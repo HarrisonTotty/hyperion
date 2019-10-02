@@ -1,0 +1,42 @@
+# Hyperion Data Configuration File
+# --------------------------------
+
+# ----- Data Files -----
+
+# Specifies the relative file paths to the various faction definitions.
+data.factions:
+  - 'factions/*.yaml'
+
+# Specifies the relative file paths to the various ship class definitions.
+data.ship_classes:
+  - 'ship_classes/*.yaml'
+
+# Specifies the relatives file paths to the various ship module definitions.
+data.ship_modules:
+  - 'ship_modules/*.yaml'
+
+# ----- Simulation Settings -----
+
+# The amount of time (in seconds) said to have passed between each iteration of
+# the underlying simulation.
+simulation.dt: 0.0167 # ~60 fps
+
+# ----- Simulation Limits -----
+
+# Specifies the global maximum simulation object acceleration magnitude.
+limits.max_acceleration: 1000
+
+# Specifies the global maximum collision detection theshold. Objects that are
+# greater than this distance from each other are assumed to be not collided.
+limits.max_collision_detection_threshold: 100
+
+# Specifies the global maximum simulation object position magnitude (the radius
+# of the universe).
+limits.max_position: 1000000000
+
+# Specifies the global maximum simulation object velocity magnitude (speed).
+limits.max_velocity: 1000000
+
+# Specifies the global minimum collision detection threshold. Objects that are
+# within this distance from each other are assumed to have collided.
+limits.min_collision_detection_threshold: 1

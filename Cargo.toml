@@ -1,0 +1,51 @@
+[package]
+authors     = ["Harrison Totty <harrisongtotty@gmail.com>"]
+description = "A competative spaceship bridge simulation game."
+edition     = "2018"
+name        = "hyperion"
+publish     = false
+readme      = "README.md"
+version     = "0.1.0"
+
+[dependencies.chrono]
+version = "0.4"
+
+[dependencies.clap]
+features = ["color"]
+version = "2.32.0"
+
+[dependencies.fern]
+version = "0.5.7"
+
+[dependencies.indoc]
+version = "0.3.4"
+
+[dependencies.log]
+version = "0.4.6"
+
+[dependencies.ncollide3d]
+version = "0.20.1"
+
+[dependencies.rocket]
+version = "0.4.2"
+
+[dependencies.rocket_contrib]
+version = "0.4.2"
+
+[dependencies.serde]
+version = "1.0.99"
+
+[dependencies.serde_derive]
+version = "1.0.99"
+
+[dependencies.serde_yaml]
+version = "0.8.9"
+
+[dependencies.specs]
+version = "0.15.0"
+
+[dependencies.specs-derive]
+version = "0.4.0"
+
+[dependencies.yaml-rust]
+version = "0.4.3"

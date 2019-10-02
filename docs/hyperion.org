@@ -1,0 +1,29 @@
+#+title: Hyperion
+
+* Game/Logic Flow
+** 1 - Start Server
+Firstly, the server process is started and pointed at a game data directory (which contains a set of =.yaml= files which define the various available ship classes, weapons, modules, etc). Client processes then can communicate with the server process via REST API calls.
+** 2 - Create A Ship & Connect Main Screen
+A "main screen" client process is launched which binds to a new ship name with connection password. This sends the following =POST= to the server:
+#+begin_src js
+// /v1/create-ship
+{ "name": "example", "password": "pass" }
+#+end_src
+If the process is successful, the server will respond with the ship's registration and ID number:
+#+begin_src js
+{ "id": 1, "registration": "VZQ-275", "result": "success" }
+#+end_src
+It is important to know that the ship's id number is what's used to access the ship's info via the API.
+From there, the main screen will register updates via a =GET= to =/v1/ships/1/main-screen=, which will return what screen is /actually/ being displayed there (is the content the external view (camera), or science, or some other screen?).
+** 3 - Connect Captain
+The captain launches a client process connected to the ship created by the "main screen". In general, any
+* API
+** Position Data Structure
+When making a =GET= request to an API endpoint corresponding to a ship position, it will respond in the following format:
+#+begin_src js
+// /v1/ships/{id}/positions/{name}
+{
+  "iteration": 47892,    // The current simulation iteration.
+  "position": "science", // The name of this position.
+}
+#+end_src
