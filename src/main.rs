@@ -1,6 +1,6 @@
-//! Hyperion
+//! Hyperion Server Program
 
-#![feature(box_syntax, decl_macro, proc_macro_hygiene)]
+#[macro_use] extern crate log;
 
 pub mod cli;
 pub mod logging;
@@ -19,4 +19,6 @@ fn main() {
         Ok(_)  => debug!("Initialized logging subsystem."),
         Err(e) => panic!("Unable to initialize logging subsystem - {}", e)
     }
+
+    // Load data files.
 }

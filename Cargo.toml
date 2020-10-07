@@ -6,3 +6,22 @@ name        = "hyperion"
 publish     = false
 readme      = "README.md"
 version     = "0.1.0"
+
+[dependencies.chrono]
+version = "0.4.19"
+
+[dependencies.clap]
+features = ["color"]
+version = "2.33.3"
+
+[dependencies.fern]
+version = "0.6.0"
+
+[dependencies.log]
+version = "0.4.11"
+
+[dependencies.walkdir]
+version = "2.3.1"
+
+[dependencies.yaml-rust]
+version = "0.4.4"
