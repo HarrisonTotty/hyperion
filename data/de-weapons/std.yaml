@@ -1,0 +1,19 @@
+# Directed Energy Weapons
+# -----------------------
+
+de_weapons:
+  'Laser Beam':
+    desc: >-
+      A high-wattage laser beam capable of traversing incredibly long ranges at
+      the speed of light. Deals a small amount of continuous damage at very long
+      ranges.
+  'Proton Phaser':
+    desc: >-
+      A basic proton-based directed-energy weapon that delivers a small amount
+      of damage at a high velocity.
+  'Synchrotron Converging Laser':
+    desc: >-
+      Uses the constructive interference of multiple lasers that converge into a
+      single laser beam. Although this weapon has a firing delay as the lasers
+      converge, this weapon is capable of dealing a massive amount of damage
+      over a very long range.

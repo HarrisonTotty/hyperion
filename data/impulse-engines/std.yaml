@@ -1,0 +1,32 @@
+# Impulse Engines
+# ---------------
+
+impulse_engines:
+  'Higgs Field "Surfing" Engines':
+    desc: >-
+      Just as the warp core is able to bend space to allow FTL travel, these
+      engines combine ion impulse with bending the localized Higgs field,
+      producing a good amount of thrust while still remaining energy efficient.
+  'Ion Engines':
+    desc: >-
+      Ion impulse engines provide little forward thrust but are extremely energy
+      efficient.
+  'Neutrino Tethering Engines':
+    desc: >-
+      By (somehow) paramagnetically tethering to natural neutrinos as they pass
+      through a containment field, these engines are capable of producing large
+      amounts of thrust at good energy efficiency.
+  'Plasma Induction Engines':
+    desc: >-
+      By expelling large amounts of plasma through magnetic fields, this set of
+      impulse engines are capable of generating large amounts of thrust at the
+      cost of energy efficiency.
+  'Scram Pulse Engines':
+    desc: >-
+      By expelling massive quantities of charged nuclear material out the back
+      of this engine, it is capable of generating massive amounts of thrust at a
+      very low energy efficiency,
+  'Solar Sail':
+    desc: >-
+      By far the most efficient form of slow, long-distance travel, solar sails
+      use captured sunlight to produce a very small amount of thrust.

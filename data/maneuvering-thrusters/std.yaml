@@ -1,0 +1,27 @@
+# Maneuvering Thrusters
+# ---------------------
+
+maneuvering_thrusters:
+  'Ion Thrusters':
+    desc: >-
+      Uses a series of small ion engines to produce a small amount of angular
+      thrust with good energy efficiency.
+  'Magneto Thrusters':
+    desc: >-
+      Actually not a series of thrusters at all, this series of electromagnets
+      is capable of naturally aligning to regional flux, generating a large
+      amount of angular thrust at low energy consumption.
+  'Material Thrusters':
+    desc: >-
+      By ejecting solid material out of the thruster head, this type of
+      maneuvering thruster has been used since the 1960's. Produces a decent
+      amount of angular thrust at a high energy consumption.
+  'Plasma Thrusters':
+    desc: >-
+      By expelling large amounts of plasma through magnetic fields, this set of
+      maneuvering thrusters are capable of generating large amounts of thrust at
+      the cost of energy efficiency.
+  'Smart Thrusters':
+    desc: >-
+      A more efficient variant of the standard material thruster that uses
+      artificial mass compensation to improve turn speeds.

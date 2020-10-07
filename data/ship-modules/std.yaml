@@ -1,0 +1,83 @@
+# Ship Modules
+# ------------
+
+# Each module has 100 hit points
+
+ship_modules:
+  'Anti-Missile System':
+    desc: >-
+      Adds a tube for the deployment of chaff, flares, and flak countermeasures
+      against enemy missiles, rockets, and torpedoes.
+  'Auxiliary Support System':
+    desc: >-
+      Adds a reserve support system capable of supplying emergency energy or
+      recharging shields.
+  'Cargo Bay':
+    desc: >-
+      Adds a cargo bay to the ship.
+  'Communication System':
+    desc: >-
+      Allows the ship to communicate to other vessels and stations.
+    required: true
+  'Cooling System':
+    desc: >-
+      Adds a cooling system to the power core that may be activated to cool
+      modules before or after they overheat.
+  'Deflective Plating':
+    desc: >-
+      Adds a layer of protective plating on the ship to absorb or prevent damage
+      to other modules. Particularly effective against directed-energy weapons.
+      Each layer reduces damage from directed-energy weapons by 5% and other
+      weapons by 2%.
+  'Directed-Energy Weapon Port':
+    desc: >-
+      Adds a weapon port to the ship design which may be outfitted with
+      directed-energy weapons such as lasers, phasers, plasma weapons, or
+      particle beam weapons.
+  'FTL Drive':
+    desc: >-
+      Allows the ship to travel faster than the speed of light.
+    required: true
+  'Hanger Bay':
+    desc: >-
+      Adds a hanger bay to the ship, allowing it to carry fighters, bombers, or
+      escape shuttles.
+  'Impulse Engines':
+    desc: >-
+      Generates forward thrust for the ship.
+    required: true
+  'Kinetic Weapon Port':
+    desc: >-
+      Adds a weapon port to the ship design which may be outfitted with kinetic
+      weapons such as cannons or rail guns.
+  'Maneuvering Thrusters':
+    desc: >-
+      Allows the ship to change course.
+    required: true
+  'Missile Tube':
+    desc: >-
+      Adds a missile tube to the ship design that supports the loading of
+      various missiles, rockets, and torpedoes.
+  'Power Module':
+    desc: >-
+      Generates and/or stores energy for other ship modules.
+    required: true
+  'Radial Emission System':
+    desc: >-
+      Adds an energy emission system on all sides of the ship, allowing it to
+      detonate radial pulse weapons such as sensor jammers and EMP pulses.
+  'Sensor Array':
+    desc: >-
+      Allows the ship to scan and accurately navigate through space.
+    required: true
+  'Shield Generator':
+    desc: >-
+      Adds a rechargeable shield to the ship to absorb or deflect damage.
+      Particularly effective against kinetic weapons. Adding multiple shield
+      generators increases the base effectiveness of the shield. Each shield
+      generator reduces damage to shields from kinetic weapons by 2% and adds
+      a maximum of 500 shield hit points.
+  'Stealth System':
+    desc: >-
+      Adds a series of scanner signature masking systems to the ship that may be
+      activated, allowing it to remain undetected on enemy long-range scanners.

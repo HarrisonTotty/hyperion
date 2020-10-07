@@ -1,0 +1,20 @@
+# Countermeasures
+# ---------------
+
+countermeasures:
+  'Chaff Pod':
+    desc: >-
+      A rocket-propelled sensor pod capable of jamming nearby missile guidance
+      systems.
+  'Counter-Missile':
+    desc: >-
+      A missile armed with a small warhead and advanced antimissile guidance
+      system to pre-detonate incoming missiles and torpedoes mid-flight.
+  'Flak Torpedo':
+    desc: >-
+      A torpedo armed with a fragmentation warhead to pre-detonate all missiles
+      and torpedoes within its blast radius.
+  'Flare Missile':
+    desc: >-
+      A missile capable of mimicking the signature of the ship the fired it,
+      causing opposing missiles to lock onto it instead.

@@ -1,0 +1,32 @@
+# Ship Sizes
+# ----------
+
+# NOTE: Mass is in (metric) tonnes (equal to 1000 kg). Length is in meters. The
+# width of the ship is assumed to be 1/4 its length, and its height is assumed
+# to be 1/6 its length.
+
+ship_sizes:
+  'Large':
+    cost: 400
+    desc: >-
+      Large ships have 1000 base hit points and 20 module slots.
+    hit_points: 1000
+    length: 1000
+    mass: 400000
+    module_slots: 20
+  'Medium':
+    cost: 200
+    desc: >-
+      Medium ships have 750 base hit points and 15 module slots.
+    hit_points: 750
+    length: 500
+    mass: 200000
+    module_slots: 15
+  'Small':
+    cost: 100
+    desc: >-
+      Small ships have 500 base hit points and 12 module slots.
+    hit_points: 500
+    length: 250
+    mass: 100000
+    module_slots: 12

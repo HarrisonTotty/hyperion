@@ -1,0 +1,89 @@
+# Missiles
+# --------
+
+missiles:
+  'Decoy Missile':
+    desc: >-
+      A missile with an empty warhead and false scan signal to trick enemy ships
+      into wasting anti-missile countermeasures.
+  'Decoy Torpedo':
+    desc: >-
+      A torpedo with an empty warhead and false scan signal to trick enemy ships
+      into wasting anti-missile countermeasures.
+  'MK 1 Antimatter Torpedo':
+    desc: >-
+      Armed with a warhead filled with antinuclear material, this slow-moving
+      torpedo is capable of dealing massive damage to a large blast radius.
+  'MK 11 Guided Missile':
+    desc: >-
+      The standard guided missile capable of delivering a moderate amount of
+      damage to a small blast radius.
+  'MK 2 LR Trident Missile':
+    desc: >-
+      A guided missile capable of traversing very long ranges to deal a large
+      amount of damage to a precise area.
+  'MK 3 HE Torpedo':
+    desc: >-
+      A standard high-explosive, unguided warhead capable of dealing a moderate
+      amount of damage to a medium-sized area.
+  'MK 4 LRHE Torpedo':
+    desc: >-
+      A long-range varient of the standard MK 3 HE Torpedo capable of traveling
+      a much larger distance at a faster speed.
+  'MK 5 Nuclear Missile':
+    desc: >-
+      Armed with a thermonuclear warhead, this slower-moving missile deals a
+      large amount of damage over a large blast radius.
+  'MK 8 Nuclear Torpedo':
+    desc: >-
+      Armed with a thermonuclear warhead, this slow-moving torpedo deals a large
+      amount of damage over a very large blast radius.
+  'MK 9 Antimatter Missile':
+    desc: >-
+      Armed with a warhead filled with antinuclear material, this slower-moving
+      missile is capable of dealing a large amount of damage to a compact blast
+      radius.
+  'Type 1 Ion Missile':
+    desc: >-
+      A variant of the standard guided missile that trades damage for the
+      capability of temporarily jamming enemy communications, sensors, and
+      lock-on capabilities.
+  'Type 1 Ion Torpedo':
+    desc: >-
+      Delivering a moderate amount of damage in a decent blast radius, ion
+      torpedoes also have the capability of temporarily jamming enemy
+      communications, sensors, and lock-on capabilities.
+  'Type 2 Plasma Missile':
+    desc: >-
+      A variant of the standard guided missile that excels at dealing additional
+      damage to enemy shields but is not effective against unshielded targets.
+  'Type 2 Plasma Torpedo':
+    desc: >-
+      Plasma torpedoes excel at dealing additional damage to enemy shields but
+      are not effective against unshielded targets.
+  'Type 3 Positron Missile':
+    desc: >-
+      A missile armed with a positron warhead, dealing less damage than the MK
+      11 but allowing some of the damage to bypass shields.
+  'Type 3 Positron Torpedo':
+    desc: >-
+      A torpedo armed with a positron warhead, allowing some of the damage to
+      bypass shields.
+  'Type 4 Tachyon Missile':
+    desc: >-
+      A missile armed with a tachyon warhead, dealing less damage than the MK 11
+      but temporarily preventing the target from utilizing its FTL drive.
+  'Type 4 Tachyon Torpedo':
+    desc: >-
+      A torpedo armed with a tachyon warhead, dealing less damage than the MK 3
+      but temporarily preventing the target from utilizing its FTL drive.
+  'Type 5 Graviton Missile':
+    desc: >-
+      A missile armed with a graviton warhead, dealing less damage than the MK
+      11 but temporarily increasing the mass of the target, causing it to move
+      slower and reducing its maneuverability.
+  'Type 5 Graviton Torpedo':
+    desc: >-
+      A torpedo armed with a graviton warhead, dealing less damage than the MK 3
+      but temporarily increasing the mass of the target, causing it to move
+      slower and reducing its maneuverability.

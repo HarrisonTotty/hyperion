@@ -1,0 +1,25 @@
+# Ship Roles
+# ----------
+
+ship_roles:
+  'Defense':
+    desc: >-
+      Ships optimized for defensive roles start with 10% more base and module
+      hit points.
+    percent_hit_points: 10
+    percent_module_hit_points: 10
+  'Offense':
+    desc: >-
+      Ships optimized for offensive roles deal 10% more damage per hit.
+    percent_weapons_damage: 10
+  'Support':
+    desc: >-
+      Ships optimized for support roles have an additional ship module slot.
+    module_slots: 1
+  'Versatile':
+    desc: >-
+      Ships optimized to be versatile start with 5% more base/module hit points
+      and deal 5% more damage per hit.
+    percent_hit_points: 5
+    percent_module_hit_points: 5
+    percent_weapons_damage: 5

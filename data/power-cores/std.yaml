@@ -1,0 +1,29 @@
+# Power Cores
+# -----------
+
+power_cores:
+  'Antinuclear Reactor':
+    desc: >-
+      A reactor that forces the fusion of antinuclear material to generate
+      massive amounts of energy compared to regular fusion reactors.
+  'Condensed Plasma Battery':
+    desc: >-
+      Utilizing hypercompressed plasma, this power core is capable of storing
+      large amounts of energy but cannot produce any energy of its own.
+  'High-Energy Boson Reactor':
+    desc: >-
+      An updated version of the antinuclear reactor that is capable of greatly
+      increasing energy storage via paramagnetic boson induction.
+  'Mark III Fission Reactor':
+    desc: >-
+      A basic nuclear fission reactor core capable of slowly restoring its
+      energy reserves if power is cut from other ship systems.
+  'Mark IV Fusion Reactor':
+    desc: >-
+      A reactor that utilizes nuclear fusion technology to generate a larger
+      amount of energy per second compared to the standard fission reactor.
+  'Neutrino Pulsion Core':
+    desc: >-
+      A reactor capable of generating unparalleled amounts of energy via
+      neutrino capture. However, the sheer size of the production system leaves
+      little room for energy storage.

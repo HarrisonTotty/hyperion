@@ -1,0 +1,108 @@
+# Standard Ship Classes
+# ---------------------
+
+ship_classes:
+  'Battleship':
+    desc: >-
+      A medium-sized offensive ship typically loaded with short and medium-range
+      weapons.
+    role: Offense
+    size: Medium
+  'Carrier':
+    desc: >-
+      A large ship developed with the intent of supporting other vessels by
+      deploying squadrons of fighters and bombers.
+    role: Support
+    size: Large
+  'Corvette':
+    desc: >-
+      A large and highly versatile ship, corvette-class ships are well-rounded
+      and capable of fulfilling most combat roles.
+    role: Versatile
+    size: Large
+  'Courier':
+    desc: >-
+      A small-sized vessel optimized for diplomatic communications and
+      reconnaissance missions.
+    role: Support
+    size: Small
+  'Cruiser':
+    desc: >-
+      A small spaceship with versatile capabilities.
+    role: Versatile
+    size: Small
+  'Defender':
+    desc: >-
+      The largest class of defense-oriented spaceships, defender-class ships are
+      capable of taking (and preventing) more damage than any other class of
+      spaceship.
+    role: Defense
+    size: Large
+  'Destroyer':
+    desc: >-
+      A medium-sized offensive ship typically armed with medium and long-range
+      weapons.
+    role: Offense
+    size: Medium
+  'Dreadnought':
+    desc: >-
+      A large offensive ship typically armed with medium and long-range
+      weaponry. Dreadnoughts are arguably the most powerful large-sized
+      spaceship that fulfills an offensive role on the battlefield.
+    role: Offense
+    size: Large
+  'Escort':
+    desc: >-
+      A small ship built to aid in defending other ships in combat.
+    role: Defense
+    size: Small
+  'Freighter':
+    desc: >-
+      A large vessel primarily built for transporting cargo, freighters can be
+      outfitted to utilize their large cargo holds for massive quantities of
+      munitions storage.
+    role: Support
+    size: Large
+  'Frigate':
+    desc: >-
+      A medium-sized ship built to aid in defending other ships in combat.
+    role: Defense
+    size: Medium
+  'Hyperion':
+    desc: >-
+      A large ship typically outfitted as a long-range missile deployment
+      vessel. Hyperions are capable of carrying large quantities of missile
+      ammunition but are more lacking in defensive capabilities.
+    role: Offense
+    size: Large
+  'Intercepter':
+    desc: >-
+      A small, fast, and highly maneuverable ship built for intercepting
+      incoming opponents and chasing-down fleeing ones.
+    role: Offense
+    size: Small
+  'Scout':
+    desc: >-
+      A small, fast ship typically outfitted with advanced sensors and improved
+      stealth technology.
+    role: Support
+    size: Small
+  'Tanker':
+    desc: >-
+      A medium-sized vessel primarily built for transporting fuel and energy.
+    role: Support
+    size: Medium
+  'Transport':
+    desc: >-
+      A medium-sized vessel built for transporting military or civilian
+      personnel.
+    role: Support
+    size: Medium
+  'Warship':
+    desc: >-
+      A large offensive ship primarily outfitted with short-range weapons.
+      Warships excel at close-range combat, typically warping close to enemy
+      vessels to prevent them from effectively deploying high-explosive
+      munitions.
+    role: Offense
+    size: Large
