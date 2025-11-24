@@ -1,0 +1,118 @@
+name: Escort
+desc: >-
+  A small ship built to defend other ships. Escorts excel at intercepting
+  threats and providing close-range protection for larger vessels with
+  their agile defensive capabilities.
+size: Small
+role: Defense
+max_weight: 160
+max_modules: 11
+base_hp: 280
+build_points: 380
+bonuses:
+  module_hp_defense: 0.25
+  module_cost_defense: -0.15
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "General Dynamics Space Systems"
+    variant: "Guardian-class"
+    lore: >-
+      Federation escorts are built around integrated defense networks that can coordinate
+      with protected vessels. Their sophisticated fire control allows them to engage
+      multiple incoming threats simultaneously.
+  
+  mars-coalition:
+    manufacturer: "Sinus Meridiani Defense"
+    variant: "Aegis-class"
+    lore: >-
+      Martian escorts prioritize aggressive point defense and threat interception.
+      Rather than passive protection, they actively hunt incoming missiles and strike
+      craft, creating defensive zones around convoy formations.
+  
+  belt-alliance:
+    manufacturer: "Juno Protection Systems"
+    variant: "Shepherd-class"
+    lore: >-
+      Belt escorts are designed for extended convoy duty, protecting slow-moving
+      freighters and tankers. Their endurance and reliability make them trusted
+      guardians of commercial shipping lanes.
+  
+  europa-compact:
+    manufacturer: "Annwn Defensive Engineering"
+    variant: "Protector-class"
+    lore: >-
+      Europan escorts feature adaptive shielding systems that can redistribute
+      protection across multiple vessels. Their unique energy sharing capabilities
+      make them force multipliers in defensive operations.
+  
+  outer-rim-collective:
+    manufacturer: "Outer Shield Builders"
+    variant: "Watchdog-class"
+    lore: >-
+      Outer Rim escorts are community defense vessels, often crewed by militia
+      volunteers. What they lack in sophistication they compensate for with
+      determination and intimate knowledge of local space.
+  
+  corporate-syndicate:
+    manufacturer: "Asset Protection Services Ltd."
+    variant: "Insurance Policy-class"
+    lore: >-
+      Corporate escorts are cost-effective solutions to convoy protection requirements.
+      Their standardized design allows for rapid deployment and easy replacement,
+      with insurance coverage factored into operational costs.
+
+# Technical specifications
+length: 72.0   # meters
+width: 22.0    # meters
+height: 16.0   # meters
+mass: 15000.0  # metric tons (empty)
+crew_min: 6
+crew_max: 12
+cargo_capacity: 120.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 48.0      # m/s²
+max_turn_rate: 40.0         # degrees/second
+max_warp_speed: 5.8         # multiples of light speed
+warp_efficiency: 0.82       # 0.0-1.0 rating
+sensor_range: 20000.0       # kilometers
+
+# Operational metadata
+operational_range: 10.0     # AU
+build_time: 100             # days
+maintenance_cost: 280.0     # credits per day
+fuel_capacity: 5000.0       # units
+fuel_consumption: 60.0      # units per hour
+
+# Lore and flavor
+lore: >-
+  Escorts are the dedicated guardians of fleet formations and convoys, small vessels
+  optimized for defensive operations. Unlike interceptors that hunt aggressively or
+  frigates that provide area defense, escorts maintain close proximity to protected
+  assets, ready to intercept any threat that penetrates outer defensive layers.
+  
+  The escort's tactical doctrine centers on threat prioritization and engagement timing.
+  With limited firepower compared to dedicated warships, escort commanders must choose
+  their targets wisely—a missile that gets through could cripple a valuable freighter,
+  while wasting ammunition on decoys leaves the formation vulnerable. The best escort
+  captains develop almost precognitive threat assessment abilities.
+  
+  Escort duty is often underappreciated but critically important. While not as glamorous
+  as fleet actions or exploration, escorts enable commerce and logistics—the lifeblood
+  of civilization. Merchant captains know the value of good escort crews, and many form
+  long-standing relationships with particular escort vessels, requesting them by name
+  for dangerous routes.
+
+year_introduced: 2283
+
+notable_ships:
+  - "TFS Loyal Guardian"
+  - "MSS Red Shield"
+  - "BAV Reliable Protector"
+  - "ECS Safe Passage"
+  - "ORC Convoy Friend"
+  - "CSS Premium Coverage"

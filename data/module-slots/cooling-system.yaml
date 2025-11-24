@@ -1,0 +1,18 @@
+id: cooling-system
+name: "Cooling System"
+desc: >-
+  Heat management and thermal dissipation system.
+extended_desc: >-
+  Cooling systems help manage heat buildup from other modules by
+  generating and storing coolant that can be allocated to reduce heat
+  levels. Essential for maintaining optimal performance during extended
+  combat or high-power operations.
+groups: ["Support", "Thermal", "Engineering"]
+required: false
+has_varients: true
+base_cost: 9
+max_slots: 2
+base_hp: 10
+base_power_consumption: 4.0
+base_heat_generation: 0.0
+base_weight: 80

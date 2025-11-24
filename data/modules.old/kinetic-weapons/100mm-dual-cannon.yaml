@@ -1,0 +1,26 @@
+id: "100mm-dual-cannon"
+name: "100mm Dual Cannon"
+description: "Twin-barreled cannon system doubling the firepower of standard medium weapons."
+cost: 280
+model: "Twin-Linked Havoc Battery"
+manufacturer: "Aegis Armaments Corp."
+lore: >-
+  Aegis Armaments' answer to the 'more dakka' problem was elegantly simple: mount two
+  Devastators side-by-side and fire them simultaneously. The Havoc Battery delivers
+  punishing volleys that can shred through enemy shields and hull plating. Ammunition
+  consumption is ferocious and accuracy suffers slightly from the twin-barrel recoil,
+  but few targets survive a sustained Havoc barrage.
+additional_hp: 8
+additional_power_consumption: 10
+additional_heat_generation: 40
+additional_weight: 35
+stats:
+  ammo:
+    type: shell
+    size: 100mm
+  tags: ["Pulse", "Automatic"]
+  reload_time: 2.2
+  num_projectiles: 2
+  ammo_consumption: 2
+  accuracy: 0.86
+  effective_range: 3200

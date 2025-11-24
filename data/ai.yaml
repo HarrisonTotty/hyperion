@@ -1,0 +1,131 @@
+# AI Behavior Configuration
+# Controls AI decision-making, personalities, combat tactics, and navigation
+
+# Overall AI difficulty setting (string: easy/normal/hard/expert)
+difficulty: "normal"
+
+# AI response time in seconds (how quickly AI reacts to changes)
+response_time: 1.0
+
+update:
+  # AI update rate in milliseconds (100ms = 10 ticks/second)
+  tick_rate_ms: 100
+  # Maximum AI ships processed per tick (for performance)
+  max_ships_per_tick: 100
+  # Behavior tree evaluation depth limit
+  max_behavior_depth: 10
+
+personalities:
+  aggressive:
+    # High aggression - seeks combat actively
+    aggression: 0.9
+    # Prefers close combat range (meters)
+    preferred_range: 2000.0
+    # Only retreats when critically damaged
+    retreat_threshold: 0.2
+    # Raises shields late in combat
+    shield_raise_threshold: 0.8
+    # Uses abilities frequently
+    ability_usage: 0.8
+    # Smaller patrol radius - stays near objectives
+    patrol_radius: 5000.0
+  
+  defensive:
+    # Low aggression - defensive posture
+    aggression: 0.3
+    # Prefers longer engagement range
+    preferred_range: 5000.0
+    # Retreats earlier to preserve ship
+    retreat_threshold: 0.5
+    # Raises shields proactively
+    shield_raise_threshold: 0.9
+    # Moderate ability usage
+    ability_usage: 0.6
+    # Moderate patrol radius
+    patrol_radius: 3000.0
+  
+  passive:
+    # Very low aggression - avoids combat
+    aggression: 0.1
+    # Maintains maximum safe distance
+    preferred_range: 8000.0
+    # Retreats at first sign of damage
+    retreat_threshold: 0.7
+    # Always keeps shields up
+    shield_raise_threshold: 0.95
+    # Rarely uses offensive abilities
+    ability_usage: 0.3
+    # Small patrol area
+    patrol_radius: 2000.0
+  
+  trader:
+    # Minimal aggression - focused on trade routes
+    aggression: 0.1
+    # Avoids combat entirely if possible
+    preferred_range: 10000.0
+    # Retreats with minimal damage
+    retreat_threshold: 0.8
+    # Always defensive
+    shield_raise_threshold: 0.95
+    # Rarely engages
+    ability_usage: 0.2
+    # Large patrol radius for trade routes
+    patrol_radius: 15000.0
+  
+  patrol:
+    # Balanced aggression for patrol duties
+    aggression: 0.5
+    # Standard engagement range
+    preferred_range: 3000.0
+    # Moderate retreat threshold
+    retreat_threshold: 0.4
+    # Balanced shield usage
+    shield_raise_threshold: 0.85
+    # Standard ability usage
+    ability_usage: 0.5
+    # Large patrol area coverage
+    patrol_radius: 10000.0
+
+combat:
+  target_selection:
+    # Weight for distance in target selection (closer targets prioritized)
+    distance_weight: 1.0
+    # Weight for threat level (dangerous targets prioritized)
+    threat_weight: 1.5
+    # Weight for vulnerability (damaged targets prioritized)
+    vulnerability_weight: 1.2
+    # Maximum targeting range (meters)
+    max_range: 50000.0
+    # Minimum time between target switches (seconds)
+    retarget_cooldown: 5.0
+  
+  weapons:
+    # Optimal firing range as fraction of max range
+    optimal_range_fraction: 0.7
+    # Weapon type priorities (0-10, higher = preferred)
+    energy_priority: 7
+    kinetic_priority: 5
+    missile_priority: 6
+    # Minimum power level required to fire (0.0-1.0)
+    min_power_to_fire: 0.3
+  
+  defense:
+    # Distance to start evasive maneuvers (meters)
+    evasion_range: 3000.0
+    # Evasion pattern complexity (1-5, higher = more erratic)
+    evasion_complexity: 3
+    # Countermeasure usage threshold (0.0-1.0)
+    countermeasure_threshold: 0.5
+    # Point defense activation range (meters)
+    point_defense_range: 5000.0
+
+navigation:
+  # Movement speeds as fraction of maximum speed (0.0-1.0)
+  approach_speed: 0.8
+  combat_speed: 0.9
+  retreat_speed: 1.0
+  patrol_speed: 0.6
+  # Waypoint arrival threshold (meters)
+  waypoint_threshold: 100.0
+  # Time to wait at patrol waypoint (seconds)
+  patrol_wait_time: 10.0

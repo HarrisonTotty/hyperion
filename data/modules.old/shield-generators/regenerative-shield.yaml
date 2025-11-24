@@ -1,0 +1,13 @@
+id: "regenerative-shield"
+type: "shield-generator"
+name: "Regenerative Shield Array"
+description: "Advanced shield with rapid regeneration. Lower maximum strength but faster recovery."
+cost: 150
+stats:
+  max_shield_strength: 1500  # shield points
+  recharge_rate: 200  # points per second (very fast)
+  recharge_delay: 2  # seconds after taking damage (quick recovery)
+  power_consumption: 200  # MW
+  heat_generation: 150  # K
+  mass: 22  # tons
+  efficiency: 0.78  # 78% damage absorption

@@ -1,0 +1,24 @@
+id: heavy-cannon
+type: kinetic-weapon
+name: "Heavy Cannon"
+model: "Thor 200mm Heavy Cannon"
+manufacturer: "Titan Armaments"
+desc: >-
+  Powerful heavy cannon firing 200mm shells for maximum damage against armored targets.
+lore: >-
+  Titan's Thor cannon is built for one purpose: punching through heavy armor plating.
+  The massive 200mm shells deliver devastating kinetic impact that can crack open
+  battleship hulls. The weapon's prodigious recoil and slower rate of fire demand
+  skilled gunnery, but a well-placed Thor shot can decide fleet engagements.
+cost: 280
+additional_hp: 25
+additional_power_consumption: 18
+additional_heat_generation: 35
+additional_weight: 250
+ammo_type: shell
+ammo_size: 200mm
+reload_time: 5.0
+num_projectiles: 1
+ammo_consumed: 1
+accuracy: 0.82
+effective_range: 4000

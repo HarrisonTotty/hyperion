@@ -1,0 +1,24 @@
+id: heavy-particle-cannon
+type: de-weapon
+name: "Heavy Particle Cannon"
+model: "Nova HPC-X Heavy Cannon"
+manufacturer: "Titan Armaments"
+desc: >-
+  Devastating particle cannon delivering massive energy discharge with long recharge cycles.
+lore: >-
+  Titan's Nova cannon represents the pinnacle of directed energy weaponry. Each discharge
+  releases a focused stream of accelerated particles that can punch through battleship
+  armor plating. The weapon's prodigious energy requirements and cooling needs result
+  in slower recharge times, but a direct hit from the Nova can cripple even the most
+  heavily armored vessels. Capital ship captains learn to fear the telltale energy
+  buildup that precedes a Nova strike.
+cost: 320
+additional_hp: 25
+additional_power_consumption: 25
+additional_heat_generation: 45
+additional_weight: 240
+damage: 95
+recharge_time: 6.0
+max_range: 12000
+projectile_speed: 299792458
+weapon_tags: ["Beam", "Particle"]

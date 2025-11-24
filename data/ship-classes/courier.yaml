@@ -1,0 +1,119 @@
+name: Courier
+desc: >-
+  Serves as a messaging/delivery vessel. Couriers are fast, agile ships
+  optimized for speed and efficiency, capable of quickly traversing
+  dangerous space to deliver critical communications.
+size: Medium
+role: Support
+max_weight: 240
+max_modules: 13
+base_hp: 320
+build_points: 560
+bonuses:
+  module_weight: -0.2
+  module_cost_support: -0.25
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Federal Express Spacecraft"
+    variant: "Mercury-class"
+    lore: >-
+      Federation couriers are the gold standard for secure, rapid delivery. Built with
+      quantum-encrypted storage and emergency escape systems, they ensure critical
+      messages and materials reach their destination regardless of obstacles.
+  
+  mars-coalition:
+    manufacturer: "Valles Swift Transport"
+    variant: "Quicksilver-class"
+    lore: >-
+      Martian couriers prioritize pure speed, often employing experimental drive
+      systems that would be considered reckless on other vessels. Their pilots are
+      selected for nerves of steel and reaction times in the top percentile.
+  
+  belt-alliance:
+    manufacturer: "Vesta Rapid Delivery"
+    variant: "Runner-class"
+    lore: >-
+      Belt couriers are efficient, no-frills vessels designed for reliable package
+      delivery across vast distances. Their economical operation and simple maintenance
+      make them favorites of independent contractors.
+  
+  europa-compact:
+    manufacturer: "Conamara Express Engineering"
+    variant: "Messenger-class"
+    lore: >-
+      Europan couriers feature unique navigation systems optimized for complex
+      environments. Their ability to find efficient routes through dense fields and
+      gravitational anomalies makes them invaluable for time-critical deliveries.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Postal Service"
+    variant: "Pony Express-class"
+    lore: >-
+      Outer Rim couriers maintain the vital communication links between scattered
+      settlements. Often operating alone for weeks, their crews become legends for
+      determination and navigational skill.
+  
+  corporate-syndicate:
+    manufacturer: "SpeedPost Logistics Inc."
+    variant: "Next-Day-class"
+    lore: >-
+      Corporate couriers are optimized for cost-per-delivery metrics and guaranteed
+      service windows. Their standardized operation allows for predictable scheduling
+      and reliable performance across all routes.
+
+# Technical specifications
+length: 135.0  # meters
+width: 38.0    # meters
+height: 26.0   # meters
+mass: 42000.0  # metric tons (empty)
+crew_min: 8
+crew_max: 15
+cargo_capacity: 300.0  # cubic meters (secure/prioritized)
+
+# Performance characteristics
+max_acceleration: 50.0      # m/s²
+max_turn_rate: 32.0         # degrees/second
+max_warp_speed: 7.2         # multiples of light speed
+warp_efficiency: 0.90       # 0.0-1.0 rating
+sensor_range: 22000.0       # kilometers
+
+# Operational metadata
+operational_range: 30.0     # AU
+build_time: 150             # days
+maintenance_cost: 450.0     # credits per day
+fuel_capacity: 14000.0      # units
+fuel_consumption: 90.0      # units per hour
+
+# Lore and flavor
+lore: >-
+  Couriers are the lifelines of interstellar civilization, racing through space carrying
+  critical communications, time-sensitive cargo, and irreplaceable materials. In an age
+  where quantum entanglement communication is expensive and limited, couriers bridge the
+  gap, ensuring that messages, data cores, and vital supplies reach their destinations
+  quickly and securely.
+  
+  The courier's design philosophy balances speed with security. Their cargo holds feature
+  advanced encryption, tamper-detection, and self-destruct systems to protect sensitive
+  materials. Meanwhile, their powerful drives and efficient fuel systems allow them to
+  maintain high speeds over long distances, often outrunning potential threats rather
+  than engaging them.
+  
+  Courier crews are an elite breed—navigators who can plot optimal routes through hostile
+  space, pilots who can execute emergency maneuvers, and security specialists trained to
+  protect their cargo at all costs. Many famous explorers and scouts began their careers
+  as courier pilots, learning to navigate dangerous routes and think independently during
+  long solo runs.
+
+year_introduced: 2286
+
+notable_ships:
+  - "TFS Swift Message"
+  - "MSS Red Runner"
+  - "BAV Cheap Mail"
+  - "ECS Deep Delivery"
+  - "ORC Never Late"
+  - "CSS Express Profit"

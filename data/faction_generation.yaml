@@ -1,0 +1,97 @@
+# Faction Generation Configuration
+# Controls procedural faction creation and diplomatic relationships
+
+governments:
+  # Government type probabilities (should sum to 1.0)
+  probabilities:
+    democracy: 0.20
+    military_dictatorship: 0.15
+    monarchy: 0.15
+    corporate: 0.15
+    collective: 0.15
+    theocracy: 0.10
+    anarchy: 0.10
+
+traits:
+  # Minimum and maximum traits per faction
+  min_traits: 2
+  max_traits: 4
+  
+  # Trait probabilities (independent, don't need to sum to 1.0)
+  probabilities:
+    expansionist: 0.25    # Seeks to expand territory
+    isolationist: 0.15    # Prefers isolation
+    mercantile: 0.30      # Trade-focused
+    scientific: 0.25      # Research-oriented
+    zealous: 0.15         # Ideologically driven
+    honorable: 0.20       # Values honor and tradition
+    cunning: 0.20         # Strategic and deceptive
+    xenophobic: 0.15      # Distrusts aliens
+    xenophilic: 0.20      # Embraces diversity
+    militaristic: 0.25    # Military-focused
+    pacifist: 0.15        # Avoids conflict
+  
+  # Conflicting trait pairs (cannot coexist)
+  conflicts:
+    - trait1: "Expansionist"
+      trait2: "Isolationist"
+    - trait1: "Xenophobic"
+      trait2: "Xenophilic"
+    - trait1: "Militaristic"
+      trait2: "Pacifist"
+
+relationships:
+  # Government compatibility modifiers
+  government_compatibility:
+    # Bonus for same government type
+    same_government_bonus: 2
+    # Specific government pairings
+    democracy_democracy: 3
+    democracy_dictatorship: -2
+    monarchy_corporate: -1
+    collective_corporate: -3
+    # Default for unlisted pairings
+    default_compatibility: 0
+  
+  # Trait interaction modifiers
+  trait_interactions:
+    xenophilic_bonus: 2
+    xenophobic_penalty: -2
+    expansionist_conflict: -1
+    mercantile_bonus: 1
+    militaristic_pacifist: -3
+    honorable_bonus: 1
+    cunning_penalty: -1
+  
+  # Territorial proximity effects
+  proximity:
+    # Penalty for neighboring territories
+    neighbor_penalty: -1
+    # Penalty for contested systems
+    contested_penalty: -2
+    # Distance threshold for neighbors (light-years)
+    neighbor_threshold: 100.0
+  
+  # Relationship state thresholds
+  thresholds:
+    # Minimum score for Allied status
+    allied_min: 5
+    # Minimum for Friendly
+    friendly_min: 2
+    # Neutral range (min, max)
+    neutral_range: [-1, 1]
+    # Maximum for Unfriendly
+    unfriendly_max: -2
+    # Maximum for Hostile
+    hostile_max: -4
+    # Below this is War
+    war_max: -5
+
+territory:
+  # Territory assignment
+  min_systems: 3
+  max_systems: 15
+  # Allow factions to claim overlapping systems
+  allow_overlapping: false
+  # Territory distribution fairness (0.0-1.0, higher = more equal distribution)
+  fairness: 0.7

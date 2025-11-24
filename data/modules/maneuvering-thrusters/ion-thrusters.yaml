@@ -1,0 +1,18 @@
+id: "ion-thrusters"
+type: "maneuvering-thruster"
+name: "Ion Thrusters"
+model: "IV8X"
+manufacturer: "Azul Deep Space Industries"
+desc: >-
+  Uses a series of small ion engines to produce angular thrust with excellent energy efficiency.
+lore: >-
+  Ion thrusters have been the workhorse of maneuvering systems since the early
+  days of spaceflight. While they don't provide the raw power of plasma systems,
+  their exceptional fuel efficiency and reliability make them the preferred choice
+  for long-duration missions and budget-conscious operators.
+cost: 100
+additional_hp: 0
+additional_power_consumption: 30
+additional_heat_generation: 20
+additional_weight: 10
+angular_thrust: 400

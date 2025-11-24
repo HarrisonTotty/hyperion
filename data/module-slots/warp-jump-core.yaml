@@ -1,0 +1,18 @@
+id: warp-jump-core
+name: "Warp/Jump Core"
+desc: >-
+  Enables faster-than-light travel via warp or jump drive.
+extended_desc: >-
+  Warp/jump cores allow the ship to travel faster than light through
+  either continuous warp acceleration or instantaneous jump teleportation.
+  Different cores provide varying FTL capabilities, engagement times, and
+  jump ranges. Essential for interstellar travel.
+groups: ["Support", "FTL", "Propulsion"]
+required: false
+has_varients: true
+base_cost: 20
+max_slots: 1
+base_hp: 25
+base_power_consumption: 15.0
+base_heat_generation: 12.0
+base_weight: 300

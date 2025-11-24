@@ -1,0 +1,24 @@
+id: plasma-projector
+type: de-weapon
+name: "Plasma Projector"
+model: "Inferno PP-5 Plasma System"
+manufacturer: "Tempest Weapon Works"
+desc: >-
+  Plasma weapon launching superheated bolts with travel time but devastating shield damage.
+lore: >-
+  Tempest's Inferno breaks the mold of traditional directed energy weapons by projecting
+  coherent plasma bolts rather than instant beams. The magnetically-contained plasma
+  travels at relativistic speeds but not light speed, requiring gunners to lead targets.
+  This trade-off brings exceptional damage against shields as the plasma disrupts
+  electromagnetic containment fields. The weapon excels in the anti-shield role but
+  requires more skill to use effectively.
+cost: 240
+additional_hp: 18
+additional_power_consumption: 18
+additional_heat_generation: 38
+additional_weight: 170
+damage: 65
+recharge_time: 4.0
+max_range: 9000
+projectile_speed: 50000
+weapon_tags: ["Projectile", "Plasma"]

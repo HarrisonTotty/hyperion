@@ -1,0 +1,18 @@
+id: de-weapon
+name: "Directed Energy Weapon Port"
+desc: >-
+  Mounting point for directed energy weapons like lasers and particle beams.
+extended_desc: >-
+  Directed energy weapon ports allow the ship to mount beam-based weapons
+  such as lasers, particle beams, and plasma cannons. These weapons fire
+  at the speed of light and are highly accurate but require significant
+  power to operate effectively.
+groups: ["Weapon", "Offense", "Energy"]
+required: false
+has_varients: true
+base_cost: 10
+max_slots: 4
+base_hp: 12
+base_power_consumption: 5.0
+base_heat_generation: 4.0
+base_weight: 80

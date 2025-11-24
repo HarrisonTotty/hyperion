@@ -1,0 +1,18 @@
+name: Decoy Torpedo
+model: Decoy Torpedo
+kind: Torpedo
+manufacturer: Tactical Deception Systems
+desc: >-
+  A torpedo with an empty warhead and false scan signal to trick enemy ships
+  into wasting anti-missile countermeasures.
+cost: 5
+weight: 2
+forward_thrust: 200
+max_turn_rate: 0.3
+load_time: 5.0
+tags: ["Torpedo", "Decoy"]
+impact_damage: 10
+blast_damage: 0
+blast_radius: 0
+lifetime: 20
+max_speed: 600

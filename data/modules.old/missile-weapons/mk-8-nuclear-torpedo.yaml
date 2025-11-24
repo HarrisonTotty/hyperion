@@ -1,0 +1,18 @@
+name: MK 8 Nuclear Torpedo
+model: MK 8 Nuclear Torpedo
+kind: Torpedo
+manufacturer: Extreme Ordnance Corporation
+desc: >-
+  Armed with a thermonuclear warhead, this slow-moving torpedo deals a large
+  amount of damage over a very large blast radius.
+cost: 35
+weight: 8
+forward_thrust: 180
+max_turn_rate: 0.2
+load_time: 12.0
+tags: ["Torpedo"]
+impact_damage: 400
+blast_damage: 120
+blast_radius: 350
+lifetime: 20
+max_speed: 550

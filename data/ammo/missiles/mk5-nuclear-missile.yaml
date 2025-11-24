@@ -1,0 +1,14 @@
+id: mk5-nuclear-missile
+name: "Mark V Nuclear Missile"
+desc: >-
+  Nuclear warhead delivering massive damage with significant blast radius.
+cost: 180
+weight: 150
+impact_damage: 400
+blast_radius: 200
+blast_damage: 500
+acceleration: 15.0
+max_speed: 1100
+max_turn_rate: 1.0
+lifetime: 18
+weapon_tags: ["Missile", "Nuclear"]

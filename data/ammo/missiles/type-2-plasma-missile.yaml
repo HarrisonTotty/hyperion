@@ -1,0 +1,14 @@
+id: type-2-plasma-missile
+name: "Type 2 Plasma Missile"
+desc: >-
+  Plasma warhead that excels at damaging shields but less effective against unshielded targets.
+cost: 45
+weight: 90
+impact_damage: 100
+blast_radius: 75
+blast_damage: 50
+acceleration: 21.0
+max_speed: 1300
+max_turn_rate: 1.5
+lifetime: 12
+weapon_tags: ["Missile", "Plasma"]

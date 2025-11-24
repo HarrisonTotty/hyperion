@@ -1,0 +1,18 @@
+name: Type 3 Positron Missile
+model: Type 3 Positron Missile
+kind: Missile
+manufacturer: SteelArrow Inc.
+desc: >-
+  A missile armed with a positron warhead, dealing less damage than the MK 11
+  but allowing some of the damage to bypass shields.
+cost: 10
+weight: 1
+forward_thrust: 400
+max_turn_rate: 1.0
+load_time: 5.0
+tags: ["Missile", "Positron"]
+impact_damage: 100
+blast_damage: 10
+blast_radius: 100
+lifetime: 10
+max_speed: 1200

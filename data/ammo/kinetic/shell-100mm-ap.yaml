@@ -1,0 +1,12 @@
+id: shell-100mm-ap
+name: "AP 100mm Shell"
+desc: >-
+  Armor-piercing 100mm shells designed to penetrate medium armor plating
+  with minimal collateral damage.
+cost: 15
+weight: 7
+impact_damage: 18
+blast_radius: 2
+blast_damage: 1
+velocity: 800
+armor_penetration: 8

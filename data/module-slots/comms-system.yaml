@@ -1,0 +1,18 @@
+id: comms-system
+name: "Communications System"
+desc: >-
+  Enables ship-to-ship and ship-to-station communications.
+extended_desc: >-
+  The communications system allows the ship to send and receive messages,
+  hail other vessels, and coordinate with allied forces. Different systems
+  provide varying communication ranges and encryption capabilities. Essential
+  for coordinating with teammates and interacting with other ships and stations.
+groups: ["Essential", "Communications", "Support"]
+required: true
+has_varients: true
+base_cost: 8
+max_slots: 1
+base_hp: 8
+base_power_consumption: 2.0
+base_heat_generation: 1.0
+base_weight: 50

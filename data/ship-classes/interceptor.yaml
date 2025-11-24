@@ -1,0 +1,119 @@
+name: Interceptor
+desc: >-
+  A small, fast, and highly maneuverable ship built for intercepting
+  incoming vessels. Interceptors sacrifice armor for speed and agility,
+  making them ideal for rapid response and pursuit operations.
+size: Small
+role: Offense
+max_weight: 140
+max_modules: 10
+base_hp: 200
+build_points: 360
+bonuses:
+  module_weight: -0.25
+  module_cost_offense: -0.1
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Northrop Aerospace Division"
+    variant: "Raptor-class"
+    lore: >-
+      Federation interceptors are precision instruments built around powerful engines
+      and agile thruster arrays. They serve as the first line of defense, scrambling
+      to meet incoming threats before they can reach critical assets.
+  
+  mars-coalition:
+    manufacturer: "Acidalia Strike Craft Works"
+    variant: "Lightning-class"
+    lore: >-
+      Martian interceptors embrace extreme performance over survivability. Their
+      overpowered engines and aggressive flight profiles make them the fastest combat
+      vessels in service, though pilot attrition rates are concerningly high.
+  
+  belt-alliance:
+    manufacturer: "Hebe Light Craft Collective"
+    variant: "Dart-class"
+    lore: >-
+      Belt interceptors are lightweight and economical, built for swarm tactics.
+      What they lack in individual capability they make up for in numbers and
+      coordinated pack hunting strategies.
+  
+  europa-compact:
+    manufacturer: "Cilix Flight Systems"
+    variant: "Striker-class"
+    lore: >-
+      Europan interceptors feature unique vectored thrust systems inspired by
+      marine biology. Their unconventional flight characteristics make them
+      unpredictable opponents in dogfights.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Rapid Response"
+    variant: "Chaser-class"
+    lore: >-
+      Outer Rim interceptors are built from racing craft and courier vessels
+      retrofitted with weapons. Their civilian heritage shows in their reliability
+      and ease of maintenance, if not their combat optimization.
+  
+  corporate-syndicate:
+    manufacturer: "Security Dynamics Inc."
+    variant: "Asset Protector-class"
+    lore: >-
+      Corporate interceptors are standardized platforms designed for minimum training
+      time and maximum availability. They prioritize pilot safety over pure performance,
+      reflecting corporate liability concerns.
+
+# Technical specifications
+length: 52.0   # meters
+width: 18.0    # meters
+height: 12.0   # meters
+mass: 9000.0   # metric tons (empty)
+crew_min: 2
+crew_max: 4
+cargo_capacity: 50.0   # cubic meters
+
+# Performance characteristics
+max_acceleration: 65.0      # m/s²
+max_turn_rate: 55.0         # degrees/second
+max_warp_speed: 6.8         # multiples of light speed
+warp_efficiency: 0.85       # 0.0-1.0 rating
+sensor_range: 15000.0       # kilometers
+
+# Operational metadata
+operational_range: 8.0      # AU
+build_time: 75              # days
+maintenance_cost: 220.0     # credits per day
+fuel_capacity: 2500.0       # units
+fuel_consumption: 50.0      # units per hour
+
+# Lore and flavor
+lore: >-
+  Interceptors represent the fighter jet philosophy applied to space combat—speed,
+  agility, and hitting power in the smallest possible package. These ships are built
+  for one mission: to catch and destroy enemy vessels before they can reach their
+  targets. Every design decision prioritizes acceleration and maneuverability, with
+  armor and endurance being acceptable sacrifices.
+  
+  The interceptor pilot's creed is "first contact, first kill." Their role is to
+  scramble at a moment's notice, racing to intercept incoming threats. Whether it's
+  enemy strike craft, missiles, or fast-moving raiders, interceptors must arrive
+  first and eliminate the threat decisively. This requires not just speed but also
+  exceptional piloting skill and split-second decision making.
+  
+  Interceptor squadrons develop fierce competitive spirits and aggressive cultures.
+  Pilots track their intercept times and kill counts, with elite squadrons earning
+  feared reputations. The small crew size—often just pilot and weapons officer—creates
+  intensely close partnerships. The best interceptor pairs can communicate without
+  words, their coordination approaching telepathy.
+
+year_introduced: 2282
+
+notable_ships:
+  - "TFS Strike Fast"
+  - "MSS Red Comet"
+  - "BAV Budget Fighter"
+  - "ECS Wave Rider"
+  - "ORC Catch Me"
+  - "CSS Quick Response"

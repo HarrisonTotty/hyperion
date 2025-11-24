@@ -1,0 +1,18 @@
+id: torpedo-tube
+name: "Torpedo Tube"
+desc: >-
+  Heavy ordnance launcher for unguided torpedoes.
+extended_desc: >-
+  Torpedo tubes allow the ship to launch heavy, unguided torpedoes that
+  deal massive damage on impact. While slower and less accurate than
+  missiles, torpedoes pack significantly more explosive power and are
+  devastating against large capital ships and stations.
+groups: ["Weapon", "Offense", "Torpedo"]
+required: false
+has_varients: false
+base_cost: 16
+max_slots: 2
+base_hp: 18
+base_power_consumption: 1.0
+base_heat_generation: 1.0
+base_weight: 150

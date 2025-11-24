@@ -1,0 +1,13 @@
+name: Subspace Transceiver
+model: SST-400 Subspace Transceiver
+kind: Subspace Transmitter
+manufacturer: Hyperion Communications
+desc: >-
+  Advanced subspace communication system capable of faster-than-light messaging
+  across interstellar distances. Higher encryption strength and extended range.
+cost: 200
+weight: 180
+range: 500000
+frequency_range: [1, 1000]
+encryption_strength: 7
+energy_consumption: 25

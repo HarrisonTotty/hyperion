@@ -1,0 +1,13 @@
+id: "medium-shield-mk2"
+type: "shield-generator"
+name: "Medium Shield Generator Mk2"
+description: "Standard shield generator for most combat situations. Balanced protection and efficiency."
+cost: 100
+stats:
+  max_shield_strength: 2000  # shield points
+  recharge_rate: 80  # points per second
+  recharge_delay: 4  # seconds after taking damage
+  power_consumption: 150  # MW
+  heat_generation: 100  # K
+  mass: 18  # tons
+  efficiency: 0.80  # 80% damage absorption

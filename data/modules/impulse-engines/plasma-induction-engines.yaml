@@ -1,0 +1,20 @@
+id: "plasma-induction-engines"
+type: "impulse-engine"
+cost: 1200
+name: Plasma Induction Engines
+model: PIE-500 Plasma Induction Engine
+manufacturer: TitanCore Propulsion Systems
+desc: >-
+  By expelling large amounts of plasma through magnetic fields, this set of
+  impulse engines are capable of generating large amounts of thrust at the
+  cost of energy efficiency.
+lore: >-
+  TitanCore's PIE-500 is the workhorse of the civilian transport fleet,
+  providing reliable medium-range propulsion for cargo haulers and passenger
+  vessels throughout colonized space.
+max_thrust: 1800
+power_consumption: 70
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 0

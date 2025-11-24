@@ -1,0 +1,19 @@
+id: "tactical-sensors"
+type: "sensor-array"
+cost: 500
+name: "Tactical Combat Sensors"
+model: "TCS-12000 Tactical Suite"
+manufacturer: "Forge Defense Solutions"
+desc: "High-accuracy sensors optimized for combat. Excellent targeting data at medium range."
+lore: >-
+  Forge Defense's TCS-12000 sacrifices long-range detection for exceptional
+  targeting accuracy and rapid scan rates. Military vessels use this system
+  to acquire precise fire control solutions in combat situations where accuracy
+  matters more than early warning.
+scan_range: 12000
+detail_level: 9
+scan_time: 1.5
+additional_hp: 8
+additional_power_consumption: 80
+additional_heat_generation: 70
+additional_weight: 15

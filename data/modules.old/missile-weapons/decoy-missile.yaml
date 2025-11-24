@@ -1,0 +1,28 @@
+id: "decoy-missile"
+name: "Decoy Missile"
+description: "Electronic warfare decoy with false scan signature to waste enemy countermeasures."
+cost: 3
+model: "Decoy-1"
+manufacturer: "Tactical Deception Systems"
+lore: >-
+  Tactical Deception Systems' decoy missile is psychological warfare made manifest.
+  It broadcasts false targeting signatures identical to genuine strike missiles,
+  forcing enemy point defense to choose between threats. Most choose wrong. Even
+  when identified, the mere presence of decoys complicates defensive fire solutions
+  and burns through countermeasure supplies. A cheap, effective force multiplier that
+  turns every salvo into a shell game.
+additional_hp: -10
+additional_power_consumption: 2
+additional_heat_generation: 3
+additional_weight: 1
+stats:
+  weight: 1
+  forward_thrust: 500
+  max_turn_rate: 2.0
+  load_time: 3.0
+  tags: ["Missile", "Decoy"]
+  impact_damage: 5
+  blast_damage: 0
+  blast_radius: 0
+  lifetime: 15
+  max_speed: 1400

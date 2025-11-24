@@ -1,0 +1,15 @@
+id: heat-seeking-missile
+name: "Heat-Seeking Missile"
+desc: >-
+  Standard heat-seeking missile. Tracks engine signatures.
+cost: 50
+weight: 100
+guidance_system: heat-seeking
+impact_damage: 150
+blast_radius: 10
+blast_damage: 50
+acceleration: 15.0
+max_speed: 1200
+max_turn_rate: 45.0
+lifetime: 20
+weapon_tags: ["Missile"]

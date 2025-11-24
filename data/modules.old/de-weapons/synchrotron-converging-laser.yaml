@@ -1,0 +1,25 @@
+id: "synchrotron-converging-laser"
+name: "Synchrotron Converging Laser"
+description: "Devastating multi-beam laser array that converges into a single ultra-high-energy strike."
+cost: 350
+model: "SCL-9000"
+manufacturer: "Advanced Photonics Corporation"
+lore: >-
+  APC's SCL-9000 is a masterwork of destructive engineering. Multiple synchrotron rings
+  generate coherent laser beams that converge at a focal point up to 12,000 kilometers
+  away. The convergence time creates a distinctive firing delay, but the resulting energy
+  spike can punch through capital ship armor. Power-hungry and expensive, but worth every
+  credit when you absolutely need something dead.
+additional_hp: 10
+additional_power_consumption: 30
+additional_heat_generation: 35
+additional_weight: 25
+stats:
+  fire_delay: 5
+  recharge_time: 12
+  speed: -1
+  max_range: 12000
+  tags: ["Photon", "Beam", "Manual"]
+  damage: 50
+  energy_consumption: 40
+  weight: 280

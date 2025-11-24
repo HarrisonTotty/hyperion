@@ -1,0 +1,14 @@
+name: ST 150mm Shell
+type: shell
+size: 150mm
+desc: >-
+  Standard 150mm shells for heavy cannons. These massive projectiles deliver
+  punishing damage with excellent armor penetration and substantial blast
+  effects suitable for capital ship engagements.
+cost: 20
+weight: 12
+impact_damage: 20
+blast_radius: 6
+blast_damage: 5
+velocity: 700
+armor_penetration: 6

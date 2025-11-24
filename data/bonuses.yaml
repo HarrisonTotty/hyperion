@@ -1,0 +1,231 @@
+# Bonus Type Definitions
+# ----------------------
+# Defines metadata for all possible ship class bonuses including
+# human-readable names, descriptions, formatting hints, and categories.
+
+bonuses:
+  # Combat Bonuses
+  - id: "module_hp_offense"
+    name: "Offensive Module Durability"
+    description: "Increases hit points of offensive modules"
+    category: "combat"
+    format: "percentage"
+    applies_to: ["offensive_modules"]
+    
+  - id: "module_cost_offense"
+    name: "Offensive Module Efficiency"
+    description: "Reduces build point cost of offensive modules"
+    category: "combat"
+    format: "percentage"
+    applies_to: ["offensive_modules"]
+    
+  - id: "weapon_damage"
+    name: "Weapon Damage"
+    description: "Increases base damage of all weapons"
+    category: "combat"
+    format: "percentage"
+    applies_to: ["all_weapons"]
+    
+  - id: "weapon_range"
+    name: "Weapon Range"
+    description: "Extends maximum effective range of weapons"
+    category: "combat"
+    format: "percentage"
+    applies_to: ["all_weapons"]
+    
+  - id: "weapon_accuracy"
+    name: "Weapon Accuracy"
+    description: "Improves targeting accuracy of all weapons"
+    category: "combat"
+    format: "percentage"
+    applies_to: ["all_weapons"]
+    
+  - id: "missile_reload"
+    name: "Missile Reload Speed"
+    description: "Reduces reload time for missile weapons"
+    category: "combat"
+    format: "percentage"
+    applies_to: ["missile_weapons"]
+    
+  # Defense Bonuses
+  - id: "module_hp_defense"
+    name: "Defensive Module Durability"
+    description: "Increases hit points of defensive modules"
+    category: "defense"
+    format: "percentage"
+    applies_to: ["defensive_modules"]
+    
+  - id: "module_hp"
+    name: "Module Durability"
+    description: "Increases hit points of all modules"
+    category: "defense"
+    format: "percentage"
+    applies_to: ["all_modules"]
+    
+  - id: "shield_capacity"
+    name: "Shield Capacity"
+    description: "Increases maximum shield strength"
+    category: "defense"
+    format: "percentage"
+    applies_to: ["shields"]
+    
+  - id: "shield_regen"
+    name: "Shield Regeneration"
+    description: "Improves shield recharge rate"
+    category: "defense"
+    format: "percentage"
+    applies_to: ["shields"]
+    
+  - id: "hull_armor"
+    name: "Hull Armor"
+    description: "Increases damage resistance of hull"
+    category: "defense"
+    format: "percentage"
+    applies_to: ["hull"]
+    
+  - id: "countermeasure_effectiveness"
+    name: "Countermeasure Effectiveness"
+    description: "Improves performance of defensive countermeasures"
+    category: "defense"
+    format: "percentage"
+    applies_to: ["countermeasures"]
+    
+  # Mobility Bonuses
+  - id: "engine_thrust"
+    name: "Engine Thrust"
+    description: "Increases maximum acceleration"
+    category: "mobility"
+    format: "percentage"
+    applies_to: ["engines"]
+    
+  - id: "engine_efficiency"
+    name: "Engine Efficiency"
+    description: "Reduces energy consumption of engines"
+    category: "mobility"
+    format: "percentage"
+    applies_to: ["engines"]
+    
+  - id: "turn_rate"
+    name: "Turn Rate"
+    description: "Improves ship maneuverability"
+    category: "mobility"
+    format: "percentage"
+    applies_to: ["maneuvering"]
+    
+  - id: "warp_speed"
+    name: "Warp Speed"
+    description: "Increases faster-than-light travel velocity"
+    category: "mobility"
+    format: "percentage"
+    applies_to: ["warp_drive"]
+    
+  # Utility Bonuses
+  - id: "power_generation"
+    name: "Power Generation"
+    description: "Increases reactor energy output"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["power_cores"]
+    
+  - id: "power_capacity"
+    name: "Power Capacity"
+    description: "Increases maximum energy storage"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["power_cores"]
+    
+  - id: "cooling_efficiency"
+    name: "Cooling Efficiency"
+    description: "Improves heat dissipation rate"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["cooling_systems"]
+    
+  - id: "sensor_range"
+    name: "Sensor Range"
+    description: "Extends detection range of sensors"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["sensors"]
+    
+  - id: "sensor_resolution"
+    name: "Sensor Resolution"
+    description: "Improves detail of sensor readings"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["sensors"]
+    
+  - id: "cargo_capacity"
+    name: "Cargo Capacity"
+    description: "Increases available cargo space"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["cargo_holds"]
+    
+  - id: "repair_speed"
+    name: "Repair Speed"
+    description: "Reduces time required for module repairs"
+    category: "utility"
+    format: "percentage"
+    applies_to: ["engineering"]
+    
+  # Efficiency Bonuses
+  - id: "module_cost"
+    name: "Module Cost Reduction"
+    description: "Reduces build point cost of all modules"
+    category: "efficiency"
+    format: "percentage"
+    applies_to: ["all_modules"]
+    
+  - id: "crew_efficiency"
+    name: "Crew Efficiency"
+    description: "Reduces crew requirements for operations"
+    category: "efficiency"
+    format: "percentage"
+    applies_to: ["crew"]
+    
+  - id: "maintenance_cost"
+    name: "Maintenance Cost"
+    description: "Reduces ongoing operational costs"
+    category: "efficiency"
+    format: "percentage"
+    applies_to: ["operations"]
+    
+  - id: "build_time"
+    name: "Construction Speed"
+    description: "Reduces time required to build the ship"
+    category: "efficiency"
+    format: "percentage"
+    applies_to: ["construction"]
+
+# Category metadata
+categories:
+  - id: "combat"
+    name: "Combat"
+    description: "Bonuses affecting weapons and offensive capabilities"
+    color: "#ff4444"
+    icon: "▼"
+    
+  - id: "defense"
+    name: "Defense"
+    description: "Bonuses affecting shields, armor, and survivability"
+    color: "#4444ff"
+    icon: "▼"
+    
+  - id: "mobility"
+    name: "Mobility"
+    description: "Bonuses affecting movement and maneuverability"
+    color: "#44ff44"
+    icon: "▼"
+    
+  - id: "utility"
+    name: "Utility"
+    description: "Bonuses affecting sensors, power, and ship systems"
+    color: "#ffaa44"
+    icon: "▼"
+    
+  - id: "efficiency"
+    name: "Efficiency"
+    description: "Bonuses affecting costs and operational efficiency"
+    color: "#44ffff"
+    icon: "▼"

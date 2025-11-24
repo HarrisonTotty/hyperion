@@ -1,0 +1,120 @@
+name: Hyperion
+desc: >-
+  A large ship typically outfitted as a long-range missile deployment vessel.
+  Hyperions are capable of carrying large quantities of missile ammunition
+  but are more lacking in hull thickness.
+size: Large
+role: Offense
+max_weight: 360
+max_modules: 17
+base_hp: 450
+build_points: 880
+bonuses:
+  module_cost_offense: -0.25
+  module_weight_offense: -0.2
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Cape Canaveral Strategic Systems"
+    variant: "Arsenal-class"
+    lore: >-
+      Federation Hyperions are sophisticated missile platforms designed for coordinated
+      long-range strikes. Their fire control systems can manage hundreds of missiles
+      simultaneously, overwhelming enemy defenses through sheer volume of fire.
+  
+  mars-coalition:
+    manufacturer: "Olympus Missile Works"
+    variant: "Salvo-class"
+    lore: >-
+      Martian Hyperions emphasize alpha strike capability, loading their magazines with
+      the most powerful missiles available. Their doctrine centers on devastating opening
+      volleys that can cripple enemy formations before they can respond.
+  
+  belt-alliance:
+    manufacturer: "Hygiea Ordnance Collective"
+    variant: "Launcher-class"
+    lore: >-
+      Belt Hyperions are economical missile carriers built around simple but reliable
+      launch systems. Their massive magazines compensate for less sophisticated guidance,
+      relying on quantity over individual missile quality.
+  
+  europa-compact:
+    manufacturer: "Thrace Weapons Systems"
+    variant: "Swarm-class"
+    lore: >-
+      Europan Hyperions deploy unique adaptive missiles that can coordinate mid-flight,
+      forming intelligent swarms that adapt to enemy countermeasures. Their biomimetic
+      targeting algorithms make their missiles exceptionally difficult to intercept.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Munitions Guild"
+    variant: "Rocketsled-class"
+    lore: >-
+      Outer Rim Hyperions are converted freighters and industrial vessels refitted with
+      missile tubes. While lacking military polish, their massive cargo holds allow for
+      unprecedented ammunition capacity.
+  
+  corporate-syndicate:
+    manufacturer: "Raytheon Space Defense"
+    variant: "ROI Maximizer-class"
+    lore: >-
+      Corporate Hyperions are designed around cost-per-missile-launched metrics,
+      optimizing magazine capacity and reload efficiency. Their standardized munitions
+      and automated systems minimize crew requirements.
+
+# Technical specifications
+length: 265.0  # meters
+width: 75.0    # meters
+height: 52.0   # meters
+mass: 125000.0  # metric tons (empty)
+crew_min: 45
+crew_max: 75
+cargo_capacity: 3500.0  # cubic meters (primarily missile storage)
+
+# Performance characteristics
+max_acceleration: 26.0      # m/s²
+max_turn_rate: 16.0         # degrees/second
+max_warp_speed: 4.3         # multiples of light speed
+warp_efficiency: 0.70       # 0.0-1.0 rating
+sensor_range: 40000.0       # kilometers
+
+# Operational metadata
+operational_range: 17.0     # AU
+build_time: 270             # days
+maintenance_cost: 950.0     # credits per day
+fuel_capacity: 24000.0      # units
+fuel_consumption: 160.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Hyperion-class vessels represent the pinnacle of missile warfare doctrine—large ships
+  built around massive missile magazines and sophisticated fire control systems. Named
+  after the project that first successfully demonstrated coordinated long-range missile
+  strikes, Hyperions can engage enemies from extreme distances, launching devastating
+  barrages that saturate defensive systems.
+  
+  The Hyperion's design philosophy accepts lighter armor in exchange for maximum missile
+  capacity and launch capability. Their enormous magazines can carry hundreds or even
+  thousands of missiles, allowing them to sustain high-intensity fire missions that would
+  exhaust conventional warships. Advanced targeting and coordination systems allow them
+  to manage complex multi-missile attacks, timing impacts to overwhelm point defenses.
+  
+  Hyperion crews are specialists in missile warfare and fire coordination. Successful
+  operations require perfect synchronization between fire control, magazine management,
+  and tactical positioning. The best Hyperion commanders think several volleys ahead,
+  managing ammunition reserves and coordinating with fleet elements to ensure their
+  missiles achieve maximum effect. In large fleet actions, Hyperions often serve as
+  force multipliers, their missile swarms turning the tide of battle.
+
+year_introduced: 2291
+
+notable_ships:
+  - "TFS Missile Storm"
+  - "MSS Red Rain"
+  - "BAV Cheap Rockets"
+  - "ECS Deep Strike"
+  - "ORC Maximum Firepower"
+  - "CSS Ordnance Asset"

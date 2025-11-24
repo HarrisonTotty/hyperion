@@ -1,0 +1,18 @@
+id: "material-thrusters"
+type: "maneuvering-thruster"
+name: "Material Thrusters"
+model: "MT-1960"
+manufacturer: "Classic Propulsion Systems"
+desc: >-
+  Reliable solid material ejection thrusters using proven 20th century technology.
+lore: >-
+  Classic Propulsion's MT-1960 proves that sometimes the old ways are best. By
+  ejecting solid reaction mass through simple nozzles, these thrusters achieve
+  respectable performance without exotic technologies. They're heavy and inefficient
+  by modern standards, but incredibly durable and easy to repair with basic tools.
+cost: 150
+additional_hp: 10
+additional_power_consumption: 25
+additional_heat_generation: 15
+additional_weight: 40
+angular_thrust: 700

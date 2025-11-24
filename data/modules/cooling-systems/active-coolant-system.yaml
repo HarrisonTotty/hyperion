@@ -1,0 +1,18 @@
+id: "active-coolant-system"
+type: "cooling-system"
+cost: 400
+name: "Active Coolant Circulation System"
+model: "ACCS-600 Active Coolant System"
+manufacturer: "CryoTech Solutions"
+desc: "Actively circulates coolant through ship systems. Higher cooling capacity but requires more power."
+lore: >-
+  CryoTech's ACCS-600 uses powered pumps to circulate liquid coolant throughout
+  the ship's critical systems. The active circulation dramatically improves
+  heat transfer efficiency, making it popular on vessels with high-power weapons
+  or shield systems.
+maximum_coolant: 2000
+generated_cooling: 600
+additional_hp: 5
+additional_power_consumption: 50
+additional_heat_generation: 5
+additional_weight: 15

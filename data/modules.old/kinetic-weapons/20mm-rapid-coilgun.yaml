@@ -1,0 +1,19 @@
+name: 20mm Rapid Coilgun
+model: MG-20R "Hornet" Rapid-Fire Coilgun
+kind: Coilgun
+manufacturer: Rapid Systems Defense
+desc: >-
+  A high-rate-of-fire 20mm coilgun optimized for point defense and
+  anti-fighter roles. The Hornet sacrifices some range and accuracy for
+  rapid cycling capability, able to saturate an area with projectiles to
+  overwhelm enemy point defense or intercept incoming ordnance.
+cost: 250
+ammo:
+  type: slug
+  size: 20mm
+tags: ["Pulse", "Automatic"]
+reload_time: 0.5
+num_projectiles: 2
+ammo_consumption: 2
+accuracy: 0.85
+effective_range: 2000

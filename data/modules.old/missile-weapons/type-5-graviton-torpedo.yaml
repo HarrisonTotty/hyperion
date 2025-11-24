@@ -1,0 +1,19 @@
+name: Type 5 Graviton Torpedo
+model: Type 5 Graviton Torpedo
+kind: Torpedo
+manufacturer: Advanced Ordnance Systems
+desc: >-
+  A torpedo armed with a graviton warhead, dealing less damage than the MK 3
+  but temporarily increasing the mass of the hit ship, causing it to move
+  slower and reducing its maneuverability.
+cost: 16
+weight: 3
+forward_thrust: 250
+max_turn_rate: 0.4
+load_time: 6.5
+tags: ["Torpedo", "Graviton"]
+impact_damage: 165
+blast_damage: 32
+blast_radius: 195
+lifetime: 15
+max_speed: 700

@@ -1,0 +1,20 @@
+id: "neutrino-tethering-engines"
+type: "impulse-engine"
+cost: 1600
+name: Neutrino Tethering Engines
+model: NTE-X Neutrino Tethering Engine
+manufacturer: Advanced Propulsion Dynamics
+desc: >-
+  By (somehow) paramagnetically tethering to natural neutrinos as they pass
+  through a containment field, these engines are capable of producing large
+  amounts of thrust at good energy efficiency.
+lore: >-
+  APD's NTE-X remains largely theoretical in its operation, but field results
+  are undeniable. Neutrino tethering provides excellent thrust with minimal
+  power draw, though the containment field requirements remain complex.
+max_thrust: 1400
+power_consumption: 40
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 0

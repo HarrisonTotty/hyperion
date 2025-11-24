@@ -1,0 +1,119 @@
+name: Defender
+desc: >-
+  The largest class of defensive ship, outfitted with advanced defensive
+  capabilities. Defender class ships are capable of taking more damage than
+  any other class.
+size: Large
+role: Defense
+max_weight: 400
+max_modules: 20
+base_hp: 600
+build_points: 1000
+bonuses:
+  module_hp: 0.3
+  module_cost_defense: -0.2
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Bath Iron Works Orbital"
+    variant: "Fortress-class"
+    lore: >-
+      Federation defenders are mobile citadels designed to hold critical positions
+      against overwhelming odds. Their layered defensive systems and massive armor
+      plating make them nearly indestructible anchors for defensive operations.
+  
+  mars-coalition:
+    manufacturer: "Tharsis Shield Manufacturing"
+    variant: "Bulwark-class"
+    lore: >-
+      Martian defenders combine traditional armor with active defense systems,
+      creating multi-layered protection that can adapt to different threat types.
+      They're designed to survive anything while protecting everything behind them.
+  
+  belt-alliance:
+    manufacturer: "Ceres Heavy Defense Works"
+    variant: "Immovable-class"
+    lore: >-
+      Belt defenders are built like their namesake asteroids—dense, massive, and
+      incredibly tough. Their simple but effective design prioritizes pure survivability
+      and sustained defensive fire over sophisticated systems.
+  
+  europa-compact:
+    manufacturer: "Thera Shield Systems"
+    variant: "Bastion-class"
+    lore: >-
+      Europan defenders feature regenerative armor systems inspired by biological
+      healing. Their hulls can seal breaches and redistribute protection dynamically,
+      making them remarkably resilient in prolonged engagements.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Fortification Group"
+    variant: "Last Stand-class"
+    lore: >-
+      Outer Rim defenders are community strongholds, often assembled around salvaged
+      military armor plating. Each represents the collective determination of entire
+      settlements to protect what's theirs.
+  
+  corporate-syndicate:
+    manufacturer: "Aegis Defense Corporation"
+    variant: "Market Stabilizer-class"
+    lore: >-
+      Corporate defenders are insurance policies made manifest—expensive but effective
+      protection for critical assets. Their construction emphasizes cost-effectiveness
+      while meeting stringent survivability requirements.
+
+# Technical specifications
+length: 280.0  # meters
+width: 85.0    # meters
+height: 58.0   # meters
+mass: 165000.0  # metric tons (empty)
+crew_min: 55
+crew_max: 95
+cargo_capacity: 1500.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 20.0      # m/s²
+max_turn_rate: 12.0         # degrees/second
+max_warp_speed: 3.5         # multiples of light speed
+warp_efficiency: 0.65       # 0.0-1.0 rating
+sensor_range: 32000.0       # kilometers
+
+# Operational metadata
+operational_range: 16.0     # AU
+build_time: 320             # days
+maintenance_cost: 1200.0    # credits per day
+fuel_capacity: 28000.0      # units
+fuel_consumption: 180.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Defenders represent the ultimate expression of defensive naval architecture—vessels
+  designed to take punishment that would vaporize lesser ships and keep fighting. These
+  massive vessels mount the thickest armor, most sophisticated damage control systems,
+  and most extensive defensive arrays available. When a defender takes position, it
+  becomes an immovable obstacle that enemies must either bypass or destroy at great cost.
+  
+  The defender's role in fleet doctrine is to create impenetrable defensive zones. Whether
+  protecting static installations, convoy formations, or strategic positions, defenders
+  establish areas of control that hostile forces cannot penetrate without committing
+  overwhelming force. Their mere presence changes battlefield geometry, forcing enemies
+  to route around them or accept catastrophic losses attempting breakthrough.
+  
+  Defender crews develop legendary reputations for stubbornness and resilience. These
+  ships attract personnel who believe in holding the line regardless of odds. The famous
+  defensive actions of history—desperate last stands that bought time for evacuations or
+  reinforcements—often center on defender-class vessels refusing to yield. Their captains
+  are chosen for unwavering determination and tactical defensive genius.
+
+year_introduced: 2295
+
+notable_ships:
+  - "TFS Unbreakable"
+  - "MSS Red Wall"
+  - "BAV No Passage"
+  - "ECS Deep Anchor"
+  - "ORC They Shall Not Pass"
+  - "CSS Asset Fortress"

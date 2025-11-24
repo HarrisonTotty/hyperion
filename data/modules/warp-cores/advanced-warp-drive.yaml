@@ -1,0 +1,19 @@
+id: "advanced-warp-drive"
+type: "warp-jump-core"
+cost: 2000
+name: "Advanced Warp Drive"
+model: "WD-6000X"
+manufacturer: "Stellar Dynamics Ltd"
+desc: "High-performance FTL system with enhanced speed and efficiency. Ideal for exploration and rapid response."
+lore: >-
+  The WD-6000X represents the cutting edge of continuous warp technology,
+  offering faster acceleration and higher cruise speeds than standard drives.
+  Popular with exploration vessels and rapid-response military units that
+  need to cover interstellar distances quickly.
+warp_type: warp
+warp_delay: 10.0
+jump_distance: 0
+additional_hp: 5
+additional_power_consumption: 80
+additional_heat_generation: 60
+additional_weight: 40

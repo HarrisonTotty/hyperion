@@ -1,0 +1,12 @@
+id: shell-300mm-st
+name: "ST 300mm Shell"
+desc: >-
+  Superheavy 300mm shells for siege cannons. Devastating impact with
+  extreme mass and velocity.
+cost: 80
+weight: 40
+impact_damage: 60
+blast_radius: 10
+blast_damage: 8
+velocity: 650
+armor_penetration: 8

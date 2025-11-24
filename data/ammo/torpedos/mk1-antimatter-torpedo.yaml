@@ -1,0 +1,13 @@
+id: mk1-antimatter-torpedo
+name: "Mark I Antimatter Torpedo"
+desc: >-
+  Antimatter warhead delivering catastrophic damage. Extremely expensive and volatile.
+cost: 800
+weight: 600
+impact_damage: 1500
+blast_radius: 200
+blast_damage: 1200
+acceleration: 4.0
+max_speed: 350
+lifetime: 80
+weapon_tags: ["Torpedo", "Antimatter"]

@@ -1,0 +1,14 @@
+id: type-5-graviton-missile
+name: "Type 5 Graviton Missile"
+desc: >-
+  Graviton warhead that temporarily increases target mass, reducing speed and maneuverability.
+cost: 70
+weight: 105
+impact_damage: 125
+blast_radius: 90
+blast_damage: 58
+acceleration: 19.0
+max_speed: 1280
+max_turn_rate: 1.35
+lifetime: 13
+weapon_tags: ["Missile", "Graviton"]

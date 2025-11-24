@@ -1,0 +1,13 @@
+id: mk4-lrhe-torpedo
+name: "Mark IV Long-Range High-Explosive Torpedo"
+desc: >-
+  Extended range torpedo with high-explosive payload, designed for long-distance engagements.
+cost: 350
+weight: 580
+impact_damage: 650
+blast_radius: 220
+blast_damage: 750
+acceleration: 4.5
+max_speed: 380
+lifetime: 120
+weapon_tags: ["Torpedo", "HE", "Long-Range"]

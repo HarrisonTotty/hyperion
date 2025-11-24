@@ -1,0 +1,18 @@
+name: MK 1 Antimatter Torpedo
+model: MK 1 Antimatter Torpedo
+kind: Torpedo
+manufacturer: Extreme Ordnance Corporation
+desc: >-
+  Armed with a warhead filled with antinuclear material, this slow-moving
+  torpedo is capable of dealing massive damage to a large blast radius.
+cost: 45
+weight: 10
+forward_thrust: 150
+max_turn_rate: 0.15
+load_time: 15.0
+tags: ["Torpedo"]
+impact_damage: 500
+blast_damage: 150
+blast_radius: 400
+lifetime: 25
+max_speed: 500

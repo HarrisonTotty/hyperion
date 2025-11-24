@@ -1,0 +1,120 @@
+name: Freighter
+desc: >-
+  A large vessel primarily built for transporting cargo, freighters can be
+  outfitted to utilize their large cargo holds for massive quantities of
+  ammo storage. Their extensive capacity makes them invaluable for
+  sustained operations.
+size: Large
+role: Support
+max_weight: 450
+max_modules: 18
+base_hp: 480
+build_points: 820
+bonuses:
+  module_weight_support: -0.3
+  module_cost_support: -0.25
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Terran Merchant Marine"
+    variant: "Liberty-class"
+    lore: >-
+      Federation freighters are the workhorses of interstellar commerce, moving vast
+      quantities of goods between worlds. Their standardized cargo systems allow for
+      efficient loading and unloading at any Federation port.
+  
+  mars-coalition:
+    manufacturer: "Mariner Valley Freight"
+    variant: "Red Hauler-class"
+    lore: >-
+      Martian freighters are optimized for bulk mineral and resource transport. Their
+      reinforced holds can carry dense ores and hazardous materials, making them essential
+      to Mars' industrial economy.
+  
+  belt-alliance:
+    manufacturer: "Asteroid Belt Shipping"
+    variant: "Rock Mover-class"
+    lore: >-
+      Belt freighters are massive, utilitarian vessels designed for moving raw materials
+      across vast distances. Many are converted from hollowed-out asteroids, providing
+      enormous cargo capacity at minimal cost.
+  
+  europa-compact:
+    manufacturer: "Ice Runner Logistics"
+    variant: "Glacier-class"
+    lore: >-
+      Europan freighters specialize in transporting water ice, volatiles, and cryogenic
+      materials. Their advanced refrigeration systems and containment fields make them
+      indispensable for life support resource distribution.
+  
+  outer-rim-collective:
+    manufacturer: "Free Traders Union"
+    variant: "Prospector-class"
+    lore: >-
+      Outer Rim freighters are independently operated vessels, often family-owned and
+      passed down through generations. Each is customized to its trade routes and cargo
+      preferences, making them uniquely capable.
+  
+  corporate-syndicate:
+    manufacturer: "TransGalactic Shipping Corp"
+    variant: "Profit Margin-class"
+    lore: >-
+      Corporate freighters maximize cargo-to-cost ratios through standardized designs
+      and automated systems. Operated by minimal crews, they prioritize efficiency and
+      throughput over all other considerations.
+
+# Technical specifications
+length: 380.0  # meters
+width: 120.0   # meters
+height: 95.0   # meters
+mass: 220000.0  # metric tons (empty)
+crew_min: 25
+crew_max: 50
+cargo_capacity: 15000.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 12.0      # m/s²
+max_turn_rate: 6.0          # degrees/second
+max_warp_speed: 3.2         # multiples of light speed
+warp_efficiency: 0.60       # 0.0-1.0 rating
+sensor_range: 18000.0       # kilometers
+
+# Operational metadata
+operational_range: 25.0     # AU
+build_time: 280             # days
+maintenance_cost: 600.0     # credits per day
+fuel_capacity: 50000.0      # units
+fuel_consumption: 200.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Freighters are the unsung heroes of civilization, massive vessels that move the goods
+  and materials that keep worlds running. Without their constant traffic between systems,
+  colonies would starve, industries would halt, and economies would collapse. These
+  utilitarian vessels may lack the glamour of warships or the prestige of passenger liners,
+  but they are the true backbone of interstellar society.
+  
+  The freighter's design is all about capacity and efficiency. Every cubic meter of their
+  massive hulls is optimized for cargo, with modular hold configurations allowing them to
+  carry everything from grain to manufactured goods to raw ore. Their slow speed and poor
+  maneuverability are accepted tradeoffs for the ability to move thousands of tons in a
+  single voyage.
+  
+  Freighter crews develop a distinct culture—pragmatic, self-reliant, and deeply
+  knowledgeable about cargo handling and ship maintenance. Many are family operations,
+  with multiple generations living aboard the same vessel. The best freighter captains
+  can maximize profits through careful route planning and cargo selection, becoming
+  wealthy through patient accumulation rather than spectacular risks.
+
+year_introduced: 2275
+
+notable_ships:
+  - "TFS Endless Hold"
+  - "MSS Red Cargo"
+  - "BAV Pay-per-Ton"
+  - "ECS Ice Hauler"
+  - "ORC Family Business"
+  - "CSS Quarterly Shipment"

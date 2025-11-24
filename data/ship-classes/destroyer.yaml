@@ -1,0 +1,118 @@
+name: Destroyer
+desc: >-
+  A medium-sized offensive ship typically loaded with medium/long range
+  weapons. Destroyers excel at engaging targets from distance with
+  precision and sustained firepower.
+size: Medium
+role: Offense
+max_weight: 260
+max_modules: 14
+base_hp: 380
+build_points: 630
+bonuses:
+  module_cost_offense: -0.2
+  module_weight_offense: -0.1
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Lockheed Martin Astronautics"
+    variant: "Arleigh Burke-class"
+    lore: >-
+      Federation destroyers are precision instruments of naval warfare. Built around
+      advanced fire control systems and long-range weapon platforms, they project power
+      across vast distances with devastating accuracy.
+  
+  mars-coalition:
+    manufacturer: "Noctis Labyrinthus Arsenal"
+    variant: "Warhammer-class"
+    lore: >-
+      Martian destroyers emphasize overwhelming firepower and aggressive tactics. Their
+      weapon arrays are designed for alpha strikes, capable of crippling enemy vessels
+      before they can close to effective range.
+  
+  belt-alliance:
+    manufacturer: "Hygiea Weapons Group"
+    variant: "Longshot-class"
+    lore: >-
+      Belt destroyers are patient hunters, optimized for long-range engagements in open
+      space. Their efficient power systems and ammunition recycling allow for extended
+      combat operations without resupply.
+  
+  europa-compact:
+    manufacturer: "Manannán Defense Works"
+    variant: "Kraken-class"
+    lore: >-
+      Europan destroyers incorporate biomimetic targeting systems and adaptive munitions.
+      Their weapons can adjust mid-flight, making them exceptionally effective against
+      maneuvering targets in complex environments.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Armaments Coalition"
+    variant: "Longarm-class"
+    lore: >-
+      Outer Rim destroyers are built from salvaged military components and proven civilian
+      technologies. While lacking cutting-edge systems, their rugged construction and
+      maintainability make them reliable warships.
+  
+  corporate-syndicate:
+    manufacturer: "Blackwater Security Solutions"
+    variant: "Enforcer-class"
+    lore: >-
+      Corporate destroyers serve as mobile deterrents protecting valuable assets. Designed
+      for intimidation as much as combat effectiveness, they maximize visible firepower
+      while minimizing operational costs.
+
+# Technical specifications
+length: 165.0  # meters
+width: 42.0    # meters
+height: 32.0   # meters
+mass: 58000.0  # metric tons (empty)
+crew_min: 28
+crew_max: 45
+cargo_capacity: 400.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 32.0      # m/s²
+max_turn_rate: 22.0         # degrees/second
+max_warp_speed: 4.8         # multiples of light speed
+warp_efficiency: 0.72       # 0.0-1.0 rating
+sensor_range: 35000.0       # kilometers
+
+# Operational metadata
+operational_range: 16.0     # AU
+build_time: 200             # days
+maintenance_cost: 650.0     # credits per day
+fuel_capacity: 12000.0      # units
+fuel_consumption: 120.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Destroyers are the offensive backbone of modern space navies. Purpose-built for
+  stand-off engagement, these ships mount powerful weapon arrays optimized for range
+  and precision. Their role in fleet doctrine is clear: establish fire superiority,
+  eliminate high-value targets, and suppress enemy formations before they can threaten
+  friendly capital ships.
+  
+  The destroyer's design philosophy prioritizes firepower over defense. Their hulls are
+  lighter than frigates of comparable size, sacrificing armor for additional weapon
+  mounts and fire control systems. This glass cannon approach requires skilled crews
+  who can maximize their standoff advantage while avoiding close-quarters brawls where
+  their vulnerabilities become critical.
+  
+  Destroyer commanders are known for their aggressive, calculating nature. Success
+  requires perfect timing—knowing when to unleash devastating salvos and when to break
+  off and reposition. The most celebrated destroyer captains can read fleet movements
+  like chess masters, positioning their ships for maximum impact.
+
+year_introduced: 2288
+
+notable_ships:
+  - "TFS Thunderstrike"
+  - "MSS Crimson Lance"
+  - "BAV Precision"
+  - "ECS Depth Charge"
+  - "ORC Equalizer"
+  - "CSS Asset Eliminator"

@@ -1,0 +1,106 @@
+name: Frigate
+desc: >-
+  A medium ship built to defend other ships in combat. Frigates provide
+  robust defensive capabilities while maintaining offensive potential,
+  making them ideal fleet support vessels.
+size: Medium
+role: Defense
+max_weight: 270
+max_modules: 15
+base_hp: 420
+build_points: 640
+bonuses:
+  module_hp_defense: 0.25
+  module_hp: 0.1
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "United Shipyards"
+    variant: "Constitution-class"
+    lore: >-
+      The Terran Federation's frigates emphasize balanced performance and crew comfort.
+      Built primarily at the Luna Orbital Yards, these ships serve as the backbone of
+      Federation defensive fleets.
+  
+  mars-coalition:
+    manufacturer: "Olympus Mons Defense Industries"
+    variant: "Ares-class"
+    lore: >-
+      Martian frigates are optimized for extended independent operations in hostile
+      environments. They feature reinforced hull plating and advanced life support systems.
+  
+  belt-alliance:
+    manufacturer: "Ceres Collective Shipworks"
+    variant: "Vesta-class"
+    lore: >-
+      Belt Alliance frigates are modular and easy to repair, designed for sustained
+      operations far from major shipyards. They excel at resource efficiency.
+  
+  europa-compact:
+    manufacturer: "Europa Deep Space Engineering"
+    variant: "Thalassa-class"
+    lore: >-
+      Europan frigates feature advanced sensor suites optimized for ice field navigation
+      and subsurface scanning. Their unique design incorporates biomimetic hull patterns.
+  
+  outer-rim-collective:
+    manufacturer: "Frontier Fabrication Union"
+    variant: "Nomad-class"
+    lore: >-
+      Outer Rim frigates are rugged and adaptable, built from salvaged components and
+      proven technologies. Each ship is slightly unique, reflecting its builders' ingenuity.
+  
+  corporate-syndicate:
+    manufacturer: "Hephaestus Heavy Industries"
+    variant: "Profit-class"
+    lore: >-
+      Corporate frigates maximize cost-effectiveness while meeting minimum performance
+      standards. They're designed for rapid production and easy crew replacement.
+
+# Technical specifications
+length: 150.0  # meters
+width: 45.0    # meters
+height: 30.0   # meters
+mass: 50000.0  # metric tons (empty)
+crew_min: 25
+crew_max: 40
+cargo_capacity: 500.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 35.0      # m/s²
+max_turn_rate: 25.0         # degrees/second
+max_warp_speed: 5.0         # multiples of light speed
+warp_efficiency: 0.75       # 0.0-1.0 rating
+sensor_range: 25000.0       # kilometers
+
+# Operational metadata
+operational_range: 15.0     # AU
+build_time: 180             # days
+maintenance_cost: 500.0     # credits per day
+fuel_capacity: 10000.0      # units
+fuel_consumption: 100.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  The frigate represents centuries of naval engineering tradition adapted for space combat.
+  First deployed during the early expansion period, frigates have proven their worth in
+  countless fleet actions. Their balanced design makes them versatile enough for escort duty,
+  patrol operations, or fleet defense. Modern frigates incorporate lessons learned from
+  decades of combat, featuring modular defensive systems and redundant critical components.
+  
+  Frigate crews are known for their professionalism and cohesion. The smaller complement
+  compared to cruisers or battleships allows for tighter unit bonding and more responsive
+  command structures. Many famous fleet admirals began their careers commanding frigates.
+
+year_introduced: 2285
+
+notable_ships:
+  - "TFS Valiant"
+  - "MSS Red Storm"
+  - "BAV Resilience"
+  - "ECS Deep Explorer"
+  - "ORC Frontier Guardian"
+  - "CSS Dividend"

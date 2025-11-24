@@ -1,0 +1,27 @@
+id: "50mm-heavy-railgun"
+name: "50mm Heavy Railgun"
+description: "Capital ship railgun delivering devastating armor penetration at extreme range."
+cost: 600
+model: "EM-50 Lancer"
+manufacturer: "Prometheus Heavy Industries"
+lore: >-
+  Prometheus Heavy Industries' Lancer is the weapon that redefined capital ship warfare.
+  Advanced capacitor banks and superconducting rails accelerate 50mm projectiles to
+  velocities exceeding Mach 6, delivering kinetic energy that can punch clean through
+  dreadnought armor plating. Each shot draws enough power to dim the lights across three
+  decks, but when you absolutely need to kill something at 10,000 kilometers, accept no
+  substitutes.
+additional_hp: 15
+additional_power_consumption: 60
+additional_heat_generation: 55
+additional_weight: 40
+stats:
+  ammo:
+    type: slug
+    size: 50mm
+  tags: ["Single-Fire", "Manual"]
+  reload_time: 2.8
+  num_projectiles: 1
+  ammo_consumption: 1
+  accuracy: 0.87
+  effective_range: 10000

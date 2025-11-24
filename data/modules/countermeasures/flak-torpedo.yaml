@@ -1,0 +1,16 @@
+id: "flak-torpedo"
+type: "countermeasure-system"
+name: "Flak Torpedo"
+cost: 400
+model: "FT-500 Flak System"
+manufacturer: "Anti-Missile Defense Corp"
+desc: "Launches proximity-fused torpedoes that create shrapnel clouds to destroy incoming missiles."
+lore: >-
+  AMDC's flak torpedo system launches small torpedoes that detonate in the path
+  of incoming missiles, creating clouds of high-velocity shrapnel. The area-effect
+  nature makes it particularly effective against missile swarms, though the
+  explosive launches generate significant heat and vibration.
+additional_hp: 0
+additional_power_consumption: 80
+additional_heat_generation: 100
+additional_weight: 12

@@ -1,0 +1,25 @@
+id: precision-coilgun
+type: kinetic-weapon
+name: "Precision Coilgun"
+model: "Sharpshooter MC-30"
+manufacturer: "Precision Munitions Inc"
+desc: >-
+  Sniper-grade coilgun optimized for extreme accuracy and range with slow rate of fire.
+lore: >-
+  The Sharpshooter is Precision Munitions' answer to long-range surgical strikes.
+  Multiple electromagnetic coils accelerate 30mm slugs to hypersonic velocities with
+  unprecedented accuracy. The complex targeting integration and cooling requirements
+  result in slow firing cycles, but skilled marksmen can disable critical subsystems
+  from extreme distances where other weapons lose effectiveness.
+cost: 220
+additional_hp: 12
+additional_power_consumption: 16
+additional_heat_generation: 15
+additional_weight: 110
+ammo_type: slug
+ammo_size: 30mm
+reload_time: 4.5
+num_projectiles: 1
+ammo_consumed: 1
+accuracy: 0.97
+effective_range: 6500

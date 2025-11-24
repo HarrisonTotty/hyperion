@@ -1,0 +1,20 @@
+id: "smart-thrusters"
+type: "maneuvering-thruster"
+name: "Smart Thrusters"
+description: "Advanced mass-compensated material thrusters with improved efficiency and thrust output."
+cost: 280
+model: "ST-2100"
+manufacturer: "Advanced Maneuvering Solutions"
+lore: >-
+  AMS took the proven material thruster design and brought it into the 22nd century.
+  The ST-2100 incorporates artificial mass compensation technology to reduce effective
+  inertia during maneuvers, significantly improving turn rates. The perfect middle
+  ground between classical reliability and modern performance.
+additional_hp: 5
+additional_power_consumption: 20
+additional_heat_generation: 10
+additional_weight: 15
+stats:
+  thrust: 1000
+  energy_consumption: 30
+  weight: 160

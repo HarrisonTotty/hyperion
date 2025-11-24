@@ -1,0 +1,14 @@
+name: HE 100mm Shell
+type: shell
+size: 100mm
+desc: >-
+  High-explosive 100mm shells packed with enhanced energetic compounds.
+  Creates devastating blast zones effective against multiple targets and
+  external ship systems.
+cost: 15
+weight: 7
+impact_damage: 9
+blast_radius: 10
+blast_damage: 7
+velocity: 650
+armor_penetration: 3

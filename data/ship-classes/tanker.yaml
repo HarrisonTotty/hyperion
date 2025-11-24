@@ -1,0 +1,120 @@
+name: Tanker
+desc: >-
+  A medium vessel primarily built for transporting fuel/energy. Tankers
+  are essential support vessels capable of maintaining fleet operations
+  far from base with their massive energy reserves.
+size: Medium
+role: Support
+max_weight: 300
+max_modules: 14
+base_hp: 350
+build_points: 580
+bonuses:
+  module_cost_support: -0.25
+  module_weight_support: -0.15
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Federal Fuels Division"
+    variant: "Refueler-class"
+    lore: >-
+      Federation tankers are built to strict safety standards, with redundant containment
+      systems and emergency venting capabilities. They're the lifeline of long-range fleet
+      operations, allowing task forces to operate far from resupply bases.
+  
+  mars-coalition:
+    manufacturer: "Tharsis Energy Transport"
+    variant: "Fuel Runner-class"
+    lore: >-
+      Martian tankers prioritize rapid fuel transfer and combat zone operations. Their
+      hardened fuel lines and armored tanks allow them to resupply ships under fire,
+      though this comes with significant risk.
+  
+  belt-alliance:
+    manufacturer: "Pallas Fuel Cooperative"
+    variant: "Tankship-class"
+    lore: >-
+      Belt tankers are converted from old freighters and hollowed asteroids, providing
+      massive fuel capacity at minimal cost. Their simple designs make them easy to
+      maintain and repair in remote locations.
+  
+  europa-compact:
+    manufacturer: "Europan Energy Services"
+    variant: "Reservoir-class"
+    lore: >-
+      Europan tankers specialize in cryogenic fuel transport and exotic propellant storage.
+      Their advanced cooling systems can handle the most volatile fuel types, making them
+      invaluable for cutting-edge propulsion systems.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Fuel Guild"
+    variant: "Gas Station-class"
+    lore: >-
+      Outer Rim tankers are mobile fuel depots, often stationed at key navigation points
+      to service passing ships. Many crews operate on profit-sharing agreements, making
+      them highly motivated to maintain service quality.
+  
+  corporate-syndicate:
+    manufacturer: "Petroleum Interstellar LLC"
+    variant: "Energy Asset-class"
+    lore: >-
+      Corporate tankers are optimized for fuel transport economics, with automated
+      transfer systems and standardized interfaces. Their predictable operations and
+      insurance coverage make them reliable fleet support elements.
+
+# Technical specifications
+length: 210.0  # meters
+width: 65.0    # meters
+height: 48.0   # meters
+mass: 85000.0  # metric tons (empty)
+crew_min: 15
+crew_max: 28
+cargo_capacity: 8000.0  # cubic meters (fuel storage)
+
+# Performance characteristics
+max_acceleration: 22.0      # m/s²
+max_turn_rate: 14.0         # degrees/second
+max_warp_speed: 4.0         # multiples of light speed
+warp_efficiency: 0.68       # 0.0-1.0 rating
+sensor_range: 20000.0       # kilometers
+
+# Operational metadata
+operational_range: 20.0     # AU
+build_time: 180             # days
+maintenance_cost: 500.0     # credits per day
+fuel_capacity: 75000.0      # units (for own use + transfer)
+fuel_consumption: 110.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Tankers are the lifeblood of fleet operations, mobile fuel depots that enable ships
+  to operate far beyond their normal range. Without tankers, navies would be tethered to
+  fuel bases, unable to project power or conduct extended campaigns. These specialized
+  vessels carry enormous quantities of volatile propellants, making them both invaluable
+  assets and dangerous liabilities.
+  
+  The tanker's operational doctrine centers on enabling fleet mobility. By positioning
+  themselves at strategic points, tankers create temporary supply networks that allow
+  combat vessels to refuel without returning to base. Their fuel transfer systems can
+  pump thousands of units per hour, getting ships back into action quickly. However, their
+  volatile cargoes make them priority targets—losing a tanker can cripple an entire
+  fleet's operational capacity.
+  
+  Tanker crews are specialists in fuel handling and safety procedures. Working with
+  massive quantities of explosive propellants requires meticulous attention to detail
+  and unwavering adherence to safety protocols. The best tanker captains can position
+  their vessels to maximize fleet efficiency while minimizing exposure to enemy fire,
+  a delicate balancing act that separates competent crews from legendary ones.
+
+year_introduced: 2282
+
+notable_ships:
+  - "TFS Endless Supply"
+  - "MSS Red Fuel"
+  - "BAV Budget Gas"
+  - "ECS Deep Tank"
+  - "ORC Never Empty"
+  - "CSS Energy Revenue"

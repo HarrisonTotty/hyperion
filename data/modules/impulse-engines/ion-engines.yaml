@@ -1,0 +1,20 @@
+id: "ion-engines"
+type: "impulse-engine"
+cost: 600
+name: Ion Engines
+model: IE83J Ion Engine
+manufacturer: Azul Deep Space Industries
+desc: >-
+  Ion impulse engines provide little forward thrust but are extremely
+  energy efficient.
+lore: >-
+  Azul's IE83J ion engine is the engine of choice for long-duration scientific
+  missions and deep space exploration. While lacking the raw power of plasma
+  drives, its fuel efficiency is unmatched, allowing vessels to operate for
+  months without refueling.
+max_thrust: 400
+power_consumption: 10
+additional_hp: 10
+additional_power_consumption: 50
+additional_heat_generation: 30
+additional_weight: 5

@@ -1,0 +1,13 @@
+id: mk1-torpedo
+name: "Mark I Torpedo"
+desc: >-
+  Standard heavy torpedo. Slow but devastating against capital ships.
+cost: 200
+weight: 500
+impact_damage: 800
+blast_radius: 100
+blast_damage: 400
+acceleration: 5.0
+max_speed: 400
+lifetime: 60
+weapon_tags: ["Torpedo"]

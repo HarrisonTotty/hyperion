@@ -1,0 +1,24 @@
+id: "quantum-entanglement-comm"
+type: "comms-system"
+cost: 800
+name: Quantum Entanglement Communicator
+model: QEC-1000 Quantum Link
+manufacturer: Tesseract Systems
+desc: >-
+  Cutting-edge quantum entanglement-based communication system providing
+  instantaneous, untraceable communication across any distance. Maximum
+  encryption strength with minimal energy consumption.
+lore: >-
+  Quantum entanglement communications represent the pinnacle of FTL messaging.
+  By exploiting quantum pairs, the QEC-1000 achieves truly instantaneous 
+  communication across any distance. Prohibitively expensive, they are typically
+  reserved for flagship vessels and critical diplomatic missions. The encryption
+  is theoretically unbreakable due to quantum mechanics principles.
+comm_range: 999999999
+frequency_range: [0, 0]
+encryption_lvl: 10
+power_consumption: 15
+additional_hp: 5
+additional_power_consumption: 40
+additional_heat_generation: 30
+additional_weight: 35

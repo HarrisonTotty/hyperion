@@ -1,0 +1,20 @@
+id: "scram-pulse-engines"
+type: "impulse-engine"
+cost: 2000
+name: Scram Pulse Engines
+model: SPE-1000 Scram Pulse Engine
+manufacturer: Extreme Propulsion Industries
+desc: >-
+  By expelling massive quantities of charged nuclear material out the back
+  of this engine, it is capable of generating massive amounts of thrust at
+  a very low energy efficiency.
+lore: >-
+  EPI's SPE-1000 is favored by military vessels requiring maximum acceleration.
+  The trade-off in fuel efficiency is considered acceptable for combat
+  operations where speed can mean the difference between life and death.
+max_thrust: 2800
+power_consumption: 120
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 50
+additional_weight: 15

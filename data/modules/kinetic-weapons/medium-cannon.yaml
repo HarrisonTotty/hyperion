@@ -1,0 +1,24 @@
+id: medium-cannon
+type: kinetic-weapon
+name: "Medium Cannon"
+model: "Devastator 100mm Battery"
+manufacturer: "Aegis Armaments Corp"
+desc: >-
+  Versatile medium cannon firing 100mm shells with balanced performance across all metrics.
+lore: >-
+  Aegis Armaments' Devastator series has armed fleet vessels for generations. The 100mm
+  variant strikes an ideal balance between firepower, accuracy, and ammunition efficiency.
+  It can engage targets effectively at medium range and accepts standard, armor-piercing,
+  and high-explosive shells for tactical flexibility.
+cost: 180
+additional_hp: 15
+additional_power_consumption: 12
+additional_heat_generation: 20
+additional_weight: 150
+ammo_type: shell
+ammo_size: 100mm
+reload_time: 3.0
+num_projectiles: 1
+ammo_consumed: 1
+accuracy: 0.88
+effective_range: 3500

@@ -1,0 +1,18 @@
+id: "regenerative-shield"
+type: "shield-generator"
+name: "Regenerative Shield Array"
+model: "RSA-1800"
+manufacturer: "Xenon Dynamics"
+desc: >-
+  Advanced shield with rapid regeneration. Lower maximum strength but faster recovery.
+lore: >-
+  Xenon Dynamics' innovative regenerative design sacrifices some maximum capacity
+  for dramatically improved recovery times. Popular with hit-and-run tactics and
+  explorers who need shields that can bounce back quickly from minor encounters.
+cost: 150
+additional_hp: 0
+additional_power_consumption: 50
+additional_heat_generation: 50
+additional_weight: 5
+max_shield_strength: 1500
+shield_recharge_rate: 200

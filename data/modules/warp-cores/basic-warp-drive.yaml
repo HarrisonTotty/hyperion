@@ -1,0 +1,19 @@
+id: "basic-warp-drive"
+type: "warp-jump-core"
+cost: 1000
+name: "Standard Warp Drive"
+model: "WD-1500"
+manufacturer: "Stellar Dynamics Ltd"
+desc: "Basic FTL propulsion system. Reliable and efficient for standard interstellar travel."
+lore: >-
+  Stellar Dynamics' WD-1500 has been the workhorse of interstellar commerce
+  for over three decades. While it won't break any speed records, its proven
+  reliability and ease of maintenance make it the preferred choice for
+  independent traders and small shipping companies.
+warp_type: warp
+warp_delay: 15.0
+jump_distance: 0
+additional_hp: 0
+additional_power_consumption: 50
+additional_heat_generation: 40
+additional_weight: 20

@@ -1,0 +1,17 @@
+id: "basic-radiator"
+type: "cooling-system"
+cost: 200
+name: "Basic Thermal Radiator"
+model: "TR-300 Radiator Array"
+manufacturer: "Thermal Dynamics Inc."
+desc: "Standard passive cooling system using radiator panels. Reliable and low maintenance."
+lore: >-
+  Thermal Dynamics' TR-300 is the most common cooling solution in civilian
+  spacecraft. Using simple heat-rejection radiator panels, it provides adequate
+  cooling for standard operations without complex machinery or high power draw.
+maximum_coolant: 1000
+generated_cooling: 300
+additional_hp: 0
+additional_power_consumption: 20
+additional_heat_generation: 0
+additional_weight: 10

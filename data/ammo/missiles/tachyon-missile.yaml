@@ -1,0 +1,15 @@
+id: tachyon-missile
+name: "Tachyon Missile"
+desc: >-
+  Advanced missile with tachyon warhead. Disables FTL drives on hit.
+cost: 100
+weight: 120
+guidance_system: radar-guided
+impact_damage: 120
+blast_radius: 8
+blast_damage: 40
+acceleration: 18.0
+max_speed: 1400
+max_turn_rate: 50.0
+lifetime: 18
+weapon_tags: ["Missile", "Tachyon"]

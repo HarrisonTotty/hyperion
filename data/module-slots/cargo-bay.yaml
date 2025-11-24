@@ -1,0 +1,17 @@
+id: cargo-bay
+name: "Cargo Bay"
+desc: >-
+  Increases ship cargo capacity for storing goods and resources.
+extended_desc: >-
+  Cargo bays expand the ship's storage capacity, allowing it to carry
+  more goods, resources, and supplies. Essential for trade, salvage, and
+  long-duration missions where resupply opportunities are limited.
+groups: ["Support", "Cargo", "Utility"]
+required: false
+has_varients: false
+base_cost: 5
+max_slots: 4
+base_hp: 8
+base_power_consumption: 0.0
+base_heat_generation: 0.0
+base_weight: 100

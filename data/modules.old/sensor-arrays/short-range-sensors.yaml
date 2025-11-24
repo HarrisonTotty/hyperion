@@ -1,0 +1,13 @@
+id: "short-range-sensors"
+type: "sensor-array"
+name: "Short-Range Sensor Array"
+description: "Basic sensor package for close-range detection. Compact and power-efficient."
+cost: 40
+stats:
+  detection_range: 5000  # meters
+  accuracy: 0.85  # 85% accuracy
+  scan_rate: 2.0  # scans per second
+  power_consumption: 30  # MW
+  heat_generation: 25  # K
+  mass: 8  # tons
+  target_capacity: 10  # max simultaneous targets

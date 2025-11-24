@@ -1,0 +1,18 @@
+id: missile-launcher
+name: "Missile Launcher"
+desc: >-
+  Launcher for guided missile ordnance.
+extended_desc: >-
+  Missile launchers allow the ship to fire guided missiles that track
+  and pursue enemy targets. Different launcher models support various
+  missile types and have different reload rates and capacity. Missiles
+  are effective against fast-moving targets.
+groups: ["Weapon", "Offense", "Missile"]
+required: false
+has_varients: true
+base_cost: 14
+max_slots: 3
+base_hp: 10
+base_power_consumption: 2.0
+base_heat_generation: 2.0
+base_weight: 100

@@ -1,0 +1,14 @@
+id: mk9-antimatter-missile
+name: "Mark IX Antimatter Missile"
+desc: >-
+  Antimatter warhead delivering catastrophic damage. Extremely expensive and volatile.
+cost: 280
+weight: 180
+impact_damage: 550
+blast_radius: 150
+blast_damage: 600
+acceleration: 16.0
+max_speed: 1150
+max_turn_rate: 1.1
+lifetime: 16
+weapon_tags: ["Missile", "Antimatter"]

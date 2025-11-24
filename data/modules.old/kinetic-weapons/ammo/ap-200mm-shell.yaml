@@ -1,0 +1,14 @@
+name: AP 200mm Shell
+type: shell
+size: 200mm
+desc: >-
+  Armor-piercing 200mm shells with experimental phase-hardened penetrators.
+  The ultimate anti-armor weapon, capable of punching clean through
+  dreadnought-class hull plating and delivering catastrophic internal damage.
+cost: 60
+weight: 24
+impact_damage: 45
+blast_radius: 3
+blast_damage: 2
+velocity: 750
+armor_penetration: 10

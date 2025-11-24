@@ -1,0 +1,24 @@
+id: "proton-phaser"
+name: "Proton Phaser"
+description: "Rapid-fire proton-based directed energy weapon delivering consistent damage at medium range."
+cost: 80
+model: "PP-300"
+manufacturer: "Quantum Weapons Division"
+lore: >-
+  The PP-300 exemplifies QWD's philosophy of 'simple, reliable, effective.' By accelerating
+  proton beams to near-relativistic speeds, it delivers solid hits without the power surge
+  of larger weapons. Popular among escort vessels and patrol craft for its balance of
+  firepower and efficiency.
+additional_hp: -5
+additional_power_consumption: 5
+additional_heat_generation: 10
+additional_weight: 0
+stats:
+  fire_delay: 0
+  recharge_time: 3
+  speed: 50000
+  max_range: 5000
+  tags: ["Single-Fire", "Manual"]
+  damage: 40
+  energy_consumption: 15
+  weight: 120

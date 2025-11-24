@@ -1,0 +1,14 @@
+name: HE 200mm Shell
+type: shell
+size: 200mm
+desc: >-
+  High-explosive 200mm shells containing next-generation explosive matrices.
+  Upon detonation, creates cataclysmic blast waves capable of stripping
+  armor plating and destroying entire ship sections.
+cost: 50
+weight: 22
+impact_damage: 20
+blast_radius: 20
+blast_damage: 18
+velocity: 550
+armor_penetration: 5

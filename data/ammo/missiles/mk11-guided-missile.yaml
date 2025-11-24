@@ -1,0 +1,14 @@
+id: mk11-guided-missile
+name: "Mark XI Guided Missile"
+desc: >-
+  Standard guided missile delivering moderate damage with reliable tracking capability.
+cost: 25
+weight: 80
+impact_damage: 120
+blast_radius: 80
+blast_damage: 60
+acceleration: 20.0
+max_speed: 1300
+max_turn_rate: 1.5
+lifetime: 12
+weapon_tags: ["Missile"]

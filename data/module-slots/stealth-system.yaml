@@ -1,0 +1,18 @@
+id: stealth-system
+name: "Stealth System"
+desc: >-
+  Reduces ship detectability by enemy sensors.
+extended_desc: >-
+  Stealth systems use advanced technology to reduce the ship's sensor
+  signature, making it harder to detect and target. Different systems
+  provide varying levels of detectability reduction and increase enemy
+  scan times. Useful for reconnaissance and surprise attacks.
+groups: ["Support", "Stealth", "Tactical"]
+required: false
+has_varients: true
+base_cost: 13
+max_slots: 1
+base_hp: 6
+base_power_consumption: 7.0
+base_heat_generation: 3.0
+base_weight: 70

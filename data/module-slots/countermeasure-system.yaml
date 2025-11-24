@@ -1,0 +1,18 @@
+id: countermeasure-system
+name: "Countermeasure System"
+desc: >-
+  Defensive system against incoming missiles and torpedoes.
+extended_desc: >-
+  Countermeasure systems provide active defense against missile threats
+  using chaff, flares, electronic warfare, and point-defense weapons.
+  Different systems offer varying effectiveness against different missile
+  types. Essential for surviving missile-heavy combat.
+groups: ["Defense", "Countermeasure", "Active"]
+required: false
+has_varients: true
+base_cost: 11
+max_slots: 2
+base_hp: 8
+base_power_consumption: 4.0
+base_heat_generation: 2.0
+base_weight: 60

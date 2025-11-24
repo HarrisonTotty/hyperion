@@ -1,0 +1,113 @@
+name: Cruiser
+desc: >-
+  A small ship capable of performing many roles. Cruisers are versatile
+  vessels that can be adapted to various combat situations with their
+  flexible module configuration.
+size: Small
+role: Versatile
+max_weight: 180
+max_modules: 12
+base_hp: 250
+build_points: 400
+bonuses:
+  module_cost: -0.1
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Armstrong Dynamics"
+    variant: "Ranger-class"
+    lore: >-
+      Federation cruisers serve as the primary patrol and rapid-response vessels throughout
+      Terran space. Their compact design and efficient systems make them ideal for independent
+      operations and system security missions.
+  
+  mars-coalition:
+    manufacturer: "Tharsis Defense Solutions"
+    variant: "Duststorm-class"
+    lore: >-
+      Martian cruisers are built for aggressive patrol tactics and pursuit operations.
+      Featuring uprated engines and enhanced sensor arrays, they excel at tracking and
+      intercepting targets across vast distances.
+  
+  belt-alliance:
+    manufacturer: "Vesta Light Industries"
+    variant: "Prospector-class"
+    lore: >-
+      Belt cruisers are stripped-down, efficient vessels optimized for cost-effectiveness.
+      Their simple construction makes them easy to maintain and repair even in remote
+      facilities with limited resources.
+  
+  europa-compact:
+    manufacturer: "Pwyll Basin Engineering"
+    variant: "Swimmer-class"
+    lore: >-
+      Europan cruisers feature unique hull designs inspired by aquatic life forms. Their
+      small size hides sophisticated stealth systems and ice-penetrating sensor suites
+      perfect for operations in dense field environments.
+  
+  outer-rim-collective:
+    manufacturer: "Scattered Stars Fabrication"
+    variant: "Drifter-class"
+    lore: >-
+      Outer Rim cruisers are assembled from standardized kits that can be customized to
+      local needs. Each vessel is unique, reflecting the ingenuity and resourcefulness
+      of its builders and crew.
+  
+  corporate-syndicate:
+    manufacturer: "Kauffman-Thiel Spaceworks"
+    variant: "Audit-class"
+    lore: >-
+      Corporate cruisers are mass-produced security vessels designed for rapid deployment
+      and minimal training requirements. They prioritize reliability and ease of operation
+      over performance, perfect for protecting corporate assets.
+
+# Technical specifications
+length: 95.0   # meters
+width: 28.0    # meters
+height: 20.0   # meters
+mass: 25000.0  # metric tons (empty)
+crew_min: 12
+crew_max: 20
+cargo_capacity: 250.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 45.0      # m/s²
+max_turn_rate: 35.0         # degrees/second
+max_warp_speed: 5.5         # multiples of light speed
+warp_efficiency: 0.80       # 0.0-1.0 rating
+sensor_range: 18000.0       # kilometers
+
+# Operational metadata
+operational_range: 12.0     # AU
+build_time: 120             # days
+maintenance_cost: 350.0     # credits per day
+fuel_capacity: 6000.0       # units
+fuel_consumption: 75.0      # units per hour
+
+# Lore and flavor
+lore: >-
+  Cruisers are the workhorse vessels of most navies, balancing affordability with capability.
+  Their small size and crew complement make them economical to operate, while their versatile
+  module capacity allows them to handle patrol, escort, reconnaissance, and light combat duties.
+  
+  The cruiser's compact profile makes it ideal for rapid deployment and quick response scenarios.
+  Fleet admirals appreciate their ability to be everywhere at once—what they lack in individual
+  firepower, they make up for in numbers and ubiquity. A well-coordinated cruiser squadron can
+  control vast regions of space, deterring piracy and responding to emergencies.
+  
+  Cruiser duty is often the first posting for newly commissioned officers, providing invaluable
+  experience in independent command. The intimate crew size fosters strong bonds and esprit de
+  corps. Many veterans fondly recall their cruiser days as the most formative of their careers.
+
+year_introduced: 2280
+
+notable_ships:
+  - "TFS Swift Justice"
+  - "MSS Red Horizon"
+  - "BAV Penny Pincher"
+  - "ECS Silent Current"
+  - "ORC Wanderer's Hope"
+  - "CSS Asset Guardian"

@@ -1,0 +1,20 @@
+id: "condensed-plasma-battery"
+type: "power-core"
+name: "Condensed Plasma Battery"
+model: "CPB-2000"
+manufacturer: "Energex Corporation"
+desc: >-
+  A high-capacity energy storage system using compressed plasma in magnetic bottles.
+  Exceptional energy density but lower generation rate.
+lore: >-
+  Energex's CPB-2000 takes a different approach to power generation, prioritizing
+  energy storage over production. The condensed plasma provides a massive energy
+  reserve, perfect for ships that need sustained power for extended operations or
+  to power high-draw systems in short bursts.
+cost: 200
+additional_hp: 5
+additional_power_consumption: 0
+additional_heat_generation: 5
+additional_weight: 20
+energy_production: 15
+energy_capacity: 3000

@@ -1,0 +1,14 @@
+id: "short-range-jump-drive"
+type: "warp-jump-core"
+name: "Tactical Jump Drive"
+description: "Instantaneous short-range FTL jumps. Perfect for combat maneuvering and quick tactical repositioning."
+cost: 200
+stats:
+  jump_range: 50000  # meters (50 km)
+  jump_accuracy: 0.95  # 95% precision on arrival coordinates
+  power_consumption: 1200  # MW per jump
+  heat_generation: 1500  # K per jump
+  mass: 60  # tons
+  cooldown: 30  # seconds between jumps
+  spin_up_time: 5  # seconds to calculate jump
+  max_consecutive_jumps: 5  # before requiring extended cooldown

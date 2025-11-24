@@ -1,0 +1,13 @@
+id: type-5-graviton-torpedo
+name: "Type 5 Graviton Torpedo"
+desc: >-
+  Graviton warhead that temporarily increases target mass, reducing speed and maneuverability.
+cost: 400
+weight: 580
+impact_damage: 680
+blast_radius: 195
+blast_damage: 530
+acceleration: 4.6
+max_speed: 385
+lifetime: 85
+weapon_tags: ["Torpedo", "Graviton"]

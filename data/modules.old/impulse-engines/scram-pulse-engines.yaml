@@ -1,0 +1,12 @@
+name: Scram Pulse Engines
+model: SPE-1000 Scram Pulse Engine
+kind: Nuclear Pulse Engine
+manufacturer: Extreme Propulsion Industries
+desc: >-
+  By expelling massive quantities of charged nuclear material out the back
+  of this engine, it is capable of generating massive amounts of thrust at
+  a very low energy efficiency.
+cost: 500
+weight: 320
+thrust: 2800
+energy_consumption: 120

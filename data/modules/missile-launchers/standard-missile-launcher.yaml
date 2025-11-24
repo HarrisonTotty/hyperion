@@ -1,0 +1,21 @@
+id: standard-missile-launcher
+type: missile-launcher
+name: "Standard Missile Launcher"
+model: "Arsenal A-12 Standard Launcher"
+manufacturer: "Arsenal Defense Corp"
+desc: >-
+  Balanced missile launcher providing reliable performance across all engagement scenarios.
+lore: >-
+  The Arsenal A-12 has been the standard missile launcher for three decades. It strikes
+  an optimal balance between magazine capacity, reload speed, and volley size. While it
+  doesn't excel in any particular area, its versatility makes it the go-to choice for
+  most fleet captains who need dependable missile capability.
+cost: 160
+additional_hp: 18
+additional_power_consumption: 10
+additional_heat_generation: 20
+additional_weight: 150
+reload_time: 12.0
+missile_volley_delay: 1.0
+num_launched: 1
+ammo_capacity: 12

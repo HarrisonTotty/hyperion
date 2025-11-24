@@ -1,0 +1,17 @@
+id: "heat-sink-array"
+type: "cooling-system"
+cost: 300
+name: "Thermal Heat Sink Array"
+model: "HSA-400 Heat Sink Array"
+manufacturer: "Thermal Dynamics Inc."
+desc: "Passive heat sinks that absorb thermal energy. Lower ongoing cost but limited capacity."
+lore: >-
+  The HSA-400 uses advanced thermal mass materials to absorb and slowly radiate
+  heat. While requiring minimal power, the heat sinks must be periodically
+  serviced to maintain efficiency as thermal degradation occurs over time.
+maximum_coolant: 1500
+generated_cooling: 400
+additional_hp: 0
+additional_power_consumption: 10
+additional_heat_generation: 0
+additional_weight: 12

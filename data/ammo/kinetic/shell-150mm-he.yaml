@@ -1,0 +1,13 @@
+id: shell-150mm-he
+name: "HE 150mm Shell"
+desc: >-
+  High-explosive 150mm shells with military-grade explosive compounds.
+  Creates massive blast zones capable of crippling multiple ship systems
+  and overwhelming point defense networks.
+cost: 28
+weight: 14
+impact_damage: 15
+blast_radius: 15
+blast_damage: 12
+velocity: 600
+armor_penetration: 4

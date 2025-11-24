@@ -1,0 +1,12 @@
+id: shell-150mm-st
+name: "ST 150mm Shell"
+desc: >-
+  Standard 150mm shells for heavy cannons. Balanced performance with
+  substantial stopping power.
+cost: 22
+weight: 12
+impact_damage: 22
+blast_radius: 6
+blast_damage: 5
+velocity: 700
+armor_penetration: 6

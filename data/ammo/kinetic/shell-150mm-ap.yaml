@@ -1,0 +1,12 @@
+id: shell-150mm-ap
+name: "AP 150mm Shell"
+desc: >-
+  Armor-piercing 150mm shells with hardened penetrators for punching
+  through heavy armor plating.
+cost: 30
+weight: 13
+impact_damage: 32
+blast_radius: 4
+blast_damage: 2
+velocity: 750
+armor_penetration: 9

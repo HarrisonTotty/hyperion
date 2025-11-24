@@ -1,0 +1,25 @@
+id: sniper-laser
+type: de-weapon
+name: "Sniper Laser"
+model: "Longshot LS-15 Precision Laser"
+manufacturer: "Precision Munitions Inc"
+desc: >-
+  Ultra-long-range precision laser with extended maximum range and focused beam coherence.
+lore: >-
+  Precision Munitions engineered the Longshot for surgical strikes from extreme distances.
+  Advanced focusing arrays and beam coherence systems extend effective range far beyond
+  standard energy weapons, allowing ships to engage targets before entering their
+  engagement envelope. Damage output is moderate and recharge cycles are lengthy, but
+  the tactical advantage of extreme-range fire superiority cannot be overstated. Fleet
+  commanders use Longshot-equipped vessels as fire support platforms that can influence
+  battles from safe distances.
+cost: 280
+additional_hp: 14
+additional_power_consumption: 14
+additional_heat_generation: 20
+additional_weight: 120
+damage: 38
+recharge_time: 5.0
+max_range: 18000
+projectile_speed: 299792458
+weapon_tags: ["Beam", "Photon", "Long-Range"]

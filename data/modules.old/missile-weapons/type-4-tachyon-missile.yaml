@@ -1,0 +1,18 @@
+name: Type 4 Tachyon Missile
+model: Type 4 Tachyon Missile
+kind: Missile
+manufacturer: Advanced Ordnance Systems
+desc: >-
+  A missile armed with a tachyon warhead, dealing less damage than the MK 11
+  but temporarily preventing a hit ship from warping or jumping.
+cost: 11
+weight: 1
+forward_thrust: 450
+max_turn_rate: 1.5
+load_time: 4.5
+tags: ["Missile", "Tachyon"]
+impact_damage: 90
+blast_damage: 10
+blast_radius: 85
+lifetime: 12
+max_speed: 1300

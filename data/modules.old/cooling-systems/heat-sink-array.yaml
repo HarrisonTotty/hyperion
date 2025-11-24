@@ -1,0 +1,10 @@
+id: "heat-sink-array"
+name: "Thermal Heat Sink Array"
+description: "Passive heat sinks that absorb thermal energy. Lower ongoing cost but limited capacity."
+cost: 60
+stats:
+  cooling_capacity: 400  # K/s heat dissipation
+  cooling_storage: 1500  # total coolant reserves
+  power_consumption: 10  # MW (minimal power needed)
+  mass: 12  # tons
+  efficiency: 0.70  # 70% efficiency

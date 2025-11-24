@@ -1,0 +1,18 @@
+id: sensor-array
+name: "Sensor Array"
+desc: >-
+  Long-range detection and scanning system.
+extended_desc: >-
+  Sensor arrays enable the ship to detect and scan other vessels,
+  celestial bodies, and anomalies in space. Different arrays provide
+  varying scan ranges, detail levels, and scan times. Critical for
+  tactical awareness and exploration.
+groups: ["Support", "Sensors", "Detection"]
+required: true
+has_varients: true
+base_cost: 11
+max_slots: 1
+base_hp: 8
+base_power_consumption: 5.0
+base_heat_generation: 2.0
+base_weight: 60

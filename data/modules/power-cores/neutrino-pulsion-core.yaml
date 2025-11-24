@@ -1,0 +1,21 @@
+id: "neutrino-pulsion-core"
+type: "power-core"
+name: "Neutrino Pulsion Core"
+model: "NPC-4000"
+manufacturer: "Advanced Fusion Technologies"
+desc: >-
+  Captures ambient neutrinos and converts them to usable energy. Low output
+  but requires no fuel and runs indefinitely.
+lore: >-
+  Advanced Fusion Technologies' revolutionary NPC-4000 harvests the constant
+  stream of neutrinos passing through all matter. While the power output is
+  modest compared to fusion reactors, the system requires zero fuel and will
+  operate for centuries without maintenance. Popular with deep space explorers
+  and generation ships where fuel resupply is impossible.
+cost: 350
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 3
+additional_weight: 15
+energy_production: 25
+energy_capacity: 1200

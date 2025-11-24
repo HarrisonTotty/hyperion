@@ -1,0 +1,13 @@
+id: mk3-he-torpedo
+name: "Mark III High-Explosive Torpedo"
+desc: >-
+  High-explosive warhead with enhanced blast radius, effective against clustered targets.
+cost: 300
+weight: 550
+impact_damage: 600
+blast_radius: 250
+blast_damage: 800
+acceleration: 5.5
+max_speed: 420
+lifetime: 70
+weapon_tags: ["Torpedo", "HE"]

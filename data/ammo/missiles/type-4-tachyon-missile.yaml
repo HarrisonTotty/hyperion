@@ -1,0 +1,14 @@
+id: type-4-tachyon-missile
+name: "Type 4 Tachyon Missile"
+desc: >-
+  Tachyon warhead that temporarily prevents hit ships from warping or jumping.
+cost: 65
+weight: 100
+impact_damage: 130
+blast_radius: 85
+blast_damage: 55
+acceleration: 20.0
+max_speed: 1320
+max_turn_rate: 1.4
+lifetime: 13
+weapon_tags: ["Missile", "Tachyon"]

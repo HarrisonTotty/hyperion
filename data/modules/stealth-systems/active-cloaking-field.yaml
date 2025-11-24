@@ -1,0 +1,18 @@
+id: "active-cloaking-field"
+type: "stealth-system"
+cost: 1200
+name: "Active Cloaking Field"
+model: "ACF-90 Cloaking Generator"
+manufacturer: "Advanced Stealth Systems"
+desc: "Cutting-edge active cloaking that renders the ship nearly invisible to sensors."
+lore: >-
+  ASS's active cloaking field represents the pinnacle of stealth technology,
+  using advanced field generators to bend sensor waves around the ship. The
+  massive power requirements limit its use to special operations vessels,
+  but the near-invisibility it provides is unmatched.
+detectability_reduction: 0.90
+scan_time_increase: 10.0
+additional_hp: 5
+additional_power_consumption: 300
+additional_heat_generation: 100
+additional_weight: 25

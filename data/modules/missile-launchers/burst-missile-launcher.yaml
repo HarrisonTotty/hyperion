@@ -1,0 +1,21 @@
+id: burst-missile-launcher
+type: missile-launcher
+name: "Burst Missile Launcher"
+model: "Tempest Salvo Array"
+manufacturer: "Tempest Weapon Works"
+desc: >-
+  Multi-tube launcher capable of firing devastating missile salvos to overwhelm enemy defenses.
+lore: >-
+  Tempest's Salvo Array revolutionized missile warfare by firing multiple missiles
+  simultaneously in a coordinated strike pattern. Each volley unleashes three missiles
+  that can saturate point defense systems. The complex loading mechanism results in
+  slower reloads and reduced total capacity, but the alpha strike potential is unmatched.
+cost: 280
+additional_hp: 20
+additional_power_consumption: 18
+additional_heat_generation: 35
+additional_weight: 180
+reload_time: 20.0
+missile_volley_delay: 2.0
+num_launched: 3
+ammo_capacity: 12

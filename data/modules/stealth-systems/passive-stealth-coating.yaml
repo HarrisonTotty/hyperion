@@ -1,0 +1,18 @@
+id: "passive-stealth-coating"
+type: "stealth-system"
+cost: 400
+name: "Passive Stealth Coating"
+model: "PSC-30 Radar Absorbent Material"
+manufacturer: "Stealth Technologies Corp"
+desc: "Radar-absorbent coating that reduces sensor signature. Always active with no power cost."
+lore: >-
+  STC's passive stealth coating uses advanced metamaterials to absorb
+  radar and sensor emissions, making ships significantly harder to detect.
+  The coating requires no power and works continuously, though it's less
+  effective than active stealth systems.
+detectability_reduction: 0.30
+scan_time_increase: 0.0
+additional_hp: 5
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 5

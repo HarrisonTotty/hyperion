@@ -1,0 +1,119 @@
+name: Battleship
+desc: >-
+  A medium-sized offensive ship typically loaded with short/medium range
+  weapons. Battleships combine firepower with durability, making them
+  formidable in direct combat engagements.
+size: Medium
+role: Offense
+max_weight: 280
+max_modules: 15
+base_hp: 400
+build_points: 650
+bonuses:
+  module_hp_offense: 0.2
+  module_cost_offense: -0.15
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Newport News Orbital"
+    variant: "Iowa-class"
+    lore: >-
+      Federation battleships are mobile fortresses designed to anchor battle lines.
+      Their armored hulls and redundant systems allow them to absorb tremendous punishment
+      while delivering devastating close-range broadsides.
+  
+  mars-coalition:
+    manufacturer: "Hellas Basin Heavy Works"
+    variant: "Titan-class"
+    lore: >-
+      Martian battleships embrace the philosophy of aggressive offense. Built with oversized
+      power cores and weapon mounts, they trade some durability for the ability to deliver
+      crushing alpha strikes that can shatter enemy formations.
+  
+  belt-alliance:
+    manufacturer: "Ceres Defense Consortium"
+    variant: "Fortress-class"
+    lore: >-
+      Belt battleships are practical, no-nonsense warships built for sustained combat.
+      Their design emphasizes ammunition capacity and power efficiency, allowing them to
+      fight longer battles without resupply.
+  
+  europa-compact:
+    manufacturer: "Thera Impact Yards"
+    variant: "Behemoth-class"
+    lore: >-
+      Europan battleships incorporate advanced ablative armor systems inspired by ice
+      impact studies. Their hulls can absorb and dissipate energy in unique ways, making
+      them surprisingly resilient against concentrated fire.
+  
+  outer-rim-collective:
+    manufacturer: "Frontier Heavy Industries"
+    variant: "Bastion-class"
+    lore: >-
+      Outer Rim battleships are assembled from military surplus and commercial heavy
+      equipment. While their patchwork nature is obvious, their crews have proven that
+      determination and ingenuity can match factory-fresh vessels.
+  
+  corporate-syndicate:
+    manufacturer: "Raytheon-Krupp Defense Group"
+    variant: "Shareholder Value-class"
+    lore: >-
+      Corporate battleships are designed to maximize ROI through intimidation. Their
+      imposing profiles and visible weapon arrays deter aggression, while modular
+      construction keeps production costs manageable.
+
+# Technical specifications
+length: 185.0  # meters
+width: 52.0    # meters
+height: 38.0   # meters
+mass: 75000.0  # metric tons (empty)
+crew_min: 35
+crew_max: 55
+cargo_capacity: 600.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 25.0      # m/s²
+max_turn_rate: 16.0         # degrees/second
+max_warp_speed: 4.2         # multiples of light speed
+warp_efficiency: 0.68       # 0.0-1.0 rating
+sensor_range: 28000.0       # kilometers
+
+# Operational metadata
+operational_range: 14.0     # AU
+build_time: 220             # days
+maintenance_cost: 800.0     # credits per day
+fuel_capacity: 15000.0      # units
+fuel_consumption: 150.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Battleships represent the marriage of firepower and survivability. Unlike destroyers
+  that rely on range, or cruisers that depend on versatility, battleships are built for
+  one purpose: to close with the enemy and slug it out at close range. Their reinforced
+  hulls and layered armor systems allow them to absorb punishing fire while their weapon
+  batteries tear through enemy defenses.
+  
+  The battleship's tactical doctrine centers on the decisive engagement. These ships are
+  fleet anchors, positioned to draw enemy fire and hold critical positions. Their presence
+  alone can dictate the flow of battle, forcing enemies to commit resources or concede
+  strategic positions. In the chaos of close-quarters combat, battleship crews must maintain
+  discipline and coordination, as every second of sustained fire counts.
+  
+  Commanding a battleship requires nerves of steel. Unlike nimble vessels that can evade
+  danger, battleship captains must trust their armor and commit fully to the fight. The best
+  battleship commanders possess an almost preternatural ability to read damage reports and
+  prioritize systems, keeping their ships in the fight long after lighter vessels would have
+  withdrawn.
+
+year_introduced: 2292
+
+notable_ships:
+  - "TFS Indomitable"
+  - "MSS Iron Fist"
+  - "BAV Stubborn"
+  - "ECS Pressure Hull"
+  - "ORC Never Surrender"
+  - "CSS Profit Guardian"

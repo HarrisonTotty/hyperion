@@ -1,0 +1,14 @@
+name: ST 300mm Shell
+type: shell
+size: 300mm
+desc: >-
+  Standard 300mm shells for superheavy siege cannons. These enormous
+  projectiles are typically used in planetary bombardment and station
+  assault operations, delivering unmatched destructive power.
+cost: 80
+weight: 40
+impact_damage: 50
+blast_radius: 12
+blast_damage: 15
+velocity: 500
+armor_penetration: 8

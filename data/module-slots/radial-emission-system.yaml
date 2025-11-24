@@ -1,0 +1,18 @@
+id: radial-emission-system
+name: "Radial Emission System"
+desc: >-
+  Omnidirectional area-effect weapon system.
+extended_desc: >-
+  Radial emission systems emit energy pulses in all directions from the
+  ship, such as EMP blasts or shield disruption waves. These systems are
+  effective against multiple nearby targets but require careful timing
+  and positioning to use effectively.
+groups: ["Weapon", "Offense", "AOE"]
+required: false
+has_varients: true
+base_cost: 15
+max_slots: 1
+base_hp: 10
+base_power_consumption: 12.0
+base_heat_generation: 10.0
+base_weight: 90

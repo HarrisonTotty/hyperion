@@ -1,0 +1,15 @@
+id: "long-range-jump-drive"
+type: "warp-jump-core"
+name: "Interstellar Jump Drive"
+description: "Long-distance instantaneous travel system. Enables rapid transit between star systems but requires significant power and cooldown."
+cost: 400
+stats:
+  jump_range: 5000000  # meters (5000 km / 5 Mm)
+  jump_accuracy: 0.88  # 88% precision on arrival coordinates
+  power_consumption: 3000  # MW per jump
+  heat_generation: 3500  # K per jump
+  mass: 150  # tons
+  cooldown: 180  # seconds between jumps (3 minutes)
+  spin_up_time: 30  # seconds to calculate jump
+  max_consecutive_jumps: 2  # before requiring extended cooldown
+  extended_cooldown: 600  # 10 minutes after max consecutive jumps

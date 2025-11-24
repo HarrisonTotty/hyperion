@@ -1,0 +1,11 @@
+id: shell-200mm-he
+name: "HE 200mm Shell"
+desc: >-
+  High explosive 200mm shell for cannons. Lower penetration, high blast damage.
+cost: 12
+weight: 48
+impact_damage: 80
+blast_radius: 15
+blast_damage: 40
+velocity: 750
+armor_penetration: 3

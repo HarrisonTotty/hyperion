@@ -1,0 +1,119 @@
+name: Warship
+desc: >-
+  A large offensive ship primarily outfitted with short/medium range weapons.
+  Warships excel at close-range combat, typically warping too close to enemy
+  vessels for them to effectively deploy high-explosive missiles or torpedos.
+size: Large
+role: Offense
+max_weight: 410
+max_modules: 19
+base_hp: 580
+build_points: 920
+bonuses:
+  module_hp_offense: 0.3
+  module_hp: 0.15
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Norfolk Strategic Yards"
+    variant: "Bismarck-class"
+    lore: >-
+      Federation warships are built for decisive close-quarters engagement. Their
+      heavy armor and powerful close-range batteries make them dominant in fleet
+      actions, designed to close with the enemy and deliver crushing broadsides.
+  
+  mars-coalition:
+    manufacturer: "Hellas Heavy Combat"
+    variant: "Warlord-class"
+    lore: >-
+      Martian warships embrace aggressive shock tactics, often equipped with experimental
+      weapons and oversized power cores. Their doctrine centers on sudden warp jumps into
+      knife-fighting range where their overwhelming firepower decides battles instantly.
+  
+  belt-alliance:
+    manufacturer: "Interamnia Combat Works"
+    variant: "Slugger-class"
+    lore: >-
+      Belt warships are built like their asteroid origins—dense, heavily armored, and
+      bristling with kinetic weapons. They excel at close-range brawls where their
+      massive construction and straightforward weapons give them staying power.
+  
+  europa-compact:
+    manufacturer: "Tyre Combat Engineering"
+    variant: "Juggernaut-class"
+    lore: >-
+      Europan warships feature unconventional weapon layouts and adaptive armor systems.
+      Their close-range combat systems can adjust firing patterns mid-engagement, making
+      them unpredictable and dangerous opponents.
+  
+  outer-rim-collective:
+    manufacturer: "Frontier War Guild"
+    variant: "Brawler-class"
+    lore: >-
+      Outer Rim warships are assembled from military salvage and heavy industrial
+      equipment. What they lack in elegance they make up for in raw firepower and the
+      desperate determination of crews fighting for their homes.
+  
+  corporate-syndicate:
+    manufacturer: "Blackwater Combat Systems"
+    variant: "Enforcer Prime-class"
+    lore: >-
+      Corporate warships are designed to project overwhelming force in territorial
+      disputes and asset protection. Their imposing appearance and visible armament
+      serve as much to deter aggression as to win battles.
+
+# Technical specifications
+length: 295.0  # meters
+width: 88.0    # meters
+height: 62.0   # meters
+mass: 175000.0  # metric tons (empty)
+crew_min: 60
+crew_max: 105
+cargo_capacity: 1800.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 22.0      # m/s²
+max_turn_rate: 14.0         # degrees/second
+max_warp_speed: 4.0         # multiples of light speed
+warp_efficiency: 0.66       # 0.0-1.0 rating
+sensor_range: 30000.0       # kilometers
+
+# Operational metadata
+operational_range: 15.0     # AU
+build_time: 310             # days
+maintenance_cost: 1350.0    # credits per day
+fuel_capacity: 32000.0      # units
+fuel_consumption: 220.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Warships are purpose-built killing machines, large vessels optimized for close-range
+  combat where their devastating firepower can be brought to bear. Unlike destroyers that
+  engage at standoff range or dreadnoughts that dominate through sheer size, warships
+  are designed to close with the enemy and engage in brutal, decisive combat at ranges
+  measured in kilometers rather than thousands of kilometers.
+  
+  The warship's tactical doctrine is aggressive and unforgiving. Using warp jumps to
+  bypass enemy defensive zones, warships appear at point-blank range where their heavy
+  armor and overwhelming short-range firepower give them decisive advantages. This
+  requires courage verging on recklessness—warship captains must be willing to commit
+  fully, knowing that once engaged, retreat is rarely an option.
+  
+  Warship crews are the shock troops of naval warfare, trained for intense, chaotic
+  close-quarters battle. The acceleration forces during combat maneuvers, the hull
+  impacts from enemy fire, and the thunderous discharge of main batteries create an
+  environment of controlled chaos. The best warship crews thrive in this maelstrom,
+  maintaining discipline and coordination while their ship tears through enemy formations.
+
+year_introduced: 2294
+
+notable_ships:
+  - "TFS Close Quarters"
+  - "MSS Red Hammer"
+  - "BAV Cheap Shot"
+  - "ECS Depth Charge"
+  - "ORC In Your Face"
+  - "CSS Hostile Takeover"

@@ -1,0 +1,27 @@
+id: "mk-9-antimatter-missile"
+name: "MK 9 Antimatter Missile"
+description: "Devastating antimatter warhead delivering catastrophic damage in a focused blast radius."
+cost: 30
+model: "MK 9"
+manufacturer: "Extreme Ordnance Corporation"
+lore: >-
+  Extreme Ordnance Corporation's MK 9 brings matter-antimatter annihilation to the
+  tactical missile platform. When antimatter meets matter, total conversion to energy
+  occurs - Einstein's E=mc² in its purest, most destructive form. The slower flight
+  speed is a acceptable trade-off for the devastating yield. Captains report that
+  hitting a target with an MK 9 is like watching a miniature star go supernova.
+additional_hp: 5
+additional_power_consumption: 15
+additional_heat_generation: 20
+additional_weight: 8
+stats:
+  weight: 3
+  forward_thrust: 350
+  max_turn_rate: 0.8
+  load_time: 9.0
+  tags: ["Missile"]
+  impact_damage: 350
+  blast_damage: 60
+  blast_radius: 180
+  lifetime: 18
+  max_speed: 1000

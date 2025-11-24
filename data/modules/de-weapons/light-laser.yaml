@@ -1,0 +1,23 @@
+id: light-laser
+type: de-weapon
+name: "Light Laser"
+model: "FocalPoint L-7 Light Laser"
+manufacturer: "SunScore Systems Inc"
+desc: >-
+  Efficient light laser optimized for rapid firing with modest energy consumption.
+lore: >-
+  SunScore's FocalPoint L-7 is the standard light energy weapon across known space.
+  Its compact design and minimal power draw make it ideal for escort vessels and
+  patrol craft. While individual shots lack the punch of heavier weapons, the rapid
+  recharge cycle enables sustained fire that can wear down shields and ablate armor.
+  The instant beam travel time ensures hits at any range within the weapon's envelope.
+cost: 140
+additional_hp: 12
+additional_power_consumption: 8
+additional_heat_generation: 15
+additional_weight: 90
+damage: 25
+recharge_time: 2.0
+max_range: 8000
+projectile_speed: 299792458
+weapon_tags: ["Beam", "Photon"]

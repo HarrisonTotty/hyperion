@@ -1,0 +1,12 @@
+name: Higgs Field "Surfing" Engines
+model: HFS-7 Higgs Field Surfing Engine
+kind: Higgs Field Engine
+manufacturer: Quantum Propulsion Labs
+desc: >-
+  Just as the warp core is able to bend space to allow FTL travel, these
+  engines combine ion impulse with bending the localized higgs field,
+  producing a good amount of thrust while still remaining energy efficient.
+cost: 280
+weight: 180
+thrust: 900
+energy_consumption: 25

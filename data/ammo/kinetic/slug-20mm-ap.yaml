@@ -1,0 +1,12 @@
+id: slug-20mm-ap
+name: "AP 20mm Slug"
+desc: >-
+  Armor-piercing 20mm slugs with tungsten-carbide cores for enhanced
+  penetration against hardened targets.
+cost: 12
+weight: 2
+impact_damage: 20
+blast_radius: 0
+blast_damage: 0
+velocity: 2200
+armor_penetration: 9

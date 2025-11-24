@@ -1,0 +1,100 @@
+# Procedural Generation Configuration
+# Controls galaxy generation, star systems, and universe creation
+
+galaxy:
+  # Galaxy radius in light-years
+  radius: 50000.0
+  # Number of sectors per dimension (creates 10x10x10 = 1000 sectors)
+  sectors_per_dimension: 10
+  # Z-axis flattening factor (0.0-1.0, lower = flatter disk galaxy)
+  flattening_factor: 0.15
+  
+  spiral_arms:
+    # Number of major spiral arms
+    count: 4
+    # Spiral tightness (radians per unit radius)
+    tightness: 0.3
+    # Arm width as fraction of galaxy radius
+    width: 0.15
+
+stars:
+  # Star type probabilities (should sum to 1.0)
+  type_probabilities:
+    blue_giant: 0.01      # Rare, massive, short-lived
+    white: 0.04           # Uncommon, hot
+    yellow: 0.10          # Sun-like stars
+    orange: 0.15          # K-type stars
+    red_dwarf: 0.65       # Most common, long-lived
+    neutron: 0.03         # Stellar remnants
+    black_hole: 0.02      # Exotic objects
+  
+  # Star density multipliers by sector type
+  sector_densities:
+    core: 3.0            # Dense galactic core
+    arm: 2.0             # Spiral arms
+    inter_arm: 1.0       # Between arms
+    rim: 0.5             # Outer rim
+    void_density: 0.1    # Empty voids
+  
+  # Probability that a star has an inhabited system (0.0-1.0)
+  inhabited_probability: 0.15
+
+systems:
+  planets:
+    # Minimum and maximum planets per system
+    min_planets: 1
+    max_planets: 8
+    
+    # Planet type probabilities (should sum to 1.0)
+    type_probabilities:
+      terrestrial: 0.30  # Rocky planets
+      gas_giant: 0.20    # Jupiter-like
+      ice_giant: 0.15    # Neptune-like
+      ice: 0.15          # Frozen worlds
+      volcanic: 0.10     # Active volcanic
+      ocean: 0.10        # Water worlds
+    
+    habitable_zone:
+      # Habitable zone boundaries based on stellar luminosity
+      inner_multiplier: 0.95
+      outer_multiplier: 1.37
+      # Base habitable zone in AU for Sun-like stars
+      base_zone_au: 1.0
+  
+  moons:
+    # Gas giant moon generation
+    gas_giant_min_moons: 2
+    gas_giant_max_moons: 20
+    # Terrestrial planet moons
+    terrestrial_moon_probability: 0.3
+    terrestrial_max_moons: 3
+  
+  asteroids:
+    # Probability of asteroid belt per system
+    probability: 0.6
+    # Maximum belts per system
+    max_per_system: 3
+    # Density range
+    min_density: 0.1
+    max_density: 0.9
+  
+  stations:
+    # Probability of station in inhabited systems
+    probability: 0.7
+    # Maximum stations per system
+    max_per_system: 4
+    
+    # Station type probabilities (should sum to 1.0)
+    type_probabilities:
+      trade: 0.35       # Trading hubs
+      military: 0.20    # Defense stations
+      research: 0.15    # Science stations
+      mining: 0.20      # Resource extraction
+      shipyard: 0.10    # Ship construction
+
+generation:
+  # Default parameters for new universes
+  default_stars: 1000
+  default_factions: 5
+  # Use deterministic generation (same seed = same universe)
+  deterministic: true

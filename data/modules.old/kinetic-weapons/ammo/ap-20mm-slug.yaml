@@ -1,0 +1,14 @@
+name: AP 20mm Slug
+type: slug
+size: 20mm
+desc: >-
+  Armor-piercing 20mm tungsten-carbide slugs with optimized mass-to-velocity
+  ratio. Designed for maximum penetration against armored targets, these
+  projectiles achieve devastating results through pure kinetic energy transfer.
+cost: 12
+weight: 3
+impact_damage: 20
+blast_radius: 0
+blast_damage: 0
+velocity: 2500
+armor_penetration: 9

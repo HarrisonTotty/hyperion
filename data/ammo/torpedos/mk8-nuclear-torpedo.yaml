@@ -1,0 +1,13 @@
+id: mk8-nuclear-torpedo
+name: "Mark VIII Nuclear Torpedo"
+desc: >-
+  Nuclear warhead delivering massive damage with extreme blast radius. Slow but devastating.
+cost: 600
+weight: 700
+impact_damage: 1200
+blast_radius: 300
+blast_damage: 1500
+acceleration: 3.5
+max_speed: 320
+lifetime: 90
+weapon_tags: ["Torpedo", "Nuclear"]

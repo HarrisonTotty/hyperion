@@ -1,0 +1,20 @@
+id: "overcharge-capacitor"
+type: "aux-support-system"
+cost: 400
+name: "Overcharge Capacitor"
+model: "OC-150 Weapon Overcharger"
+manufacturer: "Offensive Systems Ltd"
+desc: "Temporarily increases all weapon damage output. Limited to 3 uses before requiring station recharge."
+lore: >-
+  OSL's overcharge capacitor feeds massive energy bursts directly into weapon
+  systems, dramatically increasing their damage output. The extreme heat and
+  power draw make sustained use impossible, but for brief periods it can
+  turn the tide of battle.
+hp_regained: 0
+energy_restored: 0
+heat_dissipated: 0
+num_uses: 3
+additional_hp: 0
+additional_power_consumption: 200
+additional_heat_generation: 200
+additional_weight: 7

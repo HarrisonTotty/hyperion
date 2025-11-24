@@ -1,0 +1,19 @@
+id: "short-range-jump-drive"
+type: "warp-jump-core"
+cost: 1500
+name: "Tactical Jump Drive"
+model: "TJD-50"
+manufacturer: "Quantum Jump Technologies"
+desc: "Instantaneous short-range FTL jumps. Perfect for combat maneuvering and quick tactical repositioning."
+lore: >-
+  QJT's Tactical Jump Drive revolutionized combat doctrine by allowing ships
+  to instantly reposition on the battlefield. While limited to short ranges,
+  the tactical advantage of instantaneous movement cannot be overstated.
+  Military forces rely on these drives for surprise attacks and evasive maneuvers.
+warp_type: jump
+warp_delay: 5.0
+jump_distance: 50
+additional_hp: 0
+additional_power_consumption: 120
+additional_heat_generation: 150
+additional_weight: 10

@@ -1,0 +1,10 @@
+id: "cryogenic-cooling"
+name: "Cryogenic Cooling System"
+description: "Advanced cryogenic cooling using liquid nitrogen. Exceptional cooling capacity for high-performance ships."
+cost: 175
+stats:
+  cooling_capacity: 1200  # K/s heat dissipation
+  cooling_storage: 3500  # total coolant reserves
+  power_consumption: 100  # MW
+  mass: 25  # tons
+  efficiency: 0.95  # 95% efficiency

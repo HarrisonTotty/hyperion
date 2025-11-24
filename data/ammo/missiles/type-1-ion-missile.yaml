@@ -1,0 +1,14 @@
+id: type-1-ion-missile
+name: "Type 1 Ion Missile"
+desc: >-
+  Ion warhead that disrupts enemy electronics and power systems, dealing reduced hull damage.
+cost: 40
+weight: 85
+impact_damage: 80
+blast_radius: 70
+blast_damage: 45
+acceleration: 22.0
+max_speed: 1350
+max_turn_rate: 1.6
+lifetime: 13
+weapon_tags: ["Missile", "Ion"]

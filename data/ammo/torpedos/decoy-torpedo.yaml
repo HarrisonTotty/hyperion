@@ -1,0 +1,13 @@
+id: decoy-torpedo
+name: "Decoy Torpedo"
+desc: >-
+  An inert torpedo designed to mimic the signature of live ordnance to confuse enemy targeting systems.
+cost: 15
+weight: 200
+impact_damage: 0
+blast_radius: 0
+blast_damage: 0
+acceleration: 10.0
+max_speed: 500
+lifetime: 20
+weapon_tags: ["Torpedo", "Decoy"]

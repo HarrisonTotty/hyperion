@@ -1,0 +1,23 @@
+id: medium-phaser
+type: de-weapon
+name: "Medium Phaser"
+model: "StarLance P-12 Phaser Array"
+manufacturer: "Quantum Dynamics Corp"
+desc: >-
+  Balanced phaser array delivering reliable damage output with moderate power requirements.
+lore: >-
+  Quantum Dynamics' P-12 phaser has armed cruisers and destroyers for two decades.
+  The weapon strikes an optimal balance between damage per shot, recharge speed, and
+  power consumption. Its modulated particle beam can maintain fire on evasive targets
+  thanks to the light-speed beam velocity, making it devastating against fighters and
+  corvettes that rely on maneuverability.
+cost: 200
+additional_hp: 16
+additional_power_consumption: 12
+additional_heat_generation: 22
+additional_weight: 140
+damage: 45
+recharge_time: 3.5
+max_range: 10000
+projectile_speed: 299792458
+weapon_tags: ["Beam", "Photon"]

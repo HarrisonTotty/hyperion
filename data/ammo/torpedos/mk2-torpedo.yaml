@@ -1,0 +1,13 @@
+id: mk2-torpedo
+name: "Mark II Torpedo"
+desc: >-
+  Advanced torpedo with improved guidance and warhead yield.
+cost: 300
+weight: 550
+impact_damage: 1200
+blast_radius: 150
+blast_damage: 600
+acceleration: 6.0
+max_speed: 450
+lifetime: 70
+weapon_tags: ["Torpedo"]

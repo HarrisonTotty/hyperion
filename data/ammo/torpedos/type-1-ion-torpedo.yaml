@@ -1,0 +1,13 @@
+id: type-1-ion-torpedo
+name: "Type 1 Ion Torpedo"
+desc: >-
+  Ion warhead that disrupts enemy electronics and power systems, dealing reduced hull damage.
+cost: 250
+weight: 480
+impact_damage: 400
+blast_radius: 150
+blast_damage: 300
+acceleration: 6.0
+max_speed: 450
+lifetime: 65
+weapon_tags: ["Torpedo", "Ion"]

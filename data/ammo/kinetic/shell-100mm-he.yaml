@@ -1,0 +1,12 @@
+id: shell-100mm-he
+name: "HE 100mm Shell"
+desc: >-
+  High-explosive 100mm shells optimized for blast damage against lightly
+  armored targets and ship systems.
+cost: 12
+weight: 6
+impact_damage: 8
+blast_radius: 8
+blast_damage: 6
+velocity: 700
+armor_penetration: 3

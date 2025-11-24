@@ -1,0 +1,19 @@
+id: power-core
+name: "Power Core"
+desc: >-
+  Provides the ship with power generation and capacity.
+extended_desc: >-
+  Different power cores provide varying levels of power output and
+  capacity. The power core is essential for running all ship systems,
+  and its performance directly affects the ship's overall capabilities.
+  Power can be allocated to other modules by the engineering officer to
+  improve their performance.
+groups: ["Essential", "Power", "Support"]
+required: true
+has_varients: true
+base_cost: 10
+max_slots: 2
+base_hp: 10
+base_power_consumption: 0.0
+base_heat_generation: 5.0
+base_weight: 100

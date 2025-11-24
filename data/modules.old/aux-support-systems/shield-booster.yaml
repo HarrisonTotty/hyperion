@@ -1,0 +1,12 @@
+id: "shield-booster"
+name: "Shield Booster"
+description: "Provides a temporary boost to shield strength and regeneration. Limited to 2 uses before requiring station recharge."
+cost: 100
+stats:
+  shield_boost: 1500  # additional shield points
+  regen_boost_multiplier: 2.0  # doubles shield regeneration rate
+  duration: 20  # seconds
+  max_uses: 2
+  recharge_time: 90  # seconds cooldown between uses
+  power_consumption: 150  # MW while active
+  mass: 8  # tons

@@ -1,0 +1,116 @@
+name: Corvette
+desc: >-
+  A large and highly versatile ship, corvette class ships are well-rounded
+  and capable of supporting most combat roles. Corvettes can be adapted
+  to almost any situation with their extensive module capacity.
+size: Large
+role: Versatile
+max_weight: 380
+max_modules: 18
+base_hp: 500
+build_points: 850
+bonuses:
+  module_cost: -0.15
+  module_hp: 0.1
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Terran Industrial Complex"
+    variant: "Olympus-class"
+    lore: >-
+      Federation corvettes are designed as multi-role workhorses capable of extended
+      independent operations. They feature redundant systems and extensive automation,
+      allowing smaller crews to operate these large vessels effectively.
+  
+  mars-coalition:
+    manufacturer: "Valles Marineris Shipbuilding"
+    variant: "Sandstorm-class"
+    lore: >-
+      Martian corvettes prioritize modularity and battlefield adaptability. Built with
+      quick-swap module bays, they can be reconfigured between missions to match evolving
+      tactical requirements. Crew quarters are compact but efficient.
+  
+  belt-alliance:
+    manufacturer: "Pallas Industrial Cooperative"
+    variant: "Prospector-class"
+    lore: >-
+      Belt corvettes are rugged exploration and patrol vessels designed for long-duration
+      missions without resupply. Their extensive cargo holds and efficient life support
+      make them ideal for frontier operations.
+  
+  europa-compact:
+    manufacturer: "Conamara Chaos Yards"
+    variant: "Leviathan-class"
+    lore: >-
+      Europan corvettes incorporate unique water-based cooling systems and bio-integrated
+      components. Their unusual aesthetics hide sophisticated sensor arrays optimized for
+      deep space scanning and ice navigation.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Assembly Works"
+    variant: "Pathfinder-class"
+    lore: >-
+      Outer Rim corvettes are assembled from proven components sourced across dozens of
+      suppliers. While lacking cutting-edge tech, their reliability and ease of maintenance
+      make them favorites among independent operators.
+  
+  corporate-syndicate:
+    manufacturer: "Weyland-Omnicorp Solutions"
+    variant: "Profit-Maximizer MkVII"
+    lore: >-
+      Corporate corvettes emphasize cost-per-engagement metrics and standardized components.
+      Built in massive automated facilities, they sacrifice individuality for economies of
+      scale and guaranteed parts availability.
+
+# Technical specifications
+length: 220.0  # meters
+width: 70.0    # meters
+height: 45.0   # meters
+mass: 95000.0  # metric tons (empty)
+crew_min: 40
+crew_max: 65
+cargo_capacity: 1200.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 28.0      # m/s²
+max_turn_rate: 18.0         # degrees/second
+max_warp_speed: 4.5         # multiples of light speed
+warp_efficiency: 0.70       # 0.0-1.0 rating
+sensor_range: 30000.0       # kilometers
+
+# Operational metadata
+operational_range: 20.0     # AU
+build_time: 240             # days
+maintenance_cost: 750.0     # credits per day
+fuel_capacity: 18000.0      # units
+fuel_consumption: 140.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Corvettes represent the pinnacle of multi-role design philosophy. Too large to be nimble
+  like frigates, yet too small to match battleship firepower, corvettes instead excel at
+  adaptability. Their extensive module capacity allows field commanders to reconfigure
+  these ships for whatever mission profile is required—anti-fighter screening, long-range
+  patrol, convoy escort, or even light assault operations.
+  
+  The corvette's versatility comes at a cost: they require skilled, experienced crews to
+  operate at peak efficiency. Without clear specialization, corvette commanders must be
+  tactical generalists, able to assess situations and adapt on the fly. This has led to
+  corvettes serving as training grounds for future capital ship commanders.
+  
+  In fleet compositions, corvettes serve as force multipliers, filling gaps and adapting
+  to changing battlefield conditions. Their cost-effectiveness makes them popular with
+  resource-constrained factions, while wealthy navies appreciate their operational flexibility.
+
+year_introduced: 2290
+
+notable_ships:
+  - "TFS Adaptable"
+  - "MSS Variable Storm"
+  - "BAV Long Hauler"
+  - "ECS Proteus"
+  - "ORC Jack-of-All-Trades"
+  - "CSS Return Investment"

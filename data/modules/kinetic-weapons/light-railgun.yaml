@@ -1,0 +1,24 @@
+id: light-railgun
+type: kinetic-weapon
+name: "Light Railgun"
+model: "VX-20 Precision Railgun"
+manufacturer: "Velocity Arms"
+desc: >-
+  Lightweight railgun firing 20mm slugs with exceptional accuracy and minimal power draw.
+lore: >-
+  The VX-20 is the weapon of choice for scouts and interceptors that need precision
+  firepower without the mass penalty of heavier systems. Its electromagnetic accelerator
+  delivers slugs at incredible velocity with pinpoint accuracy. While damage per shot
+  is modest, skilled gunners can consistently hit critical systems at extended range.
+cost: 120
+additional_hp: 10
+additional_power_consumption: 15
+additional_heat_generation: 12
+additional_weight: 80
+ammo_type: slug
+ammo_size: 20mm
+reload_time: 1.5
+num_projectiles: 1
+ammo_consumed: 1
+accuracy: 0.95
+effective_range: 5000

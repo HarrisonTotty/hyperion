@@ -1,0 +1,20 @@
+id: "long-range-jump-drive"
+type: "warp-jump-core"
+cost: 2500
+name: "Interstellar Jump Drive"
+model: "IJD-5000"
+manufacturer: "Quantum Jump Technologies"
+desc: "Long-distance instantaneous travel system. Enables rapid transit between star systems but requires significant power and cooldown."
+lore: >-
+  The IJD-5000 allows capital ships to jump across entire star systems in
+  an instant. The massive power requirements and lengthy cooldown periods
+  mean these drives are primarily used for strategic repositioning rather
+  than tactical combat. Jump calculations at these distances require
+  sophisticated navigation computers and precise timing.
+warp_type: jump
+warp_delay: 30.0
+jump_distance: 5000
+additional_hp: 10
+additional_power_consumption: 300
+additional_heat_generation: 350
+additional_weight: 80

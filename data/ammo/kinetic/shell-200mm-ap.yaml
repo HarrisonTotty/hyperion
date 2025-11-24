@@ -1,0 +1,11 @@
+id: shell-200mm-ap
+name: "AP 200mm Shell"
+desc: >-
+  Armor piercing 200mm shell for cannons. High penetration, lower blast damage.
+cost: 15
+weight: 55
+impact_damage: 120
+blast_radius: 0
+blast_damage: 0
+velocity: 900
+armor_penetration: 8

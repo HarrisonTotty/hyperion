@@ -1,0 +1,12 @@
+id: "long-range-sensors"
+name: "Long-Range Sensor Array"
+description: "Advanced long-range detection system. Essential for reconnaissance and early warning."
+cost: 125
+stats:
+  detection_range: 30000  # meters
+  accuracy: 0.95  # 95% accuracy
+  scan_rate: 1.0  # scans per second
+  power_consumption: 100  # MW
+  heat_generation: 80  # K
+  mass: 18  # tons
+  target_capacity: 30  # max simultaneous targets

@@ -1,0 +1,19 @@
+id: "heavy-shield-mk3"
+type: "shield-generator"
+name: "Heavy Shield Generator Mk3"
+model: "HSG-3000"
+manufacturer: "Defensive Systems Corp"
+desc: >-
+  Military-grade shield generator for capital ships. Exceptional protection but high power draw.
+lore: >-
+  The HSG-3000 is the pinnacle of current shield technology, capable of protecting
+  even dreadnought-class vessels from sustained assault. Its power requirements are
+  substantial, but for capital ship commanders, the peace of mind it provides is
+  worth every megawatt.
+cost: 175
+additional_hp: 5
+additional_power_consumption: 100
+additional_heat_generation: 80
+additional_weight: 15
+max_shield_strength: 4000
+shield_recharge_rate: 120

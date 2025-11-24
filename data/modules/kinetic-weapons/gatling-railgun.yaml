@@ -1,0 +1,26 @@
+id: gatling-railgun
+type: kinetic-weapon
+name: "Gatling Railgun"
+model: "Storm GR-20 Rotary System"
+manufacturer: "Velocity Arms"
+desc: >-
+  Multi-barrel rotary railgun delivering sustained rapid fire with moderate accuracy.
+lore: >-
+  Velocity Arms revolutionized close-range combat with the Storm's rotating barrel assembly.
+  Six electromagnetic rails fire in sequence, maintaining continuous fire pressure that
+  overwhelms point defenses and keeps enemy shields under constant stress. The rotating
+  design distributes heat buildup, enabling sustained fire that would melt conventional
+  railguns. Accuracy at range suffers, but in knife-fight engagements, nothing matches
+  the Storm's suppressive firepower.
+cost: 260
+additional_hp: 16
+additional_power_consumption: 25
+additional_heat_generation: 30
+additional_weight: 160
+ammo_type: slug
+ammo_size: 20mm
+reload_time: 1.0
+num_projectiles: 3
+ammo_consumed: 3
+accuracy: 0.85
+effective_range: 3000

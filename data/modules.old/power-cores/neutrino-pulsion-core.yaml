@@ -1,0 +1,12 @@
+name: Neutrino Pulsion Core
+model: Neutrino Pulsion Core
+kind: Neutrino Capture Reactor
+manufacturer: Advanced Energy Systems
+desc: >-
+  A reactor capable of generating unparalleled amounts of energy via
+  neutrino capture. However, the sheer size of the production system
+  leaves little room for energy storage.
+cost: 650
+max_energy: 1800
+production: 120
+weight: 250

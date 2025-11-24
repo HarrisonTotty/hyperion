@@ -1,0 +1,19 @@
+id: "solar-sail"
+type: "impulse-engine"
+cost: 500
+name: Solar Sail
+model: SS-2000 Solar Sail Array
+manufacturer: Helios Navigation Systems
+desc: >-
+  By far the most efficient form of short-range travel, solar sails use
+  captured sunlight to produce a very small amount of thrust.
+lore: >-
+  Helios' solar sail technology has been refined over decades to provide
+  ultra-efficient propulsion for scientific probes and automated cargo tugs
+  operating in inner-system environments.
+max_thrust: 200
+power_consumption: 2
+additional_hp: 20
+additional_power_consumption: 80
+additional_heat_generation: 50
+additional_weight: 10

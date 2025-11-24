@@ -1,0 +1,27 @@
+id: "300mm-superheavy-cannon"
+name: "300mm Superheavy Cannon"
+description: "Legendary siege weapon firing vehicle-sized shells capable of breaching any known armor."
+cost: 800
+model: "Omega-Class Worldbreaker"
+manufacturer: "Prometheus Heavy Industries"
+lore: >-
+  The Worldbreaker is less a weapon and more a statement of intent. Reserved exclusively
+  for dreadnoughts and siege platforms, it fires 300mm shells the size of small vehicles
+  with enough kinetic energy to reduce fortifications to atoms. Each shot requires five
+  seconds to reload, draws power from dedicated capacitor banks, and produces a muzzle
+  flash visible from orbit. When you absolutely, positively need to break a world - accept
+  no substitutes.
+additional_hp: 25
+additional_power_consumption: 80
+additional_heat_generation: 90
+additional_weight: 100
+stats:
+  ammo:
+    type: shell
+    size: 300mm
+  tags: ["Single-Fire", "Manual"]
+  reload_time: 5.0
+  num_projectiles: 1
+  ammo_consumption: 1
+  accuracy: 0.78
+  effective_range: 8000

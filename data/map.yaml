@@ -1,0 +1,5 @@
+# Map Generation Configuration
+# ----------------------------
+
+galaxy_size: 1000
+star_density: 0.15

@@ -1,0 +1,17 @@
+id: "emission-dampener"
+type: "stealth-system"
+cost: 600
+name: "Emission Dampener"
+model: "ED-50 Signature Dampener"
+manufacturer: "Stealth Technologies Corp"
+desc: "Active system that reduces electromagnetic emissions and heat signature."
+lore: >-
+  The ED-50 actively dampens the ship's electromagnetic and thermal emissions,
+  making it much harder to detect at long range. While it requires power to
+  operate, it provides substantial stealth benefits for reconnaissance missions.
+detectability_reduction: 0.50
+scan_time_increase: 3.0
+additional_hp: 0
+additional_power_consumption: 100
+additional_heat_generation: 50
+additional_weight: 10

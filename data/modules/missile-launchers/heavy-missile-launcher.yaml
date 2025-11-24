@@ -1,0 +1,21 @@
+id: heavy-missile-launcher
+type: missile-launcher
+name: "Heavy Missile Launcher"
+model: "Titan MK-VII Heavy Launcher"
+manufacturer: "Titan Armaments"
+desc: >-
+  Large-capacity launcher designed for sustained engagements with extended magazine capacity.
+lore: >-
+  Titan Armaments built the MK-VII for capital ships that need to maintain missile
+  pressure over extended battles. The massive magazine holds twice the ordnance of
+  standard launchers, though reload cycles are slower and the launcher can only
+  fire one missile at a time to conserve ammunition flow.
+cost: 220
+additional_hp: 25
+additional_power_consumption: 15
+additional_heat_generation: 28
+additional_weight: 200
+reload_time: 15.0
+missile_volley_delay: 1.5
+num_launched: 1
+ammo_capacity: 24

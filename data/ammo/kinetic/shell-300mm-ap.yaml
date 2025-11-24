@@ -1,0 +1,12 @@
+id: shell-300mm-ap
+name: "AP 300mm Shell"
+desc: >-
+  Superheavy armor-piercing 300mm shells capable of penetrating any
+  known armor. Reserved for anti-capital ship operations.
+cost: 120
+weight: 42
+impact_damage: 80
+blast_radius: 5
+blast_damage: 3
+velocity: 700
+armor_penetration: 10

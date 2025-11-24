@@ -1,0 +1,16 @@
+name: Chaff Pod
+model: AX-9 Chaff Pod
+kind: Rocket-Propelled Sensor Pod Array
+manufacturer: Guardian Systems Inc.
+desc: >-
+  A rocket-propelled sensor pod capable of jamming nearby missile guidance
+  systems.
+cost: 5
+weight: 1
+forward_thrust: 400
+max_turn_rate: 1.0
+load_time: 15.0
+tags: ["Missile", "Chaff"]
+blast_radius: 100
+lifetime: 10
+max_speed: 1200

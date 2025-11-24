@@ -1,0 +1,14 @@
+name: ST 50mm Slug
+type: slug
+size: 50mm
+desc: >-
+  Standard 50mm heavy electromagnetic slugs for capital-class railguns.
+  These massive projectiles combine substantial mass with extreme velocity
+  to deliver devastating kinetic strikes.
+cost: 30
+weight: 10
+impact_damage: 40
+blast_radius: 0
+blast_damage: 0
+velocity: 1500
+armor_penetration: 8

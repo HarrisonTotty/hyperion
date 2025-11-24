@@ -1,0 +1,21 @@
+name: 50mm Siege Coilgun
+model: MG-50S "Titan" Siege Platform
+kind: Siege Coilgun
+manufacturer: Prometheus Heavy Industries
+desc: >-
+  A massive 50mm siege coilgun with an extended acceleration chamber
+  spanning over 20 meters. The Titan uses superconducting magnetic coils
+  cooled to near absolute zero to generate incredible acceleration forces,
+  launching projectiles at velocities that approach a significant fraction
+  of light speed. Reserved for dreadnought-class vessels and orbital
+  bombardment platforms.
+cost: 850
+ammo:
+  type: slug
+  size: 50mm
+tags: ["Single-Fire", "Manual"]
+reload_time: 4.0
+num_projectiles: 1
+ammo_consumption: 1
+accuracy: 0.88
+effective_range: 15000

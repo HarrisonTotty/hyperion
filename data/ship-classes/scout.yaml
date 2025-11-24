@@ -1,0 +1,119 @@
+name: Scout
+desc: >-
+  A small, fast ship typically outfitted with advanced sensors and stealth
+  technology. Scouts excel at reconnaissance and intelligence gathering
+  operations while remaining undetected.
+size: Small
+role: Support
+max_weight: 150
+max_modules: 11
+base_hp: 220
+build_points: 370
+bonuses:
+  module_weight_support: -0.3
+  module_cost_support: -0.2
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Skunk Works Advanced Projects"
+    variant: "Phantom-class"
+    lore: >-
+      Federation scouts incorporate cutting-edge stealth technology and quantum-encrypted
+      communications. Built for deep penetration reconnaissance, they can operate for weeks
+      behind enemy lines without detection.
+  
+  mars-coalition:
+    manufacturer: "Noctis Intelligence Systems"
+    variant: "Shadow-class"
+    lore: >-
+      Martian scouts emphasize aggressive reconnaissance and forward observation. Their
+      advanced targeting systems can paint targets for long-range strikes, making them
+      force multipliers despite their small size.
+  
+  belt-alliance:
+    manufacturer: "Scattered Light Technologies"
+    variant: "Whisper-class"
+    lore: >-
+      Belt scouts are masters of passive detection, using highly sensitive sensor arrays
+      to gather intelligence without revealing their position. Their crews are trained in
+      patience and observation, often spending weeks in silent running mode.
+  
+  europa-compact:
+    manufacturer: "Pwyll Advanced Research"
+    variant: "Seeker-class"
+    lore: >-
+      Europan scouts feature biomimetic sensor systems that can adapt to different
+      environments. Their unique signal processing allows them to detect traces that
+      conventional sensors miss, making them invaluable for exploration.
+  
+  outer-rim-collective:
+    manufacturer: "Rimward Eyes Collective"
+    variant: "Wanderer-class"
+    lore: >-
+      Outer Rim scouts are built for endurance and self-sufficiency. With extensive
+      fuel reserves and recycling systems, they can conduct long-duration surveys of
+      unexplored regions without support.
+  
+  corporate-syndicate:
+    manufacturer: "Corporate Intelligence Solutions"
+    variant: "Observer-class"
+    lore: >-
+      Corporate scouts prioritize electronic intelligence and economic espionage
+      capabilities. Their sensor suites are optimized for intercepting communications
+      and tracking commercial shipping patterns.
+
+# Technical specifications
+length: 65.0   # meters
+width: 20.0    # meters
+height: 15.0   # meters
+mass: 12000.0  # metric tons (empty)
+crew_min: 4
+crew_max: 8
+cargo_capacity: 100.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 55.0      # m/s²
+max_turn_rate: 45.0         # degrees/second
+max_warp_speed: 6.5         # multiples of light speed
+warp_efficiency: 0.88       # 0.0-1.0 rating
+sensor_range: 50000.0       # kilometers
+
+# Operational metadata
+operational_range: 25.0     # AU
+build_time: 90              # days
+maintenance_cost: 250.0     # credits per day
+fuel_capacity: 4000.0       # units
+fuel_consumption: 40.0      # units per hour
+
+# Lore and flavor
+lore: >-
+  Scouts are the eyes and ears of any fleet, venturing into unknown or hostile territory
+  to gather critical intelligence. These small vessels sacrifice firepower and armor for
+  speed, stealth, and sensor capability. Their crews are often the first to encounter new
+  phenomena, alien vessels, or enemy deployments—information they must survive long enough
+  to report.
+  
+  The scout's greatest weapon is information. Their advanced sensor suites can detect
+  enemy movements at extreme ranges, map gravitational anomalies, and analyze stellar
+  phenomena. Coupled with stealth systems that minimize their own signature, scouts can
+  observe enemy positions and movements without revealing their presence. This intelligence
+  advantage can mean the difference between victory and defeat in fleet engagements.
+  
+  Scout crews are a special breed—patient, observant, and comfortable with isolation.
+  Missions often involve weeks of silent running, maintaining radio silence while gathering
+  data. The psychological demands are significant, requiring crews with strong bonds and
+  mental resilience. Many famous explorers and intelligence officers began their careers
+  on scout vessels.
+
+year_introduced: 2278
+
+notable_ships:
+  - "TFS Silent Eye"
+  - "MSS Ghost Wind"
+  - "BAV Far Sight"
+  - "ECS Deep Listen"
+  - "ORC Lookout"
+  - "CSS Market Intelligence"

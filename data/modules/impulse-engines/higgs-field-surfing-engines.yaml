@@ -1,0 +1,20 @@
+id: "higgs-field-surfing-engines"
+type: "impulse-engine"
+cost: 1800
+name: Higgs Field "Surfing" Engines
+model: HFS-7 Higgs Field Surfing Engine
+manufacturer: Quantum Propulsion Labs
+desc: >-
+  Just as the warp core is able to bend space to allow FTL travel, these
+  engines combine ion impulse with bending the localized higgs field,
+  producing a good amount of thrust while still remaining energy efficient.
+lore: >-
+  QPL's breakthrough HFS-7 represents the cutting edge of sublight propulsion
+  technology, using quantum field manipulation to achieve previously impossible
+  thrust-to-efficiency ratios.
+max_thrust: 900
+power_consumption: 25
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 0

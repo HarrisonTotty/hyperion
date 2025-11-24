@@ -1,0 +1,15 @@
+id: "chaff-pod"
+type: "countermeasure-system"
+name: "Chaff Pod"
+cost: 80
+model: "AX-9 Chaff Pod"
+manufacturer: "Guardian Systems Inc."
+desc: "Rocket-propelled sensor pod capable of jamming nearby missile guidance systems."
+lore: >-
+  Guardian's AX-9 launches clouds of metallic chaff that confuse radar-guided
+  missiles. The cheap, reliable countermeasure has saved countless ships from
+  missile strikes, though it's ineffective against more advanced guidance systems.
+additional_hp: 0
+additional_power_consumption: 10
+additional_heat_generation: 5
+additional_weight: 1

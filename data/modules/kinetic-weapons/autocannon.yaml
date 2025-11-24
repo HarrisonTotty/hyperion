@@ -1,0 +1,24 @@
+id: autocannon
+type: kinetic-weapon
+name: "Autocannon"
+model: "Havoc Dual-Barrel Autocannon"
+manufacturer: "Tempest Weapon Works"
+desc: >-
+  Rapid-fire autocannon system delivering high volume of fire at the cost of accuracy.
+lore: >-
+  Tempest's Havoc autocannon embodies the 'more dakka' philosophy. Twin rotating barrels
+  spit out 100mm shells in rapid succession, creating a storm of steel that can shred
+  through shields and light armor. Accuracy suffers from the violent recoil, but the
+  sheer volume of projectiles ensures hits on target. Ammunition consumption is ferocious.
+cost: 240
+additional_hp: 18
+additional_power_consumption: 20
+additional_heat_generation: 40
+additional_weight: 180
+ammo_type: shell
+ammo_size: 100mm
+reload_time: 2.0
+num_projectiles: 2
+ammo_consumed: 2
+accuracy: 0.78
+effective_range: 2800

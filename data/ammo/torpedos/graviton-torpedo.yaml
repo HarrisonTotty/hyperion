@@ -1,0 +1,13 @@
+id: graviton-torpedo
+name: "Graviton Torpedo"
+desc: >-
+  Experimental torpedo with graviton warhead. Increases target's effective mass.
+cost: 400
+weight: 600
+impact_damage: 1000
+blast_radius: 120
+blast_damage: 500
+acceleration: 7.0
+max_speed: 500
+lifetime: 80
+weapon_tags: ["Torpedo", "Graviton"]

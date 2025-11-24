@@ -1,0 +1,19 @@
+id: "medium-shield-mk2"
+type: "shield-generator"
+name: "Medium Shield Generator Mk2"
+model: "MSG-2000"
+manufacturer: "Defensive Systems Corp"
+desc: >-
+  Standard shield generator for most combat situations. Balanced protection and efficiency.
+lore: >-
+  The MSG-2000 represents the evolution of Defensive Systems' shield technology,
+  offering twice the protection of the Mk1 with improved energy efficiency. It's
+  the standard choice for patrol vessels and medium-sized warships throughout
+  civilized space.
+cost: 100
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 0
+max_shield_strength: 2000
+shield_recharge_rate: 80

@@ -1,0 +1,13 @@
+id: "active-cloaking-field"
+name: "Active Cloaking Field"
+description: "Advanced cloaking system that makes the ship nearly invisible when activated. High power drain."
+cost: 200
+stats:
+  signature_reduction: 0.85  # reduces detection signature by 85%
+  detection_range_penalty: 0.15  # enemies detect at 15% normal range
+  power_consumption: 300  # MW while active
+  heat_generation: 250  # K while active
+  mass: 25  # tons
+  cooldown: 60  # seconds between activations
+  max_duration: 30  # seconds of continuous cloaking
+  weapons_disabled: true  # cannot fire weapons while cloaked

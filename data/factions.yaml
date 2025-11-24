@@ -1,0 +1,29 @@
+# Factions Configuration
+# ----------------------
+# Defines the available factions that teams can join.
+# Each faction represents a political/military organization in the game universe.
+
+factions:
+  - id: "terran-federation"
+    name: "Terran Federation"
+    description: "United Earth government controlling the inner solar system. Known for their advanced technology and disciplined military forces."
+  
+  - id: "mars-coalition"
+    name: "Mars Coalition"
+    description: "Independent Martian colonies seeking autonomy from Earth. Fierce and resourceful, they excel at guerrilla tactics."
+  
+  - id: "belt-alliance"
+    name: "Belt Alliance"
+    description: "Asteroid belt miners and outer system traders. Masters of unconventional warfare and improvised technology."
+  
+  - id: "europa-compact"
+    name: "Europa Compact"
+    description: "Jovian moon alliance focused on scientific research and exploration. Specializes in experimental weapons and stealth technology."
+  
+  - id: "outer-rim-collective"
+    name: "Outer Rim Collective"
+    description: "Coalition of frontier colonies beyond Jupiter. Independent and self-sufficient, they value freedom above all else."
+  
+  - id: "corporate-syndicate"
+    name: "Corporate Syndicate"
+    description: "Powerful mega-corporations controlling vast resources. Their ships are well-equipped but expensive to maintain."

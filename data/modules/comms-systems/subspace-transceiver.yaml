@@ -1,0 +1,22 @@
+id: "subspace-transceiver"
+type: "comms-system"
+cost: 400
+name: Subspace Transceiver
+model: SST-400 Subspace Transceiver
+manufacturer: Hyperion Communications
+desc: >-
+  Advanced subspace communication system capable of faster-than-light messaging
+  across interstellar distances. Higher encryption strength and extended range.
+lore: >-
+  Hyperion Communications' SST-400 leverages subspace field modulation to
+  achieve FTL communication across star systems. While not instantaneous,
+  messages travel significantly faster than light, making it essential for
+  interstellar commerce and coordination.
+comm_range: 500000
+frequency_range: [1, 1000]
+encryption_lvl: 7
+power_consumption: 25
+additional_hp: 5
+additional_power_consumption: 15
+additional_heat_generation: 12
+additional_weight: 8

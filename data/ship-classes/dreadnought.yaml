@@ -1,0 +1,119 @@
+name: Dreadnought
+desc: >-
+  A large offensive ship primarily outfitted with medium/long range weapons.
+  Dreadnoughts are arguably the most powerful offensive class ship,
+  dominating the battlefield with overwhelming firepower.
+size: Large
+role: Offense
+max_weight: 420
+max_modules: 19
+base_hp: 550
+build_points: 950
+bonuses:
+  module_cost_offense: -0.2
+  module_hp_offense: 0.25
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Puget Sound Strategic Yards"
+    variant: "Yamato-class"
+    lore: >-
+      Federation dreadnoughts represent the pinnacle of Terran naval engineering. These
+      massive vessels serve as fleet flagships, coordinating battle groups while delivering
+      devastating long-range bombardments that can turn the tide of entire campaigns.
+  
+  mars-coalition:
+    manufacturer: "Olympus Mons Strategic Works"
+    variant: "Ares Prime-class"
+    lore: >-
+      Martian dreadnoughts are weapons of total war. Built without compromise, they mount
+      the most powerful weapon arrays in known space. Their captains are selected from the
+      most aggressive and capable commanders in the Coalition navy.
+  
+  belt-alliance:
+    manufacturer: "Interamnia Heavy Fabrication"
+    variant: "Leviathan-class"
+    lore: >-
+      Belt dreadnoughts are assembled in deep space, built from asteroids and salvaged
+      materials. What they lack in elegance they make up for in raw mass and firepower.
+      Each is a unique monument to Belt engineering prowess.
+  
+  europa-compact:
+    manufacturer: "Tyre Macula Megaworks"
+    variant: "Abyssal-class"
+    lore: >-
+      Europan dreadnoughts incorporate radical design philosophies, with organic-looking
+      hull configurations and adaptive weapon systems. Their alien aesthetics hide
+      sophisticated fire control networks rivaling any in the system.
+  
+  outer-rim-collective:
+    manufacturer: "United Rim Shipbuilders"
+    variant: "Colossus-class"
+    lore: >-
+      Outer Rim dreadnoughts are community projects, sometimes taking years to complete.
+      Built through collective effort and shared resources, each vessel represents the
+      pride and determination of entire settlements.
+  
+  corporate-syndicate:
+    manufacturer: "Northrop Grumman Interstellar"
+    variant: "Market Dominator-class"
+    lore: >-
+      Corporate dreadnoughts serve dual purposes: military deterrent and stockholder
+      confidence builder. Their construction employs standardized modules to reduce
+      costs while maintaining the intimidating presence expected of capital ships.
+
+# Technical specifications
+length: 320.0  # meters
+width: 95.0    # meters
+height: 65.0   # meters
+mass: 185000.0  # metric tons (empty)
+crew_min: 65
+crew_max: 110
+cargo_capacity: 2000.0  # cubic meters
+
+# Performance characteristics
+max_acceleration: 18.0      # m/s²
+max_turn_rate: 10.0         # degrees/second
+max_warp_speed: 3.8         # multiples of light speed
+warp_efficiency: 0.62       # 0.0-1.0 rating
+sensor_range: 45000.0       # kilometers
+
+# Operational metadata
+operational_range: 18.0     # AU
+build_time: 365             # days
+maintenance_cost: 1500.0    # credits per day
+fuel_capacity: 35000.0      # units
+fuel_consumption: 250.0     # units per hour
+
+# Lore and flavor
+lore: >-
+  Dreadnoughts are the queens of the battlefield, massive vessels designed to project
+  overwhelming force across vast distances. Their construction represents a staggering
+  investment of resources and expertise, making each dreadnought a strategic asset of
+  immense value. Nations rise and fall based on dreadnought counts—possessing even one
+  of these vessels can shift the balance of power in an entire sector.
+  
+  The dreadnought's operational doctrine revolves around strategic dominance. Unlike
+  smaller vessels designed for tactical flexibility, dreadnoughts are positioned to
+  control entire regions of space through threat projection alone. Their sensor arrays
+  can track dozens of targets simultaneously, while their weapon batteries can engage
+  multiple enemies at ranges where return fire is ineffective.
+  
+  Commanding a dreadnought is the pinnacle of a naval career. These postings go only
+  to the most experienced and politically connected officers, as the loss of even one
+  dreadnought can end careers and topple governments. The responsibility weighs heavily—
+  captains must balance aggressive use of their devastating firepower with the knowledge
+  that their ship represents years of national treasure.
+
+year_introduced: 2298
+
+notable_ships:
+  - "TFS Sovereign"
+  - "MSS Total War"
+  - "BAV Giant Killer"
+  - "ECS Depth Unknown"
+  - "ORC Against All Odds"
+  - "CSS Quarterly Earnings"

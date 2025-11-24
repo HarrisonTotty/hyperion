@@ -1,0 +1,24 @@
+id: pulse-laser
+type: de-weapon
+name: "Pulse Laser"
+model: "Staccato PL-9 Pulse System"
+manufacturer: "Velocity Arms"
+desc: >-
+  Rapid-fire pulse laser sacrificing damage per shot for exceptional firing rate.
+lore: >-
+  Velocity Arms designed the Staccato for close-range brawls where sustained fire
+  pressure matters more than raw damage. The pulse system fires discrete laser bursts
+  in rapid succession, each dealing modest damage but recharging almost instantly.
+  The cumulative effect can shred through shields and keep enemy systems under constant
+  stress. Effective range is limited by the pulsed beam's dispersion, but within
+  optimal distance, few weapons match its sustained DPS.
+cost: 180
+additional_hp: 14
+additional_power_consumption: 15
+additional_heat_generation: 28
+additional_weight: 110
+damage: 18
+recharge_time: 1.2
+max_range: 6000
+projectile_speed: 299792458
+weapon_tags: ["Pulse", "Photon"]

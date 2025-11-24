@@ -1,0 +1,26 @@
+id: "20mm-gatling-railgun"
+name: "20mm Gatling Railgun"
+description: "Revolutionary rotary railgun with six barrels delivering devastating sustained fire."
+cost: 380
+model: "EM-20G Hurricane"
+manufacturer: "Rapid Systems Defense"
+lore: >-
+  Rapid Systems Defense's Hurricane combines the best of old and new military technology.
+  By mounting six electromagnetic accelerator barrels in a classic gatling configuration,
+  it achieves withering rates of fire impossible with single-barrel designs. Each barrel
+  cools while others fire, enabling sustained engagements that would melt conventional
+  railguns. Devastating against swarm tactics and light armor.
+additional_hp: 5
+additional_power_consumption: 40
+additional_heat_generation: 35
+additional_weight: 20
+stats:
+  ammo:
+    type: slug
+    size: 20mm
+  tags: ["Burst", "Automatic"]
+  reload_time: 0.6
+  num_projectiles: 6
+  ammo_consumption: 6
+  accuracy: 0.82
+  effective_range: 2500

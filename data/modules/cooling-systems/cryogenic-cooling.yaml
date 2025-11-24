@@ -1,0 +1,18 @@
+id: "cryogenic-cooling"
+type: "cooling-system"
+cost: 600
+name: "Cryogenic Cooling System"
+model: "CCS-1200 Cryogenic System"
+manufacturer: "CryoTech Solutions"
+desc: "Advanced cryogenic cooling using liquid nitrogen. Exceptional cooling capacity for high-performance ships."
+lore: >-
+  The CCS-1200 represents the pinnacle of shipboard cooling technology. Using
+  liquid nitrogen and advanced heat exchangers, it can dissipate enormous
+  amounts of thermal energy. Essential for capital ships running multiple
+  high-energy weapon systems simultaneously.
+maximum_coolant: 3500
+generated_cooling: 1200
+additional_hp: 10
+additional_power_consumption: 100
+additional_heat_generation: 10
+additional_weight: 25

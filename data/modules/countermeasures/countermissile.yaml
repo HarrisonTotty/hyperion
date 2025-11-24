@@ -1,0 +1,16 @@
+id: "countermissile"
+type: "countermeasure-system"
+name: "Counter-Missile System"
+model: "CMS-100 Point Defense"
+manufacturer: "Defensive Systems Ltd"
+desc: "Automated point-defense system that intercepts incoming missiles with counter-missiles."
+lore: >-
+  DSL's counter-missile system provides an active defense layer against missile
+  attacks. The automated system tracks and engages incoming threats with small,
+  fast interceptors. While more expensive than passive countermeasures, the
+  intercept rate is significantly higher.
+cost: 150
+additional_hp: 5
+additional_power_consumption: 50
+additional_heat_generation: 30
+additional_weight: 80

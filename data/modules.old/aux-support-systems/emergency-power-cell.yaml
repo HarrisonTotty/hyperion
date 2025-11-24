@@ -1,0 +1,10 @@
+id: "emergency-power-cell"
+name: "Emergency Power Cell"
+description: "Provides a burst of emergency power to critical systems. Limited to 3 uses before requiring station recharge."
+cost: 75
+stats:
+  power_boost: 500  # MW of additional power
+  duration: 30  # seconds
+  max_uses: 3
+  recharge_time: 60  # seconds cooldown between uses
+  mass: 5  # tons

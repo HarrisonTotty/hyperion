@@ -1,0 +1,21 @@
+id: "high-energy-boson-reactor"
+type: "power-core"
+name: "High Energy Boson Reactor"
+model: "HEBR-5000"
+manufacturer: "Quantum Energy Systems"
+desc: >-
+  Exotic matter reactor using Higgs boson decay. Extremely high power output
+  but requires specialized maintenance and fuel.
+lore: >-
+  Quantum Energy Systems' HEBR-5000 pushes the boundaries of known physics,
+  harvesting energy from controlled Higgs boson decay. The technology is
+  barely understood outside of theoretical physics circles, but its power
+  output is undeniable. Maintenance crews require advanced certifications,
+  and fuel costs are astronomical.
+cost: 500
+additional_hp: 15
+additional_power_consumption: 0
+additional_heat_generation: 50
+additional_weight: 30
+energy_production: 100
+energy_capacity: 2000

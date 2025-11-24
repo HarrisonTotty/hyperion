@@ -1,0 +1,18 @@
+id: "magneto-thrusters"
+type: "maneuvering-thruster"
+name: "Magneto Thrusters"
+model: "MT-5000"
+manufacturer: "Quantum Dynamics Corporation"
+desc: >-
+  Electromagnetic flux aligners that generate angular thrust by interacting with local magnetic fields.
+lore: >-
+  Not thrusters in the traditional sense, the MT-5000 array uses powerful electromagnets
+  to align with and push against ambient magnetic fields. Exceptionally efficient in
+  regions with strong flux patterns, though performance degrades in deep space. Popular
+  among survey vessels operating near stellar bodies.
+cost: 350
+additional_hp: 0
+additional_power_consumption: 10
+additional_heat_generation: 15
+additional_weight: 5
+angular_thrust: 1200

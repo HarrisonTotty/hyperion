@@ -1,0 +1,12 @@
+id: shell-300mm-he
+name: "HE 300mm Shell"
+desc: >-
+  Superheavy high-explosive 300mm shells with catastrophic blast radius.
+  Can disable entire ship sections with a single hit.
+cost: 100
+weight: 38
+impact_damage: 35
+blast_radius: 30
+blast_damage: 25
+velocity: 600
+armor_penetration: 5

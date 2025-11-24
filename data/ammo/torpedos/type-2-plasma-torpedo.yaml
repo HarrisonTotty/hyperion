@@ -1,0 +1,13 @@
+id: type-2-plasma-torpedo
+name: "Type 2 Plasma Torpedo"
+desc: >-
+  Plasma warhead that excels at damaging shields but less effective against unshielded targets.
+cost: 280
+weight: 520
+impact_damage: 500
+blast_radius: 140
+blast_damage: 350
+acceleration: 5.2
+max_speed: 410
+lifetime: 70
+weapon_tags: ["Torpedo", "Plasma"]

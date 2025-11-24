@@ -1,0 +1,26 @@
+id: "75mm-light-cannon"
+name: "75mm Light Cannon"
+description: "Compact chemical propellant cannon optimized for rapid-fire frigate engagements."
+cost: 80
+model: "Mark V Raptor"
+manufacturer: "VelocityTech Industries Inc."
+lore: >-
+  Sometimes the old ways are still the best ways. VelocityTech's Raptor proves that
+  chemical propellant cannons remain relevant in the age of electromagnetic weapons.
+  Its excellent rate of fire and manageable ammunition consumption make it ideal for
+  extended patrol operations where power is at a premium. Frigate and corvette captains
+  appreciate the reliability and the satisfying thump of each shot.
+additional_hp: 0
+additional_power_consumption: -10
+additional_heat_generation: 18
+additional_weight: 12
+stats:
+  ammo:
+    type: shell
+    size: 75mm
+  tags: ["Single-Fire", "Automatic"]
+  reload_time: 1.2
+  num_projectiles: 1
+  ammo_consumption: 1
+  accuracy: 0.92
+  effective_range: 2500

@@ -1,0 +1,20 @@
+id: "shield-booster"
+type: "aux-support-system"
+cost: 300
+name: "Shield Booster"
+model: "SB-1500 Shield Booster"
+manufacturer: "Defensive Technologies Inc."
+desc: "Provides a temporary boost to shield strength and regeneration. Limited to 2 uses before requiring station recharge."
+lore: >-
+  DTI's shield booster overcharges the shield generators with a massive
+  capacitor discharge, instantly restoring shields and dramatically increasing
+  regeneration rates. Combat pilots swear by this system for surviving
+  overwhelming fire.
+hp_regained: 0
+energy_restored: 0
+heat_dissipated: 0
+num_uses: 2
+additional_hp: 5
+additional_power_consumption: 150
+additional_heat_generation: 50
+additional_weight: 8

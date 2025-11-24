@@ -1,0 +1,21 @@
+id: "standard-radio-array"
+type: "comms-system"
+cost: 100
+name: Standard Radio Communications Array
+model: Z96 Radio Transmission Array
+manufacturer: Wolf Comms Inc.
+desc: >-
+  A standard radio communications system with moderate range and energy requirements.
+  Suitable for most civilian and light military applications.
+lore: >-
+  Wolf Comms' Z96 has been the industry standard for decades, providing reliable
+  radio communications for civilian vessels throughout human space. Its proven
+  design and ease of maintenance make it a favorite among freighter captains.
+comm_range: 100000
+frequency_range: [30, 300]
+encryption_lvl: 3
+power_consumption: 10
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 0

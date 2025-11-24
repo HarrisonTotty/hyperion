@@ -1,0 +1,12 @@
+name: Plasma Induction Engines
+model: PIE-500 Plasma Induction Engine
+kind: Plasma Induction Engine
+manufacturer: TitanCore Propulsion Systems
+desc: >-
+  By expelling large amounts of plasma through magnetic fields, this set of
+  impulse engines are capable of generating large amounts of thrust at the
+  cost of energy efficiency.
+cost: 350
+weight: 260
+thrust: 1800
+energy_consumption: 70

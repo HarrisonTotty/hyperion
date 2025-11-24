@@ -1,0 +1,20 @@
+id: "plasma-thrusters"
+type: "maneuvering-thruster"
+name: "Plasma Thrusters"
+description: "High-power plasma induction thrusters capable of generating large amounts of angular thrust."
+cost: 400
+model: "PT-3000"
+manufacturer: "TitanCore Propulsion Systems"
+lore: >-
+  By expelling superheated plasma through precisely controlled magnetic fields,
+  TitanCore's PT-3000 delivers four times the thrust of comparable ion systems.
+  Combat pilots appreciate the rapid response times, though engineers complain
+  about the power draw and frequent maintenance intervals.
+additional_hp: 5
+additional_power_consumption: 55
+additional_heat_generation: 45
+additional_weight: 30
+stats:
+  thrust: 1600
+  energy_consumption: 65
+  weight: 240

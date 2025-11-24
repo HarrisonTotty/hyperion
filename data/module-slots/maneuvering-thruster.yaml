@@ -1,0 +1,18 @@
+id: maneuvering-thruster
+name: "Maneuvering Thrusters"
+desc: >-
+  Provides lateral and rotational thrust for ship maneuvering.
+extended_desc: >-
+  Maneuvering thrusters enable the ship to perform rotational and
+  lateral movements, crucial for combat maneuvers and precise
+  positioning. Different thruster models provide varying levels of
+  angular thrust and responsiveness.
+groups: ["Support", "Propulsion", "Maneuverability"]
+required: true
+has_varients: true
+base_cost: 10
+max_slots: 2
+base_hp: 12
+base_power_consumption: 6.0
+base_heat_generation: 4.0
+base_weight: 120

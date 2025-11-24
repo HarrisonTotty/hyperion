@@ -1,0 +1,157 @@
+# Simulation and Physics Configuration
+# Controls game physics, combat mechanics, and ship systems
+
+# Legacy fields for backward compatibility
+tick_rate: 60.0
+physics_enabled: true
+
+physics:
+  # Simulation tick rate in Hz (updates per second)
+  tick_rate: 60.0
+  # Time step for physics calculations (seconds)
+  time_step: 0.01666667  # 1/60
+  
+  effective_weight:
+    # Weight calculation multipliers
+    base_multiplier: 1.0
+    cargo_multiplier: 1.0
+    module_multiplier: 0.5
+    # Penalty for damaged modules
+    damage_penalty: 0.1
+  
+  movement:
+    # Maximum acceleration (m/s²)
+    max_acceleration: 100.0
+    # Maximum deceleration (m/s²)
+    max_deceleration: 150.0
+    # Maximum velocity for non-FTL (m/s)
+    max_velocity: 3000.0
+    # Drag coefficient
+    drag_coefficient: 0.01
+    # Thrust efficiency (0.0-1.0)
+    thrust_efficiency: 0.85
+  
+  rotation:
+    # Maximum angular velocity (rad/s)
+    max_angular_velocity: 1.0
+    # Angular acceleration (rad/s²)
+    angular_acceleration: 0.5
+    # Rotational inertia factor
+    inertia_factor: 1.0
+
+combat:
+  weapons:
+    # Base damage multiplier for all weapons
+    base_damage_multiplier: 1.0
+    
+    energy:
+      # Beam weapons deal continuous damage per second
+      beam_dps_multiplier: 1.0
+      # Pulse weapons fire 2 rounds
+      pulse_damage_multiplier: 1.2
+      # Burst weapons fire 3 rounds
+      burst_damage_multiplier: 1.5
+      # Shield damage bonuses
+      photon_shield_bonus: 0.25
+      plasma_shield_bonus: 0.30
+      # Positron shield bypass chance
+      positron_bypass_chance: 0.20
+    
+    kinetic:
+      # Kinetic weapon type multipliers
+      railgun_multiplier: 1.3
+      cannon_multiplier: 1.0
+      gauss_multiplier: 1.1
+      # Armor penetration bonus
+      armor_penetration: 0.15
+    
+    missile:
+      # Missile type multipliers
+      missile_multiplier: 2.0
+      torpedo_multiplier: 3.0
+      # Tracking and evasion
+      tracking_accuracy: 0.85
+      evasion_difficulty: 0.7
+  
+  shields:
+    # Shield regeneration rate per second (fraction of max)
+    regen_rate: 0.05
+    # Regeneration delay after taking damage (seconds)
+    regen_delay: 3.0
+    # Damage absorption (fraction absorbed)
+    absorption_rate: 0.8
+    # Recharge multiplier when raised
+    recharge_multiplier: 1.5
+  
+  status_effects:
+    ion:
+      # Power system disruption
+      duration: 5.0
+      intensity: 0.5
+      decay_rate: 0.1
+      stack_limit: 3
+    
+    graviton:
+      # Movement impairment
+      duration: 8.0
+      intensity: 0.6
+      decay_rate: 0.075
+      stack_limit: 5
+    
+    tachyon:
+      # FTL blocking
+      duration: 10.0
+      intensity: 1.0
+      decay_rate: 0.1
+      stack_limit: 1
+  
+  countermeasures:
+    # Effectiveness against missiles
+    antimissile_effectiveness: 0.8
+    antitorpedo_effectiveness: 0.6
+    # Chaff parameters
+    chaff_range: 1000.0
+    chaff_duration: 5.0
+    # Decoy effectiveness
+    decoy_effectiveness: 0.7
+
+systems:
+  power:
+    # Power generation rate per second
+    generation_rate: 100.0
+    # Power capacity per power module
+    module_capacity: 1000.0
+    # Power allocation update rate (Hz)
+    allocation_rate: 10.0
+    # Minimum power for critical systems
+    critical_minimum: 0.2
+  
+  cooling:
+    # Cooling rate per cooling module
+    module_cooling_rate: 50.0
+    # Heat generation per active module
+    heat_per_module: 10.0
+    # Overheat threshold (0.0-1.0)
+    overheat_threshold: 0.9
+    # Damage from overheating (per second)
+    overheat_damage: 1.0
+  
+  repair:
+    # Repair rate (hull points per second)
+    repair_rate: 5.0
+    # Module repair time (seconds per 10% damage)
+    module_repair_time: 2.0
+    # Repair power cost multiplier
+    power_cost: 0.5
+
+docking:
+  # Docking request range (meters)
+  request_range: 10000.0
+  # Docking approach speed limit (m/s)
+  approach_speed: 50.0
+  # Final docking range (meters)
+  final_range: 100.0
+  # Docking completion time (seconds)
+  completion_time: 5.0
+  # Undocking thrust distance (meters)
+  undock_distance: 500.0

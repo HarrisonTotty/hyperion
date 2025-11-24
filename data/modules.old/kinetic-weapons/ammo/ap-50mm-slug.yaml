@@ -1,0 +1,14 @@
+name: AP 50mm Slug
+type: slug
+size: 50mm
+desc: >-
+  Armor-piercing 50mm exotic-alloy slugs with phase-hardened cores. These
+  premium munitions represent the cutting edge of kinetic weapon technology,
+  capable of defeating even the heaviest armor systems.
+cost: 45
+weight: 12
+impact_damage: 55
+blast_radius: 0
+blast_damage: 0
+velocity: 2000
+armor_penetration: 10

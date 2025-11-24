@@ -1,0 +1,14 @@
+name: AP 100mm Shell
+type: shell
+size: 100mm
+desc: >-
+  Armor-piercing 100mm shells featuring depleted uranium penetrator cores.
+  Capable of defeating medium armor plating with concentrated kinetic impact
+  and minimal collateral blast damage.
+cost: 18
+weight: 8
+impact_damage: 18
+blast_radius: 2
+blast_damage: 1
+velocity: 850
+armor_penetration: 8

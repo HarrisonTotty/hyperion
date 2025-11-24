@@ -1,0 +1,18 @@
+name: Type 2 Plasma Torpedo
+model: Type 2 Plasma Torpedo
+kind: Torpedo
+manufacturer: Advanced Ordnance Systems
+desc: >-
+  Plasma torpedoes excel at dealing additional damage to enemy shields but
+  are not effective against unshielded targets.
+cost: 15
+weight: 3
+forward_thrust: 250
+max_turn_rate: 0.4
+load_time: 6.5
+tags: ["Torpedo", "Plasma"]
+impact_damage: 170
+blast_damage: 35
+blast_radius: 175
+lifetime: 15
+max_speed: 700

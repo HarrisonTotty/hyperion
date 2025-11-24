@@ -1,0 +1,21 @@
+id: rapid-missile-launcher
+type: missile-launcher
+name: "Rapid Missile Launcher"
+model: "SwiftStrike Mk3 Rapid Launcher"
+manufacturer: "Velocity Ordnance Systems"
+desc: >-
+  High-speed launcher optimized for rapid sequential missile deployment with minimal delay between volleys.
+lore: >-
+  Velocity Ordnance Systems designed the SwiftStrike for overwhelming enemy point defense.
+  By launching missiles in rapid succession with minimal delay, it saturates targeting systems
+  and increases the probability of successful strikes. The trade-off is a smaller magazine
+  capacity and longer reload times when the magazine is expended.
+cost: 180
+additional_hp: 15
+additional_power_consumption: 12
+additional_heat_generation: 25
+additional_weight: 120
+reload_time: 18.0
+missile_volley_delay: 0.5
+num_launched: 1
+ammo_capacity: 8

@@ -1,0 +1,122 @@
+name: Transport
+desc: >-
+  A medium-sized vessel for transporting personnel. Transports are
+  designed to safely move crew and troops between locations with
+  adequate defensive capabilities.
+size: Medium
+role: Support
+max_weight: 290
+max_modules: 14
+base_hp: 360
+build_points: 590
+bonuses:
+  module_hp: 0.15
+  module_cost_support: -0.2
+
+# Phase 2.6: Enhanced ship class data
+
+# Faction-specific manufacturers and variants
+manufacturers:
+  terran-federation:
+    manufacturer: "Colonial Transport Authority"
+    variant: "Mayflower-class"
+    lore: >-
+      Federation transports are built for passenger comfort and safety during long
+      voyages. Their spacious quarters and extensive life support systems make them
+      ideal for colony missions and military deployments alike.
+  
+  mars-coalition:
+    manufacturer: "Mariner Troop Transport"
+    variant: "Drop Ship-class"
+    lore: >-
+      Martian transports are optimized for rapid troop deployment and extraction.
+      Their hardened hulls and defensive systems allow them to operate in combat
+      zones, delivering reinforcements under fire.
+  
+  belt-alliance:
+    manufacturer: "Belt People Mover Co-op"
+    variant: "Settler-class"
+    lore: >-
+      Belt transports are no-frills vessels designed to move workers and colonists
+      between facilities efficiently. Their basic but reliable design prioritizes
+      safety and capacity over comfort.
+  
+  europa-compact:
+    manufacturer: "Europan Migration Services"
+    variant: "Voyager-class"
+    lore: >-
+      Europan transports feature advanced medical facilities and psychological support
+      systems for long-duration voyages. Their design reflects deep understanding of
+      the mental and physical challenges of extended space travel.
+  
+  outer-rim-collective:
+    manufacturer: "Frontier Transit Union"
+    variant: "Pioneer-class"
+    lore: >-
+      Outer Rim transports are community ships, often carrying entire families and
+      their possessions to new settlements. Each vessel becomes a temporary home,
+      with crews fostering strong bonds among passengers.
+  
+  corporate-syndicate:
+    manufacturer: "Personnel Logistics International"
+    variant: "Employee Transport-class"
+    lore: >-
+      Corporate transports are efficient personnel carriers optimized for cost-per-seat
+      metrics. While spartan, they meet safety requirements and allow corporations to
+      rapidly deploy workforces where needed.
+
+# Technical specifications
+length: 195.0  # meters
+width: 58.0    # meters
+height: 42.0   # meters
+mass: 68000.0  # metric tons (empty)
+crew_min: 18
+crew_max: 32
+cargo_capacity: 500.0  # cubic meters
+passenger_capacity: 250  # personnel
+
+# Performance characteristics
+max_acceleration: 28.0      # m/s²
+max_turn_rate: 18.0         # degrees/second
+max_warp_speed: 4.5         # multiples of light speed
+warp_efficiency: 0.72       # 0.0-1.0 rating
+sensor_range: 22000.0       # kilometers
+
+# Operational metadata
+operational_range: 18.0     # AU
+build_time: 165             # days
+maintenance_cost: 520.0     # credits per day
+fuel_capacity: 16000.0      # units
+fuel_consumption: 95.0      # units per hour
+
+# Lore and flavor
+lore: >-
+  Transports are the vessels that move humanity between worlds, carrying colonists,
+  military personnel, workers, and travelers across the vast distances of space. Unlike
+  cargo freighters that move goods or combat vessels that project power, transports'
+  precious cargo is people—each with hopes, fears, and destinations that will shape
+  their lives.
+  
+  The transport's design reflects the responsibility of carrying human life. Redundant
+  life support systems, extensive medical facilities, and comfortable quarters for
+  long voyages are standard. Emergency escape pods, hull reinforcement, and defensive
+  capabilities ensure passenger safety even in dangerous situations. Military transports
+  add armor and point defense systems, allowing them to deliver troops into contested
+  zones.
+  
+  Transport crews develop strong service orientations, viewing their passengers as guests
+  to be protected and cared for. The best transport captains balance efficiency with
+  compassion, knowing that for many passengers, this journey represents a major life
+  transition. Stories abound of transport crews going above and beyond—delaying departures
+  for late arrivals, organizing impromptu celebrations, and providing comfort during
+  emergencies.
+
+year_introduced: 2277
+
+notable_ships:
+  - "TFS New Horizons"
+  - "MSS Red Deployment"
+  - "BAV Cheap Seats"
+  - "ECS Deep Voyage"
+  - "ORC Next Chapter"
+  - "CSS Human Capital"

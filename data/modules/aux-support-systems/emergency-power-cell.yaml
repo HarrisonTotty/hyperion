@@ -1,0 +1,19 @@
+id: "emergency-power-cell"
+type: "aux-support-system"
+cost: 250
+name: "Emergency Power Cell"
+model: "EPC-500 Emergency Cell"
+manufacturer: "Auxiliary Systems Corp"
+desc: "Provides a burst of emergency power to critical systems. Limited to 3 uses before requiring station recharge."
+lore: >-
+  ASC's EPC-500 is a lifesaver when power systems are damaged or overloaded.
+  The emergency cell can provide a critical power boost to keep shields online
+  or weapons charged during desperate situations.
+hp_regained: 0
+energy_restored: 500
+heat_dissipated: 0
+num_uses: 3
+additional_hp: 0
+additional_power_consumption: 0
+additional_heat_generation: 0
+additional_weight: 5

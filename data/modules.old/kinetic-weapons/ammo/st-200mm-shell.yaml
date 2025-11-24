@@ -1,0 +1,14 @@
+name: ST 200mm Shell
+type: shell
+size: 200mm
+desc: >-
+  Standard 200mm shells for battleship-class cannons. These colossal
+  projectiles represent the pinnacle of conventional shell technology,
+  combining extreme mass with devastating explosive payloads.
+cost: 35
+weight: 20
+impact_damage: 28
+blast_radius: 8
+blast_damage: 8
+velocity: 650
+armor_penetration: 7

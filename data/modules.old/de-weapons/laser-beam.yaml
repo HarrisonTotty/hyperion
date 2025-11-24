@@ -1,0 +1,17 @@
+name: Laser Beam
+model: LLV7 FocalPoint 9
+kind: Laser Beam
+manufacturer: SunScore Systems Inc.
+desc: >-
+  A high-wattage laser beam capable of traversing incredibly long ranges at
+  the speed of light. Deals a small amount of continuous damage at very long
+  ranges.
+cost: 100
+weight: 150
+fire_delay: 1
+recharge_time: 5
+speed: -1
+max_range: 10000
+tags: ["Photon", "Beam", "Manual"]
+damage: 5
+energy_consumption: 10

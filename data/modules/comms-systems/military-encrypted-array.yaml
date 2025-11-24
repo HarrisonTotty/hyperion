@@ -1,0 +1,23 @@
+id: "military-encrypted-array"
+type: "comms-system"
+cost: 600
+name: Military-Grade Encrypted Array
+model: MEC-750 Tactical Comms
+manufacturer: Forge Defense Solutions
+desc: >-
+  Hardened military communications system with enhanced encryption protocols
+  and electromagnetic shielding. Designed for secure tactical communications
+  in hostile environments.
+lore: >-
+  Forge Defense's MEC-750 is standard issue for military vessels, featuring
+  reinforced EM shielding and military-grade encryption algorithms. The system
+  can maintain secure communications even under jamming and electronic warfare
+  conditions.
+comm_range: 150000
+frequency_range: [10, 500]
+encryption_lvl: 8
+power_consumption: 18
+additional_hp: 10
+additional_power_consumption: 5
+additional_heat_generation: 8
+additional_weight: 5

@@ -1,0 +1,18 @@
+id: "tachyon-pulse"
+type: "radial-emission-system"
+cost: 600
+name: "Tachyon Pulse"
+model: "TP-5000 Tachyon Emitter"
+manufacturer: "Exotic Particle Systems"
+desc: "Emits a burst of tachyon particles that can penetrate shields and disrupt FTL systems."
+lore: >-
+  EPS's tachyon pulse represents cutting-edge particle physics applied to
+  warfare. The exotic particle burst can penetrate energy shields and
+  temporarily disable warp cores, though the technology remains experimental
+  and energy-intensive.
+max_pulse_range: 5000
+pulse_speed: 5000
+additional_hp: 10
+additional_power_consumption: 400
+additional_heat_generation: 500
+additional_weight: 30

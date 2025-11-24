@@ -1,0 +1,17 @@
+id: deflector-plating
+name: "Deflector Plating"
+desc: >-
+  Reinforced armor plating for additional hull protection.
+extended_desc: >-
+  Deflector plating provides additional armor that reduces incoming
+  damage by a percentage. Multiple plating modules can be installed to
+  stack armor protection, making the ship more resilient against attacks.
+groups: ["Defense", "Armor", "Passive"]
+required: false
+has_varients: false
+base_cost: 8
+max_slots: 3
+base_hp: 20
+base_power_consumption: 0.0
+base_heat_generation: 0.0
+base_weight: 200

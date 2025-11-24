@@ -1,0 +1,14 @@
+name: ST 100mm Shell
+type: shell
+size: 100mm
+desc: >-
+  Standard 100mm shells for medium cannons. A workhorse ammunition type
+  offering reliable performance across various combat scenarios with good
+  balance between penetration and blast damage.
+cost: 10
+weight: 6
+impact_damage: 12
+blast_radius: 4
+blast_damage: 3
+velocity: 750
+armor_penetration: 5

@@ -1,0 +1,25 @@
+id: "20mm-light-railgun"
+name: "20mm Light Railgun"
+description: "Compact electromagnetic railgun delivering armor-piercing capability for small vessels."
+cost: 200
+model: "EM-20 Viper"
+manufacturer: "Electromagnetic Dynamics Corp."
+lore: >-
+  The EM-20 'Viper' revolutionized small craft armament when it launched in 2183. By utilizing
+  dual parallel conducting rails to accelerate ferromagnetic slugs to hypersonic velocities,
+  it provides genuine anti-armor capability without the bulk of chemical propellant systems.
+  The Viper's low power requirements make it the weapon of choice for corvettes and scouts.
+additional_hp: 0
+additional_power_consumption: 15
+additional_heat_generation: 20
+additional_weight: 10
+stats:
+  ammo:
+    type: slug
+    size: 20mm
+  tags: ["Single-Fire", "Automatic"]
+  reload_time: 0.9
+  num_projectiles: 1
+  ammo_consumption: 1
+  accuracy: 0.94
+  effective_range: 4000

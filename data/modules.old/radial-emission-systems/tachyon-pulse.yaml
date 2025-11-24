@@ -1,0 +1,12 @@
+id: "tachyon-pulse"
+name: "Tachyon Pulse Generator"
+description: "Emits a tachyon pulse that disrupts FTL systems, preventing warp/jump within range."
+cost: 150
+stats:
+  ftl_disruption: true
+  range: 3000  # meters
+  cooldown: 90  # seconds between uses
+  power_consumption: 400  # MW per activation
+  heat_generation: 500  # K
+  mass: 20  # tons
+  effect_duration: 30  # seconds of FTL disruption

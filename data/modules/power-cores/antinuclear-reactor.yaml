@@ -1,0 +1,21 @@
+id: "antinuclear-reactor"
+type: "power-core"
+name: "Antinuclear Reactor"
+model: "ANR-3500"
+manufacturer: "Stellar Dynamics Ltd"
+desc: >-
+  Matter-antimatter annihilation reactor. Incredible power generation but
+  requires careful handling and antimatter fuel.
+lore: >-
+  Stellar Dynamics' ANR-3500 harnesses the ultimate energy source: matter-antimatter
+  annihilation. Each reaction releases pure energy at 100% efficiency, but the
+  containment systems must be flawless. A single magnetic bottle failure could
+  vaporize the entire ship. Only the most experienced engineering crews dare to
+  operate these systems.
+cost: 450
+additional_hp: 5
+additional_power_consumption: 0
+additional_heat_generation: 40
+additional_weight: 25
+energy_production: 85
+energy_capacity: 1800

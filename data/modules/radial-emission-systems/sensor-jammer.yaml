@@ -1,0 +1,18 @@
+id: "sensor-jammer"
+type: "radial-emission-system"
+cost: 400
+name: "Sensor Jammer"
+model: "SJ-2000 Jamming Array"
+manufacturer: "Electronic Countermeasures Inc."
+desc: "Broadcasts jamming signals that interfere with enemy sensors and targeting systems."
+lore: >-
+  ECI's sensor jammer floods the battlefield with electronic noise, degrading
+  enemy sensor accuracy and making missile locks more difficult. The system
+  continuously broadcasts during combat, providing ongoing electronic warfare
+  support.
+max_pulse_range: 2000
+pulse_speed: 3000
+additional_hp: 0
+additional_power_consumption: 150
+additional_heat_generation: 200
+additional_weight: 12

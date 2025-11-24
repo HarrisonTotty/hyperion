@@ -1,0 +1,26 @@
+id: "50mm-heavy-coilgun"
+name: "50mm Heavy Coilgun"
+description: "Heavy coilgun with hundreds of precision magnetic coils delivering extreme accuracy and velocity."
+cost: 580
+model: "MG-50 Hammer"
+manufacturer: "Titan Ordnance Systems"
+lore: >-
+  The MG-50 'Hammer' represents the apex of coilgun engineering. Its extended acceleration
+  barrel houses hundreds of precision-tuned magnetic coils that progressively accelerate
+  projectiles to devastating velocities. Where railguns sacrifice accuracy for raw power,
+  the Hammer delivers both - though at significantly higher cost and maintenance complexity.
+  Preferred by captains who demand perfection in their weapons systems.
+additional_hp: 10
+additional_power_consumption: 50
+additional_heat_generation: 45
+additional_weight: 38
+stats:
+  ammo:
+    type: slug
+    size: 50mm
+  tags: ["Single-Fire", "Manual"]
+  reload_time: 2.5
+  num_projectiles: 1
+  ammo_consumption: 1
+  accuracy: 0.91
+  effective_range: 9000
