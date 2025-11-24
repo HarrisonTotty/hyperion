@@ -7,7 +7,7 @@ extended_desc: >-
   such as railguns, autocannons, and mass drivers. These weapons use
   physical projectiles and require ammunition, but are highly effective
   against armored targets.
-groups: ["Weapon", "Offense", "Kinetic"]
+groups: ["Offense"]
 required: false
 has_varients: true
 base_cost: 12

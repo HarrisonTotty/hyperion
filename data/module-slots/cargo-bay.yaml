@@ -6,7 +6,7 @@ extended_desc: >-
   Cargo bays expand the ship's storage capacity, allowing it to carry
   more goods, resources, and supplies. Essential for trade, salvage, and
   long-duration missions where resupply opportunities are limited.
-groups: ["Support", "Cargo", "Utility"]
+groups: ["Support"]
 required: false
 has_varients: false
 base_cost: 5

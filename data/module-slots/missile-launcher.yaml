@@ -7,7 +7,7 @@ extended_desc: >-
   and pursue enemy targets. Different launcher models support various
   missile types and have different reload rates and capacity. Missiles
   are effective against fast-moving targets.
-groups: ["Weapon", "Offense", "Missile"]
+groups: ["Offense"]
 required: false
 has_varients: true
 base_cost: 14

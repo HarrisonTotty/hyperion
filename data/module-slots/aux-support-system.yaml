@@ -7,7 +7,7 @@ extended_desc: >-
   functioning like consumable repair kits or energy reserves. They can
   restore hull integrity, replenish energy, or dissipate heat. Limited
   uses until recharged at a station.
-groups: ["Support", "Emergency", "Consumable"]
+groups: ["Support"]
 required: false
 has_varients: true
 base_cost: 7

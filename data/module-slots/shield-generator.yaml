@@ -7,7 +7,7 @@ extended_desc: >-
   damage before it reaches the ship's hull. Different generators provide
   varying levels of shield strength and recharge rates. Shields are
   essential for survival in combat situations.
-groups: ["Essential", "Defense", "Support"]
+groups: ["Defense"]
 required: true
 has_varients: true
 base_cost: 12

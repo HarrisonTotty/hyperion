@@ -7,7 +7,7 @@ extended_desc: >-
   deal massive damage on impact. While slower and less accurate than
   missiles, torpedoes pack significantly more explosive power and are
   devastating against large capital ships and stations.
-groups: ["Weapon", "Offense", "Torpedo"]
+groups: ["Offense"]
 required: false
 has_varients: false
 base_cost: 16

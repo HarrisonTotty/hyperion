@@ -7,7 +7,7 @@ extended_desc: >-
   either continuous warp acceleration or instantaneous jump teleportation.
   Different cores provide varying FTL capabilities, engagement times, and
   jump ranges. Essential for interstellar travel.
-groups: ["Support", "FTL", "Propulsion"]
+groups: ["Support"]
 required: false
 has_varients: true
 base_cost: 20

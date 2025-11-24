@@ -6,7 +6,7 @@ extended_desc: >-
   Deflector plating provides additional armor that reduces incoming
   damage by a percentage. Multiple plating modules can be installed to
   stack armor protection, making the ship more resilient against attacks.
-groups: ["Defense", "Armor", "Passive"]
+groups: ["Defense"]
 required: false
 has_varients: false
 base_cost: 8

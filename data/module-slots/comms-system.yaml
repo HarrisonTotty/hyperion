@@ -7,7 +7,7 @@ extended_desc: >-
   hail other vessels, and coordinate with allied forces. Different systems
   provide varying communication ranges and encryption capabilities. Essential
   for coordinating with teammates and interacting with other ships and stations.
-groups: ["Essential", "Communications", "Support"]
+groups: ["Support"]
 required: true
 has_varients: true
 base_cost: 8

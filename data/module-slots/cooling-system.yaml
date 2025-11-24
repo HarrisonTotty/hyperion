@@ -7,7 +7,7 @@ extended_desc: >-
   generating and storing coolant that can be allocated to reduce heat
   levels. Essential for maintaining optimal performance during extended
   combat or high-power operations.
-groups: ["Support", "Thermal", "Engineering"]
+groups: ["Support"]
 required: false
 has_varients: true
 base_cost: 9

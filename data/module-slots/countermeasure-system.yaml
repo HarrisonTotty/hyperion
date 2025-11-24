@@ -7,7 +7,7 @@ extended_desc: >-
   using chaff, flares, electronic warfare, and point-defense weapons.
   Different systems offer varying effectiveness against different missile
   types. Essential for surviving missile-heavy combat.
-groups: ["Defense", "Countermeasure", "Active"]
+groups: ["Defense"]
 required: false
 has_varients: true
 base_cost: 11

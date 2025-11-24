@@ -7,7 +7,7 @@ extended_desc: >-
   celestial bodies, and anomalies in space. Different arrays provide
   varying scan ranges, detail levels, and scan times. Critical for
   tactical awareness and exploration.
-groups: ["Support", "Sensors", "Detection"]
+groups: ["Support"]
 required: true
 has_varients: true
 base_cost: 11

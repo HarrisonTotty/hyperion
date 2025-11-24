@@ -7,7 +7,7 @@ extended_desc: >-
   sublight speed. Different impulse engines provide varying levels of
   thrust output. The impulse engine is essential for ship movement and
   maneuvering in normal space.
-groups: ["Essential", "Propulsion", "Drive"]
+groups: ["Support"]
 required: true
 has_varients: true
 base_cost: 15

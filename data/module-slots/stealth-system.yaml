@@ -7,7 +7,7 @@ extended_desc: >-
   signature, making it harder to detect and target. Different systems
   provide varying levels of detectability reduction and increase enemy
   scan times. Useful for reconnaissance and surprise attacks.
-groups: ["Support", "Stealth", "Tactical"]
+groups: ["Support"]
 required: false
 has_varients: true
 base_cost: 13
