@@ -2,7 +2,7 @@
 name = "hyperion"
 version = "0.1.0"
 edition = "2021"
-authors = ["HYPERION Team"]
+authors = ["Harrison Totty <harrison+hyperion@totty.dev"]
 description = "A modular and customizable spaceship bridge simulation game"
 license = "MIT"
 
