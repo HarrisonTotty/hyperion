@@ -69,39 +69,6 @@ hyperion start --log-level debug
 hyperion start -d ./custom-data -l trace
 ```
 
-## Data Directory Structure
-
-The `data/` directory contains game configuration files:
-
-```
-data/
-├── ai.yaml              # AI behavior configuration
-├── factions.yaml        # Faction definitions
-├── map.yaml            # Galaxy generation parameters
-├── modules.yaml        # Module type configuration
-├── races.yaml          # Alien race definitions
-├── simulation.yaml     # Simulation parameters
-├── modules/            # Individual module definitions
-│   ├── phaser_array_mk1.yaml
-│   ├── photon_torpedo_mk1.yaml
-│   └── ...
-└── ship-classes/       # Ship class definitions
-    ├── battleship.yaml
-    ├── corvette.yaml
-    └── ...
-```
-
-## API Endpoints
-
-### REST API
-
-- `GET /health` - Health check endpoint
-- `GET /info` - Server and configuration information
-
-### GraphQL API
-
-GraphQL endpoint available at `/graphql` (to be implemented)
-
 ## Development
 
 ### Running Tests
@@ -119,42 +86,3 @@ cargo run -- start
 # Or specify a different directory
 cargo run -- start --data-dir ./data
 ```
-
-### Project Structure
-
-```
-hyperion/
-├── src/
-│   ├── main.rs         # CLI entry point
-│   ├── lib.rs          # Library root
-│   ├── config.rs       # Configuration loading
-│   ├── server.rs       # Rocket server setup
-│   ├── api.rs          # REST/GraphQL endpoints
-│   ├── simulation.rs   # Bevy ECS simulation
-│   └── models.rs       # Game data models
-├── data/               # Default game configuration
-├── Cargo.toml          # Rust dependencies
-└── README.md
-```
-
-## Customization
-
-HYPERION is designed to be highly customizable. You can:
-
-1. **Create Custom Ship Classes**: Add YAML files to `data/ship-classes/`
-2. **Design New Modules**: Add YAML files to `data/modules/`
-3. **Define New Factions**: Edit `data/factions.yaml`
-4. **Add Alien Races**: Edit `data/races.yaml`
-5. **Tune Simulation**: Adjust parameters in `data/simulation.yaml`
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit pull requests or open issues.
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Credits
-
-Inspired by games like Star Trek Bridge Commander, Artemis Spaceship Bridge Simulator, Dwarf Fortress, and No Man's Sky.
