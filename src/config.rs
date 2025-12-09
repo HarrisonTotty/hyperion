@@ -707,15 +707,9 @@ impl GameConfig {
                 let path = entry.path();
                 
                 if path.is_dir() {
-                    // Skip weapon directories - they use WeaponConfig
-                    if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
-                        if dir_name.ends_with("-weapons") {
-                            debug!("Skipping weapon directory: {}", dir_name);
-                            continue;
-                        }
-                    }
-                    
-                    // Recursively scan subdirectories
+                    // Recursively scan all subdirectories
+                    // Note: Weapon directories (kinetic-weapons, de-weapons, etc.) now contain
+                    // proper ModuleVariant files and should be included
                     scan_directory(&path, variants_by_type, module_slots)?;
                 } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                     debug!("Loading variant: {}", path.display());
@@ -1236,19 +1230,19 @@ max_thrust: 50000
     }
     
     #[test]
-    fn test_load_module_variants_skips_weapons() {
+    fn test_load_module_variants_includes_weapons() {
         use std::env;
-        
+
         // Create a temporary directory structure
-        let temp_dir = env::temp_dir().join("hyperion_test_variants_skip_weapons");
+        let temp_dir = env::temp_dir().join("hyperion_test_variants_include_weapons");
         let _ = fs::remove_dir_all(&temp_dir);
         let modules_dir = temp_dir.join("modules");
         let power_cores_dir = modules_dir.join("power-cores");
         let weapons_dir = modules_dir.join("kinetic-weapons");
         fs::create_dir_all(&power_cores_dir).unwrap();
         fs::create_dir_all(&weapons_dir).unwrap();
-        
-        // Create a valid variant
+
+        // Create a valid power core variant
         let power_core_yaml = r#"
 id: test-reactor
 type: power-core
@@ -1266,25 +1260,41 @@ energy_production: 1000
 energy_capacity: 5000
 "#;
         fs::write(power_cores_dir.join("test-reactor.yaml"), power_core_yaml).unwrap();
-        
-        // Create a weapon file (should be skipped)
+
+        // Create a kinetic weapon variant (should be included now)
         let weapon_yaml = r#"
-id: test-weapon
+id: test-cannon
 type: kinetic-weapon
-name: "Test Weapon"
+name: "Test Cannon"
+model: "TC-100"
+manufacturer: "Test Corp"
+desc: "A test cannon"
+lore: "Test lore"
+cost: 200
+additional_hp: 15
+additional_power_consumption: 10.0
+additional_heat_generation: 20.0
+additional_weight: 100
+ammo_type: shell
+ammo_size: 100mm
+reload_time: 3.0
+num_projectiles: 1
+ammo_consumed: 1
+accuracy: 0.85
+effective_range: 3000
 "#;
-        fs::write(weapons_dir.join("test-weapon.yaml"), weapon_yaml).unwrap();
-        
+        fs::write(weapons_dir.join("test-cannon.yaml"), weapon_yaml).unwrap();
+
         // Load module variants
         let result = GameConfig::load_module_variants(modules_dir.clone(), None);
-        assert!(result.is_ok());
-        
+        assert!(result.is_ok(), "Failed to load variants: {:?}", result.err());
+
         let variants = result.unwrap();
-        // Should only have power-core, not kinetic-weapon (skipped)
-        assert_eq!(variants.len(), 1);
-        assert!(variants.contains_key("power-core"));
-        assert!(!variants.contains_key("kinetic-weapon"));
-        
+        // Should have BOTH power-core AND kinetic-weapon
+        assert_eq!(variants.len(), 2, "Expected 2 variant types, got {}", variants.len());
+        assert!(variants.contains_key("power-core"), "Missing power-core variants");
+        assert!(variants.contains_key("kinetic-weapon"), "Missing kinetic-weapon variants");
+
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);
     }
