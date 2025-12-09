@@ -8,7 +8,7 @@ role: Versatile
 max_weight: 2200
 max_modules: 18
 base_hp: 500
-build_points: 900
+build_points: 1125
 bonuses:
   module_cost: -0.15
   module_hp: 0.1
