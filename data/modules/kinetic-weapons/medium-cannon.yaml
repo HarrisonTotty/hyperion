@@ -14,7 +14,7 @@ cost: 75
 additional_hp: 15
 additional_power_consumption: 12
 additional_heat_generation: 20
-additional_weight: 150
+additional_weight: 60
 ammo_type: shell
 ammo_size: 100mm
 reload_time: 3.0

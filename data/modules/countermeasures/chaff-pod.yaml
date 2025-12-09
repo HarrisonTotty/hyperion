@@ -12,4 +12,4 @@ lore: >-
 additional_hp: 0
 additional_power_consumption: 10
 additional_heat_generation: 5
-additional_weight: 1
+additional_weight: 2

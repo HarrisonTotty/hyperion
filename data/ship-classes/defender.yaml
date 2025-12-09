@@ -5,7 +5,7 @@ desc: >-
   any other class.
 size: Large
 role: Defense
-max_weight: 400
+max_weight: 3500
 max_modules: 20
 base_hp: 600
 build_points: 1200

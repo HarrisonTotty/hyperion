@@ -16,7 +16,7 @@ cost: 130
 additional_hp: 18
 additional_power_consumption: 18
 additional_heat_generation: 38
-additional_weight: 170
+additional_weight: 70
 damage: 65
 recharge_time: 4.0
 max_range: 9000

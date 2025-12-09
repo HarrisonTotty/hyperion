@@ -15,7 +15,7 @@ cost: 100
 additional_hp: 12
 additional_power_consumption: 16
 additional_heat_generation: 15
-additional_weight: 110
+additional_weight: 45
 ammo_type: slug
 ammo_size: 30mm
 reload_time: 4.5

@@ -17,4 +17,4 @@ power_consumption: 70
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 0
-additional_weight: 0
+additional_weight: 25

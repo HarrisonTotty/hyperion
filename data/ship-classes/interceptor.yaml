@@ -5,7 +5,7 @@ desc: >-
   making them ideal for rapid response and pursuit operations.
 size: Small
 role: Offense
-max_weight: 140
+max_weight: 800
 max_modules: 10
 base_hp: 200
 build_points: 400

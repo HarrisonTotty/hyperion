@@ -5,7 +5,7 @@ desc: >-
   operations while remaining undetected.
 size: Small
 role: Support
-max_weight: 150
+max_weight: 850
 max_modules: 11
 base_hp: 220
 build_points: 420

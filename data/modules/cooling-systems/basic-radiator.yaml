@@ -14,4 +14,4 @@ generated_cooling: 300
 additional_hp: 0
 additional_power_consumption: 20
 additional_heat_generation: 0
-additional_weight: 10
+additional_weight: 0

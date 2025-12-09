@@ -5,7 +5,7 @@ desc: >-
   far from base with their massive energy reserves.
 size: Medium
 role: Support
-max_weight: 300
+max_weight: 1200
 max_modules: 14
 base_hp: 350
 build_points: 620

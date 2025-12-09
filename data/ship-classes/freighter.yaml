@@ -6,7 +6,7 @@ desc: >-
   sustained operations.
 size: Large
 role: Support
-max_weight: 450
+max_weight: 2000
 max_modules: 18
 base_hp: 480
 build_points: 850

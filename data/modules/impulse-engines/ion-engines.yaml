@@ -17,4 +17,4 @@ power_consumption: 10
 additional_hp: 10
 additional_power_consumption: 50
 additional_heat_generation: 30
-additional_weight: 5
+additional_weight: 10

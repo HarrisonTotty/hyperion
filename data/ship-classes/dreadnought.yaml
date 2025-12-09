@@ -5,7 +5,7 @@ desc: >-
   dominating the battlefield with overwhelming firepower.
 size: Large
 role: Offense
-max_weight: 420
+max_weight: 3200
 max_modules: 19
 base_hp: 550
 build_points: 1100

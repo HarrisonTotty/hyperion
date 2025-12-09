@@ -16,6 +16,6 @@ cost: 180
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 3
-additional_weight: 15
+additional_weight: 5
 energy_production: 25
 energy_capacity: 1200

@@ -16,4 +16,4 @@ scan_time: 1.5
 additional_hp: 8
 additional_power_consumption: 80
 additional_heat_generation: 70
-additional_weight: 15
+additional_weight: 10

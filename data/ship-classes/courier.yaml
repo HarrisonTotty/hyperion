@@ -5,7 +5,7 @@ desc: >-
   dangerous space to deliver critical communications.
 size: Medium
 role: Support
-max_weight: 240
+max_weight: 1100
 max_modules: 13
 base_hp: 320
 build_points: 600

@@ -14,5 +14,5 @@ cost: 40
 additional_hp: 0
 additional_power_consumption: 30
 additional_heat_generation: 20
-additional_weight: 10
+additional_weight: 0
 angular_thrust: 400

@@ -15,4 +15,4 @@ pulse_speed: 1000
 additional_hp: 5
 additional_power_consumption: 300
 additional_heat_generation: 400
-additional_weight: 18
+additional_weight: 10

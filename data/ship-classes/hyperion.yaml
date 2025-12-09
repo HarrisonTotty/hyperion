@@ -5,7 +5,7 @@ desc: >-
   but are more lacking in hull thickness.
 size: Large
 role: Offense
-max_weight: 360
+max_weight: 2500
 max_modules: 17
 base_hp: 450
 build_points: 1000

@@ -14,7 +14,7 @@ cost: 160
 additional_hp: 20
 additional_power_consumption: 18
 additional_heat_generation: 35
-additional_weight: 180
+additional_weight: 75
 reload_time: 20.0
 missile_volley_delay: 2.0
 num_launched: 3

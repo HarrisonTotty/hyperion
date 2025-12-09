@@ -5,7 +5,7 @@ desc: >-
   their agile defensive capabilities.
 size: Small
 role: Defense
-max_weight: 160
+max_weight: 900
 max_modules: 11
 base_hp: 280
 build_points: 450

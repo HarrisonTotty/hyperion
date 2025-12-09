@@ -14,6 +14,6 @@ cost: 50
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 0
-additional_weight: 0
+additional_weight: 10
 max_shield_strength: 2000
 shield_recharge_rate: 80

@@ -15,4 +15,4 @@ max_slots: 1
 base_hp: 6
 base_power_consumption: 7.0
 base_heat_generation: 3.0
-base_weight: 70
+base_weight: 50

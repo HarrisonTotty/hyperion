@@ -5,7 +5,7 @@ desc: >-
   adequate defensive capabilities.
 size: Medium
 role: Support
-max_weight: 290
+max_weight: 1300
 max_modules: 14
 base_hp: 360
 build_points: 650

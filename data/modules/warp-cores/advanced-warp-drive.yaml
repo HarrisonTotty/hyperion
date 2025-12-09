@@ -16,4 +16,4 @@ jump_distance: 0
 additional_hp: 5
 additional_power_consumption: 80
 additional_heat_generation: 60
-additional_weight: 40
+additional_weight: 60

@@ -5,7 +5,7 @@ desc: >-
   formidable in direct combat engagements.
 size: Medium
 role: Offense
-max_weight: 280
+max_weight: 1800
 max_modules: 15
 base_hp: 400
 build_points: 800

@@ -5,7 +5,7 @@ desc: >-
   vessels for them to effectively deploy high-explosive missiles or torpedos.
 size: Large
 role: Offense
-max_weight: 410
+max_weight: 2800
 max_modules: 19
 base_hp: 580
 build_points: 1050
