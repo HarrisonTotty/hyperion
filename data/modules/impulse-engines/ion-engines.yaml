@@ -15,6 +15,6 @@ lore: >-
 max_thrust: 400
 power_consumption: 10
 additional_hp: 10
-additional_power_consumption: 50
+additional_power_consumption: 15
 additional_heat_generation: 30
 additional_weight: 10

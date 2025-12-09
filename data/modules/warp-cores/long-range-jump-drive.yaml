@@ -15,6 +15,6 @@ warp_type: jump
 warp_delay: 30.0
 jump_distance: 5000
 additional_hp: 10
-additional_power_consumption: 300
+additional_power_consumption: 80
 additional_heat_generation: 350
 additional_weight: 100

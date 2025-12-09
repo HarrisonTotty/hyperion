@@ -12,7 +12,7 @@ lore: >-
   about the power draw and frequent maintenance intervals.
 cost: 30
 additional_hp: 5
-additional_power_consumption: 55
+additional_power_consumption: 30
 additional_heat_generation: 45
 additional_weight: 15
 angular_thrust: 1600

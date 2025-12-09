@@ -16,5 +16,5 @@ additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 10
 additional_weight: 0
-energy_production: 20
+energy_production: 150
 energy_capacity: 1000

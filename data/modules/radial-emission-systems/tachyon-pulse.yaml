@@ -13,6 +13,6 @@ lore: >-
 max_pulse_range: 5000
 pulse_speed: 5000
 additional_hp: 10
-additional_power_consumption: 400
+additional_power_consumption: 70
 additional_heat_generation: 500
 additional_weight: 20

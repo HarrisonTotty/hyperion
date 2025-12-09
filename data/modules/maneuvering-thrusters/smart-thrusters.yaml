@@ -12,7 +12,7 @@ lore: >-
   ground between classical reliability and modern performance.
 cost: 15
 additional_hp: 5
-additional_power_consumption: 20
+additional_power_consumption: 18
 additional_heat_generation: 10
 additional_weight: 5
 angular_thrust: 1000

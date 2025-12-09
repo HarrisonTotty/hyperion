@@ -12,7 +12,7 @@ lore: >-
   by modern standards, but incredibly durable and easy to repair with basic tools.
 cost: 8
 additional_hp: 10
-additional_power_consumption: 25
+additional_power_consumption: 12
 additional_heat_generation: 15
 additional_weight: 10
 angular_thrust: 700

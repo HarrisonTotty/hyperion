@@ -11,7 +11,7 @@ lore: >-
   explorers who need shields that can bounce back quickly from minor encounters.
 cost: 28
 additional_hp: 0
-additional_power_consumption: 50
+additional_power_consumption: 25
 additional_heat_generation: 50
 additional_weight: 15
 max_shield_strength: 1500

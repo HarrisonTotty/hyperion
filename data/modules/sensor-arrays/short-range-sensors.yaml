@@ -13,6 +13,6 @@ scan_range: 5000
 detail_level: 6
 scan_time: 2.0
 additional_hp: 0
-additional_power_consumption: 30
+additional_power_consumption: 8
 additional_heat_generation: 25
 additional_weight: 0

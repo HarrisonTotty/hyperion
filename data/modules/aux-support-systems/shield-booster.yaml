@@ -15,6 +15,6 @@ energy_restored: 0
 heat_dissipated: 0
 num_uses: 2
 additional_hp: 5
-additional_power_consumption: 150
+additional_power_consumption: 25
 additional_heat_generation: 50
 additional_weight: 5

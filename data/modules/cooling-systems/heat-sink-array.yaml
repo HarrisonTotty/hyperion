@@ -12,6 +12,6 @@ lore: >-
 maximum_coolant: 1500
 generated_cooling: 400
 additional_hp: 0
-additional_power_consumption: 10
+additional_power_consumption: 8
 additional_heat_generation: 0
 additional_weight: 5

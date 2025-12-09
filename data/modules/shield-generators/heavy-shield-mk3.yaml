@@ -12,7 +12,7 @@ lore: >-
   worth every megawatt.
 cost: 40
 additional_hp: 5
-additional_power_consumption: 100
+additional_power_consumption: 45
 additional_heat_generation: 80
 additional_weight: 25
 max_shield_strength: 4000
