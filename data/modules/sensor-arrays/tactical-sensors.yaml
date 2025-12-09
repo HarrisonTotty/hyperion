@@ -1,6 +1,6 @@
 id: "tactical-sensors"
 type: "sensor-array"
-cost: 160
+cost: 18
 name: "Tactical Combat Sensors"
 model: "TCS-12000 Tactical Suite"
 manufacturer: "Forge Defense Solutions"

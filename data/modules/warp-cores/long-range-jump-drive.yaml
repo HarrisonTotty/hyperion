@@ -1,6 +1,6 @@
 id: "long-range-jump-drive"
 type: "warp-jump-core"
-cost: 850
+cost: 80
 name: "Interstellar Jump Drive"
 model: "IJD-5000"
 manufacturer: "Quantum Jump Technologies"

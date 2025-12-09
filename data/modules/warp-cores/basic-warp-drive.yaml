@@ -1,6 +1,6 @@
 id: "basic-warp-drive"
 type: "warp-jump-core"
-cost: 300
+cost: 0
 name: "Standard Warp Drive"
 model: "WD-1500"
 manufacturer: "Stellar Dynamics Ltd"

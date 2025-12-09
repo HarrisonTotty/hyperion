@@ -1,6 +1,6 @@
 id: "ion-engines"
 type: "impulse-engine"
-cost: 150
+cost: 10
 name: Ion Engines
 model: IE83J Ion Engine
 manufacturer: Azul Deep Space Industries

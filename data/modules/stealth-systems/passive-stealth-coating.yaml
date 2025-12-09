@@ -1,6 +1,6 @@
 id: "passive-stealth-coating"
 type: "stealth-system"
-cost: 150
+cost: 0
 name: "Passive Stealth Coating"
 model: "PSC-30 Radar Absorbent Material"
 manufacturer: "Stealth Technologies Corp"
