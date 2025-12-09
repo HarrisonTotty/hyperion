@@ -10,7 +10,7 @@ lore: >-
   the PM-5 features rapid reload mechanisms that minimize downtime between engagements.
   The streamlined design reduces weight and power draw, though magazine capacity is limited.
   Ideal for hit-and-run tactics where quick follow-up shots matter more than sustained fire.
-cost: 140
+cost: 55
 additional_hp: 12
 additional_power_consumption: 8
 additional_heat_generation: 18

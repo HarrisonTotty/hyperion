@@ -11,7 +11,7 @@ lore: >-
   introduced in 2195. Its compact magnetic confinement design provides
   exceptional power-to-weight ratio, making it the standard for cruiser-class
   vessels throughout known space.
-cost: 250
+cost: 120
 additional_hp: 10
 additional_power_consumption: 0
 additional_heat_generation: 25

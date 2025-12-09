@@ -1,6 +1,6 @@
 id: "short-range-jump-drive"
 type: "warp-jump-core"
-cost: 1500
+cost: 450
 name: "Tactical Jump Drive"
 model: "TJD-50"
 manufacturer: "Quantum Jump Technologies"

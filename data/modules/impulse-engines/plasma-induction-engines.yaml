@@ -1,6 +1,6 @@
 id: "plasma-induction-engines"
 type: "impulse-engine"
-cost: 1200
+cost: 250
 name: Plasma Induction Engines
 model: PIE-500 Plasma Induction Engine
 manufacturer: TitanCore Propulsion Systems

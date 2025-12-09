@@ -9,7 +9,7 @@ lore: >-
   attacks. The automated system tracks and engages incoming threats with small,
   fast interceptors. While more expensive than passive countermeasures, the
   intercept rate is significantly higher.
-cost: 150
+cost: 60
 additional_hp: 5
 additional_power_consumption: 50
 additional_heat_generation: 30

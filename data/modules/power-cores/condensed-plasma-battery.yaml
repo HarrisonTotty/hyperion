@@ -11,7 +11,7 @@ lore: >-
   energy storage over production. The condensed plasma provides a massive energy
   reserve, perfect for ships that need sustained power for extended operations or
   to power high-draw systems in short bursts.
-cost: 200
+cost: 80
 additional_hp: 5
 additional_power_consumption: 0
 additional_heat_generation: 5

@@ -11,7 +11,7 @@ lore: >-
   unprecedented accuracy. The complex targeting integration and cooling requirements
   result in slow firing cycles, but skilled marksmen can disable critical subsystems
   from extreme distances where other weapons lose effectiveness.
-cost: 220
+cost: 100
 additional_hp: 12
 additional_power_consumption: 16
 additional_heat_generation: 15

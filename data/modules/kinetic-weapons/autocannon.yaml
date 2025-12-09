@@ -10,7 +10,7 @@ lore: >-
   spit out 100mm shells in rapid succession, creating a storm of steel that can shred
   through shields and light armor. Accuracy suffers from the violent recoil, but the
   sheer volume of projectiles ensures hits on target. Ammunition consumption is ferocious.
-cost: 240
+cost: 120
 additional_hp: 18
 additional_power_consumption: 20
 additional_heat_generation: 40

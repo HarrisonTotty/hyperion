@@ -1,7 +1,7 @@
 id: "chaff-pod"
 type: "countermeasure-system"
 name: "Chaff Pod"
-cost: 80
+cost: 30
 model: "AX-9 Chaff Pod"
 manufacturer: "Guardian Systems Inc."
 desc: "Rocket-propelled sensor pod capable of jamming nearby missile guidance systems."

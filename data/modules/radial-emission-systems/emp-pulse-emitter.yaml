@@ -1,6 +1,6 @@
 id: "emp-pulse-emitter"
 type: "radial-emission-system"
-cost: 500
+cost: 200
 name: "EMP Pulse Emitter"
 model: "EPE-1000 EMP Generator"
 manufacturer: "Electromagnetic Warfare Systems"

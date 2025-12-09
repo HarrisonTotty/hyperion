@@ -10,7 +10,7 @@ lore: >-
   bringing military-grade protection to civilian vessels. While newer models
   offer better performance, the Mk1 remains popular for its reliability and
   low maintenance requirements.
-cost: 50
+cost: 25
 additional_hp: 5
 additional_power_consumption: 20
 additional_heat_generation: 10

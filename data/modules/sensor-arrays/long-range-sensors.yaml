@@ -1,6 +1,6 @@
 id: "long-range-sensors"
 type: "sensor-array"
-cost: 600
+cost: 200
 name: "Long-Range Sensor Array"
 model: "LR-30000 Sensor Suite"
 manufacturer: "Advanced Detection Systems"

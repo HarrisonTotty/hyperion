@@ -1,6 +1,6 @@
 id: "military-encrypted-array"
 type: "comms-system"
-cost: 600
+cost: 200
 name: Military-Grade Encrypted Array
 model: MEC-750 Tactical Comms
 manufacturer: Forge Defense Solutions

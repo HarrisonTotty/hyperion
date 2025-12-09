@@ -9,7 +9,7 @@ lore: >-
   Xenon Dynamics' innovative regenerative design sacrifices some maximum capacity
   for dramatically improved recovery times. Popular with hit-and-run tactics and
   explorers who need shields that can bounce back quickly from minor encounters.
-cost: 150
+cost: 80
 additional_hp: 0
 additional_power_consumption: 50
 additional_heat_generation: 50

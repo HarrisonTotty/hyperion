@@ -1,6 +1,6 @@
 id: "solar-sail"
 type: "impulse-engine"
-cost: 500
+cost: 100
 name: Solar Sail
 model: SS-2000 Solar Sail Array
 manufacturer: Helios Navigation Systems

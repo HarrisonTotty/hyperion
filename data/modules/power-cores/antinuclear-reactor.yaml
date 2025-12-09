@@ -12,7 +12,7 @@ lore: >-
   containment systems must be flawless. A single magnetic bottle failure could
   vaporize the entire ship. Only the most experienced engineering crews dare to
   operate these systems.
-cost: 450
+cost: 250
 additional_hp: 5
 additional_power_consumption: 0
 additional_heat_generation: 40

@@ -8,7 +8,7 @@ role: Offense
 max_weight: 260
 max_modules: 14
 base_hp: 380
-build_points: 630
+build_points: 700
 bonuses:
   module_cost_offense: -0.2
   module_weight_offense: -0.1

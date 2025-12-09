@@ -10,7 +10,7 @@ lore: >-
   The massive 200mm shells deliver devastating kinetic impact that can crack open
   battleship hulls. The weapon's prodigious recoil and slower rate of fire demand
   skilled gunnery, but a well-placed Thor shot can decide fleet engagements.
-cost: 280
+cost: 170
 additional_hp: 25
 additional_power_consumption: 18
 additional_heat_generation: 35

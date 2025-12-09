@@ -10,7 +10,7 @@ lore: >-
   The ST-2100 incorporates artificial mass compensation technology to reduce effective
   inertia during maneuvers, significantly improving turn rates. The perfect middle
   ground between classical reliability and modern performance.
-cost: 280
+cost: 100
 additional_hp: 5
 additional_power_consumption: 20
 additional_heat_generation: 10

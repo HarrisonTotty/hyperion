@@ -1,6 +1,6 @@
 id: "scram-pulse-engines"
 type: "impulse-engine"
-cost: 2000
+cost: 550
 name: Scram Pulse Engines
 model: SPE-1000 Scram Pulse Engine
 manufacturer: Extreme Propulsion Industries

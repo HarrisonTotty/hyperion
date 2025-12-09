@@ -10,7 +10,7 @@ extended_desc: >-
 groups: ["Offense"]
 required: false
 has_varients: true
-base_cost: 15
+base_cost: 18
 max_slots: 1
 base_hp: 10
 base_power_consumption: 12.0

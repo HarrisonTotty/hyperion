@@ -1,6 +1,6 @@
 id: "overcharge-capacitor"
 type: "aux-support-system"
-cost: 400
+cost: 160
 name: "Overcharge Capacitor"
 model: "OC-150 Weapon Overcharger"
 manufacturer: "Offensive Systems Ltd"

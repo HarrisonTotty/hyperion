@@ -10,7 +10,7 @@ lore: >-
   pressure over extended battles. The massive magazine holds twice the ordnance of
   standard launchers, though reload cycles are slower and the launcher can only
   fire one missile at a time to conserve ammunition flow.
-cost: 220
+cost: 120
 additional_hp: 25
 additional_power_consumption: 15
 additional_heat_generation: 28

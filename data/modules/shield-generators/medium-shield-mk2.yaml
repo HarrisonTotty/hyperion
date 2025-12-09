@@ -10,7 +10,7 @@ lore: >-
   offering twice the protection of the Mk1 with improved energy efficiency. It's
   the standard choice for patrol vessels and medium-sized warships throughout
   civilized space.
-cost: 100
+cost: 50
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 0

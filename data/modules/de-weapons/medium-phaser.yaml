@@ -11,7 +11,7 @@ lore: >-
   power consumption. Its modulated particle beam can maintain fire on evasive targets
   thanks to the light-speed beam velocity, making it devastating against fighters and
   corvettes that rely on maneuverability.
-cost: 200
+cost: 100
 additional_hp: 16
 additional_power_consumption: 12
 additional_heat_generation: 22

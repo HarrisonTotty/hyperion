@@ -13,7 +13,7 @@ lore: >-
   the tactical advantage of extreme-range fire superiority cannot be overstated. Fleet
   commanders use Longshot-equipped vessels as fire support platforms that can influence
   battles from safe distances.
-cost: 280
+cost: 160
 additional_hp: 14
 additional_power_consumption: 14
 additional_heat_generation: 20

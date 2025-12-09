@@ -12,7 +12,7 @@ lore: >-
   This trade-off brings exceptional damage against shields as the plasma disrupts
   electromagnetic containment fields. The weapon excels in the anti-shield role but
   requires more skill to use effectively.
-cost: 240
+cost: 130
 additional_hp: 18
 additional_power_consumption: 18
 additional_heat_generation: 38

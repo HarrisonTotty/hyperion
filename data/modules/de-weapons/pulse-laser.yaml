@@ -12,7 +12,7 @@ lore: >-
   The cumulative effect can shred through shields and keep enemy systems under constant
   stress. Effective range is limited by the pulsed beam's dispersion, but within
   optimal distance, few weapons match its sustained DPS.
-cost: 180
+cost: 80
 additional_hp: 14
 additional_power_consumption: 15
 additional_heat_generation: 28

@@ -12,7 +12,7 @@ lore: >-
   barely understood outside of theoretical physics circles, but its power
   output is undeniable. Maintenance crews require advanced certifications,
   and fuel costs are astronomical.
-cost: 500
+cost: 300
 additional_hp: 15
 additional_power_consumption: 0
 additional_heat_generation: 50

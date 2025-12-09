@@ -1,6 +1,6 @@
 id: "advanced-warp-drive"
 type: "warp-jump-core"
-cost: 2000
+cost: 650
 name: "Advanced Warp Drive"
 model: "WD-6000X"
 manufacturer: "Stellar Dynamics Ltd"

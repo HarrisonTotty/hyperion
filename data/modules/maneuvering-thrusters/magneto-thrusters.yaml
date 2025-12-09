@@ -10,7 +10,7 @@ lore: >-
   to align with and push against ambient magnetic fields. Exceptionally efficient in
   regions with strong flux patterns, though performance degrades in deep space. Popular
   among survey vessels operating near stellar bodies.
-cost: 350
+cost: 140
 additional_hp: 0
 additional_power_consumption: 10
 additional_heat_generation: 15

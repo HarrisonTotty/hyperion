@@ -12,7 +12,7 @@ lore: >-
   in slower recharge times, but a direct hit from the Nova can cripple even the most
   heavily armored vessels. Capital ship captains learn to fear the telltale energy
   buildup that precedes a Nova strike.
-cost: 320
+cost: 200
 additional_hp: 25
 additional_power_consumption: 25
 additional_heat_generation: 45

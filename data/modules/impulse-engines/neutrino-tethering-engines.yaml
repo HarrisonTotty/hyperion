@@ -1,6 +1,6 @@
 id: "neutrino-tethering-engines"
 type: "impulse-engine"
-cost: 1600
+cost: 350
 name: Neutrino Tethering Engines
 model: NTE-X Neutrino Tethering Engine
 manufacturer: Advanced Propulsion Dynamics

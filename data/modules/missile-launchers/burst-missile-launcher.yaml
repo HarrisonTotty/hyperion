@@ -10,7 +10,7 @@ lore: >-
   simultaneously in a coordinated strike pattern. Each volley unleashes three missiles
   that can saturate point defense systems. The complex loading mechanism results in
   slower reloads and reduced total capacity, but the alpha strike potential is unmatched.
-cost: 280
+cost: 160
 additional_hp: 20
 additional_power_consumption: 18
 additional_heat_generation: 35

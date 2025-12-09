@@ -10,7 +10,7 @@ lore: >-
   an optimal balance between magazine capacity, reload speed, and volley size. While it
   doesn't excel in any particular area, its versatility makes it the go-to choice for
   most fleet captains who need dependable missile capability.
-cost: 160
+cost: 70
 additional_hp: 18
 additional_power_consumption: 10
 additional_heat_generation: 20

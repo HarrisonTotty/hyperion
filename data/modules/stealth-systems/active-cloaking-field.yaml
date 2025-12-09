@@ -1,6 +1,6 @@
 id: "active-cloaking-field"
 type: "stealth-system"
-cost: 1200
+cost: 500
 name: "Active Cloaking Field"
 model: "ACF-90 Cloaking Generator"
 manufacturer: "Advanced Stealth Systems"

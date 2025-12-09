@@ -10,7 +10,7 @@ extended_desc: >-
 groups: ["Defense"]
 required: true
 has_varients: true
-base_cost: 12
+base_cost: 6
 max_slots: 2
 base_hp: 15
 base_power_consumption: 8.0

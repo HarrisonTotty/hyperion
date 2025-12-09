@@ -10,7 +10,7 @@ lore: >-
   ejecting solid reaction mass through simple nozzles, these thrusters achieve
   respectable performance without exotic technologies. They're heavy and inefficient
   by modern standards, but incredibly durable and easy to repair with basic tools.
-cost: 150
+cost: 60
 additional_hp: 10
 additional_power_consumption: 25
 additional_heat_generation: 15

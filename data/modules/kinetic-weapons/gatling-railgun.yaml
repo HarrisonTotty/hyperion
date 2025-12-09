@@ -12,7 +12,7 @@ lore: >-
   design distributes heat buildup, enabling sustained fire that would melt conventional
   railguns. Accuracy at range suffers, but in knife-fight engagements, nothing matches
   the Storm's suppressive firepower.
-cost: 260
+cost: 140
 additional_hp: 16
 additional_power_consumption: 25
 additional_heat_generation: 30

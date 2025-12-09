@@ -10,7 +10,7 @@ extended_desc: >-
 groups: ["Support"]
 required: false
 has_varients: true
-base_cost: 20
+base_cost: 25
 max_slots: 1
 base_hp: 25
 base_power_consumption: 15.0

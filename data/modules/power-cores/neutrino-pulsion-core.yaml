@@ -12,7 +12,7 @@ lore: >-
   modest compared to fusion reactors, the system requires zero fuel and will
   operate for centuries without maintenance. Popular with deep space explorers
   and generation ships where fuel resupply is impossible.
-cost: 350
+cost: 180
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 3

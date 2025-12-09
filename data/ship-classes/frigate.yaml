@@ -8,7 +8,7 @@ role: Defense
 max_weight: 270
 max_modules: 15
 base_hp: 420
-build_points: 640
+build_points: 720
 bonuses:
   module_hp_defense: 0.25
   module_hp: 0.1

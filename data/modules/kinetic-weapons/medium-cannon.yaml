@@ -10,7 +10,7 @@ lore: >-
   variant strikes an ideal balance between firepower, accuracy, and ammunition efficiency.
   It can engage targets effectively at medium range and accepts standard, armor-piercing,
   and high-explosive shells for tactical flexibility.
-cost: 180
+cost: 75
 additional_hp: 15
 additional_power_consumption: 12
 additional_heat_generation: 20

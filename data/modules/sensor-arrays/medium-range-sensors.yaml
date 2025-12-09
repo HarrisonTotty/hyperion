@@ -1,6 +1,6 @@
 id: "medium-range-sensors"
 type: "sensor-array"
-cost: 400
+cost: 120
 name: "Medium-Range Sensor Array"
 model: "MR-15000 Sensor Suite"
 manufacturer: "SensorTech Industries"

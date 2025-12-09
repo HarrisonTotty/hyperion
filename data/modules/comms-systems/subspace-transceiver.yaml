@@ -1,6 +1,6 @@
 id: "subspace-transceiver"
 type: "comms-system"
-cost: 400
+cost: 120
 name: Subspace Transceiver
 model: SST-400 Subspace Transceiver
 manufacturer: Hyperion Communications

@@ -10,7 +10,7 @@ lore: >-
   firepower without the mass penalty of heavier systems. Its electromagnetic accelerator
   delivers slugs at incredible velocity with pinpoint accuracy. While damage per shot
   is modest, skilled gunners can consistently hit critical systems at extended range.
-cost: 120
+cost: 45
 additional_hp: 10
 additional_power_consumption: 15
 additional_heat_generation: 12

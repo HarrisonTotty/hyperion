@@ -11,7 +11,7 @@ lore: >-
   patrol craft. While individual shots lack the punch of heavier weapons, the rapid
   recharge cycle enables sustained fire that can wear down shields and ablate armor.
   The instant beam travel time ensures hits at any range within the weapon's envelope.
-cost: 140
+cost: 50
 additional_hp: 12
 additional_power_consumption: 8
 additional_heat_generation: 15

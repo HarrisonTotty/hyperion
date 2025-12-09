@@ -1,6 +1,6 @@
 id: "short-range-sensors"
 type: "sensor-array"
-cost: 200
+cost: 60
 name: "Short-Range Sensor Array"
 model: "SR-5000 Sensor Suite"
 manufacturer: "SensorTech Industries"

@@ -10,7 +10,7 @@ lore: >-
   By launching missiles in rapid succession with minimal delay, it saturates targeting systems
   and increases the probability of successful strikes. The trade-off is a smaller magazine
   capacity and longer reload times when the magazine is expended.
-cost: 180
+cost: 90
 additional_hp: 15
 additional_power_consumption: 12
 additional_heat_generation: 25

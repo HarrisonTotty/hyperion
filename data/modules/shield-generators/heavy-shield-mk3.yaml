@@ -10,7 +10,7 @@ lore: >-
   even dreadnought-class vessels from sustained assault. Its power requirements are
   substantial, but for capital ship commanders, the peace of mind it provides is
   worth every megawatt.
-cost: 175
+cost: 100
 additional_hp: 5
 additional_power_consumption: 100
 additional_heat_generation: 80

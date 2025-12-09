@@ -10,7 +10,7 @@ lore: >-
   days of spaceflight. While they don't provide the raw power of plasma systems,
   their exceptional fuel efficiency and reliability make them the preferred choice
   for long-duration missions and budget-conscious operators.
-cost: 100
+cost: 40
 additional_hp: 0
 additional_power_consumption: 30
 additional_heat_generation: 20

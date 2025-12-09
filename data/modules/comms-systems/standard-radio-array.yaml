@@ -1,6 +1,6 @@
 id: "standard-radio-array"
 type: "comms-system"
-cost: 100
+cost: 40
 name: Standard Radio Communications Array
 model: Z96 Radio Transmission Array
 manufacturer: Wolf Comms Inc.

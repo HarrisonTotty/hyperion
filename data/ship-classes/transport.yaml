@@ -8,7 +8,7 @@ role: Support
 max_weight: 290
 max_modules: 14
 base_hp: 360
-build_points: 590
+build_points: 650
 bonuses:
   module_hp: 0.15
   module_cost_support: -0.2

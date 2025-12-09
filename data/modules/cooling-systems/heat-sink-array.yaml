@@ -1,6 +1,6 @@
 id: "heat-sink-array"
 type: "cooling-system"
-cost: 300
+cost: 100
 name: "Thermal Heat Sink Array"
 model: "HSA-400 Heat Sink Array"
 manufacturer: "Thermal Dynamics Inc."
