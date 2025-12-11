@@ -9,6 +9,7 @@ max_weight: 2800
 max_modules: 19
 base_hp: 580
 build_points: 1310
+cost: 85000
 bonuses:
   module_hp_offense: 0.3
   module_hp: 0.15

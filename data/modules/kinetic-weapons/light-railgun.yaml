@@ -11,6 +11,7 @@ lore: >-
   delivers slugs at incredible velocity with pinpoint accuracy. While damage per shot
   is modest, skilled gunners can consistently hit critical systems at extended range.
 cost: 0
+credit_cost: 150
 additional_hp: 10
 additional_power_consumption: 15
 additional_heat_generation: 12

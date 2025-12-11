@@ -2,7 +2,7 @@ id: shell-200mm-st
 name: "ST 200mm Shell"
 desc: >-
   Standard 200mm shell for cannons. Balanced damage and penetration.
-cost: 10
+cost: 5
 weight: 50
 impact_damage: 100
 blast_radius: 0

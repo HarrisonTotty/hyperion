@@ -1,6 +1,7 @@
 id: "tachyon-pulse"
 type: "radial-emission-system"
 cost: 55
+credit_cost: 900
 name: "Tachyon Pulse"
 model: "TP-5000 Tachyon Emitter"
 manufacturer: "Exotic Particle Systems"

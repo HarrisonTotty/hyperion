@@ -206,12 +206,32 @@ impl GameWorld {
 
     // ==================== Team Management ====================
 
-    /// Create a new team
+    /// Create a new team with zero starting credits
     ///
     /// # Returns
     ///
     /// Returns `Ok(team_id)` on success, or `Err` if the team name is already taken.
     pub fn create_team(&mut self, name: String, faction: String) -> Result<String, String> {
+        self.create_team_with_credits(name, faction, 0)
+    }
+
+    /// Create a new team with specified starting credits
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The team name (must be unique, 1-50 characters)
+    /// * `faction` - The faction ID for the team
+    /// * `starting_credits` - Initial credit balance for the team
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(team_id)` on success, or `Err` if the team name is already taken.
+    pub fn create_team_with_credits(
+        &mut self,
+        name: String,
+        faction: String,
+        starting_credits: i64,
+    ) -> Result<String, String> {
         // Check if name is already taken
         if self.team_names.contains_key(&name) {
             return Err(format!("Team name '{}' is already taken", name));
@@ -225,12 +245,12 @@ impl GameWorld {
             return Err("Team name cannot exceed 50 characters".to_string());
         }
 
-        let team = Team::new(name.clone(), faction);
+        let team = Team::with_credits(name.clone(), faction, starting_credits);
         let team_id = team.id.clone();
-        
+
         self.teams.insert(team_id.clone(), team);
         self.team_names.insert(name, team_id.clone());
-        
+
         Ok(team_id)
     }
 
@@ -282,9 +302,39 @@ impl GameWorld {
     pub fn remove_team(&mut self, id: &str) -> Result<(), String> {
         let team = self.teams.remove(id)
             .ok_or_else(|| format!("Team {} not found", id))?;
-        
+
         self.team_names.remove(&team.name);
         Ok(())
+    }
+
+    // ==================== Team Credit Management ====================
+
+    /// Deduct credits from a team
+    ///
+    /// Returns the new balance if successful, or an error if the team doesn't exist
+    /// or has insufficient credits.
+    pub fn deduct_team_credits(&mut self, team_id: &str, amount: i64) -> Result<i64, String> {
+        let team = self.teams.get_mut(team_id)
+            .ok_or_else(|| format!("Team {} not found", team_id))?;
+
+        team.deduct_credits(amount)
+    }
+
+    /// Add credits to a team (for rewards, refunds, etc.)
+    ///
+    /// Returns the new balance, or an error if the team doesn't exist.
+    pub fn add_team_credits(&mut self, team_id: &str, amount: i64) -> Result<i64, String> {
+        let team = self.teams.get_mut(team_id)
+            .ok_or_else(|| format!("Team {} not found", team_id))?;
+
+        Ok(team.add_credits(amount))
+    }
+
+    /// Refund credits to a team (100% refund rate)
+    ///
+    /// Returns the new balance, or an error if the team doesn't exist.
+    pub fn refund_team_credits(&mut self, team_id: &str, amount: i64) -> Result<i64, String> {
+        self.add_team_credits(team_id, amount)
     }
 
     // ==================== Blueprint Management ====================
@@ -1006,16 +1056,96 @@ mod tests {
     #[test]
     fn test_game_stats() {
         let mut world = GameWorld::new();
-        
+
         world.register_player("Alice".to_string()).unwrap();
         world.register_player("Bob".to_string()).unwrap();
         let team_id = world.create_team("Alpha".to_string(), "Federation".to_string()).unwrap();
         world.create_blueprint("Ship1".to_string(), "cruiser".to_string(), team_id).unwrap();
-        
+
         let stats = world.get_stats();
         assert_eq!(stats.player_count, 2);
         assert_eq!(stats.team_count, 1);
         assert_eq!(stats.blueprint_count, 1);
         assert_eq!(stats.ship_count, 0);
+    }
+
+    #[test]
+    fn test_team_creation_with_credits() {
+        let mut world = GameWorld::new();
+
+        // Create team with starting credits
+        let team_id = world
+            .create_team_with_credits("Alpha".to_string(), "Federation".to_string(), 1_000_000)
+            .unwrap();
+
+        let team = world.get_team(&team_id).unwrap();
+        assert_eq!(team.name, "Alpha");
+        assert_eq!(team.credits, 1_000_000);
+    }
+
+    #[test]
+    fn test_team_credit_deduction() {
+        let mut world = GameWorld::new();
+
+        let team_id = world
+            .create_team_with_credits("Alpha".to_string(), "Federation".to_string(), 100_000)
+            .unwrap();
+
+        // Successful deduction
+        let new_balance = world.deduct_team_credits(&team_id, 30_000).unwrap();
+        assert_eq!(new_balance, 70_000);
+
+        let team = world.get_team(&team_id).unwrap();
+        assert_eq!(team.credits, 70_000);
+
+        // Insufficient credits
+        let result = world.deduct_team_credits(&team_id, 100_000);
+        assert!(result.is_err());
+
+        // Balance unchanged after failed deduction
+        let team = world.get_team(&team_id).unwrap();
+        assert_eq!(team.credits, 70_000);
+    }
+
+    #[test]
+    fn test_team_credit_addition() {
+        let mut world = GameWorld::new();
+
+        let team_id = world
+            .create_team_with_credits("Alpha".to_string(), "Federation".to_string(), 50_000)
+            .unwrap();
+
+        // Add credits
+        let new_balance = world.add_team_credits(&team_id, 25_000).unwrap();
+        assert_eq!(new_balance, 75_000);
+
+        let team = world.get_team(&team_id).unwrap();
+        assert_eq!(team.credits, 75_000);
+    }
+
+    #[test]
+    fn test_team_credit_refund() {
+        let mut world = GameWorld::new();
+
+        let team_id = world
+            .create_team_with_credits("Alpha".to_string(), "Federation".to_string(), 50_000)
+            .unwrap();
+
+        // Refund credits (should be same as add)
+        let new_balance = world.refund_team_credits(&team_id, 10_000).unwrap();
+        assert_eq!(new_balance, 60_000);
+
+        let team = world.get_team(&team_id).unwrap();
+        assert_eq!(team.credits, 60_000);
+    }
+
+    #[test]
+    fn test_credit_operations_on_nonexistent_team() {
+        let mut world = GameWorld::new();
+
+        // All operations should fail for non-existent team
+        assert!(world.deduct_team_credits("fake-id", 1000).is_err());
+        assert!(world.add_team_credits("fake-id", 1000).is_err());
+        assert!(world.refund_team_credits("fake-id", 1000).is_err());
     }
 }

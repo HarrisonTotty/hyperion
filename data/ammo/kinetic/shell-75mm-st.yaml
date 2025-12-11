@@ -3,7 +3,7 @@ name: "ST 75mm Shell"
 desc: >-
   Standard 75mm shells for light cannons. Economical and effective
   against light armor.
-cost: 8
+cost: 2
 weight: 4
 impact_damage: 8
 blast_radius: 3

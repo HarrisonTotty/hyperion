@@ -2,7 +2,7 @@ id: slug-50mm
 name: "50mm Railgun Slug"
 desc: >-
   High-velocity 50mm slug for railguns. Extreme penetration at long range.
-cost: 20
+cost: 3
 weight: 15
 impact_damage: 200
 blast_radius: 0

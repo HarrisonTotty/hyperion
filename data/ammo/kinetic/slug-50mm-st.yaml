@@ -3,7 +3,7 @@ name: "ST 50mm Slug"
 desc: >-
   Heavy 50mm slugs for siege-class railguns. Massive kinetic energy
   delivery against capital ships.
-cost: 20
+cost: 3
 weight: 6
 impact_damage: 40
 blast_radius: 0

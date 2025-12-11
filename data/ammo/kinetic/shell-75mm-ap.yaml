@@ -3,7 +3,7 @@ name: "AP 75mm Shell"
 desc: >-
   Armor-piercing 75mm shells with enhanced penetration characteristics
   for engaging medium armor.
-cost: 12
+cost: 3
 weight: 5
 impact_damage: 12
 blast_radius: 2

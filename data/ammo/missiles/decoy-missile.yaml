@@ -2,7 +2,7 @@ id: decoy-missile
 name: "Decoy Missile"
 desc: >-
   An inert missile designed to confuse enemy targeting systems and draw fire away from live ordnance.
-cost: 8
+cost: 10
 weight: 50
 impact_damage: 0
 blast_radius: 0

@@ -11,6 +11,7 @@ lore: >-
   respectable performance without exotic technologies. They're heavy and inefficient
   by modern standards, but incredibly durable and easy to repair with basic tools.
 cost: 8
+credit_cost: 300
 additional_hp: 10
 additional_power_consumption: 12
 additional_heat_generation: 15

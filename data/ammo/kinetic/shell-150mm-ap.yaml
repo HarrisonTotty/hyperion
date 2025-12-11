@@ -3,7 +3,7 @@ name: "AP 150mm Shell"
 desc: >-
   Armor-piercing 150mm shells with hardened penetrators for punching
   through heavy armor plating.
-cost: 30
+cost: 5
 weight: 13
 impact_damage: 32
 blast_radius: 4

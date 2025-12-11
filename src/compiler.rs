@@ -25,6 +25,13 @@ pub enum CompilationError {
     TeamNotFound(String),
     /// Failed to calculate ship systems
     SystemCalculationFailed(String),
+    /// Team has insufficient credits to compile ship
+    InsufficientCredits {
+        /// Credits required to compile the ship
+        required: i64,
+        /// Credits currently available to the team
+        available: i64,
+    },
 }
 
 impl std::fmt::Display for CompilationError {
@@ -44,6 +51,13 @@ impl std::fmt::Display for CompilationError {
             }
             CompilationError::SystemCalculationFailed(msg) => {
                 write!(f, "Failed to calculate ship systems: {}", msg)
+            }
+            CompilationError::InsufficientCredits { required, available } => {
+                write!(
+                    f,
+                    "Insufficient credits: need {}, have {}",
+                    required, available
+                )
             }
         }
     }
@@ -357,9 +371,20 @@ pub fn compile_and_spawn(
         .ok_or_else(|| CompilationError::BlueprintNotFound(blueprint_id.to_string()))?
         .clone();
 
-    // Verify team exists
-    if !world.teams().contains_key(&blueprint.team_id) {
-        return Err(CompilationError::TeamNotFound(blueprint.team_id.clone()));
+    // Verify team exists and get current credits
+    let team = world.get_team(&blueprint.team_id)
+        .ok_or_else(|| CompilationError::TeamNotFound(blueprint.team_id.clone()))?;
+    let available_credits = team.credits;
+
+    // Calculate total credit cost
+    let total_cost = calculate_blueprint_cost(&blueprint, config)?;
+
+    // Check if team has enough credits
+    if available_credits < total_cost {
+        return Err(CompilationError::InsufficientCredits {
+            required: total_cost,
+            available: available_credits,
+        });
     }
 
     // Compile blueprint
@@ -369,12 +394,138 @@ pub fn compile_and_spawn(
     // Store ship ID before moving ship into world
     let ship_id = ship.id.clone();
 
+    // Deduct credits from team
+    world.deduct_team_credits(&blueprint.team_id, total_cost)
+        .map_err(|e| CompilationError::SystemCalculationFailed(e))?;
+
     // Add ship to world
     world.register_ship(ship);
 
     // TODO: Trigger ship spawn event in simulation
 
     Ok(ship_id)
+}
+
+/// Calculate the total credit cost of a blueprint
+///
+/// This includes:
+/// - Ship class cost
+/// - Module slot costs (credit_cost for each installed module)
+/// - Module variant costs (credit_cost for each selected variant)
+///
+/// # Arguments
+///
+/// * `blueprint` - The blueprint to calculate cost for
+/// * `config` - Game configuration
+///
+/// # Returns
+///
+/// Returns the total credit cost, or an error if ship class is not found.
+pub fn calculate_blueprint_cost(
+    blueprint: &ShipBlueprint,
+    config: &GameConfig,
+) -> Result<i64, CompilationError> {
+    // Get ship class cost
+    let ship_class = config.get_ship_class(&blueprint.class)
+        .ok_or_else(|| CompilationError::ShipClassNotFound(blueprint.class.clone()))?;
+
+    let mut total_cost: i64 = ship_class.cost;
+
+    // Add module slot and variant costs
+    for module in &blueprint.modules {
+        // Add module slot cost
+        if let Some(slot) = config.get_module_slot(&module.module_slot_id) {
+            total_cost += slot.credit_cost;
+        }
+
+        // Add variant cost if selected
+        if let Some(ref variant_id) = module.variant_id {
+            if let Some(variant) = config.get_module_variant(&module.module_slot_id, variant_id) {
+                total_cost += variant.credit_cost;
+            }
+        }
+    }
+
+    Ok(total_cost)
+}
+
+/// Calculate the credit value of an active ship (for refunds)
+///
+/// This includes:
+/// - Ship class cost
+/// - Module slot costs (credit_cost for each module)
+/// - Module variant costs (credit_cost for each variant)
+///
+/// # Arguments
+///
+/// * `ship` - The active ship to calculate value for
+/// * `config` - Game configuration
+///
+/// # Returns
+///
+/// Returns the total credit value (100% refund rate).
+pub fn calculate_ship_value(
+    ship: &Ship,
+    config: &GameConfig,
+) -> i64 {
+    // Get ship class cost
+    let ship_class_cost = config.get_ship_class(&ship.class)
+        .map(|sc| sc.cost)
+        .unwrap_or(0);
+
+    let mut total_value: i64 = ship_class_cost;
+
+    // Add module slot and variant costs
+    for module in &ship.modules {
+        // Add module slot cost (module_id is the slot type)
+        if let Some(slot) = config.get_module_slot(&module.module_id) {
+            total_value += slot.credit_cost;
+        }
+
+        // Add variant cost if present (kind is the variant_id)
+        if let Some(ref variant_id) = module.kind {
+            if let Some(variant) = config.get_module_variant(&module.module_id, variant_id) {
+                total_value += variant.credit_cost;
+            }
+        }
+    }
+
+    total_value
+}
+
+/// Remove a ship and refund its credit value to the team
+///
+/// This is a convenience function that calculates the ship's value,
+/// refunds the credits to the team, and removes the ship from the world.
+///
+/// # Arguments
+///
+/// * `ship_id` - ID of the ship to remove
+/// * `world` - Mutable reference to the game world
+/// * `config` - Game configuration
+///
+/// # Returns
+///
+/// Returns the amount refunded on success, or an error message.
+pub fn remove_ship_with_refund(
+    ship_id: &str,
+    world: &mut GameWorld,
+    config: &GameConfig,
+) -> Result<i64, String> {
+    // Get ship to calculate refund
+    let ship = world.get_ship(ship_id)
+        .ok_or_else(|| format!("Ship {} not found", ship_id))?;
+
+    let team_id = ship.team_id.clone();
+    let refund_amount = calculate_ship_value(ship, config);
+
+    // Remove ship from world
+    world.remove_ship(ship_id)?;
+
+    // Refund credits to team
+    world.refund_team_credits(&team_id, refund_amount)?;
+
+    Ok(refund_amount)
 }
 
 #[cfg(test)]
@@ -397,6 +548,7 @@ mod tests {
             size: ShipSize::Medium,
             role: ShipClassRole::Combat,
             build_points: 1000.0,
+            cost: 50000,
             bonuses: HashMap::new(),
             id: String::new(),
             manufacturers: HashMap::new(),
@@ -442,17 +594,24 @@ mod tests {
             module_variants: HashMap::new(),
             module_slots: HashMap::new(),
             bonuses: None,
+            game_settings: crate::config::GameSettings::default(),
         }
     }
 
     fn create_test_world() -> GameWorld {
+        create_test_world_with_credits(1_000_000) // Default 1M credits
+    }
+
+    fn create_test_world_with_credits(starting_credits: i64) -> GameWorld {
         let mut world = GameWorld::new();
-        
+
         // Create player
         let player_id = world.register_player("TestPlayer".to_string()).unwrap();
-        
-        // Create team
-        let team_id = world.create_team("TestTeam".to_string(), "alliance".to_string()).unwrap();
+
+        // Create team with credits
+        let team_id = world
+            .create_team_with_credits("TestTeam".to_string(), "alliance".to_string(), starting_credits)
+            .unwrap();
         
         // Add player to team
         world.add_player_to_team(&team_id, &player_id).unwrap();
@@ -551,17 +710,118 @@ mod tests {
     fn test_ship_systems_initialization() {
         let config = create_test_config();
         let world = create_test_world();
-        
+
         let blueprint = world.get_all_blueprints()[0].clone();
-        
+
         let compiler = ShipCompiler::new(&config);
         let ship = compiler.compile(&blueprint, &world).unwrap();
-        
+
         // Verify systems are initialized
         assert_eq!(ship.status.hull, ship.status.max_hull);
         assert_eq!(ship.status.shields, ship.status.max_shields);
         assert!(!ship.status.shields_raised);
         assert_eq!(ship.status.status_effects.len(), 0);
         assert!(ship.inventory.ammunition.is_empty());
+    }
+
+    #[test]
+    fn test_calculate_blueprint_cost() {
+        let config = create_test_config();
+        let world = create_test_world();
+
+        let blueprint = world.get_all_blueprints()[0].clone();
+
+        // Blueprint has ship class cost = 50000, no modules
+        let cost = calculate_blueprint_cost(&blueprint, &config).unwrap();
+        assert_eq!(cost, 50000);
+    }
+
+    #[test]
+    fn test_compile_and_spawn_deducts_credits() {
+        let config = create_test_config();
+        let mut world = create_test_world_with_credits(100_000);
+
+        let team_id = {
+            let blueprint = world.get_all_blueprints()[0].clone();
+            blueprint.team_id.clone()
+        };
+        let blueprint_id = world.get_all_blueprints()[0].id.clone();
+
+        // Verify initial credits
+        assert_eq!(world.get_team(&team_id).unwrap().credits, 100_000);
+
+        // Compile ship (costs 50000)
+        let result = compile_and_spawn(&blueprint_id, &mut world, &config);
+        assert!(result.is_ok());
+
+        // Verify credits were deducted
+        let team = world.get_team(&team_id).unwrap();
+        assert_eq!(team.credits, 50_000); // 100000 - 50000
+    }
+
+    #[test]
+    fn test_compile_and_spawn_insufficient_credits() {
+        let config = create_test_config();
+        let mut world = create_test_world_with_credits(10_000); // Not enough for 50000 cost ship
+
+        let blueprint_id = world.get_all_blueprints()[0].id.clone();
+
+        let result = compile_and_spawn(&blueprint_id, &mut world, &config);
+
+        assert!(result.is_err());
+        match result {
+            Err(CompilationError::InsufficientCredits { required, available }) => {
+                assert_eq!(required, 50_000);
+                assert_eq!(available, 10_000);
+            }
+            _ => panic!("Expected InsufficientCredits error, got: {:?}", result),
+        }
+
+        // Verify no ship was created
+        assert_eq!(world.get_all_ships().len(), 0);
+    }
+
+    #[test]
+    fn test_calculate_ship_value() {
+        let config = create_test_config();
+        let mut world = create_test_world_with_credits(100_000);
+
+        let blueprint_id = world.get_all_blueprints()[0].id.clone();
+
+        // Compile ship
+        let ship_id = compile_and_spawn(&blueprint_id, &mut world, &config).unwrap();
+
+        // Get ship value
+        let ship = world.get_ship(&ship_id).unwrap();
+        let value = calculate_ship_value(ship, &config);
+
+        // Ship class cost = 50000, no modules
+        assert_eq!(value, 50_000);
+    }
+
+    #[test]
+    fn test_remove_ship_with_refund() {
+        let config = create_test_config();
+        let mut world = create_test_world_with_credits(100_000);
+
+        let team_id = {
+            let blueprint = world.get_all_blueprints()[0].clone();
+            blueprint.team_id.clone()
+        };
+        let blueprint_id = world.get_all_blueprints()[0].id.clone();
+
+        // Compile ship (costs 50000)
+        let ship_id = compile_and_spawn(&blueprint_id, &mut world, &config).unwrap();
+        assert_eq!(world.get_team(&team_id).unwrap().credits, 50_000);
+
+        // Remove ship with refund
+        let refund = remove_ship_with_refund(&ship_id, &mut world, &config).unwrap();
+        assert_eq!(refund, 50_000);
+
+        // Verify credits were refunded
+        assert_eq!(world.get_team(&team_id).unwrap().credits, 100_000);
+
+        // Verify ship was removed
+        assert!(world.get_ship(&ship_id).is_none());
     }
 }

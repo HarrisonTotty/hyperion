@@ -11,6 +11,7 @@ lore: >-
   the standard choice for patrol vessels and medium-sized warships throughout
   civilized space.
 cost: 15
+credit_cost: 450
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 0

@@ -2,7 +2,7 @@ id: type-4-tachyon-torpedo
 name: "Type 4 Tachyon Torpedo"
 desc: >-
   Tachyon warhead that temporarily prevents hit ships from warping or jumping.
-cost: 380
+cost: 50
 weight: 560
 impact_damage: 700
 blast_radius: 185

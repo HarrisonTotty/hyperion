@@ -11,6 +11,7 @@ lore: >-
   offer better performance, the Mk1 remains popular for its reliability and
   low maintenance requirements.
 cost: 0
+credit_cost: 200
 additional_hp: 5
 additional_power_consumption: 10
 additional_heat_generation: 10

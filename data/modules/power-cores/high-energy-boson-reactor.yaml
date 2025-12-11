@@ -13,6 +13,7 @@ lore: >-
   output is undeniable. Maintenance crews require advanced certifications,
   and fuel costs are astronomical.
 cost: 40
+credit_cost: 950
 additional_hp: 15
 additional_power_consumption: 0
 additional_heat_generation: 50

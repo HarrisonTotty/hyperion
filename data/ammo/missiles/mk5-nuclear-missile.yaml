@@ -2,7 +2,7 @@ id: mk5-nuclear-missile
 name: "Mark V Nuclear Missile"
 desc: >-
   Nuclear warhead delivering massive damage with significant blast radius.
-cost: 180
+cost: 85
 weight: 150
 impact_damage: 400
 blast_radius: 200

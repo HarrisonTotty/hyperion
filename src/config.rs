@@ -19,6 +19,7 @@ pub mod map;
 pub mod simulation;
 pub mod faction_gen;
 pub mod bonus;
+pub mod game_settings;
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,7 @@ pub use map::MapConfig as ProceduralMapConfig;
 pub use simulation::SimulationConfig as ProceduralSimConfig;
 pub use faction_gen::FactionGenConfig;
 pub use bonus::{BonusConfig, BonusMetadata, BonusFormat, CategoryMetadata, FormattedBonus};
+pub use game_settings::GameSettings;
 
 /// Main game configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,10 +78,14 @@ pub struct GameConfig {
     // Phase 1.2: Module variants for selection workflow
     #[serde(skip)]
     pub module_variants: HashMap<String, Vec<ModuleVariant>>,
-    
+
     // Phase 2.1: Module slot definitions
     #[serde(skip)]
     pub module_slots: HashMap<String, ModuleSlot>,
+
+    // Game settings (team economy, etc.)
+    #[serde(skip)]
+    pub game_settings: GameSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +231,12 @@ impl GameConfig {
         // Load Phase 2.6 bonus metadata
         let bonuses = Self::load_yaml_optional::<BonusConfig>(data_dir.join("bonuses.yaml"));
 
+        // Load game settings (with defaults if file doesn't exist or is incomplete)
+        let game_settings = Self::load_yaml_optional::<GameSettings>(data_dir.join("game.yaml"))
+            .unwrap_or_default();
+        game_settings.validate()?;
+        info!("Loaded game settings: team_starting_credits={}", game_settings.team_starting_credits);
+
         // Load ship classes from ship-classes directory
         let ship_classes = Self::load_ship_classes(data_dir.join("ship-classes"))?;
 
@@ -235,12 +247,8 @@ impl GameConfig {
         // Old WeaponConfig files have been migrated to ModuleVariant format
         let weapon_definitions = Vec::new();
 
-        // Load ammunition types
-        let ammunition_types = Self::load_yaml_optional::<AmmunitionTypesConfig>(
-            data_dir.join("ammunition.yaml")
-        )
-        .map(|c| c.ammunition)
-        .unwrap_or_default();
+        // Load ammunition types from data/ammo/ directory
+        let ammunition_types = Self::load_ammunition(data_dir.to_path_buf())?;
 
         // Load kinetic weapon kinds
         let kinetic_weapon_kinds = Self::load_yaml_optional::<KineticWeaponKindsConfig>(
@@ -276,6 +284,7 @@ impl GameConfig {
             bonuses,
             module_variants,
             module_slots,
+            game_settings,
         };
 
         // Validate configuration
@@ -622,7 +631,64 @@ impl GameConfig {
         load_recursive(&dir, &mut items)?;
         Ok(items)
     }
-    
+
+    /// Load ammunition from data/ammo/ directory structure
+    ///
+    /// Scans the ammo directory for category subdirectories (kinetic, missiles, torpedos)
+    /// and loads all ammunition YAML files from each category.
+    ///
+    /// Sets the ammunition category and derives ammo_type/ammo_size for kinetic ammo.
+    fn load_ammunition(data_dir: PathBuf) -> Result<Vec<AmmunitionConfig>, String> {
+        let ammo_dir = data_dir.join("ammo");
+        debug!("Loading ammunition from: {}", ammo_dir.display());
+
+        if !ammo_dir.exists() {
+            debug!("Ammunition directory does not exist");
+            return Ok(Vec::new());
+        }
+
+        let mut items = Vec::new();
+        let categories = ["kinetic", "missiles", "torpedos"];
+
+        for category in &categories {
+            let category_dir = ammo_dir.join(category);
+            if !category_dir.exists() {
+                debug!("Ammo category directory does not exist: {}", category_dir.display());
+                continue;
+            }
+
+            let entries = fs::read_dir(&category_dir)
+                .map_err(|e| format!("Failed to read ammo directory {:?}: {}", category_dir, e))?;
+
+            for entry in entries {
+                let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+                let path = entry.path();
+
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                    debug!("Loading ammunition: {}", path.display());
+                    let mut ammo = Self::load_yaml::<AmmunitionConfig>(path.clone())?;
+
+                    // If ID is empty, extract from filename
+                    if ammo.id.is_empty() {
+                        let id = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .ok_or_else(|| format!("Invalid filename: {:?}", path))?
+                            .to_string();
+                        ammo.set_id(id);
+                    }
+
+                    // Set category and derive type/size for kinetic
+                    ammo.set_category(category.to_string());
+
+                    items.push(ammo);
+                }
+            }
+        }
+
+        info!("Loaded {} ammunition types from {} categories", items.len(), categories.len());
+        Ok(items)
+    }
+
     /// Load module slots from data/module-slots/*.yaml
     /// 
     /// Scans the module-slots directory and loads all module slot definitions.
@@ -777,6 +843,7 @@ mod tests {
             size: ShipSize::Medium,
             role: ShipClassRole::Combat,
             build_points: 1000.0,
+            cost: 50000,
             bonuses: std::collections::HashMap::new(),
             id: String::new(),
             manufacturers: std::collections::HashMap::new(),
@@ -829,6 +896,7 @@ mod tests {
             weapon_definitions: vec![],
             ammunition_types: vec![],
             kinetic_weapon_kinds: vec![],
+            game_settings: GameSettings::default(),
         }
     }
 
@@ -1125,6 +1193,7 @@ base_weight: 100
             required: true,
             has_varients: true,
             base_cost: 10,
+            credit_cost: 3000,
             max_slots: 2,
             base_hp: 10,
             base_power_consumption: 0.0,
@@ -1314,6 +1383,7 @@ effective_range: 3000
             required: true,
             has_varients: true,
             base_cost: 10,
+            credit_cost: 3000,
             max_slots: 2,
             base_hp: 10,
             base_power_consumption: 0.0,
@@ -1370,6 +1440,7 @@ energy_capacity: 5000
             required: true,
             has_varients: true,
             base_cost: 10,
+            credit_cost: 3000,
             max_slots: 2,
             base_hp: 10,
             base_power_consumption: 0.0,

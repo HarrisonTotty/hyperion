@@ -2,7 +2,7 @@ id: mk1-torpedo
 name: "Mark I Torpedo"
 desc: >-
   Standard heavy torpedo. Slow but devastating against capital ships.
-cost: 200
+cost: 25
 weight: 500
 impact_damage: 800
 blast_radius: 100

@@ -2,7 +2,7 @@ id: type-5-graviton-missile
 name: "Type 5 Graviton Missile"
 desc: >-
   Graviton warhead that temporarily increases target mass, reducing speed and maneuverability.
-cost: 70
+cost: 55
 weight: 105
 impact_damage: 125
 blast_radius: 90

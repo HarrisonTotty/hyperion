@@ -3,7 +3,7 @@ name: "AP 30mm Slug"
 desc: >-
   Armor-piercing 30mm slugs with depleted uranium cores for maximum
   penetration potential.
-cost: 18
+cost: 3
 weight: 4
 impact_damage: 32
 blast_radius: 0

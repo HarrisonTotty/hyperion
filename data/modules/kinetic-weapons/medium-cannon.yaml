@@ -11,6 +11,7 @@ lore: >-
   It can engage targets effectively at medium range and accepts standard, armor-piercing,
   and high-explosive shells for tactical flexibility.
 cost: 15
+credit_cost: 350
 additional_hp: 15
 additional_power_consumption: 12
 additional_heat_generation: 20

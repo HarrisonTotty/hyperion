@@ -2,7 +2,7 @@ id: type-3-positron-torpedo
 name: "Type 3 Positron Torpedo"
 desc: >-
   Positron warhead delivering high impact damage with minimal blast radius for precision strikes.
-cost: 320
+cost: 40
 weight: 540
 impact_damage: 950
 blast_radius: 80

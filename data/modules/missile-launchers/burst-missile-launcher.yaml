@@ -11,6 +11,7 @@ lore: >-
   that can saturate point defense systems. The complex loading mechanism results in
   slower reloads and reduced total capacity, but the alpha strike potential is unmatched.
 cost: 55
+credit_cost: 950
 additional_hp: 20
 additional_power_consumption: 18
 additional_heat_generation: 35

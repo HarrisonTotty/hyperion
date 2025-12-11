@@ -2,7 +2,7 @@ id: type-3-positron-missile
 name: "Type 3 Positron Missile"
 desc: >-
   Positron warhead delivering high impact damage with minimal blast radius for precision strikes.
-cost: 55
+cost: 40
 weight: 95
 impact_damage: 180
 blast_radius: 50

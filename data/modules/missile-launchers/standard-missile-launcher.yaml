@@ -11,6 +11,7 @@ lore: >-
   doesn't excel in any particular area, its versatility makes it the go-to choice for
   most fleet captains who need dependable missile capability.
 cost: 15
+credit_cost: 400
 additional_hp: 18
 additional_power_consumption: 10
 additional_heat_generation: 20

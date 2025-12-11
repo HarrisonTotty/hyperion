@@ -2,7 +2,7 @@ id: mk2-torpedo
 name: "Mark II Torpedo"
 desc: >-
   Advanced torpedo with improved guidance and warhead yield.
-cost: 300
+cost: 35
 weight: 550
 impact_damage: 1200
 blast_radius: 150

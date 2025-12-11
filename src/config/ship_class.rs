@@ -47,10 +47,13 @@ pub struct ShipClassConfig {
     pub base_hull: f32,
     /// Build points available for this ship class
     pub build_points: f32,
+    /// Credit cost to construct this ship class
+    #[serde(default)]
+    pub cost: i64,
     /// Bonuses provided by this ship class
     #[serde(default)]
     pub bonuses: HashMap<String, f32>,
-    
+
     // Derived field (not in YAML, populated from filename)
     #[serde(skip)]
     pub id: String,
@@ -254,6 +257,7 @@ mod tests {
             max_weight: 50000.0,
             max_modules: 20,
             build_points: 500.0,
+            cost: 50000,
             bonuses: HashMap::new(),
             id: String::new(),
             manufacturers: HashMap::new(),

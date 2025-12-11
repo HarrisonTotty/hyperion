@@ -2,7 +2,7 @@ id: mk2-lr-trident-missile
 name: "Mark II Long-Range Trident Missile"
 desc: >-
   Extended range missile with improved fuel capacity for long-distance engagements.
-cost: 35
+cost: 25
 weight: 95
 impact_damage: 140
 blast_radius: 90

@@ -37,7 +37,11 @@ pub struct ModuleSlot {
     
     /// Base cost in build points to add this slot to a ship
     pub base_cost: i32,
-    
+
+    /// Credit cost to add this slot to a ship
+    #[serde(default)]
+    pub credit_cost: i64,
+
     /// Maximum number of slots of this type allowed on a ship
     pub max_slots: i32,
     
@@ -224,7 +228,11 @@ pub struct ModuleVariant {
     
     /// Build cost in build points
     pub cost: i32,
-    
+
+    /// Credit cost for this module variant
+    #[serde(default)]
+    pub credit_cost: i64,
+
     /// Additional HP beyond base module HP
     pub additional_hp: i32,
     
@@ -976,6 +984,7 @@ energy_capacity: 2000
             description: "A test variant".to_string(),
             lore: "Test lore".to_string(),
             cost: 100,
+            credit_cost: 500,
             additional_hp: 10,
             additional_power_consumption: 5.0,
             additional_heat_generation: 3.0,
@@ -997,6 +1006,7 @@ energy_capacity: 2000
             description: "T".to_string(),
             lore: "T".to_string(),
             cost: 0,
+            credit_cost: 0,
             additional_hp: 0,
             additional_power_consumption: 0.0,
             additional_heat_generation: 0.0,
@@ -1019,6 +1029,7 @@ energy_capacity: 2000
             description: "T".to_string(),
             lore: "T".to_string(),
             cost: -100,
+            credit_cost: 0,
             additional_hp: 0,
             additional_power_consumption: 0.0,
             additional_heat_generation: 0.0,
@@ -1082,13 +1093,14 @@ base_weight: 100
             required: false,
             has_varients: true,
             base_cost: 100,
+            credit_cost: 5000,
             max_slots: 4,
             base_hp: 50,
             base_power_consumption: 10.0,
             base_heat_generation: 5.0,
             base_weight: 200,
         };
-        
+
         assert!(valid_slot.validate().is_ok());
     }
     
@@ -1103,13 +1115,14 @@ base_weight: 100
             required: false,
             has_varients: false,
             base_cost: 0,
+            credit_cost: 0,
             max_slots: 1,
             base_hp: 0,
             base_power_consumption: 0.0,
             base_heat_generation: 0.0,
             base_weight: 0,
         };
-        
+
         assert!(invalid_slot.validate().is_err());
         assert!(invalid_slot.validate().unwrap_err().contains("ID cannot be empty"));
     }
@@ -1125,6 +1138,7 @@ base_weight: 100
             required: false,
             has_varients: false,
             base_cost: -10,
+            credit_cost: 0,
             max_slots: 1,
             base_hp: 0,
             base_power_consumption: 0.0,
@@ -1147,6 +1161,7 @@ base_weight: 100
             required: false,
             has_varients: false,
             base_cost: 0,
+            credit_cost: 0,
             max_slots: 0,
             base_hp: 0,
             base_power_consumption: 0.0,

@@ -4,7 +4,7 @@ desc: >-
   Standard 20mm electromagnetic slugs for railguns and coilguns. These
   ferromagnetic projectiles are accelerated to hypersonic velocities,
   delivering kinetic kills through sheer velocity and mass.
-cost: 8
+cost: 1
 weight: 2
 impact_damage: 15
 blast_radius: 0

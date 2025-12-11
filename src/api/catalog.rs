@@ -109,6 +109,7 @@ pub fn list_module_slots(config: &State<GameConfig>) -> Json<ModuleSlotListRespo
 ///   "required": true,
 ///   "has_varients": true,
 ///   "base_cost": 15,
+///   "credit_cost": 3500,
 ///   "max_slots": 3,
 ///   "base_hp": 20,
 ///   "base_power_consumption": 50.0,
@@ -209,6 +210,7 @@ pub fn list_module_variants(
 ///   "desc": "Uses ion propulsion for efficient sublight travel.",
 ///   "lore": "Ion engines have been the workhorse...",
 ///   "cost": 250,
+///   "credit_cost": 200,
 ///   "additional_hp": 5,
 ///   "additional_power_consumption": 30.0,
 ///   "additional_heat_generation": 20.0,
@@ -323,20 +325,11 @@ pub fn list_ammunition(
         }));
     }
 
-    // Get ammunition IDs for this category
+    // Get ammunition IDs for this category using the explicit category field
     let ammunition: Vec<String> = config
         .ammunition_types
         .iter()
-        .filter(|ammo| {
-            // Filter by category based on the ammo ID pattern
-            // This is a simple heuristic - could be improved with explicit category field
-            match category.as_str() {
-                "kinetic" => ammo.id.starts_with("shell-") || ammo.id.starts_with("slug-"),
-                "missiles" => ammo.id.contains("missile") && !ammo.id.contains("torpedo"),
-                "torpedos" => ammo.id.contains("torpedo"),
-                _ => false,
-            }
-        })
+        .filter(|ammo| ammo.category == category)
         .map(|ammo| ammo.id.clone())
         .collect();
 
@@ -401,13 +394,8 @@ pub fn get_ammunition(
         .find(|ammo| ammo.id == ammo_id)
     {
         Some(ammo) => {
-            // Verify it matches the category
-            let matches_category = match category.as_str() {
-                "kinetic" => ammo.id.starts_with("shell-") || ammo.id.starts_with("slug-"),
-                "missiles" => ammo.id.contains("missile") && !ammo.id.contains("torpedo"),
-                "torpedos" => ammo.id.contains("torpedo"),
-                _ => false,
-            };
+            // Verify it matches the category using explicit category field
+            let matches_category = ammo.category == category;
 
             if matches_category {
                 Ok(Json(ammo.clone()))

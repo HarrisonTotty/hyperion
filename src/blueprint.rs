@@ -389,6 +389,7 @@ mod tests {
             size: ShipSize::Medium,
             role: ShipClassRole::Combat,
             build_points: 500.0,
+            cost: 50000,
             bonuses: HashMap::new(),
             id: String::new(),
             manufacturers: HashMap::new(),
@@ -440,6 +441,7 @@ mod tests {
             module_variants: HashMap::new(),
             module_slots: HashMap::new(),
             bonuses: None,
+            game_settings: crate::config::GameSettings::default(),
         }
     }
 
@@ -456,6 +458,7 @@ mod tests {
             name: format!("Team {}", id),
             faction: "alliance".to_string(),
             members: vec![],
+            credits: 1_000_000,
         }
     }
 

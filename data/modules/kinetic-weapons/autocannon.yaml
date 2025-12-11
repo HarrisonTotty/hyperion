@@ -11,6 +11,7 @@ lore: >-
   through shields and light armor. Accuracy suffers from the violent recoil, but the
   sheer volume of projectiles ensures hits on target. Ammunition consumption is ferocious.
 cost: 35
+credit_cost: 650
 additional_hp: 18
 additional_power_consumption: 20
 additional_heat_generation: 40

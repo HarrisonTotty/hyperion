@@ -14,6 +14,7 @@ lore: >-
   commanders use Longshot-equipped vessels as fire support platforms that can influence
   battles from safe distances.
 cost: 38
+credit_cost: 750
 additional_hp: 14
 additional_power_consumption: 14
 additional_heat_generation: 20

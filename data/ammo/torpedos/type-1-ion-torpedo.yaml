@@ -2,7 +2,7 @@ id: type-1-ion-torpedo
 name: "Type 1 Ion Torpedo"
 desc: >-
   Ion warhead that disrupts enemy electronics and power systems, dealing reduced hull damage.
-cost: 250
+cost: 30
 weight: 480
 impact_damage: 400
 blast_radius: 150

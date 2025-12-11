@@ -1,6 +1,7 @@
 id: "basic-radiator"
 type: "cooling-system"
 cost: 0
+credit_cost: 150
 name: "Basic Thermal Radiator"
 model: "TR-300 Radiator Array"
 manufacturer: "Thermal Dynamics Inc."

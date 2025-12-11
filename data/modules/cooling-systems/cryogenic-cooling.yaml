@@ -1,6 +1,7 @@
 id: "cryogenic-cooling"
 type: "cooling-system"
 cost: 25
+credit_cost: 800
 name: "Cryogenic Cooling System"
 model: "CCS-1200 Cryogenic System"
 manufacturer: "CryoTech Solutions"

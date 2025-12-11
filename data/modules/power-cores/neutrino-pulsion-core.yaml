@@ -13,6 +13,7 @@ lore: >-
   operate for centuries without maintenance. Popular with deep space explorers
   and generation ships where fuel resupply is impossible.
 cost: 30
+credit_cost: 650
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 3

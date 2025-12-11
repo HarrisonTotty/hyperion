@@ -13,6 +13,7 @@ lore: >-
   stress. Effective range is limited by the pulsed beam's dispersion, but within
   optimal distance, few weapons match its sustained DPS.
 cost: 12
+credit_cost: 300
 additional_hp: 14
 additional_power_consumption: 15
 additional_heat_generation: 28

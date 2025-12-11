@@ -1,6 +1,7 @@
 id: "higgs-field-surfing-engines"
 type: "impulse-engine"
 cost: 45
+credit_cost: 850
 name: Higgs Field "Surfing" Engines
 model: HFS-7 Higgs Field Surfing Engine
 manufacturer: Quantum Propulsion Labs

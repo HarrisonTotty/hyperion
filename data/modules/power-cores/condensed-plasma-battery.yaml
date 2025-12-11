@@ -12,6 +12,7 @@ lore: >-
   reserve, perfect for ships that need sustained power for extended operations or
   to power high-draw systems in short bursts.
 cost: 10
+credit_cost: 250
 additional_hp: 5
 additional_power_consumption: 0
 additional_heat_generation: 5

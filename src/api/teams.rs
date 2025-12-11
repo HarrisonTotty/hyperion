@@ -31,6 +31,8 @@ pub struct CreateTeamResponse {
     pub name: String,
     /// Faction affiliation
     pub faction: String,
+    /// Team's starting credit balance
+    pub credits: i64,
 }
 
 /// Response for team details
@@ -44,6 +46,8 @@ pub struct TeamResponse {
     pub faction: String,
     /// List of player IDs who are members
     pub members: Vec<String>,
+    /// Team's current credit balance
+    pub credits: i64,
 }
 
 /// Response for listing teams
@@ -69,6 +73,22 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+/// Request body for credit transactions
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreditTransactionRequest {
+    /// Amount of credits to add or deduct
+    pub amount: i64,
+}
+
+/// Response for credit balance queries and transactions
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreditBalanceResponse {
+    /// Team ID
+    pub team_id: String,
+    /// Current credit balance after the transaction (or current balance for queries)
+    pub credits: i64,
+}
+
 /// GET /v1/teams - List all teams
 ///
 /// Returns a list of all teams currently in the game.
@@ -84,6 +104,7 @@ pub fn list_teams(world: &State<SharedGameWorld>) -> Json<ListTeamsResponse> {
             name: t.name.clone(),
             faction: t.faction.clone(),
             members: t.members.clone(),
+            credits: t.credits,
         })
         .collect();
     
@@ -134,7 +155,14 @@ pub fn create_team(
         }
     }
     
-    match world.create_team(request.name.clone(), request.faction.clone()) {
+    // Get starting credits from game settings
+    let starting_credits = config.game_settings.team_starting_credits;
+
+    match world.create_team_with_credits(
+        request.name.clone(),
+        request.faction.clone(),
+        starting_credits,
+    ) {
         Ok(team_id) => {
             // Auto-add player to team if player_id provided
             if let Some(ref player_id) = request.player_id {
@@ -147,12 +175,13 @@ pub fn create_team(
                     ));
                 }
             }
-            
+
             let team = world.get_team(&team_id).unwrap();
             Ok(Json(CreateTeamResponse {
                 id: team.id.clone(),
                 name: team.name.clone(),
                 faction: team.faction.clone(),
+                credits: team.credits,
             }))
         }
         Err(err) => {
@@ -180,6 +209,7 @@ pub fn get_team(
             name: team.name.clone(),
             faction: team.faction.clone(),
             members: team.members.clone(),
+            credits: team.credits,
         })),
         None => Err((
             Status::NotFound,
@@ -210,6 +240,7 @@ pub fn add_player_to_team(
                 name: team.name.clone(),
                 faction: team.faction.clone(),
                 members: team.members.clone(),
+                credits: team.credits,
             }))
         }
         Err(err) => {
@@ -241,6 +272,112 @@ pub fn remove_player_from_team(
     }
 }
 
+/// GET /v1/teams/<id>/credits - Get team's credit balance
+///
+/// Returns the current credit balance for a team.
+#[get("/v1/teams/<id>/credits")]
+pub fn get_team_credits(
+    world: &State<SharedGameWorld>,
+    id: String,
+) -> Result<Json<CreditBalanceResponse>, (Status, Json<ErrorResponse>)> {
+    let world = world.read().unwrap();
+
+    match world.get_team(&id) {
+        Some(team) => Ok(Json(CreditBalanceResponse {
+            team_id: team.id.clone(),
+            credits: team.credits,
+        })),
+        None => Err((
+            Status::NotFound,
+            Json(ErrorResponse {
+                error: format!("Team {} not found", id),
+            }),
+        )),
+    }
+}
+
+/// POST /v1/teams/<id>/credits/add - Add credits to team
+///
+/// Adds credits to a team's balance. Used for rewards, quest completion, etc.
+/// The amount must be positive.
+#[post("/v1/teams/<id>/credits/add", data = "<request>")]
+pub fn add_team_credits(
+    world: &State<SharedGameWorld>,
+    id: String,
+    request: Json<CreditTransactionRequest>,
+) -> Result<Json<CreditBalanceResponse>, (Status, Json<ErrorResponse>)> {
+    if request.amount <= 0 {
+        return Err((
+            Status::BadRequest,
+            Json(ErrorResponse {
+                error: "Amount must be positive".to_string(),
+            }),
+        ));
+    }
+
+    let mut world = world.write().unwrap();
+
+    match world.get_team_mut(&id) {
+        Some(team) => {
+            let new_balance = team.add_credits(request.amount);
+            Ok(Json(CreditBalanceResponse {
+                team_id: id,
+                credits: new_balance,
+            }))
+        }
+        None => Err((
+            Status::NotFound,
+            Json(ErrorResponse {
+                error: format!("Team {} not found", id),
+            }),
+        )),
+    }
+}
+
+/// POST /v1/teams/<id>/credits/deduct - Deduct credits from team
+///
+/// Deducts credits from a team's balance. Used for purchases.
+/// Returns an error if the team has insufficient credits.
+/// The amount must be positive.
+#[post("/v1/teams/<id>/credits/deduct", data = "<request>")]
+pub fn deduct_team_credits(
+    world: &State<SharedGameWorld>,
+    id: String,
+    request: Json<CreditTransactionRequest>,
+) -> Result<Json<CreditBalanceResponse>, (Status, Json<ErrorResponse>)> {
+    if request.amount <= 0 {
+        return Err((
+            Status::BadRequest,
+            Json(ErrorResponse {
+                error: "Amount must be positive".to_string(),
+            }),
+        ));
+    }
+
+    let mut world = world.write().unwrap();
+
+    match world.get_team_mut(&id) {
+        Some(team) => {
+            match team.deduct_credits(request.amount) {
+                Ok(new_balance) => Ok(Json(CreditBalanceResponse {
+                    team_id: id,
+                    credits: new_balance,
+                })),
+                Err(err) => Err((
+                    Status::BadRequest,
+                    Json(ErrorResponse { error: err }),
+                )),
+            }
+        }
+        None => Err((
+            Status::NotFound,
+            Json(ErrorResponse {
+                error: format!("Team {} not found", id),
+            }),
+        )),
+    }
+}
+
 /// Returns all team API routes
 pub fn routes() -> Vec<Route> {
     routes![
@@ -248,7 +385,10 @@ pub fn routes() -> Vec<Route> {
         create_team,
         get_team,
         add_player_to_team,
-        remove_player_from_team
+        remove_player_from_team,
+        get_team_credits,
+        add_team_credits,
+        deduct_team_credits
     ]
 }
 
@@ -313,6 +453,7 @@ mod tests {
             module_variants: HashMap::new(),
             module_slots: HashMap::new(),
             bonuses: None,
+            game_settings: crate::config::GameSettings::default(),
         }
     }
 

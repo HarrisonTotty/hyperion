@@ -13,6 +13,7 @@ lore: >-
   vaporize the entire ship. Only the most experienced engineering crews dare to
   operate these systems.
 cost: 35
+credit_cost: 800
 additional_hp: 5
 additional_power_consumption: 0
 additional_heat_generation: 40

@@ -1,6 +1,7 @@
 id: "sensor-jammer"
 type: "radial-emission-system"
 cost: 0
+credit_cost: 250
 name: "Sensor Jammer"
 model: "SJ-2000 Jamming Array"
 manufacturer: "Electronic Countermeasures Inc."

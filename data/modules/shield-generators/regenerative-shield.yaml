@@ -10,6 +10,7 @@ lore: >-
   for dramatically improved recovery times. Popular with hit-and-run tactics and
   explorers who need shields that can bounce back quickly from minor encounters.
 cost: 28
+credit_cost: 650
 additional_hp: 0
 additional_power_consumption: 25
 additional_heat_generation: 50

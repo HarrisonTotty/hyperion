@@ -1,6 +1,7 @@
 id: "emergency-power-cell"
 type: "aux-support-system"
 cost: 0
+credit_cost: 100
 name: "Emergency Power Cell"
 model: "EPC-500 Emergency Cell"
 manufacturer: "Auxiliary Systems Corp"

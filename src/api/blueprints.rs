@@ -480,6 +480,7 @@ mod tests {
             module_variants: HashMap::new(),
             module_slots: HashMap::new(),
             bonuses: None,
+            game_settings: crate::config::GameSettings::default(),
         }
     }
 

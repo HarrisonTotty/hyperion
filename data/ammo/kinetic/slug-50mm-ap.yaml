@@ -3,7 +3,7 @@ name: "AP 50mm Slug"
 desc: >-
   Armor-piercing 50mm slugs capable of penetrating battleship-grade
   armor plating. The ultimate railgun ammunition.
-cost: 30
+cost: 4
 weight: 7
 impact_damage: 55
 blast_radius: 0

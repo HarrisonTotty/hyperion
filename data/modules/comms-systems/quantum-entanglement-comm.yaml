@@ -1,6 +1,7 @@
 id: "quantum-entanglement-comm"
 type: "comms-system"
 cost: 20
+credit_cost: 900
 name: Quantum Entanglement Communicator
 model: QEC-1000 Quantum Link
 manufacturer: Tesseract Systems

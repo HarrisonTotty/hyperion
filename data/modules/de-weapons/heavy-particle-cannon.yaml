@@ -13,6 +13,7 @@ lore: >-
   heavily armored vessels. Capital ship captains learn to fear the telltale energy
   buildup that precedes a Nova strike.
 cost: 45
+credit_cost: 900
 additional_hp: 25
 additional_power_consumption: 25
 additional_heat_generation: 45

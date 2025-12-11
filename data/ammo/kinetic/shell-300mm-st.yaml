@@ -3,7 +3,7 @@ name: "ST 300mm Shell"
 desc: >-
   Superheavy 300mm shells for siege cannons. Devastating impact with
   extreme mass and velocity.
-cost: 80
+cost: 8
 weight: 40
 impact_damage: 60
 blast_radius: 10

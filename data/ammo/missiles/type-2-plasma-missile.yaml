@@ -2,7 +2,7 @@ id: type-2-plasma-missile
 name: "Type 2 Plasma Missile"
 desc: >-
   Plasma warhead that excels at damaging shields but less effective against unshielded targets.
-cost: 45
+cost: 35
 weight: 90
 impact_damage: 100
 blast_radius: 75

@@ -12,6 +12,7 @@ lore: >-
   While superseded by fusion technology, fission reactors remain popular
   on budget-conscious vessels and in regions with limited fuel infrastructure.
 cost: 0
+credit_cost: 150
 additional_hp: 0
 additional_power_consumption: 0
 additional_heat_generation: 10

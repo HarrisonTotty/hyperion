@@ -150,6 +150,7 @@ mod tests {
             size: crate::config::ShipSize::Medium,
             role: crate::config::ShipClassRole::Combat,
             build_points: 1000.0,
+            cost: 50000,
             bonuses: HashMap::new(),
             id: String::new(),
             manufacturers: HashMap::new(),
@@ -195,6 +196,7 @@ mod tests {
             module_variants: HashMap::new(),
             module_slots: HashMap::new(),
             bonuses: None,
+            game_settings: crate::config::GameSettings::default(),
         }
     }
 

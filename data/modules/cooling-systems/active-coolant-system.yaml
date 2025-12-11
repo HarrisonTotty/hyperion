@@ -1,6 +1,7 @@
 id: "active-coolant-system"
 type: "cooling-system"
 cost: 18
+credit_cost: 550
 name: "Active Coolant Circulation System"
 model: "ACCS-600 Active Coolant System"
 manufacturer: "CryoTech Solutions"

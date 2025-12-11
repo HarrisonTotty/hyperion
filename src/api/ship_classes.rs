@@ -30,7 +30,10 @@ pub struct ShipClassResponse {
     pub base_hull: f32,
     pub base_shields: f32,
     pub build_points: f32,
-    
+
+    // Credit cost
+    pub cost: i64,
+
     // Bonuses formatted by category
     pub bonuses: HashMap<String, Vec<FormattedBonus>>,
     
@@ -65,6 +68,7 @@ pub struct ShipClassSummary {
     pub max_weight: f32,
     pub max_modules: u32,
     pub build_points: f32,
+    pub cost: i64,
 }
 
 /// Get all available ship classes
@@ -103,6 +107,7 @@ pub fn get_ship_classes(
             max_weight: sc.max_weight,
             max_modules: sc.max_modules,
             build_points: sc.build_points,
+            cost: sc.cost,
         })
         .collect();
     
@@ -165,6 +170,7 @@ pub fn get_ship_class(
         base_hull: ship_class.base_hull,
         base_shields: ship_class.base_shields,
         build_points: ship_class.build_points,
+        cost: ship_class.cost,
         bonuses,
         technical_specs: ship_class.get_technical_specs(),
         manufacturers,
@@ -193,6 +199,7 @@ mod tests {
             base_hull: 420.0,
             base_shields: 200.0,
             build_points: 640.0,
+            cost: 42000,
             bonuses: HashMap::new(),
             id: String::new(),
             manufacturers: HashMap::new(),
@@ -239,6 +246,7 @@ mod tests {
             base_hull: 420.0,
             base_shields: 200.0,
             build_points: 640.0,
+            cost: 42000,
             bonuses: HashMap::new(),
             technical_specs: HashMap::new(),
             manufacturers: HashMap::new(),
@@ -246,8 +254,9 @@ mod tests {
             year_introduced: None,
             notable_ships: Vec::new(),
         };
-        
+
         assert_eq!(response.id, "frigate");
         assert_eq!(response.name, "Frigate");
+        assert_eq!(response.cost, 42000);
     }
 }

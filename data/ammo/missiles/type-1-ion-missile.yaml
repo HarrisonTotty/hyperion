@@ -2,7 +2,7 @@ id: type-1-ion-missile
 name: "Type 1 Ion Missile"
 desc: >-
   Ion warhead that disrupts enemy electronics and power systems, dealing reduced hull damage.
-cost: 40
+cost: 30
 weight: 85
 impact_damage: 80
 blast_radius: 70

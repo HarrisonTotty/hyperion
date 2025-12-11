@@ -11,6 +11,7 @@ groups: ["Support"]
 required: true
 has_varients: true
 base_cost: 20
+credit_cost: 1500
 max_slots: 1
 base_hp: 8
 base_power_consumption: 2.0

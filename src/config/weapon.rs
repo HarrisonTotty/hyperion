@@ -97,44 +97,95 @@ impl WeaponConfig {
 }
 
 /// Ammunition type configuration
+///
+/// Supports three ammunition categories with different field sets:
+/// - Kinetic: shells and slugs with velocity and armor penetration
+/// - Missiles: guided projectiles with acceleration and tracking
+/// - Torpedos: heavy guided munitions with extended range
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AmmunitionConfig {
+    /// Unique identifier (populated from YAML or filename)
+    #[serde(default)]
+    pub id: String,
     /// Display name
     pub name: String,
-    /// Ammunition type (e.g., "shell", "slug")
-    #[serde(rename = "type")]
-    pub ammo_type: String,
-    /// Ammunition size (e.g., "50mm", "100mm")
-    pub size: String,
     /// Description (field name 'desc' in YAML)
     #[serde(rename = "desc")]
     pub description: String,
-    /// Build cost
+    /// Credit cost per unit
     pub cost: f32,
-    /// Weight in kg
+    /// Weight in kg per unit
     pub weight: f32,
-    /// Impact damage
+    /// Impact damage on hit
     pub impact_damage: f32,
-    /// Blast radius
+    /// Blast radius (optional, for explosives)
     #[serde(default)]
     pub blast_radius: f32,
-    /// Blast damage
+    /// Blast damage (optional, for explosives)
     #[serde(default)]
     pub blast_damage: f32,
-    /// Projectile velocity
+
+    // Kinetic ammo fields
+    /// Projectile velocity (kinetic ammo)
+    #[serde(default)]
     pub velocity: f32,
-    /// Armor penetration rating
+    /// Armor penetration rating (kinetic ammo)
+    #[serde(default)]
     pub armor_penetration: f32,
-    
-    /// Derived field (not in YAML, populated from filename)
-    #[serde(skip)]
-    pub id: String,
+
+    // Missile/torpedo fields
+    /// Acceleration (missiles/torpedos)
+    #[serde(default)]
+    pub acceleration: f32,
+    /// Maximum speed (missiles/torpedos)
+    #[serde(default)]
+    pub max_speed: f32,
+    /// Maximum turn rate (missiles)
+    #[serde(default)]
+    pub max_turn_rate: f32,
+    /// Lifetime in seconds (missiles/torpedos)
+    #[serde(default)]
+    pub lifetime: f32,
+    /// Weapon tags for categorization
+    #[serde(default)]
+    pub weapon_tags: Vec<String>,
+
+    /// Ammunition category (kinetic, missiles, torpedos) - set during loading
+    #[serde(skip_deserializing, default)]
+    pub category: String,
+
+    /// Ammunition type for kinetic (shell, slug) - derived from ID
+    #[serde(skip_deserializing, default)]
+    pub ammo_type: String,
+
+    /// Ammunition size for kinetic (20mm, 50mm, etc.) - derived from ID
+    #[serde(skip_deserializing, default)]
+    pub ammo_size: String,
 }
 
 impl AmmunitionConfig {
     /// Set the ID from the filename
     pub fn set_id(&mut self, id: String) {
         self.id = id;
+    }
+
+    /// Set the category and derive ammo_type/ammo_size for kinetic ammo
+    ///
+    /// For kinetic ammo, parses the ID pattern to extract type and size:
+    /// - "slug-20mm-st" -> ammo_type="slug", ammo_size="20mm"
+    /// - "shell-100mm-ap" -> ammo_type="shell", ammo_size="100mm"
+    pub fn set_category(&mut self, category: String) {
+        self.category = category.clone();
+
+        // For kinetic ammo, derive ammo_type and ammo_size from ID
+        if category == "kinetic" {
+            // Parse ID pattern: "type-size-variant" (e.g., "slug-20mm-st", "shell-100mm-ap")
+            let parts: Vec<&str> = self.id.split('-').collect();
+            if parts.len() >= 2 {
+                self.ammo_type = parts[0].to_string();
+                self.ammo_size = parts[1].to_string();
+            }
+        }
     }
 }
 
@@ -561,9 +612,8 @@ mod tests {
     #[test]
     fn test_ammunition_config() {
         let mut ammo = AmmunitionConfig {
+            id: String::new(),
             name: "Armor Piercing Rounds".to_string(),
-            ammo_type: "slug".to_string(),
-            size: "50mm".to_string(),
             description: "High velocity rounds".to_string(),
             cost: 100.0,
             weight: 5.0,
@@ -572,10 +622,20 @@ mod tests {
             blast_damage: 0.0,
             velocity: 2000.0,
             armor_penetration: 0.8,
-            id: String::new(),
+            acceleration: 0.0,
+            max_speed: 0.0,
+            max_turn_rate: 0.0,
+            lifetime: 0.0,
+            weapon_tags: vec![],
+            category: String::new(),
+            ammo_type: String::new(),
+            ammo_size: String::new(),
         };
-        ammo.set_id("armor_piercing".to_string());
+        ammo.set_id("slug-50mm-ap".to_string());
+        ammo.set_category("kinetic".to_string());
         assert_eq!(ammo.velocity, 2000.0);
+        assert_eq!(ammo.ammo_type, "slug");
+        assert_eq!(ammo.ammo_size, "50mm");
     }
 
     #[test]

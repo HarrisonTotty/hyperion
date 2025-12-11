@@ -1,6 +1,7 @@
 id: "emission-dampener"
 type: "stealth-system"
 cost: 30
+credit_cost: 600
 name: "Emission Dampener"
 model: "ED-50 Signature Dampener"
 manufacturer: "Stealth Technologies Corp"

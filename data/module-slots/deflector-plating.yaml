@@ -10,6 +10,7 @@ groups: ["Defense"]
 required: false
 has_varients: false
 base_cost: 35
+credit_cost: 3000
 max_slots: 3
 base_hp: 20
 base_power_consumption: 0.0

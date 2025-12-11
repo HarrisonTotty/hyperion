@@ -2,7 +2,7 @@ id: tachyon-missile
 name: "Tachyon Missile"
 desc: >-
   Advanced missile with tachyon warhead. Disables FTL drives on hit.
-cost: 100
+cost: 65
 weight: 120
 guidance_system: radar-guided
 impact_damage: 120

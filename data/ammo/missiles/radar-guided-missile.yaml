@@ -2,7 +2,7 @@ id: radar-guided-missile
 name: "Radar-Guided Missile"
 desc: >-
   Radar-guided missile with active tracking. More reliable than heat-seeking.
-cost: 65
+cost: 45
 weight: 110
 guidance_system: radar-guided
 impact_damage: 180

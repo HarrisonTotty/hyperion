@@ -13,6 +13,7 @@ lore: >-
   railguns. Accuracy at range suffers, but in knife-fight engagements, nothing matches
   the Storm's suppressive firepower.
 cost: 40
+credit_cost: 750
 additional_hp: 16
 additional_power_consumption: 25
 additional_heat_generation: 30

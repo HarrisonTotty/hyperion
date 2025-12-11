@@ -11,6 +11,7 @@ lore: >-
   Combat pilots appreciate the rapid response times, though engineers complain
   about the power draw and frequent maintenance intervals.
 cost: 30
+credit_cost: 850
 additional_hp: 5
 additional_power_consumption: 30
 additional_heat_generation: 45

@@ -2,7 +2,7 @@ id: heat-seeking-missile
 name: "Heat-Seeking Missile"
 desc: >-
   Standard heat-seeking missile. Tracks engine signatures.
-cost: 50
+cost: 35
 weight: 100
 guidance_system: heat-seeking
 impact_damage: 150

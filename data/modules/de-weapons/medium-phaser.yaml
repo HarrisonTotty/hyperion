@@ -12,6 +12,7 @@ lore: >-
   thanks to the light-speed beam velocity, making it devastating against fighters and
   corvettes that rely on maneuverability.
 cost: 22
+credit_cost: 450
 additional_hp: 16
 additional_power_consumption: 12
 additional_heat_generation: 22

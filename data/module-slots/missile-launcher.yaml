@@ -11,6 +11,7 @@ groups: ["Offense"]
 required: false
 has_varients: true
 base_cost: 55
+credit_cost: 6500
 max_slots: 3
 base_hp: 10
 base_power_consumption: 2.0

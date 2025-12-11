@@ -2,7 +2,7 @@ id: shell-75mm-he
 name: "HE 75mm Shell"
 desc: >-
   High-explosive 75mm shells for anti-fighter and area suppression roles.
-cost: 10
+cost: 3
 weight: 4
 impact_damage: 5
 blast_radius: 6

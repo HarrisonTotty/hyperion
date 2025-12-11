@@ -11,6 +11,7 @@ lore: >-
   inertia during maneuvers, significantly improving turn rates. The perfect middle
   ground between classical reliability and modern performance.
 cost: 15
+credit_cost: 500
 additional_hp: 5
 additional_power_consumption: 18
 additional_heat_generation: 10

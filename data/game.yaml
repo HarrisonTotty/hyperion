@@ -1,2 +1,8 @@
 # Game Settings
 # -------------
+# Global game settings and economy parameters.
+
+# Team Economy
+# ------------
+# Starting credits for new teams (default: 1,000,000)
+team_starting_credits: 1000000

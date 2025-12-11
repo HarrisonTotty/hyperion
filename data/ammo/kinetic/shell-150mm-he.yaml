@@ -4,7 +4,7 @@ desc: >-
   High-explosive 150mm shells with military-grade explosive compounds.
   Creates massive blast zones capable of crippling multiple ship systems
   and overwhelming point defense networks.
-cost: 28
+cost: 5
 weight: 14
 impact_damage: 15
 blast_radius: 15

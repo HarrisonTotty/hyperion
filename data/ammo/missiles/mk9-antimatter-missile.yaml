@@ -2,7 +2,7 @@ id: mk9-antimatter-missile
 name: "Mark IX Antimatter Missile"
 desc: >-
   Antimatter warhead delivering catastrophic damage. Extremely expensive and volatile.
-cost: 280
+cost: 100
 weight: 180
 impact_damage: 550
 blast_radius: 150

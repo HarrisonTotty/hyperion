@@ -2,6 +2,7 @@ id: "flak-torpedo"
 type: "countermeasure-system"
 name: "Flak Torpedo"
 cost: 30
+credit_cost: 750
 model: "FT-500 Flak System"
 manufacturer: "Anti-Missile Defense Corp"
 desc: "Launches proximity-fused torpedoes that create shrapnel clouds to destroy incoming missiles."

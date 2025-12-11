@@ -2,7 +2,7 @@ id: mk3-he-torpedo
 name: "Mark III High-Explosive Torpedo"
 desc: >-
   High-explosive warhead with enhanced blast radius, effective against clustered targets.
-cost: 300
+cost: 35
 weight: 550
 impact_damage: 600
 blast_radius: 250

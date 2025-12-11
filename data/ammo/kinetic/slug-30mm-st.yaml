@@ -3,7 +3,7 @@ name: "ST 30mm Slug"
 desc: >-
   Standard 30mm electromagnetic slugs offering increased mass and
   stopping power compared to 20mm variants.
-cost: 12
+cost: 2
 weight: 3
 impact_damage: 25
 blast_radius: 0

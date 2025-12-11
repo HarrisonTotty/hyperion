@@ -45,6 +45,7 @@ fn create_test_config() -> GameConfig {
         size: ShipSize::Medium,
         role: ShipClassRole::Combat,
         build_points: 1000.0,
+        cost: 50000,
         bonuses: HashMap::new(),
         manufacturers: HashMap::new(),
         length: None,
@@ -91,6 +92,7 @@ fn create_test_config() -> GameConfig {
     module_variants: HashMap::new(),
     bonuses: None,
     module_slots: HashMap::new(),
+    game_settings: hyperion::config::GameSettings::default(),
     }
 }
 
