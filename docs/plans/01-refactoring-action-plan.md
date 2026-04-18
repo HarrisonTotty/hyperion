@@ -26,6 +26,8 @@ Plan date: 2026-04-18.
 
 **Estimated size:** < 100 LOC net deletion.
 
+**Carry-over (item 11):** Landed in 95a4473 by deletion. `Ship::new()` does not exist, so `test_ship_registration` and `test_ship_queries` have no constructor to exercise. When a `Ship` constructor lands, re-add coverage for: registering a ship and retrieving it via `get_ship` / `ship_exists`; querying by team via `get_team_ships`; querying by player via `get_player_ships` (the latter now has a real implementation per item 10 and deserves direct test coverage). Reference text of the original block lives in the git history at 95a4473^:src/state.rs.
+
 ---
 
 ## Phase 2 — Test config consolidation
