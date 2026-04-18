@@ -6,6 +6,7 @@ use rocket::{Route, State, http::Status, serde::json::Json};
 use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
+use crate::api::lookup::WorldLookup;
 use crate::state::SharedGameWorld;
 
 /// Response for shield operations
@@ -82,10 +83,7 @@ pub fn raise_shields(
     let mut world = world.write().unwrap();
 
     // Check if ship exists
-    let ship = world
-        .ships_mut()
-        .get_mut(&ship_id)
-        .ok_or(Status::NotFound)?;
+    let ship = world.find_ship_mut(&ship_id)?;
 
     // Raise shields
     ship.status.shields_raised = true;
@@ -105,10 +103,7 @@ pub fn lower_shields(
     let mut world = world.write().unwrap();
 
     // Check if ship exists
-    let ship = world
-        .ships_mut()
-        .get_mut(&ship_id)
-        .ok_or(Status::NotFound)?;
+    let ship = world.find_ship_mut(&ship_id)?;
 
     // Lower shields
     ship.status.shields_raised = false;
@@ -128,7 +123,7 @@ pub fn get_shield_status(
     let world = world.read().unwrap();
 
     // Check if ship exists
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     let percentage = if ship.status.max_shields > 0.0 {
         (ship.status.shields / ship.status.max_shields) * 100.0

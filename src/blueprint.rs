@@ -116,6 +116,154 @@ pub struct BlueprintValidator<'a> {
     teams: &'a HashMap<String, Team>,
 }
 
+/// Context passed to every validation rule.
+///
+/// Holds the blueprint being checked plus data that multiple rules need
+/// (currently just the resolved ship class). Rules mutate `result`.
+struct RuleContext<'a> {
+    blueprint: &'a ShipBlueprint,
+    ship_class: &'a ShipClassConfig,
+}
+
+/// Signature shared by every validation rule.
+///
+/// Adding a new validation rule means writing one function with this
+/// signature and appending it to [`RULES`].
+type ValidationRule =
+    for<'v, 'c> fn(&BlueprintValidator<'v>, &RuleContext<'c>, &mut ValidationResult);
+
+/// All rules run after ship-class resolution, in order.
+const RULES: &[ValidationRule] = &[
+    rule_team_exists,
+    rule_players_and_roles,
+    rule_weight_limit,
+    rule_module_count,
+    rule_unconfigured_modules,
+    rule_required_modules,
+    rule_max_allowed,
+    rule_module_variants,
+    rule_no_modules_warning,
+    rule_no_weapons_warning,
+    rule_under_equipped,
+    rule_ready_status,
+];
+
+// ==================== Validation Rules ====================
+//
+// Rules are free functions so they can be collected into a `fn`-pointer
+// table that is generic over the validator's lifetime. Each rule inspects
+// the blueprint via `ctx` and mutates `result` in place.
+
+fn rule_team_exists(
+    validator: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    if let Err(e) = validator.validate_team(&ctx.blueprint.team_id) {
+        result.add_error(e);
+    }
+}
+
+fn rule_players_and_roles(
+    validator: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    validator.validate_players_and_roles(ctx.blueprint, result);
+}
+
+fn rule_weight_limit(_: &BlueprintValidator, ctx: &RuleContext, result: &mut ValidationResult) {
+    if result.total_weight > ctx.ship_class.max_weight as u32 {
+        result.add_error(ValidationError::WeightLimitExceeded {
+            current: result.total_weight,
+            max: ctx.ship_class.max_weight as u32,
+        });
+    }
+}
+
+fn rule_module_count(_: &BlueprintValidator, ctx: &RuleContext, result: &mut ValidationResult) {
+    let module_count = ctx.blueprint.modules.len();
+    if module_count > ctx.ship_class.max_modules as usize {
+        result.add_error(ValidationError::ModuleCountExceeded {
+            current: module_count,
+            max: ctx.ship_class.max_modules as usize,
+        });
+    }
+}
+
+fn rule_unconfigured_modules(
+    _: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    let unconfigured: Vec<String> = ctx
+        .blueprint
+        .modules
+        .iter()
+        .filter(|m| m.variant_id.is_none())
+        .map(|m| m.module_slot_id.clone())
+        .collect();
+    if !unconfigured.is_empty() {
+        result.add_warning(ValidationWarning::UnconfiguredModules(unconfigured));
+    }
+}
+
+fn rule_required_modules(
+    validator: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    validator.validate_required_modules(ctx.blueprint, result);
+}
+
+fn rule_max_allowed(
+    validator: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    validator.validate_max_allowed(ctx.blueprint, result);
+}
+
+fn rule_module_variants(
+    validator: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    validator.validate_module_variants(ctx.blueprint, result);
+}
+
+fn rule_no_modules_warning(
+    _: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    if ctx.blueprint.modules.is_empty() {
+        result.add_warning(ValidationWarning::NoModules);
+    }
+}
+
+fn rule_no_weapons_warning(
+    _: &BlueprintValidator,
+    ctx: &RuleContext,
+    result: &mut ValidationResult,
+) {
+    if ctx.blueprint.weapons.is_empty() {
+        result.add_warning(ValidationWarning::NoWeapons);
+    }
+}
+
+fn rule_under_equipped(_: &BlueprintValidator, ctx: &RuleContext, result: &mut ValidationResult) {
+    if ctx.blueprint.modules.len() < ctx.ship_class.max_modules as usize / 2 {
+        result.add_warning(ValidationWarning::UnderEquipped);
+    }
+}
+
+fn rule_ready_status(_: &BlueprintValidator, ctx: &RuleContext, result: &mut ValidationResult) {
+    if !ctx.blueprint.all_players_ready() {
+        result.add_error(ValidationError::PlayersNotReady);
+    }
+}
+
 impl<'a> BlueprintValidator<'a> {
     /// Create a new blueprint validator
     pub fn new(
@@ -134,81 +282,24 @@ impl<'a> BlueprintValidator<'a> {
     pub fn validate(&self, blueprint: &ShipBlueprint) -> ValidationResult {
         let mut result = ValidationResult::new();
 
-        // Validate ship class exists
+        // Ship class is load-bearing for most rules: if we cannot resolve it,
+        // no further rule can produce meaningful output.
         let ship_class = match self.validate_ship_class(&blueprint.class) {
             Ok(class) => class,
             Err(e) => {
                 result.add_error(e);
-                return result; // Can't continue without valid ship class
+                return result;
             }
         };
 
-        // Validate team exists
-        if let Err(e) = self.validate_team(&blueprint.team_id) {
-            result.add_error(e);
-        }
+        result.set_total_weight(self.calculate_total_weight(blueprint));
 
-        // Validate players and roles
-        self.validate_players_and_roles(blueprint, &mut result);
-
-        // Calculate and validate weight
-        let total_weight = self.calculate_total_weight(blueprint);
-        result.set_total_weight(total_weight);
-
-        if total_weight > ship_class.max_weight as u32 {
-            result.add_error(ValidationError::WeightLimitExceeded {
-                current: total_weight,
-                max: ship_class.max_weight as u32,
-            });
-        }
-
-        // Validate module count
-        let module_count = blueprint.modules.len();
-        if module_count > ship_class.max_modules as usize {
-            result.add_error(ValidationError::ModuleCountExceeded {
-                current: module_count,
-                max: ship_class.max_modules as usize,
-            });
-        }
-
-        // Check for unconfigured modules
-        let unconfigured: Vec<String> = blueprint
-            .modules
-            .iter()
-            .filter(|m| m.variant_id.is_none())
-            .map(|m| m.module_slot_id.clone())
-            .collect();
-
-        if !unconfigured.is_empty() {
-            result.add_warning(ValidationWarning::UnconfiguredModules(unconfigured));
-        }
-
-        // Phase 2.3: Validate required modules
-        self.validate_required_modules(blueprint, &mut result);
-
-        // Phase 2.3: Validate max_allowed counts
-        self.validate_max_allowed(blueprint, &mut result);
-
-        // Phase 2.3: Validate variant configuration
-        self.validate_module_variants(blueprint, &mut result);
-
-        // Check for modules/weapons
-        if blueprint.modules.is_empty() {
-            result.add_warning(ValidationWarning::NoModules);
-        }
-
-        if blueprint.weapons.is_empty() {
-            result.add_warning(ValidationWarning::NoWeapons);
-        }
-
-        // Check if under-equipped
-        if module_count < ship_class.max_modules as usize / 2 {
-            result.add_warning(ValidationWarning::UnderEquipped);
-        }
-
-        // Check ready status
-        if !blueprint.all_players_ready() {
-            result.add_error(ValidationError::PlayersNotReady);
+        let ctx = RuleContext {
+            blueprint,
+            ship_class,
+        };
+        for rule in RULES {
+            rule(self, &ctx, &mut result);
         }
 
         result

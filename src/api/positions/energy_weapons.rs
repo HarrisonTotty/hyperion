@@ -6,6 +6,7 @@ use rocket::{Route, State, http::Status, serde::json::Json};
 use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
+use crate::api::lookup::WorldLookup;
 use crate::state::SharedGameWorld;
 
 /// Request to set target for energy weapons
@@ -181,7 +182,7 @@ pub fn get_status(
     let world = world.read().unwrap();
 
     // Check if ship exists
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     // Get energy weapons from ship
     let weapons: Vec<EnergyWeaponStatus> = ship

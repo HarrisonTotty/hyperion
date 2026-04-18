@@ -6,6 +6,7 @@ use rocket::{Route, State, http::Status, serde::json::Json};
 use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
+use crate::api::lookup::WorldLookup;
 use crate::state::SharedGameWorld;
 
 /// Request to set thrust vector
@@ -149,7 +150,7 @@ pub fn engage_warp(
 ) -> Result<Json<WarpResponse>, Status> {
     let world_read = world.read().unwrap();
 
-    let ship = world_read.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world_read.find_ship(&ship_id)?;
 
     let tachyon_disabled = ship.status.is_tachyon_disabled();
     drop(world_read);
@@ -184,7 +185,7 @@ pub fn engage_jump(
 ) -> Result<Json<JumpResponse>, Status> {
     let world_read = world.read().unwrap();
 
-    let ship = world_read.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world_read.find_ship(&ship_id)?;
 
     let tachyon_disabled = ship.status.is_tachyon_disabled();
     drop(world_read);
@@ -236,7 +237,7 @@ pub fn get_helm_status(
 ) -> Result<Json<HelmStatusResponse>, Status> {
     let world = world.read().unwrap();
 
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     let tachyon_effect = ship.status.is_tachyon_disabled();
 

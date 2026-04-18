@@ -2,6 +2,7 @@
 //!
 //! Provides REST API endpoints for compiling blueprints into active ships.
 
+use crate::api::lookup::WorldLookup;
 use crate::compiler;
 use crate::config::GameConfig;
 use crate::state::SharedGameWorld;
@@ -94,7 +95,7 @@ pub fn list_ships(world: &State<SharedGameWorld>) -> Json<ListShipsResponse> {
 pub fn get_ship(id: &str, world: &State<SharedGameWorld>) -> Result<Json<ShipResponse>, Status> {
     let world = world.read().unwrap();
 
-    let ship = world.get_ship(id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(id)?;
 
     Ok(Json(ship_to_response(ship)))
 }

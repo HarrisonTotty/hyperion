@@ -4,6 +4,7 @@
 //! - Crew reassignment
 //! - Captain's log management
 
+use crate::api::lookup::WorldLookup;
 use crate::models::role::ShipRole;
 use crate::models::ship::CaptainLogEntry;
 use crate::state::SharedGameWorld;
@@ -65,10 +66,7 @@ pub fn reassign_crew(
     let mut game_world = world.write().map_err(|_| Status::InternalServerError)?;
 
     // Get the ship and team_id
-    let team_id = {
-        let ship = game_world.ships().get(&ship_id).ok_or(Status::NotFound)?;
-        ship.team_id.clone()
-    };
+    let team_id = game_world.find_ship(&ship_id)?.team_id.clone();
 
     // Validate all player IDs exist in the team
     let team = game_world
@@ -83,10 +81,7 @@ pub fn reassign_crew(
     }
 
     // Update player role assignments
-    let ship = game_world
-        .ships_mut()
-        .get_mut(&ship_id)
-        .ok_or(Status::NotFound)?;
+    let ship = game_world.find_ship_mut(&ship_id)?;
     ship.player_roles = request.assignments.clone();
 
     Ok(Json(ReassignCrewResponse {

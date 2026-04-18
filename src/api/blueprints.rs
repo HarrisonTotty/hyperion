@@ -2,6 +2,7 @@
 //!
 //! Provides REST API endpoints for managing ship blueprints.
 
+use crate::api::lookup::WorldLookup;
 use crate::blueprint::BlueprintValidator;
 use crate::config::GameConfig;
 use crate::models::role::ShipRole;
@@ -218,7 +219,7 @@ pub fn get_blueprint(
 ) -> Result<Json<BlueprintResponse>, Status> {
     let world = world.read().unwrap();
 
-    let blueprint = world.get_blueprint(id).ok_or(Status::NotFound)?;
+    let blueprint = world.find_blueprint(id)?;
 
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -240,7 +241,7 @@ pub fn join_blueprint(
     let mut game_world = world.write().unwrap();
 
     // Get blueprint and add player with empty roles
-    let blueprint = game_world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+    let blueprint = game_world.find_blueprint_mut(id)?;
 
     blueprint.set_player_roles(request.player_id.clone(), vec![]);
 
@@ -268,9 +269,8 @@ pub fn update_roles(
         return Err(Status::BadRequest);
     }
 
-    let blueprint = game_world.get_blueprint_mut(id).ok_or_else(|| {
+    let blueprint = game_world.find_blueprint_mut(id).inspect_err(|_| {
         eprintln!("Blueprint not found: {}", id);
-        Status::NotFound
     })?;
 
     // Add player if not already in blueprint (auto-join)
@@ -298,7 +298,7 @@ pub fn add_module(
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
 
-    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+    let blueprint = world.find_blueprint_mut(id)?;
 
     // Create module instance
     let module = crate::models::blueprint::ModuleInstance {
@@ -321,7 +321,7 @@ pub fn remove_module(
 ) -> Result<Status, Status> {
     let mut world = world.write().unwrap();
 
-    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+    let blueprint = world.find_blueprint_mut(id)?;
 
     let initial_len = blueprint.modules.len();
     blueprint.modules.retain(|m| m.id != module_id);
@@ -343,7 +343,7 @@ pub fn configure_module(
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
 
-    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+    let blueprint = world.find_blueprint_mut(id)?;
 
     let module = blueprint
         .modules
@@ -368,7 +368,7 @@ pub fn mark_ready(
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
 
-    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+    let blueprint = world.find_blueprint_mut(id)?;
 
     // Verify player is part of this blueprint
     if !blueprint.player_roles.contains_key(&request.player_id) {
@@ -390,7 +390,7 @@ pub fn unmark_ready(
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
 
-    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+    let blueprint = world.find_blueprint_mut(id)?;
 
     blueprint.unmark_ready(player_id);
 
@@ -407,7 +407,7 @@ pub fn validate_blueprint(
 ) -> Result<Json<ValidationResponse>, Status> {
     let world_lock = world.read().unwrap();
 
-    let blueprint = world_lock.get_blueprint(id).ok_or(Status::NotFound)?;
+    let blueprint = world_lock.find_blueprint(id)?;
 
     // Create validator
     let validator = BlueprintValidator::new(config, world_lock.players(), world_lock.teams());
@@ -504,6 +504,22 @@ mod tests {
         assert_eq!(response.status(), Status::Ok);
         let body: ListBlueprintsResponse = response.into_json().unwrap();
         assert_eq!(body.blueprints.len(), 0);
+    }
+
+    #[test]
+    fn returns_404_for_missing_blueprint() {
+        // Smoke test for the WorldLookup layer: a missing entity must still
+        // surface as Rocket's default 404 (status + HTML body), matching the
+        // pre-refactor behaviour of `ok_or(Status::NotFound)?`.
+        let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
+        let response = client.get("/v1/blueprints/does-not-exist").dispatch();
+
+        assert_eq!(response.status(), Status::NotFound);
+        let body = response.into_string().unwrap_or_default();
+        assert!(
+            body.contains("404: Not Found"),
+            "expected Rocket default 404 body, got: {body}"
+        );
     }
 
     #[test]

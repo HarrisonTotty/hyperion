@@ -7,6 +7,7 @@ pub mod blueprints;
 pub mod catalog;
 pub mod factions;
 pub mod generation;
+pub mod lookup;
 pub mod modules;
 pub mod players;
 pub mod positions;

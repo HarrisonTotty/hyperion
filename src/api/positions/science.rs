@@ -6,6 +6,7 @@ use rocket::{Route, State, http::Status, serde::json::Json};
 use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
+use crate::api::lookup::WorldLookup;
 use crate::state::SharedGameWorld;
 
 /// Request to scan a target
@@ -84,7 +85,7 @@ pub fn scan_target(
 ) -> Result<Json<ScanResponse>, Status> {
     let world_read = world.read().unwrap();
 
-    let ship = world_read.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world_read.find_ship(&ship_id)?;
 
     let ion_jammed = ship.status.is_ion_jammed();
     drop(world_read);
@@ -172,7 +173,7 @@ pub fn analyze_target(
 ) -> Result<Json<AnalysisResponse>, Status> {
     let world_read = world.read().unwrap();
 
-    let ship = world_read.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world_read.find_ship(&ship_id)?;
 
     let ion_jammed = ship.status.is_ion_jammed();
 
@@ -181,10 +182,7 @@ pub fn analyze_target(
     }
 
     // Try to find target ship
-    let target = world_read
-        .ships()
-        .get(&request.target_id)
-        .ok_or(Status::NotFound)?;
+    let target = world_read.find_ship(&request.target_id)?;
 
     let hull_pct = if target.status.max_hull > 0.0 {
         (target.status.hull / target.status.max_hull) * 100.0

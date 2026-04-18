@@ -7,6 +7,7 @@ use rocket::{get, patch, post, routes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::api::lookup::WorldLookup;
 use crate::state::SharedGameWorld;
 
 /// Request to allocate power to modules
@@ -175,7 +176,7 @@ pub fn get_ship_status(
     let world = world.read().unwrap();
 
     // Check if ship exists
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     let hull_pct = if ship.status.max_hull > 0.0 {
         (ship.status.hull / ship.status.max_hull) * 100.0
@@ -213,7 +214,7 @@ pub fn get_modules_status(
     let world = world.read().unwrap();
 
     // Check if ship exists
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     let modules: Vec<ModuleStatusInfo> = ship
         .modules
@@ -250,7 +251,7 @@ pub fn activate_auxiliary_module(
     let mut world = world.write().unwrap();
 
     // Check if ship exists
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     // Find the module
     let module = ship

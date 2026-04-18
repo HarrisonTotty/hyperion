@@ -6,6 +6,7 @@ use rocket::{Route, State, http::Status, serde::json::Json};
 use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
+use crate::api::lookup::WorldLookup;
 use crate::state::SharedGameWorld;
 
 /// Request to set target
@@ -172,7 +173,7 @@ pub fn get_status(
 ) -> Result<Json<Vec<KineticWeaponStatus>>, Status> {
     let world = world.read().unwrap();
 
-    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+    let ship = world.find_ship(&ship_id)?;
 
     let weapons = ship
         .weapons
