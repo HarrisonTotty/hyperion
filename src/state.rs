@@ -14,6 +14,55 @@ use crate::models::ship::{CaptainLogEntry, DockingRequest, FighterCommand, HailM
 use crate::models::{Player, Ship, ShipBlueprint, Team};
 use crate::stations::Station;
 
+/// Emits the shared `get_* / get_*_mut / get_all_*s` accessors for an entity
+/// type stored in a `HashMap<String, _>` field on `Self`.
+///
+/// The three generated methods are intentionally the minimum common surface —
+/// per-entity helpers (registration, filtered queries, name lookups with a
+/// secondary index) live alongside the macro invocation.
+macro_rules! declare_entity_accessors {
+    (
+        field: $field:ident,
+        type: $ty:ty,
+        get: $get:ident,
+        get_mut: $get_mut:ident,
+        get_all: $get_all:ident $(,)?
+    ) => {
+        #[doc = concat!("Get a `", stringify!($ty), "` by ID.")]
+        pub fn $get(&self, id: &str) -> Option<&$ty> {
+            self.$field.get(id)
+        }
+
+        #[doc = concat!("Get a mutable reference to a `", stringify!($ty), "` by ID.")]
+        pub fn $get_mut(&mut self, id: &str) -> Option<&mut $ty> {
+            self.$field.get_mut(id)
+        }
+
+        #[doc = concat!("Get all `", stringify!($ty), "`s.")]
+        pub fn $get_all(&self) -> Vec<&$ty> {
+            self.$field.values().collect()
+        }
+    };
+}
+
+/// Emits a `get_*_by_name` accessor for entities with a secondary
+/// `HashMap<String, String>` index mapping name → id.
+macro_rules! declare_entity_name_lookup {
+    (
+        field: $field:ident,
+        name_index: $name_index:ident,
+        type: $ty:ty,
+        get_by_name: $get_by_name:ident $(,)?
+    ) => {
+        #[doc = concat!("Get a `", stringify!($ty), "` by its unique name.")]
+        pub fn $get_by_name(&self, name: &str) -> Option<&$ty> {
+            self.$name_index
+                .get(name)
+                .and_then(|id| self.$field.get(id))
+        }
+    };
+}
+
 /// Thread-safe wrapper for game state
 ///
 /// This allows multiple threads (e.g., API handlers, simulation) to access
@@ -172,26 +221,19 @@ impl GameWorld {
         Ok(player_id)
     }
 
-    /// Get a player by ID
-    pub fn get_player(&self, id: &str) -> Option<&Player> {
-        self.players.get(id)
+    declare_entity_accessors! {
+        field: players,
+        type: Player,
+        get: get_player,
+        get_mut: get_player_mut,
+        get_all: get_all_players,
     }
 
-    /// Get a mutable reference to a player by ID
-    pub fn get_player_mut(&mut self, id: &str) -> Option<&mut Player> {
-        self.players.get_mut(id)
-    }
-
-    /// Get a player by name
-    pub fn get_player_by_name(&self, name: &str) -> Option<&Player> {
-        self.player_names
-            .get(name)
-            .and_then(|id| self.players.get(id))
-    }
-
-    /// Get all players
-    pub fn get_all_players(&self) -> Vec<&Player> {
-        self.players.values().collect()
+    declare_entity_name_lookup! {
+        field: players,
+        name_index: player_names,
+        type: Player,
+        get_by_name: get_player_by_name,
     }
 
     /// Remove a player
@@ -263,24 +305,19 @@ impl GameWorld {
         Ok(team_id)
     }
 
-    /// Get a team by ID
-    pub fn get_team(&self, id: &str) -> Option<&Team> {
-        self.teams.get(id)
+    declare_entity_accessors! {
+        field: teams,
+        type: Team,
+        get: get_team,
+        get_mut: get_team_mut,
+        get_all: get_all_teams,
     }
 
-    /// Get a mutable reference to a team by ID
-    pub fn get_team_mut(&mut self, id: &str) -> Option<&mut Team> {
-        self.teams.get_mut(id)
-    }
-
-    /// Get a team by name
-    pub fn get_team_by_name(&self, name: &str) -> Option<&Team> {
-        self.team_names.get(name).and_then(|id| self.teams.get(id))
-    }
-
-    /// Get all teams
-    pub fn get_all_teams(&self) -> Vec<&Team> {
-        self.teams.values().collect()
+    declare_entity_name_lookup! {
+        field: teams,
+        name_index: team_names,
+        type: Team,
+        get_by_name: get_team_by_name,
     }
 
     /// Add a player to a team
@@ -382,19 +419,12 @@ impl GameWorld {
         Ok(blueprint_id)
     }
 
-    /// Get a blueprint by ID
-    pub fn get_blueprint(&self, id: &str) -> Option<&ShipBlueprint> {
-        self.blueprints.get(id)
-    }
-
-    /// Get a mutable reference to a blueprint by ID
-    pub fn get_blueprint_mut(&mut self, id: &str) -> Option<&mut ShipBlueprint> {
-        self.blueprints.get_mut(id)
-    }
-
-    /// Get all blueprints
-    pub fn get_all_blueprints(&self) -> Vec<&ShipBlueprint> {
-        self.blueprints.values().collect()
+    declare_entity_accessors! {
+        field: blueprints,
+        type: ShipBlueprint,
+        get: get_blueprint,
+        get_mut: get_blueprint_mut,
+        get_all: get_all_blueprints,
     }
 
     /// Get all blueprints for a specific team
@@ -424,19 +454,12 @@ impl GameWorld {
         ship_id
     }
 
-    /// Get a ship by ID
-    pub fn get_ship(&self, id: &str) -> Option<&Ship> {
-        self.ships.get(id)
-    }
-
-    /// Get a mutable reference to a ship by ID
-    pub fn get_ship_mut(&mut self, id: &str) -> Option<&mut Ship> {
-        self.ships.get_mut(id)
-    }
-
-    /// Get all ships
-    pub fn get_all_ships(&self) -> Vec<&Ship> {
-        self.ships.values().collect()
+    declare_entity_accessors! {
+        field: ships,
+        type: Ship,
+        get: get_ship,
+        get_mut: get_ship_mut,
+        get_all: get_all_ships,
     }
 
     /// Get all ships for a specific team
@@ -481,19 +504,12 @@ impl GameWorld {
         station_id
     }
 
-    /// Get a station by ID
-    pub fn get_station(&self, id: &str) -> Option<&Station> {
-        self.stations.get(id)
-    }
-
-    /// Get a mutable reference to a station by ID
-    pub fn get_station_mut(&mut self, id: &str) -> Option<&mut Station> {
-        self.stations.get_mut(id)
-    }
-
-    /// Get all stations
-    pub fn get_all_stations(&self) -> Vec<&Station> {
-        self.stations.values().collect()
+    declare_entity_accessors! {
+        field: stations,
+        type: Station,
+        get: get_station,
+        get_mut: get_station_mut,
+        get_all: get_all_stations,
     }
 
     /// Get all stations for a specific faction
