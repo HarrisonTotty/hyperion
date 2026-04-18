@@ -122,7 +122,7 @@ impl<'a> ShipCompiler<'a> {
         let compiled_modules = self.compile_modules(blueprint)?;
 
         // Calculate ship systems from compiled modules
-        let status = self.initialize_ship_status(blueprint, ship_class, &compiled_modules)?;
+        let status = self.initialize_ship_status(ship_class, &compiled_modules)?;
 
         // Create inventory
         let inventory = self.initialize_inventory(blueprint);
@@ -231,10 +231,14 @@ impl<'a> ShipCompiler<'a> {
             .ok_or_else(|| CompilationError::ShipClassNotFound(class_id.to_string()))
     }
 
-    /// Initialize ship status based on blueprint and ship class
+    /// Initialize ship status from ship class and compiled modules.
+    ///
+    /// All blueprint-derived data needed here is already reflected in
+    /// `compiled_modules` (resolved variants, mass, power, cooling) and
+    /// `ship_class` (base hull/shields), so the blueprint itself is not
+    /// required.
     fn initialize_ship_status(
         &self,
-        _blueprint: &ShipBlueprint,
         ship_class: &ShipClassConfig,
         compiled_modules: &[CompiledModule],
     ) -> Result<ShipStatus, CompilationError> {

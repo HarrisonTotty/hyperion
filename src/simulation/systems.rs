@@ -9,7 +9,32 @@ use bevy_ecs::system::{Commands, Query};
 use nalgebra::Vector3;
 
 use super::components::*;
-use crate::weapons::{StatusEffectType, WeaponTagCalculator};
+use crate::weapons::{DamageResult, StatusEffectType, WeaponTagCalculator};
+
+/// Apply a computed [`DamageResult`] to a target ship.
+///
+/// Shields absorb damage first; any overflow reduces hull integrity. If the
+/// result carries a status effect and the target has a [`StatusEffects`]
+/// component, the effect is applied with its bundled duration.
+///
+/// Damage scaling (e.g. `damage * delta_time` for continuous weapons) must be
+/// applied by the caller before invoking [`WeaponTagCalculator::calculate_damage`];
+/// this helper applies `result.hull_damage` verbatim.
+fn apply_damage_result(
+    shield: &mut ShieldComponent,
+    ship_data: &mut ShipData,
+    effects: Option<&mut StatusEffects>,
+    result: &DamageResult,
+) {
+    let remaining_damage = shield.apply_damage(result.hull_damage);
+    if remaining_damage > 0.0 {
+        ship_data.hull -= remaining_damage;
+    }
+
+    if let (Some(effects), Some(status_effect)) = (effects, result.status_effect.as_ref()) {
+        effects.apply(status_effect.effect_type, status_effect.duration);
+    }
+}
 
 #[cfg(test)]
 use crate::models::WeaponTag;
@@ -178,18 +203,13 @@ pub fn damage_system(
                     Err(_) => continue, // Skip on error
                 };
 
-                // Apply damage to shields first, then hull
-                let remaining_damage = shield.apply_damage(damage_result.hull_damage);
-                if remaining_damage > 0.0 {
-                    ship_data.hull -= remaining_damage;
-                }
-
-                // Apply status effects
-                if let Ok(mut effects) = status_effects.get_mut(ship_entity)
-                    && let Some(status_effect) = damage_result.status_effect
-                {
-                    effects.apply(status_effect.effect_type, status_effect.duration);
-                }
+                let mut effects = status_effects.get_mut(ship_entity).ok();
+                apply_damage_result(
+                    &mut shield,
+                    &mut ship_data,
+                    effects.as_deref_mut(),
+                    &damage_result,
+                );
 
                 // Remove projectile
                 commands.entity(projectile_entity).despawn();
@@ -273,18 +293,13 @@ pub fn beam_weapon_system(
                     Err(_) => continue,
                 };
 
-                // Apply damage
-                let remaining_damage = shield.apply_damage(damage_result.hull_damage);
-                if remaining_damage > 0.0 {
-                    ship_data.hull -= remaining_damage;
-                }
-
-                // Apply status effects
-                if let Ok(mut effects) = status_effects.get_mut(ship_entity)
-                    && let Some(status_effect) = damage_result.status_effect
-                {
-                    effects.apply(status_effect.effect_type, status_effect.duration);
-                }
+                let mut effects = status_effects.get_mut(ship_entity).ok();
+                apply_damage_result(
+                    &mut shield,
+                    &mut ship_data,
+                    effects.as_deref_mut(),
+                    &damage_result,
+                );
             }
         }
     }
@@ -663,6 +678,102 @@ mod tests {
         let jump = world.get::<JumpDriveComponent>(ship).unwrap();
         assert!(jump.target_destination.is_none()); // Jump cancelled by Tachyon
         assert!(jump.disabled);
+    }
+
+    #[test]
+    fn damage_and_beam_systems_share_application_logic() {
+        // Both damage_system and beam_weapon_system route through
+        // apply_damage_result; feeding them equivalent inputs must produce
+        // identical shield/hull/effects state on the target.
+        let mut world = World::new();
+
+        let make_target = |world: &mut World| -> Entity {
+            world
+                .spawn((
+                    ShipData::new(
+                        "target".to_string(),
+                        "Target".to_string(),
+                        "cruiser".to_string(),
+                        "team1".to_string(),
+                        1000.0,
+                        200.0,
+                        100.0,
+                    ),
+                    ShieldComponent::new(200.0, 0.0, 5.0),
+                    StatusEffects::new(),
+                    Transform {
+                        position: Vector3::zeros(),
+                        rotation: nalgebra::UnitQuaternion::identity(),
+                        velocity: Vector3::zeros(),
+                        angular_velocity: Vector3::zeros(),
+                    },
+                ))
+                .id()
+        };
+
+        let kinetic_target = make_target(&mut world);
+        let beam_target = make_target(&mut world);
+
+        let spawn_projectile =
+            |world: &mut World, ptype: ProjectileType, target: Entity, damage: f32| {
+                world.spawn((
+                    ProjectileComponent {
+                        projectile_type: ptype,
+                        owner: Entity::from_raw_u32(1000).unwrap(),
+                        target: Some(target),
+                        damage,
+                        tags: vec![WeaponTag::Ion],
+                        lifetime: 1.0,
+                    },
+                    Transform {
+                        position: Vector3::zeros(),
+                        rotation: nalgebra::UnitQuaternion::identity(),
+                        velocity: Vector3::zeros(),
+                        angular_velocity: Vector3::zeros(),
+                    },
+                ));
+            };
+
+        // Same effective damage (500) enters calculate_damage in both paths:
+        // damage_system sees projectile.damage directly, and
+        // beam_weapon_system scales by delta_time=1.0 at the call site.
+        spawn_projectile(&mut world, ProjectileType::Kinetic, kinetic_target, 500.0);
+        spawn_projectile(&mut world, ProjectileType::Beam, beam_target, 500.0);
+
+        let _ = world.run_system_once(damage_system);
+        let _ = world.run_system_once(
+            |beams: Query<(&ProjectileComponent, &Transform)>,
+             ships: Query<(Entity, &mut ShipData, &mut ShieldComponent, &Transform)>,
+             effects: Query<&mut StatusEffects>| {
+                beam_weapon_system(beams, ships, effects, 1.0);
+            },
+        );
+
+        let k_shield = world
+            .get::<ShieldComponent>(kinetic_target)
+            .unwrap()
+            .strength;
+        let b_shield = world.get::<ShieldComponent>(beam_target).unwrap().strength;
+        let k_hull = world.get::<ShipData>(kinetic_target).unwrap().hull;
+        let b_hull = world.get::<ShipData>(beam_target).unwrap().hull;
+        let k_ion = world
+            .get::<StatusEffects>(kinetic_target)
+            .unwrap()
+            .has_effect(StatusEffectType::IonJam);
+        let b_ion = world
+            .get::<StatusEffects>(beam_target)
+            .unwrap()
+            .has_effect(StatusEffectType::IonJam);
+
+        assert!((k_shield - b_shield).abs() < 0.01);
+        assert!((k_hull - b_hull).abs() < 0.01);
+        assert_eq!(k_ion, b_ion);
+
+        // Sanity: Ion applies 0.6x damage, so 500 -> 300 hull damage.
+        // Shield absorbs 200, hull takes 100 (1000 - 100 = 900).
+        assert!((k_hull - 900.0).abs() < 0.01);
+        assert!(k_shield.abs() < 0.01);
+        assert!(k_ion);
     }
 
     #[test]
