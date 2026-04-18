@@ -58,7 +58,6 @@ pub struct GameConfig {
     // Enhanced configuration
     pub ship_classes: Vec<ShipClassConfig>,
     pub module_definitions: Vec<ModuleConfig>,
-    pub weapon_definitions: Vec<WeaponConfig>,
     pub ammunition_types: Vec<AmmunitionConfig>,
     pub kinetic_weapon_kinds: Vec<KineticWeaponKind>,
 
@@ -251,10 +250,6 @@ impl GameConfig {
         // Load module definitions from modules directory
         let module_definitions = Self::load_modules(data_dir.join("modules"))?;
 
-        // TODO: Remove weapon_definitions once weapon migration to ModuleVariants is complete
-        // Old WeaponConfig files have been migrated to ModuleVariant format
-        let weapon_definitions = Vec::new();
-
         // Load ammunition types from data/ammo/ directory
         let ammunition_types = Self::load_ammunition(data_dir.to_path_buf())?;
 
@@ -283,7 +278,6 @@ impl GameConfig {
             simulation,
             ship_classes,
             module_definitions,
-            weapon_definitions,
             ammunition_types,
             kinetic_weapon_kinds,
             ai_behavior,
@@ -312,11 +306,6 @@ impl GameConfig {
         // Validate modules
         for module in &self.module_definitions {
             module.validate()?;
-        }
-
-        // Validate weapons
-        for weapon in &self.weapon_definitions {
-            weapon.validate()?;
         }
 
         // Validate module slots
@@ -356,13 +345,6 @@ impl GameConfig {
             }
         }
 
-        let mut weapon_ids = HashMap::new();
-        for w in &self.weapon_definitions {
-            if weapon_ids.insert(&w.id, &w.name).is_some() {
-                return Err(format!("Duplicate weapon ID '{}' found", w.id));
-            }
-        }
-
         // Check for duplicate module slot IDs (already done during loading via HashMap)
         // But we can validate they're reasonable
         if self.module_slots.is_empty() {
@@ -393,11 +375,6 @@ impl GameConfig {
     /// Find a module by ID
     pub fn get_module(&self, id: &str) -> Option<&ModuleConfig> {
         self.module_definitions.iter().find(|m| m.id == id)
-    }
-
-    /// Find a weapon by ID
-    pub fn get_weapon(&self, id: &str) -> Option<&WeaponConfig> {
-        self.weapon_definitions.iter().find(|w| w.id == id)
     }
 
     /// Find ammunition by ID
@@ -453,33 +430,6 @@ impl GameConfig {
                 None
             }
         }
-    }
-
-    /// Load all YAML files from a directory
-    #[allow(dead_code)]
-    fn load_directory<T: for<'de> Deserialize<'de>>(dir: PathBuf) -> Result<Vec<T>, String> {
-        debug!("Loading directory: {}", dir.display());
-
-        if !dir.exists() {
-            return Ok(Vec::new());
-        }
-
-        let mut items = Vec::new();
-
-        let entries =
-            fs::read_dir(&dir).map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
-
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let path = entry.path();
-
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-                let item = Self::load_yaml::<T>(path)?;
-                items.push(item);
-            }
-        }
-
-        Ok(items)
     }
 
     /// Load ship classes from a directory, setting IDs from filenames
@@ -583,57 +533,6 @@ impl GameConfig {
                     && path.extension().and_then(|s| s.to_str()) == Some("yaml")
                 {
                     let mut item = GameConfig::load_yaml::<ModuleConfig>(path.clone())?;
-
-                    // Extract filename without extension as ID
-                    let id = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .ok_or_else(|| format!("Invalid filename: {:?}", path))?
-                        .to_string();
-
-                    item.set_id(id);
-                    items.push(item);
-                }
-            }
-
-            Ok(())
-        }
-
-        load_recursive(&dir, &mut items)?;
-        Ok(items)
-    }
-
-    /// Load weapons from modules/*-weapons directories (recursively), setting IDs from filenames
-    #[allow(dead_code)]
-    fn load_weapons(dir: PathBuf) -> Result<Vec<WeaponConfig>, String> {
-        debug!("Loading weapons from: {}", dir.display());
-
-        if !dir.exists() {
-            return Ok(Vec::new());
-        }
-
-        let mut items = Vec::new();
-
-        fn load_recursive(dir: &Path, items: &mut Vec<WeaponConfig>) -> Result<(), String> {
-            let entries = fs::read_dir(dir)
-                .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
-
-            for entry in entries {
-                let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-                let path = entry.path();
-
-                if path.is_dir() {
-                    // Only recurse into weapon directories
-                    if let Some(dir_name) = path.file_name().and_then(|s| s.to_str())
-                        && dir_name.ends_with("-weapons")
-                    {
-                        debug!("Loading weapons from: {}", dir_name);
-                        load_recursive(&path, items)?;
-                    }
-                } else if path.is_file()
-                    && path.extension().and_then(|s| s.to_str()) == Some("yaml")
-                {
-                    let mut item = GameConfig::load_yaml::<WeaponConfig>(path.clone())?;
 
                     // Extract filename without extension as ID
                     let id = path
@@ -941,7 +840,6 @@ pub mod test_utils {
             module_slots: std::collections::HashMap::new(),
             ship_classes: vec![create_test_ship_class("cruiser", "Cruiser")],
             module_definitions: vec![],
-            weapon_definitions: vec![],
             ammunition_types: vec![],
             kinetic_weapon_kinds: vec![],
             game_settings: GameSettings::default(),

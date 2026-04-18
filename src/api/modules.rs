@@ -105,42 +105,6 @@ fn get_modules(config: &State<GameConfig>) -> Json<ModulesResponse> {
     Json(ModulesResponse { modules, count })
 }
 
-/// Determine module category from groups and name
-///
-/// Maps module groups to frontend category names.
-#[allow(dead_code)]
-fn determine_category(groups: &[String], name: &str) -> String {
-    // Special case for maneuvering thrusters
-    if name.to_lowercase().contains("maneuvering") || name.to_lowercase().contains("thruster") {
-        return "maneuvering-thrusters".to_string();
-    }
-
-    for group in groups {
-        match group.as_str() {
-            "power" => return "power-cores".to_string(),
-            "engines" => return "impulse-engines".to_string(),
-            "deweapons" => return "energy-weapons".to_string(),
-            "kweapons" => return "kinetic-weapons".to_string(),
-            "missiles" => return "missile-weapons".to_string(),
-            "defense" => return "countermeasures".to_string(),
-            "comms" | "sensors" => return "comms-systems".to_string(),
-            _ => {}
-        }
-    }
-
-    // Check for secondary categories
-    for group in groups {
-        match group.as_str() {
-            "weapons" => return "weapons".to_string(),
-            "support" => return "support".to_string(),
-            _ => {}
-        }
-    }
-
-    // Default to support if no specific category found
-    "support".to_string()
-}
-
 /// Get a specific module by ID
 ///
 /// # Arguments
@@ -215,49 +179,4 @@ fn get_module_variants(
 /// Returns all module routes
 pub fn routes() -> Vec<Route> {
     routes![get_modules, get_module, get_module_variants]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_determine_category() {
-        assert_eq!(
-            determine_category(&["power".to_string()], "Power Module"),
-            "power-cores"
-        );
-        assert_eq!(
-            determine_category(&["engines".to_string()], "Impulse Engines"),
-            "impulse-engines"
-        );
-        assert_eq!(
-            determine_category(&["deweapons".to_string()], "Energy Weapon"),
-            "energy-weapons"
-        );
-        assert_eq!(
-            determine_category(&["kweapons".to_string()], "Kinetic Weapon"),
-            "kinetic-weapons"
-        );
-        assert_eq!(
-            determine_category(&["missiles".to_string()], "Missile Tube"),
-            "missile-weapons"
-        );
-        assert_eq!(
-            determine_category(&["defense".to_string()], "Shield"),
-            "countermeasures"
-        );
-        assert_eq!(
-            determine_category(&["comms".to_string()], "Comms"),
-            "comms-systems"
-        );
-        assert_eq!(
-            determine_category(&["engines".to_string()], "Maneuvering Thrusters"),
-            "maneuvering-thrusters"
-        );
-        assert_eq!(
-            determine_category(&["unknown".to_string()], "Unknown"),
-            "support"
-        );
-    }
 }

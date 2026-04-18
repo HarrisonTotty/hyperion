@@ -409,6 +409,33 @@ fn test_communication_between_ships() {
 }
 
 #[test]
+fn test_weapon_yaml_round_trip_as_module_variant() {
+    // Confirms that known weapon YAMLs in data/modules/*-weapons/ still load
+    // cleanly as ModuleVariants after the weapon_definitions removal.
+    let kinetic = std::fs::read_to_string("data/modules/kinetic-weapons/autocannon.yaml")
+        .expect("autocannon.yaml should exist");
+    let kinetic_variant: ModuleVariant =
+        serde_yaml::from_str(&kinetic).expect("autocannon.yaml should parse as ModuleVariant");
+    assert_eq!(kinetic_variant.id, "autocannon");
+    assert_eq!(kinetic_variant.module_type, "kinetic-weapon");
+    assert_eq!(kinetic_variant.name, "Autocannon");
+
+    let de = std::fs::read_to_string("data/modules/de-weapons/medium-phaser.yaml")
+        .expect("medium-phaser.yaml should exist");
+    let de_variant: ModuleVariant =
+        serde_yaml::from_str(&de).expect("medium-phaser.yaml should parse as ModuleVariant");
+    assert_eq!(de_variant.id, "medium-phaser");
+    assert_eq!(de_variant.module_type, "de-weapon");
+    de_variant.validate().expect("variant must validate");
+    de_variant
+        .validate_numeric_ranges()
+        .expect("numeric ranges must validate");
+    de_variant
+        .validate_type_specific_fields()
+        .expect("type-specific fields must validate");
+}
+
+#[test]
 fn test_ion_weapon_jamming_effects() {
     // Test Ion weapon effects on communications and science
     use hyperion::simulation::components::*;
