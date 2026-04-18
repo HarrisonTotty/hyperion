@@ -11,6 +11,7 @@ Documentation can be found in the `docs/` directory. In particular:
 * `modules.md` - Provides an in-depth guide into the game's ship module system.
 * `ship-positions.md` - Detailed information about the role and capabilities of each ship position.
 * `plans/` contains detailed action plans for implementing new features.
+* `brainstorming/` contains brainstorming documents for new features/ideas.
 
 ## Common Commands
 
