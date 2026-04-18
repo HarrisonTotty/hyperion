@@ -44,7 +44,7 @@ pub fn power_system(mut power_grids: Query<&mut PowerGrid>) {
         // This system just tracks and validates
         let _allocated = power_grid.total_allocated();
 
-        // TODO: Enforce power limits and redistribute if over capacity
+        // See docs/plans/simulation-completeness.md — power_system
     }
 }
 
@@ -56,7 +56,7 @@ pub fn cooling_system(mut cooling_systems: Query<&mut CoolingSystem>) {
         // Calculate total cooling allocated
         let _allocated = cooling_sys.total_allocated();
 
-        // TODO: Enforce cooling limits and manage overheating
+        // See docs/plans/simulation-completeness.md — cooling_system
     }
 }
 
@@ -112,8 +112,8 @@ pub fn weapon_fire_system(
             continue;
         }
 
-        // TODO: Get targeting component from parent ship
-        // TODO: Check ammunition from parent ship inventory
+        // See docs/plans/simulation-completeness.md — weapon_fire_system
+        // (targeting from parent ship and ammunition inventory checks)
 
         // For now, create a simple projectile
         let projectile = ProjectileComponent::kinetic(
@@ -164,7 +164,8 @@ pub fn damage_system(
         {
             // Simple distance-based collision detection
             let distance = (proj_transform.position - ship_transform.position).magnitude();
-            let collision_distance = 10.0; // TODO: Use actual ship/projectile radius
+            // See docs/plans/simulation-completeness.md — damage_system (real radii)
+            let collision_distance = 10.0;
 
             if distance < collision_distance {
                 // Calculate damage using weapon tags
@@ -227,7 +228,7 @@ pub fn projectile_system(
             turn_rate: _,
         } = projectile.projectile_type
         {
-            // TODO: Implement target tracking/homing behavior
+            // See docs/plans/simulation-completeness.md — projectile_system (missile homing)
             // For now, just maintain current velocity
         }
 
@@ -259,7 +260,8 @@ pub fn beam_weapon_system(
         {
             // Simple line-of-sight check (could be improved with raycasting)
             let distance = (beam_transform.position - ship_transform.position).magnitude();
-            let max_range = 5000.0; // TODO: Make this configurable
+            // See docs/plans/simulation-completeness.md — beam_weapon_system (configurable range)
+            let max_range = 5000.0;
 
             if distance < max_range {
                 // Calculate damage (1x per second = base_damage * delta_time)
@@ -293,7 +295,7 @@ pub fn beam_weapon_system(
 /// When missiles or torpedoes hit their target, they create an explosion
 /// that can damage nearby ships.
 pub fn explosion_system() {
-    // TODO: Implement area-of-effect explosion damage
+    // See docs/plans/simulation-completeness.md — explosion_system (AoE damage)
     // For now, single-target damage is handled by damage_system
 }
 
@@ -316,13 +318,13 @@ pub fn countermeasure_system(
     countermeasures: Query<(&WeaponComponent, &Transform), With<PointDefenseMarker>>,
     projectiles: Query<(Entity, &ProjectileComponent, &Transform)>,
 ) {
-    // TODO: Implement point-defense logic
-    // For now, this is a placeholder
+    // See docs/plans/simulation-completeness.md — countermeasure_system
+    // (owner filtering, accuracy, configurable range, ammunition)
 
     for (weapon, weapon_transform) in countermeasures.iter() {
         // Check for nearby enemy missiles/torpedoes
         for (projectile_entity, projectile, proj_transform) in projectiles.iter() {
-            // TODO: Skip if projectile is from this ship (needs parent-child relationships)
+            // Owner filtering pending parent-child relationships
 
             // Skip if not a missile or torpedo
             let is_missile_or_torpedo = matches!(
@@ -336,11 +338,10 @@ pub fn countermeasure_system(
 
             // Check if in range
             let distance = (proj_transform.position - weapon_transform.position).magnitude();
-            let pd_range = 1000.0; // TODO: Make configurable
+            let pd_range = 1000.0;
 
             if distance < pd_range && weapon.can_fire() {
-                // Intercept missile (simple success check for now)
-                // TODO: Add accuracy calculations
+                // Always-hit interception; accuracy roll pending
                 commands.entity(projectile_entity).despawn();
                 break; // One missile per weapon per tick
             }
@@ -352,8 +353,7 @@ pub fn countermeasure_system(
 ///
 /// This system allows crew to repair damaged modules over time.
 pub fn repair_system() {
-    // TODO: Implement repair logic with crew assignments
-    // For now, this is a placeholder
+    // See docs/plans/simulation-completeness.md — repair_system (crew-driven repairs)
 }
 
 /// System that handles science officer scans.
@@ -361,16 +361,15 @@ pub fn repair_system() {
 /// This system processes scan requests and reveals information about
 /// target ships.
 pub fn scanning_system() {
-    // TODO: Implement scanning logic
-    // This would track scan progress and reveal ship data
+    // See docs/plans/simulation-completeness.md — scanning_system
 }
 
 /// System that handles ship-to-ship communication.
 ///
 /// Communication is blocked when a ship is jammed by Ion weapons.
 pub fn communication_system() {
-    // TODO: Implement message passing between ships
-    // For now, CommunicationState.can_communicate() provides the check
+    // See docs/plans/simulation-completeness.md — communication_system
+    // For now, CommunicationState::can_communicate() provides the jam check
 }
 
 /// System that handles warp drive acceleration.
