@@ -452,11 +452,16 @@ impl GameWorld {
         self.ships.contains_key(&id.to_string())
     }
 
-    /// Get all ships for a specific player
-    pub fn get_player_ships(&self, _player_id: uuid::Uuid) -> Vec<uuid::Uuid> {
-        // For now, return empty vec. In a full implementation, we'd track player-ship assignments
-        // This would require extending Ship model to include assigned crew/players
-        Vec::new()
+    /// Get all ships that `player_id` is assigned to via `player_roles`.
+    ///
+    /// Ship IDs that cannot be parsed as UUIDs are skipped.
+    pub fn get_player_ships(&self, player_id: uuid::Uuid) -> Vec<uuid::Uuid> {
+        let player_id_str = player_id.to_string();
+        self.ships
+            .values()
+            .filter(|ship| ship.player_roles.contains_key(&player_id_str))
+            .filter_map(|ship| uuid::Uuid::parse_str(&ship.id).ok())
+            .collect()
     }
 
     /// Remove a ship
@@ -1118,44 +1123,6 @@ mod tests {
         assert_eq!(world.get_team_blueprints(&team1_id).len(), 2);
         assert_eq!(world.get_team_blueprints(&team2_id).len(), 1);
     }
-
-    // TODO: Re-enable ship tests once Ship::new() constructor is implemented
-    // #[test]
-    // fn test_ship_registration() {
-    //     let mut world = GameWorld::new();
-    //
-    //     let team_id = world.create_team("Alpha".to_string(), "Federation".to_string()).unwrap();
-    //     let ship = Ship::new(uuid::Uuid::new_v4().to_string(), "cruiser".to_string(), team_id.clone());
-    //     let ship_id = ship.id.clone();
-    //
-    //     world.register_ship(ship);
-    //
-    //     assert!(world.get_ship(&ship_id).is_some());
-    //     assert_eq!(world.get_all_ships().len(), 1);
-    // }
-
-    // #[test]
-    // fn test_ship_queries() {
-    //     let mut world = GameWorld::new();
-    //
-    //     let team1_id = world.create_team("Alpha".to_string(), "Federation".to_string()).unwrap();
-    //     let team2_id = world.create_team("Bravo".to_string(), "Empire".to_string()).unwrap();
-    //
-    //     let ship1 = Ship::new(uuid::Uuid::new_v4().to_string(), "cruiser".to_string(), team1_id.clone());
-    //     let ship2 = Ship::new(uuid::Uuid::new_v4().to_string(), "battleship".to_string(), team1_id.clone());
-    //     let ship3 = Ship::new(uuid::Uuid::new_v4().to_string(), "frigate".to_string(), team2_id.clone());
-    //
-    //     world.register_ship(ship1);
-    //     world.register_ship(ship2);
-    //     world.register_ship(ship3);
-    //
-    //     // Get all ships
-    //     assert_eq!(world.get_all_ships().len(), 3);
-    //
-    //     // Get team-specific ships
-    //     assert_eq!(world.get_team_ships(&team1_id).len(), 2);
-    //     assert_eq!(world.get_team_ships(&team2_id).len(), 1);
-    // }
 
     #[test]
     fn test_game_stats() {

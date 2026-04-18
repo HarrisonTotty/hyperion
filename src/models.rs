@@ -24,11 +24,3 @@ pub use role::ShipRole;
 pub use ship::{CompiledModule, Ship};
 pub use status::{Inventory, ShipStatus, StatusEffect, StatusEffectType};
 pub use weapon::{Weapon, WeaponFireMode, WeaponTag};
-
-// Legacy export for backward compatibility
-/// Represents a ship module slot (legacy, use ModuleInstance)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ModuleSlot {
-    pub slot_type: String,
-    pub module_id: Option<String>,
-}
