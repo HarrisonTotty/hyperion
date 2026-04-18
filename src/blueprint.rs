@@ -393,89 +393,18 @@ impl<'a> BlueprintValidator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::test_utils::{create_test_game_config, create_test_ship_class};
     use crate::models::role::ShipRole;
 
-    fn create_test_ship_class() -> ShipClassConfig {
-        use crate::config::{ShipClassRole, ShipSize};
-        use std::collections::HashMap;
-
-        let mut ship = ShipClassConfig {
-            name: "Test Cruiser".to_string(),
-            description: "A test ship class".to_string(),
-            base_hull: 500.0,
-            base_shields: 250.0,
-            max_weight: 1000.0,
-            max_modules: 10,
-            size: ShipSize::Medium,
-            role: ShipClassRole::Combat,
-            build_points: 500.0,
-            cost: 50000,
-            bonuses: HashMap::new(),
-            id: String::new(),
-            manufacturers: HashMap::new(),
-            length: None,
-            width: None,
-            height: None,
-            mass: None,
-            crew_min: None,
-            crew_max: None,
-            cargo_capacity: None,
-            max_acceleration: None,
-            max_turn_rate: None,
-            max_warp_speed: None,
-            warp_efficiency: None,
-            sensor_range: None,
-            operational_range: None,
-            build_time: None,
-            maintenance_cost: None,
-            fuel_capacity: None,
-            fuel_consumption: None,
-            lore: None,
-            year_introduced: None,
-            notable_ships: vec![],
-        };
-        ship.set_id("test_cruiser".to_string());
-        ship
-    }
-
+    // test_validate_weight_limit relies on a small max_weight (1000kg) so that
+    // 15 placeholder modules at ~100kg each trip the weight-limit validator.
     fn create_test_config() -> GameConfig {
-        use crate::config::{
-            AiConfig, FactionsConfig, MapConfig, ModulesConfig, RacesConfig, SimulationConfig,
-        };
-        use std::collections::HashMap;
-
-        GameConfig {
-            ai: AiConfig {
-                difficulty: "medium".to_string(),
-                response_time: 1.0,
-            },
-            factions: FactionsConfig { factions: vec![] },
-            map: MapConfig {
-                galaxy_size: 1000,
-                star_density: 0.5,
-            },
-            modules: ModulesConfig {
-                modules: HashMap::new(),
-            },
-            races: RacesConfig { races: vec![] },
-            simulation: SimulationConfig {
-                tick_rate: 60.0,
-                physics_enabled: true,
-            },
-            ship_classes: vec![create_test_ship_class()],
-            module_definitions: vec![],
-            weapon_definitions: vec![],
-            ammunition_types: vec![],
-            kinetic_weapon_kinds: vec![],
-            ai_behavior: crate::config::AIConfig::default(),
-            procedural_map: crate::config::ProceduralMapConfig::default(),
-            simulation_params: crate::config::ProceduralSimConfig::default(),
-            faction_generation: crate::config::FactionGenConfig::default(),
-            module_variants: HashMap::new(),
-            module_slots: HashMap::new(),
-            bonuses: None,
-            game_settings: crate::config::GameSettings::default(),
-        }
+        let mut ship_class = create_test_ship_class("test_cruiser", "Test Cruiser");
+        ship_class.base_hull = 500.0;
+        ship_class.base_shields = 250.0;
+        ship_class.max_weight = 1000.0;
+        ship_class.build_points = 500.0;
+        create_test_game_config().with_ship_class(ship_class)
     }
 
     fn create_test_player(id: &str) -> Player {

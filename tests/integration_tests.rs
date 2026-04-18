@@ -4,6 +4,7 @@
 
 use hyperion::api;
 use hyperion::api::generation::UniverseState;
+use hyperion::config::test_utils::{create_test_game_config, create_test_ship_class};
 use hyperion::config::*;
 use hyperion::models::*;
 use hyperion::state::GameWorld;
@@ -30,91 +31,33 @@ fn create_test_rocket() -> rocket::Rocket<rocket::Build> {
         .mount("/graphql", api::graphql_routes())
 }
 
-/// Helper to create a minimal test configuration
+/// Helper to create a minimal test configuration.
+///
+/// The integration cruiser is roomier (base_hull=5000, max_weight=50000) than
+/// the canonical test cruiser so that multi-module scenarios fit without tripping
+/// limits. Overrides are applied on top of [`create_test_game_config`].
 fn create_test_config() -> GameConfig {
-    use std::collections::HashMap;
+    let mut cruiser = create_test_ship_class("cruiser", "Cruiser");
+    cruiser.description = "Medium combat vessel".to_string();
+    cruiser.base_hull = 5000.0;
+    cruiser.base_shields = 2500.0;
+    cruiser.max_weight = 50000.0;
+    cruiser.max_modules = 20;
 
-    let ship_class = ShipClassConfig {
-        id: "cruiser".to_string(),
-        name: "Cruiser".to_string(),
-        description: "Medium combat vessel".to_string(),
-        base_hull: 5000.0,
-        base_shields: 2500.0,
-        max_weight: 50000.0,
-        max_modules: 20,
-        size: ShipSize::Medium,
-        role: ShipClassRole::Combat,
-        build_points: 1000.0,
-        cost: 50000,
-        bonuses: HashMap::new(),
-        manufacturers: HashMap::new(),
-        length: None,
-        width: None,
-        height: None,
-        mass: None,
-        crew_min: None,
-        crew_max: None,
-        cargo_capacity: None,
-        max_acceleration: None,
-        max_turn_rate: None,
-        max_warp_speed: None,
-        warp_efficiency: None,
-        sensor_range: None,
-        operational_range: None,
-        build_time: None,
-        maintenance_cost: None,
-        fuel_capacity: None,
-        fuel_consumption: None,
-        lore: None,
-        year_introduced: None,
-        notable_ships: vec![],
-    };
-
-    GameConfig {
-        ai: AiConfig {
-            difficulty: "medium".to_string(),
-            response_time: 1.0,
-        },
-        factions: FactionsConfig {
-            factions: vec![
-                hyperion::config::Faction {
-                    id: "federation".to_string(),
-                    name: "Federation".to_string(),
-                    description: "Test faction".to_string(),
-                },
-                hyperion::config::Faction {
-                    id: "empire".to_string(),
-                    name: "Empire".to_string(),
-                    description: "Test faction".to_string(),
-                },
-            ],
-        },
-        map: MapConfig {
-            galaxy_size: 1000,
-            star_density: 0.5,
-        },
-        modules: ModulesConfig {
-            modules: std::collections::HashMap::new(),
-        },
-        races: RacesConfig { races: vec![] },
-        simulation: SimulationConfig {
-            tick_rate: 60.0,
-            physics_enabled: true,
-        },
-        ship_classes: vec![ship_class],
-        module_definitions: vec![],
-        weapon_definitions: vec![],
-        ammunition_types: vec![],
-        kinetic_weapon_kinds: vec![],
-        ai_behavior: AIConfig::default(),
-        procedural_map: ProceduralMapConfig::default(),
-        simulation_params: ProceduralSimConfig::default(),
-        faction_generation: FactionGenConfig::default(),
-        module_variants: HashMap::new(),
-        bonuses: None,
-        module_slots: HashMap::new(),
-        game_settings: hyperion::config::GameSettings::default(),
-    }
+    create_test_game_config()
+        .with_ship_class(cruiser)
+        .with_factions(vec![
+            Faction {
+                id: "federation".to_string(),
+                name: "Federation".to_string(),
+                description: "Test faction".to_string(),
+            },
+            Faction {
+                id: "empire".to_string(),
+                name: "Empire".to_string(),
+                description: "Test faction".to_string(),
+            },
+        ])
 }
 
 #[test]

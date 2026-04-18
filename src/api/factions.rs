@@ -61,66 +61,31 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AiConfig, Faction, FactionsConfig, GameConfig, MapConfig, ModulesConfig, RacesConfig,
-        SimulationConfig,
-    };
+    use crate::config::test_utils::create_test_game_config;
+    use crate::config::{Faction, GameConfig};
     use rocket::Build;
     use rocket::local::blocking::Client;
 
     fn create_test_config() -> GameConfig {
-        use std::collections::HashMap;
-
-        GameConfig {
-            ai: AiConfig {
-                difficulty: "normal".to_string(),
-                response_time: 1.0,
-            },
-            factions: FactionsConfig {
-                factions: vec![
-                    Faction {
-                        id: "federation".to_string(),
-                        name: "United Federation".to_string(),
-                        description: "A democratic alliance of peaceful worlds".to_string(),
-                    },
-                    Faction {
-                        id: "empire".to_string(),
-                        name: "Galactic Empire".to_string(),
-                        description: "A militaristic expansionist power".to_string(),
-                    },
-                    Faction {
-                        id: "alliance".to_string(),
-                        name: "Free Alliance".to_string(),
-                        description: "Independent systems united for mutual defense".to_string(),
-                    },
-                ],
-            },
-            map: MapConfig {
-                galaxy_size: 1000,
-                star_density: 0.15,
-            },
-            modules: ModulesConfig {
-                modules: HashMap::new(),
-            },
-            races: RacesConfig { races: vec![] },
-            simulation: SimulationConfig {
-                tick_rate: 60.0,
-                physics_enabled: true,
-            },
-            ship_classes: vec![],
-            module_definitions: vec![],
-            weapon_definitions: vec![],
-            ammunition_types: vec![],
-            kinetic_weapon_kinds: vec![],
-            ai_behavior: crate::config::AIConfig::default(),
-            procedural_map: crate::config::ProceduralMapConfig::default(),
-            simulation_params: crate::config::ProceduralSimConfig::default(),
-            faction_generation: crate::config::FactionGenConfig::default(),
-            module_variants: HashMap::new(),
-            module_slots: HashMap::new(),
-            bonuses: None,
-            game_settings: crate::config::GameSettings::default(),
-        }
+        create_test_game_config()
+            .with_ship_classes(vec![])
+            .with_factions(vec![
+                Faction {
+                    id: "federation".to_string(),
+                    name: "United Federation".to_string(),
+                    description: "A democratic alliance of peaceful worlds".to_string(),
+                },
+                Faction {
+                    id: "empire".to_string(),
+                    name: "Galactic Empire".to_string(),
+                    description: "A militaristic expansionist power".to_string(),
+                },
+                Faction {
+                    id: "alliance".to_string(),
+                    name: "Free Alliance".to_string(),
+                    description: "Independent systems united for mutual defense".to_string(),
+                },
+            ])
     }
 
     fn create_test_rocket() -> rocket::Rocket<Build> {

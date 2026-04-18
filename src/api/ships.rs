@@ -126,92 +126,21 @@ pub fn routes() -> Vec<rocket::Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AiConfig, FactionsConfig, GameConfig, MapConfig, ModulesConfig, RacesConfig,
-        ShipClassConfig, SimulationConfig,
-    };
+    use crate::config::test_utils::{create_test_game_config, create_test_ship_class};
+    use crate::config::{Faction, GameConfig};
     use crate::state::GameWorld;
     use rocket::Build;
     use rocket::local::blocking::Client;
 
+    // API tests exercise the "test_cruiser" ship class id and "alliance" faction.
     fn create_test_config() -> GameConfig {
-        use std::collections::HashMap;
-
-        let mut ship_class = ShipClassConfig {
-            name: "Test Cruiser".to_string(),
-            description: "A test ship class".to_string(),
-            base_hull: 1000.0,
-            base_shields: 500.0,
-            max_weight: 5000.0,
-            max_modules: 10,
-            size: crate::config::ShipSize::Medium,
-            role: crate::config::ShipClassRole::Combat,
-            build_points: 1000.0,
-            cost: 50000,
-            bonuses: HashMap::new(),
-            id: String::new(),
-            manufacturers: HashMap::new(),
-            length: None,
-            width: None,
-            height: None,
-            mass: None,
-            crew_min: None,
-            crew_max: None,
-            cargo_capacity: None,
-            max_acceleration: None,
-            max_turn_rate: None,
-            max_warp_speed: None,
-            warp_efficiency: None,
-            sensor_range: None,
-            operational_range: None,
-            build_time: None,
-            maintenance_cost: None,
-            fuel_capacity: None,
-            fuel_consumption: None,
-            lore: None,
-            year_introduced: None,
-            notable_ships: vec![],
-        };
-        ship_class.set_id("test_cruiser".to_string());
-
-        GameConfig {
-            ai: AiConfig {
-                difficulty: "medium".to_string(),
-                response_time: 1.0,
-            },
-            factions: FactionsConfig {
-                factions: vec![crate::config::Faction {
-                    id: "alliance".to_string(),
-                    name: "Alliance".to_string(),
-                    description: "Test faction".to_string(),
-                }],
-            },
-            map: MapConfig {
-                galaxy_size: 1000,
-                star_density: 0.5,
-            },
-            modules: ModulesConfig {
-                modules: HashMap::new(),
-            },
-            races: RacesConfig { races: vec![] },
-            simulation: SimulationConfig {
-                tick_rate: 60.0,
-                physics_enabled: true,
-            },
-            ship_classes: vec![ship_class],
-            module_definitions: vec![],
-            weapon_definitions: vec![],
-            ammunition_types: vec![],
-            kinetic_weapon_kinds: vec![],
-            ai_behavior: crate::config::AIConfig::default(),
-            procedural_map: crate::config::ProceduralMapConfig::default(),
-            simulation_params: crate::config::ProceduralSimConfig::default(),
-            faction_generation: crate::config::FactionGenConfig::default(),
-            module_variants: HashMap::new(),
-            module_slots: HashMap::new(),
-            bonuses: None,
-            game_settings: crate::config::GameSettings::default(),
-        }
+        create_test_game_config()
+            .with_ship_class(create_test_ship_class("test_cruiser", "Test Cruiser"))
+            .with_factions(vec![Faction {
+                id: "alliance".to_string(),
+                name: "Alliance".to_string(),
+                description: "Test faction".to_string(),
+            }])
     }
 
     fn create_test_rocket() -> rocket::Rocket<Build> {

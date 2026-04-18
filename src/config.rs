@@ -861,11 +861,17 @@ struct KineticWeaponKindsConfig {
     kinds: Vec<KineticWeaponKind>,
 }
 
-#[cfg(test)]
-mod tests {
+/// Test fixtures and builders for constructing `GameConfig` instances in tests.
+///
+/// This module is the single source of truth for test configuration. Every test
+/// that needs a `GameConfig` should start from [`create_test_game_config`] and use
+/// the `with_*` builders on [`GameConfig`] to override only the fields the test
+/// cares about.
+#[doc(hidden)]
+pub mod test_utils {
     use super::*;
 
-    /// Helper function to create a minimal test ShipClassConfig
+    /// Create a minimal test `ShipClassConfig` with cruiser-shaped defaults.
     pub fn create_test_ship_class(id: &str, name: &str) -> ShipClassConfig {
         let mut ship = ShipClassConfig {
             name: name.to_string(),
@@ -906,7 +912,7 @@ mod tests {
         ship
     }
 
-    /// Helper function to create a minimal test GameConfig
+    /// Create a minimal test `GameConfig` containing a single `cruiser` ship class.
     pub fn create_test_game_config() -> GameConfig {
         GameConfig {
             ai: AiConfig {
@@ -941,6 +947,35 @@ mod tests {
             game_settings: GameSettings::default(),
         }
     }
+
+    impl GameConfig {
+        /// Replace `ship_classes` with a single entry.
+        #[must_use]
+        pub fn with_ship_class(mut self, class: ShipClassConfig) -> Self {
+            self.ship_classes = vec![class];
+            self
+        }
+
+        /// Replace `ship_classes` with the supplied list.
+        #[must_use]
+        pub fn with_ship_classes(mut self, classes: Vec<ShipClassConfig>) -> Self {
+            self.ship_classes = classes;
+            self
+        }
+
+        /// Replace the factions list.
+        #[must_use]
+        pub fn with_factions(mut self, factions: Vec<Faction>) -> Self {
+            self.factions = FactionsConfig { factions };
+            self
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_utils::create_test_game_config;
+    use super::*;
 
     #[test]
     fn test_config_structure() {
