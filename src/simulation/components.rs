@@ -691,6 +691,86 @@ impl Default for CommunicationState {
     }
 }
 
+/// Shared startup/cooldown/disabled machinery for FTL drive components.
+///
+/// Warp and jump drives both track the same three-phase state — startup
+/// countdown, cooldown countdown, and a Tachyon-weapon disabled flag — so
+/// the timer lives here and each drive component embeds it as a field.
+#[derive(Debug, Clone)]
+pub struct DriveTimer {
+    /// Startup time before the drive engages (seconds)
+    pub startup_time: f32,
+    /// Current startup progress counting down toward zero
+    pub startup_progress: f32,
+    /// Cooldown time after the drive completes (seconds)
+    pub cooldown_time: f32,
+    /// Current cooldown progress counting down toward zero
+    pub cooldown_progress: f32,
+    /// Set by weapon status effects to suppress the drive
+    pub disabled: bool,
+}
+
+impl DriveTimer {
+    /// Create a new timer with zeroed progress and `disabled` cleared.
+    pub fn new(startup_time: f32, cooldown_time: f32) -> Self {
+        Self {
+            startup_time,
+            startup_progress: 0.0,
+            cooldown_time,
+            cooldown_progress: 0.0,
+            disabled: false,
+        }
+    }
+
+    /// True when the drive is neither disabled nor cooling down.
+    ///
+    /// Callers pair this with a drive-specific "not already in use" check
+    /// to decide whether a new engagement is allowed.
+    pub fn is_ready(&self) -> bool {
+        !self.disabled && self.cooldown_progress <= 0.0
+    }
+
+    /// True while the startup timer is counting down.
+    pub fn is_starting_up(&self) -> bool {
+        self.startup_progress > 0.0
+    }
+
+    /// Advance the startup countdown by `delta_time` seconds.
+    ///
+    /// Returns `true` on the tick that the timer just finished so the caller
+    /// can transition to the drive's active state. Returns `false` while the
+    /// timer is still running or if it was already at zero.
+    pub fn tick_startup(&mut self, delta_time: f32) -> bool {
+        if self.startup_progress <= 0.0 {
+            return false;
+        }
+        self.startup_progress -= delta_time;
+        if self.startup_progress <= 0.0 {
+            self.startup_progress = 0.0;
+            return true;
+        }
+        false
+    }
+
+    /// Advance the cooldown by `delta_time` seconds, clamped at zero.
+    ///
+    /// Returns `true` while the cooldown was still active at the start of
+    /// the tick, so callers can `continue` past other phases that should
+    /// not run during cooldown.
+    pub fn tick_cooldown(&mut self, delta_time: f32) -> bool {
+        if self.cooldown_progress <= 0.0 {
+            return false;
+        }
+        self.cooldown_progress = (self.cooldown_progress - delta_time).max(0.0);
+        true
+    }
+
+    /// Trigger a full-length cooldown after the drive finishes executing.
+    pub fn trigger_cooldown(&mut self) {
+        self.cooldown_progress = self.cooldown_time;
+    }
+}
+
 /// Warp drive component (FTL acceleration drive)
 #[derive(Component, Debug, Clone)]
 pub struct WarpDriveComponent {
@@ -698,18 +778,10 @@ pub struct WarpDriveComponent {
     pub max_warp_factor: f32,
     /// Current warp factor (1.0 = normal speed, higher = faster)
     pub current_warp_factor: f32,
-    /// Startup time before warp engages (seconds)
-    pub startup_time: f32,
-    /// Current startup progress (0.0 to startup_time)
-    pub startup_progress: f32,
-    /// Cooldown time after dropping out of warp (seconds)
-    pub cooldown_time: f32,
-    /// Current cooldown progress (0.0 to cooldown_time)
-    pub cooldown_progress: f32,
+    /// Shared timer + disabled state
+    pub timer: DriveTimer,
     /// Whether warp drive is currently active
     pub active: bool,
-    /// Whether warp drive is disabled (by Tachyon weapons)
-    pub disabled: bool,
 }
 
 impl WarpDriveComponent {
@@ -718,18 +790,14 @@ impl WarpDriveComponent {
         Self {
             max_warp_factor,
             current_warp_factor: 1.0,
-            startup_time,
-            startup_progress: 0.0,
-            cooldown_time,
-            cooldown_progress: 0.0,
+            timer: DriveTimer::new(startup_time, cooldown_time),
             active: false,
-            disabled: false,
         }
     }
 
     /// Check if can engage warp
     pub fn can_engage(&self) -> bool {
-        !self.disabled && !self.active && self.cooldown_progress <= 0.0
+        self.timer.is_ready() && !self.active
     }
 
     /// Check if currently in warp
@@ -743,18 +811,10 @@ impl WarpDriveComponent {
 pub struct JumpDriveComponent {
     /// Maximum jump range (meters)
     pub max_range: f32,
-    /// Startup time before jump executes (seconds)
-    pub startup_time: f32,
-    /// Current startup progress (0.0 to startup_time)
-    pub startup_progress: f32,
-    /// Cooldown time between jumps (seconds)
-    pub cooldown_time: f32,
-    /// Current cooldown progress (0.0 to cooldown_time)
-    pub cooldown_progress: f32,
+    /// Shared timer + disabled state
+    pub timer: DriveTimer,
     /// Target jump destination (if jump is charging)
     pub target_destination: Option<Vector3<f32>>,
-    /// Whether jump drive is disabled (by Tachyon weapons)
-    pub disabled: bool,
 }
 
 impl JumpDriveComponent {
@@ -762,18 +822,14 @@ impl JumpDriveComponent {
     pub fn new(max_range: f32, startup_time: f32, cooldown_time: f32) -> Self {
         Self {
             max_range,
-            startup_time,
-            startup_progress: 0.0,
-            cooldown_time,
-            cooldown_progress: 0.0,
+            timer: DriveTimer::new(startup_time, cooldown_time),
             target_destination: None,
-            disabled: false,
         }
     }
 
     /// Check if can initiate jump
     pub fn can_jump(&self) -> bool {
-        !self.disabled && self.target_destination.is_none() && self.cooldown_progress <= 0.0
+        self.timer.is_ready() && self.target_destination.is_none()
     }
 
     /// Check if jump is charging
@@ -1013,7 +1069,7 @@ mod tests {
         assert!(!warp.is_in_warp());
 
         let mut warp = warp;
-        warp.disabled = true;
+        warp.timer.disabled = true;
         assert!(!warp.can_engage());
     }
 

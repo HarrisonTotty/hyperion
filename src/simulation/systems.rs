@@ -397,26 +397,22 @@ pub fn warp_system(
     for (mut warp, mut transform, effects) in query.iter_mut() {
         // Check if disabled by Tachyon
         if effects.has_effect(StatusEffectType::TachyonWarpBlock) {
-            warp.disabled = true;
+            warp.timer.disabled = true;
             warp.active = false;
             continue;
-        } else {
-            warp.disabled = false;
         }
+        warp.timer.disabled = false;
 
         // Handle startup
-        if warp.startup_progress > 0.0 {
-            warp.startup_progress -= delta_time;
-            if warp.startup_progress <= 0.0 {
+        if warp.timer.is_starting_up() {
+            if warp.timer.tick_startup(delta_time) {
                 warp.active = true;
-                warp.startup_progress = 0.0;
             }
             continue;
         }
 
         // Handle cooldown
-        if warp.cooldown_progress > 0.0 {
-            warp.cooldown_progress = (warp.cooldown_progress - delta_time).max(0.0);
+        if warp.timer.tick_cooldown(delta_time) {
             continue;
         }
 
@@ -442,32 +438,28 @@ pub fn jump_system(
     for (mut jump, mut transform, effects) in query.iter_mut() {
         // Check if disabled by Tachyon
         if effects.has_effect(StatusEffectType::TachyonWarpBlock) {
-            jump.disabled = true;
+            jump.timer.disabled = true;
             jump.target_destination = None;
             continue;
-        } else {
-            jump.disabled = false;
         }
+        jump.timer.disabled = false;
 
         // Handle charging
         if jump.target_destination.is_some() {
-            jump.startup_progress -= delta_time;
-            if jump.startup_progress <= 0.0 {
+            if jump.timer.tick_startup(delta_time) {
                 // Execute jump
                 if let Some(destination) = jump.target_destination {
                     transform.position = destination;
                     transform.velocity = Vector3::zeros(); // Stop when jumping
                 }
                 jump.target_destination = None;
-                jump.startup_progress = 0.0;
-                jump.cooldown_progress = jump.cooldown_time;
+                jump.timer.trigger_cooldown();
             }
             continue;
         }
 
         // Handle cooldown
-        if jump.cooldown_progress > 0.0 {
-            jump.cooldown_progress = (jump.cooldown_progress - delta_time).max(0.0);
+        if jump.timer.tick_cooldown(delta_time) {
             continue;
         }
 
@@ -642,7 +634,7 @@ mod tests {
 
         let warp = world.get::<WarpDriveComponent>(ship).unwrap();
         assert!(!warp.active); // Disabled by Tachyon
-        assert!(warp.disabled);
+        assert!(warp.timer.disabled);
     }
 
     #[test]
@@ -651,7 +643,7 @@ mod tests {
 
         let mut jump = JumpDriveComponent::new(10000.0, 10.0, 30.0);
         jump.target_destination = Some(Vector3::new(5000.0, 0.0, 0.0));
-        jump.startup_progress = 9.0;
+        jump.timer.startup_progress = 9.0;
 
         let mut effects = StatusEffects::new();
         effects.apply(StatusEffectType::TachyonWarpBlock, 10.0);
@@ -677,7 +669,7 @@ mod tests {
 
         let jump = world.get::<JumpDriveComponent>(ship).unwrap();
         assert!(jump.target_destination.is_none()); // Jump cancelled by Tachyon
-        assert!(jump.disabled);
+        assert!(jump.timer.disabled);
     }
 
     #[test]
