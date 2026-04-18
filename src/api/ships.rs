@@ -168,6 +168,22 @@ mod tests {
     }
 
     #[test]
+    fn returns_404_for_missing_ship() {
+        // Smoke test for the WorldLookup layer: a missing entity must still
+        // surface as Rocket's default 404 (status + HTML body), matching the
+        // pre-refactor behaviour of `ok_or(Status::NotFound)?`.
+        let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
+        let response = client.get("/v1/ships/does-not-exist").dispatch();
+
+        assert_eq!(response.status(), Status::NotFound);
+        let body = response.into_string().unwrap_or_default();
+        assert!(
+            body.contains("404: Not Found"),
+            "expected Rocket default 404 body, got: {body}"
+        );
+    }
+
+    #[test]
     fn test_compile_ship() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
 

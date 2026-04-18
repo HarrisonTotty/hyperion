@@ -419,6 +419,22 @@ mod tests {
     }
 
     #[test]
+    fn returns_404_for_missing_team() {
+        // Lock in the current 404 body shape for team lookups: a JSON
+        // `ErrorResponse` with `error: "Team <id> not found"`. This handler
+        // does not route through `WorldLookup`, so the body diverges from the
+        // Rocket-default 404 used by ships and blueprints.
+        let client = Client::tracked(create_test_rocket()).unwrap();
+        let response = client.get("/v1/teams/does-not-exist").dispatch();
+
+        assert_eq!(response.status(), Status::NotFound);
+        let body: ErrorResponse = response
+            .into_json()
+            .expect("expected JSON ErrorResponse body");
+        assert_eq!(body.error, "Team does-not-exist not found");
+    }
+
+    #[test]
     fn test_list_teams_empty() {
         let client = Client::tracked(create_test_rocket()).unwrap();
         let response = client.get("/v1/teams").dispatch();

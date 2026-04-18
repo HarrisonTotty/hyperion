@@ -427,6 +427,22 @@ mod tests {
     }
 
     #[test]
+    fn returns_404_for_missing_station() {
+        // Smoke test for the station GET handler: a missing entity must still
+        // surface as Rocket's default 404 (status + HTML body), matching the
+        // pre-refactor behaviour of `ok_or(Status::NotFound)?`.
+        let client = create_test_client();
+        let response = client.get("/v1/stations/does-not-exist").dispatch();
+
+        assert_eq!(response.status(), Status::NotFound);
+        let body = response.into_string().unwrap_or_default();
+        assert!(
+            body.contains("404: Not Found"),
+            "expected Rocket default 404 body, got: {body}"
+        );
+    }
+
+    #[test]
     fn test_create_station() {
         let client = create_test_client();
 

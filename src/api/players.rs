@@ -169,6 +169,22 @@ mod tests {
     }
 
     #[test]
+    fn returns_404_for_missing_player() {
+        // Lock in the current 404 body shape for player lookups: a JSON
+        // `ErrorResponse` with `error: "Player <id> not found"`. This handler
+        // does not route through `WorldLookup`, so the body diverges from the
+        // Rocket-default 404 used by ships and blueprints.
+        let client = Client::tracked(create_test_rocket()).unwrap();
+        let response = client.get("/v1/players/does-not-exist").dispatch();
+
+        assert_eq!(response.status(), Status::NotFound);
+        let body: ErrorResponse = response
+            .into_json()
+            .expect("expected JSON ErrorResponse body");
+        assert_eq!(body.error, "Player does-not-exist not found");
+    }
+
+    #[test]
     fn test_create_player() {
         let client = Client::tracked(create_test_rocket()).unwrap();
 
