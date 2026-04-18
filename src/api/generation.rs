@@ -3,22 +3,23 @@
 //! This module provides HTTP endpoints for generating and querying procedurally generated
 //! universes, including galaxies, star systems, factions, languages, and history.
 
-use rocket::{State, get, post};
-use rocket::serde::json::Json;
 use rocket::http::Status;
-use serde::{Serialize, Deserialize};
+use rocket::serde::json::Json;
+use rocket::{State, get, post};
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
-use crate::generation::{ProceduralUniverse, Star, StarSystem, ProceduralFaction};
+use crate::generation::ProceduralUniverse;
 
 /// Application state for storing the current procedural universe
+#[derive(Default)]
 pub struct UniverseState {
     pub universe: Option<ProceduralUniverse>,
 }
 
 impl UniverseState {
     pub fn new() -> Self {
-        Self { universe: None }
+        Self::default()
     }
 }
 
@@ -202,7 +203,7 @@ pub fn generate_universe(
         request.num_stars,
         request.num_factions,
     );
-    
+
     let response = UniverseResponse {
         name: universe.name.clone(),
         seed: universe.seed,
@@ -210,9 +211,9 @@ pub fn generate_universe(
         num_systems: universe.systems.len(),
         num_factions: universe.factions.len(),
     };
-    
+
     state.write().unwrap().universe = Some(universe);
-    
+
     Ok(Json(response))
 }
 
@@ -222,7 +223,7 @@ pub fn get_universe(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<UniverseResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
         Ok(Json(UniverseResponse {
             name: universe.name.clone(),
@@ -242,9 +243,12 @@ pub fn get_galaxy(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<GalaxyResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
-        let stars: Vec<StarResponse> = universe.galaxy.stars.iter()
+        let stars: Vec<StarResponse> = universe
+            .galaxy
+            .stars
+            .iter()
             .map(|star| StarResponse {
                 id: star.id.clone(),
                 name: star.name.clone(),
@@ -253,7 +257,7 @@ pub fn get_galaxy(
                 sector: format!("{:?}", star.sector),
             })
             .collect();
-        
+
         Ok(Json(GalaxyResponse {
             radius: universe.galaxy.radius,
             stars,
@@ -269,18 +273,21 @@ pub fn list_systems(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<Vec<SystemResponse>>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
-        let systems: Vec<SystemResponse> = universe.systems.iter()
+        let systems: Vec<SystemResponse> = universe
+            .systems
+            .iter()
             .map(|system| {
-                let star = universe.galaxy.stars.iter()
+                let star = universe
+                    .galaxy
+                    .stars
+                    .iter()
                     .find(|s| s.id == system.id)
                     .unwrap();
-                
-                let num_moons: usize = system.planets.iter()
-                    .map(|p| p.moons.len())
-                    .sum();
-                
+
+                let num_moons: usize = system.planets.iter().map(|p| p.moons.len()).sum();
+
                 SystemResponse {
                     star_id: system.id.clone(),
                     star_name: star.name.clone(),
@@ -291,7 +298,7 @@ pub fn list_systems(
                 }
             })
             .collect();
-        
+
         Ok(Json(systems))
     } else {
         Err(Status::NotFound)
@@ -305,21 +312,28 @@ pub fn get_system(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<SystemDetailResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
         if let Some(system) = universe.get_system(&star_id) {
-            let star = universe.galaxy.stars.iter()
+            let star = universe
+                .galaxy
+                .stars
+                .iter()
                 .find(|s| s.id == star_id)
                 .unwrap();
-            
-            let planets: Vec<PlanetResponse> = system.planets.iter()
+
+            let planets: Vec<PlanetResponse> = system
+                .planets
+                .iter()
                 .map(|planet| PlanetResponse {
                     name: planet.name.clone(),
                     planet_type: format!("{:?}", planet.planet_type),
                     orbit_radius: planet.orbital_radius,
                     mass: planet.mass as f64,
                     has_atmosphere: planet.atmosphere,
-                    moons: planet.moons.iter()
+                    moons: planet
+                        .moons
+                        .iter()
                         .map(|moon| MoonResponse {
                             name: moon.name.clone(),
                             mass: moon.mass,
@@ -328,27 +342,33 @@ pub fn get_system(
                         .collect(),
                 })
                 .collect();
-            
-            let asteroid_belts: Vec<AsteroidBeltResponse> = system.asteroid_belts.iter()
+
+            let asteroid_belts: Vec<AsteroidBeltResponse> = system
+                .asteroid_belts
+                .iter()
                 .map(|belt| AsteroidBeltResponse {
                     inner_radius: belt.inner_radius,
                     outer_radius: belt.outer_radius,
                     density: belt.density as f64,
                 })
                 .collect();
-            
-            let stations: Vec<StationResponse> = system.stations.iter()
+
+            let stations: Vec<StationResponse> = system
+                .stations
+                .iter()
                 .map(|station| StationResponse {
                     name: station.name.clone(),
                     station_type: format!("{:?}", station.station_type),
                     location: if station.orbiting != "Star" {
-                        StationLocation::Planetary { planet: station.orbiting.clone() }
+                        StationLocation::Planetary {
+                            planet: station.orbiting.clone(),
+                        }
                     } else {
                         StationLocation::Orbital
                     },
                 })
                 .collect();
-            
+
             Ok(Json(SystemDetailResponse {
                 star_id: star_id.clone(),
                 star_name: star.name.clone(),
@@ -370,20 +390,20 @@ pub fn list_factions(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<Vec<FactionResponse>>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
-        let factions: Vec<FactionResponse> = universe.factions.iter()
+        let factions: Vec<FactionResponse> = universe
+            .factions
+            .iter()
             .map(|faction| FactionResponse {
                 id: faction.id.clone(),
                 name: faction.name.clone(),
                 government: format!("{:?}", faction.government),
-                traits: faction.traits.iter()
-                    .map(|t| format!("{:?}", t))
-                    .collect(),
+                traits: faction.traits.iter().map(|t| format!("{:?}", t)).collect(),
                 num_systems: faction.territories.len(),
             })
             .collect();
-        
+
         Ok(Json(factions))
     } else {
         Err(Status::NotFound)
@@ -397,10 +417,12 @@ pub fn get_faction(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<FactionDetailResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
         if let Some(faction) = universe.get_faction(&faction_id) {
-            let relationships: Vec<RelationshipResponse> = faction.relationships.iter()
+            let relationships: Vec<RelationshipResponse> = faction
+                .relationships
+                .iter()
                 .map(|(other_id, relationship)| {
                     let other_faction = universe.get_faction(other_id).unwrap();
                     RelationshipResponse {
@@ -410,14 +432,12 @@ pub fn get_faction(
                     }
                 })
                 .collect();
-            
+
             Ok(Json(FactionDetailResponse {
                 id: faction.id.clone(),
                 name: faction.name.clone(),
                 government: format!("{:?}", faction.government),
-                traits: faction.traits.iter()
-                    .map(|t| format!("{:?}", t))
-                    .collect(),
+                traits: faction.traits.iter().map(|t| format!("{:?}", t)).collect(),
                 territories: faction.territories.clone(),
                 relationships,
             }))
@@ -436,17 +456,19 @@ pub fn get_language(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<LanguageResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
         if let Some(faction) = universe.get_faction(&faction_id) {
             if let Some(language) = universe.get_faction_language(&faction_id) {
-                let sample_words: Vec<(String, String)> = language.vocabulary.iter()
+                let sample_words: Vec<(String, String)> = language
+                    .vocabulary
+                    .iter()
                     .take(10)
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
-                
+
                 let sample_phrase = language.generate_phrase(12345);
-                
+
                 Ok(Json(LanguageResponse {
                     faction_id: faction.id.clone(),
                     faction_name: faction.name.clone(),
@@ -465,21 +487,26 @@ pub fn get_language(
 }
 
 /// Translate text to a faction's language
-#[post("/v1/generation/languages/<faction_id>/translate", format = "json", data = "<request>")]
+#[post(
+    "/v1/generation/languages/<faction_id>/translate",
+    format = "json",
+    data = "<request>"
+)]
 pub fn translate(
     faction_id: String,
     request: Json<TranslateRequest>,
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<TranslateResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
         if let Some(language) = universe.get_faction_language(&faction_id) {
             let words: Vec<&str> = request.text.split_whitespace().collect();
-            let translated_words: Vec<String> = words.iter()
-                .filter_map(|word| language.translate(word).map(|s| s.clone()))
+            let translated_words: Vec<String> = words
+                .iter()
+                .filter_map(|word| language.translate(word).cloned())
                 .collect();
-            
+
             Ok(Json(TranslateResponse {
                 original: request.text.clone(),
                 translated: translated_words.join(" "),
@@ -498,14 +525,18 @@ pub fn get_history(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<HistoryResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
-        let events: Vec<EventResponse> = universe.history.iter()
+        let events: Vec<EventResponse> = universe
+            .history
+            .iter()
             .map(|event| {
-                let faction_names: Vec<String> = event.factions.iter()
+                let faction_names: Vec<String> = event
+                    .factions
+                    .iter()
                     .filter_map(|id| universe.get_faction(id).map(|f| f.name.clone()))
                     .collect();
-                
+
                 EventResponse {
                     year: event.year,
                     event_type: format!("{:?}", event.event_type),
@@ -514,7 +545,7 @@ pub fn get_history(
                 }
             })
             .collect();
-        
+
         Ok(Json(HistoryResponse { events }))
     } else {
         Err(Status::NotFound)
@@ -528,14 +559,18 @@ pub fn get_faction_history(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<HistoryResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
-        let events: Vec<EventResponse> = universe.get_faction_history(&faction_id).iter()
+        let events: Vec<EventResponse> = universe
+            .get_faction_history(&faction_id)
+            .iter()
             .map(|event| {
-                let faction_names: Vec<String> = event.factions.iter()
+                let faction_names: Vec<String> = event
+                    .factions
+                    .iter()
                     .filter_map(|id| universe.get_faction(id).map(|f| f.name.clone()))
                     .collect();
-                
+
                 EventResponse {
                     year: event.year,
                     event_type: format!("{:?}", event.event_type),
@@ -544,7 +579,7 @@ pub fn get_faction_history(
                 }
             })
             .collect();
-        
+
         Ok(Json(HistoryResponse { events }))
     } else {
         Err(Status::NotFound)
@@ -557,12 +592,12 @@ pub fn get_timeline(
     state: &State<Arc<RwLock<UniverseState>>>,
 ) -> Result<Json<TimelineResponse>, Status> {
     let state = state.read().unwrap();
-    
+
     if let Some(universe) = &state.universe {
         use crate::generation::HistoryGenerator;
-        let mut history_gen = HistoryGenerator::new(universe.seed);
+        let history_gen = HistoryGenerator::new(universe.seed);
         let summary = history_gen.generate_timeline_summary(&universe.history, &universe.factions);
-        
+
         Ok(Json(TimelineResponse { summary }))
     } else {
         Err(Status::NotFound)
@@ -591,13 +626,13 @@ pub fn routes() -> Vec<rocket::Route> {
 mod tests {
     use super::*;
     use rocket::local::blocking::Client;
-    
+
     fn create_test_client() -> Client {
         let state = Arc::new(RwLock::new(UniverseState::new()));
-        
-        let rocket = rocket::build()
-            .manage(state)
-            .mount("/", rocket::routes![
+
+        let rocket = rocket::build().manage(state).mount(
+            "/",
+            rocket::routes![
                 generate_universe,
                 get_universe,
                 get_galaxy,
@@ -610,37 +645,39 @@ mod tests {
                 get_history,
                 get_faction_history,
                 get_timeline,
-            ]);
-        
+            ],
+        );
+
         Client::tracked(rocket).expect("valid rocket instance")
     }
-    
+
     #[test]
     fn test_generate_universe() {
         let client = create_test_client();
-        
+
         let request = GenerateUniverseRequest {
             name: "Test Universe".to_string(),
             seed: 12345,
             num_stars: 100,
             num_factions: 3,
         };
-        
-        let response = client.post("/v1/generation/universe")
+
+        let response = client
+            .post("/v1/generation/universe")
             .json(&request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let universe: UniverseResponse = response.into_json().unwrap();
         assert_eq!(universe.name, "Test Universe");
         assert_eq!(universe.seed, 12345);
     }
-    
+
     #[test]
     fn test_get_universe() {
         let client = create_test_client();
-        
+
         // First generate a universe
         let request = GenerateUniverseRequest {
             name: "Test Universe".to_string(),
@@ -648,20 +685,21 @@ mod tests {
             num_stars: 50,
             num_factions: 2,
         };
-        
-        client.post("/v1/generation/universe")
+
+        client
+            .post("/v1/generation/universe")
             .json(&request)
             .dispatch();
-        
+
         // Then retrieve it
         let response = client.get("/v1/generation/universe").dispatch();
         assert_eq!(response.status(), Status::Ok);
     }
-    
+
     #[test]
     fn test_list_systems() {
         let client = create_test_client();
-        
+
         // Generate universe
         let request = GenerateUniverseRequest {
             name: "Test Universe".to_string(),
@@ -669,23 +707,24 @@ mod tests {
             num_stars: 50,
             num_factions: 2,
         };
-        
-        client.post("/v1/generation/universe")
+
+        client
+            .post("/v1/generation/universe")
             .json(&request)
             .dispatch();
-        
+
         // List systems
         let response = client.get("/v1/generation/systems").dispatch();
         assert_eq!(response.status(), Status::Ok);
-        
+
         let systems: Vec<SystemResponse> = response.into_json().unwrap();
         assert!(!systems.is_empty());
     }
-    
+
     #[test]
     fn test_list_factions() {
         let client = create_test_client();
-        
+
         // Generate universe
         let request = GenerateUniverseRequest {
             name: "Test Universe".to_string(),
@@ -693,23 +732,24 @@ mod tests {
             num_stars: 50,
             num_factions: 3,
         };
-        
-        client.post("/v1/generation/universe")
+
+        client
+            .post("/v1/generation/universe")
             .json(&request)
             .dispatch();
-        
+
         // List factions
         let response = client.get("/v1/generation/factions").dispatch();
         assert_eq!(response.status(), Status::Ok);
-        
+
         let factions: Vec<FactionResponse> = response.into_json().unwrap();
         assert_eq!(factions.len(), 3);
     }
-    
+
     #[test]
     fn test_get_history() {
         let client = create_test_client();
-        
+
         // Generate universe
         let request = GenerateUniverseRequest {
             name: "Test Universe".to_string(),
@@ -717,15 +757,16 @@ mod tests {
             num_stars: 50,
             num_factions: 3,
         };
-        
-        client.post("/v1/generation/universe")
+
+        client
+            .post("/v1/generation/universe")
             .json(&request)
             .dispatch();
-        
+
         // Get history
         let response = client.get("/v1/generation/history").dispatch();
         assert_eq!(response.status(), Status::Ok);
-        
+
         let history: HistoryResponse = response.into_json().unwrap();
         assert!(!history.events.is_empty());
     }

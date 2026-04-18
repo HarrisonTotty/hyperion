@@ -18,12 +18,11 @@
 //! - `GET /v1/catalog/ammo/<category>` - List ammo IDs in category
 //! - `GET /v1/catalog/ammo/<category>/<ammo_id>` - Get detailed ammo information
 
-use rocket::{Route, State, get, routes};
 use rocket::serde::json::Json;
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use rocket::{Route, State, get, routes};
+use serde::{Deserialize, Serialize};
 
-use crate::config::{GameConfig, ModuleSlot, ModuleVariant, AmmunitionConfig};
+use crate::config::{AmmunitionConfig, GameConfig, ModuleSlot, ModuleVariant};
 
 /// Response containing a list of module slot IDs
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,7 +121,7 @@ pub fn get_module_slot(
     slot_id: &str,
     config: &State<GameConfig>,
 ) -> Result<Json<ModuleSlot>, Json<ErrorResponse>> {
-    match config.get_module_slot(&slot_id) {
+    match config.get_module_slot(slot_id) {
         Some(slot) => Ok(Json(slot.clone())),
         None => Err(Json(ErrorResponse {
             error: format!("Module slot '{}' not found", slot_id),
@@ -261,20 +260,20 @@ pub fn get_module_variant(
 /// }
 /// ```
 #[get("/v1/catalog/ammo")]
-pub fn list_ammo_categories(config: &State<GameConfig>) -> Json<AmmoCategoryListResponse> {
+pub fn list_ammo_categories(_config: &State<GameConfig>) -> Json<AmmoCategoryListResponse> {
     // Get all unique ammunition categories from the loaded ammunition
     let mut categories = std::collections::HashSet::new();
-    
+
     // Scan ammunition configs to find categories
     // For now, return hardcoded categories since we know the structure
     // TODO: This could be dynamic based on what's actually loaded
     categories.insert("kinetic".to_string());
     categories.insert("missiles".to_string());
     categories.insert("torpedos".to_string());
-    
+
     let mut category_list: Vec<String> = categories.into_iter().collect();
     category_list.sort();
-    
+
     Json(AmmoCategoryListResponse {
         categories: category_list,
     })
@@ -314,7 +313,7 @@ pub fn list_ammunition(
     config: &State<GameConfig>,
 ) -> Result<Json<AmmoListResponse>, Json<ErrorResponse>> {
     // Validate category
-    let valid_categories = vec!["kinetic", "missiles", "torpedos"];
+    let valid_categories = ["kinetic", "missiles", "torpedos"];
     if !valid_categories.contains(&category.as_str()) {
         return Err(Json(ErrorResponse {
             error: format!(
@@ -376,7 +375,7 @@ pub fn get_ammunition(
     config: &State<GameConfig>,
 ) -> Result<Json<AmmunitionConfig>, Json<ErrorResponse>> {
     // Validate category
-    let valid_categories = vec!["kinetic", "missiles", "torpedos"];
+    let valid_categories = ["kinetic", "missiles", "torpedos"];
     if !valid_categories.contains(&category.as_str()) {
         return Err(Json(ErrorResponse {
             error: format!(

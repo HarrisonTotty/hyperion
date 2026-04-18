@@ -2,8 +2,8 @@
 //!
 //! Handles scanning, contacts, threat detection, and analysis
 
-use rocket::{Route, State, serde::json::Json, http::Status};
-use rocket::{routes, post, get};
+use rocket::{Route, State, http::Status, serde::json::Json};
+use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
 use crate::state::SharedGameWorld;
@@ -83,23 +83,22 @@ pub fn scan_target(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ScanResponse>, Status> {
     let world_read = world.read().unwrap();
-    
-    let ship = world_read.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let ship = world_read.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
     let ion_jammed = ship.status.is_ion_jammed();
     drop(world_read);
-    
+
     if ion_jammed {
         return Ok(Json(ScanResponse {
             success: false,
             ion_jammed: true,
         }));
     }
-    
+
     let mut world_write = world.write().unwrap();
     world_write.add_scan_command(ship_id, request.target_id.clone());
-    
+
     Ok(Json(ScanResponse {
         success: true,
         ion_jammed: false,
@@ -113,14 +112,14 @@ pub fn get_contacts(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ContactsResponse>, Status> {
     let world = world.read().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // In a real implementation, this would query the simulation
     let contacts = vec![];
-    
+
     Ok(Json(ContactsResponse { contacts }))
 }
 
@@ -131,14 +130,14 @@ pub fn get_threats(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ThreatsResponse>, Status> {
     let world = world.read().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // In a real implementation, this would query the simulation
     let threats = vec![];
-    
+
     Ok(Json(ThreatsResponse { threats }))
 }
 
@@ -150,11 +149,11 @@ pub fn get_navigation(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<NavigationInfo>, Status> {
     let world = world.read().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // In a real implementation, this would calculate actual navigation data
     Ok(Json(NavigationInfo {
         target_id,
@@ -172,32 +171,33 @@ pub fn analyze_target(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<AnalysisResponse>, Status> {
     let world_read = world.read().unwrap();
-    
-    let ship = world_read.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let ship = world_read.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
     let ion_jammed = ship.status.is_ion_jammed();
-    
+
     if ion_jammed {
         return Err(Status::BadRequest);
     }
-    
+
     // Try to find target ship
-    let target = world_read.ships().get(&request.target_id)
+    let target = world_read
+        .ships()
+        .get(&request.target_id)
         .ok_or(Status::NotFound)?;
-    
+
     let hull_pct = if target.status.max_hull > 0.0 {
         (target.status.hull / target.status.max_hull) * 100.0
     } else {
         0.0
     };
-    
+
     let shields_pct = if target.status.max_shields > 0.0 {
         (target.status.shields / target.status.max_shields) * 100.0
     } else {
         0.0
     };
-    
+
     Ok(Json(AnalysisResponse {
         target_id: target.id.clone(),
         class: target.class.clone(),
@@ -221,15 +221,15 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::GameWorld;
     use crate::models::ship::Ship;
     use crate::models::status::{ShipStatus, StatusEffect, StatusEffectType};
+    use crate::state::GameWorld;
     use std::sync::{Arc, RwLock};
-    
+
     fn setup_test_world() -> SharedGameWorld {
         Arc::new(RwLock::new(GameWorld::new()))
     }
-    
+
     fn create_test_ship(id: &str, team_id: &str) -> Ship {
         Ship {
             id: id.to_string(),
@@ -243,25 +243,25 @@ mod tests {
             inventory: Default::default(),
         }
     }
-    
+
     #[test]
     fn test_scan_target() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(ScanRequest {
             target_id: "enemy1".to_string(),
         });
-        
-        let result = scan_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = scan_target("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert!(!response.ion_jammed);
     }
-    
+
     #[test]
     fn test_scan_target_ion_jammed() {
         let world = setup_test_world();
@@ -272,49 +272,53 @@ mod tests {
             magnitude: 1.0,
         });
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(ScanRequest {
             target_id: "enemy1".to_string(),
         });
-        
-        let result = scan_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = scan_target("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(!response.success);
         assert!(response.ion_jammed);
     }
-    
+
     #[test]
     fn test_get_contacts() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_contacts("ship1".to_string(), &State::from(&world));
+
+        let result = get_contacts("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_get_threats() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_threats("ship1".to_string(), &State::from(&world));
+
+        let result = get_threats("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_get_navigation() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_navigation("ship1".to_string(), "target1".to_string(), &State::from(&world));
+
+        let result = get_navigation(
+            "ship1".to_string(),
+            "target1".to_string(),
+            State::from(&world),
+        );
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_analyze_target() {
         let world = setup_test_world();
@@ -322,18 +326,18 @@ mod tests {
         let ship2 = create_test_ship("ship2", "team2");
         world.write().unwrap().add_ship(ship1);
         world.write().unwrap().add_ship(ship2);
-        
+
         let request = Json(AnalyzeRequest {
             target_id: "ship2".to_string(),
         });
-        
-        let result = analyze_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = analyze_target("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert_eq!(response.target_id, "ship2");
     }
-    
+
     #[test]
     fn test_analyze_target_ion_jammed() {
         let world = setup_test_world();
@@ -346,12 +350,12 @@ mod tests {
         let ship2 = create_test_ship("ship2", "team2");
         world.write().unwrap().add_ship(ship1);
         world.write().unwrap().add_ship(ship2);
-        
+
         let request = Json(AnalyzeRequest {
             target_id: "ship2".to_string(),
         });
-        
-        let result = analyze_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = analyze_target("ship1".to_string(), request, State::from(&world));
         assert_eq!(result.err(), Some(Status::BadRequest));
     }
 }

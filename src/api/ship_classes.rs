@@ -1,14 +1,12 @@
+use rocket::serde::json::Json;
 /// Ship classes API endpoints
 ///
 /// Provides REST API for querying available ship classes with detailed specifications.
-
-use rocket::{get, State, Route, routes};
-use rocket::serde::json::Json;
+use rocket::{Route, State, get, routes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::config::{BonusConfig, FormattedBonus, ShipClassConfig, ShipSize, ShipClassRole, GameConfig};
-use crate::state::SharedGameWorld;
+use crate::config::{FormattedBonus, GameConfig, ShipClassRole, ShipSize};
 
 /// Returns all ship class API routes
 pub fn routes() -> Vec<Route> {
@@ -23,7 +21,7 @@ pub struct ShipClassResponse {
     pub description: String,
     pub size: ShipSize,
     pub role: ShipClassRole,
-    
+
     // Build constraints
     pub max_weight: f32,
     pub max_modules: u32,
@@ -36,13 +34,13 @@ pub struct ShipClassResponse {
 
     // Bonuses formatted by category
     pub bonuses: HashMap<String, Vec<FormattedBonus>>,
-    
+
     // Technical specifications
     pub technical_specs: HashMap<String, String>,
-    
+
     // Faction-specific manufacturers
     pub manufacturers: HashMap<String, ManufacturerInfo>,
-    
+
     // Lore and flavor
     pub lore: Option<String>,
     pub year_introduced: Option<u32>,
@@ -78,7 +76,7 @@ pub struct ShipClassSummary {
 ///
 /// # Example
 ///
-/// ```
+/// ```text
 /// GET /v1/ship-classes
 /// GET /v1/ship-classes?faction=terran-federation
 /// ```
@@ -110,10 +108,10 @@ pub fn get_ship_classes(
             cost: sc.cost,
         })
         .collect();
-    
+
     // Sort by build points for consistent ordering
     ship_classes.sort_by(|a, b| a.build_points.partial_cmp(&b.build_points).unwrap());
-    
+
     Json(ship_classes)
 }
 
@@ -125,16 +123,13 @@ pub fn get_ship_classes(
 ///
 /// # Example
 ///
-/// ```
+/// ```text
 /// GET /v1/ship-classes/frigate
 /// ```
 #[get("/v1/ship-classes/<id>")]
-pub fn get_ship_class(
-    config: &State<GameConfig>,
-    id: &str,
-) -> Option<Json<ShipClassResponse>> {
-    let ship_class = config.get_ship_class(&id)?;
-    
+pub fn get_ship_class(config: &State<GameConfig>, id: &str) -> Option<Json<ShipClassResponse>> {
+    let ship_class = config.get_ship_class(id)?;
+
     // Format bonuses using bonus metadata if available
     let bonuses = if let Some(ref bonus_config) = config.bonuses {
         ship_class.get_formatted_bonuses(bonus_config)
@@ -142,7 +137,7 @@ pub fn get_ship_class(
         // Fallback to simple formatting without metadata
         HashMap::new()
     };
-    
+
     // Convert manufacturers to API format
     let manufacturers: HashMap<String, ManufacturerInfo> = ship_class
         .manufacturers
@@ -158,7 +153,7 @@ pub fn get_ship_class(
             )
         })
         .collect();
-    
+
     Some(Json(ShipClassResponse {
         id: ship_class.id.clone(),
         name: ship_class.name.clone(),
@@ -183,55 +178,7 @@ pub fn get_ship_class(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GameConfig, ShipClassConfig, ShipSize, ShipClassRole};
-    use std::sync::Mutex;
-    use rocket::local::blocking::Client;
-    use rocket::{routes, Build, Rocket};
-
-    fn create_test_rocket() -> Rocket<Build> {
-        let mut ship_class = ShipClassConfig {
-            name: "Test Frigate".to_string(),
-            description: "A test ship".to_string(),
-            size: ShipSize::Medium,
-            role: ShipClassRole::Combat,
-            max_weight: 270.0,
-            max_modules: 15,
-            base_hull: 420.0,
-            base_shields: 200.0,
-            build_points: 640.0,
-            cost: 42000,
-            bonuses: HashMap::new(),
-            id: String::new(),
-            manufacturers: HashMap::new(),
-            length: Some(150.0),
-            width: Some(45.0),
-            height: Some(30.0),
-            mass: Some(50000.0),
-            crew_min: Some(25),
-            crew_max: Some(40),
-            cargo_capacity: Some(500.0),
-            max_acceleration: Some(35.0),
-            max_turn_rate: Some(25.0),
-            max_warp_speed: Some(5.0),
-            warp_efficiency: Some(0.75),
-            sensor_range: Some(25000.0),
-            operational_range: Some(15.0),
-            build_time: Some(180),
-            maintenance_cost: Some(500.0),
-            fuel_capacity: Some(10000.0),
-            fuel_consumption: Some(100.0),
-            lore: Some("A versatile test ship".to_string()),
-            year_introduced: Some(2350),
-            notable_ships: vec!["USS Test".to_string()],
-        };
-        ship_class.set_id("test-frigate".to_string());
-
-        // Note: We'd need to create a proper GameConfig here for full testing
-        // This is simplified for demonstration
-        
-        rocket::build()
-            .mount("/v1", routes![get_ship_classes, get_ship_class])
-    }
+    use crate::config::{ShipClassRole, ShipSize};
 
     #[test]
     fn test_ship_class_response_structure() {

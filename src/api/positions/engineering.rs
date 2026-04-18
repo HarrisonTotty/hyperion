@@ -2,8 +2,8 @@
 //!
 //! Handles power allocation, cooling allocation, and repairs
 
-use rocket::{Route, State, serde::json::Json, http::Status};
-use rocket::{routes, post, patch, get};
+use rocket::{Route, State, http::Status, serde::json::Json};
+use rocket::{get, patch, post, routes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -101,17 +101,17 @@ pub fn allocate_power(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<AllocatePowerResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     let allocated_count = request.allocations.len();
-    
+
     // Record power allocations
     world.add_power_allocations(ship_id, request.allocations.clone());
-    
+
     Ok(Json(AllocatePowerResponse {
         success: true,
         allocated_modules: allocated_count,
@@ -126,17 +126,17 @@ pub fn allocate_cooling(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<AllocateCoolingResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     let allocated_count = request.allocations.len();
-    
+
     // Record cooling allocations
     world.add_cooling_allocations(ship_id, request.allocations.clone());
-    
+
     Ok(Json(AllocateCoolingResponse {
         success: true,
         allocated_modules: allocated_count,
@@ -151,15 +151,15 @@ pub fn repair_module(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<RepairResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Record repair command
     world.add_repair_command(ship_id, request.module_id.clone());
-    
+
     Ok(Json(RepairResponse {
         success: true,
         module_id: request.module_id.clone(),
@@ -173,23 +173,22 @@ pub fn get_ship_status(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ShipStatusInfo>, Status> {
     let world = world.read().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
+    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
     let hull_pct = if ship.status.max_hull > 0.0 {
         (ship.status.hull / ship.status.max_hull) * 100.0
     } else {
         0.0
     };
-    
+
     let shields_pct = if ship.status.max_shields > 0.0 {
         (ship.status.shields / ship.status.max_shields) * 100.0
     } else {
         0.0
     };
-    
+
     Ok(Json(ShipStatusInfo {
         hull: ship.status.hull,
         max_hull: ship.status.max_hull,
@@ -212,14 +211,20 @@ pub fn get_modules_status(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ModulesStatusResponse>, Status> {
     let world = world.read().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
-    let modules: Vec<ModuleStatusInfo> = ship.modules.iter()
+    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
+    let modules: Vec<ModuleStatusInfo> = ship
+        .modules
+        .iter()
         .map(|m| {
-            let health = ship.status.module_health.get(&m.instance_id).copied().unwrap_or(100.0);
+            let health = ship
+                .status
+                .module_health
+                .get(&m.instance_id)
+                .copied()
+                .unwrap_or(100.0);
             ModuleStatusInfo {
                 module_id: m.instance_id.clone(),
                 health,
@@ -227,12 +232,15 @@ pub fn get_modules_status(
             }
         })
         .collect();
-    
+
     Ok(Json(ModulesStatusResponse { modules }))
 }
 
 /// Activate an auxiliary module
-#[post("/v1/ships/<ship_id>/modules/<module_id>/activate", data = "<_request>")]
+#[post(
+    "/v1/ships/<ship_id>/modules/<module_id>/activate",
+    data = "<_request>"
+)]
 pub fn activate_auxiliary_module(
     ship_id: String,
     module_id: String,
@@ -240,22 +248,23 @@ pub fn activate_auxiliary_module(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ActivateModuleResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
+    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
     // Find the module
-    let module = ship.modules.iter()
+    let module = ship
+        .modules
+        .iter()
         .find(|m| m.instance_id == module_id)
         .ok_or(Status::NotFound)?;
-    
+
     // Get the module's duration stat
     let duration = module.get_stat_f64("duration").unwrap_or(10.0) as f32;
-    
+
     // Record the activation command
     world.add_auxiliary_activation(ship_id, module_id.clone(), duration);
-    
+
     Ok(Json(ActivateModuleResponse {
         success: true,
         message: "Auxiliary module activation queued".to_string(),
@@ -279,15 +288,15 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::GameWorld;
     use crate::models::ship::Ship;
     use crate::models::status::ShipStatus;
+    use crate::state::GameWorld;
     use std::sync::{Arc, RwLock};
-    
+
     fn setup_test_world() -> SharedGameWorld {
         Arc::new(RwLock::new(GameWorld::new()))
     }
-    
+
     fn create_test_ship(id: &str, team_id: &str) -> Ship {
         Ship {
             id: id.to_string(),
@@ -301,64 +310,64 @@ mod tests {
             inventory: Default::default(),
         }
     }
-    
+
     #[test]
     fn test_allocate_power() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let mut allocations = HashMap::new();
         allocations.insert("engine1".to_string(), 100.0);
         allocations.insert("shield1".to_string(), 50.0);
-        
+
         let request = Json(AllocatePowerRequest { allocations });
-        
-        let result = allocate_power("ship1".to_string(), request, &State::from(&world));
+
+        let result = allocate_power("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.allocated_modules, 2);
     }
-    
+
     #[test]
     fn test_allocate_cooling() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let mut allocations = HashMap::new();
         allocations.insert("weapon1".to_string(), 30.0);
-        
+
         let request = Json(AllocateCoolingRequest { allocations });
-        
-        let result = allocate_cooling("ship1".to_string(), request, &State::from(&world));
+
+        let result = allocate_cooling("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.allocated_modules, 1);
     }
-    
+
     #[test]
     fn test_repair_module() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(RepairRequest {
             module_id: "engine1".to_string(),
         });
-        
-        let result = repair_module("ship1".to_string(), request, &State::from(&world));
+
+        let result = repair_module("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.module_id, "engine1");
     }
-    
+
     #[test]
     fn test_get_ship_status() {
         let world = setup_test_world();
@@ -366,25 +375,25 @@ mod tests {
         ship.status.hull = 800.0;
         ship.status.max_hull = 1000.0;
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_ship_status("ship1".to_string(), &State::from(&world));
+
+        let result = get_ship_status("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert_eq!(response.hull, 800.0);
         assert_eq!(response.max_hull, 1000.0);
         assert_eq!(response.hull_percentage, 80.0);
     }
-    
+
     #[test]
     fn test_get_modules_status() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_modules_status("ship1".to_string(), &State::from(&world));
+
+        let result = get_modules_status("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert_eq!(response.modules.len(), 0);
     }

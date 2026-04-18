@@ -106,7 +106,7 @@ impl Station {
             size: StationSize::Medium,
         }
     }
-    
+
     /// Create a new station with custom size
     pub fn with_size(name: String, position: [f64; 3], faction: String, size: StationSize) -> Self {
         let max_docked = match size {
@@ -115,7 +115,7 @@ impl Station {
             StationSize::Large => 10,
             StationSize::Massive => 20,
         };
-        
+
         Self {
             id: Uuid::new_v4(),
             name,
@@ -129,7 +129,7 @@ impl Station {
             size,
         }
     }
-    
+
     /// Request docking permission
     ///
     /// Returns true if request is approved, false if denied
@@ -138,43 +138,50 @@ impl Station {
         if self.docked_ships.contains(&ship_id) {
             return false;
         }
-        
+
         if self.docking_requests.iter().any(|(id, _)| *id == ship_id) {
             return false;
         }
-        
+
         // Check if hostile
         if self.hostile_factions.contains(&ship_faction.to_string()) {
             self.docking_requests.push((ship_id, DockingStatus::Denied));
             return false;
         }
-        
+
         // Check if station is full
         if self.docked_ships.len() >= self.max_docked_ships {
             self.docking_requests.push((ship_id, DockingStatus::Denied));
             return false;
         }
-        
+
         // Approve docking
-        self.docking_requests.push((ship_id, DockingStatus::Requested));
+        self.docking_requests
+            .push((ship_id, DockingStatus::Requested));
         true
     }
-    
+
     /// Approve a docking request
     pub fn approve_docking(&mut self, ship_id: Uuid) -> bool {
-        if let Some((_, status)) = self.docking_requests.iter_mut().find(|(id, _)| *id == ship_id) {
+        if let Some((_, status)) = self
+            .docking_requests
+            .iter_mut()
+            .find(|(id, _)| *id == ship_id)
+        {
             *status = DockingStatus::Approaching;
             true
         } else {
             false
         }
     }
-    
+
     /// Complete docking (ship has arrived)
     pub fn complete_docking(&mut self, ship_id: Uuid) -> bool {
-        if let Some(index) = self.docking_requests.iter().position(|(id, status)| {
-            *id == ship_id && *status == DockingStatus::Approaching
-        }) {
+        if let Some(index) = self
+            .docking_requests
+            .iter()
+            .position(|(id, status)| *id == ship_id && *status == DockingStatus::Approaching)
+        {
             self.docking_requests.remove(index);
             self.docked_ships.push(ship_id);
             true
@@ -182,64 +189,68 @@ impl Station {
             false
         }
     }
-    
+
     /// Undock a ship
     pub fn undock_ship(&mut self, ship_id: Uuid) -> bool {
         if let Some(index) = self.docked_ships.iter().position(|id| *id == ship_id) {
             self.docked_ships.remove(index);
-            self.docking_requests.push((ship_id, DockingStatus::Undocking));
+            self.docking_requests
+                .push((ship_id, DockingStatus::Undocking));
             true
         } else {
             false
         }
     }
-    
+
     /// Complete undocking (ship has departed)
     pub fn complete_undocking(&mut self, ship_id: Uuid) -> bool {
-        if let Some(index) = self.docking_requests.iter().position(|(id, status)| {
-            *id == ship_id && *status == DockingStatus::Undocking
-        }) {
+        if let Some(index) = self
+            .docking_requests
+            .iter()
+            .position(|(id, status)| *id == ship_id && *status == DockingStatus::Undocking)
+        {
             self.docking_requests.remove(index);
             true
         } else {
             false
         }
     }
-    
+
     /// Check if a ship is docked
     pub fn is_ship_docked(&self, ship_id: Uuid) -> bool {
         self.docked_ships.contains(&ship_id)
     }
-    
+
     /// Get docking status for a ship
     pub fn get_docking_status(&self, ship_id: Uuid) -> Option<DockingStatus> {
         if self.docked_ships.contains(&ship_id) {
             return Some(DockingStatus::Docked);
         }
-        
+
         self.docking_requests
             .iter()
             .find(|(id, _)| *id == ship_id)
             .map(|(_, status)| *status)
     }
-    
+
     /// Get available docking bays
     pub fn available_docking_bays(&self) -> usize {
-        self.max_docked_ships.saturating_sub(self.docked_ships.len())
+        self.max_docked_ships
+            .saturating_sub(self.docked_ships.len())
     }
-    
+
     /// Add a hostile faction
     pub fn add_hostile_faction(&mut self, faction: String) {
         if !self.hostile_factions.contains(&faction) {
             self.hostile_factions.push(faction);
         }
     }
-    
+
     /// Remove a hostile faction
     pub fn remove_hostile_faction(&mut self, faction: &str) {
         self.hostile_factions.retain(|f| f != faction);
     }
-    
+
     /// Check if a faction is hostile
     pub fn is_hostile_to(&self, faction: &str) -> bool {
         self.hostile_factions.contains(&faction.to_string())
@@ -251,15 +262,11 @@ impl Station {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceRequest {
     /// Repair a specific module
-    RepairModule {
-        module_id: String,
-    },
+    RepairModule { module_id: String },
     /// Repair all damaged modules
     RepairAll,
     /// Refuel the ship
-    Refuel {
-        amount: f32,
-    },
+    Refuel { amount: f32 },
     /// Rearm a specific weapon
     RearmWeapon {
         weapon_id: String,
@@ -281,7 +288,7 @@ pub struct ServiceResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_station_creation() {
         let station = Station::new(
@@ -289,14 +296,14 @@ mod tests {
             [100.0, 200.0, 300.0],
             "Federation".to_string(),
         );
-        
+
         assert_eq!(station.name, "Alpha Station");
         assert_eq!(station.position, [100.0, 200.0, 300.0]);
         assert_eq!(station.faction, "Federation");
         assert_eq!(station.max_docked_ships, 5);
         assert_eq!(station.docked_ships.len(), 0);
     }
-    
+
     #[test]
     fn test_station_with_size() {
         let small = Station::with_size(
@@ -306,7 +313,7 @@ mod tests {
             StationSize::Small,
         );
         assert_eq!(small.max_docked_ships, 2);
-        
+
         let massive = Station::with_size(
             "Massive Station".to_string(),
             [0.0, 0.0, 0.0],
@@ -315,7 +322,7 @@ mod tests {
         );
         assert_eq!(massive.max_docked_ships, 20);
     }
-    
+
     #[test]
     fn test_docking_request() {
         let mut station = Station::new(
@@ -323,24 +330,33 @@ mod tests {
             [0.0, 0.0, 0.0],
             "Federation".to_string(),
         );
-        
+
         let ship_id = Uuid::new_v4();
-        
+
         // Request docking
         let approved = station.request_docking(ship_id, "Federation");
         assert!(approved);
-        assert_eq!(station.get_docking_status(ship_id), Some(DockingStatus::Requested));
-        
+        assert_eq!(
+            station.get_docking_status(ship_id),
+            Some(DockingStatus::Requested)
+        );
+
         // Approve docking
         assert!(station.approve_docking(ship_id));
-        assert_eq!(station.get_docking_status(ship_id), Some(DockingStatus::Approaching));
-        
+        assert_eq!(
+            station.get_docking_status(ship_id),
+            Some(DockingStatus::Approaching)
+        );
+
         // Complete docking
         assert!(station.complete_docking(ship_id));
-        assert_eq!(station.get_docking_status(ship_id), Some(DockingStatus::Docked));
+        assert_eq!(
+            station.get_docking_status(ship_id),
+            Some(DockingStatus::Docked)
+        );
         assert!(station.is_ship_docked(ship_id));
     }
-    
+
     #[test]
     fn test_hostile_faction_docking() {
         let mut station = Station::new(
@@ -348,16 +364,19 @@ mod tests {
             [0.0, 0.0, 0.0],
             "Federation".to_string(),
         );
-        
+
         station.add_hostile_faction("Empire".to_string());
-        
+
         let ship_id = Uuid::new_v4();
         let approved = station.request_docking(ship_id, "Empire");
-        
+
         assert!(!approved);
-        assert_eq!(station.get_docking_status(ship_id), Some(DockingStatus::Denied));
+        assert_eq!(
+            station.get_docking_status(ship_id),
+            Some(DockingStatus::Denied)
+        );
     }
-    
+
     #[test]
     fn test_station_capacity() {
         let mut station = Station::with_size(
@@ -366,30 +385,33 @@ mod tests {
             "Federation".to_string(),
             StationSize::Small,
         );
-        
+
         assert_eq!(station.available_docking_bays(), 2);
-        
+
         // Dock two ships
         let ship1 = Uuid::new_v4();
         let ship2 = Uuid::new_v4();
-        
+
         station.request_docking(ship1, "Federation");
         station.approve_docking(ship1);
         station.complete_docking(ship1);
-        
+
         station.request_docking(ship2, "Federation");
         station.approve_docking(ship2);
         station.complete_docking(ship2);
-        
+
         assert_eq!(station.available_docking_bays(), 0);
-        
+
         // Try to dock a third ship - should be denied
         let ship3 = Uuid::new_v4();
         let approved = station.request_docking(ship3, "Federation");
         assert!(!approved);
-        assert_eq!(station.get_docking_status(ship3), Some(DockingStatus::Denied));
+        assert_eq!(
+            station.get_docking_status(ship3),
+            Some(DockingStatus::Denied)
+        );
     }
-    
+
     #[test]
     fn test_undocking() {
         let mut station = Station::new(
@@ -397,25 +419,28 @@ mod tests {
             [0.0, 0.0, 0.0],
             "Federation".to_string(),
         );
-        
+
         let ship_id = Uuid::new_v4();
-        
+
         // Dock the ship
         station.request_docking(ship_id, "Federation");
         station.approve_docking(ship_id);
         station.complete_docking(ship_id);
         assert!(station.is_ship_docked(ship_id));
-        
+
         // Undock
         assert!(station.undock_ship(ship_id));
-        assert_eq!(station.get_docking_status(ship_id), Some(DockingStatus::Undocking));
+        assert_eq!(
+            station.get_docking_status(ship_id),
+            Some(DockingStatus::Undocking)
+        );
         assert!(!station.is_ship_docked(ship_id));
-        
+
         // Complete undocking
         assert!(station.complete_undocking(ship_id));
         assert_eq!(station.get_docking_status(ship_id), None);
     }
-    
+
     #[test]
     fn test_hostile_faction_management() {
         let mut station = Station::new(
@@ -423,16 +448,16 @@ mod tests {
             [0.0, 0.0, 0.0],
             "Federation".to_string(),
         );
-        
+
         assert!(!station.is_hostile_to("Empire"));
-        
+
         station.add_hostile_faction("Empire".to_string());
         assert!(station.is_hostile_to("Empire"));
-        
+
         station.remove_hostile_faction("Empire");
         assert!(!station.is_hostile_to("Empire"));
     }
-    
+
     #[test]
     fn test_station_services() {
         let services = StationServices::default();

@@ -2,8 +2,8 @@
 //!
 //! Defines weapon specifications with tag support.
 
-use serde::{Deserialize, Serialize};
 use crate::models::WeaponTag;
+use serde::{Deserialize, Serialize};
 
 /// Weapon configuration from YAML files
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub struct WeaponConfig {
     /// Weight in kg (optional for some weapon types)
     #[serde(default)]
     pub weight: f32,
-    
+
     // Weapon type-specific fields (missiles, DE weapons, kinetic)
     /// Fire delay / reload time
     #[serde(default)]
@@ -33,19 +33,19 @@ pub struct WeaponConfig {
     pub reload_time: f32,
     #[serde(default)]
     pub recharge_time: f32,
-    
+
     /// Projectile speed
     #[serde(default)]
     pub speed: f32,
     #[serde(default)]
     pub velocity: f32,
-    
+
     /// Range
     #[serde(default)]
     pub max_range: f32,
     #[serde(default)]
     pub effective_range: f32,
-    
+
     /// Damage fields
     #[serde(default)]
     pub damage: f32,
@@ -55,11 +55,11 @@ pub struct WeaponConfig {
     pub blast_damage: f32,
     #[serde(default)]
     pub blast_radius: f32,
-    
+
     /// Energy consumption
     #[serde(default)]
     pub energy_consumption: f32,
-    
+
     /// Missile-specific
     #[serde(default)]
     pub forward_thrust: f32,
@@ -71,7 +71,7 @@ pub struct WeaponConfig {
     pub lifetime: f32,
     #[serde(default)]
     pub max_speed: f32,
-    
+
     /// Kinetic-specific
     #[serde(default)]
     pub num_projectiles: u32,
@@ -79,11 +79,11 @@ pub struct WeaponConfig {
     pub ammo_consumption: u32,
     #[serde(default)]
     pub accuracy: f32,
-    
+
     /// Weapon tags (fire patterns, energy types, status effects, etc.)
     #[serde(default)]
     pub tags: Vec<WeaponTag>,
-    
+
     /// Derived field (not in YAML, populated from filename)
     #[serde(skip)]
     pub id: String,
@@ -235,10 +235,10 @@ impl WeaponConfig {
         if self.cost < 0.0 {
             return Err(format!("Weapon {} cannot have negative cost", self.id));
         }
-        
+
         // Validate tag combinations
         self.validate_tags()?;
-        
+
         Ok(())
     }
 
@@ -248,27 +248,39 @@ impl WeaponConfig {
         let has_burst = self.tags.contains(&WeaponTag::Burst);
         let has_pulse = self.tags.contains(&WeaponTag::Pulse);
         let has_single = self.tags.contains(&WeaponTag::SingleFire);
-        
+
         // Check for mutually exclusive fire patterns
-        let fire_pattern_count = [has_beam, has_burst, has_pulse, has_single].iter().filter(|&&x| x).count();
+        let fire_pattern_count = [has_beam, has_burst, has_pulse, has_single]
+            .iter()
+            .filter(|&&x| x)
+            .count();
         if fire_pattern_count > 1 {
-            return Err(format!("Weapon {} has multiple fire pattern tags (Beam, Burst, Pulse, SingleFire are mutually exclusive)", self.id));
+            return Err(format!(
+                "Weapon {} has multiple fire pattern tags (Beam, Burst, Pulse, SingleFire are mutually exclusive)",
+                self.id
+            ));
         }
 
         let has_missile = self.tags.contains(&WeaponTag::Missile);
         let has_torpedo = self.tags.contains(&WeaponTag::Torpedo);
-        
+
         // Missiles and torpedos are mutually exclusive
         if has_missile && has_torpedo {
-            return Err(format!("Weapon {} cannot be both Missile and Torpedo", self.id));
+            return Err(format!(
+                "Weapon {} cannot be both Missile and Torpedo",
+                self.id
+            ));
         }
 
         let has_manual = self.tags.contains(&WeaponTag::Manual);
         let has_automatic = self.tags.contains(&WeaponTag::Automatic);
-        
+
         // Manual and Automatic are mutually exclusive
         if has_manual && has_automatic {
-            return Err(format!("Weapon {} cannot be both Manual and Automatic", self.id));
+            return Err(format!(
+                "Weapon {} cannot be both Manual and Automatic",
+                self.id
+            ));
         }
 
         Ok(())
@@ -286,28 +298,28 @@ impl WeaponConfig {
 }
 
 /// Configuration for weapon tag effects
-/// 
+///
 /// Defines how each weapon tag modifies weapon behavior, damage, and status effects
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeaponTagConfig {
     /// The weapon tag this config applies to
     pub tag: WeaponTag,
-    
+
     /// Display name for this tag
     pub name: String,
-    
+
     /// Description of the tag's effects
     pub description: String,
-    
+
     /// Damage multiplier applied (1.0 = no change, 2.0 = double damage)
     pub damage_multiplier: f32,
-    
+
     /// Status effect applied on hit (if any)
     pub status_effect: Option<StatusEffectConfig>,
-    
+
     /// Additional power draw multiplier (1.0 = normal, 1.5 = 50% more power)
     pub power_multiplier: f32,
-    
+
     /// Range multiplier (1.0 = normal, 0.5 = half range)
     pub range_multiplier: f32,
 }
@@ -317,13 +329,13 @@ pub struct WeaponTagConfig {
 pub struct StatusEffectConfig {
     /// Type of status effect (Ion, Graviton, Tachyon)
     pub effect_type: String,
-    
+
     /// Duration of the effect in seconds
     pub duration: f32,
-    
+
     /// Chance to apply effect (0.0 to 1.0)
     pub application_chance: f32,
-    
+
     /// Magnitude of the effect (e.g., 0.3 for 30% weight increase)
     pub magnitude: f32,
 }
@@ -369,7 +381,7 @@ impl WeaponTagConfig {
                 power_multiplier: 0.8,
                 range_multiplier: 1.0,
             },
-            
+
             // Projectile type tags
             WeaponTag::Missile => Self {
                 tag,
@@ -389,7 +401,7 @@ impl WeaponTagConfig {
                 power_multiplier: 0.3,
                 range_multiplier: 1.3,
             },
-            
+
             // Energy type tags
             WeaponTag::Photon => Self {
                 tag,
@@ -418,7 +430,7 @@ impl WeaponTagConfig {
                 power_multiplier: 2.0,
                 range_multiplier: 1.0,
             },
-            
+
             // Status effect tags
             WeaponTag::Ion => Self {
                 tag,
@@ -462,7 +474,7 @@ impl WeaponTagConfig {
                 power_multiplier: 1.8,
                 range_multiplier: 1.1,
             },
-            
+
             // Countermeasure tags
             WeaponTag::Decoy => Self {
                 tag,
@@ -500,7 +512,7 @@ impl WeaponTagConfig {
                 power_multiplier: 0.3,
                 range_multiplier: 0.3,
             },
-            
+
             // Fire control tags (these don't have direct effects)
             WeaponTag::Manual => Self {
                 tag,
@@ -643,12 +655,12 @@ mod tests {
         let ion_config = WeaponTagConfig::default_for_tag(WeaponTag::Ion);
         assert_eq!(ion_config.name, "Ion");
         assert!(ion_config.status_effect.is_some());
-        
+
         let status = ion_config.status_effect.unwrap();
         assert_eq!(status.effect_type, "Ion");
         assert_eq!(status.duration, 10.0);
         assert_eq!(status.application_chance, 0.8);
-        
+
         let beam_config = WeaponTagConfig::default_for_tag(WeaponTag::Beam);
         assert_eq!(beam_config.power_multiplier, 1.5);
         assert_eq!(beam_config.range_multiplier, 1.2);
@@ -660,10 +672,10 @@ mod tests {
         assert!(graviton.status_effect.is_some());
         let effect = graviton.status_effect.unwrap();
         assert_eq!(effect.magnitude, 0.3); // 30% weight increase
-        
+
         let tachyon = WeaponTagConfig::default_for_tag(WeaponTag::Tachyon);
         assert!(tachyon.status_effect.is_some());
-        
+
         let photon = WeaponTagConfig::default_for_tag(WeaponTag::Photon);
         assert!(photon.status_effect.is_none()); // No status effect
     }

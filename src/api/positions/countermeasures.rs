@@ -2,10 +2,9 @@
 //!
 //! Handles shields, countermeasures, and point defense systems.
 
-use rocket::{Route, State, serde::json::Json, http::Status};
-use rocket::{routes, post, get};
+use rocket::{Route, State, http::Status, serde::json::Json};
+use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::state::SharedGameWorld;
 
@@ -81,14 +80,16 @@ pub fn raise_shields(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ShieldResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships_mut().get_mut(&ship_id)
+    let ship = world
+        .ships_mut()
+        .get_mut(&ship_id)
         .ok_or(Status::NotFound)?;
-    
+
     // Raise shields
     ship.status.shields_raised = true;
-    
+
     Ok(Json(ShieldResponse {
         success: true,
         shields_raised: true,
@@ -102,14 +103,16 @@ pub fn lower_shields(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ShieldResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships_mut().get_mut(&ship_id)
+    let ship = world
+        .ships_mut()
+        .get_mut(&ship_id)
         .ok_or(Status::NotFound)?;
-    
+
     // Lower shields
     ship.status.shields_raised = false;
-    
+
     Ok(Json(ShieldResponse {
         success: true,
         shields_raised: false,
@@ -123,17 +126,16 @@ pub fn get_shield_status(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ShieldStatusResponse>, Status> {
     let world = world.read().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
+    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
     let percentage = if ship.status.max_shields > 0.0 {
         (ship.status.shields / ship.status.max_shields) * 100.0
     } else {
         0.0
     };
-    
+
     Ok(Json(ShieldStatusResponse {
         current: ship.status.shields,
         max: ship.status.max_shields,
@@ -150,19 +152,19 @@ pub fn load_countermeasures(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<LoadCountermeasuresResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Add countermeasure load record
     world.add_countermeasure_load(
         ship_id,
         request.countermeasure_type.clone(),
         request.quantity,
     );
-    
+
     Ok(Json(LoadCountermeasuresResponse {
         success: true,
         loaded: request.quantity,
@@ -177,20 +179,17 @@ pub fn activate_countermeasures(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ActivateCountermeasuresResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     let threats_engaged = request.target_threat_ids.len() as u32;
-    
+
     // Add countermeasure activation record
-    world.add_countermeasure_activation(
-        ship_id,
-        request.target_threat_ids.clone(),
-    );
-    
+    world.add_countermeasure_activation(ship_id, request.target_threat_ids.clone());
+
     Ok(Json(ActivateCountermeasuresResponse {
         success: true,
         threats_engaged,
@@ -205,15 +204,15 @@ pub fn toggle_point_defense(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<TogglePointDefenseResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Update point defense setting
     world.set_point_defense(ship_id.clone(), request.enabled);
-    
+
     Ok(Json(TogglePointDefenseResponse {
         success: true,
         enabled: request.enabled,
@@ -235,15 +234,15 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::GameWorld;
     use crate::models::ship::Ship;
     use crate::models::status::ShipStatus;
+    use crate::state::GameWorld;
     use std::sync::{Arc, RwLock};
-    
+
     fn setup_test_world() -> SharedGameWorld {
         Arc::new(RwLock::new(GameWorld::new()))
     }
-    
+
     fn create_test_ship(id: &str, team_id: &str) -> Ship {
         Ship {
             id: id.to_string(),
@@ -257,54 +256,54 @@ mod tests {
             inventory: Default::default(),
         }
     }
-    
+
     #[test]
     fn test_raise_shields() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = raise_shields("ship1".to_string(), &State::from(&world));
+
+        let result = raise_shields("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert!(response.shields_raised);
-        
+
         // Verify ship state was updated
         let world_read = world.read().unwrap();
         let ship = world_read.ships().get("ship1").unwrap();
         assert!(ship.status.shields_raised);
     }
-    
+
     #[test]
     fn test_lower_shields() {
         let world = setup_test_world();
         let mut ship = create_test_ship("ship1", "team1");
         ship.status.shields_raised = true;
         world.write().unwrap().add_ship(ship);
-        
-        let result = lower_shields("ship1".to_string(), &State::from(&world));
+
+        let result = lower_shields("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert!(!response.shields_raised);
-        
+
         // Verify ship state was updated
         let world_read = world.read().unwrap();
         let ship = world_read.ships().get("ship1").unwrap();
         assert!(!ship.status.shields_raised);
     }
-    
+
     #[test]
     fn test_raise_shields_not_found() {
         let world = setup_test_world();
-        
-        let result = raise_shields("ship1".to_string(), &State::from(&world));
+
+        let result = raise_shields("ship1".to_string(), State::from(&world));
         assert_eq!(result.err(), Some(Status::NotFound));
     }
-    
+
     #[test]
     fn test_get_shield_status() {
         let world = setup_test_world();
@@ -313,132 +312,126 @@ mod tests {
         ship.status.max_shields = 1000.0;
         ship.status.shields_raised = true;
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_shield_status("ship1".to_string(), &State::from(&world));
+
+        let result = get_shield_status("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert_eq!(response.current, 750.0);
         assert_eq!(response.max, 1000.0);
         assert_eq!(response.percentage, 75.0);
         assert!(response.raised);
     }
-    
+
     #[test]
     fn test_get_shield_status_not_found() {
         let world = setup_test_world();
-        
-        let result = get_shield_status("ship1".to_string(), &State::from(&world));
+
+        let result = get_shield_status("ship1".to_string(), State::from(&world));
         assert_eq!(result.err(), Some(Status::NotFound));
     }
-    
+
     #[test]
     fn test_load_countermeasures() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(LoadCountermeasuresRequest {
             countermeasure_type: CountermeasureType::Antimissile,
             quantity: 10,
         });
-        
-        let result = load_countermeasures("ship1".to_string(), request, &State::from(&world));
+
+        let result = load_countermeasures("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.loaded, 10);
     }
-    
+
     #[test]
     fn test_load_countermeasures_not_found() {
         let world = setup_test_world();
-        
+
         let request = Json(LoadCountermeasuresRequest {
             countermeasure_type: CountermeasureType::Chaff,
             quantity: 5,
         });
-        
-        let result = load_countermeasures("ship1".to_string(), request, &State::from(&world));
+
+        let result = load_countermeasures("ship1".to_string(), request, State::from(&world));
         assert_eq!(result.err(), Some(Status::NotFound));
     }
-    
+
     #[test]
     fn test_activate_countermeasures() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(ActivateCountermeasuresRequest {
             target_threat_ids: vec!["missile1".to_string(), "missile2".to_string()],
         });
-        
-        let result = activate_countermeasures("ship1".to_string(), request, &State::from(&world));
+
+        let result = activate_countermeasures("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.threats_engaged, 2);
     }
-    
+
     #[test]
     fn test_activate_countermeasures_not_found() {
         let world = setup_test_world();
-        
+
         let request = Json(ActivateCountermeasuresRequest {
             target_threat_ids: vec!["missile1".to_string()],
         });
-        
-        let result = activate_countermeasures("ship1".to_string(), request, &State::from(&world));
+
+        let result = activate_countermeasures("ship1".to_string(), request, State::from(&world));
         assert_eq!(result.err(), Some(Status::NotFound));
     }
-    
+
     #[test]
     fn test_toggle_point_defense() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let request = Json(TogglePointDefenseRequest {
-            enabled: true,
-        });
-        
-        let result = toggle_point_defense("ship1".to_string(), request, &State::from(&world));
+
+        let request = Json(TogglePointDefenseRequest { enabled: true });
+
+        let result = toggle_point_defense("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert!(response.enabled);
     }
-    
+
     #[test]
     fn test_toggle_point_defense_disable() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let request = Json(TogglePointDefenseRequest {
-            enabled: false,
-        });
-        
-        let result = toggle_point_defense("ship1".to_string(), request, &State::from(&world));
+
+        let request = Json(TogglePointDefenseRequest { enabled: false });
+
+        let result = toggle_point_defense("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert!(!response.enabled);
     }
-    
+
     #[test]
     fn test_toggle_point_defense_not_found() {
         let world = setup_test_world();
-        
-        let request = Json(TogglePointDefenseRequest {
-            enabled: true,
-        });
-        
-        let result = toggle_point_defense("ship1".to_string(), request, &State::from(&world));
+
+        let request = Json(TogglePointDefenseRequest { enabled: true });
+
+        let result = toggle_point_defense("ship1".to_string(), request, State::from(&world));
         assert_eq!(result.err(), Some(Status::NotFound));
     }
 }

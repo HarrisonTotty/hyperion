@@ -55,14 +55,14 @@ impl Team {
             credits: starting_credits,
         }
     }
-    
+
     /// Add a player to the team
     pub fn add_member(&mut self, player_id: String) {
         if !self.members.contains(&player_id) {
             self.members.push(player_id);
         }
     }
-    
+
     /// Remove a player from the team
     pub fn remove_member(&mut self, player_id: &str) {
         self.members.retain(|id| id != player_id);

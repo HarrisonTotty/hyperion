@@ -4,9 +4,4 @@
 
 pub mod tags;
 
-pub use tags::{
-    WeaponTagCalculator,
-    DamageResult,
-    StatusEffect,
-    StatusEffectType,
-};
+pub use tags::{DamageResult, StatusEffect, StatusEffectType, WeaponTagCalculator};

@@ -2,8 +2,8 @@
 //!
 //! Handles missiles and torpedoes
 
-use rocket::{Route, State, serde::json::Json, http::Status};
-use rocket::{routes, post, get};
+use rocket::{Route, State, http::Status, serde::json::Json};
+use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
 use crate::state::SharedGameWorld;
@@ -58,18 +58,21 @@ pub fn set_target(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<MissileResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     world.set_missile_weapon_target(ship_id, request.target_id.clone());
-    
+
     Ok(Json(MissileResponse { success: true }))
 }
 
 /// Load ordnance
-#[post("/v1/ships/<ship_id>/missile-weapons/<weapon_id>/load", data = "<request>")]
+#[post(
+    "/v1/ships/<ship_id>/missile-weapons/<weapon_id>/load",
+    data = "<request>"
+)]
 pub fn load_ordnance(
     ship_id: String,
     weapon_id: String,
@@ -77,13 +80,18 @@ pub fn load_ordnance(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<MissileResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
-    world.load_missile_ordnance(ship_id, weapon_id, request.ordnance_type.clone(), request.quantity);
-    
+
+    world.load_missile_ordnance(
+        ship_id,
+        weapon_id,
+        request.ordnance_type.clone(),
+        request.quantity,
+    );
+
     Ok(Json(MissileResponse { success: true }))
 }
 
@@ -95,18 +103,21 @@ pub fn fire_weapon(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<MissileResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     world.fire_missile_weapon(ship_id, weapon_id);
-    
+
     Ok(Json(MissileResponse { success: true }))
 }
 
 /// Toggle auto-fire
-#[post("/v1/ships/<ship_id>/missile-weapons/<weapon_id>/auto", data = "<request>")]
+#[post(
+    "/v1/ships/<ship_id>/missile-weapons/<weapon_id>/auto",
+    data = "<request>"
+)]
 pub fn toggle_auto(
     ship_id: String,
     weapon_id: String,
@@ -114,13 +125,13 @@ pub fn toggle_auto(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<MissileResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     world.set_missile_auto_fire(ship_id, weapon_id, request.enabled);
-    
+
     Ok(Json(MissileResponse { success: true }))
 }
 
@@ -131,11 +142,12 @@ pub fn get_status(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<Vec<MissileWeaponStatus>>, Status> {
     let world = world.read().unwrap();
-    
-    let ship = world.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
-    let weapons = ship.weapons.iter()
+
+    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
+    let weapons = ship
+        .weapons
+        .iter()
         .map(|w| MissileWeaponStatus {
             weapon_id: w.id.clone(),
             loaded_ordnance: "none".to_string(),
@@ -143,7 +155,7 @@ pub fn get_status(
             ready: true,
         })
         .collect();
-    
+
     Ok(Json(weapons))
 }
 
@@ -161,15 +173,15 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::GameWorld;
     use crate::models::ship::Ship;
     use crate::models::status::ShipStatus;
+    use crate::state::GameWorld;
     use std::sync::{Arc, RwLock};
-    
+
     fn setup_test_world() -> SharedGameWorld {
         Arc::new(RwLock::new(GameWorld::new()))
     }
-    
+
     fn create_test_ship(id: &str, team_id: &str) -> Ship {
         Ship {
             id: id.to_string(),
@@ -183,44 +195,53 @@ mod tests {
             inventory: Default::default(),
         }
     }
-    
+
     #[test]
     fn test_set_target() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(SetTargetRequest {
             target_id: "enemy1".to_string(),
         });
-        
-        let result = set_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = set_target("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_load_ordnance() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(LoadOrdnanceRequest {
             weapon_id: "missile1".to_string(),
             ordnance_type: "photon_torpedo".to_string(),
             quantity: 10,
         });
-        
-        let result = load_ordnance("ship1".to_string(), "missile1".to_string(), request, &State::from(&world));
+
+        let result = load_ordnance(
+            "ship1".to_string(),
+            "missile1".to_string(),
+            request,
+            State::from(&world),
+        );
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_fire_weapon() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = fire_weapon("ship1".to_string(), "missile1".to_string(), &State::from(&world));
+
+        let result = fire_weapon(
+            "ship1".to_string(),
+            "missile1".to_string(),
+            State::from(&world),
+        );
         assert!(result.is_ok());
     }
 }

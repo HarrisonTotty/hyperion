@@ -29,6 +29,7 @@ The HYPERION server is a Rust program built with:
 
 - Rust 1.70 or higher
 - Cargo (comes with Rust)
+- [`just`](https://github.com/casey/just) (optional, for running project recipes)
 
 ### Building from Source
 
@@ -38,7 +39,7 @@ git clone https://github.com/yourusername/hyperion.git
 cd hyperion
 
 # Build the project
-cargo build --release
+just build-release     # or: cargo build --release
 
 # The binary will be available at target/release/hyperion
 ```
@@ -71,18 +72,33 @@ hyperion start -d ./custom-data -l trace
 
 ## Development
 
+Common development tasks are wrapped as [`just`](https://github.com/casey/just) recipes. Run `just` with no arguments to see the full list.
+
+| Recipe | Description |
+|--------|-------------|
+| `just build` | Debug build |
+| `just build-release` | Release build |
+| `just run -- <args>` | Run the binary, forwarding args |
+| `just test` | Run unit, integration, and doc tests |
+| `just format` | Format sources with `rustfmt` |
+| `just format-check` | Verify formatting without writing changes |
+| `just lint` | Run `clippy` with warnings treated as errors |
+| `just typecheck` | Fast `cargo check` across all targets |
+| `just doc` | Build and open API documentation |
+| `just check` | Full CI gate: format-check, lint, typecheck, test |
+
 ### Running Tests
 
 ```bash
-cargo test
+just test              # or: cargo test
 ```
 
 ### Running with Development Data
 
 ```bash
 # Uses ./data directory by default
-cargo run -- start
+just run -- start
 
 # Or specify a different directory
-cargo run -- start --data-dir ./data
+just run -- start --data-dir ./data
 ```

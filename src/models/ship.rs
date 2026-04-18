@@ -2,12 +2,12 @@
 //!
 //! Defines structures for ships active in the simulation.
 
+use super::blueprint::WeaponInstance;
+use super::role::ShipRole;
+use super::status::{Inventory, ShipStatus};
+use crate::config::ModuleStats;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use super::role::ShipRole;
-use super::blueprint::{ModuleInstance, WeaponInstance};
-use super::status::{ShipStatus, Inventory};
-use crate::config::ModuleStats;
 
 /// Compiled module with resolved stats and runtime state
 ///
@@ -42,23 +42,23 @@ impl CompiledModule {
     pub fn get_stat_f64(&self, key: &str) -> Option<f64> {
         self.stats.get_f64(key)
     }
-    
+
     /// Check if module is damaged (health below max)
     pub fn is_damaged(&self) -> bool {
         self.current_health < self.max_health
     }
-    
+
     /// Check if module is destroyed (health at or below 0)
     pub fn is_destroyed(&self) -> bool {
         self.current_health <= 0.0
     }
-    
+
     /// Get current efficiency based on health and power allocation
     pub fn get_efficiency(&self) -> f32 {
         if !self.operational || self.is_destroyed() {
             return 0.0;
         }
-        
+
         // Efficiency scales with health and power allocation
         let health_factor = self.current_health / self.max_health;
         health_factor * self.power_allocated

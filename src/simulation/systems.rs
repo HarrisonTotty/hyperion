@@ -3,13 +3,13 @@
 //! This module contains all the systems that operate on the simulation components,
 //! implementing the game logic for movement, combat, power management, and more.
 
-use bevy_ecs::prelude::*;
 use bevy_ecs::entity::Entity;
+use bevy_ecs::prelude::*;
 use bevy_ecs::system::{Commands, Query};
 use nalgebra::Vector3;
 
 use super::components::*;
-use crate::weapons::{WeaponTagCalculator, StatusEffectType};
+use crate::weapons::{StatusEffectType, WeaponTagCalculator};
 
 #[cfg(test)]
 use crate::models::WeaponTag;
@@ -23,7 +23,7 @@ pub fn movement_system(mut query: Query<&mut Transform>, delta_time: f32) {
         // Apply velocity to position
         let velocity = transform.velocity;
         transform.position += velocity * delta_time;
-        
+
         // Apply angular velocity to rotation
         if transform.angular_velocity.magnitude() > 0.0 {
             let axis_angle = transform.angular_velocity * delta_time;
@@ -43,7 +43,7 @@ pub fn power_system(mut power_grids: Query<&mut PowerGrid>) {
         // Power generation and distribution is managed elsewhere
         // This system just tracks and validates
         let _allocated = power_grid.total_allocated();
-        
+
         // TODO: Enforce power limits and redistribute if over capacity
     }
 }
@@ -55,7 +55,7 @@ pub fn cooling_system(mut cooling_systems: Query<&mut CoolingSystem>) {
     for cooling_sys in cooling_systems.iter_mut() {
         // Calculate total cooling allocated
         let _allocated = cooling_sys.total_allocated();
-        
+
         // TODO: Enforce cooling limits and manage overheating
     }
 }
@@ -64,10 +64,7 @@ pub fn cooling_system(mut cooling_systems: Query<&mut CoolingSystem>) {
 ///
 /// Shields only regenerate when raised, and regeneration rate is affected by
 /// power allocation and ship damage.
-pub fn shield_system(
-    mut query: Query<(&mut ShieldComponent, &PowerGrid)>,
-    delta_time: f32,
-) {
+pub fn shield_system(mut query: Query<(&mut ShieldComponent, &PowerGrid)>, delta_time: f32) {
     for (mut shield, power_grid) in query.iter_mut() {
         if shield.raised {
             // Calculate regeneration based on power available
@@ -76,7 +73,7 @@ pub fn shield_system(
             } else {
                 1.0
             };
-            
+
             // Regenerate shields using built-in method
             let regen = shield.regen_rate * power_efficiency * delta_time;
             shield.strength = (shield.strength + regen).min(shield.max_strength);
@@ -87,10 +84,7 @@ pub fn shield_system(
 /// System that updates weapon cooldowns over time.
 ///
 /// This system reduces the remaining cooldown for all weapons that are cooling down.
-pub fn weapon_cooldown_system(
-    mut query: Query<&mut WeaponComponent>,
-    delta_time: f32,
-) {
+pub fn weapon_cooldown_system(mut query: Query<&mut WeaponComponent>, delta_time: f32) {
     for mut weapon in query.iter_mut() {
         weapon.update_cooldown(delta_time);
     }
@@ -112,15 +106,15 @@ pub fn weapon_fire_system(
         if !weapon.is_automatic || !weapon.is_active {
             continue;
         }
-        
+
         // Check if weapon can fire
         if !weapon.can_fire() {
             continue;
         }
-        
+
         // TODO: Get targeting component from parent ship
         // TODO: Check ammunition from parent ship inventory
-        
+
         // For now, create a simple projectile
         let projectile = ProjectileComponent::kinetic(
             weapon_entity, // Use weapon entity as owner for now
@@ -128,7 +122,7 @@ pub fn weapon_fire_system(
             weapon.tags.clone(),
             10.0,
         );
-        
+
         // Create projectile entity with appropriate transform
         commands.spawn((
             projectile,
@@ -139,7 +133,7 @@ pub fn weapon_fire_system(
                 angular_velocity: Vector3::zeros(),
             },
         ));
-        
+
         // Start weapon cooldown
         weapon.fire();
     }
@@ -152,60 +146,52 @@ pub fn weapon_fire_system(
 pub fn damage_system(
     mut commands: Commands,
     projectiles: Query<(Entity, &ProjectileComponent, &Transform)>,
-    mut ships: Query<(
-        Entity,
-        &mut ShipData,
-        &mut ShieldComponent,
-        &Transform,
-    )>,
+    mut ships: Query<(Entity, &mut ShipData, &mut ShieldComponent, &Transform)>,
     mut status_effects: Query<&mut StatusEffects>,
 ) {
     let calculator = WeaponTagCalculator::new();
-    
+
     for (projectile_entity, projectile, proj_transform) in projectiles.iter() {
         // Skip beam weapons (handled by BeamWeaponSystem)
         if projectile.projectile_type == ProjectileType::Beam {
             continue;
         }
-        
+
         // Check for collision with target ship (if projectile has a target)
-        if let Some(target_entity) = projectile.target {
-            if let Ok((ship_entity, mut ship_data, mut shield, ship_transform)) = 
-                ships.get_mut(target_entity) {
-                
-                // Simple distance-based collision detection
-                let distance = (proj_transform.position - ship_transform.position).magnitude();
-                let collision_distance = 10.0; // TODO: Use actual ship/projectile radius
-                
-                if distance < collision_distance {
-                    // Calculate damage using weapon tags
-                    let damage_result = calculator.calculate_damage(
-                        projectile.damage,
-                        &projectile.tags,
-                    );
-                    
-                    // Check for errors
-                    let damage_result = match damage_result {
-                        Ok(dr) => dr,
-                        Err(_) => continue, // Skip on error
-                    };
-                    
-                    // Apply damage to shields first, then hull
-                    let remaining_damage = shield.apply_damage(damage_result.hull_damage);
-                    if remaining_damage > 0.0 {
-                        ship_data.hull -= remaining_damage;
-                    }
-                    
-                    // Apply status effects
-                    if let Ok(mut effects) = status_effects.get_mut(ship_entity) {
-                        if let Some(status_effect) = damage_result.status_effect {
-                            effects.apply(status_effect.effect_type, status_effect.duration);
-                        }
-                    }
-                    
-                    // Remove projectile
-                    commands.entity(projectile_entity).despawn();
+        if let Some(target_entity) = projectile.target
+            && let Ok((ship_entity, mut ship_data, mut shield, ship_transform)) =
+                ships.get_mut(target_entity)
+        {
+            // Simple distance-based collision detection
+            let distance = (proj_transform.position - ship_transform.position).magnitude();
+            let collision_distance = 10.0; // TODO: Use actual ship/projectile radius
+
+            if distance < collision_distance {
+                // Calculate damage using weapon tags
+                let damage_result =
+                    calculator.calculate_damage(projectile.damage, &projectile.tags);
+
+                // Check for errors
+                let damage_result = match damage_result {
+                    Ok(dr) => dr,
+                    Err(_) => continue, // Skip on error
+                };
+
+                // Apply damage to shields first, then hull
+                let remaining_damage = shield.apply_damage(damage_result.hull_damage);
+                if remaining_damage > 0.0 {
+                    ship_data.hull -= remaining_damage;
                 }
+
+                // Apply status effects
+                if let Ok(mut effects) = status_effects.get_mut(ship_entity)
+                    && let Some(status_effect) = damage_result.status_effect
+                {
+                    effects.apply(status_effect.effect_type, status_effect.duration);
+                }
+
+                // Remove projectile
+                commands.entity(projectile_entity).despawn();
             }
         }
     }
@@ -225,22 +211,26 @@ pub fn projectile_system(
         if projectile.projectile_type == ProjectileType::Beam {
             continue;
         }
-        
+
         // Update lifetime
         projectile.update(delta_time);
-        
+
         // Despawn if lifetime expired
         if projectile.is_expired() {
             commands.entity(entity).despawn();
             continue;
         }
-        
+
         // Missiles track their target
-        if let ProjectileType::Missile { thrust: _, turn_rate: _ } = projectile.projectile_type {
+        if let ProjectileType::Missile {
+            thrust: _,
+            turn_rate: _,
+        } = projectile.projectile_type
+        {
             // TODO: Implement target tracking/homing behavior
             // For now, just maintain current velocity
         }
-        
+
         // Position already updated by movement_system
     }
 }
@@ -250,56 +240,48 @@ pub fn projectile_system(
 /// Beam weapons apply 1x damage per second while active and target is locked.
 pub fn beam_weapon_system(
     beams: Query<(&ProjectileComponent, &Transform)>,
-    mut ships: Query<(
-        Entity,
-        &mut ShipData,
-        &mut ShieldComponent,
-        &Transform,
-    )>,
+    mut ships: Query<(Entity, &mut ShipData, &mut ShieldComponent, &Transform)>,
     mut status_effects: Query<&mut StatusEffects>,
     delta_time: f32,
 ) {
     let calculator = WeaponTagCalculator::new();
-    
+
     for (beam, beam_transform) in beams.iter() {
         // Only process beam weapons
         if beam.projectile_type != ProjectileType::Beam {
             continue;
         }
-        
+
         // Check if beam hits target
-        if let Some(target_entity) = beam.target {
-            if let Ok((ship_entity, mut ship_data, mut shield, ship_transform)) = 
-                ships.get_mut(target_entity) {
-                
-                // Simple line-of-sight check (could be improved with raycasting)
-                let distance = (beam_transform.position - ship_transform.position).magnitude();
-                let max_range = 5000.0; // TODO: Make this configurable
-                
-                if distance < max_range {
-                    // Calculate damage (1x per second = base_damage * delta_time)
-                    let damage_result = calculator.calculate_damage(
-                        beam.damage * delta_time,
-                        &beam.tags,
-                    );
-                    
-                    let damage_result = match damage_result {
-                        Ok(dr) => dr,
-                        Err(_) => continue,
-                    };
-                    
-                    // Apply damage
-                    let remaining_damage = shield.apply_damage(damage_result.hull_damage);
-                    if remaining_damage > 0.0 {
-                        ship_data.hull -= remaining_damage;
-                    }
-                    
-                    // Apply status effects
-                    if let Ok(mut effects) = status_effects.get_mut(ship_entity) {
-                        if let Some(status_effect) = damage_result.status_effect {
-                            effects.apply(status_effect.effect_type, status_effect.duration);
-                        }
-                    }
+        if let Some(target_entity) = beam.target
+            && let Ok((ship_entity, mut ship_data, mut shield, ship_transform)) =
+                ships.get_mut(target_entity)
+        {
+            // Simple line-of-sight check (could be improved with raycasting)
+            let distance = (beam_transform.position - ship_transform.position).magnitude();
+            let max_range = 5000.0; // TODO: Make this configurable
+
+            if distance < max_range {
+                // Calculate damage (1x per second = base_damage * delta_time)
+                let damage_result =
+                    calculator.calculate_damage(beam.damage * delta_time, &beam.tags);
+
+                let damage_result = match damage_result {
+                    Ok(dr) => dr,
+                    Err(_) => continue,
+                };
+
+                // Apply damage
+                let remaining_damage = shield.apply_damage(damage_result.hull_damage);
+                if remaining_damage > 0.0 {
+                    ship_data.hull -= remaining_damage;
+                }
+
+                // Apply status effects
+                if let Ok(mut effects) = status_effects.get_mut(ship_entity)
+                    && let Some(status_effect) = damage_result.status_effect
+                {
+                    effects.apply(status_effect.effect_type, status_effect.duration);
                 }
             }
         }
@@ -319,10 +301,7 @@ pub fn explosion_system() {
 ///
 /// This system updates the duration of all active status effects and
 /// removes effects that have expired.
-pub fn status_effect_system(
-    mut query: Query<&mut StatusEffects>,
-    delta_time: f32,
-) {
+pub fn status_effect_system(mut query: Query<&mut StatusEffects>, delta_time: f32) {
     for mut effects in query.iter_mut() {
         effects.update(delta_time);
     }
@@ -339,26 +318,26 @@ pub fn countermeasure_system(
 ) {
     // TODO: Implement point-defense logic
     // For now, this is a placeholder
-    
+
     for (weapon, weapon_transform) in countermeasures.iter() {
         // Check for nearby enemy missiles/torpedoes
         for (projectile_entity, projectile, proj_transform) in projectiles.iter() {
             // TODO: Skip if projectile is from this ship (needs parent-child relationships)
-            
+
             // Skip if not a missile or torpedo
             let is_missile_or_torpedo = matches!(
                 projectile.projectile_type,
                 ProjectileType::Missile { .. } | ProjectileType::Torpedo
             );
-            
+
             if !is_missile_or_torpedo {
                 continue;
             }
-            
+
             // Check if in range
             let distance = (proj_transform.position - weapon_transform.position).magnitude();
             let pd_range = 1000.0; // TODO: Make configurable
-            
+
             if distance < pd_range && weapon.can_fire() {
                 // Intercept missile (simple success check for now)
                 // TODO: Add accuracy calculations
@@ -410,7 +389,7 @@ pub fn warp_system(
         } else {
             warp.disabled = false;
         }
-        
+
         // Handle startup
         if warp.startup_progress > 0.0 {
             warp.startup_progress -= delta_time;
@@ -420,13 +399,13 @@ pub fn warp_system(
             }
             continue;
         }
-        
+
         // Handle cooldown
         if warp.cooldown_progress > 0.0 {
             warp.cooldown_progress = (warp.cooldown_progress - delta_time).max(0.0);
             continue;
         }
-        
+
         // Apply warp acceleration
         if warp.active {
             // Warp increases speed based on warp factor
@@ -455,7 +434,7 @@ pub fn jump_system(
         } else {
             jump.disabled = false;
         }
-        
+
         // Handle charging
         if jump.target_destination.is_some() {
             jump.startup_progress -= delta_time;
@@ -471,13 +450,13 @@ pub fn jump_system(
             }
             continue;
         }
-        
+
         // Handle cooldown
         if jump.cooldown_progress > 0.0 {
             jump.cooldown_progress = (jump.cooldown_progress - delta_time).max(0.0);
             continue;
         }
-        
+
         // Jump execution is triggered by player action, not automatic
         // This system just manages the charging state
     }
@@ -495,21 +474,21 @@ mod tests {
     #[test]
     fn test_movement_system() {
         let mut world = World::new();
-        
-        let ship = world.spawn(
-            Transform {
+
+        let ship = world
+            .spawn(Transform {
                 position: Vector3::new(0.0, 0.0, 0.0),
                 rotation: nalgebra::UnitQuaternion::identity(),
                 velocity: Vector3::new(10.0, 0.0, 0.0),
                 angular_velocity: Vector3::zeros(),
-            },
-        ).id();
-        
+            })
+            .id();
+
         // Run system with 1 second delta
-        world.run_system_once(|query: Query<&mut Transform>| {
+        let _ = world.run_system_once(|query: Query<&mut Transform>| {
             movement_system(query, 1.0);
         });
-        
+
         let transform = world.get::<Transform>(ship).unwrap();
         assert!((transform.position.x - 10.0).abs() < 0.01);
     }
@@ -517,20 +496,22 @@ mod tests {
     #[test]
     fn test_shield_system_regeneration() {
         let mut world = World::new();
-        
-        let ship = world.spawn((
-            ShieldComponent::new(100.0, 10.0, 5.0),
-            PowerGrid::new(100.0, 200.0),
-        )).id();
-        
+
+        let ship = world
+            .spawn((
+                ShieldComponent::new(100.0, 10.0, 5.0),
+                PowerGrid::new(100.0, 200.0),
+            ))
+            .id();
+
         // Damage shields
         world.get_mut::<ShieldComponent>(ship).unwrap().strength = 50.0;
-        
+
         // Run system with 1 second delta
-        world.run_system_once(|query: Query<(&mut ShieldComponent, &PowerGrid)>| {
+        let _ = world.run_system_once(|query: Query<(&mut ShieldComponent, &PowerGrid)>| {
             shield_system(query, 1.0);
         });
-        
+
         let shield = world.get::<ShieldComponent>(ship).unwrap();
         assert!(shield.strength > 50.0); // Should have regenerated
         assert!(shield.strength <= 100.0); // But not over max
@@ -539,20 +520,17 @@ mod tests {
     #[test]
     fn test_shield_system_no_regen_when_lowered() {
         let mut world = World::new();
-        
+
         let mut shield = ShieldComponent::new(100.0, 10.0, 5.0);
         shield.strength = 50.0;
         shield.raised = false; // Shields lowered
-        
-        let ship = world.spawn((
-            shield,
-            PowerGrid::new(100.0, 200.0),
-        )).id();
-        
-        world.run_system_once(|query: Query<(&mut ShieldComponent, &PowerGrid)>| {
+
+        let ship = world.spawn((shield, PowerGrid::new(100.0, 200.0))).id();
+
+        let _ = world.run_system_once(|query: Query<(&mut ShieldComponent, &PowerGrid)>| {
             shield_system(query, 1.0);
         });
-        
+
         let shield = world.get::<ShieldComponent>(ship).unwrap();
         assert!((shield.strength - 50.0).abs() < 0.01); // No regeneration
     }
@@ -560,7 +538,7 @@ mod tests {
     #[test]
     fn test_weapon_cooldown_system() {
         let mut world = World::new();
-        
+
         let mut weapon = WeaponComponent::new(
             "w1".to_string(),
             "laser_mk1".to_string(),
@@ -569,16 +547,16 @@ mod tests {
             10.0,
             50.0,
         );
-        
+
         // Set cooldown directly
         weapon.cooldown = 5.0;
-        
+
         let weapon_entity = world.spawn(weapon).id();
-        
-        world.run_system_once(|query: Query<&mut WeaponComponent>| {
+
+        let _ = world.run_system_once(|query: Query<&mut WeaponComponent>| {
             weapon_cooldown_system(query, 1.0);
         });
-        
+
         let weapon = world.get::<WeaponComponent>(weapon_entity).unwrap();
         assert!((weapon.cooldown - 4.0).abs() < 0.01); // Cooldown should have decreased by 1 second
     }
@@ -586,16 +564,16 @@ mod tests {
     #[test]
     fn test_status_effect_system() {
         let mut world = World::new();
-        
+
         let mut effects = StatusEffects::new();
         effects.apply(StatusEffectType::IonJam, 5.0);
-        
+
         let entity = world.spawn(effects).id();
-        
-        world.run_system_once(|query: Query<&mut StatusEffects>| {
+
+        let _ = world.run_system_once(|query: Query<&mut StatusEffects>| {
             status_effect_system(query, 1.0);
         });
-        
+
         let effects = world.get::<StatusEffects>(entity).unwrap();
         assert!(effects.has_effect(StatusEffectType::IonJam));
         let duration = effects.get_duration(StatusEffectType::IonJam).unwrap();
@@ -605,16 +583,16 @@ mod tests {
     #[test]
     fn test_status_effect_system_removes_expired() {
         let mut world = World::new();
-        
+
         let mut effects = StatusEffects::new();
         effects.apply(StatusEffectType::IonJam, 0.5);
-        
+
         let entity = world.spawn(effects).id();
-        
-        world.run_system_once(|query: Query<&mut StatusEffects>| {
+
+        let _ = world.run_system_once(|query: Query<&mut StatusEffects>| {
             status_effect_system(query, 1.0);
         });
-        
+
         let effects = world.get::<StatusEffects>(entity).unwrap();
         assert!(!effects.has_effect(StatusEffectType::IonJam));
     }
@@ -622,28 +600,32 @@ mod tests {
     #[test]
     fn test_warp_system_disabled_by_tachyon() {
         let mut world = World::new();
-        
+
         let mut warp = WarpDriveComponent::new(9.9, 5.0, 10.0);
         warp.active = true;
-        
+
         let mut effects = StatusEffects::new();
         effects.apply(StatusEffectType::TachyonWarpBlock, 10.0);
-        
-        let ship = world.spawn((
-            warp,
-            Transform {
-                position: Vector3::zeros(),
-                rotation: nalgebra::UnitQuaternion::identity(),
-                velocity: Vector3::new(10.0, 0.0, 0.0),
-                angular_velocity: Vector3::zeros(),
+
+        let ship = world
+            .spawn((
+                warp,
+                Transform {
+                    position: Vector3::zeros(),
+                    rotation: nalgebra::UnitQuaternion::identity(),
+                    velocity: Vector3::new(10.0, 0.0, 0.0),
+                    angular_velocity: Vector3::zeros(),
+                },
+                effects,
+            ))
+            .id();
+
+        let _ = world.run_system_once(
+            |query: Query<(&mut WarpDriveComponent, &mut Transform, &StatusEffects)>| {
+                warp_system(query, 1.0);
             },
-            effects,
-        )).id();
-        
-        world.run_system_once(|query: Query<(&mut WarpDriveComponent, &mut Transform, &StatusEffects)>| {
-            warp_system(query, 1.0);
-        });
-        
+        );
+
         let warp = world.get::<WarpDriveComponent>(ship).unwrap();
         assert!(!warp.active); // Disabled by Tachyon
         assert!(warp.disabled);
@@ -652,29 +634,33 @@ mod tests {
     #[test]
     fn test_jump_system_disabled_by_tachyon() {
         let mut world = World::new();
-        
+
         let mut jump = JumpDriveComponent::new(10000.0, 10.0, 30.0);
         jump.target_destination = Some(Vector3::new(5000.0, 0.0, 0.0));
         jump.startup_progress = 9.0;
-        
+
         let mut effects = StatusEffects::new();
         effects.apply(StatusEffectType::TachyonWarpBlock, 10.0);
-        
-        let ship = world.spawn((
-            jump,
-            Transform {
-                position: Vector3::zeros(),
-                rotation: nalgebra::UnitQuaternion::identity(),
-                velocity: Vector3::zeros(),
-                angular_velocity: Vector3::zeros(),
+
+        let ship = world
+            .spawn((
+                jump,
+                Transform {
+                    position: Vector3::zeros(),
+                    rotation: nalgebra::UnitQuaternion::identity(),
+                    velocity: Vector3::zeros(),
+                    angular_velocity: Vector3::zeros(),
+                },
+                effects,
+            ))
+            .id();
+
+        let _ = world.run_system_once(
+            |query: Query<(&mut JumpDriveComponent, &mut Transform, &StatusEffects)>| {
+                jump_system(query, 1.0);
             },
-            effects,
-        )).id();
-        
-        world.run_system_once(|query: Query<(&mut JumpDriveComponent, &mut Transform, &StatusEffects)>| {
-            jump_system(query, 1.0);
-        });
-        
+        );
+
         let jump = world.get::<JumpDriveComponent>(ship).unwrap();
         assert!(jump.target_destination.is_none()); // Jump cancelled by Tachyon
         assert!(jump.disabled);
@@ -683,29 +669,37 @@ mod tests {
     #[test]
     fn test_projectile_system_lifetime() {
         let mut world = World::new();
-        
+
         let projectile = ProjectileComponent::kinetic(
-            Entity::from_raw(0),
+            Entity::from_raw_u32(0).unwrap(),
             50.0,
             vec![WeaponTag::SingleFire],
             0.5,
         );
-        
-        let projectile_entity = world.spawn((
-            projectile,
-            Transform {
-                position: Vector3::zeros(),
-                rotation: nalgebra::UnitQuaternion::identity(),
-                velocity: Vector3::new(1000.0, 0.0, 0.0),
-                angular_velocity: Vector3::zeros(),
+
+        let projectile_entity = world
+            .spawn((
+                projectile,
+                Transform {
+                    position: Vector3::zeros(),
+                    rotation: nalgebra::UnitQuaternion::identity(),
+                    velocity: Vector3::new(1000.0, 0.0, 0.0),
+                    angular_velocity: Vector3::zeros(),
+                },
+            ))
+            .id();
+
+        let _ = world.run_system_once(
+            |commands: Commands, query: Query<(Entity, &mut ProjectileComponent)>| {
+                projectile_system(commands, query, 1.0);
             },
-        )).id();
-        
-        world.run_system_once(|mut commands: Commands, query: Query<(Entity, &mut ProjectileComponent)>| {
-            projectile_system(commands, query, 1.0);
-        });
-        
+        );
+
         // Projectile should be despawned
-        assert!(world.get::<ProjectileComponent>(projectile_entity).is_none());
+        assert!(
+            world
+                .get::<ProjectileComponent>(projectile_entity)
+                .is_none()
+        );
     }
 }

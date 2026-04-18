@@ -2,12 +2,12 @@
 //!
 //! Provides REST API endpoints for managing ship blueprints.
 
-use rocket::{State, serde::json::Json, http::Status, get, post, patch, delete, routes};
-use serde::{Deserialize, Serialize};
-use crate::state::SharedGameWorld;
-use crate::models::role::ShipRole;
-use crate::config::GameConfig;
 use crate::blueprint::BlueprintValidator;
+use crate::config::GameConfig;
+use crate::models::role::ShipRole;
+use crate::state::SharedGameWorld;
+use rocket::{State, delete, get, http::Status, patch, post, routes, serde::json::Json};
+use serde::{Deserialize, Serialize};
 
 // ==================== Request/Response Types ====================
 
@@ -137,20 +137,26 @@ fn blueprint_to_response(bp: &crate::models::ShipBlueprint) -> BlueprintResponse
         class: bp.class.clone(),
         team_id: bp.team_id.clone(),
         crew,
-        player_roles: bp.player_roles.iter()
+        player_roles: bp
+            .player_roles
+            .iter()
             .map(|(pid, roles)| PlayerRoleInfo {
                 player_id: pid.clone(),
                 roles: roles.clone(),
             })
             .collect(),
-        modules: bp.modules.iter()
+        modules: bp
+            .modules
+            .iter()
             .map(|m| ModuleInfo {
                 id: m.id.clone(),
                 module_slot_id: m.module_slot_id.clone(),
                 variant_id: m.variant_id.clone(),
             })
             .collect(),
-        weapons: bp.weapons.iter()
+        weapons: bp
+            .weapons
+            .iter()
             .map(|w| WeaponInfo {
                 id: w.id.clone(),
                 weapon_id: w.weapon_id.clone(),
@@ -169,11 +175,12 @@ fn blueprint_to_response(bp: &crate::models::ShipBlueprint) -> BlueprintResponse
 #[get("/v1/blueprints")]
 pub fn list_blueprints(world: &State<SharedGameWorld>) -> Json<ListBlueprintsResponse> {
     let world = world.read().unwrap();
-    let blueprints = world.get_all_blueprints()
+    let blueprints = world
+        .get_all_blueprints()
         .into_iter()
         .map(blueprint_to_response)
         .collect();
-    
+
     Json(ListBlueprintsResponse { blueprints })
 }
 
@@ -184,19 +191,21 @@ pub fn create_blueprint(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Validate ship name
     if request.name.is_empty() || request.name.len() > 50 {
         return Err(Status::BadRequest);
     }
-    
+
     // Create blueprint
-    let blueprint_id = world.create_blueprint(
-        request.name.clone(),
-        request.ship_class.clone(),
-        request.team_id.clone(),
-    ).map_err(|_| Status::BadRequest)?;
-    
+    let blueprint_id = world
+        .create_blueprint(
+            request.name.clone(),
+            request.ship_class.clone(),
+            request.team_id.clone(),
+        )
+        .map_err(|_| Status::BadRequest)?;
+
     let blueprint = world.get_blueprint(&blueprint_id).unwrap();
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -208,10 +217,9 @@ pub fn get_blueprint(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     let world = world.read().unwrap();
-    
-    let blueprint = world.get_blueprint(id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let blueprint = world.get_blueprint(id).ok_or(Status::NotFound)?;
+
     Ok(Json(blueprint_to_response(blueprint)))
 }
 
@@ -223,17 +231,16 @@ pub fn join_blueprint(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     // Verify player exists
-        {
-            let world_guard = world.read().unwrap();
-            if world_guard.get_player(&request.player_id).is_none() {
-                return Err(Status::BadRequest);
-            }
+    {
+        let world_guard = world.read().unwrap();
+        if world_guard.get_player(&request.player_id).is_none() {
+            return Err(Status::BadRequest);
         }
-        let mut game_world = world.write().unwrap();
+    }
+    let mut game_world = world.write().unwrap();
 
     // Get blueprint and add player with empty roles
-        let blueprint = game_world.get_blueprint_mut(id)
-        .ok_or(Status::NotFound)?;
+    let blueprint = game_world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
 
     blueprint.set_player_roles(request.player_id.clone(), vec![]);
 
@@ -248,34 +255,36 @@ pub fn update_roles(
     request: Json<UpdateRolesRequest>,
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
-    eprintln!("Received role update request: player_id={}, roles={:?}", request.player_id, request.roles);
-    
-        let mut game_world = world.write().unwrap();
-    
+    eprintln!(
+        "Received role update request: player_id={}, roles={:?}",
+        request.player_id, request.roles
+    );
+
+    let mut game_world = world.write().unwrap();
+
     // Verify player exists
-        {
-            let world_guard = world.read().unwrap();
-            if world_guard.get_player(&request.player_id).is_none() {
-                eprintln!("Player not found: {}", request.player_id);
-                return Err(Status::BadRequest);
-            }
-        }
-    
-        let blueprint = game_world.get_blueprint_mut(id)
-        .ok_or_else(|| {
-            eprintln!("Blueprint not found: {}", id);
-            Status::NotFound
-        })?;
-    
+    if game_world.get_player(&request.player_id).is_none() {
+        eprintln!("Player not found: {}", request.player_id);
+        return Err(Status::BadRequest);
+    }
+
+    let blueprint = game_world.get_blueprint_mut(id).ok_or_else(|| {
+        eprintln!("Blueprint not found: {}", id);
+        Status::NotFound
+    })?;
+
     // Add player if not already in blueprint (auto-join)
     if !blueprint.player_roles.contains_key(&request.player_id) {
         eprintln!("Auto-adding player to blueprint: {}", request.player_id);
         blueprint.set_player_roles(request.player_id.clone(), vec![]);
     }
-    
-    eprintln!("Setting player roles: player_id={}, roles={:?}", request.player_id, request.roles);
+
+    eprintln!(
+        "Setting player roles: player_id={}, roles={:?}",
+        request.player_id, request.roles
+    );
     blueprint.set_player_roles(request.player_id.clone(), request.roles.clone());
-    
+
     let blueprint = game_world.get_blueprint(id).unwrap();
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -288,10 +297,9 @@ pub fn add_module(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
-    
-    let blueprint = world.get_blueprint_mut(id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+
     // Create module instance
     let module = crate::models::blueprint::ModuleInstance {
         id: uuid::Uuid::new_v4().to_string(),
@@ -299,7 +307,7 @@ pub fn add_module(
         variant_id: request.variant_id.clone(),
     };
     blueprint.modules.push(module);
-    
+
     let blueprint = world.get_blueprint(id).unwrap();
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -312,17 +320,16 @@ pub fn remove_module(
     world: &State<SharedGameWorld>,
 ) -> Result<Status, Status> {
     let mut world = world.write().unwrap();
-    
-    let blueprint = world.get_blueprint_mut(id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+
     let initial_len = blueprint.modules.len();
     blueprint.modules.retain(|m| m.id != module_id);
-    
+
     if blueprint.modules.len() == initial_len {
         return Err(Status::NotFound);
     }
-    
+
     Ok(Status::NoContent)
 }
 
@@ -335,17 +342,19 @@ pub fn configure_module(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
-    
-    let blueprint = world.get_blueprint_mut(id)
-        .ok_or(Status::NotFound)?;
-    
-    let module = blueprint.modules.iter_mut()
+
+    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+
+    let module = blueprint
+        .modules
+        .iter_mut()
         .find(|m| m.id == module_id)
         .ok_or(Status::NotFound)?;
-    
-    // This endpoint is deprecated; use update_module_variant instead
-    // For backward compatibility, do nothing or log a warning
-    
+
+    if let Some(kind) = &request.kind {
+        module.variant_id = Some(kind.clone());
+    }
+
     let blueprint = world.get_blueprint(id).unwrap();
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -358,17 +367,16 @@ pub fn mark_ready(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
-    
-    let blueprint = world.get_blueprint_mut(id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+
     // Verify player is part of this blueprint
     if !blueprint.player_roles.contains_key(&request.player_id) {
         return Err(Status::BadRequest);
     }
-    
+
     blueprint.mark_ready(request.player_id.clone());
-    
+
     let blueprint = world.get_blueprint(id).unwrap();
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -381,12 +389,11 @@ pub fn unmark_ready(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<BlueprintResponse>, Status> {
     let mut world = world.write().unwrap();
-    
-    let blueprint = world.get_blueprint_mut(id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let blueprint = world.get_blueprint_mut(id).ok_or(Status::NotFound)?;
+
     blueprint.unmark_ready(player_id);
-    
+
     let blueprint = world.get_blueprint(id).unwrap();
     Ok(Json(blueprint_to_response(blueprint)))
 }
@@ -399,29 +406,20 @@ pub fn validate_blueprint(
     config: &State<GameConfig>,
 ) -> Result<Json<ValidationResponse>, Status> {
     let world_lock = world.read().unwrap();
-    
-    let blueprint = world_lock.get_blueprint(id)
-        .ok_or(Status::NotFound)?;
-    
+
+    let blueprint = world_lock.get_blueprint(id).ok_or(Status::NotFound)?;
+
     // Create validator
-    let validator = BlueprintValidator::new(
-        config,
-        world_lock.players(),
-        world_lock.teams(),
-    );
-    
+    let validator = BlueprintValidator::new(config, world_lock.players(), world_lock.teams());
+
     // Perform validation
     let result = validator.validate(blueprint);
-    
+
     // Convert errors and warnings to strings
-    let errors: Vec<String> = result.errors.iter()
-        .map(|e| format!("{:?}", e))
-        .collect();
-    
-    let warnings: Vec<String> = result.warnings.iter()
-        .map(|w| format!("{:?}", w))
-        .collect();
-    
+    let errors: Vec<String> = result.errors.iter().map(|e| format!("{:?}", e)).collect();
+
+    let warnings: Vec<String> = result.warnings.iter().map(|w| format!("{:?}", w)).collect();
+
     Ok(Json(ValidationResponse {
         valid: result.is_valid,
         errors,
@@ -449,25 +447,49 @@ pub fn routes() -> Vec<rocket::Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket::local::blocking::Client;
-    use rocket::Build;
+    use crate::config::{
+        AiConfig, FactionsConfig, GameConfig, MapConfig, ModulesConfig, RacesConfig,
+        SimulationConfig,
+    };
     use crate::state::GameWorld;
-    use crate::config::{GameConfig, AiConfig, FactionsConfig, MapConfig, ModulesConfig, RacesConfig, SimulationConfig};
+    use rocket::Build;
+    use rocket::local::blocking::Client;
 
     fn create_test_config() -> GameConfig {
         use std::collections::HashMap;
-        
+
         GameConfig {
-            ai: AiConfig { difficulty: "medium".to_string(), response_time: 1.0 },
+            ai: AiConfig {
+                difficulty: "medium".to_string(),
+                response_time: 1.0,
+            },
             // Provide test factions used by blueprint tests (e.g. "alliance")
-            factions: FactionsConfig { factions: vec![
-                crate::config::Faction { id: "alliance".to_string(), name: "Alliance".to_string(), description: "Test faction".to_string() },
-                crate::config::Faction { id: "federation".to_string(), name: "Federation".to_string(), description: "Test faction".to_string() },
-            ] },
-            map: MapConfig { galaxy_size: 1000, star_density: 0.5 },
-            modules: ModulesConfig { modules: HashMap::new() },
+            factions: FactionsConfig {
+                factions: vec![
+                    crate::config::Faction {
+                        id: "alliance".to_string(),
+                        name: "Alliance".to_string(),
+                        description: "Test faction".to_string(),
+                    },
+                    crate::config::Faction {
+                        id: "federation".to_string(),
+                        name: "Federation".to_string(),
+                        description: "Test faction".to_string(),
+                    },
+                ],
+            },
+            map: MapConfig {
+                galaxy_size: 1000,
+                star_density: 0.5,
+            },
+            modules: ModulesConfig {
+                modules: HashMap::new(),
+            },
             races: RacesConfig { races: vec![] },
-            simulation: SimulationConfig { tick_rate: 60.0, physics_enabled: true },
+            simulation: SimulationConfig {
+                tick_rate: 60.0,
+                physics_enabled: true,
+            },
             ship_classes: vec![],
             module_definitions: vec![],
             weapon_definitions: vec![],
@@ -490,19 +512,22 @@ mod tests {
         rocket::build()
             .manage(world)
             .manage(config)
-            .mount("/", crate::api::routes![
-                list_blueprints,
-                create_blueprint,
-                get_blueprint,
-                join_blueprint,
-                update_roles,
-                add_module,
-                remove_module,
-                configure_module,
-                mark_ready,
-                unmark_ready,
-                validate_blueprint,
-            ])
+            .mount(
+                "/",
+                crate::api::routes![
+                    list_blueprints,
+                    create_blueprint,
+                    get_blueprint,
+                    join_blueprint,
+                    update_roles,
+                    add_module,
+                    remove_module,
+                    configure_module,
+                    mark_ready,
+                    unmark_ready,
+                    validate_blueprint,
+                ],
+            )
             .mount("/", crate::api::players::routes())
             .mount("/", crate::api::teams::routes())
     }
@@ -511,7 +536,7 @@ mod tests {
     fn test_list_blueprints_empty() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
         let response = client.get("/v1/blueprints").dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let body: ListBlueprintsResponse = response.into_json().unwrap();
         assert_eq!(body.blueprints.len(), 0);
@@ -520,17 +545,15 @@ mod tests {
     #[test]
     fn test_create_blueprint() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create a team first
         let team_request = serde_json::json!({
             "name": "Alpha Team",
             "faction": "alliance"
         });
-        let team_response = client.post("/v1/teams")
-            .json(&team_request)
-            .dispatch();
+        let team_response = client.post("/v1/teams").json(&team_request).dispatch();
         assert_eq!(team_response.status(), Status::Ok);
-        
+
         // Parse as generic JSON first to see what we got
         let team_json: serde_json::Value = team_response.into_json().expect("Failed to parse JSON");
         let team_id = team_json["id"].as_str().expect("No id field").to_string();
@@ -540,11 +563,12 @@ mod tests {
             ship_class: "cruiser".to_string(),
             team_id: team_id.clone(),
         };
-        
-        let response = client.post("/v1/blueprints")
+
+        let response = client
+            .post("/v1/blueprints")
             .json(&blueprint_request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let blueprint: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(blueprint.name, "USS Enterprise");
@@ -555,23 +579,28 @@ mod tests {
     #[test]
     fn test_get_blueprint() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create team and blueprint
         let team_request = serde_json::json!({"name": "Beta Team", "faction": "alliance"});
         let team_response = client.post("/v1/teams").json(&team_request).dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
+
         let blueprint_request = CreateBlueprintRequest {
             name: "Defiant".to_string(),
             ship_class: "destroyer".to_string(),
             team_id: team_id.clone(),
         };
-        let create_response = client.post("/v1/blueprints").json(&blueprint_request).dispatch();
+        let create_response = client
+            .post("/v1/blueprints")
+            .json(&blueprint_request)
+            .dispatch();
         let created: BlueprintResponse = create_response.into_json().unwrap();
-        
+
         // Get blueprint
-        let response = client.get(format!("/v1/blueprints/{}", created.id)).dispatch();
+        let response = client
+            .get(format!("/v1/blueprints/{}", created.id))
+            .dispatch();
         assert_eq!(response.status(), Status::Ok);
         let blueprint: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(blueprint.id, created.id);
@@ -581,34 +610,38 @@ mod tests {
     #[test]
     fn test_join_blueprint() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create player, team, and blueprint
         let player_request = serde_json::json!({"name": "Kirk"});
         let player_response = client.post("/v1/players").json(&player_request).dispatch();
         let player_json: serde_json::Value = player_response.into_json().unwrap();
         let player_id = player_json["id"].as_str().unwrap().to_string();
-        
+
         let team_request = serde_json::json!({"name": "Gamma Team", "faction": "alliance"});
         let team_response = client.post("/v1/teams").json(&team_request).dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
+
         let blueprint_request = CreateBlueprintRequest {
             name: "Voyager".to_string(),
             ship_class: "cruiser".to_string(),
             team_id: team_id.clone(),
         };
-        let create_response = client.post("/v1/blueprints").json(&blueprint_request).dispatch();
+        let create_response = client
+            .post("/v1/blueprints")
+            .json(&blueprint_request)
+            .dispatch();
         let blueprint: BlueprintResponse = create_response.into_json().unwrap();
-        
+
         // Join blueprint
         let join_request = JoinBlueprintRequest {
             player_id: player_id.clone(),
         };
-        let response = client.post(format!("/v1/blueprints/{}/join", blueprint.id))
+        let response = client
+            .post(format!("/v1/blueprints/{}/join", blueprint.id))
             .json(&join_request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let updated: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(updated.player_roles.len(), 1);
@@ -618,21 +651,24 @@ mod tests {
     #[test]
     fn test_update_roles() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Setup: player, team, blueprint, and join
-        let player_response = client.post("/v1/players")
+        let player_response = client
+            .post("/v1/players")
             .json(&serde_json::json!({"name": "Picard"}))
             .dispatch();
         let player_json: serde_json::Value = player_response.into_json().unwrap();
         let player_id = player_json["id"].as_str().unwrap().to_string();
-        
-        let team_response = client.post("/v1/teams")
+
+        let team_response = client
+            .post("/v1/teams")
             .json(&serde_json::json!({"name": "Delta Team", "faction": "alliance"}))
             .dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
-        let blueprint_response = client.post("/v1/blueprints")
+
+        let blueprint_response = client
+            .post("/v1/blueprints")
             .json(&CreateBlueprintRequest {
                 name: "Enterprise-D".to_string(),
                 ship_class: "battleship".to_string(),
@@ -640,20 +676,24 @@ mod tests {
             })
             .dispatch();
         let blueprint: BlueprintResponse = blueprint_response.into_json().unwrap();
-        
-        client.post(format!("/v1/blueprints/{}/join", blueprint.id))
-            .json(&JoinBlueprintRequest { player_id: player_id.clone() })
+
+        client
+            .post(format!("/v1/blueprints/{}/join", blueprint.id))
+            .json(&JoinBlueprintRequest {
+                player_id: player_id.clone(),
+            })
             .dispatch();
-        
+
         // Update roles
         let update_request = UpdateRolesRequest {
             player_id: player_id.clone(),
             roles: vec![ShipRole::Captain, ShipRole::Helm],
         };
-        let response = client.patch(format!("/v1/blueprints/{}/roles", blueprint.id))
+        let response = client
+            .patch(format!("/v1/blueprints/{}/roles", blueprint.id))
             .json(&update_request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let updated: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(updated.player_roles[0].roles.len(), 2);
@@ -662,15 +702,17 @@ mod tests {
     #[test]
     fn test_add_and_remove_module() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create team and blueprint
-        let team_response = client.post("/v1/teams")
+        let team_response = client
+            .post("/v1/teams")
             .json(&serde_json::json!({"name": "Epsilon Team", "faction": "alliance"}))
             .dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
-        let blueprint_response = client.post("/v1/blueprints")
+
+        let blueprint_response = client
+            .post("/v1/blueprints")
             .json(&CreateBlueprintRequest {
                 name: "Discovery".to_string(),
                 ship_class: "corvette".to_string(),
@@ -678,24 +720,29 @@ mod tests {
             })
             .dispatch();
         let blueprint: BlueprintResponse = blueprint_response.into_json().unwrap();
-        
+
         // Add module
         let add_request = AddModuleRequest {
             module_slot_id: "power_core_1".to_string(),
             variant_id: Some("fusion".to_string()),
         };
-        let response = client.post(format!("/v1/blueprints/{}/modules", blueprint.id))
+        let response = client
+            .post(format!("/v1/blueprints/{}/modules", blueprint.id))
             .json(&add_request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let updated: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(updated.modules.len(), 1);
-        
+
         let module_id = updated.modules[0].id.clone();
-        
+
         // Remove module
-        let response = client.delete(format!("/v1/blueprints/{}/modules/{}", blueprint.id, module_id))
+        let response = client
+            .delete(format!(
+                "/v1/blueprints/{}/modules/{}",
+                blueprint.id, module_id
+            ))
             .dispatch();
         assert_eq!(response.status(), Status::NoContent);
     }
@@ -703,15 +750,17 @@ mod tests {
     #[test]
     fn test_configure_module() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create team, blueprint, and add module
-        let team_response = client.post("/v1/teams")
+        let team_response = client
+            .post("/v1/teams")
             .json(&serde_json::json!({"name": "Zeta Team", "faction": "alliance"}))
             .dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
-        let blueprint_response = client.post("/v1/blueprints")
+
+        let blueprint_response = client
+            .post("/v1/blueprints")
             .json(&CreateBlueprintRequest {
                 name: "Cerritos".to_string(),
                 ship_class: "frigate".to_string(),
@@ -719,8 +768,9 @@ mod tests {
             })
             .dispatch();
         let blueprint: BlueprintResponse = blueprint_response.into_json().unwrap();
-        
-        let add_response = client.post(format!("/v1/blueprints/{}/modules", blueprint.id))
+
+        let add_response = client
+            .post(format!("/v1/blueprints/{}/modules", blueprint.id))
             .json(&AddModuleRequest {
                 module_slot_id: "impulse_engine".to_string(),
                 variant_id: None,
@@ -728,38 +778,45 @@ mod tests {
             .dispatch();
         let updated: BlueprintResponse = add_response.into_json().unwrap();
         let module_id = updated.modules[0].id.clone();
-        
+
         // Configure module
         let config_request = ConfigureModuleRequest {
             kind: Some("ion".to_string()),
         };
-        let response = client.patch(format!("/v1/blueprints/{}/modules/{}", blueprint.id, module_id))
+        let response = client
+            .patch(format!(
+                "/v1/blueprints/{}/modules/{}",
+                blueprint.id, module_id
+            ))
             .json(&config_request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let configured: BlueprintResponse = response.into_json().unwrap();
-    assert_eq!(configured.modules[0].variant_id, Some("ion".to_string()));
+        assert_eq!(configured.modules[0].variant_id, Some("ion".to_string()));
     }
 
     #[test]
     fn test_ready_workflow() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create player, team, blueprint, and join
-        let player_response = client.post("/v1/players")
+        let player_response = client
+            .post("/v1/players")
             .json(&serde_json::json!({"name": "Sisko"}))
             .dispatch();
         let player_json: serde_json::Value = player_response.into_json().unwrap();
         let player_id = player_json["id"].as_str().unwrap().to_string();
-        
-        let team_response = client.post("/v1/teams")
+
+        let team_response = client
+            .post("/v1/teams")
             .json(&serde_json::json!({"name": "Eta Team", "faction": "alliance"}))
             .dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
-        let blueprint_response = client.post("/v1/blueprints")
+
+        let blueprint_response = client
+            .post("/v1/blueprints")
             .json(&CreateBlueprintRequest {
                 name: "DS9".to_string(),
                 ship_class: "defender".to_string(),
@@ -767,45 +824,55 @@ mod tests {
             })
             .dispatch();
         let blueprint: BlueprintResponse = blueprint_response.into_json().unwrap();
-        
-        client.post(format!("/v1/blueprints/{}/join", blueprint.id))
-            .json(&JoinBlueprintRequest { player_id: player_id.clone() })
+
+        client
+            .post(format!("/v1/blueprints/{}/join", blueprint.id))
+            .json(&JoinBlueprintRequest {
+                player_id: player_id.clone(),
+            })
             .dispatch();
-        
+
         // Mark ready
         let ready_request = ReadyRequest {
             player_id: player_id.clone(),
         };
-        let response = client.post(format!("/v1/blueprints/{}/ready", blueprint.id))
+        let response = client
+            .post(format!("/v1/blueprints/{}/ready", blueprint.id))
             .json(&ready_request)
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let ready_bp: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(ready_bp.ready_players.len(), 1);
-        assert_eq!(ready_bp.all_ready, true);
-        
+        assert!(ready_bp.all_ready);
+
         // Unmark ready
-        let response = client.delete(format!("/v1/blueprints/{}/ready/{}", blueprint.id, player_id))
+        let response = client
+            .delete(format!(
+                "/v1/blueprints/{}/ready/{}",
+                blueprint.id, player_id
+            ))
             .dispatch();
         assert_eq!(response.status(), Status::Ok);
         let unready_bp: BlueprintResponse = response.into_json().unwrap();
         assert_eq!(unready_bp.ready_players.len(), 0);
-        assert_eq!(unready_bp.all_ready, false);
+        assert!(!unready_bp.all_ready);
     }
 
     #[test]
     fn test_validate_blueprint() {
         let client = Client::tracked(create_test_rocket()).expect("valid rocket instance");
-        
+
         // Create team and blueprint
-        let team_response = client.post("/v1/teams")
+        let team_response = client
+            .post("/v1/teams")
             .json(&serde_json::json!({"name": "Theta Team", "faction": "alliance"}))
             .dispatch();
         let team_json: serde_json::Value = team_response.into_json().unwrap();
         let team_id = team_json["id"].as_str().unwrap().to_string();
-        
-        let blueprint_response = client.post("/v1/blueprints")
+
+        let blueprint_response = client
+            .post("/v1/blueprints")
             .json(&CreateBlueprintRequest {
                 name: "Titan".to_string(),
                 ship_class: "dreadnought".to_string(),
@@ -813,14 +880,15 @@ mod tests {
             })
             .dispatch();
         let blueprint: BlueprintResponse = blueprint_response.into_json().unwrap();
-        
+
         // Validate empty blueprint
-        let response = client.get(format!("/v1/blueprints/{}/validate", blueprint.id))
+        let response = client
+            .get(format!("/v1/blueprints/{}/validate", blueprint.id))
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
         let validation: ValidationResponse = response.into_json().unwrap();
-        assert_eq!(validation.valid, false);
-        assert!(validation.errors.len() > 0);
+        assert!(!validation.valid);
+        assert!(!validation.errors.is_empty());
     }
 }

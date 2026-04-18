@@ -28,7 +28,7 @@ pub trait BehaviorContext: std::any::Any {
 pub trait BehaviorNode: Send + Sync {
     /// Execute this node with the given context
     fn tick(&mut self, context: &mut dyn BehaviorContext) -> BehaviorStatus;
-    
+
     /// Reset the node state
     fn reset(&mut self);
 }
@@ -54,7 +54,7 @@ impl BehaviorNode for Selector {
     fn tick(&mut self, context: &mut dyn BehaviorContext) -> BehaviorStatus {
         while self.current_child < self.children.len() {
             let status = self.children[self.current_child].tick(context);
-            
+
             match status {
                 BehaviorStatus::Success => {
                     self.reset();
@@ -68,11 +68,11 @@ impl BehaviorNode for Selector {
                 }
             }
         }
-        
+
         self.reset();
         BehaviorStatus::Failure
     }
-    
+
     fn reset(&mut self) {
         self.current_child = 0;
         for child in &mut self.children {
@@ -102,7 +102,7 @@ impl BehaviorNode for Sequence {
     fn tick(&mut self, context: &mut dyn BehaviorContext) -> BehaviorStatus {
         while self.current_child < self.children.len() {
             let status = self.children[self.current_child].tick(context);
-            
+
             match status {
                 BehaviorStatus::Success => {
                     self.current_child += 1;
@@ -116,11 +116,11 @@ impl BehaviorNode for Sequence {
                 }
             }
         }
-        
+
         self.reset();
         BehaviorStatus::Success
     }
-    
+
     fn reset(&mut self) {
         self.current_child = 0;
         for child in &mut self.children {
@@ -148,7 +148,7 @@ impl BehaviorNode for Inverter {
             BehaviorStatus::Running => BehaviorStatus::Running,
         }
     }
-    
+
     fn reset(&mut self) {
         self.child.reset();
     }
@@ -175,7 +175,7 @@ impl BehaviorNode for Repeater {
     fn tick(&mut self, context: &mut dyn BehaviorContext) -> BehaviorStatus {
         while self.current_repeats < self.max_repeats {
             let status = self.child.tick(context);
-            
+
             match status {
                 BehaviorStatus::Running => {
                     return BehaviorStatus::Running;
@@ -186,11 +186,11 @@ impl BehaviorNode for Repeater {
                 }
             }
         }
-        
+
         self.reset();
         BehaviorStatus::Success
     }
-    
+
     fn reset(&mut self) {
         self.current_repeats = 0;
         self.child.reset();
@@ -213,7 +213,7 @@ impl BehaviorNode for Succeeder {
         let _ = self.child.tick(context);
         BehaviorStatus::Success
     }
-    
+
     fn reset(&mut self) {
         self.child.reset();
     }
@@ -247,7 +247,7 @@ where
             BehaviorStatus::Failure
         }
     }
-    
+
     fn reset(&mut self) {
         // Conditions are stateless
     }
@@ -277,149 +277,9 @@ where
     fn tick(&mut self, context: &mut dyn BehaviorContext) -> BehaviorStatus {
         (self.action)(context)
     }
-    
+
     fn reset(&mut self) {
         // Actions are typically stateless, but could store state if needed
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    // Simple test context
-    struct TestContext {
-        value: i32,
-    }
-    
-    impl BehaviorContext for TestContext {
-        fn update(&mut self) {
-            // Nothing to update
-        }
-    }
-    
-    #[test]
-    fn test_selector_success() {
-        let mut selector = Selector::new(vec![
-            Box::new(Condition::new(|_| false)),
-            Box::new(Condition::new(|_| true)),
-            Box::new(Condition::new(|_| false)),
-        ]);
-        
-        let mut context = TestContext { value: 0 };
-        let status = selector.tick(&mut context);
-        assert_eq!(status, BehaviorStatus::Success);
-    }
-    
-    #[test]
-    fn test_selector_failure() {
-        let mut selector = Selector::new(vec![
-            Box::new(Condition::new(|_| false)),
-            Box::new(Condition::new(|_| false)),
-            Box::new(Condition::new(|_| false)),
-        ]);
-        
-        let mut context = TestContext { value: 0 };
-        let status = selector.tick(&mut context);
-        assert_eq!(status, BehaviorStatus::Failure);
-    }
-    
-    #[test]
-    fn test_sequence_success() {
-        let mut sequence = Sequence::new(vec![
-            Box::new(Condition::new(|_| true)),
-            Box::new(Condition::new(|_| true)),
-            Box::new(Condition::new(|_| true)),
-        ]);
-        
-        let mut context = TestContext { value: 0 };
-        let status = sequence.tick(&mut context);
-        assert_eq!(status, BehaviorStatus::Success);
-    }
-    
-    #[test]
-    fn test_sequence_failure() {
-        let mut sequence = Sequence::new(vec![
-            Box::new(Condition::new(|_| true)),
-            Box::new(Condition::new(|_| false)),
-            Box::new(Condition::new(|_| true)),
-        ]);
-        
-        let mut context = TestContext { value: 0 };
-        let status = sequence.tick(&mut context);
-        assert_eq!(status, BehaviorStatus::Failure);
-    }
-    
-    #[test]
-    fn test_inverter() {
-        let mut inverter = Inverter::new(Box::new(Condition::new(|_| true)));
-        let mut context = TestContext { value: 0 };
-        assert_eq!(inverter.tick(&mut context), BehaviorStatus::Failure);
-        
-        let mut inverter = Inverter::new(Box::new(Condition::new(|_| false)));
-        assert_eq!(inverter.tick(&mut context), BehaviorStatus::Success);
-    }
-    
-    #[test]
-    fn test_action() {
-        let mut action = Action::new(|ctx: &mut dyn BehaviorContext| {
-            let test_ctx = ctx.downcast_mut::<TestContext>().unwrap();
-            test_ctx.value += 1;
-            BehaviorStatus::Success
-        });
-        
-        let mut context = TestContext { value: 0 };
-        assert_eq!(action.tick(&mut context), BehaviorStatus::Success);
-        assert_eq!(context.value, 1);
-    }
-    
-    #[test]
-    fn test_repeater() {
-        let mut repeater = Repeater::new(
-            Box::new(Action::new(|ctx: &mut dyn BehaviorContext| {
-                let test_ctx = ctx.downcast_mut::<TestContext>().unwrap();
-                test_ctx.value += 1;
-                BehaviorStatus::Success
-            })),
-            3,
-        );
-        
-        let mut context = TestContext { value: 0 };
-        let status = repeater.tick(&mut context);
-        assert_eq!(status, BehaviorStatus::Success);
-        assert_eq!(context.value, 3);
-    }
-    
-    #[test]
-    fn test_complex_tree() {
-        // Create a tree: Sequence(Condition, Selector(Condition, Condition))
-        let mut tree = Sequence::new(vec![
-            Box::new(Condition::new(|_| true)),
-            Box::new(Selector::new(vec![
-                Box::new(Condition::new(|_| false)),
-                Box::new(Condition::new(|_| true)),
-            ])),
-        ]);
-        
-        let mut context = TestContext { value: 0 };
-        let status = tree.tick(&mut context);
-        assert_eq!(status, BehaviorStatus::Success);
-    }
-}
-
-// Helper trait for downcasting BehaviorContext
-trait DowncastableContext: BehaviorContext {
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-}
-
-impl<T: BehaviorContext + 'static> DowncastableContext for T {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
     }
 }
 
@@ -433,8 +293,132 @@ impl BehaviorContextExt for dyn BehaviorContext + '_ {
     fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         (self as &dyn std::any::Any).downcast_ref::<T>()
     }
-    
+
     fn downcast_mut<T: 'static>(&mut self) -> Option<&mut T> {
         (self as &mut dyn std::any::Any).downcast_mut::<T>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Simple test context
+    struct TestContext {
+        value: i32,
+    }
+
+    impl BehaviorContext for TestContext {
+        fn update(&mut self) {
+            // Nothing to update
+        }
+    }
+
+    #[test]
+    fn test_selector_success() {
+        let mut selector = Selector::new(vec![
+            Box::new(Condition::new(|_| false)),
+            Box::new(Condition::new(|_| true)),
+            Box::new(Condition::new(|_| false)),
+        ]);
+
+        let mut context = TestContext { value: 0 };
+        let status = selector.tick(&mut context);
+        assert_eq!(status, BehaviorStatus::Success);
+    }
+
+    #[test]
+    fn test_selector_failure() {
+        let mut selector = Selector::new(vec![
+            Box::new(Condition::new(|_| false)),
+            Box::new(Condition::new(|_| false)),
+            Box::new(Condition::new(|_| false)),
+        ]);
+
+        let mut context = TestContext { value: 0 };
+        let status = selector.tick(&mut context);
+        assert_eq!(status, BehaviorStatus::Failure);
+    }
+
+    #[test]
+    fn test_sequence_success() {
+        let mut sequence = Sequence::new(vec![
+            Box::new(Condition::new(|_| true)),
+            Box::new(Condition::new(|_| true)),
+            Box::new(Condition::new(|_| true)),
+        ]);
+
+        let mut context = TestContext { value: 0 };
+        let status = sequence.tick(&mut context);
+        assert_eq!(status, BehaviorStatus::Success);
+    }
+
+    #[test]
+    fn test_sequence_failure() {
+        let mut sequence = Sequence::new(vec![
+            Box::new(Condition::new(|_| true)),
+            Box::new(Condition::new(|_| false)),
+            Box::new(Condition::new(|_| true)),
+        ]);
+
+        let mut context = TestContext { value: 0 };
+        let status = sequence.tick(&mut context);
+        assert_eq!(status, BehaviorStatus::Failure);
+    }
+
+    #[test]
+    fn test_inverter() {
+        let mut inverter = Inverter::new(Box::new(Condition::new(|_| true)));
+        let mut context = TestContext { value: 0 };
+        assert_eq!(inverter.tick(&mut context), BehaviorStatus::Failure);
+
+        let mut inverter = Inverter::new(Box::new(Condition::new(|_| false)));
+        assert_eq!(inverter.tick(&mut context), BehaviorStatus::Success);
+    }
+
+    #[test]
+    fn test_action() {
+        let mut action = Action::new(|ctx: &mut dyn BehaviorContext| {
+            let test_ctx = ctx.downcast_mut::<TestContext>().unwrap();
+            test_ctx.value += 1;
+            BehaviorStatus::Success
+        });
+
+        let mut context = TestContext { value: 0 };
+        assert_eq!(action.tick(&mut context), BehaviorStatus::Success);
+        assert_eq!(context.value, 1);
+    }
+
+    #[test]
+    fn test_repeater() {
+        let mut repeater = Repeater::new(
+            Box::new(Action::new(|ctx: &mut dyn BehaviorContext| {
+                let test_ctx = ctx.downcast_mut::<TestContext>().unwrap();
+                test_ctx.value += 1;
+                BehaviorStatus::Success
+            })),
+            3,
+        );
+
+        let mut context = TestContext { value: 0 };
+        let status = repeater.tick(&mut context);
+        assert_eq!(status, BehaviorStatus::Success);
+        assert_eq!(context.value, 3);
+    }
+
+    #[test]
+    fn test_complex_tree() {
+        // Create a tree: Sequence(Condition, Selector(Condition, Condition))
+        let mut tree = Sequence::new(vec![
+            Box::new(Condition::new(|_| true)),
+            Box::new(Selector::new(vec![
+                Box::new(Condition::new(|_| false)),
+                Box::new(Condition::new(|_| true)),
+            ])),
+        ]);
+
+        let mut context = TestContext { value: 0 };
+        let status = tree.tick(&mut context);
+        assert_eq!(status, BehaviorStatus::Success);
     }
 }

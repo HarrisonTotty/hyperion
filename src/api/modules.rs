@@ -2,10 +2,10 @@
 //!
 //! Provides endpoints for retrieving module catalog information.
 
-use rocket::{Route, State, get, routes};
-use rocket::serde::json::Json;
-use serde::{Deserialize, Serialize};
 use crate::config::{GameConfig, ModuleVariant};
+use rocket::serde::json::Json;
+use rocket::{Route, State, get, routes};
+use serde::{Deserialize, Serialize};
 
 /// Module catalog entry for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +76,6 @@ fn get_modules(config: &State<GameConfig>) -> Json<ModulesResponse> {
         .modules
         .iter()
         .map(|(id, template)| {
-            
             ModuleCatalogEntry {
                 id: id.clone(),
                 name: template.name.clone(),
@@ -93,27 +92,29 @@ fn get_modules(config: &State<GameConfig>) -> Json<ModulesResponse> {
             }
         })
         .collect();
-    
+
     // Sort by category then name for consistent ordering
     modules.sort_by(|a, b| {
-        a.category.cmp(&b.category)
+        a.category
+            .cmp(&b.category)
             .then_with(|| a.name.cmp(&b.name))
     });
-    
+
     let count = modules.len();
-    
+
     Json(ModulesResponse { modules, count })
 }
 
 /// Determine module category from groups and name
 ///
 /// Maps module groups to frontend category names.
+#[allow(dead_code)]
 fn determine_category(groups: &[String], name: &str) -> String {
     // Special case for maneuvering thrusters
     if name.to_lowercase().contains("maneuvering") || name.to_lowercase().contains("thruster") {
         return "maneuvering-thrusters".to_string();
     }
-    
+
     for group in groups {
         match group.as_str() {
             "power" => return "power-cores".to_string(),
@@ -126,7 +127,7 @@ fn determine_category(groups: &[String], name: &str) -> String {
             _ => {}
         }
     }
-    
+
     // Check for secondary categories
     for group in groups {
         match group.as_str() {
@@ -135,7 +136,7 @@ fn determine_category(groups: &[String], name: &str) -> String {
             _ => {}
         }
     }
-    
+
     // Default to support if no specific category found
     "support".to_string()
 }
@@ -152,7 +153,6 @@ fn determine_category(groups: &[String], name: &str) -> String {
 #[get("/v1/modules/<id>")]
 fn get_module(id: String, config: &State<GameConfig>) -> Option<Json<ModuleCatalogEntry>> {
     config.modules.modules.get(&id).map(|template| {
-        
         Json(ModuleCatalogEntry {
             id: id.clone(),
             name: template.name.clone(),
@@ -223,14 +223,41 @@ mod tests {
 
     #[test]
     fn test_determine_category() {
-        assert_eq!(determine_category(&["power".to_string()], "Power Module"), "power-cores");
-        assert_eq!(determine_category(&["engines".to_string()], "Impulse Engines"), "impulse-engines");
-        assert_eq!(determine_category(&["deweapons".to_string()], "Energy Weapon"), "energy-weapons");
-        assert_eq!(determine_category(&["kweapons".to_string()], "Kinetic Weapon"), "kinetic-weapons");
-        assert_eq!(determine_category(&["missiles".to_string()], "Missile Tube"), "missile-weapons");
-        assert_eq!(determine_category(&["defense".to_string()], "Shield"), "countermeasures");
-        assert_eq!(determine_category(&["comms".to_string()], "Comms"), "comms-systems");
-        assert_eq!(determine_category(&["engines".to_string()], "Maneuvering Thrusters"), "maneuvering-thrusters");
-        assert_eq!(determine_category(&["unknown".to_string()], "Unknown"), "support");
+        assert_eq!(
+            determine_category(&["power".to_string()], "Power Module"),
+            "power-cores"
+        );
+        assert_eq!(
+            determine_category(&["engines".to_string()], "Impulse Engines"),
+            "impulse-engines"
+        );
+        assert_eq!(
+            determine_category(&["deweapons".to_string()], "Energy Weapon"),
+            "energy-weapons"
+        );
+        assert_eq!(
+            determine_category(&["kweapons".to_string()], "Kinetic Weapon"),
+            "kinetic-weapons"
+        );
+        assert_eq!(
+            determine_category(&["missiles".to_string()], "Missile Tube"),
+            "missile-weapons"
+        );
+        assert_eq!(
+            determine_category(&["defense".to_string()], "Shield"),
+            "countermeasures"
+        );
+        assert_eq!(
+            determine_category(&["comms".to_string()], "Comms"),
+            "comms-systems"
+        );
+        assert_eq!(
+            determine_category(&["engines".to_string()], "Maneuvering Thrusters"),
+            "maneuvering-thrusters"
+        );
+        assert_eq!(
+            determine_category(&["unknown".to_string()], "Unknown"),
+            "support"
+        );
     }
 }

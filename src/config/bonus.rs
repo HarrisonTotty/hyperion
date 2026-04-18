@@ -107,7 +107,7 @@ impl BonusConfig {
         };
 
         let sign = if value >= 0.0 { "+" } else { "" };
-        
+
         match bonus.format {
             BonusFormat::Percentage => {
                 format!("{}{:.0}%", sign, value * 100.0)
@@ -141,7 +141,7 @@ impl BonusConfig {
 
                 result
                     .entry(bonus_meta.category.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(formatted);
             }
         }
@@ -239,7 +239,7 @@ mod tests {
         bonuses.insert("shield_capacity".to_string(), 0.30);
 
         let formatted = config.format_bonuses_by_category(&bonuses);
-        
+
         assert_eq!(formatted.len(), 2);
         assert!(formatted.contains_key("combat"));
         assert!(formatted.contains_key("defense"));

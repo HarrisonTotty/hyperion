@@ -6,7 +6,7 @@
 use clap::{Parser, Subcommand};
 use hyperion::config::GameConfig;
 use hyperion::server;
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use std::path::PathBuf;
 
 /// HYPERION - Spaceship Bridge Simulation Game Server
@@ -54,9 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            env_logger::Builder::new()
-                .filter_level(level_filter)
-                .init();
+            env_logger::Builder::new().filter_level(level_filter).init();
 
             info!("Starting HYPERION server");
             info!("Data directory: {}", data_dir.display());
@@ -88,13 +86,13 @@ mod tests {
 
     #[test]
     fn test_cli_parsing() {
-        let cli = Cli::parse_from(&["hyperion", "start"]);
+        let cli = Cli::parse_from(["hyperion", "start"]);
         assert!(matches!(cli.command, Commands::Start { .. }));
     }
 
     #[test]
     fn test_cli_with_options() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "hyperion",
             "start",
             "--data-dir",
@@ -103,15 +101,11 @@ mod tests {
             "debug",
         ]);
 
-        if let Commands::Start {
+        let Commands::Start {
             data_dir,
             log_level,
-        } = cli.command
-        {
-            assert_eq!(data_dir, PathBuf::from("/custom/path"));
-            assert_eq!(log_level, "debug");
-        } else {
-            panic!("Expected Start command");
-        }
+        } = cli.command;
+        assert_eq!(data_dir, PathBuf::from("/custom/path"));
+        assert_eq!(log_level, "debug");
     }
 }

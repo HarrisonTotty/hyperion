@@ -2,13 +2,13 @@
 //!
 //! REST API endpoints for team management operations.
 
-use rocket::{routes, Route, State, get, post, patch, delete};
-use rocket::serde::json::Json;
 use rocket::http::Status;
+use rocket::serde::json::Json;
+use rocket::{Route, State, delete, get, patch, post, routes};
 use serde::{Deserialize, Serialize};
 
-use crate::state::SharedGameWorld;
 use crate::config::GameConfig;
+use crate::state::SharedGameWorld;
 
 /// Request body for creating a new team
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,7 +96,7 @@ pub struct CreditBalanceResponse {
 pub fn list_teams(world: &State<SharedGameWorld>) -> Json<ListTeamsResponse> {
     let world = world.read().unwrap();
     let teams = world.get_all_teams();
-    
+
     let team_responses: Vec<TeamResponse> = teams
         .into_iter()
         .map(|t| TeamResponse {
@@ -107,9 +107,9 @@ pub fn list_teams(world: &State<SharedGameWorld>) -> Json<ListTeamsResponse> {
             credits: t.credits,
         })
         .collect();
-    
+
     let count = team_responses.len();
-    
+
     Json(ListTeamsResponse {
         teams: team_responses,
         count,
@@ -128,33 +128,38 @@ pub fn create_team(
     request: Json<CreateTeamRequest>,
 ) -> Result<Json<CreateTeamResponse>, (Status, Json<ErrorResponse>)> {
     // Validate faction exists in config
-    let faction_exists = config.factions.factions
+    let faction_exists = config
+        .factions
+        .factions
         .iter()
         .any(|f| f.id == request.faction);
-    
+
     if !faction_exists {
         return Err((
             Status::BadRequest,
             Json(ErrorResponse {
-                error: format!("Invalid faction_id: '{}' not found in configuration", request.faction),
+                error: format!(
+                    "Invalid faction_id: '{}' not found in configuration",
+                    request.faction
+                ),
             }),
         ));
     }
 
     let mut world = world.write().unwrap();
-    
+
     // Validate player exists if player_id provided
-    if let Some(ref player_id) = request.player_id {
-        if world.get_player(player_id).is_none() {
-            return Err((
-                Status::BadRequest,
-                Json(ErrorResponse {
-                    error: format!("Player '{}' not found", player_id),
-                }),
-            ));
-        }
+    if let Some(ref player_id) = request.player_id
+        && world.get_player(player_id).is_none()
+    {
+        return Err((
+            Status::BadRequest,
+            Json(ErrorResponse {
+                error: format!("Player '{}' not found", player_id),
+            }),
+        ));
     }
-    
+
     // Get starting credits from game settings
     let starting_credits = config.game_settings.team_starting_credits;
 
@@ -165,15 +170,15 @@ pub fn create_team(
     ) {
         Ok(team_id) => {
             // Auto-add player to team if player_id provided
-            if let Some(ref player_id) = request.player_id {
-                if let Err(err) = world.add_player_to_team(&team_id, player_id) {
-                    return Err((
-                        Status::InternalServerError,
-                        Json(ErrorResponse {
-                            error: format!("Team created but failed to add player: {}", err),
-                        }),
-                    ));
-                }
+            if let Some(ref player_id) = request.player_id
+                && let Err(err) = world.add_player_to_team(&team_id, player_id)
+            {
+                return Err((
+                    Status::InternalServerError,
+                    Json(ErrorResponse {
+                        error: format!("Team created but failed to add player: {}", err),
+                    }),
+                ));
             }
 
             let team = world.get_team(&team_id).unwrap();
@@ -184,12 +189,7 @@ pub fn create_team(
                 credits: team.credits,
             }))
         }
-        Err(err) => {
-            Err((
-                Status::BadRequest,
-                Json(ErrorResponse { error: err }),
-            ))
-        }
+        Err(err) => Err((Status::BadRequest, Json(ErrorResponse { error: err }))),
     }
 }
 
@@ -202,7 +202,7 @@ pub fn get_team(
     id: String,
 ) -> Result<Json<TeamResponse>, (Status, Json<ErrorResponse>)> {
     let world = world.read().unwrap();
-    
+
     match world.get_team(&id) {
         Some(team) => Ok(Json(TeamResponse {
             id: team.id.clone(),
@@ -231,7 +231,7 @@ pub fn add_player_to_team(
     request: Json<AddPlayerRequest>,
 ) -> Result<Json<TeamResponse>, (Status, Json<ErrorResponse>)> {
     let mut world = world.write().unwrap();
-    
+
     match world.add_player_to_team(&id, &request.player_id) {
         Ok(_) => {
             let team = world.get_team(&id).unwrap();
@@ -243,12 +243,7 @@ pub fn add_player_to_team(
                 credits: team.credits,
             }))
         }
-        Err(err) => {
-            Err((
-                Status::BadRequest,
-                Json(ErrorResponse { error: err }),
-            ))
-        }
+        Err(err) => Err((Status::BadRequest, Json(ErrorResponse { error: err }))),
     }
 }
 
@@ -262,13 +257,10 @@ pub fn remove_player_from_team(
     player_id: String,
 ) -> Result<Status, (Status, Json<ErrorResponse>)> {
     let mut world = world.write().unwrap();
-    
+
     match world.remove_player_from_team(&team_id, &player_id) {
         Ok(_) => Ok(Status::NoContent),
-        Err(err) => Err((
-            Status::NotFound,
-            Json(ErrorResponse { error: err }),
-        )),
+        Err(err) => Err((Status::NotFound, Json(ErrorResponse { error: err }))),
     }
 }
 
@@ -357,18 +349,13 @@ pub fn deduct_team_credits(
     let mut world = world.write().unwrap();
 
     match world.get_team_mut(&id) {
-        Some(team) => {
-            match team.deduct_credits(request.amount) {
-                Ok(new_balance) => Ok(Json(CreditBalanceResponse {
-                    team_id: id,
-                    credits: new_balance,
-                })),
-                Err(err) => Err((
-                    Status::BadRequest,
-                    Json(ErrorResponse { error: err }),
-                )),
-            }
-        }
+        Some(team) => match team.deduct_credits(request.amount) {
+            Ok(new_balance) => Ok(Json(CreditBalanceResponse {
+                team_id: id,
+                credits: new_balance,
+            })),
+            Err(err) => Err((Status::BadRequest, Json(ErrorResponse { error: err }))),
+        },
         None => Err((
             Status::NotFound,
             Json(ErrorResponse {
@@ -395,19 +382,18 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket::local::blocking::Client;
-    use rocket::Build;
-    use crate::state::GameWorld;
     use crate::api::players::CreatePlayerRequest;
     use crate::config::{
-        GameConfig, AiConfig, FactionsConfig, Faction, MapConfig,
-        ModulesConfig, RacesConfig, SimulationConfig,
+        AiConfig, Faction, FactionsConfig, GameConfig, MapConfig, ModulesConfig, RacesConfig,
+        SimulationConfig,
     };
-    use std::collections::HashMap;
+    use crate::state::GameWorld;
+    use rocket::Build;
+    use rocket::local::blocking::Client;
 
     fn create_test_config() -> GameConfig {
         use std::collections::HashMap;
-        
+
         GameConfig {
             ai: AiConfig {
                 difficulty: "normal".to_string(),
@@ -434,9 +420,7 @@ mod tests {
             modules: ModulesConfig {
                 modules: HashMap::new(),
             },
-            races: RacesConfig {
-                races: vec![],
-            },
+            races: RacesConfig { races: vec![] },
             simulation: SimulationConfig {
                 tick_rate: 60.0,
                 physics_enabled: true,
@@ -471,9 +455,9 @@ mod tests {
     fn test_list_teams_empty() {
         let client = Client::tracked(create_test_rocket()).unwrap();
         let response = client.get("/v1/teams").dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: ListTeamsResponse = response.into_json().unwrap();
         assert_eq!(body.count, 0);
         assert_eq!(body.teams.len(), 0);
@@ -482,7 +466,7 @@ mod tests {
     #[test]
     fn test_create_team() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         let response = client
             .post("/v1/teams")
             .json(&CreateTeamRequest {
@@ -491,9 +475,9 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: CreateTeamResponse = response.into_json().unwrap();
         assert_eq!(body.name, "Alpha Team");
         assert_eq!(body.faction, "Federation");
@@ -503,7 +487,7 @@ mod tests {
     #[test]
     fn test_create_team_duplicate_name() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create first team
         client
             .post("/v1/teams")
@@ -513,7 +497,7 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         // Try to create duplicate
         let response = client
             .post("/v1/teams")
@@ -523,9 +507,9 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("already taken"));
     }
@@ -533,7 +517,7 @@ mod tests {
     #[test]
     fn test_create_team_invalid_name() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Empty name
         let response = client
             .post("/v1/teams")
@@ -543,14 +527,14 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
     }
 
     #[test]
     fn test_get_team() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create team
         let create_response = client
             .post("/v1/teams")
@@ -560,17 +544,15 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         let create_body: CreateTeamResponse = create_response.into_json().unwrap();
         let team_id = create_body.id;
-        
+
         // Get team
-        let response = client
-            .get(format!("/v1/teams/{}", team_id))
-            .dispatch();
-        
+        let response = client.get(format!("/v1/teams/{}", team_id)).dispatch();
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: TeamResponse = response.into_json().unwrap();
         assert_eq!(body.id, team_id);
         assert_eq!(body.name, "Alpha Team");
@@ -581,13 +563,11 @@ mod tests {
     #[test]
     fn test_get_team_not_found() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
-        let response = client
-            .get("/v1/teams/nonexistent-id")
-            .dispatch();
-        
+
+        let response = client.get("/v1/teams/nonexistent-id").dispatch();
+
         assert_eq!(response.status(), Status::NotFound);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("not found"));
     }
@@ -595,7 +575,7 @@ mod tests {
     #[test]
     fn test_add_player_to_team() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create player
         let player_response = client
             .post("/v1/players")
@@ -603,9 +583,10 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        let player_body: crate::api::players::CreatePlayerResponse = player_response.into_json().unwrap();
+        let player_body: crate::api::players::CreatePlayerResponse =
+            player_response.into_json().unwrap();
         let player_id = player_body.id;
-        
+
         // Create team
         let team_response = client
             .post("/v1/teams")
@@ -617,7 +598,7 @@ mod tests {
             .dispatch();
         let team_body: CreateTeamResponse = team_response.into_json().unwrap();
         let team_id = team_body.id;
-        
+
         // Add player to team
         let response = client
             .patch(format!("/v1/teams/{}", team_id))
@@ -625,9 +606,9 @@ mod tests {
                 player_id: player_id.clone(),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: TeamResponse = response.into_json().unwrap();
         assert_eq!(body.members.len(), 1);
         assert!(body.members.contains(&player_id));
@@ -636,7 +617,7 @@ mod tests {
     #[test]
     fn test_add_player_to_team_player_not_found() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create team
         let team_response = client
             .post("/v1/teams")
@@ -648,7 +629,7 @@ mod tests {
             .dispatch();
         let team_body: CreateTeamResponse = team_response.into_json().unwrap();
         let team_id = team_body.id;
-        
+
         // Try to add non-existent player
         let response = client
             .patch(format!("/v1/teams/{}", team_id))
@@ -656,9 +637,9 @@ mod tests {
                 player_id: "nonexistent-player".to_string(),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("not found"));
     }
@@ -666,7 +647,7 @@ mod tests {
     #[test]
     fn test_add_player_to_team_team_not_found() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create player
         let player_response = client
             .post("/v1/players")
@@ -674,24 +655,23 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        let player_body: crate::api::players::CreatePlayerResponse = player_response.into_json().unwrap();
+        let player_body: crate::api::players::CreatePlayerResponse =
+            player_response.into_json().unwrap();
         let player_id = player_body.id;
-        
+
         // Try to add to non-existent team
         let response = client
             .patch("/v1/teams/nonexistent-team")
-            .json(&AddPlayerRequest {
-                player_id,
-            })
+            .json(&AddPlayerRequest { player_id })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
     }
 
     #[test]
     fn test_remove_player_from_team() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create player
         let player_response = client
             .post("/v1/players")
@@ -699,9 +679,10 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        let player_body: crate::api::players::CreatePlayerResponse = player_response.into_json().unwrap();
+        let player_body: crate::api::players::CreatePlayerResponse =
+            player_response.into_json().unwrap();
         let player_id = player_body.id;
-        
+
         // Create team
         let team_response = client
             .post("/v1/teams")
@@ -713,7 +694,7 @@ mod tests {
             .dispatch();
         let team_body: CreateTeamResponse = team_response.into_json().unwrap();
         let team_id = team_body.id;
-        
+
         // Add player to team
         client
             .patch(format!("/v1/teams/{}", team_id))
@@ -721,18 +702,16 @@ mod tests {
                 player_id: player_id.clone(),
             })
             .dispatch();
-        
+
         // Remove player from team
         let response = client
             .delete(format!("/v1/teams/{}/players/{}", team_id, player_id))
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::NoContent);
-        
+
         // Verify player was removed
-        let team_response = client
-            .get(format!("/v1/teams/{}", team_id))
-            .dispatch();
+        let team_response = client.get(format!("/v1/teams/{}", team_id)).dispatch();
         let team_body: TeamResponse = team_response.into_json().unwrap();
         assert_eq!(team_body.members.len(), 0);
     }
@@ -740,18 +719,18 @@ mod tests {
     #[test]
     fn test_remove_player_from_team_not_found() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         let response = client
             .delete("/v1/teams/nonexistent-team/players/nonexistent-player")
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::NotFound);
     }
 
     #[test]
     fn test_list_teams_with_data() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create multiple teams
         client
             .post("/v1/teams")
@@ -761,7 +740,7 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         client
             .post("/v1/teams")
             .json(&CreateTeamRequest {
@@ -770,12 +749,12 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         // List teams
         let response = client.get("/v1/teams").dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: ListTeamsResponse = response.into_json().unwrap();
         assert_eq!(body.count, 2);
         assert_eq!(body.teams.len(), 2);
@@ -784,7 +763,7 @@ mod tests {
     #[test]
     fn test_team_with_multiple_players() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create players
         let alice_response = client
             .post("/v1/players")
@@ -792,8 +771,9 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        let alice_body: crate::api::players::CreatePlayerResponse = alice_response.into_json().unwrap();
-        
+        let alice_body: crate::api::players::CreatePlayerResponse =
+            alice_response.into_json().unwrap();
+
         let bob_response = client
             .post("/v1/players")
             .json(&CreatePlayerRequest {
@@ -801,7 +781,7 @@ mod tests {
             })
             .dispatch();
         let bob_body: crate::api::players::CreatePlayerResponse = bob_response.into_json().unwrap();
-        
+
         // Create team
         let team_response = client
             .post("/v1/teams")
@@ -813,7 +793,7 @@ mod tests {
             .dispatch();
         let team_body: CreateTeamResponse = team_response.into_json().unwrap();
         let team_id = team_body.id;
-        
+
         // Add both players
         client
             .patch(format!("/v1/teams/{}", team_id))
@@ -821,19 +801,17 @@ mod tests {
                 player_id: alice_body.id.clone(),
             })
             .dispatch();
-        
+
         client
             .patch(format!("/v1/teams/{}", team_id))
             .json(&AddPlayerRequest {
                 player_id: bob_body.id.clone(),
             })
             .dispatch();
-        
+
         // Verify team has both members
-        let response = client
-            .get(format!("/v1/teams/{}", team_id))
-            .dispatch();
-        
+        let response = client.get(format!("/v1/teams/{}", team_id)).dispatch();
+
         let body: TeamResponse = response.into_json().unwrap();
         assert_eq!(body.members.len(), 2);
         assert!(body.members.contains(&alice_body.id));
@@ -843,7 +821,7 @@ mod tests {
     #[test]
     fn test_create_team_with_player_auto_join() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create player
         let player_response = client
             .post("/v1/players")
@@ -851,9 +829,10 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        let player_body: crate::api::players::CreatePlayerResponse = player_response.into_json().unwrap();
+        let player_body: crate::api::players::CreatePlayerResponse =
+            player_response.into_json().unwrap();
         let player_id = player_body.id;
-        
+
         // Create team with player_id
         let response = client
             .post("/v1/teams")
@@ -863,17 +842,15 @@ mod tests {
                 player_id: Some(player_id.clone()),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let create_body: CreateTeamResponse = response.into_json().unwrap();
         let team_id = create_body.id;
-        
+
         // Verify player was automatically added to team
-        let team_response = client
-            .get(format!("/v1/teams/{}", team_id))
-            .dispatch();
-        
+        let team_response = client.get(format!("/v1/teams/{}", team_id)).dispatch();
+
         let team_body: TeamResponse = team_response.into_json().unwrap();
         assert_eq!(team_body.members.len(), 1);
         assert!(team_body.members.contains(&player_id));
@@ -882,7 +859,7 @@ mod tests {
     #[test]
     fn test_create_team_invalid_faction() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         let response = client
             .post("/v1/teams")
             .json(&CreateTeamRequest {
@@ -891,9 +868,9 @@ mod tests {
                 player_id: None,
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("Invalid faction_id"));
     }
@@ -901,7 +878,7 @@ mod tests {
     #[test]
     fn test_create_team_with_faction_id_field() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Test that faction_id is accepted as an alias for faction
         let response = client
             .post("/v1/teams")
@@ -910,9 +887,9 @@ mod tests {
                 "faction_id": "Federation",
             }))
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: CreateTeamResponse = response.into_json().unwrap();
         assert_eq!(body.name, "Alpha Team");
         assert_eq!(body.faction, "Federation");
@@ -921,7 +898,7 @@ mod tests {
     #[test]
     fn test_create_team_with_invalid_player() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         let response = client
             .post("/v1/teams")
             .json(&CreateTeamRequest {
@@ -930,11 +907,10 @@ mod tests {
                 player_id: Some("nonexistent-player".to_string()),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("not found"));
     }
 }
-

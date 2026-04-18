@@ -225,11 +225,11 @@ mod tests {
     #[test]
     fn test_personality_ranges() {
         let config = AIConfig::default();
-        
+
         // Aggression should be 0.0-1.0
         assert!(config.personalities.aggressive.aggression <= 1.0);
         assert!(config.personalities.defensive.aggression <= 1.0);
-        
+
         // Retreat thresholds should be reasonable
         assert!(config.personalities.aggressive.retreat_threshold < 0.5);
         assert!(config.personalities.defensive.retreat_threshold > 0.3);
@@ -240,8 +240,11 @@ mod tests {
         let config = AIConfig::default();
         let yaml = serde_yaml::to_string(&config).unwrap();
         let deserialized: AIConfig = serde_yaml::from_str(&yaml).unwrap();
-        
+
         assert_eq!(config.update.tick_rate_ms, deserialized.update.tick_rate_ms);
-        assert_eq!(config.personalities.aggressive.aggression, deserialized.personalities.aggressive.aggression);
+        assert_eq!(
+            config.personalities.aggressive.aggression,
+            deserialized.personalities.aggressive.aggression
+        );
     }
 }

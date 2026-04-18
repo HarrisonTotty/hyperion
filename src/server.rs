@@ -2,16 +2,16 @@
 //!
 //! Handles the Rocket web server, GraphQL API, and client connections.
 
-use crate::config::GameConfig;
-use crate::state::GameWorld;
-use crate::websocket::WebSocketManager;
-use crate::event_broadcaster::EventBroadcaster;
 use crate::api;
 use crate::api::generation::UniverseState;
+use crate::config::GameConfig;
+use crate::event_broadcaster::EventBroadcaster;
+use crate::state::GameWorld;
+use crate::websocket::WebSocketManager;
 use log::info;
+use rocket_cors::{AllowedOrigins, CorsOptions};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use rocket_cors::{AllowedOrigins, CorsOptions};
 
 /// Launch the Rocket server with the given configuration
 ///
@@ -28,22 +28,22 @@ pub async fn launch(config: GameConfig) -> Result<(), rocket::Error> {
     // Initialize game world state
     let game_world = GameWorld::new_shared();
     info!("Game world initialized");
-    
+
     // Initialize WebSocket manager
     let ws_manager = Arc::new(WebSocketManager::new());
     info!("WebSocket manager initialized");
-    
+
     // Initialize procedural generation state
     let universe_state = Arc::new(RwLock::new(UniverseState::new()));
     info!("Procedural generation state initialized");
-    
+
     // Start event broadcaster in background
     let broadcaster = EventBroadcaster::with_interval(
         game_world.clone(),
         ws_manager.clone(),
         Duration::from_millis(16), // ~60fps
     );
-    
+
     tokio::spawn(async move {
         broadcaster.run().await;
     });
@@ -69,13 +69,4 @@ pub async fn launch(config: GameConfig) -> Result<(), rocket::Error> {
     rocket.launch().await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_server_module() {
-        // Placeholder test
-        assert!(true);
-    }
 }

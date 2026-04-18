@@ -5,16 +5,16 @@
 //! as well as systems that operate on those components.
 
 pub mod components;
-pub mod systems;
-pub mod physics;
 pub mod r#loop;
 pub mod module_state;
+pub mod physics;
+pub mod systems;
 
 pub use components::*;
-pub use systems::*;
-pub use physics::*;
 pub use r#loop::*;
 pub use module_state::*;
+pub use physics::*;
+pub use systems::*;
 
 use bevy_ecs::world::World;
 
@@ -32,6 +32,6 @@ mod tests {
     #[test]
     fn test_simulation_init() {
         let world = init_simulation();
-        assert!(world.entities().len() == 0);
+        assert!(world.entities().is_empty());
     }
 }

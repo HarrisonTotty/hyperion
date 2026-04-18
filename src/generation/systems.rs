@@ -2,8 +2,8 @@
 //!
 //! This module generates star systems with planets, moons, asteroid belts, and stations.
 
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -135,46 +135,56 @@ pub enum StationType {
 
 impl StarSystem {
     /// Generate a star system from a star
-    pub fn generate(star_id: String, star_name: String, star_type: StarType, inhabited: bool, seed: u64) -> Self {
+    pub fn generate(
+        star_id: String,
+        star_name: String,
+        star_type: StarType,
+        inhabited: bool,
+        seed: u64,
+    ) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
-        
+
         // Generate star properties
         let star = Self::generate_star_info(&mut rng, star_type);
-        
+
         // Determine number of planets
         let num_planets = match star_type {
-            StarType::BlueGiant => rng.gen_range(0..3),
-            StarType::White => rng.gen_range(2..6),
-            StarType::Yellow => rng.gen_range(3..9),
-            StarType::Orange => rng.gen_range(2..7),
-            StarType::RedDwarf => rng.gen_range(1..5),
+            StarType::BlueGiant => rng.random_range(0..3),
+            StarType::White => rng.random_range(2..6),
+            StarType::Yellow => rng.random_range(3..9),
+            StarType::Orange => rng.random_range(2..7),
+            StarType::RedDwarf => rng.random_range(1..5),
             StarType::Neutron | StarType::BlackHole => 0,
         };
-        
+
         // Generate planets
         let mut planets = Vec::new();
         for i in 0..num_planets {
             let planet = Self::generate_planet(&mut rng, i, &star, inhabited);
             planets.push(planet);
         }
-        
+
         // Generate asteroid belts
         let mut asteroid_belts = Vec::new();
-        if rng.gen_bool(0.4) {
+        if rng.random_bool(0.4) {
             let belt = Self::generate_asteroid_belt(&mut rng, num_planets);
             asteroid_belts.push(belt);
         }
-        
+
         // Generate stations
         let mut stations = Vec::new();
-        if inhabited || rng.gen_bool(0.3) {
-            let num_stations = if inhabited { rng.gen_range(1..4) } else { rng.gen_range(0..2) };
+        if inhabited || rng.random_bool(0.3) {
+            let num_stations = if inhabited {
+                rng.random_range(1..4)
+            } else {
+                rng.random_range(0..2)
+            };
             for _ in 0..num_stations {
                 let station = Self::generate_station(&mut rng, &planets);
                 stations.push(station);
             }
         }
-        
+
         StarSystem {
             id: star_id,
             name: star_name,
@@ -185,22 +195,34 @@ impl StarSystem {
             inhabited,
         }
     }
-    
+
     fn generate_star_info(rng: &mut StdRng, star_type: StarType) -> StarInfo {
         let (mass, luminosity) = match star_type {
-            StarType::BlueGiant => (rng.gen_range(10.0..50.0), rng.gen_range(1000.0..10000.0)),
-            StarType::White => (rng.gen_range(1.4..2.5), rng.gen_range(5.0..25.0)),
-            StarType::Yellow => (rng.gen_range(0.8..1.2), rng.gen_range(0.6..1.5)),
-            StarType::Orange => (rng.gen_range(0.5..0.8), rng.gen_range(0.1..0.6)),
-            StarType::RedDwarf => (rng.gen_range(0.1..0.5), rng.gen_range(0.001..0.1)),
-            StarType::Neutron => (rng.gen_range(1.4..2.0), rng.gen_range(0.0001..0.001)),
-            StarType::BlackHole => (rng.gen_range(3.0..20.0), 0.0),
+            StarType::BlueGiant => (
+                rng.random_range(10.0..50.0),
+                rng.random_range(1000.0..10000.0),
+            ),
+            StarType::White => (rng.random_range(1.4..2.5), rng.random_range(5.0..25.0)),
+            StarType::Yellow => (rng.random_range(0.8..1.2), rng.random_range(0.6..1.5)),
+            StarType::Orange => (rng.random_range(0.5..0.8), rng.random_range(0.1..0.6)),
+            StarType::RedDwarf => (rng.random_range(0.1..0.5), rng.random_range(0.001..0.1)),
+            StarType::Neutron => (rng.random_range(1.4..2.0), rng.random_range(0.0001..0.001)),
+            StarType::BlackHole => (rng.random_range(3.0..20.0), 0.0),
         };
-        
-        StarInfo { star_type, mass, luminosity }
+
+        StarInfo {
+            star_type,
+            mass,
+            luminosity,
+        }
     }
-    
-    fn generate_planet(rng: &mut StdRng, index: usize, star: &StarInfo, system_inhabited: bool) -> Planet {
+
+    fn generate_planet(
+        rng: &mut StdRng,
+        index: usize,
+        star: &StarInfo,
+        system_inhabited: bool,
+    ) -> Planet {
         // Orbital radius increases with each planet
         let base_radius = match star.star_type {
             StarType::BlueGiant => 5.0,
@@ -210,61 +232,86 @@ impl StarSystem {
             StarType::RedDwarf => 0.1,
             _ => 1.0,
         };
-        
-        let orbital_radius = base_radius * (1.5_f64).powi(index as i32) * rng.gen_range(0.8..1.2);
-        
+
+        let orbital_radius =
+            base_radius * (1.5_f64).powi(index as i32) * rng.random_range(0.8..1.2);
+
         // Habitable zone (rough approximation)
         let hab_inner = (star.luminosity as f64).sqrt() * 0.95;
         let hab_outer = (star.luminosity as f64).sqrt() * 1.37;
         let in_habitable_zone = orbital_radius >= hab_inner && orbital_radius <= hab_outer;
-        
+
         // Determine planet type based on orbital radius
         let planet_type = if orbital_radius < hab_inner * 0.5 {
-            if rng.gen_bool(0.7) { PlanetType::Volcanic } else { PlanetType::Terrestrial }
+            if rng.random_bool(0.7) {
+                PlanetType::Volcanic
+            } else {
+                PlanetType::Terrestrial
+            }
         } else if in_habitable_zone {
-            if rng.gen_bool(0.4) { PlanetType::Terrestrial } 
-            else if rng.gen_bool(0.3) { PlanetType::Ocean }
-            else { PlanetType::Ice }
+            if rng.random_bool(0.4) {
+                PlanetType::Terrestrial
+            } else if rng.random_bool(0.3) {
+                PlanetType::Ocean
+            } else {
+                PlanetType::Ice
+            }
         } else if orbital_radius < hab_outer * 2.0 {
-            if rng.gen_bool(0.6) { PlanetType::GasGiant } else { PlanetType::Terrestrial }
+            if rng.random_bool(0.6) {
+                PlanetType::GasGiant
+            } else {
+                PlanetType::Terrestrial
+            }
         } else {
-            if rng.gen_bool(0.5) { PlanetType::IceGiant } else { PlanetType::Ice }
+            if rng.random_bool(0.5) {
+                PlanetType::IceGiant
+            } else {
+                PlanetType::Ice
+            }
         };
-        
+
         // Mass and radius based on type
         let (mass, radius) = match planet_type {
-            PlanetType::Terrestrial => (rng.gen_range(0.1..3.0), rng.gen_range(0.5..1.8)),
-            PlanetType::GasGiant => (rng.gen_range(50.0..500.0), rng.gen_range(5.0..15.0)),
-            PlanetType::IceGiant => (rng.gen_range(10.0..50.0), rng.gen_range(3.0..6.0)),
-            PlanetType::Ice => (rng.gen_range(0.1..2.0), rng.gen_range(0.4..1.5)),
-            PlanetType::Volcanic => (rng.gen_range(0.5..2.0), rng.gen_range(0.6..1.2)),
-            PlanetType::Ocean => (rng.gen_range(0.8..1.5), rng.gen_range(0.9..1.3)),
+            PlanetType::Terrestrial => (rng.random_range(0.1..3.0), rng.random_range(0.5..1.8)),
+            PlanetType::GasGiant => (rng.random_range(50.0..500.0), rng.random_range(5.0..15.0)),
+            PlanetType::IceGiant => (rng.random_range(10.0..50.0), rng.random_range(3.0..6.0)),
+            PlanetType::Ice => (rng.random_range(0.1..2.0), rng.random_range(0.4..1.5)),
+            PlanetType::Volcanic => (rng.random_range(0.5..2.0), rng.random_range(0.6..1.2)),
+            PlanetType::Ocean => (rng.random_range(0.8..1.5), rng.random_range(0.9..1.3)),
         };
-        
-        let atmosphere = matches!(planet_type, PlanetType::Terrestrial | PlanetType::Ocean | PlanetType::Volcanic | PlanetType::GasGiant | PlanetType::IceGiant);
-        
+
+        let atmosphere = matches!(
+            planet_type,
+            PlanetType::Terrestrial
+                | PlanetType::Ocean
+                | PlanetType::Volcanic
+                | PlanetType::GasGiant
+                | PlanetType::IceGiant
+        );
+
         // Inhabited chance (only if system is inhabited and planet is habitable)
-        let inhabited = system_inhabited && in_habitable_zone && 
-                        matches!(planet_type, PlanetType::Terrestrial | PlanetType::Ocean) &&
-                        rng.gen_bool(0.5);
-        
+        let inhabited = system_inhabited
+            && in_habitable_zone
+            && matches!(planet_type, PlanetType::Terrestrial | PlanetType::Ocean)
+            && rng.random_bool(0.5);
+
         // Generate moons for large planets
         let num_moons = match planet_type {
-            PlanetType::GasGiant => rng.gen_range(2..20),
-            PlanetType::IceGiant => rng.gen_range(1..10),
-            PlanetType::Terrestrial if rng.gen_bool(0.3) => rng.gen_range(1..3),
+            PlanetType::GasGiant => rng.random_range(2..20),
+            PlanetType::IceGiant => rng.random_range(1..10),
+            PlanetType::Terrestrial if rng.random_bool(0.3) => rng.random_range(1..3),
             _ => 0,
         };
-        
+
         let mut moons = Vec::new();
         for i in 0..num_moons {
             moons.push(Moon {
                 name: format!("Moon {}", i + 1),
-                mass: rng.gen_range(0.01..2.0),
-                radius: rng.gen_range(0.1..1.5),
+                mass: rng.random_range(0.01..2.0),
+                radius: rng.random_range(0.1..1.5),
             });
         }
-        
+
         Planet {
             name: format!("Planet {}", index + 1),
             orbital_radius,
@@ -277,12 +324,12 @@ impl StarSystem {
             moons,
         }
     }
-    
+
     fn generate_asteroid_belt(rng: &mut StdRng, num_planets: usize) -> AsteroidBelt {
         let inner_radius = 2.0 + num_planets as f64 * 0.5;
-        let outer_radius = inner_radius + rng.gen_range(0.5..2.0);
-        let density = rng.gen_range(0.1..1.0);
-        
+        let outer_radius = inner_radius + rng.random_range(0.5..2.0);
+        let density = rng.random_range(0.1..1.0);
+
         AsteroidBelt {
             name: "Asteroid Belt".to_string(),
             inner_radius,
@@ -290,23 +337,23 @@ impl StarSystem {
             density,
         }
     }
-    
+
     fn generate_station(rng: &mut StdRng, planets: &[Planet]) -> StationInfo {
-        let station_type = match rng.gen_range(0..5) {
+        let station_type = match rng.random_range(0..5) {
             0 => StationType::Trade,
             1 => StationType::Military,
             2 => StationType::Research,
             3 => StationType::Mining,
             _ => StationType::Shipyard,
         };
-        
-        let orbiting = if !planets.is_empty() && rng.gen_bool(0.7) {
-            let planet_idx = rng.gen_range(0..planets.len());
+
+        let orbiting = if !planets.is_empty() && rng.random_bool(0.7) {
+            let planet_idx = rng.random_range(0..planets.len());
             planets[planet_idx].name.clone()
         } else {
             "Star".to_string()
         };
-        
+
         StationInfo {
             id: Uuid::new_v4(),
             name: format!("{:?} Station", station_type),
@@ -319,7 +366,7 @@ impl StarSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_system_generation() {
         let system = StarSystem::generate(
@@ -329,14 +376,14 @@ mod tests {
             true,
             42,
         );
-        
+
         assert_eq!(system.id, "STAR-000001");
         assert_eq!(system.name, "Alpha Centauri");
         assert_eq!(system.star.star_type, StarType::Yellow);
         assert!(system.inhabited);
         assert!(!system.planets.is_empty());
     }
-    
+
     #[test]
     fn test_planet_types() {
         let system = StarSystem::generate(
@@ -346,14 +393,20 @@ mod tests {
             false,
             123,
         );
-        
+
         // Should have variety of planet types
-        let has_terrestrial = system.planets.iter().any(|p| p.planet_type == PlanetType::Terrestrial);
-        let has_gas_giant = system.planets.iter().any(|p| p.planet_type == PlanetType::GasGiant);
-        
+        let has_terrestrial = system
+            .planets
+            .iter()
+            .any(|p| p.planet_type == PlanetType::Terrestrial);
+        let has_gas_giant = system
+            .planets
+            .iter()
+            .any(|p| p.planet_type == PlanetType::GasGiant);
+
         assert!(has_terrestrial || has_gas_giant);
     }
-    
+
     #[test]
     fn test_habitable_zone() {
         let system = StarSystem::generate(
@@ -363,15 +416,17 @@ mod tests {
             true,
             456,
         );
-        
+
         // At least one planet should be in habitable zone for inhabited system
-        let habitable_planets: Vec<_> = system.planets.iter()
+        let habitable_planets: Vec<_> = system
+            .planets
+            .iter()
             .filter(|p| p.in_habitable_zone)
             .collect();
-        
+
         assert!(!habitable_planets.is_empty());
     }
-    
+
     #[test]
     fn test_gas_giant_moons() {
         let system = StarSystem::generate(
@@ -381,17 +436,19 @@ mod tests {
             false,
             789,
         );
-        
+
         // Gas giants should have moons
-        let gas_giants: Vec<_> = system.planets.iter()
+        let gas_giants: Vec<_> = system
+            .planets
+            .iter()
             .filter(|p| p.planet_type == PlanetType::GasGiant)
             .collect();
-        
+
         if !gas_giants.is_empty() {
             assert!(!gas_giants[0].moons.is_empty());
         }
     }
-    
+
     #[test]
     fn test_stations() {
         let system = StarSystem::generate(
@@ -401,11 +458,11 @@ mod tests {
             true,
             321,
         );
-        
+
         // Inhabited systems should have stations
         assert!(!system.stations.is_empty());
     }
-    
+
     #[test]
     fn test_deterministic_generation() {
         let system1 = StarSystem::generate(
@@ -415,7 +472,7 @@ mod tests {
             false,
             42,
         );
-        
+
         let system2 = StarSystem::generate(
             "STAR-000006".to_string(),
             "Test".to_string(),
@@ -423,9 +480,12 @@ mod tests {
             false,
             42,
         );
-        
+
         // Same seed should produce same results
         assert_eq!(system1.planets.len(), system2.planets.len());
-        assert_eq!(system1.planets[0].orbital_radius, system2.planets[0].orbital_radius);
+        assert_eq!(
+            system1.planets[0].orbital_radius,
+            system2.planets[0].orbital_radius
+        );
     }
 }

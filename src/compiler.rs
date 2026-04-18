@@ -4,10 +4,10 @@
 //! in the simulation. Handles initialization of all ship systems, assignment
 //! of player roles, and spawning ships into the game world.
 
-use crate::models::{Ship, ShipBlueprint, ShipStatus, Inventory, CompiledModule};
-use crate::models::blueprint::ModuleInstance;
-use crate::config::{GameConfig, ShipClassConfig, ModuleStats};
 use crate::blueprint::BlueprintValidator;
+use crate::config::{GameConfig, ModuleStats, ShipClassConfig};
+use crate::models::blueprint::ModuleInstance;
+use crate::models::{CompiledModule, Inventory, Ship, ShipBlueprint, ShipStatus};
 use crate::state::GameWorld;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -52,7 +52,10 @@ impl std::fmt::Display for CompilationError {
             CompilationError::SystemCalculationFailed(msg) => {
                 write!(f, "Failed to calculate ship systems: {}", msg)
             }
-            CompilationError::InsufficientCredits { required, available } => {
+            CompilationError::InsufficientCredits {
+                required,
+                available,
+            } => {
                 write!(
                     f,
                     "Insufficient credits: need {}, have {}",
@@ -100,15 +103,12 @@ impl<'a> ShipCompiler<'a> {
         world: &GameWorld,
     ) -> Result<Ship, CompilationError> {
         // Validate blueprint
-        let validator = BlueprintValidator::new(
-            self.config,
-            world.players(),
-            world.teams(),
-        );
-        
+        let validator = BlueprintValidator::new(self.config, world.players(), world.teams());
+
         let validation_result = validator.validate(blueprint);
         if !validation_result.is_valid {
-            let errors: Vec<String> = validation_result.errors
+            let errors: Vec<String> = validation_result
+                .errors
                 .iter()
                 .map(|e| format!("{:?}", e))
                 .collect();
@@ -117,7 +117,7 @@ impl<'a> ShipCompiler<'a> {
 
         // Get ship class configuration
         let ship_class = self.get_ship_class(&blueprint.class)?;
-        
+
         // Compile modules with resolved stats
         let compiled_modules = self.compile_modules(blueprint)?;
 
@@ -143,7 +143,7 @@ impl<'a> ShipCompiler<'a> {
             inventory,
         })
     }
-    
+
     /// Compile modules by resolving stats from variant configuration
     ///
     /// For each module instance in the blueprint:
@@ -151,23 +151,29 @@ impl<'a> ShipCompiler<'a> {
     /// 2. Resolve stats from the variant YAML
     /// 3. Initialize runtime state (health, power, cooling)
     /// 4. Create CompiledModule instance
-    fn compile_modules(&self, blueprint: &ShipBlueprint) -> Result<Vec<CompiledModule>, CompilationError> {
+    fn compile_modules(
+        &self,
+        blueprint: &ShipBlueprint,
+    ) -> Result<Vec<CompiledModule>, CompilationError> {
         let mut compiled = Vec::new();
-        
+
         for module in &blueprint.modules {
             let compiled_module = self.compile_module(module)?;
             compiled.push(compiled_module);
         }
-        
+
         Ok(compiled)
     }
-    
+
     /// Compile a single module instance
     fn compile_module(&self, module: &ModuleInstance) -> Result<CompiledModule, CompilationError> {
         // Try to get variant stats if variant_id is specified
         let (name, stats) = if let Some(variant_id) = &module.variant_id {
             // Module has a variant configured
-            if let Some(variant) = self.config.get_module_variant(&module.module_slot_id, variant_id) {
+            if let Some(variant) = self
+                .config
+                .get_module_variant(&module.module_slot_id, variant_id)
+            {
                 (variant.name.clone(), variant.stats.clone())
             } else {
                 // Variant not found, use defaults
@@ -175,7 +181,11 @@ impl<'a> ShipCompiler<'a> {
             }
         } else {
             // No variant, check if module slot requires one
-            if self.config.get_module_variants(&module.module_slot_id).is_some() {
+            if self
+                .config
+                .get_module_variants(&module.module_slot_id)
+                .is_some()
+            {
                 // This module slot requires a variant but none is configured
                 // Use default empty stats (validation should have caught this)
                 (module.module_slot_id.clone(), ModuleStats::default())
@@ -190,7 +200,10 @@ impl<'a> ShipCompiler<'a> {
         };
 
         // Get max health from module slot template or default to 100
-        let max_health = self.config.modules.modules
+        let max_health = self
+            .config
+            .modules
+            .modules
             .get(&module.module_slot_id)
             .map(|t| t.hp as f32)
             .unwrap_or(100.0);
@@ -198,20 +211,21 @@ impl<'a> ShipCompiler<'a> {
         Ok(CompiledModule {
             instance_id: module.id.clone(),
             module_id: module.module_slot_id.clone(), // Map new field to legacy for now
-            kind: module.variant_id.clone(), // Map new field to legacy for now
+            kind: module.variant_id.clone(),          // Map new field to legacy for now
             name,
             stats,
             current_health: max_health,
             max_health,
             operational: true,
-            power_allocated: 1.0, // Full power by default
+            power_allocated: 1.0,   // Full power by default
             cooling_allocated: 1.0, // Full cooling by default
         })
     }
 
     /// Get ship class configuration
     fn get_ship_class(&self, class_id: &str) -> Result<&ShipClassConfig, CompilationError> {
-        self.config.ship_classes
+        self.config
+            .ship_classes
             .iter()
             .find(|sc| sc.id == class_id)
             .ok_or_else(|| CompilationError::ShipClassNotFound(class_id.to_string()))
@@ -220,7 +234,7 @@ impl<'a> ShipCompiler<'a> {
     /// Initialize ship status based on blueprint and ship class
     fn initialize_ship_status(
         &self,
-        blueprint: &ShipBlueprint,
+        _blueprint: &ShipBlueprint,
         ship_class: &ShipClassConfig,
         compiled_modules: &[CompiledModule],
     ) -> Result<ShipStatus, CompilationError> {
@@ -234,7 +248,8 @@ impl<'a> ShipCompiler<'a> {
         }
 
         // Calculate power generation and capacity from compiled modules
-        let (power_generation, power_capacity) = self.calculate_power_systems_from_compiled(compiled_modules);
+        let (power_generation, power_capacity) =
+            self.calculate_power_systems_from_compiled(compiled_modules);
 
         // Calculate cooling capacity from compiled modules
         let cooling_capacity = self.calculate_cooling_capacity_from_compiled(compiled_modules);
@@ -261,31 +276,32 @@ impl<'a> ShipCompiler<'a> {
 
         Ok(status)
     }
-    
+
     /// Calculate base weight from compiled modules
     fn calculate_base_weight_from_compiled(&self, modules: &[CompiledModule]) -> f32 {
-        modules.iter()
+        modules
+            .iter()
             .filter_map(|m| m.get_stat_f64("mass"))
             .sum::<f64>() as f32
     }
-    
+
     /// Calculate power generation and capacity from compiled power core modules
     fn calculate_power_systems_from_compiled(&self, modules: &[CompiledModule]) -> (f32, f32) {
         let mut total_generation = 0.0;
         let mut total_capacity = 0.0;
-        
+
         for module in modules {
             // Check for power generation (production stat)
             if let Some(production) = module.get_stat_f64("production") {
                 total_generation += production as f32;
             }
-            
+
             // Check for power capacity (max_energy stat)
             if let Some(capacity) = module.get_stat_f64("max_energy") {
                 total_capacity += capacity as f32;
             }
         }
-        
+
         // If no power modules found, provide minimum defaults
         if total_generation == 0.0 {
             total_generation = 100.0; // Minimum emergency power
@@ -293,50 +309,23 @@ impl<'a> ShipCompiler<'a> {
         if total_capacity == 0.0 {
             total_capacity = 1000.0; // Minimum emergency capacity
         }
-        
+
         (total_generation, total_capacity)
     }
-    
+
     /// Calculate cooling capacity from compiled cooling modules
     fn calculate_cooling_capacity_from_compiled(&self, modules: &[CompiledModule]) -> f32 {
-        let total_cooling: f64 = modules.iter()
+        let total_cooling: f64 = modules
+            .iter()
             .filter_map(|m| m.get_stat_f64("cooling_capacity"))
             .sum();
-        
+
         // If no cooling modules found, provide minimum default
         if total_cooling == 0.0 {
             300.0 // Minimum passive cooling
         } else {
             total_cooling as f32
         }
-    }
-
-    /// Calculate base weight of the ship
-    fn calculate_base_weight(&self, blueprint: &ShipBlueprint) -> f32 {
-    // TODO: Look up actual weights from configuration
-    // For now, use placeholder values
-    0.0 // Function not used; placeholder implementation
-    }
-
-    /// Calculate power generation and capacity from power core modules
-    fn calculate_power_systems(&self, blueprint: &ShipBlueprint) -> (f32, f32) {
-        // TODO: Look up power cores in module definitions and sum their values
-        // For now, use placeholder values based on module count
-        let power_cores = blueprint.modules.iter()
-            .filter(|m| m.module_slot_id.contains("power") || m.module_slot_id.contains("reactor") || m.module_slot_id.contains("battery"))
-            .count();
-        
-        let generation = power_cores as f32 * 50.0; // 50 units per power core
-        let capacity = power_cores as f32 * 1000.0; // 1000 units capacity per power core
-        
-        (generation, capacity)
-    }
-
-    /// Calculate cooling capacity from cooling modules
-    fn calculate_cooling_capacity(&self, blueprint: &ShipBlueprint) -> f32 {
-        // TODO: Look up cooling modules in module definitions
-        // For now, use placeholder value
-        100.0 * blueprint.modules.len() as f32
     }
 
     /// Initialize ship inventory
@@ -367,12 +356,14 @@ pub fn compile_and_spawn(
     config: &GameConfig,
 ) -> Result<String, CompilationError> {
     // Get blueprint
-    let blueprint = world.get_blueprint(blueprint_id)
+    let blueprint = world
+        .get_blueprint(blueprint_id)
         .ok_or_else(|| CompilationError::BlueprintNotFound(blueprint_id.to_string()))?
         .clone();
 
     // Verify team exists and get current credits
-    let team = world.get_team(&blueprint.team_id)
+    let team = world
+        .get_team(&blueprint.team_id)
         .ok_or_else(|| CompilationError::TeamNotFound(blueprint.team_id.clone()))?;
     let available_credits = team.credits;
 
@@ -395,8 +386,9 @@ pub fn compile_and_spawn(
     let ship_id = ship.id.clone();
 
     // Deduct credits from team
-    world.deduct_team_credits(&blueprint.team_id, total_cost)
-        .map_err(|e| CompilationError::SystemCalculationFailed(e))?;
+    world
+        .deduct_team_credits(&blueprint.team_id, total_cost)
+        .map_err(CompilationError::SystemCalculationFailed)?;
 
     // Add ship to world
     world.register_ship(ship);
@@ -426,7 +418,8 @@ pub fn calculate_blueprint_cost(
     config: &GameConfig,
 ) -> Result<i64, CompilationError> {
     // Get ship class cost
-    let ship_class = config.get_ship_class(&blueprint.class)
+    let ship_class = config
+        .get_ship_class(&blueprint.class)
         .ok_or_else(|| CompilationError::ShipClassNotFound(blueprint.class.clone()))?;
 
     let mut total_cost: i64 = ship_class.cost;
@@ -439,10 +432,10 @@ pub fn calculate_blueprint_cost(
         }
 
         // Add variant cost if selected
-        if let Some(ref variant_id) = module.variant_id {
-            if let Some(variant) = config.get_module_variant(&module.module_slot_id, variant_id) {
-                total_cost += variant.credit_cost;
-            }
+        if let Some(ref variant_id) = module.variant_id
+            && let Some(variant) = config.get_module_variant(&module.module_slot_id, variant_id)
+        {
+            total_cost += variant.credit_cost;
         }
     }
 
@@ -464,12 +457,10 @@ pub fn calculate_blueprint_cost(
 /// # Returns
 ///
 /// Returns the total credit value (100% refund rate).
-pub fn calculate_ship_value(
-    ship: &Ship,
-    config: &GameConfig,
-) -> i64 {
+pub fn calculate_ship_value(ship: &Ship, config: &GameConfig) -> i64 {
     // Get ship class cost
-    let ship_class_cost = config.get_ship_class(&ship.class)
+    let ship_class_cost = config
+        .get_ship_class(&ship.class)
         .map(|sc| sc.cost)
         .unwrap_or(0);
 
@@ -483,10 +474,10 @@ pub fn calculate_ship_value(
         }
 
         // Add variant cost if present (kind is the variant_id)
-        if let Some(ref variant_id) = module.kind {
-            if let Some(variant) = config.get_module_variant(&module.module_id, variant_id) {
-                total_value += variant.credit_cost;
-            }
+        if let Some(ref variant_id) = module.kind
+            && let Some(variant) = config.get_module_variant(&module.module_id, variant_id)
+        {
+            total_value += variant.credit_cost;
         }
     }
 
@@ -513,7 +504,8 @@ pub fn remove_ship_with_refund(
     config: &GameConfig,
 ) -> Result<i64, String> {
     // Get ship to calculate refund
-    let ship = world.get_ship(ship_id)
+    let ship = world
+        .get_ship(ship_id)
         .ok_or_else(|| format!("Ship {} not found", ship_id))?;
 
     let team_id = ship.team_id.clone();
@@ -531,13 +523,15 @@ pub fn remove_ship_with_refund(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{
+        AiConfig, FactionsConfig, MapConfig, ModulesConfig, RacesConfig, SimulationConfig,
+    };
     use crate::models::role::ShipRole;
-    use crate::config::{AiConfig, FactionsConfig, MapConfig, ModulesConfig, RacesConfig, SimulationConfig};
 
     fn create_test_config() -> GameConfig {
-        use crate::config::{ShipClassConfig, ShipSize, ShipClassRole};
+        use crate::config::{ShipClassConfig, ShipClassRole, ShipSize};
         use std::collections::HashMap;
-        
+
         let mut ship_class = ShipClassConfig {
             name: "Test Cruiser".to_string(),
             description: "A test ship class".to_string(),
@@ -576,12 +570,23 @@ mod tests {
         ship_class.set_id("test_cruiser".to_string());
 
         GameConfig {
-            ai: AiConfig { difficulty: "medium".to_string(), response_time: 1.0 },
+            ai: AiConfig {
+                difficulty: "medium".to_string(),
+                response_time: 1.0,
+            },
             factions: FactionsConfig { factions: vec![] },
-            map: MapConfig { galaxy_size: 1000, star_density: 0.5 },
-            modules: ModulesConfig { modules: HashMap::new() },
+            map: MapConfig {
+                galaxy_size: 1000,
+                star_density: 0.5,
+            },
+            modules: ModulesConfig {
+                modules: HashMap::new(),
+            },
             races: RacesConfig { races: vec![] },
-            simulation: SimulationConfig { tick_rate: 60.0, physics_enabled: true },
+            simulation: SimulationConfig {
+                tick_rate: 60.0,
+                physics_enabled: true,
+            },
             ship_classes: vec![ship_class],
             module_definitions: vec![],
             weapon_definitions: vec![],
@@ -610,24 +615,30 @@ mod tests {
 
         // Create team with credits
         let team_id = world
-            .create_team_with_credits("TestTeam".to_string(), "alliance".to_string(), starting_credits)
+            .create_team_with_credits(
+                "TestTeam".to_string(),
+                "alliance".to_string(),
+                starting_credits,
+            )
             .unwrap();
-        
+
         // Add player to team
         world.add_player_to_team(&team_id, &player_id).unwrap();
-        
+
         // Create blueprint
-        let blueprint_id = world.create_blueprint(
-            "Test Ship".to_string(),
-            "test_cruiser".to_string(),
-            team_id.clone(),
-        ).unwrap();
-        
+        let blueprint_id = world
+            .create_blueprint(
+                "Test Ship".to_string(),
+                "test_cruiser".to_string(),
+                team_id.clone(),
+            )
+            .unwrap();
+
         // Setup blueprint with player and roles
         let bp = world.get_blueprint_mut(&blueprint_id).unwrap();
         bp.set_player_roles(player_id.clone(), vec![ShipRole::Captain]);
         bp.mark_ready(player_id);
-        
+
         world
     }
 
@@ -635,12 +646,12 @@ mod tests {
     fn test_compile_valid_blueprint() {
         let config = create_test_config();
         let world = create_test_world();
-        
+
         let blueprint = world.get_all_blueprints()[0].clone();
-        
+
         let compiler = ShipCompiler::new(&config);
         let result = compiler.compile(&blueprint, &world);
-        
+
         assert!(result.is_ok());
         let ship = result.unwrap();
         assert_eq!(ship.name, "Test Ship");
@@ -653,13 +664,13 @@ mod tests {
     fn test_compile_invalid_ship_class() {
         let config = create_test_config();
         let world = create_test_world();
-        
+
         let mut blueprint = world.get_all_blueprints()[0].clone();
         blueprint.class = "nonexistent".to_string();
-        
+
         let compiler = ShipCompiler::new(&config);
         let result = compiler.compile(&blueprint, &world);
-        
+
         assert!(result.is_err());
         // The validation will fail because ship class doesn't exist
         match result {
@@ -670,7 +681,10 @@ mod tests {
                 // Also acceptable if it gets past validation somehow
                 assert_eq!(id, "nonexistent");
             }
-            _ => panic!("Expected ValidationFailed or ShipClassNotFound error, got: {:?}", result),
+            _ => panic!(
+                "Expected ValidationFailed or ShipClassNotFound error, got: {:?}",
+                result
+            ),
         }
     }
 
@@ -678,14 +692,14 @@ mod tests {
     fn test_compile_and_spawn() {
         let config = create_test_config();
         let mut world = create_test_world();
-        
+
         let blueprint_id = world.get_all_blueprints()[0].id.clone();
-        
+
         let result = compile_and_spawn(&blueprint_id, &mut world, &config);
-        
+
         assert!(result.is_ok());
         let ship_id = result.unwrap();
-        
+
         // Verify ship was added to world
         let ship = world.get_ship(&ship_id);
         assert!(ship.is_some());
@@ -696,9 +710,9 @@ mod tests {
     fn test_compile_and_spawn_blueprint_not_found() {
         let config = create_test_config();
         let mut world = create_test_world();
-        
+
         let result = compile_and_spawn("nonexistent", &mut world, &config);
-        
+
         assert!(result.is_err());
         match result {
             Err(CompilationError::BlueprintNotFound(_)) => {}
@@ -770,7 +784,10 @@ mod tests {
 
         assert!(result.is_err());
         match result {
-            Err(CompilationError::InsufficientCredits { required, available }) => {
+            Err(CompilationError::InsufficientCredits {
+                required,
+                available,
+            }) => {
                 assert_eq!(required, 50_000);
                 assert_eq!(available, 10_000);
             }

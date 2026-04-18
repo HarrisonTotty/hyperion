@@ -380,8 +380,14 @@ mod tests {
     #[test]
     fn test_weapon_multipliers() {
         let config = SimulationConfig::default();
-        assert!(config.combat.weapons.missile.torpedo_multiplier > config.combat.weapons.missile.missile_multiplier);
-        assert!(config.combat.weapons.energy.burst_damage_multiplier > config.combat.weapons.energy.pulse_damage_multiplier);
+        assert!(
+            config.combat.weapons.missile.torpedo_multiplier
+                > config.combat.weapons.missile.missile_multiplier
+        );
+        assert!(
+            config.combat.weapons.energy.burst_damage_multiplier
+                > config.combat.weapons.energy.pulse_damage_multiplier
+        );
     }
 
     #[test]
@@ -389,8 +395,11 @@ mod tests {
         let config = SimulationConfig::default();
         let yaml = serde_yaml::to_string(&config).unwrap();
         let deserialized: SimulationConfig = serde_yaml::from_str(&yaml).unwrap();
-        
+
         assert_eq!(config.physics.tick_rate, deserialized.physics.tick_rate);
-        assert_eq!(config.combat.shields.regen_rate, deserialized.combat.shields.regen_rate);
+        assert_eq!(
+            config.combat.shields.regen_rate,
+            deserialized.combat.shields.regen_rate
+        );
     }
 }

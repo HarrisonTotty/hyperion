@@ -4,11 +4,11 @@
 //! These components represent various aspects of ships, weapons, modules,
 //! and other entities in the game world.
 
-use bevy_ecs::prelude::*;
-use nalgebra::{Vector3, UnitQuaternion};
-use std::collections::HashMap;
 use crate::models::WeaponTag;
 use crate::weapons::StatusEffectType;
+use bevy_ecs::prelude::*;
+use nalgebra::{UnitQuaternion, Vector3};
+use std::collections::HashMap;
 
 /// 3D position, rotation, and velocity
 #[derive(Component, Debug, Clone)]
@@ -33,7 +33,7 @@ impl Transform {
             angular_velocity: Vector3::zeros(),
         }
     }
-    
+
     /// Create a transform at a specific position
     pub fn at_position(position: Vector3<f32>) -> Self {
         Self {
@@ -86,8 +86,15 @@ pub struct ShipData {
 
 impl ShipData {
     /// Create new ship data
-    pub fn new(id: String, name: String, class_id: String, team_id: String,
-               max_hull: f32, max_shields: f32, base_weight: f32) -> Self {
+    pub fn new(
+        id: String,
+        name: String,
+        class_id: String,
+        team_id: String,
+        max_hull: f32,
+        max_shields: f32,
+        base_weight: f32,
+    ) -> Self {
         Self {
             id,
             name,
@@ -105,17 +112,17 @@ impl ShipData {
             effective_weight: base_weight,
         }
     }
-    
+
     /// Check if ship is destroyed
     pub fn is_destroyed(&self) -> bool {
         self.hull <= 0.0
     }
-    
+
     /// Check if shields are up
     pub fn shields_up(&self) -> bool {
         self.shields > 0.0
     }
-    
+
     /// Get hull percentage (0.0 to 1.0)
     pub fn hull_percentage(&self) -> f32 {
         if self.max_hull > 0.0 {
@@ -124,7 +131,7 @@ impl ShipData {
             0.0
         }
     }
-    
+
     /// Get shield percentage (0.0 to 1.0)
     pub fn shield_percentage(&self) -> f32 {
         if self.max_shields > 0.0 {
@@ -173,12 +180,12 @@ impl ModuleComponent {
             active: true,
         }
     }
-    
+
     /// Check if module is operational
     pub fn is_operational(&self) -> bool {
         self.active && self.health > 0.0
     }
-    
+
     /// Calculate effective output based on health and efficiency
     pub fn effective_output(&self, base_output: f32) -> f32 {
         if self.is_operational() {
@@ -218,10 +225,16 @@ pub struct WeaponComponent {
 
 impl WeaponComponent {
     /// Create a new weapon
-    pub fn new(id: String, config_id: String, weapon_type: String, 
-               tags: Vec<WeaponTag>, base_damage: f32, max_cooldown: f32) -> Self {
+    pub fn new(
+        id: String,
+        config_id: String,
+        weapon_type: String,
+        tags: Vec<WeaponTag>,
+        base_damage: f32,
+        max_cooldown: f32,
+    ) -> Self {
         let is_automatic = tags.contains(&WeaponTag::Automatic);
-        
+
         Self {
             id,
             config_id,
@@ -236,12 +249,12 @@ impl WeaponComponent {
             is_active: true,
         }
     }
-    
+
     /// Check if weapon can fire
     pub fn can_fire(&self) -> bool {
         self.is_active && self.cooldown <= 0.0 && self.has_ammunition()
     }
-    
+
     /// Check if weapon has ammunition (always true for energy weapons)
     pub fn has_ammunition(&self) -> bool {
         if self.weapon_type == "kinetic" || self.weapon_type == "missile" {
@@ -250,14 +263,14 @@ impl WeaponComponent {
             true // Energy weapons don't need ammo
         }
     }
-    
+
     /// Update cooldown
     pub fn update_cooldown(&mut self, delta_time: f32) {
         if self.cooldown > 0.0 {
             self.cooldown = (self.cooldown - delta_time).max(0.0);
         }
     }
-    
+
     /// Fire the weapon (sets cooldown and consumes ammo)
     pub fn fire(&mut self) {
         self.cooldown = self.max_cooldown;
@@ -293,12 +306,12 @@ impl TargetingComponent {
             disabled: false,
         }
     }
-    
+
     /// Check if can engage target
     pub fn can_engage(&self) -> bool {
         !self.disabled && self.target.is_some() && self.is_locked
     }
-    
+
     /// Clear target
     pub fn clear_target(&mut self) {
         self.target = None;
@@ -339,25 +352,25 @@ impl ShieldComponent {
             power_draw,
         }
     }
-    
+
     /// Check if shields are active
     pub fn is_active(&self) -> bool {
         self.raised && self.strength > 0.0
     }
-    
+
     /// Regenerate shields
     pub fn regenerate(&mut self, delta_time: f32) {
         if self.raised {
             self.strength = (self.strength + self.regen_rate * delta_time).min(self.max_strength);
         }
     }
-    
+
     /// Apply damage to shields
     pub fn apply_damage(&mut self, damage: f32) -> f32 {
         if !self.raised || self.strength <= 0.0 {
             return damage; // All damage passes through
         }
-        
+
         if damage >= self.strength {
             let overflow = damage - self.strength;
             self.strength = 0.0;
@@ -389,17 +402,17 @@ impl PowerGrid {
             capacity,
         }
     }
-    
+
     /// Get total allocated power
     pub fn total_allocated(&self) -> f32 {
         self.distribution.values().sum()
     }
-    
+
     /// Get available power
     pub fn available_power(&self) -> f32 {
         (self.generation - self.total_allocated()).max(0.0)
     }
-    
+
     /// Allocate power to a module
     pub fn allocate(&mut self, module_id: String, amount: f32) {
         self.distribution.insert(module_id, amount);
@@ -426,17 +439,17 @@ impl CoolingSystem {
             capacity,
         }
     }
-    
+
     /// Get total allocated cooling
     pub fn total_allocated(&self) -> f32 {
         self.distribution.values().sum()
     }
-    
+
     /// Get available cooling
     pub fn available_cooling(&self) -> f32 {
         (self.dissipation - self.total_allocated()).max(0.0)
     }
-    
+
     /// Allocate cooling to a module
     pub fn allocate(&mut self, module_id: String, amount: f32) {
         self.distribution.insert(module_id, amount);
@@ -457,17 +470,17 @@ impl DamageComponent {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Apply damage to a module
     pub fn damage_module(&mut self, module_id: String, damage: f32) {
         *self.module_damage.entry(module_id).or_insert(0.0) += damage;
     }
-    
+
     /// Apply hull damage
     pub fn damage_hull(&mut self, damage: f32) {
         self.hull_damage += damage;
     }
-    
+
     /// Get damage to specific module
     pub fn get_module_damage(&self, module_id: &str) -> f32 {
         self.module_damage.get(module_id).copied().unwrap_or(0.0)
@@ -488,23 +501,23 @@ impl InventoryComponent {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Add ammunition
     pub fn add_ammo(&mut self, ammo_id: String, count: u32) {
         *self.ammunition.entry(ammo_id).or_insert(0) += count;
     }
-    
+
     /// Remove ammunition
     pub fn remove_ammo(&mut self, ammo_id: &str, count: u32) -> bool {
-        if let Some(current) = self.ammunition.get_mut(ammo_id) {
-            if *current >= count {
-                *current -= count;
-                return true;
-            }
+        if let Some(current) = self.ammunition.get_mut(ammo_id)
+            && *current >= count
+        {
+            *current -= count;
+            return true;
         }
         false
     }
-    
+
     /// Get ammunition count
     pub fn get_ammo_count(&self, ammo_id: &str) -> u32 {
         self.ammunition.get(ammo_id).copied().unwrap_or(0)
@@ -523,15 +536,16 @@ impl StatusEffects {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Apply a status effect
     pub fn apply(&mut self, effect_type: StatusEffectType, duration: f32) {
         // Status effects don't stack - replace with longer duration
-        self.effects.entry(effect_type)
+        self.effects
+            .entry(effect_type)
             .and_modify(|d| *d = d.max(duration))
             .or_insert(duration);
     }
-    
+
     /// Update status effects (decay over time)
     pub fn update(&mut self, delta_time: f32) {
         self.effects.retain(|_, duration| {
@@ -539,12 +553,12 @@ impl StatusEffects {
             *duration > 0.0
         });
     }
-    
+
     /// Check if effect is active
     pub fn has_effect(&self, effect_type: StatusEffectType) -> bool {
         self.effects.contains_key(&effect_type)
     }
-    
+
     /// Get remaining duration of effect
     pub fn get_duration(&self, effect_type: StatusEffectType) -> Option<f32> {
         self.effects.get(&effect_type).copied()
@@ -598,10 +612,17 @@ impl ProjectileComponent {
             lifetime,
         }
     }
-    
+
     /// Create a missile projectile
-    pub fn missile(owner: Entity, target: Entity, damage: f32, 
-                   tags: Vec<WeaponTag>, thrust: u32, turn_rate: u32, lifetime: f32) -> Self {
+    pub fn missile(
+        owner: Entity,
+        target: Entity,
+        damage: f32,
+        tags: Vec<WeaponTag>,
+        thrust: u32,
+        turn_rate: u32,
+        lifetime: f32,
+    ) -> Self {
         Self {
             projectile_type: ProjectileType::Missile { thrust, turn_rate },
             owner,
@@ -611,12 +632,12 @@ impl ProjectileComponent {
             lifetime,
         }
     }
-    
+
     /// Check if projectile is expired
     pub fn is_expired(&self) -> bool {
         self.lifetime <= 0.0
     }
-    
+
     /// Update lifetime
     pub fn update(&mut self, delta_time: f32) {
         self.lifetime -= delta_time;
@@ -640,18 +661,18 @@ impl CommunicationState {
             jam_duration: 0.0,
         }
     }
-    
+
     /// Check if can communicate
     pub fn can_communicate(&self) -> bool {
         !self.jammed
     }
-    
+
     /// Apply jamming
     pub fn jam(&mut self, duration: f32) {
         self.jammed = true;
         self.jam_duration = self.jam_duration.max(duration);
     }
-    
+
     /// Update jamming state
     pub fn update(&mut self, delta_time: f32) {
         if self.jammed {
@@ -705,12 +726,12 @@ impl WarpDriveComponent {
             disabled: false,
         }
     }
-    
+
     /// Check if can engage warp
     pub fn can_engage(&self) -> bool {
         !self.disabled && !self.active && self.cooldown_progress <= 0.0
     }
-    
+
     /// Check if currently in warp
     pub fn is_in_warp(&self) -> bool {
         self.active && self.current_warp_factor > 1.0
@@ -749,12 +770,12 @@ impl JumpDriveComponent {
             disabled: false,
         }
     }
-    
+
     /// Check if can initiate jump
     pub fn can_jump(&self) -> bool {
         !self.disabled && self.target_destination.is_none() && self.cooldown_progress <= 0.0
     }
-    
+
     /// Check if jump is charging
     pub fn is_charging(&self) -> bool {
         self.target_destination.is_some()
@@ -764,18 +785,18 @@ impl JumpDriveComponent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_transform_creation() {
         let transform = Transform::new();
         assert_eq!(transform.position, Vector3::zeros());
         assert_eq!(transform.velocity, Vector3::zeros());
-        
+
         let pos = Vector3::new(100.0, 200.0, 300.0);
         let transform = Transform::at_position(pos);
         assert_eq!(transform.position, pos);
     }
-    
+
     #[test]
     fn test_ship_data() {
         let ship = ShipData::new(
@@ -787,7 +808,7 @@ mod tests {
             500.0,
             50000.0,
         );
-        
+
         assert_eq!(ship.hull, 1000.0);
         assert_eq!(ship.max_hull, 1000.0);
         assert!(!ship.is_destroyed());
@@ -795,7 +816,7 @@ mod tests {
         assert_eq!(ship.hull_percentage(), 1.0);
         assert_eq!(ship.shield_percentage(), 1.0);
     }
-    
+
     #[test]
     fn test_module_component() {
         let mut module = ModuleComponent::new(
@@ -804,18 +825,18 @@ mod tests {
             "power-core".to_string(),
             Some("fusion".to_string()),
         );
-        
+
         assert!(module.is_operational());
         assert_eq!(module.effective_output(100.0), 100.0);
-        
+
         module.health = 0.5;
         assert_eq!(module.effective_output(100.0), 50.0);
-        
+
         module.active = false;
         assert!(!module.is_operational());
         assert_eq!(module.effective_output(100.0), 0.0);
     }
-    
+
     #[test]
     fn test_weapon_component() {
         let mut weapon = WeaponComponent::new(
@@ -826,133 +847,133 @@ mod tests {
             100.0,
             1.5,
         );
-        
+
         assert!(weapon.is_automatic);
         assert!(weapon.can_fire());
-        
+
         weapon.fire();
         assert!(!weapon.can_fire());
         assert_eq!(weapon.cooldown, 1.5);
-        
+
         weapon.update_cooldown(1.0);
         assert_eq!(weapon.cooldown, 0.5);
-        
+
         weapon.update_cooldown(1.0);
         assert_eq!(weapon.cooldown, 0.0);
         assert!(weapon.can_fire());
     }
-    
+
     #[test]
     fn test_targeting_component() {
         let mut targeting = TargetingComponent::new(3.0);
-        
+
         assert!(!targeting.can_engage());
-        
-        targeting.target = Some(Entity::from_raw(1));
+
+        targeting.target = Some(Entity::from_raw_u32(1).unwrap());
         targeting.is_locked = true;
         assert!(targeting.can_engage());
-        
+
         targeting.disabled = true;
         assert!(!targeting.can_engage());
-        
+
         targeting.disabled = false;
         targeting.clear_target();
         assert!(!targeting.can_engage());
     }
-    
+
     #[test]
     fn test_shield_component() {
         let mut shields = ShieldComponent::new(1000.0, 50.0, 10.0);
-        
+
         assert!(shields.is_active());
-        
+
         // Regenerate shields
         shields.strength = 500.0;
         shields.regenerate(10.0); // 50/s * 10s = 500
         assert_eq!(shields.strength, 1000.0);
-        
+
         // Apply damage
         let overflow = shields.apply_damage(600.0);
         assert_eq!(shields.strength, 400.0);
         assert_eq!(overflow, 0.0);
-        
+
         // Damage exceeds shields
         let overflow = shields.apply_damage(500.0);
         assert_eq!(shields.strength, 0.0);
         assert_eq!(overflow, 100.0);
     }
-    
+
     #[test]
     fn test_power_grid() {
         let mut grid = PowerGrid::new(1000.0, 1000.0);
-        
+
         assert_eq!(grid.available_power(), 1000.0);
-        
+
         grid.allocate("module1".to_string(), 300.0);
         grid.allocate("module2".to_string(), 200.0);
-        
+
         assert_eq!(grid.total_allocated(), 500.0);
         assert_eq!(grid.available_power(), 500.0);
     }
-    
+
     #[test]
     fn test_cooling_system() {
         let mut cooling = CoolingSystem::new(500.0, 500.0);
-        
+
         assert_eq!(cooling.available_cooling(), 500.0);
-        
+
         cooling.allocate("module1".to_string(), 150.0);
         cooling.allocate("module2".to_string(), 100.0);
-        
+
         assert_eq!(cooling.total_allocated(), 250.0);
         assert_eq!(cooling.available_cooling(), 250.0);
     }
-    
+
     #[test]
     fn test_damage_component() {
         let mut damage = DamageComponent::new();
-        
+
         damage.damage_module("engine".to_string(), 50.0);
         damage.damage_hull(100.0);
-        
+
         assert_eq!(damage.get_module_damage("engine"), 50.0);
         assert_eq!(damage.hull_damage, 100.0);
     }
-    
+
     #[test]
     fn test_inventory_component() {
         let mut inventory = InventoryComponent::new();
-        
+
         inventory.add_ammo("torpedo".to_string(), 10);
         assert_eq!(inventory.get_ammo_count("torpedo"), 10);
-        
+
         assert!(inventory.remove_ammo("torpedo", 5));
         assert_eq!(inventory.get_ammo_count("torpedo"), 5);
-        
+
         assert!(!inventory.remove_ammo("torpedo", 10));
         assert_eq!(inventory.get_ammo_count("torpedo"), 5);
     }
-    
+
     #[test]
     fn test_status_effects() {
         let mut effects = StatusEffects::new();
-        
+
         effects.apply(StatusEffectType::IonJam, 10.0);
         assert!(effects.has_effect(StatusEffectType::IonJam));
         assert_eq!(effects.get_duration(StatusEffectType::IonJam), Some(10.0));
-        
+
         effects.update(5.0);
         assert_eq!(effects.get_duration(StatusEffectType::IonJam), Some(5.0));
-        
+
         effects.update(10.0);
         assert!(!effects.has_effect(StatusEffectType::IonJam));
     }
-    
+
     #[test]
     fn test_projectile_component() {
-        let owner = Entity::from_raw(1);
-        let target = Entity::from_raw(2);
-        
+        let owner = Entity::from_raw_u32(1).unwrap();
+        let target = Entity::from_raw_u32(2).unwrap();
+
         let mut projectile = ProjectileComponent::missile(
             owner,
             target,
@@ -962,47 +983,47 @@ mod tests {
             45,
             30.0,
         );
-        
+
         assert!(!projectile.is_expired());
         projectile.update(35.0);
         assert!(projectile.is_expired());
     }
-    
+
     #[test]
     fn test_communication_state() {
         let mut comms = CommunicationState::new();
-        
+
         assert!(comms.can_communicate());
-        
+
         comms.jam(10.0);
         assert!(!comms.can_communicate());
-        
+
         comms.update(5.0);
         assert!(!comms.can_communicate());
-        
+
         comms.update(6.0);
         assert!(comms.can_communicate());
     }
-    
+
     #[test]
     fn test_warp_drive_component() {
         let warp = WarpDriveComponent::new(9.9, 5.0, 3.0);
-        
+
         assert!(warp.can_engage());
         assert!(!warp.is_in_warp());
-        
+
         let mut warp = warp;
         warp.disabled = true;
         assert!(!warp.can_engage());
     }
-    
+
     #[test]
     fn test_jump_drive_component() {
         let jump = JumpDriveComponent::new(10000.0, 10.0, 30.0);
-        
+
         assert!(jump.can_jump());
         assert!(!jump.is_charging());
-        
+
         let mut jump = jump;
         jump.target_destination = Some(Vector3::new(5000.0, 0.0, 0.0));
         assert!(jump.is_charging());

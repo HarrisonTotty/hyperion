@@ -2,24 +2,24 @@
 //!
 //! Defines REST and GraphQL API endpoints for game clients.
 
-pub mod players;
-pub mod teams;
-pub mod factions;
-pub mod blueprints;
-pub mod ships;
-pub mod positions;
-pub mod stations;
 pub mod ai;
-pub mod generation;
-pub mod ship_classes;
-pub mod modules;
+pub mod blueprints;
 pub mod catalog;
+pub mod factions;
+pub mod generation;
+pub mod modules;
+pub mod players;
+pub mod positions;
+pub mod ship_classes;
+pub mod ships;
+pub mod stations;
+pub mod teams;
 
-use rocket::{routes, Route, State, get, options};
-use rocket::serde::json::Json;
-use serde_json;
 use crate::config::GameConfig;
 use crate::websocket;
+use rocket::serde::json::Json;
+use rocket::{Route, State, get, options, routes};
+use serde_json;
 
 /// Catch-all OPTIONS handler for CORS preflight requests
 #[options("/<_..>")]
@@ -88,13 +88,4 @@ pub fn websocket_routes() -> Vec<Route> {
 pub fn graphql_routes() -> Vec<Route> {
     // GraphQL routes will be implemented here
     routes![]
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_api_module() {
-        // Placeholder test
-        assert!(true);
-    }
 }

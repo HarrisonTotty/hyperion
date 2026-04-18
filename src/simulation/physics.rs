@@ -13,16 +13,16 @@ use crate::weapons::StatusEffectType;
 pub mod constants {
     /// Speed of light (m/s) - used for warp calculations
     pub const SPEED_OF_LIGHT: f32 = 299_792_458.0;
-    
+
     /// Space drag coefficient (very low in vacuum)
     pub const SPACE_DRAG: f32 = 0.0001;
-    
+
     /// Graviton weight multiplier (doubles effective weight)
     pub const GRAVITON_WEIGHT_MULTIPLIER: f32 = 2.0;
-    
+
     /// Default collision radius for ships (meters)
     pub const DEFAULT_SHIP_RADIUS: f32 = 50.0;
-    
+
     /// Default collision radius for projectiles (meters)
     pub const DEFAULT_PROJECTILE_RADIUS: f32 = 1.0;
 }
@@ -44,7 +44,7 @@ impl Force {
             application_point: None,
         }
     }
-    
+
     /// Create a force at a specific point (for torque)
     pub fn at_point(vector: Vector3<f32>, point: Vector3<f32>) -> Self {
         Self {
@@ -64,21 +64,19 @@ pub struct ForceAccumulator {
 impl ForceAccumulator {
     /// Create a new force accumulator
     pub fn new() -> Self {
-        Self {
-            forces: Vec::new(),
-        }
+        Self { forces: Vec::new() }
     }
-    
+
     /// Add a force
     pub fn add_force(&mut self, force: Force) {
         self.forces.push(force);
     }
-    
+
     /// Clear all forces (called after integration)
     pub fn clear(&mut self) {
         self.forces.clear();
     }
-    
+
     /// Get total force vector
     pub fn total_force(&self) -> Vector3<f32> {
         self.forces.iter().map(|f| f.vector).sum()
@@ -102,12 +100,12 @@ impl CollisionShape {
             enabled: true,
         }
     }
-    
+
     /// Create a ship collision shape
     pub fn ship() -> Self {
         Self::sphere(constants::DEFAULT_SHIP_RADIUS)
     }
-    
+
     /// Create a projectile collision shape
     pub fn projectile() -> Self {
         Self::sphere(constants::DEFAULT_PROJECTILE_RADIUS)
@@ -126,11 +124,7 @@ pub fn calculate_effective_weight(base_weight: f32, effects: &StatusEffects) -> 
 /// Apply thrust force from engines
 ///
 /// Engines provide thrust in the forward direction of the ship.
-pub fn apply_engine_thrust(
-    transform: &Transform,
-    thrust: f32,
-    accumulator: &mut ForceAccumulator,
-) {
+pub fn apply_engine_thrust(transform: &Transform, thrust: f32, accumulator: &mut ForceAccumulator) {
     // Thrust is applied in the forward direction (local Z axis)
     let forward = transform.rotation * Vector3::new(0.0, 0.0, 1.0);
     let force = Force::new(forward * thrust);
@@ -162,11 +156,11 @@ pub fn engine_force_system(
 ) {
     for (transform, mut accumulator, module) in query.iter_mut() {
         // Only apply thrust for engine modules that are operational
-        if module.kind.as_ref().map(|k| k.as_str()) == Some("engine") && module.is_operational() {
+        if module.kind.as_deref() == Some("engine") && module.is_operational() {
             // Calculate thrust based on efficiency and power allocation
             let max_thrust = 10000.0; // TODO: Get from configuration
             let thrust = max_thrust * module.efficiency * module.power_allocation;
-            
+
             if thrust > 0.0 {
                 apply_engine_thrust(transform, thrust, &mut accumulator);
             }
@@ -177,15 +171,9 @@ pub fn engine_force_system(
 /// System that applies drag forces
 ///
 /// Space has minimal drag, but we apply a small amount for gameplay.
-pub fn drag_force_system(
-    mut query: Query<(&Transform, &mut ForceAccumulator)>,
-) {
+pub fn drag_force_system(mut query: Query<(&Transform, &mut ForceAccumulator)>) {
     for (transform, mut accumulator) in query.iter_mut() {
-        apply_drag(
-            transform.velocity,
-            constants::SPACE_DRAG,
-            &mut accumulator,
-        );
+        apply_drag(transform.velocity, constants::SPACE_DRAG, &mut accumulator);
     }
 }
 
@@ -205,15 +193,15 @@ pub fn physics_integration_system(
         // Calculate effective mass
         let effective_weight = calculate_effective_weight(ship_data.base_weight, effects);
         let mass = effective_weight; // In space, weight ~= mass
-        
+
         if mass > 0.0 {
             // Apply F = ma to get acceleration
             let total_force = accumulator.total_force();
             let acceleration = total_force / mass;
-            
+
             // Update velocity: v = v + a * dt
             transform.velocity += acceleration * delta_time;
-            
+
             // Clear forces for next frame
             accumulator.clear();
         }
@@ -245,21 +233,22 @@ pub fn collision_detection_system(
         for j in (i + 1)..ship_vec.len() {
             let (_entity1, transform1, shape1) = ship_vec[i];
             let (_entity2, transform2, shape2) = ship_vec[j];
-            
-            if shape1.enabled && shape2.enabled {
-                if check_sphere_collision(
+
+            if shape1.enabled
+                && shape2.enabled
+                && check_sphere_collision(
                     transform1.position,
                     shape1.radius,
                     transform2.position,
                     shape2.radius,
-                ) {
-                    // TODO: Emit collision event
-                    // For now, we just detect the collision
-                }
+                )
+            {
+                // TODO: Emit collision event
+                // For now, we just detect the collision
             }
         }
     }
-    
+
     // Projectile-to-ship collisions are handled by damage_system
     // This is here for completeness and future expansion
 }
@@ -273,14 +262,14 @@ pub fn impact_momentum_system(
 ) {
     // TODO: This would be triggered by collision events
     // For now, it's a placeholder showing the concept
-    
+
     for (_ship_transform, ship_data, effects) in ships.iter_mut() {
         for (projectile_transform, _projectile) in projectiles.iter() {
             // If projectile hit ship (detected by damage system)
             // Calculate momentum transfer
             let projectile_mass = 1.0; // kg
             let momentum_transfer = projectile_transform.velocity * projectile_mass;
-            
+
             // Apply to ship
             let effective_weight = calculate_effective_weight(ship_data.base_weight, effects);
             if effective_weight > 0.0 {
@@ -295,18 +284,18 @@ pub fn impact_momentum_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::world::World;
     use bevy_ecs::system::RunSystemOnce;
+    use bevy_ecs::world::World;
 
     #[test]
     fn test_calculate_effective_weight() {
         let mut effects = StatusEffects::new();
         let base_weight = 1000.0;
-        
+
         // No effects
         let weight = calculate_effective_weight(base_weight, &effects);
         assert_eq!(weight, 1000.0);
-        
+
         // With Graviton effect
         effects.apply(StatusEffectType::GravitonWeight, 5.0);
         let weight = calculate_effective_weight(base_weight, &effects);
@@ -321,11 +310,11 @@ mod tests {
             velocity: Vector3::zeros(),
             angular_velocity: Vector3::zeros(),
         };
-        
+
         let mut accumulator = ForceAccumulator::new();
-        
+
         apply_engine_thrust(&transform, 1000.0, &mut accumulator);
-        
+
         let total_force = accumulator.total_force();
         assert!((total_force.z - 1000.0).abs() < 0.01); // Force in Z direction
     }
@@ -334,9 +323,9 @@ mod tests {
     fn test_apply_drag() {
         let velocity = Vector3::new(100.0, 0.0, 0.0);
         let mut accumulator = ForceAccumulator::new();
-        
+
         apply_drag(velocity, constants::SPACE_DRAG, &mut accumulator);
-        
+
         let total_force = accumulator.total_force();
         assert!(total_force.x < 0.0); // Drag opposes velocity
     }
@@ -345,16 +334,16 @@ mod tests {
     fn test_check_sphere_collision() {
         let pos1 = Vector3::new(0.0, 0.0, 0.0);
         let pos2 = Vector3::new(10.0, 0.0, 0.0);
-        
+
         // Colliding (overlap)
         assert!(check_sphere_collision(pos1, 6.0, pos2, 6.0));
-        
+
         // Not colliding (gap between)
         assert!(!check_sphere_collision(pos1, 4.0, pos2, 4.0));
-        
+
         // Just touching (distance = sum of radii, considered touching but not colliding)
         assert!(!check_sphere_collision(pos1, 5.0, pos2, 5.0));
-        
+
         // Clearly colliding (one inside the other)
         assert!(check_sphere_collision(pos1, 10.0, pos2, 5.0));
     }
@@ -362,15 +351,15 @@ mod tests {
     #[test]
     fn test_force_accumulator() {
         let mut accumulator = ForceAccumulator::new();
-        
+
         accumulator.add_force(Force::new(Vector3::new(10.0, 0.0, 0.0)));
         accumulator.add_force(Force::new(Vector3::new(0.0, 20.0, 0.0)));
-        
+
         let total = accumulator.total_force();
         assert_eq!(total.x, 10.0);
         assert_eq!(total.y, 20.0);
         assert_eq!(total.z, 0.0);
-        
+
         accumulator.clear();
         assert_eq!(accumulator.forces.len(), 0);
     }
@@ -378,38 +367,47 @@ mod tests {
     #[test]
     fn test_physics_integration_basic() {
         let mut world = World::new();
-        
-        let ship = world.spawn((
-            Transform {
-                position: Vector3::zeros(),
-                rotation: nalgebra::UnitQuaternion::identity(),
-                velocity: Vector3::zeros(),
-                angular_velocity: Vector3::zeros(),
-            },
-            ForceAccumulator::new(),
-            ShipData::new(
-                "ship1".to_string(),
-                "Test Ship".to_string(),
-                "battleship".to_string(),
-                "team1".to_string(),
-                1000.0,
-                500.0,
-                1000.0, // 1000 kg
-            ),
-            StatusEffects::new(),
-        )).id();
-        
+
+        let ship = world
+            .spawn((
+                Transform {
+                    position: Vector3::zeros(),
+                    rotation: nalgebra::UnitQuaternion::identity(),
+                    velocity: Vector3::zeros(),
+                    angular_velocity: Vector3::zeros(),
+                },
+                ForceAccumulator::new(),
+                ShipData::new(
+                    "ship1".to_string(),
+                    "Test Ship".to_string(),
+                    "battleship".to_string(),
+                    "team1".to_string(),
+                    1000.0,
+                    500.0,
+                    1000.0, // 1000 kg
+                ),
+                StatusEffects::new(),
+            ))
+            .id();
+
         // Apply a force
-        world.get_mut::<ForceAccumulator>(ship).unwrap()
+        world
+            .get_mut::<ForceAccumulator>(ship)
+            .unwrap()
             .add_force(Force::new(Vector3::new(1000.0, 0.0, 0.0))); // 1000 N
-        
+
         // Run integration with 1 second
-        world.run_system_once(
-            |query: Query<(&mut Transform, &mut ForceAccumulator, &ShipData, &StatusEffects)>| {
+        let _ = world.run_system_once(
+            |query: Query<(
+                &mut Transform,
+                &mut ForceAccumulator,
+                &ShipData,
+                &StatusEffects,
+            )>| {
                 physics_integration_system(query, 1.0);
-            }
+            },
         );
-        
+
         let transform = world.get::<Transform>(ship).unwrap();
         // F = ma, a = F/m = 1000/1000 = 1 m/s²
         // v = v0 + at = 0 + 1*1 = 1 m/s
@@ -419,41 +417,50 @@ mod tests {
     #[test]
     fn test_physics_integration_with_graviton() {
         let mut world = World::new();
-        
+
         let mut effects = StatusEffects::new();
         effects.apply(StatusEffectType::GravitonWeight, 10.0);
-        
-        let ship = world.spawn((
-            Transform {
-                position: Vector3::zeros(),
-                rotation: nalgebra::UnitQuaternion::identity(),
-                velocity: Vector3::zeros(),
-                angular_velocity: Vector3::zeros(),
-            },
-            ForceAccumulator::new(),
-            ShipData::new(
-                "ship1".to_string(),
-                "Test Ship".to_string(),
-                "battleship".to_string(),
-                "team1".to_string(),
-                1000.0,
-                500.0,
-                1000.0, // 1000 kg base
-            ),
-            effects,
-        )).id();
-        
+
+        let ship = world
+            .spawn((
+                Transform {
+                    position: Vector3::zeros(),
+                    rotation: nalgebra::UnitQuaternion::identity(),
+                    velocity: Vector3::zeros(),
+                    angular_velocity: Vector3::zeros(),
+                },
+                ForceAccumulator::new(),
+                ShipData::new(
+                    "ship1".to_string(),
+                    "Test Ship".to_string(),
+                    "battleship".to_string(),
+                    "team1".to_string(),
+                    1000.0,
+                    500.0,
+                    1000.0, // 1000 kg base
+                ),
+                effects,
+            ))
+            .id();
+
         // Apply same force as before
-        world.get_mut::<ForceAccumulator>(ship).unwrap()
+        world
+            .get_mut::<ForceAccumulator>(ship)
+            .unwrap()
             .add_force(Force::new(Vector3::new(1000.0, 0.0, 0.0)));
-        
+
         // Run integration
-        world.run_system_once(
-            |query: Query<(&mut Transform, &mut ForceAccumulator, &ShipData, &StatusEffects)>| {
+        let _ = world.run_system_once(
+            |query: Query<(
+                &mut Transform,
+                &mut ForceAccumulator,
+                &ShipData,
+                &StatusEffects,
+            )>| {
                 physics_integration_system(query, 1.0);
-            }
+            },
         );
-        
+
         let transform = world.get::<Transform>(ship).unwrap();
         // Effective mass is doubled (2000 kg)
         // a = F/m = 1000/2000 = 0.5 m/s²
@@ -466,10 +473,10 @@ mod tests {
         let shape = CollisionShape::sphere(10.0);
         assert_eq!(shape.radius, 10.0);
         assert!(shape.enabled);
-        
+
         let ship_shape = CollisionShape::ship();
         assert_eq!(ship_shape.radius, constants::DEFAULT_SHIP_RADIUS);
-        
+
         let proj_shape = CollisionShape::projectile();
         assert_eq!(proj_shape.radius, constants::DEFAULT_PROJECTILE_RADIUS);
     }

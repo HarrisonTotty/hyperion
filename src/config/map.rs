@@ -290,7 +290,7 @@ mod tests {
             + config.stars.type_probabilities.red_dwarf
             + config.stars.type_probabilities.neutron
             + config.stars.type_probabilities.black_hole;
-        
+
         // Should sum to approximately 1.0
         assert!((sum - 1.0).abs() < 0.01);
     }
@@ -304,7 +304,7 @@ mod tests {
             + config.systems.planets.type_probabilities.ice
             + config.systems.planets.type_probabilities.volcanic
             + config.systems.planets.type_probabilities.ocean;
-        
+
         assert!((sum - 1.0).abs() < 0.01);
     }
 
@@ -313,8 +313,11 @@ mod tests {
         let config = MapConfig::default();
         let yaml = serde_yaml::to_string(&config).unwrap();
         let deserialized: MapConfig = serde_yaml::from_str(&yaml).unwrap();
-        
+
         assert_eq!(config.galaxy.radius, deserialized.galaxy.radius);
-        assert_eq!(config.generation.default_stars, deserialized.generation.default_stars);
+        assert_eq!(
+            config.generation.default_stars,
+            deserialized.generation.default_stars
+        );
     }
 }

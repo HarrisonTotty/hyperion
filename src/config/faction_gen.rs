@@ -271,7 +271,7 @@ mod tests {
             + config.governments.probabilities.collective
             + config.governments.probabilities.theocracy
             + config.governments.probabilities.anarchy;
-        
+
         assert!((sum - 1.0).abs() < 0.01);
     }
 
@@ -280,8 +280,11 @@ mod tests {
         let config = FactionGenConfig::default();
         let yaml = serde_yaml::to_string(&config).unwrap();
         let deserialized: FactionGenConfig = serde_yaml::from_str(&yaml).unwrap();
-        
+
         assert_eq!(config.traits.min_traits, deserialized.traits.min_traits);
-        assert_eq!(config.relationships.thresholds.allied_min, deserialized.relationships.thresholds.allied_min);
+        assert_eq!(
+            config.relationships.thresholds.allied_min,
+            deserialized.relationships.thresholds.allied_min
+        );
     }
 }

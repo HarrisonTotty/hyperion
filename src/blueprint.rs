@@ -8,8 +8,8 @@
 //! - Module count and restrictions
 //! - Module and weapon configuration validation
 
-use crate::models::{ShipBlueprint, Player, Team};
 use crate::config::{GameConfig, ShipClassConfig};
+use crate::models::{Player, ShipBlueprint, Team};
 use std::collections::HashMap;
 
 /// Validation error types
@@ -36,7 +36,11 @@ pub enum ValidationError {
     /// Required module missing
     RequiredModuleMissing(String),
     /// Module exceeds max_allowed count
-    ModuleCountLimitExceeded { module_slot_id: String, current: usize, max: u32 },
+    ModuleCountLimitExceeded {
+        module_slot_id: String,
+        current: usize,
+        max: u32,
+    },
     /// Module requires variant selection but variant_id is not configured
     VariantNotConfigured { module_slot_id: String },
     /// Not all players are ready
@@ -150,7 +154,7 @@ impl<'a> BlueprintValidator<'a> {
         // Calculate and validate weight
         let total_weight = self.calculate_total_weight(blueprint);
         result.set_total_weight(total_weight);
-        
+
         if total_weight > ship_class.max_weight as u32 {
             result.add_error(ValidationError::WeightLimitExceeded {
                 current: total_weight,
@@ -168,21 +172,23 @@ impl<'a> BlueprintValidator<'a> {
         }
 
         // Check for unconfigured modules
-        let unconfigured: Vec<String> = blueprint.modules.iter()
+        let unconfigured: Vec<String> = blueprint
+            .modules
+            .iter()
             .filter(|m| m.variant_id.is_none())
             .map(|m| m.module_slot_id.clone())
             .collect();
-        
+
         if !unconfigured.is_empty() {
             result.add_warning(ValidationWarning::UnconfiguredModules(unconfigured));
         }
-        
+
         // Phase 2.3: Validate required modules
         self.validate_required_modules(blueprint, &mut result);
-        
+
         // Phase 2.3: Validate max_allowed counts
         self.validate_max_allowed(blueprint, &mut result);
-        
+
         // Phase 2.3: Validate variant configuration
         self.validate_module_variants(blueprint, &mut result);
 
@@ -210,20 +216,24 @@ impl<'a> BlueprintValidator<'a> {
 
     /// Validate ship class exists in configuration
     fn validate_ship_class(&self, class_id: &str) -> Result<&ShipClassConfig, ValidationError> {
-        self.config.ship_classes.iter()
+        self.config
+            .ship_classes
+            .iter()
             .find(|sc| sc.id == class_id)
             .ok_or_else(|| ValidationError::InvalidShipClass(class_id.to_string()))
     }
 
     /// Validate team exists
     fn validate_team(&self, team_id: &str) -> Result<&Team, ValidationError> {
-        self.teams.get(team_id)
+        self.teams
+            .get(team_id)
             .ok_or_else(|| ValidationError::InvalidTeam(team_id.to_string()))
     }
 
     /// Validate player exists
     fn validate_player(&self, player_id: &str) -> Result<&Player, ValidationError> {
-        self.players.get(player_id)
+        self.players
+            .get(player_id)
             .ok_or_else(|| ValidationError::InvalidPlayer(player_id.to_string()))
     }
 
@@ -259,7 +269,7 @@ impl<'a> BlueprintValidator<'a> {
             }
         }
     }
-    
+
     /// Validate that all required modules are present
     ///
     /// Checks modules.yaml for modules with `required: true` and ensures
@@ -268,43 +278,48 @@ impl<'a> BlueprintValidator<'a> {
         for (module_slot_id, template) in &self.config.modules.modules {
             if template.required {
                 // Check if this required module exists in the blueprint
-                let has_module = blueprint.modules.iter()
+                let has_module = blueprint
+                    .modules
+                    .iter()
                     .any(|m| &m.module_slot_id == module_slot_id);
                 if !has_module {
                     result.add_error(ValidationError::RequiredModuleMissing(
-                        template.name.clone()
+                        template.name.clone(),
                     ));
                 }
             }
         }
     }
-    
+
     /// Validate that no module exceeds max_allowed count
     ///
     /// Checks modules.yaml for max_allowed constraints and counts instances
     /// in the blueprint to ensure limits are not exceeded.
     fn validate_max_allowed(&self, blueprint: &ShipBlueprint, result: &mut ValidationResult) {
         use std::collections::HashMap;
-        
+
         // Count instances of each module type
         let mut module_counts: HashMap<String, usize> = HashMap::new();
         for module in &blueprint.modules {
-            *module_counts.entry(module.module_slot_id.clone()).or_insert(0) += 1;
+            *module_counts
+                .entry(module.module_slot_id.clone())
+                .or_insert(0) += 1;
         }
         // Check against max_allowed constraints
         for (module_slot_id, count) in module_counts {
-            if let Some(template) = self.config.modules.modules.get(&module_slot_id) {
-                if template.max_allowed > 0 && count > template.max_allowed as usize {
-                    result.add_error(ValidationError::ModuleCountLimitExceeded {
-                        module_slot_id: template.name.clone(),
-                        current: count,
-                        max: template.max_allowed,
-                    });
-                }
+            if let Some(template) = self.config.modules.modules.get(&module_slot_id)
+                && template.max_allowed > 0
+                && count > template.max_allowed as usize
+            {
+                result.add_error(ValidationError::ModuleCountLimitExceeded {
+                    module_slot_id: template.name.clone(),
+                    current: count,
+                    max: template.max_allowed,
+                });
             }
         }
     }
-    
+
     /// Validate that modules requiring variant selection have kind configured
     ///
     /// Checks if a module type has variants defined in config. If so, the module
@@ -320,10 +335,15 @@ impl<'a> BlueprintValidator<'a> {
                     });
                 } else if let Some(variant_id) = &module.variant_id {
                     // Validate that the variant exists in available variants
-                    if self.config.get_module_variant(&module.module_slot_id, variant_id).is_none() {
-                        result.add_error(ValidationError::InvalidModuleConfiguration(
-                            format!("Invalid variant '{}' for module slot '{}'", variant_id, module.module_slot_id)
-                        ));
+                    if self
+                        .config
+                        .get_module_variant(&module.module_slot_id, variant_id)
+                        .is_none()
+                    {
+                        result.add_error(ValidationError::InvalidModuleConfiguration(format!(
+                            "Invalid variant '{}' for module slot '{}'",
+                            variant_id, module.module_slot_id
+                        )));
                     }
                 }
             }
@@ -376,9 +396,9 @@ mod tests {
     use crate::models::role::ShipRole;
 
     fn create_test_ship_class() -> ShipClassConfig {
-        use crate::config::{ShipSize, ShipClassRole};
+        use crate::config::{ShipClassRole, ShipSize};
         use std::collections::HashMap;
-        
+
         let mut ship = ShipClassConfig {
             name: "Test Cruiser".to_string(),
             description: "A test ship class".to_string(),
@@ -419,16 +439,29 @@ mod tests {
     }
 
     fn create_test_config() -> GameConfig {
-        use crate::config::{AiConfig, FactionsConfig, MapConfig, ModulesConfig, RacesConfig, SimulationConfig};
+        use crate::config::{
+            AiConfig, FactionsConfig, MapConfig, ModulesConfig, RacesConfig, SimulationConfig,
+        };
         use std::collections::HashMap;
-        
+
         GameConfig {
-            ai: AiConfig { difficulty: "medium".to_string(), response_time: 1.0 },
+            ai: AiConfig {
+                difficulty: "medium".to_string(),
+                response_time: 1.0,
+            },
             factions: FactionsConfig { factions: vec![] },
-            map: MapConfig { galaxy_size: 1000, star_density: 0.5 },
-            modules: ModulesConfig { modules: HashMap::new() },
+            map: MapConfig {
+                galaxy_size: 1000,
+                star_density: 0.5,
+            },
+            modules: ModulesConfig {
+                modules: HashMap::new(),
+            },
             races: RacesConfig { races: vec![] },
-            simulation: SimulationConfig { tick_rate: 60.0, physics_enabled: true },
+            simulation: SimulationConfig {
+                tick_rate: 60.0,
+                physics_enabled: true,
+            },
             ship_classes: vec![create_test_ship_class()],
             module_definitions: vec![],
             weapon_definitions: vec![],
@@ -489,13 +522,18 @@ mod tests {
         let result = validator.validate(&blueprint);
 
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::NoPlayers)));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::NoPlayers))
+        );
     }
 
     #[test]
     fn test_validate_player_no_roles() {
         let config = create_test_config();
-        
+
         let mut players = HashMap::new();
         players.insert("player1".to_string(), create_test_player("player1"));
 
@@ -515,13 +553,18 @@ mod tests {
         let result = validator.validate(&blueprint);
 
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::NoRolesAssigned(_))));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::NoRolesAssigned(_)))
+        );
     }
 
     #[test]
     fn test_validate_players_not_ready() {
         let config = create_test_config();
-        
+
         let mut players = HashMap::new();
         players.insert("player1".to_string(), create_test_player("player1"));
 
@@ -541,13 +584,18 @@ mod tests {
         let result = validator.validate(&blueprint);
 
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::PlayersNotReady)));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::PlayersNotReady))
+        );
     }
 
     #[test]
     fn test_validate_weight_limit() {
         let config = create_test_config();
-        
+
         let mut players = HashMap::new();
         players.insert("player1".to_string(), create_test_player("player1"));
 
@@ -566,24 +614,31 @@ mod tests {
 
         // Add many modules to exceed weight limit (each module = 100kg placeholder)
         for i in 0..15 {
-            blueprint.modules.push(crate::models::blueprint::ModuleInstance {
-                id: format!("module_{}", i),
-                module_slot_id: "test_module_slot".to_string(),
-                variant_id: None,
-            });
+            blueprint
+                .modules
+                .push(crate::models::blueprint::ModuleInstance {
+                    id: format!("module_{}", i),
+                    module_slot_id: "test_module_slot".to_string(),
+                    variant_id: None,
+                });
         }
 
         let validator = BlueprintValidator::new(&config, &players, &teams);
         let result = validator.validate(&blueprint);
 
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::WeightLimitExceeded { .. })));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::WeightLimitExceeded { .. }))
+        );
     }
 
     #[test]
     fn test_validate_module_count_limit() {
         let config = create_test_config();
-        
+
         let mut players = HashMap::new();
         players.insert("player1".to_string(), create_test_player("player1"));
 
@@ -602,24 +657,31 @@ mod tests {
 
         // Add more modules than allowed (max_modules = 10)
         for i in 0..12 {
-            blueprint.modules.push(crate::models::blueprint::ModuleInstance {
-                id: format!("module_{}", i),
-                module_slot_id: "test_module_slot".to_string(),
-                variant_id: None,
-            });
+            blueprint
+                .modules
+                .push(crate::models::blueprint::ModuleInstance {
+                    id: format!("module_{}", i),
+                    module_slot_id: "test_module_slot".to_string(),
+                    variant_id: None,
+                });
         }
 
         let validator = BlueprintValidator::new(&config, &players, &teams);
         let result = validator.validate(&blueprint);
 
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::ModuleCountExceeded { .. })));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::ModuleCountExceeded { .. }))
+        );
     }
 
     #[test]
     fn test_validate_valid_blueprint() {
         let config = create_test_config();
-        
+
         let mut players = HashMap::new();
         players.insert("player1".to_string(), create_test_player("player1"));
 
@@ -633,16 +695,21 @@ mod tests {
             "test_cruiser".to_string(),
             "team1".to_string(),
         );
-        blueprint.set_player_roles("player1".to_string(), vec![ShipRole::Captain, ShipRole::Helm]);
+        blueprint.set_player_roles(
+            "player1".to_string(),
+            vec![ShipRole::Captain, ShipRole::Helm],
+        );
         blueprint.mark_ready("player1".to_string());
 
         // Add a few modules (within limits)
         for i in 0..5 {
-            blueprint.modules.push(crate::models::blueprint::ModuleInstance {
-                id: format!("module_{}", i),
-                module_slot_id: "test_module_slot".to_string(),
-                variant_id: Some("test_variant".to_string()),
-            });
+            blueprint
+                .modules
+                .push(crate::models::blueprint::ModuleInstance {
+                    id: format!("module_{}", i),
+                    module_slot_id: "test_module_slot".to_string(),
+                    variant_id: Some("test_variant".to_string()),
+                });
         }
 
         let validator = BlueprintValidator::new(&config, &players, &teams);

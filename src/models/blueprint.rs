@@ -2,9 +2,9 @@
 //!
 //! Defines structures for ships in the design phase.
 
+use super::role::ShipRole;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use super::role::ShipRole;
 
 /// Represents a ship in the design phase
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,28 +65,30 @@ impl ShipBlueprint {
             ready_players: HashSet::new(),
         }
     }
-    
+
     /// Add or update player roles
     pub fn set_player_roles(&mut self, player_id: String, roles: Vec<ShipRole>) {
         self.player_roles.insert(player_id, roles);
     }
-    
+
     /// Mark a player as ready
     pub fn mark_ready(&mut self, player_id: String) {
         self.ready_players.insert(player_id);
     }
-    
+
     /// Unmark a player as ready
     pub fn unmark_ready(&mut self, player_id: &str) {
         self.ready_players.remove(player_id);
     }
-    
+
     /// Check if all players are ready
     pub fn all_players_ready(&self) -> bool {
         if self.player_roles.is_empty() {
             return false;
         }
-        self.player_roles.keys().all(|pid| self.ready_players.contains(pid))
+        self.player_roles
+            .keys()
+            .all(|pid| self.ready_players.contains(pid))
     }
 }
 
@@ -101,24 +103,27 @@ mod tests {
             "cruiser".to_string(),
             "team1".to_string(),
         );
-        
+
         assert_eq!(blueprint.name, "USS Enterprise");
         assert_eq!(blueprint.class, "cruiser");
         assert!(blueprint.modules.is_empty());
         assert!(blueprint.weapons.is_empty());
-        
+
         // Set player roles
-        blueprint.set_player_roles("player1".to_string(), vec![ShipRole::Captain, ShipRole::Helm]);
+        blueprint.set_player_roles(
+            "player1".to_string(),
+            vec![ShipRole::Captain, ShipRole::Helm],
+        );
         blueprint.set_player_roles("player2".to_string(), vec![ShipRole::Engineering]);
         assert_eq!(blueprint.player_roles.len(), 2);
-        
+
         // Ready status
         assert!(!blueprint.all_players_ready());
         blueprint.mark_ready("player1".to_string());
         assert!(!blueprint.all_players_ready());
         blueprint.mark_ready("player2".to_string());
         assert!(blueprint.all_players_ready());
-        
+
         // Unmark ready
         blueprint.unmark_ready("player1");
         assert!(!blueprint.all_players_ready());
@@ -133,7 +138,7 @@ mod tests {
         };
         assert_eq!(module.variant_id, Some("fusion".to_string()));
     }
-    
+
     #[test]
     fn test_weapon_instance() {
         let weapon = WeaponInstance {

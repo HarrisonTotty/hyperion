@@ -10,20 +10,20 @@
 //! - `status` - Ship status, effects, and inventory
 //! - `weapon` - Weapon tags and definitions
 
+pub mod blueprint;
 pub mod player;
 pub mod role;
-pub mod blueprint;
 pub mod ship;
 pub mod status;
 pub mod weapon;
 
 // Re-export commonly used types for convenience
+pub use blueprint::{ModuleInstance, ShipBlueprint, WeaponInstance};
 pub use player::{Player, Team};
 pub use role::ShipRole;
-pub use blueprint::{ShipBlueprint, ModuleInstance, WeaponInstance};
-pub use ship::{Ship, CompiledModule};
-pub use status::{ShipStatus, StatusEffect, StatusEffectType, Inventory};
-pub use weapon::{WeaponTag, WeaponFireMode, Weapon};
+pub use ship::{CompiledModule, Ship};
+pub use status::{Inventory, ShipStatus, StatusEffect, StatusEffectType};
+pub use weapon::{Weapon, WeaponFireMode, WeaponTag};
 
 // Legacy export for backward compatibility
 /// Represents a ship module slot (legacy, use ModuleInstance)

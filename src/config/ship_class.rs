@@ -2,9 +2,9 @@
 //!
 //! Defines ship class specifications and constraints.
 
+use crate::config::bonus::{BonusConfig, FormattedBonus};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::config::bonus::{BonusConfig, FormattedBonus};
 
 /// Ship size categories
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,18 +57,18 @@ pub struct ShipClassConfig {
     // Derived field (not in YAML, populated from filename)
     #[serde(skip)]
     pub id: String,
-    
+
     // Default to 0 if not specified in YAML
     #[serde(default)]
     pub base_shields: f32,
-    
+
     // ========== Phase 2.6: Enhanced Fields ==========
-    
+
     // Faction-Specific Data
     /// Primary manufacturer by faction ID
     #[serde(default)]
     pub manufacturers: HashMap<String, FactionManufacturer>,
-    
+
     // Technical Specifications
     /// Length in meters
     #[serde(default)]
@@ -91,7 +91,7 @@ pub struct ShipClassConfig {
     /// Cargo capacity in cubic meters
     #[serde(default)]
     pub cargo_capacity: Option<f32>,
-    
+
     // Performance Characteristics
     /// Maximum sublight acceleration in m/s²
     #[serde(default)]
@@ -108,7 +108,7 @@ pub struct ShipClassConfig {
     /// Sensor range in kilometers
     #[serde(default)]
     pub sensor_range: Option<f32>,
-    
+
     // Operational Metadata
     /// Typical operational range in AU
     #[serde(default)]
@@ -125,7 +125,7 @@ pub struct ShipClassConfig {
     /// Fuel consumption rate per hour
     #[serde(default)]
     pub fuel_consumption: Option<f32>,
-    
+
     // Lore and Flavor
     /// Historical background or design notes
     #[serde(default)]
@@ -154,7 +154,7 @@ impl ShipClassConfig {
     pub fn set_id(&mut self, id: String) {
         self.id = id;
     }
-    
+
     /// Validate ship class configuration
     pub fn validate(&self) -> Result<(), String> {
         if self.id.is_empty() {
@@ -164,20 +164,32 @@ impl ShipClassConfig {
             return Err("Ship class name cannot be empty".to_string());
         }
         if self.base_hull <= 0.0 {
-            return Err(format!("Ship class {} must have positive base_hull", self.id));
+            return Err(format!(
+                "Ship class {} must have positive base_hull",
+                self.id
+            ));
         }
         if self.base_shields < 0.0 {
-            return Err(format!("Ship class {} cannot have negative base_shields", self.id));
+            return Err(format!(
+                "Ship class {} cannot have negative base_shields",
+                self.id
+            ));
         }
         if self.max_weight <= 0.0 {
-            return Err(format!("Ship class {} must have positive max_weight", self.id));
+            return Err(format!(
+                "Ship class {} must have positive max_weight",
+                self.id
+            ));
         }
         if self.max_modules == 0 {
-            return Err(format!("Ship class {} must allow at least one module", self.id));
+            return Err(format!(
+                "Ship class {} must allow at least one module",
+                self.id
+            ));
         }
         Ok(())
     }
-    
+
     /// Get formatted bonuses grouped by category
     ///
     /// # Arguments
@@ -193,11 +205,11 @@ impl ShipClassConfig {
     ) -> HashMap<String, Vec<FormattedBonus>> {
         bonus_config.format_bonuses_by_category(&self.bonuses)
     }
-    
+
     /// Get technical specifications as a structured map
     pub fn get_technical_specs(&self) -> HashMap<String, String> {
         let mut specs = HashMap::new();
-        
+
         if let Some(length) = self.length {
             specs.insert("Length".to_string(), format!("{:.1} m", length));
         }
@@ -231,10 +243,10 @@ impl ShipClassConfig {
         if let Some(range) = self.operational_range {
             specs.insert("Range".to_string(), format!("{:.1} AU", range));
         }
-        
+
         specs
     }
-    
+
     /// Get manufacturer info for a specific faction
     pub fn get_manufacturer(&self, faction_id: &str) -> Option<&FactionManufacturer> {
         self.manufacturers.get(faction_id)

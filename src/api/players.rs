@@ -2,9 +2,9 @@
 //!
 //! REST API endpoints for player management operations.
 
-use rocket::{routes, Route, State, get, post, delete};
-use rocket::serde::json::Json;
 use rocket::http::Status;
+use rocket::serde::json::Json;
+use rocket::{Route, State, delete, get, post, routes};
 use serde::{Deserialize, Serialize};
 
 use crate::state::SharedGameWorld;
@@ -57,7 +57,7 @@ pub struct ErrorResponse {
 pub fn list_players(world: &State<SharedGameWorld>) -> Json<ListPlayersResponse> {
     let world = world.read().unwrap();
     let players = world.get_all_players();
-    
+
     let player_responses: Vec<PlayerResponse> = players
         .into_iter()
         .map(|p| PlayerResponse {
@@ -65,9 +65,9 @@ pub fn list_players(world: &State<SharedGameWorld>) -> Json<ListPlayersResponse>
             name: p.name.clone(),
         })
         .collect();
-    
+
     let count = player_responses.len();
-    
+
     Json(ListPlayersResponse {
         players: player_responses,
         count,
@@ -85,7 +85,7 @@ pub fn create_player(
     request: Json<CreatePlayerRequest>,
 ) -> Result<Json<CreatePlayerResponse>, (Status, Json<ErrorResponse>)> {
     let mut world = world.write().unwrap();
-    
+
     match world.register_player(request.name.clone()) {
         Ok(player_id) => {
             let player = world.get_player(&player_id).unwrap();
@@ -94,12 +94,7 @@ pub fn create_player(
                 name: player.name.clone(),
             }))
         }
-        Err(err) => {
-            Err((
-                Status::BadRequest,
-                Json(ErrorResponse { error: err }),
-            ))
-        }
+        Err(err) => Err((Status::BadRequest, Json(ErrorResponse { error: err }))),
     }
 }
 
@@ -112,7 +107,7 @@ pub fn get_player(
     id: String,
 ) -> Result<Json<PlayerResponse>, (Status, Json<ErrorResponse>)> {
     let world = world.read().unwrap();
-    
+
     match world.get_player(&id) {
         Some(player) => Ok(Json(PlayerResponse {
             id: player.id.clone(),
@@ -137,13 +132,10 @@ pub fn delete_player(
     id: String,
 ) -> Result<Status, (Status, Json<ErrorResponse>)> {
     let mut world = world.write().unwrap();
-    
+
     match world.remove_player(&id) {
         Ok(_) => Ok(Status::NoContent),
-        Err(err) => Err((
-            Status::NotFound,
-            Json(ErrorResponse { error: err }),
-        )),
+        Err(err) => Err((Status::NotFound, Json(ErrorResponse { error: err }))),
     }
 }
 
@@ -155,24 +147,22 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket::local::blocking::Client;
-    use rocket::Build;
     use crate::state::GameWorld;
+    use rocket::Build;
+    use rocket::local::blocking::Client;
 
     fn create_test_rocket() -> rocket::Rocket<Build> {
         let world = GameWorld::new_shared();
-        rocket::build()
-            .manage(world)
-            .mount("/", routes())
+        rocket::build().manage(world).mount("/", routes())
     }
 
     #[test]
     fn test_list_players_empty() {
         let client = Client::tracked(create_test_rocket()).unwrap();
         let response = client.get("/v1/players").dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: ListPlayersResponse = response.into_json().unwrap();
         assert_eq!(body.count, 0);
         assert_eq!(body.players.len(), 0);
@@ -181,16 +171,16 @@ mod tests {
     #[test]
     fn test_create_player() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         let response = client
             .post("/v1/players")
             .json(&CreatePlayerRequest {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: CreatePlayerResponse = response.into_json().unwrap();
         assert_eq!(body.name, "Alice");
         assert!(!body.id.is_empty());
@@ -199,7 +189,7 @@ mod tests {
     #[test]
     fn test_create_player_duplicate_name() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create first player
         client
             .post("/v1/players")
@@ -207,7 +197,7 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        
+
         // Try to create duplicate
         let response = client
             .post("/v1/players")
@@ -215,9 +205,9 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("already taken"));
     }
@@ -225,7 +215,7 @@ mod tests {
     #[test]
     fn test_create_player_invalid_name() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Empty name
         let response = client
             .post("/v1/players")
@@ -233,9 +223,9 @@ mod tests {
                 name: "".to_string(),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
-        
+
         // Invalid characters
         let response = client
             .post("/v1/players")
@@ -243,14 +233,14 @@ mod tests {
                 name: "Alice@123".to_string(),
             })
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::BadRequest);
     }
 
     #[test]
     fn test_get_player() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create player
         let create_response = client
             .post("/v1/players")
@@ -258,17 +248,15 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        
+
         let create_body: CreatePlayerResponse = create_response.into_json().unwrap();
         let player_id = create_body.id;
-        
+
         // Get player
-        let response = client
-            .get(format!("/v1/players/{}", player_id))
-            .dispatch();
-        
+        let response = client.get(format!("/v1/players/{}", player_id)).dispatch();
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: PlayerResponse = response.into_json().unwrap();
         assert_eq!(body.id, player_id);
         assert_eq!(body.name, "Alice");
@@ -277,13 +265,11 @@ mod tests {
     #[test]
     fn test_get_player_not_found() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
-        let response = client
-            .get("/v1/players/nonexistent-id")
-            .dispatch();
-        
+
+        let response = client.get("/v1/players/nonexistent-id").dispatch();
+
         assert_eq!(response.status(), Status::NotFound);
-        
+
         let body: ErrorResponse = response.into_json().unwrap();
         assert!(body.error.contains("not found"));
     }
@@ -291,7 +277,7 @@ mod tests {
     #[test]
     fn test_delete_player() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create player
         let create_response = client
             .post("/v1/players")
@@ -299,40 +285,36 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        
+
         let create_body: CreatePlayerResponse = create_response.into_json().unwrap();
         let player_id = create_body.id;
-        
+
         // Delete player
         let response = client
             .delete(format!("/v1/players/{}", player_id))
             .dispatch();
-        
+
         assert_eq!(response.status(), Status::NoContent);
-        
+
         // Verify player is gone
-        let response = client
-            .get(format!("/v1/players/{}", player_id))
-            .dispatch();
-        
+        let response = client.get(format!("/v1/players/{}", player_id)).dispatch();
+
         assert_eq!(response.status(), Status::NotFound);
     }
 
     #[test]
     fn test_delete_player_not_found() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
-        let response = client
-            .delete("/v1/players/nonexistent-id")
-            .dispatch();
-        
+
+        let response = client.delete("/v1/players/nonexistent-id").dispatch();
+
         assert_eq!(response.status(), Status::NotFound);
     }
 
     #[test]
     fn test_list_players_with_data() {
         let client = Client::tracked(create_test_rocket()).unwrap();
-        
+
         // Create multiple players
         client
             .post("/v1/players")
@@ -340,19 +322,19 @@ mod tests {
                 name: "Alice".to_string(),
             })
             .dispatch();
-        
+
         client
             .post("/v1/players")
             .json(&CreatePlayerRequest {
                 name: "Bob".to_string(),
             })
             .dispatch();
-        
+
         // List players
         let response = client.get("/v1/players").dispatch();
-        
+
         assert_eq!(response.status(), Status::Ok);
-        
+
         let body: ListPlayersResponse = response.into_json().unwrap();
         assert_eq!(body.count, 2);
         assert_eq!(body.players.len(), 2);

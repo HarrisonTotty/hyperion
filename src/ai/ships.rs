@@ -3,10 +3,12 @@
 //! This module implements various AI behaviors for NPC ships including
 //! combat, patrol, and trading behaviors.
 
-use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use super::behavior_tree::{BehaviorContext, BehaviorNode, BehaviorStatus, Selector, Sequence, Condition, Action};
+use super::behavior_tree::{
+    Action, BehaviorContext, BehaviorNode, BehaviorStatus, Condition, Selector, Sequence,
+};
 
 /// AI personality type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,7 +106,7 @@ impl ShipAIContext {
             commands: Vec::new(),
         }
     }
-    
+
     pub fn add_command(&mut self, command: AICommand) {
         self.commands.push(command);
     }
@@ -132,7 +134,7 @@ impl CombatAI {
             Box::new(Action::new(Self::idle_patrol)),
         ]))
     }
-    
+
     /// Build defensive combat behavior tree
     pub fn build_defensive() -> Box<dyn BehaviorNode> {
         Box::new(Selector::new(vec![
@@ -151,7 +153,7 @@ impl CombatAI {
             Box::new(Action::new(Self::idle_patrol)),
         ]))
     }
-    
+
     fn is_low_hull(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -160,7 +162,7 @@ impl CombatAI {
             false
         }
     }
-    
+
     fn has_enemy_nearby(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -169,7 +171,7 @@ impl CombatAI {
             false
         }
     }
-    
+
     fn is_under_attack(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -178,7 +180,7 @@ impl CombatAI {
             false
         }
     }
-    
+
     fn select_target(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -193,7 +195,7 @@ impl CombatAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn select_nearest_attacker(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -209,7 +211,7 @@ impl CombatAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn engage_target(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -220,7 +222,7 @@ impl CombatAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn retreat_to_station(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -235,10 +237,10 @@ impl CombatAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn idle_patrol(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
-        if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
+        if ctx.downcast_mut::<ShipAIContext>().is_some() {
             // Simple idle behavior - could be extended
             BehaviorStatus::Success
         } else {
@@ -268,7 +270,7 @@ impl PatrolAI {
             Box::new(Action::new(Self::follow_patrol_route)),
         ]))
     }
-    
+
     fn is_low_hull(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -277,7 +279,7 @@ impl PatrolAI {
             false
         }
     }
-    
+
     fn is_under_attack(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -286,7 +288,7 @@ impl PatrolAI {
             false
         }
     }
-    
+
     fn defend(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -300,7 +302,7 @@ impl PatrolAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn retreat_to_station(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -315,22 +317,22 @@ impl PatrolAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn follow_patrol_route(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
             if ship_ctx.patrol_route.is_empty() {
                 return BehaviorStatus::Failure;
             }
-            
+
             let waypoint = ship_ctx.patrol_route[ship_ctx.waypoint_index];
             ship_ctx.current_waypoint = Some(waypoint);
             ship_ctx.add_command(AICommand::MoveTo { position: waypoint });
-            
+
             // In a real implementation, we'd check if we reached the waypoint
             // For now, just cycle through waypoints
             ship_ctx.waypoint_index = (ship_ctx.waypoint_index + 1) % ship_ctx.patrol_route.len();
-            
+
             BehaviorStatus::Success
         } else {
             BehaviorStatus::Failure
@@ -359,7 +361,7 @@ impl TradingAI {
             Box::new(Action::new(Self::follow_trade_route)),
         ]))
     }
-    
+
     fn is_low_hull(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -368,7 +370,7 @@ impl TradingAI {
             false
         }
     }
-    
+
     fn is_under_attack(ctx: &dyn BehaviorContext) -> bool {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_ref::<ShipAIContext>() {
@@ -377,7 +379,7 @@ impl TradingAI {
             false
         }
     }
-    
+
     fn evade(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -388,7 +390,7 @@ impl TradingAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn retreat_to_station(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -402,7 +404,7 @@ impl TradingAI {
             BehaviorStatus::Failure
         }
     }
-    
+
     fn follow_trade_route(ctx: &mut dyn BehaviorContext) -> BehaviorStatus {
         use super::behavior_tree::BehaviorContextExt;
         if let Some(ship_ctx) = ctx.downcast_mut::<ShipAIContext>() {
@@ -421,98 +423,110 @@ impl TradingAI {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_ship_ai_context_creation() {
         let ship_id = Uuid::new_v4();
         let ctx = ShipAIContext::new(ship_id, "Federation".to_string());
-        
+
         assert_eq!(ctx.ship_id, ship_id);
         assert_eq!(ctx.faction, "Federation");
         assert_eq!(ctx.personality, AIPersonality::Defensive);
         assert_eq!(ctx.hull_integrity, 1.0);
     }
-    
+
     #[test]
     fn test_aggressive_combat_ai() {
         let ship_id = Uuid::new_v4();
         let mut ctx = ShipAIContext::new(ship_id, "Federation".to_string());
         ctx.nearby_ships.push(Uuid::new_v4());
-        
+
         let mut ai = CombatAI::build_aggressive();
         let status = ai.tick(&mut ctx);
-        
+
         assert_eq!(status, BehaviorStatus::Success);
         assert!(!ctx.commands.is_empty());
     }
-    
+
     #[test]
     fn test_defensive_combat_ai_not_under_attack() {
         let ship_id = Uuid::new_v4();
         let mut ctx = ShipAIContext::new(ship_id, "Federation".to_string());
-        
+
         let mut ai = CombatAI::build_defensive();
         let status = ai.tick(&mut ctx);
-        
+
         assert_eq!(status, BehaviorStatus::Success);
     }
-    
+
     #[test]
     fn test_defensive_combat_ai_under_attack() {
         let ship_id = Uuid::new_v4();
         let mut ctx = ShipAIContext::new(ship_id, "Federation".to_string());
         ctx.under_attack = true;
         ctx.nearby_ships.push(Uuid::new_v4());
-        
+
         let mut ai = CombatAI::build_defensive();
         let status = ai.tick(&mut ctx);
-        
+
         assert_eq!(status, BehaviorStatus::Success);
         // Should have commands to engage
-        assert!(ctx.commands.iter().any(|cmd| matches!(cmd, AICommand::FireWeapons)));
+        assert!(
+            ctx.commands
+                .iter()
+                .any(|cmd| matches!(cmd, AICommand::FireWeapons))
+        );
     }
-    
+
     #[test]
     fn test_patrol_ai() {
         let ship_id = Uuid::new_v4();
         let mut ctx = ShipAIContext::new(ship_id, "Federation".to_string());
-        ctx.patrol_route = vec![
-            [0.0, 0.0, 0.0],
-            [100.0, 0.0, 0.0],
-            [100.0, 100.0, 0.0],
-        ];
-        
+        ctx.patrol_route = vec![[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [100.0, 100.0, 0.0]];
+
         let mut ai = PatrolAI::build();
         let status = ai.tick(&mut ctx);
-        
+
         assert_eq!(status, BehaviorStatus::Success);
-        assert!(ctx.commands.iter().any(|cmd| matches!(cmd, AICommand::MoveTo { .. })));
+        assert!(
+            ctx.commands
+                .iter()
+                .any(|cmd| matches!(cmd, AICommand::MoveTo { .. }))
+        );
     }
-    
+
     #[test]
     fn test_trading_ai() {
         let ship_id = Uuid::new_v4();
         let mut ctx = ShipAIContext::new(ship_id, "Federation".to_string());
         ctx.nearest_station = Some(Uuid::new_v4());
-        
+
         let mut ai = TradingAI::build();
         let status = ai.tick(&mut ctx);
-        
+
         assert_eq!(status, BehaviorStatus::Success);
-        assert!(ctx.commands.iter().any(|cmd| matches!(cmd, AICommand::DockAtStation { .. })));
+        assert!(
+            ctx.commands
+                .iter()
+                .any(|cmd| matches!(cmd, AICommand::DockAtStation { .. }))
+        );
     }
-    
+
     #[test]
     fn test_retreat_when_low_hull() {
         let ship_id = Uuid::new_v4();
         let mut ctx = ShipAIContext::new(ship_id, "Federation".to_string());
         ctx.hull_integrity = 0.2; // Low hull
         ctx.nearest_station = Some(Uuid::new_v4());
-        
+
         let mut ai = CombatAI::build_aggressive();
         let status = ai.tick(&mut ctx);
-        
+
         assert_eq!(status, BehaviorStatus::Success);
-        assert!(ctx.commands.iter().any(|cmd| matches!(cmd, AICommand::DockAtStation { .. })));
+        assert!(
+            ctx.commands
+                .iter()
+                .any(|cmd| matches!(cmd, AICommand::DockAtStation { .. }))
+        );
     }
 }

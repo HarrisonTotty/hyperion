@@ -2,8 +2,8 @@
 //!
 //! Handles directed-energy weapons (lasers, beams, plasma, etc.)
 
-use rocket::{Route, State, serde::json::Json, http::Status};
-use rocket::{routes, post, get};
+use rocket::{Route, State, http::Status, serde::json::Json};
+use rocket::{get, post, routes};
 use serde::{Deserialize, Serialize};
 
 use crate::state::SharedGameWorld;
@@ -87,15 +87,15 @@ pub fn set_target(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<SetTargetResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Set energy weapon target
     world.set_energy_weapon_target(ship_id, request.target_id.clone());
-    
+
     Ok(Json(SetTargetResponse {
         success: true,
         target_id: request.target_id.clone(),
@@ -110,15 +110,15 @@ pub fn fire_weapon(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<FireWeaponResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Record weapon fire command
     world.add_weapon_fire_command(ship_id, request.weapon_id.clone());
-    
+
     Ok(Json(FireWeaponResponse {
         success: true,
         weapon_id: request.weapon_id.clone(),
@@ -133,15 +133,15 @@ pub fn toggle_auto(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ToggleAutoResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Set auto-fire mode
     world.set_weapon_auto_fire(ship_id, request.weapon_id.clone(), request.enabled);
-    
+
     Ok(Json(ToggleAutoResponse {
         success: true,
         weapon_id: request.weapon_id.clone(),
@@ -157,15 +157,15 @@ pub fn activate_radial(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<ActivateRadialResponse>, Status> {
     let mut world = world.write().unwrap();
-    
+
     // Check if ship exists
     if !world.ships().contains_key(&ship_id) {
         return Err(Status::NotFound);
     }
-    
+
     // Record radial weapon activation
     world.add_radial_weapon_activation(ship_id, request.weapon_id.clone());
-    
+
     Ok(Json(ActivateRadialResponse {
         success: true,
         weapon_id: request.weapon_id.clone(),
@@ -179,13 +179,14 @@ pub fn get_status(
     world: &State<SharedGameWorld>,
 ) -> Result<Json<WeaponStatusResponse>, Status> {
     let world = world.read().unwrap();
-    
+
     // Check if ship exists
-    let ship = world.ships().get(&ship_id)
-        .ok_or(Status::NotFound)?;
-    
+    let ship = world.ships().get(&ship_id).ok_or(Status::NotFound)?;
+
     // Get energy weapons from ship
-    let weapons: Vec<EnergyWeaponStatus> = ship.weapons.iter()
+    let weapons: Vec<EnergyWeaponStatus> = ship
+        .weapons
+        .iter()
         .map(|w| EnergyWeaponStatus {
             weapon_id: w.id.clone(),
             cooldown: 0.0, // Would be retrieved from simulation
@@ -194,9 +195,9 @@ pub fn get_status(
             tags: vec![], // Tags would be looked up from WeaponConfig
         })
         .collect();
-    
+
     let current_target = world.get_energy_weapon_target(&ship_id);
-    
+
     Ok(Json(WeaponStatusResponse {
         weapons,
         current_target,
@@ -217,15 +218,15 @@ pub fn routes() -> Vec<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::GameWorld;
     use crate::models::ship::Ship;
     use crate::models::status::ShipStatus;
+    use crate::state::GameWorld;
     use std::sync::{Arc, RwLock};
-    
+
     fn setup_test_world() -> SharedGameWorld {
         Arc::new(RwLock::new(GameWorld::new()))
     }
-    
+
     fn create_test_ship(id: &str, team_id: &str) -> Ship {
         Ship {
             id: id.to_string(),
@@ -239,102 +240,102 @@ mod tests {
             inventory: Default::default(),
         }
     }
-    
+
     #[test]
     fn test_set_target() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(SetTargetRequest {
             target_id: "enemy1".to_string(),
         });
-        
-        let result = set_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = set_target("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.target_id, "enemy1");
     }
-    
+
     #[test]
     fn test_set_target_not_found() {
         let world = setup_test_world();
-        
+
         let request = Json(SetTargetRequest {
             target_id: "enemy1".to_string(),
         });
-        
-        let result = set_target("ship1".to_string(), request, &State::from(&world));
+
+        let result = set_target("ship1".to_string(), request, State::from(&world));
         assert_eq!(result.err(), Some(Status::NotFound));
     }
-    
+
     #[test]
     fn test_fire_weapon() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(FireWeaponRequest {
             weapon_id: "laser1".to_string(),
         });
-        
-        let result = fire_weapon("ship1".to_string(), request, &State::from(&world));
+
+        let result = fire_weapon("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.weapon_id, "laser1");
     }
-    
+
     #[test]
     fn test_toggle_auto() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(ToggleAutoRequest {
             weapon_id: "laser1".to_string(),
             enabled: true,
         });
-        
-        let result = toggle_auto("ship1".to_string(), request, &State::from(&world));
+
+        let result = toggle_auto("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.weapon_id, "laser1");
         assert!(response.auto_enabled);
     }
-    
+
     #[test]
     fn test_activate_radial() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
+
         let request = Json(ActivateRadialRequest {
             weapon_id: "emp1".to_string(),
         });
-        
-        let result = activate_radial("ship1".to_string(), request, &State::from(&world));
+
+        let result = activate_radial("ship1".to_string(), request, State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert!(response.success);
         assert_eq!(response.weapon_id, "emp1");
     }
-    
+
     #[test]
     fn test_get_status() {
         let world = setup_test_world();
         let ship = create_test_ship("ship1", "team1");
         world.write().unwrap().add_ship(ship);
-        
-        let result = get_status("ship1".to_string(), &State::from(&world));
+
+        let result = get_status("ship1".to_string(), State::from(&world));
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().into_inner();
         assert_eq!(response.weapons.len(), 0);
         assert_eq!(response.current_target, None);

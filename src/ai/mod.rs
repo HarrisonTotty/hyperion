@@ -8,5 +8,5 @@ pub mod ships;
 pub mod system;
 
 pub use behavior_tree::{BehaviorContext, BehaviorNode, BehaviorStatus};
-pub use ships::{AIPersonality, ShipAIContext, AICommand, CombatAI, PatrolAI, TradingAI};
-pub use system::{ShipAI, AIManager, AIContextUpdate};
+pub use ships::{AICommand, AIPersonality, CombatAI, PatrolAI, ShipAIContext, TradingAI};
+pub use system::{AIContextUpdate, AIManager, ShipAI};

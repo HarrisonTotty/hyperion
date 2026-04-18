@@ -17,13 +17,13 @@ pub enum WeaponTag {
     /// Weapon fires one projectile at a time
     #[serde(rename = "Single-Fire")]
     SingleFire,
-    
+
     // Projectile Type Tags
     /// Guided projectile with high velocity and small warhead
     Missile,
     /// Unguided projectile with large warhead and slow velocity
     Torpedo,
-    
+
     // Energy Type Tags
     /// Photon-based weapon, deals 0.5x damage to shields
     Photon,
@@ -31,7 +31,7 @@ pub enum WeaponTag {
     Plasma,
     /// Positron-based weapon, 25% damage bypasses shields
     Positron,
-    
+
     // Status Effect Tags
     /// Ion-based weapon, jams communications and science, disables targeting
     Ion,
@@ -39,7 +39,7 @@ pub enum WeaponTag {
     Graviton,
     /// Tachyon-based weapon, disables warp and jump drives
     Tachyon,
-    
+
     // Countermeasure Tags
     /// False scan signature to waste enemy countermeasures
     Decoy,
@@ -49,7 +49,7 @@ pub enum WeaponTag {
     Antitorpedo,
     /// Jams missiles in area without detonating
     Chaff,
-    
+
     // Fire Mode Tags
     /// Must be manually fired
     Manual,
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn test_weapon_tags() {
         // Test that weapon tags can be created and compared
-        let tags = vec![WeaponTag::Beam, WeaponTag::Photon, WeaponTag::Automatic];
+        let tags = [WeaponTag::Beam, WeaponTag::Photon, WeaponTag::Automatic];
         assert!(tags.contains(&WeaponTag::Beam));
         assert!(tags.contains(&WeaponTag::Photon));
         assert!(!tags.contains(&WeaponTag::Missile));

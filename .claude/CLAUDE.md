@@ -11,3 +11,15 @@ Documentation can be found in the `docs/` directory. In particular:
 * `modules.md` - Provides an in-depth guide into the game's ship module system.
 * `ship-positions.md` - Detailed information about the role and capabilities of each ship position.
 * `plans/` contains detailed action plans for implementing new features.
+
+## Common Commands
+
+Development tasks are wrapped in a `justfile` at the repo root. Prefer these over raw `cargo` invocations so the workflow stays consistent. Run `just` with no arguments to see all recipes.
+
+* `just build` / `just build-release` - Compile the project.
+* `just run -- <args>` - Run the binary, forwarding args after `--`.
+* `just test` - Run unit, integration, and doc tests.
+* `just format` / `just format-check` - Apply or verify `rustfmt`.
+* `just lint` - Run `clippy` with `-D warnings` (matches the rule in `.claude/rules/development.md`).
+* `just typecheck` - Fast `cargo check` across all targets.
+* `just check` - Full CI gate: format-check, lint, typecheck, and tests.
