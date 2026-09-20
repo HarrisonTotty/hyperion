@@ -1,0 +1,89 @@
+# Git hooks for HYPERION, managed by https://pre-commit.com.
+# Run `just hooks` to install, or `just pre-commit` to run against every file.
+#
+# Fast checks run on commit; tests run on push. `just ci` remains the full gate.
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-json
+        # tsconfig files are JSONC.
+        exclude: ^(.*/)?tsconfig(\..+)?\.json$
+      - id: check-toml
+      - id: check-yaml
+        # Machine-written, and multi-document as of pnpm 12.
+        exclude: ^pnpm-lock\.yaml$
+      - id: end-of-file-fixer
+        exclude: ^packages/protocol/src/generated/
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+        exclude: ^packages/protocol/src/generated/
+
+  # The toolchains are pinned by the repo (rust-toolchain.toml, pnpm-lock.yaml),
+  # so hooks call them directly instead of using pre-commit-managed copies.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all --
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --workspace --all-targets -- -D warnings
+        language: system
+        files: (\.rs|Cargo\.(toml|lock))$
+        pass_filenames: false
+
+      - id: prettier
+        name: prettier
+        entry: pnpm exec prettier --write --ignore-unknown
+        language: system
+        types: [text]
+        exclude_types: [rust, toml]
+
+      - id: oxlint
+        name: oxlint (type-aware)
+        entry: pnpm lint
+        language: system
+        types_or: [ts, tsx, javascript, jsx]
+        pass_filenames: false
+
+      - id: typecheck
+        name: tsc
+        entry: pnpm typecheck
+        language: system
+        files: (\.(ts|tsx|mts|cts)|tsconfig.*\.json|package\.json|pnpm-lock\.yaml)$
+        pass_filenames: false
+
+      - id: protocol-bindings
+        name: protocol bindings are up to date
+        entry: just gen-protocol-check
+        language: system
+        files: ^(crates/hyperion-protocol/|packages/protocol/src/generated/)
+        pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --workspace
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+      - id: vitest
+        name: vitest
+        entry: pnpm test
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true

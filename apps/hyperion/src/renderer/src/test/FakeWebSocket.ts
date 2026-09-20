@@ -1,0 +1,41 @@
+import type { ServerMessage } from "@hyperion/protocol";
+
+/**
+ * In-memory stand-in for the browser `WebSocket`, letting tests play the
+ * server's side of the conversation.
+ */
+export class FakeWebSocket extends EventTarget {
+  static instances: FakeWebSocket[] = [];
+
+  readonly sent: unknown[] = [];
+
+  constructor(readonly url: string) {
+    super();
+    FakeWebSocket.instances.push(this);
+  }
+
+  static latest(): FakeWebSocket {
+    const socket = FakeWebSocket.instances.at(-1);
+    if (socket === undefined) {
+      throw new Error("no WebSocket has been opened");
+    }
+    return socket;
+  }
+
+  send(data: string): void {
+    const message: unknown = JSON.parse(data);
+    this.sent.push(message);
+  }
+
+  close(): void {
+    this.dispatchEvent(new Event("close"));
+  }
+
+  serverOpens(): void {
+    this.dispatchEvent(new Event("open"));
+  }
+
+  serverSends(message: ServerMessage): void {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
+  }
+}

@@ -1,0 +1,17 @@
+# Rust
+/target/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Build output
+out/
+dist/
+coverage/
+
+# Local environment
+.env
+.env.*.local
+*.log
+.DS_Store
