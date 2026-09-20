@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -8,6 +8,14 @@ describe("App", () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  it("opens on the link display inside the console frame", () => {
+    render(<App />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "Displays" });
+    expect(within(navigation).getByText("Link")).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the link being established on launch", () => {
