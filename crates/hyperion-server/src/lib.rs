@@ -22,6 +22,7 @@ pub mod universe;
 mod ws;
 
 use std::error::Error;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, io};
@@ -34,11 +35,12 @@ use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
 use crate::stats::RequestStats;
 
-pub use config::{ParseConfigError, ServerConfig, ServerConfigBuilder};
+pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder};
 pub use stats::{RequestCounters, ServerStats};
 
-/// Address the server listens on when `HYPERION_ADDR` is not set.
-pub const DEFAULT_ADDR: &str = "127.0.0.1:7878";
+/// Address the server listens on when neither `--address` and `--port` nor their variables are
+/// given.
+pub const DEFAULT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7878);
 
 /// A running server's shared state and the router that serves it.
 ///

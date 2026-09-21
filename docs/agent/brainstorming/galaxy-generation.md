@@ -210,9 +210,10 @@ across and a finest stellar cell of 8 ly:
 Each layer up has cells twice as wide, so it needs one bit fewer per axis, and those three bits go
 to the index. This matters because the coarse layers are the ones that fill up: a 128 ly cell has
 4,096 times the volume of an 8 ly cell. With a fixed 16-bit index the coarsest layer would overflow
-at a total density of only about 5 systems per cubic light-year, which the nuclear disc exceeds
-several times over. With the sliding split, the finest layer is the tightest again, at about 170 per
-cubic light-year, which only a nuclear or globular cluster core reaches. Those are not placed by the
+at a total density of only about 4 systems per cubic light-year under the default mass function (5
+under Kroupa's), which the nuclear disc exceeds several times over. With the sliding split, the
+finest layer is the tightest again, at about 180 per cubic light-year (170 under Kroupa's), which
+only a nuclear or globular cluster core reaches. Those are not placed by the
 grid at all; see [Dense features](#dense-features-clusters-and-the-galactic-centre).
 
 The split follows a layer's cell size, not its layer value, because the two substellar layers of
@@ -270,9 +271,10 @@ The seed chooses the galaxy's gross properties from the observed ranges for larg
 - **Stellar mass**, 3–10 × 10¹⁰ M☉, log-uniform. The number of systems is derived from it, not
   drawn: mass divided by the mean present-day mass of a system, which is a once-per-galaxy
   quadrature over the mass function, multiplicity, the age distributions, stellar lifetimes and
-  remnant masses. It comes to 0.48 M☉ under Kroupa's function and 0.55–0.60 under Chabrier's, living
-  stars, remnants and companions together, and varies by only 3% between the old populations. So a
-  galaxy holds 0.5–2 × 10¹¹ systems, and one of the Milky Way's mass about 10¹¹.
+  remnant masses. It comes to about 0.55–0.59 M☉ under the default, Chabrier's system function (0.48
+  under Kroupa's), living stars, remnants and companions together, and varies by only 3% between the
+  old populations. So a galaxy holds 0.5–1.8 × 10¹¹ systems, and one of the Milky Way's mass about
+  10¹¹.
 - **Shares and sizes** of the [populations](#populations): disc scale length (the Milky Way's is
   about 2.6 kpc), scale heights, bulge, bar and nuclear disc. Sizes are tied to the mass they hold,
   as mass^⅓ with a small scatter. Independent draws were tried first and reached a rotation speed of
@@ -313,14 +315,20 @@ Cloud, remain addable variety.
 
 Analytic functions of galactic position, one set per stellar population:
 
-- **Density.** Thin disc, thick disc and nuclear disc as double exponentials, bulge and long bar as
-  triaxial profiles, halo as a sum of power-law components. Spiral arms are logarithmic spirals that
+- **Density.** Thin disc, thick disc and nuclear disc exponential in radius and cored in height,
+  bulge and long bar as triaxial profiles, halo as a sum of broken power-law components. A disc's
+  vertical profile is the one the vertical Jeans equation gives, tabulated once per galaxy; see
+  [Orbits and time](#orbits-and-time). Spiral arms are logarithmic spirals that
   modulate density, weakly for old stars and strongly for young ones, which is why arms are traced
   by blue stars and nebulae and not by mass.
 - **Age.** Each population has its own age distribution: halo and bulge old, thick disc old, thin
   disc a broad range, arms weighted young.
-- **Metallicity.** Falls with galactic radius (about −0.05 dex per kpc in the Milky Way disc) and
-  with age, with scatter. It matters downstream: giant-planet occurrence rises steeply with
+- **Metallicity.** Falls with galactic radius (about −0.05 dex per kpc in the Milky Way disc) and,
+  beyond about 8 Gyr, with age, with scatter. In the thin disc the mean at a given radius is flat for
+  ages up to 8 Gyr and then falls about 0.1 dex per Gyr, with a scatter of 0.20 dex at every age
+  (Bergemann et al. 2014; Casagrande et al. 2011). The flat part is radial migration seen at a fixed
+  radius, which the model has no other way to show. It matters downstream: giant-planet occurrence
+  rises steeply with
   metallicity. Small rocky planets depend on it only weakly and are known around old, metal-poor
   stars, so they should thin out only at the very low metallicities of the halo.
 - **Velocity.** Each population has closed-form kinematics in the tabulated potential; see
@@ -328,8 +336,8 @@ Analytic functions of galactic position, one set per stellar population:
 - **Dust and gas.** A field, not a set of objects, with density, pressure and extinction; see
   [Between the stars](#between-the-stars).
 
-Because these are closed-form, a galaxy map at any zoom integrates fields and never touches
-individual stars. It is not free, though; see [Visualiser](#visualiser).
+Because these are closed-form or tabulated once per galaxy, a galaxy map at any zoom integrates
+fields and never touches individual stars. It is not free, though; see [Visualiser](#visualiser).
 
 ### Large features
 
@@ -563,9 +571,9 @@ position and on its own independent draws, and the parts are independent Poisson
 #### Dense features: clusters and the galactic centre
 
 The nuclear cluster and the cores of globular clusters are too dense for the grid. The fine layer's
-index overflows at about 170 systems per cubic light-year, and long before that a cell-wide bound
-makes the candidate counts absurd. The field itself stays finite at the centre, at about 0.3 per
-cubic light-year for the bulge and about 18 for the nuclear disc of [Populations](#populations), so
+index overflows at about 180 systems per cubic light-year, and long before that a cell-wide bound
+makes the candidate counts absurd. The field itself stays finite at the centre, at about 0.26 per
+cubic light-year for the bulge and about 16 for the nuclear disc of [Populations](#populations), so
 it needs no cap and still knows nothing about the features. What was left unsolved was how the range
 query finds the members near a ship without generating a million of them. **Lean:** each feature
 with members carries a small nested grid of its own, in its own frame:
@@ -623,11 +631,12 @@ The galactic centre is the first entry of the global list. Its central black hol
 Its nuclear cluster was the tight case, so it was worked through with the Milky Way's measured
 profile: 2.5 × 10⁷ M☉ (Schödel et al. 2014), which is 4–5 × 10⁷ systems, on a broken power law with
 an inner slope of 1.3 (Gallego-Cano et al. 2018), a break near 10 ly and an outer slope of 3.5. That
-puts about 9,000 systems per cubic light-year at 3 ly from the black hole, matching the measured 1.5
-× 10⁵ M☉ per cubic parsec. On a slope that shallow the count per cell rises with each level as far
-as the break, and the 16-cell grid above fails: its fullest cell in the M dwarf band expects 14,000
-candidates against an index of 8,192. Halving the cells fixes it. With 32 cells per axis the fullest
-cell expects about 1,700 candidates, and the bound wastes only a few per cent of them.
+puts about 7,800 systems per cubic light-year at 3 ly from the black hole (9,000 under Kroupa's
+function), matching the measured 1.5 × 10⁵ M☉ per cubic parsec. On a slope that shallow the count
+per cell rises with each level as far as the break, and the 16-cell grid above fails: its fullest
+cell in the M dwarf band expects about 11,000 candidates (14,000 under Kroupa's) against an index of
+8,192. Halving the cells fixes it. With 32 cells per axis the fullest cell expects about 1,400
+candidates, and the bound wastes only a few per cent of them.
 
 An earlier draft softened the cusp into a core of 0.03 ly. That cannot stand. The cluster's
 velocities must come from somewhere, and the only consistent source is a distribution function f(E),
@@ -639,7 +648,7 @@ whose pericentre would pass within about 2 au of the black hole is thinned out, 
 10⁻⁵ of the cluster. The density is defined as the integral of f, so positions and velocities agree
 by construction. The grid becomes twelve levels, from cells of 1 ÷ 256 ly, a binary fraction so that
 cell edges are exact, up to 8 ly and a reach of 128 ly, where the cluster has fallen well below the
-nuclear disc around it. The innermost cell expects about a hundred candidates.
+nuclear disc around it. The innermost cell expects about eighty candidates.
 
 Three more things are true of the real cluster and copied:
 
@@ -670,15 +679,21 @@ of accreted galaxies (Naidu et al. 2020). Most of that debris is phase-mixed, sm
 lumpy only in velocity and chemistry, and some of it is still in cold streams.
 
 **The halo is a marked mixture.** Its share stays about 1% and is split by independent marks into
-components. Each smooth one is a cored, flattened or triaxial power law that never rises with |x|,
-|y| or |z|, and the halo's bound is the sum of their nearest-corner values. The component is a
+components. Each smooth one is a cored, flattened or triaxial broken power law that never rises with
+|x|, |y| or |z|, and the halo's bound is the sum of their nearest-corner values. Star counts measure
+an inner slope of 2.2–2.8, steepening by 1.5–2.5 beyond a break at 16–28 kpc (52,000–91,000 ly)
+(Deason et al. 2011; Xue et al. 2015; Pila-Díez et al. 2015; Iorio et al. 2018; Medina et al. 2024;
+Han et al. 2022), so the smooth components take inner slopes of 2.2–2.8, the globular-born debris
+staying steeper, and the dominant merger takes the break. The cut at 65,000 ly (19.9 kpc) lies at or
+inside most measured breaks, so inside the root cube the halo is mostly its inner slope. The
+component is a
 derived mark, as the population is, and it sets metallicity, α abundance, age and the velocity
 ellipsoid:
 
 | Component                          | Share of the halo | Form                                                                                                         |
 | ---------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
 | In situ, the heated early disc     | 15–30%            | Flattened to about 0.5, inside about 50,000 ly, prograde, [Fe/H] near −0.6                                   |
-| The dominant ancient merger        | 35–60%            | Strongly radial orbits, no net rotation, [Fe/H] near −1.2, a break where its stars pile up at apocentre      |
+| The dominant ancient merger        | 35–60%            | Strongly radial orbits, no net rotation, [Fe/H] near −1.2, a break at 16–28 kpc where its stars pile up at apocentre, the slope steepening by 1.5–2.5 beyond it |
 | Two to five lesser old progenitors | 10–25% together   | Each with its own net rotation, metallicity and age                                                          |
 | Globular-born debris               | 8–15%             | Steeper inward; up to a third carry second-population chemistry, so nitrogen-rich stars are 2–4% of the halo |
 | Discrete: streams and dwarf cores  | 2–15%             | Below                                                                                                        |
@@ -710,8 +725,11 @@ The table is a cache, about 0.2 s and 80 kB to rebuild, and is never stored.
   Milky Way's globulars qualify.
 - Globular streams number about 1.5 per globular, most of them orphans whose cluster is gone: 10³–
   10⁵ M☉, 30,000–160,000 ly long, 100–400 ly wide, with a dispersion of 0.5–3 km/s. On its axis such
-  a stream is 25–45 times the smooth halo around it and a thousandth of the disc's reference
-  density. The multiplier is a parameter of the generator version. The known census is over 120
+  a stream is a thousandth of the disc's reference density. Against the r^−3.5 halo of earlier
+  drafts that was 25–45 times the smooth halo around it at 15–18 kpc. The measured slopes of
+  2026-09-21 make the smooth halo there three to four times denser, so the same stream now stands at
+  roughly 7–15 times the smooth halo. That is a rough estimate, to be worked again with the streams.
+  The multiplier is a parameter of the generator version. The known census is over 120
   streams and far from complete (Bonaca and Price-Whelan 2025).
 - Dwarf streams come from the handful of progenitors accreted in the last 6 Gyr or so, with stellar
   masses drawn from M^−1.45 over 10⁵–10⁹·⁵ M☉: several wraps, 1,000–6,000 ly wide, 10–25 km/s. About
@@ -753,10 +771,11 @@ the galaxy-wide totals come out right without a global mass budget. A query for 
 than magnitude X within R" walks only the layers that can contain such stars. The same structure
 serves gameplay: bright stars are charted from afar, dim ones are discovered by going there.
 
-Near the Sun the density is about 0.0023 systems per cubic light-year (0.003 counting individual
-stars), so an 8 ly cube holds about one. At the centre of the bulge it is about a hundred times
-higher, about 0.3 per cubic light-year, and the nuclear disc adds about 18 more in the innermost few
-hundred light-years. The index absorbs that at every layer (see [Identifiers](#identifiers)). The
+Near the Sun there are about 0.0019 systems with a star or white dwarf per cubic light-year (0.0025
+counting individual stars and white dwarfs; 0.0023 and 0.0031 with brown dwarfs; Kirkpatrick et al.
+2024), so an 8 ly cube holds about one. At the centre of the bulge the density is over a hundred
+times higher, about 0.26 per cubic light-year, and the nuclear disc adds about 16 more in the
+innermost few hundred light-years. The index absorbs that at every layer (see [Identifiers](#identifiers)). The
 nuclear cluster does not fit: it averages some 10⁵ stars per cubic parsec over its central few
 parsecs and passes 10⁶ in the innermost half parsec. It is a feature with a grid of its own; see
 [Dense features](#dense-features-clusters-and-the-galactic-centre).
@@ -765,8 +784,8 @@ parsecs and passes 10⁶ in the innermost half parsec. It is a feature with a gr
 
 - **Primary mass** from an initial mass function, within the layer's band, up to a limit of 150 M☉.
   About three quarters of stars come out as M dwarfs, which is correct and should not be "fixed" to
-  make the galaxy more colourful. Two functions are supported behind one interface: Kroupa's and
-  Chabrier's system function. See [Sizing the layers](#sizing-the-layers).
+  make the galaxy more colourful. Two functions are supported behind one interface: Chabrier's
+  system function, the default, and Kroupa's. See [Sizing the layers](#sizing-the-layers).
 - **Multiplicity** depends on primary mass: roughly a quarter of M dwarfs, nearly half of Sun-like
   stars and most O and B stars have companions. Companion mass ratios and orbital periods are drawn
   from the observed distributions (periods log-normal, peaking near 10⁵ days for Sun-like
@@ -871,14 +890,17 @@ from its own streams.
   many exist is the least certain number in this document, so it follows the best measurement and
   not convenience: about 21 per star, with an uncertainty of a factor of two either way, on a mass
   function falling nearly as 1 ÷ mass (Sumi et al. 2023), which also keeps Jupiters under one for
-  every four stars (Mróz et al. 2017). Nearly all of them are smaller than Neptune. That is about 26
-  per system, and they follow the stars, since the measurement is made towards the bulge. In 8 ly
-  cells the galactic centre would then hold about 490 per cubic light-year, and up to 700 for the
-  densest seed, against an index limit of 128. So the layer uses 4 ly cells and the ID's spare bits
-  (see [Identifiers](#identifiers)): five to a cell at the reference density, and a limit of 1,024
-  per cubic light-year. The abundance stays a parameter of the generator version, capped by that
-  limit at about 38 per star for Milky Way values and 27 for the densest seed, and the range query
-  never walks this layer unless asked.
+  every four stars (Mróz et al. 2017). Nearly all of them are smaller than Neptune. That is about 30
+  per system at the model's 1.4 stars per system, and they follow the stars, since the measurement
+  is made towards the bulge. In 8 ly cells the galactic centre would then hold about 490 per cubic
+  light-year, and up to 700 for the densest seed, against an index limit of 128. So the layer uses 4
+  ly cells and the ID's spare bits (see [Identifiers](#identifiers)): about six to a cell at the
+  reference density, and a limit of 1,024 per cubic light-year. The abundance stays a parameter of
+  the generator version, capped by that limit at about 44 per star for Milky Way values and 31 for
+  the densest seed, and the range query never walks this layer unless asked. (An earlier draft wrote
+  26 per system, five to a cell and caps of 38 and 27. It used Kroupa's denser system counts and
+  rounded the stars per system down to 1.24. The default's lower system density and the computed
+  ratio cancel at the centre.)
 - **Dust and gas** are a field, not objects. Three smooth components, all needed once supernova
   shells read the gas they expand into: a thin neutral disc a few hundred light-years tall with a
   hole inside the bar, a warm ionised layer of about 0.03 atoms per cubic centimetre with a scale
@@ -952,10 +974,10 @@ Velocities are closed-form in the potential tables, per population:
 
 | Population           | Velocity                                                                                                                                                                                                                                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Discs                | Vertical dispersion from the vertical Jeans equation and the population's own scale height, so it falls outward with the disc. Radial dispersion is that ÷ 0.5–0.6, and the azimuthal follows from κ² ÷ 4Ω². The mean lags the circular speed by the asymmetric drift, about σ_R² ÷ 80 km/s.                                                            |
+| Discs                | Vertical dispersion from the vertical Jeans equation on the population's own vertical profile, so it falls outward with the disc; at the reference radius it is the heating law below times the galaxy's dispersion scale. Radial dispersion is that ÷ 0.5–0.6, and the azimuthal follows from κ² ÷ 4Ω². The mean lags the circular speed by the asymmetric drift, about σ_R² ÷ 80 km/s. |
 | Young disc           | The same, with a floor of 5 km/s from the turbulence of the gas, plus streaming of 5–15 km/s along the arms as a closed form of the arm phase.                                                                                                                                                                                                          |
 | Thick disc           | About (65, 40, 35) km/s, lagging by about 50.                                                                                                                                                                                                                                                                                                           |
-| Halo                 | Per [component](#streams-and-accreted-structure): radial orbits and no rotation for the dominant merger, mild rotation for the in-situ part. The mixture averages an anisotropy near 0.6 and a radial dispersion of about 145 km/s against 141 measured.                                                                                                |
+| Halo                 | Per [component](#streams-and-accreted-structure): radial orbits and no rotation for the dominant merger, mild rotation for the in-situ part. The mixture averages an anisotropy near 0.6. On the r^−3.5 slopes of earlier drafts its radial dispersion came to about 145 km/s against 141 measured. That no longer holds as worked: on the measured inner slopes of 2.2–2.8, a spherical Jeans estimate at the same anisotropy gives about 155–185 km/s at the Sun's radius. The velocity stage must check it again. |
 | Bulge and bar        | Rotation at the bar's pattern speed plus streaming along the density's own ellipses, which satisfies continuity exactly and rotates cylindrically by construction. Dispersions from an axisymmetric Jeans solution tabulated once: 160–215 km/s intrinsic near the centre, which projects to the 116–134 km/s that surveys measure at a latitude of 1°. |
 | Nuclear disc         | Rotation of about 100 km/s and a dispersion of about 70, falling outward (Sormani et al. 2022).                                                                                                                                                                                                                                                         |
 | Nuclear cluster      | The distribution function above: a dispersion rising as r^−½ inside about 3 ly, to 500 km/s at 0.1 ly.                                                                                                                                                                                                                                                  |
@@ -966,11 +988,20 @@ Draws are cut off at the local escape speed.
 class that placed them.
 
 The disc's velocities force a change to its structure. One scale height for the whole old thin disc
-contradicts the observed heating of stars with age, σ_z = 22 km/s × (age ÷ 10 Gyr)^0.44 (Sharma et
-al. 2021). So the old thin disc is a set of about five discs by age, as in the Besançon model, each
-with the scale height at which the Jeans equation returns its dispersion: from about 320 ly at half
-a gigayear to 1,700 ly at ten. A system's age, height and vertical speed are then correlated, as
-they are in reality. See [Populations](#populations).
+contradicts the observed heating of stars with age, σ_z = 21.1 km/s × ((age + 0.1 Gyr) ÷ 10.1
+Gyr)^0.441 × (1 + 0.20 |z| ÷ kpc) (Sharma et al. 2021; about 22 km/s × (age ÷ 10 Gyr)^0.44 in the
+plane). So the old thin disc is a set of about five discs by age, as in the Besançon model, each
+with the vertical profile that the Jeans equation gives for its dispersion in the galaxy's
+potential. That profile is cored: flat at the plane, where the vertical pull vanishes, and close to
+exponential only well above it, as measured disc profiles are (Bovy 2017). An exponential in height
+would put a cusp in the mid-plane that no star count shows. Together with the thick disc, the
+sub-discs' profiles reproduce the measured far-field split into a thin disc of about 300 pc and a thick one of about 900
+pc (Bland-Hawthorn and Gerhard 2016) with no free height. Each sub-disc's height is its effective
+height Σ ÷ 2ρ₀, from about 320 ly at half a gigayear to 1,700 ly at ten. The drawn mean height of
+850–1,150 ly is the whole old thin disc's effective height. It is met by scaling the heating law's
+dispersions, not the heights, so heights, dispersions and profiles satisfy the Jeans equation
+together. A system's age, height and vertical speed are then correlated, as they are in reality. See
+[Populations](#populations).
 
 **What a sensor sees is the past.** Every reading of an object at distance d is its state at the
 retarded time t − d ÷ c. In a model where everything is a function of time that costs one
@@ -1001,7 +1032,7 @@ stellar stage must therefore be continuous in age, with no tables binned by age.
 time, T = lifetime − age at the epoch.
 
 **Star formation continues.** Every population still forming stars draws ages from −H, so systems
-not yet born at the epoch exist in the process: 1,300–8,400 of them, at one to eight births a year.
+not yet born at the epoch exist in the process: 1,100–7,300 of them, at one to seven births a year.
 Such an ID resolves at all times, its state before birth is "no system yet", and the range query
 filters on age plus time being positive.
 
@@ -1171,18 +1202,19 @@ to expose the choices.
 
 ### Populations
 
-Seven populations, some of them split further, each with a closed-form number density in systems per
-cubic light-year, an age range, and a share of the galaxy's systems drawn from the seed:
+Seven populations, some of them split further, each with a number density in systems per cubic
+light-year (closed-form, or for a disc's vertical profile a table built once per galaxy), an age
+range, and a share of the galaxy's systems drawn from the seed:
 
 | Population      | Shape                                                                                                                  | Share                        | Age               |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ----------------- |
-| Young thin disc | Double exponential, scale height 130–200 ly, strongly bound to the arms                                                | 0.3–0.6% of the thin disc    | −H to 100 Myr     |
-| Old thin disc   | About five double exponentials by age, scale length 7,000–11,500 ly, heights from 320 to 1,700 ly, averaging 850–1,150 | the remainder, 47–70%        | 0.1–10 Gyr        |
-| Thick disc      | Double exponential, shorter and about three times as tall                                                              | 8–14%                        | 10–12 Gyr         |
+| Young thin disc | Exponential in radius, cored in height, effective height 130–200 ly, strongly bound to the arms | 0.3–0.6% of the thin disc    | −H to 100 Myr     |
+| Old thin disc   | About five discs by age, exponential in radius and cored in height, scale length 7,000–11,500 ly, effective heights from 320 to 1,700 ly, averaging 850–1,150 as Σ ÷ 2ρ₀ of the whole | the remainder, 47–70%        | 0.1–10 Gyr        |
+| Thick disc      | Exponential in radius, cored in height, shorter and about three times as tall | 8–14%                        | 10–12 Gyr         |
 | Bulge           | Boxy triaxial exponential along x, scale lengths 1,700–3,000 ly by 0.5–0.7 by 0.3–0.4 of that                          | 20–35% with the long bar     | 8–12 Gyr          |
 | Long bar        | Along x, half-length 10,000–18,000 ly, about a tenth as wide, 500–700 ly tall                                          | 30–40% of the bulge's figure | 6–10 Gyr          |
-| Nuclear disc    | Double exponential, scale length 200–400 ly, height 0.3–0.5 of that                                                    | 1–2.5%                       | mostly over 8 Gyr |
-| Halo            | A mixture of cored power laws near r^−3.5, out to 65,000 ly                                                            | about 1%                     | 10–13 Gyr         |
+| Nuclear disc    | Exponential in radius, cored in height, scale length 200–400 ly, effective height 0.3–0.5 of that | 1–2.5%                       | mostly over 8 Gyr |
+| Halo            | A mixture of cored broken power laws, inner slopes 2.2–2.8, out to 65,000 ly | about 1%                     | 10–13 Gyr         |
 
 The shares must sum to 100%, so the seed draws the thick disc, the bulge with its bar, the nuclear
 disc and the halo, and the thin disc takes what is left. The bulge range follows Bland-Hawthorn and
@@ -1201,14 +1233,15 @@ Gerhard and Portail 2015), and it is what makes a face-on map read as a barred s
 spiral with an oval middle. It is level along most of its length and falls off at the end, Gaussian
 across and exponential in height, so the bound stays exact for it too. The arms start at its ends:
 their fade-in radius is the bar's half-length, and with two arms each leaves the x axis there. The
-bulge's central density is about 0.3 per cubic light-year (0.15–0.6 over the ranges), a hundred
-times the solar neighbourhood's. The nuclear disc is the small, dense, rotating disc at the heart of
+bulge's central density is about 0.26 per cubic light-year (0.13–0.5 over the ranges), over a
+hundred times the solar neighbourhood's. The nuclear disc is the small, dense, rotating disc at the heart of
 a barred galaxy, fed by gas the bar drives inward. The Milky Way's holds about 10⁹ M☉, between 1.2%
 and 2.4% of its stars, with a scale length of 290 ly and a height of 93 ly (Launhardt et al. 2002;
-Sormani et al. 2022), which comes to about 18 systems per cubic light-year at its centre, and 9–26
+Sormani et al. 2022), which comes to about 16 systems per cubic light-year at its centre, and 8–23
 over our ranges. Most of it is over 8 Gyr old and a few per cent formed in the last gigayear. It
 surrounds the nuclear cluster of [Dense features](#dense-features-clusters-and-the-galactic-centre),
-and being a double exponential it keeps the corner bound exact. The halo is a mixture of components
+and being exponential in radius and cored in height, never rising with either, it keeps the corner
+bound exact. The halo is a mixture of components
 chosen by marking, most of them the debris of accreted galaxies; see
 [Streams and accreted structure](#streams-and-accreted-structure). It stops at 65,000 ly so that it
 fits inside the root cube, which also drops about 15% of the globular clusters. The discs' tails
@@ -1238,40 +1271,55 @@ density bound is hardest to keep.
 Each population is normalised by its share of the galaxy's system count, which is cleaner than
 normalising by a "solar neighbourhood" density, because a fictional galaxy has no Sun. The count is
 the drawn stellar mass divided by the mean mass of a system (see
-[Galaxy parameters](#galaxy-parameters)). Over the parameter ranges that gives 0.001–0.009 systems
-per cubic light-year in the plane at 26,000 ly from the centre. Milky Way values give 0.0027 against
-the measured 0.0023, so the real galaxy sits mid-range. The statistical test compares a sample
-against the density computed for that seed, not against a fixed number.
+[Galaxy parameters](#galaxy-parameters)). Over the parameter ranges that gives about 0.0008–0.008
+systems per cubic light-year in the plane at 26,000 ly from the centre. Milky Way values give about
+0.0021 at the Sun's radius and height, averaged in azimuth, against the measured 0.0018–0.0021, so
+the real galaxy sits mid-range. The measurement counts systems with a star or white dwarf: 0.00193 ±
+0.00004 within 20 pc (Kirkpatrick et al. 2024) and 0.00184 ± 0.00011 within 10 pc (Reylé et al.
+2021). The 0.0023 of earlier drafts also counted systems of brown dwarfs alone, which the stellar
+layers never place. The statistical test compares a sample against the density computed for that
+seed, not against a fixed number.
 
 ### Sizing the layers
 
 Integrating a mass function from 0.08 to 150 M☉ gives the share of systems in each band, and a
 reference density of 0.003 systems per cubic light-year then gives the expected count per cell. The
-reference is a round figure near the middle of our range, a little above the Milky Way's 0.0023, and
-the sums below that speak of "the reference density" use it too. The first pair of columns is for
-Kroupa's function and the second for Chabrier's system function:
+reference is a round figure near the middle of our range, about 1.6 times the Milky Way's 0.0019,
+and the sums below that speak of "the reference density" use it too. The first pair of columns is
+for Kroupa's function, the second for Chabrier's system function as published, and the third for
+the default: Chabrier's with its branch above 1 M☉ scaled by the provisional 0.68 (below):
 
-| Layer | Cell   | Primary initial mass | Share (Kroupa) | Per cell | Share (Chabrier) | Per cell |
-| ----- | ------ | -------------------- | -------------- | -------- | ---------------- | -------- |
-| A     | 8 ly   | 0.08–0.5 M☉          | 76%            | 1.2      | 66%              | 1.0      |
-| B     | 16 ly  | 0.5–0.75 M☉          | 9.8%           | 1.2      | 12%              | 1.4      |
-| C     | 32 ly  | 0.75–2.5 M☉          | 11%            | 11       | 17%              | 17       |
-| D     | 64 ly  | 2.5–8 M☉             | 2.3%           | 18       | 3.7%             | 29       |
-| E     | 128 ly | 8–150 M☉             | 0.64%          | 40       | 1.0%             | 64       |
+| Layer | Cell   | Primary initial mass | Share (Kroupa) | Per cell | Share (Chabrier) | Per cell | Share (default) | Per cell |
+| ----- | ------ | -------------------- | -------------- | -------- | ---------------- | -------- | --------------- | -------- |
+| A     | 8 ly   | 0.08–0.5 M☉          | 76%            | 1.2      | 66%              | 1.0      | 70%             | 1.1      |
+| B     | 16 ly  | 0.5–0.75 M☉          | 9.8%           | 1.2      | 12%              | 1.4      | 12%             | 1.5      |
+| C     | 32 ly  | 0.75–2.5 M☉          | 11%            | 11       | 17%              | 17       | 15%             | 14       |
+| D     | 64 ly  | 2.5–8 M☉             | 2.3%           | 18       | 3.7%             | 29       | 2.6%            | 21       |
+| E     | 128 ly | 8–150 M☉             | 0.64%          | 40       | 1.0%             | 64       | 0.73%           | 46       |
 
 Both are supported. The mass function sits behind one interface, the band shares are computed from
 it by integration and never written down as constants, and the five layers are comfortable under
 either. Which one a universe uses belongs to its generator version. The arbiter between them is the
-test that means something: the fractions among all stars, companions included, against the observed
-single-star function. An earlier draft leaned to Chabrier's system function on the ground that a
-primary is what placement draws, and expected Kroupa's to make dwarfs too common once companions
-were added. Worked through, it is the other way round. Kroupa's function used for primaries, with
-companions at the observed frequencies, reproduces the single-star function almost exactly: 76.4% of
-all stars below 0.5 M☉ against 75.9%. Chabrier's system function used the same way comes out
-top-heavy, at 67%. **Lean:** Kroupa's as the default. Chabrier's stays supported, with its branch
-above 1 M☉ scaled by a constant of about 0.65–0.7 fitted offline so that the test passes. The worked
-figures elsewhere in this document use the Kroupa columns. Under Chabrier the coarse layers are
-about half as full again, which changes none of the conclusions.
+volume-complete census, which counts primaries and companions directly: 2,240 systems with a star
+or white dwarf within 20 pc (Kirkpatrick et al. 2024), and the 10 pc sample (Reylé et al. 2021).
+Of its primaries, 66–68% lie below 0.5 M☉. Chabrier's system function gives 66% and Kroupa's 76%,
+and the census's shares of the bands above (13, 18 and 3%) are Chabrier's too. Among all stars,
+companions and the progenitors of white dwarfs included, the census has 69% below 0.5 M☉.
+Kroupa's function used for primaries, with the model's companions, gives 76.4% and fails. Chabrier's
+used the same way gives 66.9% as published and 70.9% with its branch above 1 M☉ scaled by 0.68, so
+the two bracket the census. An earlier draft of this passage took Kroupa's side. It compared the
+model's 76.4% against "the observed single-star function, 75.9%", but that figure is Kroupa's
+function itself, not a count. As published, Chabrier's function makes systems too heavy, 0.66 M☉
+each at the Sun against the census's 0.55–0.59, because the provisional companion model gives
+0.42–0.44 stellar companions per system where the census counts 0.32–0.38, weighing 0.11–0.14 M☉ in
+all. Scaled by 0.68, it gives 0.59. **Lean** (ruled on 2026-09-21; see [Decisions](#decisions)):
+Chabrier's system function as the default, with its branch above 1 M☉ scaled by a constant fitted
+offline, provisionally 0.68. With the binary stage's companions, the fit must reproduce the census's
+primary band shares, 69% of all stars below 0.5 M☉, and a local mean mass of 0.55–0.59 M☉ per
+system. Kroupa's stays supported. The worked figures elsewhere in this document are for the default
+unless they name Kroupa's. Figures first worked under Kroupa's have been scaled to the default's
+system count, about 0.87 times Kroupa's. Under the default the coarse layers C–E are 10–30% fuller than under
+Kroupa's (half as full again as published), which changes none of the conclusions.
 
 This is a correction to the first sketch. Each step up multiplies cell volume by eight, but above
 0.5 M☉ the mass function only thins out by about 2.5 times per doubling of mass, so eight layers
@@ -1302,7 +1350,7 @@ Four honest caveats:
   guarantee, until the stellar stage says what each star is now.
 - It is a loose upper bound at the top. Stars above 8 M☉ live under 40 Myr, and only the young
   population, about half a per cent of the disc, is that young. So layer E is almost entirely
-  remnants, with well under one living O or B star per cell among forty systems, and the arms will
+  remnants, with well under one living O or B star per cell among some forty-five systems, and the arms will
   not stand out in it until the stellar stage can tell the living from the dead.
 - Layer D loses 2–4% of its systems to ancient Type Ia supernovae that left nothing behind, and
   every layer's share in the field is its budget less what sits in features and catalogue classes.
@@ -1336,7 +1384,12 @@ centre with a small margin. A numerical check showed that is not a bound:
   |y| or |z|. Because the planes x = 0, y = 0 and z = 0 are cell faces, no cell straddles them, and
   the maximum of every one of these components is at the cell's corner nearest the origin. For these
   the corner value is exact. A bar rotated off the axes would break this (its maximum can sit inside
-  a face), which is the practical reason the bar defines the x axis.
+  a face), which is the practical reason the bar defines the x axis. The discs' cored vertical
+  profiles keep it too. The Jeans profile's logarithm falls with height at the rate K_z ÷ σ² + 2σ′ ÷
+  σ, which is never negative, because the vertical pull points to the plane and the dispersion never
+  falls with height. So the profile never rises with |z|. Where it is read from a table, the knots
+  are made exactly continuous, or the bound's small relative margin covers the last-bit steps of
+  interpolation.
 - Arm ridges cross cell interiors. For a sharp young-disc arm in a 128 ly cell near the bar the true
   maximum beat the corner estimate by up to 12%, more than any small margin.
 
@@ -1518,20 +1571,21 @@ visiting only the cells that intersect the sphere. Five details matter for the d
   better served by a smaller radius than by a mass floor.
 - **Cost scales with volume, and volume with R³.** A 50 ly sphere intersects about 1,400 layer-A
   cells and about 300 cells of the other layers together. At the reference density that is some
-  2,900 candidates for 1,600 systems returned, a few milliseconds of work. The coarse layers are the
+  3,100 candidates for 1,600 systems returned (2,900 under Kroupa's function), a few milliseconds of
+  work. The coarse layers are the
   least efficient, since a 50 ly sphere is small against a 128 ly cell and twenty candidates are
   generated for each one kept, but they are cheap in absolute terms. A 500 ly sphere intersects a
   million cells. Long ranges therefore need a mass floor ("navigation beacons only"). In the bulge a
-  50 ly sphere holds 30,000 to a few hundred thousand systems, and about 35 million at the very
-  centre, 7 million from the nuclear disc and the rest from the cluster, so the limit and the census
+  50 ly sphere holds 26,000 to a few hundred thousand systems, and about 30 million at the very
+  centre, 6 million from the nuclear disc and the rest from the cluster, so the limit and the census
   rule are needed from the start.
 - **The query has a time.** Cells are chosen by epoch position, so the sphere is padded by the
   largest speed × |t|: 1,000 km/s, above any escape speed, which is 0.33 ly a century and adds 2% to
   a 50 ly query. Only the unbound class needs more. Distances are then tested at time t, and systems
   not yet born are dropped. Expected counts do not change, because the process is stationary. Around
   the central black hole the pad per level is the distance a radial plunge could cover, and
-  everything inside a radius growing as |t|^⅔ is scanned in full: 0.31 ly and 42,000 systems at a
-  century, about 10 ms with cached orbits. Indexing by orbital invariants was looked at and does not
+  everything inside a radius growing as |t|^⅔ is scanned in full: 0.31 ly and about 37,000 systems
+  at a century, about 10 ms with cached orbits. Indexing by orbital invariants was looked at and does not
   help, since two fifths of the stars with semi-major axes of 1–10 ly dip inside 1 ly.
 - **The grid is not the only source.** Members of [large features](#large-features), of the global
   list of streams, dwarf cores and the galactic centre, the [catalogue classes](#events-in-time),
@@ -1777,9 +1831,9 @@ Left to this document by the project owner on the same day, and open to revision
   [Dense features](#dense-features-clusters-and-the-galactic-centre).
 - **Below the reference plane a symbol is open, and above it filled.** See
   [The local chart in 3D](#the-local-chart-in-3d).
-- **Both mass functions are supported**, with Kroupa's as the default, because used for primaries it
-  reproduces the observed mix of all stars and Chabrier's system function does not. See
-  [Sizing the layers](#sizing-the-layers).
+- **Both mass functions are supported.** Kroupa's was the default until 2026-09-21, when the census
+  showed the reverse of the reason given for it, and Chabrier's system function replaced it (below).
+  See [Sizing the layers](#sizing-the-layers).
 - **Close pairs stay two systems**, and a ship's frame goes to the smallest distance ÷ radius with
   hysteresis. See [Coordinates](#coordinates).
 - **The long bar is a sixth population.** See [Populations](#populations).
@@ -1834,10 +1888,77 @@ ruling, until a round raised no new ones. Equally open to revision:
   a global list, with tracks measured from tracer sprays, and dwarf cores exist inside the cube.
 - **The gas field has three phases and a pressure.**
 
+**2026-09-21: local density rulings.** A research report checked the local figures against the 10
+pc and 20 pc censuses (Reylé et al. 2021; Kirkpatrick et al. 2024), McKee et al. 2015,
+Bland-Hawthorn and Gerhard 2016 and Bovy 2017. The owner adopted all six of its rulings. They replace
+the figures above where they differ, and the text has been brought into line:
+
+1. **Each disc is exponential in radius and cored in height.** Each age cohort of the thin disc takes
+   the vertical profile that the Jeans equation gives with Sharma et al.'s (2021) heating law, not an
+   exponential in height. The drawn height of 850–1,150 ly stays, read as the effective height Σ ÷
+   2ρ₀, and the dispersions are scaled to meet it, not the heights. Reason: measured profiles are
+   cored at the plane (Bovy 2017), and this one reproduces the far-field thin and thick heights
+   (Bland-Hawthorn and Gerhard 2016) with no free height, moving the mid-plane density by −5% to +2%.
+   It never rises with |z|, so the corner bounds stay exact. See [Orbits and time](#orbits-and-time).
+2. **Chabrier's system function is the default**, its branch above 1 M☉ scaled by the constant
+   fitted offline. Kroupa's stays supported, and which function a universe uses still belongs to its
+   generator version. The mean present-day mass per system becomes about 0.55–0.59 M☉. Reason: the
+   20 pc census has 66–68% of primaries below 0.5 M☉, where Chabrier's gives 66% and Kroupa's 76%,
+   and 69% of all stars, not 75.9% (Kirkpatrick et al. 2024; Reylé et al. 2021). See
+   [Sizing the layers](#sizing-the-layers).
+3. **The local benchmark is 0.0018–0.0021 systems per cubic light-year** at the Sun's position,
+   counting systems with a star or white dwarf. Reason: the 20 pc census gives 0.00193 ± 0.00004
+   (Kirkpatrick et al. 2024). The former 0.0023 counted systems of brown dwarfs alone as well, which
+   no stellar layer places. See [Populations](#populations).
+4. **The halo's smooth components are broken power laws**: an inner slope of 2.2–2.8, and for the
+   dominant merger a break at 16–28 kpc beyond which the slope steepens by 1.5–2.5. They stay cored
+   and flattened, and never rise with |x|, |y| or |z|. They replace "near r^−3.5". Reason: star
+   counts measure these slopes (Deason et al. 2011; Xue et al. 2015; Pila-Díez et al. 2015; Iorio et
+   al. 2018; Medina et al. 2024; Han et al. 2022), and r^−3.5 was about one too steep inside the
+   cube. See [Streams and accreted structure](#streams-and-accreted-structure).
+5. **Disc heating, a note for the velocity stage.** It solves the Jeans equation on each disc's
+   actual profile and tests Sharma et al.'s law exactly, not its rounding. Reason: with ruling 1 the
+   law then holds by construction, where the exponential sub-discs as first built ran their Jeans
+   dispersions about 20% above it. The same stage checks σ_z ÷ σ_R against Sharma et al.'s own
+   exponents, 0.441 vertical and 0.251 radial, which make the ratio grow as age^0.19, about 1.6 times
+   across the sub-discs. The "÷ 0.5–0.6" of [Orbits and time](#orbits-and-time) stands until then.
+6. **The thin disc's age–metallicity relation is flat to 8 Gyr, then falls about 0.1 dex per Gyr,
+   with a scatter of 0.20 dex.** Reason: Gaia-ESO finds it nearly flat for 0–8 Gyr and falling beyond
+   9, with a significant scatter at any age (Bergemann et al. 2014), and the Geneva–Copenhagen survey
+   finds the same flat, broad relation (Casagrande et al. 2011). The plan's former −0.04 dex per Gyr
+   was uncited and put the youngest stars at the Sun's radius 0.18 dex above solar. See
+   [Fields](#fields).
+
 ## Open questions
 
 Three rounds of questions were answered on 2026-09-20 and are now under [Decisions](#decisions). The
-third was worked through by subagents until a round raised no new questions. None is open.
+third was worked through by subagents until a round raised no new questions. None of those is open.
+
+The density rulings of 2026-09-21 left six questions open, for the owner or for the Milky Way checks
+that tune the fixture:
+
+- **The bracket on the stars' surface density at the Sun's radius.** Measurements span 29–38 M☉ per
+  square parsec. McKee et al.'s 33.4 ± 3 rests on a 400 pc height for the M dwarfs, and Bovy and
+  Rix's 38 ± 4 is dynamical. The census density times the derived effective height gives 26–30.
+  With the rulings, a Milky Way fixture meets the benchmark only at 28–30, the low edge. Which
+  bracket applies?
+- **The fixture's gas.** Its gas column at the Sun's radius is 6.6 M☉ per square parsec against 13.7
+  ± 1.6 measured (McKee et al. 2015). Raising it restores the vertical pull near the plane when the
+  stars' surface density drops.
+- **The census's mass density.** The 20 pc census gives 0.037 M☉ per cubic parsec in stars and
+  remnants, and McKee et al. 0.0415. The difference is white dwarfs that McKee et al. infer but the
+  census does not see (8.5 against 4.8 × 10⁻³ per cubic parsec), and M dwarfs 8% above the census
+  (Reid, Gizis and Hawley 2002). It decides whether the target mean mass per system is 0.55 or 0.59
+  M☉.
+- **Azimuthal mean or arm position.** The census is one point, probably between arms for the old
+  disc, and the old arms modulate the density by about ±20% at Milky Way values. Should the
+  benchmark compare the azimuthal mean at the Sun's radius, or the range around it?
+- **The Sun's radius.** The benchmark is read at R₀ = 26,670 ly (8.18 kpc; GRAVITY Collaboration
+  2019). GRAVITY's later 8.277 kpc (from memory, not verified) would lower the model's density there
+  by about 4%.
+- **The halo's share.** The fixture's halo near the Sun is 3–5 × 10⁻⁵ M☉ per cubic parsec against
+  about 10⁻⁴ measured, and its halo mass 0.58 × 10⁹ M☉ against 1.4 ± 0.4 × 10⁹ (Deason et al. 2019).
+  Both measured figures are from memory. "About 1%" may be low by about a factor of two.
 
 What remains is offline fitting, which is work and not a choice. Each is a table or a constant that
 belongs to the generator version and has a named source to fit against:
@@ -1853,7 +1974,9 @@ belongs to the generator version and has a named source to fit against:
   exponent, against multimass King models; the pulsar count against encounter rate.
 - The number of orphan streams per globular cluster, 1.5 and uncertain threefold.
 - The helium correction to lifetimes and the horizontal branch.
-- The scaling of Chabrier's high-mass branch.
+- The scaling of Chabrier's high-mass branch, now the default's, fitted together with the binary
+  stage's companions to the census: its primary band shares, 69% of all stars below 0.5 M☉, and a
+  local mean mass of 0.55–0.59 M☉ per system (Kirkpatrick et al. 2024).
 - The kick law's rank table, from the generator's own tracks, and its four defaults: the low mode's
   ramp between core masses of 2 and 3 M☉, the black holes' factor of 0.75, the widths of the
   electron-capture windows, and the fate of merged binaries in clusters. Each is pinned by a test
@@ -1906,8 +2029,28 @@ Figures above are rounded and should be re-checked against these when they becom
 - Hörmann 1993, _The transformed rejection method for generating Poisson random variables_,
   Insurance: Mathematics and Economics 12.
 - The Rust Rand Book, _Reproducibility_. <https://rust-random.github.io/book/crate-reprod.html>
-- Bland-Hawthorn and Gerhard 2016, _The Galaxy in Context_, ARA&A 54 (Milky Way structure).
-- Reylé et al. 2021, _The 10 parsec sample in the Gaia era_, A&A 650 (local density).
+- Bland-Hawthorn and Gerhard 2016, _The Galaxy in Context_, ARA&A 54, 529 (Milky Way structure; the
+  disc's far-field thin and thick heights, §5.1.3).
+- Reylé et al. 2021, _The 10 parsec sample in the Gaia era_, A&A 650, A201, with its 2023 update in
+  VizieR J/A+A/650/A201 (local density and census shares).
+- Kirkpatrick et al. 2024, ApJS 271, 55, with its table 4 in VizieR J/ApJS/271/55, _A full-sky 20pc
+  census of stars and brown dwarfs_ (the 20 pc census: system density, primary and all-star mass
+  fractions, mean mass per system).
+- Bovy 2017, _Stellar inventory of the solar neighborhood using Gaia DR1_, MNRAS 470, 1360 (cored
+  vertical profiles, the main sequence's mid-plane density).
+- Bovy and Rix 2013, ApJ 779, 115 (the dynamical surface density at the Sun; quoted by McKee et al.
+  2015 and Bland-Hawthorn and Gerhard 2016, not read).
+- Reid, Gizis and Hawley 2002, AJ 124, 2721 (the local M dwarfs; quoted, not read).
+- Deason, Belokurov and Evans 2011, MNRAS 416, 2903; Xue et al. 2015, ApJ 809, 144; Pila-Díez et
+  al. 2015, A&A 579, A38 (from a search summary); Iorio et al. 2018, MNRAS 474, 2142; Medina et al.
+  2024, MNRAS 531, 4762; Han et al. 2022, AJ 164, 249 (the stellar halo's slopes and breaks).
+- Deason et al. 2019 (the stellar halo's mass; from memory, not verified).
+- Bergemann et al. 2014, A&A 565, A89 (the age–metallicity relation in Gaia-ESO).
+- Casagrande et al. 2011, A&A 530, A138 (the Geneva–Copenhagen survey's age–metallicity relation;
+  its scatter of about 0.2 dex and mean near −0.05 dex from memory, not verified).
+- GRAVITY Collaboration 2019, A&A 625, L10 (R₀ = 8.18 kpc; as cited by plan 02, not re-checked);
+  GRAVITY Collaboration 2022, A&A 657, L12 (R₀ = 8.277 kpc from memory, not verified).
+- Bennett and Bovy 2019 (the Sun's height above the plane, about 21 pc; from memory, not verified).
 - Kroupa 2001, _On the variation of the initial mass function_, MNRAS 322.
 - Chabrier 2003, _Galactic stellar and substellar initial mass function_, PASP 115.
 - Duchêne and Kraus 2013, _Stellar Multiplicity_, ARA&A 51; Raghavan et al. 2010, ApJS 190.
@@ -1929,7 +2072,7 @@ Figures above are rounded and should be re-checked against these when they becom
 - Binney and Tremaine 2008, _Galactic Dynamics_, Princeton (Jeans equations, Eddington inversion,
   asymmetric drift, Jacobi radius).
 - Sharma et al. 2021, _Fundamental relations for the velocity dispersion of stars in the Milky Way_,
-  MNRAS 506; Holmberg, Nordström and Andersen 2009, A&A 501; Robin et al. 2003, A&A 409 (the
+  MNRAS 506, 1761 (the heating law's exponents, 0.441 vertical and 0.251 radial); Holmberg, Nordström and Andersen 2009, A&A 501; Robin et al. 2003, A&A 409 (the
   Besançon model).
 - Bond et al. 2010, _The Milky Way tomography with SDSS III: stellar kinematics_, ApJ 716.
 - Portail et al. 2017, _Dynamical modelling of the galactic bulge and bar_, MNRAS 465; Sanders,
@@ -1944,7 +2087,7 @@ Figures above are rounded and should be re-checked against these when they becom
 - Bahcall and Wolf 1976, _Star distribution around a massive black hole in a globular cluster_, ApJ
   209; Hailey et al. 2018, Nature 556; Generozov et al. 2018, MNRAS 478.
 - McKee, Parravano and Hollenbach 2015, _Stars, gas, and dark matter in the solar neighborhood_,
-  ApJ 814.
+  ApJ 814, 13.
 - Cioffi, McKee and Bertschinger 1988, _Dynamics of radiative supernova remnants_, ApJ 334; Leahy
   and Williams 2017, AJ 153; Tang and Wang 2005, ApJ 628; Truelove and McKee 1999, ApJS 120.
 - Higdon and Lingenfelter 2005, _OB associations, supernova-generated superbubbles, and the source

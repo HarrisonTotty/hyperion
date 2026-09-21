@@ -4,8 +4,9 @@
 //! of its own; everything else follows from them as pure functions: the mass function and its
 //! band shares, the populations' age distributions, the mean present-day mass of a system and the
 //! system count, the mass model and its potential tables ([`potential`]), the density fields with
-//! their ages and metallicities ([`fields`]) and the share of each layer per population
-//! ([`shares`]). No star is placed here; placement reads what this module provides.
+//! their ages and metallicities ([`fields`]), true upper bounds on every density over a cell
+//! ([`bounds`]) and the share of each layer per population ([`shares`]). No star is placed here;
+//! placement reads what this module provides.
 //!
 //! Generation code here works in light-years, solar masses, Julian years and km/s ([`consts`]).
 //! Public functions take and return [`units`](crate::units) newtypes, except on hot paths, which
@@ -15,6 +16,7 @@
 //! the bar, +z to galactic north, the galaxy turning counter-clockwise seen from the north.
 
 pub mod ages;
+pub mod bounds;
 pub mod consts;
 pub mod fates;
 pub mod fields;

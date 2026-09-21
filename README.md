@@ -26,7 +26,7 @@ actual-size, procedurally generated galaxy.
 ```sh
 just install   # pnpm install
 just hooks     # install the git pre-commit and pre-push hooks (once per clone)
-just server    # run the game server on 127.0.0.1:7878 (override with HYPERION_ADDR)
+just server    # run the game server on 127.0.0.1:7878 (`just server --help` for options)
 just client    # run the Electron client with hot reload
 ```
 
@@ -34,15 +34,17 @@ The client connects to `ws://127.0.0.1:7878/ws`; override with `VITE_HYPERION_SE
 
 ### Server configuration
 
-The server reads these environment variables:
+The server takes these options, each of which can instead be set by its environment variable.
+An option given on the command line wins over its variable.
 
-| Variable                 | Default                                      | What                                 |
-| ------------------------ | -------------------------------------------- | ------------------------------------ |
-| `HYPERION_ADDR`          | `127.0.0.1:7878`                             | Address to listen on                 |
-| `HYPERION_DATA_DIR`      | `./hyperion-data`                            | Where universes are saved            |
-| `HYPERION_WORKERS`       | available parallelism less one, at least one | Generation worker threads            |
-| `HYPERION_CELL_CACHE_MB` | `256`                                        | Cache of generated cells, in MiB     |
-| `HYPERION_MAP_CACHE_MB`  | `64`                                         | Cache of galaxy density maps, in MiB |
+| Option          | Variable                 | Default                                      | What                                 |
+| --------------- | ------------------------ | -------------------------------------------- | ------------------------------------ |
+| `--address`     | `HYPERION_ADDR`          | `127.0.0.1`                                  | IP address to listen on              |
+| `--port`        | `HYPERION_PORT`          | `7878`                                       | Port to listen on                    |
+| `--data-dir`    | `HYPERION_DATA_DIR`      | `./hyperion-data`                            | Where universes are saved            |
+| `--num-workers` | `HYPERION_WORKERS`       | available parallelism less one, at least one | Generation worker threads            |
+| `--cell-cache`  | `HYPERION_CELL_CACHE_MB` | `256`                                        | Cache of generated cells, in MiB     |
+| `--map-cache`   | `HYPERION_MAP_CACHE_MB`  | `64`                                         | Cache of galaxy density maps, in MiB |
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;

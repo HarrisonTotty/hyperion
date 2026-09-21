@@ -22,8 +22,8 @@
 //!
 //! Every envelope never rises with |x|, |y| or |z|, so its maximum over a cell that straddles no
 //! axis plane is at the corner nearest the origin; only the arm factors, which are unimodal in the
-//! arm phase, need more (plan 02, P02.T8). [`Component::envelope`] and [`Component::arm`] expose
-//! the two parts, and a density is exactly their product.
+//! arm phase, need more ([`bounds`](super::bounds), plan 02, P02.T8). [`Component::envelope`] and
+//! [`Component::arm`] expose the two parts, and a density is exactly their product.
 //!
 //! # Order
 //!

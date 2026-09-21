@@ -1098,3 +1098,32 @@ component order and the map's quadrature scheme belong to the version as well.
     0.001–0.009. The fixture's total central density is 22.1 per ly³; over 10³ seeds its median
     is 17.8 and 5% exceed T11's 30 (maximum 51, against layer A's index capacity of 128 per ly³), because the
     nuclear disc's density, like the bulge's, takes its size scatter cubed.
+- **R17. Deviations in T8, as built (P02.T8).** The acceptance filter `galaxy_bounds` matches test
+  names, and no T8.a test name contains it: T8 runs as
+  `cargo test -p hyperion-sim --test galaxy_bounds` and `--lib galaxy::bounds`, the slow tests
+  under `just test-slow`.
+  - _Cell geometry (T8.a)._ `CellBox::new` rejects an edge that is not a power of two
+    (`EdgeNotPowerOfTwo`, 0 included) and a box reaching outside the root cube (`OutsideRootCube`),
+    besides a box across a plane (`StraddlesPlane`); the axis is 0–2 as in `BuildGenCellError`. A
+    power-of-two edge keeps `in_plane_half_diagonal` (edge × `FRAC_1_SQRT_2`, which rounds up)
+    at or above the exact edge ÷ √2, which T8.b's phase range needs: for 340 other edges under
+    5,000 it falls one unit in the last place short. The root cube keeps every envelope far from
+    underflow, where a relative margin gives no headroom. The low-corner getter is `min_corner()`,
+    because `min()` resolved to the derived `Ord::min`. `r_cyl_range` takes each end as
+    `Site::new(corner).r`, the densities' own R, so no point of a cell lies outside it, bit for bit
+    (tested). `ScalarRange` lands in T8.a, not T8.b, because `r_cyl_range` returns it; its fields
+    stay public as the Provides has them, `ScalarRange::new` debug-asserts lo ≤ hi, and an infinite
+    end is allowed. Beyond the Provides: `CellBox::{min_corner, edge, contains}`,
+    `ScalarRange::{new, contains}`, `BOUND_MARGIN`, `Component::envelope_bound`.
+  - _Margin (T8.a)._ Every envelope bound is the nearest corner's envelope × (1 + 2⁻⁴⁰), about
+    9.1 × 10⁻¹³ (`BOUND_MARGIN`), for every component alike, not only the bulge that needs it
+    (R16): 130 times the bulge's 7 × 10⁻¹⁵ and under the test's 10⁻¹².
+  - _Tests (T8.a)._ The plan's check runs as three `#[ignore = "slow: …"]` tests, one per pinned
+    seed: 2,000 random cells of each of the edges 4, 8, 16, 32, 64, 128 and 4,096 ly on a 17³
+    lattice with its corners, plus targeted cells in every octant (the centre, the bar's end, the
+    bulge's switch between its terms and its series limit t^c∥ = 1/256, each halo component's
+    core, break and cut), each probe set also stepping the nearest corner outwards by up to 32
+    units in the last place. They take about 45 s on four cores. The fast suite runs 12 cells per
+    edge on a 9³ lattice and the targeted cells on 3³. Zero violations; the envelope bounds are
+    pure and order-independent (tested). `GENERATOR_VERSION` stays 4 until T8.c bumps it once for
+    T8 with `galaxy_bounds.golden`: nothing reads a bound before then.

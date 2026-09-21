@@ -1,19 +1,21 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use hyperion_server::{Server, ServerConfig};
+use clap::Parser;
+use hyperion_server::{Server, ServerArgs, ServerConfig};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Parsing exits with the help, the version or a usage error before anything starts.
+    let config = ServerConfig::from(ServerArgs::parse());
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
-    let config = ServerConfig::from_env().context("invalid configuration")?;
     // Bind first, so that nothing needs tearing down when the address is taken.
     let listener = TcpListener::bind(config.addr())
         .await
