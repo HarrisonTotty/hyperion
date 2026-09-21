@@ -173,13 +173,3 @@ argue with its output.
   two runs.
 - Every `hyperion-protocol` message has a test pinning its JSON wire form, because the TypeScript
   client depends on it.
-
-## Sources
-
-Distilled from the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/), the
-[Rust Book](https://doc.rust-lang.org/book/) (chapters 9 and 11), the
-[rustdoc book](https://doc.rust-lang.org/rustdoc/), the
-[`std` documentation](https://doc.rust-lang.org/std/), the
-[Tokio documentation](https://tokio.rs/tokio/tutorial) and the
-[Rust Performance Book](https://nnethercote.github.io/perf-book/). Consult them when a case is not
-covered here.
