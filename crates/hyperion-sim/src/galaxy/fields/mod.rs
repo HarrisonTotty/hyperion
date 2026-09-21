@@ -205,7 +205,7 @@ impl Shape {
     }
 
     /// The density without any arm factor at `site`.
-    fn envelope_at(&self, site: &Site) -> f64 {
+    pub(crate) fn envelope_at(&self, site: &Site) -> f64 {
         match self {
             Self::Disc(disc) => disc.envelope(site.r, site.abs_z),
             Self::Bulge(bulge) => bulge.density_at(site),

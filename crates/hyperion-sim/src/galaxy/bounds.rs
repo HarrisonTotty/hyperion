@@ -32,21 +32,23 @@
 //!   `libm` result, and still under the 10⁻¹² to which the bound equals the corner's value.
 //! - **The arm phase.** A density computes `cos φ` by double angles from `x ÷ R` and `y ÷ R`
 //!   ([`ArmGeometry::point`]), while a cell's range of phase comes from the phase at its centre;
-//!   the two differ from the exact cosine by a few 10⁻¹⁴ at most (measured under 10⁻¹⁴ apart, the
-//!   phase's own rounding at 60 radians a few 10⁻¹⁴). The greatest `cos φ` over a range is
-//!   therefore raised by [`COS_SLACK`], 2⁻³⁶ or 1.5 × 10⁻¹¹, which loosens a sharp arm's bound by
-//!   at most `k` × 2⁻³⁶ ≤ 5 × 10⁻⁸ of itself.
-//! - **`I₀ₑ` and the radii.** The sharp arm's `I₀ₑ(k)` falls with `k` except across its switch
-//!   between series at `k = 15`, where it rises by 5 × 10⁻¹⁵; the bound divides by `I₀ₑ(k_max)`
-//!   times `1 −` [`BOUND_MARGIN`]. A density's `k` and fade read `R² = x² + y²` and `R = √R²`, a
-//!   bound's read `R` from the corners, so the radii are widened by [`ROUNDING_SLACK`], 2⁻⁵⁰
-//!   relative, which covers the rounding of `R²` from `R`. Each arm factor's bound is raised by
-//!   the same 2⁻⁵⁰ absolute, eight units in the last place of 1, which covers the factor's own
-//!   `1 + …` where it nears 0, as it can with an arm fraction near 1.
+//!   the two differ from the exact cosine by a few 10⁻¹⁴ at most (measured under 10⁻¹⁴ apart; the
+//!   phase's own rounding, up to 150 radians in a 4 ly cell 20 ly from the axis, 4 × 10⁻¹⁴). The
+//!   greatest `cos φ` over a range is therefore raised by `COS_SLACK`, 2⁻³⁶ or 1.5 × 10⁻¹¹, which
+//!   loosens a sharp arm's bound by at most `k` × 2⁻³⁶ ≤ 5 × 10⁻⁸ of itself.
+//! - **`I₀ₑ` and the radii.** The sharp arm's `I₀ₑ(k)` falls with `k` except where its sum
+//!   changes form: across the switch between series at `k = 15` and wherever the asymptotic
+//!   series takes one more term, it rises by up to 1.3 × 10⁻¹⁴ (at `k ≈ 15.004`); the bound
+//!   divides by `I₀ₑ(k_max)` times `1 −` [`BOUND_MARGIN`]. A density's `k` and fade read
+//!   `R² = x² + y²` and `R = √R²`, a bound's read `R` from the corners, so the radii are widened
+//!   by `ROUNDING_SLACK`, 2⁻⁵⁰ relative, which covers the rounding of `R²` from `R`.
 //!
 //! With these, each step of the bound's arithmetic takes inputs no smaller than the density's
 //! same step, and rounding is monotone, so the bound is not below the density bit for bit, given
-//! a monotone `libm`; the envelope's margin covers `libm` itself. The corners are whole
+//! a monotone `libm`. The envelope's relative margin covers `libm`'s last-bit steps wherever the
+//! arm factor is well above 0; each arm factor's bound is also raised by 2⁻⁵⁰ absolute, four
+//! units in the last place of 1, which covers them where the factor nears 0, as it can between
+//! arms with an arm fraction near 1 and a relative margin cannot. The corners are whole
 //! light-years, exact as `f64`s, and a cell's range of radius is computed from them by the
 //! densities' own arithmetic, so no point of a cell lies nearer the origin than its nearest
 //! corner, or outside its range of radius, even by a unit in the last place.
@@ -54,14 +56,30 @@
 //! The margins are part of the generated output: they move every candidate count by under one
 //! part in 10⁷ (on a sharp arm's flank) and mostly under one in 10¹², which no test can see, and
 //! they belong to the generator version like the rest of the bound.
+//!
+//! # A layer's bound
+//!
+//! A layer's density is `Σ share × density` over the components in their fixed order
+//! ([`Fields::layer_density`]), and its bound is the same sum of `share × bound`
+//! ([`Fields::layer_bound`]), in the same order. Each product and each partial sum is a monotone
+//! rounding of inputs no smaller than the density's, so once every component's bound holds, the
+//! layer's holds bit for bit: the weights plan 03 hands to `Mark::pick_weighted` never sum past
+//! the layer's bound. Plan 03 (P03.T4.b) still pads the bound by `1 + 10⁻¹²` before that call and
+//! debug-asserts the weighted density against the padded bound. The two do not overlap: the
+//! margins here are inside the bound and make it true of the computed densities; plan 03's padding
+//! is outside it, so its assertion fires only for a violation of more than 10⁻¹² beyond a bound
+//! that already carries them, and the acceptance it changes, by at most 10⁻¹², is its own.
 
 use std::error::Error;
 use std::fmt;
 
 use super::PointLy;
+use super::fields::arms::Arm;
 #[cfg(doc)]
 use super::fields::arms::{ArmAcross, ArmGeometry, GentleArm, SharpArm};
-use super::fields::{Component, Site};
+use super::fields::{Component, ComponentId, Fields, MAX_COMPONENTS, Site};
+use super::imf::MassBand;
+use super::shares::ShareMatrix;
 use crate::coords::ROOT_HALF_WIDTH_LY;
 
 /// The relative margin every envelope bound carries above the envelope's value at the nearest
@@ -70,12 +88,12 @@ pub const BOUND_MARGIN: f64 = 1.0 / 1_099_511_627_776.0;
 
 /// How far the greatest `cos φ` over a range of arm phase is raised, absolutely: 2⁻³⁶, about
 /// 1.5 × 10⁻¹¹ (module documentation, "Floating point").
-pub const COS_SLACK: f64 = 1.0 / 68_719_476_736.0;
+pub(crate) const COS_SLACK: f64 = 1.0 / 68_719_476_736.0;
 
 /// The relative widening of a range of radius before an arm factor reads it, and the absolute
-/// amount an arm factor's bound is raised: 2⁻⁵⁰, about 8.9 × 10⁻¹⁶ (module documentation,
-/// "Floating point").
-pub const ROUNDING_SLACK: f64 = 1.0 / 1_125_899_906_842_624.0;
+/// amount an arm factor's bound is raised: 2⁻⁵⁰, about 8.9 × 10⁻¹⁶, four units in the last place
+/// of 1 (module documentation, "Floating point").
+pub(crate) const ROUNDING_SLACK: f64 = 1.0 / 1_125_899_906_842_624.0;
 
 /// A factor of a density that is bounded over a cell from the range one scalar takes across it
 /// (brainstorm, "Exact placement by thinning").
@@ -95,6 +113,7 @@ pub const ROUNDING_SLACK: f64 = 1.0 / 1_125_899_906_842_624.0;
 pub trait UnimodalFactor {
     /// An upper bound on the factor at every point whose scalar lies in `range`: never below the
     /// factor there as computed, bit for bit.
+    #[must_use]
     fn sup(&self, range: ScalarRange) -> f64;
 }
 
@@ -392,15 +411,14 @@ impl Component {
     /// let fields = Fields::new(&params, &MassModel::new(&params));
     /// let young = &fields.components()[0];
     /// // A layer-E cell that a ridge crosses at 26,000 ly: the corners miss the ridge, the bound
-    /// // does not.
-    /// let arms = fields.arms();
-    /// let theta = arms.ridge_azimuth(26_000.0, 0);
-    /// let (x, y) = (26_000.0 * hyperion_sim::math::cos(theta), 26_000.0 * hyperion_sim::math::sin(theta));
-    /// let min = [x, y, 0.0].map(|c| (c / 128.0).floor() as i32 * 128);
-    /// let cell = CellBox::new(min, 128)?;
-    /// let on_ridge = young.density(&PointLy::new(x, y, 0.0));
-    /// assert!(on_ridge <= young.bound(&cell));
-    /// assert!(young.bound(&cell) < 1.5 * on_ridge);
+    /// // does not, and it stays within a few per cent of the ridge's density.
+    /// let theta = fields.arms().ridge_azimuth(26_000.0, 0);
+    /// let (sin, cos) = hyperion_sim::math::sin_cos(theta);
+    /// let ridge = PointLy::new(26_000.0 * cos, 26_000.0 * sin, 0.0);
+    /// let cell = CellBox::new([-17_024, -19_712, 0], 128)?;
+    /// assert!(cell.contains(&ridge));
+    /// let on_ridge = young.density(&ridge);
+    /// assert!(on_ridge <= young.bound(&cell) && young.bound(&cell) < 1.05 * on_ridge);
     /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
     /// ```
     #[must_use]
@@ -413,6 +431,91 @@ impl Component {
             }
             None => envelope,
         }
+    }
+}
+
+impl Fields {
+    /// An upper bound on the density of the component `id` over `cell`, systems per cubic
+    /// light-year: [`Component::bound`].
+    ///
+    /// # Panics
+    ///
+    /// If `id` does not index these fields' components ([`Fields::component`]).
+    #[must_use]
+    pub fn component_bound(&self, id: ComponentId, cell: &CellBox) -> f64 {
+        self.component(id).bound(cell)
+    }
+
+    /// Every component's bound over `cell` into `out`, in component order, the same bits as
+    /// [`component_bound`](Self::component_bound); entries past the last component are set to 0.
+    /// Systems per cubic light-year, before layer shares.
+    ///
+    /// It reads the nearest corner and the cell's ranges of radius and phase once for every
+    /// component, and the arm factor's bound once for the sub-discs, which share one arm.
+    pub fn component_bounds(&self, cell: &CellBox, out: &mut [f64; MAX_COMPONENTS]) {
+        let corner = Site::new(&cell.nearest_corner());
+        let radii = cell.r_cyl_range();
+        // Every arm follows the galaxy's geometry, which `Fields::new` debug-asserts.
+        let phase = self.arms().phase_range(cell);
+        let mut last: Option<(&Arm, f64)> = None;
+        let (used, rest) = out.split_at_mut(self.components().len());
+        for (slot, component) in used.iter_mut().zip(self.components()) {
+            let envelope = component.shape().envelope_at(&corner) * (1.0 + BOUND_MARGIN);
+            *slot = match component.arm() {
+                Some(arm) => {
+                    let sup = match last {
+                        Some((previous, sup)) if previous == arm => sup,
+                        _ => {
+                            let sup = arm.sup(radii, phase);
+                            last = Some((arm, sup));
+                            sup
+                        }
+                    };
+                    envelope * sup
+                }
+                None => envelope,
+            };
+        }
+        rest.fill(0.0);
+    }
+
+    /// An upper bound on the density of the layer of `band` over `cell`, systems per cubic
+    /// light-year: `Σ share × bound` over the components in order, the sum
+    /// [`layer_density`](Self::layer_density) takes of the densities (module documentation, "A
+    /// layer's bound"). This is the bound placement thins against (plan 03).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::PointLy;
+    /// use hyperion_sim::galaxy::bounds::CellBox;
+    /// use hyperion_sim::galaxy::fields::Fields;
+    /// use hyperion_sim::galaxy::imf::{BandShares, Kroupa, MassBand};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::galaxy::potential::MassModel;
+    /// use hyperion_sim::galaxy::shares::ShareMatrix;
+    ///
+    /// let params = GalaxyParams::milky_way_like();
+    /// let fields = Fields::new(&params, &MassModel::new(&params));
+    /// let shares = ShareMatrix::uniform(&BandShares::of(&Kroupa));
+    /// // A layer-A cell at the solar circle: the mean number of candidates is bound × 8³.
+    /// let cell = CellBox::new([22_512, 12_992, 48], 8)?;
+    /// let bound = fields.layer_bound(&shares, MassBand::A, &cell);
+    /// let centre = fields.layer_density(&shares, MassBand::A, &cell.centre());
+    /// assert!(centre <= bound && bound < 1.2 * centre);
+    /// assert!((0.5..3.0).contains(&(bound * 512.0)));
+    /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
+    /// ```
+    #[must_use]
+    pub fn layer_bound(&self, shares: &ShareMatrix, band: MassBand, cell: &CellBox) -> f64 {
+        let mut bounds = [0.0; MAX_COMPONENTS];
+        self.component_bounds(cell, &mut bounds);
+        self.components()
+            .iter()
+            .zip(bounds)
+            .fold(0.0, |sum, (c, bound)| {
+                sum + shares.component_share(band, c) * bound
+            })
     }
 }
 

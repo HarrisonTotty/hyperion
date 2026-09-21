@@ -1099,9 +1099,9 @@ component order and the map's quadrature scheme belong to the version as well.
     is 17.8 and 5% exceed T11's 30 (maximum 51, against layer A's index capacity of 128 per ly³), because the
     nuclear disc's density, like the bulge's, takes its size scatter cubed.
 - **R17. Deviations in T8, as built (P02.T8).** The acceptance filter `galaxy_bounds` matches test
-  names, and no T8.a test name contains it: T8 runs as
-  `cargo test -p hyperion-sim --test galaxy_bounds` and `--lib galaxy::bounds`, the slow tests
-  under `just test-slow`.
+  names, and no T8.a or T8.b test name contains it: T8 runs as
+  `cargo test -p hyperion-sim --test galaxy_bounds`, `--lib galaxy::bounds` and
+  `--lib galaxy::fields::arms`, the slow tests under `just test-slow`.
   - _Cell geometry (T8.a)._ `CellBox::new` rejects an edge that is not a power of two
     (`EdgeNotPowerOfTwo`, 0 included) and a box reaching outside the root cube (`OutsideRootCube`),
     besides a box across a plane (`StraddlesPlane`); the axis is 0–2 as in `BuildGenCellError`. A
@@ -1127,3 +1127,33 @@ component order and the map's quadrature scheme belong to the version as well.
     edge on a 9³ lattice and the targeted cells on 3³. Zero violations; the envelope bounds are
     pure and order-independent (tested). `GENERATOR_VERSION` stays 4 until T8.c bumps it once for
     T8 with `galaxy_bounds.golden`: nothing reads a bound before then.
+  - _Arm bounds (T8.b)._ `ArmGeometry::phase_range`, `SharpArm::sup`, `GentleArm::sup`,
+    `Arm::{sup, across}` and `ArmAcross` live in `fields/arms.rs`, beside the factors whose
+    arithmetic they repeat step by step; `bounds.rs` holds the trait, the margins and
+    `Component::bound` (envelope bound × arm factor bound), which T8.c's `component_bound` wraps.
+    The trait's `sup` takes one range, but an arm factor also depends on R, so `ArmAcross` fixes
+    the band of radii (from `r_cyl_range`) and takes the phase. Every phase is the range (−∞, ∞).
+    The gentle bound is 1 + f(R_max) a c for c ≥ 0 and 1 + f(R_min) a c for c < 0, the plan's two
+    cases (its floor at 0 is never reached). For plan 07's lanes, at R + δ with δ = d ÷ cos p ≥ 0:
+    `phase_range`'s half-width still bounds the phase there, only the centre moves, to
+    `phase_polar(R_c + δ, θ_c)`, and `SharpArm::sup` takes the shifted radii rounded outward.
+  - _Margins (T8.b)._ Beyond the envelopes' 2⁻⁴⁰, the bound is never below the density as
+    computed, bit for bit, because each step of `sup` repeats the factor's step on inputs no
+    smaller (the argument is in `bounds.rs`, "Floating point"): the greatest cos φ over a range is
+    raised by 2⁻³⁶ (1.5 × 10⁻¹¹) absolute, covering the densities' double-angle cos φ and the
+    phase's rounding (under 10⁻¹⁴ apart; 4 × 10⁻¹⁴ at 150 radians, 20 ly from the axis), which
+    loosens a sharp bound by at most k × 2⁻³⁶ ≤ 5 × 10⁻⁸; I₀ₑ(k(R_max)) is taken × (1 − 2⁻⁴⁰),
+    because `bessel_i0e` rises where its sum changes form, by up to 1.33 × 10⁻¹⁴ where the
+    asymptotic series takes a 31st term at k ≈ 15.004 and 5 × 10⁻¹⁵ at the switch at 15; the
+    radii are widened by 2⁻⁵⁰ relative, since a density's k reads x² + y² and a bound's reads R²
+    from √; and each arm factor's bound is raised by 2⁻⁵⁰ absolute, for `libm`'s last-bit steps
+    where the factor nears 0 (arm fraction near 1), which a relative margin cannot cover. Each
+    has a unit test with its headroom. `COS_SLACK` and `ROUNDING_SLACK` are `pub(crate)`.
+  - _Tests (T8.b)._ Arm bounds against a 17 × 17 scan of the cell's face with every ridge
+    crossing, over 5,000 random cells of every edge (half in the plane at 0.5–3 bar
+    half-lengths), for 24 arms at the ends of their ranges: two and four arms, 10° and 18°, bars
+    of 10,000 and 18,000 ly, sharp at (250 ly, 0.9) and (500 ly, 1.0), gentle at a = 0.3; the
+    slow test scans every arm in every cell on 33 × 33. Zero violations. Tightness, the
+    fixture's young disc over 3,000 random 128 ly mid-plane cells between the bar's end and
+    40,000 ly: mean bound ÷ mean density 1.750, under the plan's 3.5 and the brainstorm's 2.8
+    (whose profile differed).

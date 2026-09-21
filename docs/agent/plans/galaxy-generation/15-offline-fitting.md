@@ -424,9 +424,13 @@ rerun by `--rerun-fast`.
 
 ### P15.T4 Chabrier high-mass branch scale
 
-**Source.** The observed single-star mass function (Kroupa 2001; Chabrier 2003) and the observed
-multiplicity (Duchêne and Kraus 2013; Raghavan et al. 2010), as "Sizing the layers" uses them: of
-all stars, companions included, 75.9% lie below 0.5 M☉.
+**Source.** The volume-complete census, as "Sizing the layers" uses it since the 2026-09-21 density
+rulings: within 20 pc (Kirkpatrick et al. 2024, table 4) 66.5% of primaries lie below 0.5 M☉, with
+12.9, 17.8 and 2.9% in the bands above, and 68.8% of all stars, companions and white-dwarf
+progenitors included; the 10 pc sample (Reylé et al. 2021) agrees. The mean present-day mass per
+system with a star or white dwarf is 0.55–0.59 M☉. The former target, 75.9% of all stars, was
+Kroupa's function itself. The observed multiplicity is plan 11's (Duchêne and Kraus 2013; Raghavan
+et al. 2010).
 
 **Consumer.** Plan 02, `imf::Chabrier`. **Format** (`tables::chabrier`):
 `pub const HIGH_MASS_BRANCH_SCALE: f64;` multiplying the branch above 1 M☉.
@@ -434,10 +438,12 @@ all stars, companions included, 75.9% lie below 0.5 M☉.
 - **P15.T4.a Move the constant.** Plan 02's 0.68 becomes the table, provisional, same value.
 - **P15.T4.b Fit (M4, after plan 11).** With plan 11's multiplicity model and its all-stars
   quadrature, solve for the scale s by bisection on the fraction below 0.5 M☉. The quadrature is
-  deterministic, so no sampling is needed. **Acceptance:** fraction below 0.5 M☉ within 0.3 points
-  of 75.9%; s inside 0.6–0.75 (otherwise the task fails and the discrepancy is reported, never
-  clamped); mean present-day mass per system under the scaled function within 0.53–0.57 M☉ by plan
-  02's `mean_present_mass`. Bumps the version.
+  deterministic, so no sampling is needed. **Acceptance:** fraction below 0.5 M☉ within 1 point of
+  the census's 68.8%; primary band shares within the census's Poisson errors; s inside 0.6–1.0 (0.68
+  gives about 71% with plan 02's stand-in companions and 1.0 about 67%; otherwise the task fails and
+  the discrepancy is reported, never clamped); the local mid-plane mean present-day mass per system
+  under the scaled function within 0.55–0.59 M☉ by plan 02's `mean_present_mass`. If no s meets all
+  three with plan 11's companions, the task reports which one fails. Bumps the version.
 
 **Files.** `src/tasks/chabrier.rs`, `manifests/chabrier.toml`, `tables/chabrier.rs`,
 `galaxy/imf.rs`.
@@ -807,6 +813,15 @@ plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator 
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** Chabrier's system function is now the default, and
+  P15.T4 fits its scale to the 20 pc census instead of the 75.9% that was Kroupa's function itself,
+  so the scale may land well above the old 0.6–0.75 window. The halo's smooth components now have
+  inner slopes of 2.2–2.8, which makes the smooth halo at 15–18 kpc three to four times denser, so a
+  typical globular stream stands at roughly 7–15 times it, not 25–45. P15.T11.b's tenfold
+  detectability cut then removes more model streams, and the fitted multiplier k moves with it. The
+  cut is a manifest parameter, and its value is checked against how the known streams were found
+  before the fit runs. If plan 02 puts the discs' cored vertical profiles into the potential, P15.T3
+  gains a one-dimensional expansion of those profiles beside `MGE_EXP`.
 - **The roadmap's "M2 onward" hides an M1 dependency.** Resolved as the roadmap says: P02.T6.a
   creates the crate with the first-cut MGE task, and this plan extends both after M1. The crate plan
   02 leaves has no registry, emitter or lock file, so between M1 and P15.T2 the only guard on

@@ -140,7 +140,8 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
    galaxy is a few 10⁸ M☉, while progenitors run to 10⁹·⁵ M☉, so a drawn share and drawn progenitors
    cannot agree unless one yields. The ceiling is the brainstorm's 15%; its floor of 2% is not
    enforced, because globular tubes alone come to under 1% of the halo and raising them to 2% would
-   break the brainstorm's own figures for their masses and their contrast of 25–45. See Risks.
+   break the brainstorm's own figures for their masses and their contrast (25–45 against the old
+   r^−3.5 halo, roughly 7–15 against the slopes ruled on 2026-09-21). See Risks.
 2. **Axisymmetric forces.** The integrator reads the (R, z) potential table only. The bar is left
    out because no progenitor with a tube comes inside corotation.
 3. **Force interpolation.** Plan 02's tables give Φ(R, z) and no gradient. `Leapfrog::new` samples
@@ -403,10 +404,11 @@ neglected curvature is under 10⁻⁴ ly. **Budgets:** expected members of tubes
 cube against `discrete_share` × the halo's budget, within 5% (the tolerance of design note 1's
 inside-the-cube estimate), and sampled halo field plus discrete members against the halo's budget
 within Poisson error in eight volumes. **Contrast:** on its axis at 15–18 kpc a globular stream is
-25–45 times the smooth halo and about a thousandth of the reference density. **Figures:** globular
-tubes 30,000–160,000 ly long, 100–400 ly wide, 0.5–3 km/s; dwarf tubes 1,000–6,000 ly wide, 10–25
-km/s, several wraps. The benches of P10.T4, T6.c and T9 are recorded in the plan's doc comment with
-the machine they ran on.
+about a thousandth of the reference density and roughly 7–15 times the smooth halo; the figure is
+recorded, and a value outside it is a finding, since the brainstorm's range is an estimate (see
+Risks). **Figures:** globular tubes 30,000–160,000 ly long, 100–400 ly wide, 0.5–3 km/s; dwarf tubes
+1,000–6,000 ly wide, 10–25 km/s, several wraps. The benches of P10.T4, T6.c and T9 are recorded in
+the plan's doc comment with the machine they ran on.
 
 ## Verification
 
@@ -433,6 +435,12 @@ dwarfs' stripping fraction, the shell-widening factor.
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** The halo's smooth components now have inner slopes
+  of 2.2–2.8, and the dominant merger breaks at 16–28 kpc, steepening by 1.5–2.5 beyond. At 15–18
+  kpc that halo is three to four times denser than the r^−3.5 halo the brainstorm's 25–45 was worked
+  on, so P10.T12's contrast becomes roughly 7–15. The streams' masses and widths are unchanged. The
+  new range is an estimate from spherical profiles, so the first run records the contrast rather
+  than tuning streams to it.
 - **The discrete share against the dwarf mass range.** The mixture table gives the discrete share
   2–15% of a halo that holds a few 10⁸ M☉, while dwarf progenitors run to 10⁹·⁵ M☉. Resolved by
   design note 1: the drawn share is a ceiling and scales down the cold debris of the largest dwarfs;

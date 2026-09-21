@@ -1288,11 +1288,12 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   metallicities (about 400 full tracks, some tens of milliseconds) and held by the `Galaxy`, as the
   potential tables are. `mean_companions` delegates to `ProvisionalFates`. `fates_for` switches to
   it. Bump `GENERATOR_VERSION`; regenerate every golden file in the same commit with `just bless`.
-- **Tests:** at Milky Way parameters the mean present-day mass per system under Kroupa is 0.48 ±
-  0.02 M☉ (0.55–0.60 under Chabrier), varies by under 5% between the old populations, and the young
-  disc's is 30–50% higher; the share of dead primaries is 8 ± 2% in the old thin disc, 11 ± 2% in
-  the thick disc and 13 ± 3% in the halo (the research figures behind the brainstorm's 0.48); the
-  system count for a 5 × 10¹⁰ M☉ galaxy is near 10¹¹.
+- **Tests:** at Milky Way parameters the mean present-day mass per system under the default,
+  Chabrier's system function, is 0.55–0.59 M☉ (0.48 ± 0.02 under Kroupa's), varies by under 5%
+  between the old populations, and the young disc's is 30–50% higher; the share of dead primaries is
+  8 ± 2% in the old thin disc, 11 ± 2% in the thick disc and 13 ± 3% in the halo (the research
+  figures behind the brainstorm's 0.48); the system count for a 5 × 10¹⁰ M☉ galaxy is near 0.9 ×
+  10¹¹ (10¹¹ under Kroupa's).
 - **Files:** `galaxy/fates.rs`, `galaxy/params.rs` (the call sites of plan 02's P02.T4 and P02.T5),
   `stellar/fates.rs`, all goldens.
 - **Accept:** `just ci` green with regenerated goldens; the version bump is in the same commit.
@@ -1517,6 +1518,10 @@ Reserved so that later plans move no star:
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** The default mass function is now Chabrier's system
+  function, so T30.b's bracket is the default's 0.55–0.59 M☉, with Kroupa's 0.48 kept as a second
+  case. The thin discs' age–metallicity relation is now flat to 8 Gyr, so the thin discs' entry in
+  T30.a's `reference_fe_h` follows whatever mean P02.T7.e sets at the reference radius.
 - **Transcription.** HPT has some 200 coefficients and known misprints. Mitigations: checksummed
   tables, continuity sweeps across every piecewise boundary, and T12's comparison with SSE output.
   The SSE source is consulted only to settle a misprint, and its licence is unclear, so no code is

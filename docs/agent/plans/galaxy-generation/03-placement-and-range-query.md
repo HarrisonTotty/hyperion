@@ -307,14 +307,14 @@ Decisions where the brainstorm is silent. None contradicts it.
    cell would be short of candidates in every query alike, and the headroom check exists so that no
    galaxy that could reach the clamp is ever played. `check_index_headroom` is called by whoever
    builds a `Galaxy` for play, which is plan 04's universe registry; nothing in this plan calls it
-   on the hot path. At Milky Way values the fullest layer-A cell expects about 7,500 candidates of
-   65,536.
+   on the hot path. At Milky Way values the fullest layer-A cell expects about 6,000 candidates of
+   65,536 under the default mass function (7,500 under Kroupa's).
 7. **Ages are signed years at the epoch.** `age_at(t)` adds the clock time. "No system yet" is
    `age_at(t) ≤ 0`. A record resolves at all times; existence is a question asked with a time.
 8. **Census stops at the first layer that does not fit.** Layers are tried from E to A with a
    running expected total. The first layer whose addition would exceed the limit is left out with
-   every finer layer, even if a finer one alone would fit (layer B is smaller than C under Kroupa),
-   because the result must be statable as "complete above m".
+   every finer layer, even if a finer one alone would fit (layer B is smaller than C under either
+   mass function), because the result must be statable as "complete above m".
 9. **The limit is on expected counts only.** The realised count fluctuates around it and is never
    truncated, since truncation would break the census. Callers size buffers with headroom. The
    default limit is 4,096.
@@ -441,14 +441,14 @@ Acceptance: tests pass; `just test-slow` passes.
   `ShareMatrix::component_share(band, component)`, and apply Design note 3 with
   `Mark::pick_weighted`. The index picked is the `ComponentId`. Add
   `debug_assert!(weighted_density <= bound * (1.0 + 1e-12))` with the cell and position in the
-  message: this is the brainstorm's bound-check assertion. `pick_weighted` requires Σ weights ≤
-  its bound exactly and debug-asserts it, so pass it the bound padded by the same tolerance,
+  message: this is the brainstorm's bound-check assertion. `pick_weighted` requires Σ weights ≤ its
+  bound exactly and debug-asserts it, so pass it the bound padded by the same tolerance,
   `bound * (1.0 + 1e-12)`, computed once per cell. A sum within rounding of the bound then never
   trips plan 01's assertion, and acceptance changes by at most one part in 10¹², which no test can
-  see. Record the padding in the doc comment. Tests: acceptance frequency in a cell
-  equals mean density ÷ bound within a binomial interval; the picked components' frequencies match
-  the odds at a fixed position (chi-square, using a test-only entry point that fixes the position).
-  Acceptance: `cargo test -p hyperion-sim placement::candidate::accept`.
+  see. Record the padding in the doc comment. Tests: acceptance frequency in a cell equals mean
+  density ÷ bound within a binomial interval; the picked components' frequencies match the odds at a
+  fixed position (chi-square, using a test-only entry point that fixes the position). Acceptance:
+  `cargo test -p hyperion-sim placement::candidate::accept`.
 
 Files: `galaxy/placement/candidate.rs`.
 
@@ -558,17 +558,18 @@ golden test fail (checked once, not committed).
 - **P03.T9.c Expected counts over the sphere.** `expected_counts` integrates each component's
   density over the unpadded sphere once, then forms each layer's count as Σ_c
   `component_share(band, c)` × I_c. Quadrature, fixed by Design note 11: split the z range [z₀ − R,
-  z₀ + R] at z = 0 when it lies strictly inside, because every disc has a kink there; divide each
-  part into n equal panels, n = ⌈width ÷ 64 ly⌉ held between 1 and 16; Gauss–Legendre in z on each
-  panel; at each z node integrate over the disc of radius √(R² − (z − z₀)²) about (x₀, y₀) with
-  Gauss–Legendre in radius (weight r) and equally spaced azimuths offset by half a step. Orders are
-  4 × 4 × 8 (z, radius, azimuth) for R ≤ 256 ly and 8 × 8 × 16 above. Nodes and weights are
-  constants with their source cited. Files: `galaxy/query/expected.rs`. Tests: a constant density
-  gives 4πR³ ÷ 3 to 10⁻¹²; a pure exponential in |z| matches its closed form to 10⁻⁶; against
-  `reference_sphere_integral` the layer totals agree within 2% for R of 10, 50, 500 and 5,000 ly at
-  the Sun-like point, above the plane, straddling the plane and in the bulge, and within 5% at the
-  nuclear disc's centre; the result is bit-identical on repeated calls. Acceptance:
-  `cargo test -p hyperion-sim query::expected`, slow cases under `just test-slow`.
+  z₀ + R] at z = 0 when it lies strictly inside, because the bulge and the bar have a kink there
+  (the discs, cored in height, no longer do); divide each part into n equal panels, n = ⌈width ÷ 64
+  ly⌉ held between 1 and 16; Gauss–Legendre in z on each panel; at each z node integrate over the
+  disc of radius √(R² − (z − z₀)²) about (x₀, y₀) with Gauss–Legendre in radius (weight r) and
+  equally spaced azimuths offset by half a step. Orders are 4 × 4 × 8 (z, radius, azimuth) for R ≤
+  256 ly and 8 × 8 × 16 above. Nodes and weights are constants with their source cited. Files:
+  `galaxy/query/expected.rs`. Tests: a constant density gives 4πR³ ÷ 3 to 10⁻¹²; a pure exponential
+  in |z| matches its closed form to 10⁻⁶; against `reference_sphere_integral` the layer totals agree
+  within 2% for R of 10, 50, 500 and 5,000 ly at the Sun-like point, above the plane, straddling the
+  plane and in the bulge, and within 5% at the nuclear disc's centre; the result is bit-identical on
+  repeated calls. Acceptance: `cargo test -p hyperion-sim query::expected`, slow cases under
+  `just test-slow`.
 - **P03.T9.d Census rule.** A pure function from the grid's `LayerCounts`, the sources'
   `LayerCounts`, per-layer cell counts, the limit, the cell budget and the mass floor to a `Census`
   and the set of layers to walk, per Design notes 8–10. If even layer E does not fit, the census is
@@ -746,3 +747,8 @@ Reserved so that later plans move no star they need not:
   plain multiply and add is bit-identical to the fused form whenever the two cells differ by 31 ly
   or less per axis, so a fast path on that condition is exact; add it with a test that compares both
   paths across the boundary.
+- **Updated for the 2026-09-21 density rulings.** The default mass function is now Chabrier's system
+  function, so the fullest layer-A cell at Milky Way values drops to about 6,000 candidates (Design
+  note 6), and a 50 ly query at the reference density generates about 3,100 candidates, not 2,900,
+  for the same 1,600 systems. The discs are cored in height, so the z = 0 split of P03.T9.c now
+  serves the bulge and the bar alone. It stays, because the quadrature belongs to the version.

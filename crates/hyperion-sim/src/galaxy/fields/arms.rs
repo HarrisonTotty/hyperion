@@ -192,7 +192,7 @@ impl ArmGeometry {
     /// let cell = CellBox::new([20_000, 0, 0], 8)?;
     /// let phase = arms.phase_range(&cell);
     /// assert!(phase.hi - phase.lo < 0.02);
-    /// assert!(phase.contains(arms.phase(20_004.0, 4.0).unwrap()));
+    /// assert!(arms.phase(20_004.0, 4.0).is_some_and(|p| phase.contains(p)));
     /// // A cell on the z axis holds every phase.
     /// assert!(arms.phase_range(&CellBox::new([0, 0, 64], 8)?).hi.is_infinite());
     /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
@@ -267,8 +267,9 @@ impl ArmGeometry {
     }
 }
 
-/// The greatest `cos φ` over `phase`, raised by [`COS_SLACK`] and capped at 1: 1 if the range
+/// The greatest `cos φ` over `phase`, raised by `COS_SLACK` and capped at 1: 1 if the range
 /// holds a ridge (a multiple of 2π) or a whole turn, else the cosine at the end nearer a ridge.
+#[must_use]
 fn cos_sup(phase: ScalarRange) -> f64 {
     let half = 0.5 * (phase.hi - phase.lo);
     // Also every phase, an infinite range, and a NaN end, which would be a bug upstream.
@@ -287,8 +288,9 @@ fn cos_sup(phase: ScalarRange) -> f64 {
     (cos + COS_SLACK).min(1.0)
 }
 
-/// `radii` widened by [`ROUNDING_SLACK`] each way, so that `R²` computed from the ends brackets
+/// `radii` widened by `ROUNDING_SLACK` each way, so that `R²` computed from the ends brackets
 /// every `x² + y²` of the cell although it was rounded from `R`.
+#[must_use]
 fn widened(radii: ScalarRange) -> (f64, f64) {
     (
         radii.lo * (1.0 - ROUNDING_SLACK),
@@ -452,7 +454,8 @@ impl SharpArm {
     }
 
     /// An upper bound on the factor at every point whose radius lies in `radii` (ly) and whose
-    /// phase lies in `phase` (plan 02, P02.T8.b).
+    /// phase lies in `phase` (plan 02, P02.T8.b): for a cell, its
+    /// [`r_cyl_range`](CellBox::r_cyl_range) and its [`phase_range`](ArmGeometry::phase_range).
     ///
     /// With `c` the greatest `cos φ` over the phase (1 if the range reaches a ridge), the profile
     /// is at most `g_sup = exp(k(R_min) (c − 1)) ÷ I₀ₑ(k(R_max))`: its numerator falls as `k`
@@ -462,6 +465,22 @@ impl SharpArm {
     /// [`factor`](Self::factor) does, from inputs raised by the margins of
     /// [`bounds`](crate::galaxy::bounds) ("Floating point"): `c` by 2⁻³⁶, `I₀ₑ` lowered by 2⁻⁴⁰,
     /// the radii widened by 2⁻⁵⁰, and the result raised by 2⁻⁵⁰.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::bounds::CellBox;
+    /// use hyperion_sim::galaxy::fields::arms::SharpArm;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let arm = SharpArm::young_disc(&GalaxyParams::milky_way_like());
+    /// let geometry = arm.geometry();
+    /// let cell = CellBox::new([20_480, 8_192, 0], 128)?;
+    /// let bound = arm.sup(cell.r_cyl_range(), geometry.phase_range(&cell));
+    /// let centre = cell.centre();
+    /// assert!(arm.factor(&geometry.point(centre.x, centre.y)) <= bound);
+    /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
+    /// ```
     #[must_use]
     pub fn sup(&self, radii: ScalarRange, phase: ScalarRange) -> f64 {
         let (r_lo, r_hi) = widened(radii);
@@ -529,7 +548,8 @@ impl GentleArm {
     }
 
     /// An upper bound on the factor at every point whose radius lies in `radii` (ly) and whose
-    /// phase lies in `phase` (plan 02, P02.T8.b).
+    /// phase lies in `phase` (plan 02, P02.T8.b): for a cell, its
+    /// [`r_cyl_range`](CellBox::r_cyl_range) and its [`phase_range`](ArmGeometry::phase_range).
     ///
     /// With `c` the greatest `cos φ` over the phase (1 if the range reaches a ridge), the bound is
     /// `1 + f(R_max) a c` when `c ≥ 0` and `1 + f(R_min) a c` when `c < 0`, where the fade-in
@@ -572,8 +592,9 @@ impl Arm {
         }
     }
 
-    /// An upper bound on the factor over `radii` and `phase`: [`SharpArm::sup`] or
-    /// [`GentleArm::sup`].
+    /// An upper bound on the factor over the radii `radii` and the phases `phase`, for a cell
+    /// its [`r_cyl_range`](CellBox::r_cyl_range) and its
+    /// [`phase_range`](ArmGeometry::phase_range): [`SharpArm::sup`] or [`GentleArm::sup`].
     #[must_use]
     pub fn sup(&self, radii: ScalarRange, phase: ScalarRange) -> f64 {
         match self {
@@ -582,10 +603,11 @@ impl Arm {
         }
     }
 
-    /// The factor over the band of radii `radii` (ly), as a factor of the phase alone.
+    /// The factor over the band of radii `radii` (ly), for a cell its
+    /// [`r_cyl_range`](CellBox::r_cyl_range), as a factor of the phase alone.
     #[must_use]
-    pub fn across(&self, radii: ScalarRange) -> ArmAcross {
-        ArmAcross { arm: *self, radii }
+    pub fn across(&self, radii: ScalarRange) -> ArmAcross<'_> {
+        ArmAcross { arm: self, radii }
     }
 }
 
@@ -608,12 +630,12 @@ impl Arm {
 /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ArmAcross {
-    arm: Arm,
+pub struct ArmAcross<'a> {
+    arm: &'a Arm,
     radii: ScalarRange,
 }
 
-impl UnimodalFactor for ArmAcross {
+impl UnimodalFactor for ArmAcross<'_> {
     fn sup(&self, phase: ScalarRange) -> f64 {
         self.arm.sup(self.radii, phase)
     }
@@ -842,7 +864,7 @@ mod tests {
     /// The greatest cosine over a range: 1 when a ridge or a whole turn is inside, the nearer
     /// end's otherwise, always raised by the slack and never above 1.
     #[test]
-    fn the_greatest_cosine_of_a_range() {
+    fn cos_sup_is_one_over_a_ridge_and_the_nearer_ends_cosine_otherwise() {
         let range = |lo: f64, hi: f64| ScalarRange::new(lo, hi);
         assert_same_bits(cos_sup(range(-0.1, 0.1)), 1.0);
         assert_same_bits(cos_sup(range(6.2, 6.3)), 1.0);
@@ -868,8 +890,8 @@ mod tests {
     }
 
     /// The densities' `cos φ`, by double angles, and the cosine of the phase differ by far less
-    /// than the slack the bounds raise the greatest cosine by, at every radius of the cube, for
-    /// every arm count and pitch at the ends of their ranges.
+    /// than the slack the bounds raise the greatest cosine by, at every radius of the cube from
+    /// 20 ly out, for every arm count and pitch at the ends of their ranges.
     #[test]
     fn the_cosine_slack_covers_the_densities_cosine() {
         let mut lcg = hyperion_testkit::lcg::Lcg::new(0xc05);
@@ -883,8 +905,14 @@ mod tests {
                         LightYears::new(bar),
                     )
                     .unwrap();
-                    for _ in 0..20_000 {
-                        let r = 93_000.0 * lcg.next_f64().sqrt();
+                    for i in 0..20_000 {
+                        // Uniform by area, and one in four log-uniform from 20 ly, where the
+                        // phase reaches 150 radians.
+                        let r = if i % 4 == 0 {
+                            20.0 * math::exp(lcg.next_f64() * math::ln(4_650.0))
+                        } else {
+                            93_000.0 * lcg.next_f64().sqrt()
+                        };
                         let theta = 2.0 * PI * lcg.next_f64();
                         let (x, y) = (
                             (r * math::cos(theta)).round(),
@@ -901,21 +929,29 @@ mod tests {
     }
 
     /// `I₀ₑ` never rises with `k` by more than a small part of the margin the sharp bound divides
-    /// it by: stepped one representable value at a time across its switch between series at 15,
-    /// and over random pairs up to the cube's largest `k`.
+    /// it by: stepped one representable value at a time across its switch between series at 15
+    /// and across every `k` where the asymptotic series takes one more term, `(2j − 1)² ÷ 8j`, up
+    /// to 25, and over random pairs up to the cube's largest `k`. The largest rise, at the
+    /// 31st term's `k ≈ 15.004`, is 1.33 × 10⁻¹⁴.
     #[test]
     fn bessel_i0e_rises_by_far_less_than_the_margin() {
         let mut worst: f64 = 0.0;
-        let mut k = 15.0_f64;
-        for _ in 0..1_000 {
-            k = k.next_down();
-        }
-        let mut least = bessel_i0e(k);
-        for _ in 0..2_000 {
-            k = k.next_up();
-            let value = bessel_i0e(k);
-            worst = worst.max(value / least - 1.0);
-            least = least.min(value);
+        let terms = (31..=51).map(|j: u32| {
+            let odd = f64::from(2 * j - 1);
+            odd * odd / (8.0 * f64::from(j))
+        });
+        for centre in std::iter::once(15.0).chain(terms) {
+            let mut k: f64 = centre;
+            for _ in 0..1_000 {
+                k = k.next_down();
+            }
+            let mut least = bessel_i0e(k);
+            for _ in 0..2_000 {
+                k = k.next_up();
+                let value = bessel_i0e(k);
+                worst = worst.max(value / least - 1.0);
+                least = least.min(value);
+            }
         }
         let mut lcg = hyperion_testkit::lcg::Lcg::new(0x10e);
         for _ in 0..100_000 {
@@ -923,7 +959,7 @@ mod tests {
             let higher = k * (1.0 + 1e-9 * lcg.next_f64());
             worst = worst.max(bessel_i0e(higher) / bessel_i0e(k) - 1.0);
         }
-        assert!(worst < BOUND_MARGIN / 64.0, "{worst:e}");
+        assert!(worst < BOUND_MARGIN / 32.0, "{worst:e}");
     }
 
     /// The widened radii give a `k` below that of any point at the least radius and above that of

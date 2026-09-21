@@ -854,8 +854,9 @@ bench: that query cold, target under 20 ms.
   break near 10 ly and outer slope 3.5 (Schödel et al. 2014; Gallego-Cano et al. 2018), continued
   inward to 10⁻³ ly, then r^−½, truncated at the grid's reach of 128 ly; mass and break from
   `NuclearClusterParams`; enclosed mass in closed form by pieces; potential of the black hole plus
-  the cluster. Tests at Milky Way values: about 9,000 systems per cubic light-year at 3 ly, 4–5 ×
-  10⁷ systems, fewer than three inside 10⁻³ ly, the stars outweigh the black hole near 10 ly.
+  the cluster. Tests at Milky Way values: about 7,800 systems per cubic light-year at 3 ly under the
+  default mass function (9,000 under Kroupa's), 4–5 × 10⁷ systems, fewer than three inside 10⁻³ ly,
+  the stars outweigh the black hole near 10 ly.
 - **P09.T24.b Eddington inversion.** `DistributionFunction::invert(profile, potential)` on a
   logarithmic grid of 256 radii, with the substitution that removes the square-root singularity
   (Binney and Tremaine 2008, eq. 4.46). f must be non-negative everywhere: a returned error, not a
@@ -897,10 +898,11 @@ third; the unretained are not generated here (they are in the bulge's displaced 
 P09.T21 with the marks of P09.T25 after the class pick. `CentreMemberId`; the central black hole is
 member zero of the feature-level list, a `MemberRecord` with its mass from `GalaxyParams`.
 `CentreModel::as_global_entry()` gives plan 10 the first entry of its list. Plan 03's `resolve`
-dispatches `SystemIdKind::Centre` here. Tests: the fullest cell and band expects about 1,700
-candidates (under 8,192 for every seed); the innermost cell about a hundred; every member's ID
-round-trips through `SystemId::from_raw` (levels 0–11, no inner cell of 8–23); the black hole
-resolves from `0xF000_0007_0000_0000`; goldens of the hundred innermost members.
+dispatches `SystemIdKind::Centre` here. Tests: the fullest cell and band expects about 1,400
+candidates under the default mass function (1,700 under Kroupa's; under 8,192 for every seed); the
+innermost cell about eighty; every member's ID round-trips through `SystemId::from_raw` (levels
+0–11, no inner cell of 8–23); the black hole resolves from `0xF000_0007_0000_0000`; goldens of the
+hundred innermost members.
 
 #### P09.T28 The Kepler regime
 
@@ -935,8 +937,9 @@ resolves from `0xF000_0007_0000_0000`; goldens of the hundred innermost members.
 − 1.5 √(2GM) |t|)^(2⁄3), and everything inside r_full = (1.5 √(2GM) |t|)^(2⁄3) is scanned in full.
 Orbits are propagated to the query's time and tested there. The caller may supply a cache of orbital
 elements per cell (`CentreOrbitCache`). The same pad applies to grid systems in the Kepler regime.
-Tests: r_full of 0.31 ly and about 42,000 systems at a century; a query at t = ±100 yr equals a
-brute-force scan of the inner 2 ly; bench: the century query with cached orbits, target about 10 ms.
+Tests: r_full of 0.31 ly and about 37,000 systems at a century (42,000 under Kroupa's); a query at t
+= ±100 yr equals a brute-force scan of the inner 2 ly; bench: the century query with cached orbits,
+target about 10 ms.
 
 #### P09.T30 The black hole's own events
 
@@ -1200,6 +1203,11 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** The default mass function is now Chabrier's system
+  function, with about 0.87 times Kroupa's systems per solar mass, so the centre's figures are
+  scaled: about 7,800 systems per cubic light-year at 3 ly (T24.a), 1,400 candidates in the fullest
+  cell and band and eighty in the innermost (T27), and 37,000 systems in r_full at a century (T29).
+  The cluster's 4–5 × 10⁷ members and every conclusion about the 8,192 index still hold.
 - **Where the shell window lives.** The brainstorm's order of attack puts "the shell test" with
   kicks and displaced objects, which is plan 08, while this plan's scope holds the supernova section
   in full. This plan owns `snr` and `claims`; if plan 08 has already built the window, P09.T15

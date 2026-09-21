@@ -1,20 +1,26 @@
-//! The bounds (plan 02, P02.T8): cell geometry, the envelopes' nearest-corner bounds, and the arm
-//! factors' bounds from a cell's ranges of radius and phase.
+//! The bounds (plan 02, P02.T8): cell geometry, the envelopes' nearest-corner bounds, the arm
+//! factors' bounds from a cell's ranges of radius and phase, the layers' bounds, the violation
+//! hunt and the golden file.
 //!
 //! The checks over thousands of cells run in full as slow tests under `just test-slow`; the fast
 //! suite runs the same checks on a sample a debug build can afford.
 
-use hyperion_sim::Seed;
+use std::collections::BTreeSet;
+
 use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::bounds::{CellBox, ScalarRange, UnimodalFactor};
 use hyperion_sim::galaxy::fields::arms::{Arm, ArmGeometry, GentleArm, SharpArm};
-use hyperion_sim::galaxy::fields::{Component, Fields, Shape};
-use hyperion_sim::galaxy::imf::MassFunctionKind;
-use hyperion_sim::galaxy::params::{ArmCount, GalaxyParams};
+use hyperion_sim::galaxy::fields::{Component, Fields, MAX_COMPONENTS, Shape};
+use hyperion_sim::galaxy::imf::{BandShares, Kroupa, MassBand, MassFunctionKind};
+use hyperion_sim::galaxy::params::{ArmCount, GalaxyParams, GalaxyParamsBuilder};
 use hyperion_sim::galaxy::potential::MassModel;
+use hyperion_sim::galaxy::shares::ShareMatrix;
 use hyperion_sim::math;
-use hyperion_sim::units::{Degrees, LightYears, Radians};
+use hyperion_sim::units::{Degrees, LightYears, Radians, Years};
+use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::golden;
+use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
 
@@ -334,15 +340,14 @@ fn envelopes_never_exceed_their_bounds_over_many_cells_seed_2() {
     envelopes_never_exceed_their_bounds_over_many_cells(PINNED[2]);
 }
 
-/// Every envelope bound's bits over a few cells.
-fn envelope_bound_bits(fields: &Fields, cells: &[CellBox]) -> Vec<u64> {
+/// Every component's envelope bound's and bound's bits over a few cells.
+fn bound_bits(fields: &Fields, cells: &[CellBox]) -> Vec<u64> {
     cells
         .iter()
         .flat_map(|cell| {
-            fields
-                .components()
-                .iter()
-                .map(|c| hyperion_testkit::float::bits(c.envelope_bound(cell)))
+            fields.components().iter().flat_map(|c| {
+                [c.envelope_bound(cell), c.bound(cell)].map(hyperion_testkit::float::bits)
+            })
         })
         .collect()
 }
@@ -351,19 +356,19 @@ fn envelope_bound_bits(fields: &Fields, cells: &[CellBox]) -> Vec<u64> {
 /// twice, and building galaxies or bounding cells in any order changes nothing (the
 /// sim-determinism rule for anything a cache may hold).
 #[test]
-fn envelope_bounds_are_pure_and_order_independent() {
+fn bounds_are_pure_and_order_independent() {
     let mut lcg = Lcg::new(0x0208_0bde);
     let cells: Vec<CellBox> = EDGES
         .iter()
         .flat_map(|&edge| [random_cell(&mut lcg, edge), random_cell(&mut lcg, edge)])
         .collect();
-    let first = envelope_bound_bits(&seeded(PINNED[1]), &cells);
+    let first = bound_bits(&seeded(PINNED[1]), &cells);
     let _other = seeded(PINNED[0]);
-    assert_eq!(first, envelope_bound_bits(&seeded(PINNED[1]), &cells));
-    assert_order_independent(&PINNED, |&seed| envelope_bound_bits(&seeded(seed), &cells));
+    assert_eq!(first, bound_bits(&seeded(PINNED[1]), &cells));
+    assert_order_independent(&PINNED, |&seed| bound_bits(&seeded(seed), &cells));
     let fields = seeded(PINNED[2]);
     assert_order_independent(&cells, |cell| {
-        envelope_bound_bits(&fields, std::slice::from_ref(cell))
+        bound_bits(&fields, std::slice::from_ref(cell))
     });
 }
 
@@ -651,4 +656,565 @@ fn the_young_disc_bound_is_tight_on_the_mid_plane() {
     let ratio = bounds / densities;
     println!("young disc, 128 ly mid-plane cells: mean bound ÷ mean density = {ratio:.3}");
     assert!((1.0..3.5).contains(&ratio), "{ratio}");
+}
+
+// Layer bounds and the violation hunt (P02.T8.c).
+
+/// The five stellar layers: cell edge and mass band.
+const LAYERS: [(u32, MassBand); 5] = [
+    (8, MassBand::A),
+    (16, MassBand::B),
+    (32, MassBand::C),
+    (64, MassBand::D),
+    (128, MassBand::E),
+];
+
+/// The share matrix every galaxy of the first milestone uses.
+fn kroupa_shares() -> ShareMatrix {
+    ShareMatrix::uniform(&BandShares::of(&Kroupa))
+}
+
+/// `layer_bound` is `Σ share × bound` over the components in order, bit for bit, and
+/// `component_bounds` holds each component's `bound` and zeros past the last.
+#[test]
+fn layer_bounds_are_share_weighted_sums_in_component_order() {
+    let shares = kroupa_shares();
+    let mut lcg = Lcg::new(0x0208_c0a1);
+    for seed in PINNED {
+        let fields = seeded(seed);
+        for edge in EDGES {
+            for _ in 0..10 {
+                let cell = random_cell(&mut lcg, edge);
+                let mut bounds = [f64::NAN; MAX_COMPONENTS];
+                fields.component_bounds(&cell, &mut bounds);
+                let count = fields.components().len();
+                for (id, component) in fields.component_ids().zip(fields.components()) {
+                    let bound = bounds[id.index()];
+                    assert_same_bits(bound, component.bound(&cell));
+                    assert_same_bits(bound, fields.component_bound(id, &cell));
+                }
+                assert!(bounds[count..].iter().all(|&b| b.abs() < f64::MIN_POSITIVE));
+                for band in MassBand::ALL {
+                    let expected = fields
+                        .components()
+                        .iter()
+                        .zip(bounds)
+                        .fold(0.0, |sum, (c, b)| sum + shares.component_share(band, c) * b);
+                    assert_same_bits(fields.layer_bound(&shares, band, &cell), expected);
+                }
+            }
+        }
+    }
+}
+
+/// The directions of the hunt's pattern search: the three axes and the plane's two diagonals, both
+/// ways, since arm ridges run obliquely through a cell.
+const DIRECTIONS: [[f64; 3]; 10] = [
+    [1.0, 0.0, 0.0],
+    [-1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, -1.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, 0.0, -1.0],
+    [1.0, 1.0, 0.0],
+    [-1.0, -1.0, 0.0],
+    [1.0, -1.0, 0.0],
+    [-1.0, 1.0, 0.0],
+];
+
+/// A search for the greatest value of a function over a cell.
+struct Search<'a> {
+    cell: &'a CellBox,
+    lo: [f64; 3],
+    hi: [f64; 3],
+}
+
+impl<'a> Search<'a> {
+    fn new(cell: &'a CellBox) -> Self {
+        let lo = cell.min_corner().map(f64::from);
+        let hi = lo.map(|low| low + f64::from(cell.edge()));
+        Self { cell, lo, hi }
+    }
+
+    /// An `m³` lattice of the cell, corners included.
+    fn lattice(&self, m: u32) -> Vec<PointLy> {
+        let edge = f64::from(self.cell.edge());
+        let steps = f64::from(m - 1);
+        let mut points = Vec::new();
+        for i in 0..m {
+            for j in 0..m {
+                for k in 0..m {
+                    let at = |low: f64, i: u32| low + edge * f64::from(i) / steps;
+                    points.push(PointLy::new(
+                        at(self.lo[0], i),
+                        at(self.lo[1], j),
+                        at(self.lo[2], k),
+                    ));
+                }
+            }
+        }
+        points
+    }
+
+    /// Compass search from `start`: move to any better point one step away along
+    /// [`DIRECTIONS`], clamped to the cell, and quarter the step when none is better, down to a
+    /// millionth of the edge.
+    fn ascend(&self, start: PointLy, step: f64, f: &impl Fn(&PointLy) -> f64) -> (f64, PointLy) {
+        let floor = f64::from(self.cell.edge()) / 1_048_576.0;
+        let mut at = [start.x, start.y, start.z];
+        let mut best = f(&start);
+        let mut step = step;
+        while step > floor {
+            let mut moved = false;
+            for d in DIRECTIONS {
+                let q: [f64; 3] =
+                    std::array::from_fn(|a| (at[a] + step * d[a]).clamp(self.lo[a], self.hi[a]));
+                let value = f(&PointLy::new(q[0], q[1], q[2]));
+                if value > best {
+                    best = value;
+                    at = q;
+                    moved = true;
+                }
+            }
+            if !moved {
+                step *= 0.25;
+            }
+        }
+        (best, PointLy::new(at[0], at[1], at[2]))
+    }
+
+    /// The greatest value of `f` found by an `m³` lattice refined by compass search from the
+    /// lattice's best point and from the nearest corner.
+    fn maximise(&self, m: u32, f: &impl Fn(&PointLy) -> f64) -> (f64, PointLy) {
+        let best = self
+            .lattice(m)
+            .into_iter()
+            .map(|p| (f(&p), p))
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .expect("a lattice has points");
+        let step = 0.5 * f64::from(self.cell.edge()) / f64::from(m - 1);
+        [best.1, self.cell.nearest_corner()]
+            .into_iter()
+            .map(|start| self.ascend(start, step, f))
+            .fold(best, |a, b| if b.0 > a.0 { b } else { a })
+    }
+}
+
+/// The greatest density ÷ bound the hunt found, per quantity.
+#[derive(Debug, Default)]
+struct Worst {
+    young: f64,
+    sub_disc: f64,
+    layer: f64,
+    other: f64,
+    cells: usize,
+}
+
+impl Worst {
+    fn note(slot: &mut f64, value: f64, bound: f64) {
+        if bound > 0.0 {
+            *slot = slot.max(value / bound);
+        }
+    }
+}
+
+/// Which quantities a cell's search maximises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Effort {
+    /// The arms: the young disc, the youngest sub-disc, and the layer at a lattice and the arms'
+    /// maxima.
+    Arms,
+    /// The arms, and the layer refined by compass search.
+    ArmsAndLayer,
+    /// Every component and the layer, each refined by compass search.
+    Everything,
+}
+
+/// Hunts `cell` of the layer of `band` for a point where a density exceeds its bound, and panics
+/// with the point if it finds one.
+fn hunt_cell(
+    fields: &Fields,
+    shares: &ShareMatrix,
+    band: MassBand,
+    cell: &CellBox,
+    effort: Effort,
+    worst: &mut Worst,
+) {
+    let search = Search::new(cell);
+    let mut bounds = [0.0; MAX_COMPONENTS];
+    fields.component_bounds(cell, &mut bounds);
+    let mut maxima = vec![cell.nearest_corner()];
+    for (i, component) in fields.components().iter().enumerate() {
+        let (slot, lattice) = match (i, effort) {
+            (0, _) => (&mut worst.young, 5),
+            (1, _) => (&mut worst.sub_disc, 3),
+            (_, Effort::Everything) => (&mut worst.other, 3),
+            _ => continue,
+        };
+        let (value, at) = search.maximise(lattice, &|p| component.density(p));
+        assert!(
+            value <= bounds[i],
+            "component {i}: {value:e} at {at:?} exceeds the bound {:e} over {cell:?}",
+            bounds[i]
+        );
+        Worst::note(slot, value, bounds[i]);
+        maxima.push(at);
+    }
+    let bound = fields.layer_bound(shares, band, cell);
+    let layer = |p: &PointLy| fields.layer_density(shares, band, p);
+    let (value, at) = if effort == Effort::Arms {
+        maxima
+            .into_iter()
+            .chain(search.lattice(3))
+            .map(|p| (layer(&p), p))
+            .fold(
+                (0.0, cell.nearest_corner()),
+                |a, b| if b.0 > a.0 { b } else { a },
+            )
+    } else {
+        search.maximise(3, &layer)
+    };
+    assert!(
+        value <= bound,
+        "layer {band:?}: {value:e} at {at:?} exceeds the bound {bound:e} over {cell:?}"
+    );
+    Worst::note(&mut worst.layer, value, bound);
+    worst.cells += 1;
+}
+
+/// The cells of `edge` that the arms' ridges cross between 0.8 and 2 bar half-lengths, walked in
+/// steps of 16 ly along each ridge, with their eight neighbours in the plane, on the side z ≥ 0
+/// (the densities and bounds are the same bits below it).
+fn ridge_cells(arms: &ArmGeometry, edge: u32) -> BTreeSet<[i32; 3]> {
+    let l = arms.bar_half_length().value();
+    // Along a logarithmic spiral ds = dR ÷ sin p.
+    let step = 16.0 * math::sin(arms.pitch().value());
+    let size = f64::from(edge);
+    let index = |c: f64| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a cell index inside the root cube"
+        )]
+        let i = (c / size).floor() as i32;
+        i
+    };
+    let mut cells = BTreeSet::new();
+    for ridge in 0..arms.count().get() {
+        let mut r = 0.8 * l;
+        while r <= 2.0 * l {
+            let theta = arms.ridge_azimuth(r, ridge);
+            let (ix, iy) = (index(r * math::cos(theta)), index(r * math::sin(theta)));
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    cells.insert([ix + dx, iy + dy, 0]);
+                }
+            }
+            r += step;
+        }
+    }
+    cells
+}
+
+/// A random cell of `edge` in the central 1,000 ly.
+fn central_cell(lcg: &mut Lcg, edge: u32) -> CellBox {
+    let p = [0; 3].map(|_| 1_000.0 * (2.0 * lcg.next_f64() - 1.0));
+    cell_at(p, edge)
+}
+
+/// The hunt of P02.T8.c over one galaxy: every `stride`-th ridge cell of every layer, the
+/// targeted cells, and `random` random cells per layer, half of them in the central 1,000 ly.
+/// Returns the worst ratios per layer.
+fn hunt(params: &GalaxyParams, stride: usize, random: usize, seed: u64) -> Vec<Worst> {
+    let fields = fields_of(params);
+    let shares = kroupa_shares();
+    let mut lcg = Lcg::new(0x0208_c0a2 ^ seed);
+    let mut report = Vec::new();
+    for (edge, band) in LAYERS {
+        let mut worst = Worst::default();
+        let size = i32::try_from(edge).expect("a layer's edge");
+        for index in ridge_cells(fields.arms(), edge).into_iter().step_by(stride) {
+            let cell = CellBox::new(index.map(|i| i * size), edge).expect("a ridge cell");
+            hunt_cell(&fields, &shares, band, &cell, Effort::Arms, &mut worst);
+        }
+        for cell in targeted_cells(&fields, edge) {
+            hunt_cell(
+                &fields,
+                &shares,
+                band,
+                &cell,
+                Effort::Everything,
+                &mut worst,
+            );
+        }
+        for i in 0..random {
+            let cell = if i % 2 == 0 {
+                random_cell(&mut lcg, edge)
+            } else {
+                central_cell(&mut lcg, edge)
+            };
+            hunt_cell(
+                &fields,
+                &shares,
+                band,
+                &cell,
+                Effort::ArmsAndLayer,
+                &mut worst,
+            );
+        }
+        report.push(worst);
+    }
+    report
+}
+
+// Golden values (P02.T8.c).
+
+/// Ten places, each pinned as the cell of every stellar layer that holds it: fifty cells. The
+/// centre on both sides of every plane, the bulge, the bar and its end, the solar circle on and
+/// off the arms, above the disc, the halo and the halo's cut.
+const GOLDEN_POINTS: [[f64; 3]; 10] = [
+    [0.0, 0.0, 0.0],
+    [-0.5, -0.5, -0.5],
+    [900.0, 400.0, 150.0],
+    [13_600.0, 0.0, 0.0],
+    [16_000.0, 300.0, 40.0],
+    [22_516.7, 13_000.0, 50.0],
+    [-6_000.0, -25_300.0, 5.0],
+    [0.0, 26_000.0, 1_500.0],
+    [-20_000.0, 10_000.0, -30_000.0],
+    [45_952.0, 45_952.0, 0.0],
+];
+
+/// The fifty pinned cells, with the band of the layer each belongs to.
+fn golden_cells() -> Vec<(CellBox, MassBand)> {
+    LAYERS
+        .iter()
+        .flat_map(|&(edge, band)| GOLDEN_POINTS.iter().map(move |&p| (cell_at(p, edge), band)))
+        .collect()
+}
+
+/// A cell's label: its low corner and edge.
+fn cell_label(cell: &CellBox) -> String {
+    let [x, y, z] = cell.min_corner();
+    format!("({x}, {y}, {z}; {})", cell.edge())
+}
+
+/// Every component's bound, the young disc's envelope bound and range of phase, and the layer
+/// bound, over each pinned cell of the fixture.
+fn write_fixture_bounds(w: &mut GoldenWriter) {
+    let fields = fields_of(&GalaxyParams::milky_way_like());
+    let shares = kroupa_shares();
+    let young = &fields.components()[0];
+    for (cell, band) in golden_cells() {
+        let label = format!("milky_way{}", cell_label(&cell));
+        let mut bounds = [0.0; MAX_COMPONENTS];
+        fields.component_bounds(&cell, &mut bounds);
+        for (i, bound) in bounds[..fields.components().len()].iter().enumerate() {
+            w.f64(&format!("{label}.component[{i}]"), *bound);
+        }
+        w.f64(
+            &format!("{label}.young_envelope"),
+            young.envelope_bound(&cell),
+        );
+        let radii = cell.r_cyl_range();
+        w.f64(&format!("{label}.r_cyl.lo"), radii.lo);
+        w.f64(&format!("{label}.r_cyl.hi"), radii.hi);
+        let phase = fields.arms().phase_range(&cell);
+        w.f64(&format!("{label}.phase.lo"), phase.lo);
+        w.f64(&format!("{label}.phase.hi"), phase.hi);
+        w.f64(
+            &format!("{label}.layer_{band:?}"),
+            fields.layer_bound(&shares, band, &cell),
+        );
+    }
+}
+
+/// The young disc's, the youngest sub-disc's and the layer's bound over each pinned cell of a
+/// seed.
+fn write_seed_bounds(w: &mut GoldenWriter, seed: Seed) {
+    let fields = fields_of(&GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa));
+    let shares = kroupa_shares();
+    for (cell, band) in golden_cells() {
+        let label = format!("{seed}{}", cell_label(&cell));
+        w.f64(
+            &format!("{label}.young"),
+            fields.components()[0].bound(&cell),
+        );
+        w.f64(
+            &format!("{label}.sub_disc_1"),
+            fields.components()[1].bound(&cell),
+        );
+        w.f64(
+            &format!("{label}.layer_{band:?}"),
+            fields.layer_bound(&shares, band, &cell),
+        );
+    }
+}
+
+/// The bounds of fifty pinned cells, bit for bit (P02.T8.c): every component of the fixture,
+/// and the arms and layers of the three pinned seeds.
+#[test]
+fn galaxy_bounds_are_pinned() {
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.line("# milky_way");
+    write_fixture_bounds(&mut w);
+    for seed in PINNED {
+        let seed = Seed::new(seed);
+        w.line(&format!("# {seed}"));
+        write_seed_bounds(&mut w, seed);
+    }
+    golden!("galaxy_bounds", w.as_str());
+}
+
+/// The hunt's five seeds (P02.T8.c), found by scanning the first 1,500 seeds of the family
+/// `0x0208_4a47_0000_0000 | n`, with the property each was chosen for.
+const HUNT_SEEDS: [(&str, u64); 5] = [
+    ("sharpest_arms", 0x0208_4a47_0000_0368),
+    ("sharpest_four_arms", 0x0208_4a47_0000_00f0),
+    ("longest_bar", 0x0208_4a47_0000_05ce),
+    ("shortest_bar", 0x0208_4a47_0000_05bb),
+    ("tightest_four_arms", 0x0208_4a47_0000_0086),
+];
+
+/// The seed's parameters, checked to still have the property it was chosen for: a change to the
+/// parameter draws that moves them makes this fail rather than quietly weaken the hunt.
+fn hunt_params(name: &str, seed: u64) -> GalaxyParams {
+    let params = GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::Kroupa);
+    let arms = params.arms();
+    let pitch = Degrees::from(arms.pitch()).value();
+    let width = arms.young_width().value();
+    let bar = params.bar().half_length().value();
+    let holds = match name {
+        "sharpest_arms" => arms.count() == ArmCount::Two && pitch > 17.5 && width < 260.0,
+        "sharpest_four_arms" => arms.count() == ArmCount::Four && pitch > 17.5 && width < 260.0,
+        "longest_bar" => bar >= 17_999.0 && arms.count() == ArmCount::Two,
+        "shortest_bar" => bar <= 10_001.0 && arms.count() == ArmCount::Four,
+        "tightest_four_arms" => arms.count() == ArmCount::Four && pitch < 10.1 && bar >= 17_999.0,
+        _ => false,
+    };
+    assert!(
+        holds,
+        "{name}: {:?}, {pitch}°, {width} ly, bar {bar} ly",
+        arms.count()
+    );
+    params
+}
+
+/// Galaxies with parameters at the edges of their ranges: the sharpest two arms on the shortest
+/// bar, four tightly wound sharp arms, and the densest centre, with the smallest bulge, nuclear
+/// disc, bar and halo cores, the nearest halo break and its steepest slope.
+fn edge_params(name: &str) -> GalaxyParams {
+    let builder = GalaxyParamsBuilder::new();
+    let builder = match name {
+        "edge_sharp_two" => builder
+            .arm_count(ArmCount::Two)
+            .arm_pitch(Degrees::new(18.0))
+            .arm_young_width(LightYears::new(250.0))
+            .arm_young_fraction(0.9)
+            .arm_old_amplitude(0.3)
+            .bar_half_length(LightYears::new(10_000.0))
+            .young_height(LightYears::new(130.0)),
+        "edge_tight_four" => builder
+            .arm_count(ArmCount::Four)
+            .arm_pitch(Degrees::new(10.0))
+            .arm_young_width(LightYears::new(250.0))
+            .arm_young_fraction(0.9)
+            .arm_old_amplitude(0.3)
+            .bar_half_length(LightYears::new(10_000.0))
+            .young_height(LightYears::new(130.0)),
+        "edge_dense_centre" => builder
+            .bulge_length(LightYears::new(1_700.0))
+            .bulge_b_over_a(0.5)
+            .bulge_c_over_a(0.3)
+            .bulge_boxiness(3.0)
+            .nuclear_length(LightYears::new(200.0))
+            .nuclear_height_ratio(0.3)
+            .bar_half_length(LightYears::new(10_000.0))
+            .bar_width_ratio(0.08)
+            .bar_height(LightYears::new(500.0))
+            .halo_in_situ(0.3, 0.45, LightYears::new(1_500.0), 3.7, Years::new(12.0e9))
+            .halo_dominant(0.6, 0.6, LightYears::new(2_000.0), 3.7, Years::new(12.0e9))
+            .halo_dominant_break_radius(LightYears::new(40_000.0))
+            .halo_dominant_break_steepening(2.0),
+        _ => panic!("no edge galaxy {name}"),
+    };
+    builder.build().expect("every value inside its range")
+}
+
+/// Runs the full hunt over one galaxy and prints the worst ratio found per layer.
+fn hunt_and_report(name: &str, params: &GalaxyParams, random: usize, seed: u64) {
+    for ((edge, _), worst) in LAYERS.iter().zip(hunt(params, 1, random, seed)) {
+        println!(
+            "{name}, {edge} ly: {} cells; density ÷ bound at most {:.12} (young), {:.12} \
+             (sub-disc), {:.12} (other components), {:.12} (layer)",
+            worst.cells, worst.young, worst.sub_disc, worst.other, worst.layer
+        );
+    }
+}
+
+/// A sample of the hunt on the fixture: one ridge cell in 40, the targeted cells, and 6 random
+/// cells per layer. The whole hunt runs as slow tests.
+#[test]
+fn bounds_hold_in_a_sample_of_the_hunt() {
+    let report = hunt(&GalaxyParams::milky_way_like(), 40, 6, 0);
+    for worst in report {
+        assert!(worst.cells > 0);
+        assert!(worst.young > 0.9 && worst.layer > 0.9, "{worst:?}");
+    }
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_the_sharpest_arms() {
+    let (name, seed) = HUNT_SEEDS[0];
+    hunt_and_report(name, &hunt_params(name, seed), 10_000, seed);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_the_sharpest_four_arms() {
+    let (name, seed) = HUNT_SEEDS[1];
+    hunt_and_report(name, &hunt_params(name, seed), 10_000, seed);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_the_longest_bar() {
+    let (name, seed) = HUNT_SEEDS[2];
+    hunt_and_report(name, &hunt_params(name, seed), 10_000, seed);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_the_shortest_bar() {
+    let (name, seed) = HUNT_SEEDS[3];
+    hunt_and_report(name, &hunt_params(name, seed), 10_000, seed);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_the_tightest_four_arms() {
+    let (name, seed) = HUNT_SEEDS[4];
+    hunt_and_report(name, &hunt_params(name, seed), 10_000, seed);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_sharp_arms_on_the_shortest_bar() {
+    let name = "edge_sharp_two";
+    hunt_and_report(name, &edge_params(name), 2_000, 1);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_four_tight_sharp_arms() {
+    let name = "edge_tight_four";
+    hunt_and_report(name, &edge_params(name), 2_000, 2);
+}
+
+#[test]
+#[ignore = "slow: the violation hunt over one galaxy"]
+fn bounds_hold_in_the_hunt_with_the_densest_centre() {
+    let name = "edge_dense_centre";
+    hunt_and_report(name, &edge_params(name), 2_000, 3);
 }

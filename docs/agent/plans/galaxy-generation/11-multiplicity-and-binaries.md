@@ -511,10 +511,10 @@ re-validated against the code when their turn comes (README).
   before core collapse; it takes the threshold as a function so that T4.a can supply the real one,
   and until then a test-only closure of periastron under 10 au stands in). Fixed Gauss–Legendre
   nodes, no randomness, stars only. Nothing calls them yet, so no output changes. Tests: under
-  Kroupa the fraction below 0.5 M☉ is 0.764 ± 0.005, against the observed 0.759; under unscaled
-  Chabrier 0.67 ± 0.01; the gap between `stripped_share` and plan 08's
-  `ClassTable::stripped_share_used` is printed per mass for T1.d. Acceptance:
-  `cargo test -p hyperion-sim multiplicity::quadrature`.
+  Kroupa the fraction below 0.5 M☉ is 0.764 ± 0.005 and under unscaled Chabrier 0.67 ± 0.01, against
+  the 20 pc census's 0.69 (Kirkpatrick et al. 2024; the 0.759 once quoted as observed is Kroupa's
+  function itself); the gap between `stripped_share` and plan 08's `ClassTable::stripped_share_used`
+  is printed per mass for T1.d. Acceptance: `cargo test -p hyperion-sim multiplicity::quadrature`.
 - **P11.T1.d Replace the stand-ins (version bump; every star moves).** Four edits in one commit. (1)
   Plan 02's `StellarFates` gains a provided method
   `companion_mass_ratio_cdf(&self, m1: f64, q: f64) -> f64`, defaulting to the uniform 0.1–1 that
@@ -526,13 +526,13 @@ re-validated against the code when their turn comes (README).
   so plan 06's provisional mark and plan 08's class table both follow; plan 06's constant
   `KickLawParams::stripped_share` stays only as the quadratures' fallback for tests. Bump the
   version and regenerate every golden: this is the one task of the plan that moves primaries. Tests:
-  mean present mass per system is 0.48 ± 0.03 M☉ under Kroupa (plan 02's bracket; plan 02 measures
-  0.498–0.503 with its stand-in fates, R11) and 0.55–0.60 under Chabrier, within 3% across the old
-  populations; stars per system 1.33–1.45; `stripped_share` averaged over layer E lies in 0.20–0.33,
-  the two mixes of the brainstorm's scratch Monte Carlo, and a value outside is a finding against
-  the period distribution, not a reason to move the window; plan 06's kick-law tests (P06.T19.d) and
-  plan 08's class-table tests still pass. Acceptance: `just ci` and `just test-slow`. T1.d lands
-  after T4.a, which supplies the real threshold.
+  mean present mass per system is 0.55–0.59 M☉ under the default, Chabrier's with plan 15's scale,
+  and 0.48 ± 0.03 M☉ under Kroupa (plan 02's bracket; plan 02 measures 0.498–0.503 with its stand-in
+  fates, R11), within 3% across the old populations; stars per system 1.33–1.45; `stripped_share`
+  averaged over layer E lies in 0.20–0.33, the two mixes of the brainstorm's scratch Monte Carlo,
+  and a value outside is a finding against the period distribution, not a reason to move the window;
+  plan 06's kick-law tests (P06.T19.d) and plan 08's class-table tests still pass. Acceptance:
+  `just ci` and `just test-slow`. T1.d lands after T4.a, which supplies the real threshold.
 
 Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`; edits in
 `galaxy/fates.rs`, `galaxy/displaced/binarity.rs`, every golden.
@@ -858,13 +858,14 @@ Acceptance: `cargo test -p hyperion-sim stellar::system`.
 Slow tests, fixed seeds, Milky Way parameters unless stated: multiplicity by primary mass in six
 bins against the anchors (chi-square); companion count ratios for Sun-like primaries; period and
 mass-ratio Kolmogorov–Smirnov from generated systems, not from the samplers; the all-stars test on
-generated systems of all five layers weighted by share, brown dwarfs left out: 76.4 ± 0.5% below 0.5
-M☉ under Kroupa, against the observed 75.9%; under Chabrier with `high_mass_scale` 1 about 67%, and
-with plan 15's scale (provisionally 0.68; P15.T4.b fits it against `all_stars_fraction_below` and
-lands inside the brainstorm's 0.65–0.7) 75.9 ± 1%; a miss under Kroupa is a finding against the
-anchors, not a reason to widen the window; blue straggler and hot subdwarf fractions in an old
-population against the figures plan 06 uses for its class-fraction tests; a Hertzsprung–Russell dump
-of a cluster with binaries for the check by eye.
+generated systems of all five layers weighted by share, brown dwarfs left out, against the 20 pc
+census's 69% below 0.5 M☉ (68.8%; Kirkpatrick et al. 2024): under the default, Chabrier's with plan
+15's scale (provisionally 0.68, which gives about 71% with plan 02's stand-in companions; P15.T4.b
+fits it together with this plan's companions), 69 ± 1%; under Chabrier with `high_mass_scale` 1
+about 67%, and under Kroupa 76.4 ± 0.5%, both recorded; a miss under the default is a finding
+against the companions or the scale, not a reason to widen the window; blue straggler and hot
+subdwarf fractions in an old population against the figures plan 06 uses for its class-fraction
+tests; a Hertzsprung–Russell dump of a cluster with binaries for the check by eye.
 
 Files: `crates/hyperion-sim/tests/binaries_statistical.rs`.
 
@@ -921,9 +922,9 @@ passes its four retention bands, change the default here with the bump. Acceptan
   white dwarfs, about ten neutron-star merger entries, 2–4% of layer D redrawn for Type Ia, about
   one pooled event in six exploding, from a merger rate five to seven times the Type Ia rate.
 - Multiplicity: about a quarter of M dwarfs, nearly half of Sun-like stars and most O and B stars
-  have companions; Sun-like periods peak within 0.1 dex of 10⁵ days; 76.4% of all stars below 0.5 M☉
-  under Kroupa against the observed 75.9%, 67% under unscaled Chabrier; bound brown dwarfs at a few
-  per hundred stars.
+  have companions; Sun-like periods peak within 0.1 dex of 10⁵ days; 69% of all stars below 0.5 M☉
+  under the default against the 20 pc census's 68.8% (76.4% under Kroupa, 67% under unscaled
+  Chabrier); bound brown dwarfs at a few per hundred stars.
 - Benches: `binary_evolve`, `system_full`, `awd_scan_marks` (per host; the target that makes a
   galaxy-wide scan "seconds" is under 300 ns).
 - By eye: a cluster's Hertzsprung–Russell diagram shows a binary sequence and blue stragglers; the
@@ -944,6 +945,13 @@ that brown-dwarf companions can be retuned without touching a star; the shapes o
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** Chabrier's system function is now the default, and
+  the all-stars test's target is the 20 pc census's 69% below 0.5 M☉, not the 75.9% that was
+  Kroupa's function itself (T1.c, T1.d, T12, Verification). This plan's companions and plan 15's
+  scale are fitted together to that figure, the census's primary band shares (66.5, 12.9, 17.8 and
+  2.9%) and a local mean mass of 0.55–0.59 M☉ per system. The census counts 0.32–0.38 stellar
+  companions per system, about 0.29 per M primary and 0.6 per FGK primary. Close companions are
+  probably incomplete there, so a model above it is a finding to weigh, not an automatic failure.
 - **Redraw against veto** (Design note 8). The brainstorm's wording for the non-Ia classes ("the
   cells draw conditional on not being in the class") is read as a conditional draw of the binary's
   marks, with the class's observed share leaving through the share matrix. Plan 09 agrees: it carves

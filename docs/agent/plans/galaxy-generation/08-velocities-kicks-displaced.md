@@ -252,12 +252,14 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
 2. **Tables, not closed forms per call.** Each law is reduced once per galaxy to small tables on the
    potential's radial grid (and its (R, z) grid for the spheroids), about 2 MB in all, built in
    under a second after `PotentialTables::full`. A velocity draw is then a few interpolations.
-3. **The disc's vertical dispersion depends on height.** For a tracer exp(−|z| ÷ h) the vertical
-   Jeans equation gives σ_z²(R, z) = e^(|z| ÷ h) ∫ e^(−z′ ÷ h) K_z(R, z′) dz′, taken from |z| to
-   infinity, with K_z from `MassModel::vertical_force`. It is tabulated per disc component on 64
-   radii × 24 heights (heights in units of h, 0 to 8) with a 16-node Gauss–Laguerre rule. This is
-   the same integral plan 02 uses, density-weighted, to set the sub-disc heights, so age, height and
-   vertical speed agree by construction. A single σ_z(R) would be simpler but is not stationary.
+3. **The disc's vertical dispersion depends on height.** On the component's own vertical profile
+   ρ(z), which since the 2026-09-21 density rulings is plan 02's cored Jeans profile and not
+   exp(−|z| ÷ h), the vertical Jeans equation gives σ_z²(R, z) = (1 ÷ ρ(z)) ∫ ρ(z′) K_z(R, z′) dz′,
+   taken from |z| to infinity, with K_z from `MassModel::vertical_force`. It is tabulated per disc
+   component on 64 radii × 24 heights (heights in units of the effective height h, 0 to 8), by
+   quadrature over the profile's own table. This is the equation plan 02 solves to build each
+   sub-disc's profile, so age, height and vertical speed agree by construction. A single σ_z(R)
+   would be simpler but is not stationary.
 4. **σ_z ÷ σ_R runs from 0.5 for the youngest sub-disc to 0.6 for the oldest**, linear in log age,
    and 0.5 for the young disc. The brainstorm gives the range; Sharma et al. (2021) give σ_R a
    shallower age exponent than σ_z, which is the sign of this trend (re-check the exponents). The
@@ -290,8 +292,9 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
    and none; in situ 0.3 and prograde at 0.35 v_c; globular-born debris 0.5 and none; each lesser
    progenitor draws β uniform on 0.3–0.7 and a rotation uniform on ±0.25 v_c on the tag
    `halo.kinematics`, keyed by its component index. The mixture is tested to average an anisotropy
-   near 0.6 and a radial dispersion near 145 km/s. If plan 02's `HaloComponentParams` already
-   carries these, its values are used and the tag is not registered.
+   near 0.6 and a radial dispersion near 145 km/s, a figure worked on the r^−3.5 halo (see Risks).
+   If plan 02's `HaloComponentParams` already carries these, its values are used and the tag is not
+   registered.
 10. **Bulge, bar and nuclear disc share one Jeans solver.** Axisymmetric, cylindrically aligned,
     with a constant β_z = 1 − σ_z² ÷ σ_R²: ν σ_z²(R, z) = ∫ ν K_z dz′ from |z| to infinity; σ_R² =
     σ_z² ÷ (1 − β_z); ν ⟨v_φ²⟩ = ν σ_R² + R ∂(ν σ_R²) ÷ ∂R + ν R ∂Φ ÷ ∂R. The tracer ν is the
@@ -493,10 +496,11 @@ plan 01's tag-collision test covers the new tags.
 - **P08.T2.a Vertical Jeans tables.** `DiscKinematics::new` per disc component (young, each
   sub-disc, thick): σ_z²(R, z) per Design note 3. Tests: for an isothermal sheet in a test potential
   with K_z = 2π G Σ tanh-form the routine returns the analytic σ_z to 0.5%; σ_z at z = 0 falls
-  outward with an e-folding length within 1.7–2.3 R_d between 1 and 4 R_d; the density-weighted mean
-  at plan 02's reference radius reproduces 22 km/s × (age ÷ 10 Gyr)^0.44 for each sub-disc's mean
-  age to 5% (Sharma et al. 2021), which is the check that this table and plan 02's heights use one
-  integral.
+  outward with an e-folding length within 1.7–2.3 R_d between 1 and 4 R_d; at plan 02's reference
+  radius, at the heights each sub-disc's profile has, σ_z reproduces Sharma et al.'s (2021) law
+  exactly as plan 02 applies it, 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)
+  times the galaxy's dispersion scale, to 5%, not its rounding 22 km/s × (age ÷ 10 Gyr)^0.44. That
+  is the check that this table and plan 02's profiles solve one equation.
 - **P08.T2.b In-plane dispersions and mean rotation.** σ_R from Design note 4, σ_φ² = σ_R² κ² ÷ 4Ω²,
   `asymmetric_drift` from note 5. Tests at Milky Way values and `sunlike_point`: old-disc
   mass-weighted σ_R within 30–40 km/s; σ_φ ÷ σ_R within 0.6–0.75; v_a × 80 km/s ÷ σ_R² within
@@ -875,6 +879,14 @@ Provides.
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** The discs are cored in height, so Design note 3
+  integrates over each component's own profile and P08.T2.a tests Sharma et al.'s exact law. Design
+  note 4's σ_z ÷ σ_R of 0.5 to 0.6 must be checked against Sharma et al.'s own exponents (0.441
+  vertical, 0.251 radial), which make the ratio grow as age^0.19, about 1.6 times across the
+  sub-discs; take σ_R from their radial law if the check fails, and report it to the owner. The
+  halo's inner slopes are now 2.2–2.8, not near 3.5. A spherical Jeans estimate at β 0.6–0.7 in a
+  flat 230 km/s curve then gives σ_r of about 155–185 km/s at the Sun's radius, not 145, so P08.T3's
+  135–155 km/s may fail. A miss is a finding for the owner, never a reason to steepen the slopes.
 - **Contradiction: "retained" against "56 classes", and own-form shares below 1 in the lowest bin.**
   Resolved in Design note 13. If the owner prefers the literal reading of either sentence, only the
   class table's assignment of the lowest row changes.
