@@ -242,22 +242,40 @@ mod tests {
     #[test]
     fn the_cluster_mass_and_potential_integrate_the_density() {
         let c = cluster();
-        for r in [0.1, 3.0, 10.0, 30.0, 500.0] {
-            let edges = [1e-9, 0.01, 1.0, 10.0, 100.0, r.max(100.0)];
-            let edges: Vec<f64> = edges.into_iter().filter(|&e| e <= r).chain([r]).collect();
-            let shell = |x: f64| 4.0 * core::f64::consts::PI * x * x * c.density(LightYears::new(x));
+        for r in [0.1_f64, 3.0, 10.0, 30.0, 500.0] {
+            // Panels a decade wide from 10⁻⁹ ly, with one edge at the break.
+            let edges: Vec<f64> = [1e-9, 1e-6, 1e-3, 0.01, 0.1, 1.0, 10.0, 100.0]
+                .into_iter()
+                .filter(|&e| e < r)
+                .chain([r])
+                .collect();
+            let shell =
+                |x: f64| 4.0 * core::f64::consts::PI * x * x * c.density(LightYears::new(x));
             let mass = gl_log_panels(shell, &edges);
             let closed = c.enclosed_mass(LightYears::new(r)).value();
-            assert!((mass / closed - 1.0).abs() < 1e-8, "M({r}) {mass} against {closed}");
+            assert!(
+                (mass / closed - 1.0).abs() < 1e-8,
+                "M({r}) {mass} against {closed}"
+            );
             // Φ(r) = −∫_r^∞ G M(<x) ÷ x² dx.
-            let outer = [r, 10.0 * r, 1e3 * r, 1e6 * r, 1e12 * r];
+            let mut outer: Vec<f64> = [r, 10.0 * r, 1e3 * r, 1e6 * r, 1e12 * r]
+                .into_iter()
+                .chain([10.0].into_iter().filter(|&b| b > r))
+                .collect();
+            outer.sort_by(f64::total_cmp);
             let force = |x: f64| G * c.enclosed_mass(LightYears::new(x)).value() / (x * x);
             let phi = -gl_log_panels(force, &outer);
             let closed = c.potential(LightYears::new(r));
-            assert!((phi / closed - 1.0).abs() < 1e-6, "Φ({r}) {phi} against {closed}");
+            assert!(
+                (phi / closed - 1.0).abs() < 1e-6,
+                "Φ({r}) {phi} against {closed}"
+            );
         }
         assert!(c.potential(LightYears::ZERO).is_finite());
-        assert!((c.potential(LightYears::new(1e-12)) / c.potential(LightYears::ZERO) - 1.0).abs() < 1e-9);
+        assert!(
+            (c.potential(LightYears::new(1e-12)) / c.potential(LightYears::ZERO) - 1.0).abs()
+                < 1e-9
+        );
     }
 
     #[test]
@@ -277,7 +295,8 @@ mod tests {
 
     #[test]
     fn slopes_outside_their_ranges_are_rejected() {
-        let make = |g1, g2| BrokenPowerLaw::new(SolarMasses::new(1.0), LightYears::new(1.0), g1, g2);
+        let make =
+            |g1, g2| BrokenPowerLaw::new(SolarMasses::new(1.0), LightYears::new(1.0), g1, g2);
         assert!(make(2.0, 3.5).is_err());
         assert!(make(1.3, 3.0).is_err());
         assert!(make(-0.1, 3.5).is_err());

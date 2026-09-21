@@ -24,9 +24,9 @@ use crate::galaxy::consts::{G, LIGHT_YEARS_PER_MEGAPARSEC};
 use crate::galaxy::fates::{
     ProvisionalFates, mean_formed_mass, mean_present_mass, mean_present_mass_of_mixture,
 };
+use crate::galaxy::potential::sigma;
 use crate::galaxy::{POPULATIONS, Population};
 use crate::math;
-use crate::galaxy::potential::sigma;
 use crate::units::{
     Degrees, Dex, DexPerKiloparsec, KilometresPerSecond, LightYears, Radians, SolarMasses, Years,
 };
@@ -465,6 +465,7 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
             length: LightYears::new(i.gas_length_ratio * thin_length),
         },
         dark_halo,
+        // Filled in by the second phase below.
         black_hole: BlackHoleParams {
             scatter: Dex::new(i.bh_scatter),
             bulge_dispersion: KilometresPerSecond::ZERO,
@@ -477,14 +478,19 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         },
         accretion,
     };
-    // The second phase (plan 02, P02.T6.e): the bulge's dispersion in the model without the
-    // black hole and the nuclear cluster, then the black hole's mass from it.
+    params.black_hole = black_hole(&params);
+    Ok(params)
+}
+
+/// The second phase of the build (plan 02, P02.T6.e): the bulge's dispersion in the mass model of
+/// `params` without the black hole and the nuclear cluster, then the black hole's mass from it
+/// with the drawn scatter.
+fn black_hole(params: &GalaxyParams) -> BlackHoleParams {
     let scatter = params.black_hole.scatter;
-    let dispersion = sigma::bulge_dispersion(&params);
-    params.black_hole = BlackHoleParams {
+    let dispersion = sigma::bulge_dispersion(params);
+    BlackHoleParams {
         scatter,
         bulge_dispersion: dispersion,
         mass: sigma::black_hole_mass(dispersion, scatter),
-    };
-    Ok(params)
+    }
 }

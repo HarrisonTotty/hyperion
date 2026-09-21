@@ -22,5 +22,9 @@ hyperion-testkit.workspace = true
 name = "foundation"
 harness = false
 
+[[bench]]
+name = "galaxy"
+harness = false
+
 [lints]
 workspace = true

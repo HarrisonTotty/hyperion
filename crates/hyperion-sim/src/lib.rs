@@ -20,7 +20,8 @@
 //! On top of it, the galaxy model (plan 02):
 //!
 //! - [`galaxy`]: the galaxy's parameters drawn from the seed, the mass function, age
-//!   distributions and the mean mass of a system, with the numerical helpers they share.
+//!   distributions and the mean mass of a system, the mass model and its potential tables, with
+//!   the numerical helpers they share.
 //! - [`tables`]: constant tables, exact or fitted offline.
 //!
 //! The crate's only runtime dependency is `libm`.

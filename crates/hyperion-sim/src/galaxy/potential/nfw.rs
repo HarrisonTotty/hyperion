@@ -170,7 +170,10 @@ mod tests {
     fn mu_is_continuous_across_its_switch() {
         let below = mu(SERIES_BELOW.next_down());
         let above = mu(SERIES_BELOW);
-        assert!(((below - above) / above).abs() < 1e-13, "{below} against {above}");
+        assert!(
+            ((below - above) / above).abs() < 1e-13,
+            "{below} against {above}"
+        );
         let x: f64 = 1e-6;
         assert!((mu(x) / (0.5 * x * x) - 1.0).abs() < 2e-6);
     }
@@ -190,7 +193,10 @@ mod tests {
             let phi = -gl_log_panels(force, &edges);
             let closed = h.potential(LightYears::new(r));
             // The tail beyond 10¹⁶ r, G M₂₀₀ ÷ μ(c) × ln(10¹⁶ x) ÷ 10¹⁶ r, is left out.
-            assert!((phi / closed - 1.0).abs() < 1e-11, "{r}: {phi} against {closed}");
+            assert!(
+                (phi / closed - 1.0).abs() < 1e-11,
+                "{r}: {phi} against {closed}"
+            );
         }
     }
 

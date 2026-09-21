@@ -613,6 +613,8 @@ fn write_params(w: &mut GoldenWriter, label: &str, p: &GalaxyParams) {
     f("dark.concentration", p.dark_halo().concentration());
     f("dark.r200", p.dark_halo().r200().value());
     f("bh.scatter", p.black_hole().scatter().value());
+    f("bh.sigma", p.black_hole().bulge_dispersion().value());
+    f("bh.mass", p.black_hole().mass().value());
     f("metallicity_gradient", p.metallicity_gradient().value());
     f("halo.discrete_share", p.halo().discrete_share());
     for c in p.halo().components() {

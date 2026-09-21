@@ -23,7 +23,7 @@ mod tables;
 use std::error::Error;
 use std::fmt;
 
-pub use model::{MassModel, unit_bulge_moments, bulge_second_moments};
+pub use model::MassModel;
 pub use tables::PotentialTables;
 
 /// A mass component could not be built: `quantity` is `value`, which is not finite or lies

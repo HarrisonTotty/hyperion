@@ -14,7 +14,7 @@
 //! R_e²)^(3÷2))` beyond `R_e`, integrating the Jeans equation by parts gives `∫ Σ σ_p² dA =
 //! ∫₀^∞ W ν v_c² ÷ r dr` and `∫ Σ dA = ∫₀^∞ W ν ÷ a dr` for the exponential `ν = e^(−r ÷ a)`.
 
-use super::model::{MassModel, bulge_second_moments};
+use super::model::MassModel;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::quad::{bisect, gl_panels};
 use crate::math;
@@ -62,12 +62,23 @@ pub fn black_hole_mass(sigma: KilometresPerSecond, scatter: Dex) -> SolarMasses 
     ))
 }
 
-/// The scale `a` of the sphericalised bulge `ν ∝ e^(−r ÷ a)`: the spherical exponential with the
-/// boxy bulge's `⟨r²⟩ = ⟨R²⟩ + ⟨z²⟩`, which is `12 a²` for it.
+/// The scale `a` of the sphericalised bulge `ν ∝ e^(−r ÷ a)`: the sphere with the boxy bulge's
+/// mass and central density, so that `8π a³ = 6 V(p) a_x a_y a_z`, where
+/// `V(p) = 4π B(2 ÷ p, 1 ÷ p + 1) ÷ p` is the volume of the unit body `m ≤ 1` of boxiness `p`
+/// ([`BulgeParams`](crate::galaxy::params::BulgeParams)).
+///
+/// The aperture dispersion is dominated by the inner kiloparsec, where the density's
+/// normalisation matters most; matching the second moment instead would weight the boxy body's
+/// far corners and gives a sphere about 15% larger for the Milky Way.
 #[must_use]
 pub fn sphericalised_scale(params: &GalaxyParams) -> LightYears {
-    let (r2, z2) = bulge_second_moments(params.bulge());
-    LightYears::new(((r2 + z2) / 12.0).sqrt())
+    let bulge = params.bulge();
+    let p = bulge.boxiness();
+    let ln_beta = |x: f64, y: f64| math::ln_gamma(x) + math::ln_gamma(y) - math::ln_gamma(x + y);
+    let unit_body = 3.0 * math::exp(ln_beta(2.0 / p, 1.0 / p + 1.0)) / p;
+    LightYears::new(math::cbrt(
+        unit_body * bulge.scale_x().value() * bulge.scale_y().value() * bulge.scale_z().value(),
+    ))
 }
 
 /// The fraction of a spherical exponential's mass projected outside the cylinder of radius `x`
@@ -105,9 +116,10 @@ fn cylinder_volume(x: f64, x_e: f64) -> f64 {
 
 /// The mass-weighted projected dispersion inside the effective radius of the exponential tracer
 /// of scale `a` (ly), in the rotation curve of `model`, km/s.
-pub fn aperture_dispersion(model: &MassModel, a: f64) -> f64 {
+fn aperture_dispersion(model: &MassModel, a: f64) -> f64 {
     // v_c² and its slope in ln r at the sample radii, everything in the model included.
-    let step = math::ln(SAMPLE_RANGE.1 / SAMPLE_RANGE.0) / f64::from(u8::try_from(SAMPLES - 1).expect("16"));
+    let step = math::ln(SAMPLE_RANGE.1 / SAMPLE_RANGE.0)
+        / f64::from(u8::try_from(SAMPLES - 1).expect("16"));
     let mut v2 = [0.0; SAMPLES];
     let mut slope = [0.0; SAMPLES];
     for k in 0..SAMPLES {
@@ -142,7 +154,16 @@ pub fn aperture_dispersion(model: &MassModel, a: f64) -> f64 {
             + step * ((t3 - 2.0 * t2 + t) * slope[k] + (t3 - t2) * slope[k + 1])
     };
     let x_e = effective_radius_in_scales();
-    let edges = [0.0, 0.5 * x_e, x_e, 2.0 * x_e, 4.0 * x_e, 8.0 * x_e, 16.0 * x_e, 60.0];
+    let edges = [
+        0.0,
+        0.5 * x_e,
+        x_e,
+        2.0 * x_e,
+        4.0 * x_e,
+        8.0 * x_e,
+        16.0 * x_e,
+        60.0,
+    ];
     let weighted = gl_panels(
         |x| {
             if x <= 0.0 {
@@ -159,7 +180,7 @@ pub fn aperture_dispersion(model: &MassModel, a: f64) -> f64 {
 /// The bulge's projected velocity dispersion inside its effective radius, from the mass model of
 /// `params` without the black hole and the nuclear cluster (plan 02, Design note 8).
 ///
-/// The bulge is made spherical as the exponential of the same `⟨r²⟩`
+/// The bulge is made spherical as the exponential of the same mass and central density
 /// ([`sphericalised_scale`]); `σ_r²(r) = (1 ÷ ν) ∫_r^∞ ν v_c² ÷ r′ dr′` is the isotropic Jeans
 /// solution in the model's in-plane rotation curve, sampled at 16 radii; the result is the
 /// square root of the mass-weighted mean of the projected `σ²` inside the projected half-mass

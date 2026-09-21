@@ -3,8 +3,8 @@
 //! A universe holds one barred spiral. Its seed draws the galaxy's parameters, each from a stream
 //! of its own; everything else follows from them as pure functions: the mass function and its
 //! band shares, the populations' age distributions, the mean present-day mass of a system and the
-//! system count, and later the potential, the density fields and their bounds. No star is placed
-//! here; placement reads what this module provides.
+//! system count, the mass model and its potential tables ([`potential`]), and later the density
+//! fields and their bounds. No star is placed here; placement reads what this module provides.
 //!
 //! Generation code here works in light-years, solar masses, Julian years and km/s ([`consts`]).
 //! Public functions take and return [`units`](crate::units) newtypes, except on hot paths, which

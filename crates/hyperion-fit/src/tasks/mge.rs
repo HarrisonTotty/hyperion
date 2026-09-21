@@ -215,14 +215,14 @@ fn literal(value: f64) -> String {
     let mut out = String::new();
     let digits: Vec<char> = whole.chars().collect();
     for (i, c) in digits.iter().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push('_');
         }
         out.push(*c);
     }
     out.push('.');
     for (i, c) in fraction.chars().enumerate() {
-        if i > 0 && i % 3 == 0 {
+        if i > 0 && i.is_multiple_of(3) {
             out.push('_');
         }
         out.push(c);
@@ -239,7 +239,7 @@ fn thousands(n: u32) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);

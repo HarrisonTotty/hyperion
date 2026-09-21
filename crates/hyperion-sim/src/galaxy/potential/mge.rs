@@ -30,9 +30,10 @@
 //! - Prolate, it runs in `v` with `T = sinh v ÷ √−ε`, which absorbs `1 ÷ √(1 − εT²)` into `dv`.
 //! - Oblate in the plane, it runs in `v` with `T = sin v ÷ √ε`, which removes the endpoint
 //!   singularity `1 ÷ √(1 − T²)` that a flat Gaussian has at `T = 1`.
-//! - Oblate off the plane, it runs in `w = tan v`, where the vertical factor `exp(−z² w² ÷
-//!   2σ²ε)` is a Gaussian in `w`: one panel on `[0, 1]`, then panels in `ln w` at most a factor of
-//!   100 wide out to the Gaussian's cut or `√ε ÷ q`.
+//! - Oblate off the plane, it runs in `u` with `w = tan v = sinh u`, which is linear near 0 and
+//!   logarithmic far out, from 0 to the Gaussian's cut in `w`, `9σ √ε ÷ |z|`, or to `√ε ÷ q`. In
+//!   `w` the vertical factor `exp(−z² w² ÷ 2σ²ε)` is a plain Gaussian, and a flat Gaussian's
+//!   integrand, which in `T` crowds into the last `q²` before 1, spreads over decades.
 //!
 //! Every choice depends only on the Gaussian and the point, so each value is a fixed sequence of
 //! IEEE operations.
@@ -50,12 +51,6 @@ const CUT: f64 = 9.0;
 
 /// At or below this `|ε|` the rule runs in `T`: `1 − εT²` then stays within `[½, 3÷2]`.
 const NEAR_SPHERICAL: f64 = 0.5;
-
-/// The widest ratio of the ends of one panel in `ln w`.
-const LOG_PANEL: f64 = 100.0;
-
-/// The most panels in `ln w`: `w` reaches `√ε ÷ q`, below 10¹⁸ for any axis ratio above 10⁻¹⁸.
-const MAX_LOG_PANELS: u32 = 9;
 
 /// How a Gaussian's integrals change variable (module documentation, "Quadrature").
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,14 +78,14 @@ enum Shape {
 /// # fn main() -> Result<(), hyperion_sim::galaxy::potential::BuildComponentError> {
 /// // A flattened Gaussian's potential and circular speed, far outside it and near its centre.
 /// let g = Gaussian::new(SolarMasses::new(1e10), LightYears::new(3_000.0), 0.3)?;
-/// let far = LightYears::new(1e6);
-/// let kepler = hyperion_sim::galaxy::consts::G * 1e10 / 1e6;
-/// assert!((g.v_circ_sq(far) / kepler - 1.0).abs() < 1e-5);
+/// let far = LightYears::new(1e7);
+/// let kepler = hyperion_sim::galaxy::consts::G * 1e10 / 1e7;
+/// assert!((g.v_circ_sq(far) / kepler - 1.0).abs() < 1e-6);
 /// assert!(g.potential(LightYears::ZERO, LightYears::ZERO) < g.potential(far, LightYears::ZERO));
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Gaussian {
     mass: SolarMasses,
     sigma: LightYears,
@@ -102,6 +97,22 @@ pub struct Gaussian {
     a: f64,
     /// `1 ÷ max(1, q²)`: the weight of `z²` in the radius that sets the cut.
     z_weight: f64,
+    /// The nodes of the whole range, which most points use.
+    whole: Box<WholeRange>,
+}
+
+/// One node of a quadrature: `T²`, `1 ÷ (1 − εT²)` and the weight of `f(T) ÷ √(1 − εT²)`.
+type Node = [f64; 3];
+
+/// The nodes for a point within the cut, `T_c = 1`, generated once: in the plane (the oblate
+/// rule in `v`; the same as off it for other shapes) and off it without the vertical cut. They are
+/// the very nodes [`Gaussian::generate`] gives for those arguments, so using them changes no bit.
+#[derive(Debug, Clone, PartialEq)]
+struct WholeRange {
+    in_plane: [Node; 32],
+    off_plane: [Node; 32],
+    /// The oblate rule's end in `w` for `T_c = 1`, `√ε ÷ q`; 0 for other shapes.
+    w_end: f64,
 }
 
 /// A Gaussian's in-plane quantities at one radius, for the potential tables.
@@ -157,7 +168,7 @@ impl Gaussian {
             }
         };
         let s = sigma.value();
-        Ok(Self {
+        let mut gaussian = Self {
             mass,
             sigma,
             q,
@@ -165,7 +176,29 @@ impl Gaussian {
             amplitude: G * mass.value() * (2.0 / core::f64::consts::PI).sqrt() / s,
             a: 0.5 / (s * s),
             z_weight: 1.0 / (q * q).max(1.0),
-        })
+            whole: Box::new(WholeRange {
+                in_plane: [[0.0; 3]; 32],
+                off_plane: [[0.0; 3]; 32],
+                w_end: 0.0,
+            }),
+        };
+        let mut whole = WholeRange {
+            in_plane: [[0.0; 3]; 32],
+            off_plane: [[0.0; 3]; 32],
+            w_end: gaussian.oblate_w_end(1.0, 0.0),
+        };
+        let mut i = 0;
+        gaussian.generate(1.0, 0.0, true, |t2, inv_d, jac| {
+            whole.in_plane[i] = [t2, inv_d, jac];
+            i += 1;
+        });
+        i = 0;
+        gaussian.generate(1.0, 0.0, false, |t2, inv_d, jac| {
+            whole.off_plane[i] = [t2, inv_d, jac];
+            i += 1;
+        });
+        *gaussian.whole = whole;
+        Ok(gaussian)
     }
 
     /// The mass.
@@ -203,11 +236,57 @@ impl Gaussian {
         (CUT * self.sigma.value() / rho).min(1.0)
     }
 
-    /// Calls `visit(t², 1 − εT², jac)` at each node of the quadrature for the point `(R, z)`,
+    /// Calls `visit(t², 1 ÷ (1 − εT²), jac)` at each node of the quadrature for the point `(R, z)`,
     /// where `Σ jac f(T) ≈ ∫₀^Tc f(T) ÷ √(1 − εT²) dT`. `in_plane` selects the oblate
     /// Gaussian's rule for `z = 0`.
-    fn for_each_node(&self, r_cyl: f64, z: f64, in_plane: bool, mut visit: impl FnMut(f64, f64, f64)) {
+    fn for_each_node(
+        &self,
+        r_cyl: f64,
+        z: f64,
+        in_plane: bool,
+        mut visit: impl FnMut(f64, f64, f64),
+    ) {
         let t_cut = self.t_cut(r_cyl, z);
+        let oblate = matches!(self.shape, Shape::Oblate { .. });
+        let cached = if t_cut < 1.0 {
+            None
+        } else if oblate && in_plane {
+            Some(&self.whole.in_plane)
+        } else if !oblate || self.oblate_w_end(1.0, z) >= self.whole.w_end {
+            Some(&self.whole.off_plane)
+        } else {
+            None
+        };
+        match cached {
+            Some(nodes) => {
+                for &[t2, inv_d, jac] in nodes {
+                    visit(t2, inv_d, jac);
+                }
+            }
+            None => self.generate(t_cut, z, in_plane, visit),
+        }
+    }
+
+    /// The oblate rule's end in `w = tan v` for the cut `t_cut` in `T` and height `z`: `√ε T_c ÷
+    /// √(1 − εT_c²)`, or the vertical factor's cut `9σ √ε ÷ |z|` if that is nearer. 0 for other
+    /// shapes.
+    fn oblate_w_end(&self, t_cut: f64, z: f64) -> f64 {
+        let Shape::Oblate { root, .. } = self.shape else {
+            return 0.0;
+        };
+        // 1 − εT_c² = (1 − T_c)(1 + T_c) + q² T_c², without cancellation.
+        let d_cut = (1.0 - t_cut) * (1.0 + t_cut) + self.q * self.q * t_cut * t_cut;
+        let w_end = root * t_cut / d_cut.sqrt();
+        if z == 0.0 {
+            w_end
+        } else {
+            w_end.min(CUT * self.sigma.value() * root / z.abs())
+        }
+    }
+
+    /// The nodes of the rule for the cut `t_cut` in `T` and height `z`, as
+    /// [`for_each_node`](Self::for_each_node) describes.
+    fn generate(&self, t_cut: f64, z: f64, in_plane: bool, mut visit: impl FnMut(f64, f64, f64)) {
         match self.shape {
             Shape::NearSpherical { eps } => {
                 let half = 0.5 * t_cut;
@@ -215,7 +294,7 @@ impl Gaussian {
                     let t = half + half * x;
                     let t2 = t * t;
                     let d = 1.0 - eps * t2;
-                    visit(t2, d, w * half / d.sqrt());
+                    visit(t2, 1.0 / d, w * half / d.sqrt());
                 }
             }
             Shape::Prolate { minus_eps, root } => {
@@ -223,7 +302,7 @@ impl Gaussian {
                 for (&x, &w) in GL32_NODES.iter().zip(&GL32_WEIGHTS) {
                     let s = math::sinh(half + half * x);
                     let s2 = s * s;
-                    visit(s2 / minus_eps, 1.0 + s2, w * half / root);
+                    visit(s2 / minus_eps, 1.0 / (1.0 + s2), w * half / root);
                 }
             }
             Shape::Oblate { eps, root } if in_plane => {
@@ -235,40 +314,21 @@ impl Gaussian {
                 let half = 0.5 * v_cut;
                 for (&x, &w) in GL32_NODES.iter().zip(&GL32_WEIGHTS) {
                     let (sin, cos) = math::sin_cos(half + half * x);
-                    visit(sin * sin / eps, cos * cos, w * half / root);
+                    visit(sin * sin / eps, 1.0 / (cos * cos), w * half / root);
                 }
             }
             Shape::Oblate { eps, root } => {
-                // 1 − εT_c² = (1 − T_c)(1 + T_c) + q² T_c², without cancellation.
-                let d_cut = (1.0 - t_cut) * (1.0 + t_cut) + self.q * self.q * t_cut * t_cut;
-                let mut w_end = root * t_cut / d_cut.sqrt();
-                if z != 0.0 {
-                    w_end = w_end.min(CUT * self.sigma.value() * root / z.abs());
-                }
+                let w_end = self.oblate_w_end(t_cut, z);
                 let mut emit = |w: f64, jac: f64| {
                     let w2 = w * w;
                     let one_w2 = 1.0 + w2;
-                    visit(w2 / (eps * one_w2), 1.0 / one_w2, jac / (root * one_w2));
+                    visit(w2 / (eps * one_w2), one_w2, jac / (root * one_w2));
                 };
-                let half = 0.5 * w_end.min(1.0);
-                for (&x, &w) in GL32_NODES.iter().zip(&GL32_WEIGHTS) {
-                    emit(half + half * x, w * half);
-                }
-                if w_end > 1.0 {
-                    let span = math::ln(w_end);
-                    let per_panel = math::ln(LOG_PANEL);
-                    let mut panels = 1_u32;
-                    while f64::from(panels) * per_panel < span && panels < MAX_LOG_PANELS {
-                        panels += 1;
-                    }
-                    let half = 0.5 * span / f64::from(panels);
-                    for panel in 0..panels {
-                        let mid = half * f64::from(2 * panel + 1);
-                        for (&x, &w) in GL32_NODES.iter().zip(&GL32_WEIGHTS) {
-                            let wv = math::exp(mid + half * x);
-                            emit(wv, w * half * wv);
-                        }
-                    }
+                // w = sinh u: linear near 0, logarithmic far out, with dw = cosh u du.
+                let half = 0.5 * math::asinh(w_end);
+                for (&x, &weight) in GL32_NODES.iter().zip(&GL32_WEIGHTS) {
+                    let w = math::sinh(half + half * x);
+                    emit(w, weight * half * (1.0 + w * w).sqrt());
                 }
             }
         }
@@ -280,8 +340,8 @@ impl Gaussian {
         let (r, z) = (r_cyl.value(), z.value());
         let (r2, z2) = (r * r, z * z);
         let mut sum = 0.0;
-        self.for_each_node(r, z, z == 0.0, |t2, d, jac| {
-            sum += jac * math::exp(-self.a * t2 * (r2 + z2 / d));
+        self.for_each_node(r, z, z == 0.0, |t2, inv_d, jac| {
+            sum += jac * math::exp(-self.a * t2 * (r2 + z2 * inv_d));
         });
         -self.amplitude * sum
     }
@@ -296,8 +356,8 @@ impl Gaussian {
         }
         let (r2, z2) = (r * r, z * z);
         let mut sum = 0.0;
-        self.for_each_node(r, z, false, |t2, d, jac| {
-            sum += jac * t2 / d * math::exp(-self.a * t2 * (r2 + z2 / d));
+        self.for_each_node(r, z, false, |t2, inv_d, jac| {
+            sum += jac * t2 * inv_d * math::exp(-self.a * t2 * (r2 + z2 * inv_d));
         });
         self.amplitude * 2.0 * self.a * z * sum
     }
@@ -344,12 +404,12 @@ impl Gaussian {
     pub(crate) fn grid_point(&self, r: f64, z: f64) -> GridPoint {
         let (r2, z2) = (r * r, z * z);
         let mut m = [0.0; 4];
-        self.for_each_node(r, z, z == 0.0, |t2, d, jac| {
-            let e = jac * math::exp(-self.a * t2 * (r2 + z2 / d));
+        self.for_each_node(r, z, z == 0.0, |t2, inv_d, jac| {
+            let e = jac * math::exp(-self.a * t2 * (r2 + z2 * inv_d));
             m[0] += e;
             m[1] += e * t2;
-            m[2] += e * t2 / d;
-            m[3] += e * t2 * t2 / d;
+            m[2] += e * t2 * inv_d;
+            m[3] += e * t2 * t2 * inv_d;
         });
         let two_a = 2.0 * self.a;
         [
@@ -453,7 +513,10 @@ fn nonzero(table: &[(f64, f64)]) -> impl Iterator<Item = (f64, f64)> + Clone + '
 }
 
 /// Checks a component's mass and two lengths.
-fn check(mass: SolarMasses, lengths: [(&'static str, LightYears); 2]) -> Result<(), BuildComponentError> {
+fn check(
+    mass: SolarMasses,
+    lengths: [(&'static str, LightYears); 2],
+) -> Result<(), BuildComponentError> {
     BuildComponentError::check_non_negative("mass", mass.value())?;
     for (name, length) in lengths {
         BuildComponentError::check_positive(name, length.value())?;
@@ -478,7 +541,11 @@ pub fn double_exponential(
     check(mass, [("length", length), ("height", height)])?;
     let terms = nonzero(&MGE_EXP).flat_map(move |(wi, si)| {
         nonzero(&MGE_EXP).map(move |(wj, sj)| {
-            (wi * si * si * wj * sj, length * si, (height * sj) / (length * si))
+            (
+                wi * si * si * wj * sj,
+                length * si,
+                (height * sj) / (length * si),
+            )
         })
     });
     normalised(mass, terms)
@@ -526,4 +593,207 @@ pub fn bar_disc(
         })
     });
     normalised(mass, terms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Composite Simpson's rule for `∫ₐᵇ f` with `n` (even) intervals.
+    fn simpson(integrand: impl Fn(f64) -> f64, lo: f64, hi: f64, intervals: u32) -> f64 {
+        let step = (hi - lo) / f64::from(intervals);
+        let mut sum = integrand(lo) + integrand(hi);
+        for i in 1..intervals {
+            sum += integrand(lo + step * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        sum * step / 3.0
+    }
+
+    /// `∫₀¹ f(T) ÷ √(1 − εT²) dT` by brute force, knowing nothing of the scheme under test:
+    /// `T = cos φ`, and Simpson's rule with 40,000 intervals in `ln φ` from 10⁻¹² to π ÷ 2,
+    /// which resolves both a flat Gaussian's end at `T → 1` and a distant point's Gaussian at
+    /// `T → 0`.
+    fn reference(
+        gaussian: &Gaussian,
+        r_cyl: f64,
+        height: f64,
+        moment: impl Fn(f64, f64) -> f64,
+    ) -> f64 {
+        let (lo, hi) = (math::ln(1e-12), math::ln(0.5 * core::f64::consts::PI));
+        let integrand = |log_phi: f64| {
+            let phi = math::exp(log_phi);
+            let (sin, cos) = math::sin_cos(phi);
+            let t2 = cos * cos;
+            // 1 − εT² = sin²φ + q² cos²φ, without cancellation.
+            let q2 = gaussian.q * gaussian.q;
+            let denominator = sin * sin + q2 * t2;
+            let exponent = gaussian.a * t2 * (r_cyl * r_cyl + height * height / denominator);
+            phi * sin * math::exp(-exponent) / denominator.sqrt() * moment(t2, denominator)
+        };
+        simpson(integrand, lo, hi, 40_000)
+    }
+
+    fn gaussians() -> Vec<Gaussian> {
+        [1e-4, 0.01, 0.3, 0.72, 1.0, 1.2, 3.0, 40.0]
+            .iter()
+            .map(|&q| Gaussian::new(SolarMasses::new(1e9), LightYears::new(1_000.0), q).unwrap())
+            .collect()
+    }
+
+    /// Every change of variable against the brute-force reference, at points inside, near and
+    /// far from the Gaussian, in and off the plane.
+    #[test]
+    fn the_quadrature_matches_a_brute_force_integral() {
+        let points = [
+            (0.0, 0.0),
+            (300.0, 0.0),
+            (2_000.0, 0.0),
+            (30_000.0, 0.0),
+            (500.0, 0.05),
+            (500.0, 3.0),
+            (1_500.0, 40.0),
+            (0.0, 700.0),
+            (8_000.0, 9_000.0),
+            (100.0, 1e-3),
+            (3_000.0, 0.5),
+            (50.0, 5_000.0),
+            (20_000.0, 100.0),
+        ];
+        for g in gaussians() {
+            for &(r, z) in &points {
+                let what = format!("q {} at ({r}, {z})", g.q);
+                let phi = -g.amplitude * reference(&g, r, z, |_, _| 1.0);
+                let ours = g.potential(LightYears::new(r), LightYears::new(z));
+                assert!(
+                    (ours / phi - 1.0).abs() < 1e-7,
+                    "Φ {what}: {ours} against {phi}"
+                );
+                if z > 0.0 {
+                    let kz = g.amplitude * 2.0 * g.a * z * reference(&g, r, z, |t2, d| t2 / d);
+                    let ours = g.vertical_force(LightYears::new(r), LightYears::new(z));
+                    assert!(
+                        (ours / kz - 1.0).abs() < 1e-6,
+                        "K_z {what}: {ours} against {kz}"
+                    );
+                } else if r > 0.0 {
+                    let v2 = g.amplitude * 2.0 * g.a * r * r * reference(&g, r, 0.0, |t2, _| t2);
+                    let ours = g.v_circ_sq(LightYears::new(r));
+                    assert!(
+                        (ours / v2 - 1.0).abs() < 1e-7,
+                        "v² {what}: {ours} against {v2}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The in-plane slope and curvature and the grid's derivatives against finite differences.
+    #[test]
+    fn derivatives_match_finite_differences() {
+        let h = 1e-4;
+        for g in gaussians() {
+            for r in [200.0, 1_000.0, 4_000.0] {
+                let at = g.in_plane(r);
+                let up = g.in_plane(r * math::exp(h));
+                let down = g.in_plane(r * math::exp(-h));
+                let slope = (up.v_circ_sq - down.v_circ_sq) / (2.0 * h);
+                let curvature = (up.slope - down.slope) / (2.0 * h);
+                let phi_slope = (up.potential - down.potential) / (2.0 * h);
+                let scale = at.v_circ_sq.abs() + at.slope.abs();
+                assert!((at.slope - slope).abs() < 1e-6 * scale, "q {} slope", g.q);
+                assert!(
+                    (at.curvature - curvature).abs() < 1e-5 * scale,
+                    "q {} curvature",
+                    g.q
+                );
+                assert!(
+                    (at.v_circ_sq - phi_slope).abs() < 1e-6 * scale,
+                    "q {} dΦ",
+                    g.q
+                );
+                for z in [30.0, 800.0] {
+                    let p = g.grid_point(r, z);
+                    let dr = (g.grid_point(r * math::exp(h), z)[0]
+                        - g.grid_point(r * math::exp(-h), z)[0])
+                        / (2.0 * h);
+                    let dz = (g.grid_point(r, z * math::exp(h))[0]
+                        - g.grid_point(r, z * math::exp(-h))[0])
+                        / (2.0 * h);
+                    let drz = (g.grid_point(r, z * math::exp(h))[1]
+                        - g.grid_point(r, z * math::exp(-h))[1])
+                        / (2.0 * h);
+                    let scale = p[0].abs();
+                    assert!((p[1] - dr).abs() < 1e-7 * scale, "q {} ∂R at z {z}", g.q);
+                    assert!((p[2] - dz).abs() < 1e-7 * scale, "q {} ∂z at z {z}", g.q);
+                    assert!((p[3] - drz).abs() < 1e-6 * scale, "q {} ∂R∂z at z {z}", g.q);
+                    let kz = g.vertical_force(LightYears::new(r), LightYears::new(z));
+                    assert!((p[2] - kz * z).abs() < 1e-9 * scale);
+                }
+            }
+        }
+    }
+
+    /// The mass inside a sphere against a brute-force integral of the density, for every shape
+    /// thick enough for the brute force to resolve, and a nearly razor-thin one against the
+    /// thin limit `M (1 − e^(−r² ÷ 2σ²))`.
+    #[test]
+    fn the_enclosed_mass_integrates_the_density() {
+        let thin = &gaussians()[0];
+        for r in [100.0, 1_000.0, 5_000.0] {
+            let x = r / thin.sigma.value();
+            let limit = 1e9 * (1.0 - math::exp(-0.5 * x * x));
+            let ours = thin.enclosed_mass(LightYears::new(r)).value();
+            assert!(
+                (ours / limit - 1.0).abs() < 1e-3,
+                "thin, r {r}: {ours} against {limit}"
+            );
+        }
+        for g in gaussians().into_iter().skip(1) {
+            for r in [100.0, 1_000.0, 5_000.0] {
+                // M(<r) = 4π ∫₀^r ∫₀¹ ρ(r′ √(1 − μ²), r′ μ) dμ r′² dr′, Simpson in both.
+                let shell = |rr: f64| {
+                    let ring = |mu: f64| {
+                        g.density(
+                            LightYears::new(rr * (1.0 - mu * mu).sqrt()),
+                            LightYears::new(rr * mu),
+                        )
+                    };
+                    simpson(ring, 0.0, 1.0, 2_000) * rr * rr
+                };
+                let brute = 4.0 * core::f64::consts::PI * simpson(shell, 0.0, r, 200);
+                let ours = g.enclosed_mass(LightYears::new(r)).value();
+                assert!(
+                    (ours / brute - 1.0).abs() < 2e-3,
+                    "q {} r {r}: {ours} against {brute}",
+                    g.q
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_series_of_g_meets_the_closed_form() {
+        let below = g_integral(0.5_f64.next_down());
+        let above = g_integral(0.5);
+        assert!(
+            ((below - above) / above).abs() < 1e-13,
+            "{below} against {above}"
+        );
+    }
+
+    #[test]
+    fn invalid_components_are_rejected() {
+        let m = SolarMasses::new(1.0);
+        let l = LightYears::new(1.0);
+        assert!(Gaussian::new(SolarMasses::new(-1.0), l, 1.0).is_err());
+        assert!(Gaussian::new(m, LightYears::new(0.0), 1.0).is_err());
+        assert!(Gaussian::new(m, l, f64::NAN).is_err());
+        assert!(double_exponential(m, l, LightYears::new(-1.0)).is_err());
+        let error = Gaussian::new(m, l, 0.0).unwrap_err();
+        assert_eq!(error.quantity, "axis ratio");
+        assert_eq!(
+            error.to_string(),
+            "a mass component's axis ratio is 0, outside its range"
+        );
+    }
 }

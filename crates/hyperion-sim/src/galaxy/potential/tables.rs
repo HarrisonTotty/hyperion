@@ -161,20 +161,20 @@ impl Grid {
     }
 
     /// The Gaussians' potential at a point inside the grid's range, bicubic in the logarithms.
-    fn at(&self, r_cyl: f64, z: f64) -> f64 {
-        let (i, t) = cell(r_cyl);
-        let (j, s) = cell(z);
-        let [t0, t1, dt0, dt1] = hermite(t);
-        let [s0, s1, ds0, ds1] = hermite(s);
-        let (value_t, slope_t) = ([t0, t1], [dt0, dt1]);
-        let (value_s, slope_s) = ([s0, s1], [ds0, ds1]);
+    fn at(&self, r_cyl: f64, height: f64) -> f64 {
+        let (row, across) = cell(r_cyl);
+        let (column, up) = cell(height);
+        let [r0, r1, dr0, dr1] = hermite(across);
+        let [z0, z1, dz0, dz1] = hermite(up);
+        let (value_r, slope_r) = ([r0, r1], [dr0, dr1]);
+        let (value_z, slope_z) = ([z0, z1], [dz0, dz1]);
         let mut sum = 0.0;
         for di in 0..2 {
             for dj in 0..2 {
-                let [f, f_r, f_z, f_rz] = self.points[(i + di) * POINTS + j + dj];
-                sum += value_t[di] * value_s[dj] * f
-                    + STEP * (slope_t[di] * value_s[dj] * f_r + value_t[di] * slope_s[dj] * f_z)
-                    + STEP * STEP * slope_t[di] * slope_s[dj] * f_rz;
+                let [phi, by_r, by_z, by_both] = self.points[(row + di) * POINTS + column + dj];
+                sum += value_r[di] * value_z[dj] * phi
+                    + STEP * (slope_r[di] * value_z[dj] * by_r + value_r[di] * slope_z[dj] * by_z)
+                    + STEP * STEP * slope_r[di] * slope_z[dj] * by_both;
             }
         }
         sum
@@ -292,8 +292,8 @@ impl PotentialTables {
         self.totals(r.value()).slope / r.value()
     }
 
-    /// Ω² and κ² at `r > 0` (ly), in (km/s ÷ ly)²: `Ω² = v_c² ÷ R²` and `κ² = (1 ÷ R) dv_c² ÷ dR
-    /// + 2 v_c² ÷ R²`.
+    /// Ω² and κ² at `r > 0` (ly), in (km/s ÷ ly)²: `Ω² = v_c² ÷ R²` and
+    /// `κ² = (1 ÷ R) dv_c² ÷ dR + 2 v_c² ÷ R²`.
     fn frequencies_sq(&self, r: f64) -> (f64, f64) {
         let at = self.totals(r);
         let r2 = r * r;
@@ -415,19 +415,63 @@ mod tests {
 
     #[test]
     fn hermite_reproduces_a_cubic_in_the_logarithm() {
-        let f = |u: f64| 0.3 * u * u * u - u + 2.0;
-        let df = |u: f64| 0.9 * u * u - 1.0;
-        let mut y = [0.0; POINTS];
-        let mut dy = [0.0; POINTS];
-        for i in 0..POINTS {
+        let cubic = |u: f64| 0.3 * u * u * u - u + 2.0;
+        let slope = |u: f64| 0.9 * u * u - 1.0;
+        let mut values = [0.0; POINTS];
+        let mut slopes = [0.0; POINTS];
+        for (i, (value, derivative)) in values.iter_mut().zip(&mut slopes).enumerate() {
             let u = math::ln(grid_point(i));
-            y[i] = f(u);
-            dy[i] = df(u);
+            *value = cubic(u);
+            *derivative = slope(u);
         }
         for x in [0.1, 3.7, 1_234.5, 200_000.0] {
-            let (i, t) = cell(x);
-            let u = math::ln(x);
-            assert!((interpolate(&y, &dy, i, t) - f(u)).abs() < 1e-9 * f(u).abs().max(1.0));
+            let (index, position) = cell(x);
+            let exact = cubic(math::ln(x));
+            let interpolated = interpolate(&values, &slopes, index, position);
+            assert!((interpolated - exact).abs() < 1e-9 * exact.abs().max(1.0));
+        }
+    }
+
+    /// A synthetic solid-body rotation curve, `v_c = Ω₀ R`, with nothing else: κ = 2Ω, so
+    /// `4Ω² − κ²` vanishes and the tidal radius takes the floor `(G m ÷ 0.05 Ω²)^⅓`.
+    #[test]
+    fn the_tidal_floor_engages_for_a_solid_body_curve() {
+        let omega_sq = 1e-4;
+        let mut table = InPlaneTable {
+            v_circ_sq: [0.0; POINTS],
+            slope: [0.0; POINTS],
+            curvature: [0.0; POINTS],
+            potential: [0.0; POINTS],
+        };
+        for i in 0..POINTS {
+            let r = grid_point(i);
+            table.v_circ_sq[i] = omega_sq * r * r;
+            table.slope[i] = 2.0 * omega_sq * r * r;
+            table.curvature[i] = 4.0 * omega_sq * r * r;
+            table.potential[i] = 0.5 * omega_sq * r * r;
+        }
+        let zero = SolarMasses::ZERO;
+        let tables = PotentialTables {
+            in_plane: table,
+            grid: None,
+            dark_halo: Nfw::new(zero, 10.0, LightYears::new(1e5)).unwrap(),
+            nuclear_cluster: BrokenPowerLaw::new(zero, LightYears::new(10.0), 1.3, 3.5).unwrap(),
+            black_hole: PointMass::new(zero).unwrap(),
+            bar_corotation: LightYears::new(10_000.0),
+        };
+        for r in [0.01, 3.0, 5_000.0, 100_000.0] {
+            let ratio =
+                tables.kappa(LightYears::new(r)).value() / tables.omega(LightYears::new(r)).value();
+            assert!((ratio - 2.0).abs() < 1e-9, "κ ÷ Ω = {ratio} at {r}");
+            let p = PointLy::new(0.0, 0.0, r);
+            let rt = LightYears::from(tables.tidal_radius(SolarMasses::new(1.0), &p)).value();
+            let floor = math::cbrt(G / (TIDAL_FLOOR * omega_sq));
+            // Ω² itself is interpolated, and e^(2 ln R) is not a cubic in ln R: the Hermite
+            // error is up to h⁴ ÷ 384 × 16 ≈ 1.4 × 10⁻⁴ in Ω², a third of that in the radius.
+            assert!(
+                (rt / floor - 1.0).abs() < 1e-4,
+                "{rt} against {floor} at {r}"
+            );
         }
     }
 

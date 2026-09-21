@@ -29,7 +29,7 @@ enum Centre {
 /// `z = (1 − ϖ^p)^(1÷p)`, `∫ ϖᵅ (1 − ϖ^p)^(β÷p) dϖ = B((α + 1) ÷ p, β ÷ p + 1) ÷ p`, so `⟨ϖ²⟩ =
 /// 20 B(4 ÷ p, 1 ÷ p + 1) ÷ B(2 ÷ p, 1 ÷ p + 1)` and `⟨z²⟩ = (20 ÷ 3) B(2 ÷ p, 3 ÷ p + 1) ÷
 /// B(2 ÷ p, 1 ÷ p + 1)`. At `p = 2`, the spherical exponential, they are 8 and 4.
-pub fn unit_bulge_moments(boxiness: f64) -> (f64, f64) {
+pub(crate) fn unit_bulge_moments(boxiness: f64) -> (f64, f64) {
     let p = boxiness;
     let ln_beta = |x: f64, y: f64| math::ln_gamma(x) + math::ln_gamma(y) - math::ln_gamma(x + y);
     let volume = ln_beta(2.0 / p, 1.0 / p + 1.0);
@@ -40,14 +40,14 @@ pub fn unit_bulge_moments(boxiness: f64) -> (f64, f64) {
 
 /// The boxy bulge's second moments `⟨R²⟩` and `⟨z²⟩`, ly²: the unit body's scaled by the bulge's
 /// axes, `⟨R²⟩ = (a² + b²) ⟨ϖ²⟩ ÷ 2` and `⟨z²⟩ = c² ⟨z²⟩`.
-pub fn bulge_second_moments(bulge: &BulgeParams) -> (f64, f64) {
+pub(crate) fn bulge_second_moments(bulge: &BulgeParams) -> (f64, f64) {
     let (planar, vertical) = unit_bulge_moments(bulge.boxiness());
     let (a, b, c) = (
         bulge.scale_x().value(),
         bulge.scale_y().value(),
         bulge.scale_z().value(),
     );
-    (0.5 * (a * a + b * b) * planar, c * c * vertical)
+    (f64::midpoint(a * a, b * b) * planar, c * c * vertical)
 }
 
 /// The spheroidal exponential `exp(−√(R² ÷ a_r² + z² ÷ a_z²))` with the boxy bulge's second
@@ -105,7 +105,7 @@ impl MassModel {
 
     /// The model without the black hole and the nuclear cluster, from which the bulge's
     /// dispersion is read before the black hole's mass exists (plan 02, Design note 8).
-    pub fn without_centre(params: &GalaxyParams) -> Self {
+    pub(crate) fn without_centre(params: &GalaxyParams) -> Self {
         Self::assemble(params, Centre::Excluded)
     }
 
@@ -331,8 +331,14 @@ mod tests {
             let planar = integrate(&|w, _| w * w) / norm;
             let vertical = integrate(&|_, z| z * z) / norm;
             let (closed_planar, closed_vertical) = unit_bulge_moments(p);
-            assert!((planar / closed_planar - 1.0).abs() < 1e-6, "p {p}: {planar}");
-            assert!((vertical / closed_vertical - 1.0).abs() < 1e-6, "p {p}: {vertical}");
+            assert!(
+                (planar / closed_planar - 1.0).abs() < 1e-6,
+                "p {p}: {planar}"
+            );
+            assert!(
+                (vertical / closed_vertical - 1.0).abs() < 1e-6,
+                "p {p}: {vertical}"
+            );
         }
         let (planar, vertical) = unit_bulge_moments(2.0);
         assert!((planar - 8.0).abs() < 1e-12 && (vertical - 4.0).abs() < 1e-12);
