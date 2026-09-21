@@ -127,6 +127,8 @@ def scan(src: str, lang: str) -> tuple[str, str, list[tuple[int, int, str]]]:
     def regex_end(i: int) -> int | None:
         """Index after the regex literal that opens at i, if the `/` there can open one."""
         before = "".join(bare[max(0, i - 40) : i]).rstrip()
+        if src.startswith("//", i):
+            return None  # the `//` of a URL in JSX text: a regex is never empty
         after_value = before[-1:].isalnum() or before[-1:] in ")]}\"'`_$" or before.endswith(("++", "--", "<"))
         after_arrow = before.endswith("=>")
         if before and (after_value or (before.endswith(">") and not after_arrow)):
@@ -161,7 +163,7 @@ def scan(src: str, lang: str) -> tuple[str, str, list[tuple[int, int, str]]]:
         elif lang != "html" and src.startswith("/*", i):
             end = src.find("*/", i + 2)
             end = n if end == -1 else end + 2
-        elif lang == "js" and src.startswith("//", i):
+        elif lang == "js" and src.startswith("//", i) and not re.search(r"[A-Za-z]:$", src[max(0, i - 2) : i]):  # not https://
             end = src.find("\n", i)
             end = n if end == -1 else end
         if end is not None:
@@ -321,7 +323,7 @@ def ui_strings(lang: str, bare: str, strings: list[tuple[int, int, str]], in_tex
         elif re.search(r"[{,]\s*$", before) and re.match(r"\s*:", after):
             continue  # an object key
         text = glyphs.decode_escapes(raw) if lang == "js" else raw
-        if re.search(r"[\w-]\s*=\s*$", before):
+        if lang == "html" or re.search(r"[\w-]=$", before):
             text = html.unescape(text)  # an attribute value: `title="&rarr;"` shows →
         if not re.search(r"[A-Za-z]", text) and not re.search(r"[^\x00-\x7f]", text):
             continue
@@ -428,7 +430,7 @@ def check_stylesheet_scope(path: Path, code: str, root: Path) -> list[Finding]:
     found: list[Finding] = []
     if path.suffix == ".css" and not is_shared_sheet(path, root):
         shared = shared_classes(root)
-        for block in re.finditer(r"([^{}]+)\{", code):
+        for block in re.finditer(r"\s*([^{}]+)\{", code):
             clashes = sorted(set(re.findall(r"\.([a-zA-Z][\w-]*)", block.group(1))) & shared)
             if clashes:
                 names = ", ".join("." + c for c in clashes)
@@ -467,8 +469,11 @@ def check_code(path: Path, code: str, bare: str, root_blocks: list[tuple[int, in
     for m in HEX.finditer(code):
         if not (css and ID_SELECTOR.match(code, m.end())):  # `#fade {` is an id selector
             add(m.start(), "error", "literal-colour", f"Literal colour {m.group(0)}: use a token (var(--…)) from styles.css.", "Colour")
-    for m in re.finditer(r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\(", code):
-        add(m.start(), "error", "literal-colour", f"Colour function {m.group(0)}…): use a token.", "Colour")
+    for m in re.finditer(r"\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\((?:[^()]|\([^()]*\))*\)?", code):
+        if "${" in m.group(0) or "var(" in m.group(0):  # computed, such as a ramp or tint built from tokens
+            add(m.start(), "check", "literal-colour", f"Computed colour {m.group(1)}(…): make sure every input comes from a token.", "Colour")
+        else:
+            add(m.start(), "error", "literal-colour", f"Colour function {m.group(1)}(…): use a token.", "Colour")
     tokens_blanked = re.sub(r"--[\w-]+", lambda m: " " * len(m.group(0)), code)  # `var(--hazard-yellow)` is a token
     for m in NAMED_COLOUR.finditer(tokens_blanked):
         add(m.start(1), "error", "literal-colour", f"Named colour '{m.group(1)}': use a token.", "Colour")
@@ -513,9 +518,9 @@ def check_code(path: Path, code: str, bare: str, root_blocks: list[tuple[int, in
             if float(number) > HAIRLINE_MAX_PX:
                 add(m.start(), "check", "px-length", f"{number}px: size in rem so the 80–150% interface scale holds.", "Accessibility")
 
-    for m in re.finditer(r"font-style\s*:\s*(?:italic|oblique)|fontStyle\s*:\s*['\"](?:italic|oblique)|<(?:em|i)[\s>]", code):
+    for m in re.finditer(r"font-style\s*:\s*(?:italic|oblique)|fontStyle\s*:\s*['\"](?:italic|oblique)|(?<![\w$)\]])<(?:em|i)[\s>]", code):
         add(m.start(), "error", "italic", "No italics on a console.", "Typography")
-    for m in re.finditer(r"font-weight\s*:\s*(?:bold|bolder|[6-9]00)|fontWeight\s*:|<(?:strong|b)[\s>]", code):
+    for m in re.finditer(r"font-weight\s*:\s*(?:bold|bolder|[6-9]00)|fontWeight\s*:|(?<![\w$)\]])<(?:strong|b)[\s>]", code):
         add(m.start(), "check", "bold", "Bold is for display titles only; emphasis on a console means an alert.", "Typography")
     for m in re.finditer(r"font-family\s*:\s*([^;}]+)|fontFamily\s*:\s*(['\"`])(.*?)\2", code):
         family = m.group(1) if m.group(1) is not None else m.group(3)
@@ -613,7 +618,7 @@ def check_text(texts: list[tuple[int, str]], unchecked: dict[str, str]) -> list[
             found.append(Finding(at(m.start()), "check", "voice", f"'{m.group(0)}' in '{excerpt}': web or game phrasing; state the fact, as in DOCKED or NO CARRIER.", "Voice and nomenclature"))
         if m := re.search(r"[A-Za-z0-9)}]!(?:\s|$)", text):
             found.append(Finding(at(m.start()), "error", "voice", f"Exclamation mark in '{excerpt}'.", "Voice and nomenclature"))
-        if " " in stripped:  # a single word such as US is more likely an abbreviation
+        if len(text.split()) > 1:  # a single word such as US is more likely an abbreviation
             if m := PERSON_NAMED.search(text):
                 found.append(Finding(at(m.start()), "error", "voice", f"Second or first person '{m.group(0)}' in '{excerpt}': the ship never speaks as a person.", "Voice and nomenclature"))
             elif (m := PERSON_OTHER.search(text)) and (m.group(0) != "I" or re.search(r"[a-z]", text)):
@@ -735,6 +740,7 @@ def main() -> None:
             checks += f.severity == "check"
     print(f"\n{errors} error(s), {checks} check(s) in {len(files)} file(s) scanned. Heuristic: confirm each line against the guide.")
     if unchecked:
+        sys.stdout.flush()  # the warning goes after the findings, not before them
         reason = next(iter(unchecked.values()))
         print(f"ux_lint: glyph check did not run for {len(unchecked)} character(s) ({' '.join(unchecked)}): {reason}", file=sys.stderr)
         sys.exit(2)

@@ -88,11 +88,12 @@ python3 .claude/skills/console-ux/scripts/contrast.py line-strong surface-2 --mi
 python3 .claude/skills/console-ux/scripts/glyphs.py "☉ ↑ µ"     # can the bundled B612 fonts draw these?
 ```
 
-- `ux_lint.py` is a heuristic and exits 1 on any error. An `error` breaks a must-or-never rule as
-  written. A `check` needs judgement: a `50%` radius may be a contact symbol, and a hover handler
-  may have a keyboard twin. Fix and re-run until it is clean, or until every remaining line is a
-  justified exception with a code comment giving the reason. The guide lets a "should" rule be
-  broken with a stated reason.
+- `ux_lint.py` is a heuristic. It exits 1 on any error, and 2 when it couldn't run fully (a bad
+  path, or the fonts missing, which `pnpm install` fixes). `glyphs.py` and `contrast.py` use the
+  same exit codes. An `error` breaks a must-or-never rule as written. A `check` needs judgement: a
+  `50%` radius may be a contact symbol, and a hover handler may have a keyboard twin. Fix and re-run
+  until it is clean, or until every remaining line is a justified exception with a code comment
+  giving the reason. The guide lets a "should" rule be broken with a stated reason.
 - Run `contrast.py` whenever a token changes or a new foreground and background meet. Text needs
   6:1 and control outlines 3:1.
 - Run `glyphs.py` for any character outside ASCII before it reaches the screen. A glyph B612 lacks

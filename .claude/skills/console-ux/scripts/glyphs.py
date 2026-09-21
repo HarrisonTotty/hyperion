@@ -3,7 +3,7 @@
 
 Usage:
     glyphs.py "☉ ° µ ↑"        Report each non-space character: in B612? in B612 Mono?
-    glyphs.py '\\u2609 \\u{2192}' Escapes are decoded first: \\uXXXX, \\u{…}, \\UXXXXXXXX and \\xXX.
+    glyphs.py '\\u2609 \\u2192'   Escapes are decoded first: \\uXXXX, \\u{…}, \\UXXXXXXXX and \\xXX.
     glyphs.py --ranges          Print every code point range each font covers.
 
 Reads the regular-weight WOFF files that @fontsource bundles (apps/hyperion/node_modules), so
