@@ -285,6 +285,35 @@ fn every_grid_cell_is_a_cell_box() {
 
 // Envelope bounds (P02.T8.a).
 
+/// The bulge, whose envelope can rise by a last bit, never becomes subnormal inside the root
+/// cube, where the bounds' relative margin would round away: at the cube's far corner, for the
+/// smallest bulge the parameters allow and both ends of its boxiness, it is a normal number far
+/// above the least one.
+#[test]
+fn the_bulge_stays_normal_across_the_root_cube() {
+    for boxiness in [3.0, 4.0] {
+        let params = GalaxyParamsBuilder::new()
+            .bulge_length(LightYears::new(1_700.0))
+            .bulge_b_over_a(0.5)
+            .bulge_c_over_a(0.3)
+            .bulge_boxiness(boxiness)
+            .build()
+            .unwrap();
+        let fields = fields_of(&params);
+        let bulge = fields
+            .components()
+            .iter()
+            .find(|c| matches!(c.shape(), Shape::Bulge(_)))
+            .unwrap();
+        let centre = bulge.envelope(&PointLy::default());
+        let corner = bulge.envelope(&PointLy::new(ROOT, ROOT, ROOT));
+        assert!(
+            corner > 1e-65 * centre && corner.is_normal(),
+            "{corner:e} at c∥ {boxiness}"
+        );
+    }
+}
+
 /// For every component of the three pinned seeds, on a sample of random cells of every size and
 /// on the targeted cells, no envelope exceeds its bound and each bound is its corner's value to
 /// 10⁻¹². The full count runs as a slow test.

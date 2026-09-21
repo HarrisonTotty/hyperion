@@ -1,4 +1,4 @@
-# generator_version = 4
+# generator_version = 5
 # milky_way
 milky_way.bh.sigma = 0x405dd33caf86bb19  # 119.30057895810423
 milky_way.bh.mass = 0x415067163ba57865  # 4299864.931974505

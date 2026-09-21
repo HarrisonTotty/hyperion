@@ -6,10 +6,10 @@ a design exploration, not a plan. Decisions are marked **Lean** where there is a
 and the open ones are collected under [Open questions](#open-questions). What has been settled is
 under [Decisions](#decisions), from two rounds with the project owner.
 
-It builds on [the galaxy generation brainstorm](galaxy-generation.md) and assumes all of it is
-built. Every system, star, body and event is a pure function of seed, ID and time. The range query
-and the `GALAXY` and `SYSTEM` displays exist, and sensors see the past through a minimal Knowledge
-overlay.
+It builds on [the galaxy generation brainstorm](galaxy-generation.md) and assumes all of its plans
+are built. Every system, star, body and event is a pure function of seed, ID and time. The range
+query and the `GALAXY` and `SYSTEM` displays exist, and sensors see the past through a minimal
+Knowledge overlay.
 
 ## Goal and scope
 
@@ -52,16 +52,16 @@ Out of scope, each with hooks defined here:
 
 ## What to take from the references
 
-| Reference             | Take                                                                                                                                                                                                                                                                                                                                                                                                                                       | Leave                                                                                                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| No Man's Sky          | Seamless flight through a system and down to a planet's surface, with no loading screens. The whole of a system is open to the player, its star included. Everything is generated from the seed on arrival.                                                                                                                                                                                                                                | Systems and planets far smaller than real ones. HYPERION keeps real scale, so crossing a system takes a jump, or a drive type of its own (an open question).                         |
-| Elite Dangerous       | One pilot runs a whole ship. Modules with power and heat budgets, and heat as a resource to manage. Jump range that depends on the ship's mass, so loadout is a navigation decision. Scooping fuel as a survival loop. Exploration as discover, scan and map, with a log. Flight assist, which decides whether a keyboard can fly the ship at all. Fighters launched from a larger ship. Landings on real-scale planets, since _Horizons_. | A speed cap on a Newtonian ship. Supercruise, a second invented drive for travel within a system. Fighters flown by telepresence at any range.                                       |
-| Orbiter               | Honest Newtonian flight among real orbits. Multi-function displays as the interface to orbital mechanics: transfers, plane changes, synchronised orbits. Time acceleration from 10× to 100,000×, which makes real distances playable.                                                                                                                                                                                                      | Shallow systems: no power, heat or life support without add-ons. A rendering-first presentation.                                                                                     |
-| Kerbal Space Program  | Manoeuvre nodes: a planned burn that the player edits against a predicted trajectory. Delta-v budgets as readouts. Time warp that drops to real time when something needs attention.                                                                                                                                                                                                                                                       | Patched conics and their jumps at sphere-of-influence boundaries. A solar system at a tenth of real scale.                                                                           |
-| DCS World, Falcon BMS | Depth of systems: failure modes, checklists, start-up procedures, full HOTAS binding. A cockpit that rewards knowing the aircraft.                                                                                                                                                                                                                                                                                                         | A steep entry. Depth must be available, never required on the first flight.                                                                                                          |
-| Artemis, EmptyEpsilon | Artemis 2.4 added a fighter pilot position: a player flies a single-seat craft launched from the crew's ship. EmptyEpsilon's Single Pilot station combines Helm, Weapons and short-range scanning into one console, so one person can fly a ship built for a crew. That regrouping is the model for this whole brainstorm.                                                                                                                 | Arcade flight models.                                                                                                                                                                |
-| _The Expanse_         | High-g flight as a limit on the crew, not the ship. Flip-and-burn. A ship that shows up in infrared because it has to shed heat.                                                                                                                                                                                                                                                                                                           | The Epstein drive's free lunch: gees of thrust at an exhaust velocity that implies terawatts, with no waste heat to show for it. If HYPERION invents a drive, it says so; see below. |
-| Traveller             | The 100-diameter limit: a jump drive that cannot work deep in a gravity well, so every arrival and departure has a sublight leg.                                                                                                                                                                                                                                                                                                           | A rule with no reason behind it. [Later drive types](#for-later-drive-types) derive one.                                                                                             |
+| Reference             | Take                                                                                                                                                                                                                                                                                                                                                                                                                                       | Leave                                                                                                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No Man's Sky          | Seamless flight through a system and down to a planet's surface, with no loading screens. The whole of a system is open to the player, its star included. Everything is generated from the seed on arrival.                                                                                                                                                                                                                                | Systems and planets far smaller than real ones. HYPERION keeps real scale, so crossing a system takes a jump, or a drive type of its own (an open question).                                                                     |
+| Elite Dangerous       | One pilot runs a whole ship. Modules with power and heat budgets, and heat as a resource to manage. Jump range that depends on the ship's mass, so loadout is a navigation decision. Scooping fuel as a survival loop. Exploration as discover, scan and map, with a log. Flight assist, which decides whether a keyboard can fly the ship at all. Fighters launched from a larger ship. Landings on real-scale planets, since _Horizons_. | A speed cap on a Newtonian ship. Supercruise as a second, separate invented drive; continuous flight within a system, if it comes, is a type of jump drive (an open question). Fighters flown by telepresence at any range.      |
+| Orbiter               | Honest Newtonian flight among real orbits. Multi-function displays as the interface to orbital mechanics: transfers, plane changes, synchronised orbits. Time acceleration up to 100,000×, which makes real distances playable.                                                                                                                                                                                                            | Shallow systems: no power, heat or life support without add-ons. A rendering-first presentation.                                                                                                                                 |
+| Kerbal Space Program  | Manoeuvre nodes: a planned burn that the player edits against a predicted trajectory. Delta-v budgets as readouts. Time warp that drops to real time when something needs attention.                                                                                                                                                                                                                                                       | Patched conics and their jumps at sphere-of-influence boundaries. A solar system at a tenth of real scale.                                                                                                                       |
+| DCS World, Falcon BMS | Depth of systems: failure modes, checklists, start-up procedures, full HOTAS binding. A cockpit that rewards knowing the aircraft.                                                                                                                                                                                                                                                                                                         | A steep entry. Depth must be available, never required on the first flight.                                                                                                                                                      |
+| Artemis, EmptyEpsilon | Artemis 2.4 added a fighter pilot position: a player flies a single-seat craft launched from the crew's ship. EmptyEpsilon's Single Pilot station combines Helm, Weapons and short-range scanning into one console, so one person can fly a ship built for a crew. That regrouping is the model for this whole brainstorm.                                                                                                                 | Arcade flight models.                                                                                                                                                                                                            |
+| _The Expanse_         | High-g flight as a limit on the crew, not the ship. Flip-and-burn. A ship that shows up in infrared because it has to shed heat.                                                                                                                                                                                                                                                                                                           | The Epstein drive's free lunch: gees of thrust at an exhaust velocity that implies terawatts, with no waste heat to show for it. If HYPERION invents a drive, it says so; see [Travel within a system](#travel-within-a-system). |
+| Traveller             | For a later drive type, the 100-diameter limit: a jump drive that cannot work deep in a gravity well, so every arrival and departure has a sublight leg.                                                                                                                                                                                                                                                                                   | A rule with no reason behind it. [Later drive types](#for-later-drive-types) derive one.                                                                                                                                         |
 
 The common lesson: **a single seat is the whole ship at one console.** Design the ship as though a
 crew will fly it, then give all of its stations to one person.
@@ -92,7 +92,7 @@ station.
 ### Sessions
 
 A session is a universe, the craft in it and the players flying them. Single-player is one craft
-and one player. The server holds the session, and the client never simulates.
+and one player. The server holds the session and is its only authority.
 
 **Lean:** single-player runs the same server, locally. The Electron main process starts
 `hyperion-server` on the loopback interface as a child process and connects to it, and connecting
@@ -100,15 +100,18 @@ to a remote server stays possible. One code path means nothing written for one p
 rewritten for several.
 
 A session's state is play state, not generated data: the craft, the clock, the Knowledge gathered
-and the deltas that play has made. The galaxy brainstorm's overlays already anticipate it. It is
-stored beside the universe, under `universes/<id>/sessions/<id>/`, and saved on a timer and on
-request.
+and the deltas that play has made. The galaxy brainstorm's overlays already anticipate it.
+**Lean:** it is stored in the universe's directory under the names plan 04 reserved there:
+`session.json` for the clock and the craft, `knowledge/`, which plan 12 already writes, and
+`deltas/`. A universe therefore holds one session. A second playthrough of the same seed is a second
+universe, as plan 04 already provides, since a universe is a save with an ID of its own. The session
+is saved on a timer and on request.
 
 ### The clock
 
 The session holds the universe's "now". **Lean:** a session starts at the epoch, UT 0, and time
-only moves forward. Mission elapsed time, `MET`, counts from the session's start, as the UX guide
-already defines.
+only moves forward. Mission elapsed time, `MET`, counts from the session's start, in the format
+the UX guide already sets.
 
 **Lean: the simulation steps at 64 Hz.** `UniverseTime` counts whole nanoseconds, and 1/64 s is
 exactly 15,625,000 ns, so every tick is exact and the clock never drifts. 1/60 s is not a whole
@@ -120,8 +123,8 @@ of ten from 1× to 100,000×, the ceiling of both Orbiter and KSP. Each tick the
 10ᵏ × 15.625 ms, which is still exact. **Lean**, for the rules:
 
 - The flight computer drops the rate on its own when the pilot needs to act: an alert, a change of
-  frame, the start of a planned burn, and closing within a set distance of another object or the top
-  of an atmosphere.
+  frame, the start of a planned burn, closing within a set distance of another object or the top of
+  an atmosphere, and arming the jump drive, which drops it to 1×.
 - Above 10×, manual inputs are ignored and attitude is held by the flight computer. Burns under
   compression are the flight computer's, flown to a plan.
 - Compressing time never saves anything but the player's time. A 30-day transfer at 100,000× lasts
@@ -131,8 +134,9 @@ The galaxy's clock window is H = 1,000 years either side of the epoch. At 100,00
 forward takes 3.7 days of continuous play, so a session will not reach it in practice, but the
 server enforces it.
 
-Pausing is a rate of zero, available in single-player only. The UX guide asks for a persistent
-banner for any mode that is not live operation, and the rate sits beside `UT` in the header strip.
+**Lean:** pausing is a rate of zero, available in single-player only. The rate sits beside `UT` in
+the header strip. The UX guide asks for a persistent banner in simulation, training and replay
+modes, and a pause should carry one too, which needs an edit to the guide.
 
 A session has one clock. When fighters share a session with the main ship, compression becomes an
 agreement across the session. That is out of scope here, and noted so that nothing assumes a clock
@@ -155,8 +159,8 @@ advance, for a jump when the drive is armed.
 
 A local server makes latency negligible. A remote one, for a bridge on a network, will want
 client-side prediction and interpolation of the craft, which determinism keeps possible and which
-is deferred. The view interpolates between telemetry updates even locally, since a monitor refreshes
-faster than 64 Hz.
+is deferred. The view interpolates between telemetry updates even locally, since frames and ticks
+do not line up and many monitors refresh faster than 64 Hz.
 
 ## Where the ship is
 
@@ -200,7 +204,8 @@ Two approaches:
 **Lean: restricted n-body.** Bodies are on rails, so each gravity term is one evaluation of a Kepler
 orbit the planetary stage already provides. The ship feels its host star or stars and every body
 whose pull at its position exceeds a small threshold. Low orbits also need the dominant body's
-oblateness, J₂, if the planetary stage provides a flattening; that is a hook to check. The
+oblateness, J₂, which the planetary stage does not provide yet. It follows from the rotation and the
+interior, and is a hook to add. The
 navigation computer still shows osculating elements about a chosen body for planning, as Orbiter's
 displays do.
 
@@ -236,10 +241,11 @@ The pilot flies through a fly-by-wire flight control system, whose modes are alw
   from it, or at a fixed inertial attitude.
 - **Translation.** `DIRECT`, or `VEL`, in which the stick commands a change of velocity against a
   stated reference and a centred stick holds it. The references are the frame body's orbit, where
-  holding means coasting, and `TARGET`, for station-keeping.
+  holding means coasting; the frame body itself, where holding means thrusting against gravity, as a
+  hover over a surface will; and `TARGET`, for station-keeping.
 - Real spacecraft autopilots offer the same choices: rate command with attitude hold, direct
-  control, and minimum-impulse pulses. Elite's flight assist is `RATE` with `VEL` against the local
-  frame, and it is what lets a keyboard fly a ship.
+  control, and minimum-impulse pulses. Elite's flight assist is `RATE` with `VEL` against the frame
+  body, and it is what lets a keyboard fly a ship.
 
 There is no speed limit. Speed is relative to a frame and says little on its own, so the flight
 display shows velocity against the chosen reference and the delta-v remaining.
@@ -307,8 +313,9 @@ as between systems (see [Jump drives](#jump-drives)), so the pieces are:
 - **Real engines for everything near.** Approach, orbit, rendezvous and skimming are flown under
   known physics: a manoeuvring engine for anything quick, and a cruise drive for longer legs.
 - **Time compression for long coasts and slow burns**, flown by the flight computer.
-- **Nothing is fenced off.** The limit on approaching a star is the one physics sets: the heat of
-  its light on the hull, 136 kW/m² at 0.1 AU from the Sun (see [Ship systems](#ship-systems)).
+- **Nothing is fenced off.** The limit on approaching an ordinary star is the one physics sets: the
+  heat of its light on the hull, 136 kW/m² at 0.1 AU from the Sun (see
+  [Ship systems](#ship-systems)). Near a compact remnant, tides and radiation can set it first.
 
 **Lean: jump drives are the only invented technology.** Everything else is known physics, or
 engineering extrapolated from it, the register the UX guide already sets for the consoles. A torch
@@ -316,10 +323,15 @@ drive, as _The Expanse_ has, would make the heat, power and propellant models de
 are the systems this phase exists to test. Time compression is an honest concession to play: it
 changes how fast the player lives through time, not what happens in it.
 
+The first drive strains this lean while it is fitted. A free jump into any orbit leaves the engines,
+propellant and time compression little to do, so until a drive type with costs exists they are
+exercised by scenarios and by craft fitted without a drive, as fighters will be.
+
 What this leaves out is No Man's Sky's pulse engine: continuous flight between planets in a few
 minutes, watching the destination grow. Real engines cannot do it, and a jump skips it. If flying
-the first version shows it is missed, it can come back as a drive type of its own, an invented
-mode of continuous flight within a system, and is listed under [Open questions](#open-questions).
+the first version shows it is missed, it can come back as a type of jump drive that moves the ship
+continuously rather than in one step, so that jump drives stay the only invented technology. It is
+listed under [Open questions](#open-questions).
 
 ### Engines
 
@@ -346,7 +358,7 @@ rings and small moons, taken at a rendezvous rather than a landing, can follow.
 
 ## Jump drives
 
-The galaxy brainstorm settled that a drive can jump to any point within range, charted or not. The
+The galaxy brainstorm settled that a drive can jump to any system within range, charted or not. The
 owner has ruled that HYPERION will have several types of jump drive with different gameplay
 properties, and that the first is the simplest: it teleports the ship to its target, within a
 system as well as between systems.
@@ -368,21 +380,25 @@ A drive type is data, like the rest of a craft definition. Each type fixes:
 
 **Lean**, for each property, since the owner has asked for the simplest drive and left the detail:
 
-- **Range: 1,000 ly**, a parameter of the type, set large for testing. At a Sun-like radius that
-  sphere holds some ten million systems, so targets are not listed. They are chosen where they are
-  already shown: on the `GALAXY` display's map or local chart, on the `SYSTEM` display, or by
-  designation or ID. Longer journeys chain jumps.
-- **Anywhere, within a system too, the star included.** The drive refuses only an arrival inside a
-  body, or below the top of its atmosphere or the star's photosphere, with a margin. The navigation
-  computer states the heat load at the arrival point, and arriving somewhere that load exceeds the
-  radiators is the pilot's decision, under `ARM` and `EXECUTE`.
+- **Range: 1,000 ly**, a parameter of the type, set large for testing. At the Sun's radius, with
+  Milky Way-like parameters, that sphere holds several million systems, so targets are not listed.
+  They are chosen where they are already shown: on the `GALAXY` display's map or local chart, on
+  the `SYSTEM` display, or by designation or ID. Any system in range is a target, charted or not,
+  but a body is one only once the ship knows it. Longer journeys chain jumps.
+- **Any point in range, within a system too, the star included.** The galaxy brainstorm's rule names
+  systems, and this drive widens it to points. It refuses only an arrival inside a body, or below
+  the top of its atmosphere or the star's photosphere, with a margin. The navigation computer states
+  the heat load at the arrival point before `EXECUTE`, and arriving where that load exceeds the
+  radiators is left to the pilot.
 - **Arrival matched to the target.** The pilot chooses the arrival state from the target: a circular
   orbit about a body at a chosen altitude, or rest relative to the target at a chosen offset. A
-  point in empty space means rest relative to the frame there: the system's barycentre, or, between
-  the stars, the galaxy's circular velocity at that point. So the drive is also a free change of
-  velocity, which bypasses the propellant economy while it is fitted. That suits testing, and later
-  types restore the cost.
-- **No universe time, and no cost.** A short spool-up in real time, then `ARM` and `EXECUTE`.
+  point in empty space means rest relative to the frame there: the body's within its Hill sphere,
+  the system's barycentre elsewhere in a system, and between the stars the galaxy's circular
+  velocity at that point, about the mean motion of the systems around it. So the drive is also a
+  free change of velocity, which bypasses the propellant economy while it is fitted. That suits
+  testing, and later types restore the cost.
+- **No universe time in transit, and no cost.** `ARM` drops the time rate to 1× and charges the
+  drive for a few seconds of universe time, and `EXECUTE` then jumps.
 - **What the sensors then see.** On arrival the sensors see the destination's past light cone, which
   the galaxy already models: after a 10 ly jump the pilot sees their point of departure as it was
   ten years before, and a jump outruns any news. There is no faster-than-light communication.
@@ -392,8 +408,8 @@ A drive type is data, like the rest of a craft definition. Each type fixes:
 
 ### For later drive types
 
-The rules worked out in the first round are kept here as candidates for drive types with real
-costs. None of them applies to the first drive.
+The rules worked out in this document's first draft are kept here as candidates for drive types with
+real costs. None of them applies to the first drive.
 
 #### Range from energy
 
@@ -401,11 +417,12 @@ A jump draws on a charge that the reactor builds up in the drive. The energy gro
 mass and the distance, so range falls as the ship is loaded (Elite's lesson: loadout is a navigation
 decision), and the recharge time ties the drive to power and heat. There is no invented consumable.
 
-The galaxy says what a range means. At a Sun-like radius the generated density matches the local
-one, about 0.0023 systems per cubic light-year (Reylé et al. 2021), so the nearest neighbour is
-about 4 ly away, a 10 ly sphere holds about 10 systems, and a 20 ly sphere about 80. Density falls
-with height above the disc, so a short range makes the space above the disc and the thin stretches
-between arms real obstacles, as the galaxy brainstorm intends.
+The galaxy says what a range means. With Milky Way-like parameters the generated density at the
+Sun's radius is about 0.002 systems per cubic light-year, as measured (Reylé et al. 2021;
+Kirkpatrick et al. 2024), and other seeds give from 0.0008 to 0.008. At 0.002 the nearest neighbour
+is about 4.4 ly away, a 10 ly sphere holds about 8 systems, and a 20 ly sphere about 67. Density
+falls with height above the disc, so a short range makes the space above the disc and the thin
+stretches between arms real obstacles, as the galaxy brainstorm intends.
 
 #### The tidal limit
 
@@ -422,7 +439,7 @@ density, which is Traveller's 100-diameter rule with a reason. Calibrated to 100
 | Mars                             | 606,000 km      | 89           |
 | Earth                            | 1.27 million km | 100          |
 | Jupiter                          | 8.7 million km  | 62           |
-| 0.2 M☉ red dwarf                 | 0.35 AU         | 165          |
+| 0.2 M☉ red dwarf                 | 0.35 AU         | 169          |
 | 0.6 M☉ white dwarf               | 0.50 AU         | 4,300        |
 | Sun                              | 0.59 AU         | 63           |
 | 1.4 M☉ neutron star              | 0.66 AU         | 4 million    |
@@ -501,7 +518,7 @@ as the UX guide requires.
   K sheds 57 kW per square metre per face, and at 300 K only 0.46. Radiators are large and fragile,
   deployed and stowed. Heat sinks absorb bursts, and coolant loops move heat between them. Starlight
   adds to the load: 1,361 W/m² at 1 AU from the Sun and 136 kW/m² at 0.1 AU, so a close pass by a
-  star is a thermal problem, and the only thing that limits how close a ship can go. A ship's
+  star is a thermal problem, and for an ordinary star the limit on how close a ship can go. A ship's
   radiators are also its brightest feature in the infrared, which is how other sensors will find it.
 - **Propellant.** Tanks with mass, position, pressure and boil-off. Delta-v remaining is computed
   from them.
@@ -512,8 +529,9 @@ as the UX guide requires.
 - **Structure.** Hull integrity and structural load limits.
 - **Damage and failures.** Each component has a health and failure modes. Wear-out failures draw
   from the session's streams, and hazards damage what they reach: collisions, radiation from flares,
-  heat, and gas at speed. **Lean:** a manual cold start is available, in the manner of DCS, and so
-  is an automatic one, since depth must never be required on the first flight.
+  heat, dust and gas at speed, and tides near compact remnants. **Lean:** a manual cold start is
+  available, in the manner of DCS, and so is an automatic one, since depth must never be required on
+  the first flight.
 
 ## Sensors and exploration
 
@@ -535,9 +553,10 @@ level of detail. This phase adds sensor models and the exploration loop on top.
   surface and atmosphere, to mapped from orbit. Each rung has a method and an instrument.
 - **The log** records each discovery with its time and position, under the catalogue designation
   derived from its ID.
-- **Mapping** from orbit needs the orbital-scale map generator that the galaxy brainstorm leaves to
-  a later consumer. It is the first layer of the planets to come, so it belongs to their brainstorm;
-  see [Planets](#planets).
+- **Mapping** from orbit needs the orbital-scale map generator. The galaxy brainstorm includes
+  orbital-scale maps in its scope, but plan 14 builds only their inputs, the surface seed and global
+  figures, and leaves the generator to a later consumer. It is the first layer of the planets to
+  come, so it belongs to their brainstorm; see [Planets](#planets).
 
 ## The cockpit
 
@@ -557,7 +576,8 @@ New displays, each to join the nomenclature list:
 - `SENSORS`: contacts, measurements in progress and the discovery log.
 - Systems displays, as schematics: power, thermal, propellant and life support.
 
-`GALAXY`, `SYSTEM` and `LINK` stay as they are.
+`LINK` stays as it is. `GALAXY` and `SYSTEM` gain one command, to make the selection the jump
+target.
 
 ### The view outside
 
@@ -624,7 +644,9 @@ real-scale systems, and then planets that can be flown down to, as in No Man's S
   client and the server. `hyperion-sim` already compiles to WebAssembly, and CI checks it bit for
   bit there. So the terrain generator can be sim code that the server runs natively and the client
   runs in workers, if the browser target joins those checks. Detail finer than collision needs can
-  be generated on the GPU, where it need not match.
+  be generated on the GPU, where it need not match. The client then holds the body's surface seed,
+  the top level of its record, which reveals the whole surface at once. The planets brainstorm must
+  square that with the rule that the client holds only what the ship has seen.
 - **Fit with the consoles.** Text that must be read stays in the DOM, set in B612, where the UX
   guide's tooling checks it. A canvas is paired with a DOM list of its marks. Displays open in
   windows of their own.
@@ -791,21 +813,26 @@ Not a plan, only the dependency order a plan would follow:
 1. Sessions, the loop at 64 Hz, persistence, and the local server started by the client, with a
    craft as a point mass on a trivial display. A thin vertical slice.
 2. The rendering engine, and `VIEW` as a wireframe at real scale.
-3. The first jump drive and the `JUMP` display, so that testing can reach anywhere.
-4. Gravity and propagation among the planetary stage's bodies, frames, time compression, and the
-   `NAV` display with a predicted trajectory.
+3. The first jump drive and the `JUMP` display, arriving at rest, so that testing can reach
+   anywhere.
+4. Gravity and propagation among the planetary stage's bodies, frames, time compression, arrival in
+   orbit, and the `NAV` display with a predicted trajectory.
 5. Attitude dynamics, thrusters, the flight control modes, the `FLIGHT` display and input devices.
 6. Engines, propellant and delta-v, planned burns and the autopilot.
-7. Power, heat and life support, their displays, and alerts with procedures.
+7. Power, heat and life support, their displays, the heat load on `JUMP`, and alerts with
+   procedures.
 8. Sensors over the Knowledge overlay, and the exploration loop.
 9. Hazards, damage and failures.
 10. Refuelling, the home base and docking.
 11. Craft definitions for fighters, and the hooks a carrier will need.
 
 **Lean, for the first milestone:** steps 1 to 5. A player jumps to any planet within 1,000 ly,
-arrives in orbit, and flies there with time compression, seen through the wireframe view. It is the
-smallest thing that exercises the loop, the flight model, the drive and the cockpit, and it answers
-the question this phase was chosen to answer: does flying feel right?
+arrives in orbit, and flies there on thrusters with time compression, seen through the wireframe
+view. It is the smallest thing that exercises the loop, the flight model, the drive and the cockpit,
+and it answers the question this phase was chosen to answer: does flying feel right?
+
+Sensors come at step 8, so until then the ship knows everything: the server grants every level of a
+body's record, as plan 14's does until the Knowledge overlay exists.
 
 ## Sources
 
@@ -838,6 +865,8 @@ Figures above are rounded and should be re-checked against these when they becom
   <https://www.projectrho.com/public_html/rocket/>
 - Boyajian et al. 2012, _Stellar diameters and temperatures II_, ApJ 757, 112 (radii of M dwarfs).
 - Reylé et al. 2021, _The 10 parsec sample in the Gaia era_, A&A 650 (local density of systems).
+- Kirkpatrick et al. 2024, _A full-sky 20pc census of stars and brown dwarfs_, ApJS 271, 55 (local
+  density of systems).
 - NASA Jupiter fact sheet (scale height, gravity, temperature at 1 bar).
   <https://nssdc.gsfc.nasa.gov/planetary/factsheet/jupiterfact.html>
 - CODATA 2018 (the Stefan–Boltzmann constant); Kopp and Lean 2011, GRL 38 (total solar irradiance,
