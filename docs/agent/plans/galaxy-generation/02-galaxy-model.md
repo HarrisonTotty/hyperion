@@ -1006,3 +1006,95 @@ component order and the map's quadrature scheme belong to the version as well.
   180 and 216 km/s at 0.5, 1 and 2 kpc, 8–11% under the research note's model (163, 202, 239), with
   every enclosed mass of T11 inside its bracket and v_c(1 kpc) ÷ v_c(8 kpc) 0.81 against the note's
   Milky Way 0.87. `GENERATOR_VERSION` is 3.
+- **R16. Deviations in T7, as built (P02.T7).** `GENERATOR_VERSION` is 4, one bump for T7 with its
+  validation; the goldens other than the new `galaxy_fields.golden` changed their header line
+  only. The acceptance filter `galaxy_fields` selects only the golden test: T7 runs as
+  `cargo test -p hyperion-sim --test galaxy_fields` and `--lib galaxy::fields`.
+  - _Sub-disc heights (T7.b, D9)._ Two corrections to how D9 derives them. (1) The five heights
+    are scaled so that their share-weighted _harmonic_ mean, 1 ÷ Σ wᵢ ÷ hᵢ, is the drawn height:
+    the sub-discs then have the mid-plane density of one disc of that height, which is the disc
+    the potential holds (D6) and the one the brainstorm's in-plane density is worked for. D9's
+    arithmetic mean put 16% more systems in the mid-plane. Only this reading makes the
+    brainstorm's own figures agree: its "320 ly at half a gigayear to 1,700 ly at ten", weighted
+    by the bins, average 1,090 ly harmonically and 1,260 arithmetically, against the drawn
+    850–1,150. (2) The heating law is Sharma et al.'s own (2021, MNRAS 506, 1761, eqs. 4 and 7,
+    Table 2), not the brainstorm's rounding: 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 in the
+    mid-plane, times 1 + 0.20 |z| ÷ kpc, so D9's density-weighted target over an exponential of
+    height h is σ_z(τ, 0)² (1 + 2γh + 2γ²h²). For the fixture the Jeans heights are 227–1,015 ly
+    (a slab solve in McKee et al.'s 2015 measured column agrees), the factor 1.45 and the heights
+    329–1,470 ly, inside T7.b's 250–400 and 1,400–2,000, which the tests read on the heights the
+    discs have. Over 10³ seeds the factor has a median of 1.39, 78% of seeds in 0.6–1.6, range
+    0.75–2.85. Its logarithm follows that of the column within 1 kpc at R_ref times the drawn
+    height at r = 0.98, which the sweep asserts: the Jeans solve is consistent, and the drawn
+    height (850–1,150 ly) does not follow the column (31–160 M☉ pc⁻²; the top where a massive
+    disc's length is clamped at 7,000 ly). Hence, for the owner and plan 08: at the scaled
+    heights σ_z from D9's integral exceeds the law by about √1.45, so P08.T2.a's 5% holds at the
+    unscaled heights only (`SubDiscHeights::weighted_dispersions`). `K_z(R_ref, z)` costs about 1
+    ms, so it is read from three `Gl16Panel`s in ln z (`Gl16Panel::value`, added); the Jeans
+    integral at the solved heights agrees with direct `K_z` to 10⁻⁷ (tested). `Fields::new` takes
+    about 45 ms.
+  - _The halo's cut is a sphere, not D11's ellipsoid in m (T7.d)._ It is the brainstorm's "out to
+    65,000 ly" (50,000 in situ). The ellipsoid ended a component at q × 65,000 ly over the poles
+    (45,000 for the fixture's dominant merger), so the spherically averaged slope between 20,000
+    and 60,000 ly measured that truncation: −4.18. In the plane the two cuts coincide. With the
+    sphere the fixture's slope is −3.76; over 32 seeds −3.46 to −4.10, 24 inside −3.2 to −3.9,
+    the steepest losing their in-situ component at 50,000 ly; the test checks the fixture. The
+    Milky Way's measured slope over 6–18 kpc is shallower, −2.1 to −3.1 (Deason et al. 2011; Xue
+    et al. 2015; Iorio et al. 2018), than the brainstorm's r^−3.5: a figure for the owner. p = 1,
+    as the parameters draw q only. The break B(m) = min(1, (m ÷ r_b)^−Δ) switches where m² ÷ r_b²
+    exceeds 1, so every step of the profile is monotone in floating point too. The normalisation
+    is 4π ∫₀¹ s(μ)⁻³ F(r_c s(μ)) dμ, F read from `Gl16Panel` partial integrals.
+  - _Bulge central density over 10³ seeds (T7.c)._ Median 0.33 per ly³, 93% in 0.14–0.63, range
+    0.09–1.17; fixture 0.31. With the sizes coupled (D16) it is 1 ÷ (m̄ 6V(c∥) (b ÷ a)(c ÷ a) a₀³
+    10^(3s)), free of the stellar mass, the share and N, and the 0.06 dex length scatter s enters
+    it cubed. Kroupa's lower m̄ moves the median by 1.19, not the width. The tests assert at least
+    nine in ten inside 0.14–0.63 and the median in 0.25–0.40. The normalisation is the closed form
+    6abc V(c∥), V(p) = 4π B(2 ÷ p, 1 ÷ p + 1) ÷ p, checked against a quadrature.
+  - _Monotonicity, for T8._ Every envelope is non-increasing in |x|, |y| and |z| analytically
+    (disc and bar: exponentials of sums of monotone terms, the bar's level part through
+    max(|x| − 0.85 L, 0); halo: m², the core, the continuous break and the sphere; bulge: m is a
+    norm). In floating point the discs, the bar and the halo are monotone step by step given
+    monotone `libm`, which unit-in-the-last-place stepping across the core, break and cut
+    confirms. The bulge's M (1 + t^c∥)^(1 ÷ c∥) is not: stepping raises it by up to 7 × 10⁻¹⁵ of
+    itself. T8's nearest-corner bound therefore takes a relative margin (2⁻⁴⁰ covers this and
+    `libm`'s own rounding). Density is envelope × arm factor and `densities` is
+    `Component::density`, bit for bit, for four and two arms; `densities` does not allocate;
+    order independence is tested.
+  - _Speed (T7 acceptance)._ `Fields::densities` takes 538 ns at 26,000 ly, 415 ns in the bulge and
+    585 ns at 35,000 ly, against 400 ns: a finding. The halo's six components cost about 130 ns
+    (ln_1p and exp each), the eight disc exponentials 80, the bulge 40, the arm point 35, and the
+    sharp arm's `bessel_i0e` 47 ns at the bench point's k = 13, a power series whose chain is one
+    multiply per term. Its asymptotic branch (k of 15–40) costs 50–120 ns and could lose about 70
+    by moving its division off the chain, which would move `MGE_BAR` and the potential goldens, but
+    only beyond 28,000 ly for the fixture; it is left. 29 `libm` calls set a floor near 300 ns.
+    Already taken: cos φ by double angles, the fade as 1 ÷ (1 + e^(−2u)), the bulge's bracket as a
+    binomial series below t^c∥ = 1/256, powers as `exp` of `ln_1p`.
+  - _Metallicity (T7.e)._ "Clamped" is read as the thin discs' mean clamped to [−1.0, +0.5] dex, the
+    span of thin-disc stars; the brainstorm gives no clamp. The constants are the plan's:
+    Bland-Hawthorn and Gerhard 2016 give none of them, and Casagrande et al. (2011, A&A 530, A138)
+    find little local age–metallicity relation, so −0.04 dex per Gyr is to re-check.
+  - _Interfaces._ `shares::ShareMatrix` (`uniform`, `share`, `component_share`) is built here for
+    `Fields::layer_density`, with the seven population columns only; T9 adds the reserved ones and
+    keeps the `Galaxy` handle. Beyond the Provides:
+    `Component::{envelope, arm, shape, sub_disc, count, count_with_unborn}`,
+    `Fields::{component_id, sub_disc_heights}`, `SubDiscHeights` (with `weighted_dispersions`),
+    `Shape`, `BuildFieldError`, `arms::{Arm, ArmPoint}`, the `ArmGeometry` methods `fade`, `phase`,
+    `phase_polar`, `phase_rate`, `ridge_azimuth`, `point` and `point_polar`,
+    `SharpArm::new(geometry, width, fraction)` (plan 07's lanes and P08.T1's `with_width`) with `k`
+    and `profile`, and `GentleArm::new`. cos φ is clamped to [−1, 1].
+  - _Local density, for T11 and the owner._ The fixture's in-plane density at 26,000 ly,
+    azimuthally averaged, is now 0.0038 per ly³ (0.0043 before (1)), against T11's 0.0020–0.0034.
+    Measured, at R₀ = 26,670 ly (8.18 kpc; GRAVITY Collaboration 2019, A&A 625, L10): systems with a star or white-dwarf
+    primary 0.0018–0.0021 per ly³ (Reylé et al. 2021, A&A 650, A201; Reid, Gizis and Hawley
+    2002, AJ 124, 2721), so the brainstorm's "measured 0.0023" counts brown-dwarf-only systems;
+    stellar mid-plane density 0.043 ± 0.004 M☉ pc⁻³, Σ★ 33.4 ± 3 M☉ pc⁻² and effective height
+    Σ ÷ 2ρ = 388 ± 40 pc (McKee et al. 2015, ApJ 814, 13), Σ★ 38 ± 4 (Bovy and Rix 2013). The
+    fixture there has 0.0035 per ly³, 0.061 M☉ pc⁻³, Σ★ 39 and 320 pc. The remaining factor of
+    1.7–1.9 is: the exponential sub-discs at the drawn 850–1,150 ly (1.21; the measured effective
+    height needs about 1,270 ly, a brainstorm range); Σ★ (1.0–1.17, the fixture's mass and scale
+    length, T11's to tune); 0.50 M☉ per system against 0.55–0.65 in the local census (1.1–1.3,
+    the brainstorm's Kroupa figure); and T11 reads 26,000 ly, not R₀ (1.08). A fixture height of
+    1,150 ly would bring about 0.0033 but push its scale factor to about 1.66. Over 10³ seeds 99.6% lie in
+    0.001–0.009. The fixture's total central density is 22.1 per ly³; over 10³ seeds its median
+    is 17.8 and 5% exceed T11's 30 (maximum 51, against layer A's index capacity of 128 per ly³), because the
+    nuclear disc's density, like the bulge's, takes its size scatter cubed.

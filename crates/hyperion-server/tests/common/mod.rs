@@ -7,13 +7,16 @@
 )]
 
 use std::future::IntoFuture;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use hyperion_protocol::{ClientMessage, ServerMessage};
+use hyperion_protocol::{
+    ClientMessage, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
+};
 use hyperion_server::universe::SequenceEntropy;
-use hyperion_server::{Server, ServerConfig, ServerConfigBuilder};
+use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -71,12 +74,17 @@ impl TestServer {
             .expect("the server starts");
         let (stop_serving, stopped) = oneshot::channel::<()>();
         let serving = tokio::spawn(
-            axum::serve(listener, server.router())
-                .with_graceful_shutdown(async {
-                    // A dropped sender stops serving too.
-                    let _ = stopped.await;
-                })
-                .into_future(),
+            axum::serve(
+                listener,
+                server
+                    .router()
+                    .into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async {
+                // A dropped sender stops serving too.
+                let _ = stopped.await;
+            })
+            .into_future(),
         );
         Self {
             url: format!("ws://{addr}/ws"),
@@ -101,6 +109,14 @@ impl TestServer {
     /// A new client connected to this server.
     pub async fn connect(&self) -> TestClient {
         TestClient::connect(&self.url).await
+    }
+
+    /// The running server's statistics.
+    pub fn stats(&self) -> ServerStats {
+        self.server
+            .as_ref()
+            .expect("the server is running until `stop`")
+            .stats()
     }
 
     /// Stops serving, waits for the serving task, then shuts the server down. Returns the
@@ -140,6 +156,8 @@ impl Drop for TestServer {
 #[derive(Debug)]
 pub struct TestClient {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    /// The ID of the next request, counting from 1 as the bridge client does.
+    next_id: u32,
 }
 
 impl TestClient {
@@ -149,7 +167,7 @@ impl TestClient {
             .await
             .expect("timed out connecting")
             .expect("the server accepts the connection");
-        Self { socket }
+        Self { socket, next_id: 1 }
     }
 
     /// Sends `message` as JSON.
@@ -199,13 +217,69 @@ impl TestClient {
         self.next_message().await
     }
 
-    /// Waits until the server ends the connection, whether with a close frame, an error or the
-    /// end of the stream. Panics on a text frame instead.
-    pub async fn closed(&mut self) {
+    /// Sends `bytes` as one binary frame.
+    pub async fn send_binary(&mut self, bytes: &[u8]) {
+        timeout(
+            NETWORK_TIMEOUT,
+            self.socket.send(Message::binary(bytes.to_vec())),
+        )
+        .await
+        .expect("timed out sending")
+        .expect("the connection is open");
+    }
+
+    /// Sends a request under the next ID and returns the ID, without waiting for the answer.
+    pub async fn send_request(&mut self, body: RequestBody) -> RequestId {
+        let id = RequestId(self.next_id);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .expect("fewer than 2³² requests");
+        self.send(&ClientMessage::Request { id, body }).await;
+        id
+    }
+
+    /// Makes a request and waits for its terminal message: the response's body, or the error.
+    /// Panics on any other message, since a test that expects one should read it itself.
+    pub async fn request(&mut self, body: RequestBody) -> Result<ResponseBody, RequestError> {
+        let id = self.send_request(body).await;
+        match self.next_message().await {
+            ServerMessage::Response { id: answered, body } if answered == id => Ok(body),
+            ServerMessage::RequestError {
+                id: answered,
+                error,
+            } if answered == id => Err(error),
+            other => panic!("expected the answer to request {}, got {other:?}", id.0),
+        }
+    }
+
+    /// Cancels request `id`.
+    pub async fn cancel(&mut self, id: RequestId) {
+        self.send(&ClientMessage::Cancel { id }).await;
+    }
+
+    /// Sends a close frame, then reads until the server has closed the connection. Panics on a
+    /// text frame.
+    pub async fn close(mut self) {
+        timeout(NETWORK_TIMEOUT, self.socket.close(None))
+            .await
+            .expect("timed out closing")
+            .expect("the close frame is sent");
+        self.closed().await;
+    }
+
+    /// Reads until the server has ended the connection, whether with a close frame, an error or
+    /// the end of the stream, and returns the close code the server sent, if it sent one. Reading
+    /// on after the server's close frame sends the answering one. Panics on a text frame.
+    pub async fn closed(&mut self) -> Option<u16> {
         timeout(NETWORK_TIMEOUT, async {
+            let mut code = None;
             loop {
                 match self.socket.next().await {
-                    None | Some(Err(_) | Ok(Message::Close(_))) => return,
+                    Some(Ok(Message::Close(frame))) => {
+                        code = frame.map(|frame| u16::from(frame.code));
+                    }
+                    None | Some(Err(_)) => return code,
                     Some(Ok(Message::Text(text))) => {
                         panic!("expected the connection to close, got {text}")
                     }
@@ -214,6 +288,6 @@ impl TestClient {
             }
         })
         .await
-        .expect("timed out waiting for the connection to close");
+        .expect("timed out waiting for the connection to close")
     }
 }

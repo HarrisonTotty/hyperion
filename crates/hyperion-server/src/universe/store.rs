@@ -17,10 +17,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::{error::Error, fmt};
 
+use hyperion_protocol::SeedHex;
 use hyperion_sim::GeneratorVersion;
 use serde::{Deserialize, Serialize};
 
-use super::id::{format_hex64, parse_hex64};
 use super::{UniverseId, UniverseName};
 
 /// The save format this build writes and the only one it reads.
@@ -289,9 +289,9 @@ struct FormatProbe {
 fn render(save: &SavedUniverse) -> String {
     let file = SaveFileV1 {
         format: SAVE_FORMAT,
-        id: format_hex64(save.id.get()),
+        id: save.id.to_string(),
         name: save.name.as_str().to_owned(),
-        seed: format_hex64(save.seed),
+        seed: SeedHex::from_u64(save.seed).to_string(),
         generator_version: save.generator_version.get(),
     };
     let mut text =
@@ -321,8 +321,9 @@ fn read_save(path: &Path, dir_id: UniverseId) -> Result<SavedUniverse, ReadSaveE
         .name
         .parse::<UniverseName>()
         .map_err(|_| ReadSaveError::InvalidField { field: "name" })?;
-    let seed =
-        parse_hex64(&file.seed).map_err(|_| ReadSaveError::InvalidField { field: "seed" })?;
+    let seed = SeedHex::try_from(file.seed)
+        .map_err(|_| ReadSaveError::InvalidField { field: "seed" })?
+        .to_u64();
     Ok(SavedUniverse {
         id,
         name,

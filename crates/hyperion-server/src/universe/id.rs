@@ -1,17 +1,16 @@
-//! Universe IDs and the 16-hex-digit form every server `u64` takes in text.
+//! Universe IDs, whose text form is the wire's: [`UniverseIdHex`], 16 lowercase hexadecimal
+//! digits.
 
-use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 
-/// Digits in the text form of a `u64`.
-const HEX64_DIGITS: usize = 16;
+use hyperion_protocol::{ParseHex64Error, UniverseIdHex};
 
 /// The identity of one save, drawn at random when the universe is created.
 ///
 /// Two campaigns may share a seed and a generator version and still differ in their overlays, so a
 /// save is named by this and not by its seed (plan 04, design note 16). Its text form, used for the
-/// save's directory and on the wire, is 16 lowercase hexadecimal digits.
+/// save's directory and on the wire, is that of [`UniverseIdHex`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UniverseId(u64);
 
@@ -30,57 +29,31 @@ impl UniverseId {
 }
 
 impl fmt::Display for UniverseId {
-    /// 16 lowercase hexadecimal digits, zero-padded.
+    /// The wire form: 16 lowercase hexadecimal digits, zero-padded.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}", self.0)
+        f.write_str(UniverseIdHex::from(*self).as_str())
     }
 }
 
 impl FromStr for UniverseId {
     type Err = ParseHex64Error;
 
-    /// Parses exactly 16 lowercase hexadecimal digits; upper case is refused so that one ID has
-    /// one text form.
+    /// Parses the wire form. Upper case is refused, so that one ID has one text form.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        parse_hex64(text).map(Self)
+        UniverseIdHex::try_from(text.to_owned()).map(|hex| Self::from(&hex))
     }
 }
 
-/// Text was not the 16-hex-digit form of a `u64`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ParseHex64Error {
-    /// The text was not 16 characters long.
-    WrongLength,
-    /// A character was not one of `0-9` or `a-f`.
-    InvalidDigit,
-}
-
-impl fmt::Display for ParseHex64Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("expected 16 lowercase hexadecimal digits")
+impl From<UniverseId> for UniverseIdHex {
+    fn from(id: UniverseId) -> Self {
+        Self::from_u64(id.0)
     }
 }
 
-impl Error for ParseHex64Error {}
-
-/// Formats a `u64` as 16 lowercase hexadecimal digits.
-pub(crate) fn format_hex64(value: u64) -> String {
-    format!("{value:016x}")
-}
-
-/// Parses exactly 16 lowercase hexadecimal digits.
-pub(crate) fn parse_hex64(text: &str) -> Result<u64, ParseHex64Error> {
-    if text.len() != HEX64_DIGITS {
-        return Err(ParseHex64Error::WrongLength);
+impl From<&UniverseIdHex> for UniverseId {
+    fn from(hex: &UniverseIdHex) -> Self {
+        Self(hex.to_u64())
     }
-    text.bytes().try_fold(0_u64, |value, byte| {
-        let digit = match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'a'..=b'f' => byte - b'a' + 10,
-            _ => return Err(ParseHex64Error::InvalidDigit),
-        };
-        Ok((value << 4) | u64::from(digit))
-    })
 }
 
 #[cfg(test)]
@@ -96,31 +69,24 @@ mod tests {
     }
 
     #[test]
-    fn hex64_rejects_uppercase_short_long_and_prefix() {
-        assert_eq!(
-            parse_hex64("00000000000004D2"),
-            Err(ParseHex64Error::InvalidDigit)
-        );
-        assert_eq!(parse_hex64("4d2"), Err(ParseHex64Error::WrongLength));
-        assert_eq!(
-            parse_hex64("000000000000004d2"),
-            Err(ParseHex64Error::WrongLength)
-        );
-        assert_eq!(
-            parse_hex64("0x000000000004d2"),
-            Err(ParseHex64Error::InvalidDigit)
-        );
-        // Sixteen bytes but not sixteen digits.
-        assert_eq!(
-            parse_hex64("00000000000004é"),
-            Err(ParseHex64Error::InvalidDigit)
-        );
+    fn universe_id_text_refuses_what_the_wire_refuses() {
+        for (text, error) in [
+            ("00000000000004D2", ParseHex64Error::InvalidDigit),
+            ("4d2", ParseHex64Error::WrongLength),
+            ("000000000000004d2", ParseHex64Error::WrongLength),
+            ("0x000000000004d2", ParseHex64Error::InvalidDigit),
+        ] {
+            assert_eq!(text.parse::<UniverseId>(), Err(error), "parsing {text:?}");
+        }
     }
 
     #[test]
-    fn hex64_round_trips() {
-        for value in [0, 1, 0x4d2, 0x0123_4567_89ab_cdef, u64::MAX] {
-            assert_eq!(parse_hex64(&format_hex64(value)), Ok(value));
+    fn universe_id_round_trips_through_its_wire_type() {
+        for raw in [0, 1, 0x4d2, 0x0123_4567_89ab_cdef, u64::MAX] {
+            let id = UniverseId::new(raw);
+            let hex = UniverseIdHex::from(id);
+            assert_eq!(hex.as_str(), id.to_string());
+            assert_eq!(UniverseId::from(&hex), id);
         }
     }
 }

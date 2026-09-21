@@ -865,16 +865,47 @@ give `generator_version_mismatch`.
 **P04.T14.b Galaxy parameters** (`requests/galaxy.rs`, `convert.rs`). Build the groups from
 `GalaxyParams`: `identity` (seed, generator version, mass function), `mass` (stellar mass, system
 count, mean mass per system, dark halo mass and concentration, gas mass, black hole mass),
-`populations` (each share), `discs`, `bulge_and_bar` (including pattern speed), `nuclear_disc`,
+`populations` (each share), `population_masses` and `population_mean_masses` (each population's
+mass and mean system mass), `discs`, `bulge_and_bar` (including pattern speed), `nuclear_disc`,
 `halo`, `arms` (number, pitch), `history` (formation timescale, last major merger) and `rotation`
-(circular speed at 26,000 ly, escape speed there). Units are those of design note 11: the pattern
-speed is converted from Plan 02's radians per Julian year to degrees per Myr (× 180 ÷ π × 10⁶), and
-nothing is sent per kiloparsec. Every structural getter Plan 02 provides appears once. Not sent in
-M1, and listed with the reason in a constant `EXCLUDED_PARAMETERS` beside the builder: the
-metallicity gradient, the scatter draws (they are already folded into the sizes and masses shown)
-and the per-progenitor accretion list (Plan 10 displays it). A unit test counts sent plus excluded
-parameters against a constant that a new getter's author must raise, and asserts keys are unique and
-match `^[a-z0-9_]+(\.[a-z0-9_]+)*$`.
+(circular speed at 26,000 ly, escape speed there). The groups, their keys and their order are
+exactly the table below, which Plan 05's glossary (`parameterLabels.ts`) and its fixture
+(`everyGalaxyParameter` in `test/galaxyFixtures.ts`) copy and a client test holds them to. Units
+are those of design note 11: the pattern speed is converted from Plan 02's radians per Julian year
+to degrees per Myr (× 180 ÷ π × 10⁶), times from years to Gyr, and nothing is sent per kiloparsec.
+Every structural getter Plan 02 provides appears once. Not sent in M1, and listed with the reason
+in a constant `EXCLUDED_PARAMETERS` beside the builder: the metallicity gradient and each halo
+component's mean [Fe/H] (no `dex` unit until a plan displays a metallicity); the scatter draws
+(they are already folded into the sizes and masses shown; `BlackHoleParams::scatter` is the one
+with a getter); the per-progenitor accretion list (Plan 10 displays it), which includes the lesser
+progenitors' own halo components, whose total share is sent; the halo components' age
+distributions (the `history` group stands for them); `HaloParams::discrete_share` (held at zero
+until Plan 10, which sends it); the dark halo's scale radius (r₂₀₀ ÷ c₂₀₀, both sent); the
+generator's constants, the same for every seed (the gas disc's scale height, the nuclear cluster's
+slopes and break radius, the halo components' cut radii, the globular-born debris's flattening);
+and the potential's radial profiles, of which only the `rotation` group's radius is sent
+(`PotentialTables::bar_corotation` is `bar.corotation_radius`). A unit test counts sent plus
+excluded parameters against a constant that a new getter's author must raise, and asserts keys are
+unique and match `^[a-z0-9_]+(\.[a-z0-9_]+)*$`.
+
+Keys by group, each with its `Unit` (or `text`) and origin (drawn, derived or fixed). `<p>` stands
+for each `Population` in wire order (`young_thin_disc`, `old_thin_disc`, `thick_disc`, `bulge`,
+`long_bar`, `nuclear_disc`, `halo`):
+
+| Group                    | Keys, unit, origin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`               | `seed` (text, the wire's hex; fixed), `generator_version` (`count`, fixed), `mass_function` (text, `kroupa` or `chabrier`; fixed)                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `mass`                   | `stellar_mass` (`msun`, drawn), `system_count` (`count`, derived), `mean_system_mass` (M★ ÷ N; `msun`, derived), `mean_formed_mass`, `gas.mass`, `black_hole.mass`, `nuclear_cluster.mass` (`msun`, derived), `dark_halo.mass` (M₂₀₀; `msun`, derived), `dark_halo.concentration` (`none`, derived), `dark_halo.virial_radius` (r₂₀₀; `ly`, derived), `dark_halo.f_star` (`none`, drawn)                                                                                                                                                           |
+| `populations`            | `population.<p>.share` (`none`; drawn for `thick_disc`, `nuclear_disc` and `halo`, derived for the rest)                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `population_masses`      | `population.<p>.mass` (`msun`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `population_mean_masses` | `population.<p>.mean_system_mass` (`msun`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `discs`                  | `disc.thin.scale_length` (`ly`, derived), `disc.thin.scale_height` (the mean; `ly`, drawn), `disc.young.scale_length` (`ly`, derived), `disc.young.scale_height` (`ly`, drawn), `disc.thick.scale_length`, `disc.thick.scale_height`, `disc.gas.scale_length` (`ly`, derived)                                                                                                                                                                                                                                                                      |
+| `bulge_and_bar`          | `bulge.scale_x`, `bulge.scale_y`, `bulge.scale_z` (`ly`, derived), `bulge.boxiness` (`none`, drawn), `bar.share_of_bulge` (`none`, drawn), `bar.half_length`, `bar.width` (`ly`, derived), `bar.height` (`ly`, drawn), `bar.corotation_ratio` (`none`, drawn), `bar.corotation_radius` (`ly`, derived), `bar.pattern_speed` (`deg_per_myr`, derived)                                                                                                                                                                                               |
+| `nuclear_disc`           | `nuclear_disc.scale_length`, `nuclear_disc.scale_height` (`ly`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `halo`                   | `halo.in_situ.share`, `halo.dominant_merger.share`, `halo.lesser.share` (all lesser progenitors together), `halo.globular_debris.share` (`none`, derived); `halo.in_situ.slope`, `halo.dominant_merger.slope`, `halo.globular_debris.slope` (`none`, drawn); `halo.in_situ.core`, `halo.dominant_merger.core`, `halo.globular_debris.core` (`ly`, drawn); `halo.in_situ.flattening`, `halo.dominant_merger.flattening` (`none`, drawn); `halo.dominant_merger.break_radius` (`ly`, drawn), `halo.dominant_merger.break_steepening` (`none`, drawn) |
+| `arms`                   | `arms.count` (`count`, drawn), `arms.pitch` (`deg`, drawn), `arms.young_width` (`ly`, drawn), `arms.young_fraction`, `arms.old_amplitude` (`none`, drawn)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `history`                | `history.formation_timescale` (`gyr`, drawn), `history.last_major_merger` (`gyr`, drawn), `history.globular_clusters` (`count`, derived)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `rotation`               | `rotation.radius` (26,000 ly; `ly`, fixed), `rotation.circular_speed`, `rotation.escape_speed` (`km_per_s`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 Tests (`tests/galaxy_parameters.rs`): the response for a fixed seed equals a golden JSON file under
 `crates/hyperion-server/tests/golden/` (regenerated on a generator bump); two universes with one
@@ -1054,3 +1085,39 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   `UniverseStatus`, the server's own `ParseHex64Error` in `universe/id.rs` should give way to the
   protocol's hex type, `TestClient::request` is still to add, and axum's WebSocket tasks are not
   joined by graceful shutdown, so `Server::shutdown` needs a task tracker.
+- **Deviations in T13, as built.** The connection task alone sends terminal messages: a request's
+  task returns its finished frame through the `JoinSet`, and `cancel` aborts the task and answers
+  `cancelled` at once, dropping any later frame, so "already queued" (design note 3) means already
+  pushed to the writer. The seam is `requests::Handler`
+  (`handle(&self, Arc<AppState>, RequestBody, CancelToken) -> HandlerFuture`, a `BoxFuture`), held
+  in `AppState` as `Arc<dyn Handler>`; `requests::Handlers` matches every kind and answers
+  `unsupported` until T14 replaces each arm, and the crate-private `Server::start_with_handler`
+  injects test doubles. Maps and range results are serialised by `pool.submit(Interactive, …)`,
+  which waits for a place rather than refusing a finished response; since a handler returns a
+  `ResponseBody`, T14.c's quantising and encoding is a job of its own before that one, unless T14
+  widens the seam. A missing or non-string `kind` is `bad_request`. A request that does not parse
+  still gets the duplicate-ID `error` and `hello_required` before its own error.
+  `From<SubmitJobError>` and `From<JobError>` for `RequestError` give T13.b's codes, plus
+  `JobError::Cancelled` → `cancelled`. A kind not in `REQUEST_KINDS` neither counts towards nor
+  resets the malformed-frame limit, since a newer client sends one in good faith; a binary frame
+  counts. T13.a's queue of 32 is `limits::OUTBOUND_QUEUE_FRAMES`, and `limits::CLOSE_TIMEOUT`
+  (1 s, this task's choice, not the plan's) bounds each close and so `Server::shutdown`. A
+  server-initiated close (1008 for malformed frames, 1001 for shutdown) reads on until the client's
+  close, so that the socket is not reset. The task tracker is `connections::Connections`: a guard
+  is taken before the upgrade (a server shutting down answers 503), and `Server::shutdown` closes
+  every connection, waits for the guards, then stops the pool. `ServerStats` has `connections()`,
+  `requests()` (`RequestCounters`: in flight, accepted, refused, responded, failed, cancelled,
+  abandoned) and `pool()`. `ShutDownServerError` is an enum (`CpuPool`); `StartServerError` gains
+  `StartPool`. `Universe::compatibility()` is now `status() -> UniverseStatus`,
+  `universe::ParseHex64Error` is gone, and `UniverseId` converts to and from `UniverseIdHex`. The
+  fake-handler tests are unit tests over real sockets (`src/testing.rs`), because integration tests
+  cannot inject a handler. `main.rs` serves with connect info so that peers are logged. `TestClient`
+  gains `request`, `send_request`, `cancel` and `close`, and `closed()` returns the close code.
+- **Slow readers, for T15 (ruled after T13).** T13's outbound queue is bounded by frame count (32
+  queued plus up to 8 finished), with no write timeout, so a client that stops reading can pin about
+  160 MB of 4 MB range results until shutdown. T15 adds a per-frame write timeout
+  (`limits::WRITE_TIMEOUT`, 10 s: a frame that cannot be written in that time closes the connection
+  with 1008) and a per-connection byte budget on the outbound queue (`limits::OUTBOUND_BYTES`,
+  16 MiB: the reader stops dispatching finished requests while the queue holds more), each with a
+  test in the abuse suite. An oversized inbound frame still closes without 1009, since sending one
+  needs a direct tungstenite dependency pinned to axum's; the plan only requires the close.

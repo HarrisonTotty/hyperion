@@ -22,6 +22,8 @@ interface ConsoleFrameProps {
  * See "Layout" in `docs/frontend/ux-guidelines.md`. The header strip is identical at every station
  * and titles the active display. The navigation bar is a row of display tabs, each a button
  * showing its key; the active one is marked by `aria-current` and a top rule, not by colour alone.
+ * The work area carries a modifier class named after the active display, so that a display with a
+ * fixed layout of its own, such as `GALAXY`, can replace the default grid of panels.
  */
 export function ConsoleFrame({
   displays,
@@ -46,7 +48,7 @@ export function ConsoleFrame({
           <LinkStatus status={linkStatus} />
         </div>
       </header>
-      <main className="console__work">{children}</main>
+      <main className={`console__work console__work--${active.id}`}>{children}</main>
       <nav className="console__nav" aria-label="Displays">
         <ul>
           {displays.map((display) => (

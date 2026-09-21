@@ -17,10 +17,11 @@ mod name;
 mod registry;
 mod store;
 
+use hyperion_protocol::UniverseStatus;
 use hyperion_sim::GeneratorVersion;
 
 pub use entropy::{DrawEntropyError, Entropy, OsEntropy, OsRandomError, SequenceEntropy};
-pub use id::{ParseHex64Error, UniverseId};
+pub use id::UniverseId;
 pub use name::{ParseUniverseNameError, UniverseName};
 pub use registry::{
     CreateUniverseError, LoadRegistryError, MAX_ID_DRAWS, OpenUniverseError, UniverseRegistry,
@@ -31,15 +32,6 @@ pub use store::{
 };
 
 use crate::compute::GalaxyKey;
-
-/// Whether this server can open a universe.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Compatibility {
-    /// Saved under this server's generator version.
-    Compatible,
-    /// Saved under another generator version: listed, but not opened or queried.
-    GeneratorMismatch,
-}
 
 /// One universe's identity, as the registry holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,13 +74,15 @@ impl Universe {
         GalaxyKey::new(self.seed, self.generator_version)
     }
 
-    /// Whether this server can open the universe.
+    /// Whether this server can open the universe: [`UniverseStatus::GeneratorMismatch`] if it was
+    /// saved under a generator version the server does not run, in which case it is listed but
+    /// not opened or queried.
     #[must_use]
-    pub fn compatibility(&self) -> Compatibility {
+    pub fn status(&self) -> UniverseStatus {
         if self.generator_version.is_supported() {
-            Compatibility::Compatible
+            UniverseStatus::Compatible
         } else {
-            Compatibility::GeneratorMismatch
+            UniverseStatus::GeneratorMismatch
         }
     }
 }

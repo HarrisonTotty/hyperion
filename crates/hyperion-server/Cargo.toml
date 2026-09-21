@@ -13,7 +13,8 @@ hyperion-sim.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 base64.workspace = true
-futures-util.workspace = true
+# `sink` for splitting a WebSocket into its reading and writing halves.
+futures-util = { workspace = true, features = ["sink"] }
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use anyhow::Context;
 use hyperion_server::{Server, ServerConfig};
 use tokio::net::TcpListener;
@@ -22,10 +24,17 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to start the server")?;
     tracing::info!(%addr, "listening");
 
-    let serve_result = axum::serve(listener, server.router())
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("server error");
+    // Graceful shutdown stops accepting and drains HTTP requests; `Server::shutdown` then closes
+    // the WebSockets, which axum leaves running.
+    let serve_result = axum::serve(
+        listener,
+        server
+            .router()
+            .into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("server error");
     server
         .shutdown()
         .await

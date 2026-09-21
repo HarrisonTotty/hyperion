@@ -6,6 +6,7 @@
 //! which the sim defines and which is therefore not repeated here.
 
 use std::num::{NonZeroU32, NonZeroUsize};
+use std::time::Duration;
 
 /// Largest inbound WebSocket message or frame, in bytes: 16 KiB.
 ///
@@ -15,10 +16,35 @@ pub const MAX_INBOUND_FRAME_BYTES: usize = 16 * 1024;
 
 /// Requests one connection may have in flight at once. The next is refused with
 /// `too_many_requests`.
+///
+/// A cancelled request frees its place the moment `cancelled` is sent, although work it started
+/// on the CPU pool may run on; what that can waste is bounded by the pool's queues.
 pub const MAX_IN_FLIGHT_REQUESTS: usize = 8;
 
-/// Malformed frames in a row after which the server closes the connection.
+/// Malformed frames in a row after which the server closes the connection with a policy
+/// violation (close code 1008).
+///
+/// A frame counts when it is not a client message: text that does not parse, a request whose body
+/// does not, or a binary frame. A request of a kind this server does not know is not counted,
+/// since a newer client may send one in good faith and is answered `unsupported`. Any well-formed
+/// message resets the count.
 pub const MAX_CONSECUTIVE_MALFORMED_FRAMES: u32 = 16;
+
+/// Frames one connection may have queued for the socket (plan 04, P04.T13.a).
+///
+/// When the queue is full the connection stops reading the client's frames until the client has
+/// read some of its own: the back-pressure that keeps a slow reader from growing the server's
+/// memory.
+pub const OUTBOUND_QUEUE_FRAMES: usize = 32;
+
+/// Longest a closing connection may spend sending what it has queued and completing the close
+/// handshake before its socket is dropped.
+///
+/// This is what bounds [`Server::shutdown`](crate::Server::shutdown) for a client that has stopped
+/// reading. It is this server's choice, not a figure from the plan: long enough for a client on a
+/// LAN to take a few megabytes and answer the close, short enough that a stuck one cannot hold up
+/// a shutdown.
+pub const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Universes the server holds, counting those on disk and those being created.
 pub const MAX_UNIVERSES: usize = 256;

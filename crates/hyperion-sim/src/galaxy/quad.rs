@@ -184,6 +184,29 @@ impl Gl16Panel {
         2.0 * self.coefficients[0] * self.half
     }
 
+    /// The interpolating polynomial's value at `x` in `[a, b]`; `x` outside is clamped to the
+    /// panel. At the nodes it returns the values given, to rounding.
+    ///
+    /// This is how a function that is costly to evaluate is read at many points from 16 values:
+    /// the sub-discs' Jeans integrals read the vertical force this way (plan 02, Design note 9).
+    #[must_use]
+    pub fn value(&self, x: f64) -> f64 {
+        let t = ((x - self.mid) / self.half).clamp(-1.0, 1.0);
+        // P_{k−1} and P_k at t, stepping k up from 1.
+        let mut below = 1.0;
+        let mut at = t;
+        let mut sum = self.coefficients[0] + self.coefficients[1] * t;
+        let mut k = 1.0;
+        for &coefficient in &self.coefficients[2..] {
+            let above = ((2.0 * k + 1.0) * t * at - k * below) / (k + 1.0);
+            sum += coefficient * above;
+            below = at;
+            at = above;
+            k += 1.0;
+        }
+        sum
+    }
+
     /// `∫ₐˣ` of the interpolating polynomial, for `x` in `[a, b]`; `x` outside is clamped to the
     /// panel.
     #[must_use]
@@ -331,6 +354,43 @@ mod tests {
         assert_same_bits(panel.integral_to(a - 1.0), 0.0);
         assert_relative(panel.integral(), gl16(poly, a, b), 1e-14);
         assert_relative(panel.integral_to(b), panel.integral(), 1e-14);
+    }
+
+    /// The interpolant reproduces a polynomial of degree 15 everywhere on the panel, returns the
+    /// values given at the nodes, and clamps outside.
+    #[test]
+    fn a_panel_evaluates_its_interpolant() {
+        let (a, b) = (-0.7, 2.3);
+        let poly = |x: f64| math::powi(x, 15) - 3.0 * math::powi(x, 8) + x - 2.0;
+        let nodes = Gl16Panel::nodes(a, b);
+        let values = nodes.map(poly);
+        let panel = Gl16Panel::new(a, b, &values);
+        for i in 0..=40 {
+            let x = a + (b - a) * f64::from(i) / 40.0;
+            let scale = poly(b).abs();
+            assert!(
+                ((panel.value(x) - poly(x)) / scale).abs() < 1e-13,
+                "at {x}: {} against {}",
+                panel.value(x),
+                poly(x)
+            );
+        }
+        for (&x, &v) in nodes.iter().zip(&values) {
+            assert!(
+                (panel.value(x) - v).abs() < 1e-13 * poly(b).abs(),
+                "node {x}"
+            );
+        }
+        assert_same_bits(panel.value(b + 1.0), panel.value(b + 2.0));
+        assert_same_bits(panel.value(a - 1.0), panel.value(a - 2.0));
+        assert_relative(panel.value(b + 1.0), panel.value(b), 1e-14);
+        assert_relative(panel.value(a - 1.0), panel.value(a), 1e-14);
+        let smooth = |u: f64| math::exp(u) * (1.0 + 0.3 * math::sin(4.0 * u));
+        let panel = Gl16Panel::new(0.0, 1.0, &Gl16Panel::nodes(0.0, 1.0).map(smooth));
+        for i in 0..=20 {
+            let x = f64::from(i) / 20.0;
+            assert!((panel.value(x) / smooth(x) - 1.0).abs() < 1e-12, "at {x}");
+        }
     }
 
     /// A smooth function that is not a polynomial, over a panel as wide as the mass quadrature's.

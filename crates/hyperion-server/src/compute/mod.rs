@@ -18,3 +18,5 @@ pub use pool::{
     SubmitJobError,
 };
 pub use single_flight::{Flight, SingleFlight};
+
+pub(crate) use pool::panic_message;

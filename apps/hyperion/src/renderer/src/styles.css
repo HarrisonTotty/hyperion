@@ -289,3 +289,559 @@ body {
   margin: 0.25rem 0 0;
   color: var(--text-muted);
 }
+
+/* A display with a fixed layout of its own fills the work area as one cell. */
+.console__work--galaxy {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+}
+
+/*
+ * The GALAXY display: universe and parameters, galaxy map, local chart with its list and readout.
+ * The four columns sum to 69rem at their minimum (plan 05, P05.T6.d). In the first column the
+ * universe panel takes what it needs, down to what its list gives up, and the parameters the rest,
+ * never less than their title and one line: 4.5rem.
+ */
+.galaxy {
+  display: grid;
+  grid-template-columns:
+    minmax(16rem, 20rem) minmax(18rem, 26rem) minmax(20rem, 1fr)
+    minmax(15rem, 18rem);
+  grid-template-rows: minmax(0, auto) minmax(4.5rem, 1fr);
+  grid-template-areas:
+    "universe map chart chart"
+    "parameters map chart chart";
+  gap: 1rem;
+  min-height: 0;
+}
+
+.galaxy > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.75rem 1rem;
+}
+
+.galaxy__universe {
+  grid-area: universe;
+}
+
+.galaxy__parameters {
+  grid-area: parameters;
+}
+
+.galaxy__map {
+  grid-area: map;
+}
+
+.galaxy__chart {
+  grid-area: chart;
+}
+
+.galaxy .panel__title {
+  margin-bottom: 0.5rem;
+}
+
+/*
+ * Why a panel's commands are held back, such as NO CARRIER; the controls are described by it. The
+ * header annunciates the link itself, so this is plain text.
+ */
+.panel__inhibit {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
+/* A request that has not answered: PENDING, the link's state, or a failure in words and RETRY. */
+.request-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.request-status__text {
+  letter-spacing: 0.15em;
+}
+
+/* A failed or overloaded server, or no answer: a failed system, so caution. A refusal is plain. */
+.request-status__text--fault {
+  color: var(--status-caution);
+}
+
+/*
+ * A control that changes only what the console shows or fetches, such as RETRY: --accent text, and
+ * none of the --line-strong outline that marks a command.
+ */
+.control {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  padding: 0 0.5rem;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.control:hover {
+  background: var(--surface-2);
+}
+
+.control:active {
+  background: var(--surface-0);
+}
+
+.control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The rows of a scrolling list that are in view, and its total: 12-24 of 87. */
+.list-position {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/*
+ * A control that changes what the ship or the server holds. Display-only controls, such as the
+ * navigation tabs, have no --line-strong outline; commands do.
+ */
+.command {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  padding: 0 0.75rem;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.command:hover {
+  background: var(--surface-2);
+}
+
+.command:active {
+  background: var(--surface-0);
+}
+
+.command:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Held back: kept focusable, with its outline, so that it can say why; only its text is muted. */
+.command[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.command[aria-disabled="true"]:hover,
+.command[aria-disabled="true"]:active {
+  background: var(--surface-1);
+}
+
+/* The UNIVERSE panel. Its readout puts the name and generator version on one line. */
+.universe-panel__readout {
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  gap: 0.125rem 0.75rem;
+}
+
+.universe-panel__readout dd {
+  overflow-wrap: anywhere;
+}
+
+.universe-panel__readout .readout__wide {
+  grid-column: 2 / -1;
+}
+
+/* Why the OPEN pointed at or focused is held back, below the list so that nothing clips it. */
+.universe-panel__reason {
+  min-height: 1.25rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+}
+
+/*
+ * A list, so it may scroll; the panel shows its position and total beneath it. It shows its header
+ * and up to three rows, one in a short window, and when the column is shorter still it gives way to
+ * the parameters below, down to its header and half a row, rather than let the panel clip CREATE.
+ */
+.universe-panel__list {
+  flex: 0 1 auto;
+  min-height: 4.5rem;
+  max-height: 13.25rem;
+  margin-top: 0.5rem;
+  overflow-y: auto;
+}
+
+@media (max-height: 50rem) {
+  .universe-panel__list {
+    max-height: 6.25rem;
+  }
+}
+
+/*
+ * Each universe takes two lines of a fixed height, so that the position readout can be worked out
+ * from the scroll offset: the name and the OPEN command, then the seed and generator version.
+ */
+.universe-table,
+.parameter-table {
+  display: block;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.universe-table thead,
+.universe-table tbody,
+.parameter-table tbody {
+  display: block;
+}
+
+/* The header has no command in it, so its first line needs no 2rem target. */
+.universe-table thead .universe-table__row {
+  grid-template-rows: 1.25rem 1.25rem;
+  height: 2.75rem;
+}
+
+.universe-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-1);
+}
+
+.universe-table__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem;
+  grid-template-rows: 2rem 1.25rem;
+  column-gap: 0.5rem;
+  align-items: center;
+  height: 3.5rem;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  padding: 0.125rem 0 0.125rem 0.5rem;
+}
+
+/*
+ * The open universe's row: a rule down its edge, a shape as well as a colour, as the active tab
+ * has; its marker reads OPEN in words, with aria-current.
+ */
+.universe-table__row--open {
+  border-left-color: var(--accent);
+}
+
+.universe-table th {
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-align: left;
+}
+
+.universe-table td,
+.universe-table th {
+  padding: 0;
+}
+
+.universe-table__name {
+  grid-column: 1;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.universe-table__seed {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.universe-table__version {
+  grid-column: 2;
+  grid-row: 2;
+  text-align: right;
+}
+
+/* GEN VER is wider than the version column, so it reaches left over the free end of SEED's line. */
+.universe-table th.universe-table__version {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.universe-table td.universe-table__seed,
+.universe-table td.universe-table__version {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * OPEN fits its column; PENDING, while it lasts, reaches left over the free end of the name's line
+ * rather than past the list's edge, which would scroll it sideways.
+ */
+.universe-table__action {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  text-align: right;
+}
+
+/* A state, not a control: plain text without an outline, so it cannot be taken for RETRY or OPEN. */
+.universe-table__current {
+  padding-right: 0.75rem;
+  letter-spacing: 0.15em;
+}
+
+/* The NEW UNIVERSE form. */
+.universe-form {
+  margin-top: 0.5rem;
+}
+
+.universe-form__fieldset,
+.form-choice {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.universe-form__legend {
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.universe-form__fields {
+  margin-top: 0.25rem;
+}
+
+/*
+ * A display control that shows or folds part of a panel, led by a chevron that says which. Its
+ * text starts at the panel's edge, as the other titles do.
+ */
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0;
+}
+
+.glyph--disclosure {
+  vertical-align: baseline;
+}
+
+.form-field {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/*
+ * A field's label and its format hint share a line, so that the input has the full width. Where
+ * both do not fit, the hint moves whole to a line of its own, still at the right.
+ */
+.form-field__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.form-field__head > * {
+  white-space: nowrap;
+}
+
+.form-field__head > .form-field__hint {
+  margin-left: auto;
+}
+
+.form-field__label {
+  padding: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.form-choice {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* Floated, so that the radio buttons sit beside the group's legend. */
+.form-choice > legend {
+  float: left;
+  margin-right: 0.5rem;
+  line-height: 2rem;
+}
+
+/* The options wrap under each other in the narrowest column rather than overflow it. */
+.form-choice__options {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.75rem;
+}
+
+.form-field__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  padding: 0 0.5rem;
+  color: var(--text);
+  font: inherit;
+}
+
+.form-field__input--number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.form-field__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Disabled: the outline keeps its 3:1, and the field reads as inert by its surface and text. */
+.form-field__input:disabled {
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
+
+.form-field__hint {
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  text-align: right;
+}
+
+/*
+ * An entry refused, and what is valid, in words beneath the field it names. Plain text: an entry is
+ * neither an alert, a limit nor a failed system, which are what the guide keeps yellow for.
+ */
+.form-field__error {
+  margin: 0.25rem 0 0;
+}
+
+/* Spaced at the guide's least, 0.1em, so that both options fit beside SEED in a 16rem column. */
+.form-choice__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.form-choice__option input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.form-choice__option input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.universe-form__actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* The PARAMETERS panel. */
+.parameters__identity {
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* A list, so it may scroll; the panel shows its position and total beneath it. */
+.parameters__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Inset, so that the panel's edge never clips it. */
+.parameters__list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* A group heading is one layout unit, 1.5rem, and a parameter row two. */
+.parameters__group-title {
+  display: flex;
+  align-items: flex-end;
+  height: 1.5rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+.parameter-table tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3rem 4.5rem;
+  grid-template-rows: 1.25rem 1.25rem;
+  column-gap: 0.5rem;
+  align-items: baseline;
+  height: 3rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0;
+}
+
+.parameter-table th,
+.parameter-table td {
+  padding: 0;
+}
+
+.parameter-table__label {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  overflow: hidden;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parameter-table__value {
+  grid-column: 1;
+  grid-row: 2;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.parameter-table__unit {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--text-muted);
+}
+
+.parameter-table__origin {
+  grid-column: 3;
+  grid-row: 2;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}

@@ -33,11 +33,13 @@ describe("symbolOutline", () => {
   });
 
   it("gives every shape a distinct outline", () => {
-    const outlines = (["circle", ...POLYGONS] as const).map((shape) =>
-      JSON.stringify(symbolOutline(shape)),
-    );
+    const outlines = (["circle", ...POLYGONS] as const).map((shape) => symbolOutline(shape));
 
-    expect(new Set(outlines).size).toBe(outlines.length);
+    outlines.forEach((outline, index) => {
+      for (const other of outlines.slice(index + 1)) {
+        expect(outline).not.toEqual(other);
+      }
+    });
   });
 });
 

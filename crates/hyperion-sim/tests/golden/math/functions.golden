@@ -1,4 +1,4 @@
-# generator_version = 3
+# generator_version = 4
 
 sin(0.0) = 0x0000000000000000  # 0.0
 sin(1e-9) = 0x3e112e0be826d695  # 1e-9

@@ -111,9 +111,10 @@ impl HaloComponentParams {
         self.outer_break
     }
 
-    /// The ellipsoidal radius beyond which the component has no systems: 50,000 ly in situ,
+    /// The radius of the sphere outside which the component has no systems: 50,000 ly in situ,
     /// 65,000 ly otherwise, so that the halo fits inside the root cube (brainstorm,
-    /// "Populations"; plan 02, Design note 11).
+    /// "Populations"; plan 02, Design note 11, with the sphere of
+    /// [`HaloProfile`](crate::galaxy::fields::halo::HaloProfile) in place of its ellipsoid).
     #[must_use]
     pub fn cut_radius(&self) -> LightYears {
         self.cut_radius

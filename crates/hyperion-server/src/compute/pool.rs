@@ -651,7 +651,7 @@ fn millis(duration: Duration) -> f64 {
 }
 
 /// The message a panic carried, when it was a string.
-pub(super) fn panic_message(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_owned()
     } else if let Some(message) = payload.downcast_ref::<String>() {

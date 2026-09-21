@@ -1,14 +1,19 @@
 //! Seed sweeps of the galaxy model (plan 02, P02.T11): the checks that loop over 10³ seeds or
-//! more, as slow tests. The fast suite runs the same checks over 32 seeds in `galaxy_params.rs`.
+//! more, as slow tests. The fast suite runs the same checks over 32 seeds in `galaxy_params.rs`,
+//! `galaxy_potential.rs` and `galaxy_fields.rs`.
 
 mod common;
 
 use common::{assert_derived_consistent, assert_params_in_ranges, assert_within};
 use hyperion_sim::Seed;
-use hyperion_sim::galaxy::Population;
+use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
+use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::potential::MassModel;
+use hyperion_sim::galaxy::{PointLy, Population};
 use hyperion_sim::math;
+use hyperion_sim::units::LightYears;
 
 fn sweep() -> impl Iterator<Item = GalaxyParams> {
     (0..10_000_u64).map(|n| {
@@ -131,4 +136,98 @@ fn the_bulge_dispersion_over_a_thousand_seeds() {
     assert_within("median σ", sigmas[500], 105.0, 125.0);
     assert_within("5th percentile", sigmas[50], 80.0, 100.0);
     assert_within("95th percentile", sigmas[950], 125.0, 155.0);
+}
+
+/// The fields over 10³ seeds (P02.T7.b, P02.T7.c): the sub-discs' heights rise with age, every
+/// root lies inside the bisection's bracket and their harmonic mean is the drawn height, every
+/// galaxy has at most `MAX_COMPONENTS` components, the scale factor is the physics', and at least
+/// nine in ten bulge centres lie in plan 02's 0.14–0.63 per ly³ around a median near the
+/// brainstorm's "about 0.3".
+///
+/// Findings (plan 02, Risks, R16), printed and not asserted:
+///
+/// - The sub-discs' scale factor, which plan 02 expects in 0.6–1.6, has a median of 1.39 and 78%
+///   of seeds inside 0.6–1.6, from 0.75 to 2.85. Its logarithm follows that of the disc's column
+///   at `R_ref` (from `K_z` at 1 kpc) times the drawn height with a correlation of 0.98, which is
+///   asserted: the heating law is the same for every galaxy, while the drawn mean height
+///   (850–1,150 ly) is not tied to the column, which runs from 31 to 160 M☉ per pc².
+/// - The bulge's central density has a median of 0.33 and 93% of seeds in 0.14–0.63, from 0.09 to
+///   1.17. With the sizes coupled to the masses it is free of the stellar mass, the share and the
+///   system count, and the 0.06 dex scatter of the bulge's length enters it cubed.
+#[test]
+#[ignore = "slow: builds the fields, and the sub-discs' Jeans solve, of 10³ galaxies"]
+fn the_fields_over_a_thousand_seeds() {
+    let mut scales = Vec::with_capacity(1_000);
+    let mut points = Vec::with_capacity(1_000);
+    let mut bulges = Vec::with_capacity(1_000);
+    for n in 0..1_000_u64 {
+        let seed = Seed::new(0x0207_5eed_0000_0000 | n);
+        let params = GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa);
+        let model = MassModel::new(&params);
+        let fields = Fields::new(&params, &model);
+        assert!(fields.components().len() <= MAX_COMPONENTS);
+        let sub = fields.sub_disc_heights();
+        let unscaled = sub.unscaled().map(LightYears::value);
+        assert!(
+            unscaled.windows(2).all(|w| w[0] < w[1]),
+            "{seed}: {unscaled:?}"
+        );
+        assert!(
+            unscaled[0] > 17.0 && unscaled[4] < 8_000.0,
+            "{seed}: a root at the bracket's end"
+        );
+        let mean = sub.mean_height().value() / params.thin_disc().height().value();
+        assert!(
+            (mean - 1.0).abs() < 1e-9,
+            "{seed}: mean height off by {mean}"
+        );
+        scales.push(sub.scale());
+        let column = model.vertical_force(
+            sub.reference_radius(),
+            LightYears::new(LIGHT_YEARS_PER_KILOPARSEC),
+        );
+        points.push((
+            math::ln(column * params.thin_disc().height().value()),
+            math::ln(sub.scale()),
+        ));
+        let bulge = fields
+            .components()
+            .iter()
+            .find(|c| c.population() == Population::Bulge)
+            .expect("every galaxy has a bulge")
+            .density(&PointLy::default());
+        bulges.push(bulge);
+    }
+    bulges.sort_by(f64::total_cmp);
+    let inside = bulges
+        .iter()
+        .filter(|&&b| (0.14..=0.63).contains(&b))
+        .count();
+    eprintln!(
+        "bulge centre: min {:.3}, 1% {:.3}, median {:.3}, 99% {:.3}, max {:.3}; \
+         {inside} of 1,000 in 0.14–0.63",
+        bulges[0], bulges[10], bulges[500], bulges[990], bulges[999]
+    );
+    assert!(
+        inside >= 900,
+        "{inside} of 1,000 bulge centres in 0.14–0.63"
+    );
+    assert_within("median bulge centre", bulges[500], 0.25, 0.40);
+    scales.sort_by(f64::total_cmp);
+    let inside = scales.iter().filter(|&&s| (0.6..=1.6).contains(&s)).count();
+    eprintln!(
+        "sub-disc scale factor: min {:.3}, 5% {:.3}, median {:.3}, 95% {:.3}, max {:.3}; \
+         {inside} of 1,000 in 0.6–1.6",
+        scales[0], scales[50], scales[500], scales[950], scales[999]
+    );
+    let n = 1_000.0;
+    let mean_x = points.iter().fold(0.0, |s, p| s + p.0) / n;
+    let mean_y = points.iter().fold(0.0, |s, p| s + p.1) / n;
+    let (sxy, sxx, syy) = points.iter().fold((0.0, 0.0, 0.0), |(xy, xx, yy), p| {
+        let (dx, dy) = (p.0 - mean_x, p.1 - mean_y);
+        (xy + dx * dy, xx + dx * dx, yy + dy * dy)
+    });
+    let correlation = sxy / (sxx * syy).sqrt();
+    eprintln!("ln scale against ln(column × drawn height): r = {correlation:.3}");
+    assert!(correlation > 0.95, "r = {correlation}");
 }

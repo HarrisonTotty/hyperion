@@ -5,11 +5,12 @@ use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use hyperion_protocol::UniverseStatus;
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::{
-    Compatibility, DrawEntropyError, Entropy, ParseUniverseNameError, SAVE_FORMAT, SavedUniverse,
-    ScanStoreError, Universe, UniverseId, UniverseName, UniverseStore, WriteSaveError,
+    DrawEntropyError, Entropy, ParseUniverseNameError, SAVE_FORMAT, SavedUniverse, ScanStoreError,
+    Universe, UniverseId, UniverseName, UniverseStore, WriteSaveError,
 };
 use crate::limits::MAX_UNIVERSES;
 
@@ -143,9 +144,9 @@ impl UniverseRegistry {
     pub fn open(&self, id: UniverseId) -> Result<Arc<Universe>, OpenUniverseError> {
         let state = self.inner.lock();
         if let Some(universe) = state.universes.get(&id) {
-            return match universe.compatibility() {
-                Compatibility::Compatible => Ok(Arc::clone(universe)),
-                Compatibility::GeneratorMismatch => {
+            return match universe.status() {
+                UniverseStatus::Compatible => Ok(Arc::clone(universe)),
+                UniverseStatus::GeneratorMismatch => {
                     Err(OpenUniverseError::GeneratorVersionMismatch {
                         id,
                         saved: universe.generator_version,
@@ -562,7 +563,7 @@ mod tests {
         assert_eq!(given.seed(), 1234);
         assert_eq!(given.id(), UniverseId::new(0x11));
         assert_eq!(given.generator_version(), GENERATOR_VERSION);
-        assert_eq!(given.compatibility(), Compatibility::Compatible);
+        assert_eq!(given.status(), UniverseStatus::Compatible);
         let drawn = create(&registry, "Drawn", None).await.unwrap();
         assert_eq!(drawn.seed(), 0x22);
         assert_eq!(drawn.id(), UniverseId::new(0x33));
@@ -667,7 +668,7 @@ mod tests {
         let registry = load(dir.path(), SequenceEntropy::new([0xcd])).await;
         let listed = registry.list();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].compatibility(), Compatibility::GeneratorMismatch);
+        assert_eq!(listed[0].status(), UniverseStatus::GeneratorMismatch);
         assert_eq!(listed[0].generator_version(), other);
         let error = registry.open(UniverseId::new(0xab)).unwrap_err();
         assert_eq!(

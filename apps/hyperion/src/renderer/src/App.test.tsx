@@ -118,10 +118,10 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.queryByRole("heading", { level: 2, name: "Galaxy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Universe" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "F2 Galaxy" }));
 
-    expect(screen.getByRole("heading", { level: 2, name: "Galaxy" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Universe" })).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { level: 2, name: "Server Link" }),
     ).not.toBeInTheDocument();
