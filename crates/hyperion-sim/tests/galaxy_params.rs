@@ -31,7 +31,7 @@ fn fast_seeds() -> impl Iterator<Item = Seed> {
 }
 
 fn params(seed: Seed) -> GalaxyParams {
-    GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa)
+    GalaxyParams::from_seed(seed, MassFunctionKind::default())
 }
 
 #[test]
@@ -212,14 +212,16 @@ fn the_milky_way_fixture_has_the_plan_values() {
     assert_relative("f★", p.dark_halo().f_star(), 0.32, 0.0);
     // The Milky Way's own offset from M–σ, which makes its black hole Sgr A*'s mass.
     assert_same_bits(p.black_hole().scatter().value(), -0.421);
-    // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "0.48
-    // M☉ under Kroupa's function" (brainstorm, "Galaxy parameters"), with plan 02's ±0.03.
+    // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "about
+    // 0.55–0.59 M☉ under the default, Chabrier's system function" (brainstorm, "Galaxy
+    // parameters").
+    assert_eq!(p.mass_function(), MassFunctionKind::default());
     assert_within("system count", p.system_count(), 1.0e11, 1.3e11);
     assert_within(
         "mean mass per system",
         p.stellar_mass().value() / p.system_count(),
-        0.45,
-        0.51,
+        0.55,
+        0.59,
     );
     // Its nuclear disc holds about 10⁹ M☉ (Launhardt et al. 2002; Sormani et al. 2022), and its
     // nuclear cluster 2.5 × 10⁷ M☉ (Schödel et al. 2014).
@@ -265,7 +267,7 @@ fn lesser(flattening: f64, feh: f64) -> LesserProgenitorInput {
     LesserProgenitorInput::new(
         1.0,
         flattening,
-        3.5,
+        2.5,
         Years::new(11.5 * GYR),
         Dex::new(feh),
         Years::new(9.0 * GYR),
@@ -341,7 +343,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.31,
                 0.5,
                 LightYears::new(2_000.0),
-                3.5,
+                2.5,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -350,7 +352,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.2,
                 0.6,
                 LightYears::new(2_000.0),
-                3.5,
+                2.5,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -359,7 +361,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.2,
                 0.5,
                 LightYears::new(1_000.0),
-                3.5,
+                2.5,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -368,7 +370,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.2,
                 0.5,
                 LightYears::new(2_000.0),
-                3.8,
+                2.9,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -377,7 +379,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.2,
                 0.5,
                 LightYears::new(2_000.0),
-                3.5,
+                2.5,
                 Years::new(12.6 * GYR),
             )
         }),
@@ -386,7 +388,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.3,
                 0.7,
                 LightYears::new(3_000.0),
-                3.5,
+                2.5,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -395,7 +397,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.5,
                 0.9,
                 LightYears::new(3_000.0),
-                3.5,
+                2.5,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -404,7 +406,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.5,
                 0.7,
                 LightYears::new(6_000.0),
-                3.5,
+                2.5,
                 Years::new(11.5 * GYR),
             )
         }),
@@ -412,7 +414,7 @@ fn out_of_range_cases() -> Vec<Case> {
             b.halo_dominant_break_radius(LightYears::new(30_000.0))
         }),
         ("halo.dominant.break_steepening", |b| {
-            b.halo_dominant_break_steepening(2.1)
+            b.halo_dominant_break_steepening(2.6)
         }),
         ("halo.lesser.share_total", |b| {
             b.halo_lesser_share_total(0.26)
@@ -453,7 +455,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.2,
                 0.5,
                 LightYears::new(2_000.0),
-                3.5,
+                2.5,
                 Years::new(11.0 * GYR),
             )
         }),
@@ -462,7 +464,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 0.5,
                 0.7,
                 LightYears::new(3_000.0),
-                3.5,
+                2.5,
                 Years::new(11.2 * GYR),
             )
         }),
@@ -472,7 +474,7 @@ fn out_of_range_cases() -> Vec<Case> {
                 LesserProgenitorInput::new(
                     1.0,
                     0.8,
-                    3.5,
+                    2.5,
                     Years::new(11.5 * GYR),
                     Dex::new(-1.5),
                     Years::new(11.2 * GYR),
@@ -526,7 +528,7 @@ fn the_builder_rejects_each_out_of_range_value() {
     let weightless = LesserProgenitorInput::new(
         0.0,
         0.8,
-        3.5,
+        2.5,
         Years::new(11.5 * GYR),
         Dex::new(-1.5),
         Years::new(9.0 * GYR),
@@ -548,12 +550,12 @@ fn the_builder_rejects_each_out_of_range_value() {
 #[test]
 fn the_builder_sets_what_it_is_given() {
     let p = GalaxyParamsBuilder::new()
-        .mass_function(MassFunctionKind::Chabrier)
+        .mass_function(MassFunctionKind::Kroupa)
         .arm_count(ArmCount::Two)
         .halo_lesser_progenitors(vec![lesser(0.8, -1.5), lesser(0.9, -1.1)])
         .build()
         .unwrap();
-    assert_eq!(p.mass_function(), MassFunctionKind::Chabrier);
+    assert_eq!(p.mass_function(), MassFunctionKind::Kroupa);
     assert_eq!(p.arms().count(), ArmCount::Two);
     let components = p.halo().components();
     assert_eq!(components.len(), 5);
@@ -563,9 +565,10 @@ fn the_builder_sets_what_it_is_given() {
     // Shares before renormalising: 0.225, 0.475, 0.175 split in two, 0.115; total 0.99.
     assert_relative("in-situ share", components[0].share(), 0.225 / 0.99, 1e-14);
     assert_relative("lesser share", components[2].share(), 0.0875 / 0.99, 1e-14);
-    // Chabrier's mean masses are heavier (brainstorm: 0.55–0.60 against Kroupa's 0.48).
-    let kroupa = GalaxyParams::milky_way_like();
-    assert!(p.system_count() < kroupa.system_count());
+    // Kroupa's mean masses are lighter (brainstorm: 0.48 against the default's 0.55–0.59), so the
+    // same stars make more systems.
+    let default = GalaxyParams::milky_way_like();
+    assert!(p.system_count() > default.system_count());
 }
 
 /// Every parameter of one galaxy, in the order of the getters.
@@ -657,7 +660,7 @@ fn write_params(w: &mut GoldenWriter, label: &str, p: &GalaxyParams) {
     }
 }
 
-/// Three pinned seeds under Kroupa's function, one under Chabrier's, and the fixture: every
+/// Three pinned seeds under the default mass function, one under Kroupa's, and the fixture: every
 /// parameter, bit for bit.
 #[test]
 fn galaxy_params_are_pinned() {
@@ -673,11 +676,11 @@ fn galaxy_params_are_pinned() {
         write_params(&mut w, &seed.to_string(), &params(seed));
     }
     let seed = Seed::new(0x5eed_0000_c0ff_ee00);
-    w.line(&format!("# seed {seed}, Chabrier"));
+    w.line(&format!("# seed {seed}, Kroupa"));
     write_params(
         &mut w,
-        "chabrier",
-        &GalaxyParams::from_seed(seed, MassFunctionKind::Chabrier),
+        "kroupa",
+        &GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa),
     );
     w.line("# milky_way_like");
     write_params(&mut w, "milky_way", &GalaxyParams::milky_way_like());

@@ -24,7 +24,11 @@
 //! between the two, each covered by a margin that the bound carries:
 //!
 //! - **The envelopes.** They never rise analytically, and the discs', the bar's and the halo's do
-//!   not rise in floating point either, step by step, given a monotone `libm`. The bulge's does,
+//!   not rise in floating point either, step by step, given a monotone `libm`. A disc's vertical
+//!   profile is a table, and between its knots it could rise by a rounding; it does not, because
+//!   its exponent is linear between knots that are found exactly and made continuous bit for bit,
+//!   so the exponent never falls with height as computed ([`vertical`](super::fields::vertical),
+//!   "Floating point", with a test that steps across every knot). The bulge's envelope does rise,
 //!   by up to 7 × 10⁻¹⁵ of itself, because its `M (1 + t^c∥)^(1 ÷ c∥)` rounds differently on
 //!   either side of the switch between its two terms (plan 02, Risks, R16). Every envelope bound
 //!   is therefore the value at the nearest corner times `1 +` [`BOUND_MARGIN`], 2⁻⁴⁰ or 9.1 ×
@@ -45,12 +49,15 @@
 //!
 //! Where an envelope is subnormal, below 2.2 × 10⁻³⁰⁸, the relative margin shrinks with the
 //! precision left, and below about 3 × 10⁻³¹² it rounds away and the bound is the corner's value
-//! itself. Inside the root cube only the long bar and the nuclear disc get there, where the sum
+//! itself. Inside the root cube only the long bar and the coldest discs get there, where the sum
 //! of their exponent's terms passes about 710: the bar far out along x (from about 6.5
-//! half-lengths) or across it (from about 38 widths), the nuclear disc far from its centre (from
-//! about 250 scale heights at the cube's corners and 700 on its axis). Both are monotone bit for
-//! bit. The bulge, the one envelope that rises by a last bit, stays above 10⁻⁶⁵ of its centre
-//! everywhere in the cube (tested), and the halo's components are 0 beyond their cut.
+//! half-lengths) or across it (from about 38 widths), the young disc far above the plane (from
+//! about 12,000–24,000 ly, 80–130 of its effective heights) and, in a few galaxies, the youngest
+//! sub-disc near the cube's top. The discs are isothermal above 2.4 kpc and fall there only as the
+//! potential rises, so the nuclear disc, whose exponent reaches about 110 at the cube's edge, no
+//! longer gets there. All are monotone bit for bit. The bulge, the one envelope that rises by a
+//! last bit, stays above 10⁻⁶⁵ of its centre everywhere in the cube (tested), and the halo's
+//! components are 0 beyond their cut.
 //!
 //! With these, each step of the bound's arithmetic takes inputs no smaller than the density's
 //! same step, and rounding is monotone, so the bound is not below the density bit for bit, given

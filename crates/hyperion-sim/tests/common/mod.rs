@@ -4,6 +4,7 @@
 //! The ranges are written out here from plan 02's table, independently of the sim's own
 //! constants, so that a wrong constant in the sim fails a test instead of moving the bracket.
 
+use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
     ArmCount, GalaxyParams, HaloComponentKind, HaloComponentParams, ProgenitorKind,
 };
@@ -211,11 +212,11 @@ fn assert_halo_in_ranges(p: &GalaxyParams) {
     for c in components {
         let what = format!("{:?}", c.kind());
         let (slope, flattening, core, cut) = match c.kind() {
-            HaloComponentKind::InSitu => ((3.3, 3.7), (0.45, 0.55), (1_500.0, 3_000.0), 50_000.0),
+            HaloComponentKind::InSitu => ((2.2, 2.8), (0.45, 0.55), (1_500.0, 3_000.0), 50_000.0),
             HaloComponentKind::DominantMerger => {
-                ((3.3, 3.7), (0.6, 0.8), (2_000.0, 5_000.0), 65_000.0)
+                ((2.2, 2.8), (0.6, 0.8), (2_000.0, 5_000.0), 65_000.0)
             }
-            HaloComponentKind::Lesser(_) => ((3.3, 3.7), (0.6, 1.0), (3_000.0, 3_000.0), 65_000.0),
+            HaloComponentKind::Lesser(_) => ((2.2, 2.8), (0.6, 1.0), (3_000.0, 3_000.0), 65_000.0),
             HaloComponentKind::GlobularDebris => {
                 ((4.0, 4.5), (1.0, 1.0), (3_000.0, 5_000.0), 65_000.0)
             }
@@ -243,8 +244,8 @@ fn assert_halo_in_ranges(p: &GalaxyParams) {
         match c.outer_break() {
             Some(b) => {
                 assert_eq!(c.kind(), HaloComponentKind::DominantMerger);
-                assert_within("break radius", b.radius().value(), 40_000.0, 90_000.0);
-                assert_within("break steepening", b.steepening(), 1.0, 2.0);
+                assert_within("break radius", b.radius().value(), 52_000.0, 91_000.0);
+                assert_within("break steepening", b.steepening(), 1.5, 2.5);
             }
             None => assert_ne!(c.kind(), HaloComponentKind::DominantMerger),
         }
@@ -334,7 +335,13 @@ pub fn assert_derived_consistent(p: &GalaxyParams) {
         stellar / per_system,
         1e-12,
     );
-    assert_within("system count", p.system_count(), 0.5e11, 2.1e11);
+    // M★'s 3–10 × 10¹⁰ M☉ over the default's 0.55–0.58 M☉ per system (brainstorm, "Galaxy
+    // parameters": 0.5–1.8 × 10¹¹); Kroupa's lighter systems reach 2.1 × 10¹¹.
+    let most = match p.mass_function() {
+        MassFunctionKind::Chabrier => 1.8e11,
+        MassFunctionKind::Kroupa => 2.1e11,
+    };
+    assert_within("system count", p.system_count(), 0.5e11, most);
     let m200 = p.dark_halo().m200().value();
     // Plan 02's "1.4–5.3 × 10¹²" is this range rounded: 10¹¹ M☉ ÷ (0.157 f★) at the ends of f★'s
     // range, 0.45 and 0.12, is 1.415 and 5.308 × 10¹², so the exact ends are checked.
@@ -349,9 +356,16 @@ pub fn assert_derived_consistent(p: &GalaxyParams) {
     for pop in POPULATIONS {
         let mean = p.mean_system_mass(pop).value();
         assert!(mean < formed, "{pop:?}: {mean} ≥ {formed}");
+        // Under the default the old populations hold 0.544–0.576 M☉ per system over 10⁴ seeds,
+        // around the brainstorm's 0.55–0.59, and the young disc 35–45% more than the old thin disc;
+        // under Kroupa's function 0.47–0.51, around its 0.48.
+        let (young, old) = match p.mass_function() {
+            MassFunctionKind::Chabrier => ((0.77, 0.83), (0.54, 0.58)),
+            MassFunctionKind::Kroupa => ((0.65, 0.75), (0.45, 0.52)),
+        };
         match pop {
-            Population::YoungThinDisc => assert_within("young mean mass", mean, 0.65, 0.75),
-            _ => assert_within(pop.name(), mean, 0.45, 0.52),
+            Population::YoungThinDisc => assert_within("young mean mass", mean, young.0, young.1),
+            _ => assert_within(pop.name(), mean, old.0, old.1),
         }
     }
 }

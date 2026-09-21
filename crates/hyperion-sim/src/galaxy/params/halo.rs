@@ -44,13 +44,13 @@ pub struct HaloBreak {
 }
 
 impl HaloBreak {
-    /// The ellipsoidal radius beyond which the slope steepens, 40,000–90,000 ly.
+    /// The ellipsoidal radius beyond which the slope steepens, 52,000–91,000 ly (16–28 kpc).
     #[must_use]
     pub fn radius(&self) -> LightYears {
         self.radius
     }
 
-    /// How much the power-law slope steepens beyond the break, 1–2.
+    /// How much the power-law slope steepens beyond the break, 1.5–2.5.
     #[must_use]
     pub fn steepening(&self) -> f64 {
         self.steepening
@@ -58,7 +58,8 @@ impl HaloBreak {
 }
 
 /// One smooth component of the halo: a cored power law `(1 + m² ÷ a²)^(−γ ÷ 2)` in the
-/// ellipsoidal radius `m² = x² + y² + z² ÷ q²`, cut at a radius.
+/// ellipsoidal radius `m² = x² + y² + z² ÷ q²`, broken beyond a radius for the dominant merger, and
+/// cut at a radius.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HaloComponentParams {
     pub(super) kind: HaloComponentKind,
@@ -86,7 +87,7 @@ impl HaloComponentParams {
         self.share
     }
 
-    /// The power-law slope γ: 3.3–3.7, or 4.0–4.5 for the globular-born debris.
+    /// The power-law slope γ inside any break: 2.2–2.8, or 4.0–4.5 for the globular-born debris.
     #[must_use]
     pub fn slope(&self) -> f64 {
         self.slope

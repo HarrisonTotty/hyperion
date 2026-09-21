@@ -153,11 +153,17 @@ pub(super) const HALO_DOMINANT_CORE: Law = Law::Uniform {
     lo: 2_000.0,
     hi: 5_000.0,
 };
+/// The dominant merger's break, ly: 16–28 kpc, where star counts measure it (Deason, Belokurov and
+/// Evans 2011, 27 kpc; Xue et al. 2015, 18; Pila-Díez et al. 2015, about 20; Medina et al. 2024,
+/// 18 to 24 as the flattening is taken), rounded to 52,000–91,000 ly as the brainstorm has it
+/// ("Streams and accreted structure").
 pub(super) const HALO_DOMINANT_BREAK_RADIUS: Law = Law::Uniform {
-    lo: 40_000.0,
-    hi: 90_000.0,
+    lo: 52_000.0,
+    hi: 91_000.0,
 };
-pub(super) const HALO_DOMINANT_BREAK_STEEPENING: Law = Law::Uniform { lo: 1.0, hi: 2.0 };
+/// How much the dominant merger's slope steepens beyond its break: 1.5–2.5, the measured outer
+/// slopes (3.8–4.85) less the inner (2.1–2.5) in the same sources.
+pub(super) const HALO_DOMINANT_BREAK_STEEPENING: Law = Law::Uniform { lo: 1.5, hi: 2.5 };
 pub(super) const HALO_LESSER_SHARE_TOTAL: Law = Law::Uniform { lo: 0.10, hi: 0.25 };
 pub(super) const HALO_LESSER_FLATTENING: Law = Law::Uniform { lo: 0.6, hi: 1.0 };
 pub(super) const HALO_DEBRIS_SHARE: Law = Law::Uniform { lo: 0.08, hi: 0.15 };
@@ -167,7 +173,11 @@ pub(super) const HALO_DEBRIS_CORE: Law = Law::Uniform {
     hi: 5_000.0,
 };
 pub(super) const HALO_DISCRETE_SHARE: Law = Law::Uniform { lo: 0.02, hi: 0.15 };
-pub(super) const HALO_COMPONENT_SLOPE: Law = Law::Uniform { lo: 3.3, hi: 3.7 };
+/// The smooth components' inner slope, 2.2–2.8 (brainstorm, "Streams and accreted structure";
+/// Deason, Belokurov and Evans 2011, 2.3; Pila-Díez et al. 2015, 2.50; Iorio et al. 2018, 2.96 as
+/// a single power law; Xue et al. 2015, 2.1 ± 0.3). The globular-born debris stays steeper,
+/// [`HALO_DEBRIS_SLOPE`].
+pub(super) const HALO_COMPONENT_SLOPE: Law = Law::Uniform { lo: 2.2, hi: 2.8 };
 /// Half the width of a halo component's age range, which is one gigayear.
 pub(super) const HALO_AGE_HALF_WIDTH: f64 = 0.5 * GYR;
 /// The centre of a halo component's one-gigayear age range, so that the range lies in 10–13 Gyr.

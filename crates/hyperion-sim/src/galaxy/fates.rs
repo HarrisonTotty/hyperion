@@ -16,11 +16,12 @@
 //! uniform between 0.1 and 1, and a companion below the hydrogen-burning limit is neither drawn
 //! nor counted, so its mass is uniform on `[max(0.1 m, 0.08 M☉), m]` for a primary of mass `m`.
 //! Each companion has the system's age and evolves like a primary of its own mass. This is the
-//! reading under which Kroupa's function for primaries reproduces the brainstorm's 76.4% of all
-//! stars below 0.5 M☉, and Chabrier's unscaled system function its 67%, with 1.40 stars per
-//! system. The other reading, a ratio uniform on 0.1–1 with the companions that fall below
-//! 0.08 M☉ dropped, gives 74.5%, 65% and 1.29 stars per system, outside the brainstorm's figures
-//! and its 1.33–1.45.
+//! reading under which the model gives the brainstorm's figures for all stars below 0.5 M☉, 76.4%
+//! under Kroupa's function for primaries, 66.9% under Chabrier's system function as published and
+//! 70.9% under the default, Chabrier's with its branch above 1 M☉ scaled by 0.68, with 1.40–1.44
+//! stars per system. The other reading, a ratio uniform on 0.1–1 with the companions that fall
+//! below 0.08 M☉ dropped, gives 74.5% and 65% under the first two and 1.29 stars per system under
+//! Kroupa's, outside the brainstorm's figures and its 1.33–1.45.
 //!
 //! # Quadrature
 //!
@@ -367,9 +368,9 @@ fn per_system_mean(
 /// For a star of mass m the expected present mass over the ages is `m F + m_rem (1 − F)`, with `F`
 /// the fraction of born systems younger than the star's lifetime ([`AgeDistribution::born_cdf`]);
 /// the unborn systems of a still-forming population are left out, since its density is
-/// normalised to its born systems. Under Kroupa's function a 10 Gyr declining history comes to
-/// about 0.5 M☉ per system, the brainstorm's 0.48 ± 0.03; under Chabrier's with its provisional
-/// scale 0.55–0.60.
+/// normalised to its born systems. Under the default, Chabrier's system function with its
+/// provisional scale, a 10 Gyr declining history comes to 0.57–0.58 M☉ per system, inside the
+/// brainstorm's 0.55–0.59, and under Kroupa's function to about 0.5, its 0.48 ± 0.03.
 ///
 /// # Panics
 ///
@@ -476,10 +477,12 @@ pub fn mean_stars_per_system(
 
 /// The fraction of all stars, companions included, whose initial mass lies below `m` M☉.
 ///
-/// This is the arbiter between the mass functions (brainstorm, "Sizing the layers"): the observed
-/// single-star function puts 75.9% of stars below 0.5 M☉. Kroupa's function for primaries with
-/// companions at the observed frequencies gives about 76%; Chabrier's unscaled system function
-/// comes out top-heavy, at about 67%.
+/// This is the arbiter between the mass functions (brainstorm, "Sizing the layers"): the 20 pc
+/// census, which counts primaries and companions directly, has 69% of all its stars below 0.5 M☉
+/// (Kirkpatrick et al. 2024, ApJS 271, 55, Table 18: 69.2% of those of 0.08 M☉ or more). With the
+/// provisional companions, Kroupa's function for primaries gives 76.4% and fails; Chabrier's system
+/// function gives 66.9% as published and 70.9% with its branch above 1 M☉ scaled by 0.68, so the
+/// two bracket the census.
 #[must_use]
 pub fn stars_below(
     f: &(impl MassFunction + ?Sized),
@@ -541,41 +544,46 @@ mod tests {
         mean_present_mass(f, &ProvisionalFates, ages).value()
     }
 
-    /// Brainstorm, "Galaxy parameters": 0.48 M☉ under Kroupa's function, 0.55–0.60 under
-    /// Chabrier's, for a 10 Gyr declining history, at every timescale the seed can draw.
+    /// Brainstorm, "Galaxy parameters": about 0.55–0.59 M☉ under the default, Chabrier's system
+    /// function with its branch above 1 M☉ scaled, and 0.48 under Kroupa's, for a 10 Gyr declining
+    /// history, at every timescale the seed can draw.
     #[test]
     fn a_declining_history_matches_the_brainstorm() {
         for tau in [5.0, 7.0, 9.0] {
+            let default = present(&Chabrier::provisional(), &history(tau));
+            assert!(
+                (0.55..=0.59).contains(&default),
+                "Chabrier, τ = {tau}: {default}"
+            );
             let kroupa = present(&Kroupa, &history(tau));
             assert!((kroupa - 0.48).abs() <= 0.03, "Kroupa, τ = {tau}: {kroupa}");
-            let chabrier = present(&Chabrier::provisional(), &history(tau));
-            assert!(
-                (0.55..=0.60).contains(&chabrier),
-                "Chabrier, τ = {tau}: {chabrier}"
-            );
         }
     }
 
-    /// "Varies by only 3% between the old populations", under Kroupa's function, which the
-    /// brainstorm's worked figures use. The research behind the figure puts every population but
-    /// the young disc within ±3% (its own model spreads by 5.0% from the halo to the old thin
-    /// disc), so every old population, the old thin disc at each timescale the seed can draw
-    /// included, lies within 3% of their midpoint. The five uniformly old ones agree to 3% outright.
+    /// "Varies by only 3% between the old populations", under the default, which the brainstorm's
+    /// worked figures use, and under Kroupa's function. The research behind the figure puts every
+    /// population but the young disc within ±3% (its own model spreads by 5.0% from the halo to the
+    /// old thin disc), so every old population, the old thin disc at each timescale the seed can
+    /// draw included, lies within 3% of their midpoint. The five uniformly old ones agree to 3%
+    /// outright.
     #[test]
     fn old_populations_agree_within_three_per_cent() {
+        for f in [&Chabrier::provisional() as &dyn MassFunction, &Kroupa] {
+            old_populations_agree_under(f);
+        }
+    }
+
+    fn old_populations_agree_under(f: &dyn MassFunction) {
         let mut named: Vec<(String, f64)> = old_populations()
             .iter()
-            .map(|(name, ages)| ((*name).to_owned(), present(&Kroupa, ages)))
+            .map(|(name, ages)| ((*name).to_owned(), present(f, ages)))
             .collect();
         let uniformly_old: Vec<f64> = named.iter().map(|(_, m)| *m).collect();
         let lightest = uniformly_old.iter().copied().fold(f64::INFINITY, f64::min);
         let heaviest = uniformly_old.iter().copied().fold(0.0, f64::max);
         assert!(heaviest / lightest <= 1.03, "{named:?}");
         for tau in [5.0, 7.0, 9.0] {
-            named.push((
-                format!("old thin, τ = {tau}"),
-                present(&Kroupa, &old_thin(tau)),
-            ));
+            named.push((format!("old thin, τ = {tau}"), present(f, &old_thin(tau))));
         }
         let lightest = named.iter().map(|(_, m)| *m).fold(f64::INFINITY, f64::min);
         let heaviest = named.iter().map(|(_, m)| *m).fold(0.0, f64::max);
@@ -588,12 +596,14 @@ mod tests {
     }
 
     /// The young disc has lost almost nothing yet: 35–45% more mass per system than the old thin
-    /// disc of the same history.
+    /// disc of the same history, under either function.
     #[test]
     fn the_young_disc_is_heavier_by_a_third_or_more() {
-        for tau in [5.0, 7.0, 9.0] {
-            let ratio = present(&Kroupa, &young(tau)) / present(&Kroupa, &old_thin(tau));
-            assert!((1.35..=1.45).contains(&ratio), "τ = {tau}: {ratio}");
+        for f in [&Chabrier::provisional() as &dyn MassFunction, &Kroupa] {
+            for tau in [5.0, 7.0, 9.0] {
+                let ratio = present(f, &young(tau)) / present(f, &old_thin(tau));
+                assert!((1.35..=1.45).contains(&ratio), "{f:?}, τ = {tau}: {ratio}");
+            }
         }
     }
 
@@ -605,15 +615,34 @@ mod tests {
         }
     }
 
-    /// The arbiter of "Sizing the layers".
+    /// The arbiter of "Sizing the layers": the 20 pc census has 69% of all its stars below 0.5 M☉
+    /// (Kirkpatrick et al. 2024, Table 18: 69.2%), and 66–68% of its primaries (66.5% within 20 pc,
+    /// Kirkpatrick et al. 2024; 67.8% within 10 pc, Reylé et al. 2021, A&A 650, A201). Chabrier's
+    /// system function as published and with its branch above 1 M☉ scaled by 0.68 bracket the
+    /// first, at the brainstorm's 66.9% and 70.9% to the precision printed; the published
+    /// function's share of primaries, 66%, lies among the census's. Kroupa's gives the brainstorm's
+    /// 76.4% of all stars and 76% of primaries, above both.
     #[test]
-    fn kroupa_reproduces_the_single_star_mix_and_chabrier_is_top_heavy() {
-        let kroupa = stars_below(&Kroupa, &ProvisionalFates, 0.5);
-        assert!((0.75..=0.78).contains(&kroupa), "Kroupa: {kroupa}");
-        let chabrier = stars_below(&Chabrier::new(1.0).unwrap(), &ProvisionalFates, 0.5);
-        assert!(chabrier < 0.70, "Chabrier: {chabrier}");
+    fn chabrier_s_system_function_brackets_the_census() {
+        const CENSUS_ALL_STARS: f64 = 0.69;
+        let printed = |share: f64, percent: f64| (100.0 * share - percent).abs() <= 0.05;
+        let published = Chabrier::new(1.0).unwrap();
+        let scaled = Chabrier::provisional();
+        let below = |f: &dyn MassFunction| stars_below(f, &ProvisionalFates, 0.5);
+        let (low, high) = (below(&published), below(&scaled));
+        assert!(
+            low < CENSUS_ALL_STARS && CENSUS_ALL_STARS < high,
+            "{low} and {high} bracket 0.69"
+        );
+        assert!(printed(low, 66.9), "published: {low}");
+        assert!(printed(high, 70.9), "scaled: {high}");
+        let primaries =
+            crate::galaxy::imf::BandShares::of(&published).share(crate::galaxy::imf::MassBand::A);
+        assert!((0.66..=0.68).contains(&primaries), "primaries: {primaries}");
+        let kroupa = below(&Kroupa);
+        assert!(printed(kroupa, 76.4), "Kroupa: {kroupa}");
         assert_same_bits(stars_below(&Kroupa, &ProvisionalFates, 0.08), 0.0);
-        let all = stars_below(&Kroupa, &ProvisionalFates, 150.5);
+        let all = stars_below(&scaled, &ProvisionalFates, 150.5);
         assert!((all - 1.0).abs() < 1e-12, "{all}");
     }
 
@@ -633,12 +662,14 @@ mod tests {
 
     #[test]
     fn formed_mass_exceeds_present_mass_for_every_population() {
-        let formed = mean_formed_mass(&Kroupa, &ProvisionalFates).value();
-        let mut all = vec![("young", young(7.0)), ("old thin", old_thin(7.0))];
-        all.extend(old_populations());
-        for (name, ages) in all {
-            let present = present(&Kroupa, &ages);
-            assert!(formed > present, "{name}: {present} ≥ {formed}");
+        for f in [&Chabrier::provisional() as &dyn MassFunction, &Kroupa] {
+            let formed = mean_formed_mass(f, &ProvisionalFates).value();
+            let mut all = vec![("young", young(7.0)), ("old thin", old_thin(7.0))];
+            all.extend(old_populations());
+            for (name, ages) in all {
+                let present = present(f, &ages);
+                assert!(formed > present, "{f:?}, {name}: {present} ≥ {formed}");
+            }
         }
     }
 

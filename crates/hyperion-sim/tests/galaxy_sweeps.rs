@@ -19,13 +19,13 @@ fn sweep() -> impl Iterator<Item = GalaxyParams> {
     (0..10_000_u64).map(|n| {
         GalaxyParams::from_seed(
             Seed::new(0x0200_5ee9_0000_0000 | n),
-            MassFunctionKind::Kroupa,
+            MassFunctionKind::default(),
         )
     })
 }
 
-/// P02.T5.a and P02.T5.b over 10⁴ seeds: every getter within its range, N within 0.5–2.1 × 10¹¹,
-/// the population masses summing to M★, M₂₀₀ within its bracket.
+/// P02.T5.a and P02.T5.b over 10⁴ seeds: every getter within its range, N within 0.5–1.8 × 10¹¹
+/// (0.528–1.775 × 10¹¹), the population masses summing to M★, M₂₀₀ within its bracket.
 #[test]
 #[ignore = "slow: builds the parameters of 10⁴ galaxies"]
 fn every_getter_lies_in_its_range_over_ten_thousand_seeds() {
@@ -116,7 +116,7 @@ fn the_bulge_dispersion_over_a_thousand_seeds() {
         .map(|n| {
             GalaxyParams::from_seed(
                 Seed::new(0x0206_5e00_0000_0000 | n),
-                MassFunctionKind::Kroupa,
+                MassFunctionKind::default(),
             )
             .black_hole()
             .bulge_dispersion()
@@ -138,43 +138,39 @@ fn the_bulge_dispersion_over_a_thousand_seeds() {
     assert_within("95th percentile", sigmas[950], 125.0, 155.0);
 }
 
-/// The fields over 10³ seeds (P02.T7.b, P02.T7.c): the sub-discs' heights rise with age, every
-/// root lies inside the bisection's bracket and their harmonic mean is the drawn height, every
-/// galaxy has at most `MAX_COMPONENTS` components, the scale factor is the physics', and at least
-/// nine in ten bulge centres lie in plan 02's 0.14–0.63 per ly³ around a median near the
-/// brainstorm's "about 0.3".
+/// The fields over 10³ seeds (P02.T7.b, P02.T7.c): the sub-discs' effective heights rise with age
+/// and their harmonic mean is the drawn height, every galaxy has at most `MAX_COMPONENTS`
+/// components, the dispersion scale lies in 0.6–1.6 for at least 99% of seeds with its median
+/// within a tenth of 1 and follows the physics, and at least nine in ten bulge centres lie in
+/// 0.12–0.55 per ly³ around a median near the brainstorm's "about 0.26".
 ///
-/// Findings (plan 02, Risks, R16), printed and not asserted:
+/// Findings (plan 02, Risks), printed:
 ///
-/// - The sub-discs' scale factor, which plan 02 expects in 0.6–1.6, has a median of 1.39 and 78%
-///   of seeds inside 0.6–1.6, from 0.75 to 2.85. Its logarithm follows that of the disc's column
-///   at `R_ref` (from `K_z` at 1 kpc) times the drawn height with a correlation of 0.98, which is
-///   asserted: the heating law is the same for every galaxy, while the drawn mean height
-///   (850–1,150 ly) is not tied to the column, which runs from 31 to 160 M☉ per pc².
-/// - The bulge's central density has a median of 0.33 and 93% of seeds in 0.14–0.63, from 0.09 to
-///   1.17. With the sizes coupled to the masses it is free of the stellar mass, the share and the
-///   system count, and the 0.06 dex scatter of the bulge's length enters it cubed.
+/// - The dispersion scale, the factor on Sharma et al.'s heating law that meets the drawn height,
+///   has a median of 0.99, 99.8% of seeds in 0.6–1.6, and runs from 0.64 to 1.72. Its logarithm
+///   follows half that of the disc's column at `R_ref` (from `K_z` at 1 kpc) times the drawn height
+///   with a correlation of 0.97, which is asserted: the heating law is the same for every galaxy,
+///   while the drawn height (850–1,150 ly) is not tied to the column.
+/// - The bulge's central density has a median of 0.29 and 93.5% of seeds in 0.12–0.55, from 0.08
+///   to 1.02. With the sizes coupled to the masses it is free of the stellar mass, the share and
+///   the system count, and the 0.06 dex scatter of the bulge's length enters it cubed.
 #[test]
-#[ignore = "slow: builds the fields, and the sub-discs' Jeans solve, of 10³ galaxies"]
+#[ignore = "slow: builds the fields, and the discs' Jeans solve, of 10³ galaxies"]
 fn the_fields_over_a_thousand_seeds() {
     let mut scales = Vec::with_capacity(1_000);
     let mut points = Vec::with_capacity(1_000);
     let mut bulges = Vec::with_capacity(1_000);
     for n in 0..1_000_u64 {
         let seed = Seed::new(0x0207_5eed_0000_0000 | n);
-        let params = GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa);
+        let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
         let model = MassModel::new(&params);
         let fields = Fields::new(&params, &model);
         assert!(fields.components().len() <= MAX_COMPONENTS);
         let sub = fields.sub_disc_heights();
-        let unscaled = sub.unscaled().map(LightYears::value);
+        let heights = sub.heights().map(LightYears::value);
         assert!(
-            unscaled.windows(2).all(|w| w[0] < w[1]),
-            "{seed}: {unscaled:?}"
-        );
-        assert!(
-            unscaled[0] > 17.0 && unscaled[4] < 8_000.0,
-            "{seed}: a root at the bracket's end"
+            heights.windows(2).all(|w| w[0] < w[1]),
+            "{seed}: {heights:?}"
         );
         let mean = sub.mean_height().value() / params.thin_disc().height().value();
         assert!(
@@ -201,25 +197,30 @@ fn the_fields_over_a_thousand_seeds() {
     bulges.sort_by(f64::total_cmp);
     let inside = bulges
         .iter()
-        .filter(|&&b| (0.14..=0.63).contains(&b))
+        .filter(|&&b| (0.12..=0.55).contains(&b))
         .count();
     eprintln!(
         "bulge centre: min {:.3}, 1% {:.3}, median {:.3}, 99% {:.3}, max {:.3}; \
-         {inside} of 1,000 in 0.14–0.63",
+         {inside} of 1,000 in 0.12–0.55",
         bulges[0], bulges[10], bulges[500], bulges[990], bulges[999]
     );
     assert!(
         inside >= 900,
-        "{inside} of 1,000 bulge centres in 0.14–0.63"
+        "{inside} of 1,000 bulge centres in 0.12–0.55"
     );
-    assert_within("median bulge centre", bulges[500], 0.25, 0.40);
+    assert_within("median bulge centre", bulges[500], 0.22, 0.35);
     scales.sort_by(f64::total_cmp);
     let inside = scales.iter().filter(|&&s| (0.6..=1.6).contains(&s)).count();
     eprintln!(
-        "sub-disc scale factor: min {:.3}, 5% {:.3}, median {:.3}, 95% {:.3}, max {:.3}; \
+        "dispersion scale: min {:.3}, 5% {:.3}, median {:.3}, 95% {:.3}, max {:.3}; \
          {inside} of 1,000 in 0.6–1.6",
         scales[0], scales[50], scales[500], scales[950], scales[999]
     );
+    assert!(
+        inside >= 990,
+        "{inside} of 1,000 dispersion scales in 0.6–1.6"
+    );
+    assert_within("median dispersion scale", scales[500], 0.9, 1.1);
     let n = 1_000.0;
     let mean_x = points.iter().fold(0.0, |s, p| s + p.0) / n;
     let mean_y = points.iter().fold(0.0, |s, p| s + p.1) / n;
@@ -228,6 +229,9 @@ fn the_fields_over_a_thousand_seeds() {
         (xy + dx * dy, xx + dx * dx, yy + dy * dy)
     });
     let correlation = sxy / (sxx * syy).sqrt();
-    eprintln!("ln scale against ln(column × drawn height): r = {correlation:.3}");
+    eprintln!(
+        "ln scale against ln(column × drawn height): r = {correlation:.3}, slope {:.3}",
+        sxy / sxx
+    );
     assert!(correlation > 0.95, "r = {correlation}");
 }

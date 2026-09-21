@@ -2,9 +2,9 @@
 //!
 //! Placement draws each system's primary from an initial mass function, within the band of
 //! primary *initial* mass that its layer owns (brainstorm, "Sizing the layers"). Two functions are
-//! supported behind one interface, [`MassFunction`]: [`Kroupa`]'s (2001), the default, and
-//! [`Chabrier`]'s (2003) system function. Which one a universe uses belongs to its generator
-//! version (plan 02, Design note 5). The share of systems in each band is computed from the
+//! supported behind one interface, [`MassFunction`]: [`Chabrier`]'s (2003) system function with
+//! its branch above 1 M☉ scaled, the default, and [`Kroupa`]'s (2001). Which one a universe uses
+//! belongs to its generator version (plan 02, Design note 5). The share of systems in each band is computed from the
 //! function by integration ([`BandShares`]) and never written down as a constant.
 //!
 //! Masses here are bare `f64`s in solar masses, on the stellar range
@@ -477,13 +477,17 @@ impl Error for BuildChabrierError {}
 /// The overall constant A drops out, so the log-normal carries coefficient 1 and the power law the
 /// log-normal's value at 1 M☉.
 ///
-/// Used for primaries with companions at the observed frequencies, the unscaled function comes
-/// out top-heavy against the observed mix of all stars, 67% of stars below 0.5 M☉ against 76%
-/// (brainstorm, "Sizing the layers"). So its branch above 1 M☉ is multiplied by
-/// [`high_mass_scale`](Self::high_mass_scale), a constant fitted offline to about 0.65–0.7 (plan
-/// 15). Until that fit lands the scale is the provisional
+/// It is the default (brainstorm, Decisions, "2026-09-21: local density rulings", 2): the 20 pc
+/// census has 66–68% of its primaries below 0.5 M☉, where this function gives 66% and Kroupa's
+/// 76%, and 69% of all its stars (Kirkpatrick et al. 2024, ApJS 271, 55, Table 18). Used for
+/// primaries with the provisional companions (plan 02, Design note 4), the function as published
+/// makes systems too heavy, 0.66 M☉ each at the Sun against the census's 0.55–0.59, and puts 67%
+/// of all stars below 0.5 M☉. So its branch above 1 M☉ is multiplied by
+/// [`high_mass_scale`](Self::high_mass_scale), a constant fitted offline together with the binary
+/// stage's companions (plan 15). Until that fit lands the scale is the provisional
 /// [`PROVISIONAL_HIGH_MASS_SCALE`](Self::PROVISIONAL_HIGH_MASS_SCALE), 0.68 (plan 02, Design note
-/// 5); a scale of 1 is Chabrier's function as published.
+/// 5), which gives 71% of all stars below 0.5 M☉: the two bracket the census. A scale of 1 is
+/// Chabrier's function as published.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Chabrier {
     high_mass_scale: f64,
@@ -582,12 +586,15 @@ impl MassFunction for Chabrier {
 }
 
 /// Which mass function a galaxy uses: part of its generator version.
+///
+/// The default is [`Chabrier`]'s system function with the provisional high-mass scale; [`Kroupa`]'s
+/// stays supported (brainstorm, Decisions, "2026-09-21: local density rulings", 2).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MassFunctionKind {
-    /// [`Kroupa`], the default.
-    #[default]
+    /// [`Kroupa`].
     Kroupa,
-    /// [`Chabrier`] with the provisional high-mass scale.
+    /// [`Chabrier`] with the provisional high-mass scale: the default.
+    #[default]
     Chabrier,
 }
 
@@ -689,6 +696,17 @@ mod tests {
         ] {
             assert_rounds_to("chabrier", 100.0 * chabrier.share(band), printed, decimals);
         }
+        // The default: Chabrier's with its branch above 1 M☉ scaled by the provisional 0.68.
+        let default = BandShares::of(MassFunctionKind::default().to_mass_function().as_ref());
+        for (band, printed, decimals) in [
+            (MassBand::A, 70.0, 0),
+            (MassBand::B, 12.0, 0),
+            (MassBand::C, 15.0, 0),
+            (MassBand::D, 2.6, 1),
+            (MassBand::E, 0.73, 2),
+        ] {
+            assert_rounds_to("default", 100.0 * default.share(band), printed, decimals);
+        }
     }
 
     /// The table's "Per cell" columns: 0.003 systems per cubic light-year times the cell volume
@@ -726,6 +744,21 @@ mod tests {
             assert_rounds_to(
                 "chabrier per cell",
                 per_cell(&chabrier, band),
+                printed,
+                decimals,
+            );
+        }
+        let default = BandShares::of(&Chabrier::provisional());
+        for (band, printed, decimals) in [
+            (MassBand::A, 1.1, 1),
+            (MassBand::B, 1.5, 1),
+            (MassBand::C, 14.0, 0),
+            (MassBand::D, 21.0, 0),
+            (MassBand::E, 46.0, 0),
+        ] {
+            assert_rounds_to(
+                "default per cell",
+                per_cell(&default, band),
                 printed,
                 decimals,
             );
@@ -857,6 +890,6 @@ mod tests {
         assert_same_bits(kroupa.pdf(0.3), Kroupa.pdf(0.3));
         let chabrier = MassFunctionKind::Chabrier.to_mass_function();
         assert_same_bits(chabrier.pdf(3.0), Chabrier::provisional().pdf(3.0));
-        assert_eq!(MassFunctionKind::default(), MassFunctionKind::Kroupa);
+        assert_eq!(MassFunctionKind::default(), MassFunctionKind::Chabrier);
     }
 }

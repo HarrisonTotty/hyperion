@@ -294,7 +294,7 @@ fn models() -> Vec<(String, GalaxyParams)> {
         let seed = Seed::new(s);
         (
             seed.to_string(),
-            GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa),
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
         )
     }));
     all
@@ -485,7 +485,7 @@ fn the_scatter_moves_the_black_hole_mass_only() {
 #[test]
 fn the_bulge_dispersion_over_32_seeds() {
     for seed in seeds() {
-        let params = GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa);
+        let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
         let sigma = params.black_hole().bulge_dispersion().value();
         assert_within(&format!("σ for {seed}"), sigma, 80.0, 170.0);
         assert!(params.black_hole().mass().value() > 0.0);

@@ -12,20 +12,22 @@ use crate::units::LightYears;
 /// law, `n0 (1 + m² ÷ a²)^(−γ ÷ 2) B(m)` systems per cubic light-year in the ellipsoidal radius
 /// `m² = x² + y² + z² ÷ q²`, inside the sphere of the cut radius `r_c` and none beyond.
 ///
-/// The brainstorm's components are "cored, flattened or triaxial" power laws that never rise
-/// with |x|, |y| or |z|. The parameters draw one axis ratio, `q ≤ 1` (plan 02, P02.T5.a), so the
-/// in-plane ratio `p` of plan 02's P02.T7.d is 1. The dominant merger's slope steepens by `Δ`
-/// beyond its break `r_b` through the continuous factor `B(m) = min(1, (m ÷ r_b)^(−Δ))`, a broken
-/// power law as Deason, Belokurov and Evans (2011, MNRAS 416, 2903) fit the Milky Way's; that the
-/// break is where a massive progenitor's debris piles up at apocentre is Deason et al. (2013, ApJ
-/// 763, 113). Every other component has `B = 1`.
+/// The brainstorm's components are "cored, flattened or triaxial" broken power laws that never
+/// rise with |x|, |y| or |z|, with inner slopes of 2.2–2.8 as star counts measure them (brainstorm,
+/// "Streams and accreted structure"; Deason, Belokurov and Evans 2011, MNRAS 416, 2903; Xue et al.
+/// 2015, ApJ 809, 144; Pila-Díez et al. 2015, A&A 579, A38). The parameters draw one axis ratio,
+/// `q ≤ 1` (plan 02, P02.T5.a), so the in-plane ratio `p` of plan 02's P02.T7.d is 1. The dominant
+/// merger's slope steepens by `Δ`, 1.5–2.5, beyond its break `r_b` at 16–28 kpc through the
+/// continuous factor `B(m) = min(1, (m ÷ r_b)^(−Δ))`, a broken power law as those sources fit the
+/// Milky Way's; that the break is where a massive progenitor's debris piles up at apocentre is
+/// Deason et al. (2013, ApJ 763, 113). Every other component has `B = 1`.
 ///
 /// The halo stops at 65,000 ly so that it fits inside the root cube, and the in-situ component
 /// lies inside 50,000 ly (brainstorm, "Populations" and "Streams and accreted structure"). The cut
 /// is a sphere of that radius, not an ellipsoid in `m` as plan 02's Design note 11 has it: an
 /// ellipsoid of axis ratio `q` ends at `q r_c` over the poles, 45,000 ly for the Milky Way's
-/// dominant merger, which steepens the spherically averaged profile between 20,000 and 60,000 ly
-/// to about r^−4.2 against the brainstorm's "near r^−3.5" (plan 02, Risks, R16).
+/// dominant merger, which would steepen the spherically averaged profile between 20,000 and
+/// 60,000 ly by about 0.4 and measure the truncation, not the halo (plan 02, Risks, R16).
 /// The core, the flattening, the break and the sphere each only lower the density as |x|, |y| or
 /// |z| grows, so the nearest-corner bound stays exact, and every step of the computation is
 /// monotone as well ([`envelope`](Self::envelope)).

@@ -5,12 +5,13 @@
 //! each density is exactly its closed form, in systems per cubic light-year of every mass band
 //! together, at the epoch, with the feature share φ held at 0 (plan 02, Design note 12):
 //!
-//! - the young thin disc, the old thin disc's five sub-discs, the thick disc and the nuclear disc
-//!   as double exponentials ([`disc`]), the young disc with the sharp arm and the sub-discs with
-//!   the gentle one ([`arms`]);
+//! - the young thin disc, the old thin disc's five sub-discs, the thick disc and the nuclear disc,
+//!   each exponential in radius and cored in height ([`disc`]): its vertical profile is the
+//!   vertical Jeans equation's in the galaxy's potential, tabulated once ([`vertical`]); the young
+//!   disc carries the sharp arm and the sub-discs the gentle one ([`arms`]);
 //! - the boxy bulge `exp(−m)` ([`bulge`]) and the long bar ([`bar`]);
-//! - the halo as a marked mixture of cored, flattened power laws, one component per smooth halo
-//!   component ([`halo`]).
+//! - the halo as a marked mixture of cored, flattened, broken power laws, one component per smooth
+//!   halo component ([`halo`]).
 //!
 //! Each [`Component`]'s density is normalised to its own share of the galaxy's systems: a
 //! sub-disc's share of the old thin disc, a halo component's share of the halo. A still-forming
@@ -46,7 +47,7 @@
 //! // Every component's density at a point in the disc, into a buffer on the stack.
 //! let mut densities = [0.0; MAX_COMPONENTS];
 //! let total = fields.densities(&PointLy::new(22_000.0, 13_000.0, 60.0), &mut densities);
-//! assert!((0.001..0.009).contains(&total), "{total} per ly³");
+//! assert!((0.0008..0.008).contains(&total), "{total} per ly³");
 //! // The components' systems add up to the galaxy's.
 //! let count: f64 = fields.components().iter().map(|c| c.count()).sum();
 //! assert!((count / params.system_count() - 1.0).abs() < 1e-12);
@@ -59,19 +60,23 @@ pub mod disc;
 pub mod halo;
 pub mod metallicity;
 mod sub_discs;
+pub mod vertical;
 
 use std::error::Error;
 use std::fmt;
 
 pub use metallicity::FehDistribution;
 pub use sub_discs::SubDiscHeights;
+pub use vertical::VerticalProfile;
 
 use self::arms::{Arm, ArmGeometry, ArmPoint, GentleArm, SharpArm};
 use self::bar::LongBar;
 use self::bulge::BoxyBulge;
-use self::disc::DoubleExponential;
+use self::disc::ExponentialDisc;
 use self::halo::HaloProfile;
 use self::metallicity::Metallicity;
+use self::sub_discs::DiscProfiles;
+use self::vertical::{Height, locate};
 use super::ages::{
     AgeDistribution, BULGE_AGES, FeatureShare, LONG_BAR_AGES, SubDisc, THICK_DISC_AGES,
 };
@@ -163,6 +168,8 @@ pub(crate) struct Site {
     pub r_sq: f64,
     /// `√(x² + y²)`, ly.
     pub r: f64,
+    /// `|z|` located in the discs' vertical tables.
+    pub height: Height,
 }
 
 impl Site {
@@ -176,15 +183,16 @@ impl Site {
             abs_z: p.z.abs(),
             r_sq,
             r: r_sq.sqrt(),
+            height: locate(p.z.abs()),
         }
     }
 }
 
-/// A component's closed-form density.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// A component's density: closed form, or for a disc's vertical profile a table built once.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
-    /// A double-exponential disc, with or without arms.
-    Disc(DoubleExponential),
+    /// A disc exponential in radius and cored in height, with or without arms.
+    Disc(ExponentialDisc),
     /// The boxy bulge.
     Bulge(BoxyBulge),
     /// The long bar.
@@ -208,7 +216,7 @@ impl Shape {
     #[must_use]
     pub(crate) fn envelope_at(&self, site: &Site) -> f64 {
         match self {
-            Self::Disc(disc) => disc.envelope(site.r, site.abs_z),
+            Self::Disc(disc) => disc.envelope_at(site.r, site.height),
             Self::Bulge(bulge) => bulge.density_at(site),
             Self::Bar(bar) => bar.density_at(site),
             Self::Halo(halo) => halo.density_at(site),
@@ -332,8 +340,8 @@ impl Component {
 /// The galaxy's density fields: its components in their fixed order, and the arms they share.
 ///
 /// Built once per galaxy, immutable, and a pure function of the parameters and the mass model.
-/// Solving the sub-discs' heights costs some 50 `K_z` evaluations of the mass model, most of the
-/// build (plan 02, Design note 9).
+/// Solving the discs' vertical profiles costs some 100 `K_z` evaluations of the mass model, most
+/// of the build (plan 02, Design note 9).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fields {
     components: Vec<Component>,
@@ -349,10 +357,16 @@ impl Fields {
     /// Never for built parameters: every size, share and amplitude they hold is inside its range.
     #[must_use]
     pub fn new(params: &GalaxyParams, model: &MassModel) -> Self {
-        let sub_discs = SubDiscHeights::solve(params, model);
+        let DiscProfiles {
+            young,
+            sub_discs,
+            thick,
+            nuclear,
+            summary,
+        } = DiscProfiles::solve(params, model);
         let mut components = Vec::with_capacity(10 + params.halo().components().len());
-        push_thin_discs(params, &sub_discs, &mut components);
-        push_inner_populations(params, &mut components);
+        push_thin_discs(params, young, sub_discs, &summary, &mut components);
+        push_inner_populations(params, thick, nuclear, &mut components);
         push_halo(params, &mut components);
         assert!(
             components.len() <= MAX_COMPONENTS,
@@ -371,7 +385,7 @@ impl Fields {
         Self {
             components,
             arms,
-            sub_discs,
+            sub_discs: summary,
         }
     }
 
@@ -423,7 +437,8 @@ impl Fields {
         &self.arms
     }
 
-    /// The old thin disc's sub-discs as the Jeans equation shaped them.
+    /// The old thin disc's sub-discs as the Jeans equation shaped them: ages, dispersions and
+    /// effective heights. Each disc's own profile is its [`ExponentialDisc::profile`].
     #[must_use]
     pub fn sub_disc_heights(&self) -> &SubDiscHeights {
         &self.sub_discs
@@ -480,7 +495,9 @@ const VALID: &str = "built parameters give valid components";
 /// The young thin disc and the old thin disc's five sub-discs, youngest first.
 fn push_thin_discs(
     params: &GalaxyParams,
-    sub_discs: &SubDiscHeights,
+    young_profile: VerticalProfile,
+    profiles: [VerticalProfile; 5],
+    summary: &SubDiscHeights,
     components: &mut Vec<Component>,
 ) {
     let n = params.system_count();
@@ -493,10 +510,10 @@ fn push_thin_discs(
     components.push(Component {
         population: Population::YoungThinDisc,
         shape: Shape::Disc(
-            DoubleExponential::new(
+            ExponentialDisc::new(
                 young / young_ages.born_fraction(),
                 params.young_disc().length(),
-                params.young_disc().height(),
+                young_profile,
                 Some(Arm::Sharp(SharpArm::young_disc(params))),
             )
             .expect(VALID),
@@ -510,13 +527,12 @@ fn push_thin_discs(
 
     let old = n * params.population_share(Population::OldThinDisc);
     let gentle = Arm::Gentle(GentleArm::old_disc(params));
-    let (shares, heights) = (sub_discs.shares(), sub_discs.heights());
-    for ((bin, share), height) in SubDisc::ALL.into_iter().zip(shares).zip(heights) {
+    for ((bin, share), profile) in SubDisc::ALL.into_iter().zip(summary.shares()).zip(profiles) {
         let count = old * share;
         components.push(Component {
             population: Population::OldThinDisc,
             shape: Shape::Disc(
-                DoubleExponential::new(count, thin.length(), height, Some(gentle)).expect(VALID),
+                ExponentialDisc::new(count, thin.length(), profile, Some(gentle)).expect(VALID),
             ),
             count,
             ages: AgeDistribution::old_thin_disc(tau, bin).expect(VALID),
@@ -528,7 +544,12 @@ fn push_thin_discs(
 }
 
 /// The thick disc, the bulge, the long bar and the nuclear disc, in that order.
-fn push_inner_populations(params: &GalaxyParams, components: &mut Vec<Component>) {
+fn push_inner_populations(
+    params: &GalaxyParams,
+    thick_profile: VerticalProfile,
+    nuclear_profile: VerticalProfile,
+    components: &mut Vec<Component>,
+) {
     let n = params.system_count();
     let uniform = |[lo, hi]: [Years; 2]| AgeDistribution::uniform(lo, hi).expect(VALID);
     let mut push = |population, shape: Shape, ages: AgeDistribution, feh| {
@@ -548,10 +569,10 @@ fn push_inner_populations(params: &GalaxyParams, components: &mut Vec<Component>
     push(
         Population::ThickDisc,
         Shape::Disc(
-            DoubleExponential::new(
+            ExponentialDisc::new(
                 count(Population::ThickDisc),
                 thick.length(),
-                thick.height(),
+                thick_profile,
                 None,
             )
             .expect(VALID),
@@ -577,10 +598,10 @@ fn push_inner_populations(params: &GalaxyParams, components: &mut Vec<Component>
     push(
         Population::NuclearDisc,
         Shape::Disc(
-            DoubleExponential::new(
+            ExponentialDisc::new(
                 count(Population::NuclearDisc) / nuclear_ages.born_fraction(),
                 nuclear.length(),
-                nuclear.height(),
+                nuclear_profile,
                 None,
             )
             .expect(VALID),

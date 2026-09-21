@@ -19,9 +19,9 @@
 //! use hyperion_sim::galaxy::imf::MassFunctionKind;
 //! use hyperion_sim::galaxy::params::GalaxyParams;
 //!
-//! let params = GalaxyParams::from_seed(Seed::new(42), MassFunctionKind::Kroupa);
-//! // The system count is derived, not drawn: 0.5–2 × 10¹¹ over the parameter ranges.
-//! assert!((0.5e11..2.1e11).contains(&params.system_count()));
+//! let params = GalaxyParams::from_seed(Seed::new(42), MassFunctionKind::default());
+//! // The system count is derived, not drawn: 0.5–1.8 × 10¹¹ over the parameter ranges.
+//! assert!((0.5e11..1.9e11).contains(&params.system_count()));
 //! // Shares are of systems; masses follow and add up to the stellar mass.
 //! let total: f64 = hyperion_sim::galaxy::POPULATIONS
 //!     .iter()
@@ -54,7 +54,9 @@ use crate::units::{
     Degrees, Dex, DexPerKiloparsec, KilometresPerSecond, LightYears, Radians, SolarMasses, Years,
 };
 
-/// A double-exponential disc's scale length and scale height.
+/// A disc's scale length and height: exponential in radius, cored in height, with the height the
+/// effective height `Σ ÷ 2ρ₀` of the vertical profile the fields solve for it (plan 02, Design
+/// note 9).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DiscParams {
     length: LightYears,
@@ -68,8 +70,9 @@ impl DiscParams {
         self.length
     }
 
-    /// The vertical scale height. For the old thin disc this is the mean over its sub-discs,
-    /// whose own heights the fields solve for (plan 02, Design note 9).
+    /// The effective height `Σ ÷ 2ρ₀`. For the old thin disc it is that of the five sub-discs
+    /// together, the harmonic mean of their own, which the fields meet by scaling their
+    /// dispersions (plan 02, Design note 9).
     #[must_use]
     pub fn height(&self) -> LightYears {
         self.height
@@ -467,16 +470,19 @@ impl GalaxyParams {
     /// The Milky Way fixture: the galaxy's measured values, without scatter but for the black
     /// hole's, for the comparisons of plan 02's P02.T11.
     ///
+    /// The default mass function, Chabrier's system function with its branch above 1 M☉ scaled;
     /// M★ 6.0 × 10¹⁰ M☉ (Licquia and Newman 2015); shares thick 10%, bulge and bar 31% with the
     /// bar 30% of that (Bland-Hawthorn and Gerhard 2016; Portail et al. 2017), nuclear disc 1.75%
     /// (Launhardt et al. 2002; Sormani et al. 2022), halo 1%; timescale 7 Gyr; thin disc 8,480 ly
-    /// long with a mean height of 1,000 ly (Bland-Hawthorn and Gerhard 2016); bulge 2,280 × 1,440
+    /// long with an effective height of 1,000 ly (Bland-Hawthorn and Gerhard 2016); bulge 2,280 × 1,440
     /// × 820 ly, boxiness 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly
     /// (Wegg, Gerhard and Portail 2015), corotation ratio 1.2; nuclear disc 290 ly by 93 ly
     /// (Sormani et al. 2022); four arms at 12°; f★ 0.32, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
     /// McMillan (2017); the black hole 0.421 dex below the M–σ relation, which makes it the 4.30 ×
-    /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013). Values without a
-    /// measurement take the middle of their ranges.
+    /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013); the halo's inner
+    /// slopes 2.5, and the dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0
+    /// (Pila-Díez et al. 2015; Medina et al. 2024). Values without a measurement take the middle
+    /// of their ranges.
     ///
     /// # Panics
     ///
@@ -717,9 +723,9 @@ impl GalaxyParamsBuilder {
         /// The thin disc's scale length coupled to its mass, with this scatter (within ±9 × 0.05
         /// dex).
         thin_length_scatter(Dex) => thin_length = Inputs::coupled;
-        /// The old thin disc's mean scale height, 850–1,150 ly.
+        /// The old thin disc's effective height, 850–1,150 ly.
         thin_mean_height(LightYears) => thin_mean_height = LightYears::value;
-        /// The young disc's scale height, 130–200 ly.
+        /// The young disc's effective height, 130–200 ly.
         young_height(LightYears) => young_height = LightYears::value;
         /// The thick disc's length over the thin disc's, 0.7–0.9.
         thick_length_ratio(f64) => thick_length_ratio;
@@ -743,7 +749,7 @@ impl GalaxyParamsBuilder {
         bar_length_scatter(Dex) => bar_length = Inputs::coupled;
         /// The long bar's width over its half-length, 0.08–0.12.
         bar_width_ratio(f64) => bar_width_ratio;
-        /// The long bar's scale height, 500–700 ly.
+        /// The long bar's scale height, 500–700 ly, of its exponential profile in height.
         bar_height(LightYears) => bar_height = LightYears::value;
         /// The bar's corotation radius over its half-length, 1.0–1.4.
         bar_corotation_ratio(f64) => bar_corotation_ratio;
@@ -778,9 +784,9 @@ impl GalaxyParamsBuilder {
         black_hole_scatter(Dex) => bh_scatter = Dex::value;
         /// The discs' metallicity gradient, −0.07 to −0.04 dex per kpc.
         metallicity_gradient(DexPerKiloparsec) => metallicity_gradient = DexPerKiloparsec::value;
-        /// The dominant merger's break radius, 40,000–90,000 ly.
+        /// The dominant merger's break radius, 52,000–91,000 ly.
         halo_dominant_break_radius(LightYears) => halo_dominant_break_radius = LightYears::value;
-        /// How much the dominant merger's slope steepens beyond its break, 1–2.
+        /// How much the dominant merger's slope steepens beyond its break, 1.5–2.5.
         halo_dominant_break_steepening(f64) => halo_dominant_break_steepening;
         /// The lesser progenitors' combined share of the halo before renormalising, 10–25%.
         halo_lesser_share_total(f64) => halo_lesser_share_total;
@@ -800,7 +806,7 @@ impl GalaxyParamsBuilder {
     }
 
     /// The in-situ halo: its share before renormalising (15–30%), axis ratio (0.45–0.55), core
-    /// (1,500–3,000 ly), slope (3.3–3.7) and the centre of its one-gigayear age range
+    /// (1,500–3,000 ly), slope (2.2–2.8) and the centre of its one-gigayear age range
     /// (10.5–12.5 Gyr, and at least half a gigayear before the last major merger, which heated
     /// it).
     #[must_use]
@@ -823,7 +829,7 @@ impl GalaxyParamsBuilder {
     }
 
     /// The dominant merger's halo component: share before renormalising (35–60%), axis ratio
-    /// (0.6–0.8), core (2,000–5,000 ly), slope (3.3–3.7) and age centre (10.5–12.5 Gyr, and at
+    /// (0.6–0.8), core (2,000–5,000 ly), slope (2.2–2.8) and age centre (10.5–12.5 Gyr, and at
     /// least half a gigayear before the last major merger, when its star formation stopped).
     #[must_use]
     pub fn halo_dominant(

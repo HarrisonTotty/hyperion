@@ -16,7 +16,7 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::bounds::CellBox;
 use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
-use hyperion_sim::galaxy::imf::{BandShares, Kroupa, MassBand, MassFunctionKind};
+use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::ShareMatrix;
@@ -52,7 +52,7 @@ fn potential(c: &mut Criterion) {
 fn params(c: &mut Criterion) {
     let mut group = c.benchmark_group("params");
     group.bench_function("GalaxyParams::from_seed", |b| {
-        b.iter(|| GalaxyParams::from_seed(black_box(Seed::new(7)), MassFunctionKind::Kroupa));
+        b.iter(|| GalaxyParams::from_seed(black_box(Seed::new(7)), MassFunctionKind::default()));
     });
     group.finish();
 }
@@ -87,7 +87,9 @@ fn fields(c: &mut Criterion) {
 fn bounds(c: &mut Criterion) {
     let params = GalaxyParams::milky_way_like();
     let fields = Fields::new(&params, &MassModel::new(&params));
-    let shares = ShareMatrix::uniform(&BandShares::of(&Kroupa));
+    let shares = ShareMatrix::uniform(&BandShares::of(
+        MassFunctionKind::default().to_mass_function().as_ref(),
+    ));
     let mut group = c.benchmark_group("bounds");
     let mut out = [0.0; MAX_COMPONENTS];
     // A layer-A cell at the solar circle, 30° from the bar; a layer-E cell there; a layer-A cell

@@ -61,7 +61,7 @@ All under `hyperion_sim::galaxy`. Signatures are sketches.
 ```rust
 pub struct Galaxy { /* params, fates, mass model, tables, fields, shares */ }
 impl Galaxy {
-    pub fn new(seed: Seed) -> Self;                      // Kroupa, in-plane tables only
+    pub fn new(seed: Seed) -> Self;                      // the default IMF, in-plane tables only
     pub fn with_mass_function(seed: Seed, kind: MassFunctionKind) -> Self;
     pub fn from_params(params: GalaxyParams) -> Self;    // fixtures and tests
     pub fn with_full_potential(self) -> Self;            // adds the (R, z) grid; about a second
@@ -93,7 +93,7 @@ pub trait MassFunction {
     fn sample_in_band(&self, band: MassBand, stream: &mut Stream) -> f64;   // provided: one uniform
 }
 pub struct Kroupa; pub struct Chabrier { high_mass_scale: f64 }
-pub enum MassFunctionKind { Kroupa, Chabrier }
+pub enum MassFunctionKind { Kroupa, Chabrier }               // Chabrier (× 0.68) is the default
 pub struct BandShares([f64; 5]);
 impl BandShares {
     pub fn of(f: &impl MassFunction) -> Self;
@@ -197,6 +197,9 @@ impl Fields {
     pub fn arms(&self) -> &arms::ArmGeometry;                 // shared with the gas field, plan 07
 }
 pub mod arms { pub struct ArmGeometry; pub struct SharpArm; pub struct GentleArm; }
+pub mod vertical {                                            // a disc's cored profile, D9
+    pub struct VerticalProfile;   // exponent, value, integral_to, effective_height, dispersion(_at)
+}
 ```
 
 ### `galaxy::bounds`
@@ -308,15 +311,20 @@ remnant masses and companions, which arrive with plans 06 and 11. M1 uses `Provi
   over 8 M☉ (Duchêne and Kraus 2013; re-check), mass ratio uniform on 0.1–1, companions below 0.08
   M☉ not counted, each companion aged and evolved like a primary.
 
-The acceptance test is the brainstorm's own figures: 0.48 M☉ under Kroupa, 0.55–0.60 under Chabrier,
-within 3% across the old populations. The fates sit behind the `StellarFates` trait so that plans 06
+The acceptance test is the brainstorm's own figures: 0.55–0.59 M☉ per system under the default,
+Chabrier's system function with its branch above 1 M☉ scaled by 0.68, and 0.48 under Kroupa's
+(kept as Kroupa's), within 3% across the old populations; and the census as the arbiter between
+the functions, 69% of all stars below 0.5 M☉ and 66–68% of primaries (Kirkpatrick et al. 2024;
+Reylé et al. 2021; brainstorm, "Sizing the layers"). The fates sit behind the `StellarFates` trait so that plans 06
 and 11 swap the implementation in one place. The consequence is stated plainly under Generator
 version: N scales every density, so replacing the fates moves every star and bumps the version.
 Before the first release that is free.
 
-**D5. The mass function belongs to the generator version.** `Galaxy::new` uses Kroupa.
-`with_mass_function` exists for tests and for a future version that chooses Chabrier. Chabrier's
-high-mass scale is a provisional 0.68; plan 15 fits it.
+**D5. The mass function belongs to the generator version.** `Galaxy::new` uses the default,
+Chabrier's system function with its branch above 1 M☉ scaled by the offline-fitted constant, a
+provisional 0.68 until plan 15 fits it together with plan 11's companions (brainstorm, Decisions,
+"2026-09-21: local density rulings", 2). Kroupa's stays supported: `with_mass_function` builds it,
+for tests and for any version that chooses it.
 
 **D6. The potential in M1, before plan 15's tables.** The brainstorm builds the potential from
 Gaussian sums with dimensionless coefficients fitted offline. Plan 15 depends on this plan, not the
@@ -338,8 +346,15 @@ other way round, so M1 ships a first cut:
   exponential with the same mass and the same second moments ⟨R²⟩ and ⟨z²⟩, found by one quadrature
   per galaxy. Plan 15 supplies a true two-dimensional expansion of exp(−m) per boxiness exponent.
 - The old thin disc and the young disc enter the potential as one double exponential with the drawn
-  mean height. The sub-discs' heights are then solved in that potential in one pass, with no
-  iteration (D9).
+  mean height. The discs' vertical profiles are then solved in that potential in one pass, with no
+  iteration (D9). The stars are cored in height (D9), but the potential keeps every disc exponential
+  in height at its drawn height, which is the stars' effective height `Σ ÷ 2ρ₀`: the two have the
+  same surface and mid-plane densities at every radius, so K_z agrees in the plane, where its slope
+  is 4πGρ₀, and far above, where it is 2πGΣ. Between, the fixture's cored thin disc holds up to 5%
+  of its 2πGΣ more within a given height, 4.6% of the whole K_z there, about 1.1 effective heights
+  up. Holding the cored profiles in the potential would need a Gaussian expansion of each galaxy's
+  tables and would make the solve an iteration; plan 15's fitted tables may replace the vertical
+  expansion, a version bump.
 - The NFW halo, the black hole and the nuclear cluster are spherical and are added in closed form or
   by a radial quadrature. They need no expansion.
 - Every formula is pinned by a closed-form test (a spherical Gaussian against erf, a spherical
@@ -359,14 +374,20 @@ log₁₀(σ ÷ 200 km/s), with 0.38 dex of scatter (re-check; not in the brains
 Because the black hole feeds the potential that σ is read from, σ is computed without the black hole
 and the nuclear cluster, which change it by well under a per cent at the effective radius.
 
-**D9. Sub-disc heights.** Five sub-discs with age edges 0.1, 1, 2, 4, 7 and 10 Gyr. Each takes as
-its age the mean age of the formation history inside its bin, and as its target dispersion σ_z = 22
-km/s × (age ÷ 10 Gyr)^0.44 (Sharma et al. 2021). Its height h is the root of ⟨σ_z²⟩(h) = (1 ÷ h)
-∫₀^∞ z e^(−z÷h) K_z(R_ref, z) dz, which is the density-weighted vertical Jeans equation for an
-exponential tracer, with R_ref three thin-disc scale lengths and K_z from `MassModel`. The five
-heights are then scaled by one factor so that their share-weighted mean equals the drawn mean height
-(850–1,150 ly). Heights are constant with radius. Plan 08 derives dispersions from these heights by
-the same equation, so age, height and vertical speed agree by construction.
+**D9. Sub-discs and every disc's cored profile.** Five sub-discs with age edges 0.1, 1, 2, 4, 7 and
+10 Gyr. Each takes as its age the mean age of the formation history inside its bin, and as its
+dispersion Sharma et al.'s (2021, MNRAS 506, 1761, eqs. 4 and 7, Table 2) exact heating law, not
+its rounding: σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc).
+Each sub-disc's vertical profile is the vertical Jeans equation's solution for that dispersion in
+K_z(R_ref, z) from `MassModel`, R_ref three thin-disc scale lengths: n(z) ÷ n(0) = (σ(0) ÷ σ(z))²
+exp(−∫₀^|z| K_z ÷ σ² dz′), cored at the plane, tabulated once per galaxy (`fields/vertical.rs`) and
+held at every radius. A disc's height is its effective height h = Σ ÷ 2ρ₀. The drawn mean height
+(850–1,150 ly) is the old thin disc's effective height, the share-weighted harmonic mean 1 ÷ Σ wᵢ
+÷ hᵢ of the sub-discs' (their mid-plane densities add), and it is met by the one dispersion scale s,
+not by scaling the heights (brainstorm, Decisions, "2026-09-21: local density rulings", 1). The
+young, thick and nuclear discs are cored the same way, each with a mid-plane dispersion of its own
+that meets its drawn effective height. Plan 08 solves the same equation on the same profiles, so
+age, height and vertical speed agree by construction.
 
 **D10. The sharp arm.** The young disc's arm factor is 1 + f(R) A (g − 1), with g = exp(k (cos φ −
 1)) ÷ I₀ₑ(k), where I₀ₑ(k) = e^(−k) I₀(k). The azimuthal mean of g is exactly 1 for any k, which is
@@ -463,7 +484,8 @@ and by `bisect` for the log-normal. Upper limit 150 M☉. `BandShares::of` integ
 Files: `galaxy/imf.rs`.
 
 Tests: shares against the brainstorm's table (Kroupa 76, 9.8, 11, 2.3, 0.64%; Chabrier with scale 1:
-66, 12, 17, 3.7, 1.0%), each to the precision printed; shares sum to 1; `quantile_in` is the inverse
+66, 12, 17, 3.7, 1.0%; the default, scale 0.68: 70, 12, 15, 2.6, 0.73%), each to the precision
+printed; shares sum to 1; `quantile_in` is the inverse
 of the restricted CDF at 1,000 points per band; a Kolmogorov–Smirnov test of 10⁵ quantile samples
 per band; per-cell counts at the reference density 0.003 reproduce the table's "Per cell" column.
 
@@ -501,10 +523,12 @@ the arbiter test of "Sizing the layers".
 
 Files: `galaxy/fates.rs`.
 
-Tests (the brainstorm's figures, "Galaxy parameters" first bullet and "Sizing the layers"): Kroupa
-0.48 ± 0.03 M☉ and Chabrier (scale 0.68) 0.55–0.60 M☉ for a 10 Gyr declining history; old
-populations within 3% of each other; the young disc 35–45% higher; stars per system 1.33–1.45;
-Kroupa puts 75–78% of all stars below 0.5 M☉; Chabrier with scale 1 comes out top-heavy (under 70%);
+Tests (the brainstorm's figures, "Galaxy parameters" first bullet and "Sizing the layers"): the
+default, Chabrier (scale 0.68), 0.55–0.59 M☉ and Kroupa 0.48 ± 0.03 M☉ for a 10 Gyr declining
+history; old populations within 3% of each other and the young disc 35–45% higher, under both;
+stars per system 1.33–1.45; the arbiter is the census, 69% of all stars below 0.5 M☉ (Kirkpatrick et
+al. 2024): Chabrier as published (66.9%) and scaled by 0.68 (70.9%) bracket it, its published share
+of primaries below 0.5 M☉ (66%) lies in the census's 66–68%, and Kroupa's 76.4% fails;
 `mean_formed_mass` equals `mean_present_mass` for an age distribution concentrated at zero age to
 10⁻⁹ relative, and exceeds it for every population of the fixture.
 
@@ -567,12 +591,14 @@ progenitors first, then recent ones): `accretion.progenitor.mass`, `accretion.pr
 `accretion.progenitor.orbit`, whose stream yields apocentre, pericentre, inclination, node and phase
 in that order.
 
-Halo components ("Streams and accreted structure", table): in-situ share 15–30%, flattening
-0.45–0.55, core 1,500–3,000 ly; dominant merger 35–60%, flattening 0.6–0.8, core 2,000–5,000 ly,
-break radius 40,000–90,000 ly beyond which the slope steepens by 1–2; lesser progenitors, 2–5 of
-them, 10–25% together split by a stick-breaking draw, each with flattening 0.6–1.0 and its own age
-and [Fe/H]; globular-born debris 8–15%, slope 4.0–4.5, core 3,000–5,000 ly; discrete share 2–15%.
-Slopes otherwise 3.3–3.7. The shares are renormalised to sum to 1.
+Halo components ("Streams and accreted structure", table): each a cored, flattened, broken power
+law. In-situ share 15–30%, flattening 0.45–0.55, core 1,500–3,000 ly; dominant merger 35–60%,
+flattening 0.6–0.8, core 2,000–5,000 ly, break radius 52,000–91,000 ly (16–28 kpc) beyond which the
+slope steepens by 1.5–2.5; lesser progenitors, 2–5 of them, 10–25% together split by a
+stick-breaking draw, each with flattening 0.6–1.0 and its own age and [Fe/H]; globular-born debris
+8–15%, slope 4.0–4.5, core 3,000–5,000 ly; discrete share 2–15%. Inner slopes otherwise 2.2–2.8
+(Deason et al. 2011; Xue et al. 2015; Pila-Díez et al. 2015; Iorio et al. 2018; Medina et al.
+2024). The shares are renormalised to sum to 1.
 
 Accretion history: last major merger uniform 6–11 Gyr ago; the dominant and lesser progenitors
 above; recent progenitors Poisson with mean 8, accreted within 6 Gyr, stellar masses from M^−1.45 on
@@ -593,14 +619,17 @@ half-length 16,000 ly × (M_bar ÷ 5.6 × 10⁹)^⅓, clamp 10,000–18,000; nuc
 from 200 times the critical density (Dutton and Macciò 2014, NFW fit at redshift zero; re-check
 coefficients). The black hole's mass is filled in by T6.e.
 
-Tests: N within 0.5–2.1 × 10¹¹ over 10⁴ seeds; population masses sum to M★ to 1 part in 10¹²; sizes
+Tests: N within 0.5–1.8 × 10¹¹ over 10⁴ seeds under the default (M★'s 3–10 × 10¹⁰ M☉ over its
+0.55–0.58 M☉ per system; 0.5–2.1 under Kroupa's); population masses sum to M★ to 1 part in 10¹²; sizes
 correlate with masses at the expected slope; M₂₀₀ within 1.4 × 10¹²–5.3 × 10¹² × (M★ ÷ 10¹¹).
 
-**P02.T5.c Milky Way fixture and golden file.** `GalaxyParams::milky_way_like()`: M★ 6.0 × 10¹⁰ M☉;
-shares thick 10%, bulge and bar 31% with the bar 30% of that, nuclear disc 1.75%, halo 1%; timescale
-7 Gyr; thin length 8,480 ly and mean height 1,000 ly; bulge 2,280 × 1,440 × 820 ly, boxiness 3.5;
-bar half-length 16,000 ly, height 590 ly, corotation ratio 1.2; nuclear disc 290 ly by 93 ly; four
-arms at 12°; f★ 0.32 and no scatter anywhere. Values may be tuned within the cited measurements so
+**P02.T5.c Milky Way fixture and golden file.** `GalaxyParams::milky_way_like()`: the default mass
+function; M★ 6.0 × 10¹⁰ M☉; shares thick 10%, bulge and bar 31% with the bar 30% of that, nuclear
+disc 1.75%, halo 1%; timescale 7 Gyr; thin length 8,480 ly and effective height 1,000 ly; bulge
+2,280 × 1,440 × 820 ly, boxiness 3.5; bar half-length 16,000 ly, height 590 ly, corotation ratio
+1.2; nuclear disc 290 ly by 93 ly; four arms at 12°; f★ 0.32; the halo's inner slopes 2.5 and the
+dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0 (Pila-Díez et al. 2015; Medina et
+al. 2024); no scatter anywhere. Values may be tuned within the cited measurements so
 that the checks of T11 pass, and each is cited (Bland-Hawthorn and Gerhard 2016; Wegg and Gerhard
 2013; Wegg, Gerhard and Portail 2015; Launhardt et al. 2002; Sormani et al. 2022; McMillan 2017;
 Licquia and Newman 2015). Golden file `tests/golden/galaxy_params.golden` for three pinned seeds.
@@ -700,9 +729,9 @@ Acceptance for T6, and for each subtask with its own tests:
 
 ### P02.T7 Fields
 
-**P02.T7.a Discs and arms.** `fields/disc.rs`: `DoubleExponential { n0, length, height, arm }` with
-density n0 exp(−R ÷ length) exp(−|z| ÷ height) × arm factor and n0 = count ÷ (4π length² height).
-`fields/arms.rs`: `ArmGeometry` (count, pitch, bar half-length, fade), `phase(x, y)`, `SharpArm` and
+**P02.T7.a Discs and arms.** `fields/disc.rs`: `ExponentialDisc { n0, length, profile, arm }` with
+density n0 exp(−R ÷ length) f(|z|) × arm factor, f the disc's cored `VerticalProfile` (T7.b, D9;
+`fields/vertical.rs`), and n0 = count ÷ (4π length² h) with h its effective height. `fields/arms.rs`: `ArmGeometry` (count, pitch, bar half-length, fade), `phase(x, y)`, `SharpArm` and
 `GentleArm` per D10. At R = 0 the phase is undefined and the factor is 1 because f(0) is below 10⁻⁴;
 the code returns 1 there explicitly. Components: young disc (sharp), thick disc (none), nuclear disc
 (none).
@@ -710,47 +739,58 @@ the code returns 1 there explicitly. Components: young disc (sharp), thick disc 
 Tests: the azimuthal mean of each arm factor is 1 to 10⁻⁶ at 40 radii by 4,096-point sums; the
 ridge's full width at half maximum is 2.355 σ_w to 3% at 20,000 and 40,000 ly; with two arms the
 ridge at R = L_bar lies on the x axis; ridges trail (θ of the ridge falls as R grows); each disc
-integrates to its count to 0.1% by brute-force quadrature over the cube plus the analytic tail.
+integrates to its count to 0.1% by brute-force quadrature over the cube plus the analytic tail, whose
+column is 2h.
 
-**P02.T7.b The old thin disc as sub-discs.** Per D9: bins, shares and ages from T3, target
-dispersions, heights by `bisect` on the Jeans integral with `MassModel::vertical_force`, rescaling
-to the drawn mean. Five `DoubleExponential` components with `GentleArm`, each with its bin's
-`AgeDistribution`.
+**P02.T7.b The old thin disc as sub-discs, and every disc cored.** Per D9: bins, shares and ages
+from T3; each sub-disc's profile from the vertical Jeans equation under Sharma et al.'s exact law
+with `MassModel::vertical_force`, tabulated (`VerticalProfile`); the dispersion scale s by `bisect`
+so that the sub-discs' harmonic effective height is the drawn one. Five `ExponentialDisc`
+components with `GentleArm`, each with its bin's `AgeDistribution`. The young, thick and nuclear
+discs' profiles likewise, each meeting its drawn effective height. The profile's exponent must
+never fall with |z| in floating point, or the discs' bounds carry a margin (T8).
 
-Tests: for the fixture the unscaled heights run from 250–400 ly (youngest) to 1,400–2,000 ly
-(oldest), against the brainstorm's 320 to 1,700; heights increase with age; the share-weighted mean
-equals the drawn mean to 10⁻⁹; the scale factor lies in 0.6–1.6 over 10³ seeds (a finding outside
-it).
+Tests: for the fixture the effective heights rise with age, the youngest and oldest within a
+quarter of the brainstorm's "320 ly at half a gigayear to 1,700 ly at ten" read at their mean ages;
+their harmonic mean equals the drawn height to 10⁻⁹; every disc is cored and has its drawn effective
+height; the dispersion scale lies in 0.6–1.6 for the fixture and for at least 99% of 10³ seeds,
+with the median within a tenth of 1, and follows √(column × drawn height) (correlation over 0.95);
+far from the plane, a double exponential fitted to the fixture's discs at R₀ over 250–3,000 pc, as
+star counts are, gives Bland-Hawthorn and Gerhard's (2016, §5.1.3) thin disc of 300 ± 50 pc, thick
+disc of 900 ± 180 pc and thick share of 4 ± 2%; the local mean mass per system at R₀ is the
+census's 0.55–0.59 M☉; the profile's exponent never falls across any knot of its table, stepped a
+unit in the last place at a time.
 
 **P02.T7.c Bulge and long bar.** Bulge: n0 exp(−m), m = {[(|x| ÷ a)² + (|y| ÷ b)²]^(c∥÷2) + (|z| ÷
 c)^c∥}^(1÷c∥), normalised by 6 a b c times the unit body's volume, itself a one-dimensional
 quadrature. Bar: n0 L(|x|) exp(−y² ÷ 2σ_y²) exp(−|z| ÷ h), with L level to 0.85 of the half-length
 and a Gaussian end of 0.15 half-lengths, normalised in closed form. Tests: both never rise with |x|,
 |y| or |z| (10⁵ random pairs); the bulge varies by at most 20% across any 128 ly cell of the
-fixture; the fixture's central density is 0.2–0.35 per ly³ and 0.14–0.63 over 10³ seeds; counts by
-brute-force quadrature to 0.5%.
+fixture; the fixture's central density is 0.17–0.30 per ly³ and 0.12–0.55 over 10³ seeds (the
+brainstorm's "about 0.26 (0.13–0.5 over the ranges)"); counts by brute-force quadrature to 0.5%.
 
-**P02.T7.d The halo as a marked mixture.** One component per smooth halo component: n0 (1 + m² ÷
-a²)^(−γ÷2) with m² = x² + y² ÷ p² + z² ÷ q², the dominant merger's slope steepening beyond its break
-through a continuous factor that never rises, cut per D11, normalised by radial quadrature.
-`Component::halo_component` returns the kind, so that plan 03's population pick is also the
-component mark. The discrete share is carried but not applied (D12). Tests: monotone; counts to
-0.5%; the mixture's spherically averaged slope between 20,000 and 60,000 ly is −3.2 to −3.9; nothing
-beyond 65,000 ly.
+**P02.T7.d The halo as a marked mixture.** One component per smooth halo component, a broken power
+law: n0 (1 + m² ÷ a²)^(−γ÷2) with m² = x² + y² ÷ p² + z² ÷ q² and an inner slope γ of 2.2–2.8, the
+dominant merger's slope steepening by 1.5–2.5 beyond its break at 16–28 kpc through a continuous
+factor that never rises, cut per D11, normalised by radial quadrature. `Component::halo_component`
+returns the kind, so that plan 03's population pick is also the component mark. The discrete share
+is carried but not applied (D12). Tests: monotone; counts to 0.5%; the mixture's spherically
+averaged slope between 20,000 and 60,000 ly is −2.1 to −3.0 (inner); nothing beyond 65,000 ly.
 
 **P02.T7.e Metallicity and assembly.** `FehDistribution { mean, sigma }`. Thin discs: mean = 0.0 +
-gradient × (R − 3 lengths) − 0.04 dex per Gyr × (age − 4.5 Gyr) clamped, sigma 0.15; thick −0.55,
+gradient × (R − 3 lengths), flat in age to 8 Gyr and then falling about 0.1 dex per Gyr (Bergemann
+et al. 2014; Casagrande et al. 2011), clamped, sigma 0.20; thick −0.55,
 0.25; bulge 0.0, 0.40; bar 0.0, 0.30; nuclear disc +0.1, 0.30; halo per component (in situ −0.6,
 dominant −1.2, lesser drawn −2.0 to −1.0, debris −1.5; sigma 0.3). All marked for re-checking
 against Bland-Hawthorn and Gerhard 2016. `Fields::new(&GalaxyParams, &MassModel)` assembles the
 components in the fixed order young, sub-discs 1–5, thick, bulge, bar, nuclear disc, halo components
 (D18), and `densities`, `population_density`, `layer_density`. Tests: the gradient at 26,000 ly is
-the drawn one; component count at most `MAX_COMPONENTS`; Σ population counts = N; golden densities
-at 20 pinned points for three seeds; the nuclear disc's central density for the fixture is 14–22 per
-ly³.
+the drawn one; the age–metallicity relation is flat to 8 Gyr and 0.1 dex per Gyr poorer beyond;
+component count at most `MAX_COMPONENTS`; Σ population counts = N; golden densities at 20 pinned
+points for three seeds; the nuclear disc's central density for the fixture is 12–19 per ly³.
 
-Files: `galaxy/fields/{mod,disc,arms,bulge,bar,halo,metallicity}.rs`, `tests/galaxy_fields.rs`,
-`tests/golden/galaxy_fields.golden`.
+Files: `galaxy/fields/{mod,disc,vertical,sub_discs,arms,bulge,bar,halo,metallicity}.rs`,
+`tests/galaxy_fields.rs`, `tests/golden/galaxy_fields.golden`.
 
 Acceptance for T7, and for each subtask with its own tests:
 `cargo test -p hyperion-sim galaxy_fields` passes and `just ci` is green; a Criterion bench reports
@@ -763,11 +803,16 @@ Acceptance for T7, and for each subtask with its own tests:
 or z = 0. Methods: `nearest_corner()`, `farthest_corner()`, `r_cyl_range()` (from the nearest and
 farthest corners, as the brainstorm states), `centre()`, `in_plane_half_diagonal()`. The envelope
 bound of every component is its arm-free density at the nearest corner. It works for any
-power-of-two edge, so the 4 ly, 16 ly and 4,096 ly grids of later plans reuse it.
+power-of-two edge, so the 4 ly, 16 ly and 4,096 ly grids of later plans reuse it. A disc's vertical
+profile is a table (T7.b), not a closed form: its exponent must not fall with |z| in floating
+point, between knots or across them, or the disc's bound carries a relative margin that covers the
+rise.
 
 Tests: for every component of three seeds and 2,000 random cells per layer size, the envelope's
 maximum over a 17³ lattice plus the corners never exceeds the bound, and equals it at the nearest
-corner to 1 part in 10¹².
+corner to 1 part in 10¹² (to the margin and one rounding where the corner is subnormal); the cells
+include the discs' tables where their segments change width, where the dispersion stops rising and
+at their end.
 
 **P02.T8.b The unimodal-factor rule and the arm bounds.** The `UnimodalFactor` trait and
 `ScalarRange`. Phase range of a cell: the phase at the centre ± n × half-diagonal ÷ (R_min sin p),
@@ -815,15 +860,16 @@ Acceptance: `cargo test -p hyperion-sim galaxy_handle` passes.
 
 ### P02.T10 Column density for the galaxy map
 
-**P02.T10.a Face-on.** Discs: 2 height × n0 exp(−R ÷ length) × arm factor. Bar: closed form, 2 h.
+**P02.T10.a Face-on.** Discs: 2 h × n0 exp(−R ÷ length) × arm factor, h the effective height. Bar: closed form, 2 h.
 Bulge and halo components: `gl32` in z after a substitution that maps the half-line (or the cut)
 onto the unit interval, as the brainstorm's "32-node quadrature per pixel". `YoungOnly` selects the
 young disc alone. Tests: against a 4,000-step brute-force integral at 200 points to 10⁻³ (bulge and
 halo) and 10⁻¹² (closed forms); the face-on map's integral over the plane equals N to 0.5%.
 
 **P02.T10.b Edge-on.** Line of sight along +y, so the picture shows x across and z up and the bar
-lies in its plane. Across a pixel's height the z-integral is closed-form for every double
-exponential and the bar, and a 4-node quadrature for bulge and halo; the result is divided by the
+lies in its plane. Across a pixel's height the z-integral is closed-form for every disc, whose
+tabulated profile is exponential across each segment of its table (`VerticalProfile::integral_to`,
+exact for the table), and for the bar, and a 4-node quadrature for bulge and halo; the result is divided by the
 pixel's height, so a disc thinner than a pixel keeps its light. Along the line of sight: fixed
 panels symmetric about y = 0 with `gl16` per panel. Components without arms take eight log-spaced
 panels a side, from 16 ly to their cut or the cube's edge. Discs with arms take panels no wider than
@@ -870,11 +916,25 @@ At `GalaxyParams::milky_way_like()`:
 | Escape speed at 8 kpc                  | 545–605 km/s (brainstorm: 574)                              |
 | Bar pattern speed                      | 33–41 km/s per kpc                                          |
 | Tidal radius, 1 M☉ at 26,000 ly        | 3.7–5.1 ly                                                  |
-| In-plane density at 26,000 ly          | 0.0020–0.0034 per ly³, azimuthal mean (brainstorm: 0.0027)  |
+| In-plane density at R₀ and z☉          | 0.0018–0.0021 per ly³, azimuthal mean (see below)           |
+| Mid-plane stellar mass density at R₀   | 0.0375–0.0455 M☉ pc⁻³ (McKee et al. 2015: 0.0415 ± 0.004)   |
 | Nuclear disc share and central density | 1.2–2.4%; 14–22 per ly³                                     |
 
 Enclosed mass here is `MassModel::enclosed_mass` for the spherical components plus the mass of each
 field component inside the sphere by quadrature of its true (not axisymmetrised) density.
+
+The density row reads at R₀ = 26,670 ly (8.18 kpc; GRAVITY Collaboration 2019) and the Sun's
+height, 20.8 pc (Bennett and Bovy 2019), and counts systems with a star or white dwarf: the 20 pc
+census gives 0.00193 ± 0.00004 per ly³ (Kirkpatrick et al. 2024) and the 10 pc census 0.00184 ±
+0.00011 (Reylé et al. 2021; brainstorm, Decisions, "2026-09-21: local density rulings", 3). The mass
+density row excludes brown dwarfs, as the stellar layers do. After P02.T7's revision the fixture
+gives 0.00297 and 0.061, 1.54 and 1.47 times these, because its stars' surface density at R₀ is 39
+M☉ pc⁻² (R18). T11 tunes the fixture's Σ★ to 28–30 M☉ pc⁻², with a shorter thin scale length
+(2.2–2.4 kpc; Bland-Hawthorn and Gerhard's 2.6 ± 0.5, Bovy and Rix's mass-weighted 2.15 ± 0.14) or
+less stellar mass, within their cited measurements, and its rotation-curve and enclosed-mass checks
+must absorb the change (through f★ and the gas disc, whose column at R₀, 6.6 M☉ pc⁻², is half the
+measured 13.7 ± 1.6). A thin effective height nearer the top of its drawn range lowers the density
+too, about 8% at 1,100 ly, and lifts the far-field thin disc from 259 to 286 pc.
 
 The inner rotation curve row is added after T6: the fixture gives v_c = 150, 180 and 216 km/s at
 0.5, 1 and 2 kpc, 8–11% below the brainstorm research model's 163, 202 and 239, while every enclosed
@@ -888,7 +948,7 @@ Over 4,000 seeds (parameters and `MassModel::v_circ_sq` only, no tables): v_c at
 median in 225–255 km/s and at least 68% in 210–270 km/s; the median slope from 5 to 16 kpc is within
 ±4 km/s per kpc; v_c(1 kpc) stays under 300 km/s for 99% of seeds (the uncoupled draft reached 390);
 the median of v_c(1) ÷ v_c(8) is 0.85–0.97. Over 1,000 seeds: the in-plane density at 26,000 ly lies
-in 0.001–0.009 for at least 98%; the total central density stays under 30 per ly³, so no layer's
+in 0.0008–0.008 for at least 98%; the total central density stays under 30 per ly³, so no layer's
 index can overflow.
 
 Files: the two test files.
@@ -923,9 +983,10 @@ can:
 - the accretion history, globular count, gas disc and nuclear cluster as parameters already drawn.
 
 Known future bumps that originate here, each moving every star because N, the potential or the
-sub-disc heights change: plan 06 replaces lifetimes and remnant masses in `StellarFates`; plan 11
-replaces the companion model; plan 15 replaces `MGE_EXP`, `MGE_BAR`, the bulge's spheroid and
-Chabrier's scale; plan 08 replaces the σ estimator behind the black hole's mass; plan 09 turns on φ
+discs' vertical profiles change: plan 06 replaces lifetimes and remnant masses in `StellarFates`;
+plan 11 replaces the companion model; plan 15 replaces `MGE_EXP`, `MGE_BAR`, the bulge's spheroid
+and Chabrier's scale, and may replace the discs' exponential vertical expansion in the potential
+(D6); plan 08 replaces the σ estimator behind the black hole's mass; plan 09 turns on φ
 and plan 10 the halo's discrete share; plan 07 may refine the gas disc. The bound's formulae, the
 component order and the map's quadrature scheme belong to the version as well.
 
@@ -936,7 +997,9 @@ component order and the map's quadrature scheme belong to the version as well.
   bar smaller by about a quarter. The reading chosen matches Portail et al. (2017).
 - **R2. "Averaging 850–1,150 ly."** Read with the research note behind it: the seed draws the mean
   height and the Jeans solution sets the ratios (D9). If the scale factor strays far from 1, the
-  model's disc mass and the measured heating law disagree, and T7.b reports it.
+  model's disc mass and the measured heating law disagree, and T7.b reports it. Since the
+  2026-09-21 rulings the height is the old thin disc's effective height and the factor is the
+  dispersion scale on the heating law (R18).
 - **R3. The brainstorm's "about five" sub-discs** against six ages in its research note. Five bins
   are used.
 - **R4. Black hole and σ.** The brainstorm reads M–σ from the bulge's projected dispersion of
@@ -1009,39 +1072,15 @@ component order and the map's quadrature scheme belong to the version as well.
 - **R16. Deviations in T7, as built (P02.T7).** `GENERATOR_VERSION` is 4, one bump for T7 with its
   validation; the goldens other than the new `galaxy_fields.golden` changed their header line
   only. The acceptance filter `galaxy_fields` selects only the golden test: T7 runs as
-  `cargo test -p hyperion-sim --test galaxy_fields` and `--lib galaxy::fields`.
-  - _Sub-disc heights (T7.b, D9)._ Two corrections to how D9 derives them. (1) The five heights
-    are scaled so that their share-weighted _harmonic_ mean, 1 ÷ Σ wᵢ ÷ hᵢ, is the drawn height:
-    the sub-discs then have the mid-plane density of one disc of that height, which is the disc
-    the potential holds (D6) and the one the brainstorm's in-plane density is worked for. D9's
-    arithmetic mean put 16% more systems in the mid-plane. Only this reading makes the
-    brainstorm's own figures agree: its "320 ly at half a gigayear to 1,700 ly at ten", weighted
-    by the bins, average 1,090 ly harmonically and 1,260 arithmetically, against the drawn
-    850–1,150. (2) The heating law is Sharma et al.'s own (2021, MNRAS 506, 1761, eqs. 4 and 7,
-    Table 2), not the brainstorm's rounding: 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 in the
-    mid-plane, times 1 + 0.20 |z| ÷ kpc, so D9's density-weighted target over an exponential of
-    height h is σ_z(τ, 0)² (1 + 2γh + 2γ²h²). For the fixture the Jeans heights are 227–1,015 ly
-    (a slab solve in McKee et al.'s 2015 measured column agrees), the factor 1.45 and the heights
-    329–1,470 ly, inside T7.b's 250–400 and 1,400–2,000, which the tests read on the heights the
-    discs have. Over 10³ seeds the factor has a median of 1.39, 78% of seeds in 0.6–1.6, range
-    0.75–2.85. Its logarithm follows that of the column within 1 kpc at R_ref times the drawn
-    height at r = 0.98, which the sweep asserts: the Jeans solve is consistent, and the drawn
-    height (850–1,150 ly) does not follow the column (31–160 M☉ pc⁻²; the top where a massive
-    disc's length is clamped at 7,000 ly). Hence, for the owner and plan 08: at the scaled
-    heights σ_z from D9's integral exceeds the law by about √1.45, so P08.T2.a's 5% holds at the
-    unscaled heights only (`SubDiscHeights::weighted_dispersions`). `K_z(R_ref, z)` costs about 1
-    ms, so it is read from three `Gl16Panel`s in ln z (`Gl16Panel::value`, added); the Jeans
-    integral at the solved heights agrees with direct `K_z` to 10⁻⁷ (tested). `Fields::new` takes
-    about 45 ms.
+  `cargo test -p hyperion-sim --test galaxy_fields` and `--lib galaxy::fields`. The sub-bullets on
+  the sub-discs' heights, the halo's slope, the metallicity constants and the local density,
+  which the 2026-09-21 density rulings resolved, are retired; R18 records the revision, and the
+  figures below are those of T7 as first built.
   - _The halo's cut is a sphere, not D11's ellipsoid in m (T7.d)._ It is the brainstorm's "out to
     65,000 ly" (50,000 in situ). The ellipsoid ended a component at q × 65,000 ly over the poles
     (45,000 for the fixture's dominant merger), so the spherically averaged slope between 20,000
-    and 60,000 ly measured that truncation: −4.18. In the plane the two cuts coincide. With the
-    sphere the fixture's slope is −3.76; over 32 seeds −3.46 to −4.10, 24 inside −3.2 to −3.9,
-    the steepest losing their in-situ component at 50,000 ly; the test checks the fixture. The
-    Milky Way's measured slope over 6–18 kpc is shallower, −2.1 to −3.1 (Deason et al. 2011; Xue
-    et al. 2015; Iorio et al. 2018), than the brainstorm's r^−3.5: a figure for the owner. p = 1,
-    as the parameters draw q only. The break B(m) = min(1, (m ÷ r_b)^−Δ) switches where m² ÷ r_b²
+    and 60,000 ly measured that truncation, not the halo. In the plane the two cuts coincide. p =
+    1, as the parameters draw q only. The break B(m) = min(1, (m ÷ r_b)^−Δ) switches where m² ÷ r_b²
     exceeds 1, so every step of the profile is monotone in floating point too. The normalisation
     is 4π ∫₀¹ s(μ)⁻³ F(r_c s(μ)) dμ, F read from `Gl16Panel` partial integrals.
   - _Bulge central density over 10³ seeds (T7.c)._ Median 0.33 per ly³, 93% in 0.14–0.63, range
@@ -1069,10 +1108,6 @@ component order and the map's quadrature scheme belong to the version as well.
     only beyond 28,000 ly for the fixture; it is left. 29 `libm` calls set a floor near 300 ns.
     Already taken: cos φ by double angles, the fade as 1 ÷ (1 + e^(−2u)), the bulge's bracket as a
     binomial series below t^c∥ = 1/256, powers as `exp` of `ln_1p`.
-  - _Metallicity (T7.e)._ "Clamped" is read as the thin discs' mean clamped to [−1.0, +0.5] dex, the
-    span of thin-disc stars; the brainstorm gives no clamp. The constants are the plan's:
-    Bland-Hawthorn and Gerhard 2016 give none of them, and Casagrande et al. (2011, A&A 530, A138)
-    find little local age–metallicity relation, so −0.04 dex per Gyr is to re-check.
   - _Interfaces._ `shares::ShareMatrix` (`uniform`, `share`, `component_share`) is built here for
     `Fields::layer_density`, with the seven population columns only; T9 adds the reserved ones and
     keeps the `Galaxy` handle. Beyond the Provides:
@@ -1082,22 +1117,6 @@ component order and the map's quadrature scheme belong to the version as well.
     `phase_polar`, `phase_rate`, `ridge_azimuth`, `point` and `point_polar`,
     `SharpArm::new(geometry, width, fraction)` (plan 07's lanes and P08.T1's `with_width`) with `k`
     and `profile`, and `GentleArm::new`. cos φ is clamped to [−1, 1].
-  - _Local density, for T11 and the owner._ The fixture's in-plane density at 26,000 ly,
-    azimuthally averaged, is now 0.0038 per ly³ (0.0043 before (1)), against T11's 0.0020–0.0034.
-    Measured, at R₀ = 26,670 ly (8.18 kpc; GRAVITY Collaboration 2019, A&A 625, L10): systems with a star or white-dwarf
-    primary 0.0018–0.0021 per ly³ (Reylé et al. 2021, A&A 650, A201; Reid, Gizis and Hawley
-    2002, AJ 124, 2721), so the brainstorm's "measured 0.0023" counts brown-dwarf-only systems;
-    stellar mid-plane density 0.043 ± 0.004 M☉ pc⁻³, Σ★ 33.4 ± 3 M☉ pc⁻² and effective height
-    Σ ÷ 2ρ = 388 ± 40 pc (McKee et al. 2015, ApJ 814, 13), Σ★ 38 ± 4 (Bovy and Rix 2013). The
-    fixture there has 0.0035 per ly³, 0.061 M☉ pc⁻³, Σ★ 39 and 320 pc. The remaining factor of
-    1.7–1.9 is: the exponential sub-discs at the drawn 850–1,150 ly (1.21; the measured effective
-    height needs about 1,270 ly, a brainstorm range); Σ★ (1.0–1.17, the fixture's mass and scale
-    length, T11's to tune); 0.50 M☉ per system against 0.55–0.65 in the local census (1.1–1.3,
-    the brainstorm's Kroupa figure); and T11 reads 26,000 ly, not R₀ (1.08). A fixture height of
-    1,150 ly would bring about 0.0033 but push its scale factor to about 1.66. Over 10³ seeds 99.6% lie in
-    0.001–0.009. The fixture's total central density is 22.1 per ly³; over 10³ seeds its median
-    is 17.8 and 5% exceed T11's 30 (maximum 51, against layer A's index capacity of 128 per ly³), because the
-    nuclear disc's density, like the bulge's, takes its size scatter cubed.
 - **R17. Deviations in T8, as built (P02.T8).** The acceptance filter `galaxy_bounds` matches test
   names and selects only T8.c's golden test, `galaxy_bounds_are_pinned`: T8 runs as
   `cargo test -p hyperion-sim --test galaxy_bounds`, `--lib galaxy::bounds` and
@@ -1209,3 +1228,103 @@ component order and the map's quadrature scheme belong to the version as well.
     against 571 ns for `densities` on the same loaded machine (i7-8665U). A sparse cell's bound
     and one candidate's densities come to 1.1–1.3 µs before the Poisson draw: inside plan 03's 2
     µs, not its 1.
+- **R18. Updated for the 2026-09-21 density rulings (P02.T7).** The owner adopted all six rulings
+  of the brainstorm's Decisions entry "2026-09-21: local density rulings"; D4–D6, D9 and the texts
+  of T2, T4, T5, T7, T8, T10 and T11 above are rewritten for them. `GENERATOR_VERSION` is 6, one
+  bump for the whole revision: the parameters' goldens moved with the default mass function and
+  the halo's ranges, the potential's with the populations' masses under the default, the fields'
+  and the bounds' everywhere; the rest changed their header only. As built:
+  - _Mass function (D4, D5, T2, T4)._ `MassFunctionKind::default()` is `Chabrier` (scale 0.68) and
+    the fixture takes it; the tests read the default, with Kroupa's as a second case (the
+    parameters' golden pins one seed under it). A 10 Gyr declining history holds 0.572–0.578 M☉
+    per system (Kroupa's 0.498–0.503); the fixture 0.566 overall, its old populations 0.547–0.574
+    and its young disc 0.790, 1.375 times its old thin disc; over 10⁴ seeds the old populations
+    hold 0.544–0.576 and N is 0.528–1.775 × 10¹¹. All stars below 0.5 M☉: 66.9% under Chabrier's
+    function as published, 70.9% scaled, 76.4% under Kroupa's; primaries: 66.3%, 69.7%, 76.1%.
+    The fixture has 1.061 × 10¹¹ systems (1.217 under Kroupa's) and a black hole of 4.297 × 10⁶
+    M☉ at σ = 119.28 km/s, Sgr A*'s still. The band-share test gains the brainstorm's default
+    column.
+  - _Cored profiles (D9, T7.a, T7.b)._ `fields/vertical.rs` holds `VerticalProfile` (the Jeans
+    solution tabulated at 705 knots, every light-year to 128 ly, then 64 segments per octave to
+    65,536 ly, its exponent linear between them; `exponent`, `value`, `integral_to`,
+    `effective_height`, `dispersion`, `dispersion_at`, `gradient`, `gradient_reach`), and the
+    crate's `VerticalForce` (moved from `sub_discs.rs`) and `JeansIntegral`. `DoubleExponential` is
+    `ExponentialDisc { n0, length, profile, arm }`, `height()` its effective height and `profile()`
+    its profile. `SubDiscHeights` keeps its name and its getter `Fields::sub_disc_heights`:
+    `dispersions` are the law's, `scaled_dispersions` the profiles', `scale` the dispersion scale,
+    `heights` and `unscaled` the effective heights at the scale and at 1; `weighted_dispersions`
+    and the public `SubDiscHeights::solve` are gone. Every disc takes Sharma et al.'s rise of 0.20
+    per kpc, which they find for the high-α stars too ("no special provision is needed to
+    accommodate the thick disc stars", §7): an isothermal thick disc, as Bovy et al. (2012, ApJ
+    755, 115) measure mono-abundance populations, left the fixture's far-field fit with no thick
+    disc (its h₂ at the fit's floor of 500 pc). The rise stops at 2.4 kpc, the reach of the heights
+    Sharma et al.'s figures show (`DISPERSION_GRADIENT_REACH_KPC`): carried on, it gave every disc
+    a tail falling as z⁻², and the fixture's thick disc a tenth of the halo's density 10 kpc above
+    the Sun (now 1.7%). The thin, young and thick discs are solved at three thin-disc scale lengths,
+    the nuclear disc at two of its own, the mass-weighted mean radius of an exponential disc. The
+    profiles' only slope at the plane is −2γ, an e-fold in 2.5 kpc. For the fixture: effective
+    heights 371–1,373 ly (364–1,341 unscaled; the youngest and oldest within a quarter of the
+    brainstorm's heights at their mean ages, 340 and 1,560 ly, which T7.b's brackets now read),
+    dispersion scale 1.019, mid-plane dispersions 6.5–20.1 km/s, and 2.74 km/s for the young disc,
+    37.0 for the thick and 31.5 for the nuclear. Over 10³ seeds the scale has a median of 0.987,
+    99.8% in 0.6–1.6 (0.64–1.72), and its logarithm follows half that of the column at R_ref times
+    the drawn height (slope 0.535, correlation 0.974); the young disc's dispersion runs 1.8–5.1
+    km/s, the thick's 22–61, the nuclear's 22–52.
+  - _Against measurements (T7.b)._ At R₀ = 8.178 kpc, far from the plane, a double exponential
+    fitted over 250–3,000 pc to the fixture's discs gives 258.6 pc, 985 pc and a thick share of
+    2.3%, against Bland-Hawthorn and Gerhard's 300 ± 50, 900 ± 180 and 4 ± 2% (the thin disc 9 pc
+    and the share 0.3 points from their edges; 286 pc at an effective height of 1,100 ly). In the
+    plane the fixture has 0.0609 M☉ pc⁻³ of stars and remnants against McKee et al.'s 0.0415 ±
+    0.004 (their 0.043 counts brown dwarfs, which no stellar layer holds; T11's row takes 0.0415),
+    and 0.00303 systems per ly³, 0.00297 at the Sun's height, against the census's 0.00193: 1.47 and
+    1.54 times, the fixture's Σ★ of 39 against the 25–27 M☉ pc⁻² these two need. T11 tunes Σ★; at
+    its 28 the density at the Sun's height would be about 0.0021, the bracket's top. The local mean
+    mass per system, 0.579 M☉, is asserted against the census's 0.55–0.59.
+  - _The potential (D6)._ It keeps every disc exponential in height at the drawn effective height;
+    the fixture's cored thin disc differs from it by at most 5% of its 2πGΣ within a height, 4.6%
+    of the whole K_z there, near 1.1 effective heights.
+  - _Bounds (T8)._ No new margin: the profile's exponent is non-decreasing bit for bit, because
+    its segments are found exactly (integer part, octave by `ilog2`, powers of two) and its knots
+    are made continuous as rounded (`fields/vertical.rs`, "Floating point"). A unit test steps a
+    unit in the last place at a time across every knot, and the table's end, of twelve profiles
+    (two radii, isothermal and rising, 3–90 km/s); `galaxy_bounds.rs` adds targeted disc cells
+    where the segments change width, where the rise stops, at 32,768 and 49,152 ly and at the
+    cube's top. The young disc is subnormal far above the plane (from 12,000–24,000 ly) and the
+    youngest sub-disc near the cube's top in some galaxies, where the relative margin rounds to at
+    most one unit in the last place, so `assert_envelopes_bounded` allows a subnormal corner its
+    margin plus one rounding; the nuclear disc no longer gets there. HUNT_RESULTS
+  - _Halo (T5.a, T5.c, T7.d)._ Inner slopes 2.2–2.8, the dominant break 52,000–91,000 ly and its
+    steepening 1.5–2.5 (tags and word counts unchanged); the fixture 2.5, 58,700 ly, 2.0. Its
+    spherically averaged slope from 20,000 to 60,000 ly is −2.973, 0.03 inside the bracket, the
+    in-situ component's cut at 50,000 ly and the steep debris taking it past the inner −2.5; the
+    halo near the Sun is 2.6 × 10⁻⁶ per ly³. For the owner: Xue et al.'s inner slope is 2.1 ± 0.3
+    and Medina et al.'s 1.88 in a spherical fit (2.05 in their Table 5), below 2.2; a range of
+    2.0–2.8 would cover every measurement.
+  - _Metallicity (T7.e)._ Flat to 8 Gyr and 0.1 dex per Gyr poorer beyond, read from Bergemann et
+    al.'s (2014) Fig. 6, which gives no number; sigma 0.20 from Casagrande et al.'s (2011) Table 1
+    (σ 0.22, half the FWHM 0.19). The flat part is solar at three scale lengths, as the youngest
+    local stars are (Nieva and Przybilla 2012: Fe 7.52 ± 0.03 against the Sun's 7.50), so the
+    local mean over every age is −0.03 to −0.04 against the Geneva–Copenhagen survey's −0.06. For
+    the owner: Bergemann et al. assign their old, metal-poor stars to the thick disc, and they say
+    their result "does not support" Casagrande et al.'s flat relation to 12 Gyr, so the decline
+    may belong to the thick disc rather than the thin.
+  - _Scaled brackets (T5.b, T7.c, T7.e)._ Kroupa's figures times the bulge's and the nuclear
+    disc's mean mass per system under Kroupa's over the default's, 0.866: the fixture's bulge
+    centre is 0.268 per ly³ (0.17–0.30), over 10³ seeds median 0.290 and 93.5% in 0.12–0.55
+    (0.08–1.02); its nuclear disc's 18.89 (12–19, 0.6% under the top), over 10³ seeds median 15.1
+    (6.1–43.7); the total centre 19.3, over 10³ seeds median 15.6 and 1.3% above T11's 30 (maximum
+    44.3). The in-plane density at 26,000 ly lies in 0.0008–0.008 for 99.7% of 10³ seeds
+    (0.00106–0.00873). N's bracket is 0.5–1.8 × 10¹¹ under the default and stays 0.5–2.1 under
+    Kroupa's.
+  - _Speed (T7 acceptance)._ `Fields::new` takes about 80 ms, not 45: a second table of K_z, at
+    the nuclear disc's radius, and the bisections of the dispersions. `Fields::densities` takes
+    about 590 ns at the solar circle, against 538–585 ns before and the 400 ns target, a finding:
+    each disc reads its table at a height located once per point. Both measured on a machine
+    loaded by other work, where Criterion's runs are not repeatable.
+  - _For later plans._ Plan 08's Design note 3 solves the same Jeans equation on
+    `VerticalProfile`, whose `dispersion_at` is σ₀ (1 + γ min(|z|, 2.4 kpc)) by construction at
+    the reference radius, the law times the dispersion scale for the sub-discs; the young, thick
+    and nuclear discs carry their own σ₀. Plan 09's Design note 21 bounds density ÷ g(z) at the
+    height nearest the plane, which held for exponential discs; a cored disc's ratio to an
+    exponential proposal peaks above the plane, so plan 09 must bound it anew when revalidated.
+    T11 tunes the fixture's Σ★ (its table, above).

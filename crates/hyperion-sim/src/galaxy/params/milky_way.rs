@@ -47,7 +47,9 @@ fn gse_orbit() -> Orbit {
 pub(super) fn inputs() -> Inputs {
     let middle_halo_age = 11.5 * GYR;
     Inputs {
-        mass_function: MassFunctionKind::Kroupa,
+        // The default, Chabrier's system function with its branch above 1 M☉ scaled (brainstorm,
+        // Decisions, "2026-09-21: local density rulings", 2).
+        mass_function: MassFunctionKind::Chabrier,
         // 6.08 ± 1.14 × 10¹⁰ M☉ (Licquia and Newman 2015, ApJ 806, 96).
         stellar_mass: 6.0e10,
         // The thick disc about a tenth, and the bulge with its bar 31%: "roughly a quarter to 30%"
@@ -64,7 +66,9 @@ pub(super) fn inputs() -> Inputs {
         // The middle of 5–9 Gyr: a present formation rate about half the past average, against
         // Licquia and Newman's 1.65 ± 0.19 M☉ a year.
         sfh_timescale: 7.0 * GYR,
-        // 2.6 ± 0.5 kpc and about 300 pc (Bland-Hawthorn and Gerhard 2016).
+        // 2.6 ± 0.5 kpc (Bland-Hawthorn and Gerhard 2016). The height is the thin disc's
+        // effective height Σ ÷ 2ρ₀, whose cored profiles then fall off as about 250–300 pc far
+        // from the plane, against their 300 ± 50 pc there (plan 02, P02.T7.b).
         thin_length: Size::Fixed(8_480.0),
         thin_mean_height: 1_000.0,
         // "The young disc's 150 ly height" (brainstorm, "Sizing the layers").
@@ -110,29 +114,32 @@ pub(super) fn inputs() -> Inputs {
         bh_scatter: -0.421,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
-        // The halo's components and the accretion history at the middle of their ranges.
+        // The halo's components and the accretion history at the middle of their ranges but for
+        // the slopes and the break: an inner slope of 2.5 and a break at 18 kpc (58,700 ly),
+        // steepening by 2.0 (Pila-Díez et al. 2015, A&A 579, A38: 2.50 inside about 20 kpc;
+        // Medina et al. 2024, MNRAS 531, 4762: 18.1 kpc spherical, 4.47 beyond).
         halo_in_situ: HaloComponentInput {
             share: 0.225,
             flattening: 0.5,
             core: 2_250.0,
-            slope: 3.5,
+            slope: 2.5,
             age_centre: middle_halo_age,
         },
         halo_dominant: HaloComponentInput {
             share: 0.475,
             flattening: 0.7,
             core: 3_500.0,
-            slope: 3.5,
+            slope: 2.5,
             age_centre: middle_halo_age,
         },
-        halo_dominant_break_radius: 65_000.0,
-        halo_dominant_break_steepening: 1.5,
+        halo_dominant_break_radius: 58_700.0,
+        halo_dominant_break_steepening: 2.0,
         halo_lesser_share_total: 0.175,
         halo_lesser: (0..3)
             .map(|_| LesserProgenitorInput {
                 weight: 1.0,
                 flattening: 0.8,
-                slope: 3.5,
+                slope: 2.5,
                 age_centre: middle_halo_age,
                 feh_mean: -1.5,
                 accreted: 9.0 * GYR,

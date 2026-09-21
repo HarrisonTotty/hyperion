@@ -11,7 +11,7 @@ use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::bounds::{CellBox, ScalarRange, UnimodalFactor};
 use hyperion_sim::galaxy::fields::arms::{Arm, ArmGeometry, GentleArm, SharpArm};
 use hyperion_sim::galaxy::fields::{Component, Fields, MAX_COMPONENTS, Shape};
-use hyperion_sim::galaxy::imf::{BandShares, Kroupa, MassBand, MassFunctionKind};
+use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::{ArmCount, GalaxyParams, GalaxyParamsBuilder};
 use hyperion_sim::galaxy::potential::MassModel;
 use hyperion_sim::galaxy::shares::ShareMatrix;
@@ -45,7 +45,7 @@ fn fields_of(params: &GalaxyParams) -> Fields {
 fn seeded(seed: u64) -> Fields {
     fields_of(&GalaxyParams::from_seed(
         Seed::new(seed),
-        MassFunctionKind::Kroupa,
+        MassFunctionKind::default(),
     ))
 }
 
@@ -98,8 +98,9 @@ fn random_cell(lcg: &mut Lcg, edge: u32) -> CellBox {
 }
 
 /// The places where an envelope is likeliest to beat its corner: the centre, the bar's end, the
-/// bulge's switch between its terms, and each halo component's core, break and cut, in every
-/// octant and touching the axis planes.
+/// bulge's switch between its terms, each halo component's core, break and cut, and the discs'
+/// vertical tables where their segments change width, where their dispersion stops rising and at
+/// their end, in every octant and touching the axis planes.
 fn targeted_cells(fields: &Fields, edge: u32) -> Vec<CellBox> {
     let mut points: Vec<[f64; 3]> = vec![[0.0; 3]];
     for component in fields.components() {
@@ -135,7 +136,17 @@ fn targeted_cells(fields: &Fields, edge: u32) -> Vec<CellBox> {
                     points.push([m / 3.0_f64.sqrt(); 3]);
                 }
             }
-            Shape::Disc(_) => {}
+            Shape::Disc(disc) => {
+                let l = disc.length().value();
+                let reach = disc.profile().gradient_reach();
+                let top = ROOT - 2.0 * f64::from(edge);
+                for z in [
+                    0.5, 1.0, 127.5, 128.0, 256.0, 4_096.0, reach, 32_768.0, 49_152.0, top,
+                ] {
+                    points.push([l, 0.0, z]);
+                    points.push([0.0, 0.5 * l, z]);
+                }
+            }
         }
     }
     // Every sign, with a zero coordinate on both sides of its plane.
@@ -211,10 +222,20 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
     for (i, component) in fields.components().iter().enumerate() {
         let bound = component.envelope_bound(cell);
         let corner = component.envelope(&cell.nearest_corner());
-        if corner > 0.0 {
+        if corner >= f64::MIN_POSITIVE {
             assert!(
                 (bound / corner - 1.0).abs() <= 1e-12,
                 "component {i} in {cell:?}: bound {bound:e} against the corner's {corner:e}"
+            );
+        } else if corner > 0.0 {
+            // A subnormal corner keeps fewer bits, and its margin rounds to the nearest unit in
+            // the last place, which can exceed 10⁻¹² of it (`bounds.rs`, "Floating point"): the
+            // young disc far above the plane, the bar's Gaussian end.
+            let unit = f64::MIN_POSITIVE * f64::EPSILON;
+            assert!(
+                corner <= bound && bound - corner <= 1e-12 * corner + unit,
+                "component {i} in {cell:?}: bound {bound:e} against the subnormal corner's \
+                 {corner:e}"
             );
         } else {
             assert!(
@@ -372,7 +393,7 @@ fn envelopes_never_exceed_their_bounds_over_many_cells_seed_2() {
 /// The bits of every component's envelope bound and bound, of `component_bounds` and of every
 /// layer's bound over a few cells.
 fn bound_bits(fields: &Fields, cells: &[CellBox]) -> Vec<u64> {
-    let shares = kroupa_shares();
+    let shares = default_shares();
     let mut bits = Vec::new();
     for cell in cells {
         for c in fields.components() {
@@ -708,15 +729,17 @@ const LAYERS: [(u32, MassBand); 5] = [
 ];
 
 /// The share matrix every galaxy of the first milestone uses.
-fn kroupa_shares() -> ShareMatrix {
-    ShareMatrix::uniform(&BandShares::of(&Kroupa))
+fn default_shares() -> ShareMatrix {
+    ShareMatrix::uniform(&BandShares::of(
+        MassFunctionKind::default().to_mass_function().as_ref(),
+    ))
 }
 
 /// `layer_bound` is `Σ share × bound` over the components in order, bit for bit, and
 /// `component_bounds` holds each component's `bound` and zeros past the last.
 #[test]
 fn layer_bounds_are_share_weighted_sums_in_component_order() {
-    let shares = kroupa_shares();
+    let shares = default_shares();
     let mut lcg = Lcg::new(0x0208_c0a1);
     for seed in PINNED {
         let fields = seeded(seed);
@@ -960,7 +983,7 @@ fn central_cell(lcg: &mut Lcg, edge: u32) -> CellBox {
 /// Returns the worst ratios per layer.
 fn hunt(params: &GalaxyParams, stride: usize, random: usize, seed: u64) -> Vec<Worst> {
     let fields = fields_of(params);
-    let shares = kroupa_shares();
+    let shares = default_shares();
     let mut lcg = Lcg::new(0x0208_c0a2 ^ seed);
     let mut report = Vec::new();
     for (edge, band) in LAYERS {
@@ -1036,7 +1059,7 @@ fn cell_label(cell: &CellBox) -> String {
 /// bound, over each pinned cell of the fixture.
 fn write_fixture_bounds(w: &mut GoldenWriter) {
     let fields = fields_of(&GalaxyParams::milky_way_like());
-    let shares = kroupa_shares();
+    let shares = default_shares();
     let young = &fields.components()[0];
     for (cell, band) in golden_cells() {
         let label = format!("milky_way{}", cell_label(&cell));
@@ -1065,8 +1088,8 @@ fn write_fixture_bounds(w: &mut GoldenWriter) {
 /// The young disc's, the youngest sub-disc's and the layer's bound over each pinned cell of a
 /// seed.
 fn write_seed_bounds(w: &mut GoldenWriter, seed: Seed) {
-    let fields = fields_of(&GalaxyParams::from_seed(seed, MassFunctionKind::Kroupa));
-    let shares = kroupa_shares();
+    let fields = fields_of(&GalaxyParams::from_seed(seed, MassFunctionKind::default()));
+    let shares = default_shares();
     for (cell, band) in golden_cells() {
         let label = format!("{seed}{}", cell_label(&cell));
         w.f64(
@@ -1113,7 +1136,7 @@ const HUNT_SEEDS: [(&str, u64); 5] = [
 /// The seed's parameters, checked to still have the property it was chosen for: a change to the
 /// parameter draws that moves them makes this fail rather than quietly weaken the hunt.
 fn hunt_params(name: &str, seed: u64) -> GalaxyParams {
-    let params = GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::Kroupa);
+    let params = GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default());
     let arms = params.arms();
     let pitch = Degrees::from(arms.pitch()).value();
     let width = arms.young_width().value();
@@ -1166,10 +1189,10 @@ fn edge_params(name: &str) -> GalaxyParams {
             .bar_half_length(LightYears::new(10_000.0))
             .bar_width_ratio(0.08)
             .bar_height(LightYears::new(500.0))
-            .halo_in_situ(0.3, 0.45, LightYears::new(1_500.0), 3.7, Years::new(12.0e9))
-            .halo_dominant(0.6, 0.6, LightYears::new(2_000.0), 3.7, Years::new(12.0e9))
-            .halo_dominant_break_radius(LightYears::new(40_000.0))
-            .halo_dominant_break_steepening(2.0),
+            .halo_in_situ(0.3, 0.45, LightYears::new(1_500.0), 2.8, Years::new(12.0e9))
+            .halo_dominant(0.6, 0.6, LightYears::new(2_000.0), 2.8, Years::new(12.0e9))
+            .halo_dominant_break_radius(LightYears::new(52_000.0))
+            .halo_dominant_break_steepening(2.5),
         _ => panic!("no edge galaxy {name}"),
     };
     builder.build().expect("every value inside its range")

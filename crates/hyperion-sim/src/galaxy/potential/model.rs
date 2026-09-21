@@ -72,6 +72,16 @@ pub(crate) fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
 /// density ([`mge::bar_disc`](super::mge::bar_disc)); the boxy bulge is the spheroidal
 /// exponential with its mass and second moments. The stellar halo's 1% is left out.
 ///
+/// The discs' stars are cored in height ([`fields::vertical`](crate::galaxy::fields::vertical)),
+/// but the potential keeps them exponential in height, at the drawn heights, which are the stars'
+/// effective heights `Σ ÷ 2ρ₀`. The two have the same surface and mid-plane densities at every
+/// radius, so `K_z` agrees in the plane, where its slope is `4πGρ₀`, and far above, where it is
+/// `2πGΣ`; between, for the Milky Way fixture's thin disc, the cored stars hold up to 5% of the
+/// disc's `2πGΣ` more within a given height, 4.6% of the whole `K_z` there, about 1.1 effective
+/// heights up. The cored profiles are solved in this potential, so holding them in it as well
+/// would make the solve an iteration, which Design note 6 rules out; plan 15's fitted tables may
+/// replace the vertical expansion.
+///
 /// Radii are light-years in the galactic frame, potentials (km/s)² with zero at infinity, forces
 /// (km/s)² per light-year.
 ///
