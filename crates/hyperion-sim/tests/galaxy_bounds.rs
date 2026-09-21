@@ -369,16 +369,25 @@ fn envelopes_never_exceed_their_bounds_over_many_cells_seed_2() {
     envelopes_never_exceed_their_bounds_over_many_cells(PINNED[2]);
 }
 
-/// Every component's envelope bound's and bound's bits over a few cells.
+/// The bits of every component's envelope bound and bound, of `component_bounds` and of every
+/// layer's bound over a few cells.
 fn bound_bits(fields: &Fields, cells: &[CellBox]) -> Vec<u64> {
-    cells
-        .iter()
-        .flat_map(|cell| {
-            fields.components().iter().flat_map(|c| {
-                [c.envelope_bound(cell), c.bound(cell)].map(hyperion_testkit::float::bits)
-            })
-        })
-        .collect()
+    let shares = kroupa_shares();
+    let mut bits = Vec::new();
+    for cell in cells {
+        for c in fields.components() {
+            bits.extend([c.envelope_bound(cell), c.bound(cell)].map(hyperion_testkit::float::bits));
+        }
+        let mut bounds = [0.0; MAX_COMPONENTS];
+        fields.component_bounds(cell, &mut bounds);
+        bits.extend(bounds.map(hyperion_testkit::float::bits));
+        for band in MassBand::ALL {
+            bits.push(hyperion_testkit::float::bits(
+                fields.layer_bound(&shares, band, cell),
+            ));
+        }
+    }
+    bits
 }
 
 /// The bounds are a pure function of the galaxy and the cell: the same seed gives the same bits
@@ -722,7 +731,9 @@ fn layer_bounds_are_share_weighted_sums_in_component_order() {
                     assert_same_bits(bound, component.bound(&cell));
                     assert_same_bits(bound, fields.component_bound(id, &cell));
                 }
-                assert!(bounds[count..].iter().all(|&b| b.abs() < f64::MIN_POSITIVE));
+                for &unused in &bounds[count..] {
+                    assert_same_bits(unused, 0.0);
+                }
                 for band in MassBand::ALL {
                     let expected = fields
                         .components()
@@ -769,7 +780,7 @@ impl<'a> Search<'a> {
     fn lattice(&self, m: u32) -> Vec<PointLy> {
         let edge = f64::from(self.cell.edge());
         let steps = f64::from(m - 1);
-        let mut points = Vec::new();
+        let mut points = Vec::with_capacity(usize::try_from(m * m * m).expect("a small lattice"));
         for i in 0..m {
             for j in 0..m {
                 for k in 0..m {
@@ -878,7 +889,7 @@ fn hunt_cell(
             (0, _) => (&mut worst.young, 5),
             (1, _) => (&mut worst.sub_disc, 3),
             (_, Effort::Everything) => (&mut worst.other, 3),
-            _ => continue,
+            (_, Effort::Arms | Effort::ArmsAndLayer) => continue,
         };
         let (value, at) = search.maximise(lattice, &|p| component.density(p));
         assert!(
@@ -916,26 +927,20 @@ fn hunt_cell(
 /// (the densities and bounds are the same bits below it).
 fn ridge_cells(arms: &ArmGeometry, edge: u32) -> BTreeSet<[i32; 3]> {
     let l = arms.bar_half_length().value();
-    // Along a logarithmic spiral ds = dR ÷ sin p.
-    let step = 16.0 * math::sin(arms.pitch().value());
-    let size = f64::from(edge);
-    let index = |c: f64| {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "a cell index inside the root cube"
-        )]
-        let i = (c / size).floor() as i32;
-        i
-    };
+    // Steps of 16 ly of arc, or of one cell where cells are smaller, so that two steps never skip a
+    // cell's neighbour; along a logarithmic spiral ds = dR ÷ sin p.
+    let step = 16.0_f64.min(f64::from(edge)) * math::sin(arms.pitch().value());
+    let size = i32::try_from(edge).expect("a layer's edge");
     let mut cells = BTreeSet::new();
     for ridge in 0..arms.count().get() {
         let mut r = 0.8 * l;
         while r <= 2.0 * l {
             let theta = arms.ridge_azimuth(r, ridge);
-            let (ix, iy) = (index(r * math::cos(theta)), index(r * math::sin(theta)));
-            for dx in -1..=1 {
-                for dy in -1..=1 {
-                    cells.insert([ix + dx, iy + dy, 0]);
+            let [x, y, _] =
+                cell_at([r * math::cos(theta), r * math::sin(theta), 0.0], edge).min_corner();
+            for dx in [-size, 0, size] {
+                for dy in [-size, 0, size] {
+                    cells.insert([x + dx, y + dy, 0]);
                 }
             }
             r += step;
@@ -960,9 +965,8 @@ fn hunt(params: &GalaxyParams, stride: usize, random: usize, seed: u64) -> Vec<W
     let mut report = Vec::new();
     for (edge, band) in LAYERS {
         let mut worst = Worst::default();
-        let size = i32::try_from(edge).expect("a layer's edge");
-        for index in ridge_cells(fields.arms(), edge).into_iter().step_by(stride) {
-            let cell = CellBox::new(index.map(|i| i * size), edge).expect("a ridge cell");
+        for min in ridge_cells(fields.arms(), edge).into_iter().step_by(stride) {
+            let cell = CellBox::new(min, edge).expect("a ridge cell");
             hunt_cell(&fields, &shares, band, &cell, Effort::Arms, &mut worst);
         }
         for cell in targeted_cells(&fields, edge) {
@@ -999,7 +1003,8 @@ fn hunt(params: &GalaxyParams, stride: usize, random: usize, seed: u64) -> Vec<W
 
 /// Ten places, each pinned as the cell of every stellar layer that holds it: fifty cells. The
 /// centre on both sides of every plane, the bulge, the bar and its end, the solar circle on and
-/// off the arms, above the disc, the halo and the halo's cut.
+/// off the arms, above the disc, the outer halo across the bar, where the bar's Gaussian is
+/// subnormal and the bound's margin rounds away, and the halo's cut.
 const GOLDEN_POINTS: [[f64; 3]; 10] = [
     [0.0, 0.0, 0.0],
     [-0.5, -0.5, -0.5],
@@ -1009,7 +1014,7 @@ const GOLDEN_POINTS: [[f64; 3]; 10] = [
     [22_516.7, 13_000.0, 50.0],
     [-6_000.0, -25_300.0, 5.0],
     [0.0, 26_000.0, 1_500.0],
-    [-20_000.0, 10_000.0, -30_000.0],
+    [0.0, 61_000.0, 0.0],
     [45_952.0, 45_952.0, 0.0],
 ];
 

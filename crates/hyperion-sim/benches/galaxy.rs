@@ -115,7 +115,10 @@ fn bounds(c: &mut Criterion) {
             b.iter(|| fields.layer_bound(&shares, band, black_box(&cell)));
         });
         group.bench_function(format!("Fields::component_bounds ({label})"), |b| {
-            b.iter(|| fields.component_bounds(black_box(&cell), &mut out));
+            b.iter(|| {
+                fields.component_bounds(black_box(&cell), &mut out);
+                black_box(&out);
+            });
         });
     }
     group.finish();

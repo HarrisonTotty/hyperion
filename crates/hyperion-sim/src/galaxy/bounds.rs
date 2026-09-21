@@ -43,12 +43,14 @@
 //!   `R² = x² + y²` and `R = √R²`, a bound's read `R` from the corners, so the radii are widened
 //!   by `ROUNDING_SLACK`, 2⁻⁵⁰ relative, which covers the rounding of `R²` from `R`.
 //!
-//! Where an envelope is subnormal, below 2.2 × 10⁻³⁰⁸, the relative margin rounds away and the
-//! bound is the corner's value itself. Inside the root cube only the long bar's Gaussian end,
-//! beyond about 6.5 half-lengths along x or 38 widths across it, and the nuclear disc, beyond
-//! about 700 scale heights from the plane, get there, and both are monotone bit for bit; the
-//! bulge, the one envelope that rises by a last bit, stays above 10⁻⁶⁵ of its centre everywhere in
-//! the cube (tested), and the halo's components are 0 beyond their cut.
+//! Where an envelope is subnormal, below 2.2 × 10⁻³⁰⁸, the relative margin shrinks with the
+//! precision left, and below about 3 × 10⁻³¹² it rounds away and the bound is the corner's value
+//! itself. Inside the root cube only the long bar and the nuclear disc get there, where the sum
+//! of their exponent's terms passes about 710: the bar far out along x (from about 6.5
+//! half-lengths) or across it (from about 38 widths), the nuclear disc far from its centre (from
+//! about 250 scale heights at the cube's corners and 700 on its axis). Both are monotone bit for
+//! bit. The bulge, the one envelope that rises by a last bit, stays above 10⁻⁶⁵ of its centre
+//! everywhere in the cube (tested), and the halo's components are 0 beyond their cut.
 //!
 //! With these, each step of the bound's arithmetic takes inputs no smaller than the density's
 //! same step, and rounding is monotone, so the bound is not below the density bit for bit, given

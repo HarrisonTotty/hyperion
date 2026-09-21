@@ -205,6 +205,7 @@ impl Shape {
     }
 
     /// The density without any arm factor at `site`.
+    #[must_use]
     pub(crate) fn envelope_at(&self, site: &Site) -> f64 {
         match self {
             Self::Disc(disc) => disc.envelope(site.r, site.abs_z),
@@ -359,7 +360,8 @@ impl Fields {
             components.len()
         );
         let arms = ArmGeometry::of(params);
-        debug_assert!(
+        // The bounds read one range of phase for every arm (`Fields::component_bounds`).
+        assert!(
             components
                 .iter()
                 .filter_map(Component::arm)

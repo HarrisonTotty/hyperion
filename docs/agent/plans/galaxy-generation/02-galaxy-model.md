@@ -1099,7 +1099,7 @@ component order and the map's quadrature scheme belong to the version as well.
     is 17.8 and 5% exceed T11's 30 (maximum 51, against layer A's index capacity of 128 per ly³), because the
     nuclear disc's density, like the bulge's, takes its size scatter cubed.
 - **R17. Deviations in T8, as built (P02.T8).** The acceptance filter `galaxy_bounds` matches test
-  names, and no T8.a or T8.b test name contains it: T8 runs as
+  names and selects only T8.c's golden test, `galaxy_bounds_are_pinned`: T8 runs as
   `cargo test -p hyperion-sim --test galaxy_bounds`, `--lib galaxy::bounds` and
   `--lib galaxy::fields::arms`, the slow tests under `just test-slow`.
   - _Cell geometry (T8.a)._ `CellBox::new` rejects an edge that is not a power of two
@@ -1156,4 +1156,56 @@ component order and the map's quadrature scheme belong to the version as well.
     slow test scans every arm in every cell on 33 × 33. Zero violations. Tightness, the
     fixture's young disc over 3,000 random 128 ly mid-plane cells between the bar's end and
     40,000 ly: mean bound ÷ mean density 1.750, under the plan's 3.5 and the brainstorm's 2.8
-    (whose profile differed).
+    (whose profile differed); 1.75, 1.81 and 1.56 on the hunt's sharpest-arm seeds below.
+  - _Layer bounds (T8.c)._ `Fields::component_bound` wraps `Component::bound`; `component_bounds`
+    gives the same bits (tested), reading the nearest corner and the ranges of radius and phase
+    once per cell and the sub-discs' shared arm bound once, and zeroes the slots past the last
+    component. `layer_bound` folds share × bound from 0 in component order, as `layer_density`
+    folds the densities, so once every component's bound holds, Σ weights ≤ the layer's bound bit
+    for bit. Its margins sit inside the bound; P03.T4.b's padding by (1 + 10⁻¹²) before
+    `Mark::pick_weighted` sits outside it, is not needed for that inequality, and its debug
+    assertion fires only for a violation of more than 10⁻¹² beyond a bound already carrying the
+    margins (`bounds.rs`, "A layer's bound"). `Fields::new`'s check that every arm shares the
+    galaxy's geometry is now an `assert!`, since `component_bounds` reads one range of phase for
+    all of them; `Shape::envelope_at` is `pub(crate)`. Below 2.2 × 10⁻³⁰⁸ the relative margin
+    shrinks, and below about 3 × 10⁻³¹² it rounds away: inside the root cube only the bar's
+    Gaussian end and the nuclear disc far from its centre get there, both monotone bit for bit;
+    the bulge stays normal across the cube (tested).
+  - _The hunt (T8.c)._ Five seeds from a scan of 1,500 (`0x0208_4a47_0000_0000 | n`), each
+    asserted to keep its property: the sharpest two arms and the sharpest four (pitch over 17.5°,
+    width under 260 ly), the longest bar (two arms), the shortest (four arms), and four arms at
+    10° on the longest bar. Three builder galaxies at the edges of the ranges: two sharp arms on
+    a 10,000 ly bar, four tight sharp arms, and the densest centre (smallest bulge, nuclear disc,
+    bar and halo cores, nearest and steepest halo break). Per stellar layer: every ridge from 0.8
+    to 2 bar half-lengths in steps of 16 ly of arc (8 ly for layer A, so that no neighbour is
+    skipped), the cell holding each step and its eight neighbours in the plane on the side z ≥ 0
+    (z < 0 gives the same bits; the cells above, which the plan counts as neighbours, share the
+    ranges of radius and phase with a smaller envelope and are not taken); T8.a's targeted
+    cells; 10⁴ random cells for the seeds and 2,000 for the builder galaxies, half in the central
+    1,000 ly.
+  - _The maximiser (T8.c)._ The plan's 33³ lattice in every cell would take about 1.7 × 10¹⁰
+    evaluations per galaxy, hours. Instead, an m³ lattice (m = 5 for the young disc, 3
+    otherwise) is refined by compass search along the axes and the plane's diagonals, both ways,
+    from the lattice's best point and from the nearest corner, down to 2⁻²⁰ of the edge: the
+    young disc and the youngest sub-disc (whose arm the others share) in every cell, with the
+    layer read at the lattice and those maxima in ridge cells and refined in the random ones, and
+    every component in the targeted cells. 1.86 million cells, zero violations, 84 s on four
+    cores for all of T8's slow tests. The worst density ÷ bound is 1 − 9 × 10⁻¹³ (the margin at a
+    corner) for every quantity, and exactly 1 where the bar's end is subnormal at the cube's
+    edge. The fast suite runs one ridge cell in 40, the targeted cells and 6 random cells per layer
+    on the fixture. `Search`, `ridge_cells` and `hunt_cell` are private to the test file; plan
+    08's extension of the hunt (P08.T11) would move them to `hyperion-testkit`.
+  - _Golden and version (T8.c)._ `GENERATOR_VERSION` is 5, the one bump for T8; the other goldens
+    changed their header only. `galaxy_bounds.golden` pins 50 cells, the cell of each stellar
+    layer holding ten places: the centre on both sides of each plane, the bulge, the bar and its
+    end, the solar circle on and off an arm, above the disc, 61,000 ly across the bar (a subnormal
+    bound) and the halo's cut. For the fixture every component's bound, the young disc's
+    envelope bound, the ranges of radius and phase and the layer's bound; for the three pinned
+    seeds the young disc's, the youngest sub-disc's and the layer's bounds. Stable in debug and
+    release; `just test-wasm` not run (no wasmtime).
+  - _Speed (T8.c)._ The plan sets no target; plan 03's 1–2 µs per sparse cell leaves about 1 µs
+    beside `Fields::densities`. `Fields::layer_bound` takes 694 ns for a layer-A cell at the
+    solar circle, 634 ns for layer E and 543 ns in the bulge (`component_bounds` 20–30 ns less),
+    against 571 ns for `densities` on the same loaded machine (i7-8665U). A sparse cell's bound
+    and one candidate's densities come to 1.1–1.3 µs before the Poisson draw: inside plan 03's 2
+    µs, not its 1.
