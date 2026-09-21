@@ -1,0 +1,631 @@
+# Plan 13: Brown dwarfs and rogue planets
+
+## Header
+
+- **Milestone:** M5.
+- **Depends on:** 06 (stars: evolution, remnants and classes), and through it 01–05. By M5 plans
+  07–12 have also landed; this plan uses plan 08's velocities through the hook plan 03 left and
+  needs nothing else from them.
+- **Brainstorm sections covered:**
+  - "Between the stars": the bullets "Brown dwarfs", "Rogue planets" and "Interstellar comets and
+    asteroids", and the closing sentence on the range query's mass floor.
+  - "Identifiers": the paragraph on the two substellar layers (16 ly cells for brown dwarfs; 4 ly
+    cells, k = −1 and the three spare bits for rogue planets; 1,024 per cubic light-year).
+  - "The range query": "The two substellar layers ... come after layer A in the walk and only when
+    the caller asks for them."
+  - "Sizing the layers": the fourth caveat (brown dwarfs are not in the five layers).
+  - "Covering every class of star": the row "Below 0.1 M☉" as far as it gives a brown dwarf its
+    state.
+  - "Planetary systems": the last paragraph (free-floating objects are systems with no star).
+  - "Galaxy parameters": the remark that independent size draws overflowed the rogue-planet index.
+  - "Decisions": "Interstellar space has content" and "Rogue planets follow the measured abundance".
+  - "Suggested order of attack": step 11.
+
+## Goal
+
+When this plan is done the galaxy holds its free-floating substellar objects, and only those: a
+brown dwarf bound to a star is a companion and belongs to plan 11, and a planet bound to a star
+belongs to plan 14. Brown dwarfs (13 Jupiter masses to the hydrogen-burning limit) are placed in a
+layer of 16 ly cells at one for every five or six stars, and rogue planets (a third of an Earth mass
+to 13 Jupiter masses) in a layer of 4 ly cells at about 21 per star on a mass function falling
+nearly as 1 ÷ mass, both by the same thinning, populations and ages as the stars, with the rogue
+planets' abundance capped per galaxy so that the 16-bit cell index can never overflow. Each object
+resolves from its ID, drifts like a system, and answers the range query when, and only when, the
+caller lowers the mass floor by one or two steps. A brown dwarf has a state and a class from plan
+06's cooling fits; a rogue planet has mass, age, population and metallicity, with bulk properties
+and moons left to plan 14, which is handed the cooling fit extended down to giant-planet masses.
+Interstellar comets and asteroids exist as a statistical density. In the `GALAXY` display the local
+chart can show both kinds with their own symbols, selector steps, legend entries and readout units.
+
+## Scope and non-goals
+
+In scope:
+
+- Generator-version parameters for the two abundances and the two mass functions.
+- The per-galaxy cap on the rogue planets' abundance, from the index limit and the galaxy's own peak
+  density.
+- Two rows of the share matrix, placement of both layers, `resolve`, designations.
+- The range query's substellar request and two extra mass-floor steps, the walk order, the census
+  line and expected counts.
+- A brown dwarf's state and class through plan 06; the cooling fit for giant planets that plan 14
+  will call; the hook for plan 14 on both kinds.
+- The interstellar small-body number density.
+- Protocol, server and client changes that let the chart request and show the two kinds.
+- Tests and benchmarks, including a rogue-planet cell at the galactic centre.
+
+Non-goals:
+
+- Bulk properties, atmospheres, moons and rings of rogue planets and brown dwarfs. Plan 14's stage
+  supplies them; this plan fixes what it will be handed.
+- Substellar members of features (clusters, the nuclear cluster, streams). The brainstorm gives the
+  two layers to the grid only. See Risks.
+- Brown-dwarf binaries. Every object here is single. See Risks.
+- Brown dwarfs and planets bound to stars. A brown-dwarf companion is one of plan 11's bodies in the
+  stellar slot of its system, and a bound planet is plan 14's. The abundance here counts
+  free-floating objects only (Design note 6).
+- Making interstellar comets and asteroids real around a ship. Only the density and a reserved tag
+  exist.
+- Microlensing by these objects. The brainstorm makes it a ray walked at query time, which is a
+  sensor feature; the range query with the lowered floor is what it will use.
+
+## Provides
+
+Rust, under `hyperion_sim::galaxy::substellar` unless stated:
+
+```rust
+// params.rs: generator-version parameters
+pub struct SubstellarParams { /* private */ }
+impl SubstellarParams {
+    pub const fn generator_default() -> SubstellarParams;
+    pub fn brown_dwarfs_per_star(&self) -> f64;        // 1 ÷ 5.5
+    pub fn rogue_planets_per_star(&self) -> f64;       // 21
+    pub fn rogue_mass_slope(&self) -> f64;             // 0.96 in dN ÷ dlog M
+    pub fn with_rogue_planets_per_star(self, n: f64) -> SubstellarParams; // tests and tuning
+}
+pub const BROWN_DWARF_MIN: JupiterMasses;              // 13
+pub const BROWN_DWARF_MAX: SolarMasses;                // 0.08, the stellar layers' lower edge
+pub const ROGUE_PLANET_MIN: EarthMasses;               // 1 ÷ 3
+pub const ROGUE_PLANET_MAX: JupiterMasses;             // 13
+
+// mass.rs
+pub fn draw_brown_dwarf_mass(f: &dyn MassFunction, s: &mut Stream) -> SolarMasses;
+pub fn draw_rogue_planet_mass(p: &SubstellarParams, s: &mut Stream) -> SolarMasses;
+pub fn rogue_planets_above(p: &SubstellarParams, m: EarthMasses) -> f64;   // per star, closed form
+
+// abundance.rs
+pub struct SubstellarAbundance { /* per-system figures for one galaxy */ }
+impl SubstellarAbundance {
+    pub fn for_galaxy(galaxy: &Galaxy, p: &SubstellarParams) -> SubstellarAbundance;
+    pub fn brown_dwarfs_per_system(&self) -> f64;
+    pub fn rogue_planets_per_system(&self) -> f64;     // after the cap
+    pub fn rogue_planet_cap_per_system(&self) -> f64;
+    pub fn is_capped(&self) -> bool;
+}
+
+// small_bodies.rs
+pub fn interstellar_small_body_density(galaxy: &Galaxy, p: &GalacticPosition) -> PerCubicAu;
+```
+
+Elsewhere in `hyperion-sim`:
+
+- `stellar::substellar::giant_cooling(mass, age, comp) -> CoolingState` (luminosity, radius,
+  effective temperature), the cooling fit for 0.3–13 M_Jup, continuous at its upper end with plan
+  06's `stellar::substellar::cooling`. Plan 14 consumes both as "plan 13's cooling fits".
+- `imf::MassBand` gains `BrownDwarf` and `RoguePlanet`. `ShareMatrix::share` returns, for those two
+  bands, objects per system of the population, not a share. `BandShares` stays five-band.
+- `placement`: `SUBSTELLAR_LAYERS: [LayerSpec; 2]` (brown dwarfs at 16 ly, rogue planets at 4 ly),
+  `layer_spec` answers for them, `resolve(SystemId)` accepts their IDs, and
+  `SystemRecord::kind() -> SystemKind` with `SystemKind::{Stellar, BrownDwarf, RoguePlanet}` is
+  derived from the layer. Plan 14's `HostKind` has the same three values and converts from it.
+- `query`: plan 03's `SubstellarRequest` values other than `None` are accepted;
+  `MassFloor::{BrownDwarfs, RoguePlanets}` are the two steps below `LayerA`; `check_index_headroom`
+  covers the two layers.
+- `Galaxy::substellar(&self) -> &SubstellarAbundance` and, if plan 02 lacks it,
+  `Galaxy::mean_stars_per_system()`.
+- `units`: `PerCubicAu`. (`JupiterMasses`, `EarthMasses` and their conversions are plan 01's.)
+- Domain tags, as entries of plan 01's `domain_tags!` registry in `rng/tags.rs` under a "Plan 13"
+  heading: `SUBSTELLAR_MASS: System = "substellar.mass"` and, reserved and unused,
+  `INTERSTELLAR_SMALL_BODIES: Cell = "interstellar.small_bodies"`.
+
+Protocol and client:
+
+- `MassLayer` gains `BrownDwarf` and `RoguePlanet` (`"brown_dwarf"`, `"rogue_planet"` on the wire),
+  which serves `SystemsInRangeRequest::min_layer`, `SystemRecord::layer` and `LayerCensus::layer` at
+  once. A `substellar` group in `GalaxyParameters` with `substellar.brown_dwarfs_per_system`,
+  `substellar.rogue_planets_per_system`, `substellar.rogue_planet_cap_per_system` and
+  `substellar.rogue_planets_capped`.
+- Client: `components/EarthGlyph.tsx` and `components/EarthMassUnit.tsx` beside plan 05's `SunGlyph`
+  and `SolarMassUnit`. This plan is their only owner, and plan 14 consumes them. In plan 05's
+  `lib/format.ts`: `formatMassMearth(massMearth)` and `formatSubstellarMass(massMsun, layer)`, which
+  returns the value and which of the two units it is in (Design note 14). The `triangle-down` value
+  of `SymbolShape`; two steps in the `MIN MASS` group of `ChartControls`; legend, list, readout and
+  census entries for the two kinds.
+
+Convention for plan 14, matching its D3 (`body_index` = `slot << 8 | sub`, with slot `0x00` the
+stellar level, where plan 06 puts the primary at index 0 and plan 11 its companions at 1–15): a
+free-floating object is a system whose body `0x0000` is the object itself, its moons are the bodies
+`0x0100`, `0x0200` and so on (slot `0x01` upward, sub `0x00`), and its rings are `0x0080`–`0x008F`.
+This plan generates and stores no body index other than `0x0000`.
+
+## Consumes
+
+- **Plan 01:** `id::{SystemId, Layer}` with `Layer::BrownDwarf` (value 5, 16 ly cells, 19-bit index)
+  and `Layer::RoguePlanet` (value 6, 4 ly cells, k = −1, 45 cell bits, the three spare bits, 16-bit
+  index) already encoded and canonical, `Layer::cell_size_ly()` and `Layer::index_bits()`;
+  `Designation`; `rng` with the Poisson sampler (PTRS at means of tens of thousands),
+  `PowerLaw::new(α, lo, hi)` for a density ∝ x^−α with both limits explicit, and integer-threshold
+  decisions; `Stream::open(Seed, DomainTag, ObjectKey)` and the `domain_tags!` registry; `units`,
+  including `JupiterMasses`, `EarthMasses` and the constants of `units::consts`;
+  `coords::CellSize::Ly4` and the position draw of its Design note 23; `hyperion-testkit` (goldens,
+  `stats`, order independence); `GENERATOR_VERSION`.
+- **Plan 02:** `Galaxy`, `Fields` (`densities`, `layer_density`) and `bounds` (`component_bounds`,
+  `layer_bound`, `CellBox`) for every component, which the substellar layers reuse unchanged;
+  `ShareMatrix`; `imf::{MassFunction, MassBand, BandShares}`;
+  `fates::StellarFates::mean_companions`, from which the mean number of stars per system follows
+  (plan 02's own tests put it at 1.33–1.45); `PotentialTables::tidal_radius`.
+- **Plan 03:** `placement` (`LayerSpec`, `CellKey`, candidate counts from bound × volume, candidate
+  streams, population pick by the odds at the candidate's position, age draw from the population's
+  distribution, ages from −H, `SystemRecord`, `resolve`, the clamp and `check_index_headroom` of its
+  Design note 6), `query` with `RangeQuery`, `RangeResult`, `Census`, `MassFloor` and
+  `SubstellarRequest` (the request enum exists already and is rejected with
+  `BuildRangeQueryError::SubstellarLayersUnavailable` until this plan), the padding and unborn
+  filter, the drift hook.
+- **Plan 04:** the request envelope (no new kind is added here); `MassLayer`,
+  `SystemsInRangeRequest`, `SystemsInRange`, `Census`, `LayerCensus`, `SystemRecord`,
+  `GalaxyParameters` with its groups, `ParameterValue`, the cell cache bounded by bytes; its
+  statement under "Extending the convention" that `MassLayer` will grow. The optional request field
+  `include_substellar` that it reserves there is not used (Design note 9).
+- **Plan 05:** `symbols.ts` (`symbolOutline`, `SIZE_CLASS_REM`), `marks.ts` (`SymbolShape`),
+  `ChartControls.tsx`, `CensusReadout.tsx`, `SystemList.tsx`, `SystemReadout.tsx`,
+  `SymbolLegend.tsx`, `parameterLabels.ts`, `lib/format.ts`, `lib/galaxy/wire.ts` (`layerIndex`),
+  `SunGlyph`, `SolarMassUnit`, `UnitLabel`, `RADIUS_STEPS_LY` running down to hundredths of a
+  light-year, and the guide's reservation of a drawn `⊕` (P05.T2.d).
+- **Plan 06:** `stellar::substellar::cooling(mass, age, comp) -> StarState`, valid 0.01–0.08 M☉ (its
+  P06.T13, "shared with plan 13"), the classification that gives L, T and Y,
+  `ObjectKind::Substellar`, `stellar::system::draw_metallicity`, `StellarBrief` and its wire form
+  `StellarBriefDto` behind the request flag `include_stellar`, and `starSymbols.ts`, whose Design
+  note 17 already draws a substellar object as a circle.
+- **Plan 08 (soft):** velocities per population through plan 03's drift hook, which is keyed by ID
+  and population and so serves these layers unchanged.
+- **Plan 09 (soft):** `features::shares::FeatureShares::field_factor(population, band)`, the factor
+  1 − φ, which gains the two new bands (Design note 4).
+- **Plan 15 (soft):** the fitting toolchain (`just fit <task>`, `just fit-check`, the table header,
+  `tables.lock`, `data/<dataset>/PROVENANCE.toml`), if the giant-planet cooling fit of P13.T5.b
+  needs a table and not only published power laws.
+
+## Design notes
+
+1. **Module placement.** `hyperion_sim::galaxy::substellar` holds parameters, mass functions,
+   abundance and the small-body density. Placement and the query stay in plan 03's modules and
+   become generic over these two layers; no parallel placement code is written.
+
+2. **Abundances are per star in the parameters and per system in the share matrix.** The brainstorm
+   states both abundances per star, and placement works in systems. The conversion is the galaxy's
+   own mean number of stars per system, 1 plus the mass-function average of plan 02's
+   `mean_companions`, which plan 02's tests put at 1.33–1.45. The brainstorm's cap figures (38 and
+   27 per star against 1,024 ÷ 18.7 and 1,024 ÷ 27 per system) agree with that ratio; its "about 26
+   per system" implies 1.24 and is read as a rounding. So rogue planets come to 28–30 per system and
+   about five and a half to a cell at the reference density. See Risks.
+
+3. **One abundance for every population.** "The same populations and ages as the stars" is read as:
+   each population's column of the two new rows holds the same number. The matrix allows a later
+   version to thin rogue planets in the metal-poor halo; the measurement, made towards the bulge,
+   does not yet justify it.
+
+4. **The field density is the stars' field density.** The substellar rows multiply the same
+   population densities as the stellar rows, including the factor 1 − φ that plan 09 introduced for
+   systems inside features. Plan 09's `field_factor(population, band)` is per band, and for the two
+   new bands it returns layer A's factor, the band of the stars these objects most resemble in
+   number and origin. Objects born in clusters are therefore neither in the grid nor in the features
+   for now. The alternative, the full budget without 1 − φ, would put free-floating objects where
+   the young field has almost no stars, which contradicts "they follow the stars".
+
+5. **The brown-dwarf band is [13 M_Jup, 0.08 M☉).** The brainstorm says 13–80 Jupiter masses, and
+   0.08 M☉ is 83.8. Taking 80 literally would leave a gap that no layer owns, so the upper edge is
+   the stellar layers' lower edge and "80" is read as its rounding.
+
+6. **The brown-dwarf mass function is the substellar branch of the universe's mass function**,
+   behind plan 02's `MassFunction`: for Kroupa (2001) a power law of index −0.3 below 0.08 M☉, for
+   Chabrier (2003) the continuation of the log-normal. Only its shape is used. The normalisation is
+   the abundance parameter, one per 5.5 stars, not continuity with the stellar branch, because the
+   brainstorm fixes the count. The count is of free-floating objects only. The brainstorm's other
+   figure, "one for every four or five stars, companions included" ("Sizing the layers"), is this
+   one plus the brown-dwarf companions that plan 11 draws, about 0.04 per star, and P13.T9 reports
+   the sum once plan 11's companions exist.
+
+7. **The rogue-planet mass function** is dN ÷ dlog₁₀ M = Z × (M ÷ 8 M⊕)^−0.96 per star (Sumi et al.
+   2023), that is dN ÷ dM ∝ M^−1.96, "falling nearly as 1 ÷ mass". With Z = 2.18 per dex per star
+   the integral from ⅓ M⊕ to 13 M_Jup (4,131 M⊕) is 21.0, so the abundance parameter and the paper's
+   normalisation agree, and only the abundance, the slope and the limits are parameters; Z is
+   derived. Above 0.3 M_Jup the law gives 0.09 per star, inside the limit of one per four stars
+   (Mróz et al. 2017), and 97.7% of the objects are below Neptune's 17 M⊕.
+
+8. **The cap uses plan 03's headroom rule.** A 4 ly cell holds 64 ly³ and its index 65,536
+   candidates. Plan 03's Design note 6 already requires, for every layer, that the largest possible
+   bound × volume plus eight standard deviations stay under the index capacity, with the largest
+   bound taken as the sum of every component's global peak, so no search is needed. For this layer
+   that is a largest Poisson mean λ with λ + 8√λ ≤ 65,536, about 63,500, or 992 per cubic light-year
+   in place of the brainstorm's nominal 1,024. A rogue-planet cell's bound is the abundance per
+   system times the bound on the total system density, so the cap per system is 992 ÷ the sum of the
+   components' peak densities (18.7 per ly³ at Milky Way values, up to 27). The effective abundance
+   is the smaller of the parameter and the cap, and `check_index_headroom` then passes by
+   construction. At the default 21 per star the cap binds for no seed in plan 02's ranges, and a
+   test asserts that, because it is what plan 02's coupled size draws were introduced to guarantee.
+   The brown-dwarf layer needs no cap: its fullest 16 ly cell expects about 20,000 candidates
+   against 2¹⁹.
+
+9. **Asking and the floor.** The brainstorm says the layers are walked "only when the caller asks"
+   and that the mass floor "gains two steps". Plan 03 already carries both: the builder's
+   `substellar(SubstellarRequest)` is the asking, and `MassFloor` has room for the steps. They are
+   tied so that they cannot disagree: a request of `BrownDwarfs` or `BrownDwarfsAndRoguePlanets`
+   lowers a floor of `LayerA` to the matching step, a floor step below `LayerA` without the matching
+   request is a build error, and a request with a floor above `LayerA` is a build error too, since
+   the floor would cut the layers off. The walk goes E to A, then brown dwarfs, then rogue planets,
+   and the census rule is unchanged: a layer whose expected count would exceed the caller's limit is
+   dropped whole with everything after it. On the wire the single field `min_layer` carries both,
+   because `MassLayer` gains the two values: a client that sends `brown_dwarf` or `rogue_planet` has
+   asked. Plan 04 also reserved an optional `include_substellar` flag for this. It stays reserved
+   and unused, because a second field could only ever repeat or contradict the first.
+
+10. **Records are `SystemRecord`s.** A free-floating object is a system with no star, as the
+    brainstorm says, so it has a `SystemId`, a position, a population, an age and a mass, and
+    everything keyed by `SystemId` (drift, tidal radius, frames, designations, overlays) works
+    without a special case. `SystemKind` is derived from the layer and never stored. (The name
+    `ObjectKind` is plan 06's, for what a star is now.)
+
+11. **Streams.** A candidate's streams are keyed by its ID, which contains the layer, so the
+    position, acceptance, population and age draws reuse plan 03's tags and are independent of every
+    stellar draw by construction. The mass draw uses a new tag, `substellar.mass`, because its
+    distribution is not the stellar one and must be free to change alone.
+
+12. **A rogue planet's state is plan 14's; the cooling fit it needs is built here.** Plan 06's fit
+    is valid from 0.01 M☉ (10.5 M_Jup) up. Plan 14 derives a rogue planet as body `0x0000` and asks
+    this plan for the cooling of giants from 0.3 M_Jup, so P13.T5.b and P13.T5.c extend the fit down
+    to 0.3 M_Jup as `giant_cooling`. This plan itself returns, for a rogue planet, mass, age,
+    population and metallicity and nothing derived, and the readout says so until plan 14
+    (`BULK PROPERTIES: NOT YET MODELLED`), which is what the UX guide's rule on honest data asks
+    for.
+
+13. **Small bodies scale with the stars.** The density is 0.1 per cubic astronomical unit (the
+    brainstorm's "perhaps one for every ten cubic astronomical units") at the reference density of
+    0.003 systems per cubic light-year, times the local total system density ÷ 0.003, since such
+    bodies are ejected from planetary systems. The brainstorm cites no source for the figure, and
+    the doc comment says that it is the brainstorm's.
+
+14. **Units on the consoles.** Every planetary mass is shown in M⊕, here and in plan 14 (its D19):
+    the guide asks for one unit per quantity everywhere on the ship, and a second planetary unit
+    would need a Jupiter sign that B612 lacks as it lacks `☉`. So a rogue planet's mass is in M⊕ (up
+    to `4,131 M⊕`), and a brown dwarf's is in M☉ (`0.052 M☉`), the unit of the stellar sequence it
+    continues. No Jupiter-mass unit enters the guide. The two new floor steps read `0.012 M☉` and
+    `0.33 M⊕`.
+
+15. **Symbols.** Plan 06 uses circle, ringed circle, diamond, triangle and square, and already draws
+    `ObjectKind::Substellar` as a circle. A brown dwarf keeps the circle, at layer A's size class,
+    because it is the faint end of the same sequence; the list, readout and legend name it. A rogue
+    planet is a new type and gets a new `SymbolShape`, `triangle-down`, also at layer A's size
+    class, the smallest at which plan 05 found an open outline still reads as open. No size class
+    below A is added.
+
+## Tasks
+
+Parallelism: T1, T5.b, T5.c and T6 are independent of everything else here (T5.c needs T5.b). T2
+needs T1. T3 needs T2. T4, T5.a and T5.d need T3 and are independent of each other. T7 needs T4 and
+T5.a. T8.a and T8.b need only plan 05; T8.c and T8.d need T7. T9 needs T3–T5 and can run beside T7
+and T8. Every domain tag is added to `rng/tags.rs` in the task that first opens a stream under it,
+as plan 01 requires.
+
+### P13.T1 Parameters, units and mass functions
+
+Build `substellar::params` and `substellar::mass`, on plan 01's `JupiterMasses` and `EarthMasses`.
+Register `SUBSTELLAR_MASS` in `rng/tags.rs`; the mass stream is
+`Stream::open(seed, tags::SUBSTELLAR_MASS, ObjectKey::from(id))`. `draw_brown_dwarf_mass` samples
+the substellar branch of the `MassFunction` between the band edges; add that branch to plan 02's
+`Kroupa` and `Chabrier` implementations as a separate method, leaving every existing method's output
+unchanged. `draw_rogue_planet_mass` uses plan 01's `PowerLaw::new(1.96, lo, hi)` (its α is the
+positive exponent of a density ∝ x^−α, here in dN ÷ dM) with both limits explicit.
+`rogue_planets_above` is the closed-form integral. Re-check the slope, normalisation and lower mass
+against Sumi et al. (2023), the Jupiter limit against Mróz et al. (2017), and the substellar indices
+against Kroupa (2001) and Chabrier (2003).
+
+- Files: `crates/hyperion-sim/src/galaxy/substellar/{mod.rs,params.rs,mass.rs}`,
+  `crates/hyperion-sim/src/rng/tags.rs`, plan 02's `imf` module.
+- Tests: 10⁵ draws of each mass pass plan 01's Kolmogorov–Smirnov helper against the analytic
+  distribution; all draws lie inside their band; with Z derived from 21 per star the value at 8 M⊕
+  is 2.18 per dex to 2%; `rogue_planets_above(0.3 M_Jup)` is under 0.25 per star; the share below 17
+  M⊕ is above 0.95; plan 02's `imf` goldens are unchanged.
+- Acceptance: `cargo test -p hyperion-sim substellar` passes.
+
+### P13.T2 Abundance, the per-galaxy cap and the share matrix
+
+Build `substellar::abundance` by Design notes 2, 3 and 8. Add `Galaxy::mean_stars_per_system()` if
+missing, computed once with the quadrature of plan 02's `fates` module. Add
+`MassBand::{BrownDwarf, RoguePlanet}`; every exhaustive match on `MassBand` then fails to compile
+and is settled one by one: `BandShares` and `MassFunction::sample_in_band` reject the two values
+(they are not part of the stellar normalisation), `ShareMatrix::share` and `component_share` return
+the per-system abundance, the conversion from `id::Layer` maps the two layers, and plan 09's
+`FeatureShares::phi` and `field_factor` answer for them as for band A (Design note 4). `Galaxy`
+builds and holds a `SubstellarAbundance` and feeds it to its `ShareMatrix`. Extend plan 03's
+`check_index_headroom` to the two layers.
+
+- Files: `crates/hyperion-sim/src/galaxy/substellar/abundance.rs`, plan 02's `imf`, `shares` and
+  `Galaxy`, plan 03's `placement` (headroom check only).
+- Tests:
+  - Milky Way fixture: brown dwarfs per system 0.23–0.27; rogue planets per system 27–31; the cap
+    per star within 10% of 38; `is_capped()` false; `check_index_headroom` passes.
+  - With `with_rogue_planets_per_star(42.0)` on the Milky Way fixture the effective figure equals
+    the cap, the cap × the summed peak densities × 64 is at most the headroom mean, and
+    `check_index_headroom` still passes.
+  - Over 2,000 seeds (slow): the default abundance is never capped; the smallest cap per star found
+    is recorded and lies within 20% of the brainstorm's 27; the brown-dwarf layer's fullest 16 ly
+    cell has a mean under 10% of its 2¹⁹ index.
+  - For the five stellar bands `ShareMatrix::share` is bit-identical to before.
+- Acceptance: the tests pass; every stellar golden file is unchanged.
+
+### P13.T3 Placement of the two layers
+
+- **P13.T3.a Brown dwarfs.** Add `SUBSTELLAR_LAYERS` and make `layer_spec` answer for
+  `Layer::BrownDwarf`: cell size from `Layer::cell_size_ly()` (16 ly), density and bound from
+  `layer_density` and `layer_bound` with `MassBand::BrownDwarf`, population pick and age as for
+  stars, mass from `draw_brown_dwarf_mass`. `CellKey::new` stops rejecting the layer with its
+  `BuildCellKeyError`, `CellKey::of` stops returning `ResolveSystemError::LayerNotGenerated` for it,
+  and plan 03's tests that assert the layer is not generated are replaced in the subtask that makes
+  each of them false (here and in T3.b for `CellKey`, in T3.c for `resolve`). Acceptance: where the
+  system density is 0.003 per ly³ a 16 ly cell averages 2.6–3.4 brown dwarfs (the brainstorm's "two
+  or three", at this plan's stars per system); at five positions (plane at 26,000 ly, 3,000 ly above
+  it, the bulge at 1,000 ly, an arm ridge, the halo at 40,000 ly) the count in a test volume lies
+  inside plan 01's Poisson interval for the expected count; the population mix passes a chi-square
+  test against the odds the stellar layers use at the same position; ages pass a Kolmogorov–Smirnov
+  test against layer A's ages there.
+- **P13.T3.b Rogue planets.** The same for `Layer::RoguePlanet`: 4 ly cells (k = −1), positions
+  drawn as integer light-years within the cell (two bits per axis) plus an offset, candidate index
+  in 16 bits with the ID's spare bits carrying the extra cell bits as plan 01 encodes them, mass
+  from `draw_rogue_planet_mass`. `LayerSpec::cell_ly` is a `u32` and 4 fits; any code in plan 03
+  that assumes a cell of at least 8 ly is found by a test that generates a cell at every corner of
+  the root cube. Acceptance: the same three statistical checks; at a density of 0.003 systems per
+  ly³ a cell averages 4.8–6 objects; every generated ID round-trips through plan 01's canonical
+  decode; an ID of another layer with non-zero spare bits is still rejected.
+- **P13.T3.c Resolution, designations, goldens.** `resolve` for both layers (recompute the candidate
+  count, check the index, rerun the acceptance), `SystemRecord::kind`, designations through plan 01.
+  The carve-out hook `catalogue_claims` is not called for these layers. Bump `GENERATOR_VERSION`.
+  Acceptance: every object from a generated cell resolves to the same record; an index at or above
+  the candidate count, and a rejected candidate's index, resolve to "no such system"; order
+  independence (cells generated in two orders and an object resolved alone agree bit for bit); a
+  golden file of twenty objects per layer for two seeds; objects with negative age exist in the
+  young disc and are "no system yet" before their birth.
+- **P13.T3.d Bound hunting.** Extend plan 03's violation hunt to 4 ly and 16 ly cells along arm
+  ridges near the bar's ends and in the flared and central regions, with the debug assertion that
+  density never exceeds the bound active. Acceptance: no violation in 10⁶ candidates per layer
+  (slow).
+- Files: plan 03's `placement` module and tests, `crates/hyperion-sim/tests/golden/`.
+
+### P13.T4 Range query: the request and two floor steps
+
+Accept `SubstellarRequest::{BrownDwarfs, BrownDwarfsAndRoguePlanets}`, add
+`MassFloor::{BrownDwarfs, RoguePlanets}`, and implement the tie between them, the walk order and the
+census of Design note 9 (new error variants `SubstellarNotRequested` and `SubstellarBelowFloor` on
+`BuildRangeQueryError`; `SubstellarLayersUnavailable` is removed). Expected counts for the census
+decision come from the same integral of the layer density over the sphere that the stellar layers
+use: plan 03's `LayerCounts` has had seven entries since M1, the two substellar ones held at zero
+(its design note 17), and `expected_counts` now fills them, only when the layers are requested.
+`Census::complete_down_to` can now name a substellar layer, and `complete_above` then returns that
+band's lower edge in M☉ (0.0124 for brown dwarfs, 1.0 × 10⁻⁶ for rogue planets). `cells_in_sphere`
+and `count_cells_in_sphere` accept the two layers, and the cell budget counts their cells. Padding,
+the time argument, the cell budget and the unborn filter apply unchanged. The merge hook for
+non-grid sources gains nothing, since no feature holds substellar members.
+
+- Files: plan 03's `query` module and tests.
+- Tests: with the default request the result is bit-identical to the result before this plan and the
+  query's statistics show no substellar cell touched; with `BrownDwarfs` a 50 ly query where the
+  density is 0.003 per ly³ returns about 390–450 brown dwarfs (Poisson interval on the computed
+  expectation) and the same stars; with `BrownDwarfsAndRoguePlanets` and a limit of 5,000 at 50 ly
+  the rogue-planet layer is dropped whole and the census names the brown-dwarf step; at 10 ly it is
+  kept and returns about 350–400; at the galactic centre with a 0.5 ly radius the expected count
+  drives the decision and the result is the same across runs and cache states; results at t = ±1,000
+  years contain the same IDs apart from those crossing the sphere; each contradictory builder input
+  returns its error variant.
+- Acceptance: the tests pass; plan 03's query benchmarks are unchanged at the default request.
+
+### P13.T5 State of a brown dwarf, the giant cooling fit and the hook for plan 14
+
+- **P13.T5.a Brown dwarfs through the stellar stage.** Route a brown-dwarf record through plan 06's
+  stage: metallicity draw, then `stellar::substellar::cooling` at age plus clock time, then
+  classification. Plan 06's fit starts at 0.01 M☉ and the band at 0.0124 M☉, so no extension is
+  needed at this end; the deuterium-burning refinement that P06.T13 leaves to this plan is made here
+  if the source gives it in closed form, and otherwise recorded as not modelled. Check that
+  `PotentialTables::tidal_radius` accepts substellar masses. Tests: over 10⁴ brown dwarfs, none is
+  classed earlier than M6, effective temperature falls monotonically with age at fixed mass and
+  rises with mass at fixed age, state is continuous across ±H, and state is continuous in mass
+  across 0.08 M☉ against a layer-A star of the same age and metallicity to 5%; a golden histogram of
+  classes for the old thin disc and the halo, checked by eye against the expectation that old brown
+  dwarfs are mostly T and Y; an Earth-mass object at 26,000 ly has a tidal radius of 0.04–0.08 ly.
+- **P13.T5.b The giant-planet cooling data.** This plan builds the cooling fit for 0.3–13 M_Jup and
+  plan 14 consumes it. The source is the giant-planet models of Burrows et al. (2001), the one the
+  brainstorm cites for this range. First evaluate the paper's power laws for L, T_eff and R at 1
+  M_Jup and 4.6 Gyr against Jupiter (effective temperature 100–160 K, radius within 10%). Recalled
+  without the paper to hand, they miss Jupiter's luminosity severalfold, so expect to need the
+  second route: a `hyperion-fit` task `giant_cooling`, written to plan 15's conventions, that reads
+  the published model grid (committed under `crates/hyperion-fit/data/giant_cooling/` with its
+  `PROVENANCE.toml`), fits log L and R on a grid of at most 12 masses × 12 ages in log mass and log
+  age, and writes `crates/hyperion-sim/src/tables/giant_cooling.rs` with plan 15's header and lock
+  entry. Acceptance: either the power laws pass the Jupiter check and the doc comment records it, or
+  `just fit giant_cooling` writes the table and `just fit-check` passes.
+- **P13.T5.c Cooling of giant planets.** `stellar::substellar::giant_cooling` (signature under
+  Provides) for 0.3–13 M_Jup and ages from 1 Myr, from T5.b's power laws or table (interpolated
+  bilinearly in log mass and log age, continuous in both, no bins in age). It must join plan 06's
+  fit at 0.0124 M☉: luminosity, radius and temperature agree to 5% there at 0.1, 1 and 10 Gyr, by a
+  blend over 10–13 M_Jup if the two sources disagree. Tests: a 1 M_Jup object at 4.6 Gyr has an
+  effective temperature of 100–160 K and a radius within 10% of Jupiter's; luminosity falls
+  monotonically with age and rises with mass; state is continuous in age across ±H; golden values at
+  nine (mass, age) points. Acceptance: `cargo test -p hyperion-sim stellar::substellar::giant`
+  passes and plan 06's goldens are unchanged.
+- **P13.T5.d The hook.** For a rogue planet the sim returns the record and its metallicity and no
+  derived state. Document on `SystemKind` the body-`0x0000` convention and that plan 14's `HostKind`
+  converts from it. Test: a rogue planet's summary has no stellar fields and serialises without
+  them.
+- Files: plan 06's `stellar/substellar.rs` and its tests, `crates/hyperion-fit/` and
+  `crates/hyperion-sim/src/tables/giant_cooling.rs` if a table is needed,
+  `crates/hyperion-sim/src/galaxy/substellar/mod.rs`.
+- Acceptance (T5.a and T5.d): their tests pass under `cargo test -p hyperion-sim substellar`; plan
+  06's goldens are unchanged.
+
+### P13.T6 Interstellar small-body density
+
+Build `substellar::small_bodies` by Design note 13, add `PerCubicAu`, register the reserved tag
+`INTERSTELLAR_SMALL_BODIES` (scope `Cell`) in `rng/tags.rs` with a comment on what it is reserved
+for: making such bodies real around a ship, keyed by a cell.
+
+- Files: `crates/hyperion-sim/src/galaxy/substellar/small_bodies.rs`,
+  `crates/hyperion-sim/src/units.rs`, `crates/hyperion-sim/src/rng/tags.rs`.
+- Tests: 0.1 per au³ where the system density is 0.003 per ly³; proportional to the system density
+  at three other positions; the domain-tag collision test still passes.
+- Acceptance: the tests pass.
+
+### P13.T7 Protocol and server
+
+Add `BrownDwarf` and `RoguePlanet` to the wire's `MassLayer`. `min_layer` then carries the request
+(the server maps it to the sim's `SubstellarRequest` and floor), `SystemRecord::layer` tells the
+kind, and `LayerCensus` rows appear for the two layers with their mass bounds in M☉. For a brown
+dwarf the record carries plan 06's `StellarBriefDto` when `include_stellar` is set; for a rogue
+planet that field is absent, not zeroed. No request kind is added, so `REQUEST_KINDS` is unchanged,
+and plan 04's reserved `include_substellar` stays unused (Design note 9). Add the `substellar` group
+to `GalaxyParameters`: the three abundances as `Number { unit: None }` with origin `Derived`, and
+`rogue_planets_capped` as `Text { value: "yes" | "no" }`. The server keeps its result limit as the
+census limit and accounts a rogue-planet cell's bytes in the cell cache (a central cell holds some
+35,000 records, over a megabyte). Run `just gen-protocol`.
+
+- Files: `crates/hyperion-protocol/src/` (plan 04's galaxy messages), `crates/hyperion-server/src/`
+  (plan 04's handlers and caches), `packages/protocol/src/`.
+- Tests: wire-form tests pinning the JSON of a request with each new `min_layer`, of a result
+  holding one of each kind, and of the parameters group; a WebSocket integration test that the
+  default request returns no substellar object and a lowered `min_layer` does; a cache test that
+  inserting a central rogue-planet cell evicts by bytes and never exceeds the bound.
+- Acceptance: `just gen-protocol-check` and `just ci` green.
+
+### P13.T8 Client: symbols, selectors, legend, units
+
+- **P13.T8.a UX guide.** Edit `docs/frontend/ux-guidelines.md`: allow the Earth mass as a unit,
+  written `M` with the drawn `⊕` glyph that plan 05 reserved there; state Design note 14's rule for
+  which objects use which mass unit; add the inverted triangle to the star chart's symbol set as
+  "free-floating planet" and "brown dwarf" to the circle's meanings. Acceptance:
+  `grep -n "⊕\|free-floating" docs/frontend/ux-guidelines.md` finds each edit, and Prettier passes
+  on the guide.
+- **P13.T8.b Glyph and formatting.** `components/EarthGlyph.tsx` (an inline SVG sized to the text, a
+  circle with a cross, in `currentColor`) and `components/EarthMassUnit.tsx`, modelled on `SunGlyph`
+  and `SolarMassUnit`, with the accessible name "Earth masses" on the unit as a whole; in
+  `lib/format.ts`, `formatMassMearth` (two decimals below 10, one below 100, whole numbers with
+  digit grouping above) and `formatSubstellarMass(massMsun, layer)`. The character `⊕` is never
+  typed into a string that reaches the screen. Tests: the unit's accessible name; `0.33`, `17.1` and
+  `4,131` from the formatter; a brown dwarf formats in M☉ and a rogue planet in M⊕. Acceptance:
+  `pnpm test` and `pnpm lint` green.
+- **P13.T8.c Chart symbols, selector and census.** `symbols.ts` gains the `triangle-down` outline
+  and `starSymbols.ts` the two kinds (Design note 15). Every exhaustive `switch` over `MassLayer`
+  now fails to compile and is settled: plan 05's `layerIndex` gives both new layers layer A's size
+  class. `ChartControls`' `MIN MASS` group gains the steps `0.012 M☉` and `0.33 M⊕`,
+  keyboard-operable like the others, below `0.08`, which no longer reads `ALL`; the lowest step
+  does. Choosing a substellar step while the query radius would exceed the census limit is allowed,
+  and `CensusReadout` (`COMPLETE ABOVE 0.012 M☉`) tells the operator what was dropped, as it does
+  for stars. Tests: component tests for the selector steps and which one reads `ALL`, and for the
+  census line in each unit; a pure test that `triangle-down` open and filled differ only by fill and
+  share a hit area. Acceptance: `pnpm typecheck`, `pnpm lint` and `pnpm test` green.
+- **P13.T8.d Legend, readout, list and parameters.** `SymbolLegend` gains the inverted triangle and
+  the circle's new meaning and keeps `SYMBOLS NOT TO SCALE`. `SystemReadout` shows kind, mass in the
+  unit of Design note 14, age, population and metallicity, class and temperature for a brown dwarf,
+  and `BULK PROPERTIES: NOT YET MODELLED` for a rogue planet, never a blank or a zero.
+  `SystemList`'s kind column names the two kinds in words, so that shape is never the only signal,
+  and plan 06's `STARS` filter gains them. `parameterLabels.ts` gains the `substellar` group. Tests:
+  component tests for the legend, the readout of each kind, the list and the parameter labels.
+  Acceptance: `pnpm typecheck`, `pnpm lint`, `pnpm test` and `just ci` green; by eye, at 10 ly
+  around a point in the plane the chart shows a few stars, about one brown dwarf per five stars and
+  a few hundred rogue planets, and remains readable.
+- Files: the named components and modules under `apps/hyperion/src/renderer/src/` and their tests.
+
+### P13.T9 Statistical tests and benchmarks
+
+Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion benches in
+`crates/hyperion-sim/benches/substellar.rs`.
+
+- Ratios in a 400 ly cube in the plane at 26,000 ly, Milky Way fixture: brown dwarfs ÷ stars within
+  10% of 1 ÷ 5.5 and rogue planets ÷ stars within 10% of 21, with stars counted as systems ×
+  `mean_stars_per_system()`; objects above 0.3 M_Jup under one per four stars. The test also prints
+  free-floating brown dwarfs plus plan 11's brown-dwarf companions per star, for review against the
+  brainstorm's "one for every four or five stars, companions included"; that figure is not asserted
+  here, because the companions are plan 11's.
+- Budgets: over ten random large volumes the summed counts of each layer match the integral of its
+  density (Poisson interval), which is the brainstorm's density-against-the-field test for these
+  layers.
+- Determinism: two runs agree; the stellar goldens of plans 03 and 06 are unchanged.
+- Benchmarks, with targets that are findings if missed: one rogue-planet cell touching the origin,
+  about 35,000 candidates (20 ms); a 0.5 ly query at the origin with rogue planets requested (150 ms
+  cold); a 10 ly query at a density of 0.003 per ly³ with rogue planets requested (5 ms cold over
+  the stellar query); a 50 ly query with brown dwarfs requested (1 ms over the stellar query). If
+  the first two miss, the recorded remedy is to test a candidate's distance from the padded sphere
+  before evaluating its density, which changes no output because acceptance is independent per
+  candidate, and applies only to cells not being cached whole.
+- Acceptance: `just test-slow` green; `just bench` runs the four benches and the figures are
+  recorded in the module docs.
+
+## Verification
+
+- `just ci`, `just test-slow` and `just bench` as listed. The brainstorm's requirements map as
+  follows: layer sizes and ID layout (T3.b, T3.c), abundances and the per-galaxy cap (T2, T9), mass
+  functions and the Jupiter limit (T1, T9), same populations and ages (T3.a, T3.b), state from the
+  cooling fits (T5.a), the giant cooling fit handed to plan 14 (T5.b, T5.c), the two floor steps and
+  walking only on request (T4), the statistical small-body density (T6), display changes (T8), the
+  central-cell benchmark (T9).
+- Golden, order-independence and bound tests as the brainstorm's Testing section requires of any
+  placed layer (T3.c, T3.d).
+- By eye in the `GALAXY` display: a 10 ly chart in the plane with the floor at its lowest step; the
+  same at 1,000 ly from the centre with a radius of 2 ly; the parameters panel's abundances for
+  several seeds.
+
+## Generator version
+
+- No existing object moves: the new layers have their own layer values in every ID, and the only new
+  tag with draws is `substellar.mass`. `GENERATOR_VERSION` is bumped once, in P13.T3.c, when the
+  layers become resolvable, because a universe gains objects. Goldens of earlier plans change only
+  where they record the version.
+- The abundances, the slope, the band limits, the headroom rule behind the cap and the giant cooling
+  fit belong to the generator version; changing any of them changes candidate counts and so every
+  substellar object.
+- Reserved: the tag `interstellar.small_bodies`; per-population entries in the two share-matrix
+  rows; body `0x0000` of a free-floating system for the object itself, with plan 14 taking slots
+  from `0x01`. The two layers use the last layer values, so, as the brainstorm notes, the spare bits
+  of the other layers are the only room left in the ID.
+
+## Risks and open points
+
+- **Stars per system: an inconsistency in the brainstorm.** It converts 21 per star to "about 26 per
+  system" (a ratio of 1.24), while its caps of 38 and 27 per star against 1,024 ÷ 18.7 and 1,024 ÷
+  27 per system imply 1.40–1.44, its local densities (0.0023 systems and 0.003 stars per cubic
+  light-year) imply 1.30, and plan 02 computes 1.33–1.45 from the multiplicity the brainstorm itself
+  specifies. The per-star figure is the measurement and the ratio is derived, so this plan uses the
+  computed ratio throughout: the galaxy holds 28–30 rogue planets per system and not 26, a 4 ly cell
+  at the reference density holds about five and a half and not five, and "490 per cubic light-year
+  at the centre" becomes about 540, still under the limit. Reported for the brainstorm's next
+  revision. If the owner prefers 26 per system as the primary figure, only `SubstellarParams`
+  changes.
+- **The measured abundance is uncertain by a factor of two either way.** At the upper end (42 per
+  star) the cap binds for most seeds near the centre, which silently lowers the abundance of the
+  whole galaxy, not only of the centre, because the share-matrix entry is one number per population.
+  The parameters panel shows when that happens.
+- **Features hold no substellar objects** (Design note 4). A globular cluster or the nuclear cluster
+  therefore shows no brown dwarfs on a chart. Plan 09's member ID has spare mass-band values that
+  could carry them; that is a later revision with a version bump.
+- **Brown dwarfs are single.** Plan 11's multiplicity is not applied, although a tenth to a fifth of
+  free-floating brown dwarfs are binaries. Applying it later changes no placement, only the systems'
+  contents.
+- **The upper band edge** is read as 0.08 M☉, not 80 M_Jup (Design note 5).
+- **Cost at the centre.** A single central rogue-planet cell is tens of thousands of candidates and
+  a 0.5 ly query touches at least eight. The benchmark targets are derived from plan 03's
+  per-candidate cost and are untested until that code exists.
+- **The giant cooling fit.** Burrows et al. (2001) give power laws for brown dwarfs and model curves
+  for giant planets, and what this plan says of them is recalled, not re-read: P13.T5.b re-checks
+  it. If the curves must be fitted, T5.b is a `hyperion-fit` task of about a day and T5.c the
+  function. Plan 14 depends on the function's name, range and `CoolingState`, not on its internals.
+- **The cap against the index limit.** The brainstorm states the limit as 1,024 per cubic
+  light-year, the bare capacity of the index. Under plan 03's headroom rule the usable figure is 992
+  (Design note 8), which lowers the caps by 3% and is inside the rounding of "about 38" and "27".
+- **Two knobs for one request.** Plan 03 carries both a `SubstellarRequest` and room in `MassFloor`.
+  Design note 9 ties them; dropping `SubstellarRequest` in favour of the floor alone would be
+  simpler and is a change to plan 03's signature that its author chose to avoid.
+- **Small-body density** rests on an unsourced figure in the brainstorm (Design note 13).
