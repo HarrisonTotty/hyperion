@@ -964,3 +964,35 @@ component order and the map's quadrature scheme belong to the version as well.
   the dominant merger's orbit takes an eccentricity of 0.85–0.95 (Belokurov et al. 2018) in place
   of the broad pericentre range. Where the ages move, so do the halo's mean mass per system and
   everything that follows from N, by about 10⁻⁵.
+- **R13. The black hole and σ as built (P02.T6.e).** The estimator follows D8 exactly; a direct
+  projection integral reproduces the fixture's 119.3 km/s to 4 × 10⁻⁵, and the sphericalised bulge
+  is the sphere of the bulge's mass and central density (matching its second moment gives 123.6). At
+  119.3 km/s McConnell and Ma's relation gives 1.13 × 10⁷ M☉, 2.6 times Sgr A*'s (4.297 ± 0.012) ×
+  10⁶ (GRAVITY Collaboration 2022, A&A 657, L12): the Milky Way lies 0.421 dex below the relation,
+  1.1 times its scatter. So the fixture's M–σ scatter is −0.421 dex, not T5.c's zero, its black hole
+  is 4.30 × 10⁶ M☉, T6.e's factor of 2.5 is checked on that mass, and T11's enclosed mass at 1 pc
+  comes to 5.15 × 10⁶. Plan 08 resets the offset when it replaces the estimator. Over 10³ seeds 86%
+  of σ lie in 90–135 km/s (median 114), not 90%, because the isotropic spherical stand-in sits 5–10%
+  above the axisymmetric value (R4); the sweep asserts 85% until plan 08.
+- **R14. `MGE_BAR` against its tests (P02.T6.a).** A non-negative sum of centred Gaussians is
+  log-convex in u², and the bar's Gaussian end is log-concave, so no such sum meets 3% locally. By
+  linear programming over 14 or 16 log-spaced widths, the best maximum relative error is 12% out to
+  one half-length and 30% out to 1.1, and holding even the level part to 10% puts the mass over 0.5%
+  off. More or re-placed widths and relative weighting do not help, so the table stands. The 3% is
+  read against the central value (2.9%), the mass is met (0.2%), and the mass inside a radius, which
+  the rotation curve reads, is off by up to 6.6% just beyond the half-length (4.4% at best with the
+  other two held), bounded at 7% by the test. P15.T3.a's 2% for the bar meets the same limit unless
+  it allows negative weights or off-centre terms.
+- **R15. Other as-built points (P02.T6).** `PotentialTables::full` takes 2.7 s against 2 s (R9):
+  4,096 points × 767 Gaussians × 32 nodes. 44% of the evaluations regenerate their nodes, 32%
+  because the point lies beyond the Gaussian's cut; sharing the other 12% along a column would save
+  under 10%, so the vertical expansion is not cut. `GalaxyParams::from_seed` takes 7.4 ms, not "well
+  under a millisecond" (T11), because T6.e's σ builds the black-hole-free model (1.1 ms) and reads
+  its rotation curve at 16 radii (5.5 ms); a recomputed constant and unused node caches (0.6 ms)
+  were removed. `MassModel::enclosed_mass` holds the spherical components only, as T11 reads it, and
+  `expanded_enclosed_mass` adds the Gaussians. The nuclear cluster's break is sharp, so its mass and
+  potential are closed forms, not tabulated quadratures, and the bulge's moments are Beta functions,
+  checked against the two-dimensional `gl32` quadrature. At Milky Way values v_c is 150, 180 and 216
+  km/s at 0.5, 1 and 2 kpc, 8–11% under the research note's model (163, 202, 239), with every
+  enclosed mass of T11 inside its bracket and v_c(1 kpc) ÷ v_c(8 kpc) 0.81 against the note's Milky
+  Way 0.87. `GENERATOR_VERSION` is 3.

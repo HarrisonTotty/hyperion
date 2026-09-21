@@ -210,7 +210,8 @@ fn the_milky_way_fixture_has_the_plan_values() {
         1e-15,
     );
     assert_relative("f★", p.dark_halo().f_star(), 0.32, 0.0);
-    assert_same_bits(p.black_hole().scatter().value(), 0.0);
+    // The Milky Way's own offset from M–σ, which makes its black hole Sgr A*'s mass.
+    assert_same_bits(p.black_hole().scatter().value(), -0.421);
     // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "0.48
     // M☉ under Kroupa's function" (brainstorm, "Galaxy parameters"), with plan 02's ±0.03.
     assert_within("system count", p.system_count(), 1.0e11, 1.3e11);

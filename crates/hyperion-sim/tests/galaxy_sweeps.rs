@@ -100,10 +100,10 @@ fn sizes_correlate_with_masses_at_the_cube_root() {
 
 /// The bulge's dispersion over 10³ seeds (P02.T6.e): the plan asks that 90% lie in 90–135 km/s.
 ///
-/// Finding: the isotropic spherical estimator of Design note 8 sits about 5–10% above the
-/// brainstorm's axisymmetric value (Risks, R4), and 86–88% of seeds fall in the band, with the
-/// median near 115 km/s. The bracket checked is 85% until plan 08's Jeans table replaces the
-/// estimator; the median and the tails are checked as well.
+/// Finding: the isotropic spherical estimator of Design note 8, which the code follows exactly,
+/// sits about 5–10% above the brainstorm's axisymmetric value (Risks, R4), and 86% of seeds fall
+/// in the band, with the median near 115 km/s. The bracket checked is 85% until plan 08's Jeans
+/// table replaces the estimator (Risks, R13); the median and the tails are checked as well.
 #[test]
 #[ignore = "slow: builds the parameters, and the σ estimator, of 10³ galaxies"]
 fn the_bulge_dispersion_over_a_thousand_seeds() {

@@ -16,7 +16,7 @@
 
 use super::model::MassModel;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::quad::{bisect, gl_panels};
+use crate::galaxy::quad::gl_panels;
 use crate::math;
 use crate::units::{Dex, KilometresPerSecond, LightYears, SolarMasses};
 
@@ -82,7 +82,9 @@ pub fn sphericalised_scale(params: &GalaxyParams) -> LightYears {
 }
 
 /// The fraction of a spherical exponential's mass projected outside the cylinder of radius `x`
-/// scales: `(1 ÷ 6) ∫_x^∞ (r² − x²)^(3÷2) e^(−r) dr`, by `r = x cosh t`.
+/// scales: `(1 ÷ 6) ∫_x^∞ (r² − x²)^(3÷2) e^(−r) dr`, by `r = x cosh t`. Only the tests evaluate
+/// it, to pin [`EFFECTIVE_RADIUS_IN_SCALES`].
+#[cfg(test)]
 fn projected_outside(x: f64) -> f64 {
     let t_end = math::acosh(1.0 + 60.0 / x);
     let edges = [0.0, 0.125, 0.25, 0.5, 1.0].map(|f| f * t_end);
@@ -96,12 +98,14 @@ fn projected_outside(x: f64) -> f64 {
     ) / 6.0
 }
 
-/// The projected half-mass radius of a spherical exponential, in scales, by bisection: about
-/// 2.0.
-#[must_use]
-pub fn effective_radius_in_scales() -> f64 {
-    bisect(|x| 0.5 - projected_outside(x), 0.5, 5.0, 60)
-}
+/// The projected half-mass radius of a spherical exponential, in scales: the root of `x² K₂(x) =
+/// 1`.
+///
+/// It is found by bisection on the mass fraction projected outside the cylinder of radius `x`,
+/// 60 steps from `[0.5, 5]`, and written down here because it is the same for every galaxy:
+/// recomputing it took half a millisecond of every parameter build. The test
+/// `the_effective_radius_is_the_bisected_root` repeats the bisection and requires these very bits.
+pub const EFFECTIVE_RADIUS_IN_SCALES: f64 = 2.026_996_389_655_237_4;
 
 /// `W(x) × 3 ÷ 4π`: the volume of the sphere of radius x inside the cylinder of radius
 /// `x_e`, in units of `4π ÷ 3`.
@@ -153,7 +157,7 @@ fn aperture_dispersion(model: &MassModel, a: f64) -> f64 {
             + (-2.0 * t3 + 3.0 * t2) * v2[k + 1]
             + step * ((t3 - 2.0 * t2 + t) * slope[k] + (t3 - t2) * slope[k + 1])
     };
-    let x_e = effective_radius_in_scales();
+    let x_e = EFFECTIVE_RADIUS_IN_SCALES;
     let edges = [
         0.0,
         0.5 * x_e,
@@ -184,7 +188,7 @@ fn aperture_dispersion(model: &MassModel, a: f64) -> f64 {
 /// ([`sphericalised_scale`]); `σ_r²(r) = (1 ÷ ν) ∫_r^∞ ν v_c² ÷ r′ dr′` is the isotropic Jeans
 /// solution in the model's in-plane rotation curve, sampled at 16 radii; the result is the
 /// square root of the mass-weighted mean of the projected `σ²` inside the projected half-mass
-/// radius ([`effective_radius_in_scales`]).
+/// radius ([`EFFECTIVE_RADIUS_IN_SCALES`]).
 #[must_use]
 pub fn bulge_dispersion(params: &GalaxyParams) -> KilometresPerSecond {
     let model = MassModel::without_centre(params);
@@ -197,15 +201,28 @@ pub fn bulge_dispersion(params: &GalaxyParams) -> KilometresPerSecond {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::galaxy::quad::bisect;
 
     /// The projected half-mass radius of a spherical exponential solves `x² K₂(x) = 1`, since
     /// the mass outside the cylinder is `x² K₂(x) ÷ 2`: `x = 2.0270`, which a Newton step from
     /// `K₂(2) = 0.253 760` and `d(x² K₂) ÷ dx = −x² K₁(x)`, `K₁(2) = 0.139 866`, confirms.
     #[test]
     fn the_effective_radius_of_an_exponential_sphere() {
-        let x = effective_radius_in_scales();
+        let x = EFFECTIVE_RADIUS_IN_SCALES;
         assert!((x - 2.027_0).abs() < 2e-4, "{x}");
+        assert!((projected_outside(x) - 0.5).abs() < 1e-14);
         assert!((projected_outside(1e-3) - 1.0).abs() < 1e-6);
+    }
+
+    /// The constant is the bisection's result to the last bit, so writing it down changed no
+    /// output.
+    #[test]
+    fn the_effective_radius_is_the_bisected_root() {
+        let bisected = bisect(|x| 0.5 - projected_outside(x), 0.5, 5.0, 60);
+        assert!(
+            bisected.total_cmp(&EFFECTIVE_RADIUS_IN_SCALES).is_eq(),
+            "{bisected:?}"
+        );
     }
 
     #[test]

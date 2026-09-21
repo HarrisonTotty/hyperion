@@ -9,7 +9,7 @@ argument-hint: "<task-id> [--feature <plan-set>]"
 Action plans live in `docs/agent/plans/<feature>/NN-*.md`. Each plan set has a roadmap
 `README.md` with its conventions, and names a brainstorm that is the specification. A plan says
 how to build, never what: where plan and brainstorm disagree, the brainstorm wins until the owner
-revises it.
+(the user, who rules on the specification) revises it.
 
 Task: `$ARGUMENTS`. If no ID was given, run `--list` (below), find the first task whose
 prerequisites exist in the code and whose own Provides do not, and confirm the choice with the
@@ -31,16 +31,21 @@ Task <id>:
 
 ## 1. Load the task
 
-Plans run to 1,000–1,800 lines. Run the extractor instead of paging through them. It prints the
-plan header, the ordering notes, the task (for a subtask: the parent intro and any paragraph shared
-by all subtasks), the full text of every design note the task cites, and the other lines in the
-plan set that mention the task. `--context` adds the plan's Generator version and Risks sections:
+Plans are long. Run the extractor from the repository root instead of paging through them. It
+prints the plan header, the ordering notes, the task (with its phase intro, and for a subtask the
+parent intro and the paragraphs shared by all subtasks), the design notes the task cites, and the
+other lines in the plan set that mention the task. `--context` adds the plan's Generator version
+and Risks sections. It works from headings and labels, so if a section looks cut short, read the
+plan around the lines it names:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py P02.T5.a --context   # the task in context
-python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py P02.T5.a --acceptance  # acceptance criteria and their commands
-python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py --list P02             # task IDs and titles; [commit] where a commit names one
+python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --context     # the task in context
+python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --acceptance  # acceptance criteria and commands
+python3 .claude/skills/implement-task/scripts/plan_task.py --list P02             # IDs and titles; [commit] if a subject names one
 ```
+
+When more than one plan set exists, plan numbers repeat: add `--feature <plan-set>` to every call,
+and pass it on to `validate` and `review-changes`.
 
 Then read:
 
@@ -48,8 +53,8 @@ Then read:
   figures.
 - The plan's **Provides** and **Consumes** entries for what this task builds or uses. Later plans
   grep for the names in Provides.
-- The brainstorm sections that the plan header lists and this task touches, and no others. The
-  brainstorm is about 2,000 lines, so find sections with `grep -n '^#' <brainstorm>`.
+- The brainstorm sections that the plan header lists and this task touches, and no others. Find
+  them with `grep -n '^#' <brainstorm>` rather than reading the whole brainstorm.
 - The plan's **Risks and open points** (printed by `--context`), especially what earlier tasks
   recorded as built. It says where the code differs from the plan text.
 - The "Mentioned elsewhere" lines. Later tasks and plans that check or consume this task's output
@@ -65,6 +70,11 @@ stand-ins outlive their tasks.
 Run `git status`. If there are unrelated uncommitted changes, mention them and keep your edits
 apart from them.
 
+If the task is its plan's reconcile task (one that adjusts the plan's Consumes to the code as
+built, such as galaxy-generation's P03.T1), or the first task of a plan the roadmap says must be
+re-validated when its turn comes and whose Risks section has no "Re-validated at" record, run the
+`revalidate-plan` skill first. Then carry on here with the corrected plan.
+
 ## 3. Settle open questions before writing code
 
 Unclear points come in two kinds, and they are handled differently:
@@ -79,7 +89,9 @@ Unclear points come in two kinds, and they are handled differently:
 
 The brainstorm's numbers are rounded. When a figure becomes code, re-check it against the source
 the brainstorm cites and put the citation in the doc comment. For more than a couple of figures,
-hand the list to the `science-checker` agent.
+hand the list to the `science-checker` agent. Where the source disagrees with the brainstorm beyond
+rounding, that is a specification question: give the owner both values rather than silently
+choosing one.
 
 ## 4. Build with tests
 
@@ -92,8 +104,8 @@ matching files, and they override habits from other codebases. In addition:
   `sim-determinism` skill before writing generators, random draws, or anything a golden file pins.
 - **Operator-facing UI** (`apps/hyperion/src/renderer`): load the `console-ux` skill before writing
   components, CSS, displayed strings or value formatting.
-- Both skills are listed only once you work with matching files. If one isn't offered yet, read
-  its `SKILL.md` under `.claude/skills/` directly.
+- Both skills are gated by `paths`, so they may not be offered until you touch matching files. If
+  one isn't offered yet, read `.claude/skills/<name>/SKILL.md` directly.
 - Write the task's tests with the code. Iterate with the narrowest command:
   `cargo test -p <crate> <filter>`, or `pnpm --filter hyperion exec vitest run <path>`.
 - Stay inside the task. Work that belongs to a later task or plan waits for it, even when it is
@@ -102,8 +114,15 @@ matching files, and they override habits from other codebases. In addition:
 ## 5. Validate
 
 Invoke the `validate` skill with the task ID. It runs in its own context, picks the checks for
-the changed files, runs the task's acceptance commands and the CI gate, and returns only what
-failed. Fix and re-run until it passes.
+the changed files, runs the task's acceptance commands and the CI gate, and returns a verdict with
+excerpts of any failures:
+
+- **PASS** or **PASS WITH SKIPS**: go on, and name the skipped checks in the report.
+- **FAIL**: fix the cause and validate again.
+- **INCOMPLETE**: resolve the cause if you can (wrong arguments, a tooling error you can work
+  around by checking the task by hand), otherwise report it. Don't loop on it.
+
+Whatever the verdict:
 
 - Never weaken a test, threshold, tolerance or lint to get to green. That includes widening a
   bracket the plan states and explaining it only in a code comment. If the plan's number is wrong,
@@ -123,12 +142,13 @@ reason, which goes in the report. Validate again after fixing.
 ## 7. Record as built
 
 The plan is the record the next task reads. Under **Risks and open points**, record what was
-built differently, in the plan's existing style. Plan 01 uses `**Deviations in T<n>, as built.**`
-bullets; plan 02 uses numbered items tagged with the task, such as `**R11. D4 re-checked
-(P02.T4).**`. Use the first form only when the plan has neither. Keep entries terse and factual,
-each deviation with its reason. Cover renamed or added public items, changed files or acceptance
-commands, and discoveries that affect later tasks. The plan-conformance reviewer's output lists
-candidates. Don't rewrite the task text itself. If nothing deviated, add nothing.
+built differently, in the style that section already uses. In galaxy-generation, plan 01 uses
+`**Deviations in T<n>, as built.**` bullets and plan 02 numbered items tagged with the task, such
+as `**R11. D4 re-checked (P02.T4).**`. If the plan has no such records yet, use the first form.
+Keep entries terse and factual, each deviation with its reason. Cover renamed or added public
+items, changed files or acceptance commands, and discoveries that affect later tasks. The
+plan-conformance reviewer's output lists candidates. Don't rewrite the task text itself, except
+through `revalidate-plan` (step 2). If nothing deviated, add nothing.
 
 If the task changed generated output, check that the plan's **Generator version** section still
 holds.

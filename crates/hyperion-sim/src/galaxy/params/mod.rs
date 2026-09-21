@@ -180,8 +180,9 @@ impl NuclearDiscParams {
 ///
 /// Its mass is 0.024 of the nuclear disc's with 0.2 dex of scatter, the Milky Way's 2.5 × 10⁷ M☉
 /// (Schödel et al. 2014) against its nuclear disc's 1.05 × 10⁹ M☉ (Sormani et al. 2022); inner
-/// slope 1.3 (Gallego-Cano et al. 2018), break 10 ly, outer slope 3.5 (brainstorm, "Dense
-/// features").
+/// slope 1.3, break 10 ly, outer slope 3.5 (brainstorm, "Dense features"). The slope lies between
+/// Gallego-Cano et al.'s (2018) 1.43 ± 0.1 for the faint stars and Schödel et al.'s (2018) 1.13 ±
+/// 0.05 for the diffuse light.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NuclearClusterParams {
     mass: SolarMasses,
@@ -463,8 +464,8 @@ impl GalaxyParams {
             .expect("every drawn value lies inside the range it is drawn from")
     }
 
-    /// The Milky Way fixture: the galaxy's measured values, without scatter, for the comparisons
-    /// of plan 02's P02.T11.
+    /// The Milky Way fixture: the galaxy's measured values, without scatter but for the black
+    /// hole's, for the comparisons of plan 02's P02.T11.
     ///
     /// M★ 6.0 × 10¹⁰ M☉ (Licquia and Newman 2015); shares thick 10%, bulge and bar 31% with the
     /// bar 30% of that (Bland-Hawthorn and Gerhard 2016; Portail et al. 2017), nuclear disc 1.75%
@@ -473,7 +474,9 @@ impl GalaxyParams {
     /// × 820 ly, boxiness 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly
     /// (Wegg, Gerhard and Portail 2015), corotation ratio 1.2; nuclear disc 290 ly by 93 ly
     /// (Sormani et al. 2022); four arms at 12°; f★ 0.32, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
-    /// McMillan (2017). Values without a measurement take the middle of their ranges.
+    /// McMillan (2017); the black hole 0.421 dex below the M–σ relation, which makes it the 4.30 ×
+    /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013). Values without a
+    /// measurement take the middle of their ranges.
     ///
     /// # Panics
     ///

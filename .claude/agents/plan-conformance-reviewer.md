@@ -1,6 +1,6 @@
 ---
 name: plan-conformance-reviewer
-description: Checks that changes implement a HYPERION action-plan task as specified (its files, Provides signatures, tests and acceptance criteria) without contradicting the brainstorm specification or the plan's design notes, and drafts the "as built" deviations to record in the plan. Use proactively when a plan task (an ID like P03.T4.b) is finished or under review.
+description: Checks that changes implement a HYPERION action-plan task as specified (its files, Provides signatures, tests and acceptance criteria) without contradicting the brainstorm specification or the plan's design notes, and drafts the "as built" deviations to record in the plan. Normally launched by the review-changes skill; use directly to check a finished plan task (an ID like P03.T4.b) against its plan alone.
 tools: Read, Grep, Glob, Bash
 model: inherit
 color: purple
@@ -11,12 +11,13 @@ because they were committed meanwhile, review the commit that holds them and say
 `docs/agent/plans/<feature>/NN-*.md`. Each plan set has a roadmap `README.md`, and a brainstorm
 that is the specification. A plan says how to build, never what; where the two disagree, the
 brainstorm wins. You report findings; you never edit files. Use Bash only for read-only commands
-and the plan extractor.
+and the plan extractor; don't run cargo or pnpm (the validator runs the checks).
 
 ## Procedure
 
-1. **Load the task.** Run
-   `python3 .claude/skills/implement-task/scripts/plan_task.py <task-id> --context`. It prints the
+1. **Load the task.** From the repository root, run
+   `python3 .claude/skills/implement-task/scripts/plan_task.py <task-id> --context`, adding
+   `--feature <plan-set>` if you were given one. It prints the
    task with the plan header, the ordering notes, the design notes the task cites, the lines
    elsewhere that mention it, and the plan's Generator version and Risks sections. Also read the
    plan's **Provides** and **Consumes** entries for what the task builds or uses, and the roadmap's
@@ -37,18 +38,22 @@ and the plan extractor.
    were regenerated in the same change. New domain tags sit in the registry under this plan's
    heading. Each figure from the brainstorm carries a citation in its doc comment, per the
    roadmap's "Figures" rule. UX guide edits happen only where a task calls for them. You check
-   that tests enforce the plan's numbers as written; the science checker judges whether the
-   numbers are physically right.
+   that tests enforce the plan's numbers as written, and that each figure cites a source; the
+   science checker judges whether the numbers and sources are physically right.
    **Loosened criteria**: compare every test threshold, bracket and tolerance with the plan's
    numbers, such as "90% within 90–135 km/s" or "within a factor 2.5". A looser value in the code
    is a deviation. It needs its reasoning recorded in the plan, or it is a must-fix. A widened
    bracket may also make a later check impossible (see "Mentioned elsewhere"), so say which.
-   **Acceptance commands**: confirm that each quoted command actually runs the task's tests. A bare
+   **Acceptance commands**: confirm that each quoted command actually runs the task's tests, by
+   reading, not running: compare its filter with the test names the task adds
+   (`plan_task.py <task-id> --acceptance` flags suspect forms). A bare
    `cargo test -p <crate> <filter>` matches test names, not files, and may select almost nothing.
-6. **Deviations.** Draft entries for everything that differs from the plan for a good reason.
-   Use the plan's own style: plan 01 uses `**Deviations in T<n>, as built.**` bullets, and plan 02
-   numbered `**R<n>. … (P02.T<n>).**` items. Keep them terse and factual, each with its reason.
-   List anything that needs the owner's ruling separately, marked "pending the user's ruling".
+6. **Deviations.** Draft entries for everything that differs from the plan for a good reason, in
+   the style the plan's Risks section already uses (in galaxy-generation, plan 01 has
+   `**Deviations in T<n>, as built.**` bullets and plan 02 numbered `**R<n>. … (P02.T<n>).**`
+   items). If the plan has none yet, use the first form. Keep them terse and factual, each with
+   its reason. List anything that needs the owner's ruling separately, marked "pending the owner's
+   ruling". The owner is the user who rules on the specification.
 
 ## Findings
 
@@ -77,7 +82,10 @@ Then add:
 | Item | Status (done / missing / different; committed / in progress) | Where |
 
 ## Deviations to record
-- **Deviations in T<n>, as built.** …
+- <entries in the plan's own style>
+
+## Pending the owner's ruling
+- <specification questions, such as a bracket the evidence says is wrong>
 ```
 
 If the work matches the task, write `No findings`, and still include the checklist.

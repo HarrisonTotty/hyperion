@@ -1,4 +1,4 @@
-# generator_version = 2
+# generator_version = 3
 # seed 0000000000000001
 0000000000000001.stellar_mass = 0x4222c44fed53f7d2  # 40301491881.984024
 0000000000000001.sfh_timescale = 0x4200049f54848760  # 8599628432.566101
@@ -854,9 +854,9 @@ milky_way.dark.f_star = 0x3fd47ae147ae147b  # 0.32
 milky_way.dark.m200 = 0x427160fe41c13912  # 1194267515923.567
 milky_way.dark.concentration = 0x40206f1bcd3e12c2  # 8.217008985354713
 milky_way.dark.r200 = 0x4126682ac7a6ce0e  # 734229.3899444954
-milky_way.bh.scatter = 0x0000000000000000  # 0.0
+milky_way.bh.scatter = 0xbfdaf1a9fbe76c8b  # -0.421
 milky_way.bh.sigma = 0x405dd33caf86bb19  # 119.30057895810423
-milky_way.bh.mass = 0x41659f179bffca1f  # 11335868.874974309
+milky_way.bh.mass = 0x415067163ba57865  # 4299864.931974505
 milky_way.metallicity_gradient = 0xbfa999999999999a  # -0.05
 milky_way.halo.discrete_share = 0x3fb5c28f5c28f5c3  # 0.085
 milky_way.halo.insitu.share = 0x3fcd1745d1745d18  # 0.2272727272727273

@@ -475,6 +475,41 @@ mod tests {
         }
     }
 
+    /// Around a lone point mass M, κ = Ω and the tidal radius is `R (m ÷ 3M)^⅓` at any radius,
+    /// inside the grid, below it and beyond it.
+    #[test]
+    fn the_tidal_radius_around_a_lone_point_mass() {
+        let zero = SolarMasses::ZERO;
+        let mass = 4.3e6;
+        let tables = PotentialTables {
+            in_plane: InPlaneTable {
+                v_circ_sq: [0.0; POINTS],
+                slope: [0.0; POINTS],
+                curvature: [0.0; POINTS],
+                potential: [0.0; POINTS],
+            },
+            grid: None,
+            dark_halo: Nfw::new(zero, 10.0, LightYears::new(1e5)).unwrap(),
+            nuclear_cluster: BrokenPowerLaw::new(zero, LightYears::new(10.0), 1.3, 3.5).unwrap(),
+            black_hole: PointMass::new(SolarMasses::new(mass)).unwrap(),
+            bar_corotation: LightYears::new(10_000.0),
+        };
+        for r in [0.01, 3.0, 5_000.0, 1e6] {
+            let p = PointLy::new(0.36 * r, 0.48 * r, 0.8 * r);
+            let rt = LightYears::from(tables.tidal_radius(SolarMasses::new(2.0), &p)).value();
+            let expected = r * math::cbrt(2.0 / (3.0 * mass));
+            assert!(
+                (rt / expected - 1.0).abs() < 1e-12,
+                "{rt} against {expected}"
+            );
+            let (omega, kappa) = (
+                tables.omega(LightYears::new(r)),
+                tables.kappa(LightYears::new(r)),
+            );
+            assert!((kappa.value() / omega.value() - 1.0).abs() < 1e-12);
+        }
+    }
+
     #[test]
     fn the_far_field_mass_is_the_gaussians_mass() {
         let params = crate::galaxy::params::GalaxyParams::milky_way_like();

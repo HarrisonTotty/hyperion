@@ -5,7 +5,7 @@
 //! × exp(−(R² + z² ÷ q²) ÷ 2σ²)`. With `ε = 1 − q²`, its potential and forces are one-dimensional
 //! integrals over `T` from 0 to 1 (Binney and Tremaine 2008, §2.5.2, the homoeoid form of
 //! eq. 2.140 with `T² = 1 ÷ (1 + τ)`; Emsellem, Monnet and Bacon 1994, A&A 285, 723; Cappellari
-//! 2002, MNRAS 333, 400, eq. 8):
+//! 2002, MNRAS 333, 400, eq. 12):
 //!
 //! - `Φ(R, z) = −G M √(2 ÷ π) ÷ σ × ∫ exp(−T² (R² + z² ÷ (1 − εT²)) ÷ 2σ²) ÷ √(1 − εT²) dT`;
 //! - `v_c²(R) = R ∂Φ ÷ ∂R = G M √(2 ÷ π) R² ÷ σ³ × ∫ T² exp(−T² R² ÷ 2σ²) ÷ √(1 − εT²) dT` in
@@ -105,10 +105,12 @@ pub struct Gaussian {
 type Node = [f64; 3];
 
 /// The nodes for a point within the cut, `T_c = 1`, generated once: in the plane (the oblate
-/// rule in `v`; the same as off it for other shapes) and off it without the vertical cut. They are
-/// the very nodes [`Gaussian::generate`] gives for those arguments, so using them changes no bit.
+/// rule in `v`; other shapes use the same rule in and off the plane) and off it without the
+/// vertical cut. They are the very nodes [`Gaussian::generate`] gives for those arguments, so
+/// using them changes no bit.
 #[derive(Debug, Clone, PartialEq)]
 struct WholeRange {
+    /// Filled for an oblate Gaussian only; other shapes use `off_plane` in the plane.
     in_plane: [Node; 32],
     off_plane: [Node; 32],
     /// The oblate rule's end in `w` for `T_c = 1`, `√ε ÷ q`; 0 for other shapes.
@@ -188,15 +190,19 @@ impl Gaussian {
             w_end: gaussian.oblate_w_end(1.0, 0.0),
         };
         let mut i = 0;
-        gaussian.generate(1.0, 0.0, true, |t2, inv_d, jac| {
-            whole.in_plane[i] = [t2, inv_d, jac];
-            i += 1;
-        });
-        i = 0;
         gaussian.generate(1.0, 0.0, false, |t2, inv_d, jac| {
             whole.off_plane[i] = [t2, inv_d, jac];
             i += 1;
         });
+        // Only an oblate Gaussian has a rule of its own in the plane; the others read
+        // `off_plane` there too, which is the same rule.
+        if matches!(shape, Shape::Oblate { .. }) {
+            i = 0;
+            gaussian.generate(1.0, 0.0, true, |t2, inv_d, jac| {
+                whole.in_plane[i] = [t2, inv_d, jac];
+                i += 1;
+            });
+        }
         *gaussian.whole = whole;
         Ok(gaussian)
     }
@@ -785,10 +791,24 @@ mod tests {
     fn invalid_components_are_rejected() {
         let m = SolarMasses::new(1.0);
         let l = LightYears::new(1.0);
-        assert!(Gaussian::new(SolarMasses::new(-1.0), l, 1.0).is_err());
-        assert!(Gaussian::new(m, LightYears::new(0.0), 1.0).is_err());
-        assert!(Gaussian::new(m, l, f64::NAN).is_err());
-        assert!(double_exponential(m, l, LightYears::new(-1.0)).is_err());
+        let quantity = |result: Result<_, BuildComponentError>| {
+            result.map(|_: Gaussian| ()).unwrap_err().quantity
+        };
+        assert_eq!(
+            quantity(Gaussian::new(SolarMasses::new(-1.0), l, 1.0)),
+            "mass"
+        );
+        assert_eq!(
+            quantity(Gaussian::new(m, LightYears::new(0.0), 1.0)),
+            "width"
+        );
+        assert_eq!(quantity(Gaussian::new(m, l, f64::NAN)), "axis ratio");
+        assert_eq!(
+            double_exponential(m, l, LightYears::new(-1.0))
+                .unwrap_err()
+                .quantity,
+            "height"
+        );
         let error = Gaussian::new(m, l, 0.0).unwrap_err();
         assert_eq!(error.quantity, "axis ratio");
         assert_eq!(

@@ -15,9 +15,9 @@ standard. This skill is how to apply it and check the result.
 
 ## Before building
 
-Read the guide in full the first time you do UI work in a session. It is about 300 lines, and
-every rule carries weight. Then look at how the existing code does things, and reuse its pieces
-rather than inventing parallel ones:
+Read the guide in full the first time you do UI work in a session; every rule carries weight.
+Then look at how the existing code does things, and reuse its pieces rather than inventing
+parallel ones:
 
 - `styles.css` holds the tokens (`:root`) and the shared classes: `.console*` (the fixed frame),
   `.panel` and `.panel__title`, `.field`, `.readout` with `.readout__missing`, `.annunciator`.
@@ -44,9 +44,15 @@ reaches for.
 - **Times** carry their time system label. Bearings are `000°` to `359°`. Countdowns run from
   `T-` to `T+`.
 - **Type**: at least `0.875rem`, sized in rem, at most four sizes on a console. No italics. Bold
-  for display titles only. Labels are UPPER CASE (three words or fewer); sentences are mixed case.
+  for display titles only. Upper case "for display titles, panel titles, field labels, button
+  labels and status annunciations of three words or fewer"; mixed case for sentences.
 - **Voice**: terse, literal, impersonal, as in `NO CARRIER`. No "I", "please", "you", `!`,
-  "Loading…" or "thinking…". Use only abbreviations on the nomenclature list.
+  "Loading…" or "thinking…". The guide allows only abbreviations on a ship-wide nomenclature list,
+  which doesn't exist yet: bring a new abbreviation to the owner rather than coining one.
+- **Alerts** come from the server, never from a console. Each names the system, what is wrong and
+  what to do. Only emergency and warning flash or use reverse video. Use `role="alert"` for
+  emergency and warning and `role="status"` for the rest; live values go in `output` or a live
+  region.
 - **Never**: spinners, skeleton loaders, toasts, hamburger menus, emoji, or a modal dialog for
   anything short of `ARM`/`EXECUTE`.
 - **Commands** are closed-loop: `PENDING`, then the server's result. Never update optimistically.
@@ -57,26 +63,29 @@ reaches for.
 - **Input**: everything works from the keyboard, focus shows as a 2px `--accent` outline, targets
   are at least 2rem, and nothing depends on hover or a right click alone.
 - **Spatial displays** always show scale, orientation and reference frame. They are true to scale,
-  or labelled `NOT TO SCALE`. Fast graphics go on a canvas, and text meant to be read stays in the
-  DOM.
+  or say what isn't (`BODIES NOT TO SCALE`). Fast graphics go on a canvas, and text meant to be read
+  stays in the DOM.
 
 ## When the guide doesn't cover it
 
 New displays will hit gaps: a new unit, a new glyph, a new kind of display. The guide is the
 owner's to change. Ask the user rather than inventing a convention. There is one exception: a
-plan task that specifies a guide edit (as P05.T2 does). Make exactly that edit, and keep items
-marked "needs the owner's confirmation" in a commit of their own. Never edit the guide to make
-code pass a check.
+plan task that specifies a guide edit (as galaxy-generation's P05.T2 does). Make exactly that
+edit, and keep items marked "needs the owner's confirmation" in a commit of their own. Never edit
+the guide to make code pass a check.
 
 ## Checks
 
 Run these before calling UI work done. The `ux-reviewer` agent runs them too.
 
+Run them from the repository root:
+
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/ux_lint.py                     # changed renderer files; or pass paths, or --all
-python3 ${CLAUDE_SKILL_DIR}/scripts/contrast.py                    # every token pairing the guide requires
-python3 ${CLAUDE_SKILL_DIR}/scripts/contrast.py text-muted surface-2  # one pairing (tokens or #hex)
-python3 ${CLAUDE_SKILL_DIR}/scripts/glyphs.py "☉ ↑ µ"              # can the bundled B612 and B612 Mono draw these?
+python3 .claude/skills/console-ux/scripts/ux_lint.py            # changed renderer files; or pass paths, or --all
+python3 .claude/skills/console-ux/scripts/contrast.py           # every token pairing the guide requires
+python3 .claude/skills/console-ux/scripts/contrast.py text-muted surface-2          # one text pairing (6:1)
+python3 .claude/skills/console-ux/scripts/contrast.py line-strong surface-2 --min 3  # an outline (3:1)
+python3 .claude/skills/console-ux/scripts/glyphs.py "☉ ↑ µ"     # can the bundled B612 fonts draw these?
 ```
 
 - `ux_lint.py` is a heuristic and exits 1 on any error. An `error` breaks a must-or-never rule as
@@ -87,9 +96,8 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/glyphs.py "☉ ↑ µ"              # can th
 - Run `contrast.py` whenever a token changes or a new foreground and background meet. Text needs
   6:1 and control outlines 3:1.
 - Run `glyphs.py` for any character outside ASCII before it reaches the screen. A glyph B612 lacks
-  falls back to a system font, so draw it as an inline SVG. For `☉` the galaxy-generation plan
-  specifies this in P05.T2.d, and P05.T3.b builds `SunGlyph` and `SolarMassUnit`; reuse them once
-  they exist.
+  falls back to a system font, so draw it as an inline SVG. Look in `components/` and the plan for
+  an existing drawn glyph first (galaxy-generation's P05.T3.b plans `SunGlyph` for `☉`).
 
 The scripts cannot see layout, data states or command flow. When the change is visible, run the
 client (`just server` and `just client`) and check it at 1920×1080 and 1280×720 if you can take a

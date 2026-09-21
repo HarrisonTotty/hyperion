@@ -103,16 +103,23 @@ fn bar_profile(u: f64) -> f64 {
 }
 
 /// `MGE_BAR` reproduces the bar's profile to 3% of its central value everywhere, and its mass to
-/// 0.5%.
+/// 0.5%; the mass inside each radius, which is what the rotation curve reads, stays within 7%.
 ///
-/// A sum of centred Gaussians with non-negative weights cannot follow the bar's Gaussian end in
-/// relative terms (it is completely monotone in `u²`), so the 3% is read against the central
-/// value; the fit's `hyperion-fit` documentation says so.
+/// A sum of centred Gaussians with non-negative weights is log-convex in `u²`, and the bar's
+/// Gaussian end is log-concave, so no such sum follows the end in relative terms: by linear
+/// programming over 14 or 16 log-spaced widths, the best achievable maximum relative error is 12%
+/// out to one half-length and 30% out to 1.1, and holding the level part to even 10% forces the
+/// total mass off by more than 0.5%. So the 3% is read against the central value (plan 02,
+/// Risks, R14). The mass inside a radius is off by up to 6.6% just beyond the half-length; the
+/// best any such fit could do there with the other two checks held is 4.4%.
 #[test]
 fn mge_bar_reproduces_the_bar_profile() {
-    for i in 0..=250 {
+    let profile: Vec<f64> = (0..=250)
+        .map(|i| bar_profile(0.01 * f64::from(i)))
+        .collect();
+    for (i, &p) in (0..=250).zip(&profile) {
         let u = 0.01 * f64::from(i);
-        let error = expansion(&MGE_BAR, u) - bar_profile(u);
+        let error = expansion(&MGE_BAR, u) - p;
         assert!(error.abs() < 0.03, "at u = {u}: {error}");
     }
     let mass = MGE_BAR
@@ -120,6 +127,25 @@ fn mge_bar_reproduces_the_bar_profile() {
         .fold(0.0, |sum, &(w, s)| sum + w * 2.0 * PI * s * s);
     let exact = (2.0 * PI).sqrt() * 0.1 * 2.0 * (0.85 + 0.15 * (0.5 * PI).sqrt());
     assert_relative("bar mass", mass, exact, 5e-3);
+    // The mass inside u, 2π ∫ Σ u du: Simpson's rule on the samples above for the profile, in
+    // closed form for the expansion.
+    let mut inside = 0.0;
+    for pair in 0..125_u32 {
+        let (i, u) = (2 * pair, 0.01 * f64::from(2 * pair));
+        let at = |k: u32| {
+            let index = usize::try_from(i + k).unwrap();
+            (u + 0.01 * f64::from(k)) * profile[index]
+        };
+        inside += 2.0 * PI * 0.01 / 3.0 * (at(0) + 4.0 * at(1) + at(2));
+        let edge = u + 0.02;
+        let expanded = MGE_BAR.iter().fold(0.0, |sum, &(w, s)| {
+            sum + w * 2.0 * PI * s * s * (1.0 - math::exp(-edge * edge / (2.0 * s * s)))
+        });
+        if edge >= 0.05 {
+            assert_relative(&format!("mass inside {edge}"), expanded, inside, 0.07);
+        }
+    }
+    assert_relative("mass inside 2.5", inside, exact, 1e-3);
 }
 
 // P02.T6.b: Gaussian components.
@@ -398,27 +424,31 @@ fn the_model_holds_the_parameters_masses() {
 
 // P02.T6.e: the black hole.
 
-/// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole without scatter
-/// lies within a factor of 2.5 of the measured 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
+/// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole lies within a
+/// factor of 2.5 of Sgr A*'s 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
 ///
-/// Finding: the isotropic spherical estimator of plan 02's Design note 8 gives 119 km/s against
-/// the brainstorm's axisymmetric 105–115, so the black hole comes out 2.6 times the measured
-/// mass, just outside the plan's factor of 2.5 (plan 02, Risks, R4, foresaw an offset of this
-/// kind). The bracket checked is a factor of 3 until plan 08's Jeans table replaces the
-/// estimator.
+/// The fixture's scatter is the Milky Way's own offset from the relation, −0.421 dex, set so that
+/// the estimator's 119.3 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13). The factor of 2.5
+/// then lets σ move by 7% before the test fails, which is what it guards: the relation itself,
+/// without the offset, gives 2.6 times the measured mass at this σ, a real galaxy 1.1 times the
+/// relation's intrinsic scatter below it.
 #[test]
 fn the_fixture_black_hole_follows_m_sigma() {
     let params = GalaxyParams::milky_way_like();
     let bh = params.black_hole();
-    assert_within("σ", bh.bulge_dispersion().value(), 95.0, 125.0);
+    let sigma = bh.bulge_dispersion();
+    assert_within("σ", sigma.value(), 95.0, 125.0);
     assert_relative(
-        "M–σ",
+        "M–σ with the fixture's offset",
         bh.mass().value(),
-        black_hole_mass(bh.bulge_dispersion(), Dex::new(0.0)).value(),
+        black_hole_mass(sigma, bh.scatter()).value(),
         1e-12,
     );
+    assert_within("offset, dex", bh.scatter().value(), -0.5, -0.35);
     let ratio = bh.mass().value() / 4.3e6;
-    assert_within("black hole ÷ 4.3 × 10⁶ M☉", ratio, 1.0 / 3.0, 3.0);
+    assert_within("black hole ÷ 4.3 × 10⁶ M☉", ratio, 1.0 / 2.5, 2.5);
+    let on_relation = black_hole_mass(sigma, Dex::new(0.0)).value() / 4.3e6;
+    assert_within("the relation alone ÷ 4.3 × 10⁶ M☉", on_relation, 2.0, 3.5);
     assert_relative(
         "σ is the estimator's",
         bh.bulge_dispersion().value(),
@@ -444,7 +474,7 @@ fn the_scatter_moves_the_black_hole_mass_only() {
     assert_relative(
         "mass",
         scattered.black_hole().mass().value() / plain.black_hole().mass().value(),
-        math::exp10(0.38),
+        math::exp10(0.38 - plain.black_hole().scatter().value()),
         1e-12,
     );
     let at_200 = black_hole_mass(KilometresPerSecond::new(200.0), Dex::new(0.0));

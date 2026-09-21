@@ -85,11 +85,12 @@ impl SphericalMass for PointMass {
 /// and `ρ_b (r ÷ r_b)^−γ₂` outside, with `γ₁ < 2` so that the potential is finite at the centre
 /// and `γ₂ > 3` so that the mass is.
 ///
-/// It stands for the nuclear star cluster: inner slope 1.3 (Gallego-Cano et al. 2018, A&A 609,
-/// A26), break 10 ly and outer slope 3.5 (brainstorm, "Dense features"). The brainstorm gives
-/// the two slopes and the break and nothing of how sharp the break is; a sharp one needs no
-/// further parameter and has the enclosed mass and the potential in closed form. With `x = r ÷
-/// r_b` and `A = 4π ρ_b r_b³`:
+/// It stands for the nuclear star cluster: inner slope 1.3, break 10 ly and outer slope 3.5
+/// (brainstorm, "Dense features"). Re-checked, the slope lies between the 1.43 ± 0.1 that
+/// Gallego-Cano et al. (2018, A&A 609, A26) find for the faint stars and the 1.13 ± 0.05 of the
+/// diffuse light (Schödel et al. 2018, A&A 609, A27). The brainstorm gives the two slopes and the
+/// break and nothing of how sharp the break is; a sharp one needs no further parameter and has the
+/// enclosed mass and the potential in closed form. With `x = r ÷ r_b` and `A = 4π ρ_b r_b³`:
 ///
 /// - `M(<r) = A x^(3−γ₁) ÷ (3 − γ₁)` inside, `A [1 ÷ (3 − γ₁) + (1 − x^(3−γ₂)) ÷ (γ₂ − 3)]`
 ///   outside, and in total `A [1 ÷ (3 − γ₁) + 1 ÷ (γ₂ − 3)]`;
@@ -297,9 +298,11 @@ mod tests {
     fn slopes_outside_their_ranges_are_rejected() {
         let make =
             |g1, g2| BrokenPowerLaw::new(SolarMasses::new(1.0), LightYears::new(1.0), g1, g2);
-        assert!(make(2.0, 3.5).is_err());
-        assert!(make(1.3, 3.0).is_err());
-        assert!(make(-0.1, 3.5).is_err());
-        assert!(make(0.0, 4.0).is_ok());
+        let quantity = |g1, g2| make(g1, g2).unwrap_err().quantity;
+        assert_eq!(quantity(2.0, 3.5), "2 − inner slope");
+        assert_eq!(quantity(1.3, 3.0), "outer slope − 3");
+        assert_eq!(quantity(-0.1, 3.5), "inner slope");
+        let accepted = make(0.0, 4.0).unwrap();
+        assert!(accepted.mass().value().total_cmp(&1.0).is_eq());
     }
 }

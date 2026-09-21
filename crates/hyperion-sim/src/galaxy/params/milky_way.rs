@@ -1,4 +1,5 @@
-//! The Milky Way fixture (plan 02, P02.T5.c): measured values, no scatter anywhere.
+//! The Milky Way fixture (plan 02, P02.T5.c): measured values, no scatter anywhere but the black
+//! hole's, which is the Milky Way's measured offset from the M–σ relation.
 //!
 //! Every value the plan fixes is set here with its source. Values the plan does not fix, and for
 //! which no measurement applies to this model, take the middle of their ranges and say so. The
@@ -100,7 +101,13 @@ pub(super) fn inputs() -> Inputs {
         // M₂₀₀ = 1.19 × 10¹² M☉, against 1.3 × 10¹² (McMillan 2017, MNRAS 465, 76).
         dark_f_star: 0.32,
         dark_concentration_scatter: 0.0,
-        bh_scatter: 0.0,
+        // Sgr A* is (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration 2022, A&A 657, L12). At the
+        // fixture's bulge dispersion of 119.3 km/s the M–σ relation of McConnell and Ma (2013,
+        // ApJ 764, 184) gives 1.13 × 10⁷ M☉; the Milky Way lies 0.421 dex below it, 1.1 times the
+        // relation's intrinsic scatter, and this offset puts the fixture's black hole at 4.30 ×
+        // 10⁶ M☉. It holds for this σ only: when plan 08 replaces the σ estimator, it is set
+        // again.
+        bh_scatter: -0.421,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges.

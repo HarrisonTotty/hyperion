@@ -1,9 +1,10 @@
 ---
 name: sim-determinism
-description: Keeps HYPERION's procedural generation bit-for-bit reproducible across runs, call orders and CPU architectures. It covers random streams and domain tags, word consumption, iteration and summation order, integer widths, golden files, GENERATOR_VERSION bumps and statistical-test seeds. Use whenever writing or changing generator code in crates/hyperion-sim or crates/hyperion-testkit, adding random draws, when a golden test fails, or before bumping the generator version.
+description: Keeps HYPERION's procedural generation bit-for-bit reproducible across runs, call orders and CPU architectures. It covers random streams and domain tags, word consumption, iteration and summation order, integer widths, golden files, GENERATOR_VERSION bumps and statistical-test seeds. Use whenever writing or changing generator code in crates/hyperion-sim or crates/hyperion-testkit, or fitted tables in crates/hyperion-fit, adding random draws, when a golden test fails, or before bumping the generator version.
 paths:
   - "crates/hyperion-sim/**"
   - "crates/hyperion-testkit/**"
+  - "crates/hyperion-fit/**"
 ---
 
 # Simulation determinism
@@ -11,25 +12,31 @@ paths:
 A universe is `(seed, generator_version)`. The same pair must give the same bits on x86-64,
 AArch64 and wasm32, in any call order, for as long as saves exist. CI checks all three
 architectures. The sim's `clippy.toml` already bans platform maths (go through
-`hyperion_sim::math`), `f64::mul_add` and float `to_bits`. This skill covers what no lint can see.
+`hyperion_sim::math`), `f64::mul_add` and float `to_bits`, and `hyperion-fit`'s repeats the ban for
+fitted tables. The exact `libm` pin in the root `Cargo.toml` is part of the output too: changing it
+is a generator-version change. This skill covers what no lint can see.
 
 ## Streams and draws
 
-- Randomness comes only from `Stream::open(seed, TAG, key)`. Each property group gets its own
-  domain tag, declared inside `domain_tags!` in `crates/hyperion-sim/src/rng/tags.rs` under the
-  plan's heading, as `NAME: <scope variant> = "a.b.c";` (for example
+- Randomness comes only from `Stream::open(seed, TAG, key)`, or, for events, from
+  `EventKey::derive(seed, EVENT_TAG, subject)` and its `bin_stream` / `event_stream`
+  (`Stream::open` panics on an `Event`-scope tag). Each property group gets its own domain tag,
+  declared inside `domain_tags!` in `crates/hyperion-sim/src/rng/tags.rs` under the plan's heading,
+  as `NAME: <scope variant> = "a.b.c";` (for example
   `GALAXY_PARAMS_STELLAR_MASS: Galaxy = "galaxy.params.stellar_mass";`), by the task that first
-  opens it.
+  opens it. An event tag also takes a number in `crates/hyperion-sim/src/id/event_tags.rs`, backed
+  by an `Event`-scope domain tag.
 - A tag is never renamed or removed. Its name is hashed into every key it opens.
 - **The number and order of words drawn from a stream is part of the output.** Adding a draw,
   reordering draws, or making a draw conditional moves every later value from that stream. A new
   property gets a new tag, not an extra draw on an existing stream. A rejection loop is fine as
   long as it consumes words deterministically.
-- Keys come from integers only, through the `ObjectKey` constructors. Never derive a key from float
-  bits, pointers, the index of an unordered collection, or `std::hash` (`RandomState` is seeded
-  per process).
-- Random decisions go through the integer thresholds in `rng::decide` (`Threshold`, `Thresholds`,
-  `Mark`). Don't compare a float uniform with a float probability.
+- Keys come from integers only, through the `ObjectKey` constructors or the `From<SystemId>` and
+  `From<BodyId>` conversions. Never derive a key from float bits, pointers, the index of an
+  unordered collection, or `std::hash` (`RandomState` is seeded per process).
+- Random decisions go through the integer thresholds `rng::{Threshold, Thresholds, Mark}`
+  (`rng/decide.rs`), usually via `Stream::decide`, `Stream::pick` or `Stream::mark`. Don't compare a
+  float uniform with a float probability.
 
 ## Order independence
 
@@ -47,7 +54,8 @@ For anything that may sit behind a cache, prove order independence with
 
 ## Arithmetic whose form is output
 
-- Float addition is not associative, so **summation order is output** (plan 02, design note 18).
+- Float addition is not associative, so **summation order is output** (galaxy-generation plan 02,
+  D18).
   Sum components in their fixed, declared order. Never sum an unordered collection or reduce in
   parallel. An algebraically equal rewrite changes bits: factoring out, reordering terms,
   `x * x * x` for `powi(x, 3)`, multiplying by a precomputed `1 / x`. Refactor such code only as a
@@ -67,30 +75,36 @@ moved.
    **Generator version** section usually says. If it isn't, the failure is a bug: find the stream,
    order or arithmetic change that caused it, and don't bless.
 2. If it is meant to: bump `GENERATOR_VERSION` in `crates/hyperion-sim/src/version.rs`, once per
-   task, in the commit that moves the output (plans say tasks bump "as they land"). Check
-   `git diff HEAD -- crates/hyperion-sim/src/version.rs` first so that you don't bump twice. A
-   work-in-progress checkpoint may lag. The task isn't done until its bump and regenerated goldens
-   are in.
+   task, in the commit that moves the output (plans say tasks bump "as they land"). Update the
+   `assert_eq!(GENERATOR_VERSION.get(), N)` test in the same file. So that you don't bump twice,
+   check whether the task already bumped, including in its earlier checkpoint commits:
+   `golden_diff.py --base <commit before the task's first commit>` shows the rise. The task isn't
+   done until its bump and regenerated goldens are in.
 3. Run `just bless`. It refuses to run under `CI`.
-4. Account for every golden that moved:
+4. Account for every golden that moved (run from the repository root):
 
    ```bash
-   python3 ${CLAUDE_SKILL_DIR}/scripts/golden_diff.py            # against HEAD; --base <ref> for a range
+   python3 .claude/skills/sim-determinism/scripts/golden_diff.py                    # tree vs HEAD
+   python3 .claude/skills/sim-determinism/scripts/golden_diff.py --base <ref>       # tree vs <ref>
+   python3 .claude/skills/sim-determinism/scripts/golden_diff.py --base C^ --head C # commit C
    ```
 
    It separates header-only churn (every golden carries the version), extensions (new labels, old
-   values unchanged) and changed values, and says whether the version and the goldens agree. The
-   change must explain each changed value. A change it can't explain is a leak: something moved
-   that shouldn't have, so go back to step 1 for it. An extension isn't automatically safe: if a
+   values unchanged) and changed values. It checks every golden's header against the version, and
+   ends with a verdict: problems (exit 1), checks to make by hand, or consistent. The change must
+   explain each changed value. A change it can't explain is a leak: something moved that shouldn't
+   have, so go back to step 1 for it. An extension isn't automatically safe: if a
    new label pins a value the base already generated, and its computation changed, that is moved
    output too.
 5. Run `just test-wasm` if wasmtime is installed. If it isn't, say that it wasn't run; CI will run
    it.
 6. If the bump trips a statistical test, run that test under three other seeds. Two failures in
-   three is a real defect. Otherwise change the seed in the same commit, with a note (plan 01,
-   design note 28). Never loosen α, shrink the sample, or widen a bracket or tolerance the plan
-   states in order to pass. If the plan's bracket is wrong, that is a deviation to record with its
-   reasoning, which the plan-conformance reviewer checks.
+   three is a real defect. Otherwise change the seed in the same commit, with a note
+   (galaxy-generation plan 01, design note 28). Never loosen α, shrink the sample, or widen a
+   bracket or tolerance the plan states in order to pass. If the plan's bracket is wrong, it is
+   either a technical correction, recorded in the plan as a deviation with its reasoning, or, when
+   the figure comes from the brainstorm, a specification question for the owner. The
+   plan-conformance reviewer checks for both.
 
 ## Adding goldens and statistical tests
 

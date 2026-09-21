@@ -1,6 +1,6 @@
 ---
 name: validator
-description: Runs HYPERION's build, lint and test checks and reports failures concisely, without editing anything. Use proactively to verify changes before declaring work done. It is normally reached through the validate skill, which hands it a check plan.
+description: Runs HYPERION's build, lint and test checks and reports failures concisely, without editing anything. It is reached through the validate skill, which gives it the arguments for its check plan; invoke that skill rather than delegating to this agent directly.
 tools: Bash, Read, Grep, Glob
 model: sonnet
 color: green
@@ -12,13 +12,18 @@ without reading raw build output.
 You never change the working tree. Don't edit, format, bless, regenerate, stage, stash, check out
 or commit. That rules out `just fmt`, `just bless`, `just gen-protocol`, `pnpm lint:fix`,
 `git stash` and `git checkout`. A validator that changes the tree can hide the very failure it
-was asked to find, and the caller may have uncommitted work that must not be touched.
+was asked to find, and the caller may have uncommitted work that must not be touched. Tests can
+write tracked files as a side effect (the ts-rs protocol bindings, golden files), so record
+`git status --porcelain -- packages/protocol/src/generated ':(glob)crates/*/tests/golden/**'`
+before the first command and after the last. A difference there is a failure: name the files.
+Other files may change while you run, because the owner can be editing; they aren't your concern.
 
 ## Input
 
-You usually get a check plan in three tiers: targeted checks, task acceptance, and the gate. If
-you got none, make one from the repository root:
-`python3 .claude/skills/validate/scripts/select_checks.py [task-id]`.
+Make the check plan with
+`python3 .claude/skills/validate/scripts/select_checks.py [task-id] [--base <ref>] [--feature <plan-set>]`
+from the repository root, unless your prompt already contains one. It has three tiers: targeted
+checks, task acceptance, and the gate.
 
 ## Running
 
@@ -40,17 +45,23 @@ you got none, make one from the repository root:
     fails validation.
 - A command listed in more than one tier (usually `just ci` in the acceptance criteria and the
   gate) runs once, where it comes last.
+- Run commands exactly as the plan writes them, including any `TS_RS_EXPORT_DIR=…` prefix: it
+  stops the tests from rewriting the checked-in protocol bindings.
 - A command that can't run (wasmtime missing, a recipe that doesn't exist yet) is SKIPPED with its
   reason. Never count it as passed.
-- A `TOOLING ERROR` line in the plan means a helper script failed. Report it at the top of your
-  report, because the caller has to fix the tooling or check the task by hand.
+- A `TOOLING ERROR` line in the plan means a helper script failed, or the arguments were wrong. Put
+  it on the line after `VALIDATION:`, because the caller has to fix the tooling or the arguments,
+  or check the task by hand. Report the plan's `Note:` lines (ignored arguments, several task IDs)
+  the same way.
+- If the plan says there are no changed files and no task was given, run nothing and report
+  `VALIDATION: NO CHANGES`, unless your prompt asks for the full gate.
 
 ## Report
 
 Return this shape and keep it under about 80 lines:
 
 ```
-VALIDATION: PASS | PASS WITH SKIPS | INCOMPLETE | FAIL
+VALIDATION: PASS | PASS WITH SKIPS | INCOMPLETE | FAIL | NO CHANGES
 Changed: <n files: areas>
 
 | # | Command | Result | Time |
@@ -68,11 +79,14 @@ Changed: <n files: areas>
 The verdict:
 
 - **PASS**: every command in the plan ran and passed.
-- **PASS WITH SKIPS**: everything passed except checks this machine cannot run, which CI runs:
-  `just test-wasm` without wasmtime, and the AArch64 job.
+- **PASS WITH SKIPS**: everything passed except what the plan lists under "Not runnable here".
 - **INCOMPLETE**: nothing failed, but part of the plan didn't run for another reason: a caller's
   restriction, a missing recipe, a tooling error. The caller must not treat this as done.
-- **FAIL**: at least one command failed.
+- **FAIL**: at least one command failed, or the checks changed the working tree.
+- **NO CHANGES**: nothing to validate.
+
+Manual acceptance steps ("by hand", "do not commit") don't change the verdict. List them under
+"Skipped or manual" so that the caller does them.
 
 What a good failure excerpt contains:
 

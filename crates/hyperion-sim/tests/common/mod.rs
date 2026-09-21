@@ -168,11 +168,14 @@ pub fn assert_params_in_ranges(p: &GalaxyParams, max_sigmas: f64) {
     );
     assert_within("concentration", dark.concentration(), 2.0, 40.0);
     assert_within("r200", dark.r200().value(), 400_000.0, 1_400_000.0);
+    // The fixture's one scatter is the Milky Way's measured offset from M–σ, 1.1 times the
+    // relation's 0.38 dex (plan 02, Risks, R13), so this bound never falls below 1.2 of it.
+    let bh_sigmas = max_sigmas.max(1.2);
     assert_within(
         "black hole scatter",
         p.black_hole().scatter().value(),
-        -max_sigmas * 0.38,
-        max_sigmas * 0.38,
+        -bh_sigmas * 0.38,
+        bh_sigmas * 0.38,
     );
     assert_within(
         "metallicity gradient",
