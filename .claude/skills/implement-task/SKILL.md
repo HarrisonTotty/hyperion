@@ -33,10 +33,11 @@ Task <id>:
 
 Plans run to 1,000–1,800 lines. Run the extractor instead of paging through them. It prints the
 plan header, the ordering notes, the task (for a subtask: the parent intro and any paragraph shared
-by all subtasks) and the full text of every design note the task cites:
+by all subtasks), the full text of every design note the task cites, and the other lines in the
+plan set that mention the task. `--context` adds the plan's Generator version and Risks sections:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py P02.T5.a             # the task in context
+python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py P02.T5.a --context   # the task in context
 python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py P02.T5.a --acceptance  # acceptance criteria and their commands
 python3 ${CLAUDE_SKILL_DIR}/scripts/plan_task.py --list P02             # task IDs and titles; [commit] where a commit names one
 ```
@@ -49,8 +50,10 @@ Then read:
   grep for the names in Provides.
 - The brainstorm sections that the plan header lists and this task touches, and no others. The
   brainstorm is about 2,000 lines, so find sections with `grep -n '^#' <brainstorm>`.
-- The plan's **Risks and open points**, especially the "as built" bullets of earlier tasks. They
-  record where the code differs from the plan text.
+- The plan's **Risks and open points** (printed by `--context`), especially what earlier tasks
+  recorded as built. It says where the code differs from the plan text.
+- The "Mentioned elsewhere" lines. Later tasks and plans that check or consume this task's output
+  tell you what it must not break.
 
 ## 2. Check prerequisites
 
@@ -102,8 +105,10 @@ Invoke the `validate` skill with the task ID. It runs in its own context, picks 
 the changed files, runs the task's acceptance commands and the CI gate, and returns only what
 failed. Fix and re-run until it passes.
 
-- Never weaken a test, threshold, tolerance or lint to get to green. If a check is itself wrong,
-  that is a deviation for step 7 and a line in the report.
+- Never weaken a test, threshold, tolerance or lint to get to green. That includes widening a
+  bracket the plan states and explaining it only in a code comment. If the plan's number is wrong,
+  it is either a technical correction (record it in step 7) or a specification question (ask the
+  user, as in step 3). Either way it appears in the report.
 - Some acceptance steps say "check by hand once, do not commit", such as confirming that a lint
   fires. Do them, revert the temporary edit, and report the result.
 - A benchmark target the task names is a finding, not a failure. Report the measurement.
@@ -117,8 +122,10 @@ reason, which goes in the report. Validate again after fixing.
 
 ## 7. Record as built
 
-The plan is the record the next task reads. Under **Risks and open points**, add to or create a
-bullet `**Deviations in T<n>, as built.**` in the style of the existing ones: terse and factual,
+The plan is the record the next task reads. Under **Risks and open points**, record what was
+built differently, in the plan's existing style. Plan 01 uses `**Deviations in T<n>, as built.**`
+bullets; plan 02 uses numbered items tagged with the task, such as `**R11. D4 re-checked
+(P02.T4).**`. Use the first form only when the plan has neither. Keep entries terse and factual,
 each deviation with its reason. Cover renamed or added public items, changed files or acceptance
 commands, and discoveries that affect later tasks. The plan-conformance reviewer's output lists
 candidates. Don't rewrite the task text itself. If nothing deviated, add nothing.

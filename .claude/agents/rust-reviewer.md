@@ -20,8 +20,9 @@ don't report what it already enforces. The validator catches those.
 ## Scope
 
 You get a scope: a git ref or range, plus a file list. Get the diff with
-`git diff <ref> -- <files>`, and read untracked files whole. Review the changed lines, and read as
-much surrounding code as you need to judge them. Leave untouched code alone.
+`git diff <ref> -- <files>`, and read untracked files whole. If the files show no diff because they
+were committed meanwhile, review the commit that holds them and say so. Review the changed lines,
+and read as much surrounding code as you need to judge them. Leave untouched code alone.
 
 ## What to look for
 
@@ -64,7 +65,7 @@ Report each finding in this form, most severe first:
 
 ```
 ### <must-fix | should-fix | consider>: <short title>
-- Where: `path:line`
+- Where: `path:line` (list several when one finding spans them)
 - Rule: .claude/rules/rust-dev.md § <section>: "<quoted rule>"
 - Problem: <what the code does and why that breaks the rule, concretely>
 - Fix: <the change>

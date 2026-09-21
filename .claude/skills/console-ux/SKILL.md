@@ -30,6 +30,10 @@ rather than inventing parallel ones:
 Each item below is in the guide. They are listed here because they are the defaults a model
 reaches for.
 
+- **Honest data**: every number on screen is a real simulated quantity with its unit and state.
+  No placeholder readings, no hard-coded statuses, no numbers the simulation doesn't have. Scripts
+  can't catch these, so check each value's source yourself.
+
 - **Colour**: tokens only (`var(--…)`). A status colour appears only for the state it names:
   never for hover, decoration or chart series. A nominal reading is plain `--text`, not green. No
   glow, shadow, gradient, blur or transparency on chrome.
@@ -83,7 +87,9 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/glyphs.py "☉ ↑ µ"              # can th
 - Run `contrast.py` whenever a token changes or a new foreground and background meet. Text needs
   6:1 and control outlines 3:1.
 - Run `glyphs.py` for any character outside ASCII before it reaches the screen. A glyph B612 lacks
-  falls back to a system font, so draw it as an inline SVG (the plan does this for `☉`).
+  falls back to a system font, so draw it as an inline SVG. For `☉` the galaxy-generation plan
+  specifies this in P05.T2.d, and P05.T3.b builds `SunGlyph` and `SolarMassUnit`; reuse them once
+  they exist.
 
 The scripts cannot see layout, data states or command flow. When the change is visible, run the
 client (`just server` and `just client`) and check it at 1920×1080 and 1280×720 if you can take a

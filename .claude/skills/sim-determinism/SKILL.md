@@ -16,8 +16,10 @@ architectures. The sim's `clippy.toml` already bans platform maths (go through
 ## Streams and draws
 
 - Randomness comes only from `Stream::open(seed, TAG, key)`. Each property group gets its own
-  domain tag, declared in `crates/hyperion-sim/src/rng/tags.rs` under the plan's heading
-  (`CONST: Scope = "a.b.c";`) by the task that first opens it.
+  domain tag, declared inside `domain_tags!` in `crates/hyperion-sim/src/rng/tags.rs` under the
+  plan's heading, as `NAME: <scope variant> = "a.b.c";` (for example
+  `GALAXY_PARAMS_STELLAR_MASS: Galaxy = "galaxy.params.stellar_mass";`), by the task that first
+  opens it.
 - A tag is never renamed or removed. Its name is hashed into every key it opens.
 - **The number and order of words drawn from a stream is part of the output.** Adding a draw,
   reordering draws, or making a draw conditional moves every later value from that stream. A new
@@ -32,8 +34,15 @@ architectures. The sim's `clippy.toml` already bans platform maths (go through
 ## Order independence
 
 Generating A then B equals generating B then A, which equals generating B alone. Generators are
-pure functions of seed, key and inputs. The sim keeps no caches, because the caller owns them. For
-anything that may sit behind a cache, prove it with
+pure functions of seed, key and inputs.
+
+- **Banned**: state that depends on call history, such as memo tables filled on first use,
+  counters, or lazily initialised globals. Caches that do this belong to the caller (the server).
+- **Allowed**: immutable values precomputed in a constructor from its inputs alone, such as
+  quadrature nodes or tables. If a precomputed path stands in for a direct computation, add a test
+  that the two agree bit for bit, so that a later edit can't split them.
+
+For anything that may sit behind a cache, prove order independence with
 `hyperion_testkit::order::assert_order_independent`.
 
 ## Arithmetic whose form is output
@@ -58,8 +67,10 @@ moved.
    **Generator version** section usually says. If it isn't, the failure is a bug: find the stream,
    order or arithmetic change that caused it, and don't bless.
 2. If it is meant to: bump `GENERATOR_VERSION` in `crates/hyperion-sim/src/version.rs`, once per
-   change. Check `git diff HEAD -- crates/hyperion-sim/src/version.rs` first so that you don't bump
-   twice.
+   task, in the commit that moves the output (plans say tasks bump "as they land"). Check
+   `git diff HEAD -- crates/hyperion-sim/src/version.rs` first so that you don't bump twice. A
+   work-in-progress checkpoint may lag. The task isn't done until its bump and regenerated goldens
+   are in.
 3. Run `just bless`. It refuses to run under `CI`.
 4. Account for every golden that moved:
 
@@ -67,15 +78,19 @@ moved.
    python3 ${CLAUDE_SKILL_DIR}/scripts/golden_diff.py            # against HEAD; --base <ref> for a range
    ```
 
-   It separates header-only churn (every golden carries the version), extensions (new values
-   pinned, old ones unchanged) and changed values, and says whether the version and the goldens
-   agree. The change must explain each changed value. A change it can't explain is a leak:
-   something moved that shouldn't have, so go back to step 1 for it.
+   It separates header-only churn (every golden carries the version), extensions (new labels, old
+   values unchanged) and changed values, and says whether the version and the goldens agree. The
+   change must explain each changed value. A change it can't explain is a leak: something moved
+   that shouldn't have, so go back to step 1 for it. An extension isn't automatically safe: if a
+   new label pins a value the base already generated, and its computation changed, that is moved
+   output too.
 5. Run `just test-wasm` if wasmtime is installed. If it isn't, say that it wasn't run; CI will run
    it.
 6. If the bump trips a statistical test, run that test under three other seeds. Two failures in
    three is a real defect. Otherwise change the seed in the same commit, with a note (plan 01,
-   design note 28). Never loosen α or shrink the sample to pass.
+   design note 28). Never loosen α, shrink the sample, or widen a bracket or tolerance the plan
+   states in order to pass. If the plan's bracket is wrong, that is a deviation to record with its
+   reasoning, which the plan-conformance reviewer checks.
 
 ## Adding goldens and statistical tests
 

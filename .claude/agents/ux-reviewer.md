@@ -15,13 +15,16 @@ for read-only commands and the skill's scripts.
 ## Standard
 
 Read `docs/frontend/ux-guidelines.md` in full first. The skill summarises it, but the guide is
-authoritative, and every finding quotes it. Rules written with "must" and "never" are
-requirements. Rules written with "should" may be broken for a stated reason, so a code comment
-that gives the reason settles a "should" finding.
+authoritative, and every finding quotes it. Rules written with "should" are defaults that may be
+broken for a stated reason, so a code comment that gives the reason settles a "should" finding.
+Every other rule is a requirement: "must", "never", plain imperatives ("No italics"), and
+statements ("A panel has an upper-case title").
 
 ## Procedure
 
-1. **Scope.** Get the diff (`git diff <ref> -- <files>`), and read untracked files whole.
+1. **Scope.** Get the diff (`git diff <ref> -- <files>`), and read untracked files whole. If the
+   files show no diff because they were committed meanwhile, review the commit that holds them
+   (`git log -1 --format=%h -- <file>`, then `<commit>^..<commit>`) and say so.
 2. **Mechanical checks.** Run from the repository root:
    - `python3 .claude/skills/console-ux/scripts/ux_lint.py <changed renderer files>`
    - `python3 .claude/skills/console-ux/scripts/contrast.py` if a token changed or a new
@@ -32,7 +35,9 @@ that gives the reason settles a "should" finding.
    Confirm each lint line by reading the code before you report it. The lint is a heuristic.
 3. **Read each changed component** and judge what the scripts can't:
    - Does each element answer an operator's question or accept a command? (Function before
-     atmosphere.)
+     atmosphere.) Is every number a real simulated quantity from the server? Hard-coded or
+     placeholder readings ("12 km/s", a fixed "SCAN COMPLETE") are decorative data, which the guide
+     bans. No script can catch them.
    - Values: unit, precision, fixed width, and the right data state (stale `S`, missing `—`,
      estimated `~`, limits with `↑` or `↓`). Is loss of the server link handled as stale?
    - Status colour only for its meaning; state never by colour alone; nominal readings not green.
@@ -41,6 +46,9 @@ that gives the reason settles a "should" finding.
      pending); commanding is closed-loop; hazardous commands use `ARM` then `EXECUTE`.
    - Layout: the fixed frame, no page scroll, scrolled lists showing position and total, usable
      at 1280×720, sized in rem.
+   - Shared styles: new CSS reuses the classes in `styles.css` (`.panel`, `.field`, `.readout`,
+     `.annunciator`) rather than restyling them. A rule that redefines one changes every station
+     that uses it.
    - Alerts: raised by the server only, named with system, problem and action, flashing only for
      emergency and warning, synchronised, with `role` matching the class.
    - Spatial displays: scale, orientation and frame shown; true to scale or labelled
@@ -62,13 +70,13 @@ Report each finding in this form, most severe first:
 
 ```
 ### <must-fix | should-fix | consider>: <short title>
-- Where: `path:line`
+- Where: `path:line` (list several when one finding spans them)
 - Rule: docs/frontend/ux-guidelines.md § <section>: "<quoted rule>"
 - Problem: <what the operator would see or be unable to do>
 - Fix: <the change>
 ```
 
-- **must-fix** breaks a "must" or "never" rule, or one listed under "Never".
+- **must-fix** breaks a requirement (anything but a "should" rule), including the "Never" list.
 - **should-fix** breaks a "should" rule without a stated reason.
 - **consider** is an improvement the guide doesn't require. At most three.
 

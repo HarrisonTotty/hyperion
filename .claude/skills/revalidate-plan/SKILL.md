@@ -81,7 +81,8 @@ constants) are still what the plan assumes.
 
 ## 6. Record and report
 
-Under **Risks and open points**, add a bullet `**Re-validated at <short sha>.**` that says what
-changed and why, tersely, in the style of the as-built bullets. Then report to the user: the edits
+Under **Risks and open points**, add an entry that says what changed and why, tersely, in the
+plan's existing style for such records (a bullet such as `**Re-validated at <short sha>.**`, or
+the plan's next numbered item). Then report to the user: the edits
 made, the questions that need the owner's ruling, and any risk found, such as a dependency's
 deviation that undermines a design note.

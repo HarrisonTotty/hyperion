@@ -27,6 +27,8 @@ Arguments: `$ARGUMENTS`.
   **untracked files included**. `git diff` omits untracked files, so list them with
   `git ls-files --others --exclude-standard`, and pass new files to reviewers by name.
 - Leave out files under `.claude/` unless they are the subject of the review.
+- The tree can move during a review, for example when another session commits. If reviewers
+  report that their files have no diff, let them review the commit that now holds the work.
 
 ## 2. Route
 

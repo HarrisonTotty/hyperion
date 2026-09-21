@@ -18,12 +18,19 @@ Never run `just bless`.
 
 ## Procedure
 
-1. **Scope.** Get the diff (`git diff <ref> -- <files>`), and read untracked files whole.
+1. **Scope.** Get the diff (`git diff <ref> -- <files>`), and read untracked files whole. If the
+   files show no diff because they were committed meanwhile, review the commit that holds them
+   (`git log -1 --format=%h -- <file>`, then `<commit>^..<commit>`) and say so.
+   Always diff `crates/hyperion-sim/clippy.toml` too, even when it isn't listed: its ban list is
+   part of the guarantee.
 2. **Golden and version state.** Run
    `python3 .claude/skills/sim-determinism/scripts/golden_diff.py [--base <ref>]`. Every changed
    pinned value must trace back to something in the diff that was meant to move it. Report a bump
    without moved output, moved output without a bump, and changed values that the task doesn't
-   explain.
+   explain. The script can't see values that were generated but never pinned. For each **new**
+   label, check at the base (`git show <ref>:<path>`) whether that value already existed. If it
+   did and its computation changed, it is moved output, even though the script calls it an
+   extension.
 3. **Trace every generator the diff touches**, from stream to output. Note which tag it opens,
    with which key, how many words it draws and in what order. Compare with the previous version
    (`git show <ref>:<path>`). Any change in word count or order, including a new conditional draw,
@@ -50,14 +57,16 @@ Report each finding in this form, most severe first:
 
 ```
 ### <must-fix | should-fix | consider>: <short title>
-- Where: `path:line`
+- Where: `path:line` (a primary location, then any others)
 - Rule: sim-determinism skill § <section> (or the plan design note): "<quoted rule>"
 - Problem: <what moves, when, and on which architecture or call order>
 - Fix: <the change>
 ```
 
-- **must-fix**: output can differ between runs, machines or call orders; output moved without a
-  bump; a tag was renamed or removed.
+- **must-fix**: output can differ between runs, machines or call orders; a tag was renamed or
+  removed; output moved without a bump in a change that completes its task. In a
+  work-in-progress commit, a missing bump is should-fix: name the task whose commit must carry
+  it.
 - **should-fix**: a missing golden, order-independence or determinism test; a bump that the change
   doesn't explain.
 - **consider**: hardening the rules don't require. At most three.

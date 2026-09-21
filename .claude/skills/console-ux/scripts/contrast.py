@@ -96,6 +96,8 @@ def main() -> None:
         r = ratio(resolve(args[0], table), resolve(args[1], table))
         verdict = "PASS" if r >= minimum else "FAIL"
         print(f"{args[0]} on {args[1]}: {r:.2f}:1 (minimum {minimum:g}:1) {verdict}")
+        if any(a.startswith("#") for a in args):
+            print("Note: components never use literal colours; this ratio is for choosing or checking a token value.")
         sys.exit(0 if r >= minimum else 1)
 
     rows: list[tuple[str, str, float, float]] = []

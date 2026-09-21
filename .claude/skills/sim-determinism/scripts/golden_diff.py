@@ -173,9 +173,10 @@ def main() -> None:
         print("  - Pinned values changed but GENERATOR_VERSION was not bumped: bump it and run `just bless`,")
         print("    or, if the change was not meant to move output, find what moved it.")
     if (extended or added) and not moved and not bumped:
-        print("  - Only new values were pinned. If they are new generated output of existing universes, the")
-        print("    plan's 'Generator version' section decides whether this change bumps; bumps are free before")
-        print("    the first release.")
+        print("  - Only new labels were pinned, and no previously pinned value changed. That does not prove")
+        print("    output held: a new label may pin a value the base already generated without pinning it.")
+        print("    For each new label, check whether its value existed at the base; if its computation changed")
+        print("    since, it is moved output and needs the bump. Only a value that did not exist at all is new.")
     if rise > 1:
         problems = True
         print(f"  - GENERATOR_VERSION rose by {rise}; one bump per change is enough.")

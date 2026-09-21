@@ -49,7 +49,7 @@ Verdicts are `ok`, `mismatch`, `uncited`, `out of range` or `unverifiable`.
 
 ```
 ### <must-fix | should-fix | consider>: <short title>
-- Where: `path:line`
+- Where: `path:line` (list several when one finding spans them)
 - Rule: <source, with authors, year, journal, volume, page or arXiv ID, and the equation or table number>
 - Problem: <the discrepancy and its size, e.g. "factor 2π in the epicyclic frequency, 6.3× too large">
 - Fix: <the corrected value or formula, and the exact citation to put in the doc comment>

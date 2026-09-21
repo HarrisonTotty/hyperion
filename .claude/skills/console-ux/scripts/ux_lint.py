@@ -128,11 +128,14 @@ def ui_texts(path: Path, src: str, code: str, strings: list[tuple[int, str]]) ->
             continue
         texts.append((line, text))
     if path.suffix == ".tsx":
-        bare = blank_strings(code)
-        for m in re.finditer(r">([^<>{}]+)<", bare):
-            segment = m.group(1)
-            if re.search(r"[A-Za-z]", segment) and not re.search(r"=>|&&|\|\||;|==|\breturn\b", segment):
-                texts.append((line_of(bare, m.start(1)), segment.strip()))
+        # JSX text between tags, with any {expression} inside it removed: `<span>{v} ☉</span>`
+        # yields "☉". Strings stay intact here, so `{"☉"}` is caught as a string literal above.
+        for m in re.finditer(r">((?:[^<>{}]|\{[^{}]*\})+)<", code):
+            segment = re.sub(r"\{[^{}]*\}", " ", m.group(1))
+            if re.search(r"=>|&&|\|\||;|==|\breturn\b", segment):
+                continue
+            if segment.strip():
+                texts.append((line_of(code, m.start(1)), segment.strip()))
     return texts
 
 
@@ -140,20 +143,56 @@ def ui_texts(path: Path, src: str, code: str, strings: list[tuple[int, str]]) ->
 
 HEX = re.compile(r"(?<![\w.&$])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b")
 NAMED_COLOUR = re.compile(
-    r"(?:color|background(?:-color)?|border(?:-\w+)?|fill|stroke|outline(?:-color)?|fillStyle|strokeStyle)"
+    r"(?:color|background(?:-color)?|border(?:-\w+)?|fill|stroke|outline(?:-color)?|fillStyle|strokeStyle|"
+    r"box-shadow|text-shadow|boxShadow|textShadow|shadowColor)"
     r"\s*[:=]\s*['\"]?[^;'\"]*\b(white|black|red|green|blue|yellow|orange|purple|gr[ae]y|cyan|magenta|lime|pink)\b",
     re.I,
 )
-UI_BANNED = re.compile(r"\b(loading|please|oops|sorry|success(?:ful(?:ly)?)?|welcome|click here|tap here|awesome|hooray)\b", re.I)
+UI_BANNED = re.compile(
+    r"\b(loading|please|oops|sorry|success(?:ful(?:ly)?)?|welcome|click here|tap here|awesome|hooray|"
+    r"spinner|toast|skeleton)\b",
+    re.I,
+)
 WEB_IDIOM = re.compile(r"\b(spinner|skeleton|toast|hamburger|snackbar|confetti|throbber)\b", re.I)
 FICTION_BREAK = re.compile(r"\b(glow\w*|neon|scan-?lines?|hologram\w*|glassmorph\w*|crt|chromatic)\b", re.I)
 PERSON = re.compile(r"\b(I|I'm|I've|I'll)\b|\b(me|my|we|our|us|you|your|you're|you've)\b", re.I)
 PLACEHOLDER = re.compile(r"^(N/?A|n/a|--|NaN|null|undefined|TBD|\?+|-|0\.0+)$")
-EMOJI = re.compile("[\U0001f000-\U0001faff\u2600-\u27bf\ufe0f\u2b50\u2b55\u2934\u2935]")
+EMOJI = re.compile("[\U0001f000-\U0001faff\ufe0f]")
 
 
 def length_px(value: float, unit: str) -> float:
     return value * 16 if unit in ("rem", "em") else value
+
+
+def shared_classes(root: Path) -> set[str]:
+    sheet = root / RENDERER / "src" / "styles.css"
+    if not sheet.exists():
+        return set()
+    return set(re.findall(r"\.([a-zA-Z][\w-]*)", blank_comments(sheet.read_text(encoding="utf-8"), True)[0]))
+
+
+def reduced_motion_guarded(root: Path) -> bool:
+    return any("prefers-reduced-motion" in p.read_text(encoding="utf-8") for p in (root / RENDERER).rglob("*.css"))
+
+
+def check_stylesheet_scope(path: Path, code: str, root: Path) -> list[Finding]:
+    """CSS outside styles.css that restyles a shared class, and motion with no reduced-motion guard."""
+    found: list[Finding] = []
+    if path.suffix == ".css" and path.name != "styles.css":
+        shared = shared_classes(root)
+        for block in re.finditer(r"([^{}]+)\{", code):
+            clashes = sorted(set(re.findall(r"\.([a-zA-Z][\w-]*)", block.group(1))) & shared)
+            if clashes:
+                names = ", ".join("." + c for c in clashes)
+                found.append(Finding(line_of(code, block.start(1)), "check", "shared-class",
+                    f"Restyles {names} from styles.css for everything that uses it: stations differ in content, never in grammar.",
+                    "Principles"))
+    if re.search(r"@keyframes|\banimation(?:-name)?\s*:|transition(?:-duration)?\s*:", code) and not reduced_motion_guarded(root):
+        m = re.search(r"@keyframes|\banimation(?:-name)?\s*:|transition(?:-duration)?\s*:", code)
+        found.append(Finding(line_of(code, m.start()), "error", "reduced-motion",
+            "Motion with no prefers-reduced-motion rule anywhere in the renderer's CSS: drop transitions and replace flashing with steady reverse video under it.",
+            "Motion and sound"))
+    return found
 
 
 def check_code(path: Path, code: str, root_block: tuple[int, int] | None) -> list[Finding]:
@@ -244,7 +283,7 @@ def check_code(path: Path, code: str, root_block: tuple[int, int] | None) -> lis
         if path.suffix == ".tsx":
             add(m.start(), "check", "number-format", "Format values through one shared formatter so a quantity has the same unit and precision everywhere.", "Numbers, units and time")
     for m in WEB_IDIOM.finditer(code):
-        add(m.start(), "error", "web-idiom", f"'{m.group(0)}': no spinners, skeleton loaders, toasts or hamburger menus.", "Never")
+        add(m.start(), "check", "web-idiom", f"'{m.group(0)}' in a name: no spinners, skeleton loaders, toasts or hamburger menus.", "Never")
 
     if css:
         for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", code):
@@ -271,7 +310,7 @@ def check_text(texts: list[tuple[int, str]]) -> list[Finding]:
         if PLACEHOLDER.fullmatch(stripped):
             found.append(Finding(line, "error", "missing-value", f"'{stripped}' as a value: a missing value is an em dash — in --text-muted.", "Data states"))
         for m in EMOJI.finditer(stripped):
-            found.append(Finding(line, "error", "emoji", f"Emoji or pictograph U+{ord(m.group(0)):04X}: never on a console; draw symbols as SVG.", "Never"))
+            found.append(Finding(line, "error", "emoji", f"Emoji U+{ord(m.group(0)):04X}: never on a console; draw symbols as SVG.", "Never"))
         for ch in dict.fromkeys(c for c in stripped if ord(c) > 0x7F and not EMOJI.match(c)):
             try:
                 lacking = glyphs.missing(ch)
@@ -337,9 +376,10 @@ def main() -> None:
         root_block = None
         if css and (m := re.search(r":root\s*\{[^}]*\}", code)):
             root_block = (m.start(), m.end())
-        findings = check_code(path, code, root_block)
+        findings = check_code(path, code, root_block) + check_stylesheet_scope(path, code, root)
         if path.suffix in (".tsx", ".ts", ".html"):
             findings += check_text(ui_texts(path, src, code, strings))
+        findings = list({(f.line, f.rule, f.message): f for f in findings}.values())
         if not findings:
             continue
         print(path.relative_to(root) if path.is_relative_to(root) else path)

@@ -4,6 +4,8 @@
 Usage:
     plan_task.py P02.T5.a              Task text with the plan header, the ordering notes and
                                        every design note the task cites.
+    plan_task.py P02.T5.a --context    The same, plus the plan's Generator version and Risks
+                                       sections (earlier tasks' as-built records live there).
     plan_task.py P02.T5 --acceptance   Only the acceptance criteria (all subtasks) and the
                                        commands quoted in them.
     plan_task.py --list [P02]          Every task ID and title, marked where a commit names it.
@@ -212,7 +214,24 @@ def task_blocks(lines, all_markers, target) -> tuple[list[str], tuple[int, int],
     return block, (target.line, end), (parent.line, parent_end)
 
 
-def show_task(root: Path, task_id: str, feature: str | None) -> None:
+def mentions(root: Path, plan: Path, lines: list[str], task_id: str, span: tuple[int, int], limit: int = 20) -> list[str]:
+    """Lines elsewhere in the plan set that name this task: the full ID in any plan, and the short
+    form (T6.e, or T6 for a parent) in its own plan, outside the task's own section."""
+    short = task_id.split(".", 1)[1]
+    short_re = re.compile(r"(?<![\w.])" + re.escape(short) + r"(?![\w])")
+    full_re = re.compile(re.escape(task_id) + r"(?![\w])")
+    hits: list[str] = []
+    for other in sorted(plan.parent.glob("[0-9][0-9]-*.md")):
+        text = lines if other == plan else other.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(text):
+            if other == plan and span[0] <= i < span[1]:
+                continue
+            if full_re.search(line) or (other == plan and short_re.search(line)):
+                hits.append(f"{other.relative_to(root)}:{i + 1}: {line.strip()[:140]}")
+    return hits[:limit] + ([f"… {len(hits) - limit} more"] if len(hits) > limit else [])
+
+
+def show_task(root: Path, task_id: str, feature: str | None, context: bool = False) -> None:
     plan, lines, all_markers, target = load(root, task_id, feature)
     rel = plan.relative_to(root)
     block, (start, end), parent_span = task_blocks(lines, all_markers, target)
@@ -252,10 +271,25 @@ def show_task(root: Path, task_id: str, feature: str | None) -> None:
             print(notes[number])
             print()
 
+    refs = mentions(root, plan, lines, task_id, parent_span or (start, end))
+    if refs:
+        print("## Mentioned elsewhere (ordering, later checks that depend on this task)\n")
+        for ref in refs:
+            print(f"- {ref}")
+        print()
+
+    if context:
+        for title in ("generator version", "risks"):
+            span = named_section(lines, title)
+            if span:
+                print("\n".join(lines[span[0] : span[1]]).rstrip())
+                print()
+
     print("## Also read\n")
     print("- The plan's Provides and Consumes entries for what this task builds or uses.")
     print("- The brainstorm sections the header lists that this task touches (the brainstorm is the specification).")
-    print("- The plan's 'Risks and open points', including 'as built' deviations of earlier tasks.")
+    if not context:
+        print("- The plan's 'Generator version' and 'Risks and open points' sections (or rerun with --context).")
 
 
 def show_acceptance(root: Path, task_id: str, feature: str | None) -> None:
@@ -280,6 +314,11 @@ def show_acceptance(root: Path, task_id: str, feature: str | None) -> None:
         print("## Commands quoted in the acceptance criteria\n")
         for cmd in commands:
             print(f"- `{cmd}`")
+    bare = [c for c in commands if re.fullmatch(r"cargo test -p \S+ [\w:]+", c)]
+    if bare:
+        print("\nNote: a bare filter (`cargo test -p <crate> <name>`) matches test *names*, not files.")
+        print("Check that it selects the task's tests; `--test <file>` runs one integration-test file,")
+        print("and `--lib <module path>` the unit tests of a module.")
     manual = [p for p in hits if re.search(r"by hand|by eye|do not commit|manually", p, re.I)]
     if manual:
         print("\n## Contains manual steps (run them, revert any temporary edit, report the result)")
@@ -320,6 +359,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("task_id", nargs="?", help="task ID such as P02.T5 or P05.T1.a")
     parser.add_argument("--acceptance", action="store_true", help="print only the acceptance criteria")
+    parser.add_argument("--context", action="store_true", help="also print the Generator version and Risks sections")
     parser.add_argument("--list", nargs="?", const="", metavar="PLAN", help="list tasks, optionally of one plan")
     parser.add_argument("--feature", help="plan set directory under docs/agent/plans/")
     args = parser.parse_args()
@@ -332,7 +372,7 @@ def main() -> None:
     elif args.acceptance:
         show_acceptance(root, args.task_id, args.feature)
     else:
-        show_task(root, args.task_id, args.feature)
+        show_task(root, args.task_id, args.feature, args.context)
 
 
 if __name__ == "__main__":
