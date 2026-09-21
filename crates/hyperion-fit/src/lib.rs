@@ -1,0 +1,208 @@
+//! Offline fitting for HYPERION: the tool that writes the generator's fitted constant tables.
+//!
+//! Some of the generator's numbers are the result of a fit that is too slow, or too fiddly, to run
+//! each time a galaxy is built: the dimensionless coefficients of the Gaussian expansions behind
+//! the potential, and later the samplers and constants of plan 15. This crate runs those fits and
+//! renders each result as Rust source, which is committed under `crates/hyperion-sim/src/tables/`
+//! with a header naming the tool, its inputs and its version.
+//!
+//! Nothing depends on this crate: it depends on `hyperion-sim`, never the reverse. Every
+//! transcendental it evaluates goes through [`hyperion_sim::math`], every quadrature through
+//! [`hyperion_sim::galaxy::quad`], and every fit takes a fixed number of steps with no randomness
+//! and no threads, so a table comes out bit for bit the same on every platform. Each task's test
+//! renders the fit again and compares it with the committed table, so a stale or hand-edited
+//! table fails CI.
+//!
+//! One task exists so far (plan 02, P02.T6.a): [`tasks::mge`], run as `hyperion-fit run mge`.
+//! Plan 15 extends the crate.
+
+pub mod tasks;
+
+use std::error::Error;
+use std::fmt;
+use std::io;
+use std::path::PathBuf;
+
+/// Where `run mge` writes its table unless `--out` says otherwise: the sim's `tables/mge.rs`,
+/// fixed at compile time so that the tool works from any directory.
+pub const DEFAULT_MGE_OUT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../hyperion-sim/src/tables/mge.rs"
+);
+
+/// The command line's usage, for error messages.
+pub const USAGE: &str = "usage: hyperion-fit run mge [--out <path>]";
+
+/// What the command line asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Command {
+    /// Fit the Gaussian expansions of the potential ([`tasks::mge`]) and write the table to
+    /// `out`.
+    RunMge {
+        /// The file to write.
+        out: PathBuf,
+    },
+}
+
+impl Command {
+    /// Parses the arguments after the program's name: `run mge [--out <path>]`.
+    ///
+    /// # Errors
+    ///
+    /// [`RunFitError::Usage`] for a malformed command line, [`RunFitError::UnknownTask`] for a
+    /// task other than `mge`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_fit::{Command, RunFitError};
+    ///
+    /// let command = Command::parse(["run", "mge", "--out", "table.rs"].map(String::from))?;
+    /// assert_eq!(command, Command::RunMge { out: "table.rs".into() });
+    /// # Ok::<(), RunFitError>(())
+    /// ```
+    pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, RunFitError> {
+        let mut args = args.into_iter();
+        match args.next().as_deref() {
+            Some("run") => {}
+            Some(other) => return Err(RunFitError::Usage(format!("unknown command `{other}`"))),
+            None => return Err(RunFitError::Usage("no command given".to_owned())),
+        }
+        match args.next().as_deref() {
+            Some("mge") => {}
+            Some(other) => return Err(RunFitError::UnknownTask(other.to_owned())),
+            None => return Err(RunFitError::Usage("no task given".to_owned())),
+        }
+        let mut out = PathBuf::from(DEFAULT_MGE_OUT);
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--out" => match args.next() {
+                    Some(path) => out = PathBuf::from(path),
+                    None => return Err(RunFitError::Usage("`--out` needs a path".to_owned())),
+                },
+                other => {
+                    return Err(RunFitError::Usage(format!("unexpected argument `{other}`")));
+                }
+            }
+        }
+        Ok(Self::RunMge { out })
+    }
+}
+
+/// A fitting task could not run.
+#[derive(Debug)]
+pub enum RunFitError {
+    /// The command line was malformed; the text says how.
+    Usage(String),
+    /// The command line named a task that does not exist.
+    UnknownTask(String),
+    /// The table could not be written.
+    Write {
+        /// The file being written.
+        path: PathBuf,
+        /// Why it failed.
+        source: io::Error,
+    },
+}
+
+impl RunFitError {
+    /// The process exit code for this error: 2 for a bad command line, 1 for a failed write.
+    #[must_use]
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Self::Usage(_) | Self::UnknownTask(_) => 2,
+            Self::Write { .. } => 1,
+        }
+    }
+}
+
+impl fmt::Display for RunFitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Usage(why) => write!(f, "{why}; {USAGE}"),
+            Self::UnknownTask(task) => write!(f, "unknown task `{task}`; {USAGE}"),
+            Self::Write { path, .. } => write!(f, "cannot write {}", path.display()),
+        }
+    }
+}
+
+impl Error for RunFitError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Usage(_) | Self::UnknownTask(_) => None,
+            Self::Write { source, .. } => Some(source),
+        }
+    }
+}
+
+/// Runs `command` and returns the path it wrote.
+///
+/// # Errors
+///
+/// [`RunFitError::Write`] if the output file cannot be written.
+pub fn run(command: &Command) -> Result<PathBuf, RunFitError> {
+    match command {
+        Command::RunMge { out } => {
+            let source = tasks::mge::render(&tasks::mge::fit());
+            std::fs::write(out, source).map_err(|source| RunFitError::Write {
+                path: out.clone(),
+                source,
+            })?;
+            Ok(out.clone())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Command, RunFitError> {
+        Command::parse(args.iter().map(|&a| a.to_owned()))
+    }
+
+    #[test]
+    fn run_mge_defaults_to_the_sims_table() {
+        let Command::RunMge { out } = parse(&["run", "mge"]).unwrap();
+        assert!(
+            out.ends_with("hyperion-sim/src/tables/mge.rs"),
+            "{}",
+            out.display()
+        );
+    }
+
+    #[test]
+    fn a_malformed_command_line_is_a_usage_error() {
+        assert!(matches!(parse(&[]), Err(RunFitError::Usage(_))));
+        assert!(matches!(parse(&["fit", "mge"]), Err(RunFitError::Usage(_))));
+        assert!(matches!(parse(&["run"]), Err(RunFitError::Usage(_))));
+        assert!(matches!(
+            parse(&["run", "mge", "--out"]),
+            Err(RunFitError::Usage(_))
+        ));
+        assert!(matches!(
+            parse(&["run", "mge", "--verbose"]),
+            Err(RunFitError::Usage(_))
+        ));
+        match parse(&["run", "kicks"]) {
+            Err(error @ RunFitError::UnknownTask(_)) => {
+                assert_eq!(error.exit_code(), 2);
+                assert_eq!(error.to_string(), format!("unknown task `kicks`; {USAGE}"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_failed_write_names_the_path() {
+        let out = PathBuf::from("/nonexistent-directory/for/hyperion-fit/mge.rs");
+        match run(&Command::RunMge { out: out.clone() }) {
+            Err(error @ RunFitError::Write { .. }) => {
+                assert_eq!(error.exit_code(), 1);
+                assert_eq!(error.to_string(), format!("cannot write {}", out.display()));
+                assert!(error.source().is_some());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}

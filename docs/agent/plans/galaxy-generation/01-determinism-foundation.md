@@ -278,7 +278,7 @@ otherwise.
    a stream holds 2⁴⁹ words. The generator version is not folded into the key, so a version bump
    moves only what its code change moves.
 3. **A tag fixes what its counter word names.** Every tag is declared with a `TagScope`, and
-   `Stream::open` debug-asserts that the `ObjectKey`'s scope matches. This is what makes it safe for
+   `Stream::open` asserts, in release builds too, that the `ObjectKey`'s scope matches. This is what makes it safe for
    a cell's word (an ID with the index zeroed) to equal the ID of that cell's candidate 0, and for
    body index 0 to share `sub = 0` with its system: the two are never opened under the same tag.
 4. **One tag registry.** The interface sketch names a free-standing `domain_tag!`. The collision
@@ -879,8 +879,8 @@ Tests: `word_at(n)` equals the n-th `next_u64` for n up to 1,000; two streams th
 of seed, tag, object word or `sub` share no word among their first 1,000 (checked for adjacent
 cells, consecutive candidates, consecutive body indices: the structured inputs the brainstorm
 names); `sub` and `block` do not alias (body 1, block 0 differs from body 0, block 2⁴⁸ − 1's
-neighbour: assert on the counter words through a private accessor); a scope mismatch panics in debug
-(`#[should_panic(expected = "scope")]`, under `cfg(debug_assertions)`); golden
+neighbour: assert on the counter words through a private accessor); a scope mismatch panics, in
+release builds too (`#[should_panic(expected = "scope")]`); golden
 `tests/golden/rng/streams.golden`: the first eight words for twenty (seed, tag, key) triples.
 Benchmark: open a stream and draw four words (a thinning candidate's budget), target under 50 ns.
 
@@ -1182,6 +1182,59 @@ The designation format and the text forms are not part of the generator version.
   plan 06's concern (evolution is slow; fast phenomena take the clock time directly), recorded here
   because `Span::as_seconds_f64` invites the mistake.
 - **The AArch64 runner** may not be available to a private repository; T12 names the fallback.
+- **Deviations in T1–T5, as built.** `coords::Frame` needs `SystemId` and `BodyId`, so it lands with
+  P01.T6.e, not T5.b; `powi` equals repeated multiplication bit for bit only where the powers are
+  exact (squaring rounds differently from x⁴ on), so its fixed order is pinned instead; the T5.a
+  4 m round trip holds for points reached by a translation, while for unrelated points the `f64`
+  displacement adds its own rounding at the separation (128 m spacing at 100 ly); fused
+  multiply-adds go through `math::mul_add` (`libm::fma`), and `f64::mul_add` is disallowed, because
+  without hardware FMA it calls the platform's `fma`; T3's acceptance command is
+  `cargo test -p hyperion-sim -- units version`.
+- **Deviations in T6 and T7.b, as built.** `id/reserved.rs` is split into `reserved`, `nested`,
+  `global`, `catalogue` and `system`; the builders and parsers need
+  `BuildSystemIdError::FieldOutOfRange` and `NotCanonical`, `DecodeSystemIdError::BandOutOfRange`
+  (a stream's band 7), `BuildEventBinError`, `ParseEventWordError` and `ConvertDesignationError`,
+  because `Designation` also names bodies (the ` /<n>` suffix) and so
+  `SystemId::try_from(&Designation)` can fail; `cell_word` zeroes `[27:0]` (index and member) of a
+  catalogue system and returns a pinned ID unchanged; `domain_tags!` is private to `rng`, so the
+  `compile_fail` doctests call `rng::assert_tag_names`, which it expands to.
+- **Deviations in T7 and T8, as built.** Tags of scope `SelfTest` accept a key of any scope,
+  because the goldens and T11 open `selftest.stream` with every kind of key; the Poisson inversion
+  has no 256-term cap and stops instead at the first term too small to move the running sum (the
+  cap was reachable: rounding leaves the sum at 1 − 3 × 2⁻⁵³ at a mean of 9.99, so the largest
+  uniforms ran to 256; now they stop at 47, moving at most a few × 2⁻⁵³ of probability), and it sums
+  its first three terms before comparing, which gives the same answer and meets the 40 ns target;
+  PTRS tests k's sign before the squeeze, which changes no result because the squeeze region has k
+  ≥ 4 at a mean of 10; `uniform_in` lies in the closed `[lo, hi]` (the largest uniforms round to `hi`
+  whenever `(hi − lo) × 2⁻⁵³` is at most half a unit in the last place of `hi`, not only for
+  narrow ranges), which plan 02's closed parameter ranges accept; the piecewise samplers pick
+  segments with a private copy of Design note 7's rule, which T9 replaces with `Thresholds` without
+  moving a draw; `PiecewiseLinear` takes its second word through `uniform_open`, so a zero density
+  at a knot never gives 0 ÷ 0; `POISSON_MAX_MEAN` (2³¹) is exported.
+- **Deviations in T9–T11, as built.** A body's event key is block 1 of its step-1 counter and a
+  system's is block 0. With `(system's raw ID, sub << 48)` alone, body 0 got its system's key under
+  the same event tag, because event tags, unlike domain tags, carry no subject scope, and the
+  brainstorm gives different IDs different streams. Added beyond the sketch: `Mark::from_word`, the
+  getters `Mark::get`, `Threshold::get`, `Thresholds::{as_slice, len, is_empty}` and
+  `EventKey::words`. `pick_weighted` debug-checks the whole total even after an early pick, and
+  weights are debug-checked as non-negative. In release `from_probability` clamps, and a NaN gives
+  `NEVER`. The decision golden is its own file, `rng/decisions.golden`, so `rng/samplers.golden`
+  stayed byte-identical through the piecewise samplers' swap to `Thresholds`, which shows the swap
+  moved nothing. `every_golden_file_carries_the_current_version` checks the header of every golden
+  file in the crate, whichever plan's test writes it. Changing a Threefry rotation fails the
+  known-answer tests and every golden drawn through Threefry (`streams`, `samplers`, `decisions`,
+  `events`). `rng/tags.golden` pins only FNV hashes, so it rightly still passes.
+- **T12 is verified locally only; acceptance on a pull request is still pending.** The repository
+  has no remote. `ci.yml` has both jobs: `rust-aarch64` on `ubuntu-24.04-arm` (whose image ships
+  rustup), and `rust-wasm32`, which is the `wasm32-wasip1` fallback running `just test-wasm`. Both
+  are kept because they catch different things. AArch64 catches FMA contraction and differences in
+  platform code paths; wasm32 catches output that depends on a 32-bit `usize`. On an x86-64 host
+  (Rust 1.98.1, wasmtime 48.0.2 from its release tarball), `just test-wasm` ran the tests,
+  doctests and slow tests of `hyperion-sim` and `hyperion-testkit` under wasmtime, and all nine
+  goldens passed bit for bit. libtest cannot unwind on wasm, so it reports every
+  `#[should_panic]` test as ignored there; the x86-64 and AArch64 jobs run them. Goldens are read
+  at host paths fixed at compile time, so the runner preopens the repository at that same path
+  with `--dir`. Nothing has been run on AArch64 yet.
 - **Statistical thresholds.** α = 10⁻³ over a few dozen fixed-seed tests gives a few per cent chance
   that some seed needs changing at the first run. Design note 28 says how that is handled without
   weakening a test.

@@ -1,8 +1,42 @@
 //! Deterministic simulation and procedural generation core for HYPERION.
 //!
-//! This crate performs no I/O and reads no clocks: given the same seed and the
-//! same sequence of inputs it must always produce the same universe. Transport,
-//! sessions and persistence live in `hyperion-server`.
+//! This crate performs no I/O, reads no clocks, spawns no threads and holds no caches: given the
+//! same seed and the same inputs it must always produce the same universe, on every platform.
+//! Transport, sessions, caches and persistence live in `hyperion-server`.
+//!
+//! The determinism foundation, which everything else is built on:
+//!
+//! - [`math`]: every transcendental function, on the exactly pinned `libm`.
+//! - [`version`]: [`GENERATOR_VERSION`], half of what identifies a universe.
+//! - [`units`]: unit newtypes over `f64` and the physical constants between them.
+//! - [`time`]: the universe clock, the clock window H and the light-crossing bound L.
+//! - [`coords`]: the galactic, system and body frames, generation cells, the galactic axes and
+//!   the named directions.
+//! - [`id`]: the 64-bit system ID with every layout, body IDs, event words, their text forms and
+//!   designations.
+//! - [`rng`]: random streams keyed by seed, domain tag and object, the domain-tag registry, and
+//!   the samplers.
+//!
+//! On top of it, the galaxy model (plan 02):
+//!
+//! - [`galaxy`]: the galaxy's parameters drawn from the seed, the mass function, age
+//!   distributions and the mean mass of a system, with the numerical helpers they share.
+//! - [`tables`]: constant tables, exact or fitted offline.
+//!
+//! The crate's only runtime dependency is `libm`.
+
+pub mod coords;
+pub mod galaxy;
+pub mod id;
+pub mod math;
+pub mod rng;
+pub mod tables;
+pub mod time;
+pub mod units;
+pub mod version;
+
+pub use rng::Seed;
+pub use version::{GENERATOR_VERSION, GeneratorVersion};
 
 use std::time::Duration;
 

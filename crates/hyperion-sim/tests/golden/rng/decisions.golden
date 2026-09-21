@@ -1,0 +1,34 @@
+# generator_version = 2
+from_probability(0.1) = 0x0003333333333334
+from_probability(1/3) = 0x000aaaaaaaaaaaab
+from_probability(4e-5) = 0x00000053e2d6238e
+from_probability(1 - 2^-53) = 0x001fffffffffffff
+from_probability(1) = 0x0020000000000000
+from_probability(0) = 0x0000000000000000
+from_ratio(3, 7) = 0x000db6db6db6db6e
+from_ratio(0.8, 2.5) = 0x000a3d70a3d70a3e
+
+from_weights([0.25, 0.625, 0.125, 0.75], 2.5)
+[0] = 0x0003333333333334
+[1] = 0x000b333333333333
+[2] = 0x000ccccccccccccd
+[3] = 0x0016666666666666
+
+marks of selftest.stream, item 23
+[0] mark = 0x0a51075d25bcc3 below(1/3) = true pick = Some(1)
+[1] mark = 0x1cd0f4cbc59766 below(1/3) = false pick = None
+[2] mark = 0x02d3f182a9b630 below(1/3) = true pick = Some(0)
+[3] mark = 0x1b71eacbb96c37 below(1/3) = false pick = None
+[4] mark = 0x0b2156f46a3f88 below(1/3) = false pick = Some(1)
+[5] mark = 0x189ecd9a200229 below(1/3) = false pick = None
+[6] mark = 0x074b57b24c5899 below(1/3) = true pick = Some(1)
+[7] mark = 0x07ff069771412e below(1/3) = true pick = Some(1)
+[8] mark = 0x11878aff0293f7 below(1/3) = false pick = Some(3)
+[9] mark = 0x16e96a3e21e219 below(1/3) = false pick = None
+[10] mark = 0x01bedf013d6503 below(1/3) = true pick = Some(0)
+[11] mark = 0x0412310eae9700 below(1/3) = true pick = Some(1)
+[12] mark = 0x08a5b98d3ccbf2 below(1/3) = true pick = Some(1)
+[13] mark = 0x134a6483ef8767 below(1/3) = false pick = Some(3)
+[14] mark = 0x17d6df6b963a5f below(1/3) = false pick = None
+[15] mark = 0x05c31e3807e100 below(1/3) = true pick = Some(1)
+words = 16

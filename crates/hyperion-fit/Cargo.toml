@@ -1,0 +1,16 @@
+[package]
+name = "hyperion-fit"
+description = "Offline fitting for HYPERION: emits the constant tables the generator reads."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Nothing depends on this crate, so it is not in `[workspace.dependencies]`. Its only dependency is
+# the sim, for `hyperion_sim::math` and the quadratures, so that a fit is bit-identical on every
+# platform.
+[dependencies]
+hyperion-sim.workspace = true
+
+[lints]
+workspace = true

@@ -11,10 +11,15 @@ publish = false
 [workspace.dependencies]
 hyperion-protocol = { path = "crates/hyperion-protocol" }
 hyperion-sim = { path = "crates/hyperion-sim" }
+hyperion-testkit = { path = "crates/hyperion-testkit" }
 
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws"] }
+criterion = { version = "0.8.2", default-features = false }
 futures-util = "0.3.34"
+# Pinned exactly: libm is reproducible across platforms but not across its own versions, so a bump
+# is a generator-version change. `arch` is off so that there is one code path to reason about.
+libm = { version = "=0.2.16", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
@@ -33,3 +38,10 @@ pedantic = { level = "warn", priority = -1 }
 
 [profile.release]
 lto = "thin"
+
+# Slow statistical tests (`just test-slow`): release speed, but with the debug assertions and
+# overflow checks that the sim's bound checks rely on.
+[profile.slow-test]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true

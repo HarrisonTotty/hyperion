@@ -6,7 +6,21 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[lib]
+# Benchmarks live under `benches/`; libtest's harness rejects Criterion's arguments.
+bench = false
+
 [dependencies]
+# The sim's only runtime dependency. See `hyperion_sim::math`.
+libm.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+hyperion-testkit.workspace = true
+
+[[bench]]
+name = "foundation"
+harness = false
 
 [lints]
 workspace = true

@@ -1,0 +1,80 @@
+# generator_version = 2
+
+grid A cell [-8192, -8192, -8192] index 0 -> 0x0000000000000000 -> 000 000000 A-0
+grid A cell [0, 0, 0] index 0 -> 0x0200080020000000 -> GGG 000000 A-0
+grid A cell [-1, 3, -7] index 42 -> 0x01fff800dff9002a -> FGF FZ03FS A-42
+grid A cell [8191, 8191, 8191] index 65535 -> 0x03ffffffffffffff -> ZZZ FZFZFZ A-65535
+
+grid B cell [-4096, -4096, -4096] index 0 -> 0x2000000000000000 -> 000 000000 B-0
+grid B cell [0, 0, 0] index 0 -> 0x2200100080000000 -> GGG 000000 B-0
+grid B cell [-1, 3, -7] index 42 -> 0x21fff0037fc8002a -> FGF 7Z037S B-42
+grid B cell [4095, 4095, 4095] index 524287 -> 0x23ffffffffffffff -> ZZZ 7Z7Z7Z B-524287
+
+grid C cell [-2048, -2048, -2048] index 0 -> 0x4000000000000000 -> 000 000000 C-0
+grid C cell [0, 0, 0] index 0 -> 0x4200200200000000 -> GGG 000000 C-0
+grid C cell [-1, 3, -7] index 42 -> 0x41ffe00dfe40002a -> FGF 3Z033S C-42
+grid C cell [2047, 2047, 2047] index 4194303 -> 0x43ffffffffffffff -> ZZZ 3Z3Z3Z C-4194303
+
+grid D cell [-1024, -1024, -1024] index 0 -> 0x6000000000000000 -> 000 000000 D-0
+grid D cell [0, 0, 0] index 0 -> 0x6200400800000000 -> GGG 000000 D-0
+grid D cell [-1, 3, -7] index 42 -> 0x61ffc037f200002a -> FGF 1Z031S D-42
+grid D cell [1023, 1023, 1023] index 33554431 -> 0x63ffffffffffffff -> ZZZ 1Z1Z1Z D-33554431
+
+grid E cell [-512, -512, -512] index 0 -> 0x8000000000000000 -> 000 000000 E-0
+grid E cell [0, 0, 0] index 0 -> 0x8200802000000000 -> GGG 000000 E-0
+grid E cell [-1, 3, -7] index 42 -> 0x81ff80df9000002a -> FGF 0Z030S E-42
+grid E cell [511, 511, 511] index 268435455 -> 0x83ffffffffffffff -> ZZZ 0Z0Z0Z E-268435455
+
+grid BrownDwarf cell [-4096, -4096, -4096] index 0 -> 0xa000000000000000 -> 000 000000 F-0
+grid BrownDwarf cell [0, 0, 0] index 0 -> 0xa200100080000000 -> GGG 000000 F-0
+grid BrownDwarf cell [-1, 3, -7] index 42 -> 0xa1fff0037fc8002a -> FGF 7Z037S F-42
+grid BrownDwarf cell [4095, 4095, 4095] index 524287 -> 0xa3ffffffffffffff -> ZZZ 7Z7Z7Z F-524287
+
+grid RoguePlanet cell [-16384, -16384, -16384] index 0 -> 0xc000000000000000 -> 000 000000 G-0
+grid RoguePlanet cell [0, 0, 0] index 0 -> 0xd000200040000000 -> GGG 000000 G-0
+grid RoguePlanet cell [-1, 3, -7] index 42 -> 0xcfffe001bff9002a -> FGF ZZ03ZS G-42
+grid RoguePlanet cell [16383, 16383, 16383] index 65535 -> 0xdfffffffffffffff -> ZZZ ZZZZZZ G-65535
+
+feature [0, 0, 0] #5 FeatureLevel { index: 0 } -> 0xe8420002f0000000 -> GGG F5 M0
+feature [0, 0, 0] #5 FeatureLevel { index: 8191 } -> 0xe8420002f0001fff -> GGG F5 M8191
+feature [0, 0, 0] #5 InCell { band: A, level: 0, cell: [7, 8, 7], index: 0 } -> 0xe842000280f0e000 -> GGG F5 A0-787-0
+feature [0, 0, 0] #5 InCell { band: C, level: 3, cell: [8, 15, 2], index: 40 } -> 0xe8420002a71e4028 -> GGG F5 C3-8F2-40
+feature [0, 0, 0] #5 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 8191 } -> 0xe8420002efe1ffff -> GGG F5 G7-F0F-8191
+feature [-16, 15, -1] #16383 FeatureLevel { index: 0 } -> 0xe07dfffff0000000 -> 0ZF F16383 M0
+feature [-16, 15, -1] #16383 FeatureLevel { index: 8191 } -> 0xe07dfffff0001fff -> 0ZF F16383 M8191
+feature [-16, 15, -1] #16383 InCell { band: A, level: 0, cell: [7, 8, 7], index: 0 } -> 0xe07dffff80f0e000 -> 0ZF F16383 A0-787-0
+feature [-16, 15, -1] #16383 InCell { band: C, level: 3, cell: [8, 15, 2], index: 40 } -> 0xe07dffffa71e4028 -> 0ZF F16383 C3-8F2-40
+feature [-16, 15, -1] #16383 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 8191 } -> 0xe07dffffefe1ffff -> 0ZF F16383 G7-F0F-8191
+
+dwarf core 0 FeatureLevel { index: 0 } -> 0xf400000070000000 -> DWARF 0 M0
+dwarf core 0 InCell { band: C, level: 3, cell: [8, 15, 2], index: 40 } -> 0xf4000000271e4028 -> DWARF 0 C3-8F2-40
+dwarf core 0 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 8191 } -> 0xf40000006fe1ffff -> DWARF 0 G7-F0F-8191
+dwarf core 3 FeatureLevel { index: 0 } -> 0xf4000001f0000000 -> DWARF 3 M0
+dwarf core 3 InCell { band: C, level: 3, cell: [8, 15, 2], index: 40 } -> 0xf4000001a71e4028 -> DWARF 3 C3-8F2-40
+dwarf core 3 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 8191 } -> 0xf4000001efe1ffff -> DWARF 3 G7-F0F-8191
+
+centre FeatureLevel { index: 0 } -> 0xf000000700000000 -> CENTRE M0
+centre FeatureLevel { index: 1 } -> 0xf000000700000001 -> CENTRE M1
+centre InCell { band: A, level: 9, cell: [2, 17, 18], index: 12 } -> 0xf00000009146400c -> CENTRE A9-2HJ-12
+centre InCell { band: E, level: 11, cell: [31, 0, 31], index: 8191 } -> 0xf0000004bf83ffff -> CENTRE EB-Z0Z-8191
+
+stream 0 A along 0 across [0, 0] index 0 -> 0xf200000000000000 -> STREAM 0 A-0-0.0-0
+stream 87 A along 5121 across [3, 23] index 9 -> 0xf2015c28021ae009 -> STREAM 87 A-5121-3.23-9
+stream 4095 RoguePlanet along 16383 across [63, 63] index 8191 -> 0xf23fff7fffffffff -> STREAM 4095 G-16383-63.63-8191
+
+pinned 0 -> 0xf800000000000000 -> PIN 0
+pinned 42 -> 0xf80000000000002a -> PIN 42
+pinned 288230376151711743 -> 0xfbffffffffffffff -> PIN 288230376151711743
+
+catalogue class 0 cell [-128, -128, -128] index 0 member 0 -> 0xfc00000000000000 -> 000 K0-000-0
+catalogue class 3 cell [8, -67, 26] index 118 member 1 -> 0xfc3883d9a0000761 -> H7K K3-052-118/1
+catalogue class 9 cell [0, 0, 0] index 1 member 0 -> 0xfc98080800000010 -> GGG K9-000-1
+catalogue class 63 cell [127, 127, 127] index 16777215 member 15 -> 0xffffffffffffffff -> ZZZ K63-777-16777215/15
+
+body 0228c38627ff0007.0000 -> H7K 4C0RFZ A-7 /0
+body 0228c38627ff0007.0100 -> H7K 4C0RFZ A-7 /256
+body f000000700000000.ffff -> CENTRE M0 /65535
+event bin 0 number 0 -> f000000700000000:0001000000000000
+event bin -1 number 255 -> 0228c38627ff0007.0000:0001ffffffffffff
+event bin -549755813888 number 0 -> 0228c38627ff0007:0001800000000000
+event bin 549755813887 number 1 -> 0228c38627ff0007:00017fffffffff01

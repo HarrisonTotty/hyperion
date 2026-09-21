@@ -1,0 +1,201 @@
+# generator_version = 2
+
+seed 0000000000000000 tag selftest.stream key Galaxy word 0x0000000000000000 sub 0
+word[0] = 0x634d7bd19c9089af
+word[1] = 0xfb87b597ab7a61e6
+word[2] = 0xb0bce30000ded690
+word[3] = 0x1238fd2f8a0b14e4
+word[4] = 0xe93bccfc5b8a3d06
+word[5] = 0x2dca10c2e27ec078
+word[6] = 0xead10fcc0e6deef2
+word[7] = 0x89aa721774817fd1
+
+seed 0000000000000001 tag selftest.stream key Galaxy word 0x0000000000000000 sub 0
+word[0] = 0x97c8378b35fe9c0e
+word[1] = 0x3e1bfaaf80af573e
+word[2] = 0x52373e9dd0f1100b
+word[3] = 0x6da6a2c8bbe326b8
+word[4] = 0xbaedc62db949b146
+word[5] = 0x6925f44ad6f91fdb
+word[6] = 0xb5957f3cbd6cb6e0
+word[7] = 0xf32c45e42a4537cc
+
+seed ffffffffffffffff tag selftest.stream key Galaxy word 0x0000000000000000 sub 0
+word[0] = 0x826737a7b64c1b6f
+word[1] = 0x6f47407f3b35a58a
+word[2] = 0xd9da54bd80040f63
+word[3] = 0x0172f303e02a54b7
+word[4] = 0xa3a7ddd405599738
+word[5] = 0x3800f4f824bab27c
+word[6] = 0xdf4e555f46545a27
+word[7] = 0xb098afc1a04819e4
+
+seed 00000000deadbeef tag selftest.stream key Galaxy word 0x0000000000000001 sub 0
+word[0] = 0xf331f548a66e9997
+word[1] = 0xe52838e7d56be0a1
+word[2] = 0xea18d23a60a932aa
+word[3] = 0x54c577d738683ae8
+word[4] = 0x44c7d9e8f8111860
+word[5] = 0x566954e74a0269bd
+word[6] = 0xb82f2eb559148c2b
+word[7] = 0x089773526bf1ddcf
+
+seed 00000000deadbeef tag selftest.stream key Galaxy word 0x0000000000000002 sub 0
+word[0] = 0x1da2cbdfa84d83ce
+word[1] = 0x679eaecfeca1e305
+word[2] = 0x28288c24c9701922
+word[3] = 0x7cbd6c6483e59e10
+word[4] = 0x45434126eb40771d
+word[5] = 0x892e159a89602f46
+word[6] = 0x14343d2be1cdf029
+word[7] = 0xf0e0965baa589072
+
+seed 00000000deadbeef tag selftest.stream key Galaxy word 0xffffffffffffffff sub 0
+word[0] = 0x3f5932778745670b
+word[1] = 0x9b76b5b465fd0323
+word[2] = 0x062ff678bf4af0cd
+word[3] = 0x0195161738477d5d
+word[4] = 0x2dabca82c7d2f377
+word[5] = 0x334a4a9d60b0706f
+word[6] = 0xa57f4c8e40a19285
+word[7] = 0xddb4e9cb93ed8094
+
+seed 000000000000002a tag selftest.stream key Cell word 0x0200080020000000 sub 0
+word[0] = 0x78b2be86bb1906bd
+word[1] = 0x1575f0f6b0d8bc88
+word[2] = 0x71c474f52e3632c4
+word[3] = 0x9c6c3e7380fc08f6
+word[4] = 0xd0e71588d977539f
+word[5] = 0xdc8b06f0daafe999
+word[6] = 0xf6fe432336ac890a
+word[7] = 0x65cf8211b24f5225
+
+seed 000000000000002a tag selftest.stream key Cell word 0x0200180020000000 sub 0
+word[0] = 0x26585e9bdfb018ec
+word[1] = 0x2fde88ec25a89e70
+word[2] = 0xe99c4b3ff307efa8
+word[3] = 0xc82e2cb3de8654df
+word[4] = 0xc2fa063bddc22cd4
+word[5] = 0xc7827999ade36c93
+word[6] = 0x92d2aacdc681945f
+word[7] = 0xa505cf41839ad6d3
+
+seed 000000000000002a tag selftest.stream key Cell word 0x0200080060000000 sub 0
+word[0] = 0xe626657559ed00c8
+word[1] = 0x0c9dd6a0e752e3e8
+word[2] = 0x45b34218c3c384a9
+word[3] = 0x5243c7b3d6ac4f3c
+word[4] = 0x6b1ef9af93ffc0f7
+word[5] = 0x210a514c1716db2d
+word[6] = 0x594e695c3d84b368
+word[7] = 0xb947e4b602598897
+
+seed 000000000000002a tag selftest.stream key Cell word 0x020008001fff0000 sub 0
+word[0] = 0xfee1f0253273c5a4
+word[1] = 0x8bd9d41d09921f4f
+word[2] = 0x1f60c11ffcf8b84e
+word[3] = 0xdb5624a93304c401
+word[4] = 0x355d0907a5b8ad13
+word[5] = 0x11bf041307f59b69
+word[6] = 0xca9aaf03557d781c
+word[7] = 0xd38fcfd611c7fcf1
+
+seed 000000000000002a tag selftest.stream key Feature word 0xe6d3e06a00000000 sub 0
+word[0] = 0x0caf868613537208
+word[1] = 0xc150eb3ce658b26c
+word[2] = 0xf457461183028f0c
+word[3] = 0x132cd488a6ae378f
+word[4] = 0xd6694fb7321a9c4d
+word[5] = 0xfa312fd2a4180067
+word[6] = 0x9728cb385f46b463
+word[7] = 0xc331ef003b560d0b
+
+seed 000000000000002a tag selftest.stream key System word 0x0228c38627ff0007 sub 0
+word[0] = 0x7d3635b754cad4e8
+word[1] = 0x9b5239d4a13b6829
+word[2] = 0xd3304715d669fadb
+word[3] = 0x15f1d8198a6efd71
+word[4] = 0xc9aed206a65ca27b
+word[5] = 0x3cf41df6c660ffb1
+word[6] = 0xfaa4e2250b0e5f32
+word[7] = 0xf4e287305d6d4f1a
+
+seed 000000000000002a tag selftest.stream key System word 0x0228c38627ff0008 sub 0
+word[0] = 0x961b33c3ef48beda
+word[1] = 0x0007367b4ebdcdde
+word[2] = 0xf6cefc678a45621c
+word[3] = 0x3fff0b74c1ab0938
+word[4] = 0xaa4c15ec11005ca4
+word[5] = 0xca70077d6f1a5687
+word[6] = 0x8d548ce3f0ce4e1a
+word[7] = 0x644d3c47ebbd428d
+
+seed 000000000000002a tag selftest.stream key System word 0x0228c38627ff0009 sub 0
+word[0] = 0x431bb5ca4d37fa20
+word[1] = 0x94f44e0726212c35
+word[2] = 0xc094a1ae7204160b
+word[3] = 0x2d04e3f0af29fd17
+word[4] = 0xb6c2656c9169867a
+word[5] = 0x9c4fd102c1c4bbc0
+word[6] = 0xe0fc7ed03d67807f
+word[7] = 0x4eba33cff8747d53
+
+seed 000000000000002a tag selftest.stream key System word 0xf000000700000000 sub 0
+word[0] = 0xe4f3157110e6e443
+word[1] = 0x6619235705d8d8d7
+word[2] = 0xdfe62496a81545da
+word[3] = 0xef16cf478cada22e
+word[4] = 0xda6981db155f5c4b
+word[5] = 0xa2b464148db8087c
+word[6] = 0x2fb208c99e41b425
+word[7] = 0x34320510f8149336
+
+seed 000000000000002a tag selftest.stream key Body word 0x0228c38627ff0007 sub 0
+word[0] = 0x7d3635b754cad4e8
+word[1] = 0x9b5239d4a13b6829
+word[2] = 0xd3304715d669fadb
+word[3] = 0x15f1d8198a6efd71
+word[4] = 0xc9aed206a65ca27b
+word[5] = 0x3cf41df6c660ffb1
+word[6] = 0xfaa4e2250b0e5f32
+word[7] = 0xf4e287305d6d4f1a
+
+seed 000000000000002a tag selftest.stream key Body word 0x0228c38627ff0007 sub 1
+word[0] = 0x414ab6808b9f451f
+word[1] = 0x1a1c246c0a289ca3
+word[2] = 0x6160837c4677e4bc
+word[3] = 0xa0c0ff6ee74e9e78
+word[4] = 0xb52491e87a9886be
+word[5] = 0x9a028abc48602d18
+word[6] = 0x23ebe5d94b8bd3d6
+word[7] = 0xb8b8459c58083dee
+
+seed 000000000000002a tag selftest.stream key Body word 0x0228c38627ff0007 sub 2
+word[0] = 0xfb8fa904545f7d7d
+word[1] = 0x73d40bb96c7991e2
+word[2] = 0x11b018e3014f1a1f
+word[3] = 0x304f1e55b2f634de
+word[4] = 0x31bdd4262789afd2
+word[5] = 0x21d47ea88a95bbf2
+word[6] = 0x8567c781aa770d81
+word[7] = 0x52c525c40fb14e70
+
+seed 000000000000002a tag selftest.stream key Body word 0x0228c38627ff0007 sub 65535
+word[0] = 0xc8dce38561e7e56b
+word[1] = 0xa2ba0137bef8cd42
+word[2] = 0xa6b8ab3d700df0c1
+word[3] = 0x2f7a2c31c78a7899
+word[4] = 0x448739fef345e368
+word[5] = 0x3505668a50fdcfdd
+word[6] = 0x90298cc0c97e8414
+word[7] = 0xa8178e9148687674
+
+seed 8000000000000000 tag selftest.stream key Body word 0xf000000700000000 sub 256
+word[0] = 0x2504444abe5f78bc
+word[1] = 0x6524ab90b5ff03be
+word[2] = 0xb714c1cc2b979871
+word[3] = 0x795f7f14845be2cf
+word[4] = 0x94df2fff40f51756
+word[5] = 0xc2a66e77612b33b3
+word[6] = 0x14522df87641c1c3
+word[7] = 0x236a2fe8e3bf66de

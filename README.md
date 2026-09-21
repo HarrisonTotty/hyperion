@@ -44,6 +44,17 @@ The client connects to `ws://127.0.0.1:7878/ws`; override with `VITE_HYPERION_SE
 `just ci` runs everything CI runs, including a check that the generated protocol bindings are
 up to date.
 
+- `just test-slow` runs the slow statistical tests, marked `#[ignore = "slow: ..."]`, under the
+  `slow-test` profile (release speed with debug assertions on); CI runs it after `just test`.
+- `just bench` runs the Criterion benchmarks (`just bench -- <filter>` narrows them); a regression
+  is a finding to raise, never a CI failure.
+- `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate
+  `GENERATOR_VERSION` bump; it refuses to run under `CI`.
+- `just test-wasm` runs the sim's and the testkit's tests, goldens and slow tests included, as
+  `wasm32-wasip1` under wasmtime. It needs `rustup target add wasm32-wasip1` and wasmtime, so it is
+  not part of `just ci`. CI runs it, and the same tests on AArch64, so that generated output is
+  checked bit for bit on three architectures.
+
 ### Git hooks
 
 `just hooks` installs hooks defined in `.pre-commit-config.yaml`. On commit they run file hygiene

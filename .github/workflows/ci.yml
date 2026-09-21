@@ -25,7 +25,44 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: just test-slow
       - run: just gen-protocol-check
+
+  # The goldens pin `libm` function values and sampler outputs as bits, so passing them on a second
+  # architecture turns the claim that a saved universe survives a move to another machine into a
+  # check. AArch64 has hardware FMA and its own code generation, so it catches a contracted
+  # multiply-add or a platform maths call that slipped past the lint.
+  rust-aarch64:
+    name: Rust (AArch64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - run: cargo test -p hyperion-sim -p hyperion-testkit
+      - run: just test-slow
+
+  # The same tests as wasm32-wasip1 under wasmtime: a 32-bit `usize`, which catches output that
+  # depends on the width of an index, on a third instruction set. It is also the fallback should
+  # the AArch64 runner be unavailable.
+  rust-wasm32:
+    name: Rust (wasm32-wasip1)
+    runs-on: ubuntu-latest
+    env:
+      WASMTIME_VERSION: v48.0.2
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: rustup target add wasm32-wasip1
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - name: Install wasmtime
+        run: |
+          curl -sSfL "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/wasmtime-${WASMTIME_VERSION}-x86_64-linux" >> "$GITHUB_PATH"
+      - run: just test-wasm
 
   frontend:
     name: Frontend

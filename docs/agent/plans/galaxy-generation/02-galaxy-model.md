@@ -954,3 +954,13 @@ component order and the map's quadrature scheme belong to the version as well.
 - **R10. Provisional ranges** the brainstorm does not give (arm width and fraction, halo cores and
   flattenings, thick-disc ratios, gas disc size, metallicity means, progenitor orbits, the odds of
   two against four arms) are decisions of this plan and are the first things to tune by eye.
+- **R11. D4 re-checked (P02.T4).** Lifetimes are Raiteri, Villata and Navarro (1996) at Z = 0.02,
+  not 10 Gyr × m^−2.5, and companions above 8 M☉ are Duchêne and Kraus's 1.0 (8–16 M☉) and 1.3,
+  not 1.4: D4's law spread the old populations by 6.7% against the brainstorm's ±3%.
+- **R12. Halo ages and accretion re-checked (P02.T5).** Independent draws let a component's stars
+  be younger than the event that put them in the halo. Now the in-situ and dominant components'
+  age centres are drawn on [max(10.5 Gyr, merger + 0.5 Gyr), 12.5 Gyr] and a lesser progenitor's
+  accretion on [6 Gyr, min(12 Gyr, its youngest stars)], each on its own stream with one word, and
+  the dominant merger's orbit takes an eccentricity of 0.85–0.95 (Belokurov et al. 2018) in place
+  of the broad pericentre range. Where the ages move, so do the halo's mean mass per system and
+  everything that follows from N, by about 10⁻⁵.

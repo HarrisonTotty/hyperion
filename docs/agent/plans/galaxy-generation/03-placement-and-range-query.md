@@ -441,7 +441,11 @@ Acceptance: tests pass; `just test-slow` passes.
   `ShareMatrix::component_share(band, component)`, and apply Design note 3 with
   `Mark::pick_weighted`. The index picked is the `ComponentId`. Add
   `debug_assert!(weighted_density <= bound * (1.0 + 1e-12))` with the cell and position in the
-  message: this is the brainstorm's bound-check assertion. Tests: acceptance frequency in a cell
+  message: this is the brainstorm's bound-check assertion. `pick_weighted` requires Σ weights ≤
+  its bound exactly and debug-asserts it, so pass it the bound padded by the same tolerance,
+  `bound * (1.0 + 1e-12)`, computed once per cell. A sum within rounding of the bound then never
+  trips plan 01's assertion, and acceptance changes by at most one part in 10¹², which no test can
+  see. Record the padding in the doc comment. Tests: acceptance frequency in a cell
   equals mean density ÷ bound within a binomial interval; the picked components' frequencies match
   the odds at a fixed position (chi-square, using a test-only entry point that fixes the position).
   Acceptance: `cargo test -p hyperion-sim placement::candidate::accept`.
@@ -736,3 +740,9 @@ Reserved so that later plans move no star they need not:
 - **Suppression and expected counts.** A pinned volume's suppression is not subtracted from the
   grid's expected count. That errs high, which can only drop a layer early, the same direction the
   brainstorm accepts for features.
+- **`displacement_to` cost.** Plan 01 routes `mul_add` through `libm::fma` for determinism, so
+  `GalacticPosition::displacement_to` costs about 54 ns (three axes) against about 12 ns with
+  hardware FMA. Keep it unless the range-query benchmark shows it on the profile. If it does, a
+  plain multiply and add is bit-identical to the fused form whenever the two cells differ by 31 ly
+  or less per axis, so a fast path on that condition is exact; add it with a test that compares both
+  paths across the boundary.

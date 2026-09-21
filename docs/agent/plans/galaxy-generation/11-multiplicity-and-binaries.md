@@ -337,7 +337,8 @@ where a name has changed by the time this plan runs only the call sites here cha
 ## Design notes
 
 1. **One multiplicity model, and the stripped mark stays the primary draw.** Three earlier stand-ins
-   exist. Plan 02's `ProvisionalFates::mean_companions` (0.30, 0.60, 1.0 and 1.4 by primary mass)
+   exist. Plan 02's `ProvisionalFates::mean_companions` (0.30, 0.60, 1.0 and 1.3 for primaries of
+   0.08–0.5, 0.5–1.5, 1.5–16 and over 16 M☉, Duchêne and Kraus's bins as published; plan 02's R11)
    feeds `mean_present_mass` and `stars_below`, which average a companion over a mass ratio uniform
    on 0.1–1 inside the quadrature. Plan 06's `KickLawParams::stripped_share` is a constant 0.25.
    Plan 08's `displaced::binarity::stripped_share(m, comp)` returns that constant, and it is the one
@@ -525,12 +526,13 @@ re-validated against the code when their turn comes (README).
   so plan 06's provisional mark and plan 08's class table both follow; plan 06's constant
   `KickLawParams::stripped_share` stays only as the quadratures' fallback for tests. Bump the
   version and regenerate every golden: this is the one task of the plan that moves primaries. Tests:
-  mean present mass per system is 0.48 ± 0.01 M☉ under Kroupa and 0.55–0.60 under Chabrier, within
-  3% across the old populations; stars per system 1.33–1.45; `stripped_share` averaged over layer E
-  lies in 0.20–0.33, the two mixes of the brainstorm's scratch Monte Carlo, and a value outside is a
-  finding against the period distribution, not a reason to move the window; plan 06's kick-law tests
-  (P06.T19.d) and plan 08's class-table tests still pass. Acceptance: `just ci` and
-  `just test-slow`. T1.d lands after T4.a, which supplies the real threshold.
+  mean present mass per system is 0.48 ± 0.03 M☉ under Kroupa (plan 02's bracket; plan 02 measures
+  0.498–0.503 with its stand-in fates, R11) and 0.55–0.60 under Chabrier, within 3% across the old
+  populations; stars per system 1.33–1.45; `stripped_share` averaged over layer E lies in 0.20–0.33,
+  the two mixes of the brainstorm's scratch Monte Carlo, and a value outside is a finding against
+  the period distribution, not a reason to move the window; plan 06's kick-law tests (P06.T19.d) and
+  plan 08's class-table tests still pass. Acceptance: `just ci` and `just test-slow`. T1.d lands
+  after T4.a, which supplies the real threshold.
 
 Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`; edits in
 `galaxy/fates.rs`, `galaxy/displaced/binarity.rs`, every golden.

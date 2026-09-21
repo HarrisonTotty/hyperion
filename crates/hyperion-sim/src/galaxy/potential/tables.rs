@@ -1,0 +1,443 @@
+//! The potential reduced to tables once per galaxy (plan 02, P02.T6.d and Design notes 7 and 17).
+
+use super::model::MassModel;
+use super::nfw::Nfw;
+use super::spherical::{BrokenPowerLaw, PointMass, SphericalMass};
+use crate::galaxy::PointLy;
+use crate::galaxy::consts::{G, LIGHT_YEARS_PER_YEAR_PER_KM_S};
+use crate::math;
+use crate::units::{KilometresPerSecond, LightYears, Metres, PerYear, SolarMasses};
+
+/// Points per axis of the grids.
+const POINTS: usize = 64;
+
+/// `ln` of the grids' first point, 2⁻⁴ ly.
+const LN_FIRST: f64 = -4.0 * core::f64::consts::LN_2;
+
+/// `ln` of the grids' last point, 2¹⁸ ly.
+const LN_LAST: f64 = 18.0 * core::f64::consts::LN_2;
+
+/// The grids' first and last points, ly.
+const FIRST: f64 = 0.0625;
+const LAST: f64 = 262_144.0;
+
+/// The step between grid points in `ln R` (and `ln |z|`): 22 ln 2 ÷ 63.
+const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
+
+/// Where the denominator of the tidal radius is floored, as a fraction of Ω² (plan 02, Design
+/// note 17; brainstorm, "Coordinates").
+const TIDAL_FLOOR: f64 = 0.05;
+
+/// The grid point `i` of either axis, ly: `2⁻⁴ × 2^(22 i ÷ 63)`, with both ends exact.
+fn grid_point(i: usize) -> f64 {
+    match i {
+        0 => FIRST,
+        63 => LAST,
+        _ => math::exp(LN_FIRST + STEP * f64::from(u8::try_from(i).expect("below 64"))),
+    }
+}
+
+/// The cell of the grid holding `ln x` for `x` inside the grid, and the position in it, 0–1.
+fn cell(x: f64) -> (usize, f64) {
+    let position = ((math::ln(x) - LN_FIRST) / STEP).clamp(0.0, 62.999_999_999);
+    let index = position.floor();
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a whole number clamped to 0–62"
+    )]
+    let i = index as usize;
+    (i, position - index)
+}
+
+/// The cubic Hermite basis at `t`: the weights of the two values and of the two slopes (in units
+/// of the cell).
+fn hermite(t: f64) -> [f64; 4] {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    [
+        2.0 * t3 - 3.0 * t2 + 1.0,
+        -2.0 * t3 + 3.0 * t2,
+        t3 - 2.0 * t2 + t,
+        t3 - t2,
+    ]
+}
+
+/// Cubic Hermite interpolation in `ln x` between grid points `i` and `i + 1`, with values `y`
+/// and their derivatives in `ln x`, `dy`.
+fn interpolate(y: &[f64; POINTS], dy: &[f64; POINTS], i: usize, t: f64) -> f64 {
+    let [h00, h01, h10, h11] = hermite(t);
+    h00 * y[i] + h01 * y[i + 1] + STEP * (h10 * dy[i] + h11 * dy[i + 1])
+}
+
+/// The Gaussians' in-plane quantities at the radial grid points.
+#[derive(Debug, Clone, PartialEq)]
+struct InPlaneTable {
+    /// `v_c²`, (km/s)².
+    v_circ_sq: [f64; POINTS],
+    /// `d v_c² ÷ d ln R`, (km/s)².
+    slope: [f64; POINTS],
+    /// `d² v_c² ÷ d (ln R)²`, (km/s)².
+    curvature: [f64; POINTS],
+    /// `Φ(R, 0)`, (km/s)².
+    potential: [f64; POINTS],
+}
+
+/// The Gaussians' part at one radius: `v_c²`, `d v_c² ÷ d ln R` and `Φ(R, 0)`.
+#[derive(Debug, Clone, Copy)]
+struct Extended {
+    v_circ_sq: f64,
+    slope: f64,
+    potential: f64,
+}
+
+impl InPlaneTable {
+    fn new(model: &MassModel) -> Self {
+        let mut table = Self {
+            v_circ_sq: [0.0; POINTS],
+            slope: [0.0; POINTS],
+            curvature: [0.0; POINTS],
+            potential: [0.0; POINTS],
+        };
+        for i in 0..POINTS {
+            let at = model.extended_in_plane(grid_point(i));
+            table.v_circ_sq[i] = at.v_circ_sq;
+            table.slope[i] = at.slope;
+            table.curvature[i] = at.curvature;
+            table.potential[i] = at.potential;
+        }
+        table
+    }
+
+    /// The Gaussians' part at radius `r`: interpolated inside the grid, solid-body below it and
+    /// Keplerian above it.
+    fn at(&self, r: f64) -> Extended {
+        if r < FIRST {
+            // Solid body: v_c² ∝ R², so d v_c² ÷ d ln R = 2 v_c², and Φ rises as ½ Ω² R².
+            let omega_sq = self.v_circ_sq[0] / (FIRST * FIRST);
+            return Extended {
+                v_circ_sq: omega_sq * r * r,
+                slope: 2.0 * omega_sq * r * r,
+                potential: self.potential[0] + 0.5 * omega_sq * (r * r - FIRST * FIRST),
+            };
+        }
+        if r > LAST {
+            // A point mass: v_c² and Φ fall as 1 ÷ R from their values at the edge.
+            let scale = LAST / r;
+            let v_circ_sq = self.v_circ_sq[POINTS - 1] * scale;
+            return Extended {
+                v_circ_sq,
+                slope: -v_circ_sq,
+                potential: self.potential[POINTS - 1] * scale,
+            };
+        }
+        let (i, t) = cell(r);
+        Extended {
+            v_circ_sq: interpolate(&self.v_circ_sq, &self.slope, i, t),
+            slope: interpolate(&self.slope, &self.curvature, i, t),
+            // dΦ ÷ d ln R in the plane is v_c².
+            potential: interpolate(&self.potential, &self.v_circ_sq, i, t),
+        }
+    }
+}
+
+/// The Gaussians' potential on the (R, |z|) grid, with its derivatives in `ln R` and `ln |z|`
+/// for bicubic Hermite interpolation.
+#[derive(Debug, Clone, PartialEq)]
+struct Grid {
+    /// `[Φ, R ∂Φ ÷ ∂R, z ∂Φ ÷ ∂z, R z ∂²Φ ÷ ∂R ∂z]` at `(R_i, z_j)`, row `i`, column `j`.
+    points: Vec<[f64; 4]>,
+}
+
+impl Grid {
+    fn new(model: &MassModel) -> Self {
+        let mut points = Vec::with_capacity(POINTS * POINTS);
+        for i in 0..POINTS {
+            for j in 0..POINTS {
+                points.push(model.extended_grid_point(grid_point(i), grid_point(j)));
+            }
+        }
+        Self { points }
+    }
+
+    /// The Gaussians' potential at a point inside the grid's range, bicubic in the logarithms.
+    fn at(&self, r_cyl: f64, z: f64) -> f64 {
+        let (i, t) = cell(r_cyl);
+        let (j, s) = cell(z);
+        let [t0, t1, dt0, dt1] = hermite(t);
+        let [s0, s1, ds0, ds1] = hermite(s);
+        let (value_t, slope_t) = ([t0, t1], [dt0, dt1]);
+        let (value_s, slope_s) = ([s0, s1], [ds0, ds1]);
+        let mut sum = 0.0;
+        for di in 0..2 {
+            for dj in 0..2 {
+                let [f, f_r, f_z, f_rz] = self.points[(i + di) * POINTS + j + dj];
+                sum += value_t[di] * value_s[dj] * f
+                    + STEP * (slope_t[di] * value_s[dj] * f_r + value_t[di] * slope_s[dj] * f_z)
+                    + STEP * STEP * slope_t[di] * slope_s[dj] * f_rz;
+            }
+        }
+        sum
+    }
+}
+
+/// The galaxy's potential as tables: circular speed, its radial derivative and the potential on
+/// a radial grid in the plane, and on request the potential on an (R, |z|) grid (plan 02,
+/// P02.T6.d; Design note 7).
+///
+/// Both grids have 64 points per axis, log-spaced from 2⁻⁴ to 2¹⁸ ly, and hold the Gaussian
+/// components alone, interpolated by cubic Hermite in `ln R` (bicubic in `ln R` and `ln |z|` on
+/// the (R, z) grid) from exact derivatives. The dark halo, the nuclear cluster and the black hole
+/// are added in closed form at lookup. Below 2⁻⁴ ly the Gaussians' part is taken as solid-body,
+/// where the black hole dominates anyway; beyond 2¹⁸ ly as a point mass; on the (R, z) grid,
+/// below 2⁻⁴ ly in R it is taken at 2⁻⁴ ly, and below 2⁻⁴ ly in |z| it is blended quadratically
+/// into the plane's value.
+///
+/// Ω and κ are in radians per year, speeds in km/s, potentials in (km/s)² with zero at infinity.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
+/// use hyperion_sim::units::LightYears;
+///
+/// let model = MassModel::new(&GalaxyParams::milky_way_like());
+/// let tables = PotentialTables::in_plane(&model);
+/// let sun = LightYears::new(26_100.0);
+/// // The escape speed at the Sun's radius exceeds the circular speed by about √2 or more.
+/// let (v, escape) = (tables.v_circ(sun).value(), tables.escape_speed_in_plane(sun).value());
+/// assert!(escape > 1.414 * v);
+/// // The off-plane potential needs the (R, z) grid.
+/// assert!(tables.potential(sun, LightYears::new(1_000.0)).is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct PotentialTables {
+    in_plane: InPlaneTable,
+    grid: Option<Grid>,
+    dark_halo: Nfw,
+    nuclear_cluster: BrokenPowerLaw,
+    black_hole: PointMass,
+    bar_corotation: LightYears,
+}
+
+impl PotentialTables {
+    /// The in-plane tables of `model`: 64 radii of one quadrature per Gaussian.
+    #[must_use]
+    pub fn in_plane(model: &MassModel) -> Self {
+        Self {
+            in_plane: InPlaneTable::new(model),
+            grid: None,
+            dark_halo: *model.dark_halo(),
+            nuclear_cluster: *model.nuclear_cluster(),
+            black_hole: *model.black_hole(),
+            bar_corotation: model.bar_corotation(),
+        }
+    }
+
+    /// The in-plane tables and the 64 × 64 (R, |z|) grid of `model`.
+    #[must_use]
+    pub fn full(model: &MassModel) -> Self {
+        Self::in_plane(model).with_grid(model)
+    }
+
+    /// These tables with the (R, |z|) grid of `model` added, which must be the model the tables
+    /// were built from.
+    #[must_use]
+    pub fn with_grid(self, model: &MassModel) -> Self {
+        Self {
+            grid: Some(Grid::new(model)),
+            ..self
+        }
+    }
+
+    /// Whether the (R, |z|) grid is present.
+    #[must_use]
+    pub fn has_grid(&self) -> bool {
+        self.grid.is_some()
+    }
+
+    /// The spherical components in the model's order.
+    fn spherical(&self) -> [&dyn SphericalMass; 3] {
+        [&self.dark_halo, &self.nuclear_cluster, &self.black_hole]
+    }
+
+    /// `v_c²`, `d v_c² ÷ d ln R` and `Φ(R, 0)` at `r > 0` (ly), everything included.
+    fn totals(&self, r: f64) -> Extended {
+        let radius = LightYears::new(r);
+        self.spherical()
+            .iter()
+            .fold(self.in_plane.at(r), |sum, c| Extended {
+                v_circ_sq: sum.v_circ_sq + c.v_circ_sq(radius),
+                slope: sum.slope + c.v_circ_sq_slope(radius),
+                potential: sum.potential + c.potential(radius),
+            })
+    }
+
+    /// The circular speed squared in the plane at radius `r > 0`, (km/s)².
+    #[must_use]
+    pub fn v_circ_sq(&self, r: LightYears) -> f64 {
+        self.totals(r.value()).v_circ_sq
+    }
+
+    /// The circular speed in the plane at radius `r > 0`.
+    #[must_use]
+    pub fn v_circ(&self, r: LightYears) -> KilometresPerSecond {
+        KilometresPerSecond::new(self.v_circ_sq(r).sqrt())
+    }
+
+    /// `d v_c² ÷ dR` in the plane at radius `r > 0`, (km/s)² per light-year.
+    #[must_use]
+    pub fn v_circ_sq_derivative(&self, r: LightYears) -> f64 {
+        self.totals(r.value()).slope / r.value()
+    }
+
+    /// Ω² and κ² at `r > 0` (ly), in (km/s ÷ ly)²: `Ω² = v_c² ÷ R²` and `κ² = (1 ÷ R) dv_c² ÷ dR
+    /// + 2 v_c² ÷ R²`.
+    fn frequencies_sq(&self, r: f64) -> (f64, f64) {
+        let at = self.totals(r);
+        let r2 = r * r;
+        (at.v_circ_sq / r2, (at.slope + 2.0 * at.v_circ_sq) / r2)
+    }
+
+    /// The circular frequency `Ω = v_c ÷ R` at radius `r > 0`.
+    #[must_use]
+    pub fn omega(&self, r: LightYears) -> PerYear {
+        PerYear::new(self.frequencies_sq(r.value()).0.sqrt() * LIGHT_YEARS_PER_YEAR_PER_KM_S)
+    }
+
+    /// The epicyclic frequency `κ = √((1 ÷ R) dv_c² ÷ dR + 2 v_c² ÷ R²)` at radius `r > 0`.
+    #[must_use]
+    pub fn kappa(&self, r: LightYears) -> PerYear {
+        PerYear::new(self.frequencies_sq(r.value()).1.sqrt() * LIGHT_YEARS_PER_YEAR_PER_KM_S)
+    }
+
+    /// The potential in the plane at radius `r > 0`, (km/s)², zero at infinity.
+    #[must_use]
+    pub fn potential_in_plane(&self, r: LightYears) -> f64 {
+        self.totals(r.value()).potential
+    }
+
+    /// The potential at `(R, z)`, (km/s)², zero at infinity; `None` without the (R, z) grid
+    /// ([`full`](Self::full)). Off the centre only.
+    #[must_use]
+    pub fn potential(&self, r_cyl: LightYears, z: LightYears) -> Option<f64> {
+        let grid = self.grid.as_ref()?;
+        let (r, z) = (r_cyl.value().max(FIRST), z.value().abs());
+        let extended = if r > LAST || z > LAST {
+            // A point mass beyond the grid, scaled from the grid's edge.
+            let (rc, zc) = (r.min(LAST), z.min(LAST));
+            grid.at(rc, zc) * math::hypot(rc, zc) / math::hypot(r, z)
+        } else if z < FIRST {
+            let plane = self.in_plane.at(r).potential;
+            let edge = grid.at(r, FIRST);
+            plane + (edge - plane) * (z / FIRST) * (z / FIRST)
+        } else {
+            grid.at(r, z)
+        };
+        let radius = LightYears::new(math::hypot(r_cyl.value(), z));
+        Some(
+            self.spherical()
+                .iter()
+                .fold(extended, |sum, c| sum + c.potential(radius)),
+        )
+    }
+
+    /// The escape speed `√(−2Φ)` in the plane at radius `r > 0`.
+    #[must_use]
+    pub fn escape_speed_in_plane(&self, r: LightYears) -> KilometresPerSecond {
+        KilometresPerSecond::new((-2.0 * self.potential_in_plane(r)).sqrt())
+    }
+
+    /// The escape speed `√(−2Φ)` at `(R, z)`; `None` without the (R, z) grid.
+    #[must_use]
+    pub fn escape_speed(&self, r_cyl: LightYears, z: LightYears) -> Option<KilometresPerSecond> {
+        self.potential(r_cyl, z)
+            .map(|phi| KilometresPerSecond::new((-2.0 * phi).sqrt()))
+    }
+
+    /// The tidal (Jacobi) radius of a system of mass `m` at `p`: `(G m ÷ (4Ω² − κ²))^⅓`
+    /// (brainstorm, "Coordinates"), in metres (plan 02, Design note 17).
+    ///
+    /// Ω and κ are read at the spherical radius `|p|` from the in-plane tables. The denominator is
+    /// floored at `0.05 Ω²`, where the rotation curve is nearly solid-body. Around a lone point
+    /// mass M at distance R it is `R (m ÷ 3M)^⅓`. At the centre itself it is zero.
+    #[must_use]
+    pub fn tidal_radius(&self, m: SolarMasses, p: &PointLy) -> Metres {
+        let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
+        if r == 0.0 {
+            return Metres::ZERO;
+        }
+        let (omega_sq, kappa_sq) = self.frequencies_sq(r);
+        let denominator = (4.0 * omega_sq - kappa_sq).max(TIDAL_FLOOR * omega_sq);
+        Metres::from(LightYears::new(math::cbrt(G * m.value() / denominator)))
+    }
+
+    /// The bar's corotation radius: its corotation ratio times its half-length.
+    #[must_use]
+    pub fn bar_corotation(&self) -> LightYears {
+        self.bar_corotation
+    }
+
+    /// The bar's pattern speed: the circular frequency at its corotation radius.
+    #[must_use]
+    pub fn bar_pattern_speed(&self) -> PerYear {
+        self.omega(self.bar_corotation)
+    }
+
+    /// The Gaussians' total mass, for tests of the far field.
+    #[cfg(test)]
+    fn extended_edge(&self) -> f64 {
+        self.in_plane.v_circ_sq[POINTS - 1] * LAST / G
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_grid_spans_two_to_the_minus_four_to_two_to_the_eighteen() {
+        assert!(grid_point(0).total_cmp(&0.0625).is_eq());
+        assert!(grid_point(63).total_cmp(&262_144.0).is_eq());
+        for i in 1..63 {
+            let ratio = grid_point(i) / grid_point(i - 1);
+            assert!((math::ln(ratio) - STEP).abs() < 1e-12);
+        }
+        for i in 0..63 {
+            let (cell_i, t) = cell(grid_point(i) * math::exp(0.5 * STEP));
+            assert_eq!(cell_i, i);
+            assert!((t - 0.5).abs() < 1e-9);
+        }
+        assert_eq!(cell(LAST).0, 62);
+        assert_eq!(cell(FIRST).0, 0);
+    }
+
+    #[test]
+    fn hermite_reproduces_a_cubic_in_the_logarithm() {
+        let f = |u: f64| 0.3 * u * u * u - u + 2.0;
+        let df = |u: f64| 0.9 * u * u - 1.0;
+        let mut y = [0.0; POINTS];
+        let mut dy = [0.0; POINTS];
+        for i in 0..POINTS {
+            let u = math::ln(grid_point(i));
+            y[i] = f(u);
+            dy[i] = df(u);
+        }
+        for x in [0.1, 3.7, 1_234.5, 200_000.0] {
+            let (i, t) = cell(x);
+            let u = math::ln(x);
+            assert!((interpolate(&y, &dy, i, t) - f(u)).abs() < 1e-9 * f(u).abs().max(1.0));
+        }
+    }
+
+    #[test]
+    fn the_far_field_mass_is_the_gaussians_mass() {
+        let params = crate::galaxy::params::GalaxyParams::milky_way_like();
+        let model = MassModel::new(&params);
+        let tables = PotentialTables::in_plane(&model);
+        // At 2¹⁸ ly the Gaussians are within a per cent of a point mass.
+        let edge = tables.extended_edge();
+        assert!((edge / model.extended_mass() - 1.0).abs() < 0.01, "{edge}");
+    }
+}

@@ -50,6 +50,35 @@ test:
     cargo test --workspace
     pnpm test
 
+# Run the slow tests (marked `#[ignore = "slow: ..."]`) under the slow-test profile.
+test-slow:
+    cargo test --workspace --profile slow-test -- --ignored
+
+# Run the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
+test-wasm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A second architecture with a 32-bit `usize`, run under wasmtime. It needs
+    # `rustup target add wasm32-wasip1` and wasmtime on the PATH (or `WASMTIME` set to it), so it
+    # is not part of `ci`. Goldens are read at host paths fixed at compile time, so the guest is
+    # given the repository, and the target directory if it lies elsewhere, at those same paths.
+    dirs="--dir={{ justfile_directory() }}"
+    if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+        dirs+=" --dir=$(realpath -m "$CARGO_TARGET_DIR")"
+    fi
+    export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} $dirs"
+    cargo test --target wasm32-wasip1 -p hyperion-sim -p hyperion-testkit
+    cargo test --target wasm32-wasip1 -p hyperion-sim -p hyperion-testkit --profile slow-test \
+        -- --ignored
+
+# Run the Criterion benchmarks, e.g. `just bench -- samplers`.
+bench *args:
+    cargo bench --workspace {{ args }}
+
+# Regenerate the golden files after a deliberate GENERATOR_VERSION bump.
+bless:
+    HYPERION_BLESS=1 cargo test --workspace
+
 # Regenerate the TypeScript protocol bindings from the Rust protocol crate.
 gen-protocol:
     rm -rf packages/protocol/src/generated
@@ -71,4 +100,4 @@ build:
     pnpm build
 
 # Everything CI runs.
-ci: fmt-check check lint test gen-protocol-check
+ci: fmt-check check lint test test-slow gen-protocol-check
