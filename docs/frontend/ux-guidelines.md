@@ -70,7 +70,9 @@ never use them for decoration, branding, chart series or hover effects.
   being reported.
 - Solid status fills use `--surface-0` text on the status colour, never white.
 - No gradients, glows, drop shadows, blurs or transparency effects on console chrome.
-  Depth comes from the three surfaces and hairlines.
+  Depth comes from the three surfaces and hairlines. The ban covers chrome: panels,
+  controls, frames and backgrounds. A colour ramp that encodes data, such as a raster
+  field under "Graphs, schematics and spatial displays", is not a gradient in this sense.
 - The interface is dark only. Do not add a light theme.
 
 ## Typography
@@ -82,6 +84,11 @@ never use them for decoration, branding, chart series or hover effects.
 - B612 covers Latin text and a small symbol set, including `°`, `µ`, `×`, `−`, `—`, `↑` and
   `↓`. Check that a new symbol exists in the font before using it, because a fallback glyph
   from the system font will not match. Draw anything else as an SVG icon.
+- `☉` (U+2609) is in neither B612 nor B612 Mono. It is drawn as an inline SVG sized to the
+  text, a circle with a centre dot in `currentColor`, and the accessible name "solar
+  masses" goes on the unit as a whole. `⊕` (U+2295) is reserved, to be drawn the same way
+  when planets need it. Neither character may be typed into a string that reaches the
+  screen.
 - The typeface must tell `0` from `O` and `1` from `l` and `I`.
 - Numbers are always monospaced with tabular figures, so that a changing value never
   shifts its neighbours.
@@ -100,6 +107,13 @@ never use them for decoration, branding, chart series or hover effects.
 
 - Every numeric value shows its unit, either beside the value or once for a labelled
   group. Units are SI, written with correct symbols and a space: `12.4 km/s`, `310 K`.
+- Beside SI, stellar and system masses are in solar masses, `M☉` (drawn, see
+  "Typography"), and ages are in `Myr` and `Gyr`. Universe time is in years, `yr`. Rates
+  and densities compose allowed units: `°/Myr`, `/ly³`, `SYSTEMS/ly²`.
+- A value outside its unit's ladder is written in E notation with three significant
+  figures: `5.20E10 M☉`. A legend tick at an exact power of ten is written `1E-4`. B612 has
+  no superscript digits beyond `¹`, `²` and `³` and no superscript minus, so `10⁻⁴` cannot be
+  set, and long digit strings are not allowed.
 - The same quantity uses the same unit and precision everywhere on the ship. Show the
   precision the operator can act on, not the precision the simulation has.
 - Scale units rather than printing long numbers: `m`, `km`, `Mm`, `Gm`, then `AU` and `ly`.
@@ -112,6 +126,9 @@ never use them for decoration, branding, chart series or hover effects.
 - Times use a 24-hour clock and always carry a label naming the time system:
   `MET 57/14:08:33` (days/hours:minutes:seconds), `UTC 14:08:33`. Countdown timers are
   negative before the event and positive after it: `T-00:04:12`, `T+00:00:30`.
+- Universe time, the galaxy's own clock counted from the generator's epoch, is labelled `UT`
+  and shown as signed years: `UT +12.50 yr`. `UT` never means Universal Time; the wall
+  clock in the header strip is `UTC`.
 - Present information in directly usable form. Never make the operator do arithmetic:
   show time to closest approach, not just range and closing speed.
 
@@ -244,6 +261,33 @@ Four classes, shared by the whole ship:
   encodes the type and the label carries identity, so that colour stays free for status.
 - Spatial displays are true to scale by default. Any exaggeration of size or distance
   made for visibility must be labelled on the display (`BODIES NOT TO SCALE`).
+- A continuous field, such as column density or dust, may be drawn as a raster rather than
+  in vector lines. It uses a single hue, from `--surface-0` to `--text`. The ramp is
+  logarithmic when the data span more than two orders of magnitude, and the legend says
+  which (`LOG SCALE`). The floor is stated, and values at or below it are exactly
+  `--surface-0`. A legend with tick values and the unit is mandatory. Each pixel shows the
+  value computed for it: no smoothing or interpolation that invents values.
+- A three-dimensional spatial display (star chart, tactical plot, orbit map) follows one set
+  of conventions, so that every such display reads alike:
+  - The projection is orthographic only, so the whole picture has one scale.
+  - The camera orbits the view centre by azimuth and elevation, with no roll. Presets
+    `TOP`, `SIDE` and `FRONT` give axis-aligned views, and the default view is oblique.
+  - A reference plane through the centre carries the `--line` grid and rings, and a stalk
+    joins each mark to its foot on the plane.
+  - A mark is filled above the plane and open below it, with the same outline. Fill means
+    nothing else on a spatial display.
+  - Size may encode a class, never depth, and a legend says so (`SYMBOLS NOT TO SCALE`).
+    Nothing is dimmed by depth.
+  - `--accent` marks what is available, such as a reachable system. A bracket reticle marks
+    the selection, and the reticle in `--target` marks a commanded destination.
+  - A range sphere's outline is a circle drawn at 6:1 contrast, and is labelled apart from
+    the ring on the plane. The edge of the fetched data is drawn, so that unfetched space
+    never looks empty.
+  - The view always shows an axis triad, the azimuth and elevation, a 1-2-5 scale bar, the
+    frame name, the centre and the time.
+  - It redraws on demand only, never on a loop.
+  - The canvas is paired with a DOM list of its marks, from which they are selected with the
+    keyboard.
 - Render fast-changing instruments on a canvas. Text that must be read stays in the DOM.
 
 ## Motion and sound
@@ -269,6 +313,31 @@ Four classes, shared by the whole ship:
   ship-wide nomenclature list, and an abbreviation is used only if it is on that list.
 - Real engineering and astronautical terms are preferred to invented ones: `DELTA-V`,
   `PERIAPSIS`, `RCS`, `EPS`. Invented technology is named in the same register.
+- Directions in the galaxy are named for the galaxy itself: `COREWARD` and `RIMWARD`
+  (towards and away from the galactic axis), `SPINWARD` and `ANTISPINWARD` (with and
+  against the direction of rotation), `NORTH` and `SOUTH` (+z, from which the galaxy
+  rotates counter-clockwise, and −z). They are local to a point, and undefined on the axis.
+- The galaxy-wide reference frame is named `GALACTIC`. Its coordinates are given as
+  `RADIUS` (distance from the axis), `ANGLE` (from +x, counter-clockwise seen from the
+  north) and `HEIGHT` (along +z).
+
+### Nomenclature list
+
+| Name        | Kind         | Meaning                                                  |
+| ----------- | ------------ | -------------------------------------------------------- |
+| `LINK`      | Display      | The server link: endpoint, versions, latency             |
+| `GALAXY`    | Display      | The universe, its galaxy parameters, map and local chart |
+| `AZM`       | Abbreviation | Azimuth of a spatial display's camera                    |
+| `ELV`       | Abbreviation | Elevation of a spatial display's camera                  |
+| `DESIG`     | Abbreviation | Designation                                              |
+| `DIST`      | Abbreviation | Distance                                                 |
+| `ID`        | Abbreviation | Identifier: a system's or universe's 16-digit hex ID     |
+| `INIT MASS` | Abbreviation | Initial mass                                             |
+| `MIN MASS`  | Abbreviation | Minimum mass: the lowest initial mass a query includes   |
+| `GEN VER`   | Abbreviation | Generator version                                        |
+| `EXP`       | Abbreviation | Expected count                                           |
+| `RET`       | Abbreviation | Returned count                                           |
+| `UT`        | Time system  | Universe time, from the generator's epoch                |
 
 ## Accessibility
 

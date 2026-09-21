@@ -1026,3 +1026,31 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   longer than one ping round trip on one worker. That is a safe margin of several orders of
   magnitude, but it is a margin and not a proof; the unit test of queue priority in T8.a is the
   proof.
+- **Deviations in T1–T5, as built.** `nextFreeRequestId`, `MAX_REQUEST_ID` and the test-only
+  `setLastRequestId` are exported from `requests.ts` but not from the package index, so the ID
+  wrap-around can be tested without 2³² requests. A cancelled ID stays reserved until the server's
+  late reply arrives or the link drops. oxlint rejects reading a ref during render, so the socket
+  that requests use lives in a small `RequestLink` class held in `useState`; only the socket that
+  requests are sent on settles them as `link_lost` when it closes. `serverGeneratorVersion` stays
+  `null` when the server speaks another protocol version. The Protocol row reads
+  `SERVER n / CLIENT m`, because `SRV` and `CLT` are not on the nomenclature list. ts-rs's
+  `no-serde-warnings` feature is on in the root `Cargo.toml`; `packages/protocol` gained vitest.
+  Until T13, `ws.rs` answers every request with `request_error` code `unsupported` and ignores
+  `cancel`.
+- **Deviations in T6–T10, as built.** `UniverseStore::scan()` returns `StoreScan` (loaded saves
+  plus later-format ones), so `open` can answer `UnsupportedSaveFormat` and a create never reuses a
+  later-format save's ID. `write` only creates: it fails with `AlreadyExists`, the registry then
+  draws another ID, and a failed write removes what it wrote. Creates in progress count against
+  `MAX_UNIVERSES` from the moment their name is reserved. An empty `HYPERION_DATA_DIR` is refused.
+  `CpuPool::new` takes three `NonZeroUsize` and returns `Result`; jobs are
+  `FnOnce(&CancelToken) -> T`; `shutdown(&self)` is safe to cancel and to call twice; `counters()`
+  is added; a panic in a job's drop code is caught too. `SingleFlight::run` registers the caller
+  at once and returns a `Flight` future whose `make_future` runs lazily on first poll, outside the
+  lock (hence its `Send + 'static` bound); if the computation panics, every waiter panics with the
+  original message and the key is freed, so T13 must answer `internal` when a request task
+  panics. `ByteLru::insert` returns `Insertion` (stored or refused) and uses checked arithmetic;
+  `SharedByteLru` drops evicted values after releasing its lock. `Server::start` is async and
+  fails if the data directory is not a directory. For T13: `universe::Compatibility` stands in for
+  `UniverseStatus`, the server's own `ParseHex64Error` in `universe/id.rs` should give way to the
+  protocol's hex type, `TestClient::request` is still to add, and axum's WebSocket tasks are not
+  joined by graceful shutdown, so `Server::shutdown` needs a task tracker.

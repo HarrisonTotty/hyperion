@@ -4,6 +4,7 @@ const STATUS_LABEL = {
   connecting: "ESTABLISHING LINK",
   connected: "LINK NOMINAL",
   disconnected: "NO CARRIER",
+  incompatible: "LINK INCOMPATIBLE",
 } as const satisfies Record<ConnectionStatus, string>;
 
 interface LinkStatusProps {

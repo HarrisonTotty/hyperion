@@ -1,6 +1,9 @@
 # Rust
 /target/
 
+# Server data (saved universes) from `just server`
+hyperion-data/
+
 # Node
 node_modules/
 *.tsbuildinfo

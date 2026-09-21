@@ -1,10 +1,25 @@
+import { PROTOCOL_VERSION } from "@hyperion/protocol";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ConnectionState } from "../lib/connection";
 import { ConnectionPanel } from "./ConnectionPanel";
 
-const CONNECTED: ConnectionState = { status: "connected", serverVersion: "9.9.9", latencyMs: 12.4 };
+const CONNECTED: ConnectionState = {
+  status: "connected",
+  serverVersion: "9.9.9",
+  serverProtocolVersion: PROTOCOL_VERSION,
+  serverGeneratorVersion: 2,
+  latencyMs: 12.4,
+};
+
+const DISCONNECTED: ConnectionState = {
+  status: "disconnected",
+  serverVersion: null,
+  serverProtocolVersion: null,
+  serverGeneratorVersion: null,
+  latencyMs: null,
+};
 
 function renderPanel(connection: ConnectionState): void {
   render(<ConnectionPanel url="ws://ship/ws" clientVersion="1.2.3" connection={connection} />);
@@ -24,8 +39,8 @@ describe("ConnectionPanel", () => {
     renderPanel(CONNECTED);
 
     expect(reading("Endpoint")).toHaveTextContent("ws://ship/ws");
-    expect(reading("Client Ver")).toHaveTextContent("1.2.3");
-    expect(reading("Server Ver")).toHaveTextContent("9.9.9");
+    expect(reading("Client Version")).toHaveTextContent("1.2.3");
+    expect(reading("Server Version")).toHaveTextContent("9.9.9");
   });
 
   it.each([
@@ -40,9 +55,16 @@ describe("ConnectionPanel", () => {
   });
 
   it("shows a dash for values it does not have", () => {
-    renderPanel({ status: "disconnected", serverVersion: null, latencyMs: null });
+    renderPanel(DISCONNECTED);
 
-    expect(reading("Server Ver")).toHaveTextContent("—");
+    expect(reading("Server Version")).toHaveTextContent("—");
     expect(reading("Latency")).toHaveTextContent("—");
+    expect(reading("Protocol")).toHaveTextContent(`SERVER — / CLIENT ${PROTOCOL_VERSION}`);
+  });
+
+  it("shows the server's protocol version beside the client's", () => {
+    renderPanel({ ...CONNECTED, status: "incompatible", serverProtocolVersion: 1 });
+
+    expect(reading("Protocol")).toHaveTextContent(`SERVER 1 / CLIENT ${PROTOCOL_VERSION}`);
   });
 });

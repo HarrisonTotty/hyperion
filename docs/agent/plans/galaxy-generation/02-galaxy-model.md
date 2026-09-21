@@ -849,9 +849,10 @@ Acceptance, for each subtask with its own tests: `cargo test -p hyperion-sim gal
 Slow tests in `tests/galaxy_milky_way.rs` and `tests/galaxy_sweeps.rs`, marked as plan 01 defines.
 Every loop over 10³ seeds or more in this plan is one of them, those of T5.a, T5.b, T6.e and T7
 included: they live in `tests/galaxy_sweeps.rs`, and the fast suite runs the same checks over 32
-seeds with brackets wide enough for that sample. A parameter set costs well under a millisecond to
-build here, but plan 08's P08.T4.d replaces the σ estimator with a Jeans solution of about 100 ms,
-and the sweeps must not move when it does.
+seeds with brackets wide enough for that sample. A parameter set costs 7–8 ms to build here, most of
+it T6.e's σ estimator (R15), and plan 08's P08.T4.d replaces that estimator with a Jeans solution of
+about 100 ms, so the sweeps must not move when it does. Run them only under `just test-slow`'s
+optimised profile: in a debug build a 10⁴-seed sweep takes the better part of an hour.
 
 At `GalaxyParams::milky_way_like()`:
 
@@ -864,6 +865,7 @@ At `GalaxyParams::milky_way_like()`:
 | at 1 kpc                               | 7.5–10.5 × 10⁹ M☉                                           |
 | at 2 kpc                               | 1.8–2.6 × 10¹⁰ M☉ (Portail et al. 2017)                     |
 | v_c(1 kpc) ÷ v_c(8 kpc)                | 0.75–1.1                                                    |
+| v_c at 0.5, 1 and 2 kpc                | against measured curves, not the research model (see below) |
 | v_c at 8 kpc                           | 215–245 km/s (Eilers et al. 2019)                           |
 | Escape speed at 8 kpc                  | 545–605 km/s (brainstorm: 574)                              |
 | Bar pattern speed                      | 33–41 km/s per kpc                                          |
@@ -873,6 +875,14 @@ At `GalaxyParams::milky_way_like()`:
 
 Enclosed mass here is `MassModel::enclosed_mass` for the spherical components plus the mass of each
 field component inside the sphere by quadrature of its true (not axisymmetrised) density.
+
+The inner rotation curve row is added after T6: the fixture gives v_c = 150, 180 and 216 km/s at
+0.5, 1 and 2 kpc, 8–11% below the brainstorm research model's 163, 202 and 239, while every enclosed
+mass above is inside its measured bracket. The research figures are a model, not data. T11 takes the
+brackets from published measurements of the inner Milky Way's circular speed (for example Portail et
+al. 2017's dynamical model, or Sofue 2013, noting that terminal velocities inside the bar are biased
+by non-circular motion), each with its citation. A value outside them is a finding against the model
+(the inner Gaussian fit, the bulge's share or scale), never a reason to move the fixture's draws.
 
 Over 4,000 seeds (parameters and `MassModel::v_circ_sq` only, no tables): v_c at 8 kpc has its
 median in 225–255 km/s and at least 68% in 210–270 km/s; the median slope from 5 to 16 kpc is within
@@ -986,13 +996,13 @@ component order and the map's quadrature scheme belong to the version as well.
 - **R15. Other as-built points (P02.T6).** `PotentialTables::full` takes 2.7 s against 2 s (R9):
   4,096 points × 767 Gaussians × 32 nodes. 44% of the evaluations regenerate their nodes, 32%
   because the point lies beyond the Gaussian's cut; sharing the other 12% along a column would save
-  under 10%, so the vertical expansion is not cut. `GalaxyParams::from_seed` takes 7.4 ms, not "well
+  under 10%, so the vertical expansion is not cut. `GalaxyParams::from_seed` takes 7–8 ms, not "well
   under a millisecond" (T11), because T6.e's σ builds the black-hole-free model (1.1 ms) and reads
-  its rotation curve at 16 radii (5.5 ms); a recomputed constant and unused node caches (0.6 ms)
-  were removed. `MassModel::enclosed_mass` holds the spherical components only, as T11 reads it, and
-  `expanded_enclosed_mass` adds the Gaussians. The nuclear cluster's break is sharp, so its mass and
-  potential are closed forms, not tabulated quadratures, and the bulge's moments are Beta functions,
-  checked against the two-dimensional `gl32` quadrature. At Milky Way values v_c is 150, 180 and 216
-  km/s at 0.5, 1 and 2 kpc, 8–11% under the research note's model (163, 202, 239), with every
-  enclosed mass of T11 inside its bracket and v_c(1 kpc) ÷ v_c(8 kpc) 0.81 against the note's Milky
-  Way 0.87. `GENERATOR_VERSION` is 3.
+  its rotation curve at 16 radii (5.5 ms); a recomputed constant and unused node caches, about 0.3
+  ms, were removed. `MassModel::enclosed_mass` holds the spherical components only, as T11 reads it,
+  and `expanded_enclosed_mass` adds the Gaussians. The nuclear cluster's break is sharp, so its mass
+  and potential are closed forms, not tabulated quadratures, and the bulge's moments are Beta
+  functions, checked against the two-dimensional `gl32` quadrature. At Milky Way values v_c is 150,
+  180 and 216 km/s at 0.5, 1 and 2 kpc, 8–11% under the research note's model (163, 202, 239), with
+  every enclosed mass of T11 inside its bracket and v_c(1 kpc) ÷ v_c(8 kpc) 0.81 against the note's
+  Milky Way 0.87. `GENERATOR_VERSION` is 3.

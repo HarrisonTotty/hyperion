@@ -1,4 +1,5 @@
 use anyhow::Context;
+use hyperion_server::{Server, ServerConfig};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -10,17 +11,26 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let addr =
-        std::env::var("HYPERION_ADDR").unwrap_or_else(|_| hyperion_server::DEFAULT_ADDR.to_owned());
-    let listener = TcpListener::bind(&addr)
+    let config = ServerConfig::from_env().context("invalid configuration")?;
+    // Bind first, so that nothing needs tearing down when the address is taken.
+    let listener = TcpListener::bind(config.addr())
         .await
-        .with_context(|| format!("failed to bind {addr}"))?;
-    tracing::info!("listening on {}", listener.local_addr()?);
+        .with_context(|| format!("failed to bind {}", config.addr()))?;
+    let addr = listener.local_addr()?;
+    let server = Server::start(config)
+        .await
+        .context("failed to start the server")?;
+    tracing::info!(%addr, "listening");
 
-    axum::serve(listener, hyperion_server::app())
+    let serve_result = axum::serve(listener, server.router())
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .context("server error")
+        .context("server error");
+    server
+        .shutdown()
+        .await
+        .context("failed to shut down cleanly")?;
+    serve_result
 }
 
 async fn shutdown_signal() {

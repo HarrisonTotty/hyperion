@@ -3,25 +3,47 @@
 
 Usage:
     glyphs.py "☉ ° µ ↑"        Report each non-space character: in B612? in B612 Mono?
+    glyphs.py '\\u2609 \\u{2192}' Escapes are decoded first: \\uXXXX, \\u{…}, \\UXXXXXXXX and \\xXX.
     glyphs.py --ranges          Print every code point range each font covers.
 
 Reads the regular-weight WOFF files that @fontsource bundles (apps/hyperion/node_modules), so
 the answer is what the client actually ships, not what the full upstream font contains. A
 character missing here falls back to a system font that will not match (UX guide, Typography):
 draw it as an SVG instead. Exit status is 1 when a checked character is missing from either
-font. Uses only the Python standard library.
+font, and 2 on a usage error (an unknown option, nothing to check) or when the font files are
+missing or unreadable (run `pnpm install`). Uses only the Python standard library.
 """
 
 from __future__ import annotations
 
+import re
 import struct
 import sys
 import unicodedata
 import zlib
 from functools import cache
 from pathlib import Path
+from typing import NoReturn
 
 FONTS = {"B612": "b612", "B612 Mono": "b612-mono"}
+# What coverage() raises when the fonts are missing (OSError) or not the WOFF files expected.
+FONT_ERRORS = (OSError, ValueError, struct.error, zlib.error)
+ESCAPE = re.compile(r"\\(?:u\{([0-9a-fA-F]{1,6})\}|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2})|\\)")
+SURROGATE_PAIR = re.compile("[\ud800-\udbff][\udc00-\udfff]")
+
+
+def decode_escapes(text: str) -> str:
+    """Decode `\\uXXXX`, `\\u{…}`, `\\UXXXXXXXX` and `\\xXX`, joining UTF-16 surrogate pairs
+    (`\\ud83d\\ude80` is one emoji). An escaped backslash and anything else stay as written."""
+
+    def char(m: re.Match[str]) -> str:
+        digits = next((g for g in m.groups() if g), None)
+        if digits is None or int(digits, 16) > 0x10FFFF:
+            return m.group(0)  # `\\` (so `\\u2609` is not an escape), or past the last code point
+        return chr(int(digits, 16))
+
+    text = ESCAPE.sub(char, text)
+    return SURROGATE_PAIR.sub(lambda m: m.group(0).encode("utf-16-le", "surrogatepass").decode("utf-16-le"), text)
 
 
 def repo_root() -> Path:
@@ -140,30 +162,45 @@ def ranges(points: frozenset[int]) -> list[tuple[int, int]]:
     return out
 
 
+def fail(message: str) -> NoReturn:
+    print(f"glyphs.py: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
 def main() -> None:
     args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        return
+    options = [a for a in args if a.startswith("--")]
+    if unknown := [a for a in options if a != "--ranges"]:
+        fail(f"unknown option {unknown[0]}\nusage: glyphs.py CHARS... | --ranges")
+    if options and len(options) != len(args):
+        fail("--ranges takes no characters")
+    chars = [c for c in dict.fromkeys("".join(decode_escapes(a) for a in args)) if not c.isspace()]
+    if not options and not chars:
+        fail("no characters to check")
     try:
-        if args == ["--ranges"]:
-            for font in FONTS:
-                spans = ", ".join(f"U+{a:04X}" if a == b else f"U+{a:04X}–{b:04X}" for a, b in ranges(coverage(font)))
-                print(f"{font}: {spans}\n")
-            return
-        if not args or args[0] in ("-h", "--help"):
-            print(__doc__)
-            return
-        chars = [c for c in dict.fromkeys("".join(args)) if not c.isspace()]
-        bad = False
-        print(f"{'char':<6}{'code':<9}{'B612':<7}{'Mono':<7}name")
-        for c in chars:
-            gone = missing(c)
-            bad = bad or bool(gone)
-            marks = ["no" if f in gone else "yes" for f in FONTS]
-            print(f"{c:<6}U+{ord(c):04X}   {marks[0]:<7}{marks[1]:<7}{unicodedata.name(c, '?')}")
-        if bad:
-            print("\nMissing glyphs fall back to a system font. Draw them as an inline SVG (UX guide, Typography).")
-            sys.exit(1)
-    except (FileNotFoundError, ValueError) as err:
-        sys.exit(f"glyphs.py: {err}")
+        tables = {font: coverage(font) for font in FONTS}  # before any output, so a failure prints alone
+    except FONT_ERRORS as err:
+        fail(str(err))
+
+    if options:
+        for font, points in tables.items():
+            spans = ", ".join(f"U+{a:04X}" if a == b else f"U+{a:04X}–{b:04X}" for a, b in ranges(points))
+            print(f"{font}: {spans}\n")
+        return
+    bad = False
+    print(f"{'char':<6}{'code':<9}{'B612':<7}{'Mono':<7}name")
+    for c in chars:
+        gone = missing(c)
+        bad = bad or bool(gone)
+        marks = ["no" if f in gone else "yes" for f in FONTS]
+        shown = c if c.isprintable() else "?"  # a control character or lone surrogate from an escape
+        print(f"{shown:<6}U+{ord(c):04X}   {marks[0]:<7}{marks[1]:<7}{unicodedata.name(c, '?')}")
+    if bad:
+        print("\nMissing glyphs fall back to a system font. Draw them as an inline SVG (UX guide, Typography).")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

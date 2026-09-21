@@ -395,9 +395,13 @@ pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3];            // boxiness c = 3.0, 
   0.5% of Freeman's Bessel-function form over 0.2–8 scale lengths (Bessel functions by series and
   asymptotic forms in the task's test module, through `math`); the bar profile (plan 02's: the
   azimuthal average of the long bar's surface density at width ratio 0.1, level to 0.85 of the
-  half-length with a Gaussian end of 0.15 half-lengths) to 2% and its mass to 0.3%; plan 02's own
-  table tests (1%, 0.1%, 3%, 0.5%) still pass, and `mge_table_is_reproduced` passes against the new
-  file.
+  half-length with a Gaussian end of 0.15 half-lengths) to 3% of its central value and its mass to
+  0.3%, and its cumulative mass within 5% everywhere; plan 02's own table tests (1%, 0.1%, 3%, 0.5%,
+  and the 7% cumulative check) still pass, and `mge_table_is_reproduced` passes against the new
+  file. A local 2% is out of reach: plan 02's R14 shows by linear programming that no non-negative
+  sum of centred Gaussians fits the profile's flat top and sharp end better than 12% locally inside
+  one half-length, and that the best possible cumulative-mass error is 4.4%. Beating that needs
+  another basis (off-centre or negative terms), which plan 02's potential code does not support.
 - **P15.T3.b The boxy bulge in two dimensions.** For each boxiness c, fit 16 terms with free width
   and q on a polar grid of 48 × 12 points by Levenberg–Marquardt from the one-dimensional solution,
   weights kept non-negative by a projected step. Plan 02 then drops its equal-second-moments

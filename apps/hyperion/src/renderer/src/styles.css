@@ -100,18 +100,48 @@ body {
   list-style: none;
 }
 
-.console__nav li {
+/* A display tab changes only what the console shows, so it has no --line-strong control outline. */
+.console__tab {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-height: 2rem;
+  margin: 0;
+  border: 0;
   border-top: 2px solid transparent;
+  border-radius: 0;
+  background: none;
   padding: 0.5rem 1rem;
   color: var(--text-muted);
+  font: inherit;
   font-size: 0.875rem;
   letter-spacing: 0.15em;
   text-transform: uppercase;
+  cursor: pointer;
 }
 
-.console__nav li[aria-current="page"] {
+.console__tab:hover {
+  background: var(--surface-2);
+}
+
+.console__tab:active {
+  background: var(--surface-0);
+}
+
+/* Inset, so that the edge of the window never clips it. */
+.console__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The active tab's top rule is a shape as well as a colour; aria-current says it in words. */
+.console__tab[aria-current="page"] {
   border-top-color: var(--accent);
   color: var(--accent);
+}
+
+.console__key {
+  font-family: var(--font-mono);
 }
 
 /* A labelled value outside a readout list, such as the clock in the header strip. */
@@ -149,6 +179,13 @@ body {
   text-transform: uppercase;
 }
 
+/* What a panel says when it has nothing to show, such as NO UNIVERSE OPEN. */
+.panel__empty {
+  margin: 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
 /* Status annunciation. In-progress states stay neutral: see "Colour" in the UX guidelines. */
 .annunciator {
   font-size: 0.875rem;
@@ -160,6 +197,10 @@ body {
 }
 
 .annunciator--disconnected {
+  color: var(--status-warning);
+}
+
+.annunciator--incompatible {
   color: var(--status-warning);
 }
 
@@ -184,5 +225,67 @@ body {
 }
 
 .readout__missing {
+  color: var(--text-muted);
+}
+
+/* A unit symbol that is partly drawn, such as the solar mass; it keeps its parts together. */
+.unit {
+  white-space: nowrap;
+}
+
+/* A sign missing from B612, drawn as inline SVG sized to the text and set as a subscript. */
+.glyph {
+  width: 0.7em;
+  height: 0.7em;
+  vertical-align: sub;
+}
+
+/* The legend of a raster field: see "Graphs, schematics and spatial displays" in the guide. */
+.density-legend {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.density-legend__caption {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-muted);
+}
+
+.density-legend__title,
+.density-legend__scale-type {
+  letter-spacing: 0.15em;
+}
+
+/* Room for half of the outermost tick labels, which are centred on the bar's ends. */
+.density-legend__scale {
+  padding: 0 1.25rem;
+}
+
+.density-legend__bar {
+  display: block;
+  width: 100%;
+  height: 1rem;
+  color: var(--text-muted);
+}
+
+.density-legend__ticks {
+  position: relative;
+  height: 1.25rem;
+}
+
+.density-legend__tick {
+  position: absolute;
+  top: 0.125rem;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.density-legend__floor {
+  margin: 0.25rem 0 0;
   color: var(--text-muted);
 }

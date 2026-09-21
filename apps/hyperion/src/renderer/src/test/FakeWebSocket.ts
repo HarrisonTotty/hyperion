@@ -1,4 +1,4 @@
-import type { ServerMessage } from "@hyperion/protocol";
+import type { RequestError, RequestId, ResponseBody, ServerMessage } from "@hyperion/protocol";
 
 /**
  * In-memory stand-in for the browser `WebSocket`, letting tests play the
@@ -37,5 +37,15 @@ export class FakeWebSocket extends EventTarget {
 
   serverSends(message: ServerMessage): void {
     this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
+  }
+
+  /** Ends the request with this ID with a response. */
+  serverResponds(id: RequestId, body: ResponseBody): void {
+    this.serverSends({ type: "response", id, body });
+  }
+
+  /** Ends the request with this ID with an error. */
+  serverRejects(id: RequestId, error: RequestError): void {
+    this.serverSends({ type: "request_error", id, error });
   }
 }

@@ -32,6 +32,22 @@ just client    # run the Electron client with hot reload
 
 The client connects to `ws://127.0.0.1:7878/ws`; override with `VITE_HYPERION_SERVER_URL`.
 
+### Server configuration
+
+The server reads these environment variables:
+
+| Variable                 | Default                                      | What                                 |
+| ------------------------ | -------------------------------------------- | ------------------------------------ |
+| `HYPERION_ADDR`          | `127.0.0.1:7878`                             | Address to listen on                 |
+| `HYPERION_DATA_DIR`      | `./hyperion-data`                            | Where universes are saved            |
+| `HYPERION_WORKERS`       | available parallelism less one, at least one | Generation worker threads            |
+| `HYPERION_CELL_CACHE_MB` | `256`                                        | Cache of generated cells, in MiB     |
+| `HYPERION_MAP_CACHE_MB`  | `64`                                         | Cache of galaxy density maps, in MiB |
+
+The data directory is created with the first universe. Each universe is one directory,
+`universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;
+nothing generated is saved. To delete a universe, stop the server and remove its directory.
+
 ## Checks
 
 | Command      | Rust                      | TypeScript                    |

@@ -1373,3 +1373,7 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   D11 fallback covers the exact axis.
 - **`FakeWebSocket` is edited by plans 04 and 05.** T1.b builds on P04.T5's methods and must land
   after it.
+- **As built (T3.a): on-screen numbers follow the guide, not this plan's examples.** Digits group
+  from five, so four-digit values read `12-24 of 1612`, `2981-3000 of 3000`, `SYSTEMS 1612`; and a
+  negative number takes the guide's `-` from `lib/format.ts`, so the range messages of T8.g and
+  T11.c read `-65,536 TO 65,536 ly` and `-1000 TO 1000 yr`.

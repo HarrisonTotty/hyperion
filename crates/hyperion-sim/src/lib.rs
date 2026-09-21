@@ -41,7 +41,14 @@ pub use version::{GENERATOR_VERSION, GeneratorVersion};
 
 use std::time::Duration;
 
-/// Top-level simulation state.
+/// The mutable, stepped state of one session inside a universe: the ship, the clock, and later the
+/// deltas play makes.
+///
+/// A universe is the immutable `(seed, generator_version)` and is shared by every session in it;
+/// a `Simulation` is what one session changes. The first milestone has no session, so the server
+/// constructs none yet. The session clock runs on the universe clock: [`Simulation::now`] is the
+/// epoch plus the elapsed time, so that a session already knows "now" in the terms every query
+/// takes (plan 04, design note 20).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Simulation {
     seed: u64,
@@ -50,7 +57,7 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    /// Creates a simulation of the galaxy generated from `seed`.
+    /// Creates a session in the universe whose seed is `seed`, at the epoch.
     #[must_use]
     pub fn new(seed: u64) -> Self {
         Self {
@@ -66,7 +73,7 @@ impl Simulation {
         self.elapsed += dt;
     }
 
-    /// The seed the galaxy is generated from.
+    /// The universe's seed: the seed its galaxy is generated from.
     #[must_use]
     pub fn seed(&self) -> u64 {
         self.seed
@@ -83,6 +90,23 @@ impl Simulation {
     pub fn elapsed(&self) -> Duration {
         self.elapsed
     }
+
+    /// The session's present on the universe clock: the epoch plus [`Simulation::elapsed`].
+    ///
+    /// # Panics
+    ///
+    /// If more than 2⁶³ − 1 seconds (2.9 × 10¹¹ years) have elapsed, which the universe clock
+    /// cannot represent. No session comes near it.
+    #[must_use]
+    pub fn now(&self) -> time::UniverseTime {
+        let seconds = i64::try_from(self.elapsed.as_secs())
+            .expect("a session's elapsed time is below 2⁶³ seconds");
+        let elapsed = time::Span::new(seconds, self.elapsed.subsec_nanos())
+            .expect("a Duration's subsecond nanoseconds are below 10⁹");
+        time::UniverseTime::EPOCH
+            .checked_add(elapsed)
+            .expect("the epoch plus at most 2⁶³ − 1 seconds is a universe time")
+    }
 }
 
 #[cfg(test)]
@@ -97,6 +121,18 @@ mod tests {
         }
         assert_eq!(sim.tick(), 3);
         assert_eq!(sim.elapsed(), Duration::from_millis(150));
+    }
+
+    #[test]
+    fn now_is_the_epoch_plus_the_elapsed_time() {
+        let mut sim = Simulation::new(42);
+        assert_eq!(sim.now(), time::UniverseTime::EPOCH);
+        for _ in 0..3 {
+            sim.step(Duration::from_millis(50));
+        }
+        assert_eq!(sim.now(), time::UniverseTime::new(0, 150_000_000).unwrap());
+        sim.step(Duration::from_secs(2));
+        assert_eq!(sim.now(), time::UniverseTime::new(2, 150_000_000).unwrap());
     }
 
     #[test]

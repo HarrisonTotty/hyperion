@@ -1,0 +1,18 @@
+{
+  "description": "A 4 x 2 edge-on density map at 16 bits, pinned from both languages. log10_per_ly2 is the raw map, row by row from the top, null for an empty pixel; every value is exact as an f32. Quantising it (ceiling = its maximum, floor = ceiling - 7 dex edge-on) gives codes, which map encodes.",
+  "log10_per_ly2": [null, -5.0, -4.999999046325684, -1.5, -0.5, 1.0, 1.9990234375, 2.0],
+  "codes": [0, 0, 1, 32768, 42130, 56173, 65526, 65535],
+  "map": {
+    "universe": "0123456789abcdef",
+    "view": "edge_on",
+    "population": "all",
+    "width_px": 4,
+    "height_px": 2,
+    "centre_ly": [0.0, 0.0],
+    "ly_per_px": 32768.0,
+    "bits": 16,
+    "floor_log10_per_ly2": -5.0,
+    "ceiling_log10_per_ly2": 2.0,
+    "data_base64": "AAAAAAEAAICSpG3b9v///w=="
+  }
+}

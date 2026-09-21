@@ -103,8 +103,8 @@ fn projected_outside(x: f64) -> f64 {
 ///
 /// It is found by bisection on the mass fraction projected outside the cylinder of radius `x`,
 /// 60 steps from `[0.5, 5]`, and written down here because it is the same for every galaxy:
-/// recomputing it took half a millisecond of every parameter build. The test
-/// `the_effective_radius_is_the_bisected_root` repeats the bisection and requires these very bits.
+/// recomputing it took 0.4 ms of every parameter build. A test repeats the bisection and
+/// requires these very bits.
 pub const EFFECTIVE_RADIUS_IN_SCALES: f64 = 2.026_996_389_655_237_4;
 
 /// `W(x) × 3 ÷ 4π`: the volume of the sphere of radius x inside the cylinder of radius
