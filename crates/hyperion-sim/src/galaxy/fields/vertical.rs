@@ -154,7 +154,10 @@ pub(crate) struct Height {
 /// absolute value first.
 #[must_use]
 pub(crate) fn locate(abs_z: f64) -> Height {
-    debug_assert!(!(abs_z < 0.0), "a height located as |z|, got {abs_z}");
+    debug_assert!(
+        abs_z >= 0.0 || abs_z.is_nan(),
+        "a height located as |z|, got {abs_z}"
+    );
     if abs_z < LINEAR_END {
         let floor = abs_z.floor();
         #[expect(
@@ -224,7 +227,7 @@ fn mean_decay(d: f64) -> f64 {
 /// assert!(profile.value(2.0 * h) < profile.value(h) * profile.value(h));
 /// // The effective height Σ ÷ 2ρ₀ is the integral of the profile, and the drawn height.
 /// assert!((h / params.thick_disc().height().value() - 1.0).abs() < 1e-12);
-/// assert!((profile.integral_to(1e9) / h - 1.0).abs() < 1e-12);
+/// assert!((profile.integral_to(-1e9).value() / h - 1.0).abs() < 1e-12);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalProfile {
@@ -262,7 +265,11 @@ impl VerticalProfile {
         (gradient, reach): (f64, f64),
         reference_radius: LightYears,
     ) -> Self {
-        assert_eq!(exact.len(), SEGMENTS, "one exponent per knot above the plane");
+        assert_eq!(
+            exact.len(),
+            SEGMENTS,
+            "one exponent per knot above the plane"
+        );
         let mut segments = Vec::with_capacity(SEGMENTS);
         let mut below = Vec::with_capacity(SEGMENTS);
         let mut e = 0.0;
@@ -627,7 +634,12 @@ mod tests {
         for z0 in [60.0, 300.0, 2_000.0] {
             let sigma = 2.0; // M☉ per ly²
             let force = VerticalForce::new(|z| 2.0 * PI * G * sigma * math::tanh(z / z0));
-            let integral = JeansIntegral::new(&force, 0.0, TABLE_END, LightYears::new(1.0));
+            let integral = JeansIntegral::new(
+                &force,
+                0.0,
+                LightYears::new(TABLE_END),
+                LightYears::new(1.0),
+            );
             let dispersion = (PI * G * sigma * z0).sqrt();
             let profile = integral.profile(KilometresPerSecond::new(dispersion));
             for t in [0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 12.0] {
@@ -642,7 +654,7 @@ mod tests {
             }
             let h = profile.effective_height().value();
             assert!((h / z0 - 1.0).abs() < 1e-4, "z₀ {z0}: effective height {h}");
-            let solved = integral.solve(z0);
+            let solved = integral.solve(LightYears::new(z0));
             assert!(
                 (solved.dispersion().value() / dispersion - 1.0).abs() < 1e-4,
                 "z₀ {z0}: σ {} against {dispersion}",
@@ -663,7 +675,8 @@ mod tests {
         let reach = 7_000.0;
         let force_of = |z: f64| k * math::tanh(z / 100.0);
         let force = VerticalForce::new(force_of);
-        let integral = JeansIntegral::new(&force, gamma, reach, LightYears::new(1.0));
+        let integral =
+            JeansIntegral::new(&force, 0.2, LightYears::new(reach), LightYears::new(1.0));
         let sigma = 15.0;
         let profile = integral.profile(KilometresPerSecond::new(sigma));
         let s = |z: f64| 1.0 + gamma * z.min(reach);
@@ -689,39 +702,50 @@ mod tests {
         }
         let at = |z: f64| profile.dispersion_at(z).value() / sigma;
         assert!((at(LIGHT_YEARS_PER_KILOPARSEC) - 1.2).abs() < 1e-14);
+        assert!((at(-LIGHT_YEARS_PER_KILOPARSEC) - 1.2).abs() < 1e-14);
         assert!((at(20_000.0) - s(reach)).abs() < 1e-14);
+        assert!((profile.gradient_per_kpc() - 0.2).abs() < 1e-15);
+        assert!((profile.gradient_reach().value() - reach).abs() < f64::MIN_POSITIVE);
+        // Either side of the plane alike.
+        for z in [0.5, 150.0, 40_960.0] {
+            hyperion_testkit::float::assert_same_bits(profile.exponent(-z), profile.exponent(z));
+        }
     }
 
     /// The profile's integral against a direct quadrature of its value, and the effective height
     /// as the whole integral.
     #[test]
-    fn the_integral_is_the_profile_s() {
+    fn integral_to_matches_a_quadrature_of_the_profile() {
         let (_, forces) = fixture_forces();
-        let integral =
-            JeansIntegral::new(&forces[0].1, 0.0, TABLE_END, LightYears::new(forces[0].0));
+        let integral = JeansIntegral::new(
+            &forces[0].1,
+            0.0,
+            LightYears::new(TABLE_END),
+            LightYears::new(forces[0].0),
+        );
         let profile = integral.profile(KilometresPerSecond::new(20.0));
         for z in [0.3, 50.0, 127.5, 128.0, 700.0, 3_333.0, 65_536.0, 80_000.0] {
             let mut edges: Vec<f64> = (0..=SEGMENTS).map(knot).filter(|&k| k < z).collect();
             edges.push(z);
             let direct = gl_panels(|x| profile.value(x), &edges);
-            let ours = profile.integral_to(z);
+            let ours = profile.integral_to(z).value();
             assert!(
                 (ours / direct - 1.0).abs() < 1e-12,
                 "z {z}: {ours} against {direct}"
             );
         }
         let h = profile.effective_height().value();
-        assert!((profile.integral_to(1e12) / h - 1.0).abs() < 1e-12);
+        assert!((profile.integral_to(1e12).value() / h - 1.0).abs() < 1e-12);
     }
 
     /// Profiles of the fixture's forces, cold and hot, with and without a rising dispersion.
     fn fixture_profiles() -> Vec<VerticalProfile> {
         let (_, forces) = fixture_forces();
-        let gamma = 0.2 / LIGHT_YEARS_PER_KILOPARSEC;
         let mut profiles = Vec::new();
         for (r, force) in &forces {
-            for g in [0.0, gamma] {
-                let integral = JeansIntegral::new(force, g, 7_828.0, LightYears::new(*r));
+            for g in [0.0, 0.2] {
+                let integral =
+                    JeansIntegral::new(force, g, LightYears::new(7_828.0), LightYears::new(*r));
                 for sigma in [3.0, 20.0, 90.0] {
                     profiles.push(integral.profile(KilometresPerSecond::new(sigma)));
                 }
@@ -779,7 +803,8 @@ mod tests {
         let (_, forces) = fixture_forces();
         let (r, force) = &forces[0];
         let gamma = 0.2 / LIGHT_YEARS_PER_KILOPARSEC;
-        let integral = JeansIntegral::new(force, gamma, TABLE_END, LightYears::new(*r));
+        let integral =
+            JeansIntegral::new(force, 0.2, LightYears::new(TABLE_END), LightYears::new(*r));
         let sigma = 10.0;
         let profile = integral.profile(KilometresPerSecond::new(sigma));
         for k in (0..SEGMENTS).step_by(7) {

@@ -7,7 +7,7 @@ mod common;
 use common::{assert_derived_consistent, assert_params_in_ranges, assert_within};
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
-use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
+use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS, Shape};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::MassModel;
@@ -139,10 +139,12 @@ fn the_bulge_dispersion_over_a_thousand_seeds() {
 }
 
 /// The fields over 10³ seeds (P02.T7.b, P02.T7.c): the sub-discs' effective heights rise with age
-/// and their harmonic mean is the drawn height, every galaxy has at most `MAX_COMPONENTS`
-/// components, the dispersion scale lies in 0.6–1.6 for at least 99% of seeds with its median
-/// within a tenth of 1 and follows the physics, and at least nine in ten bulge centres lie in
-/// 0.12–0.55 per ly³ around a median near the brainstorm's "about 0.26".
+/// and their harmonic mean is the drawn height, the young, thick and nuclear discs meet their own
+/// drawn heights (no bisection stops at its bracket's end), every galaxy has at most
+/// `MAX_COMPONENTS` components, the dispersion scale lies in 0.6–1.6 for at least 99% of seeds
+/// with its median within a tenth of 1 and follows the physics, as the square root of the column
+/// times the drawn height, and at least nine in ten bulge centres lie in 0.12–0.55 per ly³ around
+/// a median near the brainstorm's "about 0.26".
 ///
 /// Findings (plan 02, Risks), printed:
 ///
@@ -177,6 +179,20 @@ fn the_fields_over_a_thousand_seeds() {
             (mean - 1.0).abs() < 1e-9,
             "{seed}: mean height off by {mean}"
         );
+        for (i, drawn) in [
+            (0, params.young_disc().height()),
+            (6, params.thick_disc().height()),
+            (9, params.nuclear_disc().height()),
+        ] {
+            let Shape::Disc(disc) = fields.components()[i].shape() else {
+                panic!("{seed}: component {i} is not a disc");
+            };
+            let met = disc.height().value() / drawn.value();
+            assert!(
+                (met - 1.0).abs() < 1e-9,
+                "{seed}: component {i} meets its height to {met}"
+            );
+        }
         scales.push(sub.scale());
         let column = model.vertical_force(
             sub.reference_radius(),
@@ -229,9 +245,8 @@ fn the_fields_over_a_thousand_seeds() {
         (xy + dx * dy, xx + dx * dx, yy + dy * dy)
     });
     let correlation = sxy / (sxx * syy).sqrt();
-    eprintln!(
-        "ln scale against ln(column × drawn height): r = {correlation:.3}, slope {:.3}",
-        sxy / sxx
-    );
+    let slope = sxy / sxx;
+    eprintln!("ln scale against ln(column × drawn height): r = {correlation:.3}, slope {slope:.3}");
     assert!(correlation > 0.95, "r = {correlation}");
+    assert_within("the scale's power of the column × height", slope, 0.4, 0.65);
 }

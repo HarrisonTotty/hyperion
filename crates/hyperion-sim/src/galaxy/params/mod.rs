@@ -70,9 +70,10 @@ impl DiscParams {
         self.length
     }
 
-    /// The effective height `Σ ÷ 2ρ₀`. For the old thin disc it is that of the five sub-discs
-    /// together, the harmonic mean of their own, which the fields meet by scaling their
-    /// dispersions (plan 02, Design note 9).
+    /// The effective height `Σ ÷ 2ρ₀`.
+    ///
+    /// For the old thin disc it is that of the five sub-discs together, the harmonic mean of their
+    /// own, which the fields meet by scaling their dispersions (plan 02, Design note 9).
     #[must_use]
     pub fn height(&self) -> LightYears {
         self.height

@@ -616,8 +616,8 @@ mod tests {
     }
 
     /// The arbiter of "Sizing the layers": the 20 pc census has 69% of all its stars below 0.5 M☉
-    /// (Kirkpatrick et al. 2024, Table 18: 69.2%), and 66–68% of its primaries (66.5% within 20 pc,
-    /// Kirkpatrick et al. 2024; 67.8% within 10 pc, Reylé et al. 2021, A&A 650, A201). Chabrier's
+    /// (Kirkpatrick et al. 2024, Table 18: 69.2%), and 66–68% of its primaries (66.5% within 20 pc
+    /// and 67.8% within 10 pc, tallied from Kirkpatrick et al. 2024, Table 4). Chabrier's
     /// system function as published and with its branch above 1 M☉ scaled by 0.68 bracket the
     /// first, at the brainstorm's 66.9% and 70.9% to the precision printed; the published
     /// function's share of primaries, 66%, lies among the census's. Kroupa's gives the brainstorm's

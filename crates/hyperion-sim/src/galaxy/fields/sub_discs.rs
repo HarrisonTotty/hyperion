@@ -24,17 +24,19 @@
 //!
 //! The other discs are cored the same way, their dispersions rising with height by the same
 //! 0.20 per kpc, as Sharma et al. find the high-α stars' do too ("no special provision is needed to
-//! accommodate the thick disc stars", §7), each with a mid-plane dispersion of its own that meets
-//! its drawn effective height:
+//! accommodate the thick disc stars", in their summary and conclusions), each with a mid-plane
+//! dispersion of its own that meets its drawn effective height:
 //! the young disc (130–200 ly, drawn apart from the old disc's) and the thick disc at the same
 //! reference radius, and the nuclear disc at two of its own scale lengths, the mass-weighted mean
 //! radius of an exponential disc. An isothermal thick disc, as mono-abundance populations are
 //! measured to be over 0.5–2 kpc ("nearly isothermal", Bovy et al. 2012, ApJ 755, 115) and as the
-//! brainstorm's single dispersion for it might be read, falls off too fast in the model's
-//! potential, where `K_z` keeps rising above the thin disc: 1.5 kpc up the Milky Way fixture's
-//! discs e-fold in 420 pc, and a double exponential fitted to them at the Sun's radius finds its
-//! thick disc at the fit's floor of 500 pc, against Bland-Hawthorn and Gerhard's (2016, ARA&A 54,
-//! 529, §5.1.3) 900 ± 180 pc; with the gradient it finds 985 pc (plan 02, P02.T7.b). For the
+//! brainstorm's single dispersion for it might be read, falls off too fast far from the plane: at
+//! a given effective height a cored profile e-folds faster far out than an exponential (sech²
+//! in half its effective height), and in the model's potential `K_z` keeps rising above the thin
+//! disc. 1.5 kpc up the Milky Way fixture's discs then e-fold in 420 pc, and a double exponential
+//! fitted to them at the Sun's radius finds its thick disc at the fit's floor of 500 pc, against
+//! Bland-Hawthorn and Gerhard's (2016, ARA&A 54, 529, §5.1.3) 900 ± 180 pc, an exponential fit's
+//! far-field height; with the gradient it finds 985 pc (plan 02, P02.T7.b). For the
 //! nuclear disc, a hundred light-years thick, the gradient changes its dispersion by under 1%
 //! across it.
 //!
@@ -152,8 +154,10 @@ impl SubDiscHeights {
     }
 
     /// Each sub-disc's mid-plane dispersion as its profile has it: the heating law's times the
-    /// galaxy's dispersion scale. With the law's `1 + 0.20 |z| ÷ kpc`, the vertical Jeans equation
-    /// on the sub-disc's own profile returns it (plan 08, Design note 3).
+    /// galaxy's dispersion scale.
+    ///
+    /// With the law's `1 + 0.20 |z| ÷ kpc` up to 2.4 kpc, the vertical Jeans equation on the
+    /// sub-disc's own profile returns it (plan 08, Design note 3).
     #[must_use]
     pub fn scaled_dispersions(&self) -> [KilometresPerSecond; 5] {
         self.dispersions.map(|sigma| sigma * self.scale)
@@ -172,8 +176,10 @@ impl SubDiscHeights {
     }
 
     /// The galaxy's dispersion scale `s`: the factor on the heating law that gives the sub-discs
-    /// the drawn mean height. Far from 1, it says the model's disc mass and the measured heating
-    /// law disagree with the drawn height (plan 02, Risks, R2).
+    /// the drawn mean height.
+    ///
+    /// Far from 1, it says the model's disc mass and the measured heating law disagree with the
+    /// drawn height (plan 02, Risks, R2).
     #[must_use]
     pub fn scale(&self) -> f64 {
         self.scale
@@ -197,6 +203,7 @@ impl SubDiscHeights {
 }
 
 /// `1 ÷ Σ wᵢ ÷ hᵢ`, in order.
+#[must_use]
 fn harmonic_mean(weights: &[f64; 5], heights: &[f64; 5]) -> f64 {
     let inverse = weights
         .iter()
@@ -221,13 +228,14 @@ impl DiscProfiles {
     /// # Panics
     ///
     /// Never for built parameters, whose formation timescale and heights are positive.
+    #[must_use]
     pub(crate) fn solve(params: &GalaxyParams, model: &MassModel) -> Self {
         const VALID: &str = "built parameters hold a positive timescale";
         let force_at = |r: f64| {
             VerticalForce::new(|z| model.vertical_force(LightYears::new(r), LightYears::new(z)))
         };
-        let gamma = DISPERSION_HEIGHT_GRADIENT_PER_KPC / LIGHT_YEARS_PER_KILOPARSEC;
-        let reach = DISPERSION_GRADIENT_REACH_KPC * LIGHT_YEARS_PER_KILOPARSEC;
+        let gamma = DISPERSION_HEIGHT_GRADIENT_PER_KPC;
+        let reach = LightYears::new(DISPERSION_GRADIENT_REACH_KPC * LIGHT_YEARS_PER_KILOPARSEC);
 
         let reference = REFERENCE_RADIUS_LENGTHS * params.thin_disc().length().value();
         let disc_force = force_at(reference);
@@ -247,7 +255,7 @@ impl DiscProfiles {
         let mean_height = |profiles: &[VerticalProfile; 5]| {
             harmonic_mean(
                 &shares,
-                &[0, 1, 2, 3, 4].map(|i| profiles[i].effective_height().value()),
+                &profiles.each_ref().map(|p| p.effective_height().value()),
             )
         };
         let drawn = params.thin_disc().height().value();
@@ -259,7 +267,8 @@ impl DiscProfiles {
         );
         let scale = math::exp(ln_scale);
         let sub_discs = profiles(scale);
-        let effective = |p: &[VerticalProfile; 5]| [0, 1, 2, 3, 4].map(|i| p[i].effective_height());
+        let effective =
+            |p: &[VerticalProfile; 5]| p.each_ref().map(VerticalProfile::effective_height);
         let summary = SubDiscHeights {
             reference_radius: LightYears::new(reference),
             mean_ages,
@@ -270,8 +279,8 @@ impl DiscProfiles {
             heights: effective(&sub_discs),
         };
 
-        let young = heated.solve(params.young_disc().height().value());
-        let thick = heated.solve(params.thick_disc().height().value());
+        let young = heated.solve(params.young_disc().height());
+        let thick = heated.solve(params.thick_disc().height());
         let nuclear_reference =
             NUCLEAR_REFERENCE_RADIUS_LENGTHS * params.nuclear_disc().length().value();
         let nuclear = JeansIntegral::new(
@@ -280,7 +289,7 @@ impl DiscProfiles {
             reach,
             LightYears::new(nuclear_reference),
         )
-        .solve(params.nuclear_disc().height().value());
+        .solve(params.nuclear_disc().height());
         Self {
             young,
             sub_discs,
@@ -334,16 +343,15 @@ mod tests {
         );
         let summary = profiles.summary;
         assert!(relative(summary.mean_height(), params.thin_disc().height()) < 1e-12);
-        let gamma = DISPERSION_HEIGHT_GRADIENT_PER_KPC / LIGHT_YEARS_PER_KILOPARSEC;
+        let gamma = DISPERSION_HEIGHT_GRADIENT_PER_KPC;
         for (profile, sigma) in profiles.sub_discs.iter().zip(summary.scaled_dispersions()) {
             assert!((profile.dispersion().value() / sigma.value() - 1.0).abs() < 1e-15);
-            assert!((profile.gradient() / gamma - 1.0).abs() < 1e-15);
+            assert!((profile.gradient_per_kpc() / gamma - 1.0).abs() < 1e-15);
         }
         for profile in [&profiles.young, &profiles.thick, &profiles.nuclear] {
-            assert!((profile.gradient() / gamma - 1.0).abs() < 1e-15);
-            assert!(
-                (profile.gradient_reach() / (2.4 * LIGHT_YEARS_PER_KILOPARSEC) - 1.0).abs() < 1e-15
-            );
+            assert!((profile.gradient_per_kpc() / gamma - 1.0).abs() < 1e-15);
+            let reach = profile.gradient_reach().value();
+            assert!((reach / (2.4 * LIGHT_YEARS_PER_KILOPARSEC) - 1.0).abs() < 1e-15);
         }
     }
 }

@@ -454,9 +454,9 @@ fn azimuthal_mean(r: f64, z: f64, mut f: impl FnMut(&PointLy) -> f64) -> f64 {
 /// (Bland-Hawthorn and Gerhard 2016, ARA&A 54, 529, §5.1.3), with no free height: the drawn heights
 /// are effective heights, and the profiles are the Jeans equation's.
 ///
-/// The fixture's fit is 251 pc, 876 pc and 2.9%: its thin disc sits near the bottom of the
-/// measured range at its effective height of 1,000 ly, and would reach 277 pc at 1,100 ly and
-/// 290 pc at 1,150 ly, the top of the drawn range.
+/// The fixture's fit is 258.6 pc, 985 pc and 2.3%: its thin disc sits near the bottom of the
+/// measured range at its effective height of 1,000 ly, and would reach 286 pc at 1,100 ly and
+/// 299 pc at 1,150 ly, the top of the drawn range.
 #[test]
 fn the_fixture_s_discs_far_from_the_plane_are_the_milky_way_s() {
     let (_, fields) = fixture();
@@ -493,10 +493,11 @@ fn the_fixture_s_discs_far_from_the_plane_are_the_milky_way_s() {
 ///   1; 0.043 with brown dwarfs, which no stellar layer holds);
 /// - the number density of systems with a star or white dwarf at the Sun's height, 20.8 pc
 ///   (Bennett and Bovy 2019, MNRAS 482, 1417), against 0.00193 ± 0.00004 per ly³ within 20 pc
-///   (Kirkpatrick et al. 2024, ApJS 271, 55: 2,240 systems in 33,510 pc³) and the benchmark's
-///   0.0018–0.0021 (brainstorm, Decisions, "2026-09-21: local density rulings", 3);
+///   (tallied from Kirkpatrick et al. 2024, ApJS 271, 55, Table 4: 2,240 systems in 33,510 pc³)
+///   and the benchmark's 0.0018–0.0021 (brainstorm, Decisions, "2026-09-21: local density
+///   rulings", 3);
 /// - their ratio, the local mean present-day mass per system, against the census's 0.55–0.59
-///   (Kirkpatrick et al. 2024; McKee et al. 2015's inferred white dwarfs give the top).
+///   (tallied from the same table; McKee et al. 2015's inferred white dwarfs give the top).
 ///
 /// The fixture gives 0.061 M☉ pc⁻³ and 0.00297 per ly³, 1.47 and 1.54 times the measurements.
 /// Both scale with the stars' surface density at R₀, which is 39 M☉ pc⁻² in the fixture and needs
@@ -534,7 +535,7 @@ fn the_fixture_against_the_solar_neighbourhood() {
     );
 }
 
-/// Over 32 seeds the young disc's, the thick disc's and the nuclear disc's own dispersions, which
+/// Over 8 seeds the young disc's, the thick disc's and the nuclear disc's own dispersions, which
 /// meet their drawn effective heights, stay physical: the young disc near the heating law's few
 /// km/s for its age (Sharma et al. 2021) and the thick disc near the brainstorm's "about 35 km/s".
 #[test]

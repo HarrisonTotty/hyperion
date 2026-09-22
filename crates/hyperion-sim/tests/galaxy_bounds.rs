@@ -138,7 +138,7 @@ fn targeted_cells(fields: &Fields, edge: u32) -> Vec<CellBox> {
             }
             Shape::Disc(disc) => {
                 let l = disc.length().value();
-                let reach = disc.profile().gradient_reach();
+                let reach = disc.profile().gradient_reach().value();
                 let top = ROOT - 2.0 * f64::from(edge);
                 for z in [
                     0.5, 1.0, 127.5, 128.0, 256.0, 4_096.0, reach, 32_768.0, 49_152.0, top,

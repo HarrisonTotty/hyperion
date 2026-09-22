@@ -478,8 +478,9 @@ impl Error for BuildChabrierError {}
 /// log-normal's value at 1 M☉.
 ///
 /// It is the default (brainstorm, Decisions, "2026-09-21: local density rulings", 2): the 20 pc
-/// census has 66–68% of its primaries below 0.5 M☉, where this function gives 66% and Kroupa's
-/// 76%, and 69% of all its stars (Kirkpatrick et al. 2024, ApJS 271, 55, Table 18). Used for
+/// census has 66–68% of its primaries below 0.5 M☉ (tallied from Kirkpatrick et al. 2024, ApJS
+/// 271, 55, Table 4, within 20 pc and 10 pc), where this function gives 66% and Kroupa's 76%, and
+/// 69% of all its stars (their Table 18). Used for
 /// primaries with the provisional companions (plan 02, Design note 4), the function as published
 /// makes systems too heavy, 0.66 M☉ each at the Sun against the census's 0.55–0.59, and puts 67%
 /// of all stars below 0.5 M☉. So its branch above 1 M☉ is multiplied by

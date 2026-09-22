@@ -377,7 +377,8 @@ and the nuclear cluster, which change it by well under a per cent at the effecti
 **D9. Sub-discs and every disc's cored profile.** Five sub-discs with age edges 0.1, 1, 2, 4, 7 and
 10 Gyr. Each takes as its age the mean age of the formation history inside its bin, and as its
 dispersion Sharma et al.'s (2021, MNRAS 506, 1761, eqs. 4 and 7, Table 2) exact heating law, not
-its rounding: σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc).
+its rounding: σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc),
+the rise stopping at 2.4 kpc, the reach of the heights it was fitted to (R18).
 Each sub-disc's vertical profile is the vertical Jeans equation's solution for that dispersion in
 K_z(R_ref, z) from `MassModel`, R_ref three thin-disc scale lengths: n(z) ÷ n(0) = (σ(0) ÷ σ(z))²
 exp(−∫₀^|z| K_z ÷ σ² dz′), cored at the plane, tabulated once per galaxy (`fields/vertical.rs`) and
@@ -918,7 +919,7 @@ At `GalaxyParams::milky_way_like()`:
 | Tidal radius, 1 M☉ at 26,000 ly        | 3.7–5.1 ly                                                  |
 | In-plane density at R₀ and z☉          | 0.0018–0.0021 per ly³, azimuthal mean (see below)           |
 | Mid-plane stellar mass density at R₀   | 0.0375–0.0455 M☉ pc⁻³ (McKee et al. 2015: 0.0415 ± 0.004)   |
-| Nuclear disc share and central density | 1.2–2.4%; 14–22 per ly³                                     |
+| Nuclear disc share and central density | 1.2–2.4%; 12–19 per ly³                                     |
 
 Enclosed mass here is `MassModel::enclosed_mass` for the spherical components plus the mass of each
 field component inside the sphere by quadrature of its true (not axisymmetrised) density.
@@ -1083,7 +1084,8 @@ component order and the map's quadrature scheme belong to the version as well.
     1, as the parameters draw q only. The break B(m) = min(1, (m ÷ r_b)^−Δ) switches where m² ÷ r_b²
     exceeds 1, so every step of the profile is monotone in floating point too. The normalisation
     is 4π ∫₀¹ s(μ)⁻³ F(r_c s(μ)) dμ, F read from `Gl16Panel` partial integrals.
-  - _Bulge central density over 10³ seeds (T7.c)._ Median 0.33 per ly³, 93% in 0.14–0.63, range
+  - _Bulge central density over 10³ seeds (T7.c; under Kroupa's function, superseded by R18's
+    scaled brackets)._ Median 0.33 per ly³, 93% in 0.14–0.63, range
     0.09–1.17; fixture 0.31. With the sizes coupled (D16) it is 1 ÷ (m̄ 6V(c∥) (b ÷ a)(c ÷ a) a₀³
     10^(3s)), free of the stellar mass, the share and N, and the 0.06 dex length scatter s enters
     it cubed. Kroupa's lower m̄ moves the median by 1.19, not the width. The tests assert at least
@@ -1255,9 +1257,9 @@ component order and the map's quadrature scheme belong to the version as well.
     `heights` and `unscaled` the effective heights at the scale and at 1; `weighted_dispersions`
     and the public `SubDiscHeights::solve` are gone. Every disc takes Sharma et al.'s rise of 0.20
     per kpc, which they find for the high-α stars too ("no special provision is needed to
-    accommodate the thick disc stars", §7): an isothermal thick disc, as Bovy et al. (2012, ApJ
-    755, 115) measure mono-abundance populations, left the fixture's far-field fit with no thick
-    disc (its h₂ at the fit's floor of 500 pc). The rise stops at 2.4 kpc, the reach of the heights
+    accommodate the thick disc stars", in their summary): an isothermal thick disc, as Bovy et al.
+    (2012, ApJ 755, 115) measure mono-abundance populations, left the fixture's far-field fit with
+    no thick disc (its h₂ at the fit's floor of 500 pc). The rise stops at 2.4 kpc, the reach of the heights
     Sharma et al.'s figures show (`DISPERSION_GRADIENT_REACH_KPC`): carried on, it gave every disc
     a tail falling as z⁻², and the fixture's thick disc a tenth of the halo's density 10 kpc above
     the Sun (now 1.7%). The thin, young and thick discs are solved at three thin-disc scale lengths,
@@ -1271,7 +1273,8 @@ component order and the map's quadrature scheme belong to the version as well.
     the drawn height (slope 0.535, correlation 0.974); the young disc's dispersion runs 1.8–5.1
     km/s, the thick's 22–61, the nuclear's 22–52.
   - _Against measurements (T7.b)._ At R₀ = 8.178 kpc, far from the plane, a double exponential
-    fitted over 250–3,000 pc to the fixture's discs gives 258.6 pc, 985 pc and a thick share of
+    fitted over 250–3,000 pc to the fixture's young, old and thick discs (least squares in ln n at
+    56 heights, a grid then a compass search, h₂ > 1.3 h₁; not the nuclear disc or the halo) gives 258.6 pc, 985 pc and a thick share of
     2.3%, against Bland-Hawthorn and Gerhard's 300 ± 50, 900 ± 180 and 4 ± 2% (the thin disc 9 pc
     and the share 0.3 points from their edges; 286 pc at an effective height of 1,100 ly). In the
     plane the fixture has 0.0609 M☉ pc⁻³ of stars and remnants against McKee et al.'s 0.0415 ±
@@ -1279,7 +1282,12 @@ component order and the map's quadrature scheme belong to the version as well.
     and 0.00303 systems per ly³, 0.00297 at the Sun's height, against the census's 0.00193: 1.47 and
     1.54 times, the fixture's Σ★ of 39 against the 25–27 M☉ pc⁻² these two need. T11 tunes Σ★; at
     its 28 the density at the Sun's height would be about 0.0021, the bracket's top. The local mean
-    mass per system, 0.579 M☉, is asserted against the census's 0.55–0.59.
+    mass per system, 0.579 M☉, is asserted against the census's 0.55–0.59, and the density at the
+    Sun's height is asserted below the plane's; the mass and number densities are printed, and
+    T11's rows assert them. The census's figures (0.00193 per ly³, 66.5% of primaries below 0.5
+    M☉ within 20 pc and 67.8% within 10 pc, 0.55–0.59 M☉ per system) are tallies from Kirkpatrick
+    et al.'s (2024) Table 4, not printed there; the brainstorm's "0.00184 within 10 pc (Reylé et
+    al. 2021)" is the same table's tally too.
   - _The potential (D6)._ It keeps every disc exponential in height at the drawn effective height;
     the fixture's cored thin disc differs from it by at most 5% of its 2πGΣ within a height, 4.6%
     of the whole K_z there, near 1.1 effective heights.
@@ -1304,7 +1312,9 @@ component order and the map's quadrature scheme belong to the version as well.
     halo near the Sun is 2.6 × 10⁻⁶ per ly³. For the owner: Xue et al.'s inner slope is 2.1 ± 0.3
     and Medina et al.'s 1.88 in a spherical fit (2.05 in their Table 5), below 2.2; a range of
     2.0–2.8 would cover every measurement.
-  - _Metallicity (T7.e)._ Flat to 8 Gyr and 0.1 dex per Gyr poorer beyond, read from Bergemann et
+  - _Metallicity (T7.e)._ The thin discs' mean is still clamped to [−1.0, +0.5] dex, R16's
+    reading of "clamped", the span of thin-disc stars; the brainstorm gives no clamp. Flat to 8 Gyr
+    and 0.1 dex per Gyr poorer beyond, read from Bergemann et
     al.'s (2014) Fig. 6, which gives no number; sigma 0.20 from Casagrande et al.'s (2011) Table 1
     (σ 0.22, half the FWHM 0.19). The flat part is solar at three scale lengths, as the youngest
     local stars are (Nieva and Przybilla 2012: Fe 7.52 ± 0.03 against the Sun's 7.50), so the
@@ -1319,16 +1329,34 @@ component order and the map's quadrature scheme belong to the version as well.
     (6.1–43.7); the total centre 19.3, over 10³ seeds median 15.6 and 1.3% above T11's 30 (maximum
     44.3). The in-plane density at 26,000 ly lies in 0.0008–0.008 for 99.7% of 10³ seeds
     (0.00106–0.00873). N's bracket is 0.5–1.8 × 10¹¹ under the default and stays 0.5–2.1 under
-    Kroupa's.
+    Kroupa's. The parameters' tests hold every old population's mean mass per system to 0.54–0.58
+    M☉ under the default (the young disc 0.77–0.83; 0.45–0.52 and 0.65–0.75 under Kroupa's): over
+    10⁴ seeds the old populations give 0.544–0.576, up to 0.006 under the brainstorm's "about
+    0.55". The 10³-seed sweep asserts the bulge's median centre in 0.22–0.35 (R16's 0.25–0.40
+    scaled) and the dispersion scale's power of the column × height in 0.4–0.65 (0.535), and that
+    the young, thick and nuclear discs meet their drawn heights to 10⁻⁹. The fast suite holds their
+    dispersions over 8 seeds to 1–8, 15–70 and 10–80 km/s.
   - _Speed (T7 acceptance)._ `Fields::new` takes about 80 ms, not 45: a second table of K_z, at
     the nuclear disc's radius, and the bisections of the dispersions. `Fields::densities` takes
     about 590 ns at the solar circle, against 538–585 ns before and the 400 ns target, a finding:
     each disc reads its table at a height located once per point. Both measured on a machine
     loaded by other work, where Criterion's runs are not repeatable.
+  - _Interfaces._ `ExponentialDisc::new` is `pub(crate)`, since only the crate builds a
+    `VerticalProfile`; outside it a disc comes from `Fields`. `VerticalProfile`'s public methods
+    take a signed height and read |z|; `integral_to` returns `LightYears`, `gradient_per_kpc` is γ
+    and `gradient_reach` z_γ. `metallicity::THIN_DISC_REFERENCE_AGE` is gone and
+    `THIN_DISC_FLAT_AGE` is new. `Gl16Panel::value`, added in T7's first build, stays public in
+    `galaxy::quad`. The heating law's constants and `heating_law` are `pub` inside the private
+    `sub_discs` module, so only the crate reaches them.
   - _For later plans._ Plan 08's Design note 3 solves the same Jeans equation on
     `VerticalProfile`, whose `dispersion_at` is σ₀ (1 + γ min(|z|, 2.4 kpc)) by construction at
     the reference radius, the law times the dispersion scale for the sub-discs; the young, thick
-    and nuclear discs carry their own σ₀. Plan 09's Design note 21 bounds density ÷ g(z) at the
+    and nuclear discs carry their own σ₀. P08.T2.a's comparison reaches 8 effective heights, beyond
+    2.4 kpc for the oldest sub-discs and the thick disc, where the uncapped law runs about 12%
+    above the profiles', so it must compare against the capped law. T10's edge-on columns read
+    `VerticalProfile::integral_to`, which is exact for the table but has no bit-for-bit monotonicity
+    argument, unlike `exponent`: a difference of two columns can come out a unit in the last place
+    below 0 near a knot, so T10 clamps it at 0 or proves otherwise. Plan 09's Design note 21 bounds density ÷ g(z) at the
     height nearest the plane, which held for exponential discs; a cored disc's ratio to an
     exponential proposal peaks above the plane, so plan 09 must bound it anew when revalidated.
     T11 tunes the fixture's Σ★ (its table, above).

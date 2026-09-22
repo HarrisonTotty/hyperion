@@ -438,7 +438,9 @@ impl Fields {
     }
 
     /// The old thin disc's sub-discs as the Jeans equation shaped them: ages, dispersions and
-    /// effective heights. Each disc's own profile is its [`ExponentialDisc::profile`].
+    /// effective heights.
+    ///
+    /// Each disc's own profile is its [`ExponentialDisc::profile`].
     #[must_use]
     pub fn sub_disc_heights(&self) -> &SubDiscHeights {
         &self.sub_discs

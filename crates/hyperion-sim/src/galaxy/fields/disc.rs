@@ -53,13 +53,13 @@ pub struct ExponentialDisc {
 
 impl ExponentialDisc {
     /// A disc of `count` systems over all space with this scale length and vertical profile,
-    /// modulated by `arm`.
+    /// modulated by `arm`. A profile's effective height is positive and finite by construction.
     ///
     /// # Errors
     ///
     /// [`BuildFieldError`] if the count is negative or the scale length is not positive, or
     /// either is not finite.
-    pub fn new(
+    pub(crate) fn new(
         count: f64,
         length: LightYears,
         profile: VerticalProfile,
@@ -68,7 +68,6 @@ impl ExponentialDisc {
         BuildFieldError::check_non_negative("count", count)?;
         BuildFieldError::check_positive("scale length", length.value())?;
         let h = profile.effective_height().value();
-        BuildFieldError::check_positive("effective height", h)?;
         let l = length.value();
         Ok(Self {
             n0: count / (4.0 * core::f64::consts::PI * l * l * h),
@@ -116,14 +115,16 @@ impl ExponentialDisc {
         4.0 * core::f64::consts::PI * l * l * h * self.n0
     }
 
-    /// The envelope `n0 exp(−(R ÷ length + E(|z|)))` at cylindrical radius `r_cyl` and height
-    /// `|z|` (ly): the density without the arm factor, systems per cubic light-year.
+    /// The envelope `n0 exp(−(R ÷ length + E(|z|)))` at cylindrical radius `r_cyl` and height `z`
+    /// (ly, either side of the plane): the density without the arm factor, systems per cubic
+    /// light-year.
     #[must_use]
-    pub fn envelope(&self, r_cyl: f64, abs_z: f64) -> f64 {
-        self.envelope_at(r_cyl, locate(abs_z))
+    pub fn envelope(&self, r_cyl: f64, z: f64) -> f64 {
+        self.envelope_at(r_cyl, locate(z.abs()))
     }
 
     /// The envelope at cylindrical radius `r_cyl` (ly) and the located height `height`.
+    #[must_use]
     pub(crate) fn envelope_at(&self, r_cyl: f64, height: Height) -> f64 {
         self.n0 * math::exp(-(r_cyl * self.inv_length + self.profile.exponent_at(height)))
     }
@@ -160,7 +161,7 @@ mod tests {
     /// A profile in a constant vertical force: exponential far from the plane.
     fn profile(sigma: f64) -> VerticalProfile {
         let force = VerticalForce::new(|z| 0.01 * math::tanh(z / 100.0));
-        JeansIntegral::new(&force, 0.0, 0.0, LightYears::new(1.0))
+        JeansIntegral::new(&force, 0.0, LightYears::new(0.0), LightYears::new(1.0))
             .profile(KilometresPerSecond::new(sigma))
     }
 
@@ -196,7 +197,7 @@ mod tests {
         for (x, y, z) in [(20_000.0, 3_000.0, 40.0), (-5.0, 17_000.0, -900.0)] {
             let p = PointLy::new(x, y, z);
             let r = (x * x + y * y).sqrt();
-            let expected = disc.envelope(r, z.abs()) * arm.factor(&geometry.point(x, y));
+            let expected = disc.envelope(r, z) * arm.factor(&geometry.point(x, y));
             hyperion_testkit::float::assert_same_bits(disc.density(&p), expected);
         }
         assert!(matches!(disc.arm(), Some(Arm::Gentle(_))));
