@@ -111,6 +111,12 @@ fn galaxy_map_specs_are_validated() {
         centred([f64::NAN, 0.0]).unwrap_err(),
         BuildMapSpecError::OutsideRootCube { axis: 0, .. }
     ));
+    // A pixel of the order of the last place of the picture's own light-years is refused: two of a
+    // row's edges would land on one `f64`, leaving it no height and its mean column a NaN.
+    assert!(matches!(
+        MapSpec::new(MapView::EdgeOn, all, [512, 256], [0.0, 32_000.0], 1e-12).unwrap_err(),
+        BuildMapSpecError::UnresolvedRows { .. }
+    ));
     let spec = whole_cube(MapView::EdgeOn, MapSelection::YoungOnly, 32, 16);
     assert_eq!(spec.view(), MapView::EdgeOn);
     assert_eq!(spec.selection(), MapSelection::YoungOnly);
@@ -184,6 +190,24 @@ fn galaxy_map_rows_are_the_same_in_any_band() {
                 );
             }
         }
+        // And in any order: plan 04's workers finish in whatever order they please, so the bands
+        // are rendered back to front and out of step here, into buffers of their own, and laid down
+        // by index. Nothing carries from one call to the next, so the bits must be the same.
+        let bands: Vec<std::ops::Range<u32>> = vec![9..13, 0..2, 5..9, 2..5];
+        let mut assembled = vec![f64::NAN; whole.len()];
+        for rows in bands {
+            let mut buf = Vec::new();
+            render_rows(&fields, &spec, rows.clone(), &mut buf);
+            let at = usize::try_from(rows.start).expect("a row") * width;
+            assembled[at..at + buf.len()].copy_from_slice(&buf);
+        }
+        for (at, (&ours, &theirs)) in assembled.iter().zip(&whole).enumerate() {
+            assert_eq!(
+                bits(ours),
+                bits(theirs),
+                "{view:?} {selection:?}, bands out of order, pixel {at}: {ours:e} against {theirs:e}"
+            );
+        }
         // A band rendered twice, and one buffer reused, give the same bits again.
         let mut once = Vec::new();
         render_rows(&fields, &spec, 4..9, &mut once);
@@ -235,8 +259,15 @@ fn galaxy_map_counts_the_young_disc_alone_when_asked() {
 /// column, summed over the pixels and multiplied by a pixel's area, is what its density integrates
 /// to over the root cube.
 ///
-/// The map's square loses the discs' tails beyond the cube, a few tenths of a per cent, so the sum
-/// falls a little short of N; the pixel grid's midpoint rule is what the resolution buys.
+/// The map's square loses the discs' tails beyond the cube, so the sum falls a little short of N:
+/// 0.1226% of N by an independent two-dimensional quadrature of each disc over the square, 0.1202
+/// of it the two thin discs at 8,480 ly of scale length against the cube's 65,536 (the thick disc
+/// adds 0.0024% and nothing else reaches the edge, the halo's cut lying inside it).
+///
+/// What the resolution buys is the rest: the midpoint rule over the pixel grid, which is almost
+/// entirely the nuclear disc, whose 290 ly of scale length a 512 ly grid under-reads by some 5%
+/// (0.085% of N, the whole of the 256 × 256 raster's shortfall beyond the tails). At 128 ly the
+/// nuclear disc is resolved and the shortfall is the tails alone.
 #[test]
 #[ignore = "slow: a 1,024 × 1,024 face-on map of the whole cube"]
 fn galaxy_map_face_on_holds_the_galaxys_systems() {

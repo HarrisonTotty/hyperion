@@ -52,8 +52,12 @@ pub fn gl16(f: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
 /// `∫ₐᵇ f(x) dx` by the 4-point Gauss–Legendre rule: exact for polynomials of degree up to 7.
 ///
 /// This is the cheapest rule the galaxy model uses: the map averages the bulge's and the halo's
-/// density across a pixel's height with it, where the density changes by well under an e-fold
-/// (plan 02, P02.T10.b).
+/// density across a pixel's height with it (plan 02, P02.T10.b). Four nodes hold a relative 10⁻³
+/// while the panel spans at most some eight scale heights of the integrand — for `exp(−z ÷ c)` on
+/// `[0, d]` the rule reads 0.998 of the integral at `d ÷ c = 8`, 0.943 at 16 and 0.054 at 80 — which
+/// the maps plan 04 renders meet with room to spare (pixels of 128 to 1,024 ly against the bulge's
+/// vertical scale of some 820 ly), and a much coarser raster does not: a pixel 8,192 ly tall resting
+/// on the plane under-reads its column by 8 × 10⁻³ (`galaxy/map.rs`, unit tests).
 #[must_use]
 pub fn gl4(f: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
     rule(&GL4_NODES, &GL4_WEIGHTS, f, a, b)

@@ -1103,7 +1103,9 @@ component order and the map's quadrature scheme belong to the version as well.
     `Component::density`, bit for bit, for four and two arms; `densities` does not allocate;
     order independence is tested.
   - _Speed (T7 acceptance)._ `Fields::densities` takes 538 ns at 26,000 ly, 415 ns in the bulge and
-    585 ns at 35,000 ly, against 400 ns: a finding. The halo's six components cost about 130 ns
+    585 ns at 35,000 ly, against 400 ns: a finding. **Corrected in R21: these bare nanoseconds are
+    not reproducible, because the i7-8665U runs between 1.9 and 4.8 GHz. Read them as 39 and 30
+    times the cost of one `math::exp` on the same machine at the same moment.** The halo's six components cost about 130 ns
     (ln_1p and exp each), the eight disc exponentials 80, the bulge 40, the arm point 35, and the
     sharp arm's `bessel_i0e` 47 ns at the bench point's k = 13, a power series whose chain is one
     multiply per term. Its asymptotic branch (k of 15–40) costs 50–120 ns and could lose about 70
@@ -1228,7 +1230,9 @@ component order and the map's quadrature scheme belong to the version as well.
   - _Speed (T8.c)._ The plan sets no target; plan 03's 1–2 µs per sparse cell leaves about 1 µs
     beside `Fields::densities`. `Fields::layer_bound` takes 694 ns for a layer-A cell at the
     solar circle, 634 ns for layer E and 543 ns in the bulge (`component_bounds` 20–30 ns less),
-    against 571 ns for `densities` on the same loaded machine (i7-8665U). A sparse cell's bound
+    against 571 ns for `densities` on the same loaded machine (i7-8665U). **Corrected in R21: as
+    with R16, read these as multiples of one `math::exp`, not as nanoseconds — 62, 57 and 48 of
+    them, re-measured.** A sparse cell's bound
     and one candidate's densities come to 1.1–1.3 µs before the Poisson draw: inside plan 03's 2
     µs, not its 1.
 - **R18. Updated for the 2026-09-21 density rulings (P02.T7).** The owner adopted all six rulings
@@ -1504,3 +1508,63 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     would move `galaxy_map.golden`. Plan 04's eight workers bring the edge-on
     raster to about 3 s of wall clock, its own budget (its line 986), and the face-on one to well
     under a second.
+- **R21. Validation of T9 and T10 (val02 lane).** Both tasks match the plan; the accuracy and
+  banding figures of R19 and R20 were re-derived independently and hold (the closed forms to
+  4 × 10⁻¹⁵ and the bar to 2 × 10⁻¹⁵ against a knot-exact 10-node quadrature; the bulge's and the
+  halo's face-on columns to 5 × 10⁻¹⁰ or better, so R20's 2.8 × 10⁻⁸ and 3.4 × 10⁻⁵ are the
+  4,000-step brute force's own limits rather than the map's; the face-on totals −0.2071% and
+  −0.1193% against N; `render_rows` bit for bit over bands of 1, 7, 64 and 255 rows of a 12 × 256
+  raster where 2,976 of 3,072 young-only pixels fall under `DISC_FLOOR`). Fixed, moving no generated
+  output: `MapSpec::new` now refuses a pixel of the order of the last place of the picture's own
+  coordinates (`BuildMapSpecError::UnresolvedRows`), which left two row edges on one `f64` and so a
+  row of no height, whose mean column was `0 ÷ 0` — a NaN pixel from `render_rows` in a release
+  build, where `column_density_edge_on`'s assertion is gone; the band's "which lines of sight are
+  wanted" is a `[bool; MAX_PARTS]` mask instead of the sum of the band's vertical means, so that no
+  value taken over the band can reach the decision; the shared-line agreement test runs over the
+  three pinned seeds as well as the fixture; and two doc figures that quoted a best case are the
+  worst cases R20 records.
+  - _For the owner: the four nodes across a pixel's height (T10.b)._ `gl4` holds the plan's
+    3 × 10⁻³ only while a pixel is at most some eight scale heights tall. Measured against the same
+    lines of sight over sixteen panels of the pixel, and confirmed against an independent
+    two-dimensional quadrature: 1.6 × 10⁻⁷ at 256 ly, 4.2 × 10⁻⁵ at 1,024, 1.9 × 10⁻³ at 4,096 and
+    8.0 × 10⁻³ at 8,192, a pixel resting on the plane holding the spheroids' peak inside the rule's
+    innermost node. Every raster plan 04 renders (128 to 1,024 ly per pixel) is inside the bracket,
+    and T10's own test reads 256 ly pixels, so nothing was caught; `galaxy_map.golden`'s 16 × 16
+    raster of the whole cube is 8,192 ly and is therefore pinned 0.8% below the true column. A unit
+    test now records the figures against pixel height. Splitting the height into panels would move
+    the golden and the generator version, so it is the owner's call, not this lane's.
+  - _The face-on shortfall, attributed (T10.a)._ Of the 256 × 256 raster's 0.2071%, 0.1226% is the
+    discs' tails beyond the cube's square (0.1202 the two thin discs at 8,480 ly against 65,536,
+    0.0024 the thick) and the remaining 0.085% is the nuclear disc, whose 290 ly of scale length a
+    512 ly grid under-reads by some 5%. At 128 ly the nuclear disc is resolved and only the tails
+    remain (−0.1193% against a tail of 0.1226%). Plan 05 should expect a coarse face-on picture to
+    under-read the galactic centre's pixels, not only the total.
+  - _R16's and R17's timings re-measured, and the yardstick they were missing._ Another lane read
+    `Fields::densities` at 1.35 µs and `Fields::layer_bound` at 1.41 µs against R16's 538–585 ns and
+    R17's 543–694 ns, and asked whether the cored profiles of the 2026-09-21 revision are the cause.
+    They are not, and neither figure is wrong: **the plan was quoting wall-clock nanoseconds from a
+    shared laptop whose clock moves by a factor of 2.5.** Criterion at a one-minute load average of
+    11–14 gives `Fields::densities` 1.53 µs at the disc point and 1.14 µs in the bulge, with
+    `/sys/.../scaling_cur_freq` reading 2.70 GHz on all eight logical CPUs against the part's 4.8 GHz
+    single-core turbo. Measured against a yardstick instead, in one process at a load of 7.3 falling
+    to 4.0, with the loop's own cost subtracted: one `math::exp` costs 13.7 ns, where R16's own
+    breakdown ("29 `libm` calls set a floor near 300 ns") implies 10.3 ns; `Fields::densities` costs
+    778 ns at the disc point and 527 ns in the bulge, which is 57 and 39 `math::exp`; and
+    `Fields::layer_bound` costs 844, 777 and 654 ns for a layer-A disc cell, a layer-E disc cell and
+    a layer-A bulge cell, 62, 57 and 48 `math::exp`. R16's 538 ns rescaled by the primitive is 714 ns
+    against the 778 measured, and R17's 694 ns is 921 against the 844 measured: the code costs what
+    it cost, to under a tenth, and the spread is the machine.
+  - _What the cored profiles do cost (T7.b, for the owner)._ The revision's table lookup,
+    `VerticalProfile::exponent`, is 15.8 ns, 1.15 `math::exp`, and the eight discs' lookups are
+    126 ns, 16% of `densities` at the disc point and 24% in the bulge; a plain exponential's
+    `z ÷ h` was a division. So the cored profiles added of order a fifth, which is the step R18
+    already recorded (590 ns after, 538–585 before) and nowhere near the 2.5 times observed. T9's
+    boxed `ShareMatrix` is not in it either: seven `share` lookups are 3.4 ns in all.
+  - _The consequence for plan 03 and the brainstorm's budget._ Plan 03's 3.31 µs per sparse fine
+    cell and 21.8 ms for a 50 ly cold query are the same code on the same slow machine state, so
+    they are not evidence that its 1–2 µs and 5 ms were unreachable. A per-cell budget in bare
+    nanoseconds cannot be checked on this hardware: quote it, as this entry now does, in
+    `math::exp` (about 14 ns loaded, about 10 ns lightly loaded), or measure with the CPU pinned.
+    At the yardstick figures above a sparse cell's bound plus one candidate's densities is 119
+    `math::exp`, which is 1.2 µs at 10 ns and 1.7 µs at 14 — inside the brainstorm's 1–2 µs, as R17
+    read it.

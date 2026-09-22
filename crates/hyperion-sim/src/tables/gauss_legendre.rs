@@ -2,7 +2,9 @@
 //!
 //! An n-point rule integrates every polynomial of degree up to 2n − 1 exactly. The nodes are the
 //! roots of the Legendre polynomial Pₙ and the weights `2 ÷ ((1 − x²) Pₙ′(x)²)` (Abramowitz and
-//! Stegun 1964, §25.4.29). Each literal is the correctly rounded `f64` of the value computed at 50
+//! Stegun 1964, §25.4.29, whose Table 25.4 prints the values; the same rule is DLMF §3.5(v), eq.
+//! 3.5.21, which is the citation to follow, the 1964 handbook being out of print and its scans
+//! gone). Each literal is the correctly rounded `f64` of the value computed at 50
 //! significant digits with `mpmath` by Newton iteration on Pₙ, and prints as the shortest decimal
 //! that round-trips. Nodes ascend from −1 to +1, and the tables are exactly symmetric: node `i` is
 //! the negation of node `n − 1 − i`, and the two weights are equal.
@@ -47,6 +49,9 @@ pub const GL8_NODES: [f64; 8] = [
 ];
 
 /// The 8 weights of the Gauss–Legendre rule on `[−1, 1]`, in the order of [`GL8_NODES`].
+///
+/// Abramowitz and Stegun (1964), Table 25.4, outermost first: 0.101 228 536 290 376 259,
+/// 0.222 381 034 453 374 471, 0.313 706 645 877 887 287 and 0.362 683 783 378 361 983.
 pub const GL8_WEIGHTS: [f64; 8] = [
     0.101_228_536_290_376_26,
     0.222_381_034_453_374_48,

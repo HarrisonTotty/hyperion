@@ -1285,3 +1285,36 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
 - **Pending re-validation.** Nothing in this plan waits on unbuilt code: every Consumes item exists.
   P07.T12's Milky Way figures wait on plan 02's P02.T11, as its own text now says, and P07.T11.a waits
   on the owner.
+- **T1 partially built, 2026-09-22 (paused).** `units.rs`'s five newtypes with `BOLTZMANN_CONSTANT` and
+  `HYDROGEN_MASS_KG` (CODATA, tested), the `gas.params` tag under a "Plan 07" heading after plan 06's
+  event tags, `pub mod gas;`, `gas/mod.rs` (the cm-per-ly conversions, `MASS_PER_HYDROGEN_FACTOR`,
+  `SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY` = 9.978 × 10⁻⁴, `IONISED_PARTICLES_PER_HYDROGEN`) and
+  `gas/params.rs` (`GasParams`, `MolecularDisc`, `LaneParams`, `from_galaxy`, `milky_way_like`, plus
+  `neutral_fraction()`, `pressure_speed()` and the `PRESSURE_HEIGHT`/`PRESSURE_SPEED` constants) are
+  complete and their unit tests pass. **Still owed for T1:** `tests/gas.rs` with
+  `golden/gas/params.golden` for three seeds, and regenerating plan 01's `tests/golden/rng/tags.golden`
+  (one added line — `domain_tags_are_pinned` fails until it is blessed). T2 is not begun. The work sits
+  in the `gal` worktree and as `patches/gal-P07T1-PARTIAL.patch`.
+- **Ruling on design note 3's word indices** (the note was ambiguous: "parameter *k* of the table is
+  `seek(k)`" against seventeen table rows, but "indices 0–15 reserved"). The **eleven drawn parameters
+  take words 0–10 in table order**; words 11–15 stay reserved; the derived and constant rows get no word
+  at all. Design note 3's wording should be corrected to say that, since only drawn parameters consume
+  words.
+- **T1's prose "each parameter is one `Stream::uniform_in`" is wrong**: the table makes `f_c` and `n_cor`
+  **log-uniform**. Both still cost exactly one word, so the index rule above is unaffected.
+- **The Milky Way fixture as built** differs from the table: `R_g` is **14,840 ly** (1.75 × 8,480), not
+  14,000, and the gas mass is 5.06 × 10⁹ M☉. Use the code's values.
+- **T2's mass test cannot integrate "over the cube" to 2%.** The normalisation integrates to 20 R_g, and
+  about **11% of the neutral mass lies outside the ±65,536 ly root cube** (analytic estimate). Integrate
+  over the component's own support instead, and report the in-cube fraction as a separate figure.
+  - An exact cross-check on `gl_log_panels` for that integral:
+    ∫₀^∞ R e^(−a/R − R/b) dR = 2 a b K₂(2 √(a/b)).
+  - Analytic predictions for T2's brackets, from the parameters as built and **not yet measured**:
+    neutral ≈ 0.66 cm⁻³ (bracket 0.6–0.9), warm ionised ≈ 0.029 (0.025–0.035), molecular centre ≈ 41
+    (20–80), and the hole at R_m ÷ 8 is 0.2–0.5% of peak for every seed, against the "under 1%" test.
+  - The corona-hot check is load-bearing at its limit: the worst case is
+    300 ÷ (2.3 × 1.2 × 10⁻³) = 1.09 × 10⁵ K against design note 12's 10⁵ K floor.
+- Clippy's `doc_markdown` rejects bare `R_m`, `h_w`, `σ_ln` and the like in doc comments — backtick
+  them. No `clippy.toml` change was needed (`McMillan` and `McKee` are already in `doc-valid-idents`),
+  and note that the transcendental bans now also come from a **workspace-root `clippy.toml`** which the
+  sim's own file shadows.

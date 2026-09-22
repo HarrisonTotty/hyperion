@@ -129,6 +129,15 @@ pub enum BuildMapSpecError {
         /// The picture's extent on that axis, light-years.
         extent: f64,
     },
+    /// The pixel is too small to tell the picture's rows apart this far up the picture: two
+    /// consecutive row edges would round to the same light-year, leaving a row with no height and,
+    /// edge-on, no mean column ([`MapSpec::pixel_span`]).
+    UnresolvedRows {
+        /// The light-years per pixel given.
+        ly_per_px: f64,
+        /// The picture's centre up the picture, light-years.
+        centre: f64,
+    },
 }
 
 impl fmt::Display for BuildMapSpecError {
@@ -149,6 +158,11 @@ impl fmt::Display for BuildMapSpecError {
                 f,
                 "a map {extent} ly wide centred on {centre} ly reaches outside the root cube on \
                  axis {axis} of its picture"
+            ),
+            Self::UnresolvedRows { ly_per_px, centre } => write!(
+                f,
+                "a map's pixel of {ly_per_px} ly cannot tell its rows apart {centre} ly up the \
+                 picture"
             ),
         }
     }
@@ -211,8 +225,9 @@ impl MapSpec {
     /// # Errors
     ///
     /// [`BuildMapSpecError`] if either dimension is 0, if a pixel is not a positive finite number
-    /// of light-years, or if the picture, centre included, is not finite or reaches outside the
-    /// root cube. The edges of the cube are allowed, as M1's maps span it exactly.
+    /// of light-years, if the picture, centre included, is not finite or reaches outside the root
+    /// cube, or if the pixel is too small to separate the picture's rows where it lies. The edges
+    /// of the cube are allowed, as M1's maps span it exactly.
     pub fn new(
         view: MapView,
         selection: MapSelection,
@@ -251,6 +266,23 @@ impl MapSpec {
                     extent,
                 });
             }
+        }
+        // A pixel of the order of the last place of the picture's own coordinates would leave two
+        // consecutive row edges on the same `f64`: the row would have no height and its mean column
+        // would be 0 ÷ 0, a NaN pixel in a release build, where `column_density_edge_on`'s
+        // assertion is gone. Row edges are spaced by `ly_per_px` and each is rounded by at most
+        // half the last place of the largest of them, so twice that place is a sufficient pixel.
+        // Which rows collapse is a quantisation pattern, not a monotone one — the outermost rows
+        // miss about a tenth of the cases — so the test is on the pixel, not on a row.
+        let up = spec.extent()[1];
+        let top = (centre[1] + 0.5 * up)
+            .abs()
+            .max((centre[1] - 0.5 * up).abs());
+        if ly_per_px <= 2.0 * top * f64::EPSILON {
+            return Err(BuildMapSpecError::UnresolvedRows {
+                ly_per_px,
+                centre: centre[1],
+            });
         }
         Ok(spec)
     }
@@ -330,8 +362,9 @@ impl MapSpec {
     /// The heights row `row` spans, edge-on: `[z_lo, z_hi]`, with the row's centre between them.
     ///
     /// Consecutive rows share an edge bit for bit, so a column of pixels covers its line without a
-    /// gap or an overlap. These are the heights [`render_rows`] gives
-    /// [`column_density_edge_on`], which reproduces a pixel only when given them.
+    /// gap or an overlap, and every row of a built [`MapSpec`] has a height above 0. These are the
+    /// heights [`render_rows`] gives [`column_density_edge_on`], which reproduces a pixel only when
+    /// given them.
     #[must_use]
     pub fn pixel_span(&self, row: u32) -> [f64; 2] {
         let edge =
@@ -429,8 +462,24 @@ pub fn column_density_edge_on(
     let mut means = [0.0; MAX_PARTS];
     plan.vertical_means(z_lo, z_hi, &mut means);
     let mut lines = [0.0; MAX_PARTS];
-    plan.line_integrals(x, &means, &mut lines);
+    plan.line_integrals(x, &wanted_parts(&[means]), &mut lines);
     plan.pixel(x, z_lo, z_hi, &means, &lines)
+}
+
+/// Which parts any row of a band wants: the parts whose vertical mean over some row is above 0, and
+/// so whose line of sight must be integrated.
+///
+/// A mask, not the sum of the means, so that what a band computes cannot depend on the value of a
+/// sum taken over the band's rows: a pixel's value depends on the pixel alone (plan 04, P04.T11).
+fn wanted_parts(means: &[[f64; MAX_PARTS]]) -> [bool; MAX_PARTS] {
+    let mut wanted = [false; MAX_PARTS];
+    for row in means {
+        for (slot, &mean) in wanted.iter_mut().zip(row.iter()) {
+            debug_assert!(mean >= 0.0, "a vertical mean of {mean} is below 0");
+            *slot |= mean > 0.0;
+        }
+    }
+    wanted
 }
 
 /// Fills `out` with the rows `rows` of the raster `spec`, row by row and left to right, in systems
@@ -516,12 +565,7 @@ fn render_edge_on_rows(fields: &Fields, spec: &MapSpec, rows: Range<u32>, out: &
     for (row, &[z_lo, z_hi]) in heights.iter().enumerate() {
         plan.vertical_means(z_lo, z_hi, &mut means[row]);
     }
-    let mut wanted = [0.0; MAX_PARTS];
-    for row in &means {
-        for (slot, &mean) in wanted.iter_mut().zip(row.iter()) {
-            *slot += mean;
-        }
-    }
+    let wanted = wanted_parts(&means);
     let mut lines = [0.0; MAX_PARTS];
     for column in 0..spec.width_px() {
         let x = spec.across(f64::from(column) + 0.5);
@@ -553,8 +597,10 @@ fn gl32_panel(f: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
 /// length times `1 + P`, `P` the dimensionless in-plane radius, because the density is level in `z`
 /// out to `z ≈ c P` and falls over a width that grows with `P`: a fixed scale would push the whole
 /// fall-off into the last few nodes far from the centre. The transformed integrand falls off faster
-/// than any power towards `u = 1`, where the rule has no node, so the tail costs nothing. Against a
-/// brute-force integral it holds to 7 × 10⁻⁹ for `P` from 0 to 60 (unit tests).
+/// than any power towards `u = 1`, where the rule has no node, so the tail costs nothing. Its worst
+/// relative error against a brute-force integral over the map's 200 points is 2.8 × 10⁻⁸ (unit
+/// tests; the figure is the brute force's own limit, since an independent knot-exact quadrature puts
+/// it under 10⁻⁹), against the plan's 10⁻³.
 fn bulge_face_on(bulge: &BoxyBulge, x: f64, y: f64) -> f64 {
     let scale = bulge.scale_z().value() * (1.0 + bulge.radius(x, y, 0.0));
     2.0 * gl32(
@@ -576,7 +622,10 @@ fn bulge_face_on(bulge: &BoxyBulge, x: f64, y: f64) -> f64 {
 /// of sight, and `c = 1 − s ÷ Z` carries `u = 1` to the chord's end: the transformed integrand then
 /// runs from `s` at `u = 0` to `s (s ÷ Z)^(γ − 2)`-ish at `u = 1` without a peak between, which the
 /// rule resolves to the last bits. The dominant merger's break, a kink in the integrand, is a panel
-/// edge (unit tests: 5 × 10⁻¹⁶ against brute force, against 1.6 × 10⁻⁴ without the edge).
+/// edge: with it the quadrature sits 5 × 10⁻¹⁶ from a brute force of the broken profile, without it
+/// 1.6 × 10⁻⁴. The worst relative error over the map's 200 points is 3.4 × 10⁻⁵ (unit tests), which
+/// is the 4,000-step brute force's own limit at the kink and not the map's: an independent
+/// quadrature with the break and the cut as panel edges puts the columns under 10⁻⁹.
 fn halo_face_on(halo: &HaloProfile, r_sq: f64) -> f64 {
     let cut = halo.cut_radius().value();
     let chord_sq = cut * cut - r_sq;
@@ -892,6 +941,13 @@ impl Spheroid<'_> {
 
     /// The mean of `∫ n dy` over the pixel's height, `∫∫ n dy dz ÷ (z_hi − z_lo)`, by [`gl4`] in
     /// `z`, split at the plane where the pixel straddles it, since `n` reads `|z|`.
+    ///
+    /// Four nodes are what plan 02's P02.T10.b asks for, and they hold the plan's 3 × 10⁻³ while a
+    /// pixel is no more than some eight scale heights tall, which covers every raster plan 04
+    /// renders (128 to 1,024 ly). A much taller pixel resting on the plane loses the peak the rule's
+    /// innermost node sits above: 1.9 × 10⁻³ at 4,096 ly and 8 × 10⁻³ at 8,192 ly, the height of the
+    /// golden file's 16 × 16 raster of the whole cube, which a unit test records. Splitting the
+    /// height into panels would move `galaxy_map.golden` and so the generator version.
     fn pixel(self, x: f64, z_lo: f64, z_hi: f64) -> f64 {
         let integral = if z_lo < 0.0 && z_hi > 0.0 {
             gl4(|z| self.along(x, z), z_lo, 0.0) + gl4(|z| self.along(x, z), 0.0, z_hi)
@@ -1005,16 +1061,16 @@ impl<'a> EdgeOnPlan<'a> {
         }
     }
 
-    /// Each line of sight's integral at `x` (ly), for the lines some part with a non-zero entry in
-    /// `wanted` reads, and 0 for the rest, whose parts contribute 0 whatever their line gives.
+    /// Each line of sight's integral at `x` (ly), for the lines a part `wanted` marks reads, and 0
+    /// for the rest, whose parts contribute 0 whatever their line gives.
     ///
-    /// `wanted` is a band's rows together, so which lines are computed depends on the band; zeroing
-    /// the others keeps the buffer from ever carrying a value belonging to another column, and the
-    /// parts that read them are multiplied by a mean of 0 in any case.
-    fn line_integrals(&self, x: f64, wanted: &[f64; MAX_PARTS], out: &mut [f64; MAX_PARTS]) {
+    /// `wanted` covers a band's rows together, so which lines are computed depends on the band;
+    /// zeroing the others keeps the buffer from ever carrying a value belonging to another column,
+    /// and the parts that read them are multiplied by a mean of 0 in any case.
+    fn line_integrals(&self, x: f64, wanted: &[bool; MAX_PARTS], out: &mut [f64; MAX_PARTS]) {
         let mut needed = [false; MAX_PARTS];
-        for (part, &mean) in self.parts.iter().zip(wanted.iter()) {
-            if mean <= 0.0 {
+        for (part, &asked) in self.parts.iter().zip(wanted.iter()) {
+            if !asked {
                 continue;
             }
             match part {
@@ -1056,7 +1112,9 @@ mod tests {
     use hyperion_testkit::lcg::Lcg;
 
     use super::*;
+    use crate::Seed;
     use crate::coords::ROOT_HALF_WIDTH_LY;
+    use crate::galaxy::imf::MassFunctionKind;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::potential::MassModel;
 
@@ -1103,6 +1161,116 @@ mod tests {
     #[test]
     fn the_root_cubes_half_width_is_the_frames() {
         assert_same_bits(ROOT_HALF, f64::from(ROOT_HALF_WIDTH_LY));
+    }
+
+    /// A pixel too small to separate the picture's rows is refused, because a row of no height has
+    /// no mean column: `0 ÷ 0` would give a NaN pixel in a release build, where
+    /// [`column_density_edge_on`]'s assertion is gone.
+    #[test]
+    fn a_map_whose_rows_would_collapse_is_refused() {
+        let all = MapSelection::AllSystems;
+        // 32,000 ly up, one light-year is 2⁻³⁸ of a step, so a pixel of 10⁻¹² ly leaves consecutive
+        // row edges on the same `f64`.
+        let spec = MapSpec::new(MapView::EdgeOn, all, [4, 256], [0.0, 32_000.0], 1e-12);
+        assert!(matches!(
+            spec,
+            Err(BuildMapSpecError::UnresolvedRows { .. })
+        ));
+        // The collapse can come from a row anywhere in the picture, below the plane as above it.
+        assert!(matches!(
+            MapSpec::new(MapView::EdgeOn, all, [4, 256], [0.0, -32_000.0], 1e-12),
+            Err(BuildMapSpecError::UnresolvedRows { .. })
+        ));
+        // At the cube's edge the last place is 1.5 × 10⁻¹¹ ly, so a pixel of 10⁻¹¹ goes too.
+        assert!(matches!(
+            MapSpec::new(MapView::EdgeOn, all, [4, 256], [0.0, 65_535.0], 1e-11),
+            Err(BuildMapSpecError::UnresolvedRows { .. })
+        ));
+        // A pixel of a thousandth of a light-year at the cube's edge is still resolved, and every
+        // row of an accepted spec has a height above 0.
+        for (centre, ly_per_px, rows) in [
+            ([0.0, 65_535.0], 1e-3, 256_u32),
+            ([0.0, 0.0], 1e-9, 64),
+            ([0.0, 0.0], 8_192.0, 16),
+            ([0.0, 0.0], 8_192.0, 15),
+        ] {
+            let spec = MapSpec::new(MapView::EdgeOn, all, [4, rows], centre, ly_per_px)
+                .expect("a resolved raster");
+            for row in 0..rows {
+                let [lo, hi] = spec.pixel_span(row);
+                assert!(hi > lo, "row {row} of {spec:?} spans {lo} to {hi}");
+            }
+        }
+    }
+
+    /// The band's mask marks a part exactly when some row of the band wants its line of sight, so
+    /// that nothing about the band but which lines are computed can differ.
+    #[test]
+    fn the_bands_mask_is_the_union_of_its_rows() {
+        let mut rows = [[0.0; MAX_PARTS]; 3];
+        rows[0][2] = 1.5;
+        rows[1][2] = 0.0;
+        rows[1][5] = f64::MIN_POSITIVE;
+        rows[2][0] = 0.25;
+        let wanted = wanted_parts(&rows);
+        let mut expected = [false; MAX_PARTS];
+        expected[0] = true;
+        expected[2] = true;
+        expected[5] = true;
+        assert_eq!(wanted, expected);
+        // A band of one row is the mask of that row alone, which is what a single pixel takes.
+        assert_eq!(wanted_parts(&rows[1..2]), {
+            let mut only = [false; MAX_PARTS];
+            only[5] = true;
+            only
+        });
+        assert_eq!(wanted_parts(&[]), [false; MAX_PARTS]);
+    }
+
+    /// What the four nodes across a pixel's height cost a raster far coarser than the ones plan 04
+    /// renders: the figures [`Spheroid::pixel`]'s documentation quotes.
+    ///
+    /// The bulge and the halo are the only components the height integral is not exact for, and a
+    /// pixel resting on the plane holds their peak between the plane and the rule's innermost node.
+    /// Plan 04's rasters are 128 to 1,024 ly, where this is under 10⁻⁴; the golden file's 16 × 16
+    /// raster of the whole cube is 8,192 ly, where it is 8 × 10⁻³, past the plan's 3 × 10⁻³ for the
+    /// view. Tightening it would move `galaxy_map.golden`, so the limit is recorded, not fixed.
+    #[test]
+    fn edge_on_columns_lose_a_pixel_taller_than_the_spheroids_scale() {
+        let fields = fixture();
+        // A reference that resolves the height: the same lines of sight, over sixteen panels of the
+        // pixel instead of one, which the closed forms leave unchanged and the spheroids do not.
+        let refined = |x: f64, z_lo: f64, z_hi: f64| {
+            let step = (z_hi - z_lo) / 16.0;
+            let plan = EdgeOnPlan::new(&fields, MapSelection::AllSystems);
+            let mut total = 0.0;
+            for k in 0..16 {
+                let (lo, hi) = (z_lo + f64::from(k) * step, z_lo + f64::from(k + 1) * step);
+                let mut means = [0.0; MAX_PARTS];
+                plan.vertical_means(lo, hi, &mut means);
+                let mut lines = [0.0; MAX_PARTS];
+                plan.line_integrals(x, &wanted_parts(&[means]), &mut lines);
+                total += plan.pixel(x, lo, hi, &means, &lines) * (hi - lo);
+            }
+            total / (z_hi - z_lo)
+        };
+        let brackets = [
+            (256.0, 1e-5),
+            (1_024.0, 1e-4),
+            (4_096.0, 4e-3),
+            (8_192.0, 1.5e-2),
+        ];
+        for (height, bracket) in brackets {
+            let mut worst = 0.0_f64;
+            for x in [0.0, 512.0, 2_048.0, 4_096.0, 8_192.0, 26_000.0] {
+                let ours =
+                    column_density_edge_on(&fields, x, 0.0, height, MapSelection::AllSystems);
+                let theirs = refined(x, 0.0, height);
+                worst = worst.max((ours / theirs - 1.0).abs());
+            }
+            println!("edge-on, a pixel {height} ly tall on the plane: {worst:e}");
+            assert!(worst < bracket, "{height} ly tall: {worst:e}");
+        }
     }
 
     /// The bulge's face-on column against the brute force over the half-line, which is taken out to
@@ -1193,6 +1361,9 @@ mod tests {
     fn the_closed_form_face_on_columns_match_the_exact_vertical_integral() {
         let fields = fixture();
         let (mut worst, mut worst_brute) = (0.0_f64, 0.0_f64);
+        // The discs alone, whose `exact` really is an exact integral: for the bar `exact` is its
+        // brute force, so the two figures would otherwise be reported as one (plan 02, R20).
+        let mut worst_disc = 0.0_f64;
         for (x, y) in face_on_points() {
             let r = (x * x + y * y).sqrt();
             let arm = fields.arms().point(x, y);
@@ -1245,11 +1416,15 @@ mod tests {
                 );
                 worst = worst.max(error);
                 worst_brute = worst_brute.max(from_brute);
+                if matches!(component.shape(), Shape::Disc(_)) {
+                    worst_disc = worst_disc.max(error);
+                }
             }
         }
         println!(
-            "closed forms face-on: worst relative error {worst:e} against the exact integral, \
-             {worst_brute:e} against the brute force"
+            "closed forms face-on: worst relative error {worst:e} against the exact integral \
+             ({worst_disc:e} for the discs, whose integral is exact; the rest is the bar against \
+             its own brute force), {worst_brute:e} against the brute force"
         );
     }
 
@@ -1334,23 +1509,39 @@ mod tests {
         assert_eq!(discs, 8);
         assert_eq!(plan.lines.len(), 5);
         // A shared line gives each disc that reads it the same bits as its own line would: the
-        // deduplication stands in for the direct computation.
-        let mut means = [1.0; MAX_PARTS];
+        // deduplication stands in for the direct computation. The fixture and the three seeds the
+        // goldens pin, so that a galaxy whose discs do not share a scale length is covered too.
+        let mut wanted = [true; MAX_PARTS];
         let mut lines = [0.0; MAX_PARTS];
-        for x in [0.0, 4_096.0, 26_000.0, -60_000.0] {
-            plan.line_integrals(x, &means, &mut lines);
-            for (part, component) in plan.parts.iter().zip(fields.components()) {
-                let Part::Disc { line, .. } = part else {
-                    continue;
-                };
-                let Shape::Disc(disc) = component.shape() else {
-                    panic!("a disc part holds a disc")
-                };
-                assert_same_bits(lines[*line], Line::of_disc(disc).integral(x));
+        let seeds = [
+            0x0000_0000_0000_0001,
+            0x5eed_0000_c0ff_ee00,
+            0xdead_beef_cafe_f00d,
+        ];
+        let others: Vec<Fields> = seeds
+            .into_iter()
+            .map(|s| {
+                let params = GalaxyParams::from_seed(Seed::new(s), MassFunctionKind::default());
+                Fields::new(&params, &MassModel::new(&params))
+            })
+            .collect();
+        for their_fields in std::iter::once(&fields).chain(&others) {
+            let plan = EdgeOnPlan::new(their_fields, MapSelection::AllSystems);
+            for x in [0.0, 4_096.0, 26_000.0, -60_000.0] {
+                plan.line_integrals(x, &wanted, &mut lines);
+                for (part, component) in plan.parts.iter().zip(their_fields.components()) {
+                    let Part::Disc { line, .. } = part else {
+                        continue;
+                    };
+                    let Shape::Disc(disc) = component.shape() else {
+                        panic!("a disc part holds a disc")
+                    };
+                    assert_same_bits(lines[*line], Line::of_disc(disc).integral(x));
+                }
             }
         }
-        means[0] = 0.0;
-        plan.line_integrals(0.0, &means, &mut lines);
+        wanted[0] = false;
+        plan.line_integrals(0.0, &wanted, &mut lines);
         assert_same_bits(lines[0], 0.0);
         let young = MapSelection::YoungOnly;
         let narrow = EdgeOnPlan::new(&fields, young);
