@@ -1317,3 +1317,29 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   (16,384 face-on, 8,192 edge-on), so the relative 10⁻⁹ is never reached, while neighbouring columns
   differ by up to 0.65 dex face-on and 1.43 dex edge-on, eight orders above it, so the test does
   catch a half-pixel offset in `pixel_centre`.
+- **T14.d and T14.e, as built.** `convert.rs` gains `RangeRequest` (`TryFrom<&SystemsInRangeRequest>`),
+  which checks time, centre, radius and limit in design note 24's order, each failure a `bad_request`
+  naming its field, and builds the query with the `MassFloor` from `min_layer` and
+  `limits::MAX_QUERY_CELLS`; then `systems_in_range`, `census`, `galactic_position`, `mass_layer` and
+  `wire_population`. `requests::galaxy::systems` is `openable_universe` → validate → `galaxies.get` →
+  **one** interactive job that owns the state, builds the `CellCacheHandle` inside itself, runs
+  `range_query(&galaxy, &mut cells, &[], &query)` and converts in the same job, because the handle
+  borrows the cache and cannot cross an await. Validation runs **before** `galaxies.get`, as T14.c
+  does, so a bad field costs no galaxy build. `AppState` gains `cells` from
+  `ServerConfig::cell_cache_bytes` and `ServerStats::new` now takes seven arguments (`maps` then
+  `cells`). `the_handlers_refuse_every_kind_until_its_handler_exists` is deleted: T14.d was the last
+  handler, so no kind was left for it to list. `SHUTDOWN_TIMEOUT` in `tests/common/mod.rs` is **60 s**,
+  not 300 s, bounded by the longest job the server cannot abort — one band of a 1,024-pixel edge-on
+  map, measured at about 5.5 s of teardown in the dev profile — plus the join.
+  - `1e999` yields the connection-level `error` rather than `bad_request`: `serde_json` rejects the
+    number before the envelope is read, so design note 4's probe cannot recover the request ID either.
+    Pinned as such, with `f64::MAX` covering the intent the plan's test describes.
+  - Test tolerances, with reasons: masses to a relative 10⁻¹⁵, because `serde_json`'s parser is exact
+    only with `float_roundtrip`; positions to 10 m, because `position_at` re-normalises through
+    `translated` and that costs about 2 m of ULP.
+  - `below_mass_floor` compares `MassFloor`s rather than `Layer`s: `Layer`'s derived order would
+    mis-report every layer once plan 13 adds finer floors.
+  - **Measured**, 50 ly at 26,000 ly returning 2,045 records: release cold 35.7 ms and warm 12.3 ms end
+    to end, with the cell cache holding 1,732 cells in 516 KB; under `cargo test` 201 ms and 122 ms.
+    **T16's "under 15 ms end to end" is met warm but not cold** — a finding for T16 to record, not a
+    failure here. `tests/galaxy_creation.rs` takes 1.2 s idle and 7.5 s under concurrent load.

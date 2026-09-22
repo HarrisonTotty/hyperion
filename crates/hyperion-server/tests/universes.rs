@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 
 use common::{TestClient, TestServer, test_entropy};
 use hyperion_protocol::{
-    CreateUniverseRequest, DensityMapRequest, ErrorCode, GalaxyParametersRequest, MapPopulation,
-    MapView, OpenUniverseRequest, RequestBody, RequestError, ResponseBody, SeedHex, UniverseIdHex,
-    UniverseInfo, UniverseList, UniverseStatus,
+    CreateUniverseRequest, DensityMapRequest, ErrorCode, GalacticPosition, GalaxyParametersRequest,
+    MapPopulation, MapView, MassLayer, OpenUniverseRequest, RequestBody, RequestError,
+    ResponseBody, SeedHex, SystemsInRangeRequest, UniverseIdHex, UniverseInfo, UniverseList,
+    UniverseStatus, UniverseTime,
 };
 use hyperion_server::limits::MAX_UNIVERSE_NAME_CHARS;
 use hyperion_sim::GENERATOR_VERSION;
@@ -234,8 +235,7 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
             ..talos.clone()
         }]
     );
-    // Every request that names a universe is refused alike, and none of them generates anything:
-    // P04.T14.d adds `systems_in_range` to this test.
+    // Every request that names a universe is refused alike, and none of them generates anything.
     let refusals = [
         RequestBody::OpenUniverse(OpenUniverseRequest {
             universe: talos.id.clone(),
@@ -249,6 +249,14 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
             population: MapPopulation::All,
             resolution: 128,
             bits: 8,
+        }),
+        RequestBody::SystemsInRange(SystemsInRangeRequest {
+            universe: talos.id.clone(),
+            centre: GalacticPosition::default(),
+            radius_ly: 50.0,
+            time: UniverseTime::default(),
+            min_layer: MassLayer::A,
+            limit: 1_000,
         }),
     ];
     for body in refusals {
@@ -265,8 +273,11 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
         );
     }
     assert_eq!(
-        server.stats().galaxies().builds(),
-        0,
+        (
+            server.stats().galaxies().builds(),
+            server.stats().cells().entries()
+        ),
+        (0, 0),
         "a universe this server cannot run generates nothing"
     );
     assert_eq!(

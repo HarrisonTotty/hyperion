@@ -215,6 +215,7 @@ impl Harness {
             shared.pool.counters(),
             shared.galaxies.counters(),
             shared.maps.counters(),
+            shared.cells.counters(),
         );
         let (requests, outbound, pool) = (stats.requests(), stats.outbound(), stats.pool());
         assert_eq!(

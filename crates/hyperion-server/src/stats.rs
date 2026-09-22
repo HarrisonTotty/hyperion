@@ -19,6 +19,7 @@ pub struct ServerStats {
     pool: PoolCounters,
     galaxies: GalaxyCounters,
     maps: LruCounters,
+    cells: LruCounters,
 }
 
 impl ServerStats {
@@ -29,6 +30,7 @@ impl ServerStats {
         pool: PoolCounters,
         galaxies: GalaxyCounters,
         maps: LruCounters,
+        cells: LruCounters,
     ) -> Self {
         Self {
             connections,
@@ -37,6 +39,7 @@ impl ServerStats {
             pool,
             galaxies,
             maps,
+            cells,
         }
     }
 
@@ -76,6 +79,13 @@ impl ServerStats {
     #[must_use]
     pub fn maps(&self) -> LruCounters {
         self.maps
+    }
+
+    /// The cell cache's contents and use, including its byte budget: what a range query found
+    /// generated already, cell by cell.
+    #[must_use]
+    pub fn cells(&self) -> LruCounters {
+        self.cells
     }
 }
 

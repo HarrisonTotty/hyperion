@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
-    ClientMessage, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
+    ClientMessage, CreateUniverseRequest, RequestBody, RequestError, RequestId, ResponseBody,
+    SeedHex, ServerMessage, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
 use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
@@ -41,10 +42,12 @@ pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
 /// Upper bound on a server's teardown, which is not a network wait.
 ///
 /// Shutting the CPU pool down drops what is queued and then waits for the jobs in hand, and a job
-/// cannot be aborted (plan 04, design note 5). One band of a 1,024-pixel edge-on map is the longest
-/// of them, seconds of work and more on a loaded machine, so a shutdown is given far longer than a
-/// message.
-pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(300);
+/// cannot be aborted (plan 04, design note 5). The bound is therefore the longest job the server
+/// cannot abort, plus the join: one band of 16 rows of a 1,024-pixel edge-on map, measured at about
+/// 13 s (plan 04, "Measured map costs"). Sixty seconds is over four times that and leaves room for
+/// a loaded machine. The 300 s this once was accommodated a new map handler and would hide a hang
+/// for five minutes.
+pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The values a test server's entropy hands out, in order: seeds that a create leaves out, then
 /// universe IDs, as they are drawn.
@@ -127,6 +130,13 @@ impl TestServer {
     /// A new client connected to this server.
     pub async fn connect(&self) -> TestClient {
         TestClient::connect(&self.url).await
+    }
+
+    /// A new client that has said hello, ready to make requests.
+    pub async fn connected(&self) -> TestClient {
+        let mut client = self.connect().await;
+        client.hello().await;
+        client
     }
 
     /// The running server's statistics.
@@ -215,6 +225,13 @@ impl TestClient {
 
     /// The next message from the server, skipping WebSocket pings and pongs.
     pub async fn next_message(&mut self) -> ServerMessage {
+        let text = self.next_text().await;
+        serde_json::from_str(&text).expect("the server sends valid messages")
+    }
+
+    /// The text of the next frame from the server, skipping WebSocket pings and pongs: the bytes as
+    /// they arrived, for a test that pins a response exactly rather than through a decoder.
+    pub async fn next_text(&mut self) -> String {
         loop {
             let frame = timeout(NETWORK_TIMEOUT, self.socket.next())
                 .await
@@ -222,9 +239,7 @@ impl TestClient {
                 .expect("the server closed the connection")
                 .expect("the connection is healthy");
             match frame {
-                Message::Text(text) => {
-                    return serde_json::from_str(&text).expect("the server sends valid messages");
-                }
+                Message::Text(text) => return text.to_string(),
                 Message::Ping(_) | Message::Pong(_) => {}
                 other => panic!("unexpected frame {other:?}"),
             }
@@ -279,6 +294,19 @@ impl TestClient {
                 error,
             } if answered == id => Err(error),
             other => panic!("expected the answer to request {}, got {other:?}", id.0),
+        }
+    }
+
+    /// Creates a universe named `name` from `seed` and returns what the server made of it. Panics
+    /// on a refusal, so a test that expects one makes the request itself.
+    pub async fn create_universe(&mut self, name: &str, seed: u64) -> UniverseInfo {
+        let body = RequestBody::CreateUniverse(CreateUniverseRequest {
+            name: name.to_owned(),
+            seed: Some(SeedHex::from_u64(seed)),
+        });
+        match self.request(body).await {
+            Ok(ResponseBody::CreateUniverse(info)) => info,
+            other => panic!("expected the created universe, got {other:?}"),
         }
     }
 

@@ -1,4 +1,5 @@
-//! The galaxy's handlers: `galaxy_parameters` and `density_map` (plan 04, P04.T14.b and T14.c).
+//! The galaxy's handlers: `galaxy_parameters`, `density_map` and `systems_in_range` (plan 04,
+//! P04.T14.b to T14.d).
 //!
 //! Each starts from [`openable_universe`](super::universe::openable_universe), so that a universe
 //! this server cannot run is refused before any other field is read, and then takes the universe's
@@ -7,12 +8,15 @@
 
 use std::sync::Arc;
 
-use hyperion_protocol::{DensityMapRequest, GalaxyParametersRequest, RequestError, ResponseBody};
+use hyperion_protocol::{
+    DensityMapRequest, GalaxyParametersRequest, RequestError, ResponseBody, SystemsInRangeRequest,
+};
+use hyperion_sim::galaxy::query::range_query;
 
 use super::universe::openable_universe;
 use crate::AppState;
 use crate::compute::{CancelToken, JobError, Priority, quantise_map};
-use crate::convert::{MapRequest, density_map, galaxy_parameters};
+use crate::convert::{MapRequest, RangeRequest, density_map, galaxy_parameters, systems_in_range};
 
 /// The galaxy's parameters: the groups of plan 04's P04.T14.b table, in its order.
 ///
@@ -73,4 +77,47 @@ pub(crate) async fn map(
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
     Ok(ResponseBody::DensityMap(answered))
+}
+
+/// The systems within the request's radius of its centre at its time, with the census.
+///
+/// The query and the conversion of its hits are one interactive pool job, which owns the state and
+/// takes its [`CellCacheHandle`](crate::compute::CellCacheHandle) from it there: the handle borrows
+/// the cache and so cannot cross an `.await`, and the conversion is cheap beside the query but too
+/// dear for the runtime, since a 20,000-record answer is megabytes of wire types. The frame that
+/// answer becomes is serialised by a second job (design note 22). A running query is never stopped
+/// (design note 5): its cell budget, [`MAX_QUERY_CELLS`](crate::limits::MAX_QUERY_CELLS), bounds
+/// how long it can take.
+///
+/// # Errors
+///
+/// Those of [`openable_universe`] for a universe this server cannot serve, `bad_request` naming
+/// `time`, `centre`, `radius_ly` or `limit` for a field it cannot use (design note 24), those of
+/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built,
+/// `queue_full` if the interactive queue has no room for the query, `internal` if the pool is
+/// shutting down or the query panics, and `cancelled` if the client gave up before it ran.
+pub(crate) async fn systems(
+    state: Arc<AppState>,
+    request: SystemsInRangeRequest,
+    token: CancelToken,
+) -> Result<ResponseBody, RequestError> {
+    let universe = openable_universe(&state, &request.universe)?;
+    let query = RangeRequest::try_from(&request)?.into_query();
+    let galaxy = state.galaxies.get(universe.key()).await?;
+    let key = universe.key();
+    let shared = Arc::clone(&state);
+    let answer = move |_: &CancelToken| {
+        let mut cells = shared.cells.handle(key);
+        // No sources: the grid is the whole answer in the first milestone (plan 03's
+        // `range_query`).
+        let result = range_query(&galaxy, &mut cells, &[], &query);
+        systems_in_range(request, &query, &result)
+    };
+    let receiver = state
+        .pool
+        .try_submit(Priority::Interactive, token, answer)?;
+    let answered = receiver
+        .await
+        .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
+    Ok(ResponseBody::SystemsInRange(answered))
 }
