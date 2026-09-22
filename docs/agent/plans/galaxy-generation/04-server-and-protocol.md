@@ -1343,3 +1343,25 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     to end, with the cell cache holding 1,732 cells in 516 KB; under `cargo test` 201 ms and 122 ms.
     **T16's "under 15 ms end to end" is met warm but not cold** — a finding for T16 to record, not a
     failure here. `tests/galaxy_creation.rs` takes 1.2 s idle and 7.5 s under concurrent load.
+- **T15, as built.** `tests/abuse.rs` covers all seven listed cases; `tests/common/mod.rs` gained
+  `STATS_POLL`, `TestServer::stats_until`, `stats_until_within` and `stop_within`, so that no test in
+  the suite guesses at timing and the shutdown bound *is* the assertion rather than a clock reading.
+  Acceptance met: `cargo test -p hyperion-server --test abuse` ten times in a row, 10/10, 9–16 s a run
+  at load average 5–11, plus `--lib outbound::` 16/16 in each and three concurrent copies of the suite
+  for three rounds, 9/9.
+  - Two cases were **made less timing-sensitive on purpose**, after one failure in ten at load 19: the
+    shutdown case's queued work is now 50 ly range queries (about a second of queue) instead of
+    light-year ones whose queues emptied inside about 40 ms, with a second assertion that both queues
+    still hold work as the shutdown begins; and the two-client map case renders 256 pixels rather than
+    128 so its flight lasts about a second. Both windows are now roughly 25 times the work that
+    follows them. A test whose window is comparable to a scheduler delay is not measuring the server.
+  - Measured behaviour worth keeping: **192 of 200** flooded queries are refused `too_many_requests`
+    and all 8 admitted are answered; an oversized frame closes the connection with **no close frame**
+    at all (`closed() == None`), which is what this plan's "without 1009" note means, now pinned by a
+    test; closing a socket with a 1,024-pixel edge-on map in flight skips **31 of 32** bands, runs only
+    the galaxy build and the band in hand, and caches nothing; `Server::shutdown()` with both queues
+    loaded and two non-reading clients returns in about 1.0 s, nearly all of it their `CLOSE_TIMEOUT`.
+  - The 17 KiB-frame and sixteen-malformed-frame cases duplicate `tests/websocket.rs`'s close checks,
+    kept because the abuse angle differs: work already in flight is abandoned and the server is
+    unharmed. Follow-up not taken, for whoever next touches the file: `tests/density_map.rs`'s
+    `bulk_work_under_way` is now a duplicate of `stats_until`.

@@ -22,7 +22,7 @@ use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
@@ -48,6 +48,12 @@ pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
 /// a loaded machine. The 300 s this once was accommodated a new map handler and would hide a hang
 /// for five minutes.
 pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How often [`TestServer::stats_until`] looks at the server's counters again.
+///
+/// Short beside every state it waits for (a job reaching a worker, a connection closing, a queue
+/// draining), and long enough that the polling costs nothing measurable.
+const STATS_POLL: Duration = Duration::from_millis(5);
 
 /// The values a test server's entropy hands out, in order: seeds that a create leaves out, then
 /// universe IDs, as they are drawn.
@@ -147,9 +153,54 @@ impl TestServer {
             .stats()
     }
 
-    /// Stops serving, waits for the serving task, then shuts the server down. Returns the
-    /// temporary data directory, if the server made one, so that another server can start on it.
-    pub async fn stop(mut self) -> Option<TempDir> {
+    /// Waits until the running server's statistics satisfy `condition`, and returns the snapshot
+    /// that did.
+    ///
+    /// The plan has these tests read [`ServerStats`] rather than guess at timing (P04.T13.c): a
+    /// test waits until the server itself says a job has reached a worker, a queue has drained or a
+    /// connection has gone. Most of those counters are a snapshot and not a watch, so this polls
+    /// them every [`STATS_POLL`], bounded by [`NETWORK_TIMEOUT`] so that a state which never
+    /// arrives fails the test instead of hanging the suite. `what` is what the caller is waiting
+    /// for, named for the panic message.
+    pub async fn stats_until(
+        &self,
+        what: &str,
+        condition: impl Fn(&ServerStats) -> bool,
+    ) -> ServerStats {
+        self.stats_until_within(NETWORK_TIMEOUT, what, condition)
+            .await
+    }
+
+    /// [`TestServer::stats_until`], bounded by `bound` instead of [`NETWORK_TIMEOUT`], for a state
+    /// that waits on a CPU job rather than on the network.
+    pub async fn stats_until_within(
+        &self,
+        bound: Duration,
+        what: &str,
+        condition: impl Fn(&ServerStats) -> bool,
+    ) -> ServerStats {
+        let waited = timeout(bound, async {
+            loop {
+                let stats = self.stats();
+                if condition(&stats) {
+                    return stats;
+                }
+                sleep(STATS_POLL).await;
+            }
+        })
+        .await;
+        waited.unwrap_or_else(|_| {
+            panic!(
+                "timed out after {bound:?} waiting until {what}; the server reports {:?}",
+                self.stats()
+            )
+        })
+    }
+
+    /// Stops the serving task and waits for it, which every teardown here does first. Serving ends
+    /// without waiting for the connections it upgraded, which is why the server needs a teardown of
+    /// its own (P04.T13).
+    async fn end_serving(&mut self) {
         if let Some(stop_serving) = self.stop_serving.take() {
             // The serving task may have ended already, and then nobody listens.
             let _ = stop_serving.send(());
@@ -161,6 +212,12 @@ impl TestServer {
                 .expect("the serving task does not panic")
                 .expect("serving ends without error");
         }
+    }
+
+    /// Stops serving, waits for the serving task, then shuts the server down. Returns the
+    /// temporary data directory, if the server made one, so that another server can start on it.
+    pub async fn stop(mut self) -> Option<TempDir> {
+        self.end_serving().await;
         if let Some(server) = self.server.take() {
             timeout(SHUTDOWN_TIMEOUT, server.shutdown())
                 .await
@@ -168,6 +225,24 @@ impl TestServer {
                 .expect("the server shuts down cleanly");
         }
         self.temp_dir.take()
+    }
+
+    /// Stops serving, then shuts the server down within `bound` rather than [`SHUTDOWN_TIMEOUT`].
+    ///
+    /// The abuse suite holds a shutdown with work queued to [`NETWORK_TIMEOUT`] (P04.T15), so the
+    /// bound is that test's assertion and has to be the caller's to choose: this panics if the
+    /// shutdown takes longer, or does not succeed. Clients need not have closed, since closing them
+    /// is the shutdown's own work.
+    pub async fn stop_within(mut self, bound: Duration) {
+        self.end_serving().await;
+        let server = self
+            .server
+            .take()
+            .expect("the server is running until `stop`");
+        timeout(bound, server.shutdown())
+            .await
+            .unwrap_or_else(|_| panic!("the server did not shut down within {bound:?}"))
+            .expect("the server shuts down cleanly");
     }
 
     /// Stops this server and starts another on the same data directory with a fresh
