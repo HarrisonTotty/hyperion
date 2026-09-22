@@ -31,6 +31,14 @@ name = "galaxy"
 harness = false
 
 [[bench]]
+name = "placement"
+harness = false
+
+[[bench]]
+name = "range_query"
+harness = false
+
+[[bench]]
 name = "stellar"
 harness = false
 

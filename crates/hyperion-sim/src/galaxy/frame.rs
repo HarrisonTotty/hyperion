@@ -6,13 +6,26 @@
 //! smaller by a tenth, so a ship drifting along a boundary does not flicker between frames. Outside
 //! every sphere the ship is in the galactic frame. The rule needs only the systems near the ship,
 //! which the range query supplies, and is evaluated at the query's time.
+//!
+//! [`select_frame`] is the rule itself, over candidates the caller has already found;
+//! [`frame_at`] finds them, by walking each stellar layer over the reach of its own largest sphere
+//! of influence and merging whatever the query's sources hold there. Both are pure functions of the
+//! galaxy, the ship's position and the time: neither depends on the caller's cache, nor on the
+//! order a walk happens to visit systems in.
 
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
-use crate::id::SystemId;
-use crate::units::Metres;
+use crate::coords::GalacticPosition;
+use crate::galaxy::placement::{CellCache, LayerSpec, STELLAR_LAYERS, SystemRecord};
+use crate::galaxy::query::{
+    LayerSet, QuerySphere, SystemHit, SystemSource, cells_in_sphere, hit_at, pad_for, pad_speed,
+};
+use crate::galaxy::{Galaxy, PointLy};
+use crate::id::{Layer, SystemId};
+use crate::time::UniverseTime;
+use crate::units::{LightYears, Metres, SolarMasses};
 
 /// How much smaller a rival's ratio of distance to tidal radius must be before it takes the ship
 /// from its current frame: a tenth (brainstorm, "Coordinates": "It changes frame only when another
@@ -168,6 +181,190 @@ pub fn select_frame(candidates: &[FrameCandidate], current: Option<SystemId>) ->
     } else {
         Some(current.id)
     }
+}
+
+/// How much wider than a layer's largest sphere of influence [`frame_at`] searches: a quarter
+/// (plan 03, P03.T12.b).
+///
+/// A system holds the ship only while the ship is inside that system's own tidal radius, and within
+/// a layer the radius is largest for the layer's heaviest primary, since it grows as the cube root
+/// of the mass. Searching `1.25 ×` that largest radius, taken at the ship's own position, therefore
+/// finds every system of the layer that could hold the ship unless the tidal radius of one mass
+/// changes by more than a quarter between the ship and that system: the radius goes as
+/// `(4Ω² − κ²)^(−⅓)`, so that needs the denominator to change by a factor of 1.95 within a few tens
+/// of light-years, which the rotation curve does nowhere the grid places a system.
+const SEARCH_MARGIN: f64 = 1.25;
+
+/// The frame a ship at `ship` is in at time `t`, having been in `current`: a system's ID, or `None`
+/// for the galactic frame (plan 03, Design note 16).
+///
+/// This is [`select_frame`] over the systems that could hold the ship. Each stellar layer is walked
+/// separately, over a sphere of 1.25 times the tidal radius of the layer's heaviest primary at the
+/// ship's position, so a layer of small stars costs a handful of cells rather than
+/// the reach of layer E's giants; there is no census and no limit, because the answer is one ID and
+/// the spheres are a few light-years across. Systems are placed at `t` by
+/// [`position_at`](super::query::position_at), tested there by
+/// [`hit_at`](super::query::hit_at) — a system not yet born holds nothing — and each one's tidal
+/// radius is read at its own position from its primary's initial mass
+/// ([`PotentialTables::tidal_radius`](super::potential::PotentialTables::tidal_radius)), which is
+/// the brainstorm's sphere of influence until plans 06 and 11 give a present-day system mass.
+///
+/// `cache` is the caller's, as everywhere else in this plan, and the answer is the same whatever it
+/// holds. `sources` are the query's non-grid sources, asked over the widest of the layers' spheres
+/// and for every stellar layer, and honoured in both directions: their systems can take the ship,
+/// and a source that suppresses a grid system — a pinned volume holding its own content — also
+/// keeps that system from taking it.
+///
+/// A ship at the exact galactic centre, or beside a system there, is left to the galactic frame:
+/// the tidal radius is zero at the centre, which is no sphere of influence, and plan 09's rule for
+/// the centre's own members ("the smaller radius wins") is layered on there.
+///
+/// # Panics
+///
+/// If a system's drift would take it out of the addressable cube, which
+/// [`position_at`](super::query::position_at) cannot do while velocities are zero.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::frame::frame_at;
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::galaxy::placement::{CellKey, NoCache, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let galaxy = Galaxy::from_params(Seed::new(19), GalaxyParams::milky_way_like());
+/// let mut cache = NoCache::new();
+///
+/// // A ship sitting on a generated system is in that system's frame.
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// let system = cell.first().expect("a 32 ly cell of the solar circle holds systems");
+/// let here = system.epoch_position();
+/// let frame = frame_at(&galaxy, &mut cache, &[], here, UniverseTime::EPOCH, None);
+/// assert_eq!(frame, Some(system.id()));
+///
+/// // Far above the disc no sphere of influence reaches, so the ship is in the galactic frame.
+/// let halo = GalacticPosition::from_light_years([0.0, 0.0, 60_000.0]).expect("in the cube");
+/// assert_eq!(frame_at(&galaxy, &mut cache, &[], &halo, UniverseTime::EPOCH, None), None);
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+#[must_use]
+pub fn frame_at<C: CellCache>(
+    galaxy: &Galaxy,
+    cache: &mut C,
+    sources: &[&dyn SystemSource],
+    ship: &GalacticPosition,
+    t: UniverseTime,
+    current: Option<SystemId>,
+) -> Option<SystemId> {
+    let mut candidates = Vec::new();
+    let mut widest: Option<QuerySphere> = None;
+    for spec in STELLAR_LAYERS {
+        let layer = spec.layer();
+        let Some(sphere) =
+            search_sphere(galaxy, ship, t, layer, SolarMasses::new(spec.band().hi()))
+        else {
+            continue;
+        };
+        for key in cells_in_sphere(layer, &sphere) {
+            cache.with_cell(galaxy, key, |cell| {
+                for record in cell {
+                    // Tested first, then offered to the sources, so that a source is asked to
+                    // suppress only systems that are in reach at `t`, which is the order its
+                    // contract describes and the one `range_query` uses.
+                    if let Some(hit) = hit_at(galaxy, record, &sphere)
+                        && !suppressed(sources, galaxy, record, t)
+                    {
+                        candidates.extend(candidate_for(galaxy, &hit));
+                    }
+                }
+            });
+        }
+        if widest.is_none_or(|held| {
+            sphere
+                .padded_radius()
+                .total_cmp(&held.padded_radius())
+                .is_gt()
+        }) {
+            widest = Some(sphere);
+        }
+    }
+
+    // The sources are asked once, over the widest sphere any layer was walked with and for every
+    // stellar layer, because a source reports its members by the layer they would fall in and this
+    // rule has no census to admit layers by. A member farther away than its own layer's search
+    // radius can only fail to hold the ship, never win.
+    if let Some(sphere) = widest {
+        let layers: LayerSet = STELLAR_LAYERS.iter().map(LayerSpec::layer).collect();
+        let mut hits = Vec::new();
+        for source in sources {
+            source.systems_in_sphere(galaxy, &sphere, layers, &mut hits);
+        }
+        candidates.extend(hits.iter().filter_map(|hit| candidate_for(galaxy, hit)));
+    }
+
+    select_frame(&candidates, current)
+}
+
+/// The sphere of `layer` searched about `ship` at `t`, or `None` where the layer's largest sphere of
+/// influence is not a sphere at all: at the exact galactic centre the tidal radius is zero.
+///
+/// The radius is [`SEARCH_MARGIN`] times the tidal radius of `largest` at the ship's position, and
+/// the pad is the layer's, as in the range query, so that cells chosen by epoch position cannot
+/// miss a system that has drifted in by `t` (plan 03, Design note 13).
+#[must_use]
+fn search_sphere(
+    galaxy: &Galaxy,
+    ship: &GalacticPosition,
+    t: UniverseTime,
+    layer: Layer,
+    largest: SolarMasses,
+) -> Option<QuerySphere> {
+    let reach = galaxy
+        .potential()
+        .tidal_radius(largest, &PointLy::from(ship));
+    let radius = LightYears::from(reach) * SEARCH_MARGIN;
+    // The only rejection a positive finite radius can meet is a pad that is not finite, and the pad
+    // is a few light-years over the whole clock window; a radius of zero is the centre, handled by
+    // returning `None`.
+    QuerySphere::new(*ship, radius, t, pad_for(t, pad_speed(layer))).ok()
+}
+
+/// The candidate a system near the ship makes, or `None` for a system whose tidal radius is no
+/// sphere of influence.
+///
+/// The distance and the position are the hit's, so they are already taken at the query's time; the
+/// tidal radius is read at that position, from the primary's initial mass (plan 03, Design note 16).
+#[must_use]
+fn candidate_for(galaxy: &Galaxy, hit: &SystemHit) -> Option<FrameCandidate> {
+    let tidal_radius = galaxy.potential().tidal_radius(
+        hit.record().primary_initial_mass(),
+        &PointLy::from(hit.position()),
+    );
+    // The error is dropped rather than propagated because the one case that reaches it is a system
+    // at the exact galactic centre, whose tidal radius is zero: it is no sphere of influence, and
+    // the centre's members are plan 09's rule, not this one (plan 03, T12.a as built).
+    FrameCandidate::new(hit.id(), Metres::from(hit.distance()), tidal_radius).ok()
+}
+
+/// Whether any source replaces this grid system at `t`, so that it cannot hold the ship either.
+///
+/// Asked in the order the sources were given and only until one says yes, exactly as
+/// [`range_query`](super::query::range_query) asks it.
+#[must_use]
+fn suppressed(
+    sources: &[&dyn SystemSource],
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    t: UniverseTime,
+) -> bool {
+    sources
+        .iter()
+        .any(|source| source.suppresses(galaxy, record, t))
 }
 
 #[cfg(test)]
