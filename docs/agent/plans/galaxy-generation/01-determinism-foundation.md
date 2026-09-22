@@ -1238,3 +1238,19 @@ The designation format and the text forms are not part of the generator version.
 - **Statistical thresholds.** α = 10⁻³ over a few dozen fixed-seed tests gives a few per cent chance
   that some seed needs changing at the first run. Design note 28 says how that is handled without
   weakening a test.
+- **T1.e's CI wiring, changed since it was built (2026-09-22).** `ci.yml` is removed: the
+  repository still has no remote, so nothing ran it, and the three-architecture claim above rests on
+  local runs either way. `ci` therefore no longer gains `test-slow`. It is the commit gate
+  (`fmt-check check lint test gen-protocol-check`, about 3 minutes) and the new `ci-slow` is
+  `ci test-slow`, because by plan 02's tasks `test-slow` had reached 19 minutes of the 22 that `ci`
+  took, and it is not what a commit needs to wait for. Measured warm: `test-slow` 1,118 s, of which
+  `galaxy_sweeps` 423 s, `galaxy_bounds` 370 s, `sampler_statistics` 158 s and the monotone-phase
+  roots 91 s. Restoring a workflow means running `just ci-slow`, `just test-wasm` and the AArch64
+  tests as its steps.
+- **The sim is built at `opt-level = 2` for tests (2026-09-22).** Unoptimised, the fast suite spent
+  about 120 s in its test binaries, most of `just test`'s 175 s; the same tests take about 65 s at
+  `opt-level = 2`, for about 18 s more on a build from scratch and no measurable change to an
+  incremental one. The whole fast suite, all 16 goldens included, passes bit for bit under
+  `slow-test` (opt-level 3, thin LTO), which is what makes the change safe: the pinned `libm` and
+  `math`'s fixed evaluation orders leave generated output independent of the optimiser. Debug
+  assertions and overflow checks stay on, so the bound checks still fire.

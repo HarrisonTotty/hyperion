@@ -120,10 +120,10 @@ no star it need not.
 - Random streams are opened with `Stream::open(Seed, DomainTag, ObjectKey)`. Every domain tag is an
   entry in plan 01's single registry, `rng/tags.rs`, and each plan's tasks add their own entries
   there, so the collision test covers them all.
-- Slow statistical tests and Milky Way comparisons run under `just test-slow`, which CI runs. Plan
-  01 defines how they are marked.
+- Slow statistical tests and Milky Way comparisons run under `just test-slow`, which `just ci-slow`
+  runs and `just ci` does not. Plan 01 defines how they are marked.
 - Benchmarks use Criterion as a dev-dependency and run under `just bench`. The brainstorm's targets
-  are recorded in the plan that owns the code, and a regression is a finding, not a CI failure.
+  are recorded in the plan that owns the code, and a regression is a finding, not a failure.
 
 ### Figures
 

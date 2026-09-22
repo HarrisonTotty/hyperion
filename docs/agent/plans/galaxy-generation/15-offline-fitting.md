@@ -147,9 +147,9 @@ must fill. P15.T2 checks each against the code as built, and the owner's code wi
 
 - `just fit <task>`: `cargo run --release -p hyperion-fit -- run <task> --since <current>`, writing
   into the sim's `tables/` and updating `crates/hyperion-fit/tables.lock`.
-- `just fit-check`: `cargo run -p hyperion-fit -- check`. Part of `just ci`, and a step of the
-  `rust` job in `.github/workflows/ci.yml`. It reruns no fit. Its cost is the fingerprints' probes,
-  a few seconds at most, since the displaced table's probes build plan 02's full potential once.
+- `just fit-check`: `cargo run -p hyperion-fit -- check`. Part of `just ci`. It reruns no fit. Its
+  cost is the fingerprints' probes, a few seconds at most, since the displaced table's probes build
+  plan 02's full potential once.
 - `just test-slow` additionally runs `hyperion-fit check --rerun-fast`.
 
 ## Consumes
@@ -349,11 +349,11 @@ with `toml`); `list_prints_registered_tasks`.
   so that `mge_table_is_reproduced` keeps passing. Each table's items are checked against the format
   its task group states here, and a difference is settled before any fit.
 - `check` with every rule of Design note 8, and `--rerun-fast`.
-- `justfile`: `fit-check`, added to `ci`; `test-slow` gains `--rerun-fast`. `ci.yml`: a
-  `just fit-check` step in the `rust` job. `.gitignore`: `crates/hyperion-fit/data/cache/`.
+- `justfile`: `fit-check`, added to `ci`; `test-slow` gains `--rerun-fast`. `.gitignore`:
+  `crates/hyperion-fit/data/cache/`.
 
 **Files.** `crates/hyperion-fit/src/{emit,manifest,cli}.rs`, `crates/hyperion-fit/tables.lock`,
-`crates/hyperion-sim/src/tables/mod.rs`, `justfile`, `.github/workflows/ci.yml`, `.gitignore`.
+`crates/hyperion-sim/src/tables/mod.rs`, `justfile`, `.gitignore`.
 
 **Tests.** `emitted_literals_round_trip` (strip separators, parse, compare bits, over 10⁴ values
 including subnormals and powers of ten); `emitted_file_passes_header_grammar`;

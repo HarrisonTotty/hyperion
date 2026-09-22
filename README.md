@@ -59,19 +59,21 @@ nothing generated is saved. To delete a universe, stop the server and remove its
 | `just fmt`   | `cargo fmt`               | `prettier`                    |
 | `just test`  | `cargo test`              | `vitest`                      |
 
-`just ci` runs everything CI runs, including a check that the generated protocol bindings are
-up to date.
+`just ci` is the gate before a commit: the four checks above plus a check that the generated
+protocol bindings are up to date. It takes about three minutes.
 
+- `just ci-slow` is `just ci` plus `just test-slow`. The slow tests add about nineteen minutes, so
+  run it before a push that changes the sim, and after a `GENERATOR_VERSION` bump.
 - `just test-slow` runs the slow statistical tests, marked `#[ignore = "slow: ..."]`, under the
-  `slow-test` profile (release speed with debug assertions on); CI runs it after `just test`.
+  `slow-test` profile (release speed with debug assertions on).
 - `just bench` runs the Criterion benchmarks (`just bench -- <filter>` narrows them); a regression
-  is a finding to raise, never a CI failure.
+  is a finding to raise, never a failure.
 - `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate
   `GENERATOR_VERSION` bump; it refuses to run under `CI`.
 - `just test-wasm` runs the sim's and the testkit's tests, goldens and slow tests included, as
-  `wasm32-wasip1` under wasmtime. It needs `rustup target add wasm32-wasip1` and wasmtime, so it is
-  not part of `just ci`. CI runs it, and the same tests on AArch64, so that generated output is
-  checked bit for bit on three architectures.
+  `wasm32-wasip1` under wasmtime, where `usize` is 32 bits. It needs wasmtime and the target
+  (`rustup target add wasm32-wasip1`), so it is part of neither `ci` nor `ci-slow`. Run it, and the
+  same tests on AArch64, to check generated output bit for bit on three architectures.
 
 ### Git hooks
 
@@ -83,5 +85,5 @@ the commit-stage hooks against every file.
 ### Changing the protocol
 
 Edit the types in `crates/hyperion-protocol`, run `just gen-protocol`, re-export any new type
-from `packages/protocol/src/index.ts`, and commit the regenerated bindings. CI fails if they are
-stale.
+from `packages/protocol/src/index.ts`, and commit the regenerated bindings. `just ci` fails if they
+are stale.

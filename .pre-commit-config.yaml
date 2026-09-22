@@ -1,7 +1,7 @@
 # Git hooks for HYPERION, managed by https://pre-commit.com.
 # Run `just hooks` to install, or `just pre-commit` to run against every file.
 #
-# Fast checks run on commit; tests run on push. `just ci` remains the full gate.
+# Fast checks run on commit; tests run on push. `just ci-slow` remains the full gate.
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
 

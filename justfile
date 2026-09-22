@@ -1,4 +1,5 @@
-# HYPERION task runner — `just` lists recipes, `just ci` runs everything CI runs.
+# HYPERION task runner — `just` lists recipes, `just ci` is the gate before a commit and
+# `just ci-slow` adds the slow statistical tests.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -50,7 +51,7 @@ test:
     cargo test --workspace
     pnpm test
 
-# Run the slow tests (marked `#[ignore = "slow: ..."]`) under the slow-test profile.
+# Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile. About 19 minutes.
 test-slow:
     cargo test --workspace --profile slow-test -- --ignored
 
@@ -99,5 +100,8 @@ build:
     cargo build --workspace --release
     pnpm build
 
-# Everything CI runs.
-ci: fmt-check check lint test test-slow gen-protocol-check
+# The gate before a commit: everything but the slow tests and the other architectures.
+ci: fmt-check check lint test gen-protocol-check
+
+# `ci` plus the slow statistical tests: the full gate, about 22 minutes.
+ci-slow: ci test-slow

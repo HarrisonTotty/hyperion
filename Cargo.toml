@@ -59,3 +59,20 @@ lto = "thin"
 inherits = "release"
 debug-assertions = true
 overflow-checks = true
+
+# The sim's arithmetic dominates `just test`, and an unoptimised build pays for all of it: the fast
+# suite spends about 120 s in its test binaries at `opt-level = 0` and about 65 s at
+# `opt-level = 2`, against about 18 s more on a build from scratch and no measurable change to an
+# incremental one (measured 2026-09-22 on 8 cores). Debug assertions and overflow checks stay on, so
+# the sim's bound checks still fire. Generated output does not change: the whole fast suite, golden
+# files included, passes bit for bit under `slow-test`, which optimises harder still (opt-level 3,
+# thin LTO).
+[profile.dev.package.hyperion-sim]
+opt-level = 2
+
+# The fitting crate solves least squares and the testkit runs the statistics, for the same reason.
+[profile.dev.package.hyperion-fit]
+opt-level = 2
+
+[profile.dev.package.hyperion-testkit]
+opt-level = 2
