@@ -1,4 +1,4 @@
-# generator_version = 7
+# generator_version = 8
 # milky_way, seed 0
 milky_way.face_on.all[0][0] = 0x3f6fd5659ec7e65b  # 0.0038859352846401358
 milky_way.face_on.all[0][1] = 0x3f8127ba20c1b424  # 0.008376554608014848

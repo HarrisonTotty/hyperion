@@ -5,12 +5,17 @@
 //! constants, so that a wrong constant in the sim fails a test instead of moving the bracket.
 
 use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::galaxy::fields::MAX_COMPONENTS;
 use hyperion_sim::galaxy::imf::{MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::{
     ArmCount, GalaxyParams, HaloComponentKind, HaloComponentParams, ProgenitorKind,
 };
+use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord};
+use hyperion_sim::galaxy::query::{PAD_SPEED, SystemHit, pad_for, position_at};
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
+use hyperion_sim::id::Layer;
 use hyperion_sim::math;
+use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{Degrees, LightYears};
 
 const GYR: f64 = 1e9;
@@ -383,6 +388,165 @@ pub fn sunlike_point(galaxy: &Galaxy) -> GalacticPosition {
     let bar = galaxy.params().bar().half_length().value();
     assert!(bar < 26_000.0, "the bar reaches {bar} ly, past the Sun");
     GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("26,000 ly is in the root cube")
+}
+
+/// The whole light-years of a non-negative length, rounded up.
+#[must_use]
+fn whole_ly_up(ly: f64) -> i64 {
+    assert!(
+        ly.is_finite() && (0.0..=1.0e9).contains(&ly),
+        "{ly} ly is not a length a test searches over"
+    );
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the assertion above holds the value in [0, 10⁹], where every whole number is \
+                  exact in both f64 and i64"
+    )]
+    let whole = ly.ceil() as i64;
+    whole
+}
+
+/// Calls `sample(point, weight, [ix, iy, iz])` at the midpoint of each of `steps³` equal boxes of
+/// the box of whole light-years from `min_ly` with edge `size_ly`, so that `Σ weight × f(point)` is
+/// `∫ f dV` over it.
+///
+/// The step indices let a caller integrate over part of the box — the slab beside a cell face, say —
+/// in the same pass.
+pub fn for_each_box_midpoint(
+    min_ly: [i32; 3],
+    size_ly: u32,
+    steps: u32,
+    mut sample: impl FnMut(&PointLy, f64, [u32; 3]),
+) {
+    assert!(steps > 0, "a midpoint sum needs a step");
+    let [x0, y0, z0] = min_ly.map(f64::from);
+    let h = f64::from(size_ly) / f64::from(steps);
+    let weight = h * h * h;
+    let at = |base: f64, i: u32| base + (f64::from(i) + 0.5) * h;
+    for ix in 0..steps {
+        for iy in 0..steps {
+            for iz in 0..steps {
+                let point = PointLy::new(at(x0, ix), at(y0, iy), at(z0, iz));
+                sample(&point, weight, [ix, iy, iz]);
+            }
+        }
+    }
+}
+
+/// The integral of a layer's density over the box of whole light-years from `min_ly` with edge
+/// `size_ly`, by a midpoint sum of `steps³` points: the expected number of systems the grid places
+/// there (plan 03, P03.T8.a).
+///
+/// The sum shares no point with the thinning and none with `expected_counts`'s Gauss–Legendre rule.
+/// Its relative error is about `(h ÷ L)² ÷ 24` for a density of scale `L`, with `h = size ÷ steps`,
+/// so a step of an eighth of a cell is well under a per cent everywhere the layers reach.
+#[must_use]
+pub fn reference_box_integral(
+    galaxy: &Galaxy,
+    band: MassBand,
+    min_ly: [i32; 3],
+    size_ly: u32,
+    steps: u32,
+) -> f64 {
+    let (fields, shares) = (galaxy.fields(), galaxy.shares());
+    let mut total = 0.0;
+    for_each_box_midpoint(min_ly, size_ly, steps, |point, weight, _| {
+        total += weight * fields.layer_density(shares, band, point);
+    });
+    total
+}
+
+/// Each density component's integral over the box of whole light-years from `min_ly` with edge
+/// `size_ly`, by the same midpoint sum as [`reference_box_integral`]: the odds the thinning picks a
+/// component with, once weighted by the band's share (plan 03, P03.T8.b).
+#[must_use]
+pub fn reference_box_component_integrals(
+    galaxy: &Galaxy,
+    min_ly: [i32; 3],
+    size_ly: u32,
+    steps: u32,
+) -> [f64; MAX_COMPONENTS] {
+    let fields = galaxy.fields();
+    let mut integrals = [0.0; MAX_COMPONENTS];
+    let mut densities = [0.0; MAX_COMPONENTS];
+    for_each_box_midpoint(min_ly, size_ly, steps, |point, weight, _| {
+        fields.densities(point, &mut densities);
+        for (integral, density) in integrals.iter_mut().zip(densities) {
+            *integral += weight * density;
+        }
+    });
+    integrals
+}
+
+/// Every system of the five stellar layers within `radius` of `centre` at `t`, by generating every
+/// cell that can hold one and testing each system: the range query's answer, found without a census,
+/// a sphere or a walk (plan 03, P03.T10).
+///
+/// Cells are enumerated over the bounding box of the query's reach on each layer's grid, clipped to
+/// the root cube, so the region searched strictly contains the one `cells_in_sphere` walks: a walk
+/// that misses a cell shows up as a system missing from the query. Every cell is generated through
+/// `NoCache`, in whole, as a cache would hold it. The hits are ordered as the query orders them, by
+/// distance at `t` and then by ID.
+#[must_use]
+pub fn brute_force_in_sphere(
+    galaxy: &Galaxy,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+) -> Vec<SystemHit> {
+    // The query pads its walk for motion; two light-years more here keeps this search wider than
+    // the query's however the pad is rounded.
+    let reach = whole_ly_up(radius.value() + pad_for(t, PAD_SPEED).value() + 2.0);
+    let centre_ly = centre.cell().to_array().map(i64::from);
+    let mut cache = NoCache::new();
+    let mut hits = Vec::new();
+    for layer in [Layer::E, Layer::D, Layer::C, Layer::B, Layer::A] {
+        let cell_ly = i64::from(layer.cell_size_ly());
+        let half = 65_536 / cell_ly;
+        let ends = centre_ly.map(|c| {
+            let first = (c - reach).div_euclid(cell_ly).max(-half);
+            let last = (c + reach).div_euclid(cell_ly).min(half - 1);
+            (first, last)
+        });
+        for x in ends[0].0..=ends[0].1 {
+            for y in ends[1].0..=ends[1].1 {
+                for z in ends[2].0..=ends[2].1 {
+                    let cell = [x, y, z].map(|c| i32::try_from(c).expect("a cell of the cube"));
+                    let key = CellKey::new(layer, cell).expect("a stellar layer inside the cube");
+                    cache.with_cell(galaxy, key, |systems| {
+                        collect_hits(galaxy, systems, centre, radius, t, &mut hits);
+                    });
+                }
+            }
+        }
+    }
+    hits.sort_by(|a, b| {
+        a.distance()
+            .total_cmp(&b.distance())
+            .then_with(|| a.id().raw().cmp(&b.id().raw()))
+    });
+    hits
+}
+
+/// The systems of one cell that are inside the sphere at `t`, appended to `hits`.
+fn collect_hits(
+    galaxy: &Galaxy,
+    systems: &[SystemRecord],
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+    hits: &mut Vec<SystemHit>,
+) {
+    for record in systems {
+        if record.age_at(t).value() <= 0.0 {
+            continue;
+        }
+        let position = position_at(galaxy, record, t);
+        let distance = LightYears::from(centre.distance_to(&position));
+        if distance.value() <= radius.value() {
+            hits.push(SystemHit::new(*record, position, distance));
+        }
+    }
 }
 
 /// The integral of a layer's density over a sphere, by a midpoint sum in height, radius and azimuth:
