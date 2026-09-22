@@ -145,19 +145,18 @@ function ParameterList({ groups }: ParameterListProps) {
 }
 
 /**
- * The `PARAMETERS` panel: the open universe's seed, generator version and drawn structural
+ * The `PARAMETERS` page: the open universe's seed, generator version and drawn structural
  * parameters, grouped, each with its unit and whether it was drawn, derived or fixed.
  *
  * @remarks
- * Requested for the open universe, and again whenever another is opened or the operator asks
- * with `RETRY` after a failure. Labels come from the
- * client's glossary, and a key it lacks is shown as itself (plan 05, design note D8a). Values are
- * right-aligned in B612 Mono with their units beside them; nothing is converted. All rows stay in
- * the DOM, since there are a few dozen, and the list scrolls inside the panel, from the keyboard
- * too, with the position of the rows in view beneath it.
+ * A page of the panel it shares with `GALAXY MAP`, whose page selector names it. Requested for the
+ * open universe, and again whenever another is opened or the operator asks with `RETRY` after a
+ * failure. Labels come from the client's glossary, and a key it lacks is shown as itself (plan 05,
+ * design note D8a). Values are right-aligned in B612 Mono with their units beside them; nothing is
+ * converted. All rows stay in the DOM, since there are a few dozen, and the list scrolls inside the
+ * page, from the keyboard too, with the position of the rows in view beneath it.
  */
 export function ParametersPanel() {
-  const titleId = useId();
   const { open } = useUniverse();
   const [retries, setRetries] = useState(0);
   const state = useServerRequest<"galaxy_parameters">(
@@ -167,10 +166,7 @@ export function ParametersPanel() {
   );
 
   return (
-    <section className="panel galaxy__parameters parameters" aria-labelledby={titleId}>
-      <h2 className="panel__title" id={titleId}>
-        Parameters
-      </h2>
+    <div className="parameters">
       {open === null ? <p className="panel__empty">NO UNIVERSE OPEN</p> : null}
       <RequestStatus
         state={state}
@@ -189,6 +185,6 @@ export function ParametersPanel() {
           <ParameterList groups={toGroups(state.response.groups)} />
         </>
       ) : null}
-    </section>
+    </div>
   );
 }

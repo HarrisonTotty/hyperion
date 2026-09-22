@@ -34,8 +34,10 @@ async function renderPanel() {
   render(
     <ServerLinkHarness>
       <UniverseProvider>
-        <UniversePanel />
-        <ParametersPanel />
+        <UniversePanel expanded onToggle={() => undefined} />
+        <div role="tabpanel" aria-label="PARAMETERS">
+          <ParametersPanel />
+        </div>
       </UniverseProvider>
     </ServerLinkHarness>,
   );
@@ -61,8 +63,9 @@ async function openFromList(
   });
 }
 
+/** The page, as the pages panel labels it. */
 function panel(): HTMLElement {
-  return screen.getByRole("region", { name: "Parameters" });
+  return screen.getByRole("tabpanel", { name: "PARAMETERS" });
 }
 
 describe("ParametersPanel", () => {

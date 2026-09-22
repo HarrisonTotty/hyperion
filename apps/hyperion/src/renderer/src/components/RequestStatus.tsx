@@ -1,6 +1,7 @@
 import type { ErrorCode, RequestKind } from "@hyperion/protocol";
 
 import type { RequestState } from "../lib/useServerRequest";
+import { StatusLine, type StatusStanding } from "./StatusLine";
 
 interface RequestStatusProps {
   readonly state: RequestState<RequestKind>;
@@ -11,15 +12,13 @@ interface RequestStatusProps {
 }
 
 /**
- * How a request that has not answered reads: neutral while it waits or while the link is down,
- * refused when the server turned it down for a reason in the request itself, and a fault when the
- * server failed, was overloaded or did not answer.
+ * A request that has not answered, in words, and how it stands: waiting while it waits or while
+ * the link is down, refused when the server turned it down for a reason in the request itself, and
+ * a fault when the server failed, was overloaded or did not answer.
  */
-type Standing = "waiting" | "refused" | "fault";
-
 interface Annunciation {
   readonly text: string;
-  readonly standing: Standing;
+  readonly standing: StatusStanding;
 }
 
 /**
@@ -82,22 +81,15 @@ export function RequestStatus({ state, id, onRetry }: RequestStatusProps) {
     return null;
   }
   return (
-    <div className="request-status">
-      <output
-        id={id}
-        className={
-          shown.standing === "fault"
-            ? "request-status__text request-status__text--fault"
-            : "request-status__text"
-        }
-      >
-        {shown.text}
-      </output>
-      {shown.standing !== "waiting" && onRetry !== undefined ? (
-        <button type="button" className="control" onClick={onRetry}>
-          RETRY
-        </button>
-      ) : null}
-    </div>
+    <StatusLine
+      text={shown.text}
+      standing={shown.standing}
+      id={id}
+      action={
+        shown.standing !== "waiting" && onRetry !== undefined
+          ? { label: "RETRY", onAction: onRetry }
+          : undefined
+      }
+    />
   );
 }

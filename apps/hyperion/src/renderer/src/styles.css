@@ -298,46 +298,41 @@ body {
 }
 
 /*
- * The GALAXY display: universe and parameters, galaxy map, local chart with its list and readout.
- * The four columns sum to 69rem at their minimum (plan 05, P05.T6.d). In the first column the
- * universe panel takes what it needs, down to what its list gives up, and the parameters the rest,
- * never less than their title and one line: 4.5rem.
+ * The GALAXY display, in two columns. The first holds UNIVERSE and, below it, the PARAMETERS and
+ * GALAXY MAP pages; the second the CURSOR panel and the local chart. The first column is wide
+ * enough for the map's pictures and the words beside them, 52rem at least, which leaves the second
+ * 25rem at 1280 px; wider, the two share the width 4:3, which lets the map fill the column's height
+ * at 1920 x 1080.
  */
 .galaxy {
   display: grid;
-  grid-template-columns:
-    minmax(16rem, 20rem) minmax(18rem, 26rem) minmax(20rem, 1fr)
-    minmax(15rem, 18rem);
-  grid-template-rows: minmax(0, auto) minmax(4.5rem, 1fr);
-  grid-template-areas:
-    "universe map chart chart"
-    "parameters map chart chart";
+  grid-template-columns: minmax(52rem, 4fr) minmax(20rem, 3fr);
   gap: 1rem;
   min-height: 0;
 }
 
-.galaxy > .panel {
+.galaxy__column {
   display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.galaxy__column > .panel {
+  display: flex;
+  flex: none;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 1rem;
 }
 
-.galaxy__universe {
-  grid-area: universe;
-}
-
-.galaxy__parameters {
-  grid-area: parameters;
-}
-
-.galaxy__map {
-  grid-area: map;
-}
-
-.galaxy__chart {
-  grid-area: chart;
+/* A panel that takes what its column leaves: the pages, the local chart, UNIVERSE shown whole. */
+.galaxy__column > .galaxy__pages,
+.galaxy__column > .galaxy__chart,
+.galaxy__column > .galaxy__universe:not(.universe-panel--folded) {
+  flex: 1 1 auto;
 }
 
 .galaxy .panel__title {
@@ -404,6 +399,17 @@ body {
   outline-offset: 1px;
 }
 
+/* Held back: kept focusable so that it can say why, its text muted and the pointer refused. */
+.control[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.control[aria-disabled="true"]:hover,
+.control[aria-disabled="true"]:active {
+  background: none;
+}
+
 /* The rows of a scrolling list that are in view, and its total: 12-24 of 87. */
 .list-position {
   margin: 0.25rem 0 0;
@@ -456,7 +462,92 @@ body {
   background: var(--surface-1);
 }
 
-/* The UNIVERSE panel. Its readout puts the name and generator version on one line. */
+/*
+ * The UNIVERSE panel. Its title is the control that shows it whole or folds it to one line, the
+ * open universe's name, seed and generator version beside the title: a header, so its padding is
+ * the least that keeps the control's 2rem target clear of the border.
+ */
+.universe-panel--folded {
+  padding-block: 0.25rem;
+}
+
+.universe-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0 1.5rem;
+  min-width: 0;
+  min-height: 2rem;
+}
+
+.universe-panel__title {
+  flex: none;
+}
+
+/* Upper case as every panel title is; the text stays mixed case for the accessible name. */
+.universe-panel__title .control {
+  text-transform: inherit;
+}
+
+.universe-panel--folded .universe-panel__title,
+.universe-panel--folded .universe-summary {
+  margin: 0;
+}
+
+.universe-panel__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.universe-panel__body[hidden] {
+  display: none;
+}
+
+/* The open universe on one line: name, seed and generator version, labels before values. */
+.universe-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0 1.5rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.universe-summary__item {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+/* The name gives way first, to an ellipsis, since the seed and version identify the universe. */
+.universe-summary__item--name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.universe-summary dt {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.universe-summary dd {
+  margin: 0;
+}
+
+.universe-summary__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.universe-summary__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Its readout puts the name and generator version on one line. */
 .universe-panel__readout {
   grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
   gap: 0.125rem 0.75rem;
@@ -479,22 +570,15 @@ body {
 }
 
 /*
- * A list, so it may scroll; the panel shows its position and total beneath it. It shows its header
- * and up to three rows, one in a short window, and when the column is shorter still it gives way to
- * the parameters below, down to its header and half a row, rather than let the panel clip CREATE.
+ * A list, so it may scroll; the panel shows its position and total beneath it. Shown whole, the
+ * panel has its column, and the list takes what the rest leaves, down to its header and half a row
+ * (4.5rem), rather than let the panel clip CREATE.
  */
 .universe-panel__list {
   flex: 0 1 auto;
   min-height: 4.5rem;
-  max-height: 13.25rem;
   margin-top: 0.5rem;
   overflow-y: auto;
-}
-
-@media (max-height: 50rem) {
-  .universe-panel__list {
-    max-height: 6.25rem;
-  }
 }
 
 /*
@@ -756,6 +840,12 @@ body {
   accent-color: var(--accent);
 }
 
+/* Held back while the link is down: its text muted and the pointer refused, as a held-back command's. */
+.form-choice__option:has(input[aria-disabled="true"]) {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
 .form-choice__option input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -844,4 +934,438 @@ body {
   grid-row: 2;
   color: var(--text-muted);
   letter-spacing: 0.1em;
+}
+
+/*
+ * The PARAMETERS and GALAXY MAP pages, sharing a panel. The page selector is the panel's title, at
+ * its top left; the map's pictures run from the panel's top beside it, so the map page spans the
+ * selector's row and keeps its first 2.5rem of words clear of the selector, which stands above it.
+ */
+.galaxy__column > .galaxy-pages {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.galaxy__column > .galaxy-pages[hidden] {
+  display: none;
+}
+
+.galaxy-pages__tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: start;
+  gap: 0.25rem;
+}
+
+/*
+ * A page's name: a display control, so no --line-strong outline. The chosen page's name is --accent
+ * over a 2px --accent rule, a shape as well as a colour, as the active display tab's rule is.
+ */
+.galaxy-pages__tab {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0 0.75rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.galaxy-pages__tab:first-child {
+  padding-left: 0;
+}
+
+.galaxy-pages__tab:hover {
+  background: var(--surface-2);
+}
+
+.galaxy-pages__tab:active {
+  background: var(--surface-0);
+}
+
+.galaxy-pages__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.galaxy-pages__tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+.galaxy-pages__page {
+  min-width: 0;
+  min-height: 0;
+}
+
+.galaxy-pages__page[hidden] {
+  display: none;
+}
+
+.galaxy-pages__page--parameters {
+  display: flex;
+  grid-area: 2 / 1;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+.galaxy-pages__page--parameters > .parameters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.galaxy-pages__page--map {
+  grid-area: 1 / 1 / 3 / 2;
+}
+
+/* The GALAXY MAP page, measured for the size of its pictures. */
+.galaxy-map {
+  height: 100%;
+  min-height: 0;
+}
+
+.galaxy-map__empty {
+  padding-top: 2.5rem;
+}
+
+/*
+ * The words beside the pictures, then the gutter for the vertical axes' labels, the pictures, and
+ * the gutter for the horizontal axes' labels. Face-on above edge-on, 0.5rem apart: the face-on
+ * picture spans the page's controls and its own words, the edge-on picture its words. The
+ * pictures' width, --map-picture, is the page's to set (GalaxyMapPanel.tsx, which restates these
+ * widths), even, and as large as the page allows.
+ */
+.galaxy-map__grid {
+  display: grid;
+  grid-template-columns: minmax(24rem, 1fr) 3.75rem var(--map-picture) 1.75rem;
+  grid-template-rows: auto minmax(0, 1fr) 0.5rem calc(var(--map-picture) / 2);
+  height: calc(var(--map-picture) * 1.5 + 0.5rem);
+  font-size: 0.875rem;
+}
+
+/* Above the face-on view's box, which spans this row too, so that its controls take the pointer. */
+.galaxy-map__controls {
+  position: relative;
+  z-index: 1;
+  grid-area: 1 / 1;
+  padding: 2.5rem 0 0.5rem;
+}
+
+.galaxy-map__population {
+  margin-bottom: 0.25rem;
+}
+
+/* The frame and the scale, which the two pictures share. */
+.galaxy-map__furniture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.25rem 1.5rem;
+  min-height: 1.5rem;
+}
+
+/*
+ * One view of the galaxy map: its words in the first column, its picture in the third, each laid on
+ * the page's columns.
+ */
+.galaxy-map__grid > .map-view {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  grid-template-rows: subgrid;
+  min-height: 0;
+}
+
+.galaxy-map__grid > .map-view--face_on {
+  grid-row: 1 / 3;
+}
+
+.galaxy-map__grid > .map-view--edge_on {
+  grid-row: 4;
+}
+
+.map-view__side {
+  display: flex;
+  grid-column: 1;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.map-view--face_on > .map-view__side {
+  grid-row: 2;
+}
+
+.map-view--edge_on > .map-view__side {
+  grid-row: 1;
+}
+
+.map-view__area {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  min-width: 0;
+}
+
+.map-view__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 1rem;
+}
+
+/* A sub-heading within a panel, as a parameter group's title is. */
+.map-view__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+.map-view__rotation,
+.map-view__hint {
+  margin: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.map-view__unit {
+  color: var(--text-muted);
+}
+
+/* Room for the longest reading, 4.89E-10, so that the unit never moves as the cursor does. */
+.map-view__density {
+  display: inline-block;
+  min-width: 8ch;
+  text-align: right;
+}
+
+/* The picture, at the width the page gives both, in its view's proportions. */
+.map-view__picture {
+  position: relative;
+  width: var(--map-picture);
+  outline: 1px solid var(--line);
+}
+
+.map-view--face_on .map-view__picture {
+  height: var(--map-picture);
+}
+
+.map-view--edge_on .map-view__picture {
+  height: calc(var(--map-picture) / 2);
+}
+
+/*
+ * Any rescaling the browser does, at a fractional device pixel ratio, repeats pixels, never blends.
+ * A pointer picks a point on it, so it takes the crosshair pointer.
+ */
+.map-view__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--surface-0);
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+.map-view__canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * A mark over a map, centred on its point and clear of the pointer: the cursor's cross in --accent
+ * and the chart centre's brackets in --text. The ramp runs up to --text, over which either colour
+ * falls below 6:1, so each stroke is cased in --surface-0 (10.4:1 against --accent, 13.6:1 against
+ * --text): a solid edge, not a glow.
+ */
+.map-view__mark {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  overflow: visible;
+  transform: translate(-50%, -50%);
+  fill: none;
+  pointer-events: none;
+}
+
+.map-view__mark path {
+  vector-effect: non-scaling-stroke;
+}
+
+.map-view__mark-casing {
+  stroke: var(--surface-0);
+  stroke-width: 3.5px;
+}
+
+.map-view__mark-line {
+  stroke-width: 1.5px;
+}
+
+.map-view__mark--cursor .map-view__mark-line {
+  stroke: var(--accent);
+}
+
+.map-view__mark--centre .map-view__mark-line {
+  stroke: var(--text);
+}
+
+/* A mark pegged to the picture's edge: the arrow beside it says which way its point lies. */
+.map-view__peg {
+  position: absolute;
+  padding-left: 1rem;
+  transform: translateY(-50%);
+  color: var(--text);
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* An axis label, outside the picture at the end of its axis, in a gutter of its own. */
+.map-view__axis {
+  position: absolute;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* The vertical axis's label beside its end: +Z NORTH at the top, on two lines, +X at the bottom. */
+.map-view__axis--top,
+.map-view__axis--bottom {
+  right: 100%;
+  width: 3.75rem;
+  padding-right: 0.25rem;
+  text-align: right;
+  white-space: normal;
+}
+
+.map-view__axis--top {
+  top: 0;
+}
+
+.map-view__axis--bottom {
+  bottom: 0;
+}
+
+.map-view__axis--across {
+  top: 50%;
+  left: 100%;
+  padding-left: 0.25rem;
+  transform: translateY(-50%);
+}
+
+/* A 1-2-5 length: a bar with end ticks, and the length it stands for. */
+.scale-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.scale-bar__bar {
+  height: 0.5rem;
+  border: 1px solid var(--text);
+  border-top: 0;
+}
+
+.scale-bar__label {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The CURSOR panel: the cursor's coordinates to enter, CENTRE CHART, and its GALACTIC reading. */
+.centre-entry {
+  font-size: 0.875rem;
+}
+
+.centre-entry__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.galaxy .centre-entry__head > .panel__title {
+  margin: 0;
+}
+
+.centre-entry__head > .control {
+  margin-left: auto;
+}
+
+.centre-entry__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.centre-entry__field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Room for the longest entry, -65,535.9999, in the field's own monospaced figures. */
+.centre-entry__input {
+  width: calc(12ch + 1rem + 2px);
+}
+
+.centre-entry__unit {
+  color: var(--text-muted);
+}
+
+/* A control's single-key binding, shown on it as the guide asks. */
+.control__key {
+  font-family: var(--font-mono);
+}
+
+.cursor-readout__values {
+  grid-template-columns: repeat(2, max-content max-content);
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.cursor-readout__values dd {
+  white-space: nowrap;
+}
+
+/*
+ * A value right-aligned in room for the longest, -65,536.0, and its unit in a slot of its own, so
+ * that decimal points line up down each column, the degree sign's too.
+ */
+.cursor-readout__value {
+  display: inline-block;
+  min-width: 9ch;
+  text-align: right;
+}
+
+.cursor-readout__unit {
+  display: inline-block;
+  min-width: 1.25rem;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/* Text for assistive technology alone, such as the cursor's position announced as a whole. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

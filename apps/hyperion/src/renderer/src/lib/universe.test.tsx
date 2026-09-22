@@ -261,6 +261,80 @@ describe("useUniverseSession", () => {
     expect(result.current.command).toEqual({ kind: "idle" });
   });
 
+  it("reports a create cut off by the link as unconfirmed until it is dismissed", async () => {
+    vi.useFakeTimers();
+    const { result, socket } = renderSession();
+    act(() => {
+      result.current.create("SURVEY 2", null);
+    });
+    await server(() => {
+      socket.close();
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    act(() => {
+      FakeWebSocket.latest().serverWelcomes();
+    });
+    // The server may have made the universe; the refreshed list says whether it did.
+    expect(result.current.createUnconfirmed).toBe(true);
+
+    act(() => {
+      result.current.dismissUnconfirmed();
+    });
+
+    expect(result.current.createUnconfirmed).toBe(false);
+  });
+
+  it("clears an unconfirmed create once a universe is opened from the list", async () => {
+    vi.useFakeTimers();
+    const { result, socket } = renderSession();
+    act(() => {
+      result.current.create("SURVEY 2", null);
+    });
+    await server(() => {
+      socket.close();
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const reconnected = FakeWebSocket.latest();
+    act(() => {
+      reconnected.serverWelcomes();
+    });
+    act(() => {
+      result.current.openUniverse(aUniverse().id);
+    });
+    expect(result.current.createUnconfirmed).toBe(true);
+
+    await server(() => {
+      reconnected.serverAnswers("open_universe", () => anOpenedUniverse());
+    });
+
+    expect(result.current.createUnconfirmed).toBe(false);
+  });
+
+  it("does not report an open cut off by the link as an unconfirmed create", async () => {
+    vi.useFakeTimers();
+    const { result, socket } = renderSession();
+    act(() => {
+      result.current.openUniverse(aUniverse().id);
+    });
+
+    await server(() => {
+      socket.close();
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    act(() => {
+      FakeWebSocket.latest().serverWelcomes();
+    });
+
+    expect(result.current.command).toEqual({ kind: "idle" });
+    expect(result.current.createUnconfirmed).toBe(false);
+  });
+
   it("keeps its identity while nothing changes", () => {
     const { result, rerender } = renderSession();
     const before = result.current;

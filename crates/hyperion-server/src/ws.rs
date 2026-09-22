@@ -2,16 +2,19 @@
 //!
 //! The connection task owns everything about its socket (plan 04, design note 22). It reads the
 //! client's frames, answers `hello` and `ping` itself, and runs each request as a task in a
-//! [`JoinSet`](tokio::task::JoinSet) through [`Requests`], waiting on frames, finished requests
-//! and the server's shutdown in one `select!`. A writer task, owned and joined by the connection
-//! task, sends what the connection queues for it through a bounded channel of
-//! [`OUTBOUND_QUEUE_FRAMES`]; when the client reads too slowly and the queue fills, the connection
-//! stops reading until it drains. Closing the connection, for whatever reason, cancels every
-//! request it has in flight.
+//! [`JoinSet`](tokio::task::JoinSet) through [`Requests`], waiting on frames, finished requests,
+//! room in its outbound queue, its writer and the server's shutdown in one `select!`. A writer
+//! task, owned and joined by the connection task, sends what the connection queues for it
+//! ([`outbound`](crate::outbound)). When the client reads too slowly, the queue's byte budget
+//! holds finished requests back while the connection reads on, and a full count of queued frames
+//! stops it reading until the queue drains; a frame not written within the write timeout closes
+//! the connection with a policy violation. Closing the connection, for whatever reason, cancels
+//! every request it has in flight.
 
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Extension;
 use axum::extract::State;
@@ -19,10 +22,9 @@ use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade, close_code};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
+use futures_util::stream::SplitStream;
 use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, ServerMessage};
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::Instrument;
@@ -30,9 +32,36 @@ use tracing::Instrument;
 use crate::AppState;
 use crate::connections::{Closing, ConnectionGuard};
 use crate::limits::{
-    CLOSE_TIMEOUT, MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES, OUTBOUND_QUEUE_FRAMES,
+    CLOSE_TIMEOUT, MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES, OUTBOUND_BYTES,
+    WRITE_TIMEOUT,
 };
+use crate::outbound::{self, Held, Outbound, WriterStopped};
 use crate::requests::{self, Handshake, Inbound, Requests, Tally, to_frame};
+
+/// The limits a connection enforces on writing to its client.
+///
+/// The server's are those of [`limits`](crate::limits), which [`ConnectionLimits::default`]
+/// gives; unit tests shorten them, so that a slow reader's test need not wait out
+/// [`WRITE_TIMEOUT`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ConnectionLimits {
+    /// Payload bytes the outbound queue holds before finished requests are held back.
+    pub(crate) outbound_bytes: usize,
+    /// Longest one frame may take to be written.
+    pub(crate) write_timeout: Duration,
+    /// Longest a closing connection may take to send what it has queued and finish closing.
+    pub(crate) close_timeout: Duration,
+}
+
+impl Default for ConnectionLimits {
+    fn default() -> Self {
+        Self {
+            outbound_bytes: OUTBOUND_BYTES,
+            write_timeout: WRITE_TIMEOUT,
+            close_timeout: CLOSE_TIMEOUT,
+        }
+    }
+}
 
 /// Accepts a WebSocket, unless the server is shutting down. A client message or frame above
 /// [`MAX_INBOUND_FRAME_BYTES`] fails the read, which ends the connection.
@@ -92,6 +121,8 @@ enum End {
     ReadFailed(axum::Error),
     /// The writer stopped, because writing to the socket failed.
     WriterGone,
+    /// A frame could not be written within the write timeout: the client has stopped reading.
+    WriteTimedOut,
     /// [`MAX_CONSECUTIVE_MALFORMED_FRAMES`] arrived in a row.
     TooManyMalformed,
     /// The server is shutting down.
@@ -106,11 +137,24 @@ impl End {
                 code: close_code::POLICY,
                 reason: Utf8Bytes::from_static("too many malformed frames"),
             }),
+            Self::WriteTimedOut => Some(CloseFrame {
+                code: close_code::POLICY,
+                reason: Utf8Bytes::from_static("the client is not reading"),
+            }),
             Self::ShuttingDown => Some(CloseFrame {
                 code: close_code::AWAY,
                 reason: Utf8Bytes::from_static("the server is shutting down"),
             }),
             Self::ClientClosed | Self::ReadFailed(_) | Self::WriterGone => None,
+        }
+    }
+}
+
+impl From<WriterStopped> for End {
+    fn from(stopped: WriterStopped) -> Self {
+        match stopped {
+            WriterStopped::Failed => Self::WriterGone,
+            WriterStopped::TimedOut => Self::WriteTimedOut,
         }
     }
 }
@@ -121,6 +165,7 @@ impl fmt::Display for End {
             Self::ClientClosed => f.write_str("closed by the client"),
             Self::ReadFailed(error) => write!(f, "reading failed: {error}"),
             Self::WriterGone => f.write_str("writing failed"),
+            Self::WriteTimedOut => f.write_str("a frame was not written in time"),
             Self::TooManyMalformed => f.write_str("too many malformed frames"),
             Self::ShuttingDown => f.write_str("the server is shutting down"),
         }
@@ -129,6 +174,8 @@ impl fmt::Display for End {
 
 /// What woke the connection.
 enum Event {
+    /// The oldest held request's frame fits the outbound queue now.
+    Room,
     Finished(Result<(tokio::task::Id, requests::Finished), tokio::task::JoinError>),
     Frame(Option<Result<Message, axum::Error>>),
 }
@@ -136,7 +183,9 @@ enum Event {
 /// The reading side of a connection and everything it owns.
 struct Connection {
     requests: Requests,
-    outbound: mpsc::Sender<Message>,
+    outbound: Outbound,
+    /// Finished requests waiting for room in `outbound`.
+    held: Held,
     closing: Closing,
     handshake: Handshake,
     malformed_in_a_row: u32,
@@ -146,25 +195,37 @@ impl Connection {
     /// Runs a connection from its upgrade to its close.
     async fn run(socket: WebSocket, state: Arc<AppState>, closing: Closing) {
         tracing::info!("client connected");
+        let limits = state.connection_limits;
         let (sink, mut stream) = socket.split();
-        let (outbound, queue) = mpsc::channel(OUTBOUND_QUEUE_FRAMES);
-        let mut writer = tokio::spawn(write(sink, queue).in_current_span());
+        let (outbound, writer) = outbound::open(
+            state.outbound_stats.clone(),
+            limits.outbound_bytes,
+            limits.write_timeout,
+        );
+        let mut writer = tokio::spawn(writer.run(sink).in_current_span());
         let mut connection = Self {
-            requests: Requests::new(state),
+            requests: Requests::new(Arc::clone(&state)),
             outbound,
+            held: Held::new(state.outbound_stats.clone()),
             closing,
             handshake: Handshake::Pending,
             malformed_in_a_row: 0,
         };
         let end = connection.read(&mut stream).await;
+        if matches!(end, End::WriteTimedOut) {
+            state.outbound_stats.write_timed_out();
+        }
         let Self {
             mut requests,
             outbound,
+            held,
             ..
         } = connection;
+        // Held requests are still in flight, and are abandoned with the rest.
+        drop(held);
         requests.close().await;
         let closed = timeout(
-            CLOSE_TIMEOUT,
+            limits.close_timeout,
             close(end.close_frame(), outbound, &mut stream, &mut writer),
         )
         .await;
@@ -187,18 +248,42 @@ impl Connection {
     /// Reads and answers frames until the connection ends, and says why it did.
     async fn read(&mut self, stream: &mut SplitStream<WebSocket>) -> End {
         loop {
+            let next_held = self.held.next_len();
+            let room = self.outbound.room_for(next_held.unwrap_or_default());
             let event = tokio::select! {
                 biased;
                 () = self.closing.wait() => return End::ShuttingDown,
-                // Finished requests first, so that their places are free before more are read.
+                stopped = self.outbound.writer_stopped() => return End::from(stopped),
+                // Finished requests first, so that their places are free before more are read,
+                // as long as the queue has room for them. Frames are read on regardless, so that
+                // `ping` and `cancel` are answered while it has none.
+                () = room, if next_held.is_some() => Event::Room,
                 Some(joined) = self.requests.join_next(), if self.requests.has_tasks() => {
                     Event::Finished(joined)
                 }
                 frame = stream.next() => Event::Frame(frame),
             };
             let handled = match event {
-                Event::Finished(joined) => match self.requests.finish(joined) {
+                Event::Room => match self.held.pop().and_then(|held| self.requests.end(held)) {
                     Some(frame) => self.push(Message::Text(frame.into())).await,
+                    None => Ok(()),
+                },
+                Event::Finished(joined) => match self.requests.settle(joined) {
+                    // Queued at once only if nothing is held before it, so that terminal frames
+                    // are queued in the order their requests finished.
+                    Some(settled)
+                        if self.held.is_empty()
+                            && self.outbound.has_room_for(settled.frame_len()) =>
+                    {
+                        match self.requests.end(settled) {
+                            Some(frame) => self.push(Message::Text(frame.into())).await,
+                            None => Ok(()),
+                        }
+                    }
+                    Some(settled) => {
+                        self.held.push(settled);
+                        Ok(())
+                    }
                     None => Ok(()),
                 },
                 Event::Frame(None | Some(Ok(Message::Close(_)))) => Err(End::ClientClosed),
@@ -264,12 +349,18 @@ impl Connection {
             }
             ClientMessage::Ping { nonce } => Some(to_frame(&ServerMessage::Pong { nonce })),
             ClientMessage::Request { id, body } => self.requests.submit(id, body, self.handshake),
-            ClientMessage::Cancel { id } => self.requests.cancel(id),
+            ClientMessage::Cancel { id } => {
+                let cancelled = self.requests.cancel(id);
+                // A held frame of the request just cancelled is dropped: `cancelled` ended it.
+                self.held
+                    .retain(|settled| self.requests.is_in_flight(settled));
+                cancelled
+            }
         }
     }
 
-    /// Queues a frame for the writer, waiting while the queue is full, unless the server starts
-    /// shutting down meanwhile.
+    /// Queues a frame for the writer, waiting while the queue holds its full count of frames,
+    /// unless the server starts shutting down meanwhile.
     async fn push(&mut self, message: Message) -> Result<(), End> {
         tokio::select! {
             biased;
@@ -287,7 +378,7 @@ impl Connection {
 /// lose the close frame on its way to the client.
 async fn close(
     frame: Option<CloseFrame>,
-    outbound: mpsc::Sender<Message>,
+    outbound: Outbound,
     stream: &mut SplitStream<WebSocket>,
     writer: &mut JoinHandle<()>,
 ) -> Result<(), tokio::task::JoinError> {
@@ -305,29 +396,17 @@ async fn close(
     writer.await
 }
 
-/// The writer task: sends queued frames in order until the queue closes, then completes the
-/// close handshake.
-async fn write(mut sink: SplitSink<WebSocket, Message>, mut queue: mpsc::Receiver<Message>) {
-    while let Some(message) = queue.recv().await {
-        if let Err(error) = sink.send(message).await {
-            tracing::debug!(%error, "failed to write to the client");
-            return;
-        }
-    }
-    // Answers the client's close frame, or sends ours, and flushes.
-    if let Err(error) = sink.close().await {
-        tracing::debug!(%error, "failed to close the socket");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use hyperion_protocol::{ErrorCode, RequestId};
 
     use super::*;
+    use crate::limits::OUTBOUND_QUEUE_FRAMES;
     use crate::testing::{
-        Call, Calls, Client, Harness, Scripted, body, bulky_response, small_response,
+        CLOGGING_BYTES, Call, Calls, Client, Harness, Scripted, body, bulky_response,
+        small_response,
     };
+    use crate::{Server, ServerConfig};
 
     #[test]
     fn hello_is_welcomed_with_both_versions() {
@@ -339,6 +418,23 @@ mod tests {
                 generator_version: hyperion_sim::GENERATOR_VERSION.get(),
             }
         );
+    }
+
+    #[tokio::test]
+    async fn the_server_holds_its_connections_to_the_limits_of_the_limits_module() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let server = Server::start(ServerConfig::builder().data_dir(data_dir.path()).build())
+            .await
+            .unwrap();
+        assert_eq!(
+            server.state().connection_limits,
+            ConnectionLimits {
+                outbound_bytes: OUTBOUND_BYTES,
+                write_timeout: WRITE_TIMEOUT,
+                close_timeout: CLOSE_TIMEOUT,
+            }
+        );
+        server.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -561,11 +657,6 @@ mod tests {
         assert_eq!(client.closed().await, Some(close_code::AWAY));
     }
 
-    /// A response larger than a slow reader's socket and the server's send buffer hold together:
-    /// Linux grows a send buffer to 4 MiB at most by default, and the slow reader's receive
-    /// buffer does not grow.
-    const CLOGGING_BYTES: usize = 8 << 20;
-
     /// Duplicates of an ID in flight sent behind the clogging response: twice what the outbound
     /// queue holds. Each is refused with the connection-level `error`, and counted as refused, as
     /// the connection reads it.
@@ -583,13 +674,9 @@ mod tests {
     /// duplicates, with its queue full. Returns request 2's call.
     async fn clog(harness: &Harness, calls: &mut Calls, client: &mut Client) -> Call {
         client.hello().await;
-        client.request(1, body(1)).await;
-        assert!(calls.next().await.respond(bulky_response(CLOGGING_BYTES)));
-        // Counted just before the response is queued, so every refusal is queued behind it,
-        // where the writer, stuck on it, takes none of them.
-        harness
-            .requests_until(|counters| counters.responded() == 1)
-            .await;
+        // Every refusal is queued behind the response, where the writer, stuck on it, takes none
+        // of them.
+        harness.stick_writer(calls, client, 1).await;
         client.request(2, body(2)).await;
         let second = calls.next().await;
         assert_eq!(second.id(), 2);

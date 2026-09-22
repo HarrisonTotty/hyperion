@@ -1292,7 +1292,11 @@ component order and the map's quadrature scheme belong to the version as well.
     cube's top. The young disc is subnormal far above the plane (from 12,000–24,000 ly) and the
     youngest sub-disc near the cube's top in some galaxies, where the relative margin rounds to at
     most one unit in the last place, so `assert_envelopes_bounded` allows a subnormal corner its
-    margin plus one rounding; the nuclear disc no longer gets there. HUNT_RESULTS
+    margin plus one rounding; the nuclear disc no longer gets there. The builder galaxy with the
+    densest centre takes the new halo ranges' ends (slopes 2.8, the break at 52,000 ly steepening
+    by 2.5). T8's slow tests pass: 1.88 million cells in the hunt, zero violations, the worst
+    density ÷ bound 1 − 9 × 10⁻¹³ for normal envelopes and 1 to twelve places where the young disc
+    or the bar is subnormal; 213 s on the loaded machine.
   - _Halo (T5.a, T5.c, T7.d)._ Inner slopes 2.2–2.8, the dominant break 52,000–91,000 ly and its
     steepening 1.5–2.5 (tags and word counts unchanged); the fixture 2.5, 58,700 ly, 2.0. Its
     spherically averaged slope from 20,000 to 60,000 ly is −2.973, 0.03 inside the bracket, the

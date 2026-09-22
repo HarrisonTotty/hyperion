@@ -14,6 +14,7 @@ pub mod compute;
 pub mod config;
 mod connections;
 pub mod limits;
+mod outbound;
 mod requests;
 mod stats;
 #[cfg(test)]
@@ -33,10 +34,11 @@ use crate::compute::{CpuPool, ShutDownPoolError, StartPoolError};
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
-use crate::stats::RequestStats;
+use crate::stats::{OutboundStats, RequestStats};
+use crate::ws::ConnectionLimits;
 
 pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder};
-pub use stats::{RequestCounters, ServerStats};
+pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
 /// Address the server listens on when neither `--address` and `--port` nor their variables are
 /// given.
@@ -65,6 +67,10 @@ pub(crate) struct AppState {
     pub(crate) connections: Connections,
     /// Requests in flight and how requests have ended.
     pub(crate) request_stats: RequestStats,
+    /// What the connections' outbound queues hold, and the connections closed for not reading.
+    pub(crate) outbound_stats: OutboundStats,
+    /// The limits each connection enforces on writing to its client.
+    pub(crate) connection_limits: ConnectionLimits,
 }
 
 impl Server {
@@ -78,13 +84,15 @@ impl Server {
     /// [`StartServerError`] if the data directory is not a directory or cannot be inspected, if
     /// the CPU pool cannot start, or if start-up is interrupted by the runtime shutting down.
     pub async fn start(config: ServerConfig) -> Result<Self, StartServerError> {
-        Self::start_with_handler(config, Arc::new(Handlers)).await
+        Self::start_with_handler(config, Arc::new(Handlers), ConnectionLimits::default()).await
     }
 
-    /// [`Server::start`], with `handler` answering every request.
+    /// [`Server::start`], with `handler` answering every request and each connection held to
+    /// `connection_limits`.
     pub(crate) async fn start_with_handler(
         config: ServerConfig,
         handler: Arc<dyn Handler>,
+        connection_limits: ConnectionLimits,
     ) -> Result<Self, StartServerError> {
         let data_dir = config.data_dir().to_path_buf();
         tokio::task::spawn_blocking(move || check_data_dir(&data_dir))
@@ -107,6 +115,8 @@ impl Server {
                 handler,
                 connections: Connections::new(),
                 request_stats: RequestStats::new(),
+                outbound_stats: OutboundStats::new(),
+                connection_limits,
             }),
         })
     }
@@ -125,6 +135,7 @@ impl Server {
         ServerStats::new(
             self.state.connections.open_count(),
             self.state.request_stats.snapshot(),
+            self.state.outbound_stats.snapshot(),
             self.state.pool.counters(),
         )
     }

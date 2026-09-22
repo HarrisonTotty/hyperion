@@ -1,5 +1,6 @@
 import { formatNumber, formatSci } from "../../lib/format";
 import { rampColour, RAMP_LEVELS } from "../../lib/galaxy/ramp";
+import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 
 interface DensityLegendProps {
   /** The ramp the map is painted with, from `buildRamp`, so the legend matches the picture. */
@@ -15,6 +16,8 @@ const BAR_WIDTH = 320;
 const SEGMENT_WIDTH = BAR_WIDTH / SEGMENTS;
 const BAR_HEIGHT = 12;
 const TICK_BOTTOM = 16;
+/** Where an unlabelled decade's shorter tick ends. */
+const MINOR_TICK_BOTTOM = 14;
 // A decade within this of the floor or the ceiling still gets its tick, despite rounding.
 const DECADE_TOLERANCE = 1e-9;
 
@@ -32,6 +35,39 @@ function wholeDecades(floor: number, ceiling: number): number[] {
   return decades;
 }
 
+/** B612 Mono's advance, the same for every character, in em (the bundled font's `hmtx`). */
+const MONO_ADVANCE_EM = 0.65;
+/** The tick labels' size, as `styles.css` sets it on the legend. */
+const LABEL_FONT_REM = 0.875;
+/** The least space between two tick labels. */
+const LABEL_GAP_REM = 0.5;
+
+/**
+ * Every how many decades a tick is labelled: 1 unless the labels would run together on the bar
+ * as laid out, as the edge-on map's seven decades do in a narrow column.
+ *
+ * @param ticksWidth - The measured width of the row the labels stand in, the bar's width; `null`
+ *   before it is measured, when every decade is labelled.
+ */
+function labelEvery(
+  ticksWidth: ElementSize | null,
+  spanLog10: number,
+  labels: ReadonlyArray<string>,
+): number {
+  if (ticksWidth === null || !(ticksWidth.widthPx > 0) || !(spanLog10 > 0)) {
+    return 1;
+  }
+  const widestChars = Math.max(0, ...labels.map((label) => label.length));
+  const labelPx =
+    (widestChars * MONO_ADVANCE_EM * LABEL_FONT_REM + LABEL_GAP_REM) * ticksWidth.remPx;
+  const decadePx = ticksWidth.widthPx / spanLog10;
+  return Math.max(1, Math.ceil(labelPx / decadePx));
+}
+
+function isMultipleOf(decade: number, step: number): boolean {
+  return ((decade % step) + step) % step === 0;
+}
+
 function tenToThe(log10: number): string {
   return `ten to the power ${formatNumber(log10, 1)}`;
 }
@@ -44,13 +80,20 @@ function tenToThe(log10: number): string {
  * Follows the raster rules under "Graphs, schematics and spatial displays" in
  * `docs/frontend/ux-guidelines.md`. The bar is 32 steps of the picture's own ramp; its accessible
  * name gives the range and unit in words. Tick labels are in E notation (`1E-4`), since B612 has
- * no superscript minus.
+ * no superscript minus. Every decade has a tick; where the bar is too narrow for a label at each,
+ * only the decades at a multiple of every second (or third) are labelled, with longer ticks.
  */
 export function DensityLegend({ ramp, floorLog10PerLy2, ceilingLog10PerLy2 }: DensityLegendProps) {
+  const { ref: ticksRef, size: ticksWidth } = useElementSize();
   const spanLog10 = ceilingLog10PerLy2 - floorLog10PerLy2;
   // A map with no systems has floor and ceiling equal (plan 04, design note 12).
   const empty = !(spanLog10 > 0);
   const decades = empty ? [] : wholeDecades(floorLog10PerLy2, ceilingLog10PerLy2);
+  const labels = new Map(decades.map((decade) => [decade, formatSci(10 ** decade, "tick")]));
+  const step = labelEvery(ticksWidth, spanLog10, [...labels.values()]);
+  // Decades at a multiple of the step read best (1E-6, 1E-4, …); failing any, the first decade.
+  const anchor = decades.find((decade) => isMultipleOf(decade, step)) ?? decades[0] ?? 0;
+  const labelled = (decade: number): boolean => isMultipleOf(decade - anchor, step);
   const position = (log10: number): number => (log10 - floorLog10PerLy2) / spanLog10;
   const name = empty
     ? "Column density legend, log scale: no systems in the map"
@@ -90,21 +133,21 @@ export function DensityLegend({ ramp, floorLog10PerLy2, ceilingLog10PerLy2 }: De
               x1={position(decade) * BAR_WIDTH}
               x2={position(decade) * BAR_WIDTH}
               y1={BAR_HEIGHT}
-              y2={TICK_BOTTOM}
+              y2={labelled(decade) ? TICK_BOTTOM : MINOR_TICK_BOTTOM}
               stroke="currentColor"
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
             />
           ))}
         </svg>
-        <div className="density-legend__ticks" aria-hidden="true">
-          {decades.map((decade) => (
+        <div className="density-legend__ticks" ref={ticksRef} aria-hidden="true">
+          {decades.filter(labelled).map((decade) => (
             <span
               key={decade}
               className="density-legend__tick"
               style={{ left: `${position(decade) * 100}%` }}
             >
-              {formatSci(10 ** decade, "tick")}
+              {labels.get(decade)}
             </span>
           ))}
         </div>

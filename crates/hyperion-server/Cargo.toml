@@ -25,8 +25,9 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-# `process` for running the binary in the command-line tests.
-tokio = { workspace = true, features = ["process", "time"] }
+# `process` for running the binary in the command-line tests; `test-util` for the paused clock of
+# the writer's timeout tests.
+tokio = { workspace = true, features = ["process", "test-util", "time"] }
 tokio-tungstenite.workspace = true
 serde_json.workspace = true
 

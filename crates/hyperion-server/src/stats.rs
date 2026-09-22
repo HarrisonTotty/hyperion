@@ -2,8 +2,8 @@
 //!
 //! [`Server::stats`](crate::Server::stats) takes a [`ServerStats`] snapshot. Integration tests read
 //! these counters instead of guessing at timing: a test waits until a counter says a request has
-//! ended rather than sleeping until it probably has. The caches add their own counters to the
-//! snapshot as they join the server's state (plan 04, P04.T14).
+//! ended, or a queue has filled, rather than sleeping until it probably has. The caches add their
+//! own counters to the snapshot as they join the server's state (plan 04, P04.T14).
 
 use tokio::sync::watch;
 
@@ -14,14 +14,21 @@ use crate::compute::PoolCounters;
 pub struct ServerStats {
     connections: usize,
     requests: RequestCounters,
+    outbound: OutboundCounters,
     pool: PoolCounters,
 }
 
 impl ServerStats {
-    pub(crate) fn new(connections: usize, requests: RequestCounters, pool: PoolCounters) -> Self {
+    pub(crate) fn new(
+        connections: usize,
+        requests: RequestCounters,
+        outbound: OutboundCounters,
+        pool: PoolCounters,
+    ) -> Self {
         Self {
             connections,
             requests,
+            outbound,
             pool,
         }
     }
@@ -36,6 +43,13 @@ impl ServerStats {
     #[must_use]
     pub fn requests(&self) -> RequestCounters {
         self.requests
+    }
+
+    /// What the connections' outbound queues hold now, and the connections closed because their
+    /// clients stopped reading.
+    #[must_use]
+    pub fn outbound(&self) -> OutboundCounters {
+        self.outbound
     }
 
     /// The CPU pool's queue depths and the jobs it has run.
@@ -170,6 +184,119 @@ impl RequestStats {
     }
 }
 
+/// What the connections' outbound queues hold, over every connection (plan 04, P04.T15).
+///
+/// The queue of a connection holds the frames waiting for its socket, each counted in payload
+/// bytes from the moment it is queued until it has been written. When a client reads too slowly
+/// the queue reaches [`OUTBOUND_BYTES`](crate::limits::OUTBOUND_BYTES) and the connection holds
+/// back its finished requests; when a frame waits longer than
+/// [`WRITE_TIMEOUT`](crate::limits::WRITE_TIMEOUT) to be written, the connection is closed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct OutboundCounters {
+    queued_bytes: usize,
+    largest_queue_bytes: usize,
+    held_requests: usize,
+    write_timeouts: u64,
+}
+
+impl OutboundCounters {
+    /// Payload bytes queued for clients now, counting each frame until it has been written.
+    #[must_use]
+    pub fn queued_bytes(&self) -> usize {
+        self.queued_bytes
+    }
+
+    /// The most payload bytes one connection has had queued at once so far.
+    #[must_use]
+    pub fn largest_queue_bytes(&self) -> usize {
+        self.largest_queue_bytes
+    }
+
+    /// Finished requests held back now, because their connection's queue has no room for their
+    /// terminal frames.
+    ///
+    /// They are still in flight, and end when their frames are queued.
+    #[must_use]
+    pub fn held_requests(&self) -> usize {
+        self.held_requests
+    }
+
+    /// Connections closed because a frame could not be written within
+    /// [`WRITE_TIMEOUT`](crate::limits::WRITE_TIMEOUT).
+    #[must_use]
+    pub fn write_timeouts(&self) -> u64 {
+        self.write_timeouts
+    }
+}
+
+/// The live outbound counters, shared by every connection.
+///
+/// A watch channel, as [`RequestStats`] is. Clones share the counters, so that each connection's
+/// queue can keep a handle to them.
+#[derive(Debug, Clone)]
+pub(crate) struct OutboundStats {
+    counters: watch::Sender<OutboundCounters>,
+}
+
+impl OutboundStats {
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self {
+            counters: watch::Sender::new(OutboundCounters::default()),
+        }
+    }
+
+    /// The counters now.
+    #[must_use]
+    pub(crate) fn snapshot(&self) -> OutboundCounters {
+        *self.counters.borrow()
+    }
+
+    /// A receiver of the counters, on which a test can wait for a queue to fill or drain.
+    #[cfg(test)]
+    pub(crate) fn subscribe(&self) -> watch::Receiver<OutboundCounters> {
+        self.counters.subscribe()
+    }
+
+    /// A frame of `bytes` was queued on a connection, whose queue now holds `connection_bytes`.
+    pub(crate) fn queued(&self, bytes: usize, connection_bytes: usize) {
+        self.counters.send_modify(|counters| {
+            counters.queued_bytes = counters.queued_bytes.saturating_add(bytes);
+            counters.largest_queue_bytes = counters.largest_queue_bytes.max(connection_bytes);
+        });
+    }
+
+    /// A frame of `bytes` left its queue: written, or dropped with its connection.
+    pub(crate) fn dequeued(&self, bytes: usize) {
+        self.counters.send_modify(|counters| {
+            counters.queued_bytes = counters.queued_bytes.saturating_sub(bytes);
+        });
+    }
+
+    /// A finished request is held back.
+    pub(crate) fn held(&self) {
+        self.counters.send_modify(|counters| {
+            counters.held_requests = counters.held_requests.saturating_add(1);
+        });
+    }
+
+    /// `count` held requests were let go: queued, cancelled, or abandoned with their connection.
+    pub(crate) fn released(&self, count: usize) {
+        if count == 0 {
+            return;
+        }
+        self.counters.send_modify(|counters| {
+            counters.held_requests = counters.held_requests.saturating_sub(count);
+        });
+    }
+
+    /// A connection is closed because a frame could not be written in time.
+    pub(crate) fn write_timed_out(&self) {
+        self.counters
+            .send_modify(|counters| counters.write_timeouts += 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +336,41 @@ mod tests {
                 + counters.failed()
                 + counters.cancelled()
                 + counters.abandoned()
+        );
+    }
+
+    #[test]
+    fn outbound_gauges_return_to_zero_and_the_largest_queue_is_kept() {
+        let stats = OutboundStats::new();
+        stats.queued(300, 300);
+        stats.queued(500, 800);
+        // Another connection's queue, smaller than the first one's.
+        stats.queued(100, 100);
+        stats.held();
+        stats.held();
+        stats.write_timed_out();
+        assert_eq!(
+            stats.snapshot(),
+            OutboundCounters {
+                queued_bytes: 900,
+                largest_queue_bytes: 800,
+                held_requests: 2,
+                write_timeouts: 1,
+            }
+        );
+        for bytes in [300, 500, 100] {
+            stats.dequeued(bytes);
+        }
+        stats.released(2);
+        stats.released(0);
+        assert_eq!(
+            stats.snapshot(),
+            OutboundCounters {
+                queued_bytes: 0,
+                largest_queue_bytes: 800,
+                held_requests: 0,
+                write_timeouts: 1,
+            }
         );
     }
 }

@@ -34,8 +34,30 @@ pub const MAX_CONSECUTIVE_MALFORMED_FRAMES: u32 = 16;
 ///
 /// When the queue is full the connection stops reading the client's frames until the client has
 /// read some of its own: the back-pressure that keeps a slow reader from growing the server's
-/// memory.
+/// memory. [`OUTBOUND_BYTES`] bounds the same queue in bytes.
 pub const OUTBOUND_QUEUE_FRAMES: usize = 32;
+
+/// Payload bytes one connection may have queued for the socket before it stops queueing the
+/// answers of finished requests: 16 MiB (plan 04, P04.T15).
+///
+/// A frame counts from the moment it is queued until it has been written. While a finished
+/// request's terminal frame would take the queue past the budget, the connection holds the frame
+/// back but goes on reading, so that `ping` and `cancel` are still answered; a held request is
+/// still in flight and can be cancelled. A frame larger than the whole budget is sent once the queue
+/// is empty. The connection's own small answers (`pong`, `welcome`, refusals, `cancelled`) are not
+/// held, and [`OUTBOUND_QUEUE_FRAMES`] bounds them. A slow reader therefore makes the server hold
+/// the finished frames of its [`MAX_IN_FLIGHT_REQUESTS`], plus a queue of this much, or of one
+/// larger frame alone, plus those small answers, until [`WRITE_TIMEOUT`] closes it.
+pub const OUTBOUND_BYTES: usize = 16 * 1024 * 1024;
+
+/// Longest one frame may take to be written to a client: 10 s (plan 04, P04.T15).
+///
+/// A frame that takes longer means the client has stopped reading, or reads a 4 MB range result
+/// at under about 3 Mbit/s. The server then closes the connection with a policy violation (close
+/// code 1008), cancels everything it had in flight, and sends nothing more but the close frame.
+/// Without this, a client that stops reading would keep its queue and its finished requests until
+/// shutdown.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Longest a closing connection may spend sending what it has queued and completing the close
 /// handshake before its socket is dropped.

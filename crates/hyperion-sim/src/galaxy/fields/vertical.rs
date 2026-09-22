@@ -62,6 +62,7 @@
 //! as for the exponential discs before them, and the discs need no margin of their own. The tests
 //! step across every knot a unit in the last place at a time.
 
+use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
 use crate::galaxy::quad::{Gl16Panel, bisect, gl16};
 use crate::math;
 use crate::units::{KilometresPerSecond, LightYears};
@@ -96,7 +97,7 @@ pub(crate) const SEGMENTS: usize = LINEAR_SEGMENTS + OCTAVES * OCTAVE_SEGMENTS;
 
 /// The height of the table's last knot, ly: the root cube's half-width, so that every point of the
 /// cube reads the table.
-pub const TABLE_END: f64 = 65_536.0;
+const TABLE_END: f64 = 65_536.0;
 
 /// The heights, in ly, between which `K_z` is tabulated.
 const FORCE_RANGE: (f64, f64) = (2.0, 131_072.0);
@@ -112,6 +113,7 @@ const DISPERSION_BRACKET: (f64, f64) = (0.25, 1_024.0);
 pub(crate) const BISECTIONS: u32 = 48;
 
 /// The width of segment `k`, ly: 1 below 128 ly, `2ʲ⁺¹` in octave j.
+#[must_use]
 fn segment_width(k: usize) -> f64 {
     if k < LINEAR_SEGMENTS {
         1.0
@@ -121,6 +123,7 @@ fn segment_width(k: usize) -> f64 {
 }
 
 /// The height of knot `k`, 0 to [`SEGMENTS`], ly: exact.
+#[must_use]
 pub(crate) fn knot(k: usize) -> f64 {
     let small = |n: usize| f64::from(u32::try_from(n).expect("a knot index below 1,000"));
     if k <= LINEAR_SEGMENTS {
@@ -146,8 +149,12 @@ pub(crate) struct Height {
 
 /// The segment of the table that holds the height `abs_z ≥ 0` (ly), exactly (module
 /// documentation, "Floating point").
+///
+/// Every caller passes `|z|`: [`Site`](super::Site) and the profile's public methods take the
+/// absolute value first.
 #[must_use]
 pub(crate) fn locate(abs_z: f64) -> Height {
+    debug_assert!(!(abs_z < 0.0), "a height located as |z|, got {abs_z}");
     if abs_z < LINEAR_END {
         let floor = abs_z.floor();
         #[expect(
@@ -168,7 +175,7 @@ pub(crate) fn locate(abs_z: f64) -> Height {
         )]
         let whole = abs_z as u32;
         // The octave from the whole part: 128 × 2ʲ ≤ z < 128 × 2ʲ⁺¹ exactly when 2⁷⁺ʲ ≤ ⌊z⌋ < 2⁸⁺ʲ.
-        let octave = (whole.ilog2() - 7) as usize;
+        let octave = usize::try_from(whole.ilog2() - 7).expect("an octave index below 9");
         let scaled = abs_z * INVERSE_WIDTHS[octave];
         let floor = scaled.floor();
         #[expect(
@@ -190,6 +197,7 @@ pub(crate) fn locate(abs_z: f64) -> Height {
 }
 
 /// `(1 − e^(−d)) ÷ d`, the mean of `e^(−d t)` over `t ∈ [0, 1]`; 1 at `d = 0`.
+#[must_use]
 fn mean_decay(d: f64) -> f64 {
     if d > 0.0 { -math::exp_m1(-d) / d } else { 1.0 }
 }
@@ -239,25 +247,27 @@ pub struct VerticalProfile {
 }
 
 impl VerticalProfile {
-    /// The profile whose exponent is `exact` at the knots, made monotone and continuous in floating
-    /// point (module documentation, "Floating point").
+    /// The profile whose exponent is `exact` at the knots above the plane, made monotone and
+    /// continuous in floating point (module documentation, "Floating point"); it is 0 in the plane.
     ///
     /// # Panics
     ///
-    /// If `exact` does not hold one value per knot, or if the exponent does not rise across the
-    /// last segment, which a positive vertical force rules out.
+    /// If `exact` does not hold one value per knot above the plane, or if the exponent does not
+    /// rise across the last segment, which a positive vertical force rules out, so that the
+    /// effective height is positive and finite.
+    #[must_use]
     fn from_exponents(
-        exact: &[f64],
+        exact: impl ExactSizeIterator<Item = f64>,
         dispersion: KilometresPerSecond,
         (gradient, reach): (f64, f64),
         reference_radius: LightYears,
     ) -> Self {
-        assert_eq!(exact.len(), SEGMENTS + 1, "one exponent per knot");
+        assert_eq!(exact.len(), SEGMENTS, "one exponent per knot above the plane");
         let mut segments = Vec::with_capacity(SEGMENTS);
         let mut below = Vec::with_capacity(SEGMENTS);
         let mut e = 0.0;
         let mut integral = 0.0;
-        for (k, &next) in exact[1..].iter().enumerate() {
+        for (k, next) in exact.enumerate() {
             let rise = (next - e).max(0.0);
             segments.push([e, rise]);
             below.push(integral);
@@ -270,6 +280,10 @@ impl VerticalProfile {
             "a vertical profile's exponent rises at the table's end"
         );
         let effective_height = integral + math::exp(-e) / end_rate;
+        assert!(
+            effective_height.is_finite() && effective_height > 0.0,
+            "a vertical profile's effective height is {effective_height}"
+        );
         Self {
             dispersion,
             gradient,
@@ -285,6 +299,7 @@ impl VerticalProfile {
     }
 
     /// `E` at the located height `height`: never falls as the height grows, bit for bit.
+    #[must_use]
     pub(crate) fn exponent_at(&self, height: Height) -> f64 {
         match self.segments.get(height.segment) {
             Some(&[e, rise]) => e + height.offset * rise,
@@ -292,26 +307,28 @@ impl VerticalProfile {
         }
     }
 
-    /// The exponent `E(|z|)` at the height `abs_z` (ly): `n(z) = n(0) exp(−E)`.
+    /// The exponent `E(|z|)` at the height `z` (ly, either side of the plane): `n(z) = n(0)
+    /// exp(−E)`.
     #[must_use]
-    pub fn exponent(&self, abs_z: f64) -> f64 {
-        self.exponent_at(locate(abs_z))
+    pub fn exponent(&self, z: f64) -> f64 {
+        self.exponent_at(locate(z.abs()))
     }
 
-    /// The density at the height `abs_z` (ly) relative to the mid-plane's, `n(z) ÷ n(0)`: 1 in the
-    /// plane, never rising with height.
+    /// The density at the height `z` (ly, either side of the plane) relative to the mid-plane's,
+    /// `n(z) ÷ n(0)`: 1 in the plane, never rising with `|z|`.
     #[must_use]
-    pub fn value(&self, abs_z: f64) -> f64 {
-        math::exp(-self.exponent(abs_z))
+    pub fn value(&self, z: f64) -> f64 {
+        math::exp(-self.exponent(z))
     }
 
-    /// `∫₀^|z| n ÷ n(0) dz` up to the height `abs_z` (ly), in ly: exact for the table, which is
-    /// exponential across each segment. A disc's column between two heights is its mid-plane
-    /// density times the difference (plan 02, P02.T10).
+    /// `∫₀^|z| n ÷ n(0) dz` up to the height `z` (ly, either side of the plane).
+    ///
+    /// It is exact for the table, which is exponential across each segment. A disc's column
+    /// between two heights is its mid-plane density times the difference (plan 02, P02.T10).
     #[must_use]
-    pub fn integral_to(&self, abs_z: f64) -> f64 {
-        let height = locate(abs_z);
-        match self.segments.get(height.segment) {
+    pub fn integral_to(&self, z: f64) -> LightYears {
+        let height = locate(z.abs());
+        LightYears::new(match self.segments.get(height.segment) {
             Some(&[e, rise]) => {
                 let width = segment_width(height.segment);
                 self.below[height.segment]
@@ -323,7 +340,7 @@ impl VerticalProfile {
                         * height.offset
                         * mean_decay(height.offset * self.end_rate)
             }
-        }
+        })
     }
 
     /// The effective height `Σ ÷ 2ρ₀ = ∫₀^∞ n ÷ n(0) dz`: for the discs, the drawn height.
@@ -338,23 +355,24 @@ impl VerticalProfile {
         self.dispersion
     }
 
-    /// The vertical dispersion at the height `abs_z` (ly) and the reference radius, `σ₀ (1 +
-    /// γ min(|z|, z_γ))`: the dispersion the profile is the Jeans solution for.
+    /// The vertical dispersion at the height `z` (ly, either side of the plane) and the reference
+    /// radius, `σ₀ (1 + γ min(|z|, z_γ))`: the dispersion the profile is the Jeans solution for.
     #[must_use]
-    pub fn dispersion_at(&self, abs_z: f64) -> KilometresPerSecond {
-        self.dispersion * (1.0 + self.gradient * abs_z.min(self.reach))
+    pub fn dispersion_at(&self, z: f64) -> KilometresPerSecond {
+        self.dispersion * (1.0 + self.gradient * z.abs().min(self.reach))
     }
 
-    /// `γ`, how fast the dispersion grows with height, per ly: 0 for an isothermal disc.
+    /// `γ`, how fast the dispersion grows with height, per kpc: 0.20 for every disc (Sharma et
+    /// al. 2021).
     #[must_use]
-    pub fn gradient(&self) -> f64 {
-        self.gradient
+    pub fn gradient_per_kpc(&self) -> f64 {
+        self.gradient * LIGHT_YEARS_PER_KILOPARSEC
     }
 
-    /// `z_γ`, the height above which the dispersion stops rising, ly.
+    /// `z_γ`, the height above which the dispersion stops rising.
     #[must_use]
-    pub fn gradient_reach(&self) -> f64 {
-        self.reach
+    pub fn gradient_reach(&self) -> LightYears {
+        LightYears::new(self.reach)
     }
 
     /// The radius at which the profile was solved.
@@ -381,6 +399,7 @@ pub(crate) struct VerticalForce {
 impl VerticalForce {
     /// The table of the force `k_z(z)`, (km/s)² per ly, for `z > 0` in ly, evaluated at the 48
     /// nodes of its panels in ascending order.
+    #[must_use]
     pub(crate) fn new(mut k_z: impl FnMut(f64) -> f64) -> Self {
         let lo = math::ln(FORCE_RANGE.0);
         let hi = math::ln(FORCE_RANGE.1);
@@ -401,6 +420,7 @@ impl VerticalForce {
     }
 
     /// `K_z` at the height `z > 0` (ly), (km/s)² per ly.
+    #[must_use]
     pub(crate) fn at(&self, z: f64) -> f64 {
         let u = math::ln(z);
         let offset = (u - self.lo) / self.width;
@@ -436,15 +456,18 @@ pub(crate) struct JeansIntegral {
 }
 
 impl JeansIntegral {
-    /// The integrals of `force`, tabulated at `reference_radius`, for the gradient `gradient` (per
-    /// ly) up to the height `reach` (ly): `gl16` on every segment, split where the rise stops, and
-    /// summed upwards.
+    /// The integrals of `force`, tabulated at `reference_radius`, for the gradient
+    /// `gradient_per_kpc` up to the height `reach`: `gl16` on every segment, split where the rise
+    /// stops, and summed upwards.
+    #[must_use]
     pub(crate) fn new(
         force: &VerticalForce,
-        gradient: f64,
-        reach: f64,
+        gradient_per_kpc: f64,
+        reach: LightYears,
         reference_radius: LightYears,
     ) -> Self {
+        let gradient = gradient_per_kpc / LIGHT_YEARS_PER_KILOPARSEC;
+        let reach = reach.value();
         let rise = |z: f64| 1.0 + gradient * z.min(reach);
         let integrand = |z: f64| {
             let s = rise(z);
@@ -475,25 +498,26 @@ impl JeansIntegral {
     }
 
     /// The profile of a disc whose mid-plane dispersion is `dispersion`.
+    #[must_use]
     pub(crate) fn profile(&self, dispersion: KilometresPerSecond) -> VerticalProfile {
         let inverse = 1.0 / (dispersion.value() * dispersion.value());
-        let exact: Vec<f64> = self
-            .log_term
+        let exact = self.log_term[1..]
             .iter()
-            .zip(&self.potential)
-            .map(|(l, p)| l + p * inverse)
-            .collect();
+            .zip(&self.potential[1..])
+            .map(|(l, p)| l + p * inverse);
         VerticalProfile::from_exponents(
-            &exact,
+            exact,
             dispersion,
             (self.gradient, self.reach),
             self.reference_radius,
         )
     }
 
-    /// The profile whose effective height is `height` (ly), by [`BISECTIONS`] bisections of `ln σ₀`
+    /// The profile whose effective height is `height`, by [`BISECTIONS`] bisections of `ln σ₀`
     /// between 0.25 and 1,024 km/s: the effective height grows with the dispersion.
-    pub(crate) fn solve(&self, height: f64) -> VerticalProfile {
+    #[must_use]
+    pub(crate) fn solve(&self, height: LightYears) -> VerticalProfile {
+        let height = height.value();
         let ln_sigma = bisect(
             |u| {
                 self.profile(KilometresPerSecond::new(math::exp(u)))

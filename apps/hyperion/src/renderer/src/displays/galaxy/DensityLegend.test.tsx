@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildRamp, parseHexColour, rampColour } from "../../lib/galaxy/ramp";
 import { DensityLegend } from "./DensityLegend";
@@ -70,6 +70,44 @@ describe("DensityLegend", () => {
     expect(steps).toHaveLength(32);
     expect(steps[0]).toHaveAttribute("fill", rampColour(RAMP, 5));
     expect(steps[31]).toHaveAttribute("fill", rampColour(RAMP, 251));
+  });
+
+  it("labels every second decade where the bar is too narrow for a label at each", () => {
+    // Seven decades across 246 px leave 35 px a decade; `1E-6` and a gap take 44 px at 16 px a rem.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 246, height: 20 }),
+    );
+    renderLegend(-6, 1);
+
+    for (const tick of ["1E-6", "1E-4", "1E-2", "1E0"]) {
+      expect(screen.getByText(tick)).toBeInTheDocument();
+    }
+    for (const tick of ["1E-5", "1E-3", "1E-1", "1E1"]) {
+      expect(screen.queryByText(tick)).not.toBeInTheDocument();
+    }
+    // Every decade keeps its tick; the labelled ones are longer.
+    const ticks = Array.from(screen.getByRole("img").querySelectorAll("line"));
+    expect(ticks.map((tick) => tick.getAttribute("y2"))).toEqual([
+      "16",
+      "14",
+      "16",
+      "14",
+      "16",
+      "14",
+      "16",
+      "14",
+    ]);
+  });
+
+  it("labels every decade where the bar has room for them", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 400, height: 20 }),
+    );
+    renderLegend(-6, 1);
+
+    for (const tick of ["1E-6", "1E-5", "1E-4", "1E-3", "1E-2", "1E-1", "1E0", "1E1"]) {
+      expect(screen.getByText(tick)).toBeInTheDocument();
+    }
   });
 
   it("says so when the map holds no systems", () => {

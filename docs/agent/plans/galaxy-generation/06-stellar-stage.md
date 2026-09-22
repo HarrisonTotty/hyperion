@@ -1676,7 +1676,7 @@ Reserved so that later plans move no star:
     is `settledState`. T33's modules are `envelope.rs` and `galaxy.rs`, and its optional fields are
     the protocol's first. T34's cache key is `GalaxyKey`, and T35.b's count groups digits from
     five.
-  - _Pending re-validation._ T3 and T29.b wait on P03.T1 (`SystemRecord`, `Existence`, `resolve`)
+  - _Pending re-validation._ T3 and T29.b wait on P03.T5.a (`SystemRecord`, `Existence`) and P03.T7 (`resolve`)
     and P02.T9 (`Galaxy`). T30 waits on P02.T9 and on plan 02 switching the default mass function
     to Chabrier's (the code's default and `milky_way_like` are still Kroupa's). T34 waits on
     P04.T14. T35–T37 wait on P05.T9–T11 (`SystemList`, `SystemReadout`, `SymbolLegend`,

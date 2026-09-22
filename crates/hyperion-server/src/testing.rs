@@ -23,8 +23,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::compute::CancelToken;
-use crate::requests::{Handler, HandlerFuture};
-use crate::stats::RequestCounters;
+use crate::requests::{Handler, HandlerFuture, to_frame};
+use crate::stats::{OutboundCounters, RequestCounters};
+use crate::ws::ConnectionLimits;
 use crate::{AppState, Server, ServerConfig, ServerStats};
 
 /// Upper bound on any single wait.
@@ -44,15 +45,26 @@ pub(crate) struct Harness {
 impl Harness {
     /// A server with one CPU worker whose every request `handler` answers.
     pub(crate) async fn start(handler: impl Handler + 'static) -> Self {
+        Self::start_with_limits(handler, ConnectionLimits::default()).await
+    }
+
+    /// [`Harness::start`], with each connection held to `limits`.
+    pub(crate) async fn start_with_limits(
+        handler: impl Handler + 'static,
+        limits: ConnectionLimits,
+    ) -> Self {
         let data_dir = tempfile::tempdir().expect("a temporary directory");
         let config = ServerConfig::builder()
             .data_dir(data_dir.path())
             .workers(std::num::NonZeroUsize::MIN)
             .build();
-        let server = timeout(WAIT, Server::start_with_handler(config, Arc::new(handler)))
-            .await
-            .expect("timed out starting the server")
-            .expect("the server starts");
+        let server = timeout(
+            WAIT,
+            Server::start_with_handler(config, Arc::new(handler), limits),
+        )
+        .await
+        .expect("timed out starting the server")
+        .expect("the server starts");
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind port 0");
         let addr = listener
             .local_addr()
@@ -141,6 +153,38 @@ impl Harness {
             .expect("the counters live as long as the server")
     }
 
+    /// Waits until the outbound counters satisfy `condition`, and returns them.
+    pub(crate) async fn outbound_until(
+        &self,
+        condition: impl FnMut(&OutboundCounters) -> bool,
+    ) -> OutboundCounters {
+        let mut counters = self.state().outbound_stats.subscribe();
+        *timeout(WAIT, counters.wait_for(condition))
+            .await
+            .expect("timed out waiting on the outbound counters")
+            .expect("the counters live as long as the server")
+    }
+
+    /// Makes `client`'s server-side writer stick: sends request `id`, answered through `calls`
+    /// with a response of [`CLOGGING_BYTES`], which `client`, a slow reader, does not read.
+    /// Returns once the response has been counted, just before it is queued, and gives the
+    /// length of its frame, [`clogging_frame_len`].
+    pub(crate) async fn stick_writer(
+        &self,
+        calls: &mut Calls,
+        client: &mut Client,
+        id: u32,
+    ) -> usize {
+        let responded = self.server().stats().requests().responded();
+        client.request(id, body(id)).await;
+        let call = calls.next().await;
+        assert_eq!(call.id(), id, "the request that sticks the writer");
+        assert!(call.respond(bulky_response(CLOGGING_BYTES)));
+        self.requests_until(|counters| counters.responded() > responded)
+            .await;
+        clogging_frame_len(id)
+    }
+
     /// Waits until `count` connections are open.
     pub(crate) async fn connections_until(&self, count: usize) {
         timeout(WAIT, self.state().connections.wait_until_open(count))
@@ -149,8 +193,8 @@ impl Harness {
     }
 
     /// Stops serving and shuts the server down, as `main` does, then checks that nothing outlived
-    /// it: no connection, no request in flight, no job queued or running, and every accepted
-    /// request ended exactly one way.
+    /// it: no connection, no request in flight, nothing queued for a client or held back, no job
+    /// queued or running, and every accepted request ended exactly one way.
     pub(crate) async fn stop(self) {
         let shared = Arc::clone(self.state());
         // The serving task may have ended already, and then nobody listens.
@@ -167,18 +211,21 @@ impl Harness {
         let stats = ServerStats::new(
             shared.connections.open_count(),
             shared.request_stats.snapshot(),
+            shared.outbound_stats.snapshot(),
             shared.pool.counters(),
         );
-        let (requests, pool) = (stats.requests(), stats.pool());
+        let (requests, outbound, pool) = (stats.requests(), stats.outbound(), stats.pool());
         assert_eq!(
             (
                 stats.connections(),
                 requests.in_flight(),
+                outbound.queued_bytes(),
+                outbound.held_requests(),
                 pool.queued_interactive(),
                 pool.queued_bulk(),
                 pool.running(),
             ),
-            (0, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0, 0, 0),
             "something outlived the server: {stats:?}"
         );
         assert_eq!(
@@ -192,6 +239,31 @@ impl Harness {
 /// The receive buffer of [`Harness::connect_slow_reader`]'s socket, in bytes. Linux doubles it
 /// for its own bookkeeping and keeps it from growing.
 pub(crate) const SLOW_READER_BUFFER_BYTES: u32 = 4096;
+
+/// A response larger than a slow reader's socket and the server's send buffer hold together:
+/// Linux grows a send buffer to 4 MiB at most by default, and the slow reader's receive buffer
+/// does not grow. Written to a slow reader, it sticks the connection's writer.
+pub(crate) const CLOGGING_BYTES: usize = 8 << 20;
+
+/// The payload bytes of the frame that answers request `id` with a response of
+/// [`CLOGGING_BYTES`], as [`response_frame_len`] gives them.
+///
+/// Worked out without serialising megabytes, which in a debug build takes long enough for a
+/// test's write timeout to run out: the response's name is all `x`, which JSON does not escape,
+/// so each byte of it is one byte of the frame.
+pub(crate) fn clogging_frame_len(id: u32) -> usize {
+    response_frame_len(id, bulky_response(0)) + CLOGGING_BYTES
+}
+
+/// The payload bytes of the frame that answers request `id` with `body`: what the outbound queue
+/// is charged for it.
+pub(crate) fn response_frame_len(id: u32, body: ResponseBody) -> usize {
+    to_frame(&ServerMessage::Response {
+        id: RequestId(id),
+        body,
+    })
+    .len()
+}
 
 /// A WebSocket client of a [`Harness`].
 #[derive(Debug)]

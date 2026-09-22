@@ -5,6 +5,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { FakeWebSocket } from "./test/FakeWebSocket";
+import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
+import { stubCanvas } from "./test/RecordingContext2D";
+
+/** Plays the server's side, letting the outcomes it settles reach React. */
+async function answer(play: () => void): Promise<void> {
+  await act(async () => {
+    play();
+    await Promise.resolve();
+  });
+}
+
+function chartCentreMarks(): HTMLElement[] {
+  return screen.queryAllByRole("img", { name: "Chart centre" });
+}
 
 describe("App", () => {
   beforeEach(() => {
@@ -157,5 +171,65 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Server Link" })).toBeInTheDocument();
     expect(screen.getByText("9.9.9")).toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  describe("the key C, which centres the chart", () => {
+    /** Opens a universe on GALAXY with both maps drawn, the map page laid out 792 × 488 px. */
+    async function galaxyWithMaps(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+      stubCanvas();
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+        DOMRect.fromRect({ x: 0, y: 0, width: 792, height: 488 }),
+      );
+      const socket = FakeWebSocket.latest();
+      act(() => {
+        socket.serverWelcomes();
+      });
+      await user.keyboard("{F2}");
+      await answer(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList());
+      });
+      await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+      await answer(() => {
+        socket.serverAnswers("open_universe", () => anOpenedUniverse());
+      });
+      await answer(() => {
+        for (let answered = 0; answered < 2; answered += 1) {
+          socket.serverAnswers("density_map", ({ view }) => {
+            const heightPx = view === "face_on" ? 8 : 4;
+            return aDensityMap({
+              codes: Array<number>(8 * heightPx).fill(1),
+              widthPx: 8,
+              heightPx,
+              view,
+            });
+          });
+        }
+      });
+    }
+
+    it("centres the chart while GALAXY is shown", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await galaxyWithMaps(user);
+      await user.click(screen.getByRole("tab", { name: "GALAXY MAP" }));
+
+      await user.keyboard("c");
+
+      expect(chartCentreMarks()).toHaveLength(2);
+    });
+
+    it("does nothing while LINK is shown", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await galaxyWithMaps(user);
+      await user.click(screen.getByRole("tab", { name: "GALAXY MAP" }));
+      await user.keyboard("{F1}");
+
+      await user.keyboard("c");
+      await user.keyboard("{F2}");
+
+      expect(screen.getByRole("heading", { level: 1, name: "Galaxy" })).toBeInTheDocument();
+      expect(chartCentreMarks()).toEqual([]);
+    });
   });
 });

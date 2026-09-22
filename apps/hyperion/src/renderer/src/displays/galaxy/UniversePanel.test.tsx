@@ -1,5 +1,6 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UniverseProvider } from "../../components/UniverseProvider";
@@ -32,13 +33,26 @@ const OLD_SURVEY = aUniverse({
   status: "generator_mismatch",
 });
 
+/** Holds the panel's fold, as the display does, starting whole. */
+function FoldablePanel() {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <UniversePanel
+      expanded={expanded}
+      onToggle={() => {
+        setExpanded((shown) => !shown);
+      }}
+    />
+  );
+}
+
 /** Renders the panel under a welcomed link, with the universe session. */
 function renderPanel() {
   const user = userEvent.setup();
   render(
     <ServerLinkHarness>
       <UniverseProvider>
-        <UniversePanel />
+        <FoldablePanel />
       </UniverseProvider>
     </ServerLinkHarness>,
   );
@@ -76,6 +90,34 @@ function universeRows(): HTMLElement[] {
   const table = screen.getByRole("table", { name: "Universes" });
   // The first row is the header.
   return within(table).getAllByRole("row").slice(1);
+}
+
+/** Creates a universe, drops the link before the answer, and brings the link back. */
+async function createAcrossALinkDrop() {
+  const { user, socket } = renderPanel();
+  await server(() => {
+    socket.serverAnswers("list_universes", () => aUniverseList([]));
+  });
+  await user.type(screen.getByRole("textbox", { name: "NAME" }), "SURVEY 3{Enter}");
+  // Fake time only for the wait before reconnecting, which the operator's input never needs.
+  vi.useFakeTimers();
+  await server(() => {
+    socket.close();
+  });
+  act(() => {
+    vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+  });
+  vi.useRealTimers();
+  const reconnected = FakeWebSocket.latest();
+  act(() => {
+    reconnected.serverWelcomes();
+  });
+  return { user, reconnected };
+}
+
+function formStatus(): HTMLElement {
+  const form = screen.getByRole("group", { name: "NEW UNIVERSE" });
+  return within(form).getByRole("status");
 }
 
 describe("UniversePanel", () => {
@@ -375,6 +417,56 @@ describe("UniversePanel", () => {
     });
   });
 
+  describe("folded to one line", () => {
+    it("names the open universe by name, seed and generator version beside its title", async () => {
+      const { user, socket } = renderPanel();
+      await server(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList([SURVEY_1]));
+      });
+      await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+      await server(() => {
+        socket.serverAnswers("open_universe", () => anOpenedUniverse(SURVEY_1));
+      });
+      const toggle = screen.getByRole("button", { name: "Universe" });
+
+      await user.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      const summary = shownText("SEED")[0]?.closest("dl");
+      expect(summary).toHaveTextContent(
+        /^NAME\s*SURVEY 1\s*SEED\s*00000000000004D2\s*GEN VER\s*2$/,
+      );
+      expect(screen.queryByRole("table", { name: "Universes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "NEW UNIVERSE" })).not.toBeInTheDocument();
+    });
+
+    it("says NO UNIVERSE OPEN when none is", async () => {
+      const { user } = renderPanel();
+
+      await user.click(screen.getByRole("button", { name: "Universe" }));
+
+      expect(shownText("NO UNIVERSE OPEN")).toHaveLength(1);
+    });
+
+    it("is shown and folded from the keyboard by its title, a heading", async () => {
+      const { user, socket } = renderPanel();
+      await server(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList([SURVEY_1]));
+      });
+      const toggle = within(screen.getByRole("heading", { level: 2 })).getByRole("button", {
+        name: "Universe",
+      });
+
+      toggle.focus();
+      await user.keyboard("{Enter}");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await user.keyboard(" ");
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("table", { name: "Universes" })).toBeInTheDocument();
+    });
+  });
+
   describe("the NEW UNIVERSE form", () => {
     it("is shown while no universe is open, and folded once one is", async () => {
       const { user, socket } = renderPanel();
@@ -589,6 +681,85 @@ describe("UniversePanel", () => {
         "REJECTED: a universe named SURVEY 1 exists",
       );
       expect(screen.getByText("NO UNIVERSE OPEN")).toBeInTheDocument();
+    });
+
+    describe("a create cut off by a lost link", () => {
+      it("reads CREATE UNCONFIRMED, its cause and the action, in caution once the link returns", async () => {
+        await createAcrossALinkDrop();
+
+        expect(formStatus()).toHaveTextContent(
+          "CREATE UNCONFIRMED: link lost before reply; check the universe list",
+        );
+        expect(formStatus()).toHaveClass("request-status__text--fault");
+      });
+
+      it("clears CREATE UNCONFIRMED when a universe is opened from the list", async () => {
+        const { user, reconnected } = await createAcrossALinkDrop();
+        await server(() => {
+          reconnected.serverAnswers("list_universes", () => aUniverseList([SURVEY_1]));
+        });
+
+        await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+        expect(screen.getByText(/^CREATE UNCONFIRMED/)).toBeInTheDocument();
+        await server(() => {
+          reconnected.serverAnswers("open_universe", () => anOpenedUniverse(SURVEY_1));
+        });
+
+        expect(screen.queryByText(/CREATE UNCONFIRMED/)).not.toBeInTheDocument();
+      });
+
+      it("keeps the panel and its fields shown while the report stands, saying why", async () => {
+        const { user } = await createAcrossALinkDrop();
+        const fields = screen.getByRole("button", { name: "NEW UNIVERSE" });
+        const panel = screen.getByRole("button", { name: "Universe" });
+
+        await user.click(fields);
+        await user.click(panel);
+
+        for (const toggle of [fields, panel]) {
+          expect(toggle).toHaveAttribute("aria-expanded", "true");
+          expect(toggle).toHaveAttribute("aria-disabled", "true");
+          expect(toggle).toHaveAccessibleDescription(
+            "CREATE UNCONFIRMED: link lost before reply; check the universe list",
+          );
+        }
+        expect(screen.getByText(/^CREATE UNCONFIRMED/)).toBeVisible();
+      });
+
+      it("gives the report an ID of its own beside an OPEN's status", async () => {
+        const { user, reconnected } = await createAcrossALinkDrop();
+        await server(() => {
+          reconnected.serverAnswers("list_universes", () => aUniverseList([SURVEY_1]));
+        });
+
+        await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+
+        const statuses = screen.getAllByRole("status");
+        expect(statuses.map((status) => status.textContent)).toEqual([
+          "PENDING",
+          "CREATE UNCONFIRMED: link lost before reply; check the universe list",
+        ]);
+        expect(new Set(statuses.map((status) => status.id)).size).toBe(2);
+      });
+
+      it("clears CREATE UNCONFIRMED when the operator dismisses it", async () => {
+        const { user } = await createAcrossALinkDrop();
+
+        await user.click(screen.getByRole("button", { name: "DISMISS" }));
+
+        expect(screen.queryByText(/CREATE UNCONFIRMED/)).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "CREATE" })).toHaveFocus();
+      });
+
+      it("clears CREATE UNCONFIRMED with the next create", async () => {
+        const { user, reconnected } = await createAcrossALinkDrop();
+
+        await user.click(screen.getByRole("button", { name: "CREATE" }));
+
+        expect(reconnected.requestsOfKind("create_universe")).toHaveLength(1);
+        expect(formStatus()).toHaveTextContent("PENDING");
+        expect(screen.queryByText(/CREATE UNCONFIRMED/)).not.toBeInTheDocument();
+      });
     });
 
     it("sends nothing from CREATE while the link is down", async () => {

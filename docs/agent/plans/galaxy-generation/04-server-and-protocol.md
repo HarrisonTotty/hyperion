@@ -1117,7 +1117,32 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   queued plus up to 8 finished), with no write timeout, so a client that stops reading can pin about
   160 MB of 4 MB range results until shutdown. T15 adds a per-frame write timeout
   (`limits::WRITE_TIMEOUT`, 10 s: a frame that cannot be written in that time closes the connection
-  with 1008) and a per-connection byte budget on the outbound queue (`limits::OUTBOUND_BYTES`,
-  16 MiB: the reader stops dispatching finished requests while the queue holds more), each with a
-  test in the abuse suite. An oversized inbound frame still closes without 1009, since sending one
-  needs a direct tungstenite dependency pinned to axum's; the plan only requires the close.
+  with 1008) and a per-connection byte budget on the outbound queue (`limits::OUTBOUND_BYTES`, 16
+  MiB: the reader stops dispatching finished requests while the queue holds more), each with a test
+  in the abuse suite. An oversized inbound frame still closes without 1009, since sending one needs
+  a direct tungstenite dependency pinned to axum's; the plan only requires the close.
+- **Deviations in T15's slow-reader part, as built.** `src/outbound.rs` holds the queue
+  (`Outbound`), the `Writer` and `Held`. Each frame is charged its payload bytes (no WebSocket
+  header) from being queued until it is written or dropped. The budget rule is stricter than
+  "while the queue holds more": a finished request's frame is queued only if nothing is held before
+  it and the queue is empty or stays within `OUTBOUND_BYTES`, else it waits in `Held`, oldest first.
+  A held request stays in flight, so it keeps its slot, `cancel` ends it and drops its frame, and a
+  close abandons it; the connection's own answers (`pong`, `welcome`, refusals, `cancelled`) are
+  never held, and the 32-frame bound is unchanged. After a write timeout the writer drops every
+  queued frame but the close, so the 1008 close follows the rest of the stuck frame if the client
+  reads again, and otherwise the socket is dropped after `CLOSE_TIMEOUT`. `Requests::finish` is
+  split into `settle` and `end`. `ServerStats::outbound()` returns `OutboundCounters`
+  (`queued_bytes`, `largest_queue_bytes`, `held_requests`, `write_timeouts`), and
+  `Harness::stop` checks that the first and third are zero. The crate-private
+  `ws::ConnectionLimits` (outbound bytes, write and close timeouts; defaults from `limits`) sits in
+  `AppState`, and `Server::start_with_handler` takes it; `testing.rs` gains
+  `Harness::start_with_limits`, `outbound_until`, `stick_writer`, `response_frame_len` and
+  `CLOGGING_BYTES`. The tests are unit tests in `outbound.rs`, not in `tests/abuse.rs`, because
+  they need a scripted handler and test-only limits; T15's ten-run loop should also run
+  `cargo test -p hyperion-server --lib outbound::`. The writer's own tests use a paused clock, so
+  the server's tokio dev-dependency gains `test-util`.
+- **Slow-reader limits, accepted residue (validated).** Two bounded imprecisions stay, by ruling:
+  after a write timeout a held reply released in the instant between the writer's stop signal and
+  its byte release is counted `responded` rather than `abandoned` (stats only; the client sees the
+  same close), and the outbound queue may exceed `OUTBOUND_BYTES` by the connection's own small
+  answers, at most about 34 of them under the 16 KiB inbound limit (about 0.55 MiB).

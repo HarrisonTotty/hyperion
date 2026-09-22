@@ -258,6 +258,26 @@ pub(crate) struct Finished {
     ending: Ending,
 }
 
+/// A request whose task has ended, with its terminal frame, not yet queued.
+///
+/// The request stays in flight until [`Requests::end`], so that a `cancel` arriving while the
+/// connection holds the frame back still ends it (plan 04, P04.T15).
+#[derive(Debug)]
+pub(crate) struct Settled {
+    id: RequestId,
+    task: TaskId,
+    frame: String,
+    ending: Ending,
+}
+
+impl Settled {
+    /// The payload bytes of the terminal frame.
+    #[must_use]
+    pub(crate) fn frame_len(&self) -> usize {
+        self.frame.len()
+    }
+}
+
 /// One request in flight.
 #[derive(Debug)]
 struct InFlight {
@@ -270,7 +290,9 @@ struct InFlight {
 /// One connection's requests in flight, each run by a task in a [`JoinSet`].
 ///
 /// Owned by the connection task, so it needs no lock. Its methods return the frame to send, if
-/// any, and the connection pushes it to the writer in the order it was returned.
+/// any, and the connection pushes it to the writer in the order it was returned, except that a
+/// finished request's terminal frame may wait in [`Held`](crate::outbound::Held) for room in the
+/// outbound queue, while later answers go ahead of it.
 #[derive(Debug)]
 pub(crate) struct Requests {
     state: Arc<AppState>,
@@ -377,48 +399,70 @@ impl Requests {
         self.tasks.join_next_with_id().await
     }
 
-    /// Ends the request whose task ended and returns its terminal frame, or `None` if the request
-    /// was cancelled first and has been answered already.
+    /// Takes the terminal frame of a request whose task has ended, or `None` if the request was
+    /// cancelled first and has been answered already.
+    ///
+    /// The request stays in flight until [`Requests::end`] queues its frame.
     ///
     /// A task that panicked, whether in its handler or in a computation it shared (a
     /// [`SingleFlight`](crate::compute::SingleFlight) passes a panic on to every waiter), is
     /// answered `internal`: it costs that request and nothing else.
-    pub(crate) fn finish(
-        &mut self,
-        joined: Result<(TaskId, Finished), JoinError>,
-    ) -> Option<String> {
+    #[must_use]
+    pub(crate) fn settle(&self, joined: Result<(TaskId, Finished), JoinError>) -> Option<Settled> {
         let task = match &joined {
             Ok((task, _)) => *task,
             Err(error) => error.id(),
         };
         // A cancelled request's ID may already be in use again, so the task, not the ID, says
         // which request this was.
-        let id = self
+        let (&id, entry) = self
             .in_flight
             .iter()
-            .find_map(|(id, entry)| (entry.task.id() == task).then_some(*id))?;
-        let entry = self.in_flight.remove(&id)?;
-        match joined {
-            Ok((_, Finished { frame, ending })) => {
-                self.state.request_stats.ended(ending);
-                Some(frame)
-            }
+            .find(|(_, entry)| entry.task.id() == task)?;
+        let (frame, ending) = match joined {
+            Ok((_, Finished { frame, ending })) => (frame, ending),
             Err(error) => {
                 let reason = match error.try_into_panic() {
                     Ok(payload) => panic_message(payload.as_ref()),
                     Err(_) => "its task was cancelled by the runtime".to_owned(),
                 };
                 tracing::error!(id = id.0, kind = entry.kind, %reason, "a request failed");
-                self.state.request_stats.ended(Ending::Failed);
-                Some(to_frame(&ServerMessage::RequestError {
+                let frame = to_frame(&ServerMessage::RequestError {
                     id,
                     error: request_error(
                         ErrorCode::Internal,
                         "the server failed while answering this request",
                     ),
-                }))
+                });
+                (frame, Ending::Failed)
             }
+        };
+        Some(Settled {
+            id,
+            task,
+            frame,
+            ending,
+        })
+    }
+
+    /// Whether a settled request is still in flight: no `cancel` has ended it since it settled.
+    #[must_use]
+    pub(crate) fn is_in_flight(&self, settled: &Settled) -> bool {
+        self.in_flight
+            .get(&settled.id)
+            .is_some_and(|entry| entry.task.id() == settled.task)
+    }
+
+    /// Ends a settled request and returns its terminal frame to queue, or `None` if a `cancel`
+    /// has ended it meanwhile.
+    #[must_use]
+    pub(crate) fn end(&mut self, settled: Settled) -> Option<String> {
+        if !self.is_in_flight(&settled) {
+            return None;
         }
+        self.in_flight.remove(&settled.id);
+        self.state.request_stats.ended(settled.ending);
+        Some(settled.frame)
     }
 
     /// Cancels every request in flight and waits for their tasks to stop, for a connection that

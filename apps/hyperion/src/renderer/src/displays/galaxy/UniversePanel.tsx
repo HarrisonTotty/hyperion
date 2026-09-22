@@ -1,6 +1,7 @@
 import type { UniverseIdHex, UniverseInfo } from "@hyperion/protocol";
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 
+import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { RequestStatus } from "../../components/RequestStatus";
 import { formatListPosition, formatNumber } from "../../lib/format";
 import { formatHex64 } from "../../lib/seed";
@@ -300,32 +301,88 @@ function UniverseList({
   );
 }
 
+interface UniverseSummaryProps {
+  readonly open: UniverseInfo | null;
+}
+
+/** The open universe on one line, for the folded panel: its name, seed and generator version. */
+function UniverseSummary({ open }: UniverseSummaryProps) {
+  if (open === null) {
+    return <p className="panel__empty universe-summary">NO UNIVERSE OPEN</p>;
+  }
+  return (
+    <dl className="universe-summary">
+      <div className="universe-summary__item universe-summary__item--name">
+        <dt>NAME</dt>
+        <dd className="universe-summary__name">{open.name}</dd>
+      </div>
+      <div className="universe-summary__item">
+        <dt>SEED</dt>
+        <dd className="universe-summary__number">{formatHex64(open.seed)}</dd>
+      </div>
+      <div className="universe-summary__item">
+        <dt>GEN VER</dt>
+        <dd className="universe-summary__number">{formatNumber(open.generator_version, 0)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+interface UniversePanelProps {
+  /**
+   * Whether the panel is shown whole; folded, it is one line, its title control and the open
+   * universe's name, seed and generator version.
+   */
+  readonly expanded: boolean;
+  /** Shows or folds the panel. A display control: it changes nothing the server holds. */
+  readonly onToggle: () => void;
+}
+
 /**
  * The `UNIVERSE` panel: the open universe, the server's universes to open, and the form that
  * creates one.
  *
  * @remarks
- * Opening and creating change what the server holds, so both are commands: each shows `PENDING`
- * beside the control that gave it and then the server's answer, never an optimistic change, and
- * no other command can be given until it has answered: the `OPEN` given reads `PENDING`, and
- * `CREATE` has its status beside it. While the link is down every command is held back and states
- * the link's reason, as is the `OPEN` of a universe made by another generator version, which states
- * both versions. Seeds and IDs are shown in upper case. The `NEW UNIVERSE` fields are shown while
- * no universe is open and folded once one is, since universes are created rarely and the
- * parameters below need the room; the operator can show or fold them at any time, and that choice
- * holds until another universe is opened.
+ * Its title is a display control that folds the panel to one line, the open universe's name, seed
+ * and generator version, with a chevron that shows which; the display decides when it is folded.
+ * If the panel folds while the focus is in it, as when an `OPEN` opens its universe, the focus
+ * moves to the title control rather than being lost. Opening and creating change what the server
+ * holds, so both are commands: each shows `PENDING` beside the control that gave it and then the
+ * server's answer, never an optimistic change, and no other command can be given until it has
+ * answered: the `OPEN` given reads `PENDING`, and `CREATE` has its status beside it. While the link
+ * is down every command is held back and states the link's reason, as is the `OPEN` of a universe
+ * made by another generator version, which states both versions. Seeds and IDs are shown in upper
+ * case. The `NEW UNIVERSE` fields are shown while no universe is open and folded once one is,
+ * since universes are created rarely; the operator can show or fold them at any time, and that
+ * choice holds until another universe is opened. A create whose result is unconfirmed keeps the
+ * panel and the fields shown, so that its report is seen, and holds both controls back, described
+ * by the report, until it is cleared.
  */
-export function UniversePanel() {
+export function UniversePanel({ expanded, onToggle }: UniversePanelProps) {
   const titleId = useId();
+  const bodyId = useId();
   const linkReasonId = useId();
   const commandStatusId = useId();
+  const unconfirmedId = useId();
   const { status } = useServerLink();
-  const { open, list, command, create, openUniverse, refresh } = useUniverse();
+  const {
+    open,
+    list,
+    command,
+    createUnconfirmed,
+    create,
+    openUniverse,
+    refresh,
+    dismissUnconfirmed,
+  } = useUniverse();
   const [lastCommand, setLastCommand] = useState<LastCommand>(null);
   const [formChoice, setFormChoice] = useState<FormChoice | null>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const openId = open?.id ?? null;
   const formExpanded =
-    formChoice !== null && formChoice.openId === openId ? formChoice.expanded : openId === null;
+    createUnconfirmed ||
+    (formChoice !== null && formChoice.openId === openId ? formChoice.expanded : openId === null);
   const linkReason = linkDownReason(status);
   const commandPending = command.kind === "pending";
   const inhibitedBy = [
@@ -333,42 +390,89 @@ export function UniversePanel() {
     ...(commandPending ? [commandStatusId] : []),
   ];
 
+  // A fold would leave the focus on a hidden control, or nowhere when the `OPEN` that caused it
+  // gives way to the word OPEN; before paint, it moves to the control that shows the panel again.
+  const wasExpanded = useRef(expanded);
+  useLayoutEffect(() => {
+    const folded = wasExpanded.current && !expanded;
+    wasExpanded.current = expanded;
+    const focused = document.activeElement;
+    const lost = focused === null || focused === document.body;
+    if (folded && (lost || bodyRef.current?.contains(focused) === true)) {
+      toggleRef.current?.focus();
+    }
+  }, [expanded]);
+
   return (
-    <section className="panel galaxy__universe universe-panel" aria-labelledby={titleId}>
-      <h2 className="panel__title" id={titleId}>
-        Universe
-      </h2>
-      {linkReason === null ? null : (
-        <p className="panel__inhibit" id={linkReasonId}>
-          {linkReason}
-        </p>
-      )}
-      <OpenUniverseReadout open={open} />
-      {lastCommand?.kind === "open" ? <RequestStatus state={command} id={commandStatusId} /> : null}
-      <UniverseList
-        list={list}
-        openId={openId}
-        pendingId={lastCommand?.kind === "open" && commandPending ? lastCommand.universe : null}
-        inhibitedBy={inhibitedBy}
-        onOpen={(universe) => {
-          setLastCommand({ kind: "open", universe });
-          openUniverse(universe);
-        }}
-        onRetry={refresh}
-      />
-      <NewUniverseForm
-        command={lastCommand?.kind === "create" ? command : null}
-        commandStatusId={commandStatusId}
-        inhibitedBy={inhibitedBy}
-        onCreate={(name, seed) => {
-          setLastCommand({ kind: "create" });
-          create(name, seed);
-        }}
-        expanded={formExpanded}
-        onToggle={() => {
-          setFormChoice({ openId, expanded: !formExpanded });
-        }}
-      />
+    <section
+      className={
+        expanded
+          ? "panel galaxy__universe universe-panel"
+          : "panel galaxy__universe universe-panel universe-panel--folded"
+      }
+      aria-labelledby={titleId}
+    >
+      <div className="universe-panel__head">
+        <h2 className="panel__title universe-panel__title" id={titleId}>
+          <button
+            ref={toggleRef}
+            type="button"
+            className="control disclosure"
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            // Held back while a create is unconfirmed, whose report the panel must keep in view.
+            aria-disabled={createUnconfirmed ? "true" : undefined}
+            aria-describedby={createUnconfirmed ? unconfirmedId : undefined}
+            onClick={() => {
+              if (!createUnconfirmed) {
+                onToggle();
+              }
+            }}
+          >
+            <DisclosureGlyph expanded={expanded} />
+            Universe
+          </button>
+        </h2>
+        {expanded ? null : <UniverseSummary open={open} />}
+      </div>
+      <div className="universe-panel__body" id={bodyId} ref={bodyRef} hidden={!expanded}>
+        {linkReason === null ? null : (
+          <p className="panel__inhibit" id={linkReasonId}>
+            {linkReason}
+          </p>
+        )}
+        <OpenUniverseReadout open={open} />
+        {lastCommand?.kind === "open" ? (
+          <RequestStatus state={command} id={commandStatusId} />
+        ) : null}
+        <UniverseList
+          list={list}
+          openId={openId}
+          pendingId={lastCommand?.kind === "open" && commandPending ? lastCommand.universe : null}
+          inhibitedBy={inhibitedBy}
+          onOpen={(universe) => {
+            setLastCommand({ kind: "open", universe });
+            openUniverse(universe);
+          }}
+          onRetry={refresh}
+        />
+        <NewUniverseForm
+          command={lastCommand?.kind === "create" ? command : null}
+          commandStatusId={commandStatusId}
+          inhibitedBy={inhibitedBy}
+          onCreate={(name, seed) => {
+            setLastCommand({ kind: "create" });
+            create(name, seed);
+          }}
+          expanded={formExpanded}
+          onToggle={() => {
+            setFormChoice({ openId, expanded: !formExpanded });
+          }}
+          unconfirmed={createUnconfirmed}
+          unconfirmedId={unconfirmedId}
+          onDismissUnconfirmed={dismissUnconfirmed}
+        />
+      </div>
     </section>
   );
 }

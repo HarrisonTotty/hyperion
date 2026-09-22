@@ -3,11 +3,18 @@ import { type FormEvent, useId, useLayoutEffect, useRef, useState } from "react"
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { RequestStatus } from "../../components/RequestStatus";
+import { StatusLine } from "../../components/StatusLine";
 import { parseSeedHex } from "../../lib/seed";
 import type { UniverseCommandState } from "../../lib/universe";
 
 /** The longest name the server accepts, in characters after trimming (plan 04, design note 16). */
 const NAME_MAX_CHARACTERS = 48;
+
+/**
+ * What a create cut off by a lost link reads: the condition, its cause, then the action, as the
+ * guide has an error say what is wrong, why and what the operator can do.
+ */
+const UNCONFIRMED_TEXT = "CREATE UNCONFIRMED: link lost before reply; check the universe list";
 
 // Control characters are refused by the server; the message asks for printable characters.
 const CONTROL_CHARACTER = /\p{Cc}/u;
@@ -58,6 +65,12 @@ interface NewUniverseFormProps {
   readonly expanded: boolean;
   /** Shows or folds the fields. A display control: it changes nothing the server holds. */
   readonly onToggle: () => void;
+  /** Whether a create from this form was cut off by a lost link, so that its result is unknown. */
+  readonly unconfirmed: boolean;
+  /** The ID the unconfirmed report takes, so that the controls it holds back can refer to it. */
+  readonly unconfirmedId: string;
+  /** Clears the unconfirmed report once the operator has seen it. */
+  readonly onDismissUnconfirmed: () => void;
 }
 
 /**
@@ -73,7 +86,11 @@ interface NewUniverseFormProps {
  * disabled while the seed is `RANDOM`, and its hint says that the server draws it. `Enter` in
  * either field submits. `CREATE` changes what the server holds, so it has the command outline;
  * it shows `PENDING` and then the server's answer, and is held back, saying why, while the link is
- * down or a command is pending. Each hint sits on its field's label line, so that a 16-digit seed
+ * down or a command is pending. A create cut off by a lost link reads
+ * `CREATE UNCONFIRMED: link lost before reply; check the universe list` in caution once the link
+ * returns, since the server may have made the universe, until the next create, a universe opened
+ * from the list, or `DISMISS`; meanwhile the fields stay shown and their control is held back,
+ * described by the report. Each hint sits on its field's label line, so that a 16-digit seed
  * has the field's full width.
  */
 export function NewUniverseForm({
@@ -83,6 +100,9 @@ export function NewUniverseForm({
   onCreate,
   expanded,
   onToggle,
+  unconfirmed,
+  unconfirmedId,
+  onDismissUnconfirmed,
 }: NewUniverseFormProps) {
   const fieldsId = useId();
   const nameId = useId();
@@ -97,6 +117,7 @@ export function NewUniverseForm({
   const [seedText, setSeedText] = useState("");
   const [errors, setErrors] = useState<Errors>(NO_ERRORS);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const createRef = useRef<HTMLButtonElement>(null);
   const fieldsRef = useRef<HTMLDivElement>(null);
   const inhibited = inhibitedBy.length > 0;
 
@@ -134,7 +155,14 @@ export function NewUniverseForm({
             className="control disclosure"
             aria-expanded={expanded}
             aria-controls={fieldsId}
-            onClick={onToggle}
+            // Held back while a create is unconfirmed, whose report the fields must keep in view.
+            aria-disabled={unconfirmed ? "true" : undefined}
+            aria-describedby={unconfirmed ? unconfirmedId : undefined}
+            onClick={() => {
+              if (!unconfirmed) {
+                onToggle();
+              }
+            }}
           >
             <DisclosureGlyph expanded={expanded} />
             NEW UNIVERSE
@@ -232,6 +260,7 @@ export function NewUniverseForm({
           </div>
           <div className="universe-form__actions">
             <button
+              ref={createRef}
               type="submit"
               className="command"
               // Held back rather than disabled, so that it keeps focus and can say why.
@@ -240,7 +269,26 @@ export function NewUniverseForm({
             >
               CREATE
             </button>
-            {command === null ? null : <RequestStatus state={command} id={commandStatusId} />}
+            {unconfirmed ? (
+              // The server may have made the universe before the link dropped: a command whose
+              // result is unknown, reported in caution until the operator dismisses it.
+              <StatusLine
+                text={UNCONFIRMED_TEXT}
+                standing="fault"
+                id={unconfirmedId}
+                action={{
+                  label: "DISMISS",
+                  onAction: () => {
+                    onDismissUnconfirmed();
+                    // The control goes with the report; the focus goes to the command beside it.
+                    createRef.current?.focus();
+                  },
+                }}
+              />
+            ) : null}
+            {command === null || unconfirmed ? null : (
+              <RequestStatus state={command} id={commandStatusId} />
+            )}
           </div>
         </div>
       </fieldset>
