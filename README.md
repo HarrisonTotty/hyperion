@@ -27,10 +27,10 @@ actual-size, procedurally generated galaxy.
 just install   # pnpm install
 just hooks     # install the git pre-commit and pre-push hooks (once per clone)
 just server    # run the game server on 127.0.0.1:7878 (`just server --help` for options)
-just client    # run the Electron client with hot reload
+just client    # run the Electron client with hot reload (`just client --help` for options)
 ```
 
-The client connects to `ws://127.0.0.1:7878/ws`; override with `VITE_HYPERION_SERVER_URL`.
+Options to `just client` reach the client: `just client --address 10.0.0.5 --port 9100`.
 
 ### Server configuration
 
@@ -49,6 +49,21 @@ An option given on the command line wins over its variable.
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;
 nothing generated is saved. To delete a universe, stop the server and remove its directory.
+
+### Client configuration
+
+The client takes the server to link to, as an option or as its variable. It links to
+`ws://<address>:<port>/ws`, so by default a server on this machine.
+
+| Option      | Variable               | Default     | What                                  |
+| ----------- | ---------------------- | ----------- | ------------------------------------- |
+| `--address` | `HYPERION_SERVER_ADDR` | `127.0.0.1` | IP address or host name of the server |
+| `--port`    | `HYPERION_SERVER_PORT` | `7878`      | Port the server listens on            |
+
+The variables name the server, not the client, so they are deliberately not the server's own
+`HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are not
+the same thing. Both options are read at launch, so no rebuild is needed to point the client
+somewhere else, and the `LINK` display shows the endpoint in use.
 
 ## Checks
 

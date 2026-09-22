@@ -22,9 +22,10 @@ pre-commit:
 server *args:
     cargo run -p hyperion-server -- {{ args }}
 
-# Run the bridge client (Electron) with hot reload.
-client:
-    pnpm dev
+# The `--` tells electron-vite that the rest of the line is the client's own command line.
+# Run the bridge client (Electron) with hot reload, e.g. `just client --port 9000`.
+client *args:
+    pnpm --filter hyperion exec electron-vite dev -- {{ args }}
 
 # Typecheck Rust and TypeScript.
 check:

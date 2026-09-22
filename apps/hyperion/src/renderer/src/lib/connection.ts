@@ -7,9 +7,6 @@ import {
 } from "@hyperion/protocol";
 import { useEffect, useState } from "react";
 
-/** Where a locally run hyperion-server listens; used unless `VITE_HYPERION_SERVER_URL` is set. */
-export const DEFAULT_SERVER_URL = "ws://127.0.0.1:7878/ws";
-
 const PING_INTERVAL_MS = 2_000;
 const RECONNECT_DELAY_MS = 2_000;
 

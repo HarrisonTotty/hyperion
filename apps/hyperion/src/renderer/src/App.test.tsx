@@ -7,6 +7,7 @@ import { App } from "./App";
 import { FakeWebSocket } from "./test/FakeWebSocket";
 import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
 import { stubCanvas } from "./test/RecordingContext2D";
+import { stubHyperionApi } from "./test/stubHyperionApi";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
@@ -35,6 +36,15 @@ describe("App", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("links to the server the client was launched to link to", () => {
+    stubHyperionApi("ws://10.0.0.5:9100/ws");
+
+    render(<App />);
+
+    expect(FakeWebSocket.latest().url).toBe("ws://10.0.0.5:9100/ws");
+    expect(screen.getByText("ws://10.0.0.5:9100/ws")).toBeInTheDocument();
   });
 
   it("shows the link being established on launch", () => {

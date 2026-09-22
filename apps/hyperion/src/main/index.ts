@@ -1,14 +1,34 @@
 import { join } from "node:path";
 
+import { CommanderError } from "commander";
 import { app, BrowserWindow, shell } from "electron";
 
+import { serverUrlSwitch } from "../preload/serverUrl";
+import { parseClientArgs, serverUrlOf, userArgs } from "./cli";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 
 function reportLoadFailure(error: unknown): void {
   console.error("failed to load the renderer:", error);
 }
 
-function createWindow(): void {
+/**
+ * The server URL from the command line, or `undefined` once the command line has ended the run, as
+ * `--help`, `--version` and a usage error do.
+ */
+function resolveServerUrl(): string | undefined {
+  try {
+    return serverUrlOf(parseClientArgs(userArgs(process.argv, app.isPackaged), app.getVersion()));
+  } catch (error) {
+    if (error instanceof CommanderError) {
+      // The help, the version or the usage error has been written already.
+      app.exit(error.exitCode);
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function createWindow(serverUrl: string): void {
   const window = new BrowserWindow({
     width: 1600,
     height: 900,
@@ -22,6 +42,8 @@ function createWindow(): void {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // The sandboxed preload has no way to read the command line, so the URL rides in its argv.
+      additionalArguments: [serverUrlSwitch(serverUrl)],
     },
   });
 
@@ -59,12 +81,18 @@ function createWindow(): void {
 }
 
 async function main(): Promise<void> {
+  // Before the app is ready, so that `--help` and a usage error answer without a window appearing.
+  const serverUrl = resolveServerUrl();
+  if (serverUrl === undefined) {
+    return;
+  }
+
   await app.whenReady();
-  createWindow();
+  createWindow(serverUrl);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createWindow(serverUrl);
     }
   });
 }
