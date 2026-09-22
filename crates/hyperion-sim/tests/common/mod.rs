@@ -4,13 +4,14 @@
 //! The ranges are written out here from plan 02's table, independently of the sim's own
 //! constants, so that a wrong constant in the sim fails a test instead of moving the bracket.
 
-use hyperion_sim::galaxy::imf::MassFunctionKind;
+use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::galaxy::imf::{MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::{
     ArmCount, GalaxyParams, HaloComponentKind, HaloComponentParams, ProgenitorKind,
 };
-use hyperion_sim::galaxy::{POPULATIONS, Population};
+use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use hyperion_sim::math;
-use hyperion_sim::units::Degrees;
+use hyperion_sim::units::{Degrees, LightYears};
 
 const GYR: f64 = 1e9;
 
@@ -368,4 +369,61 @@ pub fn assert_derived_consistent(p: &GalaxyParams) {
             _ => assert_within(pop.name(), mean, old.0, old.1),
         }
     }
+}
+
+// --- Placement and the range query (plan 03) ---
+
+/// A point like the Sun's: in the plane, 26,000 ly from the centre on the +y axis, well clear of the
+/// bar, whose half-length reaches at most 18,000 ly.
+///
+/// It is where the brainstorm's reference density applies, so a 50 ly query here is the one whose
+/// figures the plan quotes.
+#[must_use]
+pub fn sunlike_point(galaxy: &Galaxy) -> GalacticPosition {
+    let bar = galaxy.params().bar().half_length().value();
+    assert!(bar < 26_000.0, "the bar reaches {bar} ly, past the Sun");
+    GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("26,000 ly is in the root cube")
+}
+
+/// The integral of a layer's density over a sphere, by a midpoint sum in height, radius and azimuth:
+/// an independent reference for `expected_counts`, whose Gauss–Legendre rule it shares no node with.
+///
+/// `steps` is the number of midpoints in height; the radius takes half as many and the azimuth a
+/// quarter, so the cost is `steps³ ÷ 8`. The sum covers the sphere exactly, with no boundary error,
+/// and its own error falls as `steps⁻²`.
+#[must_use]
+pub fn reference_sphere_integral(
+    galaxy: &Galaxy,
+    band: MassBand,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    steps: u32,
+) -> f64 {
+    let (fields, shares) = (galaxy.fields(), galaxy.shares());
+    let [x0, y0, z0] = centre.to_light_years_f64();
+    let r = radius.value();
+    let (nz, nr, na) = (steps, (steps / 2).max(1), (steps / 4).max(4));
+    let dz = 2.0 * r / f64::from(nz);
+    let da = std::f64::consts::TAU / f64::from(na);
+    let mut total = 0.0;
+    for iz in 0..nz {
+        let z = z0 - r + (f64::from(iz) + 0.5) * dz;
+        let rho_sq = r * r - (z - z0) * (z - z0);
+        if rho_sq <= 0.0 {
+            continue;
+        }
+        let rho = rho_sq.sqrt();
+        let dr = rho / f64::from(nr);
+        for ir in 0..nr {
+            let radius_here = (f64::from(ir) + 0.5) * dr;
+            let weight = dz * dr * radius_here * da;
+            for ia in 0..na {
+                let theta = (f64::from(ia) + 0.5) * da;
+                let (sin, cos) = math::sin_cos(theta);
+                let point = PointLy::new(x0 + radius_here * cos, y0 + radius_here * sin, z);
+                total += weight * fields.layer_density(shares, band, &point);
+            }
+        }
+    }
+    total
 }

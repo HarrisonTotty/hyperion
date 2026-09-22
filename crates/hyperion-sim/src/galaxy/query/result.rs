@@ -3,8 +3,9 @@
 
 use std::ops::Add;
 
-use crate::galaxy::placement::{STELLAR_LAYERS, layer_spec};
-use crate::id::Layer;
+use crate::coords::GalacticPosition;
+use crate::galaxy::placement::{STELLAR_LAYERS, SystemRecord, layer_spec};
+use crate::id::{Layer, SystemId};
 use crate::units::{LightYears, SolarMasses};
 
 /// An expected number of systems per layer, indexed by [`Layer::value`]: the five stellar layers
@@ -229,6 +230,113 @@ impl Census {
     }
 }
 
+/// One system a range query found: the system as placed, and where it was at the query's time.
+///
+/// The record is the state at the epoch, which is what a cache holds and what an ID resolves to;
+/// [`position`](Self::position) and [`distance`](Self::distance) are the only parts that depend on
+/// the query's time. Until plan 08 draws velocities the position is the epoch position, and the
+/// distance is the distance from the sphere's centre to it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SystemHit {
+    record: SystemRecord,
+    position: GalacticPosition,
+    distance: LightYears,
+}
+
+impl SystemHit {
+    /// A hit from the system, where it was at the query's time, and its distance from the query's
+    /// centre there.
+    ///
+    /// A [`SystemSource`](super::SystemSource) builds its own hits; the grid's come from
+    /// [`hit_at`](super::hit_at), which is also what decides whether there is one.
+    #[must_use]
+    pub const fn new(
+        record: SystemRecord,
+        position: GalacticPosition,
+        distance: LightYears,
+    ) -> Self {
+        Self {
+            record,
+            position,
+            distance,
+        }
+    }
+
+    /// The system as placed: its state at the epoch.
+    #[must_use]
+    pub const fn record(&self) -> &SystemRecord {
+        &self.record
+    }
+
+    /// The system's ID.
+    #[must_use]
+    pub fn id(&self) -> SystemId {
+        self.record.id()
+    }
+
+    /// Where the system was at the query's time, in the galactic frame.
+    #[must_use]
+    pub const fn position(&self) -> &GalacticPosition {
+        &self.position
+    }
+
+    /// How far the system was from the query's centre at the query's time.
+    #[must_use]
+    pub const fn distance(&self) -> LightYears {
+        self.distance
+    }
+}
+
+/// What a range query found: the systems, what the result is complete for, and what it cost.
+///
+/// The systems are ordered by distance at the query's time, then by ID, so the order is the same
+/// whatever the query walked first and whatever a cache held (plan 03, Design note 14). Their count
+/// is not bounded by the query's limit: the limit bounds the expected count of a layer, and the
+/// realised count fluctuates around it and is never truncated, because truncation would break the
+/// census (Design note 9).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RangeResult {
+    systems: Vec<SystemHit>,
+    census: Census,
+    stats: QueryStats,
+}
+
+impl RangeResult {
+    /// A result from its parts. Only the query assembly builds one.
+    #[must_use]
+    pub(super) const fn new(systems: Vec<SystemHit>, census: Census, stats: QueryStats) -> Self {
+        Self {
+            systems,
+            census,
+            stats,
+        }
+    }
+
+    /// The systems found, nearest first at the query's time and by ID on a tie.
+    #[must_use]
+    pub fn systems(&self) -> &[SystemHit] {
+        &self.systems
+    }
+
+    /// The systems found, taken out of the result.
+    #[must_use]
+    pub fn into_systems(self) -> Vec<SystemHit> {
+        self.systems
+    }
+
+    /// What the result is complete for.
+    #[must_use]
+    pub const fn census(&self) -> &Census {
+        &self.census
+    }
+
+    /// What the query cost.
+    #[must_use]
+    pub const fn stats(&self) -> &QueryStats {
+        &self.stats
+    }
+}
+
 /// How much work a range query did.
 ///
 /// A bag of counters with no invariant between them, which the query assembly adds to in place.
@@ -246,14 +354,18 @@ impl QueryStats {
         self.cells_visited
     }
 
-    /// Systems tested against the sphere at the query's time, from the grid and the sources.
+    /// Systems the query looked at: every record of every cell it walked, plus every hit a source
+    /// returned, since a source tests its own members and reports only those that are in.
     #[must_use]
     pub const fn systems_examined(&self) -> u64 {
         self.systems_examined
     }
 
-    /// The radius the cells were chosen by: the query's radius plus the pad for motion over
-    /// |t|.
+    /// The widest radius any layer's cells were chosen by: the query's radius plus the largest pad
+    /// for motion over |t|.
+    ///
+    /// Each layer is walked with its own pad, which is the same for all of them until plan 08 raises
+    /// one, so this is that pad today and the largest of them afterwards.
     #[must_use]
     pub const fn padded_radius(&self) -> LightYears {
         self.padded_radius

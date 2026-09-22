@@ -2,6 +2,7 @@
 //! more, as slow tests. The fast suite runs the same checks over 32 seeds in `galaxy_params.rs`,
 //! `galaxy_potential.rs` and `galaxy_fields.rs`.
 
+#[expect(dead_code, reason = "the sweeps use no range-query helper")]
 mod common;
 
 use common::{assert_derived_consistent, assert_params_in_ranges, assert_within};

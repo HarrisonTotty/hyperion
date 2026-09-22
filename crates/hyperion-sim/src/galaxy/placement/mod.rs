@@ -23,6 +23,7 @@ mod generate;
 mod headroom;
 mod layers;
 mod record;
+mod resolve;
 
 use std::error::Error;
 use std::fmt;
@@ -34,6 +35,7 @@ pub use generate::{cell_heap_bytes, generate_cell};
 pub use headroom::check_index_headroom;
 pub use layers::{LayerSpec, STELLAR_LAYERS, layer_for_initial_mass, layer_spec};
 pub use record::{Existence, SystemOrigin, SystemRecord};
+pub use resolve::resolve;
 
 use candidate::evaluate_candidate_from_bound;
 use cell::layer_bound;

@@ -1,4 +1,4 @@
-//! Gauss–Legendre nodes and weights on `[−1, 1]`, 4, 16 and 32 points.
+//! Gauss–Legendre nodes and weights on `[−1, 1]`, 4, 8, 16 and 32 points.
 //!
 //! An n-point rule integrates every polynomial of degree up to 2n − 1 exactly. The nodes are the
 //! roots of the Legendre polynomial Pₙ and the weights `2 ÷ ((1 − x²) Pₙ′(x)²)` (Abramowitz and
@@ -12,6 +12,9 @@
 
 /// The 4 nodes of the Gauss–Legendre rule on `[−1, 1]`, ascending: in closed form the inner pair
 /// is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` and the outer `±√((3 + 2√(6 ÷ 5)) ÷ 7)`.
+///
+/// Abramowitz and Stegun (1964), Table 25.4: ±0.339 981 043 584 856 264 803 and
+/// ±0.861 136 311 594 052 575 224.
 pub const GL4_NODES: [f64; 4] = [
     -0.861_136_311_594_052_6,
     -0.339_981_043_584_856_26,
@@ -26,6 +29,33 @@ pub const GL4_WEIGHTS: [f64; 4] = [
     0.652_145_154_862_546_1,
     0.652_145_154_862_546_1,
     0.347_854_845_137_453_85,
+];
+
+/// The 8 nodes of the Gauss–Legendre rule on `[−1, 1]`, ascending.
+///
+/// Abramowitz and Stegun (1964), Table 25.4: ±0.183 434 642 495 649 805,
+/// ±0.525 532 409 916 328 986, ±0.796 666 477 413 626 740 and ±0.960 289 856 497 536 232.
+pub const GL8_NODES: [f64; 8] = [
+    -0.960_289_856_497_536_3,
+    -0.796_666_477_413_626_7,
+    -0.525_532_409_916_329,
+    -0.183_434_642_495_649_8,
+    0.183_434_642_495_649_8,
+    0.525_532_409_916_329,
+    0.796_666_477_413_626_7,
+    0.960_289_856_497_536_3,
+];
+
+/// The 8 weights of the Gauss–Legendre rule on `[−1, 1]`, in the order of [`GL8_NODES`].
+pub const GL8_WEIGHTS: [f64; 8] = [
+    0.101_228_536_290_376_26,
+    0.222_381_034_453_374_48,
+    0.313_706_645_877_887_27,
+    0.362_683_783_378_362,
+    0.362_683_783_378_362,
+    0.313_706_645_877_887_27,
+    0.222_381_034_453_374_48,
+    0.101_228_536_290_376_26,
 ];
 
 /// The 16 nodes of the Gauss–Legendre rule on `[−1, 1]`, ascending.
@@ -162,13 +192,19 @@ mod tests {
     #[test]
     fn tables_are_ascending_and_exactly_symmetric() {
         assert_symmetric(&GL4_NODES, &GL4_WEIGHTS);
+        assert_symmetric(&GL8_NODES, &GL8_WEIGHTS);
         assert_symmetric(&GL16_NODES, &GL16_WEIGHTS);
         assert_symmetric(&GL32_NODES, &GL32_WEIGHTS);
     }
 
     #[test]
     fn weights_sum_to_two() {
-        for weights in [&GL4_WEIGHTS[..], &GL16_WEIGHTS[..], &GL32_WEIGHTS[..]] {
+        for weights in [
+            &GL4_WEIGHTS[..],
+            &GL8_WEIGHTS[..],
+            &GL16_WEIGHTS[..],
+            &GL32_WEIGHTS[..],
+        ] {
             let sum: f64 = weights.iter().sum();
             assert!((sum - 2.0).abs() < 4.0 * f64::EPSILON, "sum = {sum}");
         }
@@ -189,6 +225,9 @@ mod tests {
         }
         for &x in &GL4_NODES {
             assert!(legendre(4, x).abs() < 1e-15, "P4({x})");
+        }
+        for &x in &GL8_NODES {
+            assert!(legendre(8, x).abs() < 1e-15, "P8({x})");
         }
         for &x in &GL16_NODES {
             assert!(legendre(16, x).abs() < 1e-12, "P16({x})");

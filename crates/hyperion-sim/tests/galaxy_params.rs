@@ -4,6 +4,7 @@
 //! The checks over many seeds run here on 32 seeds, and over 10⁴ in `galaxy_sweeps.rs` under
 //! `just test-slow` (plan 02, P02.T11).
 
+#[expect(dead_code, reason = "the parameter tests use no range-query helper")]
 mod common;
 
 use common::{assert_derived_consistent, assert_params_in_ranges, assert_relative, assert_within};
