@@ -9,6 +9,11 @@ interface RequestStatusProps {
   readonly id?: string;
   /** Sends the request again; offered as `RETRY` after a rejection or a timeout. */
   readonly onRetry?: () => void;
+  /**
+   * Whether it announces its own changes, which it does unless this is `false`. Set it to `false`
+   * only where the status stands inside another live region, as the census summary's does.
+   */
+  readonly announce?: boolean;
 }
 
 /**
@@ -75,7 +80,7 @@ function annunciation(state: RequestState<RequestKind>): Annunciation | null {
  * when the caller can send the request again, `RETRY` follows. Nothing is rendered for `ok` and
  * `idle`.
  */
-export function RequestStatus({ state, id, onRetry }: RequestStatusProps) {
+export function RequestStatus({ state, id, onRetry, announce }: RequestStatusProps) {
   const shown = annunciation(state);
   if (shown === null) {
     return null;
@@ -85,6 +90,7 @@ export function RequestStatus({ state, id, onRetry }: RequestStatusProps) {
       text={shown.text}
       standing={shown.standing}
       id={id}
+      announce={announce}
       action={
         shown.standing !== "waiting" && onRetry !== undefined
           ? { label: "RETRY", onAction: onRetry }

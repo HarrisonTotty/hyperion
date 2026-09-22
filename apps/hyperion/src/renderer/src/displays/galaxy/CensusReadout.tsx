@@ -153,8 +153,10 @@ interface CensusReadoutProps {
  * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
  *
  * The summary line is an `output`, read as a whole when it changes, so that a query given from the
- * keyboard announces that it started and then what came back; it is the one thing on the chart that
- * is announced, the camera's own readouts being deliberately silent.
+ * keyboard announces that it started and then what came back. Nothing within it announces on its
+ * own: the request's status line is silenced, so the answer is read once rather than in parts. The
+ * camera's readouts are deliberately silent; `CHART DATA INVALID`, the selected-system readout and
+ * the cursor line announce from their own places, each being a region in its own right.
  */
 export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: CensusReadoutProps) {
   const tableId = useId();
@@ -190,7 +192,12 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
               )}
             </p>
           )}
-          <RequestStatus state={state} onRetry={onRetry} />
+          {/*
+           * It announces nothing of its own: it stands inside the region above, which reads the
+           * whole line, so a region of its own would have the answer read twice or in part, as
+           * each screen reader chose (the orchestrator's ruling 12).
+           */}
+          <RequestStatus state={state} onRetry={onRetry} announce={false} />
           {result === null ? null : (
             <dl className="readout census-readout__counts">
               <dt>SYSTEMS</dt>

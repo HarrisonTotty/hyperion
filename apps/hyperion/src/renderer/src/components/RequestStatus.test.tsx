@@ -85,4 +85,18 @@ describe("RequestStatus", () => {
 
     expect(screen.queryByRole("button", { name: "RETRY" })).not.toBeInTheDocument();
   });
+
+  it("announces its own changes where it stands on its own", () => {
+    render(<RequestStatus state={{ kind: "pending" }} />);
+
+    // An `output` is a live region by itself, so it needs no `aria-live` to be read.
+    expect(screen.getByRole("status")).not.toHaveAttribute("aria-live");
+  });
+
+  it("announces nothing of its own inside another live region", () => {
+    render(<RequestStatus state={{ kind: "pending" }} announce={false} />);
+
+    // Off, so the region around it governs and the answer is not read twice.
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "off");
+  });
 });

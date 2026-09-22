@@ -50,9 +50,19 @@ function renderReadout(
   };
 }
 
-/** The census summary, which is the chart's one announced region. */
+/** The census summary, which is the readout's one announced region. */
 function summary(): HTMLElement {
   return screen.getByRole("status", { name: "Census" });
+}
+
+/**
+ * The status regions the readout announces changes from: every `role="status"`, which an `output`
+ * carries by itself, less the ones turned off.
+ */
+function announcing(): HTMLElement[] {
+  return screen
+    .getAllByRole("status")
+    .filter((region) => region.getAttribute("aria-live") !== "off");
 }
 
 /** A census row's cells, its layer letter first. */
@@ -163,14 +173,34 @@ describe("CensusReadout", () => {
     expect(summary()).not.toHaveTextContent("PENDING");
   });
 
-  it("announces nothing but what the answer says: no table, no control", async () => {
+  it("announces from the summary alone, the status line inside it staying silent", () => {
+    renderReadout(TWO_SYSTEMS, PENDING);
+
+    // A live region nested in a live region is read differently by every screen reader, so the
+    // inner one is turned off and the summary governs (the orchestrator's ruling 12).
+    expect(within(summary()).getByText("PENDING")).toHaveAttribute("aria-live", "off");
+    const announced = announcing();
+    expect(announced).toHaveLength(1);
+    expect(announced[0]).toBe(summary());
+  });
+
+  it("keeps the census table and its control out of what is announced", async () => {
     const user = userEvent.setup();
-    renderReadout(aChart());
+    // Rejected, so that the status line and its RETRY stand in the summary as well.
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "queue_full",
+      reason: "the queue is full",
+    });
 
     await user.click(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
 
     expect(within(summary()).queryByRole("table")).not.toBeInTheDocument();
-    expect(within(summary()).queryByRole("button")).not.toBeInTheDocument();
+    expect(
+      within(summary()).queryByRole("button", { name: "CENSUS BY LAYER" }),
+    ).not.toBeInTheDocument();
+    // RETRY is what the operator can do about the answer, so it is read with it.
+    expect(within(summary()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
   });
 
   it("gives the server's reason and RETRY when the query is rejected", async () => {

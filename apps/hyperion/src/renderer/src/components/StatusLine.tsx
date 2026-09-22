@@ -19,6 +19,11 @@ interface StatusLineProps {
   readonly id?: string | undefined;
   /** What the operator can do about it, offered after the text. */
   readonly action?: StatusAction | undefined;
+  /**
+   * Whether it announces its own changes. Set it to `false` only for a status line rendered inside
+   * another live region, which then governs what is read.
+   */
+  readonly announce?: boolean | undefined;
 }
 
 /**
@@ -29,8 +34,13 @@ interface StatusLineProps {
  * Every state is in words, never a spinner. A fault is in `--status-caution` with its words, since
  * the guide keeps yellow for alerts, limits and failed systems; waiting and a refusal are plain
  * text. The control is a display control (`.control`), not a command.
+ *
+ * An `output` is a live region of its own, so one nested inside another is read differently by
+ * every screen reader: twice, or only the inner change, or the whole outer region. A status line
+ * that stands inside another region therefore takes `announce={false}`, which keeps the `output`
+ * and its semantics but leaves the announcing to the nearest region around it.
  */
-export function StatusLine({ text, standing, id, action }: StatusLineProps) {
+export function StatusLine({ text, standing, id, action, announce = true }: StatusLineProps) {
   return (
     <div className="request-status">
       <output
@@ -40,6 +50,8 @@ export function StatusLine({ text, standing, id, action }: StatusLineProps) {
             ? "request-status__text request-status__text--fault"
             : "request-status__text"
         }
+        // Off, and so not a region of its own: the nearest announcing ancestor governs the change.
+        aria-live={announce ? undefined : "off"}
       >
         {text}
       </output>

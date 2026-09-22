@@ -5,8 +5,7 @@
  * One script, played through `App` from the welcome to a chart at another time: what an operator
  * does, in order, with nothing faked but the socket, the canvas, the layout and the clock. Each step
  * of the script is a function, and each step has its own `it`, which plays the script up to that
- * step and then reads the console, so that a step has one reason to fail and a failure names the
- * step that broke. Frames and timeouts are faked throughout, since a preset's turn takes several
+ * step and then reads what that step changed, so that a failure names the step that broke. Frames and timeouts are faked throughout, since a preset's turn takes several
  * frames and the camera's angle readouts hold for 250 ms: the script waits that out rather than
  * racing it.
  */
@@ -66,9 +65,6 @@ const CHART_TIME_YR = 12.5;
  * hold for 250 ms after the change they show.
  */
 const READOUT_SETTLE_MS = 500;
-
-/** The most presses of `Tab` the control after the one focused may take, before the reach is broken. */
-const MAX_TABS = 4;
 
 /** The systems of the query's answer that lie above the lightest mass layer. */
 const SYSTEMS_ABOVE_A = 24;
@@ -162,29 +158,6 @@ interface Session {
   readonly user: ReturnType<typeof userEvent.setup>;
   readonly socket: FakeWebSocket;
   readonly recorder: RecordingContext2D;
-}
-
-/**
- * Presses `Tab` until `target` has the focus, as an operator reaches a control from the keyboard.
- *
- * @throws Error naming what held the focus when the target was not reached.
- */
-async function tabTo(user: ReturnType<typeof userEvent.setup>, target: HTMLElement): Promise<void> {
-  for (let press = 0; press < MAX_TABS; press += 1) {
-    if (document.activeElement === target) {
-      return;
-    }
-    // Each press must land before the next, as an operator's do.
-    // oxlint-disable-next-line no-await-in-loop
-    await user.tab();
-  }
-  if (document.activeElement !== target) {
-    const held = document.activeElement;
-    throw new Error(
-      `${MAX_TABS} presses of Tab reached ${held?.tagName ?? "nothing"} ` +
-        `"${held?.textContent ?? ""}", not ${target.tagName} "${target.ariaLabel ?? ""}"`,
-    );
-  }
 }
 
 /** The `GALAXY` page on show, which is the only one in the accessibility tree. */
@@ -344,17 +317,20 @@ async function answerQuery({ socket }: Session): Promise<void> {
         minLayer: body.min_layer,
         systems: kept,
       });
-      // The server echoes the instant it was asked about, to the nanosecond.
-      return { ...answer, time: body.time };
+      // The server echoes the instant it was asked about, to the nanosecond, and answers in the
+      // order it walked its cells, which is not by distance: what puts the list nearest first is
+      // the client's own sort, so the answer is sent farthest first to make it say so.
+      return { ...answer, time: body.time, systems: answer.systems.toReversed() };
     });
   });
 }
 
 /** 8. The list of systems is reached with `Tab`, and the next system selected. */
 async function selectSystem({ user }: Session): Promise<void> {
-  // The list follows the `CURSOR` fields in the tab order, so it is reached from the last of them.
+  // The list is the next stop after the `CURSOR` fields, so one `Tab` from the last of them
+  // reaches it; the step asserts the focus landed there.
   await user.click(within(cursorPanel()).getByRole("textbox", { name: "Z" }));
-  await tabTo(user, systemList());
+  await user.tab();
   await user.keyboard("{ArrowDown}");
 }
 
@@ -432,7 +408,7 @@ describe("the GALAXY display, end to end", () => {
 
     // The client greets the server first; the universe list follows, as soon as the link is up.
     expect(socket.sent[0]).toEqual({ type: "hello", client_version: __APP_VERSION__ });
-    expect(screen.getByRole("status")).toHaveTextContent("LINK NOMINAL");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent("LINK NOMINAL");
     expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
   });
 
