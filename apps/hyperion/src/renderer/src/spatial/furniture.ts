@@ -60,7 +60,12 @@ function edgeInsetPx(viewport: Viewport): number {
 
 /** The triad's box in the view's bottom left-hand corner, in `rem`, its origin at the centre. */
 export const TRIAD_BOX_REM = { width: 15, height: 8 } as const;
-/** The length of an axis seen side on, in `rem`. */
+/** The box a triad is drawn in, in `rem`. */
+export interface TriadBoxRem {
+  readonly width: number;
+  readonly height: number;
+}
+/** The length of an axis seen side on, in `rem`, on a box with the room for it. */
 const AXIS_REM = 1.75;
 /** The radius of the triad's away and towards symbols, in `rem`. */
 export const TRIAD_MARKER_REM = 0.25;
@@ -135,6 +140,37 @@ function remBox(centre: ScreenRem, size: TextSizeRem): BoxPx {
 }
 
 /**
+ * The box a triad is drawn in on a view of this size: its usual 15 × 8 rem, or the view itself
+ * where that is smaller.
+ *
+ * @remarks
+ * The overlay clips whatever leaves it and the guide has a 3D view always show its axis triad, so a
+ * stage shorter than the usual box (the local chart's, which gives way to its census table) gets a
+ * shorter triad rather than a triad with its top cut off.
+ */
+export function triadBoxRem(viewport: Viewport): TriadBoxRem {
+  if (!(viewport.remPx > 0)) {
+    return TRIAD_BOX_REM;
+  }
+  return {
+    width: Math.min(TRIAD_BOX_REM.width, viewport.widthPx / viewport.remPx),
+    height: Math.min(TRIAD_BOX_REM.height, viewport.heightPx / viewport.remPx),
+  };
+}
+
+/**
+ * How far an axis reaches from the triad's origin in a box of this height, in `rem`.
+ *
+ * @remarks
+ * The usual 1.75 rem, shortened on a short box so that an axis's end symbol and the label beyond it
+ * still fit inside the box, since the box is all the room the overlay leaves.
+ */
+function axisReachRem(boxHeightRem: number, labelHeightRem: number): number {
+  const room = boxHeightRem / 2 - TRIAD_MARKER_REM - LABEL_GAP_REM - labelHeightRem;
+  return Math.max(0, Math.min(AXIS_REM, room));
+}
+
+/**
  * The triad's axes and labels for a frame seen from `angles` (plan 05, T10.f).
  *
  * @remarks
@@ -143,8 +179,15 @@ function remBox(centre: ScreenRem, size: TextSizeRem): BoxPx {
  * it, or further out along its axis. Every label is kept inside the triad's box. On the galactic
  * axis the directions are labelled `-X` and `+Y`, as the frame falls back to them (design note
  * D11), with the guide's `-` for a signed value.
+ *
+ * @param boxRem - The box the triad is drawn in, from {@link triadBoxRem}: the axes are shortened
+ *   to fit a box shorter than {@link TRIAD_BOX_REM}, so that nothing leaves it.
  */
-export function triadLayout(frame: LocalFrame, angles: CameraAngles): ReadonlyArray<TriadAxis> {
+export function triadLayout(
+  frame: LocalFrame,
+  angles: CameraAngles,
+  boxRem: TriadBoxRem = TRIAD_BOX_REM,
+): ReadonlyArray<TriadAxis> {
   const basis = viewBasis(frame, angles);
   const labels = frame.onAxis
     ? { coreward: "-X", spinward: "+Y", north: "NORTH" }
@@ -154,9 +197,13 @@ export function triadLayout(frame: LocalFrame, angles: CameraAngles): ReadonlyAr
     vector: frame[name],
     projected: onScreen(frame[name], basis),
   }));
+  const reachRem = axisReachRem(
+    boxRem.height,
+    textSizeRem(labels.coreward, OVERLAY_LETTER_SPACING_EM).heightRem,
+  );
   const placed: BoxPx[] = [];
   return axes.map(({ name, vector, projected }): TriadAxis => {
-    const tip = { x: projected.x * AXIS_REM, y: projected.y * AXIS_REM };
+    const tip = { x: projected.x * reachRem, y: projected.y * reachRem };
     const end = axisEnd(dot(vector, basis.forward));
     const others = axes
       .filter((other) => other.name !== name)
@@ -180,13 +227,13 @@ export function triadLayout(frame: LocalFrame, angles: CameraAngles): ReadonlyAr
     const inBox = (centre: ScreenRem): ScreenRem => ({
       x: clamp(
         centre.x,
-        -TRIAD_BOX_REM.width / 2 + size.widthRem / 2,
-        TRIAD_BOX_REM.width / 2 - size.widthRem / 2,
+        -boxRem.width / 2 + size.widthRem / 2,
+        boxRem.width / 2 - size.widthRem / 2,
       ),
       y: clamp(
         centre.y,
-        -TRIAD_BOX_REM.height / 2 + size.heightRem / 2,
-        TRIAD_BOX_REM.height / 2 - size.heightRem / 2,
+        -boxRem.height / 2 + size.heightRem / 2,
+        boxRem.height / 2 - size.heightRem / 2,
       ),
     });
     // Beyond the axis's end if that is clear; else the nearest clear place about it, a line or two
@@ -218,8 +265,14 @@ export function triadLayout(frame: LocalFrame, angles: CameraAngles): ReadonlyAr
 /**
  * The part of the view the triad covers, its axes, symbols and labels, in pixels: what the core
  * arrow and the curve labels keep clear of.
+ *
+ * @param boxRem - The box the triad was laid out in, which fixes where its origin sits.
  */
-export function triadFootprintPx(axes: ReadonlyArray<TriadAxis>, viewport: Viewport): BoxPx {
+export function triadFootprintPx(
+  axes: ReadonlyArray<TriadAxis>,
+  viewport: Viewport,
+  boxRem: TriadBoxRem = TRIAD_BOX_REM,
+): BoxPx {
   let minX = -TRIAD_MARKER_REM;
   let minY = -TRIAD_MARKER_REM;
   let maxX = TRIAD_MARKER_REM;
@@ -247,8 +300,8 @@ export function triadFootprintPx(axes: ReadonlyArray<TriadAxis>, viewport: Viewp
     );
   }
   const remPx = viewport.remPx;
-  const originX = (TRIAD_BOX_REM.width / 2) * remPx;
-  const originY = viewport.heightPx - (TRIAD_BOX_REM.height / 2) * remPx;
+  const originX = (boxRem.width / 2) * remPx;
+  const originY = viewport.heightPx - (boxRem.height / 2) * remPx;
   return {
     leftPx: originX + minX * remPx,
     topPx: originY + minY * remPx,

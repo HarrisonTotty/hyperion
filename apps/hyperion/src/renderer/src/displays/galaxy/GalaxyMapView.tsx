@@ -19,6 +19,7 @@ import {
 } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
+import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { formatSci } from "../../lib/format";
 import { type MapGeometry, mapGeometry, pixelToLy } from "../../lib/galaxy/mapGeometry";
@@ -318,19 +319,6 @@ interface CursorDensityReadingProps {
   readonly density: CursorDensity;
   /** Whether it is read from a stale picture: then in `--text-muted` with a trailing `S`. */
   readonly stale: boolean;
-}
-
-/** The guide's stale mark, after a stale value, named for assistive technology. */
-function StaleMark() {
-  return (
-    <>
-      {" "}
-      <span className="stale-mark" aria-hidden="true">
-        S
-      </span>
-      <span className="visually-hidden">stale</span>
-    </>
-  );
 }
 
 /** The column density under the cursor: a value, `BELOW FLOOR`, or an em dash off the map. */

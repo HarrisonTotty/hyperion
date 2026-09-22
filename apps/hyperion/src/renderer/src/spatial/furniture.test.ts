@@ -10,6 +10,8 @@ import {
   coreArrowLayout,
   coreLabelText,
   placeCurveLabels,
+  TRIAD_BOX_REM,
+  triadBoxRem,
   triadFootprintPx,
   triadLayout,
 } from "./furniture";
@@ -55,7 +57,65 @@ function everyAngle(): CameraAngles[] {
   return angles;
 }
 
+describe("triadBoxRem", () => {
+  it("keeps its usual box on a view with the room for it", () => {
+    expect(triadBoxRem({ widthPx: 1_036, heightPx: 628, remPx: 16 })).toEqual(TRIAD_BOX_REM);
+  });
+
+  it("gives a short view a box no taller than the view", () => {
+    // The local chart's stage at 1280 × 688 with the census table shown.
+    expect(triadBoxRem({ widthPx: 798, heightPx: 74, remPx: 16 })).toEqual({
+      width: 15,
+      height: 4.625,
+    });
+  });
+
+  it("follows the interface scale", () => {
+    expect(triadBoxRem({ widthPx: 798, heightPx: 170, remPx: 24 })).toEqual({
+      width: 15,
+      height: 170 / 24,
+    });
+  });
+});
+
 describe("triadLayout", () => {
+  it("keeps every axis and label inside a box shorter than the usual one, at every angle", () => {
+    // The overlay clips what leaves it, so a short stage must shorten the triad, not cut it off.
+    const shortBox = { width: 15, height: 4.625 };
+    const inBox: BoxPx = {
+      leftPx: -shortBox.width / 2,
+      topPx: -shortBox.height / 2,
+      widthPx: shortBox.width,
+      heightPx: shortBox.height,
+    };
+    const failures: string[] = [];
+
+    for (const angles of everyAngle()) {
+      const axes = triadLayout(FRAME, angles, shortBox);
+      const clear = axes.every(
+        (axis) =>
+          within(
+            {
+              leftPx: axis.labelAt.x - axis.labelSize.widthRem / 2,
+              topPx: axis.labelAt.y - axis.labelSize.heightRem / 2,
+              widthPx: axis.labelSize.widthRem,
+              heightPx: axis.labelSize.heightRem,
+            },
+            inBox,
+          ) &&
+          within(
+            { leftPx: axis.tip.x - 0.25, topPx: axis.tip.y - 0.25, widthPx: 0.5, heightPx: 0.5 },
+            inBox,
+          ),
+      );
+      if (!clear) {
+        failures.push(`${angles.azimuthDeg}°, ${angles.elevationDeg}°`);
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+
   it("keeps the labels from covering each other, and inside the triad's box", () => {
     const failures: string[] = [];
     const inBox: BoxPx = { leftPx: -7.5, topPx: -4, widthPx: 15, heightPx: 8 };

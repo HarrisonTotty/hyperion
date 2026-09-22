@@ -8,6 +8,8 @@ import { symbolOutline } from "./symbols";
 export interface ColourTokens extends Readonly<Record<ColourToken, string>> {
   /** `--surface-0`, which the canvas is cleared to. */
   readonly surface0: string;
+  /** `--text-muted`, which a stale view is drawn in ({@link staleTokens}). */
+  readonly textMuted: string;
 }
 
 /** The custom property behind each colour a spatial view uses. */
@@ -17,6 +19,7 @@ const TOKEN_PROPERTIES: Readonly<Record<keyof ColourTokens, string>> = {
   target: "--target",
   line: "--line",
   surface0: "--surface-0",
+  textMuted: "--text-muted",
 };
 
 function isTokenName(name: string): name is keyof ColourTokens {
@@ -56,6 +59,25 @@ export function readTokens(element: Element): ColourTokens {
     target: read(TOKEN_PROPERTIES.target),
     line: read(TOKEN_PROPERTIES.line),
     surface0: read(TOKEN_PROPERTIES.surface0),
+    textMuted: read(TOKEN_PROPERTIES.textMuted),
+  };
+}
+
+/**
+ * The same colours for a view whose data is stale: everything a mark or a curve is drawn in reads
+ * in `--text-muted`.
+ *
+ * @remarks
+ * The guide shows a stale value in `--text-muted` ("Data states"), and a stale map's picture is
+ * already ramped to it (plan 05, T8.d). `--line`, the reference grid, is furniture and not data, so
+ * it is left alone, as is the background.
+ */
+export function staleTokens(tokens: ColourTokens): ColourTokens {
+  return {
+    ...tokens,
+    text: tokens.textMuted,
+    accent: tokens.textMuted,
+    target: tokens.textMuted,
   };
 }
 

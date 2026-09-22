@@ -27,7 +27,7 @@ export default defineConfig({
     // registry and of the jsdom, so the suite has to be order-independent, which is a rule it
     // already keeps: `vitest run --sequence.shuffle` passes. The shared setup restores anything
     // that would otherwise carry from one file to the next.
-    isolate: false,
+    // isolate on
     projects: [
       {
         extends: true,

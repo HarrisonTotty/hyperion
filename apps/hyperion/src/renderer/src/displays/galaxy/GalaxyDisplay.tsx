@@ -1,38 +1,14 @@
 import type { UniverseIdHex } from "@hyperion/protocol";
-import { memo, useId, useState } from "react";
+import { memo, useState } from "react";
 
 import type { CentreLy } from "../../lib/galaxy/model";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { useUniverse } from "../../lib/universe";
 import { CentreEntry } from "./CentreEntry";
-import { GalaxyPages } from "./GalaxyPages";
+import { type GalaxyPage, GalaxyPages } from "./GalaxyPages";
+import { SystemsPanel } from "./SystemsPanel";
 import { UniversePanel } from "./UniversePanel";
-
-interface DataPanelProps {
-  readonly title: string;
-  /** The panel's place in the display's layout. */
-  readonly className: string;
-  readonly universeOpen: boolean;
-}
-
-/**
- * A data panel whose content is built by a later task: the local chart (P05.T11).
- *
- * @remarks
- * It shows only what is true: its title, and `NO UNIVERSE OPEN` until a universe is. Nothing is
- * drawn in it until its content exists.
- */
-function DataPanel({ title, className, universeOpen }: DataPanelProps) {
-  const titleId = useId();
-  return (
-    <section className={`panel ${className}`} aria-labelledby={titleId}>
-      <h2 className="panel__title" id={titleId}>
-        {title}
-      </h2>
-      {universeOpen ? null : <p className="panel__empty">NO UNIVERSE OPEN</p>}
-    </section>
-  );
-}
+import { useLocalChart } from "./useLocalChart";
 
 /** Where the map cursor starts: the galactic centre. */
 const ORIGIN_LY: CentreLy = [0, 0, 0];
@@ -46,15 +22,23 @@ interface UniverseChoice {
   readonly expanded: boolean;
 }
 
+/** The page on show and the open universe it was chosen for: a choice lasts until another opens. */
+interface PageChoice {
+  readonly openId: UniverseIdHex | null;
+  readonly page: GalaxyPage;
+}
+
 function GalaxyPanels() {
   const { open, createUnconfirmed } = useUniverse();
   const { status } = useServerLink();
   const openId = open?.id ?? null;
   const [universeChoice, setUniverseChoice] = useState<UniverseChoice | null>(null);
+  const [pageChoice, setPageChoice] = useState<PageChoice | null>(null);
   // Picked on the map and entered in CURSOR, which sit side by side.
   const [cursorLy, setCursorLy] = useState<CentreLy>(ORIGIN_LY);
   // Chosen on the map and charted by the local chart, so held by the display both are part of.
   const [chartCentreLy, setChartCentreLy] = useState<CentreLy | null>(null);
+  const chart = useLocalChart(chartCentreLy);
   // Whole while no universe is open, and while a create's result is unconfirmed, so that its
   // report is seen; folded once one is open.
   const universeExpanded =
@@ -62,6 +46,7 @@ function GalaxyPanels() {
     (universeChoice !== null && universeChoice.openId === openId
       ? universeChoice.expanded
       : openId === null);
+  const page = pageChoice !== null && pageChoice.openId === openId ? pageChoice.page : "map";
 
   return (
     <div className="galaxy">
@@ -74,9 +59,14 @@ function GalaxyPanels() {
         />
         <GalaxyPages
           hidden={universeExpanded}
+          page={page}
+          onPage={(next) => {
+            setPageChoice({ openId, page: next });
+          }}
           cursorLy={cursorLy}
           onCursor={setCursorLy}
           centreLy={chartCentreLy}
+          chart={chart}
         />
       </div>
       <div className="galaxy__column galaxy__column--chart">
@@ -84,11 +74,15 @@ function GalaxyPanels() {
           <CentreEntry
             cursorLy={cursorLy}
             onCursor={setCursorLy}
-            onCentre={setChartCentreLy}
+            onCentre={(centreLy) => {
+              setChartCentreLy(centreLy);
+              // The chart is what CENTRE CHART acts on, so it is what the column then shows.
+              setPageChoice({ openId, page: "chart" });
+            }}
             heldBack={linkDownReason(status)}
           />
         )}
-        <DataPanel title="Local Chart" className="galaxy__chart" universeOpen={open !== null} />
+        {open === null ? null : <SystemsPanel chart={chart} />}
       </div>
     </div>
   );
@@ -100,13 +94,15 @@ function GalaxyPanels() {
  *
  * @remarks
  * Two columns. The first holds `UNIVERSE`, folded to one line once a universe is open, and below
- * it the `PARAMETERS` and `GALAXY MAP` pages, which share a panel; `UNIVERSE` shown whole takes the
- * column, and the pages are out of view until it folds again. The second holds the `CURSOR` panel,
- * beside the map and after it in reading order, and the local chart. The display holds the map
- * cursor, which the map and `CURSOR` share, and the chart's centre, which `CENTRE CHART` sets and
- * the local chart (P05.T11.g) takes as its `centreLy`, so that both last across a visit to another
- * display (plan 05, design note D1). With no universe open, `UNIVERSE` is whole and the local chart
- * says `NO UNIVERSE OPEN`. Memoised: it takes no props and reads the server link and the universe
- * from context, so a latency update, which re-renders `App`, does not re-render it.
+ * it the `PARAMETERS`, `GALAXY MAP` and `LOCAL CHART` pages, which share a panel; `UNIVERSE` shown
+ * whole takes the column, and the pages are out of view until it folds again. The second holds the
+ * `CURSOR` panel, beside the map and after it in reading order, and `SYSTEMS`, the list and readout
+ * the chart is paired with. The display holds the map cursor, which the map and `CURSOR` share, the
+ * chart's centre, which `CENTRE CHART` sets, the page on show, which `CENTRE CHART` turns to the
+ * chart, and, through `useLocalChart`, the chart itself, since its picture and its list stand in
+ * different columns. All of it lasts across a visit to another display (plan 05, design note D1).
+ * With no universe open, `UNIVERSE` is whole and says `NO UNIVERSE OPEN`, and nothing else is shown.
+ * Memoised: it takes no props and reads the server link and the universe from context, so a latency
+ * update, which re-renders `App`, does not re-render it.
  */
 export const GalaxyDisplay = memo(GalaxyPanels);

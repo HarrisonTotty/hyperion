@@ -66,6 +66,7 @@ function viewOf(props: Partial<SpatialViewProps>) {
       time={{ label: "UT", value: "+0.00", unit: "yr", widthCh: 9 }}
       coreDistance={{ value: "26,000.0", unit: "ly" }}
       accessibleName="Local chart"
+      stale={false}
       onSelect={() => undefined}
       {...props}
     />
@@ -1227,6 +1228,20 @@ describe("SpatialView's readouts", () => {
     expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
     expect(container.querySelector("[data-core]")).toBeNull();
     expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
+  });
+
+  it("shortens the triad to a stage under its usual box, which the overlay would clip", () => {
+    // The local chart's stage at 1280 × 688 with its census table shown: 798 × 74 px.
+    fakeFramesAndTimeouts();
+    stubLayout(798, 74);
+    stubCanvas();
+    render(viewOf({}));
+
+    const triad = screen.getByRole("img", { name: "Axis triad" });
+    expect(triad.style.height).toBe("4.625rem");
+    for (const name of ["COREWARD", "SPINWARD", "NORTH"]) {
+      expect(within(triad).getByText(name)).toBeVisible();
+    }
   });
 });
 

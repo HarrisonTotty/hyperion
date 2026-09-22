@@ -225,6 +225,8 @@ describe("App", () => {
 
       await user.keyboard("c");
 
+      // C shows the chart it centred, so the map is chosen again to read its marks.
+      await user.click(screen.getByRole("tab", { name: "GALAXY MAP" }));
       expect(chartCentreMarks()).toHaveLength(2);
     });
 

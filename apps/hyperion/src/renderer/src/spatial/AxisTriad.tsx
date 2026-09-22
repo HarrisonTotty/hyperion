@@ -1,6 +1,6 @@
 import type { CameraAngles } from "./camera";
 import type { LocalFrame } from "./frame";
-import { TRIAD_BOX_REM, TRIAD_MARKER_REM, type TriadAxis, triadLayout } from "./furniture";
+import { TRIAD_MARKER_REM, type TriadAxis, type TriadBoxRem, triadLayout } from "./furniture";
 
 /** SVG user units in a `rem`, so that stroke widths read as CSS pixels at 100%. */
 const UNITS_PER_REM = 16;
@@ -70,6 +70,11 @@ export interface AxisTriadProps {
   readonly frame: LocalFrame;
   /** Where the camera looks from. */
   readonly angles: CameraAngles;
+  /**
+   * The box to draw in, from `triadBoxRem`: the view's own size where that is smaller than the
+   * triad's usual 15 × 8 rem, so that the overlay never clips the triad.
+   */
+  readonly boxRem: TriadBoxRem;
 }
 
 /**
@@ -84,10 +89,10 @@ export interface AxisTriadProps {
  * labelled `-X` and `+Y`, as the frame falls back to them (design note D11). The labels are DOM
  * text, in B612; the picture is one image to assistive technology, named `Axis triad`.
  */
-export function AxisTriad({ frame, angles }: AxisTriadProps) {
-  const axes = triadLayout(frame, angles);
-  const halfWidth = units(TRIAD_BOX_REM.width / 2);
-  const halfHeight = units(TRIAD_BOX_REM.height / 2);
+export function AxisTriad({ frame, angles, boxRem }: AxisTriadProps) {
+  const axes = triadLayout(frame, angles, boxRem);
+  const halfWidth = units(boxRem.width / 2);
+  const halfHeight = units(boxRem.height / 2);
   return (
     <div
       className="axis-triad"
@@ -96,7 +101,7 @@ export function AxisTriad({ frame, angles }: AxisTriadProps) {
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role="img"
       aria-label="Axis triad"
-      style={{ width: `${TRIAD_BOX_REM.width}rem`, height: `${TRIAD_BOX_REM.height}rem` }}
+      style={{ width: `${boxRem.width}rem`, height: `${boxRem.height}rem` }}
     >
       <svg
         className="axis-triad__axes"
@@ -113,7 +118,7 @@ export function AxisTriad({ frame, angles }: AxisTriadProps) {
           key={axis.name}
           className="axis-triad__label"
           style={{
-            transform: `translate(${TRIAD_BOX_REM.width / 2 + axis.labelAt.x}rem, ${TRIAD_BOX_REM.height / 2 + axis.labelAt.y}rem) translate(-50%, -50%)`,
+            transform: `translate(${boxRem.width / 2 + axis.labelAt.x}rem, ${boxRem.height / 2 + axis.labelAt.y}rem) translate(-50%, -50%)`,
           }}
         >
           {axis.label}

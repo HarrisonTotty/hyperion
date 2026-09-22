@@ -177,20 +177,19 @@ describe("GalaxyDisplay", () => {
     vi.useRealTimers();
   });
 
-  it("shows UNIVERSE whole and the local chart, each a named region, before a universe is open", () => {
+  it("shows UNIVERSE whole and nothing else before a universe is open", () => {
     renderDisplay();
 
-    for (const name of ["Universe", "Local Chart"]) {
-      const region = screen.getByRole("region", { name });
-      expect(within(region).getByRole("heading", { level: 2, name })).toBeInTheDocument();
-    }
-    expect(universeToggle()).toHaveAttribute("aria-expanded", "true");
+    const universe = screen.getByRole("region", { name: "Universe" });
     expect(
-      within(screen.getByRole("region", { name: "Local Chart" })).getByText("NO UNIVERSE OPEN"),
+      within(universe).getByRole("heading", { level: 2, name: "Universe" }),
     ).toBeInTheDocument();
-    // Nothing to page through or to centre on yet.
+    expect(universeToggle()).toHaveAttribute("aria-expanded", "true");
+    expect(within(universe).getByText("NO UNIVERSE OPEN")).toBeInTheDocument();
+    // Nothing to page through, to centre on, or to list yet.
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Cursor" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Systems" })).not.toBeInTheDocument();
   });
 
   it("drops the empty state once a universe opens", async () => {
@@ -277,13 +276,17 @@ describe("GalaxyDisplay", () => {
   });
 
   describe("pages", () => {
-    it("offers PARAMETERS and GALAXY MAP, and shows the map by default", async () => {
+    it("offers the parameters, the map and the chart, and shows the map by default", async () => {
       await renderWithMaps();
 
       const tabs = within(screen.getByRole("tablist", { name: "Galaxy pages" })).getAllByRole(
         "tab",
       );
-      expect(tabs.map((tab) => tab.textContent)).toEqual(["PARAMETERS", "GALAXY MAP"]);
+      expect(tabs.map((tab) => tab.textContent)).toEqual([
+        "PARAMETERS",
+        "GALAXY MAP",
+        "LOCAL CHART",
+      ]);
       expect(screen.getByRole("tab", { name: "GALAXY MAP" })).toHaveAttribute(
         "aria-selected",
         "true",
@@ -324,8 +327,8 @@ describe("GalaxyDisplay", () => {
 
       await user.keyboard("{End}");
 
-      expect(map).toHaveFocus();
-      expect(mapPage()).toBeVisible();
+      expect(screen.getByRole("tab", { name: "LOCAL CHART" })).toHaveFocus();
+      expect(screen.getByRole("tabpanel", { name: "LOCAL CHART" })).toBeVisible();
 
       await user.keyboard("{Home}");
 
@@ -336,8 +339,8 @@ describe("GalaxyDisplay", () => {
     it("wraps round from the last page to the first, and back", async () => {
       const { user } = await renderWithMaps();
       const parameters = screen.getByRole("tab", { name: "PARAMETERS" });
-      const map = screen.getByRole("tab", { name: "GALAXY MAP" });
-      map.focus();
+      const chart = screen.getByRole("tab", { name: "LOCAL CHART" });
+      await user.click(chart);
 
       await user.keyboard("{ArrowRight}");
 
@@ -346,8 +349,8 @@ describe("GalaxyDisplay", () => {
 
       await user.keyboard("{ArrowLeft}");
 
-      expect(map).toHaveFocus();
-      expect(map).toHaveAttribute("aria-selected", "true");
+      expect(chart).toHaveFocus();
+      expect(chart).toHaveAttribute("aria-selected", "true");
     });
 
     it("shows the map again once another universe is opened", async () => {
@@ -388,7 +391,7 @@ describe("GalaxyDisplay", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
       );
       expect(
-        cursorPanel().compareDocumentPosition(screen.getByRole("region", { name: "Local Chart" })),
+        cursorPanel().compareDocumentPosition(screen.getByRole("region", { name: "Systems" })),
       ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     });
 
@@ -442,6 +445,8 @@ describe("GalaxyDisplay", () => {
 
       await user.keyboard("c");
 
+      // C shows the chart it centred, so the map is chosen again to read its mark.
+      await user.click(screen.getByRole("tab", { name: "GALAXY MAP" }));
       expect(
         within(mapView("FACE-ON FROM NORTH")).getByRole("img", { name: "Chart centre" }),
       ).toHaveStyle({ left: "50%", top: "50%" });
@@ -647,6 +652,8 @@ describe("GalaxyDisplay", () => {
     // One map pixel down the face-on map, x = 16,384 ly, then the chart is centred on the cursor.
     await user.keyboard("{ArrowDown}c");
 
+    // C shows the chart it centred, so the map is chosen again to read its marks.
+    await user.click(screen.getByRole("tab", { name: "GALAXY MAP" }));
     expect(
       within(mapView("FACE-ON FROM NORTH")).getByRole("img", { name: "Chart centre" }),
     ).toHaveStyle({ left: "50%", top: "62.5%" });

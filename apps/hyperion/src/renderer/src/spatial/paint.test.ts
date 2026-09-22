@@ -5,7 +5,7 @@ import type { Camera, Viewport } from "./camera";
 import { buildDrawList, type DrawList, type DrawOp, type SymbolOp } from "./drawList";
 import { localFrameAt } from "./frame";
 import type { SpatialScene } from "./marks";
-import { type ColourTokens, paint, readTokens, sameTokens } from "./paint";
+import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { symbolOutline } from "./symbols";
 import { vec3 } from "./vec3";
 
@@ -16,6 +16,7 @@ const TOKENS: ColourTokens = {
   target: "#333333",
   line: "#444444",
   surface0: "#555555",
+  textMuted: "#666666",
 };
 
 function listOf(ops: ReadonlyArray<DrawOp>): DrawList {
@@ -131,6 +132,7 @@ describe("readTokens", () => {
       target: "#e879f9",
       line: "#1c2a3a",
       surface0: "#05080d",
+      textMuted: "#8a9db3",
     });
     element.remove();
   });
@@ -143,6 +145,7 @@ describe("readTokens", () => {
       "--target": " #e879f9 ",
       "--line": " #1c2a3a",
       "--surface-0": " #05080d",
+      "--text-muted": " #8a9db3 ",
     };
     vi.spyOn(CSSStyleDeclaration.prototype, "getPropertyValue").mockImplementation(
       (property: string) => computed[property] ?? "",
@@ -154,6 +157,7 @@ describe("readTokens", () => {
       target: "#e879f9",
       line: "#1c2a3a",
       surface0: "#05080d",
+      textMuted: "#8a9db3",
     });
   });
 
@@ -167,9 +171,22 @@ describe("readTokens", () => {
 describe("sameTokens", () => {
   it("holds for sets equal in every token and fails for one that differs in any", () => {
     expect(sameTokens(TOKENS, { ...TOKENS })).toBe(true);
-    for (const name of ["text", "accent", "target", "line", "surface0"] as const) {
+    for (const name of ["text", "accent", "target", "line", "surface0", "textMuted"] as const) {
       expect(sameTokens(TOKENS, { ...TOKENS, [name]: "#000000" })).toBe(false);
     }
+  });
+});
+
+describe("staleTokens", () => {
+  it("draws every mark and curve of a stale view in --text-muted, keeping the grid and background", () => {
+    expect(staleTokens(TOKENS)).toEqual({
+      text: TOKENS.textMuted,
+      accent: TOKENS.textMuted,
+      target: TOKENS.textMuted,
+      line: TOKENS.line,
+      surface0: TOKENS.surface0,
+      textMuted: TOKENS.textMuted,
+    });
   });
 });
 

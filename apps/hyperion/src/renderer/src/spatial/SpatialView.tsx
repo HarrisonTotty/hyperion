@@ -23,6 +23,7 @@ import {
   type Viewport,
   zoomLimits,
 } from "./camera";
+import { StaleMark } from "../components/StaleMark";
 import { AxisTriad } from "./AxisTriad";
 import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
 import { buildDrawList, type ScreenPoint } from "./drawList";
@@ -32,12 +33,14 @@ import {
   coreArrowLayout,
   coreLabelText,
   placeCurveLabels,
+  TRIAD_BOX_REM,
+  triadBoxRem as triadBoxOf,
   triadFootprintPx,
   triadLayout,
 } from "./furniture";
 import { chooseLabels, placeLabels } from "./labels";
 import type { SpatialScene } from "./marks";
-import { type ColourTokens, paint, readTokens, sameTokens } from "./paint";
+import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { pick } from "./pick";
 import { PRESET_CONTROLS, PresetButtons } from "./PresetButtons";
 import { Reading, type SpatialQuantity, type SpatialReading } from "./Reading";
@@ -171,8 +174,13 @@ export interface SpatialViewProps {
    * as the centre's `RADIUS`, written the same way (`26,000.0 ly`).
    */
   readonly coreDistance: SpatialQuantity;
-  /** The accessible name of the view's canvas. */
+  /** The accessible name of the view's canvas; `, stale` is added to it while `stale` holds. */
   readonly accessibleName: string;
+  /**
+   * Whether the scene is a snapshot its source no longer backs, as after the link is lost: it is
+   * then drawn in `--text-muted` with a trailing `S`, the guide's stale state.
+   */
+  readonly stale: boolean;
   /** Called with the mark the operator picks on the canvas. */
   readonly onSelect: (id: string) => void;
   /**
@@ -220,6 +228,7 @@ export function SpatialView({
   time,
   coreDistance,
   accessibleName,
+  stale,
   onSelect,
   children,
 }: SpatialViewProps) {
@@ -281,8 +290,12 @@ export function SpatialView({
   );
   // The overlay's furniture: the triad in its corner, the core arrow short of it, and the curve
   // labels round both.
-  const triad = triadLayout(scene.frame, cameraState.angles);
-  const triadBox: BoxPx | null = viewport === null ? null : triadFootprintPx(triad, viewport);
+  // The triad is drawn in the view where the view is smaller than its usual box, since the overlay
+  // clips what leaves it and the guide has a 3D view always show its triad.
+  const triadBoxRem = viewport === null ? TRIAD_BOX_REM : triadBoxOf(viewport);
+  const triad = triadLayout(scene.frame, cameraState.angles, triadBoxRem);
+  const triadBox: BoxPx | null =
+    viewport === null ? null : triadFootprintPx(triad, viewport, triadBoxRem);
   const coreArrow =
     viewport === null || triadBox === null
       ? null
@@ -320,17 +333,23 @@ export function SpatialView({
     );
   }, []);
 
+  // A stale scene is painted in `--text-muted`, as a stale map's picture is ramped to it (T8.d).
+  const paintTokens = useMemo(
+    () => (tokens === null || !stale ? tokens : staleTokens(tokens)),
+    [tokens, stale],
+  );
+
   const backingWidthPx = Math.round(widthPx * pixelRatio);
   const backingHeightPx = Math.round(heightPx * pixelRatio);
   // A new backing size, which clears the canvas, comes with a new viewport and so a new draw list,
   // or with a new pixel ratio: either paints again.
   useLayoutEffect(() => {
     const context = canvasRef.current?.getContext("2d") ?? null;
-    if (context === null || drawList === null || tokens === null) {
+    if (context === null || drawList === null || paintTokens === null) {
       return;
     }
-    paint(context, drawList, tokens, pixelRatio);
-  }, [drawList, tokens, pixelRatio]);
+    paint(context, drawList, paintTokens, pixelRatio);
+  }, [drawList, paintTokens, pixelRatio]);
 
   // The view's single keys act from anywhere on the display but a text field (D3).
   useEffect(() => {
@@ -389,7 +408,7 @@ export function SpatialView({
   const pointerHandlers = usePointerOrbit(canvasRef, remPx, move, onClick);
 
   return (
-    <div className="spatial-view">
+    <div className={stale ? "spatial-view spatial-view--stale" : "spatial-view"}>
       <div className="spatial-view__controls">
         <PresetButtons angles={cameraState.angles} onChoose={choosePreset} />
         <dl className="spatial-view__angles" id={anglesId}>
@@ -431,7 +450,7 @@ export function SpatialView({
           // oxlint-disable-next-line jsx-a11y/no-interactive-element-to-noninteractive-role
           role="application"
           tabIndex={0}
-          aria-label={accessibleName}
+          aria-label={stale ? `${accessibleName}, stale` : accessibleName}
           // The camera's angles and the keys, read when the canvas takes focus, not as they change.
           aria-describedby={`${anglesId} ${legendId}`}
           onKeyDown={onCanvasKeyDown}
@@ -476,7 +495,7 @@ export function SpatialView({
                   </span>
                 ))}
           </div>
-          <AxisTriad frame={scene.frame} angles={cameraState.angles} />
+          <AxisTriad frame={scene.frame} angles={cameraState.angles} boxRem={triadBoxRem} />
           {viewport === null || coreArrow === null ? null : (
             <CoreArrow layout={coreArrow} viewport={viewport} distance={coreDistance} />
           )}
@@ -501,6 +520,7 @@ export function SpatialView({
             units={scaleUnits}
           />
         )}
+        {stale ? <StaleMark /> : null}
         {scene.frame.onAxis ? (
           <p className="spatial-view__axis-note">{AXIS_FALLBACK_MESSAGE}</p>
         ) : null}

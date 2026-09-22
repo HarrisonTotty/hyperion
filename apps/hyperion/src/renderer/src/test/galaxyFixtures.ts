@@ -536,6 +536,7 @@ export interface SystemsInRangeSpec {
   readonly timeYr?: number;
   readonly minLayer?: MassLayer;
   readonly overLimit?: ReadonlyArray<MassLayer>;
+  readonly overCellBudget?: ReadonlyArray<MassLayer>;
   readonly limit?: number;
   readonly universe?: UniverseIdHex;
 }
@@ -554,6 +555,7 @@ export function aSystemsInRange({
   timeYr = 0,
   minLayer = "a",
   overLimit = [],
+  overCellBudget = [],
   limit = 4_000,
   universe = UNIVERSE_ID,
 }: SystemsInRangeSpec = {}): ResponseFor<"systems_in_range"> {
@@ -572,7 +574,7 @@ export function aSystemsInRange({
     centre: galacticPositionFromLy(centreLy),
     radius_ly: radiusLy,
     time: universeTimeFromYears(timeYr),
-    census: aCensus({ minLayer, overLimit, returned, limit }),
+    census: aCensus({ minLayer, overLimit, overCellBudget, returned, limit }),
     systems: records,
   };
 }

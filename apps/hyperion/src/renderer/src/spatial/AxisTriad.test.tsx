@@ -4,12 +4,13 @@ import { describe, expect, it } from "vitest";
 import { AxisTriad } from "./AxisTriad";
 import { type CameraAngles, PRESETS } from "./camera";
 import { localFrameAt } from "./frame";
+import { TRIAD_BOX_REM, type TriadBoxRem } from "./furniture";
 import { vec3 } from "./vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
-function renderTriad(angles: CameraAngles, frame = FRAME) {
-  render(<AxisTriad frame={frame} angles={angles} />);
+function renderTriad(angles: CameraAngles, frame = FRAME, boxRem: TriadBoxRem = TRIAD_BOX_REM) {
+  render(<AxisTriad frame={frame} angles={angles} boxRem={boxRem} />);
   return screen.getByRole("img", { name: "Axis triad" });
 }
 
@@ -113,6 +114,27 @@ describe("AxisTriad", () => {
     // Coreward is up and spinward right, so north's label goes down and to the left.
     expect(northX).toBeLessThan(originX);
     expect(northY).toBeGreaterThan(originY);
+  });
+
+  it("draws itself and every label inside a box shorter than its usual one", () => {
+    // The local chart's stage at 1280 x 688 with the census table shown: 74 px, 4.625rem.
+    const shortBox = { width: 15, height: 4.625 };
+    const triad = renderTriad(PRESETS.oblique, FRAME, shortBox);
+
+    expect(triad.style.height).toBe("4.625rem");
+    for (const name of ["COREWARD", "SPINWARD", "NORTH"]) {
+      const label = within(triad).getByText(name);
+      const [, centreY] = labelCentreRem(label);
+      const halfHeight = 1.09375 / 2;
+      expect(centreY - halfHeight).toBeGreaterThanOrEqual(0);
+      expect(centreY + halfHeight).toBeLessThanOrEqual(shortBox.height);
+    }
+    // Every axis ends, with its symbol, inside the box too.
+    for (const name of ["coreward", "spinward", "north"]) {
+      const line = axis(triad, name).querySelector("line");
+      const reachRem = Math.abs(Number(line?.getAttribute("y2") ?? 0)) / 16;
+      expect(reachRem + 0.25).toBeLessThanOrEqual(shortBox.height / 2);
+    }
   });
 
   it("labels the directions -X and +Y on the galactic axis, where the frame falls back to them", () => {
