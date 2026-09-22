@@ -5,7 +5,8 @@
 //! band shares, the populations' age distributions, the mean present-day mass of a system and the
 //! system count, the mass model and its potential tables ([`potential`]), the density fields with
 //! their ages and metallicities ([`fields`]), true upper bounds on every density over a cell
-//! ([`bounds`]) and the share of each layer per population ([`shares`]). [`Galaxy`] bundles them:
+//! ([`bounds`]), the share of each layer per population ([`shares`]) and the column densities the
+//! galaxy map draws ([`map`]). [`Galaxy`] bundles them:
 //! built once per seed, immutable, and what placement ([`placement`]) and the range query
 //! ([`query`]) read (plan 03).
 //!
@@ -23,6 +24,7 @@ pub mod fates;
 pub mod fields;
 pub mod frame;
 pub mod imf;
+pub mod map;
 pub mod params;
 pub mod placement;
 pub mod potential;

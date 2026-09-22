@@ -1229,3 +1229,33 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   `hyperion-testkit` is therefore a dev-dependency of `hyperion-server`. `tests/galaxy_parameters.rs`
   also covers `open` warming the galaxy (no build for the parameters that follow), two saves of one
   seed sharing one build, and an unknown universe refused before any build.
+- **Deviations in T12, as built.** `CachedCell::new` shrinks the records it is given to fit, because
+  `generate_cell` reserves for every candidate and plan 03's `cell_heap_bytes` charges the records
+  alone; `CachedCell::systems()` lends them and the field stays private. `SharedCellCache::new` takes
+  the budget in bytes and `counters()` returns plan 04's `LruCounters`, so T13.c's snapshot needs no
+  new type. `CellCacheHandle<'_>` borrows the cache rather than sharing it by `Arc`, as the plan's
+  `handle(&self, GalaxyKey)` implies: plan 03's `CellCache::with_cell` takes `impl FnOnce`, so the
+  trait is not dyn-compatible and every caller is generic, and T14.d makes its handle **inside** the
+  pool job, from the `Arc<AppState>` the job owns. The handle asserts that the galaxy it is handed is
+  the one its key names, since lending one galaxy's cells under another's key would break every
+  guarantee the range query makes; a handle is built per query from that query's universe, so a
+  mismatch is a bug. A cell the budget cannot hold is lent and not stored, and its buffer comes back
+  to the handle for the next cell. The cache is **not** in `AppState` yet: nothing reads it until
+  T14.d runs a query, and an unread field is a Clippy failure, so T14.d adds it (from
+  `ServerConfig::cell_cache_bytes`) with its own `ServerStats` accessor. The tests walk the cells of a
+  sphere with plan 03's `cells_in_sphere` and compare cell by cell against `NoCache`, cold, warm,
+  under a 1 KiB budget and with a budget below one record: plan 03's `range_query` (P03.T7–T8) is not
+  in the tree yet, and a walk is what the cache sees of a query.
+- **Where `check_index_headroom` is handled (T11.a, amended in T12).** Plan 03's headroom check is
+  documented as "plan 04's universe registry" calling it once for a galaxy built for play, and
+  `generate_cell` **panics** for a galaxy that would fail it, which T12's `with_cell` can reach. The
+  registry never builds a galaxy, so the check belongs where one is built: `GalaxyCache`'s pool job
+  runs `check_index_headroom` after `Galaxy::new` and, on failure, logs at `error` and answers
+  `ComputeError::UnplayableGalaxy(ExceedIndexCapacityError)` without holding the galaxy, so every
+  request naming that universe is refused rather than panicking. It becomes `internal` with the
+  layer and its counts in the message, because no `ErrorCode` stands for "this universe is
+  unplayable" and design note 15 keeps the codes fixed; a code of its own is the first release's
+  business. `ComputeError` therefore loses `Eq` and `Hash` (the error carries an `f64` mean). No seed
+  is known to fail: the check costs microseconds against a 130 ms build, and a galaxy that fails it is
+  built once and refused. A unit test builds one with plan 03's own recipe (Kroupa, 10¹¹ M☉ and the
+  smallest, flattest, largest-share nuclear disc) through the test-only builder hook.

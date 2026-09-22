@@ -9,7 +9,9 @@
 //! version.
 
 use crate::math;
-use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS, GL32_NODES, GL32_WEIGHTS};
+use crate::tables::gauss_legendre::{
+    GL4_NODES, GL4_WEIGHTS, GL16_NODES, GL16_WEIGHTS, GL32_NODES, GL32_WEIGHTS,
+};
 
 /// `∫ₐᵇ f` by the rule with these nodes and weights on `[−1, 1]`, mapped linearly onto `[a, b]`.
 #[inline]
@@ -45,6 +47,16 @@ pub fn gl32(f: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
 #[must_use]
 pub fn gl16(f: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
     rule(&GL16_NODES, &GL16_WEIGHTS, f, a, b)
+}
+
+/// `∫ₐᵇ f(x) dx` by the 4-point Gauss–Legendre rule: exact for polynomials of degree up to 7.
+///
+/// This is the cheapest rule the galaxy model uses: the map averages the bulge's and the halo's
+/// density across a pixel's height with it, where the density changes by well under an e-fold
+/// (plan 02, P02.T10.b).
+#[must_use]
+pub fn gl4(f: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
+    rule(&GL4_NODES, &GL4_WEIGHTS, f, a, b)
 }
 
 /// `∫ f(x) dx` from `edges[0]` to the last edge, by [`gl32`] on each panel between consecutive
@@ -284,6 +296,19 @@ mod tests {
     fn gl16_integrates_x_to_the_30_exactly() {
         let integral = gl16(|x| math::powi(x, 30), -1.0, 1.0);
         assert_relative(integral, 2.0 / 31.0, 1e-13);
+    }
+
+    #[test]
+    fn gl4_integrates_x_to_the_6_exactly() {
+        assert_relative(gl4(|x| math::powi(x, 6), -1.0, 1.0), 2.0 / 7.0, 1e-15);
+        assert_relative(gl4(|x| math::powi(x, 7) + 1.0, -1.0, 1.0), 2.0, 1e-15);
+        // An exponential over a fifth of an e-fold, as a pixel's height spans: eight digits.
+        assert_relative(
+            gl4(|x| math::exp(-x), 0.0, 0.2),
+            1.0 - math::exp(-0.2),
+            1e-12,
+        );
+        assert_same_bits(gl4(|_| 1.0, 3.0, 3.0), 0.0);
     }
 
     #[test]

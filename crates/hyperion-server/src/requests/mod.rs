@@ -146,12 +146,18 @@ impl From<JobError> for RequestError {
 }
 
 impl From<ComputeError> for RequestError {
-    /// A cached computation fails only as its pool job did, so each cause keeps the code it has as
-    /// a job's.
+    /// A cached computation fails as its pool job did, so each of those causes keeps the code it has
+    /// as a job's. A galaxy whose systems cannot be numbered is the server's own affair
+    /// (`internal`): the universe cannot be served at all, and the message says why, since no
+    /// error code stands for "this universe is unplayable" (design note 15 keeps the codes fixed).
     fn from(error: ComputeError) -> Self {
         match error {
             ComputeError::Submit(error) => error.into(),
             ComputeError::Job(error) => error.into(),
+            ComputeError::UnplayableGalaxy(cause) => request_error(
+                ErrorCode::Internal,
+                format!("this universe cannot be generated: {cause}"),
+            ),
         }
     }
 }
@@ -826,6 +832,23 @@ mod tests {
         assert_eq!(
             code(ComputeError::from(JobError::Cancelled).into()),
             ErrorCode::Cancelled
+        );
+        // A galaxy that cannot be generated is the server's own affair, with the reason in the
+        // message so that an operator can see which layer refused it.
+        let unplayable = RequestError::from(ComputeError::from(
+            hyperion_sim::galaxy::placement::ExceedIndexCapacityError::LayerTooDense {
+                layer: hyperion_sim::id::Layer::A,
+                largest_mean: 64_000.0,
+                capacity: 65_536,
+            },
+        ));
+        assert_eq!(unplayable.code, ErrorCode::Internal);
+        assert_eq!(unplayable.field, None);
+        assert!(
+            unplayable
+                .message
+                .starts_with("this universe cannot be generated: layer A's densest cell"),
+            "{unplayable:?}"
         );
     }
 

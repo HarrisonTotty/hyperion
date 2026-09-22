@@ -1,4 +1,4 @@
-//! Gauss–Legendre nodes and weights on `[−1, 1]`, 16 and 32 points.
+//! Gauss–Legendre nodes and weights on `[−1, 1]`, 4, 16 and 32 points.
 //!
 //! An n-point rule integrates every polynomial of degree up to 2n − 1 exactly. The nodes are the
 //! roots of the Legendre polynomial Pₙ and the weights `2 ÷ ((1 − x²) Pₙ′(x)²)` (Abramowitz and
@@ -9,6 +9,24 @@
 //!
 //! The order of the entries is part of the generator version, because the quadratures in
 //! [`galaxy::quad`](crate::galaxy::quad) sum in index order.
+
+/// The 4 nodes of the Gauss–Legendre rule on `[−1, 1]`, ascending: in closed form the inner pair
+/// is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` and the outer `±√((3 + 2√(6 ÷ 5)) ÷ 7)`.
+pub const GL4_NODES: [f64; 4] = [
+    -0.861_136_311_594_052_6,
+    -0.339_981_043_584_856_26,
+    0.339_981_043_584_856_26,
+    0.861_136_311_594_052_6,
+];
+
+/// The 4 weights of the Gauss–Legendre rule on `[−1, 1]`, in the order of [`GL4_NODES`]: the inner
+/// nodes take `(18 + √30) ÷ 36` and the outer `(18 − √30) ÷ 36`.
+pub const GL4_WEIGHTS: [f64; 4] = [
+    0.347_854_845_137_453_85,
+    0.652_145_154_862_546_1,
+    0.652_145_154_862_546_1,
+    0.347_854_845_137_453_85,
+];
 
 /// The 16 nodes of the Gauss–Legendre rule on `[−1, 1]`, ascending.
 pub const GL16_NODES: [f64; 16] = [
@@ -143,13 +161,14 @@ mod tests {
 
     #[test]
     fn tables_are_ascending_and_exactly_symmetric() {
+        assert_symmetric(&GL4_NODES, &GL4_WEIGHTS);
         assert_symmetric(&GL16_NODES, &GL16_WEIGHTS);
         assert_symmetric(&GL32_NODES, &GL32_WEIGHTS);
     }
 
     #[test]
     fn weights_sum_to_two() {
-        for weights in [&GL16_WEIGHTS[..], &GL32_WEIGHTS[..]] {
+        for weights in [&GL4_WEIGHTS[..], &GL16_WEIGHTS[..], &GL32_WEIGHTS[..]] {
             let sum: f64 = weights.iter().sum();
             assert!((sum - 2.0).abs() < 4.0 * f64::EPSILON, "sum = {sum}");
         }
@@ -167,6 +186,9 @@ mod tests {
                 (p0, p1) = (p1, ((2.0 * k - 1.0) * x * p1 - (k - 1.0) * p0) / k);
             }
             p1
+        }
+        for &x in &GL4_NODES {
+            assert!(legendre(4, x).abs() < 1e-15, "P4({x})");
         }
         for &x in &GL16_NODES {
             assert!(legendre(16, x).abs() < 1e-12, "P16({x})");

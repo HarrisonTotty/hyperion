@@ -8,6 +8,9 @@
 //! - `Fields::layer_bound` over a cell, once per cell in placement (P02.T8): 1 µs, the part of
 //!   plan 03's 1–2 µs per sparse cell that `Fields::densities` leaves.
 //! - `Galaxy::new`, the whole handle a universe's galaxy cache builds once (P02.T9): 100 ms.
+//! - `render_rows` over a whole map on one thread (P02.T10.c): a 512 × 512 face-on map in 1 s and a
+//!   512 × 256 edge-on map in 5 s. Plan 04's pool splits a map into bands of rows over eight
+//!   workers, where its own targets are 1 s and 3 s (P04.T11).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -17,6 +20,7 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::bounds::CellBox;
 use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
 use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
+use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView, render_rows};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::ShareMatrix;
@@ -144,5 +148,35 @@ fn handle(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(galaxy, potential, params, fields, bounds, handle);
+/// The galaxy map of the Milky Way fixture: M1's two rasters, every row in one call on one thread,
+/// as plan 02's P02.T10.c measures them.
+fn map(c: &mut Criterion) {
+    let params = GalaxyParams::milky_way_like();
+    let fields = Fields::new(&params, &MassModel::new(&params));
+    let mut group = c.benchmark_group("map");
+    group.sample_size(10);
+    group.warm_up_time(Duration::from_secs(1));
+    let rasters = [
+        ("face-on 512 × 512", MapView::FaceOn, 512, 512, 60),
+        ("edge-on 512 × 256", MapView::EdgeOn, 512, 256, 400),
+    ];
+    for (label, view, width, height, seconds) in rasters {
+        let spec = MapSpec::new(
+            view,
+            MapSelection::AllSystems,
+            [width, height],
+            [0.0, 0.0],
+            131_072.0 / f64::from(width),
+        )
+        .expect("a raster of the root cube");
+        let mut out = Vec::new();
+        group.measurement_time(Duration::from_secs(seconds));
+        group.bench_function(format!("render_rows ({label})"), |b| {
+            b.iter(|| render_rows(&fields, black_box(&spec), 0..height, &mut out));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(galaxy, potential, params, fields, bounds, handle, map);
 criterion_main!(galaxy);

@@ -31,7 +31,8 @@ const HEADROOM_SIGMAS: f64 = 8.0;
 
 /// Checks that no cell of `galaxy` can draw more candidates than its layer's IDs can number.
 ///
-/// Whoever builds a [`Galaxy`] for play calls this once (plan 04's universe registry). Nothing on
+/// Whoever builds a [`Galaxy`] for play calls this once (plan 04's `GalaxyCache`, in
+/// `compute/galaxies.rs`; the universe registry never builds one). Nothing on
 /// the hot path calls it: [`candidate_count`](super::candidate_count) clamps instead, and this check
 /// exists so that no galaxy which could reach the clamp is ever played.
 ///

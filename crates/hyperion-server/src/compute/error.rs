@@ -3,21 +3,26 @@
 use std::error::Error;
 use std::fmt;
 
+use hyperion_sim::galaxy::placement::ExceedIndexCapacityError;
+
 use super::{JobError, SubmitJobError};
 
-/// A value the server could not compute: the CPU pool would not take the job, or the job did not
-/// finish.
+/// A value the server could not compute: the CPU pool would not take the job, the job did not
+/// finish, or the galaxy it needed cannot be played.
 ///
 /// Every cached computation ([`GalaxyCache`](super::GalaxyCache) and the map and cell caches that
 /// follow it) fails this way and no other, because the work itself is pure: a galaxy or a map is a
 /// function of its key. It is `Clone` so that the waiters on one
 /// [`SingleFlight`](super::SingleFlight) can share it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ComputeError {
     /// The pool refused the job.
     Submit(SubmitJobError),
     /// The job was refused, cancelled or lost before it produced a value.
     Job(JobError),
+    /// The galaxy was built, and a layer of it is too dense for its system IDs, so nothing may be
+    /// generated in it (plan 03, design note 6).
+    UnplayableGalaxy(ExceedIndexCapacityError),
 }
 
 impl fmt::Display for ComputeError {
@@ -25,6 +30,7 @@ impl fmt::Display for ComputeError {
         match self {
             Self::Submit(_) => f.write_str("the computation could not be queued"),
             Self::Job(_) => f.write_str("the computation did not finish"),
+            Self::UnplayableGalaxy(_) => f.write_str("the galaxy cannot be generated"),
         }
     }
 }
@@ -34,7 +40,14 @@ impl Error for ComputeError {
         match self {
             Self::Submit(source) => Some(source),
             Self::Job(source) => Some(source),
+            Self::UnplayableGalaxy(source) => Some(source),
         }
+    }
+}
+
+impl From<ExceedIndexCapacityError> for ComputeError {
+    fn from(error: ExceedIndexCapacityError) -> Self {
+        Self::UnplayableGalaxy(error)
     }
 }
 
@@ -67,6 +80,18 @@ mod tests {
         assert_eq!(
             job.source().map(ToString::to_string).as_deref(),
             Some("the job was cancelled")
+        );
+        let too_dense = ComputeError::from(ExceedIndexCapacityError::LayerTooDense {
+            layer: hyperion_sim::id::Layer::A,
+            largest_mean: 65_000.0,
+            capacity: 65_536,
+        });
+        assert_eq!(too_dense.to_string(), "the galaxy cannot be generated");
+        assert!(
+            too_dense
+                .source()
+                .is_some_and(|source| source.to_string().contains("layer A's densest cell")),
+            "{too_dense:?}"
         );
     }
 }

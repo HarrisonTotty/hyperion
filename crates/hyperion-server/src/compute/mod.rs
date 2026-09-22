@@ -6,10 +6,12 @@
 //! expensive value share a single computation, and a [`CancelToken`] lets whoever waits on a job
 //! give it up. Whatever is computed this way fails only as a [`ComputeError`].
 //!
-//! [`GalaxyCache`] holds the galaxies built from universes' seeds. A density map is computed and
+//! [`GalaxyCache`] holds the galaxies built from universes' seeds and [`SharedCellCache`] the
+//! generated cells a range query reads, each keyed by a [`GalaxyKey`]. A density map is computed and
 //! cached as a [`RawDensityMap`] and quantised for each response by [`quantise_map`].
 
 mod cancel;
+mod cells;
 mod density_map;
 mod error;
 mod galaxies;
@@ -18,6 +20,7 @@ mod pool;
 mod single_flight;
 
 pub use cancel::{CancelOnDrop, CancelToken};
+pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
 pub use density_map::{
     BuildRawMapError, CodeDepth, ParseCodeDepthError, QuantisedMap, RawDensityMap, quantise_map,
 };

@@ -1423,3 +1423,84 @@ component order and the map's quadrature scheme belong to the version as well.
     `from_params` 98 ms), at a load of about 4 on the i7-8665U; at a load of 10–16 every figure
     doubles or triples. `Fields::new` is two thirds of it (R18). `with_full_potential` takes R15's
     2.7 s, not the "about a second" of the Provides and plan 04.
+- **R20. Deviations in T10, as built (P02.T10).** `GENERATOR_VERSION` is 7, the one bump for T10:
+  the new `galaxy_map.golden` is the only golden whose values move, and the fifteen tracked ones
+  and T9's `galaxy_handle.golden` changed their header line only (`golden_diff.py`: "header only,
+  consistent"). `just test-wasm` not run (no wasmtime). The acceptance filter `galaxy_map` matches
+  the integration tests alone, so T10 runs as `cargo test -p hyperion-sim --test galaxy_map` and
+  `--lib galaxy::map`, the latter holding the per-component brute-force comparisons, which need the
+  private column functions; its two slow tests run under `just test-slow`, so the gate is
+  `just ci-slow`.
+  - _`MapSpec` holds one pixel size (T10.c)._ `MapSpec::new(view, selection, [width_px, height_px],
+centre, ly_per_px)` takes square pixels, not the Provides' "extent in ly": plan 04's
+    `RawDensityMap` and the client's `mapGeometry.ts` both carry one `ly_per_px`, and the extent
+    follows from it (`extent()`). Validated: neither dimension 0 (`EmptySize`), a positive finite
+    pixel (`PixelSize`), and the picture inside the root cube with its faces allowed, since M1's
+    maps span the cube exactly (`OutsideRootCube`, by picture axis). Beyond the Provides:
+    `BuildMapSpecError`, the getters, `extent`, `pixel_count`, `pixel_centre(column, row)` and
+    `pixel_span(row)`, the heights a row spans edge-on. `pixel_centre` is the wire's formula, so
+    row 0 is the top of the picture; consecutive `pixel_span`s share an edge bit for bit, and only
+    those heights reproduce a pixel through `column_density_edge_on`.
+  - _Face-on substitutions (T10.a)._ The bulge takes `z = s u ÷ (1 − u)` with `s = c (1 + P)`, `P`
+    the dimensionless in-plane radius: a fixed scale would push the whole fall-off into the last
+    nodes far from the centre, where the density is level out to `z ≈ c P`. A halo component takes
+    `z = s u ÷ (1 − c u)` with `s = q √(a² + R²)` and `c = 1 − s ÷ Z`, `Z` the chord inside the cut,
+    which carries `u = 1` to the chord's end. The dominant merger's break, a kink in the integrand,
+    is a panel edge in both views, which the task text does not ask for: without it the face-on
+    quadrature sits 1.6 × 10⁻⁴ from the brute force instead of 5 × 10⁻¹⁶. Worst relative error over
+    200 points: 2.8 × 10⁻⁸ for the bulge and 3.4 × 10⁻⁵ for the halo, against the plan's 10⁻³.
+  - _The closed forms' 10⁻¹² (T10.a)._ Read against the exact integral of a disc's vertical
+    profile, `VerticalProfile::integral_to`, which is exact for its table (worst 2.2 × 10⁻¹⁶ over
+    200 points), and 10⁻⁵ against the 4,000-step brute force (worst 5.1 × 10⁻⁶): Simpson's rule
+    cannot do better than about 10⁻⁶ across the table's 705 knots, which break the profile's slope,
+    and the nuclear disc's 93 ly height leaves it 16 ly of step. The bar's exponential is smooth and
+    meets 10⁻¹² against a brute force of four panels of a thousand steps. Subnormal columns, which
+    the bar has at the cube's far corners, are skipped.
+  - _The face-on map's systems (T10.a)._ 0.207% under N at 256 × 256 and 0.119% under at
+    1,024 × 1,024, inside the plan's 0.5%: the shortfall is the discs' tails beyond the cube's
+    square, which the map cannot hold, and the rest the pixel grid's midpoint rule. A slow test
+    asserts both.
+  - _Edge-on lines of sight (T10.b)._ A disc with arms takes equal panels of at most 512 ly out to
+    the cube's edge, not "out to eight scale lengths": eight scale lengths is 67,840 ly for the
+    fixture's thin disc, already past the cube, but shorter for other seeds, and stopping there
+    would cut the disc's column short. 512 ly is what resolves an arm of the narrowest drawn width.
+    Every component without arms takes one panel from 0 to 16 ly and eight log-spaced beyond it,
+    out to the cube's edge or, for a halo component, the chord inside its cut, which depends on the
+    height and so is taken afresh at each node of the quadrature across the pixel. Components even
+    in y, which is everything but a disc with arms, take twice the integral over y ≥ 0. The
+    spheroids' 4-node rule across the pixel's height is split at the plane where the pixel straddles
+    it, since the density reads |z| and has a kink there. Worst relative error against a 4,000-step
+    brute force over 200 pixels: 5.7 × 10⁻⁴, against the plan's 3 × 10⁻³.
+  - _Factored, and skipped (T10.b)._ A disc's edge-on pixel is `n0 × (its line of sight's integral)
+× (the mean of its profile over the pixel)` and the bar's is the same without `n0`, so the five
+    sub-discs, which share a scale length and an arm, share one line of sight, and `render_rows`
+    computes each line once per column of a band instead of once per pixel. That changes no value:
+    a line of sight depends on x alone. A disc whose profile integrates to under 10⁻⁹ of its whole
+    column across a pixel is left out of it, and its line of sight is not computed for a band no row
+    of which wants it. A column difference of `integral_to` is clamped at 0 (R18).
+  - _Golden (T10.c)._ `galaxy_map.golden` pins the fixture and the three pinned seeds, each as four
+    16 × 16 rasters of the whole cube (both views by both selections) and a fifth of 16 × 15,
+    edge-on: an odd number of rows puts one pixel across the plane, the only pixel that takes the
+    split quadrature and the sum of two half-columns, which no even raster centred on the plane
+    reaches. 5,056 values. Stable in debug and under the slow-test profile.
+  - _Beyond the Provides._ `galaxy::quad::gl4` and `tables::gauss_legendre::{GL4_NODES,
+GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weight `(18 + √30) ÷ 36` and
+    outer `±√((3 + 2√(6 ÷ 5)) ÷ 7)` with `(18 − √30) ÷ 36`, each rounded once; `MapSpec`'s getters
+    above; `BuildMapSpecError`. `render_rows` clears `out` and fills `rows.len() × width_px` values
+    row by row, and panics if the rows reach past the raster. `column_density_edge_on` debug-asserts
+    that the pixel has a height, since dividing by none would give a NaN.
+  - _Speed (T10.c acceptance)._ Both targets are missed, a finding. On one thread of the i7-8665U
+    the 512 × 512 face-on map takes 5.1 s against the plan's 1 s (4.2–6.2 s over ten samples, at a
+    load of 9–13) and the 512 × 256 edge-on map 64 s against 5 s (57–72 s, at a load of 10–17),
+    where figures run two to three times the unloaded ones (R19): about 2 s and 21 s unloaded by
+    that factor, so the face-on map is some twice its target and the edge-on map four times its.
+    The edge-on cost is the bulge's and the halo's two-dimensional quadrature, the only part that
+    does not factor into a line of sight times a height: 4 heights × 144 nodes × 7 components is
+    4,032 envelope evaluations a pixel, 5.3 × 10⁸ for the raster, at some 40 ns each. Face-on it is
+    the seven 32-node quadratures a pixel, 1.7 × 10⁷ in all. The one lever that moves no value is to
+    group the five halo components that share a cut radius of 65,000 ly, whose panels, nodes and
+    radii are the same, so that each node's `√(x² + y²)` and panel scheme are shared: perhaps a
+    fifth, since the `ln_1p` and `exp` of each component's profile remain. Fewer panels or nodes
+    would move `galaxy_map.golden`. Plan 04's eight workers bring the edge-on
+    raster to about 3 s of wall clock, its own budget (its line 986), and the face-on one to well
+    under a second.

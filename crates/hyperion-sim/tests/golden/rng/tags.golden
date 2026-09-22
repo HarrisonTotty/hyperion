@@ -1,4 +1,4 @@
-# generator_version = 6
+# generator_version = 7
 selftest.stream (SelfTest) = 0xe8e7b5915e249927
 event.selftest (Event) = 0x9442133d71ca154d
 galaxy.params.stellar_mass (Galaxy) = 0x7d41a975d717b0a1

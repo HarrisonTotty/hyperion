@@ -19,6 +19,7 @@ use std::time::Instant;
 use hyperion_protocol::SeedHex;
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::placement::check_index_headroom;
 
 use super::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Priority, SingleFlight,
@@ -182,8 +183,9 @@ impl GalaxyCache {
     ///
     /// [`ComputeError::Submit`] if the pool's interactive queue is full or the pool is shutting
     /// down, and [`ComputeError::Job`] if the build was cancelled, the pool stopped before it ran, or
-    /// it panicked, which would be a bug in [`Galaxy::new`]. A build has no failure of its own: a
-    /// galaxy is a pure function of its key.
+    /// it panicked, which would be a bug in [`Galaxy::new`]. A galaxy that is built and then fails
+    /// [`check_index_headroom`] is [`ComputeError::UnplayableGalaxy`] and is not held: nothing may be
+    /// generated in it, so no request naming that universe can be served.
     ///
     /// # Panics
     ///
@@ -238,6 +240,10 @@ async fn build_on_pool(
     let receiver = pool.try_submit(Priority::Interactive, token, move |_| {
         let started = Instant::now();
         let galaxy = build(Seed::new(key.seed()));
+        // Checked once, here, because this is where a galaxy is built for play: a galaxy whose
+        // densest cell could draw more candidates than its layer's IDs can number is not played at
+        // all, and placement panics rather than generate a short cell (plan 03, design note 6).
+        let headroom = check_index_headroom(&galaxy);
         tracing::info!(
             seed = %SeedHex::from_u64(key.seed()),
             generator_version = %key.generator_version(),
@@ -245,11 +251,22 @@ async fn build_on_pool(
             heap_kib = galaxy.heap_bytes() / 1024,
             "built a galaxy"
         );
-        galaxy
+        match headroom {
+            Ok(()) => Ok(galaxy),
+            Err(error) => {
+                tracing::error!(
+                    seed = %SeedHex::from_u64(key.seed()),
+                    generator_version = %key.generator_version(),
+                    %error,
+                    "refusing a galaxy whose systems cannot be numbered"
+                );
+                Err(error)
+            }
+        }
     })?;
     let galaxy = receiver
         .await
-        .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
+        .unwrap_or_else(|closed| Err(JobError::from(closed)))??;
     Ok(Arc::new(galaxy))
 }
 
@@ -275,6 +292,11 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use hyperion_sim::galaxy::imf::MassFunctionKind;
+    use hyperion_sim::galaxy::params::GalaxyParamsBuilder;
+    use hyperion_sim::galaxy::placement::ExceedIndexCapacityError;
+    use hyperion_sim::id::Layer;
+    use hyperion_sim::units::{LightYears, SolarMasses};
     use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
     use tokio::time::timeout;
 
@@ -477,6 +499,46 @@ mod tests {
         assert_eq!(pool.counters().cancelled(), 1, "the build was skipped");
         assert_eq!(builds.load(Ordering::SeqCst), 0);
         assert_eq!(cache.counters().builds(), 0);
+        pool.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_galaxy_whose_systems_cannot_be_numbered_is_refused_and_not_held() {
+        let pool = pool(1);
+        // The densest centre the parameter builder allows, which no seed draws: plan 03's own test
+        // of `check_index_headroom` builds this galaxy the same way.
+        let cache = GalaxyCache::with_builder(Arc::clone(&pool), |seed| {
+            let params = GalaxyParamsBuilder::new()
+                .mass_function(MassFunctionKind::Kroupa)
+                .stellar_mass(SolarMasses::new(1.0e11))
+                .nuclear_disc_share(0.025)
+                .nuclear_length(LightYears::new(200.0))
+                .nuclear_height_ratio(0.3)
+                .build()
+                .expect("every value is inside its range");
+            Galaxy::from_params(seed, params)
+        });
+        let refusal = async || {
+            let error = timeout(WAIT, cache.get(key(3)))
+                .await
+                .expect("timed out building a galaxy")
+                .expect_err("a galaxy whose layer A is too dense is refused");
+            assert!(
+                matches!(
+                    error,
+                    ComputeError::UnplayableGalaxy(ExceedIndexCapacityError::LayerTooDense {
+                        layer: Layer::A,
+                        ..
+                    })
+                ),
+                "{error:?}"
+            );
+        };
+        refusal().await;
+        let counters = cache.counters();
+        assert_eq!((counters.builds(), counters.entries()), (0, 0));
+        // The key is free, so the next request for that universe is refused in the same way.
+        refusal().await;
         pool.shutdown().await.unwrap();
     }
 
