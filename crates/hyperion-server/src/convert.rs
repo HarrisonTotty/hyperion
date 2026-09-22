@@ -11,8 +11,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use hyperion_protocol::{
-    CreateUniverseRequest, ErrorCode, GalaxyParameters, Parameter, ParameterGroup, ParameterOrigin,
-    ParameterValue, RequestError, SeedHex, Unit, UniverseInfo, UniverseList,
+    CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, GalaxyParameters, Parameter,
+    ParameterGroup, ParameterOrigin, ParameterValue, RequestError, SeedHex, Unit, UniverseInfo,
+    UniverseList,
 };
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
@@ -25,6 +26,7 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::universe::{
     CreateUniverseError, OpenUniverseError, ParseUniverseNameError, Universe, UniverseName,
 };
@@ -122,6 +124,77 @@ pub(crate) fn universe_list(universes: &[Arc<Universe>]) -> UniverseList {
             .map(|universe| UniverseInfo::from(universe.as_ref()))
             .collect(),
         server_generator_version: GENERATOR_VERSION.get(),
+    }
+}
+
+/// A `density_map` request, checked: the map asked for and the depth its codes are wanted in.
+///
+/// The universe is looked up before this, as every galaxy handler does (P04.T14's intro), so what is
+/// left to check is the resolution and the bit depth, each of which names its own field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MapRequest {
+    view: hyperion_protocol::MapView,
+    population: hyperion_protocol::MapPopulation,
+    resolution: MapResolution,
+    depth: CodeDepth,
+}
+
+impl MapRequest {
+    /// The map to compute, over the galaxy `galaxy` names.
+    #[must_use]
+    pub(crate) fn key(self, galaxy: GalaxyKey) -> MapKey {
+        MapKey::new(galaxy, self.view, self.population, self.resolution)
+    }
+
+    /// The depth the codes are quantised to.
+    #[must_use]
+    pub(crate) fn depth(self) -> CodeDepth {
+        self.depth
+    }
+}
+
+impl TryFrom<&DensityMapRequest> for MapRequest {
+    type Error = ConvertRequestError;
+
+    /// Checks `resolution` against the four widths M1 serves and `bits` against 8 and 16.
+    fn try_from(request: &DensityMapRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            view: request.view,
+            population: request.population,
+            resolution: MapResolution::try_from(request.resolution)
+                .map_err(|error| ConvertRequestError::new("resolution", error))?,
+            depth: CodeDepth::try_from(request.bits)
+                .map_err(|error| ConvertRequestError::new("bits", error))?,
+        })
+    }
+}
+
+/// The answer to `density_map`: the raster's geometry, the codes' range, and the codes themselves.
+///
+/// The geometry is the raw map's, so the client reads the pixel-to-light-year rule off the response
+/// alone (the `DensityMap` doc comment), and the floor and ceiling are the quantiser's for the depth
+/// the request asked for. It takes the request by value because it moves the universe's ID into the
+/// answer, and because the base64 of up to 2.8 MiB that
+/// [`QuantisedMap::to_base64`](crate::compute::QuantisedMap::to_base64) makes means this belongs in
+/// a pool job, which owns what it is given.
+#[must_use]
+pub(crate) fn density_map(
+    request: DensityMapRequest,
+    raw: &RawDensityMap,
+    quantised: &QuantisedMap,
+) -> DensityMap {
+    DensityMap {
+        universe: request.universe,
+        view: request.view,
+        population: request.population,
+        width_px: raw.width_px(),
+        height_px: raw.height_px(),
+        centre_ly: raw.centre_ly(),
+        ly_per_px: raw.ly_per_px(),
+        bits: quantised.depth().bits(),
+        floor_log10_per_ly2: quantised.floor_log10_per_ly2(),
+        ceiling_log10_per_ly2: quantised.ceiling_log10_per_ly2(),
+        data_base64: quantised.to_base64(),
     }
 }
 

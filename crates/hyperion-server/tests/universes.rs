@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use common::{TestClient, TestServer, test_entropy};
 use hyperion_protocol::{
-    CreateUniverseRequest, ErrorCode, GalaxyParametersRequest, OpenUniverseRequest, RequestBody,
-    RequestError, ResponseBody, SeedHex, UniverseIdHex, UniverseInfo, UniverseList, UniverseStatus,
+    CreateUniverseRequest, DensityMapRequest, ErrorCode, GalaxyParametersRequest, MapPopulation,
+    MapView, OpenUniverseRequest, RequestBody, RequestError, ResponseBody, SeedHex, UniverseIdHex,
+    UniverseInfo, UniverseList, UniverseStatus,
 };
 use hyperion_server::limits::MAX_UNIVERSE_NAME_CHARS;
 use hyperion_sim::GENERATOR_VERSION;
@@ -234,13 +235,20 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
         }]
     );
     // Every request that names a universe is refused alike, and none of them generates anything:
-    // P04.T14.c and T14.d add `density_map` and `systems_in_range` to this test.
+    // P04.T14.d adds `systems_in_range` to this test.
     let refusals = [
         RequestBody::OpenUniverse(OpenUniverseRequest {
             universe: talos.id.clone(),
         }),
         RequestBody::GalaxyParameters(GalaxyParametersRequest {
             universe: talos.id.clone(),
+        }),
+        RequestBody::DensityMap(DensityMapRequest {
+            universe: talos.id.clone(),
+            view: MapView::FaceOn,
+            population: MapPopulation::All,
+            resolution: 128,
+            bits: 8,
         }),
     ];
     for body in refusals {

@@ -31,7 +31,7 @@ use std::{fmt, io};
 
 use axum::{Router, routing::get};
 
-use crate::compute::{CpuPool, GalaxyCache, ShutDownPoolError, StartPoolError};
+use crate::compute::{CpuPool, DensityMapService, GalaxyCache, ShutDownPoolError, StartPoolError};
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
@@ -58,8 +58,7 @@ pub struct Server {
 
 /// The state every connection and request shares.
 ///
-/// The remaining caches, of density maps and of cells, join it with the handlers that need them
-/// (P04.T14.c and T14.d).
+/// The cache of generated cells joins it with the handler that needs it (P04.T14.d).
 #[derive(Debug)]
 pub(crate) struct AppState {
     /// Every universe the server holds, loaded from the data directory at start.
@@ -71,7 +70,11 @@ pub(crate) struct AppState {
     pub(crate) pool: Arc<CpuPool>,
     /// The galaxies built from the open universes' seeds, at most
     /// [`GALAXY_CACHE_ENTRIES`](limits::GALAXY_CACHE_ENTRIES) of them.
-    pub(crate) galaxies: GalaxyCache,
+    ///
+    /// Shared with [`AppState::maps`], which takes the galaxy of each map it computes from it.
+    pub(crate) galaxies: Arc<GalaxyCache>,
+    /// The density maps computed so far, in the configured byte budget.
+    pub(crate) maps: DensityMapService,
     /// What answers each request: [`Handlers`], or a test's double.
     pub(crate) handler: Arc<dyn Handler>,
     /// The open WebSocket connections, which shutdown closes and waits for.
@@ -124,10 +127,16 @@ impl Server {
             )
             .map_err(StartServerError::StartPool)?,
         );
-        let galaxies = GalaxyCache::new(Arc::clone(&pool));
+        let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
+        let maps = DensityMapService::new(
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            config.map_cache_bytes(),
+        );
         tracing::info!(
             data_dir = %config.data_dir().display(),
             workers = config.workers().get(),
+            map_cache_mib = config.map_cache_bytes() / (1 << 20),
             "server started"
         );
         Ok(Self {
@@ -135,6 +144,7 @@ impl Server {
                 registry,
                 pool,
                 galaxies,
+                maps,
                 handler,
                 connections: Connections::new(),
                 request_stats: RequestStats::new(),
@@ -161,6 +171,7 @@ impl Server {
             self.state.outbound_stats.snapshot(),
             self.state.pool.counters(),
             self.state.galaxies.counters(),
+            self.state.maps.counters(),
         )
     }
 
@@ -317,7 +328,24 @@ mod tests {
         let (handler, mut calls) = Scripted::new();
         let harness = Harness::start(handler).await;
         let stats = || harness.server().stats();
-        assert_eq!(stats(), ServerStats::default());
+        // Every counter starts at zero. The map cache's budget is configuration rather than a
+        // counter, so the snapshot of a fresh server is the default one but for that.
+        assert_eq!(
+            stats(),
+            ServerStats::new(
+                0,
+                RequestCounters::default(),
+                OutboundCounters::default(),
+                crate::compute::PoolCounters::default(),
+                crate::compute::GalaxyCounters::default(),
+                stats().maps(),
+            )
+        );
+        assert_eq!(stats().maps().entries(), 0);
+        assert_eq!(
+            stats().maps().budget(),
+            ServerConfig::builder().build().map_cache_bytes()
+        );
         let mut client = harness.connect().await;
         assert_eq!(stats().connections(), 1);
         client.hello().await;

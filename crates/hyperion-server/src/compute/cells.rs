@@ -183,6 +183,7 @@ mod tests {
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::units::LightYears;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
+    use hyperion_testkit::order::assert_order_independent;
 
     use super::*;
     use crate::cache::ENTRY_OVERHEAD_BYTES;
@@ -379,6 +380,58 @@ mod tests {
         // And both agree with no cache at all.
         assert_eq!(a_then_b.0, uncached(&first));
         assert_eq!(a_then_b.1, uncached(&second));
+    }
+
+    /// Lends `cell` through a handle of `cache`, as one call of an order-independence pass.
+    fn lend_one(cache: &SharedCellCache, cell: CellKey) -> Vec<SystemRecord> {
+        cache
+            .handle(key())
+            .with_cell(galaxy(), cell, <[SystemRecord]>::to_vec)
+    }
+
+    #[test]
+    fn a_cell_is_the_same_whatever_was_asked_before_it() {
+        let cells = disc_cells();
+        // The testkit's check runs every cell forwards, backwards, in a fixed permutation and alone,
+        // which is what the determinism rules ask of anything sitting behind a cache. Three caches:
+        // one kept warm across the passes, one built fresh for every single call, and one whose
+        // budget evicts under the walk.
+        let warm = SharedCellCache::new(ROOMY);
+        assert_order_independent(&cells, |&cell| lend_one(&warm, cell));
+        assert_order_independent(&cells, |&cell| lend_one(&SharedCellCache::new(ROOMY), cell));
+        let tight = SharedCellCache::new(1024);
+        assert_order_independent(&cells, |&cell| lend_one(&tight, cell));
+    }
+
+    #[test]
+    fn threads_walking_one_cache_at_once_lend_the_same_systems() {
+        let cells = disc_cells();
+        let expected = uncached(&cells);
+        // Roomy, so the walks race on hits and inserts, and then a budget below one cell, so they
+        // race on eviction and refusal too: a lent cell is an `Arc` of its own, so whatever the
+        // others evict meanwhile cannot change what a walk reads.
+        for budget in [ROOMY, 1024, size_of::<SystemRecord>()] {
+            let cache = SharedCellCache::new(budget);
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    scope.spawn(|| {
+                        let mut handle = cache.handle(key());
+                        assert_eq!(lend(&mut handle, &cells), expected, "budget {budget}");
+                    });
+                }
+            });
+            let counters = cache.counters();
+            assert!(
+                counters.bytes() <= budget,
+                "{} bytes held of {budget}",
+                counters.bytes()
+            );
+            assert_eq!(
+                counters.hits() + counters.misses(),
+                4 * count(cells.len()),
+                "every lookup is counted once"
+            );
+        }
     }
 
     #[test]

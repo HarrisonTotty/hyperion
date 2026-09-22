@@ -55,30 +55,24 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 
 /// The server's handlers: every request kind, and the code that answers it.
 ///
-/// A kind whose handler has yet to arrive with its P04.T14 subtask (`density_map` and
-/// `systems_in_range`) is answered `unsupported`, as a server that predates the kind would answer
-/// it. Each such handler starts from [`universe::openable_universe`].
+/// A kind whose handler has yet to arrive with its P04.T14 subtask (`systems_in_range`) is answered
+/// `unsupported`, as a server that predates the kind would answer it. Each such handler starts from
+/// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
 impl Handler for Handlers {
-    fn handle(
-        &self,
-        state: Arc<AppState>,
-        body: RequestBody,
-        _token: CancelToken,
-    ) -> HandlerFuture {
+    fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture {
         match body {
             RequestBody::CreateUniverse(request) => Box::pin(universe::create(state, request)),
             RequestBody::ListUniverses => Box::pin(ready(Ok(universe::list(&state)))),
             RequestBody::OpenUniverse(request) => Box::pin(universe::open(state, request)),
             RequestBody::GalaxyParameters(request) => Box::pin(galaxy::parameters(state, request)),
-            RequestBody::DensityMap(_) | RequestBody::SystemsInRange(_) => {
-                Box::pin(ready(Err(request_error(
-                    ErrorCode::Unsupported,
-                    format!("this server does not serve `{}` requests yet", kind(&body)),
-                ))))
-            }
+            RequestBody::DensityMap(request) => Box::pin(galaxy::map(state, request, token)),
+            RequestBody::SystemsInRange(_) => Box::pin(ready(Err(request_error(
+                ErrorCode::Unsupported,
+                format!("this server does not serve `{}` requests yet", kind(&body)),
+            )))),
         }
     }
 }
@@ -800,12 +794,9 @@ mod tests {
         let harness = Harness::start(scripted).await;
         // Each P04.T14 subtask removes its kind from this list when it serves it, and the last
         // one removes this test.
-        let unserved = every_body().into_iter().filter(|body| {
-            matches!(
-                body,
-                RequestBody::DensityMap(_) | RequestBody::SystemsInRange(_)
-            )
-        });
+        let unserved = every_body()
+            .into_iter()
+            .filter(|body| matches!(body, RequestBody::SystemsInRange(_)));
         for body in unserved {
             let expected = format!("this server does not serve `{}` requests yet", kind(&body));
             let answer = Handlers

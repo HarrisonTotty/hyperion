@@ -7,6 +7,7 @@
 
 use tokio::sync::watch;
 
+use crate::cache::LruCounters;
 use crate::compute::{GalaxyCounters, PoolCounters};
 
 /// A snapshot of the server's activity.
@@ -17,6 +18,7 @@ pub struct ServerStats {
     outbound: OutboundCounters,
     pool: PoolCounters,
     galaxies: GalaxyCounters,
+    maps: LruCounters,
 }
 
 impl ServerStats {
@@ -26,6 +28,7 @@ impl ServerStats {
         outbound: OutboundCounters,
         pool: PoolCounters,
         galaxies: GalaxyCounters,
+        maps: LruCounters,
     ) -> Self {
         Self {
             connections,
@@ -33,6 +36,7 @@ impl ServerStats {
             outbound,
             pool,
             galaxies,
+            maps,
         }
     }
 
@@ -65,6 +69,13 @@ impl ServerStats {
     #[must_use]
     pub fn galaxies(&self) -> GalaxyCounters {
         self.galaxies
+    }
+
+    /// The density map cache's contents and use, including its byte budget: a repeated request for
+    /// one map is a hit and computes nothing.
+    #[must_use]
+    pub fn maps(&self) -> LruCounters {
+        self.maps
     }
 }
 

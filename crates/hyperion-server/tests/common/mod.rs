@@ -27,10 +27,24 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 /// Upper bound on any single network wait.
 ///
-/// Generous, because the answer being waited for may be one that builds a galaxy: about 130 ms with
-/// `hyperion-sim` optimised as the root `Cargo.toml` optimises it (plan 02, Risks, R19), and several
-/// times that on a loaded machine or an unoptimised build.
+/// Generous, because the answer waited for may be one that builds a galaxy, and `open_universe`
+/// always is (plan 04, design note 6). A build is about 130 ms in a release build (plan 02, Risks,
+/// R19), but these tests run under `just test`, where `hyperion-sim` is `opt-level = 2` with debug
+/// assertions and overflow checks still on, and `cargo test` runs a binary's tests in parallel, so
+/// several galaxies are built at once. Measured over a loopback socket on eight cores at load
+/// average 14 (2026-09-22): one cold `open_universe` took 0.85–0.93 s on its own and up to 2.04 s
+/// with twelve running together, against 0.5 ms warm and under 20 ms for every other wait here.
+/// Twenty seconds is ten times the worst of that, and still turns a hung server into a failed test
+/// rather than a hung suite.
 pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Upper bound on a server's teardown, which is not a network wait.
+///
+/// Shutting the CPU pool down drops what is queued and then waits for the jobs in hand, and a job
+/// cannot be aborted (plan 04, design note 5). One band of a 1,024-pixel edge-on map is the longest
+/// of them, seconds of work and more on a loaded machine, so a shutdown is given far longer than a
+/// message.
+pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// The values a test server's entropy hands out, in order: seeds that a create leaves out, then
 /// universe IDs, as they are drawn.
@@ -138,7 +152,7 @@ impl TestServer {
                 .expect("serving ends without error");
         }
         if let Some(server) = self.server.take() {
-            timeout(NETWORK_TIMEOUT, server.shutdown())
+            timeout(SHUTDOWN_TIMEOUT, server.shutdown())
                 .await
                 .expect("timed out shutting the server down")
                 .expect("the server shuts down cleanly");

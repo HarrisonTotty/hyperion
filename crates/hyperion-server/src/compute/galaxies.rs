@@ -110,7 +110,7 @@ impl Held {
     /// recently used entry if the cache is full.
     ///
     /// Returns whatever it dropped, for the caller to drop outside the lock.
-    fn insert(&mut self, key: GalaxyKey, galaxy: &Arc<Galaxy>) -> Option<Arc<Galaxy>> {
+    fn insert(&mut self, key: GalaxyKey, galaxy: Arc<Galaxy>) -> Option<Arc<Galaxy>> {
         let replaced = self
             .entries
             .iter()
@@ -122,7 +122,7 @@ impl Held {
         } else {
             None
         };
-        self.entries.push((key, Arc::clone(galaxy)));
+        self.entries.push((key, galaxy));
         self.counters.builds += 1;
         self.counters.entries = self.entries.len();
         self.counters.bytes = self
@@ -214,7 +214,7 @@ impl GalaxyCache {
                 let galaxy = build_on_pool(&pool, build, key).await?;
                 // The galaxy it replaces or evicts is dropped outside the lock: freeing 1.4 MiB is
                 // not the business of a critical section every request passes through.
-                let dropped = lock(&held).insert(key, &galaxy);
+                let dropped = lock(&held).insert(key, Arc::clone(&galaxy));
                 drop(dropped);
                 Ok(galaxy)
             })

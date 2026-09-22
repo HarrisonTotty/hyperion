@@ -76,3 +76,14 @@ opt-level = 2
 
 [profile.dev.package.hyperion-testkit]
 opt-level = 2
+
+# Dependencies, for the same reason and at almost no ongoing cost, since they rarely rebuild. `"*"`
+# is every dependency and no workspace member. It is `libm` that matters: the sim's only runtime
+# dependency, which every transcendental reaches through `hyperion_sim::math`, so an unoptimised
+# `libm` was undoing part of the sim's own `opt-level = 2` above. It also covers `serde_json`, which
+# is most of the work in the protocol's and the server's golden tests. Generated output is
+# unaffected: Rust neither contracts float operations nor enables fast-math, so IEEE results are
+# identical at every optimisation level, `libm` is pinned with `=`, and the whole fast suite, golden
+# files included, already passes bit for bit under `slow-test` at opt-level 3 with thin LTO.
+[profile.dev.package."*"]
+opt-level = 2

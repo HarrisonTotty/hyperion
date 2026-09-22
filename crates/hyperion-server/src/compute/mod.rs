@@ -22,7 +22,8 @@ mod single_flight;
 pub use cancel::{CancelOnDrop, CancelToken};
 pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
 pub use density_map::{
-    BuildRawMapError, CodeDepth, ParseCodeDepthError, QuantisedMap, RawDensityMap, quantise_map,
+    BuildRawMapError, CodeDepth, DensityMapService, MAP_WIDTH_LY, MapKey, MapResolution,
+    ParseCodeDepthError, ParseMapResolutionError, QuantisedMap, RawDensityMap, quantise_map,
 };
 pub use error::ComputeError;
 pub use galaxies::{GalaxyCache, GalaxyCounters};

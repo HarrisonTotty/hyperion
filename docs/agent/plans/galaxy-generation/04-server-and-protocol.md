@@ -1259,3 +1259,48 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   is known to fail: the check costs microseconds against a 130 ms build, and a galaxy that fails it is
   built once and refused. A unit test builds one with plan 03's own recipe (Kroupa, 10¹¹ M☉ and the
   smallest, flattest, largest-share nuclear disc) through the test-only builder hook.
+- **Deviations in T11.c, as built.** `DensityMapService` and `MapKey` live in
+  `compute/density_map.rs` beside the quantiser rather than in a file of their own, so that T11's
+  acceptance filter (`density_map`) reaches their tests and one module owns one concept. The service
+  holds the `GalaxyCache` (`AppState::galaxies` is now an `Arc<GalaxyCache>`) and fetches the galaxy
+  of each map itself, which is what lets `get(key)` have the plan's signature; a `SingleFlight`
+  computation is `'static`, so nothing else could have passed the galaxy in. `MapKey` takes a
+  `MapResolution` (`Px128`, `Px256`, `Px512`, `Px1024`; `TryFrom<u16>` with
+  `ParseMapResolutionError`, `width_px`, `height_px(view)`, `ly_per_px`), which is T14.c's
+  `resolution` check and makes an unserved raster unrepresentable, as `CodeDepth` does for `bits`.
+  The extent is the constant `MAP_WIDTH_LY` (131,072 ly) and the centre is the origin, so `MapKey`'s
+  `MapSpec` cannot fail. A band's pixels are converted to `f32` by the sim's `math::log10`, not the
+  platform's, so the golden codes hold on every machine; a pixel of zero density becomes `−∞`, which
+  also keeps a NaN out of `RawDensityMap`. The service's `counters()` are the cache's `LruCounters`,
+  reported by `ServerStats::maps()`; because those carry the byte budget, which is configuration
+  rather than a counter, `ServerStats::default()` is no longer a fresh server's snapshot and T13.c's
+  counter test compares the counters instead. The flight looks in the cache once more before
+  computing, as `GalaxyCache` does, and `SharedByteLru` counts that look, so two concurrent `get`s
+  of one key show three misses.
+- **Measured map costs (T11.c), which put two of T16's targets out of reach.** Release build, this
+  machine, one thread, seed `00000000000004d2`: a 512-pixel face-on raster is 5.3 s (the plan's
+  target is under 1 s on eight workers: **met**, about 0.7 s); a 128-pixel edge-on raster is 7.5 s;
+  a 1,024-pixel edge-on raster is 422 s, or about 53 s on eight workers. Edge-on costs about 0.85 ms
+  a pixel against face-on's 0.02 ms, because every spheroid component integrates along its own line
+  of sight per pixel (plan 02's `EdgeOnPlan::pixel`), so a 512-pixel edge-on map is 8–13 s on eight
+  workers against the plan's 3 s target: **not met, by 3–4×**, and no server-side change can meet it
+  without plan 02 changing its algorithm. What the server does guarantee is that nothing waits for a
+  map: bands are bulk work, `ping` and `cancel` are answered on the runtime, and a cancelled map
+  stops after the band in hand, which for a 1,024-pixel edge-on map is one band of 16 rows, 13 s
+  here. `BAND_ROWS` is the knob if that tail ever matters: the cost is nearly proportional to a
+  band's pixels, so halving the rows halves the tail for a few percent more total work.
+- **Deviations in T14.c, as built.** `convert.rs` gains `MapRequest` (`TryFrom<&DensityMapRequest>`,
+  checking `resolution` then `bits`, each naming its own field) and `density_map`, which builds the
+  response from the raw map's geometry and the quantiser's floor and ceiling. The handler is
+  `requests::galaxy::map`, and it takes the request's `CancelToken`, so `Handlers::handle` now passes
+  the token on. One interactive pool job builds the whole answer — quantising up to a million pixels
+  and the base64 of up to 2.8 MiB of it, neither of which may touch the runtime — and the response
+  frame is a second job in `requests::respond`, as T13's note foresaw; `convert::density_map`
+  therefore takes the request by value, so the job owns it and moves the universe's ID into the
+  answer. A cancelled request skips a quantising job that is still queued. `tests/common/mod.rs` gains
+  `SHUTDOWN_TIMEOUT` (300 s) for `TestServer::stop`, because a teardown waits for the band in hand
+  and that is not a network wait; `NETWORK_TIMEOUT` still bounds every message. `tests/density_map.rs`
+  covers both views at both depths from one raster each, the geometry, the centre pixel's ceiling
+  code, `young` against `all`, the cache counter, both bad fields, an unknown universe, and the
+  stall: with one worker, a 1,024-pixel edge-on map in flight answers `ping` and then `cancel`
+  without waiting for the map. `tests/universes.rs`'s mismatch test gains `density_map`.
