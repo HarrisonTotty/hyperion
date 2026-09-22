@@ -5,9 +5,10 @@ import pkg from "./package.json" with { type: "json" };
 
 // The tests that need a DOM: every component test, and the three logic tests that render a hook or
 // paint a real canvas. Everything else is pure functions and runs in Node, which costs nothing to
-// create — building a jsdom for all 49 files was half of the suite's time (measured 2026-09-22:
-// 114 s of 250 s tracked). A new `.test.ts` that reaches for `document` or `renderHook` fails with
-// "document is not defined"; list it here, or name it `.test.tsx` if it carries JSX.
+// create — a jsdom for every file was 45% of the suite's tracked time (measured 2026-09-22 on
+// 8 cores: 74.9 s across 56 files), and the half that needs no DOM now runs in about 1.3 s. A new
+// `.test.ts` that reaches for `document` or `renderHook` fails with "document is not defined";
+// list it here, or name it `.test.tsx` if it carries JSX.
 const DOM_TESTS = [
   "src/**/*.test.tsx",
   "src/renderer/src/lib/connection.test.ts",
@@ -22,11 +23,12 @@ export default defineConfig({
   test: {
     restoreMocks: true,
     unstubGlobals: true,
-    // Workers are reused across files instead of one being spawned per file, which halves the
-    // suite again (about 26 s to about 13 s on 8 cores). It costs the isolation of the module
-    // registry and of the jsdom, so the suite has to be order-independent, which is a rule it
-    // already keeps: `vitest run --sequence.shuffle` passes. The shared setup restores anything
-    // that would otherwise carry from one file to the next.
+    // Workers are reused across files instead of one being spawned per file, which vitest costed
+    // at about 2.9 s of spawn and environment each. With the split above, the suite goes from
+    // about 30 s to about 14 s. It gives up the isolation of the module registry and of the jsdom,
+    // so the suite has to be order-independent, which is a rule it already keeps:
+    // `vitest run --sequence.shuffle` passes. The shared setup clears what would otherwise carry
+    // from one file to the next.
     isolate: false,
     projects: [
       {
