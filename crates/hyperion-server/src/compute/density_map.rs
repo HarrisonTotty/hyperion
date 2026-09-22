@@ -623,7 +623,9 @@ impl DensityMapService {
             .run(key, move || async move {
                 // As in `GalaxyCache::get`: a caller can arrive just after another flight has
                 // finished and left the registry, and the map it computed is worth more than a
-                // second computation of it. This look does not count as a lookup.
+                // second computation of it. Unlike the galaxies', this look is counted, because
+                // `SharedByteLru` has no uncounted lookup, so one `get` that computes shows two
+                // misses (plan 04, the T11.c deviations).
                 if let Some(map) = maps.get(&key) {
                     return Ok(map);
                 }
@@ -875,17 +877,53 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn one_worker_and_four_build_the_same_map() {
+    async fn any_worker_count_builds_the_raster_the_sim_renders_in_one_go() {
         let key = key(MapView::FaceOn, MapPopulation::All);
-        let (one_pool, one) = service(1);
-        let (four_pool, four) = service(4);
-        let (on_one, on_four) = tokio::join!(get(&one, key), get(&four, key));
-        // Bit for bit: every band renders from one `MapSpec`, so neither the band size nor the
-        // number of workers that ran them changes a pixel (plan 02, P02.T10).
-        assert_eq!(on_one, on_four);
-        assert_eq!(on_one.log10().len(), 128 * 128);
-        one_pool.shutdown().await.unwrap();
-        four_pool.shutdown().await.unwrap();
+        // What the sim renders for the whole raster in one call, with no banding at all. Every
+        // service below must reproduce it bit for bit: each band renders its rows from this same
+        // `MapSpec` (plan 02, P02.T10, which measured bands of 1 to 13 identical), and the bands
+        // are assembled in row order whatever order they finished in, so neither the split nor the
+        // number of workers that ran it can change a pixel — nor can a band land in the wrong row.
+        let mut values = Vec::new();
+        render_rows(galaxy().fields(), &key.spec(), 0..128, &mut values);
+        let unbanded = to_log10(&values);
+        assert_eq!(unbanded.len(), 128 * 128);
+
+        let mut pools = Vec::new();
+        for workers in [1, 2, 3, 5, 8] {
+            let (pool, service) = service(workers);
+            let map = get(&service, key).await;
+            assert_eq!(
+                map.log10(),
+                unbanded.as_slice(),
+                "the raster built on {workers} workers is not the one the sim renders unbanded"
+            );
+            pools.push(pool);
+        }
+        for pool in pools {
+            pool.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_map_every_waiter_gave_up_on_can_be_asked_for_again() {
+        let (pool, service) = service(1);
+        let key = key(MapView::FaceOn, MapPopulation::All);
+        // The only waiter gives up before the raster is done, which drops the flight and with it
+        // the `CancelOnDrop` that skips the bands still queued (design note 5). Whether it got as
+        // far as a band or not, the key must be free afterwards: a dead flight left in the registry
+        // would make every later request for this map wait for a result that never comes.
+        let abandoned = timeout(Duration::from_millis(1), service.get(key)).await;
+        assert!(
+            abandoned.is_err(),
+            "a 128-pixel raster is not one millisecond of work"
+        );
+        assert_eq!(service.counters().entries(), 0, "nothing was cached");
+
+        let map = get(&service, key).await;
+        assert_eq!(map.log10().len(), 128 * 128);
+        assert_eq!(service.counters().entries(), 1);
+        pool.shutdown().await.unwrap();
     }
 
     #[tokio::test]

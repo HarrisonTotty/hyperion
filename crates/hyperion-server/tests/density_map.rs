@@ -4,15 +4,18 @@
 mod common;
 
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use common::{TestClient, TestServer};
+use common::{NETWORK_TIMEOUT, TestClient, TestServer};
 use hyperion_protocol::{
     ClientMessage, CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, MapPopulation,
-    MapView, RequestBody, RequestError, ResponseBody, SeedHex, ServerMessage, UniverseIdHex,
-    UniverseInfo,
+    MapView, OpenUniverseRequest, RequestBody, RequestError, ResponseBody, SeedHex, ServerMessage,
+    UniverseIdHex, UniverseInfo,
 };
+use hyperion_server::compute::PoolCounters;
+use tokio::time::{sleep, timeout};
 
 /// The seed of every universe these tests create.
 const SEED: u64 = 0x4d2;
@@ -38,6 +41,38 @@ async fn create(client: &mut TestClient, name: &str) -> UniverseInfo {
         Ok(ResponseBody::CreateUniverse(info)) => info,
         other => panic!("expected the created universe, got {other:?}"),
     }
+}
+
+/// Opens `universe`, which warms its galaxy on the pool (P04.T14.a), so that a map asked for
+/// afterwards finds the worker free for its bands.
+async fn open(client: &mut TestClient, universe: &UniverseIdHex) {
+    let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+        universe: universe.clone(),
+    });
+    match client.request(body).await {
+        Ok(ResponseBody::OpenUniverse(_)) => {}
+        other => panic!("expected the opened universe, got {other:?}"),
+    }
+}
+
+/// Waits until the pool has one job in hand and more queued in bulk, and returns its counters.
+///
+/// The plan has the integration tests read [`ServerStats`](hyperion_server::ServerStats) rather than
+/// guess at timing (P04.T13.c); the pool's counters are a snapshot and not a watch, so this polls
+/// them, bounded by [`NETWORK_TIMEOUT`] so that a map that never reaches the pool fails the test
+/// instead of hanging the suite.
+async fn bulk_work_under_way(server: &TestServer) -> PoolCounters {
+    timeout(NETWORK_TIMEOUT, async {
+        loop {
+            let pool = server.stats().pool();
+            if pool.running() > 0 && pool.queued_bulk() > 0 {
+                return pool;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the map's bands never reached the pool")
 }
 
 fn request(
@@ -320,12 +355,15 @@ async fn an_unknown_universe_is_refused_before_any_map_is_computed() {
     server.stop().await;
 }
 
-/// The socket does not stall while a map is computed, and the map can be given up.
+/// The socket does not stall while a map's bands are computed, and the map can be given up.
 ///
-/// One worker and the dearest raster there is: a 1,024-pixel edge-on map is minutes of work on one
-/// worker (see the plan's Risks for the measured cost), so nothing here waits for it. `ping` is
-/// answered by the connection task on the runtime, never by the pool, and `cancel` ends the request
-/// at once while the band in hand runs on.
+/// One worker and the dearest raster there is: a 1,024-pixel edge-on map is 32 bands of some
+/// seconds each on one worker (see the plan's Risks for the measured cost), so nothing here waits
+/// for it. The galaxy is warmed by `open_universe` first, or the one worker would still be building
+/// it when the `cancel` arrives and no band would ever be queued; the pool's counters are then read
+/// before the `ping`, so that the test fails rather than quietly passes if the map never reached the
+/// pool at all. `ping` is answered by the connection task on the runtime, never by the pool, and
+/// `cancel` ends the request at once while the band in hand runs on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
@@ -335,6 +373,8 @@ async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
     let server = TestServer::start_with(config).await;
     let mut client = connected(&server).await;
     let universe = create(&mut client, "Kepler Reach").await;
+    open(&mut client, &universe.id).await;
+    assert_eq!(server.stats().galaxies().builds(), 1, "the galaxy is warm");
 
     let map_id = client
         .send_request(request(
@@ -345,7 +385,20 @@ async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
             8,
         ))
         .await;
-    // The pong arrives while the map is still being computed.
+    // The map is the pool's bulk work and the only worker is inside one of its bands, which is what
+    // the `ping` below has to overtake.
+    let pool = bulk_work_under_way(&server).await;
+    assert_eq!(
+        pool.running(),
+        1,
+        "the one worker has a band in hand: {pool:?}"
+    );
+    // A 512-row raster is 32 bands of 16 rows, so 31 wait behind the one in hand. Asserted loosely
+    // because the band size is a knob the plan reserves, and because a band is seconds of work that
+    // a heavily loaded machine could see finish before this reads the counters.
+    assert!(pool.queued_bulk() > 0, "bands are queued: {pool:?}");
+
+    // The pong arrives while a band of the map is being computed.
     client.send(&ClientMessage::Ping { nonce: 7 }).await;
     match client.next_message().await {
         ServerMessage::Pong { nonce } => assert_eq!(nonce, 7),
@@ -365,10 +418,10 @@ async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
         ServerMessage::Pong { nonce } => assert_eq!(nonce, 8),
         other => panic!("expected a pong, got {other:?}"),
     }
-    // Two requests were made: the create, which answered, and the map, which was cancelled. A
-    // `ping` is not a request and is answered by the connection itself.
+    // Three requests were made: the create and the open, which answered, and the map, which was
+    // cancelled. A `ping` is not a request and is answered by the connection itself.
     let requests = server.stats().requests();
-    assert_eq!((requests.cancelled(), requests.responded()), (1, 1));
+    assert_eq!((requests.cancelled(), requests.responded()), (1, 2));
     assert_eq!(
         server.stats().maps().entries(),
         0,

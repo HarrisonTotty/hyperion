@@ -1304,3 +1304,16 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   code, `young` against `all`, the cache counter, both bad fields, an unknown universe, and the
   stall: with one worker, a 1,024-pixel edge-on map in flight answers `ping` and then `cancel`
   without waiting for the map. `tests/universes.rs`'s mismatch test gains `density_map`.
+- **Validation of T11.c and T14.c, as fixed.** The stall test cancelled its map while the _galaxy_
+  was still building (`galaxies.builds` 0 and `pool.queued_bulk` 0 at the `cancel`), so no band was
+  ever queued and it proved only that pool work does not stall the socket. It now warms the galaxy
+  with `open_universe` first and reads the pool's counters before the `ping`, so it fails rather than
+  quietly passes if the map never reaches the pool; the band in hand then costs about 5.5 s of
+  teardown in the dev profile, measured, which is what `SHUTDOWN_TIMEOUT` has to exceed. The
+  worker-count test compares one, two, three, five and eight workers against the raster
+  `render_rows` renders in one unbanded call, which pins the row order of the assembly as well as
+  the band independence, and a new test pins that a map every waiter gave up on leaves its key free.
+  Measured while checking the symmetry tolerance: every mirror pair of both views is bit-identical
+  (16,384 face-on, 8,192 edge-on), so the relative 10⁻⁹ is never reached, while neighbouring columns
+  differ by up to 0.65 dex face-on and 1.43 dex edge-on, eight orders above it, so the test does
+  catch a half-pixel offset in `pixel_centre`.

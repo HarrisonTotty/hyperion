@@ -1476,6 +1476,18 @@ body {
   gap: 0 1rem;
 }
 
+/*
+ * What the answer says, on one line with the control beside it. A box of its own because it is the
+ * announced region and the control is not, so it lays its own three parts out as the row would.
+ */
+.census-readout__summary {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+}
+
 .census-readout__line,
 .census-readout__hint {
   margin: 0;
@@ -1487,7 +1499,7 @@ body {
   color: var(--status-caution);
 }
 
-.census-readout__row > .request-status {
+.census-readout__summary > .request-status {
   margin: 0;
 }
 

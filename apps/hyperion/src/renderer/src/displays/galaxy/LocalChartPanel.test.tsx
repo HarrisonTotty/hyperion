@@ -227,7 +227,8 @@ describe("LocalChartPanel", () => {
       .map((element) => element.textContent);
     expect(labels).toContain("RANGE 50 ly SET");
     expect(labels).toContain("QUERY EDGE 80 ly");
-    expect(labels).toContain("PLANE 50 ly");
+    // Both curves of the range say so: the value is entered, not measured (ruling 10).
+    expect(labels).toContain("PLANE 50 ly SET");
   });
 
   it("says what its symbols mean, and that they are not to scale", async () => {

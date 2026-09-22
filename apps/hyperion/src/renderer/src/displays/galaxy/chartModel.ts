@@ -108,8 +108,13 @@ function rangeLabel(driveRangeLy: number): string {
   return `RANGE ${formatChartLengthLy(driveRangeLy)} ly SET`;
 }
 
+/**
+ * The plane ring's label, which says `SET` as the range sphere's does: the two curves draw the same
+ * operator-set value a short distance apart, and one of them left unmarked would read as a
+ * measurement (plan 05, design note D9, and the orchestrator's ruling 10).
+ */
 function planeLabel(driveRangeLy: number): string {
-  return `PLANE ${formatChartLengthLy(driveRangeLy)} ly`;
+  return `PLANE ${formatChartLengthLy(driveRangeLy)} ly SET`;
 }
 
 function toMark(

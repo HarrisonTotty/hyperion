@@ -151,6 +151,10 @@ interface CensusReadoutProps {
  * fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
  * newer query is in flight its `PENDING` stands beside the census and the answer on show stays. An
  * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
+ *
+ * The summary line is an `output`, read as a whole when it changes, so that a query given from the
+ * keyboard announces that it started and then what came back; it is the one thing on the chart that
+ * is announced, the camera's own readouts being deliberately silent.
  */
 export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: CensusReadoutProps) {
   const tableId = useId();
@@ -161,26 +165,33 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
   return (
     <div className={stale ? "census-readout census-readout--stale" : "census-readout"}>
       <div className="census-readout__row">
-        {line === null ? null : (
-          <p
-            className={
-              line.kind === "nothing_fits"
-                ? "census-readout__line census-readout__line--caution"
-                : "census-readout__line"
-            }
-          >
-            {line.kind === "complete" ? (
-              <>
-                {line.text} {formatMassMsun(line.aboveMsun)} <SolarMassUnit />
-              </>
-            ) : (
-              line.text
-            )}
-          </p>
-        )}
-        <RequestStatus state={state} onRetry={onRetry} />
-        {result === null ? null : (
-          <>
+        {/*
+         * An `output`, so that a query's answer is announced once, as a whole: an operator who
+         * presses `C` from the keyboard is told that the query started and then what came back,
+         * which nothing else on the page says (the orchestrator's ruling 11). Atomic, so a changed
+         * count is read with the line it belongs to. The per-layer table, the system list and the
+         * camera's own readouts stay out of it: a spatial view announces nothing as it moves.
+         */}
+        <output className="census-readout__summary" aria-label="Census" aria-atomic="true">
+          {line === null ? null : (
+            <p
+              className={
+                line.kind === "nothing_fits"
+                  ? "census-readout__line census-readout__line--caution"
+                  : "census-readout__line"
+              }
+            >
+              {line.kind === "complete" ? (
+                <>
+                  {line.text} {formatMassMsun(line.aboveMsun)} <SolarMassUnit />
+                </>
+              ) : (
+                line.text
+              )}
+            </p>
+          )}
+          <RequestStatus state={state} onRetry={onRetry} />
+          {result === null ? null : (
             <dl className="readout census-readout__counts">
               <dt>SYSTEMS</dt>
               <dd>{formatNumber(result.systems.length, 0)}</dd>
@@ -190,19 +201,22 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
                 {stale ? <StaleMark /> : null}
               </dd>
             </dl>
-            <button
-              type="button"
-              className="control disclosure census-readout__toggle"
-              aria-expanded={tableShown}
-              aria-controls={tableId}
-              onClick={() => {
-                setTableShown((shown) => !shown);
-              }}
-            >
-              <DisclosureGlyph expanded={tableShown} />
-              CENSUS BY LAYER
-            </button>
-          </>
+          )}
+        </output>
+        {result === null ? null : (
+          // Outside the region: the table it shows is not part of what the answer says.
+          <button
+            type="button"
+            className="control disclosure census-readout__toggle"
+            aria-expanded={tableShown}
+            aria-controls={tableId}
+            onClick={() => {
+              setTableShown((shown) => !shown);
+            }}
+          >
+            <DisclosureGlyph expanded={tableShown} />
+            CENSUS BY LAYER
+          </button>
         )}
       </div>
       {hint === null ? null : <p className="census-readout__hint">{hint}</p>}

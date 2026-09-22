@@ -23,6 +23,12 @@ export default defineConfig({
   test: {
     restoreMocks: true,
     unstubGlobals: true,
+    // A display test drives the whole console through `user-event`, and the heaviest of them (the
+    // local chart's, and the end-to-end script of P05.T12.a) take about 2 s each with the suite's
+    // workers on eight cores. Vitest's default of 5 s left them failing whenever the machine was
+    // also building something else, which is a flake and not a finding, so the limit is what a
+    // test that is genuinely stuck needs to cross.
+    testTimeout: 15_000,
     // Workers are reused across files instead of one being spawned per file, which vitest costed
     // at about 2.9 s of spawn and environment each. With the split above, the suite goes from
     // about 30 s to about 14 s. It gives up the isolation of the module registry and of the jsdom,

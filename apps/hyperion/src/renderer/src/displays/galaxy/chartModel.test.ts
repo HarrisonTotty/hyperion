@@ -88,7 +88,8 @@ describe("toScene", () => {
     expect(scene.plane.rings).toEqual([
       { radius: 20, label: "" },
       { radius: 40, label: "" },
-      { radius: 50, label: "PLANE 50 ly" },
+      // The ring draws the value the range sphere does, so it says `SET` as well (ruling 10).
+      { radius: 50, label: "PLANE 50 ly SET" },
     ]);
   });
 
@@ -98,7 +99,7 @@ describe("toScene", () => {
     expect(scene.plane.spacing).toBe(0.02);
     expect(scene.plane.rings).toEqual([
       { radius: 0.02, label: "" },
-      { radius: 0.04, label: "PLANE 0.04 ly" },
+      { radius: 0.04, label: "PLANE 0.04 ly SET" },
     ]);
   });
 

@@ -28,16 +28,31 @@ function renderReadout(
   { stale = false } = {},
 ) {
   const onRetry = vi.fn<() => void>();
-  render(
+  const readout = (
+    shownResult: ChartResult | null,
+    shownState: RequestState<"systems_in_range">,
+  ) => (
     <CensusReadout
-      result={result}
-      state={state}
+      result={shownResult}
+      state={shownState}
       driveRangeLy={50}
       stale={stale}
       onRetry={onRetry}
-    />,
+    />
   );
-  return { onRetry };
+  const { rerender } = render(readout(result, state));
+  return {
+    onRetry,
+    /** Shows the answer to the query that was in flight, as the chart does when it arrives. */
+    answered: (shownResult: ChartResult) => {
+      rerender(readout(shownResult, { kind: "ok", response: aSystemsInRange() }));
+    },
+  };
+}
+
+/** The census summary, which is the chart's one announced region. */
+function summary(): HTMLElement {
+  return screen.getByRole("status", { name: "Census" });
 }
 
 /** A census row's cells, its layer letter first. */
@@ -128,8 +143,34 @@ describe("CensusReadout", () => {
   it("keeps the answer on show with PENDING beside it while a newer query is in flight", () => {
     renderReadout(TWO_SYSTEMS, PENDING);
 
-    expect(screen.getByRole("status")).toHaveTextContent("PENDING");
+    expect(summary()).toHaveTextContent("PENDING");
     expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent("2");
+  });
+
+  it("announces the query and then what came back, as one line", () => {
+    const { answered } = renderReadout(null, PENDING);
+
+    // An `output`, so the region is the semantic element and not an `aria-live` attribute; atomic,
+    // so a count is read with the line it belongs to (the orchestrator's ruling 11).
+    expect(summary().tagName).toBe("OUTPUT");
+    expect(summary()).toHaveAttribute("aria-atomic", "true");
+    expect(summary()).toHaveTextContent("PENDING");
+
+    answered(TWO_SYSTEMS);
+
+    expect(summary()).toHaveTextContent("COMPLETE ABOVE 0.08");
+    expect(summary()).toHaveTextContent("IN RANGE");
+    expect(summary()).not.toHaveTextContent("PENDING");
+  });
+
+  it("announces nothing but what the answer says: no table, no control", async () => {
+    const user = userEvent.setup();
+    renderReadout(aChart());
+
+    await user.click(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
+
+    expect(within(summary()).queryByRole("table")).not.toBeInTheDocument();
+    expect(within(summary()).queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("gives the server's reason and RETRY when the query is rejected", async () => {
@@ -142,7 +183,7 @@ describe("CensusReadout", () => {
 
     await user.click(screen.getByRole("button", { name: "RETRY" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("REJECTED: the queue is full");
+    expect(summary()).toHaveTextContent("REJECTED: the queue is full");
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
