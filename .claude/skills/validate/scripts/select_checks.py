@@ -7,7 +7,7 @@ Usage:
 Changes are the working tree against REF (default HEAD) plus untracked files, or, for A..B, the
 commits in that range. A bare word that names a commit is taken as the base. The plan has three
 tiers: targeted checks for what changed (fast), the task's acceptance commands when a task ID is
-given, and the gate that mirrors CI. `--feature` names the plan set when plan numbers are ambiguous.
+given, and the gate to finish with. `--feature` names the plan set when plan numbers are ambiguous.
 `--args-stdin` reads the arguments from standard input as one line of free text.
 
 Always exits 0. Problems are printed in the plan as `TOOLING ERROR:` lines, and ignored arguments
@@ -36,6 +36,9 @@ GENERATED = "packages/protocol/src/generated/"
 PRETTIER_SKIP = re.compile(rf"(\.(rs|toml|lock)$|^{GENERATED}|^\.claude/|^target/)")
 WORKSPACE_WIDE = re.compile(r"^(Cargo\.(toml|lock)|rust-toolchain\.toml|rustfmt\.toml|\.cargo/)")
 INFRA = re.compile(r"^(justfile|\.github/|\.pre-commit-config\.yaml)")
+# A test marked slow runs only under `just test-slow`, so a change that touches one is gated with
+# `just ci-slow` rather than `just ci`.
+SLOW_MARK = re.compile(r'#\[ignore\s*=\s*"slow')
 DETERMINISM_CRATES = {"hyperion-sim", "hyperion-testkit", "hyperion-fit"}
 # `cargo test` runs ts-rs's export tests, which rewrite the checked-in bindings through
 # TS_RS_EXPORT_DIR (.cargo/config.toml). An environment value takes precedence over that config,
@@ -124,6 +127,14 @@ def parse_args(root: Path, argv: list[str]) -> tuple[str | None, str, str | None
     return task, base or "HEAD", feature, warnings
 
 
+def read_or_empty(path: Path) -> str:
+    """The file's text, or `""` if it cannot be read (gone, renamed away, or not text)."""
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
 def crate_of(path: str) -> str | None:
     parts = path.split("/")
     return parts[1] if len(parts) > 2 and parts[0] == "crates" else None
@@ -132,7 +143,7 @@ def crate_of(path: str) -> str | None:
 def wasm_available() -> tuple[bool, str]:
     runner = os.environ.get("WASMTIME", "wasmtime")
     if shutil.which(runner) is None:
-        return False, "wasmtime is not on PATH (CI runs it)"
+        return False, "wasmtime is not on PATH"
     try:
         targets = subprocess.run(
             ["rustup", "target", "list", "--installed"], capture_output=True, text=True, check=True
@@ -191,6 +202,7 @@ def main() -> None:
     protocol = [f for f in changed if f.startswith(("crates/hyperion-protocol/", GENERATED))]
     client = bool(ts or protocol)
     determinism = [f for f in changed if crate_of(f) in DETERMINISM_CRATES] or (workspace_wide and bool(rust))
+    slow_marked = sorted(f for f in rust if f not in deleted and SLOW_MARK.search(read_or_empty(root / f)))
     benches = sorted({f for f in changed if re.match(r"crates/[^/]+/benches/[^/]+\.rs$", f)})
     manifests = [f for f in changed if f.endswith(("package.json", "pnpm-lock.yaml"))]
     ux_guide = "docs/frontend/ux-guidelines.md" in changed
@@ -205,7 +217,7 @@ def main() -> None:
     if goldens:
         areas.append(f"{len(goldens)} golden file(s)")
     if infra:
-        areas.append("CI/build config")
+        areas.append("build or hook config")
     docs = [f for f in changed if f.endswith(".md")]
     if docs:
         areas.append(f"{len(docs)} Markdown file(s)")
@@ -268,24 +280,32 @@ def main() -> None:
         print("(no task ID given)")
     print()
 
-    gate: list[tuple[str, str]] = [
-        (f"{NO_EXPORT}just ci", "CI's Rust job (fmt, check, clippy, tests, slow tests, bindings) and the frontend "
-         "job's format, typecheck, lint and test")
-    ]
+    # `just ci` is the commit gate and leaves the slow tests out; `just ci-slow` adds them. Anything
+    # that owns slow tests is validated with the slow ones: a changed file that marks one, and the
+    # crates whose statistical tests and goldens are the point (a change to their code can break a
+    # slow test it does not itself mark).
+    slow_owned = slow_marked or determinism
+    if slow_owned:
+        why = "the fast gate plus the slow tests: "
+        why += f"{slow_marked[0]} marks one" if slow_marked else "sim, testkit or fit changed"
+        gate: list[tuple[str, str]] = [(f"{NO_EXPORT}just ci-slow", why)]
+    else:
+        gate = [(f"{NO_EXPORT}just ci", "the commit gate: fmt-check, check, lint, test, gen-protocol-check")]
     skipped: list[str] = []
     if client or infra:
-        gate.append(("pnpm build", "CI's frontend job also builds the client"))
+        gate.append(("pnpm build", "the client must still build"))
     if determinism:
         ok, reason = wasm_available()
         if ok:
             gate.append(("just test-wasm", "sim, testkit or fit changed; goldens must hold bit for bit on wasm32"))
         else:
             skipped.append(f"`just test-wasm`: {reason}")
-        skipped.append("AArch64 golden run: CI only (`rust-aarch64` job)")
+        skipped.append("AArch64 golden run: nowhere to run it (no remote, and the CI workflow was removed on "
+                       "2026-09-22; plan 01's Risks says how to restore one)")
     if manifests:
-        skipped.append("`pnpm install --frozen-lockfile` (CI's frontend job): it would change node_modules. Check "
+        skipped.append("`pnpm install --frozen-lockfile`: it would change node_modules. Check "
                        "instead that pnpm-lock.yaml changed together with any package.json dependency change")
-    print("## Tier 3: gate (mirrors CI; run after tiers 1 and 2 pass)\n")
+    print("## Tier 3: gate (run after tiers 1 and 2 pass)\n")
     for i, (cmd, why) in enumerate(gate, 1):
         print(f"{i}. `{cmd}`  # {why}")
     if skipped:
@@ -303,7 +323,8 @@ def main() -> None:
     if ux_guide:
         notes.append("The UX guide changed: plan tasks that edit it usually give `grep` strings as acceptance.")
     if infra:
-        notes.append("CI or hook config changed: the gate above is the minimum; compare with .github/workflows/ci.yml.")
+        notes.append("The justfile or a hook config changed: the gate above is the minimum, and a recipe it "
+                     "calls may itself have moved, so read the diff before trusting a pass.")
     if notes:
         print("## Notes\n")
         for n in notes:
