@@ -16,14 +16,27 @@
 //! The substellar layers, brown dwarfs and rogue planets, are plan 13's; their IDs are well formed
 //! but not placed here.
 
+mod cache;
+mod candidate;
 mod cell;
+mod generate;
+mod headroom;
 mod layers;
+mod record;
 
 use std::error::Error;
 use std::fmt;
 
-pub use cell::CellKey;
+pub use cache::{CellCache, NoCache};
+pub use candidate::{CandidateOutcome, evaluate_candidate};
+pub use cell::{CellKey, candidate_count};
+pub use generate::{cell_heap_bytes, generate_cell};
+pub use headroom::check_index_headroom;
 pub use layers::{LayerSpec, STELLAR_LAYERS, layer_for_initial_mass, layer_spec};
+pub use record::{Existence, SystemOrigin, SystemRecord};
+
+use candidate::evaluate_candidate_from_bound;
+use cell::layer_bound;
 
 use crate::coords::{BuildGenCellError, GenCell};
 use crate::id::Layer;

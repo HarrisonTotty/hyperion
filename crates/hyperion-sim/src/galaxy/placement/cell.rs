@@ -3,8 +3,13 @@
 use super::layers::layer_spec;
 use super::{BuildCellKeyError, ResolveSystemError};
 use crate::coords::{GalacticPosition, GenCell};
+use crate::galaxy::Galaxy;
 use crate::galaxy::bounds::CellBox;
+#[cfg(doc)]
+use crate::galaxy::fields::Fields;
+use crate::galaxy::imf::MassBand;
 use crate::id::{BuildSystemIdError, Layer, SystemId, SystemIdKind};
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 
 /// A generation cell of one stellar layer: plan 01's [`GenCell`] plus the layer that owns it.
 ///
@@ -205,12 +210,128 @@ impl CellKey {
             .expect("index 0 fits every layer's index field")
             .raw()
     }
+
+    /// The mass band of the cell's layer.
+    ///
+    /// # Panics
+    ///
+    /// Never: a key's layer is one of the five stellar layers, each of which owns a band.
+    #[must_use]
+    pub(super) fn band(&self) -> MassBand {
+        MassBand::try_from(self.layer()).expect("a cell key's layer is a stellar layer")
+    }
+}
+
+/// An upper bound on the density of the cell's layer over the cell, systems per cubic light-year.
+///
+/// This is plan 02's [`Fields::layer_bound`] over [`CellKey::cell_box`] and nothing else: the
+/// bound, and the order it folds `share × bound` over the components in, are plan 02's and are part
+/// of the generated output (brainstorm, "Exact placement by thinning": "The bound is part of the
+/// generated output"), so placement re-derives no part of it. Every candidate of the cell is thinned
+/// against the same value, and [`candidate_count`] draws its Poisson mean from it, so a cell
+/// evaluates it once.
+#[must_use]
+pub(super) fn layer_bound(galaxy: &Galaxy, key: CellKey) -> f64 {
+    galaxy
+        .fields()
+        .layer_bound(galaxy.shares(), key.band(), &key.cell_box())
+}
+
+/// How many candidates the cell draws: a Poisson number with mean bound × volume, on the cell's own
+/// stream.
+///
+/// This is step 2 of the brainstorm's thinning ("Exact placement by thinning"). The mean is
+/// plan 02's [`Fields::layer_bound`] over the cell times [`CellKey::volume_ly3`], and the draw is
+/// one Poisson variate on
+/// `galaxy.cell.candidates` keyed by [`CellKey::cell_word`] (plan 03, Design note 1). It depends on
+/// the cell alone, so two cells never interfere and the same cell always draws the same number, and
+/// the count is clamped to [`CellKey::index_capacity`] so that every candidate has an ID (Design
+/// note 6).
+///
+/// # Panics
+///
+/// - If the mean exceeds [`POISSON_MAX_MEAN`](crate::rng::POISSON_MAX_MEAN), 2³¹, which
+///   [`check_index_headroom`](super::check_index_headroom) rules out for every galaxy that is
+///   played: the largest index capacity is 2²⁸.
+/// - If the mean is negative or not a number, which a density bound times a volume is not: a
+///   broken invariant in plan 02's bound.
+/// - In debug builds, if the draw exceeds the cell's index capacity, which the headroom check rules
+///   out and the clamp would otherwise hide.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, candidate_count};
+/// use hyperion_sim::id::Layer;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// // A layer-A cell at the Sun's distance from the centre holds a candidate or two.
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+/// let key = CellKey::containing(Layer::A, &sun)?;
+/// let count = candidate_count(&galaxy, key);
+/// assert!(count < 16);
+/// // The draw is a pure function of the galaxy and the cell.
+/// assert_eq!(candidate_count(&galaxy, key), count);
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+#[must_use]
+pub fn candidate_count(galaxy: &Galaxy, key: CellKey) -> u32 {
+    candidate_count_from_bound(galaxy.seed(), key, layer_bound(galaxy, key))
+}
+
+/// [`candidate_count`] with the cell's bound already evaluated, for the callers that need it for the
+/// thinning as well ([`generate_cell`](super::generate_cell)).
+///
+/// # Panics
+///
+/// As [`candidate_count`]: on a mean that is negative, not a number or above
+/// [`POISSON_MAX_MEAN`](crate::rng::POISSON_MAX_MEAN), and, in debug builds, on a draw above the
+/// cell's index capacity.
+#[must_use]
+pub(super) fn candidate_count_from_bound(seed: Seed, key: CellKey, bound: f64) -> u32 {
+    let mean = bound * key.volume_ly3();
+    let mut stream = Stream::open(
+        seed,
+        tags::GALAXY_CELL_CANDIDATES,
+        ObjectKey::cell(key.cell_word()),
+    );
+    let drawn = stream.poisson(mean);
+    let capacity = key.index_capacity();
+    debug_assert!(
+        drawn <= u64::from(capacity),
+        "the {} ly cell {:?} of layer {} drew {drawn} candidates, past its index capacity of \
+         {capacity}: check_index_headroom should have refused this galaxy",
+        key.size_ly(),
+        key.gen_cell().to_array(),
+        key.layer().letter(),
+    );
+    clamp_to_capacity(drawn, capacity)
+}
+
+/// A Poisson draw cut down to a cell's index capacity (plan 03, Design note 6).
+///
+/// The clamp is a pure function of the cell's own draw, so it is deterministic, independent of
+/// generation order, and the same when one ID is resolved as when the whole cell is generated; it
+/// belongs to the generator version. It is never reached in a galaxy that passes
+/// [`check_index_headroom`](super::check_index_headroom), which is why that check is a hard error
+/// and why the caller debug-asserts against it.
+#[must_use]
+fn clamp_to_capacity(drawn: u64, capacity: u32) -> u32 {
+    let capped = drawn.min(u64::from(capacity));
+    u32::try_from(capped).expect("a count capped at a u32 fits in a u32")
 }
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
+
     use super::*;
     use crate::coords::{BuildGenCellError, CellSize, LyCell};
+    use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{LayerSpec, STELLAR_LAYERS};
     use crate::id::CentreMemberId;
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
@@ -453,5 +574,137 @@ mod tests {
         let corner = CellKey::new(Layer::E, [-512, 511, -512]).unwrap();
         assert_eq!(corner.cell_box().min_corner(), [-65_536, 65_408, -65_536]);
         assert_eq!(CellSize::Ly128.ly(), corner.size_ly());
+    }
+
+    // --- Candidate counts (P03.T3) ---
+
+    /// The Sun-like point, written out because a unit test cannot reach `tests/common`: in the
+    /// plane, 26,000 ly from the centre on the +y axis, clear of the bar (plan 03, Test helpers).
+    const SUNLIKE_LY: [f64; 3] = [0.0, 26_000.0, 0.0];
+
+    /// The seed of the galaxies these tests place candidates in.
+    const SEED: u64 = 0x0300_ce11_0000_0000;
+
+    fn galaxy() -> Galaxy {
+        Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+    }
+
+    fn sunlike() -> GalacticPosition {
+        GalacticPosition::from_light_years(SUNLIKE_LY).expect("the Sun-like point is in the cube")
+    }
+
+    /// The candidate counts of `cells_per_axis³` layer-A cells at the Sun-like point against the
+    /// sum of their means: a Poisson sum has the sum of the means (P03.T3).
+    fn counts_match_bound_times_volume(cells_per_axis: i32) {
+        let galaxy = galaxy();
+        let corner = CellKey::containing(Layer::A, &sunlike()).unwrap();
+        let [x0, y0, z0] = corner.gen_cell().to_array();
+        let half = cells_per_axis / 2;
+        let mut total_mean = 0.0;
+        let mut total_count = 0_u64;
+        for x in x0..x0 + cells_per_axis {
+            for y in y0..y0 + cells_per_axis {
+                for z in z0 - half..z0 - half + cells_per_axis {
+                    let key = CellKey::new(Layer::A, [x, y, z]).unwrap();
+                    total_mean += layer_bound(&galaxy, key) * key.volume_ly3();
+                    total_count += u64::from(candidate_count(&galaxy, key));
+                }
+            }
+        }
+        // The reference density puts about one system in an 8 ly cell, and the thinning draws a
+        // little over one candidate for each.
+        let per_axis = f64::from(cells_per_axis);
+        let cells = per_axis * per_axis * per_axis;
+        assert!(
+            (0.2 * cells..5.0 * cells).contains(&total_mean),
+            "{total_mean} candidates expected over {cells} layer-A cells at the Sun-like point"
+        );
+        assert_poisson_count(
+            "layer-A candidates at the Sun-like point",
+            total_count,
+            total_mean,
+            ALPHA,
+        );
+    }
+
+    #[test]
+    fn candidate_counts_follow_the_bound_over_ten_thousand_cells() {
+        counts_match_bound_times_volume(22);
+    }
+
+    #[test]
+    #[ignore = "slow: 10⁵ layer-A cells at the Sun-like point"]
+    fn candidate_counts_follow_the_bound_over_a_hundred_thousand_cells() {
+        counts_match_bound_times_volume(47);
+    }
+
+    #[test]
+    fn the_bound_is_the_layers_own_and_holds_at_the_cells_centre() {
+        let galaxy = galaxy();
+        let (fields, shares) = (galaxy.fields(), galaxy.shares());
+        for spec in &STELLAR_LAYERS {
+            let key = CellKey::containing(spec.layer(), &sunlike()).unwrap();
+            assert_eq!(key.band(), spec.band());
+            let bound = layer_bound(&galaxy, key);
+            // Plan 02's bound for the same band over the same box, and nothing else.
+            assert_same_bits(
+                bound,
+                fields.layer_bound(shares, spec.band(), &key.cell_box()),
+            );
+            let at_centre = fields.layer_density(shares, spec.band(), &key.cell_box().centre());
+            assert!(
+                at_centre <= bound && bound > 0.0,
+                "layer {}: {at_centre} at the centre against a bound of {bound}",
+                spec.layer().letter()
+            );
+        }
+    }
+
+    #[test]
+    fn a_cells_candidate_count_is_the_same_on_every_call() {
+        let galaxy = galaxy();
+        for spec in &STELLAR_LAYERS {
+            let key = CellKey::containing(spec.layer(), &sunlike()).unwrap();
+            let count = candidate_count(&galaxy, key);
+            assert_eq!(candidate_count(&galaxy, key), count, "{:?}", spec.layer());
+            assert_eq!(
+                candidate_count_from_bound(galaxy.seed(), key, layer_bound(&galaxy, key)),
+                count
+            );
+            assert!(count <= key.index_capacity());
+        }
+    }
+
+    #[test]
+    fn a_cell_of_negligible_density_draws_no_candidate() {
+        let galaxy = galaxy();
+        // The far corner of the cube: the discs and the bar have underflowed and the halo is past
+        // its cut, so all that is left is the bulge's 10⁻⁶⁵ of its centre, under one candidate in
+        // 10⁹ cells.
+        let key = CellKey::new(Layer::E, [-512, -512, -512]).unwrap();
+        let bound = layer_bound(&galaxy, key);
+        assert!(
+            bound >= 0.0 && bound * key.volume_ly3() < 1e-9,
+            "a bound of {bound} at the cube's corner"
+        );
+        assert_eq!(candidate_count(&galaxy, key), 0);
+    }
+
+    #[test]
+    fn a_draw_above_the_index_capacity_is_clamped_to_it() {
+        for capacity in [65_536_u32, 1 << 19, 1 << 28] {
+            assert_eq!(clamp_to_capacity(0, capacity), 0);
+            assert_eq!(clamp_to_capacity(7, capacity), 7);
+            assert_eq!(
+                clamp_to_capacity(u64::from(capacity) - 1, capacity),
+                capacity - 1
+            );
+            assert_eq!(clamp_to_capacity(u64::from(capacity), capacity), capacity);
+            assert_eq!(
+                clamp_to_capacity(u64::from(capacity) + 1, capacity),
+                capacity
+            );
+            assert_eq!(clamp_to_capacity(u64::MAX, capacity), capacity);
+        }
     }
 }
