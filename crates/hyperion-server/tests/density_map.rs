@@ -4,7 +4,9 @@
 mod common;
 
 use std::num::NonZeroUsize;
-use std::time::Duration;
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -14,7 +16,11 @@ use hyperion_protocol::{
     MapView, OpenUniverseRequest, RequestBody, RequestError, ResponseBody, SeedHex, ServerMessage,
     UniverseIdHex, UniverseInfo,
 };
-use hyperion_server::compute::PoolCounters;
+use hyperion_server::compute::{
+    CpuPool, DensityMapService, GalaxyCache, GalaxyKey, MapKey, MapResolution, PoolCounters,
+};
+use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
+use hyperion_sim::GENERATOR_VERSION;
 use tokio::time::{sleep, timeout};
 
 /// The seed of every universe these tests create.
@@ -432,4 +438,64 @@ async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
     // The bands still queued were skipped when the last waiter went; the band in hand runs to its
     // end, which is what `SHUTDOWN_TIMEOUT` allows for.
     server.stop().await;
+}
+
+/// How long both 512-pixel maps of one galaxy may take to build (P04.T16).
+///
+/// Measured under this profile: 19.8 s on eight workers, on a machine at a load average of 21 to 29
+/// against its eight cores. The rasters are about 61 core-seconds in a release build (8.05 s face-on
+/// and 52.6 s edge-on on one worker, `benches/density_map.rs`), so CI's two cores need about 60 s and
+/// this budget is three times that, and nine times what was measured here. It is deliberately wide:
+/// it catches a gross regression — bands that stopped running in parallel, a flight that rebuilds a
+/// map for every waiter, a cache that no longer holds one — and not plan 02's per-pixel cost, which
+/// P04.T16 records as a finding instead.
+const BUILD_BUDGET: Duration = Duration::from_secs(180);
+
+/// Both 512-pixel maps of one galaxy build inside [`BUILD_BUDGET`] on every core the host has.
+///
+/// The build is what is timed, through the cache and the pool a server uses, not a response: the
+/// quantising and the base64 of one are milliseconds (`benches/density_map.rs`) against seconds of
+/// raster. The galaxy is built by the first `get`, as it is for the first request of a new universe,
+/// and is counted in.
+///
+/// The plan asked for 20 s on CI's two cores, and that is out of reach: the edge-on raster alone is
+/// 52.6 s of one core (0.40 ms for each of 131,072 pixels, `benches/density_map.rs`), so two cores
+/// cannot finish both views inside 20 s however the bands are split, and eight cores here manage it
+/// only when the machine is otherwise idle. [`BUILD_BUDGET`] is set from the measurement instead.
+#[tokio::test]
+#[ignore = "slow: both 512-pixel rasters, about a minute of arithmetic"]
+async fn density_map_512_builds_within_budget() {
+    let workers = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+    let pool = Arc::new(
+        CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
+            .expect("the pool starts"),
+    );
+    let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
+    // Room for both maps: 512 × 512 and 512 × 256 pixels of `f32`, 768 KiB in all.
+    let maps = DensityMapService::new(Arc::clone(&pool), Arc::clone(&galaxies), 4 << 20);
+
+    let started = Instant::now();
+    for view in [MapView::FaceOn, MapView::EdgeOn] {
+        let key = MapKey::new(
+            GalaxyKey::new(SEED, GENERATOR_VERSION),
+            view,
+            MapPopulation::All,
+            MapResolution::Px512,
+        );
+        let map = maps.get(key).await.expect("the pool computes the map");
+        assert_eq!(
+            map.log10().len(),
+            usize::from(MapResolution::Px512.width_px())
+                * usize::from(MapResolution::Px512.height_px(view)),
+            "the {view:?} map holds one value per pixel"
+        );
+    }
+    let elapsed = started.elapsed();
+    pool.shutdown().await.expect("the pool shuts down");
+
+    assert!(
+        elapsed <= BUILD_BUDGET,
+        "both 512-pixel maps took {elapsed:?} on {workers} workers, over the budget of \
+         {BUILD_BUDGET:?}"
+    );
 }

@@ -1,16 +1,19 @@
-# Clippy configuration for `hyperion-sim` alone. Clippy takes the nearest `clippy.toml` and does
-# not merge, so this file shadows the workspace root's `clippy.toml` completely and has to repeat
-# everything this crate needs of it.
-
-# Author names and journal abbreviations that `doc_markdown` would otherwise take for code; ".."
-# keeps Clippy's defaults.
-doc-valid-idents = ["McMillan", "McConnell", "McKee", "ApJ", "ApJS", ".."]
-
+# Clippy configuration for every crate without one of its own: `hyperion-server`,
+# `hyperion-protocol` and `hyperion-testkit`. Clippy takes the nearest `clippy.toml` walking up from
+# the crate's manifest and does not merge, so `crates/hyperion-sim/clippy.toml` and
+# `crates/hyperion-fit/clippy.toml` shadow this file entirely and stay self-contained.
+#
 # Every transcendental function goes through `hyperion_sim::math`, which wraps the exactly pinned
-# `libm`. The platform's own versions differ between operating systems and CPU architectures, and
-# a saved universe must survive being moved to another machine. That includes `mul_add`, which
-# calls the platform's `fma` where the CPU has none. Float bits are never hashed, whether as an
-# integer or as bytes, and the golden writer that prints them lives in `hyperion-testkit`.
+# `libm`. The platform's own versions differ between operating systems and CPU architectures, and a
+# saved universe must survive being moved to another machine. That binds outside the sim as well:
+# the server turns a map's column densities into log₁₀ before quantising them
+# (`compute::density_map`), and the golden codes hold only because that logarithm is the sim's.
+# That includes `mul_add`, which calls the platform's `fma` where the CPU has none.
+#
+# Unlike the sim's and the fitting crate's lists, this one does not ban the float-bit conversions
+# (`to_bits`, `to_le_bytes` and friends). Printing float bits is the testkit's job, and the server's
+# tests compare `f64` fields by their bits because the rules forbid `==` on floats; neither hashes
+# them, which is what the sim's ban is for.
 disallowed-methods = [
     { path = "f64::sin", reason = "use hyperion_sim::math::sin: platform maths is not reproducible" },
     { path = "f64::cos", reason = "use hyperion_sim::math::cos: platform maths is not reproducible" },
@@ -39,10 +42,6 @@ disallowed-methods = [
     { path = "f64::cbrt", reason = "use hyperion_sim::math::cbrt: platform maths is not reproducible" },
     { path = "f64::hypot", reason = "use hyperion_sim::math::hypot: platform maths is not reproducible" },
     { path = "f64::mul_add", reason = "use hyperion_sim::math::mul_add: without hardware FMA this calls the platform's fma" },
-    { path = "f64::to_bits", reason = "float bits are never hashed; print bits through the testkit only" },
-    { path = "f64::to_le_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
-    { path = "f64::to_be_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
-    { path = "f64::to_ne_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
     { path = "f32::sin", reason = "use f64 and hyperion_sim::math::sin: platform maths is not reproducible" },
     { path = "f32::cos", reason = "use f64 and hyperion_sim::math::cos: platform maths is not reproducible" },
     { path = "f32::tan", reason = "use f64 and hyperion_sim::math::tan: platform maths is not reproducible" },
@@ -70,8 +69,4 @@ disallowed-methods = [
     { path = "f32::cbrt", reason = "use f64 and hyperion_sim::math::cbrt: platform maths is not reproducible" },
     { path = "f32::hypot", reason = "use f64 and hyperion_sim::math::hypot: platform maths is not reproducible" },
     { path = "f32::mul_add", reason = "use f64 and hyperion_sim::math::mul_add: without hardware FMA this calls the platform's fma" },
-    { path = "f32::to_bits", reason = "float bits are never hashed; print bits through the testkit only" },
-    { path = "f32::to_le_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
-    { path = "f32::to_be_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
-    { path = "f32::to_ne_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
 ]

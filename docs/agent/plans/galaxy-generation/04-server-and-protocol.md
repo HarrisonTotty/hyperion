@@ -1365,3 +1365,33 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     kept because the abuse angle differs: work already in flight is abandoned and the server is
     unharmed. Follow-up not taken, for whoever next touches the file: `tests/density_map.rs`'s
     `bulk_work_under_way` is now a duplicate of `stats_until`.
+- **T16, as built, and the `disallowed_methods` gap it closed.** Before the benches: `crates/hyperion-server`
+  was not reached by any Clippy configuration, so nothing enforced that transcendentals go through
+  `hyperion_sim::math` even though the density map's golden codes depend on `math::log10`. A new
+  workspace-root `clippy.toml` now carries the f64/f32 transcendental bans and binds in
+  `hyperion-server`, `hyperion-protocol` and `hyperion-testkit` (Clippy takes the nearest file walking
+  up from the manifest). It deliberately omits the float-**bit** bans, because the testkit is the
+  sanctioned bit printer (`float.rs`, `golden.rs`) and the server's tests compare `f64` by bits, `==` on
+  floats being forbidden. `crates/hyperion-sim/clippy.toml` and `hyperion-fit`'s still shadow the root
+  file and must stay self-contained; the sim's comment now says so. **Proved binding** by swapping
+  `math::log10` for `f64::log10` in `compute/density_map.rs` and watching `just lint` fail with the
+  note, then reverting.
+  - **The slow test's 20 s budget is unreachable and is now 180 s**, documented in the test: one
+    512-pixel pair is about 61 core-seconds of raster, measured at 19.8 s on eight loaded workers
+    (load 21–29), 12.5 s inside the gate, and an estimated 60 s on CI's two cores. It guards against a
+    banding or caching regression, not against plan 02's per-pixel cost. **Deviation.**
+  - Measured, with load average beside each (8 cores): 512 face-on on eight workers **1.07 s** at load
+    8–17 against the 1 s target — met when idle (0.7 s, T11.c) and just missed under load; 512 edge-on
+    **12.8 s** against 3 s, and 52.6 s on one worker (0.40 ms a pixel), which is plan 02's raster cost
+    and not this crate's; young-only 34 ms and 856 ms; quantise plus base64 1.96/2.11 ms at 512 and
+    7.00/7.96 ms at 1024; a **cached** 512 request 4.86 ms end to end against the 5 ms target, met with
+    no margin; `pong` while a 1,024-pixel map builds **114 µs** against 50 ms, met comfortably; a 50 ly
+    query cold **36.3 ms** against the brainstorm's 5 ms, warm 3.79 ms, and 25.1 ms uncached — so the
+    cache costs about 44% on a miss against the plan's "under 10%" and saves 85% on a hit; 5,000
+    records serialise in 5.03 ms to 1.29 MB.
+  - That query touches 1,732 cells for 2,045 systems, so **14.5 µs a cell against the brainstorm's
+    1–2 µs** — and the brainstorm says the per-cell and the 5 ms targets stand or fall together, so they
+    have fallen together. See plan 02's R16/R17, whose recorded per-call costs also do not reproduce.
+  - Other deviations: the quantise benches use face-on rasters as an upper bound per resolution; the two
+    end-to-end figures came from a throwaway test, now deleted, with the figures recorded in
+    `tests/density_map.rs`'s doc comment.

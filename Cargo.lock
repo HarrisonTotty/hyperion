@@ -653,6 +653,7 @@ dependencies = [
  "axum",
  "base64",
  "clap",
+ "criterion",
  "futures-util",
  "getrandom 0.4.3",
  "hyperion-protocol",

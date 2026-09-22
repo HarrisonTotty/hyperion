@@ -24,6 +24,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 # The golden-file harness of plan 01, for the pinned `galaxy_parameters` response.
 hyperion-testkit.workspace = true
 tempfile.workspace = true
@@ -32,6 +33,14 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["process", "test-util", "time"] }
 tokio-tungstenite.workspace = true
 serde_json.workspace = true
+
+[[bench]]
+name = "density_map"
+harness = false
+
+[[bench]]
+name = "range_query"
+harness = false
 
 [lints]
 workspace = true
