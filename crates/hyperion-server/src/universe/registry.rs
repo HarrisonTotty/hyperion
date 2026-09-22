@@ -5,12 +5,12 @@ use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use hyperion_protocol::UniverseStatus;
+use hyperion_protocol::{SeedHex, UniverseStatus};
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::{
-    DrawEntropyError, Entropy, ParseUniverseNameError, SAVE_FORMAT, SavedUniverse, ScanStoreError,
-    Universe, UniverseId, UniverseName, UniverseStore, WriteSaveError,
+    DrawEntropyError, Entropy, SAVE_FORMAT, SavedUniverse, ScanStoreError, Universe, UniverseId,
+    UniverseName, UniverseStore, WriteSaveError,
 };
 use crate::limits::MAX_UNIVERSES;
 
@@ -101,29 +101,37 @@ impl UniverseRegistry {
 
     /// Creates and saves a universe.
     ///
-    /// The name is trimmed and checked, then reserved; `seed` is kept if given and otherwise
-    /// drawn from the entropy source, and then the ID is drawn, in that order. An ID that is
-    /// taken, in the registry or on disk, is drawn again. The universe is listed once its save is
-    /// written; if the write fails the name is free again.
+    /// The name is reserved; `seed` is kept if given and otherwise drawn from the entropy source,
+    /// and then the ID is drawn, in that order. An ID that is taken, in the registry or on disk, is
+    /// drawn again. The universe is listed once its save is written; if the write fails the name is
+    /// free again.
     ///
-    /// Cancellation-safe: the work runs on a blocking task that finishes, and updates the
-    /// registry, even if this future is dropped.
+    /// Cancellation-safe: the work runs on a blocking task that finishes, updates the registry and
+    /// logs the outcome, even if this future is dropped. A universe created is logged at `info`
+    /// with its ID, name, seed and generator version; a failure of the server's own (a draw, the
+    /// write, no free ID) at `error` with its causes.
     ///
     /// # Errors
     ///
-    /// [`CreateUniverseError`]: an invalid name, a name in use (compared without regard to case),
-    /// the [`MAX_UNIVERSES`] limit, a failed draw or write, or no free ID after
-    /// [`MAX_ID_DRAWS`] draws.
+    /// [`CreateUniverseError`]: a name in use (compared without regard to case), the
+    /// [`MAX_UNIVERSES`] limit, a failed draw or write, no free ID after [`MAX_ID_DRAWS`] draws,
+    /// or a blocking task that did not finish.
     pub async fn create(
         &self,
-        name: &str,
+        name: UniverseName,
         seed: Option<u64>,
     ) -> Result<Arc<Universe>, CreateUniverseError> {
-        let name: UniverseName = name.parse().map_err(CreateUniverseError::InvalidName)?;
         let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || inner.create(&name, seed))
-            .await
-            .map_err(|_| CreateUniverseError::Interrupted)?
+        tokio::task::spawn_blocking(move || {
+            let created = inner.create(&name, seed);
+            log_create(&created);
+            created
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "a create's blocking task did not finish");
+            CreateUniverseError::Interrupted
+        })?
     }
 
     /// Every universe, sorted by name without regard to case, then by ID.
@@ -166,6 +174,40 @@ impl UniverseRegistry {
     pub fn store(&self) -> &UniverseStore {
         &self.inner.store
     }
+}
+
+/// Logs how a create ended: a universe created at `info`, a failure of the server's own at `error`
+/// with its causes. A refusal of what was asked for is the requester's to report.
+fn log_create(created: &Result<Arc<Universe>, CreateUniverseError>) {
+    match created {
+        Ok(universe) => tracing::info!(
+            id = %universe.id,
+            name = %universe.name,
+            seed = %SeedHex::from_u64(universe.seed),
+            generator_version = %universe.generator_version,
+            "created a universe"
+        ),
+        Err(
+            error @ (CreateUniverseError::Entropy(_)
+            | CreateUniverseError::Storage(_)
+            | CreateUniverseError::NoFreeId
+            | CreateUniverseError::Interrupted),
+        ) => tracing::error!(error = %chain(error), "failed to create a universe"),
+        Err(CreateUniverseError::NameTaken { .. } | CreateUniverseError::LimitReached { .. }) => {}
+    }
+}
+
+/// An error and each of its sources, joined by colons.
+#[must_use]
+fn chain(error: &dyn Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
 }
 
 impl Inner {
@@ -325,8 +367,6 @@ impl Error for LoadRegistryError {
 /// A universe could not be created.
 #[derive(Debug)]
 pub enum CreateUniverseError {
-    /// The name broke a rule of [`UniverseName`].
-    InvalidName(ParseUniverseNameError),
     /// Another universe has this name, compared without regard to case.
     NameTaken {
         /// The name asked for, trimmed.
@@ -350,7 +390,6 @@ pub enum CreateUniverseError {
 impl fmt::Display for CreateUniverseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidName(error) => write!(f, "invalid universe name: {error}"),
             Self::NameTaken { name } => write!(f, "a universe named {name:?} exists already"),
             Self::LimitReached { limit } => {
                 write!(f, "the server holds its limit of {limit} universes")
@@ -368,8 +407,7 @@ impl Error for CreateUniverseError {
         match self {
             Self::Entropy(error) => Some(error),
             Self::Storage(error) => Some(error),
-            Self::InvalidName(_)
-            | Self::NameTaken { .. }
+            Self::NameTaken { .. }
             | Self::LimitReached { .. }
             | Self::NoFreeId
             | Self::Interrupted => None,
@@ -454,7 +492,7 @@ mod tests {
         name: &str,
         seed: Option<u64>,
     ) -> Result<Arc<Universe>, CreateUniverseError> {
-        timeout(WAIT, registry.create(name, seed))
+        timeout(WAIT, registry.create(universe_name(name), seed))
             .await
             .expect("timed out creating")
     }
@@ -470,6 +508,11 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    /// `text` as a universe name, which a test gives valid.
+    fn universe_name(text: &str) -> UniverseName {
+        text.parse().expect("a valid name")
     }
 
     fn names(registry: &UniverseRegistry) -> Vec<String> {
@@ -517,41 +560,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn names_are_checked_before_anything_is_drawn() {
+    async fn a_taken_name_is_refused_before_anything_is_drawn() {
         let dir = tempfile::tempdir().unwrap();
-        let registry = load(dir.path(), SequenceEntropy::new([0xab])).await;
-        let invalid = |error| match error {
-            CreateUniverseError::InvalidName(error) => error,
-            other => panic!("expected an invalid name, got {other:?}"),
-        };
-        assert_eq!(
-            invalid(create(&registry, "  ", None).await.unwrap_err()),
-            ParseUniverseNameError::Empty
-        );
-        assert_eq!(
-            invalid(create(&registry, &"a".repeat(49), None).await.unwrap_err()),
-            ParseUniverseNameError::TooLong { chars: 49 }
-        );
-        assert_eq!(
-            invalid(create(&registry, "Kepler\tReach", None).await.unwrap_err()),
-            ParseUniverseNameError::ControlCharacter
-        );
-        let kepler = create(&registry, " Kepler Reach ", Some(7)).await.unwrap();
-        assert_eq!(kepler.name().as_str(), "Kepler Reach");
-        assert_eq!(
-            kepler.id(),
-            UniverseId::new(0xab),
-            "the refused creates drew nothing"
-        );
+        let registry = load(dir.path(), SequenceEntropy::new([0xab, 0xac])).await;
+        let kepler = create(&registry, "Kepler Reach", Some(7)).await.unwrap();
+        assert_eq!(kepler.id(), UniverseId::new(0xab));
         match create(&registry, "KEPLER reach", None).await.unwrap_err() {
             CreateUniverseError::NameTaken { name } => assert_eq!(name, "KEPLER reach"),
             other => panic!("expected a taken name, got {other:?}"),
         }
-        assert_eq!(names(&registry), ["Kepler Reach"]);
+        let vega = create(&registry, "Vega", Some(8)).await.unwrap();
+        assert_eq!(
+            vega.id(),
+            UniverseId::new(0xac),
+            "the refused create drew nothing"
+        );
+        assert_eq!(names(&registry), ["Kepler Reach", "Vega"]);
         assert_eq!(
             fs::read_dir(dir.path().join("universes")).unwrap().count(),
-            1,
-            "only the valid create wrote a save"
+            2,
+            "the refused create wrote no save"
+        );
+    }
+
+    #[test]
+    fn a_chain_joins_an_error_and_its_sources() {
+        let error = CreateUniverseError::Storage(WriteSaveError::Io {
+            operation: "write",
+            path: std::path::PathBuf::from("universe.json.tmp"),
+            source: std::io::Error::other("disk full"),
+        });
+        assert_eq!(
+            chain(&error),
+            "failed to save the universe: failed to write universe.json.tmp: disk full"
         );
     }
 
@@ -617,7 +658,7 @@ mod tests {
         let registry = load(dir.path(), entropy).await;
         let first = tokio::spawn({
             let registry = registry.clone();
-            async move { registry.create("Last", None).await }
+            async move { registry.create(universe_name("Last"), None).await }
         });
         // The first create holds the last place, though it has drawn no ID yet.
         timeout(WAIT, entered).await.expect("timed out").unwrap();
@@ -786,7 +827,7 @@ mod tests {
         let registry = load(dir.path(), entropy).await;
         let first = tokio::spawn({
             let registry = registry.clone();
-            async move { registry.create("Kepler", Some(1)).await }
+            async move { registry.create(universe_name("Kepler"), Some(1)).await }
         });
         // The first create has reserved the name and waits in its draw of the ID.
         timeout(WAIT, entered).await.expect("timed out").unwrap();
@@ -814,7 +855,7 @@ mod tests {
         .into_iter()
         .map(|name| {
             let registry = registry.clone();
-            tokio::spawn(async move { registry.create(name, Some(1)).await })
+            tokio::spawn(async move { registry.create(universe_name(name), Some(1)).await })
         })
         .collect();
         let mut successes = 0;
@@ -836,7 +877,7 @@ mod tests {
         let registry = load(dir.path(), entropy).await;
         let caller = tokio::spawn({
             let registry = registry.clone();
-            async move { registry.create("Kepler", Some(1)).await }
+            async move { registry.create(universe_name("Kepler"), Some(1)).await }
         });
         timeout(WAIT, entered).await.expect("timed out").unwrap();
         caller.abort();

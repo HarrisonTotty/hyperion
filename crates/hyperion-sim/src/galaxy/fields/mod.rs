@@ -183,7 +183,7 @@ impl Site {
             abs_z: p.z.abs(),
             r_sq,
             r: r_sq.sqrt(),
-            height: locate(p.z.abs()),
+            height: locate(p.z),
         }
     }
 }
@@ -488,6 +488,30 @@ impl Fields {
         self.components.iter().fold(0.0, |sum, c| {
             sum + shares.component_share(band, c) * c.shape.density_at(&site, &arm)
         })
+    }
+
+    /// The bytes the fields own on the heap: the components, the discs' vertical tables and the
+    /// age distributions.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.components.capacity() * size_of::<Component>()
+            + self
+                .components
+                .iter()
+                .map(Component::heap_bytes)
+                .sum::<usize>()
+    }
+}
+
+impl Component {
+    /// The bytes the component owns on the heap, beyond its own size.
+    #[must_use]
+    fn heap_bytes(&self) -> usize {
+        let shape = match &self.shape {
+            Shape::Disc(disc) => disc.profile().heap_bytes(),
+            Shape::Bulge(_) | Shape::Bar(_) | Shape::Halo(_) => 0,
+        };
+        shape + self.ages.heap_bytes()
     }
 }
 

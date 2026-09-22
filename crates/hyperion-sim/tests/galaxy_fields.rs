@@ -423,6 +423,10 @@ fn fit_double_exponential(z: &[f64], ln_n: &[f64]) -> (f64, f64, f64) {
             } else {
                 trial[axis] + sign * step[axis]
             };
+            // The thin disc stays the thinner component, as on the grid.
+            if trial[1] <= 1.3 * trial[0] {
+                continue;
+            }
             let trial_cost = cost(trial[0], trial[1], trial[2]);
             if trial_cost < c {
                 (c, h1, h2, f) = (trial_cost, trial[0], trial[1], trial[2]);

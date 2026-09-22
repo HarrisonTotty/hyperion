@@ -13,6 +13,7 @@ pub mod cache;
 pub mod compute;
 pub mod config;
 mod connections;
+mod convert;
 pub mod limits;
 mod outbound;
 mod requests;
@@ -35,6 +36,7 @@ use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
 use crate::stats::{OutboundStats, RequestStats};
+use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
 pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder};
@@ -56,9 +58,11 @@ pub struct Server {
 
 /// The state every connection and request shares.
 ///
-/// The universe registry and the caches join it with the handlers that need them (P04.T14).
+/// The caches join it with the handlers that need them (P04.T14).
 #[derive(Debug)]
 pub(crate) struct AppState {
+    /// Every universe the server holds, loaded from the data directory at start.
+    pub(crate) registry: UniverseRegistry,
     /// Where generation, and the serialisation of large responses, runs: never on the runtime.
     pub(crate) pool: CpuPool,
     /// What answers each request: [`Handlers`], or a test's double.
@@ -74,15 +78,16 @@ pub(crate) struct AppState {
 }
 
 impl Server {
-    /// Builds the server's state from `config` and starts its CPU pool.
+    /// Builds the server's state from `config`: loads the saved universes and starts the CPU pool.
     ///
     /// Nothing is written: the data directory is created with the first universe. A data
-    /// directory that exists must be a directory.
+    /// directory that exists must be a directory, and its saves are scanned on a blocking task.
     ///
     /// # Errors
     ///
     /// [`StartServerError`] if the data directory is not a directory or cannot be inspected, if
-    /// the CPU pool cannot start, or if start-up is interrupted by the runtime shutting down.
+    /// its saves cannot be listed, if the CPU pool cannot start, or if start-up is interrupted by
+    /// the runtime shutting down.
     pub async fn start(config: ServerConfig) -> Result<Self, StartServerError> {
         Self::start_with_handler(config, Arc::new(Handlers), ConnectionLimits::default()).await
     }
@@ -98,6 +103,12 @@ impl Server {
         tokio::task::spawn_blocking(move || check_data_dir(&data_dir))
             .await
             .map_err(|_| StartServerError::Interrupted)??;
+        let registry = UniverseRegistry::load(
+            UniverseStore::new(config.data_dir()),
+            Arc::clone(config.entropy()),
+        )
+        .await
+        .map_err(StartServerError::LoadRegistry)?;
         let pool = CpuPool::new(
             config.workers(),
             INTERACTIVE_QUEUE_CAPACITY,
@@ -111,6 +122,7 @@ impl Server {
         );
         Ok(Self {
             state: Arc::new(AppState {
+                registry,
                 pool,
                 handler,
                 connections: Connections::new(),
@@ -205,6 +217,8 @@ pub enum StartServerError {
         /// The operating system's error.
         source: io::Error,
     },
+    /// The saved universes could not be loaded.
+    LoadRegistry(LoadRegistryError),
     /// The CPU pool could not start.
     StartPool(StartPoolError),
     /// A start-up task was cancelled by the runtime shutting down.
@@ -224,6 +238,7 @@ impl fmt::Display for StartServerError {
             Self::InspectDataDir { path, .. } => {
                 write!(f, "failed to inspect the data directory {}", path.display())
             }
+            Self::LoadRegistry(_) => f.write_str("failed to load the saved universes"),
             Self::StartPool(_) => f.write_str("failed to start the cpu pool"),
             Self::Interrupted => f.write_str("server start-up was interrupted"),
         }
@@ -234,6 +249,7 @@ impl Error for StartServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InspectDataDir { source, .. } => Some(source),
+            Self::LoadRegistry(source) => Some(source),
             Self::StartPool(source) => Some(source),
             Self::DataDirNotADirectory { .. } | Self::Interrupted => None,
         }
@@ -349,6 +365,23 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(&error, StartServerError::DataDirNotADirectory { path } if *path == file),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn saves_that_cannot_be_listed_stop_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        // The directory of universes is a file, so the scan cannot list it.
+        std::fs::write(dir.path().join("universes"), "").unwrap();
+        let error = Server::start(ServerConfig::builder().data_dir(dir.path()).build())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                StartServerError::LoadRegistry(crate::universe::LoadRegistryError::Scan(_))
+            ),
             "{error:?}"
         );
     }

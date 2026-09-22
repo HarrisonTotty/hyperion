@@ -200,6 +200,13 @@ impl MassModel {
         self.bar_corotation
     }
 
+    /// The bytes the model owns on the heap: the Gaussians and their node tables.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.gaussians.capacity() * size_of::<Gaussian>()
+            + self.gaussians.len() * Gaussian::HEAP_BYTES
+    }
+
     /// The spherical components in their fixed order: dark halo, nuclear cluster, black hole.
     pub(crate) fn spherical(&self) -> [&dyn SphericalMass; 3] {
         [&self.dark_halo, &self.nuclear_cluster, &self.black_hole]

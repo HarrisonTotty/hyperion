@@ -225,6 +225,9 @@ impl Gaussian {
         self.q
     }
 
+    /// The bytes each Gaussian owns on the heap: its nodes for the whole range.
+    pub(crate) const HEAP_BYTES: usize = size_of::<WholeRange>();
+
     /// The density at `(R, z)`, M☉ per cubic light-year.
     #[must_use]
     pub fn density(&self, r_cyl: LightYears, z: LightYears) -> f64 {

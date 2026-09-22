@@ -117,7 +117,9 @@ pub(super) fn inputs() -> Inputs {
         // The halo's components and the accretion history at the middle of their ranges but for
         // the slopes and the break: an inner slope of 2.5 and a break at 18 kpc (58,700 ly),
         // steepening by 2.0 (Pila-Díez et al. 2015, A&A 579, A38: 2.50 inside about 20 kpc;
-        // Medina et al. 2024, MNRAS 531, 4762: 18.1 kpc spherical, 4.47 beyond).
+        // Xue et al. 2015, ApJ 809, 144: a break at 18 ± 1 kpc for a halo flattened to 0.7, as
+        // this component is; Medina et al. 2024, MNRAS 531, 4762: 18.1 kpc spherical, 4.47
+        // beyond).
         halo_in_situ: HaloComponentInput {
             share: 0.225,
             flattening: 0.5,

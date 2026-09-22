@@ -120,7 +120,7 @@ impl ExponentialDisc {
     /// light-year.
     #[must_use]
     pub fn envelope(&self, r_cyl: f64, z: f64) -> f64 {
-        self.envelope_at(r_cyl, locate(z.abs()))
+        self.envelope_at(r_cyl, locate(z))
     }
 
     /// The envelope at cylindrical radius `r_cyl` (ly) and the located height `height`.

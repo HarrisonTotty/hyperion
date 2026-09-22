@@ -7,7 +7,7 @@ import { populationLabel } from "../../lib/galaxy/wire";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { useUniverse } from "../../lib/universe";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
-import { scaleBar } from "../../spatial/scale";
+import { ScaleBar } from "../../spatial/ScaleBar";
 import { GalaxyMapView } from "./GalaxyMapView";
 import { MAP_ACROSS_LY } from "./mapCursor";
 
@@ -54,22 +54,6 @@ function pictureWidthFor(size: ElementSize): number {
   return Math.max(0, 2 * Math.floor(Math.min(acrossPx, downPx) / 2));
 }
 
-interface MapScaleBarProps {
-  readonly lengthLy: number;
-  readonly lengthPx: number;
-}
-
-/** A 1-2-5 length drawn as a bar with end ticks, and its label. */
-function MapScaleBar({ lengthLy, lengthPx }: MapScaleBarProps) {
-  return (
-    <div className="scale-bar">
-      {/* One pixel wider, so that the centres of the 1 px end ticks are the length apart. */}
-      <div className="scale-bar__bar" style={{ width: `${lengthPx + 1}px` }} />
-      <span className="scale-bar__label">{formatScaleLength(lengthLy)}</span>
-    </div>
-  );
-}
-
 interface GalaxyMapPanelProps {
   /** The map cursor, in the `GALACTIC` frame, shown on both views. */
   readonly cursorLy: CentreLy;
@@ -106,10 +90,6 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelP
   const inhibited = linkReason !== null;
   const pictureWidthPx = size === null ? 0 : pictureWidthFor(size);
   const devicePixelRatio = size?.devicePixelRatio ?? 1;
-  const bar =
-    pictureWidthPx > 0
-      ? scaleBar(pictureWidthPx / MAP_ACROSS_LY, pictureWidthPx * SCALE_BAR_SHARE)
-      : null;
   // The pictures' width, which the stylesheet lays the page out by.
   const gridStyle: CSSProperties & { readonly "--map-picture": string } = {
     "--map-picture": `${pictureWidthPx}px`,
@@ -155,7 +135,13 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelP
               <p className="field">
                 <span className="field__label">FRAME</span> <span>GALACTIC</span>
               </p>
-              {bar === null ? null : <MapScaleBar lengthLy={bar.length} lengthPx={bar.lengthPx} />}
+              {pictureWidthPx > 0 ? (
+                <ScaleBar
+                  pxPerUnit={pictureWidthPx / MAP_ACROSS_LY}
+                  maxBarPx={pictureWidthPx * SCALE_BAR_SHARE}
+                  formatLength={formatScaleLength}
+                />
+              ) : null}
             </div>
           </div>
           <GalaxyMapView

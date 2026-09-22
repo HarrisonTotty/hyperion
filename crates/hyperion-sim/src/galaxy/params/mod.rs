@@ -158,7 +158,7 @@ impl BarParams {
     }
 }
 
-/// The nuclear disc, a double exponential at the centre.
+/// The nuclear disc at the centre: exponential in radius, cored in height (plan 02, Design note 9).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NuclearDiscParams {
     length: LightYears,
@@ -172,7 +172,7 @@ impl NuclearDiscParams {
         self.length
     }
 
-    /// The vertical scale height, 0.3–0.5 of the length.
+    /// The effective height `Σ ÷ 2ρ₀`, 0.3–0.5 of the length.
     #[must_use]
     pub fn height(&self) -> LightYears {
         self.height
@@ -554,19 +554,20 @@ impl GalaxyParams {
         self.mean_formed_mass
     }
 
-    /// The old thin disc: its scale length and its mean scale height, 850–1,150 ly.
+    /// The old thin disc: its scale length and its effective height, 850–1,150 ly, the sub-discs'
+    /// harmonic mean.
     #[must_use]
     pub fn thin_disc(&self) -> &DiscParams {
         &self.thin_disc
     }
 
-    /// The young thin disc: the thin disc's scale length and a height of 130–200 ly.
+    /// The young thin disc: the thin disc's scale length and an effective height of 130–200 ly.
     #[must_use]
     pub fn young_disc(&self) -> &DiscParams {
         &self.young_disc
     }
 
-    /// The thick disc: 0.7–0.9 of the thin disc's length and 2.7–3.3 of its mean height.
+    /// The thick disc: 0.7–0.9 of the thin disc's length and 2.7–3.3 of its effective height.
     #[must_use]
     pub fn thick_disc(&self) -> &DiscParams {
         &self.thick_disc
@@ -637,6 +638,16 @@ impl GalaxyParams {
     #[must_use]
     pub fn accretion(&self) -> &AccretionHistory {
         &self.accretion
+    }
+
+    /// The bytes the parameters own on the heap: the halo's components with their ages, and the
+    /// progenitors.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let halo = &self.halo.components;
+        halo.capacity() * size_of::<HaloComponentParams>()
+            + halo.iter().map(|c| c.ages.heap_bytes()).sum::<usize>()
+            + self.accretion.progenitors.capacity() * size_of::<Progenitor>()
     }
 }
 

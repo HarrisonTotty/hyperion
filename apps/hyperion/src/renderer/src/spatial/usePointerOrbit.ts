@@ -6,8 +6,22 @@ import type { CameraMove } from "./useOrbitCamera";
 /** Degrees the camera turns for each `rem` a pointer is dragged (plan 05, T10.d). */
 export const DRAG_DEG_PER_REM = 8;
 
-/** How far, in `rem`, a pointer may move between down and up and still be a click, not a drag. */
+/**
+ * How far, in `rem`, a mouse or a pen may move between down and up and still be a click, not a
+ * drag.
+ */
 export const CLICK_SLOP_REM = 0.25;
+
+/**
+ * How far, in `rem`, a finger may move between down and up and still be a tap, not a drag: 8 px at
+ * 100%, as the platforms allow a touch (Android's touch slop is 8 dp).
+ *
+ * @remarks
+ * A finger wobbles further on a tap than a mouse does on a click, and the guide has consoles run on
+ * touch screens with targets of 2 rem, so a finger is given twice a mouse's slop. A drag still turns
+ * the camera from where the finger went down, so nothing of it is lost.
+ */
+export const TOUCH_CLICK_SLOP_REM = 0.5;
 
 /** Wheel travel, in CSS pixels, that zooms by a factor of 2. */
 const WHEEL_PX_PER_DOUBLING = 400;
@@ -30,10 +44,12 @@ interface Gesture {
   dragging: boolean;
   /** Whether a second pointer joined, making it a pinch, never a click. */
   pinched: boolean;
+  /** How far, in `rem`, the first pointer may stray and still click: a finger's slop or a mouse's. */
+  slopRem: number;
 }
 
 function newGesture(): Gesture {
-  return { pointers: new Map(), dragging: false, pinched: false };
+  return { pointers: new Map(), dragging: false, pinched: false, slopRem: CLICK_SLOP_REM };
 }
 
 function distancePx(a: ScreenPoint, b: ScreenPoint): number {
@@ -79,13 +95,13 @@ export interface PointerOrbitHandlers {
  * @remarks
  * A drag with the primary button, a finger or a pen turns the camera 8° for each `rem` of travel:
  * across to the azimuth, and down to raise the camera. The pointer is captured, so a drag that
- * leaves the canvas keeps turning it. Movement under a quarter of a `rem` between down and up is a
- * click, reported with the point, and does not turn the camera. Two pointers zoom by the ratio of
- * their separations. The wheel zooms by 2^(−travel ÷ 400 px) through a listener that is not passive,
- * so that the page never scrolls under the view. `pointercancel`, or a capture lost without a
- * `pointerup`, ends that pointer's part of the gesture without a click, so that a missed up never
- * leaves a pointer behind to turn the next drag into a pinch.
- * Nothing depends on hover or the secondary button.
+ * leaves the canvas keeps turning it. Movement under a quarter of a `rem` between down and up, or
+ * half a `rem` for a finger, is a click, reported with the point, and does not turn the camera.
+ * Two pointers zoom by the ratio of their separations. The wheel zooms by 2^(−travel ÷ 400 px)
+ * through a listener that is not passive, so that the page never scrolls under the view.
+ * `pointercancel`, or a capture lost without a `pointerup`, ends that pointer's part of the gesture
+ * without a click, so that a missed up never leaves a pointer behind to turn the next drag into a
+ * pinch. Nothing depends on hover or the secondary button.
  *
  * @param canvasRef - The canvas, which takes the wheel listener.
  * @param remPx - CSS pixels in a `rem`, which scales the drag and the click slop.
@@ -141,6 +157,8 @@ export function usePointerOrbit(
       gesture.pointers.set(event.pointerId, { start: point, last: point });
       if (gesture.pointers.size > 1) {
         gesture.pinched = true;
+      } else {
+        gesture.slopRem = event.pointerType === "touch" ? TOUCH_CLICK_SLOP_REM : CLICK_SLOP_REM;
       }
       event.currentTarget.setPointerCapture(event.pointerId);
     },
@@ -161,7 +179,7 @@ export function usePointerOrbit(
         return;
       }
       if (!gesture.dragging) {
-        if (distancePx(pointer.start, point) < CLICK_SLOP_REM * remPx) {
+        if (distancePx(pointer.start, point) < gesture.slopRem * remPx) {
           return;
         }
         // The drag turns the camera from where the pointer went down.

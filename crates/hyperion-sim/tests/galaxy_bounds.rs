@@ -140,9 +140,15 @@ fn targeted_cells(fields: &Fields, edge: u32) -> Vec<CellBox> {
                 let l = disc.length().value();
                 let reach = disc.profile().gradient_reach().value();
                 let top = ROOT - 2.0 * f64::from(edge);
-                for z in [
-                    0.5, 1.0, 127.5, 128.0, 256.0, 4_096.0, reach, 32_768.0, 49_152.0, top,
-                ] {
+                // Every height where the table's segments change width (128 ly times a power of
+                // two), where the rise stops, and the cells below the table's end, at the cube's
+                // face.
+                let widths = (0..9).map(|j| 128.0 * f64::from(1_u32 << j));
+                let end = ROOT - 0.5 * f64::from(edge);
+                for z in [0.5, 1.0, 127.5, reach, 49_152.0, top, end]
+                    .into_iter()
+                    .chain(widths)
+                {
                     points.push([l, 0.0, z]);
                     points.push([0.0, 0.5 * l, z]);
                 }
@@ -686,7 +692,7 @@ fn mean_density(component: &Component, cell: &CellBox, m: u32) -> f64 {
 /// Tightness (P02.T8.b): over 128 ly cells on the mid-plane between the bar's end and 40,000 ly,
 /// the young disc's mean bound over its mean density, which is the candidates placed per system
 /// kept, is under 3.5 for the fixture. The brainstorm's 2.8 was for another profile; the figure
-/// is recorded in the plan (Risks, R17).
+/// is recorded in the plan (Risks, R18: 1.418 on the cored profiles).
 #[test]
 fn the_young_disc_bound_is_tight_on_the_mid_plane() {
     let params = GalaxyParams::milky_way_like();

@@ -4,8 +4,9 @@
 //! primary *initial* mass that its layer owns (brainstorm, "Sizing the layers"). Two functions are
 //! supported behind one interface, [`MassFunction`]: [`Chabrier`]'s (2003) system function with
 //! its branch above 1 M☉ scaled, the default, and [`Kroupa`]'s (2001). Which one a universe uses
-//! belongs to its generator version (plan 02, Design note 5). The share of systems in each band is computed from the
-//! function by integration ([`BandShares`]) and never written down as a constant.
+//! belongs to its generator version (plan 02, Design note 5). The share of systems in each band is
+//! computed from the function by integration ([`BandShares`]) and never written down as a
+//! constant.
 //!
 //! Masses here are bare `f64`s in solar masses, on the stellar range
 //! [`MASS_LIMIT_LO`]–[`MASS_LIMIT_HI`], 0.08–150 M☉.

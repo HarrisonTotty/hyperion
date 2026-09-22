@@ -225,6 +225,7 @@ describe("GalaxyMapPanel", () => {
     expect(within(panel()).getByText("FRAME").parentElement).toHaveTextContent("FRAME GALACTIC");
     // 320 px for 131,072 ly: the longest 1-2-5 bar within a quarter of the width.
     expect(within(panel()).getAllByText("20,000 ly")).toHaveLength(1);
+    expect(within(panel()).getByRole("img", { name: "Scale bar, 20,000 ly" })).toBeInTheDocument();
   });
 
   it("gives both pictures one width, as large as the page's width allows", async () => {

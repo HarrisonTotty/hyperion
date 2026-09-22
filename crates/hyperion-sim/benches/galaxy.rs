@@ -7,19 +7,20 @@
 //!   (P02.T7); `Fields::new`, most of it the sub-discs' Jeans solve.
 //! - `Fields::layer_bound` over a cell, once per cell in placement (P02.T8): 1 µs, the part of
 //!   plan 03's 1–2 µs per sparse cell that `Fields::densities` leaves.
+//! - `Galaxy::new`, the whole handle a universe's galaxy cache builds once (P02.T9): 100 ms.
 
 use std::hint::black_box;
 use std::time::Duration;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
-use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::bounds::CellBox;
 use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
 use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::ShareMatrix;
+use hyperion_sim::galaxy::{Galaxy, PointLy};
 use hyperion_sim::units::LightYears;
 
 /// The potential of the Milky Way fixture: the model, its tables, and lookups.
@@ -126,5 +127,22 @@ fn bounds(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(galaxy, potential, params, fields, bounds);
+/// The whole handle: parameters, mass model, in-plane tables, fields and shares.
+fn handle(c: &mut Criterion) {
+    let mut group = c.benchmark_group("galaxy");
+    group.sample_size(20);
+    group.bench_function("Galaxy::new", |b| {
+        b.iter(|| Galaxy::new(black_box(Seed::new(7))));
+    });
+    group.bench_function("Galaxy::from_params (fixture)", |b| {
+        b.iter_batched(
+            GalaxyParams::milky_way_like,
+            |params| Galaxy::from_params(Seed::new(7), params),
+            BatchSize::LargeInput,
+        );
+    });
+    group.finish();
+}
+
+criterion_group!(galaxy, potential, params, fields, bounds, handle);
 criterion_main!(galaxy);

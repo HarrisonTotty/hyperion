@@ -510,6 +510,12 @@ impl AgeDistribution {
         }
         edges
     }
+
+    /// The bytes the distribution owns on the heap.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.pieces.capacity() * size_of::<Piece>() + self.cumulative.capacity() * size_of::<f64>()
+    }
 }
 
 /// H, the clock window, in Julian years: exactly 1,000.

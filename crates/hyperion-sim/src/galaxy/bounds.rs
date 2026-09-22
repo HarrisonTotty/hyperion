@@ -471,7 +471,7 @@ impl Fields {
     pub fn component_bounds(&self, cell: &CellBox, out: &mut [f64; MAX_COMPONENTS]) {
         let corner = Site::new(&cell.nearest_corner());
         let radii = cell.r_cyl_range();
-        // Every arm follows the galaxy's geometry, which `Fields::new` debug-asserts.
+        // Every arm follows the galaxy's geometry, which `Fields::new` asserts.
         let phase = self.arms().phase_range(cell);
         let mut last: Option<(&Arm, f64)> = None;
         let (used, rest) = out.split_at_mut(self.components().len());

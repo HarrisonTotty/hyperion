@@ -18,10 +18,10 @@
 //! exponential only well above the disc, as measured profiles are (Bovy 2017, MNRAS 470, 1360:
 //! every population's is cored at the mid-plane). Its one slope at the plane, `−2γ`, comes from
 //! the dispersion's rise with `|z|`: an e-fold in 2.5 kpc at Sharma et al.'s γ, against an
-//! exponential disc's e-fold in one scale height. A disc's height is its effective height, `h = Σ ÷ 2ρ₀ = ∫₀^∞ n ÷
-//! n(0) dz`, and a drawn height is met by choosing `σ₀`, not by stretching the profile
-//! ([`JeansIntegral::solve`]). The shape is solved once at the reference radius and holds at
-//! every radius, so a disc's density separates into `exp(−R ÷ L)` times the profile.
+//! exponential disc's e-fold in one scale height. A disc's height is its effective height,
+//! `h = Σ ÷ 2ρ₀ = ∫₀^∞ n ÷ n(0) dz`, and a drawn height is met by choosing `σ₀`, not by stretching
+//! the profile ([`JeansIntegral::solve`]). The shape is solved once at the reference radius and
+//! holds at every radius, so a disc's density separates into `exp(−R ÷ L)` times the profile.
 //!
 //! # The table
 //!
@@ -147,17 +147,15 @@ pub(crate) struct Height {
     offset: f64,
 }
 
-/// The segment of the table that holds the height `abs_z ≥ 0` (ly), exactly (module
-/// documentation, "Floating point").
+/// The segment of the table that holds the height `|z|` (ly, `z` either side of the plane),
+/// exactly (module documentation, "Floating point").
 ///
-/// Every caller passes `|z|`: [`Site`](super::Site) and the profile's public methods take the
-/// absolute value first.
+/// The absolute value is taken here, so that no caller can read the table at a negative height,
+/// where the segment's cast would saturate to 0 and the exponent would no longer be `E(|z|)`.
+/// Callers that already hold `|z|` pass it unchanged: `abs` is exact.
 #[must_use]
-pub(crate) fn locate(abs_z: f64) -> Height {
-    debug_assert!(
-        abs_z >= 0.0 || abs_z.is_nan(),
-        "a height located as |z|, got {abs_z}"
-    );
+pub(crate) fn locate(z: f64) -> Height {
+    let abs_z = z.abs();
     if abs_z < LINEAR_END {
         let floor = abs_z.floor();
         #[expect(
@@ -318,7 +316,7 @@ impl VerticalProfile {
     /// exp(−E)`.
     #[must_use]
     pub fn exponent(&self, z: f64) -> f64 {
-        self.exponent_at(locate(z.abs()))
+        self.exponent_at(locate(z))
     }
 
     /// The density at the height `z` (ly, either side of the plane) relative to the mid-plane's,
@@ -328,13 +326,17 @@ impl VerticalProfile {
         math::exp(-self.exponent(z))
     }
 
-    /// `∫₀^|z| n ÷ n(0) dz` up to the height `z` (ly, either side of the plane).
+    /// `∫₀^|z| n ÷ n(0) dz` up to the height `z` (ly, either side of the plane): the same for `z`
+    /// and `−z`.
     ///
     /// It is exact for the table, which is exponential across each segment. A disc's column
-    /// between two heights is its mid-plane density times the difference (plan 02, P02.T10).
+    /// between two heights on the same side of the plane is its mid-plane density times the
+    /// difference of the two, and between heights on opposite sides times their sum (plan 02,
+    /// P02.T10). It is not monotone bit for bit: a difference of two nearby heights can round a
+    /// unit in the last place below 0 (plan 02, Risks, R18).
     #[must_use]
     pub fn integral_to(&self, z: f64) -> LightYears {
-        let height = locate(z.abs());
+        let height = locate(z);
         LightYears::new(match self.segments.get(height.segment) {
             Some(&[e, rise]) => {
                 let width = segment_width(height.segment);
@@ -386,6 +388,12 @@ impl VerticalProfile {
     #[must_use]
     pub fn reference_radius(&self) -> LightYears {
         self.reference_radius
+    }
+
+    /// The bytes the table owns on the heap.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.segments) + size_of_val(&*self.below)
     }
 }
 
@@ -551,9 +559,12 @@ mod tests {
     const PI: f64 = core::f64::consts::PI;
 
     /// Every knot is located as itself, every height inside a segment exactly, and the widths and
-    /// knots tile `[0, 65,536]`.
+    /// knots tile `[0, 65,536]`. A height below the plane is located as its mirror above it.
     #[test]
     fn heights_are_located_exactly() {
+        for z in [0.0, 0.5, 127.5, 128.0, 300.25, 65_536.0, 70_000.0] {
+            assert_eq!(locate(-z), locate(z), "at {z}");
+        }
         assert!((knot(0)).abs() < f64::MIN_POSITIVE);
         assert!((knot(LINEAR_SEGMENTS) - 128.0).abs() < f64::MIN_POSITIVE);
         assert!((knot(SEGMENTS) - TABLE_END).abs() < f64::MIN_POSITIVE);
@@ -575,6 +586,7 @@ mod tests {
         for _ in 0..100_000 {
             let z = math::exp(lcg.next_f64() * math::ln(70_000.0)) - 1.0;
             let at = locate(z);
+            assert_eq!(locate(-z), at, "at {z}");
             if at.segment < SEGMENTS {
                 let rebuilt = knot(at.segment) + at.offset * segment_width(at.segment);
                 assert!(

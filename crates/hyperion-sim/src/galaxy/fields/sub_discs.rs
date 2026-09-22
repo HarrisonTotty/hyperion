@@ -10,17 +10,18 @@
 //!
 //! `σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)`,
 //!
-//! up to 2.4 kpc from the plane, the reach of the heights it was fitted to, and level above,
-//! at the Sun's angular momentum and metallicity, which the reference radius, three thin-disc
-//! scale lengths, stands for. Each sub-disc's vertical profile is the vertical Jeans equation's
-//! solution for that dispersion in the galaxy's potential at the reference radius
-//! ([`vertical`](super::vertical)): cored at the plane, with no free height. `s` is the galaxy's
-//! dispersion scale, one number that the drawn mean height fixes: the sub-discs' effective heights
-//! `hᵢ = Σᵢ ÷ 2ρ₀,ᵢ`, weighted by their shares `wᵢ` of the old thin disc, have the harmonic mean
-//! `1 ÷ Σ wᵢ ÷ hᵢ` of the drawn 850–1,150 ly. That mean is the whole old thin disc's effective
-//! height, `Σ ÷ 2ρ₀`, since the sub-discs' mid-plane densities add. The heights are met by
-//! scaling the dispersions, not the heights, so heights, dispersions and profiles satisfy one
-//! Jeans equation together (brainstorm, Decisions, "2026-09-21: local density rulings", 1).
+//! up to 2.4 kpc from the plane, where the height axes of the figures it was fitted in end (the
+//! binned data reach about 2 kpc), and level above, at the Sun's angular momentum and metallicity,
+//! which the reference radius, three thin-disc scale lengths, stands for. Each sub-disc's vertical
+//! profile is the vertical Jeans equation's solution for that dispersion in the galaxy's potential
+//! at the reference radius ([`vertical`](super::vertical)): cored at the plane, with no free
+//! height. `s` is the galaxy's dispersion scale, one number that the drawn mean height fixes: the
+//! sub-discs' effective heights `hᵢ = Σᵢ ÷ 2ρ₀,ᵢ`, weighted by their shares `wᵢ` of the old thin
+//! disc, have the harmonic mean `1 ÷ Σ wᵢ ÷ hᵢ` of the drawn 850–1,150 ly. That mean is the whole
+//! old thin disc's effective height, `Σ ÷ 2ρ₀`, since the sub-discs' mid-plane densities add. The
+//! heights are met by scaling the dispersions, not the heights, so heights, dispersions and
+//! profiles satisfy one Jeans equation together (brainstorm, Decisions, "2026-09-21: local density
+//! rulings", 1).
 //!
 //! The other discs are cored the same way, their dispersions rising with height by the same
 //! 0.20 per kpc, as Sharma et al. find the high-α stars' do too ("no special provision is needed to
@@ -70,10 +71,10 @@ pub const HEATING_AGE_OFFSET_GYR: f64 = 0.1;
 pub const DISPERSION_HEIGHT_GRADIENT_PER_KPC: f64 = 0.20;
 
 /// The height, kpc, up to which the dispersion rises by [`DISPERSION_HEIGHT_GRADIENT_PER_KPC`] and
-/// above which it stays level: the reach of the heights Sharma et al. (2021, Figs. 1 and 15)
-/// fitted their law to. They say nothing of extrapolating it, and carried on to the root cube's
-/// edge it would give every disc a tail falling as `z⁻²`: the Milky Way fixture's thick disc would
-/// hold a tenth of the halo's density 10 kpc above the Sun.
+/// above which it stays level: where the height axes of Sharma et al.'s (2021) Figs. 1 and 15 end,
+/// their binned data reaching about 2 kpc. They say nothing of extrapolating it, and carried on to
+/// the root cube's edge it would give every disc a tail falling as `z⁻²`: the Milky Way fixture's
+/// thick disc would hold a tenth of the halo's density 10 kpc above the Sun.
 pub const DISPERSION_GRADIENT_REACH_KPC: f64 = 2.4;
 
 /// The heating law in the mid-plane, `σ_z(τ, 0) = 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441`

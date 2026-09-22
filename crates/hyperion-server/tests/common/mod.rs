@@ -141,6 +141,17 @@ impl TestServer {
         }
         self.temp_dir.take()
     }
+
+    /// Stops this server and starts another on the same data directory with a fresh
+    /// [`test_entropy`], as restarting the process would. The new server keeps the temporary data
+    /// directory, if this one made it.
+    pub async fn restart(self) -> Self {
+        let data_dir = self.data_dir.clone();
+        let temp_dir = self.stop().await;
+        let mut server = Self::start_with(Self::config(&data_dir).build()).await;
+        server.temp_dir = temp_dir;
+        server
+    }
 }
 
 impl Drop for TestServer {

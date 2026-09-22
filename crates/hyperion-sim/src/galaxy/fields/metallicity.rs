@@ -16,13 +16,14 @@
 //!   Gyr)`, clamped to [−1.0, +0.5], sigma 0.20. Gaia-ESO finds the relation "nearly flat" for 0–8
 //!   Gyr, falling beyond 9 Gyr, with "a significant scatter of \[Fe/H\] at any age" (Bergemann et
 //!   al. 2014, A&A 565, A89, §5); the slope beyond is read from their Fig. 6, which gives no
-//!   number. The scatter is the Geneva–Copenhagen survey's, σ 0.22 and half its FWHM 0.19
-//!   (Casagrande et al. 2011, A&A 530, A138, Table 1). The flat part is solar three scale lengths
-//!   out, about the Sun's radius, as the youngest local stars and the gas are: Fe 7.52 ± 0.03
-//!   against the Sun's 7.50 ± 0.04 (Nieva and Przybilla 2012, A&A 539, A143, Table 7). With the
-//!   declining formation history the local mean over every age then comes to −0.03 to −0.04,
-//!   against the survey's −0.06 over its own, differently weighted, sample. The clamp is plan
-//!   02's;
+//!   number. The scatter is the width of the Geneva–Copenhagen survey's local distribution over
+//!   every age, σ 0.22 and half its FWHM 0.19 (Casagrande et al. 2011, A&A 530, A138, Table 1),
+//!   held at every age as the rulings have it, although the survey finds young stars' narrower.
+//!   The flat part is solar three scale lengths out, about the Sun's radius, as the youngest local
+//!   stars and the gas are: Fe 7.52 ± 0.03 against the Sun's 7.50 ± 0.04 (Nieva and Przybilla
+//!   2012, A&A 539, A143, Table 7). With the declining formation history the local mean over every
+//!   age then comes to −0.03 to −0.04, against the survey's −0.06 over its own, differently
+//!   weighted, sample. The clamp is plan 02's;
 //! - thick disc −0.55, sigma 0.25; bulge 0.0, 0.40; long bar 0.0, 0.30; nuclear disc +0.1, 0.30;
 //! - halo components their own means (in situ −0.6, dominant merger −1.2, lesser progenitors drawn
 //!   in −2.0 to −1.0, globular-born debris −1.5), sigma 0.3.
@@ -46,8 +47,8 @@ pub const THIN_DISC_REFERENCE_LENGTHS: f64 = 3.0;
 /// outer disc above −1.0 (provisional).
 pub const THIN_DISC_MEAN_RANGE: (f64, f64) = (-1.0, 0.5);
 
-/// The thin discs' scatter about the mean at every age, dex (Casagrande et al. 2011, Table 1:
-/// σ 0.22, FWHM/2 0.19).
+/// The thin discs' scatter about the mean at every age, dex: the local distribution's width over
+/// every age (Casagrande et al. 2011, Table 1: σ 0.22, FWHM/2 0.19).
 pub const THIN_DISC_SIGMA: Dex = Dex::new(0.20);
 
 /// The thick disc's \[Fe/H\].

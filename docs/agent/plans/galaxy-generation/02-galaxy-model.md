@@ -378,7 +378,8 @@ and the nuclear cluster, which change it by well under a per cent at the effecti
 10 Gyr. Each takes as its age the mean age of the formation history inside its bin, and as its
 dispersion Sharma et al.'s (2021, MNRAS 506, 1761, eqs. 4 and 7, Table 2) exact heating law, not
 its rounding: σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc),
-the rise stopping at 2.4 kpc, the reach of the heights it was fitted to (R18).
+the rise stopping at 2.4 kpc, where the height axes of its figures end (its binned data reach
+about 2 kpc; R18).
 Each sub-disc's vertical profile is the vertical Jeans equation's solution for that dispersion in
 K_z(R_ref, z) from `MassModel`, R_ref three thin-disc scale lengths: n(z) ÷ n(0) = (σ(0) ÷ σ(z))²
 exp(−∫₀^|z| K_z ÷ σ² dz′), cored at the plane, tabulated once per galaxy (`fields/vertical.rs`) and
@@ -1251,21 +1252,23 @@ component order and the map's quadrature scheme belong to the version as well.
   - _Cored profiles (D9, T7.a, T7.b)._ `fields/vertical.rs` holds `VerticalProfile` (the Jeans
     solution tabulated at 705 knots, every light-year to 128 ly, then 64 segments per octave to
     65,536 ly, its exponent linear between them; `exponent`, `value`, `integral_to`,
-    `effective_height`, `dispersion`, `dispersion_at`, `gradient`, `gradient_reach`), and the
-    crate's `VerticalForce` (moved from `sub_discs.rs`) and `JeansIntegral`. `DoubleExponential` is
-    `ExponentialDisc { n0, length, profile, arm }`, `height()` its effective height and `profile()`
-    its profile. `SubDiscHeights` keeps its name and its getter `Fields::sub_disc_heights`:
-    `dispersions` are the law's, `scaled_dispersions` the profiles', `scale` the dispersion scale,
-    `heights` and `unscaled` the effective heights at the scale and at 1; `weighted_dispersions`
-    and the public `SubDiscHeights::solve` are gone. Every disc takes Sharma et al.'s rise of 0.20
-    per kpc, which they find for the high-α stars too ("no special provision is needed to
-    accommodate the thick disc stars", in their summary): an isothermal thick disc, as Bovy et al.
-    (2012, ApJ 755, 115) measure mono-abundance populations, left the fixture's far-field fit with
-    no thick disc (its h₂ at the fit's floor of 500 pc). The rise stops at 2.4 kpc, the reach of the heights
-    Sharma et al.'s figures show (`DISPERSION_GRADIENT_REACH_KPC`): carried on, it gave every disc
-    a tail falling as z⁻², and the fixture's thick disc a tenth of the halo's density 10 kpc above
-    the Sun (now 1.7%). The thin, young and thick discs are solved at three thin-disc scale lengths,
-    the nuclear disc at two of its own, the mass-weighted mean radius of an exponential disc. The
+    `effective_height`, `dispersion`, `dispersion_at`, `gradient_per_kpc`, `gradient_reach`), and
+    the crate's `VerticalForce` (moved from `sub_discs.rs`) and `JeansIntegral`. `DoubleExponential`
+    is `ExponentialDisc { n0, length, profile, arm }`, `height()` its effective height and
+    `profile()` its profile. `SubDiscHeights` keeps its name and its getter
+    `Fields::sub_disc_heights`: `dispersions` are the law's, `scaled_dispersions` the profiles',
+    `scale` the dispersion scale, `heights` and `unscaled` the effective heights at the scale and at
+    1; `weighted_dispersions` and the public `SubDiscHeights::solve` are gone. Every disc takes
+    Sharma et al.'s rise of 0.20 per kpc, which they find for the high-α stars too ("no special
+    provision is needed to accommodate the thick disc stars", in their summary): an isothermal thick
+    disc, as Bovy et al. (2012, ApJ 755, 115) measure mono-abundance populations, left the fixture's
+    far-field fit with no thick disc (its h₂ at the fit's floor of 500 pc). The rise stops at 2.4
+    kpc, where the height axes of Sharma et al.'s Figs. 1 and 15 end
+    (`DISPERSION_GRADIENT_REACH_KPC`; their binned data reach about 2 kpc, found in validation, so a
+    cap of 2.0 kpc is as defensible and is the owner's to rule on): carried on, it gave every disc a
+    tail falling as z⁻², and the fixture's thick disc a tenth of the halo's density 10 kpc above the
+    Sun (now 1.7%). The thin, young and thick discs are solved at three thin-disc scale lengths, the
+    nuclear disc at two of its own, the mass-weighted mean radius of an exponential disc. The
     profiles' only slope at the plane is −2γ, an e-fold in 2.5 kpc. For the fixture: effective
     heights 371–1,373 ly (364–1,341 unscaled; the youngest and oldest within a quarter of the
     brainstorm's heights at their mean ages, 340 and 1,560 ly, which T7.b's brackets now read),
@@ -1293,20 +1296,28 @@ component order and the map's quadrature scheme belong to the version as well.
   - _The potential (D6)._ It keeps every disc exponential in height at the drawn effective height;
     the fixture's cored thin disc differs from it by at most 5% of its 2πGΣ within a height, 4.6%
     of the whole K_z there, near 1.1 effective heights.
-  - _Bounds (T8)._ No new margin: the profile's exponent is non-decreasing bit for bit, because
-    its segments are found exactly (integer part, octave by `ilog2`, powers of two) and its knots
-    are made continuous as rounded (`fields/vertical.rs`, "Floating point"). A unit test steps a
-    unit in the last place at a time across every knot, and the table's end, of twelve profiles
-    (two radii, isothermal and rising, 3–90 km/s); `galaxy_bounds.rs` adds targeted disc cells
-    where the segments change width, where the rise stops, at 32,768 and 49,152 ly and at the
-    cube's top. The young disc is subnormal far above the plane (from 12,000–24,000 ly) and the
-    youngest sub-disc near the cube's top in some galaxies, where the relative margin rounds to at
-    most one unit in the last place, so `assert_envelopes_bounded` allows a subnormal corner its
-    margin plus one rounding; the nuclear disc no longer gets there. The builder galaxy with the
-    densest centre takes the new halo ranges' ends (slopes 2.8, the break at 52,000 ly steepening
-    by 2.5). T8's slow tests pass: 1.88 million cells in the hunt, zero violations, the worst
-    density ÷ bound 1 − 9 × 10⁻¹³ for normal envelopes and 1 to twelve places where the young disc
-    or the bar is subnormal; 213 s on the loaded machine.
+  - _Bounds (T8)._ No new margin: the profile's exponent is non-decreasing bit for bit, because its
+    segments are found exactly (integer part, octave by `ilog2`, powers of two) and its knots are
+    made continuous as rounded (`fields/vertical.rs`, "Floating point"). A unit test steps a unit in
+    the last place at a time across every knot, and the table's end, of twelve profiles (two radii,
+    isothermal and rising, 3–90 km/s); `galaxy_bounds.rs` adds targeted disc cells at all nine
+    heights where the segments change width (128 ly to 32,768 ly), where the rise stops, at 49,152
+    ly, near the cube's top and at the table's end. `locate` takes |z| itself, so no caller can read
+    the table at a negative height. The young disc is subnormal far above the plane (from
+    12,000–24,000 ly) and the youngest sub-disc near the cube's top in some galaxies, where the
+    relative margin rounds to at most one unit in the last place, so `assert_envelopes_bounded`
+    allows a subnormal corner its margin plus one rounding; the nuclear disc no longer gets there.
+    The builder galaxy with the densest centre takes the new halo ranges' ends (slopes 2.8, the
+    break at 52,000 ly steepening by 2.5). T8's slow tests pass: 1.89 million cells in the hunt,
+    zero violations, the worst density ÷ bound 1 − 9 × 10⁻¹³ for normal envelopes and 1 to twelve
+    places where the young disc or the bar is subnormal; 213–320 s on the loaded machine. Tightness
+    under the cored profiles (T8.b): 1.418 for the fixture's young disc, 1.28–1.47 on the five hunt
+    seeds; R17's 1.750, its subnormal list and its timings are T8 as first built, on exponential
+    discs. In validation the bounds held at 8.4 million points of 89,600 cells over 64 further
+    seeds, with `layer_bound` over a root octant above every cell's, as P03's headroom check
+    assumes; the fast suite caught each of a phase range 3% short, a sharp arm's numerator read at
+    the outer radius and its fade at the inner, and the margin removed (the bulge), and the knot
+    test caught a table interpolated as a lerp, which the margin alone would have covered.
   - _Halo (T5.a, T5.c, T7.d)._ Inner slopes 2.2–2.8, the dominant break 52,000–91,000 ly and its
     steepening 1.5–2.5 (tags and word counts unchanged); the fixture 2.5, 58,700 ly, 2.0. Its
     spherically averaged slope from 20,000 to 60,000 ly is −2.973, 0.03 inside the bracket, the
@@ -1358,7 +1369,57 @@ component order and the map's quadrature scheme belong to the version as well.
     above the profiles', so it must compare against the capped law. T10's edge-on columns read
     `VerticalProfile::integral_to`, which is exact for the table but has no bit-for-bit monotonicity
     argument, unlike `exponent`: a difference of two columns can come out a unit in the last place
-    below 0 near a knot, so T10 clamps it at 0 or proves otherwise. Plan 09's Design note 21 bounds density ÷ g(z) at the
-    height nearest the plane, which held for exponential discs; a cored disc's ratio to an
-    exponential proposal peaks above the plane, so plan 09 must bound it anew when revalidated.
-    T11 tunes the fixture's Σ★ (its table, above).
+    below 0 (in validation, 24 falls in 3.8 × 10⁷ unit steps, all inside segments), so T10 clamps
+    it at 0. It returns ∫₀^|z| for either sign of z, so a column across the plane is a sum. Plan
+    09's Design note 21 bounds density ÷ g(z) at the height nearest the plane, which held for
+    exponential discs; a cored disc's ratio to an exponential proposal peaks above the plane, so
+    plan 09 must bound it anew when revalidated. T11 tunes the fixture's Σ★ (its table, above).
+- **R19. Deviations in T9, as built (P02.T9).** No generated output moves: the shares and every
+  sum over them keep their bits, so `GENERATOR_VERSION` stays 6. The one new golden,
+  `galaxy_handle.golden`, pins every layer's density at 16 points for the fixture and the three
+  pinned seeds, each checked bit for bit against Σ share × density in component order; no golden
+  pinned `layer_density` before. Every test in `tests/galaxy_handle.rs` has `galaxy_handle` in its
+  name, so the acceptance filter selects them; the one slow test runs under `just test-slow`, and
+  the unit tests of `galaxy::shares` and `galaxy::tests` run under `--lib`.
+  - _`from_params` takes a seed._ `Galaxy::from_params(seed, params)`, not `from_params(params)`:
+    plan 03 places stars in the Milky Way fixture under fixed seeds (P03.T8, its benches), and
+    placement keys its streams on `Galaxy::seed()`. The seed keys placement only; two seeds give
+    the same fields, tables and shares (tested). Plans 03 and 15 pass one.
+  - _No fates field._ `ProvisionalFates` is zero-sized, and its result, the mean masses, is held by
+    `GalaxyParams`, which `system_count`, `mean_system_mass` and `mean_formed_mass` pass through
+    to. P06.T30.b's `TrackFates` table, "held by the `Galaxy`", is needed while
+    `GalaxyParams::from_seed` derives the mean masses, before any handle exists, and `from_params`
+    takes finished parameters: P06.T30 builds it inside that derivation or restructures the build.
+  - _Mass function held by value._ A private enum of `Kroupa` and `Chabrier`, so that `Galaxy`
+    derives `Debug`, `Clone` and `PartialEq` and is `RefUnwindSafe`; `mass_function()` lends it as
+    `&dyn MassFunction`. It repeats `MassFunctionKind::to_mass_function`'s mapping, and a unit test
+    holds the two equal.
+  - _Reserved columns._ R16's "T9 adds the reserved ones" is read as the layout: `ShareMatrix` is
+    band × column, row-major in a boxed slice, with `column_count()` of at least
+    `POPULATION_COLUMNS` and the populations first in `POPULATIONS` order. `uniform` builds the
+    seven and no more, because plan 08 sets the number of displaced classes (P08.T12.a) and builds
+    them where placement reads the shares, in `from_params`, not in `with_full_potential`.
+    `ShareMatrix` is no longer `Copy`. `share` reads one index with one bounds check; the cost
+    against the inline array it replaced is a few nanoseconds per `layer_bound`, not measurable on
+    the loaded machine.
+  - _Beyond the Provides._ `Galaxy::mass_model()` (the handle keeps the model for
+    `with_full_potential`; plan 08 reads `MassModel::{vertical_force, v_circ_sq}`),
+    `Galaxy::heap_bytes()`, `shares::POPULATION_COLUMNS`, `ShareMatrix::{column_count, row}`, and
+    `pub(crate)` `heap_bytes` on the parts (`Gaussian::HEAP_BYTES`). Plan 04 (its line 246) reads a
+    galaxy-wide `mean_system_mass()`: that is `stellar_mass() ÷ system_count()` of the parameters.
+  - _Size, for plan 04._ 1,434,880–1,436,448 bytes on the heap (1.37 MiB) over the fixture and the
+    three pinned seeds, 90% of it the mass model's 767 Gaussians with their node tables (1.29 MB),
+    the fields 141 KB; `size_of::<Galaxy>()` is 3,248 bytes; the (R, |z|) grid adds 131,072. Four
+    cache entries come to about 5.5 MiB, so plan 04's Design note 23 holds. `heap_bytes` counts
+    capacity, without the allocator's overhead, so a clone can report a little less. The test
+    prints the figures and asserts 512 KiB–4 MiB, under 5% apart, and a handle under 16 KiB.
+  - _Tests._ `Send + Sync + RefUnwindSafe` rules out `Cell`, `RefCell` and `OnceCell`; a lock,
+    `OnceLock` or atomic would pass, and the sim holds none. Parts and handles are compared by their
+    `Debug` text, which tells every two floats apart, and order independence by its fingerprint. A
+    slow test covers `with_full_potential`: it adds only the grid, bit for bit
+    `PotentialTables::full`, and a second call builds nothing.
+  - _Speed (T9 acceptance)._ `Galaxy::new` takes 129 ms against 100 ms, a finding: parameters 9.6
+    ms, the mass model 2.8, the in-plane tables 25.6 and `Fields::new` 85 (the fixture's
+    `from_params` 98 ms), at a load of about 4 on the i7-8665U; at a load of 10–16 every figure
+    doubles or triples. `Fields::new` is two thirds of it (R18). `with_full_potential` takes R15's
+    2.7 s, not the "about a second" of the Provides and plan 04.

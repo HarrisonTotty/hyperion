@@ -1283,24 +1283,6 @@ body {
   transform: translateY(-50%);
 }
 
-/* A 1-2-5 length: a bar with end ticks, and the length it stands for. */
-.scale-bar {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-}
-
-.scale-bar__bar {
-  height: 0.5rem;
-  border: 1px solid var(--text);
-  border-top: 0;
-}
-
-.scale-bar__label {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
 /* The CURSOR panel: the cursor's coordinates to enter, CENTRE CHART, and its GALACTIC reading. */
 .centre-entry {
   font-size: 0.875rem;
@@ -1386,9 +1368,10 @@ body {
 }
 
 /*
- * The general 3D spatial view: its key legend, then the canvas with DOM over it (labels and
- * furniture, which take no pointer, so that the canvas gets every drag and pick). The canvas fills
- * the stage, which the view's container sizes.
+ * The general 3D spatial view: its preset views, camera angles and key legend, then the canvas with
+ * DOM over it (labels and furniture, which take no pointer, so that the canvas gets every drag and
+ * pick), then its frame, centre and time. The canvas fills the stage, which the view's container
+ * sizes.
  */
 .spatial-view {
   display: flex;
@@ -1400,8 +1383,8 @@ body {
 }
 
 /*
- * The preset buttons and the key legend, above the view and outside its overlay, so that they take
- * a pointer.
+ * The preset buttons, the camera's angles and the key legend, above the view and outside its
+ * overlay, so that the buttons take a pointer.
  */
 .spatial-view__controls {
   display: flex;
@@ -1477,4 +1460,166 @@ body {
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+/*
+ * The labelled values around a spatial view, `AZM 030°` or `RADIUS 26,000.0 ly`, set as `.field`s:
+ * each value right-aligned in a slot of fixed width, its unit muted after it. The rows wrap between
+ * values.
+ */
+.spatial-view__angles,
+.spatial-view__readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0;
+}
+
+.spatial-reading {
+  white-space: nowrap;
+}
+
+.spatial-reading dd {
+  margin: 0;
+}
+
+.spatial-reading__value {
+  display: inline-block;
+  text-align: right;
+}
+
+.spatial-reading__unit {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/*
+ * Below the view, in the same place on every spatial display: the frame, the centre and the time,
+ * the scale bar, and on the galactic axis why the directions are undefined.
+ */
+.spatial-view__furniture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.25rem 1.5rem;
+}
+
+.spatial-view__axis-note {
+  flex-basis: 100%;
+  margin: 0;
+  letter-spacing: 0.1em;
+}
+
+/* A 1-2-5 length: a bar with end ticks, and the length it stands for. */
+.scale-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.scale-bar__slot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.scale-bar__bar {
+  height: 0.5rem;
+  border: 1px solid var(--text);
+  border-top: 0;
+}
+
+/* Room for the longest length, `20,000 ly` or `0.05 ly`, so that the bar never moves. */
+.scale-bar__label {
+  min-width: 9ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Labels over the canvas, placed by the view from the draw list, each moved from the top left. */
+.spatial-view__labels {
+  position: absolute;
+  inset: 0;
+}
+
+/* A mark's label, its designation; no letter spacing, since its box is estimated from its length. */
+.spatial-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+/* A mark within the set range is labelled in the colour of its symbol. */
+.spatial-label--available {
+  color: var(--accent);
+}
+
+/*
+ * The label of a sphere or a ring: a label, muted, spaced as labels are, its number in monospaced
+ * figures. `RANGE 50 ly SET` stays muted too: the range is an entered setting, never a reading.
+ */
+.spatial-label--curve {
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.spatial-label__figures,
+.core-arrow__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/*
+ * The axis triad, in the view's bottom left-hand corner, sized by the view: its axes about the
+ * centre of its box, drawn in user units of a sixteenth of a rem.
+ */
+.axis-triad {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  color: var(--text);
+}
+
+.axis-triad__axes,
+.core-arrow__mark {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.axis-triad__dot,
+.core-arrow__dot {
+  fill: currentColor;
+  stroke: none;
+}
+
+.axis-triad__label,
+.core-arrow__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.25;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* The core arrow at the rim of the view, drawn in the view's CSS pixels. */
+.core-arrow {
+  position: absolute;
+  inset: 0;
+  color: var(--text);
+}
+
+.core-arrow__value {
+  color: var(--text);
 }

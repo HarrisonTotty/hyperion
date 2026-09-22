@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 
+import { formatBearingDeg, formatSignedDeg } from "../lib/format";
 import { isTextEntry } from "../lib/textEntry";
 import { useElementSize } from "../lib/useElementSize";
 import { usePrefersReducedMotion } from "../lib/usePrefersReducedMotion";
@@ -22,13 +23,29 @@ import {
   type Viewport,
   zoomLimits,
 } from "./camera";
+import { AxisTriad } from "./AxisTriad";
+import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
 import { buildDrawList, type ScreenPoint } from "./drawList";
+import {
+  type BoxPx,
+  coreArrowBoxes,
+  coreArrowLayout,
+  coreLabelText,
+  placeCurveLabels,
+  triadFootprintPx,
+  triadLayout,
+} from "./furniture";
+import { chooseLabels, placeLabels } from "./labels";
 import type { SpatialScene } from "./marks";
 import { type ColourTokens, paint, readTokens, sameTokens } from "./paint";
 import { pick } from "./pick";
 import { PRESET_CONTROLS, PresetButtons } from "./PresetButtons";
+import { Reading, type SpatialQuantity, type SpatialReading } from "./Reading";
+import type { ScaleUnit } from "./scale";
+import { ScaleBar } from "./ScaleBar";
 import { type CameraMove, useOrbitCamera } from "./useOrbitCamera";
 import { usePointerOrbit } from "./usePointerOrbit";
+import { useThrottledValue } from "./useThrottledValue";
 
 /**
  * Space kept clear between the fitted sphere and the edge of the view, in `rem`, room for the
@@ -43,10 +60,25 @@ const FINE_ARROW_STEP_DEG = 1;
 /** The factor one press of a zoom key zooms by. */
 const ZOOM_STEP = 1.25;
 
-/** The view's keys, shown above it and describing its canvas. */
-const KEY_LEGEND: ReadonlyArray<string> = ["ARROWS ROTATE", "+/− ZOOM", "T S F O VIEWS", "Z FIT"];
+/**
+ * The view's keys, shown above it and describing its canvas. The preset views' keys are shown on
+ * their buttons, and are not repeated here.
+ */
+const KEY_LEGEND: ReadonlyArray<string> = ["ARROWS ROTATE", "+/− ZOOM", "Z FIT"];
 
-/** How many steps an arrow key turns the camera by: right raises the azimuth, up the elevation. */
+/** The shortest time between two changes of the azimuth and elevation readouts: 4 Hz. */
+const READOUT_INTERVAL_MS = 250;
+
+/** The longest the scale bar may be, in `rem`. */
+const SCALE_BAR_MAX_REM = 6;
+
+/** The width of the azimuth and elevation values, in characters: `000°` and `+90°`. */
+const ANGLE_WIDTH_CH = 4;
+
+/**
+ * How many steps an arrow key turns the camera by. The keys turn it as a drag does, as if the scene
+ * were taken by its near side: right raises the azimuth, and down raises the camera.
+ */
 interface ArrowTurn {
   readonly azimuthSteps: number;
   readonly elevationSteps: number;
@@ -55,9 +87,37 @@ interface ArrowTurn {
 const ARROW_TURNS: Readonly<Record<string, ArrowTurn>> = {
   ArrowLeft: { azimuthSteps: -1, elevationSteps: 0 },
   ArrowRight: { azimuthSteps: 1, elevationSteps: 0 },
-  ArrowUp: { azimuthSteps: 0, elevationSteps: 1 },
-  ArrowDown: { azimuthSteps: 0, elevationSteps: -1 },
+  ArrowUp: { azimuthSteps: 0, elevationSteps: -1 },
+  ArrowDown: { azimuthSteps: 0, elevationSteps: 1 },
 };
+
+/** The first number in a label, with its sign, grouping and decimals. */
+const FIRST_NUMBER = /[+\-−]?\d[\d,.]*/u;
+
+interface FiguresProps {
+  readonly text: string;
+}
+
+/** A label's text with its numbers in monospaced figures, as the console sets every number. */
+function Figures({ text }: FiguresProps) {
+  const found = FIRST_NUMBER.exec(text);
+  if (found === null) {
+    return text;
+  }
+  const end = found.index + found[0].length;
+  return (
+    <>
+      {text.slice(0, found.index)}
+      <span className="spatial-label__figures">{found[0]}</span>
+      <Figures text={text.slice(end)} />
+    </>
+  );
+}
+
+/** A `transform` that moves an element from the top left to a point given in `rem`. */
+function translateRem(leftRem: number, topRem: number): string {
+  return `translate(${leftRem}rem, ${topRem}rem)`;
+}
 
 /** The preset a letter key chooses, `T`, `S`, `F` or `O`, or `null` for any other key. */
 function presetForKey(key: string): PresetName | null {
@@ -92,8 +152,25 @@ export interface SpatialViewProps {
   readonly fitRadius: number;
   /** Writes a length in scene units with its unit, for the scale bar: `20 ly`, `500 AU`. */
   readonly formatLength: (length: number) => string;
+  /**
+   * The units the scale bar may be read in, largest first, as {@link formatLength} writes them;
+   * the scene's own unit alone when absent.
+   */
+  readonly scaleUnits?: ReadonlyArray<ScaleUnit> | undefined;
   /** The reference frame's name, shown with the view: `GALACTIC`. */
   readonly frameName: string;
+  /**
+   * The view centre's coordinates in the frame, shown with the view: `RADIUS 26,000.0 ly`,
+   * `ANGLE 045.0°`, `HEIGHT +12.0 ly`.
+   */
+  readonly centre: ReadonlyArray<SpatialReading>;
+  /** The time the scene shows, labelled with its time system: `UT +0.00 yr`. */
+  readonly time: SpatialReading;
+  /**
+   * The distance from the view centre to the galactic axis, for the core arrow: the same quantity
+   * as the centre's `RADIUS`, written the same way (`26,000.0 ly`).
+   */
+  readonly coreDistance: SpatialQuantity;
   /** The accessible name of the view's canvas. */
   readonly accessibleName: string;
   /** Called with the mark the operator picks on the canvas. */
@@ -107,32 +184,47 @@ export interface SpatialViewProps {
 
 /**
  * The general 3D spatial view: an orthographic orbit camera over a scene of marks, a reference
- * plane and spheres, painted on a canvas (plan 05, T10).
+ * plane and spheres, painted on a canvas, with its orientation, scale, frame, centre and time
+ * around it (plan 05, T10).
  *
  * @remarks
  * The view owns its camera, which starts at the oblique preset at the zoom that fits a sphere of
  * `fitRadius` (plan 05, design note D16). With the canvas focused the arrow keys turn it 5° a
- * press, 1° with `Shift`, right raising the azimuth and up the elevation; from anywhere on the
- * display but a text field `+` and `=` zoom in and `-` and `−` out by 1.25, and `Z` fits again.
- * The preset buttons `TOP`, `SIDE`, `FRONT` and `OBLIQUE`, or their keys `T`, `S`, `F` and `O`,
- * turn the camera to their view over 120 ms, or at once under reduced motion, keeping the zoom.
- * Zoom stays within 0.5 to 100 times the scale that fits. A drag turns the camera, the wheel and a
- * pinch zoom it, and a click picks the nearest mark (see {@link usePointerOrbit}). All input is
- * gathered into one frame. Its container is measured through a `ResizeObserver`; the canvas's
+ * press, 1° with `Shift`, as a drag does: right raises the azimuth and down raises the camera. From
+ * anywhere on the display but a text field `+` and `=` zoom in and `-` and `−` out by 1.25, and `Z`
+ * fits again. The preset buttons `TOP`, `SIDE`, `FRONT` and `OBLIQUE`, or their keys `T`, `S`, `F`
+ * and `O`, turn the camera to their view over 120 ms, or at once under reduced motion, keeping the
+ * zoom. Zoom stays within 0.5 to 100 times the scale that fits. A drag turns the camera, the wheel
+ * and a pinch zoom it, and a click picks the nearest mark (see {@link usePointerOrbit}). All input
+ * is gathered into one frame. Its container is measured through a `ResizeObserver`; the canvas's
  * backing store follows the device pixel ratio, and sizes in `rem` follow the root font size. The
  * draw list is built during render from the scene, the camera and the viewport, and a layout
  * effect paints it whenever one of them or the colour tokens change. Nothing runs on a loop: an
- * idle view paints nothing. The canvas takes focus and is described by the visible key
- * legend; labels and furniture are DOM over it, since the canvas carries no text (D15).
+ * idle view paints nothing.
+ *
+ * Around the canvas, as the guide's 3D conventions require: the azimuth and elevation (`AZM 030°`,
+ * `ELV +30°`), changing at most four times a second and not announced as they change; over the
+ * canvas, the axis triad, the core arrow, a 1-2-5 scale bar, and the labels of the chosen marks
+ * and of the spheres and rings, all DOM text, since the canvas carries none (D15); and below it,
+ * in the same place on every spatial view, the frame, the centre and the time. The labels are
+ * hidden from assistive technology, since the list and the readout beside the view carry the same
+ * text. The canvas takes focus and is described by the visible key legend.
  */
 export function SpatialView({
   scene,
   fitRadius,
+  formatLength,
+  scaleUnits,
+  frameName,
+  centre,
+  time,
+  coreDistance,
   accessibleName,
   onSelect,
   children,
 }: SpatialViewProps) {
   const legendId = useId();
+  const anglesId = useId();
   const { ref: stageRef, size } = useElementSize();
 
   // The viewport, the camera and the draw list are memoised for their identity, not their cost: an
@@ -173,6 +265,46 @@ export function SpatialView({
     () => (camera === null || viewport === null ? null : buildDrawList(scene, camera, viewport)),
     [scene, camera, viewport],
   );
+  const shownAngles = useThrottledValue(cameraState.angles, READOUT_INTERVAL_MS);
+
+  // The marks to label depend on the scene alone, and choosing them sorts every mark: a few
+  // thousand on a chart, which a drag would otherwise sort again at every frame.
+  const chosenMarks = useMemo(
+    () => chooseLabels(scene.points, scene.selectedId, scene.destinationId),
+    [scene],
+  );
+  const pinnedIds = [scene.selectedId, scene.destinationId].filter(
+    (id): id is string => id !== null,
+  );
+  const availableIds = new Set(
+    chosenMarks.filter((mark) => mark.status === "available").map((mark) => mark.id),
+  );
+  // The overlay's furniture: the triad in its corner, the core arrow short of it, and the curve
+  // labels round both.
+  const triad = triadLayout(scene.frame, cameraState.angles);
+  const triadBox: BoxPx | null = viewport === null ? null : triadFootprintPx(triad, viewport);
+  const coreArrow =
+    viewport === null || triadBox === null
+      ? null
+      : coreArrowLayout(scene.frame, cameraState.angles, viewport, coreLabelText(coreDistance), [
+          triadBox,
+        ]);
+  const curveLabels =
+    drawList === null || viewport === null || triadBox === null || coreArrow === null
+      ? []
+      : placeCurveLabels(drawList.curveLabels, viewport, [
+          triadBox,
+          ...coreArrowBoxes(coreArrow, viewport.remPx),
+        ]);
+  // Marks' labels, placed last, keep off the furniture and the curve labels.
+  const markLabels =
+    drawList === null || viewport === null || triadBox === null || coreArrow === null
+      ? []
+      : placeLabels(chosenMarks, drawList.anchors, viewport, pinnedIds, [
+          triadBox,
+          ...coreArrowBoxes(coreArrow, viewport.remPx),
+          ...curveLabels,
+        ]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tokens, setTokens] = useState<ColourTokens | null>(null);
@@ -260,6 +392,24 @@ export function SpatialView({
     <div className="spatial-view">
       <div className="spatial-view__controls">
         <PresetButtons angles={cameraState.angles} onChoose={choosePreset} />
+        <dl className="spatial-view__angles" id={anglesId}>
+          <Reading
+            reading={{
+              label: "AZM",
+              value: formatBearingDeg(shownAngles.azimuthDeg),
+              unit: "",
+              widthCh: ANGLE_WIDTH_CH,
+            }}
+          />
+          <Reading
+            reading={{
+              label: "ELV",
+              value: formatSignedDeg(shownAngles.elevationDeg),
+              unit: "",
+              widthCh: ANGLE_WIDTH_CH,
+            }}
+          />
+        </dl>
         <p className="spatial-view__keys" id={legendId}>
           {KEY_LEGEND.map((entry, index) => (
             <Fragment key={entry}>
@@ -282,11 +432,78 @@ export function SpatialView({
           role="application"
           tabIndex={0}
           aria-label={accessibleName}
-          aria-describedby={legendId}
+          // The camera's angles and the keys, read when the canvas takes focus, not as they change.
+          aria-describedby={`${anglesId} ${legendId}`}
           onKeyDown={onCanvasKeyDown}
           {...pointerHandlers}
         />
-        <div className="spatial-view__overlay">{children}</div>
+        <div className="spatial-view__overlay">
+          <div className="spatial-view__labels" aria-hidden="true">
+            {viewport === null
+              ? null
+              : curveLabels.map((label) => (
+                  <span
+                    key={label.key}
+                    className="spatial-label spatial-label--curve"
+                    style={{
+                      transform: translateRem(
+                        label.leftPx / viewport.remPx,
+                        label.topPx / viewport.remPx,
+                      ),
+                    }}
+                  >
+                    <Figures text={label.text} />
+                  </span>
+                ))}
+            {viewport === null
+              ? null
+              : markLabels.map((label) => (
+                  <span
+                    key={label.id}
+                    className={
+                      availableIds.has(label.id)
+                        ? "spatial-label spatial-label--available"
+                        : "spatial-label"
+                    }
+                    style={{
+                      transform: translateRem(
+                        label.leftPx / viewport.remPx,
+                        label.topPx / viewport.remPx,
+                      ),
+                    }}
+                  >
+                    {label.text}
+                  </span>
+                ))}
+          </div>
+          <AxisTriad frame={scene.frame} angles={cameraState.angles} />
+          {viewport === null || coreArrow === null ? null : (
+            <CoreArrow layout={coreArrow} viewport={viewport} distance={coreDistance} />
+          )}
+          {children}
+        </div>
+      </div>
+      <div className="spatial-view__furniture">
+        <dl className="spatial-view__readings">
+          <div className="field spatial-reading">
+            <dt className="field__label">FRAME</dt> <dd>{frameName}</dd>
+          </div>
+          {centre.map((reading) => (
+            <Reading key={reading.label} reading={reading} />
+          ))}
+          <Reading reading={time} />
+        </dl>
+        {camera === null || viewport === null ? null : (
+          <ScaleBar
+            pxPerUnit={camera.pxPerUnit}
+            maxBarPx={SCALE_BAR_MAX_REM * viewport.remPx}
+            formatLength={formatLength}
+            units={scaleUnits}
+          />
+        )}
+        {scene.frame.onAxis ? (
+          <p className="spatial-view__axis-note">{AXIS_FALLBACK_MESSAGE}</p>
+        ) : null}
       </div>
     </div>
   );

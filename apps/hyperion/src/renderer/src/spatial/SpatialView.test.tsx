@@ -2,15 +2,20 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { useState } from "react";
+
+import { AU_PER_LY, formatScaleLength, SCALE_AU_BELOW_LY } from "../lib/format";
 import { FakeResizeObserver } from "../test/FakeResizeObserver";
+import { fakeFramesAndTimeouts } from "../test/fakeFramesAndTimeouts";
 import { stubMatchMedia } from "../test/stubMatchMedia";
 import { type RecordingContext2D, stubCanvas } from "../test/RecordingContext2D";
-import { type CameraAngles, project, viewBasis } from "./camera";
+import { type CameraAngles, PRESETS, project, viewBasis } from "./camera";
 import { easeOut, TRANSITION_MS, tweenCamera } from "./transition";
 import { localFrameAt } from "./frame";
 import type { PointMark, SpatialScene } from "./marks";
+import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
-import { vec3 } from "./vec3";
+import { add, scale, vec3 } from "./vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
@@ -53,6 +58,13 @@ function viewOf(props: Partial<SpatialViewProps>) {
       fitRadius={50}
       formatLength={(length) => `${length} ly`}
       frameName="GALACTIC"
+      centre={[
+        { label: "RADIUS", value: "26,000.0", unit: "ly", widthCh: 9 },
+        { label: "ANGLE", value: "045.0°", unit: "", widthCh: 6 },
+        { label: "HEIGHT", value: "+12.0", unit: "ly", widthCh: 9 },
+      ]}
+      time={{ label: "UT", value: "+0.00", unit: "yr", widthCh: 9 }}
+      coreDistance={{ value: "26,000.0", unit: "ly" }}
       accessibleName="Local chart"
       onSelect={() => undefined}
       {...props}
@@ -103,12 +115,12 @@ describe("SpatialView", () => {
     expect(screen.getByRole("button", { name: "T TOP" })).toHaveFocus();
   });
 
-  it("is described by its visible key legend", () => {
+  it("is described by its camera's angles and its visible key legend", () => {
     stubLayout();
     renderView();
 
     expect(screen.getByRole("application", { name: "Local chart" })).toHaveAccessibleDescription(
-      "ARROWS ROTATE +/− ZOOM T S F O VIEWS Z FIT",
+      "AZM 030° ELV +30° ARROWS ROTATE +/− ZOOM Z FIT",
     );
   });
 
@@ -331,13 +343,33 @@ describe("SpatialView from the keyboard", () => {
     expect(markCentre(recorder)).toEqual(markAt({ azimuthDeg: 29, elevationDeg: 30 }));
   });
 
+  it("raises the camera 5° with the down arrow, as a drag down does", async () => {
+    const { user, recorder, canvas } = setup();
+    await user.click(canvas);
+
+    await user.keyboard("{ArrowDown}");
+    nextFrame();
+
+    expect(markCentre(recorder)).toEqual(markAt({ azimuthDeg: 30, elevationDeg: 35 }));
+  });
+
+  it("lowers the camera 5° with the up arrow", async () => {
+    const { user, recorder, canvas } = setup();
+    await user.click(canvas);
+
+    await user.keyboard("{ArrowUp}");
+    nextFrame();
+
+    expect(markCentre(recorder)).toEqual(markAt({ azimuthDeg: 30, elevationDeg: 25 }));
+  });
+
   it("raises the camera no further than +90°", async () => {
     const { user, recorder, canvas } = setup();
     await user.click(canvas);
-    await user.keyboard("{ArrowUp>13/}");
+    await user.keyboard("{ArrowDown>13/}");
     nextFrame();
 
-    await user.keyboard("{ArrowDown}");
+    await user.keyboard("{ArrowUp}");
     nextFrame();
 
     // Stopped at +90°, one press down is +85°, not the +90° an unclamped +95° would give.
@@ -347,11 +379,11 @@ describe("SpatialView from the keyboard", () => {
   it("paints nothing for a press against a limit", async () => {
     const { user, recorder, canvas } = setup();
     await user.click(canvas);
-    await user.keyboard("{ArrowUp>13/}");
+    await user.keyboard("{ArrowDown>13/}");
     nextFrame();
     recorder.clear();
 
-    await user.keyboard("{ArrowUp}");
+    await user.keyboard("{ArrowDown}");
     nextFrame();
 
     expect(paints(recorder)).toBe(0);
@@ -373,7 +405,7 @@ describe("SpatialView from the keyboard", () => {
     const { user, recorder, canvas } = setup();
     await user.click(canvas);
 
-    await user.keyboard("{ArrowUp>13/}{ArrowDown}");
+    await user.keyboard("{ArrowDown>13/}{ArrowUp}");
     nextFrame();
 
     expect(markCentre(recorder)).toEqual(markAt({ azimuthDeg: 30, elevationDeg: 85 }));
@@ -1043,5 +1075,631 @@ describe("SpatialView's preset views", () => {
 
     expect(screen.getByRole("button", { name: "T TOP" })).toHaveAttribute("aria-pressed", "false");
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/** The value a readout of the view gives for a label: `AZM` reads `030°`. */
+function readout(label: string): string | null {
+  return screen.getByText(label, { selector: "dt" }).nextElementSibling?.textContent ?? null;
+}
+
+/** Lets `ms` of fake time pass, running the frames and timers that fall in it. */
+function wait(ms: number): void {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+/** The north axis of the view's triad, which says how it ends. */
+function triadNorth(): Element | null {
+  return screen.getByRole("img", { name: "Axis triad" }).querySelector("[data-axis='north']");
+}
+
+describe("SpatialView's readouts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Renders the view with frames and timeouts faked, since the readouts' 4 Hz hold is timed with
+   * `setTimeout`.
+   */
+  function setup(props: Partial<SpatialViewProps> = {}) {
+    const advanceTimers = fakeFramesAndTimeouts();
+    stubLayout(400, 300);
+    const user = userEvent.setup({ advanceTimers });
+    stubCanvas();
+    const { container } = render(viewOf(props));
+    return {
+      user,
+      container,
+      canvas: screen.getByRole("application", { name: "Local chart" }),
+    };
+  }
+
+  it("reads the camera's azimuth and elevation as AZM 030° and ELV +30°", () => {
+    setup();
+
+    expect(readout("AZM")).toBe("030°");
+    expect(readout("ELV")).toBe("+30°");
+  });
+
+  it("turns the azimuth readout from 030° to 035° with the right arrow", async () => {
+    const { user, canvas } = setup();
+    await user.click(canvas);
+
+    await user.keyboard("{ArrowRight}");
+    wait(300);
+
+    expect(readout("AZM")).toBe("035°");
+  });
+
+  it("stops the elevation readout at +90° after 13 presses of the down arrow", async () => {
+    const { user, canvas } = setup();
+    await user.click(canvas);
+
+    await user.keyboard("{ArrowDown>13/}");
+    wait(300);
+
+    expect(readout("ELV")).toBe("+90°");
+  });
+
+  it("reads AZM 000° and ELV +90° once turned to TOP", async () => {
+    const { user } = setup();
+
+    await user.click(screen.getByRole("button", { name: "T TOP" }));
+    wait(500);
+
+    expect(readout("AZM")).toBe("000°");
+    expect(readout("ELV")).toBe("+90°");
+  });
+
+  it("changes the readout once for ten turns inside 100 ms, then reads the last", async () => {
+    const { user, canvas } = setup();
+    await user.click(canvas);
+    const shown = [readout("AZM")];
+
+    // Ten presses 9 ms apart, each turn applied on the next 16 ms frame.
+    for (let turn = 0; turn < 10; turn += 1) {
+      // Each press must meet its frames before the next, as an operator's do: they cannot be sent
+      // together.
+      // oxlint-disable-next-line no-await-in-loop
+      await user.keyboard("{ArrowRight}");
+      wait(9);
+      if (shown.at(-1) !== readout("AZM")) {
+        shown.push(readout("AZM"));
+      }
+    }
+
+    // The first frame took the first two presses; the rest were held back.
+    expect(shown).toEqual(["030°", "040°"]);
+    wait(250);
+    expect(readout("AZM")).toBe("080°");
+  });
+
+  it("puts nothing in a live region, so that a drag is not announced", async () => {
+    const { user, canvas, container } = setup();
+
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: canvas, coords: { clientX: 100, clientY: 100 } },
+      { coords: { clientX: 164, clientY: 132 } },
+      { keys: "[/MouseLeft]" },
+    ]);
+    wait(300);
+
+    expect(readout("AZM")).toBe("062°");
+    expect(
+      container.querySelectorAll(
+        "[aria-live], output, [role='status'], [role='log'], [role='alert'], [role='timer'], [role='marquee']",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("turns the axis triad with the camera: north towards the viewer from TOP", async () => {
+    const { user } = setup();
+
+    await user.click(screen.getByRole("button", { name: "T TOP" }));
+    wait(500);
+
+    expect(triadNorth()).toHaveAttribute("data-end", "towards");
+  });
+
+  it("points the core arrow up from TOP, labelled with the distance to the axis", async () => {
+    const { user, container } = setup();
+
+    await user.click(screen.getByRole("button", { name: "T TOP" }));
+    wait(500);
+
+    const line = container.querySelector("[data-core='arrow'] line");
+    expect(Number(line?.getAttribute("x2"))).toBeCloseTo(200, 9);
+    expect(Number(line?.getAttribute("y2"))).toBeLessThan(Number(line?.getAttribute("y1")));
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element instanceof HTMLSpanElement && element.textContent === "CORE 26,000.0 ly",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("replaces the core arrow on the galactic axis and names the fallback directions", () => {
+    const { container } = setup({ scene: aScene({ frame: localFrameAt(vec3(0, 0, 0)) }) });
+
+    expect(
+      screen.getByText("DIRECTIONS UNDEFINED AT AXIS: GRID ALIGNED TO −X"),
+    ).toBeInTheDocument();
+    expect(container.querySelector("[data-core]")).toBeNull();
+    expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("−X")).toBeVisible();
+  });
+});
+
+/** Light-years down to 0.01 ly, then astronomical units, as the local chart reads its scale. */
+const LY_THEN_AU: ReadonlyArray<ScaleUnit> = [
+  { perSceneUnit: 1, minSceneLength: SCALE_AU_BELOW_LY },
+  { perSceneUnit: AU_PER_LY, minSceneLength: 0 },
+];
+
+/** The view's scale bar, named with its length. */
+function scaleBarElement(): HTMLElement {
+  return screen.getByRole("img", { name: /^Scale bar/u });
+}
+
+/** The scale bar's width as drawn, in CSS pixels: its length and one pixel for the end ticks. */
+function scaleBarWidthPx(): number {
+  const bar = scaleBarElement().querySelector<HTMLElement>(".scale-bar__bar");
+  return Number.parseFloat(bar?.style.width ?? "");
+}
+
+/** Props for a view fitted to a query sphere of `radiusLy`, its scale read in ly and AU. */
+function fittedTo(radiusLy: number): Partial<SpatialViewProps> {
+  return {
+    fitRadius: radiusLy,
+    scene: aScene({
+      spheres: [{ radius: radiusLy, role: "data_edge", label: `QUERY EDGE ${radiusLy} ly` }],
+    }),
+    formatLength: formatScaleLength,
+    scaleUnits: LY_THEN_AU,
+  };
+}
+
+describe("SpatialView's scale bar, frame, centre and time", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setup(props: Partial<SpatialViewProps> = {}) {
+    const advanceTimers = fakeFramesAndTimeouts();
+    stubLayout(400, 300);
+    const user = userEvent.setup({ advanceTimers });
+    stubCanvas();
+    const result = render(viewOf(props));
+    return {
+      user,
+      canvas: screen.getByRole("application", { name: "Local chart" }),
+      rerender: (next: Partial<SpatialViewProps>) => {
+        result.rerender(viewOf(next));
+      },
+    };
+  }
+
+  it("keeps the scale bar one width however long the bar, so that its row never moves", async () => {
+    const { user } = setup(fittedTo(25));
+    const bar = screen.getByRole("img", { name: /^Scale bar/u });
+    const slot = bar.querySelector<HTMLElement>(".scale-bar__slot");
+
+    await user.keyboard("+");
+    nextFrame();
+
+    // 6 rem and the end ticks' pixel, at every length.
+    expect(slot?.style.width).toBe("97px");
+  });
+
+  it("draws a 1-2-5 scale bar no longer than 6 rem, labelled with its length", () => {
+    setup(fittedTo(50));
+
+    // 118 px over 50 ly: 96 px holds 40.7 ly, so the bar is 20 ly, 47.2 px.
+    expect(screen.getByRole("img", { name: "Scale bar, 20 ly" })).toHaveTextContent("20 ly");
+    expect(scaleBarWidthPx()).toBeCloseTo(47.2 + 1, 9);
+  });
+
+  it("changes the scale bar's label when + zooms in", async () => {
+    const { user } = setup(fittedTo(25));
+    expect(screen.getByRole("img", { name: "Scale bar, 20 ly" })).toBeInTheDocument();
+
+    await user.keyboard("+");
+    nextFrame();
+
+    expect(screen.getByRole("img", { name: "Scale bar, 10 ly" })).toHaveTextContent("10 ly");
+  });
+
+  it("changes the scale bar when the wheel zooms", () => {
+    const { canvas } = setup(fittedTo(25));
+
+    fireEvent.wheel(canvas, { deltaY: -400, deltaMode: 0 });
+    nextFrame();
+
+    expect(screen.getByRole("img", { name: "Scale bar, 10 ly" })).toHaveTextContent("10 ly");
+  });
+
+  /**
+   * Zooms in press by press, 25 presses fitted to 50 ly and 25 more fitted to 0.5 ly, calling
+   * `seen` after each: zoom stops at 100 times the fit, so the query radius steps down on the way,
+   * as the operator would step it, and the zoom chosen is kept.
+   */
+  async function zoomDownToAstronomicalUnits(seen: () => void): Promise<void> {
+    const { user, rerender } = setup(fittedTo(50));
+    seen();
+    const zoomIn = async (): Promise<void> => {
+      for (let press = 0; press < 25; press += 1) {
+        // Each press must reach its frame before the next, so that every step of the bar is seen.
+        // oxlint-disable-next-line no-await-in-loop
+        await user.keyboard("+");
+        nextFrame();
+        seen();
+      }
+    };
+    await zoomIn();
+    rerender(fittedTo(0.5));
+    await zoomIn();
+  }
+
+  it("steps its label down through 0.01 ly to 500 AU as it zooms in", async () => {
+    const labels: string[] = [];
+
+    await zoomDownToAstronomicalUnits(() => {
+      const label = scaleBarElement().textContent;
+      if (labels.at(-1) !== label) {
+        labels.push(label);
+      }
+    });
+
+    expect(labels).toEqual([
+      "20 ly",
+      "10 ly",
+      "5 ly",
+      "2 ly",
+      "1 ly",
+      "0.5 ly",
+      "0.2 ly",
+      "0.1 ly",
+      "0.05 ly",
+      "0.02 ly",
+      "0.01 ly",
+      "500 AU",
+      "200 AU",
+    ]);
+  });
+
+  it("never draws the bar longer than 6 rem as it zooms in", async () => {
+    let widestPx = 0;
+
+    await zoomDownToAstronomicalUnits(() => {
+      widestPx = Math.max(widestPx, scaleBarWidthPx());
+    });
+
+    // 96 px, and the pixel that puts the end ticks' centres the length apart.
+    expect(widestPx).toBeLessThanOrEqual(96 + 1);
+  });
+
+  it("shows the frame, the centre and the time, each with its unit", () => {
+    setup();
+
+    expect(readout("FRAME")).toBe("GALACTIC");
+    expect(readout("RADIUS")).toBe("26,000.0 ly");
+    expect(readout("ANGLE")).toBe("045.0°");
+    expect(readout("HEIGHT")).toBe("+12.0 ly");
+    expect(readout("UT")).toBe("+0.00 yr");
+  });
+
+  it("gives each value a slot of fixed width, so that a new value moves nothing", () => {
+    setup();
+
+    const radius = screen.getByText("RADIUS", { selector: "dt" }).nextElementSibling;
+    if (!(radius instanceof HTMLElement)) {
+      throw new Error("RADIUS has no value");
+    }
+    expect(within(radius).getByText("26,000.0").style.minWidth).toBe("9ch");
+  });
+
+  it("shows a missing value as an em dash, without its unit", () => {
+    setup({
+      centre: [
+        { label: "RADIUS", value: "0.0", unit: "ly", widthCh: 9 },
+        { label: "ANGLE", value: null, unit: "", widthCh: 6 },
+        { label: "HEIGHT", value: "+0.0", unit: "ly", widthCh: 9 },
+      ],
+    });
+
+    expect(readout("ANGLE")).toBe("—");
+    expect(screen.getByText("—")).toHaveClass("readout__missing");
+  });
+});
+
+/** Marks spread across the view, each with a label and a priority: `M00` lowest. */
+function spreadMarks(count: number): PointMark[] {
+  return Array.from({ length: count }, (_, index) =>
+    aMark(`m${String(index).padStart(2, "0")}`, {
+      // One to a cell of a grid, so that no label covers another.
+      position: vec3(-40 + (index % 4) * 25, -40 + Math.floor(index / 4) * 16, 0),
+      label: `M${String(index).padStart(2, "0")}`,
+      labelPriority: index,
+    }),
+  );
+}
+
+/** The transform that places a label over the view. */
+function placement(element: HTMLElement): string {
+  return element.style.transform;
+}
+
+/** A label over the view, whose numbers are set apart in figures of their own. */
+function overlayLabel(text: string): HTMLElement {
+  return screen.getByText(
+    (_, element) => element instanceof HTMLSpanElement && element.textContent === text,
+  );
+}
+
+describe("SpatialView's labels", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("labels the selected mark, however low its priority", () => {
+    renderView({ scene: aScene({ points: spreadMarks(20), selectedId: "m00" }) });
+
+    expect(screen.getByText("M00")).toBeInTheDocument();
+  });
+
+  it("labels no more than nine marks: eight and the selection", () => {
+    renderView({ scene: aScene({ points: spreadMarks(20), selectedId: "m00" }) });
+
+    const labels = screen.getAllByText(/^M\d\d$/u);
+    expect(labels.length).toBeLessThanOrEqual(9);
+    expect(labels.map((label) => label.textContent)).toContain("M19");
+  });
+
+  it("hides the labels from assistive technology, which has the list and the readout", () => {
+    renderView({ scene: aScene({ points: spreadMarks(3), selectedId: "m00" }) });
+
+    expect(screen.getByText("M00").closest("[aria-hidden='true']")).not.toBeNull();
+  });
+
+  it("labels a mark within the set range in the colour of its symbol", () => {
+    renderView({
+      scene: aScene({
+        points: [aMark("a", { status: "available" }), aMark("b", { position: vec3(20, 20, 0) })],
+      }),
+    });
+
+    // The stylesheet, which jsdom does not apply, gives the class `--accent`.
+    expect(screen.getByText("A")).toHaveClass("spatial-label--available");
+    expect(screen.getByText("B")).not.toHaveClass("spatial-label--available");
+  });
+
+  it("labels the range sphere and the plane ring apart", () => {
+    renderView({
+      fitRadius: 80,
+      scene: aScene({
+        spheres: [
+          { radius: 50, role: "range", label: "RANGE 50 ly SET" },
+          { radius: 80, role: "data_edge", label: "QUERY EDGE 80 ly" },
+        ],
+        plane: { spacing: 20, extent: 80, rings: [{ radius: 50, label: "PLANE 50 ly" }] },
+      }),
+    });
+
+    const range = overlayLabel("RANGE 50 ly SET");
+    const plane = overlayLabel("PLANE 50 ly");
+    expect(overlayLabel("QUERY EDGE 80 ly")).toBeInTheDocument();
+    expect(placement(range)).not.toBe(placement(plane));
+  });
+
+  it("keeps a circle's labels in a narrow view after the zoom takes its top out of sight", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    stubLayout(360, 300);
+    const user = userEvent.setup();
+    renderView({
+      scene: aScene({
+        spheres: [
+          { radius: 50, role: "range", label: "RANGE 50 ly SET" },
+          { radius: 50, role: "data_edge", label: "QUERY EDGE 50 ly" },
+        ],
+      }),
+    });
+
+    await user.keyboard("++");
+    nextFrame();
+
+    // The circle, 184 px in radius about the view's centre, has left the top and the sides.
+    const outside = ["RANGE 50 ly SET", "QUERY EDGE 50 ly"].filter((text) => {
+      const match = /translate\((-?[\d.]+)rem, (-?[\d.]+)rem\)/u.exec(
+        placement(overlayLabel(text)),
+      );
+      const [leftRem, topRem] = [Number(match?.[1]), Number(match?.[2])];
+      // Estimated as the view estimates it: 0.72 em a character at 0.875 rem, 1.25 lines.
+      const inside =
+        leftRem >= 0 &&
+        topRem >= 0 &&
+        leftRem * 16 + text.length * 0.72 * 14 <= 360 &&
+        topRem * 16 + 17.5 <= 300;
+      return !inside;
+    });
+    expect(outside).toEqual([]);
+  });
+
+  it("gives both labels to one circle when the query radius equals the range", () => {
+    renderView({
+      scene: aScene({
+        spheres: [
+          { radius: 50, role: "range", label: "RANGE 50 ly SET" },
+          { radius: 50, role: "data_edge", label: "QUERY EDGE 50 ly" },
+        ],
+      }),
+    });
+
+    const range = overlayLabel("RANGE 50 ly SET");
+    const edge = overlayLabel("QUERY EDGE 50 ly");
+    expect(placement(range)).not.toBe(placement(edge));
+  });
+});
+
+/** Clicks the view's canvas at a point, in client coordinates. */
+async function clickCanvasAt(
+  user: ReturnType<typeof userEvent.setup>,
+  clientX: number,
+  clientY: number,
+): Promise<void> {
+  await user.pointer([
+    {
+      keys: "[MouseLeft]",
+      target: screen.getByRole("application", { name: "Local chart" }),
+      coords: { clientX, clientY },
+    },
+  ]);
+}
+
+/** The colours of the reticles in the latest paint: paths of four corner brackets. */
+function reticleColours(recorder: RecordingContext2D): string[] {
+  const colours: string[] = [];
+  const records = recorder.records;
+  const lastClear = records.findLastIndex(
+    (record) => record.type === "call" && record.name === "fillRect",
+  );
+  let moves = 0;
+  let stroke = "";
+  for (const record of records.slice(lastClear)) {
+    if (record.type === "set" && record.name === "strokeStyle") {
+      stroke = String(record.value);
+    } else if (record.type === "call" && record.name === "beginPath") {
+      moves = 0;
+    } else if (record.type === "call" && record.name === "moveTo") {
+      moves += 1;
+    } else if (record.type === "call" && record.name === "stroke" && moves === 4) {
+      colours.push(stroke);
+    }
+  }
+  return colours;
+}
+
+interface SelectingProps {
+  readonly destinationId: string | null;
+}
+
+/** The view with its selection owned by a parent, as the chart owns it. */
+function Selecting({ destinationId }: SelectingProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  return viewOf({ scene: aScene({ selectedId, destinationId }), onSelect: setSelectedId });
+}
+
+describe("SpatialView picking", () => {
+  beforeEach(() => {
+    stubLayout(400, 300);
+  });
+
+  it("selects a mark clicked 12 px away, within 1 rem", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn<(id: string) => void>();
+    renderView({ onSelect });
+    const { clientX, clientY } = markPoint();
+
+    await clickCanvasAt(user, clientX + 12, clientY);
+
+    expect(onSelect).toHaveBeenCalledWith("a");
+  });
+
+  it("selects nothing for a click 24 px from the mark", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn<(id: string) => void>();
+    renderView({ onSelect });
+    const { clientX, clientY } = markPoint();
+
+    await clickCanvasAt(user, clientX + 24, clientY);
+
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("selects the nearer of two marks that coincide on the screen", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn<(id: string) => void>();
+    const forward = viewBasis(FRAME, PRESETS.oblique).forward;
+    // "a" lies 10 ly behind "b" along the line of sight, and would win a tie by ID.
+    renderView({
+      onSelect,
+      scene: aScene({
+        points: [
+          aMark("a", { position: add(MARK_POSITION, scale(forward, 10)) }),
+          aMark("b", { position: MARK_POSITION }),
+        ],
+      }),
+    });
+    const { clientX, clientY } = markPoint();
+
+    await clickCanvasAt(user, clientX, clientY);
+
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith("b");
+  });
+
+  it("paints the accent reticle about a mark once it is selected", async () => {
+    const user = userEvent.setup();
+    const recorder = stubCanvas();
+    render(<Selecting destinationId={null} />);
+    expect(reticleColours(recorder)).toEqual([]);
+    const { clientX, clientY } = markPoint();
+
+    await clickCanvasAt(user, clientX, clientY);
+
+    expect(reticleColours(recorder)).toEqual(["#5cc8e6"]);
+  });
+
+  it("paints the target reticle about the destination, outside the selection's", async () => {
+    const user = userEvent.setup();
+    const recorder = stubCanvas();
+    render(<Selecting destinationId="a" />);
+    expect(reticleColours(recorder)).toEqual(["#e879f9"]);
+    const { clientX, clientY } = markPoint();
+
+    await clickCanvasAt(user, clientX, clientY);
+
+    expect(reticleColours(recorder)).toEqual(["#5cc8e6", "#e879f9"]);
+  });
+
+  it("takes a finger's 6 px wobble on a tap for a tap, which selects", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn<(id: string) => void>();
+    renderView({ onSelect });
+    const { clientX, clientY } = markPoint();
+
+    await user.pointer([
+      {
+        keys: "[TouchA>]",
+        target: screen.getByRole("application", { name: "Local chart" }),
+        coords: { clientX, clientY },
+      },
+      { pointerName: "TouchA", coords: { clientX: clientX + 6, clientY } },
+      { keys: "[/TouchA]" },
+    ]);
+
+    expect(onSelect).toHaveBeenCalledWith("a");
+  });
+
+  it("takes a mouse's 6 px movement for a drag, which selects nothing", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn<(id: string) => void>();
+    renderView({ onSelect });
+    const { clientX, clientY } = markPoint();
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: screen.getByRole("application", { name: "Local chart" }),
+        coords: { clientX, clientY },
+      },
+      { coords: { clientX: clientX + 6, clientY } },
+      { keys: "[/MouseLeft]" },
+    ]);
+
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });

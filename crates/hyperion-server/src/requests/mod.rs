@@ -11,10 +11,14 @@
 //! never runs.
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
-//! [`Handlers`]; unit tests inject doubles through [`AppState`].
+//! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
+//! lifecycle are in [`universe`].
+
+mod universe;
 
 use std::collections::HashMap;
 use std::fmt;
+use std::future::ready;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -48,31 +52,30 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 
 /// The server's handlers: every request kind, and the code that answers it.
 ///
-/// Each arm of the match in [`Handler::handle`] becomes a call to its kind's handler when that
-/// arrives with P04.T14. Until then every kind is answered `unsupported`, as a server that predates
-/// the kind would answer it.
+/// A kind whose handler has yet to arrive with its P04.T14 subtask (`galaxy_parameters`,
+/// `density_map` and `systems_in_range`) is answered `unsupported`, as a server that predates the
+/// kind would answer it. Each such handler starts from [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
 impl Handler for Handlers {
     fn handle(
         &self,
-        _state: Arc<AppState>,
+        state: Arc<AppState>,
         body: RequestBody,
         _token: CancelToken,
     ) -> HandlerFuture {
-        let refusal = match &body {
-            RequestBody::CreateUniverse(_)
-            | RequestBody::ListUniverses
-            | RequestBody::OpenUniverse(_)
-            | RequestBody::GalaxyParameters(_)
+        match body {
+            RequestBody::CreateUniverse(request) => Box::pin(universe::create(state, request)),
+            RequestBody::ListUniverses => Box::pin(ready(Ok(universe::list(&state)))),
+            RequestBody::OpenUniverse(request) => Box::pin(ready(universe::open(&state, &request))),
+            RequestBody::GalaxyParameters(_)
             | RequestBody::DensityMap(_)
-            | RequestBody::SystemsInRange(_) => request_error(
+            | RequestBody::SystemsInRange(_) => Box::pin(ready(Err(request_error(
                 ErrorCode::Unsupported,
                 format!("this server does not serve `{}` requests yet", kind(&body)),
-            ),
-        };
-        Box::pin(std::future::ready(Err(refusal)))
+            )))),
+        }
     }
 }
 
@@ -774,7 +777,17 @@ mod tests {
     async fn the_handlers_refuse_every_kind_until_its_handler_exists() {
         let (scripted, _calls) = Scripted::new();
         let harness = Harness::start(scripted).await;
-        for body in every_body() {
+        // Each P04.T14 subtask removes its kind from this list when it serves it, and the last
+        // one removes this test.
+        let unserved = every_body().into_iter().filter(|body| {
+            matches!(
+                body,
+                RequestBody::GalaxyParameters(_)
+                    | RequestBody::DensityMap(_)
+                    | RequestBody::SystemsInRange(_)
+            )
+        });
+        for body in unserved {
             let expected = format!("this server does not serve `{}` requests yet", kind(&body));
             let answer = Handlers
                 .handle(Arc::clone(harness.state()), body, CancelToken::new())

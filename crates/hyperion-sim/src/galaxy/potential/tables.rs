@@ -257,6 +257,15 @@ impl PotentialTables {
         self.grid.is_some()
     }
 
+    /// The bytes the tables own on the heap: the (R, |z|) grid, if present. The in-plane tables
+    /// are held inline.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.grid
+            .as_ref()
+            .map_or(0, |grid| grid.points.capacity() * size_of::<[f64; 4]>())
+    }
+
     /// The spherical components in the model's order.
     fn spherical(&self) -> [&dyn SphericalMass; 3] {
         [&self.dark_halo, &self.nuclear_cluster, &self.black_hole]

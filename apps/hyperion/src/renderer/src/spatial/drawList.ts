@@ -100,18 +100,34 @@ export interface Anchor {
   readonly radiusPx: number;
 }
 
-/** Where to put the DOM label of a sphere or a ring. */
-export interface CurveLabel {
+/** What every curve label gives: its text and the point it names. */
+interface CurveLabelBase {
   /** Stable key for the label's element. */
   readonly key: string;
   readonly text: string;
-  /** `circle-top` sits above the top of a sphere's circle; `ring` beside a ring's coreward point. */
-  readonly placement: "circle-top" | "ring";
   readonly xPx: number;
   readonly yPx: number;
   /** Position in a stack of labels sharing one point, 0 nearest the curve. */
   readonly stack: number;
 }
+
+/**
+ * The label of a sphere, at the top of its circle, with the circle itself, so that the view can
+ * move the label along it when the top is out of sight.
+ */
+export interface CircleLabel extends CurveLabelBase {
+  readonly placement: "circle-top";
+  readonly centre: ScreenPoint;
+  readonly radiusPx: number;
+}
+
+/** The label of a ring on the reference plane, at the ring's coreward point. */
+export interface RingLabel extends CurveLabelBase {
+  readonly placement: "ring";
+}
+
+/** Where to put the DOM label of a sphere or a ring. */
+export type CurveLabel = CircleLabel | RingLabel;
 
 /** What a spatial view paints, and where its marks and curves ended up. */
 export interface DrawList {
@@ -298,6 +314,8 @@ function sphereOps(
         xPx: centre.xPx,
         yPx: centre.yPx - radiusPx,
         stack,
+        centre,
+        radiusPx,
       });
     }
   }

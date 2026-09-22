@@ -1146,3 +1146,38 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   its byte release is counted `responded` rather than `abandoned` (stats only; the client sees the
   same close), and the outbound queue may exceed `OUTBOUND_BYTES` by the connection's own small
   answers, at most about 34 of them under the 16 KiB inbound limit (about 0.55 MiB).
+- **Deviations in T11.b, as built.** `quantise_map(&RawDensityMap, MapView, CodeDepth)` takes the
+  protocol's `MapView`, since plan 02's `galaxy::map` was not yet in the tree; only the floor's span
+  depends on it, so T11.c's `MapKey` may hold either view type. The depth is `CodeDepth`
+  (`Eight`, `Sixteen`; `bits()`, `max_code()`), read from the wire by `TryFrom<u8>` with
+  `ParseCodeDepthError`, which is T14.c's `bits` check; plan 07's `quantise_map_with_floor` should
+  take a `CodeDepth` too, and can reuse the private `code_of(value, floor, span, max)`.
+  `RawDensityMap`'s fields are private with getters of the same names, and
+  `RawDensityMap::new(width_px, height_px, centre_ly, ly_per_px, log10)` returns
+  `BuildRawMapError` for a zero size, a value count other than width × height, a pixel size not
+  finite and positive or a centre not finite, and a NaN or +∞ value; `HeapBytes` charges the
+  grid's capacity. `QuantisedMap` carries its depth and has `depth()`, `floor_log10_per_ly2()`,
+  `ceiling_log10_per_ly2()`, `bytes()` and `to_base64()`. The ceiling is the largest finite `f32`
+  widened to `f64`, the span is `ceiling − floor` as the decoder has it, and ties round away from
+  zero. T11's acceptance command runs as `cargo test -p hyperion-server -- density_map galaxies`
+  (cargo takes one filter before `--`).
+- **Deviations in T14.a, as built.** Plan 02's `Galaxy::new` (P02.T9) was not yet in the tree, so
+  by the orchestrator's ruling `open_universe` checks and answers but does not warm the galaxy:
+  T11.a makes `requests::universe::open` async (taking `Arc<AppState>` and the request by value)
+  and awaits `GalaxyCache::get(universe.key())` between the lookup and the answer. The lookup is
+  `requests::universe::openable_universe(&AppState, &UniverseIdHex)`, giving `unknown_universe`
+  (naming `universe`), `generator_version_mismatch` (both versions in the message) or
+  `unsupported_save_format`; T14.b–d call it before converting any other field, add their kind to
+  `tests/universes.rs`'s mismatch test, which covers `open` alone until then, and remove it from
+  `the_handlers_refuse_every_kind_until_its_handler_exists`. `convert.rs` has
+  `ConvertRequestError::new(field, reason)` (message `invalid <field>: <reason>`), `NewUniverse`
+  (`TryFrom<CreateUniverseRequest>`, `into_parts()`), `From<&Universe> for UniverseInfo`,
+  `universe_list`, and `From<CreateUniverseError>` and `From<OpenUniverseError>` for `RequestError`:
+  `name_taken` names `name`, a failed write is `storage_failed`, and a failed draw, no free ID or
+  an interrupted create is `internal`. T7's `UniverseRegistry::create` now takes a `UniverseName`,
+  so the name is checked once, in `convert.rs`, and `CreateUniverseError::InvalidName` is gone. A
+  create outlives a cancelled request, so the registry's blocking task logs it: `info` with ID,
+  name, seed and version, a server fault at `error` with its causes. `StartServerError` gains
+  `LoadRegistry`. `TestServer::restart()` starts another server on the data directory with the
+  default test configuration and a fresh `test_entropy`. `tests/universes.rs` also covers a
+  later-format save; `tests/websocket.rs` now uses `list_universes` as a served request.

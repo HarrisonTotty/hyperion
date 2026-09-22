@@ -95,6 +95,20 @@ describe("placeLabels", () => {
     ]);
   });
 
+  it("drops a label that would cover other furniture, but never the selection's", () => {
+    const chosen = [mark("picked", 1), mark("under", 9), mark("clear", 0)];
+    const anchors = [
+      anchor("picked", 100, 50),
+      anchor("under", 100, 100),
+      anchor("clear", 100, 200),
+    ];
+    const furniture = { leftPx: 0, topPx: 40, widthPx: 400, heightPx: 70 };
+
+    const placed = placeLabels(chosen, anchors, VIEWPORT, ["picked"], [furniture]);
+
+    expect(placed.map((label) => label.id)).toEqual(["picked", "clear"]);
+  });
+
   it("never drops the selected label", () => {
     const chosen = chooseLabels([mark("heavy", 9), mark("picked", 1)], "picked", null);
     const anchors = [anchor("heavy", 100, 100), anchor("picked", 102, 101)];

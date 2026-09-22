@@ -4,7 +4,9 @@
 mod common;
 
 use common::{TestClient, TestServer};
-use hyperion_protocol::{ErrorCode, PROTOCOL_VERSION, RequestBody, RequestId, ServerMessage};
+use hyperion_protocol::{
+    ErrorCode, PROTOCOL_VERSION, RequestBody, RequestId, ResponseBody, ServerMessage,
+};
 use hyperion_server::limits::{MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES};
 
 /// The WebSocket close code for a policy violation (RFC 6455, section 7.4.1).
@@ -47,22 +49,25 @@ async fn hello_then_ping_over_websocket() {
 }
 
 #[tokio::test]
-async fn every_kind_is_unsupported_until_its_handler_exists() {
+async fn a_request_is_answered_under_its_id_and_counted() {
     let server = TestServer::start().await;
     let mut client = server.connect().await;
     client.hello().await;
-    let error = client
+    let response = client
         .request(RequestBody::ListUniverses)
         .await
-        .expect_err("no request is served yet");
-    assert_eq!(error.code, ErrorCode::Unsupported);
-    assert_eq!(
-        error.message,
-        "this server does not serve `list_universes` requests yet"
+        .expect("the universes are listed");
+    assert!(
+        matches!(&response, ResponseBody::ListUniverses(list) if list.universes.is_empty()),
+        "{response:?}"
     );
     let requests = server.stats().requests();
     assert_eq!(
-        (requests.accepted(), requests.failed(), requests.in_flight()),
+        (
+            requests.accepted(),
+            requests.responded(),
+            requests.in_flight()
+        ),
         (1, 1, 0)
     );
     client.close().await;
@@ -79,15 +84,12 @@ async fn a_request_before_hello_is_refused_with_hello_required() {
         .expect_err("hello comes first");
     assert_eq!(error.code, ErrorCode::HelloRequired);
     assert_eq!(server.stats().requests().refused(), 1);
-    // After hello the same request is accepted.
+    // After hello the same request is answered.
     client.hello().await;
-    assert_eq!(
-        client
-            .request(RequestBody::ListUniverses)
-            .await
-            .unwrap_err()
-            .code,
-        ErrorCode::Unsupported
+    let answer = client.request(RequestBody::ListUniverses).await;
+    assert!(
+        matches!(answer, Ok(ResponseBody::ListUniverses(_))),
+        "{answer:?}"
     );
     client.close().await;
     server.stop().await;
@@ -142,9 +144,16 @@ async fn a_cancel_for_a_request_that_has_ended_is_ignored() {
     client.hello().await;
     let id = client.send_request(RequestBody::ListUniverses).await;
     assert_eq!(id, RequestId(1));
-    assert_eq!(
-        error_code(&client.next_message().await, 1),
-        ErrorCode::Unsupported
+    let answer = client.next_message().await;
+    assert!(
+        matches!(
+            answer,
+            ServerMessage::Response {
+                id: RequestId(1),
+                ..
+            }
+        ),
+        "{answer:?}"
     );
     client.cancel(id).await;
     // Nothing answers the cancel: the pong is the next message.
