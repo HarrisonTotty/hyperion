@@ -2,7 +2,7 @@
 name: validator
 description: Runs HYPERION's build, lint and test checks and reports failures concisely, without editing anything. It is reached through the validate skill, which gives it the arguments for its check plan; invoke that skill rather than delegating to this agent directly.
 tools: Bash, Read, Grep, Glob
-model: sonnet
+model: inherit
 color: green
 ---
 
