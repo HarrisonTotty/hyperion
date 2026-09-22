@@ -1181,3 +1181,51 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   `LoadRegistry`. `TestServer::restart()` starts another server on the data directory with the
   default test configuration and a fresh `test_entropy`. `tests/universes.rs` also covers a
   later-format save; `tests/websocket.rs` now uses `list_universes` as a served request.
+- **Deviations in T11.a, as built.** `AppState::pool` is an `Arc<CpuPool>`, because a `SingleFlight`
+  computation is `Send + 'static` and must own its handle on the pool; `GalaxyCache::new` takes one.
+  `GalaxyCache::get(GalaxyKey) -> Result<Arc<Galaxy>, ComputeError>` is as sketched, and
+  `ComputeError` (`compute/error.rs`) is `Submit(SubmitJobError)` or `Job(JobError)`, `Copy`, with
+  `From<ComputeError> for RequestError` giving each cause the code it has as a job's; T11.c's map
+  service and T12's cells fail the same way. The four-entry bound is `limits::GALAXY_CACHE_ENTRIES`,
+  and the cache is a `Vec` of at most four entries behind one `std::sync::Mutex`, not a `ByteLru`:
+  bounding entries bounds bytes. It reports `GalaxyCache::counters() -> GalaxyCounters` (entries,
+  bytes, hits, misses, builds, evictions), which `ServerStats::galaxies()` carries, so
+  `ServerStats::new` gained a parameter (T13.c). The test-only builder hook is
+  `GalaxyCache::with_builder`, `#[cfg(test)]`; the tests that exercise the cache and not the model
+  clone one galaxy built once, because `Galaxy::new` costs 129 ms optimised (plan 02, R19) and
+  several times that unoptimised or on a loaded machine. The build is logged at `info`
+  with the seed, the version, `build_ms` and `heap_kib` from inside the job. A build carries a
+  `CancelOnDrop`, so design note 5's rule for maps holds for galaxies: a build every waiter has given
+  up on is skipped while queued, which a test pins through the pool's `cancelled` counter. The flight
+  looks in the cache once more before building, without counting the lookup, since a caller can reach
+  the registry just after another flight has left it; an insert that replaces an entry still counts as
+  a build, and `bytes` is recomputed from `Galaxy::heap_bytes` on each insert. `Debug` is
+  hand-written, because the cache holds a boxed builder. `open_universe` is now
+  `requests::universe::open(Arc<AppState>, OpenUniverseRequest)`, async, and awaits
+  `GalaxyCache::get` between the lookup and the answer, so opening a universe costs one build;
+  `tests/common/mod.rs`'s `NETWORK_TIMEOUT` is 20 s for that reason.
+- **Deviations in T14.b, as built.** The builder is `convert::galaxy_parameters(&Universe, &Galaxy)`,
+  with `EXCLUDED_PARAMETERS` and `PARAMETERS_ACCOUNTED_FOR` (95 = 80 sent + 15 excluded) beside it;
+  both are `#[cfg(test)]`, since the counting test is what enforces them and Clippy's `-D warnings`
+  refuses a constant nothing else reads. The exclusions name one getter this task's list does not:
+  `BlackHoleParams::bulge_dispersion`, an intermediate of the M–σ relation whose mass is sent. The
+  handler (`requests/galaxy.rs`) builds the response on the runtime rather than as the interactive
+  pool job design note 21 implies: it is eighty numbers read off a galaxy, and the job that can cost
+  anything is the galaxy build, which `GalaxyCache::get` still submits as interactive work and which
+  still answers `queue_full`. `galaxy_parameters` panics if a halo has no in-situ, dominant-merger or
+  globular-debris component, or its dominant merger no break (documented under `# Panics`): plan 02
+  draws all four for every seed, so it is a bug path, and T13 answers it `internal` at the cost of
+  that request alone. The unit conversions go through the sim's typed conversions
+  (`Degrees::from(Radians)`, `Gigayears::from(Years)`), which are themselves defined from
+  `units::consts`, rather than through bare constants as design note 11 words it.
+  `bar.corotation_radius` is read from `PotentialTables::bar_corotation`, which holds
+  `BarParams::corotation_radius()` itself, and `rotation.radius` is `convert::ROTATION_RADIUS`
+  (26,000 ly = 7.97 kpc, the round 8 kpc at which the brainstorm quotes "210–270 km/s"; the unit test
+  holds the Milky Way fixture to that band and to the brainstorm's 500–580 km/s escape speed). The
+  golden is
+  `crates/hyperion-server/tests/golden/galaxy_parameters.golden`: plan 01's `GoldenWriter` header,
+  `# generator_version = <n>`, followed by the response's pretty-printed JSON, rather than a bare
+  `.json` file, so that a generator bump forces `just bless` rather than a silent diff;
+  `hyperion-testkit` is therefore a dev-dependency of `hyperion-server`. `tests/galaxy_parameters.rs`
+  also covers `open` warming the galaxy (no build for the parameters that follow), two saves of one
+  seed sharing one build, and an unknown universe refused before any build.

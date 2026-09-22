@@ -7,7 +7,7 @@
 
 use tokio::sync::watch;
 
-use crate::compute::PoolCounters;
+use crate::compute::{GalaxyCounters, PoolCounters};
 
 /// A snapshot of the server's activity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -16,6 +16,7 @@ pub struct ServerStats {
     requests: RequestCounters,
     outbound: OutboundCounters,
     pool: PoolCounters,
+    galaxies: GalaxyCounters,
 }
 
 impl ServerStats {
@@ -24,12 +25,14 @@ impl ServerStats {
         requests: RequestCounters,
         outbound: OutboundCounters,
         pool: PoolCounters,
+        galaxies: GalaxyCounters,
     ) -> Self {
         Self {
             connections,
             requests,
             outbound,
             pool,
+            galaxies,
         }
     }
 
@@ -56,6 +59,12 @@ impl ServerStats {
     #[must_use]
     pub fn pool(&self) -> PoolCounters {
         self.pool
+    }
+
+    /// The galaxy cache's contents and use: what a repeated request found built already.
+    #[must_use]
+    pub fn galaxies(&self) -> GalaxyCounters {
+        self.galaxies
     }
 }
 

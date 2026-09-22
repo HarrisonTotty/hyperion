@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use common::{TestClient, TestServer, test_entropy};
 use hyperion_protocol::{
-    CreateUniverseRequest, ErrorCode, OpenUniverseRequest, RequestBody, RequestError, ResponseBody,
-    SeedHex, UniverseIdHex, UniverseInfo, UniverseList, UniverseStatus,
+    CreateUniverseRequest, ErrorCode, GalaxyParametersRequest, OpenUniverseRequest, RequestBody,
+    RequestError, ResponseBody, SeedHex, UniverseIdHex, UniverseInfo, UniverseList, UniverseStatus,
 };
 use hyperion_server::limits::MAX_UNIVERSE_NAME_CHARS;
 use hyperion_sim::GENERATOR_VERSION;
@@ -233,18 +233,33 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
             ..talos.clone()
         }]
     );
-    // Every request that names a universe is refused alike. `open` is the only one served so far:
-    // P04.T14.b–d add `galaxy_parameters`, `density_map` and `systems_in_range` to this test.
-    let error = open(&mut client, &talos.id).await.unwrap_err();
-    assert_eq!(error.code, ErrorCode::GeneratorVersionMismatch);
+    // Every request that names a universe is refused alike, and none of them generates anything:
+    // P04.T14.c and T14.d add `density_map` and `systems_in_range` to this test.
+    let refusals = [
+        RequestBody::OpenUniverse(OpenUniverseRequest {
+            universe: talos.id.clone(),
+        }),
+        RequestBody::GalaxyParameters(GalaxyParametersRequest {
+            universe: talos.id.clone(),
+        }),
+    ];
+    for body in refusals {
+        let error = client.request(body).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::GeneratorVersionMismatch);
+        assert_eq!(
+            error.message,
+            format!(
+                "universe {} was created with generator version {other_version}, and this server \
+                 runs generator version {}",
+                talos.id.as_str(),
+                GENERATOR_VERSION.get()
+            )
+        );
+    }
     assert_eq!(
-        error.message,
-        format!(
-            "universe {} was created with generator version {other_version}, and this server runs \
-             generator version {}",
-            talos.id.as_str(),
-            GENERATOR_VERSION.get()
-        )
+        server.stats().galaxies().builds(),
+        0,
+        "a universe this server cannot run generates nothing"
     );
     assert_eq!(
         fs::read(&path).unwrap(),

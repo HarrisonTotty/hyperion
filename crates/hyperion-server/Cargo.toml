@@ -24,6 +24,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# The golden-file harness of plan 01, for the pinned `galaxy_parameters` response.
+hyperion-testkit.workspace = true
 tempfile.workspace = true
 # `process` for running the binary in the command-line tests; `test-util` for the paused clock of
 # the writer's timeout tests.

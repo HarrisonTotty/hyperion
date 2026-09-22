@@ -26,7 +26,11 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 /// Upper bound on any single network wait.
-pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
+///
+/// Generous, because the answer being waited for may be one that builds a galaxy: about 130 ms with
+/// `hyperion-sim` optimised as the root `Cargo.toml` optimises it (plan 02, Risks, R19), and several
+/// times that on a loaded machine or an unoptimised build.
+pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The values a test server's entropy hands out, in order: seeds that a create leaves out, then
 /// universe IDs, as they are drawn.

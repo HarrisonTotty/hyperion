@@ -213,6 +213,7 @@ impl Harness {
             shared.request_stats.snapshot(),
             shared.outbound_stats.snapshot(),
             shared.pool.counters(),
+            shared.galaxies.counters(),
         );
         let (requests, outbound, pool) = (stats.requests(), stats.outbound(), stats.pool());
         assert_eq!(

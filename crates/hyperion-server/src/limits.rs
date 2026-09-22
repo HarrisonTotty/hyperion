@@ -87,6 +87,14 @@ pub const MAX_QUERY_RADIUS_LY: f64 = 131_072.0;
 /// 2,000 ly in the outer halo expects a few thousand layer-A systems while visiting 10⁸ cells.
 pub const MAX_QUERY_CELLS: NonZeroU32 = NonZeroU32::new(262_144).expect("262,144 is not zero");
 
+/// Galaxies the server keeps built at once (plan 04, design note 23).
+///
+/// A `Galaxy` is fixed-size, about 1.4 MiB of heap (plan 02, Risks, R19), so bounding the entries
+/// bounds the bytes: four of them are about 5.5 MiB, and are a bridge's worth of universes open at
+/// once. The caches whose entries vary in size by orders of magnitude, cells and density maps, are
+/// bounded in bytes instead.
+pub const GALAXY_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(4).expect("4 is not zero");
+
 /// Interactive jobs (range queries, galaxy builds, parameter reads) that may wait in the CPU
 /// pool's queue. One more is refused at once with `queue_full`.
 pub const INTERACTIVE_QUEUE_CAPACITY: NonZeroUsize = NonZeroUsize::new(64).expect("64 is not zero");

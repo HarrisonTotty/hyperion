@@ -40,20 +40,25 @@ pub(crate) fn list(state: &AppState) -> ResponseBody {
     ResponseBody::ListUniverses(universe_list(&state.registry.list()))
 }
 
-/// Opens a universe: checks that this server can run it and answers with its identity.
+/// Opens a universe: checks that this server can run it, warms its galaxy and answers with its
+/// identity.
 ///
-/// Design note 6 has `open` also warm the universe's galaxy, so that the requests that follow find
-/// it built. The galaxy cache arrives with P04.T11.a, which needs plan 02's `Galaxy`; this
-/// handler then awaits `GalaxyCache::get(universe.key())` between the lookup and the answer.
+/// Design note 6 has `open` mean "check it, load it, warm its galaxy and tell me about it", so the
+/// galaxy is built before this answers and the requests that follow find it in the cache. A galaxy
+/// takes about 130 ms to build, which is what `open` costs the first time a universe is opened
+/// under this server.
 ///
 /// # Errors
 ///
-/// Those of [`openable_universe`].
-pub(crate) fn open(
-    state: &AppState,
-    request: &OpenUniverseRequest,
+/// Those of [`openable_universe`], and those of
+/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built: a full
+/// interactive queue is `queue_full`, and a build the client cancelled is `cancelled`.
+pub(crate) async fn open(
+    state: Arc<AppState>,
+    request: OpenUniverseRequest,
 ) -> Result<ResponseBody, RequestError> {
-    let universe = openable_universe(state, &request.universe)?;
+    let universe = openable_universe(&state, &request.universe)?;
+    state.galaxies.get(universe.key()).await?;
     tracing::info!(
         id = %universe.id(),
         name = %universe.name(),

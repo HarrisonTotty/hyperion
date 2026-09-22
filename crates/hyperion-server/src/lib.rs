@@ -31,7 +31,7 @@ use std::{fmt, io};
 
 use axum::{Router, routing::get};
 
-use crate::compute::{CpuPool, ShutDownPoolError, StartPoolError};
+use crate::compute::{CpuPool, GalaxyCache, ShutDownPoolError, StartPoolError};
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
@@ -58,13 +58,20 @@ pub struct Server {
 
 /// The state every connection and request shares.
 ///
-/// The caches join it with the handlers that need them (P04.T14).
+/// The remaining caches, of density maps and of cells, join it with the handlers that need them
+/// (P04.T14.c and T14.d).
 #[derive(Debug)]
 pub(crate) struct AppState {
     /// Every universe the server holds, loaded from the data directory at start.
     pub(crate) registry: UniverseRegistry,
     /// Where generation, and the serialisation of large responses, runs: never on the runtime.
-    pub(crate) pool: CpuPool,
+    ///
+    /// Shared, because the caches submit their own jobs: a computation they hand to a
+    /// [`SingleFlight`](compute::SingleFlight) outlives the request that started it.
+    pub(crate) pool: Arc<CpuPool>,
+    /// The galaxies built from the open universes' seeds, at most
+    /// [`GALAXY_CACHE_ENTRIES`](limits::GALAXY_CACHE_ENTRIES) of them.
+    pub(crate) galaxies: GalaxyCache,
     /// What answers each request: [`Handlers`], or a test's double.
     pub(crate) handler: Arc<dyn Handler>,
     /// The open WebSocket connections, which shutdown closes and waits for.
@@ -109,12 +116,15 @@ impl Server {
         )
         .await
         .map_err(StartServerError::LoadRegistry)?;
-        let pool = CpuPool::new(
-            config.workers(),
-            INTERACTIVE_QUEUE_CAPACITY,
-            BULK_QUEUE_CAPACITY,
-        )
-        .map_err(StartServerError::StartPool)?;
+        let pool = Arc::new(
+            CpuPool::new(
+                config.workers(),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+            )
+            .map_err(StartServerError::StartPool)?,
+        );
+        let galaxies = GalaxyCache::new(Arc::clone(&pool));
         tracing::info!(
             data_dir = %config.data_dir().display(),
             workers = config.workers().get(),
@@ -124,6 +134,7 @@ impl Server {
             state: Arc::new(AppState {
                 registry,
                 pool,
+                galaxies,
                 handler,
                 connections: Connections::new(),
                 request_stats: RequestStats::new(),
@@ -149,6 +160,7 @@ impl Server {
             self.state.request_stats.snapshot(),
             self.state.outbound_stats.snapshot(),
             self.state.pool.counters(),
+            self.state.galaxies.counters(),
         )
     }
 
