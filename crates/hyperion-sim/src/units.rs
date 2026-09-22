@@ -53,6 +53,12 @@ pub mod consts {
     /// The nominal solar luminosity, W (IAU 2015 Resolution B3).
     pub const SOLAR_LUMINOSITY_W: f64 = 3.828e26;
 
+    /// The nominal solar effective temperature, K (IAU 2015 Resolution B3).
+    ///
+    /// With [`SOLAR_LUMINOSITY_W`] and [`SOLAR_RADIUS_M`] it satisfies Stefan–Boltzmann,
+    /// L = 4πR²σT⁴, to within the rounding of the three nominal values.
+    pub const SOLAR_EFFECTIVE_TEMPERATURE_K: f64 = 5_772.0;
+
     /// The Newtonian constant of gravitation, m³ kg⁻¹ s⁻² (CODATA 2018: 6.674 30 × 10⁻¹¹, and
     /// unchanged in CODATA 2022).
     pub const GRAVITATIONAL_CONSTANT: f64 = 6.674_30e-11;
@@ -343,6 +349,32 @@ unit!(
     /// metallicity gradient.
     DexPerKiloparsec
 );
+unit!(
+    /// A metal mass fraction Z, dimensionless, 0–1: the share of a star's mass in elements
+    /// heavier than helium.
+    ///
+    /// The stellar evolution fits of Hurley, Pols and Tout (2000, MNRAS 315, 543) take Z = 0.02 as
+    /// solar and are valid for 0.0001–0.03.
+    MetalFraction
+);
+unit!(
+    /// An excess ΔY of the helium mass fraction over the value a star's metallicity implies,
+    /// dimensionless.
+    ///
+    /// Zero for every star the grid places, positive for the second-population members of
+    /// globular clusters (up to about 0.18, the brainstorm's "Covering every class of star",
+    /// helium row).
+    HeliumExcess
+);
+unit!(
+    /// A magnetic flux density in gauss (10⁻⁴ T), the unit in which stellar and neutron-star
+    /// fields are quoted.
+    Gauss
+);
+unit!(
+    /// A rate of mass loss or gain in solar masses per Julian year, such as a stellar wind's.
+    SolarMassesPerYear
+);
 
 #[cfg(test)]
 mod tests {
@@ -391,6 +423,17 @@ mod tests {
         assert_relative(SOLAR_MASS_KG, 1.988_41e30, 1e-5);
         assert_relative(JUPITER_MASS_KG, 1.898_12e27, 1e-5);
         assert_relative(EARTH_MASS_KG, 5.972_17e24, 1e-5);
+    }
+
+    /// IAU 2015 Resolution B3 derived the nominal temperature from best-estimate L and R through
+    /// Stefan–Boltzmann and rounded it, so the nominal values agree to that rounding. σ is exact in
+    /// the 2019 SI (5.670 374 419… × 10⁻⁸ W m⁻² K⁻⁴).
+    #[test]
+    fn the_nominal_solar_temperature_follows_from_luminosity_and_radius() {
+        let sigma = 5.670_374_419e-8;
+        let area = 4.0 * core::f64::consts::PI * SOLAR_RADIUS_M * SOLAR_RADIUS_M;
+        let t4 = SOLAR_LUMINOSITY_W / (area * sigma);
+        assert_relative(t4.sqrt().sqrt(), SOLAR_EFFECTIVE_TEMPERATURE_K, 1e-4);
     }
 
     macro_rules! round_trip {

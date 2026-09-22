@@ -24,13 +24,25 @@
 //!   the numerical helpers they share.
 //! - [`tables`]: constant tables, exact or fitted offline.
 //!
+//! The stars (plan 06):
+//!
+//! - [`stellar`]: each star's state at any age from its mass, composition and draws, its remnant
+//!   and kick, its classes, and its events in time.
+//!
+//! Events in time (plan 06):
+//!
+//! - [`events`]: the two constructions of a system's or body's own events, Poisson bins and the
+//!   monotone phase, the event tags of the event kinds, and time windows.
+//!
 //! The crate's only runtime dependency is `libm`.
 
 pub mod coords;
+pub mod events;
 pub mod galaxy;
 pub mod id;
 pub mod math;
 pub mod rng;
+pub mod stellar;
 pub mod tables;
 pub mod time;
 pub mod units;

@@ -14,6 +14,10 @@ bench = false
 # The sim's only runtime dependency. See `hyperion_sim::math`.
 libm.workspace = true
 
+[features]
+# Test helpers (`events::testing`) for this crate's tests and for other crates' tests.
+testing = []
+
 [dev-dependencies]
 criterion.workspace = true
 hyperion-testkit.workspace = true
@@ -24,6 +28,14 @@ harness = false
 
 [[bench]]
 name = "galaxy"
+harness = false
+
+[[bench]]
+name = "stellar"
+harness = false
+
+[[bench]]
+name = "events"
 harness = false
 
 [lints]

@@ -875,3 +875,74 @@ Reserved so that later plans move no star they need not:
   fixture's as built. Pending re-validation: T3–T8, T9.c, T9.e–T9.g, T10, T11 and T12.b wait on
   P02.T9 (the `Galaxy` handle, used here as its Provides sketches it); the densities' cost and
   Design note 6's candidate counts wait on the T7 revision.
+- **Deviations in T1, T2, T9.a, T9.b, T9.d, T12.a, as built** (built before P02.T9; nothing in them
+  takes a `Galaxy`).
+  - **T1.** The six tags are registered now, as the task says, though no stream opens under them
+    until T3–T5 (plan 08 for `system.velocity`); `rng/tags.rs`'s module doc still says a tag is
+    added by the task that first opens it. Submodules are private and re-exported, so the names are
+    `galaxy::placement::LayerSpec`, `galaxy::placement::CellKey`, `galaxy::query::Census` and so on.
+    `layer_spec` lends a row of a private `static` copy of `STELLAR_LAYERS`.
+    `layer_for_initial_mass` takes each band as `[lo, hi)`, E as `[8, 150]` M☉ and NaN as `None`;
+    plan 02's `sample_in_band` draws from the closed band, so a primary can sit on its band's upper
+    edge, and a record's layer is always its ID's, never `layer_for_initial_mass` of its mass (T5.a,
+    T8.b). The error variants, which the plan left open: `BuildCellKeyError` is
+    `NotStellarLayer(Layer)`, `CoordinateOutOfRange(BuildGenCellError)` or
+    `OutsideRootCube(GenCell)`; `ExceedIndexCapacityError` is one struct variant,
+    `LayerTooDense { layer, largest_mean, capacity }`, where T3 puts the largest bound × volume in
+    `largest_mean`; `BuildRangeQueryError` is `RadiusNotFinite`, `RadiusNotPositive`,
+    `RadiusBeyondRootCube`, `CentreOutsideRootCube`, `TimeOutsideClockWindow(UniverseTime)` or
+    `SubstellarLayersUnavailable`. The placement errors sit in `placement/mod.rs`,
+    `BuildRangeQueryError` in `query/mod.rs`. `galaxy/mod.rs`'s `//!` still describes plan 02 alone
+    ("No star is placed here"): the lane could only append to that shared file, so the integration
+    commit rewords it.
+  - **T2.** Beyond the sketch: `CellKey::volume_ly3() -> f64`, exact, for T3's bound × volume, and
+    `CellKey::cell_word() -> u64`, the raw ID of the cell's candidate 0 and the one source of Design
+    note 1's word. T3, T6 and T7 key the cell stream with `ObjectKey::cell(key.cell_word())`; a test
+    pins it equal to `SystemId::cell_word()` of every candidate. `containing` outside the cube gives
+    `OutsideRootCube(cell)`, and it accepts exactly the positions `GalacticPosition::in_root_cube`
+    accepts. `of` gives `LayerNotGenerated(layer)` for a substellar grid ID and `KindNotGenerated`
+    for every reserved kind, with no cube check: a grid ID's cell fields span the cube exactly.
+    "Stellar" is `layer_spec(layer).is_some()`, so plan 13 widens `new`, `containing` and `of`
+    through `layer_spec` alone. `candidate_id` maps `IndexTooLarge` to `None` and panics on the
+    other `BuildSystemIdError` variants, which a key cannot produce.
+  - **T9.a.** `SystemHit` and `RangeResult` are not built. A `SystemHit` holds a `SystemRecord`,
+    which is T5.a's, so the ordering note is wrong to let T9.a run beside T2–T6 for these two.
+    `SystemHit` moves to T9.f, whose `systems_in_sphere` is its first use, and `RangeResult` to
+    T9.g, which returns it; both stay in `query/result.rs` as Provides sketches them. `LayerSet`,
+    named only in `SystemSource`'s signature, is a `u8` set over `Layer::value()` (`EMPTY`, `with`,
+    `contains`, `is_empty`, `iter` in `Layer::ALL` order, `FromIterator`). `Census::layers()` gives
+    the walked set: the walk order (E to A, then the brown dwarfs and the rogue planets) down to
+    `complete_down_to`. `LayerCounts` has `ZERO`, `from_array`, `to_array`, `get`, `set` and an
+    elementwise `Add`; `from_array` and `set` panic on a count that is NaN, infinite or negative.
+    `Census` has private fields and a `pub(super)` constructor, which debug-asserts that a census
+    admitting nothing was stopped by the limit or the budget. `QueryStats` keeps `pub(super)` fields
+    for T9.g to add to. `RangeQuery` is `Clone`, not `Copy`, and `build` checks the rules in the
+    task's order (a test pins it), the diagonal as r² > 3 × 131,072², exact on the right.
+  - **T9.b.** `QuerySphere::new(centre, radius, time, pad) -> Result<_, BuildQuerySphereError>`
+    (`InvalidRadius`, `InvalidPad`), with `padded_radius = radius + pad`. The pad is the caller's,
+    because `pad_for` and `pad_speed` are T9.e's: it must be at least `pad_for(t, pad_speed(layer))`
+    for every layer walked with the sphere, and T9.g passes that. `cells_in_sphere` returns
+    `impl Iterator<Item = CellKey> + use<>`, so it borrows nothing, and yields cells in `CellKey`
+    order; both functions yield nothing for the substellar layers. A cell that only touches the
+    padded sphere is kept on every side (the bounding box reaches one light-year past
+    `[c − R, c + R]` both ways). The kept cells of a z column are contiguous, so
+    `count_cells_in_sphere` bisects each column's ends on the same test and visits no cell. At the
+    test's generic point a 50 ly sphere meets 1,436 layer-A cells and 304 in B–E (Steiner's formula
+    gives 1,429 and 307), inside the task's brackets.
+  - **T9.d.** The census is `decide_census(query, grid, sources, cells_in_layer) -> Census`, with
+    `query: &RangeQuery` and `cells_in_layer: impl FnMut(Layer) -> u64`. The limit, the budget and
+    the floor come from the query, so the two `NonZeroU32`s cannot be swapped and plan 13 finds the
+    substellar request there. The cell counts are a function, called once for each layer the walk
+    reaches and never for the rest, so a query stopped at D never counts layer A's cells; T9.g
+    passes `count_cells_in_sphere` over the padded sphere. The walked set is `Census::layers()`, not
+    a second return value. At one layer the limit is tested before the budget, and a total equal to
+    the limit fits. `decide_census` is public (T9.f's test and its doc example use it;
+    crate-private, it would be dead code until T9.g) and is a building block to add to Provides.
+  - **T12.a.** `FrameCandidate::new(id, distance, tidal_radius)` returns a `Result` whose error,
+    `BuildFrameCandidateError`, is `InvalidDistance` unless the distance is finite and ≥ 0 and
+    `InvalidTidalRadius` unless the radius is finite and > 0; the candidate has getters, `ratio()`
+    and `contains_ship()`; a distance of −0 is stored as +0. A current frame missing from the
+    candidates is dropped like one the ship has left, and an ID listed twice counts at its smallest
+    ratio; a test runs every order of five candidates. For T12.b: `PotentialTables::tidal_radius` is
+    zero at the exact centre, which `FrameCandidate::new` refuses, so `frame_at` must skip that
+    point or leave it to plan 09's rule.

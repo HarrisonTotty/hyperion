@@ -2,13 +2,15 @@
  * Fitting a density map's pixels to the device pixels of its picture without losing any.
  *
  * @remarks
- * A map is requested at the smallest resolution plan 04 offers that is at least as wide as the
- * picture's backing store, so it never has fewer pixels than the screen shows. What excess remains
- * is removed by averaging, never by dropping: each device pixel takes the area-weighted mean of the
- * linear column density of the map pixels it covers. That mean is the column density of the device
- * pixel's own area, a value of the data, not one invented between samples, so a feature thinner
- * than a device pixel, such as the edge-on young disc, is dimmed by its share of the area and never
- * lost. Log codes are not averaged: the mean of logarithms is not the logarithm of the mean.
+ * A map is requested at the smallest resolution plan 04 offers that, enlarged by at most
+ * {@link MAX_UPSCALE}, covers the picture's backing store. Enlarging repeats pixels and loses none;
+ * it spares the server a map four times the work of the next size down for a picture only a little
+ * wider than it. What excess a map has over the backing store is removed by averaging, never by
+ * dropping: each device pixel takes the area-weighted mean of the linear column density of the map
+ * pixels it covers. That mean is the column density of the device pixel's own area, a value of the
+ * data, not one invented between samples, so a feature thinner than a device pixel, such as the
+ * edge-on young disc, is dimmed by its share of the area and never lost. Log codes are not
+ * averaged: the mean of logarithms is not the logarithm of the mean.
  */
 import { type DecodedCodes, RAMP_LEVELS } from "./ramp";
 
@@ -16,14 +18,27 @@ import { type DecodedCodes, RAMP_LEVELS } from "./ramp";
 export const MAP_RESOLUTIONS_PX: ReadonlyArray<number> = [128, 256, 512, 1_024];
 
 /**
- * The map width to request for a picture: the narrowest the protocol offers that is at least the
- * picture's width in device pixels, or the widest when none is.
+ * How much larger than its own pixels a map may be drawn before a finer one is asked for.
+ *
+ * @remarks
+ * The orchestrator's ruling for the owner: at 1920 × 1080 the pictures are 562 device pixels wide,
+ * which would otherwise ask for 1,024-pixel maps, four times the server's work of 512 (plan 05,
+ * Risks).
+ */
+export const MAX_UPSCALE = 1.25;
+
+/**
+ * The map width to request for a picture: the narrowest the protocol offers that, drawn at most
+ * {@link MAX_UPSCALE} times larger, covers the picture's width in device pixels, or the widest when
+ * none does.
  *
  * @param backingWidthPx - The picture's width in device pixels.
  */
 export function mapResolutionFor(backingWidthPx: number): number {
   const widest = MAP_RESOLUTIONS_PX.at(-1) ?? 1_024;
-  return MAP_RESOLUTIONS_PX.find((resolution) => resolution >= backingWidthPx) ?? widest;
+  return (
+    MAP_RESOLUTIONS_PX.find((resolution) => resolution * MAX_UPSCALE >= backingWidthPx) ?? widest
+  );
 }
 
 /**

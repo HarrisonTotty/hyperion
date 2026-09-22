@@ -1742,3 +1742,171 @@ Reserved so that later plans move no star:
   honoured by plans 09, 11 and 14, none of which names numbers yet. Plan 09 asks that draws accept
   an attempt number (`StarDraws::for_attempt`) and plans 11 and 14 ask for the monotone helpers on
   `Track`; both are provided.
+- **Deviations in T1.a, as built.** `ObjectKind` lives in `stellar::state`, re-exported as
+  `stellar::ObjectKind`, because T1.a makes `system.rs` a `//!`-only file; no consumer names a path
+  to it. `StarState` is built by `StarState::new(StarStateParts)`, a struct of the eight required
+  inputs with public fields (none is optional, so no builder); it derives the envelope mass (M −
+  M_c, at least +0) and T_eff, and debug-asserts the documented ranges (age ≥ 0, a remnant all
+  core, `NoRemnant` massless and dark). T_eff is 0 K at zero luminosity; `surface_gravity()` is
+  `Option<Dex>`, log₁₀ g in cm s⁻², `None` at zero mass or radius. T☉ is
+  `units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K`. Added beyond the sketch:
+  `Composition::{fe_h, helium_excess, SOLAR}`, the constants `Z_SOLAR`, `Z_FIT_MIN` and
+  `Z_FIT_MAX` of `stellar::composition`, `Phase::ALL`, `ObjectKind::ALL`. `stellar::testing` is
+  `#[cfg(test)] pub(crate)` until the crate has its `testing` feature (T27.d, another lane);
+  whichever of T27.d and T1.a merges second, and at the latest T31, whose integration test calls
+  it, moves it under `cfg(any(test, feature = "testing"))` and makes it `pub`.
+- **Deviations in T2, as built.** The decision draws are `rng::Mark`s, not `UnitUniform`s
+  (brainstorm, "Floating point": decisions compare integers; the `KickDraws` sketch already has a
+  "mode mark"): `star.magnetism`, `star.stripped`, `star.remnant.type`, `star.remnant.fallback`,
+  `star.kick.mode` and the three `star.wd.*`. The median mark is 2⁵², below a threshold of
+  probability p exactly when p > ½. T25 takes the fossil field's strength rank from the magnetism
+  mark as (mark + ½) ÷ k below its threshold k; T30.b builds its type and fallback nodes as marks.
+  `star.kick.score` and `star.ns.spin` are held as the first `REDRAW_TRIES` = 8 normals of the
+  attempt's block (16 of its 64 words), in draw order; T19.a and T21.a take the first their
+  condition accepts and must document a fallback for all eight failing (about once in 10¹⁵ and 4 ×
+  10¹² stars). `star.ns.geometry` holds the spin axis (words 0–1), then the magnetic inclination
+  as a rank (word 2). `from_parts` takes `StarDrawsParts`, a struct with public fields and a
+  `MEDIAN` constant for struct-update syntax; the median's directions are galactic north (a
+  convention). Added: `ATTEMPT_WORDS`, `REDRAW_TRIES` (a const assertion keeps their product in
+  the block; changing either is a version change), `UnitUniform::{new, value, HALF}`,
+  `StandardNormal::{new, value, ZERO}`, a getter per field and `parts()`. The golden test is
+  `star_draws_are_pinned` in `tests/stellar_draws.rs`. T2 also extends
+  `tests/golden/rng/tags.golden` by the 22 tags (`domain_tags_are_pinned`, which the acceptance
+  command does not select); merging another lane's tags means regenerating that file with that
+  test.
+- **Deviations in T4, as built.** The tables are `pub(crate)` constants `coeffs_data::{A, B,
+ZAMS_L, ZAMS_R}` of type `[[f64; 5]; N]` indexed by coefficient number, with the paper's digits;
+  row 0, the closed-form rows (a17, a33, b2, b3, b17, b26, b45, b47, b50) and the unused b8 and
+  b35 are zero. Their types fix the lengths, so there is no length test; an FNV-1a checksum of the
+  bits pins each table and a test pins which rows are empty. They were read from the papers by
+  script and then checked number by number against the SSE package's data statements (`zdata.h`,
+  `zcnsts.f`), which agree to the last digit: a use of the SSE source beyond settling misprints,
+  for the owner to confirm. The paper's text layer loses b45's parentheses: b45 = 1 − (2.47162ρ −
+  5.401682ρ² + 3.247361ρ³), as printed and in SSE. Equation 21a is a58 M^a60 ÷ (a59 + M^a61) as
+  the journal prints it (the arXiv preprint misprints a59 M^a61); `ZCoeffs::alpha_r_power_law`
+  holds the one copy, which T5's αR shares. Equation numbers in doc comments are the journal's,
+  which splits some of the preprint's (9a/9b, 19a/19b, 21a/21b, 22a/22b). The a68/a66 special case
+  makes a64 jump in Z near 0.016, as in the paper and SSE; it keeps αR continuous in mass.
+  `M_hook` and `M_HeF` are quadratics in ζ with minima inside the fitted range (Z ≈ 0.0025 and
+  0.00073, as SSE's values confirm), so "each critical mass is monotone in Z" cannot hold: the test
+  asserts that `M_FGB` rises, all three are continuous at 200 points, and `M_hook` and `M_HeF` turn
+  once each. `M_FGB` keeps the paper's rounded constants (13.048, 0.0012), within 0.18% of SSE's
+  16.5 Z^0.06 ÷ (1 + (10⁻⁴ ÷ Z)^1.27). Tout et al.'s fits are their equations 1 and 2, with the
+  coefficients from their equations 3 and 4 (Tables 1 and 2). `ZCoeffs::new` clamps Z to the
+  fitted range and panics on NaN. Added: `ZCoeffs::{z, zeta, m_hook, m_hef, m_fgb}`; tests against
+  SSE output (critical masses at the five T12 metallicities, ZAMS L and R at four points), with the
+  SSE run's provenance in `stellar/sse/mod.rs`; a continuity sweep of every aₙ and bₙ in Z. Bench:
+  `ZCoeffs::new` 1.81 µs against the 5 µs target.
+- **Deviations in T5, as built.** `stellar::sse::ms` is `pub(crate)` (T10 is its first caller;
+  until then it carries `cfg_attr(not(test), expect(dead_code))`, which T10 removes, as it does on
+  `ZCoeffs::{a, b, alpha_r_power_law}`). `t_bgb`, `t_hook`, `t_ms` (in `Megayears` from the ZAMS),
+  `l_tms`, `l_bgb` (`SolarLuminosities`) and `r_tms` (`SolarRadii`) take `SolarMasses`; L and R
+  along the main sequence come from `MainSequence::new(m, &c).at(t)`, which returns the new
+  `sse::PhasePoint { luminosity, radius, core_mass }` that every later phase returns too. Equation
+  6's x is the SSE code's form, max(0.95, max(0.95 − (10/3)(Z − 0.01), min(0.99, 0.98 − (100/7)(Z −
+  0.001)))): the printed max(0.95, min(0.95 − 0.03(ζ + 0.30103), 0.99)) is a different fit, not a
+  misprint; the two agree for Z ≤ 0.0003, at 0.001 and for Z ≥ 0.01, and at Z = 0.004 (0.962
+  against 0.970) the printed form moves `t_ms` by 0.8% and late main-sequence L by 0.02–0.06 dex
+  against SSE, beyond T12.b's 0.02 dex; for the owner to confirm, since the phase consults SSE
+  only for misprints. Misprint settled against SSE: equation 22b's denominator is a74 − 1.0
+  (printed a74 − 1.06 in the journal too). Equation 23's low-mass branch takes |M − a78| as SSE
+  does (no numerical effect), and its last branch ends at a75 + 0.1 as the journal prints. R_TMS is held at 1.5 R_ZAMS below 0.5 M☉ as printed
+  (SSE holds it up to a17, where a test shows it never binds). Equation 24's degenerate floor uses
+  X = 0.76 − 3Z (Pols et al. 1998) at every mass; it binds only near 0.1 M☉, where it exceeds Tout
+  et al.'s R_ZAMS (0.135 against 0.130 R☉ at Z = 0.02), so the τ = 0 and 1 tests compare with the
+  floored radii and T15.b's blend must meet `MainSequence::at(0)`, not `zams::radius`. Continuity is
+  asserted with a test-only bisection jump detector (`stellar/sse/continuity.rs`) instead of a
+  Lipschitz bound, which the hooks' (M − `M_hook`)^0.4 and ^0.5 rises and R_TMS's steep ramp at Z =
+  10⁻⁴ would break, applied both to L and R and to each coefficient of equations 16–23 at its own
+  scale. The 0.75 M☉ test sweeps 200 metallicities. Added: L and R against SSE's `hrdiag` at nine
+  (Z, M, t) points to 10⁻⁹ (all 5 × 31 × 400 main-sequence rows of the run agree to 10⁻¹⁴).
+- **Deviations in T6, as built.** `stellar::sse::{hg, gb}` are private modules of `pub(crate)`
+  items with `ms`'s dead-code expectation, which T10 removes. The gap is `HertzsprungGap::new(m,
+&c).at(t)` (`t_start` = t_MS, `t_end` = t_BGB); the branch below `M_FGB` is
+  `FirstGiantBranch::new(m, &c).at(t)` (`t_hei`); both return `PhasePoint` and debug-assert their
+  time range. Equation 37 is `GiantBranch` (`m_x`, `l_x`, `luminosity`, `core_mass`, `times` →
+  `GiantTimes`, `core_mass_at`, `time_of_luminosity`); R_GB is `gb::radius`, L_HeI `gb::l_hei`. The
+  gap's end and equation 44 need parts of HPT 5.3–5.4, so `gb.rs` also holds, for T7 and T8 to
+  reuse: `mc_hei`, `mc_bgb` (eq. 44), `r_hei` (eq. 50), `r_mhe_intermediate` (eq. 55 from `M_HeF`
+  up; T7 adds the branch below), `blue_fraction_massive` (eq. 58 above `M_FGB`; T7 adds the rest),
+  `agb_radius` (eq. 74) and `mc_bagb` (eq. 66), the `m_c_bagb` of T8, T18.b and T28.f, which T8.b
+  re-exports from `sse` under that name since `gb` is private. Two choices follow SSE, for the owner
+  to confirm: p, q and log D change form over 2.0–2.5 M☉, not `M_HeF`–2.5 as printed (same at Z =
+  0.02; at Z = 0.001 the printed form leaves a 2 M☉ giant up to 0.06 dex fainter at a given age,
+  beyond T12.b's 0.02 dex); and above `M_FGB` a star with no blue phase (τ_bl zero below 10⁻¹⁰, as
+  SSE's `tblf`) ignites helium at R_AGB(L_HeI), not R_mHe, so that core helium burning, which then
+  starts on R_AGB (eq. 64), begins where the gap ends (every star above `M_FGB` at Z ≳ 0.022, where
+  1 − b47 < 0, and elsewhere where R_mHe ≥ R_AGB). Equation 44's c₁ is the printed 9.20925 × 10⁻⁵
+  (SSE: 0.09796164⁴), so the SSE tests (4 gap and 6 branch points) hold L and R to 10⁻⁹ and Mc to
+  10⁻⁷. T6.c re-checked: equation 49 puts the 1 M☉, Z = 0.02 tip at 2,752 L☉ (SSE agrees; Fig. 11
+  about 2,800) with a 0.477 M☉ core, and the bolometric tip **rises** with metallicity (1,933 L☉ at
+  Z = 10⁻⁴ to 2,814 at 0.03; Cassisi and Salaris 1997 agree), so the tests assert 2,752 ± 1 L☉ and a
+  rise over 200 metallicities; the plan's "near 2,500" and "falls" are for the owner to amend. Left
+  to T10.d, whose Build text should gain it: HPT section 6.3's small-envelope perturbation of L and
+  R (equations 97–100), which SSE applies from the gap to the AGB whenever μ < 1, including massive
+  stars in the gap with no mass loss (μ ≈ 0.86 at 20 M☉), and which needs T9's helium ZAMS and the
+  white dwarf's L and R; the SSE test points avoid it. Also for T10: the phase structs take one
+  mass, while SSE evaluates R_GB and R_AGB at the current mass, and equation 30 keeps the larger of
+  a mass-losing gap star's previous core and the formula's. Not done, from review: SSE reference
+  rows for the gap above `M_FGB` (only self-consistency is tested there), and computing equation
+  44's C and f_bl(`M_FGB`) once per Z rather than per star (T10's bench decides).
+- **Deviations in T1.b, as built.** `math::normal_quantile` departs from Acklam's reference form in
+  three places, each to keep its error at a few ulps: above ½ it is −Q(1 − p), with 1 − p exact,
+  so the upper tail is as accurate as the lower and the mirror is exact bit for bit (the upper
+  branch point moves to where 1 − p crosses 0.02425, so 0.97575 as an `f64` takes the tail
+  branch); for 0.25 ≤ p ≤ ½ the Halley step evaluates Φ(x) − p as ½ erf(x ÷ √2) − (p − ½), since
+  the erfc form loses x's relative precision as x → 0 at ½; and in the tail the Newton step is
+  scaled by p, (Φ − p) ÷ p × √(2π) exp(x²/2 + ln p), which cannot overflow for subnormal p. The
+  10⁻¹³ bound holds for normal p (3.3 × 10⁻¹⁶ at worst against 200-bit values). Below 2⁻¹⁰²² the
+  step cannot resolve Φ(x₀) − p and Acklam's unrefined value remains: 1.8 × 10⁻⁹ at 2⁻¹⁰⁷⁴.
+  Release builds return −∞ for p ≤ 0, +∞ for p ≥ 1 and a NaN unchanged, rather than the
+  hardware's default NaN, whose sign differs by architecture; callers inverting a draw take it
+  from `Stream::uniform_open` (`Stream::uniform` can return 0). The golden's arguments are a
+  superset of the task's: 0.97575 ± 2⁻⁵⁵ rounds to 0.97575, so the upper branch point is crossed
+  at 0.97575 ± 2⁻⁵³, and 0.02425, 0.25 (the erf switch), `f64::MIN_POSITIVE` and 5 × 10⁻³²⁴ are
+  added. Strict increase is tested on steps of 2⁻⁵⁰ in p across 0.02425, 0.25, ½ and 0.97575:
+  neighbouring doubles move the quantile by less than an ulp there, so it is monotone only to
+  within its rounding. The round trip through `normal_cdf` is relative, with the complement checked
+  above ½; since `normal_cdf` is the Φ the step drives to p, accuracy is also checked against a
+  test-only transcription of Wichura's AS 241 (PPND16) to 10⁻¹³ relative.
+- **Deviations in T27, as built.** The sketch's `(key: &EventKey, tag: EventTag)` pairs are one
+  `events::EventSeries { subject, tag, key }`, built by `EventSeries::new(seed, tag, subject)`
+  (which calls `EventKey::derive`), because an `EventId` needs the subject and a key does not
+  carry it; every `events_in`, `active_at`, `event`, `phase_at` and `cycle_at` takes
+  `&EventSeries`, and plans 09, 11 and 14 build one where their text says `EventKey::derive`. A
+  tag's series goes to one construction only: bin k's count stream is cycle k's skip stream.
+  `RateModel::bound` takes the bin's `TimeWindow` (so a model needs no Δ), and both methods return
+  the new unit `events::EventsPerSecond` (`per_day`, `per_julian_year`), kept in `events` rather
+  than `units.rs` while another lane edits that file. Phases are a split `Phase { cycles: i64,
+fraction: f64 }`: `PhaseClock::base_phase` and `phase_at` return one and `time_at` takes one,
+  because an `f64` of cycles resolves only 6 × 10⁻⁵ at P = 16 s over the source horizon;
+  `LinearClock` takes a `Span` period of at least 16 s and inverts in integer arithmetic to within
+  max(1 ns, 2⁻⁵² P). `PoissonBins::new(bin_seconds, look_back_bins)` rejects Δ outside 16 s to
+  2⁴⁴ s; bins and cycles beyond the 40-bit numbers hold no events; a bin's mean above 64 fails a
+  debug assertion; thinning is one integer `Threshold::from_ratio` decision per candidate, whose
+  time is its word's top 53 bits scaled to the bin in integer nanoseconds. `MonotonePhase::new(a,
+ℓ, J)` takes ℓ in whole cycles and 1–48 octaves with ℓ × 2^(J − 1) ≤ 2⁶², and the skip comes
+  through `with_skip(SkipMark)`; added `octaves_to_span`, `LinearClock::cycles_in`,
+  `noise_bound_cycles`, `amplitude_cycles` and `event_by_id`. Octave j's lattice value at index i is
+  the first word of `event_stream(i, j + 1)`, so a phase kind draws all of a cycle's marks from
+  `event_stream(n, 0)`. Roots are an integer-nanosecond bisection, not `galaxy::quad::bisect`
+  (whose `f64` seconds resolve a millisecond at the horizon); Φ in `f64` is not monotone within a
+  few ulps of n (over microseconds at periods of years), so the bracket, the margin, the form of
+  `noise_bound_cycles` and the midpoint rule are output, and a ten-year case in the golden pins
+  them. A per-call `Lattice` cache keeps amplitudes and the last lattice values; a test checks it
+  bit for bit against cold bisection. `Phase::new` asserts a finite fraction in release builds too.
+  "Exact arithmetic" is read as integer lattice indices and fractions from integer remainders, with
+  3s² − 2s³ in plain `f64`. Tests: `events::testing` holds `partition`,
+  `assert_partition_independent` and `ConstantRate` and does not depend on `hyperion-testkit`; the
+  tests permute calls with `assert_order_independent` over the pieces, and the thread checks are
+  separate tests compiled out on wasm32-wasip1, which has no threads (x86-64 and AArch64 run them).
+  The diffusion test measures the variance, over 400 subjects, of the drift from cycle 0, tₙ − t₀ −
+  nP, at lags 4–4,096 below a top octave of 8,192 (tₙ − nP alone is stationary across subjects);
+  its fixed ratios (each fourfold lag at least doubles, 1,024 × the lag at least 64 ×) sit about
+  five standard deviations from both the expected 4 and the control's 1. The million-cycle test is
+  `#[ignore = "slow: …"]` (about 55 s under `slow-test`). Goldens `events/bins` (with a thinned
+  rate) and `events/phase` are written from unit tests, under `tests/golden/events/`, not
+  `stellar/`. Acceptance also needs `cargo test -p hyperion-sim -- events event_tags
+domain_tags_are_pinned`, since `events` alone misses the registry tests and the tags golden.
+  Bench (x86-64, criterion): ten day-long bins with thinning, 52 µs; one horizon-spanning root
+  (P = 3 yr, 16 octaves), 30 µs.

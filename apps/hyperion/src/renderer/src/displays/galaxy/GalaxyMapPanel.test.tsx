@@ -148,14 +148,15 @@ describe("GalaxyMapPanel", () => {
 
     await openUniverse(user, socket);
 
-    // Pictures 320 px wide at a device pixel ratio of 1 take the 512-pixel map.
+    // Pictures 320 px wide at a device pixel ratio of 1 take the 256-pixel map, drawn 1.25 times
+    // larger.
     expect(
       socket
         .requestsOfKind("density_map")
         .map(({ body }) => [body.view, body.population, body.resolution]),
     ).toEqual([
-      ["face_on", "all", 512],
-      ["edge_on", "all", 512],
+      ["face_on", "all", 256],
+      ["edge_on", "all", 256],
     ]);
   });
 

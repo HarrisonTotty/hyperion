@@ -53,6 +53,31 @@ const PROPERTY_DEFAULTS: Readonly<Record<string, unknown>> = {
   wordSpacing: "0px",
 };
 
+/**
+ * The context members a spatial display's canvas never uses: text, which stays in the DOM (plan
+ * 05, D15); translucency, blending, blurs, shadows and gradients, which the guide bans from the
+ * console; and pattern fills, of which hazard striping is the only one.
+ *
+ * @remarks
+ * Kept here rather than in the tests of `spatial/`, whose sources are checked by `grep` to name
+ * none of them.
+ */
+export const BANNED_SPATIAL_MEMBERS: ReadonlyArray<string> = [
+  "fillText",
+  "strokeText",
+  "globalAlpha",
+  "globalCompositeOperation",
+  "filter",
+  "shadowBlur",
+  "shadowColor",
+  "shadowOffsetX",
+  "shadowOffsetY",
+  "createLinearGradient",
+  "createRadialGradient",
+  "createConicGradient",
+  "createPattern",
+];
+
 /** What `createImageData` and `getImageData` return: a blank picture of the size asked for. */
 function blankImageData(args: ReadonlyArray<unknown>): {
   width: number;
@@ -108,9 +133,13 @@ function returnValue(name: string, args: ReadonlyArray<unknown>): unknown {
  * `createImageData` a blank picture, a gradient an object that accepts colour stops. One recorder
  * may serve several canvases, one context each, as a browser gives; every record names its canvas.
  *
+ * A context made for no canvas (`contextFor()`) has a `canvas` of `null`, so code that reads the
+ * canvas's size, as `paint` does, is given a canvas's context instead.
+ *
  * @example
- * const recorder = new RecordingContext2D();
- * paint(recorder.contextFor(), drawList, tokens);
+ * const recorder = stubCanvas();
+ * const canvas = document.createElement("canvas");
+ * canvas.getContext("2d")?.fillRect(0, 0, 10, 10);
  * expect(recorder.names()).not.toContain("fillText");
  */
 export class RecordingContext2D {

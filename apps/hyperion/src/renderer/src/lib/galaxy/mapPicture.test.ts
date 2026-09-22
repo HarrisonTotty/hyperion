@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAP_RESOLUTIONS_PX,
+  MAX_UPSCALE,
   mapResolutionFor,
   paintLevels,
   reducedLevels,
@@ -24,19 +25,32 @@ describe("mapResolutionFor", () => {
     expect(MAP_RESOLUTIONS_PX).toEqual([128, 256, 512, 1_024]);
   });
 
+  it("enlarges a map by at most 1.25", () => {
+    expect(MAX_UPSCALE).toBe(1.25);
+  });
+
   it.each([
     [1, 128],
     [128, 128],
-    [129, 256],
+    [160, 128],
+    [161, 256],
     [244, 256],
-    [256, 256],
-    [320, 512],
-    [512, 512],
-    [733, 1_024],
-    [1_024, 1_024],
+    [320, 256],
+    [321, 512],
+    [562, 512],
+    [640, 512],
+    [641, 1_024],
+    [1_280, 1_024],
     [1_600, 1_024],
-  ])("asks for the narrowest map at least %i device pixels wide: %i", (backingPx, resolution) => {
-    expect(mapResolutionFor(backingPx)).toBe(resolution);
+  ])(
+    "asks, for a picture %i device pixels wide, for the narrowest map that covers it enlarged at most 1.25 times: %i",
+    (backingPx, resolution) => {
+      expect(mapResolutionFor(backingPx)).toBe(resolution);
+    },
+  );
+
+  it("asks for 512 pixels for the 562-pixel pictures of 1920 × 1080", () => {
+    expect(mapResolutionFor(562)).toBe(512);
   });
 });
 

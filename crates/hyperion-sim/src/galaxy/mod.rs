@@ -20,10 +20,13 @@ pub mod bounds;
 pub mod consts;
 pub mod fates;
 pub mod fields;
+pub mod frame;
 pub mod imf;
 pub mod params;
+pub mod placement;
 pub mod potential;
 pub mod quad;
+pub mod query;
 pub mod shares;
 pub mod special;
 

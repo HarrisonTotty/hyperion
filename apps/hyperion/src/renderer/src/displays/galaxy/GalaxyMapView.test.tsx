@@ -84,6 +84,15 @@ function renderView(spec: ViewSpec = {}) {
   };
 }
 
+/** Answers the face-on request with an 8 × 8 map whose one bright pixel is at the ceiling. */
+async function answerBrightFaceOn(socket: FakeWebSocket): Promise<void> {
+  const codes = Array<number>(64).fill(1);
+  codes[7] = 255;
+  await server(() => {
+    socket.serverAnswers("density_map", () => aDensityMap({ codes, widthPx: 8, heightPx: 8 }));
+  });
+}
+
 async function answerFaceOn(socket: FakeWebSocket): Promise<void> {
   await server(() => {
     socket.serverAnswers("density_map", (body) =>
@@ -103,6 +112,39 @@ function isImage(value: unknown): value is { readonly data: Uint8ClampedArray } 
     "data" in value &&
     value.data instanceof Uint8ClampedArray
   );
+}
+
+/**
+ * The straight strokes of a drawn mark, each as its run across and down, read from its path's
+ * `M x y` and `L x y` or `H x`, `V y` commands.
+ */
+function strokes(mark: HTMLElement): Array<[number, number]> {
+  const d = mark.querySelector(".map-view__mark-line")?.getAttribute("d") ?? "";
+  const runs: Array<[number, number]> = [];
+  let at: [number, number] = [0, 0];
+  for (const [, command = "", args = ""] of d.matchAll(/([MLHV])([^MLHV]*)/g)) {
+    const numbers = args
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    const [first = 0, second = 0] = numbers;
+    let next: [number, number];
+    switch (command) {
+      case "H":
+        next = [first, at[1]];
+        break;
+      case "V":
+        next = [at[0], first];
+        break;
+      default:
+        next = [first, second];
+    }
+    if (command !== "M") {
+      runs.push([next[0] - at[0], next[1] - at[1]]);
+    }
+    at = next;
+  }
+  return runs;
 }
 
 /** The index in the recording of the first record that matches. */
@@ -140,9 +182,10 @@ describe("GalaxyMapView", () => {
   it.each([
     [100, 1, 128],
     [244, 1, 256],
-    [256, 1, 256],
-    [320, 1, 512],
-    [300, 2, 1_024],
+    [320, 1, 256],
+    [330, 1, 512],
+    [562, 1, 512],
+    [300, 2, 512],
     [733, 1.5, 1_024],
   ])(
     "asks, for a picture %i px wide at a device pixel ratio of %f, for the %i-pixel map",
@@ -159,7 +202,7 @@ describe("GalaxyMapView", () => {
     const { socket, rerender } = renderView({ pictureWidthPx: 244 });
     const [first] = socket.requestsOfKind("density_map");
 
-    rerender({ pictureWidthPx: 300 });
+    rerender({ pictureWidthPx: 330 });
 
     expect(socket.cancelledIds()).toEqual([first?.id]);
     expect(socket.requestsOfKind("density_map").map(({ body }) => body.resolution)).toEqual([
@@ -335,29 +378,132 @@ describe("GalaxyMapView", () => {
     await answerFaceOn(socket);
     recorder.clear();
 
-    rerender({ pictureWidthPx: 300 });
+    // 400 and 450 device pixels both take the 512-pixel map.
+    rerender({ pictureWidthPx: 450 });
 
     expect(recorder.calls("putImageData")).toEqual([]);
     expect(recorder.calls("drawImage").map(({ args }) => args.slice(1))).toEqual([
-      [0, 0, 300, 300],
+      [0, 0, 450, 450],
     ]);
   });
 
   it("draws again at the new backing size when the device pixel ratio changes", async () => {
+    const { socket, recorder, rerender } = renderView({ pictureWidthPx: 400 });
+    await answerFaceOn(socket);
+    recorder.clear();
+
+    // 600 device pixels still take the 512-pixel map, so nothing is asked for again.
+    rerender({ pictureWidthPx: 400, devicePixelRatio: 1.5 });
+
+    const canvas = screen.getByRole("application", { name: "Galaxy map, face-on" });
+    expect(canvas).toHaveAttribute("width", "600");
+    expect(recorder.calls("drawImage").map(({ args }) => args.slice(1))).toEqual([
+      [0, 0, 600, 600],
+    ]);
+    expect(recorder.calls("putImageData")).toEqual([]);
+    expect(socket.requestsOfKind("density_map")).toHaveLength(1);
+  });
+
+  it("keeps the picture, stale, while a map of the new resolution is on its way", async () => {
+    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+
+    // 300 device pixels take the 256-pixel map, 400 the 512-pixel one.
+    rerender({ pictureWidthPx: 400 });
+
+    expect(socket.requestsOfKind("density_map").map(({ body }) => body.resolution)).toEqual([
+      256, 512,
+    ]);
+    expect(
+      screen.getByRole("application", { name: "Galaxy map, face-on, stale" }),
+    ).toBeInTheDocument();
+    expect(within(faceOn()).getByRole("status")).toHaveTextContent("PENDING");
+  });
+
+  it("draws the stale picture at the new size", async () => {
     const { socket, recorder, rerender } = renderView({ pictureWidthPx: 300 });
     await answerFaceOn(socket);
     recorder.clear();
 
-    // 450 device pixels still take the 512-pixel map, so nothing is asked for again.
-    rerender({ pictureWidthPx: 300, devicePixelRatio: 1.5 });
+    rerender({ pictureWidthPx: 400 });
 
-    const canvas = screen.getByRole("application", { name: "Galaxy map, face-on" });
-    expect(canvas).toHaveAttribute("width", "450");
     expect(recorder.calls("drawImage").map(({ args }) => args.slice(1))).toEqual([
-      [0, 0, 450, 450],
+      [0, 0, 400, 400],
     ]);
-    expect(recorder.calls("putImageData")).toEqual([]);
-    expect(socket.requestsOfKind("density_map")).toHaveLength(1);
+  });
+
+  it("paints the stale picture up to --text-muted, not --text", async () => {
+    const { socket, recorder, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerBrightFaceOn(socket);
+    recorder.clear();
+
+    rerender({ pictureWidthPx: 400 });
+
+    // The ceiling's pixel is --text-muted, #8a9db3, where a current picture has --text, #c8d6e5.
+    const pixels = putPixels(recorder);
+    const reds = Array.from({ length: 64 }, (_, pixel) => pixels[pixel * 4] ?? 0);
+    expect(Math.max(...reds)).toBe(0x8a);
+  });
+
+  it("marks the stale picture with a trailing S, and its density reading too", async () => {
+    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+
+    rerender({ pictureWidthPx: 400 });
+
+    const view = faceOn();
+    expect(within(view).getAllByText("S")).toHaveLength(2);
+    expect(within(view).getByText("CURSOR DENSITY").parentElement).toHaveTextContent(/S\s*stale$/);
+  });
+
+  it("replaces the stale picture when the new map arrives", async () => {
+    const { socket, recorder, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerBrightFaceOn(socket);
+    rerender({ pictureWidthPx: 400 });
+    recorder.clear();
+
+    await answerBrightFaceOn(socket);
+
+    expect(screen.getByRole("application", { name: "Galaxy map, face-on" })).toBeInTheDocument();
+    expect(within(faceOn()).queryByText("S")).not.toBeInTheDocument();
+    expect(within(faceOn()).queryByRole("status")).not.toBeInTheDocument();
+    const reds = Array.from({ length: 64 }, (_, pixel) => putPixels(recorder)[pixel * 4] ?? 0);
+    expect(Math.max(...reds)).toBe(0xc8);
+  });
+
+  it("keeps the stale picture beside a failure of the new map, with RETRY", async () => {
+    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    rerender({ pictureWidthPx: 400 });
+    const [, second] = socket.requestsOfKind("density_map");
+
+    await server(() => {
+      socket.serverRejects(second?.id ?? -1, {
+        code: "queue_full",
+        message: "the bulk queue is full",
+        field: null,
+      });
+    });
+
+    expect(
+      screen.getByRole("application", { name: "Galaxy map, face-on, stale" }),
+    ).toBeInTheDocument();
+    expect(within(faceOn()).getByRole("status")).toHaveTextContent(
+      "REJECTED: the bulk queue is full",
+    );
+    expect(within(faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+  });
+
+  it("keeps no picture of another population, which is other data", async () => {
+    const { socket, rerender } = renderView();
+    await answerFaceOn(socket);
+
+    rerender({ population: "young" });
+
+    expect(
+      screen.queryByRole("application", { name: /Galaxy map, face-on/ }),
+    ).not.toBeInTheDocument();
+    expect(within(faceOn()).getByRole("status")).toHaveTextContent("PENDING");
   });
 
   it("cancels the request in flight and asks again when the population changes", () => {
@@ -553,7 +699,7 @@ describe("GalaxyMapView", () => {
     expect(reading).toHaveAttribute("aria-atomic", "true");
   });
 
-  it("marks the chart's centre with its own reticle, apart from the cursor", async () => {
+  it("marks the chart's centre with a mark of its own, apart from the cursor", async () => {
     const { socket } = renderView({ cursorLy: [0, 0, 0], centreLy: [32_768, -32_768, 0] });
 
     await answerFaceOn(socket);
@@ -567,6 +713,19 @@ describe("GalaxyMapView", () => {
       left: "50%",
       top: "50%",
     });
+  });
+
+  it("draws the chart's centre as a small diagonal cross, not the cursor's upright one", async () => {
+    const { socket } = renderView({ cursorLy: [0, 0, 0], centreLy: [0, 0, 0] });
+
+    await answerFaceOn(socket);
+
+    // Every stroke of the centre's cross runs corner to corner; the cursor's run across and down.
+    const centre = strokes(within(faceOn()).getByRole("img", { name: "Chart centre" }));
+    const cursor = strokes(within(faceOn()).getByRole("img", { name: "Cursor" }));
+    expect(centre).toHaveLength(2);
+    expect(centre.every(([dx, dy]) => Math.abs(dx) === Math.abs(dy) && dx !== 0)).toBe(true);
+    expect(cursor.every(([dx, dy]) => dx === 0 || dy === 0)).toBe(true);
   });
 
   it("marks no chart centre before one is chosen", async () => {

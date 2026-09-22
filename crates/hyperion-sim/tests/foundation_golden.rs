@@ -140,6 +140,32 @@ const CIRCULAR: &[f64] = &[
 /// `asin`, and the ends.
 const UNIT_INTERVAL: &[f64] = &[0.0, 1e-10, 0.3, -0.49, 0.5, 0.7, 0.98, 0.999_999, 1.0, -1.0];
 
+/// Acklam's branch point of the normal quantile, and its mirror: 1 − 0.97575 lies just below
+/// 0.02425, so `NORMAL_QUANTILE_HIGH` takes the tail branch and the double below it the central one.
+const NORMAL_QUANTILE_LOW: f64 = 0.024_25;
+const NORMAL_QUANTILE_HIGH: f64 = 0.975_75;
+
+/// Arguments of the normal quantile: ½; both of Acklam's branch points crossed, 0.02425 ± 2⁻⁵⁵
+/// (eight ulps) and 0.97575 ± 2⁻⁵³ (one ulp); the switch from erfc to erf at 0.25; 10⁻³ and its
+/// mirror; the tail down to 10⁻¹⁰, the smallest normal and the smallest subnormal, where Φ
+/// underflows gradually; and the last double below 1.
+const NORMAL_QUANTILE: &[f64] = &[
+    0.5,
+    NORMAL_QUANTILE_LOW - f64::EPSILON / 8.0,
+    NORMAL_QUANTILE_LOW,
+    NORMAL_QUANTILE_LOW + f64::EPSILON / 8.0,
+    NORMAL_QUANTILE_HIGH - f64::EPSILON / 2.0,
+    NORMAL_QUANTILE_HIGH,
+    NORMAL_QUANTILE_HIGH + f64::EPSILON / 2.0,
+    0.25,
+    0.001,
+    0.999,
+    1e-10,
+    f64::MIN_POSITIVE,
+    5e-324,
+    1.0 - f64::EPSILON / 2.0,
+];
+
 const UNARY: &[Unary] = &[
     ("sin", math::sin, CIRCULAR),
     ("cos", math::cos, CIRCULAR),
@@ -309,6 +335,7 @@ const UNARY: &[Unary] = &[
         math::gamma,
         &[0.5, 1.0, 5.0, 10.5, 1e-10, 0.1, -0.5, -2.5, 171.0, 171.5],
     ),
+    ("normal_quantile", math::normal_quantile, NORMAL_QUANTILE),
 ];
 
 const BINARY: &[Binary] = &[

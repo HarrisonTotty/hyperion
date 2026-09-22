@@ -208,6 +208,132 @@ domain_tags! {
 
     /// A progenitor's orbit: apocentre, pericentre, inclination, node, phase.
     GALAXY_PARAMS_ACCRETION_PROGENITOR_ORBIT: Galaxy = "galaxy.params.accretion.progenitor.orbit";
+
+    // Plan 03: placement. The cell's tag is keyed by the cell's word (`SystemId::cell_word`), every
+    // other tag by the candidate's or the system's ID.
+
+    /// A generation cell's candidate count, one Poisson draw.
+    GALAXY_CELL_CANDIDATES: Cell = "galaxy.cell.candidates";
+
+    /// A candidate's position in its cell: words 0–2, one per axis.
+    GALAXY_CANDIDATE_POSITION: System = "galaxy.candidate.position";
+
+    /// A candidate's acceptance mark, word 0, which thins it or picks its component.
+    GALAXY_CANDIDATE_ACCEPT: System = "galaxy.candidate.accept";
+
+    /// An accepted system's primary initial mass, within its layer's band.
+    SYSTEM_PRIMARY_MASS: System = "system.primary_mass";
+
+    /// An accepted system's signed age at the epoch.
+    SYSTEM_AGE: System = "system.age";
+
+    /// A system's velocity at the epoch: reserved for plan 08 and opened by nothing before it.
+    SYSTEM_VELOCITY: System = "system.velocity";
+
+    // Plan 06: the stars. Every `star.*` draw tag has scope `Body`, is opened with
+    // `ObjectKey::from(BodyId)` (body 0 is a system's primary) and holds one fixed draw of
+    // `stellar::draws::StarDraws`; attempt k of a redraw starts at word 64k.
+
+    /// The Reimers mass-loss efficiency η: one standard normal.
+    STAR_ETA: Body = "star.eta";
+
+    /// The rotation rank: one uniform.
+    STAR_ROTATION: Body = "star.rotation";
+
+    /// Whether a fossil magnetic field is present, and its strength: one mark.
+    STAR_MAGNETISM: Body = "star.magnetism";
+
+    /// The spin axis: one isotropic direction (two words).
+    STAR_SPIN_AXIS: Body = "star.spin_axis";
+
+    /// The lifetime of the protostellar disc: one uniform.
+    STAR_DISC_LIFETIME: Body = "star.disc_lifetime";
+
+    /// The provisional companion-stripped mark (plan 11 conditions its binaries on it): one mark.
+    STAR_STRIPPED: Body = "star.stripped";
+
+    /// Neutron star or black hole after core collapse: one mark.
+    STAR_REMNANT_TYPE: Body = "star.remnant.type";
+
+    /// Whether a black hole forms by complete fallback: one mark.
+    STAR_REMNANT_FALLBACK: Body = "star.remnant.fallback";
+
+    /// The scatter of the remnant's mass: one standard normal.
+    STAR_REMNANT_MASS: Body = "star.remnant.mass";
+
+    /// The ordinary kick's score factor: successive standard normals, the first acceptable used.
+    STAR_KICK_SCORE: Body = "star.kick.score";
+
+    /// Whether a companion-stripped progenitor takes the low kick mode: one mark.
+    STAR_KICK_MODE: Body = "star.kick.mode";
+
+    /// The low kick mode's three Maxwellian components: three standard normals.
+    STAR_KICK_LOW: Body = "star.kick.low";
+
+    /// The kick's direction: one isotropic direction (two words).
+    STAR_KICK_DIRECTION: Body = "star.kick.direction";
+
+    /// A white dwarf's atmosphere, hydrogen or helium: one mark.
+    STAR_WD_ATMOSPHERE: Body = "star.wd.atmosphere";
+
+    /// Whether a cool helium-atmosphere white dwarf shows carbon (DQ): one mark.
+    STAR_WD_CARBON: Body = "star.wd.carbon";
+
+    /// Whether a white dwarf is polluted by metals: one mark.
+    STAR_WD_METALS: Body = "star.wd.metals";
+
+    /// A neutron star's birth spin period: successive standard normals, the first acceptable used.
+    STAR_NS_SPIN: Body = "star.ns.spin";
+
+    /// A neutron star's birth dipole field: one standard normal.
+    STAR_NS_FIELD: Body = "star.ns.field";
+
+    /// A neutron star's spin axis (two words) and magnetic inclination (one uniform).
+    STAR_NS_GEOMETRY: Body = "star.ns.geometry";
+
+    /// A pulsar's rotational phase at the epoch: one uniform.
+    STAR_NS_PHASE: Body = "star.ns.phase";
+
+    /// A black hole's spin: one standard normal.
+    STAR_BH_SPIN: Body = "star.bh.spin";
+
+    /// A planetary nebula's expansion speed: one uniform.
+    STAR_NEBULA: Body = "star.nebula";
+
+    // Plan 06, event tags (P06.T27.a): each backs an entry of `id/event_tags.rs` in the block
+    // 0x0100–0x01FF, numbered in this order. An event's marks come from its own event stream, so
+    // no kind has a second tag.
+
+    /// Flares of stars with convective envelopes (Poisson bins), event tag `0x0100`.
+    STAR_EV_FLARE: Event = "star.ev.flare";
+
+    /// Glitches of Crab-like pulsars (Poisson bins), event tag `0x0101`.
+    STAR_EV_GLITCH: Event = "star.ev.glitch";
+
+    /// Glitches of Vela-like pulsars (monotone phase), event tag `0x0102`.
+    STAR_EV_GLITCH_CYCLE: Event = "star.ev.glitch_cycle";
+
+    /// A magnetar's active episodes (Poisson bins), event tag `0x0103`.
+    STAR_EV_MAGNETAR_EPISODE: Event = "star.ev.magnetar_episode";
+
+    /// A magnetar's short bursts within an episode (Poisson bins), event tag `0x0104`.
+    STAR_EV_MAGNETAR_BURST: Event = "star.ev.magnetar_burst";
+
+    /// A magnetar's giant flares (Poisson bins), event tag `0x0105`.
+    STAR_EV_MAGNETAR_GIANT: Event = "star.ev.magnetar_giant";
+
+    /// FU Orionis outbursts of young stars (Poisson bins), event tag `0x0106`.
+    STAR_EV_FU_ORIONIS: Event = "star.ev.fu_orionis";
+
+    /// Giant eruptions of luminous blue variables (Poisson bins), event tag `0x0107`.
+    STAR_EV_LBV_ERUPTION: Event = "star.ev.lbv_eruption";
+
+    /// Thermal pulses on the asymptotic giant branch (monotone phase), event tag `0x0108`.
+    STAR_EV_THERMAL_PULSE: Event = "star.ev.thermal_pulse";
+
+    /// The cycle-keyed irregularity of pulsating variables, S Doradus cycles included (monotone
+    /// phase), event tag `0x0109`.
+    STAR_VAR_CYCLE: Event = "star.var.cycle";
 }
 
 #[cfg(test)]
@@ -221,6 +347,39 @@ mod tests {
                 assert_ne!(a.name(), b.name());
                 assert_ne!(a.hash(), b.hash(), "{} and {}", a.name(), b.name());
             }
+        }
+    }
+
+    #[test]
+    fn plan_06_registers_its_star_draw_tags_with_body_scope() {
+        let star = [
+            STAR_ETA,
+            STAR_ROTATION,
+            STAR_MAGNETISM,
+            STAR_SPIN_AXIS,
+            STAR_DISC_LIFETIME,
+            STAR_STRIPPED,
+            STAR_REMNANT_TYPE,
+            STAR_REMNANT_FALLBACK,
+            STAR_REMNANT_MASS,
+            STAR_KICK_SCORE,
+            STAR_KICK_MODE,
+            STAR_KICK_LOW,
+            STAR_KICK_DIRECTION,
+            STAR_WD_ATMOSPHERE,
+            STAR_WD_CARBON,
+            STAR_WD_METALS,
+            STAR_NS_SPIN,
+            STAR_NS_FIELD,
+            STAR_NS_GEOMETRY,
+            STAR_NS_PHASE,
+            STAR_BH_SPIN,
+            STAR_NEBULA,
+        ];
+        for tag in star {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Body, "{}", tag.name());
+            assert!(tag.name().starts_with("star."), "{}", tag.name());
+            assert!(ALL.contains(&tag));
         }
     }
 

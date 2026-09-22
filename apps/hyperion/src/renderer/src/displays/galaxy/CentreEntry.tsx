@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { formatBearingDeg, formatLengthLy, formatNumber, formatSigned } from "../../lib/format";
 import { type CentreLy, ROOT_CUBE_HALF_LY } from "../../lib/galaxy/model";
+import { isTextEntry } from "../../lib/textEntry";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../spatial/frame";
 import { vec3 } from "../../spatial/vec3";
 
@@ -109,29 +110,6 @@ function withAxis(cursorLy: CentreLy, axis: Axis, valueLy: number): CentreLy {
     return [valueLy, yLy, zLy];
   }
   return axis === 1 ? [xLy, valueLy, zLy] : [xLy, yLy, valueLy];
-}
-
-/** Input types that take no text, on which a letter key is free to be a command. */
-const NON_TEXT_INPUTS: ReadonlySet<string> = new Set([
-  "button",
-  "checkbox",
-  "color",
-  "file",
-  "image",
-  "radio",
-  "range",
-  "reset",
-  "submit",
-]);
-
-/** Whether a key press lands in a field that takes text, where a letter is typed, not a command. */
-function isTextEntry(target: EventTarget | null): boolean {
-  return (
-    (target instanceof HTMLInputElement && !NON_TEXT_INPUTS.has(target.type)) ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
 }
 
 /**

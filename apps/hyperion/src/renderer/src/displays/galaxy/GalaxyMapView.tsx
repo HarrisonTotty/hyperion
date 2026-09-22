@@ -205,13 +205,37 @@ function sameBytes(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
-/** The ramp from the colour tokens in effect at `element`: `--surface-0` up to `--text`. */
-function rampAt(element: Element): Uint8ClampedArray {
+/**
+ * The ramps a map is painted on, from the colour tokens in effect at `element`: `--surface-0` up to
+ * `--text` for a current picture, and up to `--text-muted` for a stale one, as the guide shows a
+ * stale value in `--text-muted` ("Data states").
+ */
+interface Ramps {
+  readonly current: Uint8ClampedArray;
+  readonly stale: Uint8ClampedArray;
+}
+
+function rampsAt(element: Element): Ramps {
   const style = getComputedStyle(element);
-  return buildRamp(
-    parseHexColour(style.getPropertyValue("--surface-0")),
-    parseHexColour(style.getPropertyValue("--text")),
-  );
+  const background = parseHexColour(style.getPropertyValue("--surface-0"));
+  return {
+    current: buildRamp(background, parseHexColour(style.getPropertyValue("--text"))),
+    stale: buildRamp(background, parseHexColour(style.getPropertyValue("--text-muted"))),
+  };
+}
+
+function sameRamps(a: Ramps, b: Ramps): boolean {
+  return sameBytes(a.current, b.current) && sameBytes(a.stale, b.stale);
+}
+
+function sameQuestion(a: MapQuestion, b: MapQuestion): boolean {
+  return a.universe === b.universe && a.view === b.view && a.population === b.population;
+}
+
+/** The last picture a view drew, with the question it answered. */
+interface ShownPicture {
+  readonly picture: MapPicture;
+  readonly question: MapQuestion;
 }
 
 /** RGBA bytes to put on a canvas of their own size, which is then drawn at the backing size. */
@@ -292,24 +316,44 @@ function densityUnder(picture: MapPicture, view: MapView, cursorLy: CentreLy): C
 
 interface CursorDensityReadingProps {
   readonly density: CursorDensity;
+  /** Whether it is read from a stale picture: then in `--text-muted` with a trailing `S`. */
+  readonly stale: boolean;
+}
+
+/** The guide's stale mark, after a stale value, named for assistive technology. */
+function StaleMark() {
+  return (
+    <>
+      {" "}
+      <span className="stale-mark" aria-hidden="true">
+        S
+      </span>
+      <span className="visually-hidden">stale</span>
+    </>
+  );
 }
 
 /** The column density under the cursor: a value, `BELOW FLOOR`, or an em dash off the map. */
-function CursorDensityReading({ density }: CursorDensityReadingProps) {
+function CursorDensityReading({ density, stale }: CursorDensityReadingProps) {
   let value: ReactNode;
   switch (density.kind) {
     case "density":
       value = (
         <>
-          <span className="field__value map-view__density">
+          <span className={`field__value map-view__density${stale ? " stale" : ""}`}>
             {formatSci(10 ** density.log10PerLy2)}
           </span>{" "}
           <span className="map-view__unit">SYSTEMS/ly²</span>
+          {stale ? <StaleMark /> : null}
         </>
       );
       break;
     case "below_floor":
-      value = <span>BELOW FLOOR</span>;
+      value = (
+        <span className={stale ? "stale" : undefined}>
+          BELOW FLOOR{stale ? <StaleMark /> : null}
+        </span>
+      );
       break;
     case "off_map":
       value = <span className="readout__missing">—</span>;
@@ -327,14 +371,16 @@ function CursorDensityReading({ density }: CursorDensityReadingProps) {
 type MarkKind = "cursor" | "centre";
 
 /**
- * Each mark's shape and name. The cursor is a thin cross with a gap at its point, in the selection
- * colour; the chart's centre four corner brackets in `--text`, a shape the cross cannot be taken
- * for. Both are cased in the background colour, so that they keep their contrast over the
- * brightest part of the map.
+ * Each mark's shape and name, one meaning to a shape. The cursor is a thin upright cross with a gap
+ * at its point, in the selection colour. The chart's centre is a small diagonal cross in `--text`:
+ * not the bracket reticle, which marks a selection on a spatial display, and turned 45° from the
+ * cursor, so that it reads apart from it, its arms clear of the cursor's even where the cursor
+ * stands on the centre, as it does after `C`. Both are cased in the background colour, so that
+ * they keep their contrast over the brightest part of the map.
  */
 const MARKS: Readonly<Record<MarkKind, { readonly path: string; readonly name: string }>> = {
   cursor: { path: "M0 12H9M15 12H24M12 0V9M12 15V24", name: "Cursor" },
-  centre: { path: "M3 9V3H9M15 3H21V9M21 15V21H15M9 21H3V15", name: "Chart centre" },
+  centre: { path: "M8 8L16 16M16 8L8 16", name: "Chart centre" },
 };
 
 const PEG_ARROW: Readonly<Record<"above" | "below", string>> = { above: "↑", below: "↓" };
@@ -392,7 +438,7 @@ interface GalaxyMapViewProps {
   readonly cursorLy: CentreLy;
   /** Moves the cursor, after a pick on the picture or an arrow key on it. */
   readonly onCursor: (cursorLy: CentreLy) => void;
-  /** The chart's centre, marked with a bracket reticle, or `null` before one is chosen. */
+  /** The chart's centre, marked with a small diagonal cross, or `null` before one is chosen. */
   readonly centreLy: CentreLy | null;
 }
 
@@ -418,7 +464,7 @@ function MapViewBody({
   const pictureHeightPx = pictureWidthPx / SCREEN_ASPECT[view];
   const backingWidthPx = Math.round(pictureWidthPx * devicePixelRatio);
   const backingHeightPx = Math.round(pictureHeightPx * devicePixelRatio);
-  // The narrowest map that has a pixel for every device pixel of the picture's width.
+  // The narrowest map that, enlarged at most 1.25 times, covers the picture's device pixels.
   const resolution = mapResolutionFor(backingWidthPx);
   const body: RequestOf<"density_map"> | null =
     backingWidthPx > 0
@@ -432,19 +478,33 @@ function MapViewBody({
     () => decodeMap(map, { universe, view, population }),
     [map, universe, view, population],
   );
-  const picture = decoding.kind === "ok" ? decoding.picture : null;
+  const answered = decoding.kind === "ok" ? decoding.picture : null;
+
+  // The last picture drawn stays, stale, while a map of another resolution for the same question is
+  // on its way, or failed: a resize past a resolution step never blanks the view. A map of another
+  // universe, view or population is other data, and is waited for from `PENDING`.
+  const question: MapQuestion = { universe, view, population };
+  const [shown, setShown] = useState<ShownPicture | null>(null);
+  if (answered !== null && shown?.picture !== answered) {
+    setShown({ picture: answered, question });
+  }
+  const stale = answered === null && shown !== null && sameQuestion(shown.question, question);
+  const picture = answered ?? (stale ? shown.picture : null);
 
   const rootRef = useRef<HTMLElement>(null);
-  const [ramp, setRamp] = useState<Uint8ClampedArray | null>(null);
+  const [ramps, setRamps] = useState<Ramps | null>(null);
   // The tokens are read when the view is mounted and each time its display is shown again, when
-  // `Activity` runs its effects anew; an unchanged ramp keeps its identity, and paints nothing.
+  // `Activity` runs its effects anew; unchanged ramps keep their identity, and paint nothing.
   useLayoutEffect(() => {
     if (rootRef.current === null) {
       return;
     }
-    const current = rampAt(rootRef.current);
-    setRamp((previous) => (previous !== null && sameBytes(previous, current) ? previous : current));
+    const current = rampsAt(rootRef.current);
+    setRamps((previous) =>
+      previous !== null && sameRamps(previous, current) ? previous : current,
+    );
   }, []);
+  const ramp = ramps === null ? null : stale ? ramps.stale : ramps.current;
   // Where the backing store has room for every map pixel, the map's own pixels are painted once
   // and drawn larger without smoothing, which repeats pixels and drops none, and kept across a
   // resize that still has room; otherwise the map is reduced to the backing store, afresh for each
@@ -538,14 +598,14 @@ function MapViewBody({
       : markOnPicture(picture.geometry, cursorInView(view, centreLy));
   const axes = AXIS_LABELS[view];
 
-  let content: ReactNode;
+  let status: ReactNode;
   switch (decoding.kind) {
     case "none":
-      content = <RequestStatus state={state} onRetry={onRetry} />;
+      status = <RequestStatus state={state} onRetry={onRetry} />;
       break;
     case "invalid":
       // A server fault, like a failed request, so it reads in caution and offers RETRY.
-      content = (
+      status = (
         <StatusLine
           text={`MAP DATA INVALID: ${decoding.cause}`}
           standing="fault"
@@ -554,31 +614,42 @@ function MapViewBody({
       );
       break;
     case "ok":
-      content = (
-        <div className="map-view__picture">
-          <canvas
-            ref={canvasRef}
-            className="map-view__canvas"
-            width={backingWidthPx}
-            height={backingHeightPx}
-            // A picture to pick from and move a cursor over with the arrow keys, which no native
-            // element is; its title, axes and legend are text in the DOM around it. The rule
-            // counts a canvas as interactive, which HTML does not; the plan names this role.
-            // oxlint-disable-next-line jsx-a11y/no-interactive-element-to-noninteractive-role
-            role="application"
-            tabIndex={0}
-            aria-label={`Galaxy map, ${VIEW_NAME[view]}`}
-            aria-describedby={hintId}
-            onClick={pick}
-            onKeyDown={step}
-          />
-          {centrePlace === null ? null : <MapMark kind="centre" view={view} place={centrePlace} />}
-          {cursorPlace === null ? null : <MapMark kind="cursor" view={view} place={cursorPlace} />}
-          <span className="map-view__axis map-view__axis--across">{axes.across}</span>
-          <span className={`map-view__axis map-view__axis--${axes.end}`}>{axes.vertical}</span>
-        </div>
-      );
+      status = null;
       break;
+  }
+
+  let content: ReactNode = status;
+  if (picture !== null) {
+    content = (
+      <div className="map-view__picture">
+        <canvas
+          ref={canvasRef}
+          className="map-view__canvas"
+          width={backingWidthPx}
+          height={backingHeightPx}
+          // A picture to pick from and move a cursor over with the arrow keys, which no native
+          // element is; its title, axes and legend are text in the DOM around it. The rule
+          // counts a canvas as interactive, which HTML does not; the plan names this role.
+          // oxlint-disable-next-line jsx-a11y/no-interactive-element-to-noninteractive-role
+          role="application"
+          tabIndex={0}
+          aria-label={`Galaxy map, ${VIEW_NAME[view]}${stale ? ", stale" : ""}`}
+          aria-describedby={hintId}
+          onClick={pick}
+          onKeyDown={step}
+        />
+        {centrePlace === null ? null : <MapMark kind="centre" view={view} place={centrePlace} />}
+        {cursorPlace === null ? null : <MapMark kind="cursor" view={view} place={cursorPlace} />}
+        <span className="map-view__axis map-view__axis--across">{axes.across}</span>
+        <span className={`map-view__axis map-view__axis--${axes.end}`}>{axes.vertical}</span>
+        {stale ? (
+          // The guide's trailing stale mark, after the picture; the canvas's name says it too.
+          <span className="stale-mark map-view__stale" aria-hidden="true">
+            S
+          </span>
+        ) : null}
+      </div>
+    );
   }
 
   return (
@@ -594,11 +665,12 @@ function MapViewBody({
             </p>
           )}
         </div>
+        {stale ? status : null}
         {view === "face_on" ? (
           <p className="map-view__rotation">ROTATION COUNTER-CLOCKWISE</p>
         ) : null}
         {picture === null ? null : (
-          <CursorDensityReading density={densityUnder(picture, view, cursorLy)} />
+          <CursorDensityReading density={densityUnder(picture, view, cursorLy)} stale={stale} />
         )}
         {picture === null || ramp === null ? null : (
           <DensityLegend
@@ -619,12 +691,16 @@ function MapViewBody({
  *
  * @remarks
  * The picture is `pictureWidthPx` wide, in its view's proportions. It asks for the narrowest
- * `density_map` at 8 bits (plan 05, design note D5) that has a pixel for every device pixel across
- * the picture, allowing it two minutes, and shows the request's state until it is answered, asking
- * again when the picture grows or shrinks past a resolution the protocol offers. A map that is not
- * the one asked for, is not of the M1 extents, cannot be drawn or does not decode reads
- * `MAP DATA INVALID` with the cause, a server fault. After any failure `RETRY` asks again from
- * `PENDING`: the view is mounted afresh, since a request sent again would keep an invalid answer on
+ * `density_map` at 8 bits (plan 05, design note D5) that, enlarged at most 1.25 times, covers the
+ * picture's device pixels (`mapResolutionFor`), allowing it two minutes, and shows the request's state until it is answered, asking
+ * again when the picture grows or shrinks past a resolution the protocol offers. Until that map
+ * arrives the last picture stays, resampled to the new size and marked stale as the guide has a
+ * stale value shown: painted on a ramp up to `--text-muted`, with a trailing `S` and its legend and
+ * density reading likewise, the request's state beside it; a failure of the new request leaves it
+ * so, with the failure and `RETRY`, which asks again from `PENDING`. A map of another universe or
+ * population is other data and is waited for from `PENDING`. A map that is not the one asked for,
+ * is not of the M1 extents, cannot be drawn or does not decode reads `MAP DATA INVALID` with the
+ * cause, a server fault. After any failure `RETRY` asks again from `PENDING`: the view is mounted afresh, since a request sent again would keep an invalid answer on
  * show until its successor arrived. The codes are painted with the ramp from the `--surface-0` and
  * `--text` tokens, read when the view is shown, and drawn without smoothing (D6) onto a canvas
  * whose backing store follows the device pixel ratio: pixel for pixel or larger, or, where the map
@@ -644,7 +720,7 @@ function MapViewBody({
  * map pixel at a time as the screen shows the axes, ten with `Shift`, within the map's edge pixels.
  * The cursor is drawn over the picture as a cross in the selection colour, and the column density
  * under it is read beside the picture: the value its code stands for, `BELOW FLOOR` at code 0, or
- * an em dash off the map. The chart's centre is drawn as a bracket reticle in `--text`. A mark whose
+ * an em dash off the map. The chart's centre is drawn as a small diagonal cross in `--text`. A mark whose
  * point lies above or below the map is pegged to its edge with `↑` or `↓`. Moving either paints
  * nothing.
  */

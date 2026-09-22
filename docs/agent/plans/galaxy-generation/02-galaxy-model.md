@@ -1235,7 +1235,9 @@ component order and the map's quadrature scheme belong to the version as well.
   of T2, T4, T5, T7, T8, T10 and T11 above are rewritten for them. `GENERATOR_VERSION` is 6, one
   bump for the whole revision: the parameters' goldens moved with the default mass function and
   the halo's ranges, the potential's with the populations' masses under the default, the fields'
-  and the bounds' everywhere; the rest changed their header only. As built:
+  and the bounds' everywhere; the rest changed their header only. The goldens hold bit for bit in
+  debug, release and on wasm32 (`just test-wasm`, wasmtime 48.0.2, slow tests included). As
+  built:
   - _Mass function (D4, D5, T2, T4)._ `MassFunctionKind::default()` is `Chabrier` (scale 0.68) and
     the fixture takes it; the tests read the default, with Kroupa's as a second case (the
     parameters' golden pins one seed under it). A 10 Gyr declining history holds 0.572–0.578 M☉

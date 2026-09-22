@@ -1,5 +1,5 @@
 # Rust
-/target/
+target/
 
 # Server data (saved universes) from `just server`
 hyperion-data/

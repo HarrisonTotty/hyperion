@@ -10,7 +10,20 @@
 //! - A `const` assertion enforces both, so a broken entry fails compilation.
 //!
 //! Number blocks: `0x0001` is plan 01's self-test tag; the stellar, feature, binary and body
-//! stages allocate the blocks their plans set aside.
+//! stages allocate the blocks their plans set aside:
+//!
+//! | Block             | Owner                                      |
+//! | ----------------- | ------------------------------------------ |
+//! | `0x0001`          | Plan 01's self-test tag                    |
+//! | `0x0100`–`0x01FF` | Single stars (plan 06)                     |
+//! | `0x0200`–`0x02FF` | Features and the galactic centre (plan 09) |
+//! | `0x0300`–`0x03FF` | Binaries (plan 11)                         |
+//! | `0x0400`–`0x04FF` | Bodies (plan 14)                           |
+//!
+//! `0x0002`–`0x00FF` and everything from `0x0500` stay unallocated. Within a block numbers are
+//! explicit, ascending in order of registration and never reused. Each tag's events are built by
+//! one of `events`' two constructions only, Poisson bins or a monotone phase, never both, because
+//! the two give the event key's slots different meanings.
 
 use super::event::EventTag;
 use crate::rng::{DomainTag, TagScope, tags};
@@ -92,6 +105,30 @@ event_tags! {
 
     /// A tag for tests and golden files, never emitted by a generator.
     0x0001 => SELF_TEST = tags::EVENT_SELFTEST;
+
+    // Plan 06: single stars, block 0x0100–0x01FF (P06.T27.a). Re-exported as `events::tags`.
+
+    /// Flares of stars with convective envelopes (Poisson bins).
+    0x0100 => STAR_FLARE = tags::STAR_EV_FLARE;
+    /// Glitches of Crab-like pulsars (Poisson bins).
+    0x0101 => STAR_GLITCH = tags::STAR_EV_GLITCH;
+    /// Glitches of Vela-like pulsars (monotone phase).
+    0x0102 => STAR_GLITCH_CYCLE = tags::STAR_EV_GLITCH_CYCLE;
+    /// A magnetar's active episodes (Poisson bins).
+    0x0103 => STAR_MAGNETAR_EPISODE = tags::STAR_EV_MAGNETAR_EPISODE;
+    /// A magnetar's short bursts within an episode (Poisson bins).
+    0x0104 => STAR_MAGNETAR_BURST = tags::STAR_EV_MAGNETAR_BURST;
+    /// A magnetar's giant flares (Poisson bins).
+    0x0105 => STAR_MAGNETAR_GIANT = tags::STAR_EV_MAGNETAR_GIANT;
+    /// FU Orionis outbursts of young stars (Poisson bins).
+    0x0106 => STAR_FU_ORIONIS = tags::STAR_EV_FU_ORIONIS;
+    /// Giant eruptions of luminous blue variables (Poisson bins).
+    0x0107 => STAR_LBV_ERUPTION = tags::STAR_EV_LBV_ERUPTION;
+    /// Thermal pulses on the asymptotic giant branch (monotone phase).
+    0x0108 => STAR_THERMAL_PULSE = tags::STAR_EV_THERMAL_PULSE;
+    /// The cycle-keyed irregularity of pulsating variables, S Doradus cycles included (monotone
+    /// phase).
+    0x0109 => STAR_VARIABILITY_CYCLE = tags::STAR_VAR_CYCLE;
 }
 
 #[cfg(test)]
@@ -106,7 +143,35 @@ mod tests {
         assert_eq!(EventTag::from_number(1), Some(SELF_TEST));
         assert_eq!(EventTag::from_number(0), None);
         assert_eq!(EventTag::from_number(2), None);
-        assert_eq!(ALL, &[SELF_TEST]);
+        assert_eq!(ALL.first(), Some(&SELF_TEST));
+    }
+
+    /// Plan 06's ten tags take `0x0100`–`0x0109` in order, each backed by its `star.` domain tag.
+    #[test]
+    fn plan_06_star_events_hold_0x0100_to_0x0109_in_order() {
+        let plan_06 = [
+            (STAR_FLARE, "star.ev.flare"),
+            (STAR_GLITCH, "star.ev.glitch"),
+            (STAR_GLITCH_CYCLE, "star.ev.glitch_cycle"),
+            (STAR_MAGNETAR_EPISODE, "star.ev.magnetar_episode"),
+            (STAR_MAGNETAR_BURST, "star.ev.magnetar_burst"),
+            (STAR_MAGNETAR_GIANT, "star.ev.magnetar_giant"),
+            (STAR_FU_ORIONIS, "star.ev.fu_orionis"),
+            (STAR_LBV_ERUPTION, "star.ev.lbv_eruption"),
+            (STAR_THERMAL_PULSE, "star.ev.thermal_pulse"),
+            (STAR_VARIABILITY_CYCLE, "star.var.cycle"),
+        ];
+        for ((tag, name), number) in plan_06.into_iter().zip(0x0100_u16..) {
+            assert_eq!(tag.number(), number, "{name}");
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+        }
+        assert_eq!(EventTag::from_number(0x010A), None);
+        let in_block = ALL
+            .iter()
+            .filter(|t| (0x0100..=0x01FF).contains(&t.number()))
+            .count();
+        assert_eq!(in_block, plan_06.len());
     }
 
     #[test]
