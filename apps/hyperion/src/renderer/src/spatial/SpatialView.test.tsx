@@ -1224,11 +1224,9 @@ describe("SpatialView's readouts", () => {
   it("replaces the core arrow on the galactic axis and names the fallback directions", () => {
     const { container } = setup({ scene: aScene({ frame: localFrameAt(vec3(0, 0, 0)) }) });
 
-    expect(
-      screen.getByText("DIRECTIONS UNDEFINED AT AXIS: GRID ALIGNED TO −X"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
     expect(container.querySelector("[data-core]")).toBeNull();
-    expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("−X")).toBeVisible();
+    expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
   });
 });
 
@@ -1452,9 +1450,20 @@ describe("SpatialView's labels", () => {
   it("labels no more than nine marks: eight and the selection", () => {
     renderView({ scene: aScene({ points: spreadMarks(20), selectedId: "m00" }) });
 
+    // Room for every one of them, so the cap is what holds the count down: the eight of highest
+    // priority, M19 down to M12, and the selection.
     const labels = screen.getAllByText(/^M\d\d$/u);
-    expect(labels.length).toBeLessThanOrEqual(9);
-    expect(labels.map((label) => label.textContent)).toContain("M19");
+    expect(labels.map((label) => label.textContent).toSorted()).toEqual([
+      "M00",
+      "M12",
+      "M13",
+      "M14",
+      "M15",
+      "M16",
+      "M17",
+      "M18",
+      "M19",
+    ]);
   });
 
   it("hides the labels from assistive technology, which has the list and the readout", () => {

@@ -23,37 +23,41 @@ interface AxisMarkProps {
 
 /** An axis: a line from the origin, ended by the away or towards symbol or by an arrowhead. */
 function AxisMark({ axis }: AxisMarkProps) {
-  const tipX = units(axis.tip.x);
-  const tipY = units(axis.tip.y);
-  const reach = length(axis.tip);
-  const markerR = units(TRIAD_MARKER_REM);
+  // The axis's own geometry is in `rem`; what the SVG is given is in user units.
+  const tipXUnits = units(axis.tip.x);
+  const tipYUnits = units(axis.tip.y);
+  const reachRem = length(axis.tip);
+  const markerUnits = units(TRIAD_MARKER_REM);
   // The line stops at the symbol's circle, so that it never runs into the cross or the dot.
-  const lineReach = axis.end === "across" ? reach : reach - TRIAD_MARKER_REM;
-  const direction = reach > 0 ? { x: axis.tip.x / reach, y: axis.tip.y / reach } : { x: 0, y: 0 };
-  const lineEnd = {
-    x: direction.x * Math.max(0, lineReach),
-    y: direction.y * Math.max(0, lineReach),
+  const lineReachRem = axis.end === "across" ? reachRem : reachRem - TRIAD_MARKER_REM;
+  const direction =
+    reachRem > 0 ? { x: axis.tip.x / reachRem, y: axis.tip.y / reachRem } : { x: 0, y: 0 };
+  const lineEndRem = {
+    x: direction.x * Math.max(0, lineReachRem),
+    y: direction.y * Math.max(0, lineReachRem),
   };
-  const cross = markerR * Math.SQRT1_2;
-  const head = units(HEAD_REM);
+  const crossUnits = markerUnits * Math.SQRT1_2;
+  const headUnits = units(HEAD_REM);
   const barb = (sign: number): string => {
     const angle = Math.atan2(direction.y, direction.x) + Math.PI + (sign * Math.PI) / 6;
-    return `${tipX + head * Math.cos(angle)},${tipY + head * Math.sin(angle)}`;
+    return `${tipXUnits + headUnits * Math.cos(angle)},${tipYUnits + headUnits * Math.sin(angle)}`;
   };
   return (
     <g data-axis={axis.name} data-end={axis.end}>
-      {lineReach > 0 ? <line x1="0" y1="0" x2={units(lineEnd.x)} y2={units(lineEnd.y)} /> : null}
+      {lineReachRem > 0 ? (
+        <line x1="0" y1="0" x2={units(lineEndRem.x)} y2={units(lineEndRem.y)} />
+      ) : null}
       {axis.end === "across" ? (
-        <polyline points={`${barb(1)} ${tipX},${tipY} ${barb(-1)}`} />
+        <polyline points={`${barb(1)} ${tipXUnits},${tipYUnits} ${barb(-1)}`} />
       ) : (
-        <circle cx={tipX} cy={tipY} r={markerR} />
+        <circle cx={tipXUnits} cy={tipYUnits} r={markerUnits} />
       )}
       {axis.end === "towards" ? (
-        <circle className="axis-triad__dot" cx={tipX} cy={tipY} r={units(DOT_REM)} />
+        <circle className="axis-triad__dot" cx={tipXUnits} cy={tipYUnits} r={units(DOT_REM)} />
       ) : null}
       {axis.end === "away" ? (
         <path
-          d={`M${tipX - cross} ${tipY - cross}L${tipX + cross} ${tipY + cross}M${tipX - cross} ${tipY + cross}L${tipX + cross} ${tipY - cross}`}
+          d={`M${tipXUnits - crossUnits} ${tipYUnits - crossUnits}L${tipXUnits + crossUnits} ${tipYUnits + crossUnits}M${tipXUnits - crossUnits} ${tipYUnits + crossUnits}L${tipXUnits + crossUnits} ${tipYUnits - crossUnits}`}
         />
       ) : null}
     </g>
@@ -77,7 +81,7 @@ export interface AxisTriadProps {
  * viewer in a circle with a dot, and one across the screen in an arrowhead, so that a view from
  * the south, which is mirrored, reads as such. An axis seen end on has its label beside its
  * symbol. On the galactic axis, where coreward and spinward are undefined, the directions are
- * labelled `−X` and `+Y`, as the frame falls back to them (design note D11). The labels are DOM
+ * labelled `-X` and `+Y`, as the frame falls back to them (design note D11). The labels are DOM
  * text, in B612; the picture is one image to assistive technology, named `Axis triad`.
  */
 export function AxisTriad({ frame, angles }: AxisTriadProps) {

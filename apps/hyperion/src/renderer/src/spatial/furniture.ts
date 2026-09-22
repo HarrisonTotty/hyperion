@@ -141,13 +141,13 @@ function remBox(centre: ScreenRem, size: TextSizeRem): BoxPx {
  * A label goes beyond its axis's end; an axis seen end on has its label beside its symbol, on the
  * side away from the other two axes; a label that would cover another goes a line below or above
  * it, or further out along its axis. Every label is kept inside the triad's box. On the galactic
- * axis the directions are labelled `−X` and `+Y`, as the frame falls back to them (design note
- * D11).
+ * axis the directions are labelled `-X` and `+Y`, as the frame falls back to them (design note
+ * D11), with the guide's `-` for a signed value.
  */
 export function triadLayout(frame: LocalFrame, angles: CameraAngles): ReadonlyArray<TriadAxis> {
   const basis = viewBasis(frame, angles);
   const labels = frame.onAxis
-    ? { coreward: "−X", spinward: "+Y", north: "NORTH" }
+    ? { coreward: "-X", spinward: "+Y", north: "NORTH" }
     : { coreward: "COREWARD", spinward: "SPINWARD", north: "NORTH" };
   const axes = (["coreward", "spinward", "north"] as const).map((name) => ({
     name,
@@ -261,8 +261,9 @@ export function triadFootprintPx(axes: ReadonlyArray<TriadAxis>, viewport: Viewp
 
 /** How far inside the edge of the view the core arrow's head stands, in `rem`. */
 const RIM_INSET_REM = 0.5;
-/** The core arrow's length, head included, and its head's, in `rem`. */
+/** The core arrow's length from its tail to the point of its head, in `rem`. */
 export const CORE_ARROW_REM = 1.5;
+/** The length of the core arrow's head, and so half the width of its barbs, in `rem`. */
 export const CORE_HEAD_REM = 0.375;
 /**
  * The radius of the core's away and towards symbols, in `rem`: 1.25 rem across, larger than any

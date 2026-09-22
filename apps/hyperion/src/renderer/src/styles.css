@@ -1504,10 +1504,14 @@ body {
   gap: 0.25rem 1.5rem;
 }
 
+/*
+ * Why the named directions are undefined, in the create form's plain-text voice: not an alert, a
+ * limit nor a failed system, and unspaced, since what follows the annunciated condition is a
+ * sentence in mixed case.
+ */
 .spatial-view__axis-note {
   flex-basis: 100%;
   margin: 0;
-  letter-spacing: 0.1em;
 }
 
 /* A 1-2-5 length: a bar with end ticks, and the length it stands for. */
@@ -1593,6 +1597,17 @@ body {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
+}
+
+/*
+ * Every stroke of the triad and the arrow stays 1.5 CSS pixels at every interface scale, as the
+ * canvas's own lines do (design notes D13 and D14 give sizes in `rem` and line weights in pixels).
+ * The triad's user units are a sixteenth of a `rem`, so without this its axes would reach 2.25 px at
+ * 150% beside a 1.5 px range circle. `vector-effect` is not inherited, so it goes on the shapes.
+ */
+.axis-triad__axes :is(line, polyline, circle, path),
+.core-arrow__mark :is(line, polyline, circle, path) {
+  vector-effect: non-scaling-stroke;
 }
 
 .axis-triad__dot,

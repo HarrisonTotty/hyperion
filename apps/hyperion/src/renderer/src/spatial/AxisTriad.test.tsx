@@ -118,7 +118,7 @@ describe("AxisTriad", () => {
   it("labels the directions -X and +Y on the galactic axis, where the frame falls back to them", () => {
     const triad = renderTriad(PRESETS.oblique, localFrameAt(vec3(0, 0, 5)));
 
-    expect(within(triad).getByText("−X")).toBeInTheDocument();
+    expect(within(triad).getByText("-X")).toBeInTheDocument();
     expect(within(triad).getByText("+Y")).toBeInTheDocument();
     expect(within(triad).getByText("NORTH")).toBeInTheDocument();
     expect(within(triad).queryByText("COREWARD")).not.toBeInTheDocument();

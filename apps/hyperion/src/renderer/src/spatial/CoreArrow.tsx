@@ -10,8 +10,13 @@ const DOT_REM = 0.125;
 /**
  * What the fallback frame of design note D11 means for the operator, shown in place of the core
  * arrow on the galactic axis.
+ *
+ * @remarks
+ * The condition is annunciated in upper case and what follows it is a sentence in mixed case, as
+ * the guide sets every message ("Typography"), and the axis takes the guide's `-`, the minus every
+ * signed value on the console is written with ("Numbers, units and time").
  */
-export const AXIS_FALLBACK_MESSAGE = "DIRECTIONS UNDEFINED AT AXIS: GRID ALIGNED TO −X";
+export const AXIS_FALLBACK_MESSAGE = "DIRECTIONS UNDEFINED: grid aligned to -X";
 
 interface CoreMarkProps {
   readonly layout: CoreArrowLayout;

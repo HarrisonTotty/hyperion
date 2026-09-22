@@ -1,6 +1,10 @@
 # Rust
 target/
 
+# Stray ts-rs output: a `cargo test` that misses `.cargo/config.toml`'s TS_RS_EXPORT_DIR writes the
+# bindings here instead of packages/protocol/src/generated.
+/bindings/
+
 # Server data (saved universes) from `just server`
 hyperion-data/
 
