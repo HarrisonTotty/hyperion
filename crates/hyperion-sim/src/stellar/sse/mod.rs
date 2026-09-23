@@ -20,6 +20,7 @@ mod coeffs;
 mod coeffs_data;
 #[cfg(test)]
 mod continuity;
+mod envelope;
 mod gb;
 mod hg;
 mod ms;
@@ -32,6 +33,12 @@ pub mod zams;
 mod agb;
 mod cheb;
 mod helium;
+
+// The track integrator (P06.T10.c–e).
+mod evolve;
+mod track;
+pub use evolve::{evolve, lifetime, turn_off_mass};
+pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
 #[cfg_attr(

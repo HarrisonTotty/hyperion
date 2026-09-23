@@ -2,9 +2,9 @@
 # not merge, so this file shadows the workspace root's `clippy.toml` completely and has to repeat
 # everything this crate needs of it.
 
-# Author names and journal abbreviations that `doc_markdown` would otherwise take for code; ".."
-# keeps Clippy's defaults.
-doc-valid-idents = ["McMillan", "McConnell", "McKee", "ApJ", "ApJS", ".."]
+# Author names, journal abbreviations and supernova types that `doc_markdown` would otherwise
+# take for code; ".." keeps Clippy's defaults.
+doc-valid-idents = ["McMillan", "McConnell", "McKee", "McDonald", "ApJ", "ApJS", "IIb", ".."]
 
 # Every transcendental function goes through `hyperion_sim::math`, which wraps the exactly pinned
 # `libm`. The platform's own versions differ between operating systems and CPU architectures, and

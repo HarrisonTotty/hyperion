@@ -12,15 +12,6 @@
 //! exceeds the tolerances P06.T12.b validates the backbone to. The doc comment of each function
 //! concerned names the case.
 
-// The track integrator of P06.T10 is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10 is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
@@ -96,6 +87,7 @@ fn timescales_myr(m: f64, c: &ZCoeffs) -> (f64, f64) {
 }
 
 /// The time at which the main-sequence hook ends, `t_hook` = µ `t_bgb` (HPT equation 7), Myr.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn t_hook(m: SolarMasses, c: &ZCoeffs) -> Megayears {
     Megayears::new(timescales_myr(m.value(), c).0)

@@ -36,4 +36,5 @@ pub(crate) mod testing;
 pub mod variability;
 
 pub use composition::Composition;
+pub use sse::{evolve, lifetime};
 pub use state::{ObjectKind, Phase, StarState, StarStateParts};

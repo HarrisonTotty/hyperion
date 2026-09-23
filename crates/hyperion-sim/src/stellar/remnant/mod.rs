@@ -10,6 +10,15 @@
 
 pub(crate) mod structure;
 
+// The death types of P06.T10.e, which the track integrator builds and T18 and T19 read.
+mod death;
+pub use death::{Death, DeathKind, ProgenitorAtDeath, Stripping, SupernovaType};
+
+// HPT's cooling of white dwarfs and neutron stars, which the track's remnant stage needs before
+// P06.T20 and T21 (ruling 33).
+pub(crate) mod neutron_star;
+pub(crate) mod white_dwarf;
+
 use crate::units::SolarMasses;
 
 /// Which prescription sets a remnant's mass and structure.

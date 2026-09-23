@@ -2339,3 +2339,149 @@ SolarMasses`, which plan 13 and T29 need to tell `ObjectKind::Dwarf` from `Subst
     `expect` attributes that the new public code leaves unfulfilled are removed: on
     `CompactRemnant::new`, on `ZCoeffs::b` and on the `m_c_bagb` re-export. `starA`'s tree already
     removes the first two.
+- **Deviations in T10.c–e, as built (round 7, `starA`).**
+  - _API._ `stellar::sse::{Track, TrackOptions, Bridges, MIN_INITIAL_MASS, MAX_INITIAL_MASS,
+evolve, lifetime, turn_off_mass}`, with `evolve` and `lifetime` re-exported as `stellar::{evolve,
+lifetime}`. `Track::{to_age, full, to_age_with, full_with, state_at, lifetime, death, remnant,
+max_radius_until, max_luminosity_until, built_until, initial_mass, composition, options}`. The
+    `_with` forms take `TrackOptions` (wind recipe, remnant recipe and `Bridges::{Physical,
+Instant}`); `TrackOptions::hurley2000()` is T12.b's (both HPT recipes, no bridges).
+    `pub(crate)`: `Track::pulse_phase_at` (T8.b's cumulative pulses, for T24.b and T28.f, with
+    their dead-code expectation) and `track::lifetime_of`. `window_where` is T24's and not built.
+    `stellar::remnant` gains `Death`, `DeathKind` (with `ThermonuclearDisruption`, carbon ignition
+    in a degenerate core that leaves nothing), `ProgenitorAtDeath`, `Stripping` and
+    `SupernovaType`, and the `pub(crate)` modules `white_dwarf` (HPT eq. 90) and `neutron_star`
+    (eq. 93), which both recipes use until T20 and T21 (ruling 33). `stellar::sse::envelope` holds
+    HPT §6.3's perturbation (eqs 97–105), which ruling 29 makes a requirement.
+  - _The knot coordinate_ (ruling 40). The main sequence and the helium main sequence keep design
+    note 1's τ grid (16 knots). From the Hertzsprung gap on, knots sit at fixed values of u = 1 − (1
+    − x)(1 − y): x is the phase's progress, in time for the gap, core helium burning and the
+    thermally pulsing AGB and in core mass on the giant branches, and y is the share of the entry
+    envelope lost. The 16 knots (32 on the pulsing AGB) are clustered as 1 − (1 − k ÷ (n − 1))³,
+    and each interval is integrated in u from the state reached, so the coordinate is still fixed
+    before any query. Fixed fractions of the phase's time stall on massive stars'
+    luminous-blue-variable bursts, which strip an envelope in a sliver of the phase, and at the
+    giant-branch tip. Offsets in log L and log R decay over the first 2% of a phase where HPT's
+    formulae step: the core's appearance at a massive star's gap, the second dredge-up, and an
+    early-AGB star whose remnant is still passing to the helium giants.
+  - _The initial mass in the gap is frozen_ at the main sequence's end (ruling 40). HPT ask that
+    it follow the current mass; the effect on any age is under 10⁻⁴.
+  - _SSE's forms, by ruling 40._ `R_mHe` at the initial mass above `M_FGB` (`gb::IgnitionRadius`;
+    the current-mass form keeps 25 M☉ of a 60 M☉ star at Z = 10⁻⁴). The supernova core is held to
+    at least 1.05 × `Mc,CO`(`t_BAGB`), while printed eq. 75 still decides supernova against
+    pulses (ruling 29 amended). A helium star's carbon–oxygen white dwarf has the star's whole
+    mass, because HPT say only that the star "becomes a CO WD". Below 0.689 M☉ that leaves the
+    unburnt helium on the dwarf, and the luminosity steps at the hand-over by log₁₀(M ÷ (1.45 M −
+    0.31)), as in SSE: 0.26–0.34 dex for the lightest helium star that burns helium. The step is
+    at the death, which the continuity tests exclude, but P06.T16's bridge will not remove it.
+    The early AGB's remnant passes from the end of the helium main sequence to the helium giants'
+    relation over the first third of the early AGB's own span, where SSE uses a third of its
+    nuclear time; this is provisional, for T12.b to decide. HPT's eq. 90 cools white dwarfs with A
+    = 4, 15 and 17 (ruling 33). A black hole's luminosity is exactly zero, and
+    `StarState::luminosity` says that no consumer may take its logarithm unguarded. Inside the
+    track, the only logarithms of L are of living phases.
+  - _Seams._ `phases::collapse_remnant` is P06.T18.d's: HPT's remnant stands in under both recipes
+    until then. `evolve` is where P06.T13's `substellar::cooling` takes over below 0.1 M☉; until
+    the orchestrator wires it (ruling 33), masses below 0.1 M☉ are evaluated at 0.1. The AGB hands
+    straight to the white dwarf until T16, and that step is declared to the continuity test, as are
+    the unbridged flash of `Bridges::Instant` and a helium star too light to burn helium. SSE turns
+    such a star into a helium white dwarf at once (`zpars(10)`, 0.31–0.35 M☉), and HPT do not print
+    the rule.
+  - _Supernova types._ IIP above 2 M☉ of hydrogen envelope, after Heger et al. (2003, §4.1 and
+    Fig. 2), who assume that split. IIL from 0.1 M☉, the plan's default. IIb below that, Ib above
+    0.14 M☉ of helium outside the carbon–oxygen core, and Ic below. The 0.14 is the top of the
+    0.06–0.14 M☉ that Hachinger et al. (2012, §4.3) find can hide in low-mass SNe Ic, extrapolated
+    to heavier cores. **For the orchestrator to rule:** the 0.1 M☉ IIb bound matches SN 2011dh's
+    envelope of about 0.1 M☉ (Bersten et al. 2012), but it calls the prototype, SN 1993J, Type IIL:
+    its envelope was 0.20 ± 0.05 M☉ (Woosley et al. 1994).
+  - _Dead code._ T10 made the phase modules' blanket expectations unnecessary, and they are gone.
+    What only tests call is now `#[cfg(test)]`: the constant-mass `at` of the gap, the giant
+    branch, core helium burning and the pulsing AGB, `l_zahb`, `r_zahb`, `t_hook`,
+    `GiantBranch::{m_x, l_x}`, `HeliumStar::{from_core_helium_burning, end, phase_at}` and
+    `ReimersEta::HURLEY`. Accessors that nothing calls are removed, and so is `r_mhe_low`, whose
+    wrapper had no caller. `agb::interpulse_period` keeps an expectation naming T28.f.
+    `DegenerateCore::Helium` is now what the track builds helium white dwarfs from.
+  - _Tests._ They are as the task lists. Added: finiteness over 120 random tracks under both
+    recipes (ruling 30), a helium star's whole-mass white dwarf, and the envelope's loss continuous
+    to 1% in L and R. The lifetime-in-mass sweep runs 2 metallicities × 60 intervals in the fast
+    suite (2.5 s) and 5 × 400 as a slow test. Slow tests, at the slow-test profile, one thread
+    each, load 5–7: 200 random tracks × 2 recipes × 2,000 ages continuous, 8.4 s; 10⁵ life and
+    death inputs, 228 s; 10⁴ fast lifetimes equal to the full track's bit for bit, 28 s; the 5 × 400
+    sweep, 54 s. All pass.
+  - _Against SSE_, run with `evolve.in`'s options changed as ruling 26 asks and steps a hundred
+    times finer (`pts` × 0.01), over the 16 masses × 5 Z. Phase-start ages agree to 9.5 × 10⁻⁵,
+    except a 0.1 M☉ helium white dwarf's 8.1 × 10⁻⁴ at 7 × 10¹² years. Masses at phase starts agree
+    to 0.85%, the worst at 1 M☉ on the pulsing AGB, where SSE's own steps jitter by ±0.3%. Cores at
+    phase starts agree to 9.5 × 10⁻⁴ and remnant masses to 5.3 × 10⁻⁴ M☉. Three routes differ, each
+    by a sliver of a phase: 47 years of core helium burning (60 M☉, Z = 10⁻³), a pulsing AGB of no
+    length (0.8 M☉, Z = 0.004), and SSE's 160 years as a helium giant before the supernova (20 M☉,
+    Z = 0.03). Within phases, L and R at equal phase fractions differ by up to 1.7 dex, but only
+    where the state moves steeply with time. That is the gap of massive stars, whose LBV wind strips
+    the envelope in a burst, and the pulsing AGB's end. T12.a's samples must avoid those places.
+  - _Speed_ is a finding, not a failure (ruling 40). Measured on 2026-09-23 with the bench profile
+    (`benches/stellar.rs`) at load 2.3 rising to 5.2 and 2.9–3.0 GHz. `math::exp` took 6.9 ns
+    before the groups, the idle figure, and 18.1 ns after, once the load rose.
+
+    | Call                                   | Time             | `math::exp` calls | Target                          |
+    | -------------------------------------- | ---------------- | ----------------- | ------------------------------- |
+    | `lifetime`, 4 M☉ (layer D)             | 2.0 ms           | 295,000           | 5 µs                            |
+    | `lifetime`, 20 M☉ (layer E)            | 0.95 ms          | 137,000           | 5 µs                            |
+    | `Track::to_age`, 0.4 M☉ at 5 Gyr       | 10.7 µs          | 1,550             | 10 µs (a dwarf's `generate`)    |
+    | `Track::to_age`, 2 M☉ giant at 1.2 Gyr | 0.49 ms          | 71,000            | 60 µs (a giant's `generate`)    |
+    | `Track::full`, 1, 5 and 20 M☉          | 1.5, 1.8, 1.3 ms | 187,000–261,000   | 150 µs (a remnant's `generate`) |
+    | `state_at`, main sequence and AGB      | 0.20, 1.8 µs     | 28, 260           | —                               |
+
+    A second run at load 7–9 agreed to 10–40%. A dwarf meets its target, and every evolved track
+    misses by 8–12 times. `lifetime` misses by 200–400 times, because it integrates the same grid
+    as the full track and drops only the samples and the remnant, as it must to stay equal to it
+    bit for bit. Each derivative of the envelope integration evaluates the phase's closed forms,
+    the wind, and five core-mass or progress probes, and a track takes about a thousand of them.
+    Nothing on the slice's path calls `lifetime` in bulk. Plan 08's placement will, and its target
+    stays open until then.
+- **Deviations in T12, as built (round 7, `starA`).**
+  - _T12.a._ `crates/hyperion-sim/tests/data/sse/z{0.0001,0.001,0.004,0.02,0.03}.csv`, about 32 KB
+    each, with a provenance `README.md`. The run is SSE's `evolv1` with ruling 26's options, and
+    with steps a hundred times finer than distributed (`pts` × 0.01, ruling 40); the header and the
+    README give both step settings. A "phase change" is the first logged step of each SSE stellar
+    type, and the row of a remnant's type is the death. The plan's "20 samples along each track"
+    are steps at fixed fractions of a phase's time, not at ages, chosen from SSE alone. Candidates
+    sit at 0.05, …, 0.95 of each phase that lasts at least 10⁻³ of the lifetime. A candidate is
+    kept where log L and log R move by at most 0.05 dex across ±1% of the phase, and where SSE's
+    run at ten-times-coarser steps agrees to 0.005 dex, so that SSE is converged there. The
+    candidates are then taken round-robin over the phases. Of 6,327 candidates, 5,988 pass, and
+    every star has 20. Without the convergence filter, one early-AGB sample (20 M☉, Z = 0.03, at
+    0.40 of the phase, where item 4's blend ends) was 0.0205 dex off in R. There SSE's own R moves
+    by 0.075 dex between its two step settings, and its core moves towards ours.
+  - _T12.b._ `tests/sse_reference.rs`, on the public API only. Phases are matched by SSE's type,
+    with the helium Hertzsprung gap and giant branch merged. A phase lasting under 10⁻⁴ of the
+    lifetime may be missing from the other code; three are: 47 years of core helium burning (60 M☉,
+    Z = 10⁻³), a pulsing AGB of no length (0.8 M☉, Z = 0.004), and SSE's 160 years as a helium giant
+    (20 M☉, Z = 0.03). All 80 stars pass at the plan's tolerances. The worst deviations are:
+
+    | Quantity          | Worst           | Where                                  | Tolerance |
+    | ----------------- | --------------- | -------------------------------------- | --------- |
+    | Phase-start age   | 9.5 × 10⁻⁵      | core helium burning, 1 M☉, Z = 0.03    | 1%        |
+    | Lifetime          | 8.1 × 10⁻⁴      | 0.1 M☉, Z = 0.004                      | 1%        |
+    | Phase-start mass  | 0.76%           | early AGB, 20 M☉, Z = 0.02             | 1%        |
+    | Phase-start core  | 9.5 × 10⁻⁴      | Hertzsprung gap, 100 M☉, Z = 0.02      | 1%        |
+    | log L at a sample | 2.8 × 10⁻³ dex  | core helium burning, 0.8 M☉, Z = 0.004 | 0.02 dex  |
+    | log R at a sample | 1.07 × 10⁻² dex | core helium burning, 0.8 M☉, Z = 0.004 | 0.02 dex  |
+    | Remnant mass      | 5.3 × 10⁻⁴ M☉   | black hole, 40 M☉, Z = 10⁻⁴            | 0.02 M☉   |
+
+    Every remnant is of SSE's kind. **Ruling 29's two SSE artefacts do not arise with the wind:**
+    both 60 M☉ stars (Z = 10⁻⁴ and 10⁻³) lose their envelope in the gap and never reach the AGB,
+    in either code. A test keeps that true, and no point is exempted. Ruling 40's item 4, the early
+    AGB's remnant blend over a third of the phase, passes the tolerance and stands.
+
+  - _T12.c._ The initial–final mass relation of HPT's Fig. 18 was read from the journal's 799-dpi
+    bitmap to about ±0.003 M☉: 17 points at Z = 0.02 and 16 at 0.004, from 1.25 to 7.5 M☉. Under
+    `TrackOptions::hurley2000` the tracks agree to 0.0025 M☉ (the plan asks 0.05). Under the
+    generator's recipes, at [Fe/H] = 0 and 0.85–7.2 M☉ in 0.05 M☉ steps, the white dwarfs follow
+    Cummings et al.'s (2018, ApJ 866, 21) adopted MIST fit, eqs. 4–6, to 0.08 M☉ (design note 9).
+    The worst is +0.069 M☉ at 7.2 M☉, and −0.05 M☉ near 1 M☉, within their 0.06 M☉ scatter.
+    HPT tabulate no main-sequence lifetimes. Their Fig. 5 plots Pols et al.'s detailed-model
+    `t_BGB` at Z = 10⁻⁴ and 0.03, which eq. 4 fits to 4.8%. `ms::t_bgb` agrees with 24 of those
+    models, 0.5–4 M☉, to within 4.3%, and the test (`sse::evolve`'s unit test, since `t_bgb` is
+    crate-private) allows 0.03 dex. Above 4 M☉ the two metallicities' markers overlap. The model
+    near 0.63 M☉ is left out, because its mass would need three digits at log t ∝ −3.7 log M.
+  - `cargo test -p hyperion-sim --test sse_reference` takes 0.45 s, so it is not marked slow.

@@ -328,7 +328,9 @@ impl StarState {
         self.envelope_mass
     }
 
-    /// Bolometric luminosity, L☉.
+    /// Bolometric luminosity, L☉: positive for a living star, and exactly zero for a black hole
+    /// and where nothing is left ([`Phase::NoRemnant`]), so a consumer that takes its logarithm
+    /// (a classification, an irradiation) must check it first (ruling 40 of 2026-09-22).
     #[must_use]
     pub const fn luminosity(&self) -> SolarLuminosities {
         self.luminosity

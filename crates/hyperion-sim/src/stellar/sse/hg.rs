@@ -4,15 +4,6 @@
 //!
 //! Units are HPT's, in unit newtypes: M☉, L☉, R☉ and Myr from the zero-age main sequence.
 
-// The track integrator of P06.T10 is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10 is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
@@ -24,6 +15,10 @@ use super::ms;
 /// A star of one mass crossing the Hertzsprung gap: its end points and core, evaluated once.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HertzsprungGap {
+    /// The (effective initial) mass the gap was built for, M☉.
+    mass: SolarMasses,
+    /// The radius at helium ignition, where the gap of a star above `M_FGB` ends.
+    ignition: Option<gb::IgnitionRadius>,
     t_ms: Megayears,
     t_bgb: Megayears,
     l_tms: SolarLuminosities,
@@ -59,6 +54,8 @@ impl HertzsprungGap {
         };
         let m525 = math::powf(m.value(), 5.25);
         Self {
+            mass: m,
+            ignition: (m.value() >= m_fgb).then(|| gb::IgnitionRadius::new(m, c)),
             t_ms: ms::t_ms(m, c),
             t_bgb: ms::t_bgb(m, c),
             l_tms: ms::l_tms(m, c),
@@ -92,15 +89,51 @@ impl HertzsprungGap {
     /// # Panics
     ///
     /// In debug builds, if `t` lies outside `t_MS` ≤ t ≤ `t_BGB` by more than rounding.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+        self.point(t, self.r_ehg)
+    }
+
+    /// `HertzsprungGap::at` for a star whose current mass `mt` has fallen below the mass the gap
+    /// was built for: HPT section 7.1 evaluate every radius formula at the current mass, so the
+    /// radius at the end of the gap, towards which R interpolates, is `R_GB`(`mt`, `L_BGB`) below
+    /// `M_FGB` and [`gb::IgnitionRadius`]'s from there up; luminosity, core and timescales keep the
+    /// initial mass. The radius at the terminal main sequence it starts from, `R_TMS`, keeps the
+    /// initial mass, as in the published SSE code (`hrdiag`'s `rtms`), which is also the mass the
+    /// main sequence ended with, so the gap still starts where the main sequence ends.
+    ///
+    /// Equal, bit for bit, to `HertzsprungGap::at` when `mt` is the gap's own mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as `HertzsprungGap::at`.
+    #[must_use]
+    pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        let r_ehg = match &self.ignition {
+            None => gb::radius(mt, self.l_ehg, c),
+            Some(ignition) => ignition.at(mt, c),
+        };
+        self.point(t, r_ehg)
+    }
+
+    /// The core mass at `t` (`HertzsprungGap::at`'s), M☉.
+    #[must_use]
+    pub(crate) fn core_mass(&self, t: Megayears) -> SolarMasses {
+        let tau = (t - self.t_ms) / (self.t_bgb - self.t_ms);
+        self.mc_ehg * ((1.0 - tau) * self.rho + tau)
+    }
+
+    /// L, R and core at `t` with `r_ehg` for the radius at the end of the gap.
+    #[must_use]
+    fn point(&self, t: Megayears, r_ehg: SolarRadii) -> PhasePoint {
         let tau = (t - self.t_ms) / (self.t_bgb - self.t_ms);
         debug_assert!(
             (-1e-9..=1.0 + 1e-9).contains(&tau),
             "the gap runs from t_MS to t_BGB, not τ = {tau}"
         );
         let l = self.l_tms.value() * math::powf(self.l_ehg / self.l_tms, tau);
-        let r = self.r_tms.value() * math::powf(self.r_ehg / self.r_tms, tau);
+        let r = self.r_tms.value() * math::powf(r_ehg / self.r_tms, tau);
         PhasePoint {
             luminosity: SolarLuminosities::new(l),
             radius: SolarRadii::new(r),

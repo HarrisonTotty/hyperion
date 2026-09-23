@@ -19,15 +19,6 @@
 //! small-envelope perturbation of HPT section 6.3 (equations 97–100) disabled, for rows where SSE
 //! applies it; each test says which run it reads.
 
-// The track integrator of P06.T10 is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10 is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::units::{Megayears, SolarMasses, Years};
 
@@ -50,6 +41,11 @@ pub(crate) const HELIUM_RATE_MSUN_PER_LSUN_MYR: f64 = 8.0e-5;
 /// two shells on the thermally pulsing AGB (HPT equation 71), as printed, and as the published SSE
 /// code has it.
 pub(crate) const COMBINED_RATE_MSUN_PER_LSUN_MYR: f64 = 1.27e-5;
+
+/// The least growth of the carbon–oxygen core on the AGB before a supernova, as a factor of the
+/// core at the base of the AGB: the published SSE code's 1.05 (`hrdiag`'s `mcmax`), see
+/// [`EarlyAgb::new`].
+const SUPERNOVA_CORE_GROWTH: f64 = 1.05;
 
 /// The Chandrasekhar mass, 1.44 M☉, which HPT use at all times (section 6.2.1).
 pub(crate) const CHANDRASEKHAR_MSUN: f64 = 1.44;
@@ -75,14 +71,10 @@ pub(crate) fn mc_du(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
 /// remnant; from 1.6 to 2.25 an oxygen–neon core collapses by electron capture; above, carbon burns
 /// in a non-degenerate core that goes on to collapse (HPT section 6).
 ///
-/// The published SSE code also lets the core grow to at least 1.05 times the relation's
-/// carbon–oxygen core at the base of the AGB. That binds only where that core already exceeds
-/// `Mc,SN` (40–80 M☉), whose early AGB ends at once here and lasts at most 0.24% of the lifetime
-/// longer in the code, within P06.T12.b's 1%, so the printed form is kept. At 60 M☉ and Z = 0.0001
-/// or 0.001 the code's carbon–oxygen core at the base of the AGB exceeds its helium core, and it
-/// goes on through a thermally pulsing AGB with third dredge-up for 0.41 and 0.31 Myr more (8.2%
-/// and 6.4% of its lifetime): an artefact of the code, not followed, pending the owner's
-/// confirmation.
+/// This is the printed form, which decides whether the early AGB ends in a supernova or in the
+/// thermal pulses. [`EarlyAgb`] holds the core to at least 1.05 times the relation's carbon–oxygen
+/// core at the base of the AGB, as the published SSE code does, for the core the supernova
+/// explodes with; see [`EarlyAgb::new`].
 #[must_use]
 pub(crate) fn mc_sn(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
     SolarMasses::new(CHANDRASEKHAR_MSUN.max(0.773 * gb::mc_bagb(m, c).value() - 0.35))
@@ -133,13 +125,29 @@ pub(crate) struct EarlyAgb {
 
 impl EarlyAgb {
     /// The early AGB of a star of mass `m` at the metallicity of `c`.
+    ///
+    /// The phase ends in a supernova where `Mc,SN` ([`mc_sn`], HPT equation 75) is no more than
+    /// the core after the second dredge-up, and in the thermal pulses otherwise. The core the
+    /// supernova explodes with, and the limit of the thermal pulses, is held to at least 1.05 times
+    /// the carbon–oxygen core at the base of the AGB, as the published SSE code holds it
+    /// (`hrdiag`'s `mcmax`, stellar types 5 and 6): where the relation's carbon–oxygen core at the
+    /// base of the AGB already exceeds `Mc,SN` (from about 20 M☉ at Z = 10⁻⁴ and 40 M☉ at 0.02),
+    /// equation 75 alone ends the early AGB at once, and the supernova's core, 1.17 + 0.09 `Mc,SN`
+    /// for the neutron star's mass (equation 92), is then up to 0.08 M☉ lighter than SSE's, beyond
+    /// P06.T12.b's 0.02 M☉. Where the floor lifts `Mc,SN` above the core after dredge-up (60 M☉ at
+    /// Z = 10⁻⁴ and 10⁻³, at constant mass), SSE goes on through thermal pulses with third
+    /// dredge-up, a phase HPT do not describe for such stars; here the early AGB still ends in the
+    /// supernova (ruling 29 of 2026-09-22, amended by ruling 40, which confirms the floor).
     #[must_use]
     pub(crate) fn new(m: SolarMasses, c: &ZCoeffs) -> Self {
         let t_bagb = cheb::t_hei(m, c) + cheb::t_he(m, c);
         let relation = GiantBranch::new(m, c).with_rate(HELIUM_RATE_MSUN_PER_LSUN_MYR);
         let times = relation.times_from(t_bagb, cheb::l_bagb(m, c));
-        let (mc_du, mc_sn) = (mc_du(m, c), mc_sn(m, c));
-        let (target, end) = if mc_sn.value() <= mc_du.value() {
+        let printed = mc_sn(m, c);
+        let floor = relation.core_mass_at(&times, t_bagb) * SUPERNOVA_CORE_GROWTH;
+        let mc_du = mc_du(m, c);
+        let mc_sn = if floor > printed { floor } else { printed };
+        let (target, end) = if printed.value() <= mc_du.value() {
             (mc_sn, EarlyAgbEnd::Supernova)
         } else {
             (mc_du, EarlyAgbEnd::ThermalPulses)
@@ -200,6 +208,36 @@ impl EarlyAgb {
     /// In debug builds, if `t` lies outside the phase by more than rounding.
     #[must_use]
     pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+        self.point(t, &self.asymptotic)
+    }
+
+    /// [`EarlyAgb::at`] for a star whose current mass `mt` has fallen below the mass the phase
+    /// was built for: the radius is equation 74 at `mt` (HPT section 7.1). Equal, bit for bit, to
+    /// [`EarlyAgb::at`] when `mt` is the phase's own mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`EarlyAgb::at`].
+    #[must_use]
+    pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        self.point(t, &RadiusLaw::asymptotic(mt, c))
+    }
+
+    /// The hydrogen-exhausted core, which stays at `Mc,BAGB` through the phase, M☉.
+    #[must_use]
+    pub(crate) const fn mc_bagb(&self) -> SolarMasses {
+        self.mc_bagb
+    }
+
+    /// The carbon–oxygen core mass at which the phase ends in a supernova, `Mc,SN`, M☉.
+    #[must_use]
+    pub(crate) const fn mc_sn(&self) -> SolarMasses {
+        self.mc_sn
+    }
+
+    /// L, R and core at `t` with `asymptotic` for equation 74.
+    #[must_use]
+    fn point(&self, t: Megayears, asymptotic: &RadiusLaw) -> PhasePoint {
         debug_assert!(
             t.value() >= self.t_bagb.value() * (1.0 - 1e-12)
                 && t.value() <= self.t_end.value() * (1.0 + 1e-12),
@@ -208,7 +246,7 @@ impl EarlyAgb {
         let luminosity = self.relation.luminosity(self.co_core_mass(t));
         PhasePoint {
             luminosity,
-            radius: self.asymptotic.at(luminosity),
+            radius: asymptotic.at(luminosity),
             core_mass: self.mc_bagb,
         }
     }
@@ -302,8 +340,40 @@ impl ThermallyPulsingAgb {
     /// # Panics
     ///
     /// In debug builds, if `t` lies before `t_DU` by more than rounding.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+        self.point(t, &self.asymptotic)
+    }
+
+    /// `ThermallyPulsingAgb::at` for a star whose current mass `mt` has fallen below the mass
+    /// the phase was built for: the radius is equation 74 at `mt` (HPT section 7.1). Equal, bit
+    /// for bit, to `ThermallyPulsingAgb::at` when `mt` is the phase's own mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as `ThermallyPulsingAgb::at`.
+    #[must_use]
+    pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        self.point(t, &RadiusLaw::asymptotic(mt, c))
+    }
+
+    /// The core mass after third dredge-up at `t` (`ThermallyPulsingAgb::at`'s), M☉.
+    #[must_use]
+    pub(crate) fn core_mass(&self, t: Megayears) -> SolarMasses {
+        let undredged = self.relation.core_mass_at(&self.times, t);
+        self.mc_du + (undredged - self.mc_du) * (1.0 - self.dredge_up)
+    }
+
+    /// The core mass after the second dredge-up, where the pulses start, `Mc,DU`, M☉.
+    #[must_use]
+    pub(crate) const fn mc_du(&self) -> SolarMasses {
+        self.mc_du
+    }
+
+    /// L, R and core at `t` with `asymptotic` for equation 74.
+    #[must_use]
+    fn point(&self, t: Megayears, asymptotic: &RadiusLaw) -> PhasePoint {
         debug_assert!(
             t.value() >= self.t_du.value() * (1.0 - 1e-12),
             "the thermally pulsing AGB starts at t_DU, not {t:?}"
@@ -312,7 +382,7 @@ impl ThermallyPulsingAgb {
         let luminosity = self.relation.luminosity(undredged);
         PhasePoint {
             luminosity,
-            radius: self.asymptotic.at(luminosity),
+            radius: asymptotic.at(luminosity),
             core_mass: self.mc_du + (undredged - self.mc_du) * (1.0 - self.dredge_up),
         }
     }
@@ -337,6 +407,13 @@ impl ThermallyPulsingAgb {
 /// interpulse period. The relation was fitted to 0.8–7 M☉ at Z = 0.0001–0.02 and core masses up to
 /// about 1 M☉; beyond those it is extrapolated.
 #[must_use]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P06.T28.f's thermal-pulse events are the first caller"
+    )
+)]
 pub(crate) fn interpulse_period(
     mc: SolarMasses,
     mc_first: SolarMasses,

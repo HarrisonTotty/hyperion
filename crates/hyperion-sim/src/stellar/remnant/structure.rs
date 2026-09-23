@@ -8,15 +8,6 @@
 //! code (`hrdiag.f`) agrees with the paper on everything here except two guards for white dwarfs
 //! far lighter than any single star leaves, named at [`white_dwarf_radius`].
 
-// The track integrator of P06.T10.d and T10.e is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10.d and T10.e is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::stellar::Phase;
 use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M, SPEED_OF_LIGHT};

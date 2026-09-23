@@ -72,15 +72,6 @@
 //! small-envelope term carries no Z and the helium stars' rate carries Z^0.86 (a fall of about 95
 //! times at Z = 10⁻⁴ and 7 at 0.002).
 
-// The track integrator of P06.T10.c is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10.c is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::stellar::composition::Z_SOLAR;
 use crate::stellar::{Composition, Phase, StarState};
@@ -109,6 +100,7 @@ pub(crate) struct ReimersEta(f64);
 
 impl ReimersEta {
     /// HPT's value, η = 0.5 (section 7.1), which SSE's distributed input file also uses.
+    #[cfg(test)]
     pub(crate) const HURLEY: Self = Self(0.5);
 
     /// Wraps a value of η.

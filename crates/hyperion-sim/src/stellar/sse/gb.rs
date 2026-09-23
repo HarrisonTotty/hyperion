@@ -10,15 +10,6 @@
 //! from `M_HeF` up (equation 55), the blue-phase fraction above `M_FGB` (equation 58) and the
 //! asymptotic-giant radius (equation 74).
 
-// The track integrator of P06.T10 is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10 is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
@@ -101,12 +92,14 @@ impl GiantBranch {
     }
 
     /// The core mass where the two power laws cross, `M_x` (HPT equation 38).
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn m_x(&self) -> SolarMasses {
         SolarMasses::new(self.m_x)
     }
 
     /// The luminosity where the two power laws cross, `L_x`.
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn l_x(&self) -> SolarLuminosities {
         SolarLuminosities::new(self.l_x)
@@ -433,20 +426,87 @@ pub(crate) fn blue_fraction_massive(m: SolarMasses, c: &ZCoeffs) -> f64 {
 /// helium burning with a fivefold jump in radius there. For the owner to confirm.
 #[must_use]
 pub(crate) fn r_hei(m: SolarMasses, c: &ZCoeffs) -> SolarRadii {
-    let m_fgb = c.m_fgb().value();
-    let r_gb = || radius(m, l_hei(m, c), c);
-    let mass = m.value();
-    if mass <= m_fgb {
-        return r_gb();
+    r_hei_at(m, m, c)
+}
+
+/// [`r_hei`] for a star of initial mass `m0` whose current mass is `mt` (see [`IgnitionRadius`]).
+///
+/// Equal, bit for bit, to [`r_hei`] when `mt` is `m0`.
+#[must_use]
+pub(crate) fn r_hei_at(m0: SolarMasses, mt: SolarMasses, c: &ZCoeffs) -> SolarRadii {
+    IgnitionRadius::new(m0, c).at(mt, c)
+}
+
+/// The radius at helium ignition (HPT equation 50, [`r_hei`]) of a star of one initial mass as a
+/// function of its current mass, with the terms of the initial mass evaluated once.
+///
+/// HPT section 7.1 evaluate every radius formula at the current mass, so `R_GB` and `R_AGB` take
+/// the current mass, while `L_HeI`, the blue-phase fraction that decides the regime, the regime's
+/// bounds (`M_FGB`, 12 M☉) and equation 50's interpolation weight µ keep the initial mass, as the
+/// published SSE code keeps them (`hrdiag`'s `texp`).
+///
+/// The blue loop's minimum radius `R_mHe` (equation 55) also keeps the initial mass, as in the
+/// published SSE code (`hrdiag`'s `rminf(mass)` for stars above `M_FGB`), not the current mass the
+/// paper's rule asks for. Above `M_FGB` a star that ignites helium inside the reach of the
+/// Humphreys–Davidson limit loses its envelope to HPT's luminous-blue-variable wind, whose rate
+/// goes as the cube of 10⁻⁵ R L^½ − 1: with `R_mHe` at the current mass the radius shrinks as the
+/// mass goes, the wind chokes, and a 60 M☉ star at Z = 10⁻⁴ keeps some 25 M☉ of envelope through
+/// core helium burning that SSE's loses within 10⁴ years of ignition, far beyond P06.T12.b's
+/// tolerances (1% in mass, the remnant's kind). Ruling 40 of 2026-09-22 confirms SSE's form.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IgnitionRadius {
+    l_hei: SolarLuminosities,
+    form: IgnitionForm,
+}
+
+/// Which branch of HPT equation 50 applies, by the initial mass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum IgnitionForm {
+    /// Up to `M_FGB`: the giant's radius at `L_HeI`.
+    Giant,
+    /// Above `M_FGB` with no blue phase: the asymptotic giant's radius at `L_HeI` ([`r_hei`]).
+    Asymptotic,
+    /// From 12 M☉ with a blue phase: `R_mHe` at the initial mass.
+    Minimum(SolarRadii),
+    /// Between `M_FGB` and 12 M☉ with a blue phase: `R_mHe` (`R_GB` ÷ `R_mHe`)^µ.
+    Interpolated { r_mhe: f64, mu: f64 },
+}
+
+impl IgnitionRadius {
+    /// The ignition radius of a star of initial mass `m0` at the metallicity of `c`.
+    #[must_use]
+    pub(crate) fn new(m0: SolarMasses, c: &ZCoeffs) -> Self {
+        let m_fgb = c.m_fgb().value();
+        let mass = m0.value();
+        let form = if mass <= m_fgb {
+            IgnitionForm::Giant
+        } else if blue_fraction_massive(m0, c) <= 0.0 {
+            IgnitionForm::Asymptotic
+        } else if mass >= 12.0 {
+            IgnitionForm::Minimum(r_mhe_intermediate(m0, c))
+        } else {
+            IgnitionForm::Interpolated {
+                r_mhe: r_mhe_intermediate(m0, c).value(),
+                mu: math::log10(mass / 12.0) / math::log10(m_fgb / 12.0),
+            }
+        };
+        Self {
+            l_hei: l_hei(m0, c),
+            form,
+        }
     }
-    if blue_fraction_massive(m, c) <= 0.0 {
-        agb_radius(m, l_hei(m, c), c)
-    } else if mass >= 12.0 {
-        r_mhe_intermediate(m, c)
-    } else {
-        let r_mhe = r_mhe_intermediate(m, c).value();
-        let mu = math::log10(mass / 12.0) / math::log10(m_fgb / 12.0);
-        SolarRadii::new(r_mhe * math::powf(r_gb().value() / r_mhe, mu))
+
+    /// The radius at ignition at current mass `mt`.
+    #[must_use]
+    pub(crate) fn at(&self, mt: SolarMasses, c: &ZCoeffs) -> SolarRadii {
+        match self.form {
+            IgnitionForm::Giant => radius(mt, self.l_hei, c),
+            IgnitionForm::Asymptotic => agb_radius(mt, self.l_hei, c),
+            IgnitionForm::Minimum(r_mhe) => r_mhe,
+            IgnitionForm::Interpolated { r_mhe, mu } => {
+                SolarRadii::new(r_mhe * math::powf(radius(mt, self.l_hei, c).value() / r_mhe, mu))
+            }
+        }
     }
 }
 
@@ -454,8 +514,8 @@ pub(crate) fn r_hei(m: SolarMasses, c: &ZCoeffs) -> SolarRadii {
 /// `t_HeI` (HPT section 5.2).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FirstGiantBranch {
-    /// The mass factor A of equation 46 and b1, b2, b3, fixed by the star's mass and metallicity.
-    radius_law: [f64; 4],
+    /// Equation 46 at the star's mass and metallicity.
+    radius_law: RadiusLaw,
     relation: GiantBranch,
     times: GiantTimes,
     t_bgb: Megayears,
@@ -478,15 +538,13 @@ impl FirstGiantBranch {
             m.value() < c.m_fgb().value(),
             "a star of {m:?} has no giant branch"
         );
-        let mass = m.value();
-        let a = (c.b(4) * math::powf(mass, -c.b(5))).min(c.b(6) * math::powf(mass, -c.b(7)));
         let relation = GiantBranch::new(m, c);
         let t_bgb = ms::t_bgb(m, c);
         let times = relation.times(t_bgb, ms::l_bgb(m, c));
         let t_hei = relation.time_of_luminosity(&times, l_hei(m, c));
         let linear_core = (m.value() >= c.m_hef().value()).then(|| (mc_bgb(m, c), mc_hei(m, c)));
         Self {
-            radius_law: [a, c.b(1), c.b(2), c.b(3)],
+            radius_law: RadiusLaw::giant(m, c),
             relation,
             times,
             t_bgb,
@@ -501,6 +559,32 @@ impl FirstGiantBranch {
         self.t_hei
     }
 
+    /// When the branch starts, `t_BGB`.
+    #[must_use]
+    pub(crate) const fn t_start(&self) -> Megayears {
+        self.t_bgb
+    }
+
+    /// The core mass on the core mass–luminosity relation at `t` (HPT equation 39), which sets the
+    /// luminosity; for a non-degenerate core it is the luminosity's clock, not the reported core.
+    #[must_use]
+    pub(crate) fn relation_core(&self, t: Megayears) -> SolarMasses {
+        self.relation.core_mass_at(&self.times, t)
+    }
+
+    /// The core mass the branch reports at `t` (`FirstGiantBranch::at`'s).
+    #[must_use]
+    pub(crate) fn core_mass(&self, t: Megayears) -> SolarMasses {
+        let relation_core = self.relation.core_mass_at(&self.times, t);
+        match self.linear_core {
+            None => relation_core,
+            Some((mc_bgb, mc_hei)) => {
+                let tau = (t - self.t_bgb) / (self.t_hei - self.t_bgb);
+                mc_bgb + (mc_hei - mc_bgb) * tau
+            }
+        }
+    }
+
     /// Luminosity, radius and core mass at `t`, `t_BGB` ≤ t ≤ `t_HeI`.
     ///
     /// The luminosity follows the core mass–luminosity relation along equation 39's core; for a
@@ -510,8 +594,28 @@ impl FirstGiantBranch {
     /// # Panics
     ///
     /// In debug builds, if `t` lies outside `t_BGB` ≤ t ≤ `t_HeI` by more than rounding.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+        self.point(t, &self.radius_law)
+    }
+
+    /// `FirstGiantBranch::at` for a star whose current mass `mt` has fallen below the mass the
+    /// branch was built for: the radius is equation 46 at `mt` (HPT section 7.1), luminosity and
+    /// core keep the initial mass. Equal, bit for bit, to `FirstGiantBranch::at` when `mt` is
+    /// the branch's own mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as `FirstGiantBranch::at`.
+    #[must_use]
+    pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        self.point(t, &RadiusLaw::giant(mt, c))
+    }
+
+    /// L, R and core at `t` with `radius_law` for equation 46.
+    #[must_use]
+    fn point(&self, t: Megayears, radius_law: &RadiusLaw) -> PhasePoint {
         let tau = (t - self.t_bgb) / (self.t_hei - self.t_bgb);
         debug_assert!(
             (-1e-9..=1.0 + 1e-9).contains(&tau),
@@ -523,11 +627,9 @@ impl FirstGiantBranch {
             None => relation_core,
             Some((mc_bgb, mc_hei)) => mc_bgb + (mc_hei - mc_bgb) * tau,
         };
-        let [a, b1, b2, b3] = self.radius_law;
-        let l = luminosity.value();
         PhasePoint {
             luminosity,
-            radius: SolarRadii::new(a * (math::powf(l, b1) + b2 * math::powf(l, b3))),
+            radius: radius_law.at(luminosity),
             core_mass,
         }
     }

@@ -9,7 +9,7 @@
 //! [`HeliumStar`] follows one from its zero-age helium main sequence through the helium
 //! Hertzsprung gap and giant branch. [`HeliumStar::new`] builds one at zero age, for plan 11's
 //! stripped stars and for a star whose envelope goes in the Hertzsprung gap or on the giant branch;
-//! [`HeliumStar::from_core_helium_burning`] and [`HeliumStar::from_early_agb`] take over a star
+//! `HeliumStar::from_core_helium_burning` and [`HeliumStar::from_early_agb`] take over a star
 //! whose envelope a wind removes during core helium burning or on the early AGB, the Wolf-Rayet
 //! route (HPT section 6).
 //!
@@ -23,21 +23,13 @@
 //! small-envelope perturbation of HPT section 6.3 (equations 97–100) disabled, for rows where SSE
 //! applies it; each test says which run it reads.
 
-// The track integrator of P06.T10 is the first caller outside tests.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the track integrator of P06.T10 is the first caller"
-    )
-)]
-
 use crate::math;
 use crate::stellar::Phase;
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::PhasePoint;
 use super::agb::{self, CHANDRASEKHAR_MSUN, CoreEnd, EarlyAgb};
+#[cfg(test)]
 use super::cheb::CoreHeliumBurning;
 use super::gb::{GiantBranch, GiantTimes};
 
@@ -72,6 +64,20 @@ pub(crate) fn main_sequence_lifetime(m: SolarMasses) -> Megayears {
     )
 }
 
+/// The luminosity and radius of a helium main-sequence star of mass `m` at fractional age `tau`
+/// (HPT equations 77, 78 and 80–83): what [`HeliumStar::at`] gives on the main sequence, without
+/// building the rest of the star. Core helium burning's remnant (HPT section 6.3) reads it.
+#[must_use]
+pub(crate) fn main_sequence_point(m: SolarMasses, tau: f64) -> (SolarLuminosities, SolarRadii) {
+    let mass = m.value();
+    let alpha = (0.85 - 0.08 * mass).max(0.0);
+    let beta = (0.4 - 0.22 * math::log10(mass)).max(0.0);
+    (
+        zams_luminosity(m) * (1.0 + 0.45 * tau + alpha * tau * tau),
+        zams_radius(m) * (1.0 + beta * (tau - math::powi(tau, 6))),
+    )
+}
+
 /// A naked helium star of one mass, from its helium zero-age main sequence through the helium
 /// Hertzsprung gap and giant branch until its carbon–oxygen core reaches its limit (HPT section
 /// 6.1).
@@ -89,6 +95,8 @@ pub(crate) fn main_sequence_lifetime(m: SolarMasses) -> Megayears {
 /// as HPT use them.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HeliumStar {
+    /// The helium star's (effective initial) mass, M☉.
+    mass: SolarMasses,
     l_zams: SolarLuminosities,
     r_zams: SolarRadii,
     t_ms: Megayears,
@@ -131,12 +139,7 @@ impl HeliumStar {
         let t_ms = main_sequence_lifetime(m);
         let relation = GiantBranch::helium_giant(m, agb::HELIUM_RATE_MSUN_PER_LSUN_MYR);
         let times = relation.times_from(t_ms, l_tms);
-        let shell_limit = 1.45 * mass - 0.31;
-        let mc_max = if shell_limit > 0.0 {
-            shell_limit.min(mass)
-        } else {
-            mass
-        };
+        let mc_max = shell_limit(mass);
         let mc_sn = CHANDRASEKHAR_MSUN.max(0.773 * mass - 0.35);
         let (limit, end) = if mc_max < mc_sn {
             (mc_max, CoreEnd::WhiteDwarf)
@@ -146,6 +149,7 @@ impl HeliumStar {
         let t_limit =
             relation.time_of_luminosity(&times, relation.luminosity(SolarMasses::new(limit)));
         Self {
+            mass: m,
             l_zams,
             r_zams: zams_radius(m),
             t_ms,
@@ -154,9 +158,7 @@ impl HeliumStar {
             l_tms,
             relation,
             times,
-            lambda: SolarLuminosities::new(
-                500.0 * (2.0 + math::powi(mass, 5)) / math::powf(mass, 2.5),
-            ),
+            lambda: shell_lambda(m),
             t_end: if t_limit < t_ms { t_ms } else { t_limit },
             end,
         }
@@ -170,6 +172,7 @@ impl HeliumStar {
     /// # Panics
     ///
     /// In debug builds, if `t` lies outside core helium burning by more than rounding.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn from_core_helium_burning(
         phase: &CoreHeliumBurning,
@@ -214,6 +217,7 @@ impl HeliumStar {
 
     /// How the star ends at constant mass: [`CoreEnd::WhiteDwarf`] when `Mc,max` < `Mc,SN`,
     /// otherwise [`CoreEnd::Supernova`].
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn end(&self) -> CoreEnd {
         self.end
@@ -221,17 +225,64 @@ impl HeliumStar {
 
     /// The phase at age `t`: the helium main sequence before `t_HeMS`, then the helium
     /// Hertzsprung gap while R₁ < R₂ and the helium giant branch once R₂ ≤ R₁ (HPT section 6.1).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn phase_at(&self, t: Megayears) -> Phase {
+        self.phase_at_mass(t, self.mass)
+    }
+
+    /// `HeliumStar::phase_at` for a star of current mass `mt`, whose radii decide it (see
+    /// [`HeliumStar::at_mass`]).
+    #[must_use]
+    pub(crate) fn phase_at_mass(&self, t: Megayears, mt: SolarMasses) -> Phase {
         if t < self.t_ms {
             return Phase::HeliumMainSequence;
         }
-        let (r1, r2) = self.giant_radii(self.relation.luminosity(self.core_mass_at(t)));
+        let l = self.relation.luminosity(self.core_mass_at(t));
+        let (r1, r2) = self.giant_radii(l, zams_radius(mt), shell_lambda(mt));
         if r2 <= r1 {
             Phase::HeliumGiantBranch
         } else {
             Phase::HeliumHertzsprungGap
         }
+    }
+
+    /// The helium star's mass, M☉.
+    #[must_use]
+    pub(crate) const fn mass(&self) -> SolarMasses {
+        self.mass
+    }
+
+    /// The largest mass the carbon–oxygen core of a star of this helium star's (initial) mass
+    /// reaches when its current mass is `mt`: min(`Mc,max`(`mt`), `Mc,SN`), with `Mc,max` =
+    /// min(1.45 `mt` − 0.31, `mt`) (HPT equation 89, which the published SSE code evaluates at the
+    /// current mass; below 0.214 M☉ it is `mt`) and `Mc,SN` = max(`M_Ch`, 0.773 M − 0.35) with
+    /// the initial mass (equation 75). The star ends when its core reaches it.
+    #[must_use]
+    pub(crate) fn core_limit(&self, mt: SolarMasses) -> SolarMasses {
+        let mc_sn = CHANDRASEKHAR_MSUN.max(0.773 * self.mass.value() - 0.35);
+        SolarMasses::new(shell_limit(mt.value()).min(mc_sn))
+    }
+
+    /// The luminosity at the end of the helium main sequence, `L_THe`.
+    #[must_use]
+    pub(crate) const fn l_tms(&self) -> SolarLuminosities {
+        self.l_tms
+    }
+
+    /// The helium giants' core mass–luminosity relation of this star (HPT equation 84), for the
+    /// remnant of the early AGB (section 6.3).
+    #[must_use]
+    pub(crate) const fn relation(&self) -> &GiantBranch {
+        &self.relation
+    }
+
+    /// The radius of this star at luminosity `l` after its main sequence, min(R₁, R₂) (HPT
+    /// equation 85) at its own mass.
+    #[must_use]
+    pub(crate) fn shell_radius(&self, l: SolarLuminosities) -> SolarRadii {
+        let (r1, r2) = self.giant_radii(l, self.r_zams, self.lambda);
+        if r2 < r1 { r2 } else { r1 }
     }
 
     /// Luminosity, radius and core mass at age `t`, 0 ≤ t ≤ [`HeliumStar::t_end`] (HPT equations
@@ -242,6 +293,28 @@ impl HeliumStar {
     /// In debug builds, if `t` lies outside the star's life by more than rounding.
     #[must_use]
     pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+        self.point(t, self.r_zams, self.lambda)
+    }
+
+    /// [`HeliumStar::at`] for a star whose current mass `mt` has fallen below the mass it was
+    /// built for, after its main sequence: HPT section 7.1 evaluate the radius at the current
+    /// mass, so R₁ takes `R_ZHe`(`mt`) and λ(`mt`) (equations 78, 86 and 87), as the published SSE
+    /// code does (`rzhef(mt)`, `rhehgf(mt, …)`); the luminosity and core keep the initial mass. On
+    /// the helium main sequence the initial mass is the current one (HPT section 7.1), so a helium
+    /// main-sequence star is rebuilt at its current mass rather than evaluated here. Equal, bit for
+    /// bit, to [`HeliumStar::at`] when `mt` is the star's own mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`HeliumStar::at`].
+    #[must_use]
+    pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses) -> PhasePoint {
+        self.point(t, zams_radius(mt), shell_lambda(mt))
+    }
+
+    /// L, R and core at `t` with `r_zams` and `lambda` in equation 86.
+    #[must_use]
+    fn point(&self, t: Megayears, r_zams: SolarRadii, lambda: SolarLuminosities) -> PhasePoint {
         debug_assert!(
             t.value() >= -1e-9 * self.t_ms.value()
                 && t.value() <= self.t_end.value() * (1.0 + 1e-12),
@@ -257,7 +330,7 @@ impl HeliumStar {
         }
         let core_mass = self.core_mass_at(t);
         let luminosity = self.relation.luminosity(core_mass);
-        let (r1, r2) = self.giant_radii(luminosity);
+        let (r1, r2) = self.giant_radii(luminosity, r_zams, lambda);
         PhasePoint {
             luminosity,
             radius: if r2 < r1 { r2 } else { r1 },
@@ -268,18 +341,47 @@ impl HeliumStar {
     /// The carbon–oxygen core after the main sequence (HPT equation 39 with equation 84's
     /// relation).
     #[must_use]
-    fn core_mass_at(&self, t: Megayears) -> SolarMasses {
+    pub(crate) fn core_mass_at(&self, t: Megayears) -> SolarMasses {
         self.relation.core_mass_at(&self.times, t)
     }
 
-    /// R₁ and R₂ of HPT equations 86 and 88 at luminosity `l`.
+    /// R₁ and R₂ of HPT equations 86 and 88 at luminosity `l`, with `r_zams` and `lambda` the
+    /// zero-age radius and λ of equation 87 at the mass the radius is evaluated for.
     #[must_use]
-    fn giant_radii(&self, l: SolarLuminosities) -> (SolarRadii, SolarRadii) {
-        let (l, l_tms, lambda) = (l.value(), self.l_tms.value(), self.lambda.value());
-        let r1 = self.r_zams * math::powf(l / l_tms, 0.2)
+    fn giant_radii(
+        &self,
+        l: SolarLuminosities,
+        r_zams: SolarRadii,
+        lambda: SolarLuminosities,
+    ) -> (SolarRadii, SolarRadii) {
+        let (l, l_tms, lambda) = (l.value(), self.l_tms.value(), lambda.value());
+        let r1 = r_zams * math::powf(l / l_tms, 0.2)
             + SolarRadii::new(0.02 * (math::exp(l / lambda) - math::exp(l_tms / lambda)));
         (r1, SolarRadii::new(0.08 * math::powf(l, 0.75)))
     }
+}
+
+/// λ of HPT equation 87 for a helium star of mass `m`: 500 (2 + M⁵) ÷ M^2.5 L☉.
+#[must_use]
+fn shell_lambda(m: SolarMasses) -> SolarLuminosities {
+    let mass = m.value();
+    SolarLuminosities::new(500.0 * (2.0 + math::powi(mass, 5)) / math::powf(mass, 2.5))
+}
+
+/// `Mc,max` of HPT equation 89 for a helium star of current mass `mt`: min(1.45 M − 0.31, M) at
+/// the current mass, as the published SSE code evaluates it for equation 98's µ, and M itself below
+/// 0.214 M☉, where the first is not positive.
+#[must_use]
+pub(crate) fn shell_limit_at(mt: SolarMasses) -> SolarMasses {
+    SolarMasses::new(shell_limit(mt.value()))
+}
+
+/// `Mc,max` of HPT equation 89 for a helium star of current mass `m` (M☉): min(1.45 m − 0.31, m),
+/// and m below 0.214 M☉, where the first is not positive (as in the published SSE code).
+#[must_use]
+fn shell_limit(m: f64) -> f64 {
+    let limit = 1.45 * m - 0.31;
+    if limit > 0.0 { limit.min(m) } else { m }
 }
 
 #[cfg(test)]

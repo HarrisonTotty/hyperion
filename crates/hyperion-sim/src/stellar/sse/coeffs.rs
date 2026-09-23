@@ -137,13 +137,6 @@ impl ZCoeffs {
 
     /// Coefficient aₙ of HPT's Appendix, 1 ≤ n ≤ 81, after its special cases.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the track integrator of P06.T10 is the first caller"
-        )
-    )]
     pub(crate) const fn a(&self, n: usize) -> f64 {
         self.a[n]
     }
@@ -157,13 +150,6 @@ impl ZCoeffs {
     /// The power law of HPT equation 21a for the radius α coefficient at mass `m` (M☉), the one copy
     /// that both a64's special case and the main sequence's αR use.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the track integrator of P06.T10 is the first caller"
-        )
-    )]
     pub(crate) fn alpha_r_power_law(&self, m: f64) -> f64 {
         alpha_r_power_law(&self.a, m)
     }
