@@ -9,6 +9,7 @@
 //! remnant masses (P06.T11).
 
 pub(crate) mod structure;
+pub mod wd_spectral;
 
 // The death types of P06.T10.e, which the track integrator builds and T18 and T19 read.
 mod death;

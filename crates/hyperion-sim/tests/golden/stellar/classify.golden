@@ -1,0 +1,254 @@
+# generator_version = 11
+sun: G2V
+sun.code = 0x4044fd2248f5725e  # 41.977608795020146
+sun.bc_v = 0xbfb5b0f36a3e2309  # -0.08473130554024179
+sun.b_v = 0x3fe4c7a9fb92fa02  # 0.6493730462605642
+sun.m_v = 0x40134c865d052182  # 4.824731305540242
+vega: A0V
+vega.code = 0x40343eff1669c4fb  # 20.246079827139493
+vega.bc_v = 0xbfc8acd4f9bcf21b  # -0.19277441210023558
+vega.b_v = 0x3f81a395a2bc4634  # 0.008612793949882215
+vega.m_v = 0x3fea5f608e2df80f  # 0.824142720884767
+arcturus: K2.5III
+arcturus.code = 0x404a373af1818788  # 52.43148630928687
+arcturus.bc_v = 0xbfe8000000000000  # -0.75
+arcturus.b_v = 0x3ff3d70a3d70a3d7  # 1.24
+arcturus.m_v = 0xbfc6c663535d0940  # -0.1779293210075341
+red_supergiant: M3Ia
+red_supergiant.code = 0x404f85c716e27386  # 63.04513822610083
+red_supergiant.bc_v = 0xbff8a2edcde96c0f  # -1.5397775691442381
+red_supergiant.b_v = 0x3ff7f918efe11aed  # 1.4983147974286866
+red_supergiant.m_v = 0xc018e181fd297c06  # -6.220222430855761
+sirius: A0V
+sirius.code = 0x4033d31a3308d06d  # 19.824618520404716
+sirius.bc_v = 0xbfd0ceaccffa9ba4  # -0.2626144438785849
+sirius.b_v = 0xbf91f5852faca116  # -0.017538147959528315
+sirius.m_v = 0x3ff7d936251f42e9  # 1.4905301523287398
+procyon: F5IV
+procyon.code = 0x40418d532187f9dc  # 35.104099456209696
+procyon.bc_v = 0xbf957d65603221e6  # -0.020986160274817943
+procyon.b_v = 0x3fdc7348899bb99e  # 0.44453633726416253
+procyon.m_v = 0x40054f97a1bccb72  # 2.66386343343168
+pollux: K0.5III
+pollux.code = 0x40493e9c5b6919b3  # 50.48914663917403
+pollux.bc_v = 0xbfde9205f10da182  # -0.4776625494037249
+pollux.b_v = 0x3ff0f90b43b0c884  # 1.0608017582094655
+pollux.m_v = 0x3ff224d42d5d91d4  # 1.133991410454759
+aldebaran: K5III
+aldebaran.code = 0x404b8eb90dcb4dd5  # 55.115022396344706
+aldebaran.bc_v = 0xbff198cfc64f22bb  # -1.0998075243425507
+aldebaran.b_v = 0x3ff684ec437f4dcd  # 1.4074518810856376
+aldebaran.m_v = 0xbfe89a3523a2ff02  # -0.7688241668729179
+rigel: B8Ia
+rigel.code = 0x403213026bb9c0b3  # 18.074255688524044
+rigel.bc_v = 0xbfe631690f302f7a  # -0.6935315415043839
+rigel.b_v = 0xbfbababf39805e4b  # -0.1044120326408741
+rigel.m_v = 0xc01d0ec4876c20ab  # -7.264421573614679
+deneb: A3Ia
+deneb.code = 0x4036d0f334047b6a  # 22.816210986227283
+deneb.bc_v = 0xbfa2523d4aa6745b  # -0.035783686983656714
+deneb.b_v = 0x3fbbc23d96a139ba  # 0.10843262603268658
+deneb.m_v = 0xc020e8e2f335eff5  # -8.454856491407535
+polaris: F8.5Ib
+polaris.code = 0x404340bb70696bf3  # 38.5057201876406
+polaris.bc_v = 0xbfac9499228f095e  # -0.05582121416911677
+polaris.b_v = 0x3fe24ae50fd6ffe4  # 0.5716424283382335
+polaris.m_v = 0xc00d979c6a59c5af  # -3.699028807510977
+spica: B1III
+spica.code = 0x40258673b0618f1a  # 10.762601386937195
+spica.bc_v = 0xc00420278d174a27  # -2.515700437806362
+spica.b_v = 0xbfd1071adf14440a  # -0.26605865273546725
+spica.m_v = 0xc00c308159811d3d  # -3.523684214833024
+mira: M8II
+mira.code = 0x4050f2e876b55a80  # 67.79543845854096
+mira.bc_v = 0xc00a985a26fc6026  # -3.324390701844112
+mira.b_v = 0x3ffe153400d1a3bf  # 1.8801765472401113
+mira.m_v = 0xbffbf0e025a6d964  # -1.7463075133105912
+o_dwarf: O4.5V
+o_dwarf.code = 0x4012620433951272  # 4.595719152425419
+o_dwarf.bc_v = 0xc00e801da0ab2949  # -3.8125565101846957
+o_dwarf.b_v = 0xbfd4bfe738ea8230  # -0.32421284254272376
+o_dwarf.m_v = 0xc012ccd1a4e72d76  # -4.700018478975258
+yellow_hypergiant: F5Ia+
+yellow_hypergiant.code = 0x4041800000000000  # 35.0
+yellow_hypergiant.bc_v = 0x3f706fd67b059978  # 0.004012906851448832
+yellow_hypergiant.b_v = 0x3fd55f68feb60ccf  # 0.3339483725942047
+yellow_hypergiant.m_v = 0xc023c0e66cec2c22  # -9.87675800688709
+subgiant: G5.5IV
+subgiant.code = 0x4046addf8e3ec362  # 45.35838487686739
+subgiant.bc_v = 0xbfc3f6d6c08c8206  # -0.15597042466926342
+subgiant.b_v = 0x3fe88286e0c9ea6b  # 0.7659334555058427
+subgiant.m_v = 0x400b2066785d6dcc  # 3.390820446349357
+t_tauri: K4IV
+t_tauri.code = 0x404b1b9d78c0c3c4  # 54.215743154643434
+t_tauri.bc_v = 0xbfe8000000000000  # -0.75
+t_tauri.b_v = 0x3ff3d70a3d70a3d7  # 1.24
+t_tauri.m_v = 0x4011fb08988dff16  # 4.4951499783199065
+m_subdwarf: sdM3
+m_subdwarf.code = 0x404f800000000000  # 63.0
+m_subdwarf.bc_v = 0xbffee147ae147ae1  # -1.93
+m_subdwarf.b_v = 0x3ff87ae147ae147b  # 1.53
+m_subdwarf.m_v = 0x4026f1b021197c10  # 11.472046884880939
+k_extreme_subdwarf: esdK7
+k_extreme_subdwarf.code = 0x404c800000000000  # 57.0
+k_extreme_subdwarf.bc_v = 0xbfedc28f5c28f5c3  # -0.93
+k_extreme_subdwarf.b_v = 0x3ff570a3d70a3d71  # 1.34
+k_extreme_subdwarf.m_v = 0x40217301a365f197  # 8.72462187404089
+late_m_dwarf: M9V
+late_m_dwarf.code = 0x4051400000000000  # 69.0
+late_m_dwarf.bc_v = 0xc01770a3d70a3d71  # -5.86
+late_m_dwarf.b_v = 0x40015c28f5c28f5c  # 2.17
+late_m_dwarf.m_v = 0x4032da425abfd45e  # 18.852574989159955
+l_dwarf: L3
+l_dwarf.code = 0x4052400000000000  # 73.0
+l_dwarf.bc_v = 0xc01c333333333333  # -7.05
+l_dwarf.m_v = 0x40350994af7d9c46  # 21.037425010840046
+t_dwarf: T6
+t_dwarf.code = 0x4055800000000000  # 86.0
+y_dwarf: Y1
+y_dwarf.code = 0x4056c8d056f440e8  # 91.13771604397664
+helium_star: O3V
+helium_star.code = 0x4008000000000000  # 3.0
+helium_star.bc_v = 0xc0191992111c568c  # -6.2749712632700145
+helium_star.b_v = 0xbfd51eb851eb851f  # -0.33
+helium_star.m_v = 0xbff7c2ad7e1e01f8  # -1.4850287367299853
+post_agb: B0III
+post_agb.code = 0x40241de11be8384e  # 10.058358070466195
+post_agb.bc_v = 0xc0072f8d8a7d240d  # -2.8982191867294262
+post_agb.b_v = 0xbfd2d2cdc1af6fbd  # -0.2941164390047069
+post_agb.m_v = 0xbff9bf4e9b3167ce  # -1.6092058241106204
+white_dwarf_0_120000: DO0.4
+white_dwarf_0_120000.index = 0x3fdae147ae147ae0  # 0.41999999999999993
+white_dwarf_0_120000.bc_v = 0xc01cd9199e3c6c9c  # -7.212011787832264
+white_dwarf_0_120000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_0_60000: DO0.8
+white_dwarf_0_60000.index = 0x3feae147ae147ae0  # 0.8399999999999999
+white_dwarf_0_60000.bc_v = 0xc013d1309071ab6c  # -4.954286820352404
+white_dwarf_0_60000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_0_35000: DB1.4
+white_dwarf_0_35000.index = 0x3ff70a3d70a3d709  # 1.4399999999999997
+white_dwarf_0_35000.bc_v = 0xc009dc5065327fb6  # -3.232575216868976
+white_dwarf_0_35000.b_v = 0xbfd426eebae3eacc  # -0.3148762536144829
+white_dwarf_0_20000: DB2.5
+white_dwarf_0_20000.index = 0x400428f5c28f5c29  # 2.52
+white_dwarf_0_20000.bc_v = 0xbfff561ba858c3b6  # -1.9585224700970065
+white_dwarf_0_20000.b_v = 0xbfcaebfa4d587e52  # -0.21032646919865045
+white_dwarf_0_12000: DB4.2
+white_dwarf_0_12000.index = 0x4010cccccccccccc  # 4.199999999999999
+white_dwarf_0_12000.bc_v = 0xbfe59a2dbce6d5e8  # -0.675070637653957
+white_dwarf_0_12000.b_v = 0xbfba228a207d9088  # -0.10208953183388492
+white_dwarf_0_8500: DC5.9
+white_dwarf_0_8500.index = 0x4017b7b7b7b7b7b6  # 5.929411764705881
+white_dwarf_0_8500.bc_v = 0xbfa198f1e6c4c4e3  # -0.03437000219344968
+white_dwarf_0_8500.b_v = 0x3fbc7b88fa82e932  # 0.11125999561310065
+white_dwarf_0_6000: DC8.4
+white_dwarf_0_6000.index = 0x4020cccccccccccc  # 8.399999999999999
+white_dwarf_0_6000.bc_v = 0xbfaddcf51b775ced  # -0.05832639656335368
+white_dwarf_0_6000.b_v = 0x3fe273f08ef40a56  # 0.5766527931267074
+white_dwarf_0_4500: DC11.2
+white_dwarf_0_4500.index = 0x4026666666666666  # 11.2
+white_dwarf_0_4500.bc_v = 0xbfe2d34a6a7c96c3  # -0.5882923202340965
+white_dwarf_0_4500.b_v = 0x3ff20937ab788da8  # 1.1272503564913254
+white_dwarf_1_120000: DO0.4
+white_dwarf_1_120000.index = 0x3fdae147ae147ae0  # 0.41999999999999993
+white_dwarf_1_120000.bc_v = 0xc01cd9199e3c6c9c  # -7.212011787832264
+white_dwarf_1_120000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_1_60000: DA0.8
+white_dwarf_1_60000.index = 0x3feae147ae147ae0  # 0.8399999999999999
+white_dwarf_1_60000.bc_v = 0xc013d1309071ab6c  # -4.954286820352404
+white_dwarf_1_60000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_1_35000: DA1.4
+white_dwarf_1_35000.index = 0x3ff70a3d70a3d709  # 1.4399999999999997
+white_dwarf_1_35000.bc_v = 0xc009dc5065327fb6  # -3.232575216868976
+white_dwarf_1_35000.b_v = 0xbfd426eebae3eacc  # -0.3148762536144829
+white_dwarf_1_20000: DA2.5
+white_dwarf_1_20000.index = 0x400428f5c28f5c29  # 2.52
+white_dwarf_1_20000.bc_v = 0xbfff561ba858c3b6  # -1.9585224700970065
+white_dwarf_1_20000.b_v = 0xbfcaebfa4d587e52  # -0.21032646919865045
+white_dwarf_1_12000: DB4.2
+white_dwarf_1_12000.index = 0x4010cccccccccccc  # 4.199999999999999
+white_dwarf_1_12000.bc_v = 0xbfe59a2dbce6d5e8  # -0.675070637653957
+white_dwarf_1_12000.b_v = 0xbfba228a207d9088  # -0.10208953183388492
+white_dwarf_1_8500: DQ5.9
+white_dwarf_1_8500.index = 0x4017b7b7b7b7b7b6  # 5.929411764705881
+white_dwarf_1_8500.bc_v = 0xbfa198f1e6c4c4e3  # -0.03437000219344968
+white_dwarf_1_8500.b_v = 0x3fbc7b88fa82e932  # 0.11125999561310065
+white_dwarf_1_6000: DC8.4
+white_dwarf_1_6000.index = 0x4020cccccccccccc  # 8.399999999999999
+white_dwarf_1_6000.bc_v = 0xbfaddcf51b775ced  # -0.05832639656335368
+white_dwarf_1_6000.b_v = 0x3fe273f08ef40a56  # 0.5766527931267074
+white_dwarf_1_4500: DC11.2
+white_dwarf_1_4500.index = 0x4026666666666666  # 11.2
+white_dwarf_1_4500.bc_v = 0xbfe2d34a6a7c96c3  # -0.5882923202340965
+white_dwarf_1_4500.b_v = 0x3ff20937ab788da8  # 1.1272503564913254
+white_dwarf_2_120000: DAZ0.4
+white_dwarf_2_120000.index = 0x3fdae147ae147ae0  # 0.41999999999999993
+white_dwarf_2_120000.bc_v = 0xc01cd9199e3c6c9c  # -7.212011787832264
+white_dwarf_2_120000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_2_60000: DAZ0.8
+white_dwarf_2_60000.index = 0x3feae147ae147ae0  # 0.8399999999999999
+white_dwarf_2_60000.bc_v = 0xc013d1309071ab6c  # -4.954286820352404
+white_dwarf_2_60000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_2_35000: DAZ1.4
+white_dwarf_2_35000.index = 0x3ff70a3d70a3d709  # 1.4399999999999997
+white_dwarf_2_35000.bc_v = 0xc009dc5065327fb6  # -3.232575216868976
+white_dwarf_2_35000.b_v = 0xbfd426eebae3eacc  # -0.3148762536144829
+white_dwarf_2_20000: DAZ2.5
+white_dwarf_2_20000.index = 0x400428f5c28f5c29  # 2.52
+white_dwarf_2_20000.bc_v = 0xbfff561ba858c3b6  # -1.9585224700970065
+white_dwarf_2_20000.b_v = 0xbfcaebfa4d587e52  # -0.21032646919865045
+white_dwarf_2_12000: DAZ4.2
+white_dwarf_2_12000.index = 0x4010cccccccccccc  # 4.199999999999999
+white_dwarf_2_12000.bc_v = 0xbfe59a2dbce6d5e8  # -0.675070637653957
+white_dwarf_2_12000.b_v = 0xbfba228a207d9088  # -0.10208953183388492
+white_dwarf_2_8500: DAZ5.9
+white_dwarf_2_8500.index = 0x4017b7b7b7b7b7b6  # 5.929411764705881
+white_dwarf_2_8500.bc_v = 0xbfa198f1e6c4c4e3  # -0.03437000219344968
+white_dwarf_2_8500.b_v = 0x3fbc7b88fa82e932  # 0.11125999561310065
+white_dwarf_2_6000: DAZ8.4
+white_dwarf_2_6000.index = 0x4020cccccccccccc  # 8.399999999999999
+white_dwarf_2_6000.bc_v = 0xbfaddcf51b775ced  # -0.05832639656335368
+white_dwarf_2_6000.b_v = 0x3fe273f08ef40a56  # 0.5766527931267074
+white_dwarf_2_4500: DZ11.2
+white_dwarf_2_4500.index = 0x4026666666666666  # 11.2
+white_dwarf_2_4500.bc_v = 0xbfe2d34a6a7c96c3  # -0.5882923202340965
+white_dwarf_2_4500.b_v = 0x3ff20937ab788da8  # 1.1272503564913254
+white_dwarf_3_120000: DA0.4
+white_dwarf_3_120000.index = 0x3fdae147ae147ae0  # 0.41999999999999993
+white_dwarf_3_120000.bc_v = 0xc01cd9199e3c6c9c  # -7.212011787832264
+white_dwarf_3_120000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_3_60000: DA0.8
+white_dwarf_3_60000.index = 0x3feae147ae147ae0  # 0.8399999999999999
+white_dwarf_3_60000.bc_v = 0xc013d1309071ab6c  # -4.954286820352404
+white_dwarf_3_60000.b_v = 0xbfd51eb851eb851f  # -0.33
+white_dwarf_3_35000: DA1.4
+white_dwarf_3_35000.index = 0x3ff70a3d70a3d709  # 1.4399999999999997
+white_dwarf_3_35000.bc_v = 0xc009dc5065327fb6  # -3.232575216868976
+white_dwarf_3_35000.b_v = 0xbfd426eebae3eacc  # -0.3148762536144829
+white_dwarf_3_20000: DA2.5
+white_dwarf_3_20000.index = 0x400428f5c28f5c29  # 2.52
+white_dwarf_3_20000.bc_v = 0xbfff561ba858c3b6  # -1.9585224700970065
+white_dwarf_3_20000.b_v = 0xbfcaebfa4d587e52  # -0.21032646919865045
+white_dwarf_3_12000: DA4.2
+white_dwarf_3_12000.index = 0x4010cccccccccccc  # 4.199999999999999
+white_dwarf_3_12000.bc_v = 0xbfe59a2dbce6d5e8  # -0.675070637653957
+white_dwarf_3_12000.b_v = 0xbfba228a207d9088  # -0.10208953183388492
+white_dwarf_3_8500: DA5.9
+white_dwarf_3_8500.index = 0x4017b7b7b7b7b7b6  # 5.929411764705881
+white_dwarf_3_8500.bc_v = 0xbfa198f1e6c4c4e3  # -0.03437000219344968
+white_dwarf_3_8500.b_v = 0x3fbc7b88fa82e932  # 0.11125999561310065
+white_dwarf_3_6000: DA8.4
+white_dwarf_3_6000.index = 0x4020cccccccccccc  # 8.399999999999999
+white_dwarf_3_6000.bc_v = 0xbfaddcf51b775ced  # -0.05832639656335368
+white_dwarf_3_6000.b_v = 0x3fe273f08ef40a56  # 0.5766527931267074
+white_dwarf_3_4500: DC11.2
+white_dwarf_3_4500.index = 0x4026666666666666  # 11.2
+white_dwarf_3_4500.bc_v = 0xbfe2d34a6a7c96c3  # -0.5882923202340965
+white_dwarf_3_4500.b_v = 0x3ff20937ab788da8  # 1.1272503564913254
+helium_white_dwarf_drawn: DAZ6.9
+helium_white_dwarf_drawn.index = 0x401bc6cfc105dfd6  # 6.9441518936000275
+helium_white_dwarf_drawn.bc_v = 0x3f88d5bf5b72fe00  # 0.012126440981204745
+helium_white_dwarf_drawn.b_v = 0x3fd28a2e548918a3  # 0.28968389754698814
+neutron_star: NS
+black_hole: BH
+no_remnant: NONE

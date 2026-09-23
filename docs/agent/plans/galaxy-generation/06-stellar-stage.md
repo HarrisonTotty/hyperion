@@ -2485,3 +2485,50 @@ Instant}`); `TrackOptions::hurley2000()` is T12.b's (both HPT recipes, no bridge
     crate-private) allows 0.03 dex. Above 4 M☉ the two metallicities' markers overlap. The model
     near 0.63 M☉ is left out, because its mass would need three digits at log t ∝ −3.7 log M.
   - `cargo test -p hyperion-sim --test sse_reference` takes 0.45 s, so it is not marked slow.
+- **Deviations in T23 and T20.b, as built (round 7, `class`).** Built without the T24/T25 extras (ruling 33). The integrator (T10.c–e) was another lane's, so every test builds its `StarState`s directly.
+  - _Files and API._ Besides `classify/{mod,pm13,luminosity}.rs` and `photometry.rs`, there are four new files:
+    - `classify/sk81.rs` holds the class boundaries' source table.
+    - `classify/scales.rs` holds the giant and supergiant temperature scales.
+    - `remnant/wd_spectral.rs` holds T20.b. It is not `white_dwarf.rs`, which `starA` owns.
+    - `tests/stellar_classify.rs` writes a new golden, `stellar/classify`.
+
+    `remnant/mod.rs` gains one `pub mod wd_spectral;` line, and the sim's `clippy.toml` gains one word, `McElroy`, in its list of valid identifiers.
+    - `classify` takes `(&StarState, &Composition, &StarDraws, &ClassExtras)`. `ClassExtras` is an empty `#[non_exhaustive]` struct: `ClassExtras::NONE` is its only value, and `classify` destructures it, so a field added by T21, T24 or T25 fails to compile until it is read. `PeculiarClass` is an uninhabited enum, so `Classification::peculiar_class()` is always `None`, and the `Display` match on it is empty.
+    - Added: `SpectralLetter`; `SpectralCode`, the continuous code, ten per class with O0 at 0, written to the nearest half subtype, half up; `NeutronStarClass`; and `subtype_from_teff(Kelvin) -> Option<SpectralCode>`.
+    - `LuminosityClass` names its variants (`Hypergiant` for Ia⁺ through `Dwarf` for V) and adds `Subdwarf` and `ExtremeSubdwarf`, written as prefixes. The Ia⁺ class is written `Ia+`.
+    - `SpectralType` is `Sequence(SpectralCode)`, `WhiteDwarf(WhiteDwarfType)`, `NeutronStar(NeutronStarClass)`, `BlackHole` or `NoRemnant`.
+    - Photometry: `bolometric_correction_v(Kelvin)`, `colour_b_v(Kelvin)` and `absolute_magnitude_v(&StarState)` each return `Option<Magnitudes>`. Also added: `absolute_bolometric_magnitude` and `SOLAR_ABSOLUTE_BOLOMETRIC_MAGNITUDE`.
+
+  - _T23.a._
+    - The table is Mamajek's maintained version 2022.04.16, whole: 118 rows from O3V to Y4V, SHA-256 in the header. The alternative was Table 5 (O9V–M9V) with the extension stitched on. The version differs from Table 5 by up to 700 K (O9V), and its BC_V is on the IAU 2015 scale (−0.085 for the Sun).
+    - Interpolation is linear in log T_eff, and the tables are checksummed. The Sun reads G1.98, written G2V, with M_V = 4.825.
+    - BC_V is tabulated down to L5V and B − V down to M9V; cooler objects get `None`.
+    - Above O3V, BC_V follows the Rayleigh–Jeans slope of 7.5 mag per dex, and B − V is held. From 45 to 150 kK this falls within 0.1 mag of the Montreal DA models' fall in BC_V.
+    - White dwarfs, neutron stars and black holes get no M_V. The dwarf table's BC_V is 0.6–3.3 mag off the Montreal DA models from 4,000 to 3,000 K.
+  - _T23.b._ The plan asks for log g boundaries throughout. They are used only between V, IV and the rest.
+    - III, II, Ib, Iab and Ia are separated by luminosity at the star's temperature. The source is Straižys and Kuriliene (1981), whose Tables III, IV and VII were transcribed and cross-checked by their own formula for log g to 0.045 dex.
+    - The reason: their class III gravities are those of 2.1–3.5 M☉ tracks. On log g alone, Arcturus-like giants (4,300 K, log g 1.7) would read II, which fails the plan's own test.
+    - Ia⁺ uses the Humphreys–Davidson limit in HPT's form, as the winds do.
+    - The tie rule extends to the AGB: a core-helium-burning or AGB star is at least III.
+    - Subtype scales:
+      - V is exact on the dwarf scale.
+      - III: Martins et al. (2005) for O; the dwarf scale times Zorec et al.'s (2009) III/V ratio for B–A1; the dwarf scale for A2–F5; a log T_eff bridge from F5 to G5; van Belle et al.'s (2021) fit for G5–M5.5; and Richichi et al. (1999) for M6–M9.
+      - The supergiant scale (Ib, Iab, Ia and Ia⁺ share it): Martins for O; Markova and Puls (2008) for B0–B7; Firnstein and Przybilla (2012) for B8–A3; Humphreys and McElroy (1984) for F–G; Levesque et al. (2005) for K1–M5; then parallel to the giants.
+      - IV and II take the subtype halfway between their neighbours' at the star's temperature.
+      - Giants and supergiants are typed no later than M9.5.
+    - de Burgos et al.'s (2024) B supergiants were set aside: they run 1–1.3 kK hotter at B1–B2 and would put those supergiants above the giants.
+  - _T23.c._
+    - sd and esd are classes, with the plan's [Fe/H] thresholds of −1.0 and −1.7. These have no source: Lépine et al. (2007) define the classes by TiO/CaH, not [Fe/H]. They apply to main-sequence dwarfs of class V only.
+    - L, T and Y are written without a class. Every neutron star is `NS`.
+    - `NoRemnant` is written `NONE`.
+  - _T20.b._
+    - The helium-atmosphere fraction follows the measurements and is not monotone. It is held at 24% above 75 kK, the share Bédard et al. (2020) find "born with hydrogen-deficient atmospheres"; their 87% above 90 kK is only hydrogen-rich stars crossing those temperatures faster. It falls to 8% at 30 kK (their Fig. 19), then rises to 32% at 5.5–7 kK (Kilic et al. 2025, Table 4). Reversals are pooled.
+    - As a result, above 29,854 K a helium-rich star can float up to DA. The plan's test ("never back to DA") is asserted from there down.
+    - The DB/DC boundary is set at 11,000 K instead of 12,000, where Kilic's DBs give way.
+    - The DQ fraction peaks at 38% (8–9 kK) and falls, where the plan had it rising.
+    - Metal lines use the 40 pc census's optical rates, constant with age: 8.0% of DAs and 15.8% of the rest (O'Brien et al. 2024). The plan asked for 0.25–0.5 by cooling age, which is Koester et al.'s (2014) intrinsic rate, measured in the UV. It would triple the DAZ fraction against every census, and O'Brien et al. find no trend with cooling age.
+    - The census test uses uniform ages over 0–9 Gyr on the Montreal 0.6 M☉ DA sequence and is cut at 5,000 K, where the censuses are complete. It gives DA 70.2%, DC + DQ + DZ 28.5% and DB 1.2%. The DB bracket was 2–10%, below every measured sample (1.1–2.0%), and is corrected to 1–3%.
+  - _Known limits, for T24, T25 and plan 07._
+    - Helium stars and hot central stars are typed by temperature alone (a 90 kK helium star reads O3V) until T24.a.
+    - Luminous low-mass AGB stars read II by their luminosity: the Mira-like case reads M8II, where catalogues give M7 III.
+    - BC_V is the dwarfs' at every gravity, so a late M giant's M_V is up to 1.7 mag too bright (Straižys and Kuriliene 1981, Table III, at M6 III).
