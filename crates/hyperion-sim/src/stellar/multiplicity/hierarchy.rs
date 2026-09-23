@@ -1061,6 +1061,103 @@ impl Draft {
     }
 }
 
+/// Hierarchies built by hand, for the tests of what reads a hierarchy (plan 14's stable zones):
+/// named masses and orbits, and brown-dwarf slots, which no draw makes before P11.T2.d.
+///
+/// Nothing here checks stability or the tidal cut, so a hand-built hierarchy need not be one the
+/// draw could give. That is why it is test-only: [`SystemHierarchy`] is stable by construction
+/// everywhere else.
+#[cfg(test)]
+pub(crate) mod hand_built {
+    use super::{
+        BodyId, HierarchyNode, NodeIndex, STAR_BODY_INDEX_END, SlotKind, SolarMasses, StarIndex,
+        StarSlot, SystemHierarchy, SystemId,
+    };
+    use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+    use crate::units::{GravitationalParameter, Metres, Radians};
+
+    /// A node of a hand-built hierarchy.
+    #[derive(Debug, Clone)]
+    pub(crate) enum Node {
+        /// A star, or a brown dwarf, of initial mass `mass`.
+        Star { mass: SolarMasses, kind: SlotKind },
+        /// Two nodes on a relative orbit of semi-major axis `a` and eccentricity `e` about their
+        /// total mass, in the reference plane, at periapsis at the epoch.
+        Pair {
+            inner: Box<Node>,
+            outer: Box<Node>,
+            a: Metres,
+            e: Eccentricity,
+        },
+    }
+
+    /// The hierarchy of `system` under `root`, its stars numbered depth first, inner member
+    /// before outer, as the draw numbers them; each orbit is built from its semi-major axis, so
+    /// that [`KeplerElements::semi_major_axis`] returns `a` bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// For an orbit [`KeplerElements::from_semi_major_axis`] rejects, or more than 16 stars.
+    pub(crate) fn build(system: SystemId, root: &Node) -> SystemHierarchy {
+        let mut h = SystemHierarchy {
+            nodes: Vec::new(),
+            stars: Vec::new(),
+            node_masses: Vec::new(),
+            dropped: 0,
+        };
+        emit(system, root, &mut h);
+        h
+    }
+
+    /// Appends `node` and its subtree depth first, as `Draft::emit` does; its total mass.
+    fn emit(system: SystemId, node: &Node, out: &mut SystemHierarchy) -> SolarMasses {
+        let slot = out.nodes.len();
+        match node {
+            Node::Star { mass, kind } => {
+                assert!(
+                    out.stars.len() < usize::from(STAR_BODY_INDEX_END),
+                    "a hierarchy holds at most 16 stars"
+                );
+                let index = u8::try_from(out.stars.len()).expect("fewer than 16 stars");
+                out.stars.push(StarSlot {
+                    body: BodyId::new(system, u16::from(index)),
+                    initial_mass: *mass,
+                    kind: *kind,
+                });
+                out.nodes.push(HierarchyNode::Star(StarIndex(index)));
+                out.node_masses.push(*mass);
+                *mass
+            }
+            Node::Pair { inner, outer, a, e } => {
+                out.nodes.push(HierarchyNode::Star(StarIndex::PRIMARY));
+                out.node_masses.push(SolarMasses::ZERO);
+                let inner_index = NodeIndex(u8::try_from(out.nodes.len()).expect("few nodes"));
+                let inner_mass = emit(system, inner, out);
+                let outer_index = NodeIndex(u8::try_from(out.nodes.len()).expect("few nodes"));
+                let outer_mass = emit(system, outer, out);
+                let mass = inner_mass + outer_mass;
+                let flat = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)
+                    .expect("zero angles are an orientation");
+                let orbit = KeplerElements::from_semi_major_axis(
+                    *a,
+                    GravitationalParameter::from_solar_masses(mass),
+                    *e,
+                    flat,
+                    Radians::ZERO,
+                )
+                .expect("a hand-built orbit is valid");
+                out.nodes[slot] = HierarchyNode::Pair {
+                    inner: inner_index,
+                    outer: outer_index,
+                    orbit,
+                };
+                out.node_masses[slot] = mass;
+                mass
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

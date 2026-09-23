@@ -15,16 +15,16 @@ use crate::units::{SolarMasses, Years};
 const SEED: u64 = 0x0b11_0002_0000_5eed;
 
 /// The sample size of the property tests (P11.T2 and T3.b): 10⁴ hierarchies.
-pub(super) const SAMPLE: u32 = 10_000;
+pub(crate) const SAMPLE: u32 = 10_000;
 
 /// The Milky Way fixture.
-pub(super) fn galaxy() -> Galaxy {
+pub(crate) fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral")
 }
 
 /// The Sun-like point: in the plane, 26,000 ly out on the +y axis, clear of the bar.
-pub(super) fn sunlike() -> GalacticPosition {
+pub(crate) fn sunlike() -> GalacticPosition {
     GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("inside the root cube")
 }
 
@@ -69,7 +69,7 @@ pub(super) fn record(
 
 /// `n` records at `at` whose primaries are drawn from the galaxy's mass function over the whole
 /// stellar range, 0.08–150 M☉, by a test generator salted with `salt`.
-pub(super) fn imf_records(
+pub(crate) fn imf_records(
     galaxy: &Galaxy,
     n: u32,
     at: &GalacticPosition,

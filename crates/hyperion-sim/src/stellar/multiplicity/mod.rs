@@ -29,13 +29,15 @@ mod positions;
 mod quadrature;
 mod stability;
 #[cfg(test)]
-mod testing;
+pub(crate) mod testing;
 
 pub use dist::{
     CIRCULARISATION_PERIOD, ECCENTRICITY_ENVELOPE_PERIOD, EccentricityDistribution, LOG_PERIOD_MAX,
     LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS, MassRatioDistribution,
     PeriodDistribution,
 };
+#[cfg(test)]
+pub(crate) use hierarchy::hand_built;
 pub use hierarchy::{
     DRAWS_PER_ATTEMPT, HierarchyNode, MAX_REDRAWS, MAX_STABILITY_REDRAWS, MultiplicityContext,
     NodeIndex, PROVISIONAL_INTERACTING_PERIASTRON, PROVISIONAL_STRIPPED_SHARE, RedrawAttempt,

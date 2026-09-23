@@ -18,7 +18,6 @@ pub use spacing::{
     satisfies_floor, spacing_floor,
 };
 pub use zones::{
-    BuildZoneHierarchyError, ComponentKind, OrbitHost, OrbitZone, ResolveZoneDiscError,
-    ZoneDiscInputs, ZoneHierarchy, ZoneNode, ZoneStar, holman_wiegert_p_type,
-    holman_wiegert_s_type, stable_zones,
+    BuildZoneHierarchyError, OrbitHost, OrbitZone, ResolveZoneDiscError, ZoneDiscInputs,
+    ZoneHierarchy, ZoneNode, ZoneStar, holman_wiegert_p_type, holman_wiegert_s_type, stable_zones,
 };

@@ -2476,6 +2476,7 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     (13–24). A terrestrial mean of 30 ± 8 or a giant mean of 9 ± 2 unheld can fall under its floor,
     which would put every pair of the host at the floor. As built they are held to 14–46 (two σ,
     clear of the small planets' highest floor of 12) and 7–13 (the giants' floor, and two σ above).
+    Ruled (ruling 52, 1): stands as built.
   - _T6.b, sources._ Weiss et al. (2018, AJ 155, 48, §5.2 and Fig. 14) find 93% of CKS pairs at
     least 10 apart and a peak near 20, and note that a wide pair may hide a planet. Pu and Wu (2015,
     abstract) find the pairs of systems with four or more transiting planets "tightly clustered
@@ -2509,7 +2510,7 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
       4: 23.57 au, e = 0.516, 1.12 and 0.95 M☉) the limits are 2.794 au around A, 2.54 around B and
       87.4 around both, against their table's 2.79, 2.54 and 87. At the plan's 23.5 au and
       e = 0.52, A's limit is 2.76 au.
-  - _T9.a, outside the fitted ranges (for the orchestrator to rule)._ "Clamped, which errs towards
+  - _T9.a, outside the fitted ranges (ruled, ruling 52, 2: stands as built)._ "Clamped, which errs towards
     smaller zones" holds at two edges only, S-type μ < 0.1 and P-type μ < 0.1, which are clamped. At
     the other edges a clamp errs larger, so each fit is continued instead:
     - S-type μ > 0.9 (a light host) takes the Hill scaling ((1 − μ) ÷ 0.1)^⅓ that the paper finds
@@ -2539,15 +2540,19 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     - It does not check plan 11's numbering (depth first, inner before outer). The zones' order by
       body index and the range 1–15 of `Pair(k)` rely on it.
     - At the merge, a walk of `SystemHierarchy` from its root builds one, and
-      `stable_zones(&SystemHierarchy)` goes through that adapter.
+      `stable_zones(&SystemHierarchy)` goes through that adapter. _Second pass:_ built as
+      `ZoneHierarchy::from(&SystemHierarchy)`, with `stable_zones` still taking a `ZoneHierarchy`
+      (see the second pass's bullet below).
   - _T9.b, zones._ `OrbitZone` has `host()`, `host_number()`, `host_mass()`, `component_kind()`,
-    `members()`, `inner()`, `outer()`, `truncation()` and `in_close_binary()`. A limit is `None`
+    `members()`, `inner()`, `outer()`, `truncation()` and `in_close_binary()` (the second pass
+    replaces the last with `host_multiplicity()`). A limit is `None`
     where the hierarchy sets none: a component has no inner limit, and the top of the hierarchy no
     outer one (D14's strip radius is T29's).
     - `OrbitHost::Pair(k)` names a pair by the lowest-indexed component of its outer member,
       plan 11's key star (its D5), so the name survives any node layout. `Barycentre` and `Body`
       are defined, but no zone has either. **For the orchestrator to rule:** should the root
-      pair's zone be `Barycentre`?
+      pair's zone be `Barycentre`? Ruled (ruling 52, 4): yes, keeping its host number; built in
+      the second pass.
     - Host numbers, for `DiscDraws::for_host` and `SpacingDraws::for_host`, are a star's body
       index n and 16 + k for a pair. A single star is host 0, and a star's disc draws do not change
       when it gains a companion.
@@ -2557,6 +2562,9 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     less its own greatest distance from that pair's barycentre, a (1 + e) μ. This makes zones
     disjoint for any hierarchy, and it binds only in hierarchies too tight to be stable. A
     component's zone with no room left is dropped, as is a pair's zone narrower than 1.5.
+    _Superseded (ruling 53):_ it binds in drawn, stable hierarchies too, and a component is now
+    bounded at its closest approach to each outer companion instead (the second pass's bullet
+    below). Pairs' zones keep this bound.
   - _T9.c._ `ZoneDiscInputs::for_zone(seed, system, zone, stars: &[ZoneStar], fe_h)` has `host()`,
     `lifetime()`, `draws()`, `truncation()` and `derive()`. A `ZoneStar` is a component's zero-age
     L and R and its `star.disc_lifetime` rank, plain arguments until T1.d's context; an invalid one
@@ -2564,7 +2572,7 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     luminosities in index order and takes their largest radius. The radius enters only the inner
     edge, which the P-type limit overrides, except where a close pair's corotation radius lies
     beyond it.
-  - _T9.c, the close-binary flag (for the orchestrator to rule)._ The cut is Kraus et al.'s (2016,
+  - _T9.c, the close-binary flag (ruled, ruling 52, 3: stands as built)._ The cut is Kraus et al.'s (2016,
     abstract) measured a_cut = 47 (+59/−23) au, not the plan's rounded 50. A zone is flagged when
     its host is a member of such a pair at any level above it, and never for its own circumbinary
     zone, since that disc is cleared from inside and not truncated from outside. The weight moved
@@ -2573,7 +2581,8 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     3,000 random hierarchies of three to six components. Of (c), "every zone's disc lies inside its
     zone" runs on 10⁴ random binaries and triples. "No planet outside its zone" waits for T8's
     placer, the planet-occurrence ratio for T4's weights with the flag, and both for plan 11's
-    sampled binaries. The zones are those at birth (the slice).
+    sampled binaries. The zones are those at birth (the slice). _Second pass:_ the zones' part of
+    (c) now runs on 10⁴ drawn multiples; the planets' part and the ratio wait for T8.
   - _Goldens._ New at version 11: `planetary/spacing` and `planetary/zones`, written by
     `tests/planetary_placement_golden.rs`. Nothing existing moved.
 - **Deviations in T4 and T5, as built (`arch`, round 7).**
@@ -2684,3 +2693,85 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     with `isBodyId` and a `BodyIdParts { system, bodyIndex }` interface. They throw `SyntaxError`
     for a malformed string or system, and `RangeError` for an index that is not an integer from 0
     to 65,535. T37's test that the Rust wire-form fixtures decode waits for T35.b–c's records.
+- **Deviations in P14.T9.b–c, as built (`zones`, second pass, round 7).**
+  - _The adapter._ `impl From<&SystemHierarchy> for ZoneHierarchy` walks plan 11's hierarchy
+    from its root: each star's slot becomes a `ZoneNode::component` of its index, initial mass
+    and `SlotKind`, and each pair a `ZoneNode::pair` of its orbit's semi-major axis and
+    eccentricity. Its pair masses are plan 11's `node_mass` bit for bit (tested over 2,000 drawn
+    hierarchies). `stable_zones(&ZoneHierarchy)` stays the one function that makes zones, so a
+    generated system's zones are `stable_zones(&ZoneHierarchy::from(&hierarchy))`: that is how
+    the Provides' `stable_zones(&SystemHierarchy)` is reached.
+    - `ZoneHierarchy` stays because the zones' tests and golden need hierarchies that no draw
+      gives: named systems, hierarchies too tight to be stable, and brown dwarfs before P11.T2.d.
+      `SystemHierarchy` is stable by construction and has no public constructor, and giving it
+      one would weaken that guarantee.
+    - `ComponentKind` is gone. `ZoneNode::component` and `OrbitZone::component_kind` use plan 11's
+      `SlotKind`.
+    - For tests only, `stellar::multiplicity::hand_built` (a `cfg(test)` module appended to
+      `hierarchy.rs`) builds a `SystemHierarchy` from a tree, with orbits taken from their
+      semi-major axes. Plan 11's test fixtures `galaxy`, `sunlike`, `imf_records` and `SAMPLE`
+      are now `pub(crate)`.
+  - _Ruling 52.4._ The root pair's zone is `OrbitHost::Barycentre`, with host number 16 + k as
+    before. Pairs below the root stay `Pair(k)`. Every multiple has exactly one barycentre zone:
+    the last, with no outer limit, around every component, and never flagged as a close binary.
+    In the `planetary/zones` golden, 59 of 382 lines change from `pair k` to `barycentre`, and
+    every value, host number, member list and flag is unchanged (checked line by line).
+    `golden_diff.py` counts the relabelled lines as moved values.
+  - _D10's flag into the class draw._ `OrbitZone::host_multiplicity() -> HostMultiplicity`
+    replaces `in_close_binary()`. The zone also gives `zone_limit() -> ZoneLimit` and
+    `class_constraints(&Disc) -> ClassConstraints`. `CLOSE_BINARY_SEMI_MAJOR_AXIS` is defined as
+    `CLOSE_BINARY_CUTOFF_AU`, so 47 au is written in one place. The chain that T8 and T30.a use,
+    per zone, is:
+    - `ZoneDiscInputs::for_zone(..).derive()` for the disc;
+    - `draw_class(seed, system, zone.host_number(), &class_weights(zone.host_mass(), fe_h), &zone.class_constraints(&disc))`
+      for the class;
+    - `zone.inner()` and `zone.outer()` for T8's limits.
+  - _T9's tests on drawn hierarchies._ The sample is 10⁴ multiples drawn by plan 11
+    (`ForcedMultiple`, over the mass function at the Sun-like point).
+    - The zones: 2,094 of the multiples have three or more stars, with 22,872 stars in all and
+      34,131 zones (after ruling 53, below). No two zones overlap at the worst phases. At eight
+      times per system, measured against plan 11's own `star_positions_at`, the least clearance
+      between a zone's limit and a star on either side of it was a factor of 2.07: a star outside
+      a zone that is not its own, or a pair's own star inside the pair's inner limit. The width
+      cut dropped 1,613 inner pairs' zones.
+    - The flag, on a second 10⁴ sample: 18,411 zones are flagged and 15,798 are not. Each is
+      flagged exactly when a pair above its host is under 47 au. Every flagged zone keeps 0.34 of
+      each planet-bearing class's weight, bit for bit. Planet-bearing classes were drawn in 4,524
+      flagged zones against 4,591 expected (p above α = 10⁻³). Every zone's disc lies inside its
+      zone.
+    - The brown-dwarf `StarSlot`: a binary and a triple built by hand give the zones of their
+      star-slot twins, differing only in the kind, and match the `ZoneNode` build bit for bit.
+    - The occurrence ratio of (c) waits for T8's placer.
+  - _A finding against the first pass. Ruled (ruling 53): a component is bounded at its closest
+    approach to each outer companion._ The first pass bounded a component's zone below the root by
+    its pair's zone less its own swing. That bound does not bind "only in hierarchies too tight to
+    be stable". Of the 5,250 stars below the root pair in the sample, it left 78 without a zone and
+    cut 34 more short, all in hierarchies that pass Mardling and Aarseth's test.
+    - An example: a 0.107 M☉ star at 11.4 au (e = 0.53) from a 0.659 M☉ primary, with a
+      0.639 M☉ third star at 53.3 au (e = 0.25, pericentre 40 au). The pair's S-type zone
+      against the third star is 10.9 au about its barycentre, and the light star swings 15.0 au
+      from it, so it lost its own 0.73 au zone, although its Hill sphere against the third star
+      is about 9.5 au even at the closest approach.
+    - The triple passes Mardling and Aarseth only through their inclination factor (108°, R_p ÷
+      a_in = 3.52 against 4.13 coplanar), as do the hierarchies of 61 of the 78 zoneless stars
+      and 28 of the 34 cut ones. Holman and Wiegert's fits are for coplanar, prograde orbits and
+      apply to inclined hierarchies loosely at best.
+    - _As built after the ruling._ A component's outer limit is the least, over every pair L
+      above it, of `a_L × holman_wiegert_s_type(μ, e_L) × (1 − ρ ÷ (a_L (1 − e_L)))`, with
+      μ = `m_C ÷ (m + m_C)` for the component's mass m and the mass `m_C` of L's other member
+      (taken at its barycentre), and ρ the component's greatest distance from the barycentre of
+      its own member of L. That is the S-type limit of a binary of L's eccentricity whose
+      pericentre is their closest approach. At the component's own pair ρ = 0 and it is the
+      plain S-type limit. A pair's circumbinary zone is bounded as before.
+    - _Outcomes._ On the same sample, all 78 zoneless and all 34 cut stars now keep their own
+      S-type limit exactly: the closest-approach bound binds for none of the 5,250 stars below
+      the root pair, and every star has a zone. The zones stay disjoint at the worst phases, and
+      the least clearance against plan 11's star positions is still a factor of 2.07. There are
+      34,131 zones, up from 34,053 under the first pass's bound.
+    - _Disjointness_ now holds for stable hierarchies by test, not for every hierarchy by
+      construction. The random-hierarchy overlap test checks it only for the 1,688 of its 3,000
+      hierarchies that pass Mardling and Aarseth (coplanar, prograde). A hand-built unstable
+      triple where the new bound binds is tested against the formula.
+    - _Goldens._ `planetary/zones` does not move under the ruling: no zone of its hierarchies is
+      set by either bound below the root. Against HEAD it changes only in ruling 52.4's labels,
+      which `golden_diff.py` reports as changed values (a false positive of its label matching).

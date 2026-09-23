@@ -52,7 +52,7 @@
 //! | 06 | \[Fe/H\] | [`Composition::fe_h`](crate::stellar::Composition::fe_h), as drawn |
 //! | 11 | stars in slot `0x00` | [`stellar::multiplicity::STAR_BODY_INDEX_END`](crate::stellar::multiplicity::STAR_BODY_INDEX_END) = 16; [`index::STELLAR_SUB_END`] states the same bound |
 //! | 11 | a pair's orbit | [`orbit::Eccentricity`](crate::orbit::Eccentricity) and a semi-major axis in [`Metres`](crate::units::Metres), as `KeplerElements` gives them |
-//! | 11 | the hierarchy | `SystemHierarchy` is not in the code yet; [`placement::ZoneHierarchy`] holds what the zones read of it, the components' indices, masses and kinds and each pair's members and orbit |
+//! | 11 | the hierarchy | [`stellar::multiplicity::SystemHierarchy`](crate::stellar::multiplicity::SystemHierarchy), read through [`placement::ZoneHierarchy`]'s `From<&SystemHierarchy>`: each star's index, initial mass and [`SlotKind`](crate::stellar::multiplicity::SlotKind), and each pair's members and orbit at birth |
 
 pub mod architecture;
 pub mod context;

@@ -1,5 +1,6 @@
 //! Golden values of plan 14's placement: the spacing draw (P14.T6.b), Holman and Wiegert's fits,
-//! and the stable zones, hosts and zone discs of hand-built hierarchies (P14.T9).
+//! and the stable zones, hosts and zone discs of hand-built hierarchies (P14.T9). The root pair's
+//! zone is the barycentre's (ruling 52.4), with the host number it had as a pair.
 //!
 //! They pin the arithmetic and the words drawn: a reordered sum, a changed coefficient or a moved
 //! draw number changes a line here, which is a generator-version change. CI checks the same files
@@ -8,14 +9,16 @@
 use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::orbit::Eccentricity;
+use hyperion_sim::planetary::architecture::HostMultiplicity;
 use hyperion_sim::planetary::placement::{
-    ComponentKind, OrbitHost, OrbitZone, SpacingDraws, SpacingKind, SpacingOutcome, ZoneDiscInputs,
-    ZoneHierarchy, ZoneNode, ZoneStar, draw_pair_spacing, holman_wiegert_p_type,
-    holman_wiegert_s_type, stable_zones,
+    OrbitHost, OrbitZone, SpacingDraws, SpacingKind, SpacingOutcome, ZoneDiscInputs, ZoneHierarchy,
+    ZoneNode, ZoneStar, draw_pair_spacing, holman_wiegert_p_type, holman_wiegert_s_type,
+    stable_zones,
 };
 use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::UnitUniform;
+use hyperion_sim::stellar::multiplicity::SlotKind;
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
 use hyperion_sim::units::{
     AstronomicalUnits, Dex, Metres, SolarLuminosities, SolarMasses, SolarRadii,
@@ -33,7 +36,7 @@ fn au(x: f64) -> Metres {
 }
 
 fn star(index: u8, mass: f64) -> ZoneNode {
-    ZoneNode::component(index, SolarMasses::new(mass), ComponentKind::Star)
+    ZoneNode::component(index, SolarMasses::new(mass), SlotKind::Star)
 }
 
 fn pair(inner: ZoneNode, outer: ZoneNode, a_au: f64, e: f64) -> ZoneNode {
@@ -108,7 +111,7 @@ fn write_zone(w: &mut GoldenWriter, zone: &OrbitZone) {
         "{name}: host {} members {} close {}",
         zone.host_number(),
         members.join(","),
-        zone.in_close_binary()
+        zone.host_multiplicity() == HostMultiplicity::CloseBinary
     ));
     w.f64(&format!("{name} mass"), zone.host_mass().value());
     match zone.inner() {
@@ -134,7 +137,7 @@ fn zams_star(mass: f64, rank: f64) -> ZoneStar {
 
 /// The hand-built hierarchies the zones golden pins, each with its components' zero-age states.
 fn golden_hierarchies() -> Vec<(&'static str, ZoneNode, Vec<ZoneStar>)> {
-    let dwarf = ZoneNode::component(1, SolarMasses::new(0.05), ComponentKind::BrownDwarf);
+    let dwarf = ZoneNode::component(1, SolarMasses::new(0.05), SlotKind::BrownDwarf);
     // A brown dwarf's disc will read its cooling fit at 10 Myr (P14.T27); these are stand-ins.
     let dwarf_state = ZoneStar {
         zams_luminosity: SolarLuminosities::new(3e-3),

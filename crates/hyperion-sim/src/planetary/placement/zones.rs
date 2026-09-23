@@ -59,29 +59,49 @@
 //! pair, each with its host, the host's mass and its inner and outer limits:
 //!
 //! - A component's zone has no inner limit (its disc's inner edge bounds it). Its outer limit is
-//!   the S-type limit a × `holman_wiegert_s_type(μ, e)` of the pair it is a member of, with μ its
-//!   companion's share of the pair's mass, the companion being a star or a whole inner pair.
+//!   the least, over every pair above it, of Holman and Wiegert's S-type limit against that pair's
+//!   other member at their closest approach (ruling 53):
+//!
+//!   ```text
+//!   a_L × holman_wiegert_s_type(μ, e_L) × (1 − ρ ÷ (a_L (1 − e_L))),   μ = m_C ÷ (m + m_C),
+//!   ```
+//!
+//!   for a pair L of semi-major axis `a_L` and eccentricity `e_L`, the component's mass m, the
+//!   mass `m_C` of the pair's other member (a star or a whole inner pair, taken at its
+//!   barycentre), and ρ the component's greatest distance from the barycentre of its own member
+//!   of L: the sum of a (1 + e) × (the companion's share of the mass) over the pairs between. It
+//!   is the S-type limit of a binary of L's eccentricity whose pericentre is the closest the
+//!   component and the other member come, `a_L (1 − e_L) − ρ`. At the component's own pair ρ = 0
+//!   and μ is the companion's share, so that term is the plain S-type limit, and a member of the
+//!   root pair has no other.
 //! - A pair's zone starts at the P-type limit a × `holman_wiegert_p_type(μ, e)` of its own orbit.
-//! - Every zone below the top of the hierarchy is also bounded by the zone of the pair it is a
-//!   member of, taken about that pair's barycentre: its outer limit is at most that zone's outer
-//!   limit less its own greatest distance from the barycentre, a (1 + e) μ. That is
-//!   what makes the zones of a triple disjoint however the fits compare: a circumstellar zone of
-//!   an inner pair lies inside the zone that pair has as a member of the outer one.
+//!   Below the top it is also bounded by the zone of the pair it is a member of, taken about that
+//!   pair's barycentre: its outer limit is at most that zone's outer limit less its own greatest
+//!   distance from the barycentre, a (1 + e) μ, where a member's zone is the S-type limit its
+//!   companion sets.
+//! - That the zones of a hierarchy never overlap is not proven in closed form. It is tested over
+//!   10⁴ hierarchies drawn by plan 11, at the worst phases of every orbit and against plan 11's
+//!   star positions (ruling 53). A hand-built hierarchy too tight to be stable can give
+//!   overlapping zones.
 //! - The top of the hierarchy has no outer limit: a single star's one zone is bounded only by its
 //!   disc and, when P14.T29 lands, by design note 14's strip radius.
 //! - A pair's zone narrower than a factor of [`MIN_ZONE_WIDTH`] (1.5) in radius is dropped, and so
-//!   is a component's zone with no room at all, which only a hierarchy that is not itself stable
-//!   can give.
+//!   is a component's zone with no room at all, which only a closest approach of zero or less, in
+//!   a hierarchy that is not itself stable, can give.
 //!
 //! Zones come in hierarchy order, inside out: depth first with a pair's inner member before its
-//! outer one, each pair after its members. Under plan 11's numbering of the components (its design
-//! note 5: depth first, inner before outer) the stars' zones therefore come in the order of their
-//! body indices, and every pair's k below is 1–15. [`ZoneHierarchy::new`] does not check that
-//! numbering, only that the indices run 0 to n − 1 and that no two pairs share a k. A star's zone is host [`Star(n)`](OrbitHost::Star), its
-//! body index n, and host number n; a pair's is [`Pair(k)`](OrbitHost::Pair), k being the
-//! lowest-indexed component of its outer member, the star plan 11 keys the pair's own streams by,
-//! and host number 16 + k. So a single star is host 0, as plan 14's disc has it, and a star's disc
-//! draws are the same whether it is single or has a companion.
+//! outer one, each pair after its members, so the root pair's zone comes last. Under plan 11's
+//! numbering of the components (its design note 5: depth first, inner before outer) the stars'
+//! zones therefore come in the order of their body indices, and every pair's k below is 1–15.
+//! [`ZoneHierarchy::new`] does not check that numbering, only that the indices run 0 to n − 1
+//! and that no two pairs share a k; a hierarchy converted from plan 11's has it by construction.
+//!
+//! A star's zone is host [`Star(n)`](OrbitHost::Star), its body index n, and host number n. A
+//! pair's is keyed by k, the lowest-indexed component of its outer member, the star plan 11 keys
+//! the pair's own streams by, and has host number 16 + k. The root pair's zone, around the whole
+//! system, is host [`Barycentre`](OrbitHost::Barycentre), and every pair below it is
+//! [`Pair(k)`](OrbitHost::Pair) (ruling 52.4). So a single star is host 0, as plan 14's disc has
+//! it, and a star's disc draws are the same whether it is single or has a companion.
 //!
 //! # Discs and hosts (P14.T9.c)
 //!
@@ -93,22 +113,40 @@
 //! truncated to the zone's limits. The draws are [`DiscDraws::for_host`] of the zone's
 //! [`host_number`](OrbitZone::host_number).
 //!
-//! [`OrbitZone::in_close_binary`] is design note 10's flag for the class draw (P14.T4.c): a zone
-//! whose host is a member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au) draws
-//! `Barren` with added weight, so that its planets are about a third as common as a single
-//! star's (Kraus et al. 2016). The class weights are `planetary::architecture`'s.
+//! [`OrbitZone::host_multiplicity`] is design note 10's flag for the class draw (P14.T4.c): a
+//! zone whose host is a member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au) is
+//! [`HostMultiplicity::CloseBinary`], and draws [`Barren`] with added weight, so that its planets
+//! are about a third as common as a single star's (Kraus et al. 2016).
+//! [`OrbitZone::class_constraints`] hands that flag and the zone's outer limit, with the zone's
+//! disc, to `planetary::architecture`'s [`ClassConstraints`], whose weights the class draw of the
+//! zone's [`host_number`](OrbitZone::host_number) reads.
 //!
 //! # What this reads of plan 11, and the slice
 //!
-//! Plan 14 sketches `stable_zones(&SystemHierarchy)`. Plan 11's `SystemHierarchy` (P11.T2.a) is
-//! not built yet, so the zones read a [`ZoneHierarchy`]: the least of it they need, the
-//! components' body indices, initial masses and kinds, and each pair's members, semi-major axis
-//! and eccentricity, built from [`ZoneNode`]s. When `SystemHierarchy` lands it converts into one
-//! by a walk from its root (each `StarSlot` a [`ZoneNode::component`], each
-//! `HierarchyNode::Pair` a [`ZoneNode::pair`] of its orbit's `semi_major_axis()` and
-//! `eccentricity()`), and `stable_zones` takes it through that adapter. The zones are those at
-//! birth: plan 11's binary evolution is deferred, so every pair is two single stars on a fixed
-//! orbit, and design note 10's intersection with the evaluated state comes with `BinaryState`.
+//! The zones read a [`ZoneHierarchy`], the least of a hierarchy they need: the components' body
+//! indices, initial masses and [`SlotKind`]s, and each pair's members, semi-major axis and
+//! eccentricity. A system's drawn hierarchy, plan 11's [`SystemHierarchy`], converts into one by
+//! a walk from its root ([`ZoneHierarchy::from`]): each [`StarSlot`] a [`ZoneNode::component`],
+//! each [`HierarchyNode::Pair`] a [`ZoneNode::pair`] of its orbit's `semi_major_axis()` and
+//! `eccentricity()`, the masses summed up the tree as plan 11 sums them. So a generated system's
+//! zones are
+//!
+//! ```text
+//! stable_zones(&ZoneHierarchy::from(&system_hierarchy))
+//! ```
+//!
+//! and [`stable_zones`] is the one function that makes zones. A [`ZoneHierarchy`] can also be
+//! built by hand from [`ZoneNode`]s, for the tests and goldens of hierarchies no draw gives: named
+//! systems such as α Centauri, hierarchies too tight to be stable, and brown-dwarf components,
+//! which plan 11 draws only from P11.T2.d. Plan 11's own type admits none of those, being stable
+//! by construction.
+//!
+//! The zones are those at birth: plan 11's binary evolution is deferred, so every pair is two
+//! single stars on a fixed orbit, and design note 10's intersection with the evaluated state comes
+//! with `BinaryState`.
+//!
+//! [`StarSlot`]: crate::stellar::multiplicity::StarSlot
+//! [`Barren`]: crate::planetary::architecture::ArchitectureClass::Barren
 
 use std::error::Error;
 use std::fmt;
@@ -116,10 +154,14 @@ use std::fmt;
 use crate::id::SystemId;
 use crate::math;
 use crate::orbit::Eccentricity;
+use crate::planetary::architecture::{
+    CLOSE_BINARY_CUTOFF_AU, ClassConstraints, HostMultiplicity, ZoneLimit,
+};
 use crate::planetary::disc::{self, BuildDiscHostError, Disc, DiscDraws, DiscHost, Truncation};
 use crate::planetary::index::{BodyIndex, STELLAR_SUB_END};
 use crate::rng::Seed;
 use crate::stellar::draws::UnitUniform;
+use crate::stellar::multiplicity::{HierarchyNode, NodeIndex, SlotKind, SystemHierarchy};
 use crate::stellar::premain;
 use crate::units::{
     AstronomicalUnits, Dex, Megayears, Metres, SolarLuminosities, SolarMasses, SolarRadii,
@@ -172,8 +214,10 @@ pub const MIN_ZONE_WIDTH: f64 = 1.5;
 ///
 /// Kraus et al. (2016, AJ 152, 8, abstract): inside `a_cut` = 47 (+59, −23) au, planets occur
 /// in binaries at `S_bin` = 0.34 (+0.14, −0.15) of the rate of wider binaries and single stars.
-/// Plan 14 rounds the cut to "about 50 au"; the measured value is used here.
-pub const CLOSE_BINARY_SEMI_MAJOR_AXIS: AstronomicalUnits = AstronomicalUnits::new(47.0);
+/// Plan 14 rounds the cut to "about 50 au"; the measured value is used here (ruling 48g). It is
+/// the class table's [`CLOSE_BINARY_CUTOFF_AU`], as a length.
+pub const CLOSE_BINARY_SEMI_MAJOR_AXIS: AstronomicalUnits =
+    AstronomicalUnits::new(CLOSE_BINARY_CUTOFF_AU);
 
 /// Holman and Wiegert's equation 1 as published.
 #[must_use]
@@ -279,33 +323,27 @@ pub fn holman_wiegert_p_type(mu: f64, e: f64) -> f64 {
 
 /// What a body orbits: the host of a zone, of a belt, or of a moon (plan 14's `OrbitHost`).
 ///
-/// Zones are hosted by [`Star`](Self::Star) and [`Pair`](Self::Pair) only. The other two
-/// variants are for the bodies of later tasks.
+/// Zones are hosted by [`Star`](Self::Star), [`Pair`](Self::Pair) and
+/// [`Barycentre`](Self::Barycentre). [`Body`](Self::Body) is for the moons and rings of later
+/// tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OrbitHost {
     /// The component with body index n (0–15) of the stellar level: a circumstellar zone.
     Star(u8),
-    /// The pair whose outer member's lowest-indexed component is n, the component plan 11 keys the
-    /// pair's own streams by (its design note 5), and 1–15 under its numbering: a circumbinary
-    /// zone.
+    /// A pair below the root, keyed by its outer member's lowest-indexed component n, the
+    /// component plan 11 keys the pair's own streams by (its design note 5), and 1–15 under its
+    /// numbering: the circumbinary zone of an inner pair of a triple or higher multiple.
     Pair(u8),
-    /// The barycentre of the whole system, for what is bound to the system but to no zone, such
-    /// as the cometary halo of a multiple system (P14.T21). No zone has this host.
+    /// The barycentre of the whole system: the circum-system zone of a multiple system, the root
+    /// pair's (ruling 52.4), and what is bound to the system but to no zone, such as the cometary
+    /// halo of a multiple system (P14.T21). A single star's one zone is its star's.
+    ///
+    /// It carries no key: the barycentre zone's host number, 16 + k for the root pair's key k,
+    /// is [`OrbitZone::host_number`]'s, and a draw for anything the barycentre hosts takes its
+    /// number from the zone, not from this variant.
     Barycentre,
     /// A body, as the host of its moons and rings (P14.T17–T20). No zone has this host.
     Body(BodyIndex),
-}
-
-/// What kind of body a component of a hierarchy is: plan 11's `StarSlot` kind.
-///
-/// A brown-dwarf companion bounds zones exactly as a star does (design note 10); its kind is
-/// carried so that its own zone can draw from the `SubstellarCompact` row (design note 13).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ComponentKind {
-    /// A star.
-    Star,
-    /// A brown dwarf.
-    BrownDwarf,
 }
 
 /// A node of a [`ZoneHierarchy`]: a component, or a pair of nodes on a Keplerian orbit.
@@ -324,7 +362,7 @@ pub struct ZoneNode {
 enum Shape {
     Component {
         index: u8,
-        kind: ComponentKind,
+        kind: SlotKind,
     },
     Pair {
         inner: Box<ZoneNode>,
@@ -335,11 +373,15 @@ enum Shape {
 }
 
 impl ZoneNode {
-    /// The component with body index `index` (0–15), of initial mass `mass` and kind `kind`.
+    /// The component with body index `index` (0–15), of initial mass `mass` and kind `kind`,
+    /// plan 11's [`StarSlot`](crate::stellar::multiplicity::StarSlot) kind.
     ///
-    /// Checked by [`ZoneHierarchy::new`].
+    /// A brown dwarf bounds zones exactly as a star does (design note 10); its kind is carried so
+    /// that its own zone can draw from the
+    /// [`SubstellarCompact`](crate::planetary::architecture::ArchitectureClass::SubstellarCompact)
+    /// row (design note 13). Checked by [`ZoneHierarchy::new`].
     #[must_use]
-    pub fn component(index: u8, mass: SolarMasses, kind: ComponentKind) -> Self {
+    pub fn component(index: u8, mass: SolarMasses, kind: SlotKind) -> Self {
         Self {
             shape: Shape::Component { index, kind },
             mass,
@@ -386,19 +428,21 @@ impl ZoneNode {
 /// A system's hierarchy as the stable zones read it: plan 11's components and pairs, reduced to
 /// the components' body indices, initial masses and kinds, and each pair's members and orbit.
 ///
-/// It stands in for plan 11's `SystemHierarchy` until P11.T2.a lands (see the
-/// [module documentation](self)), and is checked once, when built.
+/// A generated system's comes from its drawn [`SystemHierarchy`], by
+/// [`ZoneHierarchy::from`]; one can also be built by hand from [`ZoneNode`]s, and is then checked
+/// once, by [`ZoneHierarchy::new`] (see the [module documentation](self)).
 ///
 /// # Examples
 ///
-/// α Centauri A and B:
+/// α Centauri A and B, by hand:
 ///
 /// ```
 /// use hyperion_sim::orbit::Eccentricity;
-/// use hyperion_sim::planetary::placement::{ComponentKind, ZoneHierarchy, ZoneNode};
+/// use hyperion_sim::planetary::placement::{ZoneHierarchy, ZoneNode};
+/// use hyperion_sim::stellar::multiplicity::SlotKind;
 /// use hyperion_sim::units::{AstronomicalUnits, Metres, SolarMasses};
 ///
-/// let star = |i: u8, m: f64| ZoneNode::component(i, SolarMasses::new(m), ComponentKind::Star);
+/// let star = |i: u8, m: f64| ZoneNode::component(i, SolarMasses::new(m), SlotKind::Star);
 /// let a = Metres::from(AstronomicalUnits::new(23.57));
 /// let pair = ZoneNode::pair(star(0, 1.12), star(1, 0.95), a, Eccentricity::new(0.516)?);
 /// let hierarchy = ZoneHierarchy::new(pair)?;
@@ -445,7 +489,7 @@ impl ZoneHierarchy {
     /// # Errors
     ///
     /// [`BuildZoneHierarchyError::MassNotPositive`] unless the mass is positive and finite.
-    pub fn single(mass: SolarMasses, kind: ComponentKind) -> Result<Self, BuildZoneHierarchyError> {
+    pub fn single(mass: SolarMasses, kind: SlotKind) -> Result<Self, BuildZoneHierarchyError> {
         Self::new(ZoneNode::component(0, mass, kind))
     }
 
@@ -459,6 +503,74 @@ impl ZoneHierarchy {
     #[must_use]
     pub const fn root(&self) -> &ZoneNode {
         &self.root
+    }
+}
+
+impl From<&SystemHierarchy> for ZoneHierarchy {
+    /// The zones' view of a drawn hierarchy, by a walk from its root: each star's slot a
+    /// [`ZoneNode::component`] of its body index, initial mass and kind, and each pair a
+    /// [`ZoneNode::pair`] of its orbit's semi-major axis and eccentricity at birth.
+    ///
+    /// Each pair's mass is its members' summed inner first, as plan 11 sums
+    /// [`SystemHierarchy::node_mass`], so the two agree bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// Never for a hierarchy plan 11 draws, which numbers its stars 0 to n − 1 depth first, with
+    /// positive masses, orbits of positive semi-major axis and a key of its own for every pair,
+    /// all of which [`ZoneHierarchy::new`] checks.
+    ///
+    /// # Examples
+    ///
+    /// A generated system's zones, one per star and one around them all:
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::planetary::placement::{OrbitHost, ZoneHierarchy, stable_zones};
+    /// use hyperion_sim::stellar::multiplicity::{
+    ///     MultiplicityContext, RedrawAttempt, draw_hierarchy,
+    /// };
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(11));
+    /// let mut cell = Vec::new();
+    /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+    /// let record = cell.first().expect("layer C is not empty at the solar circle");
+    /// let context = MultiplicityContext::ForcedMultiple { max_separation: None };
+    /// let stars = draw_hierarchy(&galaxy, record, context, RedrawAttempt::FIRST);
+    /// let zones = stable_zones(&ZoneHierarchy::from(&stars));
+    /// if stars.star_count() > 1 {
+    ///     assert_eq!(zones.last().map(|z| z.host()), Some(OrbitHost::Barycentre));
+    /// }
+    /// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+    /// ```
+    fn from(h: &SystemHierarchy) -> Self {
+        Self::new(zone_node(h, h.root())).expect(
+            "a drawn hierarchy numbers its stars 0 to n - 1 with positive masses, positive \
+             semi-major axes and a key of its own for every pair",
+        )
+    }
+}
+
+/// The [`ZoneNode`] of node `index` of `h` and everything under it.
+fn zone_node(h: &SystemHierarchy, index: NodeIndex) -> ZoneNode {
+    match h.node(index) {
+        HierarchyNode::Star(star) => {
+            let slot = h.star(*star);
+            ZoneNode::component(star.get(), slot.initial_mass(), slot.kind())
+        }
+        HierarchyNode::Pair {
+            inner,
+            outer,
+            orbit,
+        } => ZoneNode::pair(
+            zone_node(h, *inner),
+            zone_node(h, *outer),
+            orbit.semi_major_axis(),
+            orbit.eccentricity(),
+        ),
     }
 }
 
@@ -577,11 +689,14 @@ impl fmt::Display for BuildZoneHierarchyError {
 
 impl Error for BuildZoneHierarchyError {}
 
-/// The host of a zone: a star or a pair, and never the other two kinds of [`OrbitHost`].
+/// The host of a zone: a star, an inner pair or the root pair, each pair with its key k, and
+/// never a body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum ZoneHost {
     Star(u8),
     Pair(u8),
+    /// The root pair, [`OrbitHost::Barycentre`], keeping its key for its host number.
+    Root(u8),
 }
 
 /// One stable zone of a system: an orbit host, its mass and the limits within which its planets
@@ -595,31 +710,35 @@ enum ZoneHost {
 pub struct OrbitZone {
     host: ZoneHost,
     host_mass: SolarMasses,
-    kind: Option<ComponentKind>,
+    kind: Option<SlotKind>,
     members: u32,
     inner: Option<Metres>,
     outer: Option<Metres>,
-    close_binary: bool,
+    multiplicity: HostMultiplicity,
 }
 
 impl OrbitZone {
-    /// The zone's host: [`OrbitHost::Star`] or [`OrbitHost::Pair`].
+    /// The zone's host: [`OrbitHost::Star`] around one component, [`OrbitHost::Pair`] around an
+    /// inner pair, or [`OrbitHost::Barycentre`] around the whole of a multiple system, the root
+    /// pair (ruling 52.4).
     #[must_use]
     pub const fn host(&self) -> OrbitHost {
         match self.host {
             ZoneHost::Star(n) => OrbitHost::Star(n),
-            ZoneHost::Pair(n) => OrbitHost::Pair(n),
+            ZoneHost::Pair(k) => OrbitHost::Pair(k),
+            ZoneHost::Root(_) => OrbitHost::Barycentre,
         }
     }
 
     /// The host's number in the draw numbers of the system-level streams (design note 4): a
-    /// star's body index n (0–15), or 16 + k for [`Pair(k)`](OrbitHost::Pair) (17–31). A single
-    /// star is host 0, as [`DiscDraws::for_host`] has it.
+    /// star's body index n (0–15), or 16 + k for a pair keyed by k (17–31), the root pair's
+    /// [`Barycentre`](OrbitHost::Barycentre) zone included. A single star is host 0, as
+    /// [`DiscDraws::for_host`] has it.
     #[must_use]
     pub const fn host_number(&self) -> u8 {
         match self.host {
             ZoneHost::Star(n) => n,
-            ZoneHost::Pair(k) => STELLAR_SUB_END + k,
+            ZoneHost::Pair(k) | ZoneHost::Root(k) => STELLAR_SUB_END + k,
         }
     }
 
@@ -629,9 +748,9 @@ impl OrbitZone {
         self.host_mass
     }
 
-    /// The kind of a component's zone's host; `None` for a pair's.
+    /// The kind of a component's zone's host, a star or a brown dwarf; `None` for a pair's.
     #[must_use]
-    pub const fn component_kind(&self) -> Option<ComponentKind> {
+    pub const fn component_kind(&self) -> Option<SlotKind> {
         self.kind
     }
 
@@ -663,16 +782,61 @@ impl OrbitZone {
         self.outer.map_or(truncation, |r| truncation.with_outer(r))
     }
 
-    /// Whether the host is a member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`]
-    /// (47 au), at any level above it: design note 10's flag for the class draw.
+    /// Design note 10's flag for the class draw: [`HostMultiplicity::CloseBinary`] when the host
+    /// is a member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au) at any level
+    /// above it, and [`HostMultiplicity::SingleOrWide`] otherwise.
     ///
     /// A pair's own orbit does not count for its circumbinary zone, whose disc it clears from
     /// inside rather than truncates from outside; the companions that suppress planets in Kraus et
-    /// al.'s (2016) sample orbit the planet host. A flagged zone draws `Barren` with added weight,
-    /// so that its planets are `S_bin` = 0.34 as common as a single star's (P14.T4.c).
+    /// al.'s (2016) sample orbit the planet host. So the [`Barycentre`](OrbitHost::Barycentre)
+    /// zone is never flagged. A flagged zone draws
+    /// [`Barren`](crate::planetary::architecture::ArchitectureClass::Barren) with added weight, so
+    /// that its planets are `S_bin` = 0.34 as common as a single star's (P14.T4.c).
     #[must_use]
-    pub const fn in_close_binary(&self) -> bool {
-        self.close_binary
+    pub const fn host_multiplicity(&self) -> HostMultiplicity {
+        self.multiplicity
+    }
+
+    /// Where the zone ends, as the class draw's constraints read it: [`ZoneLimit::Outer`] of the
+    /// zone's outer limit, or [`ZoneLimit::Unbounded`] at the top of the hierarchy.
+    #[must_use]
+    pub fn zone_limit(&self) -> ZoneLimit {
+        self.outer.map_or(ZoneLimit::Unbounded, ZoneLimit::Outer)
+    }
+
+    /// What the zone allows of its host's architecture class, with the zone's disc `disc`
+    /// (design notes 5 and 10): [`ClassConstraints::new`] of the disc, the zone's
+    /// [`zone_limit`](Self::zone_limit) and its [`host_multiplicity`](Self::host_multiplicity).
+    ///
+    /// The class draw of the zone is
+    /// [`draw_class`](crate::planetary::architecture::draw_class) at the zone's
+    /// [`host_number`](Self::host_number), with these constraints on the weights of its
+    /// [`host_mass`](Self::host_mass).
+    ///
+    /// # Examples
+    ///
+    /// Both stars of a pair 20 au apart are in a close binary, and the zone around both is not:
+    ///
+    /// ```
+    /// use hyperion_sim::orbit::Eccentricity;
+    /// use hyperion_sim::planetary::architecture::HostMultiplicity;
+    /// use hyperion_sim::planetary::disc::Disc;
+    /// use hyperion_sim::planetary::placement::{ZoneHierarchy, ZoneNode, stable_zones};
+    /// use hyperion_sim::stellar::multiplicity::SlotKind;
+    /// use hyperion_sim::units::{AstronomicalUnits, Metres, SolarMasses};
+    ///
+    /// let star = |i: u8, m: f64| ZoneNode::component(i, SolarMasses::new(m), SlotKind::Star);
+    /// let a = Metres::from(AstronomicalUnits::new(20.0));
+    /// let pair = ZoneNode::pair(star(0, 1.0), star(1, 0.5), a, Eccentricity::new(0.3)?);
+    /// let zones = stable_zones(&ZoneHierarchy::new(pair)?);
+    /// let constraints = zones[0].class_constraints(&Disc::None);
+    /// assert_eq!(constraints.multiplicity(), HostMultiplicity::CloseBinary);
+    /// assert_eq!(zones[2].host_multiplicity(), HostMultiplicity::SingleOrWide);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn class_constraints(&self, disc: &Disc) -> ClassConstraints {
+        ClassConstraints::new(disc, self.zone_limit(), self.multiplicity)
     }
 }
 
@@ -680,7 +844,9 @@ impl OrbitZone {
 /// note 10).
 ///
 /// One zone per component and per pair, less the pairs' zones narrower than a factor of
-/// [`MIN_ZONE_WIDTH`]; see the [module documentation](self) for the limits.
+/// [`MIN_ZONE_WIDTH`]; see the [module documentation](self) for the limits. A generated system's
+/// `h` is [`ZoneHierarchy::from`] its drawn [`SystemHierarchy`]; this is the one function that
+/// makes zones.
 ///
 /// # Examples
 ///
@@ -688,18 +854,19 @@ impl OrbitZone {
 ///
 /// ```
 /// use hyperion_sim::orbit::Eccentricity;
-/// use hyperion_sim::planetary::placement::{
-///     ComponentKind, OrbitHost, ZoneHierarchy, ZoneNode, stable_zones,
-/// };
+/// use hyperion_sim::planetary::placement::{OrbitHost, ZoneHierarchy, ZoneNode, stable_zones};
+/// use hyperion_sim::stellar::multiplicity::SlotKind;
 /// use hyperion_sim::units::{AstronomicalUnits, Metres, SolarMasses};
 ///
-/// let star = |i: u8, m: f64| ZoneNode::component(i, SolarMasses::new(m), ComponentKind::Star);
+/// let star = |i: u8, m: f64| ZoneNode::component(i, SolarMasses::new(m), SlotKind::Star);
 /// let a = Metres::from(AstronomicalUnits::new(23.57));
 /// let pair = ZoneNode::pair(star(0, 1.12), star(1, 0.95), a, Eccentricity::new(0.516)?);
 /// let zones = stable_zones(&ZoneHierarchy::new(pair)?);
 ///
 /// let hosts: Vec<_> = zones.iter().map(|z| z.host()).collect();
-/// assert_eq!(hosts, [OrbitHost::Star(0), OrbitHost::Star(1), OrbitHost::Pair(1)]);
+/// assert_eq!(hosts, [OrbitHost::Star(0), OrbitHost::Star(1), OrbitHost::Barycentre]);
+/// // The zone around both keeps the pair's host number, 16 + 1.
+/// assert_eq!(zones[2].host_number(), 17);
 /// let au = |m: Option<Metres>| AstronomicalUnits::from(m.expect("a limit")).value();
 /// assert!((au(zones[0].outer()) - 2.79).abs() < 0.01);
 /// assert!((au(zones[2].inner()) - 87.4).abs() < 0.1);
@@ -709,31 +876,67 @@ impl OrbitZone {
 #[must_use]
 pub fn stable_zones(h: &ZoneHierarchy) -> Vec<OrbitZone> {
     let mut zones = Vec::with_capacity(2 * usize::from(h.component_count) - 1);
-    visit(&h.root, Bound::TOP, &mut zones);
+    visit(&h.root, &Bound::TOP, &mut zones);
     zones
 }
 
 /// What the levels above a node impose on its zone.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Bound {
-    /// The zone's outer limit from the node's centre; `None` at the top.
+    /// Whether the node is the root, whose pair's zone is around the whole system.
+    top: bool,
+    /// A pair's zone's outer limit from the node's centre; `None` at the top.
     outer: Option<Metres>,
+    /// Every pair above the node, outermost first, as a component under it meets the pair's other
+    /// member.
+    encounters: Vec<Encounter>,
     /// Whether a pair above the node is closer than the close-binary cut.
-    close: bool,
+    multiplicity: HostMultiplicity,
 }
 
 impl Bound {
     const TOP: Self = Self {
+        top: true,
         outer: None,
-        close: false,
+        encounters: Vec::new(),
+        multiplicity: HostMultiplicity::SingleOrWide,
     };
 }
 
+/// A pair above a node, as a component under the node meets the pair's other member (ruling 53).
+#[derive(Debug, Clone, Copy)]
+struct Encounter {
+    /// The pair's semi-major axis, m.
+    a: f64,
+    /// The pair's eccentricity.
+    e: f64,
+    /// The mass of the pair's other member, taken at its barycentre.
+    companion: SolarMasses,
+    /// The node's greatest distance from the barycentre of its own member of the pair, m.
+    reach: f64,
+}
+
+impl Encounter {
+    /// The S-type limit, m, of a component of mass `host` against the other member at their
+    /// closest approach: a × `holman_wiegert_s_type(μ, e)` × (1 − ρ ÷ (a (1 − e))), with
+    /// μ = `m_C ÷ (m + m_C)`. Zero or less when the closest approach is.
+    fn limit(&self, host: SolarMasses) -> f64 {
+        let mu = self.companion.value() / (host.value() + self.companion.value());
+        let pericentre = self.a * (1.0 - self.e);
+        self.a * holman_wiegert_s_type(mu, self.e) * (1.0 - self.reach / pericentre)
+    }
+}
+
 /// Pushes the zones of `node` and everything under it, inside out.
-fn visit(node: &ZoneNode, bound: Bound, zones: &mut Vec<OrbitZone>) {
+fn visit(node: &ZoneNode, bound: &Bound, zones: &mut Vec<OrbitZone>) {
     match &node.shape {
         Shape::Component { index, kind } => {
-            if bound.outer.is_some_and(|r| r.value() <= 0.0) {
+            let outer = bound
+                .encounters
+                .iter()
+                .map(|encounter| encounter.limit(node.mass))
+                .reduce(f64::min);
+            if outer.is_some_and(|r| r <= 0.0) {
                 return;
             }
             zones.push(OrbitZone {
@@ -742,8 +945,8 @@ fn visit(node: &ZoneNode, bound: Bound, zones: &mut Vec<OrbitZone>) {
                 kind: Some(*kind),
                 members: node.members,
                 inner: None,
-                outer: bound.outer,
-                close_binary: bound.close,
+                outer: outer.map(Metres::new),
+                multiplicity: bound.multiplicity,
             });
         }
         Shape::Pair {
@@ -755,22 +958,43 @@ fn visit(node: &ZoneNode, bound: Bound, zones: &mut Vec<OrbitZone>) {
             let a = semi_major_axis.value();
             let e = eccentricity.value();
             let total = node.mass.value();
-            let close =
-                bound.close || *semi_major_axis < Metres::from(CLOSE_BINARY_SEMI_MAJOR_AXIS);
-            // A member's zone about its own centre: the S-type limit its companion sets, and
+            let multiplicity = if *semi_major_axis < Metres::from(CLOSE_BINARY_SEMI_MAJOR_AXIS) {
+                HostMultiplicity::CloseBinary
+            } else {
+                bound.multiplicity
+            };
+            // A member pair's zone about its own centre: the S-type limit its companion sets, and
             // within the pair's own zone less the member's greatest distance from the barycentre.
+            // A component under the member meets this pair's other member as a new encounter, and
+            // every encounter above it from the member's greatest distance farther out.
             let member = |companion: SolarMasses| {
                 let mu = companion.value() / total;
                 let limit = a * holman_wiegert_s_type(mu, e);
                 let reach = a * (1.0 + e) * mu;
                 let outer = bound.outer.map_or(limit, |r| limit.min(r.value() - reach));
+                let encounters = bound
+                    .encounters
+                    .iter()
+                    .map(|above| Encounter {
+                        reach: above.reach + reach,
+                        ..*above
+                    })
+                    .chain([Encounter {
+                        a,
+                        e,
+                        companion,
+                        reach: 0.0,
+                    }])
+                    .collect();
                 Bound {
+                    top: false,
                     outer: Some(Metres::new(outer)),
-                    close,
+                    encounters,
+                    multiplicity,
                 }
             };
-            visit(inner, member(outer.mass), zones);
-            visit(outer, member(inner.mass), zones);
+            visit(inner, &member(outer.mass), zones);
+            visit(outer, &member(inner.mass), zones);
             let lighter = inner.mass.value().min(outer.mass.value());
             let inner_limit = a * holman_wiegert_p_type(lighter / total, e);
             if bound
@@ -779,14 +1003,19 @@ fn visit(node: &ZoneNode, bound: Bound, zones: &mut Vec<OrbitZone>) {
             {
                 return;
             }
+            let host = if bound.top {
+                ZoneHost::Root(outer.lowest)
+            } else {
+                ZoneHost::Pair(outer.lowest)
+            };
             zones.push(OrbitZone {
-                host: ZoneHost::Pair(outer.lowest),
+                host,
                 host_mass: node.mass,
                 kind: None,
                 members: node.members,
                 inner: Some(Metres::new(inner_limit)),
                 outer: bound.outer,
-                close_binary: bound.close,
+                multiplicity: bound.multiplicity,
             });
         }
     }
@@ -851,15 +1080,15 @@ impl ZoneDiscInputs {
     /// use hyperion_sim::id::SystemId;
     /// use hyperion_sim::orbit::Eccentricity;
     /// use hyperion_sim::planetary::placement::{
-    ///     ComponentKind, OrbitHost, ZoneDiscInputs, ZoneHierarchy, ZoneNode, ZoneStar,
-    ///     stable_zones,
+    ///     OrbitHost, ZoneDiscInputs, ZoneHierarchy, ZoneNode, ZoneStar, stable_zones,
     /// };
     /// use hyperion_sim::stellar::draws::UnitUniform;
+    /// use hyperion_sim::stellar::multiplicity::SlotKind;
     /// use hyperion_sim::units::{
     ///     AstronomicalUnits, Dex, Metres, SolarLuminosities, SolarMasses, SolarRadii,
     /// };
     ///
-    /// let sun = |i: u8| ZoneNode::component(i, SolarMasses::new(1.0), ComponentKind::Star);
+    /// let sun = |i: u8| ZoneNode::component(i, SolarMasses::new(1.0), SlotKind::Star);
     /// let a = Metres::from(AstronomicalUnits::new(0.2));
     /// let pair = ZoneNode::pair(sun(0), sun(1), a, Eccentricity::CIRCULAR);
     /// let zones = stable_zones(&ZoneHierarchy::new(pair)?);
@@ -870,7 +1099,7 @@ impl ZoneDiscInputs {
     /// };
     /// let (seed, system) = (Seed::new(7), SystemId::from_raw(0x0200_0800_2000_0000)?);
     /// let circumbinary = &zones[2];
-    /// assert_eq!(circumbinary.host(), OrbitHost::Pair(1));
+    /// assert_eq!(circumbinary.host(), OrbitHost::Barycentre);
     ///
     /// let stars = [star, star];
     /// let inputs = ZoneDiscInputs::for_zone(seed, system, circumbinary, &stars, Dex::ZERO)?;
@@ -910,7 +1139,7 @@ impl ZoneDiscInputs {
                 let lifetime = premain::disc_lifetime(zone.host_mass, star.disc_lifetime_rank);
                 (host, lifetime)
             }
-            ZoneHost::Pair(_) => {
+            ZoneHost::Pair(_) | ZoneHost::Root(_) => {
                 let mut luminosity = 0.0;
                 let mut radius = 0.0_f64;
                 for component in zone.members() {
@@ -1020,12 +1249,25 @@ impl Error for ResolveZoneDiscError {
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::lcg::Lcg;
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 
     use super::*;
-    use crate::coords::{CellSize, GenCell};
-    use crate::id::Layer;
+    use crate::coords::{CellSize, GenCell, SystemPosition};
+    use crate::id::{BodyId, Layer};
+    use crate::planetary::architecture::{
+        ArchitectureClass, CLOSE_BINARY_SUPPRESSION, ClassWeights, class_weights, draw_class,
+    };
     use crate::stellar::Composition;
+    use crate::stellar::draws::StarDraws;
+    use crate::stellar::multiplicity::hand_built::{self, Node};
+    use crate::stellar::multiplicity::testing as multiplicity_testing;
+    use crate::stellar::multiplicity::{
+        MultiplicityContext, RedrawAttempt, StarSlot, draw_hierarchy, mardling_aarseth_limit,
+        star_positions_at,
+    };
     use crate::stellar::sse::{ZCoeffs, zams};
+    use crate::time::{Span, UniverseTime};
+    use crate::units::Radians;
 
     const SEED: Seed = Seed::new(0x5eed_0014_0009_0000);
 
@@ -1043,7 +1285,7 @@ mod tests {
     }
 
     fn star(index: u8, mass: f64) -> ZoneNode {
-        ZoneNode::component(index, SolarMasses::new(mass), ComponentKind::Star)
+        ZoneNode::component(index, SolarMasses::new(mass), SlotKind::Star)
     }
 
     fn pair(inner: ZoneNode, outer: ZoneNode, a_au: f64, e: f64) -> ZoneNode {
@@ -1067,7 +1309,11 @@ mod tests {
         let zones = zones_of(pair(star(0, 1.0), star(1, 1.0), 1.0, 0.0));
         assert_eq!(
             hosts(&zones),
-            [OrbitHost::Star(0), OrbitHost::Star(1), OrbitHost::Pair(1)]
+            [
+                OrbitHost::Star(0),
+                OrbitHost::Star(1),
+                OrbitHost::Barycentre
+            ]
         );
         for zone in &zones[..2] {
             assert!((in_au(zone.outer().unwrap()) - 0.274).abs() < 1e-12);
@@ -1251,35 +1497,43 @@ mod tests {
 
     #[test]
     fn a_single_star_has_exactly_one_zone_bounded_only_by_its_disc() {
-        let single = ZoneHierarchy::single(SolarMasses::new(1.0), ComponentKind::Star).unwrap();
+        let single = ZoneHierarchy::single(SolarMasses::new(1.0), SlotKind::Star).unwrap();
         let zones = stable_zones(&single);
         assert_eq!(zones.len(), 1);
         let zone = zones[0];
         assert_eq!(zone.host(), OrbitHost::Star(0));
         assert_eq!(zone.host_number(), 0);
         assert_same_bits(zone.host_mass().value(), 1.0);
-        assert_eq!(zone.component_kind(), Some(ComponentKind::Star));
+        assert_eq!(zone.component_kind(), Some(SlotKind::Star));
         assert_eq!(zone.members().collect::<Vec<_>>(), [0]);
         assert_eq!((zone.inner(), zone.outer()), (None, None));
         assert_eq!(zone.truncation(), Truncation::NONE);
-        assert!(!zone.in_close_binary());
+        assert_eq!(zone.zone_limit(), ZoneLimit::Unbounded);
+        assert_eq!(zone.host_multiplicity(), HostMultiplicity::SingleOrWide);
     }
 
-    /// The pairs above `host` in `root`, outermost first, each with the side `host` is on.
-    fn path_to(root: &ZoneNode, host: OrbitHost) -> Option<Vec<(&ZoneNode, bool)>> {
-        let here = match &root.shape {
+    /// The pairs above `host` in `top`, outermost first, each with the side `host` is on.
+    fn path_to(top: &ZoneNode, host: OrbitHost) -> Option<Vec<(&ZoneNode, bool)>> {
+        if host == OrbitHost::Barycentre {
+            return Some(Vec::new());
+        }
+        find_path(top, host)
+    }
+
+    fn find_path(node: &ZoneNode, host: OrbitHost) -> Option<Vec<(&ZoneNode, bool)>> {
+        let here = match &node.shape {
             Shape::Component { index, .. } => OrbitHost::Star(*index),
             Shape::Pair { outer, .. } => OrbitHost::Pair(outer.lowest),
         };
         if here == host {
             return Some(Vec::new());
         }
-        let Shape::Pair { inner, outer, .. } = &root.shape else {
+        let Shape::Pair { inner, outer, .. } = &node.shape else {
             return None;
         };
         for (child, is_outer) in [(inner, false), (outer, true)] {
-            if let Some(mut path) = path_to(child, host) {
-                path.insert(0, (root, is_outer));
+            if let Some(mut path) = find_path(child, host) {
+                path.insert(0, (node, is_outer));
                 return Some(path);
             }
         }
@@ -1402,7 +1656,7 @@ mod tests {
                 OrbitHost::Star(1),
                 OrbitHost::Pair(1),
                 OrbitHost::Star(2),
-                OrbitHost::Pair(2)
+                OrbitHost::Barycentre
             ]
         );
         assert_disjoint(&triple, &zones);
@@ -1416,13 +1670,18 @@ mod tests {
         assert_eq!(zones.len(), 7);
         assert_disjoint(&quadruple, &zones);
 
+        // Random hierarchies, of which only those that pass Mardling and Aarseth's test (their
+        // orbits coplanar and prograde) are held to disjoint zones (ruling 53).
         let mut rng = Lcg::new(0x5eed_0014_0009_000b);
-        let mut kept = 0;
+        let (mut kept, mut stable) = (0, 0);
         for _ in 0..3_000 {
             let count = 3 + u8::try_from(rng.next_below(4)).unwrap();
             let (root, _) = random_node(&mut rng, &mut 0, count);
             let zones = zones_of(root.clone());
-            assert_disjoint(&root, &zones);
+            if stable_if_coplanar(&hand_built::build(system(12), &hand_built_node(&root))) {
+                stable += 1;
+                assert_disjoint(&root, &zones);
+            }
             // Hierarchy order: the stars in index order, every pair after its members.
             let stars: Vec<u8> = zones
                 .iter()
@@ -1448,6 +1707,32 @@ mod tests {
         }
         // Most zones survive the width cut and the eccentric pairs.
         assert!(kept > 3_000 * 5, "{kept}");
+        println!("{stable} of 3,000 random hierarchies pass Mardling and Aarseth's test");
+        assert!(
+            stable > 500,
+            "only {stable} of 3,000 random hierarchies are stable"
+        );
+    }
+
+    /// `node` as a hand-built plan 11 node, its orbits coplanar and prograde.
+    fn hand_built_node(node: &ZoneNode) -> Node {
+        match &node.shape {
+            Shape::Component { kind, .. } => Node::Star {
+                mass: node.mass,
+                kind: *kind,
+            },
+            Shape::Pair {
+                inner,
+                outer,
+                semi_major_axis,
+                eccentricity,
+            } => Node::Pair {
+                inner: Box::new(hand_built_node(inner)),
+                outer: Box::new(hand_built_node(outer)),
+                a: *semi_major_axis,
+                e: *eccentricity,
+            },
+        }
     }
 
     #[test]
@@ -1467,7 +1752,7 @@ mod tests {
                 OrbitHost::Star(1),
                 OrbitHost::Star(2),
                 OrbitHost::Pair(2),
-                OrbitHost::Pair(1)
+                OrbitHost::Barycentre
             ]
         );
         let numbers: Vec<u8> = zones.iter().map(OrbitZone::host_number).collect();
@@ -1480,7 +1765,7 @@ mod tests {
 
     #[test]
     fn a_brown_dwarf_companion_bounds_zones_like_any_other_component() {
-        let dwarf = ZoneNode::component(1, SolarMasses::new(0.05), ComponentKind::BrownDwarf);
+        let dwarf = ZoneNode::component(1, SolarMasses::new(0.05), SlotKind::BrownDwarf);
         let with_dwarf = zones_of(pair(star(0, 1.0), dwarf, 10.0, 0.2));
         let with_star = zones_of(pair(star(0, 1.0), star(1, 0.05), 10.0, 0.2));
         assert_eq!(with_dwarf.len(), 3);
@@ -1490,11 +1775,8 @@ mod tests {
                 (b.host(), b.inner(), b.outer())
             );
         }
-        assert_eq!(
-            with_dwarf[1].component_kind(),
-            Some(ComponentKind::BrownDwarf)
-        );
-        assert_eq!(with_star[1].component_kind(), Some(ComponentKind::Star));
+        assert_eq!(with_dwarf[1].component_kind(), Some(SlotKind::BrownDwarf));
+        assert_eq!(with_star[1].component_kind(), Some(SlotKind::Star));
         // The star's zone is the fit at μ clamped to 0.1 (design note 10).
         let star_zone = in_au(with_dwarf[0].outer().unwrap());
         assert!((star_zone - 10.0 * holman_wiegert_s_type(0.1, 0.2)).abs() < 1e-12);
@@ -1533,29 +1815,50 @@ mod tests {
         assert_eq!(tight.len(), 4);
     }
 
+    /// Ruling 53: a component below the root pair is bounded, at each pair above its own, by
+    /// Holman and Wiegert's S-type limit against that pair's other member at their closest
+    /// approach, and not by its own pair's zone.
     #[test]
-    fn a_member_s_zone_stays_inside_its_pair_s_zone() {
-        // A wide inner pair in a triple too tight to be stable, which only a hand-built hierarchy
-        // gives: A's own S-type limit in (A, B) is 13.7 au, but A swings 25 au from AB's
-        // barycentre, and AB's zone in the triple ends 26.1 au out, so A keeps 1.1 au.
-        let inner = pair(star(0, 1.0), star(1, 1.0), 50.0, 0.0);
-        let root = pair(inner, star(2, 0.1), 120.0, 0.4);
-        let zones = zones_of(root.clone());
-        let a_zone = zones[0].outer().unwrap().value();
-        let ab_bound = au(120.0).value() * holman_wiegert_s_type(0.1 / 2.1, 0.4);
-        assert!((a_zone / (ab_bound - au(25.0).value()) - 1.0).abs() < 1e-12);
-        assert!((in_au(Metres::new(a_zone)) - 1.14).abs() < 0.01);
-        // AB's own zone, from 119 au, is gone; C keeps its zone.
-        assert_eq!(
-            hosts(&zones),
-            [
-                OrbitHost::Star(0),
-                OrbitHost::Star(1),
-                OrbitHost::Star(2),
-                OrbitHost::Pair(2)
-            ]
+    fn a_member_s_zone_is_bounded_at_its_closest_approach_to_each_outer_companion() {
+        // A wide inner pair and a heavy third body, in a triple too tight to be stable, where the
+        // outer bound binds: A swings 10 au from AB's barycentre, and C's pericentre is 28 au out.
+        let root = pair(
+            pair(star(0, 1.0), star(1, 1.0), 20.0, 0.0),
+            star(2, 2.0),
+            40.0,
+            0.3,
         );
-        assert_disjoint(&root, &zones);
+        let zones = zones_of(root);
+        let own = 20.0 * holman_wiegert_s_type(0.5, 0.0);
+        let approach = 40.0 * holman_wiegert_s_type(2.0 / 3.0, 0.3) * (1.0 - 10.0 / 28.0);
+        assert!(approach < own);
+        for zone in &zones[..2] {
+            assert!((in_au(zone.outer().unwrap()) - approach).abs() < 1e-12);
+        }
+        // C, a member of the root pair, keeps its own S-type limit.
+        assert_eq!(zones[2].host(), OrbitHost::Star(2));
+        assert_same_bits(
+            zones[2].outer().unwrap().value(),
+            au(40.0).value() * holman_wiegert_s_type(0.5, 0.3),
+        );
+        // The case that ruled it: a 0.107 M☉ star 11.4 au from its primary (e = 0.53), with a
+        // 0.639 M☉ third star at 53.3 au (e = 0.25). Bounded by its pair's zone, 10.9 au about the
+        // pair's barycentre from which it swings 15.0 au, it had no zone; at its closest approach
+        // to the third star, 25 au, the S-type limit is 3.5 au, and it keeps its own 0.73 au.
+        let light = pair(
+            pair(star(0, 0.659), star(1, 0.107), 11.38, 0.53),
+            star(2, 0.639),
+            53.27,
+            0.248,
+        );
+        let zones = zones_of(light);
+        let zone = zones
+            .iter()
+            .find(|z| z.host() == OrbitHost::Star(1))
+            .unwrap();
+        let own = 11.38 * holman_wiegert_s_type(0.659 / 0.766, 0.53);
+        assert!((in_au(zone.outer().unwrap()) - own).abs() < 1e-12);
+        assert!((own - 0.73).abs() < 0.01, "{own}");
     }
 
     #[test]
@@ -1658,7 +1961,7 @@ mod tests {
         let zones = zones_of(pair(star(0, 1.0), star(1, 0.6), 0.1, 0.1));
         let stars = [zams_star(1.0, 0.3), zams_star(0.6, 0.8)];
         let zone = &zones[2];
-        assert_eq!(zone.host(), OrbitHost::Pair(1));
+        assert_eq!(zone.host(), OrbitHost::Barycentre);
         let inputs = ZoneDiscInputs::for_zone(SEED, system(4), zone, &stars, Dex::ZERO).unwrap();
         let draws = DiscDraws::for_host(SEED, system(4), 17);
         assert_eq!(*inputs.draws(), draws);
@@ -1681,7 +1984,7 @@ mod tests {
 
     #[test]
     fn a_single_star_s_zone_disc_is_its_disc_alone() {
-        let single = ZoneHierarchy::single(SolarMasses::new(0.8), ComponentKind::Star).unwrap();
+        let single = ZoneHierarchy::single(SolarMasses::new(0.8), SlotKind::Star).unwrap();
         let zone = stable_zones(&single)[0];
         let star = zams_star(0.8, 0.55);
         let inputs =
@@ -1804,31 +2107,34 @@ mod tests {
         );
     }
 
+    fn is_close(zone: &OrbitZone) -> bool {
+        zone.host_multiplicity() == HostMultiplicity::CloseBinary
+    }
+
     #[test]
     fn components_of_pairs_inside_47_au_are_in_a_close_binary() {
         let close = zones_of(pair(star(0, 1.0), star(1, 0.5), 20.0, 0.3));
-        assert!(close[0].in_close_binary() && close[1].in_close_binary());
+        assert!(is_close(&close[0]) && is_close(&close[1]));
         // The pair's own orbit does not flag its circumbinary zone.
-        assert!(!close[2].in_close_binary());
+        assert!(!is_close(&close[2]));
         let wide = zones_of(pair(star(0, 1.0), star(1, 0.5), 100.0, 0.3));
-        assert!(wide.iter().all(|z| !z.in_close_binary()));
-        // Just either side of the cut.
+        assert!(wide.iter().all(|z| !is_close(z)));
+        // Just either side of the cut, which is the class table's.
         let cut = CLOSE_BINARY_SEMI_MAJOR_AXIS.value();
-        let at = |a: f64| zones_of(pair(star(0, 1.0), star(1, 0.5), a, 0.0))[0].in_close_binary();
+        assert_same_bits(cut, CLOSE_BINARY_CUTOFF_AU);
+        let at = |a: f64| is_close(&zones_of(pair(star(0, 1.0), star(1, 0.5), a, 0.0))[0]);
         assert!(at(cut * (1.0 - 1e-12)));
         assert!(!at(cut));
         // A close pair inside a triple whose third star is 30 au out: everything below the
-        // triple is flagged, the triple's own zone is not.
+        // triple is flagged, the zone around the whole system is not.
         let triple = zones_of(pair(
             pair(star(0, 1.0), star(1, 0.5), 0.1, 0.0),
             star(2, 0.3),
             30.0,
             0.1,
         ));
-        let flags: Vec<(OrbitHost, bool)> = triple
-            .iter()
-            .map(|z| (z.host(), z.in_close_binary()))
-            .collect();
+        let flags: Vec<(OrbitHost, bool)> =
+            triple.iter().map(|z| (z.host(), is_close(z))).collect();
         assert_eq!(
             flags,
             [
@@ -1836,8 +2142,625 @@ mod tests {
                 (OrbitHost::Star(1), true),
                 (OrbitHost::Pair(1), true),
                 (OrbitHost::Star(2), true),
-                (OrbitHost::Pair(2), false)
+                (OrbitHost::Barycentre, false)
             ]
+        );
+    }
+
+    /// Design note 10's flag reaches the class draw: a zone's constraints carry its flag and its
+    /// outer limit, and a flagged zone keeps `S_bin` = 0.34 of every planet-bearing class's weight.
+    #[test]
+    fn a_close_binary_s_zones_hand_their_flag_to_the_class_constraints() {
+        let zones = zones_of(pair(star(0, 1.0), star(1, 0.8), 30.0, 0.2));
+        let stars = [zams_star(1.0, 0.4), zams_star(0.8, 0.6)];
+        for zone in &zones {
+            let disc = ZoneDiscInputs::for_zone(SEED, system(9), zone, &stars, Dex::ZERO)
+                .unwrap()
+                .derive();
+            if is_close(zone) {
+                assert!(disc.profile().is_some(), "{:?} has no disc", zone.host());
+            }
+            let constraints = zone.class_constraints(&disc);
+            assert_eq!(constraints.multiplicity(), zone.host_multiplicity());
+            assert_eq!(
+                constraints,
+                ClassConstraints::new(&disc, zone.zone_limit(), zone.host_multiplicity())
+            );
+            match zone.outer() {
+                Some(r) => assert_eq!(zone.zone_limit(), ZoneLimit::Outer(r)),
+                None => assert_eq!(zone.zone_limit(), ZoneLimit::Unbounded),
+            }
+            let weights = class_weights(zone.host_mass(), Dex::ZERO);
+            let wide =
+                ClassConstraints::new(&disc, zone.zone_limit(), HostMultiplicity::SingleOrWide);
+            assert_suppressed(&weights, constraints, wide, is_close(zone));
+        }
+        assert_eq!(
+            zones.iter().map(is_close).collect::<Vec<_>>(),
+            [true, true, false]
+        );
+    }
+
+    /// Asserts that `constraints` keep [`CLOSE_BINARY_SUPPRESSION`] of every planet-bearing
+    /// class's weight under `wide`'s, `Barren` taking the rest, when `close`, and change nothing
+    /// otherwise.
+    fn assert_suppressed(
+        weights: &ClassWeights,
+        constraints: ClassConstraints,
+        wide: ClassConstraints,
+        close: bool,
+    ) {
+        let (kept, unsuppressed) = (
+            weights.constrained(&constraints),
+            weights.constrained(&wide),
+        );
+        if !close {
+            assert_eq!(kept, unsuppressed);
+            return;
+        }
+        for class in ArchitectureClass::ALL {
+            if class != ArchitectureClass::Barren {
+                assert_same_bits(
+                    kept.get(class),
+                    unsuppressed.get(class) * CLOSE_BINARY_SUPPRESSION,
+                );
+            }
+        }
+        assert!((kept.total() / unsuppressed.total() - 1.0).abs() < 1e-12);
+    }
+
+    /// Ruling 52.4: the root pair's zone is the barycentre's, with the host number the pair had,
+    /// so that its disc and class draws are the ones it drew as `Pair(k)`; the pairs below it
+    /// keep `Pair(k)`, and a single star has no barycentre zone.
+    #[test]
+    fn the_root_pair_s_zone_is_the_barycentre_s_and_keeps_its_host_number() {
+        let binary = zones_of(pair(star(0, 1.0), star(1, 0.6), 0.2, 0.1));
+        let root = binary.last().unwrap();
+        assert_eq!(root.host(), OrbitHost::Barycentre);
+        assert_eq!(root.host_number(), 17);
+        assert_eq!(root.members().collect::<Vec<_>>(), [0, 1]);
+        let stars = [zams_star(1.0, 0.5), zams_star(0.6, 0.5)];
+        let inputs = ZoneDiscInputs::for_zone(SEED, system(7), root, &stars, Dex::ZERO).unwrap();
+        assert_eq!(*inputs.draws(), DiscDraws::for_host(SEED, system(7), 17));
+        // (A, (B, C)): the inner pair is Pair(2), host 18; the root keeps 17.
+        let triple = zones_of(pair(
+            star(0, 2.0),
+            pair(star(1, 0.6), star(2, 0.4), 0.5, 0.0),
+            60.0,
+            0.2,
+        ));
+        let named: Vec<(OrbitHost, u8)> = triple
+            .iter()
+            .map(|z| (z.host(), z.host_number()))
+            .filter(|(_, n)| *n >= STELLAR_SUB_END)
+            .collect();
+        assert_eq!(
+            named,
+            [(OrbitHost::Pair(2), 18), (OrbitHost::Barycentre, 17)]
+        );
+        let single =
+            stable_zones(&ZoneHierarchy::single(SolarMasses::new(1.0), SlotKind::Star).unwrap());
+        assert!(single.iter().all(|z| z.host() != OrbitHost::Barycentre));
+        // Every multiple has exactly one barycentre zone, the last, unbounded outside.
+        let mut rng = Lcg::new(0x5eed_0014_0009_000d);
+        for _ in 0..3_000 {
+            let count = 2 + u8::try_from(rng.next_below(5)).unwrap();
+            let (root, _) = random_node(&mut rng, &mut 0, count);
+            let zones = zones_of(root);
+            let at: Vec<usize> = zones
+                .iter()
+                .enumerate()
+                .filter(|(_, z)| z.host() == OrbitHost::Barycentre)
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(at, [zones.len() - 1]);
+            assert_eq!(zones[at[0]].outer(), None);
+            assert_eq!(
+                zones[at[0]].members().count(),
+                usize::from(count),
+                "the barycentre's zone is around every component"
+            );
+        }
+    }
+
+    // What the zones read of plan 11: the adapter, and drawn hierarchies.
+
+    /// 10⁴ multiples drawn by plan 11 over the galaxy's mass function at the Sun-like point, each
+    /// with its system's ID.
+    fn drawn_multiples(salt: u64) -> Vec<SystemHierarchy> {
+        let galaxy = multiplicity_testing::galaxy();
+        let context = MultiplicityContext::ForcedMultiple {
+            max_separation: None,
+        };
+        let records = multiplicity_testing::imf_records(
+            &galaxy,
+            multiplicity_testing::SAMPLE,
+            &multiplicity_testing::sunlike(),
+            salt,
+        );
+        records
+            .iter()
+            .map(|record| draw_hierarchy(&galaxy, record, context, RedrawAttempt::FIRST))
+            .collect()
+    }
+
+    /// Asserts that `node` is node `index` of `h` with everything under it, bit for bit.
+    fn assert_same_tree(h: &SystemHierarchy, index: NodeIndex, node: &ZoneNode) {
+        assert_same_bits(node.mass().value(), h.node_mass(index).value());
+        match (h.node(index), &node.shape) {
+            (HierarchyNode::Star(star), Shape::Component { index: n, kind }) => {
+                let slot = h.star(*star);
+                assert_eq!(*n, star.get());
+                assert_eq!(*kind, slot.kind());
+                assert_same_bits(node.mass().value(), slot.initial_mass().value());
+            }
+            (
+                HierarchyNode::Pair {
+                    inner,
+                    outer,
+                    orbit,
+                },
+                Shape::Pair {
+                    inner: zone_inner,
+                    outer: zone_outer,
+                    semi_major_axis,
+                    eccentricity,
+                },
+            ) => {
+                assert_same_bits(semi_major_axis.value(), orbit.semi_major_axis().value());
+                assert_same_bits(eccentricity.value(), orbit.eccentricity().value());
+                let key = h.pair_key(index).unwrap().body_index();
+                assert_eq!(u16::from(zone_outer.lowest), key);
+                assert_same_tree(h, *inner, zone_inner);
+                assert_same_tree(h, *outer, zone_outer);
+            }
+            (drawn, built) => panic!("{drawn:?} became {built:?}"),
+        }
+    }
+
+    /// The adapter keeps every star's index, mass and kind and every pair's orbit and key, and
+    /// sums the masses as plan 11 does; each zone's host number is its star's index or 16 + its
+    /// pair's key, and the root pair's zone is the barycentre's.
+    #[test]
+    fn a_drawn_hierarchy_converts_node_for_node() {
+        let galaxy = multiplicity_testing::galaxy();
+        let records = multiplicity_testing::imf_records(
+            &galaxy,
+            2_000,
+            &multiplicity_testing::sunlike(),
+            0x0014_0009,
+        );
+        let mut shapes = [0_u32; 7];
+        for (i, record) in records.iter().enumerate() {
+            // Half of them free, so that singles come through too.
+            let context = if i % 2 == 0 {
+                MultiplicityContext::Free
+            } else {
+                MultiplicityContext::ForcedMultiple {
+                    max_separation: None,
+                }
+            };
+            let h = draw_hierarchy(&galaxy, record, context, RedrawAttempt::FIRST);
+            let converted = ZoneHierarchy::from(&h);
+            assert_eq!(converted.component_count(), h.star_count());
+            assert_same_bits(converted.root().mass().value(), h.system_mass().value());
+            assert_same_tree(&h, h.root(), converted.root());
+            shapes[usize::from(h.star_count())] += 1;
+            for zone in stable_zones(&converted) {
+                let members: Vec<u8> = zone.members().collect();
+                match zone.host() {
+                    OrbitHost::Star(n) => {
+                        let slot = slot(&h, n);
+                        assert_eq!(members, [n]);
+                        assert_eq!(zone.host_number(), n);
+                        assert_same_bits(zone.host_mass().value(), slot.initial_mass().value());
+                        assert_eq!(zone.component_kind(), Some(slot.kind()));
+                    }
+                    OrbitHost::Pair(_) | OrbitHost::Barycentre => {
+                        let node = node_of(&h, &members);
+                        let key = h.pair_key(node).unwrap().body_index();
+                        assert_eq!(u16::from(zone.host_number()), 16 + key);
+                        assert_eq!(zone.host() == OrbitHost::Barycentre, node == h.root());
+                        assert_same_bits(zone.host_mass().value(), h.node_mass(node).value());
+                        assert_eq!(zone.component_kind(), None);
+                    }
+                    OrbitHost::Body(_) => panic!("a zone hosted by a body"),
+                }
+            }
+        }
+        println!("stars per system over 2,000 drawn hierarchies (index = count): {shapes:?}");
+        assert!(shapes[1] > 0 && shapes[2] > 0 && shapes[3] > 0);
+    }
+
+    /// The node of `h` whose stars are exactly `members`.
+    fn node_of(h: &SystemHierarchy, members: &[u8]) -> NodeIndex {
+        let mut found = None;
+        for (index, _) in h.pairs() {
+            let mut under = Vec::new();
+            stars_under(h, index, &mut under);
+            if under == members {
+                found = Some(index);
+            }
+        }
+        found.expect("every pair's zone is a pair's")
+    }
+
+    fn stars_under(h: &SystemHierarchy, index: NodeIndex, out: &mut Vec<u8>) {
+        match h.node(index) {
+            HierarchyNode::Star(star) => out.push(star.get()),
+            HierarchyNode::Pair { inner, outer, .. } => {
+                stars_under(h, *inner, out);
+                stars_under(h, *outer, out);
+            }
+        }
+    }
+
+    /// Whether a pair of `h` closer than `cut` lies above the zone whose stars are `members`:
+    /// a pair whose stars are a strict superset of them, the hierarchy's nodes being nested.
+    fn close_pair_above(h: &SystemHierarchy, members: &[u8], cut: Metres) -> bool {
+        h.pairs().any(|(index, orbit)| {
+            let mut under = Vec::new();
+            stars_under(h, index, &mut under);
+            orbit.semi_major_axis() < cut
+                && under.len() > members.len()
+                && members.iter().all(|m| under.contains(m))
+        })
+    }
+
+    /// Star `n`'s slot in `h`.
+    fn slot(h: &SystemHierarchy, n: u8) -> &StarSlot {
+        &h.stars()[usize::from(n)]
+    }
+
+    /// P14.T9's test (c), for the zones themselves: over 10⁴ multiples drawn by plan 11, no zone
+    /// reaches outside the room its hierarchy leaves it. Checked at the worst phases of every
+    /// orbit (no two zones can ever overlap), and against plan 11's own star positions at eight
+    /// times per system: no star but a zone's own ever lies inside its outer limit, and a pair's
+    /// own stars always lie inside its inner limit. Where the planets go inside the zones is
+    /// P14.T8's placer, whose test (c) adds them.
+    ///
+    /// Every star keeps a zone, and a member of the root pair its own S-type limit exactly. Below
+    /// the root, the closest-approach bound of ruling 53 may cut a star's zone short of its own
+    /// S-type limit, and this counts how often (the first pass's bound left 78 stars of this
+    /// sample without a zone and cut 34).
+    #[test]
+    fn no_zone_of_ten_thousand_drawn_multiples_lies_outside_its_hierarchy() {
+        let hierarchies = drawn_multiples(0x0014_0009_000c);
+        let mut rng = Lcg::new(0x5eed_0014_0009_000e);
+        let mut positions = Vec::new();
+        let (mut multiples, mut higher, mut stars, mut inner_stars) = (0, 0, 0, 0);
+        let (mut zones_kept, mut pairs_dropped, mut cut) = (0, 0, 0);
+        let mut nearest: f64 = f64::INFINITY;
+        for h in &hierarchies {
+            if h.star_count() == 1 {
+                continue;
+            }
+            multiples += 1;
+            if h.star_count() > 2 {
+                higher += 1;
+            }
+            let converted = ZoneHierarchy::from(h);
+            let zones = stable_zones(&converted);
+            assert_disjoint(converted.root(), &zones);
+            let own = own_s_type_limits(converted.root());
+            let Shape::Pair { inner, outer, .. } = &converted.root().shape else {
+                unreachable!("a multiple's root is a pair");
+            };
+            for star in 0..h.star_count() {
+                stars += 1;
+                let top = [inner, outer]
+                    .iter()
+                    .any(|m| matches!(m.shape, Shape::Component { index, .. } if index == star));
+                if !top {
+                    inner_stars += 1;
+                }
+                let limit = own[usize::from(star)];
+                let zone = zones
+                    .iter()
+                    .find(|z| z.host() == OrbitHost::Star(star))
+                    .unwrap_or_else(|| panic!("star {star} has no zone in {h:#?}"));
+                let outer = zone.outer().expect("a member's zone has an outer limit");
+                if top {
+                    assert_same_bits(outer.value(), limit);
+                } else if outer.value() < limit {
+                    cut += 1;
+                }
+            }
+            zones_kept += zones.len();
+            pairs_dropped += usize::from(h.star_count())
+                - 1
+                - zones.iter().filter(|z| z.inner().is_some()).count();
+            let (_, root_orbit) = h.pairs().next().expect("a multiple has a pair");
+            let period = root_orbit.period().value();
+            for _ in 0..8 {
+                let span = Span::from_seconds_f64(rng.next_f64() * period).unwrap();
+                let t = UniverseTime::EPOCH.checked_add(span).unwrap();
+                star_positions_at(h, t, &mut positions);
+                nearest = nearest.min(clearance(h, &zones, &positions));
+            }
+        }
+        println!(
+            "{multiples} drawn multiples ({higher} of three or more stars), {stars} stars of \
+             which {inner_stars} lie below the root pair: {zones_kept} zones; {pairs_dropped} \
+             pairs' zones dropped as narrower than 1.5; {cut} stars' zones cut short of their own \
+             S-type limits at a closest approach; the least clearance between a zone's limit and a \
+             star on either side of it was a factor of {nearest:.3}"
+        );
+        assert!(multiples > 9_900 && higher > 1_000, "{multiples} {higher}");
+        assert!(
+            nearest > 1.0,
+            "a star inside a zone that is not its own: {nearest}"
+        );
+    }
+
+    /// Whether every pair of `h` would pass Mardling and Aarseth's criterion with every orbit in
+    /// one plane and prograde, their eq. 90 without the inclination factor, with the 2 + 2 factor
+    /// f₁ as plan 11 applies it: for a hand-built hierarchy, whose orbits are coplanar, their
+    /// test itself.
+    fn stable_if_coplanar(h: &SystemHierarchy) -> bool {
+        h.pairs().all(|(index, orbit)| {
+            let HierarchyNode::Pair { inner, outer, .. } = *h.node(index) else {
+                unreachable!("a pair");
+            };
+            let axis = |n: NodeIndex| match h.node(n) {
+                HierarchyNode::Pair { orbit, .. } => Some(orbit.semi_major_axis().value()),
+                HierarchyNode::Star(_) => None,
+            };
+            let (binary, a_binary, third, f1) = match (axis(inner), axis(outer)) {
+                (None, None) => return true,
+                (Some(a), None) => (inner, a, outer, 1.0),
+                (None, Some(b)) => (outer, b, inner, 1.0),
+                (Some(a), Some(b)) if a >= b => (inner, a, outer, 1.0 + 0.1 * b / a),
+                (Some(a), Some(b)) => (outer, b, inner, 1.0 + 0.1 * a / b),
+            };
+            let q_out = h.node_mass(third).value() / h.node_mass(binary).value();
+            let critical =
+                f1 * mardling_aarseth_limit(q_out, orbit.eccentricity(), Radians::ZERO) * a_binary;
+            orbit.periapsis().value() > critical
+        })
+    }
+
+    /// Each star's own S-type limit in the pair it is a member of, m, by body index; infinite
+    /// for a single star.
+    fn own_s_type_limits(root: &ZoneNode) -> [f64; 16] {
+        fn walk(node: &ZoneNode, out: &mut [f64; 16]) {
+            if let Shape::Pair {
+                inner,
+                outer,
+                semi_major_axis,
+                eccentricity,
+            } = &node.shape
+            {
+                for (member, companion) in [(inner, outer), (outer, inner)] {
+                    if let Shape::Component { index, .. } = member.shape {
+                        let mu = companion.mass.value() / node.mass.value();
+                        out[usize::from(index)] = semi_major_axis.value()
+                            * holman_wiegert_s_type(mu, eccentricity.value());
+                    }
+                    walk(member, out);
+                }
+            }
+        }
+        let mut out = [f64::INFINITY; 16];
+        walk(root, &mut out);
+        out
+    }
+
+    /// The least ratio, over the zones of `h` with its stars at `positions`, of a non-member
+    /// star's distance from a zone's host to the zone's outer limit, and of a pair's inner limit
+    /// to a member star's distance from the pair's barycentre; above 1 when no star lies inside a
+    /// zone.
+    fn clearance(
+        h: &SystemHierarchy,
+        zones: &[OrbitZone],
+        positions: &[(BodyId, SystemPosition)],
+    ) -> f64 {
+        let at = |n: u8| positions[usize::from(n)].1.metres();
+        let mass = |n: u8| slot(h, n).initial_mass().value();
+        let distance = |a: [f64; 3], b: [f64; 3]| {
+            let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+        };
+        let mut least = f64::INFINITY;
+        for zone in zones {
+            let members: Vec<u8> = zone.members().collect();
+            let total: f64 = members.iter().map(|&n| mass(n)).sum();
+            let mut centre = [0.0; 3];
+            for &n in &members {
+                for (c, x) in centre.iter_mut().zip(at(n)) {
+                    *c += mass(n) * x / total;
+                }
+            }
+            for n in 0..h.star_count() {
+                let d = distance(at(n), centre);
+                if members.contains(&n) {
+                    if let Some(inner) = zone.inner() {
+                        least = least.min(inner.value() / d);
+                    }
+                } else if let Some(outer) = zone.outer() {
+                    least = least.min(d / outer.value());
+                }
+            }
+        }
+        least
+    }
+
+    /// P14.T9.b's brown-dwarf companion, on a hand-built hierarchy, since plan 11 draws none
+    /// before P11.T2.d: a brown-dwarf `StarSlot` bounds zones exactly as a star of its mass does,
+    /// its zone carries its kind, and the zones are those of the same hierarchy built by hand from
+    /// `ZoneNode`s, bit for bit.
+    #[test]
+    fn a_brown_dwarf_slot_bounds_zones_like_any_other_component() {
+        let body = |mass: f64, kind| Node::Star {
+            mass: SolarMasses::new(mass),
+            kind,
+        };
+        let orbit = |inner, outer, a_au: f64, e: f64| Node::Pair {
+            inner: Box::new(inner),
+            outer: Box::new(outer),
+            a: au(a_au),
+            e: Eccentricity::new(e).unwrap(),
+        };
+        // A Sun with a 0.05 M☉ dwarf at 10 au; a close pair with a 0.04 M☉ dwarf 30 au out.
+        let binary = |kind| orbit(body(1.0, SlotKind::Star), body(0.05, kind), 10.0, 0.2);
+        let triple = |kind| {
+            orbit(
+                orbit(
+                    body(1.0, SlotKind::Star),
+                    body(0.7, SlotKind::Star),
+                    0.5,
+                    0.1,
+                ),
+                body(0.04, kind),
+                30.0,
+                0.3,
+            )
+        };
+        let by_nodes = [
+            pair(
+                star(0, 1.0),
+                ZoneNode::component(1, SolarMasses::new(0.05), SlotKind::BrownDwarf),
+                10.0,
+                0.2,
+            ),
+            pair(
+                pair(star(0, 1.0), star(1, 0.7), 0.5, 0.1),
+                ZoneNode::component(2, SolarMasses::new(0.04), SlotKind::BrownDwarf),
+                30.0,
+                0.3,
+            ),
+        ];
+        let shapes: [&dyn Fn(SlotKind) -> Node; 2] = [&binary, &triple];
+        for (shape, by_nodes) in shapes.into_iter().zip(by_nodes) {
+            let dwarf = hand_built::build(system(11), &shape(SlotKind::BrownDwarf));
+            let starlike = hand_built::build(system(11), &shape(SlotKind::Star));
+            let last = last_star(&dwarf);
+            assert_eq!(slot(&dwarf, last).kind(), SlotKind::BrownDwarf);
+            let with_dwarf = stable_zones(&ZoneHierarchy::from(&dwarf));
+            let with_star = stable_zones(&ZoneHierarchy::from(&starlike));
+            assert_eq!(
+                with_dwarf,
+                stable_zones(&ZoneHierarchy::new(by_nodes).unwrap())
+            );
+            assert_eq!(with_dwarf.len(), with_star.len());
+            for (a, b) in with_dwarf.iter().zip(&with_star) {
+                assert_eq!(
+                    (
+                        a.host(),
+                        a.host_number(),
+                        a.inner(),
+                        a.outer(),
+                        a.host_multiplicity()
+                    ),
+                    (
+                        b.host(),
+                        b.host_number(),
+                        b.inner(),
+                        b.outer(),
+                        b.host_multiplicity()
+                    )
+                );
+                assert_same_bits(a.host_mass().value(), b.host_mass().value());
+                let expected = if a.host() == OrbitHost::Star(last) {
+                    Some(SlotKind::BrownDwarf)
+                } else {
+                    b.component_kind()
+                };
+                assert_eq!(a.component_kind(), expected);
+            }
+        }
+        // In the triple, the dwarf bounds the close pair's circumbinary zone at its S-type limit,
+        // the fit at μ clamped to 0.1, less nothing: the pair is the triple's inner member.
+        let zones = stable_zones(&ZoneHierarchy::from(&hand_built::build(
+            system(11),
+            &triple(SlotKind::BrownDwarf),
+        )));
+        let inner_pair = zones
+            .iter()
+            .find(|z| z.host() == OrbitHost::Pair(1))
+            .unwrap();
+        let bound = 30.0 * holman_wiegert_s_type(0.1, 0.3);
+        assert!((in_au(inner_pair.outer().unwrap()) - bound).abs() < 1e-9);
+    }
+
+    /// The highest-indexed star of `h`.
+    fn last_star(h: &SystemHierarchy) -> u8 {
+        h.star_count() - 1
+    }
+
+    /// Design note 10's flag feeding `arch`'s class constraints, over 10⁴ multiples drawn by plan
+    /// 11: a zone is in a close binary exactly when a pair above its host is closer than 47 au;
+    /// its constraints carry that flag with its disc, which lies inside the zone; a flagged zone
+    /// keeps 0.34 of every planet-bearing class's weight; and its class draws follow those
+    /// weights at its own host number.
+    #[test]
+    fn drawn_binaries_inside_47_au_flag_their_zones_for_the_class_draw() {
+        let hierarchies = drawn_multiples(0x0014_0009_000f);
+        let seed = SEED;
+        let coeffs = ZCoeffs::new(Composition::SOLAR.z_fit());
+        let cut = Metres::from(CLOSE_BINARY_SEMI_MAJOR_AXIS);
+        let (mut flagged, mut unflagged) = (0_u32, 0_u32);
+        // Planet-bearing classes drawn and expected, for flagged zones.
+        let (mut drawn, mut expected, mut variance) = (0_u32, 0.0, 0.0);
+        let mut disc_count = 0_u32;
+        for h in &hierarchies {
+            let system = h.stars()[0].body().system();
+            let stars: Vec<ZoneStar> = h
+                .stars()
+                .iter()
+                .map(|slot| ZoneStar {
+                    zams_luminosity: zams::luminosity(slot.initial_mass(), &coeffs),
+                    zams_radius: zams::radius(slot.initial_mass(), &coeffs),
+                    disc_lifetime_rank: StarDraws::for_star(seed, slot.body()).disc_lifetime(),
+                })
+                .collect();
+            for zone in stable_zones(&ZoneHierarchy::from(h)) {
+                let members: Vec<u8> = zone.members().collect();
+                let close = close_pair_above(h, &members, cut);
+                assert_eq!(is_close(&zone), close, "{:?} of {h:#?}", zone.host());
+                let inputs =
+                    ZoneDiscInputs::for_zone(seed, system, &zone, &stars, Dex::ZERO).unwrap();
+                let disc = inputs.derive();
+                if let Some(profile) = disc.profile() {
+                    disc_count += 1;
+                    let truncation = zone.truncation();
+                    assert!(truncation.inner().is_none_or(|r| profile.inner_edge() >= r));
+                    assert!(truncation.outer().is_none_or(|r| profile.outer_edge() <= r));
+                }
+                let constraints = zone.class_constraints(&disc);
+                assert_eq!(constraints.multiplicity(), zone.host_multiplicity());
+                let weights = class_weights(zone.host_mass(), Dex::ZERO);
+                let wide =
+                    ClassConstraints::new(&disc, zone.zone_limit(), HostMultiplicity::SingleOrWide);
+                assert_suppressed(&weights, constraints, wide, close);
+                if !close {
+                    unflagged += 1;
+                    continue;
+                }
+                flagged += 1;
+                let kept = weights.constrained(&constraints);
+                let p = 1.0 - kept.get(ArchitectureClass::Barren) / kept.total();
+                expected += p;
+                variance += p * (1.0 - p);
+                let class = draw_class(seed, system, zone.host_number(), &weights, &constraints);
+                if class != ArchitectureClass::Barren {
+                    drawn += 1;
+                }
+            }
+        }
+        println!(
+            "{flagged} zones in close binaries and {unflagged} not, {disc_count} with a disc; \
+             planet-bearing classes drawn in {drawn} flagged zones against {expected:.1} expected"
+        );
+        assert!(
+            flagged > 5_000 && unflagged > 5_000,
+            "{flagged} {unflagged}"
+        );
+        let z = (f64::from(drawn) - expected) / variance.sqrt();
+        assert_p_value(
+            "planet-bearing classes drawn in flagged zones",
+            2.0 * (1.0 - normal_cdf(z.abs())),
+            ALPHA,
         );
     }
 }

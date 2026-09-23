@@ -126,15 +126,15 @@ star 1 disc_luminosity = 0x3fe16547e4756145  # 0.543613382537878
 star 1 disc inner_m = 0x42051518b0709e83  # 11318531598.077398
 star 1 disc outer_m = 0x425620ff3961d076  # 380171511175.2572
 star 1 disc solids_mearth = 0x40013d17397ebedb  # 2.154829453640429
-pair 1: host 17 members 0,1 close false
-pair 1 mass = 0x40008f5c28f5c290  # 2.0700000000000003
-pair 1 inner_m = 0x42a7c5fcf506ad2c  # 13069559956310.586
-pair 1 outer none
-pair 1 lifetime_myr = 0x40008d75ad1b2547  # 2.0690721057805237
-pair 1 disc_luminosity = 0x3ffbf6f3f40fac22  # 1.747791245807783
-pair 1 disc inner_m = 0x42a7c5fcf506ad2c  # 13069559956310.586
-pair 1 disc outer_m = 0x42ab0c9f8a2896a7  # 14870515094603.326
-pair 1 disc solids_mearth = 0x401412780a95d998  # 5.0180360464059035
+barycentre: host 17 members 0,1 close false
+barycentre mass = 0x40008f5c28f5c290  # 2.0700000000000003
+barycentre inner_m = 0x42a7c5fcf506ad2c  # 13069559956310.586
+barycentre outer none
+barycentre lifetime_myr = 0x40008d75ad1b2547  # 2.0690721057805237
+barycentre disc_luminosity = 0x3ffbf6f3f40fac22  # 1.747791245807783
+barycentre disc inner_m = 0x42a7c5fcf506ad2c  # 13069559956310.586
+barycentre disc outer_m = 0x42ab0c9f8a2896a7  # 14870515094603.326
+barycentre disc solids_mearth = 0x401412780a95d998  # 5.0180360464059035
 
 alpha centauri with proxima: 3 components, 5 zones
 star 0: host 0 members 0 close true
@@ -173,13 +173,13 @@ star 2 disc_luminosity = 0x3f5a7229c481273a  # 0.0016141326796223613
 star 2 disc inner_m = 0x41f691080f1093d2  # 6057656561.036089
 star 2 disc outer_m = 0x428fa9087b0036c8  # 4351356526598.8477
 star 2 disc solids_mearth = 0x400a5f2bdc666634  # 3.296470376849152
-pair 2: host 18 members 0,1,2 close false
-pair 2 mass = 0x4000f5c28f5c28f6  # 2.12
-pair 2 inner_m = 0x43315bca58307117  # 4885999225172247.0
-pair 2 outer none
-pair 2 lifetime_myr = 0x3ff2cbd2561bbf79  # 1.1747611392601967
-pair 2 disc_luminosity = 0x3ff862db6a1f969c  # 1.5241350312657351
-pair 2 disc none
+barycentre: host 18 members 0,1,2 close false
+barycentre mass = 0x4000f5c28f5c28f6  # 2.12
+barycentre inner_m = 0x43315bca58307117  # 4885999225172247.0
+barycentre outer none
+barycentre lifetime_myr = 0x3ff2cbd2561bbf79  # 1.1747611392601967
+barycentre disc_luminosity = 0x3ff862db6a1f969c  # 1.5241350312657351
+barycentre disc none
 
 two close pairs: 4 components, 7 zones
 star 0: host 0 members 0 close true
@@ -234,13 +234,13 @@ pair 3 disc_luminosity = 0x3fd748d6755c4a42  # 0.3638206621264183
 pair 3 disc inner_m = 0x425c2fb6e73c1d99  # 484238400752.46246
 pair 3 disc outer_m = 0x428ffe03bdcdf334  # 4396980615614.4004
 pair 3 disc solids_mearth = 0x40344b26219299e9  # 20.293550585070907
-pair 2: host 18 members 0,1,2,3 close false
-pair 2 mass = 0x4008000000000000  # 3.0
-pair 2 inner_m = 0x42d725f78229d881  # 101807334926178.02
-pair 2 outer none
-pair 2 lifetime_myr = 0x3fea0480a62d1e1c  # 0.8130496259336186
-pair 2 disc_luminosity = 0x3ff1973069efab2c  # 1.0994114053853066
-pair 2 disc none
+barycentre: host 18 members 0,1,2,3 close false
+barycentre mass = 0x4008000000000000  # 3.0
+barycentre inner_m = 0x42d725f78229d881  # 101807334926178.02
+barycentre outer none
+barycentre lifetime_myr = 0x3fea0480a62d1e1c  # 0.8130496259336186
+barycentre disc_luminosity = 0x3ff1973069efab2c  # 1.0994114053853066
+barycentre disc none
 
 star and brown dwarf: 2 components, 3 zones
 star 0: host 0 members 0 close true
@@ -261,15 +261,15 @@ star 1 disc_luminosity = 0x3f689374bc6a7efa  # 0.003
 star 1 disc inner_m = 0x41ef9a6183904128  # 4241689628.5079536
 star 1 disc outer_m = 0x423b3da07f648858  # 116998045540.5326
 star 1 disc solids_mearth = 0x3fce063ccf76d46c  # 0.23456535463415962
-pair 1: host 17 members 0,1 close false
-pair 1 mass = 0x3ff0cccccccccccd  # 1.05
-pair 1 inner_m = 0x428e92807d143011  # 4201821217414.0083
-pair 1 outer none
-pair 1 lifetime_myr = 0x4010fe8b13304766  # 4.248577403852186
-pair 1 disc_luminosity = 0x3fe66c452787cccc  # 0.7007165691451518
-pair 1 disc inner_m = 0x428e92807d143011  # 4201821217414.0083
-pair 1 disc outer_m = 0x42a343cd492a26c2  # 10590963930387.379
-pair 1 disc solids_mearth = 0x403db2a589a2442f  # 29.697838403812224
+barycentre: host 17 members 0,1 close false
+barycentre mass = 0x3ff0cccccccccccd  # 1.05
+barycentre inner_m = 0x428e92807d143011  # 4201821217414.0083
+barycentre outer none
+barycentre lifetime_myr = 0x4010fe8b13304766  # 4.248577403852186
+barycentre disc_luminosity = 0x3fe66c452787cccc  # 0.7007165691451518
+barycentre disc inner_m = 0x428e92807d143011  # 4201821217414.0083
+barycentre disc outer_m = 0x42a343cd492a26c2  # 10590963930387.379
+barycentre disc solids_mearth = 0x403db2a589a2442f  # 29.697838403812224
 
 tight triple: 3 components, 4 zones
 star 0: host 0 members 0 close true
@@ -299,15 +299,15 @@ star 2 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
 star 2 disc inner_m = 0x4206e02dc16ac083  # 12281296941.344
 star 2 disc outer_m = 0x424d59d454633335  # 252122278086.40005
 star 2 disc solids_mearth = 0x3fe7dbe259dad2f4  # 0.7455913310028266
-pair 2: host 18 members 0,1,2 close false
-pair 2 mass = 0x4008000000000000  # 3.0
-pair 2 inner_m = 0x4284f75ff6009556  # 2881587429394.667
-pair 2 outer none
-pair 2 lifetime_myr = 0x3fea0480a62d1e1c  # 0.8130496259336186
-pair 2 disc_luminosity = 0x4000bec5461889ba  # 2.0931497074354555
-pair 2 disc inner_m = 0x4284f75ff6009556  # 2881587429394.667
-pair 2 disc outer_m = 0x42b2ba413cfe853d  # 20591167733381.24
-pair 2 disc solids_mearth = 0x40317e0cf709e27b  # 17.492385330117468
+barycentre: host 18 members 0,1,2 close false
+barycentre mass = 0x4008000000000000  # 3.0
+barycentre inner_m = 0x4284f75ff6009556  # 2881587429394.667
+barycentre outer none
+barycentre lifetime_myr = 0x3fea0480a62d1e1c  # 0.8130496259336186
+barycentre disc_luminosity = 0x4000bec5461889ba  # 2.0931497074354555
+barycentre disc inner_m = 0x4284f75ff6009556  # 2881587429394.667
+barycentre disc outer_m = 0x42b2ba413cfe853d  # 20591167733381.24
+barycentre disc solids_mearth = 0x40317e0cf709e27b  # 17.492385330117468
 
 eccentric pair: 2 components, 3 zones
 star 0: host 0 members 0 close true
@@ -328,15 +328,15 @@ star 1 disc_luminosity = 0x3f4f665acce46fe7  # 0.0009582465516220191
 star 1 disc inner_m = 0x41f3e89ee0213f39  # 5344194050.077935
 star 1 disc outer_m = 0x41f3f5450fd92a4c  # 5357457661.572826
 star 1 disc solids_mearth = 0x3ef61690218e68c4  # 2.1064888730750573e-5
-pair 1: host 17 members 0,1 close false
-pair 1 mass = 0x4000cccccccccccd  # 2.1
-pair 1 inner_m = 0x4289589f9e485aa5  # 3483553220875.3306
-pair 1 outer none
-pair 1 lifetime_myr = 0x40004d51eed2392a  # 2.037753930845743
-pair 1 disc_luminosity = 0x402fc8d0bb548eaf  # 15.892217496940559
-pair 1 disc inner_m = 0x4289589f9e485aa5  # 3483553220875.3306
-pair 1 disc outer_m = 0x42ab3e9f026a3c30  # 14977884828958.094
-pair 1 disc solids_mearth = 0x405a22989c2714ef  # 104.54056457344608
+barycentre: host 17 members 0,1 close false
+barycentre mass = 0x4000cccccccccccd  # 2.1
+barycentre inner_m = 0x4289589f9e485aa5  # 3483553220875.3306
+barycentre outer none
+barycentre lifetime_myr = 0x40004d51eed2392a  # 2.037753930845743
+barycentre disc_luminosity = 0x402fc8d0bb548eaf  # 15.892217496940559
+barycentre disc inner_m = 0x4289589f9e485aa5  # 3483553220875.3306
+barycentre disc outer_m = 0x42ab3e9f026a3c30  # 14977884828958.094
+barycentre disc solids_mearth = 0x405a22989c2714ef  # 104.54056457344608
 
 masses summed up the tree: 3 components, 5 zones
 star 0: host 0 members 0 close true
@@ -371,12 +371,12 @@ pair 2 disc_luminosity = 0x3f93230028bd1879  # 0.018688204275598672
 pair 2 disc inner_m = 0x4210f3f327ab1aa0  # 18203068906.776
 pair 2 disc outer_m = 0x42384704d16d09ba  # 104270713197.038
 pair 2 disc solids_mearth = 0x3fbc546d84d3a33a  # 0.11066326611365876
-pair 1: host 17 members 0,1,2 close false
-pair 1 mass = 0x3fe3333333333333  # 0.6
-pair 1 inner_m = 0x426651d218aa5454  # 766896031058.6353
-pair 1 outer none
-pair 1 lifetime_myr = 0x4012d59379bd8073  # 4.708570387069005
-pair 1 disc_luminosity = 0x3f941e32ff243bf8  # 0.01964645082722069
-pair 1 disc inner_m = 0x426651d218aa5454  # 766896031058.6353
-pair 1 disc outer_m = 0x429d202f01c804cc  # 8006016201217.199
-pair 1 disc solids_mearth = 0x40475ff9082b5657  # 46.74978735080793
+barycentre: host 17 members 0,1,2 close false
+barycentre mass = 0x3fe3333333333333  # 0.6
+barycentre inner_m = 0x426651d218aa5454  # 766896031058.6353
+barycentre outer none
+barycentre lifetime_myr = 0x4012d59379bd8073  # 4.708570387069005
+barycentre disc_luminosity = 0x3f941e32ff243bf8  # 0.01964645082722069
+barycentre disc inner_m = 0x426651d218aa5454  # 766896031058.6353
+barycentre disc outer_m = 0x429d202f01c804cc  # 8006016201217.199
+barycentre disc solids_mearth = 0x40475ff9082b5657  # 46.74978735080793
