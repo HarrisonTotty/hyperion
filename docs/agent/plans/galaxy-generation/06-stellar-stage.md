@@ -1910,3 +1910,70 @@ fraction: f64 }`: `PhaseClock::base_phase` and `phase_at` return one and `time_a
 domain_tags_are_pinned`, since `events` alone misses the registry tests and the tags golden.
   Bench (x86-64, criterion): ten day-long bins with thinning, 52 µs; one horizon-spanning root
   (P = 3 yr, 16 octaves), 30 µs.
+- **Deviations in T10.a and T10.b, as built.** `sse::wind` is private; `WindRecipe` is `pub`
+  (`Default` is `Modern`) and re-exported as `sse::WindRecipe`. `wind::rate(recipe, &StarState,
+&Composition, ReimersEta) -> SolarMassesPerYear` is `pub(crate)`; η is the new `pub(crate)`
+  newtype `ReimersEta` (`new`, `value`, `HURLEY` = 0.5), which T10.c builds from
+  `StarDraws::eta` by design note 7. Added for T10.d's HPT §6.3 perturbation:
+  `wind::small_envelope_mu(m, mc, l)`, equation 97. Both recipes read Z ÷ Z☉ as
+  `Composition::z_fit` ÷ 0.02. Post-AGB, pre-main-sequence, substellar and remnant phases have no
+  wind. `Hurley2000` is SSE's `mlwind` for a single star with `hewind` = 1, the paper's, and it
+  agrees with `mlwind` to 8 × 10⁻¹⁵ over 131,040 states (types 1–9, four Z, every term), zeros
+  included. It follows SSE in four places where the printed text moves the rate further than
+  T12.b's tolerances (ruling 10), for the owner to confirm. First, Nieuwenhuijzen and de Jager
+  ramps on over 4,000–4,500 L☉; the printed switch is up to 0.7 dex high at 4,100 L☉. Second,
+  Reimers applies from the Hertzsprung gap; "the GB and beyond" would zero every gap star below
+  4,000 L☉. Third, P₀ ≤ 2,000 d rather than log P₀ ≤ 3.3, 0.059 dex where it binds. Fourth, the
+  LBV term applies to types 2–6 and not on the main sequence. Both the paper and SSE **add** the
+  LBV term to the largest of the other four, so the plan's "the maximum of the applicable terms"
+  holds for those four only. SSE's distributed `evolve.in` sets `hewind` = 0.5, so T12.a runs
+  with `hewind` = 1.0 or T12.b's helium-star rates differ by 2. `Modern` follows Belczynski et
+  al. (2010, §2.2). From 12,500 K a hydrogen-rich star loses mass at Vink's rate **alone**, in
+  place of every HPT term, small-envelope term included: design note 6's "Hurley's own choices
+  elsewhere", and Belczynski's "for H-rich low mass stars, for which the above prescriptions do
+  not apply". Vink's equations 24 and 25 were checked digit by digit against the paper,
+  Belczynski's equations 6–7 and MESA's `winds.f90`. They are applied beyond their calibrated
+  grid (log L 5.0–6.0, 20–60 M☉, Z ÷ Z☉ 1/30–3), as Belczynski applies them from about 3 M☉.
+  Across 22,500–27,500 K, Ṁ is (1 − w) cool + w hot with w linear in T, both fits taken at the
+  star's state; Vink's own jump position (about 25.9 kK at solar Z, eqs 14–15) and the second
+  jump near 15 kK are not modelled. From 11,500 to 12,500 K HPT's rate is handed over to Vink's
+  the same way, in a band we chose after MESA's "Dutch" 10,000–11,000 K. T is held at 50,000 K
+  above the fits, and v∞ ÷ v_esc at 2.6 and 1.3, with no Z^0.13 correction, so Ṁ ∝ Z^0.85 as
+  design note 6 says. Evolved hydrogen-rich stars beyond the Humphreys–Davidson limit lose
+  1.5 × 10⁻⁴ M☉ yr⁻¹ in place of every other term. That step, about 6 times the rate just inside
+  the limit for a 60 M☉ star of 10⁶ L☉, is the recipe's one discontinuity, kept as design note 6
+  specifies; the continuity test covers the five temperature boundaries (11,500, 12,500, 22,500,
+  27,500 and 50,000 K) inside the limit. Helium stars lose max(Reimers, 10⁻¹³ L^1.5 (Z ÷
+  Z☉)^0.86). A giant cooler than 11,500 K that is stripped to a helium star therefore sees its
+  rate fall about 95 times at Z = 10⁻⁴ and 7 at 0.002, as in the codes followed. The plan's O star
+  (40 M☉, 40 kK, 10⁵·⁷ L☉) loses 3.43 × 10⁻⁶ M☉ yr⁻¹.
+- **Deviations in T11, as built.** `RemnantRecipe` (`pub`, `Default` `MandelMuller2020`) lives
+  in `stellar::remnant` and is re-exported as `sse::RemnantRecipe`. `RemnantKind` and
+  `CompactRemnant` (`pub`, getters `kind` and `mass`, `pub(crate) new` debug-asserting the mass)
+  exist now, in Provides' shape, because HPT's remnant mass returns one; T18.d reuses them.
+  `remnant::structure` is `pub(crate)` and holds `CHANDRASEKHAR_MASS` (1.44),
+  `OXYGEN_NEON_MC_BAGB` (1.6) and `HURLEY_MAX_NEUTRON_STAR_MASS` (1.8). The white dwarf's kind
+  is `white_dwarf_kind(DegenerateCore)`: `Helium` for a degenerate helium core, and
+  `CarbonOxygen { mc_bagb }` below 1.6 M☉ or oxygen–neon from it. So carbon–oxygen against
+  oxygen–neon is decided by the core mass at the base of the AGB (HPT §5.4, SSE), not at the
+  envelope loss; for a helium star the caller passes its initial mass, HPT §6.1. The radii are
+  `white_dwarf_radius(recipe, m)` (equation 91, floored at the recipe's neutron-star radius),
+  `neutron_star_radius(recipe)` and `black_hole_radius(recipe, m)`: 4.24 × 10⁻⁶ M under
+  `Hurley2000`, otherwise 2GM ÷ c² from the nominal constants, 0.12% larger. HPT's "10 km" is
+  kept as their 1.4 × 10⁻⁵ R☉, 9.74 km in the nominal R☉. `hurley_supernova_remnant(mc_sn)` is
+  equation 92, a neutron star up to 1.8 M☉. **The neutron-star radius is 12.2 km, not 11.5.**
+  Koehn et al. (2025, Phys. Rev. X 15, 021014) combine nuclear theory and experiment with the
+  NICER radii of PSR J0030+0451 (Riley et al. 2019, Miller et al. 2019) and PSR J0740+6620
+  (Salmi et al. 2024, Dittmann et al. 2024), GW170817 and GW190425, and give R₁.₄ = 12.20 (+0.50
+  −0.48) km at 95%, which excludes 11.5. The other combined analyses of the NICER data centre at
+  12.0–12.45 km (Miller et al. 2021, Raaijmakers et al. 2021, and Rutherford et al. 2024 with PSR
+  J0437−4715), and those of 2025–2026 that add PSR J0614−3329 at 11.8–11.9 km. Only
+  gravitational waves with nuclear theory alone reach 11.0 km (Capano et al. 2020). T21.b's
+  spin-down constant, written with 11.5 km, should read `neutron_star_radius`: k ∝ R⁶ is 1.43
+  times larger. Equation 91's relation vanishes at M_Ch as the plan asks. The radius itself is
+  floored at the neutron star's, as HPT print it, which binds within 3 × 10⁻⁶ M☉ of M_Ch. SSE's
+  two guards below 0.002 M☉ are left out. SSE's distributed `evolve.in` has `nsflag` = 1
+  (Belczynski et al. 2002 masses) and `mxns` = 3, so T12.a must run with `nsflag` = 0 and `mxns`
+  = 1.8 to compare against `RemnantRecipe::Hurley2000`. Against SSE's `hrdiag` (run of
+  2026-09-23), white-dwarf radii at ten masses, neutron-star and black-hole radii, and the
+  supernova remnants of 8–80 M☉ stars at three Z all agree to 10⁻⁹.

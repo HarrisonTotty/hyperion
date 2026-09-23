@@ -23,9 +23,15 @@ mod continuity;
 mod gb;
 mod hg;
 mod ms;
+mod wind;
 pub mod zams;
 
 pub use coeffs::ZCoeffs;
+pub use wind::WindRecipe;
+
+// Defined with the remnants; re-exported beside `WindRecipe`, the other choice a track is built
+// with, where plan 06's Provides places both.
+pub use crate::stellar::remnant::RemnantRecipe;
 
 use crate::units::{SolarLuminosities, SolarMasses, SolarRadii};
 
