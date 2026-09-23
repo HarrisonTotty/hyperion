@@ -181,12 +181,12 @@ So the engine is being hired for the ordinary parts: resource and state manageme
 shader pipeline, a material system, culling, and the tedious correctness of a WebGPU backend across
 drivers. It is explicitly _not_ being hired to solve real scale.
 
-| Option                         | For                                                                                                                                                                                        | Against                                                                                                                                                                |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Babylon.js 9.27**            | TypeScript-first, which suits a TS 7 workspace with type-aware lint. A written backward-compatibility rule, and a breaking-changes log whose visual changes each come with a flag to restore the old look. Weekly patch cadence. Reversed-Z present. Active investment in globe-scale rendering. | A quarter of three.js's community. Documentation site opaque to tooling, though its source is on GitHub. Larger package. |
-| **three.js r186**              | The largest ecosystem by a factor of four, and the most published procedural-planet work. Reversed-Z and logarithmic depth both exposed on the WebGPU backend. Small package.              | Breaking changes in essentially every release, including silent visual ones. Upgrades must be taken in small steps forever. `react-three-fiber` pins to a React major. |
-| **PlayCanvas 2.22**            | A mature WebGPU implementation with compute shaders, MIT-licensed.                                                                                                                         | Editor-centred workflow that a code-first console app would fight. Smallest community of the three.                                                                    |
-| **Raw WebGPU, or wgpu → wasm** | Total control, and no engine to track.                                                                                                                                                     | Everything above becomes ours: culling, materials, resource lifetimes, driver workarounds. Months of work whose output is not gameplay.                                |
+| Option                         | For                                                                                                                                                                                                                                                                                              | Against                                                                                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Babylon.js 9.27**            | TypeScript-first, which suits a TS 7 workspace with type-aware lint. A written backward-compatibility rule, and a breaking-changes log whose visual changes each come with a flag to restore the old look. Weekly patch cadence. Reversed-Z present. Active investment in globe-scale rendering. | A quarter of three.js's community. Documentation site opaque to tooling, though its source is on GitHub. Larger package.                                               |
+| **three.js r186**              | The largest ecosystem by a factor of four, and the most published procedural-planet work. Reversed-Z and logarithmic depth both exposed on the WebGPU backend. Small package.                                                                                                                    | Breaking changes in essentially every release, including silent visual ones. Upgrades must be taken in small steps forever. `react-three-fiber` pins to a React major. |
+| **PlayCanvas 2.22**            | A mature WebGPU implementation with compute shaders, MIT-licensed.                                                                                                                                                                                                                               | Editor-centred workflow that a code-first console app would fight. Smallest community of the three.                                                                    |
+| **Raw WebGPU, or wgpu → wasm** | Total control, and no engine to track.                                                                                                                                                                                                                                                           | Everything above becomes ours: culling, materials, resource lifetimes, driver workarounds. Months of work whose output is not gameplay.                                |
 
 **Lean: Babylon.js, confirming the prior document's choice and, once checked, most of its
 reasoning.** TypeScript fit is verified. The compatibility commitment is verified: it is a written
@@ -232,7 +232,8 @@ Electron 44 carries Chromium 152. Chromium enables WebGPU by default on Linux on
 and later with Mesa 22.0 or newer (from Chrome 144) and for NVIDIA with a driver of 535.183.01 or
 newer (from Chrome 147). The implementation-status wiki says NVIDIA's enablement is under Wayland,
 but Chromium's blocklist entry carries no such condition. Everything else — including AMD, and
-including this machine's Gen9.5 UHD 620 — is behind a flag with no announced date. The switch set reported to work with Mesa's ANV driver is
+including this machine's Gen9.5 UHD 620 — is behind a flag with no announced date. The switch set
+reported to work with Mesa's ANV driver is
 `--enable-unsafe-webgpu --use-angle=vulkan --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`,
 where `DefaultANGLEVulkan` is the one that avoids a hang in swap-chain acquisition on ANV. Electron
 sets these from the main process.
@@ -245,9 +246,9 @@ Three consequences, which should be written down rather than discovered:
    than in compute. The client should therefore detect an adapter failure and report it as a ship
    system fault in the guide's language, not crash or silently fall back.
 2. **The switches are a distribution problem, not just a development one.** Any Linux machine that
-   is not Gen12 Intel or NVIDIA with a recent driver gets the forced path, so on Linux the forced path is the
-   _normal_ path and must be the one that is tested. Windows and macOS enable WebGPU by default and
-   should not be given the Linux switches, which name Linux's Vulkan path.
+   is not Gen12 Intel or NVIDIA with a recent driver gets the forced path, so on Linux the forced
+   path is the _normal_ path and must be the one that is tested. Windows and macOS enable WebGPU by
+   default and should not be given the Linux switches, which name Linux's Vulkan path.
 3. **Compute shaders are therefore available everywhere**, which is what makes the WebGPU-only ruling
    valuable: terrain, cloud and histogram passes can assume compute rather than emulating it in
    fragment shaders. That assumption should be used deliberately, because it is the whole return on
@@ -413,7 +414,8 @@ atmospheric composition as ordered gas fractions with a surface pressure; equili
 temperatures with day–night and equator–pole contrasts; Bond albedo, iterated against the surface and
 cloud state; rotation period, obliquity and rotation phase at the epoch, with a `BodyFixedFrame` of
 pole, prime-meridian angle and rate; ocean fraction, ice fraction (from the latitude at which the
-zonal temperature crosses freezing) and cloud fraction; relief scaled as 20 km × (g⊕ ÷ g) × a
+zonal temperature crosses freezing, which [open question 9](#open-questions) finds wrong for several
+classes of world) and cloud fraction; relief scaled as 20 km × (g⊕ ÷ g) × a
 lithosphere factor; heat flow, and from it a tectonic regime and a volcanism level; surface age, and
 from it a crater density by the Neukum–Ivanov–Hartmann chronology, scaled by the system's belt masses
 and zeroed for small craters under a thick atmosphere; rings and belts as bodies in their own right.
@@ -487,16 +489,16 @@ reporting amplification factors up to thirty-two times.
 So: run the global processes, but only at a resolution where global is cheap.
 
 The resolution is set by what the transfer and the compute can afford, and the arithmetic is worth
-writing out, because it is easy to get wrong by orders of magnitude. An Earth-sized body has
-5.1 × 10⁸ km² of surface: sampled at 100 km that is about 5 × 10⁴ cells, and at 10 km about 5 × 10⁶.
-At a few tens of bytes per cell — elevation, plate identity, crustal type, temperature,
-precipitation, prevailing wind, drainage area, ice, biome and crater state — the fine end is a
-hundred megabytes or more, which is neither a cheap transfer nor a cheap simulation. **Lean:** level 7 or 8 of the cube-sphere quadtree, cells of
-about 70 or 35 km, which is 98,304 or 393,216 cells and **roughly 2 to 15 MB** for an Earth. The
-simulation that produces it is then of order 10⁷ to 10⁸ cell updates across its iterations, a
-fraction of a second of Rust rather than minutes. Both figures need measuring rather than trusting,
-but they are the right order for "computed when a ship arrives". Everything finer than a coarse cell
-is the local synthesis's job.
+writing out, because it is easy to get wrong by orders of magnitude. An Earth-sized body has 5.1 ×
+10⁸ km² of surface: sampled at 100 km that is about 5 × 10⁴ cells, and at 10 km about 5 × 10⁶. At a
+few tens of bytes per cell — elevation, plate identity, crustal type, temperature, precipitation,
+prevailing wind, drainage area, ice, biome and crater state — the fine end is a hundred megabytes or
+more, which is neither a cheap transfer nor a cheap simulation. **Lean:** level 7 or 8 of the
+cube-sphere quadtree, cells of about 70 or 35 km, which is 98,304 or 393,216 cells and **roughly 2
+to 15 MB** for an Earth. The simulation that produces it is then of order 10⁷ to 10⁸ cell updates
+across its iterations, a fraction of a second of Rust rather than minutes. Both figures need
+measuring rather than trusting, but they are the right order for "computed when a ship arrives".
+Everything finer than a coarse cell is the local synthesis's job.
 
 What the pass does, in order:
 
@@ -753,12 +755,12 @@ The requirement is unusual and it decides the choice: HYPERION needs atmospheres
 compositions**, seen from the ground, from orbit and from outside, through the terminator, with
 correct fog on terrain at every distance.
 
-| Model                                                | Verdict                                                                                                                                                                                                                                                                                                                       |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hillaire 2020, the production LUT approach** | **Lean.** Four small tables — transmittance, multiple scattering, sky-view and aerial perspective — cheap enough to rebuild whenever the atmosphere or the sun changes: 0.31 ms for all four on a GTX 1080 at 720p, 0.5 ms with the per-pixel ray march it uses for views from space, and under a millisecond for the two per-planet tables on an iPhone 6s, which is roughly the UHD 620's class. It takes Bruneton's material model — his density profiles, ozone layer and Cornette–Shanks aerosol — and Bevy 0.19's version generalises it to any number of terms, each with its own density and phase function. RGB rather than spectral. |
-| Bruneton's precomputed scattering, 2017 revision | Multiple scattering precomputed into four-dimensional tables, inside and outside the atmosphere, with aerial perspective, and spectral at no runtime cost. But an update takes 250 ms on the same GTX 1080, about 150 ms on the discrete target and seconds on the UHD 620, and its density profiles are limited to two layers, with one aerosol and one absorbing layer. Its WebGL demo loads tables precomputed offline. The reference if Hillaire's RGB approximation proves visibly wrong. |
-| Nishita 1993, O'Neil (GPU Gems 2)                    | Single scattering only, with the known darkening artefacts and a phase function disabled to hide them. Too approximate for a display that claims physical units.                                                                                                                                                              |
-| Hosek–Wilkie and other analytic sky models           | Fitted for ground-level daylight on Earth. No use from orbit.                                                                                                                                                                                                                                                                 |
+| Model                                            | Verdict                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hillaire 2020, the production LUT approach**   | **Lean.** Four small tables — transmittance, multiple scattering, sky-view and aerial perspective — cheap enough to rebuild whenever the atmosphere or the sun changes: 0.31 ms for all four on a GTX 1080 at 720p, 0.5 ms with the per-pixel ray march it uses for views from space, and under a millisecond for the two per-planet tables on an iPhone 6s, which is roughly the UHD 620's class. It takes Bruneton's material model — his density profiles, ozone layer and Cornette–Shanks aerosol — and Bevy 0.19's version generalises it to any number of terms, each with its own density and phase function. RGB rather than spectral. |
+| Bruneton's precomputed scattering, 2017 revision | Multiple scattering precomputed into four-dimensional tables, inside and outside the atmosphere, with aerial perspective, and spectral at no runtime cost. But an update takes 250 ms on the same GTX 1080, about 150 ms on the discrete target and seconds on the UHD 620, and its density profiles are limited to two layers, with one aerosol and one absorbing layer. Its WebGL demo loads tables precomputed offline. The reference if Hillaire's RGB approximation proves visibly wrong.                                                                                                                                                 |
+| Nishita 1993, O'Neil (GPU Gems 2)                | Single scattering only, with the known darkening artefacts and a phase function disabled to hide them. Too approximate for a display that claims physical units.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Hosek–Wilkie and other analytic sky models       | Fitted for ground-level daylight on Earth. No use from orbit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 **Parameterising from physics** is the part that must be built rather than borrowed, and it is
 straightforward in outline. The medium is a list of terms, each a density profile, a scattering and
@@ -961,15 +963,16 @@ The practical form:
   budget's star-field figure is the solar neighbourhood's.
 - **The galactic band from the galaxy's own model.** The Milky Way seen from inside is the light of
   the stars too faint or too many to draw individually, integrated along each line of sight outward
-  from the ship and dimmed by the dust in front of it. That is related to what the `GALAXY` map shows
-  but is not the same integral: the map's column density counts systems per square light-year along
-  parallel lines through the whole galaxy, where the band needs luminosity along rays from a point,
-  with extinction. It comes from the same density, stellar and dust fields, so it cannot disagree with
-  the charts, and it must take exactly the light the selection leaves out — stars below the limit,
-  and those beyond each layer's capped radius — or the stars near the ship are counted twice. Drawing the band from the model means a ship in the outer disc sees a thin bright line
-  in one direction and a sparse sky in the other, _because the model says so_, and dust lanes appear
-  when the dust field does. No other game can do this, because no other game generates the galaxy it
-  is standing in.
+  from the ship and dimmed by the dust in front of it. That is related to what the `GALAXY` map
+  shows but is not the same integral: the map's column density counts systems per square light-year
+  along parallel lines through the whole galaxy, where the band needs luminosity along rays from a
+  point, with extinction. It comes from the same density, stellar and dust fields, so it cannot
+  disagree with the charts, and it must take exactly the light the selection leaves out — stars
+  below the limit, and those beyond each layer's capped radius — or the stars near the ship are
+  counted twice. Drawing the band from the model means a ship in the outer disc sees a thin bright
+  line in one direction and a sparse sky in the other, _because the model says so_, and dust lanes
+  appear when the dust field does. No other game can do this, because no other game generates the
+  galaxy it is standing in.
 
 ### The local star as a disc
 
@@ -1041,19 +1044,19 @@ features exist at all on the low setting. **Lean:** the low setting's target is 
 first real measurement has something to contradict, and the plan that implements this should replace
 them with measured figures and keep them under version control.
 
-| Pass                         | Discrete target, 1080p, 16.7 ms budget          | UHD 620 low setting, 720p, 33 ms budget                                                                                    |
-| ---------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Terrain geometry and patches | 3–5 ms | 8–14 ms, a shallower quadtree away from the ship; full depth kept under grounded bodies |
-| Atmosphere, per frame | 0.5–1 ms: sky-view and aerial-perspective tables, and a ray march from orbit | 2–4 ms, smaller tables, aerial perspective on terrain only |
-| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere or the sun changes | About 1 ms, on the same occasions |
-| Volumetric clouds            | 1.5–3 ms at quarter resolution                  | **Cut.** Replaced by a two-dimensional layer at about 1 ms                                                                 |
-| Ocean                        | 1–2 ms, Gerstner                                | 2–3 ms, fewer wave components, glint retained                                                                              |
-| Shadows                      | 1.5–3 ms, cascaded, with cloud shadows          | 2–4 ms, one cascade or a horizon map for terrain self-shadowing                                                            |
-| Star field and galactic band | Under 0.2 ms, a cubemap and bright-star sprites | Under 0.5 ms                                                                                                               |
-| Exposure histogram           | 0.3–0.5 ms                                      | About 1 ms, over a quarter-resolution input                                                                                |
-| Bloom and tone mapping       | Under 1 ms                                      | 2–3 ms, fewer bloom levels                                                                                                 |
-| Scatter instances            | 1–2 ms                                          | Off, or a token density under 1 ms; the first thing after clouds to go                                                     |
-| Rings, when in view          | 0.5–1 ms                                        | Under 0.5 ms, a textured annulus                                                                                           |
+| Pass                          | Discrete target, 1080p, 16.7 ms budget                                       | UHD 620 low setting, 720p, 33 ms budget                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Terrain geometry and patches  | 3–5 ms                                                                       | 8–14 ms, a shallower quadtree away from the ship; full depth kept under grounded bodies |
+| Atmosphere, per frame         | 0.5–1 ms: sky-view and aerial-perspective tables, and a ray march from orbit | 2–4 ms, smaller tables, aerial perspective on terrain only                              |
+| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere or the sun changes                         | About 1 ms, on the same occasions                                                       |
+| Volumetric clouds             | 1.5–3 ms at quarter resolution                                               | **Cut.** Replaced by a two-dimensional layer at about 1 ms                              |
+| Ocean                         | 1–2 ms, Gerstner                                                             | 2–3 ms, fewer wave components, glint retained                                           |
+| Shadows                       | 1.5–3 ms, cascaded, with cloud shadows                                       | 2–4 ms, one cascade or a horizon map for terrain self-shadowing                         |
+| Star field and galactic band  | Under 0.2 ms, a cubemap and bright-star sprites                              | Under 0.5 ms                                                                            |
+| Exposure histogram            | 0.3–0.5 ms                                                                   | About 1 ms, over a quarter-resolution input                                             |
+| Bloom and tone mapping        | Under 1 ms                                                                   | 2–3 ms, fewer bloom levels                                                              |
+| Scatter instances             | 1–2 ms                                                                       | Off, or a token density under 1 ms; the first thing after clouds to go                  |
+| Rings, when in view           | 0.5–1 ms                                                                     | Under 0.5 ms, a textured annulus                                                        |
 
 The discrete column's lower ends sum to about 9 ms and its upper ends to about 18 ms, which is over
 budget. That is recorded rather than tuned away: the frame fits only if the passes do not all land at
@@ -1072,16 +1075,16 @@ keep up, and the spike measures it.
 
 The ladder, stated as policy rather than as a list of numbers:
 
-| Feature        | High                                                            | Low                                                                                  |
-| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Clouds         | Raymarched volume with temporal reprojection                    | Two-dimensional layer, correct albedo and optical depth                              |
-| Terrain detail | Full quadtree depth, GPU decoration | Shallower quadtree away from the ship, decoration off; full depth under grounded bodies |
-| Ocean          | Gerstner waves, shoreline foam, sun glint; spectral waves later | Fewer Gerstner components, sun glint retained                                        |
-| Shadows        | Cascaded, with cloud shadows on terrain                         | One cascade or a horizon map: terrain self-shadowing only                            |
-| Atmosphere     | Full tables, aerial perspective on everything                   | Smaller tables, aerial perspective on terrain only                                   |
-| Scatter        | Instanced, filtered by biome and slope                          | Off, or a token density                                                              |
-| Rings | Transmittance with a two-part phase, both shadows, and particles close to | A textured annulus with the planet's shadow |
-| Resolution     | 1080p native                                                    | 720p, presented upscaled                                                             |
+| Feature        | High                                                                      | Low                                                                                     |
+| -------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Clouds         | Raymarched volume with temporal reprojection                              | Two-dimensional layer, correct albedo and optical depth                                 |
+| Terrain detail | Full quadtree depth, GPU decoration                                       | Shallower quadtree away from the ship, decoration off; full depth under grounded bodies |
+| Ocean          | Gerstner waves, shoreline foam, sun glint; spectral waves later           | Fewer Gerstner components, sun glint retained                                           |
+| Shadows        | Cascaded, with cloud shadows on terrain                                   | One cascade or a horizon map: terrain self-shadowing only                               |
+| Atmosphere     | Full tables, aerial perspective on everything                             | Smaller tables, aerial perspective on terrain only                                      |
+| Scatter        | Instanced, filtered by biome and slope                                    | Off, or a token density                                                                 |
+| Rings          | Transmittance with a two-part phase, both shadows, and particles close to | A textured annulus with the planet's shadow                                             |
+| Resolution     | 1080p native                                                              | 720p, presented upscaled                                                                |
 
 Three rules keep this honest. The renderer **states its setting on the display**, under the
 degraded-rendering data state, so a player is never misled about whether they are seeing the real
@@ -1234,10 +1237,10 @@ written, the descent spike's included, rather than after.
   where the system's Node carries 12.4 and its Chromium 15.3. The golden height files are asserted
   equal across native, wasip1 and the browser target. The fast goldens under both wasm targets join
   `just ci`, which fails with a pointer to the recipe that installs the tools when one is missing,
-  and never skips; the slow wasip1 suite joins `just ci-slow`. There is no hosted CI, so a job beside
-  `just ci` would be a gate nobody runs ([open question 12](#open-questions)). The existing pin of `libm` to `=0.2.16`, already documented
-  as a generator-version change if bumped, is what makes that plausible; the same discipline extends
-  to the surface crate.
+  and never skips; the slow wasip1 suite joins `just ci-slow`. There is no hosted CI, so a job
+  beside `just ci` would be a gate nobody runs ([open question 12](#open-questions)). The existing
+  pin of `libm` to `=0.2.16`, already documented as a generator-version change if bumped, is what
+  makes that plausible; the same discipline extends to the surface crate.
 - **Fixed-width SIMD is allowed; relaxed SIMD is banned.** WebAssembly's relaxed SIMD proposal
   permits two implementations to return different results for the same instruction, which is
   precisely what the determinism rules forbid. Fixed-width 128-bit SIMD is IEEE-exact and may be
@@ -1507,8 +1510,8 @@ the first one brings the degraded-rendering data state with it.
    the same criterion. It decides whether the browser carries the planets, and it should happen
    before anything depends on the answer.
 4. **The sky.** The sky request with its magnitude-limited census, faint stars baked and bright or
-   near ones drawn as sprites, the galactic band from the model, the local star as a limb-darkened disc, blackbody
-   colour. Cheap, highly visible, and it exercises the photometry.
+   near ones drawn as sprites, the galactic band from the model, the local star as a limb-darkened
+   disc, blackbody colour. Cheap, highly visible, and it exercises the photometry.
 5. **Lit bodies at real scale**, from plan 14's radii, albedos and rotation, with correct phase and the
    terminator. Still no surfaces.
 6. **Atmospheres**, parameterised from plan 14's composition, pressure, temperature and gravity, with
