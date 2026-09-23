@@ -124,6 +124,7 @@ mod tests {
     use super::*;
     use crate::galaxy::imf::MassFunctionKind;
     use crate::galaxy::params::{GalaxyParams, GalaxyParamsBuilder};
+    use crate::galaxy::placement::cell::layer_bound;
     use crate::id::Layer;
     use crate::rng::Seed;
     use crate::units::{LightYears, SolarMasses};
@@ -172,6 +173,56 @@ mod tests {
             (3_000.0..12_000.0).contains(&mean),
             "the fullest layer-A cell expects {mean} candidates, not about 6,000"
         );
+    }
+
+    /// The octant's bound is at least every cell's, in every layer and every octant (module
+    /// documentation): the claim that lets the check skip a search. The densest cells are the eight
+    /// that touch the origin, whose bounds come within 0.4% of the octant's; the sweep reaches out
+    /// geometrically to the cube's faces along every axis and diagonal.
+    #[test]
+    fn the_octant_bounds_every_cell_in_every_layer() {
+        let galaxy = milky_way();
+        let octant = root_octant();
+        assert_eq!((octant.min_corner(), octant.edge()), ([0, 0, 0], 65_536));
+        for spec in STELLAR_LAYERS {
+            let layer = spec.layer();
+            let largest_mean = largest_cell_mean(&galaxy, spec, &octant);
+            let edge = 65_536 / i32::try_from(layer.cell_size_ly()).unwrap();
+            // 0 to 3, then doubling to the last cell before the face.
+            let mut steps = vec![0, 1, 2, 3];
+            while let Some(&last) = steps.last().filter(|&&last| last < edge - 1) {
+                steps.push((2 * last + 1).min(edge - 1));
+            }
+            let mut densest = 0.0_f64;
+            for &sx in &steps {
+                for &sy in &steps {
+                    for &sz in &steps {
+                        for signs in 0..8_u8 {
+                            // A step of s is cell s on the positive side and cell −s − 1 on the
+                            // negative, so the eight cells touching the origin are all visited.
+                            let side =
+                                |s: i32, bit: u8| if signs >> bit & 1 == 0 { s } else { -s - 1 };
+                            let key = CellKey::new(layer, [side(sx, 0), side(sy, 1), side(sz, 2)])
+                                .unwrap();
+                            let mean = layer_bound(&galaxy, key) * key.volume_ly3();
+                            assert!(
+                                mean <= largest_mean,
+                                "layer {} cell {:?} expects {mean}, above the octant's {largest_mean}",
+                                layer.letter(),
+                                key.gen_cell().to_array()
+                            );
+                            densest = densest.max(mean);
+                        }
+                    }
+                }
+            }
+            // The sweep reached the densest cells, or it would prove little.
+            assert!(
+                densest > 0.99 * largest_mean,
+                "layer {}: the densest cell swept expects {densest} of the octant's {largest_mean}",
+                layer.letter()
+            );
+        }
     }
 
     #[test]

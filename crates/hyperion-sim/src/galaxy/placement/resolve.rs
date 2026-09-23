@@ -196,16 +196,26 @@ mod tests {
     #[test]
     fn resolve_refuses_a_thinned_candidate() {
         let galaxy = galaxy();
-        let key = CellKey::containing(Layer::E, &sunlike()).unwrap();
+        // A layer-E cell at the Sun-like point thins about one candidate in fifteen, some 1.2 a
+        // cell, so a single cell has none about three times in ten: walk along x until a dozen
+        // have been seen, which a sound fixture reaches within a few tens of cells.
+        let first = CellKey::containing(Layer::E, &sunlike()).unwrap();
+        let [x, y, z] = first.gen_cell().to_array();
         let mut thinned = 0;
-        for index in 0..candidate_count(&galaxy, key) {
-            if evaluate_candidate(&galaxy, key, index) == CandidateOutcome::Thinned {
-                let id = key.candidate_id(index).unwrap();
-                assert_eq!(resolve(&galaxy, id), Err(ResolveSystemError::NoSuchSystem));
-                thinned += 1;
+        for step in 0..64 {
+            let key = CellKey::new(Layer::E, [x + step, y, z]).unwrap();
+            for index in 0..candidate_count(&galaxy, key) {
+                if evaluate_candidate(&galaxy, key, index) == CandidateOutcome::Thinned {
+                    let id = key.candidate_id(index).unwrap();
+                    assert_eq!(resolve(&galaxy, id), Err(ResolveSystemError::NoSuchSystem));
+                    thinned += 1;
+                }
+            }
+            if thinned >= 12 {
+                return;
             }
         }
-        assert!(thinned > 0, "no candidate of the cell was thinned");
+        panic!("only {thinned} thinned candidates in 64 layer-E cells at the Sun-like point");
     }
 
     #[test]

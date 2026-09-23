@@ -499,7 +499,8 @@ plan 01's tag-collision test covers the new tags.
   outward with an e-folding length within 1.7–2.3 R_d between 1 and 4 R_d; at plan 02's reference
   radius, at the heights each sub-disc's profile has, σ_z reproduces Sharma et al.'s (2021) law
   exactly as plan 02 applies it, 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)
-  times the galaxy's dispersion scale, to 5%, not its rounding 22 km/s × (age ÷ 10 Gyr)^0.44. That
+  times the galaxy's dispersion scale, with the rise capped at |z| = 2.0 kpc where Sharma et al.'s
+  binned data end (orchestrator's ruling 4 of 2026-09-22, built in P02.T11; it was 2.4), to 5%, not its rounding 22 km/s × (age ÷ 10 Gyr)^0.44. That
   is the check that this table and plan 02's profiles solve one equation.
 - **P08.T2.b In-plane dispersions and mean rotation.** σ_R from Design note 4, σ_φ² = σ_R² κ² ÷ 4Ω²,
   `asymmetric_drift` from note 5. Tests at Milky Way values and `sunlike_point`: old-disc

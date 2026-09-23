@@ -101,9 +101,16 @@ pub(super) const THIN_MEAN_HEIGHT: Law = Law::Uniform {
     lo: 850.0,
     hi: 1_150.0,
 };
+// The brainstorm's 130–200 ly gives way to 225–345 ly, 285 ly with the same relative width (plan
+// 02, ruling 3 of 2026-09-22), so that the young disc's height agrees with the brainstorm's own
+// 5 km/s floor on its vertical dispersion: in the Milky Way fixture's potential the bottom of the
+// range, 225 ly, gives 4.96 km/s, and 285 ly gives 6.2, where 130–200 ly gave 2–3.5. 285 ly is an
+// effective height Σ ÷ 2ρ₀ of 87 pc, where the youngest measured cohorts are: Bovy's (2017, MNRAS
+// 470, 1360, Table 1) A dwarfs have z_d = 37–56 pc in sech²(Z ÷ 2z_d), whose effective height is
+// 2z_d, 75–110 pc. 130–200 ly is 40–60 pc, the molecular gas's rather than a stellar cohort's.
 pub(super) const YOUNG_HEIGHT: Law = Law::Uniform {
-    lo: 130.0,
-    hi: 200.0,
+    lo: 225.0,
+    hi: 345.0,
 };
 pub(super) const THICK_LENGTH_RATIO: Law = Law::Uniform { lo: 0.7, hi: 0.9 };
 pub(super) const THICK_HEIGHT_RATIO: Law = Law::Uniform { lo: 2.7, hi: 3.3 };
@@ -128,7 +135,15 @@ pub(super) const ARMS_YOUNG_WIDTH: Law = Law::Uniform {
 };
 pub(super) const ARMS_YOUNG_FRACTION: Law = Law::Uniform { lo: 0.7, hi: 0.9 };
 pub(super) const ARMS_OLD_AMPLITUDE: Law = Law::Uniform { lo: 0.10, hi: 0.30 };
-pub(super) const GAS_MASS_FRACTION: Law = Law::Uniform { lo: 0.10, hi: 0.20 };
+// The brainstorm's 0.10–0.20 times 7 ÷ 4, the factor that carries plan 07's gas field's column at
+// the Sun's radius, 7.9 M☉ pc⁻², to McKee, Parravano and Hollenbach's (2015, ApJ 814, 13) measured
+// 13.7 ± 1.6 (plan 02, ruling 1 of 2026-09-22). `GasDiscParams::HEIGHT` rises by the same factor, so
+// the mid-plane gas density, which the in-plane extinction reads, does not move; what moves is the
+// column and the polar extinction, in the direction the measurement wants.
+pub(super) const GAS_MASS_FRACTION: Law = Law::Uniform {
+    lo: 0.175,
+    hi: 0.350,
+};
 pub(super) const GAS_LENGTH_RATIO: Law = Law::Uniform { lo: 1.5, hi: 2.0 };
 pub(super) const DARK_F_STAR: Law = Law::LogUniform { lo: 0.12, hi: 0.45 };
 pub(super) const DARK_CONCENTRATION_SCATTER: Law = Law::NormalDex { sigma: 0.11 };

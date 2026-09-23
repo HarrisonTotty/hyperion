@@ -123,6 +123,12 @@ impl CellCache for EvictingCache {
     }
 }
 
+/// A cell's records as text: `Debug` prints every float's shortest round-trip form, so two texts
+/// are equal exactly when the records are equal bit for bit, the sign of zero included.
+fn bits(systems: &[SystemRecord]) -> String {
+    format!("{systems:?}")
+}
+
 fn generated(galaxy: &Galaxy, key: CellKey) -> Vec<SystemRecord> {
     let mut systems = Vec::new();
     generate_cell(galaxy, key, &mut systems);
@@ -133,14 +139,13 @@ fn generated(galaxy: &Galaxy, key: CellKey) -> Vec<SystemRecord> {
 fn generating_a_cell_does_not_depend_on_what_was_generated_before_it() {
     let galaxy = galaxy();
     let keys = cells();
-    // Cold every time: the function itself is pure.
-    assert_order_independent(&keys, |&key| generated(&galaxy, key));
+    // Cold every time: the function itself is pure. Compared as text, since equal texts are
+    // equal bits and a derived `==` would take a signed age of −0 for +0.
+    assert_order_independent(&keys, |&key| bits(&generated(&galaxy, key)));
     // Behind one warm cache kept across all four passes.
     let cache = RefCell::new(BTreeCache::default());
     assert_order_independent(&keys, |&key| {
-        cache
-            .borrow_mut()
-            .with_cell(&galaxy, key, <[SystemRecord]>::to_vec)
+        cache.borrow_mut().with_cell(&galaxy, key, bits)
     });
     assert_eq!(
         cache.borrow().cells(),

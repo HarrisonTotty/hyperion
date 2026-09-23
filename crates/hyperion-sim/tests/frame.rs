@@ -296,10 +296,12 @@ fn a_source_holds_the_ship_and_can_keep_a_grid_system_from_holding_it() {
 
 /// The three tidal radii P03.T12.b quotes for the fixture, which set the search radii.
 ///
-/// As built they are 4.381 ly for 1 M☉, 3.477 ly for layer A's heaviest primary (0.5 M☉) and
-/// 23.279 ly for layer E's (150 M☉), against the task's 4.4, 3.5 and 23. They are figures of the
-/// code, so a change in plan 02's potential — P02.T11's tuning of the fixture, still to run — moves
-/// them, and this test says by how much.
+/// They are figures of the code, and P02.T11's tuning of the fixture has moved them, as the
+/// previous form of this test said it would: 4.235 ly for 1 M☉, 3.361 ly for layer A's heaviest
+/// primary (0.5 M☉) and 22.501 ly for layer E's (150 M☉), where they were 4.381, 3.477 and 23.279
+/// against the task's 4.4, 3.5 and 23. The tuning shortened the thin disc's scale length and
+/// raised its height, which lowers `4Ω² − κ²` at the Sun a little; P03.T12.b's quoted figures want
+/// rounding to 4.2, 3.4 and 22.5.
 #[test]
 fn the_search_reaches_the_tidal_radii_the_task_quotes() {
     let galaxy = galaxy();
@@ -314,14 +316,17 @@ fn the_search_reaches_the_tidal_radii_the_task_quotes() {
     };
 
     let (one, layer_a, layer_e) = (radius(1.0), radius(0.5), radius(150.0));
-    assert!((one - 4.4).abs() < 0.15, "1 M☉ gives {one} ly, not 4.4");
+    eprintln!(
+        "tidal radii at the Sun: {one:.3} ly for 1 M☉, {layer_a:.3} for 0.5, {layer_e:.3} for 150"
+    );
+    assert!((one - 4.2).abs() < 0.15, "1 M☉ gives {one} ly, not 4.2");
     assert!(
-        (layer_a - 3.5).abs() < 0.15,
-        "layer A's heaviest primary gives {layer_a} ly, not 3.5"
+        (layer_a - 3.4).abs() < 0.15,
+        "layer A's heaviest primary gives {layer_a} ly, not 3.4"
     );
     assert!(
-        (layer_e - 23.0).abs() < 1.0,
-        "layer E's heaviest primary gives {layer_e} ly, not 23"
+        (layer_e - 22.5).abs() < 1.0,
+        "layer E's heaviest primary gives {layer_e} ly, not 22.5"
     );
 
     // The radius goes as the cube root of the mass, which is why one search radius a layer covers

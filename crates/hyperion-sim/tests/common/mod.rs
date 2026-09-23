@@ -83,8 +83,8 @@ pub fn assert_params_in_ranges(p: &GalaxyParams, max_sigmas: f64) {
     assert_within(
         "young height",
         p.young_disc().height().value(),
-        130.0,
-        200.0,
+        225.0,
+        345.0,
     );
     assert_relative(
         "young length",
@@ -156,14 +156,14 @@ pub fn assert_params_in_ranges(p: &GalaxyParams, max_sigmas: f64) {
     let thin_mass = p.population_mass(Population::YoungThinDisc).value()
         + p.population_mass(Population::OldThinDisc).value();
     let gas = p.gas_disc();
-    assert_within("gas fraction", gas.mass().value() / thin_mass, 0.10, 0.20);
+    assert_within("gas fraction", gas.mass().value() / thin_mass, 0.175, 0.35);
     assert_within(
         "gas length ratio",
         gas.length() / thin_disc.length(),
         1.5,
         2.0,
     );
-    assert_within("gas height", gas.height().value(), 400.0, 400.0);
+    assert_within("gas height", gas.height().value(), 700.0, 700.0);
 
     let dark = p.dark_halo();
     assert_within("f★", dark.f_star(), 0.12, 0.45);
@@ -175,9 +175,10 @@ pub fn assert_params_in_ranges(p: &GalaxyParams, max_sigmas: f64) {
     );
     assert_within("concentration", dark.concentration(), 2.0, 40.0);
     assert_within("r200", dark.r200().value(), 400_000.0, 1_400_000.0);
-    // The fixture's one scatter is the Milky Way's measured offset from M–σ, 1.1 times the
-    // relation's 0.38 dex (plan 02, Risks, R13), so this bound never falls below 1.2 of it.
-    let bh_sigmas = max_sigmas.max(1.2);
+    // The fixture's one scatter is the Milky Way's measured offset from M–σ, 1.35 times the
+    // relation's 0.38 dex at the estimator's 123.9 km/s (plan 02, Risks, R13 and R22; 1.1 times
+    // before P02.T11 raised σ), so this bound never falls below 1.5 of it.
+    let bh_sigmas = max_sigmas.max(1.5);
     assert_within(
         "black hole scatter",
         p.black_hole().scatter().value(),

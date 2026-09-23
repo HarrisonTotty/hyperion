@@ -1,8 +1,8 @@
-# generator_version = 8
+# generator_version = 9
 {
   "universe": "5eed000000000001",
   "seed": "00000000000004d2",
-  "generator_version": 8,
+  "generator_version": 9,
   "groups": [
     {
       "key": "identity",
@@ -20,7 +20,7 @@
           "origin": "fixed",
           "value": {
             "type": "number",
-            "value": 8.0,
+            "value": 9.0,
             "unit": "count"
           }
         },
@@ -78,7 +78,7 @@
           "origin": "derived",
           "value": {
             "type": "number",
-            "value": 5194630520.310878,
+            "value": 9090603410.544037,
             "unit": "msun"
           }
         },
@@ -87,7 +87,7 @@
           "origin": "derived",
           "value": {
             "type": "number",
-            "value": 85418667.5538102,
+            "value": 86423016.28729044,
             "unit": "msun"
           }
         },
@@ -377,7 +377,7 @@
           "origin": "drawn",
           "value": {
             "type": "number",
-            "value": 170.01771319034262,
+            "value": 293.6017940405874,
             "unit": "ly"
           }
         },
@@ -508,7 +508,7 @@
           "origin": "derived",
           "value": {
             "type": "number",
-            "value": 2.260155643009738,
+            "value": 2.2858496279973854,
             "unit": "deg_per_myr"
           }
         }
@@ -767,7 +767,7 @@
           "origin": "derived",
           "value": {
             "type": "number",
-            "value": 239.28048752734048,
+            "value": 242.3730603511825,
             "unit": "km_per_s"
           }
         },
@@ -776,7 +776,7 @@
           "origin": "derived",
           "value": {
             "type": "number",
-            "value": 618.8658258601581,
+            "value": 622.3178544491255,
             "unit": "km_per_s"
           }
         }

@@ -56,6 +56,10 @@ pub enum CandidateOutcome {
 /// rest of the cell. [`generate_cell`](super::generate_cell) is the way to place a whole cell: it
 /// evaluates the cell's bound once instead of once per candidate.
 ///
+/// It does not check `index` against the cell's [`candidate_count`](super::candidate_count): an
+/// index at or above the count names no candidate, yet evaluates like one. Anything that starts
+/// from an ID goes through [`resolve`](super::resolve), which checks the count first.
+///
 /// # Panics
 ///
 /// If `index` is at or above [`CellKey::index_capacity`], which no candidate of the cell reaches:
@@ -249,9 +253,9 @@ mod tests {
 
     use super::*;
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::placement::{STELLAR_LAYERS, candidate_count};
+    use crate::galaxy::placement::{STELLAR_LAYERS, SystemOrigin, candidate_count};
     use crate::id::{Layer, SystemIdKind};
-    use crate::rng::Seed;
+    use crate::rng::{Seed, Threshold};
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
     /// The seed of the galaxy these tests place candidates in.
@@ -576,6 +580,108 @@ mod tests {
         assert!(
             claimed > 0 && accepted > 0,
             "{claimed} claimed and {accepted} left of a layer-C cell"
+        );
+    }
+
+    /// Every draw of a candidate, re-derived from plan 03's Design notes 1–4 with nothing of this
+    /// module's: the streams opened by hand, their words read by number and the thresholds written
+    /// out. The goldens pin what comes out; this pins which word of which stream feeds which
+    /// decision, so that a swapped axis, a shifted word, a crossed tag or a changed padding fails
+    /// here by name and not only as a golden diff.
+    #[test]
+    fn outcome_follows_the_plans_streams_word_for_word() {
+        let galaxy = galaxy();
+        let seed = galaxy.seed();
+        let (fields, shares) = (galaxy.fields(), galaxy.shares());
+        // The Sun, the bulge, the bar's end, an arm ridge and well off the plane: places where
+        // every kind of component is picked and the thinning rejects something.
+        let places = [
+            [0.0, 26_000.0, 0.0],
+            [300.0, 350.0, 100.0],
+            [14_000.0, 200.0, 50.0],
+            [-17_000.0, -19_700.0, 4.0],
+            [4_000.0, 9_000.0, 6_000.0],
+        ];
+        let (mut accepted, mut thinned) = (0_u32, 0_u32);
+        for spec in STELLAR_LAYERS {
+            let (layer, band) = (spec.layer(), spec.band());
+            for ly in places {
+                let place = GalacticPosition::from_light_years(ly).unwrap();
+                let key = CellKey::containing(layer, &place).unwrap();
+                let cell = key.gen_cell();
+                let bound = fields.layer_bound(shares, band, &key.cell_box());
+                // Design note 1: one Poisson draw on the cell's stream, keyed by candidate 0's ID.
+                let cell_word = SystemId::from_parts(layer, cell, 0).unwrap().raw();
+                let mut cell_stream = Stream::open(
+                    seed,
+                    tags::GALAXY_CELL_CANDIDATES,
+                    ObjectKey::cell(cell_word),
+                );
+                let count = candidate_count(&galaxy, key);
+                assert_eq!(
+                    u64::from(count),
+                    cell_stream.poisson(bound * key.volume_ly3()),
+                    "layer {} at {ly:?}",
+                    layer.letter()
+                );
+                for index in 0..count.min(400) {
+                    let id = SystemId::from_parts(layer, cell, index).unwrap();
+                    // Design note 2: words 0, 1 and 2 of the position stream are x, y and z, and
+                    // word 0 of the acceptance stream is the mark.
+                    let words = Stream::open(seed, tags::GALAXY_CANDIDATE_POSITION, id.into());
+                    let position = cell.position_from_words([0, 1, 2].map(|n| words.word_at(n)));
+                    let accept = Stream::open(seed, tags::GALAXY_CANDIDATE_ACCEPT, id.into());
+                    let mark = Mark::from_word(accept.word_at(0));
+                    // Design note 3: the first component whose running sum of share × density,
+                    // over the bound padded by 10⁻¹², lies above the mark.
+                    let mut densities = [0.0; MAX_COMPONENTS];
+                    fields.densities(&PointLy::from(&position), &mut densities);
+                    let padded = bound * (1.0 + 1e-12);
+                    let mut sum = 0.0;
+                    let picked = fields.components().iter().zip(densities).position(
+                        |(component, density)| {
+                            sum += shares.component_share(band, component) * density;
+                            mark.is_below(Threshold::from_probability((sum / padded).min(1.0)))
+                        },
+                    );
+                    match (evaluate_candidate(&galaxy, key, index), picked) {
+                        (CandidateOutcome::Thinned, None) => thinned += 1,
+                        (CandidateOutcome::Accepted(record), Some(picked)) => {
+                            let component = fields.component_id(picked).unwrap();
+                            // Design note 4: one word of the mass stream and one of the age
+                            // stream, the age from the picked component's distribution.
+                            let mut mass = Stream::open(seed, tags::SYSTEM_PRIMARY_MASS, id.into());
+                            let primary = galaxy.mass_function().sample_in_band(band, &mut mass);
+                            let mut age = Stream::open(seed, tags::SYSTEM_AGE, id.into());
+                            let laws = fields.component(component);
+                            let age_at_epoch = laws.ages().sample(&mut age);
+                            assert_eq!((mass.position(), age.position()), (1, 1));
+                            assert_eq!(record.id(), id);
+                            assert_eq!(record.origin(), SystemOrigin::Grid(component));
+                            assert_eq!(record.population(), laws.population());
+                            let (theirs, mine) = (record.epoch_position(), &position);
+                            assert_eq!(theirs.cell(), mine.cell());
+                            for (a, b) in
+                                theirs.offset_metres().into_iter().zip(mine.offset_metres())
+                            {
+                                assert_same_bits(a, b);
+                            }
+                            assert_same_bits(record.primary_initial_mass().value(), primary);
+                            assert_same_bits(record.age_at_epoch().value(), age_at_epoch.value());
+                            accepted += 1;
+                        }
+                        (outcome, picked) => panic!(
+                            "layer {} at {ly:?}, candidate {index}: {outcome:?}, but the plan's \
+                             draws pick {picked:?}",
+                            layer.letter()
+                        ),
+                    }
+                }
+            }
+        }
+        assert!(
+            accepted > 1_000 && thinned > 50,
+            "{accepted} accepted and {thinned} thinned: too few to pin both branches"
         );
     }
 

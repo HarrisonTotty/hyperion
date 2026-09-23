@@ -66,27 +66,41 @@ pub(super) fn inputs() -> Inputs {
         // The middle of 5–9 Gyr: a present formation rate about half the past average, against
         // Licquia and Newman's 1.65 ± 0.19 M☉ a year.
         sfh_timescale: 7.0 * GYR,
-        // 2.6 ± 0.5 kpc (Bland-Hawthorn and Gerhard 2016). The height is the thin disc's
-        // effective height Σ ÷ 2ρ₀, whose cored profiles then fall off as about 250–300 pc far
-        // from the plane, against their 300 ± 50 pc there (plan 02, P02.T7.b).
-        thin_length: Size::Fixed(8_480.0),
-        thin_mean_height: 1_000.0,
-        // "The young disc's 150 ly height" (brainstorm, "Sizing the layers").
-        young_height: 150.0,
-        // A thick disc of 2.0 kpc by 0.9 kpc (Bland-Hawthorn and Gerhard 2016).
-        thick_length_ratio: 0.77,
-        thick_height_ratio: 3.0,
+        // 2.15 kpc, Bovy and Rix's (2013, ApJ 779, 115) mass-weighted 2.15 ± 0.14 and inside
+        // Bland-Hawthorn and Gerhard's (2016) 2.6 ± 0.5: the lever P02.T11 sanctions for bringing
+        // the stars' surface density at the Sun's radius from 39 to 30.5 M☉ pc⁻², inside the
+        // measured 29–38, which the local number and mass densities scale with. The height is the
+        // thin disc's effective height Σ ÷ 2ρ₀: 1,100 ly, 337 pc, inside the measured 300 ± 50 pc,
+        // and it is the height and not the measured surface density that moves to meet the density
+        // bracket (plan 02, ruling 8 of 2026-09-22). Its cored profiles then fall off as 282 pc far
+        // from the plane (plan 02, P02.T7.b).
+        thin_length: Size::Fixed(7_000.0),
+        thin_mean_height: 1_100.0,
+        // 285 ly in place of the brainstorm's 130–200 ly, which is 40–60 pc and so molecular gas
+        // rather than a stellar cohort, and which gave the young disc a mid-plane dispersion of
+        // 2–3.5 km/s, under the brainstorm's own 5 km/s floor (plan 02, ruling 3 of 2026-09-22).
+        // Here it gives 6.2 km/s; the floor is met from 227 ly up. 285 ly is an effective height of
+        // 87 pc, where the youngest measured cohorts are (Bovy 2017, MNRAS 470, 1360, Table 1: A
+        // dwarfs of z_d = 37–56 pc in sech²(Z ÷ 2z_d), an effective height 2z_d of 75–110 pc).
+        young_height: 285.0,
+        // A thick disc of 2.0 kpc by 0.9 kpc (Bland-Hawthorn and Gerhard 2016): 1.93 kpc by 2,970
+        // ly (911 pc) on the thin disc above, the ends of the drawn ratios' ranges that come
+        // nearest, where 0.77 and 3.0 held it at 2.0 by 0.9 on the thin disc before P02.T11's tuning.
+        thick_length_ratio: 0.9,
+        thick_height_ratio: 2.7,
         // 0.70 × 0.44 × 0.25 kpc, a boxy exponential (Wegg and Gerhard 2013, MNRAS 435, 1874).
         bulge_length: Size::Fixed(2_280.0),
         bulge_b_over_a: 1_440.0 / 2_280.0,
         bulge_c_over_a: 820.0 / 2_280.0,
         bulge_boxiness: 3.5,
         // A half-length of 5.0 kpc and a thin-bar scale height of 180 pc (Wegg, Gerhard and
-        // Portail 2015, MNRAS 450, 4050); corotation near 6 kpc (Portail et al. 2017).
+        // Portail 2015, MNRAS 450, 4050); corotation at 6.1 ± 0.5 kpc, where the pattern speed is
+        // 39.0 ± 3.5 km/s per kpc (Portail et al. 2017): 1.24 half-lengths is 6.08 kpc. At 1.2
+        // (5.89 kpc) the fixture tuned by P02.T11 turned at 41.1, just past the table's 33–41.
         bar_length: Size::Fixed(16_000.0),
         bar_width_ratio: 0.10,
         bar_height: 590.0,
-        bar_corotation_ratio: 1.2,
+        bar_corotation_ratio: 1.24,
         // 88.6 pc by 28.4 pc (Sormani et al. 2022).
         nuclear_length: Size::Fixed(290.0),
         nuclear_height_ratio: 93.0 / 290.0,
@@ -98,20 +112,24 @@ pub(super) fn inputs() -> Inputs {
         arm_young_width: 375.0,
         arm_young_fraction: 0.8,
         arm_old_amplitude: 0.2,
-        // "About 15% of the thin disc's" (brainstorm, "Galaxy parameters"); the length ratio is
-        // the middle of its range.
-        gas_mass_fraction: 0.15,
+        // The brainstorm's "about 15% of the thin disc's" times 7 ÷ 4, the factor that carries plan
+        // 07's gas field's column at the Sun's radius to McKee, Parravano and Hollenbach's (2015)
+        // measured 13.7 ± 1.6 M☉ pc⁻² with `GasDiscParams::HEIGHT` raised by the same factor, so
+        // that the mid-plane density does not move (plan 02, ruling 1 of 2026-09-22); the length
+        // ratio is the middle of its range.
+        gas_mass_fraction: 0.2625,
         gas_length_ratio: 1.75,
         // M₂₀₀ = 1.19 × 10¹² M☉, against 1.3 × 10¹² (McMillan 2017, MNRAS 465, 76).
         dark_f_star: 0.32,
         dark_concentration_scatter: 0.0,
         // Sgr A* is (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration 2022, A&A 657, L12). At the
-        // fixture's bulge dispersion of 119.3 km/s the M–σ relation of McConnell and Ma (2013,
-        // ApJ 764, 184) gives 1.13 × 10⁷ M☉; the Milky Way lies 0.421 dex below it, 1.1 times the
+        // fixture's bulge dispersion of 123.9 km/s the M–σ relation of McConnell and Ma (2013,
+        // ApJ 764, 184) gives 1.40 × 10⁷ M☉; the Milky Way lies 0.514 dex below it, 1.35 times the
         // relation's intrinsic scatter, and this offset puts the fixture's black hole at 4.30 ×
-        // 10⁶ M☉. It holds for this σ only: when plan 08 replaces the σ estimator, it is set
-        // again.
-        bh_scatter: -0.421,
+        // 10⁶ M☉. It holds for this σ only, and is set again whenever σ moves: it was −0.421 at
+        // the 119.3 km/s before P02.T11's tuning concentrated the thin disc, and plan 08's
+        // replacement of the σ estimator will move it again.
+        bh_scatter: -0.514,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges but for

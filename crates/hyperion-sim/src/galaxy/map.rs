@@ -12,9 +12,9 @@
 //! - **Edge-on** ([`column_density_edge_on`]), looking along `+y` at a pixel that spans `x` and the
 //!   heights `z_lo` to `z_hi`: the column along `+y`, averaged over the pixel's height, so that a
 //!   disc thinner than a pixel keeps its light instead of falling between samples. The height
-//!   integral is closed-form for every disc and for the bar and a 4-node rule for the bulge and the
-//!   halo; along the line of sight the integral runs over fixed panels symmetric about `y = 0` with
-//!   [`gl16`] on each.
+//!   integral is closed-form for every disc and for the bar, and a 4-node rule on panels of at most
+//!   [`PANEL_SCALES`] of the component's vertical scale for the bulge and the halo; along the line of
+//!   sight the integral runs over fixed panels symmetric about `y = 0` with [`gl16`] on each.
 //!
 //! [`render_rows`] fills a range of a [`MapSpec`]'s rows, so that a pool can split a map into bands
 //! and assemble them: the value of a pixel depends on the pixel alone, never on the band it was
@@ -939,24 +939,114 @@ impl Spheroid<'_> {
         }
     }
 
-    /// The mean of `∫ n dy` over the pixel's height, `∫∫ n dy dz ÷ (z_hi − z_lo)`, by [`gl4`] in
-    /// `z`, split at the plane where the pixel straddles it, since `n` reads `|z|`.
+    /// The vertical scale over which this component's column falls off nearest the plane, ly: the
+    /// bulge's `c`, and a halo component's core times its flattening, which is the scale of
+    /// `(1 + m² ÷ a²)^(−γ÷2)` in `z` on the axis.
     ///
-    /// Four nodes are what plan 02's P02.T10.b asks for, and they hold the plan's 3 × 10⁻³ while a
-    /// pixel is no more than some eight scale heights tall, which covers every raster plan 04
-    /// renders (128 to 1,024 ly). A much taller pixel resting on the plane loses the peak the rule's
-    /// innermost node sits above: 1.9 × 10⁻³ at 4,096 ly and 8 × 10⁻³ at 8,192 ly, the height of the
-    /// golden file's 16 × 16 raster of the whole cube, which a unit test records. Splitting the
-    /// height into panels would move `galaxy_map.golden` and so the generator version.
+    /// It is the smallest such scale over the picture, since both columns flatten in `z` as `x`
+    /// grows, so a panel of [`PANEL_SCALES`] of it is never too wide anywhere along the row.
+    fn vertical_scale(self) -> f64 {
+        match self {
+            Self::Bulge(bulge) => bulge.scale_z().value(),
+            Self::Halo(halo) => halo.flattening() * halo.core().value(),
+        }
+    }
+
+    /// The mean of `∫ n dy` over the pixel's height, `∫∫ n dy dz ÷ (z_hi − z_lo)`, by [`gl4`] on
+    /// panels of `z`, split at the plane where the pixel straddles it, since `n` reads `|z|`.
+    ///
+    /// Four nodes are what plan 02's P02.T10.b asks for, and they hold the plan's 3 × 10⁻³ only
+    /// while a panel is no more than some eight scale heights tall: alone across a pixel they
+    /// under-read a column by 1.9 × 10⁻³ at 4,096 ly and 8 × 10⁻³ at 8,192 ly, the height of a
+    /// 16 × 16 raster of the whole cube, which `galaxy_map.golden` pins. A stated accuracy has to
+    /// hold over the range the code is used over, and a golden pinning a raster outside its own
+    /// tolerance makes the tolerance untestable, so the height is panelled (plan 02, ruling 17 of
+    /// 2026-09-22): panels of at most [`PANEL_SCALES`] vertical scales of the component, at most
+    /// [`MAX_PIXEL_PANELS`] of them.
+    ///
+    /// Every raster plan 04 renders (128 to 1,024 ly per pixel, against vertical scales of some 700
+    /// to 4,000 ly) takes one panel, and one panel is `gl4` across the whole pixel bit for bit, so
+    /// the rule costs those rasters nothing.
     fn pixel(self, x: f64, z_lo: f64, z_hi: f64) -> f64 {
         let integral = if z_lo < 0.0 && z_hi > 0.0 {
-            gl4(|z| self.along(x, z), z_lo, 0.0) + gl4(|z| self.along(x, z), 0.0, z_hi)
+            self.panelled(x, z_lo, 0.0) + self.panelled(x, 0.0, z_hi)
         } else {
-            gl4(|z| self.along(x, z), z_lo, z_hi)
+            self.panelled(x, z_lo, z_hi)
         };
         integral / (z_hi - z_lo)
     }
+
+    /// The height above which the column at `x` is 0, ly: a halo component's cut sphere reaches
+    /// `√(cut² − x²)`, and the bulge has no cut.
+    fn reach_in_z(self, x: f64) -> f64 {
+        match self {
+            Self::Bulge(_) => f64::INFINITY,
+            Self::Halo(halo) => {
+                let cut = halo.cut_radius().value();
+                let across = cut * cut - x * x;
+                if across > 0.0 { across.sqrt() } else { 0.0 }
+            }
+        }
+    }
+
+    /// `∫ (∫ n dy) dz` from `lo` to `hi > lo`, neither crossing the plane, by [`gl4`] on equal
+    /// panels of at most [`PANEL_SCALES`] vertical scales.
+    ///
+    /// A halo component's column falls to 0 at the height where its cut sphere ends, with a
+    /// square-root cusp there, so the interval is first clipped to that height: otherwise a pixel
+    /// the cut crosses reads it only if some node happens to fall below the cut, as a single panel
+    /// across the top row of a raster of the whole cube did not (plan 02, Risks, R22). A pixel
+    /// wholly inside the cut is unchanged by the clip, bit for bit.
+    ///
+    /// The panel count is the fewest whose width meets that, found by counting up rather than by
+    /// rounding a quotient, so that it is one fixed comparison chain and not a cast; the last
+    /// panel's far edge is the interval's own, so no panel reaches past the pixel.
+    fn panelled(self, x: f64, lo: f64, hi: f64) -> f64 {
+        let reach = self.reach_in_z(x);
+        let (lo, hi) = (lo.max(-reach), hi.min(reach));
+        if hi <= lo {
+            return 0.0;
+        }
+        let widest = PANEL_SCALES * self.vertical_scale();
+        let span = hi - lo;
+        let mut count = 1_u32;
+        while count < MAX_PIXEL_PANELS && f64::from(count) * widest < span {
+            count += 1;
+        }
+        if count == 1 {
+            return gl4(|z| self.along(x, z), lo, hi);
+        }
+        let width = span / f64::from(count);
+        (0..count).fold(0.0, |sum, k| {
+            let a = lo + f64::from(k) * width;
+            let b = if k + 1 == count {
+                hi
+            } else {
+                lo + f64::from(k + 1) * width
+            };
+            sum + gl4(|z| self.along(x, z), a, b)
+        })
+    }
 }
+
+/// The most vertical scales of a spheroid ([`Spheroid::vertical_scale`]) that one panel of a
+/// pixel's height spans.
+///
+/// Four, half the eight scale heights [`gl4`] is demonstrably enough for, because at eight the rule
+/// is already within a factor of two of the plan's 3 × 10⁻³, and every raster plan 04 renders still
+/// takes a single panel. Measured on the plane for the Milky Way fixture against Simpson's rule on
+/// 4,000 steps in `z` (`tests::the_spheroids_height_integral_holds_its_tolerance_against_simpsons_rule`):
+/// 1.3 × 10⁻⁵ at 1,024 ly, 3.6 × 10⁻⁴ at 4,096, 1.5 × 10⁻⁴ at 8,192 and 1.2 × 10⁻³ from 16,384 ly
+/// to the cube's 65,536, where one `gl4` read 4.2 × 10⁻⁵, 1.9 × 10⁻³ and 8.0 × 10⁻³ at the first
+/// three (plan 02, Risks, R21 and R22).
+const PANEL_SCALES: f64 = 4.0;
+
+/// The most panels one side of a pixel's height is split into.
+///
+/// A bound, not a working limit: the smallest vertical scale the drawn ranges allow is 510 ly (a
+/// bulge of `c ÷ a` 0.3 on the 1,700 ly clamp), so the tallest pixel the root cube holds, 131,072
+/// ly, wants 65 panels. Past the bound the panels widen, which costs accuracy rather than time.
+const MAX_PIXEL_PANELS: u32 = 256;
 
 /// What one component contributes to an edge-on pixel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1227,16 +1317,17 @@ mod tests {
         assert_eq!(wanted_parts(&[]), [false; MAX_PARTS]);
     }
 
-    /// What the four nodes across a pixel's height cost a raster far coarser than the ones plan 04
-    /// renders: the figures [`Spheroid::pixel`]'s documentation quotes.
+    /// The height integral holds plan 02's 3 × 10⁻³ at every pixel height the root cube allows,
+    /// which is what panelling the height buys (plan 02, ruling 17 of 2026-09-22).
     ///
     /// The bulge and the halo are the only components the height integral is not exact for, and a
-    /// pixel resting on the plane holds their peak between the plane and the rule's innermost node.
-    /// Plan 04's rasters are 128 to 1,024 ly, where this is under 10⁻⁴; the golden file's 16 × 16
-    /// raster of the whole cube is 8,192 ly, where it is 8 × 10⁻³, past the plan's 3 × 10⁻³ for the
-    /// view. Tightening it would move `galaxy_map.golden`, so the limit is recorded, not fixed.
+    /// pixel resting on the plane holds their peak between the plane and the rule's innermost node,
+    /// so on one panel `gl4` under-read a column by 1.9 × 10⁻³ at 4,096 ly and 8 × 10⁻³ at 8,192 ly,
+    /// past the tolerance at the height `galaxy_map.golden`'s 16 × 16 raster of the whole cube uses.
+    /// The brackets below are the measured errors of the panelled rule; the figures are printed, and
+    /// plan 02's Risks record them.
     #[test]
-    fn edge_on_columns_lose_a_pixel_taller_than_the_spheroids_scale() {
+    fn edge_on_columns_hold_their_tolerance_at_every_pixel_height() {
         let fields = fixture();
         // A reference that resolves the height: the same lines of sight, over sixteen panels of the
         // pixel instead of one, which the closed forms leave unchanged and the spheroids do not.
@@ -1255,10 +1346,13 @@ mod tests {
             total / (z_hi - z_lo)
         };
         let brackets = [
-            (256.0, 1e-5),
+            (256.0, 1e-6),
             (1_024.0, 1e-4),
-            (4_096.0, 4e-3),
-            (8_192.0, 1.5e-2),
+            (4_096.0, 3e-4),
+            (8_192.0, 3e-4),
+            (16_384.0, 1e-3),
+            (32_768.0, 1.5e-3),
+            (65_536.0, 1.5e-3),
         ];
         for (height, bracket) in brackets {
             let mut worst = 0.0_f64;
@@ -1270,6 +1364,72 @@ mod tests {
             }
             println!("edge-on, a pixel {height} ly tall on the plane: {worst:e}");
             assert!(worst < bracket, "{height} ly tall: {worst:e}");
+        }
+    }
+
+    /// Where a halo component's cut sphere ends inside a pixel's height, the pixel reads the light
+    /// below it: the height integral is clipped to the cut, so it no longer depends on whether a node
+    /// happens to fall inside (plan 02, Risks, R22). Measured against Simpson's rule on 4,000 steps
+    /// up to the cut, for pixels 8,192 ly tall that the cut crosses near their bottom, middle and
+    /// top, where the one-panel rule read 0, 0 and a few per cent.
+    #[test]
+    fn a_pixel_the_halos_cut_crosses_reads_the_light_inside_it() {
+        let fields = fixture();
+        let x = -36_864.0;
+        let mut worst = 0.0_f64;
+        for component in fields.components() {
+            let Shape::Halo(halo) = component.shape() else {
+                continue;
+            };
+            let spheroid = Spheroid::Halo(halo);
+            let reach = spheroid.reach_in_z(x);
+            for below in [287.0, 4_096.0, 8_000.0] {
+                let (z_lo, z_hi) = (reach - below, reach - below + 8_192.0);
+                let ours = spheroid.pixel(x, z_lo, z_hi) * (z_hi - z_lo);
+                let theirs = brute_force(|z| spheroid.along(x, z), z_lo, reach, BRUTE_STEPS);
+                assert!(
+                    ours > 0.0,
+                    "{:?}: nothing read {below} ly below the cut",
+                    halo.kind()
+                );
+                worst = worst.max((ours / theirs - 1.0).abs());
+            }
+        }
+        println!("edge-on, a pixel the halo's cut crosses: worst relative error {worst:e}");
+        assert!(worst < 3e-3, "{worst:e}");
+    }
+
+    /// The spheroids' height integral on the plane against an independent reference, Simpson's rule
+    /// on 4,000 steps in `z` over the same lines of sight, which shares no node with [`gl4`]: the
+    /// figures ruling 17 of 2026-09-22 asks plan 02 to record (Risks, R22), from 1,024 ly to the
+    /// cube's full height. Before the panels, one `gl4` across the pixel read 4.2 × 10⁻⁵ at 1,024
+    /// ly, 1.9 × 10⁻³ at 4,096 and 8.0 × 10⁻³ at 8,192 (R21).
+    #[test]
+    fn the_spheroids_height_integral_holds_its_tolerance_against_simpsons_rule() {
+        let fields = fixture();
+        let spheroids: Vec<Spheroid<'_>> = fields
+            .components()
+            .iter()
+            .filter_map(|c| match c.shape() {
+                Shape::Bulge(bulge) => Some(Spheroid::Bulge(bulge)),
+                Shape::Halo(halo) => Some(Spheroid::Halo(halo)),
+                Shape::Disc(_) | Shape::Bar(_) => None,
+            })
+            .collect();
+        for height in [1_024.0, 4_096.0, 8_192.0, 16_384.0, 32_768.0, 65_536.0] {
+            let mut worst = 0.0_f64;
+            for x in [0.0, 2_048.0, 8_192.0, 26_000.0] {
+                let (ours, theirs) = spheroids.iter().fold((0.0, 0.0), |(o, r), s| {
+                    let reach = s.reach_in_z(x).min(height);
+                    (
+                        o + s.pixel(x, 0.0, height) * height,
+                        r + brute_force(|z| s.along(x, z), 0.0, reach, BRUTE_STEPS),
+                    )
+                });
+                worst = worst.max((ours / theirs - 1.0).abs());
+            }
+            println!("edge-on spheroids, {height} ly on the plane, against Simpson: {worst:e}");
+            assert!(worst < 3e-3, "{height} ly: {worst:e}");
         }
     }
 

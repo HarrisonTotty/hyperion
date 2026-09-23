@@ -378,8 +378,8 @@ and the nuclear cluster, which change it by well under a per cent at the effecti
 10 Gyr. Each takes as its age the mean age of the formation history inside its bin, and as its
 dispersion Sharma et al.'s (2021, MNRAS 506, 1761, eqs. 4 and 7, Table 2) exact heating law, not
 its rounding: σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc),
-the rise stopping at 2.4 kpc, where the height axes of its figures end (its binned data reach
-about 2 kpc; R18).
+the rise stopping at 2.0 kpc, where its binned data end, rather than at the 2.4 kpc where the
+height axes of its figures do (ruling 4 of 2026-09-22; R18, R22).
 Each sub-disc's vertical profile is the vertical Jeans equation's solution for that dispersion in
 K_z(R_ref, z) from `MassModel`, R_ref three thin-disc scale lengths: n(z) ÷ n(0) = (σ(0) ÷ σ(z))²
 exp(−∫₀^|z| K_z ÷ σ² dz′), cored at the plane, tabulated once per galaxy (`fields/vertical.rs`) and
@@ -425,8 +425,11 @@ as the brainstorm's note on births in the window requires.
 sigma of [Fe/H] at a position and age. The draw belongs to the system stage (plan 06). Values the
 brainstorm does not give are decided in P02.T7.e and marked for re-checking.
 
-**D15. Parameters that exist only for the potential.** The gas disc (mass 10–20% of the thin disc's,
-scale length 1.5–2 times the thin disc's, height 400 ly, no hole) and the nuclear cluster (mass
+**D15. Parameters that exist only for the potential.** The gas disc (mass 17.5–35% of the thin
+disc's, scale length 1.5–2 times the thin disc's, height 700 ly, no hole; the brainstorm's 10–20%
+and 400 ly both raised by 7 ÷ 4, ruling 1 of 2026-09-22, so that plan 07's column at R₀ reaches
+McKee et al.'s 13.7 ± 1.6 M☉ pc⁻² with the mid-plane density, and so the in-plane extinction,
+unchanged; R22) and the nuclear cluster (mass
 0.024 of the nuclear disc's with 0.2 dex of scatter, inner slope 1.3, break 10 ly, outer slope 3.5,
 outside the population budgets) enter the mass model so that the rotation curve and the
 enclosed-mass checks are right. Plans 07 and 09 own what they mean and may refine them.
@@ -557,7 +560,7 @@ suffix (`.height_ratio`), it shares the first one's prefix (`thick.height_ratio`
 | `share.nuclear_disc`, `share.halo`    | uniform 1–2.5%, 0.7–1.4%                               |
 | `sfh.timescale`                       | uniform 5–9 Gyr                                        |
 | `thin.length.scatter`                 | normal, 0.05 dex (coupled, T5.b)                       |
-| `thin.mean_height`, `young.height`    | uniform 850–1,150 ly, 130–200 ly                       |
+| `thin.mean_height`, `young.height`    | uniform 850–1,150 ly, 225–345 ly (ruling 3; R22)       |
 | `thick.length_ratio`, `.height_ratio` | uniform 0.7–0.9 of thin length, 2.7–3.3 of thin height |
 | `bulge.length.scatter`                | normal, 0.06 dex                                       |
 | `bulge.b_over_a`, `bulge.c_over_a`    | uniform 0.5–0.7, 0.3–0.4                               |
@@ -572,7 +575,7 @@ suffix (`.height_ratio`), it shares the first one's prefix (`thick.height_ratio`
 | `arms.pitch`                          | uniform 10–18°                                         |
 | `arms.young_width`, `.young_fraction` | uniform 250–500 ly, 0.7–0.9 (σ_w and A of D10)         |
 | `arms.old_amplitude`                  | uniform 0.10–0.30                                      |
-| `gas.mass_fraction`, `.length_ratio`  | uniform 0.10–0.20, 1.5–2.0                             |
+| `gas.mass_fraction`, `.length_ratio`  | uniform 0.175–0.350 (ruling 1; R22), 1.5–2.0           |
 | `dark.f_star`                         | log-uniform 0.12–0.45                                  |
 | `dark.concentration.scatter`          | normal, 0.11 dex                                       |
 | `bh.scatter`                          | normal, 0.38 dex                                       |
@@ -627,9 +630,11 @@ correlate with masses at the expected slope; M₂₀₀ within 1.4 × 10¹²–5
 
 **P02.T5.c Milky Way fixture and golden file.** `GalaxyParams::milky_way_like()`: the default mass
 function; M★ 6.0 × 10¹⁰ M☉; shares thick 10%, bulge and bar 31% with the bar 30% of that, nuclear
-disc 1.75%, halo 1%; timescale 7 Gyr; thin length 8,480 ly and effective height 1,000 ly; bulge
+disc 1.75%, halo 1%; timescale 7 Gyr; thin length 7,000 ly and effective height 1,100 ly, the
+thick disc 0.9 and 2.7 times them, the young disc 285 ly and the gas 26.25% of the thin disc's
+mass (P02.T11's tuning, R22; T5.c first built 8,480 ly, 1,000 ly, 0.77, 3.0, 150 ly and 15%); bulge
 2,280 × 1,440 × 820 ly, boxiness 3.5; bar half-length 16,000 ly, height 590 ly, corotation ratio
-1.2; nuclear disc 290 ly by 93 ly; four arms at 12°; f★ 0.32; the halo's inner slopes 2.5 and the
+1.24 (1.2 until T11, R22); nuclear disc 290 ly by 93 ly; four arms at 12°; f★ 0.32; the halo's inner slopes 2.5 and the
 dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0 (Pila-Díez et al. 2015; Medina et
 al. 2024); no scatter anywhere. Values may be tuned within the cited measurements so
 that the checks of T11 pass, and each is cited (Bland-Hawthorn and Gerhard 2016; Wegg and Gerhard
@@ -871,7 +876,9 @@ halo) and 10⁻¹² (closed forms); the face-on map's integral over the plane eq
 **P02.T10.b Edge-on.** Line of sight along +y, so the picture shows x across and z up and the bar
 lies in its plane. Across a pixel's height the z-integral is closed-form for every disc, whose
 tabulated profile is exponential across each segment of its table (`VerticalProfile::integral_to`,
-exact for the table), and for the bar, and a 4-node quadrature for bulge and halo; the result is divided by the
+exact for the table), and for the bar, and a 4-node quadrature for bulge and halo on panels of at
+most four of the component's vertical scales, clipped at a halo component's cut (ruling 17 of
+2026-09-22; R22); the result is divided by the
 pixel's height, so a disc thinner than a pixel keeps its light. Along the line of sight: fixed
 panels symmetric about y = 0 with `gl16` per panel. Components without arms take eight log-spaced
 panels a side, from 16 ly to their cut or the cube's edge. Discs with arms take panels no wider than
@@ -913,7 +920,7 @@ At `GalaxyParams::milky_way_like()`:
 | at 1 kpc                               | 7.5–10.5 × 10⁹ M☉                                           |
 | at 2 kpc                               | 1.8–2.6 × 10¹⁰ M☉ (Portail et al. 2017)                     |
 | v_c(1 kpc) ÷ v_c(8 kpc)                | 0.75–1.1                                                    |
-| v_c at 0.5, 1 and 2 kpc                | against measured curves, not the research model (see below) |
+| v_c at 0.5, 1 and 2 kpc                | 140–190, 165–195, 180–200 km/s (see below and R22)          |
 | v_c at 8 kpc                           | 215–245 km/s (Eilers et al. 2019)                           |
 | Escape speed at 8 kpc                  | 545–605 km/s (brainstorm: 574)                              |
 | Bar pattern speed                      | 33–41 km/s per kpc                                          |
@@ -1568,3 +1575,127 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     At the yardstick figures above a sparse cell's bound plus one candidate's densities is 119
     `math::exp`, which is 1.2 µs at 10 ns and 1.7 µs at 14 — inside the brainstorm's 1–2 µs, as R17
     read it.
+- **R22. P02.T11 as built, with rulings 1, 3, 4, 8 and 17 of 2026-09-22.** `GENERATOR_VERSION` is
+  9, one bump for all six. Re-blessed in two steps, `HYPERION_BLESS=1 cargo test --workspace`
+  skipping `every_golden_file_carries_the_current_version`, then `just bless`; `golden_diff.py`:
+  "Consistent", nine goldens with moved values, thirteen header only, none new. Every seeded galaxy
+  moves in four parameters only — `young.height` (the same word on the new range), `gas.mass`
+  (× 1.75) and the black hole's σ and mass, which read the heavier gas — so N and the other draws
+  keep their bits;
+  the seeds' face-on rasters move by at most 4.4 × 10⁻¹⁶ (2h × n0 rounds differently when h
+  changes), and `density_map_face_on_128.golden` is header only for that reason. The two slow files
+  are `tests/galaxy_milky_way.rs` (three tests) and the sweeps added to `tests/galaxy_sweeps.rs`.
+  - _Ruling 4, the dispersion rise._ `DISPERSION_GRADIENT_REACH_KPC` is 2.0 (D9). Sharma et al.'s
+    binned σ_z reach |z| ≈ 1.95 kpc (1.6 for GALAH's turn-off stars) in arXiv:2004.06556 v1, the
+    only open version; their axes and model line run to 2.4–2.5 kpc. R18's "2.4 kpc" for plan 08's
+    P08.T2.a comparison is now 2.0.
+  - _Ruling 8 and the tuning of the density rows._ The fixture's thin disc is 7,000 ly long (2.15
+    kpc, Bovy and Rix 2013's mass-weighted 2.15 ± 0.14, inside Bland-Hawthorn and Gerhard's 2.6 ±
+    0.5) with an effective height of 1,100 ly (337 pc, inside their 300 ± 50 pc): Σ★ at R₀ is
+    30.5 M☉ pc⁻², inside the measured 29–38, and the ruling's figure holds — the height, not Σ★,
+    meets the bracket. Tried on the way: 7,500 ly at 1,100 gave 0.00226 per ly³, over; 7,175 ly at
+    1,150 gave 0.00201 but put the youngest sub-disc at 429 ly, over T7.b's 426, and the thick disc
+    far from the plane at 1,178 pc, over 1,080. The thick disc takes the ends of its drawn ratios
+    that keep it at Bland-Hawthorn and Gerhard's 2.0 × 0.9 kpc, 0.9 and 2.7: 6,300 ly (1.93 kpc) by
+    2,970 ly (911 pc), where 0.77 and 3.0 did so on the old thin disc. Far from the plane the fit
+    now gives 282 pc, 1,027 pc and a thick share of 2.9%, against 300 ± 50, 900 ± 180 and 4 ± 2%.
+  - _The bar and the black hole, moved by the tuning._ The pattern speed came to 41.1 km/s per kpc
+    at a corotation ratio of 1.2, just past the table's 33–41; the ratio is 1.24, corotation at
+    6.08 kpc, Portail et al.'s (2017) measured 6.1 ± 0.5 kpc, and the speed 39.6 against their
+    39.0 ± 3.5. The concentrated thin disc raised the estimator's σ from 119.3 to 123.9 km/s, which
+    moved the black hole to 5.33 × 10⁶ M☉; the fixture's M–σ offset is re-set, as R13 says it must
+    be whenever σ moves, to −0.514 dex (1.35 times the scatter), and the black hole is Sgr A*'s
+    4.30 × 10⁶ again. T6.e's check on the offset reaches −0.55 dex, not −0.5, and the fixture's
+    range check allows 1.5 times the scatter, not 1.2.
+  - _Ruling 3, carried here until the brainstorm is edited._ The young disc's drawn height is
+    225–345 ly, not the brainstorm's 130–200, and the fixture's 285 ly. The reason: the brainstorm's
+    own 5 km/s floor on the young disc's vertical dispersion. At 130–200 ly the fixture's profile had
+    2–3.5 km/s, under the floor, so the heights and the velocity stage could not agree; 130–200 ly is
+    40–60 pc, the molecular gas's scale rather than a stellar cohort's. Measured in the tuned
+    fixture: σ = 4.96 km/s at 225 ly, 5.07 at 230, 6.22 at 285 and 7.45 at 345, so the floor is met
+    from 227 ly — the range's bottom — rather than at 285 as the ruling had it in the untuned
+    potential. 285 ly (an effective height of 87 pc) is kept because the ruling's second reason is
+    measured: Bovy's (2017, MNRAS 470, 1360, Table 1) A dwarfs, the youngest cohort, have z_d =
+    37–56 pc in sech²(Z ÷ 2z_d), an effective height 2z_d of 75–110 pc, which 227 ly (69 pc) would
+    miss. The ruling's "near 100 pc" is that effective height; read as a z_d it is the late F
+    dwarfs'. The edge-on map's thin-disc test reads pixels from 512 ly, since a 256 ly pixel now
+    lies inside the young disc's cored top, where its mean falls below a point sample.
+  - _Ruling 1, the gas._ `GasDiscParams::HEIGHT` is 700 ly and the drawn fraction 0.175–0.350,
+    both × 7 ÷ 4 (D15); the fixture's is 0.2625, 9.0 × 10⁹ M☉. The ruling's "7.9 M☉ pc⁻²" is plan
+    07's field at R₀; this plan's own double exponential gave 6.6 and now 11.5, and plan 07's field
+    goes to 13.8 by the same factor against McKee et al.'s 13.7 ± 1.6 (which counts H I, H₂, ionised
+    gas and helium). The mid-plane density is unchanged by construction; plan 07's T12 measures the
+    extinction. Plan 07 still states 10–20% and 400 ly (its lines 242–244 and 379–381) and 5.1 ×
+    10⁹ M☉ for the fixture: the `gal` lane's to update.
+  - _Ruling 17, the edge-on height integral._ The bulge's and each halo component's height integral
+    takes `gl4` on equal panels of at most four vertical scales (the bulge's c, a halo component's
+    flattening × core; `PANEL_SCALES`, at most 256 panels a side), and a halo component's is first
+    clipped at the height its cut sphere ends, √(cut² − x²), where its column falls to 0 with a
+    square-root cusp. Every raster plan 04 renders takes one panel, bit for bit the old rule; the
+    fixture's `galaxy_map.golden` centre rises 0.88%, the under-read R21 found. Worst relative
+    error on the plane over x = 0 to 26,000 ly, against Simpson's rule on 4,000 steps in z over the
+    same lines of sight (independent of `gl4`), and in brackets against the same scheme on sixteen
+    sub-panels:
+
+    | Pixel height | One `gl4` (R21) | Panelled                |
+    | ------------ | --------------- | ----------------------- |
+    | 256 ly       | 1.6 × 10⁻⁷      | (1.6 × 10⁻⁷)            |
+    | 1,024 ly     | 4.2 × 10⁻⁵      | 1.3 × 10⁻⁵ (3.9 × 10⁻⁵) |
+    | 4,096 ly     | 1.9 × 10⁻³      | 3.6 × 10⁻⁴ (1.3 × 10⁻⁴) |
+    | 8,192 ly     | 8.0 × 10⁻³      | 1.5 × 10⁻⁴ (5.6 × 10⁻⁵) |
+    | 16,384 ly    | —               | 1.2 × 10⁻³ (4.3 × 10⁻⁴) |
+    | 32,768 ly    | —               | 1.2 × 10⁻³ (5.7 × 10⁻⁴) |
+    | 65,536 ly    | —               | 1.2 × 10⁻³ (5.7 × 10⁻⁴) |
+
+    A pixel the halo's cut crosses reads within 1.7 × 10⁻³ of Simpson's rule up to the cut; without
+    the clip, the top row of the 16 × 15 raster read 2.6 × 10⁻²⁸ where the halo gives 1.3 × 10⁻⁷,
+    no node falling inside its last 287 ly.
+
+  - _The table, measured._ Enclosed mass (quadrature of the fields' true densities, the gas disc's
+    double exponential, and the spherical parts): 5.15 × 10⁶ M☉ at 1 pc, 1.25 × 10⁷ at 4 pc, 3.69
+    × 10⁸ at 100 pc, 1.11 × 10⁹ at 230 pc, 9.67 × 10⁹ at 1 kpc, 2.49 × 10¹⁰ at 2 kpc; v_c(1) ÷
+    v_c(8) 0.807; v_c(8 kpc) 231.5 km/s; escape speed 570.7; pattern speed 39.6; tidal radius of 1
+    M☉ at 26,000 ly 4.22 ly; 0.00205 systems per ly³ at R₀ and the Sun's height; 0.0417 M☉ pc⁻³ of
+    stars and remnants in the plane; the nuclear disc 1.75% of systems and 18.89 per ly³ at the
+    centre. All inside. The 2 kpc mass bracket is Portail et al.'s bulge-box mass; their own curve's
+    192 km/s implies 1.7 × 10¹⁰ M☉ in a sphere.
+  - _The inner rotation curve (a finding against the model)._ Brackets from dynamical models only,
+    read off the figures to ±3 km/s: 140–190 km/s at 0.5 kpc (Li, Shen, Gerhard and Clarke 2022,
+    ApJ 925, 71, Fig. 1, 145; Portail, Gerhard, Wegg and Ness 2017, MNRAS 465, 1621, Fig. 23, 174
+    with variants to 187), 165–195 at 1 kpc (Bland-Hawthorn and Gerhard 2016, Fig. 16, 165–171; Li
+    et al., 172; Portail et al., 191) and 180–200 at 2 kpc (Li et al., 183; Portail et al., 192;
+    Bissantz, Englmaier and Gerhard 2003, 190 at 2.2 kpc). Terminal velocities are excluded: inside
+    the bar they run high, by 100% at 0.5 kpc and 50% at 1 kpc in Chemin, Renaud and Soubiran's
+    (2015, A&A 578, A14) test, and Sofue (2013, §6.4) concedes ±20–30%. The fixture gives 152.3,
+    186.8 and 227.5 km/s: the first two inside, **v_c(2 kpc) 14% above 200**. Of v_c² there the
+    bulge's moment-matched spheroid gives 42%, the hole-free thin disc 29% (R6's "about 10% high",
+    made more so by the shorter scale length the density rows need), the halo 9%, the bar 8%, the
+    thick and nuclear discs 4–5% each and the gas 3%; 200 km/s needs 23% of v_c² out of that inner
+    mass — R5's spherical bulge by quadrature, a disc hole or plan 15's tables, each a version bump.
+    Until then the row checks 180 to 1.2 × 200 km/s, a widening recorded here, so that it cannot
+    drift further unnoticed.
+  - _The sweeps, and three brackets they miss._ Over 4,000 seeds (`0x0211_5ee9_0000_0000 | n`):
+    v_c(8 kpc) 1–99% 170–288 km/s, median **223.0** (the plan's 225–255), **58%** in 210–270 (the
+    plan's 68%); the median slope from 5 to 16 kpc −1.7 km/s per kpc; v_c(1 kpc) at the 99th
+    percentile 224.6, under 300; v_c(1) ÷ v_c(8) median **0.785** (the plan's 0.85–0.97, 1–99%
+    0.66–0.93). The brainstorm says only "210–270 km/s at 8 kpc for most seeds"; the median galaxy is
+    lighter than the Milky Way (M★ log-uniform on 3–10 × 10¹⁰, median 5.5 against 6.0) with a halo
+    spread by f★'s factor of 3.75; and 0.85–0.97 is the research model's 0.88, the same finding as
+    the inner curve above. Checked, until they are ruled on: median 215–255, at least 55% in
+    210–270, median ratio 0.75–0.97. Over 1,000 seeds (`0x0211_de00_0000_0000 | n`): every density
+    at 26,000 ly in 0.0008–0.008 (0.00109–0.00766), but the centre reaches **38.1** per ly³ (median
+    15.4, 99% 30.9) against the plan's 30, as R18 found (44.3). The 30 stands for the index limit,
+    which is about 180 per ly³ (every stellar layer's index holds 128 candidates per ly³ and layer A
+    takes 70% of systems; brainstorm, "Dense features: clusters and the galactic centre"); the
+    check is under 60, a third of it.
+  - _Other figures the tuning moved._ The tidal radii at the Sun-like point that P03.T12.b quotes
+    are 4.235 ly for 1 M☉, 3.361 for 0.5 and 22.501 for 150 (4.381, 3.477 and 23.279 before):
+    P03.T12.b's 4.4, 3.5 and 23 want 4.2, 3.4 and 22.5, which `tests/frame.rs` now holds. The edge-on
+    thin-disc test's stacked column agrees with one tall pixel to 1.4 × 10⁻⁹, over the old 10⁻⁹,
+    because the thicker young disc's tail below the map's floor falls more slowly per row; it takes
+    4 × 10⁻⁹. T8.c's two sharp-arm builder galaxies take the new range's thinnest young disc, 225
+    ly, for the old 130; the hunt holds with zero violations.
+  - _Speed (slow-test profile, one test at a time, at a load average of 9–14 with cpu0 between 2.8
+    and 3.5 GHz)._ The 4,000-seed rotation sweep 77 s, the 1,000-seed density sweep 164 s (its
+    fields' Jeans solves), the three fixture comparisons 1.2, 0.2 and 0.3 s. The height panels cost
+    the maps nothing at plan 04's pixel sizes, which take one panel.

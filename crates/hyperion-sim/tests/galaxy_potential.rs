@@ -427,11 +427,13 @@ fn the_model_holds_the_parameters_masses() {
 /// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole lies within a
 /// factor of 2.5 of Sgr A*'s 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
 ///
-/// The fixture's scatter is the Milky Way's own offset from the relation, −0.421 dex, set so that
-/// the estimator's 119.3 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13). The factor of 2.5
-/// then lets σ move by 7% before the test fails, which is what it guards: the relation itself,
-/// without the offset, gives 2.6 times the measured mass at this σ, a real galaxy 1.1 times the
-/// relation's intrinsic scatter below it.
+/// The fixture's scatter is the Milky Way's own offset from the relation, −0.514 dex, set so that
+/// the estimator's 123.9 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13 and R22). The factor of
+/// 2.5 then lets σ move by 7% before the test fails, which is what it guards: the relation itself,
+/// without the offset, gives 3.3 times the measured mass at this σ, a real galaxy 1.35 times the
+/// relation's intrinsic scatter below it. The offset's check reaches −0.55 dex, not the −0.5 it
+/// held at R13's −0.421: P02.T11's tuning raised σ from 119.3 km/s, and the offset follows σ,
+/// since what it is fixed by is Sgr A*'s measured mass.
 #[test]
 fn the_fixture_black_hole_follows_m_sigma() {
     let params = GalaxyParams::milky_way_like();
@@ -444,7 +446,7 @@ fn the_fixture_black_hole_follows_m_sigma() {
         black_hole_mass(sigma, bh.scatter()).value(),
         1e-12,
     );
-    assert_within("offset, dex", bh.scatter().value(), -0.5, -0.35);
+    assert_within("offset, dex", bh.scatter().value(), -0.55, -0.35);
     let ratio = bh.mass().value() / 4.3e6;
     assert_within("black hole ÷ 4.3 × 10⁶ M☉", ratio, 1.0 / 2.5, 2.5);
     let on_relation = black_hole_mass(sigma, Dex::new(0.0)).value() / 4.3e6;

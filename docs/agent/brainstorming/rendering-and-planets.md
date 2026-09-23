@@ -18,9 +18,9 @@ resources, what a landing party finds — is still owed a document of its own.
 ## Goal and scope
 
 Given the galaxy the [galaxy brainstorm](galaxy-generation.md) generates, draw it from the pilot's
-seat: a perspective view that is true to scale from a hull plate a metre away to a star system an
-astronomical unit across, and eventually a planet flown from orbit to a landing without a seam or a
-loading screen. The rendering must be defensible in the same way the simulation is: what is drawn is
+seat: a perspective view that is true to scale from a hull plate a metre away to a star system tens
+of astronomical units across, and eventually a planet flown from orbit to a landing without a seam
+or a loading screen. The rendering must be defensible in the same way the simulation is: what is drawn is
 what the numbers say, and where the picture is an approximation, the display says so.
 
 In scope:
@@ -64,10 +64,10 @@ renderer has to handle all of them without changing its mind about what a metre 
 Two things follow. First, the expensive cases are the near ones, and they are the ones with a planet
 in them; everything beyond a million kilometres or so is cheap because it is points and small discs
 — though a gas giant, at 7 × 10⁷ m in radius, still fills the window from 10⁸ m. Second, the dynamic
-range in _position_ is about 10¹⁶ between a hull rivet and an outer planet, and in _luminance_ about
-10¹² between a dim star and the disc of the star itself, with a sunlit surface, at about
-10⁴ cd/m², in between. Neither fits in a 32-bit float, and both have standard answers. They are in
-[Real-scale foundations](#real-scale-foundations).
+range in _position_ is about 10¹⁵ between a centimetre of hull and an outer planet, and in
+_luminance_ about 10¹² between a dim star and the disc of the star itself, with a sunlit surface, at
+about 10⁴ cd/m², in between. Neither fits in a 32-bit float, and both have standard answers. They
+are in [Real-scale foundations](#real-scale-foundations).
 
 ## Constraints that decide the design
 
@@ -125,37 +125,42 @@ where that is not true should be labelled on the display.
 
 ## The engine
 
-### Correcting the prior lean's reasoning
+### Checking the prior lean's reasoning
 
 The single-player brainstorm leaned Babylon.js on two grounds: that it shipped large-world rendering
-with a floating origin in 9.0, and that it commits to backward compatibility. Both were checked
-directly, and the picture is more complicated:
+with a floating origin in 9.0, and that it commits to backward compatibility. Both were checked,
+first through Babylon's documentation site, which automated fetching cannot read, and then through
+the documentation's markdown source on GitHub and the engine's own code. Both hold, with
+qualifications:
 
 - **Reversed-Z is not a differentiator.** Both engines have it. Babylon.js exposes
   `useReverseDepthBuffer`, which sets the depth function to `GEQUAL` and clears depth to 0 (verified
   in `Engines/thinEngine.pure.ts`). three.js exposes `reversedDepthBuffer` and
   `logarithmicDepthBuffer` as independent options on its WebGPU backend (verified in
   `WebGPUBackend.js`). The prior document's implicit contrast here does not exist.
-- **"Large World Rendering" exists as a feature name and its content could not be verified.** It is
-  listed in the Babylon.js 9.0.0 release notes of 26 March 2026, beside a geospatial camera and 3D
-  Tiles support — a trio that shows the maintainers investing in globe-scale rendering, which is
-  encouraging. The notes link its page (<https://aka.ms/babylon9LWDoc>), but `doc.babylonjs.com`
-  serves its content through a client-side application that automated fetching cannot read, and
-  nothing in the camera source or the changelog shows camera-relative rebasing for rendering. What
-  is verifiable is a physics-side floating origin for Havok, whose own author notes it has cases
-  where bodies in separate regions fail to interact. **The claim should not be leaned on until a
-  human has read that page.**
-- **The backward-compatibility commitment could not be verified at all.** No policy statement was
-  found in the repository or the accessible release material. Meanwhile three.js's breaking changes
-  are documented and routine: its migration guide records changes in essentially every release, the
-  official advice is to upgrade in increments of ten because deprecations last that long, and some
-  changes are _silent visual_ ones — physically-based brightness shifted in r181, an ambient
-  occlusion effect darkened in r185.
+- **"Large World Rendering" is camera-relative rendering, and experimental.** It is listed in the
+  Babylon.js 9.0.0 release notes of 26 March 2026, beside a geospatial camera and 3D Tiles support,
+  and its page (<https://aka.ms/babylon9LWDoc>) says what it does. `useLargeWorldRendering` turns on
+  64-bit matrices on the CPU and a floating-origin mode that overrides `Effect.setMatrix` and
+  `UniformBuffer._updateMatrixForUniform` globally, rewriting uniforms by name: the eye position is
+  subtracted from `world`, the translation is zeroed in `view`, and the combined matrices are
+  decomposed, offset and recomposed. It handles WebGPU's uniform buffers and never touches the
+  projection, so it should coexist with reversed-Z. It began as an experiment in 8.28.3, and the
+  maintainer's announcement still calls it experimental, with limits on shadows and billboards.
+- **The backward-compatibility commitment is written down.** The first golden rule of Babylon.js's
+  contributing guide is "You cannot add code that will break backward compatibility", with
+  exceptions for performance and bugs, and a breaking-changes log records what does change,
+  including changes to how things look, each with a flag that restores the old look. Meanwhile
+  three.js's breaking changes are documented and routine: its migration guide records changes in
+  essentially every release, the official advice is to upgrade in increments of ten because
+  deprecations last that long, and some changes are _silent visual_ ones — physically-based
+  brightness shifted in r181, an ambient occlusion effect darkened in r185.
 
 That last point deserves weight beyond its size, because of what this renderer is for. A display
 calibrated in absolute photometric units, whose numbers a console will state, cannot afford a
 dependency that changes what a given radiance looks like between releases without saying so. In a
-game that would be a nuisance. Here it silently falsifies an instrument.
+game that would be a nuisance. Here it silently falsifies an instrument. Babylon.js's visual changes
+are the contrast that matters: logged, and each with a way back.
 
 ### The decision does not rest on the engine's large-world feature
 
@@ -166,25 +171,29 @@ hundred lines of our own code — a differencing step, a per-patch origin, a rot
 — and an engine's opaque large-world system is as likely to fight it as to help. The same is true of
 the depth policy and the exposure model.
 
+Babylon.js's own feature shows why. It works in one 64-bit world frame, whose spacing at galactic
+distances is about 130 km, with no hierarchy of frames and no rebasing, so it cannot replace the
+simulation's frames. With the camera already at the origin it would do nothing useful, and because it
+rewrites uniforms by name across every shader, it could silently rewrite our own. **Lean:** it stays
+off, and the adapter supplies camera-relative transforms itself.
+
 So the engine is being hired for the ordinary parts: resource and state management, a render graph, a
 shader pipeline, a material system, culling, and the tedious correctness of a WebGPU backend across
 drivers. It is explicitly _not_ being hired to solve real scale.
 
 | Option                         | For                                                                                                                                                                                        | Against                                                                                                                                                                |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Babylon.js 9.27**            | TypeScript-first, which suits a TS 7 workspace with type-aware lint. Weekly patch cadence and no visible migration guides. Reversed-Z present. Active investment in globe-scale rendering. | A quarter of three.js's community. Compatibility policy unverified. Documentation opaque to tooling. Larger package.                                                   |
+| **Babylon.js 9.27**            | TypeScript-first, which suits a TS 7 workspace with type-aware lint. A written backward-compatibility rule, and a breaking-changes log whose visual changes each come with a flag to restore the old look. Weekly patch cadence. Reversed-Z present. Active investment in globe-scale rendering. | A quarter of three.js's community. Documentation site opaque to tooling, though its source is on GitHub. Larger package. |
 | **three.js r186**              | The largest ecosystem by a factor of four, and the most published procedural-planet work. Reversed-Z and logarithmic depth both exposed on the WebGPU backend. Small package.              | Breaking changes in essentially every release, including silent visual ones. Upgrades must be taken in small steps forever. `react-three-fiber` pins to a React major. |
 | **PlayCanvas 2.22**            | A mature WebGPU implementation with compute shaders, MIT-licensed.                                                                                                                         | Editor-centred workflow that a code-first console app would fight. Smallest community of the three.                                                                    |
 | **Raw WebGPU, or wgpu → wasm** | Total control, and no engine to track.                                                                                                                                                     | Everything above becomes ours: culling, materials, resource lifetimes, driver workarounds. Months of work whose output is not gameplay.                                |
 
-**Lean: Babylon.js, confirming the prior document's choice but not its reasoning.** The grounds are
-narrower than before and should be stated as they are. TypeScript fit is verified. The case against
-three.js is verified too: its churn is documented and includes silent visual changes. The case _for_
-Babylon.js's stability is not: weekly patch releases and the absence of migration guides are
-consistent with a compatibility commitment but do not establish one, and treating them as "release
-discipline" would be the prior document's unverified claim under another name. The lean therefore
-rests on TypeScript fit and on three.js's documented cost, not on an unverified large-world feature
-— and on the understanding below that makes the choice cheap to reverse.
+**Lean: Babylon.js, confirming the prior document's choice and, once checked, most of its
+reasoning.** TypeScript fit is verified. The compatibility commitment is verified: it is a written
+rule, and the changes it allows are logged with a way back. The case against three.js is verified
+too: its churn is documented and includes silent visual changes. The large-world feature is real but
+is not what the lean rests on, for the reasons above — and the understanding below makes the choice
+cheap to reverse whatever the engine does next.
 
 ### The engine is kept at arm's length
 
@@ -203,8 +212,8 @@ and unit-tested without a GPU:
 What the engine supplies is the submission of buffers and draws, the shader compilation, and the
 swap chain. Under that arrangement, switching to another JavaScript engine is a re-implementation of
 one adapter rather than of the renderer. It costs perhaps a week more than binding directly to the
-engine's scene graph, and it buys the reversibility that the unverifiable compatibility policy would
-otherwise deny us.
+engine's scene graph, and it buys the reversibility that even a written compatibility policy does
+not give.
 
 It does less for a native renderer than it might seem. A Rust renderer cannot implement a TypeScript
 interface, and would have to rewrite everything in the list above. What makes a native renderer
@@ -220,9 +229,10 @@ The owner has ruled that **WebGPU is required and Electron forces the switches**
 maintaining a WebGL2 fallback. What that means in practice on this machine:
 
 Electron 44 carries Chromium 152. Chromium enables WebGPU by default on Linux only for Intel Gen12
-and later (from Chrome 144) and for NVIDIA under Wayland with a driver of 535.183.01 or newer (from
-Chrome 147). Everything else — including AMD, and including this machine's Gen9.5 UHD 620 — is behind
-a flag with no announced date. The switch set reported to work with Mesa's ANV driver is
+and later with Mesa 22.0 or newer (from Chrome 144) and for NVIDIA with a driver of 535.183.01 or
+newer (from Chrome 147). The implementation-status wiki says NVIDIA's enablement is under Wayland,
+but Chromium's blocklist entry carries no such condition. Everything else — including AMD, and
+including this machine's Gen9.5 UHD 620 — is behind a flag with no announced date. The switch set reported to work with Mesa's ANV driver is
 `--enable-unsafe-webgpu --use-angle=vulkan --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`,
 where `DefaultANGLEVulkan` is the one that avoids a hang in swap-chain acquisition on ANV. Electron
 sets these from the main process.
@@ -230,16 +240,19 @@ sets these from the main process.
 Three consequences, which should be written down rather than discovered:
 
 1. **Forcing WebGPU bypasses Chromium's GPU blocklist**, which exists because some driver and
-   hardware combinations genuinely break. The client should therefore detect an adapter failure and
-   report it as a ship system fault in the guide's language, not crash or silently fall back.
+   hardware combinations genuinely break. The entry that gates Linux blocks WebGPU's display path
+   through Vulkan and GL interop, so the Gen9.5 risk is in presenting and compositing frames rather
+   than in compute. The client should therefore detect an adapter failure and report it as a ship
+   system fault in the guide's language, not crash or silently fall back.
 2. **The switches are a distribution problem, not just a development one.** Any Linux machine that
-   is not Gen12 Intel or Wayland NVIDIA gets the forced path, so on Linux the forced path is the
+   is not Gen12 Intel or NVIDIA with a recent driver gets the forced path, so on Linux the forced path is the
    _normal_ path and must be the one that is tested. Windows and macOS enable WebGPU by default and
    should not be given the Linux switches, which name Linux's Vulkan path.
 3. **Compute shaders are therefore available everywhere**, which is what makes the WebGPU-only ruling
    valuable: terrain, cloud and histogram passes can assume compute rather than emulating it in
    fragment shaders. That assumption should be used deliberately, because it is the whole return on
-   the ruling.
+   the ruling. Subgroups are the exception: Dawn refuses them on Gen9 unless a toggle is set, so a
+   reduction such as the exposure histogram needs a path that does without them.
 
 WebGL2's absence from the plan costs little that matters: it has no compute shaders, no storage
 buffers and no indirect draw, so every compute pass this document leans on would need a second,
@@ -254,8 +267,8 @@ checked, and under the ruling it does not need to be.
 The fallback remains a native renderer in Rust, joining the session as another protocol client, and
 the research sharpened what that would cost. Bevy is at 0.19 with breaking changes every five to six
 months; its built-in atmosphere implements Hillaire 2020, with transmittance, multiple-scattering,
-sky-view and aerial-perspective lookup tables, which is this document's reserve model rather than its
-lean, so a native renderer would either accept Hillaire or port Bruneton; its transforms are `f32`,
+sky-view and aerial-perspective lookup tables, which is this document's lean too, and its medium is
+a list of terms each with its own density and phase function; its transforms are `f32`,
 so large-world support means the `big_space` crate, which tracks Bevy a version behind. Godot's
 double-precision build converts vectors and physics but leaves shaders single precision, and
 requires maintaining custom export templates.
@@ -268,8 +281,9 @@ Electron and paying encode-plus-decode latency that a hand on a stick would feel
 single input authority for the HOTAS, and two GPU consumers in one process tree.
 
 **Lean:** keep it as a fallback, keep it possible by keeping the renderer a display sink, and do not
-pre-build for it. The condition that would trigger it is narrow and measurable: the descent spike
-fails on adequate hardware for reasons in the browser stack rather than in our own code.
+pre-build for it. The condition that would trigger it is narrow, and
+[open question 2](#open-questions) states it in a form that can be measured: the descent spike fails
+on the discrete reference machine for reasons in the browser stack rather than in our own code.
 
 ## Real-scale foundations
 
@@ -304,12 +318,13 @@ rendering relative to eye. Two details are where implementations go wrong:
   body's centre — every terrain patch is — the patch carries its own `f64` origin, its vertices are
   stored relative to that origin, and the shader is handed the single `f64`-differenced
   patch-origin-minus-camera vector as an `f32`. Vertex coordinates then never exceed the patch's
-  own size, which runs from metres at the finest level to thousands of kilometres at a root face,
-  where the patch is seen from far enough away that the coarser precision is invisible. The
-  precision tracks the level, which is what makes it enough at every scale.
+  own size, which runs from tens of metres at the finest level to thousands of kilometres at a
+  root face, where the patch is seen from far enough away that the coarser precision is invisible.
+  The precision tracks the level, which is what makes it enough at every scale.
 - **The view matrix must not contain the translation.** Rotation-only view matrices, with
   translation folded into the per-object offset, keep the large numbers out of the matrix product
-  entirely. Composing a rotation with a translation of 10¹¹ m in `f32` throws away the rotation.
+  entirely. Composed with a translation of 10¹¹ m in `f32`, every transformed vertex lands on the
+  16 km spacing of an `f32` at that magnitude.
 
 Because the simulation already hands out positions as frame-plus-offset, and already changes frames
 with hysteresis at defined boundaries, the renderer inherits a floating origin rather than inventing
@@ -475,8 +490,8 @@ The resolution is set by what the transfer and the compute can afford, and the a
 writing out, because it is easy to get wrong by orders of magnitude. An Earth-sized body has
 5.1 × 10⁸ km² of surface: sampled at 100 km that is about 5 × 10⁴ cells, and at 10 km about 5 × 10⁶.
 At a few tens of bytes per cell — elevation, plate identity, crustal type, temperature,
-precipitation, drainage area, biome — the fine end is a hundred megabytes or more, which is neither a
-cheap transfer nor a cheap simulation. **Lean:** level 7 or 8 of the cube-sphere quadtree, cells of
+precipitation, prevailing wind, drainage area, ice, biome and crater state — the fine end is a
+hundred megabytes or more, which is neither a cheap transfer nor a cheap simulation. **Lean:** level 7 or 8 of the cube-sphere quadtree, cells of
 about 70 or 35 km, which is 98,304 or 393,216 cells and **roughly 2 to 15 MB** for an Earth. The
 simulation that produces it is then of order 10⁷ to 10⁸ cell updates across its iterations, a
 fraction of a second of Rust rather than minutes. Both figures need measuring rather than trusting,
@@ -495,8 +510,11 @@ What the pass does, in order:
    and impact basins where its crater density puts them.
 2. **Coarse elevation**, with continental and oceanic crust distinguished, scaled to the relief plan 14
    already computed from gravity and lithosphere, and with the ocean surface placed to match its ocean
-   fraction rather than chosen by eye.
-3. **Climate.** A two-dimensional energy-balance model gives temperature; there is one published
+   fraction rather than chosen by eye. The largest impact basins are placed here, from plan 14's
+   crater density, because they are coarse-scale features that climate and drainage must see.
+3. **Climate**, by the model the world's regime calls for ([open question 9](#open-questions)). For
+   the common case a seasonal two-dimensional energy-balance model gives temperature — seasonal
+   because the climate classes below are defined on monthly climatology — and there is one published
    specifically for the climates of rapidly and slowly rotating _terrestrial planets_, which is
    exactly the generality needed. Precipitation is the weak point and the literature says so: the
    standard reference text on these models warns outright that precipitation cannot be solved by
@@ -507,16 +525,27 @@ What the pass does, in order:
    that the map and the console state one climate, and ice is placed where the model is coldest until
    its area matches plan 14's ice fraction, as the ocean surface is placed to match the ocean
    fraction.
-4. **Drainage.** Flow directions and accumulated drainage area on the coarse grid. This is the step
-   that buys the realism, because it is computed globally where global is affordable, and everything
-   local is then conditioned on it.
-5. **Biomes**, from temperature and precipitation. Köppen–Geiger is the recommendation: it is
-   temperature-and-precipitation driven, recognisable, and defensible in a way a hand-drawn biome map
-   is not.
+4. **Drainage and erosion.** The stream-power law, solved by the analytical method of Tzathas et
+   al. It is closed-form in time but not in space: it needs a receiver for every cell, a sort from
+   ridges down to the outlets to accumulate drainage area, a pass back upstream, and iteration to a
+   fixed point sped by multigrid, which is exactly why it runs here, on the coarse grid on the
+   server, and never per point. Ocean cells are the base level, uplift comes from the plates, and the
+   result is rescaled to plan 14's relief. It gives the final coarse elevation, flow directions,
+   drainage area and a channel-steepness index. Its published timings, 1.8 s at 512² cells and
+   8.2 s at 1024² in Python, bracket level 8's 393,216. This is the step that buys the realism,
+   because it is computed globally where global is affordable, and everything local is then
+   conditioned on it.
+5. **Climate classes, and biomes where there is life.** Köppen–Geiger for the seasonal water-cycle
+   regimes: it is temperature-and-precipitation driven, recognisable, and defensible in a way a
+   hand-drawn biome map is not. It classifies climate, not life. Plan 14 says nothing about life, so
+   vegetation follows only where a later biosphere says it exists, and a lifeless Earth-like world
+   keeps its class with bare ground. The other regimes classify surface state instead — liquid, ice
+   or frost of a named species, rock, regolith, melt, organic sediment — with the regime's named
+   zones, such as a locked world's substellar ocean and nightside glacier.
 6. **Crater state**, from plan 14's crater density rather than recomputed from surface age, since
    that density already carries the belt-mass scaling and the loss of small craters under a thick
-   atmosphere. The pass adds a saturation level and places the largest basins, which are coarse-scale
-   features; the local pass turns the rest into actual craters. Mars, under a thin atmosphere, is as
+   atmosphere. The pass adds a saturation level; the local pass turns everything smaller than the
+   basins of step 2 into actual craters. Mars, under a thin atmosphere, is as
    cratered as its surface age says; Venus loses only its small craters.
 
 **The grid.** HEALPix is equal-area with isolatitude rings and subdivides hierarchically, which is the
@@ -556,7 +585,10 @@ importance:
 One constraint follows from reasons 2 and 3 together, and it must not be lost. The local synthesis
 agrees between client and server only if its inputs do, so **Knowledge gates how much of the coarse
 field the client holds, never how accurate it is.** A surveyed region arrives as the server's exact
-cells, and an unsurveyed one does not arrive at all. A degraded copy — smoothed, quantised harder, or
+cells, whole, with a margin of neighbouring cells as wide as anything the per-query evaluation reads
+— the interpolation, the river network's neighbourhood, and crater cells larger than a coarse cell —
+so that the synthesis at a region's edge has the same inputs on both sides; an unsurveyed one does
+not arrive at all. A degraded copy — smoothed, quantised harder, or
 resampled at a sensor-limited resolution — would feed the client's synthesis different inputs, and
 the ground it drew would stop being the ground the server collides with. If the field is quantised
 for the wire, the server's own synthesis reads the same quantised values.
@@ -570,19 +602,29 @@ Per height query, on both sides, with no iteration and no global state:
 3. **Structural detail** conditioned on crustal type and the distance to a plate boundary: ridged
    multifractal for a mountain belt, low-amplitude for an abyssal plain, domain-warped where a
    boundary is oblique.
-4. **Erosional detail** conditioned on the coarse drainage area and slope. The physical statement to
-   respect is the stream-power law, incision going as a power of drainage area and slope; there is
-   also a published analytical erosion that substitutes a closed form for the iterative simulation,
-   which is the most promising route to doing this properly rather than by analogy. **Lean:** start
-   with drainage-conditioned noise, which is a heuristic and must be labelled one, and treat the
-   analytical route as the upgrade that would make it physics.
-5. **Craters**, wherever plan 14's crater density is not zero, evaluated per point: hash the cell,
-   draw a crater count from that density, and for each crater draw a diameter by inverting the
-   production function's cumulative size–frequency distribution, truncated below the smallest crater
-   the atmosphere lets through, then a jittered position and a morphology by diameter — simple bowl,
-   complex with a central peak, or multi-ring basin, at transitions the literature provides. Summing
-   the nearby craters' profiles is O(craters within the search radius), which is why the crater
-   field is baked into the patch's height texture rather than evaluated per frame.
+4. **Channels below the coarse cell.** A point given only its cell's drainage area cannot know its
+   own path downstream, so the channels come from a Dendry-style network (Gaillard et al. 2019):
+   locally computable, jittered points joined to their lowest neighbour level by level, anchored to
+   the server's flow directions and hashed from integer cells, with the reference code's
+   standard-library generator replaced by the integer hash. The profiles follow the steady-state
+   stream-power slope, S = k_s·A^−θ, with the drainage area A from Hack's law and the steepness k_s
+   from the server's solution. The network's geometry is procedural and labelled so; the profiles
+   are physics. Incision only ever cuts down, so each coarse cell's mean incision is subtracted — the
+   server computes it and sends it with the cell — or the rule of
+   [Level-of-detail consistency](#level-of-detail-consistency-and-why-collision-agrees) breaks.
+5. **Craters**, wherever plan 14's crater density is not zero, by sparse convolution. A single hashed
+   cell holding every diameter cannot work: at a cumulative size–frequency slope of −2 or steeper, a
+   fixed cell holds some 10⁹ times more 1 m craters than 35 km ones, and a crater that crosses a cell
+   edge is found only if the search reaches its rim and ejecta, out to about twice its radius. So
+   each diameter octave has its own quadtree level, with cells at least as large as that octave's
+   reach, and a query searches the 3 × 3 neighbourhood at each octave's level, across face edges,
+   where a cube corner has seven neighbours. Each cell draws its count from the density at its own
+   canonical point, weighted by its true area and capped at saturation, and each crater a diameter
+   within the octave by inverting the production function's cumulative size–frequency distribution,
+   truncated below the smallest crater the atmosphere lets through, then a jittered position and a
+   morphology by diameter — simple bowl, complex with a central peak, or multi-ring basin, at
+   transitions the literature provides. The cost is about nine cells per octave, which is still why
+   the crater field is baked into the patch's height texture rather than evaluated per frame.
 6. **Band-limit.** Sum only those octaves the current level of detail can resolve.
 
 That last step is not a performance trick. It is what makes collision agree with the picture, and it
@@ -596,21 +638,28 @@ on: _amplification_ is the authoritative local synthesis above, run on both side
 is what only the GPU draws.
 
 **Lean:** the authoritative height function — sim code, run identically on both sides — owns everything
-the ship can collide with, down to a stated wavelength. Call it a metre initially, to be tuned by what
-the flight model can actually touch. Everything finer is **GPU-only decoration**: high-frequency
-normal detail, sand ripples and small crater scars. It never displaces geometry the collision query
-does not know about, so the surface a hull touches is always the surface both sides computed. Because
+the ship can collide with, down to a fixed band limit of **1 m**, the scale of a landing-gear
+footpad: Apollo's lunar module pad was about 0.9 m across, and its gear tolerated 0.6 m of relief
+within the footprint. The limit is one generator constant, not tied to the size of the body that
+touches the ground, since two bodies on the same spot must meet the same surface, and it changes
+only with the generator version. Everything finer is **GPU-only decoration**: high-frequency normal
+detail, sand ripples and small crater scars. It never displaces geometry the collision query does
+not know about, so the surface a hull touches is always the surface both sides computed. Because
 decoration is not the simulation's, the view says when it is on, as
-[the guide's edits](#what-the-guide-must-gain) require. **Scatter** — rocks and vegetation as
-instances — is a third category: placed deterministically, so that both sides could know where every
-instance is, but decoration and not collidable at first ([open question 11](#open-questions)).
+[the guide's edits](#what-the-guide-must-gain) require.
+
+**Scatter** — rocks and vegetation as instances — splits at the same limit. Rigid instances larger
+than it, boulders and trunks, are authoritative from the first phase that draws them: discrete
+features in hashed cells per size octave, which the server answers for at contact points. A boulder
+drawn but not collidable would be exactly the geometry the rule above forbids, and at the gear's
+0.6 m tolerance it is exactly the landing hazard. Smaller scatter is decoration, flagged as such,
+and culled where it intersects a grounded body ([open question 11](#open-questions)).
 
 Two consequences worth stating. Normals should come from **analytic derivatives** of the height
 function rather than finite differences: there is no arbitrary epsilon to tune, and they stay stable
 across levels of detail, which is what stops shading from popping as patches subdivide. And scatter
-placement must be hashed from integer cell coordinates with an integer generator even while scatter
-is decoration, so that making it collidable later is a change of contract rather than of placement:
-the server can then answer "is there a boulder here" without storing one.
+placement is hashed from integer cell coordinates with an integer generator, which is what lets the
+server answer "is there a boulder here" without storing one.
 
 ### Level-of-detail consistency, and why collision agrees
 
@@ -624,13 +673,18 @@ truncating the sum is exactly a low-pass filter, which is the observation the or
 terrain work rests on. The rule that follows: every contribution to height must be band-limited and
 attributable to a level, and nothing may be added at a fine level that changes the mean at a coarse
 one. Craters are the awkward case, because a crater is not a noise band; a crater must therefore
-appear at the level whose resolution can represent its diameter, and its profile must integrate to the
-same displacement at every finer level.
+appear at the level whose resolution can represent its diameter, with its rim smoothed to that
+level's resolution so that it sharpens as it refines, and its profile must integrate to the same
+displacement at every finer level. Channels are the other, because incision only removes material,
+which is why each cell's mean incision is subtracted.
 
 The test is then simple to state and should be written early: for a sample of positions on a sample of
 worlds, the height at level _n_ and the height at level _n + k_ differ by less than a stated bound that
-depends only on _n_, and the collision query at the level the ship is using returns a value inside the
-tolerance of what is drawn.
+depends only on _n_. Collision needs no tolerance at all: it reads the interpolated authoritative
+heights of the finest level, whose vertex spacing is at most half the band limit, and that level is
+drawn around every grounded body in view, so where anything touches the ground, collision and the
+picture are the same mesh. Coarser levels serve sensors and distant views, with the level-_n_ bound
+as their stated error.
 
 ### Determinism hazards specific to terrain
 
@@ -646,12 +700,30 @@ its own, and they are the ones that bite across architectures:
   its own modelled on the sim's rather than inheriting the root file, because the root file
   deliberately omits the sim's ban on float-bit conversions. That ban exists to stop floats being
   hashed, which is exactly the mistake a noise function is tempted to make.
-- **Fused multiply-add contraction.** A compiler may fuse a multiply and an add, changing the result in
-  the last bits, and whether it does depends on target and flags. WebAssembly has no FMA, so a native
-  build that fuses and a wasm build that cannot will disagree. Contraction must be off.
+- **Fused multiply-add, where the code asks for it.** rustc never fuses a multiply and an add on its
+  own, so there is no contraction to turn off; the hazards are the explicit forms. `f64::mul_add`
+  is a call to a software `fma` on wasm32 and a single instruction with the `fma` target feature,
+  and it is already banned. The `algebraic_*` float methods, stable since Rust 1.98, license the
+  compiler to fuse and reassociate, so they fuse under `+fma` and not on wasm; no `clippy.toml`
+  bans them yet, and all three should. Core WebAssembly has no FMA at all; relaxed SIMD's
+  `relaxed_madd` is the exception.
 - **Summation order** in octave accumulation, which must be fixed and never reassociated.
-- **Relaxed SIMD is banned outright.** Its whole premise is that an instruction may return different
-  results on different hardware. Fixed-width 128-bit SIMD is IEEE-exact and welcome.
+- **Relaxed SIMD is banned outright, and mechanically.** Its whole premise is that an instruction
+  may return different results on different hardware. A `compile_error!` under
+  `target_feature = "relaxed-simd"` in the surface crate makes the ban a build failure. Fixed-width
+  128-bit SIMD is IEEE-exact and welcome.
+- **`min` and `max` are not exact at zero.** For equal inputs such as +0 and −0, Rust documents that
+  either may be returned, and a flipped zero sign propagates through `1/x`, `atan2` and `copysign`.
+  Both targets return the second operand today, but that is how the code compiles, not a guarantee,
+  so the height path uses a `min` and `max` of its own that fix the sign.
+- **A NaN's sign is nondeterministic on every target.** The sim already refuses NaN in golden files
+  and bans reading float bits, but the sign still leaks through `total_cmp`, which the rules
+  recommend, through `is_sign_*`, and through `copysign`. Heights are asserted finite before they
+  are sorted, compared or emitted.
+- **Flush-to-zero from outside.** Neither target flushes subnormals to zero under Rust, but a C
+  library built with `-ffast-math` turns flushing on for the whole process when it loads. That
+  matters once the server embeds an LLM runtime: such a runtime stays out of the server process, or
+  the server checks the floating-point control register.
 - **Seed derivation should be integer**, hashing integer cell coordinates rather than floats. The
   hash-based approach — deriving noise from a cheap cryptographic hash of the coordinates rather than
   from tables or state — is the technique that makes a noise function depend on nothing but its inputs.
@@ -683,13 +755,15 @@ correct fog on terrain at every distance.
 
 | Model                                                | Verdict                                                                                                                                                                                                                                                                                                                       |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Bruneton's precomputed scattering, 2017 revision** | **Lean.** Multiple scattering precomputed into lookup tables, works inside and outside the atmosphere, handles aerial perspective, and — decisively — takes _custom density profiles and absorption_, which is exactly the generality an arbitrary gas mixture needs. Open reference implementation, including a WebGL build. |
-| Hillaire 2020, the production LUT approach           | Cheaper and shipped in a major engine, and the right fallback if Bruneton's precompute proves too slow on arrival. Its published costs could not be extracted, so this is a measurement to make, not a claim to repeat.                                                                                                       |
+| **Hillaire 2020, the production LUT approach** | **Lean.** Four small tables — transmittance, multiple scattering, sky-view and aerial perspective — cheap enough to rebuild whenever the atmosphere or the sun changes: 0.31 ms for all four on a GTX 1080 at 720p, 0.5 ms with the per-pixel ray march it uses for views from space, and under a millisecond for the two per-planet tables on an iPhone 6s, which is roughly the UHD 620's class. It takes Bruneton's material model — his density profiles, ozone layer and Cornette–Shanks aerosol — and Bevy 0.19's version generalises it to any number of terms, each with its own density and phase function. RGB rather than spectral. |
+| Bruneton's precomputed scattering, 2017 revision | Multiple scattering precomputed into four-dimensional tables, inside and outside the atmosphere, with aerial perspective, and spectral at no runtime cost. But an update takes 250 ms on the same GTX 1080, about 150 ms on the discrete target and seconds on the UHD 620, and its density profiles are limited to two layers, with one aerosol and one absorbing layer. Its WebGL demo loads tables precomputed offline. The reference if Hillaire's RGB approximation proves visibly wrong. |
 | Nishita 1993, O'Neil (GPU Gems 2)                    | Single scattering only, with the known darkening artefacts and a phase function disabled to hide them. Too approximate for a display that claims physical units.                                                                                                                                                              |
 | Hosek–Wilkie and other analytic sky models           | Fitted for ground-level daylight on Earth. No use from orbit.                                                                                                                                                                                                                                                                 |
 
 **Parameterising from physics** is the part that must be built rather than borrowed, and it is
-straightforward in outline. Rayleigh scattering follows from the number density and refractive index
+straightforward in outline. The medium is a list of terms, each a density profile, a scattering and
+absorption coefficient and a phase function, as Bevy's is, so a new gas is a new term rather than a
+new model. Rayleigh scattering follows from the number density and refractive index
 of the mixture, falling as the inverse fourth power of wavelength; the scale height follows from
 temperature, mean molecular mass and gravity, all of which plan 14 provides. Earth's reference values
 anchor the implementation: a Rayleigh scale height near 8 km, an aerosol scale height near 1.2 km, an
@@ -707,17 +781,28 @@ tuning the Rayleigh terms. Mars' butterscotch sky and blue sunsets are both dust
 dust, its thin carbon dioxide would give a dark, faintly blue sky. Tinting the Rayleigh coefficients
 can make the daytime colour right for the wrong reason, but Rayleigh scattering is nearly symmetric
 while dust scatters strongly forward, so the glow around the sun and the blue of a Martian sunset —
-both forward-scattering effects — would still come out wrong.
+both forward-scattering effects — would still come out wrong. Bevy's Mars preset takes its dust's
+phase function from Mie theory, after Schneegans et al. 2024, which is the precedent to follow.
+
+Thick atmospheres are where both models are unproven. Bruneton's multiple-scattering iterations fail
+to converge and then diverge at 40 orders, Hillaire's colour can drift at very high scattering
+coefficients, and Bruneton's table layout mishandles small bodies with thick atmospheres, which is
+Titan's case. Venus, at a Rayleigh optical depth near 15 and a cloud optical depth near 30, is a
+diffusion regime that neither was built for. **Lean:** Hillaire's tables, regenerated when the
+atmosphere or the sun changes, with a ray march for views from orbit, where the aerial-perspective
+volume's 32 km reach runs out; and Venus- and Titan-class atmospheres validated against a
+path-traced reference before they ship ([open question 3](#open-questions)).
 
 ### Clouds
 
 Volumetric clouds are the most expensive thing in this document and the first thing to cut. The
 reference point is Guerrilla's Nubis, whose 2015 prototype ran in under 2 ms on a PlayStation 4 — and
 that is _with_ the quarter-resolution raymarching and temporal reprojection such systems require, not
-instead of them. The discrete estimate in [the budget](#performance-budget) is higher than that
-figure on a GPU some eight times a PlayStation 4's, and the reason should be stated rather than
-implied: Nubis draws a layer seen from the ground, and HYPERION's clouds are a shell seen from orbit,
-from within and from below, which needs longer marches and more samples. A good implementation
+instead of them. The discrete estimate in [the budget](#performance-budget) is about that figure on
+a GPU some eight times a PlayStation 4's, where scaling alone would predict a quarter of a
+millisecond, and the reason should be stated rather than implied: Nubis draws a layer seen from the
+ground, and HYPERION's clouds are a shell seen from orbit, from within and from below, which needs
+longer marches and more samples. A good implementation
 should bring the estimate down.
 
 **Lean:** a raymarched volumetric layer on a shell around the planet, at reduced resolution with
@@ -741,25 +826,50 @@ one trap is documented and easy to test for — if the summed steepness exceeds 
 invert and the waves visibly loop. A spectral FFT ocean with a real wave spectrum is the WebGPU
 upgrade, and it is genuinely better, but it wants compute and it is not where the first effort goes.
 
-Two honest gaps. A **spherical** ocean at planetary scale with level of detail is poorly covered in the
-published work — the standard references are all flat-patch — so tiling tangent-plane patches over the
-sphere with a radial height offset is our own construction and should be treated as a risk. And the
-**shoreline**, where a wave field meets procedural terrain, is the classic hard case: it needs the
-coarse ocean level, a depth-dependent wave amplitude, and foam driven by the terrain's slope.
+Two gaps, one smaller than it first looked. A **spherical** ocean at planetary scale is published.
+Bruneton, Neyret and Holzschuch 2010 draw the ocean from space as a sphere whose reflectance comes
+from the slope statistics of the waves too small to resolve — a Cox–Munk distribution, which is
+exactly the glint-first path above — and switch below 20 km to a projected grid on the sphere.
+Proland's ocean module implements it, working in a frame tangent to the sphere under the camera, and
+Scatterer carries it into Kerbal Space Program; Outerra's blog describes Gerstner waves on terrain
+patches. What remains our own is an ocean fixed to the planet on the terrain quadtree, consistent
+across levels of detail, rather than a projected grid that follows the camera, and a wave spectrum
+driven by the climate field. And the **shoreline**, where a wave field meets procedural terrain, is
+the classic hard case: it needs the coarse ocean level, a depth-dependent wave amplitude, and foam
+driven by the terrain's slope, and its only published account is Outerra's, a distance map with
+waves chosen by depth.
+
+Ice is the coarse pass's, not the ocean's. Where the coarse field's ice covers the sea, the ocean
+surface gives way to sea ice drawn as a terrain material, with no glint and no waves, so that a
+frozen ocean reads as ice from orbit and the ice cap a console states is the one the window shows.
 
 ### Rings
 
-Rings are easy to make look wrong and the published technical accounts are thin — the sources sought
-for this section were largely unreachable, so this is the least-researched part of the document and
-should be taken as a sketch.
+Rings are easy to make look wrong and the published rendering accounts are thin, so what follows
+rests more on planetary photometry than on graphics papers.
 
 The physics to respect: a ring is an optical depth, not a surface, so it is rendered as transmittance
-through a particle layer with a phase function that is strongly forward-scattering, which is why a
-backlit ring looks utterly different from a front-lit one. It needs the planet's shadow cast on it and
-its own shadow cast on the planet, both of which are strong, recognisable cues. Self-shadowing between
-particles is a refinement to approximate rather than simulate. From an astronomical unit away a ring
-is a textured annulus; from a kilometre away it is a field of individual bodies, and where that
-transition happens is an open question.
+through a particle layer. Its phase function has two parts. The main rings' icy particles, from
+centimetres to metres, scatter light _back_ towards the sun, with an opposition surge at small phase
+angles, and the rings darken markedly as the phase angle grows; the dusty rings and the spokes
+scatter forward. That is why a backlit ring looks utterly different from a front-lit one: the main
+rings fade and the dusty ones appear. The unlit face is lit by diffuse transmission. It needs the
+planet's shadow cast on it and its own shadow cast on the planet, both of which are strong,
+recognisable cues. Shadowing between particles is worth approximating, since it accounts for about a
+fifth of the B ring's brightening with elevation, and it is an analytic function of phase angle,
+elevation and optical depth rather than something to simulate. Björn Jónsson's published radial
+profiles — backscattered, forward-scattered, unlit side and transparency — are ready-made data for the
+annulus.
+
+Where the annulus gives way follows from the pixel. At 1080p and a 60° field of view a pixel is
+about 1.07 mrad, so a body of size _D_ fills one at about 935 × _D_: 9.4 km for a 10 m particle, and a
+10 m-thick layer seen edge-on reaches a pixel at the same range. **Lean:** the ring is an
+optical-depth slab while the camera is further from the ring plane than the largest particle's
+one-pixel range, about 10 km for Saturn-like rings. Below that, only bodies larger than a pixel are
+instanced, from the top size decade, and their share of the optical depth is removed from the slab,
+so that total extinction is conserved. Within a few layer thicknesses the view becomes a local
+particle field inside volumetric extinction, where sideways visibility is only some ten metres.
+SpaceEngine does the same in outline, without publishing its criterion.
 
 ### Knowledge, and the surface seed
 
@@ -773,39 +883,54 @@ them, absent where it does not — and never the surface seed. The fine synthesi
 a **detail seed** instead: a one-way derivation from the surface seed, from which the coarse field
 cannot be regenerated, so the client can only elaborate what the ship already established.
 
-What remains is honest labelling, and it is a rendering requirement rather than a fiction one. Terrain
-the ship has not surveyed at close range is an **approximation** — the synthesis is the model's
-elaboration of an orbital survey, not a measurement of the ground — and the display must say so,
-which is what the guide's estimated state is for, with the degraded-rendering state proposed under
-[What the guide must gain](#what-the-guide-must-gain). A surface drawn from a coarse orbital survey
-should not present itself as surveyed ground, any more than an unscanned contact's mass is shown
-without its `~`. A region not yet surveyed at all is drawn as what the ship knows of it, the disc and
-atmosphere from plan 14's figures, with no terrain claimed. **Lean:** the view carries the survey
-coverage and resolution as a readout, the same way the star chart carries its census line.
+What remains is honest labelling, and it is a rendering requirement rather than a fiction one. The
+amplified terrain is not an approximation: the server collides with the same function, so it is the
+ground itself, and the view band-limits it to what can be resolved from where the ship is, which is
+what an eye at the window would see. What the display must label is what is _not_ the ground: GPU
+decoration, a setting that draws the surface coarser than the ship's position warrants, which is the
+degraded-rendering state proposed under [What the guide must gain](#what-the-guide-must-gain), and
+the edge of what has been surveyed. A console readout that quotes the ground — an elevation or a
+slope at a distant landing site — is a different matter, because it states a measurement: it quotes
+the coarse survey, under the guide's estimated state, until the ship's sensors have seen the point,
+in the same way an unscanned contact's mass carries its `~`.
+
+A region not yet surveyed at all is drawn as what the ship knows of it, the disc and atmosphere from
+plan 14's figures, with no terrain claimed. That cannot extend to ground the ship can reach. A ship
+descending over an unsurveyed region surveys it with its own sensors on the way down, so the server
+sends the cells under and ahead of it before it could touch them, and no hull ever meets terrain the
+client was not given. **Lean:** the view carries the survey coverage and resolution as a readout,
+the same way the star chart carries its census line.
 
 ## The sky
 
 ### The star field is the galaxy, not a photograph
 
 Most space games paint a sky box. HYPERION should not, and for once the realistic answer is also the
-cheap one: the galaxy model already knows where every star is, and once plan 06's stellar stage is
-wired in, what its luminosity and effective temperature are. Two things stand between that and a sky
-today. The range query returns each system's initial mass and age, not the luminosity and temperature
-plan 06 derives from them. And the query is **volume-limited** — a radius, a mass-layer floor and a
-`limit` — while a sky is **flux-limited**: a K giant 3,000 ly away can outshine a red dwarf at 10. The
-sky therefore needs a magnitude-limited selection, built from range queries whose radius grows with
-each mass layer's luminosity ([open question 13](#open-questions)). With those, the sky is
-**generated from the same model the charts read**, which means the view out of the window and the
-`GALAXY` display cannot disagree, and a star the player jumps to is the star they were looking at.
+one this project is built for: the galaxy model already knows where every star is, and plan 06's
+stellar stage knows what each one is. Plan 06's task T33 puts a stellar brief — kind, class,
+luminosity and effective temperature — on each row of the range query when the request asks for it,
+which is what a star field needs. The harder problem is selection. The range query is
+**volume-limited** — a radius, a mass-layer floor and a `limit` — while a sky is **flux-limited**: a
+K giant 3,000 ly away can outshine a red dwarf at 10. Range queries cannot serve it. To naked-eye
+magnitude 6.5 the brightest stars of the heavier mass layers — supergiants, O stars, and giants from
+the 0.75–2.5 M☉ layer — are visible thousands of light-years away, and the spheres that reach them
+hold some 3.6 × 10⁷ systems: far past the server's cap of 20,000 expected systems per query, and a
+few minutes of one core per arrival merely to place them. The sky therefore needs a request of its
+own ([open question 13](#open-questions)). With it, the sky is **generated from the same model the
+charts read**, which means the view out of the window and the `GALAXY` display cannot disagree, and a
+star the player jumps to is the star they were looking at.
 
 The practical form:
 
-- **Apparent magnitude sets the flux**, from the star's luminosity and its distance, and flux converts
-  to the absolute luminance units the rest of the pipeline uses. Nothing is authored by eye.
+- **Apparent magnitude sets the flux**, from the star's luminosity, its distance, and the extinction
+  along the line of sight from plan 07's dust field, and flux converts to the absolute luminance
+  units the rest of the pipeline uses. Nothing is authored by eye. The sky's limit is magnitude 6.5,
+  which gives about 9,100 stars across the whole sky and some 450 in a 60° view at 1080p.
 - **Colour from the effective temperature**, by evaluating the Planck function, integrating against the
   CIE colour matching functions and converting to the display primaries, desaturating towards the white
   point when a colour falls outside the gamut. Precomputed as a one-dimensional table against
-  temperature, which is exact enough and costs a texture lookup.
+  temperature, which is exact enough and costs a texture lookup, and reddened by the same dust that
+  dims the star.
 - **Faint stars baked into a cubemap per location; bright ones drawn as sprites.** Tens of thousands
   of point sources are expensive to draw and, worse, they alias: a sub-pixel star flickers as the
   camera turns, which is the classic failure and it looks like a bug. Baking integrates each star's
@@ -813,9 +938,11 @@ The practical form:
   a pixel — and at 60° across 1080p that needs faces of about 2,900 texels, some 200 to 400 MB for
   the six in a floating-point format, and more if the view zooms. So the bake takes the faint,
   unresolved majority at a resolution the memory affords, where a faint star spread over a texel
-  reads as the sky's grain, and the few thousand stars bright enough to be seen individually are
-  drawn every frame as sprites whose point-spread function is integrated over the pixel, which keeps
-  their antialiasing at any field of view.
+  reads as the sky's grain, and the roughly 1,600 stars brighter than magnitude 5 are drawn every
+  frame as sprites whose point-spread function is integrated over the pixel, which keeps their
+  antialiasing at any field of view. Light fainter than the limit belongs to the galactic band and
+  to a statistical layer of unresolved stars, labelled as such. A deep exposure that wants fainter
+  individual stars asks for a narrow cone rather than the whole sky: a 1° field is 2 × 10⁻⁵ of it.
 - **Baked once per arrival, with parallax left to the sprites.** A star at distance _d_ shifts by
   206,265 × (baseline ÷ _d_) arcseconds, against roughly 110 arcseconds per pixel at 1080p across a
   60° field of view. In the solar neighbourhood, with the nearest star over a parsec away, a journey
@@ -825,15 +952,21 @@ The practical form:
   astronomical unit: crossing 30 au moves it nine pixels. **Lean:** a star that would shift by more
   than a tenth of a pixel across the system is drawn as a sprite at its true position every frame
   rather than baked, and everything else is baked once per arrival. The threshold is a number, and
-  saying so with it is better than hoping nobody asks.
+  saying so with it is better than hoping nobody asks. How many sprites it makes depends on where
+  the ship is. For a 30 au journey it takes every star within about 9 ly, which near the Sun, at
+  about 0.002 systems per cubic light-year, is a handful. In the nuclear disc, at some 16, it is
+  about 50,000 systems, of which roughly a third are bright enough to be in the sky at all, and in
+  the nuclear cluster nearly every star. There the bake is instead redone as
+  the ship moves, whenever the nearest baked star's accumulated shift reaches the threshold, and the
+  budget's star-field figure is the solar neighbourhood's.
 - **The galactic band from the galaxy's own model.** The Milky Way seen from inside is the light of
   the stars too faint or too many to draw individually, integrated along each line of sight outward
   from the ship and dimmed by the dust in front of it. That is related to what the `GALAXY` map shows
   but is not the same integral: the map's column density counts systems per square light-year along
   parallel lines through the whole galaxy, where the band needs luminosity along rays from a point,
   with extinction. It comes from the same density, stellar and dust fields, so it cannot disagree with
-  the charts, and it must begin where the individually drawn stars end, or the stars near the ship are
-  counted twice. Drawing the band from the model means a ship in the outer disc sees a thin bright line
+  the charts, and it must take exactly the light the selection leaves out — stars below the limit,
+  and those beyond each layer's capped radius — or the stars near the ship are counted twice. Drawing the band from the model means a ship in the outer disc sees a thin bright line
   in one direction and a sparse sky in the other, _because the model says so_, and dust lanes appear
   when the dust field does. No other game can do this, because no other game generates the galaxy it
   is standing in.
@@ -910,9 +1043,9 @@ them with measured figures and keep them under version control.
 
 | Pass                         | Discrete target, 1080p, 16.7 ms budget          | UHD 620 low setting, 720p, 33 ms budget                                                                                    |
 | ---------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Terrain geometry and patches | 3–5 ms                                          | 8–14 ms, a shallower quadtree away from the ship; full depth kept under it                                                 |
-| Atmosphere, LUT lookups      | 0.5–1 ms                                        | 2–4 ms, lower-resolution tables, aerial perspective on terrain only                                                        |
-| Atmosphere, LUT precompute   | Tens of ms, once per planet                     | Hundreds of ms to seconds, spread over frames on arrival — a spike item, and the reason a cheaper model is held in reserve |
+| Terrain geometry and patches | 3–5 ms | 8–14 ms, a shallower quadtree away from the ship; full depth kept under grounded bodies |
+| Atmosphere, per frame | 0.5–1 ms: sky-view and aerial-perspective tables, and a ray march from orbit | 2–4 ms, smaller tables, aerial perspective on terrain only |
+| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere or the sun changes | About 1 ms, on the same occasions |
 | Volumetric clouds            | 1.5–3 ms at quarter resolution                  | **Cut.** Replaced by a two-dimensional layer at about 1 ms                                                                 |
 | Ocean                        | 1–2 ms, Gerstner                                | 2–3 ms, fewer wave components, glint retained                                                                              |
 | Shadows                      | 1.5–3 ms, cascaded, with cloud shadows          | 2–4 ms, one cascade or a horizon map for terrain self-shadowing                                                            |
@@ -920,31 +1053,43 @@ them with measured figures and keep them under version control.
 | Exposure histogram           | 0.3–0.5 ms                                      | About 1 ms, over a quarter-resolution input                                                                                |
 | Bloom and tone mapping       | Under 1 ms                                      | 2–3 ms, fewer bloom levels                                                                                                 |
 | Scatter instances            | 1–2 ms                                          | Off, or a token density under 1 ms; the first thing after clouds to go                                                     |
+| Rings, when in view          | 0.5–1 ms                                        | Under 0.5 ms, a textured annulus                                                                                           |
 
 The discrete column's lower ends sum to about 9 ms and its upper ends to about 18 ms, which is over
 budget. That is recorded rather than tuned away: the frame fits only if the passes do not all land at
 their worst, and the first measurements decide which one gives. The UHD 620 column sums to about 18
-to 32 ms, inside its 33 ms frame with little to spare.
+to 32 ms, inside its 33 ms frame with little to spare. The sums leave out the rings, which are in
+view only near a ringed body, and the per-planet atmosphere tables, which are not rebuilt every
+frame.
+
+The table is GPU time for the view alone, and two costs sit outside it. The consoles beside the view
+share the same GPU for their own canvases and for compositing, which on the UHD 620 is not free. And
+the descent's heaviest cost is on the CPU: every patch's heights come from the height function in
+WebAssembly workers, a descent streams patches faster than any other situation, and in
+single-player the same processor also runs the server. That cost has no row because it is not a
+frame cost, but it is what [the descent test](#testing) watches for as the moment streaming cannot
+keep up, and the spike measures it.
 
 The ladder, stated as policy rather than as a list of numbers:
 
 | Feature        | High                                                            | Low                                                                                  |
 | -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | Clouds         | Raymarched volume with temporal reprojection                    | Two-dimensional layer, correct albedo and optical depth                              |
-| Terrain detail | Full quadtree depth, GPU decoration                             | Shallower quadtree away from the ship, decoration off; full collision depth under it |
+| Terrain detail | Full quadtree depth, GPU decoration | Shallower quadtree away from the ship, decoration off; full depth under grounded bodies |
 | Ocean          | Gerstner waves, shoreline foam, sun glint; spectral waves later | Fewer Gerstner components, sun glint retained                                        |
 | Shadows        | Cascaded, with cloud shadows on terrain                         | One cascade or a horizon map: terrain self-shadowing only                            |
 | Atmosphere     | Full tables, aerial perspective on everything                   | Smaller tables, aerial perspective on terrain only                                   |
 | Scatter        | Instanced, filtered by biome and slope                          | Off, or a token density                                                              |
-| Rings          | Transmittance with a forward-scattering phase, and both shadows | A textured annulus with the planet's shadow                                          |
+| Rings | Transmittance with a two-part phase, both shadows, and particles close to | A textured annulus with the planet's shadow |
 | Resolution     | 1080p native                                                    | 720p, presented upscaled                                                             |
 
 Three rules keep this honest. The renderer **states its setting on the display**, under the
 degraded-rendering data state, so a player is never misled about whether they are seeing the real
-surface. Whatever the setting, **the patches under the ship are drawn at the level the collision
-query uses**: the low setting may coarsen what the ship is not touching, but never what it is, or the
-guarantee of [Level-of-detail consistency](#level-of-detail-consistency-and-why-collision-agrees)
-would hold only on the high setting. And the low setting is **built alongside the high one**, not
+surface. Whatever the setting, **the patches under every grounded body in view are drawn at the
+finest level**, which is the one collision reads: the low setting may coarsen what nothing is
+touching, but never what something is, or the guarantee of
+[Level-of-detail consistency](#level-of-detail-consistency-and-why-collision-agrees) would hold only
+on the high setting. And the low setting is **built alongside the high one**, not
 retrofitted: a two-dimensional cloud layer written after the volumetric one exists will never be
 tested and will rot.
 
@@ -1075,21 +1220,30 @@ written, the descent spike's included, rather than after.
 **Lean, for the shape:**
 
 - **A crate of its own for the surface.** The client should not have to ship galaxy generation to ask
-  for a height. Terrain belongs in a small crate — `hyperion-surface` — that depends on the sim's
-  `math`, `rng` and `units` and nothing else, compiles to `wasm32-unknown-unknown` for the client and
-  links natively into the server. The wasm bundle then holds the height function alone.
+  for a height. Terrain belongs in a small crate — `hyperion-surface` — that compiles to
+  `wasm32-unknown-unknown` for the client and links natively into the server. The wasm bundle then
+  holds the height function alone. It cannot depend on `hyperion-sim`: the flight model is sim code,
+  and collision needs heights, so the sim depends on the surface crate and a dependency back would be
+  a cycle. The sim's `math`, `rng` and `units` modules therefore move into a crate beneath both, which
+  each depends on, and their discipline — the `libm` pin, the Clippy bans — moves with them. The
+  coarse pass, which only the server runs, lives in the sim beside plan 14's planetary stage and hands
+  its field to the surface crate as data.
 - **Both wasm targets join the checks, automatically.** `wasm32-unknown-unknown` is exercised with
-  `wasm-bindgen-test` in a headless browser, the golden height files are asserted equal across
-  native, wasip1 and the browser target, and both wasm runs move from the manual `just test-wasm`
-  into a gate that runs without being remembered, whether `just ci` itself or a CI job beside it
-  ([open question 12](#open-questions)). The existing pin of `libm` to `=0.2.16`, already documented
+  `wasm-bindgen-test` in its Node mode, with Electron's own binary standing in for Node through
+  `ELECTRON_RUN_AS_NODE=1`, so that the check runs on the V8 the client ships — 15.2 in Electron 44,
+  where the system's Node carries 12.4 and its Chromium 15.3. The golden height files are asserted
+  equal across native, wasip1 and the browser target. The fast goldens under both wasm targets join
+  `just ci`, which fails with a pointer to the recipe that installs the tools when one is missing,
+  and never skips; the slow wasip1 suite joins `just ci-slow`. There is no hosted CI, so a job beside
+  `just ci` would be a gate nobody runs ([open question 12](#open-questions)). The existing pin of `libm` to `=0.2.16`, already documented
   as a generator-version change if bumped, is what makes that plausible; the same discipline extends
   to the surface crate.
 - **Fixed-width SIMD is allowed; relaxed SIMD is banned.** WebAssembly's relaxed SIMD proposal
   permits two implementations to return different results for the same instruction, which is
   precisely what the determinism rules forbid. Fixed-width 128-bit SIMD is IEEE-exact and may be
   used, provided the code does not let the compiler reassociate a sum; the rule belongs in
-  `.claude/rules/rust-dev.md` next to the existing numeric rules.
+  `.claude/rules/rust-dev.md` next to the existing numeric rules, and the `compile_error!` of
+  [Determinism hazards](#determinism-hazards-specific-to-terrain) enforces it.
 - **The renderer sits in the app, beside `spatial/`, not inside it.** A new `view/` directory holds
   the engine wrapper, the scene builder and the shaders. What the two share — `vec3`, `frame` and the
   direction conventions — moves to a common place rather than being duplicated or bent. The
@@ -1097,12 +1251,27 @@ written, the descent spike's included, rather than after.
   and merging them would produce a type that means neither.
 - **The engine is loaded lazily.** Consoles that do not draw a scene must not pay for the engine's
   bundle, which a dynamic import and a manual chunk achieve.
-- **The scene arrives as a subscription.** The view needs the bodies, craft and stars near the ship
-  at the tick rate, which the current protocol cannot express: it has six request kinds and no push.
-  Plan 04 already reserved the mechanism — a request whose response carries a `subscription: u32`,
-  pushes as `notification`, and binary frames for bulk payloads — so the view is the feature that
-  finally builds it. **Lean:** JSON while the scene is bodies and craft, measured before anything
-  binary is written, exactly as the single-player brainstorm concluded.
+- **The scene arrives as a subscription.** The view needs the bodies and craft near the ship, which
+  the current protocol cannot express: it has six request kinds and no push. Plan 04 already
+  reserved the mechanism — a request whose response carries a `subscription: u32`, pushes as
+  `notification`, and binary frames for bulk payloads — so the view is the feature that finally
+  builds it. Bodies are on rails, so they travel as orbital elements, on arrival and when Knowledge
+  changes, and only craft are pushed at the 64 Hz tick rate. Stars are not in it: the sky arrives
+  once per arrival, by a request of its own. **Lean:** JSON for the scene, as the single-player
+  brainstorm concluded: at some 250 to 300 bytes a body and 400 a craft, that is about 0.25 MB/s,
+  against some 2 MB/s if everything were pushed every tick.
+- **Bulk payloads travel as binary frames.** The coarse field, 2 to 15 MB a planet, goes in
+  surveyed-region chunks of at most 1 MB, the first use of plan 04's reservation. Sent as base64 in
+  JSON, the way the density map travels today, a 15 MB field would become a 20 MB frame: over the
+  server's 16 MiB outbound budget, past its 10 s write timeout on a slow link, and holding every scene
+  push behind it. The sky's list of about 9,000 stars, some 2 MB as JSON, can stay JSON. Plan 04
+  requires new kinds to enter its table of reserved kinds first, so the scene topic, the sky request
+  and the coarse-field chunk go there before any is built.
+- **Workers hand heights to the render thread.** A `GPUDevice` cannot be shared between threads, so
+  height workers transfer their results to the thread that owns the device, or the whole renderer
+  runs in a worker on an `OffscreenCanvas`. Each worker runs its own WebAssembly instance, which
+  avoids `SharedArrayBuffer` and the cross-origin isolation it needs — isolation that pages loaded
+  with `loadFile`, as the client's are, cannot declare.
 
 The renderer is a **display sink**: it is handed a scene and draws it, and it holds no truth the
 server has not sent. This is not an aesthetic preference. It is what keeps the Knowledge overlay
@@ -1132,13 +1301,14 @@ one is testable anyway, because most of it is arithmetic.
   triple, each against hand-computed values with a cited reference.
 - **The height function's determinism**, which is the important one: golden height files asserted
   equal on native, `wasm32-wasip1` and `wasm32-unknown-unknown`, under the
-  [determinism rules](../../../.claude/rules/rust-dev.md) the sim already follows. The wasm runs
-  need toolchains `just ci` does not install today, so whether they sit in `just ci` itself or in a
-  job beside it is [open question 12](#open-questions); either way they are automatic.
-- **Collision agrees with what is drawn.** The rendered surface at a given level of detail and the
-  height the collision query returns must agree within a stated tolerance, and the tolerance must be
-  a function of the level. This is the test that makes "the same terrain on both sides" a checkable
-  claim instead of an intention.
+  [determinism rules](../../../.claude/rules/rust-dev.md) the sim already follows, in `just ci`
+  as [open question 12](#open-questions) settles. The golden loader reads files with `std::fs`,
+  which `wasm32-unknown-unknown` does not have, so it gains an arm that embeds them with
+  `include_str!`, and the golden tests carry the `wasm_bindgen_test` attribute on that target.
+- **Collision agrees with what is drawn.** The collision query and the finest level's mesh must
+  return the same height, and each coarser level must stay inside the stated bound for its level.
+  This is the test that makes "the same terrain on both sides" a checkable claim instead of an
+  intention.
 
 **With a GPU, by hand, and recorded:**
 
@@ -1183,16 +1353,21 @@ Inherited from the earlier brainstorms and unchanged:
 Recommended here, as technical choices rather than rulings:
 
 - Babylon.js in the renderer, **behind an adapter** that keeps every HYPERION-specific mechanism
-  engine-agnostic, which is what makes the choice reversible.
+  engine-agnostic, which is what makes the choice reversible, with its large-world feature off.
 - Reversed-Z with a floating-point depth buffer and an infinite far plane; no logarithmic depth.
 - Camera-relative rendering with per-patch `f64` origins, from the frames the simulation already defines.
 - Absolute photometric units throughout, with a photographic exposure model and AgX tone mapping.
 - A cube-sphere quadtree with fixed-grid patches and vertex morphing.
+- Hillaire 2020 atmospheres from a list of physically parameterised terms, with thick atmospheres
+  validated against a path tracer.
 - A coarse global field at cube-sphere level 7 or 8, computed **on the server** and sent to the
-  client, with all fine detail synthesised locally; Knowledge gates its coverage but never its
-  accuracy.
-- A new `hyperion-surface` crate, and both wasm targets brought into the determinism checks
-  automatically, before any terrain code.
+  client as binary frames, with all fine detail synthesised locally; Knowledge gates its coverage but
+  never its accuracy. Erosion runs in the coarse pass, and a collision band limit of 1 m covers
+  terrain and scatter alike.
+- A sky request of its own, magnitude-limited at 6.5, fed by plan 06's stellar brief.
+- A new `hyperion-surface` crate, with the sim's `math`, `rng` and `units` moved into a crate beneath
+  it and the sim, and both wasm targets brought into `just ci` under Electron's own V8, before any
+  terrain code.
 - A low setting targeting 30 fps at 720p on the UHD 620, against a discrete reference of the RTX 4060
   class.
 
@@ -1202,98 +1377,153 @@ additions are the owner's call.
 
 ## Open questions
 
-1. **What Babylon.js's "Large World Rendering" actually does.** The feature is named in the 9.0.0
-   release notes, which link its page at <https://aka.ms/babylon9LWDoc>; that documentation is served
-   by a client-side application that automated fetching cannot read. **Lean:** a human reads that page
-   before any weight is put on it, and the design does not depend on it either way.
+Two of these are closed by the research recorded above and kept, with their answers, so that the
+numbers cited elsewhere stay put.
+
+1. **What Babylon.js's "Large World Rendering" does.** **Closed:** camera-relative rendering, through
+   64-bit CPU matrices and a global override that subtracts the eye position from uniforms matched
+   by name, in one 64-bit frame with no rebasing (see
+   [The engine](#the-decision-does-not-rest-on-the-engines-large-world-feature)). It stays off; the
+   adapter supplies camera-relative transforms itself.
 2. **Whether the engine survives the descent spike.** **Lean:** yes. The adapter makes a switch between
    JavaScript engines cheap but not a move to a native renderer, which is one more reason the spike
    comes before anything depends on its answer. The condition for reaching for a native renderer is
-   narrow: the spike fails on adequate hardware for reasons inside the browser stack rather than in
-   our own code.
-3. **The atmosphere tables' precompute cost per planet**, particularly on the Intel part, where it may
-   run to hundreds of milliseconds or seconds and must be spread over frames on arrival. **Lean:**
-   reduced table sizes first; the cheaper production LUT model is held in reserve, and its published
-   costs need measuring rather than quoting.
-4. **Whether the coarse field is persisted.** It is a pure function, so it need not be. But it is also
-   what the ship has surveyed, and survey results are player knowledge that ought to survive a save.
-   **Lean:** recomputed and memory-cached for rendering, and recorded in the Knowledge overlay as a
-   statement of _what has been surveyed_, not as a copy of the data.
-5. **Erosion: heuristic or analytic.** Conditioning local noise on coarse drainage is a heuristic that
-   will look plausible and is not physics. There is a published analytical erosion built on the
-   stream-power law that would make it physics. **Lean:** ship the heuristic, label it as one, and treat
-   the analytical route as the upgrade that closes the gap.
-6. **The collision wavelength.** Where exactly the line falls between the authoritative height function
-   and GPU-only decoration. **Lean:** a metre to begin with, tuned against what the flight model can
-   actually touch, and stated in the surface crate's documentation because both sides depend on it.
-7. **A spherical ocean at planetary scale.** The published work is all flat-patch; tiling tangent-plane
-   patches over a sphere with a radial offset is our own construction. **Lean:** treat it as a genuine
-   risk, and get sun glint and the coarse ocean level right before any wave geometry.
-8. **Where a ring stops being an annulus and becomes particles**, and whether self-shadowing is worth
-   approximating. This is the least-researched part of the document.
+   narrow, and stated so that it can be measured: it fires only on the discrete reference machine,
+   and only when a native wgpu replay of the same WGSL passes and tile data meets the budget where
+   the browser misses it by more than a fifth, or when our CPU time and the GPU's pass time fit with
+   headroom while the frames actually delivered miss it. Dawn's robustness and validation toggles are
+   compared on and off, to price the browser's safety checks. A failure on the UHD 620 alone
+   redesigns the low setting rather than triggering a native renderer.
+3. **Whether Hillaire's model holds for thick atmospheres.** The per-planet precompute this question
+   once asked about is gone: Hillaire's tables rebuild in under a millisecond. What remains is that
+   neither model is validated at Venus's or Titan's optical depths. **Lean:** validate both classes
+   against a path-traced reference before they ship, and fall back to Bruneton's tables, with more
+   scattering orders, only where Hillaire's colour visibly drifts.
+4. **Whether the coarse field is persisted.** **Lean:** not persisted. The server recomputes it and
+   caches it keyed by seed, generator version and body. Knowledge records coverage only: for each
+   body, the coarse cells surveyed, with the time and the source — orbital or close range — in a new
+   versioned JSON-lines record beside plan 12's contacts, at most a 48 KB bitset per body at level 8.
+   A save made under another generator version already refuses to open, so surveyed ground cannot
+   move under a save; the real risk is changing the coarse pass, its wire quantisation or the local
+   synthesis without bumping `GENERATOR_VERSION`, so all three belong to it.
+5. **Erosion: where the physics runs.** **Lean:** the stream-power law runs where it can. In the
+   coarse pass, Tzathas et al.'s analytical solution produces the coarse elevation, flow directions,
+   drainage area and steepness index. Below a coarse cell, a Dendry-style network anchored to those
+   flow directions supplies the channels, with stream-power profiles. The network's geometry is a
+   heuristic and labelled so; its per-point cost, about 150 µs in the unoptimised reference code, is
+   to be measured.
+6. **The collision wavelength.** **Lean:** a fixed band limit of 1 m, the scale of a landing-gear
+   footpad, changed only with the generator version and stated in the surface crate's documentation
+   because both sides depend on it. Collision reads the finest level, which is drawn around every
+   grounded body in view. A finer tier, nested inside this one, is added only if crews on foot ever
+   touch terrain.
+7. **A planet-fixed ocean.** The spherical ocean is published, as a projected grid that follows the
+   camera and a reflectance model from space; an ocean on the terrain quadtree, consistent across
+   levels and meeting the shoreline, is our own construction. **Lean:** start from the published
+   sphere and glint, and treat the quadtree ocean and the shoreline as the risk.
+8. **Rings close to.** The criterion is now stated under [Rings](#rings). **Lean:** adopt it, with
+   analytic shadowing between particles, and measure the instancing. SpaceEngine's volumetric rings
+   run at 150 fps and more at 1080p on an RTX 2080, which suggests the discrete target can afford
+   particles and the UHD 620 cannot, so the low setting keeps the annulus.
 9. **Climate for worlds that are not Earth-like.** Energy-balance models and Köppen classification are
-   Earth-centred; tidally locked "eyeball" worlds, high-obliquity worlds where the equator is the coldest
-   place, airless bodies and Titan-like hydrocarbon cycles each break them differently. Automatically
-   selecting the right model from stellar and orbital parameters alone is, as far as this research found,
-   an open problem. **Lean:** an explicit regime classifier choosing among a few documented models, with
-   non-Earth-like classes named separately rather than forced into Köppen's letters.
-10. **Whether the scene subscription needs binary frames.** **Lean:** JSON until measurement says
-    otherwise, as the single-player brainstorm concluded.
-11. **Whether scatter is ever collidable.** A boulder a landing party can walk into is a different
-    contract from a rock that is decoration. **Lean:** decoration first; collidable scatter only if a
-    later phase needs it, and then through the same hashed placement so the server can answer for it.
-12. **How the wasm targets join the determinism checks** — which harness runs the browser target, and
-    whether both wasm runs go into `just ci` itself or into a CI job beside it, since each needs a
-    toolchain `just ci` does not install today. **Lean:** `wasm-bindgen-test` in a headless browser,
-    and both runs automatic before any terrain code is written, the descent spike's included, because
-    they are the check the whole shared-terrain argument rests on.
-13. **Where the sky's stellar figures come from, and how a flux-limited sky is queried.** The range
-    query returns initial mass and age; the sky needs luminosity and effective temperature, and a
-    selection limited by apparent brightness rather than by radius. **Lean:** the server runs plan
-    06's stellar stage and the system record gains both figures, so the client never runs it; the
-    magnitude-limited selection is a server request built from per-layer range queries, so that the
-    radius for each mass layer follows from its luminosity.
+   Earth-centred; tidally locked "eyeball" worlds, high-obliquity worlds where the equator is the
+   coldest place, airless bodies and Titan-like hydrocarbon cycles each break them differently.
+   **Lean:** the regime classifier belongs to plan 14's surface conditions, not to this document,
+   because the coarse pass is constrained to plan 14's figures and those figures are wrong without
+   one. Plan 14's ice fraction, taken from the latitude at which the zonal temperature crosses
+   freezing, assumes the poles are coldest and the ice is water, which fails for a locked world's
+   nightside ice, for obliquities between 54° and 126°, and for Titan and Pluto, where water ice is
+   bedrock; and its equator–pole contrast needs a sign and, for a locked world, the substellar axis.
+   The classifier has three fields rather than one list: a thermal regime from Koll's (2022)
+   redistribution index on optical depth, surface pressure and equilibrium temperature; a forcing from
+   the locking state, the length of the solar day and the obliquity; and a condensable from the
+   retained species against their phase diagrams. Each regime names its coarse model — radiative
+   equilibrium with thermal inertia for airless and thin-atmosphere worlds, a seasonal or body-fixed
+   energy-balance model (Ramirez 2024) for the rest, an isothermal surface for a Venus — and this
+   document then says only what each one runs and classifies. The index's thresholds and the onset
+   of slow-rotator climates still need checking against the papers.
+10. **Whether the scene subscription needs binary frames.** **Closed** for the scene: JSON, with
+    bodies as orbital elements and only craft pushed at the tick rate. Bulk payloads, the coarse
+    field first, travel as binary frames, as [Runtime and code shape](#runtime-and-code-shape) sets
+    out.
+11. **Whether scatter is ever collidable.** **Lean:** yes, above the band limit, from the first phase
+    that draws it: boulders and trunks are discrete features in hashed cells per size octave, which
+    the server answers for. Smaller scatter is decoration, culled where it intersects a grounded
+    body.
+12. **How the wasm targets join the determinism checks.** **Lean:** `wasm-bindgen-test` in Node mode
+    with Electron's own binary as Node, so that the check exercises the V8 the client ships; the fast
+    goldens under both wasm targets in `just ci`, which fails and never skips when a tool is missing;
+    the slow wasip1 suite in `just ci-slow`; all of it before any terrain code, the descent spike's
+    included. What needs a short trial is whether the runner accepts Electron in Node's place, and
+    what the extra runs add to `just ci`'s time.
+13. **How the sky is selected.** **Lean:** plan 06's stellar brief (P06.T33) supplies luminosity and
+    effective temperature, and the sky is a request kind of its own rather than a set of range
+    queries. Its census counts stars brighter than magnitude 6.5, not systems. Each mass layer's
+    radius comes from the brightest absolute magnitude it reaches in any phase of its life, dimmed by
+    the least extinction in any direction and capped — about 2,000 ly for the 0.75–2.5 M☉ layer,
+    4,300 for 2.5–8 and 10,000 for 8–150 — and beyond the caps the light belongs to the band. The two
+    lightest layers never evolve and need only tens of light-years. Candidates are skipped by mass
+    and age, which are drawn on their own streams, before any density is evaluated, and each cell's
+    bright subset is cached, so that a jump of up to 1,000 ly reuses most of the cells. That still
+    leaves some millions of cell bounds, about 5 s of the server's pool per arrival. The magnitude
+    bounds need checking by the science checker, and the saving needs a benchmark.
 
 ## Suggested order of attack
 
 Not a plan, only the dependency order a plan would follow. Steps 1 to 3 are the ones that retire risk;
 everything after them is additive. Steps 5 to 9 also wait on plan 14, which has not started: they need
-its radii, albedos, rotation, compositions and global figures. The descent spike does not, because it
-can run on a hand-parameterised test planet.
+its radii, albedos, rotation, compositions and global figures. Steps 1 and 3 do not, because they run
+on scenes built by hand — the precision scenes of [Testing](#testing) and a hand-parameterised test
+planet — and the wireframe draws generated bodies once plan 14 supplies them. Until plan 12's
+retarded-time machinery exists, the scene the server sends is the present state, which within a
+system differs from the retarded one by seconds to hours of light-time. Each feature's low setting is
+built in that feature's own step rather than at the end, as the budget's third rule requires, and
+the first one brings the degraded-rendering data state with it.
 
 1. **Foundations and the wireframe.** The engine adapter, camera-relative differencing, reversed-Z,
    frame-change rebasing, the photometric pipeline with exposure and tone mapping, and `VIEW` as a
-   wireframe at real scale with stars at their true magnitudes. The scene subscription in the protocol.
-   This is the precision test rig, and the point at which the depth and precision tests exist.
+   wireframe at real scale with stars at their true magnitudes. Those magnitudes need plan 06's
+   stellar brief on the range rows (P06.T33), so this step waits on plan 06's protocol work, whose
+   stellar system module is still a stub; until step 4 the stars are the range query's
+   volume-limited set, and the view says so. The scene subscription in the protocol.
+   The guide edits go to the owner here, since the wireframe already needs the view as a display
+   class, the exposure instrument and the motion rule. This is the precision test rig, and the point
+   at which the depth and precision tests exist.
 2. **The wasm targets in the determinism checks.** `wasm32-unknown-unknown` under `wasm-bindgen-test`,
    both wasm runs made automatic, and the client loading its first WebAssembly. Nothing terrain-shaped
    is built yet, but this is the check the shared terrain rests on, so it comes before the first line
    of terrain code, spike code included.
-3. **The descent spike, which is the gate.** An Earth-sized test planet from orbit to a metre above the
-   ground, terrain from sim code in WebAssembly workers. It passes at 1080p60 on the discrete target and
-   at 30 fps at 720p on the UHD 620's low setting. The project has no discrete GPU today, so that half
-   of the measurement needs one borrowed or rented; the UHD 620 half runs on the machine that exists,
-   and a failure there is already an answer. The single-player brainstorm named this spike with a
-   criterion of 1080p60 on the owner's machine, which the owner's ruling on the performance floor has
-   since replaced. It decides whether the browser carries the planets, and it should happen before
-   anything depends on the answer.
-4. **The sky.** Plan 06's luminosities and temperatures in the system record, the magnitude-limited
-   selection, faint stars baked and bright or near ones drawn as sprites, the galactic band from the
-   model, the local star as a limb-darkened disc, blackbody colour. Cheap, highly visible, and it
-   exercises the photometry.
+3. **The descent spike, which is the gate.** An Earth-sized test planet with Earth's reference
+   atmosphere, from orbit to a metre above the ground, terrain from sim code in WebAssembly workers
+   and the atmosphere drawn every frame, since after terrain it is one of the heaviest passes on the
+   Intel part. The descent is scripted and seeded, identical every run, and records frame intervals
+   at the 50th, 95th and 99th percentiles, main-thread time split between our code, the engine and
+   idle, GPU time per pass — which the forced switches make available, uncoarsened, on Linux —
+   tile demand against worker throughput, upload bytes, pipeline-creation stalls and
+   garbage-collection pauses. It passes at 1080p60 on the discrete target and at 30 fps at
+   720p on the UHD 620's low setting. The project has no discrete GPU today, so that half of the
+   measurement needs one borrowed or rented; the UHD 620 half runs on the machine that exists, and a
+   failure there is already an answer. The single-player brainstorm's statement of the spike carries
+   the same criterion. It decides whether the browser carries the planets, and it should happen
+   before anything depends on the answer.
+4. **The sky.** The sky request with its magnitude-limited census, faint stars baked and bright or
+   near ones drawn as sprites, the galactic band from the model, the local star as a limb-darkened disc, blackbody
+   colour. Cheap, highly visible, and it exercises the photometry.
 5. **Lit bodies at real scale**, from plan 14's radii, albedos and rotation, with correct phase and the
    terminator. Still no surfaces.
 6. **Atmospheres**, parameterised from plan 14's composition, pressure, temperature and gravity, with
-   aerial perspective on terrain.
-7. **The surface generator.** The `hyperion-surface` crate with its own `clippy.toml`, the coarse
-   global pass on the server, its wire representation, and golden height files added to step 2's
-   parity checks across native and both wasm targets. Nothing is drawn from it yet.
-8. **Terrain.** The quadtree, patch streaming, height textures, morphing, materials — and the test that
-   collision agrees with the picture.
-9. **The rest of the surface**, in rough order of value: GPU decoration, scatter, clouds, ocean and
-   glint, rings.
-10. **The quality ladder and the guide edits**, made real: both settings of every feature, the
-    degraded-rendering data state, and the recorded measurements on both GPUs.
+   aerial perspective on terrain, and the thick ones checked against a path tracer.
+7. **The surface generator.** The shared `math`, `rng` and `units` moved into the crate beneath the
+   sim, the `hyperion-surface` crate with its own `clippy.toml`, the coarse global pass in the sim on
+   the server, its binary wire chunks with Knowledge's coverage gating and coverage record, and
+   golden height files
+   added to step 2's parity checks across native and both wasm targets. Nothing is drawn from it yet.
+8. **Terrain.** The quadtree, patch streaming, height textures, morphing, materials, the survey
+   coverage readout — and the test that collision agrees with the picture.
+9. **The rest of the surface**, in rough order of value: GPU decoration with its label on the view,
+   scatter, clouds, ocean and glint, rings.
+10. **The measurements.** The budget's estimates replaced by figures measured on both GPUs and kept
+    under version control, and the ladder's settings adjusted to what they show.
 
 ## Sources
 
@@ -1310,8 +1540,19 @@ that reads as more certain than the research was.
   <https://github.com/BabylonJS/Babylon.js/releases>. An earlier draft of this document gave 9.0.0
   the date of 8.0.0, 27 March 2025.
 - Babylon.js reversed-Z: `useReverseDepthBuffer` setting `GEQUAL` and `clearDepth(0.0)`, in
-  `packages/dev/core/src/Engines/thinEngine.pure.ts`. Babylon.js's own documentation site could not be
-  read by automated fetching, so its large-world feature's content is **unverified**.
+  `packages/dev/core/src/Engines/thinEngine.pure.ts`.
+- Babylon.js Large World Rendering (verified 2026-09-23): the documentation source
+  `content/features/featuresDeepDive/scene/large_world.md` in the BabylonJS/Documentation repository,
+  to which <https://aka.ms/babylon9LWDoc> redirects; the override in
+  `packages/dev/core/src/Materials/floatingOriginMatrixOverrides.ts` and the eye position in
+  `scene.pure.ts`, at 9.27.1; its origin as an experiment in 8.28.3 (pull request 17183); and the
+  maintainer's announcement, calling it experimental. <https://forum.babylonjs.com/t/61114>. An
+  earlier draft of this document, unable to read the documentation site, called the feature
+  unverified.
+- Babylon.js compatibility (verified 2026-09-23): golden rule 1 of `contributing.md` in the engine
+  repository, and `content/breaking-changes.md` in the documentation repository, which records visual
+  changes such as PBR rough metals in 7.45.0, each with a flag to restore the old look. An earlier
+  draft of this document found no policy.
 - three.js r186 of 8 September 2026. <https://threejs.org/> and
   <https://github.com/mrdoob/three.js/releases>
 - three.js migration guide, recording breaking changes in essentially every release and advising upgrades
@@ -1323,6 +1564,14 @@ that reads as more certain than the research was.
 - WebGPU implementation status: Linux default enablement for Intel Gen12+ from Chrome 144 and NVIDIA
   under Wayland from Chrome 147, everything else behind a flag.
   <https://github.com/gpuweb/gpuweb/wiki/Implementation-Status>
+- Chromium's `software_rendering_list.json`, entry 186, blocking WebGPU's Vulkan-through-GL-interop
+  display path on Linux except for Intel Gen12+ with Mesa 22.0 or newer and NVIDIA 535.183.01 or
+  newer, with no Wayland condition; timestamp coarsening lifted by `--enable-unsafe-webgpu` in
+  `webgpu_decoder_impl.cc`; and WebGPU exposed to workers (`WorkerNavigator includes NavigatorGPU`).
+  Read on Chromium's main branch (verified 2026-09-23), **not the 152 branch**.
+- Dawn's Vulkan backend, `PhysicalDeviceVk.cpp`: subgroups refused on Gen9 unless the
+  `enable_subgroups_intel_gen9` toggle is set (verified 2026-09-23).
+  <https://dawn.googlesource.com/dawn>
 - WebGPU on Mesa's ANV driver, and the switch set including `DefaultANGLEVulkan` that avoids a
   swap-chain hang. <https://github.com/gpuweb/gpuweb/issues/5022>
 - Electron 44 bundling Chromium 152. <https://github.com/electron/electron/releases>
@@ -1341,7 +1590,10 @@ that reads as more certain than the research was.
   <https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/swiftshader.md>
 - Bevy 0.19.1 of 13 August 2026; its atmosphere settings, whose four lookup tables are Hillaire's,
   and its atmosphere module, whose documentation states that it implements Hillaire 2020 (an earlier
-  draft of this document called it Bruneton-style); and the `big_space` crate for large worlds.
+  draft of this document called it Bruneton-style); its medium in `crates/bevy_light/src/atmosphere.rs`,
+  any number of terms each with its own density and phase function, and a Mars preset whose dust
+  follows Schneegans et al. 2024 (doi:10.1111/cgf.15010, **not read**: it returned 403); and the
+  `big_space` crate for large worlds.
   <https://github.com/bevyengine/bevy/releases>, <https://docs.rs/bevy/0.19.1/bevy/pbr/struct.AtmosphereSettings.html>,
   <https://github.com/bevyengine/bevy/blob/v0.19.1/crates/bevy_pbr/src/atmosphere/mod.rs>,
   <https://github.com/aevyrie/big_space>
@@ -1390,13 +1642,25 @@ that reads as more certain than the research was.
 - Renka 1997, _Algorithm 772: STRIPACK, Delaunay triangulation and Voronoi diagram on the surface of a
   sphere_, ACM TOMS — written for a model of plate tectonics.
 - Tzathas, Gailleton, Steer et al. 2024, _Physically-based analytical erosion for fast terrain
-  generation_, Computer Graphics Forum — the closed-form substitute for iterative erosion.
+  generation_, Computer Graphics Forum — closed-form in time but evaluated numerically over space,
+  with receivers, a topological sort, an upstream pass and multigrid fixed-point iteration; 1.8 s at
+  512² and 8.2 s at 1024² in Python. Read from the authors' PDF (verified 2026-09-23).
+  <https://www-sop.inria.fr/reves/Basilic/2024/TGSC24/Analytical_Terrains_EG.pdf>. An earlier
+  draft of this document called it a closed-form substitute that could be evaluated per point.
+- Gaillard, Benes, Guérin, Galin and Peytavie 2019, _Dendry: A Procedural Model for Dendritic
+  Patterns_, I3D (doi:10.1145/3306131.3317020; **the paper returned 403**), read through its
+  reference code, which seeds each cell from integer coordinates but draws with `mt19937_64` and
+  standard-library distributions. <https://github.com/mgaillard/Noise>
+- NASA TN D-6850, _Apollo Experience Report: Lunar Module Landing Gear Subsystem_, 1972: a footpad
+  about 0.9 m across, and 0.6 m of relief tolerated within the footprint.
+  <https://ntrs.nasa.gov/citations/19720018253>
 - Schott, Paris, Fournier, Guérin et al. 2023, _Large-scale terrain authoring through interactive erosion
   simulation_, ACM TOG; and 2024, _Terrain Amplification using Multi Scale Erosion_, which names the
   boundary problems tiled erosion runs into.
 - Génevaux et al. 2013, _Terrain generation using procedural models based on hydrology_, ACM TOG;
-  Teoh 2009, _Riverland_; Derzapf, Ganster and Guthe 2011, _River networks for instant procedural
-  planets_, Computer Graphics Forum — the network-first inversion.
+  Teoh 2009, _Riverland_; Derzapf, Ganster, Guthe and Klein 2011, _River networks for instant
+  procedural planets_, Computer Graphics Forum — the network-first inversion. Derzapf et al. is
+  closed access and was read only in abstract.
 - Guérin et al. 2016, _Sparse representation of terrains for procedural modeling_; Guérin et al. 2017,
   _Interactive example-based terrain authoring with conditional generative adversarial networks_, ACM TOG;
   Grenier et al. 2024, _Real-time Terrain Enhancement with Controlled Procedural Patterns_, reporting
@@ -1404,7 +1668,10 @@ that reads as more certain than the research was.
 - Paris, Galin, Peytavie, Guérin and Gain 2019, _Terrain Amplification with Implicit 3D Features_, ACM TOG.
 - Argudo, Galin, Peytavie, Paris and Gain 2019, _Orometry-based terrain analysis and synthesis_, ACM TOG.
 - Tucker and Whipple 2002, JGR; Harel, Mudd and Attal 2016, _Geomorphology_ — the stream-power law and its
-  exponents.
+  exponents. Flint's law and Hack's law, for channel slope and drainage area, are **cited from
+  memory**, and Hack's constants (C = 1.5, h = 0.6) through Tzathas et al.
+- Lagae et al. 2009, on sparse convolution noise, and Worley 1996, on cellular noise — the
+  per-cell, neighbourhood-searched construction the crater step uses. **Cited from memory.**
 - Zafar, Olano and Curtis 2010, _GPU random numbers via the tiny encryption algorithm_, HPG — hash-based
   noise that depends on nothing but its inputs.
 - FastNoise2, for SIMD noise, and its warning that a compiler's SIMD bugs can change generated output.
@@ -1430,17 +1697,46 @@ that reads as more certain than the research was.
   production function; Croft 1985, JGR, and Krüger and Hergarten 2018, JGR, for the simple-to-complex
   transition diameter. Specific transition diameters were **not extracted** and must come from these
   papers directly.
-- Checlair, Menou and Abbot 2017, ApJ (tidally locked "eyeball" states); Ferreira, Marshall, O'Gorman and
-  Seager 2014, Icarus (at 90° obliquity the equator is the coldest region); Williams and Kasting 1997,
-  Icarus; Lunine and Atreya 2008 and Hayes, Lorenz and Lunine 2018, Nature Geoscience (Titan's methane
-  cycle).
+- Checlair, Menou and Abbot 2017, ApJ (tidally locked "eyeball" states, with no snowball
+  bifurcation), and Checlair et al. 2019, finding that ocean heat transport does not restore it;
+  Ferreira, Marshall, O'Gorman and Seager 2014, Icarus (at 90° obliquity the equator is the coldest
+  region; only its bibliography was confirmed); Williams and Kasting 1997, Icarus; Lunine and Atreya
+  2008 and Hayes, Lorenz and Lunine 2018, Nature Geoscience (Titan's methane cycle).
+- Koll 2022, ApJ 924 (arXiv:1907.13145): the day–night redistribution index for locked rocky planets,
+  in optical depth, surface pressure and equilibrium temperature. Wordsworth 2015
+  (arXiv:1412.5575): the pressure below which carbon dioxide collapses on a locked world's night side.
+  Yang et al. 2014, ApJL 787 L2: slow rotators stay temperate at nearly twice the flux. Kilic et al.
+  2018, ApJ 864, 106: stable equatorial ice belts at high obliquity. Barnes et al. 2025, the FILLET
+  protocol (arXiv:2511.11957), naming four energy-balance climate states by their ice edges. All
+  verified 2026-09-23. The 54° obliquity threshold, after Ward 1974 and Williams and Kasting 1997, is
+  **cited from memory**.
 
 **Atmosphere, clouds, ocean and imaging**
 
-- Bruneton and Neyret 2008, and Bruneton's 2017 revision with its reference implementation, which adds
-  custom density profiles and absorption. <https://ebruneton.github.io/precomputed_atmospheric_scattering/>
-- Hillaire 2020, _A Scalable and Production Ready Sky and Atmosphere Rendering Technique_, EGSR. Its LUT
-  sizes and per-frame costs were **not extracted**; only the abstract was readable.
+- Bruneton and Neyret 2008, and Bruneton's 2017 revision with its reference implementation, whose
+  defaults are a 256 × 64 transmittance table, a 32 × 128 × 32 × 8 scattering table, a 64 × 16
+  irradiance table and four scattering orders, with density profiles of at most two layers; its WebGL
+  demo loads tables precomputed offline. <https://ebruneton.github.io/precomputed_atmospheric_scattering/>
+- Hillaire 2020, _A Scalable and Production Ready Sky and Atmosphere Rendering Technique_, EGSR, Table
+  2 and section 7: 0.31 ms for all four tables on a GTX 1080 at 720p and 0.5 ms with per-pixel ray
+  marching from space, the per-planet tables under a millisecond on an iPhone 6s, and 250 ms for
+  Bruneton's update on the same GTX 1080; figures 11 and 12 for both models' behaviour at high
+  optical depth (verified 2026-09-23). <https://sebh.github.io/publications/egsr2020.pdf>. An earlier
+  draft of this document could read only the abstract.
+- Bruneton, Neyret and Holzschuch 2010, _Real-time Realistic Ocean Lighting using Seamless Transitions
+  from Geometry to BRDF_, Computer Graphics Forum, section 6 on planet-scale rendering.
+  <https://inria.hal.science/inria-00443630>. Proland's ocean module, drawing flat or spherical
+  oceans. <https://github.com/csbrandt/proland-4.0>. Scatterer's port for Kerbal Space Program.
+  <https://github.com/LGhassen/Scatterer>. Outerra, _Ocean rendering_, 18 February 2011.
+  <https://outerra.blogspot.com/2011/02/ocean-rendering.html>. An earlier draft of this document said
+  the published work was all flat-patch.
+- Rings: Björn Jónsson's ring model and radial profiles, <http://mmedia.is/bjj/data/s_rings/>; Salo
+  and French 2010 (arXiv:1007.0349), on shadowing between particles and the opposition surge; Déau
+  et al. 2009 (arXiv:0902.0289), on the surge from 0.001° to 25° phase; SpaceEngine's volumetric
+  rings, <https://spaceengine.org/news/blog210611>; ring thicknesses and optical depths from
+  Wikipedia's _Rings of Saturn_, a secondary source. Dones et al. 1993, on main-ring particles
+  backscattering, and Zebker et al. 1985, on the size distribution, are **cited from memory**. An
+  earlier draft of this document called the main rings forward-scattering.
 - Nishita et al. 1993; O'Neil, _Accurate Atmospheric Scattering_, GPU Gems 2 chapter 16.
   <https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-16-accurate-atmospheric-scattering>
 - Rayleigh and Mie coefficients, scale heights and the Cornette–Shanks phase function, from Scratchapixel's

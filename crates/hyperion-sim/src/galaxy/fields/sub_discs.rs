@@ -10,9 +10,9 @@
 //!
 //! `σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)`,
 //!
-//! up to 2.4 kpc from the plane, where the height axes of the figures it was fitted in end (the
-//! binned data reach about 2 kpc), and level above, at the Sun's angular momentum and metallicity,
-//! which the reference radius, three thin-disc scale lengths, stands for. Each sub-disc's vertical
+//! up to 2.0 kpc from the plane, where its binned data end, and level above, at the Sun's angular
+//! momentum and metallicity, which the reference radius, three thin-disc scale lengths, stands for.
+//! Each sub-disc's vertical
 //! profile is the vertical Jeans equation's solution for that dispersion in the galaxy's potential
 //! at the reference radius ([`vertical`](super::vertical)): cored at the plane, with no free
 //! height. `s` is the galaxy's dispersion scale, one number that the drawn mean height fixes: the
@@ -27,7 +27,7 @@
 //! 0.20 per kpc, as Sharma et al. find the high-α stars' do too ("no special provision is needed to
 //! accommodate the thick disc stars", in their summary and conclusions), each with a mid-plane
 //! dispersion of its own that meets its drawn effective height:
-//! the young disc (130–200 ly, drawn apart from the old disc's) and the thick disc at the same
+//! the young disc (225–345 ly, drawn apart from the old disc's) and the thick disc at the same
 //! reference radius, and the nuclear disc at two of its own scale lengths, the mass-weighted mean
 //! radius of an exponential disc. An isothermal thick disc, as mono-abundance populations are
 //! measured to be over 0.5–2 kpc ("nearly isothermal", Bovy et al. 2012, ApJ 755, 115) and as the
@@ -71,11 +71,13 @@ pub const HEATING_AGE_OFFSET_GYR: f64 = 0.1;
 pub const DISPERSION_HEIGHT_GRADIENT_PER_KPC: f64 = 0.20;
 
 /// The height, kpc, up to which the dispersion rises by [`DISPERSION_HEIGHT_GRADIENT_PER_KPC`] and
-/// above which it stays level: where the height axes of Sharma et al.'s (2021) Figs. 1 and 15 end,
-/// their binned data reaching about 2 kpc. They say nothing of extrapolating it, and carried on to
-/// the root cube's edge it would give every disc a tail falling as `z⁻²`: the Milky Way fixture's
-/// thick disc would hold a tenth of the halo's density 10 kpc above the Sun.
-pub const DISPERSION_GRADIENT_REACH_KPC: f64 = 2.4;
+/// above which it stays level: the edge of Sharma et al.'s (2021) binned data, which reach about
+/// 2 kpc, rather than the 2.4 kpc where the `|z|` axes of their Figs. 1 and 15 end (plan 02,
+/// ruling 4 of 2026-09-22: cap the rise at the edge of the data instead of extrapolating 0.4 kpc
+/// past it). They say nothing of extrapolating it, and carried on to the root cube's edge it would
+/// give every disc a tail falling as `z⁻²`: the Milky Way fixture's thick disc would hold a tenth
+/// of the halo's density 10 kpc above the Sun.
+pub const DISPERSION_GRADIENT_REACH_KPC: f64 = 2.0;
 
 /// The heating law in the mid-plane, `σ_z(τ, 0) = 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441`
 /// (module documentation).
@@ -157,7 +159,7 @@ impl SubDiscHeights {
     /// Each sub-disc's mid-plane dispersion as its profile has it: the heating law's times the
     /// galaxy's dispersion scale.
     ///
-    /// With the law's `1 + 0.20 |z| ÷ kpc` up to 2.4 kpc, the vertical Jeans equation on the
+    /// With the law's `1 + 0.20 |z| ÷ kpc` up to 2.0 kpc, the vertical Jeans equation on the
     /// sub-disc's own profile returns it (plan 08, Design note 3).
     #[must_use]
     pub fn scaled_dispersions(&self) -> [KilometresPerSecond; 5] {
@@ -352,7 +354,7 @@ mod tests {
         for profile in [&profiles.young, &profiles.thick, &profiles.nuclear] {
             assert!((profile.gradient_per_kpc() / gamma - 1.0).abs() < 1e-15);
             let reach = profile.gradient_reach().value();
-            assert!((reach / (2.4 * LIGHT_YEARS_PER_KILOPARSEC) - 1.0).abs() < 1e-15);
+            assert!((reach / (2.0 * LIGHT_YEARS_PER_KILOPARSEC) - 1.0).abs() < 1e-15);
         }
     }
 }

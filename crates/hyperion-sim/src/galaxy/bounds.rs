@@ -53,7 +53,7 @@
 //! of their exponent's terms passes about 710: the bar far out along x (from about 6.5
 //! half-lengths) or across it (from about 38 widths), the young disc far above the plane (from
 //! about 12,000–24,000 ly, 80–130 of its effective heights) and, in a few galaxies, the youngest
-//! sub-disc near the cube's top. The discs are isothermal above 2.4 kpc and fall there only as the
+//! sub-disc near the cube's top. The discs are isothermal above 2.0 kpc and fall there only as the
 //! potential rises, so the nuclear disc, whose exponent reaches about 110 at the cube's edge, no
 //! longer gets there. All are monotone bit for bit. The bulge, the one envelope that rises by a
 //! last bit, stays above 10⁻⁶⁵ of its centre everywhere in the cube (tested), and the halo's

@@ -1,4 +1,4 @@
-# generator_version = 8
+# generator_version = 9
 tag 0x0001 event.selftest
 
 seed 000000000000002a subject 0228c38627ff0007 key = 0x55d322e6a2133df8 0x79884a51c3053ade

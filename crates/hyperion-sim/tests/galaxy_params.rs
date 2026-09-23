@@ -181,8 +181,34 @@ fn the_milky_way_fixture_has_the_plan_values() {
     );
     assert_relative("halo", p.population_share(Population::Halo), 0.01, 0.0);
     assert_relative("τ", p.sfh_timescale().value(), 7.0 * GYR, 0.0);
-    assert_relative("thin length", p.thin_disc().length().value(), 8_480.0, 0.0);
-    assert_relative("thin height", p.thin_disc().height().value(), 1_000.0, 0.0);
+    // P02.T11's tuning (plan 02, rulings 1, 3 and 8 of 2026-09-22, and Risks, R22): the thin disc
+    // at Bovy and Rix's 2.15 kpc and an effective height of 1,100 ly, the thick disc at the ends of
+    // its drawn ratios that keep it near 2.0 × 0.9 kpc, the young disc at the 285 ly its velocity
+    // floor implies, and the gas raised with its height by 7 ÷ 4.
+    assert_relative("thin length", p.thin_disc().length().value(), 7_000.0, 0.0);
+    assert_relative("thin height", p.thin_disc().height().value(), 1_100.0, 0.0);
+    assert_relative(
+        "thick length",
+        p.thick_disc().length().value(),
+        6_300.0,
+        1e-15,
+    );
+    assert_relative(
+        "thick height",
+        p.thick_disc().height().value(),
+        2_970.0,
+        1e-15,
+    );
+    assert_relative("young height", p.young_disc().height().value(), 285.0, 0.0);
+    let thin_mass = p.population_mass(Population::YoungThinDisc).value()
+        + p.population_mass(Population::OldThinDisc).value();
+    assert_relative(
+        "gas",
+        p.gas_disc().mass().value(),
+        0.2625 * thin_mass,
+        1e-15,
+    );
+    assert_relative("gas height", p.gas_disc().height().value(), 700.0, 0.0);
     let bulge = p.bulge();
     assert_relative("bulge a", bulge.scale_x().value(), 2_280.0, 0.0);
     assert_relative("bulge b", bulge.scale_y().value(), 1_440.0, 1e-15);
@@ -190,7 +216,7 @@ fn the_milky_way_fixture_has_the_plan_values() {
     assert_relative("boxiness", bulge.boxiness(), 3.5, 0.0);
     assert_relative("bar", p.bar().half_length().value(), 16_000.0, 0.0);
     assert_relative("bar height", p.bar().height().value(), 590.0, 0.0);
-    assert_relative("corotation", p.bar().corotation_ratio(), 1.2, 0.0);
+    assert_relative("corotation", p.bar().corotation_ratio(), 1.24, 0.0);
     assert_relative(
         "nuclear length",
         p.nuclear_disc().length().value(),
@@ -212,7 +238,7 @@ fn the_milky_way_fixture_has_the_plan_values() {
     );
     assert_relative("f★", p.dark_halo().f_star(), 0.32, 0.0);
     // The Milky Way's own offset from M–σ, which makes its black hole Sgr A*'s mass.
-    assert_same_bits(p.black_hole().scatter().value(), -0.421);
+    assert_same_bits(p.black_hole().scatter().value(), -0.514);
     // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "about
     // 0.55–0.59 M☉ under the default, Chabrier's system function" (brainstorm, "Galaxy
     // parameters").
@@ -294,7 +320,7 @@ fn out_of_range_cases() -> Vec<Case> {
         ("thin.mean_height", |b| {
             b.thin_mean_height(LightYears::new(1_151.0))
         }),
-        ("young.height", |b| b.young_height(LightYears::new(129.0))),
+        ("young.height", |b| b.young_height(LightYears::new(224.0))),
         ("thick.length_ratio", |b| b.thick_length_ratio(0.95)),
         ("thick.height_ratio", |b| b.thick_height_ratio(2.6)),
         ("bulge.length", |b| b.bulge_length(LightYears::new(3_001.0))),
@@ -329,7 +355,7 @@ fn out_of_range_cases() -> Vec<Case> {
         }),
         ("arms.young_fraction", |b| b.arm_young_fraction(0.69)),
         ("arms.old_amplitude", |b| b.arm_old_amplitude(0.31)),
-        ("gas.mass_fraction", |b| b.gas_mass_fraction(0.21)),
+        ("gas.mass_fraction", |b| b.gas_mass_fraction(0.36)),
         ("gas.length_ratio", |b| b.gas_length_ratio(1.4)),
         ("dark.f_star", |b| b.dark_f_star(0.46)),
         ("dark.concentration.scatter", |b| {

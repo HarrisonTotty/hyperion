@@ -1176,7 +1176,7 @@ fn edge_params(name: &str) -> GalaxyParams {
             .arm_young_fraction(0.9)
             .arm_old_amplitude(0.3)
             .bar_half_length(LightYears::new(10_000.0))
-            .young_height(LightYears::new(130.0)),
+            .young_height(LightYears::new(225.0)),
         "edge_tight_four" => builder
             .arm_count(ArmCount::Four)
             .arm_pitch(Degrees::new(10.0))
@@ -1184,7 +1184,7 @@ fn edge_params(name: &str) -> GalaxyParams {
             .arm_young_fraction(0.9)
             .arm_old_amplitude(0.3)
             .bar_half_length(LightYears::new(10_000.0))
-            .young_height(LightYears::new(130.0)),
+            .young_height(LightYears::new(225.0)),
         "edge_dense_centre" => builder
             .bulge_length(LightYears::new(1_700.0))
             .bulge_b_over_a(0.5)

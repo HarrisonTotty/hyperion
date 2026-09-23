@@ -321,17 +321,40 @@ mod tests {
         )
     }
 
+    /// A record's fields with the origin swapped for `O`, so that the test can measure what a wider
+    /// origin would cost: the compiler lays it out as it lays out [`SystemRecord`], which the test
+    /// checks with `O = SystemOrigin`.
+    #[expect(dead_code, reason = "only the layout is measured")]
+    struct RecordWith<O> {
+        id: SystemId,
+        epoch_position: GalacticPosition,
+        origin: O,
+        population: Population,
+        primary_initial_mass: SolarMasses,
+        age_at_epoch: Years,
+    }
+
+    /// An origin whose widest variant carries eight bytes at four-byte alignment.
+    #[expect(dead_code, reason = "only the layout is measured")]
+    enum OriginOfEightBytes {
+        Grid(ComponentId),
+        Wide(u32),
+    }
+
     #[test]
     fn record_is_copy_and_fits_eighty_bytes() {
-        // Plan 03, P03.T5.a: at most 80 bytes, with room for the origin to grow to the eight that
-        // plan 09's `FeatureMember(FeatureId)` needs.
+        // Plan 03, P03.T5.a: at most 80 bytes, with room for the origin to grow.
         let bytes = size_of::<SystemRecord>();
         assert!(bytes <= 80, "a record is {bytes} bytes");
         assert_eq!(size_of::<SystemOrigin>(), 1);
+        assert_eq!(size_of::<RecordWith<SystemOrigin>>(), bytes);
+        // Room for an origin of eight bytes at four-byte alignment, such as a tag and a `u32`. An
+        // eight-byte-aligned payload rounds the enum up to sixteen and the record to 88 bytes, and
+        // so does plan 01's `FeatureRef`, which is sixteen bytes in memory (plan 03, Risks).
+        let grown = size_of::<RecordWith<OriginOfEightBytes>>();
         assert!(
-            bytes + 8 - size_of::<SystemOrigin>() <= 80,
-            "an eight-byte origin would take a record to {} bytes",
-            bytes + 8 - size_of::<SystemOrigin>()
+            grown <= 80,
+            "an eight-byte origin takes a record to {grown} bytes"
         );
         let record = record_aged(&galaxy(), 1.0);
         let copy = record;

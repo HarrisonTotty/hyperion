@@ -278,10 +278,17 @@ pub struct GasDiscParams {
 }
 
 impl GasDiscParams {
-    /// The gas disc's scale height, 400 ly.
-    pub const HEIGHT: LightYears = LightYears::new(400.0);
+    /// The gas disc's scale height, 700 ly.
+    ///
+    /// The brainstorm's 400 ly times 7 ÷ 4, with the drawn mass fraction raised by the same factor,
+    /// so that plan 07's gas field reaches McKee, Parravano and Hollenbach's (2015, ApJ 814, 13)
+    /// measured column of 13.7 ± 1.6 M☉ pc⁻² at the Sun's radius from the 7.9 it gave, while the
+    /// mid-plane density — and so the in-plane extinction — stays where it was (plan 02, ruling 1 of
+    /// 2026-09-22). A real neutral layer carries its column well above 123 pc, which is what 400 ly
+    /// is.
+    pub const HEIGHT: LightYears = LightYears::new(700.0);
 
-    /// Its mass, 10–20% of the thin disc's stellar mass.
+    /// Its mass, 17.5–35% of the thin disc's stellar mass ([`HEIGHT`](Self::HEIGHT)).
     #[must_use]
     pub fn mass(&self) -> SolarMasses {
         self.mass
@@ -474,12 +481,13 @@ impl GalaxyParams {
     /// The default mass function, Chabrier's system function with its branch above 1 M☉ scaled;
     /// M★ 6.0 × 10¹⁰ M☉ (Licquia and Newman 2015); shares thick 10%, bulge and bar 31% with the
     /// bar 30% of that (Bland-Hawthorn and Gerhard 2016; Portail et al. 2017), nuclear disc 1.75%
-    /// (Launhardt et al. 2002; Sormani et al. 2022), halo 1%; timescale 7 Gyr; thin disc 8,480 ly
-    /// long with an effective height of 1,000 ly (Bland-Hawthorn and Gerhard 2016); bulge 2,280 × 1,440
-    /// × 820 ly, boxiness 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly
-    /// (Wegg, Gerhard and Portail 2015), corotation ratio 1.2; nuclear disc 290 ly by 93 ly
+    /// (Launhardt et al. 2002; Sormani et al. 2022), halo 1%; timescale 7 Gyr; thin disc 7,000 ly
+    /// long with an effective height of 1,100 ly (Bovy and Rix 2013; Bland-Hawthorn and Gerhard
+    /// 2016; plan 02, ruling 8), thick disc 0.9 and 2.7 times that, young disc 285 ly (ruling 3),
+    /// gas 26.25% of the thin disc's mass (ruling 1); bulge 2,280 × 1,440 × 820 ly, boxiness 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly
+    /// (Wegg, Gerhard and Portail 2015), corotation ratio 1.24 (Portail et al. 2017); nuclear disc 290 ly by 93 ly
     /// (Sormani et al. 2022); four arms at 12°; f★ 0.32, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
-    /// McMillan (2017); the black hole 0.421 dex below the M–σ relation, which makes it the 4.30 ×
+    /// McMillan (2017); the black hole 0.514 dex below the M–σ relation, which makes it the 4.30 ×
     /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013); the halo's inner
     /// slopes 2.5, and the dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0
     /// (Pila-Díez et al. 2015; Medina et al. 2024). Values without a measurement take the middle
@@ -561,7 +569,7 @@ impl GalaxyParams {
         &self.thin_disc
     }
 
-    /// The young thin disc: the thin disc's scale length and an effective height of 130–200 ly.
+    /// The young thin disc: the thin disc's scale length and an effective height of 225–345 ly.
     #[must_use]
     pub fn young_disc(&self) -> &DiscParams {
         &self.young_disc
@@ -737,7 +745,7 @@ impl GalaxyParamsBuilder {
         thin_length_scatter(Dex) => thin_length = Inputs::coupled;
         /// The old thin disc's effective height, 850–1,150 ly.
         thin_mean_height(LightYears) => thin_mean_height = LightYears::value;
-        /// The young disc's effective height, 130–200 ly.
+        /// The young disc's effective height, 225–345 ly.
         young_height(LightYears) => young_height = LightYears::value;
         /// The thick disc's length over the thin disc's, 0.7–0.9.
         thick_length_ratio(f64) => thick_length_ratio;

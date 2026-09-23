@@ -946,3 +946,38 @@ Reserved so that later plans move no star they need not:
     ratio; a test runs every order of five candidates. For T12.b: `PotentialTables::tidal_radius` is
     zero at the exact centre, which `FrameCandidate::new` refuses, so `frame_at` must skip that
     point or leave it to plan 09's rule.
+- **T1–T7 validated adversarially (round 5, at 13fee1d, `GENERATOR_VERSION` 8).** Absolute
+  figures below are the version-8 fixture's and move with plan 02's round-5 rulings; ratios, word
+  counts and bit-identity do not.
+  - **Design note 6's figures, version 8:** the fullest layer-A cell expects 6,911 candidates under
+    the default and 8,642 under Kroupa's (the ratio, 1.2505, is the same at every seed), not about
+    6,000 and 7,500. With eight standard deviations, 7,576 of 65,536; B to E sit 45 to 900 times
+    under their capacity. Every layer's capacity is 128 systems per cubic light-year, so layer A
+    overflows at 184 systems per cubic light-year under the default and 168 under Kroupa's, and a
+    fixed 16-bit index would overflow layer E at 4.3 and 4.9: the brainstorm's 180, 170, 4 and 5.
+    The octant's bound dominated all of about 5.1 million cells swept over every octant, peaking at
+    0.99675 of it in the eight cells touching the origin. The builder's densest centre is refused at
+    layer A with a mean of 65,822. A new test sweeps cells in every octant against the octant's
+    bound: an 8 ly box at the origin in place of the octant had passed every test, goldens included.
+  - **The record's growth room is smaller than P03.T5.a says.** A record is 72 bytes. An origin
+    with an eight-byte-aligned payload rounds up to 16 bytes and the record to 88, and so does
+    plan 01's `FeatureRef`, which is 16 bytes in memory, so plan 09's `FeatureMember(FeatureId)`
+    as `FeatureId` is sketched does not fit the 80-byte cap. Only a payload of at most seven bytes
+    at four-byte alignment does. The size test's `bytes + 8 − 1 ≤ 80` ignored alignment. It now
+    measures a mirror of the record's fields. For the owner: pack `FeatureMember`'s payload, or
+    raise the cap to 88 bytes before plan 09.
+  - **`check_index_headroom` is called by plan 04's `GalaxyCache`** (`compute/galaxies.rs`), not by
+    the universe registry that Design note 6 and the third risk above name.
+  - **Tests that could not fail, now fixed.** Keying the cell stream by another word, swapping the
+    position's axes, taking the mark from word 1, crossing the mass and age tags, or padding the
+    bound by 10⁻³ each passed every T1–T7 test and failed only T8.d's golden. A test now rebuilds
+    every draw from Design notes 1–4 alone, opening the streams by hand, reading the words by
+    number and writing out the thresholds. `resolve_refuses_a_thinned_candidate` needed a thinning
+    in one layer-E cell, which about three cells in ten lack (1.2 a cell), so it now walks cells
+    until it has a dozen. `placement_order`'s order test compares records as `Debug` text, which
+    tells −0 from +0.
+  - **Re-derived:** words per candidate are 3 (position), 1 (mark), and 1 each for mass and age
+    when accepted. 2,846 records and 601 thinnings, rebuilt independently, agreed bit for bit.
+    `generate_cell`, `NoCache` (cold, and after the neighbouring cells in reverse order) and
+    `resolve` on a freshly built galaxy gave the same bits for 15 cells. The centre's layer-E cell
+    draws 294,948 candidates and keeps 138,146 systems, 9.5 MiB at 72 bytes each.
