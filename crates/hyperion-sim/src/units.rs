@@ -28,6 +28,10 @@ pub mod consts {
     /// definition (IAU), so that one light-year is exactly `c` × one year.
     pub const SECONDS_PER_JULIAN_YEAR: f64 = 31_557_600.0;
 
+    /// The day, s: 86,400 SI seconds, the unit in which orbital periods are quoted. The Julian
+    /// year is exactly 365.25 of them (IAU).
+    pub const SECONDS_PER_DAY: f64 = 86_400.0;
+
     /// Seconds in a million Julian years.
     pub const SECONDS_PER_MEGAYEAR: f64 = SECONDS_PER_JULIAN_YEAR * 1e6;
 
@@ -274,10 +278,16 @@ unit!(
     /// A duration in thousands of millions of Julian years, an edge unit.
     Gigayears
 );
+unit!(
+    /// A duration in days of 86,400 s, an edge unit: the unit of orbital periods in the
+    /// multiplicity surveys (plan 11).
+    Days
+);
 dimension!(Seconds;
     Years = consts::SECONDS_PER_JULIAN_YEAR,
     Megayears = consts::SECONDS_PER_MEGAYEAR,
     Gigayears = consts::SECONDS_PER_GIGAYEAR,
+    Days = consts::SECONDS_PER_DAY,
 );
 
 unit!(
@@ -521,6 +531,8 @@ mod tests {
             round_trip!(Seconds, Years, value);
             round_trip!(Seconds, Megayears, value);
             round_trip!(Seconds, Gigayears, value);
+            round_trip!(Seconds, Days, value);
+            round_trip!(Days, Years, value);
             round_trip!(Kilograms, SolarMasses, value);
             round_trip!(Kilograms, JupiterMasses, value);
             round_trip!(Kilograms, EarthMasses, value);
@@ -548,6 +560,8 @@ mod tests {
             1e-15,
         );
         assert_relative(Years::from(Gigayears::new(13.8)).value(), 1.38e10, 1e-15);
+        assert_same_bits(Days::from(Years::new(1.0)).value(), 365.25);
+        assert_same_bits(Seconds::from(Days::new(1.0)).value(), 86_400.0);
     }
 
     #[test]
