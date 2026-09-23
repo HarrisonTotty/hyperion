@@ -7,7 +7,9 @@
 //! each added by the task that first uses it. The disc's own figures, which are measurements with
 //! their sources beside the physics that uses them, live in [`disc`](super::disc).
 
-use crate::units::JupiterMasses;
+use crate::planetary::derive::irradiation::BondAlbedo;
+use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
+use crate::units::{EarthMasses, Gigayears, JupiterMasses};
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
 /// bound: 0.4895 of the planet's Hill radius (design note 14).
@@ -61,3 +63,39 @@ pub const SPACING_GIANT_MASS: JupiterMasses = JupiterMasses::new(0.1);
 /// mutual Hill radii can never meet. Applied at closest approach it makes "no overlapping orbits"
 /// a theorem of the generator.
 pub const HILL_STABLE_GAP: f64 = 3.464_101_615_137_754_6;
+
+/// The lightest core that holds a hydrogen and helium envelope in the composition solve: 1.5 M⊕
+/// (P14.T11.c).
+///
+/// A body lighter than this whose radius lies above its dry curve is clamped to that curve
+/// instead of given an envelope, and a heavier one is never given so much envelope that its core
+/// falls below it. Plan 14 states the floor for bodies formed inside the snow line; the solve
+/// applies it beyond the snow line as well, to icy cores, where the plan is silent.
+pub const ENVELOPE_CORE_FLOOR: EarthMasses = EarthMasses::new(1.5);
+
+/// The most water a body formed inside the snow line may hold: 0.1% of its mass (P14.T11.c).
+///
+/// A small body whose radius lies above the rock curve is clamped to rock with this much water at
+/// most, so that nothing formed inside the snow line comes out as a water world (design note 8).
+pub const INNER_WATER_CAP: f64 = 0.001;
+
+/// The most water a body formed beyond the snow line may hold: the share of water ice in the
+/// disc's solids there, 0.571 ÷ (0.489 + 0.571) = 53.9% (P14.T11.c).
+///
+/// This is Lodders's (2003, Table 11) ice-to-rock ratio of the disc of [`disc`](super::disc), so a
+/// body cannot hold more water than the solids it grew from. It lies inside the 1/2 (rock to water
+/// ice) to 2/3 (rock to all ices) that Zeng et al. (2019, Materials and Methods) take for icy
+/// cores. A larger radius takes an envelope over a core of this composition.
+pub const OUTER_WATER_CAP: f64 =
+    WATER_ICE_MASS_FRACTION / (ROCK_MASS_FRACTION + WATER_ICE_MASS_FRACTION);
+
+/// The age at which the composition solve reads a body's radius: 5 Gyr (P14.T11.c).
+///
+/// Chen and Kipping's (2017) relation describes the planets observed today, mostly about stars of
+/// several Gyr, so the drawn radius is taken as the body's radius at this age, the representative
+/// age of Lopez and Fortney's (2014) models, and the envelope fraction solved there is the body's
+/// primordial one. The envelope's radius at other ages follows from its thermal evolution.
+pub const COMPOSITION_REFERENCE_AGE: Gigayears = Gigayears::new(5.0);
+
+/// The Bond albedo of every body until the atmosphere loop of P14.T13 closes: 0.3 (P14.T12.a).
+pub const BOND_ALBEDO_BEFORE_ATMOSPHERES: BondAlbedo = BondAlbedo::from_fraction(0.3);

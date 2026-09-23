@@ -103,6 +103,32 @@ pub mod consts {
 
     /// Radians in one degree, π ÷ 180.
     pub const RADIANS_PER_DEGREE: f64 = core::f64::consts::PI / 180.0;
+
+    /// The Earth radius that planetary radii are quoted in, m: the volumetric mean radius,
+    /// 6,371.000 km (NASA Earth Fact Sheet; IUGG's R₁ is 6,371.0088 km).
+    ///
+    /// It is the unit of Zeng, Sasselov and Jacobsen's (2016, ApJ 819, 127) mass–radius table
+    /// (their footnote 3, R⊕ = 6.371 × 10⁶ m). Chen and Kipping (2017) and Lopez and Fortney (2014)
+    /// quote radii in R⊕ without saying which; the 0.11% between the mean and IAU 2015's nominal
+    /// equatorial radius (6,378.1 km) is below the precision of either.
+    pub const EARTH_RADIUS_M: f64 = 6.371e6;
+
+    /// The nominal equatorial radius of Jupiter, m (IAU 2015 Resolution B3: 7.1492 × 10⁷ m), the
+    /// unit of giant-planet radii such as Fortney, Marley and Barnes's (2007, ApJ 659, 1661).
+    pub const JUPITER_RADIUS_M: f64 = 7.1492e7;
+
+    /// The Stefan–Boltzmann constant σ, W m⁻² K⁻⁴: 5.670 374 419 × 10⁻⁸ (CODATA 2018 and 2022;
+    /// exact in the 2019 SI, which fixes h, c and k, to the digits given).
+    pub const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
+
+    /// The irradiance at 1 au from the nominal Sun, W m⁻²: L☉ ÷ 4π au² = 1,361.2 W m⁻², the unit
+    /// [`EarthFluxes`](super::EarthFluxes) counts in.
+    ///
+    /// IAU 2015 Resolution B3 defines the nominal total solar irradiance as 1,361 W m⁻² and derives
+    /// the nominal luminosity 3.828 × 10²⁶ W from it, rounded; this constant runs the other way, so
+    /// that a host of L solar luminosities gives exactly L ÷ d² of it at d au.
+    pub const SOLAR_CONSTANT_W_PER_M2: f64 =
+        SOLAR_LUMINOSITY_W / (4.0 * core::f64::consts::PI * METRES_PER_AU * METRES_PER_AU);
 }
 
 /// Defines a unit newtype over `f64`.
@@ -254,12 +280,23 @@ unit!(
     /// A length in nominal solar radii, an edge unit.
     SolarRadii
 );
+unit!(
+    /// A length in mean Earth radii ([`consts::EARTH_RADIUS_M`]), an edge unit: the unit of
+    /// planetary radii in the mass–radius relations (plan 14).
+    EarthRadii
+);
+unit!(
+    /// A length in nominal equatorial Jupiter radii ([`consts::JUPITER_RADIUS_M`]), an edge unit.
+    JupiterRadii
+);
 dimension!(Metres;
     LightYears = consts::METRES_PER_LIGHT_YEAR,
     Parsecs = consts::METRES_PER_PARSEC,
     Kiloparsecs = consts::METRES_PER_KILOPARSEC,
     AstronomicalUnits = consts::METRES_PER_AU,
     SolarRadii = consts::SOLAR_RADIUS_M,
+    EarthRadii = consts::EARTH_RADIUS_M,
+    JupiterRadii = consts::JUPITER_RADIUS_M,
 );
 
 unit!(
@@ -479,6 +516,19 @@ unit!(
     /// (plan 14). One gram per cubic centimetre is 1,000 kg m⁻³.
     KilogramsPerCubicMetre
 );
+unit!(
+    /// An irradiance, the power arriving per unit area, in watts per square metre: the SI unit used
+    /// inside the sim for the light a body receives from its hosts (plan 14).
+    WattsPerSquareMetre
+);
+unit!(
+    /// An irradiance in units of the flux at 1 au from the nominal Sun
+    /// ([`consts::SOLAR_CONSTANT_W_PER_M2`], 1,361.2 W m⁻²), an edge unit: the S⊕ or F⊕ that
+    /// habitable-zone fluxes (Kopparapu et al. 2013) and the envelope tables (Lopez and Fortney
+    /// 2014) are quoted in. A host of L solar luminosities gives L ÷ d² of it at d au.
+    EarthFluxes
+);
+dimension!(WattsPerSquareMetre; EarthFluxes = consts::SOLAR_CONSTANT_W_PER_M2);
 
 #[cfg(test)]
 mod tests {
@@ -633,6 +683,31 @@ mod tests {
             GM_SUN,
             1e-15,
         );
+    }
+
+    #[test]
+    fn planetary_radii_and_irradiances_convert_through_their_si_units() {
+        for value in [1.0, 3.7, 1e-6, 12_345.678] {
+            round_trip!(Metres, EarthRadii, value);
+            round_trip!(Metres, JupiterRadii, value);
+            round_trip!(EarthRadii, JupiterRadii, value);
+            round_trip!(WattsPerSquareMetre, EarthFluxes, value);
+        }
+        // Jupiter's nominal equatorial radius is 11.2 mean Earth radii.
+        assert_relative(
+            EarthRadii::from(JupiterRadii::new(1.0)).value(),
+            11.221_5,
+            1e-5,
+        );
+        // L☉ ÷ 4π au² rounds to IAU 2015's nominal total solar irradiance, 1,361 W m⁻².
+        assert!((SOLAR_CONSTANT_W_PER_M2 - 1_361.0).abs() < 0.5);
+        assert_relative(SOLAR_CONSTANT_W_PER_M2, 1_361.166_5, 1e-6);
+        // σ from its defining constants, 2π⁵k⁴ ÷ 15h³c², with h exact in the 2019 SI.
+        let h = 6.626_070_15e-34;
+        let pi = core::f64::consts::PI;
+        let sigma = 2.0 * crate::math::powi(pi, 5) * crate::math::powi(BOLTZMANN_CONSTANT, 4)
+            / (15.0 * crate::math::powi(h, 3) * SPEED_OF_LIGHT * SPEED_OF_LIGHT);
+        assert_relative(STEFAN_BOLTZMANN, sigma, 1e-9);
     }
 
     #[test]

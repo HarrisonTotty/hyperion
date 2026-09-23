@@ -2373,3 +2373,81 @@ it:
   - **The fixture.** The test reads the golden through Vite's `?raw` import, since the renderer may not import `node:*`, and checks all 32 lines. The worst relative disagreement is 3.0 × 10⁻¹⁶ in position (`state[26]`) and 2.1 × 10⁻¹⁶ in velocity (`state[13]`), and 30 of 32 positions and 29 of 32 velocities are the server's bits.
   - **Which lines need the reduction.** A float of seconds times the mean motion fails two lines: `state[22]` by 1.1 × 10⁻⁷ and `state[23]` by 1.5 × 10⁻⁸, the white-dwarf pairs a thousand years after and before the epoch. The hot Jupiter (`state[07]`) is off by only 3.8 × 10⁻¹¹ that way, as it is with the seconds divided by the period or reduced as a float. So the bullet above should read "the two white-dwarf binaries" for "a hot Jupiter and a white-dwarf binary", as should the fixture's header.
   - **Ruling 35.6 in T40.a.** A `reference` path and every annulus edge and belt tick are drawn in `--text-muted`, through a new `ColourToken`, `textMuted`, and `--line` is left to the grid and the plane's rings. A new test holds that: the `--line` ops of a scene with paths and annuli are those of the same plane without them. This supersedes the `--line` of the T40.a bullet above. A stale view draws both roles in `--text-muted`, as it draws every mark. **For the orchestrator to rule:** `--text` against `--text-muted` is only 1.88:1, both 1 px hairlines, so the selected orbit now stands out far less than it did against `--line`, and not at all when stale; the reticle still marks the selection by shape. T42 could draw the selected orbit wider (2 px), which T38.a's "hairline" does not allow as written. The UX review also notes the guide's reference table asks for "faint … orbit lines", which 6:1 is not.
+- **Deviations in T11.a–c and T12, as built (`derive`, round 7).**
+  - _Files and API._ `planetary/derive/{radius, envelope, composition, irradiation, habitable_zone}.rs`;
+    `envelope.rs` is added beside T11's two files for the envelope model and its tables.
+    `radius_chen_kipping(EarthMasses, UnitUniform) -> EarthRadii`, with `MassRadiusClass`;
+    `radius_zeng(EarthMasses, CoreComposition) -> EarthRadii`, a `CoreComposition` being a core
+    mass fraction and a water fraction (`IRON`, `EARTH_LIKE`, `ROCK`, `HALF_WATER`, `WATER`);
+    `envelope::radius_with_envelope(mass, core, fraction, EarthFluxes, Gigayears)`;
+    `composition(mass, radius, SnowLineSide, EarthFluxes) -> Result<SolvedComposition,
+SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock, water and
+    envelope (the name `BulkComposition` is left to T23's hook, which holds these), with `core()`,
+    `envelope_fraction()`, `radius()` and `adjustment()`; `HostLight::new(L, T_eff, R)` (ruling
+    34), `Illumination::new(host, a, e)` with its `flux()`, `total_flux`, `BondAlbedo`,
+    `equilibrium_temperature(EarthFluxes, BondAlbedo)`, `with_internal_heat`;
+    `habitable_zone(L, T_eff)` and `habitable_zone_of(orbited, companions)`, a `HabitableZone`
+    with the five limits, `conservative()`, `optimistic()` and `extrapolated()`. `units` gains
+    `EarthRadii` (the mean 6,371 km, Zeng et al.'s unit), `JupiterRadii`, `WattsPerSquareMetre`
+    and `EarthFluxes` (L☉ ÷ 4π au²), and `consts` σ and those radii; `params.rs` gains
+    `ENVELOPE_CORE_FLOOR`, `INNER_WATER_CAP`, `OUTER_WATER_CAP`, `COMPOSITION_REFERENCE_AGE` and
+    `BOND_ALBEDO_BEFORE_ATMOSPHERES`. New goldens `planetary/derive_radius` and
+    `planetary/derive_irradiation`, blessed at version 11; no existing golden moved.
+  - _T11.a._ Chen and Kipping's Table 1 is confirmed as the plan gives it (C = 1.008 R⊕; S =
+    0.2790, 0.589, −0.044, 0.881; transitions 2.04 M⊕, 0.414 M_J, 0.0800 M☉), with σ = 4.03,
+    14.6, 7.37 and 4.43%, which their eq. 3 makes dex of log₁₀ R. The median at 1 M_J is 13.77 R⊕,
+    1.23 R_J, not the plan's 1.0 R_J to 10%: their Jovian segment is fitted mostly to irradiated
+    hot Jupiters. The test asserts the paper's figure, and Jupiter's radius is T11.d's. Away from
+    the median the radius steps at the transitions, since each segment has its own σ, as in the
+    paper.
+  - _T11.b._ Zeng et al.'s (1.07 − 0.21 CMF) M^(1/3.7) holds only for 1–8 M⊕ and CMF 0–0.4, has
+    no iron curve, and misses Mars by 6% and Mercury by 10%, so their Table 2 (0.125–32 M⊕; 100,
+    50, 30, 25, 20% iron, rock, 25, 50, 100% water) is used, log–log in mass and linear in CMF; it
+    meets the power law to 0.025 R⊕ inside its range. Water is Zeng et al.'s (2019) f = 1 + 0.55x
+    − 0.14x², applied as a blend towards the pure-water curve, on an Earth-like core. The envelope
+    table is Lopez and Fortney's (2014) Tables 2–4 (solar metallicity; 1–20 M⊕, 0.01–20%, 0.1,
+    10 and 1,000 F⊕, 0.1, 1 and 10 Gyr), with R = R_Zeng(core) + (R_LF − M_core^¼), their own
+    decomposition (it reproduces their table to 3.2%). It is read in flux, their axis, not T_eq,
+    which would bring in an albedo their models already contain, and it keeps their age axis,
+    which the plan's small table lacked. Beyond 20% the radius bridges, log–log in the envelope
+    fraction, to Fortney, Marley and Barnes's (2007) coreless radius (Tables 2–4): this module's
+    construction, within 10% of their cored models. On an icy core the thickness is laid on
+    that core's own radius; their models have Earth-like cores, and they put the error of varying
+    the core's iron alone at about 10% (their §3.1). Where two printed entries are equal the
+    radius can fall by up to 1.1 × 10⁻⁵ of itself as the envelope grows; the solve's bisection
+    needs only continuity.
+  - _T11.c._ `composition` takes the flux, not `t_eq`, and returns the radius it keeps: iron
+    raises a radius, the rock and ice clamps and the envelope limit lower one
+    (`RadiusAdjustment`). The envelope is solved at 5 Gyr, Lopez and Fortney's representative age,
+    since Chen and Kipping describe mature planets. Inside the snow line the rules are the plan's,
+    the envelope on an Earth-like core (theirs), so the composition steps from pure rock to 32.5%
+    iron at the rock curve while the radius stays continuous. Beyond it, where the plan is silent:
+    above the Earth-like curve, water on an Earth-like core up to 53.9%, the ice share of the
+    disc's solids (Lodders 2003, Table 11, as in `disc`), then an envelope on that core. The 1.5 M⊕
+    floor applies on both sides, and as a floor on the core (f ≤ 1 − 1.5 M⊕ ÷ M). From 0.414 M_J
+    `composition` returns `SolveCompositionError::GiantPlanet`, the seam for T11.d. Measured:
+    Mercury CMF 0.708, Venus 0.288, Earth 0.323, Mars 0.216; envelopes of 8.2% for Uranus, 6.4%
+    for Neptune and 71% for Saturn (about 74% by Fortney et al.'s 25 M⊕ of heavy elements).
+  - _T12._ T_eq is computed from the flux, so that fluxes add, and equals the plan's
+    T★ √(R★ ÷ 2a) form to 10⁻⁴ for the nominal Sun. Measured: Earth 255.1 K (NASA's current Bond
+    albedo 0.294), Venus 229.1 K at the plan's A = 0.76 (226.6 K at NASA's 0.77), Mars 210.1 K,
+    Jupiter 109.9 K. Kopparapu et al.'s coefficients are the erratum's Table 3, checked on the
+    erratum (ApJ 770, 82): the Sun's zone is 0.993–1.690 au conservative (moist to maximum
+    greenhouse, the paper's §5) and 0.751–1.767 au optimistic. The erratum's own Table 1 prints
+    1.67 and 0.97 au for the maximum and runaway greenhouse, where its coefficients give 1.690
+    and 0.982. A limit is +∞ where companions alone give more than its flux, and zero about a
+    dark host. The fit is for main-sequence stars, and about a giant it is applied through T_eff
+    alone, which is all it reads; `extrapolated` flags only a temperature outside it. The track test is written against a documented sequence of (L, T_eff) at 25 ages
+    from this crate's `stellar::sse` phases (1 M☉, Z = 0.02, the mass held fixed), since the
+    integrator is not merged; it should be rerun on the integrator's track when P06.T10.c–e lands.
+  - _For the orchestrator to rule._ (1) Chen and Kipping's scatter meets the solve's clamps
+    (measured over 999 quantiles at 10 F⊕): inside the snow line 1.4% of 1 M⊕ bodies are raised
+    to pure iron, 30% come out over 50% iron and 27% are clamped to rock; just above 2.04 M⊕,
+    where σ jumps from 0.040 to 0.146 dex, 25% are raised to pure iron (15% at 3 M⊕, 6% at 5
+    M⊕); at 100 M⊕ 56% are lowered to the envelope limit. Super-Mercuries so common contradict
+    the CMF of 0.26 ± 0.07 Zeng et al. (2016) find. A remedy that changes no draw: T16 maps the
+    quantile onto the part of Chen and Kipping's distribution that the curves can hold (a
+    truncated normal), or T11.a narrows σ for dry bodies inside their curves. (2) The envelope
+    bridge above 20%, and the 5 Gyr reference age. (3) The outer water cap at the disc's ice share,
+    and the 1.5 M⊕ floor beyond the snow line. (4) An Earth-like core under an inner envelope (a
+    step in composition at the rock curve) rather than pure rock (continuous, but iron-free).

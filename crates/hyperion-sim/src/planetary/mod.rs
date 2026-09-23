@@ -15,8 +15,9 @@
 //!   [`BodyId`](crate::id::BodyId) (design note 3), decodable without generating anything.
 //! - [`error`]: the errors of encoding, decoding and resolving a body.
 //! - [`disc`]: the protoplanetary disc of one orbit host, its budget and ruler (design note 5).
-//! - [`derive`](mod@derive): the derivation of a body's properties; so far its limits (Roche,
-//!   Hill and satellite stability, P14.T15).
+//! - [`derive`](mod@derive): the derivation of a body's properties; so far its radius and
+//!   composition (P14.T11.a–c), irradiation and habitable zone (T12), and limits (Roche, Hill and
+//!   satellite stability, T15).
 //! - [`placement`]: placing planets; so far the Hill-spacing primitives (P14.T6.a).
 //! - [`params`]: the parameters that belong to the generator version, as named constants.
 //! - [`context`], [`system`] and [`record`]: what the stage reads from the stages above, the
