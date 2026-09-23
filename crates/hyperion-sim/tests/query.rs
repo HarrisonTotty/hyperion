@@ -26,8 +26,8 @@ use hyperion_sim::galaxy::placement::{
     CellCache, CellKey, Existence, NoCache, SystemOrigin, SystemRecord, generate_cell, resolve,
 };
 use hyperion_sim::galaxy::query::{
-    Census, CensusStop, LayerCounts, LayerSet, MassFloor, QuerySphere, RangeQuery, RangeResult,
-    SystemHit, SystemSource, cells_in_sphere, count_cells_in_sphere, decide_census,
+    Census, CensusStop, LayerCounts, LayerSet, MassFloor, PAD_SPEED, QuerySphere, RangeQuery,
+    RangeResult, SystemHit, SystemSource, cells_in_sphere, count_cells_in_sphere, decide_census,
     expected_counts, pad_for, pad_speed, position_at, range_query,
 };
 use hyperion_sim::galaxy::{Galaxy, Population};
@@ -294,7 +294,32 @@ fn a_query_at_the_edges_of_the_clock_window_still_finds_its_systems() {
             result.stats().padded_radius().value() > 20.0,
             "the sphere was not padded at {years} yr"
         );
+        // Nothing moves until plan 08, so no system can show whether a layer was walked with its
+        // pad; the cells it visited can. Each layer is walked over its own padded sphere, and a
+        // walk that dropped the pad passed every other check here when it was tried in validation.
+        let padded_cells: u64 = [Layer::E, Layer::D, Layer::C, Layer::B, Layer::A]
+            .into_iter()
+            .map(|layer| {
+                let pad = pad_for(t, pad_speed(layer));
+                let sphere = QuerySphere::new(centre, LightYears::new(20.0), t, pad)
+                    .expect("a 20 ly sphere with a pad of a few light-years");
+                count_cells_in_sphere(layer, &sphere)
+            })
+            .sum();
+        assert_eq!(
+            result.stats().cells_visited(),
+            padded_cells,
+            "at {years} yr the walk did not cover each layer's padded sphere"
+        );
         assert!(result.stats().cells_visited() >= at_epoch.stats().cells_visited());
+        if years.abs() == 1_000 {
+            // 3.3 ly of pad on 20 ly reaches cells the epoch's sphere does not.
+            assert!(
+                result.stats().cells_visited() > at_epoch.stats().cells_visited(),
+                "a pad of {:?} added no cell at {years} yr",
+                pad_for(t, PAD_SPEED)
+            );
+        }
     }
 }
 

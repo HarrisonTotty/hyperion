@@ -24,7 +24,7 @@ use crate::galaxy::query::{
 };
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
-use crate::time::UniverseTime;
+use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, Metres, SolarMasses};
 
 /// How much smaller a rival's ratio of distance to tidal radius must be before it takes the ship
@@ -53,6 +53,28 @@ impl fmt::Display for BuildFrameCandidateError {
 }
 
 impl Error for BuildFrameCandidateError {}
+
+/// [`frame_at`] was asked about a time it cannot answer for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FindFrameError {
+    /// The time lies outside the [`ClockWindow`], ±1,000 Julian years about the epoch, where
+    /// present positions are guaranteed (plan 03, Design note 12). The search pads each layer's
+    /// sphere by the farthest a system can drift since the epoch, so a time far outside the window
+    /// would walk a sphere hundreds or millions of light-years across.
+    TimeOutsideClockWindow(UniverseTime),
+}
+
+impl fmt::Display for FindFrameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimeOutsideClockWindow(t) => {
+                write!(f, "the frame time {t} lies outside the clock window")
+            }
+        }
+    }
+}
+
+impl Error for FindFrameError {}
 
 /// A system near the ship, as the frame rule sees it: its ID, the ship's distance from it and its
 /// tidal radius, both at the time the frame is asked for.
@@ -219,6 +241,12 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// the tidal radius is zero at the centre, which is no sphere of influence, and plan 09's rule for
 /// the centre's own members ("the smaller radius wins") is layered on there.
 ///
+/// # Errors
+///
+/// [`FindFrameError::TimeOutsideClockWindow`] if `t` lies outside the
+/// [`ClockWindow`], as [`RangeQuery::build`](super::query::RangeQuery::build) refuses such a time
+/// for a range query: the pad for motion grows with |t|, so the walk would grow without bound.
+///
 /// # Panics
 ///
 /// If a system's drift would take it out of the addressable cube, which
@@ -244,15 +272,14 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
 /// let system = cell.first().expect("a 32 ly cell of the solar circle holds systems");
 /// let here = system.epoch_position();
-/// let frame = frame_at(&galaxy, &mut cache, &[], here, UniverseTime::EPOCH, None);
+/// let frame = frame_at(&galaxy, &mut cache, &[], here, UniverseTime::EPOCH, None)?;
 /// assert_eq!(frame, Some(system.id()));
 ///
 /// // Far above the disc no sphere of influence reaches, so the ship is in the galactic frame.
 /// let halo = GalacticPosition::from_light_years([0.0, 0.0, 60_000.0]).expect("in the cube");
-/// assert_eq!(frame_at(&galaxy, &mut cache, &[], &halo, UniverseTime::EPOCH, None), None);
-/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// assert_eq!(frame_at(&galaxy, &mut cache, &[], &halo, UniverseTime::EPOCH, None)?, None);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[must_use]
 pub fn frame_at<C: CellCache>(
     galaxy: &Galaxy,
     cache: &mut C,
@@ -260,7 +287,10 @@ pub fn frame_at<C: CellCache>(
     ship: &GalacticPosition,
     t: UniverseTime,
     current: Option<SystemId>,
-) -> Option<SystemId> {
+) -> Result<Option<SystemId>, FindFrameError> {
+    if !ClockWindow::contains(t) {
+        return Err(FindFrameError::TimeOutsideClockWindow(t));
+    }
     let mut candidates = Vec::new();
     let mut widest: Option<QuerySphere> = None;
     for spec in STELLAR_LAYERS {
@@ -307,7 +337,7 @@ pub fn frame_at<C: CellCache>(
         candidates.extend(hits.iter().filter_map(|hit| candidate_for(galaxy, hit)));
     }
 
-    select_frame(&candidates, current)
+    Ok(select_frame(&candidates, current))
 }
 
 /// The sphere of `layer` searched about `ship` at `t`, or `None` where the layer's largest sphere of
@@ -466,6 +496,35 @@ mod tests {
         assert_eq!(select_frame(&[], Some(id(1))), None);
         // On the sphere itself the ship is inside.
         assert_eq!(select_frame(&[at_ratio(5, 1.0)], None), Some(id(5)));
+    }
+
+    #[test]
+    fn the_hysteresis_boundary_is_inclusive_and_exact_ties_settle_once() {
+        // Ratios chosen exact in f64: the current frame at 1, a rival at (1 − 0.1) × 1 = 0.9.
+        let metres = |value| Metres::new(value);
+        let current = FrameCandidate::new(id(1), metres(1.0), metres(1.0)).unwrap();
+        let at_the_boundary = FrameCandidate::new(id(2), metres(0.9), metres(1.0)).unwrap();
+        let just_short =
+            FrameCandidate::new(id(3), metres(0.9_f64.next_up()), metres(1.0)).unwrap();
+        assert_eq!(
+            select_frame(&[current, at_the_boundary], Some(id(1))),
+            Some(id(2)),
+            "a rival exactly a tenth below takes over (Design note 16: ≤)"
+        );
+        assert_eq!(
+            select_frame(&[current, just_short], Some(id(1))),
+            Some(id(1)),
+            "a rival one ulp short of a tenth below does not"
+        );
+        // A ship on two systems at once: both ratios are 0, and 0 ≤ 0.9 × 0, so the literal rule
+        // hands the ship to the lower ID even from the higher, and then keeps it there.
+        let on_both = [
+            FrameCandidate::new(id(7), metres(0.0), metres(1.0)).unwrap(),
+            FrameCandidate::new(id(8), metres(0.0), metres(1.0)).unwrap(),
+        ];
+        assert_eq!(select_frame(&on_both, None), Some(id(7)));
+        assert_eq!(select_frame(&on_both, Some(id(8))), Some(id(7)));
+        assert_eq!(select_frame(&on_both, Some(id(7))), Some(id(7)));
     }
 
     #[test]

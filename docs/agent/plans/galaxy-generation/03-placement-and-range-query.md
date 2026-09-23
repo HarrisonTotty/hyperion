@@ -751,8 +751,9 @@ Acceptance: `just bench` runs them; results recorded.
   `galaxy/frame.rs`. Acceptance: `cargo test -p hyperion-sim --lib galaxy::frame` (a bare `frame`
   filter also runs plan 01's `coords::frames` tests).
 - **P03.T12.b `frame_at`.** For each stellar layer, search radius = 1.25 × the tidal radius of the
-  layer's largest mass at the ship's position (for `milky_way_like()` as built the tidal radii are
-  about 3.5 ly for A and 23 ly for E at the Sun-like point, from 4.4 ly for 1 M☉), walk that layer
+  layer's largest mass at the ship's position (for `milky_way_like()` at version 9 onward the tidal
+  radii are about 3.4 ly for A and 22.5 ly for E at the Sun-like point, from 4.2 ly for 1 M☉; they
+  were 3.5, 23 and 4.4 before P02.T11 retuned the fixture), walk that layer
   with `cells_in_sphere` with no census, evaluate positions
   at t through `position_at`, take each system's tidal radius from `PotentialTables::tidal_radius`
   at its own position, merge the sources' systems, and apply `select_frame`. Tests: a ship placed
@@ -981,3 +982,63 @@ Reserved so that later plans move no star they need not:
     `generate_cell`, `NoCache` (cold, and after the neighbouring cells in reverse order) and
     `resolve` on a freshly built galaxy gave the same bits for 15 cells. The centre's layer-E cell
     draws 294,948 candidates and keeps 138,146 systems, 9.5 MiB at 72 bytes each.
+- **T8–T12 validated adversarially (place lane, 2026-09-23).** No generator defect, and nothing
+  below moves generated output. Absolute figures are version 8's fixture; ratios, agreements and
+  bit-identity are not.
+  - _T8.a's recorded agreement was the wrong statistic._ "0.02–1.3% in every block, layer and seed"
+    does not hold. Recounted by position (each block and a one-cell border generated) against an
+    independent two-point Gauss–Legendre rule on quarter-cells, formed from `densities` ×
+    `component_share`, the 100 block counts deviate by 0.008–8.4%. That spread is Poisson: the
+    layer-A and B blocks hold 360–3,500 systems, |z| ≤ 2.27, and Σz² = 86.6 on 100 degrees of
+    freedom. Summed per layer they agree to −0.004% (E) to +0.153% (A), within 1.4σ. The midpoint
+    reference agrees with the other rule to 5 × 10⁻⁴ at the nuclear disc and 10⁻⁴ elsewhere.
+  - _What stayed green under a deliberate perturbation of the code._ T8.a's blocks, fast and slow,
+    missed thinning 1% short in layer A, which the candidate unit test and the query golden caught.
+    The fast blocks also missed 2% too many candidates in B and thinning 1% short in E, which the
+    slow blocks caught. T8.a's slabs, per galaxy, passed a 3% deficit in the middle quarter of every
+    cell, which only the totals caught. Three mark errors passed T8.d and every golden: a mass drawn
+    for the wrong candidate past index 127 (nothing else caught it), ages from the wrong component
+    past index 127 (T8.b's KS caught it), and components 0 and 1 swapped past index 64 (T8.b's χ²
+    caught it). Three query errors passed T10's integration tests: dropping the pad for motion (the
+    query golden caught it by its cell count), dropping the unborn filter (`motion`'s unit test
+    caught it) and expected counts 2% high (the golden and the slow checks caught it). A `frame_at`
+    search margin of 0.5 instead of 1.25 passed everything. The rest was caught: 3% in C, the last
+    candidate dropped, the count less one, a cell shifted by one cell or 8 ly, and every
+    perturbation of the walk, the sort, the census and the frame rule.
+  - _Fixed in the tests._ A new golden, `placement/digests` (version 8, 35 lines), pins every record
+    of the 16 pinned cells as an FNV-1a digest per cell. T8.a pools each layer over every block and
+    galaxy, which resolves about 1% in A and B and 0.2–0.3% in C–E; the 1% case still passes, at
+    −0.87% against ±0.97%. It also pools the arm slabs over four galaxies, where the 3% patch now
+    fails at p = 1.6 × 10⁻⁷. T10's clock-window test pins each layer's padded cell count. T12.b
+    compares `frame_at` with a brute-force search at 28 ships, plus 8 more towards the centre as a
+    slow test. Each of these was checked to fail under the perturbation it answers. T12.a gains a
+    unit test of its degenerate inputs: a rival at exactly 0.9 of the current ratio takes over and
+    one an ulp above does not, and a ship on two systems at once (both ratios 0) goes to the lower
+    ID and stays.
+  - _Fixed in the code: `frame_at` took any time_ and padded each layer for |t| of drift. At 10⁵
+    years it took 1.4 s, growing as t³, and a time near the source horizon would all but hang. It
+    now returns `Result<Option<SystemId>, FindFrameError>`, refusing
+    `TimeOutsideClockWindow(t)` as `RangeQuery::build` does. This deviates from the Provides
+    sketch; nothing consumes `frame_at` yet.
+  - _Held as claimed._ T8.a's slab conditioning is sound: given the total, the eighths are
+    multinomial, and `chi_square_gof` takes bins − 1 degrees of freedom. The total is tested by the
+    block and pooled checks, and a uniform 1% bias fails those while leaving the slabs green, as it
+    should. `slow-test` keeps debug assertions: a bound 3% too tight trips T8.c at a layer-E arm
+    cell in 0.2 s.
+  - _Held as claimed, T9 and T12._ The walk equals exact integer arithmetic over 675 spheres
+    centred on cell corners, cell faces and the cube's faces. Over 2,997 fractional spheres it keeps
+    every cell nearer than R − 10⁻⁹ and none beyond R + 10⁻⁹. The query equals a per-layer brute
+    force, strictly ordered, in ten boundary cases (on every layer's corner with R = 0.5 to 300,
+    the cube's corner and face, the centre) at t = 0 and ±H. The same cell comes out bit for bit by
+    every route tried: a shuffled order, a reused buffer, `resolve` in reverse, a cache warmed by
+    neighbours, and a query against the union of eight sub-queries. `expected_counts` agrees with a
+    24-point spherical rule to 1.7 × 10⁻⁴ (4.7 × 10⁻³ at 5,000 ly in the bulge). `frame_at` equals
+    the brute force at 118 ships at two times each, 100 of the 236 answers naming a system.
+  - _T11's figures were load-inflated; the misses stand, but smaller._ These were timed in one
+    process against `math::exp` at a load of 7–10 and 3.3–4.2 GHz (7.3–7.9 ns an exp), and the
+    bench headers carry the table. A sparse fine cell costs **290 exp, 2.14–2.23 µs**, against 3.31
+    µs recorded and a 1–2 µs target. The cold 50 ly query costs **1.02 M exp, 7.2–7.3 ms**, against
+    21.8 ms recorded and a 5 ms target. The first risk's arithmetic and plan 02's R21 (119 exp,
+    "inside the budget") count only the bound (88) and the densities (74). They omit the primary's
+    mass draw, 85 exp under Chabrier, as dear as a density evaluation. That draw is the cheapest
+    lever, but it is plan 02's and would move every mass.

@@ -16,6 +16,10 @@
 //! The arm block is also cut into eighths of a cell along each axis, which is how the failure a
 //! broken bound would cause — a cell-shaped patch of missing stars, which "no ordinary test would
 //! notice" — becomes visible.
+//!
+//! One block's count resolves a bias of only a few per cent in the sparse layers, so the counts and
+//! the slabs are also summed over every block and galaxy and tested once more, where a bias of a
+//! per cent in layer A and of a few tenths in layers C to E shows.
 
 #[expect(
     dead_code,
@@ -200,13 +204,21 @@ fn block_mean(galaxy: &Galaxy, layer: Layer, block: &Block, band: MassBand) -> f
     )
 }
 
-/// Every layer's placed count in every given block of one galaxy against the field's own integral.
-fn assert_blocks_match_the_field(name: &str, galaxy: &Galaxy, blocks: &[Block]) {
+/// Each stellar layer's placed count and expected count, summed over blocks, in `STELLAR_LAYERS`
+/// order.
+type LayerTotals = [(u64, f64); STELLAR_LAYERS.len()];
+
+/// Every layer's placed count in every given block of one galaxy against the field's own integral,
+/// returning each layer's count and mean summed over the blocks.
+fn assert_blocks_match_the_field(name: &str, galaxy: &Galaxy, blocks: &[Block]) -> LayerTotals {
+    let mut totals: LayerTotals = [(0, 0.0); STELLAR_LAYERS.len()];
     for block in blocks {
-        for spec in STELLAR_LAYERS {
+        for (spec, total) in STELLAR_LAYERS.iter().zip(&mut totals) {
             let layer = spec.layer();
             let count = block_count(galaxy, layer, block);
             let mean = block_mean(galaxy, layer, block, spec.band());
+            total.0 += count;
+            total.1 += mean;
             println!(
                 "{name}, {}, layer {}: {count} systems of {mean:.1} expected over {} cells",
                 block.what,
@@ -227,6 +239,39 @@ fn assert_blocks_match_the_field(name: &str, galaxy: &Galaxy, blocks: &[Block]) 
             );
         }
     }
+    totals
+}
+
+/// Each layer's count summed over every block given, against the summed mean.
+///
+/// The blocks are disjoint and the galaxies independent, so the sum of the counts is Poisson with
+/// the sum of the means. A single block of layer A or B holds a few hundred to a few tens of
+/// thousands of systems, so the best of them resolves a bias of 2–3% at α and most resolve only
+/// 5–15%; the sum over the slow test's twenty blocks resolves about 1% in layers A and B and 0.2–0.3%
+/// in C to E. Found by biasing the generator in validation: a thinning 1% short in layer A passed
+/// every block of every galaxy (and, at −0.87% against the sum's ±0.97%, this check too).
+fn assert_pooled_counts_match_the_field(name: &str, totals: &LayerTotals) {
+    for (spec, &(count, mean)) in STELLAR_LAYERS.iter().zip(totals) {
+        let deviation = 100.0 * (count_as_f64(count) - mean) / mean;
+        println!(
+            "{name}, layer {}: {count} systems of {mean:.1} expected, {deviation:+.3}%",
+            spec.layer().letter()
+        );
+        assert_poisson_count(
+            &format!("{name}, layer {}", spec.layer().letter()),
+            count,
+            mean,
+            ALPHA,
+        );
+    }
+}
+
+/// Adds one set of per-layer totals into another.
+fn add_totals(sum: &mut LayerTotals, more: &LayerTotals) {
+    for (total, &(count, mean)) in sum.iter_mut().zip(more) {
+        total.0 += count;
+        total.1 += mean;
+    }
 }
 
 // --- P03.T8.a: density against the field, per seed ---
@@ -236,23 +281,60 @@ fn assert_blocks_match_the_field(name: &str, galaxy: &Galaxy, blocks: &[Block]) 
 fn placed_density_matches_the_field_at_the_sun_like_point() {
     let (name, galaxy) = galaxies().swap_remove(0);
     let all = blocks(&galaxy);
-    assert_blocks_match_the_field(&name, &galaxy, &[all[0], all[4]]);
+    let totals = assert_blocks_match_the_field(&name, &galaxy, &[all[0], all[4]]);
+    assert_pooled_counts_match_the_field(&format!("{name}, both blocks"), &totals);
 }
 
 /// Every layer's placed count in every block of four galaxies against the field (P03.T8.a).
 #[test]
 #[ignore = "slow: five blocks of every layer in four galaxies, each against a midpoint sum"]
 fn placed_density_matches_the_field_in_every_block_of_every_seed() {
+    let mut pooled: LayerTotals = [(0, 0.0); STELLAR_LAYERS.len()];
     for (name, galaxy) in galaxies() {
-        assert_blocks_match_the_field(&name, &galaxy, &blocks(&galaxy));
+        let totals = assert_blocks_match_the_field(&name, &galaxy, &blocks(&galaxy));
+        add_totals(&mut pooled, &totals);
+    }
+    assert_pooled_counts_match_the_field("every block of the four galaxies", &pooled);
+}
+
+/// One layer's counts in the eighths of a cell along each axis, and the field's unscaled integrals
+/// over the same eighths.
+#[derive(Debug, Clone, Copy)]
+struct Slabs {
+    observed: [[u64; SLABS]; 3],
+    expected: [[f64; SLABS]; 3],
+}
+
+impl Slabs {
+    const EMPTY: Self = Self {
+        observed: [[0; SLABS]; 3],
+        expected: [[0.0; SLABS]; 3],
+    };
+
+    /// Adds another block's slabs of the same layer: the counts are independent Poisson variables,
+    /// so the sums are Poisson with the summed means, and conditioning on the summed total is as
+    /// sound as conditioning on one block's.
+    fn add(&mut self, other: &Self) {
+        for axis in 0..3 {
+            for slab in 0..SLABS {
+                self.observed[axis][slab] += other.observed[axis][slab];
+                self.expected[axis][slab] += other.expected[axis][slab];
+            }
+        }
     }
 }
 
 /// Counts in the eighths of a cell along each axis, across the arm ridge, against their own
 /// integrals: a cell-shaped patch of missing systems would show as a deficit away from the cells'
-/// faces, and a bound that is not a true bound would put one there (P03.T8.a).
-fn assert_no_cell_shaped_patches(name: &str, galaxy: &Galaxy, block: &Block) {
-    for spec in STELLAR_LAYERS {
+/// faces, and a bound that is not a true bound would put one there (P03.T8.a). Returns each layer's
+/// slabs, in `STELLAR_LAYERS` order, for the pooled check.
+fn assert_no_cell_shaped_patches(
+    name: &str,
+    galaxy: &Galaxy,
+    block: &Block,
+) -> [Slabs; STELLAR_LAYERS.len()] {
+    let mut all = [Slabs::EMPTY; STELLAR_LAYERS.len()];
+    for (spec, slabs) in STELLAR_LAYERS.iter().zip(&mut all) {
         let layer = spec.layer();
         let size_ly = layer.cell_size_ly();
         let slab_ly = i32::try_from(size_ly).expect("a cell is at most 128 ly")
@@ -286,58 +368,77 @@ fn assert_no_cell_shaped_patches(name: &str, galaxy: &Galaxy, block: &Block) {
             },
         );
 
-        for axis in 0..3 {
-            let total = observed[axis].iter().sum::<u64>();
-            let mean = expected[axis].iter().sum::<f64>();
-            assert!(
-                total > 0 && mean > 0.0,
-                "{name}, layer {}, axis {axis}: nothing to compare",
+        *slabs = Slabs { observed, expected };
+        assert_slabs_match(name, layer, slabs);
+    }
+    all
+}
+
+/// One layer's slabs against the field, conditioned on the observed total (P03.T8.a).
+fn assert_slabs_match(name: &str, layer: Layer, slabs: &Slabs) {
+    let Slabs { observed, expected } = slabs;
+    for axis in 0..3 {
+        let total = observed[axis].iter().sum::<u64>();
+        let mean = expected[axis].iter().sum::<f64>();
+        assert!(
+            total > 0 && mean > 0.0,
+            "{name}, layer {}, axis {axis}: nothing to compare",
+            layer.letter()
+        );
+        // Scaled to the observed total, as the chi-square requires. This is a test of the shape
+        // inside a cell and not of the total, which `assert_blocks_match_the_field` tests: a
+        // fluctuation in the total must not be counted against the shape twice.
+        let scale = count_as_f64(total) / mean;
+        let scaled: Vec<f64> = expected[axis].iter().map(|e| e * scale).collect();
+        let fit = chi_square_gof(&observed[axis], &scaled);
+        // The two slabs either side of a cell face, which adjoin across it: the pair a patch
+        // thinning the cells' interiors would leave standing. Conditional on the total the pair
+        // is binomial, so the Poisson interval of its scaled mean is the conservative reading.
+        let faces = observed[axis][0] + observed[axis][SLABS - 1];
+        let faces_mean = (expected[axis][0] + expected[axis][SLABS - 1]) * scale;
+        println!(
+            "{name}, layer {}, axis {axis}: {total} systems, χ² p = {:.3} over {} eighths, \
+             {faces} of {faces_mean:.1} beside the faces",
+            layer.letter(),
+            fit.p_value,
+            fit.bins,
+        );
+        assert_p_value(
+            &format!(
+                "{name}, layer {} across the arm, eighths of a cell on axis {axis}",
                 layer.letter()
-            );
-            // Scaled to the observed total, as the chi-square requires. This is a test of the shape
-            // inside a cell and not of the total, which `assert_blocks_match_the_field` tests: a
-            // fluctuation in the total must not be counted against the shape twice.
-            let scale = count_as_f64(total) / mean;
-            let scaled: Vec<f64> = expected[axis].iter().map(|e| e * scale).collect();
-            let fit = chi_square_gof(&observed[axis], &scaled);
-            // The two slabs either side of a cell face, which adjoin across it: the pair a patch
-            // thinning the cells' interiors would leave standing. Conditional on the total the pair
-            // is binomial, so the Poisson interval of its scaled mean is the conservative reading.
-            let faces = observed[axis][0] + observed[axis][SLABS - 1];
-            let faces_mean = (expected[axis][0] + expected[axis][SLABS - 1]) * scale;
-            println!(
-                "{name}, layer {}, axis {axis}: {total} systems, χ² p = {:.3} over {} eighths, \
-                 {faces} of {faces_mean:.1} beside the faces",
-                layer.letter(),
-                fit.p_value,
-                fit.bins,
-            );
-            assert_p_value(
-                &format!(
-                    "{name}, layer {} across the arm, eighths of a cell on axis {axis}",
-                    layer.letter()
-                ),
-                fit.p_value,
-                ALPHA,
-            );
-            assert_poisson_count(
-                &format!(
-                    "{name}, layer {}, the slabs either side of a cell face on axis {axis}",
-                    layer.letter()
-                ),
-                faces,
-                faces_mean,
-                ALPHA,
-            );
-        }
+            ),
+            fit.p_value,
+            ALPHA,
+        );
+        assert_poisson_count(
+            &format!(
+                "{name}, layer {}, the slabs either side of a cell face on axis {axis}",
+                layer.letter()
+            ),
+            faces,
+            faces_mean,
+            ALPHA,
+        );
     }
 }
 
 #[test]
 #[ignore = "slow: the arm block of every layer in four galaxies, cut into eighths of a cell"]
 fn placed_density_has_no_cell_shaped_patches_across_an_arm_ridge() {
+    let mut pooled = [Slabs::EMPTY; STELLAR_LAYERS.len()];
     for (name, galaxy) in galaxies() {
-        assert_no_cell_shaped_patches(&name, &galaxy, &arm_block(&galaxy));
+        let slabs = assert_no_cell_shaped_patches(&name, &galaxy, &arm_block(&galaxy));
+        for (sum, more) in pooled.iter_mut().zip(&slabs) {
+            sum.add(more);
+        }
+    }
+    // The four arm blocks together: one galaxy's slabs resolve a patch of about a tenth, the four
+    // together a few per cent. A 3% deficit in the middle quarter of every cell passed each
+    // galaxy's check alone when the generator was perturbed in validation, and failed this one at
+    // p = 1.6 × 10⁻⁷.
+    for (spec, slabs) in STELLAR_LAYERS.iter().zip(&pooled) {
+        assert_slabs_match("the four galaxies pooled", spec.layer(), slabs);
     }
 }
 

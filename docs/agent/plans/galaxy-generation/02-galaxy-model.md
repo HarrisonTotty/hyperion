@@ -1578,7 +1578,12 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     `math::exp` (about 14 ns loaded, about 10 ns lightly loaded), or measure with the CPU pinned.
     At the yardstick figures above a sparse cell's bound plus one candidate's densities is 119
     `math::exp`, which is 1.2 µs at 10 ns and 1.7 µs at 14 — inside the brainstorm's 1–2 µs, as R17
-    read it.
+    read it. **Corrected in round 5: that sum undercounts.** It leaves out the primary's mass draw,
+    85 `math::exp` under Chabrier, as dear as a density evaluation. Measured whole by the same
+    method, a sparse fine cell is 290 `exp` and 2.14–2.23 µs (plan 03's T8–T12 validation), and a
+    real layer-A cell 500–555 `exp` and 3.8–4.2 µs (plan 04's T14.d/T16 validation). So the 1–2 µs
+    is missed, by about a tenth for the sparsest cell and 2 to 4 times for a typical one. The mass
+    draw is the cheapest lever, but it is this plan's, and speeding it up would move every mass.
 - **R22. P02.T11 as built, with rulings 1, 3, 4, 8 and 17 of 2026-09-22.** `GENERATOR_VERSION` is
   9, one bump for all six. Re-blessed in two steps, `HYPERION_BLESS=1 cargo test --workspace`
   skipping `every_golden_file_carries_the_current_version`, then `just bless`; `golden_diff.py`:

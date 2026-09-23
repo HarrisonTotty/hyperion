@@ -8,6 +8,27 @@
 //! them, and are to be re-measured after it** (plan 03's task list: P02.T11 "may tune
 //! `milky_way_like()`, which … moves T11's figures").
 //!
+//! # Re-measured in validation, against a yardstick
+//!
+//! Timed on 2026-09-23 in one process against `math::exp`, as `placement.rs` describes, at a load
+//! average of 7–10 and 3.3–4.2 GHz, where one `math::exp` took 7.3–7.9 ns; two runs agreed to 3%.
+//! The query ran at `placement.rs`'s seed, where the 50 ly sphere holds 1,419 systems in the same
+//! 1,732 cells. Version 8's fixture.
+//!
+//! | Call | `math::exp` calls | at 7.3–7.9 ns | Target |
+//! | ---- | ----------------- | ------------- | ------ |
+//! | `expected_counts (50 ly)` | 20,169–21,175 | 147–149 µs | under 0.3 ms: met |
+//! | `expected_counts (5000 ly)` | 2.76–2.85 M | 20.1–20.6 ms | none |
+//! | `range_50ly_cold` | 1.01–1.02 M | 7.18–7.32 ms | under 5 ms: **missed by 1.4×** |
+//! | `range_50ly_warm` | 104,500 | 0.72–0.74 ms | none |
+//! | `range_500ly_floor_d` (limit 65,536) | 11.85–11.93 M | 86–89 ms | none |
+//!
+//! **The cold query misses 5 ms by 1.4 times, not the four times of the table below**, which was the
+//! same code at a third of the clock. The miss is the sparse-cell miss `placement.rs` records,
+//! multiplied over the walk: of the 1.02 M, the primaries' mass draws alone are some 120,000.
+//!
+//! # As first measured, under load
+//!
 //! Measured 2026-09-22 on an Intel i7-8665U (4 cores, 8 threads, 1.9 GHz base, 4.8 GHz turbo) with
 //! other lanes building on the machine at the same time, in three rounds at different load averages,
 //! against the machine's 8 threads. The load is given with each column because it moves the figures

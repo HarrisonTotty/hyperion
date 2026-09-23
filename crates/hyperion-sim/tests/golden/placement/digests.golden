@@ -1,0 +1,35 @@
+# generator_version = 10
+# galaxy mw, 0308d00000000000
+mw.sun.E.systems = 22
+mw.sun.E.digest = 0x3e93c5fe70a5a52a
+mw.sun.D.systems = 13
+mw.sun.D.digest = 0x9ec4bc1ca269ce0c
+mw.sun.C.systems = 13
+mw.sun.C.digest = 0x9acd3da610a39ed1
+mw.sun.B.systems = 0
+mw.sun.B.digest = 0xcbf29ce484222325
+mw.sun.A.systems = 0
+mw.sun.A.digest = 0xcbf29ce484222325
+mw.bulge.A.systems = 41
+mw.bulge.A.digest = 0x71c93d4879d2a86e
+mw.bulge.E.systems = 1830
+mw.bulge.E.digest = 0x6b82dfbe0a3a657b
+mw.arm.E.systems = 145
+mw.arm.E.digest = 0x1f40879d1e6d6e85
+# galaxy drawn, 0308d0005eed0001
+drawn.sun.E.systems = 16
+drawn.sun.E.digest = 0x11cd11c2afdbd7c6
+drawn.sun.D.systems = 6
+drawn.sun.D.digest = 0x144f5dfe611608eb
+drawn.sun.C.systems = 5
+drawn.sun.C.digest = 0x8dbf09f37b144978
+drawn.sun.B.systems = 0
+drawn.sun.B.digest = 0xcbf29ce484222325
+drawn.sun.A.systems = 0
+drawn.sun.A.digest = 0xcbf29ce484222325
+drawn.bulge.A.systems = 24
+drawn.bulge.A.digest = 0x1a9144ff3e13763a
+drawn.bulge.E.systems = 962
+drawn.bulge.E.digest = 0xfd2c99313574246f
+drawn.arm.E.systems = 182
+drawn.arm.E.digest = 0xdb82a43670c2d7d6

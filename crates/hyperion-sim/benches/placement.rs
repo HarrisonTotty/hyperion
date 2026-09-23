@@ -7,6 +7,46 @@
 //! them, and are to be re-measured after it** (plan 03's task list: P02.T11 "may tune
 //! `milky_way_like()`, which … moves T11's figures").
 //!
+//! # Re-measured in validation, against a yardstick
+//!
+//! Bare nanoseconds on this laptop say more about its clock than about the code: the clock moves
+//! between 1.9 and 4.8 GHz with the load, and the tables further down were taken under other
+//! lanes' builds (plan 02, R21). So on 2026-09-23 the same calls were timed in one process against
+//! `math::exp`, measured immediately before and after each one with its loop's cost taken off, at
+//! a load average of 7–10 and 3.3–4.2 GHz (`scaling_cur_freq`), where one `math::exp` took 7.3–7.9
+//! ns. Two runs agreed to 5%. The cost is given in `math::exp` calls, which the clock does not
+//! move, and then in microseconds at that run's 7.3–7.9 ns. The fixture is version 8's.
+//!
+//! | Call | `math::exp` calls | µs at 7.3–7.9 ns |
+//! | ---- | ----------------- | ---------------- |
+//! | `sparse_fine_cell (Sun-like point)`, one candidate | 289–291 | 2.14–2.23 |
+//! | `sparse_fine_cell (rim, 35,000 ly)`, none | 104–106 | 0.76–0.79 |
+//! | `cell_by_layer (A, Sun-like point)` | 286 | 2.09–2.14 |
+//! | `cell_by_layer (B, Sun-like point)` | 477–481 | 3.48–3.57 |
+//! | `cell_by_layer (C, Sun-like point)` | 3,251–3,425 | 23.7–24.7 |
+//! | `cell_by_layer (D, Sun-like point)` | 2,365–2,371 | 17.3–18.1 |
+//! | `cell_by_layer (E, Sun-like point)` | 6,564–6,657 | 48.3–50.3 |
+//! | `cell_by_layer (A, bulge at 1,000 ly)` | 79,888–80,381 | 587–598 |
+//! | `resolve (sparse cell)` | 295–307 | 2.16–2.21 |
+//! | `resolve (fullest layer-A cell)` | 220–227 | 1.60–1.64 |
+//! | `Fields::layer_bound`, the layer-A cell at the Sun-like point | 88–89 | 0.64–0.70 |
+//! | `Fields::densities`, the Sun-like point | 74–75 | 0.55–0.59 |
+//! | `Stream::open` and `sample_in_band(A)` under Chabrier | 84–86 | 0.61–0.64 |
+//! | `Stream::open` and a Poisson draw, mean 1.3 | 7.5–7.7 | 0.06 |
+//! | `Stream::open` and an age draw | 5.8 | 0.04 |
+//!
+//! **A sparse fine cell costs 290 `math::exp`, 2.1–2.2 µs at this machine's best clock: the
+//! brainstorm's 1–2 µs is missed by about a tenth, not by the 3.31 µs below.** It is the layer bound
+//! (88), one candidate's densities (74), **its primary's mass (85)**, the Poisson draw (8), the age
+//! (6) and some 30 for the four position and acceptance words, the pick and the record. Plan 02's
+//! R21 put the cell at 119 `math::exp`, inside the budget, by counting the bound and the densities
+//! alone; the mass draw, as dear as a whole density evaluation, is what that left out. The cheapest
+//! lever is that draw, which is plan 02's sampler and moves every mass, so it is a version bump and
+//! not this plan's to pull. `resolve` stays constant time, the fullest cell 0.74 times the sparse
+//! one. The 3.31 µs of the old table is the same code at a lower clock: 290 × 11.4 ns.
+//!
+//! # As first measured, under load
+//!
 //! Measured 2026-09-22 on an Intel i7-8665U (4 cores, 8 threads, 1.9 GHz base, 4.8 GHz turbo), the
 //! same processor plan 02's R16 and R17 used, with other lanes building on the machine at the same
 //! time. Two rounds, because the load average moved a great deal between them: **round 1 at load
@@ -27,17 +67,18 @@
 //! | `resolve (sparse cell)` | constant time | 3.10 µs, met | 5.94 µs |
 //! | `resolve (fullest layer-A cell)` | constant time | 2.23 µs, met | 5.30 µs |
 //!
-//! **The brainstorm's 1–2 µs for a sparse fine cell is missed, at 3.31 µs**, and the cost sits in the
-//! two calls the target rests on rather than in anything this task added. Re-run beside these
-//! benches at load 4–8, plan 02's own `Fields::densities` takes 1.35 µs at a disc point against the
-//! 540–570 ns its R16 records, and `Fields::layer_bound` 1.41 µs over a layer-A disc cell against
-//! R17's 543–694 ns: two to two and a half times the recorded figures, on the same processor. The
-//! plan's arithmetic with today's costs gives 2.8 µs for one bound and one candidate's densities
-//! before any draw, which is what the 3.31 µs is; with R16 and R17's figures the same structure gives
-//! the 1.1–1.3 µs the plan expects. Whether those two benches were taken on a quieter or cooler
-//! machine, or whether the T7 revision's tabulated vertical profiles made the densities dearer —
-//! which the plan's first risk expects T11 to find out — is plan 02's question. Nothing here was
-//! optimised to chase the target and no target was weakened to meet it.
+//! **The brainstorm's 1–2 µs for a sparse fine cell is missed, at 3.31 µs** (a load-inflated
+//! figure: see the section above), and the cost sits in the two calls the target rests on rather
+//! than in anything this task added (corrected above: the mass draw costs as much as either).
+//! Re-run beside these benches at load 4–8, plan 02's own `Fields::densities` takes 1.35 µs at a
+//! disc point against the 540–570 ns its R16 records, and `Fields::layer_bound` 1.41 µs over a
+//! layer-A disc cell against R17's 543–694 ns: two to two and a half times the recorded figures, on
+//! the same processor. The plan's arithmetic with today's costs gives 2.8 µs for one bound and one
+//! candidate's densities before any draw, which is what the 3.31 µs is; with R16 and R17's figures
+//! the same structure gives the 1.1–1.3 µs the plan expects. Whether those two benches were taken
+//! on a quieter or cooler machine, or whether the T7 revision's tabulated vertical profiles made
+//! the densities dearer — which the plan's first risk expects T11 to find out — is plan 02's
+//! question. Nothing here was optimised to chase the target and no target was weakened to meet it.
 //!
 //! What the figures cover is the plan's model of a sparse cell exactly: the layer-A cell at the
 //! Sun-like point draws **one** candidate and accepts it, so it costs one `Fields::layer_bound`, one

@@ -1,20 +1,22 @@
 //! The first generated stars, pinned: whole cells and single IDs (plan 03, P03.T8.d).
 //!
-//! Two galaxies, two golden files. `placement/cells` holds eight whole cells of each galaxy — the
+//! Two galaxies, three golden files. `placement/cells` holds eight whole cells of each galaxy — the
 //! candidate count, which candidates the thinning kept, and each system's ID, light-year, offsets,
-//! primary initial mass, age and picked component — and `placement/ids` holds ten IDs taken through
-//! `resolve`, eight of which name a system and two of which do not. Between them they pin every draw
-//! placement makes: the Poisson count on the cell's stream, the three position words, the acceptance
-//! mark and the component it picks, and the mass and age marks.
+//! primary initial mass, age and picked component — `placement/digests` a digest of every record of
+//! the same cells, and `placement/ids` ten IDs taken through `resolve`, eight of which name a system
+//! and two of which do not. Between them they pin every draw placement makes: the Poisson count on
+//! the cell's stream, the three position words, the acceptance mark and the component it picks, and
+//! the mass and age marks.
 //!
 //! Every candidate's outcome is pinned for every cell, as a list of the kept indices. The marks are
 //! pinned for the first [`FULL_RECORDS`] systems of a cell, which is all of them except in the two
 //! bulge cells of layer E. That is a deviation from the task's "every record in full", and it is
 //! there because a 128 ly cell anywhere the bulge is the bulge holds thousands of systems: 1,700 at
 //! [`BULGE_LY`], ten thousand at 1,000 ly and a quarter of a million at the centre. Writing them all
-//! out would make one file several times the size of every golden in the repository together, and
-//! would pin nothing the first sixty-four do not: a change to a mark moves the first system as surely
-//! as the last, while a change to the thinning shows in the index list.
+//! out would make one file several times the size of every golden in the repository together. The
+//! first sixty-four do not pin the rest, though: a mark drawn for the wrong candidate only past some
+//! index, or an age taken from the wrong component there, moves no early system. So
+//! `placement/digests` pins every record of every pinned cell as one FNV-1a digest a cell.
 //!
 //! # Why these cells
 //!
@@ -71,6 +73,7 @@ use hyperion_sim::galaxy::placement::{
 use hyperion_sim::id::{Layer, SystemId, SystemIdKind};
 use hyperion_sim::math;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
+use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 
@@ -235,6 +238,66 @@ fn placed_cells_are_pinned() {
         }
     }
     golden!("placement/cells", w.as_str());
+}
+
+/// The FNV-1a offset basis and prime, 64-bit (Fowler, Noll and Vo): a digest that any changed bit
+/// of any record moves.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// Folds one record into an FNV-1a digest, every field bit for bit: the ID, the light-year and the
+/// offsets of the epoch position, the primary initial mass, the age and the picked component.
+fn digest_record(hash: &mut u64, record: &SystemRecord) {
+    let component = record
+        .component()
+        .expect("every record here was placed by the grid");
+    let ly = record.epoch_position().cell().to_array();
+    let offsets = record.epoch_position().offset_metres();
+    let words = [
+        record.id().raw(),
+        i64::from(ly[0]).cast_unsigned(),
+        i64::from(ly[1]).cast_unsigned(),
+        i64::from(ly[2]).cast_unsigned(),
+        bits(offsets[0]),
+        bits(offsets[1]),
+        bits(offsets[2]),
+        bits(record.primary_initial_mass().value()),
+        bits(record.age_at_epoch().value()),
+        u64::try_from(component.index()).expect("a component index is small"),
+    ];
+    for word in words {
+        for byte in word.to_le_bytes() {
+            *hash = (*hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME);
+        }
+    }
+}
+
+/// Every record of every pinned cell, as one digest a cell (P03.T8.d, completed in validation).
+///
+/// `placement/cells` writes the marks of a cell's first [`FULL_RECORDS`] systems only, so on its
+/// own it pins nothing past them: in the two bulge cells of layer E a mark drawn for the wrong
+/// candidate past the 64th, or an age taken from the wrong component, left every golden file and
+/// every other test unchanged (found by perturbing the generator in validation). This file closes
+/// that gap in a line or two a cell: each cell's system count and an FNV-1a digest of all its
+/// records, in index order, every field bit for bit.
+#[test]
+fn every_record_of_the_pinned_cells_is_digested() {
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let mut cell = Vec::new();
+    for (tag, galaxy) in galaxies() {
+        w.line(&format!("# galaxy {tag}, {}", galaxy.seed()));
+        for (label, _, key) in pinned_cells(&galaxy) {
+            generate_cell(&galaxy, key, &mut cell);
+            let mut hash = FNV_OFFSET;
+            for record in &cell {
+                digest_record(&mut hash, record);
+            }
+            w.line(&format!("{tag}.{label}.systems = {}", cell.len()));
+            w.u64_hex(&format!("{tag}.{label}.digest"), hash);
+        }
+    }
+    golden!("placement/digests", w.as_str());
 }
 
 /// The ten pinned IDs: where each comes from, as a label, which galaxy it belongs to and the

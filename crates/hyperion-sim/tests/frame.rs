@@ -3,8 +3,10 @@
 //! The rule itself is unit-tested beside it (P03.T12.a). What is tested here is the search: that a
 //! ship beside a generated system is in that system's frame, that a ship where no sphere of
 //! influence reaches is in the galactic frame, that the answer does not depend on the time asked
-//! for — nothing moves until plan 08 — nor on what the caller's cache holds, and that the query's
-//! sources are merged in, both as candidates and as suppressors.
+//! for — nothing moves until plan 08 — nor on what the caller's cache holds, that the query's
+//! sources are merged in, both as candidates and as suppressors, that the search finds what a
+//! brute-force search over every nearby system finds, and that a time outside the clock window is
+//! refused.
 
 #[expect(dead_code, reason = "the frame tests use only the Sun-like point")]
 mod common;
@@ -14,17 +16,20 @@ use std::collections::BTreeMap;
 use common::sunlike_point;
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::galaxy::frame::frame_at;
+use hyperion_sim::galaxy::frame::{FindFrameError, FrameCandidate, frame_at, select_frame};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{
     CellCache, CellKey, NoCache, SystemOrigin, SystemRecord, generate_cell,
 };
-use hyperion_sim::galaxy::query::{LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource};
+use hyperion_sim::galaxy::query::{
+    LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource, position_at,
+};
 use hyperion_sim::galaxy::{Galaxy, PointLy, Population};
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
-use hyperion_sim::time::UniverseTime;
+use hyperion_sim::time::{ClockWindow, SourceHorizon, UniverseTime};
 use hyperion_sim::units::{LightYears, SolarMasses, Years};
+use hyperion_testkit::lcg::Lcg;
 
 /// The seed of the galaxy these ships fly in.
 const SEED: u64 = 0x0312_b000_0000_0000;
@@ -169,7 +174,8 @@ fn a_ship_beside_a_generated_system_is_in_its_frame() {
         &ship,
         UniverseTime::EPOCH,
         None,
-    );
+    )
+    .expect("a time inside the clock window");
     assert_eq!(frame, Some(system.id()));
 
     // And it stays in that frame once it is in it: the rule only changes frame for a rival a tenth
@@ -181,7 +187,8 @@ fn a_ship_beside_a_generated_system_is_in_its_frame() {
         &ship,
         UniverseTime::EPOCH,
         Some(system.id()),
-    );
+    )
+    .expect("a time inside the clock window");
     assert_eq!(held, Some(system.id()));
 }
 
@@ -199,7 +206,8 @@ fn a_ship_in_a_void_is_in_the_galactic_frame() {
             &void,
             UniverseTime::EPOCH,
             None
-        ),
+        )
+        .expect("a time inside the clock window"),
         None
     );
     // A frame the ship has left is dropped, not carried into the void.
@@ -212,7 +220,8 @@ fn a_ship_in_a_void_is_in_the_galactic_frame() {
             &void,
             UniverseTime::EPOCH,
             Some(left)
-        ),
+        )
+        .expect("a time inside the clock window"),
         None
     );
 }
@@ -230,15 +239,18 @@ fn the_frame_is_the_same_at_every_time_and_whatever_the_cache_holds() {
     // the frame is the same at all of them.
     for years in [0_i64, 137, 1_000, -1_000] {
         let t = UniverseTime::from_julian_years(years).expect("inside the clock window");
-        let cold = frame_at(&galaxy, &mut NoCache::new(), &[], &ship, t, None);
+        let cold = frame_at(&galaxy, &mut NoCache::new(), &[], &ship, t, None)
+            .expect("a time inside the clock window");
         assert_eq!(cold, expected, "{years} yr with no cache");
         // The first call fills `keep`, so the second and third are served from memory.
         for pass in 0..3 {
-            let warm = frame_at(&galaxy, &mut keep, &[], &ship, t, None);
+            let warm = frame_at(&galaxy, &mut keep, &[], &ship, t, None)
+                .expect("a time inside the clock window");
             assert_eq!(warm, expected, "{years} yr from a warm cache, pass {pass}");
         }
         assert!(!keep.cells.is_empty(), "the warm cache kept its cells");
-        let evicting = frame_at(&galaxy, &mut flaky, &[], &ship, t, None);
+        let evicting = frame_at(&galaxy, &mut flaky, &[], &ship, t, None)
+            .expect("a time inside the clock window");
         assert_eq!(evicting, expected, "{years} yr from an evicting cache");
     }
 }
@@ -264,7 +276,8 @@ fn a_source_holds_the_ship_and_can_keep_a_grid_system_from_holding_it() {
         &ship,
         UniverseTime::EPOCH,
         None,
-    );
+    )
+    .expect("a time inside the clock window");
     assert_eq!(frame, Some(member.record().id()));
 
     // A source that replaces the grid system keeps it from holding the ship. What holds it instead
@@ -280,7 +293,8 @@ fn a_source_holds_the_ship_and_can_keep_a_grid_system_from_holding_it() {
         &ship,
         UniverseTime::EPOCH,
         None,
-    );
+    )
+    .expect("a time inside the clock window");
     assert_ne!(frame, Some(system.id()));
     // Suppression does not reach the source's own members.
     let frame = frame_at(
@@ -290,7 +304,8 @@ fn a_source_holds_the_ship_and_can_keep_a_grid_system_from_holding_it() {
         &ship,
         UniverseTime::EPOCH,
         None,
-    );
+    )
+    .expect("a time inside the clock window");
     assert_eq!(frame, Some(member.record().id()));
 }
 
@@ -333,4 +348,195 @@ fn the_search_reaches_the_tidal_radii_the_task_quotes() {
     // every system in it.
     assert!((layer_e / one - math::cbrt(150.0)).abs() < 1e-9);
     assert!((layer_a / one - math::cbrt(0.5)).abs() < 1e-9);
+}
+
+/// The frame by brute force: every system of every layer within three times the largest sphere of
+/// influence at the ship, each with its tidal radius at its own position, through `select_frame`.
+///
+/// It shares with `frame_at` only the rule and the tidal radius. Its reach is fixed and generous
+/// where `frame_at` walks each layer over 1.25 times that layer's own largest sphere, so a search
+/// that is too narrow — a margin of 0.5 instead of 1.25 passed every other test here when the code
+/// was perturbed in validation — shows as a ship this finds held and `frame_at` does not.
+fn brute_force_frame(
+    galaxy: &Galaxy,
+    cache: &mut Keep,
+    ship: &GalacticPosition,
+    t: UniverseTime,
+    current: Option<SystemId>,
+) -> Option<SystemId> {
+    let largest = LightYears::from(
+        galaxy
+            .potential()
+            .tidal_radius(SolarMasses::new(150.0), &PointLy::from(ship)),
+    )
+    .value();
+    let reach = whole_ly(3.0 * largest) + 1;
+    let centre = ship.cell().to_array().map(i64::from);
+    let mut candidates = Vec::new();
+    for layer in [Layer::E, Layer::D, Layer::C, Layer::B, Layer::A] {
+        let size = i64::from(layer.cell_size_ly());
+        let span = |axis: usize| {
+            (centre[axis] - reach).div_euclid(size)..=(centre[axis] + reach).div_euclid(size)
+        };
+        for x in span(0) {
+            for y in span(1) {
+                for z in span(2) {
+                    let key = [x, y, z].map(|c| i32::try_from(c).expect("a cell near the ship"));
+                    let key = CellKey::new(layer, key).expect("a cell inside the cube");
+                    cache.with_cell(galaxy, key, |cell| {
+                        for record in cell {
+                            if record.age_at(t).value() <= 0.0 {
+                                continue;
+                            }
+                            let position = position_at(galaxy, record, t);
+                            let tidal_radius = galaxy.potential().tidal_radius(
+                                record.primary_initial_mass(),
+                                &PointLy::from(&position),
+                            );
+                            if let Ok(candidate) = FrameCandidate::new(
+                                record.id(),
+                                ship.distance_to(&position),
+                                tidal_radius,
+                            ) {
+                                candidates.push(candidate);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+    select_frame(&candidates, current)
+}
+
+/// Whole light-years covering a small non-negative length.
+fn whole_ly(ly: f64) -> i64 {
+    assert!((0.0..1.0e6).contains(&ly), "{ly} ly is no search reach");
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the assertion holds the value under 10⁶, exact in i64"
+    )]
+    let whole = ly.ceil() as i64;
+    whole
+}
+
+/// `frame_at` against [`brute_force_frame`] for each ship at the epoch and at the end of the clock
+/// window; returns how many of the answers named a system.
+///
+/// Both searches read cells through one cache the ships share, since a layer-E cell at the centre
+/// costs tens of seconds to generate and the answer does not depend on the cache (tested above).
+fn assert_frames_match_brute_force(galaxy: &Galaxy, ships: &[[f64; 3]]) -> usize {
+    let mut cache = Keep::default();
+    let mut held = 0;
+    for ship in ships {
+        let at = GalacticPosition::from_light_years(*ship).expect("inside the cube");
+        for t in [UniverseTime::EPOCH, ClockWindow::END] {
+            let found = frame_at(galaxy, &mut cache, &[], &at, t, None)
+                .expect("a time inside the clock window");
+            assert_eq!(
+                found,
+                brute_force_frame(galaxy, &mut cache, &at, t, None),
+                "a ship at {ship:?} ly, t = {t}"
+            );
+            held += usize::from(found.is_some());
+        }
+    }
+    held
+}
+
+/// Ships up to six light-years out on each axis from the first `systems` systems of the layer-C
+/// cell at `at`: inside some spheres of influence and outside others, since at the solar circle a
+/// layer-A primary's is about 3.4 ly and a layer-E one's about 22.5.
+fn ships_beside_systems(
+    galaxy: &Galaxy,
+    at: [f64; 3],
+    systems: usize,
+    lcg: &mut Lcg,
+) -> Vec<[f64; 3]> {
+    let at = GalacticPosition::from_light_years(at).expect("inside the cube");
+    let key = CellKey::containing(Layer::C, &at).expect("inside the cube");
+    let mut cell = Vec::new();
+    generate_cell(galaxy, key, &mut cell);
+    let mut unit = || {
+        let draw = lcg.next_below(2_001);
+        f64::from(u32::try_from(draw).expect("under 2,001")) / 1_000.0 - 1.0
+    };
+    let mut ships = Vec::new();
+    for record in cell.iter().take(systems) {
+        let [x, y, z] = record.epoch_position().to_light_years_f64();
+        for _ in 0..2 {
+            ships.push([x + 6.0 * unit(), y + 6.0 * unit(), z + 6.0 * unit()]);
+        }
+    }
+    ships
+}
+
+/// `frame_at` finds exactly the frame a brute-force search over every nearby system finds, beside
+/// generated systems on and above the plane at the Sun-like point and at random points of the solar
+/// circle (P03.T12.b, validation).
+#[test]
+fn the_search_finds_the_frame_a_brute_force_search_finds() {
+    let galaxy = galaxy();
+    let mut lcg = Lcg::new(0x0312_b0f0);
+    let mut ships = ships_beside_systems(&galaxy, [0.0, 26_000.0, 0.0], 4, &mut lcg);
+    ships.extend(ships_beside_systems(
+        &galaxy,
+        [0.0, 26_000.0, 800.0],
+        4,
+        &mut lcg,
+    ));
+    for _ in 0..12 {
+        let [x, y, z] = [0, 1, 2].map(|_| {
+            let draw = lcg.next_below(2_001);
+            f64::from(u32::try_from(draw).expect("under 2,001")) / 1_000.0 - 1.0
+        });
+        ships.push([10_000.0 * x, 26_000.0 + 100.0 * y, 100.0 * z]);
+    }
+    let held = assert_frames_match_brute_force(&galaxy, &ships);
+    // A good share of the answers name a system, so the comparison is not of two `None`s. It was
+    // over half at version 8 and is 28 of 56 at version 10, where P02.T11's tuning shrank the
+    // tidal radii by about 3%.
+    let answers = 2 * ships.len();
+    assert!(
+        3 * held >= answers,
+        "only {held} of {answers} answers named a system"
+    );
+}
+
+/// The same in the dense inner galaxy, where one layer-E cell holds up to a quarter of a million
+/// systems: beside a system of the outer bulge, and ever closer to the centre, where the tidal
+/// radius falls as a point mass's does, in proportion to the distance (P03.T12.b, validation).
+#[test]
+#[ignore = "slow: brute-force frame searches through the galactic centre's layer-E cell"]
+fn the_search_finds_the_brute_force_frame_towards_the_centre() {
+    let galaxy = galaxy();
+    let mut lcg = Lcg::new(0x0312_b0f1);
+    let mut ships = ships_beside_systems(&galaxy, [2_262.7, 2_262.7, 0.0], 2, &mut lcg);
+    for r in [1_000.0, 100.0, 10.0, 1.0] {
+        ships.push([r * 0.6, r * 0.8, 0.0]);
+    }
+    let held = assert_frames_match_brute_force(&galaxy, &ships);
+    println!("{held} of {} answers named a system", 2 * ships.len());
+}
+
+/// A time outside the clock window is refused, as a range query refuses it, rather than walking a
+/// sphere padded for millennia of drift (P03.T12.b, validation: at 10⁵ years a search took over a
+/// second and grew as the cube of the time).
+#[test]
+fn a_time_outside_the_clock_window_is_refused() {
+    let galaxy = galaxy();
+    let ship = sunlike_point(&galaxy);
+    let just_after = UniverseTime::from_julian_years(1_001).expect("a representable time");
+    let just_before = UniverseTime::from_julian_years(-1_001).expect("a representable time");
+    for t in [just_after, just_before, SourceHorizon::START] {
+        assert_eq!(
+            frame_at(&galaxy, &mut NoCache::new(), &[], &ship, t, None),
+            Err(FindFrameError::TimeOutsideClockWindow(t)),
+            "{t}"
+        );
+    }
+    // Both ends of the window are inside it.
+    for t in [ClockWindow::START, ClockWindow::END] {
+        assert!(frame_at(&galaxy, &mut NoCache::new(), &[], &ship, t, None).is_ok());
+    }
 }
