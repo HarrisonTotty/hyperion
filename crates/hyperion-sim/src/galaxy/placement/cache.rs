@@ -36,10 +36,20 @@ use crate::galaxy::Galaxy;
 /// of the same cell of the same galaxy, in the same order. A cache that lends a stale cell of
 /// another galaxy, or reorders one, breaks every guarantee the range query makes.
 ///
+/// **An implementation that keeps cells between calls keys them by galaxy as well as by cell.**
+/// [`with_cell`](Self::with_cell) is given the galaxy but the trait does not check it, and a
+/// [`CellKey`] names the same cell in every galaxy, so a cache shared between two galaxies would
+/// otherwise lend one galaxy's cells to the other. Plan 04's `CellCacheHandle` keys every entry by
+/// the galaxy's seed and generator version and asserts that the seed matches the galaxy it is
+/// given; [`NoCache`] keeps no cells and needs no key. A cache whose galaxies are not all
+/// [`Galaxy::new`] of their seed, such as parameters built by hand, keys by whatever tells them
+/// apart (ruling 25 of 2026-09-22).
+///
 /// # Examples
 ///
 /// A cache that keeps the last cell it was asked for, which is enough for a walk that visits a
-/// cell's neighbours in turn:
+/// cell's neighbours in turn. It keeps the cell between calls, so it keys it by the galaxy's seed
+/// too; every galaxy it serves is [`Galaxy::new`] of its seed, which the seed then names:
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -49,7 +59,7 @@ use crate::galaxy::Galaxy;
 ///
 /// #[derive(Debug, Default)]
 /// struct LastCell {
-///     held: Option<(CellKey, Vec<SystemRecord>)>,
+///     held: Option<(Seed, CellKey, Vec<SystemRecord>)>,
 /// }
 ///
 /// impl CellCache for LastCell {
@@ -59,16 +69,19 @@ use crate::galaxy::Galaxy;
 ///         key: CellKey,
 ///         f: impl FnOnce(&[SystemRecord]) -> R,
 ///     ) -> R {
-///         let (_, systems) = match self.held.take() {
-///             Some((held, systems)) if held == key => (held, systems),
+///         let seed = galaxy.seed();
+///         let systems = match self.held.take() {
+///             Some((held_seed, held_key, systems)) if held_seed == seed && held_key == key => {
+///                 systems
+///             }
 ///             _ => {
 ///                 let mut systems = Vec::new();
 ///                 generate_cell(galaxy, key, &mut systems);
-///                 (key, systems)
+///                 systems
 ///             }
 ///         };
 ///         let result = f(&systems);
-///         self.held = Some((key, systems));
+///         self.held = Some((seed, key, systems));
 ///         result
 ///     }
 /// }
@@ -79,6 +92,11 @@ use crate::galaxy::Galaxy;
 /// let count = cache.with_cell(&galaxy, key, <[SystemRecord]>::len);
 /// // The second answer comes from the cache and is the same.
 /// assert_eq!(cache.with_cell(&galaxy, key, <[SystemRecord]>::len), count);
+/// // Another galaxy's cell of the same key is its own, not the one held.
+/// let other = Galaxy::new(Seed::new(24));
+/// let mut theirs = Vec::new();
+/// generate_cell(&other, key, &mut theirs);
+/// assert_eq!(cache.with_cell(&other, key, <[SystemRecord]>::to_vec), theirs);
 /// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
 /// ```
 pub trait CellCache {
@@ -154,6 +172,7 @@ mod tests {
             Seed::new(0x0300_cac4_0000_0000),
             GalaxyParams::milky_way_like(),
         )
+        .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
     #[test]

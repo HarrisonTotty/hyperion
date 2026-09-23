@@ -29,6 +29,9 @@
 //! `R_m` = 12 kpc and `R_d` = 1.5 kpc, is not this model's central molecular disc, which is the
 //! diffuse part of the central molecular zone (Design note 5) and sits where the nuclear disc is.
 
+use std::error::Error;
+use std::fmt;
+
 use crate::Seed;
 use crate::galaxy::gas::smooth;
 use crate::galaxy::params::GalaxyParams;
@@ -283,6 +286,48 @@ impl LaneParams {
     }
 }
 
+/// A galaxy's gas parameters could not be built (plan 07, ruling 22 of 2026-09-22).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildGasParamsError {
+    /// The warm ionised layer and the central molecular disc drawn for the galaxy weigh at least as
+    /// much as its whole gas disc, which leaves the neutral layer nothing.
+    ///
+    /// Both are drawn in absolute terms (ruling 19), so a galaxy with too little gas for them is
+    /// possible. No drawn galaxy comes near it — over 2,000 seeds the neutral layer keeps at least
+    /// 0.53 of the gas, because plan 02 couples a light galaxy to a short disc — but a galaxy built
+    /// by hand at the corner of plan 02's ranges can: the lightest thin disc with the longest scale
+    /// length and the least gas.
+    NoNeutralGas {
+        /// Plan 02's gas disc mass.
+        gas_mass: SolarMasses,
+        /// The warm ionised layer's mass, from its drawn density and height.
+        warm_mass: SolarMasses,
+        /// The molecular disc's drawn mass.
+        molecular_mass: SolarMasses,
+    },
+}
+
+impl fmt::Display for BuildGasParamsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoNeutralGas {
+                gas_mass,
+                warm_mass,
+                molecular_mass,
+            } => write!(
+                f,
+                "a warm ionised layer of {:.3e} M☉ and a molecular disc of {:.3e} M☉ leave nothing \
+                 of a {:.3e} M☉ gas disc for the neutral layer",
+                warm_mass.value(),
+                molecular_mass.value(),
+                gas_mass.value()
+            ),
+        }
+    }
+}
+
+impl Error for BuildGasParamsError {}
+
 /// Every parameter the gas field needs: plan 02's three, and the eleven drawn here.
 ///
 /// It is immutable and a pure function of the seed, the galaxy's parameters and the generator
@@ -299,7 +344,7 @@ impl LaneParams {
 ///
 /// let seed = Seed::new(0x0700_5eed);
 /// let galaxy = GalaxyParams::from_seed(seed, MassFunctionKind::default());
-/// let gas = GasParams::from_galaxy(seed, &galaxy);
+/// let gas = GasParams::from_galaxy(seed, &galaxy)?;
 /// // The mass and the scale length are plan 02's own, never redrawn.
 /// assert_eq!(gas.gas_mass(), galaxy.gas_disc().mass());
 /// assert_eq!(gas.radial_scale(), galaxy.gas_disc().length());
@@ -309,6 +354,7 @@ impl LaneParams {
 /// let shares = gas.neutral_fraction() + gas.warm_fraction() + gas.molecular_disc().fraction();
 /// assert!((shares - 1.0).abs() < 1e-15);
 /// assert!(gas.neutral_fraction() > 0.5);
+/// # Ok::<(), hyperion_sim::galaxy::gas::params::BuildGasParamsError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GasParams {
@@ -345,13 +391,21 @@ impl GasParams {
     pub const PRESSURE_HEIGHT: LightYears = LightYears::new(1_500.0);
 
     /// The velocity dispersion `σ_P` of Design note 11's hydrostatic pressure, a constant of the
-    /// generator version.
+    /// generator version: 5.15 km/s.
     ///
-    /// 5.5 km/s is calibrated so that the Milky Way fixture's mid-plane pressure at 26,000 ly is
-    /// the measured 3,800 K cm⁻³ (Jenkins and Tripp 2011, ApJ 734, 65), which P07.T5 checks. It is
-    /// of the order of the neutral medium's turbulent and thermal speeds, as a hydrostatic layer
-    /// requires.
-    pub const PRESSURE_SPEED: KilometresPerSecond = KilometresPerSecond::new(5.5);
+    /// It is of the order of the neutral medium's turbulent and thermal speeds, as a hydrostatic
+    /// layer requires, and it is calibrated at the Milky Way fixture against two measurements
+    /// together (P07.T5). The mid-plane thermal pressure at 26,000 ly is 3,800 K cm⁻³ (Jenkins and
+    /// Tripp 2011, ApJ 734, 65: log(P ÷ k) of 3.58 with a dispersion of at least 0.175 dex among
+    /// the cold neutral medium's sight lines), held to 3,400–4,200; and the hot phase fills a fifth
+    /// to two fifths of the plane's volume for `σ_ln` of 2–2.5 (brainstorm, "Between the stars"),
+    /// held to 0.17–0.41, which a denser plane needs a higher pressure for. Design note 11's 5.5
+    /// km/s was set when the fixture's disc gas in the plane was 0.70 cm⁻³; ruling 19 raised it to
+    /// 0.83, which at 5.5 km/s gives 4,670 K cm⁻³, and 4.9 km/s, which gives 3,790, leaves the hot
+    /// phase 16% of the plane at `σ_ln` 2.0. Both hold for 5.10–5.19 km/s; 5.15 gives 4,145 K cm⁻³, 0.04 dex
+    /// above the measured mean, and a hot share of 0.17–0.38 (plan 07, Risks). P07.T12 tunes it
+    /// again with the rest of the fixture.
+    pub const PRESSURE_SPEED: KilometresPerSecond = KilometresPerSecond::new(5.15);
 
     /// The gas parameters of the galaxy `params`, with `seed` keying this plan's own draws.
     ///
@@ -359,15 +413,15 @@ impl GasParams {
     /// its fixed index, so nothing plan 02 drew moves and the order of the draws below is
     /// immaterial.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the warm ionised layer and the molecular disc drawn here outweigh plan 02's gas mass, so
-    /// that nothing is left for the neutral disc. No seeded galaxy comes near it — over 2,000 seeds
-    /// the neutral disc keeps at least half the gas (`tests/gas_statistics.rs`) — because plan 02
-    /// couples a light galaxy to a short disc; a galaxy built by hand at the corner of plan 02's
-    /// ranges, the lightest thin disc with the longest scale length and the least gas, can reach it.
-    #[must_use]
-    pub fn from_galaxy(seed: Seed, params: &GalaxyParams) -> Self {
+    /// [`BuildGasParamsError::NoNeutralGas`] if the warm ionised layer and the molecular disc drawn
+    /// here outweigh plan 02's gas mass, so that nothing is left for the neutral disc (ruling 22 of
+    /// 2026-09-22). No seeded galaxy comes near it — over 2,000 seeds the neutral disc keeps at
+    /// least half the gas (`tests/gas_statistics.rs`) — because plan 02 couples a light galaxy to a
+    /// short disc; a galaxy built by hand at the corner of plan 02's ranges, the lightest thin disc
+    /// with the longest scale length and the least gas, can reach it.
+    pub fn from_galaxy(seed: Seed, params: &GalaxyParams) -> Result<Self, BuildGasParamsError> {
         let mut stream = Stream::open(seed, tags::GAS_PARAMS, ObjectKey::galaxy());
         let drawn = core::array::from_fn(|i| Drawn::ALL[i].draw(&mut stream));
         Self::of_galaxy(params, drawn)
@@ -381,14 +435,22 @@ impl GasParams {
     /// molecular disc is the nuclear disc's 290 ly by 58 ly, and the rest are the measured values
     /// where the brainstorm states one and the middle of the range otherwise. P07.T12 tunes them
     /// against the brainstorm's targets.
+    ///
+    /// # Panics
+    ///
+    /// Never: the fixture's neutral disc holds 85% of its gas.
     #[must_use]
     pub fn milky_way_like() -> Self {
         Self::of_galaxy(&GalaxyParams::milky_way_like(), MILKY_WAY_DRAWN)
+            .expect("the fixture's neutral disc holds 85% of its gas")
     }
 
     /// The parameters of `params` with `drawn` in Design note 3's table order: what
     /// [`from_galaxy`](Self::from_galaxy) and [`milky_way_like`](Self::milky_way_like) share.
-    fn of_galaxy(params: &GalaxyParams, drawn: [f64; DRAWN_COUNT]) -> Self {
+    fn of_galaxy(
+        params: &GalaxyParams,
+        drawn: [f64; DRAWN_COUNT],
+    ) -> Result<Self, BuildGasParamsError> {
         let [
             hole_ratio,
             warm_density,
@@ -412,14 +474,15 @@ impl GasParams {
             warm_height,
         );
         let neutral_mass = gas_mass.value() - warm_mass - molecular_mass;
-        assert!(
-            neutral_mass > 0.0,
-            "a warm layer of {warm_mass:e} M☉ and a molecular disc of {molecular_mass:e} M☉ \
-             outweigh the gas disc's {:e} M☉",
-            gas_mass.value()
-        );
+        if neutral_mass.is_nan() || neutral_mass <= 0.0 {
+            return Err(BuildGasParamsError::NoNeutralGas {
+                gas_mass,
+                warm_mass: SolarMasses::new(warm_mass),
+                molecular_mass: SolarMasses::new(molecular_mass),
+            });
+        }
         let molecular_length = params.nuclear_disc().length();
-        Self {
+        Ok(Self {
             gas_mass,
             radial_scale: disc.length(),
             hole_scale,
@@ -441,7 +504,7 @@ impl GasParams {
                 width: LightYears::new(lane_width),
                 fraction: lane_fraction,
             },
-        }
+        })
     }
 
     /// The gas disc's mass, plan 02's
@@ -685,11 +748,11 @@ mod tests {
     fn every_parameter_lies_in_its_range_over_2000_seeds() {
         let fixture = GalaxyParams::milky_way_like();
         for seed in seeds(2_000) {
-            assert_in_ranges(&fixture, &GasParams::from_galaxy(seed, &fixture));
+            assert_in_ranges(&fixture, &GasParams::from_galaxy(seed, &fixture).unwrap());
         }
         for seed in seeds(32) {
             let galaxy = galaxy(seed);
-            assert_in_ranges(&galaxy, &GasParams::from_galaxy(seed, &galaxy));
+            assert_in_ranges(&galaxy, &GasParams::from_galaxy(seed, &galaxy).unwrap());
         }
     }
 
@@ -717,9 +780,9 @@ mod tests {
     fn the_same_seed_gives_the_same_parameters_and_others_differ() {
         let fixture = GalaxyParams::milky_way_like();
         let seed = Seed::new(0x0700_5eed_0000_0007);
-        let once = GasParams::from_galaxy(seed, &fixture);
-        assert_eq!(once, GasParams::from_galaxy(seed, &fixture));
-        let other = GasParams::from_galaxy(Seed::new(seed.get() + 1), &fixture);
+        let once = GasParams::from_galaxy(seed, &fixture).unwrap();
+        assert_eq!(once, GasParams::from_galaxy(seed, &fixture).unwrap());
+        let other = GasParams::from_galaxy(Seed::new(seed.get() + 1), &fixture).unwrap();
         assert_ne!(once, other);
     }
 
@@ -762,7 +825,7 @@ mod tests {
         };
         let fixture = GalaxyParams::milky_way_like();
         for seed in seeds(2_000) {
-            let gas = GasParams::from_galaxy(seed, &fixture);
+            let gas = GasParams::from_galaxy(seed, &fixture).unwrap();
             let hot = temperature(&gas);
             assert!(hot > 1e5, "the corona is {hot} K for {seed:?}");
         }

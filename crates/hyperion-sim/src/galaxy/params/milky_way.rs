@@ -54,7 +54,11 @@ pub(super) fn inputs() -> Inputs {
         stellar_mass: 6.0e10,
         // The thick disc about a tenth, and the bulge with its bar 31%: "roughly a quarter to 30%"
         // of the stellar mass (Bland-Hawthorn and Gerhard 2016, ARA&A 54, 529), the bar 30% of it
-        // (Portail et al. 2017, MNRAS 465, 1621; plan 02, Risks, R1).
+        // (Portail et al. 2017, MNRAS 465, 1621; plan 02, Risks, R1). Bland-Hawthorn and Gerhard's
+        // figure (§4.2.4, 0.3 ± 0.06) is the stellar mass in the bulge box with the inner disc's
+        // stars included, while this model adds its thin and thick discs inside the box as well:
+        // the box holds 2.48 × 10¹⁰ M☉ against Portail et al.'s measured 1.85 ± 0.05 (plan 02,
+        // Risks, R23).
         share_thick: 0.10,
         share_bulge_bar: 0.31,
         share_bar_of_bulge: 0.30,
@@ -66,10 +70,14 @@ pub(super) fn inputs() -> Inputs {
         // The middle of 5–9 Gyr: a present formation rate about half the past average, against
         // Licquia and Newman's 1.65 ± 0.19 M☉ a year.
         sfh_timescale: 7.0 * GYR,
-        // 2.15 kpc, Bovy and Rix's (2013, ApJ 779, 115) mass-weighted 2.15 ± 0.14 and inside
-        // Bland-Hawthorn and Gerhard's (2016) 2.6 ± 0.5: the lever P02.T11 sanctions for bringing
-        // the stars' surface density at the Sun's radius from 39 to 30.5 M☉ pc⁻², inside the
-        // measured 29–38, which the local number and mass densities scale with. The height is the
+        // 2.15 kpc, Bovy and Rix's (2013, ApJ 779, 115) mass-weighted 2.15 ± 0.14 (the whole
+        // stellar disc's, its mono-abundance populations summed by mass, not the thin disc's
+        // alone) and inside Bland-Hawthorn and Gerhard's (2016) 2.6 ± 0.5: the lever P02.T11
+        // sanctions for bringing the stars' surface density at the Sun's radius from 39 to 30.5
+        // M☉ pc⁻², inside McKee et al.'s (2015) 33.4 ± 3 (32.2 without brown dwarfs) and 1.9
+        // standard deviations under Bovy and Rix's 38 ± 4, which the local number and mass
+        // densities scale with. The drawn size law still centres on the 8,480 ly this replaced
+        // (plan 02, Risks, R23). The height is the
         // thin disc's effective height Σ ÷ 2ρ₀: 1,100 ly, 337 pc, inside the measured 300 ± 50 pc,
         // and it is the height and not the measured surface density that moves to meet the density
         // bracket (plan 02, ruling 8 of 2026-09-22). Its cored profiles then fall off as 282 pc far
@@ -79,7 +87,10 @@ pub(super) fn inputs() -> Inputs {
         // 285 ly in place of the brainstorm's 130–200 ly, which is 40–60 pc and so molecular gas
         // rather than a stellar cohort, and which gave the young disc a mid-plane dispersion of
         // 2–3.5 km/s, under the brainstorm's own 5 km/s floor (plan 02, ruling 3 of 2026-09-22).
-        // Here it gives 6.2 km/s; the floor is met from 227 ly up. 285 ly is an effective height of
+        // Here it gives 6.16 km/s at the reference radius, three thin scale lengths out, where the
+        // floor is met from 229 ly up; at the Sun's radius the profile's own Jeans dispersion is
+        // 4.35 km/s, so plan 08's floor (P08.T2.c), not this height, holds the young disc at 5
+        // km/s over most of the disc (plan 02, Risks, R23). 285 ly is an effective height of
         // 87 pc, where the youngest measured cohorts are (Bovy 2017, MNRAS 470, 1360, Table 1: A
         // dwarfs of z_d = 37–56 pc in sech²(Z ÷ 2z_d), an effective height 2z_d of 75–110 pc).
         young_height: 285.0,
@@ -88,7 +99,10 @@ pub(super) fn inputs() -> Inputs {
         // nearest, where 0.77 and 3.0 held it at 2.0 by 0.9 on the thin disc before P02.T11's tuning.
         thick_length_ratio: 0.9,
         thick_height_ratio: 2.7,
-        // 0.70 × 0.44 × 0.25 kpc, a boxy exponential (Wegg and Gerhard 2013, MNRAS 435, 1874).
+        // The brainstorm's 2,280 × 1,440 × 820 ly ("Populations"), a boxy exponential after Wegg
+        // and Gerhard (2013, MNRAS 435, 1874), whose scale lengths are 0.70 : 0.44 : 0.18 kpc: the
+        // 820 ly (0.25 kpc) is their vertical scale height at x = 0.525 kpc, not the minor axis's
+        // 0.18 kpc, which would put c ÷ a at 0.26, under the drawn 0.3–0.4 (plan 02, Risks, R23).
         bulge_length: Size::Fixed(2_280.0),
         bulge_b_over_a: 1_440.0 / 2_280.0,
         bulge_c_over_a: 820.0 / 2_280.0,

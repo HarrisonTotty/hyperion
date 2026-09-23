@@ -266,6 +266,74 @@ impl Drop for TestServer {
     }
 }
 
+/// A compact JSON frame laid out as `serde_json::to_string_pretty` lays it out, two spaces an
+/// indent, with every string and number copied as it arrived.
+///
+/// This is how a golden pins a frame the server sent without a decoder in between: `serde_json`
+/// without its `float_roundtrip` feature can read a float a last bit out, so a golden written from
+/// a parsed and re-printed message can miss a one-ulp move on the server. The frame must be
+/// compact, as the server writes it, with no whitespace outside strings.
+///
+/// # Panics
+///
+/// If the brackets are unbalanced.
+pub fn pretty_json_frame(compact: &str) -> String {
+    fn break_line(out: &mut String, depth: usize) {
+        out.push('\n');
+        for _ in 0..depth {
+            out.push_str("  ");
+        }
+    }
+
+    let mut out = String::with_capacity(2 * compact.len());
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = compact.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '{' | '[' => {
+                out.push(c);
+                let close = if c == '{' { '}' } else { ']' };
+                if chars.next_if_eq(&close).is_some() {
+                    out.push(close);
+                } else {
+                    depth += 1;
+                    break_line(&mut out, depth);
+                }
+            }
+            '}' | ']' => {
+                depth = depth.checked_sub(1).expect("the frame's brackets balance");
+                break_line(&mut out, depth);
+                out.push(c);
+            }
+            ',' => {
+                out.push(c);
+                break_line(&mut out, depth);
+            }
+            ':' => out.push_str(": "),
+            other => out.push(other),
+        }
+    }
+    assert_eq!(depth, 0, "the frame's brackets balance");
+    out
+}
+
 /// A WebSocket client speaking `hyperion-protocol`.
 #[derive(Debug)]
 pub struct TestClient {

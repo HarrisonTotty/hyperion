@@ -1499,3 +1499,39 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     now carry these figures; the Criterion medians first recorded stay there, labelled as the spread
     under load (a validation run at load 13–15 read quantising three to five times slower than they
     do, and the query's cold path faster than its uncached one).
+- **The `systems_in_range` wire golden (generator version 11).** This closes the gap the validation
+  of T14.e left: T14.e compares a cold answer with a cold one, which cannot see an answer that moves
+  the same way on every run. `tests/systems_in_range.rs`'s
+  `the_answer_to_a_fixed_query_is_the_golden_response` writes `tests/golden/systems_in_range.golden`
+  under the version header, so every bump re-blesses it.
+  - _The query._ Seed `0x4d2`, 40 ly of the Sun-like point (0, 26,000, 0), 250 years before the
+    epoch, every layer wanted, a limit of 100. The limit, not the floor, stops the census: E and D
+    are expected to hold 7.3 and 26.3 systems and fit, while C's 146.1 would not, so the census pins
+    both kinds of line with all five expected counts. The answer is 33 systems, 5 of layer E and 28
+    of D, from the young and old thin discs and the halo, in 734 lines. Their ages are taken at a
+    time that is not the epoch. The other tests' 50 ly sphere at the default limit holds about
+    2,000 systems, too many to review, and at a limit of 100 it still returns 76.
+  - _It pins the frame as it arrived, not a parse of it._ `galaxy_parameters.golden` is written
+    from the parsed response, printed again, and that is lossy: `serde_json` without
+    `float_roundtrip` reads some floats a last bit out. Of this answer's 185 floats, 16 (13 offsets
+    and 3 ages) do not survive a parse and a print, so a golden of the parse would miss a one-ulp
+    move of any of them. The test reads the raw frame (`next_text`) and lays it out as pretty JSON
+    with every string and number copied byte for byte (`common::pretty_json_frame`). It first checks
+    that the re-indenter reproduces `to_string_pretty` exactly on the same message. The golden holds
+    the envelope too (`"type": "response"`, the request ID).
+  - _Before writing, the test asserts what the golden is for._ Exactly D and E are included and C is
+    over the limit, 20–60 systems come back with both layers among them, and the answer is the
+    sim's own for the same terms (`assert_answer_is_the_sims`).
+  - _Perturbed on purpose in the server's conversion (`convert.rs`), it goes red each time._ First,
+    one record's y offset moved by one ulp, `4154989895682880.5` → `…881.0` at line 83. A golden of
+    the parse would have missed that one, since the parse already read `…880.5` as `…881.0`.
+    Second, two neighbouring records swapped, with the comparison with the sim taken out, since
+    that comparison catches the order first: line 293, the ID. Third, layer A's expected count moved
+    by one ulp, at line 33.
+  - _For the orchestrator, not changed here._ `galaxy_parameters.golden` has the same flaw. 8 of
+    its 790 lines hold a parse a last bit off the wire, for example `0.9572388262874673` sent and
+    `…671` pinned. Writing it from `pretty_json_frame` of the raw frame would move those 8 lines and
+    nothing the server sends. **Done at the version-11 merge (orchestrator):** the test now pins the
+    whole frame as it arrived, including its `type`, `id` and `body` envelope, and checks that its
+    parse equals the parsed response. Re-blessed in the same window, the file differs from its
+    version-10 form only in the envelope, the indentation, the version and nine last-bit values.

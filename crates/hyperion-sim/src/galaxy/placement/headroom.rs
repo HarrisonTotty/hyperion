@@ -134,6 +134,7 @@ mod tests {
 
     fn milky_way() -> Galaxy {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
     #[test]
@@ -252,7 +253,8 @@ mod tests {
             .nuclear_height_ratio(0.3)
             .build()
             .expect("every value is inside its range");
-        let galaxy = Galaxy::from_params(Seed::new(SEED | 2), params);
+        let galaxy = Galaxy::from_params(Seed::new(SEED | 2), params)
+            .expect("this galaxy's gas is mostly neutral");
         let error = check_index_headroom(&galaxy).unwrap_err();
         let ExceedIndexCapacityError::LayerTooDense {
             layer,

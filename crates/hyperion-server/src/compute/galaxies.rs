@@ -516,7 +516,7 @@ mod tests {
                 .nuclear_height_ratio(0.3)
                 .build()
                 .expect("every value is inside its range");
-            Galaxy::from_params(seed, params)
+            Galaxy::from_params(seed, params).expect("this galaxy's gas is mostly neutral")
         });
         let refusal = async || {
             let error = timeout(WAIT, cache.get(key(3)))

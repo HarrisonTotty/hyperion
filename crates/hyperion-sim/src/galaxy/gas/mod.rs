@@ -17,7 +17,16 @@
 //! `f64` whose unit their documentation states, as plan 02's fields do; the facade that assembles
 //! them wraps both in newtypes.
 
+pub mod ccm;
+pub mod extinction;
+pub mod field;
+pub mod lanes;
+pub mod map;
+pub mod modifiers;
+pub mod noise;
 pub mod params;
+pub mod phase;
+pub mod pressure;
 pub mod smooth;
 
 use crate::units::consts::{HYDROGEN_MASS_KG, METRES_PER_LIGHT_YEAR, SOLAR_MASS_KG};
@@ -52,8 +61,16 @@ pub const SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY: f64 =
 /// as the protons (Design note 12).
 ///
 /// It turns a pressure P ÷ k and a density n into the equilibrium temperature T = (P ÷ k) ÷ (x n),
-/// which is what labels a point's phase. Neutral gas takes 1.1 instead.
+/// which is what labels a point's phase. Neutral gas takes
+/// [`NEUTRAL_PARTICLES_PER_HYDROGEN`] instead.
 pub const IONISED_PARTICLES_PER_HYDROGEN: f64 = 2.3;
+
+/// Particles per hydrogen nucleus in neutral gas, 1.1: the atoms and the helium's tenth (Design
+/// note 12).
+///
+/// The warm and cold phases' thresholds are taken with it: gas is warm down to 5,000 K, which is
+/// `n < P ÷ (1.1 × 5,000 k)`.
+pub const NEUTRAL_PARTICLES_PER_HYDROGEN: f64 = 1.1;
 
 #[cfg(test)]
 mod tests {

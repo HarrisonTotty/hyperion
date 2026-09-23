@@ -309,6 +309,13 @@ impl Component {
         self.metallicity.at((p.x * p.x + p.y * p.y).sqrt(), age)
     }
 
+    /// The law [`metallicity`](Self::metallicity) reads, by value: the gas field copies the young
+    /// thin disc's, whose stars formed from its gas (plan 07, Design note 13).
+    #[must_use]
+    pub(crate) fn metallicity_model(&self) -> Metallicity {
+        self.metallicity
+    }
+
     /// The halo component a system of this component belongs to: the mark of the halo's mixture;
     /// `None` outside the halo.
     #[must_use]

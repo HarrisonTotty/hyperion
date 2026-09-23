@@ -264,7 +264,7 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// use hyperion_sim::id::Layer;
 /// use hyperion_sim::time::UniverseTime;
 ///
-/// let galaxy = Galaxy::from_params(Seed::new(19), GalaxyParams::milky_way_like());
+/// let galaxy = Galaxy::from_params(Seed::new(19), GalaxyParams::milky_way_like())?;
 /// let mut cache = NoCache::new();
 ///
 /// // A ship sitting on a generated system is in that system's frame.

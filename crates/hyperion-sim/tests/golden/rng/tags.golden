@@ -1,4 +1,4 @@
-# generator_version = 10
+# generator_version = 11
 selftest.stream (SelfTest) = 0xe8e7b5915e249927
 event.selftest (Event) = 0x9442133d71ca154d
 galaxy.params.stellar_mass (Galaxy) = 0x7d41a975d717b0a1
@@ -99,3 +99,4 @@ star.ev.lbv_eruption (Event) = 0xbcf073955e78c69d
 star.ev.thermal_pulse (Event) = 0x8d0f3f8e667a19b5
 star.var.cycle (Event) = 0xd11f43d4799c3c16
 gas.params (Galaxy) = 0x80346fd71dc90f62
+gas.noise (Galaxy) = 0xcf9e5499210106b6

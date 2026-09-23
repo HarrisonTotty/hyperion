@@ -32,6 +32,17 @@ use crate::time::UniverseTime;
 ///   not re-test them; it only sorts them in with the rest.
 /// - **A source is asked only for the layers the census admitted**, as a [`LayerSet`], and appends
 ///   nothing for any other layer. A source that has no member in those layers appends nothing.
+/// - **A source's IDs are its own.** Every hit it appends carries an ID that no grid system and no
+///   other source's hit carries, which [`SystemIdKind`](crate::id::SystemIdKind) makes natural:
+///   the grid's IDs are the grid kind, and a feature's, the centre's, a stream's, a dwarf core's,
+///   pinned content's and a catalogue class's each have a kind of their own. The hits are sorted
+///   by distance and then by ID, which is a strict order only while no ID appears twice, so a
+///   query asserts in debug builds that none does. A source that stands in for a grid system
+///   suppresses it (below) and returns its own ID in its place.
+/// - **Expected counts may be listed in any order.** A query sums the sources' counts layer by
+///   layer in value order, sorting each layer's contributions with [`f64::total_cmp`], not in the
+///   order the sources are listed, so the census does not depend on that order (ruling 23 of
+///   2026-09-22).
 /// - **Suppression is the one thing a source may say about another's systems.** A pinned volume
 ///   holds its own content, so [`suppresses`](Self::suppresses) lets it remove the grid systems
 ///   inside it. It is asked once per grid system that lies inside the sphere at its time, per
@@ -162,6 +173,7 @@ mod tests {
             Seed::new(0x0309_f000_0000_0000),
             GalaxyParams::milky_way_like(),
         )
+        .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
     fn sphere() -> QuerySphere {

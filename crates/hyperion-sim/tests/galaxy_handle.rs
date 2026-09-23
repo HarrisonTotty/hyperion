@@ -147,7 +147,8 @@ fn a_galaxy_handle_holds_the_parts_built_one_by_one() {
         &Galaxy::from_params(
             seed,
             GalaxyParams::from_seed(seed, MassFunctionKind::default()),
-        ),
+        )
+        .expect("this galaxy's gas is mostly neutral"),
     );
 }
 
@@ -155,11 +156,13 @@ fn a_galaxy_handle_holds_the_parts_built_one_by_one() {
 fn a_galaxy_handle_from_params_keeps_them_and_its_seed() {
     let params = GalaxyParams::milky_way_like();
     let seed = Seed::new(0x0209_0000_0000_0001);
-    let galaxy = Galaxy::from_params(seed, params.clone());
+    let galaxy =
+        Galaxy::from_params(seed, params.clone()).expect("this galaxy's gas is mostly neutral");
     assert_eq!(galaxy.seed(), seed);
     assert_same("params", galaxy.params(), &params);
     // The seed keys placement only: another seed gives the same galaxy otherwise.
-    let other = Galaxy::from_params(Seed::new(7), params);
+    let other =
+        Galaxy::from_params(Seed::new(7), params).expect("this galaxy's gas is mostly neutral");
     assert_same("fields", other.fields(), galaxy.fields());
     assert_same("potential", other.potential(), galaxy.potential());
     assert_same("shares", other.shares(), galaxy.shares());
@@ -198,7 +201,8 @@ fn every_share_column_of_a_galaxy_handle_sums_to_one() {
 #[test]
 fn layer_densities_of_a_galaxy_handle_sum_to_the_total() {
     let galaxies = [
-        Galaxy::from_params(Seed::new(1), GalaxyParams::milky_way_like()),
+        Galaxy::from_params(Seed::new(1), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral"),
         Galaxy::new(Seed::new(PINNED[2])),
         Galaxy::with_mass_function(Seed::new(PINNED[0]), MassFunctionKind::Kroupa),
     ];
@@ -262,7 +266,8 @@ fn galaxy_handle_layers_are_pinned() {
     write_layers(
         &mut w,
         "milky_way",
-        &Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like()),
+        &Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral"),
     );
     for s in PINNED {
         let seed = Seed::new(s);
@@ -283,8 +288,10 @@ fn a_galaxy_handle_is_the_same_when_built_twice() {
     );
     assert_same(
         "the fixture",
-        &Galaxy::from_params(seed, GalaxyParams::milky_way_like()),
-        &Galaxy::from_params(seed, GalaxyParams::milky_way_like()),
+        &Galaxy::from_params(seed, GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral"),
+        &Galaxy::from_params(seed, GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral"),
     );
     let galaxy = Galaxy::new(seed);
     assert_same("a clone", &galaxy, &galaxy.clone());
@@ -307,7 +314,8 @@ fn a_galaxy_handle_is_independent_of_what_was_built_before() {
         let galaxy = match *build {
             Build::Seed(s) => Galaxy::new(Seed::new(s)),
             Build::Kroupa(s) => Galaxy::with_mass_function(Seed::new(s), MassFunctionKind::Kroupa),
-            Build::Fixture => Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like()),
+            Build::Fixture => Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like())
+                .expect("the Milky Way fixture's gas is mostly neutral"),
         };
         fingerprint(&galaxy)
     });
@@ -315,7 +323,8 @@ fn a_galaxy_handle_is_independent_of_what_was_built_before() {
 
 #[test]
 fn the_galaxy_handle_reports_its_heap_size() {
-    let fixture = Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like());
+    let fixture = Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
     let mut sizes = vec![("fixture".to_owned(), fixture.heap_bytes())];
     for s in PINNED {
         let galaxy = Galaxy::new(Seed::new(s));

@@ -99,7 +99,8 @@ fn galaxies() -> [(&'static str, Galaxy); 2] {
     [
         (
             "mw",
-            Galaxy::from_params(Seed::new(FIXTURE_SEED), GalaxyParams::milky_way_like()),
+            Galaxy::from_params(Seed::new(FIXTURE_SEED), GalaxyParams::milky_way_like())
+                .expect("the Milky Way fixture's gas is mostly neutral"),
         ),
         ("drawn", Galaxy::new(Seed::new(DRAWN_SEED))),
     ]

@@ -9,8 +9,10 @@ use crate::id::Layer;
 /// The census of a query: how far down the layers its result is complete, and why it stops there.
 ///
 /// `grid` is the grid's expected count per layer over the unpadded sphere and `sources` the merged
-/// sources' together, summed from [`LayerCounts::ZERO`] in the order the sources are listed; the
-/// two are added layer by layer once. The layers are then tried from E to A. Each adds its
+/// sources' together, summed layer by layer in value order, each layer's contributions sorted with
+/// [`f64::total_cmp`] and added from the smallest, so that it does not depend on the order the
+/// sources are listed in ([`range_query`](super::range_query); ruling 23 of 2026-09-22); the two
+/// are added layer by layer once. The layers are then tried from E to A. Each adds its
 /// expected count to a running total that starts at 0 and runs in that order (Design note 8; the
 /// order is part of the output, as plan 02's D18 fixes the order of its component sums), and its
 /// cells in the padded sphere, from `cells_in_layer`, to a running count of cells. The walk stops

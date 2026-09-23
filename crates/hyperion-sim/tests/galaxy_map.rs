@@ -490,7 +490,8 @@ fn galaxy_map_values_are_pinned() {
     write_map(
         &mut w,
         "milky_way",
-        &Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like()),
+        &Galaxy::from_params(Seed::new(0), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral"),
     );
     for s in PINNED {
         let seed = Seed::new(s);

@@ -3,10 +3,10 @@
 
 mod common;
 
-use common::{TestClient, TestServer};
+use common::{TestClient, TestServer, pretty_json_frame};
 use hyperion_protocol::{
     CreateUniverseRequest, GalaxyParameters, GalaxyParametersRequest, OpenUniverseRequest,
-    RequestBody, RequestError, ResponseBody, SeedHex, UniverseIdHex, UniverseInfo,
+    RequestBody, RequestError, ResponseBody, SeedHex, ServerMessage, UniverseIdHex, UniverseInfo,
 };
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_testkit::golden;
@@ -64,11 +64,28 @@ async fn the_parameters_of_a_fixed_seed_are_the_golden_response() {
     assert_eq!(response.seed, SeedHex::from_u64(SEED));
     assert_eq!(response.generator_version, GENERATOR_VERSION.get());
 
-    // The response's own JSON, as the client receives it, under the golden header that ties it to
-    // the generator version: a version bump re-blesses this file.
+    // The frame as it arrived, under the golden header that ties it to the generator version (a
+    // version bump re-blesses this file), laid out as pretty JSON with every number copied byte for
+    // byte (`common::pretty_json_frame`). It is not written from the parsed response: `serde_json`
+    // without `float_roundtrip` reads a few of these floats a last bit out (nine of them, when the
+    // golden was first written from the parse), so a golden of the parse could not see the server
+    // move one of them by an ulp.
+    let id = client
+        .send_request(RequestBody::GalaxyParameters(GalaxyParametersRequest {
+            universe: universe.id.clone(),
+        }))
+        .await;
+    let frame = client.next_text().await;
+    match serde_json::from_str(&frame).unwrap() {
+        ServerMessage::Response {
+            id: answered,
+            body: ResponseBody::GalaxyParameters(again),
+        } if answered == id => assert_eq!(again, response),
+        other => panic!("expected the galaxy parameters, got {other:?}"),
+    }
     let mut golden = GoldenWriter::new();
     golden.header(GENERATOR_VERSION.get());
-    for line in serde_json::to_string_pretty(&response).unwrap().lines() {
+    for line in pretty_json_frame(&frame).lines() {
         golden.line(line);
     }
     golden!("galaxy_parameters", &golden.finish());

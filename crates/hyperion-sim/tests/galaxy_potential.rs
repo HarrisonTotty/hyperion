@@ -434,11 +434,19 @@ fn the_model_holds_the_parameters_masses() {
 /// relation's intrinsic scatter below it. The offset's check reaches −0.55 dex, not the −0.5 it
 /// held at R13's −0.421: P02.T11's tuning raised σ from 119.3 km/s, and the offset follows σ,
 /// since what it is fixed by is Sgr A*'s measured mass.
+///
+/// That is also why the black hole itself is held to Sgr A*'s (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY
+/// Collaboration 2022, A&A 657, L12) to 1%: the offset is a measured fact about the Milky Way only
+/// through the mass it reproduces. Without this, σ could fall 4% and the black hole with it to
+/// 3.4 × 10⁶ M☉ with no check but the goldens noticing, since the checks below stop a rise of 1%
+/// but a fall only at 8%, and the slow enclosed mass at 1 pc at 5.4% (plan 02, Risks, R23). A σ
+/// that moves by more than 0.2% now fails here until the offset is re-set.
 #[test]
 fn the_fixture_black_hole_follows_m_sigma() {
     let params = GalaxyParams::milky_way_like();
     let bh = params.black_hole();
     let sigma = bh.bulge_dispersion();
+    assert_relative("black hole ÷ Sgr A*'s", bh.mass().value(), 4.297e6, 0.01);
     assert_within("σ", sigma.value(), 95.0, 125.0);
     assert_relative(
         "M–σ with the fixture's offset",

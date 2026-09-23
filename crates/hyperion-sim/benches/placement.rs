@@ -129,7 +129,8 @@ fn cell_at(layer: Layer, ly: f64) -> CellKey {
 /// A layer-A cell at the Sun-like point, and one 35,000 ly out at the rim: the sparse fine cells the
 /// brainstorm's 1–2 µs target is about.
 fn sparse_fine_cell(c: &mut Criterion) {
-    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like());
+    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
     let mut out = Vec::new();
     let mut group = c.benchmark_group("placement");
     for (label, key) in [
@@ -161,7 +162,8 @@ fn sparse_fine_cell(c: &mut Criterion) {
 
 /// One cell of each layer at the Sun-like point, and a layer-A cell in the bulge.
 fn cell_by_layer(c: &mut Criterion) {
-    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like());
+    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
     let sun = sunlike_point();
     let mut out = Vec::new();
     let mut group = c.benchmark_group("placement");
@@ -181,7 +183,8 @@ fn cell_by_layer(c: &mut Criterion) {
 /// One ID resolved in a sparse cell and one in the fullest layer-A cell there is, which "Identifiers"
 /// requires to cost the same.
 fn resolve_one(c: &mut Criterion) {
-    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like());
+    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
     let sparse = CellKey::containing(Layer::A, &sunlike_point()).expect("inside the root cube");
     // The fullest layer-A cell is the one at the galactic centre, where every component peaks
     // (plan 03, Design note 6: about 6,000 candidates of the 65,536 a layer-A cell can hold).

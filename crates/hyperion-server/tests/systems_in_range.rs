@@ -3,20 +3,20 @@
 //!
 //! Every query here is over one fixed seed, so the systems, their IDs and their marks are the ones
 //! the sim resolves for that seed: the test builds the same galaxy and checks the wire against it.
+//! One answer is also pinned whole, as JSON, in `golden/systems_in_range.golden`.
 
 mod common;
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
-use common::{TestClient, TestServer};
+use common::{TestClient, TestServer, pretty_json_frame};
 use hyperion_protocol::{
     Census, ErrorCode, GalacticPosition, LayerStatus, MassLayer, RequestBody, RequestError,
     ResponseBody, ServerMessage, SystemRecord, SystemsInRange, SystemsInRangeRequest,
     UniverseIdHex, UniverseTime,
 };
 use hyperion_server::limits::MAX_QUERY_CELLS;
-use hyperion_sim::Seed;
 use hyperion_sim::coords::LyCell;
 use hyperion_sim::galaxy::placement::{NoCache, resolve};
 use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, RangeResult, range_query};
@@ -24,6 +24,9 @@ use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses};
+use hyperion_sim::{GENERATOR_VERSION, Seed};
+use hyperion_testkit::golden;
+use hyperion_testkit::golden::GoldenWriter;
 
 /// The seed of every universe these tests create.
 const SEED: u64 = 0x4d2;
@@ -348,6 +351,93 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
     // And the whole answer is the sim's own for the same terms, census and all.
     let (sim_query, result) = sim_answer(&galaxy, &query);
     assert_answer_is_the_sims(&answer, &sim_query, &result);
+
+    client.close().await;
+    server.stop().await;
+}
+
+/// The answer on the wire to one fixed query, pinned under the generator version (plan 04's Risks:
+/// T14.e compares a cold answer with a cold one, which cannot see an answer that moves the same way
+/// on every run).
+///
+/// The query is forty light-years of the Sun-like point, 250 years before the epoch, under a limit
+/// of 100 expected systems. Layers E and D fit under it, about 33 systems expected, and C does not,
+/// with about 150 more, so the answer holds a few dozen systems from two layers, and the census
+/// pins both kinds of line, included and over the limit, with every layer's expected count. The
+/// records pin their order, IDs, positions, masses and populations, and their ages at a time that is
+/// not the epoch. Fifty light-years at the default limit, the other tests' sphere, holds about 2,000
+/// systems, too many to review.
+///
+/// The golden is the frame as it arrived, laid out as pretty JSON so that it can be reviewed but
+/// with every number copied byte for byte (`common::pretty_json_frame`). It is not written from the
+/// parsed answer, because `serde_json` without `float_roundtrip` reads some of these floats a last
+/// bit out: 16 of this answer's 185 (13 offsets and 3 ages) do not survive a parse and a print, so
+/// a golden of the parse could not see the server move one of them by an ulp.
+#[tokio::test]
+async fn the_answer_to_a_fixed_query_is_the_golden_response() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let mut query = Query::sunlike();
+    query.radius_ly = 40.0;
+    query.time = at_years(-250);
+    query.limit = 100;
+    let id = client.send_request(query.body(&universe.id)).await;
+    let frame = client.next_text().await;
+    let message: ServerMessage = serde_json::from_str(&frame).unwrap();
+    // The layout is `serde_json`'s own, which the re-indenter must reproduce: on the parse printed
+    // compactly, it gives exactly what `to_string_pretty` gives.
+    assert_eq!(
+        pretty_json_frame(&serde_json::to_string(&message).unwrap()),
+        serde_json::to_string_pretty(&message).unwrap()
+    );
+    let answer = match message {
+        ServerMessage::Response {
+            id: answered,
+            body: ResponseBody::SystemsInRange(answer),
+        } if answered == id => answer,
+        other => panic!("expected the systems in range, got {other:?}"),
+    };
+
+    // What the golden is for: a census stopped by the limit, with more than one layer in it, and an
+    // answer short enough to review.
+    let included: Vec<MassLayer> = answer
+        .census
+        .layers
+        .iter()
+        .filter(|line| line.status == LayerStatus::Included)
+        .map(|line| line.layer)
+        .collect();
+    assert_eq!(
+        included,
+        [MassLayer::D, MassLayer::E],
+        "{:?}",
+        answer.census
+    );
+    assert_eq!(status(&answer.census, MassLayer::C), LayerStatus::OverLimit);
+    assert!(
+        (20..=60).contains(&answer.systems.len()),
+        "{} systems",
+        answer.systems.len()
+    );
+    for layer in [MassLayer::D, MassLayer::E] {
+        assert!(
+            answer.systems.iter().any(|record| record.layer == layer),
+            "no system of layer {layer:?}"
+        );
+    }
+    // And it is the sim's own answer, so the golden pins what the sim and the wire agree on.
+    let (sim_query, result) = sim_answer(&Galaxy::new(Seed::new(SEED)), &query);
+    assert_answer_is_the_sims(&answer, &sim_query, &result);
+
+    // The frame the client received, envelope and all, under the golden header that ties it to the
+    // generator version: a version bump re-blesses this file.
+    let mut golden = GoldenWriter::new();
+    golden.header(GENERATOR_VERSION.get());
+    for line in pretty_json_frame(&frame).lines() {
+        golden.line(line);
+    }
+    golden!("systems_in_range", &golden.finish());
 
     client.close().await;
     server.stop().await;

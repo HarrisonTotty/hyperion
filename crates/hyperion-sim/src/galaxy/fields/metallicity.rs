@@ -12,18 +12,23 @@
 //! provisional and marked there for re-checking against Bland-Hawthorn and Gerhard (2016, ARA&A
 //! 54, 529):
 //!
-//! - thin discs, young and old: mean `gradient × (R − 3 lengths) − 0.1 dex per Gyr × max(0, age − 8
-//!   Gyr)`, clamped to [−1.0, +0.5], sigma 0.20. Gaia-ESO finds the relation "nearly flat" for 0–8
-//!   Gyr, falling beyond 9 Gyr, with "a significant scatter of \[Fe/H\] at any age" (Bergemann et
-//!   al. 2014, A&A 565, A89, §5); the slope beyond is read from their Fig. 6, which gives no
+//! - thin discs, young and old: mean `gradient × (R − 3.8 lengths) − 0.1 dex per Gyr × max(0, age −
+//!   8 Gyr)`, clamped to [−1.0, +0.5], sigma 0.20. Gaia-ESO finds the relation "nearly flat" for
+//!   0–8 Gyr, falling beyond 9 Gyr, with "a significant scatter of \[Fe/H\] at any age" (Bergemann
+//!   et al. 2014, A&A 565, A89, §5); the slope beyond is read from their Fig. 6, which gives no
 //!   number. The scatter is the width of the Geneva–Copenhagen survey's local distribution over
 //!   every age, σ 0.22 and half its FWHM 0.19 (Casagrande et al. 2011, A&A 530, A138, Table 1),
 //!   held at every age as the rulings have it, although the survey finds young stars' narrower.
-//!   The flat part is solar three scale lengths out, about the Sun's radius, as the youngest local
-//!   stars and the gas are: Fe 7.52 ± 0.03 against the Sun's 7.50 ± 0.04 (Nieva and Przybilla
-//!   2012, A&A 539, A143, Table 7). With the declining formation history the local mean over every
-//!   age then comes to −0.03 to −0.04, against the survey's −0.06 over its own, differently
-//!   weighted, sample. The clamp is plan 02's;
+//!   The flat part is solar at the Sun's radius, as the youngest local stars and the gas are: Fe
+//!   7.52 ± 0.03 against the Sun's 7.50 ± 0.04 (Nieva and Przybilla 2012, A&A 539, A143, Table 7).
+//!   The Sun's radius is taken in units of the thin disc's scale length, the Milky Way's R₀ ÷ `R_d`
+//!   = 3.8 ([`THIN_DISC_SOLAR_ANCHOR_LENGTHS`]), because discs' gradients are self-similar in
+//!   those units, so every drawn disc is solar at its own solar circle. On the fixture's 7,000 ly
+//!   disc that is 26,600 ly, and the young disc's mean is −0.001 at R₀ and +0.009 at 26,000 ly.
+//!   With the declining formation history the local mean over every age and every component,
+//!   weighted by density, is −0.054 at R₀ and the Sun's height (−0.026 over the thin discs
+//!   alone), against the survey's −0.06 over its own, differently weighted, sample (plan 02,
+//!   R24). The clamp is plan 02's;
 //! - thick disc −0.55, sigma 0.25; bulge 0.0, 0.40; long bar 0.0, 0.30; nuclear disc +0.1, 0.30;
 //! - halo components their own means (in situ −0.6, dominant merger −1.2, lesser progenitors drawn
 //!   in −2.0 to −1.0, globular-born debris −1.5), sigma 0.3.
@@ -39,9 +44,18 @@ pub const THIN_DISC_AGE_SLOPE: f64 = -0.1;
 /// 2014: "nearly flat" for 0–8 Gyr).
 pub const THIN_DISC_FLAT_AGE: Years = Years::new(8.0 * YEARS_PER_GIGAYEAR);
 
-/// The reference radius of the thin discs' gradient in scale lengths: three, about the Sun's,
-/// where the flat part of the mean is solar.
-pub const THIN_DISC_REFERENCE_LENGTHS: f64 = 3.0;
+/// Where the flat part of the thin discs' mean is solar, in thin-disc scale lengths: the Sun's
+/// radius in the Milky Way's, R₀ ÷ `R_d`.
+///
+/// R₀ is 8.178 ± 0.013 (stat.) ± 0.022 (sys.) kpc (GRAVITY Collaboration 2019, A&A 625, L10) and
+/// `R_d` the mass-weighted scale length, 2.15 ± 0.14 kpc (Bovy and Rix 2013, ApJ 779, 115). Their
+/// ratio is 3.804 ± 0.25, rounded to 3.8 because the scale length's 6.5% leaves the third figure
+/// meaningless; on the fixture's 7,000 ly disc the rounding moves the anchor 26 ly, 4 × 10⁻⁴ dex.
+///
+/// It is metallicity's own and fixes nothing else: where the sub-discs' profiles and `K_z` are
+/// solved is the sub-discs' `REFERENCE_RADIUS_LENGTHS`, which stays at three scale lengths; the
+/// two were equal until this one moved (ruling 21 of 2026-09-22).
+pub const THIN_DISC_SOLAR_ANCHOR_LENGTHS: f64 = 3.8;
 
 /// The clamp on the thin discs' mean, dex: the young inner disc stays below +0.5 and the old
 /// outer disc above −1.0 (provisional).
@@ -113,7 +127,7 @@ impl Metallicity {
     pub(crate) fn thin_disc(gradient: DexPerKiloparsec, length: LightYears) -> Self {
         Self::ThinDisc {
             gradient: gradient.value() / LIGHT_YEARS_PER_KILOPARSEC,
-            reference_radius: THIN_DISC_REFERENCE_LENGTHS * length.value(),
+            reference_radius: THIN_DISC_SOLAR_ANCHOR_LENGTHS * length.value(),
         }
     }
 
@@ -140,22 +154,25 @@ mod tests {
 
     #[test]
     fn the_thin_disc_is_solar_at_the_sun_and_follows_its_gradient_and_age() {
-        let disc = Metallicity::thin_disc(DexPerKiloparsec::new(-0.05), LightYears::new(8_480.0));
+        let disc = Metallicity::thin_disc(DexPerKiloparsec::new(-0.05), LightYears::new(7_000.0));
         let gyr = |t: f64| Years::new(t * YEARS_PER_GIGAYEAR);
-        // Flat to 8 Gyr, and solar there at the reference radius.
+        // The anchor is R₀ ÷ R_d scale lengths out, 26,600 ly on a 7,000 ly disc.
+        let sun = 26_600.0;
+        assert!((THIN_DISC_SOLAR_ANCHOR_LENGTHS * 7_000.0 - sun).abs() < 1e-9);
+        // Flat to 8 Gyr, and solar there at the anchor.
         for age in [-1e3, 0.0, 0.05, 4.5, 8.0] {
-            let sun = disc.at(3.0 * 8_480.0, gyr(age));
-            assert!(sun.mean().value().abs() < 1e-15, "{age} Gyr");
-            assert!((sun.sigma().value() - 0.20).abs() < 1e-15);
+            let at_sun = disc.at(sun, gyr(age));
+            assert!(at_sun.mean().value().abs() < 1e-15, "{age} Gyr");
+            assert!((at_sun.sigma().value() - 0.20).abs() < 1e-15);
         }
-        let outer = disc.at(3.0 * 8_480.0 + LIGHT_YEARS_PER_KILOPARSEC, gyr(3.0));
+        let outer = disc.at(sun + LIGHT_YEARS_PER_KILOPARSEC, gyr(3.0));
         assert!((outer.mean().value() + 0.05).abs() < 1e-12);
         // Then 0.1 dex poorer for every gigayear beyond.
-        let older = disc.at(3.0 * 8_480.0, gyr(9.5));
+        let older = disc.at(sun, gyr(9.5));
         assert!((older.mean().value() + 0.15).abs() < 1e-12);
-        let oldest = disc.at(3.0 * 8_480.0, gyr(10.0));
+        let oldest = disc.at(sun, gyr(10.0));
         assert!((oldest.mean().value() + 0.2).abs() < 1e-12);
-        // The clamp holds the extremes: the steepest gradient in the longest disc reaches +0.74
+        // The clamp holds the extremes: the steepest gradient in the longest disc reaches +0.94
         // at its centre.
         let steep = Metallicity::thin_disc(DexPerKiloparsec::new(-0.07), LightYears::new(11_500.0));
         assert!((steep.at(0.0, Years::new(-1e3)).mean().value() - 0.5).abs() < 1e-15);

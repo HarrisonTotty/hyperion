@@ -1,0 +1,734 @@
+# generator_version = 11
+{
+  "type": "response",
+  "id": 2,
+  "body": {
+    "kind": "systems_in_range",
+    "universe": "5eed000000000001",
+    "centre": {
+      "cell_ly": [
+        0,
+        26000,
+        0
+      ],
+      "offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "radius_ly": 40.0,
+    "time": {
+      "seconds": -7889400000,
+      "nanos": 0
+    },
+    "census": {
+      "limit": 100,
+      "complete_above_msun": 2.5,
+      "layers": [
+        {
+          "layer": "a",
+          "mass_min_msun": 0.08,
+          "mass_max_msun": 0.5,
+          "expected": 697.3813852849585,
+          "returned": 0,
+          "status": "over_limit"
+        },
+        {
+          "layer": "b",
+          "mass_min_msun": 0.5,
+          "mass_max_msun": 0.75,
+          "expected": 123.2244266254026,
+          "returned": 0,
+          "status": "over_limit"
+        },
+        {
+          "layer": "c",
+          "mass_min_msun": 0.75,
+          "mass_max_msun": 2.5,
+          "expected": 146.0671926139225,
+          "returned": 0,
+          "status": "over_limit"
+        },
+        {
+          "layer": "d",
+          "mass_min_msun": 2.5,
+          "mass_max_msun": 8.0,
+          "expected": 26.279532303236113,
+          "returned": 28,
+          "status": "included"
+        },
+        {
+          "layer": "e",
+          "mass_min_msun": 8.0,
+          "mass_max_msun": 150.0,
+          "expected": 7.267009450520339,
+          "returned": 5,
+          "status": "included"
+        }
+      ]
+    },
+    "systems": [
+      {
+        "id": "6200596800000009",
+        "designation": "GPG 000P00 D-9",
+        "position": {
+          "cell_ly": [
+            10,
+            25999,
+            6
+          ],
+          "offset_m": [
+            6920645450867537.0,
+            4154989895682880.5,
+            9240749522009468.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.345606699259232,
+        "age_myr": 8257.661705998304,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "620059680000000e",
+        "designation": "GPG 000P00 D-14",
+        "position": {
+          "cell_ly": [
+            17,
+            25998,
+            2
+          ],
+          "offset_m": [
+            4072947365928578.0,
+            1867293767149077.8,
+            921865834472321.9
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.093402002389267,
+        "age_myr": 5463.190502423186,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "62005967fe000002",
+        "designation": "GPF 000P1Z D-2",
+        "position": {
+          "cell_ly": [
+            7,
+            26018,
+            -1
+          ],
+          "offset_m": [
+            2740210602483352.0,
+            6363861837858715.0,
+            2006702934723342.5
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 6.1605854394732,
+        "age_myr": 5119.634947763265,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "6200596800000014",
+        "designation": "GPG 000P00 D-20",
+        "position": {
+          "cell_ly": [
+            13,
+            26002,
+            14
+          ],
+          "offset_m": [
+            5287791275386227.0,
+            1531100233802298.2,
+            9234089005926746.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.155126925753407,
+        "age_myr": 9565.01704201546,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "6200596800000007",
+        "designation": "GPG 000P00 D-7",
+        "position": {
+          "cell_ly": [
+            0,
+            26016,
+            13
+          ],
+          "offset_m": [
+            4241627083525278.5,
+            4793119266323780.0,
+            2108118032618857.5
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.004473846312418,
+        "age_myr": 26.00489207167079,
+        "population": "young_thin_disc"
+      },
+      {
+        "id": "61ffd967fe000016",
+        "designation": "FPF 1Z0P1Z D-22",
+        "position": {
+          "cell_ly": [
+            -8,
+            25995,
+            -21
+          ],
+          "offset_m": [
+            312567042887145.6,
+            5198482099244544.0,
+            4002836617604956.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.107623280094627,
+        "age_myr": 9318.011164332665,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd967fe00000d",
+        "designation": "FPF 1Z0P1Z D-13",
+        "position": {
+          "cell_ly": [
+            -17,
+            25993,
+            -15
+          ],
+          "offset_m": [
+            5057266973283999.0,
+            6618210083522917.0,
+            663131970127058.9
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.670457645260327,
+        "age_myr": 5583.780457201096,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd96800000006",
+        "designation": "FPG 1Z0P00 D-6",
+        "position": {
+          "cell_ly": [
+            -4,
+            26017,
+            15
+          ],
+          "offset_m": [
+            5025371490752236.0,
+            8417976987249585.0,
+            8984459909282755.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 5.852895055811926,
+        "age_myr": 393.1941992168016,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd957fe000004",
+        "designation": "FPF 1Z0N1Z D-4",
+        "position": {
+          "cell_ly": [
+            -13,
+            25976,
+            -11
+          ],
+          "offset_m": [
+            3677544172254885.0,
+            276631533297501.22,
+            462279109212733.1
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.7490577784928494,
+        "age_myr": 5629.091861434472,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "62005967fe00000c",
+        "designation": "GPF 000P1Z D-12",
+        "position": {
+          "cell_ly": [
+            17,
+            25986,
+            -20
+          ],
+          "offset_m": [
+            7301514440443636.0,
+            8357827581518138.0,
+            6032978050652120.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.35572503646108,
+        "age_myr": 7621.965862904737,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd967fe000000",
+        "designation": "FPF 1Z0P1Z D-0",
+        "position": {
+          "cell_ly": [
+            -28,
+            25988,
+            -7
+          ],
+          "offset_m": [
+            8973045873866993.0,
+            3597060490162371.5,
+            3750998686210812.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.613075868934202,
+        "age_myr": 7199.557026108021,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "8200b2e00000002d",
+        "designation": "GPG 000B00 E-45",
+        "position": {
+          "cell_ly": [
+            1,
+            26028,
+            11
+          ],
+          "offset_m": [
+            8960202728868480.0,
+            8536431596853509.0,
+            5203640598284314.0
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 11.80099271436342,
+        "age_myr": 10463.806891696082,
+        "population": "halo"
+      },
+      {
+        "id": "61ffd9680000000c",
+        "designation": "FPG 1Z0P00 D-12",
+        "position": {
+          "cell_ly": [
+            -3,
+            25995,
+            30
+          ],
+          "offset_m": [
+            9200599430427196.0,
+            111755736344973.22,
+            8221218294771898.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 5.758969783117937,
+        "age_myr": 9012.347269301306,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "62005967fe00000b",
+        "designation": "GPF 000P1Z D-11",
+        "position": {
+          "cell_ly": [
+            9,
+            26029,
+            -8
+          ],
+          "offset_m": [
+            2154263725282862.0,
+            6104356909018061.0,
+            3446466949124806.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.8417961257357636,
+        "age_myr": 872.1914686577767,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd957fe00000b",
+        "designation": "FPF 1Z0N1Z D-11",
+        "position": {
+          "cell_ly": [
+            -23,
+            25976,
+            -5
+          ],
+          "offset_m": [
+            2165815667346307.2,
+            9136855988607046.0,
+            2846717108540213.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.8794365755735445,
+        "age_myr": 2104.4148393648907,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd95800000004",
+        "designation": "FPG 1Z0N00 D-4",
+        "position": {
+          "cell_ly": [
+            -19,
+            25976,
+            14
+          ],
+          "offset_m": [
+            8820006763919552.0,
+            290018318497367.75,
+            1355875166111936.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.048537909020415,
+        "age_myr": 3162.3041995054323,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "6200596800000019",
+        "designation": "GPG 000P00 D-25",
+        "position": {
+          "cell_ly": [
+            25,
+            25985,
+            14
+          ],
+          "offset_m": [
+            8586609969503612.0,
+            2041808736752566.0,
+            5278427294102413.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.5225215296387655,
+        "age_myr": 7561.43177411874,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd967fe000003",
+        "designation": "FPF 1Z0P1Z D-3",
+        "position": {
+          "cell_ly": [
+            -17,
+            26015,
+            -26
+          ],
+          "offset_m": [
+            4771443983413601.0,
+            6000866377611966.0,
+            2396231788378085.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 6.598563228477547,
+        "age_myr": 2661.691270922395,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "62005957fe000006",
+        "designation": "GPF 000N1Z D-6",
+        "position": {
+          "cell_ly": [
+            14,
+            25974,
+            -19
+          ],
+          "offset_m": [
+            8422666390859984.0,
+            6294265503191580.0,
+            8533755883977832.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 7.761722594194765,
+        "age_myr": 8626.264309174507,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd96800000010",
+        "designation": "FPG 1Z0P00 D-16",
+        "position": {
+          "cell_ly": [
+            -3,
+            26018,
+            29
+          ],
+          "offset_m": [
+            3875545145933852.0,
+            582758892481907.6,
+            5191784470748067.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.749503317346491,
+        "age_myr": 39.957053284443035,
+        "population": "young_thin_disc"
+      },
+      {
+        "id": "620059580000001e",
+        "designation": "GPG 000N00 D-30",
+        "position": {
+          "cell_ly": [
+            11,
+            25967,
+            1
+          ],
+          "offset_m": [
+            4901378772114267.0,
+            1623086249955640.8,
+            8023961436017784.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.9001805245058474,
+        "age_myr": 3489.4460300867463,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd96800000011",
+        "designation": "FPG 1Z0P00 D-17",
+        "position": {
+          "cell_ly": [
+            -11,
+            26013,
+            31
+          ],
+          "offset_m": [
+            8626201139773516.0,
+            4567966196858049.0,
+            2668259689087386.5
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.2645229639429383,
+        "age_myr": 2977.342709529489,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "620059580000000b",
+        "designation": "GPG 000N00 D-11",
+        "position": {
+          "cell_ly": [
+            6,
+            25964,
+            5
+          ],
+          "offset_m": [
+            4320340614107588.5,
+            8103030972433430.0,
+            3479739456683686.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.914913391298701,
+        "age_myr": 1815.4689177118548,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd96800000003",
+        "designation": "FPG 1Z0P00 D-3",
+        "position": {
+          "cell_ly": [
+            -29,
+            26018,
+            13
+          ],
+          "offset_m": [
+            7392513389668518.0,
+            7076662345225953.0,
+            8763953544480507.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.6244523748186106,
+        "age_myr": 6534.055037007603,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "6200596800000018",
+        "designation": "GPG 000P00 D-24",
+        "position": {
+          "cell_ly": [
+            14,
+            26019,
+            26
+          ],
+          "offset_m": [
+            9080499933328276.0,
+            9307895217916506.0,
+            8559248958404725.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.974300078290767,
+        "age_myr": 9739.142648026791,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "81ffb2a000000038",
+        "designation": "FPG 0Z0A00 E-56",
+        "position": {
+          "cell_ly": [
+            -7,
+            25983,
+            33
+          ],
+          "offset_m": [
+            5204130111899001.0,
+            5866776155617199.0,
+            1831432445487014.5
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 23.399182143175423,
+        "age_myr": 97.53591735380967,
+        "population": "young_thin_disc"
+      },
+      {
+        "id": "81ffb2dff0000017",
+        "designation": "FPF 0Z0B0Z E-23",
+        "position": {
+          "cell_ly": [
+            -26,
+            26004,
+            -29
+          ],
+          "offset_m": [
+            5599466770665427.0,
+            7299373374679690.0,
+            5937956554122897.0
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 16.822539365190107,
+        "age_myr": 9832.457564712746,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "61ffd96800000013",
+        "designation": "FPG 1Z0P00 D-19",
+        "position": {
+          "cell_ly": [
+            -30,
+            26024,
+            4
+          ],
+          "offset_m": [
+            1947893614177334.0,
+            5022427280197254.0,
+            1150316518377836.8
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.2503337356139514,
+        "age_myr": 4810.720245966374,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "8200b2dff0000019",
+        "designation": "GPF 000B0Z E-25",
+        "position": {
+          "cell_ly": [
+            31,
+            26022,
+            -3
+          ],
+          "offset_m": [
+            3224315174767774.0,
+            8601493774172328.0,
+            5355858870905593.0
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 9.739257758396915,
+        "age_myr": 7909.271216167104,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "6200596800000013",
+        "designation": "GPG 000P00 D-19",
+        "position": {
+          "cell_ly": [
+            18,
+            26014,
+            31
+          ],
+          "offset_m": [
+            6093787317775672.0,
+            5231189929334800.0,
+            1187290415697406.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.6310216501508643,
+        "age_myr": 7211.543879843585,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "6200596800000011",
+        "designation": "GPG 000P00 D-17",
+        "position": {
+          "cell_ly": [
+            2,
+            26036,
+            12
+          ],
+          "offset_m": [
+            8242784141024425.0,
+            9029454994154568.0,
+            6010056255811667.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.656327034887574,
+        "age_myr": 7501.191795873864,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "62005957fe00001c",
+        "designation": "GPF 000N1Z D-28",
+        "position": {
+          "cell_ly": [
+            3,
+            25967,
+            -23
+          ],
+          "offset_m": [
+            2523709301438290.0,
+            8340100773615469.0,
+            4468107030595896.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.5580479646769967,
+        "age_myr": 5586.9939970400055,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "8200b2dff0000000",
+        "designation": "GPF 000B0Z E-0",
+        "position": {
+          "cell_ly": [
+            0,
+            26039,
+            -4
+          ],
+          "offset_m": [
+            5830138438147586.0,
+            4180225607155452.0,
+            3965390004629240.5
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 16.367408979643034,
+        "age_myr": 9734.499246502544,
+        "population": "old_thin_disc"
+      }
+    ]
+  }
+}

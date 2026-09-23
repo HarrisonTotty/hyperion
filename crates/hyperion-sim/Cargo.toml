@@ -46,5 +46,9 @@ harness = false
 name = "events"
 harness = false
 
+[[bench]]
+name = "gas"
+harness = false
+
 [lints]
 workspace = true

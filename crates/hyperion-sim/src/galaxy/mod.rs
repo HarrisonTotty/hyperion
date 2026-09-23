@@ -5,8 +5,9 @@
 //! band shares, the populations' age distributions, the mean present-day mass of a system and the
 //! system count, the mass model and its potential tables ([`potential`]), the density fields with
 //! their ages and metallicities ([`fields`]), true upper bounds on every density over a cell
-//! ([`bounds`]), the share of each layer per population ([`shares`]) and the column densities the
-//! galaxy map draws ([`map`]). [`Galaxy`] bundles them:
+//! ([`bounds`]), the share of each layer per population ([`shares`]), the column densities the
+//! galaxy map draws ([`map`]) and the gas and dust between the stars ([`gas`], plan 07). [`Galaxy`]
+//! bundles them:
 //! built once per seed, immutable, and what placement ([`placement`]) and the range query
 //! ([`query`]) read (plan 03).
 //!
@@ -34,7 +35,12 @@ pub mod query;
 pub mod shares;
 pub mod special;
 
+use std::error::Error;
+use std::fmt;
+
 use self::fields::Fields;
+use self::gas::field::GasField;
+use self::gas::params::BuildGasParamsError;
 use self::imf::{BandShares, Chabrier, Kroupa, MassFunction, MassFunctionKind};
 use self::params::GalaxyParams;
 use self::potential::{MassModel, PotentialTables};
@@ -139,15 +145,17 @@ impl Population {
 /// One galaxy, complete: everything its seed decides before a star is placed (plan 02).
 ///
 /// It holds the drawn and derived parameters, the mass function they were derived with, the mass
-/// model with its potential tables, the density fields and the share matrix, all pure functions
-/// of the seed (or of the parameters, for a fixture) and the generator version. The fates behind
-/// the mean masses are held as their result, [`GalaxyParams::mean_system_mass`].
+/// model with its potential tables, the density fields, the gas field and the share matrix, all
+/// pure functions of the seed (or of the parameters, for a fixture) and the generator version. The
+/// fates behind the mean masses are held as their result, [`GalaxyParams::mean_system_mass`].
 ///
 /// A galaxy is immutable, holds no interior mutability and is `Send + Sync`, so one build can be
 /// shared between threads behind an `Arc`, as the server's galaxy cache holds it (plan 04). The
 /// sim caches nothing itself. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
-/// R19); [`heap_bytes`](Self::heap_bytes) states what one costs to keep, about 1.4 MiB.
+/// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
+/// the heap (plan 07). [`heap_bytes`](Self::heap_bytes) states what one costs to keep, about
+/// 1.4 MiB.
 ///
 /// # Examples
 ///
@@ -178,11 +186,19 @@ pub struct Galaxy {
     model: MassModel,
     potential: PotentialTables,
     fields: Fields,
+    gas: GasField,
     shares: ShareMatrix,
 }
 
 impl Galaxy {
     /// The galaxy of `seed` under the default mass function, with the in-plane potential tables.
+    ///
+    /// # Panics
+    ///
+    /// Never, on the evidence of the seeds swept: a drawn galaxy's gas is built from its own
+    /// parameters, and over 2,000 seeds the neutral layer keeps at least 0.53 of the gas
+    /// (`tests/gas_statistics.rs`), where [`from_params`](Self::from_params) refuses a galaxy that
+    /// leaves it none (plan 07, ruling 22).
     #[must_use]
     pub fn new(seed: Seed) -> Self {
         Self::with_mass_function(seed, MassFunctionKind::default())
@@ -190,31 +206,44 @@ impl Galaxy {
 
     /// The galaxy of `seed` with the mass function `kind`, which is part of the generator version
     /// (plan 02, Design note 5): for tests, and for any version that chooses Kroupa's.
+    ///
+    /// # Panics
+    ///
+    /// Never, on the evidence of the seeds swept, as [`new`](Self::new) says.
     #[must_use]
     pub fn with_mass_function(seed: Seed, kind: MassFunctionKind) -> Self {
         Self::from_params(seed, GalaxyParams::from_seed(seed, kind))
+            .expect("a drawn galaxy keeps most of its gas neutral")
     }
 
-    /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03).
+    /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03) and
+    /// the gas field's own draws (plan 07).
     ///
     /// The parameters are `params`, such as the Milky Way fixture
     /// ([`GalaxyParams::milky_way_like`]) or a builder's, not the seed's draws.
-    #[must_use]
-    pub fn from_params(seed: Seed, params: GalaxyParams) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`BuildGalaxyError::Gas`] if the gas field cannot be built: for a galaxy built by hand whose
+    /// warm ionised layer and molecular disc, drawn for `seed`, outweigh its gas disc (plan 07,
+    /// ruling 22). No drawn galaxy comes near it.
+    pub fn from_params(seed: Seed, params: GalaxyParams) -> Result<Self, BuildGalaxyError> {
         let mass_function = HeldMassFunction::of(params.mass_function());
         let model = MassModel::new(&params);
         let potential = PotentialTables::in_plane(&model);
         let fields = Fields::new(&params, &model);
+        let gas = GasField::new(seed, &params, &fields).map_err(BuildGalaxyError::Gas)?;
         let shares = ShareMatrix::uniform(&BandShares::of(mass_function.as_dyn()));
-        Self {
+        Ok(Self {
             seed,
             params,
             mass_function,
             model,
             potential,
             fields,
+            gas,
             shares,
-        }
+        })
     }
 
     /// This galaxy with the potential's (R, |z|) grid added, for plans 08–10.
@@ -260,6 +289,12 @@ impl Galaxy {
     #[must_use]
     pub fn fields(&self) -> &Fields {
         &self.fields
+    }
+
+    /// The gas and dust field (plan 07).
+    #[must_use]
+    pub fn gas(&self) -> &GasField {
+        &self.gas
     }
 
     /// The share of each layer per population.
@@ -310,14 +345,39 @@ impl Galaxy {
     ///
     /// It varies little between seeds, since the parts are fixed-size tables but for the halo's
     /// three to six components. Most of it is the mass model's Gaussians (some 770, each with its
-    /// quadrature nodes); the (R, |z|) grid adds 128 KiB.
+    /// quadrature nodes); the (R, |z|) grid adds 128 KiB. The gas field is held inline and adds
+    /// nothing.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
             + self.model.heap_bytes()
             + self.potential.heap_bytes()
             + self.fields.heap_bytes()
+            + self.gas.heap_bytes()
             + self.shares.heap_bytes()
+    }
+}
+
+/// A [`Galaxy`] could not be built from its parameters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildGalaxyError {
+    /// The gas field could not be built (plan 07, ruling 22).
+    Gas(BuildGasParamsError),
+}
+
+impl fmt::Display for BuildGalaxyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Gas(e) => write!(f, "the galaxy's gas cannot be built: {e}"),
+        }
+    }
+}
+
+impl Error for BuildGalaxyError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Gas(e) => Some(e),
+        }
     }
 }
 

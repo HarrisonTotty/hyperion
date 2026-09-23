@@ -1042,3 +1042,43 @@ Reserved so that later plans move no star they need not:
     "inside the budget") count only the bound (88) and the densities (74). They omit the primary's
     mass draw, 85 exp under Chabrier, as dear as a density evaluation. That draw is the cheapest
     lever, but it is plan 02's and would move every mass.
+- **Rulings 23 and 25: a query independent of its sources' order, and the cache's rule (srv lane,
+  generator version 11).** No output moves while no source exists: with `&[]` the sum is 0 in
+  every layer, as the fold gave. `golden_diff` sees nothing from it.
+  - _Order-independent sums (ruling 23)._ `range_query` no longer folds the sources' expected
+    counts in list order. `sum_source_counts`, crate-private in `query/mod.rs`, sorts each
+    layer's per-source contributions with `f64::total_cmp` and adds them from the smallest,
+    starting at 0. The census then depends on the multiset of contributions only, and
+    sources need no identity key. `decide_census`'s documentation now says so. In `query/mod.rs`,
+    `the_census_does_not_depend_on_the_order_of_the_sources` runs three sources of 0.1, 0.2 and
+    0.3 (layer E, and ten times that in C) over 12 ly of the Sun-like point in all six orders. The
+    test first asserts that a plain fold does give the census different bits in some order, so that
+    it can tell the two sums apart, and then asserts that every order gives a bit-identical census
+    and the same systems. With the old fold back in place it fails, on layer E's 0.697 420 117 775
+    853 2 against …3.
+  - _Unique IDs (ruling 23)._ `SystemSource`'s contract gains the clause that a source's IDs are
+    its own, disjoint from the grid's and from every other source's, which `SystemIdKind` makes
+    natural. A `debug_assert!` over the merged, sorted hits checks that no ID appears twice. The
+    hits are ordered by distance first, so two copies need not be neighbours, and the check
+    (`ids_are_unique`) sorts a copy of the IDs. A source that hands back the grid's nearest system
+    trips it (`a_source_that_repeats_a_grid_id_trips_the_debug_check`, `#[cfg(debug_assertions)]`
+    and `should_panic`). It must land before plan 09's first source, and now it has. `frame_at`
+    merges source hits into `select_frame` without that check, which is left as it is:
+    `select_frame` is documented to count a repeated ID's smallest ratio and not to depend on the
+    candidates' order.
+  - _The cache's rule (ruling 25)._ `CellCache`'s documentation now says that an implementation
+    keeping cells between calls keys them by galaxy as well as by cell, as plan 04's
+    `CellCacheHandle` does with its seed and generator version; the trait is unchanged. The trait's
+    own example, `LastCell`, kept its cell between calls keyed by `CellKey` alone, the very pattern
+    the rule forbids. It now keys by seed as well, and shows that another galaxy's cell of the
+    same key is lent as its own. The test and bench caches
+    (`tests/{frame,query,placement_order}.rs`, `benches/range_query.rs`) each serve one galaxy and
+    are left as they are.
+- **Ruling 24: `frame_at` gets a golden (srv lane, blessed at version 11).** `tests/frame.rs`'s
+  `the_frames_of_the_solar_circle_ships_are_pinned` writes `tests/golden/frame/frames.golden`. It
+  holds the 28 ships of the brute-force test (now built by `solar_circle_ships`, with the same
+  LCG draws), each with its position's bits and the frame `frame_at` picks at the epoch and at the
+  clock window's end: an ID and designation, or `none`. Of the 56 answers, 28 name a system, as the
+  brute-force test counts. The answers are computed apart from the brute-force search, so that the
+  golden turns red on its own. With `SEARCH_MARGIN` at 0.5 in place of 1.25 it does, at line 11
+  (`ship[01]` at the epoch, `0x42002cb200000000` becomes `none`), and so does the brute-force test.

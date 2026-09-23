@@ -6,7 +6,8 @@
 //! for — nothing moves until plan 08 — nor on what the caller's cache holds, that the query's
 //! sources are merged in, both as candidates and as suppressors, that the search finds what a
 //! brute-force search over every nearby system finds, and that a time outside the clock window is
-//! refused.
+//! refused. The frames the search picks for the brute-force test's ships are pinned in
+//! `golden/frame/frames.golden` (ruling 24 of 2026-09-22).
 
 #[expect(dead_code, reason = "the frame tests use only the Sun-like point")]
 mod common;
@@ -14,7 +15,6 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::sunlike_point;
-use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::frame::{FindFrameError, FrameCandidate, frame_at, select_frame};
 use hyperion_sim::galaxy::params::GalaxyParams;
@@ -29,6 +29,9 @@ use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
 use hyperion_sim::time::{ClockWindow, SourceHorizon, UniverseTime};
 use hyperion_sim::units::{LightYears, SolarMasses, Years};
+use hyperion_sim::{GENERATOR_VERSION, Seed};
+use hyperion_testkit::golden;
+use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
 
 /// The seed of the galaxy these ships fly in.
@@ -36,6 +39,7 @@ const SEED: u64 = 0x0312_b000_0000_0000;
 
 fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
 }
 
 /// The first system of the layer-C cell holding the Sun-like point: a nearby ordinary primary.
@@ -471,16 +475,14 @@ fn ships_beside_systems(
     ships
 }
 
-/// `frame_at` finds exactly the frame a brute-force search over every nearby system finds, beside
-/// generated systems on and above the plane at the Sun-like point and at random points of the solar
-/// circle (P03.T12.b, validation).
-#[test]
-fn the_search_finds_the_frame_a_brute_force_search_finds() {
-    let galaxy = galaxy();
+/// The 28 ships of the solar circle: two beside each of the first four systems of the layer-C cells
+/// at the Sun-like point and 800 ly above it, and twelve at random points within ±10,000 ly of it
+/// along x and ±100 ly in y and z.
+fn solar_circle_ships(galaxy: &Galaxy) -> Vec<[f64; 3]> {
     let mut lcg = Lcg::new(0x0312_b0f0);
-    let mut ships = ships_beside_systems(&galaxy, [0.0, 26_000.0, 0.0], 4, &mut lcg);
+    let mut ships = ships_beside_systems(galaxy, [0.0, 26_000.0, 0.0], 4, &mut lcg);
     ships.extend(ships_beside_systems(
-        &galaxy,
+        galaxy,
         [0.0, 26_000.0, 800.0],
         4,
         &mut lcg,
@@ -492,6 +494,16 @@ fn the_search_finds_the_frame_a_brute_force_search_finds() {
         });
         ships.push([10_000.0 * x, 26_000.0 + 100.0 * y, 100.0 * z]);
     }
+    ships
+}
+
+/// `frame_at` finds exactly the frame a brute-force search over every nearby system finds, beside
+/// generated systems on and above the plane at the Sun-like point and at random points of the solar
+/// circle (P03.T12.b, validation).
+#[test]
+fn the_search_finds_the_frame_a_brute_force_search_finds() {
+    let galaxy = galaxy();
+    let ships = solar_circle_ships(&galaxy);
     let held = assert_frames_match_brute_force(&galaxy, &ships);
     // A good share of the answers name a system, so the comparison is not of two `None`s. It was
     // over half at version 8 and is 28 of 56 at version 10, where P02.T11's tuning shrank the
@@ -501,6 +513,42 @@ fn the_search_finds_the_frame_a_brute_force_search_finds() {
         3 * held >= answers,
         "only {held} of {answers} answers named a system"
     );
+}
+
+/// The frame `frame_at` picks for each of the solar circle's 28 ships at the epoch and at the end of
+/// the clock window, pinned (ruling 24 of 2026-09-22).
+///
+/// The brute-force test shows that the search is right; this shows that its answers stay put across
+/// generator changes, since which system a ship is in is game state. Each ship's position is pinned
+/// beside its two answers, so a move of the systems the ships are placed beside reads as such, not
+/// as a change of the frame rule. The answers are computed apart from the brute-force search, so
+/// that a perturbed rule turns this red on its own: a search margin of 0.5 in place of 1.25 does.
+#[test]
+fn the_frames_of_the_solar_circle_ships_are_pinned() {
+    let galaxy = galaxy();
+    let mut cache = Keep::default();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.line(&format!(
+        "# seed 0x{SEED:016x}, milky_way_like, no sources, no current frame"
+    ));
+    for (i, ship) in solar_circle_ships(&galaxy).into_iter().enumerate() {
+        let label = format!("ship[{i:02}]");
+        for (axis, value) in ["x", "y", "z"].into_iter().zip(ship) {
+            w.f64(&format!("{label}.{axis}_ly"), value);
+        }
+        let at = GalacticPosition::from_light_years(ship).expect("inside the cube");
+        for (when, t) in [("epoch", UniverseTime::EPOCH), ("end", ClockWindow::END)] {
+            let frame = frame_at(&galaxy, &mut cache, &[], &at, t, None)
+                .expect("a time inside the clock window");
+            let answer = frame.map_or_else(
+                || "none".to_owned(),
+                |id| format!("0x{:016x} ({})", id.raw(), id.designation()),
+            );
+            w.line(&format!("{label}.frame_at_{when} = {answer}"));
+        }
+    }
+    golden!("frame/frames", w.as_str());
 }
 
 /// The same in the dense inner galaxy, where one layer-E cell holds up to a quarter of a million

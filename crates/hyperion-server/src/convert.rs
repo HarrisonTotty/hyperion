@@ -1185,7 +1185,10 @@ mod tests {
     /// so the units and the origins can be checked against them.
     fn milky_way() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-        GALAXY.get_or_init(|| Galaxy::from_params(Seed::new(0x4d2), GalaxyParams::milky_way_like()))
+        GALAXY.get_or_init(|| {
+            Galaxy::from_params(Seed::new(0x4d2), GalaxyParams::milky_way_like())
+                .expect("the Milky Way fixture's gas is mostly neutral")
+        })
     }
 
     fn universe() -> Universe {

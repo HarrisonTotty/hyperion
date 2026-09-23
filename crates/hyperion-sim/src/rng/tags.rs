@@ -342,6 +342,10 @@ domain_tags! {
     /// The gas parameters plan 02 does not draw, one uniform per word at the parameter's fixed
     /// index in plan 07's Design note 3 table, keyed by `ObjectKey::galaxy()`.
     GAS_PARAMS: Galaxy = "gas.params";
+
+    /// The gas's lattice noise, one standard normal per lattice point of each octave, each on its
+    /// own `ObjectKey::galaxy_item` of the point's packed lattice word (plan 07, Design note 8).
+    GAS_NOISE: Galaxy = "gas.noise";
 }
 
 #[cfg(test)]
@@ -396,6 +400,13 @@ mod tests {
         assert_eq!(GAS_PARAMS.name(), "gas.params");
         assert_eq!(GAS_PARAMS.scope(), crate::rng::TagScope::Galaxy);
         assert!(ALL.contains(&GAS_PARAMS));
+    }
+
+    #[test]
+    fn plan_07_registers_the_gas_noise_tag_last() {
+        assert_eq!(GAS_NOISE.name(), "gas.noise");
+        assert_eq!(GAS_NOISE.scope(), crate::rng::TagScope::Galaxy);
+        assert_eq!(ALL.last(), Some(&GAS_NOISE));
     }
 
     #[test]

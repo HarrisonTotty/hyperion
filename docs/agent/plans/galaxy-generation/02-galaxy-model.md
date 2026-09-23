@@ -787,7 +787,8 @@ is carried but not applied (D12). Tests: monotone; counts to 0.5%; the mixture's
 averaged slope between 20,000 and 60,000 ly is −2.1 to −3.0 (inner); nothing beyond 65,000 ly.
 
 **P02.T7.e Metallicity and assembly.** `FehDistribution { mean, sigma }`. Thin discs: mean = 0.0 +
-gradient × (R − 3 lengths), flat in age to 8 Gyr and then falling about 0.1 dex per Gyr (Bergemann
+gradient × (R − 3.8 lengths), solar at the Milky Way's R₀ ÷ R_d (ruling 21 of 2026-09-22; R24),
+flat in age to 8 Gyr and then falling about 0.1 dex per Gyr (Bergemann
 et al. 2014; Casagrande et al. 2011), clamped, sigma 0.20; thick −0.55,
 0.25; bulge 0.0, 0.40; bar 0.0, 0.30; nuclear disc +0.1, 0.30; halo per component (in situ −0.6,
 dominant −1.2, lesser drawn −2.0 to −1.0, debris −1.5; sigma 0.3). All marked for re-checking
@@ -1344,9 +1345,11 @@ component order and the map's quadrature scheme belong to the version as well.
     reading of "clamped", the span of thin-disc stars; the brainstorm gives no clamp. Flat to 8 Gyr
     and 0.1 dex per Gyr poorer beyond, read from Bergemann et
     al.'s (2014) Fig. 6, which gives no number; sigma 0.20 from Casagrande et al.'s (2011) Table 1
-    (σ 0.22, half the FWHM 0.19). The flat part is solar at three scale lengths, as the youngest
-    local stars are (Nieva and Przybilla 2012: Fe 7.52 ± 0.03 against the Sun's 7.50), so the
-    local mean over every age is −0.03 to −0.04 against the Geneva–Copenhagen survey's −0.06. For
+    (σ 0.22, half the FWHM 0.19). The flat part is solar at the Sun's radius, as the youngest
+    local stars are (Nieva and Przybilla 2012: Fe 7.52 ± 0.03 against the Sun's 7.50): at three
+    scale lengths when this was written, where the local mean over every age came to −0.03 to
+    −0.04 against the Geneva–Copenhagen survey's −0.06, and at R₀ ÷ R_d = 3.8 since R24, where it
+    is −0.054 over every component at R₀ and the Sun's height (−0.026 over the thin discs). For
     the owner: Bergemann et al. assign their old, metal-poor stars to the thick disc, and they say
     their result "does not support" Casagrande et al.'s flat relation to 12 Gyr, so the decline
     may belong to the thick disc rather than the thin.
@@ -1734,3 +1737,233 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     and 3.5 GHz)._ The 4,000-seed rotation sweep 77 s, the 1,000-seed density sweep 164 s (its
     fields' Jeans solves), the three fixture comparisons 1.2, 0.2 and 0.3 s. The height panels cost
     the maps nothing at plan 04's pixel sizes, which take one panel.
+- **R23. Validation of P02.T11 (val02 lane, round 6).** P02.T11 is built as R22 records, and every
+  row of its table reproduces when derived another way. Its findings stand, but two of R22's
+  attributions do not, the tuning left two values behind it in the draws and the solve, two cited
+  figures are wrong and four loose, and the widened sweep brackets no longer see a real change.
+  Nothing here moves generated output: the fixes are tests and comments, and `GENERATOR_VERSION`
+  stays 10. Every figure below comes from a scratch crate (`target/scratch/val02/probe-src`) that
+  reads the sim's public API only.
+  - _The table, derived another way._ Enclosed masses by spherical coordinates (radius on panels
+    shrinking fourfold towards the centre, cos θ on panels halving towards the plane, 64 azimuths)
+    over the fields' true densities, the gas disc's double exponential, the NFW halo and the black
+    hole in closed form, and the nuclear cluster by a numerical radial integral: 5.150 × 10⁶,
+    1.248 × 10⁷, 3.692 × 10⁸, 1.113 × 10⁹, 9.647 × 10⁹ and 2.483 × 10¹⁰ M☉, R22's to four places.
+    The rotation curve summed part by part without the Gaussian sums. The discs use the Hankel form
+    of an exponential disc of exponential height,
+    `v² = (GM ÷ R) ∫ u J₁(u) (1 + a²u²)^(−3÷2) (1 + bu)⁻¹ du` with `a = R_d ÷ R` and `b = h ÷ R`,
+    which gives Freeman's closed form (modified Bessel functions) to six figures as h → 0 and the
+    thin disc's Gaussian sum to 2 × 10⁻⁴ at its height.
+    The bar and the true boxy bulge are integrated as rings (complete elliptic integrals by the
+    arithmetic–geometric mean, checked against the Hankel form, and against Binney and Tremaine's
+    eq. 2.132 for the spheroid, to 10⁻⁶). The results are 152.3, 186.7, 227.3 and 230.4 km/s at
+    0.5, 1, 2 and 8 kpc, against R22's 152.3, 186.7, 227.2 and 230.7. The 0.3 km/s at 8 kpc is
+    `MGE_BAR`'s error beyond the bar: the bar's `v²` is 4.4% high there and 8.7% high at
+    corotation (R14). The rest: escape speed 569.8 km/s (570.0); pattern speed 39.7 (39.5); tidal
+    radius of 1 M☉ at 26,000 ly 4.231 ly (4.228); 0.002051 systems per ly³ at R₀ and z☉ over 4,096
+    azimuths (0.00205); 0.04166 M☉ pc⁻³ (0.0417); Σ★ 30.46 M☉ pc⁻² (30.5); the gas column 10.54
+    (10.5); the nuclear disc 1.750% of systems and 18.890 per ly³ (count ÷ 4π L² h). The thin
+    disc's thickness takes 18% off Freeman's razor-thin `v²` at 2 kpc.
+  - _v_c(2 kpc): the finding stands, R22's attribution does not._ The moment-matched spheroid is
+    not the cause. The true boxy bulge, axisymmetrised, gives 0.5% more `v²` at 2 kpc than the
+    spheroid (8.8% and 5.4% more at 0.5 and 1 kpc, which would take v_c(1) to 189), so plan 15's
+    two-dimensional tables would not move the row; R5's spherical bulge by quadrature gives 223.4
+    (159 and 191 at 0.5 and 1 kpc). The excess is mass between 1 and 3 kpc, and Portail et al.'s own
+    figure shows it. The plan's 2 kpc row cites them for 1.8–2.6 × 10¹⁰ M☉ in a sphere, but their
+    figure is the mass in their Table 2's bulge box, ±2.2 × ±1.4 × ±1.2 kpc: (1.85 ± 0.05) × 10¹⁰.
+    The fixture holds 2.476 × 10¹⁰ M☉ there, 34% over and the same excess as v_c(2)'s in `v²`. In
+    units of 10¹⁰ M☉ that is bulge 0.96, old thin disc 0.77, bar 0.24, dark matter 0.19, thick
+    disc 0.12, nuclear disc 0.10 and gas 0.08. Bland-Hawthorn and Gerhard's bulge share (their
+    §4.2.4, 0.3 ± 0.06), which the fixture's 31% reads, is the box's stellar mass with the inner
+    disc's stars included, and the model then adds its exponential discs inside the box as well. A
+    hole in the thin disc, `Σ ∝ exp(−R ÷ R_d − R_h ÷ R)` with Σ(R₀) held, fixes the shape:
+    - R_h = 1 kpc gives 141.9, 167.2, 204.2 and 221.2 km/s at 0.5, 1, 2 and 8 kpc, and a box of
+      2.06 × 10¹⁰ M☉;
+    - R_h = 2 kpc gives 143.0, 164.9, 194.9 and 215.4 km/s, a box of 1.90 × 10¹⁰ M☉, M(< 1 kpc)
+      7.51 × 10⁹ M☉ (the row's floor), a pattern speed near 36 km/s per kpc and M★ 4.9 × 10¹⁰ M☉.
+      Every row is inside, three of them at an edge.
+
+    Lowering the fixture's bulge share instead does not work. At M★ 5.0 × 10¹⁰ M☉ and a
+    bulge-and-bar share of 0.20, the box is 1.88 × 10¹⁰ M☉ and v_c(2) 196.9 km/s, but v_c(0.5)
+    137.6, v_c(1) 159.3, M(< 1 kpc) 7.18 × 10⁹ M☉ and the bulge's centre 0.144 per ly³ leave their
+    brackets. The fault is therefore the hole-free disc. R6's reason for having none, that a hole
+    would break the nearest-corner bound, does not hold: exp(−R_h ÷ R) only rises with R, so a
+    cell's bound takes it at R_max and the exponential at R_min, as the arm bounds already do for
+    their factors. For the owner: a hole of R_h ≈ 1.5–2 kpc in the thin disc, with a Gaussian
+    expansion of its own (plan 15), which moves every star; not a change for version 11. The
+    enclosed-mass test gains the box row, checked from 1.80 × 10¹⁰ M☉ up to 1.2² × 1.90 × 10¹⁰,
+    the 20% in speed that the v_c(2 kpc) row allows. The plan's sphere row keeps its bracket, with a
+    comment that its top is not Portail's.
+
+  - _The sweeps' brackets._ The brainstorm asks for 210–270 km/s at 8 kpc "for most seeds", and
+    58.4% (2,337 of 4,000) is most. That is the specification; the median of 225–255 and the 68%
+    are the plan's gloss. R22's argument is half right. Moving the fixture to the draws' medians one
+    parameter at a time:
+    - M★ (log-uniform; median 5.46 × 10¹⁰ M☉) costs 8.4 km/s;
+    - the thin disc's coupled length (median 8,338 ly; 598 seeds at the 7,000 ly clamp) costs 5.4;
+    - f★ (median 0.233) adds 3.4: the median halo is heavier (M₂₀₀ 1.50 × 10¹² M☉ against the
+      fixture's 1.19), not lighter;
+    - the shares, heights, gas and other sizes move it by under 1 km/s each;
+    - all together they give 222.4, against the sweep's 223.0.
+
+    The first is the brainstorm's range; the second is not. D16 couples a size to "its Milky Way
+    value", and P02.T11 moved the Milky Way's thin disc to 7,000 ly while `THIN_LENGTH` still reads
+    8,480 ly at 3.4 × 10¹⁰ M☉, clamped to 7,000–11,500 ly, which leaves the fixture on the clamp's
+    floor. With `THIN_LENGTH` at 7,000 ly and its clamp scaled to 5,780–9,490 ly
+    (measured in a copy of the sim), the median v_c(8) becomes 227.8 km/s, inside the plan's
+    225–255, with 57% of seeds in 210–270, a median ratio of 0.803 and densities at 26,000 ly of
+    0.00073–0.00695 (991 in the bracket). But the population's dispersion scale then has a median of
+    1.25 (T7.b wants 0.9–1.1) and the σ sweep has 801 of 1,000 seeds in 90–135 km/s (T6.e checks
+    850). The dispersion scale, below, says why.
+
+  - _The other two brackets._ The median v_c(1) ÷ v_c(8): the bracket was at fault, not the
+    draws. The 0.85–0.97 is the research model's 0.88, and the published inner curve, 161–191 km/s
+    at 1 kpc over Eilers et al.'s 229, gives the Milky Way 0.70–0.83, so the widened 0.75–0.97 is
+    upheld. The centre: under 60 per ly³ is upheld. Builder galaxies with the densest nuclear disc
+    the ranges allow are refused by `check_index_headroom` at 153–170 per ly³ under Kroupa's
+    function and pass at 148.5 under the default, so the drawn maximum of 38.1 has a margin of four.
+  - _The dispersion scale: a second stand-in the tuning broke._ The tuned fixture's is 1.373 (R18
+    had 1.019): its old thin disc's dispersions are 37% above Sharma et al.'s law. The law is the
+    solar neighbourhood's, and D9 applies it at three thin scale lengths
+    (`REFERENCE_RADIUS_LENGTHS`), which was 7.8 kpc, near R₀, until P02.T11 shortened the disc and
+    put it at 6.4 kpc. This is the same stand-in ruling 21 found for metallicity's anchor. Solved at
+    R₀ ÷ R_d = 3.8 scale lengths, the fixture's scale is 0.985 and no P02.T11 row moves (the heights
+    are held; the bulge box moves by 0.2%). The seeds need the size law too: at 3.8 lengths with
+    `THIN_LENGTH` unchanged their median scale is 0.733, and with both changes it is 0.898 (996 of
+    1,000 in 0.6–1.6), the median v_c(8) is 227.8 and the σ sweep keeps its 801. For the owner,
+    output-moving and together: `THIN_LENGTH` 8,480 → 7,000 ly with the clamp 5,780–9,490 ly
+    (`galaxy/params/derive.rs`, T5.b's text), and `REFERENCE_RADIUS_LENGTHS` 3.0 → 3.81
+    (`galaxy/fields/sub_discs.rs`, D9's text). They re-open T7.b's median scale (0.898 against
+    0.9–1.1) and T6.e's 85% (80%), and the young disc's new floor row, since at R₀ its σ₀ is 4.36
+    km/s. Ruling 21 says the constant that fixes where the profiles are solved "would move every
+    P02.T11 row"; measured, it moves no row of the table, but it moves every disc star's height and
+    T7.b's far-field figures (not measured here). So it needs its own ruling, not version 11.
+  - _The young disc's floor._ In the fixture's potential at version 10, the young disc's σ₀ is
+    4.91 km/s at 225 ly, 5.01 at 230, 6.155 at 285 and 7.38 at 345; R22's 4.96, 5.07, 6.22 and 7.45
+    predate plan 07's ruling 19. The floor is met from 229 ly, not 227. A Jeans solve written
+    independently (`K_z` from `MassModel::vertical_force`, the capped rise, a bisection on σ₀)
+    reproduces the code's σ₀ to 1.6 × 10⁻⁵ over 64 seeds. Over 400 seeds,
+    `0x0211_d15c_0000_0000 | n`, at 225 ly, σ₀ has a median of 4.03 km/s, a 5th percentile of 3.23
+    and a minimum of 2.74: 95% of seeds miss the floor, by up to 2.26 km/s. At each seed's own drawn
+    height 51% miss it (the lowest 2.93). The height at which σ₀ reaches 5 km/s runs from 170 to 423
+    ly, with a median of 283 ly. And the floor falls away from the reference radius: the profile is
+    held at every radius while `K_z` falls outward, so plan 08's σ_z(R, 0) = √(∫ n K_z dz ÷ n(0))
+    falls too. The
+    fixture's is 12.7 km/s at half the reference radius, 6.16 at it, 4.35 at the Sun and 2.0 at
+    twice it; 225, 285 and 345 ly give 3.47, 4.35 and 5.22 km/s at the Sun; 34 of 64 seeds miss the
+    floor at 26,000 ly. No range that Bovy's cohorts allow meets the floor across the disc, so the
+    range should not move. The floor is the velocity stage's clamp, as the brainstorm's table has it
+    ("the same, with a floor of 5 km/s") and as P08.T2.c builds it. For plan 08: the clamp binds
+    over most of the young disc, the Sun included, so "age, height and vertical speed agree by
+    construction" holds for every disc but the young one. Ruling 3's 285 ly rests on Bovy's
+    effective heights alone, as R22 says.
+  - _The M–σ offset._ −0.512 dex is 1.35 times McConnell and Ma's 0.38 dex (their Table 2, all 72
+    galaxies; their 0–r_eff fit, weighted more as the estimator is, gives −0.515). At the
+    brainstorm's measured 105–115 km/s the Milky Way lies 0.11–0.33 dex under the relation. The
+    other 0.18–0.40 dex is the estimator's σ, 123.8 km/s, running 8–18% high (R4), which the offset
+    absorbs until plan 08. The checks let σ rise only 1% (σ ≤ 125 km/s, and the relation alone at
+    most 3.5 times Sgr A*), but let it fall 8% (the relation alone at least 2.0 times), with the
+    slow 1 pc row catching a fall at 5.4%. A σ 4% lower, with the black hole at 3.4 × 10⁶ M☉, was
+    noticed only by the goldens. `the_fixture_black_hole_follows_m_sigma` now holds the black hole
+    to Sgr A*'s 4.297 × 10⁶ M☉ to 1%, which fails for any move in σ over 0.2% until the offset is
+    re-set, as R13 requires.
+  - _Citations (checked in the papers by the `science-checker` agent)._ These match: the heating
+    law's 21.1, 0.441, 0.1, 10.1 and 0.20 per kpc (Sharma et al., Table 2, eqs. 4 and 7), whose
+    binned σ_z end at 2.0 kpc (twelve bins of 1/6 kpc, the last centred at 1.917), so ruling 4's cap
+    sits at the data's edge; McConnell and Ma's 8.32, 5.64 and 0.38; Portail et al.'s 39.0 ± 3.5
+    km/s per kpc and 6.1 ± 0.5 kpc, the bar's 0.54 of 1.88 × 10¹⁰ M☉ and their curve's 173.9, 190.7
+    and 191.9 km/s; Bland-Hawthorn and Gerhard's 2.6 ± 0.5 kpc, thick disc 2.0 ± 0.2 kpc by 900 ±
+    180 pc and 4 ± 2%; McKee et al.'s 0.043 less 0.0015 of brown dwarfs, 13.7 ± 1.6 and 156 pc;
+    Bovy's A dwarfs' z_d of 37–56 pc in sech²((Z + Z☉) ÷ 2z_d); GRAVITY's 8.178 kpc; Bennett and
+    Bovy's 20.8 pc; Licquia and Newman's 6.08 ± 1.14 × 10¹⁰; Sormani et al.'s 88.6 and 28.4 pc;
+    McMillan's 1.30 ± 0.30 × 10¹². These are wrong or loose:
+    - the 2 kpc row (above);
+    - Wegg and Gerhard's scale lengths are 0.70 : 0.44 : 0.18 kpc. The brainstorm's 820 ly (0.25
+      kpc) is their vertical scale height at x = 0.525 kpc; as a minor axis, 590 ly would put c ÷ a
+      at 0.26, under the drawn 0.3–0.4. The figure is the brainstorm's, so this is for the owner;
+    - Bovy and Rix's 2.15 ± 0.14 kpc is the whole stellar disc's by mass, not the thin disc's, and
+      their Σ★ of 38 ± 4 puts the fixture's 30.5 1.9 standard deviations under it (it is inside
+      McKee et al.'s 33.4 ± 3);
+    - Bland-Hawthorn and Gerhard's Fig. 16 gives 161.5–166 km/s at 1 kpc for thin scale lengths of
+      2.15–3.0 kpc, not 165–171, so the 1 kpc row's floor is now 160;
+    - Eilers et al.'s 229 km/s is ± 0.2 formal with 2–5% systematic, not ± 1;
+    - the pattern speed's 33–41 is the brainstorm's, not centred on Portail's 39.0 ± 3.5.
+  - _Checks that could not fail._ Each change was made in a copy of the sim
+    (`target/scratch/val02/mutate_t11.py`), with the asserts of `galaxy_milky_way.rs`,
+    `galaxy_sweeps.rs` and `galaxy_potential.rs` softened to report every check:
+
+    | Change, one at a time                             | Failed                                                                | Stayed green                                                                 |
+    | ------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+    | Fixture f★ 0.32 → 0.25 (M₂₀₀ + 28%)               | escape speed (608 km/s)                                               | every other row; v_c(8 kpc) 233.3                                            |
+    | Fixture f★ 0.32 → 0.40                            | escape speed                                                          | every other row                                                              |
+    | Fixture thin disc 7,000 → 7,400 ly                | n☉ (0.00226), ρ★ (0.0458)                                             | every v_c and mass row; v_c(2 kpc) 223.3                                     |
+    | Fixture young disc 285 → 225 ly                   | nothing as built; now the two young-disc rows                         | every other row                                                              |
+    | Fixture offset −0.512 → −0.40 (black hole × 1.29) | only a golden as built; now the Sgr A* check                          | M(< 1 pc) 6.4 × 10⁶ M☉                                                       |
+    | Fixture offset → −0.62 (black hole × 0.78)        | T6.e's offset range; now the Sgr A* check                             | M(< 1 pc) 4.20 × 10⁶ M☉                                                      |
+    | σ × 0.96 (black hole 3.4 × 10⁶ M☉)                | only a golden as built; now the Sgr A* check                          | M(< 1 pc) 4.26 × 10⁶; the σ sweep (median 109.5)                             |
+    | Drawn f★ 0.12–0.45 → 0.09–0.34                    | T5.a's restated range only                                            | every sweep; median v_c(8) 226.6, 2,395 in range                             |
+    | Drawn thin size law 8,480 → 9,500 ly              | nothing                                                               | every sweep; median v_c(8) 219.8, 2,278 in range                             |
+    | Drawn young disc 225–345 → 130–200 ly             | T5.a's restated range only                                            | every sweep                                                                  |
+    | Bulge and bar shares swapped                      | v_c(1) ÷ v_c(8) (0.743), M(< 1 pc), the σ sweep, the bar's size slope | v_c 143.9, 172.6, 211.8, 232.1; every other mass row; the box; the densities |
+    | Thick and nuclear shares swapped                  | 22 checks                                                             | none of note                                                                 |
+
+    The sweeps' widened brackets let every thin disc lengthen by 12%, or every f★ fall by a quarter,
+    unseen: the brainstorm's "most seeds" is still met, so green is right by the specification, and
+    only the goldens record the move. No check ties the drawn size law to the fixture (D16), which
+    is how the tuning left them apart.
+
+  - _Determinism._ The sweeps are plain loops over pure constructors, and the sim holds no mutable
+    global state (no `static mut`, cell, lock or atomic outside one test). Over 4,000 rotation seeds
+    the per-seed `v_c²` at 1, 5, 8 and 16 kpc are the same bits forward, reversed, every seventh
+    alone and split over eight threads. Over 48 density seeds so are the mean at 26,000 ly and the
+    centre, reversed and on 48 threads, and the fixture is the same after another galaxy is built.
+    No test reads another's state, so libtest's thread count cannot reach a result.
+  - _Changed here, moving no output._ `galaxy_milky_way.rs` gains the bulge-box row and the young
+    disc's two rows, corrects the 1 kpc floor to 160 km/s and the comments on the 2 kpc row, on
+    Eilers et al. and on the thin scale length (2.15 kpc, not 2.3), and re-attributes the v_c(2 kpc)
+    finding. `galaxy_potential.rs` holds the fixture's black hole to Sgr A*'s. `galaxy_sweeps.rs`
+    corrects the rotation sweep's reasoning. The fixture's and the draws' comments correct the young
+    disc's dispersions, Wegg and Gerhard's axes, Bovy and Rix's scale length and the bulge share's
+    meaning; the solar-neighbourhood test prints the fixture's dispersion scale.
+  - _Speed (slow-test profile, one test at a time, cpu0 2.6–3.4 GHz)._ The three fixture tests
+    1.7, 0.1 and 0.2 s at a load of 4.7, the bulge box adding about a second to the first; the
+    sweeps 173 s (10⁴ getters), 182 s (sizes), 10 s (σ), 173 s (fields), 88 s (rotation) and 155 s
+    (densities) at a load of 5–12. `just ci-slow` took 21 min 22 s at a load of 15 falling to 6.
+- **R24. Ruling 21: the thin discs are solar at R₀ ÷ R_d, not at three scale lengths (version
+  11).** `THIN_DISC_REFERENCE_LENGTHS` is renamed `THIN_DISC_SOLAR_ANCHOR_LENGTHS` and is 3.8, the
+  Milky Way's R₀ ÷ R_d: R₀ 8.178 ± 0.013 (stat.) ± 0.022 (sys.) kpc (GRAVITY Collaboration 2019,
+  A&A 625, L10, abstract checked) over the mass-weighted R_d 2.15 ± 0.14 kpc (Bovy and Rix 2013,
+  ApJ 779, 115, abstract checked) is 3.804 ± 0.25, rounded because R_d's 6.5% leaves the third
+  figure meaningless (26 ly and 4 × 10⁻⁴ dex on the fixture). The anchor stays scaled to each
+  galaxy's disc. `REFERENCE_RADIUS_LENGTHS` (`fields/sub_discs.rs`), where the sub-discs' profiles
+  and K_z are solved, stays at 3.0, so no P02.T11 row moves; the two were equal until now, which is
+  what confused ruling 21's first reading. Measured on the fixture (−0.05 dex per kpc, 7,000 ly),
+  before → after:
+  - _The young disc's mean._ −0.077 → +0.009 at 26,000 ly, −0.087 → −0.001 at R₀ = 26,673 ly.
+    The anchor is 26,600 ly, so the Sun-like point of the tests sits 600 ly inside it.
+  - _The local mean over every age_, each component's mean over 2,048 age quantiles weighted by
+    its azimuthally averaged density: every component at R₀ and the Sun's height −0.135 →
+    **−0.054**, the thin discs alone −0.112 → −0.026; at 26,000 ly in the plane −0.125 → −0.044
+    and −0.101 → −0.015. The Geneva–Copenhagen survey gives −0.06 over its own magnitude-limited
+    sample. R18's −0.03 to −0.04 was measured at three lengths of the old 8,480 ly disc, by a
+    method not recorded; the thin discs' figure is the nearest like for like.
+  - _Plan 07's dust-to-gas ratio_, 10^[M/H] of the young disc: 0.838 → 1.021 at 26,000 ly (0.819
+    → 0.997 at R₀). The in-plane extinction per 3,000 ly, by `gas/smooth.rs`'s rate at one point
+    times the length, goes from 1.058 to **1.289** at 26,000 ly (1.210 at R₀). `gal`'s predicted
+    1.26 is the figure at a ratio of exactly 1; the Sun-like point's 1.02 adds 2%. That is inside
+    P07.T12's 0.8–1.3, but by 0.011, and the ruling says not to chase it with the gas height. For
+    P07.T12: its integral along real lines differs from the one-point rate by a few parts in a
+    thousand, which is the whole of that margin.
+  - _Tests._ `tests/galaxy_fields.rs`'s `the_sun_is_solar_and_the_local_mean_is_near_the_surveys`
+    holds the young disc at R₀ to solar within 0.01 dex and the local mean within 0.04 of −0.06.
+    At three lengths both fail (−0.087 and −0.135). The unit test in `metallicity.rs` is re-based
+    on a 7,000 ly disc, and its steepest, longest disc now reaches +0.94 at the centre before the
+    clamp (+0.74 before).
+  - _Goldens._ Re-blessed in two steps, both exit 0: the workspace's tests under `HYPERION_BLESS=1`
+    with `--no-fail-fast`, skipping `every_golden_file_carries_the_current_version`, then
+    `just bless`. `golden_diff.py`: "Consistent", 2 goldens with moved values and 22 header only. In
+    `galaxy_fields.golden` 69 of the 80 `feh_sub_disc_2` values move and nothing else does. The
+    fixture's 20 move by the same +0.0858 dex, which is 0.05 dex per kpc × 0.8 × 7,000 ly. Each
+    seed's values move by that seed's own constant, except where they reach the +0.5 clamp, and 11
+    sit at the clamp before and after. In `galaxy_parameters.golden` only the version field moves.
+    Steep-gradient seeds now clamp over a wider inner disc: seed 1's centre goes from 0.443 to 0.5.

@@ -50,13 +50,22 @@ use crate::units::LightYears;
 /// caller twice — get the same systems, the same census and the same order.
 ///
 /// `cache` is the caller's; `sources` are everything that is not the grid, and `&[]` is the whole
-/// answer in the first milestone. The result's systems are **not** bounded by the query's limit:
+/// answer in the first milestone. The answer does not depend on the order the sources are listed
+/// in: their expected counts are summed layer by layer in value order, each layer's contributions
+/// sorted with [`f64::total_cmp`] and added from the smallest, suppression is a pure OR, and the
+/// hits are sorted by a total order over IDs that are unique by [`SystemSource`]'s contract (ruling
+/// 23 of 2026-09-22). The result's systems are **not** bounded
+/// by the query's limit:
 /// the limit bounds a layer's expected count, and the realised count is never truncated (plan 03,
 /// Design note 9), so a caller sizing a buffer leaves room for the Poisson excess.
 ///
 /// # Panics
 ///
-/// If a component's expected count is not a number, which plan 02's densities cannot produce.
+/// - If a component's expected count is not a number, which plan 02's densities cannot produce.
+/// - If the sources' expected counts sum past the largest `f64` in some layer, which no sphere the
+///   root cube holds can reach.
+/// - In debug builds, if a system ID appears twice among the merged hits, which only a source
+///   that breaks [`SystemSource`]'s contract can cause.
 ///
 /// # Examples
 ///
@@ -95,9 +104,11 @@ pub fn range_query<C: CellCache>(
 ) -> RangeResult {
     let widest = widest_sphere(query);
     let grid = expected_counts(galaxy, query.centre(), query.radius());
-    let from_sources = sources.iter().fold(LayerCounts::ZERO, |sum, source| {
-        sum + source.expected_in_sphere(galaxy, &widest)
-    });
+    let per_source: Vec<LayerCounts> = sources
+        .iter()
+        .map(|source| source.expected_in_sphere(galaxy, &widest))
+        .collect();
+    let from_sources = sum_source_counts(&per_source);
     let census = decide_census(query, &grid, &from_sources, |layer| {
         count_cells_in_sphere(layer, &sphere_for_layer(query, layer))
     });
@@ -145,7 +156,52 @@ pub fn range_query<C: CellCache>(
     stats.systems_examined += u64::try_from(systems.len().saturating_sub(from_grid))
         .expect("a hit count fits in 64 bits on every target");
     sort_hits(&mut systems);
+    // The sort is a strict order only while no ID appears twice, which the sources' contract
+    // promises and a debug build checks.
+    debug_assert!(
+        ids_are_unique(&systems),
+        "a system ID appears twice among the merged hits: a source broke the contract that its IDs \
+         are its own"
+    );
     RangeResult::new(systems, census, stats)
+}
+
+/// The sources' expected counts summed layer by layer in value order, so that the sum depends on
+/// which counts the sources report and not on the order they are listed in (ruling 23 of
+/// 2026-09-22).
+///
+/// Floating-point addition is not associative: folded in list order, 0.1, 0.2 and 0.3 give
+/// 0.600 000 000 000 000 1 in one order and 0.6 in another, and a census near its limit could flip
+/// with the list. So each layer's contributions are sorted with [`f64::total_cmp`] and then added
+/// from the smallest, starting at 0. Sources then need no identity to be ordered by. An empty list
+/// gives [`LayerCounts::ZERO`], as the fold did.
+///
+/// # Panics
+///
+/// If a layer's sum is too large for an `f64`, since an expected count must be finite: no sphere
+/// the root cube holds has 10³⁰⁸ systems in it, so only a broken source can reach it.
+#[must_use]
+pub(crate) fn sum_source_counts(per_source: &[LayerCounts]) -> LayerCounts {
+    let mut total = LayerCounts::ZERO;
+    let mut column = Vec::with_capacity(per_source.len());
+    for layer in Layer::ALL {
+        column.clear();
+        column.extend(per_source.iter().map(|counts| counts.get(layer)));
+        column.sort_by(f64::total_cmp);
+        total.set(layer, column.iter().fold(0.0, |sum, &count| sum + count));
+    }
+    total
+}
+
+/// Whether no system ID appears twice among `systems`, wherever the two copies were sorted.
+///
+/// The hits are ordered by distance first, so two copies of one ID need not be neighbours; this
+/// sorts a copy of the IDs instead. Only debug builds call it.
+#[must_use]
+fn ids_are_unique(systems: &[SystemHit]) -> bool {
+    let mut ids: Vec<u64> = systems.iter().map(|hit| hit.id().raw()).collect();
+    ids.sort_unstable();
+    ids.windows(2).all(|pair| pair[0] != pair[1])
 }
 
 /// The sphere a layer is walked with: the query's, padded by that layer's speed.
@@ -270,7 +326,196 @@ impl Error for BuildRangeQueryError {}
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
+    use crate::coords::GalacticPosition;
+    use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::placement::NoCache;
+    use crate::rng::Seed;
+
+    /// A source that reports fixed expected counts, places nothing and suppresses nothing.
+    #[derive(Debug)]
+    struct Counted(LayerCounts);
+
+    impl SystemSource for Counted {
+        fn expected_in_sphere(&self, _galaxy: &Galaxy, _sphere: &QuerySphere) -> LayerCounts {
+            self.0
+        }
+
+        fn systems_in_sphere(
+            &self,
+            _galaxy: &Galaxy,
+            _sphere: &QuerySphere,
+            _layers: LayerSet,
+            _out: &mut Vec<SystemHit>,
+        ) {
+        }
+
+        fn suppresses(&self, _galaxy: &Galaxy, _record: &SystemRecord, _t: UniverseTime) -> bool {
+            false
+        }
+    }
+
+    /// A source that breaks the contract: it hands back the grid's own nearest system as its member.
+    #[derive(Debug)]
+    struct Duplicating(SystemHit);
+
+    impl SystemSource for Duplicating {
+        fn expected_in_sphere(&self, _galaxy: &Galaxy, _sphere: &QuerySphere) -> LayerCounts {
+            LayerCounts::ZERO
+        }
+
+        fn systems_in_sphere(
+            &self,
+            _galaxy: &Galaxy,
+            _sphere: &QuerySphere,
+            layers: LayerSet,
+            out: &mut Vec<SystemHit>,
+        ) {
+            if layers.contains(self.0.record().layer()) {
+                out.push(self.0);
+            }
+        }
+
+        fn suppresses(&self, _galaxy: &Galaxy, _record: &SystemRecord, _t: UniverseTime) -> bool {
+            false
+        }
+    }
+
+    fn galaxy() -> Galaxy {
+        Galaxy::from_params(
+            Seed::new(0x0309_0de4_0000_0000),
+            GalaxyParams::milky_way_like(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
+    /// Twelve light-years of the Sun-like point, every layer: about fourteen systems from a few
+    /// dozen cells.
+    fn small_query() -> RangeQuery {
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        RangeQuery::builder(sun, LightYears::new(12.0))
+            .build()
+            .unwrap()
+    }
+
+    /// Every ordering of three items.
+    fn permutations<T: Copy>([a, b, c]: [T; 3]) -> [[T; 3]; 6] {
+        [
+            [a, b, c],
+            [a, c, b],
+            [b, a, c],
+            [b, c, a],
+            [c, a, b],
+            [c, b, a],
+        ]
+    }
+
+    /// Three sources whose plain fold depends on their order, 0.1, 0.2 and 0.3 in layers E and C,
+    /// give a bit-identical census in every order (ruling 23 of 2026-09-22).
+    #[test]
+    fn the_census_does_not_depend_on_the_order_of_the_sources() {
+        let galaxy = galaxy();
+        let query = small_query();
+        let counts = [0.1, 0.2, 0.3].map(|n| {
+            let mut counts = LayerCounts::ZERO;
+            counts.set(Layer::E, n);
+            counts.set(Layer::C, 10.0 * n);
+            counts
+        });
+        let sources = counts.map(Counted);
+        let grid = expected_counts(&galaxy, query.centre(), query.radius());
+
+        // The plain fold in list order, which the sum replaced, does depend on the order: at least
+        // two orders give the census different bits, so the test can tell the two sums apart.
+        let folded: Vec<f64> = permutations(counts)
+            .iter()
+            .map(|order| {
+                let plain = order
+                    .iter()
+                    .fold(LayerCounts::ZERO, |sum, counts| sum + *counts);
+                (grid + plain).get(Layer::E)
+            })
+            .collect();
+        assert!(
+            folded.iter().any(|sum| sum.total_cmp(&folded[0]).is_ne()),
+            "the plain fold gave one census in every order, so this test proves nothing"
+        );
+
+        let reference = range_query(
+            &galaxy,
+            &mut NoCache::new(),
+            &[&sources[0], &sources[1], &sources[2]],
+            &query,
+        );
+        for [a, b, c] in permutations([0, 1, 2]) {
+            let listed: [&dyn SystemSource; 3] = [&sources[a], &sources[b], &sources[c]];
+            let result = range_query(&galaxy, &mut NoCache::new(), &listed, &query);
+            assert_eq!(result.census(), reference.census(), "order {a}, {b}, {c}");
+            for (x, y) in result
+                .census()
+                .expected()
+                .to_array()
+                .into_iter()
+                .zip(reference.census().expected().to_array())
+            {
+                assert_same_bits(x, y);
+            }
+            assert_eq!(result.systems(), reference.systems());
+        }
+        // And the sum is the grid's plus the sources' in value order.
+        assert_same_bits(
+            reference.census().expected().get(Layer::E),
+            grid.get(Layer::E) + ((0.1 + 0.2) + 0.3),
+        );
+    }
+
+    #[test]
+    fn no_source_sums_to_zero_and_one_source_to_its_own_counts() {
+        assert_eq!(sum_source_counts(&[]), LayerCounts::ZERO);
+        let one = LayerCounts::from_array([1.5, 0.25, 3.0, 0.0, 7.0, 0.0, 0.0]);
+        for (x, y) in sum_source_counts(&[one])
+            .to_array()
+            .into_iter()
+            .zip(one.to_array())
+        {
+            assert_same_bits(x, y);
+        }
+    }
+
+    #[test]
+    fn distinct_ids_are_unique_and_a_repeated_one_is_not() {
+        let galaxy = galaxy();
+        let result = range_query(&galaxy, &mut NoCache::new(), &[], &small_query());
+        let hits = result.systems();
+        assert!(
+            hits.len() >= 2,
+            "twelve light-years of the Sun hold a few systems"
+        );
+        assert!(ids_are_unique(hits));
+        // The repeat lands far from its original, since the hits are ordered by distance first.
+        let mut repeated = hits.to_vec();
+        repeated.push(hits[0]);
+        assert!(!ids_are_unique(&repeated));
+    }
+
+    /// A source that returns an ID the grid already placed trips the debug check on the merged
+    /// hits.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "a system ID appears twice among the merged hits")]
+    fn a_source_that_repeats_a_grid_id_trips_the_debug_check() {
+        let galaxy = galaxy();
+        let query = small_query();
+        let grid = range_query(&galaxy, &mut NoCache::new(), &[], &query);
+        let nearest = *grid
+            .systems()
+            .first()
+            .expect("twelve light-years of the Sun hold a system");
+        let source = Duplicating(nearest);
+        let _merged = range_query(&galaxy, &mut NoCache::new(), &[&source], &query);
+    }
 
     #[test]
     fn error_messages_are_lower_case_without_trailing_punctuation() {

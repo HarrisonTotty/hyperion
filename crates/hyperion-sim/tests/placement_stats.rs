@@ -144,7 +144,8 @@ fn arm_block(galaxy: &Galaxy) -> Block {
 fn galaxies() -> Vec<(String, Galaxy)> {
     let mut all = vec![(
         "milky_way_like".to_owned(),
-        Galaxy::from_params(Seed::new(FIXTURE_SEED), GalaxyParams::milky_way_like()),
+        Galaxy::from_params(Seed::new(FIXTURE_SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral"),
     )];
     for seed in SEEDS {
         all.push((format!("seed {seed:#018x}"), Galaxy::new(Seed::new(seed))));
@@ -588,7 +589,8 @@ fn marks_draw_ages_from_the_picked_components_distribution() {
     let galaxy = Galaxy::from_params(
         Seed::new(FIXTURE_SEED | 0x20),
         GalaxyParams::milky_way_like(),
-    );
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
     let sun = sunlike_point(&galaxy).to_light_years_f64();
     let nuclear = galaxy.params().nuclear_disc().length().value() * 0.5_f64.sqrt();
     let places = [
@@ -722,7 +724,8 @@ fn marks_pick_components_with_the_odds_the_field_gives_them() {
     let galaxy = Galaxy::from_params(
         Seed::new(FIXTURE_SEED | 0x30),
         GalaxyParams::milky_way_like(),
-    );
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
     let all = blocks(&galaxy);
     // The Sun-like point, where the discs and the halo compete, and the outer bulge, where the
     // bulge, the bar and the nuclear disc do.

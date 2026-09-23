@@ -4,6 +4,7 @@
 //! The ranges are written out here from plan 02's table, independently of the sim's own
 //! constants, so that a wrong constant in the sim fails a test instead of moving the bracket.
 
+use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::fields::MAX_COMPONENTS;
 use hyperion_sim::galaxy::imf::{MassBand, MassFunctionKind};
@@ -591,4 +592,105 @@ pub fn reference_sphere_integral(
         }
     }
     total
+}
+
+// --- The gas and dust field (plan 07) ---
+
+/// The mean of a function of the seed over an ensemble of seeds, with its standard error.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EnsembleMean {
+    /// The sample mean.
+    pub mean: f64,
+    /// The sample's own standard error: its standard deviation over the square root of its size.
+    pub standard_error: f64,
+    /// The sample's variance, with the `n − 1` denominator.
+    pub variance: f64,
+    /// The number of seeds.
+    pub count: u64,
+}
+
+/// A running mean and variance by Welford's update, so that a sample of millions keeps its digits.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Running {
+    count: u64,
+    mean: f64,
+    squares: f64,
+}
+
+impl Running {
+    /// Adds one value.
+    pub fn push(&mut self, value: f64) {
+        self.count += 1;
+        let delta = value - self.mean;
+        self.mean += delta / count_as_f64(self.count);
+        self.squares += delta * (value - self.mean);
+    }
+
+    /// The mean and standard error so far.
+    ///
+    /// # Panics
+    ///
+    /// With fewer than two values, which have no variance.
+    #[must_use]
+    pub fn summary(&self) -> EnsembleMean {
+        assert!(
+            self.count >= 2,
+            "a sample of {} has no variance",
+            self.count
+        );
+        let variance = self.squares / count_as_f64(self.count - 1);
+        EnsembleMean {
+            mean: self.mean,
+            standard_error: (variance / count_as_f64(self.count)).sqrt(),
+            variance,
+            count: self.count,
+        }
+    }
+}
+
+/// `f` averaged over `seeds`, with a standard error (plan 07's `ensemble_mean`), by [`Running`].
+///
+/// A heavy-tailed quantity, such as the gas's log-normal factor, has a sample standard error that
+/// is itself unreliable; a caller that knows the population's variance should take the error from
+/// that instead.
+///
+/// # Panics
+///
+/// If `seeds` holds fewer than two seeds, which have no variance.
+pub fn ensemble_mean(
+    mut f: impl FnMut(Seed) -> f64,
+    seeds: impl IntoIterator<Item = Seed>,
+) -> EnsembleMean {
+    let mut running = Running::default();
+    for seed in seeds {
+        running.push(f(seed));
+    }
+    running.summary()
+}
+
+/// A whole number of light-years inside the root cube as an `i32`.
+///
+/// # Panics
+///
+/// If `ly` is not within 10⁻⁹ of a whole number inside ±65,536.
+#[must_use]
+pub fn whole_ly(ly: f64) -> i32 {
+    let whole = ly.round();
+    assert!(
+        (-65_536.0..=65_536.0).contains(&whole) && (ly - whole).abs() < 1e-9,
+        "{ly} ly is not a whole light-year of the root cube"
+    );
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a whole number inside ±65,536, which the assertion holds"
+    )]
+    let whole = whole as i32;
+    whole
+}
+
+/// A count as an `f64`, exactly: every count a test reaches is far below 2⁵³.
+#[must_use]
+fn count_as_f64(count: u64) -> f64 {
+    let exact = u32::try_from(count).expect("an ensemble of fewer than 2³² seeds");
+    f64::from(exact)
 }

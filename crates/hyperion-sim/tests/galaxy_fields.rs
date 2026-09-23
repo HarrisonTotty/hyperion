@@ -895,6 +895,66 @@ fn the_metallicity_gradient_is_the_drawn_one() {
     assert_relative("falling beyond 8 Gyr", at(9.5) - at(8.0), -0.15, 1e-12);
 }
 
+/// The mean \[Fe/H\] over every age of the systems at `(R, z)`, azimuthally averaged: each
+/// component's mean over its age distribution, by the midpoints of 2,048 equal quantiles, weighted
+/// by its azimuthally averaged density.
+fn local_mean_feh(fields: &Fields, r: f64, z: f64) -> f64 {
+    let quantiles = 2_048_u32;
+    let on_axis = PointLy::new(r, 0.0, z);
+    let (weighted, systems) =
+        fields
+            .components()
+            .iter()
+            .fold((0.0, 0.0), |(weighted, systems), c| {
+                let density = azimuthal_mean(r, z, |p| c.density(p));
+                let mean = (0..quantiles).fold(0.0, |sum, i| {
+                    let age = c
+                        .ages()
+                        .quantile((f64::from(i) + 0.5) / f64::from(quantiles));
+                    sum + c.metallicity(&on_axis, age).mean().value()
+                }) / f64::from(quantiles);
+                (weighted + density * mean, systems + density)
+            });
+    weighted / systems
+}
+
+/// The thin discs are solar at the Sun's radius, as the youngest local stars are, and the local
+/// mean over every age is near the Geneva–Copenhagen survey's (P02.T7.e; ruling 21 of 2026-09-22).
+///
+/// - The young disc's mean at R₀ is solar to 0.01 dex: the anchor is R₀ ÷ `R_d` = 3.8 scale lengths
+///   out, and the fixture's 7,000 ly is Bovy and Rix's 2.15 kpc, so it lands 73 ly inside R₀. At
+///   three scale lengths, before the ruling, it was −0.087 (−0.077 at 26,000 ly).
+/// - The local mean over every age and every component at R₀ and the Sun's height, 20.8 pc
+///   (Bennett and Bovy 2019), is within 0.04 dex of the survey's −0.06 (Casagrande et al. 2011,
+///   A&A 530, A138, Table 1), which is a magnitude-limited sample of F and G dwarfs and so weighted
+///   differently from a count of systems. It is −0.054, and was −0.135 at three scale lengths.
+#[test]
+fn the_sun_is_solar_and_the_local_mean_is_near_the_surveys() {
+    let (_, fields) = fixture();
+    let young = component(&fields, Population::YoungThinDisc);
+    let young_at = |r: f64| {
+        young
+            .metallicity(&PointLy::new(r, 0.0, 0.0), Years::ZERO)
+            .mean()
+            .value()
+    };
+    let sun_height = 20.8 * LIGHT_YEARS_PER_PARSEC;
+    let local = local_mean_feh(&fields, R0, sun_height);
+    eprintln!(
+        "young disc [Fe/H] {:.4} at R₀ and {:.4} at 26,000 ly; local mean over every age {local:.4} \
+         at R₀ and the Sun's height (Geneva–Copenhagen −0.06)",
+        young_at(R0),
+        young_at(26_000.0),
+    );
+    assert_within("the young disc's [Fe/H] at R₀", young_at(R0), -0.01, 0.01);
+    assert_within(
+        "the local mean [Fe/H] over every age",
+        local,
+        -0.06 - 0.04,
+        -0.06 + 0.04,
+    );
+}
+
 /// The components come in the fixed order, at most `MAX_COMPONENTS` of them, and their counts add
 /// up to the galaxy's system count, by population and in all (P02.T7.e).
 #[test]

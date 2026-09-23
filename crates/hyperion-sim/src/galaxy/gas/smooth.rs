@@ -284,8 +284,7 @@ impl SmoothGas {
     #[must_use]
     pub fn column_between(&self, layer: GasLayer, r: f64, z_lo: f64, z_hi: f64) -> f64 {
         debug_assert!(z_lo <= z_hi, "a column from {z_lo} ly down to {z_hi} ly");
-        let height = self.height(layer);
-        let thickness = across_heights(|z| from_plane(height, z), z_lo, z_hi);
+        let thickness = layer_thickness(self.height(layer), z_lo, z_hi);
         thickness * self.plane_density(layer, r) * CENTIMETRES_PER_LIGHT_YEAR
     }
 
@@ -356,6 +355,15 @@ fn radial_edges(scale: f64) -> [f64; RADIAL_EDGES] {
     })
 }
 
+/// `∫ exp(−|z| ÷ h) dz` from `z_lo` to `z_hi ≥ z_lo` (ly), ly: the thickness a layer of scale height
+/// `height` (ly) has across the interval, per unit of mid-plane density, as
+/// [`SmoothGas::column_between`] takes it; clamped at 0 by comparison, never by `f64::max`, and even
+/// in `z` bit for bit.
+#[must_use]
+pub(crate) fn layer_thickness(height: f64, z_lo: f64, z_hi: f64) -> f64 {
+    across_heights(|z| from_plane(height, z), z_lo, z_hi)
+}
+
 /// `∫₀^{|z|} exp(−z′ ÷ h) dz′ = h (1 − exp(−|z| ÷ h))`, ly: an exponential layer's column from the
 /// plane to `z`, per unit of mid-plane density.
 fn from_plane(height: f64, z: f64) -> f64 {
@@ -406,7 +414,7 @@ mod tests {
     /// how `gas::params`'s and plan 02's own fast sweeps are split.
     fn drawn(seed: Seed) -> GasParams {
         let galaxy = GalaxyParams::from_seed(seed, MassFunctionKind::default());
-        GasParams::from_galaxy(seed, &galaxy)
+        GasParams::from_galaxy(seed, &galaxy).expect("a drawn galaxy keeps most of its gas neutral")
     }
 
     #[track_caller]
@@ -673,7 +681,7 @@ mod tests {
                 .gas_mass_fraction(fraction)
                 .build()
                 .expect("inside plan 02's range");
-            SmoothGas::new(&GasParams::from_galaxy(seed, &galaxy))
+            SmoothGas::new(&GasParams::from_galaxy(seed, &galaxy).unwrap())
         });
         assert_same_bits(
             light.plane_density(GasLayer::Warm, r),
@@ -712,7 +720,7 @@ mod tests {
         };
         let fixture = GalaxyParams::milky_way_like();
         for seed in seeds(2_000) {
-            check(&GasParams::from_galaxy(seed, &fixture));
+            check(&GasParams::from_galaxy(seed, &fixture).unwrap());
         }
         for seed in seeds(32) {
             check(&drawn(seed));

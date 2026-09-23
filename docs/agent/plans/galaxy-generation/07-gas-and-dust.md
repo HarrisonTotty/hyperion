@@ -1412,14 +1412,17 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
     over 1.87 × 10²¹ nuclei per cm² per magnitude, at one point times the length; P07.T12 measures them.
     The column is every disc phase with helium, not the corona, as McKee et al. count it.
 
-  - _A finding against plan 02: the Sun's metallicity._ Plan 02's thin-disc metallicity is solar at
-    three scale lengths (`THIN_DISC_REFERENCE_LENGTHS`), which was 25,440 ly on the version 8 fixture
-    and is 21,000 ly since P02.T11 shortened the thin disc to 7,000 ly. So [M/H] at 26,000 ly is −0.077
-    and ζ = 0.84, where the local young population is solar or a little above. If plan 02 moves the
-    solar point back to the Sun, ζ goes to 1 and the in-plane extinction to 1.26 mag per 3,000 ly —
-    inside 0.8–1.3 but near its top — and h_n near 800 ly would bring it back to about 1.05, which is
-    ruling 19's own estimate. Plan 02's sub-discs solve their profiles at the same three lengths
-    (`REFERENCE_RADIUS_LENGTHS`), so the question is plan 02's, not this plan's.
+  - _A finding against plan 02: the Sun's metallicity._ Plan 02's thin-disc metallicity was solar at
+    three scale lengths (`THIN_DISC_REFERENCE_LENGTHS` = 3.0 up to version 10), which was 25,440 ly on
+    the version 8 fixture and 21,000 ly once P02.T11 shortened the thin disc to 7,000 ly. So [M/H] at
+    26,000 ly was −0.077 and ζ = 0.84, where the local young population is solar or a little above.
+    Plan 02's sub-discs solve their profiles at the same three lengths (`REFERENCE_RADIUS_LENGTHS`),
+    which do not move. **Ruled (ruling 21, version 11):** the constant is renamed
+    `THIN_DISC_SOLAR_ANCHOR_LENGTHS` and set to 3.8, the Milky Way's R₀ ÷ R_d, which puts the solar
+    point at 26,600 ly on the fixture: [M/H] at 26,000 ly is +0.009 and ζ = 1.02, and the in-plane
+    extinction rises to 1.29 mag per 3,000 ly — not the 1.26 estimated here, which was for ζ = 1 — just
+    inside 0.8–1.3. The ruling is not to chase it back with the gas height (the local measurement is
+    about 1.6). P07.T3–T9's measurement of it along P07.T12's lines is under "T3 to T9, as built".
   - _Plan 02, moved by the fixture's lighter gas._ The fixture's bulge σ fell from 123.9 to 123.8 km/s,
     which put its black hole at 4.28 × 10⁶ M☉; its M–σ offset is re-set, as R13 requires whenever σ
     moves, from −0.514 to **−0.512** dex, and the black hole is 4.30 × 10⁶ again (Sgr A*'s 4.297 ±
@@ -1460,3 +1463,113 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   them. No `clippy.toml` change was needed (`McMillan` and `McKee` are already in `doc-valid-idents`),
   and note that the transcendental bans now also come from a **workspace-root `clippy.toml`** which the
   sim's own file shadows.
+- **T3 to T9, as built (round 6, 2026-09-23), at generator version 10.** Every figure below is a
+  version-10 figure, measured on the Milky Way fixture with the thin discs' solar metallicity at three
+  scale lengths; ruling 21, landing in parallel, moves the anchor to 3.8 (see the last item).
+  - _T3, lanes._ `gas/lanes.rs`: `Lanes::new(ArmGeometry, LaneParams)`, `factor(r, theta)`,
+    `shift()` (δR = d ÷ cos p), `arm()`, and `sup(&CellBox)`, which T6.b reads. Nothing in plan 02
+    changed. The factor averages 1 to 10⁻⁹ at twenty radii for the fixture and sixteen drawn galaxies;
+    the lane lies inside the arm by δR to 5%; 1 − A between the arms to 1%; its peak at 26,000 ly is
+    2.9. "1 well inside the bar" is tested as within 10⁻³ inside half the bar's half-length and 10⁻⁶
+    inside a quarter: at the shortest bar and the largest shift the fade-in reads the pattern at 0.56
+    of the half-length, 2 × 10⁻⁴. The mass closes to 2% with the lanes on and the lanes move it by
+    under 10⁻⁹ (`tests/gas.rs`).
+  - _T4, noise._ `gas/noise.rs`; the tag `gas.noise` is `tags.golden`'s one new line
+    (`gas.noise (Galaxy) = 0xcf9e5499210106b6`). The lattice word is the octave in bits 60–63 and x,
+    y, z in twenty bits each below it, x highest; word 0 is never a lattice point and marks an empty
+    cache slot. Octave variances `a_k²` are written out (`OCTAVE_VARIANCES`), tested against `powf`
+    and to sum to 1. **Outside the root cube the factor is 1**, its mean: the plan left it open.
+    `NoiseCache` remembers the seed it was filled for and empties itself for another, so one cache
+    can serve two galaxies; capacity 0 is a cache that holds nothing. Over 10⁶ seeds (slow, 13 s at a
+    load of 16 and 2.3–2.7 GHz) the mean factor is 0.994 ± 0.007 and 1.000 ± 0.005 at `σ_ln` 2.0
+    (`Full`, `AtLeast(250 ly)`), 0.986 ± 0.023 and 1.004 ± 0.013 at 2.5, and `ln F`'s variance is
+    `σ_eff²` to 0.1%. Dropping the variance normalisation, or raising one octave's amplitude by a
+    fifth, turns both the slow and the fast (10⁴ seeds) test red.
+  - _T5, pressure and phases._ `gas/pressure.rs` (`Pressure`) and `gas/phase.rs` (`GasPhase::of`,
+    `temperature`, `neutral_share`, `NEUTRAL_PARTICLES_PER_HYDROGEN` in `gas/mod.rs`). **σ_P is now
+    5.15 km/s, not 5.5**: ruling 19 raised the fixture's plane disc gas at 26,000 ly from 0.70 to 0.83
+    cm⁻³, which at 5.5 km/s gives 4,670 K cm⁻³, above T5's 3,400–4,200; the measured 3,800 needs 4.9
+    km/s, where the analytic hot filling at `σ_ln` 2.0 is 0.161, below T5's 0.17. Both hold only for
+    5.10–5.19 km/s; 5.15 gives 4,145 K cm⁻³ (log 3.62 against Jenkins and Tripp's 3.58, dispersion at
+    least 0.175 dex) and a hot share of 0.172, 0.294 and 0.380 at `σ_ln` 2.0, 2.3 and 2.5.
+    `params.golden`'s three `pressure_speed` lines move with it. The floor sweep (slow, 100 galaxies
+    × 10⁴ points, 6 s) goes red when the floor is let fall with height. **Far above the disc the
+    corona's hot margin is thin**: 20,000 ly up at 26,000 ly the coolest of 2,000 seeds is 100,870 K,
+    the corner of the drawn ranges (floor 300 K cm⁻³, corona 1.2 × 10⁻³ cm⁻³, warm layer 0.035 cm⁻³
+    and 3,500 ly) gives 99,160 K, and above the inner disc one or two seeds in 2,000 fall to 92,400 K;
+    T5's test is written at the Sun's radius, and the corona's range is P07.T12's to move. Above
+    550,000 K cm⁻³ the warm limit passes 100 cm⁻³; the most compact molecular discs reach it at the
+    centre, and the phase stays monotone in density there. A warm phase's temperature uses 1.1
+    particles per nucleus, as its label does, which reads warm ionised gas up to 2.1 times too warm.
+  - _T6.a, the facade and ruling 22._ `gas/field.rs` (`GasField`, `GasState`, crate-private `Site`
+    and `Layers`), `gas/modifiers.rs`. Added beyond the sketch: `GasField::with_params(seed,
+GasParams, &Fields)` for fixtures (`GasField::new` draws the gas from the seed, so
+    `Galaxy::from_params(seed, GalaxyParams::milky_way_like())` does **not** carry
+    `GasParams::milky_way_like()`), `mean_neutral_density` (what `neutral_bound` bounds), `seed`,
+    `params`, `smooth`, `lanes`, `pressure_model`. The metallicity is the young thin disc's own law,
+    copied through a crate-private `Component::metallicity_model()` in `fields/mod.rs`, so ruling 21
+    reaches the gas without an edit here. **Ruling 22**: `GasParams::from_galaxy` returns
+    `Result<GasParams, BuildGasParamsError>` (`NoNeutralGas { gas_mass, warm_mass, molecular_mass }`),
+    `GasField::new` passes it on, and `Galaxy::from_params` returns `Result<Galaxy,
+BuildGalaxyError>` (`Gas(BuildGasParamsError)`, with `source`). `Galaxy::new` and
+    `with_mass_function` keep returning `Galaxy` and `expect`, on the 2,000-seed evidence; the corner
+    is reachable only by a thin-disc length scatter of some five standard deviations or more with the
+    other draws at their ends, and if the owner wants no panic at all there, `Galaxy::new` returns a
+    `Result` too and the server's `GalaxyCache` maps it to `UnplayableGalaxy` beside
+    `check_index_headroom`'s. The server's `GalaxyCache` builds with `Galaxy::new` and is unchanged;
+    every `Galaxy::from_params` caller (41 sites, most in tests, including `placement/cache.rs`,
+    `query/`, `compute/galaxies.rs` and `convert.rs` tests) gains an `.expect`. The corner galaxy the
+    test builds needs the **longest** bar, 18,000 ly, not the shortest: 34 seeds of 4,096 are refused.
+    **`GENERATOR_VERSION` was not bumped** in T6.a: `srv` bumps 10 to 11 in the same merge window,
+    and T6.a's bump would have moved no value. The `Galaxy` doc's figures: the field adds two radial
+    quadratures and no heap.
+  - _T6.b, the bound._ `GasField::neutral_bound(&CellBox)`, in `field.rs` rather than a `bound.rs`.
+    The lane factor's phase range is taken at the shifted radius about the cell's centre with
+    `ArmGeometry::phase_range`'s half-width, which still bounds it because the shifted phase's
+    gradient is below `n ÷ (R sin p)`. The hunt (slow, 10⁴ cells, 10⁶ points, 6 s) finds no violation;
+    on 3,897 cells away from the lanes the bound is at most 1.06 of the maximum. Dropping the lane
+    factor from the bound turns the hunt and the fast suite red.
+  - _T7, the law._ `gas/ccm.rs`. The coefficients match dust_extinction's `CCM89` and IDL
+    `ccm_unred.pro` digit for digit (the ADS scan has no text layer). **R and I are 0.64 and 0.79
+    µm, not 0.66 and 0.81**: the SVO Filter Profile Service gives the Cousins bands' effective
+    wavelengths as 0.636 and 0.783 µm. **For the owner**: the 10 µm point continues the infrared power
+    law past CCM's 3.5 µm and misses the silicate feature, 0.010 against a measured ≈0.06 (Rieke and
+    Lebofsky 1985, `A_V ÷ τ_9.7` = 16.6 ± 2.1).
+  - _T8, the integral._ `gas/extinction.rs`. The step rule needed two decisions the note left open:
+    **Δ_smooth doubles with lod as Δ_noise does**, since otherwise no budget under some 300 steps can
+    march 26,000 ly of plane; and when even one step per piece is over the budget the stretches
+    between holes are merged and marched as one, so a budget is never exceeded without holes and
+    never by more than one step per stretch between holes with them. At full quality every step is
+    32 ly, 29 ly in the fixture's centre sphere. `horizon` takes a `NoiseMode` (T8.d's test is in mean
+    mode, which the sketch could not express) and caps its range at 2¹⁹ ly; `sightline`'s last
+    arguments are named `modifiers`. Holes' interiors are hot, so they add no neutral column. Clouds' columns are added in a canonical
+    order (by centre, then core, density and dust), since a Plummer ball adds a little at any distance
+    and the determinism audit found that the source's order, or an extra distant cloud, moved the last
+    bits; `GasModifierSource` now asks for a set that is a pure function of the unordered pair `{a, b}`.
+    T8's golden is `gas/extinction.golden` (eight lines in both modes at `Full` and `Budget(64)`, and
+    the V and K horizons from the Sun); P07.T12's `sightlines.golden` is left to it.
+    `reddening` is `A_B − A_V` at the two bands' wavelengths. The mean mode matches an independent
+    midpoint quadrature of the public field to 0.1% on four lines, and a vertical line the closed
+    form to 0.1%. Measured: 1.056 mag per 3,000 ly in the plane at 26,000 ly (64 azimuths), 26.9 mag
+    and A_K 3.06 to the centre, 0.25 mag to the pole, and a coreward V horizon at 5 mag of 9,480 ly.
+  - _T9, maps._ `gas/map.rs`. The edge-on line integrals are 4,096 two-point steps of 32 ly across the
+    cube, per layer, so that each pixel is `Σ line × vertical mean` with the vertical means from
+    `smooth::layer_thickness` (new, crate-private, which `column_between` now calls). **T9's face-on
+    bracket of 0.3–0.45 mag is replaced by 0.45–0.75**: it was twice version 8's 0.18 mag to the pole,
+    and rulings 1 and 19 have since set the disc's column to McKee et al.'s 13.7 ± 1.6 M☉ pc⁻²,
+    which is 0.48–0.61 mag face-on at the fixture's `ζ` of 0.84 and 0.57–0.73 at ruling 21's; the
+    test also holds it to twice the polar sight line to 1%. Measured: 0.55 mag face-on at the Sun's
+    radius, a lane contrast of 2.9, and 34.9 mag in the edge-on pixel beside the centre.
+  - _Ruling 21's anchor, set by hand in a scratch test and not committed_: at 3.8 scale lengths ζ at
+    26,000 ly is 1.02, the in-plane extinction 1.29 mag per 3,000 ly (predicted 1.26; inside
+    P07.T12's 0.8–1.3 but 0.01 from its top), the centre 32.8 mag and A_K 3.73, the pole 0.30 mag and
+    the coreward V horizon 8,100 ly. Every bracket test here holds at both anchors.
+  - _Timing, for T4.c, T8.e and T9_: see `benches/gas.rs`'s module documentation.
+  - _For P07.T10_: the map service calls `render_extinction_rows(galaxy.gas(), &spec, rows, &mut
+out)` with plan 04's `MapSpec`, whose selection it ignores; a pixel with no dust is 0 mag, so its
+    `math::log10` is −∞ and code 0. The extinction request builds one `NoiseCache` per job
+    (`with_capacity(4_096)`), calls `sightline(gas, a, b, NoiseMode::Realised,
+Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::K)`,
+    `hydrogen_column`, `neutral_hydrogen_column`; `Sightline` is `Copy`, 32 bytes, with no heap.
+    `Galaxy::from_params` now returns a `Result`, which the server's two test sites already
+    `expect`.

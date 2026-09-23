@@ -25,6 +25,7 @@ const SEED: u64 = 0x0300_04de_0000_0000;
 
 fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
 }
 
 /// The Sun-like point: in the plane, 26,000 ly out on the +y axis, clear of the bar.

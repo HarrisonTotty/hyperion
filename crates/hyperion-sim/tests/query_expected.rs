@@ -26,6 +26,7 @@ const SEED: u64 = 0x0309_c007_0000_0001;
 
 fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
 }
 
 fn at(ly: [f64; 3]) -> GalacticPosition {

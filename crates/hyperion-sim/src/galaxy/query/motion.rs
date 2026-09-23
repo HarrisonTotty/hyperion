@@ -154,6 +154,7 @@ mod tests {
 
     fn galaxy() -> Galaxy {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
     fn at(years: i64) -> UniverseTime {

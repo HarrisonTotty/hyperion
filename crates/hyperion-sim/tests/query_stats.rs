@@ -58,7 +58,8 @@ fn realised_counts_per_layer_follow_the_expected_counts() {
     let mut expected = [0.0; 5];
     let mut spheres = 0_u32;
     for seed in SEEDS {
-        let galaxy = Galaxy::from_params(Seed::new(seed), GalaxyParams::milky_way_like());
+        let galaxy = Galaxy::from_params(Seed::new(seed), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral");
         let sun = sunlike_point(&galaxy).to_light_years_f64();
         let mut per_seed = [0_u64; 5];
         for i in 0..STEPS[0] {

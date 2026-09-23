@@ -104,6 +104,7 @@ fn sunlike_point() -> GalacticPosition {
 
 fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
 }
 
 /// A cache holding every cell it has been asked for: the warm case, and what a server's bounded

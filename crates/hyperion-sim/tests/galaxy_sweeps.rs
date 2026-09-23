@@ -263,15 +263,19 @@ fn the_fields_over_a_thousand_seeds() {
 /// model gives until they are ruled on, not moved silently:
 ///
 /// - `v_c` at 8 kpc has a median of 223 km/s, with 58% of seeds in 210–270 (1–99%: 170–288). The
-///   brainstorm says only "210–270 km/s at 8 kpc for most seeds"; the plan's 225–255 and 68% are its
-///   own. The median galaxy is lighter than the Milky Way — M★ is log-uniform on 3–10 × 10¹⁰ M☉,
-///   median 5.5 against the fixture's 6.0 — and f★'s log-uniform 0.12–0.45 spreads its halo by a
-///   factor of 3.75, so the fixture's 231.5 km/s sits above the median, as it should. Checked: the
-///   median in 215–255 and at least 55% in 210–270.
+///   brainstorm says only "210–270 km/s at 8 kpc for most seeds", which 58% meets; the plan's
+///   225–255 and 68% are its own gloss. Moving the fixture (230.7 km/s) to the draws' medians one
+///   at a time (plan 02, Risks, R23): M★'s, 5.5 × 10¹⁰ M☉ against 6.0, costs 8.4 km/s; the thin
+///   disc's size law, which still centres on the 8,480 ly that P02.T11 tuned the fixture away
+///   from to 7,000, costs 5.4; f★'s, 0.23 against 0.32, is a heavier halo, not a lighter one, and
+///   adds 3.4; all together they give 222.4, the median here. The first is the brainstorm's
+///   range; the second is the tuning not carried into the draw. Checked: the median in 215–255
+///   and at least 55% in 210–270.
 /// - `v_c(1 kpc)` ÷ `v_c(8 kpc)` has a median of 0.785 (1–99%: 0.66–0.93), against the plan's 0.85–0.97,
-///   which is the brainstorm's research model (202 ÷ 230 = 0.88) and not a measurement; the fixture
-///   gives 0.807 and passes its own 0.75–1.1 row. It is the same finding as the fixture's inner
-///   rotation curve (`galaxy_milky_way.rs`): the model's inner curve runs low. Checked: 0.75–0.97.
+///   which is the brainstorm's research model (202 ÷ 230 = 0.88) and not a measurement: the
+///   dynamical models' 161–191 km/s at 1 kpc over Eilers et al.'s 229 give the Milky Way 0.70–0.83
+///   (R23), and the fixture gives 0.809 and passes its own 0.75–1.1 row. The bracket was the
+///   research model's, not the draws' fault. Checked: 0.75–0.97.
 #[test]
 #[ignore = "slow: builds the parameters and mass models of 4,000 galaxies"]
 fn the_rotation_curve_over_four_thousand_seeds() {

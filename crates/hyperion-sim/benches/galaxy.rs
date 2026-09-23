@@ -141,7 +141,10 @@ fn handle(c: &mut Criterion) {
     group.bench_function("Galaxy::from_params (fixture)", |b| {
         b.iter_batched(
             GalaxyParams::milky_way_like,
-            |params| Galaxy::from_params(Seed::new(7), params),
+            |params| {
+                Galaxy::from_params(Seed::new(7), params)
+                    .expect("this galaxy's gas is mostly neutral")
+            },
             BatchSize::LargeInput,
         );
     });
