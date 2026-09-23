@@ -259,6 +259,42 @@ describe("paint", () => {
     ]);
   });
 
+  it("fills a ringed circle's disc alone, then strokes the disc and its ring together", () => {
+    const { recorder, path } = paintOps([symbolOp({ shape: "ringed-circle", radiusPx: 6 })]);
+
+    const names = recorder.records.map((record) => record.name);
+    expect(names.slice(names.indexOf("arc"))).toEqual([
+      "arc",
+      "fillStyle",
+      "fill",
+      "moveTo",
+      "arc",
+      "strokeStyle",
+      "lineWidth",
+      "stroke",
+    ]);
+    expect(path).toEqual([
+      ["beginPath"],
+      ["arc", 50, 40, 2, 0, 2 * Math.PI],
+      ["fill"],
+      ["moveTo", 56, 40],
+      ["arc", 50, 40, 6, 0, 2 * Math.PI],
+    ]);
+  });
+
+  it.each(["ringed-circle", "triangle-down", "pentagon", "hexagon"] as const)(
+    "draws the %s open with the same path as filled, and no fill",
+    (shape) => {
+      const filled = paintOps([symbolOp({ shape, fill: "text" })]);
+      const open = paintOps([symbolOp({ shape, fill: null })]);
+
+      expect(open.recorder.calls("fill")).toEqual([]);
+      expect(filled.recorder.calls("fill")).toHaveLength(1);
+      expect(open.path).toEqual(filled.path.filter(([name]) => name !== "fill"));
+      expect(open.recorder.calls("stroke")).toHaveLength(1);
+    },
+  );
+
   it("draws a line from its start to its end", () => {
     const { path } = paintOps([
       {

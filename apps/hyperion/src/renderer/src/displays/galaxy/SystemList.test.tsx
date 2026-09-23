@@ -1,5 +1,5 @@
 import type { SystemIdHex } from "@hyperion/protocol";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -189,6 +189,18 @@ describe("SystemList", () => {
         name: "H7K 4C0RFZ A-1, 1.00 ly, 0.29 solar masses, IN RANGE",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("names a system beyond the drive range OUT OF RANGE, though its column shows OUT", () => {
+    stubViewport();
+    renderList(manySystems(3), { driveRangeLy: 2 });
+
+    // The third system is 3 ly out, beyond the 2 ly drive range.
+    const row = screen.getByRole("option", {
+      name: /, 3\.00 ly, [\d.]+ solar masses, OUT OF RANGE$/u,
+    });
+    expect(within(row).getByText("OUT", { exact: true })).toBeInTheDocument();
+    expect(within(row).queryByText("OUT OF RANGE")).not.toBeInTheDocument();
   });
 
   it("shows nothing but its heading when the chart holds no system", () => {

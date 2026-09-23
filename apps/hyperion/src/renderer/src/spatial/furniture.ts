@@ -180,22 +180,27 @@ function axisReachRem(boxHeightRem: number, labelHeightRem: number): number {
  * axis the directions are labelled `-X` and `+Y`, as the frame falls back to them (design note
  * D11), with the guide's `-` for a signed value.
  *
+ * @param frame - The scene's frame, which the camera's angles are measured in.
  * @param boxRem - The box the triad is drawn in, from {@link triadBoxRem}: the axes are shortened
  *   to fit a box shorter than {@link TRIAD_BOX_REM}, so that nothing leaves it.
+ * @param shown - The directions the triad draws and names, as the camera sees them: the galactic
+ *   ones at the view centre where the scene's frame is tilted to them, as the orbit map's is (plan
+ *   14, D21); the scene's frame's own when absent.
  */
 export function triadLayout(
   frame: LocalFrame,
   angles: CameraAngles,
   boxRem: TriadBoxRem = TRIAD_BOX_REM,
+  shown: LocalFrame = frame,
 ): ReadonlyArray<TriadAxis> {
   const basis = viewBasis(frame, angles);
-  const labels = frame.onAxis
+  const labels = shown.onAxis
     ? { coreward: "-X", spinward: "+Y", north: "NORTH" }
     : { coreward: "COREWARD", spinward: "SPINWARD", north: "NORTH" };
   const axes = (["coreward", "spinward", "north"] as const).map((name) => ({
     name,
-    vector: frame[name],
-    projected: onScreen(frame[name], basis),
+    vector: shown[name],
+    projected: onScreen(shown[name], basis),
   }));
   const reachRem = axisReachRem(
     boxRem.height,
@@ -431,8 +436,12 @@ function besidePoint(
  * line of sight the arrow becomes the away or towards symbol at the top of the view, labelled on
  * its left.
  *
+ * @param frame - The scene's frame, which the camera's angles are measured in.
  * @param labelText - The label's text, as {@link coreLabelText} writes it.
  * @param obstacles - Furniture the arrow and its label keep clear of, such as the triad.
+ * @param shown - The galactic directions at the view centre, whose coreward the arrow points
+ *   along: apart from the scene's frame where that is tilted to them, as the orbit map's is (plan
+ *   14, D21); the scene's frame's own when absent.
  */
 export function coreArrowLayout(
   frame: LocalFrame,
@@ -440,13 +449,14 @@ export function coreArrowLayout(
   viewport: Viewport,
   labelText: string,
   obstacles: ReadonlyArray<BoxPx>,
+  shown: LocalFrame = frame,
 ): CoreArrowLayout {
-  if (frame.onAxis) {
+  if (shown.onAxis) {
     return { kind: "undefined" };
   }
   const remPx = viewport.remPx;
   const basis = viewBasis(frame, angles);
-  const projected = onScreen(frame.coreward, basis);
+  const projected = onScreen(shown.coreward, basis);
   const reach = length(projected);
   const size = textSizeRem(labelText, OVERLAY_LETTER_SPACING_EM);
   const clearOf = (box: BoxPx): boolean => !obstacles.some((other) => boxesOverlap(box, other));
@@ -455,7 +465,7 @@ export function coreArrowLayout(
     const centre = { xPx: viewport.widthPx / 2, yPx: (RIM_INSET_REM + CORE_SYMBOL_REM) * remPx };
     const clearPx = (CORE_SYMBOL_REM + CORE_GAP_REM) * remPx;
     return {
-      kind: dot(frame.coreward, basis.forward) > 0 ? "away" : "towards",
+      kind: dot(shown.coreward, basis.forward) > 0 ? "away" : "towards",
       centre,
       label: besidePoint(centre, { x: -1, y: 0 }, clearPx, size, viewport),
     };

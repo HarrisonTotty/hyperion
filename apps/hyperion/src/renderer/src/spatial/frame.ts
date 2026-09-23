@@ -1,4 +1,4 @@
-import { add, dot, scale, vec3, type Vec3 } from "./vec3";
+import { add, cross, dot, norm, normalise, scale, sub, vec3, type Vec3 } from "./vec3";
 
 /**
  * The named directions at a point, as galactic unit vectors: coreward, spinward and north.
@@ -67,6 +67,56 @@ export function localFrameAt(positionLy: Vec3): LocalFrame {
     north: NORTH,
     onAxis: false,
   };
+}
+
+/**
+ * How close to parallel, as the sine of the angle between them, a plane's reference direction may
+ * come to its normal before `planeFrame` gives up projecting it.
+ */
+export const PARALLEL_TOLERANCE = 1e-6;
+
+/** A unit vector at right angles to the unit vector `unit`, from the axis least along it. */
+function perpendicularTo(unit: Vec3): Vec3 {
+  const size = { x: Math.abs(unit.x), y: Math.abs(unit.y), z: Math.abs(unit.z) };
+  let axis: Vec3;
+  if (size.x <= size.y && size.x <= size.z) {
+    axis = vec3(1, 0, 0);
+  } else if (size.y <= size.z) {
+    axis = vec3(0, 1, 0);
+  } else {
+    axis = vec3(0, 0, 1);
+  }
+  return normalise(sub(axis, scale(unit, dot(axis, unit))));
+}
+
+/**
+ * The frame of a plane tilted to the galaxy's, such as a planetary system's: its normal as
+ * `north`, and a reference direction laid onto the plane as `coreward` (plan 14, D21).
+ *
+ * @remarks
+ * `north` is the unit normal; `coreward` is `reference` less its part along the normal,
+ * normalised; `spinward` is coreward × north, so that `(spinward, coreward, north)` is right-handed
+ * as {@link localFrameAt}'s is, and with the galactic north as the normal and a point's coreward as
+ * the reference the frame is that point's, to rounding. When the reference lies within
+ * {@link PARALLEL_TOLERANCE} of the normal, or has no length, it has no direction on the plane,
+ * and `coreward` falls back to the one along the galactic axis least along the normal. The frame
+ * is never `onAxis`: its directions are the plane's and always defined, and the galaxy's own are
+ * shown apart from it (`SpatialView`'s `axes`). Every spatial display's plane, grid, stalks, fill
+ * rule and preset views follow its scene's frame, so this frame alone tilts all of them.
+ *
+ * @param normal - The plane's normal, in any unit; its sense chooses the side marks are filled on.
+ * @param reference - The direction the plane's coreward is taken from, as galactic coreward at the
+ *   system is for the orbit map.
+ * @throws RangeError when `normal` has no length, and so no direction.
+ */
+export function planeFrame(normal: Vec3, reference: Vec3): LocalFrame {
+  const north = normalise(normal);
+  const onPlane = sub(reference, scale(north, dot(reference, north)));
+  const coreward =
+    norm(onPlane) > PARALLEL_TOLERANCE * norm(reference)
+      ? normalise(onPlane)
+      : perpendicularTo(north);
+  return { coreward, spinward: cross(coreward, north), north, onAxis: false };
 }
 
 /** The components of a galactic vector along the frame's coreward, spinward and north. */

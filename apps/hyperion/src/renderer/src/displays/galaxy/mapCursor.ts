@@ -149,8 +149,50 @@ export function pickCursor(
 }
 
 /**
+ * An edge-on height after `pixels` whole-pixel steps of `pixelLy` towards `sign`, stopped short of
+ * the limit `[minLy, maxLy]` at the furthest point of its own step lattice inside it.
+ *
+ * @remarks
+ * The lattice is the height plus whole multiples of one pixel, so that a step stopped at the limit
+ * can be undone exactly by as many one-pixel steps back as it moved (the orchestrator's ruling 28).
+ * A height already outside the limit, as a typed one beyond the map can be, is brought to the
+ * limit as a pick is, since no point of its lattice lies inside it on that side.
+ */
+function heightOnLattice(
+  valueLy: number,
+  sign: 1 | -1,
+  pixels: number,
+  pixelLy: number,
+  minLy: number,
+  maxLy: number,
+): number {
+  const within = (candidateLy: number): boolean => candidateLy >= minLy && candidateLy <= maxLy;
+  const target = valueLy + sign * pixels * pixelLy;
+  if (within(target)) {
+    return target;
+  }
+  if (!within(valueLy)) {
+    return clamp(target, minLy, maxLy);
+  }
+  const roomLy = sign > 0 ? maxLy - valueLy : valueLy - minLy;
+  let whole = Math.min(pixels, Math.floor(roomLy / pixelLy));
+  // The quotient can round up across a whole number; the point stopped at must still be inside.
+  while (whole > 0 && !within(valueLy + sign * whole * pixelLy)) {
+    whole -= 1;
+  }
+  return valueLy + sign * whole * pixelLy;
+}
+
+/**
  * The cursor after an arrow key on a view, one map pixel a step, kept as a pick is; or `null` for a
  * direction the view does not move, left and right edge-on.
+ *
+ * @remarks
+ * Face-on, a step that would leave the centres of the map's edge pixels stops on the edge pixel's
+ * centre. Edge-on, it stops instead at the furthest height inside them that lies a whole number of
+ * pixels from where the cursor was, since the edge pixels' centres lie half a pixel off the lattice
+ * of whole pixels from the plane: the same number of steps back then returns the cursor exactly to
+ * where it started, and to z = 0 from the plane (the orchestrator's ruling 28).
  *
  * @param direction - The direction on the raster, from {@link rasterDirection} for a key on screen.
  */
@@ -176,12 +218,25 @@ export function stepCursor(
       };
       break;
     case "up":
-    case "down":
+    case "down": {
+      const sign = direction === "up" ? 1 : -1;
+      const halfPixelLy = geometry.lyPerPx / 2;
       moved = {
         horizontalLy: point.horizontalLy,
-        verticalLy: point.verticalLy + (direction === "up" ? stepLy : -stepLy),
+        verticalLy:
+          view === "edge_on"
+            ? heightOnLattice(
+                point.verticalLy,
+                sign,
+                pixels,
+                geometry.lyPerPx,
+                geometry.vertical.minLy + halfPixelLy,
+                geometry.vertical.maxLy - halfPixelLy,
+              )
+            : point.verticalLy + sign * stepLy,
       };
       break;
+    }
   }
   return pickCursor(view, cursorLy, moved, geometry);
 }

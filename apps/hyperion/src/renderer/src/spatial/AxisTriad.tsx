@@ -66,15 +66,20 @@ function AxisMark({ axis }: AxisMarkProps) {
 
 /** Props of {@link AxisTriad}. */
 export interface AxisTriadProps {
-  /** The frame whose directions the triad shows. */
+  /** The scene's frame, whose directions the triad shows unless `axes` is given. */
   readonly frame: LocalFrame;
-  /** Where the camera looks from. */
+  /** Where the camera looks from, in the scene's frame. */
   readonly angles: CameraAngles;
   /**
    * The box to draw in, from `triadBoxRem`: the view's own size where that is smaller than the
    * triad's usual 15 × 8 rem, so that the overlay never clips the triad.
    */
   readonly boxRem: TriadBoxRem;
+  /**
+   * The three named directions to show instead, as unit vectors in the scene's axes: the galactic
+   * ones at the view centre, where the scene's frame is tilted to them (plan 14, D21).
+   */
+  readonly axes?: LocalFrame | undefined;
 }
 
 /**
@@ -87,10 +92,12 @@ export interface AxisTriadProps {
  * the south, which is mirrored, reads as such. An axis seen end on has its label beside its
  * symbol. On the galactic axis, where coreward and spinward are undefined, the directions are
  * labelled `-X` and `+Y`, as the frame falls back to them (design note D11). The labels are DOM
- * text, in B612; the picture is one image to assistive technology, named `Axis triad`.
+ * text, in B612; the picture is one image to assistive technology, named `Axis triad`. Given
+ * `axes`, it shows those directions as the camera sees them, so that an orbit map drawn on a
+ * system's own plane still points to galactic north, coreward and spinward.
  */
-export function AxisTriad({ frame, angles, boxRem }: AxisTriadProps) {
-  const axes = triadLayout(frame, angles, boxRem);
+export function AxisTriad({ frame, angles, boxRem, axes: shown }: AxisTriadProps) {
+  const axes = triadLayout(frame, angles, boxRem, shown ?? frame);
   const halfWidth = units(boxRem.width / 2);
   const halfHeight = units(boxRem.height / 2);
   return (

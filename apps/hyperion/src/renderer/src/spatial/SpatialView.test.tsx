@@ -11,7 +11,7 @@ import { stubMatchMedia } from "../test/stubMatchMedia";
 import { type RecordingContext2D, stubCanvas } from "../test/RecordingContext2D";
 import { type CameraAngles, PRESETS, project, viewBasis } from "./camera";
 import { easeOut, TRANSITION_MS, tweenCamera } from "./transition";
-import { localFrameAt } from "./frame";
+import { localFrameAt, planeFrame } from "./frame";
 import type { PointMark, SpatialScene } from "./marks";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
@@ -1725,5 +1725,104 @@ describe("SpatialView picking", () => {
     ]);
 
     expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("SpatialView on a system's plane, with the galactic axes given apart", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A plane tilted 30° to the galactic one about `axis`, its coreward laid from galactic coreward. */
+  function tiltedAbout(axis: "coreward" | "spinward") {
+    const lean = axis === "coreward" ? FRAME.spinward : FRAME.coreward;
+    return planeFrame(
+      add(scale(FRAME.north, Math.cos(Math.PI / 6)), scale(lean, 0.5)),
+      FRAME.coreward,
+    );
+  }
+
+  async function renderTurnedTo(button: string, props: Partial<SpatialViewProps>) {
+    const advanceTimers = fakeFramesAndTimeouts();
+    stubLayout(400, 300);
+    const user = userEvent.setup({ advanceTimers });
+    stubCanvas();
+    const { container } = render(viewOf(props));
+    await user.click(screen.getByRole("button", { name: button }));
+    wait(500);
+    return container;
+  }
+
+  /** Where the north axis's end symbol is drawn, in the triad's SVG units from its origin. */
+  function northTip(): readonly [number, number] {
+    const circle = triadNorth()?.querySelector("circle");
+    return [Number(circle?.getAttribute("cx")), Number(circle?.getAttribute("cy"))];
+  }
+
+  it("points NORTH at the viewer from TOP without axes, along the plane's own normal", async () => {
+    await renderTurnedTo("T TOP", { scene: aScene({ frame: tiltedAbout("coreward") }) });
+
+    expect(triadNorth()).toHaveAttribute("data-end", "towards");
+    expect(northTip()[0]).toBeCloseTo(0, 9);
+    expect(northTip()[1]).toBeCloseTo(0, 9);
+  });
+
+  it("points NORTH along galactic north with axes, not along the plane's normal", async () => {
+    await renderTurnedTo("T TOP", {
+      scene: aScene({ frame: tiltedAbout("coreward") }),
+      axes: FRAME,
+    });
+
+    // The plane leans 30° towards spinward, which is right from its TOP, so galactic north leans
+    // left, half a turn of the axis's length out of the screen.
+    expect(triadNorth()).toHaveAttribute("data-end", "towards");
+    expect(northTip()[0]).toBeLessThan(-1);
+    expect(northTip()[1]).toBeCloseTo(0, 9);
+  });
+
+  it("shows the plane's coreward along the line of sight from SIDE without axes", async () => {
+    // From SIDE the view looks along the plane's coreward.
+    const container = await renderTurnedTo("S SIDE", {
+      scene: aScene({ frame: tiltedAbout("spinward") }),
+    });
+
+    expect(container.querySelector("[data-core='away']")).not.toBeNull();
+  });
+
+  it("points the core arrow along galactic coreward with axes, 30° above the plane's", async () => {
+    const container = await renderTurnedTo("S SIDE", {
+      scene: aScene({ frame: tiltedAbout("spinward") }),
+      axes: FRAME,
+    });
+
+    const line = container.querySelector("[data-core='arrow'] line");
+    expect(Number(line?.getAttribute("x2"))).toBeCloseTo(200, 9);
+    expect(Number(line?.getAttribute("y2"))).toBeLessThan(Number(line?.getAttribute("y1")));
+  });
+
+  /** Renders a view on a tilted plane whose galactic axes are the galactic axis's fallback. */
+  function renderOnTheAxis() {
+    fakeFramesAndTimeouts();
+    stubLayout(400, 300);
+    stubCanvas();
+    return render(
+      viewOf({
+        scene: aScene({ frame: tiltedAbout("coreward") }),
+        axes: localFrameAt(vec3(0, 0, 0)),
+      }),
+    );
+  }
+
+  it("names the fallback directions from the axes given, which are the galaxy's", () => {
+    renderOnTheAxis();
+
+    expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
+    expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
+  });
+
+  it("draws no core arrow when the axes given lie on the galactic axis", () => {
+    const { container } = renderOnTheAxis();
+
+    expect(container.querySelector("[data-core]")).toBeNull();
   });
 });

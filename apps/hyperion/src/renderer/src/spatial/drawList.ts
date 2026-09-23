@@ -6,10 +6,17 @@ import {
   type ViewBasis,
   type Viewport,
 } from "./camera";
-import { isAbovePlane, type PointMark, type SpatialScene, type SymbolShape } from "./marks";
+import {
+  type AnnulusMark,
+  isAbovePlane,
+  type PathMark,
+  type PointMark,
+  type SpatialScene,
+  type SymbolShape,
+} from "./marks";
 import { gridLines, ringPolyline } from "./plane";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
-import { dot, scale, sub, type Vec3 } from "./vec3";
+import { add, dot, norm, scale, sub, type Vec3 } from "./vec3";
 
 /**
  * A colour token an op is drawn in, named after its CSS custom property (`--text` and so on).
@@ -121,12 +128,15 @@ export interface CircleLabel extends CurveLabelBase {
   readonly radiusPx: number;
 }
 
-/** The label of a ring on the reference plane, at the ring's coreward point. */
+/**
+ * The label of a curve beside one of its points: a ring on the reference plane at its coreward
+ * point, an annulus at its outer edge's rimward point, a path at its label anchor.
+ */
 export interface RingLabel extends CurveLabelBase {
   readonly placement: "ring";
 }
 
-/** Where to put the DOM label of a sphere or a ring. */
+/** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
 export type CurveLabel = CircleLabel | RingLabel;
 
 /** What a spatial view paints, and where its marks and curves ended up. */
@@ -146,6 +156,16 @@ const RETICLE_MARGIN_REM = 0.5;
 const TICK_EVERY_DEG = 10;
 const TICK_LENGTH_REM = 0.25;
 const SAME_RADIUS_TOLERANCE = 1e-9;
+const PATH_WIDTH_PX = 1;
+const ANNULUS_WIDTH_PX = 1;
+/** How often a belt's radial ticks join its edges. */
+const BELT_TICK_EVERY_DEG = 10;
+/**
+ * Heights within this share of a path's reach, the largest distance of its points from the view
+ * centre, count as on the reference plane, and so above it: an orbit drawn in the plane is one
+ * piece, not one split at every rounding error.
+ */
+const ON_PLANE_SHARE = 1e-9;
 
 interface PlacedMark {
   readonly mark: PointMark;
@@ -206,6 +226,144 @@ function markOps(
   ];
 }
 
+/** A run of a path that lies wholly on one side of the reference plane. */
+interface PathPiece {
+  readonly path: PathMark;
+  readonly points: ReadonlyArray<Vec3>;
+  readonly above: boolean;
+}
+
+function samePoint(a: Vec3, b: Vec3): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
+/**
+ * A path cut where it crosses the reference plane, into runs that each lie on one side of it.
+ *
+ * @remarks
+ * A point on the plane counts as above it, as a mark's does ({@link isAbovePlane}), to within
+ * {@link ON_PLANE_SHARE} of the path's reach. Each cut is where the segment meets the plane, which
+ * ends one run and starts the next, so the runs join. A closed path whose first and last runs lie
+ * on the same side has them joined into one.
+ */
+function splitAtPlane(path: PathMark, north: Vec3): PathPiece[] {
+  const first = path.points[0];
+  if (first === undefined || path.points.length < 2) {
+    return [];
+  }
+  const reach = Math.max(...path.points.map(norm));
+  const level = -ON_PLANE_SHARE * reach;
+  const height = (point: Vec3): number => dot(point, north);
+  const runs: Array<{ points: Vec3[]; above: boolean }> = [];
+  let current = { points: [first], above: height(first) >= level };
+  let previous = first;
+  for (const point of path.points.slice(1)) {
+    const above = height(point) >= level;
+    if (above !== current.above) {
+      // At the plane itself; a point within the tolerance of it is its own crossing.
+      const from = height(previous);
+      const share = Math.min(1, Math.max(0, from / (from - height(point))));
+      const crossing = add(previous, scale(sub(point, previous), share));
+      current.points.push(crossing);
+      runs.push(current);
+      current = { points: [crossing], above };
+    }
+    current.points.push(point);
+    previous = point;
+  }
+  runs.push(current);
+  const last = runs.at(-1);
+  const opening = runs[0];
+  const closed = samePoint(first, previous);
+  if (closed && runs.length > 1 && last !== undefined && opening !== undefined) {
+    if (last.above === opening.above) {
+      runs[0] = { points: [...last.points, ...opening.points.slice(1)], above: last.above };
+      runs.pop();
+    }
+  }
+  return runs
+    .filter((run) => run.points.length >= 2)
+    .map((run) => ({ path, points: run.points, above: run.above }));
+}
+
+/** The pieces of every path, reference paths before the selected one in each half. */
+function pathPieces(scene: SpatialScene): { above: PathPiece[]; below: PathPiece[] } {
+  const pieces = (scene.paths ?? []).flatMap((path) => splitAtPlane(path, scene.frame.north));
+  // A polyline spans a range of depths, so no single order of whole pieces is right for depth; the
+  // selected path goes last in its half so that no reference line crosses the one that carries
+  // meaning.
+  const ordered = [
+    ...pieces.filter((piece) => piece.path.role === "reference"),
+    ...pieces.filter((piece) => piece.path.role === "selected"),
+  ];
+  return {
+    above: ordered.filter((piece) => piece.above),
+    below: ordered.filter((piece) => !piece.above),
+  };
+}
+
+function pathOp(
+  piece: PathPiece,
+  basis: ViewBasis,
+  camera: Camera,
+  viewport: Viewport,
+): PolylineOp {
+  return {
+    kind: "polyline",
+    points: piece.points.map((point) => screen(project(point, basis, camera, viewport))),
+    stroke: piece.path.role === "selected" ? "text" : "line",
+    widthPx: PATH_WIDTH_PX,
+  };
+}
+
+/** An annulus's centre moved along the plane's normal onto the plane. */
+function footOnPlane(annulus: AnnulusMark, north: Vec3): Vec3 {
+  const centre = annulus.centre ?? { x: 0, y: 0, z: 0 };
+  return sub(centre, scale(north, dot(centre, north)));
+}
+
+/** The point on the reference plane at `radius` from `centre` towards `angleDeg` from coreward. */
+function onPlaneAt(scene: SpatialScene, centre: Vec3, radius: number, angleDeg: number): Vec3 {
+  const angle = (angleDeg * Math.PI) / 180;
+  return add(
+    centre,
+    add(
+      scale(scene.frame.coreward, radius * Math.cos(angle)),
+      scale(scene.frame.spinward, radius * Math.sin(angle)),
+    ),
+  );
+}
+
+function annulusOps(
+  annulus: AnnulusMark,
+  scene: SpatialScene,
+  toScreen: (point: Vec3) => ScreenPoint,
+): DrawOp[] {
+  const ops: DrawOp[] = [];
+  const centre = footOnPlane(annulus, scene.frame.north);
+  const { innerRadius, outerRadius } = annulus;
+  const radii = innerRadius === outerRadius ? [outerRadius] : [innerRadius, outerRadius];
+  for (const radius of radii.filter((edge) => edge > 0)) {
+    ops.push({
+      kind: "polyline",
+      points: ringPolyline(radius, scene.frame).map((point) => toScreen(add(centre, point))),
+      stroke: "line",
+      widthPx: ANNULUS_WIDTH_PX,
+    });
+  }
+  if (annulus.ticks && outerRadius > innerRadius) {
+    const segments: Array<{ from: ScreenPoint; to: ScreenPoint }> = [];
+    for (let angleDeg = 0; angleDeg < 360; angleDeg += BELT_TICK_EVERY_DEG) {
+      segments.push({
+        from: toScreen(onPlaneAt(scene, centre, innerRadius, angleDeg)),
+        to: toScreen(onPlaneAt(scene, centre, outerRadius, angleDeg)),
+      });
+    }
+    ops.push({ kind: "ticks", segments, stroke: "line", widthPx: ANNULUS_WIDTH_PX });
+  }
+  return ops;
+}
+
 function planeOps(
   scene: SpatialScene,
   basis: ViewBasis,
@@ -232,6 +390,9 @@ function planeOps(
       stroke: "line",
       widthPx: GRID_WIDTH_PX,
     });
+  }
+  for (const annulus of scene.annuli ?? []) {
+    ops.push(...annulusOps(annulus, scene, toScreen));
   }
   return ops;
 }
@@ -383,6 +544,38 @@ function ringLabels(
 }
 
 /**
+ * The labels of the annuli, each at its outer edge's rimward point, away from the rings' labels at
+ * their coreward points; then those of the paths, each at its anchor.
+ */
+function markCurveLabels(
+  scene: SpatialScene,
+  basis: ViewBasis,
+  camera: Camera,
+  viewport: Viewport,
+): CurveLabel[] {
+  const labels: CurveLabel[] = [];
+  const pointLabel = (key: string, text: string, point: Vec3): void => {
+    if (text.length === 0) {
+      return;
+    }
+    const at = project(point, basis, camera, viewport);
+    labels.push({ key, text, placement: "ring", xPx: at.xPx, yPx: at.yPx, stack: 0 });
+  };
+  for (const annulus of scene.annuli ?? []) {
+    const centre = footOnPlane(annulus, scene.frame.north);
+    pointLabel(
+      `annulus:${annulus.id}`,
+      annulus.label,
+      onPlaneAt(scene, centre, annulus.outerRadius, 180),
+    );
+  }
+  for (const path of scene.paths ?? []) {
+    pointLabel(`path:${path.id}`, path.label, path.labelAt);
+  }
+  return labels;
+}
+
+/**
  * Turns a scene and a camera into drawing instructions, mark anchors and curve-label positions.
  *
  * @remarks
@@ -393,6 +586,14 @@ function ringLabels(
  * The sphere outlines, the data edge's ticks and the reticles are screen annotations and come
  * last. Nothing is dimmed or scaled by depth: an op has no opacity, and a symbol's size comes from
  * its size class and the root font size alone. Colours are token names.
+ *
+ * A scene's paths and annuli (plan 14, T40.a) add to that order and change nothing else in it. A
+ * path is cut where it crosses the plane, and each piece opens its own half, before the half's
+ * marks, so that no line crosses a symbol; in each half the selected path comes after the
+ * reference ones. Each piece is a `--line` or `--text` polyline, 1 px wide. An annulus is drawn
+ * with the plane, after its rings: each edge a `--line` polyline and, for a belt, one `ticks` op
+ * of radial segments between the edges every 10° from coreward. Neither gives an anchor, so
+ * neither is picked. Their labels follow the rings' in the curve labels.
  */
 export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Viewport): DrawList {
   const basis = viewBasis(scene.frame, camera);
@@ -403,13 +604,24 @@ export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Vie
   }));
   const above = placed.filter((entry) => entry.above).toSorted(byFarToNear);
   const below = placed.filter((entry) => !entry.above).toSorted(byFarToNear);
-  const [farHalf, nearHalf] = camera.elevationDeg >= 0 ? [below, above] : [above, below];
+  const cameraAbove = camera.elevationDeg >= 0;
+  const [farHalf, nearHalf] = cameraAbove ? [below, above] : [above, below];
+  const pieces = pathPieces(scene);
+  const [farPieces, nearPieces] = cameraAbove
+    ? [pieces.below, pieces.above]
+    : [pieces.above, pieces.below];
 
   const ops: DrawOp[] = [];
+  for (const piece of farPieces) {
+    ops.push(pathOp(piece, basis, camera, viewport));
+  }
   for (const entry of farHalf) {
     ops.push(...markOps(entry, scene, basis, camera, viewport));
   }
   ops.push(...planeOps(scene, basis, camera, viewport));
+  for (const piece of nearPieces) {
+    ops.push(pathOp(piece, basis, camera, viewport));
+  }
   for (const entry of nearHalf) {
     ops.push(...markOps(entry, scene, basis, camera, viewport));
   }
@@ -426,6 +638,10 @@ export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Vie
   return {
     ops,
     anchors,
-    curveLabels: [...spheres.labels, ...ringLabels(scene, basis, camera, viewport)],
+    curveLabels: [
+      ...spheres.labels,
+      ...ringLabels(scene, basis, camera, viewport),
+      ...markCurveLabels(scene, basis, camera, viewport),
+    ],
   };
 }

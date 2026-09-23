@@ -39,6 +39,7 @@ import {
   triadLayout,
 } from "./furniture";
 import { chooseLabels, placeLabels } from "./labels";
+import type { LocalFrame } from "./frame";
 import type { SpatialScene } from "./marks";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { pick } from "./pick";
@@ -174,6 +175,13 @@ export interface SpatialViewProps {
    * as the centre's `RADIUS`, written the same way (`26,000.0 ly`).
    */
   readonly coreDistance: SpatialQuantity;
+  /**
+   * The galactic directions at the view centre, for the axis triad and the core arrow, where the
+   * scene's frame is tilted to them: the orbit map's, whose reference plane is a system's own
+   * (plan 14, D21, and the orchestrator's ruling 33). The scene's frame's own when absent, as on
+   * the star chart, whose frame is the galaxy's.
+   */
+  readonly axes?: LocalFrame | undefined;
   /** The accessible name of the view's canvas; `, stale` is added to it while `stale` holds. */
   readonly accessibleName: string;
   /**
@@ -217,6 +225,10 @@ export interface SpatialViewProps {
  * in the same place on every spatial view, the frame, the centre and the time. The labels are
  * hidden from assistive technology, since the list and the readout beside the view carry the same
  * text. The canvas takes focus and is described by the visible key legend.
+ *
+ * The camera, the plane, the grid, the stalks, the fill rule and the preset views all follow
+ * `scene.frame`. The triad and the core arrow follow `axes` where it is given, and so does the
+ * note that the galactic directions are undefined on the axis, which is about them.
  */
 export function SpatialView({
   scene,
@@ -227,6 +239,7 @@ export function SpatialView({
   centre,
   time,
   coreDistance,
+  axes,
   accessibleName,
   stale,
   onSelect,
@@ -292,16 +305,22 @@ export function SpatialView({
   // labels round both.
   // The triad is drawn in the view where the view is smaller than its usual box, since the overlay
   // clips what leaves it and the guide has a 3D view always show its triad.
+  const shownAxes = axes ?? scene.frame;
   const triadBoxRem = viewport === null ? TRIAD_BOX_REM : triadBoxOf(viewport);
-  const triad = triadLayout(scene.frame, cameraState.angles, triadBoxRem);
+  const triad = triadLayout(scene.frame, cameraState.angles, triadBoxRem, shownAxes);
   const triadBox: BoxPx | null =
     viewport === null ? null : triadFootprintPx(triad, viewport, triadBoxRem);
   const coreArrow =
     viewport === null || triadBox === null
       ? null
-      : coreArrowLayout(scene.frame, cameraState.angles, viewport, coreLabelText(coreDistance), [
-          triadBox,
-        ]);
+      : coreArrowLayout(
+          scene.frame,
+          cameraState.angles,
+          viewport,
+          coreLabelText(coreDistance),
+          [triadBox],
+          shownAxes,
+        );
   const curveLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
@@ -495,7 +514,12 @@ export function SpatialView({
                   </span>
                 ))}
           </div>
-          <AxisTriad frame={scene.frame} angles={cameraState.angles} boxRem={triadBoxRem} />
+          <AxisTriad
+            frame={scene.frame}
+            angles={cameraState.angles}
+            boxRem={triadBoxRem}
+            axes={shownAxes}
+          />
           {viewport === null || coreArrow === null ? null : (
             <CoreArrow layout={coreArrow} viewport={viewport} distance={coreDistance} />
           )}
@@ -521,7 +545,7 @@ export function SpatialView({
           />
         )}
         {stale ? <StaleMark /> : null}
-        {scene.frame.onAxis ? (
+        {shownAxes.onAxis ? (
           <p className="spatial-view__axis-note">{AXIS_FALLBACK_MESSAGE}</p>
         ) : null}
       </div>

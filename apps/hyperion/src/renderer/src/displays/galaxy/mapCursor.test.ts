@@ -157,8 +157,13 @@ describe("stepCursor", () => {
     expect(stepCursor("face_on", [0, 0, 0], "down", 1, FACE_ON)).toEqual([0, -32_768, 0]);
   });
 
-  it("stops at the centre of the edge pixel", () => {
-    expect(stepCursor("edge_on", [0, 0, 0], "up", 1, EDGE_ON)).toEqual([0, 0, 16_384]);
+  it("reaches the centre of the edge pixel when it lies a whole pixel away", () => {
+    expect(stepCursor("edge_on", [0, 0, -16_384], "up", 1, EDGE_ON)).toEqual([0, 0, 16_384]);
+  });
+
+  it("stays put when no whole pixel's step stays within the edge pixels' centres", () => {
+    // From the plane the edge pixels' centres lie half a pixel away (the orchestrator's ruling 28).
+    expect(stepCursor("edge_on", [0, 0, 0], "up", 1, EDGE_ON)).toEqual([0, 0, 0]);
   });
 
   it("does not move sideways edge-on", () => {
@@ -288,5 +293,53 @@ describe("the chart centre's height", () => {
 
   it("steps z back onto the plane edge-on", () => {
     expect(steppedEdgeOn(steppedEdgeOn([26_000, 0, 0], "down", 7), "up", 7)[2]).toBe(0);
+  });
+
+  it.each([
+    ["up", 31_744],
+    ["down", -31_744],
+  ] as const)(
+    "stops a step %s at the edge on the cursor's own lattice, not on the edge pixel's centre",
+    (direction, zLy) => {
+      // The edge pixels' centres are ±32,256 ly, half a pixel off every whole pixel from the plane.
+      expect(steppedEdgeOn([26_000, 0, 0], direction, 40)[2]).toBe(zLy);
+    },
+  );
+
+  /**
+   * One-pixel edge-on steps in `direction` until the cursor stops at the edge, and how many of them
+   * moved it.
+   */
+  function steppedToEdge(cursorLy: CentreLy, direction: "up" | "down", pixels: number) {
+    let stepped = cursorLy;
+    let movedPx = 0;
+    for (let step = 0; step < 100; step += 1) {
+      const next = stepCursor("edge_on", stepped, direction, pixels, EDGE_ON_128) ?? stepped;
+      movedPx += Math.round(Math.abs(next[2] - stepped[2]) / EDGE_ON_128.lyPerPx);
+      stepped = next;
+    }
+    return { stepped, movedPx };
+  }
+
+  it.each([
+    ["the plane", "up", 0],
+    ["the plane", "down", 0],
+    ["a typed height", "up", 300],
+    ["a height off the whole pixels", "down", -700.25],
+  ] as const)(
+    "comes back exactly to %s after a clamp %s and the same number of steps back",
+    (_, direction, startLy) => {
+      const back = direction === "up" ? "down" : "up";
+      const { stepped, movedPx } = steppedToEdge([26_000, 0, startLy], direction, 1);
+
+      expect(steppedEdgeOn(stepped, back, movedPx)[2]).toBe(startLy);
+    },
+  );
+
+  it("stops a clamped ten-pixel step a whole number of pixels on, which one-pixel steps undo", () => {
+    const { stepped, movedPx } = steppedToEdge([26_000, 0, 0], "up", 10);
+
+    expect(stepped[2]).toBe(31_744);
+    expect(steppedEdgeOn(stepped, "down", movedPx)[2]).toBe(0);
   });
 });

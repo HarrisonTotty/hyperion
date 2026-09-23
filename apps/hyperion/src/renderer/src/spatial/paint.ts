@@ -123,11 +123,20 @@ function paintSymbol(context: CanvasRenderingContext2D, op: SymbolOp, tokens: Co
       );
       context.closePath();
       break;
+    case "ringed-circle":
+      context.arc(xPx, yPx, op.radiusPx * outline.discRadius, 0, 2 * Math.PI);
+      break;
   }
   // Filled above the reference plane and open below it, with the same outline (plan 05, D14).
   if (op.fill !== null) {
     context.fillStyle = tokens[op.fill];
     context.fill();
+  }
+  // The ring joins the path only after the fill, so that the disc alone says which side of the
+  // plane the mark is on and the ring still reads round it (plan 06, D17); one stroke draws both.
+  if (outline.kind === "ringed-circle") {
+    context.moveTo(xPx + op.radiusPx, yPx);
+    context.arc(xPx, yPx, op.radiusPx, 0, 2 * Math.PI);
   }
   strokeWith(context, tokens, op.stroke, op.widthPx);
 }
@@ -196,9 +205,9 @@ function paintOp(context: CanvasRenderingContext2D, op: DrawOp, tokens: ColourTo
  * @remarks
  * The whole backing store is cleared, whatever its size; the ops, in CSS pixels, are then drawn
  * scaled by `pixelRatio` onto a backing store that many times larger. Circles are arcs, symbols a
- * path scaled from their unit outline, filled and stroked above the plane and only stroked below,
- * and reticles four corner brackets. There is no text on the canvas (plan 05, D15), and nothing is
- * translucent, shadowed or graded.
+ * path scaled from their unit outline, filled and stroked above the plane and only stroked below
+ * (a ringed circle's disc alone taking the fill), and reticles four corner brackets. There is no
+ * text on the canvas (plan 05, D15), and nothing is translucent, shadowed or graded.
  *
  * @param pixelRatio - Backing-store pixels in one CSS pixel, the device pixel ratio. Required, so
  *   that a caller cannot leave a high-density canvas drawn in its top left-hand corner.

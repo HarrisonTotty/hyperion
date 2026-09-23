@@ -22,11 +22,21 @@ const ROW_REM = 2;
 const OVERSCAN_ROWS = 8;
 
 /**
- * Whether a system lies within the drive range, in words: `IN RANGE` as the readout has it, or
- * `OUT`, since the list's 5 rem column cannot hold the readout's `OUT OF RANGE`.
+ * Whether a system lies within the drive range, in words as the column shows them: `IN RANGE` as
+ * the readout has it, or `OUT`, since the list's 5 rem column cannot hold the readout's
+ * `OUT OF RANGE` (the orchestrator's ruling 15).
  */
 function rangeWords(inRange: boolean): string {
   return inRange ? "IN RANGE" : "OUT";
+}
+
+/**
+ * The same in the words the rest of the display uses, for the row's accessible name: the column's
+ * `OUT` is shortened for its width, which a screen reader does not have (the orchestrator's
+ * ruling 28).
+ */
+function rangeName(inRange: boolean): string {
+  return inRange ? "IN RANGE" : "OUT OF RANGE";
 }
 
 interface SystemListProps {
@@ -221,7 +231,7 @@ export function SystemList({
                 aria-selected={system.id === selectedId}
                 aria-posinset={index + 1}
                 aria-setsize={total}
-                aria-label={`${system.designation}, ${distance} ly, ${mass} solar masses, ${rangeWords(inRange)}`}
+                aria-label={`${system.designation}, ${distance} ly, ${mass} solar masses, ${rangeName(inRange)}`}
                 className={
                   inRange ? "system-list__row system-list__row--in-range" : "system-list__row"
                 }

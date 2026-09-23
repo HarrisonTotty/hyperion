@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { between, seededRandom } from "../test/seededRandom";
-import type { Camera, Viewport } from "./camera";
-import { buildDrawList, type DrawOp } from "./drawList";
-import { localFrameAt } from "./frame";
-import type { PointMark, SizeClass, SpatialScene, SphereMark } from "./marks";
+import { type Camera, project, viewBasis, type Viewport } from "./camera";
+import { buildDrawList, type DrawOp, type PolylineOp, type TicksOp } from "./drawList";
+import { fromLocal, localFrameAt, planeFrame, toLocal } from "./frame";
+import type {
+  AnnulusMark,
+  PathMark,
+  PointMark,
+  SizeClass,
+  SpatialScene,
+  SphereMark,
+} from "./marks";
 import { pick } from "./pick";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
 import { add, dot, scale, vec3, type Vec3 } from "./vec3";
@@ -432,5 +439,466 @@ describe("buildDrawList annotations", () => {
     for (const op of plane) {
       expect(op.kind === "line" || op.kind === "polyline" ? op.stroke : null).toBe("line");
     }
+  });
+});
+
+/** A path mark, a reference line unless overridden, unlabelled. */
+function path(
+  id: string,
+  points: ReadonlyArray<Vec3>,
+  overrides: Partial<PathMark> = {},
+): PathMark {
+  return {
+    id,
+    points,
+    role: "reference",
+    label: "",
+    labelAt: points[0] ?? vec3(0, 0, 0),
+    ...overrides,
+  };
+}
+
+/** An annulus about the view centre, unticked and unlabelled unless overridden. */
+function annulus(
+  id: string,
+  innerRadius: number,
+  outerRadius: number,
+  overrides: Partial<AnnulusMark> = {},
+): AnnulusMark {
+  return { id, innerRadius, outerRadius, ticks: false, label: "", ...overrides };
+}
+
+/** A circle of `radius` about the centre in a plane turned `tiltDeg` about coreward. */
+function tiltedCircle(radius: number, tiltDeg: number, segments = 96): Vec3[] {
+  const tilt = (tiltDeg * Math.PI) / 180;
+  return Array.from({ length: segments + 1 }, (_, i) => {
+    const angle = i === segments ? 0 : (2 * Math.PI * i) / segments;
+    return local(
+      radius * Math.cos(angle),
+      radius * Math.sin(angle) * Math.cos(tilt),
+      radius * Math.sin(angle) * Math.sin(tilt),
+    );
+  });
+}
+
+/** A scene with no grid or rings, so that every polyline in its draw list is one of its own. */
+function bareScene(overrides: Partial<SpatialScene> = {}): SpatialScene {
+  return sceneOf([], { plane: { spacing: 1, extent: 0, rings: [] }, ...overrides });
+}
+
+function polylines(ops: ReadonlyArray<DrawOp>): PolylineOp[] {
+  return ops.filter((op): op is PolylineOp => op.kind === "polyline");
+}
+
+const TOP: Camera = { azimuthDeg: 0, elevationDeg: 90, pxPerUnit: K };
+
+describe("buildDrawList paths", () => {
+  it("projects a circular path tilted 60° as an ellipse with axes 1 and 0.5", () => {
+    const scene = bareScene({ paths: [path("orbit", tiltedCircle(1, 60))] });
+
+    const points = polylines(buildDrawList(scene, TOP, VIEWPORT).ops).flatMap((op) => op.points);
+
+    // From the top coreward is up and spinward right: the unit circle keeps its extent along
+    // coreward and is foreshortened by cos 60° along spinward.
+    expect(points.length).toBeGreaterThan(96);
+    for (const point of points) {
+      const across = (point.xPx - CENTRE.xPx) / (0.5 * K);
+      const up = (CENTRE.yPx - point.yPx) / K;
+      expect(across * across + up * up).toBeCloseTo(1, 9);
+    }
+    const acrossPx = points.map((point) => Math.abs(point.xPx - CENTRE.xPx));
+    const upPx = points.map((point) => Math.abs(point.yPx - CENTRE.yPx));
+    expect(Math.max(...acrossPx)).toBeCloseTo(0.5 * K, 9);
+    expect(Math.max(...upPx)).toBeCloseTo(K, 9);
+  });
+
+  it("cuts a path where it crosses the plane, at the crossing", () => {
+    const scene = bareScene({ paths: [path("cross", [local(-10, 0, -5), local(10, 0, 5)])] });
+
+    const pieces = polylines(buildDrawList(scene, TOP, VIEWPORT).ops);
+
+    // Seen from the top the crossing, on the plane at the centre, is the centre of the screen.
+    expect(pieces).toHaveLength(2);
+    expect(pieces[0]?.points.at(-1)?.xPx).toBeCloseTo(CENTRE.xPx, 9);
+    expect(pieces[0]?.points.at(-1)?.yPx).toBeCloseTo(CENTRE.yPx, 9);
+    expect(pieces[1]?.points[0]).toEqual(pieces[0]?.points.at(-1));
+  });
+
+  it.each([
+    ["above", 30, ["below", "grid", "above"]],
+    ["in", 0, ["below", "grid", "above"]],
+    ["below", -30, ["above", "grid", "below"]],
+  ] as const)(
+    "draws each piece in its own half of the order with the camera %s the plane",
+    (_, elevationDeg, order) => {
+      const scene = sceneOf([], {
+        paths: [path("cross", [local(-10, 0, -5), local(10, 0, 5)], { role: "selected" })],
+      });
+
+      const camera = cameraAt(elevationDeg);
+      const { ops } = buildDrawList(scene, camera, VIEWPORT);
+
+      // The path is the only thing drawn in --text, and its piece below the plane starts where it
+      // does; the grid and rings are --line.
+      const start = project(local(-10, 0, -5), viewBasis(FRAME, camera), camera, VIEWPORT);
+      const sequence: string[] = [];
+      for (const op of ops) {
+        let section = "grid";
+        if (op.kind === "polyline" && op.stroke === "text") {
+          const first = op.points[0];
+          section = first?.xPx === start.xPx && first.yPx === start.yPx ? "below" : "above";
+        }
+        if (sequence.at(-1) !== section) {
+          sequence.push(section);
+        }
+      }
+      expect(sequence).toEqual(order);
+    },
+  );
+
+  it("draws a closed path whose ends lie on one side of the plane as one piece there", () => {
+    const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 30))] });
+
+    // The circle starts on the plane at its coreward point, rises, and comes back from below.
+    expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops)).toHaveLength(2);
+  });
+
+  it("draws a reference path in --line and the selected one in --text, after it in its half", () => {
+    const scene = bareScene({
+      paths: [
+        path("selected", tiltedCircle(20, 0), { role: "selected" }),
+        path("reference", tiltedCircle(10, 0)),
+      ],
+    });
+
+    const strokes = polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops).map(
+      (op) => op.stroke,
+    );
+
+    expect(strokes).toEqual(["line", "text"]);
+  });
+
+  it("draws a half's path pieces before its marks, so that no line crosses a symbol", () => {
+    const scene = bareScene({
+      points: [mark("planet", local(10, 0, 0))],
+      paths: [path("orbit", tiltedCircle(10, 0))],
+    });
+
+    const kinds = buildDrawList(scene, cameraAt(30), VIEWPORT).ops.map((op) => op.kind);
+
+    expect(kinds).toEqual(["polyline", "line", "symbol"]);
+  });
+
+  it("draws a path 1 px wide", () => {
+    const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 0))] });
+
+    expect(polylines(buildDrawList(scene, TOP, VIEWPORT).ops).map((op) => op.widthPx)).toEqual([1]);
+  });
+
+  it("gives a path no anchor, so that a pick on it finds nothing", () => {
+    const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 0))] });
+
+    const { ops, anchors } = buildDrawList(scene, TOP, VIEWPORT);
+
+    const onTheOrbit = polylines(ops)[0]?.points[5] ?? CENTRE;
+    expect(anchors).toEqual([]);
+    expect(pick(anchors, onTheOrbit, 16)).toBeNull();
+  });
+
+  it("labels a path at its anchor, after the rings' labels", () => {
+    const scene = sceneOf([], {
+      plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "20 AU" }] },
+      paths: [
+        path("b", tiltedCircle(10, 0), { label: "b", labelAt: local(0, 10, 0) }),
+        path("c", tiltedCircle(15, 0)),
+      ],
+    });
+
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT);
+
+    // Spinward is to the right from the top; the unlabelled path has no label.
+    expect(curveLabels.map((label) => label.key)).toEqual(["ring:0", "path:b"]);
+    expect(curveLabels[1]).toEqual({
+      key: "path:b",
+      text: "b",
+      placement: "ring",
+      xPx: CENTRE.xPx + 10 * K,
+      yPx: CENTRE.yPx,
+      stack: 0,
+    });
+  });
+});
+
+describe("buildDrawList annuli", () => {
+  it("draws an annulus as its two edges, at their radii on the plane", () => {
+    const edges = polylines(
+      buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT).ops,
+    );
+
+    expect(edges).toHaveLength(2);
+    edges.forEach((edge, index) => {
+      for (const point of edge.points) {
+        expect(Math.hypot(point.xPx - CENTRE.xPx, point.yPx - CENTRE.yPx)).toBeCloseTo(
+          (index === 0 ? 10 : 20) * K,
+          9,
+        );
+      }
+    });
+  });
+
+  it("draws an annulus's edges as 1 px --line hairlines", () => {
+    const edges = polylines(
+      buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT).ops,
+    );
+
+    expect(edges.map((edge) => [edge.stroke, edge.widthPx])).toEqual([
+      ["line", 1],
+      ["line", 1],
+    ]);
+  });
+
+  it("draws an annulus with the plane, after its grid and rings and before the marks above it", () => {
+    const scene = sceneOf([mark("above", local(0, 0, 5))], { annuli: [annulus("hz", 10, 20)] });
+
+    const { ops } = buildDrawList(scene, TOP, VIEWPORT);
+
+    // The grid's two rings come first among the polylines, then the annulus's two edges.
+    const polylineAt = ops.flatMap((op, index) => (op.kind === "polyline" ? [index] : []));
+    const [innerAt = -1, outerAt = -1] = polylineAt.slice(-2);
+    const lastGrid = ops.findLastIndex((op) => op.kind === "line" && op.markId === null);
+    expect(polylineAt).toHaveLength(4);
+    expect(innerAt).toBeGreaterThan(lastGrid);
+    expect(ops.findIndex((op) => op.kind === "symbol")).toBeGreaterThan(outerAt);
+  });
+
+  it("draws no ticks for an annulus that is not a belt", () => {
+    const { ops } = buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT);
+
+    expect(ops.some((op) => op.kind === "ticks")).toBe(false);
+  });
+
+  it("joins a belt's edges with radial ticks every 10° from coreward", () => {
+    const scene = bareScene({ annuli: [annulus("belt", 10, 12, { ticks: true })] });
+
+    const ticks = buildDrawList(scene, TOP, VIEWPORT).ops.filter(
+      (op): op is TicksOp => op.kind === "ticks",
+    );
+
+    expect(ticks).toHaveLength(1);
+    const segments = ticks[0]?.segments ?? [];
+    expect(segments).toHaveLength(36);
+    expect(ticks[0]?.stroke).toBe("line");
+    // The first joins the edges at their coreward points, straight up the screen from the top.
+    expect(segments[0]?.from.xPx).toBeCloseTo(CENTRE.xPx, 9);
+    expect(segments[0]?.from.yPx).toBeCloseTo(CENTRE.yPx - 10 * K, 9);
+    expect(segments[0]?.to.yPx).toBeCloseTo(CENTRE.yPx - 12 * K, 9);
+    segments.forEach((segment, index) => {
+      const angle = Math.atan2(segment.to.xPx - CENTRE.xPx, CENTRE.yPx - segment.to.yPx);
+      const expected = (index * 10 * Math.PI) / 180;
+      expect(Math.cos(angle - expected)).toBeCloseTo(1, 9);
+      expect(Math.hypot(segment.from.xPx - CENTRE.xPx, segment.from.yPx - CENTRE.yPx)).toBeCloseTo(
+        10 * K,
+        9,
+      );
+      expect(Math.hypot(segment.to.xPx - CENTRE.xPx, segment.to.yPx - CENTRE.yPx)).toBeCloseTo(
+        12 * K,
+        9,
+      );
+    });
+  });
+
+  it("draws one edge for equal radii and none of radius 0", () => {
+    const scene = bareScene({
+      annuli: [annulus("snow", 15, 15, { ticks: true }), annulus("inside", 0, 5)],
+    });
+
+    const { ops } = buildDrawList(scene, TOP, VIEWPORT);
+
+    expect(polylines(ops)).toHaveLength(2);
+    expect(ops.some((op) => op.kind === "ticks")).toBe(false);
+  });
+
+  it("draws an annulus about its own centre, on the plane beneath it", () => {
+    const scene = bareScene({ annuli: [annulus("zone", 5, 5, { centre: local(10, 0, 7) })] });
+
+    const [edge] = polylines(buildDrawList(scene, cameraAt(0, 90), VIEWPORT).ops);
+
+    // Seen from the front, the plane is a line across the middle of the screen.
+    for (const point of edge?.points ?? []) {
+      expect(point.yPx).toBeCloseTo(CENTRE.yPx, 9);
+    }
+  });
+
+  it("labels an annulus at its outer edge's rimward point", () => {
+    const scene = bareScene({
+      annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" }), annulus("unlabelled", 3, 4)],
+    });
+
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT);
+
+    // Rimward is straight down the screen from the top.
+    expect(curveLabels).toEqual([
+      {
+        key: "annulus:hz",
+        text: "HABITABLE ZONE",
+        placement: "ring",
+        xPx: expect.closeTo(CENTRE.xPx, 9),
+        yPx: expect.closeTo(CENTRE.yPx + 20 * K, 9),
+        stack: 0,
+      },
+    ]);
+  });
+
+  it("gives an annulus no anchor, so that it is never picked", () => {
+    const scene = bareScene({ annuli: [annulus("belt", 10, 20, { ticks: true })] });
+
+    expect(buildDrawList(scene, TOP, VIEWPORT).anchors).toEqual([]);
+  });
+});
+
+describe("buildDrawList without paths or annuli", () => {
+  it("draws a scene that leaves them out exactly as one with none", () => {
+    const camera = cameraAt(30);
+
+    expect(buildDrawList({ ...MIXED, paths: [], annuli: [] }, camera, VIEWPORT)).toEqual(
+      buildDrawList(MIXED, camera, VIEWPORT),
+    );
+  });
+});
+
+describe("buildDrawList with the outlines the later plans add", () => {
+  it.each(["ringed-circle", "triangle-down", "pentagon", "hexagon"] as const)(
+    "draws the %s filled above the plane and open below it, differing only by fill",
+    (shape) => {
+      // From the top the two marks, 5 units either side of the plane, fall on one point.
+      const scene = sceneOf([
+        mark("above", local(0, 0, 5), { shape }),
+        mark("below", local(0, 0, -5), { shape }),
+      ]);
+
+      const { ops, anchors } = buildDrawList(scene, TOP, VIEWPORT);
+
+      const [open, filled] = symbols(ops);
+      expect(open?.fill).toBeNull();
+      expect(filled?.fill).toBe("text");
+      expect({ ...open, id: "", fill: null }).toEqual({ ...filled, id: "", fill: null });
+      expect(anchors[0]?.radiusPx).toBe(anchors[1]?.radiusPx);
+    },
+  );
+});
+
+/**
+ * Where `actual` departs from `expected`: a number more than `tolerance` from the one in the same
+ * place, or any other difference of shape or value, each named by its path.
+ */
+function departures(
+  actual: unknown,
+  expected: unknown,
+  tolerance: number,
+  where = "list",
+): string[] {
+  if (typeof expected === "number") {
+    return typeof actual === "number" && Math.abs(actual - expected) <= tolerance
+      ? []
+      : [`${where}: ${String(actual)} is not within ${tolerance} of ${expected}`];
+  }
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length !== expected.length) {
+      return [`${where}: the lists differ in length`];
+    }
+    return expected.flatMap((item: unknown, index) =>
+      departures(actual[index], item, tolerance, `${where}[${index}]`),
+    );
+  }
+  if (typeof expected === "object" && expected !== null) {
+    if (typeof actual !== "object" || actual === null) {
+      return [`${where}: not an object`];
+    }
+    const keys = Object.keys(expected).toSorted();
+    if (Object.keys(actual).toSorted().join() !== keys.join()) {
+      return [`${where}: the keys differ`];
+    }
+    return keys.flatMap((key) =>
+      departures(
+        Reflect.get(actual, key),
+        Reflect.get(expected, key),
+        tolerance,
+        `${where}.${key}`,
+      ),
+    );
+  }
+  return Object.is(actual, expected)
+    ? []
+    : [`${where}: ${String(actual)} is not ${String(expected)}`];
+}
+
+describe("buildDrawList on a tilted frame", () => {
+  // A system's plane, 30° off the galactic one, with galactic coreward laid onto it (plan 14, D21).
+  const TILTED = planeFrame(
+    add(scale(FRAME.north, Math.cos(Math.PI / 6)), scale(FRAME.spinward, 0.5)),
+    FRAME.coreward,
+  );
+
+  /** The same point in the tilted frame's own coordinates as `point` has in the galactic one. */
+  function tilted(point: Vec3): Vec3 {
+    return fromLocal(TILTED, toLocal(FRAME, point));
+  }
+
+  const GALACTIC_SCENE: SpatialScene = {
+    ...MIXED,
+    paths: [path("orbit", tiltedCircle(25, 12), { label: "b", labelAt: local(25, 0, 0) })],
+    annuli: [annulus("belt", 30, 35, { ticks: true, label: "BELT", centre: local(2, 1, 0) })],
+  };
+  function tiltedMark(point: PointMark): PointMark {
+    return { ...point, position: tilted(point.position) };
+  }
+
+  function tiltedPath(each: PathMark): PathMark {
+    return { ...each, points: each.points.map(tilted), labelAt: tilted(each.labelAt) };
+  }
+
+  function tiltedAnnulus(each: AnnulusMark): AnnulusMark {
+    return { ...each, centre: tilted(each.centre ?? vec3(0, 0, 0)) };
+  }
+
+  const TILTED_SCENE: SpatialScene = {
+    ...GALACTIC_SCENE,
+    frame: TILTED,
+    points: GALACTIC_SCENE.points.map(tiltedMark),
+    paths: (GALACTIC_SCENE.paths ?? []).map(tiltedPath),
+    annuli: (GALACTIC_SCENE.annuli ?? []).map(tiltedAnnulus),
+  };
+
+  it.each([
+    [30, 30],
+    [0, 90],
+    [90, 0],
+    [200, -45],
+  ])(
+    "draws the grid, marks, paths and annuli at azimuth %s° and elevation %s° as the galactic scene",
+    (azimuthDeg, elevationDeg) => {
+      const camera: Camera = { azimuthDeg, elevationDeg, pxPerUnit: K };
+
+      const drawn = buildDrawList(TILTED_SCENE, camera, VIEWPORT);
+
+      // The camera's angles are the frame's own, so the picture is the same to rounding.
+      expect(departures(drawn, buildDrawList(GALACTIC_SCENE, camera, VIEWPORT), 1e-9)).toEqual([]);
+    },
+  );
+
+  it("draws an orbit lying in a tilted plane as one piece, not one cut at every rounding error", () => {
+    // A plane tilted off every galactic axis, in which a point's height comes out at ±1e-15 or so.
+    const skew = planeFrame(vec3(0.3, -0.2, 0.9), FRAME.coreward);
+    const orbit = Array.from({ length: 97 }, (_, i) => {
+      const angle = i === 96 ? 0 : (2 * Math.PI * i) / 96;
+      return fromLocal(skew, {
+        coreward: 30 * Math.cos(angle),
+        spinward: 30 * Math.sin(angle),
+        north: 0,
+      });
+    });
+    const scene = bareScene({ frame: skew, paths: [path("in-plane", orbit)] });
+
+    expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops)).toHaveLength(1);
   });
 });
