@@ -257,6 +257,7 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
             time: UniverseTime::default(),
             min_layer: MassLayer::A,
             limit: 1_000,
+            include_stellar: false,
         }),
         // The universe is checked before any other field (design note 24), so a request wrong in
         // every other way too is still refused for the universe.
@@ -273,6 +274,7 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
             },
             min_layer: MassLayer::A,
             limit: 0,
+            include_stellar: false,
         }),
         RequestBody::DensityMap(DensityMapRequest {
             universe: talos.id.clone(),

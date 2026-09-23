@@ -116,6 +116,7 @@ impl Query {
             },
             min_layer: self.min_layer,
             limit: self.limit,
+            include_stellar: false,
         })
     }
 }

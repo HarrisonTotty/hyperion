@@ -1,9 +1,10 @@
-//! Wire primitives shared by every message: 64-bit values as hexadecimal text, the universe clock
-//! and galactic positions.
+//! Wire primitives shared by every message: 64-bit values and body IDs as hexadecimal text, the
+//! universe clock and galactic positions.
 //!
 //! JSON numbers lose integers above 2⁵³ once they reach JavaScript, so every `u64` crosses the wire
-//! as exactly 16 lowercase hexadecimal digits. Upper case, a `0x` prefix and any other length are
-//! refused, so that one value has one string.
+//! as exactly 16 lowercase hexadecimal digits, and a body ID as its system's 16 digits, a full stop
+//! and its body index as 4 more. Upper case, a `0x` prefix and any other length are refused, so
+//! that one value has one string.
 
 use std::error::Error;
 use std::fmt;
@@ -45,13 +46,20 @@ fn decode(text: &str) -> Result<u64, ParseHex64Error> {
     if text.len() != HEX64_DIGITS {
         return Err(ParseHex64Error::WrongLength);
     }
-    text.bytes().try_fold(0_u64, |value, byte| {
+    hex_value(text.as_bytes()).ok_or(ParseHex64Error::InvalidDigit)
+}
+
+/// The value of lowercase hexadecimal digits, most significant first; `None` if a byte is not one
+/// of `0`–`9` or `a`–`f`. The caller bounds the length, at most 16 digits.
+#[must_use]
+fn hex_value(digits: &[u8]) -> Option<u64> {
+    digits.iter().try_fold(0_u64, |value, &byte| {
         let digit = match byte {
             b'0'..=b'9' => byte - b'0',
             b'a'..=b'f' => byte - b'a' + 10,
-            _ => return Err(ParseHex64Error::InvalidDigit),
+            _ => return None,
         };
-        Ok((value << 4) | u64::from(digit))
+        Some((value << 4) | u64::from(digit))
     })
 }
 
@@ -146,6 +154,119 @@ hex64_newtype!(
     SystemIdHex,
     "a system ID"
 );
+
+/// The number of hexadecimal digits in the body index of a body ID's text form.
+const BODY_INDEX_DIGITS: usize = 4;
+
+/// The number of bytes in a body ID's text form: the system's digits, a full stop, the index's.
+const BODY_ID_LEN: usize = HEX64_DIGITS + 1 + BODY_INDEX_DIGITS;
+
+/// A body ID's text form was not a system's 16 lowercase hexadecimal digits, a full stop and 4
+/// lowercase hexadecimal digits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParseBodyIdHexError {
+    /// The text is not 21 bytes long.
+    WrongLength,
+    /// The 17th byte is not a full stop.
+    MissingSeparator,
+    /// A character of either part is not one of `0`–`9` or `a`–`f`.
+    InvalidDigit,
+}
+
+impl fmt::Display for ParseBodyIdHexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WrongLength | Self::MissingSeparator | Self::InvalidDigit => f.write_str(
+                "expected 16 lowercase hexadecimal digits, a full stop and 4 lowercase \
+                 hexadecimal digits",
+            ),
+        }
+    }
+}
+
+impl Error for ParseBodyIdHexError {}
+
+/// Parses a body ID's text form into its system's value and its body index.
+fn decode_body_id(text: &str) -> Result<(u64, u16), ParseBodyIdHexError> {
+    let bytes = text.as_bytes();
+    if bytes.len() != BODY_ID_LEN {
+        return Err(ParseBodyIdHexError::WrongLength);
+    }
+    let (system, rest) = bytes.split_at(HEX64_DIGITS);
+    let Some((&b'.', index)) = rest.split_first() else {
+        return Err(ParseBodyIdHexError::MissingSeparator);
+    };
+    let system = hex_value(system).ok_or(ParseBodyIdHexError::InvalidDigit)?;
+    let index = hex_value(index).ok_or(ParseBodyIdHexError::InvalidDigit)?;
+    let index = u16::try_from(index).expect("four hexadecimal digits fit in a u16");
+    Ok((system, index))
+}
+
+/// A body's ID: its system's ID and its 16-bit index within the system, as plan 01's `BodyId`
+/// writes it.
+///
+/// On the wire it is the system's 16 lowercase hexadecimal digits, a full stop and the body index
+/// as 4 lowercase hexadecimal digits: `0200080020000000.0100` is body `0x0100`, the first planet,
+/// of system `0200080020000000`. The index's layout is plan 14's (its design note 3): stars at
+/// `0x0000`–`0x000f`, planets from `0x0100` with their moons and rings under them. The text is
+/// checked whenever a value is built, so a held value is always well formed; the server resolves
+/// every body ID a client sends before using it, since a well-formed ID need not name a body.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_protocol::{BodyIdHex, ParseBodyIdHexError};
+///
+/// // The first planet of a system, and the same ID read back from the wire.
+/// let planet = BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100);
+/// assert_eq!(planet.as_str(), "0200080020000000.0100");
+/// let read = BodyIdHex::try_from("0200080020000000.0100".to_owned())?;
+/// assert_eq!(read.to_parts(), (0x0200_0800_2000_0000, 0x0100));
+/// # Ok::<(), ParseBodyIdHexError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(try_from = "String")]
+#[ts(export, type = "string")]
+pub struct BodyIdHex(String);
+
+impl BodyIdHex {
+    /// Encodes body `body_index` of the system whose ID is `system` for the wire.
+    #[must_use]
+    pub fn from_parts(system: u64, body_index: u16) -> Self {
+        Self(format!("{system:016x}.{body_index:04x}"))
+    }
+
+    /// Decodes the ID into its system's value and its body index.
+    ///
+    /// # Panics
+    ///
+    /// Never: the text was checked when the value was built.
+    #[must_use]
+    pub fn to_parts(&self) -> (u64, u16) {
+        decode_body_id(&self.0).expect("the text was validated when the value was built")
+    }
+
+    /// The text form, exactly as it crosses the wire.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for BodyIdHex {
+    type Error = ParseBodyIdHexError;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        decode_body_id(&text)?;
+        Ok(Self(text))
+    }
+}
+
+impl fmt::Display for BodyIdHex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// An instant on the universe clock: coordinate time in the galaxy's rest frame.
 ///
@@ -280,6 +401,119 @@ mod tests {
             ParseHex64Error::InvalidDigit.to_string(),
             "expected 16 lowercase hexadecimal digits"
         );
+    }
+
+    #[test]
+    fn body_id_hex_wire_form() {
+        let planet = BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100);
+        assert_wire_form(&planet, json!("0200080020000000.0100"));
+        assert_eq!(planet.to_string(), "0200080020000000.0100");
+    }
+
+    #[test]
+    fn body_id_hex_round_trips_every_extreme() {
+        for (system, index, text) in [
+            (0, 0, "0000000000000000.0000"),
+            (u64::MAX, u16::MAX, "ffffffffffffffff.ffff"),
+            (1 << 63, 1 << 15, "8000000000000000.8000"),
+            (0x0123_4567_89ab_cdef, 0x0a0f, "0123456789abcdef.0a0f"),
+        ] {
+            let id = BodyIdHex::from_parts(system, index);
+            assert_eq!(id.as_str(), text);
+            assert_eq!(id.to_parts(), (system, index));
+            assert_eq!(BodyIdHex::try_from(text.to_owned()), Ok(id));
+        }
+    }
+
+    #[test]
+    fn body_id_hex_round_trips_every_body_index() {
+        let system = 0x0200_0800_2000_0000;
+        for index in 0..=u16::MAX {
+            let id = BodyIdHex::from_parts(system, index);
+            let read = BodyIdHex::try_from(id.as_str().to_owned()).unwrap();
+            assert_eq!(read.to_parts(), (system, index));
+        }
+    }
+
+    #[test]
+    fn body_id_hex_rejects_every_malformed_form() {
+        let cases = [
+            ("", ParseBodyIdHexError::WrongLength),
+            ("0200080020000000", ParseBodyIdHexError::WrongLength),
+            ("0200080020000000.", ParseBodyIdHexError::WrongLength),
+            ("0200080020000000.100", ParseBodyIdHexError::WrongLength),
+            ("0200080020000000.00100", ParseBodyIdHexError::WrongLength),
+            ("200080020000000.0100", ParseBodyIdHexError::WrongLength),
+            (
+                "0200080020000000:0100",
+                ParseBodyIdHexError::MissingSeparator,
+            ),
+            (
+                "02000800200000000.100",
+                ParseBodyIdHexError::MissingSeparator,
+            ),
+            ("0200080020000000.010A", ParseBodyIdHexError::InvalidDigit),
+            ("020008002000000A.0100", ParseBodyIdHexError::InvalidDigit),
+            ("0200080020000000.0x10", ParseBodyIdHexError::InvalidDigit),
+            ("0x00080020000000.0100", ParseBodyIdHexError::InvalidDigit),
+            ("0200080020000000. 100", ParseBodyIdHexError::InvalidDigit),
+            ("0200080020000000.-100", ParseBodyIdHexError::InvalidDigit),
+            ("020008002000000g.0100", ParseBodyIdHexError::InvalidDigit),
+            // Twenty-one bytes, but the index is two characters of two bytes each.
+            ("0200080020000000.éé", ParseBodyIdHexError::InvalidDigit),
+            // Twenty-one bytes, with the separator's byte inside a two-byte character.
+            (
+                "020008002000000é.010",
+                ParseBodyIdHexError::MissingSeparator,
+            ),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(
+                BodyIdHex::try_from(text.to_owned()),
+                Err(expected),
+                "parsing {text:?}"
+            );
+            let error = serde_json::from_value::<BodyIdHex>(json!(text)).unwrap_err();
+            assert!(
+                error.to_string().contains(
+                    "expected 16 lowercase hexadecimal digits, a full stop and 4 lowercase \
+                     hexadecimal digits"
+                ),
+                "unexpected serde error for {text:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn body_id_hex_rejects_a_json_number() {
+        let error = serde_json::from_value::<BodyIdHex>(json!(256)).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid type"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn body_id_hex_orders_by_system_then_index() {
+        let first = BodyIdHex::from_parts(1, u16::MAX);
+        let second = BodyIdHex::from_parts(2, 0);
+        assert!(first < second);
+        assert!(BodyIdHex::from_parts(1, 0x00ff) < BodyIdHex::from_parts(1, 0x0100));
+    }
+
+    #[test]
+    fn parse_body_id_hex_error_text() {
+        for error in [
+            ParseBodyIdHexError::WrongLength,
+            ParseBodyIdHexError::MissingSeparator,
+            ParseBodyIdHexError::InvalidDigit,
+        ] {
+            assert_eq!(
+                error.to_string(),
+                "expected 16 lowercase hexadecimal digits, a full stop and 4 lowercase hexadecimal \
+                 digits"
+            );
+        }
     }
 
     #[test]

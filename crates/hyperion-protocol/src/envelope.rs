@@ -14,6 +14,7 @@ use crate::galaxy::{
     DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
     SystemsInRangeRequest,
 };
+use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
 
 /// A request's ID, chosen by the client and unique among its requests in flight.
@@ -120,6 +121,11 @@ pub enum ErrorCode {
     HelloRequired,
     /// No universe has the given ID.
     UnknownUniverse,
+    /// A well-formed system ID that names no system of the universe; `field` names the request's
+    /// field.
+    UnknownSystem,
+    /// A well-formed body ID that names no body of its system; `field` names the request's field.
+    UnknownBody,
     /// The universe was created with a generator version this server cannot run.
     GeneratorVersionMismatch,
     /// The universe's save is in a format this server cannot read.
@@ -157,6 +163,8 @@ pub enum RequestBody {
     DensityMap(DensityMapRequest),
     /// The systems within range of a point at a time.
     SystemsInRange(SystemsInRangeRequest),
+    /// Every star of one system at a time.
+    SystemSummary(SystemSummaryRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -176,6 +184,8 @@ pub enum ResponseBody {
     DensityMap(DensityMap),
     /// The systems found, with their census.
     SystemsInRange(SystemsInRange),
+    /// The system's stars and the orbits that hold them together.
+    SystemSummary(SystemSummaryDto),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -190,6 +200,7 @@ pub const REQUEST_KINDS: &[&str] = &[
     "galaxy_parameters",
     "density_map",
     "systems_in_range",
+    "system_summary",
 ];
 
 #[cfg(test)]
@@ -202,7 +213,9 @@ mod tests {
     use crate::galaxy::{
         Census, MapPopulation, MapView, MassLayer, ParameterGroup, SystemsInRange,
     };
-    use crate::primitives::{GalacticPosition, SeedHex, UniverseIdHex, UniverseTime};
+    use crate::orbit::HierarchyDto;
+    use crate::primitives::{GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime};
+    use crate::stellar::SystemExistenceDto;
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
 
@@ -256,9 +269,17 @@ mod tests {
                     time: UniverseTime::default(),
                     min_layer: MassLayer::A,
                     limit: 5_000,
+                    include_stellar: false,
                 }))
             }
-            Some(RequestBody::SystemsInRange(_)) => None,
+            Some(RequestBody::SystemsInRange(_)) => {
+                Some(RequestBody::SystemSummary(SystemSummaryRequest {
+                    universe,
+                    system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::SystemSummary(_)) => None,
         }
     }
 
@@ -314,7 +335,19 @@ mod tests {
                     systems: Vec::new(),
                 }))
             }
-            Some(ResponseBody::SystemsInRange(_)) => None,
+            Some(ResponseBody::SystemsInRange(_)) => {
+                Some(ResponseBody::SystemSummary(SystemSummaryDto {
+                    universe,
+                    system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                    time: UniverseTime::default(),
+                    existence: SystemExistenceDto::NotYetBorn,
+                    age_myr: -0.5,
+                    fe_h_dex: 0.0,
+                    stars: Vec::new(),
+                    hierarchy: HierarchyDto { nodes: Vec::new() },
+                }))
+            }
+            Some(ResponseBody::SystemSummary(_)) => None,
         }
     }
 
@@ -473,6 +506,29 @@ mod tests {
     }
 
     #[test]
+    fn unknown_body_request_error_wire_form() {
+        assert_wire_form(
+            &ServerMessage::RequestError {
+                id: RequestId(9),
+                error: RequestError {
+                    code: ErrorCode::UnknownBody,
+                    message: "no body 0200080020000000.0300 in its system".to_owned(),
+                    field: Some("body".to_owned()),
+                },
+            },
+            json!({
+                "type": "request_error",
+                "id": 9,
+                "error": {
+                    "code": "unknown_body",
+                    "message": "no body 0200080020000000.0300 in its system",
+                    "field": "body",
+                },
+            }),
+        );
+    }
+
+    #[test]
     fn request_error_wire_form_without_field() {
         assert_wire_form(
             &ServerMessage::RequestError {
@@ -502,6 +558,8 @@ mod tests {
             (ErrorCode::Unsupported, "unsupported"),
             (ErrorCode::HelloRequired, "hello_required"),
             (ErrorCode::UnknownUniverse, "unknown_universe"),
+            (ErrorCode::UnknownSystem, "unknown_system"),
+            (ErrorCode::UnknownBody, "unknown_body"),
             (
                 ErrorCode::GeneratorVersionMismatch,
                 "generator_version_mismatch",
@@ -551,6 +609,7 @@ mod tests {
                 "galaxy_parameters",
                 "density_map",
                 "systems_in_range",
+                "system_summary",
             ]
         );
     }

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::primitives::{GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime};
+use crate::stellar::StellarBriefDto;
 
 /// Asks for a universe's galaxy parameters (`galaxy_parameters`), answered with
 /// [`GalaxyParameters`].
@@ -287,6 +288,13 @@ pub struct SystemsInRangeRequest {
     pub min_layer: MassLayer,
     /// The most systems the census may expect to return, from 1 to 20,000.
     pub limit: u32,
+    /// Whether each row should carry a [`StellarBriefDto`] of its primary (plan 06, P06.T33).
+    ///
+    /// Optional on the wire and `false` when absent, which is how a request of plan 04's form
+    /// reads; it is written only when `true`, so that such a request's wire form is unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub include_stellar: bool,
 }
 
 /// The systems within range of a point at a time, with the census that says what was left out.
@@ -377,6 +385,13 @@ pub struct SystemRecord {
     pub age_myr: f64,
     /// The population it was placed from.
     pub population: Population,
+    /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
+    ///
+    /// Absent otherwise: the key is left out rather than written `null`, so that a row without a
+    /// brief is exactly plan 04's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stellar: Option<StellarBriefDto>,
 }
 
 #[cfg(test)]
@@ -574,6 +589,7 @@ mod tests {
                 time: epoch_plus_a_century(),
                 min_layer: MassLayer::A,
                 limit: 5_000,
+                include_stellar: false,
             }),
             json!({
                 "kind": "systems_in_range",
@@ -606,6 +622,7 @@ mod tests {
                 time: epoch_plus_a_century(),
                 min_layer: MassLayer::A,
                 limit: 5_000,
+                include_stellar: false,
             })
         );
     }
@@ -644,9 +661,9 @@ mod tests {
         })
     }
 
-    #[test]
-    fn systems_in_range_response_wire_form() {
-        let records = vec![
+    /// The two rows plan 04's range response pins: an old layer-E system and a young layer-B one.
+    fn two_rows() -> Vec<SystemRecord> {
+        vec![
             SystemRecord {
                 id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 designation: "Vorth AB-C e4-17".to_owned(),
@@ -658,6 +675,7 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                stellar: None,
             },
             SystemRecord {
                 id: SystemIdHex::from_u64(0x6000_0000_0000_0001),
@@ -670,8 +688,14 @@ mod tests {
                 initial_mass_msun: 0.625,
                 age_myr: 45.0,
                 population: Population::YoungThinDisc,
+                stellar: None,
             },
-        ];
+        ]
+    }
+
+    #[test]
+    fn systems_in_range_response_wire_form() {
+        let records = two_rows();
         let census = Census {
             limit: 5_000,
             complete_above_msun: Some(0.5),
@@ -792,6 +816,119 @@ mod tests {
                 "systems": [],
             }),
         );
+    }
+
+    #[test]
+    fn systems_in_range_request_of_plan_04_asks_for_no_briefs() {
+        // The form plan 04 pinned, with no `include_stellar`, still parses, and reads as false.
+        let text = r#"{"kind":"systems_in_range","universe":"0123456789abcdef",
+            "centre":{"cell_ly":[26000,0,-1],"offset_m":[0,0,4730365236290400]},
+            "radius_ly":50,"time":{"seconds":3155760000,"nanos":0},"min_layer":"a","limit":5000}"#;
+        match serde_json::from_str::<RequestBody>(text).unwrap() {
+            RequestBody::SystemsInRange(request) => assert!(!request.include_stellar),
+            other => panic!("expected a range request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn systems_in_range_request_wire_form_with_briefs() {
+        assert_wire_form(
+            &RequestBody::SystemsInRange(SystemsInRangeRequest {
+                universe: universe(),
+                centre: chart_centre(),
+                radius_ly: 50.0,
+                time: epoch_plus_a_century(),
+                min_layer: MassLayer::C,
+                limit: 5_000,
+                include_stellar: true,
+            }),
+            json!({
+                "kind": "systems_in_range",
+                "universe": "0123456789abcdef",
+                "centre": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "radius_ly": 50.0,
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "min_layer": "c",
+                "limit": 5_000,
+                "include_stellar": true,
+            }),
+        );
+    }
+
+    #[test]
+    fn systems_in_range_request_refuses_a_non_boolean_include_stellar() {
+        let text = r#"{"kind":"systems_in_range","universe":"0123456789abcdef",
+            "centre":{"cell_ly":[0,0,0],"offset_m":[0,0,0]},"radius_ly":50,
+            "time":{"seconds":0,"nanos":0},"min_layer":"a","limit":5000,"include_stellar":1}"#;
+        let error = serde_json::from_str::<RequestBody>(text).unwrap_err();
+        assert!(
+            error.to_string().contains("expected a boolean"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn system_record_wire_form_with_a_brief() {
+        use crate::stellar::ObjectKindDto;
+
+        assert_wire_form(
+            &SystemRecord {
+                id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                designation: "Vorth AB-C e4-17".to_owned(),
+                position: GalacticPosition {
+                    cell_ly: [26_012, -3, -2],
+                    offset_m: [1.5e15, 0.0, 9.0e15],
+                },
+                layer: MassLayer::E,
+                initial_mass_msun: 11.25,
+                age_myr: 7_250.5,
+                population: Population::OldThinDisc,
+                stellar: Some(StellarBriefDto {
+                    kind: ObjectKindDto::NeutronStar,
+                    class: "NS".to_owned(),
+                    log_luminosity_lsun: Some(-4.5),
+                    teff_k: Some(250_000.0),
+                }),
+            },
+            json!({
+                "id": "0200080020000000",
+                "designation": "Vorth AB-C e4-17",
+                "position": {
+                    "cell_ly": [26_012, -3, -2],
+                    "offset_m": [1.5e15, 0.0, 9.0e15],
+                },
+                "layer": "e",
+                "initial_mass_msun": 11.25,
+                "age_myr": 7_250.5,
+                "population": "old_thin_disc",
+                "stellar": {
+                    "kind": "neutron_star",
+                    "class": "NS",
+                    "log_luminosity_lsun": -4.5,
+                    "teff_k": 250_000.0,
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn system_record_without_a_brief_is_plan_04s_row() {
+        // No `stellar` key at all, not `"stellar": null`, and a row of that form parses.
+        let row = json!({
+            "id": "6000000000000001",
+            "designation": "Vorth AB-C b17-2",
+            "position": { "cell_ly": [25_990, 20, 0], "offset_m": [0.0, 2.0e15, 3.0e15] },
+            "layer": "b",
+            "initial_mass_msun": 0.625,
+            "age_myr": 45.0,
+            "population": "young_thin_disc",
+        });
+        let record: SystemRecord = serde_json::from_value(row.clone()).unwrap();
+        assert_eq!(record.stellar, None);
+        assert_eq!(serde_json::to_value(&record).unwrap(), row);
     }
 
     #[test]

@@ -1402,3 +1402,18 @@ m₂)`, C = 2.8 "determined empirically", "holds for q_out ≤ 5"; their reducti
     simulation 282 : 152), and 2 + 2 are 41% of quadruples (his 74%). He reproduces those only by
     correlating the subsystems of the two components (his ε₊ and ε₋), which independent draws do
     not do.
+- **Deviations in T13's slice, as built (round 7, `wire`).** In a new private module `orbit.rs` of
+  `hyperion-protocol`, its types re-exported at the crate root, built with P06.T33.
+  - `OrbitDto` is `period_s`, `semi_major_axis_m`, `eccentricity`, `inclination_rad`,
+    `ascending_node_rad`, `argument_of_periapsis_rad`, `mean_anomaly_at_epoch_rad` and `mu_m3_s2`,
+    named after `KeplerElements`'s accessors and matching the client's `KeplerOrbit` (P14.T39). Its
+    eccentricity is documented below 0.9999, since ruling 39 carries bound orbits from there up in
+    open form; the client's solver stops at the same bound.
+  - `HierarchyDto { nodes }` lists `HierarchyNodeDto`s depth first, as `SystemHierarchy::nodes`
+    does, tagged by `type`: `star { body_index, mass_msun }` and `pair { inner, outer, orbit }`,
+    the children as indices into the list. `mass_msun` is the mass the server places the star by,
+    its initial mass, as `star_positions_at` uses. A client sums a member's stars, where the server
+    reads `node_mass`, which can differ in the last bit; that is drawing only (plan 14, D18).
+  - A system not yet formed has no nodes, as it has no stars.
+  - `body_index` and `SystemSummaryDto.hierarchy` are required fields, since they land with the
+    `system_summary` kind itself; `binary_class` and `star_count` wait for the rest of T13.

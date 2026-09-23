@@ -55,9 +55,11 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 
 /// The server's handlers: every request kind, and the code that answers it.
 ///
-/// Every kind of the first milestone is served (plan 04, P04.T14). A later plan's kind is refused
-/// before it reaches here, as `unsupported`, because this server's [`REQUEST_KINDS`] does not hold
-/// it. Each handler that names a universe starts from [`universe::openable_universe`].
+/// Every kind of the first milestone is served (plan 04, P04.T14). A later plan's kind that this
+/// server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`.
+/// A kind the protocol already defines but whose handler has not landed is answered `unsupported`
+/// here, under its own ID: `system_summary` until plan 06's P06.T34. Each handler that names a
+/// universe starts from [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
@@ -72,8 +74,19 @@ impl Handler for Handlers {
             RequestBody::SystemsInRange(request) => {
                 Box::pin(galaxy::systems(state, request, token))
             }
+            RequestBody::SystemSummary(_) => Box::pin(ready(Err(not_served_yet("system_summary")))),
         }
     }
+}
+
+/// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
+/// as an older server would answer it (plan 04, design note 15).
+#[must_use]
+fn not_served_yet(kind: &str) -> RequestError {
+    request_error(
+        ErrorCode::Unsupported,
+        format!("request kind `{kind}` is not served by this server yet"),
+    )
 }
 
 /// A request's `kind` string, as it is on the wire and in [`REQUEST_KINDS`].
@@ -85,6 +98,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::GalaxyParameters(_) => "galaxy_parameters",
         RequestBody::DensityMap(_) => "density_map",
         RequestBody::SystemsInRange(_) => "systems_in_range",
+        RequestBody::SystemSummary(_) => "system_summary",
     }
 }
 
@@ -96,7 +110,8 @@ fn is_large(body: &ResponseBody) -> bool {
         ResponseBody::CreateUniverse(_)
         | ResponseBody::ListUniverses(_)
         | ResponseBody::OpenUniverse(_)
-        | ResponseBody::GalaxyParameters(_) => false,
+        | ResponseBody::GalaxyParameters(_)
+        | ResponseBody::SystemSummary(_) => false,
     }
 }
 
@@ -621,7 +636,7 @@ mod tests {
     use hyperion_protocol::{
         CreateUniverseRequest, DensityMap, DensityMapRequest, GalacticPosition,
         GalaxyParametersRequest, MapPopulation, MapView, MassLayer, OpenUniverseRequest,
-        SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
     };
 
     use super::*;
@@ -651,12 +666,18 @@ mod tests {
                 bits: 8,
             }),
             RequestBody::SystemsInRange(SystemsInRangeRequest {
-                universe,
+                universe: universe.clone(),
                 centre: GalacticPosition::default(),
                 radius_ly: 50.0,
                 time: UniverseTime::default(),
                 min_layer: MassLayer::A,
                 limit: 5_000,
+                include_stellar: false,
+            }),
+            RequestBody::SystemSummary(SystemSummaryRequest {
+                universe,
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
             }),
         ]
     }

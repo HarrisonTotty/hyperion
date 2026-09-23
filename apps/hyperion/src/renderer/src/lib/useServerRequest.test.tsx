@@ -172,6 +172,22 @@ describe("useServerRequest", () => {
     });
   });
 
+  it.each([
+    ["unknown_system", "system", "no system 0200080020000000 in this universe"],
+    ["unknown_body", "body", "no body 0200080020000000.0300 in its system"],
+  ] as const)(
+    "reports %s as a rejection with the server's reason",
+    async (code, field, message) => {
+      const { result, socket } = renderRequest(parametersOf(FIRST));
+
+      await server(() => {
+        socket.serverRejects(1, { code, message, field });
+      });
+
+      expect(result.current).toEqual({ kind: "rejected", code, reason: message });
+    },
+  );
+
   it("rejects a response of the wrong kind as a protocol violation", async () => {
     const { result, socket } = renderRequest(parametersOf(FIRST));
 

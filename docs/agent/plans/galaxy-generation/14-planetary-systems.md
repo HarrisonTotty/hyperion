@@ -2660,3 +2660,27 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     compact exponent (about −2.8, over 99% compact at 0.1 M☉) or tighter M-dwarf spacing, which T6.b and T10.b should settle together. Ruled (ruling 48, e): settled jointly by T6.b's spacing and T10.b; the `zones` lane is told. (f) Counting `TerrestrialOnly`'s Earth-mass planets, η at
     1 M☉ is roughly 40–50% against Zhu et al.'s 30 ± 3% (Yang et al. 2020 find 73 ± 13%): the
     `Barren`–`TerrestrialOnly` split, or T7's rocky masses, is the dial. Ruled (ruling 48, f): stands; Zhu's 30% counts Kepler-like systems, and T10.b checks η⊕ against Bryson et al. (2021), 0.37–0.60 in the conservative zone. (g) and (h) are recorded under _D10_ and _Shape_.
+- **Deviations in T35.a, as built (round 7, `wire`),** with P06.T33 and P11.T13's slice.
+  - `BodyIdHex` is in `primitives.rs`: `from_parts(system: u64, body_index: u16)`, `to_parts()`,
+    `as_str()`, `TryFrom<String>` and `Display`. `ParseBodyIdHexError` has `WrongLength`,
+    `MissingSeparator` and `InvalidDigit`, with one `Display` text, as `ParseHex64Error` has. Tests
+    round-trip every body index and refuse 17 malformed forms.
+  - `DetailLevelDto` (`contact` to `full`) derives `Ord` in the plan's order.
+  - `SectionDto<T>` is adjacently tagged: `{"state": "ok", "value": …}`,
+    `{"state": "not_resolved"}`, `{"state": "not_modelled"}`, `{"state": "not_applicable"}`.
+    Internal tagging would put the value's fields beside `state` and cannot carry a list, such as
+    a planet's moons. **For the orchestrator to rule.**
+  - `BodyOrbitDto.parent` is an `OrbitHostDto`, not a `BodyIdHex` (ruling 53), mirroring the sim's
+    `planetary::placement::OrbitHost` and tagged by `type`: `{"type": "star", "body_index": n}`,
+    `{"type": "pair", "key_body_index": k}`, `{"type": "barycentre"}` and
+    `{"type": "body", "id": …}` for a moon's or a ring's planet, with one wire-form pin each. `k`
+    names the pair as the sim does, by its outer member's first star, so a client finds it in the
+    system's `HierarchyDto` as the pair node whose outer child begins with star k.
+  - `valid_until` is an `Option<UniverseTime>`, `null` when no change falls inside the clock
+    window, as the `record` lane's `BodyOrbit::valid_until` is.
+  - `ErrorCode::UnknownBody` lands here rather than in T35.c, with its `settledState` case, as the
+    brief asked.
+  - In `@hyperion/protocol`, T37's `parseBodyId` and `formatBodyId` land here too, in `hex.ts`,
+    with `isBodyId` and a `BodyIdParts { system, bodyIndex }` interface. They throw `SyntaxError`
+    for a malformed string or system, and `RangeError` for an index that is not an integer from 0
+    to 65,535. T37's test that the Rust wire-form fixtures decode waits for T35.b–c's records.

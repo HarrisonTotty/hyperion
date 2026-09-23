@@ -68,6 +68,7 @@ fn query(universe: &UniverseIdHex, centre: GalacticPosition, time: UniverseTime)
         time,
         min_layer: MassLayer::A,
         limit: MAX_CENSUS_LIMIT,
+        include_stellar: false,
     })
 }
 

@@ -3,4 +3,4 @@
 /**
  * The kind of a request's failure.
  */
-export type ErrorCode = "bad_request" | "unsupported" | "hello_required" | "unknown_universe" | "generator_version_mismatch" | "unsupported_save_format" | "name_taken" | "universe_limit_reached" | "too_many_requests" | "queue_full" | "cancelled" | "storage_failed" | "internal";
+export type ErrorCode = "bad_request" | "unsupported" | "hello_required" | "unknown_universe" | "unknown_system" | "unknown_body" | "generator_version_mismatch" | "unsupported_save_format" | "name_taken" | "universe_limit_reached" | "too_many_requests" | "queue_full" | "cancelled" | "storage_failed" | "internal";

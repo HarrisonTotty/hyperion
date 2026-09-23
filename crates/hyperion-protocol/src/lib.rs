@@ -11,7 +11,11 @@
 
 mod envelope;
 mod galaxy;
+mod modelled;
+mod orbit;
+mod planetary;
 mod primitives;
+mod stellar;
 #[cfg(test)]
 pub(crate) mod testing;
 mod universe;
@@ -25,8 +29,17 @@ pub use galaxy::{
     LayerStatus, MapPopulation, MapView, MassLayer, Parameter, ParameterGroup, ParameterOrigin,
     ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest, Unit,
 };
+pub use modelled::Modelled;
+pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
+pub use planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, SectionDto};
 pub use primitives::{
-    GalacticPosition, ParseHex64Error, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
+    BodyIdHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex, SystemIdHex,
+    UniverseIdHex, UniverseTime,
+};
+pub use stellar::{
+    KickModeDto, NatalKickDto, ObjectKindDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto,
+    StarEventDto, StarEventKindDto, StarSummaryDto, StellarBriefDto, SystemExistenceDto,
+    SystemSummaryDto, SystemSummaryRequest, VariabilityDto, VariableKindDto,
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,

@@ -208,6 +208,7 @@ fn systems_in_range(records: usize) -> SystemsInRange {
                 initial_mass_msun: 0.1 + along * 8.0,
                 age_myr: 100.0 + along * 12_000.0,
                 population: Population::OldThinDisc,
+                stellar: None,
             }
         })
         .collect();

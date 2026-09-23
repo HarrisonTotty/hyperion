@@ -3,9 +3,10 @@ import type { CreateUniverseRequest } from "./CreateUniverseRequest";
 import type { DensityMapRequest } from "./DensityMapRequest";
 import type { GalaxyParametersRequest } from "./GalaxyParametersRequest";
 import type { OpenUniverseRequest } from "./OpenUniverseRequest";
+import type { SystemSummaryRequest } from "./SystemSummaryRequest";
 import type { SystemsInRangeRequest } from "./SystemsInRangeRequest";
 
 /**
  * What a request asks for, discriminated by `kind`.
  */
-export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest;
+export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest;

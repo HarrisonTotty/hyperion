@@ -2532,3 +2532,61 @@ Instant}`); `TrackOptions::hurley2000()` is T12.b's (both HPT recipes, no bridge
     - Helium stars and hot central stars are typed by temperature alone (a 90 kK helium star reads O3V) until T24.a.
     - Luminous low-mass AGB stars read II by their luminosity: the Mira-like case reads M8II, where catalogues give M7 III.
     - BC_V is the dwarfs' at every gravity, so a late M giant's M_V is up to 1.7 mag too bright (Straižys and Kuriliene 1981, Table III, at M6 III).
+- **Deviations in T33, as built (round 7, `wire`).** Built in one change with P11.T13's slice and
+  P14.T35.a, in a new private module `stellar.rs` beside `orbit.rs` and `planetary.rs`, their types
+  re-exported at the crate root as every module's are; `envelope.rs` and `galaxy.rs` gain the kind,
+  the error codes and the two optional range fields.
+  - _The field set._ `SystemSummaryDto`: `universe`, `system`, `time`, `existence`
+    (`SystemExistenceDto`: `not_yet_born`, `exists`), `age_myr`, `fe_h_dex`, `stars` and plan 11's
+    `hierarchy`. `StarSummaryDto`: `body_index`, `kind`, `phase` (`PhaseDto`, one value per
+    `Phase`), `class`, `initial_mass_msun`, `mass_msun`, `core_mass_msun`, `luminosity_lsun`,
+    `radius_rsun`, `teff_k`, `absolute_v_mag`, `colour_b_v_mag`, `mass_loss_rate_msun_per_yr`,
+    `remnant` and `death_time`; then, absent until their tasks land, `rotation_period_d` and
+    `activity_log_lx_lbol` (T25), `variability` (T26), `planetary_nebula` (T16) and
+    `active_events` (T28). `age_myr` and `initial_mass_msun` are not in the task's list: T29.b
+    computes both, and the `SYSTEM` display shows them at times other than the chart row's.
+    `body_index` and `hierarchy` are required, since they land with the kind and no older form
+    exists.
+  - _Three states per value._ Absent: this generator version does not compute it (ruling 34's
+    single value, the em dash). `null`: computed, and the object has none, plan 04's convention for
+    an `Option`. Otherwise the value. A value that is absent now and can be `null` once computed (a
+    star that does not vary, one with no nebula) is the new `hyperion_protocol::Modelled<T>`
+    (`NotModelled`, `Null`, `Value`), with hand-written serde impls and
+    `#[ts(as = "Option<Option<T>>", optional)]`, so TypeScript reads `name?: T | null`; Clippy's
+    `option_option` ruled out a bare `Option<Option<T>>`. One that always has a value once
+    computed is a skipped `Option`. **For the orchestrator to rule.**
+  - _`RemnantDto`_ is tagged by `type`: `white_dwarf { cooling_age_myr, natal_kick? }`,
+    `neutron_star { pulsar?, natal_kick? }`, `black_hole { dimensionless_spin?, natal_kick? }`,
+    `no_remnant`. The white dwarf's type is not repeated: it is the star's `class`, where T23 and
+    T20.b write Sion's type (`DA4.2`), and its composition is the `phase`. `PulsarDto` is
+    `spin_period_s`, `period_derivative_s_per_s`, `magnetic_field_g`, `alive` and `magnetar`;
+    `NatalKickDto` is `speed_km_s` and `KickModeDto` (`ordinary`, `low`, `fallback_none`,
+    `white_dwarf`).
+  - _Shapes for later tasks, fixed now from their text._ `VariabilityDto` is `kind`, `period_d` and
+    `amplitude_mag` (peak to peak, V), with `VariableKindDto` holding the 21 kinds T26.a–c name;
+    `PlanetaryNebulaDto` is T16.b's `radius_ly`, `expansion_speed_km_s`, `age_yr`,
+    `ionised_mass_msun` and `excitation_class`; `StarEventDto` is `kind` (`StarEventKindDto`,
+    T28's seven), `onset` and `duration_s`, and T28 adds each kind's magnitude, and the event ID if
+    plan 12 needs it, as fields. Activity is log₁₀ L_X ÷ L_bol, the quantity T25's Rossby law
+    gives, since `ActivityLevel` has no shape yet.
+  - _Light-less objects._ `StellarBriefDto`'s `log_luminosity_lsun` and `teff_k` are
+    `Option<f32>`, `null` for a black hole and for `NoRemnant`: log₁₀ 0 is −∞, which `serde_json`
+    writes as `null` and cannot read back as an `f32`. `StarSummaryDto.teff_k` is `null` for them
+    too, rather than the sim's 0 K.
+  - _Radii of neutron stars and black holes_ stay `radius_rsun` on the wire, one field in one unit
+    for every object; ruling 36's km is the client's scale step. **For the orchestrator to rule**,
+    against a `radius_km` on those remnants.
+  - _`include_stellar`_ is a `bool` with `serde(default, skip_serializing_if = "std::ops::Not::not")`
+    and `ts(as = "Option<bool>", optional)`, since ts-rs's `optional` takes only an `Option`. A
+    request of plan 04's form parses as `false` and serialises unchanged, and a row without a brief
+    has no `stellar` key. Until T34 the server ignores the flag and every row's `stellar` is `None`,
+    which a test in `convert.rs` pins so that T34 changes it knowingly.
+  - _Server._ `Handlers` answers `system_summary` with `unsupported` under its own ID
+    (`not_served_yet`), `kind` names it, and `is_large` puts it with the small responses;
+    `tests/websocket.rs` checks the answer and that the connection carries on.
+  - _Error codes._ `unknown_system` and plan 14's `unknown_body` both land here, after
+    `unknown_universe`, with their `settledState` cases and a hook test, and both join
+    `RequestStatus.tsx`'s `REFUSALS` (a set, not an exhaustive switch, so nothing failed to
+    compile), which would otherwise have read them as faults. Both files are the `ui` lane's.
+  - The server's `galaxy_parameters` and `systems_in_range` goldens are unchanged
+    (`golden_diff.py`: "No golden files changed").

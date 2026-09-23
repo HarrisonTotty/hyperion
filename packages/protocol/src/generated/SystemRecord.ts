@@ -2,6 +2,7 @@
 import type { GalacticPosition } from "./GalacticPosition";
 import type { MassLayer } from "./MassLayer";
 import type { Population } from "./Population";
+import type { StellarBriefDto } from "./StellarBriefDto";
 import type { SystemIdHex } from "./SystemIdHex";
 
 /**
@@ -35,4 +36,11 @@ age_myr: number,
 /**
  * The population it was placed from.
  */
-population: Population, };
+population: Population, 
+/**
+ * What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
+ *
+ * Absent otherwise: the key is left out rather than written `null`, so that a row without a
+ * brief is exactly plan 04's.
+ */
+stellar?: StellarBriefDto, };

@@ -32,4 +32,11 @@ min_layer: MassLayer,
 /**
  * The most systems the census may expect to return, from 1 to 20,000.
  */
-limit: number, };
+limit: number, 
+/**
+ * Whether each row should carry a [`StellarBriefDto`] of its primary (plan 06, P06.T33).
+ *
+ * Optional on the wire and `false` when absent, which is how a request of plan 04's form
+ * reads; it is written only when `true`, so that such a request's wire form is unchanged.
+ */
+include_stellar?: boolean, };

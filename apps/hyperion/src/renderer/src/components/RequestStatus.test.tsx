@@ -34,6 +34,18 @@ describe("RequestStatus", () => {
       "REJECTED: no universe 00000000000000a1",
       false,
     ],
+    [
+      "refused for an unknown system",
+      { kind: "rejected", code: "unknown_system", reason: "no system 0200080020000000" },
+      "REJECTED: no system 0200080020000000",
+      false,
+    ],
+    [
+      "refused for an unknown body",
+      { kind: "rejected", code: "unknown_body", reason: "no body 0200080020000000.0300" },
+      "REJECTED: no body 0200080020000000.0300",
+      false,
+    ],
     ["timed out", { kind: "timed_out" }, "TIMED OUT", true],
     ["with the link down", { kind: "link_down", reason: "NO CARRIER" }, "NO CARRIER", false],
   ])(

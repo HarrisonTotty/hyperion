@@ -369,6 +369,9 @@ pub(crate) fn systems_in_range(
 
 /// One system found, as the wire carries it: the state at the epoch but for the position and the
 /// age, which are at the query's time.
+///
+/// The row never carries a stellar brief yet, whatever the request's `include_stellar` says: the
+/// briefs come with plan 06's range handler (P06.T34), and until then every row is plan 04's.
 #[must_use]
 fn system_record(hit: &SystemHit, time: UniverseTime) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
@@ -380,6 +383,7 @@ fn system_record(hit: &SystemHit, time: UniverseTime) -> hyperion_protocol::Syst
         initial_mass_msun: record.primary_initial_mass().value(),
         age_myr: Megayears::from(record.age_at(time)).value(),
         population: wire_population(record.population()),
+        stellar: None,
     }
 }
 
@@ -1536,6 +1540,7 @@ mod tests {
             },
             min_layer,
             limit,
+            include_stellar: false,
         }
     }
 
@@ -1551,6 +1556,20 @@ mod tests {
             .into_query();
         let result = range_query(milky_way(), &mut NoCache::new(), &[], &query);
         systems_in_range(request.clone(), &query, &result)
+    }
+
+    #[test]
+    fn a_request_for_briefs_gets_rows_without_them_until_p06_t34() {
+        // The flag is the protocol's (P06.T33), but no brief is built before plan 06's range
+        // handler lands, so every row is still plan 04's.
+        let mut request = sunlike(50.0, 5_000, MassLayer::A);
+        request.include_stellar = true;
+        let answer = answer(&request);
+        assert!(
+            !answer.systems.is_empty(),
+            "a 50 ly sphere at the Sun is not empty"
+        );
+        assert!(answer.systems.iter().all(|row| row.stellar.is_none()));
     }
 
     /// The field `bad_request` names, for a request that is refused.
