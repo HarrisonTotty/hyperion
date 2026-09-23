@@ -296,9 +296,11 @@ fn b_coefficients(z: f64, zeta: f64) -> [f64; 58] {
     // b14 = b′14^b15, b16 = b′16^b15.
     b[14] = math::powf(b[14], b[15]);
     b[16] = math::powf(b[16], b[15]);
-    // b17 = 1.0, or 1.0 − 0.3880523 (ζ + 1.0)^2.862149 for ζ > −1.0.
+    // b17 = 1.0, or 1.0 − 0.3880523 (ζ + 1.0)^0.6371760 for ζ > −1.0. Both versions of the paper
+    // print the exponent as 2.862149, which is b′16's second coefficient: a misprint that the SSE
+    // code (`zdata.h`) settles.
     b[17] = if zeta > -1.0 {
-        1.0 - 0.388_052_3 * math::powf(zeta + 1.0, 2.862_149)
+        1.0 - 0.388_052_3 * math::powf(zeta + 1.0, 0.637_176)
     } else {
         1.0
     };

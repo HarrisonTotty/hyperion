@@ -180,6 +180,60 @@ impl GiantBranch {
                 - math::powf(self.b / l, (q - 1.0) / q) / ((q - 1.0) * self.a_h * self.b)
         })
     }
+
+    /// The same relation with the rate constant `rate_msun_per_lsun_myr` in place of A′H: `A_He`
+    /// on the early asymptotic giant branch and for helium giants, `A_H,He` on the thermally pulsing
+    /// one (HPT sections 5.4 and 6.1, P06.T8 and T9).
+    #[must_use]
+    pub(crate) const fn with_rate(self, rate_msun_per_lsun_myr: f64) -> Self {
+        Self {
+            a_h: rate_msun_per_lsun_myr,
+            ..self
+        }
+    }
+
+    /// The helium giants' relation for a helium star of mass `m` (HPT equation 84, P06.T9): p = 5,
+    /// q = 3, B = 4.1 × 10⁴ and D = 5.5 × 10⁴ ÷ (1 + 0.4 M⁴), with the rate constant
+    /// `rate_msun_per_lsun_myr`.
+    #[must_use]
+    pub(crate) fn helium_giant(m: SolarMasses, rate_msun_per_lsun_myr: f64) -> Self {
+        let (p, q) = (5.0, 3.0);
+        let b_coefficient = 4.1e4;
+        let d_coefficient = 5.5e4 / (1.0 + 0.4 * math::powi(m.value(), 4));
+        let m_x = math::powf(b_coefficient / d_coefficient, 1.0 / (p - q));
+        Self {
+            p,
+            q,
+            b: b_coefficient,
+            d: d_coefficient,
+            a_h: rate_msun_per_lsun_myr,
+            m_x,
+            l_x: d_coefficient * math::powf(m_x, p),
+        }
+    }
+
+    /// The timescales of growth from `t0`, where the luminosity is `l0`, at any luminosity:
+    /// [`GiantBranch::times`] up to `L_x`, and above it `t_inf,2` = `t0` + (B ÷ `l0`)^((q − 1) ÷ q)
+    /// ÷ ((q − 1) A B) (HPT equation 72, for the thermally pulsing AGB of a star whose core starts
+    /// above `M_x`), with `t_x` at `t0` and `t_inf,1` set so that the low-luminosity law meets the
+    /// core there.
+    #[must_use]
+    pub(crate) fn times_from(&self, t0: Megayears, l0: SolarLuminosities) -> GiantTimes {
+        if l0.value() <= self.l_x {
+            return self.times(t0, l0);
+        }
+        let (p, q) = (self.p, self.q);
+        let mc0 = self.core_mass(l0).value();
+        GiantTimes {
+            t_inf1: t0 + Megayears::new(math::powf(mc0, 1.0 - p) / ((p - 1.0) * self.a_h * self.d)),
+            t_x: t0,
+            t_inf2: t0
+                + Megayears::new(
+                    math::powf(self.b / l0.value(), (q - 1.0) / q)
+                        / ((q - 1.0) * self.a_h * self.b),
+                ),
+        }
+    }
 }
 
 /// The timescales of one giant branch (HPT equations 40–42), built by [`GiantBranch::times`].
@@ -200,9 +254,7 @@ pub(crate) struct GiantTimes {
 /// The giant's radius (HPT equation 46): A (L^b1 + b2 L^b3) with A = min(b4 M^−b5, b6 M^−b7).
 #[must_use]
 pub(crate) fn radius(m: SolarMasses, l: SolarLuminosities, c: &ZCoeffs) -> SolarRadii {
-    let (m, l) = (m.value(), l.value());
-    let a = (c.b(4) * math::powf(m, -c.b(5))).min(c.b(6) * math::powf(m, -c.b(7)));
-    SolarRadii::new(a * (math::powf(l, c.b(1)) + c.b(2) * math::powf(l, c.b(3))))
+    RadiusLaw::giant(m, c).at(l)
 }
 
 /// The radius on the asymptotic giant branch (HPT equation 74): A (L^b1 + b2 L^b50).
@@ -211,25 +263,69 @@ pub(crate) fn radius(m: SolarMasses, l: SolarLuminosities, c: &ZCoeffs) -> Solar
 /// b50 = b3 and A = b56 + b57 M; both linear in M between.
 #[must_use]
 pub(crate) fn agb_radius(m: SolarMasses, l: SolarLuminosities, c: &ZCoeffs) -> SolarRadii {
-    let (m, l) = (m.value(), l.value());
-    let m_hef = c.m_hef().value();
-    let m1 = m_hef - 0.2;
-    let high_a =
-        |m: f64| (c.b(51) * math::powf(m, -c.b(52))).min(c.b(53) * math::powf(m, -c.b(54)));
-    let low_a = |m: f64| c.b(56) + c.b(57) * m;
-    let (b50, a) = if m >= m_hef {
-        (c.b(55) * c.b(3), high_a(m))
-    } else if m <= m1 {
-        (c.b(3), low_a(m))
-    } else {
-        let f = (m - m1) / 0.2;
-        let low = low_a(m1);
-        (
-            c.b(3) * (1.0 + (c.b(55) - 1.0) * f),
-            low + (high_a(m_hef) - low) * f,
-        )
-    };
-    SolarRadii::new(a * (math::powf(l, c.b(1)) + c.b(2) * math::powf(l, b50)))
+    RadiusLaw::asymptotic(m, c).at(l)
+}
+
+/// A giant's radius at one mass as a function of luminosity, A (L^b1 + b2 L^x): [`radius`] and
+/// [`agb_radius`] with their mass dependence evaluated once, for the phases of P06.T7 and T8 that
+/// evaluate them along a track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RadiusLaw {
+    a: f64,
+    b1: f64,
+    b2: f64,
+    x: f64,
+}
+
+impl RadiusLaw {
+    /// The first giant branch's law (HPT equation 46): x = b3, A = min(b4 M^−b5, b6 M^−b7).
+    #[must_use]
+    pub(crate) fn giant(m: SolarMasses, c: &ZCoeffs) -> Self {
+        let m = m.value();
+        let a = (c.b(4) * math::powf(m, -c.b(5))).min(c.b(6) * math::powf(m, -c.b(7)));
+        Self {
+            a,
+            b1: c.b(1),
+            b2: c.b(2),
+            x: c.b(3),
+        }
+    }
+
+    /// The asymptotic giant branch's law (HPT equation 74; see [`agb_radius`]).
+    #[must_use]
+    pub(crate) fn asymptotic(m: SolarMasses, c: &ZCoeffs) -> Self {
+        let m = m.value();
+        let m_hef = c.m_hef().value();
+        let m1 = m_hef - 0.2;
+        let high_a =
+            |m: f64| (c.b(51) * math::powf(m, -c.b(52))).min(c.b(53) * math::powf(m, -c.b(54)));
+        let low_a = |m: f64| c.b(56) + c.b(57) * m;
+        let (x, a) = if m >= m_hef {
+            (c.b(55) * c.b(3), high_a(m))
+        } else if m <= m1 {
+            (c.b(3), low_a(m))
+        } else {
+            let f = (m - m1) / 0.2;
+            let low = low_a(m1);
+            (
+                c.b(3) * (1.0 + (c.b(55) - 1.0) * f),
+                low + (high_a(m_hef) - low) * f,
+            )
+        };
+        Self {
+            a,
+            b1: c.b(1),
+            b2: c.b(2),
+            x,
+        }
+    }
+
+    /// The radius at luminosity `l`.
+    #[must_use]
+    pub(crate) fn at(&self, l: SolarLuminosities) -> SolarRadii {
+        let l = l.value();
+        SolarRadii::new(self.a * (math::powf(l, self.b1) + self.b2 * math::powf(l, self.x)))
+    }
 }
 
 /// The core mass at the base of the asymptotic giant branch (HPT section 5.3, equation 66):

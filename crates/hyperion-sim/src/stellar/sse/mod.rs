@@ -26,6 +26,23 @@ mod ms;
 mod wind;
 pub mod zams;
 
+// Core helium burning, the asymptotic giant branch and naked helium stars (P06.T7–T9).
+mod agb;
+mod cheb;
+mod helium;
+
+// The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
+#[cfg_attr(
+    not(test),
+    expect(unused_imports, reason = "P06.T18.b and T28.f are the first callers")
+)]
+pub(crate) use agb::interpulse_period;
+#[cfg_attr(
+    not(test),
+    expect(unused_imports, reason = "P06.T18.b and T28.f are the first callers")
+)]
+pub(crate) use gb::mc_bagb as m_c_bagb;
+
 pub use coeffs::ZCoeffs;
 pub use wind::WindRecipe;
 

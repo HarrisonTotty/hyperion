@@ -1910,6 +1910,84 @@ fraction: f64 }`: `PhaseClock::base_phase` and `phase_at` return one and `time_a
 domain_tags_are_pinned`, since `events` alone misses the registry tests and the tags golden.
   Bench (x86-64, criterion): ten day-long bins with thinning, 52 µs; one horizon-spanning root
   (P = 3 yr, 16 octaves), 30 µs.
+- **Deviations in T7, as built.** `stellar::sse::cheb` is a private module of `pub(crate)` items
+  with `ms`'s dead-code expectation, which T10 removes: `CoreHeliumBurning::new(m, &c)` with
+  `t_start` (`t_HeI`), `t_end` (`t_HeI` + `t_He`) and `at(t)` → `PhasePoint`, and the landmarks
+  `t_hei`, `t_he`, `l_bagb`, `l_min_he`, `l_zahb`, `r_zahb`, `r_mhe_low` (eq. 55 below `M_HeF`) and
+  `blue_fraction` (eq. 58 in every regime, T6's `gb::blue_fraction_massive` above `M_FGB`). The
+  helium ZAMS pieces are `helium::{zams_luminosity, zams_radius, main_sequence_lifetime}` (eqs.
+  77–79). `gb.rs` gains `RadiusLaw` (R_GB and R_AGB with their mass dependence evaluated once, to
+  which `radius` and `agb_radius` now delegate, bit for bit), so that the phases keep `at(t)`
+  without a `ZCoeffs`. Below `M_HeF`, `m` is the mass after the flash, where HPT section 7.1 reset
+  M₀ to Mₜ; the envelope sets the horizontal branch through eq. 52's µ. Two places follow SSE, for
+  the owner to confirm: eq. 58's exponent is 0.4805428, not the printed 0.414, which moves `τ_bl` by
+  up to 0.035 and R by up to 0.12 dex (L 0.06 dex) at Z = 0.001, 4–5 M☉; and below `M_HeF`, `R_x` =
+  `R_ZAHB` is evaluated with the growing core, and ξ and `R_min` with it, where the paper fixes
+  `R_x` at the start (the fixed form moves R by up to 0.030 dex at 0.7 M☉, Z = 10⁻⁴, and L by 0.009
+  dex). A misprint settled against SSE: b17's exponent is 0.6371760; both printings give 2.862149,
+  b′16's second coefficient, which moved `L_min,He` by up to a third at Z = 0.03. That is a one-line
+  fix in T4's `coeffs.rs`; b17 has no other caller, so nothing generated moves. Eq. 53's 1.6479 is
+  kept as printed (SSE 1.647903, under 10⁻⁵ in `L_ZAHB`); `L_ZAHB`(`M_HeF`) = `L_min,He`(`M_HeF`)
+  whatever the core, so SSE's choice of core in eq. 55's constant is immaterial. The SSE rows hold L
+  and R to 10⁻⁵, not 10⁻⁹, because T4's printed `M_FGB` constants and the printed 1.6479 move them
+  by up to 4 × 10⁻⁶ there (3 × 10⁻³ dex at Z = 10⁻⁴; with SSE's two constants patched in, every
+  unperturbed row of the run agreed to 5 × 10⁻¹⁴); massive stars are compared with a run that
+  disables SSE's μ < 1 perturbation, which SSE applies to all of them in this phase. Plan figures
+  that are wrong for HPT's formulae, SSE agreeing with the formulae: the 5 M☉ loop at Z = 0.02 spans
+  4,010–4,665 K and never reaches 5,500–6,500 K (at Z = 0.004 it spans 4,475–7,260 K, and the test
+  asserts both); at Z = 0.0005 a horizontal branch with 0.1–0.2 M☉ of envelope sits at 15,400–9,000
+  K, and 6,000–7,500 K takes 0.25–0.30 M☉ (6,910 K for the 0.8 M☉ star that lost nothing). `t_He`(1
+  M☉) is 131.5 Myr at Z = 0.02. Continuity is tested from T6 at ignition above `M_HeF` (to 10⁻⁹ and
+  by age sweeps), in τ, and in mass across `M_HeF` and 12 M☉ and, for Z ≤ 0.002, `M_FGB`; for Z >
+  0.002 HPT's declared jump at `M_FGB` is excluded and checked to exist (only 0.007 in `τ_bl` at Z =
+  0.004).
+- **Deviations in T8, as built.** `stellar::sse::agb`: `EarlyAgb::new(m, &c)` (`t_start` = `t_BAGB`,
+  `t_end`, `end` → `EarlyAgbEnd::{ThermalPulses, Supernova}`, `co_core_mass(t)`, `at(t)` with the
+  helium core as `core_mass`, and `thermal_pulses()` → `Option<ThermallyPulsingAgb>`, so that no
+  mismatched or impossible pulsing phase can be built), `ThermallyPulsingAgb` (`t_start` = `t_DU`,
+  `t_end`, `end` → `CoreEnd::{Supernova, WhiteDwarf}`, `time_of_core_mass`, `at`,
+  `interpulse_period`), `mc_du` (eq. 69), `mc_sn` (eq. 75), and the constants
+  `HELIUM_RATE_MSUN_PER_LSUN_MYR`, `COMBINED_RATE_MSUN_PER_LSUN_MYR` and `CHANDRASEKHAR_MSUN`. The
+  ends are at constant mass; the envelope's loss under a wind is T10's root. `sse` re-exports
+  `m_c_bagb` (T6's `gb::mc_bagb`) and `interpulse_period` for T18.b and T28.f. `gb.rs` gains
+  `GiantBranch::{with_rate, times_from}`, the second for eq. 72, which the 1 M☉ thermally pulsing
+  AGB needs because its core starts above `M_x`. `A_He` is SSE's 8.0 × 10⁻⁵, not eq. 68's 7.66 ×
+  10⁻⁵, which makes the early AGB 4.4% longer and its luminosity up to 0.11 dex off SSE (2.5 M☉, Z =
+  0.02), for the owner to confirm; `A_H,He` is the printed ≈ 1.27 × 10⁻⁵, as SSE has it. `Mc,SN` is
+  eq. 75 as printed, not SSE's max(…, 1.05 `Mc,CO`(`t_BAGB`)): where the relation's carbon–oxygen
+  core at the base of the AGB already exceeds `Mc,SN` (40–80 M☉) the early AGB ends at once, at most
+  0.24% of the lifetime before SSE's; at 60 M☉ and Z = 10⁻⁴ and 10⁻³ SSE's carbon–oxygen core at the
+  base of the AGB exceeds its helium core and it runs a thermally pulsing AGB with third dredge-up
+  for 0.41 and 0.31 Myr more (8.2% and 6.4% of its lifetime), an artefact not followed, for the
+  owner to confirm, since it exceeds T12.b's 1% at those two grid points. HPT give no interpulse
+  period; it is Wagenhuber and Groenewegen (1998, A&A 340, 183) eq. 11 with all three terms, so
+  `interpulse_period(mc, mc_first, envelope, &c)` → `Years` takes the core at the first pulse and
+  the envelope as well as the core, with their α_MLT = 1.5. Plan figure re-checked: `m_c_bagb`
+  reaches 1.6 M☉ at 6.31 M☉ and 2.25 M☉ at 8.20 M☉ at Z = 0.02. SSE, at constant mass on 200 ages
+  over each star's AGB: L and R to 10⁻¹¹ on 8,690 early and 3,824 thermally pulsing rows where μ ≥ 1
+  (all 13,577 and 8,527 with the perturbation off), `t_DU`, `L_DU` and the time to `Mc,SN` to 10⁻¹².
+  The helium core's fall at `t_DU` in the second dredge-up is HPT's declared discontinuity; L and R
+  are continuous there and at `t_BAGB`.
+- **Deviations in T9, as built.** `stellar::sse::helium::HeliumStar`: `new(m)` at zero age (plan
+  11's stripped stars, and envelope loss in the gap or on the giant branch), and
+  `from_core_helium_burning(&cheb, t)` and `from_early_agb(&early, t)`, which return the star and
+  its age (eq. 76; the helium giant's age from eq. 84's relation at the early AGB's carbon–oxygen
+  core, no earlier than `t_HeMS`); `t_ms`, `t_end`, `end` (T8's `CoreEnd`), `phase_at(t)` → `Phase`
+  (the helium Hertzsprung gap while R₁ < R₂, the giant branch after) and `at(t)`. `gb.rs` gains
+  `GiantBranch::helium_giant` (eq. 84's relation). `A_He` is T8's. Below 0.214 M☉, where 1.45 M −
+  0.31 is not positive, `Mc,max` is M, as in SSE; SSE's rule that a helium main-sequence star below
+  the core at helium ignition of an `M_HeF` star (about 0.33 M☉) is at once a helium white dwarf is
+  not in HPT and is left to T10.d. Plan figure: a 4 M☉ helium star's main sequence lasts 1.514 Myr
+  ("about 1 Myr"). "Continuous in L to 1% when the envelope reaches zero" holds, to 10⁻⁹, for a star
+  whose envelope is gone on the zero-age horizontal branch, and for the helium star against the core
+  luminosity that section 6.3's perturbation takes a thinning envelope to. Without that perturbation
+  the core-helium-burning luminosity exceeds the helium star of its core by 0.13–1.75 dex (0.49 dex
+  at 1 M☉, Z = 0.02, halfway through), which is the gap T10.d must close. SSE: helium main sequence,
+  gap and giant branch L and R to 10⁻¹³ on 7,493, 455 and 11 rows where μ ≥ 1 (the perturbation of
+  helium giants near their end is T10.d's); the entries from core helium burning to 10⁻⁷ (eq. 44's
+  rounded c₁ in the core) and from the early AGB to 10⁻¹² with the perturbation off. The SSE runs
+  that T7–T9's tests read are the build of `stellar/sse/mod.rs`, run again on 2026-09-23 on finer
+  grids and a second time with the perturbation's branch disabled; each test says which it reads.
 - **Deviations in T10.a and T10.b, as built.** `sse::wind` is private; `WindRecipe` is `pub`
   (`Default` is `Modern`) and re-exported as `sse::WindRecipe`. `wind::rate(recipe, &StarState,
 &Composition, ReimersEta) -> SolarMassesPerYear` is `pub(crate)`; η is the new `pub(crate)`
