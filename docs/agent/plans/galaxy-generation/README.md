@@ -63,6 +63,87 @@ because the code they build on will exist by then.
 | M4        | Multiple stars and interacting binaries; sensors see the past; alerts for novae, supernovae and the rest          |
 | M5        | Brown dwarfs and rogue planets; planetary systems, moons, belts and rings; the `SYSTEM` display                   |
 
+## The vertical slice to the `SYSTEM` display (2026-09-23)
+
+The owner asked for the `SYSTEM` display (plan 14, phase I) ahead of the roadmap's order, which puts
+it six plans away. From round 7 on, lanes build a vertical slice: only what the first working
+display needs, taken from plans 06, 11, 13 and 14 in dependency order (ruling 33 of 2026-09-22). Two
+rules hold throughout. Each task is built as its plan specifies, not as a stub: the slice chooses
+which tasks, not how thinly. And nothing deferred may be contradicted or need tearing out: where a
+task reads something a deferred plan provides, it takes a plain argument, a named provisional
+constant or a documented `None`, and its plan's task text says so in a _Slice:_ note. A later task
+that fills such a seam bumps the version where it moves output.
+
+**What the first display shows.** `SYSTEM` is the third tab (`F3`). `OPEN SYSTEM`, beside the
+`GALAXY` local chart's readout, opens the selected system at the chart's time, held; with nothing
+selected it reads `NO SYSTEM SELECTED`, and every other data state goes through plan 05's
+`RequestStatus`, plus `NOT YET FORMED` and `NO BODIES`, with the last data kept and marked stale
+when the link is lost. It shows every star of plan 11's hierarchy, the grid primary (0.08–150 M☉)
+and its drawn companions, moving about their barycentres, each with its phase and kind, its MK class
+without peculiar suffixes, its initial mass and mass now, L, R and T_eff, and for a remnant its
+kind, mass and white-dwarf cooling age; what plan 06 does not model yet (variability, rotation,
+activity, spins, kicks, binary class) is the guide's em dash. It shows every primordial planet of
+every stable zone, S-type and P-type, in its state at the display time: not yet formed; present,
+with adiabatic expansion and circularisation; destroyed by engulfment; or unbound after a supernova,
+with a zero kick. The orbit map is drawn in the `SYSTEM BARYCENTRIC` frame on the `SYSTEM PLANE`,
+with the galactic triad, orbits as solid `--text-muted` ellipses and the selected one in `--text`,
+switchable annuli in `--text-muted` for the stable-zone limits, the snow line and the habitable
+zone, `BODIES NOT TO SCALE`, a 1-2-5 scale bar in km, Mm, Gm and AU, and the presets `INNER`, `ALL`,
+`TOP`, `SIDE`, `FRONT` and `OBLIQUE`. The display time reads `DISPLAY TIME UT +… yr ddd/hh:mm:ss`
+and steps from 1 h to 100 yr, with `RESET` and `CLOCK WINDOW LIMIT`, re-requesting past a year or a
+body's `valid_until`. The body list gives hosts, then planets by semi-major axis, with kind, a and
+state in words, and the readout, from `body_detail`, gives designation, ID and label, kind, planet
+class and state, mass in M⊕, radius in km, density and gravity, a, P, e, i and the distance from the
+primary now, T_eq and bulk composition, and for the system its architecture class and zones. What is
+absent is said, from the state the server tags on every section (ruling 34): `ok`, `not_resolved`
+(`NOT RESOLVED`), `not_modelled` (`NOT YET MODELLED`) or `not_applicable` (no row, so a gas giant
+shows no surface). `MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED` stands as a system note
+composed from those tags, and the surface, atmosphere, habitability and resources sections read
+`NOT YET MODELLED`. There is no events panel and no `RUN`/`HOLD`, and brown dwarfs and rogue planets
+cannot be reached.
+
+**The tasks, by plan.** A dependency that only a deferred part of a task needs is not a reason to
+wait for it.
+
+| Plan | Tasks in the slice                                                                                                                                                                                                                                                                                               |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 06   | T3; T10.c–e (with the dispatch below 0.1 M☉ to T13); T13; T18.a–d; T20.a; T23.a–d (no T24/T25 extras); T29.a–b; T33, T34 and T35.b in part (`system_summary`, its DTOs and `unknown_system`; its handler and the `SystemStars` cache; `starSymbols.ts`, `ringed-circle`); T15.c's disc-lifetime law ahead of T15 |
+| 11   | T3.a (with P14.T2.a); T1.a–b (T1.c beside them); T2.a–c; T3.b; T13 in part (`OrbitDto`, `HierarchyDto`, `body_index`)                                                                                                                                                                                            |
+| 13   | T5.b; T5.c; T8.a (an owner's draft); T8.b (without `formatSubstellarMass`); T8.c's `triangle-down` outline                                                                                                                                                                                                       |
+| 14   | T1.a–d; T2.a–c; T3–T9; T10.a; T11.a–d; T12; T15; T16.a–b; T28.a–c; T30.a–c; T32 in part (fifteen goldens); T34; T35 and T36 without `body_events`; T37–T41; T42.a–c; T43.a–b; T44.a                                                                                                                              |
+
+**The relaxations, each with the task that removes it.**
+
+| Plan | Relaxation                                                                                                                                                                                                                | Removed by                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| 06   | T29.a's remnant stage reads only the `star.remnant.*` fields, and `natal_kick()` is `None`: no kicks, so P14.T28.c unbinds planets with a zero kick                                                                       | P06.T19 (bump)                       |
+| 06   | White dwarfs shine by Hurley, Pols and Tout's own cooling law (their §6.2.1), under both recipes, for T10.d's hand-over and §6.3's perturbation; `Hurley2000` keeps it for good                                           | P06.T20.a under `Modern` (bump)      |
+| 06   | T23.d classifies without T24's and T25's extras, so no peculiar suffixes                                                                                                                                                  | P06.T24, T25 (bump)                  |
+| 06   | T10.d–e use the plan's interim forms for what T14, T15 and T16 add: `t_zams` = 0, a declared discontinuity at the post-AGB hand-over, the formulae as they stand above 100 M☉                                             | P06.T15.b, T16.a, T14 (bumps)        |
+| 06   | The system count N stays on the provisional fates, with no real lifetimes in the mean mass                                                                                                                                | P06.T30.b (moves every star once)    |
+| 11   | T2.b defines `ForcedMultiple` but only `Free` is used, since plan 09's `ClusterModel` is not built                                                                                                                        | P11.T8.f                             |
+| 11   | T2.c draws the innermost orbit of a primary of 8 M☉ or more on two named provisional seams: `PROVISIONAL_STRIPPED_SHARE` = 0.25 against `StarDraws::stripped()`, and an interacting range of periastron under 10 au       | P11.T1.d and T4.a (bumps)            |
+| 11   | The primary's draws are attempt 0, since plan 08's `mark_attempt()` does not exist                                                                                                                                        | P08.T12.c                            |
+| 11   | No binary evolution: every pair is two single stars on an orbit, and plan 14's zones are the zones at birth                                                                                                               | P11.T4–T11                           |
+| 11   | The companions the budget counts differ from those drawn by a few per cent                                                                                                                                                | P11.T1.d (moves every star)          |
+| 13   | Nothing is placed, so `HostKind` is always `Stellar`, and brown dwarfs and rogue planets cannot be reached                                                                                                                | P13.T3, P14.T27                      |
+| 13   | If T5.b needs a fit, it follows plan 02's `mge` convention, since plan 15's toolchain does not exist                                                                                                                      | P15.T2 (registers it)                |
+| 14   | `SystemContext`'s sphere of influence is the galactic tidal radius at the epoch position, the encounter environment `None`, the strip radius 0.49 × that radius: no pericentre stripping within about 10 ly of the centre | P09.T28.c and P14.T29                |
+| 14   | T3, T4 and T8 take host parameters and zone limits as plain arguments, not a context or an `OrbitZone`                                                                                                                    | P14.T30.a (adapts)                   |
+| 14   | No [α/Fe] and no X-ray and ultraviolet history, and so no atmospheres, surfaces, habitability or resources: those sections read `NOT YET MODELLED`                                                                        | P14.T1.a with T13, T23–T26           |
+| 14   | T16.a runs T11, T12 and T15 only, with a Bond albedo of 0.3                                                                                                                                                               | P14.T13, T14                         |
+| 14   | `generate` equals `generate_planets`: no moons, rings, belts, halo or second-generation planets, so the system note says so                                                                                               | P14.T17–T22, T28.e                   |
+| 14   | T28.a has no protoplanetary-disc body in belt slot `0xE0`                                                                                                                                                                 | P14.T28.a with T21 (bump)            |
+| 14   | T32 pins fifteen of its twenty-four goldens, with no events                                                                                                                                                               | The tasks that make the rest (bumps) |
+| 14   | `BeltDto`, `BodyEventDto` and `body_events` are deferred; `BodyKindDto` and `BodyStateDto` have every variant from the start                                                                                              | P14.T21, T31, T35–T36, T43.c         |
+| 14   | The display opens held and steps; there is no `RUN` or `HOLD`                                                                                                                                                             | P14.T44.b                            |
+| All  | The guide entries the display needs (P14.T38.a, P13.T8.a, P06.T35.a's units, the two phrases) are drafts for the owner, and the client is built to them                                                                   | The owner's edit of the guide        |
+
+Two relaxations are knowingly inaccurate until their plans land, and the display must not hide them:
+close binaries evolve as two single stars on an orbit (until P11.T4–T11), and a remnant unbinds its
+planets with no kick (until P06.T19). Both fall short of the brainstorm for a while; neither changes
+what the finished plans build.
+
 ## Conventions every plan follows
 
 ### Plan layout

@@ -906,7 +906,17 @@ nothing of plans 02 or 03.
   leading segments and offsets the HPT clock (design note 4).
 - **P06.T15.c Disc lifetime draw.** One draw on `star.disc_lifetime`: exponential with a mean of 2.5
   Myr scaled by m^(−½), held to 0.3–15 Myr (record the source). It decides classical against
-  weak-lined T Tauri (T24), bounds FU Orionis activity (T28.d), and is there for plan 14.
+  weak-lined T Tauri (T24), bounds FU Orionis activity (T28.d), and is there for plan 14. By ruling
+  33 of 2026-09-22 it is the one lifetime of a star's circumstellar disc, so that the star's T Tauri
+  class and its planets' formation see the same disc: plan 14's `disc::derive` takes it as an
+  argument (P14.T3.a) and draws no lifetime of its own, except for a circumbinary disc, whose rank
+  plan 14 draws on `planet.disc` and puts through this same law at the pair's total mass. The
+  source is Mamajek (2009, AIP Conf. Proc. 1158, 3): an e-folding time of about 2.5 Myr for the
+  disc fraction, which is the survival function of an exponential. The law, a function of the mass
+  and of the `UnitUniform` rank `StarDraws::disc_lifetime()` that draws nothing itself, goes in
+  `stellar/premain.rs` as this subtask's first piece, ahead of the rest of T15, because plan 14 is
+  its first caller (the `planet` lane, round 7); its tests (the median, the clamps, monotonicity in
+  the rank) go with it.
 - **Files:** `stellar/premain.rs`, `stellar/sse/track.rs`.
 - **Tests:** continuity at t_p and at `t_zams` (values to 10⁻⁶, slopes to 5%); a 1 M☉ star at 2 Myr
   has 1–3 L☉ and 3,900–4,500 K; in a sample of the young disc (ages −H to 100 Myr) most stars below
@@ -1346,7 +1356,10 @@ phase D and before T26.d and T28, which take a `StarModel`; T29.b needs plan 03 
     the star is already dead or dies within the window (design note 19), then the remnant stage, a
     private `remnant_stage(&Track, &StarDraws)` that reads only the `star.remnant.*`,
     `star.stripped` and `star.kick.*` fields. `state_at(t: UniverseTime)` evaluates the track at
-    the age at the epoch plus t (design note 23).
+    the age at the epoch plus t (design note 23). By ruling 34 of 2026-09-22 `StarModel` is how
+    plan 14 reads every star, never `Track`: it also exposes `lifetime`, `death`,
+    `max_radius_until` and `max_luminosity_until`, for every star, the cooling-fit stars below
+    0.1 M☉ included (T13), whose radius falls monotonically with age.
   - **Files:** `stellar/system.rs`.
   - **Tests:** `state_at(UniverseTime::EPOCH)` equals `Track::state_at(age_at_epoch)` bit for bit;
     a star dead at the epoch has its full track and a remnant; order independence.

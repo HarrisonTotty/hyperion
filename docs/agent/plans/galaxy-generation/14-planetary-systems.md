@@ -61,10 +61,11 @@ Not in scope:
 ### Additions to plan 11's `hyperion_sim::orbit`
 
 Plan 11 provides `orbit::{KeplerElements, Eccentricity, solve_kepler}` for bound orbits and says
-plan 14 reuses them. This plan adds, without touching plan 11's output:
+plan 14 reuses them. By ruling 33 of 2026-09-22, P11.T3.a builds them to this plan's precision from
+the start (T2.a) and adds `units::GravitationalParameter` (m³ s⁻²), beside plan 01's bare
+`units::consts::GM_*` constants. This plan adds, without touching plan 11's output:
 
 ```rust
-// `units::GravitationalParameter` (m³ s⁻²) is new in this plan, beside plan 01's `GM_*` constants.
 impl KeplerElements {
     pub fn from_semi_major_axis(a: Metres, mu: GravitationalParameter, ..) -> Self;
     pub fn scaled(&self, factor: f64, mu: GravitationalParameter) -> Self;   // D11 expansion
@@ -91,8 +92,9 @@ impl BodyIndex { pub fn new(slot: BodySlot, sub: BodySub) -> Result<Self, Encode
                  pub fn decode(raw: u16) -> Result<(BodySlot, BodySub), DecodeBodyIndexError>; }
 
 // context.rs — everything the stage reads from the stages above
-pub struct SystemContext { /* id, host kind, stars with tracks, hierarchy, [Fe/H], [alpha/Fe],
-                              age at epoch, tidal radius, encounter environment */ }
+pub struct SystemContext { /* id, host kind, stars as plan 06's `StarModel`s (ruling 34),
+                              hierarchy, [Fe/H], [alpha/Fe], age at epoch, tidal radius,
+                              encounter environment */ }
 impl SystemContext {
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError>;
     pub fn builder() -> SystemContextBuilder;    // synthetic hosts for tests and tools
@@ -127,11 +129,11 @@ impl PlanetarySystem {
 }
 
 // the pieces, each usable alone
-pub mod disc { pub struct Disc; pub fn derive(..) -> Disc;
-    pub fn snow_line(l: Luminosity) -> Metres; }
+pub mod disc { pub struct Disc; pub fn derive(.., lifetime: Years, ..) -> Disc; // T3; ruling 33
+    pub fn snow_line(l: SolarLuminosities) -> Metres; }
 pub mod architecture { pub enum ArchitectureClass { Barren, TerrestrialOnly, CompactMulti,
     CompactWithColdGiant, SolarLike, EccentricGiant, WarmGiant, HotJupiter, SubstellarCompact };
-    pub struct ClassWeights; pub fn class_weights(m: SolarMasses, feh: FeH) -> ClassWeights;
+    pub struct ClassWeights; pub fn class_weights(m: SolarMasses, feh: Dex) -> ClassWeights;
     pub const ARCHITECTURE_TABLE: &[ClassRow]; }
 pub mod placement { pub fn mutual_hill_radius(..) -> Metres; pub fn spacing_floor(..) -> f64;
     pub struct OrbitZone; pub enum OrbitHost { Star(u8), Pair(u8), Barycentre, Body(BodyIndex) }
@@ -150,7 +152,9 @@ pub mod fate { pub enum BodyState { NotYetFormed, Present, Destroyed { cause: De
     at: UniverseTime }, Unbound { at: UniverseTime } } }
 
 // record.rs — what a query returns, and its degradation
-pub struct BodyRecord { /* id, label, kind, parent, state, orbit, bulk, surface, hooks */ }
+pub struct BodyRecord { /* id, label, kind, parent, state;
+                          orbit, bulk, surface, hooks: each a Section<_> */ }
+pub enum Section<T> { Ok(T), NotResolved, NotModelled, NotApplicable }   // ruling 34, T34
 pub enum DetailLevel { Contact, MassAndOrbit, Bulk, Surface, Full }   // ordered
 impl BodyRecord { pub fn degrade(&self, level: DetailLevel) -> BodyRecord; }
 pub enum BodyKind { Planet(PlanetClass), DwarfPlanet, Moon(MoonOrigin), Ring, Belt(BeltKind),
@@ -159,13 +163,18 @@ pub enum BodyKind { Planet(PlanetClass), DwarfPlanet, Moon(MoonOrigin), Ring, Be
 ```
 
 Domain tags, as entries of plan 01's single `domain_tags!` registry in `rng/tags.rs` under a "Plan
-14" heading, never renamed. Plan 01 requires at least one full stop in a name and one scope per tag,
-so the first draft's `ring`, `belt` and `halo` are `ring.system`, `belt.population` and
-`cometary.population` (not `halo.`, which is the galactic halo's prefix in plans 02 and 08).
+14" heading, never renamed. The heading goes at the end of the list, whatever the plan number,
+because the macro's order fixes `tags::ALL`, which `tests/golden/rng/tags.golden` pins; the task
+that adds a tag regenerates that golden with `domain_tags_are_pinned`. Plan 01 requires at least one
+full stop in a name and one scope per tag, so the first draft's `ring`, `belt` and `halo` are
+`ring.system`, `belt.population` and `cometary.population` (not `halo.`, which is the galactic
+halo's prefix in plans 02 and 08).
 
 - Scope `System` (opened with `ObjectKey::from(SystemId)`, the host and slot in the draw number,
-  D4): `planet.disc`, `planet.plane`, `planet.class`, `planet.count`, `planet.spacing`,
-  `planet.mass`, `planet.secondgen`, `belt.population`, `cometary.population`.
+  D4): `planet.disc` (a disc's masses, radii and corotation period, and a lifetime only for a
+  circumbinary disc: a circumstellar disc's lifetime is its star's `star.disc_lifetime`, ruling 33),
+  `planet.plane`, `planet.class`, `planet.count`, `planet.spacing`, `planet.mass`,
+  `planet.secondgen`, `belt.population`, `cometary.population`.
 - Scope `Body` (opened with `ObjectKey::from(BodyId)`): `planet.orbit`, `planet.radius`,
   `planet.volatiles`, `planet.spin`, `planet.origin`, `moon.count`, `moon.mass`, `moon.orbit`,
   `moon.impact`, `moon.capture`, `ring.system`, `belt.member`, `body.surface`, `body.resources`.
@@ -175,11 +184,13 @@ so the first draft's `ring`, `belt` and `halo` are `ring.system`, `belt.populati
   `0x0404 SYSTEM_COMET` (`system.comet`).
 
 Every stream is `Stream::open(seed, tag, key)`. A `u16` body index fills plan 01's 16-bit `sub`
-field of the second counter word exactly (`sub << 48 | block`), leaving 48 bits of draw number.
+field of the second counter word exactly (`sub << 48 | block`), leaving 48 bits of block counter,
+`Stream::WORDS` = 2⁴⁹ draw numbers per body.
 
 Test helpers:
 `planetary::testing::{synthetic_star, synthetic_binary, sample_contexts, solar_system_bodies}`
-behind the `testing` feature and `cfg(test)`, in the way plan 06 exposes `stellar::testing`.
+behind `cfg(any(test, feature = "testing"))`, as plan 06's `events::testing` is (the crate's
+`testing` feature exists).
 
 ### Protocol (`hyperion-protocol`, mirrored in `@hyperion/protocol`)
 
@@ -195,26 +206,38 @@ In plan 04's envelope (`ClientMessage::Request { id, body }`), with the `Dto` na
   two); it is added by the procedure of plan 04's "Extending the convention" (a variant of each body
   with the same `kind`, the string in `REQUEST_KINDS`, a wire-form test for each, a handler,
   `just gen-protocol`), which needs no change to plan 04's code or to the TypeScript client.
-- `BodyIdHex`, a string in plan 01's form for a `BodyId`: 16 hex digits, a full stop, 4 hex digits.
-  `DetailLevelDto`, `BodyOrbitDto` (plan 11's `OrbitDto` plus `parent`, `mu_m3_s2` and
-  `valid_until`), `BodySummaryDto`, `BeltDto`, `ZoneDto`, `HabitableZoneDto`, `BodyHooksDto`,
-  `BodyEventDto`, `BodyStateDto`, `BodyKindDto`.
-- `ErrorCode::UnknownBody` (`unknown_body`), beside plan 06's `ErrorCode::UnknownSystem`.
-- In `@hyperion/protocol`: `parseBodyId` and `formatBodyId`. Plan 04's generic `request` needs no
-  change.
+- `BodyIdHex`, a string in plan 01's form for a `BodyId` (`BodyId`'s `Display`): 16 lower-case hex
+  digits, a full stop, 4 lower-case hex digits.
+  `DetailLevelDto`, `BodyOrbitDto` (plan 11's `OrbitDto` plus `parent` and `valid_until`; by ruling
+  33 of 2026-09-22 `OrbitDto` itself carries the whole element set and μ, `mu_m3_s2`, so this plan
+  adds no element of its own), `BodySummaryDto`, `BeltDto`, `ZoneDto`, `HabitableZoneDto`,
+  `BodyHooksDto`, `BodyEventDto`, `BodyStateDto`, `BodyKindDto`.
+- `ErrorCode::UnknownBody` (`unknown_body`), beside plan 06's `ErrorCode::UnknownSystem` (P06.T33;
+  neither exists at `9d8e775`). The client's exhaustive `switch` over error codes, `settledState` in
+  `apps/hyperion/src/renderer/src/lib/useServerRequest.ts`, gains its case in the same task, so that
+  `just ci` stays green after `just gen-protocol`.
+- In `@hyperion/protocol`: `parseBodyId` and `formatBodyId`, in `packages/protocol/src/hex.ts`
+  beside `hexToU64` and `u64ToHex`. Plan 04's generic `request` (`RequestClient::request`) needs no
+  change, nor does `decodeServerMessage`, which trusts the generated types.
 
 ### Client (`apps/hyperion`)
 
-- `"system"` in plan 05's `DisplayId` union (reserved there for this plan) and
-  `displays/system/SystemDisplay.tsx`.
+All paths under `apps/hyperion/src/renderer/src/`.
+
+- `"system"` in plan 05's `DisplayId` union (`lib/displays.ts`, reserved there for this plan), its
+  entry in `DISPLAYS` (`{ id: "system", title: "System", key: "F3" }`), its case in `App.tsx`'s
+  exhaustive `switch` over displays, and `displays/system/SystemDisplay.tsx`.
 - `lib/orbit.ts`: `solveKepler`, `positionAt`, `orbitPolyline`, `composePosition`, pure functions.
-- In plan 05's `spatial/`, all additive: in `marks.ts` the mark kinds `PathMark` and `AnnulusMark`
-  and two optional members of `SpatialScene`, `paths` and `annuli`; in `symbols.ts` the
-  `SymbolShape` values `pentagon` and `hexagon`; in `frame.ts`
+- In plan 05's `spatial/`, all additive: in `marks.ts` the mark kinds `PathMark` and `AnnulusMark`,
+  two optional members of `SpatialScene`, `paths` and `annuli`, and the `SymbolShape` values
+  `pentagon` and `hexagon`, whose outlines go in `symbols.ts`'s `OUTLINES`; in `frame.ts`
   `planeFrame(normal, reference): LocalFrame`, which builds the tilted frame of D21 (plan 05's
   plane, grid, stalks, presets and fill rule all follow `scene.frame`, so `PlaneSpec` itself needs
-  no change); in `AxisTriad.tsx` an optional `axes` prop, three labelled unit vectors, which
-  defaults to the scene frame's.
+  no change); on `SpatialView` an optional `axes` prop, three labelled unit vectors, which defaults
+  to the scene frame's and which it passes both to `AxisTriad` and to the core arrow
+  (`coreArrowLayout`, `CoreArrow`), since it draws both from `scene.frame` today (ruling 33); and a
+  `ScaleUnit` ladder in km, Mm, Gm and AU for `SpatialView`'s `scaleUnits` (plan 05's `scale.ts`
+  has only `SCENE_UNIT_ONLY` and the chart's private ly-to-AU ladder).
 - In `lib/format.ts`: `formatPeriod`, `formatPressure`, `formatGravity`, `formatTemperatureK`,
   `formatBodyDistance`, `formatUniverseTimeDhms`. Planetary masses use plan 13's `formatMassMearth`
   and `EarthMassUnit`, and a brown dwarf's plan 13's `formatSubstellarMass`.
@@ -222,66 +245,113 @@ In plan 04's envelope (`ClientMessage::Request { id, body }`), with the `Dto` na
 ## Consumes
 
 Names are those of the neighbouring plans' "Provides" as written. P14.T1.a reconciles them with the
-code that exists when this plan's turn comes.
+code that exists when this plan's turn comes. The plan-text half of that was done at `9d8e775` for
+the vertical slice (see Risks): where an item is built, its real path or signature is given here;
+where it is not, the task that builds it is named.
 
 - **Plan 01, determinism foundation.** `math`;
   `rng::{Seed, Stream, DomainTag, TagScope, ObjectKey, domain_tags!, EventKey}` with
   `Stream::open(Seed, DomainTag, ObjectKey)`, `impl From<BodyId> for ObjectKey` (counter word 1 is
   `sub << 48 | block`, with the `body_index` as `sub`), `seek` and `word_at` for draws addressed by
-  slot, the samplers and integer-threshold decisions; `units`, including `EarthMasses`,
-  `JupiterMasses` and `units::consts`; `time::{UniverseTime, CLOCK_WINDOW_H}`; `coords` (system and
-  body frames, which are translations with galactic axes; rotating body-fixed frames are left to
-  this plan); `id::{SystemId, BodyId, EventId, EventSubject, Designation}` and the `event_tags!`
-  registry (every `u16` is a valid body index there, and its meaning is this plan's);
-  `GENERATOR_VERSION`; `hyperion-testkit` (the golden harness, `stats`, order independence),
-  slow-test marking, `just test-slow`, `just bench`.
-- **Plan 02, galaxy model.** `galaxy::Galaxy`; `PotentialTables::tidal_radius(m, &PointLy)`.
-- **Plan 03, placement.** `placement::{SystemRecord, resolve}`, `ResolveSystemError`.
+  slot, the samplers (`Stream` methods; `PowerLaw::new` and `PiecewiseLinear::new` return `Result`s)
+  and integer-threshold decisions (`Thresholds::from_weights(weights, bound)`,
+  `Mark::{pick, pick_weighted}`); `units`, including `EarthMasses`, `JupiterMasses`,
+  `SolarLuminosities`, `SolarRadii`, `Kelvin`, `Dex` and `units::consts` (`METRES_PER_AU`,
+  `SOLAR_RADIUS_M`, `SOLAR_LUMINOSITY_W`, the `GM_*` values); `time::{UniverseTime, ClockWindow}`
+  and `CLOCK_WINDOW_H`, where `UniverseTime` is an `i64` of seconds and a `u32` of nanoseconds;
+  `coords` (system and body frames, `coords/frames.rs`'s `SystemPosition` and `BodyPosition`, which
+  are translations with galactic axes; rotating body-fixed frames are left to this plan);
+  `id::{SystemId, BodyId, EventId, EventSubject, Designation}` (`BodyId::new(system, body_index)`,
+  `body_index()`; a body's designation appends ` /<body index>`) and the `event_tags!` registry
+  (every `u16` is a valid body index there, and its meaning is this plan's); `GENERATOR_VERSION`;
+  `hyperion-testkit` (the `golden!` harness with `GoldenWriter`, `stats`,
+  `order::assert_order_independent`), slow tests marked `#[ignore = "slow: …"]`, `just test-slow`,
+  `just bench`.
+- **Plan 02, galaxy model.** `galaxy::Galaxy` (`potential()`, `shares()`, `mass_function()`);
+  `PotentialTables::tidal_radius(&self, m: SolarMasses, p: &PointLy) -> Metres`, at a record's
+  `epoch_position()` converted with `PointLy::from`.
+- **Plan 03, placement.** `placement::{SystemRecord, resolve}` (`resolve(galaxy, id)`; the record's
+  `epoch_position()`, `primary_initial_mass()`, `age_at_epoch()`, `age_at(t)`, `existence_at(t)`),
+  `ResolveSystemError` (`NoSuchSystem`, `LayerNotGenerated`, `KindNotGenerated`).
 - **Plan 04, server and protocol.** The request envelope, `RequestBody`, `ResponseBody`,
-  `REQUEST_KINDS`, `ErrorCode`, `SystemIdHex`, the wire `UniverseTime`;
-  `compute::{CpuPool, SingleFlight}`; `cache::{ByteLru, SharedByteLru, HeapBytes}`; the TypeScript
-  `request`.
-- **Plan 05, `GALAXY` display.** `lib/displays.ts` (`DISPLAYS`, `DisplayId`, which it reserves for
-  this plan to extend) and the navigation bar; `useServerRequest`, `RequestState` and
-  `RequestStatus`; `spatial/` (`SpatialView` with its `scene`, `fitRadius`, `formatLength` and
-  `frameName` props, `marks.ts` with `SpatialScene`, `PointMark`, `PlaneSpec` and `SymbolShape`,
-  `frame.ts` with `LocalFrame`, `camera.ts`, `symbols.ts`, `drawList.ts`, `pick.ts`, `scale.ts`,
-  `redraw.ts`, `AxisTriad.tsx`, whose lengths are in the scene's unit with a formatter);
-  `lib/format.ts`; `UnitLabel`; the list-plus-canvas selection pattern, `formatUniverseTimeYr` and
-  `TIME_SYSTEM_LABEL`; the guide's 3D spatial display conventions (P05.T2.e) and its units `yr`,
-  `Myr` and `Gyr`.
-- **Plan 06, stars.** `stellar::system::{SystemStars, StarModel, draw_metallicity}`; `Composition`;
-  `Track::{state_at, lifetime, death, max_radius_until, max_luminosity_until}`; `StarState` (phase,
-  mass, luminosity, radius, effective temperature); `remnant::{Death, DeathKind, NatalKick}` and
-  `SystemStars::natal_kick`; `rotation::ActivityLevel`; `stellar::substellar::cooling`; the generic
-  `events::{PoissonBins, MonotonePhase, RateModel, PhaseClock, LinearClock, TimeWindow}`;
-  `math::normal_quantile`; `SystemSummaryDto` for the hosts on the wire; the `starSymbols.ts`
-  registry. The zero-age main-sequence luminosity and radius of D6 are its `zams::luminosity` and
-  `zams::radius` (P06.T4.c), and `ErrorCode::UnknownSystem` is its P06.T33's. Still needed and
-  settled in T1.a: an [α/Fe], and an X-ray and ultraviolet history from `ActivityLevel`.
+  `REQUEST_KINDS`, `ErrorCode`, `SystemIdHex`, the wire `UniverseTime` (`{ seconds, nanos }`, the
+  seconds a JSON number); in `hyperion-server`, `compute::{CpuPool, SingleFlight, GalaxyKey}`,
+  `cache::{ByteLru, SharedByteLru, HeapBytes}`, and the dispatch in `requests/mod.rs` (`kind`,
+  `is_large`, the `Handlers` match, and the `every_body` test walk), with `TestServer` and
+  `TestClient` in `crates/hyperion-server/tests/common/mod.rs`; the TypeScript
+  `RequestClient::request`.
+- **Plan 05, `GALAXY` display**, under `apps/hyperion/src/renderer/src/`. `lib/displays.ts`
+  (`DISPLAYS`, `DisplayId = "link" | "galaxy"`, which it reserves for this plan to extend) and the
+  navigation bar (`components/ConsoleFrame.tsx`, `lib/useDisplayKeys.ts`, `App.tsx`);
+  `lib/useServerRequest.ts` (`useServerRequest`, `RequestState`) and
+  `components/RequestStatus.tsx`; `spatial/`: `SpatialView`, whose props are `scene`, `fitRadius`,
+  `formatLength`, `scaleUnits?`, `frameName`, `centre` (`SpatialReading`s), `time` (a
+  `SpatialReading`), `coreDistance` (a `SpatialQuantity`), `accessibleName`, `stale`, `onSelect`
+  and `children?`, all but two of them required; `marks.ts` with `SpatialScene`, `PointMark`
+  (`sizeClass` 0–4), `PlaneSpec` and `SymbolShape`; `frame.ts` with `LocalFrame` and
+  `localFrameAt`; `camera.ts` with `PRESETS` (`top`, `side`, `front`, `oblique`); `symbols.ts` with
+  `symbolOutline` and `SIZE_CLASS_REM`; `drawList.ts` (`buildDrawList`), `pick.ts`, `scale.ts`
+  (`ScaleUnit { perSceneUnit, minSceneLength }`, `scaleBar`, `RADIUS_STEPS_LY`), `redraw.ts`
+  (`createRedrawScheduler`), `AxisTriad.tsx` (props `frame`, `angles`, `boxRem`), `CoreArrow.tsx`,
+  `Reading.tsx`, `ScaleBar.tsx`, `furniture.ts`; `lib/format.ts`; `components/UnitLabel.tsx`; the
+  list-plus-canvas selection pattern, `formatUniverseTimeYr` and `TIME_SYSTEM_LABEL` (`"UT"`); the
+  local chart's time, which is `timeYr: number` in `displays/galaxy/useLocalChart.ts`, not a
+  `UniverseTime`, and which `@hyperion/protocol`'s `universeTimeFromYears` converts; the guide's 3D
+  spatial display conventions (P05.T2.e) and its units `yr`, `Myr` and `Gyr`.
+- **Plan 06, stars.** Built at `9d8e775`: `Composition` (`fe_h()`, `z_fit()`); `StarState` (phase,
+  mass, luminosity, radius, effective temperature, by getters); `ObjectKind` (in `stellar::state`,
+  re-exported from `stellar`); `StarDraws` with `disc_lifetime()`, the `UnitUniform` rank on
+  `star.disc_lifetime` that T3.a's lifetime reads (ruling 33); `stellar::sse::{zams, ZCoeffs}`, the
+  zero-age main-sequence luminosity and radius of D6,
+  `zams::luminosity(m: SolarMasses, &ZCoeffs) -> SolarLuminosities` and
+  `zams::radius(m, &ZCoeffs) -> SolarRadii` (P06.T4.c), with `ZCoeffs::new(composition.z_fit())`;
+  `stellar::remnant::{CompactRemnant, RemnantKind}` (`CompactRemnant::new` is `pub(crate)`); the
+  generic `events` module, `events::{EventSeries, TimeWindow}` with `PoissonBins`, `MonotonePhase`,
+  `RateModel`, `PhaseClock` and `LinearClock`, in which every construction takes an `&EventSeries`,
+  built by `EventSeries::new(seed, tag, subject)`, and `RateModel::bound` takes the bin's
+  `TimeWindow` and returns `EventsPerSecond`; `events::testing::assert_partition_independent`;
+  `math::normal_quantile`. Not built yet, by the task that builds it: `StarModel` (P06.T29.a), which
+  by ruling 34 is how this plan reads every star, never `Track`: it exposes `state_at`, `lifetime`,
+  `death`, `max_radius_until` and `max_luminosity_until` for every star, the cooling-fit stars below
+  0.1 M☉ included (whose radius falls monotonically with age), over P06.T10.c–e's `Track` for the
+  Hurley, Pols and Tout range and `substellar::cooling` below it (ruling 33); `SystemStars` and
+  `draw_metallicity` of `stellar::system` (P06.T3, T29); the disc-lifetime law of P06.T15.c in
+  `stellar/premain.rs` (built first, for this plan, in round 7); `remnant::{Death, DeathKind}`
+  (P06.T10.e, T18) and `NatalKick` with `SystemStars::natal_kick` (P06.T19);
+  `rotation::ActivityLevel` (P06.T25); `stellar::substellar::cooling`, which returns a `StarState`
+  (P06.T13); `SystemSummaryDto` for the hosts on the wire and `ErrorCode::UnknownSystem` (P06.T33);
+  the `lib/galaxy/starSymbols.ts` registry (P06.T35.b). Still needed and settled in T1.a: an [α/Fe],
+  and an X-ray and ultraviolet history from `ActivityLevel`.
 - **Plan 08, velocities and kicks.** Nothing beyond the `NatalKick` plan 06 exposes.
-- **Plan 09, features.** A system's sphere of influence (the smaller of the galactic tidal radius
-  and the feature's, and the pericentre rule of P09.T28.c for the Kepler regime); for a feature
-  member, the local number density, velocity dispersion and mean member mass from the feature's
-  class profiles.
-- **Plan 11, multiplicity.** `orbit::{KeplerElements, Eccentricity, solve_kepler}`; in
-  `stellar::multiplicity`: `SystemHierarchy`, `HierarchyNode`, `StarSlot`, `star_positions_at`,
-  `STAR_BODY_INDEX_END`, and `StarSlot`'s kind, which tells a brown-dwarf companion from a star;
-  `coords::{SystemVector, SystemVelocity}`; `BinaryState` for evolved pairs; `OrbitDto`,
-  `HierarchyDto`. Every component of the hierarchy is plan 11's body, brown-dwarf companions
-  included: this plan generates no body in slot `0x00` of a system that has a star, and reads such a
-  companion as one more component that bounds stable zones and may host one (D3, D10).
+- **Plan 09, features** (not built at `9d8e775`; T1.d's interim rule stands in, see there). A
+  system's sphere of influence (the smaller of the galactic tidal radius and the feature's, and the
+  pericentre rule of P09.T28.c for the Kepler regime); for a feature member, the local number
+  density, velocity dispersion and mean member mass from the feature's class profiles.
+- **Plan 11, multiplicity** (none of it built at `9d8e775`; P11.T3.a and T1.a–c are built in round
+  7). `orbit::{KeplerElements, Eccentricity, solve_kepler}` and `units::GravitationalParameter`
+  (P11.T3.a, which takes this plan's T2.a requirements); in `stellar::multiplicity`:
+  `SystemHierarchy`, `HierarchyNode`, `StarSlot`, `star_positions_at`, `STAR_BODY_INDEX_END`, and
+  `StarSlot`'s kind, which tells a brown-dwarf companion from a star (P11.T2.a, T3.b, T2.d);
+  `coords::{SystemVector, SystemVelocity}`, in `coords/frames.rs`; `BinaryState` for evolved pairs
+  (P11.T4, after the slice); `OrbitDto`, which carries the whole element set and μ, and
+  `HierarchyDto`, which carries the components' masses (P11.T13, ruling 33). Every component of the
+  hierarchy is plan 11's body, brown-dwarf companions included: this plan generates no body in slot
+  `0x00` of a system that has a star, and reads such a companion as one more component that bounds
+  stable zones and may host one (D3, D10).
 - **Plan 12, retarded observation.** Nothing at build time. Its note that degraded body records
   arrive with this plan is met by T34.
 - **Plan 13, substellar layers.** The free-floating brown dwarf and rogue planet records,
   `SystemRecord::kind() -> SystemKind`, from which `HostKind` converts, and the body-0 convention
   (the object is body `0x0000`, its moons `0x0100` upward, its rings `0x0080`–`0x008F`); brown dwarf
   state through plan 06's cooling fit; `stellar::substellar::giant_cooling`, returning a
-  `CoolingState`, for 0.3–13 M_Jup, which plan 13 builds and this plan only calls; for a rogue
-  planet, the record and metallicity with no derived state, which this plan supplies; `EarthGlyph`,
-  `EarthMassUnit`, `formatMassMearth`, `formatSubstellarMass`, the `triangle-down` symbol, and the
-  guide's entry for M⊕ (every planetary mass is in M⊕; there is no Jupiter-mass unit on the
-  consoles).
+  `CoolingState`, for 0.3–13 M_Jup, which plan 13 builds and this plan only calls; by ruling 34 a
+  host (a star or a brown dwarf) is always read as a `StarState` and only a giant planet's interior
+  as a `CoolingState`, with no conversion between them; for a rogue planet, the record and
+  metallicity with no derived state, which this plan supplies; `EarthGlyph`, `EarthMassUnit`,
+  `formatMassMearth`, `formatSubstellarMass`, the `triangle-down` symbol, and the guide's entry for
+  M⊕ (every planetary mass is in M⊕; there is no Jupiter-mass unit on the consoles). None of it is
+  built at `9d8e775`; the slice takes P13.T5.b–c, T8.a (as an owner's draft), T8.b and the
+  `triangle-down` outline first.
 
 ## Design notes
 
@@ -434,10 +504,15 @@ Re-check: Veras et al. (2011) for the adiabatic limit and the halo's loss; Musti
 (2012) for f; Koester et al. (2014) and Farihi (2016) for the white dwarf fractions; Niţu et al.
 (2022) for the pulsar-planet bound.
 
-**D12. Young hosts.** A disc lives for a drawn time of a few million years. Before it, the system
-holds a protoplanetary disc in a belt slot. Giants exist from a formation age drawn below the disc
-lifetime, small planets from the disc lifetime, and terrestrial planets carry a magma-ocean surface
-state until 10–100 Myr. Debris belts are bright when young and fade as 1 ÷ age (Wyatt 2008).
+**D12. Young hosts.** A disc lives for a drawn time of a few million years. By ruling 33 of
+2026-09-22 there is one lifetime per circumstellar disc, so that a star's T Tauri class (P06.T24)
+and its planets' formation see the same disc: P06.T15.c's law (exponential, mean 2.5 Myr × (M ÷
+M☉)^−½, held to 0.3–15 Myr; Mamajek 2009) applied to the star's own `star.disc_lifetime` rank. Only
+a circumbinary disc draws a rank of its own, on `planet.disc`, and takes the same law at the pair's
+total mass. Before it, the system holds a protoplanetary disc in a belt slot. Giants exist from a
+formation age drawn below the disc lifetime, small planets from the disc lifetime, and terrestrial
+planets carry a magma-ocean surface state until 10–100 Myr. Debris belts are bright when young and
+fade as 1 ÷ age (Wyatt 2008).
 
 **D13. Substellar hosts.** A brown dwarf runs the stellar path with the class table's
 `SubstellarCompact` row: no giants, a compact chain or nothing, the disc scaled to its mass. A rogue
@@ -469,9 +544,10 @@ during play is below the resolution of the global figures.
 **D16. Records degrade by dropping sections.** `BodyRecord` is nested so that each `DetailLevel` is
 a prefix: `Contact` (identity, kind unknown, position), `MassAndOrbit`, `Bulk` (radius, density,
 class, equilibrium temperature), `Surface` (atmosphere, surface conditions, rotation, figures),
-`Full` (hooks: seed, composition, habitability, resources). `degrade` clears sections and never
-blurs a number; measurement noise is the sensor plan's business. Until the Knowledge overlay exists
-the server grants whatever level a request asks for, and says which level it granted.
+`Full` (hooks: seed, composition, habitability, resources). `degrade` marks sections `NotResolved`
+and never blurs a number (each section carries one of four states, T34); measurement noise is the
+sensor plan's business. Until the Knowledge overlay exists the server grants whatever level a
+request asks for, and says which level it granted.
 
 **D17. No analytic habitability summary yet.** The civilisation brainstorm will want habitable
 worlds per large cell from the fields. The class table and the habitable-zone formulae make that a
@@ -484,7 +560,7 @@ readout comes from the server, and the display re-requests the system when its t
 than a year or past a body's `valid_until`. The TypeScript solver need not match `libm` bit for bit.
 
 **D19. Units on the display follow plan 13.** Every planetary mass, from a moon to a 13 M_Jup giant
-(`4,131 M⊕`), is in M⊕ with plan 13's formatter and drawn glyph, because the guide wants one unit
+(`4131 M⊕`), is in M⊕ with plan 13's formatter and drawn glyph, because the guide wants one unit
 per quantity everywhere on the ship; a brown dwarf's is in M☉, as on the chart. There is no
 Jupiter-mass unit. Radii are in km, which needs no new unit.
 
@@ -501,7 +577,9 @@ galactic north, coreward and spinward so that the operator can relate the map to
 05's view needs no new concept for this. Its plane, grid, stalks, fill rule and presets all follow
 `scene.frame`, a `LocalFrame` of three orthonormal vectors, so the orbit map passes a frame whose
 `north` is the plane's normal and whose `coreward` is galactic coreward projected onto the plane
-(`planeFrame`, T40), and hands the true galactic directions to `AxisTriad` separately.
+(`planeFrame`, T40), and hands the true galactic directions separately, as `SpatialView`'s `axes`
+prop. `SpatialView` draws both the triad and the core arrow from `scene.frame` itself, so the prop
+is `SpatialView`'s and it passes it to both (ruling 33).
 
 **D22. Designations and labels.** Plan 01's designation of a body, the system's designation plus
 ` /<body index>`, stays the designation of record, because it parses back to the ID. This plan adds
@@ -522,7 +600,9 @@ not the ship's clock, which does not exist yet; when it does, a display time tha
 falls under the guide's rule for simulation modes and takes that banner. Step sizes reach down to an
 hour, which plan 05's `UT +12.50 yr` cannot show, so the time reads as years, then days, hours,
 minutes and seconds in the guide's `MET` form (`UT +12 yr 183/14:08:33`). This format needs the
-owner's confirmation, as plan 05's `UT` does.
+owner's confirmation, as plan 05's `UT` does. By ruling 33 of 2026-09-22 it is drafted for the owner
+with the rest of T38.a's guide entries, and the client is built to the draft and marked for the
+owner's confirmation.
 
 ## Tasks
 
@@ -539,11 +619,19 @@ Order and parallelism:
 - Phase 0 first. Then phases A→B and T11–T15 of phase C are independent of each other and can run in
   parallel; within C, T13 needs T11 and T12. T16 needs T11–T15 and, for its sampled tests, T8.
   T10.b's radius-dependent assertions need T11.
-- T3 and T4 take the limits of a stable zone and of the strip radius as plain arguments. T9 and T29
-  supply real values when they land, and until then callers pass none.
+- T3, T4 and T8 take the limits of a stable zone and of the strip radius as plain arguments. T9 and
+  T29 supply real values when they land, and until then callers pass none.
 - Phase D needs B, T15 and T16. Phase E needs C and D. Phase F needs B–E. Phase G needs F.
 - Phase H's wire types (T35) can be drafted once T34 has fixed `BodyRecord`, in parallel with G.
 - Phase I's T38, T39 and T40 need only plan 05 and can start at any time; T41–T44 need H.
+- **The vertical slice** (README, "The vertical slice to the `SYSTEM` display", ruling 33 of
+  2026-09-22) builds the first working `SYSTEM` display before plans 09, 11 and 13 are complete.
+  Its tasks from this plan are T1.a–d, T2.a–c, T3–T9, T10.a, T11.a–d, T12, T15, T16.a–b, T28.a–c,
+  T30.a–c, subsets of T32, T35 and T36, T34, T37–T41, T42.a–c, T43.a–b and T44.a. Each is built as
+  written here. What a deferred plan or task would supply is a plain argument, the interim rule
+  that the task names, or a documented `None`, and each task says so where it applies (_Slice:_).
+  Nothing built for the slice is torn out later; a later task that fills a seam bumps the version
+  where it moves output.
 
 ### Phase 0: groundwork
 
@@ -561,6 +649,10 @@ Order and parallelism:
   - _Files:_ `crates/hyperion-sim/src/planetary/mod.rs`, owning modules as needed.
   - _Accept:_ `cargo doc -p hyperion-sim` builds with intra-doc links from `planetary` to every
     consumed item; no generated output changes (the goldens of plans 01–13 pass untouched).
+  - _Slice:_ the plan-text half was done at `9d8e775` (Consumes and Risks). The module docs of
+    `planetary/mod.rs` record each consumed item's real path as the task that uses it lands. The
+    [α/Fe] and the X-ray and ultraviolet history wait with their consumers (T13.b and phase E), and
+    plan 09's accessors are stood in for by T1.d's interim rule.
 - **P14.T1.b Module tree and errors.** Create
   `planetary/{mod, error, index, context, params, system, record}.rs` with `//!` docs. Error enums:
   `EncodeBodyIndexError`, `DecodeBodyIndexError`,
@@ -586,6 +678,16 @@ Order and parallelism:
   - _Tests:_ `for_system` on an unresolvable ID returns `NoSuchSystem`; the builder rejects a
     negative mass or an age beyond the universe's.
   - _Accept:_ `cargo test -p hyperion-sim planetary::context`.
+  - _Slice:_ the builder and the synthetic hosts land first, `for_system` once P06.T29.b's
+    `SystemStars` exists (with a single-star fallback until P11.T2.c has merged). Until plan 09:
+    - the sphere of influence is the galactic tidal radius alone,
+      `galaxy.potential().tidal_radius(system mass, &PointLy::from(record.epoch_position()))`, in
+      metres. Deferring plan 09's pericentre rule (P09.T28.c) changes output only for systems within
+      about 10 ly of the centre;
+    - the encounter environment is `None`;
+    - the strip radius of T29 is `SATELLITE_STABILITY_FRACTION` (0.49) × that tidal radius.
+
+    The [α/Fe] is `None` until T1.a's closed form lands with its consumers.
 
 #### P14.T2 Orbit additions
 
@@ -596,7 +698,11 @@ plan 11's goldens pass untouched.
   `KeplerElements::relative_state_at` reduces the mean anomaly from `UniverseTime`'s integer seconds
   modulo the period before converting to `f64`, so that a one-day orbit keeps its phase a thousand
   years out, and that `solve_kepler` exits after a fixed number of iterations and not on a
-  tolerance, so that every platform agrees. Add `from_semi_major_axis` and `scaled`.
+  tolerance, so that every platform agrees. Add `from_semi_major_axis` and `scaled`. By ruling 33 of
+  2026-09-22 this subtask is folded into P11.T3.a: the reduction, the fixed iteration count and
+  `units::GravitationalParameter` are P11.T3.a's requirements from the start, and the two
+  constructors and every test below are built with it (the `orbit` lane, round 7), so that there is
+  nothing left to check here once it has merged.
   - _Tests:_ residual |E − e sin E − M| < 10⁻¹³ for e up to 0.999; position at t and t + 10⁵ P agree
     to 1 m for a 1-day orbit at 0.02 au, and to 1 mm after one period at 50 au; energy and angular
     momentum of the state match the elements.
@@ -614,17 +720,26 @@ plan 11's goldens pass untouched.
 
 #### P14.T3 The disc
 
-`planetary/disc.rs`. Inputs: host mass, [Fe/H], zero-age luminosity and radius (D6), and optional
-inner and outer truncation radii in metres. All draws on `planet.disc`, keyed by `SystemId` with the
-host number in the draw number.
+`planetary/disc.rs`. Inputs, all plain arguments: host mass, [Fe/H], zero-age luminosity and
+radius (D6; plan 06's `sse::zams::{luminosity, radius}(m, &ZCoeffs)`), the disc's lifetime (T3.a),
+and optional inner and outer truncation radii in metres. All draws on `planet.disc`, keyed by
+`SystemId` with the host number in the draw number. Registering `planet.disc` regenerates
+`tags.golden` (Provides).
 
 - **P14.T3.a Masses and lifetime.** Gas mass M_d = f × M★ with log₁₀ f normal about −2.0, σ = 0.5,
   capped at −1.0 (gravitational instability). Solid mass M_s = M_d × Z☉ × 10^[Fe/H] with Z☉ = 0.0149
-  (Lodders 2003), times an ice enhancement beyond the snow line (factor 2; Lodders 2003). Lifetime
-  log-normal about 2.5 Myr × (M★ ÷ M☉)^−0.5, σ = 0.3 dex (Mamajek 2009; Ribas et al. 2015). For a
-  host over 3 M☉ the lifetime's mass scaling is what starves planet formation; no separate switch.
+  (Lodders 2003), times an ice enhancement beyond the snow line (factor 2; Lodders 2003). The
+  lifetime is an argument of `disc::derive`, not a draw here (ruling 33 of 2026-09-22, D12):
+  P06.T15.c's law, exponential with a mean of 2.5 Myr × (M★ ÷ M☉)^−½ held to 0.3–15 Myr (Mamajek
+  2009, AIP Conf. Proc. 1158, 3, whose e-folding time of the disc fraction is the survival function
+  of an exponential), in `stellar/premain.rs`. For a circumstellar disc the caller applies it to the
+  star's own rank, `StarDraws::disc_lifetime()` on `star.disc_lifetime`, so that the star's T Tauri
+  class (P06.T24) and its planets see the same disc. Only for a circumbinary disc does the caller
+  (T9.c) draw a rank on `planet.disc`, and apply the same law at the pair's total mass. For a host
+  over 3 M☉ the lifetime's mass scaling is what starves planet formation; no separate switch.
   - _Tests:_ medians and widths of 10⁵ draws within 2% of the parameters; solid mass scales as
-    10^[Fe/H] exactly.
+    10^[Fe/H] exactly; the lifetime is the argument. The law's own tests (its median, its clamps,
+    monotonicity in the rank) go with the law in `stellar/premain.rs`.
 - **P14.T3.b Geometry.** `snow_line(L)` = 2.7 au × √(L ÷ L☉). Inner edge: the larger of 2.5 zero-age
   stellar radii, the star's fluid Roche limit for a 1,000 kg/m³ body, and a magnetospheric
   truncation radius at a drawn corotation period, log-normal about 8 days, σ = 0.25 dex (the
@@ -694,9 +809,12 @@ single written definition; tests read the same table.
   200 days per M dwarf (Dressing and Charbonneau 2015); giants around about 3% of M dwarfs.
 
 - **P14.T4.c Code.** `class_weights`, `ClassWeights::probabilities`, and `draw_class`, which maps
-  one `planet.class` draw through integer thresholds (plan 01's `Thresholds::from_weights` and
-  `pick`). D5's fallback and D10's binary suppression are applied here, from plain arguments: the
-  disc, the zone's outer limit if any, and whether the host is in a binary closer than 50 au.
+  one `planet.class` draw through integer thresholds: plan 01's `Thresholds::from_weights` with the
+  weights' own total as its `bound`, so that no mark is rejected, and `Mark::pick` (or
+  `Mark::pick_weighted(weights, bound)`, which gives the same answer without allocating), both
+  returning an `Option` that is `Some` whenever the bound is the total. D5's fallback and D10's
+  binary suppression are applied here, from plain arguments: the disc, the zone's outer limit if
+  any, and whether the host is in a binary closer than 50 au.
   - _Tests, which pin the table:_ probabilities sum to 1 for a grid of masses 0.08–150 M☉ and [Fe/H]
     −2.5 to +0.5; the summed weight of the giant classes at fixed mass, before normalisation, is
     10^(2Δ[Fe/H]) to 10⁻¹² for [Fe/H] from −0.5 to +0.5 and constant outside it, and the log-slope
@@ -774,7 +892,11 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
 #### P14.T8 Class placers
 
 `planetary/placement/classes.rs` and `planetary/placement/mod.rs`.
-`place(ctx, host, zone, disc, class) -> Vec<PlacedPlanet>` interprets the template inside the zone.
+`place(host, limits, disc, class) -> Vec<PlacedPlanet>` interprets the template inside the zone.
+Its inputs are plain arguments, as the order note allows: the host's parameters (mass, zero-age
+luminosity and radius, [Fe/H], and whether it is in a binary closer than 50 au) and the zone's
+inner and outer limits in metres, not a `SystemContext` or an `OrbitZone`, which do not exist when
+it lands. T30.a adapts T9's zones and T1.d's context to them.
 
 - **P14.T8.a Compact groups.** First period from the template, held outside the disc's inner edge.
   Walk outward with T6 and T7 until the count is reached, the zone ends or `next_semi_major_axis`
@@ -827,9 +949,11 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
   star has one zone bounded only by its disc and D14. A zone narrower than a factor of 1.5 in radius
   is dropped.
 - **P14.T9.c Host assignment.** The disc of T3 is derived per zone: a circumstellar disc from its
-  star, a circumbinary one from the pair's total mass and summed luminosity. Apply D10's suppression
-  for binaries inside 50 au (Kraus et al. 2016; Moe and Kratter 2021) by moving class weight to
-  `Barren`.
+  star, with the star's own disc lifetime (P06.T15.c's law on `StarDraws::disc_lifetime()`), a
+  circumbinary one from the pair's total mass and summed luminosity, with a lifetime from a rank
+  drawn on `planet.disc` under the same law at the total mass (ruling 33, D12). Apply D10's
+  suppression for binaries inside 50 au (Kraus et al. 2016; Moe and Kratter 2021) by moving class
+  weight to `Barren`.
   - _Tests:_ (a) for μ = 0.5, e = 0: S-type limit 0.274 and P-type 2.39 binary separations; α
     Centauri AB (23.5 au, e = 0.52) gives about 2.8 au around A. (b) Zones of a hierarchical triple
     never overlap; a single star has exactly one zone; a brown-dwarf companion of plan 11 bounds
@@ -837,6 +961,10 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     hosts in binaries inside 50 au have planets a quarter to a half as often as single stars of the
     same mass.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement::zones`.
+  - _Slice:_ plan 11's engine (P11.T4–T11) is deferred, so every pair is two single stars on an
+    orbit and D10's zones are the zones at birth only; the intersection with the evaluated state
+    comes with `BinaryState`. No brown-dwarf companion is drawn until P11.T2.d, so (b)'s test of one
+    runs on a hand-built hierarchy with a `StarSlot` of the brown-dwarf kind.
 
 #### P14.T10 Placement tests
 
@@ -886,7 +1014,8 @@ Solar System values without a generator.
   Above the rock curve a body formed inside the snow line takes an envelope if its core is over 1.5
   M⊕ and otherwise is clamped to rock with up to 0.1% water.
 - **P14.T11.d Giants.** Above 0.414 M_J: the radius of plan 13's `giant_cooling` at the body's age
-  (it covers 0.3–13 M_J, so every giant this plan places), blended into Chen and Kipping's over
+  (it covers 0.3–13 M_J, so every giant this plan places), taken as its `CoolingState`, the one
+  cooling type this subtask accepts (ruling 34), blended into Chen and Kipping's over
   0.3–0.414 M_J; inflated for equilibrium temperatures over 1,000 K by the fitted heating efficiency
   of Thorngren and Fortney (2018), capped at 2 R_J.
   - _Tests:_ (a) radius is continuous across the segment breaks at the median quantile and monotone
@@ -902,7 +1031,9 @@ Solar System values without a generator.
 #### P14.T12 Irradiation, equilibrium temperature and the habitable zone
 
 - **P14.T12.a Equilibrium temperature.** T_eq = T★ √(R★ ÷ 2a) (1 − A)^¼ (1 − e²)^(−⅛), the
-  orbit-averaged form, with the host's state at age + t. In a multiple system fluxes add: a
+  orbit-averaged form, with the host's state at age + t, taken as plain values of L, T_eff and R,
+  which the caller reads from each host's `StarState` (ruling 34: a host is always a `StarState`,
+  and this subtask accepts no `CoolingState`). In a multiple system fluxes add: a
   circumstellar planet sees its companion at the binary's time-averaged separation, a circumbinary
   one sees both at its own distance. Bond albedo is derived from the surface and cloud state in T13,
   with 0.3 as the value used before that loop closes. Moons take their planet's orbit. A body with
@@ -1007,6 +1138,9 @@ constant.
   - _Tests:_ the Solar System table through `derive_body` reproduces the figures of T11–T15; two
     calls agree bit for bit.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+  - _Slice:_ `derive_body` runs T11, T12 and T15 only, in the order it will keep; T13 and T14 are
+    deferred, so the Bond albedo is fixed at 0.3, the value T12.a names before T13 closes the loop,
+    and the surface section is tagged `NotModelled` (T34).
 - **P14.T16.b Properties** (needs T8), in `crates/hyperion-sim/tests/planetary_properties.rs`. **No
   planet hotter than its star**: for every sampled body and time in ±H, surface and effective
   temperatures are below the hottest host's effective temperature; hosts that are black holes are
@@ -1264,7 +1398,9 @@ elements into elements at a time.
   10–100 Myr (drawn). Before the disc lifetime the system has a `ProtoplanetaryDisc` body in belt
   slot `0xE0` carrying the disc's masses and radii and gaps at formed giants; it is
   `Destroyed { cause: Dispersed }` afterwards. `BodyState::NotYetFormed` before a body's formation
-  age.
+  age. _Slice:_ built first without the `ProtoplanetaryDisc` body, whose belt slot `0xE0` no other
+  slice task fills; it is added under this subtask, with a bump, alongside phase D's belts (T21),
+  and the second half of test (a) waits with it. `BodyKindDto` has the variant from the start (T35).
 - **P14.T28.b Expansion and engulfment.** Adiabatic expansion and the engulfment test of D11, using
   the host's mass at age + t and its largest radius before that age. The destruction time is found
   by bisection on the monotone function a(t) − f R_max(t) with a fixed number of steps. Moons go
@@ -1274,7 +1410,9 @@ elements into elements at a time.
   from `elements_from_state` (T2.c) or `Unbound`. A body whose new pericentre is inside the
   remnant's Roche limit is destroyed. For a star in a binary the companion's planets see the same
   mass loss through plan 11's post-explosion orbit; circumbinary planets are treated as orbiting the
-  pair's total mass.
+  pair's total mass. _Slice:_ until P06.T19 there is no kick law, so `SystemStars::natal_kick()` is
+  `None` and T28.c applies a zero kick; the kick changes output later, with P06.T19's bump. Until
+  P11.T4 the companion's planets see the mass loss as a single star's.
 - **P14.T28.d White dwarfs.** The pollution mark and the dusty disc of D11 on `belt.population`, the
   disc as a `DebrisDisc` body inside the white dwarf's Roche limit of about 1 R☉, present from the
   start of the white dwarf phase with a lifetime set by the cooling age.
@@ -1317,6 +1455,9 @@ and T21.d as the halo's bound, and is asserted again after placement.
   belts and halo (T21) → second generation (T28.e); for a free-floating host, T27's path.
   `PlanetarySystem` holds only primordial state, which is what the server may cache ("state at the
   epoch, never positions at some time"). `generate_planets` stops before the satellites.
+  _Slice:_ satellites, belts, the halo, second-generation planets and T27's hosts are deferred, so
+  `generate` equals `generate_planets` until T22.a. Each deferred stage has its own streams (D4)
+  and slots (D3), so adding it moves no planet.
   - _Tests:_ determinism (two runs equal); order independence through plan 01's
     `assert_order_independent` (A then B equals B then A equals B alone); `generate_planets` equals
     `generate` with satellites removed; `generate_satellites` for a planet equals that planet's
@@ -1341,9 +1482,11 @@ and T21.d as the halo's bound, and is asserted again after placement.
 #### P14.T31 Events on bodies
 
 `planetary/events.rs`, per D15, using plan 06's two constructions with `BodyId` (or `SystemId` for
-comets) as the subject of plan 01's `EventKey::derive`. T31.a and T31.b register the five event tags
-of Provides, each in `rng/tags.rs` (scope `Event`) and in `id/event_tags.rs` with its number, as it
-is first used.
+comets) as the subject of an `events::EventSeries::new(seed, tag, subject)`, which calls plan 01's
+`EventKey::derive`; every construction takes the `&EventSeries`, a series goes to one construction
+only, and a `RateModel`'s `bound` takes the bin's `TimeWindow` (P06.T27 as built). T31.a and T31.b
+register the five event tags of Provides, each in `rng/tags.rs` (scope `Event`) and in
+`id/event_tags.rs` with its number, as it is first used.
 
 - **P14.T31.a Poisson bins.** `body.impact`: rate above a stated energy = the belts' number flux at
   the body × its gravitationally focused cross-section, each event with an energy from the size law
@@ -1359,9 +1502,10 @@ is first used.
   - _Tests:_ (a, b) counts over 10⁴ years match the rates (Poisson interval); (a) a Solar System
     input gives a Shoemaker–Levy-class impact on Jupiter every 50–500 years and 5–20 comets a year
     inside 5 au; (b) dust storms fall only in the perihelion season and about one Mars year in three
-    has one; (c) the same events come back for a window asked whole, in halves, and backwards (plan
-    06's `events::testing::assert_order_independent`); `EventId`s round-trip through plan 01's text
-    form; no event changes any `body_at` result.
+    has one; (c) the same events come back for a window asked whole and in halves (plan 06's
+    `events::testing::assert_partition_independent`) and in any order of asking (plan 01's
+    `hyperion_testkit::order::assert_order_independent`); `EventId`s round-trip through plan 01's
+    text form; no event changes any `body_at` result.
   - _Accept:_ `cargo test -p hyperion-sim planetary::events`.
 
 #### P14.T32 Golden systems
@@ -1377,11 +1521,21 @@ is first used.
     version bump a golden still is what its name says; the search itself is a slow test
     (`#[ignore = "slow: searches for the golden systems"]`) that reproduces the pinned IDs.
   - _Accept:_ `cargo test -p hyperion-sim --test planetary_golden pinned` and `just test-slow`.
-- **P14.T32.b The goldens.** `tests/golden/planetary/`, through plan 01's `golden!`. Each golden
-  holds the full `snapshot_at` at the epoch and at +H and the events of one century. Bump
-  `GENERATOR_VERSION` here.
+- **P14.T32.b The goldens.** `tests/golden/planetary/`, through plan 01's `golden!`, each written
+  with `GoldenWriter` so that a bump can re-bless it. Each golden holds the full `snapshot_at` at
+  the epoch and at +H and the events of one century. Bump `GENERATOR_VERSION` here.
   - _Accept:_ `cargo test -p hyperion-sim --test planetary_golden`; changing any constant in
     `planetary` fails it.
+- _Slice:_ T32.a and T32.b pin the fifteen of the twenty-four whose hosts and bodies exist without
+  plans 09 and 13, phase D and the rest of phase F: the M dwarf, the hot Jupiter, the Solar-like
+  system, the eccentric giant, the halo star, the close and the wide binary and the triple (their
+  pairs as two single stars on an orbit until P11.T4), the T Tauri star (without its disc body until
+  T28.a has it), the subgiant, the red giant, the fallback black hole (with a zero kick) and the
+  three fillers, and hold no events until T31. The other nine (the white dwarf with a polluting
+  belt, the neutron star with second-generation planets, the free-floating brown dwarf, the star
+  with a brown-dwarf companion, the two rogue planets, the nuclear-cluster and globular members and
+  the layer-E death inside the clock window) are added by the tasks that make them possible, each
+  with its bump.
 
 The twenty-four, at Milky Way parameters: an M dwarf with a resonant chain, a metal-rich G dwarf
 with a hot Jupiter, a Solar-like system, an eccentric giant, a halo star, a close binary with a
@@ -1414,14 +1568,38 @@ before and after), and three ordinary fillers.
 #### P14.T34 Detail levels and degradation
 
 `planetary/record.rs`, per D16. `BodyRecord` with nested sections `identity`, `orbit`, `bulk`,
-`surface`, `hooks`, each `Option` except identity; `DetailLevel` ordered; `degrade(level)`;
-`SystemSnapshot::degrade(level)` applies it to every body and drops belts' member lists below
-`Bulk`. `Contact`, the brainstorm's "unresolved contact", keeps the ID and the position: the kind is
-replaced by `BodyKind::Unresolved` and the label is withheld. `MassAndOrbit` is its "mass and orbit
-only".
+`surface`, `hooks`, each a `Section<T>` except identity (below); `DetailLevel` ordered;
+`degrade(level)`; `SystemSnapshot::degrade(level)` applies it to every body and drops belts' member
+lists below `Bulk`. `Contact`, the brainstorm's "unresolved contact", keeps the ID and the position:
+the kind is replaced by `BodyKind::Unresolved` and the label is withheld. `MassAndOrbit` is its
+"mass and orbit only".
+
+Every optional section of a body or system record is tagged with its state (ruling 34 of
+2026-09-22, which settles ruling 33's `NOT YET MODELLED` against `NOT RESOLVED`). The type is
+`Section<T> { Ok(T), NotResolved, NotModelled, NotApplicable }`:
+
+- `Ok(T)`: the section, with its value. "None" is data, not a state: an airless world's atmosphere
+  is `Ok` with no gas in it.
+- `NotResolved`: the granted detail level withholds it. `degrade` is the only thing that produces
+  it.
+- `NotModelled`: this generator version does not compute it, and it must never be taken for
+  "none". In the slice that is every body's `surface` and `hooks` (T13, T14 and T23–T26 fill them),
+  each planet's `moons` and `rings`, and the system's `belts` and `halo` (phase D).
+- `NotApplicable`: the section has no meaning for the body's kind, such as a gas giant's surface.
+
+The server sets every tag, because it is the authority on what its generator version computes; the
+client never infers one. A single value that the generator does not compute inside a section it
+otherwise models is not a section state: the section is `Ok` and the value is absent, which the
+display shows as the guide's "Missing" state, the em dash (the host star's variability, rotation
+and spins in the first viewer). `SystemSnapshot` carries `belts` and `halo` as sections, and each
+planet's record `moons` and `rings`, so that T41.b composes its system note from the tags.
 
 - _Tests:_ `degrade` is idempotent and monotone (`degrade(a).degrade(b)` = `degrade(min(a, b))`); a
-  `MassAndOrbit` record serialised to JSON contains no radius, temperature or composition key.
+  `MassAndOrbit` record serialised to JSON contains no radius, temperature or composition key;
+  `degrade` turns `Ok`, `NotModelled` and `NotApplicable` sections above the level into
+  `NotResolved` and leaves those at or below it untouched; in the slice, a planet's `surface` and
+  `hooks` are `NotModelled` at a granted level of `Full`, a gas giant's `surface` is
+  `NotApplicable`, and the system's `belts` and `halo` are `NotModelled`.
 - _Accept:_ `cargo test -p hyperion-sim planetary::record`.
 
 #### P14.T35 Wire types
@@ -1432,30 +1610,46 @@ convention": a variant of `RequestBody` and of `ResponseBody` per kind, the kind
 
 - **P14.T35.a IDs and orbits.** `BodyIdHex` beside `SystemIdHex`, in plan 01's string form, with
   `ParseBodyIdHexError`;
-  `BodyOrbitDto { parent: BodyIdHex, orbit: OrbitDto, mu_m3_s2, valid_until }`, angles in the system
-  frame for planets and in the parent's frame for moons, as the sim has them; `DetailLevelDto` as
-  snake-case strings.
-- **P14.T35.b Records.** `BodySummaryDto` (identity, label, kind, state, orbit, and the `bulk`
-  section when granted), `BodyDetailDto` (all granted sections, hooks included; the surface seed as
-  16 hex digits), `BeltDto`, `ZoneDto` (stable zones, snow line, system plane), `HabitableZoneDto`,
-  `BodyEventDto` (a comet event carries its elements and a track of positions sampled by the server,
-  since the client does not propagate open orbits). Every quantity's field name carries its SI unit.
+  `BodyOrbitDto { parent: BodyIdHex, orbit: OrbitDto, valid_until }`, with plan 11's `OrbitDto`,
+  which by ruling 33 of 2026-09-22 carries the whole element set (Ω, ω and the mean anomaly at the
+  epoch beside the period, a, e and i, in radians) and μ in m³ s⁻² (`mu_m3_s2`), so that D18's
+  client-side propagation needs nothing else; angles in the system frame for planets and in the
+  parent's frame for moons, as the sim has them; `DetailLevelDto` as snake-case strings;
+  `SectionDto<T>`, T34's `Section<T>` on the wire, tagged by a `state` of `ok` (with the value),
+  `not_resolved`, `not_modelled` or `not_applicable` (ruling 34), which every optional section of
+  every record below uses. Its wire form is pinned with one test per state.
+- **P14.T35.b Records.** `BodySummaryDto` (identity, label, kind, state, and the `orbit`, `bulk`,
+  `moons` and `rings` sections), `BodyDetailDto` (every section, hooks included, each a
+  `SectionDto`; the surface seed as 16 hex digits), `BeltDto`, `ZoneDto` (stable zones, snow line,
+  system plane), `HabitableZoneDto`, `BodyEventDto` (a comet event carries its elements and a track
+  of positions sampled by the server, since the client does not propagate open orbits). Every
+  quantity's field name carries its SI unit. _Slice:_ `BodyKindDto` and `BodyStateDto` get every
+  variant from the start, so that no later task changes their shape; `BeltDto` and `BodyEventDto`
+  wait for T21 and T31; the surface and hooks sections, each planet's moons and rings, and the
+  system's belts and halo are tagged `not_modelled` (T34).
 - **P14.T35.c Requests and responses.** The three pairs under Provides. `SystemBodiesDto` carries
   `granted: DetailLevelDto`, the hosts as plan 06's `SystemSummaryDto` with plan 11's
-  `HierarchyDto`, the zones, and a flat body list in index order (the tree is rebuilt from
-  `parent`). `ErrorCode::UnknownBody`. `body_events` is reserved by plan 04 like the other two: its
-  string goes into `REQUEST_KINDS` with the other two, and plan 04's
-  `request_kinds_lists_every_variant` test then covers it.
+  `HierarchyDto`, the zones, the `belts` and `halo` sections, and a flat body list in index order
+  (the tree is rebuilt from `parent`). `ErrorCode::UnknownBody`, whose case the client's exhaustive
+  `settledState` switch in `apps/hyperion/src/renderer/src/lib/useServerRequest.ts` gains in this
+  subtask, so that `just ci` stays green after `just gen-protocol`, as P06.T33 does for
+  `unknown_system`. The server's exhaustive matches over `RequestBody` and `ResponseBody`
+  (`requests::{kind, is_large}`, the `Handlers` match and the `every_body` test walk in
+  `crates/hyperion-server/src/requests/mod.rs`) gain the new kinds, which answer `unsupported` until
+  T36. `body_events` is reserved by plan 04 like the other two: its string goes into `REQUEST_KINDS`
+  with the other two, and plan 04's `request_kinds_lists_every_variant` test then covers it.
+  _Slice:_ `body_events` waits for T31, so the slice adds `system_bodies` and `body_detail` only,
+  and `body_events` follows by the same procedure.
   - _Tests:_ one wire-form test per request, response and record type, as `rust-dev.md` requires,
     each in the subtask that adds the type; (a) `BodyIdHex` round trip and rejection of malformed
-    strings; (c) `REQUEST_KINDS` holds the three new strings.
+    strings; (c) `REQUEST_KINDS` holds the three new strings (two in the slice).
   - _Accept:_ `cargo test -p hyperion-protocol`; `just gen-protocol-check` passes.
 
 #### P14.T36 Server handlers
 
 `crates/hyperion-server/src/`, beside plan 06's `system_summary` handler.
 
-- **P14.T36.a System cache.** A `SharedByteLru` keyed by (galaxy key, `SystemId`) holding
+- **P14.T36.a System cache.** A `SharedByteLru` keyed by `(GalaxyKey, SystemId)` holding
   `Arc<(SystemContext, PlanetarySystem)>`, with `HeapBytes` implemented from body counts, filled
   under `SingleFlight` so that two consoles opening one system generate it once.
 - **P14.T36.b Handlers.** `system_bodies`, `body_detail`, `body_events`: every inbound ID goes
@@ -1470,11 +1664,15 @@ convention": a variant of `RequestBody` and of `ResponseBody` per kind, the kind
     returns `bad_request` naming the field; a `detail` of `mass_and_orbit` returns no bulk section;
     the same request twice is served from the cache (the counter again).
   - _Accept:_ `cargo test -p hyperion-server system_bodies`.
+- _Slice:_ `system_bodies` and `body_detail` only; `body_events` and its window test come with
+  T31. The hosts' `SystemSummaryDto` is P06.T33–T34's, whose `system_summary` handler and
+  `SystemStars` cache the slice builds first.
 
 #### P14.T37 Client protocol helpers
 
-`packages/protocol/src/`: `parseBodyId`, `formatBodyId`, and the decoding guards for the three new
-response kinds if plan 04's decoder needs them listed. The generic `request` is unchanged.
+`packages/protocol/src/hex.ts`: `parseBodyId` and `formatBodyId`, beside `hexToU64` and
+`u64ToHex`, exported from `index.ts`. Plan 04's decoder needs no list of kinds:
+`decodeServerMessage` trusts the generated types. The generic `request` is unchanged.
 
 - _Tests:_ Vitest: fixtures copied from the Rust wire-form tests decode; a malformed body ID is
   rejected.
@@ -1494,16 +1692,25 @@ idle motion, DOM text, keyboard for everything.
   confirmation; under spatial displays, the orbit map's conventions, which extend what the guide
   already says of it (thin vector lines, a faint `--line` grid or rings, scale, orientation and
   frame always shown, dashes for predicted paths, `--target` for commanded ones, shape for type):
-  orbits are solid `--line` ellipses, reference marks like range rings and not predictions, so never
-  dashed, and the selected body's orbit is a solid `--text` hairline because it carries meaning;
-  zones and belts are labelled annuli drawn as their two edges in `--line`, a belt's edges joined by
-  short radial ticks every 10°, with no fill, hatch or dots, since hazard striping is the guide's
-  only pattern fill; the mandatory `BODIES NOT TO SCALE` label; the reference plane of D21 and its
-  label; the body symbols of T42, added to the one ship-wide symbol set; and D24's rule that bodies
-  move only when the display time does.
+  orbits are solid `--text-muted` ellipses (7.22:1 on `--surface-0`), reference marks like range
+  rings and not predictions, so never dashed, and the selected body's orbit is a solid `--text`
+  hairline because it carries the selection; zones and belts are labelled annuli drawn as their two
+  edges in `--text-muted`, a belt's edges joined by short radial ticks every 10°, with no fill,
+  hatch or dots, since hazard striping is the guide's only pattern fill; `--line` (1.38:1) stays for
+  the grid and the scale rings on the reference plane only, because orbits and zone and belt edges
+  say where something lies, so the guide's 6:1 rule for the parts of a symbol that carry meaning
+  binds them as it binds the range sphere's outline (ruling 35.6 of 2026-09-22); the mandatory
+  `BODIES NOT TO SCALE` label; the reference plane of D21 and its label; the body symbols of T42,
+  added to the one ship-wide symbol set; and D24's rule that bodies move only when the display time
+  does.
   - _Accept:_
     `grep -n "BODIES NOT TO SCALE\|SYSTEM PLANE\|DISPLAY TIME" docs/frontend/ux-guidelines.md` finds
     each edit; Prettier passes on the guide.
+  - _Slice:_ by ruling 33 of 2026-09-22 the guide is the owner's to edit, so these entries,
+    P13.T8.a's M⊕, the phrases `NOT YET MODELLED` and `NOT RESOLVED` and the parts of P06.T35.a the
+    display shows are drafted for the owner (the orchestration notes' `ux-draft-system-display.md`).
+    The client is built to the draft and marked for the owner's confirmation, as ruling 15's
+    `DRIVE RANGE` row was, and the acceptance above holds once the owner has made the edits.
 - **P14.T38.b Formatters.** In plan 05's `lib/format.ts`: `formatPeriod` (`d` under 1,000 days, `yr`
   above), `formatBodyDistance` (the guide's scaled units from km to AU with hysteresis),
   `formatTemperatureK`, `formatPressure` (Pa, kPa, MPa), `formatGravity` (m/s²),
@@ -1522,8 +1729,11 @@ spaced evenly in eccentric anomaly so that pericentre stays smooth, and
 `composePosition(bodies, id, timeS)` walking the parent chain. Near-parabolic comets use the
 server-supplied sampled track instead and are not propagated client-side.
 
-- _Tests:_ Vitest against a fixture of 32 states exported by a test of T2.a, agreeing to 10⁻⁹
-  relative; the polyline closes; a moon's composed position equals planet plus offset.
+- _Tests:_ Vitest against the fixture of 32 orbits and states that P11.T3.a writes with T2.a
+  (a golden under `crates/hyperion-sim/tests/golden/orbit/`, written through `GoldenWriter`, its
+  line format in its header), agreeing to 10⁻⁹ relative; the polyline closes; a moon's composed
+  position equals planet plus offset. The fixture is read from the golden, so a re-blessed golden
+  moves the client's test with it.
 - _Accept:_ `pnpm --filter hyperion exec vitest run src/renderer/src/lib/orbit.test.ts`.
 
 #### P14.T40 Spatial-view marks for paths and annuli
@@ -1531,12 +1741,16 @@ server-supplied sampled track instead and are not propagated client-side.
 In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists are unchanged:
 
 - **P14.T40.a Marks.** Two mark kinds in `marks.ts`: `PathMark` (a polyline in 3D, a `role` of
-  `"reference"` or `"selected"` that picks `--line` or `--text`, and a label anchor) and
+  `"reference"` or `"selected"` that picks `--text-muted` or `--text`, T38.a's rule, and a label
+  anchor) and
   `AnnulusMark` (inner and outer radius on the reference plane, a `ticks` flag for belts, and a
   label; T38.a's drawing rule). `SpatialScene` gains optional `paths` and `annuli`, absent meaning
   none. `buildDrawList` handles both with the existing projection and D12's far-to-near order (a
   path is split where it crosses the plane, an annulus is drawn with the plane), and `pick` ignores
-  them. `symbols.ts` gains the closed outlines `pentagon` and `hexagon` for T42.
+  them. `marks.ts`'s `SymbolShape` gains `pentagon` and `hexagon` for T42, `symbols.ts`'s
+  `OUTLINES` their closed outlines, and every exhaustive `switch` over `SymbolShape` its case. The
+  `ui` lane builds them in round 7 with the `ringed-circle` outline of P06.T35.b and the
+  `triangle-down` outline of P13.T8.c, so the four arrive together.
   - _Tests:_ Vitest on the projection of a circular path tilted 60° (an ellipse with axes 1 and
     0.5), on draw order either side of the reference plane, on an annulus's two edges and ticks, and
     on the new outlines (closed, centred, inside the unit circle, open and filled differing only by
@@ -1544,32 +1758,51 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
 - **P14.T40.b The tilted frame.** `frame.ts` gains `planeFrame(normal, reference): LocalFrame`:
   `north` is the unit normal, `coreward` the reference direction projected onto the plane and
   normalised (falling back to any perpendicular when the two are within 10⁻⁶ of parallel),
-  `spinward` their cross product, right-handed as `localFrameAt`'s is. `AxisTriad` gains the
-  optional `axes` prop of Provides. `PlaneSpec` is unchanged (D21).
+  `spinward` their cross product, right-handed as `localFrameAt`'s is. `SpatialView` gains the
+  optional `axes` prop of Provides (ruling 33 of 2026-09-22): it draws the axis triad
+  (`triadLayout`, `AxisTriad`, whose own props stay `frame`, `angles` and `boxRem`) and the core
+  arrow (`coreArrowLayout`, `CoreArrow`) from `scene.frame` today (`SpatialView.tsx`, about lines
+  296, 302 and 498), so it passes `axes`, or `scene.frame` when it is absent, to both. `PlaneSpec`
+  is unchanged (D21).
   - _Tests:_ the frame is orthonormal for 1,000 random normals; with the galactic north as normal it
     equals `localFrameAt`'s; a scene built on a frame tilted 30° draws its grid as plan 05 draws the
     galactic one in that frame's own coordinates; with `axes` given the triad's `NORTH` follows the
-    galactic vector and not the plane's normal.
+    galactic vector and not the plane's normal, and the core arrow follows the given coreward; with
+    `axes` absent the `GALAXY` display's triad and arrow are unchanged.
   - _Accept (both):_ `pnpm test`.
 
 #### P14.T41 The display shell
 
 `apps/hyperion/src/renderer/src/displays/system/`, beside plan 05's `displays/galaxy/`.
 
-- **P14.T41.a Navigation and requests.** Add `"system"` to `DisplayId` and its case to the
-  navigation bar. The `GALAXY` display's selected-system readout gains an `OPEN SYSTEM` button that
-  switches display with the system's ID and the chart's time. A hook
-  `useSystemBodies(systemId, timeS, detail)` owns the request, cancels on change, and re-requests
-  per D18.
+- **P14.T41.a Navigation and requests.** Add `"system"` to `DisplayId`, its entry to `DISPLAYS`
+  (`SYSTEM`, `F3`), which the navigation bar and `useDisplayKeys` read, and its case to `App.tsx`'s
+  exhaustive `switch` over displays. Beside the `GALAXY` display's selected-system readout, in
+  `SystemsPanel.tsx` and not inside the readout's `output` or any `role="status"` region (rulings 13
+  and 14 keep controls out of live regions), an `OPEN SYSTEM` button switches display with the
+  system's ID and the chart's time. The chart's time is `timeYr: number` in `useLocalChart`, so it
+  crosses as `universeTimeFromYears(timeYr)`, a `UniverseTime`. A hook
+  `useSystemBodies(systemId, time: UniverseTime, detail)` over plan 05's `useServerRequest` owns the
+  request, cancels on change, and re-requests per D18 (when the display time has moved more than a
+  year or past a body's `valid_until`).
 - **P14.T41.b Data states.** No system selected (`NO SYSTEM SELECTED`), and every non-`ok`
   `RequestState` through plan 05's shared `RequestStatus` (pending, rejected with the typed reason,
   timed out, link down), which keeps the guide's ban on spinners and "Loading…"; "no such system";
-  `NO SYSTEM YET` for an unborn host; and an empty system (`NO BODIES`), each as text, never as an
+  `NOT YET FORMED` for an unborn host (ruling 34: one phrase for anything not yet born, system,
+  star or planet); and an empty system (`NO BODIES`), each as text, never as an
   empty canvas. On loss of the link the last data stay, marked stale as the guide requires. The
-  granted detail level is always shown (`DETAIL: MASS AND ORBIT ONLY`).
+  granted detail level is always shown (`DETAIL: MASS AND ORBIT ONLY`). What this generator version
+  does not model is said, never left to look empty (ruling 33 of 2026-09-22): the display carries a
+  system note, `MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED` in the slice, so that the
+  empty space beyond the planets is not read as empty. The note is composed from T34's section tags
+  (ruling 34), never from a list in the client: belts and halo from the system's sections, moons
+  and rings from each planet's, each named when its tag is `not_modelled`, so each part drops out
+  as the server starts to model it.
   - _Tests:_ Testing Library with `FakeWebSocket`: (a) opening from the galaxy display issues one
     `system_bodies` request with the right ID and time, and `F`-key navigation reaches the display;
-    (b) each state renders its text.
+    (b) each state renders its text, including `NOT YET FORMED` for an unborn host, and the system
+    note names exactly the kinds whose tags are `not_modelled` in a fixture (all four in the
+    slice's, none when a fixture tags them `ok`).
   - _Accept:_ `pnpm test`.
 
 #### P14.T42 The orbit map
@@ -1579,23 +1812,36 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
 - **P14.T42.a Marks.** Hosts and bodies as point marks at `composePosition`, orbits as `path` marks,
   stable-zone limits, the snow line and the habitable zone as `annulus` marks that can be switched
   off, belts as ticked annuli (T38.a), the cometary halo as a labelled outer ring only when it is
-  inside the view. The selected body's orbit is the one `"selected"` path. Symbols, where shape
+  inside the view. Orbits and every annulus edge are solid `--text-muted`, and the selected body's
+  orbit, the one `"selected"` path, a solid `--text` hairline; `--line` is for the plane's grid and
+  scale rings only (ruling 35.6, T38.a). Symbols, where shape
   encodes type and one shape means one thing on every display: hosts keep their symbols from the
-  registry of plans 06 and 13 (circle, ringed circle, diamond for a white dwarf, triangle for a
-  neutron star, square for a black hole). A planet, bound or free-floating, is plan 13's
-  `triangle-down`, with plan 05's size class telling giant (3) from smaller planet (1) from dwarf
-  planet (0), under a `SYMBOLS NOT TO SCALE` legend; a moon is a `pentagon`; an unresolved contact
-  is a `hexagon`. Both new outlines are closed, because plan 05's filled-above, open-below rule
-  needs a shape that can be filled, which rules out a plain cross. The list names every kind in
-  words, so shape is never the only signal. Destroyed and unbound bodies are not drawn but stay in
-  the list. Colour stays free: only the selection reticle and, later, status use it.
+  registry of plans 06 and 13 (`lib/galaxy/starSymbols.ts`, P06.T35.b: circle, ringed circle,
+  diamond for a white dwarf, triangle for a neutron star, square for a black hole). A planet, bound
+  or free-floating, is plan 13's `triangle-down`, with plan 05's size class telling giant (3) from
+  smaller planet (1) from dwarf planet (0), under a `SYMBOLS NOT TO SCALE` legend; a moon is a
+  `pentagon`; an unresolved contact is a `hexagon`. Both new outlines are closed, because plan 05's
+  filled-above, open-below rule needs a shape that can be filled, which rules out a plain cross. The
+  list names every kind in words, so shape is never the only signal. Destroyed and unbound bodies
+  are not drawn but stay in the list. Colour stays free: only the selection reticle and, later,
+  status use it. _Slice:_ no belts, halo, moons or unresolved contacts exist yet, so their marks are
+  built and tested on fixtures but draw nothing from a real system.
 - **P14.T42.b Frames and scale.** Two frames: `SYSTEM BARYCENTRIC`, drawn on the `SYSTEM PLANE` of
   D21, and, when a planet is focused with `FOCUS BODY`, `BODY <designation>`, in which its moons and
   rings are drawn and distances switch to Mm and km. Distances are true to scale with a 1-2-5 scale
-  bar; symbols are not, and the display says `BODIES NOT TO SCALE`. Zoom presets `INNER` (fits the
-  outer habitable-zone limit or the fifth body), `ALL` (fits the outermost planet) and `BELTS` (fits
-  the outermost belt), plus plan 05's `TOP`, `SIDE`, `FRONT` and oblique views relative to the
-  system plane. The frame name, time, azimuth, elevation and triad are always shown.
+  bar; symbols are not, and the display says `BODIES NOT TO SCALE`. The bar's ladder is a new
+  `ScaleUnit` list in km, Mm, Gm and AU (`ScaleUnit { perSceneUnit, minSceneLength }`), passed as
+  `SpatialView`'s `scaleUnits`. Zoom presets `INNER` (fits the outer habitable-zone limit or the
+  fifth body), `ALL` (fits the outermost planet) and `BELTS` (fits the outermost belt), which set
+  `fitRadius`, plus plan 05's camera `PRESETS` (`top`, `side`, `front`, `oblique`, shown as `TOP`,
+  `SIDE`, `FRONT` and `OBLIQUE`) relative to the system plane. The frame name, time, azimuth,
+  elevation and triad are always shown: `SpatialView` requires `frameName`, `centre`, `time`,
+  `coreDistance`, `accessibleName` and `stale`, and takes the galactic directions for the triad and
+  the core arrow as its `axes` (T40.b). By ruling 34 the `centre` readings are the system's galactic
+  position, which is where its barycentre is (`RADIUS`, `ANGLE`, `HEIGHT`, as the chart reads its
+  centre), named in words as the barycentre, and `coreDistance` is its galactocentric distance, so
+  that the core arrow shows the true direction to the galactic centre in the galactic axes the frame
+  keeps. _Slice:_ `BELTS` and `FOCUS BODY` wait for phase D, since there are no belts and no moons.
 - **P14.T42.c Interaction.** Plan 05's controls unchanged. Picking selects the nearest body symbol
   within the guide's tolerance; orbits are not pickable.
   - _Tests:_ (a) pure mark-building functions unit-tested (a golden system's summary in, marks out;
@@ -1613,24 +1859,35 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   under their planet, belts and their members, with position and total as the guide asks of lists.
   Arrow keys move, Enter selects, and selection is shared with the map. Each row: designation, kind
   in words, semi-major axis, and state in words when not present (`DESTROYED`, `NOT YET FORMED`,
-  `UNBOUND`).
+  `UNBOUND`). _Slice:_ hosts and planets only, the hosts first, then the planets by semi-major
+  axis.
 - **P14.T43.b Readout.** An `output` element, filled by a `body_detail` request: designation and ID;
   label; kind and class; state; mass and radius; density and surface gravity; semi-major axis,
   period, eccentricity, inclination; distance from its primary now; equilibrium and surface
   temperature; pressure and atmosphere; rotation period and locking state; composition; the global
   figures; the habitability class with its reasons in words; resource abundances as a small table;
-  for the system as a whole, the architecture class and the zones. A section the granted level
-  withholds shows `NOT RESOLVED`, never a blank or a zero, and a single value missing inside a
-  granted section is the guide's em dash in `--text-muted`.
+  for the system as a whole, the architecture class and the zones. Each section renders from its T34
+  tag (ruling 34), never from a guess: `ok` shows the section; `not_resolved` reads `NOT RESOLVED`;
+  `not_modelled` reads `NOT YET MODELLED`, once per section, and is never read as "none";
+  `not_applicable` omits the section's rows, so a gas giant shows no surface section, not an em
+  dash. A single value missing inside an `ok` section is the guide's "Missing" state, the em dash in
+  `--text-muted`, and "none" is data (an airless world's atmosphere is `ok` with no gas). Nothing is
+  ever a blank or a zero. _Slice:_ the surface, atmosphere, rotation, habitability and resources
+  sections arrive tagged `not_modelled` and read `NOT YET MODELLED`; the hosts' rows show the
+  stellar summary of P06.T33 (kind, phase, MK class without peculiar suffixes, initial mass and mass
+  now, L, R, T_eff, and for a remnant its kind, mass and cooling age), with the guide's em dash for
+  what plan 06 does not model yet (variability, rotation, activity, spins, kicks, binary class).
 - **P14.T43.c Events.** A list of the body events of the century around the display time, from a
   `body_events` request, each with its time in the chart's time system and a countdown in the
   guide's `T-` form.
   - _Tests:_ Testing Library: (a) arrow keys and Enter select, the list shows position and total,
     and a destroyed body's row says `DESTROYED`; (b) keyboard selection updates the readout, a
-    `mass_and_orbit` fixture shows `NOT RESOLVED` for the surface section, and units appear on every
-    value; (c) an event before the display time counts `T+` and one after it `T-`, each with its
-    time-system label.
+    `mass_and_orbit` fixture shows `NOT RESOLVED` for the surface section, a surface tagged
+    `not_modelled` shows `NOT YET MODELLED` once, a gas giant's `not_applicable` surface shows no
+    row, and units appear on every value; (c) an event
+    before the display time counts `T+` and one after it `T-`, each with its time-system label.
   - _Accept:_ `pnpm test`.
+  - _Slice:_ T43.c waits for T31 and `body_events`; there is no events panel in the first display.
 
 #### P14.T44 Time control
 
@@ -1659,6 +1916,7 @@ nothing on the ship, and are styled as display controls, as the guide requires.
     paints a second and no frames between them; the readout changes at most four times a second.
   - _Accept (both):_ `pnpm test`; by eye: a hot Jupiter circles in seconds at 1 d/s while the cold
     giant barely moves, and nothing moves in `HOLD`.
+- _Slice:_ T44.a only. The first display opens held and steps; `RUN` and `HOLD` (T44.b) follow.
 
 ## Verification
 
@@ -1794,3 +2052,111 @@ it:
   figure taken from them is marked for re-checking in its task, and T4's written table is where the
   checked values and full references end up.
 - **Deviations in T40 and T38.b, as built (round 7, `ui`).** _T40.a._ `PathMark` is `{ id, points, role: PathRole, label, labelAt }` and `AnnulusMark` `{ id, centre?, innerRadius, outerRadius, ticks, label }`: each has an `id` for its label's key, and an annulus an optional `centre`, the view centre when absent, taken at its foot on the plane, since a wide binary's zones are about one star and not the barycentre. A path is cut where it meets the plane (heights within 10⁻⁹ of the path's size count as on it, and so above, so that an orbit drawn in a tilted plane is not cut at every rounding error), a closed path's first and last runs on one side are joined, and each piece is a 1 px polyline, `--line` or `--text`, that opens its own half before the half's marks, so that no line crosses a symbol, with the selected path after the reference ones; an annulus is drawn with the plane after its rings, each edge a `--line` polyline (equal radii draw one, a radius of 0 none) and a belt's ticks one `ticks` op of radial segments from the inner edge to the outer every 10° from coreward, the reading taken of "edges joined by short radial ticks". Labels follow the rings' in the curve labels, placed as a ring's: an annulus's at its outer edge's rimward point, away from the rings' at their coreward points, a path's at `labelAt`. **For the orchestrator to rule:** those orders and places, and T38.a's `--line` for zones, belts and orbits: it is 1.38:1 on `--surface-0`, and a zone's or belt's edge says where something lies, as a range sphere's outline does, for which the guide asks 6:1; `--text-muted` (7.22:1) is the token that passes, and the selected orbit's `--text` already does. New outlines: `pentagon` point up and `hexagon` flat at top and bottom, so that they read apart; at size class 0 their holes are 3.8 and 4.1 px at 100%, but their flat sides lie only 0.76 and 0.54 px inside a circle of the same size, so whether a moon or a contact reads apart from a host's circle at class 0 is a by-eye point for T42, which may give them a smallest size class. _T40.b_, with ruling 33: `planeFrame(normal, reference)` falls back, for a reference within `PARALLEL_TOLERANCE` (10⁻⁶) of the normal or of no length, to the direction along the galactic axis least along the normal, laid onto the plane, and is never `onAxis`; `SpatialView`'s `axes?: LocalFrame` feeds `AxisTriad`'s new `axes` prop and the core arrow through a last optional `shown` parameter of `triadLayout` and `coreArrowLayout`, and the `DIRECTIONS UNDEFINED` note follows it, since it is about the galaxy's directions; the camera, plane, grid, stalks, fill rule and presets follow `scene.frame` as D21 says. _T38.b_: `formatPeriod(periodDays)`, `formatBodyDistance(distanceKm, previous)`, `formatPressure(pressurePa)` return `{ value, unit }`; `formatTemperatureK` and `formatGravity` the value alone. Periods, distances, pressures and gravities take three significant figures, with E notation outside each ladder (below 0.01 d, from 10⁴ yr; below 0.01 km, from 10⁶ AU; below 0.01 Pa, from 10⁴ MPa; below 0.01 m/s²). Distances go km, Mm, Gm, then AU from 0.1 AU (15.0 Gm), so that every planet but the closest-in reads in AU, keeping the last unit within 5% (`DISTANCE_HYSTERESIS`) of either edge of its band; the caller holds the last unit. `formatUniverseTimeDhms(time)` takes a `UniverseTime`'s floor seconds and splits them with integer arithmetic; the sign is the whole time's, as a countdown's, so one second before the epoch reads `-0 yr 000/00:00:01`, and the days are zero-padded to three digits so that the field keeps its width, where the guide's `MET 57/14:08:33` is not. It is built to D24 and says so in its TSDoc; those two choices go to the owner with D24. Masses use plan 13's `formatMassMearth`, recorded there.
+- **Re-validated at `9d8e775` for the vertical slice** (round 7, the `doc` lane). Plans 01–05 and 07
+  are built, plan 06 in part (T1, T2, T4–T9, T10.a–b, T11, T27), plans 08, 09, 11, 13 and 15 not at
+  all; P11.T3.a, P11.T1.a–c, P14.T1.b–c and T3, and P14.T40 are being built in round 7. The plan
+  text now follows the code in these places:
+  - `units::GravitationalParameter` is P11.T3.a's, which takes T2.a's requirements (ruling 33).
+  - `coords` is split, so the two vectors are in `coords/frames.rs`.
+  - `snow_line` takes `SolarLuminosities`, and `class_weights` takes a `Dex`; there is no
+    `Luminosity` or `FeH`.
+  - `zams::{luminosity, radius}` take `(SolarMasses, &ZCoeffs)`; `ObjectKind` lives in
+    `stellar::state`; `CompactRemnant::new` is `pub(crate)`.
+  - `Death`, `DeathKind`, `NatalKick`, `ActivityLevel`, `Track`, `StarModel`, `SystemStars` and
+    `substellar::cooling` are not built yet, and Consumes names the task for each.
+  - The generic `events` module takes an `EventSeries` (`EventSeries::new(seed, tag, subject)`), its
+    `RateModel::bound` a `TimeWindow`, and T31's order check is plan 01's
+    `hyperion_testkit::order::assert_order_independent`, beside plan 06's
+    `events::testing::assert_partition_independent`.
+  - `Thresholds::from_weights` takes a bound, and `Mark::pick_weighted` exists (T4.c).
+  - `SymbolShape` is in `marks.ts` and has four values, `starSymbols.ts` does not exist, and
+    `DisplayId` is `"link" | "galaxy"`.
+  - `SpatialView` draws the triad and the core arrow from `scene.frame`, so `axes` is its prop
+    (ruling 33). It also requires `centre`, `time`, `coreDistance`, `accessibleName` and `stale`,
+    and its scale ladder is a `ScaleUnit` list, which needs a km-to-AU one.
+  - The chart's time is `timeYr: number`, which crosses to this display as a `UniverseTime` through
+    `universeTimeFromYears`.
+  - New error codes need the client's `settledState` case in the same task, and new kinds the
+    server's dispatch matches.
+  - The decoder needs no kind list, and the system cache key is `(GalaxyKey, SystemId)`.
+  - Stream counters leave 2⁴⁹ words per body.
+  - New tags go at the end of `domain_tags!`.
+  - T3's lifetime is an argument, from P06.T15.c's law on the star's rank (ruling 33).
+  - `OrbitDto` carries the whole element set and μ, so `BodyOrbitDto` adds only `parent` and
+    `valid_until` (ruling 33).
+
+  The risk above that `body_events` is not among plan 04's reserved kinds is settled: plan 04's
+  "Extending the convention" table reserves it with the other two.
+
+  Pending re-validation, because what they read is not built:
+  - T1.d's `for_system` (P06.T29.b, P11.T2.c);
+  - T11.d (P13.T5.c);
+  - T12 and T27 for substellar hosts (P06.T13, plan 13);
+  - T13 (P06.T25's `ActivityLevel`);
+  - T28.b (P06.T10.d's `max_radius_until`) and T28.c (P06.T19, P11.T4);
+  - T29 (plan 09);
+  - T35.c and T36 (P06.T33–T34);
+  - T42.a's host symbols (P06.T35.b).
+
+- **For the orchestrator to rule: telling "not yet modelled" from "does not apply".** T34 and T43.b
+  tell a withheld section (`NOT RESOLVED`) from one this version does not compute
+  (`NOT YET MODELLED`) by the granted level alone. That leaves a section that does not apply to a
+  body's kind (a belt's surface, a free-floating object's orbit), and it leaves the question of
+  where T41.b's system note gets its list. The options:
+  - (a) The client decides. From the granted level and the body's kind it knows which sections
+    apply, and the note's list is a client constant that each modelling task shortens. This is what
+    the analysis behind ruling 33 assumes.
+  - (b) The server says. `SystemBodiesDto` and `BodyDetailDto` carry a `not_modelled` list of
+    section and small-body names for the generator version, from which the client builds both the
+    readout's words and the note. A server at a later version then needs no client change to stop
+    saying it.
+  - (c) Each optional section on the wire becomes a three-way value: present, withheld or not
+    modelled.
+
+  Ruled (ruling 34): option (c) with a fourth state, so that every optional section is tagged `ok`,
+  `not_resolved`, `not_modelled` or `not_applicable` by the server and the system note is composed
+  from the tags (T34, T35.a, T41.b, T43.b).
+
+- **For the orchestrator to rule: hosts without a `Track`.** By ruling 33, `Track` covers the
+  Hurley, Pols and Tout range, and `evolve` dispatches below 0.1 M☉ to `substellar::cooling`.
+  Consumes still reads `Track::{state_at, max_radius_until, max_luminosity_until}` for every host,
+  in T12, T13.b and T28.b. A host of 0.08–0.1 M☉ has no `Track`, and neither has a free-floating
+  brown dwarf. The options:
+  - (a) Plan 06's `StarModel` (P06.T29.a) exposes `state_at`, `max_radius_until` and
+    `max_luminosity_until` for every star and dispatches itself, and this plan reads hosts only
+    through `StarModel` and `SystemStars`.
+  - (b) `SystemContext` holds a host enum, a `Track` or a cooling fit, and T12, T13.b and T28.b
+    dispatch on it.
+
+  Ruled (ruling 34): option (a), this plan reads every star through `StarModel`, which exposes
+  `state_at`, `lifetime`, `death`, `max_radius_until` and `max_luminosity_until` for every star
+  below 0.1 M☉ included, and `SystemContext` holds `StarModel`s with no host enum for stars.
+
+- **For the orchestrator to rule: the orbit map's centre and core distance.** `SpatialView` requires
+  `centre` readings and a `coreDistance`, which the chart fills with its centre's `RADIUS`, `ANGLE`
+  and `HEIGHT`. The orbit map's centre is a barycentre. The options:
+  - (a) The system's galactic position, read as the chart reads its centre, with the system's
+    `RADIUS` as the core distance.
+  - (b) The barycentre named in words (`SYSTEM BARYCENTRIC` already is the frame), with the galactic
+    position left to the system readout and the core distance still the system's `RADIUS`.
+
+  Ruled (ruling 34): option (a), the `centre` is the system's galactic position, named in words as
+  the barycentre, and `coreDistance` its galactocentric distance (T42.b).
+
+- **For the orchestrator to rule: one phrase for an unborn system.** T41.b writes `NO SYSTEM YET`
+  for an unborn host (the brainstorm's "no system yet", and plan 03's `Existence::NoSystemYet`).
+  P06.T36 writes `NOT YET FORMED` for an unborn system in the `GALAXY` readout, and T43.a writes it
+  for an unformed body. The guide's "one name per thing" asks for one. The options:
+  - (a) `NO SYSTEM YET` for a system everywhere, which changes P06.T36's text, and `NOT YET FORMED`
+    for a body.
+  - (b) `NOT YET FORMED` for both, which changes T41.b's.
+
+  Ruled (ruling 34): option (b), `NOT YET FORMED` for a system, a star and a planet alike, which
+  T41.b now uses.
+
+- **The vertical slice** (README, "The vertical slice to the `SYSTEM` display (2026-09-23)"). This
+  plan's tasks in it are T1.a–d, T2.a–c, T3–T9, T10.a, T11.a–d, T12, T15, T16.a–b, T28.a–c,
+  T30.a–c, T32 (fifteen of the twenty-four goldens), T34, T35 and T36 (without `body_events`),
+  T37–T41, T42.a–c, T43.a–b and T44.a. Each task's _Slice:_ note says what it takes as a plain
+  argument or `None` until its supplier lands. The first display has no moons, rings, belts, halo,
+  events panel or `RUN`, and cannot reach brown dwarfs or rogue planets.

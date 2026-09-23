@@ -80,12 +80,16 @@ All Rust paths are under `hyperion_sim`. Signatures are sketches.
 
 ### Additions to plan 01's `units` and `coords`
 
-`units::Days`. `coords::{SystemVector, SystemVelocity}`: a displacement and a velocity in the system
-frame's axes, `f64` metres and metres per second, beside plan 01's `SystemPosition` (a position from
-the barycentre). Plan 01 owns `coords` and has no equivalent (its `GalacticDisplacement` and
-`GalacticVelocity` are in the galactic frame), so P11.T3.a adds the two types to plan 01's file for
-the frames, `src/coords.rs` (or `src/coords/frames.rs` if plan 01 split the module), with the same
-frame guard: no conversion to a galactic or body vector without an explicit origin. Plan 14 uses all
+`units::Days` (P11.T1.a). `units::GravitationalParameter`, μ = GM in m³ s⁻² (P11.T3.a, ruling 33 of
+2026-09-22), beside plan 01's `units::consts::{GM_SUN, GM_JUPITER, GM_EARTH,
+GRAVITATIONAL_CONSTANT}`, which are bare `f64`s. `coords::{SystemVector, SystemVelocity}`: a
+displacement and a velocity in the system frame's axes, `f64` metres and metres per second, beside
+plan 01's `SystemPosition` (a position from the barycentre, `[f64; 3]` metres). Plan 01 owns
+`coords` and has no equivalent (its `GalacticDisplacement` and `GalacticVelocity` are in the
+galactic frame). Plan 01 split the module into files, so P11.T3.a adds the two types to
+`src/coords/frames.rs`, beside `SystemPosition` and `BodyPosition`, re-exports them from
+`coords/mod.rs`, and keeps that file's frame guard: no conversion to a galactic or body vector
+without an explicit origin, and a `compile_fail` doctest against mixing frames. Plan 14 uses all
 three.
 
 ### `orbit`
@@ -107,7 +111,12 @@ pub fn peters_merger_time(m1: SolarMasses, m2: SolarMasses, a: Metres, e: Eccent
 pub fn peters_separation_for(m1: SolarMasses, m2: SolarMasses, t: Years) -> Metres; // circular
 ```
 
-Plan 14 reuses `orbit` for planets and extends it with open orbits. Plan 09's
+The sketch carries the period; μ = 4π²a³ ÷ P² follows from it, and ruling 33's `OrbitDto` puts μ on
+the wire (P11.T13). `relative_state_at` reduces the mean anomaly from `UniverseTime`'s integer
+seconds (`seconds()`, an `i64`, and `subsec_nanos()`) modulo the period before any conversion to
+`f64`, and `solve_kepler` runs a fixed number of Newton iterations from a fixed starter and never
+exits on a tolerance, so that every platform agrees (P14.T2.a's requirements, taken here from the
+start). Plan 14 reuses `orbit` for planets and extends it with open orbits. Plan 09's
 `galaxy::motion::KeplerOrbit` is a different thing and stays as it is: a state vector about the
 central black hole in the galactic frame, propagated by universal variables. The two share `math`
 and nothing else.
@@ -150,6 +159,11 @@ pub fn draw_hierarchy(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityC
 pub fn star_positions_at(h: &SystemHierarchy, t: UniverseTime,
     out: &mut Vec<(BodyId, SystemPosition)>);
 pub const STAR_BODY_INDEX_END: u16 = 16;             // body indices 0..16: plan 14's slot 0x00
+// The redraw attempt lives here, because P11.T2.a uses it before `stellar::binary` exists;
+// `stellar::binary` re-exports all three.
+pub struct RedrawAttempt(/* u8, 0..MAX_REDRAWS */);
+pub const MAX_REDRAWS: u8 = 8;
+pub const DRAWS_PER_ATTEMPT: u64 = 64;               // words; equals plan 06's `ATTEMPT_WORDS`
 ```
 
 ### `stellar::binary`
@@ -177,9 +191,7 @@ pub fn classify(state: &BinaryState) -> BinaryClass;
 pub enum CarvedClass { AccretingWdFast, AccretingWdSlow, XrayBinary, StellarMerger,
     NeutronStarMerger }
 pub fn carved_class(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<CarvedClass>;
-pub struct RedrawAttempt(/* u8, 0..MAX_REDRAWS */);
-pub const MAX_REDRAWS: u8 = 8;
-pub const DRAWS_PER_ATTEMPT: u32 = 64;               // plan 06's block in `StarDraws::for_attempt`
+pub use crate::stellar::multiplicity::{RedrawAttempt, MAX_REDRAWS, DRAWS_PER_ATTEMPT};
 pub enum MergedBinaryFate { StaysJudgedOnPairVelocity, StaysJudgedOnKick, Ejected }
 pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate; // the default P15.T5.c reviews
 ```
@@ -223,8 +235,10 @@ pub struct MultiplicityFates<F: StellarFates>(/* wraps plan 06's fates */); // p
   09's `SUPERNOVA` is.
 - `stellar::binary::events::{BinaryEventKind, BinaryEvent, events_in, active_at, light_curve}`, in
   the shape of plan 06's `stellar::events`, over its
-  `events::{TimeWindow, PoissonBins, MonotonePhase, PhaseClock, LinearClock}`.
-  `light_curve(event, dt, band)` takes plan 07's `galaxy::gas::Band` and returns `Watts`; the X-ray
+  `events::{EventSeries, TimeWindow, PoissonBins, MonotonePhase, PhaseClock, LinearClock}`: every
+  construction takes an `&EventSeries`, built by `EventSeries::new(seed, tag, subject)`.
+  `light_curve(event, dt, band)` takes plan 07's `galaxy::gas::ccm::Band` (not re-exported from
+  `gas`) and returns `Watts`; the X-ray
   luminosity of an X-ray event is a separate function, `xray_luminosity(event, dt) -> Watts`,
   because plan 07's `Band` has no X-ray value.
 
@@ -246,8 +260,10 @@ pub const CLASS_SHARES: ClassShareTable;
 The reader types over them are `stellar::binary::ia::IaExplosionMark` and
 `stellar::binary::sampler::ClassSampler`. `AWD_SAMPLER` serves both accreting white dwarf classes:
 the recurrence period is one of its marks and the split is a test on it. Until P15.T9.b and
-P15.T10.b land, the constants hold the scratch values of Design note 13 and are listed in plan 15's
-`tables::MANIFEST` with `provisional: true`.
+P15.T10.b land, the constants hold the scratch values of Design note 13. `tables::MANIFEST` does not
+exist yet (plan 15's P15.T2 builds it and registers the tables already committed), so until then
+the file says it is provisional in its header, under the README's header convention, as
+`tables/mge.rs` does; once the manifest exists it lists them with `provisional: true`.
 
 ### Domain tags (never renamed)
 
@@ -258,14 +274,23 @@ brings in (Design note 5): `binary.orbit`, `binary.orientation`, `binary.phase`,
 `binary.ia_mark`, `binary.ce`. Scope `System`, under plan 09's reserved prefix `class.`, for the
 catalogue side's candidates: `class.awd`, `class.xrb`, `class.merger`, `class.nsm`. Event keys: one
 `DomainTag` of scope `Event` per event tag above, as plan 01's `event_tags!` requires. Streams are
-opened with `Stream::open(seed, tag, ObjectKey::from(id))`.
+opened with `Stream::open(seed, tag, ObjectKey::from(id))`. The "Plan 11" heading is appended at the
+end of the `domain_tags!` list, whatever the plan number, because the macro's order fixes
+`tags::ALL`, which `tests/golden/rng/tags.golden` pins; the task that adds a tag regenerates that
+golden with `domain_tags_are_pinned` (in `tests/foundation_golden.rs`).
 
 ### Protocol and client
 
 - `hyperion-protocol`: `BinaryClassDto`, `OrbitDto`, `HierarchyDto`; plan 06's `SystemSummaryDto`
   gains `hierarchy`, its `StarSummaryDto` gains `body_index` and `binary_class`, and its
   `StellarBriefDto` gains `star_count: u8`. All are additive fields on plan 06's `system_summary`
-  request kind and on plan 04's `systems_in_range` rows; this plan adds no request kind.
+  request kind and on plan 04's `systems_in_range` rows; this plan adds no request kind. By ruling
+  33 of 2026-09-22, `OrbitDto` carries the whole element set, so that the client can place a body
+  and propagate it (plan 14's D18): the period, semi-major axis, eccentricity and inclination, the
+  longitude of the ascending node, the argument of periapsis and the mean anomaly at the epoch (all
+  angles in radians), and the gravitational parameter μ in m³ s⁻². `HierarchyDto` carries each
+  component's mass, so that the client can place the stars about their barycentres. P11.T13 designs
+  the exact fields.
 - `apps/hyperion`: `StarList` component; `formatOrbit` helpers.
 
 ### Test helpers
@@ -279,60 +304,96 @@ feature, as plan 06 does for its samplers).
 ## Consumes
 
 Names are those of the owning plans' Provides as they stand; the owning plan is authoritative, and
-where a name has changed by the time this plan runs only the call sites here change.
+where a name has changed by the time this plan runs only the call sites here change. Re-validated
+against the code at `9d8e775` (see Risks): where an item is built, its real path or signature is
+given; where it is not, the task that builds it is named.
 
-- **Plan 01:** `math`; `rng::{Seed, Stream, DomainTag, ObjectKey, Mark, Threshold}`,
-  `Stream::open(seed, tag, object)` with random access by `word_at` and `seek`, the `domain_tags!`
-  registry in `rng/tags.rs`; the samplers (uniform, normal, log-normal, `PowerLaw` with the exponent
-  1 case, `PiecewiseLinear`); integer-threshold decisions; `rng::EventKey` and the `event_tags!`
-  registry in `id/event_tags.rs`; `units`;
-  `time::{UniverseTime, Span, CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon}`;
-  `coords::SystemPosition`; `id::{SystemId, BodyId, EventId, EventTag}`; `GENERATOR_VERSION`; from
-  `hyperion-testkit`, the `golden!` harness, `stats` (chi-square, Kolmogorov–Smirnov, Poisson
-  counts), `order::assert_order_independent`; slow-test marking, `just test-slow`, `just bench`.
+- **Plan 01:** `math`; `rng::{Seed, Stream, DomainTag, ObjectKey, Mark, Threshold, Thresholds}`,
+  `Stream::open(seed, tag, object)` with random access by `word_at(n)` and `seek(n)`, the
+  `domain_tags!` registry in `rng/tags.rs`; the samplers, as `Stream` methods (`uniform`,
+  `uniform_in`, `normal(mean, sigma)`, `log_normal(mu_ln, sigma_ln)`, `log_normal_dex`,
+  `power_law(&PowerLaw)`) and types (`PowerLaw::new(exponent, lo, hi)`, a density ∝ x^−exponent with
+  the exponent-1 case, returning a `Result`; `PiecewiseLinear::new`, also a `Result`, drawn with
+  `.sample(&mut stream)`); integer-threshold decisions (`Stream::{mark, decide, pick}`,
+  `Threshold::{from_probability, from_ratio}`, `Thresholds::from_weights(weights, bound)`,
+  `Mark::{is_below, pick, pick_weighted}`); `rng::EventKey` (`EventKey::derive(seed, tag, subject)`)
+  and the `event_tags!` registry in `id/event_tags.rs`; `units`; `time::{UniverseTime, Span}`,
+  `CLOCK_WINDOW_H`, `LIGHT_CROSSING_L`, `SourceHorizon` and `ClockWindow`, where `UniverseTime` is
+  an `i64` of seconds and a `u32` of nanoseconds (`seconds()`, `subsec_nanos()`,
+  `since_epoch() -> Span`); `coords::SystemPosition` (in `coords/frames.rs`);
+  `id::{SystemId, BodyId, EventId, EventTag}` (`BodyId::new`, `body_index()`); `GENERATOR_VERSION`
+  (a `GeneratorVersion`, 11 at `9d8e775`); from `hyperion-testkit`, the `golden!` harness with
+  `GoldenWriter`, through which a new golden is written so that it can be re-blessed, `stats`
+  (`chi_square_gof`, `ks_one_sample`, `assert_poisson_count`), `order::assert_order_independent`;
+  slow tests marked `#[ignore = "slow: …"]`, run by `just test-slow`; `just bench`.
 - **Plan 02:** `imf::{MassFunction, Kroupa, Chabrier}` (with `Chabrier::high_mass_scale`, which
-  reads plan 15's `tables::chabrier::HIGH_MASS_BRANCH_SCALE`, provisionally 0.68); the seam
-  `galaxy::fates::StellarFates` with `mean_companions`, `ProvisionalFates`, `mean_present_mass` and
-  `stars_below` (Design note 1); `ShareMatrix`; `potential::PotentialTables` (tidal radius).
-- **Plan 03:** `placement::{SystemRecord, resolve}`, `query::{RangeQuery, SystemSource}`,
-  `check_index_headroom`, the test helper `sunlike_point`.
-- **Plan 06:** `stellar::sse::{Track, evolve, lifetime, turn_off_mass}` with
-  `Track::max_radius_until`, and the helium-star entry point of P06.T9 (a track from a helium-star
-  mass); `StarState`, `Phase`, `Composition`; `StarDraws::{for_star, for_attempt, from_parts}`,
-  whose attempt block is 64 draws; `StarModel`;
-  `SystemStars::{generate, summary_at, brief_at, death_time, natal_kick}`, `ClockDeath`; from
-  `stellar::remnant`, `KickLaw`, `StandardKickLaw`, `KickLawParams` (with its provisional
-  `stripped_share`), `NatalKick`, `KickMode`, `Stripping`, `CollapseChannel`, `ProgenitorAtDeath`,
-  the pulsar spin-down closed form, and the provisional companion-stripped mark on the permanent
-  stream `star.stripped`;
-  `events::{TimeWindow, PoissonBins, RateModel, MonotonePhase, PhaseClock, LinearClock}`;
-  `stellar::classify`; `stellar::substellar::cooling`; `stellar::fates::TrackFates`; the rule that
-  body index 0 is the primary and companions are numbered from 1; the event-tag block 0x0300–0x03FF;
-  the protocol's `system_summary` kind with `SystemSummaryDto`, `StarSummaryDto` and
-  `StellarBriefDto`.
-- **Plan 07:** `galaxy::gas::Band`, for light curves.
-- **Plan 08:** on `SystemRecord`, `placement_class() -> PlacementClass` (`Alive`, `Retained`,
-  `Displaced { class, kind }` with `DisplacedKind::{Remnant, Runaway, Walkaway}`), `mark_attempt()`
-  and `kick_constraint()`, which plan 06's primary draws already honour; the seam
+  returns the scale the value was built with: `Chabrier::provisional()`, the default, uses
+  `Chabrier::PROVISIONAL_HIGH_MASS_SCALE` = 0.68 until plan 15's P15.T4.b fits
+  `tables::chabrier::HIGH_MASS_BRANCH_SCALE`, which does not exist yet); the seam, the trait
+  `galaxy::fates::StellarFates` (`lifetime`, `remnant_mass`, `mean_companions`, `breaks`) and the
+  free functions over it, `fates::mean_present_mass(f, fates, ages)`,
+  `fates::stars_below(f, fates, m)` and `fates::mean_stars_per_system(f, fates)`, with
+  `ProvisionalFates` (Design note 1). `Galaxy` holds no fates: `galaxy/params/derive.rs` builds a
+  `ProvisionalFates` in `mean_masses` and `build`, which plan 06's P06.T30.a turns into
+  `fates_for(population)`. `galaxy::shares::ShareMatrix`;
+  `potential::PotentialTables::tidal_radius(&self, m: SolarMasses, p: &PointLy) -> Metres`.
+- **Plan 03:** `placement::{SystemRecord, resolve}` (`resolve(galaxy, id)`; the record's
+  `epoch_position()`, `primary_initial_mass()`, `age_at_epoch()`, `age_at(t)`, `existence_at(t)`),
+  `query::{RangeQuery, SystemSource}`, `check_index_headroom(galaxy)`, the test helper
+  `sunlike_point(&Galaxy) -> GalacticPosition` in `crates/hyperion-sim/tests/common/mod.rs`.
+- **Plan 06:** built at `9d8e775`: `StarState`, `Phase`, `ObjectKind` (in `stellar::state`,
+  re-exported from `stellar`), `Composition`;
+  `StarDraws::{for_star, for_attempt, from_parts, median}` (`for_attempt` takes an `attempt: u32`),
+  whose attempt block is 64 words (`stellar::draws::ATTEMPT_WORDS`; a normal takes two), and the
+  provisional companion-stripped mark on the permanent stream `star.stripped`, which
+  `StarDraws::stripped()` returns as a `Mark`; `stellar::sse::{ZCoeffs, WindRecipe}`, `sse::zams`
+  and `stellar::remnant::{CompactRemnant, RemnantKind, RemnantRecipe}` (whose `CompactRemnant::new`
+  is `pub(crate)`); the generic `events` module (P06.T27): `events::{EventSeries, TimeWindow}` with
+  the constructions `PoissonBins` and `MonotonePhase` and their `RateModel`, `PhaseClock` and
+  `LinearClock`, where `RateModel::bound` takes the bin's `TimeWindow` and returns
+  `events::EventsPerSecond`, and `events::testing::assert_partition_independent`; the rule that body
+  index 0 is the primary and companions are numbered from 1; the event-tag block 0x0300–0x03FF. Not
+  built yet, by the task that builds it: `stellar::sse::{Track, evolve, lifetime}` with
+  `Track::max_radius_until` (P06.T10.c–e) and `turn_off_mass` (P06.T10.e); the helium-star entry
+  point of P06.T9, which exists only as the crate-private phase evaluator
+  `sse::helium::HeliumStar::new(m)` (ages in Myr from the helium zero-age main sequence, returning a
+  `PhasePoint`), inside the private module `sse::helium`; by ruling 34, `Track` gains a constructor
+  from a helium-star mass when T4 first needs it, and `HeliumStar` stays crate-private; `StarModel`
+  (P06.T29.a); `SystemStars` with `generate`, `summary_at`, `brief_at`, `death_time` and
+  `natal_kick`, and `ClockDeath` (P06.T29.b); from `stellar::remnant`, `KickLaw`, `StandardKickLaw`,
+  `KickLawParams` (with its provisional `stripped_share`), `NatalKick`, `KickMode` (P06.T19),
+  `Stripping`, `CollapseChannel`, `ProgenitorAtDeath` (P06.T10.e, T18), the pulsar spin-down closed
+  form (P06.T21.b); `stellar::classify` (P06.T23); `substellar::cooling` (P06.T13);
+  `stellar::fates::TrackFates` (P06.T30.b); the protocol's `system_summary` kind with
+  `SystemSummaryDto`, `StarSummaryDto` and `StellarBriefDto` (P06.T33).
+- **Plan 07:** `galaxy::gas::ccm::Band` (not re-exported from `gas`), for light curves.
+- **Plan 08** (not built at `9d8e775`; until P08.T12.c the primary's draws are attempt 0, as the
+  slice records in T2.c): on `SystemRecord`, `placement_class() -> PlacementClass` (`Alive`,
+  `Retained`, `Displaced { class, kind }` with `DisplacedKind::{Remnant, Runaway, Walkaway}`),
+  `mark_attempt()` and `kick_constraint()`, which plan 06's primary draws already honour; the seam
   `displaced::binarity::stripped_share(m, &Composition)` and `ClassTable::stripped_share_used`;
   `displaced::runaway::RunawayModel` (the runaway and walkaway shares this plan must reproduce);
   `kick_bins::speed_bin_shares` (the low-mode share).
-- **Plan 09:** from `catalogue_classes`, `ClassId`, `ClassProcess`, `CatalogueClassSource`,
-  `CatalogueClassCell` and `CatalogueCellKey`, with the reserved values 2, 3, 5 and 6 and
-  `ClassId::cell_log2_ly()`; the `111` prefix encoding through plan 01's `CatalogueSystemId`; the
-  catalogue grid walk; `features::members::{MemberRecord, FeatureLevelList}` and the rule that
-  feature-level lists append later classes after its own (its design note 16);
-  `features::interior::{MemberClass, ClassKind}` with the binary classes and the recycled-object
-  marks of P09.T9.e; `features::cluster::ClusterModel` (`sigma(r)`, for the hard–soft boundary);
+- **Plan 09** (not built at `9d8e775`): from `catalogue_classes`, `ClassId`, `ClassProcess`,
+  `CatalogueClassSource`, `CatalogueClassCell` and `CatalogueCellKey`, with the reserved values 2,
+  3, 5 and 6 and `ClassId::cell_log2_ly()`; the `111` prefix encoding through plan 01's
+  `CatalogueSystemId`; the catalogue grid walk;
+  `features::members::{MemberRecord, FeatureLevelList}` and the rule that feature-level lists append
+  later classes after its own (its design note 16); `features::interior::{MemberClass, ClassKind}`
+  with the binary classes and the recycled-object marks of P09.T9.e;
+  `features::cluster::ClusterModel` (`sigma(r)`, for the hard–soft boundary);
   `features::shares::FeatureShares::field_factor`, through which layer D already gives up
   `type_ia::ancient_share`; the Type Ia entry (`type_ia::IaProgenitor`) and the requirement its
   P09.T35 records, that this plan's binaries redraw any explosion before +H;
   `catalogue_classes::testing::assert_complementary`.
-- **Plan 15:** `tables::type_ia_delay::DELAY_EDGES`; `tables::MANIFEST`; the tasks P15.T4.b,
-  P15.T5.c, P15.T9.b and P15.T10.b, which call this plan's code and fill this plan's
-  `tables::binary` (Design note 13).
-- **Plans 04 and 05:** the request envelope (`RequestBody`, `ResponseBody`); `SystemsInRange` rows;
-  `displays/galaxy/{SystemList, SystemReadout}.tsx`, `lib/format.ts`, `SunGlyph`.
+- **Plan 15** (not built at `9d8e775`: `hyperion-fit` holds only plan 02's `mge` task, and neither
+  `tables::type_ia_delay` nor `tables::MANIFEST` exists): `tables::type_ia_delay::DELAY_EDGES`;
+  `tables::MANIFEST`; the tasks P15.T4.b, P15.T5.c, P15.T9.b and P15.T10.b, which call this plan's
+  code and fill this plan's `tables::binary` (Design note 13).
+- **Plans 04 and 05:** the request envelope (`RequestBody`, `ResponseBody`, `REQUEST_KINDS`);
+  `SystemsInRange` rows (the wire `SystemRecord`); under `apps/hyperion/src/renderer/src/`,
+  `displays/galaxy/{SystemList, SystemReadout}.tsx`, `lib/format.ts`, `components/SunGlyph.tsx`
+  and `components/SolarMassUnit.tsx`.
 
 ## Design notes
 
@@ -413,13 +474,13 @@ where a name has changed by the time this plan runs only the call sites here cha
    largest of the four, and the 2–4% of layer D that the brainstorm itself assigns to redraw.
 9. **Redraw mechanics.** Attempt n uses draw numbers n × 64 to n × 64 + 63 on each `binary.*` stream
    and on `system.multiplicity` and `system.hierarchy`, and `StarDraws::for_attempt(seed, body, n)`
-   for every companion, which is plan 06's block of 64. This redraw never touches the primary's own
-   draws: they stay as plan 08 left them, the track draws at `record.mark_attempt()` and the
-   remnant, stripped-mark and kick fields at whichever later attempt P08.T12.c's kick loop kept on
-   that one track, because placement, the displaced classes and the supernova test have already read
-   them. An attempt is a pure function of (ID, n). After eight attempts the last hierarchy is kept
-   with its innermost period moved out of the interacting range; at a carve probability under 5%
-   that happens less than once in 10¹⁰ systems.
+   for every companion, which is plan 06's block of 64 words (`stellar::draws::ATTEMPT_WORDS`). This
+   redraw never touches the primary's own draws: they stay as plan 08 left them, the track draws at
+   `record.mark_attempt()` and the remnant, stripped-mark and kick fields at whichever later attempt
+   P08.T12.c's kick loop kept on that one track, because placement, the displaced classes and the
+   supernova test have already read them. An attempt is a pure function of (ID, n). After eight
+   attempts the last hierarchy is kept with its innermost period moved out of the interacting range;
+   at a carve probability under 5% that happens less than once in 10¹⁰ systems.
 10. **The catalogue side draws the present first.** Following the Type Ia entry, a binary class
     entry draws what defines it now (for an accreting white dwarf: the two masses, the period, the
     transfer rate; for a merger: its time T), then a history consistent with it from plan 15's
@@ -488,11 +549,21 @@ needs T2, T5 and T6–T7. T12 runs last in the sim. T13 then T14 follow T11. T15
 can land at any time after T12. Every task that changes generated output bumps `GENERATOR_VERSION`
 and regenerates goldens in its own commit; those are T1.d, T2.c, T2.d, T6, T7, T8, T10 and T15.
 
+**The vertical slice** (README, "The vertical slice to the `SYSTEM` display", ruling 33 of
+2026-09-22) takes T3.a, T1.a–b (T1.c beside them), T2.a–c, T3.b and a subset of T13 ahead of the
+rest, and changes the order above in one place: T2.c lands before T4.a, on two provisional seams
+that T1.d and T4.a later replace with a bump (see T2.c). Each of those tasks is built as written
+here; what a deferred task would supply is a plain argument, a named provisional constant or a
+documented `None`, and the task says so where it applies.
+
 All Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise. Every task that
 first draws on a domain tag adds its entry to `rng/tags.rs` under the "Plan 11" heading, so plan
-01's collision test covers it. There is no interface-reconciliation task: the names under Consumes
-were checked against the owning plans when this plan was validated, and plans this late are
-re-validated against the code when their turn comes (README).
+01's collision test covers it. That heading goes at the end of the `domain_tags!` list, because the
+macro's order fixes `tags::ALL`, which `tests/golden/rng/tags.golden` pins; the task regenerates
+that golden with `domain_tags_are_pinned`. There is no interface-reconciliation task: the names
+under Consumes were checked against the owning plans when this plan was validated, and plans this
+late are re-validated against the code when their turn comes (README). The re-validation at
+`9d8e775` is recorded in Risks.
 
 ### P11.T1 The multiplicity model
 
@@ -513,14 +584,19 @@ re-validated against the code when their turn comes (README).
   nodes, no randomness, stars only. Nothing calls them yet, so no output changes. Tests: under
   Kroupa the fraction below 0.5 M☉ is 0.764 ± 0.005 and under unscaled Chabrier 0.67 ± 0.01, against
   the 20 pc census's 0.69 (Kirkpatrick et al. 2024; the 0.759 once quoted as observed is Kroupa's
-  function itself); the gap between `stripped_share` and plan 08's `ClassTable::stripped_share_used`
-  is printed per mass for T1.d. Acceptance: `cargo test -p hyperion-sim multiplicity::quadrature`.
+  function itself); the gap between `stripped_share` and the provisional 0.25 that plan 06's
+  `KickLawParams::stripped_share` and plan 08's `ClassTable::stripped_share_used` will read (neither
+  is built at `9d8e775`) is printed per mass for T1.d. Acceptance:
+  `cargo test -p hyperion-sim multiplicity::quadrature`.
 - **P11.T1.d Replace the stand-ins (version bump; every star moves).** Four edits in one commit. (1)
   Plan 02's `StellarFates` gains a provided method
   `companion_mass_ratio_cdf(&self, m1: f64, q: f64) -> f64`, defaulting to the uniform 0.1–1 that
-  `mean_present_mass` and `stars_below` hard-code today, and both read it. (2) `MultiplicityFates`
-  wraps plan 06's `TrackFates`, overrides `mean_companions` and that method from the model (the mass
-  ratio marginalised over period), and `Galaxy` uses it for every population. (3) `stars_below` and
+  `mean_present_mass` and `stars_below` hard-code today (the companion range
+  `[max(0.1 m, 0.08 M☉), m]` of `galaxy/fates.rs`, with `MIN_MASS_RATIO` = 0.1), and both read it.
+  (2) `MultiplicityFates` wraps plan 06's `TrackFates`, overrides `mean_companions` and that method
+  from the model (the mass ratio marginalised over period), and is what plan 06's
+  `fates_for(population)` (P06.T30.a, in `galaxy/params/derive.rs`) returns for every population:
+  `Galaxy` holds no fates of its own. (3) `stars_below` and
   `all_stars_fraction_below` now agree, which a test pins. (4) Plan 08's seam
   `displaced::binarity::stripped_share` returns this plan's `stripped_share` with T4.a's threshold,
   so plan 06's provisional mark and plan 08's class table both follow; plan 06's constant
@@ -534,25 +610,32 @@ re-validated against the code when their turn comes (README).
   plan 06's kick-law tests (P06.T19.d) and plan 08's class-table tests still pass. Acceptance:
   `just ci` and `just test-slow`. T1.d lands after T4.a, which supplies the real threshold.
 
-Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`; edits in
-`galaxy/fates.rs`, `galaxy/displaced/binarity.rs`, every golden.
+Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`, a `mod` line in
+`stellar/mod.rs`; edits in `galaxy/fates.rs`, `galaxy/params/derive.rs`,
+`galaxy/displaced/binarity.rs`, every golden.
 
 ### P11.T2 Hierarchies
 
 - **P11.T2.a Types and the draw.** `SystemHierarchy`, `HierarchyNode`, `StarSlot`,
-  `MultiplicityContext`, `RedrawAttempt`, `draw_hierarchy`: multiplicity decision by integer
-  threshold on `system.multiplicity`; companion count; for each level, period, mass ratio against
-  the mass of the node inside, eccentricity, orientation (isotropic) and mean anomaly at the epoch
-  on `binary.orbit`, `binary.orientation`, `binary.phase`; which node a further companion joins on
-  `system.hierarchy`. Draw numbers follow Design note 9. Body indices and stream keys follow Design
-  note 5. Nothing calls it yet. Tests: the numbering rule gives every pair of 10⁴ hierarchies a
-  distinct key; attempt n drawn alone equals attempt n drawn after attempts 0 to n − 1.
+  `MultiplicityContext`, `RedrawAttempt` with `MAX_REDRAWS` and `DRAWS_PER_ATTEMPT` (here in
+  `stellar::multiplicity`, because `stellar::binary` does not exist yet; T4.a re-exports them),
+  `draw_hierarchy`: multiplicity decision by integer threshold on `system.multiplicity`; companion
+  count; for each level, period, mass ratio against the mass of the node inside, eccentricity,
+  orientation (isotropic) and mean anomaly at the epoch on `binary.orbit`, `binary.orientation`,
+  `binary.phase`; which node a further companion joins on `system.hierarchy`. Register those five
+  tags. Draw numbers follow Design note 9. Body indices and stream keys follow Design note 5.
+  Orbits are T3.a's `KeplerElements`. Nothing calls it yet. Tests: the numbering rule gives every
+  pair of 10⁴ hierarchies a distinct key; attempt n drawn alone equals attempt n drawn after
+  attempts 0 to n − 1.
 - **P11.T2.b Stability and the tidal cut.** The Mardling–Aarseth condition and the half-tidal-radius
   cut as redraws of the outer orbit only, at most 16 (each on the next draw numbers of the same
   attempt block, which 64 leaves room for), then the companion is dropped (counted by a test, under
-  1%). `ForcedMultiple { max_separation }` truncates at a cluster's hard–soft boundary, the
-  separation at which a pair's orbital speed equals plan 09's `ClusterModel::sigma(r)` at the
-  member's radius; T8.f supplies it.
+  1%). The tidal radius is plan 02's `PotentialTables::tidal_radius`, in metres, at the record's
+  `epoch_position()` converted with `PointLy::from`. `ForcedMultiple { max_separation }` truncates
+  at a cluster's hard–soft boundary, the separation at which a pair's orbital speed equals plan 09's
+  `ClusterModel::sigma(r)` at the member's radius; T8.f supplies it. _Slice:_ plan 09 is not built,
+  so `ForcedMultiple` is defined and tested with an explicit `max_separation`, and no caller passes
+  it until T8.f; grid systems use `Free`.
 - **P11.T2.c Wire into the system stage (version bump).** `SystemStars::generate` calls
   `draw_hierarchy` with `Free` for grid systems (`generate_in` takes the context for everything
   else); each companion gets a `StarModel` from `StarDraws::for_attempt` on its own body index, with
@@ -560,7 +643,19 @@ Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`; 
   `record.mark_attempt()`. For primaries of 8 M☉ and up the innermost period is drawn conditional on
   plan 06's stripped mark (Design note 1). `summary_at` and `brief_at` cover all stars. Bump the
   version; regenerate goldens: no primary moves, and a golden test pins that the primaries of plan
-  06's pinned IDs are bit-identical.
+  06's pinned IDs are bit-identical. _Slice:_ this lands after P06.T29.b and before T1.d and T4.a,
+  so three things it reads do not exist yet, and each is a named seam in `stellar/system.rs`:
+  - `record.mark_attempt()` is plan 08's; until P08.T12.c the primary's draws are attempt 0
+    (`StarDraws::for_star`).
+  - The stripped share is `PROVISIONAL_STRIPPED_SHARE` = 0.25 (plan 06, design note 11), and the
+    mark it is read against is `StarDraws::stripped()`, a `Mark`, compared with
+    `Threshold::from_probability`.
+  - The interacting range is a provisional function, T1.c's test stand-in promoted and named: a
+    periastron under 10 au.
+
+  T1.d replaces the share with the model's `stripped_share` and T4.a the range with
+  `can_interact`'s threshold, each with a bump. Until T4 the pair is two single stars on an orbit.
+
 - **P11.T2.d Brown-dwarf companions (version bump).** Design note 15: the decision and marks on
   `system.substellar`, `MIN_SUBSTELLAR_COMPANION_MASS`, the desert factor, the stability test of
   T2.b, `StarSlot::kind`, state from `stellar::substellar::cooling`, `ObjectKind::Substellar` in
@@ -582,25 +677,49 @@ the golden suite pass.
 ### P11.T3 Orbits on rails
 
 - **P11.T3.a Elements, solver, Roche and Peters.** Needs only plan 01, and is the first task of the
-  plan to land, because T2.a and T4.a use its types. Build `coords::{SystemVector, SystemVelocity}`
-  and `orbit::{KeplerElements, Eccentricity, solve_kepler}` (Newton iteration from a fixed starter,
-  fixed iteration count so that results are bit-reproducible, through `math`), `relative_state_at`,
-  `roche_lobe_radius`, `peters_merger_time` (with Peters's eccentricity integral as a fixed
-  quadrature) and `peters_separation_for`. Tests: `solve_kepler` residual under 10⁻¹² for e up to
-  0.99; period closure (state at t and t + P agree to 10⁻⁹ relative); symmetric in time; the
-  brainstorm's figure is reproduced: two white dwarfs a thousand years before merging have a period
-  of 80–100 s.
+  plan to land, because T2.a and T4.a use its types. It takes plan 14's P14.T2.a requirements from
+  the start (ruling 33 of 2026-09-22), so that plan 14 inherits a solver at planetary precision
+  rather than fixing one:
+  - `units::GravitationalParameter` (m³ s⁻²), added here beside plan 01's `units::consts::GM_*`,
+    which stay bare `f64`s;
+  - `coords::{SystemVector, SystemVelocity}` in `coords/frames.rs`, re-exported from `coords`;
+  - `orbit::{KeplerElements, Eccentricity, solve_kepler}`: Newton iteration from a fixed starter, a
+    fixed iteration count and never an exit on a tolerance, so that results are bit-reproducible on
+    every platform, through `math`; the starter and the count are chosen to meet the residual below
+    and documented;
+  - `relative_state_at`, which reduces the mean anomaly from `UniverseTime`'s integer seconds and
+    nanoseconds modulo the period, in integer or exactly representable arithmetic, before any
+    conversion to `f64`, so that a one-day orbit keeps its phase a thousand years out;
+  - `periapsis`, `apoapsis`, `roche_lobe_radius` (Eggleton 1983), `peters_merger_time` (with
+    Peters's eccentricity integral as a fixed quadrature) and `peters_separation_for`.
+
+  Tests: `solve_kepler` residual |E − e sin E − M| under 10⁻¹³ for e up to 0.999 (P14.T2.a's bound,
+  which supersedes 10⁻¹² to 0.99); period closure (state at t and t + P agree to 10⁻⁹ relative);
+  symmetric in time; the brainstorm's figure is reproduced: two white dwarfs a thousand years
+  before merging have a period of 80–100 s. With it, in the same round, P14.T2.a's constructors
+  (`from_semi_major_axis`, `scaled`) and their tests, and the cross-language fixture that P14.T39's
+  `orbit.ts` tests read: a golden of 32 orbits (elements, μ, a time, and the position and velocity
+  then, at round-trip precision, e from 0 to 0.999, inclinations including 0 and near 180°, times
+  on both sides of the epoch), written through `GoldenWriter` under
+  `crates/hyperion-sim/tests/golden/orbit/`, its line format documented in its header.
+
 - **P11.T3.b Star positions.** After T2.a. `star_positions_at` walks the hierarchy, places each pair
   about its barycentre and returns plan 01's `SystemPosition`s. Tests: the barycentre of every one
   of 10⁴ hierarchies stays at the origin at ±H to 1 m; a position is the same whatever was asked
   before.
 
-Files: `coords.rs`, `orbit/{mod,kepler,peters,roche}.rs`, `stellar/multiplicity/positions.rs`.
-Acceptance: `cargo test -p hyperion-sim orbit` and `multiplicity::positions`.
+Files: `coords/frames.rs` and `coords/mod.rs`, `units.rs`, `orbit/{mod,kepler,peters,roche}.rs`, a
+`pub mod orbit` line in `lib.rs`, `stellar/multiplicity/positions.rs`. Acceptance:
+`cargo test -p hyperion-sim orbit` and `multiplicity::positions`.
 
 ### P11.T4 The binary evolution engine
 
 Source throughout: Hurley, Tout and Pols (2002), section and equation numbers in doc comments.
+
+A star stripped to its helium core (T4.c, T4.d, T4.e) is a plan 06 `Track` like any other (ruling
+34 of 2026-09-22): plan 06's `Track` gains a constructor from a helium-star mass, over P06.T9's
+entry point, in the first subtask here that needs it, so that its winds, remnant and death stay in
+plan 06's one place. `sse::helium::HeliumStar` stays crate-private, and this plan never wraps it.
 
 - **P11.T4.a Types and the pre-test.** `BinaryInput`, `BinaryTimeline`, `Segment`, `SegmentKind`,
   `BinaryState`, `can_interact` (Design note 7, over plan 06's `Track::max_radius_until`), and
@@ -673,7 +792,8 @@ under `just test-slow`.
 ### P11.T6 The Type Ia coupling
 
 Build `tables/binary.rs` with `IaPoolChannel`, `IaYieldTable` and the scratch `IA_YIELD` (η = 1 ÷ 6
-everywhere; Design note 13), registered in `tables::MANIFEST` as provisional; `IaExplosionMark`, the
+everywhere; Design note 13), marked provisional in its header and, once plan 15's P15.T2 has built
+`tables::MANIFEST`, registered there as provisional; `IaExplosionMark`, the
 reader; and the mark: a pooled event explodes when an integer draw on `binary.ia_mark` falls under
 η's threshold for its delay bin and channel. An unexploded pooled event stays what the engine made
 it. In `SystemStars::generate`, a binary whose marked explosion lies at or before +H redraws (Design
@@ -793,7 +913,10 @@ zero). Acceptance: `cargo test -p hyperion-sim catalogue_classes::binary` and `j
 Register the seven event tags of Provides in `id/event_tags.rs`, numbers explicit, with their
 `DomainTag`s of scope `Event`. Build `events_in(system, window)`, `active_at(system, t)` and
 `light_curve(event, dt, band)` over plan 06's `events` module, with no construction of this plan's
-own:
+own. Each tag's series is an `events::EventSeries::new(seed, tag, subject)` (the subject a
+`BodyId` or `SystemId` as `EventSubject`), which derives the `EventKey`; a series goes to one
+construction only, and a `RateModel`'s `bound` takes the bin's `TimeWindow` and returns
+`EventsPerSecond` (P06.T27 as built):
 
 - `MonotonePhase` with a `LinearClock`: classical and recurrent novae with P = P_rec; dwarf novae
   with a period from the transfer rate against the disc-instability rate, skip mark on; X-ray
@@ -874,18 +997,38 @@ Acceptance: `just test-slow` passes; `just ci` stays green.
 ### P11.T13 Protocol and server
 
 Extend plan 06's `StarSummaryDto` with `body_index` and `binary_class: BinaryClassDto`; add
-`OrbitDto` (period, semi-major axis, eccentricity, inclination) and `HierarchyDto` (a flat list of
-nodes); `SystemSummaryDto` gains `hierarchy`, evaluated at the request's time; `StellarBriefDto`
-gains `star_count`. Every change is an additive field under plan 04's convention, on plan 06's
-`system_summary` kind and on the `systems_in_range` rows; no request kind is added. The server
-caches `SystemStars` in the byte-bounded system cache that plan 06 instantiated from plan 04's
-`ByteLru`, with `HeapBytes` extended to hierarchies and timelines. Run `just gen-protocol`.
+`OrbitDto` and `HierarchyDto`; `SystemSummaryDto` gains `hierarchy`, evaluated at the request's
+time; `StellarBriefDto` gains `star_count`. By ruling 33 of 2026-09-22 the two new types carry what
+the client needs to place and propagate every star itself (plan 14's D18), and plan 14's
+`BodyOrbitDto` wraps the same `OrbitDto`, so the shape is fixed here, before any client code is
+written:
+
+- `OrbitDto`: the whole element set, not only the period, semi-major axis, eccentricity and
+  inclination: also the longitude of the ascending node, the argument of periapsis and the mean
+  anomaly at the epoch, all in radians, and the gravitational parameter μ in m³ s⁻². Every field
+  name carries its unit (`period_s`, `semi_major_axis_m`, `mu_m3_s2`, …), as plan 06's DTOs do.
+- `HierarchyDto`: a flat list of nodes, each star's node with its body index and its mass, and each
+  pair's with its two children and its `OrbitDto`. The masses are those `star_positions_at` uses, so
+  that the client places the stars about each barycentre exactly as the server does.
+
+This task designs the exact fields. Every change is an additive field under plan 04's convention,
+on plan 06's `system_summary` kind (P06.T33) and on the `systems_in_range` rows; no request kind is
+added. As in P06.T33, an optional field takes `#[serde(default)]`, `skip_serializing_if` and ts-rs's
+`optional`, so plan 04's and plan 06's pinned wire forms stay valid byte for byte. The server caches
+`SystemStars` in the byte-bounded system cache that plan 06's P06.T34 builds, a `SharedByteLru`
+keyed by `(GalaxyKey, SystemId)`, with `HeapBytes` extended to hierarchies and timelines. Run
+`just gen-protocol`.
+
+_Slice:_ the vertical slice (README) takes `OrbitDto`, `HierarchyDto` and `body_index` first, since
+the `SYSTEM` display needs them and nothing else here. `binary_class`, which needs T5's classes,
+and `star_count` come with the rest of this task, each an additive field.
 
 Files: `crates/hyperion-protocol/src/*.rs`, `crates/hyperion-server/src/*` (summary handler, cache
 sizing), `packages/protocol/src/generated/*`, `packages/protocol/src/index.ts`.
 
 Tests: wire-form tests for each type; a server integration test requests the summary of a pinned
-triple and gets three stars and two orbits. Acceptance: `just ci`.
+triple and gets three stars and two orbits, with the elements and μ of each and the stars' masses.
+Acceptance: `just ci`.
 
 ### P11.T14 Display
 
@@ -986,3 +1129,50 @@ that brown-dwarf companions can be retuned without touching a star; the shapes o
   conditionally on them.
 - **The fast and slow split** (Design note 12) is this plan's, not the brainstorm's. If plan 12's
   scan proves fast enough without it, the two class values can merge before the first release.
+- **Re-validated at `9d8e775` for the vertical slice** (round 7, the `doc` lane). Plans 01–05 and 07
+  are built, plan 06 in part (T1, T2, T4–T9, T10.a–b, T11, T27), plans 08, 09 and 15 not at all. The
+  plan text now follows the code in these places:
+  - `coords` is split into files, so the two vectors go in `coords/frames.rs`.
+  - `units::GravitationalParameter` is T3.a's, which also takes P14.T2.a's integer-seconds
+    reduction, fixed iteration count and 10⁻¹³ residual to e = 0.999 (ruling 33).
+  - `RedrawAttempt`, `MAX_REDRAWS` and `DRAWS_PER_ATTEMPT` move to `stellar::multiplicity`, because
+    T2.a builds them before `stellar::binary` exists.
+  - Plan 06's attempt block is 64 words (`ATTEMPT_WORDS`), not draws, and the stripped mark is a
+    `Mark`.
+  - The samplers are `Stream` methods, and `PowerLaw::new` and `PiecewiseLinear::new` return
+    `Result`s.
+  - Chabrier's scale is `Chabrier::PROVISIONAL_HIGH_MASS_SCALE`; there is no `tables::chabrier`.
+  - `mean_present_mass`, `stars_below` and `mean_stars_per_system` are free functions of
+    `galaxy::fates`, and `Galaxy` holds no fates, so T1.d goes through P06.T30.a's `fates_for`.
+  - Plan 07's band is `galaxy::gas::ccm::Band`, and plan 06's `events` take an `EventSeries`.
+  - `tables::MANIFEST` does not exist, so a provisional table says so in its header until P15.T2.
+  - New tags go at the end of `domain_tags!`, which `tags.golden` pins in order.
+  - T13's `OrbitDto` carries the whole element set and μ, and `HierarchyDto` the stars' masses
+    (ruling 33).
+
+  Pending re-validation, because what they read is not built:
+  - T1.d (plan 08's seam, P06.T30);
+  - T2.b's `ForcedMultiple` (plan 09);
+  - T4 (P06.T10.c–e, T18, T19);
+  - T6–T8 (plans 09 and 15);
+  - T10 (plan 08);
+  - the server half of T13 (P06.T33–T34).
+
+- **For the orchestrator to rule: how T4 reaches a helium star.** Consumes asks for "a track from a
+  helium-star mass". What exists is `sse::helium::HeliumStar::new(m)`, a crate-private phase
+  evaluator in a private module, which counts in Myr from the helium zero-age main sequence and
+  returns a `PhasePoint`. Plan 11's stripped companions (T4.c, T4.d) need it as a star with a state
+  at any age. The options:
+  - (a) P06.T10.c–e's `Track` gains a constructor from a helium-star mass, so plan 11 sees only
+    `Track`. This is a change to plan 06's Provides, made while `starA` builds `Track`.
+  - (b) `sse` re-exports `HeliumStar` `pub(crate)` and plan 11 wraps it in a segment of its own
+    timeline. This duplicates the hand-over logic that `Track` will hold.
+
+  Ruled (ruling 34): option (a), plan 06's `Track` gains a constructor from a helium-star mass when
+  P11.T4 first needs it, and `HeliumStar` stays crate-private.
+
+- **The vertical slice** (README, "The vertical slice to the `SYSTEM` display (2026-09-23)"). This
+  plan's tasks in it are T3.a (with P14.T2.a), T1.a–b (T1.c beside them), T2.a, T2.b, T3.b, T2.c on
+  its provisional seams, and the `OrbitDto`, `HierarchyDto` and `body_index` of T13. Everything else
+  waits. Until T4–T11 every pair is two single stars on an orbit, and until T1.d the companions the
+  budget counts differ from those drawn by a few per cent.

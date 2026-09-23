@@ -111,6 +111,9 @@ Elsewhere in `hyperion-sim`:
 - `stellar::substellar::giant_cooling(mass, age, comp) -> CoolingState` (luminosity, radius,
   effective temperature), the cooling fit for 0.3–13 M_Jup, continuous at its upper end with plan
   06's `stellar::substellar::cooling`. Plan 14 consumes both as "plan 13's cooling fits".
+  `CoolingState` is this plan's type, beside plan 06's `cooling`, which returns a `StarState`. By
+  ruling 34 there are two types, one per kind of object, and no conversion between them: a host (a
+  star or a brown dwarf) is always a `StarState`, and a giant planet's interior a `CoolingState`.
 - `imf::MassBand` gains `BrownDwarf` and `RoguePlanet`. `ShareMatrix::share` returns, for those two
   bands, objects per system of the population, not a share. `BandShares` stays five-band.
 - `placement`: `SUBSTELLAR_LAYERS: [LayerSpec; 2]` (brown dwarfs at 16 ly, rogue planets at 4 ly),
@@ -120,12 +123,17 @@ Elsewhere in `hyperion-sim`:
 - `query`: plan 03's `SubstellarRequest` values other than `None` are accepted;
   `MassFloor::{BrownDwarfs, RoguePlanets}` are the two steps below `LayerA`; `check_index_headroom`
   covers the two layers.
-- `Galaxy::substellar(&self) -> &SubstellarAbundance` and, if plan 02 lacks it,
-  `Galaxy::mean_stars_per_system()`.
+- `Galaxy::substellar(&self) -> &SubstellarAbundance` and `Galaxy::mean_stars_per_system()`. Plan
+  02 has the quadrature, the free function `galaxy::fates::mean_stars_per_system(f, fates) -> f64`,
+  but `Galaxy` has no such method and holds no fates, so this plan adds the method over the
+  galaxy's mass function and the fates `galaxy/params/derive.rs` builds (`ProvisionalFates` today;
+  plan 06's `fates_for` after P06.T30.a, and plan 11's `MultiplicityFates` after P11.T1.d).
 - `units`: `PerCubicAu`. (`JupiterMasses`, `EarthMasses` and their conversions are plan 01's.)
 - Domain tags, as entries of plan 01's `domain_tags!` registry in `rng/tags.rs` under a "Plan 13"
   heading: `SUBSTELLAR_MASS: System = "substellar.mass"` and, reserved and unused,
-  `INTERSTELLAR_SMALL_BODIES: Cell = "interstellar.small_bodies"`.
+  `INTERSTELLAR_SMALL_BODIES: Cell = "interstellar.small_bodies"`. The heading goes at the end of
+  the list, because the macro's order fixes `tags::ALL`, which `tests/golden/rng/tags.golden` pins;
+  the task that adds a tag regenerates that golden with `domain_tags_are_pinned`.
 
 Protocol and client:
 
@@ -134,12 +142,14 @@ Protocol and client:
   once. A `substellar` group in `GalaxyParameters` with `substellar.brown_dwarfs_per_system`,
   `substellar.rogue_planets_per_system`, `substellar.rogue_planet_cap_per_system` and
   `substellar.rogue_planets_capped`.
-- Client: `components/EarthGlyph.tsx` and `components/EarthMassUnit.tsx` beside plan 05's `SunGlyph`
-  and `SolarMassUnit`. This plan is their only owner, and plan 14 consumes them. In plan 05's
-  `lib/format.ts`: `formatMassMearth(massMearth)` and `formatSubstellarMass(massMsun, layer)`, which
-  returns the value and which of the two units it is in (Design note 14). The `triangle-down` value
-  of `SymbolShape`; two steps in the `MIN MASS` group of `ChartControls`; legend, list, readout and
-  census entries for the two kinds.
+- Client, under `apps/hyperion/src/renderer/src/`: `components/EarthGlyph.tsx` and
+  `components/EarthMassUnit.tsx` beside plan 05's `components/SunGlyph.tsx` and
+  `components/SolarMassUnit.tsx`. This plan is their only owner, and plan 14 consumes them. In plan
+  05's `lib/format.ts`: `formatMassMearth(massMearth)` and `formatSubstellarMass(massMsun, layer)`,
+  which returns the value and which of the two units it is in (Design note 14). The `triangle-down`
+  value of `SymbolShape` (in `spatial/marks.ts`, its outline in `spatial/symbols.ts`); two steps in
+  the `MIN MASS` group of `ChartControls`; legend, list, readout and census entries for the two
+  kinds.
 
 Convention for plan 14, matching its D3 (`body_index` = `slot << 8 | sub`, with slot `0x00` the
 stellar level, where plan 06 puts the primary at index 0 and plan 11 its companions at 1–15): a
@@ -149,49 +159,70 @@ This plan generates and stores no body index other than `0x0000`.
 
 ## Consumes
 
+Re-validated against the code at `9d8e775` (see Risks): where an item is built its real path or
+signature is given, and where it is not, the task that builds it is named.
+
 - **Plan 01:** `id::{SystemId, Layer}` with `Layer::BrownDwarf` (value 5, 16 ly cells, 19-bit index)
   and `Layer::RoguePlanet` (value 6, 4 ly cells, k = −1, 45 cell bits, the three spare bits, 16-bit
   index) already encoded and canonical, `Layer::cell_size_ly()` and `Layer::index_bits()`;
-  `Designation`; `rng` with the Poisson sampler (PTRS at means of tens of thousands),
-  `PowerLaw::new(α, lo, hi)` for a density ∝ x^−α with both limits explicit, and integer-threshold
-  decisions; `Stream::open(Seed, DomainTag, ObjectKey)` and the `domain_tags!` registry; `units`,
-  including `JupiterMasses`, `EarthMasses` and the constants of `units::consts`;
-  `coords::CellSize::Ly4` and the position draw of its Design note 23; `hyperion-testkit` (goldens,
-  `stats`, order independence); `GENERATOR_VERSION`.
-- **Plan 02:** `Galaxy`, `Fields` (`densities`, `layer_density`) and `bounds` (`component_bounds`,
-  `layer_bound`, `CellBox`) for every component, which the substellar layers reuse unchanged;
-  `ShareMatrix`; `imf::{MassFunction, MassBand, BandShares}`;
-  `fates::StellarFates::mean_companions`, from which the mean number of stars per system follows
-  (plan 02's own tests put it at 1.33–1.45); `PotentialTables::tidal_radius`.
-- **Plan 03:** `placement` (`LayerSpec`, `CellKey`, candidate counts from bound × volume, candidate
-  streams, population pick by the odds at the candidate's position, age draw from the population's
-  distribution, ages from −H, `SystemRecord`, `resolve`, the clamp and `check_index_headroom` of its
-  Design note 6), `query` with `RangeQuery`, `RangeResult`, `Census`, `MassFloor` and
-  `SubstellarRequest` (the request enum exists already and is rejected with
-  `BuildRangeQueryError::SubstellarLayersUnavailable` until this plan), the padding and unborn
-  filter, the drift hook.
+  `Designation`; `rng` with the Poisson sampler (`Stream::poisson(mean)`, by inversion below a mean
+  of 10 and PTRS above, to 2³¹), `PowerLaw::new(exponent, lo, hi)` for a density ∝ x^−exponent with
+  both limits explicit (it returns a `Result`, and is drawn with `Stream::power_law(&law)`), and
+  integer-threshold decisions; `Stream::open(Seed, DomainTag, ObjectKey)` and the `domain_tags!`
+  registry; `units`, including `JupiterMasses`, `EarthMasses` and the constants of `units::consts`
+  (`JUPITER_MASS_KG`, `EARTH_MASS_KG`, `SOLAR_MASS_KG`); `coords::CellSize::Ly4` and the position
+  draw of its Design note 23 (`GenCell::position_from_words`); `hyperion-testkit` (the `golden!`
+  harness with `GoldenWriter`, `stats`, `order::assert_order_independent`); `GENERATOR_VERSION`.
+- **Plan 02:** `Galaxy`, `Fields` (`densities`, `layer_density`) and, in `galaxy/bounds.rs`, the
+  `Fields` methods `component_bounds` and `layer_bound` with `CellBox`, for every component, which
+  the substellar layers reuse unchanged; `galaxy::shares::ShareMatrix` (`share(band, population)`,
+  `component_share(band, component)`); `imf::{MassFunction, MassBand, BandShares}`;
+  `fates::StellarFates::mean_companions` and the free function
+  `fates::mean_stars_per_system(f, fates)` built on it (plan 02's own tests put it at 1.33–1.45);
+  `PotentialTables::tidal_radius(m: SolarMasses, p: &PointLy) -> Metres`.
+- **Plan 03:** `placement` (`LayerSpec` and `STELLAR_LAYERS`, `layer_spec(layer)`, `CellKey` with
+  `new` and `of`, `BuildCellKeyError::NotStellarLayer`, `ResolveSystemError::LayerNotGenerated`,
+  candidate counts from bound × volume, candidate streams, population pick by the odds at the
+  candidate's position, age draw from the population's distribution, ages from −H, `SystemRecord`,
+  `resolve(galaxy, id)`, the clamp and `check_index_headroom(galaxy)` of its Design note 6), `query`
+  with `RangeQuery`, `RangeResult`, `Census`, `MassFloor` and `SubstellarRequest` (the request enum
+  exists already, with the builder's `substellar(request)`, and is rejected with
+  `BuildRangeQueryError::SubstellarLayersUnavailable` until this plan), `LayerCounts` (seven
+  entries), `expected_counts`, `cells_in_sphere`, `count_cells_in_sphere`, the padding and unborn
+  filter, and the drift hook, `query::motion::epoch_velocity(galaxy, record)` (zero until plan 08).
 - **Plan 04:** the request envelope (no new kind is added here); `MassLayer`,
   `SystemsInRangeRequest`, `SystemsInRange`, `Census`, `LayerCensus`, `SystemRecord`,
   `GalaxyParameters` with its groups, `ParameterValue`, the cell cache bounded by bytes; its
   statement under "Extending the convention" that `MassLayer` will grow. The optional request field
   `include_substellar` that it reserves there is not used (Design note 9).
-- **Plan 05:** `symbols.ts` (`symbolOutline`, `SIZE_CLASS_REM`), `marks.ts` (`SymbolShape`),
-  `ChartControls.tsx`, `CensusReadout.tsx`, `SystemList.tsx`, `SystemReadout.tsx`,
-  `SymbolLegend.tsx`, `parameterLabels.ts`, `lib/format.ts`, `lib/galaxy/wire.ts` (`layerIndex`),
-  `SunGlyph`, `SolarMassUnit`, `UnitLabel`, `RADIUS_STEPS_LY` running down to hundredths of a
-  light-year, and the guide's reservation of a drawn `⊕` (P05.T2.d).
-- **Plan 06:** `stellar::substellar::cooling(mass, age, comp) -> StarState`, valid 0.01–0.08 M☉ (its
-  P06.T13, "shared with plan 13"), the classification that gives L, T and Y,
-  `ObjectKind::Substellar`, `stellar::system::draw_metallicity`, `StellarBrief` and its wire form
-  `StellarBriefDto` behind the request flag `include_stellar`, and `starSymbols.ts`, whose Design
-  note 17 already draws a substellar object as a circle.
+- **Plan 05**, under `apps/hyperion/src/renderer/src/`: `spatial/symbols.ts` (`symbolOutline`,
+  `SIZE_CLASS_REM`, the `OUTLINES` record), `spatial/marks.ts` (`SymbolShape`, today `circle`,
+  `diamond`, `square` and `triangle`), in `displays/galaxy/`: `ChartControls.tsx`,
+  `CensusReadout.tsx`, `SystemList.tsx`, `SystemReadout.tsx`, `SymbolLegend.tsx` and
+  `parameterLabels.ts`; `lib/format.ts`, `lib/galaxy/wire.ts` (`layerIndex`, an exhaustive `switch`
+  over `MassLayer`), `components/{SunGlyph, SolarMassUnit, UnitLabel}.tsx`, `RADIUS_STEPS_LY` in
+  `spatial/scale.ts`, running down to hundredths of a light-year, and the guide's reservation of a
+  drawn `⊕` (P05.T2.d).
+- **Plan 06:** built at `9d8e775`: `ObjectKind::Substellar` (in `stellar::state`, re-exported from
+  `stellar`). Not built yet, by the task that builds it: `stellar::substellar::cooling`, returning a
+  `StarState`, valid 0.01–0.08 M☉ (its P06.T13, "shared with plan 13", in the `starB` lane in round
+  7); the classification that gives L, T and Y (P06.T23.c); `system::draw_metallicity` (P06.T3,
+  `starB`, round 7); `StellarBrief` (P06.T29.b) and its wire form `StellarBriefDto` behind the
+  request flag `include_stellar` (P06.T33); and `lib/galaxy/starSymbols.ts` (P06.T35.b), whose
+  Design note 17 already draws a substellar object as a circle.
 - **Plan 08 (soft):** velocities per population through plan 03's drift hook, which is keyed by ID
   and population and so serves these layers unchanged.
 - **Plan 09 (soft):** `features::shares::FeatureShares::field_factor(population, band)`, the factor
   1 − φ, which gains the two new bands (Design note 4).
-- **Plan 15 (soft):** the fitting toolchain (`just fit <task>`, `just fit-check`, the table header,
-  `tables.lock`, `data/<dataset>/PROVENANCE.toml`), if the giant-planet cooling fit of P13.T5.b
-  needs a table and not only published power laws.
+- **Plan 15 (soft):** the fitting toolchain, if the giant-planet cooling fit of P13.T5.b needs a
+  table and not only published power laws. Plan 15 is not built at `9d8e775`: there is no
+  `just fit`, `just fit-check`, `tables.lock` or `PROVENANCE.toml`. What exists is plan 02's
+  convention in `crates/hyperion-fit`: one task per module under `src/tasks/` with `fit()` and
+  `render()`, run as `hyperion-fit run <task>` (`cargo run -p hyperion-fit -- run mge` today), a
+  table under `crates/hyperion-sim/src/tables/` whose header names the tool, its inputs and its
+  version (the README's convention, as `tables/mge.rs` has it), and a test in
+  `crates/hyperion-fit/tests/` that renders the fit again and compares it with the committed table
+  byte for byte. P15.T2 later registers existing tables under its own grammar.
 
 ## Design notes
 
@@ -296,9 +327,9 @@ This plan generates and stores no body index other than `0x0000`.
 14. **Units on the consoles.** Every planetary mass is shown in M⊕, here and in plan 14 (its D19):
     the guide asks for one unit per quantity everywhere on the ship, and a second planetary unit
     would need a Jupiter sign that B612 lacks as it lacks `☉`. So a rogue planet's mass is in M⊕ (up
-    to `4,131 M⊕`), and a brown dwarf's is in M☉ (`0.052 M☉`), the unit of the stellar sequence it
-    continues. No Jupiter-mass unit enters the guide. The two new floor steps read `0.012 M☉` and
-    `0.33 M⊕`.
+    to `4131 M⊕`, the guide grouping digits only from five), and a brown dwarf's is in M☉
+    (`0.052 M☉`), the unit of the stellar sequence it continues. No Jupiter-mass unit enters the
+    guide. The two new floor steps read `0.012 M☉` and `0.33 M⊕`.
 
 15. **Symbols.** Plan 06 uses circle, ringed circle, diamond, triangle and square, and already draws
     `ObjectKind::Substellar` as a circle. A brown dwarf keeps the circle, at layer A's size class,
@@ -313,7 +344,13 @@ Parallelism: T1, T5.b, T5.c and T6 are independent of everything else here (T5.c
 needs T1. T3 needs T2. T4, T5.a and T5.d need T3 and are independent of each other. T7 needs T4 and
 T5.a. T8.a and T8.b need only plan 05; T8.c and T8.d need T7. T9 needs T3–T5 and can run beside T7
 and T8. Every domain tag is added to `rng/tags.rs` in the task that first opens a stream under it,
-as plan 01 requires.
+as plan 01 requires, at the end of the list (Provides).
+
+**The vertical slice** (README, "The vertical slice to the `SYSTEM` display", ruling 33 of
+2026-09-22) takes T5.b, T5.c, T8.a, T8.b and the `triangle-down` outline of T8.c ahead of the rest,
+because plan 14 needs the giant-planet cooling fit, the Earth-mass unit and the planet symbol. Until
+the layers are placed (T3), plan 14's `HostKind` is always `Stellar`, although all three of its
+values exist.
 
 ### P13.T1 Parameters, units and mass functions
 
@@ -322,11 +359,12 @@ Register `SUBSTELLAR_MASS` in `rng/tags.rs`; the mass stream is
 `Stream::open(seed, tags::SUBSTELLAR_MASS, ObjectKey::from(id))`. `draw_brown_dwarf_mass` samples
 the substellar branch of the `MassFunction` between the band edges; add that branch to plan 02's
 `Kroupa` and `Chabrier` implementations as a separate method, leaving every existing method's output
-unchanged. `draw_rogue_planet_mass` uses plan 01's `PowerLaw::new(1.96, lo, hi)` (its α is the
-positive exponent of a density ∝ x^−α, here in dN ÷ dM) with both limits explicit.
-`rogue_planets_above` is the closed-form integral. Re-check the slope, normalisation and lower mass
-against Sumi et al. (2023), the Jupiter limit against Mróz et al. (2017), and the substellar indices
-against Kroupa (2001) and Chabrier (2003).
+unchanged. `draw_rogue_planet_mass` uses plan 01's `PowerLaw::new(1.96, lo, hi)` (its exponent is
+the positive exponent of a density ∝ x^−exponent, here in dN ÷ dM) with both limits explicit, built
+once (it returns a `Result`, which a constant law cannot fail) and drawn with
+`Stream::power_law(&law)`. `rogue_planets_above` is the closed-form integral. Re-check the slope,
+normalisation and lower mass against Sumi et al. (2023), the Jupiter limit against Mróz et al.
+(2017), and the substellar indices against Kroupa (2001) and Chabrier (2003).
 
 - Files: `crates/hyperion-sim/src/galaxy/substellar/{mod.rs,params.rs,mass.rs}`,
   `crates/hyperion-sim/src/rng/tags.rs`, plan 02's `imf` module.
@@ -338,15 +376,18 @@ against Kroupa (2001) and Chabrier (2003).
 
 ### P13.T2 Abundance, the per-galaxy cap and the share matrix
 
-Build `substellar::abundance` by Design notes 2, 3 and 8. Add `Galaxy::mean_stars_per_system()` if
-missing, computed once with the quadrature of plan 02's `fates` module. Add
-`MassBand::{BrownDwarf, RoguePlanet}`; every exhaustive match on `MassBand` then fails to compile
-and is settled one by one: `BandShares` and `MassFunction::sample_in_band` reject the two values
-(they are not part of the stellar normalisation), `ShareMatrix::share` and `component_share` return
-the per-system abundance, the conversion from `id::Layer` maps the two layers, and plan 09's
-`FeatureShares::phi` and `field_factor` answer for them as for band A (Design note 4). `Galaxy`
-builds and holds a `SubstellarAbundance` and feeds it to its `ShareMatrix`. Extend plan 03's
-`check_index_headroom` to the two layers.
+Build `substellar::abundance` by Design notes 2, 3 and 8. Add `Galaxy::mean_stars_per_system()`,
+which `Galaxy` lacks: computed once, when the galaxy is built, with plan 02's existing quadrature
+`galaxy::fates::mean_stars_per_system(f, fates)` over the galaxy's mass function and the fates that
+`galaxy/params/derive.rs` builds (Provides). Add `MassBand::{BrownDwarf, RoguePlanet}`; every
+exhaustive match on `MassBand` then fails to compile and is settled one by one: `BandShares` and
+`MassFunction::sample_in_band` reject the two values (they are not part of the stellar
+normalisation), `ShareMatrix::share` and `component_share` return the per-system abundance, the
+conversion from `id::Layer` maps the two layers, and plan 09's `FeatureShares::phi` and
+`field_factor` answer for them as for band A (Design note 4), if plan 09 has landed by then (it is
+not built at `9d8e775`; if it has not, there is no factor 1 − φ yet, and plan 09's task adds the two
+bands when it lands). `Galaxy` builds and holds a `SubstellarAbundance` and feeds it to its
+`ShareMatrix`. Extend plan 03's `check_index_headroom` to the two layers.
 
 - Files: `crates/hyperion-sim/src/galaxy/substellar/abundance.rs`, plan 02's `imf`, `shares` and
   `Galaxy`, plan 03's `placement` (headroom check only).
@@ -368,8 +409,9 @@ builds and holds a `SubstellarAbundance` and feeds it to its `ShareMatrix`. Exte
 - **P13.T3.a Brown dwarfs.** Add `SUBSTELLAR_LAYERS` and make `layer_spec` answer for
   `Layer::BrownDwarf`: cell size from `Layer::cell_size_ly()` (16 ly), density and bound from
   `layer_density` and `layer_bound` with `MassBand::BrownDwarf`, population pick and age as for
-  stars, mass from `draw_brown_dwarf_mass`. `CellKey::new` stops rejecting the layer with its
-  `BuildCellKeyError`, `CellKey::of` stops returning `ResolveSystemError::LayerNotGenerated` for it,
+  stars, mass from `draw_brown_dwarf_mass`. `CellKey::new` and `CellKey::containing` stop rejecting
+  the layer with `BuildCellKeyError::NotStellarLayer`, `CellKey::of` stops returning
+  `ResolveSystemError::LayerNotGenerated` for it,
   and plan 03's tests that assert the layer is not generated are replaced in the subtask that makes
   each of them false (here and in T3.b for `CellKey`, in T3.c for `resolve`). Acceptance: where the
   system density is 0.003 per ly³ a 16 ly cell averages 2.6–3.4 brown dwarfs (the brainstorm's "two
@@ -445,12 +487,20 @@ non-grid sources gains nothing, since no feature holds substellar members.
   brainstorm cites for this range. First evaluate the paper's power laws for L, T_eff and R at 1
   M_Jup and 4.6 Gyr against Jupiter (effective temperature 100–160 K, radius within 10%). Recalled
   without the paper to hand, they miss Jupiter's luminosity severalfold, so expect to need the
-  second route: a `hyperion-fit` task `giant_cooling`, written to plan 15's conventions, that reads
-  the published model grid (committed under `crates/hyperion-fit/data/giant_cooling/` with its
-  `PROVENANCE.toml`), fits log L and R on a grid of at most 12 masses × 12 ages in log mass and log
-  age, and writes `crates/hyperion-sim/src/tables/giant_cooling.rs` with plan 15's header and lock
-  entry. Acceptance: either the power laws pass the Jupiter check and the doc comment records it, or
-  `just fit giant_cooling` writes the table and `just fit-check` passes.
+  second route: a `hyperion-fit` task `giant_cooling`, written as plan 02's `mge` was, because plan
+  15's toolchain does not exist (Consumes). It is `crates/hyperion-fit/src/tasks/giant_cooling.rs`
+  with `fit()` and `render()`, run as `hyperion-fit run giant_cooling` (a new `Command` variant and
+  `USAGE` line); it reads the published model grid, committed under
+  `crates/hyperion-fit/data/giant_cooling/`, whose source (paper, table, retrieval date) the table's
+  header records until P15.T2 brings `PROVENANCE.toml`; it fits log L and R on a grid of at most 12
+  masses × 12 ages in log mass and log age; and it writes
+  `crates/hyperion-sim/src/tables/giant_cooling.rs` under the README's header convention, marked
+  provisional, with a `mod` line in `tables/mod.rs`. P15.T2 later registers it under its own
+  grammar. Acceptance: either the power laws pass the Jupiter check and the doc comment records it,
+  or `cargo run -p hyperion-fit -- run giant_cooling` writes the table and
+  `cargo test -p hyperion-fit` passes. That test, `crates/hyperion-fit/tests/giant_cooling.rs`,
+  renders the fit again and compares it with the committed table byte for byte, as `tests/mge.rs`
+  does.
 - **P13.T5.c Cooling of giant planets.** `stellar::substellar::giant_cooling` (signature under
   Provides) for 0.3–13 M_Jup and ages from 1 Myr, from T5.b's power laws or table (interpolated
   bilinearly in log mass and log age, continuous in both, no bins in age). It must join plan 06's
@@ -458,8 +508,11 @@ non-grid sources gains nothing, since no feature holds substellar members.
   blend over 10–13 M_Jup if the two sources disagree. Tests: a 1 M_Jup object at 4.6 Gyr has an
   effective temperature of 100–160 K and a radius within 10% of Jupiter's; luminosity falls
   monotonically with age and rises with mass; state is continuous in age across ±H; golden values at
-  nine (mass, age) points. Acceptance: `cargo test -p hyperion-sim stellar::substellar::giant`
-  passes and plan 06's goldens are unchanged.
+  nine (mass, age) points, written through `GoldenWriter`. Acceptance:
+  `cargo test -p hyperion-sim stellar::substellar::giant` passes and plan 06's goldens are
+  unchanged. _Slice:_ this needs P06.T13's `cooling`, which the `starB` lane builds in round 7, and
+  lands after it merges. `CoolingState` is this plan's own type, with no conversion from or to
+  `StarState` (ruling 34).
 - **P13.T5.d The hook.** For a rogue planet the sim returns the record and its metallicity and no
   derived state. Document on `SystemKind` the body-`0x0000` convention and that plan 14's `HostKind`
   converts from it. Test: a rogue planet's summary has no stellar fields and serialises without
@@ -493,10 +546,16 @@ and plan 04's reserved `include_substellar` stays unused (Design note 9). Add th
 to `GalaxyParameters`: the three abundances as `Number { unit: None }` with origin `Derived`, and
 `rogue_planets_capped` as `Text { value: "yes" | "no" }`. The server keeps its result limit as the
 census limit and accounts a rogue-planet cell's bytes in the cell cache (a central cell holds some
-35,000 records, over a megabyte). Run `just gen-protocol`.
+35,000 records, over a megabyte). Run `just gen-protocol`. The generated `MassLayer` union then has
+two more values, and `just ci` runs `pnpm typecheck`, so this task also settles the client's
+exhaustive uses of it, with the least that compiles: `layerIndex`'s `switch` in
+`lib/galaxy/wire.ts` (both new layers give layer A's index, as T8.c keeps) and the
+`Record<MassLayer, …>` of band edges in `test/galaxyFixtures.ts`. The chart still offers only the
+five stellar steps until T8.c.
 
 - Files: `crates/hyperion-protocol/src/` (plan 04's galaxy messages), `crates/hyperion-server/src/`
-  (plan 04's handlers and caches), `packages/protocol/src/`.
+  (plan 04's handlers and caches), `packages/protocol/src/`, and under
+  `apps/hyperion/src/renderer/src/`, `lib/galaxy/wire.ts` and `test/galaxyFixtures.ts`.
 - Tests: wire-form tests pinning the JSON of a request with each new `min_layer`, of a result
   holding one of each kind, and of the parameters group; a WebSocket integration test that the
   default request returns no substellar object and a lowered `min_layer` does; a cache test that
@@ -510,25 +569,39 @@ census limit and accounts a rogue-planet cell's bytes in the cell cache (a centr
   which objects use which mass unit; add the inverted triangle to the star chart's symbol set as
   "free-floating planet" and "brown dwarf" to the circle's meanings. Acceptance:
   `grep -n "⊕\|free-floating" docs/frontend/ux-guidelines.md` finds each edit, and Prettier passes
-  on the guide.
+  on the guide. _Slice:_ by ruling 33 of 2026-09-22 the guide is the owner's to edit, so these
+  entries are drafted for the owner beside plan 14's (the orchestration notes'
+  `ux-draft-system-display.md`), and the client is built to the draft and marked for the owner's
+  confirmation, as ruling 15's `DRIVE RANGE` row was. The acceptance above holds once the owner has
+  made the edit.
 - **P13.T8.b Glyph and formatting.** `components/EarthGlyph.tsx` (an inline SVG sized to the text, a
   circle with a cross, in `currentColor`) and `components/EarthMassUnit.tsx`, modelled on `SunGlyph`
   and `SolarMassUnit`, with the accessible name "Earth masses" on the unit as a whole; in
-  `lib/format.ts`, `formatMassMearth` (two decimals below 10, one below 100, whole numbers with
-  digit grouping above) and `formatSubstellarMass(massMsun, layer)`. The character `⊕` is never
-  typed into a string that reaches the screen. Tests: the unit's accessible name; `0.33`, `17.1` and
-  `4,131` from the formatter; a brown dwarf formats in M☉ and a rogue planet in M⊕. Acceptance:
-  `pnpm test` and `pnpm lint` green.
-- **P13.T8.c Chart symbols, selector and census.** `symbols.ts` gains the `triangle-down` outline
-  and `starSymbols.ts` the two kinds (Design note 15). Every exhaustive `switch` over `MassLayer`
-  now fails to compile and is settled: plan 05's `layerIndex` gives both new layers layer A's size
-  class. `ChartControls`' `MIN MASS` group gains the steps `0.012 M☉` and `0.33 M⊕`,
-  keyboard-operable like the others, below `0.08`, which no longer reads `ALL`; the lowest step
-  does. Choosing a substellar step while the query radius would exceed the census limit is allowed,
-  and `CensusReadout` (`COMPLETE ABOVE 0.012 M☉`) tells the operator what was dropped, as it does
-  for stars. Tests: component tests for the selector steps and which one reads `ALL`, and for the
-  census line in each unit; a pure test that `triangle-down` open and filled differ only by fill and
-  share a hit area. Acceptance: `pnpm typecheck`, `pnpm lint` and `pnpm test` green.
+  `lib/format.ts`, `formatMassMearth` (two decimals below 10, one below 100, whole numbers above,
+  grouped in threes from five digits as plan 05's `formatNumber` does) and
+  `formatSubstellarMass(massMsun, layer)`. The character `⊕` is never typed into a string that
+  reaches the screen. Tests: the unit's accessible name; `0.33`, `17.1` and `4131` from the
+  formatter (not `4,131`, which the guide's grouping rule forbids); a brown dwarf formats in M☉ and
+  a rogue planet in M⊕. Acceptance: `pnpm test` and `pnpm lint` green. _Slice:_ `EarthGlyph`,
+  `EarthMassUnit` and `formatMassMearth` are built ahead of the rest (the `ui` lane, from round 7),
+  to the owner's draft of T8.a. `formatSubstellarMass` waits for T7, because the substellar values
+  of its `layer` argument arrive there. `UnitLabel` renders the wire's `Unit`, which has no
+  Earth-mass value, so `EarthMassUnit` is used directly, as `SolarMassUnit` is in `SystemReadout`
+  and `SystemList`.
+- **P13.T8.c Chart symbols, selector and census.** `spatial/marks.ts`'s `SymbolShape` gains
+  `triangle-down`, `spatial/symbols.ts` its outline, and every exhaustive `switch` over
+  `SymbolShape` its case; plan 06's `lib/galaxy/starSymbols.ts` (P06.T35.b) gains the two kinds
+  (Design note 15). T7 has already settled the exhaustive uses of `MassLayer` minimally: plan 05's
+  `layerIndex` gives both new layers layer A's size class. `ChartControls`' `MIN MASS` group gains
+  the steps `0.012 M☉` and `0.33 M⊕`, keyboard-operable like the others, below `0.08`, which no
+  longer reads `ALL`; the lowest step does. Choosing a substellar step while the query radius would
+  exceed the census limit is allowed, and `CensusReadout` (`COMPLETE ABOVE 0.012 M☉`) tells the
+  operator what was dropped, as it does for stars. Tests: component tests for the selector steps and
+  which one reads `ALL`, and for the census line in each unit; a pure test that `triangle-down` open
+  and filled differ only by fill and share a hit area. Acceptance: `pnpm typecheck`, `pnpm lint` and
+  `pnpm test` green. _Slice:_ the `triangle-down` outline, with its tests, is built ahead of the
+  rest in round 7 (the `ui` lane), because plan 14 draws every planet with it; the rest of this
+  subtask waits for T7.
 - **P13.T8.d Legend, readout, list and parameters.** `SymbolLegend` gains the inverted triangle and
   the circle's new meaning and keeps `SYMBOLS NOT TO SCALE`. `SystemReadout` shows kind, mass in the
   unit of Design note 14, age, population and metallicity, class and temperature for a brown dwarf,
@@ -636,3 +709,49 @@ Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion
   simpler and is a change to plan 03's signature that its author chose to avoid.
 - **Small-body density** rests on an unsourced figure in the brainstorm (Design note 13).
 - **P13.T8.b and T8.c's outline, as built (round 7, `ui`).** `EarthGlyph` (a 10-unit SVG circle and a cross through its centre, `M5 1V9M1 5H9`, in `currentColor`, class `glyph` as `SunGlyph`) and `EarthMassUnit` (`M` and the glyph, `role="img"` named "Earth masses") are built, with tests that the sign is drawn and never typed. `formatMassMearth` gives `0.33` and `17.1` as specified, but **`4131`, not `4,131`**: the guide groups digits from five, as plan 05's T3.a record already applies everywhere, so `12,480` is grouped and four digits are not. Two decimals would read `0.00` below 0.005 M⊕ and show no significant digit below 0.01, so from there the mass is in E notation with three figures (`1.80E-9`), the guide's form for a value outside its unit's ladder; between 0.01 and 0.1 M⊕ a moon or a Mercury still gets one or two significant figures (`0.01` for the Moon), which is **for the orchestrator to rule** now that plan 14's D19 puts moons in this unit. `formatSubstellarMass` is not built: it switches on the substellar `MassLayer` values, which the protocol does not have yet. Of T8.c only the `triangle-down` outline is built: the triangle turned over, with the same centroid and so the same hit area (tested), open and filled differing only by fill. At size class 0 its open hole is 1.75 px across at 100% (the test asserts at least the 1.5 px outline) and 0.95 px at 80%, where it barely reads open; plan 14's Risks name a fourth outline as the fallback.
+- **Re-validated at `9d8e775` for the vertical slice** (round 7, the `doc` lane). Plans 01–05 are
+  built, plan 06 in part, plans 08, 09 and 15 not at all. The plan text now follows the code in
+  these places:
+  - `Galaxy` has no `mean_stars_per_system()` and holds no fates, but plan 02's quadrature exists as
+    the free function `fates::mean_stars_per_system(f, fates)`, so T2 adds a method over it rather
+    than a quadrature.
+  - `PowerLaw::new` returns a `Result` and is drawn with `Stream::power_law`; the Poisson sampler is
+    `Stream::poisson`.
+  - The layer rejections T3 removes are `BuildCellKeyError::NotStellarLayer` (from `CellKey::new`
+    and `containing`) and `ResolveSystemError::LayerNotGenerated`; the drift hook is
+    `query::motion::epoch_velocity`.
+  - `ObjectKind` lives in `stellar::state`.
+  - Plan 15's toolchain does not exist, so T5.b's fit, if needed, follows plan 02's `mge`
+    convention (`hyperion-fit run giant_cooling`, checked by `cargo test -p hyperion-fit`).
+  - T7 must settle `layerIndex`'s exhaustive `switch` and the fixtures' `Record<MassLayer, …>`
+    itself, since `just ci` type-checks the client after `just gen-protocol`.
+  - New tags go at the end of `domain_tags!`.
+  - The heaviest rogue planet reads `4131 M⊕`, not `4,131 M⊕` (Design note 14, T8.b, and plan 14's
+    D19), because the guide groups digits only from five, as plan 05's `formatNumber` does.
+
+  Pending re-validation, because what they read is not built:
+  - T5.a (P06.T13, T23.c, P06.T3's `draw_metallicity`);
+  - T5.c's join with P06.T13 at 0.0124 M☉;
+  - T7's `StellarBriefDto` for brown dwarfs (P06.T33);
+  - T8.c's `starSymbols.ts` and T8.d's `STARS` filter (P06.T35.b);
+  - plan 09's `field_factor` (T2).
+
+- **For the orchestrator to rule: one cooling state or two.** P06.T13's `substellar::cooling`
+  returns a `StarState` (the `starB` lane builds it in round 7), T5.c's `giant_cooling` returns this
+  plan's `CoolingState` (L, R, T_eff), and plan 14's P14.T11.d, T12.a and T27 read both. The
+  options:
+  - (a) keep both, and give `CoolingState` a `From<&StarState>`, so that plan 14 reads only
+    `CoolingState` for every substellar host and body;
+  - (b) `giant_cooling` also returns a `StarState`, with `Phase::Substellar`, so that one type
+    serves and plan 14 reads `StarState`. `StarStateParts` then asks for a core mass, a mass-loss
+    rate and a phase fraction, which mean nothing for a planet;
+  - (c) plan 14 matches on the host kind and calls whichever fit applies, keeping two code paths.
+
+  Ruled (ruling 34): two types and no conversion, so a host is always a `StarState` and a giant
+  planet's interior a `CoolingState`, and P14.T12.a and P14.T11.d each accept only one of them.
+
+- **The vertical slice** (README, "The vertical slice to the `SYSTEM` display (2026-09-23)"). This
+  plan's tasks in it are T5.b, T5.c (after P06.T13), T8.a (as an owner's draft), T8.b (without
+  `formatSubstellarMass`) and T8.c's `triangle-down` outline. Nothing here is placed yet, so plan
+  14's `HostKind` is always `Stellar`, and brown dwarfs and rogue planets cannot be reached from the
+  `SYSTEM` display.
