@@ -39,6 +39,11 @@
 //! - [`orbit`]: Keplerian elements and their propagation to any time, bound and open, the
 //!   inverse from a state, Roche lobes and gravitational-wave inspiral.
 //!
+//! Planetary systems (plan 14):
+//!
+//! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
+//!   the Roche, Hill and satellite-stability limits.
+//!
 //! The crate's only runtime dependency is `libm`.
 
 pub mod coords;
@@ -47,6 +52,7 @@ pub mod galaxy;
 pub mod id;
 pub mod math;
 pub mod orbit;
+pub mod planetary;
 pub mod rng;
 pub mod stellar;
 pub mod tables;

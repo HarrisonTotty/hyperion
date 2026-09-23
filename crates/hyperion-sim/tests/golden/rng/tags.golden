@@ -100,3 +100,4 @@ star.ev.thermal_pulse (Event) = 0x8d0f3f8e667a19b5
 star.var.cycle (Event) = 0xd11f43d4799c3c16
 gas.params (Galaxy) = 0x80346fd71dc90f62
 gas.noise (Galaxy) = 0xcf9e5499210106b6
+planet.disc (System) = 0x4684d0b17ecf476e

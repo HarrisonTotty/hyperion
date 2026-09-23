@@ -427,8 +427,9 @@ planets (Weiss et al. 2018; Pu and Wu 2015), and the floor is kept exactly as wr
 population it was measured on. Applied to pairs that include a giant it would forbid the
 brainstorm's own Solar-like class, since Jupiter and Saturn sit 8.0 apart, so for those pairs the
 floor is the corresponding stability result for giants. So: for a pair of planets both under 0.1 M_J
-the floor on (a₂ − a₁) ÷ R_H is 10 for circular orbits rising to 12 with eccentricity (10 + 100 ×
-mean e, capped at 12); for a pair with a giant it is 7 (Chambers et al. 1996; Marzari and
+the floor on (a₂ − a₁) ÷ R_H is 10 for circular orbits rising to 12 with eccentricity (10 + 80 ×
+mean e, capped at 12: Pu and Wu's 100 per unit of the Rayleigh scale σₑ, which is 0.8 of the mean,
+ruling 38); for a pair with a giant it is 7 (Chambers et al. 1996; Marzari and
 Weidenschilling 2002); and for every pair the gap between the inner apocentre and the outer
 pericentre is at least 2√3 R_H, Gladman's (1993) two-planet Hill stability applied at closest
 approach. The last rule is what makes "no overlapping orbits" a theorem of the generator. Re-check:
@@ -727,12 +728,14 @@ and optional inner and outer truncation radii in metres. All draws on `planet.di
 `tags.golden` (Provides).
 
 - **P14.T3.a Masses and lifetime.** Gas mass M_d = f × M★ with log₁₀ f normal about −2.0, σ = 0.5,
-  capped at −1.0 (gravitational instability). Solid mass M_s = M_d × Z☉ × 10^[Fe/H] with Z☉ = 0.0149
-  (Lodders 2003), times an ice enhancement beyond the snow line (factor 2; Lodders 2003). The
+  capped at −1.0 (gravitational instability). Solids are Lodders' (2003, Table 11) condensate shares
+  of the gas, each × 10^[Fe/H]: rock, 0.489% of the gas, inside the snow line, and rock plus water
+  ice, 1.06%, beyond it, a step of 2.17 (ruling 38; the protosolar Z☉ = 0.0149 bounds both, where
+  the literal "Z☉ × 10^[Fe/H], times 2" would have put twice the heavy elements into solids). The
   lifetime is an argument of `disc::derive`, not a draw here (ruling 33 of 2026-09-22, D12):
-  P06.T15.c's law, exponential with a mean of 2.5 Myr × (M★ ÷ M☉)^−½ held to 0.3–15 Myr (Mamajek
-  2009, AIP Conf. Proc. 1158, 3, whose e-folding time of the disc fraction is the survival function
-  of an exponential), in `stellar/premain.rs`. For a circumstellar disc the caller applies it to the
+  P06.T15.c's law, exponential with a mean of 2.5 Myr at 1 M☉ scaled by m^−0.1 below it and m^−1.06
+  above, held to 0.3–15 Myr (Mamajek 2009, AIP Conf. Proc. 1158, 3; Luhman et al. 2005; Ribas et al.
+  2015; ruling 38), in `stellar/premain.rs`. For a circumstellar disc the caller applies it to the
   star's own rank, `StarDraws::disc_lifetime()` on `star.disc_lifetime`, so that the star's T Tauri
   class (P06.T24) and its planets see the same disc. Only for a circumbinary disc does the caller
   (T9.c) draw a rank on `planet.disc`, and apply the same law at the pair's total mass. For a host
@@ -743,19 +746,24 @@ and optional inner and outer truncation radii in metres. All draws on `planet.di
 - **P14.T3.b Geometry.** `snow_line(L)` = 2.7 au × √(L ÷ L☉). Inner edge: the larger of 2.5 zero-age
   stellar radii, the star's fluid Roche limit for a 1,000 kg/m³ body, and a magnetospheric
   truncation radius at a drawn corotation period, log-normal about 8 days, σ = 0.25 dex (the
-  observed inner edge of Kepler systems near 10 days; Mulders et al. 2018). Outer radius r_c = 30 au
-  × (M★ ÷ M☉)^0.5 with 0.3 dex of scatter; surface density Σ ∝ r⁻¹ exp(−r ÷ r_c), normalised to M_s.
-  Then truncate to the radii passed in, renormalising nothing: a truncated disc has lost that mass.
+  observed inner edge of Kepler systems near 10 days; Mulders et al. 2018). Characteristic radius
+  r_c = 30 au × (M★ ÷ M☉)^0.5 with 0.3 dex of scatter; surface density Σ ∝ r⁻¹ exp(−r ÷ r_c), the
+  self-similar profile, normalised to M_s from the inner edge to infinity, with the outer edge at
+  3 r_c, inside which about 95% of the mass lies (ruling 38: r_c is not the edge, so a Kuiper-like
+  belt has solids beyond it). Then truncate to the radii passed in, renormalising nothing: a
+  truncated disc has lost that mass.
   The orbit zone (T9.c) and the strip radius of D14 (T29) are what callers pass.
   - _Tests:_ `snow_line` of 1 L☉ is 2.7 au; the integrated surface density returns M_s to 10⁻⁹ for
     an untruncated disc; inner edge < outer edge or the disc is `Disc::None`.
 - **P14.T3.c `Disc` type** with getters `gas_mass`, `solid_mass`, `solid_mass_between(a, b)` (closed
   form of the Σ above), `lifetime`, `snow_line`, `inner_edge`, `outer_edge`, and `isolation_mass(a)`
-  = the mass a body can sweep from its feeding zone of 10 Hill radii, solved in closed form from Σ
-  (Lissauer 1987).
+  = the mass a body can sweep from its feeding zone of 2√3 Hill radii either side, solved in closed
+  form from Σ (Lissauer 1987; ruling 38).
   - _Tests:_ `solid_mass_between` over the whole disc equals `solid_mass`, and is additive over
-    adjoining intervals to 10⁻¹²; a minimum-mass solar disc gives an isolation mass of 0.05–0.2 M⊕
-    at 1 au and 3–15 M⊕ at 5 au.
+    adjoining intervals to 10⁻¹²; Hayashi's (1981) minimum-mass nebula (solids of 7.1 g cm⁻² ×
+    (r ÷ 1 au)^−3/2 inside 2.7 au and 30 g cm⁻² × (r ÷ 1 au)^−3/2 beyond) gives an isolation mass
+    of about 1 M⊕ at 5 au (Kennedy and Kenyon 2008, §2), and a disc enhanced to Σ = 10 g cm⁻² gives
+    0.05–0.2 M⊕ at 1 au and 3–15 M⊕ at 5 au (Armitage 2007, eqs. 202–203: 0.07 and 9 M⊕).
   - _Accept (all of T3):_ `cargo test -p hyperion-sim planetary::disc`.
 
 #### P14.T4 Architecture classes and their frequencies, written down
@@ -2226,3 +2234,133 @@ it:
     each a thousand years out, agree to 10⁻⁹ only if the client reduces `t_s % period` before
     adding `t_ns`, as the server does. JavaScript's `%` is exact, and a float of seconds times
     the mean motion is not enough.
+- **Deviations in P14.T1.b, T1.c and T3, as built (`planet`, round 7).**
+  - _T1.b._ `planetary/{mod, error, index, context, params, system, record}.rs`, with `context`,
+    `system` and `record` documentation only. `ResolveBodyError`'s variants carry their causes,
+    `NoSuchSystem(ResolveSystemError)` and `MalformedIndex(DecodeBodyIndexError)`, with `From` for
+    both and `source()`; `EncodeBodyIndexError` is `SlotOutOfRange`, `SubOutOfRange` and
+    `SubNotInSlot { slot, sub }`, and `DecodeBodyIndexError` is `ReservedSlot { raw }` and
+    `ReservedSub { raw }`. The "Plan 14" heading of `rng/tags.rs` lists every name and scope of
+    Provides; `planet.disc` (`System`) is its one entry so far, the only line `tags.golden` gains.
+    Plan 07's test that `gas.noise` is the registry's last tag now checks that it follows
+    `gas.params`. `planetary/mod.rs` records the path of each consumed item the built pieces use;
+    the full table of T1.a is left to the `doc` lane's reconciliation.
+  - _T1.c._ `BodyIndex` has `new`, `decode`, `get`, `slot`, `sub`, `parent`, `body_id`, `PRIMARY`,
+    `TryFrom<u16>` and `From<BodyIndex> for u16`, and orders by its raw value; `BodySlot` declares
+    `SecondGeneration` before `Belt`, so that it orders as its slots do. `Planet(n)` is slot n
+    (1–191) and `Component(n)`, `Moon(n)` and `Member(n)` sub-index n (from 1); `Ring(n)`,
+    `Belt(n)` and `SecondGeneration(n)` count from 0 in their blocks, whose bounds are public
+    constants (`STELLAR_SUB_END`, `LAST_PLANET_SLOT`, `SECOND_GENERATION_SLOT_START`,
+    `BELT_SLOT_START`, `BLOCK_LEN`, `LAST_MOON_SUB`, `RING_SUB_START`). The stellar level's ring
+    sub-indices decode in every system, because the index alone cannot tell a free-floating
+    object's system from a star's. 33,936 of the 65,536 values are bodies. `parent()` gives a
+    moon's or ring's planet, a stellar-level ring's object (`0x0000`) and a member's belt, and
+    `None` for a primary or a component, whose parent the system resolves. `STELLAR_SUB_END` = 16
+    stands in for plan 11's `STAR_BODY_INDEX_END`, which is not in the code yet; the merge should
+    tie the two with a `const` assertion.
+  - _T3, shape._ Plain arguments (ruling 33): `disc::derive` takes a `&DiscHost`, the lifetime in
+    `Megayears`, the `&DiscDraws` and a `Truncation`, and returns a `Disc`. `DiscHost::new` takes
+    the mass, [Fe/H], zero-age luminosity and zero-age radius, validated once
+    (`BuildDiscHostError`); a truncation is `Truncation::NONE` with `with_inner` and `with_outer`.
+    The draws are `DiscDraws::for_host(seed, system, host: u8)`, words 16h onwards of
+    `planet.disc`: three standard normals and, at word 6, the rank of a circumbinary disc's
+    lifetime, which `DiscDraws::circumbinary_lifetime(pair_mass)` turns into P06.T15.c's law; T9
+    numbers the hosts (a single star is host 0). `DiscDraws`' fields are public variates, as plan
+    06's `StarDrawsParts` are, and `DiscDraws::MEDIAN` sets each to its median. `Disc` is
+    `None | Present(DiscProfile)`, `None` also when a far corotation radius meets a near `r_c`;
+    T3.c's getters are `DiscProfile`'s, with `surface_density`, `gas_surface_density`,
+    `characteristic_radius`, `corotation_period`, `host_mass` and `drawn_gas_mass` (`M_d`, the
+    whole profile's) besides, and
+    `Disc::{gas_mass, solid_mass}` are zero for `None`. `snow_line(SolarLuminosities)` and
+    `isolation_mass(Σ, a, M★)` are free functions. `units` gains `KilogramsPerSquareMetre` and
+    `KilogramsPerCubicMetre`. New goldens, blessed at version 11 with no bump: `planetary/disc`
+    (draws and discs), `planetary/limits` (T6.a and T15) and `stellar/disc_lifetime`.
+  - _T3, the solid share (for the orchestrator to rule)._ Lodders (2003) Table 11 has 0.489% of a
+    solar-composition gas condensing as rock and 0.571% as water ice; Z☉ = 0.0149 is all heavy
+    elements, so T3.a's "M_d × Z☉ × 10^[Fe/H], times 2 beyond the snow line" read literally makes
+    the solids beyond the snow line 3% of the gas, twice every heavy element. As built the solids
+    are 0.489% × 10^[Fe/H] of the gas inside the snow line and 1.060% × 10^[Fe/H] beyond (a step of
+    2.17, the plan's factor 2). The median solar-mass disc has 33.2 M⊕ of solids (1.8 M⊕ of rock);
+    the literal reading gives about 96. Left out: ammonia hydrate, a further 9% beyond 131 K
+    (about 4.6 au × √L). Ruled (ruling 38, point 1): stands as built; with the outer edge of point 2
+    the median solar-mass disc has 32.2 M⊕ of solids.
+  - _T3, the outer edge (for the orchestrator to rule)._ "Outer radius r_c" was first built as the
+    disc's edge, with M_d normalised between the inner edge and r_c. The physics review argued
+    against it: Andrews et al. (2010, eq. 1) normalise M_d from 0 to ∞, so for γ = 1 a fraction e⁻¹
+    (37%) lies beyond r_c, and a Kuiper-like belt needs solids there. Ruled (ruling 38, point 2):
+    r_c is the characteristic radius. Σ is now normalised from the inner edge to infinity (∫ is
+    r_c e^(−r_in ÷ r_c)), the untruncated outer edge is 3 r_c (`OUTER_EDGE_CHARACTERISTIC_RADII`),
+    inside which 95% of the mass lies, and truncation still renormalises nothing. The median
+    solar-mass disc keeps 0.0095 of its 0.01 M☉ of gas inside 90 au, with Σ of solids 2.2 g cm⁻² at
+    1 au and more than 5 M⊕ of solids at 30–50 au. T3.b's text still says "outer radius r_c", for
+    the `doc` lane.
+  - _T3, the isolation mass (for the orchestrator to rule)._ Lissauer's feeding zone is 2√3 Hill
+    radii either side of the orbit, 6.9 wide, not "10 Hill radii" (40% less mass than a 10-wide
+    zone). Ruled (ruling 38, point 3): the zone stands as built, and the test's disc is Hayashi's
+    (1981) minimum-mass nebula, solids of 7.1 g cm⁻² × (r ÷ 1 au)^−3/2 inside 2.7 au and 30 g cm⁻²
+    × (r ÷ 1 au)^−3/2 beyond, which gives 1.15 M⊕ at 5 au against Kennedy and Kenyon's (2008, §2)
+    "M_iso ≈ 0.1 (1) M⊕ at 1 (5) AU" (asserted 0.5–2 M⊕), and 0.039 M⊕ at 1 au, Armitage's
+    (2007, eq. 202) 0.07 M⊕ at 10 g cm⁻² scaled to 7.1. The plan's 0.05–0.2 and 3–15 M⊕ are kept
+    for a disc enhanced to Σ = 10 g cm⁻² (0.066 and 8.2 M⊕), as P14.T3.c's text now says. For
+    T7.b, which caps each planet at `Disc::isolation_mass` × 10: the median solar disc's isolation
+    mass is 0.0070 M⊕ at 1 au and 0.0012 M⊕ at 0.3 au, so that cap would forbid the compact class's
+    1–20 M⊕ inside 0.3 au by three orders of magnitude. Ruled (ruling 38, point 4): direction for
+    the T7 lane, which replaces the local cap with a cited solid budget from the disc's whole solid
+    mass; the local isolation mass stays for giants' cores beyond the snow line.
+  - _T3, measured._ Over 10⁵ hosts: gas fraction median 0.00998 of the star, σ 0.4995 dex (2,237
+    at the cap); rotation period 7.99 d, σ 0.2503 dex; r_c 30.10 au at 1 M☉ and 15.05 au at
+    0.25 M☉, σ 0.3005 dex. The integrated surface density returns M_s to 1.2 × 10⁻¹⁴, adjoining
+    intervals add to 3.7 × 10⁻¹⁶, and the solid mass scaled as 10^[Fe/H] to the last bit at the
+    five abundances measured (the test allows 4 ε). The gas-fraction test reads `drawn_gas_mass`,
+    since `gas_mass` is now the 95% inside the edge. Unchanged by ruling 38: the draws, the
+    medians and widths above, and the integrals, which were re-run with the edge at 3 r_c.
+  - _T3, sources re-checked._ Recorded in `planetary/disc.rs`: Hayashi's 2.7 au (via Kennedy and
+    Kenyon 2008, 170 K); the 8-day, 0.25 dex rotation period against Lee and Chiang (2017, Fig. 2)
+    and Mulders et al. (2018, Table 2: innermost planets at 12 +3/−2 days, 0.22 dex wide); r_c
+    against Andrews et al. (2010, Tables 4 and 5: 14–198 au, median 39 au, 0.36 dex; γ = 0.9 ±
+    0.2) and Andrews et al. (2018, R_eff ∝ M★^0.58±0.10, 0.30 dex); the gas fraction against
+    Andrews et al. (2013, §3.2.2: M_d ∝ M★, 0.2–0.6%, ±0.7 dex, so the plan's median is 0.3–0.7
+    dex above their Class II discs); the cap against Kratter and Lodato (2016). Not in the model:
+    dust sublimation, which puts a luminous host's inner edge far outside its corotation radius
+    (about 0.07 au × √L), and the faster spin of A stars (Lee and Chiang's 1-day break).
+- **Deviations in P14.T6.a and T15, as built (`planet`, round 7).**
+  - _T6.a._ `placement/spacing.rs`: `mutual_hill_factor(m1, m2, host)` returns a `HillFactor` (χ),
+    a type of its own so that it cannot be swapped with a spacing; then
+    `mutual_hill_radius(m1, m2, host, a1, a2)`, `next_semi_major_axis(a1, Δ, χ)` (`None` from Δχ =
+    `MAX_SPACING_STEP`, 0.9), `spacing_floor(m1, m2, e1, e2)`, `Neighbour::new(mass, a, e)` and
+    `satisfies_floor(&inner, &outer, host)`, which is false when `outer` is not outside `inner`.
+    Planet masses are M⊕ and the host's M☉; the floors, the giant threshold and 2√3 are in
+    `params.rs`. The 10 and 12 are Pu and Wu's (2015, abstract and eqs. 12 and 14). The 7 is
+    conservative: Chatterjee et al.'s (2008) three-giant systems, spaced in the same mutual Hill
+    radius (eq. B2), are mostly stable for 10⁹ years at 5.5 (Fig. 29). For the orchestrator: Pu
+    and Wu's slope is 100 per unit of σₑ, the Rayleigh scale, which is 80 per unit of mean
+    eccentricity, so design note 7's 100 × mean e was a quarter steeper. Ruled (ruling 38, point
+    7): `SPACING_FLOOR_ECCENTRICITY_SLOPE` is 80, the floor reaches 12 at a mean eccentricity of
+    0.025, and design note 7 says so. Measured: Jupiter and
+    Saturn 7.89 apart; Kepler-11 b and c 9.45 (Lissauer et al. 2013, Tables 3 and 4); two Jupiters
+    at 5.2 and 6.5 au, 2.58.
+  - _T15._ `derive/limits.rs`, masses in kilograms so that one function serves star and planet or
+    planet and moon. `TidalPlanet::new(mass, radius, k₂, Q)` is validated
+    (`BuildTidalPlanetError`); `maximum_surviving_moon_mass(&planet, primary_mass, a, e, age)`
+    rests on `moon_mass_limit(outermost, &planet, age)`, Barnes and O'Brien's eq. 7 solved exactly
+    (their eq. 8 drops the planet's radius, 6% for HD 209458 b: 6.5 × 10⁻⁷ against their
+    7.0 × 10⁻⁷, reproduced when dropped). `satellite_stability_limit` takes the circular Hill
+    radius: the fit carries the planet's eccentricity itself, and T15's `hill_radius`,
+    a (1 − e) (m ÷ 3M)^⅓, would count it twice. All six of Domingos et al.'s coefficients are
+    confirmed by their abstract. "Every Solar System moon": all 187 moons of JPL's mean-element
+    table lie inside the fit, the nearest Aoede at 0.93 of its limit; the test carries 45 of them,
+    the regular moons, Pluto's and the irregulars nearest their limits. Saturn's fluid limit for
+    600 kg m⁻³ is 149,600 km, 2.57 mean radii and 2.48 equatorial; the bracket of 2.5–2.7 holds
+    only in mean radii, which the test uses (for the orchestrator), though the A ring's edge, at
+    2.27 equatorial radii, is inside the limit either way. Ruled (ruling 38): the bracket holds in
+    mean radii, and the test says mean radii. Earth's Hill radius is 1.47 × 10⁹ m
+    (1.50 circular).
+  - _T15, for the orchestrator to rule._ (a) The moon-survival bound starts a moon at the
+    generator's own 0.4895 R_H, not Barnes and O'Brien's 0.36, so it is 7.4 times theirs (7.8 for
+    HD 209458 b, whose radius matters); T15's "no moon over 10⁻⁶ M⊕ at 0.05 au for 5 Gyr" then
+    holds for rocky planets (Earth 7.6 × 10⁻⁹) but not for a Neptune (4.0 × 10⁻⁶) or a Jupiter
+    (1.2 × 10⁻⁴), and the test asserts it for rocky planets. Ruled (ruling 38, point 5): stands
+    as built, so that the moons the generator calls stable are the ones that can survive; the test
+    says so and why. (b) Rosario-Franco et al. (2020, §3.1.1) find 0.40 R_H, not 0.49, when all
+    twenty starting phases must survive 10⁵ years. Ruled (ruling 38, point 5): Domingos et al.'s
+    0.4895 stands.

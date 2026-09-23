@@ -468,6 +468,17 @@ unit!(
     /// into metres, and the law's coefficients are fitted to µm⁻¹.
     Micrometres
 );
+unit!(
+    /// A surface density in kilograms per square metre, such as a protoplanetary disc's column of
+    /// gas or solids (plan 14). One gram per square centimetre, the unit the planet-formation
+    /// literature quotes, is 10 kg m⁻².
+    KilogramsPerSquareMetre
+);
+unit!(
+    /// A mass density in kilograms per cubic metre, such as a body's bulk density in a Roche limit
+    /// (plan 14). One gram per cubic centimetre is 1,000 kg m⁻³.
+    KilogramsPerCubicMetre
+);
 
 #[cfg(test)]
 mod tests {

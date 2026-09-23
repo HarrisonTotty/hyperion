@@ -905,18 +905,19 @@ nothing of plans 02 or 03.
   so that L, R and their first derivatives meet the ZAMS values at `t_zams`. `Track` gains the two
   leading segments and offsets the HPT clock (design note 4).
 - **P06.T15.c Disc lifetime draw.** One draw on `star.disc_lifetime`: exponential with a mean of 2.5
-  Myr scaled by m^(−½), held to 0.3–15 Myr (record the source). It decides classical against
-  weak-lined T Tauri (T24), bounds FU Orionis activity (T28.d), and is there for plan 14. By ruling
-  33 of 2026-09-22 it is the one lifetime of a star's circumstellar disc, so that the star's T Tauri
-  class and its planets' formation see the same disc: plan 14's `disc::derive` takes it as an
-  argument (P14.T3.a) and draws no lifetime of its own, except for a circumbinary disc, whose rank
-  plan 14 draws on `planet.disc` and puts through this same law at the pair's total mass. The
-  source is Mamajek (2009, AIP Conf. Proc. 1158, 3): an e-folding time of about 2.5 Myr for the
-  disc fraction, which is the survival function of an exponential. The law, a function of the mass
-  and of the `UnitUniform` rank `StarDraws::disc_lifetime()` that draws nothing itself, goes in
-  `stellar/premain.rs` as this subtask's first piece, ahead of the rest of T15, because plan 14 is
-  its first caller (the `planet` lane, round 7); its tests (the median, the clamps, monotonicity in
-  the rank) go with it.
+  Myr at 1 M☉ (Mamajek 2009), scaled by m^(−0.1) below 1 M☉ (Luhman et al. 2005's brown-dwarf and
+  M-star disc fractions) and by m^(−1.06) above it (halving by 2 M☉, as Ribas et al. 2015 and
+  Mamajek measure), held to 0.3–15 Myr (ruling 38). It decides classical against weak-lined T Tauri
+  (T24), bounds FU Orionis activity (T28.d), and is there for plan 14. By ruling 33 of 2026-09-22 it
+  is the one lifetime of a star's circumstellar disc, so that the star's T Tauri class and its
+  planets' formation see the same disc: plan 14's `disc::derive` takes it as an argument (P14.T3.a)
+  and draws no lifetime of its own, except for a circumbinary disc, whose rank plan 14 draws on
+  `planet.disc` and puts through this same law at the pair's total mass. Mamajek (2009, AIP Conf.
+  Proc. 1158, 3) measures an e-folding time of about 2.5 Myr for the disc fraction, which is the
+  survival function of an exponential. The law, a function of the mass and of the `UnitUniform` rank
+  `StarDraws::disc_lifetime()` that draws nothing itself, is built in `stellar/premain.rs` ahead of
+  the rest of T15, because plan 14 is its first caller (the `planet` lane, round 7; see its as-built
+  record in Risks); its tests (the median, the clamps, monotonicity in the rank) went with it.
 - **Files:** `stellar/premain.rs`, `stellar/sse/track.rs`.
 - **Tests:** continuity at t_p and at `t_zams` (values to 10⁻⁶, slopes to 5%); a 1 M☉ star at 2 Myr
   has 1–3 L☉ and 3,900–4,500 K; in a sample of the young disc (ages −H to 100 Myr) most stars below
@@ -2148,3 +2149,23 @@ domain_tags_are_pinned`, since `events` alone misses the registry tests and the 
     output, and the `Lattice` cache lives for one call. Latent: a release build lets a NaN into a
     `StarState`, whose range checks are debug assertions.
 - **P06.T35.b's outline, as built alone (round 7, `ui`).** Only the `ringed-circle` value of `SymbolShape` and its outline are built, for plan 14's `SYSTEM` display; `starSymbols.ts`, the `STARS` filter and the legend wait for the stellar wire types. `SymbolOutline` gains a third kind, `{ kind: "ringed-circle", discRadius }`, with `discRadius` `RINGED_DISC_SHARE` = 1/3 of the ring's radius; the painter fills the disc alone, then adds the ring to the path and strokes both once, so open and filled differ only by the fill (tested in the draw list and on a recorded canvas). **Deviation, for the orchestrator to rule:** the task asks that it read open against filled at the smallest `SIZE_CLASS_REM`, which no ringed circle can: at size class 0 (8 px at 100%) the ring's and the disc's 1.5 px outlines take 6 px, leaving 2 px for the gap round the disc and the open disc's hole, which cannot both be a pixel wide. The third splits it evenly, 2 px each at size class 2 and 1.2 px at 80%, and the test asserts both at least the outline's width at class 2 — the smallest class a giant is expected to take, since D17 ties size to the initial-mass layer and giants should come from layer C (0.75–2.5 M☉) and above in a galaxy of the Milky Way's age; `starSymbols.ts` should confirm that when it lands, or plan 06 should give giants a size class floor.
+- **Deviations in T15.c, as built (`planet`, round 7; rulings 33 and 38).** Only the disc-lifetime
+  law is built, because plan 14's disc is its first caller: `stellar::premain::disc_lifetime` of a
+  mass and a rank, in `Megayears`, with `disc_lifetime_mean(mass)` and the constants
+  `DISC_LIFETIME_MEAN_SOLAR`, `DISC_LIFETIME_LOW_MASS_EXPONENT`, `DISC_LIFETIME_HIGH_MASS_EXPONENT`,
+  `DISC_LIFETIME_MIN` and `DISC_LIFETIME_MAX`; its values are pinned by the golden
+  `stellar/disc_lifetime`. It draws nothing: the rank is the star's `StarDraws::disc_lifetime()`.
+  The lifetime is −τ ln(1 − u), held to 0.3–15 Myr, with τ = 2.5 Myr at 1 M☉; the median rank gives
+  1.733 Myr there, Mamajek's half-life of 1.7. The source, re-checked: Mamajek (2009, AIP Conf.
+  Proc. 1158, 3, Fig. 1 and eq. 1), an e-folding time of 2.5 Myr for the disc fraction of 22
+  clusters; Ribas et al.'s (2015, Table A.2) all-star fit of 2.7 ± 0.7 Myr for inner-disc excesses
+  agrees. The mass scaling was first built as the plan's m^−½, which gave 1.6–2.2 Myr at 1.3–2.5 M☉
+  against Mamajek's 1.2 and 11 Myr for brown dwarfs against about 3. Ruled (ruling 38, point 6): it
+  follows measurements. Below 1 M☉, τ ∝ m^−0.1: Luhman et al. (2005, ApJ 631, L69) find brown
+  dwarfs' disc fractions of 42% and 50% in IC 348 and Chamaeleon I against 33% and 45% for their
+  M0–M6 stars, lifetimes 1.28 and 1.15 times as long across a factor of six in mass; the law gives
+  3.4 Myr at 0.05 M☉. Above 1 M☉, τ ∝ m^−1.06, halving by 2 M☉ (1.20 Myr there): Ribas et al. (2015,
+  Table 3) measure lifetimes 2.09 and 2.2 times longer below 2 M☉ than above at 1–3 and 3–11 Myr,
+  and Mamajek 1.2 Myr above 1.3 M☉. The mean reaches the 0.3 Myr floor near 7 M☉. P06.T15.c's text
+  now says so. T24's T Tauri class must read this function. T15.a and T15.b are not built, and
+  `Track` is untouched.

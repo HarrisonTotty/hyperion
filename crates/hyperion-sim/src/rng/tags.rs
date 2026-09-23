@@ -346,6 +346,28 @@ domain_tags! {
     /// The gas's lattice noise, one standard normal per lattice point of each octave, each on its
     /// own `ObjectKey::galaxy_item` of the point's packed lattice word (plan 07, Design note 8).
     GAS_NOISE: Galaxy = "gas.noise";
+
+    // Plan 14: planetary systems. Every name the plan uses is fixed here, so that no later task
+    // picks another; each entry arrives with the task that first opens a stream under it.
+    //
+    // Scope `System`, opened with `ObjectKey::from(SystemId)`, the orbit host and the planet's
+    // slot in the draw number (plan 14, design note 4): `planet.disc`, `planet.plane`,
+    // `planet.class`, `planet.count`, `planet.spacing`, `planet.mass`, `planet.secondgen`,
+    // `belt.population`, `cometary.population`.
+    //
+    // Scope `Body`, opened with `ObjectKey::from(BodyId)`: `planet.orbit`, `planet.radius`,
+    // `planet.volatiles`, `planet.spin`, `planet.origin`, `moon.count`, `moon.mass`, `moon.orbit`,
+    // `moon.impact`, `moon.capture`, `ring.system`, `belt.member`, `body.surface`,
+    // `body.resources`.
+    //
+    // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
+    // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
+    // `system.comet` (0x0404).
+
+    /// A host's protoplanetary disc (P14.T3): its gas mass, corotation period and characteristic
+    /// radius, three standard normals, then the rank of a circumbinary disc's lifetime, one
+    /// uniform; orbit host h reads words 16h onwards (`planetary::disc::DISC_WORDS_PER_HOST`).
+    PLANET_DISC: System = "planet.disc";
 }
 
 #[cfg(test)]
@@ -403,10 +425,19 @@ mod tests {
     }
 
     #[test]
-    fn plan_07_registers_the_gas_noise_tag_last() {
+    fn plan_07_registers_the_gas_noise_tag_after_its_parameters() {
         assert_eq!(GAS_NOISE.name(), "gas.noise");
         assert_eq!(GAS_NOISE.scope(), crate::rng::TagScope::Galaxy);
-        assert_eq!(ALL.last(), Some(&GAS_NOISE));
+        let noise = ALL.iter().position(|t| *t == GAS_NOISE);
+        let params = ALL.iter().position(|t| *t == GAS_PARAMS);
+        assert_eq!(noise, params.map(|p| p + 1));
+    }
+
+    #[test]
+    fn plan_14_registers_the_disc_tag_with_system_scope() {
+        assert_eq!(PLANET_DISC.name(), "planet.disc");
+        assert_eq!(PLANET_DISC.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&PLANET_DISC));
     }
 
     #[test]

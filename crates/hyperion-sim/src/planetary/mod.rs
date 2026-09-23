@@ -1,0 +1,58 @@
+//! Planetary systems (plan 14): what orbits each host, and where it is at any time.
+//!
+//! A system's planets come from a disc derived from its host, an architecture class whose
+//! frequency depends on the host's mass and metallicity, and placement under dynamical
+//! constraints; everything else about a body is computed from those (the brainstorm's "Planetary
+//! systems", approach C). Draws are primordial: a system is generated as it was born, from its
+//! hosts' zero-age properties, and time enters only through a closed-form fate transform (plan 14,
+//! design note 1). Draws that are joint properties of a system (disc, class, counts, spacings,
+//! masses) are made on system-level streams with the orbit host and slot in the draw number, and
+//! everything that belongs to one body on that body's own streams (design note 4).
+//!
+//! # What is built
+//!
+//! - [`index`]: [`BodyIndex`], the layout of the 16-bit body index inside plan 01's
+//!   [`BodyId`](crate::id::BodyId) (design note 3), decodable without generating anything.
+//! - [`error`]: the errors of encoding, decoding and resolving a body.
+//! - [`disc`]: the protoplanetary disc of one orbit host, its budget and ruler (design note 5).
+//! - [`derive`](mod@derive): the derivation of a body's properties; so far its limits (Roche,
+//!   Hill and satellite stability, P14.T15).
+//! - [`placement`]: placing planets; so far the Hill-spacing primitives (P14.T6.a).
+//! - [`params`]: the parameters that belong to the generator version, as named constants.
+//! - [`context`], [`system`] and [`record`]: what the stage reads from the stages above, the
+//!   assembled generator, and what a query returns. Documentation only until their tasks
+//!   (P14.T1.d, T30 and T34).
+//!
+//! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
+//! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
+//! its host's mass, \[Fe/H\], zero-age luminosity and radius, its lifetime and its truncation
+//! radii, not a [`context`] (P14.T1.d) or an orbit zone (P14.T9).
+//!
+//! # Consumed items, by their paths in the code
+//!
+//! The items of plan 14's "Consumes" that the pieces built so far use (P14.T1.a records the rest
+//! as they are wired):
+//!
+//! | Plan | Item | Path |
+//! | ---- | ---- | ---- |
+//! | 01 | streams, keys, tags | [`rng::Stream::open`](crate::rng::Stream::open), [`rng::ObjectKey`](crate::rng::ObjectKey) (`From<SystemId>`), [`rng::tags::PLANET_DISC`](crate::rng::tags::PLANET_DISC), [`Seed`](crate::Seed) |
+//! | 01 | IDs | [`id::SystemId`](crate::id::SystemId), [`id::BodyId`](crate::id::BodyId) (every `u16` a valid index there; its meaning is [`index`]'s) |
+//! | 01 | maths | [`math`](crate::math): `sqrt` is IEEE; `cbrt`, `exp`, `exp_m1`, `exp10` through the pinned `libm` |
+//! | 01 | units and constants | [`units`](crate::units) (`SolarMasses`, `EarthMasses`, `Metres`, `Megayears`, `Dex`, `SolarLuminosities`, `SolarRadii`, and `KilogramsPerSquareMetre` and `KilogramsPerCubicMetre`, added by this plan); [`units::consts`](crate::units::consts) (`GM_SUN`, `GRAVITATIONAL_CONSTANT`, `METRES_PER_AU`, `SOLAR_RADIUS_M`, `SOLAR_MASS_KG`, `EARTH_MASS_KG`); μ is `GM_SUN` × m until `units::GravitationalParameter` exists |
+//! | 06 | zero-age luminosity and radius (design note 6) | [`stellar::sse::zams::luminosity`](crate::stellar::sse::zams::luminosity) and [`radius`](crate::stellar::sse::zams::radius), which take `(SolarMasses, &ZCoeffs)`; the caller passes their values to [`disc::DiscHost::new`] |
+//! | 06 | the disc's lifetime (ruling 33) | [`stellar::premain::disc_lifetime`](crate::stellar::premain::disc_lifetime) of [`StarDraws::disc_lifetime`](crate::stellar::draws::StarDraws::disc_lifetime), a [`UnitUniform`](crate::stellar::draws::UnitUniform); the caller passes the result to [`disc::derive`] |
+//! | 06 | \[Fe/H\] | [`Composition::fe_h`](crate::stellar::Composition::fe_h), as drawn |
+//! | 11 | stars in slot `0x00` | `STAR_BODY_INDEX_END` = 16 is not in the code yet; [`index::STELLAR_SUB_END`] states the same bound |
+
+pub mod context;
+pub mod derive;
+pub mod disc;
+pub mod error;
+pub mod index;
+pub mod params;
+pub mod placement;
+pub mod record;
+pub mod system;
+
+pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};
+pub use index::{BodyIndex, BodySlot, BodySub};
