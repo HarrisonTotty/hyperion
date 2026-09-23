@@ -150,13 +150,6 @@ impl ZCoeffs {
 
     /// Coefficient bₙ of HPT's Appendix, 1 ≤ n ≤ 57, after its special cases.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the track integrator of P06.T10 is the first caller"
-        )
-    )]
     pub(crate) const fn b(&self, n: usize) -> f64 {
         self.b[n]
     }

@@ -55,13 +55,6 @@ impl CompactRemnant {
     /// In debug builds, if `mass` is not finite and non-negative, or is not zero for
     /// [`RemnantKind::None`].
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the track integrator of P06.T10.e is the first caller"
-        )
-    )]
     pub(crate) fn new(kind: RemnantKind, mass: SolarMasses) -> Self {
         debug_assert!(
             mass.value().is_finite() && mass.value() >= 0.0,
@@ -86,3 +79,7 @@ impl CompactRemnant {
         self.mass
     }
 }
+
+// Mandel and Müller's (2020) neutron stars and black holes, electron capture and pair instability
+// (P06.T18.a–c), which the track's death (P06.T18.d) calls.
+pub mod collapse;

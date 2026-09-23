@@ -2264,3 +2264,78 @@ SolarMasses`, which plan 13 and T29 need to tell `ObjectKind::Dwarf` from `Subst
     0.2 dex, but are 230–440 K cooler. The reason is the backbone's: HPT's equation 24 gives
     0.143 R☉ at 0.1 M☉ and Z = 10⁻⁴, against their 0.108. That is a finding against the
     backbone's floor at low Z, for T12.
+- **Deviations in T18.a–c, as built (round 7, `remnant`).** Built as functions of plain arguments in
+  `stellar::remnant::collapse` (`pub mod`), for T18.d to wire into `Track::death`; nothing generated
+  calls them yet, so no golden moved, and the new golden `stellar/collapse` pins them by bits at 11.
+  - _API._ `RemnantDraws::{of(&StarDraws), from_parts(type, fallback, mass)}` holds the three
+    reserved draws. `core_collapse(co_core, helium_core, RemnantDraws) -> CoreCollapse` returns
+    `NeutronStar { mass }`, `BlackHole { mass }` (partial fallback), `DirectCollapse { mass }`
+    (complete fallback, the helium core), `PulsationalPairInstability` (40.5 M☉) or
+    `PairInstabilitySupernova`, and `CoreCollapse::remnant()` gives the `CompactRemnant`.
+    `pair_instability(helium_core) -> PairInstability::{None, Pulsational, Disruptive, Collapse}`,
+    which `core_collapse` applies first. For electron capture there is
+    `ElectronCaptureWindows::new(&ZCoeffs)`, with `iron_core_mass()` (m_cc), `window(width)`,
+    `single()` and `companion_stripped()`, each an `InitialMassWindow` with `lower`, `upper` and
+    `contains`, and `electron_capture_remnant()`. The Table 1 figures, the 1.26 M☉ mass, the 2.25 M☉
+    core at the base of the AGB, the window widths and Belczynski's four figures are `pub const`s.
+  - _T18.d's call._ In the EAGB and helium-star ends:
+    `core_collapse(p.co_core_mass(), p.helium_core_mass(), RemnantDraws::of(draws))`.
+    `DirectCollapse` and `PulsationalPairInstability` map to `DeathKind::DirectCollapse`, and
+    `PairInstabilitySupernova` to `DeathKind::PairInstability`. At the thermally pulsing AGB's end:
+    `windows.single()` (or `companion_stripped()`) `.contains(m)`, with the windows built once per
+    track beside `lightest_helium_star`.
+  - _Figures re-checked_ against the arXiv source of MM20 (2006.08360). M₁–M₄ are 2, 3, 7 and 8. The
+    probabilities are (M_CO − M₁) ÷ (M₃ − M₁) and (M_CO − M₁) ÷ (M₄ − M₁). The mass laws are
+    1.2 ± 0.02, 1.4 + 0.5 (…) ± 0.05, 1.4 + 0.4 (…) ± 0.05 and 0.8 M_CO ± 0.5, and the hold is
+    1.13–2.0 M☉. All are as the plan has them, but the recipe is MM20's **section 3**, not 2.
+    Electron capture's 1.26 M☉ is also section 3. Belczynski et al. (2016, A&A 594, A97,
+    arXiv:1607.03116, section 3 and eq. 1, model M10) give 45–65 M☉ → 45 (1 − 0.1) = 40.5 M☉ and
+    65–135 M☉ → nothing, and section 2 gives collapse from 135 M☉.
+  - _Redraws._ MM20 redraw out-of-range masses. The one normal is mapped through the quantile of
+    the truncated normal instead: the same distribution, one draw, monotone in the draw (tested
+    against a rejection sample). A black hole of partial fallback is also held below its helium
+    core, the mass of complete fallback. MM20 print no such bound, but COMPAS, where they
+    implemented the recipe, applies it (`GiantBranch::CalculateFallbackBHMassMullerMandel`, `dev`
+    branch). MM20's models span M_CO ≈ 1.4–9 M☉ (their Fig. 1); complete fallback above that is
+    their rule carried on.
+  - _The envelope and the total mass do not enter._ MM20 take any hydrogen envelope to be unbound,
+    so T18.d need pass neither.
+  - _m_cc(Z)_ is bisected on `m_c_bagb` over 0.1–100 M☉ to adjacent doubles. It is the lowest
+    double reaching 2.25 M☉, the early AGB's own test, and matches eq. 66 inverted by hand to
+    10⁻¹⁴. It is 8.203 M☉ at Z = 0.02, 8.32 at 0.03, 6.83 at 10⁻⁴, and lowest, 6.72, near
+    3 × 10⁻⁴. Both windows lie in the oxygen–neon band (a core of at least 1.88 M☉ at the base of
+    the AGB) at every Z.
+  - **For the orchestrator to rule: the window's mass.** m_cc is found at constant mass. On
+    `starA`'s tracks main-sequence winds lower the mass `m_c_bagb` reads (HPT section 7.1), so iron
+    cores begin at m0 = 8.305 M☉ at Z = 0.02 (6.836 at [Fe/H] = −2.3). An initial-mass window
+    [8.103, 8.203) then leaves a 0.1 M☉ gap of stars that neither capture electrons nor make iron
+    cores. The track runs them through HPT's own electron capture, 2.2% of an 8–150 M☉ sample.
+    Recommended: T18.d tests the window against the mass the track's `m_c_bagb` reads, so that the
+    window meets the iron cores.
+  - **For the orchestrator to rule: the stripped window and design note 11.** Note 11 draws the
+    companion-stripped mark only for stars of 8 M☉ or more, but the stripped window [m_cc − 1,
+    m_cc) lies below 8.2 M☉ at every Z, so it would be nearly empty. Recommended: T19.c draws the
+    mark from m_cc − 1.0 M☉, where the widest window begins.
+  - _Also for the orchestrator._ MM20 use 1.38 M☉ in place of M_Ch in eq. 75, which the track does
+    not; that moves only M_CO below M₁, where the neutron star is 1.2 M☉ either way. The 40.5 M☉
+    black hole carries Belczynski's 10% neutrino loss while MM20 neglect it, so the black hole of
+    a 44.9 M☉ helium core is 44.9 M☉ and that of 45.0 is 40.5, a step design note 10 accepts.
+    T19's `ec_window_single` and `ec_window_stripped` must read `SINGLE_STAR_WINDOW` and
+    `COMPANION_STRIPPED_WINDOW`, so that there is one copy.
+  - _Population tests left to T18.d._ The 38 ± 5% black holes, 70–80% complete fallback and 2–6%
+    electron captures need real cores. The one stand-in in the tree, HPT's constant-mass cores
+    (eqs 66 and 75), passes them (36.9%, 75.0%, 2.6%), but for its own reasons. It puts solar
+    stars above about 80 M☉ into pair instability and overstates complete fallback. A forecast on
+    `starA`'s tracks (a scratch run, not committed; 3 × 20,000 Kroupa stars at Z = 0.02, η and
+    the remnant draws drawn, tracks capped at 100 M☉) gives 36.4–37.2%, **70.3–70.9%** and
+    2.4–2.6%. So T18.d's complete-fallback test sits one sampling σ above its floor: stars of
+    23–56 M☉ end on a Wolf–Rayet plateau of M_CO 6.0–8.1 M☉, short of M₄.
+  - _Tests._ The type is monotone in the draw and in M_CO. The shares follow both linear
+    probabilities (χ², α = 10⁻³). Neutron stars lie in 1.13–2.0 M☉ at |z| up to 40, and follow
+    the three branches' mean and σ. Black holes of 2–5 M☉ exist, and partial fallback lies between
+    2.0 M☉ and the helium core. The pair-instability ranges are closed below. m_cc and the windows
+    are checked at 41 metallicities.
+  - _Outside `collapse.rs`._ The `pub mod collapse;` line is appended to `remnant/mod.rs`. Three
+    `expect` attributes that the new public code leaves unfulfilled are removed: on
+    `CompactRemnant::new`, on `ZCoeffs::b` and on the `m_c_bagb` re-export. `starA`'s tree already
+    removes the first two.

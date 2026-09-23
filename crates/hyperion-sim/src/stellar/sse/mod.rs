@@ -39,10 +39,6 @@ mod helium;
     expect(unused_imports, reason = "P06.T18.b and T28.f are the first callers")
 )]
 pub(crate) use agb::interpulse_period;
-#[cfg_attr(
-    not(test),
-    expect(unused_imports, reason = "P06.T18.b and T28.f are the first callers")
-)]
 pub(crate) use gb::mc_bagb as m_c_bagb;
 
 pub use coeffs::ZCoeffs;

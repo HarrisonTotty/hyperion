@@ -1,0 +1,111 @@
+# generator_version = 11
+Z = 0.0001
+m_cc = 0x401b53016c6f0b0f  # 6.831060117986239
+single window lower = 0x401aec9b0608a4a9  # 6.73106011798624
+companion-stripped window lower = 0x401753016c6f0b0f  # 5.831060117986239
+Z = 0.001
+m_cc = 0x401ba9dd0ddaba09  # 6.915882317042368
+single window lower = 0x401b4376a77453a3  # 6.815882317042369
+companion-stripped window lower = 0x4017a9dd0ddaba09  # 5.915882317042368
+Z = 0.004
+m_cc = 0x401dc3b1da97e371  # 7.441108146210227
+single window lower = 0x401d5d4b74317d0b  # 7.341108146210227
+companion-stripped window lower = 0x4019c3b1da97e371  # 6.441108146210227
+Z = 0.02
+m_cc = 0x40206817f90b6df9  # 8.203307898183072
+single window lower = 0x402034e4c5d83ac6  # 8.103307898183072
+companion-stripped window lower = 0x401cd02ff216dbf2  # 7.203307898183072
+Z = 0.03
+m_cc = 0x4020a35d737d5a05  # 8.319072350551332
+single window lower = 0x4020702a404a26d2  # 8.219072350551333
+companion-stripped window lower = 0x401d46bae6fab40a  # 7.319072350551332
+
+seed 0x0123456789abcdef body A 0
+M_CO 1.44 in 2.3: neutron star = 0x3ff30f6b7db45c85  # 1.1912646208127466
+M_CO 1.9 in 2.9: neutron star = 0x3ff30f6b7db45c85  # 1.1912646208127466
+M_CO 2.2 in 3.3: neutron star = 0x3ff7a67639b02056  # 1.4781400922238581
+M_CO 2.5 in 3.7: neutron star = 0x3ffa0cdca0168599  # 1.6281400922237934
+M_CO 2.95 in 4.3: neutron star = 0x3ffda54ca90ba4ca  # 1.8528563121165456
+M_CO 3.5 in 5: black hole = 0x40050c2f534db711  # 2.630949641045739
+M_CO 5 in 7: black hole = 0x400e405e720edd82  # 3.7814301405703086
+M_CO 6.5 in 8.5: black hole = 0x4013ecf45d062f52  # 4.981400922300809
+M_CO 7.5 in 9.8: direct collapse = 0x402399999999999a  # 9.8
+M_CO 10 in 13: direct collapse = 0x402a000000000000  # 13.0
+M_CO 38 in 50: pulsational pair instability = 0x4044400000000000  # 40.5
+M_CO 60 in 80: pair instability = 0x0000000000000000  # 0.0
+M_CO 110 in 140: direct collapse = 0x4061800000000000  # 140.0
+
+seed 42 body E 0
+M_CO 1.44 in 2.3: neutron star = 0x3ff34b3bde484752  # 1.2058676417259062
+M_CO 1.9 in 2.9: neutron star = 0x3ff34b3bde484752  # 1.2058676417259062
+M_CO 2.2 in 3.3: neutron star = 0x3ff83c09648b3f6d  # 1.514657395124199
+M_CO 2.5 in 3.7: neutron star = 0x3ffaa26fcaf1a3f4  # 1.6646573951240926
+M_CO 2.95 in 4.3: neutron star = 0x3ffe39fdfaf7d569  # 1.8891582301560794
+M_CO 3.5 in 5: neutron star = 0x3ff76f3c97beb75b  # 1.4646573951281059
+M_CO 5 in 7: neutron star = 0x3ff9d5a2fe24d8f6  # 1.6146573951241954
+M_CO 6.5 in 8.5: direct collapse = 0x4021000000000000  # 8.5
+M_CO 7.5 in 9.8: direct collapse = 0x402399999999999a  # 9.8
+M_CO 10 in 13: direct collapse = 0x402a000000000000  # 13.0
+M_CO 38 in 50: pulsational pair instability = 0x4044400000000000  # 40.5
+M_CO 60 in 80: pair instability = 0x0000000000000000  # 0.0
+M_CO 110 in 140: direct collapse = 0x4061800000000000  # 140.0
+
+median
+M_CO 1.44 in 2.3: neutron star = 0x3ff33339507c86b0  # 1.2000058311463526
+M_CO 1.9 in 2.9: neutron star = 0x3ff33339507c86b0  # 1.2000058311463526
+M_CO 2.2 in 3.3: neutron star = 0x3ff8000000000013  # 1.5000000000000042
+M_CO 2.5 in 3.7: neutron star = 0x3ffa6666666664fd  # 1.6499999999999198
+M_CO 2.95 in 4.3: neutron star = 0x3ffdfe67f5d54bfe  # 1.8746108630045906
+M_CO 3.5 in 5: neutron star = 0x3ff73333333388d8  # 1.4500000000048683
+M_CO 5 in 7: black hole = 0x4010000533de5f50  # 4.000019846389321
+M_CO 6.5 in 8.5: direct collapse = 0x4021000000000000  # 8.5
+M_CO 7.5 in 9.8: direct collapse = 0x402399999999999a  # 9.8
+M_CO 10 in 13: direct collapse = 0x402a000000000000  # 13.0
+M_CO 38 in 50: pulsational pair instability = 0x4044400000000000  # 40.5
+M_CO 60 in 80: pair instability = 0x0000000000000000  # 0.0
+M_CO 110 in 140: direct collapse = 0x4061800000000000  # 140.0
+
+low marks, low normal
+M_CO 1.44 in 2.3: neutron star = 0x3ff2a82113e99ac4  # 1.1660471704323507
+M_CO 1.9 in 2.9: neutron star = 0x3ff2a82113e99ac4  # 1.1660471704323507
+M_CO 2.2 in 3.3: neutron star = 0x3ff6a3d70a3d7140  # 1.4150000000000347
+M_CO 2.5 in 3.7: neutron star = 0x3ff90a3d70a3d681  # 1.5649999999999695
+M_CO 2.95 in 4.3: black hole = 0x40006d32b8d5f2cc  # 2.053319400815189
+M_CO 3.5 in 5: direct collapse = 0x4014000000000000  # 5.0
+M_CO 5 in 7: direct collapse = 0x401c000000000000  # 7.0
+M_CO 6.5 in 8.5: direct collapse = 0x4021000000000000  # 8.5
+M_CO 7.5 in 9.8: direct collapse = 0x402399999999999a  # 9.8
+M_CO 10 in 13: direct collapse = 0x402a000000000000  # 13.0
+M_CO 38 in 50: pulsational pair instability = 0x4044400000000000  # 40.5
+M_CO 60 in 80: pair instability = 0x0000000000000000  # 0.0
+M_CO 110 in 140: direct collapse = 0x4061800000000000  # 140.0
+
+high marks, high normal
+M_CO 1.44 in 2.3: neutron star = 0x3ff3ef9f8b0ab7ae  # 1.2460017615626202
+M_CO 1.9 in 2.9: neutron star = 0x3ff3ef9f8b0ab7ae  # 1.2460017615626202
+M_CO 2.2 in 3.3: neutron star = 0x3ff9d70a3d70a3dd  # 1.6150000000000013
+M_CO 2.5 in 3.7: neutron star = 0x3ffc3d70a3d6e2ec  # 1.764999999997765
+M_CO 2.95 in 4.3: neutron star = 0x3fffb2d689b8c77c  # 1.9811616306073736
+M_CO 3.5 in 5: neutron star = 0x3ff90a3d70a3f0e9  # 1.5650000000014705
+M_CO 5 in 7: neutron star = 0x3ffb70a3d70a3d6b  # 1.7149999999999987
+M_CO 6.5 in 8.5: black hole = 0x4019666666607c49  # 6.34999999965573
+M_CO 7.5 in 9.8: direct collapse = 0x402399999999999a  # 9.8
+M_CO 10 in 13: direct collapse = 0x402a000000000000  # 13.0
+M_CO 38 in 50: pulsational pair instability = 0x4044400000000000  # 40.5
+M_CO 60 in 80: pair instability = 0x0000000000000000  # 0.0
+M_CO 110 in 140: direct collapse = 0x4061800000000000  # 140.0
+
+black hole, partial fallback
+M_CO 1.44 in 2.3: neutron star = 0x3ff353fc5f78622b  # 1.2080043534571228
+M_CO 1.9 in 2.9: neutron star = 0x3ff353fc5f78622b  # 1.2080043534571228
+M_CO 2.2 in 3.3: black hole = 0x4002ff8b39a133cb  # 2.37477726958466
+M_CO 2.5 in 3.7: black hole = 0x4003c6f4c16b28ba  # 2.4721465216472014
+M_CO 2.95 in 4.3: black hole = 0x400569732e90fe71  # 2.676489223289359
+M_CO 3.5 in 5: black hole = 0x400835106cc7c9e7  # 3.0259102343054454
+M_CO 5 in 7: black hole = 0x4010ccd0af171bcf  # 4.200014816079558
+M_CO 6.5 in 8.5: black hole = 0x401599999999e8fe  # 5.400000000018052
+M_CO 7.5 in 9.8: black hole = 0x4018ccccccccccbe  # 6.199999999999987
+M_CO 10 in 13: direct collapse = 0x402a000000000000  # 13.0
+M_CO 38 in 50: pulsational pair instability = 0x4044400000000000  # 40.5
+M_CO 60 in 80: pair instability = 0x0000000000000000  # 0.0
+M_CO 110 in 140: direct collapse = 0x4061800000000000  # 140.0
