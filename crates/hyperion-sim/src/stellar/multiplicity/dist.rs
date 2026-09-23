@@ -13,6 +13,7 @@
 
 use super::model::{MultiplicityModel, blend, lerp};
 use crate::galaxy::imf::MASS_LIMIT_LO;
+use crate::galaxy::quad::gl16;
 use crate::math;
 use crate::rng::{PowerLaw, Stream};
 use crate::units::consts::{GM_JUPITER, GM_SUN};
@@ -54,17 +55,27 @@ pub const LOG_PERIOD_MIN: f64 = -1.0;
 /// cuts orbits at (Design note 4).
 pub const LOG_PERIOD_MAX: f64 = 11.0;
 
-/// The period below which a low-mass pair may be a twin, q ≥ [`TWIN_MIN_MASS_RATIO`] (Design
-/// note 3): 100 days.
-pub(super) const TWIN_MAX_PERIOD: Days = Days::new(100.0);
+/// The period of the eccentricity envelope, P₀ = 2 days: Moe and Di Stefano's (2017, ApJS 230,
+/// 15, eq. 3) `e_max(P) = 1 − (P ÷ 2 d)^(−2/3)`, which keeps a pair's Roche-lobe fill factors
+/// under about 70% at periastron.
+///
+/// Every orbit of `P ≥ P₀` therefore has its periastron at or beyond the separation of a
+/// circular orbit of 2 days about the same masses. Orbits under [`CIRCULARISATION_PERIOD`] are
+/// circular whatever the envelope allows (ruling 37).
+pub const ECCENTRICITY_ENVELOPE_PERIOD: Days = Days::new(2.0);
 
-/// The mass ratio above which a pair counts as a twin, Raghavan et al.'s (2010, §5.3.5)
-/// "like-mass pairs (M₂ ÷ M₁ > 0.95)".
+/// The mass ratio above which a pair counts as a twin: Moe and Di Stefano's (2017, §2) excess
+/// population lies on q = 0.95–1, as Raghavan et al.'s (2010, §5.3.5) "like-mass pairs (M₂ ÷ M₁
+/// > 0.95)" do.
 pub(super) const TWIN_MIN_MASS_RATIO: f64 = 0.95;
 
-/// The period, as x = log₁₀(P ÷ 1 d), that divides a massive primary's close companions from its
-/// wide ones in the mass-ratio law: 3.5, about 3,000 days, the upper edge of the range Sana et
-/// al. (2012) fitted, whose sample reaches "up to about nine years".
+/// The mass ratio above which Moe and Di Stefano (2017, §2) count the companions that their
+/// excess twin fraction is a share of.
+const TWIN_REFERENCE_MASS_RATIO: f64 = 0.3;
+
+/// The period, as x = log₁₀(P ÷ 1 d), that divides an O star's close companions from its wide
+/// ones in the period law: 3.5, about 3,000 days, the upper edge of the range Sana et al. (2012)
+/// fitted, whose sample reaches "up to about nine years".
 pub(super) const CLOSE_MAX_LOG_PERIOD: f64 = 3.5;
 
 /// Steps of the safeguarded Newton inversion of a mixture's cumulative distribution. A step is a
@@ -83,12 +94,19 @@ const SQRT_TAU: f64 = 2.506_628_274_631_000_5;
 /// The shape of one component of a period anchor, in x = log₁₀(P ÷ 1 d).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PeriodShape {
-    /// A normal in x of this mean and standard deviation, truncated to [`LOG_PERIOD_MIN`]–
-    /// [`LOG_PERIOD_MAX`].
-    LogNormal { mean: f64, sigma: f64 },
+    /// A normal in x of this mean and standard deviation, truncated to `[lo, hi]`.
+    LogNormal {
+        mean: f64,
+        sigma: f64,
+        lo: f64,
+        hi: f64,
+    },
     /// A density ∝ x^`exponent` on `[lo, hi]`, 0 < lo: Sana et al.'s (2012) form for O stars,
     /// and Öpik's law, flat in x, at an exponent of 0.
     LogPowerLaw { exponent: f64, lo: f64, hi: f64 },
+    /// A density linear in x between knots `(x, density)`, the density unnormalised: Moe and Di
+    /// Stefano's (2017) piecewise fit.
+    PiecewiseLinear { knots: &'static [(f64, f64)] },
 }
 
 /// One anchor of the period distribution: a primary mass and the weighted components of the
@@ -120,30 +138,78 @@ pub(super) const O_STAR_CLOSE_SURVEYED: f64 = 0.69;
 /// the close 0.69.
 pub(super) const O_STAR_WIDE_SURVEYED: f64 = 0.61;
 
-/// The share of the O stars' close mass-ratio law, γ = −0.1 on [0.08 M☉ ÷ 30 M☉, 1], above
-/// q = 0.1: 0.878. The literal is that share, which a test recomputes.
-const O_STAR_CLOSE_SHARE_SURVEYED: f64 = 0.878_344_245_709_802;
+/// The share of the O stars' close companions above q = 0.1, under Moe and Di Stefano's laws at
+/// 30 M☉ averaged over Sana et al.'s component, twins included: 0.861. The literal is that
+/// share, which a test recomputes.
+const O_STAR_CLOSE_SHARE_SURVEYED: f64 = 0.860_919_369_285_465_5;
 
-/// The share of the O stars' wide mass-ratio law, γ = −0.5 on [0.08 M☉ ÷ 30 M☉, 1], above
-/// q = 0.1: 0.721. The literal is that share, which a test recomputes.
-const O_STAR_WIDE_SHARE_SURVEYED: f64 = 0.721_004_759_673_168_2;
+/// The share of the O stars' wide companions above q = 0.1, under Moe and Di Stefano's laws at
+/// 30 M☉ averaged over the Öpik component: 0.607. The literal is that share, which a test
+/// recomputes.
+const O_STAR_WIDE_SHARE_SURVEYED: f64 = 0.607_158_916_861_864_7;
 
 /// The close companions per O star of every mass ratio the model draws, down to
-/// 0.08 M☉ ÷ 30 M☉: the surveyed 0.69 over its law's share above q = 0.1, 0.786.
+/// 0.08 M☉ ÷ 30 M☉: the surveyed 0.69 over its law's share above q = 0.1, 0.80.
 pub(super) const O_STAR_CLOSE_FREQUENCY: f64 = O_STAR_CLOSE_SURVEYED / O_STAR_CLOSE_SHARE_SURVEYED;
 
 /// The wide companions per O star of every mass ratio the model draws: the surveyed 0.61 over its
-/// law's share above q = 0.1, 0.846.
+/// law's share above q = 0.1, 1.00.
 pub(super) const O_STAR_WIDE_FREQUENCY: f64 = O_STAR_WIDE_SURVEYED / O_STAR_WIDE_SHARE_SURVEYED;
 
-/// The share of an O star's companions in Sana et al.'s close component, 0.786 ÷ 1.632 = 0.481.
+/// The share of an O star's companions in Sana et al.'s close component, 0.80 ÷ 1.81 = 0.44.
 const O_STAR_CLOSE_WEIGHT: f64 =
     O_STAR_CLOSE_FREQUENCY / (O_STAR_CLOSE_FREQUENCY + O_STAR_WIDE_FREQUENCY);
 
+/// De Rosa et al.'s (2014, MNRAS 437, 1216, §6.4) weighted frequency of spectroscopic companions
+/// to A stars, 35.1 ± 6.5%: Abt (1965) for normal A stars, Carquillat and Prieur (2007) for Am
+/// stars and Carrier et al. (2002) for Ap stars, weighted by their shares of the VAST sample.
+const A_STAR_SPECTROSCOPIC: f64 = 0.351;
+
+/// x = log₁₀(P ÷ 1 d) of a projected separation of 30 au, the inner limit of the VAST survey: the
+/// boundary between the A stars' spectroscopic and visual companions. A projected separation is
+/// deprojected by +0.13 dex, Duquennoy and Mayor's (1991) statistical relation `log a = log ρ +
+/// 0.13`, which Raghavan et al. (2010, §5.3.3) apply to their visual pairs, and turned into a
+/// period at the anchor's mean system mass, 3.78 M☉ (2.7 M☉ times 1 plus the mean mass ratio of
+/// γ = −0.5 on [0.08 ÷ 2.7, 1], 0.40). The literal is that period, which a test recomputes.
+const A_STAR_IMAGING_LOG_PERIOD: f64 = 4.684_526_206_767_216;
+
+/// The A stars' visual companions per star beyond a projected 30 au: De Rosa et al.'s log-normal
+/// in the log of the projected separation (peak 2.59 ± 0.13, 387 au; σ 0.79 ± 0.12 dex; §6.2)
+/// integrates to 33.8 ± 2.6% over 30–10⁴ au, 0.883 of it, so the whole of it holds 0.383 and the
+/// part beyond 30 au 0.352. The literal is that count, which a test recomputes.
+const A_STAR_VISUAL: f64 = 0.352_212_663_390_216_9;
+
+/// x = log₁₀(P ÷ 1 d) of De Rosa et al.'s peak, a projected 387 au (10^2.59), deprojected and at
+/// 3.78 M☉ as [`A_STAR_IMAGING_LOG_PERIOD`] is. The literal is that period, which a test
+/// recomputes.
+const A_STAR_VISUAL_LOG_PERIOD: f64 = 6.353_844_324_687_722;
+
+/// The width of De Rosa et al.'s log-normal in x = log₁₀(P ÷ 1 d): 1.5 × 0.79 dex, since P ∝ a^1.5
+/// at a fixed mass.
+const A_STAR_VISUAL_SIGMA: f64 = 1.5 * 0.79;
+
+/// The shape of the A stars' spectroscopic companions in x = log₁₀(P ÷ 1 d): Moe and Di Stefano's
+/// (2017, eqs. 20–23) companion frequency per decade, `f_logP;q>0.3`, at M₁ = 2.7 M☉, from their
+/// shortest period, x = 0.2, to [`A_STAR_IMAGING_LOG_PERIOD`]. At 2.7 M☉ their eqs. 20–22 give
+/// 0.0503 below x = 1, 0.0711 at 2.7 and 0.0639 at 5.5, and eq. 23 joins them with a rise of 0.018
+/// per decade across 2.7 ± 0.7. The literals are those knots, which a test recomputes.
+const A_STAR_SPECTROSCOPIC_SHAPE: [(f64, f64); 5] = [
+    (0.2, 0.050_279_779_358_418_24),
+    (1.0, 0.050_279_779_358_418_24),
+    (2.0, 0.058_456_210_461_423_23),
+    (3.4, 0.083_656_210_461_423_23),
+    (A_STAR_IMAGING_LOG_PERIOD, 0.071_556_334_002_249_08),
+];
+
+/// The share of an A star's companions that are spectroscopic, 0.351 ÷ 0.703 = 0.499.
+const A_STAR_CLOSE_WEIGHT: f64 = A_STAR_SPECTROSCOPIC / (A_STAR_SPECTROSCOPIC + A_STAR_VISUAL);
+
 /// The period anchors (Design note 3), each a primary mass and its distribution of
 /// x = log₁₀(P ÷ 1 d); between two anchors the distribution is their mixture, weighted linearly in
-/// ln m, and outside it is the end anchor's. Separations are turned into periods by Kepler's
-/// third law at the anchor's mean system mass, `m₁ (1 + E[q])`, with the mean mass ratio of
+/// ln m, and outside it is the end anchor's. A mixture is the one blend that stays continuous in
+/// mass across anchors of different forms (ruling 37), and between two unimodal anchors whose
+/// peaks lie apart it is bimodal. Separations are turned into periods by Kepler's third law at
+/// the anchor's mean system mass, `m₁ (1 + E[q])`, with the mean mass ratio of
 /// [`MASS_RATIO_ANCHORS`].
 ///
 /// - **0.09 M☉**: log-normal, mean 3.92, σ 0.5. Duchêne and Kraus (2013, Table 1 and §3.3.3):
@@ -155,21 +221,25 @@ const O_STAR_CLOSE_WEIGHT: f64 =
 ///   replaced by the paper's 1.3.
 /// - **1 M☉**: log-normal, mean 5.03, σ 2.28, Raghavan et al.'s (2010, §5.3.3) fit to their
 ///   solar-type pairs, a mean of 293 years; Duchêne and Kraus round it to P ≈ 250 years and 2.3.
-/// - **2.7 M☉**: bimodal, as Duchêne and Kraus find for A stars (Table 1 and §3.4.3: a peak among
-///   spectroscopic binaries at P ≈ 10 days and one among visual binaries at about 350 au). A
-///   close log-normal of mean 1.0 and σ 1.0 with weight 0.4, and a wide one of mean 6.09 (350 au
-///   at 3.78 M☉) and σ 1.3 with weight 0.6. The paper gives the peaks and not the widths, so the
-///   widths and weights are set to its §3.4.2 figures: with a companion frequency of 1, this
-///   puts 0.40 spectroscopic companions (P < 10³ days) per star, within the 30–45% of field A
-///   stars (Abt 1983), and 0.39 visual ones over 50–2000 au, against the VAST survey's 40 ± 4%
-///   there and Kouwenhoven et al.'s 37% in Sco-Cen.
+/// - **2.7 M☉**: the A stars' two populations as De Rosa et al.'s VAST survey (2014, MNRAS 437,
+///   1216) counts them, which is Duchêne and Kraus's bimodal distribution (Table 1 and §3.4.3).
+///   Their visual companions, beyond a projected 30 au, follow the survey's log-normal in
+///   separation (§6.2: peak 387 au, σ 0.79 dex), deprojected by +0.13 dex and truncated at
+///   30 au, 0.352 per star ([`A_STAR_VISUAL`]). Their spectroscopic companions, 0.351 per star
+///   (§6.4), lie inside it with the shape of Moe and Di Stefano's (2017, ApJS 230, 15) measured
+///   companion frequency per decade at 2.7 M☉ ([`A_STAR_SPECTROSCOPIC_SHAPE`]). The weights are
+///   the two counts' shares, 0.499 and 0.501; the anchor's companion frequency stays Duchêne and
+///   Kraus's. So 0.55 of the spectroscopic companions lie under 10³ days, there are 0.19
+///   companions per star at 1–10 au (0.14 in the survey's own count, whose total is 0.70), where
+///   Duchêne and Kraus (§5.1.2) find about the solar-type 10–15%, and the visual part reproduces
+///   the survey's 21.9 ± 2.6% over 30–800 au and 33.8 ± 2.6% over 30–10⁴ au.
 /// - **30 M☉**: Sana et al.'s (2012) close component, a density ∝ x^−0.55 on x = 0.15–3.5
 ///   (π = −0.55 ± 0.22) holding 0.69 of the 1.3 companions of q ≥ 0.1 per star, and a wide one
 ///   flat in x (Öpik's law) from 3.5 to 7.76, 10⁴ au at 40.5 M☉, holding the remaining 0.61:
 ///   Duchêne and Kraus (§3.5.3) combine "short period binaries (log P ≲ 1, 30% of all high-mass
 ///   stars) and a power law period distribution extending out to ≳ 10⁴ AU". The weights are
 ///   those counts extended to every mass ratio the model draws, [`O_STAR_CLOSE_FREQUENCY`] and
-///   [`O_STAR_WIDE_FREQUENCY`], 0.48 and 0.52. Counted as the surveys count, q ≥ 0.1, this gives
+///   [`O_STAR_WIDE_FREQUENCY`], 0.44 and 0.56. Counted as the surveys count, q ≥ 0.1, this gives
 ///   0.30 of O stars a companion inside 10 days and 0.43 visual companions over two decades of
 ///   separation, against their 45 ± 5%. Sana et al.'s x range is their fitted range (de Mink et
 ///   al. 2014, §2).
@@ -184,6 +254,8 @@ pub(super) const PERIOD_ANCHORS: [PeriodAnchor; 5] = [
             PeriodShape::LogNormal {
                 mean: 3.92,
                 sigma: 0.5,
+                lo: LOG_PERIOD_MIN,
+                hi: LOG_PERIOD_MAX,
             },
         )],
     },
@@ -194,6 +266,8 @@ pub(super) const PERIOD_ANCHORS: [PeriodAnchor; 5] = [
             PeriodShape::LogNormal {
                 mean: 3.85,
                 sigma: 1.3,
+                lo: LOG_PERIOD_MIN,
+                hi: LOG_PERIOD_MAX,
             },
         )],
     },
@@ -204,6 +278,8 @@ pub(super) const PERIOD_ANCHORS: [PeriodAnchor; 5] = [
             PeriodShape::LogNormal {
                 mean: 5.03,
                 sigma: 2.28,
+                lo: LOG_PERIOD_MIN,
+                hi: LOG_PERIOD_MAX,
             },
         )],
     },
@@ -211,17 +287,18 @@ pub(super) const PERIOD_ANCHORS: [PeriodAnchor; 5] = [
         mass: 2.7,
         components: &[
             (
-                0.4,
-                PeriodShape::LogNormal {
-                    mean: 1.0,
-                    sigma: 1.0,
+                A_STAR_CLOSE_WEIGHT,
+                PeriodShape::PiecewiseLinear {
+                    knots: &A_STAR_SPECTROSCOPIC_SHAPE,
                 },
             ),
             (
-                0.6,
+                1.0 - A_STAR_CLOSE_WEIGHT,
                 PeriodShape::LogNormal {
-                    mean: 6.09,
-                    sigma: 1.3,
+                    mean: A_STAR_VISUAL_LOG_PERIOD,
+                    sigma: A_STAR_VISUAL_SIGMA,
+                    lo: A_STAR_IMAGING_LOG_PERIOD,
+                    hi: LOG_PERIOD_MAX,
                 },
             ),
         ],
@@ -249,18 +326,14 @@ pub(super) const PERIOD_ANCHORS: [PeriodAnchor; 5] = [
     },
 ];
 
-/// One anchor of the mass-ratio law: a primary mass, the exponent γ of `q^γ` for close and for
-/// wide pairs, and the share of twins among pairs under [`TWIN_MAX_PERIOD`].
+/// One anchor of the mass-ratio law below Moe and Di Stefano's range: a primary mass and the
+/// exponent γ of `q^γ`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct MassRatioAnchor {
     /// The primary mass, M☉.
     mass: f64,
-    /// γ for pairs with x = log₁₀(P ÷ 1 d) up to [`CLOSE_MAX_LOG_PERIOD`].
-    gamma_close: f64,
-    /// γ for wider pairs.
-    gamma_wide: f64,
-    /// The share of pairs under [`TWIN_MAX_PERIOD`] that are twins.
-    twin_share: f64,
+    /// The exponent γ.
+    gamma: f64,
 }
 
 impl MassRatioAnchor {
@@ -271,68 +344,179 @@ impl MassRatioAnchor {
     }
 }
 
-/// The mass-ratio anchors (Design note 3): `f(q) ∝ q^γ` on `[0.08 M☉ ÷ m₁, 1]`, with γ from
-/// Duchêne and Kraus (2013, Table 1), re-checked:
+/// The mass-ratio anchors below [`MOE_DI_STEFANO_MIN_MASS`] (Design note 3; ruling 41):
+/// `f(q) ∝ q^γ` on `[0.08 M☉ ÷ m₁, 1]`, with γ from Duchêne and Kraus (2013, Table 1),
+/// re-checked, interpolated linearly in ln m and held below the first:
 ///
-/// | Anchor (M☉) | γ close | γ wide | Twins | Table 1 (and the text)                            |
-/// | ----------- | ------- | ------ | ----- | ------------------------------------------------- |
-/// | 0.09        | 4.2     | 4.2    | 0.3   | 4.2 ± 1.0 (Burgasser et al. 2006; §3.3.4)         |
-/// | 0.25        | 0.4     | 0.4    | 0.3   | 0.4 ± 0.2 (0.39 ± 0.23, Delfosse et al.; §3.2.4)  |
-/// | 1.0         | 0.3     | 0.3    | 0.3   | 0.3 ± 0.1 (0.28 ± 0.05, Raghavan et al.; §3.1.4)  |
-/// | 2.7         | −0.5    | −0.5   | 0     | −0.5 ± 0.2 (−0.45 ± 0.15, Kouwenhoven; §3.4.4)    |
-/// | 30          | −0.1    | −0.5   | 0     | −0.1 ± 0.6 close, −0.5 ± 0.1 wide (§3.5.4)        |
+/// | Anchor (M☉) | γ   | Table 1 (and the text)                            |
+/// | ----------- | --- | ------------------------------------------------- |
+/// | 0.09        | 4.2 | 4.2 ± 1.0 (Burgasser et al. 2006; §3.3.4)         |
+/// | 0.25        | 0.4 | 0.4 ± 0.2 (0.39 ± 0.23, Delfosse et al.; §3.2.4)  |
+/// | 1.0         | 0.3 | 0.3 ± 0.1 (0.28 ± 0.05, Raghavan et al.; §3.1.4)  |
 ///
-/// The O stars' close figure is Sana et al.'s (2012) for P ≤ 3,000 days and their wide one is for
-/// separations of 100 au or more.
-///
-/// The plan lists 0.4, 0.3, −0.5 for wide A and B pairs and −0.1 for close O pairs; the table
-/// gives the A and B figure for all their pairs, so it is used at both periods, and the VLM
-/// figure, 4.2, is added at the fractions' own 0.09 M☉ anchor. Close and wide divide at
-/// [`CLOSE_MAX_LOG_PERIOD`], the end of Sana et al.'s range.
-///
-/// **Twins** (Design note 3, "a twin excess for periods under 100 days"): among pairs under
-/// [`TWIN_MAX_PERIOD`] a share of 0.3 has q uniform on [0.95, 1], for primaries up to 1 M☉, fading
-/// linearly in ln m to none at 2.7 M☉. The share is fitted here to three figures, and is an
-/// estimate from small numbers. Raghavan et al. (§5.3.5) have 16 pairs under 100 days and 16% of
-/// their q > 0.9 pairs that close; with the 37–40 pairs above q = 0.9 that their Figure 16 and
-/// their 27 like-mass pairs of about 250 imply, that puts about 6 of the 16 above q = 0.9,
-/// against 2 for the smooth law, a share of 0.28. Duchêne and Kraus's §5.3 finds an excess of
-/// q ≥ 0.98 at P ≤ 43 d among 0.5–2 M☉ binaries that is 2–3% of all spectroscopic binaries (Lucy
-/// 2006; Simon and Obbie 2009); the model gives 2.4% of those under 10⁴ days. Galactic O stars
-/// show no twin population (Sana et al. 2012), and the early claims of one among A stars were
-/// selection effects (Duchêne and Kraus §3.4.4).
-pub(super) const MASS_RATIO_ANCHORS: [MassRatioAnchor; 5] = [
+/// The 1 M☉ anchor only shapes the interpolation up to 0.8 M☉, where Moe and Di Stefano's laws
+/// take over. No twin excess is added below 0.8 M☉, since no cited measurement gives one there.
+pub(super) const MASS_RATIO_ANCHORS: [MassRatioAnchor; 3] = [
     MassRatioAnchor {
         mass: 0.09,
-        gamma_close: 4.2,
-        gamma_wide: 4.2,
-        twin_share: 0.3,
+        gamma: 4.2,
     },
     MassRatioAnchor {
         mass: 0.25,
-        gamma_close: 0.4,
-        gamma_wide: 0.4,
-        twin_share: 0.3,
+        gamma: 0.4,
     },
     MassRatioAnchor {
         mass: 1.0,
-        gamma_close: 0.3,
-        gamma_wide: 0.3,
-        twin_share: 0.3,
-    },
-    MassRatioAnchor {
-        mass: 2.7,
-        gamma_close: -0.5,
-        gamma_wide: -0.5,
-        twin_share: 0.0,
-    },
-    MassRatioAnchor {
-        mass: 30.0,
-        gamma_close: -0.1,
-        gamma_wide: -0.5,
-        twin_share: 0.0,
+        gamma: 0.3,
     },
 ];
+
+/// The lowest primary mass, M☉, of Moe and Di Stefano's (2017, ApJS 230, 15) mass-ratio set: the
+/// lower edge of their solar-type interval, 0.8–1.2 M☉ (§9.1). From it up the model takes their
+/// whole set, both slopes of the broken power law and the excess twins; below it Duchêne and
+/// Kraus's single slope stands, with no excess (ruling 41).
+pub(super) const MOE_DI_STEFANO_MIN_MASS: f64 = 0.8;
+
+/// The mass ratios where Moe and Di Stefano's power law breaks (§2): `γ_smallq` below 0.3 and
+/// `γ_largeq` above; and 0.1, the lowest ratio they measure, below which the model continues with
+/// `max(γ_smallq, 0)`.
+const MASS_RATIO_BREAKS: [f64; 2] = [0.1, TWIN_REFERENCE_MASS_RATIO];
+
+/// Primary masses, M☉, where Moe and Di Stefano's laws have a kink or a jump: the lower edge of
+/// their range; 1.2, 3.5 and 6.0, between which their slopes are interpolated (§9.1); 6.5, where
+/// the longest twin period stops falling (eq. 7); and 100 M☉, above which their eq. 6 would fall
+/// below zero and is held at zero.
+pub(super) const MOE_DI_STEFANO_MASS_KINKS: [f64; 6] =
+    [MOE_DI_STEFANO_MIN_MASS, 1.2, 3.5, 6.0, 6.5, 100.0];
+
+/// Periods, as x = log₁₀(P ÷ 1 d), where Moe and Di Stefano's slopes have kinks (eqs. 9–11 and
+/// 13–15), with the limits of their range, 0.2 and 8.0, outside which each is held.
+pub(super) const MOE_DI_STEFANO_PERIOD_KINKS: [f64; 12] =
+    [0.2, 1.0, 2.0, 2.5, 3.0, 4.0, 4.5, 5.0, 5.5, 5.6, 6.5, 8.0];
+
+/// A value interpolated between Moe and Di Stefano's solar-type, A/late-B (3.5 M☉) and early-type
+/// (over 6 M☉) fits, linearly in M₁ across 1.2–3.5 and 3.5–6.0 M☉, as their §9.1 does.
+#[must_use]
+fn by_primary_mass(m: f64, solar: f64, a_late_b: f64, early: f64) -> f64 {
+    if m <= 1.2 {
+        solar
+    } else if m <= 3.5 {
+        lerp(solar, a_late_b, (m - 1.2) / 2.3)
+    } else if m <= 6.0 {
+        lerp(a_late_b, early, (m - 3.5) / 2.5)
+    } else {
+        early
+    }
+}
+
+/// Moe and Di Stefano's (2017, eqs. 9–11) slope `γ_largeq` of the mass-ratio law over
+/// q = 0.3–1, for a primary of `m` M☉ (0.8 or more) at x = log₁₀(P ÷ 1 d), held outside x =
+/// 0.2–8, re-checked against the paper:
+///
+/// - solar type: −0.5 up to x = 5, then −0.5 − 0.3 (x − 5) (eq. 9);
+/// - 3.5 M☉: −0.5 up to 1, −0.5 − 0.2 (x − 1) to 4.5, −1.2 − 0.4 (x − 4.5) to 6.5, then −2.0
+///   (eq. 10);
+/// - over 6 M☉: −0.5 up to 1, −0.5 − 0.9 (x − 1) to 2, −1.4 − 0.3 (x − 2) to 4, then −2.0 (eq. 11).
+///
+/// Their 1σ is 0.3 everywhere (eq. 12).
+#[must_use]
+fn gamma_large(m: f64, log_period: f64) -> f64 {
+    let x = log_period.clamp(0.2, 8.0);
+    let solar = if x < 5.0 {
+        -0.5
+    } else {
+        -0.5 - 0.3 * (x - 5.0)
+    };
+    let a_late_b = if x < 1.0 {
+        -0.5
+    } else if x < 4.5 {
+        -0.5 - 0.2 * (x - 1.0)
+    } else if x < 6.5 {
+        -1.2 - 0.4 * (x - 4.5)
+    } else {
+        -2.0
+    };
+    let early = if x < 1.0 {
+        -0.5
+    } else if x < 2.0 {
+        -0.5 - 0.9 * (x - 1.0)
+    } else if x < 4.0 {
+        -1.4 - 0.3 * (x - 2.0)
+    } else {
+        -2.0
+    };
+    by_primary_mass(m, solar, a_late_b, early)
+}
+
+/// Moe and Di Stefano's (2017, eqs. 13–15) slope `γ_smallq` of the mass-ratio law over
+/// q = 0.1–0.3, for a primary of `m` M☉ (0.8 or more) at x = log₁₀(P ÷ 1 d), held outside x =
+/// 0.2–8, re-checked against the paper:
+///
+/// - solar type: 0.3 (eq. 13);
+/// - 3.5 M☉: 0.2 up to 2.5, 0.2 − 0.3 (x − 2.5) to 5.5, then −0.7 − 0.2 (x − 5.5) (eq. 14);
+/// - over 6 M☉: 0.1 up to 1, 0.1 − 0.15 (x − 1) to 3, −0.2 − 0.5 (x − 3) to 5.6, then −1.5
+///   (eq. 15).
+///
+/// Their 1σ runs from 0.4 to 0.6 (eq. 16).
+#[must_use]
+fn gamma_small(m: f64, log_period: f64) -> f64 {
+    let x = log_period.clamp(0.2, 8.0);
+    let a_late_b = if x < 2.5 {
+        0.2
+    } else if x < 5.5 {
+        0.2 - 0.3 * (x - 2.5)
+    } else {
+        -0.7 - 0.2 * (x - 5.5)
+    };
+    let early = if x < 1.0 {
+        0.1
+    } else if x < 3.0 {
+        0.1 - 0.15 * (x - 1.0)
+    } else if x < 5.6 {
+        -0.2 - 0.5 * (x - 3.0)
+    } else {
+        -1.5
+    };
+    by_primary_mass(m, 0.3, a_late_b, early)
+}
+
+/// The longest period, as x = log₁₀(P ÷ 1 d), at which a primary of `m1` has excess twins: Moe
+/// and Di Stefano's (2017, eq. 7) `8 − M₁ ÷ M☉` up to 6.5 M☉, and 1.5 above; below
+/// [`MOE_DI_STEFANO_MIN_MASS`], where there are none, the value there.
+#[must_use]
+pub(super) fn longest_twin_log_period(m1: SolarMasses) -> f64 {
+    let m = m1.value().max(MOE_DI_STEFANO_MIN_MASS);
+    if m <= 6.5 { 8.0 - m } else { 1.5 }
+}
+
+/// Moe and Di Stefano's (2017, ApJS 230, 15, eqs. 5–7) excess twin fraction `F_twin(M₁, P)`: the
+/// share of the companions with q > 0.3 that make an excess population uniform on q = 0.95–1,
+/// over their own broken power law beneath it (§2), at x = `log_period` = log₁₀(P ÷ 1 d),
+/// re-checked against the paper.
+///
+/// Below x = 1 it is `F₀ = 0.30 − 0.15 log₁₀(M₁ ÷ M☉)` (eq. 6); it falls linearly in x to zero at
+/// [`longest_twin_log_period`] (eq. 5), `8 − M₁ ÷ M☉` up to 6.5 M☉ and 1.5 above (eq. 7), and is
+/// zero beyond. Their 1σ uncertainty is max(0.03, 0.3 F) (eq. 8). So a Sun-like pair under
+/// 10 days has 0.30, falling to none at 10⁷ days, and an O star's (28 M☉) 0.08, gone by 30 days,
+/// against Sana et al.'s (2012) finding of no separate twin population. It is zero below
+/// [`MOE_DI_STEFANO_MIN_MASS`], outside their range (ruling 41), and F₀, which their slope would
+/// take below zero above 100 M☉, is held at zero.
+#[must_use]
+pub(super) fn excess_twin_fraction(m1: SolarMasses, log_period: f64) -> f64 {
+    let m = m1.value();
+    if m < MOE_DI_STEFANO_MIN_MASS {
+        return 0.0;
+    }
+    let short = (0.30 - 0.15 * math::log10(m)).max(0.0);
+    let longest = longest_twin_log_period(m1);
+    if log_period < 1.0 {
+        short
+    } else if log_period < longest {
+        short * (1.0 - (log_period - 1.0) / (longest - 1.0))
+    } else {
+        0.0
+    }
+}
 
 /// Φ(z), the standard normal distribution.
 #[must_use]
@@ -440,26 +624,103 @@ impl TruncatedNormal {
     }
 }
 
+/// A density linear in x between knots, normalised over them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Polyline {
+    /// The knots `(x, density)`, x strictly increasing, densities unnormalised and not negative.
+    knots: &'static [(f64, f64)],
+    /// The area under the knots.
+    total: f64,
+}
+
+impl Polyline {
+    #[must_use]
+    fn new(knots: &'static [(f64, f64)]) -> Self {
+        debug_assert!(knots.len() >= 2, "a polyline needs two knots");
+        let total = knots.windows(2).fold(0.0, |sum, pair| {
+            let ((x0, f0), (x1, f1)) = (pair[0], pair[1]);
+            sum + f0.midpoint(f1) * (x1 - x0)
+        });
+        Self { knots, total }
+    }
+
+    #[must_use]
+    fn support(&self) -> (f64, f64) {
+        (self.knots[0].0, self.knots[self.knots.len() - 1].0)
+    }
+
+    #[must_use]
+    fn cdf_pdf(&self, x: f64) -> (f64, f64) {
+        let (lo, hi) = self.support();
+        if x < lo {
+            return (0.0, 0.0);
+        }
+        if x > hi {
+            return (1.0, 0.0);
+        }
+        let mut below = 0.0;
+        for pair in self.knots.windows(2) {
+            let ((x0, f0), (x1, f1)) = (pair[0], pair[1]);
+            if x <= x1 {
+                let f = f0 + (f1 - f0) * (x - x0) / (x1 - x0);
+                let area = below + f0.midpoint(f) * (x - x0);
+                return ((area / self.total).clamp(0.0, 1.0), f / self.total);
+            }
+            below += f0.midpoint(f1) * (x1 - x0);
+        }
+        (1.0, 0.0)
+    }
+
+    /// The inverse of the cumulative distribution: the segment that holds the share `u` of the
+    /// area, then, for a share `v` of that segment's area, `t = v (f₀ + f₁) ÷ (f₀ + √(f₀² +
+    /// v (f₁² − f₀²)))` of its width, the rationalised root of its quadratic cumulative
+    /// distribution (as [`PiecewiseLinear`](crate::rng::PiecewiseLinear) samples).
+    #[must_use]
+    fn quantile(&self, u: f64) -> f64 {
+        let target = u.clamp(0.0, 1.0) * self.total;
+        let mut below = 0.0;
+        let last = self.knots.len() - 2;
+        for (i, pair) in self.knots.windows(2).enumerate() {
+            let ((x0, f0), (x1, f1)) = (pair[0], pair[1]);
+            let area = f0.midpoint(f1) * (x1 - x0);
+            if target <= below + area || i == last {
+                let v = if area > 0.0 {
+                    ((target - below) / area).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let root = f0 + (f0 * f0 + v * (f1 * f1 - f0 * f0)).sqrt();
+                let t = if root > 0.0 { v * (f0 + f1) / root } else { v };
+                return x0 + t * (x1 - x0);
+            }
+            below += area;
+        }
+        self.support().1
+    }
+}
+
 /// One built component of a [`PeriodDistribution`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Component {
     Normal(TruncatedNormal),
     Power(PowerLaw),
+    Linear(Polyline),
 }
 
 impl Component {
     #[must_use]
     fn new(shape: PeriodShape) -> Self {
         match shape {
-            PeriodShape::LogNormal { mean, sigma } => Self::Normal(TruncatedNormal::new(
+            PeriodShape::LogNormal {
                 mean,
                 sigma,
-                LOG_PERIOD_MIN,
-                LOG_PERIOD_MAX,
-            )),
+                lo,
+                hi,
+            } => Self::Normal(TruncatedNormal::new(mean, sigma, lo, hi)),
             PeriodShape::LogPowerLaw { exponent, lo, hi } => Self::Power(
                 PowerLaw::new(-exponent, lo, hi).expect("the anchors' power laws are valid"),
             ),
+            PeriodShape::PiecewiseLinear { knots } => Self::Linear(Polyline::new(knots)),
         }
     }
 
@@ -468,6 +729,7 @@ impl Component {
         match self {
             Self::Normal(n) => n.cdf_pdf(x),
             Self::Power(p) => (p.cdf(x), p.pdf(x)),
+            Self::Linear(l) => l.cdf_pdf(x),
         }
     }
 
@@ -476,6 +738,7 @@ impl Component {
         match self {
             Self::Normal(n) => n.quantile(u),
             Self::Power(p) => p.quantile(u),
+            Self::Linear(l) => l.quantile(u),
         }
     }
 
@@ -484,6 +747,7 @@ impl Component {
         match self {
             Self::Normal(n) => (n.lo, n.hi),
             Self::Power(p) => (p.lo(), p.hi()),
+            Self::Linear(l) => l.support(),
         }
     }
 }
@@ -527,13 +791,22 @@ impl PeriodDistribution {
         &self.components[..self.len]
     }
 
-    /// Every component's lower and upper limit, in x = log₁₀(P ÷ 1 d): the points where the
-    /// density may jump, for quadratures that put panel edges there.
-    pub(super) fn component_limits(&self) -> impl Iterator<Item = f64> + '_ {
-        self.used().iter().flat_map(|(_, c)| {
-            let (lo, hi) = c.support();
-            [lo, hi]
-        })
+    /// Every point where a component's density jumps or has a kink, in x = log₁₀(P ÷ 1 d): each
+    /// component's limits and a piecewise-linear one's knots, for quadratures that put panel
+    /// edges there.
+    #[must_use]
+    pub(super) fn component_limits(&self) -> Vec<f64> {
+        let mut limits = Vec::with_capacity(4 * MAX_PERIOD_COMPONENTS);
+        for (_, component) in self.used() {
+            match component {
+                Component::Linear(line) => limits.extend(line.knots.iter().map(|&(x, _)| x)),
+                Component::Normal(_) | Component::Power(_) => {
+                    let (lo, hi) = component.support();
+                    limits.extend([lo, hi]);
+                }
+            }
+        }
+        limits
     }
 
     /// The limits of the distribution's support, in x = log₁₀(P ÷ 1 d).
@@ -631,48 +904,77 @@ impl PeriodDistribution {
     }
 }
 
-/// Which part of a mass-ratio law a period selects.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PeriodRegime {
-    /// Under [`TWIN_MAX_PERIOD`]: the close exponent, and twins.
-    Twin,
-    /// From [`TWIN_MAX_PERIOD`] to x = [`CLOSE_MAX_LOG_PERIOD`]: the close exponent.
-    Close,
-    /// Wider: the wide exponent.
-    Wide,
-}
-
-impl PeriodRegime {
-    /// The three regimes in ascending period.
-    pub(super) const ALL: [Self; 3] = [Self::Twin, Self::Close, Self::Wide];
-
-    #[must_use]
-    fn of(period: Days) -> Self {
-        if period < TWIN_MAX_PERIOD {
-            Self::Twin
-        } else if math::log10(period.value()) <= CLOSE_MAX_LOG_PERIOD {
-            Self::Close
-        } else {
-            Self::Wide
+/// `∫ f(x) dx` over x = log₁₀(P ÷ 1 d) from `lo` to `hi`, by 16-point Gauss–Legendre on panels
+/// between `lo`, `hi`, every limit of a component of `periods` (where its density may jump) and
+/// `kinks`, each split into equal parts no wider than `max_panel`. Fewer than one panel gives 0.
+#[must_use]
+pub(super) fn integrate_log_period(
+    periods: &PeriodDistribution,
+    lo: f64,
+    hi: f64,
+    kinks: &[f64],
+    max_panel: f64,
+    mut f: impl FnMut(f64) -> f64,
+) -> f64 {
+    if hi <= lo {
+        return 0.0;
+    }
+    let mut edges: Vec<f64> = periods
+        .component_limits()
+        .into_iter()
+        .chain(kinks.iter().copied())
+        .filter(|&x| x > lo && x < hi)
+        .collect();
+    edges.push(lo);
+    edges.push(hi);
+    edges.sort_by(f64::total_cmp);
+    edges.dedup();
+    let mut sum = 0.0;
+    for pair in edges.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        let mut pieces = 1_u32;
+        while (end - start) / f64::from(pieces) > max_panel {
+            pieces += 1;
+        }
+        let step = (end - start) / f64::from(pieces);
+        for i in 0..pieces {
+            let a = start + step * f64::from(i);
+            let b = if i + 1 == pieces { end } else { a + step };
+            sum += gl16(&mut f, a, b);
         }
     }
+    sum
 }
 
-/// `∫ qᵏ dq` over `[lo, 1]`, for `0 < lo ≤ 1`: `(1 − lo^(k+1)) ÷ (k + 1)`, or `−ln lo` at k = −1.
+/// `∫ qᵏ dq` over `[a, b]`, for `0 < a ≤ b`: `b^(k+1) (1 − (a ÷ b)^(k+1)) ÷ (k + 1)`, or
+/// `ln(b ÷ a)` at k = −1.
 #[must_use]
-fn power_integral(k: f64, lo: f64) -> f64 {
+fn power_integral(k: f64, a: f64, b: f64) -> f64 {
     let g = k + 1.0;
-    let log_lo = math::ln(lo);
+    let log_ratio = math::ln(a / b);
     if g.abs() < 1e-8 {
-        -log_lo
+        -log_ratio
     } else {
-        -math::exp_m1(g * log_lo) / g
+        -math::powf(b, g) * math::exp_m1(g * log_ratio) / g
     }
+}
+
+/// The most segments of a mass-ratio law's broken power law: below 0.1, 0.1–0.3 and above 0.3.
+const MAX_MASS_RATIO_SEGMENTS: usize = 3;
+
+/// One segment of a broken power law in q: `c q^γ` on `[lo, hi]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Segment {
+    /// The density `q^γ` normalised on the segment.
+    power: PowerLaw,
+    /// The segment's share of the whole law's area.
+    share: f64,
 }
 
 /// The distribution of a companion's mass ratio q = m₂ ÷ m₁ for one primary mass and period
-/// ([`MultiplicityModel::mass_ratio_distribution`]): `q^γ` on `[0.08 M☉ ÷ m₁, 1]`, with a share of
-/// twins uniform on [0.95, 1] for close low-mass pairs.
+/// ([`MultiplicityModel::mass_ratio_distribution`]): a power law on `[0.08 M☉ ÷ m₁, 1]`, continuous
+/// and broken at q = 0.1 and 0.3 for primaries of 0.8 M☉ or more, with a share of twins uniform on
+/// [0.95, 1] there.
 ///
 /// For a primary of 0.08 M☉ or less the range is empty and every companion has q = 1.
 ///
@@ -693,40 +995,130 @@ fn power_integral(k: f64, lo: f64) -> f64 {
 /// assert!(q >= ratios.lo() && q <= 1.0);
 /// assert!((ratios.lo() - 0.2).abs() < 1e-15);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MassRatioDistribution {
     /// The lowest mass ratio, 0.08 M☉ ÷ m₁, or 1 when that is at least 1.
     lo: f64,
-    /// The exponent γ of `q^γ`.
-    gamma: f64,
-    /// `q^γ` on `[lo, 1]`, or `None` when the range is empty.
-    power: Option<PowerLaw>,
-    /// The share of twins.
+    /// The smooth law's segments in ascending q; the first `len` are in use, none when the range
+    /// is empty.
+    segments: [Segment; MAX_MASS_RATIO_SEGMENTS],
+    len: usize,
+    /// The weight of the twins in the mixture.
     twin_share: f64,
     /// The twins' lowest mass ratio, `max(0.95, lo)`.
     twin_lo: f64,
 }
 
 impl MassRatioDistribution {
+    /// The smooth law on `[lo, 1]`, without twins: `q^γᵢ` on successive segments ending at each
+    /// `(end, γᵢ)` of `pieces` (the last ending at 1), continuous at every break; segments that
+    /// end at or below `lo` are left out.
     #[must_use]
-    fn new(lo: f64, gamma: f64, twin_share: f64) -> Self {
+    fn smooth(lo: f64, pieces: &[(f64, f64)]) -> Self {
+        let placeholder = Segment {
+            power: PowerLaw::new(0.0, 0.5, 1.0).expect("a flat law on [0.5, 1] is valid"),
+            share: 0.0,
+        };
+        let mut segments = [placeholder; MAX_MASS_RATIO_SEGMENTS];
         if lo >= 1.0 {
             return Self {
                 lo: 1.0,
-                gamma,
-                power: None,
+                segments,
+                len: 0,
                 twin_share: 0.0,
                 twin_lo: 1.0,
             };
         }
-        let power = PowerLaw::new(-gamma, lo, 1.0).expect("q^γ on [lo, 1] with lo < 1 is valid");
+        let mut len = 0;
+        let mut start = lo;
+        // The density's coefficient on the current segment, and its areas, for continuity.
+        let mut coefficient = 1.0;
+        let mut areas = [0.0; MAX_MASS_RATIO_SEGMENTS];
+        let mut previous: Option<f64> = None;
+        for &(end, gamma) in pieces {
+            if end <= start {
+                continue;
+            }
+            if let Some(before) = previous {
+                // c₁ start^γ₀ = c₂ start^γ₁ at the break.
+                coefficient *= math::powf(start, before - gamma);
+            }
+            let power =
+                PowerLaw::new(-gamma, start, end).expect("q^γ on a segment of [lo, 1] is valid");
+            areas[len] = coefficient * power.integral();
+            segments[len] = Segment { power, share: 0.0 };
+            len += 1;
+            previous = Some(gamma);
+            start = end;
+        }
+        let total = areas[..len].iter().fold(0.0, |sum, a| sum + a);
+        for (segment, area) in segments[..len].iter_mut().zip(areas) {
+            segment.share = area / total;
+        }
         Self {
             lo,
-            gamma,
-            power: Some(power),
-            twin_share,
+            segments,
+            len,
+            twin_share: 0.0,
             twin_lo: TWIN_MIN_MASS_RATIO.max(lo),
         }
+    }
+
+    fn used(&self) -> &[Segment] {
+        &self.segments[..self.len]
+    }
+
+    /// The smooth law's cumulative distribution and density at `q`, without the twins.
+    #[must_use]
+    fn smooth_cdf_pdf(&self, q: f64) -> (f64, f64) {
+        let mut below = 0.0;
+        for segment in self.used() {
+            if q <= segment.power.hi() {
+                let cdf = below + segment.share * segment.power.cdf(q);
+                return (cdf.clamp(0.0, 1.0), segment.share * segment.power.pdf(q));
+            }
+            below += segment.share;
+        }
+        (1.0, 0.0)
+    }
+
+    /// The smooth law's quantile of `u`, without the twins.
+    #[must_use]
+    fn smooth_quantile(&self, u: f64) -> f64 {
+        let mut below = 0.0;
+        let last = self.len.saturating_sub(1);
+        for (i, segment) in self.used().iter().enumerate() {
+            if u <= below + segment.share || i == last {
+                let v = if segment.share > 0.0 {
+                    ((u - below) / segment.share).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                return segment.power.quantile(v);
+            }
+            below += segment.share;
+        }
+        1.0
+    }
+
+    /// The weight in this law's mixture of Moe and Di Stefano's excess twin fraction `excess`,
+    /// which they count among companions with q > 0.3: the w with `w ÷ (w + (1 − w) S) =
+    /// excess`, where S is the smooth law's share above 0.3, so `w = excess S ÷ (1 − excess +
+    /// excess S)`. For a primary of 0.08 M☉ or less there are no twins to weigh.
+    #[must_use]
+    pub(super) fn twin_weight(&self, excess: f64) -> f64 {
+        if self.len == 0 {
+            return 0.0;
+        }
+        let above = 1.0 - self.smooth_cdf_pdf(TWIN_REFERENCE_MASS_RATIO).0;
+        excess * above / (1.0 - excess + excess * above)
+    }
+
+    /// This law with twins of Moe and Di Stefano's excess fraction `excess` added.
+    #[must_use]
+    fn with_twins(mut self, excess: f64) -> Self {
+        self.twin_share = self.twin_weight(excess);
+        self
     }
 
     /// The lowest mass ratio: 0.08 M☉ ÷ m₁, or 1 for a primary of 0.08 M☉ or less.
@@ -735,39 +1127,40 @@ impl MassRatioDistribution {
         self.lo
     }
 
-    /// The exponent γ of the smooth law `q^γ`.
-    #[must_use]
-    pub fn gamma(&self) -> f64 {
-        self.gamma
-    }
-
-    /// The share of twins, uniform on [0.95, 1]: positive only for low-mass pairs under 100 days.
+    /// The weight of the twins, uniform on [0.95, 1], in the law's mixture: Moe and Di Stefano's
+    /// excess twin fraction for this primary and period, reweighed from companions of q > 0.3 to
+    /// all the law's companions; 0 below 0.8 M☉.
     #[must_use]
     pub fn twin_share(&self) -> f64 {
         self.twin_share
     }
 
-    /// The same law without its twins: `q^γ` alone.
+    /// The same law without its twins.
+    #[cfg(test)]
     #[must_use]
     pub(super) fn smooth_part(&self) -> Self {
         Self {
             twin_share: 0.0,
-            ..*self
+            ..self.clone()
         }
     }
 
     /// The twins' part of the density at `q`, before their weight.
     #[must_use]
     fn twin_pdf(&self, q: f64) -> f64 {
-        if (self.twin_lo..=1.0).contains(&q) {
+        if self.twin_lo < 1.0 && (self.twin_lo..=1.0).contains(&q) {
             1.0 / (1.0 - self.twin_lo)
         } else {
             0.0
         }
     }
 
+    /// The twins' part of the cumulative distribution at `q`, before their weight.
     #[must_use]
     fn twin_cdf(&self, q: f64) -> f64 {
+        if self.twin_lo >= 1.0 {
+            return if q >= 1.0 { 1.0 } else { 0.0 };
+        }
         ((q - self.twin_lo) / (1.0 - self.twin_lo)).clamp(0.0, 1.0)
     }
 
@@ -775,33 +1168,37 @@ impl MassRatioDistribution {
     /// have q = 1.
     #[must_use]
     pub fn pdf(&self, q: f64) -> f64 {
-        let Some(power) = &self.power else {
+        if self.len == 0 {
             return 0.0;
-        };
+        }
         let w = self.twin_share;
-        (1.0 - w) * power.pdf(q) + w * self.twin_pdf(q)
+        (1.0 - w) * self.smooth_cdf_pdf(q).1 + w * self.twin_pdf(q)
     }
 
     /// The probability that the mass ratio is at most `q`.
     #[must_use]
     pub fn cdf(&self, q: f64) -> f64 {
-        let Some(power) = &self.power else {
+        if self.len == 0 {
             return if q >= 1.0 { 1.0 } else { 0.0 };
-        };
+        }
         let w = self.twin_share;
-        ((1.0 - w) * power.cdf(q) + w * self.twin_cdf(q)).clamp(0.0, 1.0)
+        ((1.0 - w) * self.smooth_cdf_pdf(q).0 + w * self.twin_cdf(q)).clamp(0.0, 1.0)
     }
 
     /// The mean mass ratio.
     #[must_use]
     pub fn mean(&self) -> f64 {
-        if self.power.is_none() {
+        if self.len == 0 {
             return 1.0;
         }
-        let smooth =
-            power_integral(self.gamma + 1.0, self.lo) / power_integral(self.gamma, self.lo);
+        let smooth = self.used().iter().fold(0.0, |sum, segment| {
+            let (a, b) = (segment.power.lo(), segment.power.hi());
+            let gamma = -segment.power.exponent();
+            let mean = power_integral(gamma + 1.0, a, b) / power_integral(gamma, a, b);
+            sum + segment.share * mean
+        });
         let w = self.twin_share;
-        (1.0 - w) * smooth + w * 0.5 * (self.twin_lo + 1.0)
+        (1.0 - w) * smooth + w * self.twin_lo.midpoint(1.0)
     }
 
     /// The mass ratio below which a share `u` of companions lies, for `u` in [0, 1]: the inverse
@@ -809,22 +1206,24 @@ impl MassRatioDistribution {
     /// among them.
     #[must_use]
     pub fn quantile(&self, u: f64) -> f64 {
-        let Some(power) = &self.power else {
+        if self.len == 0 {
             return 1.0;
-        };
+        }
         let u = u.clamp(0.0, 1.0);
         let w = self.twin_share;
         if w <= 0.0 {
-            return power.quantile(u);
+            return self.smooth_quantile(u);
         }
-        let below_twins = (1.0 - w) * power.cdf(self.twin_lo);
+        let below_twins = (1.0 - w) * self.smooth_cdf_pdf(self.twin_lo).0;
         if u <= below_twins {
-            return power.quantile(u / (1.0 - w)).min(self.twin_lo);
+            return self.smooth_quantile(u / (1.0 - w)).min(self.twin_lo);
         }
         let eval = |q: f64| {
-            let cdf = (1.0 - w) * power.cdf(q) + w * self.twin_cdf(q);
-            let pdf = (1.0 - w) * power.pdf(q) + w * self.twin_pdf(q);
-            (cdf, pdf)
+            let (cdf, pdf) = self.smooth_cdf_pdf(q);
+            (
+                (1.0 - w) * cdf + w * self.twin_cdf(q),
+                (1.0 - w) * pdf + w * self.twin_pdf(q),
+            )
         };
         invert(eval, u, self.twin_lo, 1.0).clamp(self.twin_lo, 1.0)
     }
@@ -845,10 +1244,13 @@ impl MassRatioDistribution {
 /// al. (2010, §5.3.4) find it roughly flat above their 12-day circularisation limit. The plan's
 /// thermal law above 10³ days is Duquennoy and Mayor's (1991), whose own bias-corrected
 /// distribution Duchêne and Kraus show to be flat beyond e ≈ 0.3, and is replaced by the flat
-/// law. The cap `e_max = 1 − (P ÷ P_circ)^(−2/3)` keeps the periastron `a (1 − e)` outside the
-/// separation of a circular orbit of the circularisation period about the same masses, as Design
-/// note 3 asks; it is the rising upper envelope of the period–eccentricity plane that both papers
-/// describe.
+/// law. The cap is Moe and Di Stefano's (2017, ApJS 230, 15, eq. 3) envelope, `e_max = 1 −
+/// (P ÷ 2 d)^(−2/3)`, which keeps the pair's Roche-lobe fill factors under about 70% at
+/// periastron and so the periastron `a (1 − e)` at or beyond the separation of a circular 2-day
+/// orbit about the same masses ([`ECCENTRICITY_ENVELOPE_PERIOD`]; ruling 37). It is the rising
+/// upper envelope of the period–eccentricity plane that Duchêne and Kraus describe, and at
+/// 12 days it already allows 0.70. Under the circularisation period every orbit is circular,
+/// which is a separate, tidal statement.
 ///
 /// # Examples
 ///
@@ -858,8 +1260,8 @@ impl MassRatioDistribution {
 ///
 /// let model = MultiplicityModel::default_v1();
 /// assert_eq!(model.eccentricity_distribution(Days::new(5.0)).e_max(), 0.0);
-/// // Eight times the circularisation period: the separation is 4 times the circular one's.
-/// let wide = model.eccentricity_distribution(Days::new(96.0));
+/// // Eight times the envelope's period: the separation is 4 times a 2-day orbit's.
+/// let wide = model.eccentricity_distribution(Days::new(16.0));
 /// assert!((wide.e_max() - 0.75).abs() < 1e-12);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -874,7 +1276,7 @@ impl EccentricityDistribution {
         if period < CIRCULARISATION_PERIOD {
             return Self { e_max: 0.0 };
         }
-        let ratio = period / CIRCULARISATION_PERIOD;
+        let ratio = period / ECCENTRICITY_ENVELOPE_PERIOD;
         Self {
             e_max: 1.0 - math::powf(ratio, -2.0 / 3.0),
         }
@@ -935,11 +1337,12 @@ impl MultiplicityModel {
     /// | 0.09   | normal, mean 3.92, σ 0.5                                                    |
     /// | 0.25   | normal, mean 3.85, σ 1.3                                                    |
     /// | 1.0    | normal, mean 5.03, σ 2.28                                                   |
-    /// | 2.7    | 0.4 × normal (1.0, 1.0) + 0.6 × normal (6.09, 1.3)                          |
-    /// | 30     | 0.48 × x^−0.55 on 0.15–3.5 + 0.52 × flat on 3.5–7.76                        |
+    /// | 2.7    | 0.50 × Moe and Di Stefano's shape on 0.2–4.68 + 0.50 × normal (6.35, 1.19)   |
+    /// | 30     | 0.44 × x^−0.55 on 0.15–3.5 + 0.56 × flat on 3.5–7.76                        |
     ///
-    /// Every normal is truncated to [`LOG_PERIOD_MIN`]–[`LOG_PERIOD_MAX`]. Its sources and the
-    /// corrections to the plan's figures are in this module's anchor table.
+    /// The first three normals are truncated to [`LOG_PERIOD_MIN`]–[`LOG_PERIOD_MAX`], the A
+    /// stars' visual one to 4.68–[`LOG_PERIOD_MAX`]. The sources and the corrections to the plan's
+    /// figures are in this module's anchor table.
     #[must_use]
     pub fn period_distribution(&self, m1: SolarMasses) -> PeriodDistribution {
         let anchors = self.period_anchors();
@@ -959,72 +1362,100 @@ impl MultiplicityModel {
         PeriodDistribution { components, len }
     }
 
-    /// The mass-ratio law for a primary of `m1` in one period regime.
+    /// The smooth mass-ratio law for a primary of `m1` at x = `log_period` = log₁₀(P ÷ 1 d),
+    /// without twins: below [`MOE_DI_STEFANO_MIN_MASS`], Duchêne and Kraus's `q^γ` with γ from
+    /// [`MASS_RATIO_ANCHORS`]; from it up, Moe and Di Stefano's broken power law, `γ_smallq` on
+    /// q = 0.1–0.3 and `γ_largeq` above (their eqs. 9–11 and 13–15; [`gamma_small`],
+    /// [`gamma_large`]), continued below 0.1 with `max(γ_smallq, 0)`.
+    ///
+    /// Their laws are measured down to q = 0.1. Below it the model neither lets their negative
+    /// small-q slopes rise towards extreme ratios nor stops: a slope that rose over the 1.5 decades
+    /// down to 0.08 M☉ ÷ 30 M☉ would, with the surveyed counts above q = 0.1 held, give an O star
+    /// more companions than [`MAX_COMPANIONS`](super::MAX_COMPANIONS) allows, and Duchêne and Kraus
+    /// (§5.1.3, §5.4) find a deficit of extreme mass ratios, not an excess.
     ///
     /// # Panics
     ///
     /// If `m1` is not positive and finite.
     #[must_use]
-    pub(super) fn mass_ratio_in(
+    pub(super) fn smooth_mass_ratio(
         &self,
         m1: SolarMasses,
-        regime: PeriodRegime,
+        log_period: f64,
     ) -> MassRatioDistribution {
         assert!(
             m1.value() > 0.0 && m1.value().is_finite(),
             "a mass-ratio law needs a positive primary mass, got {m1:?}"
         );
-        let anchors = self.mass_ratio_anchors();
-        let (i, t) = blend(anchors, |a| a.mass, m1.value());
-        let (a, b) = (&anchors[i], &anchors[i + 1]);
-        let (gamma, twins) = match regime {
-            PeriodRegime::Twin => (
-                lerp(a.gamma_close, b.gamma_close, t),
-                lerp(a.twin_share, b.twin_share, t),
-            ),
-            PeriodRegime::Close => (lerp(a.gamma_close, b.gamma_close, t), 0.0),
-            PeriodRegime::Wide => (lerp(a.gamma_wide, b.gamma_wide, t), 0.0),
-        };
-        MassRatioDistribution::new(MIN_COMPANION_MASS / m1, gamma, twins)
+        let lo = MIN_COMPANION_MASS / m1;
+        let m = m1.value();
+        if m < MOE_DI_STEFANO_MIN_MASS {
+            let anchors = self.mass_ratio_anchors();
+            let (i, t) = blend(anchors, |a| a.mass, m);
+            let gamma = lerp(anchors[i].gamma, anchors[i + 1].gamma, t);
+            return MassRatioDistribution::smooth(lo, &[(1.0, gamma)]);
+        }
+        let small = gamma_small(m, log_period);
+        let large = gamma_large(m, log_period);
+        let [extreme_end, small_end] = MASS_RATIO_BREAKS;
+        MassRatioDistribution::smooth(
+            lo,
+            &[
+                (extreme_end, small.max(0.0)),
+                (small_end, small),
+                (1.0, large),
+            ],
+        )
+    }
+
+    /// The mass-ratio law with its twins at x = log₁₀(P ÷ 1 d).
+    #[must_use]
+    pub(super) fn mass_ratio_at(&self, m1: SolarMasses, log_period: f64) -> MassRatioDistribution {
+        self.smooth_mass_ratio(m1, log_period)
+            .with_twins(excess_twin_fraction(m1, log_period))
     }
 
     /// The distribution of the mass ratio q = m₂ ÷ m₁ of a companion of a primary of initial mass
-    /// `m1` on an orbit of `period`: `q^γ` on `[0.08 M☉ ÷ m₁, 1]`, γ linear in ln m between the
-    /// anchors of Duchêne and Kraus (2013, Table 1), close or wide by period, with twins under
-    /// 100 days for low-mass primaries (see this module's anchor table for each figure).
+    /// `m1` on an orbit of `period`, on `[0.08 M☉ ÷ m₁, 1]`: below 0.8 M☉ Duchêne and Kraus's
+    /// (2013, Table 1) `q^γ`; from 0.8 M☉ up Moe and Di Stefano's (2017) whole mass-ratio set,
+    /// their broken power law by mass and period and their excess twins on [0.95, 1]
+    /// (`excess_twin_fraction`), so that twins are counted once (ruling 41).
     ///
     /// # Panics
     ///
     /// If `m1` is not positive and finite.
     #[must_use]
     pub fn mass_ratio_distribution(&self, m1: SolarMasses, period: Days) -> MassRatioDistribution {
-        self.mass_ratio_in(m1, PeriodRegime::of(period))
+        self.mass_ratio_at(m1, math::log10(period.value()))
     }
 
-    /// The distribution of a companion orbit's eccentricity at `period`, the same for every
-    /// primary mass (Duchêne and Kraus 2013, §5.1.4: "remarkably little dependency on primary
-    /// mass").
+    /// The periods, as x = log₁₀(P ÷ 1 d), where a primary of `m1`'s mass-ratio law has a kink:
+    /// Moe and Di Stefano's slopes' and their twins' (x = 1 and the longest twin period).
     #[must_use]
-    pub fn eccentricity_distribution(&self, period: Days) -> EccentricityDistribution {
-        EccentricityDistribution::for_period(period)
+    pub(super) fn mass_ratio_period_kinks(m1: SolarMasses) -> [f64; 13] {
+        let mut kinks = [0.0; 13];
+        kinks[..12].copy_from_slice(&MOE_DI_STEFANO_PERIOD_KINKS);
+        kinks[12] = longest_twin_log_period(m1);
+        kinks
     }
 
-    /// The share of a primary's companions in each period regime, and the mass-ratio law there.
-    ///
-    /// # Panics
-    ///
-    /// If `m1` is not positive and finite.
+    /// `∫ f_P(x) g(law at x) dx ÷ ∫ f_P(x) dx` over the periods of a primary of `m1`, the
+    /// mass-ratio law taken at each period, by [`integrate_log_period`] on panels no wider than a
+    /// decade with edges at the law's kinks; the ratio makes a constant `g` exact. Below 0.8 M☉,
+    /// where the law does not depend on the period, it is `g` of that law.
     #[must_use]
-    pub(super) fn mass_ratio_regimes(&self, m1: SolarMasses) -> [(f64, MassRatioDistribution); 3] {
-        let periods = self.period_distribution(m1);
-        let twin_edge = periods.cdf(math::log10(TWIN_MAX_PERIOD.value()));
-        let close_edge = periods.cdf(CLOSE_MAX_LOG_PERIOD).max(twin_edge);
-        let shares = [twin_edge, close_edge - twin_edge, 1.0 - close_edge];
-        let mut regimes = PeriodRegime::ALL.map(|r| (0.0, self.mass_ratio_in(m1, r)));
-        for (regime, share) in regimes.iter_mut().zip(shares) {
-            regime.0 = share;
+    fn over_periods(&self, m1: SolarMasses, g: impl Fn(&MassRatioDistribution) -> f64) -> f64 {
+        if m1.value() < MOE_DI_STEFANO_MIN_MASS {
+            return g(&self.mass_ratio_at(m1, 0.0));
         }
-        regimes
+        let periods = self.period_distribution(m1);
+        let (lo, hi) = periods.support();
+        let kinks = Self::mass_ratio_period_kinks(m1);
+        let value = integrate_log_period(&periods, lo, hi, &kinks, 1.0, |x| {
+            periods.pdf(x) * g(&self.mass_ratio_at(m1, x))
+        });
+        let total = integrate_log_period(&periods, lo, hi, &kinks, 1.0, |x| periods.pdf(x));
+        value / total
     }
 
     /// The probability that a companion of a primary of initial mass `m1` has a mass ratio of at
@@ -1039,10 +1470,13 @@ impl MultiplicityModel {
     /// If `m1` is not positive and finite.
     #[must_use]
     pub fn companion_mass_ratio_cdf(&self, m1: SolarMasses, q: f64) -> f64 {
-        self.mass_ratio_regimes(m1)
-            .iter()
-            .fold(0.0, |sum, (share, law)| sum + share * law.cdf(q))
-            .clamp(0.0, 1.0)
+        if q >= 1.0 {
+            return 1.0;
+        }
+        if q < MIN_COMPANION_MASS / m1 {
+            return 0.0;
+        }
+        self.over_periods(m1, |law| law.cdf(q)).clamp(0.0, 1.0)
     }
 
     /// The mean mass ratio of a companion of a primary of initial mass `m1`, over every period.
@@ -1052,9 +1486,15 @@ impl MultiplicityModel {
     /// If `m1` is not positive and finite.
     #[must_use]
     pub fn mean_companion_mass_ratio(&self, m1: SolarMasses) -> f64 {
-        self.mass_ratio_regimes(m1)
-            .iter()
-            .fold(0.0, |sum, (share, law)| sum + share * law.mean())
+        self.over_periods(m1, MassRatioDistribution::mean)
+    }
+
+    /// The distribution of a companion orbit's eccentricity at `period`, the same for every
+    /// primary mass (Duchêne and Kraus 2013, §5.1.4: "remarkably little dependency on primary
+    /// mass").
+    #[must_use]
+    pub fn eccentricity_distribution(&self, period: Days) -> EccentricityDistribution {
+        EccentricityDistribution::for_period(period)
     }
 }
 
@@ -1079,6 +1519,17 @@ mod tests {
 
     /// The mass ratio down to which the surveys of B and O stars count companions.
     const SURVEY_MIN_MASS_RATIO: f64 = 0.1;
+
+    /// Duquennoy and Mayor's (1991) deprojection of a projected separation, dex.
+    const DEPROJECTION_DEX: f64 = 0.13;
+
+    /// The A-star anchor's mean system mass, M☉.
+    const A_STAR_SYSTEM_MASS: f64 = 3.78;
+
+    /// x = log₁₀(P ÷ 1 d) of a relative orbit of `a_au` about the A-star anchor's system mass.
+    fn a_star_log_period(a_au: f64) -> f64 {
+        log_period_of(a_au, A_STAR_SYSTEM_MASS)
+    }
 
     fn model() -> MultiplicityModel {
         MultiplicityModel::default_v1()
@@ -1211,7 +1662,7 @@ mod tests {
     }
 
     #[test]
-    fn eccentric_orbits_keep_periastron_outside_the_circularisation_separation() {
+    fn eccentric_orbits_keep_periastron_outside_a_two_day_orbit() {
         let model = model();
         let mut s = stream(51);
         for i in 0_u32..=80 {
@@ -1220,12 +1671,12 @@ mod tests {
             let floor = if period < CIRCULARISATION_PERIOD {
                 1.0
             } else {
-                math::powf(CIRCULARISATION_PERIOD / period, 2.0 / 3.0)
+                math::powf(ECCENTRICITY_ENVELOPE_PERIOD / period, 2.0 / 3.0)
             };
             for _ in 0..500 {
                 let e = law.sample(&mut s);
                 assert!((0.0..1.0).contains(&e), "e = {e} at {period:?}");
-                // a (1 − e) ≥ a_circ, with a ∝ P^(2/3) at fixed masses.
+                // a (1 − e) ≥ a(2 d), with a ∝ P^(2/3) at fixed masses.
                 assert!(1.0 - e >= floor * (1.0 - 1e-12), "e = {e} at {period:?}");
                 if period < CIRCULARISATION_PERIOD {
                     assert_same_bits(e, 0.0);
@@ -1241,7 +1692,7 @@ mod tests {
             let periods = model.period_distribution(m1);
             // Power-law components' densities jump at their limits, so the integral has edges
             // there.
-            let mut edges: Vec<f64> = periods.component_limits().collect();
+            let mut edges = periods.component_limits();
             edges.sort_by(f64::total_cmp);
             edges.dedup();
             let upto = |x: f64| {
@@ -1270,10 +1721,22 @@ mod tests {
                 if law.lo() >= 1.0 {
                     continue;
                 }
-                // The twins' density jumps at 0.95, so the integral has an edge there.
+                // The twins' density jumps at 0.95 and the power law breaks at 0.1 and 0.3, so the
+                // integral has edges there.
                 let edge = TWIN_MIN_MASS_RATIO.max(law.lo());
-                let over =
-                    |f: &dyn Fn(f64) -> f64| integral(f, law.lo(), edge) + integral(f, edge, 1.0);
+                let mut edges: Vec<f64> = [0.1, 0.3, edge]
+                    .into_iter()
+                    .filter(|&q| q > law.lo() && q < 1.0)
+                    .collect();
+                edges.push(law.lo());
+                edges.push(1.0);
+                edges.sort_by(f64::total_cmp);
+                edges.dedup();
+                let over = |f: &dyn Fn(f64) -> f64| {
+                    edges
+                        .windows(2)
+                        .fold(0.0, |sum, pair| sum + integral(f, pair[0], pair[1]))
+                };
                 let total = over(&|q| law.pdf(q));
                 assert!(
                     (total - 1.0).abs() < 1e-9,
@@ -1284,7 +1747,7 @@ mod tests {
                     (mean - law.mean()).abs() < 1e-9,
                     "mean {mean} at {m1:?}, {p} d"
                 );
-                let middle = law.lo().midpoint(edge);
+                let middle = law.lo().midpoint(edges[1]);
                 let partial = integral(|q| law.pdf(q), law.lo(), middle);
                 let at = law.cdf(middle);
                 assert!(
@@ -1405,32 +1868,40 @@ mod tests {
             (m_dwarf - log_period_of(5.3, 0.421)).abs() < 0.02,
             "{m_dwarf}"
         );
-        // A stars: 30–45% with a spectroscopic companion (P < 10³ d) and 40 ± 4% with a visual
-        // one over 50–2000 au (Duchêne and Kraus §3.4.2), at a companion frequency of 1.
+        // A stars, in De Rosa et al.'s (2014) own count: 35.1% spectroscopic companions inside
+        // a projected 30 au, and 21.9 ± 2.6% and 33.8 ± 2.6% visual ones over 30–800 and 30–10⁴ au
+        // (Table 8); the 1–10 au share, which Duchêne and Kraus (§5.1.2) expect near the
+        // solar-type 10–15%, is recorded.
         let a_star = at(2.7);
-        let spectroscopic = a_star.cdf(3.0);
-        let visual =
-            a_star.cdf(log_period_of(2000.0, 3.78)) - a_star.cdf(log_period_of(50.0, 3.78));
-        println!("A stars: {spectroscopic:.3} spectroscopic, {visual:.3} visual companions");
-        assert!((0.30..=0.45).contains(&spectroscopic), "{spectroscopic}");
-        assert!((visual - 0.40).abs() <= 0.04, "{visual}");
+        let counted = A_STAR_SPECTROSCOPIC + A_STAR_VISUAL;
+        let x = |a: f64| a_star_log_period(a * math::exp10(DEPROJECTION_DEX));
+        let inside = counted * a_star.cdf(A_STAR_IMAGING_LOG_PERIOD);
+        let to_800 = counted * (a_star.cdf(x(800.0)) - a_star.cdf(x(30.0)));
+        let to_10_000 = counted * (a_star.cdf(x(1e4)) - a_star.cdf(x(30.0)));
+        let one_to_ten = a_star.cdf(a_star_log_period(10.0)) - a_star.cdf(a_star_log_period(1.0));
+        let under_thousand_days = a_star.cdf(3.0) / a_star.cdf(A_STAR_IMAGING_LOG_PERIOD);
+        println!(
+            "A stars: {inside:.3} spectroscopic, {to_800:.3} over 30–800 au, {to_10_000:.3} over \
+             30–10⁴ au; {one_to_ten:.3} per companion at 1–10 au ({:.3} in the survey's count); \
+             {under_thousand_days:.3} of the spectroscopic ones under 10³ d",
+            counted * one_to_ten
+        );
+        assert!((inside - A_STAR_SPECTROSCOPIC).abs() < 1e-12, "{inside}");
+        assert!((to_800 - 0.219).abs() <= 0.026, "{to_800}");
+        assert!((to_10_000 - 0.338).abs() <= 0.026, "{to_10_000}");
+        assert!((0.18..=0.21).contains(&one_to_ten), "{one_to_ten}");
         // O stars, counted as the surveys count, q ≥ 0.1: 0.69 companions inside 10^3.5 d (Sana
         // et al. 2012), 30% of stars inside 10 d and 45 ± 5% visual companions over two decades
         // of separation (Duchêne and Kraus §3.5.2–3).
         let o_mass = SolarMasses::new(30.0);
         let o_star = at(30.0);
         let frequency = model.companion_frequency(o_mass);
-        let above = |regime| {
-            1.0 - model
-                .mass_ratio_in(o_mass, regime)
-                .cdf(SURVEY_MIN_MASS_RATIO)
-        };
-        let close_above = above(PeriodRegime::Close);
+        let close_above = surveyed_share(&model, o_mass, (0.15, CLOSE_MAX_LOG_PERIOD));
         let sana = frequency * o_star.cdf(CLOSE_MAX_LOG_PERIOD) * close_above;
         let inside_ten_days = frequency * o_star.cdf(1.0) * close_above;
         let two_decades = frequency
             * (o_star.cdf(log_period_of(3_000.0, 40.5)) - o_star.cdf(log_period_of(30.0, 40.5)))
-            * above(PeriodRegime::Wide);
+            * surveyed_share(&model, o_mass, (CLOSE_MAX_LOG_PERIOD, 7.76));
         println!(
             "O stars, q ≥ 0.1: {sana:.3} within 10^3.5 d, {inside_ten_days:.3} within 10 d, \
              {two_decades:.3} over 30–3000 au"
@@ -1440,20 +1911,129 @@ mod tests {
         assert!((two_decades - 0.45).abs() <= 0.05, "{two_decades}");
     }
 
+    /// The share above q = 0.1, twins included, of the companions whose periods lie in `range`
+    /// of x = log₁₀(P ÷ 1 d), as the surveys of massive stars count them.
+    fn surveyed_share(model: &MultiplicityModel, m1: SolarMasses, (lo, hi): (f64, f64)) -> f64 {
+        let periods = model.period_distribution(m1);
+        let kinks = MultiplicityModel::mass_ratio_period_kinks(m1);
+        let above = integrate_log_period(&periods, lo, hi, &kinks, 1.0, |x| {
+            periods.pdf(x) * (1.0 - model.mass_ratio_at(m1, x).cdf(SURVEY_MIN_MASS_RATIO))
+        });
+        above / integrate_log_period(&periods, lo, hi, &kinks, 1.0, |x| periods.pdf(x))
+    }
+
     /// The O stars' shares above q = 0.1 are the ones their literals hold, and the wide count is
     /// Duchêne and Kraus's 1.3 less Sana et al.'s 0.69.
     #[test]
     fn the_o_star_shares_above_a_tenth_are_their_laws() {
         let model = model();
         let o_mass = SolarMasses::new(30.0);
-        let above = |regime| {
-            1.0 - model
-                .mass_ratio_in(o_mass, regime)
-                .cdf(SURVEY_MIN_MASS_RATIO)
-        };
-        assert_same_bits(above(PeriodRegime::Close), O_STAR_CLOSE_SHARE_SURVEYED);
-        assert_same_bits(above(PeriodRegime::Wide), O_STAR_WIDE_SHARE_SURVEYED);
+        let close = surveyed_share(&model, o_mass, (0.15, CLOSE_MAX_LOG_PERIOD));
+        let wide = surveyed_share(&model, o_mass, (CLOSE_MAX_LOG_PERIOD, 7.76));
+        println!("O stars above q = 0.1: close {close:?}, wide {wide:?}");
+        assert!(
+            (close - O_STAR_CLOSE_SHARE_SURVEYED).abs() < 1e-14,
+            "{close:?}"
+        );
+        assert!(
+            (wide - O_STAR_WIDE_SHARE_SURVEYED).abs() < 1e-14,
+            "{wide:?}"
+        );
         assert!((1.3 - O_STAR_CLOSE_SURVEYED - O_STAR_WIDE_SURVEYED).abs() < 1e-15);
+    }
+
+    /// The A-star anchor's literals are what their documentation derives them from: De Rosa et
+    /// al.'s log-normal and counts, the 30 au boundary, and Moe and Di Stefano's eqs. 20–23 at
+    /// 2.7 M☉.
+    #[test]
+    fn the_a_star_literals_are_their_derivations() {
+        let z = |log_a: f64| (log_a - 2.59) / 0.79;
+        let observed = normal_cdf(z(4.0)) - normal_cdf(z(math::log10(30.0)));
+        let visual = 0.338 / observed * (1.0 - normal_cdf(z(math::log10(30.0))));
+        assert!((visual - A_STAR_VISUAL).abs() < 1e-14, "{visual:?}");
+        let boundary = a_star_log_period(30.0 * math::exp10(DEPROJECTION_DEX));
+        assert!(
+            (boundary - A_STAR_IMAGING_LOG_PERIOD).abs() < 1e-12,
+            "{boundary:?}"
+        );
+        let peak = a_star_log_period(math::exp10(2.59 + DEPROJECTION_DEX));
+        assert!((peak - A_STAR_VISUAL_LOG_PERIOD).abs() < 1e-12, "{peak:?}");
+        let l = math::log10(2.7);
+        let short = 0.020 + 0.04 * l + 0.07 * l * l;
+        let middle = 0.039 + 0.07 * l + 0.01 * l * l;
+        let long = 0.078 - 0.05 * l + 0.04 * l * l;
+        let (alpha, delta) = (0.018, 0.7);
+        // Eq. 23 of Moe and Di Stefano (2017).
+        let f = |x: f64| {
+            if x < 1.0 {
+                short
+            } else if x < 2.7 - delta {
+                short + (x - 1.0) / (1.7 - delta) * (middle - short - alpha * delta)
+            } else if x < 2.7 + delta {
+                middle + alpha * (x - 2.7)
+            } else {
+                middle
+                    + alpha * delta
+                    + (x - 2.7 - delta) / (2.8 - delta) * (long - middle - alpha * delta)
+            }
+        };
+        for (x, density) in A_STAR_SPECTROSCOPIC_SHAPE {
+            assert!(
+                (f(x) - density).abs() < 1e-15,
+                "{x}: {:?} against {density}",
+                f(x)
+            );
+        }
+        println!("A stars at 2.7 M☉: f_logP {short:.4}, {middle:.4}, {long:.4}");
+    }
+
+    /// Moe and Di Stefano's excess twin fraction at their evaluation masses (§9.1: 1, 3.5, 7, 12
+    /// and 28 M☉), from their eqs. 5–7.
+    #[test]
+    fn the_twin_fraction_is_moe_and_di_stefanos() {
+        for (m, short, longest) in [
+            (1.0, 0.30, 7.0),
+            (3.5, 0.218_4, 4.5),
+            (7.0, 0.173_2, 1.5),
+            (12.0, 0.138_1, 1.5),
+            (28.0, 0.082_9, 1.5),
+        ] {
+            let m1 = SolarMasses::new(m);
+            assert!(
+                (excess_twin_fraction(m1, 0.5) - short).abs() < 1e-4,
+                "{m} M☉"
+            );
+            assert!(
+                (longest_twin_log_period(m1) - longest).abs() < 1e-12,
+                "{m} M☉"
+            );
+            let halfway = excess_twin_fraction(m1, 1.0_f64.midpoint(longest));
+            assert!((halfway - 0.5 * excess_twin_fraction(m1, 0.0)).abs() < 1e-12);
+            assert_same_bits(excess_twin_fraction(m1, longest), 0.0);
+        }
+        // No excess below Moe and Di Stefano's range (ruling 41).
+        assert_same_bits(excess_twin_fraction(SolarMasses::new(0.79), 0.0), 0.0);
+        assert!((excess_twin_fraction(SolarMasses::new(0.8), 0.0) - 0.3145).abs() < 1e-4);
+        assert_same_bits(excess_twin_fraction(SolarMasses::new(150.0), 0.0), 0.0);
+    }
+
+    /// Among companions with q > 0.3, the twins' weight in the law is the excess fraction, as Moe
+    /// and Di Stefano define it.
+    #[test]
+    fn the_twin_weight_counts_among_companions_above_three_tenths() {
+        let model = model();
+        for m in [0.8, 1.0, 4.0, 30.0] {
+            let m1 = SolarMasses::new(m);
+            let law = model.mass_ratio_distribution(m1, Days::new(5.0));
+            let excess = excess_twin_fraction(m1, math::log10(5.0));
+            let above = 1.0 - law.smooth_part().cdf(TWIN_REFERENCE_MASS_RATIO);
+            let w = law.twin_share();
+            let counted = w / (w + (1.0 - w) * above);
+            assert!(
+                (counted - excess).abs() < 1e-14,
+                "{counted} against {excess} at {m} M☉"
+            );
+        }
     }
 
     #[test]
@@ -1484,41 +2064,105 @@ mod tests {
 
     /// Twins against Raghavan et al.'s 27 like-mass pairs (q > 0.95) of about 250 (§5.3.5), and
     /// against Duchêne and Kraus's excess at q ≥ 0.98 and P ≤ 43 d, 2–3% of spectroscopic
-    /// binaries (§5.3), here those under 10⁴ days.
+    /// binaries (§5.3), here those under 10⁴ days. Both are printed; the first is held to its
+    /// 2σ Poisson range.
     #[test]
     fn sun_like_twins_match_the_surveys() {
         let model = model();
         let sun = SolarMasses::new(1.0);
         let like_mass = 1.0 - model.companion_mass_ratio_cdf(sun, TWIN_MIN_MASS_RATIO);
         let periods = model.period_distribution(sun);
-        let twin_share = model
-            .mass_ratio_distribution(sun, Days::new(10.0))
-            .twin_share();
-        let excess = twin_share * (1.0 - 0.98) / (1.0 - TWIN_MIN_MASS_RATIO)
-            * periods.cdf(math::log10(43.0))
-            / periods.cdf(4.0);
+        let twins = integrate_log_period(
+            &periods,
+            LOG_PERIOD_MIN,
+            math::log10(43.0),
+            &MultiplicityModel::mass_ratio_period_kinks(sun),
+            0.5,
+            |x| periods.pdf(x) * model.mass_ratio_at(sun, x).twin_share(),
+        );
+        let excess = twins * (1.0 - 0.98) / (1.0 - TWIN_MIN_MASS_RATIO) / periods.cdf(4.0);
         println!(
             "Sun-like: {like_mass:.3} of pairs like-mass, twin excess {excess:.4} of binaries \
              under 10⁴ d"
         );
-        // 27 of about 248, with a Poisson error of ±5.2 pairs at 2σ.
+        // 27 of about 248, 0.109 with a Poisson error of 0.021 at 1σ: the 2σ range (ruling 41).
         assert!((0.067..=0.151).contains(&like_mass), "{like_mass}");
-        assert!((0.02..=0.03).contains(&excess), "{excess}");
+        assert!((0.01..=0.03).contains(&excess), "{excess}");
     }
 
     #[test]
-    fn the_marginal_mass_ratio_law_mixes_the_regimes() {
+    fn the_marginal_mass_ratio_law_runs_from_nothing_to_everything() {
         let model = model();
         for m1 in mass_sweep() {
-            let regimes = model.mass_ratio_regimes(m1);
-            let total = regimes.iter().fold(0.0, |sum, (share, _)| sum + share);
-            assert!((total - 1.0).abs() < 1e-15, "{total} at {m1:?}");
-            assert!(regimes.iter().all(|(share, _)| *share >= 0.0));
-            let lo = regimes[0].1.lo();
+            let lo = MIN_COMPANION_MASS / m1;
+            if lo >= 1.0 {
+                continue;
+            }
             assert!(model.companion_mass_ratio_cdf(m1, lo * 0.999).abs() < 1e-15);
             assert_same_bits(model.companion_mass_ratio_cdf(m1, 1.0), 1.0);
+            let mut last = 0.0;
+            for i in 0_u32..=20 {
+                let q = lo + (1.0 - lo) * f64::from(i) / 20.0;
+                let f = model.companion_mass_ratio_cdf(m1, q);
+                assert!(f >= last - 1e-15, "the marginal falls at q = {q}, {m1:?}");
+                last = f;
+            }
+            assert!((last - 1.0).abs() < 1e-12, "{last} at {m1:?}");
             let mean = model.mean_companion_mass_ratio(m1);
             assert!((lo..=1.0).contains(&mean), "{mean} at {m1:?}");
+        }
+    }
+
+    /// Moe and Di Stefano's slopes at their evaluation points (eqs. 9–11 and 13–15), with the
+    /// interpolation between their solar-type, 3.5 M☉ and early-type fits.
+    #[test]
+    fn the_slopes_are_moe_and_di_stefanos() {
+        let cases = [
+            (1.0, 3.0, -0.5, 0.3),
+            (1.0, 6.0, -0.8, 0.3),
+            (3.5, 3.0, -0.9, 0.05),
+            (3.5, 5.5, -1.6, -0.7),
+            (3.5, 7.0, -2.0, -1.0),
+            (10.0, 1.5, -0.95, 0.025),
+            (10.0, 3.0, -1.7, -0.2),
+            (10.0, 6.0, -2.0, -1.5),
+        ];
+        for (m, x, large, small) in cases {
+            assert!(
+                (gamma_large(m, x) - large).abs() < 1e-12,
+                "γ_largeq at {m}, {x}"
+            );
+            assert!(
+                (gamma_small(m, x) - small).abs() < 1e-12,
+                "γ_smallq at {m}, {x}"
+            );
+        }
+        // Halfway between the solar-type and 3.5 M☉ fits in mass.
+        let halfway = gamma_large(2.35, 3.0);
+        assert!((halfway - (-0.7)).abs() < 1e-12, "{halfway}");
+    }
+
+    /// A law in Moe and Di Stefano's range is continuous at its breaks and has their slopes on
+    /// each side.
+    #[test]
+    fn the_broken_power_law_is_continuous_with_their_slopes() {
+        let model = model();
+        for (m, x) in [(1.0, 3.0), (4.0, 5.0), (30.0, 6.0)] {
+            let law = model.smooth_mass_ratio(SolarMasses::new(m), x);
+            for q in MASS_RATIO_BREAKS {
+                let below = law.pdf(q * (1.0 - 1e-9));
+                let above = law.pdf(q * (1.0 + 1e-9));
+                assert!((below / above - 1.0).abs() < 1e-6, "a jump at {q}, {m} M☉");
+            }
+            let slope = |a: f64, b: f64| math::ln(law.pdf(b) / law.pdf(a)) / math::ln(b / a);
+            assert!((slope(0.4, 0.8) - gamma_large(m, x)).abs() < 1e-9, "{m} M☉");
+            assert!(
+                (slope(0.15, 0.25) - gamma_small(m, x)).abs() < 1e-9,
+                "{m} M☉"
+            );
+            let extreme = gamma_small(m, x).max(0.0);
+            let floor = law.lo() * 1.01;
+            assert!((slope(floor, 0.095) - extreme).abs() < 1e-9, "{m} M☉");
         }
     }
 

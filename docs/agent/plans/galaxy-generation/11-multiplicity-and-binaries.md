@@ -1205,34 +1205,68 @@ Fn(SolarMasses, f64, &Composition) -> Metres`, as T1.c's text asks and the sketc
   - **Massive stars' counts are for q ≥ 0.1.** Duchêne and Kraus's B and O frequencies (1.0 and
     1.3) and Sana et al.'s 0.69 count companions down to q ≈ 0.1 only, while Design note 3 draws
     q down to 0.08 M☉ ÷ m₁. The 11 and 30 M☉ anchors therefore hold the counts extended over the
-    model's own mass-ratio law (1.27 and 1.63 companions per star, O-star period weights 0.48 and
-    0.52), so that counted above q = 0.1 the model gives the surveys' figures exactly. The
-    alternative, truncating massive primaries' ratios at 0.1 as plan 02's stand-in does, is closer
-    to Duchêne and Kraus's §5.1.3 (a deficit of companions below q ≈ 0.1) but leaves O stars no
-    companion under a tenth of their mass: **for the orchestrator to rule**.
-  - **Choices the papers leave open, for the orchestrator to rule.** (1) Between anchors the period
-    distribution is the two anchors' mixture, not interpolated parameters, so that bimodal and
-    power-law anchors can mix. (2) A very-low-mass anchor, log-normal (3.92, 0.5) from a ≈ 4.5 au,
-    and γ = 4.2 there, both Duchêne and Kraus's Table 1. (3) The A-star anchor's widths and weights,
-    0.4 × N(1.0, 1.0) + 0.6 × N(6.09, 1.3), are this lane's, set to their §3.4.2 figures: 0.40
-    spectroscopic and 0.39 visual (50–2000 au, against 40 ± 4%) companions per star; it leaves
-    0.06 per star at 1–10 au, where their §5.1.2 expects about the solar-type 10–15%. (4) The
-    O-star anchor is Sana et al.'s x^−0.55 on log P 0.15–3.5 plus Öpik's law to 10⁴ au (7.76):
-    counted at q ≥ 0.1, 0.30 of O stars have a companion inside 10 d (their 30%) and 0.43 one over
-    two decades of separation (45 ± 5%). (5) γ splits close and wide at log P = 3.5 (O stars −0.1
-    and −0.5); A and B stars take −0.5 at every period, as Table 1 gives it, and Sun-like stars
-    the table's 0.3, not §3.1.4's split (1.16 below log P = 5.5, −0.01 above). (6) Twins: 0.3 of
-    pairs under 100 d, q uniform on [0.95, 1], up to 1 M☉, fading to none at 2.7 M☉, fitted to
-    Raghavan et al.'s §5.3.5 counts (the q > 0.9 total read from their Figure 16) and Duchêne and
-    Kraus's §5.3 (2.4% of binaries under 10⁴ d are q ≥ 0.98, P ≤ 43 d twins, against 2–3%); 9.2%
-    of Sun-like pairs come out like-mass, against their 27 of about 250. (7) The eccentricity cap
-    scales with the 12-day circularisation period, as Design note 3 asks, which rules out e > 0.6
-    below 47 d; Moe and Di Stefano (2017, ApJS 230, 15, eq. 3) scale theirs by 2 d.
-  - **Measured for T1.d.** All stars below 0.5 M☉: 0.7649 under Kroupa, 0.6730 under Chabrier as
-    published, 0.7107 under the default (census 0.69). Stars per system 1.396, 1.447 and 1.425.
-    Companions' initial mass per system 0.234, 0.339 and 0.270 M☉, against plan 02's stand-in's
-    0.250, 0.368 and 0.288, so T1.d's mean present mass will fall by up to 0.03 M☉ at the default.
-    `stripped_share` under the 10 au stand-in is 0.29 at 8 M☉, 0.38 at 20, 0.43 at 30 and 0.40
+    model's own mass-ratio law (after ruling 41, 1.40 and 1.81 companions per star, O-star period
+    weights 0.44 and 0.56), so that counted above q = 0.1, twins included, the model gives the
+    surveys' figures exactly. **Ruled (ruling 37, item 1): stands as built.**
+  - **Choices the papers left open, and their rulings.**
+    - (1) Between anchors the period distribution is the two anchors' mixture, not interpolated
+      parameters, so that bimodal and power-law anchors can mix; (2) a very-low-mass anchor,
+      log-normal (3.92, 0.5) from a ≈ 4.5 au, and γ = 4.2 there, both Duchêne and Kraus's Table 1;
+      (4) the O-star anchor, Sana et al.'s x^−0.55 on log P 0.15–3.5 plus Öpik's law to 10⁴ au
+      (7.76), which counted at q ≥ 0.1 gives 0.30 of O stars a companion inside 10 d (their 30%)
+      and 0.43 one over two decades of separation (45 ± 5%). **Ruled (ruling 37, item 2): stand as
+      built.** The doc comment now says that a mixture of two unimodal anchors is bimodal between
+      them.
+    - (3) The A-star anchor. **Ruled (ruling 37, item 3): refitted to measurements.** Its visual
+      companions are De Rosa et al.'s VAST log-normal (2014, MNRAS 437, 1216, §6.2: peak 387 au
+      projected, σ 0.79 dex), deprojected by +0.13 dex (Duquennoy and Mayor 1991, as Raghavan et al.
+      do) and truncated inside a projected 30 au, 0.352 per star; its spectroscopic ones are their
+      §6.4 weighted frequency, 0.351 per star (Abt 1965; Carquillat and Prieur 2007; Carrier et al.
+      2002), with the shape of Moe and Di Stefano's (2017, ApJS 230, 15) companion frequency per
+      decade at 2.7 M☉ (their eqs. 20–23) from log P = 0.2 to the 30 au boundary (log P 4.68).
+      The weights are 0.499 and 0.501. It reproduces the survey's 35.1%, 21.9 ± 2.6% (30–800 au;
+      model 22.0%) and 33.8 ± 2.6% (30–10⁴ au; model 33.8%). The 1–10 au share becomes 0.19 per
+      star at the anchor's companion frequency of 1 (0.14 in the survey's own count, whose total
+      is 0.70), against the old 0.06. The 10–15% is sourced: it is Duchêne and Kraus's §5.1.2
+      ("the frequency of companions in the 1–10 AU range (10–15%) does not vary significantly
+      with stellar mass for M ≤ 1.5 M☉", and among intermediate-mass stars "in reasonable
+      agreement"), a figure for primaries up to 1.5 M☉ that the model does not use as a target.
+    - (5) and (6), the mass-ratio law and its twins. **Ruled (ruling 37, item 5; ruling 41,
+      amending item 4): one source for the law and its excess.** From 0.8 M☉ up, the lower edge
+      of Moe and Di Stefano's solar-type interval, the model takes their whole mass-ratio set,
+      re-checked against the paper: the broken power law, γ_smallq on q = 0.1–0.3 (eqs. 13–15)
+      and γ_largeq on 0.3–1 (eqs. 9–11), each by period and interpolated linearly in M₁ across
+      1.2–3.5 and 3.5–6 M☉, and their excess twin fraction on q = 0.95–1 (eqs. 5–7: 0.30 −
+      0.15 log₁₀ M₁ below log P = 1, falling linearly to zero at log P = 8 − M₁, 1.5 above
+      6.5 M☉), counted among companions of q > 0.3 and weighed into the mixture as
+      `F S ÷ (1 − F + F S)`. Below 0.8 M☉ Duchêne and Kraus's single slope stands (4.2, 0.4, 0.3
+      at 0.09, 0.25, 1 M☉) with no excess. The close/wide split at log P = 3.5 now shapes only the
+      O stars' period anchor. Raghavan et al.'s like-mass check is back at 2σ and passes: 11.4%
+      of Sun-like pairs are like-mass, against 10.9 ± 2.1%; 1.8% of binaries under 10⁴ d are
+      q ≥ 0.98 twins inside 43 d (Duchêne and Kraus §5.3: 2–3%). **For the orchestrator to
+      rule:** their laws are measured down to q = 0.1, and below it the model continues with
+      `max(γ_smallq, 0)`, flat where their small-q slope is negative. Extending the negative
+      slopes themselves, as ruling 37 item 1 reads for Duchêne and Kraus's gentler ones, would
+      put 77% of an O star's wide companions under q = 0.1 and, with the surveyed counts above
+      0.1 held, 3.5 companions per O star, most multiples at the cap of five; Duchêne and Kraus
+      (§5.1.3, §5.4) find a deficit of extreme mass ratios, not an excess.
+    - (7) The eccentricity envelope. **Ruled (ruling 37, item 6): Moe and Di Stefano's, as they
+      give it.** Their eq. 3, re-checked: `e_max = 1 − (P ÷ 2 d)^(−2/3)` for P > 2 d, which keeps
+      the Roche-lobe fill factors under about 70% at periastron; P₀ = 2 d
+      (`ECCENTRICITY_ENVELOPE_PERIOD`, public). Orbits under 12 d stay circular. At 12 d the
+      envelope already allows 0.70, and e > 0.6 is open from 7.9 d (so from 12 d), where the
+      lane's scaling had barred it below 47 d. `stripped_share`'s eccentricity integral follows:
+      the periastron floor of an orbit above 12 d is now the separation of a 2-day orbit.
+  - **Measured for T1.d** (after rulings 37 and 41). All stars below 0.5 M☉: 0.7702 under Kroupa,
+    0.6810 under Chabrier as published, 0.7177 under the default (census 0.69). **A finding for
+    the orchestrator:** the first two now fall just outside the plan's T1.c brackets,
+    0.764 ± 0.005 and 0.67 ± 0.01, which are the brainstorm's figures for plan 02's provisional
+    companions; Moe and Di Stefano's solar-type law puts more companions at low q. The two still
+    bracket the census, which is what the figures are for, and the test asserts that and prints
+    the values. Stars per system 1.398, 1.450 and 1.427, inside T1.d's 1.33–1.45. Companions'
+    initial mass per system 0.207, 0.296 and 0.238 M☉, against plan 02's stand-in's 0.250, 0.368
+    and 0.288, so T1.d's mean present mass will fall by up to 0.05 M☉ at the default.
+    `stripped_share` under the 10 au stand-in is 0.28 at 8 M☉, 0.36 at 20, 0.40 at 30 and 0.37
     at 150, against plan 06's provisional 0.25.
 - **Deviations in P11.T3.a, as built** (round 7, with plan 14's P14.T2 in the same module). Plan
   01's code differs from the sketch in three places, and the code was followed. `UniverseTime` is

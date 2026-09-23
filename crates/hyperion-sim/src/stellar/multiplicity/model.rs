@@ -39,11 +39,12 @@ pub(super) struct FractionAnchor {
 const B_STAR_SURVEYED_FREQUENCY: f64 = 1.0;
 
 /// The share of the model's mass-ratio law at 11 M☉, marginalised over its periods, above
-/// q = 0.1: 0.788. The literal is that share, which a test recomputes.
-const B_STAR_SHARE_SURVEYED: f64 = 0.788_380_371_333_157_6;
+/// q = 0.1: 0.713 under Moe and Di Stefano's laws. The literal is that share, which a test
+/// recomputes.
+const B_STAR_SHARE_SURVEYED: f64 = 0.712_812_438_194_613_8;
 
 /// The companions per B star of every mass ratio the model draws, down to 0.08 M☉ ÷ 11 M☉: the
-/// surveyed 1.0 over the law's share above q = 0.1, 1.27.
+/// surveyed 1.0 over the law's share above q = 0.1, 1.40.
 const B_STAR_COMPANION_FREQUENCY: f64 = B_STAR_SURVEYED_FREQUENCY / B_STAR_SHARE_SURVEYED;
 
 /// Duchêne and Kraus's (2013, ARA&A 51, 269) Table 1, "Multiplicity properties for Population I
@@ -67,8 +68,8 @@ const B_STAR_COMPANION_FREQUENCY: f64 = B_STAR_SURVEYED_FREQUENCY / B_STAR_SHARE
 ///
 /// The B and O stars' frequencies count only companions of q ≳ 0.1, the surveys' limit, while the
 /// model draws mass ratios down to 0.08 M☉ ÷ m₁ (Design note 3). Their anchors therefore hold the
-/// measured count extended over the model's own mass-ratio law: 1.27 at 11 M☉
-/// ([`B_STAR_COMPANION_FREQUENCY`]) and 1.63 at 30 M☉, the sum of
+/// measured count extended over the model's own mass-ratio law: 1.40 at 11 M☉
+/// ([`B_STAR_COMPANION_FREQUENCY`]) and 1.81 at 30 M☉, the sum of
 /// [`O_STAR_CLOSE_FREQUENCY`] and [`O_STAR_WIDE_FREQUENCY`]. Counted above q = 0.1 the model
 /// gives Duchêne and Kraus's 1.0 and 1.3 again.
 const FRACTION_ANCHORS: [FractionAnchor; 6] = [
@@ -246,7 +247,7 @@ impl MultiplicityModel {
     /// multiple is CF ÷ MF *after* the cap: it solves `r + r² + r³ + r⁴ = CF ÷ MF − 1` by a fixed
     /// number of Newton steps from the uncapped ratio 1 − MF ÷ CF. The mean of this distribution
     /// is therefore [`companion_frequency`](Self::companion_frequency) exactly, which is the
-    /// measured quantity; the uncapped ratio would fall 4% short of it at 11 M☉. For Sun-like
+    /// measured quantity; the uncapped ratio would fall 6% short of it at 11 M☉. For Sun-like
     /// primaries the shares of single, double, triple and higher systems are 56 : 31 : 9 : 4,
     /// against Raghavan et al.'s (2010, §5.2) observed 56 : 33 : 8 : 3.
     #[must_use]
@@ -371,10 +372,10 @@ mod tests {
     }
 
     /// The plan's ratio, 1 − MF ÷ CF, gives the frequency before the cap exactly and falls short
-    /// after it where multiples are rich, by 4.1% at the most (at 11 M☉); the solved ratio closes
+    /// after it where multiples are rich, by 6.1% at the most (at 11 M☉); the solved ratio closes
     /// the gap.
     #[test]
-    fn the_cap_would_cost_the_uncapped_ratio_four_per_cent_at_the_most() {
+    fn the_cap_would_cost_the_uncapped_ratio_six_per_cent_at_the_most() {
         let model = model();
         let mut worst: f64 = 0.0;
         for m in masses() {
@@ -394,7 +395,7 @@ mod tests {
             "the uncapped ratio's worst shortfall: {:.2}%",
             100.0 * worst
         );
-        assert!((0.03..0.045).contains(&worst), "{worst}");
+        assert!((0.05..0.07).contains(&worst), "{worst}");
     }
 
     #[test]

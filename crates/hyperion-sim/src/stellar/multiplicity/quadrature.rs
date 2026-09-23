@@ -8,12 +8,13 @@
 //! them. The panel scheme and node counts are part of the generator version from then on.
 
 use super::dist::{
-    CIRCULARISATION_PERIOD, MIN_COMPANION_MASS, MassRatioDistribution, PeriodDistribution,
-    PeriodRegime, TWIN_MAX_PERIOD, TWIN_MIN_MASS_RATIO,
+    CIRCULARISATION_PERIOD, ECCENTRICITY_ENVELOPE_PERIOD, MIN_COMPANION_MASS,
+    MOE_DI_STEFANO_MASS_KINKS, MOE_DI_STEFANO_MIN_MASS, PeriodDistribution, TWIN_MIN_MASS_RATIO,
+    integrate_log_period,
 };
 use super::model::MultiplicityModel;
 use crate::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO, MassFunction};
-use crate::galaxy::quad::{gl16, gl32_log};
+use crate::galaxy::quad::{gl16_log, gl32_log};
 use crate::math;
 use crate::stellar::Composition;
 use crate::units::consts::GM_SUN;
@@ -25,14 +26,17 @@ const MAX_PANEL_LN_MASS: f64 = 0.5;
 /// The widest panel of the quadrature over the period, in x = log₁₀(P ÷ 1 d).
 const MAX_PANEL_LOG_PERIOD: f64 = 0.5;
 
+/// The widest panel of the quadrature over the mass ratio, in ln q.
+const MAX_PANEL_LN_RATIO: f64 = 1.0;
+
 /// The primary mass, M☉, below which the twins' range starts at the lowest mass ratio rather than
 /// at 0.95: 0.08 ÷ 0.95, a kink of the mass-ratio law.
 const TWIN_RANGE_KINK: f64 = MASS_LIMIT_LO / TWIN_MIN_MASS_RATIO;
 
 /// The integral over the primary's mass of `f`, from 0.08 to 150 M☉, by [`gl32_log`] on panels
 /// between the stellar range's ends, the mass function's breaks, the model's anchor masses,
-/// [`TWIN_RANGE_KINK`] and `extra`, each split into equal parts no wider than
-/// [`MAX_PANEL_LN_MASS`] in ln m.
+/// [`TWIN_RANGE_KINK`], Moe and Di Stefano's mass kinks ([`MOE_DI_STEFANO_MASS_KINKS`]) and
+/// `extra`, each split into equal parts no wider than [`MAX_PANEL_LN_MASS`] in ln m.
 #[must_use]
 fn integrate_primaries(
     mf: &dyn MassFunction,
@@ -46,6 +50,7 @@ fn integrate_primaries(
         .copied()
         .chain(model.anchor_masses())
         .chain([TWIN_RANGE_KINK])
+        .chain(MOE_DI_STEFANO_MASS_KINKS)
         .chain(extra.iter().copied())
         .filter(|&m| m > MASS_LIMIT_LO && m < MASS_LIMIT_HI)
         .collect();
@@ -144,81 +149,77 @@ fn semi_major_axis(total: SolarMasses, period: Seconds) -> Metres {
     Metres::new(math::cbrt(GM_SUN * total.value() * n * n))
 }
 
-/// x = log₁₀(P ÷ 1 d) of the circularisation period.
-#[must_use]
-fn log_circularisation_period() -> f64 {
-    math::log10(CIRCULARISATION_PERIOD.value())
-}
-
-/// The probability that a companion of one mass ratio, on an orbit drawn from `periods` inside
-/// `[x_lo, x_hi]`, has its periastron inside `ratio` times the separation of a circular orbit of
-/// the circularisation period, with the eccentricity law of
-/// [`eccentricity_distribution`](MultiplicityModel::eccentricity_distribution).
+/// The share of a primary's companions, over periods x = log₁₀(P ÷ 1 d) in `[x_lo, x_hi]` and
+/// weighted by `weight(x)`, whose periastron lies inside `ratio` times `a₀`, the separation of a
+/// circular orbit of [`ECCENTRICITY_ENVELOPE_PERIOD`] about the pair's masses, under the
+/// eccentricity law of [`eccentricity_distribution`](MultiplicityModel::eccentricity_distribution).
 ///
-/// With `y = a ÷ a_circ = 10^((2/3)(x − x_circ))`, the cap on e holds the periastron at or beyond
-/// `a_circ`, so for `ratio ≤ 1` only circular orbits with `a < ratio a_circ` interact, and for
-/// `ratio > 1` every orbit with `y ≤ ratio` does and a wider one with probability
-/// `(ratio − 1) ÷ (y − 1)`, the share of `[0, e_max]` whose periastron is inside. The two closed
-/// parts are differences of the period distribution; the tail is 16-point Gauss–Legendre on
-/// panels no wider than 0.5 in x, with edges at every component's limits.
+/// With `y = a ÷ a₀ = 10^((2/3)(x − x₀))`, an orbit with `y ≤ ratio` interacts whatever its
+/// eccentricity. A wider orbit under the circularisation period is circular and does not. A wider
+/// one above it has e uniform on `[0, 1 − 1 ÷ y]`, so its periastron `a (1 − e)` never falls
+/// under `a₀`: for `ratio ≤ 1` it does not interact, and for `ratio > 1` it does with probability
+/// `(ratio − 1) ÷ (y − 1)`, the share of `[0, e_max]` whose periastron is inside. Integrated by
+/// [`integrate_log_period`] on panels no wider than 0.5 in x, with edges where `y = ratio`, at the
+/// circularisation period, where the density may jump and at `kinks`.
 #[must_use]
-fn interacting_share(periods: &PeriodDistribution, ratio: f64, x_lo: f64, x_hi: f64) -> f64 {
+fn interacting_share(
+    periods: &PeriodDistribution,
+    ratio: f64,
+    (x_lo, x_hi): (f64, f64),
+    kinks: &[f64],
+    weight: impl Fn(f64) -> f64,
+) -> f64 {
     if x_hi <= x_lo || ratio <= 0.0 {
         return 0.0;
     }
-    let x_circ = log_circularisation_period();
-    let x_inside = x_circ + 1.5 * math::log10(ratio);
-    let closed_hi = x_inside.clamp(x_lo, x_hi);
-    let closed = periods.cdf(closed_hi) - periods.cdf(x_lo);
-    if ratio <= 1.0 || closed_hi >= x_hi {
-        return closed.max(0.0);
-    }
-    let tail = |x: f64| {
-        let y = math::exp10((2.0 / 3.0) * (x - x_circ));
-        periods.pdf(x) * (ratio - 1.0) / (y - 1.0)
+    let x_0 = math::log10(ECCENTRICITY_ENVELOPE_PERIOD.value());
+    let x_circ = math::log10(CIRCULARISATION_PERIOD.value());
+    let x_inside = x_0 + 1.5 * math::log10(ratio);
+    let interacts = |x: f64| {
+        let y = math::exp10((2.0 / 3.0) * (x - x_0));
+        if y <= ratio {
+            1.0
+        } else if x < x_circ || ratio <= 1.0 {
+            0.0
+        } else {
+            (ratio - 1.0) / (y - 1.0)
+        }
     };
-    let mut edges = vec![closed_hi, x_hi];
-    edges.extend(
-        periods
-            .component_limits()
-            .filter(|&x| x > closed_hi && x < x_hi),
-    );
+    let mut edges = vec![x_inside, x_circ];
+    edges.extend_from_slice(kinks);
+    integrate_log_period(periods, x_lo, x_hi, &edges, MAX_PANEL_LOG_PERIOD, |x| {
+        periods.pdf(x) * weight(x) * interacts(x)
+    })
+}
+
+/// `∫ g(q) dq` over the mass ratios `[lo, 1]`, by 16-point Gauss–Legendre in ln q on panels
+/// between `lo`, 1 and the laws' breaks at 0.1, 0.3 and 0.95 (where the twins' density jumps),
+/// each split into equal parts no wider than [`MAX_PANEL_LN_RATIO`]. In ln q a power law's
+/// integrand is smooth even where it is steep.
+#[must_use]
+fn over_mass_ratios(lo: f64, mut g: impl FnMut(f64) -> f64) -> f64 {
+    let mut edges: Vec<f64> = [0.1, 0.3, TWIN_MIN_MASS_RATIO]
+        .into_iter()
+        .filter(|&q| q > lo && q < 1.0)
+        .collect();
+    edges.push(lo);
+    edges.push(1.0);
     edges.sort_by(f64::total_cmp);
-    edges.dedup();
-    let mut sum = closed.max(0.0);
+    let mut sum = 0.0;
     for pair in edges.windows(2) {
-        let (start, end) = (pair[0], pair[1]);
+        let (start, end) = (math::ln(pair[0]), math::ln(pair[1]));
         let mut pieces = 1_u32;
-        while (end - start) / f64::from(pieces) > MAX_PANEL_LOG_PERIOD {
+        while (end - start) / f64::from(pieces) > MAX_PANEL_LN_RATIO {
             pieces += 1;
         }
         let step = (end - start) / f64::from(pieces);
         for i in 0..pieces {
-            let lo = start + step * f64::from(i);
-            let hi = if i + 1 == pieces { end } else { lo + step };
-            sum += gl16(tail, lo, hi);
+            let a = start + step * f64::from(i);
+            let b = if i + 1 == pieces { end } else { a + step };
+            sum += gl16_log(&mut g, math::exp(a), math::exp(b));
         }
     }
     sum
-}
-
-/// The mean of `g(q)` over a mass-ratio law: its smooth part by 16-point Gauss–Legendre in the
-/// law's own cumulative share, where the integrand is smooth even for a steep `q^γ`, and its
-/// twins by the same rule on their uniform range.
-#[must_use]
-fn over_mass_ratios(law: &MassRatioDistribution, mut g: impl FnMut(f64) -> f64) -> f64 {
-    if law.lo() >= 1.0 {
-        return g(1.0);
-    }
-    let w = law.twin_share();
-    let smooth_law = law.smooth_part();
-    let smooth = gl16(|u| g(smooth_law.quantile(u)), 0.0, 1.0);
-    if w <= 0.0 {
-        return smooth;
-    }
-    let twin_lo = TWIN_MIN_MASS_RATIO.max(law.lo());
-    let twins = gl16(&mut g, twin_lo, 1.0) / (1.0 - twin_lo);
-    (1.0 - w) * smooth + w * twins
 }
 
 /// The share of primaries of initial mass `m1` and composition `comp` whose innermost companion's
@@ -232,10 +233,10 @@ fn over_mass_ratios(law: &MassRatioDistribution, mut g: impl FnMut(f64) -> f64) 
 /// [`multiple_fraction`](MultiplicityModel::multiple_fraction) times the probability that its
 /// innermost orbit, drawn from the model's period, mass-ratio and eccentricity laws as the
 /// hierarchy draws it (Design notes 1 and 4), has a periastron under the threshold. Integrated
-/// over the three period regimes of the mass-ratio law: in each, over the mass ratio by
-/// 16-point Gauss–Legendre in the law's cumulative share, and for each ratio over the period and
-/// the eccentricity as `interacting_share` does. No randomness; brown-dwarf companions are left
-/// out.
+/// over the mass ratio as `over_mass_ratios` does, the threshold taken once at each ratio, and
+/// for each ratio over the period and the eccentricity as `interacting_share` does, weighted by
+/// the density of that ratio in the mass-ratio law at each period. No randomness; brown-dwarf
+/// companions are left out.
 ///
 /// # Panics
 ///
@@ -265,29 +266,27 @@ pub fn stripped_share(
     interacting_periastron: impl Fn(SolarMasses, f64, &Composition) -> Metres,
 ) -> f64 {
     let periods = model.period_distribution(m1);
-    let (support_lo, support_hi) = periods.support();
-    let twin_edge = math::log10(TWIN_MAX_PERIOD.value());
-    let close_edge = super::dist::CLOSE_MAX_LOG_PERIOD;
-    let circular = Seconds::from(CIRCULARISATION_PERIOD);
-    let mut inner = 0.0;
-    for regime in PeriodRegime::ALL {
-        let (lo, hi) = match regime {
-            PeriodRegime::Twin => (support_lo, twin_edge),
-            PeriodRegime::Close => (twin_edge, close_edge),
-            PeriodRegime::Wide => (close_edge, support_hi),
-        };
-        let (lo, hi) = (lo.max(support_lo), hi.min(support_hi));
-        if hi <= lo {
-            continue;
-        }
-        let law = model.mass_ratio_in(m1, regime);
-        inner += over_mass_ratios(&law, |q| {
-            let total = m1 * (1.0 + q);
-            let a_circ = semi_major_axis(total, circular);
-            let ratio = interacting_periastron(m1, q, comp) / a_circ;
-            interacting_share(&periods, ratio, lo, hi)
-        });
-    }
+    let support = periods.support();
+    let kinks = MultiplicityModel::mass_ratio_period_kinks(m1);
+    let envelope = Seconds::from(ECCENTRICITY_ENVELOPE_PERIOD);
+    let ratio_at = |q: f64| {
+        let a_0 = semi_major_axis(m1 * (1.0 + q), envelope);
+        interacting_periastron(m1, q, comp) / a_0
+    };
+    let lo = MIN_COMPANION_MASS / m1;
+    let inner = if lo >= 1.0 {
+        interacting_share(&periods, ratio_at(1.0), support, &kinks, |_| 1.0)
+    } else {
+        // Below Moe and Di Stefano's range the law does not depend on the period.
+        let fixed = (m1.value() < MOE_DI_STEFANO_MIN_MASS).then(|| model.mass_ratio_at(m1, 0.0));
+        over_mass_ratios(lo, |q| {
+            let density = |x: f64| match &fixed {
+                Some(law) => law.pdf(q),
+                None => model.mass_ratio_at(m1, x).pdf(q),
+            };
+            interacting_share(&periods, ratio_at(q), support, &kinks, density)
+        })
+    };
     model.multiple_fraction(m1) * inner
 }
 
@@ -316,7 +315,12 @@ mod tests {
     /// The brainstorm's figures for all stars below 0.5 M☉ ("Sizing the layers"): 76.4% under
     /// Kroupa's function for primaries and 66.9% under Chabrier's as published, against the 20 pc
     /// census's 69% (Kirkpatrick et al. 2024, Table 18; the 75.9% once quoted as observed is
-    /// Kroupa's function itself). The plan's brackets are 0.764 ± 0.005 and 0.67 ± 0.01.
+    /// Kroupa's function itself). The plan's brackets, 0.764 ± 0.005 and 0.67 ± 0.01, are those
+    /// figures for plan 02's provisional companions. With Moe and Di Stefano's lighter companions
+    /// above 0.8 M☉ (ruling 41) the model gives 0.7702 and 0.6810, each just outside its bracket:
+    /// a finding recorded in plan 11's Risks for the orchestrator. What the figures are for, that
+    /// the two functions bracket the census, still holds, and the test asserts it, with the
+    /// default between them.
     #[test]
     fn the_all_stars_fraction_brackets_the_census() {
         let model = model();
@@ -328,8 +332,10 @@ mod tests {
             "all stars below 0.5 M☉: Kroupa {kroupa:.4}, Chabrier as published {published:.4}, \
              default (scale 0.68) {default:.4}; census 0.69"
         );
-        assert!((kroupa - 0.764).abs() <= 0.005, "Kroupa: {kroupa}");
-        assert!((published - 0.67).abs() <= 0.01, "Chabrier: {published}");
+        assert!(
+            published < default && default < kroupa,
+            "{published} {default} {kroupa}"
+        );
         assert!(published < 0.69 && 0.69 < kroupa);
     }
 

@@ -17,8 +17,9 @@ mod model;
 mod quadrature;
 
 pub use dist::{
-    CIRCULARISATION_PERIOD, EccentricityDistribution, LOG_PERIOD_MAX, LOG_PERIOD_MIN,
-    MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS, MassRatioDistribution, PeriodDistribution,
+    CIRCULARISATION_PERIOD, ECCENTRICITY_ENVELOPE_PERIOD, EccentricityDistribution, LOG_PERIOD_MAX,
+    LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS, MassRatioDistribution,
+    PeriodDistribution,
 };
 pub use model::{MAX_COMPANIONS, MultiplicityModel};
 pub use quadrature::{all_stars_fraction_below, mean_companion_mass_per_system, stripped_share};
