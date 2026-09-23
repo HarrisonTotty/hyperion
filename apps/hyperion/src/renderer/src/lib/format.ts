@@ -98,15 +98,22 @@ export function formatSigned(value: number, decimals: number): string {
 export type SciForm = "reading" | "tick";
 
 /**
- * Formats a number in E notation with three significant figures: `5.20E10`, `1.00E-4`.
+ * Formats a number in E notation, with three significant figures by default: `5.20E10`, `1.00E-4`.
  *
  * @remarks
  * For values outside a unit's ladder, where B612's lack of superscripts rules out `10⁻⁴`. In
  * `tick` form trailing zeros of the mantissa are dropped, so an exact power of ten reads `1E-4`.
+ *
+ * @param significantFigures - 1 to 21; three by the guide, two where a quantity's own precision is
+ *   two figures, as a small planetary mass's is ({@link formatMassMearth}).
  */
-export function formatSci(value: number, form: SciForm = "reading"): string {
+export function formatSci(
+  value: number,
+  form: SciForm = "reading",
+  significantFigures = 3,
+): string {
   requireFinite(value, "value");
-  const [mantissa, exponent] = value.toExponential(2).split("e");
+  const [mantissa, exponent] = value.toExponential(significantFigures - 1).split("e");
   if (mantissa === undefined || exponent === undefined) {
     throw new Error(`toExponential gave no exponent for ${String(value)}`);
   }
@@ -213,25 +220,38 @@ export function formatMassMsun(massMsun: number): string {
 
 const MASS_MEARTH_TWO_DECIMALS_BELOW = 10;
 const MASS_MEARTH_ONE_DECIMAL_BELOW = 100;
-/** Below this many Earth masses two decimals show no significant digit, so E notation is used. */
-const MASS_MEARTH_SCI_BELOW = 0.01;
+/** Below this many Earth masses two decimals would drop a figure, so two significant ones are kept. */
+const MASS_MEARTH_TWO_FIGURES_BELOW = 0.1;
+/** Below this many Earth masses two significant figures need a run of zeros: E notation. */
+const MASS_MEARTH_SCI_BELOW = 0.001;
+/** The significant figures of a mass below {@link MASS_MEARTH_TWO_FIGURES_BELOW}. */
+const MASS_MEARTH_SMALL_FIGURES = 2;
 
 /**
- * Formats a mass in Earth masses without its unit: two decimals below 10, one below 100, and whole
- * numbers from there, digits grouped from five as every number is (plan 13, P13.T8.b): `0.33`,
- * `17.1`, `4131`, `12,480`.
+ * Formats a mass in Earth masses without its unit: two significant figures below 0.1, two decimals
+ * below 10, one below 100, and whole numbers from there, digits grouped from five as every number
+ * is (plan 13, P13.T8.b): `0.012`, `0.33`, `17.1`, `4131`, `12,480`.
  *
  * @remarks
  * Every planetary mass on the ship is in M⊕, from a moon to a 13 Jupiter-mass giant (plan 14,
  * D19); the unit is drawn by `EarthMassUnit`, never typed. Each step is decided on the rounded
- * text, so that 9.996 reads `10.0` and never `10.00`. Below 0.01 M⊕, where two decimals would read
- * `0.00`, which the guide keeps from standing for anything but zero, the mass is in E notation with
- * three significant figures: `1.80E-9`, a small moon's.
+ * text, so that 9.996 reads `10.0` and never `10.00`, and 0.0996 reads `0.10` on either side.
+ * Below 0.1 M⊕ two decimals would keep one figure or none, so the Moon would read `0.01`; there the
+ * mass keeps two significant figures instead, `0.012`, and below 0.001 M⊕ it is in E notation with
+ * the same two, `1.6E-4` for Ceres (the orchestrator's ruling 35).
  */
 export function formatMassMearth(massMearth: number): string {
   requireFinite(massMearth, "mass");
-  if (massMearth !== 0 && Math.abs(roundSignificant(massMearth, 3)) < MASS_MEARTH_SCI_BELOW) {
-    return formatSci(massMearth);
+  const twoFigures = Math.abs(roundSignificant(massMearth, MASS_MEARTH_SMALL_FIGURES));
+  if (massMearth !== 0 && twoFigures < MASS_MEARTH_SCI_BELOW) {
+    return formatSci(massMearth, "reading", MASS_MEARTH_SMALL_FIGURES);
+  }
+  if (massMearth !== 0 && twoFigures < MASS_MEARTH_TWO_FIGURES_BELOW) {
+    return numberFormat(`significant:${MASS_MEARTH_SMALL_FIGURES}`, {
+      minimumSignificantDigits: MASS_MEARTH_SMALL_FIGURES,
+      maximumSignificantDigits: MASS_MEARTH_SMALL_FIGURES,
+      signDisplay: "negative",
+    }).format(massMearth);
   }
   const twoDecimals = formatNumber(massMearth, 2);
   if (Math.abs(Number(twoDecimals.replaceAll(",", ""))) < MASS_MEARTH_TWO_DECIMALS_BELOW) {

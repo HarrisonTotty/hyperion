@@ -161,9 +161,28 @@ describe("stepCursor", () => {
     expect(stepCursor("edge_on", [0, 0, -16_384], "up", 1, EDGE_ON)).toEqual([0, 0, 16_384]);
   });
 
-  it("stays put when no whole pixel's step stays within the edge pixels' centres", () => {
-    // From the plane the edge pixels' centres lie half a pixel away (the orchestrator's ruling 28).
+  it("stays put when a whole pixel's step would reach the map's edge", () => {
+    // From the plane the map's edge lies a whole pixel away, and a step stops strictly inside it
+    // (the orchestrator's rulings 28 and 35).
     expect(stepCursor("edge_on", [0, 0, 0], "up", 1, EDGE_ON)).toEqual([0, 0, 0]);
+  });
+
+  it("stops a face-on step at the edge a whole number of pixels on, not at the edge pixel's centre", () => {
+    // From the galactic centre both faces are two whole pixels away. The root cube holds its lower
+    // face at -65,536 ly and not its upper one at 65,536 ly, so a step stops on the one and a pixel
+    // short of the other (the orchestrator's ruling 35).
+    expect(stepCursor("face_on", [0, 0, 0], "right", 10, FACE_ON)).toEqual([32_768, 0, 0]);
+    expect(stepCursor("face_on", [0, 0, 0], "down", 10, FACE_ON)).toEqual([0, -65_536, 0]);
+  });
+
+  it("moves only the axis it steps along face-on", () => {
+    // A typed x in the outer half of an edge pixel, where no pick puts it, stays through a y step.
+    expect(stepCursor("face_on", [-60_000, 0, 7], "up", 1, FACE_ON)).toEqual([-60_000, 32_768, 7]);
+  });
+
+  it("brings a typed height beyond the map to the edge pixel's centre, as a pick would", () => {
+    expect(stepCursor("edge_on", [0, 0, 100_000], "down", 1, EDGE_ON)).toEqual([0, 0, 16_384]);
+    expect(stepCursor("edge_on", [0, 0, -50_000], "down", 1, EDGE_ON)).toEqual([0, 0, -16_384]);
   });
 
   it("does not move sideways edge-on", () => {
@@ -204,10 +223,27 @@ describe("pixelIndexAt", () => {
     ["the top left corner", -65_536, 32_768, 0],
     ["the bottom right corner", 65_536, -32_768, 7],
     ["a point on the edge between columns 1 and 2, in row 0", 0, 16_384, 2],
-    ["a point on the edge between the rows, in column 0", -49_152, 0, 4],
+    ["a point on the edge between the rows, in column 0", -49_152, 0, 0],
   ])("puts %s in the pixel it lies in", (_, horizontalLy, verticalLy, index) => {
     expect(pixelIndexAt(EDGE_ON, { horizontalLy, verticalLy })).toBe(index);
   });
+
+  it.each([
+    ["columns 0 and 1 in column 1", -32_768, 16_384, 5],
+    ["columns 2 and 3 in column 3", 32_768, 16_384, 7],
+    ["rows 0 and 1 in row 0", -16_384, 32_768, 1],
+    ["rows 2 and 3 in row 2", -16_384, -32_768, 9],
+    ["the middle columns in column 2", 0, 16_384, 6],
+    ["the middle rows in row 1", -16_384, 0, 5],
+    ["the map's bottom edge in the bottom row", -16_384, -65_536, 13],
+  ])(
+    "puts a point on the edge between %s, the pixel on its +x or +y side",
+    (_, horizontalLy, verticalLy, index) => {
+      // The 4 × 4 face-on map: row 0 is the top, the most +y, and column 0 the most -x. Each pixel
+      // holds its lower edges, as the root cube holds its lower faces.
+      expect(pixelIndexAt(FACE_ON, { horizontalLy, verticalLy })).toBe(index);
+    },
+  );
 
   it("gives nothing off the map", () => {
     expect(pixelIndexAt(EDGE_ON, { horizontalLy: 0, verticalLy: -40_000 })).toBeNull();
@@ -297,11 +333,13 @@ describe("the chart centre's height", () => {
 
   it.each([
     ["up", 31_744],
-    ["down", -31_744],
+    ["down", -32_768],
   ] as const)(
     "stops a step %s at the edge on the cursor's own lattice, not on the edge pixel's centre",
     (direction, zLy) => {
       // The edge pixels' centres are ±32,256 ly, half a pixel off every whole pixel from the plane.
+      // A step keeps within the map's half-open extent, which holds its bottom edge at -32,768 ly
+      // and not its top edge at +32,768 ly (the orchestrator's ruling 35).
       expect(steppedEdgeOn([26_000, 0, 0], direction, 40)[2]).toBe(zLy);
     },
   );
@@ -342,4 +380,108 @@ describe("the chart centre's height", () => {
     expect(stepped[2]).toBe(31_744);
     expect(steppedEdgeOn(stepped, "down", movedPx)[2]).toBe(0);
   });
+
+  /** The row of the edge-on map the cursor's height lies in, 0 at the top. */
+  function edgeOnRow(cursorLy: CentreLy): number | null {
+    const index = pixelIndexAt(EDGE_ON_128, cursorInView("edge_on", cursorLy));
+    return index === null ? null : Math.floor(index / EDGE_ON_128.widthPx);
+  }
+
+  /** The rows read on the way from the bottom edge to the top one, a one-pixel step at a time. */
+  function rowsReadBottomToTop(startLy: CentreLy): Array<number | null> {
+    let stepped = steppedEdgeOn(startLy, "down", 70);
+    const rows = [edgeOnRow(stepped)];
+    for (let step = 0; step < 70; step += 1) {
+      stepped = steppedEdgeOn(stepped, "up", 1);
+      if (edgeOnRow(stepped) !== rows.at(-1)) {
+        rows.push(edgeOnRow(stepped));
+      }
+    }
+    return rows;
+  }
+
+  /** Every row of the edge-on map, from the bottom one up. */
+  const EVERY_ROW = Array.from({ length: 64 }, (_, index) => 63 - index);
+
+  it.each([
+    ["up", 0],
+    ["down", 63],
+  ] as const)(
+    "reaches the edge row by arrow keys from the plane, stepping %s",
+    (direction, row) => {
+      // The orchestrator's ruling 35: +31,744 ly is the top row's lower edge, and reads the top row.
+      expect(edgeOnRow(steppedEdgeOn([26_000, 0, 0], direction, 40))).toBe(row);
+    },
+  );
+
+  it.each([
+    ["the plane", 0],
+    ["a typed height", 300],
+    ["a height off the whole pixels", -700.25],
+    ["a height half a pixel off them", 512],
+  ])("reads every row, one after another, by arrow keys from %s", (_, startLy) => {
+    expect(rowsReadBottomToTop([26_000, 0, startLy])).toEqual(EVERY_ROW);
+  });
+
+  /** The cursor after `steps` face-on steps of `pixels` in `direction` on the raster. */
+  function steppedFaceOn(
+    cursorLy: CentreLy,
+    direction: (typeof DIRECTIONS)[number],
+    steps: number,
+    pixels = 1,
+  ): CentreLy {
+    let stepped = cursorLy;
+    for (let step = 0; step < steps; step += 1) {
+      stepped = stepCursor("face_on", stepped, direction, pixels, FACE_ON_128) ?? stepped;
+    }
+    return stepped;
+  }
+
+  /** The face-on pixel the cursor lies in, as its column and row. */
+  function faceOnPixel(cursorLy: CentreLy): { column: number; row: number } | null {
+    const index = pixelIndexAt(FACE_ON_128, cursorInView("face_on", cursorLy));
+    return index === null ? null : { column: index % 128, row: Math.floor(index / 128) };
+  }
+
+  it.each([
+    ["the galactic centre", [0, 0, 0]],
+    ["a typed point off the whole pixels", [26_000.5, -7_777.25, 0]],
+  ] as const)(
+    "reads every column and every row face-on by arrow keys from %s",
+    (_, startLy: CentreLy) => {
+      const read = (backward: "left" | "down", forward: "right" | "up", axis: "column" | "row") => {
+        let stepped = steppedFaceOn(startLy, backward, 140);
+        const seen = new Set<number>();
+        for (let step = 0; step <= 140; step += 1) {
+          const pixel = faceOnPixel(stepped);
+          if (pixel !== null) {
+            seen.add(pixel[axis]);
+          }
+          stepped = steppedFaceOn(stepped, forward, 1);
+        }
+        return seen.size;
+      };
+
+      expect([read("left", "right", "column"), read("down", "up", "row")]).toEqual([128, 128]);
+    },
+  );
+
+  it.each(DIRECTIONS)(
+    "comes back exactly to where it was after a face-on clamp %s and the same number of steps back",
+    (direction) => {
+      const back = { left: "right", right: "left", up: "down", down: "up" } as const;
+      const startLy: CentreLy = [26_000.5, -7_777.25, 0];
+      let stepped = startLy;
+      let movedPx = 0;
+      for (let step = 0; step < 20; step += 1) {
+        const next = stepCursor("face_on", stepped, direction, 10, FACE_ON_128) ?? stepped;
+        movedPx += Math.round(
+          (Math.abs(next[0] - stepped[0]) + Math.abs(next[1] - stepped[1])) / FACE_ON_128.lyPerPx,
+        );
+        stepped = next;
+      }
+
+      expect(steppedFaceOn(stepped, back[direction], movedPx)).toEqual(startLy);
+    },
+  );
 });

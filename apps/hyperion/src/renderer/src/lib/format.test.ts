@@ -77,6 +77,14 @@ describe("formatSci", () => {
   });
 
   it.each([
+    [1.57e-4, "reading", "1.6E-4"],
+    [9.96e-4, "reading", "1.0E-3"],
+    [1e-4, "tick", "1E-4"],
+  ] as const)("writes %f to two significant figures in %s form as %s", (value, form, expected) => {
+    expect(formatSci(value, form, 2)).toBe(expected);
+  });
+
+  it.each([
     [1e-4, "1E-4"],
     [1, "1E0"],
     [100, "1E2"],
@@ -405,7 +413,7 @@ describe("formatUniverseTimeDhms", () => {
 describe("formatMassMearth", () => {
   it.each([
     [0.33, "0.33"],
-    [0.0123, "0.01"],
+    [0.1, "0.10"],
     [9.99, "9.99"],
     [9.996, "10.0"],
     [17.1, "17.1"],
@@ -418,12 +426,35 @@ describe("formatMassMearth", () => {
   });
 
   it.each([
-    [0.004, "4.00E-3"],
-    [1.8e-9, "1.80E-9"],
+    // The Moon, 7.346E22 kg of the Earth's 5.972E24 kg: two decimals would read 0.01.
+    [0.0123, "0.012"],
+    [0.004, "0.0040"],
+    [0.05, "0.050"],
+    [0.0994, "0.099"],
+    [0.001, "0.0010"],
   ])(
-    "writes %f Earth masses, which two decimals would read 0.00, as %s",
+    "keeps two significant figures of %f Earth masses, below 0.1, as %s",
     (massMearth, expected) => {
       expect(formatMassMearth(massMearth)).toBe(expected);
     },
   );
+
+  it("reads a mass that rounds up to a step's edge as the edge reads, from either side", () => {
+    expect(formatMassMearth(0.0996)).toBe("0.10");
+    expect(formatMassMearth(0.1004)).toBe("0.10");
+    expect(formatMassMearth(0.000_999)).toBe("0.0010");
+  });
+
+  it.each([
+    // Ceres, 9.38E20 kg (Park et al. 2016): 1.57E-4 of the Earth's mass.
+    [9.38e20 / 5.972e24, "1.6E-4"],
+    [0.000_94, "9.4E-4"],
+    [1.8e-9, "1.8E-9"],
+  ])("writes %f Earth masses, below 0.001, in E notation as %s", (massMearth, expected) => {
+    expect(formatMassMearth(massMearth)).toBe(expected);
+  });
+
+  it("reads zero as 0.00, not in E notation", () => {
+    expect(formatMassMearth(0)).toBe("0.00");
+  });
 });

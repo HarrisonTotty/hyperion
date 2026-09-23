@@ -8,7 +8,10 @@ import { symbolOutline } from "./symbols";
 export interface ColourTokens extends Readonly<Record<ColourToken, string>> {
   /** `--surface-0`, which the canvas is cleared to. */
   readonly surface0: string;
-  /** `--text-muted`, which a stale view is drawn in ({@link staleTokens}). */
+  /**
+   * `--text-muted`, which reference paths and annulus edges are drawn in, and every mark and curve
+   * of a stale view ({@link staleTokens}).
+   */
   readonly textMuted: string;
 }
 

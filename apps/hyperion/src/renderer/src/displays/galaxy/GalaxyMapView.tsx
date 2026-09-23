@@ -740,7 +740,8 @@ function MapViewBody({
  *
  * The picture takes focus and carries the map cursor, shared with the other view: a click or tap
  * sets x and y face-on and z alone edge-on (plan 05, design note D19), and the arrow keys move it a
- * map pixel at a time as the screen shows the axes, ten with `Shift`, within the map's edge pixels.
+ * map pixel at a time as the screen shows the axes, ten with `Shift`, stopping at the edge pixels on
+ * the cursor's own lattice of whole pixels (the orchestrator's rulings 28 and 35).
  * The cursor is drawn over the picture as a cross in the selection colour, and the column density
  * under it is read beside the picture: the value its code stands for, `BELOW FLOOR` at code 0, or
  * an em dash off the map. That reading announces its changes only while the picture has focus, so

@@ -5,9 +5,10 @@
  * @remarks
  * The cursor is a point of the `GALACTIC` frame in light-years. The face-on view shows and sets its
  * x and y; the edge-on view shows its x and z but sets only z, as the brainstorm has the edge-on
- * view pick a height (plan 05, design note D19). A pick or a step keeps the cursor within the
- * map's edge pixels, at most at their centres, so it never lies on the map's outer edge: the face-on
- * map's edges are the faces of the root cube, whose upper faces lie outside it (plan 01).
+ * view pick a height (plan 05, design note D19). A pick keeps the cursor within the map's edge
+ * pixels, at most at their centres. A step keeps it within the map's half-open extent, lower edges
+ * in and upper edges out, as the root cube holds its lower faces and not its upper ones (plan 01):
+ * the face-on map's edges are the cube's faces.
  *
  * Points, pixels and directions here are the raster's, as plan 04 sends it: x to the right, and y
  * (face-on) or z (edge-on) up. The screen shows the face-on raster turned a quarter-turn clockwise,
@@ -149,16 +150,19 @@ export function pickCursor(
 }
 
 /**
- * An edge-on height after `pixels` whole-pixel steps of `pixelLy` towards `sign`, stopped short of
- * the limit `[minLy, maxLy]` at the furthest point of its own step lattice inside it.
+ * A coordinate after `pixels` whole-pixel steps of `pixelLy` towards `sign`, stopped short of the
+ * half-open limit `[minLy, maxLy)` at the furthest point of its own step lattice inside it.
  *
  * @remarks
- * The lattice is the height plus whole multiples of one pixel, so that a step stopped at the limit
- * can be undone exactly by as many one-pixel steps back as it moved (the orchestrator's ruling 28).
- * A height already outside the limit, as a typed one beyond the map can be, is brought to the
- * limit as a pick is, since no point of its lattice lies inside it on that side.
+ * The lattice is the coordinate plus whole multiples of one pixel, so that a step stopped at the
+ * limit can be undone exactly by as many one-pixel steps back as it moved (the orchestrator's
+ * rulings 28 and 35). Each pixel is half-open in the same way ({@link pixelIndexAt}), so each holds
+ * exactly one point of the lattice wherever it starts, and the arrow keys reach every pixel. A
+ * coordinate outside the limit, as a typed one beyond the map or on its upper edge can be, has no
+ * lattice point inside it on that side, and is brought to the centre of the edge pixel, as a pick
+ * would bring it.
  */
-function heightOnLattice(
+function onLattice(
   valueLy: number,
   sign: 1 | -1,
   pixels: number,
@@ -166,17 +170,22 @@ function heightOnLattice(
   minLy: number,
   maxLy: number,
 ): number {
-  const within = (candidateLy: number): boolean => candidateLy >= minLy && candidateLy <= maxLy;
+  const within = (candidateLy: number): boolean => candidateLy >= minLy && candidateLy < maxLy;
   const target = valueLy + sign * pixels * pixelLy;
   if (within(target)) {
     return target;
   }
   if (!within(valueLy)) {
-    return clamp(target, minLy, maxLy);
+    const halfPixelLy = pixelLy / 2;
+    return clamp(target, minLy + halfPixelLy, maxLy - halfPixelLy);
   }
   const roomLy = sign > 0 ? maxLy - valueLy : valueLy - minLy;
-  let whole = Math.min(pixels, Math.floor(roomLy / pixelLy));
-  // The quotient can round up across a whole number; the point stopped at must still be inside.
+  let whole = Math.min(pixels, Math.max(0, Math.floor(roomLy / pixelLy)));
+  // The quotient can round either way across a whole number; the point stopped at must be the
+  // furthest one inside.
+  while (whole < pixels && within(valueLy + sign * (whole + 1) * pixelLy)) {
+    whole += 1;
+  }
   while (whole > 0 && !within(valueLy + sign * whole * pixelLy)) {
     whole -= 1;
   }
@@ -184,15 +193,16 @@ function heightOnLattice(
 }
 
 /**
- * The cursor after an arrow key on a view, one map pixel a step, kept as a pick is; or `null` for a
- * direction the view does not move, left and right edge-on.
+ * The cursor after an arrow key on a view, one map pixel a step; or `null` for a direction the view
+ * does not move, left and right edge-on.
  *
  * @remarks
- * Face-on, a step that would leave the centres of the map's edge pixels stops on the edge pixel's
- * centre. Edge-on, it stops instead at the furthest height inside them that lies a whole number of
- * pixels from where the cursor was, since the edge pixels' centres lie half a pixel off the lattice
- * of whole pixels from the plane: the same number of steps back then returns the cursor exactly to
- * where it started, and to z = 0 from the plane (the orchestrator's ruling 28).
+ * A step that would leave the map's half-open extent stops, on either map and along either axis, at
+ * the furthest point inside it that lies a whole number of pixels from where the cursor was: the
+ * same number of steps back then returns the cursor exactly to where it started, and to z = 0 from
+ * the plane (the orchestrator's rulings 28 and 35). Since each pixel holds its lower edge and not its
+ * upper one ({@link pixelIndexAt}), the steps from any start reach every pixel of the map, the edge
+ * rows and columns among them.
  *
  * @param direction - The direction on the raster, from {@link rasterDirection} for a key on screen.
  */
@@ -203,42 +213,29 @@ export function stepCursor(
   pixels: number,
   geometry: MapGeometry,
 ): CentreLy | null {
-  const stepLy = pixels * geometry.lyPerPx;
-  const point = cursorInView(view, cursorLy);
-  let moved: MapPointLy;
+  const [xLy, yLy, zLy] = cursorLy;
+  const { horizontal, vertical, lyPerPx } = geometry;
+  let stepped: CentreLy | null;
   switch (direction) {
     case "left":
-    case "right":
-      if (view === "edge_on") {
-        return null;
-      }
-      moved = {
-        horizontalLy: point.horizontalLy + (direction === "right" ? stepLy : -stepLy),
-        verticalLy: point.verticalLy,
-      };
+    case "right": {
+      const sign = direction === "right" ? 1 : -1;
+      stepped =
+        view === "edge_on"
+          ? null
+          : [onLattice(xLy, sign, pixels, lyPerPx, horizontal.minLy, horizontal.maxLy), yLy, zLy];
       break;
+    }
     case "up":
     case "down": {
       const sign = direction === "up" ? 1 : -1;
-      const halfPixelLy = geometry.lyPerPx / 2;
-      moved = {
-        horizontalLy: point.horizontalLy,
-        verticalLy:
-          view === "edge_on"
-            ? heightOnLattice(
-                point.verticalLy,
-                sign,
-                pixels,
-                geometry.lyPerPx,
-                geometry.vertical.minLy + halfPixelLy,
-                geometry.vertical.maxLy - halfPixelLy,
-              )
-            : point.verticalLy + sign * stepLy,
-      };
+      const moved = (valueLy: number): number =>
+        onLattice(valueLy, sign, pixels, lyPerPx, vertical.minLy, vertical.maxLy);
+      stepped = view === "face_on" ? [xLy, moved(yLy), zLy] : [xLy, yLy, moved(zLy)];
       break;
     }
   }
-  return pickCursor(view, cursorLy, moved, geometry);
+  return stepped;
 }
 
 /** A place on a picture, as fractions of its width from the left and of its height from the top. */
@@ -289,15 +286,22 @@ export function markOnPicture(geometry: MapGeometry, point: MapPointLy): MarkPla
  * The map pixel a point lies in, as its index in the codes, or `null` outside the map's extent.
  *
  * @remarks
- * A point on the edge between two pixels lies in the one to its right or below, and a point on the
- * map's far edge in its last pixel.
+ * Each pixel holds its lower edge along each galactic axis and not its upper one, as the root cube
+ * and its cells do (plan 01), so a point on the edge between two pixels lies in the one to its right
+ * or above it; a point on the map's upper or right-hand edge lies in the edge pixel. On plan 04's
+ * maps, whose sides are an even number of pixels, the plane and the galactic axis are pixel edges,
+ * so every point the arrow keys reach from them is one too, and this rule, with a step's half-open
+ * limit ({@link stepCursor}), is what lets the arrow keys read every row and column, the edge rows
+ * among them (the orchestrator's ruling 35).
  */
 export function pixelIndexAt(geometry: MapGeometry, point: MapPointLy): number | null {
   if (!withinExtent(geometry, point)) {
     return null;
   }
   const { column, row } = lyToPixel(geometry, point.horizontalLy, point.verticalLy);
+  // Columns count along +x and rows against the vertical axis, so a half goes up for a column and,
+  // by rounding the negation, down for a row.
   const wholeColumn = clamp(Math.round(column), 0, geometry.widthPx - 1);
-  const wholeRow = clamp(Math.round(row), 0, geometry.heightPx - 1);
+  const wholeRow = clamp(-Math.round(-row), 0, geometry.heightPx - 1);
   return wholeRow * geometry.widthPx + wholeColumn;
 }

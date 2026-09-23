@@ -563,7 +563,7 @@ describe("buildDrawList paths", () => {
     expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops)).toHaveLength(2);
   });
 
-  it("draws a reference path in --line and the selected one in --text, after it in its half", () => {
+  it("draws a reference path in --text-muted and the selected one in --text, after it in its half", () => {
     const scene = bareScene({
       paths: [
         path("selected", tiltedCircle(20, 0), { role: "selected" }),
@@ -575,7 +575,9 @@ describe("buildDrawList paths", () => {
       (op) => op.stroke,
     );
 
-    expect(strokes).toEqual(["line", "text"]);
+    // The orchestrator's ruling 35: an orbit says where something lies, so it takes 6:1, which
+    // --text-muted reaches and --line does not.
+    expect(strokes).toEqual(["textMuted", "text"]);
   });
 
   it("draws a half's path pieces before its marks, so that no line crosses a symbol", () => {
@@ -629,6 +631,11 @@ describe("buildDrawList paths", () => {
   });
 });
 
+/** The ops drawn in `--line`. */
+function inLine(ops: ReadonlyArray<DrawOp>): DrawOp[] {
+  return ops.filter((op) => op.stroke === "line");
+}
+
 describe("buildDrawList annuli", () => {
   it("draws an annulus as its two edges, at their radii on the plane", () => {
     const edges = polylines(
@@ -646,15 +653,32 @@ describe("buildDrawList annuli", () => {
     });
   });
 
-  it("draws an annulus's edges as 1 px --line hairlines", () => {
+  it("draws an annulus's edges as 1 px --text-muted hairlines", () => {
     const edges = polylines(
       buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT).ops,
     );
 
     expect(edges.map((edge) => [edge.stroke, edge.widthPx])).toEqual([
-      ["line", 1],
-      ["line", 1],
+      ["textMuted", 1],
+      ["textMuted", 1],
     ]);
+  });
+
+  it("leaves --line to the plane's grid and rings when paths and annuli are drawn", () => {
+    const withRing = { spacing: 20, extent: 50, rings: [{ radius: 20, label: "20 AU" }] };
+    const furniture = buildDrawList(bareScene({ plane: withRing }), cameraAt(30), VIEWPORT).ops;
+    const scene = bareScene({
+      plane: withRing,
+      paths: [path("orbit", tiltedCircle(10, 30))],
+      annuli: [annulus("hz", 10, 20), annulus("belt", 30, 32, { ticks: true })],
+    });
+
+    const { ops } = buildDrawList(scene, cameraAt(30), VIEWPORT);
+
+    // The orchestrator's ruling 35: what is drawn in --line is the plane's own furniture, the same
+    // with the paths and annuli as without them.
+    expect(inLine(ops)).toEqual(inLine(furniture));
+    expect(inLine(furniture)).toHaveLength(furniture.length);
   });
 
   it("draws an annulus with the plane, after its grid and rings and before the marks above it", () => {
@@ -687,7 +711,7 @@ describe("buildDrawList annuli", () => {
     expect(ticks).toHaveLength(1);
     const segments = ticks[0]?.segments ?? [];
     expect(segments).toHaveLength(36);
-    expect(ticks[0]?.stroke).toBe("line");
+    expect(ticks[0]?.stroke).toBe("textMuted");
     // The first joins the edges at their coreward points, straight up the screen from the top.
     expect(segments[0]?.from.xPx).toBeCloseTo(CENTRE.xPx, 9);
     expect(segments[0]?.from.yPx).toBeCloseTo(CENTRE.yPx - 10 * K, 9);

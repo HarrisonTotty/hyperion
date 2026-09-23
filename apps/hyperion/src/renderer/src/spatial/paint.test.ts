@@ -417,6 +417,15 @@ describe("paint", () => {
         stroke: "target",
         widthPx: 1,
       },
+      {
+        kind: "polyline",
+        points: [
+          { xPx: 0, yPx: 0 },
+          { xPx: 10, yPx: 0 },
+        ],
+        stroke: "textMuted",
+        widthPx: 1,
+      },
     ]);
 
     expect(recorder.sets("strokeStyle")).toEqual([
@@ -424,6 +433,7 @@ describe("paint", () => {
       TOKENS.text,
       TOKENS.accent,
       TOKENS.target,
+      TOKENS.textMuted,
     ]);
   });
 

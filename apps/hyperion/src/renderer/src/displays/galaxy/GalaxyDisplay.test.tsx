@@ -569,15 +569,51 @@ describe("GalaxyDisplay", () => {
       expect(mapCanvas("edge-on")).toHaveAccessibleDescription("↑ ↓ MOVE CURSOR");
     });
 
-    it("stops at the centre of the map's edge pixel, inside the root cube", async () => {
+    it("stops a whole pixel inside the root cube's face, on the cursor's lattice", async () => {
       const { user } = await renderWithMaps();
       mapCanvas("face-on").focus();
 
       await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
 
-      // Half of the 16,384 ly pixel inside the face at 65,536 ly, which lies outside the cube.
-      expect(coordinate("X")).toBe("57,344.0");
+      // Three 16,384 ly pixels from the centre: a fourth reaches the face at 65,536 ly, which lies
+      // outside the cube, so the step stops on the lattice and not on the edge pixel's centre (the
+      // orchestrator's ruling 35).
+      expect(coordinate("X")).toBe("49,152.0");
     });
+
+    it("reads the edge pixel where a clamped step stops on its inner edge", async () => {
+      const { user } = await renderWithMaps();
+      mapCanvas("face-on").focus();
+
+      await user.keyboard("{Shift>}{ArrowDown}{ArrowLeft}{/Shift}");
+
+      // The raster's last pixel, code 63: the most +x and the most -y, which the turned picture
+      // shows at its bottom left.
+      expect(
+        within(mapView("FACE-ON FROM NORTH")).getByText("CURSOR DENSITY").parentElement,
+      ).toHaveTextContent("CURSOR DENSITY 1.66E-3 SYSTEMS/ly²");
+    });
+
+    it.each([
+      ["top", "{ArrowUp}{ArrowUp}{ArrowUp}", "+16,384.0 ly", "1.21E-6"],
+      ["bottom", "{ArrowDown}{ArrowDown}{ArrowDown}", "-32,768.0 ly", "5.55E-6"],
+    ])(
+      "reaches the %s row's density from the plane by arrow keys alone",
+      async (_, keys, height, density) => {
+        const { user } = await renderWithMaps();
+        mapCanvas("edge-on").focus();
+
+        await user.keyboard(keys);
+
+        // The orchestrator's ruling 35: a step stops within the map's half-open extent, on the top
+        // row's lower edge or on the map's bottom edge, and reads that row (code 4 at the top in
+        // column 4, code 28 at the bottom).
+        expect(reading("HEIGHT")).toBe(height);
+        expect(
+          within(mapView("EDGE-ON ALONG +Y")).getByText("CURSOR DENSITY").parentElement,
+        ).toHaveTextContent(`CURSOR DENSITY ${density} SYSTEMS/ly²`);
+      },
+    );
 
     it("sets X and Y to the extent's centre on a click at the face-on centre, leaving Z", async () => {
       const { user } = await renderWithMaps();
@@ -683,13 +719,15 @@ describe("GalaxyDisplay", () => {
     it("reads the column density under the cursor on each map", async () => {
       await renderWithMaps();
 
-      // At the centre: face-on code 36 of 255 over 5 dex from 1E-4, edge-on code 20 over 7 from 1E-6.
+      // At the centre, the corner of four pixels, which reads the one to its +x and +y face-on and
+      // its +x and +z edge-on, as the root cube holds its lower faces (the orchestrator's ruling
+      // 35): face-on code 28 of 255 over 5 dex from 1E-4, edge-on code 12 over 7 from 1E-6.
       expect(
         within(mapView("FACE-ON FROM NORTH")).getByText("CURSOR DENSITY").parentElement,
-      ).toHaveTextContent("CURSOR DENSITY 4.89E-4 SYSTEMS/ly²");
+      ).toHaveTextContent("CURSOR DENSITY 3.40E-4 SYSTEMS/ly²");
       expect(
         within(mapView("EDGE-ON ALONG +Y")).getByText("CURSOR DENSITY").parentElement,
-      ).toHaveTextContent("CURSOR DENSITY 3.34E-6 SYSTEMS/ly²");
+      ).toHaveTextContent("CURSOR DENSITY 2.01E-6 SYSTEMS/ly²");
     });
 
     it("announces the density once for one arrow key press, from the map being moved over", async () => {

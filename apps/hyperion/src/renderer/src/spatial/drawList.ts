@@ -10,6 +10,7 @@ import {
   type AnnulusMark,
   isAbovePlane,
   type PathMark,
+  type PathRole,
   type PointMark,
   type SpatialScene,
   type SymbolShape,
@@ -19,12 +20,13 @@ import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
 import { add, dot, norm, scale, sub, type Vec3 } from "./vec3";
 
 /**
- * A colour token an op is drawn in, named after its CSS custom property (`--text` and so on).
+ * A colour token an op is drawn in, named after its CSS custom property in camel case (`text` for
+ * `--text`, `textMuted` for `--text-muted`).
  *
  * @remarks
  * The draw list never holds a colour: the painter resolves the name against the stylesheet.
  */
-export type ColourToken = "text" | "accent" | "target" | "line";
+export type ColourToken = "text" | "textMuted" | "accent" | "target" | "line";
 
 /** A point on the screen, in CSS pixels from the top left of the view. */
 export interface ScreenPoint {
@@ -302,6 +304,16 @@ function pathPieces(scene: SpatialScene): { above: PathPiece[]; below: PathPiece
   };
 }
 
+/**
+ * The token each path is drawn in: `--text-muted` for a reference path, which says where something
+ * lies and so takes the guide's 6:1 for the parts of a symbol that carry meaning, which `--line`
+ * does not reach; `--text` for the selected one (the orchestrator's ruling 35).
+ */
+const PATH_STROKE: Readonly<Record<PathRole, ColourToken>> = {
+  reference: "textMuted",
+  selected: "text",
+};
+
 function pathOp(
   piece: PathPiece,
   basis: ViewBasis,
@@ -311,7 +323,7 @@ function pathOp(
   return {
     kind: "polyline",
     points: piece.points.map((point) => screen(project(point, basis, camera, viewport))),
-    stroke: piece.path.role === "selected" ? "text" : "line",
+    stroke: PATH_STROKE[piece.path.role],
     widthPx: PATH_WIDTH_PX,
   };
 }
@@ -347,7 +359,7 @@ function annulusOps(
     ops.push({
       kind: "polyline",
       points: ringPolyline(radius, scene.frame).map((point) => toScreen(add(centre, point))),
-      stroke: "line",
+      stroke: "textMuted",
       widthPx: ANNULUS_WIDTH_PX,
     });
   }
@@ -359,7 +371,7 @@ function annulusOps(
         to: toScreen(onPlaneAt(scene, centre, outerRadius, angleDeg)),
       });
     }
-    ops.push({ kind: "ticks", segments, stroke: "line", widthPx: ANNULUS_WIDTH_PX });
+    ops.push({ kind: "ticks", segments, stroke: "textMuted", widthPx: ANNULUS_WIDTH_PX });
   }
   return ops;
 }
@@ -590,10 +602,12 @@ function markCurveLabels(
  * A scene's paths and annuli (plan 14, T40.a) add to that order and change nothing else in it. A
  * path is cut where it crosses the plane, and each piece opens its own half, before the half's
  * marks, so that no line crosses a symbol; in each half the selected path comes after the
- * reference ones. Each piece is a `--line` or `--text` polyline, 1 px wide. An annulus is drawn
- * with the plane, after its rings: each edge a `--line` polyline and, for a belt, one `ticks` op
- * of radial segments between the edges every 10° from coreward. Neither gives an anchor, so
- * neither is picked. Their labels follow the rings' in the curve labels.
+ * reference ones. Each piece is a polyline 1 px wide, in `--text-muted` for a reference path and
+ * `--text` for the selected one. An annulus is drawn with the plane, after its rings: each edge a
+ * `--text-muted` polyline and, for a belt, one `--text-muted` `ticks` op of radial segments between
+ * the edges every 10° from coreward. Neither a path nor an annulus gives an anchor, so neither is
+ * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and
+ * the plane's rings (the orchestrator's ruling 35).
  */
 export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Viewport): DrawList {
   const basis = viewBasis(scene.frame, camera);

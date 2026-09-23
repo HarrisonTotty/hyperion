@@ -70,11 +70,14 @@ export interface PlaneSpec {
 }
 
 /**
- * What a path is drawn as: `reference` in `--line`, as an orbit is, or `selected` in `--text`, as
- * the selected body's orbit is because it carries meaning (plan 14, T38.a).
+ * What a path is drawn as: `reference` in `--text-muted`, as an orbit is, or `selected` in `--text`,
+ * as the selected body's orbit is because it carries the selection (plan 14, T38.a).
  *
  * @remarks
- * Both are solid hairlines. Dashes are kept for predicted paths and `--target` for commanded ones,
+ * Both are solid hairlines. An orbit says where something lies, so it takes the guide's 6:1 for the
+ * parts of a symbol that carry meaning, which `--text-muted` reaches (7.22:1 on `--surface-0`) and
+ * `--line` (1.38:1) does not; `--line` stays for the plane's grid and scale rings (the
+ * orchestrator's ruling 35). Dashes are kept for predicted paths and `--target` for commanded ones,
  * which the guide gives them and which no role here draws.
  */
 export type PathRole = "reference" | "selected";
@@ -97,8 +100,8 @@ export interface PathMark {
 
 /**
  * A band on the reference plane between two circles about one centre, such as a habitable zone or
- * a belt: drawn as its two edges in `--line`, a belt's joined by radial ticks every 10°, with no
- * fill, hatch or dots (plan 14, T38.a).
+ * a belt: drawn as its two edges in `--text-muted`, a belt's joined by radial ticks every 10°, with
+ * no fill, hatch or dots (plan 14, T38.a; the orchestrator's ruling 35).
  */
 export interface AnnulusMark {
   /** Stable identity, which keys its label. */
