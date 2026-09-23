@@ -2,6 +2,9 @@
 # merge, so this repeats what it needs of `hyperion-sim`'s: a fitted table must come out the same
 # on every platform, so every transcendental goes through `hyperion_sim::math` here too.
 
+# Journal names in citations, as the sim's `clippy.toml` has them.
+doc-valid-idents = ["ApJ", "ApJS", ".."]
+
 # Every transcendental function goes through `hyperion_sim::math`, which wraps the exactly pinned
 # `libm`. The platform's own versions differ between operating systems and CPU architectures, and
 # a saved universe must survive being moved to another machine. That includes `mul_add`, which

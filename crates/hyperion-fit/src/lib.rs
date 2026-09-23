@@ -13,8 +13,9 @@
 //! renders the fit again and compares it with the committed table, so a stale or hand-edited
 //! table fails CI.
 //!
-//! One task exists so far (plan 02, P02.T6.a): [`tasks::mge`], run as `hyperion-fit run mge`.
-//! Plan 15 extends the crate.
+//! Two tasks exist so far: plan 02's [`tasks::mge`] (P02.T6.a), run as `hyperion-fit run mge`, and
+//! plan 13's [`tasks::giant_cooling`] (P13.T5.b), run as `hyperion-fit run giant_cooling`. Plan 15
+//! extends the crate.
 
 pub mod tasks;
 
@@ -30,8 +31,15 @@ pub const DEFAULT_MGE_OUT: &str = concat!(
     "/../hyperion-sim/src/tables/mge.rs"
 );
 
+/// Where `run giant_cooling` writes its table unless `--out` says otherwise: the sim's
+/// `tables/giant_cooling.rs`.
+pub const DEFAULT_GIANT_COOLING_OUT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../hyperion-sim/src/tables/giant_cooling.rs"
+);
+
 /// The command line's usage, for error messages.
-pub const USAGE: &str = "usage: hyperion-fit run mge [--out <path>]";
+pub const USAGE: &str = "usage: hyperion-fit run <mge | giant_cooling> [--out <path>]";
 
 /// What the command line asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,15 +50,21 @@ pub enum Command {
         /// The file to write.
         out: PathBuf,
     },
+    /// Fit the cooling of giant planets ([`tasks::giant_cooling`]) and write the table to `out`.
+    RunGiantCooling {
+        /// The file to write.
+        out: PathBuf,
+    },
 }
 
 impl Command {
-    /// Parses the arguments after the program's name: `run mge [--out <path>]`.
+    /// Parses the arguments after the program's name: `run <task> [--out <path>]`, the task
+    /// `mge` or `giant_cooling`.
     ///
     /// # Errors
     ///
     /// [`RunFitError::Usage`] for a malformed command line, [`RunFitError::UnknownTask`] for a
-    /// task other than `mge`.
+    /// task other than `mge` and `giant_cooling`.
     ///
     /// # Examples
     ///
@@ -68,12 +82,16 @@ impl Command {
             Some(other) => return Err(RunFitError::Usage(format!("unknown command `{other}`"))),
             None => return Err(RunFitError::Usage("no command given".to_owned())),
         }
-        match args.next().as_deref() {
-            Some("mge") => {}
+        let (task, default): (fn(PathBuf) -> Self, _) = match args.next().as_deref() {
+            Some("mge") => (|out| Self::RunMge { out }, DEFAULT_MGE_OUT),
+            Some("giant_cooling") => (
+                |out| Self::RunGiantCooling { out },
+                DEFAULT_GIANT_COOLING_OUT,
+            ),
             Some(other) => return Err(RunFitError::UnknownTask(other.to_owned())),
             None => return Err(RunFitError::Usage("no task given".to_owned())),
-        }
-        let mut out = PathBuf::from(DEFAULT_MGE_OUT);
+        };
+        let mut out = PathBuf::from(default);
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--out" => match args.next() {
@@ -85,7 +103,7 @@ impl Command {
                 }
             }
         }
-        Ok(Self::RunMge { out })
+        Ok(task(out))
     }
 }
 
@@ -141,16 +159,18 @@ impl Error for RunFitError {
 ///
 /// [`RunFitError::Write`] if the output file cannot be written.
 pub fn run(command: &Command) -> Result<PathBuf, RunFitError> {
-    match command {
-        Command::RunMge { out } => {
-            let source = tasks::mge::render(&tasks::mge::fit());
-            std::fs::write(out, source).map_err(|source| RunFitError::Write {
-                path: out.clone(),
-                source,
-            })?;
-            Ok(out.clone())
-        }
-    }
+    let (out, source) = match command {
+        Command::RunMge { out } => (out, tasks::mge::render(&tasks::mge::fit())),
+        Command::RunGiantCooling { out } => (
+            out,
+            tasks::giant_cooling::render(&tasks::giant_cooling::fit()),
+        ),
+    };
+    std::fs::write(out, source).map_err(|source| RunFitError::Write {
+        path: out.clone(),
+        source,
+    })?;
+    Ok(out.clone())
 }
 
 #[cfg(test)]
@@ -163,11 +183,31 @@ mod tests {
 
     #[test]
     fn run_mge_defaults_to_the_sims_table() {
-        let Command::RunMge { out } = parse(&["run", "mge"]).unwrap();
+        let Ok(Command::RunMge { out }) = parse(&["run", "mge"]) else {
+            panic!("`run mge` parses to `RunMge`");
+        };
         assert!(
             out.ends_with("hyperion-sim/src/tables/mge.rs"),
             "{}",
             out.display()
+        );
+    }
+
+    #[test]
+    fn run_giant_cooling_defaults_to_the_sims_table_and_takes_an_out() {
+        let Ok(Command::RunGiantCooling { out }) = parse(&["run", "giant_cooling"]) else {
+            panic!("`run giant_cooling` parses to `RunGiantCooling`");
+        };
+        assert!(
+            out.ends_with("hyperion-sim/src/tables/giant_cooling.rs"),
+            "{}",
+            out.display()
+        );
+        assert_eq!(
+            parse(&["run", "giant_cooling", "--out", "table.rs"]).unwrap(),
+            Command::RunGiantCooling {
+                out: "table.rs".into()
+            }
         );
     }
 

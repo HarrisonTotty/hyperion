@@ -756,3 +756,59 @@ Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion
   14's `HostKind` is always `Stellar`, and brown dwarfs and rogue planets cannot be reached from the
   `SYSTEM` display.
 - **`formatMassMearth` below 0.1 M⊕, as ruled (ruling 35.9; round 7b, `ui`).** Below 0.1 M⊕ a mass keeps two significant figures (`0.012` for the Moon, `0.0040`, `0.099`), and below 0.001 M⊕ it is in E notation with the same two (`1.6E-4` for Ceres, `1.8E-9`). Plan 13's two decimals hold from 0.1 up. Each step is decided on the rounded text, so 0.0996 reads `0.10` from either side and 0.000999 reads `0.0010`; zero reads `0.00`. `formatSci` gains a last optional `significantFigures`, three by default, for it. The guide writes E notation "with three significant figures", and the ruling's `1.6E-4` has two. The client follows the ruling, so the owner's draft should say that a mass below 0.001 M⊕ keeps two figures (**for the orchestrator**, with the draft).
+- **Deviations in P13.T5.b–c, as built** (round 7, `giant`).
+  - _The power laws fail the Jupiter check_, so T5.b took the second route. At 1 M_Jup and 4.6 Gyr
+    Burrows et al.'s equation 1 gives 1.59 × 10⁻¹⁰ L☉, 13–18% of Jupiter's internal luminosity;
+    equation 2 gives 36 K; equation 5 at equation 3's gravity gives 1.42 R_Jup. A unit test keeps
+    the check.
+  - _The grid is Sonora Bobcat_ (Marley et al. 2021, ApJ 920, 85; Zenodo record 5063476,
+    CC BY 4.0), cloudless, at [M/H] = 0. It is the only candidate whose licence allows committing
+    its numbers: Burrows et al.'s 1997 files ask to be told of any use, and Baraffe et al.'s COND
+    tracks carry no licence. It also reaches old, cold planets, down to 100 K. The fit reads 455 rows,
+    0.0005–0.011 M☉, committed with their source, retrieval date and checksums in
+    `crates/hyperion-fit/data/giant_cooling/sonora_bobcat_nc+0.0_co1.0_mass.txt`.
+  - _The tracks above 11.5 M_Jup are left out_, because they burn deuterium: 0.47 dex brighter
+    than `cooling` at 12.6 M_Jup and 0.1 Gyr. Neither fit models deuterium burning.
+  - _Two corners are extrapolated._ No grid reaches 0.3 M_Jup. Bobcat's lightest track is
+    0.52 M_Jup and ends at 3 Gyr, and its 1.05 and 1.57 M_Jup tracks end at 6 and 10 Gyr. The fit is
+    least squares for bilinear interpolation with a second-difference penalty of weight 10⁻⁴, and
+    that penalty makes the table a power law in mass and age where there are no rows. Saturn's
+    corner is therefore extrapolated. **For the orchestrator to rule.**
+  - _The table and its residuals._ The table holds log₁₀ L and log₁₀ R, not R, at 12 nodes
+    log-spaced over 0.3–13 M_Jup and 12 over 1 Myr–15 Gyr. The worst residuals are 0.046 dex in
+    log L and 0.60% in R, both at 10.5 M_Jup (0.2 and 0.1 Gyr), with rms 0.008 dex and 0.12%.
+  - _Past 15 Gyr the state follows Burrows et al.'s late-time age laws_, L ∝ t^−1.3 and
+    R ∝ t^−0.056, as `cooling` does. Each mass's own last interval would have let masses change
+    order in the blend by 37 Gyr. No object is that old, but the function takes any age.
+  - _Jupiter and Saturn at 4.6 Gyr._ At 1 M_Jup the fit gives 104.6 K and 71,478 km, against
+    Jupiter's internal 99–107 K and 71,492 km. At the fit's lower end of 0.3 M_Jup (Saturn has
+    0.2994) it gives 63.6 K and 65,270 km. Saturn's internal flux is 77–84 K (Hanel et al. 1983;
+    Wang et al. 2024) and its mean radius 58,232 km. So a coreless model with no helium rain is
+    17–24% cold and 12% large, as Fortney et al.'s (2007) coreless 66,560 km confirms. Plan 14's
+    T11.d uses Chen and Kipping's radius there.
+  - _The API._ `giant_cooling(mass: JupiterMasses, age: Years, comp: &Composition) ->
+Result<CoolingState, EvaluateGiantCoolingError>`, as P06.T13 returned a `Result`. The error
+    has `MassOutsideFit` and `AgeOutsideLife`. The range is `GIANT_MIN_MASS` and `GIANT_MAX_MASS`
+    (0.3 and 13 M_Jup, inclusive), and below 1 Myr the 1 Myr state is held. `CoolingState` has
+    `luminosity()` in L☉, `radius()` in R☉ and `effective_temperature()` in K. They describe the
+    planet's own cooling, as if isolated. The mass is in Jupiter masses because the range is, and a
+    caller converts with `From`.
+  - _Metallicity moves the luminosity as it moves `cooling`'s at 13 M_Jup and the same age._ That
+    is Burrows et al.'s κ̂^0.35 once the object is degenerate. It is less while the object
+    contracts: at Z = 10⁻⁴, −0.12 dex at 1 Myr against the term's −0.57. The radius is the table's
+    at every metallicity. Bobcat's ±0.5 dex grids move L by a weaker 0–0.22 dex per dex, and they
+    make metal-rich objects 0.5–2.5% smaller per dex. With Bobcat's dependence a metal-poor
+    object's luminosity would fall with mass across the join. With `cooling`'s, the two sources
+    differ there by the same amount at every metallicity. **For the orchestrator to rule.**
+  - _The join._ Over 10–13 M_Jup, ln L and ln R are blended, linearly in log mass, to `cooling`'s
+    closed form. That form is read from 10 M_Jup, 5% below its own 0.01 M☉. At 13 M_Jup, L and R
+    equal `cooling`'s bit for bit. At 0.0124 M☉ they agree within 0.11% in L, 0.013% in R and
+    0.026% in T at 0.1, 1 and 10 Gyr, at every metallicity. A smooth step would let L fall with
+    mass at old ages, where the two sources differ by 0.16–0.20 dex. With the linear weight,
+    d ln L ÷ d ln m stays above 0.09.
+  - _Files._ `stellar/substellar.rs` is now `stellar/substellar/mod.rs`, unchanged except one doc
+    line and the `mod giant` and `pub use` lines. `giant_cooling` is in `stellar/substellar/giant.rs`,
+    so its tests run under `cargo test -p hyperion-sim stellar::substellar::giant`. The
+    `stellar/substellar_cooling` golden is unchanged. The new golden `stellar/giant_cooling` pins
+    nine (mass, age) points at [Fe/H] = 0 and −1. In `hyperion-fit`, `mge`'s float-literal helper
+    moved to `tasks/render.rs` and learned negative numbers; the `mge` table is unchanged.

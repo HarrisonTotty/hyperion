@@ -24,6 +24,8 @@ use hyperion_sim::galaxy::quad::gl_panels;
 use hyperion_sim::galaxy::special::bessel_i0e;
 use hyperion_sim::math;
 
+use super::render::literal;
+
 /// The task's version, written into the table's header. A change to anything below that moves
 /// the table bumps it.
 pub const VERSION: u32 = 0;
@@ -203,37 +205,6 @@ pub fn fit() -> MgeTables {
     }
 }
 
-/// `value` as a Rust float literal: the shortest decimal that reads back to the same `f64`, with
-/// its digits grouped in threes as Clippy asks.
-fn literal(value: f64) -> String {
-    let shortest = format!("{value:?}");
-    let (mantissa, exponent) = match shortest.split_once('e') {
-        Some((m, e)) => (m, Some(e)),
-        None => (shortest.as_str(), None),
-    };
-    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, "0"));
-    let mut out = String::new();
-    let digits: Vec<char> = whole.chars().collect();
-    for (i, c) in digits.iter().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push('_');
-        }
-        out.push(*c);
-    }
-    out.push('.');
-    for (i, c) in fraction.chars().enumerate() {
-        if i > 0 && i.is_multiple_of(3) {
-            out.push('_');
-        }
-        out.push(c);
-    }
-    if let Some(e) = exponent {
-        out.push('e');
-        out.push_str(e);
-    }
-    out
-}
-
 /// `n` with its thousands separated by commas, as prose writes it.
 fn thousands(n: u32) -> String {
     let digits = n.to_string();
@@ -315,24 +286,6 @@ pub fn render(tables: &MgeTables) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn literals_read_back_to_the_same_value_and_are_grouped() {
-        for (value, expected) in [
-            (0.04, "0.04"),
-            (3.5, "3.5"),
-            (1.0, "1.0"),
-            (0.0, "0.0"),
-            (1_234.567_8, "1_234.567_8"),
-            (0.001_234_567_891_234_5, "0.001_234_567_891_234_5"),
-            (1.234_567e-7, "1.234_567e-7"),
-        ] {
-            let text = literal(value);
-            assert_eq!(text, expected);
-            let back: f64 = text.replace('_', "").parse().unwrap();
-            assert!(back.total_cmp(&value).is_eq(), "{text}");
-        }
-    }
 
     /// The level part of the bar's average is the closed form, and it joins the quadrature
     /// continuously at 0.85.

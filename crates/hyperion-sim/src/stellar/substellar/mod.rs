@@ -5,7 +5,8 @@
 //! brown dwarfs, giving luminosity and temperature from mass and age (Burrows et al. 2001, checked
 //! against Baraffe et al. 2015). These supply classes L, T and Y." [`cooling`] is that fit, valid
 //! from [`MIN_MASS`] (0.01 M☉, 10.5 Jupiter masses) to [`MAX_MASS`] (0.1 M☉), where it meets the
-//! backbone's zero-age main sequence; plan 13's `giant_cooling` continues it below.
+//! backbone's zero-age main sequence; plan 13's [`giant_cooling`] continues it below, from 13 down
+//! to 0.3 Jupiter masses, with its own [`CoolingState`].
 //!
 //! # The model
 //!
@@ -103,6 +104,12 @@ use crate::units::consts::{
 };
 use crate::units::{
     MetalFraction, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
+};
+
+pub mod giant;
+
+pub use giant::{
+    CoolingState, EvaluateGiantCoolingError, GIANT_MAX_MASS, GIANT_MIN_MASS, giant_cooling,
 };
 
 /// The lowest mass the fits cover, 0.01 M☉ (10.5 Jupiter masses): the lower end of the range

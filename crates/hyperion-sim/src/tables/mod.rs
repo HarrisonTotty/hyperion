@@ -6,4 +6,5 @@
 //! generated output.
 
 pub mod gauss_legendre;
+pub mod giant_cooling;
 pub mod mge;
