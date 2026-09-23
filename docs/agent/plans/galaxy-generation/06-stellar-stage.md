@@ -2169,3 +2169,98 @@ domain_tags_are_pinned`, since `events` alone misses the registry tests and the 
   and Mamajek 1.2 Myr above 1.3 M☉. The mean reaches the 0.3 Myr floor near 7 M☉. P06.T15.c's text
   now says so. T24's T Tauri class must read this function. T15.a and T15.b are not built, and
   `Track` is untouched.
+- **Deviations in T3, as built.** `stellar::system::draw_metallicity(&Galaxy, &SystemRecord) ->
+Composition` as specified: \[Fe/H\] = `mean + sigma × z` through `Stream::normal` (two words of
+  `system.metallicity`, scope `System`, keyed by `ObjectKey::from(SystemId)`), `Composition::from_fe_h`
+  with no helium excess, the field read at `max(age, 0)`; a record without a component fails a
+  `debug_assert!` and reads its population's first component. The tag sits under a new "Plan 06,
+  the system's own draws" heading after the `star.*` tags, so `tags.golden` gains one line in the
+  middle, not at the end. Tests (`tests/stellar_metallicity.rs`, units in `system.rs`): the
+  gradient over 2.7 × 10⁵ thin-disc records of a strip of layer-E cells along +y (12,800–44,800
+  ly), slow by plan 01's convention although it runs in about a second, is the fixture's −0.05
+  dex/kpc within 3.29 standard errors of the fitted slope (measured −0.04979 ± 0.00020), and the
+  scatter the field's 0.20 within 3.29 of its own standard error (0.2001). The field states no
+  tolerance, so the bracket is its scatter's sampling error at α = 10⁻³. Records older than
+  `THIN_DISC_FLAT_AGE` are left out, so the test holds whichever disc carries the decline beyond
+  8 Gyr. The halo test builds records from parts in the fixture's in-situ and dominant-merger
+  components, 10⁴ each, and finds means −0.5988 and −1.1991, a separation of 0.6004 against 0.6
+  (± 0.0042), and a two-sample K–S p below 10⁻³⁰⁰. The K–S test at one place (old thin disc,
+  9,000/21,000/−120 ly, 3.2 Gyr) has p = 0.72. The golden `stellar/system_metallicity` pins 25
+  records: the first three of seven cells across the layers, three young-disc and three halo
+  records found by placement, and one young-disc record 500 years unborn built from parts, since
+  the unborn sliver (H = 1,000 years) is too rare to find. **For the orchestrator:** ruling 7 is
+  not in the field as built. `galaxy/fields/metallicity.rs` still gives the thin discs the
+  decline of 0.1 dex per Gyr beyond 8 Gyr, and the thick disc a fixed −0.55. T3 reads whatever the
+  field says, so moving the decline is plan 02's change, with a bump.
+- **Deviations in T13, as built.** `stellar::substellar::cooling(mass: SolarMasses, age: Years,
+comp: &Composition) -> Result<StarState, EvaluateCoolingError>`. It covers
+  `substellar::{MIN_MASS, MAX_MASS}` = 0.01–0.1 M☉ inclusive. `MassOutsideFits(mass)` is returned
+  outside that range or for NaN, and `AgeOutsideLife(age)` for a negative or non-finite age. Below
+  `MIN_AGE` (1 Myr) it gives the 1 Myr state with the true age. Plan 13's sketch has a bare
+  `StarState`, so its calls take `?` or an `expect`. Added: `hydrogen_burning_limit(&Composition) ->
+SolarMasses`, which plan 13 and T29 need to tell `ObjectKind::Dwarf` from `Substellar`. The
+  returned phase is `Phase::Substellar` at every age and on both sides of the limit, since the
+  phase's own doc already covers "the latest M dwarfs" and no such object leaves it. Mass is
+  constant, the core is zero, the mass-loss rate is zero and the phase fraction is zero. The
+  seam for `starA`'s `evolve` is `m0 < 0.1 → cooling(m0, age, comp)`, which cannot fail for grid
+  primaries (0.08 M☉ and up). Five departures from the plan's sketch follow, **for the
+  orchestrator to rule**.
+  - _A contraction regime._ Burrows et al.'s power laws are late-time fits ("characterize older
+    SMOs", §II), and alone they miss BHAC15 at 0.1 Gyr: 3,238 against 2,525 K at 0.05 M☉, and
+    −2.42 against −2.68 dex at 0.09 M☉. Before degeneracy the object contracts on its Hayashi
+    track by the n = 3/2 polytrope's Kelvin–Helmholtz law, R³ = t_KH m² (T☉/T_H)⁴ ÷ 7t, whose
+    one parameter T_H = 3,020 K (m ÷ 0.1)^0.09 is fitted to BHAC15. It joins the Burrows branch
+    by p-norms of order 4, the smaller L and the larger R. The Burrows radius is their
+    equation 5, at equation 3's gravity and equation 2's temperature.
+  - _Radius and temperature are joined, not luminosity and radius._ With L and R joined, a star
+    settling on the floor rose by up to 200 K in temperature at Z = 10⁻⁴. With R and T each a
+    p-norm of order 20 and L = R²T⁴, T, R and L never rise with age, and T never falls with
+    mass, by construction. Plan 13's P13.T5.a asks for exactly that.
+  - _The floor._ R_hb = R₀.₁ (m ÷ 0.1)^1.2 x^0.05 and T_hb = T₀.₁ x^0.18, with x = (m − m_e) ÷
+    (0.1 − m_e), fitted to BHAC15's 10 Gyr isochrone. It is pinned at 0.1 M☉ to Tout's ZAMS
+    luminosity and to the radius the backbone starts from, HPT's equation 24 floor (0.1346 R☉ at
+    Z = 0.02; `zams::radius` alone gives 0.1305). That floor is computed again in
+    `backbone_at_tenth`, in `sse::ms`'s arithmetic, because `MainSequence` is private to `sse`.
+    At merge, add a test of `cooling(0.1)` against `evolve(0.1)` at 1 and 10 Gyr.
+  - _Metallicity._ Burrows's κ̂ is read as Z ÷ Z☉ (on `z_fit`) above a metal-free floor
+    4^(−1/0.35) = 0.0190, the quarter of solar luminosity their text gives at zero metallicity.
+    The hydrogen-burning limit follows their equation 7, m_e ∝ κ̂^(−1/9), with its own floor
+    (0.068 ÷ 0.083)⁹. It is calibrated at 0.068 M☉ solar, where the floor's weight must vanish
+    for BHAC15's 0.07 M☉ model to keep burning, and at 0.083 M☉ metal-poor. Baraffe et al.'s
+    (1997, A&A 327, 1054) Tables II–V start at 0.083 M☉ at every \[M/H\] from −2.0 to −1.0, and
+    call that the limit. At −2.0 their model is at the edge (1,779 K, log L −4.27), but at −1.0 it
+    still has 2,359 K, so the limit there lies lower. The fit gives 0.065 M☉ at Z = 0.03, 0.079 at
+    \[M/H\] = −1 (their 0.083 M☉ model's luminosity within 0.12 dex, relative to 0.1 M☉), 0.0826
+    at −2.0 and 0.083 at Z = 10⁻⁴.
+  - _The 10 Gyr point at 0.05 M☉._ BHAC15's grid stops at 1,300 K, so it comes from ATMO 2020
+    (Phillips et al. 2020, A&A 637, A38), the same group's cold extension: 782 K and −5.670. The
+    fit gives 759 K and −5.698.
+- **Measured for T13**, against BHAC15's isochrones (`BHAC15_iso.2mass`). ΔT and Δlog L at
+  0.05 M☉ are +10 K and 0.000 at 0.1 Gyr, and +98 K and +0.125 at 1 Gyr (from the track). The
+  0.125 is Burrows's equation 1 itself, which ATMO 2020 matches to 0.02 dex. At 0.075 M☉ they are
+  +8, −120 and +69 K, and −0.002, −0.093 and +0.034. At 0.08 M☉, +4, −74 and −25 K, and −0.004,
+  −0.060 and −0.020. At 0.09 M☉, +6, −57 and −58 K, and +0.003, −0.008 and −0.012. The worst are
+  120 K and 0.125 dex, against the plan's 150 K and 0.15. Over BHAC15's grid from 30 Myr to
+  10 Gyr and 0.03–0.1 M☉ the fit is within 190 K and 0.16 dex. At 0.1 M☉ it meets the backbone
+  within 0.53% in L and 0.02% in R from 1 Gyr on, at all five metallicities (the plan's 2%; the
+  test holds 1% and 0.03%). A
+  0.05 M☉ object is 2,535 K at 0.1 Gyr (M), 1,481 K at 1 Gyr (L) and 931 K at 5 Gyr (T), on
+  Pecaut and Mamajek's scale (2022.04.16: M/L at 2,310 K, L/T at 1,310 K). Continuity in age is
+  a log–log Lipschitz bound (|Δln L| ≤ 2|Δln t|, |Δln R| ≤ |Δln t| ÷ 3). The golden
+  `stellar/substellar_cooling` pins 252 states.
+  - _Plan figures that were wrong._ The limit's range is wider than 0.072–0.078 M☉ at its
+    metal-poor end. At solar metallicity Burrows et al. give 0.07–0.075 M☉ and BHAC15 0.07, but
+    the limit is 0.083 M☉ at \[M/H\] = −2.0 (Baraffe et al. 1997) and 0.092 M☉ at zero
+    metallicity (Burrows et al., after Saumon et al. 1994). A 0.05 M☉ object is not "2,800 K at
+    0.1 Gyr": BHAC15 give 2,525 K and ATMO 2020 2,548 K, and 2,800 K is its temperature at
+    10–25 Myr. Deuterium burns above 13 Jupiter masses, not below (Burrows et al. §II), and the
+    fit ignores it at every mass.
+  - _Known limits._ Near 13 Jupiter masses the fit is up to 0.6 dex faint at 30–100 Myr against
+    ATMO 2020, where deuterium burns (P13.T5.a may add it). At 0.1 M☉ it is 0.42 dex brighter
+    than the backbone at 0.1 Gyr, as BHAC15's star is, until P06.T15.b's pre-main sequence, whose
+    Hayashi segment should use this contraction law. Young objects near 0.075 M☉ are 2,900–
+    3,000 K below 10 Myr (BHAC15 2,967 K, ATMO 2020 3,050 K), which P13.T5.a's "none earlier than
+    M6" (2,810 K) must allow. The metal-poor floors follow Baraffe et al. (1997) in luminosity to
+    0.2 dex, but are 230–440 K cooler. The reason is the backbone's: HPT's equation 24 gives
+    0.143 R☉ at 0.1 M☉ and Z = 10⁻⁴, against their 0.108. That is a finding against the
+    backbone's floor at low Z, for T12.

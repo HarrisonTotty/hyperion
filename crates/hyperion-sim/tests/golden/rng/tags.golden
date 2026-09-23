@@ -88,6 +88,7 @@ star.ns.geometry (Body) = 0x44efeaa183d8a6e0
 star.ns.phase (Body) = 0xa58a3eb61d8998e7
 star.bh.spin (Body) = 0x1b6fe6fca4a4ec6f
 star.nebula (Body) = 0xb890ef4cadc6c22e
+system.metallicity (System) = 0x980a122ec2b00fc1
 star.ev.flare (Event) = 0x806dabacbef9e780
 star.ev.glitch (Event) = 0x26acdfada9e1ca09
 star.ev.glitch_cycle (Event) = 0x248ec47483166c9c

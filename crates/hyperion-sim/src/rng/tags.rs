@@ -300,6 +300,13 @@ domain_tags! {
     /// A planetary nebula's expansion speed: one uniform.
     STAR_NEBULA: Body = "star.nebula";
 
+    // Plan 06, the system's own draws (P06.T3): scope `System`, opened with
+    // `ObjectKey::from(SystemId)`, one stream per system shared by all its stars.
+
+    /// A grid system's iron abundance \[Fe/H\]: one standard normal (two words) scaling its
+    /// density component's scatter about its mean (`stellar::system::draw_metallicity`).
+    SYSTEM_METALLICITY: System = "system.metallicity";
+
     // Plan 06, event tags (P06.T27.a): each backs an entry of `id/event_tags.rs` in the block
     // 0x0100–0x01FF, numbered in this order. An event's marks come from its own event stream, so
     // no kind has a second tag.
@@ -415,6 +422,13 @@ mod tests {
             assert!(tag.name().starts_with("star."), "{}", tag.name());
             assert!(ALL.contains(&tag));
         }
+    }
+
+    #[test]
+    fn plan_06_registers_the_system_metallicity_tag_with_system_scope() {
+        assert_eq!(SYSTEM_METALLICITY.name(), "system.metallicity");
+        assert_eq!(SYSTEM_METALLICITY.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&SYSTEM_METALLICITY));
     }
 
     #[test]

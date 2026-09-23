@@ -778,4 +778,18 @@ mod tests {
             1.713_113_275_733_314_7,
         ),
     ];
+
+    /// The cooling fits below 0.1 M☉ pin themselves to where this main sequence starts at 0.1 M☉
+    /// (P06.T13), and compute it again because this type is private to `sse`: the two must not
+    /// part.
+    #[test]
+    fn the_substellar_fits_pin_is_where_the_main_sequence_starts_at_0_1() {
+        for z in REFERENCE_Z {
+            let c = ZCoeffs::new(MetalFraction::new(z));
+            let start = MainSequence::new(SolarMasses::new(0.1), &c).at(Megayears::ZERO);
+            let (l, r) = crate::stellar::substellar::backbone_zams_at_tenth(MetalFraction::new(z));
+            hyperion_testkit::float::assert_same_bits(start.luminosity.value(), l.value());
+            hyperion_testkit::float::assert_same_bits(start.radius.value(), r.value());
+        }
+    }
 }
