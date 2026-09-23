@@ -1,0 +1,640 @@
+# generator_version = 11
+
+probabilities m 0.05 fe_h -2.5
+barren = 0x3fefb0dcf9d49911  # 0.9903397445203003
+terrestrial_only = 0x0000000000000000  # 0.0
+compact_multi = 0x0000000000000000  # 0.0
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x3f83c8c18ad9bbef  # 0.009660255479699812
+
+probabilities m 0.05 fe_h -1.5
+barren = 0x3fe06397487031b7  # 0.5121570982751597
+terrestrial_only = 0x0000000000000000  # 0.0
+compact_multi = 0x0000000000000000  # 0.0
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x3fdf38d16f1f9c93  # 0.4878429017248404
+
+probabilities m 0.05 fe_h -0.8
+barren = 0x3faf932ef0149293  # 0.06166979485195614
+terrestrial_only = 0x0000000000000000  # 0.0
+compact_multi = 0x0000000000000000  # 0.0
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x3fee06cd10feb6d7  # 0.9383302051480439
+
+probabilities m 0.05 fe_h -0.3
+barren = 0x3f9cdc05c61b382a  # 0.028183069435549303
+terrestrial_only = 0x0000000000000000  # 0.0
+compact_multi = 0x0000000000000000  # 0.0
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x3fef191fd1cf263f  # 0.9718169305644507
+
+probabilities m 0.05 fe_h 0
+barren = 0x3f99e555dd1b8112  # 0.02528890764267639
+terrestrial_only = 0x0000000000000000  # 0.0
+compact_multi = 0x0000000000000000  # 0.0
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x3fef30d5511723f8  # 0.9747110923573237
+
+probabilities m 0.05 fe_h 0.4
+barren = 0x3f990e59e5850bae  # 0.024468807824870424
+terrestrial_only = 0x0000000000000000  # 0.0
+compact_multi = 0x0000000000000000  # 0.0
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x3fef378d30d3d7a2  # 0.9755311921751295
+
+probabilities m 0.1 fe_h -2.5
+barren = 0x3fefb194ffdcf5ed  # 0.9904274937941274
+terrestrial_only = 0x3f3f65c1d517c8bc  # 0.0004790876601809093
+compact_multi = 0x3f829dcdc14e4c19  # 0.009090049230314578
+compact_with_cold_giant = 0x3ebfd8a5fd7f2813  # 1.89818637429335e-6
+solar_like = 0x3e897a1e6465b9a8  # 1.8981863742933498e-7
+eccentric_giant = 0x3ea97a1e6465b9a8  # 7.592745497173399e-7
+warm_giant = 0x3e997a1e6465b9a8  # 3.7963727485866995e-7
+hot_jupiter = 0x3e831cc6cfb2acd7  # 1.4239854082462858e-7
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.1 fe_h -1.5
+barren = 0x3fe087e479168332  # 0.5165884366034332
+terrestrial_only = 0x3f98c64af224c466  # 0.024193926839135925
+compact_multi = 0x3fdd6108b50f9017  # 0.45904748613088614
+compact_with_cold_giant = 0x3f1920f2fa0655a0  # 9.585841190181419e-5
+solar_like = 0x3ee41a5bfb384480  # 9.585841190181419e-6
+eccentric_giant = 0x3f041a5bfb384480  # 3.8343364760725675e-5
+warm_giant = 0x3ef41a5bfb384480  # 1.9171682380362837e-5
+hot_jupiter = 0x3ede2969bfc5f8c5  # 7.191126311643745e-6
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.1 fe_h -0.8
+barren = 0x3fb1f82da63fa4c5  # 0.07019315060428528
+terrestrial_only = 0x3fa7d377f24e486f  # 0.04653525193056473
+compact_multi = 0x3fec4114754c884f  # 0.8829443255419934
+compact_with_cold_giant = 0x3f282aa76c454337  # 0.00018437665688477722
+solar_like = 0x3ef35552bd0435c6  # 1.8437665688477723e-5
+eccentric_giant = 0x3f135552bd0435c6  # 7.375066275391089e-5
+warm_giant = 0x3f035552bd0435c6  # 3.6875331376955446e-5
+hot_jupiter = 0x3eed01c98401d77c  # 1.3831606452390425e-5
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.1 fe_h -0.3
+barren = 0x3fa2f0d937912e42  # 0.03699377826032137
+terrestrial_only = 0x3fa8a9ed6bd123b2  # 0.04817144337773217
+compact_multi = 0x3fed3f659926fb26  # 0.9139888755088108
+compact_with_cold_giant = 0x3f3f3b5a0a38c94f  # 0.0004765600990338696
+solar_like = 0x3f08fc48082d6dd9  # 4.765600990338696e-5
+eccentric_giant = 0x3f28fc48082d6dd9  # 0.00019062403961354784
+warm_giant = 0x3f18fc48082d6dd9  # 9.531201980677392e-5
+hot_jupiter = 0x3f02be602ceab41b  # 3.575068477821454e-5
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.1 fe_h 0
+barren = 0x3fa16e05c071f663  # 0.03404252981361535
+terrestrial_only = 0x3fa8accd44e8cccd  # 0.048193373357571546
+compact_multi = 0x3fed42ce34e7671e  # 0.9144049676208146
+compact_with_cold_giant = 0x3f5f01804b831fc2  # 0.0018924477463304478
+solar_like = 0x3f28ce003c68e635  # 0.00018924477463304478
+eccentric_giant = 0x3f48ce003c68e635  # 0.0007569790985321791
+warm_giant = 0x3f38ce003c68e635  # 0.00037848954926608956
+hot_jupiter = 0x3f229ba82bd3a271  # 0.00014196803923673424
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.1 fe_h 0.4
+barren = 0x3fa0b789cb7bac4b  # 0.03265028580593617
+terrestrial_only = 0x3fa84355896c768b  # 0.04738871862921908
+compact_multi = 0x3fecc5bc7674ecab  # 0.8991377175911074
+compact_with_cold_giant = 0x3f880694f3a32fea  # 0.011731303868508253
+solar_like = 0x3f533877294f5988  # 0.0011731303868508253
+eccentric_giant = 0x3f733877294f5988  # 0.004692521547403301
+warm_giant = 0x3f633877294f5988  # 0.0023462607737016507
+hot_jupiter = 0x3f4cd67d75babc67  # 0.0008800613972733796
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.3 fe_h -2.5
+barren = 0x3fefb9449e17c8ea  # 0.9913657272102487
+terrestrial_only = 0x3f5e467b7f1d00ef  # 0.0018478590031492622
+compact_multi = 0x3f7ba330a8ee0028  # 0.006747427060759072
+compact_with_cold_giant = 0x3ef707f35553fff8  # 2.19641272751758e-5
+solar_like = 0x3ec26cc2aaa99994  # 2.1964127275175803e-6
+eccentric_giant = 0x3ee26cc2aaa99994  # 8.785650910070321e-6
+warm_giant = 0x3ed26cc2aaa99994  # 4.3928254550351606e-6
+hot_jupiter = 0x3ebba4dbba22d1e9  # 1.647709475122438e-6
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.3 fe_h -1.5
+barren = 0x3fe20c092fb1222c  # 0.5639692241175616
+terrestrial_only = 0x3fb7e39d724ce2bc  # 0.09331687965903773
+compact_multi = 0x3fd5cec4654bcc1f  # 0.3407450665683331
+compact_with_cold_giant = 0x3f522c46015447fa  # 0.001109188427396378
+solar_like = 0x3f1d13a33553a65d  # 0.0001109188427396378
+eccentric_giant = 0x3f3d13a33553a65d  # 0.0004436753709585512
+warm_giant = 0x3f2d13a33553a65d  # 0.0002218376854792756
+hot_jupiter = 0x3f15d01560df79a1  # 8.320932849368311e-5
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.3 fe_h -0.8
+barren = 0x3fc4a659e94638fb  # 0.1613266362223341
+terrestrial_only = 0x3fc6f978319b1776  # 0.17948820516738423
+compact_multi = 0x3fe4f905c4c4cb7a  # 0.6553982585086111
+compact_with_cold_giant = 0x3f617a2777d09a88  # 0.0021334429607294293
+solar_like = 0x3f2bf6a58c80f740  # 0.00021334429607294293
+eccentric_giant = 0x3f4bf6a58c80f740  # 0.0008533771842917717
+warm_giant = 0x3f3bf6a58c80f740  # 0.00042668859214588586
+hot_jupiter = 0x3f24fa49d976309f  # 0.00016004706843053982
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.3 fe_h -0.3
+barren = 0x3fc0b9211c5e7164  # 0.1306496990699869
+terrestrial_only = 0x3fc7a7abaddebaef  # 0.18480440129993478
+compact_multi = 0x3fe5980bb0da21e7  # 0.6748102621214088
+compact_with_cold_giant = 0x3f76773d74ebf944  # 0.005484809937796268
+solar_like = 0x3f41f8fdf7232dd1  # 0.0005484809937796269
+eccentric_giant = 0x3f61f8fdf7232dd1  # 0.0021939239751185076
+warm_giant = 0x3f51f8fdf7232dd1  # 0.0010969619875592538
+hot_jupiter = 0x3f3af729e1ec1088  # 0.00041146061441588904
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.3 fe_h 0
+barren = 0x3fbfddba19721278  # 0.12447703477125482
+terrestrial_only = 0x3fc70e66d800aab2  # 0.1801270060253351
+compact_multi = 0x3fe50c2186407428  # 0.6577308294396333
+compact_with_cold_giant = 0x3f95ba957d056136  # 0.021219573741604957
+solar_like = 0x3f61621130d11a92  # 0.002121957374160496
+eccentric_giant = 0x3f81621130d11a92  # 0.008487829496641983
+warm_giant = 0x3f71621130d11a92  # 0.004243914748320992
+hot_jupiter = 0x3f5a14b8a678318f  # 0.001591854403048296
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 0.3 fe_h 0.4
+barren = 0x3fba67af9eb16f97  # 0.1031446230348919
+terrestrial_only = 0x3fc33add6c38bbd1  # 0.15023391517885767
+compact_multi = 0x3fe18df0b6880f69  # 0.5485766949718541
+compact_with_cold_giant = 0x3fbc90128fbad630  # 0.11157337197331496
+solar_like = 0x3f86d9a872fbde8f  # 0.0111573371973315
+eccentric_giant = 0x3fa6d9a872fbde8f  # 0.044629348789326
+warm_giant = 0x3f96d9a872fbde8f  # 0.022314674394663
+hot_jupiter = 0x3f81244f022b2441  # 0.008370034459760702
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h -2.5
+barren = 0x3fefc67afdb35fce  # 0.9929785685626429
+terrestrial_only = 0x3f7137d1fd8ad44d  # 0.004203624987600807
+compact_multi = 0x3f64a9626373652a  # 0.0025221749925604846
+compact_with_cold_giant = 0x3f25d48821453eb7  # 0.00016655122511587624
+solar_like = 0x3ef176d34dd0fef9  # 1.6655122511587625e-5
+eccentric_giant = 0x3f1176d34dd0fef9  # 6.66204900463505e-5
+warm_giant = 0x3f0176d34dd0fef9  # 3.331024502317525e-5
+hot_jupiter = 0x3eea33ddc16296f9  # 1.2494374498860343e-5
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h -1.5
+barren = 0x3fe4a7430be26618  # 0.6454177124134644
+terrestrial_only = 0x3fcb2c17641f1709  # 0.21228306187384074
+compact_multi = 0x3fc04da7a2790dd2  # 0.12736983712430444
+compact_with_cold_giant = 0x3f8139b36a40a37c  # 0.00841083686835175
+solar_like = 0x3f4b8f8576cdd260  # 0.000841083686835175
+eccentric_giant = 0x3f6b8f8576cdd260  # 0.0033643347473407
+warm_giant = 0x3f5b8f8576cdd260  # 0.00168216737367035
+hot_jupiter = 0x3f44acecfa97cb20  # 0.0006309659121924473
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h -0.8
+barren = 0x3fd459e58befe629  # 0.31798685708744984
+terrestrial_only = 0x3fda21c456fa6d38  # 0.4083109712025421
+compact_multi = 0x3fcf5bb8685fb643  # 0.24498658272152526
+compact_with_cold_giant = 0x3f9090de6a719a18  # 0.01617763065987718
+solar_like = 0x3f5a8163dd829026  # 0.0016177630659877178
+eccentric_giant = 0x3f7a8163dd829026  # 0.006471052263950871
+warm_giant = 0x3f6a8163dd829026  # 0.0032355261319754356
+hot_jupiter = 0x3f53e2473025e880  # 0.0012136168666914415
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h -0.3
+barren = 0x3fd2000fb730b017  # 0.28125374688784305
+terrestrial_only = 0x3fd9e8148a540c9d  # 0.4047900534498668
+compact_multi = 0x3fcf167f0c64dbef  # 0.24287403206992006
+compact_with_cold_giant = 0x3fa480e4c8c64225  # 0.04004588080272623
+solar_like = 0x3f70671d6d6b681e  # 0.0040045880802726235
+eccentric_giant = 0x3f90671d6d6b681e  # 0.016018352321090494
+warm_giant = 0x3f80671d6d6b681e  # 0.008009176160545247
+hot_jupiter = 0x3f689c339c26d603  # 0.003004170227735471
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h 0
+barren = 0x3fcd8087d7a51626  # 0.23048494367155675
+terrestrial_only = 0x3fd570c1fa7c70da  # 0.33500718556912334
+compact_multi = 0x3fc9ba825fc8876c  # 0.201004311341474
+compact_with_cold_giant = 0x3fc0d6a0f9fcfbab  # 0.1315499516149122
+solar_like = 0x3f8af1018ffb2c45  # 0.01315499516149122
+eccentric_giant = 0x3faaf1018ffb2c45  # 0.05261998064596488
+warm_giant = 0x3f9af1018ffb2c45  # 0.02630999032298244
+hot_jupiter = 0x3f843602a9ea1b3e  # 0.009868641672495234
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h 0.4
+barren = 0x3fba4ab96ed1ecb1  # 0.10270270305220454
+terrestrial_only = 0x3fc3293a796fd9c3  # 0.14969569139038982
+compact_multi = 0x3fb6fe462b530550  # 0.08981741483423389
+compact_with_cold_giant = 0x3fd7b79050dfe6a8  # 0.3705788411894937
+solar_like = 0x3fa2f94040b31eec  # 0.037057884118949364
+eccentric_giant = 0x3fc2f94040b31eec  # 0.14823153647579745
+warm_giant = 0x3fb2f94040b31eec  # 0.07411576823789873
+hot_jupiter = 0x3f9c77a534234ea7  # 0.027800160701032663
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1.9 fe_h -2.5
+barren = 0x3fefca01e895d295  # 0.9934091131859356
+terrestrial_only = 0x3f73cf81a95e8fc6  # 0.004836565485593474
+compact_multi = 0x3f52277bb12a3dad  # 0.001108046334284167
+compact_with_cold_giant = 0x3f37dc7f7cd5d5c9  # 0.0003640948533168679
+solar_like = 0x3f0316cc63de44a0  # 3.640948533168678e-5
+eccentric_giant = 0x3f2316cc63de44a0  # 0.00014563794132674713
+warm_giant = 0x3f1316cc63de44a0  # 7.281897066337356e-5
+hot_jupiter = 0x3efca3fa2a11a1b3  # 2.7313743548169986e-5
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1.9 fe_h -1.5
+barren = 0x3fe55960618e0a38  # 0.6671602158897434
+terrestrial_only = 0x3fcf43789f493ae2  # 0.2442465570224704
+compact_multi = 0x3faca64f3396a952  # 0.05595633988135042
+compact_with_cold_giant = 0x3f92d3fc9880baaf  # 0.018386790092501822
+solar_like = 0x3f5e1ffa8d9ac44a  # 0.001838679009250182
+eccentric_giant = 0x3f7e1ffa8d9ac44a  # 0.007354716037000728
+warm_giant = 0x3f6e1ffa8d9ac44a  # 0.003677358018500364
+hot_jupiter = 0x3f5699636531e995  # 0.0013793440491825838
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1.9 fe_h -0.8
+barren = 0x3fd70713d5c9c552  # 0.35980697515249915
+terrestrial_only = 0x3fde110bd70bb7e3  # 0.4697904205376046
+compact_multi = 0x3fbb8d811ae032d6  # 0.10762793451449268
+compact_with_cold_giant = 0x3fa21b723e412df3  # 0.0353656483644861
+solar_like = 0x3f6cf8b6ca01e31f  # 0.0035365648364486103
+eccentric_giant = 0x3f8cf8b6ca01e31f  # 0.014146259345794441
+warm_giant = 0x3f7cf8b6ca01e31f  # 0.007073129672897221
+hot_jupiter = 0x3f65bbe2cf1af5b6  # 0.0026530675757771805
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1.9 fe_h -0.3
+barren = 0x3fd3ab1f4c428b64  # 0.3073194737173053
+terrestrial_only = 0x3fdc5e277494e067  # 0.44324671158711343
+compact_multi = 0x3fb9fef91a948515  # 0.10154683016709883
+compact_with_cold_giant = 0x3fb5542e70b06315  # 0.08331575633236483
+solar_like = 0x3f81102526f38278  # 0.008331575633236485
+eccentric_giant = 0x3fa1102526f38278  # 0.03332630253294594
+warm_giant = 0x3f91102526f38278  # 0.01666315126647297
+hot_jupiter = 0x3f7999cef48567d3  # 0.0062501987634621834
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1.9 fe_h 0
+barren = 0x3fcb28253e87270c  # 0.2121626429855542
+terrestrial_only = 0x3fd3bf281426bf6c  # 0.308542270354329
+compact_multi = 0x3fb218800fb463b1  # 0.07068634398855413
+compact_with_cold_giant = 0x3fcd772f70b2af6d  # 0.23019974711257465
+solar_like = 0x3f97928c5a288c57  # 0.023019974711257465
+eccentric_giant = 0x3fb7928c5a288c57  # 0.09207989884502986
+warm_giant = 0x3fa7928c5a288c57  # 0.04603994942251493
+hot_jupiter = 0x3f91af028dd7f076  # 0.017269172580185864
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1.9 fe_h 0.4
+barren = 0x3fb11c40ddb34240  # 0.06683736240962279
+terrestrial_only = 0x3fb8f10b2eb6497d  # 0.09742803469115376
+compact_multi = 0x3f96db32681f8822  # 0.022320544819997797
+compact_with_cold_giant = 0x3fdd5414142bde02  # 0.45825674028262153
+solar_like = 0x3fa7767676897e68  # 0.04582567402826215
+eccentric_giant = 0x3fc7767676897e68  # 0.1833026961130486
+warm_giant = 0x3fb7767676897e68  # 0.0916513480565243
+hot_jupiter = 0x3fa199f0d3fbbf99  # 0.03437759959876913
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 5 fe_h -2.5
+barren = 0x3fefceddd8a5519a  # 0.9940022689211674
+terrestrial_only = 0x3f7750c275975b5e  # 0.005692252737808127
+compact_multi = 0x3f340513783acbf1  # 0.00030547833760435824
+compact_with_cold_giant = 0x3d80f29e5ff60065  # 1.9267337288954225e-12
+solar_like = 0x3d4b1dca332333d5  # 1.9267337288954225e-13
+eccentric_giant = 0x3d6b1dca332333d5  # 7.70693491558169e-13
+warm_giant = 0x3d5b1dca332333d5  # 3.853467457790845e-13
+hot_jupiter = 0x3d44579b3aaf9217  # 1.4454011221866605e-13
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 5 fe_h -1.5
+barren = 0x3fe64ec33c9c9920  # 0.69711458051896
+terrestrial_only = 0x3fd265b970c96e19  # 0.28745876325931047
+compact_multi = 0x3f8f9802b9bcc9da  # 0.015426656049020094
+compact_with_cold_giant = 0x3ddabee1ef7038a1  # 9.730005330921885e-11
+solar_like = 0x3da565818c59c6e7  # 9.730005330921885e-12
+eccentric_giant = 0x3dc565818c59c6e7  # 3.892002132368754e-11
+warm_giant = 0x3db565818c59c6e7  # 1.946001066184377e-11
+hot_jupiter = 0x3da00d207c4e8947  # 7.299275667042637e-12
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 5 fe_h -0.8
+barren = 0x3fdab70acce89db6  # 0.4174220086155985
+terrestrial_only = 0x3fe1b167ce9fd3b2  # 0.5529059444075897
+compact_multi = 0x3f9e625957c6ad96  # 0.029672046644618165
+compact_with_cold_giant = 0x3de9b8bd46f6eb55  # 1.8714954888090374e-10
+solar_like = 0x3db493ca9f2bef78  # 1.8714954888090376e-11
+eccentric_giant = 0x3dd493ca9f2bef78  # 7.48598195523615e-11
+warm_giant = 0x3dc493ca9f2bef78  # 3.742990977618075e-11
+hot_jupiter = 0x3daedf9b07ccd39d  # 1.4039623841757527e-11
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 5 fe_h -0.3
+barren = 0x3fd96267e47f6309  # 0.39663121523112516
+terrestrial_only = 0x3fe2530c8975bc7d  # 0.5726378140224281
+compact_multi = 0x3f9f77f07a900dfa  # 0.030730969887384753
+compact_with_cold_giant = 0x3e00a113bb51e6c2  # 4.839736308241821e-10
+solar_like = 0x3dca9b52c54fd79f  # 4.839736308241822e-11
+eccentric_giant = 0x3dea9b52c54fd79f  # 1.9358945232967288e-10
+warm_giant = 0x3dda9b52c54fd79f  # 9.679472616483644e-11
+hot_jupiter = 0x3dc3f5bb9375e213  # 3.630683465032101e-11
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 5 fe_h 0
+barren = 0x3fd944f730d6cecf  # 0.39483432549898806
+terrestrial_only = 0x3fe26104f3b0693f  # 0.5743431815674639
+compact_multi = 0x3f9f8fee41c4a780  # 0.03082248951356048
+compact_with_cold_giant = 0x3e208ceea8db70bb  # 1.926733722964958e-9
+solar_like = 0x3dea7b1774924df8  # 1.9267337229649578e-10
+eccentric_giant = 0x3e0a7b1774924df8  # 7.706934891859831e-10
+warm_giant = 0x3dfa7b1774924df8  # 3.8534674459299156e-10
+hot_jupiter = 0x3de3dd8d9648d65d  # 1.4454011177377322e-10
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 5 fe_h 0.4
+barren = 0x3fd93c9f8926ba0c  # 0.39432514566115695
+terrestrial_only = 0x3fe264fa5b3a1343  # 0.5748264104628124
+compact_multi = 0x3f9f96ba939a01c3  # 0.03084842229736907
+compact_with_cold_giant = 0x3e4a1b4f0736a42b  # 1.2156867712871458e-8
+solar_like = 0x3e14e2a59f5ee9bd  # 1.215686771287146e-9
+eccentric_giant = 0x3e34e2a59f5ee9bd  # 4.862747085148584e-9
+warm_giant = 0x3e24e2a59f5ee9bd  # 2.431373542574292e-9
+hot_jupiter = 0x3e0f55eae20ffd2b  # 9.119864343960379e-10
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h 0, constrained: none
+barren = 0x3fcd8087d7a51626  # 0.23048494367155675
+terrestrial_only = 0x3fd570c1fa7c70da  # 0.33500718556912334
+compact_multi = 0x3fc9ba825fc8876c  # 0.201004311341474
+compact_with_cold_giant = 0x3fc0d6a0f9fcfbab  # 0.1315499516149122
+solar_like = 0x3f8af1018ffb2c45  # 0.01315499516149122
+eccentric_giant = 0x3faaf1018ffb2c45  # 0.05261998064596488
+warm_giant = 0x3f9af1018ffb2c45  # 0.02630999032298244
+hot_jupiter = 0x3f843602a9ea1b3e  # 0.009868641672495234
+substellar_compact = 0x0000000000000000  # 0.0
+
+probabilities m 1 fe_h 0, constrained: zone inside the snow line, close binary
+barren = 0x3fe7a0af62f845b9  # 0.7383648808483293
+terrestrial_only = 0x3fc1712982e8963e  # 0.136265934868037
+compact_multi = 0x3fc00c18f13652de  # 0.1253691842836337
+compact_with_cold_giant = 0x0000000000000000  # 0.0
+solar_like = 0x0000000000000000  # 0.0
+eccentric_giant = 0x0000000000000000  # 0.0
+warm_giant = 0x0000000000000000  # 0.0
+hot_jupiter = 0x0000000000000000  # 0.0
+substellar_compact = 0x0000000000000000  # 0.0
+
+mark seed 0123456789abcdef system 0228c38627ff0007 host 0 = 0x00037ad1f618166d
+class = barren
+mark seed 0123456789abcdef system 0228c38627ff0007 host 1 = 0x001ee39d30ef7dda
+class = warm_giant
+mark seed 000000000000002a system 01ffd802a0000000 host 0 = 0x0012d18a3ae03980
+class = compact_multi
+mark seed 000000000000002a system 01ffd802a0000000 host 255 = 0x0017388a5c9896d0
+class = compact_multi
+
+terrestrial_only group 0: Rocky
+terrestrial_only group 0 presence = 0x3ff0000000000000  # 1.0
+terrestrial_only group 0 count 2-6
+terrestrial_only group 0 mass min = 0x3fa999999999999a  # 0.05
+terrestrial_only group 0 mass max = 0x4000000000000000  # 2.0
+terrestrial_only group 0 scaled au inner = 0x3fc999999999999a  # 0.2
+terrestrial_only group 0 scaled au outer = 0x3fe0000000000000  # 0.5
+terrestrial_only group 0 e rayleigh = 0x3fa999999999999a  # 0.05
+terrestrial_only group 0 reach InsideSnowLine spacing Terrestrial origin InSitu
+
+terrestrial_only group 1: IceRich
+terrestrial_only group 1 presence = 0x3ff0000000000000  # 1.0
+terrestrial_only group 1 count 0-3
+terrestrial_only group 1 mass min = 0x3f947ae147ae147b  # 0.02
+terrestrial_only group 1 mass max = 0x4014000000000000  # 5.0
+terrestrial_only group 1 snow lines inner = 0x3ff0000000000000  # 1.0
+terrestrial_only group 1 snow lines outer = 0x4000000000000000  # 2.0
+terrestrial_only group 1 e rayleigh = 0x3fa999999999999a  # 0.05
+terrestrial_only group 1 reach Open spacing Terrestrial origin InSitu
+
+compact_multi group 0: Chain
+compact_multi group 0 presence = 0x3ff0000000000000  # 1.0
+compact_multi group 0 count 1-10
+compact_multi group 0 rate at 0.1 = 0x4018ae47956cd7e3  # 6.170194945114392
+compact_multi group 0 mean at 0.1 = 0x40185c73b3335f13  # 6.090285110483609
+compact_multi group 0 rate at 0.48 = 0x4018ae47956cd7e3  # 6.170194945114392
+compact_multi group 0 mean at 0.48 = 0x40185c73b3335f13  # 6.090285110483609
+compact_multi group 0 rate at 1 = 0x400b0a3d70a3d70a  # 3.38
+compact_multi group 0 mean at 1 = 0x400bfbfece25b1e6  # 3.498044596219404
+compact_multi group 0 rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
+compact_multi group 0 mean at 1.3 = 0x400755310cd7a6d5  # 2.916597462016265
+compact_multi group 0 mass min = 0x3ff0000000000000  # 1.0
+compact_multi group 0 mass max = 0x4034000000000000  # 20.0
+compact_multi group 0 period break = 0x4028000000000000  # 12.0
+compact_multi group 0 period rising = 0x3ff999999999999a  # 1.6
+compact_multi group 0 period falling = 0xbfeccccccccccccd  # -0.9
+compact_multi group 0 period min = 0x3ff0000000000000  # 1.0
+compact_multi group 0 period max = 0x4049000000000000  # 50.0
+compact_multi group 0 e rayleigh = 0x3fa47ae147ae147b  # 0.04
+compact_multi group 0 hot probability = 0x3fd999999999999a  # 0.4
+compact_multi group 0 hot e half-normal = 0x3fd3333333333333  # 0.3
+compact_multi group 0 reach Open spacing SmallPlanets origin Migrated
+
+compact_with_cold_giant group 0: Chain
+compact_with_cold_giant group 0 presence = 0x3ff0000000000000  # 1.0
+compact_with_cold_giant group 0 count 1-10
+compact_with_cold_giant group 0 rate at 0.1 = 0x4018ae47956cd7e3  # 6.170194945114392
+compact_with_cold_giant group 0 mean at 0.1 = 0x40185c73b3335f13  # 6.090285110483609
+compact_with_cold_giant group 0 rate at 0.48 = 0x4018ae47956cd7e3  # 6.170194945114392
+compact_with_cold_giant group 0 mean at 0.48 = 0x40185c73b3335f13  # 6.090285110483609
+compact_with_cold_giant group 0 rate at 1 = 0x400b0a3d70a3d70a  # 3.38
+compact_with_cold_giant group 0 mean at 1 = 0x400bfbfece25b1e6  # 3.498044596219404
+compact_with_cold_giant group 0 rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
+compact_with_cold_giant group 0 mean at 1.3 = 0x400755310cd7a6d5  # 2.916597462016265
+compact_with_cold_giant group 0 mass min = 0x3ff0000000000000  # 1.0
+compact_with_cold_giant group 0 mass max = 0x4034000000000000  # 20.0
+compact_with_cold_giant group 0 period break = 0x4028000000000000  # 12.0
+compact_with_cold_giant group 0 period rising = 0x3ff999999999999a  # 1.6
+compact_with_cold_giant group 0 period falling = 0xbfeccccccccccccd  # -0.9
+compact_with_cold_giant group 0 period min = 0x3ff0000000000000  # 1.0
+compact_with_cold_giant group 0 period max = 0x4049000000000000  # 50.0
+compact_with_cold_giant group 0 e rayleigh = 0x3fa47ae147ae147b  # 0.04
+compact_with_cold_giant group 0 hot probability = 0x3fd999999999999a  # 0.4
+compact_with_cold_giant group 0 hot e half-normal = 0x3fd3333333333333  # 0.3
+compact_with_cold_giant group 0 reach Open spacing SmallPlanets origin Migrated
+
+compact_with_cold_giant group 1: Giant
+compact_with_cold_giant group 1 presence = 0x3ff0000000000000  # 1.0
+compact_with_cold_giant group 1 count 1-2
+compact_with_cold_giant group 1 mass min = 0x4057d64e2f20cb3e  # 95.34852197840243
+compact_with_cold_giant group 1 mass max = 0x40a8d49171177e61  # 3178.284065946748
+compact_with_cold_giant group 1 mass index = 0xbfd3d70a3d70a3d7  # -0.31
+compact_with_cold_giant group 1 snow lines inner = 0x3ff0000000000000  # 1.0
+compact_with_cold_giant group 1 snow lines outer = 0x4008000000000000  # 3.0
+compact_with_cold_giant group 1 e split = 0x4077e4cccccccccd  # 382.3
+compact_with_cold_giant group 1 e short beta a = 0x3fe64dd2f1a9fbe7  # 0.697
+compact_with_cold_giant group 1 e short beta b = 0x400a28f5c28f5c29  # 3.27
+compact_with_cold_giant group 1 e long beta a = 0x3ff1eb851eb851ec  # 1.12
+compact_with_cold_giant group 1 e long beta b = 0x4008b851eb851eb8  # 3.09
+compact_with_cold_giant group 1 reach Open spacing Giants origin InSitu
+
+solar_like group 0: Rocky
+solar_like group 0 presence = 0x3ff0000000000000  # 1.0
+solar_like group 0 count 2-6
+solar_like group 0 mass min = 0x3fa999999999999a  # 0.05
+solar_like group 0 mass max = 0x4000000000000000  # 2.0
+solar_like group 0 scaled au inner = 0x3fc999999999999a  # 0.2
+solar_like group 0 scaled au outer = 0x3fe0000000000000  # 0.5
+solar_like group 0 e rayleigh = 0x3fa999999999999a  # 0.05
+solar_like group 0 reach InsideSnowLine spacing Terrestrial origin InSitu
+
+solar_like group 1: Giant
+solar_like group 1 presence = 0x3ff0000000000000  # 1.0
+solar_like group 1 count 1-3
+solar_like group 1 mass min = 0x4057d64e2f20cb3e  # 95.34852197840243
+solar_like group 1 mass max = 0x40a8d49171177e61  # 3178.284065946748
+solar_like group 1 mass index = 0xbfd3d70a3d70a3d7  # -0.31
+solar_like group 1 snow lines inner = 0x3ff0000000000000  # 1.0
+solar_like group 1 snow lines outer = 0x4000000000000000  # 2.0
+solar_like group 1 e rayleigh = 0x3fa999999999999a  # 0.05
+solar_like group 1 reach Open spacing Giants origin InSitu
+
+solar_like group 2: IceGiant
+solar_like group 2 presence = 0x3ff0000000000000  # 1.0
+solar_like group 2 count 0-2
+solar_like group 2 mass min = 0x4024000000000000  # 10.0
+solar_like group 2 mass max = 0x403e000000000000  # 30.0
+solar_like group 2 location outward
+solar_like group 2 e rayleigh = 0x3fa999999999999a  # 0.05
+solar_like group 2 reach Open spacing Giants origin InSitu
+
+eccentric_giant group 0: Survivor
+eccentric_giant group 0 presence = 0x3ff0000000000000  # 1.0
+eccentric_giant group 0 count 0-1
+eccentric_giant group 0 mass min = 0x3fa999999999999a  # 0.05
+eccentric_giant group 0 mass max = 0x4024000000000000  # 10.0
+eccentric_giant group 0 scaled au inner = 0x3fc999999999999a  # 0.2
+eccentric_giant group 0 scaled au outer = 0x3fe0000000000000  # 0.5
+eccentric_giant group 0 e half-normal = 0x3fd3333333333333  # 0.3
+eccentric_giant group 0 reach InsideSnowLine spacing Terrestrial origin InSitu
+
+eccentric_giant group 1: Giant
+eccentric_giant group 1 presence = 0x3ff0000000000000  # 1.0
+eccentric_giant group 1 count 1-2
+eccentric_giant group 1 mass min = 0x4057d64e2f20cb3e  # 95.34852197840243
+eccentric_giant group 1 mass max = 0x40a8d49171177e61  # 3178.284065946748
+eccentric_giant group 1 mass index = 0xbfd3d70a3d70a3d7  # -0.31
+eccentric_giant group 1 scaled au inner = 0x3fe0000000000000  # 0.5
+eccentric_giant group 1 scaled au outer = 0x4014000000000000  # 5.0
+eccentric_giant group 1 e beta a = 0x3febbe76c8b43958  # 0.867
+eccentric_giant group 1 e beta b = 0x40083d70a3d70a3d  # 3.03
+eccentric_giant group 1 reach Open spacing Giants origin BeyondSnowLine
+
+warm_giant group 0: Giant
+warm_giant group 0 presence = 0x3ff0000000000000  # 1.0
+warm_giant group 0 count 1-1
+warm_giant group 0 mass min = 0x4057d64e2f20cb3e  # 95.34852197840243
+warm_giant group 0 mass max = 0x40a8d49171177e61  # 3178.284065946748
+warm_giant group 0 mass index = 0xbfd3d70a3d70a3d7  # -0.31
+warm_giant group 0 period min = 0x4024000000000000  # 10.0
+warm_giant group 0 period max = 0x4069000000000000  # 200.0
+warm_giant group 0 e split = 0x4077e4cccccccccd  # 382.3
+warm_giant group 0 e short beta a = 0x3fe64dd2f1a9fbe7  # 0.697
+warm_giant group 0 e short beta b = 0x400a28f5c28f5c29  # 3.27
+warm_giant group 0 e long beta a = 0x3ff1eb851eb851ec  # 1.12
+warm_giant group 0 e long beta b = 0x4008b851eb851eb8  # 3.09
+warm_giant group 0 reach Open spacing Giants origin Migrated
+
+warm_giant group 1: Companions
+warm_giant group 1 presence = 0x3fe0000000000000  # 0.5
+warm_giant group 1 count 1-2
+warm_giant group 1 mass min = 0x3ff0000000000000  # 1.0
+warm_giant group 1 mass max = 0x4034000000000000  # 20.0
+warm_giant group 1 location flanking
+warm_giant group 1 e rayleigh = 0x3fa47ae147ae147b  # 0.04
+warm_giant group 1 reach Open spacing SmallPlanets origin Migrated
+
+hot_jupiter group 0: Giant
+hot_jupiter group 0 presence = 0x3ff0000000000000  # 1.0
+hot_jupiter group 0 count 1-1
+hot_jupiter group 0 mass min = 0x4057d64e2f20cb3e  # 95.34852197840243
+hot_jupiter group 0 mass max = 0x40a8d49171177e61  # 3178.284065946748
+hot_jupiter group 0 mass index = 0xbfd3d70a3d70a3d7  # -0.31
+hot_jupiter group 0 period median = 0x400c000000000000  # 3.5
+hot_jupiter group 0 period sigma = 0x3fc3333333333333  # 0.15
+hot_jupiter group 0 period min = 0x3ff0000000000000  # 1.0
+hot_jupiter group 0 period max = 0x4024000000000000  # 10.0
+hot_jupiter group 0 e split = 0x4077e4cccccccccd  # 382.3
+hot_jupiter group 0 e short beta a = 0x3fe64dd2f1a9fbe7  # 0.697
+hot_jupiter group 0 e short beta b = 0x400a28f5c28f5c29  # 3.27
+hot_jupiter group 0 e long beta a = 0x3ff1eb851eb851ec  # 1.12
+hot_jupiter group 0 e long beta b = 0x4008b851eb851eb8  # 3.09
+hot_jupiter group 0 reach Open spacing Giants origin BeyondSnowLine
+
+hot_jupiter group 1: Giant
+hot_jupiter group 1 presence = 0x3fe3333333333333  # 0.6
+hot_jupiter group 1 count 1-1
+hot_jupiter group 1 mass min = 0x4073dd412745feb4  # 317.8284065946748
+hot_jupiter group 1 mass max = 0x40a8d49171177e61  # 3178.284065946748
+hot_jupiter group 1 mass index = 0xbfd3d70a3d70a3d7  # -0.31
+hot_jupiter group 1 snow lines inner = 0x4000000000000000  # 2.0
+hot_jupiter group 1 snow lines outer = 0x4020000000000000  # 8.0
+hot_jupiter group 1 e split = 0x4077e4cccccccccd  # 382.3
+hot_jupiter group 1 e short beta a = 0x3fe64dd2f1a9fbe7  # 0.697
+hot_jupiter group 1 e short beta b = 0x400a28f5c28f5c29  # 3.27
+hot_jupiter group 1 e long beta a = 0x3ff1eb851eb851ec  # 1.12
+hot_jupiter group 1 e long beta b = 0x4008b851eb851eb8  # 3.09
+hot_jupiter group 1 reach Open spacing Giants origin InSitu
+
+substellar_compact group 0: Chain
+substellar_compact group 0 presence = 0x3ff0000000000000  # 1.0
+substellar_compact group 0 count 1-10
+substellar_compact group 0 rate at 0.1 = 0x4018ae47956cd7e3  # 6.170194945114392
+substellar_compact group 0 mean at 0.1 = 0x40185c73b3335f13  # 6.090285110483609
+substellar_compact group 0 rate at 0.48 = 0x4018ae47956cd7e3  # 6.170194945114392
+substellar_compact group 0 mean at 0.48 = 0x40185c73b3335f13  # 6.090285110483609
+substellar_compact group 0 rate at 1 = 0x400b0a3d70a3d70a  # 3.38
+substellar_compact group 0 mean at 1 = 0x400bfbfece25b1e6  # 3.498044596219404
+substellar_compact group 0 rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
+substellar_compact group 0 mean at 1.3 = 0x400755310cd7a6d5  # 2.916597462016265
+substellar_compact group 0 mass min = 0x3f847ae147ae147b  # 0.01
+substellar_compact group 0 mass max = 0x4000000000000000  # 2.0
+substellar_compact group 0 period break = 0x4028000000000000  # 12.0
+substellar_compact group 0 period rising = 0x3ff999999999999a  # 1.6
+substellar_compact group 0 period falling = 0xbfeccccccccccccd  # -0.9
+substellar_compact group 0 period min = 0x3ff0000000000000  # 1.0
+substellar_compact group 0 period max = 0x4049000000000000  # 50.0
+substellar_compact group 0 e rayleigh = 0x3fa47ae147ae147b  # 0.04
+substellar_compact group 0 hot probability = 0x3fd999999999999a  # 0.4
+substellar_compact group 0 hot e half-normal = 0x3fd3333333333333  # 0.3
+substellar_compact group 0 reach Open spacing SmallPlanets origin Migrated

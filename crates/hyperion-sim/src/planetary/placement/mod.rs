@@ -1,12 +1,24 @@
 //! Placement: where a system's planets go, under dynamical constraints (plan 14, phase B).
 //!
-//! So far only [`spacing`] is built: the mutual Hill radius, the next orbit at a given spacing and
-//! the stability floor of design note 7 (P14.T6.a). The spacing draw (T6.b), masses (T7), the class
-//! placers (T8) and the stable zones of multiple systems (T9) follow.
+//! Built so far:
+//!
+//! - [`spacing`]: the mutual Hill radius, the next orbit at a given spacing and the stability
+//!   floor of design note 7 (P14.T6.a), and the spacing draw (P14.T6.b).
+//! - [`zones`]: Holman and Wiegert's stability limits, the stable zones of a hierarchy, and each
+//!   zone's disc and close-binary flag (P14.T9, design note 10).
+//!
+//! Masses (T7) and the class placers (T8) follow.
 
 pub mod spacing;
+pub mod zones;
 
 pub use spacing::{
-    HillFactor, Neighbour, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
+    HillFactor, Neighbour, PairSpacing, SpacingDraws, SpacingKind, SpacingOutcome,
+    draw_pair_spacing, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
     satisfies_floor, spacing_floor,
+};
+pub use zones::{
+    BuildZoneHierarchyError, ComponentKind, OrbitHost, OrbitZone, ResolveZoneDiscError,
+    ZoneDiscInputs, ZoneHierarchy, ZoneNode, ZoneStar, holman_wiegert_p_type,
+    holman_wiegert_s_type, stable_zones,
 };

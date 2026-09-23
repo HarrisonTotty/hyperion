@@ -1317,3 +1317,88 @@ Fn(SolarMasses, f64, &Composition) -> Metres`, as T1.c's text asks and the sketc
     0.8 + 0.6 and 98 s at 0.9 + 0.9. A 0.6 + 0.6 M☉ pair gives 76 s.
   - `orbit/functions.golden` pins by bits Peters's time over all its panel counts, its inverse
     and the Roche lobe, beside plan 14's fixture `orbit/states.golden`. Both are new at 11.
+- **Deviations in P11.T2.a–b and T3.b, as built** (round 7, the `hier` lane; T2.c and T2.d not
+  started). The code is `stellar/multiplicity/{hierarchy,stability,positions}.rs`, with
+  `PeriodDistribution::quantile_in` and `share_in` added to `dist.rs` (`sample_in` now calls
+  `quantile_in`, bit for bit), four tags in `rng/tags.rs`, and the new golden
+  `stellar/hierarchies` (six IDs, blessed at 11). Nothing generated calls `draw_hierarchy`, so no
+  existing golden moves.
+  - **Where a companion goes.** Companions are added one at a time, each to a node of the
+    hierarchy's outer spine: the whole system (a new outermost orbit) or the outer member at any
+    level down to its last star (a new orbit inside it). Strictly inside out, as Design note 4
+    has it, no outer member could hold a subsystem, and Tokovinin (2014, AJ 147, 87) finds those
+    "almost as frequent as in the primary components", with 2 + 2 quadruples at 4%. Only the new
+    orbit is ever redrawn, which is what "the outer orbit only" protects, but it may be the inner
+    orbit of an existing pair. Joining only the spine puts each new star last in depth-first
+    order, so companion k is body k when its orbit is drawn and Design note 5's keys need no
+    renumbering. Every shape is reachable in some order of drawing.
+  - **The node is drawn with the period, on `binary.orbit`, not on `system.hierarchy`.** A node
+    picked once per companion and kept through its redraws dropped 2.2% of companions: a node with
+    no real room fails all seventeen tries. Instead each try's first `binary.orbit` word picks the
+    node, by integer thresholds on the weights of the nodes' period windows, and the period, by
+    inverse transform of the mark's residual inside the node's window. The windows come from the
+    criterion's necessary conditions (its smallest axis ratio 2.8 × 0.7 = 1.96, the enclosing
+    orbit's known eccentricity, the tidal cut). That is rejection sampling of (node, orbit), so
+    it is exact: a companion joins a node in proportion to the chance that an orbit drawn for it
+    passes the test. `system.hierarchy` is not opened and is not registered, so four tags were
+    added and `tags.golden` gained four lines, not five; the name stays reserved in the heading.
+    **For the orchestrator to rule.**
+  - **The laws a companion is drawn from.** Its period and mass-ratio laws are the model's at the
+    mass of the first star of the node it joins (the system's primary for the whole system), and
+    its mass is that star's times q. Moe and Di Stefano (2017, §2 and §5), whose law it is, define
+    a tertiary's q "with respect to the … primary" and not "M_B ÷ (M_Aa + M_Ab)"; Tokovinin (2014,
+    §4.3) draws inner and outer periods "from the same log-normal distribution". The plan's "mass
+    ratio against the mass of the node inside" would let a tertiary outweigh the primary. No star
+    outweighs the primary, by construction.
+  - **Semi-major axes follow the final masses.** A pair's period, eccentricity, orientation and
+    phase are drawn when it forms; its `KeplerElements` are built `from_period` with the pair's
+    μ, the total initial mass of its members as the hierarchy finally stands, so a later companion
+    that joins a member widens the pair's orbit at the same period. Every test is therefore run on
+    the whole hierarchy after each try.
+  - **Mardling and Aarseth, re-checked** against the paper (2001, MNRAS 321, 398, §4.1 eq. 90 and
+    §4.2): `R_p,out ÷ a_in > 2.8 [(1 + q_out)(1 + e_out) ÷ (1 − e_out)^½]^⅖`, `q_out = m₃ ÷ (m₁ +
+m₂)`, C = 2.8 "determined empirically", "holds for q_out ≤ 5"; their reduction factor `f = 1 −
+0.3 i ÷ 180°` on the right for inclined and retrograde orbits; a 3 + 1 tests its inner
+    triple's outer orbit as the inner binary; a 2 + 2 takes the member of larger semi-major axis
+    as the binary and the other as the third body, with `f₁ = 1 + 0.1 min(a ÷ a₂, a₂ ÷ a)`. It is
+    applied beyond q_out = 5 too (a light pair about a heavy star), where it grows as q^⅖ against
+    the Hill radius's q^⅓, so it errs towards stability.
+  - **The tidal cut** is plan 02's radius at the record's epoch position and at the sum of the
+    stars' initial masses, the mass the orbits are bound to, not the primary's alone as the frame
+    rule reads it; half of it is at most 0.91 of the frame rule's radius, so every star lies in
+    its system's frame.
+  - **`ForcedMultiple { max_separation }` bounds every semi-major axis**, since a hard–soft
+    boundary is a binding energy. A forced multiple whose every companion is dropped comes out
+    single (none of 5,000 measured with 1,000 au); P11.T8.f may redraw it at its next attempt.
+    **For the orchestrator to rule** whether it should.
+  - **Design note 1 is built into `draw_hierarchy`**, so that P11.T2.c calls it unchanged:
+    `draw_hierarchy(galaxy, record, MultiplicityContext::Free, RedrawAttempt::FIRST)`. For a
+    primary of 8 M☉ or more (`STRIPPED_MARK_MIN_MASS`) the mark `StarDraws::for_star(..)
+.stripped()`, attempt 0 until plan 08's `mark_attempt`, is read against
+    `PROVISIONAL_STRIPPED_SHARE` = 0.25. A set mark makes the system multiple with the primary's
+    own orbit's periastron under `PROVISIONAL_INTERACTING_PERIASTRON` = 10 au; an unset one makes
+    it multiple with probability (MF − s) ÷ (1 − s) and that periastron at least 10 au. The seams
+    are therefore in `stellar::multiplicity`, not `stellar/system.rs` as T2.c says. **For the
+    orchestrator to rule.** The primary's initial mass is the record's `primary_initial_mass()`
+    (placement's `system.primary_mass`); plan 06's `StarDraws` hold no mass.
+  - **Smaller choices.** An orbit with e ≥ 0.9999 is redrawn, since ruling 39 carries such
+    orbits as open ones. A dropped companion drops every later one, so body indices have no gap.
+    Mark picks on `system.multiplicity`: word 64n decides multiple, word 64n + 1 the count from
+    the model's PMF given a multiple, which `ForcedMultiple` reads alone. The node-and-period
+    mark's residual counts a window wider than 2⁵² marks in pairs, as `Stream::uniform_open`
+    counts 52 bits, so that the share inside the window stays strictly below 1.
+  - **Measured.** Companions dropped after sixteen redraws: 0 of 4,239 over the mass function at
+    the Sun-like point, 0 of 4,266 in the inner disc at 6,000 ly, 10 of 10,305 (0.10%) for
+    primaries log-uniform on 0.08–150 M☉, 9 of 6,333 (0.14%) of them above 8 M☉, against the
+    plan's 1%; under `ForcedMultiple` inside 1,000 au, 13 of 6,526. Multiple share and companions
+    asked for match the model within 3.29σ at 0.3, 1 and 3 M☉ (0.4405 against 0.44 at 1 M☉).
+    Stripped marks: 982 of 4,000 massive primaries (0.2455). The barycentre of 10⁴ hierarchies at
+    ±H and the epoch: worst 0.95 m, measured with exact products, with stars up to 2.0 × 10¹⁶ m
+    out. The spacing of an `f64` there is 4 m, so the plan's 1 m is met because the heavy stars
+    sit near the origin, not guaranteed. The test also asserts the bound that holds at any
+    separation, one `f64` epsilon (2.2 × 10⁻¹⁶) of the farthest star's distance. **For the
+    orchestrator:** whether the plan's figure should read so. **A finding against Tokovinin (2014, Table 3):** Sun-like triples put their inner
+    pair about the primary 1,316 times and in the outer member 1,379 times (his corrected
+    simulation 282 : 152), and 2 + 2 are 41% of quadruples (his 74%). He reproduces those only by
+    correlating the subsystems of the two components (his ε₊ and ε₋), which independent draws do
+    not do.

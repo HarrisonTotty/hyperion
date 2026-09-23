@@ -375,6 +375,49 @@ domain_tags! {
     /// radius, three standard normals, then the rank of a circumbinary disc's lifetime, one
     /// uniform; orbit host h reads words 16h onwards (`planetary::disc::DISC_WORDS_PER_HOST`).
     PLANET_DISC: System = "planet.disc";
+
+    /// Planet spacings in mutual Hill radii (P14.T6.b): orbit host h's mean spacings, three
+    /// standard normals from word 8h, and the spacing of the pair whose outer planet is in slot s,
+    /// up to seventeen standard normals from word 2,048 + 64s
+    /// (`planetary::placement::spacing`).
+    PLANET_SPACING: System = "planet.spacing";
+
+    /// An orbit host's architecture class (P14.T4.c): one mark, picked against the class weights;
+    /// orbit host h reads word 4h (`planetary::architecture::CLASS_WORDS_PER_HOST`), and words
+    /// 4h + 1 to 4h + 3 are reserved.
+    PLANET_CLASS: System = "planet.class";
+
+    // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
+    // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
+    // (`stellar::multiplicity::RedrawAttempt`) reads words 64n to 64n + 63 of every stream here.
+    //
+    // Scope `System`, opened with `ObjectKey::from(SystemId)`: `system.multiplicity`,
+    // `system.hierarchy` (reserved: the hierarchy draw picks each companion's node with its
+    // period, on `binary.orbit`), `system.substellar`.
+    //
+    // Scope `Body`, opened with `ObjectKey::from(BodyId)` of the star an orbit brings in, the
+    // lowest-indexed star of the pair's outer member (plan 11, design note 5): `binary.orbit`,
+    // `binary.orientation`, `binary.phase`, `binary.kick`, `binary.ia_mark`, `binary.ce`.
+    //
+    // Scope `System`, under plan 09's prefix `class.`: `class.awd`, `class.xrb`, `class.merger`,
+    // `class.nsm`.
+
+    /// Whether a system is multiple and how many stellar companions it has: one mark each, words
+    /// 64n and 64n + 1 of attempt n (`stellar::multiplicity::draw_hierarchy`).
+    SYSTEM_MULTIPLICITY: System = "system.multiplicity";
+
+    /// A companion's node and period (one mark, picking the node among the candidates' period
+    /// windows and the period inside it), mass ratio and eccentricity (one uniform each): try r
+    /// of attempt n at words 64n + 3r to 64n + 3r + 2.
+    BINARY_ORBIT: Body = "binary.orbit";
+
+    /// A companion's orbital plane and periapsis, isotropic: the cosine of the inclination, the
+    /// ascending node and the argument of periapsis, one uniform each, try r of attempt n at words
+    /// 64n + 3r to 64n + 3r + 2.
+    BINARY_ORIENTATION: Body = "binary.orientation";
+
+    /// A companion's mean anomaly at the epoch: one uniform, try r of attempt n at word 64n + r.
+    BINARY_PHASE: Body = "binary.phase";
 }
 
 #[cfg(test)]
@@ -452,6 +495,36 @@ mod tests {
         assert_eq!(PLANET_DISC.name(), "planet.disc");
         assert_eq!(PLANET_DISC.scope(), crate::rng::TagScope::System);
         assert!(ALL.contains(&PLANET_DISC));
+    }
+
+    #[test]
+    fn plan_11_registers_its_hierarchy_tags_with_their_scopes() {
+        use crate::rng::TagScope;
+        let tags = [
+            (SYSTEM_MULTIPLICITY, "system.multiplicity", TagScope::System),
+            (BINARY_ORBIT, "binary.orbit", TagScope::Body),
+            (BINARY_ORIENTATION, "binary.orientation", TagScope::Body),
+            (BINARY_PHASE, "binary.phase", TagScope::Body),
+        ];
+        for (tag, name, scope) in tags {
+            assert_eq!(tag.name(), name);
+            assert_eq!(tag.scope(), scope, "{name}");
+            assert!(ALL.contains(&tag), "{name}");
+        }
+    }
+
+    #[test]
+    fn plan_14_registers_the_spacing_tag_with_system_scope() {
+        assert_eq!(PLANET_SPACING.name(), "planet.spacing");
+        assert_eq!(PLANET_SPACING.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&PLANET_SPACING));
+    }
+
+    #[test]
+    fn plan_14_registers_the_class_tag_with_system_scope() {
+        assert_eq!(PLANET_CLASS.name(), "planet.class");
+        assert_eq!(PLANET_CLASS.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&PLANET_CLASS));
     }
 
     #[test]

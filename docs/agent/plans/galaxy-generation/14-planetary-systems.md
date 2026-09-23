@@ -2451,3 +2451,212 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     bridge above 20%, and the 5 Gyr reference age. (3) The outer water cap at the disc's ice share,
     and the 1.5 M⊕ floor beyond the snow line. (4) An Earth-like core under an inner envelope (a
     step in composition at the rock curve) rather than pure rock (continuous, but iron-free).
+- **Deviations in P14.T6.b and T9, as built (`zones`, round 7).**
+  - _T6.b, shape._ In `placement/spacing.rs`, `SpacingKind` is `SmallPlanets`, `TerrestrialGroup`
+    or `GiantPair`, each with `law() -> MeanSpacingLaw` (`centre`, `sigma`, `min`, `max` and
+    `mean(z)`). `SpacingDraws::for_host(seed, system, host)` holds three public `StandardNormal`s,
+    with `MEDIAN`, `normal(kind)` and `mean_spacing(kind)`. The pair's draw is
+    `draw_pair_spacing(seed, system, outer: BodyIndex, mean, floor) -> PairSpacing`, whose
+    `outcome()` is `SpacingOutcome::Drawn { redraws }` or `Floor`. A template's spacing law (T5)
+    can name a `SpacingKind`. The law's figures live in `spacing.rs` beside their sources, as the
+    disc's do, and not in `params.rs`.
+  - _T6.b, one mean per host and kind._ "A system draws a mean spacing μ" is read per orbit host
+    and per kind: each zone is its own host (D10), and a `SolarLike` host has both a terrestrial and
+    a giant μ.
+  - _T6.b, the floor._ It is an argument, `spacing_floor` of the pair's masses and eccentricities.
+    T8.d draws eccentricities after the spacing, so at draw time a placer can pass only the
+    circular floor, or the floor of an eccentricity it assumes.
+  - _T6.b, draw numbers._ All on `planet.spacing` (`System`), the one line `tags.golden` gains. Host
+    h's three normals are words 8h, 8h + 2 and 8h + 4 of the eight it owns
+    (`SPACING_WORDS_PER_HOST`, so 256 hosts fill words 0–2,047). The pair whose outer planet is in
+    slot s reads words 2,048 + 64s onwards, two per attempt, so a placer assigns a planet its slot
+    before drawing its spacing and never renumbers it. "Redrawn … at most 16 times" is read
+    literally: the draw and 16 redraws, 17 attempts in all, then the floor.
+  - _T6.b, holds (for the orchestrator to rule)._ The plan holds only the small planets' mean
+    (13–24). A terrestrial mean of 30 ± 8 or a giant mean of 9 ± 2 unheld can fall under its floor,
+    which would put every pair of the host at the floor. As built they are held to 14–46 (two σ,
+    clear of the small planets' highest floor of 12) and 7–13 (the giants' floor, and two σ above).
+  - _T6.b, sources._ Weiss et al. (2018, AJ 155, 48, §5.2 and Fig. 14) find 93% of CKS pairs at
+    least 10 apart and a peak near 20, and note that a wide pair may hide a planet. Pu and Wu (2015,
+    abstract) find the pairs of systems with four or more transiting planets "tightly clustered
+    around 12 mutual Hill radii" once transit geometry and sensitivity are accounted for, below the
+    plan's centre of 17. The plan's 30 and 9 have no source. Computed from JPL's masses, the Solar
+    System's Venus and Earth are 26.3 apart, Earth and Mars 40.1, Jupiter and Saturn 7.9 and Saturn
+    and Uranus 14.0.
+  - _T6.b, measured._ Over 10⁴ small pairs of 2,000 systems at the circular floor of 10, the least
+    accepted Δ is 10.003 and the median 17.15, with 12.6 and 22.1 at the 10th and 90th percentiles,
+    and no pair at the floor. The accepted spacings about a fixed mean are the normal truncated at
+    the floor (Kolmogorov–Smirnov p = 0.078). Over 4 × 10⁵ pairs about a mean at the floor, the
+    redraw counts are geometric out to 16. The means' medians and the shares held at each end
+    match their laws at α = 10⁻³. T6.a's tests stand as they were: the Solar System passes
+    pairwise, two Jupiters at 5.2 and 6.5 au fail, and so do Kepler-11 b and c at 9.45.
+  - _T6.b, an M dwarf's chain._ Δ in mutual Hill radii is the same for every host, so the period
+    ratio per step grows as the host's mass falls. At 0.3 M☉ and the median 17.15 it is 1.63 for a
+    pair of 1 M⊕ planets, 2.04 for 3 M⊕ and 2.34 for 5 M⊕. A chain of 3 M⊕ planets from 5 days
+    reaches 175 days at its sixth planet and 358 at its seventh; one of 1 M⊕ planets from 10 days
+    stays inside 200 days to its seventh. How much of a chain lies beyond 200 days is therefore
+    T7's masses and T5's first period as much as T6.b's spacing (ruling 48(e)).
+  - _T9.a._ Every coefficient of equations 1 and 3 was checked against Holman and Wiegert (1999)
+    itself (arXiv astro-ph/9809315), and all thirteen are as the plan gives them. Their μ is m₂ ÷
+    (m₁ + m₂), where m₁ is the star the planet orbits.
+    - The S-type fit covers 0.1 ≤ μ ≤ 0.9 and e ≤ 0.8 (their Table 3), to 4% typically and 11% at
+      worst.
+    - The P-type fit covers 0.1 ≤ μ ≤ 0.5 and e ≤ 0.7 (their Table 7), to 3% and 6%. The paper's
+      text says 0.9, but its integrations stop at 0.5, and its §2 states the μ ↔ 1 − μ symmetry.
+    - The built fits meet Tables 3 and 7 to 11.4% and 6% at worst. The 11.4% is at μ = 0.6,
+      e = 0.7, where Table 3's 0.05 has one significant figure.
+    - Measured: 0.274 and 2.3875 at μ = 0.5, e = 0. With Holman and Wiegert's own α Centauri (Table
+      4: 23.57 au, e = 0.516, 1.12 and 0.95 M☉) the limits are 2.794 au around A, 2.54 around B and
+      87.4 around both, against their table's 2.79, 2.54 and 87. At the plan's 23.5 au and
+      e = 0.52, A's limit is 2.76 au.
+  - _T9.a, outside the fitted ranges (for the orchestrator to rule)._ "Clamped, which errs towards
+    smaller zones" holds at two edges only, S-type μ < 0.1 and P-type μ < 0.1, which are clamped. At
+    the other edges a clamp errs larger, so each fit is continued instead:
+    - S-type μ > 0.9 (a light host) takes the Hill scaling ((1 − μ) ÷ 0.1)^⅓ that the paper finds
+      there (its §3.1 and Fig. 1). It was measured at e = 0 only, so using it at every e is an
+      assumption.
+    - S-type e > 0.8 scales by ((1 − e) ÷ 0.2)^1.2 (`S_TYPE_ECCENTRICITY_EXPONENT`), the law of
+      Jaime, Aguilar and Pichardo (2014, MNRAS 443, 260, eq. 11), R = R_Egg 0.733 (1 − e)^1.2
+      q^0.07, after the invariant loops of Pichardo et al. (2005). For equal masses it gives Table
+      3's 0.04 at e = 0.8, and it closes faster than the companion's pericentre. A linear (1 − e),
+      first built, errs larger than both this law and the fit's own slope there, (1 − e)^1.4, as
+      the science review found. For γ Vir (e = 0.881) Holman and Wiegert extrapolate the polynomial
+      to 0.61 au, and this gives 0.74.
+    - P-type μ is folded to min(μ, 1 − μ). Unfolded, μ = 0.9 on a circular orbit would give 1.19
+      separations against the 1.96 of its mirror image, μ = 0.1.
+    - P-type e > 0.7 scales by (1 + e) ÷ 1.7, the same multiple of the apocentre, which Table 7
+      holds at 2.3–2.6 from e = 0.5 to 0.7. Jaime et al.'s circumbinary law (eq. 12) grows more
+      slowly with e, so this errs towards the smaller zone.
+
+    Each continuation is continuous at its edge, and inside the ranges both functions are the
+    published polynomials to the bit.
+
+  - _T9.b, the hierarchy._ Plan 11's `SystemHierarchy` is not built, so `stable_zones` takes a
+    `ZoneHierarchy`, built from `ZoneNode::component(index, mass, kind)`, where `ComponentKind` is
+    `Star` or `BrownDwarf`, and `ZoneNode::pair(inner, outer, a, Eccentricity)`.
+    - It is checked once (`BuildZoneHierarchyError`): indices 0 to n − 1, unique and under 16,
+      masses and semi-major axes positive, and pair keys unique.
+    - It does not check plan 11's numbering (depth first, inner before outer). The zones' order by
+      body index and the range 1–15 of `Pair(k)` rely on it.
+    - At the merge, a walk of `SystemHierarchy` from its root builds one, and
+      `stable_zones(&SystemHierarchy)` goes through that adapter.
+  - _T9.b, zones._ `OrbitZone` has `host()`, `host_number()`, `host_mass()`, `component_kind()`,
+    `members()`, `inner()`, `outer()`, `truncation()` and `in_close_binary()`. A limit is `None`
+    where the hierarchy sets none: a component has no inner limit, and the top of the hierarchy no
+    outer one (D14's strip radius is T29's).
+    - `OrbitHost::Pair(k)` names a pair by the lowest-indexed component of its outer member,
+      plan 11's key star (its D5), so the name survives any node layout. `Barycentre` and `Body`
+      are defined, but no zone has either. **For the orchestrator to rule:** should the root
+      pair's zone be `Barycentre`?
+    - Host numbers, for `DiscDraws::for_host` and `SpacingDraws::for_host`, are a star's body
+      index n and 16 + k for a pair. A single star is host 0, and a star's disc draws do not change
+      when it gains a companion.
+    - Zones come depth first, inner member before outer, each pair after its members. A pair's
+      mass is its members' summed up the tree, inner first, and a golden pins that order.
+  - _T9.b, added beyond the plan._ Every zone is also bounded by the zone of the pair above it,
+    less its own greatest distance from that pair's barycentre, a (1 + e) μ. This makes zones
+    disjoint for any hierarchy, and it binds only in hierarchies too tight to be stable. A
+    component's zone with no room left is dropped, as is a pair's zone narrower than 1.5.
+  - _T9.c._ `ZoneDiscInputs::for_zone(seed, system, zone, stars: &[ZoneStar], fe_h)` has `host()`,
+    `lifetime()`, `draws()`, `truncation()` and `derive()`. A `ZoneStar` is a component's zero-age
+    L and R and its `star.disc_lifetime` rank, plain arguments until T1.d's context; an invalid one
+    is `ResolveZoneDiscError::InvalidStar` with its index. A circumbinary host sums its members'
+    luminosities in index order and takes their largest radius. The radius enters only the inner
+    edge, which the P-type limit overrides, except where a close pair's corotation radius lies
+    beyond it.
+  - _T9.c, the close-binary flag (for the orchestrator to rule)._ The cut is Kraus et al.'s (2016,
+    abstract) measured a_cut = 47 (+59/−23) au, not the plan's rounded 50. A zone is flagged when
+    its host is a member of such a pair at any level above it, and never for its own circumbinary
+    zone, since that disc is cleared from inside and not truncated from outside. The weight moved
+    to `Barren` is `arch`'s, to give S_bin = 0.34 (+0.14/−0.15).
+  - _T9 tests._ (a) and (b) run on hand-built hierarchies. Overlap is checked at the worst phases on
+    3,000 random hierarchies of three to six components. Of (c), "every zone's disc lies inside its
+    zone" runs on 10⁴ random binaries and triples. "No planet outside its zone" waits for T8's
+    placer, the planet-occurrence ratio for T4's weights with the flag, and both for plan 11's
+    sampled binaries. The zones are those at birth (the slice).
+  - _Goldens._ New at version 11: `planetary/spacing` and `planetary/zones`, written by
+    `tests/planetary_placement_golden.rs`. Nothing existing moved.
+- **Deviations in T4 and T5, as built (`arch`, round 7).**
+  - _Shape_ (ruled, ruling 48, h: T5's own file stands). `planetary/architecture.rs` holds T4 (the classes, the frequency model, the anchors
+    and the draw in its module documentation, `ARCHITECTURE_TABLE` of `ClassRow`s) and
+    `planetary/architecture/template.rs` holds T5, a file of its own so that T5's accept filter
+    `planetary::architecture::template` names a module. `ArchitectureClass` has `ALL`, `index`,
+    `name`, `has_giants` and `giant_free_sibling`; `class_weights(SolarMasses, Dex) -> ClassWeights`
+    (`get`, `total`, `giant_total`, `probabilities`, `constrained`); `ClassProbabilities`
+    (`get`, `giant_share`, `compact_share`). D5 and D10 enter as
+    `ClassConstraints::new(&Disc, ZoneLimit, HostMultiplicity)`, with
+    `ZoneLimit::{Unbounded, Outer(Metres)}`, `HostMultiplicity::{SingleOrWide, CloseBinary}`,
+    `ClassConstraints::NONE` and `capacity() -> DiscCapacity::{None, SmallPlanets, Giants}`;
+    `ClassWeights::constrained` applies them. The weight table and its constants live in
+    `architecture.rs`, not `params.rs` (whose documentation points there), so that the module
+    documentation is their single written definition. `ClassDraw::for_host(seed, system, host)` reads word
+    4h of `planet.class` (`CLASS_WORDS_PER_HOST`, words 4h + 1 to 4h + 3 reserved) and
+    `ClassDraw::class` picks with `Mark::pick_weighted` against the weights' own total, which is
+    `Thresholds::from_weights` with `Mark::pick` without the allocation (tested equal);
+    `draw_class(seed, system, host, &weights, &constraints)` does both. The scaling laws are
+    public: `giant_host_mass_scaling`, `giant_metallicity_scaling`,
+    `small_planet_metallicity_scaling`. `planet.class` (`System`) is the one new tag.
+  - _Anchors re-checked_ (papers under the lane's `target/scratch/papers/arch/`): Cumming et al.
+    (2008) 10.5% and α = −0.31; Wright et al. (2012) 1.2 ± 0.38%; Howard et al. (2012) 0.4–0.5%;
+    Zhu et al. (2018) 30 ± 3% and 3.0 ± 0.3 per system; Zhu and Wu (2018) 32 ± 8%; Dressing and
+    Charbonneau (2015) 2.5 ± 0.2; M-dwarf giants (Johnson et al. 2010's 3% at 0.5 M☉, Cumming's
+    1.0%, Bonfils et al. 2013, Montet et al. 2014's 6.5 ± 3.0%); Johnson et al.'s α = 1.0 ± 0.3
+    (their β is 1.2 ± 0.2, not 2); Reffert et al. (2015) µ = 1.9, σ = 0.5 M☉. Fischer and Valenti
+    (2005) and Buchhave et al. (2012) against their abstracts only (no preprint; the full texts
+    were not reachable), so the ±0.5 of the giant law's range is plan 14's reading.
+  - _Weights and scalings changed, each for its source._ `CompactWithColdGiant` 0.07 → 0.10 and
+    `CompactMulti` 0.24 → 0.21 (Zhu and Wu's third; the draft gave 23%); `SolarLike` 0.03 → 0.01
+    (Zhu and Wu's ∼1% of cold-Jupiter systems without super-Earths; Wittenmyer et al.'s Jupiter
+    analogues come from `CompactWithColdGiant`; with the eccentric and outer giants the table gives
+    4.1% of stars a cold Jupiter without super-Earths and P(SE ∣ CJ) ≈ 73%, inside Zhu and Wu's
+    90 ± 20%); `CompactMulti`'s exponent −0.9 → −1.5, with the chain count rising to M dwarfs
+    (below), so that a 0.48 M☉ host has 2.4 small planets if every chain planet lay inside 200
+    days, about 1.9 inside them at T6.b's spacing (the science review's estimate), against
+    Dressing and Charbonneau's 2.5 ± 0.2 (the draft gave 1.4 counting every planet); Reffert et al.'s width 0.8 → 0.5 M☉. Then, by ruling 48 (c), so that the anchors hold after D5's fallback: the giant classes' w₀ × 1.373 (`GIANT_WEIGHT_SCALE`: 0.1373, 0.01373, 0.05492, 0.02746, keeping their ratios) and `HotJupiter` 0.008 → 0.0103 (`HOT_JUPITER_WEIGHT`), solved together over the solar-disc sample (20,000 discs of a zero-age 1 M☉, \[Fe/H\] = 0 host, 83.4% of which can form a giant). Below \[Fe/H\] = −0.5 the giant weight is thinned by
+    s(\[Fe/H\]) ÷ s(−0.5), not only held, since held it gave 2.2% of hosts at −2.5 a giant against
+    0.7% small planets alone, against every survey's order and Mortier et al.'s (2012, A&A 543,
+    A45) fall "even in the low-metallicity tail"; Sozzetti et al.'s (2009) fp < 0.67% is met
+    either way. T4.c's "constant outside it" holds above +0.5 only. What s and z take goes to `Barren`. `SubstellarCompact` has the two
+    small-planet classes' weight at 0.08 M☉ (`galaxy::imf::MASS_LIMIT_LO`), the giants none.
+  - _T4.c as measured._ Probabilities sum to 1 to 10⁻¹² over 0.01–150 M☉ and −2.5 to +0.5; the giants' summed weight is 10^(2Δ\[Fe/H\]) to 10⁻¹² on −0.5 to +0.5; the giant share's log-slope between −0.5 and −0.2 is 1.88 at 1 M☉ and 1.98 at 0.3 M☉; in the table, before the fallback, at 0.3 M☉ giants 0.038 and compact 0.679, at 1 M☉ giants 0.234, compact 0.333, hot Jupiters 0.0099 and cold giants in 0.396 of compact systems; the small-planet weights are 0.963 of solar at −0.8 and 0.091 at −2. After the fallback, over the solar-disc sample at 1 M☉ and \[Fe/H\] = 0 (`the_anchors_hold_after_the_disc_fallback`): giants of 0.3–10 M♃ at 2–2,000 days 10.50% (Cumming's 10.5%, with the templates' orbits), hot Jupiters 0.823%, a cold giant in 32.4% of compact systems, giants in all 19.5% (the plan's 0.14–0.20 now holds here, not in the table), compact 33.9%. The
+    6 × 6 golden (`planetary/architecture`, with two constrained rows, four draws and every
+    template's figures, which nothing reads until T8) is new and blessed at 11; the chi-square of
+    2 × 10⁵ draws (two cases) runs in the ordinary suite.
+  - _D5's fallback._ No disc gives `Barren`. Giants need the snow line inside the nearer of the
+    disc's edge and the zone's outer limit, and 10 M⊕ (`GIANT_SOLID_BUDGET`) of solids between
+    them; otherwise `SolarLike` and `EccentricGiant` fall to `TerrestrialOnly`, and
+    `CompactWithColdGiant`, `WarmGiant` and `HotJupiter` to `CompactMulti`. T7.c's "within the
+    disc lifetime" is left to T7.c, which has the growth law. With T3's draws, 83.4% of solar discs can form giants, 67% at 0.5 M☉, 50% at 0.3 M☉ and 48% at \[Fe/H\] = −0.5; the rescaling above makes the anchors hold after it. Ruled (ruling 48, c): fixed as described.
+  - _D10._ A close binary keeps 0.34 of every planet-bearing class (Kraus et al. 2016's
+    `S_bin`); the cut-off is theirs, 47 (+59 −23) au, as `CLOSE_BINARY_CUTOFF_AU`, which the
+    caller (T9.c) compares, where plan 14 says "about 50 au". Ruled (ruling 48, g): Kraus's 47 au stands.
+  - _T5._ `ClassTemplate` (groups inside out, `quiet_inside`, the two `BeltRule`s) of
+    `PlanetGroup`s (role, presence, `CountLaw`, `MassRange` with `MassLaw`, `Location`, `Reach`,
+    `SpacingFamily`, `EccentricityLaw`, `Origin`, an optional `HotVariant`), `TEMPLATES` and
+    `template(class)`. Beyond the plan's four fields it carries the eccentricity law (T8.d's
+    values and Kipping 2013's short- and long-period Betas), the origin that sets
+    `formed_beyond_snow_line`, and the presence of optional groups. The chain's count is a
+    zero-truncated Poisson with λ = 3.38 (max(M, 0.48 M☉) ÷ M☉)^−0.82, at most 10: mean 3.5 at
+    1 M☉, 6.1 at and below 0.48 M☉ (Ballard and Johnson 2016's 6.1 ± 1.9 for M dwarfs), 2.9 at
+    1.3 M☉; the plan's cap of 7 is 10 (Mulders et al. 2018), since a mean of 6.1 cannot live
+    under 7. The first period is Mulders et al.'s (2018) broken power law, break 12 days, indices
+    1.6 and −0.9, truncated to 1–50 days. From the science review: the warm giant is at 10–200
+    days, Huang et al.'s definition, not 0.1–1 au × √L, which around a 0.5 M☉ host is 1.6–49 days
+    and so a hot Jupiter; it is `Origin::Migrated`, since Huang et al. propose in-situ formation
+    for those with companions; every giant but the eccentric ones takes Kipping's (2013, Table 2)
+    two Betas by the drawn period (split at 382.3 days, `EccentricityLaw::BetaByPeriod`), not by
+    group; the hot Jupiter's outer giant is 1–10 M♃, so that 56% of hot-Jupiter systems have one
+    in Bryan et al.'s (2016) 1–20 M♃ at 5–20 au (their 52 ± 5% overall, hot giants more often);
+    `quiet_inside` of 100 days is plan 14's, Huang et al. having 50. Choices of this lane where
+    the plan gave no figure: the hot Jupiter's σ of 0.15 dex, its outer giant at 2–8 snow-line
+    radii in 60% of systems, the ice-rich bodies' 0.02–5 M⊕, the survivor's 0.05–10 M⊕, the ice
+    giants' 10–30 M⊕, the rocky groups' start at 0.2–0.5 au × √L and the warm giant's companions
+    at 1–2.
+  - _Put to the orchestrator, and ruled by ruling 48._ (a) `SubstellarCompact`'s weight: continuous with the stars'
+    at 0.08 M☉ makes 97.6% of brown dwarfs host a chain, which no survey measures; the alternative is a lower figure with no source. Ruled (ruling 48, a): deferred to P14.T27, which sets `SubstellarCompact`'s weight from a cited occurrence estimate for ultracool dwarfs; the slice never reaches a brown-dwarf host. (b) −1.5 extrapolates below the Kepler M dwarfs:
+    a 0.1 M☉ host is 92% compact. Ruled (ruling 48, b): stands, for T10.b to check against a cited mid-to-late M-dwarf occurrence (Hardegree-Ullman et al. 2019 the candidate); a figure outside is a finding against the exponent. (c) Whether the giant w₀ should be raised so that the anchors hold after D5's fallback rather than before it. Ruled (ruling 48, c): yes, fixed as above (× 1.373, and hot Jupiters 0.0103). (d) `Barren` taking the halo's loss, and the giants thinned below −0.5. Ruled (ruling 48, d): stands as built. (e) Dressing and Charbonneau's 2.5 ± 0.2 is not met
+    inside 200 days (about 1.9, inside T10.b's 1.8–3.2 window) because T6.b's spacing of about
+    17 mutual Hill radii carries an M dwarf's chain past 200 days; meeting it needs a steeper
+    compact exponent (about −2.8, over 99% compact at 0.1 M☉) or tighter M-dwarf spacing, which T6.b and T10.b should settle together. Ruled (ruling 48, e): settled jointly by T6.b's spacing and T10.b; the `zones` lane is told. (f) Counting `TerrestrialOnly`'s Earth-mass planets, η at
+    1 M☉ is roughly 40–50% against Zhu et al.'s 30 ± 3% (Yang et al. 2020 find 73 ± 13%): the
+    `Barren`–`TerrestrialOnly` split, or T7's rocky masses, is the dial. Ruled (ruling 48, f): stands; Zhu's 30% counts Kepler-like systems, and T10.b checks η⊕ against Bryson et al. (2021), 0.37–0.60 in the conservative zone. (g) and (h) are recorded under _D10_ and _Shape_.

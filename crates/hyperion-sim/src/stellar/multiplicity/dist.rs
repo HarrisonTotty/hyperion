@@ -895,12 +895,50 @@ impl PeriodDistribution {
             lo.value() > 0.0 && lo <= hi && hi.value().is_finite(),
             "sample_in needs 0 < lo ≤ hi, got {lo:?} and {hi:?}"
         );
+        self.quantile_in(stream.uniform_open(), lo, hi)
+    }
+
+    /// The period below which a share `u` of the distribution restricted to `[lo, hi]` lies, for
+    /// `u` in [0, 1]: the inverse transform [`sample_in`](Self::sample_in) applies to its uniform,
+    /// with the same clamping, for a caller that holds its own variate (the hierarchy draw, whose
+    /// one mark picks a node and a period together).
+    ///
+    /// # Panics
+    ///
+    /// Unless `0 < lo ≤ hi`, both finite.
+    pub(super) fn quantile_in(&self, u: f64, lo: Days, hi: Days) -> Days {
+        assert!(
+            lo.value() > 0.0 && lo <= hi && hi.value().is_finite(),
+            "quantile_in needs 0 < lo ≤ hi, got {lo:?} and {hi:?}"
+        );
         let (s_lo, s_hi) = self.support();
         let a = math::log10(lo.value()).clamp(s_lo, s_hi);
         let b = math::log10(hi.value()).clamp(s_lo, s_hi);
         let (f_a, f_b) = (self.cdf(a), self.cdf(b));
-        let p = f_a + stream.uniform_open() * (f_b - f_a);
+        let p = f_a + u * (f_b - f_a);
         Days::new(math::exp10(self.quantile_between(p, a, b)))
+    }
+
+    /// The share of the distribution inside `[lo, hi]` after the clamping that
+    /// [`sample_in`](Self::sample_in) applies: its weight as one window of a mixture of
+    /// restricted draws. Zero for a range outside the support or empty after clamping.
+    ///
+    /// # Panics
+    ///
+    /// Unless `0 < lo ≤ hi`, both finite.
+    pub(super) fn share_in(&self, lo: Days, hi: Days) -> f64 {
+        assert!(
+            lo.value() > 0.0 && lo <= hi && hi.value().is_finite(),
+            "share_in needs 0 < lo ≤ hi, got {lo:?} and {hi:?}"
+        );
+        let (s_lo, s_hi) = self.support();
+        let a = math::log10(lo.value()).clamp(s_lo, s_hi);
+        let b = math::log10(hi.value()).clamp(s_lo, s_hi);
+        if b > a {
+            (self.cdf(b) - self.cdf(a)).max(0.0)
+        } else {
+            0.0
+        }
     }
 }
 
@@ -2047,6 +2085,35 @@ mod tests {
         assert!((math::log10(above.value()) - hi).abs() < 1e-12, "{above:?}");
         let point = periods.sample_in(&mut s, Days::new(100.0), Days::new(100.0));
         assert!((point.value() - 100.0).abs() < 1e-9, "{point:?}");
+    }
+
+    /// `quantile_in` is `sample_in` with its uniform given, and `share_in` is the probability
+    /// between the same clamped limits: the pair the hierarchy draw's windows rest on.
+    #[test]
+    fn a_window_s_share_and_quantile_clamp_as_the_restricted_draw_does() {
+        let periods = model().period_distribution(SolarMasses::new(1.0));
+        let (x_min, x_max) = periods.support();
+        let (lo, hi) = (Days::new(10.0), Days::new(1e4));
+        let share = periods.share_in(lo, hi);
+        assert_same_bits(share, periods.cdf(4.0) - periods.cdf(1.0));
+        let mut drawn = stream(57);
+        let mut given = stream(57);
+        for _ in 0..1_000 {
+            let u = given.uniform_open();
+            assert_same_bits(
+                periods.sample_in(&mut drawn, lo, hi).value(),
+                periods.quantile_in(u, lo, hi).value(),
+            );
+        }
+        // The ends of the window are the clamped limits.
+        assert!((periods.quantile_in(0.0, lo, hi).value() - 10.0).abs() < 1e-9);
+        assert!((periods.quantile_in(1.0, lo, hi).value() - 1e4).abs() < 1e-6);
+        // Outside the support a window holds nothing, and partly outside it is clamped.
+        assert_same_bits(periods.share_in(Days::new(1e12), Days::new(1e13)), 0.0);
+        assert_same_bits(periods.share_in(Days::new(1e-3), Days::new(1e-2)), 0.0);
+        let whole = periods.share_in(Days::new(1e-5), Days::new(1e15));
+        assert_same_bits(whole, periods.cdf(x_max) - periods.cdf(x_min));
+        assert!((whole - 1.0).abs() < 1e-12);
     }
 
     #[test]

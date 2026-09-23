@@ -1,0 +1,382 @@
+# generator_version = 11
+s_type 0.02 0 = 0x3fdb4395810624de  # 0.42600000000000005
+p_type 0.02 0 = 0x3fff60aa64c2f838  # 1.9611
+s_type 0.02 0.3 = 0x3fd1061c79b34a46  # 0.26599800000000007
+p_type 0.02 0.3 = 0x400956bb1290257c  # 3.1673489999999997
+s_type 0.02 0.7 = 0x3fb6d06fef7c2441  # 0.08911800000000004
+p_type 0.02 0.7 = 0x4010aaff2a172abf  # 4.166989
+s_type 0.02 0.8 = 0x3faa52263d816ad2  # 0.05140800000000002
+p_type 0.02 0.8 = 0x4011a5ff1d81f107  # 4.4121060000000005
+s_type 0.02 0.9 = 0x3f96e9e65505eccf  # 0.022376631678963584
+p_type 0.02 0.9 = 0x4012a0ff10ecb74e  # 4.657223
+s_type 0.02 0.99 = 0x3f5721cfe14be479  # 0.0014118700102570254
+p_type 0.02 0.99 = 0x401382e56c00035b  # 4.8778283
+s_type 0.1 0 = 0x3fdb4395810624de  # 0.42600000000000005
+p_type 0.1 0 = 0x3fff60aa64c2f838  # 1.9611
+s_type 0.1 0.3 = 0x3fd1061c79b34a46  # 0.26599800000000007
+p_type 0.1 0.3 = 0x400956bb1290257c  # 3.1673489999999997
+s_type 0.1 0.7 = 0x3fb6d06fef7c2441  # 0.08911800000000004
+p_type 0.1 0.7 = 0x4010aaff2a172abf  # 4.166989
+s_type 0.1 0.8 = 0x3faa52263d816ad2  # 0.05140800000000002
+p_type 0.1 0.8 = 0x4011a5ff1d81f107  # 4.4121060000000005
+s_type 0.1 0.9 = 0x3f96e9e65505eccf  # 0.022376631678963584
+p_type 0.1 0.9 = 0x4012a0ff10ecb74e  # 4.657223
+s_type 0.1 0.99 = 0x3f5721cfe14be479  # 0.0014118700102570254
+p_type 0.1 0.99 = 0x401382e56c00035b  # 4.8778283
+s_type 0.25 0 = 0x3fd79db22d0e5604  # 0.369
+p_type 0.25 0 = 0x40027eb851eb851e  # 2.3118749999999997
+s_type 0.25 0.3 = 0x3fcdc8f32378ab0d  # 0.232695
+p_type 0.25 0.3 = 0x400ac8346dc5d638  # 3.3477562499999998
+s_type 0.25 0.7 = 0x3fb43f91e646f156  # 0.079095
+p_type 0.25 0.7 = 0x4010c084b5dcc63f  # 4.18800625
+s_type 0.25 0.8 = 0x3fa7689ca18bd65d  # 0.04571999999999996
+p_type 0.25 0.8 = 0x4011bcc8c08f687f  # 4.434359558823529
+s_type 0.25 0.9 = 0x3f9460df22065851  # 0.019900785876949382
+p_type 0.25 0.9 = 0x4012b90ccb420abf  # 4.680712867647059
+s_type 0.25 0.99 = 0x3f549298f80e1284  # 0.0012556547009988936
+p_type 0.25 0.99 = 0x40139c16d4e2cff9  # 4.902430845588236
+s_type 0.5 0 = 0x3fd189374bc6a7f0  # 0.274
+p_type 0.5 0 = 0x400319999999999a  # 2.3875
+s_type 0.5 0.3 = 0x3fc6ae297396d093  # 0.17719000000000004
+p_type 0.5 0.3 = 0x40097288ce703afa  # 3.1809249999999993
+s_type 0.5 0.7 = 0x3faff1950331e3aa  # 0.062390000000000015
+p_type 0.5 0.7 = 0x400f84f765fd8ade  # 3.9399250000000015
+s_type 0.5 0.8 = 0x3fa28e0c9d9d3456  # 0.03623999999999998
+p_type 0.5 0.8 = 0x4010afce450dc1fd  # 4.1716852941176485
+s_type 0.5 0.9 = 0x3f90272877b1b638  # 0.01577437620692576
+p_type 0.5 0.9 = 0x40119d20d71cbe8b  # 4.403445588235296
+s_type 0.5 0.99 = 0x3f504e92c8a709fa  # 0.0009952958522353437
+p_type 0.5 0.99 = 0x401272b7f42a3b72  # 4.612029852941179
+s_type 0.75 0 = 0x3fc6e978d4fdf3b6  # 0.179
+p_type 0.75 0 = 0x40027eb851eb851e  # 2.3118749999999997
+s_type 0.75 0.3 = 0x3fbf26bf8769ec2d  # 0.121685
+p_type 0.75 0.3 = 0x400ac8346dc5d638  # 3.3477562499999998
+s_type 0.75 0.7 = 0x3fa7640639d5e4a0  # 0.045684999999999976
+p_type 0.75 0.7 = 0x4010c084b5dcc63f  # 4.18800625
+s_type 0.75 0.8 = 0x3f9b66f9335d2498  # 0.026759999999999978
+p_type 0.75 0.8 = 0x4011bcc8c08f687f  # 4.434359558823529
+s_type 0.75 0.9 = 0x3f87dae39aba2839  # 0.011647966536902131
+p_type 0.75 0.9 = 0x4012b90ccb420abf  # 4.680712867647059
+s_type 0.75 0.99 = 0x3f481519328002dc  # 0.0007349370034717933
+p_type 0.75 0.99 = 0x40139c16d4e2cff9  # 4.902430845588236
+s_type 0.9 0 = 0x3fbf3b645a1cac08  # 0.122
+p_type 0.9 0 = 0x3fff60aa64c2f838  # 1.9611
+s_type 0.9 0.3 = 0x3fb6a033e78e1933  # 0.088382
+p_type 0.9 0.3 = 0x400956bb1290257c  # 3.1673489999999997
+s_type 0.9 0.7 = 0x3fa2424a276b7ed0  # 0.03566199999999997
+p_type 0.9 0.7 = 0x4010aaff2a172abf  # 4.166989
+s_type 0.9 0.8 = 0x3f9593e5fb71fbbc  # 0.021071999999999966
+p_type 0.9 0.8 = 0x4011a5ff1d81f107  # 4.4121060000000005
+s_type 0.9 0.9 = 0x3f82c8d534baff49  # 0.00917212073488795
+p_type 0.9 0.9 = 0x4012a0ff10ecb74e  # 4.657223
+s_type 0.9 0.99 = 0x3f42f6ab60045efe  # 0.0005787216942136628
+p_type 0.9 0.99 = 0x401382e56c00035b  # 4.8778283
+s_type 0.95 0 = 0x3fb8c9f263d58e6a  # 0.0968314641700602
+p_type 0.95 0 = 0x3fff60aa64c2f838  # 1.9611
+s_type 0.95 0.3 = 0x3fb1f5463d2b551f  # 0.07014883988752672
+p_type 0.95 0.3 = 0x400956bb1290257c  # 3.1673489999999997
+s_type 0.95 0.7 = 0x3f9cfbf8ea9bb5c1  # 0.028304948157644953
+p_type 0.95 0.7 = 0x4010aaff2a172abf  # 4.166989
+s_type 0.95 0.8 = 0x3f9120522fb02e64  # 0.01672485748353693
+p_type 0.95 0.8 = 0x4011a5ff1d81f107  # 4.4121060000000005
+s_type 0.95 0.9 = 0x3f7dd18bda78e631  # 0.007279917051670235
+p_type 0.95 0.9 = 0x4012a0ff10ecb74e  # 4.657223
+s_type 0.95 0.99 = 0x3f3e1a4eaf8e1ab0  # 0.0004593317130957937
+p_type 0.95 0.99 = 0x401382e56c00035b  # 4.8778283
+s_type 0.999 0 = 0x3f9aea384ee92214  # 0.02628410321838899
+p_type 0.999 0 = 0x3fff60aa64c2f838  # 1.9611
+s_type 0.999 0.3 = 0x3f937f91ab0c69a1  # 0.0190413246774398
+p_type 0.999 0.3 = 0x400956bb1290257c  # 3.1673489999999997
+s_type 0.999 0.7 = 0x3f7f785c87824de0  # 0.0076831449915917005
+p_type 0.999 0.7 = 0x4010aaff2a172abf  # 4.166989
+s_type 0.999 0.8 = 0x3f729859ef465176  # 0.00453982477883518
+p_type 0.999 0.8 = 0x4011a5ff1d81f107  # 4.4121060000000005
+s_type 0.999 0.9 = 0x3f6030206317fef4  # 0.001976073509240334
+p_type 0.999 0.9 = 0x4012a0ff10ecb74e  # 4.657223
+s_type 0.999 0.99 = 0x3f2057a09663e80e  # 0.00012468180938879396
+p_type 0.999 0.99 = 0x401382e56c00035b  # 4.8778283
+
+single sun: 1 components, 1 zones
+star 0: host 0 members 0 close false
+star 0 mass = 0x3ff0000000000000  # 1.0
+star 0 inner none
+star 0 outer none
+star 0 lifetime_myr = 0x3ffbb9d3beb8c86b  # 1.7328679513998633
+star 0 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 0 disc inner_m = 0x4205da1bee5aeb2d  # 11731697099.364832
+star 0 disc outer_m = 0x42c02a883d5d57cb  # 35549720787631.586
+star 0 disc solids_mearth = 0x401318d955ffb6c8  # 4.774266570789855
+
+alpha centauri ab: 2 components, 3 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x3ff1eb851eb851ec  # 1.12
+star 0 inner none
+star 0 outer_m = 0x4258536ded484cd1  # 417915712801.20026
+star 0 lifetime_myr = 0x3fdfa9605803df41  # 0.4947129115603169
+star 0 disc_luminosity = 0x3ff3445001d4fb80  # 1.204177863269905
+star 0 disc inner_m = 0x4206b179c7f50c89  # 12183353598.63112
+star 0 disc outer_m = 0x4258536ded484cd1  # 417915712801.20026
+star 0 disc solids_mearth = 0x3fb57d098a49b36a  # 0.08393916727227482
+star 1: host 1 members 1 close true
+star 1 mass = 0x3fee666666666666  # 0.95
+star 1 inner none
+star 1 outer_m = 0x425620ff3961d076  # 380171511175.2572
+star 1 lifetime_myr = 0x3ff489c10c34ebd2  # 1.2836313702416544
+star 1 disc_luminosity = 0x3fe16547e4756145  # 0.543613382537878
+star 1 disc inner_m = 0x42051518b0709e83  # 11318531598.077398
+star 1 disc outer_m = 0x425620ff3961d076  # 380171511175.2572
+star 1 disc solids_mearth = 0x40013d17397ebedb  # 2.154829453640429
+pair 1: host 17 members 0,1 close false
+pair 1 mass = 0x40008f5c28f5c290  # 2.0700000000000003
+pair 1 inner_m = 0x42a7c5fcf506ad2c  # 13069559956310.586
+pair 1 outer none
+pair 1 lifetime_myr = 0x40008d75ad1b2547  # 2.0690721057805237
+pair 1 disc_luminosity = 0x3ffbf6f3f40fac22  # 1.747791245807783
+pair 1 disc inner_m = 0x42a7c5fcf506ad2c  # 13069559956310.586
+pair 1 disc outer_m = 0x42ab0c9f8a2896a7  # 14870515094603.326
+pair 1 disc solids_mearth = 0x401412780a95d998  # 5.0180360464059035
+
+alpha centauri with proxima: 3 components, 5 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x3ff199999999999a  # 1.1
+star 0 inner none
+star 0 outer_m = 0x42583e36d62e3b77  # 416491985080.92914
+star 0 lifetime_myr = 0x3fe022d63e4e8774  # 0.5042525498322292
+star 0 disc_luminosity = 0x3ff1ad9003d55b12  # 1.104873671507168
+star 0 disc inner_m = 0x42068eb00621da07  # 12110397636.231459
+star 0 disc outer_m = 0x42583e36d62e3b77  # 416491985080.92914
+star 0 disc solids_mearth = 0x3fb5390d60c218ac  # 0.082901798365216
+star 1: host 1 members 1 close true
+star 1 mass = 0x3feccccccccccccd  # 0.9
+star 1 inner none
+star 1 outer_m = 0x42559b6283aa61bb  # 371204951721.52704
+star 1 lifetime_myr = 0x3ff4a6421fa9549d  # 1.2905904042029654
+star 1 disc_luminosity = 0x3fdababb6f646d00  # 0.41764722707894464
+star 1 disc inner_m = 0x4204b4b2f43689f0  # 11116371590.817352
+star 1 disc outer_m = 0x42559b6283aa61bb  # 371204951721.52704
+star 1 disc solids_mearth = 0x40019cc5af645f98  # 2.2015489294535193
+pair 1: host 17 members 0,1 close false
+pair 1 mass = 0x4000000000000000  # 2.0
+pair 1 inner_m = 0x42a7d752b2bbf94c  # 13106786426364.648
+pair 1 outer_m = 0x42e98063e4238231  # 224313779231761.53
+pair 1 lifetime_myr = 0x40012ad52ce9dbac  # 2.1459144123905016
+pair 1 disc_luminosity = 0x3ff85c3edfae7652  # 1.5225208985861127
+pair 1 disc inner_m = 0x42a7d752b2bbf94c  # 13106786426364.648
+pair 1 disc outer_m = 0x42aa9688846455dc  # 14616918897194.93
+pair 1 disc solids_mearth = 0x4010159893818d04  # 4.021089844495922
+star 2: host 2 members 2 close false
+star 2 mass = 0x3fbeb851eb851eb8  # 0.12
+star 2 inner none
+star 2 outer_m = 0x42ceeadc690c7bad  # 67988138105079.35
+star 2 lifetime_myr = 0x4006a76d7660b8d3  # 2.831751751734467
+star 2 disc_luminosity = 0x3f5a7229c481273a  # 0.0016141326796223613
+star 2 disc inner_m = 0x41f691080f1093d2  # 6057656561.036089
+star 2 disc outer_m = 0x428fa9087b0036c8  # 4351356526598.8477
+star 2 disc solids_mearth = 0x400a5f2bdc666634  # 3.296470376849152
+pair 2: host 18 members 0,1,2 close false
+pair 2 mass = 0x4000f5c28f5c28f6  # 2.12
+pair 2 inner_m = 0x43315bca58307117  # 4885999225172247.0
+pair 2 outer none
+pair 2 lifetime_myr = 0x3ff2cbd2561bbf79  # 1.1747611392601967
+pair 2 disc_luminosity = 0x3ff862db6a1f969c  # 1.5241350312657351
+pair 2 disc none
+
+two close pairs: 4 components, 7 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x3ff0000000000000  # 1.0
+star 0 inner none
+star 0 outer_m = 0x4208a0a04101a8c3  # 13221759008.207403
+star 0 lifetime_myr = 0x3fd3333333333333  # 0.3
+star 0 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 0 disc inner_m = 0x4205da1bee5aeb2d  # 11731697099.364832
+star 0 disc outer_m = 0x4208a0a04101a8c3  # 13221759008.207403
+star 0 disc solids_mearth = 0x3f336624f899078a  # 0.00029600527395611724
+star 1: host 1 members 1 close true
+star 1 mass = 0x3fe0000000000000  # 0.5
+star 1 inner none
+star 1 outer_m = 0x41ff3baa65982c40  # 8384063065.510803
+star 1 lifetime_myr = 0x3fee94fc964be65b  # 0.9556868491628835
+star 1 disc_luminosity = 0x3fa3643e665ceea9  # 0.037874174113736565
+star 1 disc none
+pair 1: host 17 members 0,1 close false
+pair 1 mass = 0x3ff8000000000000  # 1.5
+pair 1 inner_m = 0x423cd2ae795ef4ff  # 123793733982.95702
+pair 1 outer_m = 0x428ffe03bdcdf334  # 4396980615614.4004
+pair 1 lifetime_myr = 0x400749ccd316bf5c  # 2.911035203105639
+pair 1 disc_luminosity = 0x3fe789f599313138  # 0.7355907432588884
+pair 1 disc inner_m = 0x423cd2ae795ef4ff  # 123793733982.95702
+pair 1 disc outer_m = 0x428ffe03bdcdf334  # 4396980615614.4004
+pair 1 disc solids_mearth = 0x4058a7fdcafa425c  # 98.62486528815629
+star 2: host 2 members 2 close true
+star 2 mass = 0x3fe999999999999a  # 0.8
+star 2 inner none
+star 2 outer_m = 0x4219b7c76df1b50e  # 27614370684.42681
+star 2 lifetime_myr = 0x3ffc59fdab390ad1  # 1.7719704330817658
+star 2 disc_luminosity = 0x3fce3f51bd0d6a85  # 0.23630735140871564
+star 2 disc inner_m = 0x42053c650f285c32  # 11400946149.045017
+star 2 disc outer_m = 0x4219b7c76df1b50e  # 27614370684.42681
+star 2 disc solids_mearth = 0x3fa7b29d6006aa37  # 0.04628459737007911
+star 3: host 3 members 3 close true
+star 3 mass = 0x3fe6666666666666  # 0.7
+star 3 inner none
+star 3 outer_m = 0x4217a7dc75b8f4f1  # 25400122734.2392
+star 3 lifetime_myr = 0x4017dca896524cc0  # 5.965486859105283
+star 3 disc_luminosity = 0x3fc0525b2dab2a00  # 0.12751331071770267
+star 3 disc inner_m = 0x4204e8829b230c70  # 11225027428.381073
+star 3 disc outer_m = 0x4217a7dc75b8f4f1  # 25400122734.2392
+star 3 disc solids_mearth = 0x3fd030b9753fc1fb  # 0.2529739041338243
+pair 3: host 19 members 2,3 close false
+pair 3 mass = 0x3ff8000000000000  # 1.5
+pair 3 inner_m = 0x425c2fb6e73c1d99  # 484238400752.46246
+pair 3 outer_m = 0x428ffe03bdcdf334  # 4396980615614.4004
+pair 3 lifetime_myr = 0x3fd8d0b19214d224  # 0.3877376486373427
+pair 3 disc_luminosity = 0x3fd748d6755c4a42  # 0.3638206621264183
+pair 3 disc inner_m = 0x425c2fb6e73c1d99  # 484238400752.46246
+pair 3 disc outer_m = 0x428ffe03bdcdf334  # 4396980615614.4004
+pair 3 disc solids_mearth = 0x40344b26219299e9  # 20.293550585070907
+pair 2: host 18 members 0,1,2,3 close false
+pair 2 mass = 0x4008000000000000  # 3.0
+pair 2 inner_m = 0x42d725f78229d881  # 101807334926178.02
+pair 2 outer none
+pair 2 lifetime_myr = 0x3fea0480a62d1e1c  # 0.8130496259336186
+pair 2 disc_luminosity = 0x3ff1973069efab2c  # 1.0994114053853066
+pair 2 disc none
+
+star and brown dwarf: 2 components, 3 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x3ff0000000000000  # 1.0
+star 0 inner none
+star 0 outer_m = 0x425b94718a79ac8d  # 473818343910.6961
+star 0 lifetime_myr = 0x3ffbb9d3beb8c86b  # 1.7328679513998633
+star 0 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 0 disc inner_m = 0x4205da1bee5aeb2d  # 11731697099.364832
+star 0 disc outer_m = 0x425b94718a79ac8d  # 473818343910.6961
+star 0 disc solids_mearth = 0x3fbee2d2a2127bfe  # 0.12064854103890352
+star 1: host 1 members 1 close true
+star 1 mass = 0x3fa999999999999a  # 0.05
+star 1 inner none
+star 1 outer_m = 0x423b3da07f648858  # 116998045540.5326
+star 1 lifetime_myr = 0x40103eb8396a6519  # 4.061249634856062
+star 1 disc_luminosity = 0x3f689374bc6a7efa  # 0.003
+star 1 disc inner_m = 0x41ef9a6183904128  # 4241689628.5079536
+star 1 disc outer_m = 0x423b3da07f648858  # 116998045540.5326
+star 1 disc solids_mearth = 0x3fce063ccf76d46c  # 0.23456535463415962
+pair 1: host 17 members 0,1 close false
+pair 1 mass = 0x3ff0cccccccccccd  # 1.05
+pair 1 inner_m = 0x428e92807d143011  # 4201821217414.0083
+pair 1 outer none
+pair 1 lifetime_myr = 0x4010fe8b13304766  # 4.248577403852186
+pair 1 disc_luminosity = 0x3fe66c452787cccc  # 0.7007165691451518
+pair 1 disc inner_m = 0x428e92807d143011  # 4201821217414.0083
+pair 1 disc outer_m = 0x42a343cd492a26c2  # 10590963930387.379
+pair 1 disc solids_mearth = 0x403db2a589a2442f  # 29.697838403812224
+
+tight triple: 3 components, 4 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x3ff0000000000000  # 1.0
+star 0 inner none
+star 0 outer_m = 0x4223165dedf7999a  # 40989816571.8
+star 0 lifetime_myr = 0x3fe1d9fadcc0a055  # 0.5578588782855244
+star 0 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 0 disc inner_m = 0x4205da1bee5aeb2d  # 11731697099.364832
+star 0 disc outer_m = 0x4223165dedf7999a  # 40989816571.8
+star 0 disc solids_mearth = 0x3f77c76992b33d20  # 0.00580540885421435
+star 1: host 1 members 1 close true
+star 1 mass = 0x3ff0000000000000  # 1.0
+star 1 inner none
+star 1 outer_m = 0x4223165dedf7999a  # 40989816571.8
+star 1 lifetime_myr = 0x3ffbb9d3beb8c86b  # 1.7328679513998633
+star 1 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 1 disc inner_m = 0x4205722b09ddffc8  # 11513717051.749893
+star 1 disc outer_m = 0x4223165dedf7999a  # 40989816571.8
+star 1 disc solids_mearth = 0x3fc2e0ea9c1a4d08  # 0.14748890516475677
+star 2: host 2 members 2 close true
+star 2 mass = 0x3ff0000000000000  # 1.0
+star 2 inner none
+star 2 outer_m = 0x424d59d454633335  # 252122278086.40005
+star 2 lifetime_myr = 0x401018293af47840  # 4.023594781085251
+star 2 disc_luminosity = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 2 disc inner_m = 0x4206e02dc16ac083  # 12281296941.344
+star 2 disc outer_m = 0x424d59d454633335  # 252122278086.40005
+star 2 disc solids_mearth = 0x3fe7dbe259dad2f4  # 0.7455913310028266
+pair 2: host 18 members 0,1,2 close false
+pair 2 mass = 0x4008000000000000  # 3.0
+pair 2 inner_m = 0x4284f75ff6009556  # 2881587429394.667
+pair 2 outer none
+pair 2 lifetime_myr = 0x3fea0480a62d1e1c  # 0.8130496259336186
+pair 2 disc_luminosity = 0x4000bec5461889ba  # 2.0931497074354555
+pair 2 disc inner_m = 0x4284f75ff6009556  # 2881587429394.667
+pair 2 disc outer_m = 0x42b2ba413cfe853d  # 20591167733381.24
+pair 2 disc solids_mearth = 0x40317e0cf709e27b  # 17.492385330117468
+
+eccentric pair: 2 components, 3 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x4000000000000000  # 2.0
+star 0 inner none
+star 0 outer_m = 0x420f2d0db0b871da  # 16737482263.055592
+star 0 lifetime_myr = 0x3fea98b0de2a15ff  # 0.8311390246532823
+star 0 disc_luminosity = 0x402fc85321e95b1d  # 15.891259250388936
+star 0 disc inner_m = 0x420b8822c4f3d7d1  # 14781012126.48038
+star 0 disc outer_m = 0x420f2d0db0b871da  # 16737482263.055592
+star 0 disc solids_mearth = 0x3f4202c9e2383a75  # 0.0005496488342389821
+star 1: host 1 members 1 close true
+star 1 mass = 0x3fb999999999999a  # 0.1
+star 1 inner none
+star 1 outer_m = 0x41f3f5450fd92a4c  # 5357457661.572826
+star 1 lifetime_myr = 0x400173d145c04cd2  # 2.181551499300988
+star 1 disc_luminosity = 0x3f4f665acce46fe7  # 0.0009582465516220191
+star 1 disc inner_m = 0x41f3e89ee0213f39  # 5344194050.077935
+star 1 disc outer_m = 0x41f3f5450fd92a4c  # 5357457661.572826
+star 1 disc solids_mearth = 0x3ef61690218e68c4  # 2.1064888730750573e-5
+pair 1: host 17 members 0,1 close false
+pair 1 mass = 0x4000cccccccccccd  # 2.1
+pair 1 inner_m = 0x4289589f9e485aa5  # 3483553220875.3306
+pair 1 outer none
+pair 1 lifetime_myr = 0x40004d51eed2392a  # 2.037753930845743
+pair 1 disc_luminosity = 0x402fc8d0bb548eaf  # 15.892217496940559
+pair 1 disc inner_m = 0x4289589f9e485aa5  # 3483553220875.3306
+pair 1 disc outer_m = 0x42ab3e9f026a3c30  # 14977884828958.094
+pair 1 disc solids_mearth = 0x405a22989c2714ef  # 104.54056457344608
+
+masses summed up the tree: 3 components, 5 zones
+star 0: host 0 members 0 close true
+star 0 mass = 0x3fb999999999999a  # 0.1
+star 0 inner none
+star 0 outer_m = 0x422284ba1e278000  # 39768100627.75
+star 0 lifetime_myr = 0x400173d145c04cd2  # 2.181551499300988
+star 0 disc_luminosity = 0x3f4f665acce46fe7  # 0.0009582465516220191
+star 0 disc inner_m = 0x41f4491c62192ecb  # 5445371425.573924
+star 0 disc outer_m = 0x422284ba1e278000  # 39768100627.75
+star 0 disc solids_mearth = 0x3f70f0674c951eae  # 0.004135516655260281
+star 1: host 1 members 1 close true
+star 1 mass = 0x3fc999999999999a  # 0.2
+star 1 inner none
+star 1 outer_m = 0x41da4de9b690a3d8  # 1765254874.2600002
+star 1 lifetime_myr = 0x4000489f006c4b72  # 2.035459521584408
+star 1 disc_luminosity = 0x3f77306a8c452d1c  # 0.005661407664159481
+star 1 disc none
+star 2: host 2 members 2 close true
+star 2 mass = 0x3fd3333333333333  # 0.3
+star 2 inner none
+star 2 outer_m = 0x41e1633b07dd70a4  # 2333726782.92
+star 2 lifetime_myr = 0x3fff45f52d1bee17  # 1.9545795213770185
+star 2 disc_luminosity = 0x3f8aadcb0b579a64  # 0.013026796611439191
+star 2 disc none
+pair 2: host 18 members 1,2 close true
+pair 2 mass = 0x3fe0000000000000  # 0.5
+pair 2 inner_m = 0x4210f3f327ab1aa0  # 18203068906.776
+pair 2 outer_m = 0x42384704d16d09ba  # 104270713197.038
+pair 2 lifetime_myr = 0x400656b751af2264  # 2.792341840893913
+pair 2 disc_luminosity = 0x3f93230028bd1879  # 0.018688204275598672
+pair 2 disc inner_m = 0x4210f3f327ab1aa0  # 18203068906.776
+pair 2 disc outer_m = 0x42384704d16d09ba  # 104270713197.038
+pair 2 disc solids_mearth = 0x3fbc546d84d3a33a  # 0.11066326611365876
+pair 1: host 17 members 0,1,2 close false
+pair 1 mass = 0x3fe3333333333333  # 0.6
+pair 1 inner_m = 0x426651d218aa5454  # 766896031058.6353
+pair 1 outer none
+pair 1 lifetime_myr = 0x4012d59379bd8073  # 4.708570387069005
+pair 1 disc_luminosity = 0x3f941e32ff243bf8  # 0.01964645082722069
+pair 1 disc inner_m = 0x426651d218aa5454  # 766896031058.6353
+pair 1 disc outer_m = 0x429d202f01c804cc  # 8006016201217.199
+pair 1 disc solids_mearth = 0x40475ff9082b5657  # 46.74978735080793

@@ -1,0 +1,76 @@
+# generator_version = 11
+
+means seed 0123456789abcdef system 0228c38627ff0007 host 0
+SmallPlanets normal = 0x3fe7446ce4181404  # 0.7271027045213718
+SmallPlanets mean = 0x4032d15881d1e190  # 18.81775676130343
+TerrestrialGroup normal = 0xc002c3be672105b0  # -2.345578008361109
+TerrestrialGroup mean = 0x402c000000000000  # 14.0
+GiantPair normal = 0x3fc629dfc778e2a9  # 0.17315289726118024
+GiantPair mean = 0x4022b14efe3bc715  # 9.34630579452236
+
+means seed 0123456789abcdef system 0228c38627ff0007 host 1
+SmallPlanets normal = 0xbfc9019ad24bd84b  # -0.19536147373554721
+SmallPlanets mean = 0x403082f7f9e484c7  # 16.511596315661134
+TerrestrialGroup normal = 0xc003093c2673ea3b  # -2.379509258663601
+TerrestrialGroup mean = 0x402c000000000000  # 14.0
+GiantPair normal = 0x3fd63d6a880bb1d6  # 0.3474985436030499
+GiantPair mean = 0x402363d6a880bb1d  # 9.694997087206099
+
+means seed 000000000000002a system 01ffd802a0000000 host 0
+SmallPlanets normal = 0x3fb4aa261a862de5  # 0.08072126529275854
+SmallPlanets mean = 0x403133a95f424f73  # 17.201803163231897
+TerrestrialGroup normal = 0xbff79e1d0e0f071a  # -1.4761019276779224
+TerrestrialGroup mean = 0x403230f178f87c73  # 18.19118457857662
+GiantPair normal = 0x3fd0aef5eec41eeb  # 0.26067875210763586
+GiantPair mean = 0x40230aef5eec41ef  # 9.521357504215272
+
+means seed 000000000000002a system 01ffd802a0000000 host 17
+SmallPlanets normal = 0x3fffe52cf62d6499  # 1.9934510818768898
+SmallPlanets mean = 0x4035fbcf067717b8  # 21.983627704692225
+TerrestrialGroup normal = 0xbfe5e82e56121d37  # -0.6845924073285578
+TerrestrialGroup mean = 0x403885f46a7b78b2  # 24.523260741371537
+GiantPair normal = 0x3feef2e384213e00  # 0.9671495037709406
+GiantPair mean = 0x4025de5c708427c0  # 10.934299007541881
+
+means seed 000000000000002a system 01ffd802a0000000 host 255
+SmallPlanets normal = 0xbfd78f095e8c4b8b  # -0.3681052611656745
+SmallPlanets mean = 0x40301469a24e850d  # 16.079736847085815
+TerrestrialGroup normal = 0x3ff9bbe799e15d52  # 1.608375168890991
+TerrestrialGroup mean = 0x40456ef9e6785754  # 42.867001351127925
+GiantPair normal = 0x3f9fd49dd0aee56d  # 0.031084504949580195
+GiantPair mean = 0x40221fd49dd0aee5  # 9.06216900989916
+
+pairs of 01ffd802a0000000 about 17 above 10
+planet 1 drawn after 0 = 0x4028f4c74d3c44f7  # 12.478083051306823
+planet 2 drawn after 0 = 0x402a334480ea19a5  # 13.100132015778238
+planet 7 drawn after 0 = 0x40300696998ccee8  # 16.025735470654496
+planet 191 drawn after 0 = 0x4030ba6ec31108d3  # 16.728252593668753
+second-generation planet 0 drawn after 0 = 0x4033e58d2ea5940e  # 19.896685519623183
+
+pairs of 01ffd802a0000000 about 13 above 12
+planet 1 drawn after 1 = 0x402d2b0ebc665662  # 14.584096801273692
+planet 2 drawn after 1 = 0x402ad1a4f005934e  # 13.409461498909561
+planet 7 drawn after 0 = 0x40280d2d33199dd0  # 12.025735470654496
+planet 191 drawn after 0 = 0x402974dd862211a5  # 12.728252593668751
+second-generation planet 0 drawn after 0 = 0x402fcb1a5d4b281d  # 15.896685519623185
+
+pairs of 01ffd802a0000000 about 30 above 10
+planet 1 drawn after 0 = 0x40397a63a69e227c  # 25.478083051306825
+planet 2 drawn after 0 = 0x403a19a240750cd2  # 26.100132015778236
+planet 7 drawn after 0 = 0x403d0696998ccee8  # 29.025735470654496
+planet 191 drawn after 0 = 0x403dba6ec31108d3  # 29.728252593668753
+second-generation planet 0 drawn after 0 = 0x404072c69752ca07  # 32.89668551962318
+
+pairs of 01ffd802a0000000 about 9 above 7
+planet 1 drawn after 1 = 0x40252b0ebc665662  # 10.584096801273692
+planet 2 drawn after 1 = 0x4022d1a4f005934e  # 9.409461498909561
+planet 7 drawn after 0 = 0x40200d2d33199dd0  # 8.025735470654496
+planet 191 drawn after 0 = 0x402174dd862211a5  # 8.728252593668751
+second-generation planet 0 drawn after 0 = 0x4027cb1a5d4b281d  # 11.896685519623185
+
+pairs of 01ffd802a0000000 about 0 above 30
+planet 1 floor = 0x403e000000000000  # 30.0
+planet 2 floor = 0x403e000000000000  # 30.0
+planet 7 floor = 0x403e000000000000  # 30.0
+planet 191 floor = 0x403e000000000000  # 30.0
+second-generation planet 0 floor = 0x403e000000000000  # 30.0

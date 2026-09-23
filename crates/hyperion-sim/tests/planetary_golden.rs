@@ -1,5 +1,6 @@
 //! Golden values of plan 14's built pieces: the disc's draws and discs, plan 06's disc-lifetime
-//! law, and the closed forms of the limits and the spacing floor (P14.T3, T6.a, T15; P06.T15.c).
+//! law, the closed forms of the limits and the spacing floor, and the architecture classes'
+//! probabilities and draws (P14.T3, T4, T6.a, T15; P06.T15.c).
 //!
 //! They pin the arithmetic, not only the draws: a reordered sum, a changed power or a moved word
 //! changes a line here, which is a generator-version change. CI checks the same file on 64-bit Arm
@@ -7,6 +8,12 @@
 
 use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::planetary::architecture::template::{
+    CountLaw, EccentricityLaw, Location, MassLaw, PeriodLaw, TEMPLATES,
+};
+use hyperion_sim::planetary::architecture::{
+    ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
+};
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
 use hyperion_sim::planetary::derive::{
     OrbitSense, hill_radius, maximum_surviving_moon_mass, roche_limit_fluid, roche_limit_rigid,
@@ -149,6 +156,178 @@ fn discs_are_pinned() {
         ),
     );
     golden!("planetary/disc", w.as_str());
+}
+
+/// P14.T4.c: every class's probability on a 6 × 6 grid of host mass and \[Fe/H\], so that any
+/// change to a weight or a scaling is a visible diff; then the class draws of a few hosts, and
+/// the figures of every class template (P14.T5), which nothing reads until P14.T8.
+#[test]
+fn class_probabilities_draws_and_templates_are_pinned() {
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    for m in [0.05, 0.1, 0.3, 1.0, 1.9, 5.0] {
+        for x in [-2.5, -1.5, -0.8, -0.3, 0.0, 0.4] {
+            let p = class_weights(SolarMasses::new(m), Dex::new(x)).probabilities();
+            w.line("");
+            w.line(&format!("probabilities m {m} fe_h {x}"));
+            for class in ArchitectureClass::ALL {
+                w.f64(class.name(), p.get(class));
+            }
+        }
+    }
+    let sun = zams_host(1.0, 0.0);
+    let disc = disc::derive(
+        &sun,
+        Megayears::new(2.5),
+        &DiscDraws::MEDIAN,
+        Truncation::NONE,
+    );
+    let constraints = [
+        ("none", ClassConstraints::NONE),
+        (
+            "zone inside the snow line, close binary",
+            ClassConstraints::new(
+                &disc,
+                ZoneLimit::Outer(au(2.0)),
+                HostMultiplicity::CloseBinary,
+            ),
+        ),
+    ];
+    for (name, c) in constraints {
+        let p = class_weights(SolarMasses::new(1.0), Dex::new(0.0))
+            .constrained(&c)
+            .probabilities();
+        w.line("");
+        w.line(&format!("probabilities m 1 fe_h 0, constrained: {name}"));
+        for class in ArchitectureClass::ALL {
+            w.f64(class.name(), p.get(class));
+        }
+    }
+    w.line("");
+    let weights = class_weights(SolarMasses::new(1.0), Dex::new(0.0));
+    let a = system([652, -4_584, 2_047], 7);
+    let b = system([-3, 10, 0], 0);
+    for (seed, id, host) in [
+        (Seed::new(0x0123_4567_89ab_cdef), a, 0),
+        (Seed::new(0x0123_4567_89ab_cdef), a, 1),
+        (Seed::new(42), b, 0),
+        (Seed::new(42), b, 255),
+    ] {
+        let draw = ClassDraw::for_host(seed, id, host);
+        w.u64_hex(
+            &format!("mark seed {seed} system {id} host {host}"),
+            draw.mark().get(),
+        );
+        w.line(&format!("class = {}", draw.class(&weights).name()));
+    }
+    for template in &TEMPLATES {
+        for (i, group) in template.groups().iter().enumerate() {
+            w.line("");
+            let name = format!("{} group {i}", template.class().name());
+            w.line(&format!("{name}: {:?}", group.role()));
+            write_template_group(&mut w, &name, group);
+        }
+    }
+    golden!("planetary/architecture", w.as_str());
+}
+
+fn write_template_group(
+    w: &mut GoldenWriter,
+    name: &str,
+    group: &hyperion_sim::planetary::architecture::template::PlanetGroup,
+) {
+    w.f64(&format!("{name} presence"), group.presence());
+    let (least, most) = group.count().range();
+    w.line(&format!("{name} count {least}-{most}"));
+    if let CountLaw::ZeroTruncatedPoisson { .. } = group.count() {
+        for m in [0.1, 0.48, 1.0, 1.3] {
+            let host = SolarMasses::new(m);
+            let rate = group.count().poisson_rate(host).unwrap();
+            w.f64(&format!("{name} rate at {m}"), rate);
+            w.f64(&format!("{name} mean at {m}"), group.count().mean(host));
+        }
+    }
+    let masses = group.masses();
+    w.f64(&format!("{name} mass min"), masses.min().value());
+    w.f64(&format!("{name} mass max"), masses.max().value());
+    if let MassLaw::PowerLaw { index } = masses.law() {
+        w.f64(&format!("{name} mass index"), index);
+    }
+    match group.location() {
+        Location::Period(PeriodLaw::BrokenPowerLaw {
+            break_period,
+            rising,
+            falling,
+            min,
+            max,
+        }) => {
+            w.f64(&format!("{name} period break"), break_period.value());
+            w.f64(&format!("{name} period rising"), rising);
+            w.f64(&format!("{name} period falling"), falling);
+            w.f64(&format!("{name} period min"), min.value());
+            w.f64(&format!("{name} period max"), max.value());
+        }
+        Location::Period(PeriodLaw::LogNormal {
+            median,
+            sigma_dex,
+            min,
+            max,
+        }) => {
+            w.f64(&format!("{name} period median"), median.value());
+            w.f64(&format!("{name} period sigma"), sigma_dex);
+            w.f64(&format!("{name} period min"), min.value());
+            w.f64(&format!("{name} period max"), max.value());
+        }
+        Location::Period(PeriodLaw::LogUniform { min, max }) => {
+            w.f64(&format!("{name} period min"), min.value());
+            w.f64(&format!("{name} period max"), max.value());
+        }
+        Location::ScaledAu { inner, outer } => {
+            w.f64(&format!("{name} scaled au inner"), inner);
+            w.f64(&format!("{name} scaled au outer"), outer);
+        }
+        Location::SnowLines { inner, outer } => {
+            w.f64(&format!("{name} snow lines inner"), inner);
+            w.f64(&format!("{name} snow lines outer"), outer);
+        }
+        Location::Outward => w.line(&format!("{name} location outward")),
+        Location::Flanking => w.line(&format!("{name} location flanking")),
+    }
+    write_eccentricity(w, name, group.eccentricity());
+    if let Some(hot) = group.hot_variant() {
+        w.f64(&format!("{name} hot probability"), hot.probability());
+        write_eccentricity(w, &format!("{name} hot"), hot.eccentricity());
+    }
+    w.line(&format!(
+        "{name} reach {:?} spacing {:?} origin {:?}",
+        group.reach(),
+        group.spacing(),
+        group.origin()
+    ));
+}
+
+fn write_eccentricity(w: &mut GoldenWriter, name: &str, law: EccentricityLaw) {
+    match law {
+        EccentricityLaw::Rayleigh { sigma } => w.f64(&format!("{name} e rayleigh"), sigma),
+        EccentricityLaw::HalfNormal { sigma } => w.f64(&format!("{name} e half-normal"), sigma),
+        EccentricityLaw::Beta { a, b } => {
+            w.f64(&format!("{name} e beta a"), a);
+            w.f64(&format!("{name} e beta b"), b);
+        }
+        EccentricityLaw::BetaByPeriod {
+            split,
+            short_a,
+            short_b,
+            long_a,
+            long_b,
+        } => {
+            w.f64(&format!("{name} e split"), split.value());
+            w.f64(&format!("{name} e short beta a"), short_a);
+            w.f64(&format!("{name} e short beta b"), short_b);
+            w.f64(&format!("{name} e long beta a"), long_a);
+            w.f64(&format!("{name} e long beta b"), long_b);
+        }
+    }
 }
 
 #[test]

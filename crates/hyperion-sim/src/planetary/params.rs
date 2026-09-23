@@ -1,10 +1,11 @@
 //! The parameters of the planetary stage that belong to the generator version, as named constants
 //! in one place (plan 14, "Generator version").
 //!
-//! Changing any of these moves generated bodies and needs a generator-version bump. The plan
-//! gathers here the class weight table, the spacing floors, the ring probabilities, the
-//! pulsar-planet probability, [`SATELLITE_STABILITY_FRACTION`] and the white dwarf pollution fit,
-//! each added by the task that first uses it. The disc's own figures, which are measurements with
+//! Changing any of these moves generated bodies and needs a generator-version bump. The class
+//! weight table and its constants are [`architecture`](super::architecture)'s, whose module
+//! documentation is their single written definition (P14.T4). The plan gathers here the spacing
+//! floors, the ring probabilities, the pulsar-planet probability, [`SATELLITE_STABILITY_FRACTION`]
+//! and the white dwarf pollution fit, each added by the task that first uses it. The disc's own figures, which are measurements with
 //! their sources beside the physics that uses them, live in [`disc`](super::disc).
 
 use crate::planetary::derive::irradiation::BondAlbedo;
