@@ -7,6 +7,7 @@
 mod common;
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
@@ -14,11 +15,15 @@ use hyperion_protocol::{
     ResponseBody, ServerMessage, SystemRecord, SystemsInRange, SystemsInRangeRequest,
     UniverseIdHex, UniverseTime,
 };
+use hyperion_server::limits::MAX_QUERY_CELLS;
 use hyperion_sim::Seed;
-use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::resolve;
-use hyperion_sim::id::SystemId;
+use hyperion_sim::coords::LyCell;
+use hyperion_sim::galaxy::placement::{NoCache, resolve};
+use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, RangeResult, range_query};
+use hyperion_sim::galaxy::{Galaxy, Population};
+use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+use hyperion_sim::units::{LightYears, SolarMasses};
 
 /// The seed of every universe these tests create.
 const SEED: u64 = 0x4d2;
@@ -130,6 +135,147 @@ fn status(census: &Census, layer: MassLayer) -> LayerStatus {
         .status
 }
 
+/// The sim's own answer to `query`, run in the test over a galaxy built here and no cache, so that
+/// the wire's answer can be held to it field by field.
+///
+/// The query is built from the request's terms with plan 03's builder directly, not through the
+/// server's conversion, and carries the server's cell budget, which the plan fixes (design note 24).
+fn sim_answer(galaxy: &Galaxy, query: &Query) -> (RangeQuery, RangeResult) {
+    let centre = hyperion_sim::coords::GalacticPosition::new(
+        LyCell::new(query.centre.cell_ly),
+        query.centre.offset_m,
+    )
+    .expect("the test's centres are canonical");
+    let floor = match query.min_layer {
+        MassLayer::A => MassFloor::LayerA,
+        MassLayer::B => MassFloor::LayerB,
+        MassLayer::C => MassFloor::LayerC,
+        MassLayer::D => MassFloor::LayerD,
+        MassLayer::E => MassFloor::LayerE,
+    };
+    let sim_query = RangeQuery::builder(centre, LightYears::new(query.radius_ly))
+        .time(
+            hyperion_sim::time::UniverseTime::new(query.time.seconds, query.time.nanos)
+                .expect("the test's times are well formed"),
+        )
+        .limit(NonZeroU32::new(query.limit).expect("the test's limits are above zero"))
+        .mass_floor(floor)
+        .cell_budget(MAX_QUERY_CELLS)
+        .build()
+        .expect("the test's queries are valid");
+    let result = range_query(galaxy, &mut NoCache::new(), &[], &sim_query);
+    (sim_query, result)
+}
+
+/// The wire's layer for each stellar layer, and the band plan 02 gives it in M☉ of initial mass,
+/// written out here rather than read from the server or the sim's layer table.
+fn wire_layer_and_band(layer: Layer) -> (MassLayer, f64, f64) {
+    match layer {
+        Layer::A => (MassLayer::A, 0.08, 0.5),
+        Layer::B => (MassLayer::B, 0.5, 0.75),
+        Layer::C => (MassLayer::C, 0.75, 2.5),
+        Layer::D => (MassLayer::D, 2.5, 8.0),
+        Layer::E => (MassLayer::E, 8.0, 150.0),
+        Layer::BrownDwarf | Layer::RoguePlanet => panic!("the first milestone places no {layer:?}"),
+    }
+}
+
+/// The wire's population for each of the sim's.
+fn wire_population(population: Population) -> hyperion_protocol::Population {
+    match population {
+        Population::YoungThinDisc => hyperion_protocol::Population::YoungThinDisc,
+        Population::OldThinDisc => hyperion_protocol::Population::OldThinDisc,
+        Population::ThickDisc => hyperion_protocol::Population::ThickDisc,
+        Population::Bulge => hyperion_protocol::Population::Bulge,
+        Population::LongBar => hyperion_protocol::Population::LongBar,
+        Population::NuclearDisc => hyperion_protocol::Population::NuclearDisc,
+        Population::Halo => hyperion_protocol::Population::Halo,
+    }
+}
+
+/// Whether `a` and `b` agree to a relative `1e-15`: `serde_json` writes a float that round-trips,
+/// but its own parser is exact only with `float_roundtrip`, so the test's reading can be a last
+/// bit out.
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-15 * a.abs().max(b.abs())
+}
+
+/// Holds the wire's answer to the sim's own for the same terms: every record in the same order with
+/// the same ID, layer, population, mass, age and position, and every line of the census with plan
+/// 02's band, plan 03's expected count, the number of records the answer holds in that layer, and
+/// `included` exactly for the layers the census admitted.
+fn assert_answer_is_the_sims(
+    answer: &SystemsInRange,
+    sim_query: &RangeQuery,
+    result: &RangeResult,
+) {
+    let time = sim_query.time();
+    assert_eq!(answer.systems.len(), result.systems().len());
+    let mut returned = BTreeMap::<MassLayer, u32>::new();
+    for (record, hit) in answer.systems.iter().zip(result.systems()) {
+        let sim = hit.record();
+        let (layer, _, _) = wire_layer_and_band(sim.layer());
+        assert_eq!(record.id.to_u64(), sim.id().raw(), "{record:?}");
+        assert_eq!(record.designation, sim.id().designation().to_string());
+        assert_eq!(record.layer, layer, "{record:?}");
+        assert_eq!(
+            record.population,
+            wire_population(sim.population()),
+            "{record:?}"
+        );
+        assert!(
+            close(record.initial_mass_msun, sim.primary_initial_mass().value()),
+            "{record:?}"
+        );
+        let age_myr = sim.age_at(time).value() / 1e6;
+        assert!(
+            (record.age_myr - age_myr).abs() <= 1e-12 * age_myr.abs().max(1.0),
+            "{record:?} is {age_myr} Myr old at the query's time"
+        );
+        assert_eq!(record.position.cell_ly, hit.position().cell().to_array());
+        let moved_m = distance_ly(
+            &record.position,
+            &GalacticPosition {
+                cell_ly: hit.position().cell().to_array(),
+                offset_m: hit.position().offset_metres(),
+            },
+        ) * METRES_PER_LIGHT_YEAR;
+        assert!(moved_m < 10.0, "{record:?} is {moved_m} m from the sim's");
+        *returned.entry(layer).or_default() += 1;
+    }
+
+    let census = result.census();
+    assert_eq!(answer.census.limit, sim_query.limit().get());
+    assert_eq!(
+        answer.census.complete_above_msun,
+        census.complete_above().map(SolarMasses::value)
+    );
+    let layers = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E];
+    assert_eq!(answer.census.layers.len(), layers.len());
+    for (line, layer) in answer.census.layers.iter().zip(layers) {
+        let (wire, lo, hi) = wire_layer_and_band(layer);
+        assert_eq!(line.layer, wire, "the census lists A to E in order");
+        assert!(
+            close(line.mass_min_msun, lo) && close(line.mass_max_msun, hi),
+            "{line:?}"
+        );
+        assert!(
+            close(line.expected, census.expected().get(layer)),
+            "{line:?}"
+        );
+        assert_eq!(
+            line.returned,
+            returned.get(&wire).copied().unwrap_or(0),
+            "the census counts what the answer holds: {line:?}"
+        );
+        assert_eq!(
+            line.status == LayerStatus::Included,
+            census.layers().contains(layer),
+            "{line:?}"
+        );
+    }
+}
+
 /// The records by ID, for comparing two answers.
 fn by_id(answer: &SystemsInRange) -> BTreeMap<&str, &SystemRecord> {
     answer
@@ -198,6 +344,10 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
     let unique = ids.len();
     ids.dedup();
     assert_eq!(ids.len(), unique, "two records share an ID");
+
+    // And the whole answer is the sim's own for the same terms, census and all.
+    let (sim_query, result) = sim_answer(&galaxy, &query);
+    assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;
     server.stop().await;
@@ -285,7 +435,23 @@ async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born() {
             "{younger} Myr younger, not {five_hundred_years_myr}: {earlier_record:?}"
         );
     }
-    assert_eq!(earlier.systems.len() + dropped, epoch.systems.len());
+    // Nothing is dropped here, and nothing can be: the youngest of these systems is 0.71 Myr old
+    // (generator version 8), and a system under the clock window's 1,000 years would take a sphere
+    // of about a million, fifty times the largest census. The drop itself is plan 03's, pinned by
+    // `motion_drops_a_system_that_is_not_born_yet`; what the wire adds is the time, which the ages
+    // above and the comparison with the sim below hold.
+    assert_eq!(
+        dropped, 0,
+        "{dropped} systems were born within five centuries of the epoch"
+    );
+    assert_eq!(earlier.systems.len(), epoch.systems.len());
+
+    // Both answers are the sim's own, ages at the query's time included.
+    let galaxy = Galaxy::new(Seed::new(SEED));
+    for (answer, query) in [(&epoch, Query::sunlike()), (&earlier, earlier_query)] {
+        let (sim_query, result) = sim_answer(&galaxy, &query);
+        assert_answer_is_the_sims(answer, &sim_query, &result);
+    }
 
     client.close().await;
     server.stop().await;
@@ -322,6 +488,8 @@ async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so() {
             assert_eq!(line.returned, 0, "{line:?}");
         }
     }
+    let (sim_query, result) = sim_answer(&Galaxy::new(Seed::new(SEED)), &query);
+    assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;
     server.stop().await;
@@ -445,6 +613,170 @@ async fn each_field_it_cannot_use_is_a_bad_request_naming_that_field() {
     // Nothing was generated for any of them: each was refused before the galaxy was touched.
     let stats = server.stats();
     assert_eq!((stats.cells().entries(), stats.galaxies().builds()), (0, 0));
+
+    client.close().await;
+    server.stop().await;
+}
+
+/// One way a request can be wrong, with the code and the field it is refused with.
+type Fault = (fn(&mut Query), ErrorCode, &'static str);
+
+/// A request wrong in several ways is refused for the first of them in design note 24's order:
+/// universe, time, centre, radius, limit.
+///
+/// A handler that checked the fields in another order would still name the right field for each
+/// fault alone, so every pair of faults is tried, and then all five at once, mended one at a time
+/// from the front.
+#[tokio::test]
+async fn a_request_wrong_in_several_ways_is_refused_for_the_first_in_design_note_24s_order() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    // Not an ID `test_entropy` draws, so no universe has it.
+    let unknown = UniverseIdHex::from_u64(0x0bad_0000_0000_0001);
+    // Each fault, in design note 24's order.
+    let faults: [Fault; 5] = [
+        (|_| (), ErrorCode::UnknownUniverse, "universe"),
+        (|q| q.time = at_years(2_000), ErrorCode::BadRequest, "time"),
+        (
+            |q| q.centre = at_cell([65_536, 0, 0]),
+            ErrorCode::BadRequest,
+            "centre",
+        ),
+        (
+            |q| q.radius_ly = 200_000.0,
+            ErrorCode::BadRequest,
+            "radius_ly",
+        ),
+        (|q| q.limit = 0, ErrorCode::BadRequest, "limit"),
+    ];
+    let ask_with = |faulty: &[usize]| {
+        let mut query = Query::sunlike();
+        for &index in faulty {
+            faults[index].0(&mut query);
+        }
+        let target = if faulty.contains(&0) {
+            &unknown
+        } else {
+            &universe.id
+        };
+        (query, target.clone())
+    };
+
+    for first in 0..faults.len() {
+        for second in first + 1..faults.len() {
+            let (query, target) = ask_with(&[first, second]);
+            let error = ask(&mut client, &target, &query).await.unwrap_err();
+            let (_, code, field) = faults[first];
+            assert_eq!(
+                (error.code, error.field.as_deref()),
+                (code, Some(field)),
+                "faults {first} and {second} together are refused for fault {first}: {error:?}"
+            );
+        }
+    }
+    let mut remaining: Vec<usize> = (0..faults.len()).collect();
+    while let Some(&first) = remaining.first() {
+        let (query, target) = ask_with(&remaining);
+        let error = ask(&mut client, &target, &query).await.unwrap_err();
+        let (_, code, field) = faults[first];
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (code, Some(field)),
+            "faults {remaining:?} are refused for fault {first}: {error:?}"
+        );
+        remaining.remove(0);
+    }
+    // With every fault mended the request is served.
+    assert!(
+        !ask(&mut client, &universe.id, &Query::sunlike())
+            .await
+            .unwrap()
+            .systems
+            .is_empty()
+    );
+
+    client.close().await;
+    server.stop().await;
+}
+
+/// A centre whose offset is not canonical and a radius of zero or below each name their field, and
+/// the edges of every range are where design note 24 puts them: the widest radius is served and the
+/// next float up is not, both ends of the clock window are inside it and a nanosecond beyond either
+/// is outside, and a limit of one system is served.
+#[tokio::test]
+async fn the_edges_of_every_range_are_where_design_note_24_puts_them() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let tiny = || {
+        let mut query = Query::sunlike();
+        query.radius_ly = 1.0;
+        query
+    };
+
+    for offset_m in [[-1.0, 0.0, 0.0], [0.0, METRES_PER_LIGHT_YEAR, 0.0]] {
+        let mut query = tiny();
+        query.centre.offset_m = offset_m;
+        assert_eq!(
+            refused(&mut client, &universe.id, &query).await,
+            (ErrorCode::BadRequest, Some("centre".to_owned())),
+            "{offset_m:?}"
+        );
+    }
+    for radius_ly in [0.0, -1.0, -0.0] {
+        let mut query = tiny();
+        query.radius_ly = radius_ly;
+        assert_eq!(
+            refused(&mut client, &universe.id, &query).await,
+            (ErrorCode::BadRequest, Some("radius_ly".to_owned())),
+            "{radius_ly}"
+        );
+    }
+    // The widest radius is served, from the census alone: nothing that wide fits any limit.
+    let mut widest = tiny();
+    widest.radius_ly = hyperion_server::limits::MAX_QUERY_RADIUS_LY;
+    let answer = ask(&mut client, &universe.id, &widest).await.unwrap();
+    assert!(answer.systems.is_empty(), "{:?}", answer.census);
+    widest.radius_ly = widest.radius_ly.next_up();
+    assert_eq!(
+        refused(&mut client, &universe.id, &widest).await,
+        (ErrorCode::BadRequest, Some("radius_ly".to_owned()))
+    );
+
+    // The clock window is inclusive at both ends, and a nanosecond past either end is outside it.
+    let h_seconds = 1_000 * SECONDS_PER_JULIAN_YEAR;
+    for (seconds, nanos, inside) in [
+        (h_seconds, 0, true),
+        (-h_seconds, 0, true),
+        (h_seconds, 1, false),
+        (-h_seconds - 1, 999_999_999, false),
+    ] {
+        let mut query = tiny();
+        query.time = UniverseTime { seconds, nanos };
+        let answer = ask(&mut client, &universe.id, &query).await;
+        match (inside, answer) {
+            (true, Ok(answer)) => assert_eq!(answer.time, query.time),
+            (false, Err(error)) => {
+                assert_eq!(
+                    (error.code, error.field.as_deref()),
+                    (ErrorCode::BadRequest, Some("time"))
+                );
+            }
+            (_, other) => panic!("{seconds} s {nanos} ns: {other:?}"),
+        }
+    }
+    // A limit of one system is a valid query; the census decides what fits.
+    let mut one = tiny();
+    one.limit = 1;
+    assert_eq!(
+        ask(&mut client, &universe.id, &one)
+            .await
+            .unwrap()
+            .census
+            .limit,
+        1
+    );
 
     client.close().await;
     server.stop().await;

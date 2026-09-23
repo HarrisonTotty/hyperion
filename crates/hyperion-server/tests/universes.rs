@@ -258,6 +258,29 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
             min_layer: MassLayer::A,
             limit: 1_000,
         }),
+        // The universe is checked before any other field (design note 24), so a request wrong in
+        // every other way too is still refused for the universe.
+        RequestBody::SystemsInRange(SystemsInRangeRequest {
+            universe: talos.id.clone(),
+            centre: GalacticPosition {
+                cell_ly: [65_536, 0, 0],
+                offset_m: [0.0; 3],
+            },
+            radius_ly: 200_000.0,
+            time: UniverseTime {
+                seconds: 0,
+                nanos: 1_000_000_000,
+            },
+            min_layer: MassLayer::A,
+            limit: 0,
+        }),
+        RequestBody::DensityMap(DensityMapRequest {
+            universe: talos.id.clone(),
+            view: MapView::FaceOn,
+            population: MapPopulation::All,
+            resolution: 100,
+            bits: 7,
+        }),
     ];
     for body in refusals {
         let error = client.request(body).await.unwrap_err();

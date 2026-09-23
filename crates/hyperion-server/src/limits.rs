@@ -102,3 +102,33 @@ pub const INTERACTIVE_QUEUE_CAPACITY: NonZeroUsize = NonZeroUsize::new(64).expec
 /// Bulk jobs (density map bands) that may wait in the CPU pool's queue. One more waits for a
 /// slot.
 pub const BULK_QUEUE_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).expect("256 is not zero");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every limit holds the figure plan 04 gives it: design note 24's, T13.a's frame count, T15's
+    /// byte budget and write timeout, design note 16's name length and design note 23's four
+    /// galaxies; `CLOSE_TIMEOUT` and the queue capacities are this server's own choice (T13, T8).
+    ///
+    /// The tests that exercise a limit read its value from here, so that a frame one byte over the
+    /// limit is over it whatever the limit is; this is the test that notices the limit itself move.
+    #[test]
+    fn every_limit_is_the_plans() {
+        assert_eq!(MAX_INBOUND_FRAME_BYTES, 16_384, "16 KiB");
+        assert_eq!(MAX_IN_FLIGHT_REQUESTS, 8);
+        assert_eq!(MAX_CONSECUTIVE_MALFORMED_FRAMES, 16);
+        assert_eq!(OUTBOUND_QUEUE_FRAMES, 32);
+        assert_eq!(OUTBOUND_BYTES, 16_777_216, "16 MiB");
+        assert_eq!(WRITE_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(CLOSE_TIMEOUT, Duration::from_secs(1));
+        assert_eq!(MAX_UNIVERSES, 256);
+        assert_eq!(MAX_UNIVERSE_NAME_CHARS, 48);
+        assert_eq!(MAX_CENSUS_LIMIT, 20_000);
+        assert_eq!(MAX_QUERY_RADIUS_LY.to_bits(), 131_072.0_f64.to_bits());
+        assert_eq!(MAX_QUERY_CELLS.get(), 1 << 18);
+        assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
+        assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
+        assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);
+    }
+}

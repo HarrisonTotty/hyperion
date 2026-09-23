@@ -289,12 +289,19 @@ async fn two_hundred_queries_fired_at_once_end_in_exactly_two_hundred_terminal_m
 /// "Measured map costs"), so the map cannot finish while the test runs. The galaxy is warmed first,
 /// or the one worker would still be building it and no band would ever be queued; the pool's
 /// counters are then read before the close, so that a map which never reached the pool fails this
-/// test instead of letting it pass on an empty queue. After the close the bands still queued are
-/// skipped rather than computed, which the pool's `cancelled` counter shows — 31 of the 32 bands,
-/// measured, against two jobs run: the galaxy and the band in hand. That band runs to its end, which
-/// is a CPU wait and not a network one, so the drain is given [`SHUTDOWN_TIMEOUT`].
+/// test instead of letting it pass on an empty queue. Four range queries are then queued behind the
+/// band in hand, because the two kinds of work stop by different routes: a band nobody waits for is
+/// skipped because its flight is dropped with the last waiter, while a query's job is skipped only
+/// because the closing connection cancels its request's token. After the close every job still
+/// queued is skipped rather than computed, which the pool's `cancelled` counter shows — the 31
+/// bands and the 4 queries, measured, against two jobs run: the galaxy and the band in hand. That
+/// band runs to its end, which is a CPU wait and not a network one, so the drain is given
+/// [`SHUTDOWN_TIMEOUT`].
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
+    /// Range queries queued behind the map's band in hand when the socket closes.
+    const QUERIES: usize = 4;
+
     let data_dir = tempfile::tempdir().expect("a temporary directory");
     let config = TestServer::config(data_dir.path())
         .workers(one_worker())
@@ -325,12 +332,25 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
         1,
         "the map is the one request in flight"
     );
+    // Queries wait behind the band in hand, since the one worker is busy with it for seconds.
+    for _ in 0..QUERIES {
+        client
+            .send_request(Query::around([0, 26_000, 0]).body(&universe.id))
+            .await;
+    }
+    server
+        .stats_until("the queries are queued behind the band", |stats| {
+            stats.pool().queued_interactive() == QUERIES
+        })
+        .await;
 
-    // The client goes away with the map unanswered. The count is taken again here, because a band
-    // that finished since the one above would have taken the next one out of the queue.
-    let queued = u64::try_from(server.stats().pool().queued_bulk())
-        .expect("fewer than 2⁶⁴ bands")
-        .min(queued);
+    // The client goes away with the map and the queries unanswered. The count is taken again here,
+    // because a band that finished since the one above would have taken the next job out of the
+    // queue.
+    let at_close = server.stats().pool();
+    let queued = u64::try_from(at_close.queued_bulk() + at_close.queued_interactive())
+        .expect("fewer than 2⁶⁴ jobs")
+        .min(queued + u64::try_from(QUERIES).expect("four"));
     client.close().await;
     let idle = server
         .stats_until_within(
@@ -345,21 +365,21 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
         .await;
     assert_eq!(
         (idle.requests().abandoned(), idle.requests().in_flight()),
-        (1, 0),
-        "the map was abandoned with its connection"
+        (1 + u64::try_from(QUERIES).expect("four"), 0),
+        "the map and the queries were abandoned with their connection"
     );
-    // The bands still queued were skipped rather than computed. One of them may have reached a
+    // The jobs still queued were skipped rather than computed. One of them may have reached a
     // worker in the instant between the count above and the close taking effect, so the count is
-    // held to one less; that band is also why `completed` is allowed a third job beside the galaxy
-    // build and the band in hand.
+    // held to one less; that job is also why `completed` is allowed a third beside the galaxy build
+    // and the band in hand. A query that ran would be a fourth.
     assert!(
         idle.pool().cancelled() + 1 >= queued,
-        "the {queued} bands still queued were skipped: {:?}",
+        "the {queued} jobs still queued were skipped: {:?}",
         idle.pool()
     );
     assert!(
         idle.pool().completed() <= 3,
-        "no band that nobody waited for was computed: {:?}",
+        "no job that nobody waited for was computed: {:?}",
         idle.pool()
     );
     assert_eq!(

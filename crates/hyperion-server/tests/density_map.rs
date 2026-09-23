@@ -3,6 +3,7 @@
 
 mod common;
 
+use std::hint::black_box;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread;
@@ -20,7 +21,7 @@ use hyperion_server::compute::{
     CpuPool, DensityMapService, GalaxyCache, GalaxyKey, MapKey, MapResolution, PoolCounters,
 };
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
-use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::{GENERATOR_VERSION, math};
 use tokio::time::{sleep, timeout};
 
 /// The seed of every universe these tests create.
@@ -440,30 +441,112 @@ async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
     server.stop().await;
 }
 
-/// How long both 512-pixel maps of one galaxy may take to build (P04.T16).
+/// The work in both 512-pixel rasters of the fixture galaxy, in calls of the sim's `math::exp`.
 ///
-/// Measured under this profile: 19.8 s on eight workers, on a machine at a load average of 21 to 29
-/// against its eight cores. The rasters are about 61 core-seconds in a release build (8.05 s face-on
-/// and 52.6 s edge-on on one worker, `benches/density_map.rs`), so CI's two cores need about 60 s and
-/// this budget is three times that, and nine times what was measured here. It is deliberately wide:
-/// it catches a gross regression — bands that stopped running in parallel, a flight that rebuilds a
-/// map for every waiter, a cache that no longer holds one — and not plan 02's per-pixel cost, which
-/// P04.T16 records as a finding instead.
-const BUILD_BUDGET: Duration = Duration::from_secs(180);
+/// Measured band by band on one thread, each band against a calibration of the call taken either
+/// side of it, so that the count does not move with the host's clock or load (plan 04, Risks, the
+/// validation of T16): 5.2 to 5.6 × 10⁹ at generator version 8, of which 4.1 to 4.6 × 10⁸ face-on
+/// and 4.8 to 5.2 × 10⁹ edge-on. At the 7.5 ns a call that an idle i7-8665U gives at its 4.2 GHz
+/// single-core clock, that is about 40 core-seconds. The upper figures are used.
+const RASTER_PAIR_EXP_CALLS: f64 = 5.6e9;
 
-/// Both 512-pixel maps of one galaxy build inside [`BUILD_BUDGET`] on every core the host has.
+/// The face-on raster's share of [`RASTER_PAIR_EXP_CALLS`].
+const FACE_ON_EXP_CALLS: f64 = 4.6e8;
+
+/// The dearest single band of the pair, in the same calls: an edge-on band of 16 rows through the
+/// plane, 4.4 to 5.5 × 10⁸. A map is done when its dearest band is, however many workers there are,
+/// so this bounds the build from below on a host with more workers than the edge-on map has bands.
+const DEAREST_BAND_EXP_CALLS: f64 = 5.5e8;
+
+/// How many times the expected work a build may take before the test fails.
+///
+/// The expected work is [`RASTER_PAIR_EXP_CALLS`] ÷ workers, or the face-on map's share of it plus
+/// [`DEAREST_BAND_EXP_CALLS`] where that is longer. Measured in the slow-test profile against the
+/// calibration below, builds came to 0.27 to 0.95 of it, on eight workers and on two at load
+/// averages of 9 to 17: less than one because a hyperthread slows a loop of pure `exp` more than it
+/// slows the raster, and spread by load that moved between a calibration and the build. Three times
+/// is wide enough for a loaded gate and for a generator bump that moves plan 02's raster cost by a
+/// half. What it catches depends on the host: on this laptop's eight hyperthreads a build runs at
+/// about 0.57 of the expected work, so it fails at a per-pixel regression of about five times, and
+/// four times, tried, passed. It is a guard against gross regressions, not a benchmark.
+const BUILD_SLACK: f64 = 3.0;
+
+/// `math::exp` calls on each calibrating thread in one pass: about 30 ms of an idle core, several
+/// of the scheduler's time slices, so that a thread's share of a loaded host averages out.
+const CALIBRATION_CALLS: u32 = 4_000_000;
+
+/// Passes per calibration, whose median is taken.
+const CALIBRATION_PASSES: usize = 5;
+
+/// How often the build's pool is looked at, to see how many bands it is running at once.
+const RUNNING_POLL: Duration = Duration::from_millis(2);
+
+/// Nanoseconds a call of the sim's `math::exp` takes on each of `threads` threads running at once:
+/// every thread times its own calls, the pass is their mean, and the calibration is the median of
+/// [`CALIBRATION_PASSES`] passes.
+///
+/// This is the host's speed as each of the pool's workers sees it, measured in this process and at
+/// the pool's width: the clock, which on this laptop moves between 1.9 and 4.8 GHz with load and
+/// heat, and the contention, from other processes and from hyperthreads sharing a core, that the
+/// workers meet. Each thread is timed on its own, not the pass as a whole, because a pass that
+/// waits for its slowest thread measures how late the scheduler ran one thread rather than how fast
+/// the threads ran; the first read eight threads on this laptop at 110–130 ns a call under a load of
+/// 20, against a build that ran as though at 25.
+fn exp_ns_at(threads: NonZeroUsize) -> f64 {
+    let mut passes: Vec<f64> = (0..CALIBRATION_PASSES)
+        .map(|_| {
+            let per_thread: Vec<Duration> = thread::scope(|scope| {
+                let timers: Vec<_> = (0..threads.get())
+                    .map(|_| {
+                        scope.spawn(|| {
+                            let started = Instant::now();
+                            let mut sum = 0.0_f64;
+                            for call in 0..CALIBRATION_CALLS {
+                                sum += math::exp(black_box(f64::from(call % 97) * 0.01));
+                            }
+                            black_box(sum);
+                            started.elapsed()
+                        })
+                    })
+                    .collect();
+                timers
+                    .into_iter()
+                    .map(|timer| timer.join().expect("a calibrating thread does not panic"))
+                    .collect()
+            });
+            let total: Duration = per_thread.iter().sum();
+            let calls = f64::from(CALIBRATION_CALLS)
+                * f64::from(u32::try_from(threads.get()).expect("fewer than 2³² threads"));
+            total.as_secs_f64() * 1e9 / calls
+        })
+        .collect();
+    passes.sort_unstable_by(f64::total_cmp);
+    passes[CALIBRATION_PASSES / 2]
+}
+
+/// Both 512-pixel maps of one galaxy build with every worker running a band at once, and inside a
+/// budget stated in the host's own `math::exp` calls (P04.T16).
 ///
 /// The build is what is timed, through the cache and the pool a server uses, not a response: the
 /// quantising and the base64 of one are milliseconds (`benches/density_map.rs`) against seconds of
 /// raster. The galaxy is built by the first `get`, as it is for the first request of a new universe,
 /// and is counted in.
 ///
-/// The plan asked for 20 s on CI's two cores, and that is out of reach: the edge-on raster alone is
-/// 52.6 s of one core (0.40 ms for each of 131,072 pixels, `benches/density_map.rs`), so two cores
-/// cannot finish both views inside 20 s however the bands are split, and eight cores here manage it
-/// only when the machine is otherwise idle. [`BUILD_BUDGET`] is set from the measurement instead.
+/// Two things are checked, because a wall-clock budget alone checks neither. That the bands run in
+/// parallel is read off the pool, which must be seen running as many bands at once as it has workers
+/// (or bands, if fewer): serial bands cost only two to five times the parallel build, which no budget
+/// wide enough for a loaded machine can tell apart. And the cost: the build must finish within
+/// [`BUILD_SLACK`] times its expected work, counted in calls of `math::exp` as timed at the pool's
+/// width before and after it, the slower of the two, so that the budget follows the host's clock
+/// and load instead of assuming one.
+///
+/// The plan asked for 20 s of wall clock on CI's two cores. That is just out of reach, not far out
+/// of it: the pair is about 40 core-seconds at this laptop's best single-core clock, so two cores
+/// need at least 20 s there and more on a slower host. The 180 s that this test held before was
+/// set from measurements taken under a load of 8 to 29 and never normalised, which made the pair
+/// look like 61 core-seconds, and was wide enough to pass bands run one at a time.
 #[tokio::test]
-#[ignore = "slow: both 512-pixel rasters, about a minute of arithmetic"]
+#[ignore = "slow: both 512-pixel rasters, about 40 core-seconds of arithmetic"]
 async fn density_map_512_builds_within_budget() {
     let workers = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let pool = Arc::new(
@@ -474,28 +557,56 @@ async fn density_map_512_builds_within_budget() {
     // Room for both maps: 512 × 512 and 512 × 256 pixels of `f32`, 768 KiB in all.
     let maps = DensityMapService::new(Arc::clone(&pool), Arc::clone(&galaxies), 4 << 20);
 
+    let exp_before = exp_ns_at(workers);
     let started = Instant::now();
-    for view in [MapView::FaceOn, MapView::EdgeOn] {
-        let key = MapKey::new(
-            GalaxyKey::new(SEED, GENERATOR_VERSION),
-            view,
-            MapPopulation::All,
-            MapResolution::Px512,
-        );
-        let map = maps.get(key).await.expect("the pool computes the map");
-        assert_eq!(
-            map.log10().len(),
-            usize::from(MapResolution::Px512.width_px())
-                * usize::from(MapResolution::Px512.height_px(view)),
-            "the {view:?} map holds one value per pixel"
-        );
+    let build = async {
+        for view in [MapView::FaceOn, MapView::EdgeOn] {
+            let key = MapKey::new(
+                GalaxyKey::new(SEED, GENERATOR_VERSION),
+                view,
+                MapPopulation::All,
+                MapResolution::Px512,
+            );
+            let map = maps.get(key).await.expect("the pool computes the map");
+            assert_eq!(
+                map.log10().len(),
+                usize::from(MapResolution::Px512.width_px())
+                    * usize::from(MapResolution::Px512.height_px(view)),
+                "the {view:?} map holds one value per pixel"
+            );
+        }
+    };
+    tokio::pin!(build);
+    let mut most_running = 0;
+    loop {
+        tokio::select! {
+            () = &mut build => break,
+            () = sleep(RUNNING_POLL) => most_running = most_running.max(pool.counters().running()),
+        }
     }
     let elapsed = started.elapsed();
+    let exp_after = exp_ns_at(workers);
     pool.shutdown().await.expect("the pool shuts down");
 
+    // The edge-on map has the fewer bands: 256 rows of 16.
+    let bands = 16;
+    assert_eq!(
+        most_running,
+        workers.get().min(bands),
+        "the pool of {workers} workers ran at most {most_running} bands at once"
+    );
+    let exp_ns = exp_before.max(exp_after);
+    let workers_f64 = f64::from(u32::try_from(workers.get()).expect("fewer than 2³² workers"));
+    let budget_calls = BUILD_SLACK
+        * (RASTER_PAIR_EXP_CALLS / workers_f64)
+            .max(FACE_ON_EXP_CALLS / workers_f64 + DEAREST_BAND_EXP_CALLS);
+    let budget = Duration::from_secs_f64(budget_calls * exp_ns * 1e-9);
     assert!(
-        elapsed <= BUILD_BUDGET,
-        "both 512-pixel maps took {elapsed:?} on {workers} workers, over the budget of \
-         {BUILD_BUDGET:?}"
+        elapsed <= budget,
+        "both 512-pixel maps took {elapsed:?} on {workers} workers, over the budget of {budget:?}: \
+         {budget_calls:.3e} calls of `math::exp` at {exp_ns:.2} ns (before {exp_before:.2}, after \
+         {exp_after:.2}); the build was {:.3e} calls, {:.2} of the expected work",
+        elapsed.as_secs_f64() * 1e9 / exp_ns,
+        elapsed.as_secs_f64() * 1e9 / exp_ns / (RASTER_PAIR_EXP_CALLS / workers_f64)
     );
 }

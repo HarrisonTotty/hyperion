@@ -23,39 +23,51 @@
 //!
 //! # Measured, 2026-09-22
 //!
-//! Release profile, seed `00000000000004d2`, eight cores, Criterion's median of a hundred samples
-//! with the confidence interval beside it. The machine built four other lanes throughout, at a load
-//! average of 11–14 against its eight cores, so every figure is pessimistic by an unknown factor; a
-//! second run of the same file at a load of 14–17 gave 31.5 ms, 3.31 ms, 22.2 ms and 4.83 ms, which
-//! is the spread to read these with. Targets from P04.T16 and the brainstorm's "The range query".
+//! Release profile, seed `00000000000004d2`, generator version 8 (the version-9 fixture moves every
+//! count here), on an i7-8665U: four cores and eight hyperthreads, whose clock moves between 1.9 and
+//! 4.8 GHz with load and heat. **A bare time on this machine is not a measurement**: the uncached
+//! query below took 10.0 ms idle and 31.3 ms under Criterion at a load of 14. Each figure is
+//! therefore given with the sim's `math::exp` timed in the same process, and a per-cell cost in those
+//! calls, which stays put while the clock moves (plan 02, R21; plan 04, Risks, the validation of
+//! T16).
 //!
-//! This query visits 1,732 cells, examines 4,280 systems and returns 2,045, complete down to layer A
-//! (measured with `QueryStats`), against the brainstorm's estimate of "about 1,400 fine cells".
+//! Idle (load average 1.6, 3.4 to 4.2 GHz, one `math::exp` 7.4 to 7.9 ns), best of 15, three runs:
 //!
-//! | Bench | Measured | Target |
-//! | --- | --- | --- |
-//! | 50 ly at 26,000 ly, cold cache | 36.3 ms [34.0, 38.9] | under 5 ms cold: **missed, by about 7×** |
-//! | 50 ly at 26,000 ly, warm cache | 3.79 ms [3.66, 3.93] | — (a hit is 7× cheaper than generating) |
-//! | 50 ly at 26,000 ly, no cache | 25.1 ms [24.5, 25.8] | the cache to add under 10%: **missed, +44% on a miss** |
-//! | `systems_in_range`, 5,000 records, 1,290,424 bytes | 5.03 ms [4.91, 5.15] | — (0.25 GB/s of JSON) |
+//! | Path | Measured | Per visited cell | Target |
+//! | --- | --- | --- | --- |
+//! | 50 ly at 26,000 ly, no cache | 10.0–10.1 ms | 5.8 µs, 770–780 `exp` | under 5 ms cold: **missed, by 2×** |
+//! | 50 ly at 26,000 ly, cold cache | 10.8–11.8 ms | 6.2–6.8 µs | the cache to add under 10%: **met, +8% to +18%** |
+//! | 50 ly at 26,000 ly, warm cache | 1.10–1.73 ms | 0.6–1.0 µs | — (a hit is 6–9× cheaper than generating) |
+//!
+//! This query visits 1,732 cells, examines 4,280 systems and returns 2,045, complete down to layer
+//! A (`QueryStats`), against the brainstorm's estimate of "about 1,400 fine cells": 1,424 of the
+//! cells are layer A's. Placing one cell costs, by layer: A 3.8–4.2 µs (500–555 `exp`), B 5.3–5.7
+//! µs, C 30–32 µs, D 30–32 µs, E 69–73 µs.
 //!
 //! What the figures say:
 //!
-//! - The cold query is the brainstorm's own coupling failing, not the cache's fault: 25.1 ms over
-//!   1,732 cells is 14.5 µs a cell against the 1–2 µs it wanted for a sparse fine cell, and it says
-//!   there that "the first and last targets stand or fall together". Closing that is plan 03's
-//!   generation cost, not this crate's.
-//! - The cache costs 44% on a miss — the per-cell `Vec`, the charge, the lock and the eviction
-//!   bookkeeping, against `NoCache`'s one reused scratch buffer — and saves 85% on a hit. Two queries
-//!   near one another share most of their cells, which is what it is for, so the trade is worth
-//!   making; the 10% figure is not.
-//! - A 5,000-record answer is 1.29 MB of JSON and 5 ms to serialise, so the 20,000-record limit is
-//!   about 5 MB and 20 ms. That is why a large response is serialised as a pool job and never on the
-//!   runtime (design note 21).
-//! - End to end over loopback, the handler of P04.T14.d is what closes this, and it is not in this
-//!   tree. Measured there instead, for this same query returning 2,045 records: 35.7 ms cold and
-//!   12.3 ms warm, against T16's target of under 15 ms end to end — **met warm, missed cold**, by the
-//!   same generation cost the cold figure above is.
+//! - A layer-A cell at the solar circle, the sparse fine cell the brainstorm means, is 3.8 µs
+//!   against its 1–2 µs: **missed, by 2 to 4 times**. Plan 02's R21 estimated 119 `exp` for a
+//!   sparse cell from the bound and one candidate's densities; the whole placement measures about
+//!   four times that.
+//! - The coarse layers are not "cheap in absolute terms": B to E are 3.9 of the 9.3 ms of placing,
+//!   42%, so even layer-A cells at 1–2 µs would leave this query at 5.3 to 6.7 ms at least. The brainstorm's
+//!   "the first and last targets stand or fall together" is therefore not quite so: the 5 ms would
+//!   fall with the coarse layers alone.
+//! - The cache costs about a tenth on a miss and saves 84% to 90% on a hit, as the plan wanted.
+//! - A 5,000-record answer is 1.29 MB of JSON, 5.0–5.4 ms to serialise under a load of 11–17 (not
+//!   normalised; no target), so the 20,000-record limit is about 5 MB and 20 ms: why a large
+//!   response is serialised as a pool job and never on the runtime (design note 21).
+//! - End to end over loopback, P04.T14.d's handler returning the same 2,045 records: cold 18.1 to
+//!   20.2 ms and warm 6.4 to 7.4 ms at a load of 10 with `exp` at 12.3 ns, which is 1.6 times the
+//!   idle figure; idle, that is about 11 to 14 ms cold, from the compute above plus about 1 ms each
+//!   of serialising and parsing, against T16's under 15 ms: **met, narrowly, on an idle machine**,
+//!   and met warm by a wide margin. At a load of 22 the same run read 52 to 72 ms cold.
+//!
+//! The figures first recorded here (cold 36.3 ms, warm 3.79 ms, uncached 25.1 ms, so 14.5 µs a
+//! cell and a cache costing 44% on a miss) were taken at a load of 11 to 17 and not normalised; a
+//! Criterion run at a load of 14 during the validation gave cold 20.1 ms, warm 3.33 ms and uncached
+//! 31.3 ms, the cache's cost reversing its sign. They measured the machine, not the code.
 
 use std::hint::black_box;
 

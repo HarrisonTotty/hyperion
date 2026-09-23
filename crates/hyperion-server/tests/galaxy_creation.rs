@@ -163,6 +163,30 @@ fn codes(map: &DensityMap) -> Vec<u8> {
     bytes
 }
 
+/// A chart centre picked off the maps, as the display picks one: x and y from the centre of a
+/// face-on pixel about 26,000 ly out from the galactic centre, and z from the edge-on row nearest the
+/// plane. At 128 pixels no row is centred on the plane, so that row's centre is half a pixel, 512 ly,
+/// from it.
+fn chart_centre(face_on: &DensityMap, edge_on: &DensityMap) -> GalacticPosition {
+    let (column, row) = pixel_nearest(face_on, 0.0, CHART_RADIUS_LY);
+    let (x_ly, y_ly) = pixel_centre_ly(face_on, column, row);
+    let (edge_column, edge_row) = pixel_nearest(edge_on, x_ly, 0.0);
+    let (edge_x_ly, z_ly) = pixel_centre_ly(edge_on, edge_column, edge_row);
+    assert!(
+        (edge_x_ly - x_ly).abs() <= f64::EPSILON * x_ly.abs(),
+        "both maps are the same width, so the same x is the same column: {x_ly} and {edge_x_ly}"
+    );
+    assert!(
+        (y_ly - CHART_RADIUS_LY).abs() <= face_on.ly_per_px,
+        "{y_ly} ly is not within a pixel of the solar circle"
+    );
+    assert!(
+        z_ly.abs() <= edge_on.ly_per_px,
+        "{z_ly} ly is not within a pixel of the plane"
+    );
+    position_from_ly([x_ly, y_ly, z_ly])
+}
+
 #[tokio::test]
 async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
     let server = TestServer::start().await;
@@ -206,26 +230,7 @@ async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
         "both maps have systems in them"
     );
 
-    // A chart centre picked off the maps, as the display picks one: x and y from the centre of a
-    // face-on pixel about 26,000 ly out from the galactic centre, and z from the edge-on row
-    // nearest the plane.
-    let (column, row) = pixel_nearest(&face_on, 0.0, CHART_RADIUS_LY);
-    let (x_ly, y_ly) = pixel_centre_ly(&face_on, column, row);
-    let (edge_column, edge_row) = pixel_nearest(&edge_on, x_ly, 0.0);
-    let (edge_x_ly, z_ly) = pixel_centre_ly(&edge_on, edge_column, edge_row);
-    assert!(
-        (edge_x_ly - x_ly).abs() <= f64::EPSILON * x_ly.abs(),
-        "both maps are the same width, so the same x is the same column: {x_ly} and {edge_x_ly}"
-    );
-    assert!(
-        (y_ly - CHART_RADIUS_LY).abs() <= face_on.ly_per_px,
-        "{y_ly} ly is not within a pixel of the solar circle"
-    );
-    assert!(
-        z_ly.abs() <= edge_on.ly_per_px,
-        "{z_ly} ly is not within a pixel of the plane"
-    );
-    let centre = position_from_ly([x_ly, y_ly, z_ly]);
+    let centre = chart_centre(&face_on, &edge_on);
 
     // The systems around that point, at the epoch and a century later.
     let epoch = UniverseTime {
@@ -269,7 +274,20 @@ async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
         }))
         .await;
     assert_eq!(opened, Ok(ResponseBody::OpenUniverse(universe.clone())));
+    // The new server rebuilt the galaxy from the save's seed and holds no cell yet, so the answer
+    // below is computed afresh from the identity on disk and is not the first server's, cached.
+    let stats = server.stats();
+    assert_eq!(
+        (stats.galaxies().builds(), stats.cells().entries()),
+        (1, 0),
+        "the restarted server starts from the save alone"
+    );
     let (again, again_bytes) = ask(&mut client, query(&universe.id, centre, epoch)).await;
+    let cells = server.stats().cells();
+    assert!(
+        cells.entries() > 0 && cells.hits() == 0,
+        "the re-answer generated its cells: {cells:?}"
+    );
     assert_eq!(again, at_epoch);
     assert_eq!(
         answer_bytes(&again_bytes),

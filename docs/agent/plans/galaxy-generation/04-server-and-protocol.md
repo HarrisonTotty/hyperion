@@ -1343,6 +1343,8 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     to end, with the cell cache holding 1,732 cells in 516 KB; under `cargo test` 201 ms and 122 ms.
     **T16's "under 15 ms end to end" is met warm but not cold** — a finding for T16 to record, not a
     failure here. `tests/galaxy_creation.rs` takes 1.2 s idle and 7.5 s under concurrent load.
+    **Corrected in the validation below: the cold figure was the machine's load; idle it is about 11
+    to 14 ms, and met narrowly.**
 - **T15, as built.** `tests/abuse.rs` covers all seven listed cases; `tests/common/mod.rs` gained
   `STATS_POLL`, `TestServer::stats_until`, `stats_until_within` and `stop_within`, so that no test in
   the suite guesses at timing and the shutdown bound _is_ the assertion rather than a clock reading.
@@ -1379,7 +1381,9 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   - **The slow test's 20 s budget is unreachable and is now 180 s**, documented in the test: one
     512-pixel pair is about 61 core-seconds of raster, measured at 19.8 s on eight loaded workers
     (load 21–29), 12.5 s inside the gate, and an estimated 60 s on CI's two cores. It guards against a
-    banding or caching regression, not against plan 02's per-pixel cost. **Deviation.**
+    banding or caching regression, not against plan 02's per-pixel cost. **Deviation.** **Corrected
+    in the validation below: the pair is about 40 core-seconds, not 61; 180 s could not catch any of
+    the regressions named; the budget is now in `math::exp` calls.**
   - Measured, with load average beside each (8 cores): 512 face-on on eight workers **1.07 s** at load
     8–17 against the 1 s target — met when idle (0.7 s, T11.c) and just missed under load; 512 edge-on
     **12.8 s** against 3 s, and 52.6 s on one worker (0.40 ms a pixel), which is plan 02's raster cost
@@ -1388,10 +1392,110 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     no margin; `pong` while a 1,024-pixel map builds **114 µs** against 50 ms, met comfortably; a 50 ly
     query cold **36.3 ms** against the brainstorm's 5 ms, warm 3.79 ms, and 25.1 ms uncached — so the
     cache costs about 44% on a miss against the plan's "under 10%" and saves 85% on a hit; 5,000
-    records serialise in 5.03 ms to 1.29 MB.
+    records serialise in 5.03 ms to 1.29 MB. **Corrected in the validation below: none of these was
+    normalised, and the query's three were the machine's load.**
   - That query touches 1,732 cells for 2,045 systems, so **14.5 µs a cell against the brainstorm's
     1–2 µs** — and the brainstorm says the per-cell and the 5 ms targets stand or fall together, so they
     have fallen together. See plan 02's R16/R17, whose recorded per-call costs also do not reproduce.
+    **Corrected in the validation below: 5.8 µs a visited cell idle, and 3.8 µs a layer-A cell — the
+    1–2 µs is missed by 2 to 4 times, not 7 to 14.**
   - Other deviations: the quantise benches use face-on rasters as an upper bound per resolution; the two
     end-to-end figures came from a throwaway test, now deleted, with the figures recorded in
     `tests/density_map.rs`'s doc comment.
+- **Validation of T14.d, T14.e, T15 and T16 (val04 lane), as fixed.** Every test of the four tasks
+  was broken on purpose: 34 mutations of the server, each run against the tests that should catch
+  it. Against the tests as built, 16 stayed green; now two do, neither a defect: a warm cell that
+  reverses its records, which cannot change an answer, and four times the work per map band, which
+  the slow test's budget is too wide to see (below).
+  - _T14.d's validation order was never tested._ The handler checks design note 24's order, but
+    reversing it (limit, radius, centre, time), swapping time and centre, reading the fields before
+    the universe, or dropping the server's time check so that the sim's `build`, which checks the
+    time last, answers it all passed, because each test had one fault. `tests/systems_in_range.rs`
+    gains a test that sends every pair of the five faults (universe, time, centre, radius, limit)
+    and then all five, mended one at a time from the front, and checks which refusal comes back;
+    `tests/universes.rs`'s mismatch test gains a `systems_in_range` and a `density_map` wrong in
+    every other field too, still refused `generator_version_mismatch`. Another new test pins the
+    edges: a non-canonical offset names `centre`, radii of 0, −0 and −1 name `radius_ly`, 131,072 ly
+    is served while the next float up is refused, ±H is inside the window and a nanosecond beyond
+    it outside, and a limit of 1 is served.
+  - _The census and the records were barely tested._ Always sending `returned` as 0, swapping
+    layers A and B or two populations on the wire, sending layer E's band or layer A's expected
+    count for every layer, and reversing the records (so that "nearest first" was never checked)
+    all passed; the age, the echoes, the floor and the stop reasons were already caught. The
+    fixed-seed tests now hold the wire's answer to the sim's own: `range_query` run in the test over
+    the same galaxy with `NoCache`, compared record by record in order (ID, designation, layer,
+    population, mass, age at the query's time, position) and census line by line (plan 02's bands
+    written out in the test, plan 03's expected counts, `returned` counted from the answer,
+    `included` exactly for the layers the census admits).
+  - _The "less exactly those not yet born" clause of T14.d's test cannot fire._ At the solar circle
+    the youngest system in 50 ly is 0.71 Myr old and in 200 ly 0.32 Myr (generator version 8), so a
+    system under the clock window's 1,000 years would need about a million in the sphere, fifty
+    times the largest census: no wire answer can hold one. The test now says so and asserts that
+    nothing is dropped; the drop is plan 03's, pinned by `motion_drops_a_system_that_is_not_born_yet`.
+  - _T14.e's byte-identity is real and now pinned as such._ The restarted server is a new `Server`
+    with fresh caches, so the re-answer is computed from the save, not served from a cache; the test
+    now asserts one galaxy build and no cells before the re-query, and cells generated with no hit
+    by it. A mutation that makes the answer drift between calls turns it red. It compares a cold
+    answer with a cold one, and so catches answers that depend on process state; an answer that
+    moves the same way on every run (a seam that changes deterministically) is caught by
+    `tests/systems_in_range.rs`'s comparison with the sim and by the sim's goldens, not by T14.e. A
+    wire golden of this query would close that and belongs to the next generator bump. Note for
+    plan 05: at 128 pixels no edge-on row is centred on the plane, so "the row nearest the plane"
+    puts the chart's centre at z = −512 ly, half a pixel below it.
+  - _T15's figures reproduce exactly._ Three runs idle and twelve under load (four and six copies of
+    the suite at once, one round against eight CPU hogs that stretched a run from 9 s to 45 s): 192 of
+    200 refused and 8 answered every time; the oversized frame closes with no close frame; 31 bands
+    queued at the close and 31 skipped, 2 jobs completed and no map cached; the shutdown 1.002 to
+    1.007 s. The shutdown test's "both queues still hold work" held in all fifteen, with 1 or 7
+    queries and 7 or 8 bands queued. The acceptance loop passed 10 of 10, with `--lib outbound::` 16
+    of 16 each time.
+  - _T15's gaps, fixed._ A closing connection that cancelled nothing still passed, because a map's
+    bands stop by another route (their flight is dropped with its last waiter); the closing test now
+    queues four range queries behind the band in hand, which only the cancelled tokens skip, and
+    counts them. No test pinned a limit's value, since every test reads its limit from `limits`: a
+    frame limit of 64 KiB or seventeen malformed frames passed. `limits.rs` gains
+    `every_limit_is_the_plans`. Not defects: the shutdown test cannot see the pool keeping or
+    draining its queue, because `Server::shutdown` closes the connections, which cancel their jobs,
+    before it stops the pool; the pool's own unit test catches both. A warm cell that reverses its
+    records changes no answer, since hits are sorted nearest first; one that loses a record is
+    caught by the interleaved test.
+  - _The slow test could not fail for what it guarded._ At 180 s it passed bands run one at a time
+    (serial is two to five times the parallel build, well inside), and it had one waiter per map
+    and one request per key, so it could not see a flight rebuilding a map or a cache that no longer
+    held one. `density_map_512_builds_within_budget` now checks that the pool is seen running
+    `min(workers, 16)` bands at once, which fails for serial bands on any host, and holds the build to
+    3 × max(W ÷ workers, the face-on share ÷ workers + the dearest band), where W = 5.6 × 10⁹ calls of
+    `math::exp` (measured below) and a call is timed on the pool's width of threads, each timing its
+    own, before and after the build, the slower taken. Builds came to 0.27 to 0.95 of the expected
+    work at loads of 9 to 17 on eight and two workers; four times the work per band still passed on
+    this laptop's eight hyperthreads, where it fails at about five. A thread-by-thread calibration is
+    needed: timing a pass by its slowest thread read 110–130 ns a call at load 20 against a build
+    that ran as though at 25. The constants are version-8 figures; a generator bump that moves plan
+    02's raster cost by more than half should re-measure them.
+  - _The timing figures of T14.d and T16 were the machine, not the code._ This laptop is an i7-8665U,
+    four cores and eight hyperthreads (not eight cores), whose clock read 2.2–4.2 GHz across these
+    runs. Every figure is quoted with the sim's `math::exp` timed in the same process, as plan 02's
+    R21 does. Idle (load 1.6, `exp` 7.4–7.9 ns), best of 15 in three runs, the 50 ly query at 26,000 ly
+    is **10.0 ms uncached, 10.8–11.8 ms through a cold cache, 1.10–1.73 ms warm**, against the 25.1,
+    36.3 and 3.79 ms recorded: 5.8 µs a visited cell, not 14.5, and the cache costs +8% to +18% on a
+    miss (the plan's under 10%: **met**, where +44% was recorded) and saves 84–90% on a hit. By
+    layer, placing a cell costs A 3.8–4.2 µs (500–555 `exp`), B 5.3–5.7, C and D 30–32, E 69–73 µs.
+    So **the brainstorm's 1–2 µs for a sparse fine cell is missed by 2 to 4 times and its 5 ms by 2**
+    — both fall, but by far less than recorded, and R21's reading of plan 02 ("119 `exp`, inside the
+    1–2 µs") undercounts a real layer-A cell about four times, since it sums the bound and one
+    candidate's densities only. And they do not stand or fall together: the coarse layers are 3.9 of
+    the 9.3 ms of placing, so layer-A cells at 1–2 µs would still leave the query at 5.3–6.7 ms.
+    End to end over loopback: cold 18.1–20.2 ms and warm 6.4–7.4 ms at load 10 with `exp` at 12.3 ns,
+    1.6 times idle, so about 11–14 ms cold idle against T16's under 15 ms (**met, narrowly**; 52–72 ms
+    at load 22); a cached 512-pixel map 3.4 / 4.2 ms at 8 / 16 bits at load 10 (**met**; 5.7–7.5 ms
+    at load 22); `pong` during a 1,024-pixel edge-on map 44 µs (**met**). The rasters, counted band by
+    band in `exp` calls with each band timed against calls either side of it: 512 face-on 4.1–4.6 ×
+    10⁸, 512 edge-on 4.8–5.2 × 10⁹, its dearest band 4.4–5.5 × 10⁸ — at the idle 7.5 ns, 3.1–3.4,
+    36–39 and 3.3–4.1 core-seconds, so **the pair is about 40 core-seconds, not 61**. Face-on under
+    1 s on eight workers is met idle (0.7 s, T11.c); edge-on under 3 s is missed by about 2 times,
+    structurally, since one band alone is longer and four cores cannot do 36 core-seconds in 3; and
+    the plan's 20 s on CI's two cores is **just out of reach, not far out**: 22.4 s was measured on
+    two workers at load 10, against the estimated 60 s that set 180 s. The bench files' module docs
+    now carry these figures; the Criterion medians first recorded stay there, labelled as the spread
+    under load (a validation run at load 13–15 read quantising three to five times slower than they
+    do, and the query's cold path faster than its uncached one).
