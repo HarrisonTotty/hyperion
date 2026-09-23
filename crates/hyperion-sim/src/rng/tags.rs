@@ -334,6 +334,14 @@ domain_tags! {
     /// The cycle-keyed irregularity of pulsating variables, S Doradus cycles included (monotone
     /// phase), event tag `0x0109`.
     STAR_VAR_CYCLE: Event = "star.var.cycle";
+
+    // Plan 07: the gas and dust field. Both tags have scope `Galaxy`. This heading is appended
+    // after plan 06's event tags because the macro's order fixes `ALL`, which
+    // `tests/golden/rng/tags.golden` pins.
+
+    /// The gas parameters plan 02 does not draw, one uniform per word at the parameter's fixed
+    /// index in plan 07's Design note 3 table, keyed by `ObjectKey::galaxy()`.
+    GAS_PARAMS: Galaxy = "gas.params";
 }
 
 #[cfg(test)]
@@ -381,6 +389,13 @@ mod tests {
             assert!(tag.name().starts_with("star."), "{}", tag.name());
             assert!(ALL.contains(&tag));
         }
+    }
+
+    #[test]
+    fn plan_07_registers_the_gas_parameter_tag() {
+        assert_eq!(GAS_PARAMS.name(), "gas.params");
+        assert_eq!(GAS_PARAMS.scope(), crate::rng::TagScope::Galaxy);
+        assert!(ALL.contains(&GAS_PARAMS));
     }
 
     #[test]

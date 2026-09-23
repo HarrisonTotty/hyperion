@@ -1285,17 +1285,34 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
 - **Pending re-validation.** Nothing in this plan waits on unbuilt code: every Consumes item exists.
   P07.T12's Milky Way figures wait on plan 02's P02.T11, as its own text now says, and P07.T11.a waits
   on the owner.
-- **T1 partially built, 2026-09-22 (paused).** `units.rs`'s five newtypes with `BOLTZMANN_CONSTANT` and
-  `HYDROGEN_MASS_KG` (CODATA, tested), the `gas.params` tag under a "Plan 07" heading after plan 06's
-  event tags, `pub mod gas;`, `gas/mod.rs` (the cm-per-ly conversions, `MASS_PER_HYDROGEN_FACTOR`,
-  `SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY` = 9.978 × 10⁻⁴, `IONISED_PARTICLES_PER_HYDROGEN`) and
-  `gas/params.rs` (`GasParams`, `MolecularDisc`, `LaneParams`, `from_galaxy`, `milky_way_like`, plus
-  `neutral_fraction()`, `pressure_speed()` and the `PRESSURE_HEIGHT`/`PRESSURE_SPEED` constants) are
-  complete and their unit tests pass. **Still owed for T1:** `tests/gas.rs` with
-  `golden/gas/params.golden` for three seeds, and regenerating plan 01's `tests/golden/rng/tags.golden`
-  (one added line — `domain_tags_are_pinned` fails until it is blessed). T2 is not begun. The work sits
-  in the `gal` worktree and as `patches/gal-P07T1-PARTIAL.patch`.
-- **Ruling on design note 3's word indices** (the note was ambiguous: "parameter *k* of the table is
+- **T1 and T2, as built (2026-09-22).** T1 is complete: `units.rs`'s five newtypes with
+  `BOLTZMANN_CONSTANT` and `HYDROGEN_MASS_KG` (CODATA, tested), the `gas.params` tag under a "Plan 07"
+  heading after plan 06's event tags (`tags.golden` gained exactly one line,
+  `gas.params (Galaxy) = 0x80346fd71dc90f62`), `gas/mod.rs` (the cm-per-ly conversions,
+  `MASS_PER_HYDROGEN_FACTOR`, `SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY` = 9.978 × 10⁻⁴,
+  `IONISED_PARTICLES_PER_HYDROGEN`), `gas/params.rs` (`GasParams`, `MolecularDisc`, `LaneParams`,
+  `from_galaxy`, `milky_way_like`, `neutral_fraction()`, `pressure_speed()`, `PRESSURE_HEIGHT` and
+  `PRESSURE_SPEED`), and `tests/gas.rs` with `golden/gas/params.golden` over plan 02's three golden
+  seeds. T2 is `gas/smooth.rs`: `SmoothGas` and `GasLayer`, both `pub` with a doctest, taking bare `f64`
+  light-years and returning cm⁻³ or cm⁻² as the module doc says of hot paths. It normalises with
+  `quad::gl_log_panels` over eight log-spaced panels from 1 ly to 20 R_g (10⁻⁷ relative across the drawn
+  ranges), and its closed-form vertical columns are clamped without `f64::max`. No plan 02 or 03 golden
+  moved, and no parameter range disagreed with the brainstorm or McMillan (2017). Measured at the
+  fixture (version 8), against the brackets and the analytic predictions below:
+
+  | Quantity                       | Measured    | Predicted | Bracket     |
+  | ------------------------------ | ----------- | --------- | ----------- |
+  | Neutral, plane, 26,000 ly      | 0.673 cm⁻³  | 0.66      | 0.6–0.9     |
+  | Warm ionised, plane, 26,000 ly | 0.0297 cm⁻³ | 0.029     | 0.025–0.035 |
+  | Molecular centre               | 42.1 cm⁻³   | 41        | 20–80       |
+  | Worst hole at R_m ÷ 8          | 0.33%       | 0.2–0.5%  | under 1%    |
+  | Mass closure (brute force)     | −1.9 × 10⁻⁶ | —         | 2%          |
+
+  The `galaxy::gas` tests take about 0.9 s together, so none is marked slow. P02.T11 raises the gas
+  disc's mass and scale height by the same 1.74 (ruling 1), which leaves the three mid-plane figures
+  unchanged; re-read them after it merges, as a check on that ruling's arithmetic.
+
+- **Ruling on design note 3's word indices** (the note was ambiguous: "parameter _k_ of the table is
   `seek(k)`" against seventeen table rows, but "indices 0–15 reserved"). The **eleven drawn parameters
   take words 0–10 in table order**; words 11–15 stay reserved; the derived and constant rows get no word
   at all. Design note 3's wording should be corrected to say that, since only drawn parameters consume
@@ -1305,7 +1322,9 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
 - **The Milky Way fixture as built** differs from the table: `R_g` is **14,840 ly** (1.75 × 8,480), not
   14,000, and the gas mass is 5.06 × 10⁹ M☉. Use the code's values.
 - **T2's mass test cannot integrate "over the cube" to 2%.** The normalisation integrates to 20 R_g, and
-  about **11% of the neutral mass lies outside the ±65,536 ly root cube** (analytic estimate). Integrate
+  about **11% of the neutral mass lies outside the ±65,536 ly root cube** (analytic estimate).
+  **As measured, 5.6% for the fixture**: the 11% estimate took a cylinder inscribed in the cube and
+  missed its corners. At the largest drawn scale lengths up to about 20% lies outside. Integrate
   over the component's own support instead, and report the in-cube fraction as a separate figure.
   - An exact cross-check on `gl_log_panels` for that integral:
     ∫₀^∞ R e^(−a/R − R/b) dR = 2 a b K₂(2 √(a/b)).

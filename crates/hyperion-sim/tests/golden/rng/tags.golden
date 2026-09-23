@@ -98,3 +98,4 @@ star.ev.fu_orionis (Event) = 0x6480fac23896bde7
 star.ev.lbv_eruption (Event) = 0xbcf073955e78c69d
 star.ev.thermal_pulse (Event) = 0x8d0f3f8e667a19b5
 star.var.cycle (Event) = 0xd11f43d4799c3c16
+gas.params (Galaxy) = 0x80346fd71dc90f62

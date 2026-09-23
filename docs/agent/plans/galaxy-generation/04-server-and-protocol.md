@@ -1345,7 +1345,7 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     failure here. `tests/galaxy_creation.rs` takes 1.2 s idle and 7.5 s under concurrent load.
 - **T15, as built.** `tests/abuse.rs` covers all seven listed cases; `tests/common/mod.rs` gained
   `STATS_POLL`, `TestServer::stats_until`, `stats_until_within` and `stop_within`, so that no test in
-  the suite guesses at timing and the shutdown bound *is* the assertion rather than a clock reading.
+  the suite guesses at timing and the shutdown bound _is_ the assertion rather than a clock reading.
   Acceptance met: `cargo test -p hyperion-server --test abuse` ten times in a row, 10/10, 9–16 s a run
   at load average 5–11, plus `--lib outbound::` 16/16 in each and three concurrent copies of the suite
   for three rounds, 9/9.

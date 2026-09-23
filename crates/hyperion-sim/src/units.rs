@@ -81,6 +81,19 @@ pub mod consts {
     /// The terrestrial mass, kg: GM of Earth ÷ G, about 5.972 17 × 10²⁴ kg.
     pub const EARTH_MASS_KG: f64 = GM_EARTH / GRAVITATIONAL_CONSTANT;
 
+    /// The Boltzmann constant, J K⁻¹. Exact in the 2019 SI, which defines the kelvin by it
+    /// (CODATA 2018 and 2022: 1.380 649 × 10⁻²³ exactly).
+    pub const BOLTZMANN_CONSTANT: f64 = 1.380_649e-23;
+
+    /// The mass of a hydrogen atom (¹H), kg: about 1.673 533 × 10⁻²⁷ kg.
+    ///
+    /// The proton and the electron of CODATA 2022, 1.672 621 925 95 × 10⁻²⁷ kg and
+    /// 9.109 383 7139 × 10⁻³¹ kg, less the 13.6 eV of binding, 2.42 × 10⁻³⁵ kg. The interstellar
+    /// medium's mass density is quoted as 1.4 × this × the number density of hydrogen nuclei, the
+    /// 1.4 standing for helium (plan 07, Design note 2); a model that counts nuclei rather than
+    /// protons wants the atom's mass, which is 0.05% above the proton's.
+    pub const HYDROGEN_MASS_KG: f64 = 1.673_532_84e-27;
+
     /// Metres per second in one kilometre per second.
     pub const METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND: f64 = 1e3;
 
@@ -375,6 +388,37 @@ unit!(
     /// A rate of mass loss or gain in solar masses per Julian year, such as a stellar wind's.
     SolarMassesPerYear
 );
+unit!(
+    /// A number density of hydrogen nuclei per cubic centimetre, the unit every measurement and
+    /// every formula of the interstellar medium is quoted in (plan 07, Design note 2).
+    ///
+    /// The mass density it stands for is 1.4 × [`consts::HYDROGEN_MASS_KG`] × this, the 1.4
+    /// standing for the helium that accompanies the hydrogen.
+    HydrogenPerCm3
+);
+unit!(
+    /// A thermal pressure divided by the Boltzmann constant, P ÷ k in K cm⁻³: the form
+    /// interstellar pressures are measured and quoted in (plan 07, Design note 2).
+    ///
+    /// The pressure in pascals is this × [`consts::BOLTZMANN_CONSTANT`] × 10⁶ (cm⁻³ to m⁻³).
+    KelvinPerCm3
+);
+unit!(
+    /// A column density per square centimetre, such as the hydrogen column along a line of sight.
+    PerCm2
+);
+unit!(
+    /// An extinction or a colour excess in magnitudes, 2.5 log₁₀ of the ratio of two fluxes.
+    Magnitudes
+);
+unit!(
+    /// A wavelength in micrometres, the unit the interstellar extinction law is written in
+    /// (Cardelli, Clayton and Mathis 1989, whose argument is 1 ÷ λ in µm⁻¹).
+    ///
+    /// It stands outside the length dimension's conversions on purpose: nothing turns a wavelength
+    /// into metres, and the law's coefficients are fitted to µm⁻¹.
+    Micrometres
+);
 
 #[cfg(test)]
 mod tests {
@@ -423,6 +467,25 @@ mod tests {
         assert_relative(SOLAR_MASS_KG, 1.988_41e30, 1e-5);
         assert_relative(JUPITER_MASS_KG, 1.898_12e27, 1e-5);
         assert_relative(EARTH_MASS_KG, 5.972_17e24, 1e-5);
+    }
+
+    /// Two independent routes to the hydrogen atom's mass agree: its proton and electron
+    /// (CODATA 2022) less the mass of its 13.6 eV of binding, and its relative atomic mass times
+    /// the atomic mass constant. The Boltzmann constant is checked through the molar gas constant,
+    /// `R = k N_A`, every one of the three exact in the 2019 SI.
+    #[test]
+    fn the_interstellar_medium_constants_are_codata_values() {
+        let (proton, electron) = (1.672_621_925_95e-27, 9.109_383_713_9e-31);
+        let binding = 13.598_434_599_702 * 1.602_176_634e-19 / (SPEED_OF_LIGHT * SPEED_OF_LIGHT);
+        assert_relative(HYDROGEN_MASS_KG, proton + electron - binding, 1e-9);
+        let atomic_mass_constant = 1.660_539_068_92e-27;
+        assert_relative(
+            HYDROGEN_MASS_KG,
+            1.007_825_031_90 * atomic_mass_constant,
+            1e-8,
+        );
+        let avogadro = 6.022_140_76e23;
+        assert_relative(BOLTZMANN_CONSTANT * avogadro, 8.314_462_618_153_24, 1e-15);
     }
 
     /// IAU 2015 Resolution B3 derived the nominal temperature from best-estimate L and R through

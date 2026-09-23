@@ -23,6 +23,7 @@ pub mod consts;
 pub mod fates;
 pub mod fields;
 pub mod frame;
+pub mod gas;
 pub mod imf;
 pub mod map;
 pub mod params;
