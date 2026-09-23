@@ -50,6 +50,7 @@ import {
   screenToRaster,
   stepCursor,
 } from "./mapCursor";
+import { usePageTabFocus } from "./pageTabFocus";
 
 /** Bits per code of the map the display asks for: the ramp has 256 levels (plan 05, D5). */
 const MAP_BITS = 8;
@@ -539,6 +540,12 @@ function MapViewBody({
   const source = native ?? reduced;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Under `Activity` the view's effects run again each time its display is shown. The picture may
+  // have lost the focus while it was hidden without a `blur` reaching it, which is the browser's to
+  // decide for an element that is not displayed, so whether it has focus is read afresh then.
+  useLayoutEffect(() => {
+    setFocused(canvasRef.current !== null && canvasRef.current === document.activeElement);
+  }, []);
   const paintedRef = useRef<{
     readonly source: PictureSource;
     readonly canvas: HTMLCanvasElement | null;
@@ -715,13 +722,14 @@ function MapViewBody({
  * so, with the failure and `RETRY`, which asks again from `PENDING`. A map of another universe or
  * population is other data and is waited for from `PENDING`. A map that is not the one asked for,
  * is not of the M1 extents, cannot be drawn or does not decode reads `MAP DATA INVALID` with the
- * cause, a server fault. After any failure `RETRY` asks again from `PENDING`: the view is mounted afresh, since a request sent again would keep an invalid answer on
- * show until its successor arrived. The codes are painted with the ramp from the `--surface-0` and
- * `--text` tokens, read when the view is shown, and drawn without smoothing (D6) onto a canvas
- * whose backing store follows the device pixel ratio: pixel for pixel or larger, or, where the map
- * still has more pixels than the backing store, reduced by area-weighted averaging of linear
- * density, so that no map pixel is dropped. Painting happens when the map, the size or the ramp
- * changes, never on a loop.
+ * cause, a server fault. After any failure `RETRY` asks again from `PENDING`: the view is mounted
+ * afresh, since a request sent again would keep an invalid answer on show until its successor
+ * arrived, and the focus goes to the page's tab, since `RETRY` goes too. The codes are painted with
+ * the ramp from the `--surface-0` and `--text` tokens, read when the view is shown, and drawn
+ * without smoothing (D6) onto a canvas whose backing store follows the device pixel ratio: pixel
+ * for pixel or larger, or, where the map still has more pixels than the backing store, reduced by
+ * area-weighted averaging of linear density, so that no map pixel is dropped. Painting happens when
+ * the map, the size or the ramp changes, never on a loop.
  *
  * The face-on picture is the raster turned a quarter-turn clockwise, +x down and +y to the right,
  * as the spatial view's `TOP` shows the galaxy from the +x axis; the edge-on picture is x across and
@@ -743,11 +751,15 @@ function MapViewBody({
  */
 export function GalaxyMapView(props: GalaxyMapViewProps) {
   const [attempt, setAttempt] = useState(0);
+  const focusPageTab = usePageTabFocus();
   return (
     <MapViewBody
       key={attempt}
       {...props}
       onRetry={() => {
+        // RETRY goes with the body it mounts afresh, so the focus goes to the page's tab, which
+        // stays, and not to the document's body (the orchestrator's ruling 18).
+        focusPageTab?.();
         setAttempt((count) => count + 1);
       }}
     />

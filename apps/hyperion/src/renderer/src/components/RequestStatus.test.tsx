@@ -80,6 +80,20 @@ describe("RequestStatus", () => {
     expect(screen.queryByRole("button", { name: "RETRY" })).not.toBeInTheDocument();
   });
 
+  it("describes RETRY by the failure it retries", () => {
+    render(
+      <RequestStatus
+        state={{ kind: "rejected", code: "queue_full", reason: "busy" }}
+        onRetry={() => {}}
+      />,
+    );
+
+    // As the census's RETRY is, so that a RETRY reached by Tab says what it retries everywhere.
+    expect(screen.getByRole("button", { name: "RETRY" })).toHaveAccessibleDescription(
+      "REJECTED: busy",
+    );
+  });
+
   it("offers no RETRY when the caller cannot send again", () => {
     render(<RequestStatus state={{ kind: "timed_out" }} />);
 

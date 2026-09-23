@@ -346,7 +346,8 @@ interface UniversePanelProps {
  * Its title is a display control that folds the panel to one line, the open universe's name, seed
  * and generator version, with a chevron that shows which; the display decides when it is folded.
  * If the panel folds while the focus is in it, as when an `OPEN` opens its universe, the focus
- * moves to the title control rather than being lost. Opening and creating change what the server
+ * moves to the title control rather than being lost, and so it does from the list's `RETRY`, which
+ * goes as it is pressed. Opening and creating change what the server
  * holds, so both are commands: each shows `PENDING` beside the control that gave it and then the
  * server's answer, never an optimistic change, and no other command can be given until it has
  * answered: the `OPEN` given reads `PENDING`, and `CREATE` has its status beside it. While the link
@@ -392,13 +393,19 @@ export function UniversePanel({ expanded, onToggle }: UniversePanelProps) {
 
   // A fold would leave the focus on a hidden control, or nowhere when the `OPEN` that caused it
   // gives way to the word OPEN; before paint, it moves to the control that shows the panel again.
+  // So it does when the panel is shown whole over the pages with the focus in them, as a create
+  // left unconfirmed by a lost link shows it, whatever the operator was doing on the map.
   const wasExpanded = useRef(expanded);
   useLayoutEffect(() => {
     const folded = wasExpanded.current && !expanded;
+    const unfolded = !wasExpanded.current && expanded;
     wasExpanded.current = expanded;
     const focused = document.activeElement;
     const lost = focused === null || focused === document.body;
-    if (folded && (lost || bodyRef.current?.contains(focused) === true)) {
+    if (
+      (folded && (lost || bodyRef.current?.contains(focused) === true)) ||
+      (unfolded && focused !== null && focused.closest("[hidden]") !== null)
+    ) {
       toggleRef.current?.focus();
     }
   }, [expanded]);
@@ -454,7 +461,12 @@ export function UniversePanel({ expanded, onToggle }: UniversePanelProps) {
             setLastCommand({ kind: "open", universe });
             openUniverse(universe);
           }}
-          onRetry={refresh}
+          onRetry={() => {
+            // RETRY goes as the list goes pending; the focus goes to the panel's title control, as
+            // it does when the panel folds, rather than to the document's body (ruling 18).
+            toggleRef.current?.focus();
+            refresh();
+          }}
         />
         <NewUniverseForm
           command={lastCommand?.kind === "create" ? command : null}

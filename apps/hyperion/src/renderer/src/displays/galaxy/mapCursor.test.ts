@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mapGeometry, pixelToLy } from "../../lib/galaxy/mapGeometry";
+import type { CentreLy } from "../../lib/galaxy/model";
 import { localFrameAt } from "../../spatial/frame";
 import { vec3 } from "../../spatial/vec3";
 import {
@@ -205,5 +206,87 @@ describe("pixelIndexAt", () => {
 
   it("gives nothing off the map", () => {
     expect(pixelIndexAt(EDGE_ON, { horizontalLy: 0, verticalLy: -40_000 })).toBeNull();
+  });
+});
+
+describe("the chart centre's height", () => {
+  // Plan 04's 128-pixel maps: 1,024 ly a pixel, the edge-on map 64 rows over ±32,768 ly, so that no
+  // row is centred on the plane; the one nearest it is centred half a pixel off, at ±512 ly.
+  const FACE_ON_128 = mapGeometry({
+    view: "face_on",
+    width_px: 128,
+    height_px: 128,
+    centre_ly: [0, 0],
+    ly_per_px: 1_024,
+  });
+  const EDGE_ON_128 = mapGeometry({
+    view: "edge_on",
+    width_px: 128,
+    height_px: 64,
+    centre_ly: [0, 0],
+    ly_per_px: 1_024,
+  });
+  const DIRECTIONS = ["left", "right", "up", "down"] as const;
+
+  it.each([
+    ["a pixel's centre", 512, -1_536],
+    ["a pixel's corner", 0, 1_024],
+    ["a point inside a pixel", 26_000.3, -7_777.7],
+    ["a point beyond the map's edge", 70_000, -70_000],
+  ])("keeps z exactly 0 through a face-on pick at %s", (_, horizontalLy, verticalLy) => {
+    const [, , zLy] = pickCursor("face_on", [0, 0, 0], { horizontalLy, verticalLy }, FACE_ON_128);
+
+    // `toBe` compares with `Object.is`, so −0 fails it too.
+    expect(zLy).toBe(0);
+  });
+
+  it("keeps z exactly 0 through face-on steps of one and ten pixels, into the edges and back", () => {
+    let cursorLy: CentreLy = [0, 0, 0];
+    // Every height a step left, other than +0 exactly: `Object.is` tells −0 from 0.
+    const offThePlane: number[] = [];
+    for (const pixels of [1, 10]) {
+      for (const direction of DIRECTIONS) {
+        // Far enough to stop at the edge pixel, then back the other way.
+        for (let step = 0; step < 80; step += 1) {
+          cursorLy = stepCursor("face_on", cursorLy, direction, pixels, FACE_ON_128) ?? cursorLy;
+          if (!Object.is(cursorLy[2], 0)) {
+            offThePlane.push(cursorLy[2]);
+          }
+        }
+      }
+    }
+
+    expect(offThePlane).toEqual([]);
+  });
+
+  it.each([
+    ["on the plane", 0],
+    ["off a row's centre", -300],
+  ])("takes an edge-on pick's height where it is, %s, not a row's centre", (_, verticalLy) => {
+    const [, , zLy] = pickCursor(
+      "edge_on",
+      [26_000, 0, 5],
+      { horizontalLy: 0, verticalLy },
+      EDGE_ON_128,
+    );
+
+    expect(zLy).toBe(verticalLy);
+  });
+
+  /** The cursor after `steps` one-pixel edge-on steps in `direction`. */
+  function steppedEdgeOn(cursorLy: CentreLy, direction: "up" | "down", steps: number): CentreLy {
+    let stepped = cursorLy;
+    for (let step = 0; step < steps; step += 1) {
+      stepped = stepCursor("edge_on", stepped, direction, 1, EDGE_ON_128) ?? stepped;
+    }
+    return stepped;
+  }
+
+  it("steps z by whole pixels from the plane edge-on", () => {
+    expect(steppedEdgeOn([26_000, 0, 0], "down", 7)[2]).toBe(-7_168);
+  });
+
+  it("steps z back onto the plane edge-on", () => {
+    expect(steppedEdgeOn(steppedEdgeOn([26_000, 0, 0], "down", 7), "up", 7)[2]).toBe(0);
   });
 });

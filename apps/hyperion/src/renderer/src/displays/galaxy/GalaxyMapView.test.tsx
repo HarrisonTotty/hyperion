@@ -1,11 +1,13 @@
 import type { MapPopulation, MapView } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Activity } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CentreLy } from "../../lib/galaxy/model";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { aDensityMap, UNIVERSE_ID } from "../../test/galaxyFixtures";
+import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { GalaxyMapView } from "./GalaxyMapView";
@@ -32,6 +34,8 @@ interface ViewSpec {
   readonly cursorLy?: CentreLy;
   readonly onCursor?: (cursorLy: CentreLy) => void;
   readonly centreLy?: CentreLy | null;
+  /** Whether the display the view stands on is hidden, as `App` hides one under `Activity`. */
+  readonly displayHidden?: boolean;
 }
 
 function viewOf({
@@ -42,19 +46,22 @@ function viewOf({
   cursorLy = [0, 0, 0],
   onCursor = () => undefined,
   centreLy = null,
+  displayHidden = false,
 }: ViewSpec) {
   return (
     <ServerLinkHarness>
-      <GalaxyMapView
-        universe={UNIVERSE_ID}
-        view={view}
-        population={population}
-        pictureWidthPx={pictureWidthPx}
-        devicePixelRatio={devicePixelRatio}
-        cursorLy={cursorLy}
-        onCursor={onCursor}
-        centreLy={centreLy}
-      />
+      <Activity mode={displayHidden ? "hidden" : "visible"}>
+        <GalaxyMapView
+          universe={UNIVERSE_ID}
+          view={view}
+          population={population}
+          pictureWidthPx={pictureWidthPx}
+          devicePixelRatio={devicePixelRatio}
+          cursorLy={cursorLy}
+          onCursor={onCursor}
+          centreLy={centreLy}
+        />
+      </Activity>
     </ServerLinkHarness>
   );
 }
@@ -98,6 +105,30 @@ async function answerFaceOn(socket: FakeWebSocket): Promise<void> {
     socket.serverAnswers("density_map", (body) =>
       aDensityMap({ codes: FACE_ON_CODES, widthPx: 8, heightPx: 8, population: body.population }),
     );
+  });
+}
+
+/** Keeps a `focusout` from React, which hears `blur` through it: a focus lost unheard. */
+function unheard(event: Event): void {
+  event.stopPropagation();
+}
+
+/** One pixel of the 8 × 8 face-on map from the galactic centre: the cursor after `ArrowDown`. */
+const MOVED_LY: CentreLy = [16_384, 0, 0];
+
+/** The face-on view's density reading. */
+function faceOnDensity(): HTMLElement | null {
+  return within(faceOn()).getByText("CURSOR DENSITY").parentElement;
+}
+
+/** The regions that announce as the cursor moves one pixel, the view otherwise as `spec` has it. */
+async function announcedOnMove(
+  rerender: (next: ViewSpec) => void,
+  spec: ViewSpec = {},
+): Promise<ReadonlyArray<HTMLElement>> {
+  return announcements(() => {
+    rerender({ ...spec, cursorLy: MOVED_LY });
+    return Promise.resolve();
   });
 }
 
@@ -689,32 +720,36 @@ describe("GalaxyMapView", () => {
     ).toBeInTheDocument();
   });
 
-  it("reads the density under the cursor out as it changes, while the picture has focus", async () => {
-    const { socket } = renderView();
+  it("announces the density under the cursor as it moves, while the picture has focus", async () => {
+    const { socket, rerender } = renderView();
     await answerFaceOn(socket);
-
     act(() => {
       screen.getByRole("application", { name: "Galaxy map, face-on" }).focus();
     });
 
-    const reading = within(faceOn()).getByText("CURSOR DENSITY").parentElement;
-    expect(reading).toHaveAttribute("aria-live", "polite");
-    expect(reading).toHaveAttribute("aria-atomic", "true");
+    const announced = await announcedOnMove(rerender);
+
+    expect(announced).toEqual([faceOnDensity()]);
+  });
+
+  it("reads the density out whole", async () => {
+    const { socket } = renderView();
+
+    await answerFaceOn(socket);
+
+    expect(faceOnDensity()).toHaveAttribute("aria-atomic", "true");
   });
 
   it("stops announcing the density once the picture loses focus", async () => {
     const user = userEvent.setup();
-    const { socket } = renderView();
+    const { socket, rerender } = renderView();
     await answerFaceOn(socket);
     await user.click(screen.getByRole("application", { name: "Galaxy map, face-on" }));
 
     // Focus that moved on to the other view would otherwise leave both announcing (ruling 16).
     await user.click(document.body);
 
-    expect(within(faceOn()).getByText("CURSOR DENSITY").parentElement).toHaveAttribute(
-      "aria-live",
-      "off",
-    );
+    expect(await announcedOnMove(rerender)).toEqual([]);
   });
 
   it("announces no density from a new picture after a focused one was taken away", async () => {
@@ -729,23 +764,40 @@ describe("GalaxyMapView", () => {
     rerender({ population: "young" });
     await answerFaceOn(socket);
 
-    expect(within(faceOn()).getByText("CURSOR DENSITY").parentElement).toHaveAttribute(
-      "aria-live",
-      "off",
-    );
+    expect(await announcedOnMove(rerender, { population: "young" })).toEqual([]);
   });
 
   it("announces no density while the picture has not got focus", async () => {
-    const { socket } = renderView();
-
+    const { socket, rerender } = renderView();
     await answerFaceOn(socket);
 
     // The other view's reading follows the same cursor, so a view that is not being moved over
     // would announce a second time for one key press (the orchestrator's ruling 16).
-    expect(within(faceOn()).getByText("CURSOR DENSITY").parentElement).toHaveAttribute(
-      "aria-live",
-      "off",
-    );
+    expect(await announcedOnMove(rerender)).toEqual([]);
+  });
+
+  it("announces no density once its display is shown again, if the focus left it unheard", async () => {
+    const { socket, rerender } = renderView();
+    await answerFaceOn(socket);
+    const picture = screen.getByRole("application", { name: "Galaxy map, face-on" });
+    act(() => {
+      picture.focus();
+    });
+    // The picture loses the focus while its display is hidden, and no `blur` reaches React: what
+    // the view may meet if a browser takes the focus from an element it no longer displays.
+    rerender({ displayHidden: true });
+    window.addEventListener("focusout", unheard, { capture: true });
+    try {
+      act(() => {
+        picture.blur();
+      });
+    } finally {
+      window.removeEventListener("focusout", unheard, { capture: true });
+    }
+
+    rerender({ displayHidden: false });
+
+    expect(await announcedOnMove(rerender)).toEqual([]);
   });
 
   it("marks the chart's centre with a mark of its own, apart from the cursor", async () => {

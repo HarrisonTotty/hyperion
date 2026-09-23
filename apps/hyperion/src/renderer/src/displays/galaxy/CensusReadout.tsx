@@ -1,5 +1,5 @@
 import type { LayerCensus, LayerStatus } from "@hyperion/protocol";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { annunciation } from "../../components/RequestStatus";
@@ -11,6 +11,7 @@ import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import type { RequestState } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
 import { censusHint, censusLine, formatBandMsun, inRangeCount } from "./chartModel";
+import { usePageTabFocus } from "./pageTabFocus";
 
 /** What a layer's line in the census table says about the layer, in words. */
 function statusWords(status: LayerStatus): string {
@@ -134,7 +135,7 @@ interface CensusReadoutProps {
   readonly driveRangeLy: number;
   /** Whether the answer is a snapshot the link no longer backs: then muted, with a trailing `S`. */
   readonly stale: boolean;
-  /** Sends the query again after a failure. */
+  /** Sends the query again after a failure; the readout moves the focus off `RETRY` first. */
   readonly onRetry: () => void;
 }
 
@@ -157,12 +158,16 @@ interface CensusReadoutProps {
  * announces that it started and then what came back. `RETRY` and `CENSUS BY LAYER` stand beside it,
  * outside it. The camera's readouts are deliberately silent; `CHART DATA INVALID`, the
  * selected-system readout and the cursor line announce from their own places, each being a region
- * in its own right.
+ * in its own right. `RETRY` goes as it is pressed, since the query is then pending, so it hands the
+ * focus to `CENSUS BY LAYER` beside it, or, before the first answer, when there is no toggle, to
+ * the page's tab: never to the document's body (the orchestrator's ruling 18).
  */
 export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: CensusReadoutProps) {
   const tableId = useId();
   const stateId = useId();
   const [tableShown, setTableShown] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const focusPageTab = usePageTabFocus();
   const line = result === null ? null : censusLine(result.census);
   const hint = result === null ? null : censusHint(result.layers);
   const shown = annunciation(state);
@@ -241,13 +246,29 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
           // Beside the region, not in it: what the operator can do about a failure is a control,
           // and a control that appears inside a region is announced with it. Described by the
           // words, so that it says which failure it retries wherever it is reached from.
-          <button type="button" className="control" aria-describedby={stateId} onClick={onRetry}>
+          <button
+            type="button"
+            className="control"
+            aria-describedby={stateId}
+            onClick={() => {
+              // The query goes pending and RETRY with it, so the focus goes to a control that
+              // stays (ruling 18). The ruling's first choice, the map picture `C` was pressed on,
+              // is never on show here: `C` shows this page, which hides the map's.
+              if (toggleRef.current === null) {
+                focusPageTab?.();
+              } else {
+                toggleRef.current.focus();
+              }
+              onRetry();
+            }}
+          >
             RETRY
           </button>
         )}
         {result === null ? null : (
           // Outside the region: the table it shows is not part of what the answer says.
           <button
+            ref={toggleRef}
             type="button"
             className="control disclosure census-readout__toggle"
             aria-expanded={tableShown}

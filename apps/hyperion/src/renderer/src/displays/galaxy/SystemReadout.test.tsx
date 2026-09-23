@@ -49,13 +49,19 @@ function valueOf(readout: HTMLElement, label: string): string | null {
 }
 
 describe("SystemReadout", () => {
-  it("is a status region named for the selection, read as a whole", () => {
+  it("is read as a whole when the selection changes", () => {
     const readout = renderReadout(aSystem([1, 0, 0]));
 
-    // Not an `output`, whose content model is phrasing content and cannot hold the readout's `dl`
-    // (the orchestrator's ruling 14); atomic, so a new selection is read as one reading.
-    expect(readout.tagName.toLowerCase()).toBe("div");
+    // Atomic, so that a new selection is read as one reading.
     expect(readout).toHaveAttribute("aria-atomic", "true");
+  });
+
+  it("holds its list in an element whose content may be a list, not in an output", () => {
+    const readout = renderReadout(aSystem([1, 0, 0]));
+
+    // A rule of HTML's content models, so held as markup: an `output` holds phrasing content only
+    // and cannot hold the readout's `dl` (the orchestrator's ruling 14).
+    expect(readout.tagName).toBe("DIV");
   });
 
   it("names the system and gives its ID in upper case", () => {

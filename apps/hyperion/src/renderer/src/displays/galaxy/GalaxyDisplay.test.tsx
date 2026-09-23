@@ -250,6 +250,31 @@ describe("GalaxyDisplay", () => {
       expect(shownInUniverse("SURVEY 2")).toBeInTheDocument();
     });
 
+    it("takes the focus to its control when a create left unconfirmed shows it over the map", async () => {
+      const rendered = await renderWithMaps();
+      await rendered.user.click(universeToggle());
+      await rendered.user.click(screen.getByRole("button", { name: "NEW UNIVERSE" }));
+      await rendered.user.type(screen.getByRole("textbox", { name: "NAME" }), "SURVEY 3{Enter}");
+      // Folded again while the create is pending, and the map taken up meanwhile.
+      await rendered.user.click(universeToggle());
+      mapCanvas("face-on").focus();
+      vi.useFakeTimers();
+      await server(() => {
+        rendered.socket.close();
+      });
+      act(() => {
+        vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+      });
+      vi.useRealTimers();
+
+      act(() => {
+        FakeWebSocket.latest().serverWelcomes();
+      });
+
+      // The report of the lost create shows the panel whole, which hides the map that had it.
+      expect(document.activeElement).toBe(universeToggle());
+    });
+
     it("stays whole while a create's result is unconfirmed, so that the report is seen", async () => {
       const rendered = await renderWithMaps();
       await rendered.user.click(universeToggle());
@@ -310,6 +335,57 @@ describe("GalaxyDisplay", () => {
       // The map page is only hidden, so its maps are not asked for again on its return.
       await user.click(screen.getByRole("tab", { name: "GALAXY MAP" }));
       expect(socket.requestsOfKind("density_map")).toHaveLength(2);
+    });
+
+    it("hands the focus to the PARAMETERS tab when its RETRY is pressed", async () => {
+      const { user, socket } = await renderWithMaps();
+      await user.click(screen.getByRole("tab", { name: "PARAMETERS" }));
+      const [parameters] = socket.requestsOfKind("galaxy_parameters");
+      await server(() => {
+        socket.serverRejects(parameters?.id ?? -1, {
+          code: "queue_full",
+          message: "the interactive queue is full",
+          field: null,
+        });
+      });
+      act(() => {
+        within(screen.getByRole("tabpanel", { name: "PARAMETERS" }))
+          .getByRole("button", { name: "RETRY" })
+          .focus();
+      });
+
+      await user.keyboard("{Enter}");
+
+      // RETRY goes as the request goes pending, and nothing on the page can take the focus until
+      // the answer: its tab can (the orchestrator's ruling 18).
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "PARAMETERS" }));
+    });
+
+    it("hands the focus to the GALAXY MAP tab when a map's RETRY is pressed", async () => {
+      const rendered = renderDisplay();
+      const { user, socket } = rendered;
+      await server(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList([aUniverse()]));
+      });
+      await openFromList(rendered);
+      const faceOnMap = socket
+        .requestsOfKind("density_map")
+        .find(({ body }) => body.view === "face_on");
+      await server(() => {
+        socket.serverRejects(faceOnMap?.id ?? -1, {
+          code: "queue_full",
+          message: "the interactive queue is full",
+          field: null,
+        });
+      });
+      act(() => {
+        within(mapView("FACE-ON FROM NORTH")).getByRole("button", { name: "RETRY" }).focus();
+      });
+
+      await user.keyboard("{Enter}");
+
+      // The view is mounted afresh from PENDING, RETRY and all; the page's tab stays.
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "GALAXY MAP" }));
     });
 
     it("is one stop in the tab order, its pages chosen with the arrow keys", async () => {
@@ -453,6 +529,38 @@ describe("GalaxyDisplay", () => {
       ).toHaveStyle({ left: "50%", top: "50%" });
     });
 
+    it("hands the focus to the LOCAL CHART tab when C hides the map that had it", async () => {
+      const { user } = await renderWithMaps();
+      mapCanvas("face-on").focus();
+
+      await user.keyboard("c");
+
+      // The map's page is hidden to show the chart's, and a hidden element keeps the focus in
+      // jsdom, where Chromium takes it away; either way it must reach the page now shown.
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "LOCAL CHART" }));
+    });
+
+    it("hands the focus to the LOCAL CHART tab when C is pressed on the map's tab", async () => {
+      const { user } = await renderWithMaps();
+      act(() => {
+        screen.getByRole("tab", { name: "GALAXY MAP" }).focus();
+      });
+
+      await user.keyboard("c");
+
+      // The tab list's one stop follows the page shown, and so does the focus that was on it.
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "LOCAL CHART" }));
+    });
+
+    it("leaves the focus on CENTRE CHART, which stays on show, when it shows the chart", async () => {
+      const { user } = await renderWithMaps();
+      const centre = within(cursorPanel()).getByRole("button", { name: "C CENTRE CHART" });
+
+      await user.click(centre);
+
+      expect(document.activeElement).toBe(centre);
+    });
+
     it("makes each map a focusable picture with its key hint", async () => {
       await renderWithMaps();
 
@@ -482,6 +590,22 @@ describe("GalaxyDisplay", () => {
       expect(coordinate("X")).toBe("0.0");
       expect(coordinate("Y")).toBe("0.0");
       expect(coordinate("Z")).toBe(formatNumber(PIXEL_LY, 1));
+    });
+
+    it("centres the chart on the plane after a face-on click and face-on steps", async () => {
+      const { user, socket } = await renderWithMaps();
+      // A pointer inside a pixel, off its centre, then steps of one and ten pixels.
+      await click(user, placeCanvas("face-on"), 123.4, 77.7);
+      await user.keyboard("{ArrowDown}{ArrowLeft}{Shift>}{ArrowUp}{ArrowRight}{/Shift}");
+
+      await user.keyboard("c");
+
+      // The edge-on map has an even number of rows, as at 128 pixels, so that no row is centred on
+      // the plane; a face-on pick or step keeps the cursor's z, which starts at 0, and nothing
+      // takes it from the edge-on row nearest the plane (plan 04's note for this plan).
+      const centre = socket.requestsOfKind("systems_in_range")[0]?.body.centre;
+      expect(centre?.cell_ly[2]).toBe(0);
+      expect(centre?.offset_m[2]).toBe(0);
     });
 
     it("sets X from the height of a face-on click and Y from its place across", async () => {

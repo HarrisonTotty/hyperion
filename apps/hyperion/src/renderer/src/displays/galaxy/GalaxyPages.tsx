@@ -1,8 +1,9 @@
-import { Activity, type KeyboardEvent, useId } from "react";
+import { Activity, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
 
 import type { CentreLy } from "../../lib/galaxy/model";
 import { GalaxyMapPanel } from "./GalaxyMapPanel";
 import { LocalChartPanel } from "./LocalChartPanel";
+import { PageTabFocus } from "./pageTabFocus";
 import { ParametersPanel } from "./ParametersPanel";
 import type { LocalChartState } from "./useLocalChart";
 
@@ -17,6 +18,21 @@ const PAGE_TITLE: Readonly<Record<GalaxyPage, string>> = {
   map: "GALAXY MAP",
   chart: "LOCAL CHART",
 };
+
+/** The ID of a page's tab, from the pages' own ID. */
+function tabIdOf(baseId: string, page: GalaxyPage): string {
+  return `${baseId}-tab-${page}`;
+}
+
+/** The ID of a page, from the pages' own ID. */
+function pageIdOf(baseId: string, page: GalaxyPage): string {
+  return `${baseId}-page-${page}`;
+}
+
+/** Moves the focus to a page's tab. */
+function focusTab(baseId: string, page: GalaxyPage): void {
+  document.getElementById(tabIdOf(baseId, page))?.focus();
+}
 
 /** The page an arrow, `Home` or `End` key moves the selection to from `page`, or `null`. */
 function pageAfterKey(key: string, page: GalaxyPage): GalaxyPage | null {
@@ -67,7 +83,9 @@ interface GalaxyPagesProps {
  * one stop in the tab order; the arrow keys, `Home` and `End` choose a page there, and a click or
  * tap chooses the page under it. The map is shown until the operator chooses otherwise, and
  * `CENTRE CHART` shows the chart. Every page stays mounted, the ones not chosen hidden, so that none
- * asks the server again on its return and the chart keeps its camera.
+ * asks the server again on its return and the chart keeps its camera. A page hidden with the focus
+ * in it, as by `C` on a focused map, hands the focus to the tab of the page shown; and each page
+ * offers its tab, through {@link PageTabFocus}, to a control of its own that goes as it is pressed.
  */
 export function GalaxyPages({
   hidden,
@@ -79,8 +97,31 @@ export function GalaxyPages({
   chart,
 }: GalaxyPagesProps) {
   const baseId = useId();
-  const tabId = (each: GalaxyPage): string => `${baseId}-tab-${each}`;
-  const panelId = (each: GalaxyPage): string => `${baseId}-page-${each}`;
+  const tabId = (each: GalaxyPage): string => tabIdOf(baseId, each);
+  const panelId = (each: GalaxyPage): string => pageIdOf(baseId, each);
+  const pagesRef = useRef<HTMLDivElement>(null);
+
+  // A page chosen from elsewhere hides the one the focus may be in, as `C` pressed on a focused map
+  // hides the map's page to show the chart's. The focus would stay on a hidden element, which
+  // Chromium then takes away and jsdom does not; before paint, it moves to the tab of the page now
+  // shown, as it follows a choice made on the tabs. A map's density reading, which announces only
+  // while its picture has focus, so hears the picture's `blur` from this move, in any browser,
+  // rather than rely on how the browser treats a focused element that is hidden.
+  // The same holds for the focus on the tab of the page that was shown, which is no longer the
+  // tab list's one stop.
+  useLayoutEffect(() => {
+    const focused = document.activeElement;
+    const within = focused?.closest('[role="tabpanel"], [role="tab"]');
+    if (
+      within !== null &&
+      within !== undefined &&
+      pagesRef.current?.contains(within) === true &&
+      within.id !== pageIdOf(baseId, page) &&
+      within.id !== tabIdOf(baseId, page)
+    ) {
+      focusTab(baseId, page);
+    }
+  }, [baseId, page]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     const next = pageAfterKey(event.key, page);
@@ -90,11 +131,11 @@ export function GalaxyPages({
     event.preventDefault();
     onPage(next);
     // The focus follows the choice, as it does in a tab list.
-    document.getElementById(tabId(next))?.focus();
+    focusTab(baseId, next);
   };
 
   return (
-    <div className="panel galaxy__pages galaxy-pages" hidden={hidden}>
+    <div className="panel galaxy__pages galaxy-pages" hidden={hidden} ref={pagesRef}>
       <div className="galaxy-pages__tabs" role="tablist" aria-label="Galaxy pages">
         {GALAXY_PAGES.map((each) => (
           <button
@@ -123,7 +164,13 @@ export function GalaxyPages({
         className="galaxy-pages__page galaxy-pages__page--parameters"
         hidden={page !== "parameters"}
       >
-        <ParametersPanel />
+        <PageTabFocus
+          value={() => {
+            focusTab(baseId, "parameters");
+          }}
+        >
+          <ParametersPanel />
+        </PageTabFocus>
       </div>
       <div
         id={panelId("map")}
@@ -132,7 +179,13 @@ export function GalaxyPages({
         className="galaxy-pages__page galaxy-pages__page--map"
         hidden={page !== "map"}
       >
-        <GalaxyMapPanel cursorLy={cursorLy} onCursor={onCursor} centreLy={centreLy} />
+        <PageTabFocus
+          value={() => {
+            focusTab(baseId, "map");
+          }}
+        >
+          <GalaxyMapPanel cursorLy={cursorLy} onCursor={onCursor} centreLy={centreLy} />
+        </PageTabFocus>
       </div>
       <div
         id={panelId("chart")}
@@ -147,7 +200,13 @@ export function GalaxyPages({
          * so its single keys (D3) and its frames belong to the page the operator is looking at.
          */}
         <Activity mode={page === "chart" ? "visible" : "hidden"}>
-          <LocalChartPanel chart={chart} />
+          <PageTabFocus
+            value={() => {
+              focusTab(baseId, "chart");
+            }}
+          >
+            <LocalChartPanel chart={chart} />
+          </PageTabFocus>
         </Activity>
       </div>
     </div>

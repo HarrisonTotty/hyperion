@@ -352,6 +352,27 @@ describe("UniversePanel", () => {
       expect(socket.requestsOfKind("list_universes")).toHaveLength(2);
     });
 
+    it("hands the focus to its title control when the list's RETRY is pressed", async () => {
+      const { user, socket } = renderPanel();
+      const [list] = socket.requestsOfKind("list_universes");
+      await server(() => {
+        socket.serverRejects(list?.id ?? -1, {
+          code: "queue_full",
+          message: "the interactive queue is full",
+          field: null,
+        });
+      });
+      act(() => {
+        screen.getByRole("button", { name: "RETRY" }).focus();
+      });
+
+      await user.keyboard("{Enter}");
+
+      // RETRY goes as the list goes pending; the title control stays (the orchestrator's ruling
+      // 18).
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Universe" }));
+    });
+
     it("keeps the list through a link loss and requests it again on reconnect", async () => {
       vi.useFakeTimers();
       const { socket } = renderPanel();

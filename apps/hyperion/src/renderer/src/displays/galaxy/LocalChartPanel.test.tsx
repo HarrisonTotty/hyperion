@@ -70,8 +70,11 @@ interface Rendered {
   readonly recorder: RecordingContext2D;
 }
 
-/** Renders the display with a universe open, its maps left pending: the chart needs neither. */
-async function renderChart({ radiusLy = 80 } = {}): Promise<Rendered> {
+/**
+ * Renders the display with a universe open, its maps left pending: the chart needs neither. The
+ * chart's first query is answered unless `answered` is false.
+ */
+async function renderChart({ radiusLy = 80, answered = true } = {}): Promise<Rendered> {
   const user = userEvent.setup();
   const recorder = stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -99,8 +102,40 @@ async function renderChart({ radiusLy = 80 } = {}): Promise<Rendered> {
   await user.clear(screen.getByRole("textbox", { name: "X" }));
   await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
   await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
-  await answerQuery(socket, radiusLy);
+  if (answered) {
+    await answerQuery(socket, radiusLy);
+  }
   return { user, socket, recorder };
+}
+
+/** Refuses the query in flight, as a server whose queue is full does. */
+async function refuseQuery(socket: FakeWebSocket): Promise<void> {
+  const query = socket.requestsOfKind("systems_in_range").at(-1);
+  await server(() => {
+    socket.serverRejects(query?.id ?? -1, {
+      code: "queue_full",
+      message: "the interactive queue is full",
+      field: null,
+    });
+  });
+}
+
+/** Answers the query in flight with a census missing a layer, which the chart cannot read. */
+async function answerUnreadable(socket: FakeWebSocket): Promise<void> {
+  await server(() => {
+    socket.serverAnswers("systems_in_range", (body) => {
+      const answer = aSystemsInRange({ centreLy: CENTRE, radiusLy: 100, minLayer: body.min_layer });
+      return { ...answer, census: { ...answer.census, layers: answer.census.layers.slice(1) } };
+    });
+  });
+}
+
+/** Presses the chart page's RETRY from the keyboard, as an operator who reached it by Tab does. */
+async function pressRetry(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  act(() => {
+    within(chartPage()).getByRole("button", { name: "RETRY" }).focus();
+  });
+  await user.keyboard("{Enter}");
 }
 
 /** Answers the query in flight with the three fixture systems. */
@@ -376,5 +411,51 @@ describe("LocalChartPanel", () => {
     await user.click(within(chartPage()).getByRole("button", { name: "RETRY" }));
 
     expect(socket.requestsOfKind("systems_in_range")).toHaveLength(sentBefore + 1);
+  });
+
+  it("hands the focus to CENSUS BY LAYER when the census's RETRY is pressed", async () => {
+    const { user, socket } = await renderChart();
+    await user.selectOptions(within(chartPage()).getByLabelText("QUERY RADIUS"), "100");
+    await refuseQuery(socket);
+
+    await pressRetry(user);
+
+    // RETRY goes as the query goes pending, and the toggle beside it stays (ruling 18).
+    expect(document.activeElement).toBe(
+      within(chartPage()).getByRole("button", { name: "CENSUS BY LAYER" }),
+    );
+  });
+
+  it("hands the focus to the page's tab when RETRY is pressed before any answer", async () => {
+    const { user, socket } = await renderChart({ answered: false });
+    await refuseQuery(socket);
+
+    await pressRetry(user);
+
+    // No answer, so no CENSUS BY LAYER: the tab that heads the page, never the document's body.
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "LOCAL CHART" }));
+  });
+
+  it("keeps the focus on the chart data's RETRY while it stays on show", async () => {
+    const { user, socket } = await renderChart();
+    await user.selectOptions(within(chartPage()).getByLabelText("QUERY RADIUS"), "100");
+    await answerUnreadable(socket);
+
+    await pressRetry(user);
+    // The same unreadable answer again, as a deterministic server gives it: the fault stays.
+    await answerUnreadable(socket);
+
+    expect(document.activeElement).toBe(within(chartPage()).getByRole("button", { name: "RETRY" }));
+  });
+
+  it("hands the focus to the page's tab once a usable answer takes the chart data's RETRY away", async () => {
+    const { user, socket } = await renderChart();
+    await user.selectOptions(within(chartPage()).getByLabelText("QUERY RADIUS"), "100");
+    await answerUnreadable(socket);
+
+    await pressRetry(user);
+    await answerQuery(socket, 100);
+
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "LOCAL CHART" }));
   });
 });

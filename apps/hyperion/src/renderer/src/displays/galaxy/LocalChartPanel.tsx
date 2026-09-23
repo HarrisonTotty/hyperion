@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef } from "react";
+
 import {
   AU_PER_LY,
   formatBearingDeg,
@@ -16,6 +18,7 @@ import { SpatialView } from "../../spatial/SpatialView";
 import { vec3 } from "../../spatial/vec3";
 import { CensusReadout } from "./CensusReadout";
 import { ChartControls } from "./ChartControls";
+import { usePageTabFocus } from "./pageTabFocus";
 import { SymbolLegend } from "./SymbolLegend";
 import type { LocalChartState } from "./useLocalChart";
 
@@ -55,11 +58,27 @@ interface LocalChartPanelProps {
  * quantity does not carry two precisions. Under the chart stand what it was asked for, the census of
  * what came back, and the legend, each on as few lines as it can be, so that the picture keeps the
  * height. With no centre chosen the page says how to choose one, and an answer the client cannot
- * chart reads as a fault with `RETRY`, as an unusable map does. An answer the link no longer backs
- * is drawn and read as stale, in `--text-muted` with a trailing `S`.
+ * chart reads as a fault with `RETRY`, as an unusable map does. That `RETRY` stays on show while
+ * the query it sends is pending and goes once an answer the chart can use arrives; the focus it
+ * held then goes to the page's tab. An answer the link no longer backs is drawn and read as stale,
+ * in `--text-muted` with a trailing `S`.
  */
 export function LocalChartPanel({ chart }: LocalChartPanelProps) {
   const { result, scene, bands, state, hasCentre, driveRangeLy, heldBack, fault, stale } = chart;
+  const focusPageTab = usePageTabFocus();
+  // The fault is the last answer's, so its RETRY stays on show while the query it sends is pending,
+  // and goes with the fault once an answer the chart can use arrives. Had it the focus then, the
+  // focus is left on nothing; before paint it goes to the page's tab (the orchestrator's ruling
+  // 18).
+  const faultShown = useRef(fault !== null);
+  useLayoutEffect(() => {
+    const cleared = faultShown.current && fault === null;
+    faultShown.current = fault !== null;
+    const focused = document.activeElement;
+    if (cleared && (focused === null || focused === document.body)) {
+      focusPageTab?.();
+    }
+  }, [fault, focusPageTab]);
   const centre = result === null ? null : cylindrical(vec3(...result.centreLy));
   const onAxis = centre !== null && !(centre.radiusLy > AXIS_TOLERANCE_LY);
   const radiusText = centre === null ? null : formatLengthLy(centre.radiusLy, CENTRE_DECIMALS);

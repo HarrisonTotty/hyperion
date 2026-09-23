@@ -138,6 +138,20 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
   });
 
+  it("hands the focus to the shown display's tab when a function key hides the one that had it", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.keyboard("{F2}");
+    act(() => {
+      screen.getByRole("button", { name: "Universe" }).focus();
+    });
+
+    await user.keyboard("{F1}");
+
+    // A hidden element keeps the focus in jsdom, and Chromium takes it away to the page's body.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "F1 Link" }));
+  });
+
   it("hides the inactive display from the accessibility tree", async () => {
     const user = userEvent.setup();
     render(<App />);

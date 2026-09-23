@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -152,21 +152,40 @@ describe("CensusReadout", () => {
     expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent("2");
   });
 
-  it("announces the query and then what came back, as one line", () => {
+  it("announces the query and then what came back", async () => {
     const { answered } = renderReadout(null, PENDING);
-
-    // Atomic, so a count is read with the line it belongs to (the orchestrator's ruling 11). A
-    // `div` with `role="status"`, not an `output`: an `output` holds phrasing content, and the
-    // region holds a `p` and a `dl` (ruling 14).
-    expect(summary().tagName).toBe("DIV");
-    expect(summary()).toHaveAttribute("aria-atomic", "true");
     expect(summary()).toHaveTextContent("PENDING");
+
+    const announced = await announcements(() => {
+      answered(TWO_SYSTEMS);
+      return Promise.resolve();
+    });
+
+    expect(announced).toEqual([summary()]);
+  });
+
+  it("gives the answer in place of PENDING once it comes back", () => {
+    const { answered } = renderReadout(null, PENDING);
 
     answered(TWO_SYSTEMS);
 
     expect(summary()).toHaveTextContent("COMPLETE ABOVE 0.08");
-    expect(summary()).toHaveTextContent("IN RANGE");
     expect(summary()).not.toHaveTextContent("PENDING");
+  });
+
+  it("reads the whole summary when any part of it changes", () => {
+    renderReadout(TWO_SYSTEMS, PENDING);
+
+    // Atomic, so that a count is read with the line it belongs to (the orchestrator's ruling 11).
+    expect(summary()).toHaveAttribute("aria-atomic", "true");
+  });
+
+  it("holds its list in an element whose content may be a list, not in an output", () => {
+    renderReadout(TWO_SYSTEMS, PENDING);
+
+    // A rule of HTML's content models, so held as markup: an `output` holds phrasing content only,
+    // and the summary holds a `p` and a `dl`, so it is a `div` with the status role (ruling 14).
+    expect(summary().tagName).toBe("DIV");
   });
 
   it("holds no region of its own inside the summary", () => {
@@ -235,6 +254,24 @@ describe("CensusReadout", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it("hands the focus to CENSUS BY LAYER beside it when RETRY is pressed", async () => {
+    const user = userEvent.setup();
+    const { show } = renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "queue_full",
+      reason: "the queue is full",
+    });
+    act(() => {
+      screen.getByRole("button", { name: "RETRY" }).focus();
+    });
+
+    await user.keyboard("{Enter}");
+    // What the chart does on RETRY: the query goes pending, and RETRY goes with the failure.
+    show(PENDING);
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
+  });
+
   it("offers no RETRY while the query is pending", () => {
     renderReadout(TWO_SYSTEMS, PENDING);
 
@@ -250,9 +287,10 @@ describe("CensusReadout", () => {
   it("gives the link's state in plain words, as it is no failure of the query", () => {
     renderReadout(TWO_SYSTEMS, { kind: "link_down", reason: "NO CARRIER" });
 
-    expect(within(summary()).getByText("NO CARRIER")).not.toHaveClass(
-      "census-readout__state--fault",
-    );
+    // Exactly the plain class, so that a renamed caution class cannot pass unseen.
+    expect(within(summary()).getByText("NO CARRIER")).toHaveClass("census-readout__state", {
+      exact: true,
+    });
   });
 
   it("reads a timeout in caution, as a failed system", () => {
@@ -268,8 +306,9 @@ describe("CensusReadout", () => {
       reason: "no such universe",
     });
 
-    expect(within(summary()).getByText("REJECTED: no such universe")).not.toHaveClass(
-      "census-readout__state--fault",
+    expect(within(summary()).getByText("REJECTED: no such universe")).toHaveClass(
+      "census-readout__state",
+      { exact: true },
     );
   });
 

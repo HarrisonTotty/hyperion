@@ -9,6 +9,7 @@ import { useUniverse } from "../../lib/universe";
 import { type ScrollMetrics, useScrollMetrics } from "../../lib/useScrollMetrics";
 import { REQUEST_TIMEOUT_MS, useServerRequest } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
+import { usePageTabFocus } from "./pageTabFocus";
 import { groupLabel } from "./parameterLabels";
 import { type ParameterReading, toReading } from "./parameterReadings";
 
@@ -151,14 +152,16 @@ function ParameterList({ groups }: ParameterListProps) {
  * @remarks
  * A page of the panel it shares with `GALAXY MAP`, whose page selector names it. Requested for the
  * open universe, and again whenever another is opened or the operator asks with `RETRY` after a
- * failure. Labels come from the client's glossary, and a key it lacks is shown as itself (plan 05,
- * design note D8a). Values are right-aligned in B612 Mono with their units beside them; nothing is
+ * failure; `RETRY` goes as the request goes pending, so it hands the focus to the page's tab.
+ * Labels come from the client's glossary, and a key it lacks is shown as itself (plan 05, design
+ * note D8a). Values are right-aligned in B612 Mono with their units beside them; nothing is
  * converted. All rows stay in the DOM, since there are a few dozen, and the list scrolls inside the
  * page, from the keyboard too, with the position of the rows in view beneath it.
  */
 export function ParametersPanel() {
   const { open } = useUniverse();
   const [retries, setRetries] = useState(0);
+  const focusPageTab = usePageTabFocus();
   const state = useServerRequest<"galaxy_parameters">(
     open === null ? null : { kind: "galaxy_parameters", universe: open.id },
     REQUEST_TIMEOUT_MS,
@@ -171,6 +174,9 @@ export function ParametersPanel() {
       <RequestStatus
         state={state}
         onRetry={() => {
+          // RETRY goes as the request goes pending, and nothing else here can take the focus
+          // until the answer: the page's tab can (the orchestrator's ruling 18).
+          focusPageTab?.();
           setRetries((count) => count + 1);
         }}
       />
