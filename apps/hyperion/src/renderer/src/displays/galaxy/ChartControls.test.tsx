@@ -112,8 +112,8 @@ describe("ChartControls", () => {
     const user = userEvent.setup();
     const { onDriveRange } = renderControls();
 
-    await user.clear(screen.getByLabelText("DRIVE RANGE SET"));
-    await user.type(screen.getByLabelText("DRIVE RANGE SET"), "80");
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "80");
     await user.tab();
 
     expect(onDriveRange).toHaveBeenCalledWith(80);
@@ -123,8 +123,8 @@ describe("ChartControls", () => {
     const user = userEvent.setup();
     const { onDriveRange } = renderControls();
 
-    await user.clear(screen.getByLabelText("DRIVE RANGE SET"));
-    await user.type(screen.getByLabelText("DRIVE RANGE SET"), "900{Enter}");
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "900{Enter}");
 
     expect(screen.getByText("DRIVE RANGE INVALID: enter 0.01 to 500 ly")).toBeInTheDocument();
     expect(onDriveRange).not.toHaveBeenCalled();

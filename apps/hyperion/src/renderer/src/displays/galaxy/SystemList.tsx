@@ -21,7 +21,10 @@ const ROW_REM = 2;
 /** Rows rendered beyond each end of the visible ones, so that a scroll shows no gap. */
 const OVERSCAN_ROWS = 8;
 
-/** Whether a system lies within the set range, in the words the list and the readout share. */
+/**
+ * Whether a system lies within the drive range, in words: `IN RANGE` as the readout has it, or
+ * `OUT`, since the list's 5 rem column cannot hold the readout's `OUT OF RANGE`.
+ */
 function rangeWords(inRange: boolean): string {
   return inRange ? "IN RANGE" : "OUT";
 }
@@ -46,7 +49,7 @@ interface SystemListProps {
  * the whole list. `ArrowUp` and `ArrowDown` move one row, `PageUp` and `PageDown` one window, `Home`
  * and `End` the ends; the selection follows the active row and is reported, and the list scrolls it
  * into view by its index, since a row outside the window is not in the DOM to scroll to. A selection
- * made on the chart scrolls the list to it as well. Whether a system is within the set range is
+ * made on the chart scrolls the list to it as well. Whether a system is within the drive range is
  * repeated in words, so that the chart's `--accent` is never the only signal.
  */
 export function SystemList({
@@ -168,7 +171,12 @@ export function SystemList({
         <span>
           INIT MASS <SolarMassUnit />
         </span>
-        <span>RANGE</span>
+        {/*
+         * The setting's one name, as the readout's reading of the same words has it: `RANGE` alone
+         * is kept for the chart's curve labels, where the chart is the context (the orchestrator's
+         * ruling 15). No `SET`, since the column holds within-or-beyond words, not the value.
+         */}
+        <span>DRIVE RANGE</span>
       </div>
       <div
         className="system-list__scroll"

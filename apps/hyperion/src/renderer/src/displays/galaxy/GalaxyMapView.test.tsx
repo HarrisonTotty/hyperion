@@ -689,14 +689,63 @@ describe("GalaxyMapView", () => {
     ).toBeInTheDocument();
   });
 
-  it("reads the density under the cursor out as it changes", async () => {
+  it("reads the density under the cursor out as it changes, while the picture has focus", async () => {
     const { socket } = renderView();
-
     await answerFaceOn(socket);
+
+    act(() => {
+      screen.getByRole("application", { name: "Galaxy map, face-on" }).focus();
+    });
 
     const reading = within(faceOn()).getByText("CURSOR DENSITY").parentElement;
     expect(reading).toHaveAttribute("aria-live", "polite");
     expect(reading).toHaveAttribute("aria-atomic", "true");
+  });
+
+  it("stops announcing the density once the picture loses focus", async () => {
+    const user = userEvent.setup();
+    const { socket } = renderView();
+    await answerFaceOn(socket);
+    await user.click(screen.getByRole("application", { name: "Galaxy map, face-on" }));
+
+    // Focus that moved on to the other view would otherwise leave both announcing (ruling 16).
+    await user.click(document.body);
+
+    expect(within(faceOn()).getByText("CURSOR DENSITY").parentElement).toHaveAttribute(
+      "aria-live",
+      "off",
+    );
+  });
+
+  it("announces no density from a new picture after a focused one was taken away", async () => {
+    const { socket, rerender } = renderView();
+    await answerFaceOn(socket);
+    act(() => {
+      screen.getByRole("application", { name: "Galaxy map, face-on" }).focus();
+    });
+
+    // Another population is other data, waited for from PENDING: the focused canvas goes, and no
+    // blur tells the view so.
+    rerender({ population: "young" });
+    await answerFaceOn(socket);
+
+    expect(within(faceOn()).getByText("CURSOR DENSITY").parentElement).toHaveAttribute(
+      "aria-live",
+      "off",
+    );
+  });
+
+  it("announces no density while the picture has not got focus", async () => {
+    const { socket } = renderView();
+
+    await answerFaceOn(socket);
+
+    // The other view's reading follows the same cursor, so a view that is not being moved over
+    // would announce a second time for one key press (the orchestrator's ruling 16).
+    expect(within(faceOn()).getByText("CURSOR DENSITY").parentElement).toHaveAttribute(
+      "aria-live",
+      "off",
+    );
   });
 
   it("marks the chart's centre with a mark of its own, apart from the cursor", async () => {

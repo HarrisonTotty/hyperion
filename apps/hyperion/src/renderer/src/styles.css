@@ -359,12 +359,15 @@ body {
   font-size: 0.875rem;
 }
 
-.request-status__text {
+/* The state's words, where a status line shows them and where the census region carries them. */
+.request-status__text,
+.census-readout__state {
   letter-spacing: 0.15em;
 }
 
 /* A failed or overloaded server, or no answer: a failed system, so caution. A refusal is plain. */
-.request-status__text--fault {
+.request-status__text--fault,
+.census-readout__state--fault {
   color: var(--status-caution);
 }
 
@@ -1261,7 +1264,7 @@ body {
   color: var(--text-muted);
 }
 
-/* The accent that marks what is within the set range is not live either once the answer is stale. */
+/* The accent marking what is within the drive range is not live either once the answer is stale. */
 .systems-panel--stale .system-list__row--in-range {
   color: var(--text-muted);
 }
@@ -1359,7 +1362,7 @@ body {
   margin: 0;
 }
 
-/* What the chart is asked for: the radius, the mass floor, the range set and the time. */
+/* What the chart is asked for: the radius, the mass floor, the drive range and the time. */
 .chart-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1458,9 +1461,10 @@ body {
 }
 
 /*
- * What the range query returned: the census line, the request's state, the counts and the control
- * that shows the census layer by layer, all on one row, then the hint and the table on rows of their
- * own. A column, so that the table is the part that gives way when the page is short.
+ * What the range query returned: the census line, the request's state and the counts, then RETRY
+ * after a failure and the control that shows the census layer by layer, all on one row, then the
+ * hint and the table on rows of their own. A column, so that the table is the part that gives way
+ * when the page is short.
  */
 .census-readout {
   display: flex;
@@ -1499,8 +1503,14 @@ body {
   color: var(--status-caution);
 }
 
-.census-readout__summary > .request-status {
+/*
+ * The request's state in words, in the announced region: PENDING, the link's state, or a failure.
+ * Its letter spacing and colours are `.request-status__text`'s, above, since it says what a status
+ * line would; RETRY stands outside the region, on the row beside it.
+ */
+.census-readout__state {
   margin: 0;
+  font-size: 0.875rem;
 }
 
 .census-readout__counts {
@@ -1663,7 +1673,7 @@ body {
   cursor: pointer;
 }
 
-/* Within the set range: --accent, as its symbol is, and the words beside it say so too. */
+/* Within the drive range: --accent, as its symbol is, and the words beside it say so too. */
 .system-list__row--in-range {
   color: var(--accent);
 }
@@ -1696,10 +1706,6 @@ body {
 }
 
 /* Everything known about the selected system, two labelled values to a line. */
-.system-readout {
-  display: block;
-}
-
 .system-readout__values {
   grid-template-columns: repeat(2, max-content minmax(0, 1fr));
   gap: 0.25rem 0.75rem;
@@ -1997,7 +2003,7 @@ body {
   white-space: nowrap;
 }
 
-/* A mark within the set range is labelled in the colour of its symbol. */
+/* A mark within the drive range is labelled in the colour of its symbol. */
 .spatial-label--available {
   color: var(--accent);
 }

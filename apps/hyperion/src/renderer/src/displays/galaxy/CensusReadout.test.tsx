@@ -6,6 +6,7 @@ import type { ChartResult } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { PENDING, type RequestState } from "../../lib/useServerRequest";
 import { aSystemsInRange } from "../../test/galaxyFixtures";
+import { announcements } from "../../test/liveRegions";
 import { CensusReadout } from "./CensusReadout";
 
 const CENTRE = [26_000, 0, 0] as const;
@@ -47,22 +48,16 @@ function renderReadout(
     answered: (shownResult: ChartResult) => {
       rerender(readout(shownResult, { kind: "ok", response: aSystemsInRange() }));
     },
+    /** Shows another state of the query beside the same answer. */
+    show: (shownState: RequestState<"systems_in_range">) => {
+      rerender(readout(result, shownState));
+    },
   };
 }
 
 /** The census summary, which is the readout's one announced region. */
 function summary(): HTMLElement {
   return screen.getByRole("status", { name: "Census" });
-}
-
-/**
- * The status regions the readout announces changes from: every `role="status"`, which an `output`
- * carries by itself, less the ones turned off.
- */
-function announcing(): HTMLElement[] {
-  return screen
-    .getAllByRole("status")
-    .filter((region) => region.getAttribute("aria-live") !== "off");
 }
 
 /** A census row's cells, its layer letter first. */
@@ -92,7 +87,7 @@ describe("CensusReadout", () => {
     );
   });
 
-  it("counts the systems returned and those within the set range", () => {
+  it("counts the systems returned and those within the drive range", () => {
     renderReadout(TWO_SYSTEMS);
 
     expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent("2");
@@ -160,9 +155,10 @@ describe("CensusReadout", () => {
   it("announces the query and then what came back, as one line", () => {
     const { answered } = renderReadout(null, PENDING);
 
-    // An `output`, so the region is the semantic element and not an `aria-live` attribute; atomic,
-    // so a count is read with the line it belongs to (the orchestrator's ruling 11).
-    expect(summary().tagName).toBe("OUTPUT");
+    // Atomic, so a count is read with the line it belongs to (the orchestrator's ruling 11). A
+    // `div` with `role="status"`, not an `output`: an `output` holds phrasing content, and the
+    // region holds a `p` and a `dl` (ruling 14).
+    expect(summary().tagName).toBe("DIV");
     expect(summary()).toHaveAttribute("aria-atomic", "true");
     expect(summary()).toHaveTextContent("PENDING");
 
@@ -173,20 +169,31 @@ describe("CensusReadout", () => {
     expect(summary()).not.toHaveTextContent("PENDING");
   });
 
-  it("announces from the summary alone, the status line inside it staying silent", () => {
+  it("holds no region of its own inside the summary", () => {
     renderReadout(TWO_SYSTEMS, PENDING);
 
     // A live region nested in a live region is read differently by every screen reader, so the
-    // inner one is turned off and the summary governs (the orchestrator's ruling 12).
-    expect(within(summary()).getByText("PENDING")).toHaveAttribute("aria-live", "off");
-    const announced = announcing();
-    expect(announced).toHaveLength(1);
-    expect(announced[0]).toBe(summary());
+    // request's state is words in the summary rather than a `StatusLine` of its own (the
+    // orchestrator's ruling 13).
+    expect(within(summary()).queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("keeps the census table and its control out of what is announced", async () => {
+  it("announces a change confined to the state's words, from the summary", async () => {
+    const { show } = renderReadout(TWO_SYSTEMS, PENDING);
+
+    const announced = await announcements(() => {
+      show({ kind: "link_down", reason: "NO CARRIER" });
+      return Promise.resolve();
+    });
+
+    // `NO CARRIER` replacing `PENDING` changes nothing else, which is the change that a silenced
+    // status line nested in the summary left unannounced (ruling 13).
+    expect(announced).toEqual([summary()]);
+  });
+
+  it("keeps the table and both controls out of what is announced", async () => {
     const user = userEvent.setup();
-    // Rejected, so that the status line and its RETRY stand in the summary as well.
+    // Rejected, so that the state in words and its RETRY are both on show.
     renderReadout(TWO_SYSTEMS, {
       kind: "rejected",
       code: "queue_full",
@@ -196,11 +203,22 @@ describe("CensusReadout", () => {
     await user.click(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
 
     expect(within(summary()).queryByRole("table")).not.toBeInTheDocument();
-    expect(
-      within(summary()).queryByRole("button", { name: "CENSUS BY LAYER" }),
-    ).not.toBeInTheDocument();
-    // RETRY is what the operator can do about the answer, so it is read with it.
-    expect(within(summary()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+    // A control inside a live region is announced with it, so both stand beside the region, while
+    // the words that say what happened stay in it (ruling 13).
+    expect(within(summary()).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("describes RETRY by the failure it retries", () => {
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "queue_full",
+      reason: "the queue is full",
+    });
+
+    // Outside the region, so the words are not read with it unless it names them itself.
+    expect(screen.getByRole("button", { name: "RETRY" })).toHaveAccessibleDescription(
+      "REJECTED: the queue is full",
+    );
   });
 
   it("gives the server's reason and RETRY when the query is rejected", async () => {
@@ -215,6 +233,44 @@ describe("CensusReadout", () => {
 
     expect(summary()).toHaveTextContent("REJECTED: the queue is full");
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("offers no RETRY while the query is pending", () => {
+    renderReadout(TWO_SYSTEMS, PENDING);
+
+    expect(screen.queryByRole("button", { name: "RETRY" })).not.toBeInTheDocument();
+  });
+
+  it("offers no RETRY while the link is down, since the query goes again with the link", () => {
+    renderReadout(TWO_SYSTEMS, { kind: "link_down", reason: "NO CARRIER" });
+
+    expect(screen.queryByRole("button", { name: "RETRY" })).not.toBeInTheDocument();
+  });
+
+  it("gives the link's state in plain words, as it is no failure of the query", () => {
+    renderReadout(TWO_SYSTEMS, { kind: "link_down", reason: "NO CARRIER" });
+
+    expect(within(summary()).getByText("NO CARRIER")).not.toHaveClass(
+      "census-readout__state--fault",
+    );
+  });
+
+  it("reads a timeout in caution, as a failed system", () => {
+    renderReadout(TWO_SYSTEMS, { kind: "timed_out" });
+
+    expect(within(summary()).getByText("TIMED OUT")).toHaveClass("census-readout__state--fault");
+  });
+
+  it("reads a refusal in plain text, since nothing failed", () => {
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "unknown_universe",
+      reason: "no such universe",
+    });
+
+    expect(within(summary()).getByText("REJECTED: no such universe")).not.toHaveClass(
+      "census-readout__state--fault",
+    );
   });
 
   it("reads the census layer by layer with its position and total, the head kept in view", async () => {

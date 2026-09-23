@@ -52,7 +52,7 @@ function Reading({ label, value, unit, wide = false, beside }: ReadingProps) {
   );
 }
 
-/** Whether the selected system is within the set range, in words; `null` when none is selected. */
+/** Whether the selected system is within the drive range, in words; `null` with none selected. */
 function rangeWords(system: ChartSystem | null, driveRangeLy: number): string | null {
   if (system === null) {
     return null;
@@ -78,15 +78,17 @@ interface SystemReadoutProps {
  * old.
  *
  * @remarks
- * An `output`, so that a selection made on the chart or in the list is announced once. `COREWARD`,
- * `SPINWARD` and `NORTH` are the signed offsets along the named directions at the chart centre;
- * `NORTH` is the offset from the reference plane, the only non-visual source of the chart's fill cue,
- * and the legend's `FILLED NORTH OF PLANE` names the same direction. `RADIUS`, `ANGLE` and `HEIGHT`
- * are the system's own place in the `GALACTIC` frame, whose coordinates the guide names in those
- * words; the angle is missing on the galactic axis, where it is undefined. The age is the age at the
- * chart time, which is given beside it, since a query at another time gives another age. Whether the
- * system is within the set range is in words, never colour alone. With nothing selected every value
- * is an em dash.
+ * A live region read as a whole, so that a selection made on the chart or in the list is announced
+ * once rather than value by value. It is a `div` with `role="status"`, not the `output` that would
+ * otherwise be the semantic element for it: an `output` holds phrasing content, and the readout is
+ * a `dl` (the orchestrator's ruling 14). `COREWARD`, `SPINWARD` and `NORTH` are the signed offsets
+ * along the named directions at the chart centre; `NORTH` is the offset from the reference plane,
+ * the only non-visual source of the chart's fill cue, and the legend's `FILLED NORTH OF PLANE`
+ * names the same direction. `RADIUS`, `ANGLE` and `HEIGHT` are the system's own place in the
+ * `GALACTIC` frame, whose coordinates the guide names in those words; the angle is missing on the
+ * galactic axis, where it is undefined. The age is the age at the chart time, which is given beside
+ * it, since a query at another time gives another age. Whether the system is within the drive
+ * range is in words, never colour alone. With nothing selected every value is an em dash.
  */
 export function SystemReadout({
   system,
@@ -102,7 +104,11 @@ export function SystemReadout({
   const atTime = `AT ${TIME_SYSTEM_LABEL} ${formatUniverseTimeYr(timeYr)} yr`;
 
   return (
-    <output className="system-readout" aria-label="Selected system">
+    // `output`'s content model is phrasing content, so it cannot hold this `dl`: the rules' "use
+    // the semantic element before ARIA" adds a role where no native element fits, and here none
+    // does. Atomic, so the whole selection is read, not the values that happen to have changed.
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
+    <div className="system-readout" role="status" aria-label="Selected system" aria-atomic="true">
       <dl className="readout system-readout__values">
         <Reading label="DESIG" value={system?.designation ?? null} wide />
         <Reading label="ID" value={system === null ? null : formatHex64(system.id)} wide />
@@ -111,7 +117,12 @@ export function SystemReadout({
           value={system === null ? null : formatLengthLy(system.distanceLy, distanceDecimals)}
           unit="ly"
         />
-        <Reading label="SET RANGE" value={rangeWords(system, driveRangeLy)} />
+        {/*
+         * `DRIVE RANGE`, the setting's one name, and no `SET`: the reading draws a within or beyond
+         * word, not the setting's value, and `SET` marks a drawn value (the orchestrator's ruling
+         * 15, and design note D9).
+         */}
+        <Reading label="DRIVE RANGE" value={rangeWords(system, driveRangeLy)} />
         <Reading
           label="NORTH"
           value={local === null ? null : formatSigned(local.north, distanceDecimals)}
@@ -153,6 +164,6 @@ export function SystemReadout({
           wide
         />
       </dl>
-    </output>
+    </div>
   );
 }

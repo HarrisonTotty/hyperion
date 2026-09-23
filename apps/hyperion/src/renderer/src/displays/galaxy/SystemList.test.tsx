@@ -135,16 +135,24 @@ describe("SystemList", () => {
     expect(onSelect).toHaveBeenLastCalledWith(systems[20]?.id);
   });
 
-  it("says in words whether a system is within the set range", () => {
+  it("says in words whether a system is within the drive range", () => {
     stubViewport();
     renderList(manySystems(60), { driveRangeLy: 10 });
 
     const options = screen.getAllByRole("option");
     expect(options[0]).toHaveTextContent("IN RANGE");
     expect(options[0]).toHaveClass("system-list__row--in-range");
-    // The twenty-first system is 21 ly out, beyond the range set.
+    // The twenty-first system is 21 ly out, beyond the drive range.
     expect(options[20]).toHaveTextContent("OUT");
     expect(options[20]).not.toHaveClass("system-list__row--in-range");
+  });
+
+  it("heads those words with the setting's one name, DRIVE RANGE", () => {
+    renderList(manySystems(3));
+
+    // `RANGE` alone is the chart's curve labels' abbreviation, and nowhere else's (ruling 15).
+    expect(screen.getByText("DRIVE RANGE")).toBeInTheDocument();
+    expect(screen.queryByText("RANGE", { exact: true })).not.toBeInTheDocument();
   });
 
   it("marks the selected row, and scrolls to it when the chart selects it", () => {

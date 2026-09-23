@@ -319,10 +319,12 @@ interface CursorDensityReadingProps {
   readonly density: CursorDensity;
   /** Whether it is read from a stale picture: then in `--text-muted` with a trailing `S`. */
   readonly stale: boolean;
+  /** Whether it announces its changes, which only the view whose picture has focus does. */
+  readonly announce: boolean;
 }
 
 /** The column density under the cursor: a value, `BELOW FLOOR`, or an em dash off the map. */
-function CursorDensityReading({ density, stale }: CursorDensityReadingProps) {
+function CursorDensityReading({ density, stale, announce }: CursorDensityReadingProps) {
   let value: ReactNode;
   switch (density.kind) {
     case "density":
@@ -348,8 +350,15 @@ function CursorDensityReading({ density, stale }: CursorDensityReadingProps) {
       break;
   }
   return (
-    // Read out as a whole when it changes, as it does on each arrow key on the map.
-    <p className="field" aria-live="polite" aria-atomic="true">
+    /*
+     * Read out as a whole when it changes, but only beside the picture the operator is moving the
+     * cursor over. The cursor is shared by both views and its x is in both, so one arrow key that
+     * moves x changes both readings, and two live regions changing on one key press is two
+     * announcements of the same reading — which is a defect, not verbosity (the orchestrator's
+     * ruling 16). The arrow keys reach a picture only while it has focus, so the focused view's
+     * reading is the one the key asked for; the other stays on screen to be read on demand.
+     */
+    <p className="field" aria-live={announce ? "polite" : "off"} aria-atomic="true">
       <span className="field__label">CURSOR DENSITY</span> {value}
     </p>
   );
@@ -480,6 +489,14 @@ function MapViewBody({
   const picture = answered ?? (stale ? shown.picture : null);
 
   const rootRef = useRef<HTMLElement>(null);
+  // Whether the picture has focus, which decides whether this view's density reading announces
+  // (see `CursorDensityReading`): the arrow keys move the cursor only on the focused picture.
+  const [focused, setFocused] = useState(false);
+  // With no picture there is no canvas, and one removed while it had focus fires no `blur`, so the
+  // flag is dropped here; otherwise the next picture's reading would announce without focus.
+  if (picture === null && focused) {
+    setFocused(false);
+  }
   const [ramps, setRamps] = useState<Ramps | null>(null);
   // The tokens are read when the view is mounted and each time its display is shown again, when
   // `Activity` runs its effects anew; unchanged ramps keep their identity, and paint nothing.
@@ -625,6 +642,12 @@ function MapViewBody({
           aria-describedby={hintId}
           onClick={pick}
           onKeyDown={step}
+          onFocus={() => {
+            setFocused(true);
+          }}
+          onBlur={() => {
+            setFocused(false);
+          }}
         />
         {centrePlace === null ? null : <MapMark kind="centre" view={view} place={centrePlace} />}
         {cursorPlace === null ? null : <MapMark kind="cursor" view={view} place={cursorPlace} />}
@@ -658,7 +681,11 @@ function MapViewBody({
           <p className="map-view__rotation">ROTATION COUNTER-CLOCKWISE</p>
         ) : null}
         {picture === null ? null : (
-          <CursorDensityReading density={densityUnder(picture, view, cursorLy)} stale={stale} />
+          <CursorDensityReading
+            density={densityUnder(picture, view, cursorLy)}
+            stale={stale}
+            announce={focused}
+          />
         )}
         {picture === null || ramp === null ? null : (
           <DensityLegend
@@ -708,9 +735,11 @@ function MapViewBody({
  * map pixel at a time as the screen shows the axes, ten with `Shift`, within the map's edge pixels.
  * The cursor is drawn over the picture as a cross in the selection colour, and the column density
  * under it is read beside the picture: the value its code stands for, `BELOW FLOOR` at code 0, or
- * an em dash off the map. The chart's centre is drawn as a small diagonal cross in `--text`. A mark whose
- * point lies above or below the map is pegged to its edge with `↑` or `↓`. Moving either paints
- * nothing.
+ * an em dash off the map. That reading announces its changes only while the picture has focus, so
+ * that one arrow key gives one announcement and not one from each view, whose readings both follow
+ * the shared cursor's x. The chart's centre is drawn as a small diagonal cross in `--text`. A mark
+ * whose point lies above or below the map is pegged to its edge with `↑` or `↓`. Moving either
+ * paints nothing.
  */
 export function GalaxyMapView(props: GalaxyMapViewProps) {
   const [attempt, setAttempt] = useState(0);

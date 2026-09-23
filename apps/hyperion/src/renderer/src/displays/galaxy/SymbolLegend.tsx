@@ -12,7 +12,7 @@ interface MarkProps {
   /** Diameter in `rem`, from the size class it stands for. */
   readonly diameterRem: number;
   readonly filled: boolean;
-  /** Whether the mark stands for what is within the set range, drawn in `--accent`. */
+  /** Whether the mark stands for what is within the drive range, drawn in `--accent`. */
   readonly available?: boolean;
 }
 
@@ -64,12 +64,13 @@ interface SymbolLegendProps {
  * @remarks
  * The guide's 3D conventions require the legend: size encodes a class and never depth, which
  * `SYMBOLS NOT TO SCALE` states, fill says which side of the reference plane a system is on, and
- * `--accent` marks what is within the set range, which is repeated here in words so that colour is
- * never the only signal. Size is shown as the five marks between the lightest and heaviest initial
- * mass the census names, rather than one line per band, since the chart's page cannot spare five
- * lines at 1280 px; each band's edges are in the census table and each system's mass in the readout.
- * The edges come from the census the server sent, so the client holds no copy of the band table, and
- * before the first answer the legend shows only what fill and colour mean.
+ * `--accent` marks what is within the drive range, which is repeated here in words so that colour
+ * is never the only signal; the setting's one name is `DRIVE RANGE` (the orchestrator's ruling 15).
+ * Size is shown as the five marks between the lightest and heaviest initial mass the census names,
+ * rather than one line per band, since the chart's page cannot spare five lines at 1280 px; each
+ * band's edges are in the census table and each system's mass in the readout. The edges come from
+ * the census the server sent, so the client holds no copy of the band table, and before the first
+ * answer the legend shows only what fill and colour mean.
  */
 export function SymbolLegend({ bands }: SymbolLegendProps) {
   const lightest = bands?.[0];
@@ -99,7 +100,7 @@ export function SymbolLegend({ bands }: SymbolLegendProps) {
       </p>
       <p className="symbol-legend__item">
         <Mark diameterRem={SIZE_CLASS_REM[4]} filled available />
-        ACCENT WITHIN SET RANGE
+        ACCENT WITHIN DRIVE RANGE
       </p>
       <p className="symbol-legend__item">
         <Reticle />

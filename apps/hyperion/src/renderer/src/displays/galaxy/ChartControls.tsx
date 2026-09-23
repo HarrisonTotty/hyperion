@@ -32,9 +32,12 @@ function parseNumber(text: string, decimals: number): number | null {
 }
 
 interface NumberFieldProps {
-  /** The field's label, in upper case: `DRIVE RANGE SET`. */
+  /** The field's label, in upper case: `DRIVE RANGE`. */
   readonly label: string;
-  /** What a refusal calls the field, without any word that is not its name: `DRIVE RANGE`. */
+  /**
+   * What a refusal calls the field: the quantity's name and no other word, which is the label
+   * itself for as long as no field's label carries one (`DRIVE RANGE`).
+   */
   readonly name: string;
   /** The value on show, formatted without its unit. */
   readonly text: string;
@@ -270,8 +273,13 @@ export function ChartControls({
           ))}
         </div>
       </fieldset>
+      {/*
+       * `DRIVE RANGE`, not `DRIVE RANGE SET`: `SET` marks a drawn value as an operator setting
+       * rather than a measurement (design note D9), and a field the operator types into already
+       * says as much (the orchestrator's ruling 15).
+       */}
       <NumberField
-        label="DRIVE RANGE SET"
+        label="DRIVE RANGE"
         name="DRIVE RANGE"
         text={formatChartLengthLy(driveRangeLy)}
         hint={`${formatNumber(DRIVE_RANGE_MIN_LY, 2)}-${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}

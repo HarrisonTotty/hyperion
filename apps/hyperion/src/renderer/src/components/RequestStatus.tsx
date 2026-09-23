@@ -9,11 +9,6 @@ interface RequestStatusProps {
   readonly id?: string;
   /** Sends the request again; offered as `RETRY` after a rejection or a timeout. */
   readonly onRetry?: () => void;
-  /**
-   * Whether it announces its own changes, which it does unless this is `false`. Set it to `false`
-   * only where the status stands inside another live region, as the census summary's does.
-   */
-  readonly announce?: boolean;
 }
 
 /**
@@ -21,7 +16,7 @@ interface RequestStatusProps {
  * the link is down, refused when the server turned it down for a reason in the request itself, and
  * a fault when the server failed, was overloaded or did not answer.
  */
-interface Annunciation {
+export interface Annunciation {
   readonly text: string;
   readonly standing: StatusStanding;
 }
@@ -39,8 +34,16 @@ const REFUSALS: ReadonlySet<string> = new Set<ErrorCode>([
   "generator_version_mismatch",
 ]);
 
-/** The words for a request state that is not `ok` or `idle`, and how it stands. */
-function annunciation(state: RequestState<RequestKind>): Annunciation | null {
+/**
+ * The words for a request state that is not `ok` or `idle`, and how it stands; `null` for a state
+ * that shows nothing.
+ *
+ * @remarks
+ * Exported so that a display whose own live region must carry the request's state can render the
+ * words in it directly, rather than nesting a {@link StatusLine} that is a live region itself (the
+ * orchestrator's ruling 13). `CensusReadout` is the one such caller.
+ */
+export function annunciation(state: RequestState<RequestKind>): Annunciation | null {
   let shown: Annunciation | null;
   switch (state.kind) {
     case "idle":
@@ -80,7 +83,7 @@ function annunciation(state: RequestState<RequestKind>): Annunciation | null {
  * when the caller can send the request again, `RETRY` follows. Nothing is rendered for `ok` and
  * `idle`.
  */
-export function RequestStatus({ state, id, onRetry, announce }: RequestStatusProps) {
+export function RequestStatus({ state, id, onRetry }: RequestStatusProps) {
   const shown = annunciation(state);
   if (shown === null) {
     return null;
@@ -90,7 +93,6 @@ export function RequestStatus({ state, id, onRetry, announce }: RequestStatusPro
       text={shown.text}
       standing={shown.standing}
       id={id}
-      announce={announce}
       action={
         shown.standing !== "waiting" && onRetry !== undefined
           ? { label: "RETRY", onAction: onRetry }

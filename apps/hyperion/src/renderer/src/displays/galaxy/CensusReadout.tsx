@@ -2,7 +2,7 @@ import type { LayerCensus, LayerStatus } from "@hyperion/protocol";
 import { useId, useState } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
-import { RequestStatus } from "../../components/RequestStatus";
+import { annunciation } from "../../components/RequestStatus";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
 import { formatListPosition, formatMassMsun, formatNumber, formatSci } from "../../lib/format";
@@ -147,34 +147,55 @@ interface CensusReadoutProps {
  * layer, so it stands beside every chart. Nothing fitting the census limit is an answer, not a
  * failure, and reads in `--status-caution` as a limit reached, with what the operator can do. A
  * layer the server left out adds a hint under it. The counts are of what was returned and of what
- * lies within the set range. The per-layer table, which is how placement is checked against the
+ * lies within the drive range. The per-layer table, which is how placement is checked against the
  * fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
  * newer query is in flight its `PENDING` stands beside the census and the answer on show stays. An
  * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
  *
- * The summary line is an `output`, read as a whole when it changes, so that a query given from the
- * keyboard announces that it started and then what came back. Nothing within it announces on its
- * own: the request's status line is silenced, so the answer is read once rather than in parts. The
- * camera's readouts are deliberately silent; `CHART DATA INVALID`, the selected-system readout and
- * the cursor line announce from their own places, each being a region in its own right.
+ * The summary is a live region holding text only — the census line, the request's state in words
+ * and the counts — read as a whole when it changes, so that a query given from the keyboard
+ * announces that it started and then what came back. `RETRY` and `CENSUS BY LAYER` stand beside it,
+ * outside it. The camera's readouts are deliberately silent; `CHART DATA INVALID`, the
+ * selected-system readout and the cursor line announce from their own places, each being a region
+ * in its own right.
  */
 export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: CensusReadoutProps) {
   const tableId = useId();
+  const stateId = useId();
   const [tableShown, setTableShown] = useState(false);
   const line = result === null ? null : censusLine(result.census);
   const hint = result === null ? null : censusHint(result.layers);
+  const shown = annunciation(state);
 
   return (
     <div className={stale ? "census-readout census-readout--stale" : "census-readout"}>
       <div className="census-readout__row">
         {/*
-         * An `output`, so that a query's answer is announced once, as a whole: an operator who
-         * presses `C` from the keyboard is told that the query started and then what came back,
-         * which nothing else on the page says (the orchestrator's ruling 11). Atomic, so a changed
-         * count is read with the line it belongs to. The per-layer table, the system list and the
-         * camera's own readouts stay out of it: a spatial view announces nothing as it moves.
+         * The announced region, so that an operator who presses `C` from the keyboard is told that
+         * the query started and then what came back, which nothing else on the page says (the
+         * orchestrator's ruling 11). Atomic, so a changed count is read with the line it belongs
+         * to.
+         *
+         * Text only, and `div role="status"` rather than `output`, on two counts (rulings 13 and
+         * 14). An `output`'s content model is phrasing content, and this region holds a `p` and a
+         * `dl`, so an `output` here would be invalid HTML; the rules' "semantic element before
+         * ARIA" asks for the native element where one fits, and an element that cannot legally
+         * hold a `dl` does not fit. And the request's state is rendered from `annunciation` rather
+         * than by nesting `RequestStatus`, whose `StatusLine` is a live region itself: a region
+         * inside a region is read differently by every screen reader, and silencing the inner one
+         * leaves a change confined to its text unspecified. `RETRY` and `CENSUS BY LAYER` are
+         * siblings of the region, since a control appearing inside one is announced with it. The
+         * per-layer table, the system list and the camera's own readouts stay out of it as well: a
+         * spatial view announces nothing as it moves.
          */}
-        <output className="census-readout__summary" aria-label="Census" aria-atomic="true">
+        <div
+          className="census-readout__summary"
+          // The `output` the rule asks for cannot hold this region's `dl`, as above.
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
+          role="status"
+          aria-label="Census"
+          aria-atomic="true"
+        >
           {line === null ? null : (
             <p
               className={
@@ -192,12 +213,18 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
               )}
             </p>
           )}
-          {/*
-           * It announces nothing of its own: it stands inside the region above, which reads the
-           * whole line, so a region of its own would have the answer read twice or in part, as
-           * each screen reader chose (the orchestrator's ruling 12).
-           */}
-          <RequestStatus state={state} onRetry={onRetry} announce={false} />
+          {shown === null ? null : (
+            <p
+              id={stateId}
+              className={
+                shown.standing === "fault"
+                  ? "census-readout__state census-readout__state--fault"
+                  : "census-readout__state"
+              }
+            >
+              {shown.text}
+            </p>
+          )}
           {result === null ? null : (
             <dl className="readout census-readout__counts">
               <dt>SYSTEMS</dt>
@@ -209,7 +236,15 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
               </dd>
             </dl>
           )}
-        </output>
+        </div>
+        {shown === null || shown.standing === "waiting" ? null : (
+          // Beside the region, not in it: what the operator can do about a failure is a control,
+          // and a control that appears inside a region is announced with it. Described by the
+          // words, so that it says which failure it retries wherever it is reached from.
+          <button type="button" className="control" aria-describedby={stateId} onClick={onRetry}>
+            RETRY
+          </button>
+        )}
         {result === null ? null : (
           // Outside the region: the table it shows is not part of what the answer says.
           <button
@@ -218,7 +253,7 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
             aria-expanded={tableShown}
             aria-controls={tableId}
             onClick={() => {
-              setTableShown((shown) => !shown);
+              setTableShown((wasShown) => !wasShown);
             }}
           >
             <DisclosureGlyph expanded={tableShown} />

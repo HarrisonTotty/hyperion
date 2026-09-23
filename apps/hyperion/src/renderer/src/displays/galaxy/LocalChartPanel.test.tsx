@@ -23,7 +23,7 @@ const CENTRE = [26_000, 0, 0] as const;
 const WIDTH_PX = 400;
 const HEIGHT_PX = 300;
 
-/** Three systems: one at the chart centre, one in range and one beyond the range set. */
+/** Three systems: one at the chart centre, one in range and one beyond the drive range. */
 const SYSTEMS: ReadonlyArray<{
   readonly relLy: readonly [number, number, number];
   readonly layer: MassLayer;
@@ -218,7 +218,7 @@ describe("LocalChartPanel", () => {
     expect(reading("DESIG")).toBe("H7K 4C0RFZ C-1");
   });
 
-  it("draws the range set and the query edge apart, the range labelled as a setting", async () => {
+  it("draws the drive range and the query edge apart, the range labelled as a setting", async () => {
     await renderChart();
 
     // Each curve label is one span whose figures are set apart, so the text is read as a whole.
@@ -231,6 +231,26 @@ describe("LocalChartPanel", () => {
     expect(labels).toContain("PLANE 50 ly SET");
   });
 
+  it("keeps all three curve labels at TOP, where the range sphere and its plane ring meet", async () => {
+    // Reduced motion, so that the turn to the preset is instant.
+    stubMatchMedia(true);
+    const { user } = await renderChart();
+
+    await user.keyboard("t");
+
+    // Looking down the north axis, the plane ring projects onto the range sphere's outline, so the
+    // two labels that grew a `SET` are drawn at nearly one place: `placeCurveLabels` must still
+    // place both, and the query edge's, rather than dropping one where they collide. This is the
+    // one part of T12.b's by-eye point (d) that a test can hold.
+    const labels = within(chartPage())
+      .getAllByText(/ly/u)
+      .map((element) => element.textContent);
+    expect(within(chartPage()).getByText("ELV").nextElementSibling).toHaveTextContent("+90°");
+    expect(labels).toContain("RANGE 50 ly SET");
+    expect(labels).toContain("PLANE 50 ly SET");
+    expect(labels).toContain("QUERY EDGE 80 ly");
+  });
+
   it("says what its symbols mean, and that they are not to scale", async () => {
     await renderChart();
 
@@ -239,7 +259,7 @@ describe("LocalChartPanel", () => {
       "SYMBOLS NOT TO SCALE",
       "FILLED NORTH OF PLANE",
       "OPEN SOUTH OF PLANE",
-      "ACCENT WITHIN SET RANGE",
+      "ACCENT WITHIN DRIVE RANGE",
       "BRACKET SELECTED",
     ]) {
       expect(within(legend).getByText(words)).toBeInTheDocument();

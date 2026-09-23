@@ -49,10 +49,13 @@ function valueOf(readout: HTMLElement, label: string): string | null {
 }
 
 describe("SystemReadout", () => {
-  it("is an output named for the selection", () => {
+  it("is a status region named for the selection, read as a whole", () => {
     const readout = renderReadout(aSystem([1, 0, 0]));
 
-    expect(readout.tagName.toLowerCase()).toBe("output");
+    // Not an `output`, whose content model is phrasing content and cannot hold the readout's `dl`
+    // (the orchestrator's ruling 14); atomic, so a new selection is read as one reading.
+    expect(readout.tagName.toLowerCase()).toBe("div");
+    expect(readout).toHaveAttribute("aria-atomic", "true");
   });
 
   it("names the system and gives its ID in upper case", () => {
@@ -84,10 +87,10 @@ describe("SystemReadout", () => {
     expect(valueOf(readout, "HEIGHT")).toBe("+12.0 ly");
   });
 
-  it("says in words whether the system is within the set range", () => {
+  it("says in words whether the system is within the drive range", () => {
     const readout = renderReadout(aSystem([60, 0, 0], { radiusLy: 80 }), { driveRangeLy: 50 });
 
-    expect(valueOf(readout, "SET RANGE")).toBe("OUT OF RANGE");
+    expect(valueOf(readout, "DRIVE RANGE")).toBe("OUT OF RANGE");
   });
 
   it("gives the initial mass with the drawn solar mass", () => {
@@ -116,7 +119,7 @@ describe("SystemReadout", () => {
       "DESIG",
       "ID",
       "DIST",
-      "SET RANGE",
+      "DRIVE RANGE",
       "NORTH",
       "HEIGHT",
       "INIT MASS",

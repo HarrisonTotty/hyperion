@@ -13,6 +13,7 @@ import {
   aUniverseList,
   someGalaxyParameters,
 } from "../../test/galaxyFixtures";
+import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { GalaxyDisplay } from "./GalaxyDisplay";
@@ -565,6 +566,35 @@ describe("GalaxyDisplay", () => {
       expect(
         within(mapView("EDGE-ON ALONG +Y")).getByText("CURSOR DENSITY").parentElement,
       ).toHaveTextContent("CURSOR DENSITY 3.34E-6 SYSTEMS/ly²");
+    });
+
+    it("announces the density once for one arrow key press, from the map being moved over", async () => {
+      const { user } = await renderWithMaps();
+      mapCanvas("face-on").focus();
+
+      const announced = await announcements(() => user.keyboard("{ArrowDown}"));
+
+      // Both readings follow the shared cursor's x, so both change on this key press and both
+      // announced it before the orchestrator's ruling 16. The CURSOR panel's position summary is a
+      // region of its own and says something else, so it is not counted here.
+      const densities = announced.filter((region) =>
+        region.textContent.startsWith("CURSOR DENSITY"),
+      );
+      expect(densities).toEqual([
+        within(mapView("FACE-ON FROM NORTH")).getByText("CURSOR DENSITY").parentElement,
+      ]);
+    });
+
+    it("announces the position once for one arrow key press, and nothing but it and the density", async () => {
+      const { user } = await renderWithMaps();
+      mapCanvas("face-on").focus();
+
+      const announced = await announcements(() => user.keyboard("{ArrowDown}"));
+
+      // What P05.T12.b listens for by ear, held here by count: beside the map's reading, which the
+      // test above counts, the CURSOR panel's position summary once, and no other region.
+      const others = announced.filter((region) => !region.textContent.startsWith("CURSOR DENSITY"));
+      expect(others).toEqual([within(cursorPanel()).getByText(/^CURSOR X /u)]);
     });
 
     it("reads BELOW FLOOR where the map's code is 0", async () => {

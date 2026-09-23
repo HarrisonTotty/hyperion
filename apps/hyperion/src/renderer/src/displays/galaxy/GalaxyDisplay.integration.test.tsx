@@ -33,6 +33,7 @@ import {
   type RelativeSystemSpec,
   someGalaxyParameters,
 } from "../../test/galaxyFixtures";
+import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 
 /** The universe the operator creates: `SURVEY 1` from the seed typed below. */
@@ -504,6 +505,19 @@ describe("the GALAXY display, end to end", () => {
     expect(reading("DIST")).toBe("2.00 ly");
     expect(reading("COREWARD")).toBe("+2.00 ly");
     expect(reading("POPULATION")).toBe("OLD THIN DISC");
+  });
+
+  it("announces a selection once, from the selected system's readout alone", async () => {
+    const { user } = await playTo("charted");
+    await user.click(within(cursorPanel()).getByRole("textbox", { name: "Z" }));
+    await user.tab();
+
+    const announced = await announcements(() => user.keyboard("{ArrowDown}"));
+
+    // P05.T12.b's "the `Selected system` output is announced on selection", held by count: the
+    // list's rows and its position line and the chart's mark labels change too, and none of them
+    // announces.
+    expect(announced).toEqual([screen.getByRole("status", { name: "Selected system" })]);
   });
 
   it("turns the chart to TOP on t, where it reads AZM 000° and ELV +90°", async () => {
