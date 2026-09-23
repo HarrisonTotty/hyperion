@@ -715,8 +715,10 @@ nothing of plans 02 or 03.
   interpolated in τ between the terminal main sequence and the base of the giant branch (or helium
   ignition for masses above `m_fgb`). Tests: continuous with T5 at `t_ms` and with T6.a at `t_bgb`.
 - **P06.T6.c Giant radius** R_GB(M, L) and the luminosity at helium ignition `l_he_i`, time of
-  ignition `t_he_i`. Tests: the tip of the giant branch for 1 M☉ at Z = 0.02 is near 2,500 L☉ with a
-  core near 0.47 M☉ (re-check against HPT's figures); the tip luminosity falls with metallicity.
+  ignition `t_he_i`. Tests: the tip of the giant branch for 1 M☉ at Z = 0.02 is 2,700–3,000 L☉ with
+  a core near 0.48 M☉ (HPT's formulae give 2,752 L☉ and 0.477 M☉; BaSTI 2,985 L☉ and 0.478 M☉); the
+  tip luminosity rises with metallicity (Salaris and Cassisi 1997, MNRAS 289, 406: 1,977 L☉ at Z =
+  10⁻⁴ to 2,742 at 0.006). Corrected in round 6's validation from "near 2,500" and "falls".
 - **Files:** `stellar/sse/hg.rs`, `gb.rs`. **Accept:** tests pass.
 
 #### P06.T7 Core helium burning
@@ -2055,3 +2057,80 @@ domain_tags_are_pinned`, since `events` alone misses the registry tests and the 
   = 1.8 to compare against `RemnantRecipe::Hurley2000`. Against SSE's `hrdiag` (run of
   2026-09-23), white-dwarf radii at ten masses, neutron-star and black-hole radii, and the
   supernova remnants of 8–80 M☉ stars at three Z all agree to 10⁻⁹.
+- **Validation of T1.a, T1.b, T2, T4–T6 and T27 (val06, round 6).**
+  - _Coefficients._ Every row of HPT's Appendix (journal pages 566–569, ADS scan) and of Tout et
+    al.'s Tables 1 and 2 (page 258) was read against the page images, and separately against
+    SSE's `zdata.h` through `zcnsts.f`'s mapping: all 143 table rows agree (SSE stores the rows of
+    b21 and b22 in the other order). The closed forms do not all agree. b17's exponent is printed
+    2.862149 in the journal and the preprint, which is b′16's β one row above; SSE has 0.6371760,
+    a number the paper never prints. The printed form moves `L_min,He` (equation 51) by +0.08 dex
+    at Z = 0.004 and −0.17 dex at 0.03, so b17 now takes SSE's exponent as a misprint settled,
+    with a test against SSE's `lHef` (the same fix, to the same value, as `starA`'s); nothing reads
+    b17 before T7. For T7: equation 58's (M ÷ `M_FGB`)^0.414 is 0.4805428 in SSE's `tblf` (the
+    printed exponent raises `τ_bl` by up to 0.035), and equation 53's 1.6479 is 1.647903 there.
+  - _Agreement with SSE, reproduced_ over all of `probe_hrd.csv` with a harness since removed:
+    main sequence (52,029 rows) L 1.0 × 10⁻¹⁴ and R 1.3 × 10⁻¹⁴ relative; gap (770 rows) L
+    2.0 × 10⁻¹⁴, Mc 4.3 × 10⁻⁸ (equation 44's c₁), and R 1.3 × 10⁻³ dex at Z = 10⁻⁴, 5 M☉, above
+    `M_FGB`, where equation 50's µ reads the rounded `M_FGB` (7 × 10⁻¹⁴ with SSE's); branch (1,795
+    rows) L 4.2 × 10⁻¹³, R 2.6 × 10⁻¹³, Mc 4.3 × 10⁻⁸. The recorded 10⁻¹³ for the gap holds only
+    below `M_FGB`. Eighteen rows (15 gap, 3 branch) carry SSE's µ < 1 perturbation, T10.d's, and
+    differ by up to 0.018 dex in R. Added to the tests: the nine unperturbed gap rows above `M_FGB`
+    (all at Z = 10⁻⁴), four main-sequence rows in η's Z ≤ 0.0009 branch, and 24 points of SSE's
+    landmark functions (`L_HeI`, `R_GB`, `R_AGB`, `R_mHe`, `τ_bl`, `Mc,BAGB`, `Mc,BGB`, `Mc,HeI`,
+    `R_HeI`), which the gap's end had been checked against only through the same functions.
+  - _The five choices for the owner_, as the worst deviation from SSE over the grid's unperturbed
+    rows; all five meet the 0.02 dex rule, and the recommendation is to confirm them as built.
+    - Equation 6's printed x: `t_MS` −0.83% (Z = 0.004), main-sequence R +0.030 dex and L
+      +0.016 dex within 13.8 Gyr (L +0.055 dex and gap L −0.18 dex beyond it), 207 rows past
+      0.02 dex. SSE's form stands.
+    - p, q and log D from `M_HeF`: branch L −0.038 dex (Z = 0.001, 2 M☉), R −0.023 dex, Mc
+      −0.95%, `t_HeI` +0.055%. SSE's 2.0 M☉ stands.
+    - Ignition at `R_AGB` without a blue phase: the printed `R_HeI` differs by −0.70 to +2.31 dex
+      at 15 of the 155 points (M ≥ 40 at Z = 0.02, M ≥ 15 at 0.03, 60–100 at 0.004, 100 at 0.001);
+      every gap row it touches is perturbed, where it is off by 1.14 dex. SSE's form stands.
+    - Equation 44's printed c₁: Mc 4.3 × 10⁻⁸, L and R unchanged. The printed form stands.
+    - `M_FGB`'s rounded constants: gap R 1.3 × 10⁻³ dex, `L_min,He` 8 × 10⁻⁵ dex, `τ_bl`
+      1.4 × 10⁻³, and, measured by `starA` together with equation 53's printed 1.6479, core helium
+      burning 1.1 × 10⁻³ dex in L and 3.1 × 10⁻³ in R (ruling 29). The printed form stands.
+  - _T6.c's figures._ The plan's "near 2,500 L☉" and "falls" should read: a 1 M☉ star at
+    Z = 0.02 reaches the tip at 2,700–3,000 L☉ (log L = 3.45 ± 0.05; BaSTI, Pietrinferni et al.
+    2004, ApJ 612, 168, Table 3: 2,985 L☉ with a 0.478 M☉ core; HPT's equation 49 gives 2,752 L☉
+    and 0.477 M☉), and the bolometric tip brightens with metallicity (Salaris and Cassisi 1997,
+    MNRAS 289, 406, Table 1: 1,977 L☉ at Z = 10⁻⁴ to 2,742 at 0.006, against HPT's 1,933 to 2,814
+    at 0.03); only the I-band tip fades. Cassisi and Salaris 1997 (MNRAS 285, 593) gives no tip
+    luminosity: the paper meant is Salaris and Cassisi 1997.
+  - _The normal quantile_ against roots found to 45 digits at 49,187 points (each branch point ±6
+    ulps, the tails, 2⁻¹⁰⁷⁴–2⁻¹⁰²², random): 3.4 × 10⁻¹⁶ relative (2.45 ulps) for normal p, and
+    3.9 × 10⁻⁹ for subnormal p, at 6.5 × 10⁻³¹⁹ (the doc said 3.5 × 10⁻⁹; corrected). The mirror
+    is exact bit for bit at all 37,058 points where 1 − (1 − p) = p, except p = ½, +0 against −0,
+    which no odd function avoids (the doc is corrected).
+  - _T2._ Tags, scopes and word budgets match "Generator version" and the plan's text (at most 16
+    of 64 words; eight tries all fail at 8.9 × 10⁻¹⁶ and 2.5 × 10⁻¹³). The median mark's boundary
+    is exact: ceil(p × 2⁵³) > 2⁵² exactly when p > ½, and ½ + 2⁻⁵³ already accepts. The test
+    checked 0.500001 and one field, so a median mark one too high passed it; it now checks every
+    field of the median and the next double above ½.
+  - _T27._ New tests: the partition rule over every one-second piece of ±1,000 s at 16 s bins and
+    periods, with cuts a nanosecond either side of an event, across `ClockWindow::START` and `END`
+    and `SourceHorizon::START`, and across the last 40-bit bin and cycle numbers; and
+    `LinearClock`'s fraction against the exact ratio, to 2⁻⁵⁰ across the source horizon. All pass.
+    A rate above its bound fails only in debug builds, as the plan asks. In release it is clipped
+    to the bound, a mean above 64 passes, a count above 255 is clamped (events are lost without a
+    word), and a NaN rate gives no events; a NaN, negative or overflowing bound panics in release
+    too.
+  - _Tests that could not fail_ (97 deliberate breaks, 38 survived). The jump detector's 0.05 dex
+    gate hid every jump below about 0.03 dex, and its bisection lost a jump that ran against the
+    slope. It now flags any interval that departs from the cubic through its neighbours, cuts each
+    into 32 pieces so that curvature cannot outweigh a jump, bisects every piece past the tolerance
+    towards its outlying quarter, and tells a cusp from a jump by whether the change halves over 2²⁰
+    of width. It finds 10⁻⁴ dex anywhere in a sweep, which the continuity tests alone now show for
+    every jump the breaks planted; the main-sequence sweep takes about 10 s in debug under load. The
+    diffusion test was one-sided, so octave amplitudes of 2ʲ passed; it now bounds each fourfold
+    lag's growth by 8. Coefficient digits below the SSE tests' 10⁻⁹, b46's finishing step and b17
+    were pinned by the checksum alone. The new golden `stellar/sse` pins every aₙ, bₙ and critical
+    mass and points of all three phases at the five metallicities, bit for bit; it passes on
+    wasm32-wasip1. Left as equivalent: γ's a75 + 0.1 bound (its clamp makes the forms identical),
+    `events_in`'s −1 ns on the window's end, the phase's one-cycle margins, the quantile's erf/erfc
+    switch anywhere in 0.1–0.4, and √(2π) one ulp off.
+  - _Determinism._ No platform transcendental bypasses `math`, nothing `usize`-dependent reaches
+    output, and the `Lattice` cache lives for one call. Latent: a release build lets a NaN into a
+    `StarState`, whose range checks are debug assertions.

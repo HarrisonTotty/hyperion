@@ -541,6 +541,7 @@ mod tests {
     use crate::id::{BodyId, EventSubject, SystemId, event_tags};
     use crate::math;
     use crate::rng::Seed;
+    use crate::time::{ClockWindow, SourceHorizon};
 
     const SEED: Seed = Seed::new(0x0e7e_0006_0027_0002);
     const DAY: i64 = 86_400;
@@ -919,6 +920,62 @@ mod tests {
             .collect();
         let fit = chi_square_gof(&observed, &expected);
         assert_p_value("thinned sinusoid's phase profile", fit.p_value, ALPHA);
+    }
+
+    /// The partition rule at its edges: every one-second piece of a stretch across the epoch, every
+    /// bin edge, cuts a nanosecond apart, windows across the ends of the clock window and the
+    /// source horizon, and a window across the last 40-bit bin number, past which bins hold no
+    /// events.
+    #[test]
+    fn the_partition_rule_holds_for_one_second_pieces_and_at_the_ends_of_time() {
+        let series = flares();
+        let short = PoissonBins::new(PoissonBins::MIN_BIN_SECONDS, 1).unwrap();
+        let rate = ConstantRate::new(EventsPerSecond::new(1.5));
+        let listing = |w: TimeWindow| list(short, &series, w, &rate);
+        let whole = TimeWindow::new(at(-1_000, 250_000_000), at(1_000, 0)).unwrap();
+        let events = listing(whole);
+        assert!(events.len() > 2_500, "{} events", events.len());
+        let seconds: Vec<UniverseTime> = (-999..1_000).map(|s| at(s, 0)).collect();
+        assert_partition_independent(whole, &seconds, listing);
+        let edges: Vec<UniverseTime> = (-62..=62).map(|k| at(16 * k, 0)).collect();
+        assert_partition_independent(whole, &edges, listing);
+        let e = to_nanos(events[100].time());
+        let tight: Vec<UniverseTime> = [e - 1, e, e, e + 1]
+            .into_iter()
+            .map(|n| from_nanos(n).unwrap())
+            .collect();
+        assert_partition_independent(whole, &tight, listing);
+
+        let daily_listing = |w: TimeWindow| list(daily(), &series, w, &per_day(20.0));
+        for centre in [ClockWindow::START, ClockWindow::END, SourceHorizon::START] {
+            let c = to_nanos(centre);
+            let span = i128::from(3 * DAY) * 1_000_000_000;
+            let w = TimeWindow::new(from_nanos(c - span).unwrap(), from_nanos(c + span).unwrap())
+                .unwrap();
+            assert!(daily_listing(w).len() > 60, "around {centre}");
+            let cuts = [
+                from_nanos(c - 1).unwrap(),
+                centre,
+                from_nanos(c + 1).unwrap(),
+            ];
+            assert_partition_independent(w, &cuts, daily_listing);
+        }
+
+        let edge = (EventBin::MAX.get() + 1) * PoissonBins::MIN_BIN_SECONDS;
+        let w = TimeWindow::new(at(edge - 100, 0), at(edge + 100, 0)).unwrap();
+        let near = listing(w);
+        assert!(
+            near.len() > 60,
+            "{} events before the last bin edge",
+            near.len()
+        );
+        assert!(near.iter().all(|e| e.time() < at(edge, 0)));
+        assert_partition_independent(w, &[at(edge - 1, 0), at(edge, 0)], listing);
+        for e in &near {
+            assert_eq!(short.event(&series, e.id(), &rate).as_ref(), Some(e));
+        }
+        let past = TimeWindow::new(at(edge, 0), at(edge + 1_000, 0)).unwrap();
+        assert!(listing(past).is_empty());
     }
 
     /// Pinned keys: a star's flares and a system's self-test events, with each event's time and

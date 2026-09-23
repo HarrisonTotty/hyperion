@@ -361,12 +361,14 @@ fn horner(c: &[f64], x: f64) -> f64 {
 /// C, Applied Statistics 37(3), 477–484, 1988, doi:10.2307/2347330) and by the round trip through
 /// Φ. Below 2⁻¹⁰²² Φ is subnormal and the step resolves `p` only to its spacing; where Φ(x₀)
 /// rounds to `p` the step vanishes and Acklam's unrefined value remains, 1.8 × 10⁻⁹ from the true
-/// quantile at 2⁻¹⁰⁷⁴ and at most 3.5 × 10⁻⁹ in a sweep of subnormal `p`. Three choices of
-/// evaluation keep the bound where Acklam's reference form loses it:
+/// quantile at 2⁻¹⁰⁷⁴ and at most 3.9 × 10⁻⁹ in a sweep of subnormal `p` (at 6.5 × 10⁻³¹⁹, against
+/// roots found to 45 digits). Three choices of evaluation keep the bound where Acklam's
+/// reference form loses it:
 ///
 /// - Above ½ the result is `−normal_quantile(1 − p)`, and `1 − p` is exact there, so the upper
-///   tail is as accurate as the lower and `normal_quantile(1 − p) = −normal_quantile(p)` exactly
-///   whenever `1 − p` is representable.
+///   tail is as accurate as the lower and `normal_quantile(1 − p) = −normal_quantile(p)` bit for
+///   bit whenever `1 − (1 − p) = p`, except at p = ½, where the quantile is +0 and its negation
+///   −0.
 /// - For 0.25 ≤ p ≤ ½ the step evaluates Φ(x) − p as ½ erf(x ÷ √2) − (p − ½), both terms exact
 ///   or relatively accurate, so that the result keeps its relative precision as it goes to zero
 ///   at p = ½. Below 0.25 it uses ½ erfc(−x ÷ √2) − p.

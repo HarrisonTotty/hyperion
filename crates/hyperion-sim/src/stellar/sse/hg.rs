@@ -224,6 +224,111 @@ mod tests {
         }
     }
 
+    /// The gap above `M_FGB` against the published SSE code, at every row of its run where the
+    /// small-envelope perturbation does not act (only Z = 10⁻⁴, 5–10 M☉): L to 10⁻⁹ and `Mc` to
+    /// 10⁻⁷, as below `M_FGB`. R is held to 0.4% only: below 12 M☉ the radius at ignition
+    /// interpolates with µ = log(M ÷ 12) ÷ log(`M_FGB` ÷ 12) (equation 50), and `M_FGB`'s rounded
+    /// constants (see [`ZCoeffs::m_fgb`]) move it by up to 0.3% (1.3 × 10⁻³ dex) at 5 M☉; with the
+    /// code's own `M_FGB` these rows agree to 10⁻¹³.
+    #[test]
+    fn matches_the_published_sse_code_above_m_fgb() {
+        for &(z, m, t, l_sse, r_sse, mc_sse) in SSE_HG_ABOVE_M_FGB {
+            let c = coeffs(z);
+            assert!(m > c.m_fgb().value());
+            let point = HertzsprungGap::new(SolarMasses::new(m), &c).at(Megayears::new(t));
+            let (l, r, mc) = (
+                point.luminosity.value(),
+                point.radius.value(),
+                point.core_mass.value(),
+            );
+            assert_close(&format!("L at Z = {z}, M = {m}, t = {t}"), l, l_sse);
+            assert!(
+                (r / r_sse - 1.0).abs() < 4e-3,
+                "R at Z = {z}, M = {m}, t = {t}: {r} against {r_sse}"
+            );
+            assert!(
+                (mc / mc_sse - 1.0).abs() < 1e-7,
+                "Mc at Z = {z}, M = {m}, t = {t}: {mc} against {mc_sse}"
+            );
+        }
+    }
+
+    /// (Z, M, t Myr, L, R, Mc) from SSE's `hrdiag` in the gap above `M_FGB`.
+    const SSE_HG_ABOVE_M_FGB: &[(f64, f64, f64, f64, f64, f64)] = &[
+        (
+            1e-4,
+            5.0,
+            87.991_595_580_914_16,
+            2_347.858_621_181_019,
+            11.668_355_551_309_693,
+            0.854_992_880_604_563_9,
+        ),
+        (
+            1e-4,
+            5.0,
+            88.255_834_606_682_68,
+            2_782.447_802_185_429_7,
+            53.103_070_436_717_1,
+            0.863_475_573_419_436,
+        ),
+        (
+            1e-4,
+            6.0,
+            61.505_164_695_585_3,
+            4_239.167_265_045_708,
+            10.185_298_933_891_888,
+            1.089_330_828_225_27,
+        ),
+        (
+            1e-4,
+            6.0,
+            61.688_762_202_139_28,
+            5_130.181_827_145_344,
+            50.932_527_819_357_77,
+            1.101_753_969_035_898_6,
+        ),
+        (
+            1e-4,
+            7.0,
+            46.186_352_081_538_864,
+            6_547.225_362_167_329,
+            6.043_202_897_182_916,
+            1.334_534_771_758_351_8,
+        ),
+        (
+            1e-4,
+            7.0,
+            46.321_795_929_285_31,
+            8_060.669_117_819_123,
+            30.211_726_946_936_79,
+            1.351_531_851_629_674_2,
+        ),
+        (
+            1e-4,
+            8.0,
+            36.528_180_481_482_32,
+            10_144.282_164_505_637,
+            6.970_906_722_018_649,
+            1.598_944_021_564_605_6,
+        ),
+        (
+            1e-4,
+            8.0,
+            36.634_988_026_749_82,
+            12_718.516_271_408_851,
+            33.535_112_377_594_885,
+            1.621_581_723_228_188,
+        ),
+        (
+            1e-4,
+            10.0,
+            25.351_699_174_662_33,
+            23_541.712_722_694_46,
+            17.104_549_841_189_64,
+            2.183_972_531_052_668,
+        ),
+    ];
+
     /// (Z, M, t Myr, L, R, Mc) from SSE's `hrdiag` in the Hertzsprung gap.
     const SSE_HG: &[(f64, f64, f64, f64, f64, f64)] = &[
         (

@@ -103,6 +103,7 @@ pub fn radius(m: SolarMasses, coeffs: &ZCoeffs) -> SolarRadii {
 
 #[cfg(test)]
 mod tests {
+    use super::super::continuity::assert_continuous_over;
     use super::*;
     use crate::math;
     use crate::units::MetalFraction;
@@ -124,7 +125,8 @@ mod tests {
     }
 
     /// L rises with mass at every metallicity, and neither L nor R jumps: a Lipschitz bound in
-    /// log–log over 2,000 steps from 0.1 to 100 M☉.
+    /// log–log over 2,000 steps from 0.1 to 100 M☉, and the jump detector of
+    /// [`continuity`](super::super::continuity), which sees a jump of 10⁻⁴ dex.
     #[test]
     fn luminosity_rises_and_both_are_continuous_in_mass() {
         for z in REFERENCE_Z {
@@ -148,6 +150,12 @@ mod tests {
                     "Z = {z}: R jumps at log M = {m0}"
                 );
             }
+            let log_masses: Vec<f64> = points.iter().map(|p| p.0).collect();
+            let at = |log_m: f64| SolarMasses::new(math::exp10(log_m));
+            let log_l = |log_m: f64| math::log10(luminosity(at(log_m), &c).value());
+            let log_r = |log_m: f64| math::log10(radius(at(log_m), &c).value());
+            assert_continuous_over(&format!("log L at Z = {z}"), log_l, &log_masses, 0.05, 1e-9);
+            assert_continuous_over(&format!("log R at Z = {z}"), log_r, &log_masses, 0.05, 1e-9);
         }
     }
 

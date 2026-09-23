@@ -898,7 +898,7 @@ mod tests {
     use crate::events::{EventSubject, from_nanos};
     use crate::id::{BodyId, SystemId, event_tags};
     use crate::rng::Seed;
-    use crate::time::SourceHorizon;
+    use crate::time::{ClockWindow, SourceHorizon};
 
     const SEED: Seed = Seed::new(0x0e7e_0006_0027_0003);
     const DAY: i64 = 86_400;
@@ -1362,11 +1362,17 @@ mod tests {
             let mean = xs.iter().sum::<f64>() / n;
             xs.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / (n - 1.0)
         };
-        // Diffusion: each fourfold lag at least doubles the variance, and 1,024 times the lag
-        // gives at least 64 times the variance (a random walk gives 1,024).
+        // Diffusion as a random walk's: each fourfold lag multiplies the variance by more than 2
+        // and less than 8 (a random walk gives 4, these seeds 3.9–4.9), and 1,024 times the lag
+        // by more than 64 and less than 16,384 (a random walk gives 1,024, these seeds 1,727).
+        // Octave amplitudes growing as 2ʲ rather than 2^(j/2) make the drift ballistic (9–16 a
+        // step, 226,000 over all), and a jittered lattice does not grow at all.
         let diffuses = |drifts: &[Vec<f64>]| {
             let v: Vec<f64> = drifts.iter().map(|d| variance(d)).collect();
-            v.windows(2).all(|p| p[1] > 2.0 * p[0]) && v[v.len() - 1] > 64.0 * v[0]
+            let total = v[v.len() - 1] / v[0];
+            v.windows(2).all(|p| p[1] > 2.0 * p[0] && p[1] < 8.0 * p[0])
+                && total > 64.0
+                && total < 16_384.0
         };
         assert!(
             diffuses(&phase_drifts),
@@ -1411,6 +1417,103 @@ mod tests {
             "the first event is cycle {first_event}, the window starts in cycle {first}"
         );
         assert_eq!(events[events.len() - 1].cycle(), last);
+    }
+
+    /// The partition rule at its edges: every one-second piece of a stretch across the epoch at the
+    /// shortest period, cuts a nanosecond either side of an event, windows across the ends of the
+    /// clock window and the source horizon, and a window across the last 40-bit cycle number, past
+    /// which cycles have no event.
+    #[test]
+    fn the_partition_rule_holds_for_one_second_pieces_and_at_the_ends_of_time() {
+        let fast = LinearClock::new(LinearClock::MIN_PERIOD, at(-7, 5)).unwrap();
+        let phase = MonotonePhase::new(0.3, 4, 8)
+            .unwrap()
+            .with_skip(SkipMark::from_probability(0.1));
+        let series = pulses(3);
+        let listing = |w: TimeWindow| list(phase, &series, &fast, w);
+        let whole = TimeWindow::new(at(-1_000, 1), at(1_000, 0)).unwrap();
+        let events = listing(whole);
+        assert!(events.len() > 100, "{} events", events.len());
+        let seconds: Vec<UniverseTime> = (-999..1_000).map(|s| at(s, 0)).collect();
+        assert_partition_independent(whole, &seconds, listing);
+        let e = to_nanos(events[50].time());
+        let tight: Vec<UniverseTime> = [e - 1, e, e, e + 1]
+            .into_iter()
+            .map(|n| from_nanos(n).unwrap())
+            .collect();
+        assert_partition_independent(whole, &tight, listing);
+
+        let clock = daily();
+        let daily_listing = |w: TimeWindow| list(noise(), &series, &clock, w);
+        for centre in [ClockWindow::START, ClockWindow::END, SourceHorizon::START] {
+            let c = to_nanos(centre);
+            let span = i128::from(20 * DAY) * 1_000_000_000;
+            let w = TimeWindow::new(from_nanos(c - span).unwrap(), from_nanos(c + span).unwrap())
+                .unwrap();
+            assert!(daily_listing(w).len() > 25, "around {centre}");
+            let cuts = [
+                from_nanos(c - 1).unwrap(),
+                centre,
+                from_nanos(c + 1).unwrap(),
+            ];
+            assert_partition_independent(w, &cuts, daily_listing);
+        }
+
+        let origin = LinearClock::new(LinearClock::MIN_PERIOD, UniverseTime::EPOCH).unwrap();
+        let edge_listing = |w: TimeWindow| list(phase, &series, &origin, w);
+        let edge = (EventBin::MAX.get() + 1) * 16;
+        let w = TimeWindow::new(at(edge - 1_000, 0), at(edge + 1_000, 0)).unwrap();
+        let near = edge_listing(w);
+        assert!(near.len() > 20, "{} events near the last cycle", near.len());
+        assert_eq!(
+            near.last().map(CycleEvent::cycle),
+            Some(EventBin::MAX.get())
+        );
+        let cycles: Vec<i64> = near.iter().map(CycleEvent::cycle).collect();
+        assert!(cycles.windows(2).all(|p| p[0] < p[1]));
+        let cut = near[near.len() / 2].time();
+        assert_partition_independent(w, &[cut, at(edge, 0)], edge_listing);
+        assert_eq!(phase.event(&series, &origin, EventBin::MAX.get() + 1), None);
+    }
+
+    /// `LinearClock`'s split phase against the exact rational (t − origin) ÷ P, at the shortest
+    /// period and a day, across the source horizon: the whole cycles are exact and the fraction is
+    /// within 2⁻⁵⁰ of the true one, far inside the plan's 10⁻⁶ cycles.
+    #[test]
+    fn a_linear_clocks_split_phase_is_the_exact_ratio_to_the_last_bits() {
+        let origin = at(-98_765, 4_321);
+        for period in [Span::from_seconds(16), Span::new(DAY, 7).unwrap()] {
+            let clock = LinearClock::new(period, origin).unwrap();
+            let p = span_nanos(period);
+            let (start, end) = (to_nanos(SourceHorizon::START), to_nanos(SourceHorizon::END));
+            let step = (end - start) / 1_009;
+            for k in 0..=1_009 {
+                let t = start + k * step + 13 * k;
+                let since = t - to_nanos(origin);
+                let phase = clock.base_phase(from_nanos(t).unwrap());
+                assert_eq!(i128::from(phase.cycles()), since.div_euclid(p));
+                // |fraction − rem ÷ P| ≤ 2⁻⁵⁰, compared in integers: fraction × 2⁶⁴ is a whole
+                // number once fraction ≥ 2⁻¹¹, and the ratio is rem × 2⁶⁴ ÷ P.
+                let rem = since.rem_euclid(p);
+                let fraction = phase.fraction();
+                if fraction < 1.0 / 2048.0 {
+                    continue;
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "a fraction in [2^-11, 1) times 2^64 is a whole number below 2^64"
+                )]
+                let scaled = (fraction * 18_446_744_073_709_551_616.0) as u128;
+                let exact = u128::try_from(rem).unwrap() << 64;
+                let ours = scaled * u128::try_from(p).unwrap();
+                let tolerance = u128::try_from(p).unwrap() << 14;
+                assert!(
+                    ours.abs_diff(exact) <= tolerance,
+                    "period {period}, t = {t} ns: fraction {fraction} against {rem} ÷ {p}"
+                );
+            }
+        }
     }
 
     /// Pinned keys: the first events after the epoch of three series, and phases at fixed instants.

@@ -436,7 +436,7 @@ impl MainSequence {
 
 #[cfg(test)]
 mod tests {
-    use super::super::continuity::{assert_continuous_over, assert_no_jump};
+    use super::super::continuity::{assert_continuous_over, assert_no_jump, suspect_intervals};
     use super::*;
     use crate::units::MetalFraction;
 
@@ -613,7 +613,8 @@ mod tests {
 
     /// log L and log R swept over a fine mass grid at fixed fractions τ of the main sequence, and
     /// over τ at each mass; every value is finite, and every interval that changes by more than a
-    /// coarse bound is bisected down to the resolution of `f64`, so that only a jump fails.
+    /// coarse bound, or departs from its neighbours (see [`suspect_intervals`]), is bisected down
+    /// to the resolution of `f64`, so that only a jump fails, down to about 10⁻⁴ dex.
     #[test]
     fn luminosity_and_radius_are_continuous_in_age_and_mass() {
         let taus: Vec<f64> = (0..=40).map(|i| f64::from(i) / 40.0).collect();
@@ -634,23 +635,21 @@ mod tests {
                 .collect();
             for k in 0..2 {
                 for (j, &tau) in taus.iter().enumerate() {
-                    for (i, pair) in table.windows(2).enumerate() {
-                        if (pair[1].1[j][k] - pair[0].1[j][k]).abs() > 0.05 {
-                            let f = |log_m: f64| {
-                                log_lr(&MainSequence::new(mass(math::exp10(log_m)), &c), tau)[k]
-                            };
-                            let what = format!("quantity {k} in mass at τ = {tau}, Z = {z}");
-                            assert_no_jump(&what, f, log_masses[i], log_masses[i + 1], 1e-6);
-                        }
+                    let column: Vec<f64> = table.iter().map(|(_, row)| row[j][k]).collect();
+                    for i in suspect_intervals(&column, 0.05) {
+                        let f = |log_m: f64| {
+                            log_lr(&MainSequence::new(mass(math::exp10(log_m)), &c), tau)[k]
+                        };
+                        let what = format!("quantity {k} in mass at τ = {tau}, Z = {z}");
+                        assert_no_jump(&what, f, log_masses[i], log_masses[i + 1], 1e-6);
                     }
                 }
                 for ((ms, row), log_m) in table.iter().zip(&log_masses) {
-                    for (j, pair) in row.windows(2).enumerate() {
-                        if (pair[1][k] - pair[0][k]).abs() > 0.05 {
-                            let what = format!("quantity {k} in τ at log M = {log_m}, Z = {z}");
-                            let f = |t: f64| log_lr(ms, t)[k];
-                            assert_no_jump(&what, f, taus[j], taus[j + 1], 1e-6);
-                        }
+                    let values: Vec<f64> = row.iter().map(|v| v[k]).collect();
+                    for j in suspect_intervals(&values, 0.05) {
+                        let what = format!("quantity {k} in τ at log M = {log_m}, Z = {z}");
+                        let f = |t: f64| log_lr(ms, t)[k];
+                        assert_no_jump(&what, f, taus[j], taus[j + 1], 1e-6);
                     }
                 }
             }
@@ -684,7 +683,8 @@ mod tests {
         }
     }
 
-    /// (Z, M, t Myr, L, R) from SSE's `hrdiag`, at τ from 0.3 to 0.995, across the hook.
+    /// (Z, M, t Myr, L, R) from SSE's `hrdiag`, at τ from 0.3 to 0.995, across the hook, and at
+    /// Z = 0.0001 from 1.1 M☉, where the β term's exponent η is 20 (equation 18).
     const SSE_MS: &[(f64, f64, f64, f64, f64)] = &[
         (
             0.02,
@@ -748,6 +748,34 @@ mod tests {
             2_711.630_026_278_984,
             7.580_769_093_396_833,
             2.511_663_065_916_609_5,
+        ),
+        (
+            0.0001,
+            1.1,
+            2_555.291_577_356_671,
+            4.206_524_436_394_703,
+            1.009_485_395_494_931_2,
+        ),
+        (
+            0.0001,
+            1.1,
+            4_134.268_919_968_576,
+            10.626_679_284_748_201,
+            1.548_704_914_314_370_5,
+        ),
+        (
+            0.0001,
+            1.25,
+            1_695.853_967_183_741_6,
+            7.078_190_695_245_577,
+            1.065_083_796_165_719_1,
+        ),
+        (
+            0.0001,
+            1.25,
+            2_732.655_681_717_877,
+            16.900_715_983_651_516,
+            1.713_113_275_733_314_7,
         ),
     ];
 }

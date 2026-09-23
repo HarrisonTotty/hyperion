@@ -127,7 +127,9 @@ impl ZCoeffs {
     /// Evaluated as the paper prints it, 13.048 (Z ÷ 0.02)^0.06 ÷ (1 + 0.0012 (0.02 ÷ Z)^1.27).
     /// The published SSE code writes 16.5 Z^0.06 ÷ (1 + (10⁻⁴ ÷ Z)^1.27), of which the paper
     /// rounds the constants (16.5 × 0.02^0.06 = 13.0479, 0.005^1.27 = 0.001196); the two differ by
-    /// at most 0.18%, at Z = 10⁻⁴, which no validation tolerance of P06.T12 resolves.
+    /// at most 0.18%, at Z = 10⁻⁴. Against the code that moves the radius of a gap star between
+    /// `M_FGB` and 12 M☉ by up to 1.3 × 10⁻³ dex (5 M☉ at Z = 10⁻⁴, through equation 50's µ) and
+    /// `L_min,He` by up to 8 × 10⁻⁵ dex, well inside P06.T12.b's 0.02 dex.
     #[must_use]
     pub const fn m_fgb(&self) -> SolarMasses {
         self.m_fgb
@@ -529,6 +531,35 @@ mod tests {
         }
         // b36 = b′36⁴ at ζ = 0.
         assert!((c.b(36) - math::powi(1.445_216e-1, 4)).abs() < 1e-15);
+    }
+
+    /// b14–b17 and `M_FGB` reproduce the published SSE code's `L_min,He` ÷ `L_HeI` (HPT
+    /// equation 51, its `lHef`; see [`sse`](super) for the run) for intermediate masses at the
+    /// metallicities where b17 is neither 1 nor its solar value, which the printed exponent of b17
+    /// (2.862149) misses by 0.03–0.17 dex. The tolerance is `M_FGB`'s rounded constants, which move
+    /// the ratio by up to 1.7 × 10⁻⁵ here (at Z = 0.001, where b17 is 1 in both forms).
+    #[test]
+    fn b14_to_b17_reproduce_the_minimum_helium_burning_luminosity_of_the_sse_code() {
+        let sse = [
+            (0.001, 3.0, 0.701_027_469_269_589_5),
+            (0.004, 5.0, 0.676_755_950_997_596_8),
+            (0.02, 4.0, 0.280_600_981_000_361_6),
+            (0.03, 3.0, 0.196_165_061_010_434_5),
+            (0.03, 8.0, 0.475_501_205_808_725_5),
+        ];
+        for (z, m, ratio_sse) in sse {
+            let c = ZCoeffs::new(MetalFraction::new(z));
+            let (b14, b15, b16, b17) = (c.b(14), c.b(15), c.b(16), c.b(17));
+            let m_fgb = c.m_fgb().value();
+            let c_coefficient =
+                b17 / math::powf(m_fgb, 0.1) + (b16 * b17 - b14) / math::powf(m_fgb, b15 + 0.1);
+            let ratio =
+                (b14 + c_coefficient * math::powf(m, b15 + 0.1)) / (b16 + math::powf(m, b15));
+            assert!(
+                (ratio / ratio_sse - 1.0).abs() < 3e-5,
+                "L_min,He ÷ L_HeI at Z = {z}, M = {m}: {ratio} against {ratio_sse}"
+            );
+        }
     }
 
     #[test]

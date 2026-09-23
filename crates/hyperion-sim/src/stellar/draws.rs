@@ -668,13 +668,53 @@ mod tests {
         assert_same_bits(median.eta().value(), 0.0);
         assert_same_bits(median.rotation().value(), 0.5);
         assert_eq!(median.spin_axis(), UnitVector::NORTH);
+        // Every mark is 2⁵², below a threshold of probability p exactly when p > ½: not at ½, and
+        // already at the next double above it, ½ + 2⁻⁵³.
         let half = crate::rng::Threshold::from_probability(0.5);
-        assert!(!median.remnant_type().is_below(half));
-        assert!(
-            median
-                .remnant_type()
-                .is_below(crate::rng::Threshold::from_probability(0.500_001))
-        );
+        let above_half = crate::rng::Threshold::from_probability(0.5_f64.next_up());
+        for mark in [
+            median.magnetism(),
+            median.stripped(),
+            median.remnant_type(),
+            median.remnant_fallback(),
+            median.kick_mode(),
+            median.wd_atmosphere(),
+            median.wd_carbon(),
+            median.wd_metals(),
+        ] {
+            assert_eq!(mark.get(), 1 << 52);
+            assert!(!mark.is_below(half));
+            assert!(mark.is_below(above_half));
+        }
+        for rank in [
+            median.rotation(),
+            median.disc_lifetime(),
+            median.ns_inclination(),
+            median.ns_phase(),
+            median.nebula(),
+        ] {
+            assert_same_bits(rank.value(), 0.5);
+        }
+        for normal in [
+            median.eta(),
+            median.remnant_mass(),
+            median.ns_field(),
+            median.bh_spin(),
+        ]
+        .iter()
+        .chain(median.kick_score())
+        .chain(median.kick_low())
+        .chain(median.ns_spin())
+        {
+            assert_same_bits(normal.value(), 0.0);
+        }
+        for direction in [
+            median.spin_axis(),
+            median.kick_direction(),
+            median.ns_spin_axis(),
+        ] {
+            assert_eq!(direction, UnitVector::NORTH);
+        }
         assert_eq!(median, StarDraws::from_parts(StarDrawsParts::MEDIAN));
         let tweaked = StarDraws::from_parts(StarDrawsParts {
             eta: StandardNormal::new(1.0).unwrap(),

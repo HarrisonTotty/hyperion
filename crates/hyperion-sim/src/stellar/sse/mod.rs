@@ -23,6 +23,8 @@ mod continuity;
 mod gb;
 mod hg;
 mod ms;
+#[cfg(test)]
+mod reference;
 mod wind;
 pub mod zams;
 
