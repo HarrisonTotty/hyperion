@@ -1,8 +1,8 @@
-# generator_version = 9
+# generator_version = 10
 {
   "universe": "5eed000000000001",
   "seed": "00000000000004d2",
-  "generator_version": 9,
+  "generator_version": 10,
   "groups": [
     {
       "key": "identity",
@@ -20,7 +20,7 @@
           "origin": "fixed",
           "value": {
             "type": "number",
-            "value": 9.0,
+            "value": 10.0,
             "unit": "count"
           }
         },

@@ -112,24 +112,29 @@ pub(super) fn inputs() -> Inputs {
         arm_young_width: 375.0,
         arm_young_fraction: 0.8,
         arm_old_amplitude: 0.2,
-        // The brainstorm's "about 15% of the thin disc's" times 7 ÷ 4, the factor that carries plan
-        // 07's gas field's column at the Sun's radius to McKee, Parravano and Hollenbach's (2015)
-        // measured 13.7 ± 1.6 M☉ pc⁻² with `GasDiscParams::HEIGHT` raised by the same factor, so
-        // that the mid-plane density does not move (plan 02, ruling 1 of 2026-09-22); the length
-        // ratio is the middle of its range.
-        gas_mass_fraction: 0.2625,
+        // 24% of the thin disc's mass, 8.2 × 10⁹ M☉: what carries plan 07's gas field's column at
+        // the Sun's radius to McKee, Parravano and Hollenbach's (2015, ApJ 814, 13) measured
+        // 13.7 ± 1.6 M☉ pc⁻² (13.8) on `GasDiscParams::HEIGHT`'s 700 ly, with plan 07's warm
+        // ionised layer drawn by its own density (plan 07, ruling 19 of 2026-09-22). Ruling 1's
+        // 26.25%, the brainstorm's "about 15%" times 7 ÷ 4, took the warm layer's mass as a share
+        // of the gas and so carried it 1.9 times too heavy; with the warm layer held at its
+        // measured density the neutral disc carries the added column alone and 26.25% overshoots
+        // to 15.1. The mid-plane neutral density is 0.80 cm⁻³ and the in-plane extinction 1.06 mag
+        // per 3,000 ly, the brainstorm's "about one". The length ratio is the middle of its range.
+        gas_mass_fraction: 0.24,
         gas_length_ratio: 1.75,
         // M₂₀₀ = 1.19 × 10¹² M☉, against 1.3 × 10¹² (McMillan 2017, MNRAS 465, 76).
         dark_f_star: 0.32,
         dark_concentration_scatter: 0.0,
         // Sgr A* is (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration 2022, A&A 657, L12). At the
-        // fixture's bulge dispersion of 123.9 km/s the M–σ relation of McConnell and Ma (2013,
-        // ApJ 764, 184) gives 1.40 × 10⁷ M☉; the Milky Way lies 0.514 dex below it, 1.35 times the
+        // fixture's bulge dispersion of 123.8 km/s the M–σ relation of McConnell and Ma (2013,
+        // ApJ 764, 184) gives 1.40 × 10⁷ M☉; the Milky Way lies 0.512 dex below it, 1.35 times the
         // relation's intrinsic scatter, and this offset puts the fixture's black hole at 4.30 ×
         // 10⁶ M☉. It holds for this σ only, and is set again whenever σ moves: it was −0.421 at
-        // the 119.3 km/s before P02.T11's tuning concentrated the thin disc, and plan 08's
+        // the 119.3 km/s before P02.T11's tuning concentrated the thin disc, −0.514 at the 123.9
+        // km/s of P02.T11's heavier gas before plan 07's ruling 19 lightened it, and plan 08's
         // replacement of the σ estimator will move it again.
-        bh_scatter: -0.514,
+        bh_scatter: -0.512,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges but for

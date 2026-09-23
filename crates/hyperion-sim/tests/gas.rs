@@ -21,19 +21,22 @@ const PINNED_SEEDS: [u64; 3] = [
 ];
 
 /// Every getter of `gas`, labelled `<prefix>.<name>`, in Design note 3's table order: plan 02's
-/// three rows first, then the eleven drawn here and the two constants.
+/// three rows first, then the eleven drawn here with what each derives, and the two constants.
 fn write_gas_params(w: &mut GoldenWriter, prefix: &str, gas: &GasParams) {
     let mut f = |name: &str, value: f64| w.f64(&format!("{prefix}.{name}"), value);
     f("mass", gas.gas_mass().value());
     f("radial_scale", gas.radial_scale().value());
     f("neutral_height", gas.neutral_height().value());
     f("hole_scale", gas.hole_scale().value());
+    f("neutral_mass", gas.neutral_mass().value());
     f("neutral_fraction", gas.neutral_fraction());
-    f("warm_fraction", gas.warm_fraction());
+    f("warm_density", gas.warm_density().value());
     f("warm_height", gas.warm_height().value());
+    f("warm_mass", gas.warm_mass().value());
+    f("warm_fraction", gas.warm_fraction());
     let molecular = gas.molecular_disc();
-    f("molecular_fraction", molecular.fraction());
     f("molecular_mass", molecular.mass().value());
+    f("molecular_fraction", molecular.fraction());
     f("molecular_length", molecular.length().value());
     f("molecular_height", molecular.height().value());
     f("corona_density", gas.corona_density().value());

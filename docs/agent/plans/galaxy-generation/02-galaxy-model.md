@@ -429,7 +429,8 @@ brainstorm does not give are decided in P02.T7.e and marked for re-checking.
 disc's, scale length 1.5–2 times the thin disc's, height 700 ly, no hole; the brainstorm's 10–20%
 and 400 ly both raised by 7 ÷ 4, ruling 1 of 2026-09-22, so that plan 07's column at R₀ reaches
 McKee et al.'s 13.7 ± 1.6 M☉ pc⁻² with the mid-plane density, and so the in-plane extinction,
-unchanged; R22) and the nuclear cluster (mass
+unchanged; R22; the Milky Way fixture's 24%, once plan 07's ruling 19 drew its warm ionised layer
+by its own density) and the nuclear cluster (mass
 0.024 of the nuclear disc's with 0.2 dex of scatter, inner slope 1.3, break 10 ly, outer slope 3.5,
 outside the population budgets) enter the mass model so that the rotation curve and the
 enclosed-mass checks are right. Plans 07 and 09 own what they mean and may refine them.
@@ -631,8 +632,9 @@ correlate with masses at the expected slope; M₂₀₀ within 1.4 × 10¹²–5
 **P02.T5.c Milky Way fixture and golden file.** `GalaxyParams::milky_way_like()`: the default mass
 function; M★ 6.0 × 10¹⁰ M☉; shares thick 10%, bulge and bar 31% with the bar 30% of that, nuclear
 disc 1.75%, halo 1%; timescale 7 Gyr; thin length 7,000 ly and effective height 1,100 ly, the
-thick disc 0.9 and 2.7 times them, the young disc 285 ly and the gas 26.25% of the thin disc's
-mass (P02.T11's tuning, R22; T5.c first built 8,480 ly, 1,000 ly, 0.77, 3.0, 150 ly and 15%); bulge
+thick disc 0.9 and 2.7 times them, the young disc 285 ly and the gas 24% of the thin disc's mass
+(P02.T11's tuning and plan 07's ruling 19, R22; T5.c first built 8,480 ly, 1,000 ly, 0.77, 3.0, 150
+ly and 15%); bulge
 2,280 × 1,440 × 820 ly, boxiness 3.5; bar half-length 16,000 ly, height 590 ly, corotation ratio
 1.24 (1.2 until T11, R22); nuclear disc 290 ly by 93 ly; four arms at 12°; f★ 0.32; the halo's inner slopes 2.5 and the
 dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0 (Pila-Díez et al. 2015; Medina et
@@ -942,7 +944,9 @@ M☉ pc⁻² (R18). T11 tunes the fixture's Σ★ to 28–30 M☉ pc⁻², with 
 (2.2–2.4 kpc; Bland-Hawthorn and Gerhard's 2.6 ± 0.5, Bovy and Rix's mass-weighted 2.15 ± 0.14) or
 less stellar mass, within their cited measurements, and its rotation-curve and enclosed-mass checks
 must absorb the change (through f★ and the gas disc, whose column at R₀, 6.6 M☉ pc⁻², is half the
-measured 13.7 ± 1.6). A thin effective height nearer the top of its drawn range lowers the density
+measured 13.7 ± 1.6). Settled by ruling 1 of 2026-09-22 and plan 07's ruling 19: the gas disc is
+700 ly tall, and the fixture's gas 24% of its thin disc, which plan 07's field carries to 13.8 M☉ pc⁻²
+at R₀ with its warm ionised layer at its own measured density (R22). A thin effective height nearer the top of its drawn range lowers the density
 too, about 8% at 1,100 ly, and lifts the far-field thin disc from 259 to 286 pc.
 
 The inner rotation curve row is added after T6: the fixture gives v_c = 150, 180 and 216 km/s at
@@ -1621,12 +1625,38 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     dwarfs'. The edge-on map's thin-disc test reads pixels from 512 ly, since a 256 ly pixel now
     lies inside the young disc's cored top, where its mean falls below a point sample.
   - _Ruling 1, the gas._ `GasDiscParams::HEIGHT` is 700 ly and the drawn fraction 0.175–0.350,
-    both × 7 ÷ 4 (D15); the fixture's is 0.2625, 9.0 × 10⁹ M☉. The ruling's "7.9 M☉ pc⁻²" is plan
-    07's field at R₀; this plan's own double exponential gave 6.6 and now 11.5, and plan 07's field
-    goes to 13.8 by the same factor against McKee et al.'s 13.7 ± 1.6 (which counts H I, H₂, ionised
-    gas and helium). The mid-plane density is unchanged by construction; plan 07's T12 measures the
-    extinction. Plan 07 still states 10–20% and 400 ly (its lines 242–244 and 379–381) and 5.1 ×
-    10⁹ M☉ for the fixture: the `gal` lane's to update.
+    both × 7 ÷ 4 (D15); the fixture's was 0.2625, 9.0 × 10⁹ M☉, and is now 0.24 (the next bullet).
+    The ruling's "7.9 M☉ pc⁻²" is plan 07's field at R₀; this plan's own double exponential gave 6.6
+    and at 0.2625 gave 11.5. Plan 07's field was expected to go to 13.8 by the same factor against
+    McKee et al.'s 13.7 ± 1.6 (which counts H I, H₂, ionised gas and helium), with the mid-plane
+    density unchanged by construction; it did not, because plan 07 then drew its warm ionised layer
+    as a share of the gas while that layer's height is its own.
+  - _Plan 07's ruling 19, after the merge._ Plan 07's warm ionised layer is now drawn by its mid-plane
+    density at the Sun's radius and its molecular disc by its mass, and its neutral disc takes the rest
+    of this plan's gas mass; plan 07's Risks record it. Re-closing ruling 1's arithmetic with the warm
+    layer held, the two levers were `GasDiscParams::HEIGHT` and the gas fraction: the height stays at
+    700 ly (215 pc, already 1.4 times the measured atomic layer's effective height of 156 pc, McKee et
+    al.'s Table 2), the drawn range stays 0.175–0.35, and **the fixture's fraction is 0.24**, 8.24 ×
+    10⁹ M☉, which gives plan 07's field 13.8 M☉ pc⁻² at R₀ (0.2625 gave 15.1), a neutral mid-plane
+    of 0.80 cm⁻³ and 1.06 mag per 3,000 ly. The lighter gas moved the fixture's σ from 123.9 to
+    123.8 km/s and its black hole to 4.28 × 10⁶ M☉, so the M–σ offset is re-set (R13) from −0.514 to
+    **−0.512** dex and the black hole is 4.30 × 10⁶ again. Measured before → after, one test at a time
+    under `slow-test` (load 3, 3.5 GHz), all inside their brackets: enclosed mass 5.147 → 5.150 × 10⁶
+    M☉ at 1 pc, 1.2480 → 1.2483 × 10⁷ at 4 pc, 3.693 → 3.692 × 10⁸ at 100 pc, 1.114 → 1.113 × 10⁹ at
+    230 pc, 9.666 → 9.647 × 10⁹ at 1 kpc and 2.490 → 2.483 × 10¹⁰ at 2 kpc; v_c 152.3 → 152.3, 186.8
+    → 186.7, 227.5 → 227.2 and 231.5 → 230.7 km/s at 0.5, 1, 2 and 8 kpc (the 2 kpc finding stands:
+    13.6% above 200); v_c(1) ÷ v_c(8) 0.807 → 0.809; escape speed 570.7 → 570.0 km/s; pattern speed
+    39.6 → 39.5; the tidal radius of 1 M☉ at 26,000 ly 4.22 → 4.23 ly; this plan's own gas column at
+    R₀ 11.5 → 10.5 M☉ pc⁻²; the gas's share of v_c² at 2 kpc 2.6% → 2.4%. Unmoved: 0.00205 per ly³,
+    0.0417 M☉ pc⁻³, Σ★ 30.5, the nuclear disc's 1.75% and 18.89 per ly³. The seed sweeps read no
+    fixture and no drawn range moved, so they are bit for bit as below.
+  - _A finding for this plan from plan 07: the Sun's metallicity._ The thin discs' metallicity is solar
+    at three scale lengths (`THIN_DISC_REFERENCE_LENGTHS`), and the sub-discs' profiles are solved there
+    (`REFERENCE_RADIUS_LENGTHS`). The tuning's shorter thin disc moved that point from 25,440 ly to
+    21,000 ly, so at the Sun's 26,000 ly the young disc's [Fe/H] is −0.077, where the local young
+    population is solar or a little above; plan 07's dust-to-gas ratio there is 0.84, not 1. Whether
+    the three lengths should become the Sun's radius is this plan's question; plan 07 records what it
+    does to the extinction.
   - _Ruling 17, the edge-on height integral._ The bulge's and each halo component's height integral
     takes `gl4` on equal panels of at most four vertical scales (the bulge's c, a halo component's
     flattening × core; `PANEL_SCALES`, at most 256 panels a side), and a halo component's is first

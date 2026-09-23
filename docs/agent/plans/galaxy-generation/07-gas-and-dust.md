@@ -82,14 +82,36 @@ impl GasParams {
     pub fn radial_scale(&self) -> LightYears;   // R_g, plan 02's GasDiscParams::length()
     pub fn hole_scale(&self) -> LightYears;     // R_m
     pub fn neutral_height(&self) -> LightYears; // h_n, plan 02's GasDiscParams::HEIGHT
-    pub fn warm_fraction(&self) -> f64;         // f_w
+    pub fn neutral_mass(&self) -> SolarMasses;  // what the other two layers leave (ruling 19)
+    pub fn neutral_fraction(&self) -> f64;      // 1 − f_w − f_c
+    pub fn warm_density(&self) -> HydrogenPerCm3; // w at REFERENCE_RADIUS, drawn
+    pub fn warm_mass(&self) -> SolarMasses;     // derived from w, h_w and the radial form
+    pub fn warm_fraction(&self) -> f64;         // f_w, derived
     pub fn warm_height(&self) -> LightYears;    // h_w
-    pub fn molecular_disc(&self) -> MolecularDisc; // mass, scale length, height
+    pub fn molecular_disc(&self) -> MolecularDisc; // mass (drawn), fraction (derived), length, height
     pub fn corona_density(&self) -> HydrogenPerCm3;
     pub fn pressure_floor(&self) -> KelvinPerCm3;
     pub fn pressure_height(&self) -> LightYears;
     pub fn sigma_ln(&self) -> f64;
     pub fn lane(&self) -> LaneParams;           // offset, width, fraction
+    pub const REFERENCE_RADIUS: LightYears;     // 26,000 ly, where w is read
+}
+
+// smooth.rs (P07.T2)
+pub enum GasLayer { Neutral, Warm, Molecular }
+pub struct SmoothGas { /* amplitudes, shapes, corona */ }
+impl SmoothGas {
+    pub fn new(params: &GasParams) -> SmoothGas;
+    pub fn plane_density(&self, layer: GasLayer, r: f64) -> f64;       // cm⁻³, azimuthal mean
+    pub fn density(&self, layer: GasLayer, r: f64, z: f64) -> f64;
+    pub fn disc(&self, r: f64, z: f64) -> f64;                         // n_disc, no lanes
+    pub fn mean_density(&self, r: f64, z: f64) -> f64;                 // n_disc + n_cor
+    pub fn plane_disc_mean(&self, r: f64) -> f64;                      // n̄_disc(R, 0)
+    pub fn column(&self, layer: GasLayer, r: f64) -> f64;              // cm⁻², 2h × n(R, 0)
+    pub fn column_between(&self, layer: GasLayer, r: f64, z_lo: f64, z_hi: f64) -> f64;
+    pub fn disc_column(&self, r: f64) -> f64;
+    pub fn disc_column_between(&self, r: f64, z_lo: f64, z_hi: f64) -> f64;
+    // height, corona_density, neutral_peak_radius
 }
 
 // field.rs
@@ -239,10 +261,11 @@ Every name below was checked against the code as built at the re-validation reco
   `version::GENERATOR_VERSION` (a `GeneratorVersion` newtype; goldens record `.get()`).
 - **Plan 02, galaxy model:**
   - `GalaxyParams::gas_disc() -> &GasDiscParams`, whose getters are `mass()`, `length()` and
-    `height()` — not `radial_scale` or `neutral_height`. The mass is a drawn 10–20% of the **whole**
-    thin disc's stellar mass (young and old together) and the scale length 1.5–2 times the thin
-    disc's, both uniform; the height is the fixed associated const `GasDiscParams::HEIGHT`, 400 ly,
-    with no draw and no tag. Plan 02's D15 says plan 07 owns what they mean, and its "Generator
+    `height()` — not `radial_scale` or `neutral_height`. The mass is a drawn 17.5–35% of the
+    **whole** thin disc's stellar mass (young and old together; 24% for the Milky Way fixture) and
+    the scale length 1.5–2 times the thin disc's, both uniform; the height is the fixed associated
+    const `GasDiscParams::HEIGHT`, 700 ly, with no draw and no tag (plan 02's ruling 1 of
+    2026-09-22 and this plan's ruling 19; see Risks). Plan 02's D15 says plan 07 owns what they mean, and its "Generator
     version" reserves "plan 07 may refine the gas disc" (see Risks). `BarParams::half_length()`,
     `NuclearDiscParams::length()`, `GalaxyParams::milky_way_like()` and
     `GalaxyParams::from_seed(seed, kind)`.
@@ -368,31 +391,48 @@ targets; the targets are binding, these are not.
 3. **Parameters plan 02 does not draw are drawn here**, on the tag `gas.params` with the galaxy as
    the object and one fixed draw index per parameter, so that nothing in plan 02's output moves and
    a parameter added later appends an index. `Stream::seek` takes a **word** number, and every
-   parameter here is one uniform, which costs one word, so parameter _k_ of the table is `seek(k)`.
-   A parameter added later that needs a normal costs two words and so appends two indices. The
+   parameter drawn here is one uniform or one log-uniform, which costs one word, so the eleven
+   drawn rows take words 0–10 in the table's order and the derived and constant rows none (see
+   Risks, the ruling on the word indices). A parameter added later that needs a normal costs two
+   words and so appends two indices. The warm ionised layer and the molecular disc are drawn in
+   absolute terms, by the warm layer's mid-plane density at R₀ = 26,000 ly and by the molecular
+   disc's mass, and their shares f_w and f_c of the gas are derived; the neutral disc takes the
+   rest of plan 02's gas mass (ruling 19 of 2026-09-22). They first were drawn as shares, which tied
+   two layers whose measurements are absolute to a gas mass that has since moved and will move
+   again; the two rows keep the words they had. The
    table's first three rows are plan 02's, not drawn here; on the wire they stay where P04.T14.b put
    them (`gas.mass` under `mass`, `disc.gas.scale_length` under `discs`) and only the rest form
    P07.T10.b's `gas` group, since a dotted parameter key is unique across the whole response.
 
-   | Parameter                             | Rule                                               | MW           |
-   | ------------------------------------- | -------------------------------------------------- | ------------ |
-   | Gas mass                              | `GasDiscParams::mass()`, 10–20% of the thin disc's | 5.1 × 10⁹ M☉ |
-   | Radial scale R_g                      | `GasDiscParams::length()`, 1.5–2 × the thin disc's | 14,000 ly    |
-   | Neutral scale height h_n              | `GasDiscParams::HEIGHT`, a generator constant      | 400 ly       |
-   | Hole scale R_m                        | 0.8–1.2 × the bar's half-length                    | 16,000 ly    |
-   | Warm ionised share of the mass f_w    | 0.20–0.30, uniform                                 | 0.25         |
-   | Warm ionised scale height h_w         | 2,500–3,500 ly, uniform                            | 3,000 ly     |
-   | Molecular disc share of the mass f_c  | 3–10 × 10⁻⁴, log-uniform                           | 5 × 10⁻⁴     |
-   | Molecular disc scale length R_c       | the nuclear disc's scale length                    | 290 ly       |
-   | Molecular disc height h_c             | 0.15–0.25 × R_c                                    | 58 ly        |
-   | Corona density n_cor                  | 0.5–1.2 × 10⁻³ cm⁻³, log-uniform (note 12)         | 10⁻³         |
-   | Pressure floor P_cor ÷ k              | 300–500 K cm⁻³, uniform                            | 400          |
-   | Pressure height h_P                   | generator-version constant                         | 1,500 ly     |
-   | Pressure speed σ_P                    | generator-version constant                         | 5.5 km/s     |
-   | Log-normal width σ_ln                 | 2.0–2.5, uniform                                   | 2.3          |
-   | Lane offset d (inward, perpendicular) | 300–600 ly, uniform                                | 450 ly       |
-   | Lane width σ_w                        | 150–300 ly, uniform                                | 200 ly       |
-   | Lane fraction A of the neutral gas    | 0.08–0.20, uniform                                 | 0.12         |
+   | Parameter                             | Rule                                                 | MW           |
+   | ------------------------------------- | ---------------------------------------------------- | ------------ |
+   | Gas mass                              | `GasDiscParams::mass()`, 17.5–35% of the thin disc's | 8.2 × 10⁹ M☉ |
+   | Radial scale R_g                      | `GasDiscParams::length()`, 1.5–2 × the thin disc's   | 12,250 ly    |
+   | Neutral scale height h_n              | `GasDiscParams::HEIGHT`, a generator constant        | 700 ly       |
+   | Hole scale R_m                        | 0.8–1.2 × the bar's half-length                      | 16,000 ly    |
+   | Warm ionised density w at R₀          | 0.025–0.035 cm⁻³, uniform (word 1)                   | 0.030        |
+   | Warm ionised scale height h_w         | 2,500–3,500 ly, uniform                              | 3,000 ly     |
+   | Molecular disc mass M_c               | 2–3 × 10⁶ M☉, log-uniform (word 3; note 5)           | 2.5 × 10⁶ M☉ |
+   | Molecular disc scale length R_c       | the nuclear disc's scale length                      | 290 ly       |
+   | Molecular disc height h_c             | 0.15–0.25 × R_c                                      | 58 ly        |
+   | Corona density n_cor                  | 0.5–1.2 × 10⁻³ cm⁻³, log-uniform (note 12)           | 10⁻³         |
+   | Pressure floor P_cor ÷ k              | 300–500 K cm⁻³, uniform                              | 400          |
+   | Pressure height h_P                   | generator-version constant                           | 1,500 ly     |
+   | Pressure speed σ_P                    | generator-version constant                           | 5.5 km/s     |
+   | Log-normal width σ_ln                 | 2.0–2.5, uniform                                     | 2.3          |
+   | Lane offset d (inward, perpendicular) | 300–600 ly, uniform                                  | 450 ly       |
+   | Lane width σ_w                        | 150–300 ly, uniform                                  | 200 ly       |
+   | Lane fraction A of the neutral gas    | 0.08–0.20, uniform                                   | 0.12         |
+
+   Derived for the fixture: the warm layer weighs 1.19 × 10⁹ M☉, f_w = 0.145; f_c = 3.0 × 10⁻⁴;
+   the neutral disc 7.04 × 10⁹ M☉, a share of 0.855. The warm layer's two ranges together give a
+   column of 19–38 cm⁻³ pc from the plane, around the pulsars' 24.4 (Schnitzeler 2012, as McKee,
+   Parravano and Hollenbach 2015, ApJ 814, 13, Table 2 adopt it: 0.0154 cm⁻³ over 1,590 pc, the
+   same column in a taller, thinner layer); the brainstorm's 0.03 cm⁻³ at "near 3,000 ly" is the
+   Taylor–Cordes thick disc of about 0.9 kpc. R₀ is the same 26,000 ly for every seed, as every
+   other check in the generator takes the Sun's radius: scaling it with a galaxy's gas disc was
+   estimated over the same 2,000 galaxies, with this plan's own draws taken at random, to lower
+   the least neutral share from about 0.5 to about 0.27 (Risks).
 
 4. **The smooth field.** With R, z cylindrical in light-years:
 
@@ -407,25 +447,33 @@ targets; the targets are binding, these are not.
    The factor exp(−R_m ÷ R) is the hole inside the bar, in the form McMillan (2017) uses for the
    Milky Way's gas discs; the neutral disc peaks at √(R_m R_g), near the bar's end. The warm layer
    takes half the hole scale because ionised gas fills the inner galaxy more evenly than neutral gas
-   does. n_0, w_0 and c_0 follow from the mass budget: the gas mass of plan 02 is shared as (1 − f_w
-   − f_c), f_w and f_c, and each normalisation is mass ÷ (1.4 m_H × the component's volume
-   integral). The molecular disc's integral is 4π R_c² h_c. The other two have no elementary radial
+   does. w_0 is the drawn density at R₀ divided by the warm layer's radial factor there. c_0 and n_0
+   follow from masses, each normalisation being mass ÷ (1.4 m_H × the component's volume integral):
+   the molecular disc's drawn mass, and for the neutral disc the rest of plan 02's gas mass once the
+   warm layer's mass (w_0 × 1.4 m_H × its volume integral) and the molecular disc's are taken out
+   (ruling 19). The molecular disc's integral is 4π R_c² h_c. The other two have no elementary radial
    integral, so the radial part is a fixed quadrature in ln R, eight panels with log-spaced edges
    from 1 ly to 20 R_g through plan 02's `galaxy::quad::gl_log_panels`, which substitutes u = ln R
    itself and puts 32 nodes on each panel (`gl_panels` integrates in R, not in ln R), done once in
-   `GasField::new`. The corona is outside the budget: it is a halo component, given by its density.
-   With MW values this gives 0.70 cm⁻³ of neutral gas and 0.030 cm⁻³ of warm ionised gas in the
-   plane at 26,000 ly, 1.1 mag per 3,000 ly there, 0.19 mag to the galactic pole, and 28 mag to the
-   centre (13 from the disc, 15 from the molecular disc, 1 from the warm layer). Every one of those
-   figures was re-derived at the re-validation and holds to two figures; the gas column they imply at
-   26,000 ly, 7.9 M☉ per square parsec, is the subject of an owner question under Risks.
+   `SmoothGas::new` (P07.T2), which `GasField::new` will call. The corona is outside the budget: it
+   is a halo component, given by its density. With MW values, as built and measured at P07.T2 after
+   rulings 1 and 19: 0.80 cm⁻³ of neutral gas and 0.030 cm⁻³ of warm ionised gas in the plane at
+   26,000 ly; a column there of 13.8 M☉ per square parsec of every phase, helium included (11.9
+   neutral, 1.9 warm), against McKee et al.'s 13.7 ± 1.6; 1.06 mag per 3,000 ly in the plane, 0.28
+   mag to the galactic pole, and 27 mag to the centre (13.7 from the disc, 12.5 from the molecular
+   disc, 0.8 from the warm layer). The extinctions are predictions from the mean field with the
+   dust-to-gas ratio of Design note 13, which at 26,000 ly is ζ = 0.84, not 1 (Risks); P07.T12
+   measures them. Before ruling 19 the figures were 0.67 and 0.030 cm⁻³, 7.6 M☉ pc⁻², 1.05 mag
+   per 3,000 ly, 0.18 and 27 mag (version 8), and at version 9 as merged 0.77 and 0.057 cm⁻³,
+   15.0 M☉ pc⁻² and a molecular centre of 74 cm⁻³, the warm bracket missed.
 
 5. **The molecular disc's mass is set by the brainstorm's thirty magnitudes, not by the Milky Way's
    central molecular zone.** The real zone holds 3–5 × 10⁷ M☉, which as a smooth disc would put over
    a hundred magnitudes in front of the centre. The real gas is in a few dense clouds that the line
    of sight to the centre mostly misses. So the smooth disc carries only the diffuse part, some 2–3
-   × 10⁶ M☉, and the dense clouds are plan 09's features, which add their own dust locally as the
-   brainstorm says. See Risks.
+   × 10⁶ M☉ — drawn in those terms, log-uniform, and not as a share of the gas (ruling 19) — and the
+   dense clouds are plan 09's features, which add their own dust locally as the brainstorm says. The
+   fixture's 2.5 × 10⁶ M☉ gives 40.9 cm⁻³ at the centre. See Risks.
 
 6. **Lanes reuse the arm factor at a shifted radius.** lane(R, θ) = S(R + d ÷ cos p, θ), where S is
    plan 02's `SharpArm` factor 1 + f(R) A (g − 1), built on the shared `ArmGeometry` through
@@ -920,11 +968,12 @@ variants exist.
   built with one worker equals one built with four; the second `get` is a cache hit; a golden raster
   `crates/hyperion-server/tests/golden/extinction_map_face_on_128.golden` beside plan 04's.
 - **P07.T10.b Gas parameters** (needs T11.a). A `gas` group in `GalaxyParameters` with every entry of
-  Design note 3's table that this plan draws, under dotted keys (`gas.hole_scale`, `gas.warm_fraction`,
-  `gas.warm_height`, `gas.molecular_fraction`, `gas.molecular_length`, `gas.molecular_height`,
+  Design note 3's table that this plan draws, under dotted keys (`gas.hole_scale`, `gas.warm_density`,
+  `gas.warm_height`, `gas.molecular_mass`, `gas.molecular_length`, `gas.molecular_height`,
   `gas.corona_density`, `gas.pressure_floor`, `gas.pressure_height`, `gas.pressure_speed`,
-  `gas.sigma_ln`, `gas.lane_offset`, `gas.lane_width`, `gas.lane_fraction`), each marked drawn,
-  derived or fixed through `convert.rs`'s `drawn`/`derived`/`fixed` helpers, plus `gas.scale_height`
+  `gas.sigma_ln`, `gas.lane_offset`, `gas.lane_width`, `gas.lane_fraction`, and since ruling 19 the
+  derived `gas.warm_fraction`, `gas.molecular_fraction` and `gas.neutral_fraction`), each marked
+  drawn, derived or fixed through `convert.rs`'s `drawn`/`derived`/`fixed` helpers, plus `gas.scale_height`
   as `fixed`, which this task moves out of `EXCLUDED_PARAMETERS` (its exclusion reads "a constant of
   the generator, the same for every seed", which no longer stands once the gas field reads it). The
   table's first three rows are **not** re-sent: `gas.mass` is already a `derived` entry in the `mass`
@@ -1239,39 +1288,28 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   needs T8). The generator-version section now records the second bump T12's tuning forces, and the
   cap on the extinction request was made 64 everywhere. Nothing about what is built changed; the five
   questions below are for the owner.
-- **For the owner: the fixture's gas column.** The brainstorm's open questions now include "The
-  fixture's gas": plan 02's gas disc gives 6.6 M☉ per square parsec at the Sun's radius against McKee
-  et al.'s measured 13.7 ± 1.6, and raising it would restore the vertical pull near the plane when
-  P02.T11 lowers the stars' surface density. This plan's own field, with the hole pushing mass outward
-  and the warm layer added, gives 7.9 M☉ per square parsec there — still 1.74 times short. The two
-  knobs are not equivalent, and the choice is the owner's:
-  - Raising the **mass** by 1.74 (plan 02's drawn fraction 0.10–0.20 becoming about 0.17–0.35) raises
-    the mid-plane density with it, and the in-plane extinction goes from 1.1 to 1.9 mag per 3,000 ly,
-    outside the brainstorm's "about one magnitude per 3,000 ly" and outside P07.T12's 0.8–1.3 bracket.
-  - Raising the **mass and the height together** by 1.74 (h_n 400 → about 700 ly, the fraction as
-    above) leaves the mid-plane density and so the in-plane extinction untouched at 1.1 mag, and raises
-    the polar extinction from 0.19 to 0.33 mag and the 21 cm column with it. This is the physically
-    natural reading — the real neutral layer's column is carried well above 123 pc — and it reconciles
-    both of the brainstorm's figures, but h_n is plan 02's fixed `GasDiscParams::HEIGHT` and the mass
-    enters the potential, so either change moves every star and belongs to plan 02's D15 with a version
-    bump and a re-check of its rotation-curve and enclosed-mass brackets.
-  - Or leave both as they are and read the 7.9 as the price of meeting the extinction figure, which is
-    the outcome the brainstorm states and the one this plan is built on.
-- **For the owner: does ruling 1 bind the gas disc?** The 2026-09-21 rulings' first ruling is headed
-  "Each disc is exponential in radius and cored in height", and its text and its reason (Bovy 2017's
-  measured star counts, the far-field thin and thick heights) are about the stellar discs' age cohorts.
-  The brainstorm's "Between the stars" says only "a thin neutral disc a few hundred light-years tall"
-  and gives the gas no vertical form, so nothing it says is contradicted by Design note 4's
-  exp(−|z| ÷ h_n), and plan 02 kept the gas disc a plain double exponential in the potential. But a
-  real gas layer is hydrostatic and cored at the plane for the same reason a stellar one is, and this
-  plan's own Design note 11 is a hydrostatic pressure. If the owner rules that the gas is cored too,
-  three things follow: P07.T2's closed-form vertical columns and P07.T9's face-on closed form become
-  `VerticalProfile::integral_to` differences with its clamp at 0 (which plan 02's R18 and `across_pixel`
-  already handle); P07.T6.b's vertical factor still never rises with |z|, so its bound holds; but plan
-  09's Design note 21, which bounds density ÷ g(z) at the height nearest the plane, stops holding for
-  its clouds as well as for its stellar-disc features, and plan 09 must be told. As the gas stands,
-  exponential, that bound does hold for the clouds and plan 09 need re-bound only what follows the
-  stellar discs.
+- **The fixture's gas column, ruled (rulings 1 and 19 of 2026-09-22).** The brainstorm's open question
+  "The fixture's gas" asked whether the column at the Sun's radius should reach McKee et al.'s measured
+  13.7 ± 1.6 M☉ pc⁻² from the 6.6 of plan 02's double exponential (7.9 by this plan's field, 7.6 as T2
+  measured it). Ruling 1 raised plan 02's drawn gas fraction and `GasDiscParams::HEIGHT` together by
+  1.74 in P02.T11 (0.175–0.35 and 700 ly), on the principle that the column is carried by thickening
+  the layer and not by densifying the plane, whose density the in-plane extinction reads. That held for
+  the neutral layer only: the warm ionised layer and the molecular disc were then drawn as shares of the
+  gas mass while the warm layer's height is its own, so both came out about 1.9 times too dense (0.057
+  cm⁻³ and 74 cm⁻³). Ruling 19 draws them absolutely and re-closes the arithmetic with the warm layer
+  held; see the bullet on ruling 19 below for what it measured and moved. Superseded figures: ruling
+  1's 26.25% for the fixture and its "mid-plane unchanged at 0.70".
+- **The gas disc stays exponential in height (ruling 2 of 2026-09-22), provisionally.** The 2026-09-21
+  rulings' first ruling ("each disc is exponential in radius and cored in height") keeps its stellar
+  scope: its text and its reason (Bovy 2017's star counts, the far-field thin and thick heights) are
+  about the stellar age cohorts, and the brainstorm gives the gas no vertical form. So Design note 4's
+  exp(−|z| ÷ h_n) stands, P07.T2's vertical columns and P07.T9's face-on form stay closed forms, and plan
+  09's Design note 21 bound (density ÷ g(z) at the height nearest the plane) holds for its clouds. The
+  decision is **provisional**, for the reason against it: a real gas layer is hydrostatic and cored at
+  the plane for the same reason a stellar one is, and Design note 11 is itself a hydrostatic pressure.
+  Revisit when plan 09 is written, since plan 09 must re-bound for the stellar discs regardless; coring
+  the gas would then turn T2's columns and T9's face-on form into `VerticalProfile::integral_to`
+  differences clamped at 0, leave T6.b's bound holding, and make plan 09 re-bound its clouds too.
 - **For the owner: typography.** P07.T11.a's four units are written `mag`, `/cm²`, `/cm³` and `K/cm³`,
   the form the guide's existing `/ly³` and `SYSTEMS/ly²` use, because the guide records that B612 has
   no superscript minus and so `cm⁻²` cannot be set. Whether `<sup>` and `<sub>` may be used — which
@@ -1310,27 +1348,112 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
 
   The `galaxy::gas` tests take about 0.9 s together, so none is marked slow. P02.T11 raises the gas
   disc's mass and scale height by the same 1.74 (ruling 1), which leaves the three mid-plane figures
-  unchanged; re-read them after it merges, as a check on that ruling's arithmetic.
+  unchanged; re-read them after it merges, as a check on that ruling's arithmetic. **Re-read, it did
+  not hold for the warm and molecular layers**: see the next bullet.
+
+- **Ruling 19, as built (2026-09-23): the warm ionised layer and the molecular disc drawn absolutely.**
+  After P02.T11 merged, T2's test read the warm ionised gas at 0.0566 cm⁻³ against 0.025–0.035, because
+  f_w and f_c were shares of a gas mass that rulings 1 and 8 had raised 1.75 times while the warm
+  layer's height is its own. Built:
+  - _The draws._ Word 1 is the warm layer's mid-plane density at R₀ = 26,000 ly
+    (`GasParams::REFERENCE_RADIUS`), uniform 0.025–0.035 cm⁻³, the brainstorm's "about 0.03" (its
+    sources: the Taylor–Cordes thick disc of about 0.9 kpc; with h_w's 2,500–3,500 ly the column from
+    the plane is 19–38 cm⁻³ pc, around the pulsars' 24.4 of Schnitzeler 2012 in McKee et al. 2015,
+    Table 2, which puts the same column in 0.0154 cm⁻³ over 1,590 pc). Word 3 is the molecular disc's
+    mass, log-uniform 2–3 × 10⁶ M☉ (Design note 5). Each is one word at its old index, so the word
+    layout is unchanged; `warm_fraction()` and `MolecularDisc::fraction()` are derived, and
+    `warm_density()`, `warm_mass()` and `neutral_mass()` are new getters. `SmoothGas` takes the warm
+    amplitude from the density (so the layer reads its drawn value at R₀ to 10⁻¹⁵ for every seed) and
+    the neutral disc's from the rest of the mass.
+  - _The neutral share._ Its floor is one half — the ruling's "a neutral layer that is not most of the
+    gas is not this galaxy"; the Milky Way's local column is 87% atomic or molecular (McKee et al.,
+    Table 2) and the fixture's disc 85%. Over 2,000 seeds each against its own galaxy
+    (`tests/gas_statistics.rs`, slow, 14 s optimised at a load of 1.1 and 3.5 GHz): least **0.529**,
+    1% 0.631, 16% 0.765, median 0.847, 84% 0.895, most 0.942. None falls below the floor, but the
+    lightest galaxies come near it: their warm layer weighs what the Milky Way's does, about 10⁹ M☉,
+    against a few 10⁹ of gas. The fast suite checks the floor over 2,000 seeds against the fixture's
+    galaxy and 32 against their own.
+  - _R₀._ Fixed at 26,000 ly for every galaxy, as the rest of the generator takes the Sun's radius.
+    Scaling it with the gas disc (R₀ = 26,000 × R_g ÷ 12,250) or the thin disc was estimated over the
+    same 2,000 galaxies, with this plan's own draws taken at random, to lower the least neutral share
+    to about 0.27 and 0.32, since a short disc then reads the solar density well inside 26,000 ly.
+  - _A reachable panic, a finding._ `GasParams::from_galaxy` panics, documented, if the warm layer and
+    the molecular disc outweigh the gas. No seed comes near it (plan 02 couples a light galaxy to a
+    short disc), but `GalaxyParamsBuilder` can build one at the corner of plan 02's ranges: 3 × 10¹⁰ M☉
+    of stars, a thin share of 0.47, a gas fraction of 0.175 and a thin disc fixed at 11,500 ly give
+    2.5 × 10⁹ M☉ of gas against a warm layer of up to 2.5 × 10⁹. P07.T6.a, which builds the field in
+    `Galaxy::from_params`, should decide whether such a builder galaxy is refused earlier.
+  - _Ruling 1 re-closed, measured together at the fixture_ by `gas::smooth`'s unit test
+    `the_fixture_carries_the_measured_column_at_the_measured_extinction`. The levers were plan 02's
+    `GasDiscParams::HEIGHT` and the fixture's gas fraction; the height stays at 700 ly, since 215 pc is
+    already 1.4 times the measured atomic layer's effective height (156 pc: McKee et al.'s 10.9 M☉ pc⁻²
+    over 1.01 cm⁻³), and the fixture's fraction goes from 0.2625 to **0.24** (8.24 × 10⁹ M☉), which
+    carries the column to McKee's central value. Plan 02's drawn range stays 0.175–0.35: it is the
+    spread of other galaxies, which the Milky Way's column does not measure, and 0.24 lies inside it.
+    Ruling 19's estimate of h_n near 800 ly held the neutral mid-plane at version 8's 0.67; what the
+    in-plane extinction reads is the dust-bearing density, and with ζ = 0.84 at 26,000 ly (below)
+    0.80 cm⁻³ gives the same 1.06 mag as version 8's 0.70 did at ζ = 0.98.
+
+    | At the fixture                        | Version 8 | Version 9 as merged | Now        | Bracket     |
+    | ------------------------------------- | --------- | ------------------- | ---------- | ----------- |
+    | Neutral mid-plane at 26,000 ly (cm⁻³) | 0.673     | 0.769               | **0.802**  | 0.6–0.9     |
+    | Warm ionised mid-plane (cm⁻³)         | 0.0297    | 0.0566              | **0.0300** | 0.025–0.035 |
+    | Molecular centre (cm⁻³)               | 42.1      | 73.7                | **40.9**   | 20–80       |
+    | Gas column at 26,000 ly (M☉ pc⁻²)     | 7.6       | 15.0                | **13.8**   | 13.7 ± 1.6  |
+    | of it warm ionised (McKee: 1.8 ± 0.1) | 1.9       | 3.6                 | **1.9**    | —           |
+    | A(V) per 3,000 ly in the plane (mag)  | 1.05      | 1.05                | **1.06**   | 0.8–1.3     |
+    | A(V) to the galactic pole (mag)       | 0.18      | —                   | 0.28       | —           |
+    | A(V) to the centre, mean field (mag)  | 27.2      | —                   | 26.9       | 24–38       |
+    | Neutral share of the gas              | 0.75      | 0.75                | 0.855      | ≥ 0.5       |
+    | Gas outside the root cube             | 5.6%      | 3.1%                | 3.2%       | —           |
+    | Hole at R_m ÷ 8, worst seed           | 0.33%     | —                   | 0.34%      | under 1%    |
+
+    The extinctions are predictions from the mean field and the dust-to-gas ratio of Design note 13,
+    over 1.87 × 10²¹ nuclei per cm² per magnitude, at one point times the length; P07.T12 measures them.
+    The column is every disc phase with helium, not the corona, as McKee et al. count it.
+
+  - _A finding against plan 02: the Sun's metallicity._ Plan 02's thin-disc metallicity is solar at
+    three scale lengths (`THIN_DISC_REFERENCE_LENGTHS`), which was 25,440 ly on the version 8 fixture
+    and is 21,000 ly since P02.T11 shortened the thin disc to 7,000 ly. So [M/H] at 26,000 ly is −0.077
+    and ζ = 0.84, where the local young population is solar or a little above. If plan 02 moves the
+    solar point back to the Sun, ζ goes to 1 and the in-plane extinction to 1.26 mag per 3,000 ly —
+    inside 0.8–1.3 but near its top — and h_n near 800 ly would bring it back to about 1.05, which is
+    ruling 19's own estimate. Plan 02's sub-discs solve their profiles at the same three lengths
+    (`REFERENCE_RADIUS_LENGTHS`), so the question is plan 02's, not this plan's.
+  - _Plan 02, moved by the fixture's lighter gas._ The fixture's bulge σ fell from 123.9 to 123.8 km/s,
+    which put its black hole at 4.28 × 10⁶ M☉; its M–σ offset is re-set, as R13 requires whenever σ
+    moves, from −0.514 to **−0.512** dex, and the black hole is 4.30 × 10⁶ again (Sgr A*'s 4.297 ±
+    0.012). P02.T11's fixture rows, before → after, all still inside: enclosed mass 5.147 → 5.150 × 10⁶
+    M☉ at 1 pc, 1.2480 → 1.2483 × 10⁷ at 4 pc, 3.693 → 3.692 × 10⁸ at 100 pc, 1.114 → 1.113 × 10⁹ at
+    230 pc, 9.666 → 9.647 × 10⁹ at 1 kpc, 2.490 → 2.483 × 10¹⁰ at 2 kpc; v_c 152.3 → 152.3, 186.8 →
+    186.7, 227.5 → 227.2 and 231.5 → 230.7 km/s at 0.5, 1, 2 and 8 kpc; v_c(1) ÷ v_c(8) 0.807 → 0.809;
+    escape speed 570.7 → 570.0 km/s; pattern speed 39.6 → 39.5 km/s per kpc; tidal radius of 1 M☉ at
+    26,000 ly 4.22 → 4.23 ly; plan 02's own gas column at R₀ 11.5 → 10.5 M☉ pc⁻². Unmoved: 0.00205
+    systems per ly³, 0.0417 M☉ pc⁻³, Σ★ 30.5 M☉ pc⁻², the nuclear disc's 1.75% and 18.89 per ly³. The
+    seed sweeps do not read the fixture and the drawn range did not move (see plan 02's R22).
 
 - **Ruling on design note 3's word indices** (the note was ambiguous: "parameter _k_ of the table is
   `seek(k)`" against seventeen table rows, but "indices 0–15 reserved"). The **eleven drawn parameters
   take words 0–10 in table order**; words 11–15 stay reserved; the derived and constant rows get no word
   at all. Design note 3's wording should be corrected to say that, since only drawn parameters consume
   words.
-- **T1's prose "each parameter is one `Stream::uniform_in`" is wrong**: the table makes `f_c` and `n_cor`
-  **log-uniform**. Both still cost exactly one word, so the index rule above is unaffected.
-- **The Milky Way fixture as built** differs from the table: `R_g` is **14,840 ly** (1.75 × 8,480), not
-  14,000, and the gas mass is 5.06 × 10⁹ M☉. Use the code's values.
+- **T1's prose "each parameter is one `Stream::uniform_in`" is wrong**: the table makes the molecular
+  disc's mass (before ruling 19, its share f_c) and `n_cor` **log-uniform**. Both still cost exactly one
+  word, so the index rule above is unaffected.
+- **The Milky Way fixture as built**: `R_g` is **12,250 ly** (1.75 × plan 02's 7,000 since P02.T11; it
+  was 14,840 at version 8) and the gas mass 8.24 × 10⁹ M☉ (24% of the thin disc, ruling 19). The table
+  now carries these.
 - **T2's mass test cannot integrate "over the cube" to 2%.** The normalisation integrates to 20 R_g, and
   about **11% of the neutral mass lies outside the ±65,536 ly root cube** (analytic estimate).
-  **As measured, 5.6% for the fixture**: the 11% estimate took a cylinder inscribed in the cube and
-  missed its corners. At the largest drawn scale lengths up to about 20% lies outside. Integrate
+  **As measured, 5.6% for the version 8 fixture and 3.2% since P02.T11** shortened its gas disc to
+  12,250 ly: the 11% estimate took a cylinder inscribed in the cube and missed its corners. At the
+  largest drawn scale lengths up to about 20% lies outside. Integrate
   over the component's own support instead, and report the in-cube fraction as a separate figure.
   - An exact cross-check on `gl_log_panels` for that integral:
     ∫₀^∞ R e^(−a/R − R/b) dR = 2 a b K₂(2 √(a/b)).
-  - Analytic predictions for T2's brackets, from the parameters as built and **not yet measured**:
-    neutral ≈ 0.66 cm⁻³ (bracket 0.6–0.9), warm ionised ≈ 0.029 (0.025–0.035), molecular centre ≈ 41
-    (20–80), and the hole at R_m ÷ 8 is 0.2–0.5% of peak for every seed, against the "under 1%" test.
+  - Analytic predictions for T2's brackets at version 8 (since measured, above): neutral ≈ 0.66 cm⁻³
+    (bracket 0.6–0.9), warm ionised ≈ 0.029 (0.025–0.035), molecular centre ≈ 41 (20–80), and the hole
+    at R_m ÷ 8 is 0.2–0.5% of peak for every seed, against the "under 1%" test.
   - The corona-hot check is load-bearing at its limit: the worst case is
     300 ÷ (2.3 × 1.2 × 10⁻³) = 1.09 × 10⁵ K against design note 12's 10⁵ K floor.
 - Clippy's `doc_markdown` rejects bare `R_m`, `h_w`, `σ_ln` and the like in doc comments — backtick

@@ -12,6 +12,14 @@
 //! velocity dispersion [`GasParams::PRESSURE_SPEED`] that Design note 11's hydrostatic pressure is
 //! calibrated with.
 //!
+//! The warm ionised layer and the central molecular disc are drawn in absolute terms — the warm
+//! layer by its mid-plane density at the Sun's radius, the molecular disc by its mass — because the
+//! brainstorm and Design note 5 state them so, and the neutral disc takes the rest of plan 02's gas
+//! mass (plan 07, ruling 19 of 2026-09-22). Drawn as shares of that mass, as they first were, the
+//! two layers moved whenever plan 02's gas mass did, which is a quantity their measurements have
+//! nothing to do with, and plan 02's own spread of gas masses multiplied into the warm layer's
+//! density.
+//!
 //! The ranges are the brainstorm's where it states one ("Between the stars", the bullet "Dust and
 //! gas": a warm layer of about 0.03 cm⁻³ with a scale height near 3,000 ly, a corona of about 10⁻³
 //! cm⁻³, a log-normal of σ 2–2.5) and Design notes 3 and 5's otherwise. The radial form, the hole
@@ -22,6 +30,7 @@
 //! diffuse part of the central molecular zone (Design note 5) and sits where the nuclear disc is.
 
 use crate::Seed;
+use crate::galaxy::gas::smooth;
 use crate::galaxy::params::GalaxyParams;
 use crate::math;
 use crate::rng::{ObjectKey, Stream, tags};
@@ -74,12 +83,12 @@ const DRAWN_COUNT: usize = 11;
 enum Drawn {
     /// The hole scale `R_m` over the bar's half-length.
     HoleRatio,
-    /// The warm ionised layer's share `f_w` of the gas mass.
-    WarmFraction,
+    /// The warm ionised layer's mid-plane density at the Sun's radius, cm⁻³.
+    WarmDensity,
     /// The warm ionised layer's scale height `h_w`, ly.
     WarmHeight,
-    /// The molecular disc's share `f_c` of the gas mass.
-    MolecularFraction,
+    /// The molecular disc's mass, M☉.
+    MolecularMass,
     /// The molecular disc's scale height `h_c` over its scale length `R_c`.
     MolecularHeightRatio,
     /// The corona's density `n_cor`, cm⁻³.
@@ -100,9 +109,9 @@ impl Drawn {
     /// Every drawn parameter, in Design note 3's table order, which is the word order.
     const ALL: [Self; DRAWN_COUNT] = [
         Self::HoleRatio,
-        Self::WarmFraction,
+        Self::WarmDensity,
         Self::WarmHeight,
-        Self::MolecularFraction,
+        Self::MolecularMass,
         Self::MolecularHeightRatio,
         Self::CoronaDensity,
         Self::PressureFloor,
@@ -116,9 +125,9 @@ impl Drawn {
     const fn word(self) -> u64 {
         match self {
             Self::HoleRatio => 0,
-            Self::WarmFraction => 1,
+            Self::WarmDensity => 1,
             Self::WarmHeight => 2,
-            Self::MolecularFraction => 3,
+            Self::MolecularMass => 3,
             Self::MolecularHeightRatio => 4,
             Self::CoronaDensity => 5,
             Self::PressureFloor => 6,
@@ -131,23 +140,27 @@ impl Drawn {
 
     /// The law and range of Design note 3's table.
     ///
-    /// The hole scale follows the bar, whose ends the arms and the gas lanes start from; the warm
-    /// layer's height is the brainstorm's "near 3,000 ly"; the molecular share is Design note 5's
-    /// 2–3 × 10⁶ M☉ of diffuse central gas as a share of a few 10⁹; the corona's range is the
-    /// brainstorm's 10⁻³ cm⁻³, trimmed above so that the corona comes out hot for every seed
-    /// (Design note 12 and the plan's Risks); `σ_ln` is the brainstorm's 2–2.5.
+    /// The hole scale follows the bar, whose ends the arms and the gas lanes start from. The warm
+    /// layer is the brainstorm's "about 0.03 atoms per cubic centimetre with a scale height near
+    /// 3,000 ly", drawn independently in density and height: the two ranges together give a column
+    /// of 19–38 cm⁻³ pc from the plane, around the pulsars' measured 24.4 cm⁻³ pc (Schnitzeler
+    /// 2012, as McKee, Parravano and Hollenbach 2015, ApJ 814, 13, Table 2 adopt it: 0.0154 cm⁻³
+    /// over 1,590 pc, the same column in a taller, thinner layer). The molecular disc's mass is
+    /// Design note 5's 2–3 × 10⁶ M☉ of diffuse central gas. The corona's range is the brainstorm's
+    /// 10⁻³ cm⁻³, trimmed above so that the corona comes out hot for every seed (Design note 12
+    /// and the plan's Risks); `σ_ln` is the brainstorm's 2–2.5.
     const fn law(self) -> Law {
         match self {
             Self::HoleRatio => Law::Uniform { lo: 0.8, hi: 1.2 },
-            Self::WarmFraction => Law::Uniform { lo: 0.20, hi: 0.30 },
+            Self::WarmDensity => Law::Uniform {
+                lo: 0.025,
+                hi: 0.035,
+            },
             Self::WarmHeight => Law::Uniform {
                 lo: 2_500.0,
                 hi: 3_500.0,
             },
-            Self::MolecularFraction => Law::LogUniform {
-                lo: 3e-4,
-                hi: 10e-4,
-            },
+            Self::MolecularMass => Law::LogUniform { lo: 2e6, hi: 3e6 },
             Self::MolecularHeightRatio => Law::Uniform { lo: 0.15, hi: 0.25 },
             Self::CoronaDensity => Law::LogUniform {
                 lo: 0.5e-3,
@@ -176,9 +189,9 @@ impl Drawn {
     const fn name(self) -> &'static str {
         match self {
             Self::HoleRatio => "hole_ratio",
-            Self::WarmFraction => "warm_fraction",
+            Self::WarmDensity => "warm_density",
             Self::WarmHeight => "warm_height",
-            Self::MolecularFraction => "molecular_fraction",
+            Self::MolecularMass => "molecular_mass",
             Self::MolecularHeightRatio => "molecular_height_ratio",
             Self::CoronaDensity => "corona_density",
             Self::PressureFloor => "pressure_floor",
@@ -200,8 +213,8 @@ impl Drawn {
 /// The central molecular disc: the diffuse part of the central molecular zone, where the nuclear
 /// disc is (brainstorm, "Between the stars"; Design note 5).
 ///
-/// Its mass is a few thousandths of a per cent of the gas, not the 3–5 × 10⁷ M☉ the real zone
-/// holds, because the real mass is in a few dense clouds that a line of sight to the centre mostly
+/// Its mass is 2–3 × 10⁶ M☉, a few hundredths of a per cent of the gas, not the 3–5 × 10⁷ M☉ the
+/// real zone holds, because the real mass is in a few dense clouds that a line of sight to the centre mostly
 /// misses: the clouds are plan 09's features and carry their own dust. What is left here is what
 /// puts the brainstorm's thirty magnitudes in front of the centre.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -213,13 +226,13 @@ pub struct MolecularDisc {
 }
 
 impl MolecularDisc {
-    /// Its share `f_c` of the gas mass, 3–10 × 10⁻⁴.
+    /// Its share `f_c` of the gas mass, derived: its mass over plan 02's gas mass, a few 10⁻⁴.
     #[must_use]
     pub fn fraction(&self) -> f64 {
         self.fraction
     }
 
-    /// Its mass: the share times the gas disc's mass.
+    /// Its mass, 2–3 × 10⁶ M☉, drawn (Design note 5).
     #[must_use]
     pub fn mass(&self) -> SolarMasses {
         self.mass
@@ -290,9 +303,12 @@ impl LaneParams {
 /// // The mass and the scale length are plan 02's own, never redrawn.
 /// assert_eq!(gas.gas_mass(), galaxy.gas_disc().mass());
 /// assert_eq!(gas.radial_scale(), galaxy.gas_disc().length());
-/// // The three phases share the mass: neutral, warm ionised and molecular.
+/// // The warm ionised layer is drawn by its density at the Sun's radius, and the neutral disc
+/// // takes what the warm layer and the molecular disc leave of the gas mass.
+/// assert!((0.025..=0.035).contains(&gas.warm_density().value()));
 /// let shares = gas.neutral_fraction() + gas.warm_fraction() + gas.molecular_disc().fraction();
 /// assert!((shares - 1.0).abs() < 1e-15);
+/// assert!(gas.neutral_fraction() > 0.5);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GasParams {
@@ -300,7 +316,8 @@ pub struct GasParams {
     radial_scale: LightYears,
     hole_scale: LightYears,
     neutral_height: LightYears,
-    warm_fraction: f64,
+    warm_density: HydrogenPerCm3,
+    warm_mass: SolarMasses,
     warm_height: LightYears,
     molecular: MolecularDisc,
     corona_density: HydrogenPerCm3,
@@ -310,6 +327,16 @@ pub struct GasParams {
 }
 
 impl GasParams {
+    /// The Sun's galactocentric radius, 26,000 ly: where the brainstorm's figures for the solar
+    /// neighbourhood are read, and so where the warm ionised layer's drawn density applies.
+    ///
+    /// It is the same for every galaxy, as the rest of the generator takes it (plan 02's and plan
+    /// 03's checks at the Sun-like point, and this plan's brackets). Scaling it with a galaxy's gas
+    /// disc was estimated and rejected: over the same 2,000 galaxies the least neutral share falls
+    /// from about 0.5 to about 0.27, because a short disc then reads the solar density well inside
+    /// 26,000 ly, where the layer is denser and its mass larger (plan 07, Risks).
+    pub const REFERENCE_RADIUS: LightYears = LightYears::new(26_000.0);
+
     /// The scale height `h_P` of the pressure above the plane, a constant of the generator version.
     ///
     /// The thermal pressure falls more slowly with height than the neutral gas does, because the
@@ -331,6 +358,14 @@ impl GasParams {
     /// The draws are on [`tags::GAS_PARAMS`] with [`ObjectKey::galaxy`], one word per parameter at
     /// its fixed index, so nothing plan 02 drew moves and the order of the draws below is
     /// immaterial.
+    ///
+    /// # Panics
+    ///
+    /// If the warm ionised layer and the molecular disc drawn here outweigh plan 02's gas mass, so
+    /// that nothing is left for the neutral disc. No seeded galaxy comes near it — over 2,000 seeds
+    /// the neutral disc keeps at least half the gas (`tests/gas_statistics.rs`) — because plan 02
+    /// couples a light galaxy to a short disc; a galaxy built by hand at the corner of plan 02's
+    /// ranges, the lightest thin disc with the longest scale length and the least gas, can reach it.
     #[must_use]
     pub fn from_galaxy(seed: Seed, params: &GalaxyParams) -> Self {
         let mut stream = Stream::open(seed, tags::GAS_PARAMS, ObjectKey::galaxy());
@@ -341,8 +376,8 @@ impl GasParams {
     /// The Milky Way fixture, pairing with
     /// [`GalaxyParams::milky_way_like`](crate::galaxy::params::GalaxyParams::milky_way_like).
     ///
-    /// Its values are Design note 3's table: the gas disc is plan 02's fixture (5.1 × 10⁹ M☉,
-    /// 14,840 ly long, 400 ly tall), the hole scale is the bar's half-length of 16,000 ly, the
+    /// Its values are Design note 3's table: the gas disc is plan 02's fixture (8.2 × 10⁹ M☉,
+    /// 12,250 ly long, 700 ly tall), the hole scale is the bar's half-length of 16,000 ly, the
     /// molecular disc is the nuclear disc's 290 ly by 58 ly, and the rest are the measured values
     /// where the brainstorm states one and the middle of the range otherwise. P07.T12 tunes them
     /// against the brainstorm's targets.
@@ -356,9 +391,9 @@ impl GasParams {
     fn of_galaxy(params: &GalaxyParams, drawn: [f64; DRAWN_COUNT]) -> Self {
         let [
             hole_ratio,
-            warm_fraction,
+            warm_density,
             warm_height,
-            molecular_fraction,
+            molecular_mass,
             molecular_height_ratio,
             corona_density,
             pressure_floor,
@@ -368,17 +403,33 @@ impl GasParams {
             lane_fraction,
         ] = drawn;
         let disc = params.gas_disc();
+        let gas_mass = disc.mass();
+        let hole_scale = params.bar().half_length() * hole_ratio;
+        let warm_mass = smooth::warm_mass(
+            warm_density,
+            hole_scale.value(),
+            disc.length().value(),
+            warm_height,
+        );
+        let neutral_mass = gas_mass.value() - warm_mass - molecular_mass;
+        assert!(
+            neutral_mass > 0.0,
+            "a warm layer of {warm_mass:e} M☉ and a molecular disc of {molecular_mass:e} M☉ \
+             outweigh the gas disc's {:e} M☉",
+            gas_mass.value()
+        );
         let molecular_length = params.nuclear_disc().length();
         Self {
-            gas_mass: disc.mass(),
+            gas_mass,
             radial_scale: disc.length(),
-            hole_scale: params.bar().half_length() * hole_ratio,
+            hole_scale,
             neutral_height: disc.height(),
-            warm_fraction,
+            warm_density: HydrogenPerCm3::new(warm_density),
+            warm_mass: SolarMasses::new(warm_mass),
             warm_height: LightYears::new(warm_height),
             molecular: MolecularDisc {
-                fraction: molecular_fraction,
-                mass: disc.mass() * molecular_fraction,
+                fraction: molecular_mass / gas_mass.value(),
+                mass: SolarMasses::new(molecular_mass),
                 length: molecular_length,
                 height: molecular_length * molecular_height_ratio,
             },
@@ -394,7 +445,7 @@ impl GasParams {
     }
 
     /// The gas disc's mass, plan 02's
-    /// [`GasDiscParams::mass`](crate::galaxy::params::GasDiscParams::mass): 10–20% of the whole
+    /// [`GasDiscParams::mass`](crate::galaxy::params::GasDiscParams::mass): 17.5–35% of the whole
     /// thin disc's stellar mass, and the budget the three phases share.
     #[must_use]
     pub fn gas_mass(&self) -> SolarMasses {
@@ -419,23 +470,49 @@ impl GasParams {
     }
 
     /// The neutral layer's scale height `h_n`, plan 02's
-    /// [`GasDiscParams::HEIGHT`](crate::galaxy::params::GasDiscParams::HEIGHT) of 400 ly: the
-    /// brainstorm's "a thin neutral disc a few hundred light-years tall".
+    /// [`GasDiscParams::HEIGHT`](crate::galaxy::params::GasDiscParams::HEIGHT) of 700 ly: the
+    /// brainstorm's "a thin neutral disc a few hundred light-years tall", made tall enough to carry
+    /// the measured column without densifying the plane (plan 02, ruling 1 of 2026-09-22).
     #[must_use]
     pub fn neutral_height(&self) -> LightYears {
         self.neutral_height
     }
 
-    /// The neutral layer's share of the gas mass, `1 − f_w − f_c`.
+    /// The neutral layer's mass: what the warm ionised layer and the molecular disc leave of the gas
+    /// mass (ruling 19).
     #[must_use]
-    pub fn neutral_fraction(&self) -> f64 {
-        1.0 - self.warm_fraction - self.molecular.fraction
+    pub fn neutral_mass(&self) -> SolarMasses {
+        self.gas_mass - self.warm_mass - self.molecular.mass
     }
 
-    /// The warm ionised layer's share `f_w` of the gas mass, 0.20–0.30.
+    /// The neutral layer's share of the gas mass, `1 − f_w − f_c`.
+    ///
+    /// It is most of the gas: 0.85 for the Milky Way fixture, against the 0.87 of McKee, Parravano
+    /// and Hollenbach's (2015) local column that is atomic or molecular, and at least 0.53 over
+    /// 2,000 seeds (plan 07, Risks).
+    #[must_use]
+    pub fn neutral_fraction(&self) -> f64 {
+        1.0 - self.warm_fraction() - self.molecular.fraction
+    }
+
+    /// The warm ionised layer's mid-plane density at [`REFERENCE_RADIUS`](Self::REFERENCE_RADIUS),
+    /// 0.025–0.035 cm⁻³: the brainstorm's "about 0.03 atoms per cubic centimetre", drawn.
+    #[must_use]
+    pub fn warm_density(&self) -> HydrogenPerCm3 {
+        self.warm_density
+    }
+
+    /// The warm ionised layer's mass, derived from its density at the Sun's radius, its height and
+    /// the radial form it shares with the neutral disc.
+    #[must_use]
+    pub fn warm_mass(&self) -> SolarMasses {
+        self.warm_mass
+    }
+
+    /// The warm ionised layer's share `f_w` of the gas mass, derived: its mass over plan 02's.
     #[must_use]
     pub fn warm_fraction(&self) -> f64 {
-        self.warm_fraction
+        self.warm_mass / self.gas_mass
     }
 
     /// The warm ionised layer's scale height `h_w`, 2,500–3,500 ly: the brainstorm's "near
@@ -502,10 +579,10 @@ impl GasParams {
 /// The Milky Way fixture's draws, in [`Drawn::ALL`]'s order (Design note 3's `MW` column).
 const MILKY_WAY_DRAWN: [f64; DRAWN_COUNT] = [
     // The hole scale is the bar's half-length itself, 16,000 ly, which puts the neutral disc's
-    // peak at 15,400 ly.
-    1.0, 0.25, 3_000.0,
-    // 2.5 × 10⁶ M☉ of diffuse central gas against the fixture's 5.1 × 10⁹ M☉ (Design note 5).
-    5e-4,
+    // peak at 14,000 ly; the warm layer is the brainstorm's 0.03 cm⁻³ and 3,000 ly.
+    1.0, 0.030, 3_000.0,
+    // 2.5 × 10⁶ M☉ of diffuse central gas, the middle of Design note 5's 2–3 × 10⁶.
+    2.5e6,
     // 58 ly against the nuclear disc's 290 ly, half of Sormani et al.'s (2022) 28 pc height.
     0.20, 1e-3, 400.0, 2.3, 450.0, 200.0, 0.12,
 ];
@@ -517,6 +594,7 @@ mod tests {
     use super::super::IONISED_PARTICLES_PER_HYDROGEN;
     use super::*;
     use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::params::GasDiscParams;
 
     /// Seeds of the sweeps: the same form plan 02's tests use, with this plan's own prefix.
     fn seeds(count: u64) -> impl Iterator<Item = Seed> {
@@ -526,6 +604,12 @@ mod tests {
     fn galaxy(seed: Seed) -> GalaxyParams {
         GalaxyParams::from_seed(seed, MassFunctionKind::default())
     }
+
+    /// The least share of the gas the neutral disc may hold: half. A galaxy whose neutral gas is not
+    /// most of its gas is not a Milky Way-like spiral (ruling 19); the Milky Way's local column is
+    /// 87% atomic or molecular (McKee, Parravano and Hollenbach 2015, Table 2: 11.9 of 13.7 M☉
+    /// pc⁻²). A seed below it is a finding to report, not a share to clamp.
+    const NEUTRAL_SHARE_FLOOR: f64 = 0.5;
 
     /// Every getter against Design note 3's table, written out here independently of [`Drawn`]'s
     /// own laws so that a wrong law or a wrong word fails the test rather than moving the range.
@@ -548,22 +632,18 @@ mod tests {
             0.8,
             1.2,
         );
-        within("warm fraction", gas.warm_fraction(), 0.20, 0.30);
+        within("warm density", gas.warm_density().value(), 0.025, 0.035);
         within("warm height", gas.warm_height().value(), 2_500.0, 3_500.0);
+        assert_same_bits(gas.warm_fraction(), gas.warm_mass() / gas.gas_mass());
         let molecular = gas.molecular_disc();
-        within("molecular fraction", molecular.fraction(), 3e-4, 10e-4);
+        within("molecular mass", molecular.mass().value(), 2e6, 3e6);
+        assert_same_bits(molecular.fraction(), molecular.mass() / gas.gas_mass());
         assert_eq!(molecular.length(), galaxy.nuclear_disc().length());
         within(
             "molecular height ratio",
             molecular.height() / molecular.length(),
             0.15,
             0.25,
-        );
-        within(
-            "molecular mass",
-            molecular.mass() / gas.gas_mass(),
-            3e-4,
-            10e-4,
         );
         within(
             "corona density",
@@ -579,16 +659,28 @@ mod tests {
         within("lane offset", lane.offset().value(), 300.0, 600.0);
         within("lane width", lane.width().value(), 150.0, 300.0);
         within("lane fraction", lane.fraction(), 0.08, 0.20);
-        // The three phases share the whole gas mass.
+        // The three phases share the whole gas mass, and the neutral disc holds most of it.
         let shares = gas.neutral_fraction() + gas.warm_fraction() + molecular.fraction();
         assert!((shares - 1.0).abs() < 1e-15, "shares sum to {shares}");
-        within("neutral fraction", gas.neutral_fraction(), 0.69, 0.80);
+        let masses = gas.neutral_mass() + gas.warm_mass() + molecular.mass();
+        assert!(
+            (masses / gas.gas_mass() - 1.0).abs() < 1e-15,
+            "masses sum to {masses:?}"
+        );
+        within(
+            "neutral fraction",
+            gas.neutral_fraction(),
+            NEUTRAL_SHARE_FLOOR,
+            1.0,
+        );
     }
 
-    /// Design note 3's table over 2,000 seeds. The galaxy's own parameters enter only as the three
-    /// rows that are read and the two the draws scale (the bar's half-length and the nuclear
-    /// disc's length), so the sweep draws 2,000 seeds against one galaxy and 32 seeds against
-    /// their own, which is what plan 02's own fast sweep costs.
+    /// Design note 3's table over 2,000 seeds. The galaxy's own parameters enter as the three rows
+    /// that are read, the two the draws scale (the bar's half-length and the nuclear disc's length)
+    /// and, through the neutral share, the gas mass and scale length. A galaxy costs some 17 ms to
+    /// build even optimised, so the sweep draws 2,000 seeds against one galaxy and 32 seeds against
+    /// their own, which is what plan 02's own fast sweep costs; `tests/gas_statistics.rs` holds the
+    /// neutral share over 2,000 seeds' own galaxies under `just test-slow`.
     #[test]
     fn every_parameter_lies_in_its_range_over_2000_seeds() {
         let fixture = GalaxyParams::milky_way_like();
@@ -610,9 +702,15 @@ mod tests {
         assert_eq!(gas.hole_scale(), LightYears::new(16_000.0));
         assert_eq!(gas.molecular_disc().length(), LightYears::new(290.0));
         assert_eq!(gas.molecular_disc().height(), LightYears::new(58.0));
-        assert_eq!(gas.neutral_height(), LightYears::new(400.0));
-        assert!((gas.radial_scale().value() - 14_840.0).abs() < 1e-9);
-        assert!((gas.gas_mass().value() / 5.1e9 - 1.0).abs() < 0.02);
+        assert_eq!(gas.neutral_height(), GasDiscParams::HEIGHT);
+        assert_eq!(gas.warm_density(), HydrogenPerCm3::new(0.030));
+        assert_eq!(gas.molecular_disc().mass(), SolarMasses::new(2.5e6));
+        // Plan 02's fixture: 24% of a 3.43 × 10¹⁰ M☉ thin disc, 1.75 of its 7,000 ly.
+        assert!((gas.radial_scale().value() - 12_250.0).abs() < 1e-9);
+        assert!((gas.gas_mass().value() / 8.24e9 - 1.0).abs() < 0.01);
+        // The warm layer at 0.03 cm⁻³ and 3,000 ly weighs 1.2 × 10⁹ M☉, a seventh of the gas.
+        assert!((gas.warm_mass().value() / 1.2e9 - 1.0).abs() < 0.01);
+        assert!((0.84..=0.86).contains(&gas.neutral_fraction()));
     }
 
     #[test]

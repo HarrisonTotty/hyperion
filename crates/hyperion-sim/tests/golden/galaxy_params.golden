@@ -1,4 +1,4 @@
-# generator_version = 9
+# generator_version = 10
 # seed 0000000000000001
 0000000000000001.stellar_mass = 0x4222c44fed53f7d2  # 40301491881.984024
 0000000000000001.sfh_timescale = 0x4200049f54848760  # 8599628432.566101
@@ -848,15 +848,15 @@ milky_way.arms.pitch = 0x3fcacee9f37bebd6  # 0.20943951023931956
 milky_way.arms.young_width = 0x4077700000000000  # 375.0
 milky_way.arms.young_fraction = 0x3fe999999999999a  # 0.8
 milky_way.arms.old_amplitude = 0x3fc999999999999a  # 0.2
-milky_way.gas.mass = 0x4200c8e8fc22fb71  # 9011273604.372774
+milky_way.gas.mass = 0x41feb135003ff7a9  # 8238878723.997964
 milky_way.gas.length = 0x40c7ed0000000000  # 12250.0
 milky_way.dark.f_star = 0x3fd47ae147ae147b  # 0.32
 milky_way.dark.m200 = 0x427160fe41c13912  # 1194267515923.567
 milky_way.dark.concentration = 0x40206f1bcd3e12c2  # 8.217008985354713
 milky_way.dark.r200 = 0x4126682ac7a6ce0e  # 734229.3899444954
-milky_way.bh.scatter = 0xbfe072b020c49ba6  # -0.514
-milky_way.bh.sigma = 0x405efb01a5e18ba5  # 123.9219755842774
-milky_way.bh.mass = 0x415067fb6b3ba7af  # 4300781.675516053
+milky_way.bh.scatter = 0xbfe0624dd2f1a9fc  # -0.512
+milky_way.bh.sigma = 0x405ef5636c68a8ea  # 123.83419332714735
+milky_way.bh.mass = 0x41506a89f1660ad3  # 4303399.771853167
 milky_way.metallicity_gradient = 0xbfa999999999999a  # -0.05
 milky_way.halo.discrete_share = 0x3fb5c28f5c28f5c3  # 0.085
 milky_way.halo.insitu.share = 0x3fcd1745d1745d18  # 0.2272727272727273

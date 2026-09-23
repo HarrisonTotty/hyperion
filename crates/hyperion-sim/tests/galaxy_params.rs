@@ -202,12 +202,7 @@ fn the_milky_way_fixture_has_the_plan_values() {
     assert_relative("young height", p.young_disc().height().value(), 285.0, 0.0);
     let thin_mass = p.population_mass(Population::YoungThinDisc).value()
         + p.population_mass(Population::OldThinDisc).value();
-    assert_relative(
-        "gas",
-        p.gas_disc().mass().value(),
-        0.2625 * thin_mass,
-        1e-15,
-    );
+    assert_relative("gas", p.gas_disc().mass().value(), 0.24 * thin_mass, 1e-15);
     assert_relative("gas height", p.gas_disc().height().value(), 700.0, 0.0);
     let bulge = p.bulge();
     assert_relative("bulge a", bulge.scale_x().value(), 2_280.0, 0.0);
@@ -238,7 +233,7 @@ fn the_milky_way_fixture_has_the_plan_values() {
     );
     assert_relative("f★", p.dark_halo().f_star(), 0.32, 0.0);
     // The Milky Way's own offset from M–σ, which makes its black hole Sgr A*'s mass.
-    assert_same_bits(p.black_hole().scatter().value(), -0.514);
+    assert_same_bits(p.black_hole().scatter().value(), -0.512);
     // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "about
     // 0.55–0.59 M☉ under the default, Chabrier's system function" (brainstorm, "Galaxy
     // parameters").

@@ -135,11 +135,15 @@ pub(super) const ARMS_YOUNG_WIDTH: Law = Law::Uniform {
 };
 pub(super) const ARMS_YOUNG_FRACTION: Law = Law::Uniform { lo: 0.7, hi: 0.9 };
 pub(super) const ARMS_OLD_AMPLITUDE: Law = Law::Uniform { lo: 0.10, hi: 0.30 };
-// The brainstorm's 0.10–0.20 times 7 ÷ 4, the factor that carries plan 07's gas field's column at
-// the Sun's radius, 7.9 M☉ pc⁻², to McKee, Parravano and Hollenbach's (2015, ApJ 814, 13) measured
-// 13.7 ± 1.6 (plan 02, ruling 1 of 2026-09-22). `GasDiscParams::HEIGHT` rises by the same factor, so
-// the mid-plane gas density, which the in-plane extinction reads, does not move; what moves is the
-// column and the polar extinction, in the direction the measurement wants.
+// The brainstorm's 0.10–0.20 times 7 ÷ 4, the factor ruling 1 of 2026-09-22 found to carry plan
+// 07's gas field's column at the Sun's radius, 7.9 M☉ pc⁻², to McKee, Parravano and Hollenbach's
+// (2015, ApJ 814, 13) measured 13.7 ± 1.6, with `GasDiscParams::HEIGHT` raised by the same factor
+// so that the mid-plane gas density, which the in-plane extinction reads, does not move. Once plan
+// 07 drew its warm ionised layer by its own density (its ruling 19) the Milky Way fixture needed
+// only 24% to reach the column, 1.6 times its "about 15%", and the range was kept: it is the spread
+// of other galaxies, whose gas fractions the Milky Way's column does not measure, and 24% lies
+// inside it. Over 2,000 seeds it leaves the neutral disc at least 0.53 of the gas (plan 07's
+// `tests/gas_statistics.rs`).
 pub(super) const GAS_MASS_FRACTION: Law = Law::Uniform {
     lo: 0.175,
     hi: 0.350,

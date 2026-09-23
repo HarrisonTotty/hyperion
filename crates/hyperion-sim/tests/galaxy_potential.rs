@@ -427,8 +427,8 @@ fn the_model_holds_the_parameters_masses() {
 /// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole lies within a
 /// factor of 2.5 of Sgr A*'s 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
 ///
-/// The fixture's scatter is the Milky Way's own offset from the relation, −0.514 dex, set so that
-/// the estimator's 123.9 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13 and R22). The factor of
+/// The fixture's scatter is the Milky Way's own offset from the relation, −0.512 dex, set so that
+/// the estimator's 123.8 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13 and R22). The factor of
 /// 2.5 then lets σ move by 7% before the test fails, which is what it guards: the relation itself,
 /// without the offset, gives 3.3 times the measured mass at this σ, a real galaxy 1.35 times the
 /// relation's intrinsic scatter below it. The offset's check reaches −0.55 dex, not the −0.5 it

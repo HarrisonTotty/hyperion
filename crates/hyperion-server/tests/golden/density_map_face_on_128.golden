@@ -1,4 +1,4 @@
-# generator_version = 9
+# generator_version = 10
 seed = 0x00000000000004d2
 size = 128 x 128 px, 1024 ly per px
 floor_log10_per_ly2 = 0xbffeb085c0000000  # -1.9180963039398193

@@ -1,9 +1,10 @@
 //! The smooth gas: three exponential layers and the hot corona (plan 07, Design note 4).
 //!
-//! Each layer is a radial factor times `exp(−|z| ÷ h)`, and its amplitude follows from the mass
-//! budget: plan 02's gas mass is shared as `1 − f_w − f_c`, `f_w` and `f_c` between the neutral
-//! disc, the warm ionised layer and the central molecular disc, and each amplitude is that share
-//! divided by 1.4 `m_H` times the layer's volume integral. The corona is outside the budget — a halo
+//! Each layer is a radial factor times `exp(−|z| ÷ h)`. The warm ionised layer's amplitude is its
+//! drawn mid-plane density at the Sun's radius divided by its radial factor there; the molecular
+//! disc's and the neutral disc's follow from their masses — the molecular disc's drawn, the neutral
+//! disc's the rest of plan 02's gas mass once the other two are taken out (ruling 19) — each divided
+//! by 1.4 `m_H` times the layer's volume integral. The corona is outside the budget — a halo
 //! component given by its density alone, an additive floor that carries no dust.
 //!
 //! The neutral and warm layers' radial factor `exp(−R_m ÷ R − R ÷ R_g)` is the form McMillan (2017,
@@ -32,6 +33,7 @@
 use crate::galaxy::gas::params::GasParams;
 use crate::galaxy::quad;
 use crate::math;
+use crate::units::SolarMasses;
 
 use super::{CENTIMETRES_PER_LIGHT_YEAR, SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY};
 
@@ -129,12 +131,14 @@ pub struct SmoothGas {
 }
 
 impl SmoothGas {
-    /// The smooth field of `params`, each layer normalised to its share of the gas mass.
+    /// The smooth field of `params`: the warm layer at its drawn density at the Sun's radius, the
+    /// molecular disc and the neutral disc at their masses.
     ///
     /// # Panics
     ///
-    /// If a scale length, a scale height or the gas mass is not positive and finite. [`GasParams`]
-    /// produces none of those: every one of them is a positive draw or a positive constant.
+    /// If a scale length, a scale height or a layer's mass is not positive and finite.
+    /// [`GasParams`] produces none of those: every length and height is a positive draw or a
+    /// positive constant, and it refuses a galaxy whose neutral disc would have no mass.
     #[must_use]
     pub fn new(params: &GasParams) -> Self {
         let hole_scale = params.hole_scale().value();
@@ -152,25 +156,34 @@ impl SmoothGas {
         for height in heights {
             assert!(height > 0.0, "a gas scale height of {height} ly");
         }
-        let mass = params.gas_mass().value();
-        assert!(mass > 0.0 && mass.is_finite(), "a gas mass of {mass} M☉");
-        // Each layer's volume integral is 2π ∫ R f(R) dR × 2h, the vertical integral of
-        // exp(−|z| ÷ h) over the whole line being 2h. The molecular disc's radial moment is the
-        // elementary R_c², which makes its volume the 4π R_c² h_c of Design note 4.
-        let moments = [
-            radial_moment(hole_scale, radial_scale),
-            radial_moment(0.5 * hole_scale, radial_scale),
-            molecular_length * molecular_length,
+        let [neutral_mass, molecular_mass] =
+            [params.neutral_mass(), molecular.mass()].map(SolarMasses::value);
+        for mass in [neutral_mass, molecular_mass] {
+            assert!(mass > 0.0 && mass.is_finite(), "a gas layer of {mass} M☉");
+        }
+        // A layer's volume integral is 2π ∫ R f(R) dR × 2h, the vertical integral of exp(−|z| ÷ h)
+        // over the whole line being 2h. The molecular disc's radial moment is the elementary R_c²,
+        // which makes its volume the 4π R_c² h_c of Design note 4.
+        let amplitude_of = |mass: f64, moment: f64, height: f64| {
+            mass / (SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY
+                * core::f64::consts::TAU
+                * moment
+                * 2.0
+                * height)
+        };
+        let amplitudes = [
+            amplitude_of(
+                neutral_mass,
+                radial_moment(hole_scale, radial_scale),
+                heights[0],
+            ),
+            warm_amplitude(params.warm_density().value(), hole_scale, radial_scale),
+            amplitude_of(
+                molecular_mass,
+                molecular_length * molecular_length,
+                heights[2],
+            ),
         ];
-        let shares = [
-            params.neutral_fraction(),
-            params.warm_fraction(),
-            molecular.fraction(),
-        ];
-        let amplitudes = core::array::from_fn(|i| {
-            let volume = core::f64::consts::TAU * moments[i] * 2.0 * heights[i];
-            shares[i] * mass / (SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY * volume)
-        });
         Self {
             hole_scale,
             radial_scale,
@@ -294,6 +307,31 @@ impl SmoothGas {
             .map(|&layer| self.column_between(layer, r, z_lo, z_hi))
             .sum()
     }
+}
+
+/// The warm ionised layer's radial amplitude, cm⁻³, for a mid-plane density `density` (cm⁻³) at the
+/// Sun's radius [`GasParams::REFERENCE_RADIUS`]: the density divided by the layer's radial factor
+/// `exp(−R_m ÷ 2R − R ÷ R_g)` there, for a hole scale `hole` and a radial scale `scale` in ly.
+pub(crate) fn warm_amplitude(density: f64, hole: f64, scale: f64) -> f64 {
+    let r = GasParams::REFERENCE_RADIUS.value();
+    density / math::exp(-0.5 * hole / r - r / scale)
+}
+
+/// The warm ionised layer's mass, M☉, for a mid-plane density `density` (cm⁻³) at the Sun's radius,
+/// a hole scale `hole`, a radial scale `scale` and a scale height `height`, all in ly.
+///
+/// This is how [`GasParams`] derives the warm layer's share of the gas and so what the neutral disc
+/// is left with; [`SmoothGas`] reads the same amplitude, so the layer's mass and its density agree
+/// by construction.
+pub(crate) fn warm_mass(density: f64, hole: f64, scale: f64, height: f64) -> f64 {
+    let amplitude = warm_amplitude(density, hole, scale);
+    let moment = radial_moment(0.5 * hole, scale);
+    SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY
+        * core::f64::consts::TAU
+        * moment
+        * 2.0
+        * height
+        * amplitude
 }
 
 /// `∫₀^∞ R exp(−hole ÷ R − R ÷ scale) dR`, ly², by Design note 4's fixed quadrature.
@@ -455,8 +493,9 @@ mod tests {
     }
 
     /// Design note 4's normalisation against a brute-force integral of the field itself, for the
-    /// Milky Way fixture and twenty drawn galaxies: each layer carries its share of plan 02's gas
-    /// mass to 2%, and so does the disc as a whole.
+    /// Milky Way fixture and twenty drawn galaxies: each layer carries its mass to 2% — the warm
+    /// layer the mass its density at the Sun's radius implies, the molecular disc its drawn mass,
+    /// the neutral disc the rest — and so the disc as a whole carries plan 02's gas mass.
     ///
     /// The plan asked for the integral "over the cube". It is taken over the layers' own support
     /// instead, because a fifth of the gas can lie outside the root cube at the largest scale
@@ -469,16 +508,16 @@ mod tests {
         for (name, params) in cases {
             let gas = SmoothGas::new(&params);
             let (whole, in_cube) = brute_force_masses(&gas);
-            let shares = [
-                params.neutral_fraction(),
-                params.warm_fraction(),
-                params.molecular_disc().fraction(),
+            let masses = [
+                params.neutral_mass(),
+                params.warm_mass(),
+                params.molecular_disc().mass(),
             ];
             for layer in GasLayer::ALL {
                 assert_relative(
                     &format!("{name} {layer:?} mass"),
                     whole[layer.index()],
-                    shares[layer.index()] * params.gas_mass().value(),
+                    masses[layer.index()].value(),
                     0.02,
                 );
             }
@@ -490,17 +529,20 @@ mod tests {
                 0.02,
             );
             // The neutral layer reaches well past the cube at the largest scale lengths; the
-            // smallest share seen is about 0.8, and a share above 1 would mean a weight above one.
+            // smallest share seen is about 0.84, and a share above 1 would mean a weight above one.
             let inside: f64 = in_cube.iter().sum();
             assert_within(&format!("{name} in-cube share"), inside / total, 0.70, 1.0);
         }
     }
 
     /// The fixture's own figures: the mass closing to a few parts in a million, which is what makes
-    /// the 2% budget above a test of the code, and 5.6% of its gas outside the root cube.
+    /// the 2% budget above a test of the code, and 3.2% of its gas outside the root cube.
     ///
-    /// Plan 07's Risks estimated 11% from the cube's inscribed cylinder of radius 65,536 ly. The
-    /// cube's corners reach 92,681 ly, and counting them halves the figure.
+    /// The share outside follows the gas disc's scale length, 1.75 of the thin disc's: 5.6% when
+    /// plan 02's fixture had a thin disc 8,480 ly long, 3.2% since P02.T11 shortened it to 7,000 ly
+    /// (ruling 8 of 2026-09-22), which pulls the gas inward too. Plan 07's Risks first estimated
+    /// 11% from the cube's inscribed cylinder of radius 65,536 ly; the cube's corners reach
+    /// 92,681 ly, and counting them halved the figure.
     #[test]
     fn the_fixtures_mass_closes_and_names_its_share_outside_the_cube() {
         let params = GasParams::milky_way_like();
@@ -509,7 +551,7 @@ mod tests {
         let total: f64 = whole.iter().sum();
         let inside: f64 = in_cube.iter().sum();
         assert_relative("fixture gas mass", total, params.gas_mass().value(), 1e-4);
-        assert_relative("fixture in-cube share", inside / total, 0.944, 0.01);
+        assert_relative("fixture in-cube share", inside / total, 0.968, 0.002);
     }
 
     /// The radial moment's quadrature against an independent midpoint sum, at the extremes of the
@@ -552,6 +594,97 @@ mod tests {
             gas.plane_density(GasLayer::Molecular, 0.0),
             20.0,
             80.0,
+        );
+    }
+
+    /// Ruling 1's arithmetic, closed again with the warm layer held at its measured density (ruling
+    /// 19): at the Sun's radius the fixture's neutral mid-plane density, its total gas column and its
+    /// in-plane extinction are measured together, since they are two knobs — the gas disc's height
+    /// and its mass — against three measurements.
+    ///
+    /// - The neutral mid-plane density: 0.6–0.9 cm⁻³ (Design note 4).
+    /// - The column of every phase, helium included, against McKee, Parravano and Hollenbach's
+    ///   (2015, ApJ 814, 13, Table 2) 13.7 ± 1.6 M☉ pc⁻², which counts H₂, H I and the warm ionised
+    ///   gas and not the hot corona. The corona is left out here for the same reason.
+    /// - The visual extinction per 3,000 ly in the plane, the brainstorm's "about one magnitude",
+    ///   against P07.T12's 0.8–1.3: the dust-bearing mid-plane density times the dust-to-gas ratio
+    ///   ζ = 10^[M/H] of the young thin disc's metallicity at the Sun's radius (Design note 13),
+    ///   over 1.87 × 10²¹ hydrogen nuclei per cm² per magnitude (Bohlin, Savage and Drake 1978's
+    ///   5.8 × 10²¹ per magnitude of E(B − V), at `R_V` = 3.1). It is the rate at one point times the
+    ///   length; P07.T12 integrates it along real lines, which differ by the radial curvature over
+    ///   ±1,500 ly, a few parts in a thousand.
+    #[test]
+    fn the_fixture_carries_the_measured_column_at_the_measured_extinction() {
+        use crate::galaxy::fields::metallicity::Metallicity;
+        use crate::units::Years;
+        use crate::units::consts::{HYDROGEN_MASS_KG, METRES_PER_PARSEC, SOLAR_MASS_KG};
+
+        let galaxy = GalaxyParams::milky_way_like();
+        let gas = SmoothGas::new(&GasParams::milky_way_like());
+        let r = SUN_RADIUS_LY;
+
+        let neutral = gas.plane_density(GasLayer::Neutral, r);
+        assert_within("neutral mid-plane density", neutral, 0.6, 0.9);
+
+        let centimetres_per_parsec = METRES_PER_PARSEC * 100.0;
+        let solar_masses_per_pc2 = |column: f64| {
+            super::super::MASS_PER_HYDROGEN_FACTOR
+                * HYDROGEN_MASS_KG
+                * column
+                * centimetres_per_parsec
+                * centimetres_per_parsec
+                / SOLAR_MASS_KG
+        };
+        let column = solar_masses_per_pc2(gas.disc_column(r));
+        assert_within("gas column at the Sun", column, 13.7 - 1.6, 13.7 + 1.6);
+        // The warm layer's own column is McKee et al.'s ionised gas, 1.8 ± 0.1 M☉ pc⁻², to a tenth.
+        let warm = solar_masses_per_pc2(gas.column(GasLayer::Warm, r));
+        assert_within("warm ionised column", warm, 1.7, 2.0);
+
+        let metallicity =
+            Metallicity::thin_disc(galaxy.metallicity_gradient(), galaxy.thin_disc().length());
+        let zeta = math::exp10(metallicity.at(r, Years::ZERO).mean().value());
+        let per_magnitude = 5.8e21 / 3.1;
+        let extinction =
+            gas.disc(r, 0.0) * zeta * 3_000.0 * CENTIMETRES_PER_LIGHT_YEAR / per_magnitude;
+        assert_within("extinction per 3,000 ly", extinction, 0.8, 1.3);
+    }
+
+    /// The warm layer is drawn by its density, not by a share of plan 02's gas mass (ruling 19): at
+    /// the Sun's radius it is its drawn density for every seed, and a heavier gas disc leaves it
+    /// where it was and puts the difference into the neutral disc.
+    #[test]
+    fn the_warm_layer_keeps_its_density_whatever_the_gas_mass() {
+        use crate::galaxy::params::GalaxyParamsBuilder;
+
+        let r = GasParams::REFERENCE_RADIUS.value();
+        for params in seeds(32).map(drawn) {
+            let gas = SmoothGas::new(&params);
+            assert_relative(
+                "the warm layer at the Sun",
+                gas.plane_density(GasLayer::Warm, r),
+                params.warm_density().value(),
+                1e-15,
+            );
+        }
+        let seed = Seed::new(0x0700_5eed_0000_0019);
+        let [light, heavy] = [0.2, 0.3].map(|fraction| {
+            let galaxy = GalaxyParamsBuilder::new()
+                .gas_mass_fraction(fraction)
+                .build()
+                .expect("inside plan 02's range");
+            SmoothGas::new(&GasParams::from_galaxy(seed, &galaxy))
+        });
+        assert_same_bits(
+            light.plane_density(GasLayer::Warm, r),
+            heavy.plane_density(GasLayer::Warm, r),
+        );
+        assert_same_bits(
+            light.plane_density(GasLayer::Molecular, 0.0),
+            heavy.plane_density(GasLayer::Molecular, 0.0),
+        );
+        assert!(
+            heavy.plane_density(GasLayer::Neutral, r) > light.plane_density(GasLayer::Neutral, r)
         );
     }
 
