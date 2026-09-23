@@ -313,6 +313,45 @@ dimension!(Kilograms;
 );
 
 unit!(
+    /// A gravitational parameter μ = GM in m³ s⁻², the SI unit used inside the sim: what every
+    /// orbit takes in place of a mass.
+    ///
+    /// GM is known far better than G or M apart (IAU 2015 Resolution B3 gives the nominal solar,
+    /// Jovian and terrestrial values, [`consts::GM_SUN`], [`consts::GM_JUPITER`] and
+    /// [`consts::GM_EARTH`]), so a mass in one of those units converts through its own GM, never
+    /// through kilograms. A relative orbit of two bodies takes the sum of their parameters. It
+    /// stands outside the mass dimension's conversions: the constructors below name their unit.
+    GravitationalParameter
+);
+
+impl GravitationalParameter {
+    /// The parameter of a mass in nominal solar masses: GM☉ × m.
+    #[must_use]
+    pub fn from_solar_masses(mass: SolarMasses) -> Self {
+        Self(consts::GM_SUN * mass.0)
+    }
+
+    /// The parameter of a mass in nominal Jovian masses: GM of Jupiter × m.
+    #[must_use]
+    pub fn from_jupiter_masses(mass: JupiterMasses) -> Self {
+        Self(consts::GM_JUPITER * mass.0)
+    }
+
+    /// The parameter of a mass in nominal terrestrial masses: GM of Earth × m.
+    #[must_use]
+    pub fn from_earth_masses(mass: EarthMasses) -> Self {
+        Self(consts::GM_EARTH * mass.0)
+    }
+
+    /// The parameter of a mass in kilograms: G × m, with CODATA's G, which is known only to
+    /// 2 × 10⁻⁵. Prefer the constructors from the nominal mass units.
+    #[must_use]
+    pub fn from_kilograms(mass: Kilograms) -> Self {
+        Self(consts::GRAVITATIONAL_CONSTANT * mass.0)
+    }
+}
+
+unit!(
     /// A speed in metres per second, the SI unit used inside the sim.
     MetresPerSecond
 );
@@ -562,6 +601,27 @@ mod tests {
         assert_relative(Years::from(Gigayears::new(13.8)).value(), 1.38e10, 1e-15);
         assert_same_bits(Days::from(Years::new(1.0)).value(), 365.25);
         assert_same_bits(Seconds::from(Days::new(1.0)).value(), 86_400.0);
+    }
+
+    #[test]
+    fn gravitational_parameters_come_from_the_nominal_mass_parameters() {
+        assert_same_bits(
+            GravitationalParameter::from_solar_masses(SolarMasses::new(2.0)).value(),
+            2.0 * GM_SUN,
+        );
+        assert_same_bits(
+            GravitationalParameter::from_jupiter_masses(JupiterMasses::new(1.0)).value(),
+            GM_JUPITER,
+        );
+        assert_same_bits(
+            GravitationalParameter::from_earth_masses(EarthMasses::new(0.5)).value(),
+            0.5 * GM_EARTH,
+        );
+        assert_relative(
+            GravitationalParameter::from_kilograms(Kilograms::new(SOLAR_MASS_KG)).value(),
+            GM_SUN,
+            1e-15,
+        );
     }
 
     #[test]

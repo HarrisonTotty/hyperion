@@ -230,6 +230,30 @@ pub fn gamma(x: f64) -> f64 {
     libm::tgamma(x)
 }
 
+/// The remainder of `x ÷ y` with the quotient truncated towards zero: C's `fmod`, the result
+/// exact and with the sign of `x`, and NaN for `y = 0` or an infinite `x`.
+///
+/// Rust's `%` on `f64` computes the same value but lowers to the platform's `fmod`. Every correct
+/// implementation gives the same bits, since the exact remainder is always representable, but this
+/// is `libm`'s pure-integer one, so the result depends on nothing outside the pinned crate. The
+/// orbit phase reduction uses it (plan 11, P11.T3.a).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::math::fmod;
+///
+/// assert_eq!(fmod(7.5, 2.0), 1.5);
+/// assert_eq!(fmod(-7.5, 2.0), -1.5);
+/// // Exact however large the quotient: 2⁶⁰ = 4³⁰ leaves 1 modulo 3.
+/// assert_eq!(fmod(1_152_921_504_606_846_976.0, 3.0), 1.0);
+/// ```
+#[inline]
+#[must_use]
+pub fn fmod(x: f64, y: f64) -> f64 {
+    libm::fmod(x, y)
+}
+
 /// `x × a + b` with a single rounding: IEEE 754 `fusedMultiplyAdd`, correctly rounded.
 ///
 /// Use it where the exact product must meet the addend before anything is rounded, for instance

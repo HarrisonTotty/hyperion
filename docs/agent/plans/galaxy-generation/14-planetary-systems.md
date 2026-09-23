@@ -2160,3 +2160,69 @@ it:
   T37–T41, T42.a–c, T43.a–b and T44.a. Each task's _Slice:_ note says what it takes as a plain
   argument or `None` until its supplier lands. The first display has no moons, rings, belts, halo,
   events panel or `RUN`, and cannot reach brown dwarfs or rogue planets.
+- **Deviations in P14.T2, as built** (round 7, in P11.T3.a's `orbit` module; see plan 11's
+  record). All three subtasks are built.
+  - **T2.a.** The precision requirements were built in from the start rather than checked
+    afterwards. The phase is reduced exactly from the integer seconds and centred.
+    `solve_kepler` has a fixed starter and a fixed count (plan 11's record gives both, and the
+    residuals). `units::GravitationalParameter` is plan 11's addition.
+  - **T2.a constructors.** `from_semi_major_axis(a, μ, e, Orientation, M₀)` fills the sketch's
+    `..` with plan 11's `Orientation`. `scaled(factor, μ)` returns
+    `Result<Self, BuildOrbitError>` rather than `Self`. It keeps e, the orientation and M₀. With
+    `factor` = μ₀ ÷ μ(t), μ being the pair's total G(M₁ + M₂) (Veras et al. 2011), the specific
+    angular momentum is conserved; for a planet of negligible mass that is M₀ ÷ M(t).
+  - **T2.a tests.** All pass: 1 m after 10⁵ periods at 0.02 au, 1 mm after one period at 50 au
+    at four times up to 8 × 10¹² s, energy and angular momentum to 10⁻¹² over 5,000 random
+    orbits, and a one-day orbit bit for bit a thousand years out.
+  - **T2.b.** `OpenOrbit::new(q, e, Orientation, time_of_pericentre, μ)` returns `Result`, with
+    e ≥ `OpenOrbit::MIN_ECCENTRICITY` = 0.9999, so it also carries bound near-parabolic orbits.
+    It refuses an orbit whose mean motion √(μ ÷ |a|³), with |a| = q ÷ |1 − e|, overflows or
+    underflows (`BuildOrbitError::MeanMotionNotPositive`), so propagation never produces NaN.
+  - **T2.b regimes.** A bound orbit's interval is always reduced exactly modulo its period
+    first. Inside `NEAR_PARABOLIC_BAND` = 10⁻⁶ of e = 1, the universal-variable equation is
+    solved from pericentre with the Stumpff series, by two Halley iterations. They start from the
+    conic's own solution, E ÷ √α or H ÷ √−α, which the stable forms of the two Kepler solvers
+    give accurately there, and from `solve_barker`'s parabola at e = 1 exactly. Above the band,
+    `solve_kepler_hyperbolic` uses Mikkola's hyperbolic starter and two Halley iterations
+    (relative residual 2 × 10⁻¹⁵ up to |M| = 10¹²), and it returns NaN for e ≤ 1. Below the band
+    it is the ellipse.
+  - **T2.b fix from review.** The first build started the band's iteration from the parabola on
+    the unreduced interval. The science review found that this fails beyond about one period for
+    a bound orbit in the band, so both changes above were made.
+  - **T2.b conventions.** `solve_barker(M)` solves D + D³ ÷ 3 = M, with D = tan(ν ÷ 2) and
+    M = √(μ ÷ 2q³)(t − τ), in a closed form that does not cancel for small M. The positions
+    either side of each band edge agree to 1 m at q = 1 au over ±100 years. A bound orbit in the
+    band matches the ellipse to 10⁻⁹ and repeats after a period, up to ten periods out.
+  - **T2.c.** The signature is `elements_from_state(r, v, μ, t) -> Result<Orbit, InvertStateError>`,
+    with `Orbit::{Bound(KeplerElements), Open(OpenOrbit)}`. The sketch's
+    `Result<KeplerElements, OpenOrbit>` treated an open orbit as an error and had no way to report
+    a state with no angular momentum (`Radial`), a component that is not finite, a pericentre
+    time off the clock, or a valid state whose orbit overflows (`Unrepresentable`, which wraps
+    the `BuildOrbitError`).
+  - **T2.c conventions.** An eccentricity below 0.9999 is `Bound`, and anything else is `Open`.
+    Where an angle is undefined, the node is set to 0 at i = 0 or π and the periapsis to the node
+    for e = 0, and the anomaly is measured from that choice. Inside the band, the universal
+    variable comes in closed form from both in-plane components, E = atan2(√α y′, 1 − α(q − x)),
+    so a state beyond r = a keeps its branch.
+  - **T2.c tests.** 10⁴ random bound states, including i = 0, π and e = 0, round-trip to 10⁻¹².
+    3,000 open states, and bound states in the band beyond r = a, round-trip to 10⁻⁹. Far out on
+    a hyperbola r ∥ v, so the state's own r × v is good only to about 10⁻¹⁶ ÷ sin(r, v).
+  - **The fixture for T39** is `crates/hyperion-sim/tests/golden/orbit/states.golden`, written by
+    `tests/orbit_states.rs` and blessed at 11. It holds 32 orbits, one per line:
+    `state[NN] = a e i node peri m0 period mu t_s t_ns x y z vx vy vz`, in SI units and radians,
+    with the format documented in the file's header. The floats are Rust's shortest round-trip
+    `{:e}`, which `Number()` reads back exactly.
+  - **The fixture's floats.** Writing them as decimals departs from the sim-determinism rule
+    "never pin a float by its decimal form alone", because the TypeScript side must parse the
+    file. The departure is safe: shortest round-trip decimal maps each finite double, −0
+    included, to its own string, and the test asserts that every value written is finite.
+  - **A second new golden**, `orbit/functions`, pins by bits what the fixture does not: both
+    Kepler solvers, Barker's equation, the Roche lobe, Peters's time over all its panel counts
+    and its inverse, open orbits in their three regimes, and the inverse from a state.
+  - **`math::fmod`.** A wrapper of `libm::fmod` was added to plan 01's `math` so that the phase
+    reduction does not lower `%` to the platform's `fmod`. Every correct `fmod` is exact, so the
+    bits are the same either way.
+  - **What the fixture asks of `orbit.ts`.** Two lines, a hot Jupiter and a white-dwarf binary
+    each a thousand years out, agree to 10⁻⁹ only if the client reduces `t_s % period` before
+    adding `t_ns`, as the server does. JavaScript's `%` is exact, and a float of seconds times
+    the mean motion is not enough.

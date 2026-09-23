@@ -9,11 +9,23 @@
 //! use hyperion_sim::coords::{BodyPosition, SystemPosition};
 //! let _ = SystemPosition::new([1.0, 0.0, 0.0]) + BodyPosition::new([1.0, 0.0, 0.0]);
 //! ```
+//!
+//! A system frame also has its free vectors: [`SystemVector`], a displacement such as one body's
+//! position relative to another's, and [`SystemVelocity`]. Orbits produce both (plan 11's
+//! [`orbit`](crate::orbit)). They carry the same guard: a displacement is added to a
+//! [`SystemPosition`] only, and neither converts to a galactic or body vector.
+//!
+//! ```compile_fail
+//! use hyperion_sim::coords::{GalacticDisplacement, SystemVector};
+//! let _ = SystemVector::new([1.0, 0.0, 0.0]) + GalacticDisplacement::new([1.0, 0.0, 0.0]);
+//! ```
+
+use std::ops::{Add, Mul, Neg, Sub};
 
 use super::galactic::{GalacticDisplacement, GalacticPosition};
 use super::vec3;
 use crate::id::{BodyId, SystemId};
-use crate::units::Metres;
+use crate::units::{Metres, MetresPerSecond, Seconds};
 
 /// The frame a position is expressed in: galactic, a system's, or a body's.
 ///
@@ -110,6 +122,166 @@ impl SystemPosition {
     pub fn to_galactic(&self, barycentre: &GalacticPosition) -> Option<GalacticPosition> {
         barycentre.translated(GalacticDisplacement::new(self.0))
     }
+
+    /// This position moved by a displacement in the system frame.
+    #[must_use]
+    pub fn translated(&self, displacement: SystemVector) -> Self {
+        Self(vec3::add(self.0, displacement.0))
+    }
+
+    /// The displacement from this position to `other`: `other − self`.
+    #[must_use]
+    pub fn displacement_to(&self, other: &Self) -> SystemVector {
+        SystemVector(vec3::sub(other.0, self.0))
+    }
+}
+
+/// A displacement in a system's frame: `f64` metres along the galactic axes.
+///
+/// A relative orbit's position (one body from another) is one of these, and so is a position's
+/// offset from the barycentre before it becomes a [`SystemPosition`]. Its precision is that of an
+/// `f64` at its own length.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::coords::{SystemPosition, SystemVector};
+///
+/// // A companion 1 au out along +x, and the primary on the far side of the barycentre.
+/// let separation = SystemVector::new([1.496e11, 0.0, 0.0]);
+/// let primary = SystemPosition::ORIGIN.translated(separation * -0.25);
+/// let companion = primary.translated(separation);
+/// assert_eq!(primary.displacement_to(&companion), separation);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SystemVector([f64; 3]);
+
+impl SystemVector {
+    /// The zero displacement.
+    pub const ZERO: Self = Self([0.0; 3]);
+
+    /// A displacement from its components in metres.
+    #[must_use]
+    pub const fn new(metres: [f64; 3]) -> Self {
+        Self(metres)
+    }
+
+    /// The components in metres.
+    #[must_use]
+    pub const fn metres(&self) -> [f64; 3] {
+        self.0
+    }
+
+    /// The length in metres.
+    #[must_use]
+    pub fn length(&self) -> Metres {
+        Metres::new(vec3::length(self.0))
+    }
+
+    /// The dot product with another displacement, m².
+    #[must_use]
+    pub fn dot(&self, other: &Self) -> f64 {
+        vec3::dot(self.0, other.0)
+    }
+}
+
+impl Add for SystemVector {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(vec3::add(self.0, rhs.0))
+    }
+}
+
+impl Sub for SystemVector {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self(vec3::sub(self.0, rhs.0))
+    }
+}
+
+impl Neg for SystemVector {
+    type Output = Self;
+    fn neg(self) -> Self {
+        Self(vec3::neg(self.0))
+    }
+}
+
+impl Mul<f64> for SystemVector {
+    type Output = Self;
+    fn mul(self, rhs: f64) -> Self {
+        Self(vec3::scale(self.0, rhs))
+    }
+}
+
+/// A velocity in a system's frame: `f64` metres per second along the galactic axes.
+///
+/// Relative to whatever the orbit or the caller names: a relative orbit's velocity is one body's
+/// relative to the other's, and a velocity relative to the barycentre is that times the other
+/// body's share of the mass.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SystemVelocity([f64; 3]);
+
+impl SystemVelocity {
+    /// Zero velocity.
+    pub const ZERO: Self = Self([0.0; 3]);
+
+    /// A velocity from its components in metres per second.
+    #[must_use]
+    pub const fn new(metres_per_second: [f64; 3]) -> Self {
+        Self(metres_per_second)
+    }
+
+    /// The components in metres per second.
+    #[must_use]
+    pub const fn metres_per_second(&self) -> [f64; 3] {
+        self.0
+    }
+
+    /// The speed in metres per second.
+    #[must_use]
+    pub fn speed(&self) -> MetresPerSecond {
+        MetresPerSecond::new(vec3::length(self.0))
+    }
+
+    /// The dot product with another velocity, m² s⁻².
+    #[must_use]
+    pub fn dot(&self, other: &Self) -> f64 {
+        vec3::dot(self.0, other.0)
+    }
+
+    /// The displacement covered at this velocity over a duration: straight-line motion.
+    #[must_use]
+    pub fn displacement_over(&self, duration: Seconds) -> SystemVector {
+        SystemVector(vec3::scale(self.0, duration.value()))
+    }
+}
+
+impl Add for SystemVelocity {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(vec3::add(self.0, rhs.0))
+    }
+}
+
+impl Sub for SystemVelocity {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self(vec3::sub(self.0, rhs.0))
+    }
+}
+
+impl Neg for SystemVelocity {
+    type Output = Self;
+    fn neg(self) -> Self {
+        Self(vec3::neg(self.0))
+    }
+}
+
+impl Mul<f64> for SystemVelocity {
+    type Output = Self;
+    fn mul(self, rhs: f64) -> Self {
+        Self(vec3::scale(self.0, rhs))
+    }
 }
 
 /// A position in a body's frame: `f64` metres from the body's centre, along the galactic axes.
@@ -190,6 +362,34 @@ mod tests {
         assert_eq!(Frame::Body(body).system(), Some(system));
         assert_ne!(Frame::System(system), Frame::Body(BodyId::new(system, 0)));
         assert!(Frame::Galactic < Frame::System(system));
+    }
+
+    #[test]
+    fn system_vectors_translate_positions_and_back() {
+        let from = SystemPosition::new([1.0e11, -2.0, 3.5]);
+        let step = SystemVector::new([-4.0e10, 6.0, 0.25]);
+        let to = from.translated(step);
+        assert_eq!(to, SystemPosition::new([6.0e10, 4.0, 3.75]));
+        assert_eq!(from.displacement_to(&to), step);
+        assert_eq!(to.displacement_to(&from), -step);
+        assert_eq!(step + SystemVector::ZERO, step);
+        assert_eq!(step - step, SystemVector::ZERO);
+        assert_eq!(step * 2.0, SystemVector::new([-8.0e10, 12.0, 0.5]));
+        assert_same_bits(SystemVector::new([3.0, 4.0, 12.0]).length().value(), 13.0);
+        assert_same_bits(step.dot(&SystemVector::new([0.0, 1.0, 4.0])), 7.0);
+    }
+
+    #[test]
+    fn system_velocities_integrate_to_displacements() {
+        let v = SystemVelocity::new([3.0, -4.0, 0.0]);
+        assert_same_bits(v.speed().value(), 5.0);
+        assert_same_bits(v.dot(&v), 25.0);
+        assert_eq!(
+            v.displacement_over(Seconds::new(2.0)),
+            SystemVector::new([6.0, -8.0, 0.0])
+        );
+        assert_eq!(v + (-v), SystemVelocity::ZERO);
+        assert_eq!(v - v * 0.5, SystemVelocity::new([1.5, -2.0, 0.0]));
     }
 
     #[test]

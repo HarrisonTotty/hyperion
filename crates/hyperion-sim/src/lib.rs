@@ -34,6 +34,11 @@
 //! - [`events`]: the two constructions of a system's or body's own events, Poisson bins and the
 //!   monotone phase, the event tags of the event kinds, and time windows.
 //!
+//! Orbits (plan 11, with plan 14's additions):
+//!
+//! - [`orbit`]: Keplerian elements and their propagation to any time, bound and open, the
+//!   inverse from a state, Roche lobes and gravitational-wave inspiral.
+//!
 //! The crate's only runtime dependency is `libm`.
 
 pub mod coords;
@@ -41,6 +46,7 @@ pub mod events;
 pub mod galaxy;
 pub mod id;
 pub mod math;
+pub mod orbit;
 pub mod rng;
 pub mod stellar;
 pub mod tables;

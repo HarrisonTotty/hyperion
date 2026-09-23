@@ -45,7 +45,7 @@ mod vec3;
 
 pub use cell::{BuildGenCellError, CellSize, GenCell, LyCell};
 pub use directions::{Cylindrical, Directions, UnitVector};
-pub use frames::{BodyPosition, Frame, SystemPosition};
+pub use frames::{BodyPosition, Frame, SystemPosition, SystemVector, SystemVelocity};
 pub use galactic::{
     BuildGalacticPositionError, GalacticDisplacement, GalacticPosition, GalacticVelocity,
 };

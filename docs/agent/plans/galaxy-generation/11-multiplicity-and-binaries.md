@@ -1234,3 +1234,52 @@ Fn(SolarMasses, f64, &Composition) -> Metres`, as T1.c's text asks and the sketc
     0.250, 0.368 and 0.288, so T1.d's mean present mass will fall by up to 0.03 M☉ at the default.
     `stripped_share` under the 10 au stand-in is 0.29 at 8 M☉, 0.38 at 20, 0.43 at 30 and 0.40
     at 150, against plan 06's provisional 0.25.
+- **Deviations in P11.T3.a, as built** (round 7, with plan 14's P14.T2 in the same module). Plan
+  01's code differs from the sketch in three places, and the code was followed. `UniverseTime` is
+  `i64` seconds plus `u32` nanoseconds, and the phase reduction uses both. `units` had no
+  gravitational parameter, so `units::GravitationalParameter` (m³ s⁻²) was added here, with
+  `from_solar_masses`, `from_jupiter_masses`, `from_earth_masses` and `from_kilograms`.
+  `coords` is split, so `SystemVector` and `SystemVelocity` are in `coords/frames.rs`, with
+  `SystemPosition::translated` and `displacement_to` beside them, which P11.T3.b's barycentre
+  placement needs. The module is `orbit/{mod, kepler, orientation, phase, peters, roche}.rs`, plus
+  plan 14's `open.rs` and `state.rs`. Its changes to the sketch:
+  - The three angles are one type, `Orientation::new(i, Ω, ω)`. It returns `Result`, requires i in
+    [0, π], reduces Ω and ω into [0, 2π), and precomputes the perifocal basis.
+  - `KeplerElements` has no all-fields constructor. It is built by
+    `from_period(P, μ, e, orientation, M₀)`, the form for T2's companions, which are drawn by
+    period, or by plan 14's `from_semi_major_axis(a, μ, e, orientation, M₀)`. Both return
+    `Result<_, BuildOrbitError>` and reduce M₀ into [0, 2π).
+  - `KeplerElements` stores μ as well as a and P, because ruling 33 puts μ on the wire. Each
+    constructor derives one of a and P from the other.
+  - `mean_anomaly_at(t)` is public, since plan 14's D11 reads a planet's phase at a death time.
+  - `solve_kepler` returns E in [−π, π] for any M. It uses the cubic starter of Mikkola (1987,
+    Celestial Mechanics 40, page 329), then exactly `KEPLER_HALLEY_ITERATIONS` = 2 Halley
+    iterations, never stopping on a tolerance. It evaluates f as (1 − e)E + e(E − sin E), with
+    E − sin E from the Stumpff series, so that E keeps its relative precision near periapsis at
+    high e.
+  - The measured worst residual is 8.9 × 10⁻¹⁶ rad for e ≤ 0.999 and 1.3 × 10⁻¹⁵ rad up to
+    0.999 999, over 10⁵ grid values and 2 × 10⁷ random ones, and E is within two units in its
+    last place of the converged root. The test asks for P14.T2.a's 10⁻¹³ up to 0.999, which
+    covers this task's 10⁻¹² up to 0.99.
+  - The mean anomaly is reduced exactly modulo the period from the clock's integer seconds, by the
+    truncated remainder `math::fmod`, a wrapper of the pinned `libm` added to plan 01's `math`.
+    The fraction of a period is centred in [−½, ½), so a phase keeps its relative precision on
+    both sides of a whole period, and an anomaly already in [−π, π] is never lifted through 2π.
+    The first build did lift it, and a near-parabolic orbit a century before periapsis came out
+    7.7 km off.
+  - `peters_merger_time(m₁, m₂, a, e) -> Years` computes Peters's eq. 5.14 as Tc × F(e). F comes
+    from fixed Gauss–Legendre panels in t = e ÷ √(1 − e²). It agrees with a direct Runge–Kutta
+    integration of da/dt and de/dt to 10⁻⁹ (the test's bound; about 10⁻¹⁴ measured), and it is
+    within 3% of Mandel's (2021) fit for e up to 0.999 99. It approaches Peters's asymptote
+    (768/425)(1 − e²)^(7/2) only slowly: the gap is about 2.06 √(1 − e).
+  - `peters_merger_time`, `peters_separation_for` and `roche_lobe_radius` panic, with the panic
+    documented, on masses, axes, times or mass ratios that are not finite and positive. A caller
+    that passes one has a bug.
+  - Eggleton's formula agrees with Paczyński's (1971) to within 3% for q from 0.05 to 0.8. Its
+    use at periapsis (Design note 7) is the usual approximation for an eccentric binary, and the
+    doc comment says it is an extrapolation.
+  - The brainstorm's 80–100 s for two white dwarfs a thousand years before merging holds for
+    pairs of 0.6–0.9 M☉ each, whose totals are near or above the Chandrasekhar mass: 83 s at
+    0.8 + 0.6 and 98 s at 0.9 + 0.9. A 0.6 + 0.6 M☉ pair gives 76 s.
+  - `orbit/functions.golden` pins by bits Peters's time over all its panel counts, its inverse
+    and the Roche lobe, beside plan 14's fixture `orbit/states.golden`. Both are new at 11.
