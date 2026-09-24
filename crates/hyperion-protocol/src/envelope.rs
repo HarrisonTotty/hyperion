@@ -14,6 +14,10 @@ use crate::galaxy::{
     DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
     SystemsInRangeRequest,
 };
+use crate::planetary::{
+    BodyDetailDto, BodyDetailRequest, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
+    SystemBodiesRequest,
+};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
 
@@ -165,6 +169,12 @@ pub enum RequestBody {
     SystemsInRange(SystemsInRangeRequest),
     /// Every star of one system at a time.
     SystemSummary(SystemSummaryRequest),
+    /// Every body of one system at a time, at a detail level.
+    SystemBodies(SystemBodiesRequest),
+    /// One body's whole record at a time, at a detail level.
+    BodyDetail(BodyDetailRequest),
+    /// The events on one system's bodies in a window of time.
+    BodyEvents(BodyEventsRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -186,6 +196,14 @@ pub enum ResponseBody {
     SystemsInRange(SystemsInRange),
     /// The system's stars and the orbits that hold them together.
     SystemSummary(SystemSummaryDto),
+    // This and `BodyDetail` are boxed: each is twice the size of any other answer, and every
+    // message would otherwise carry that size.
+    /// The system's hosts, zones and bodies.
+    SystemBodies(Box<SystemBodiesDto>),
+    /// The body's record.
+    BodyDetail(Box<BodyDetailDto>),
+    /// The events in the window.
+    BodyEvents(BodyEventsDto),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -201,6 +219,9 @@ pub const REQUEST_KINDS: &[&str] = &[
     "density_map",
     "systems_in_range",
     "system_summary",
+    "system_bodies",
+    "body_detail",
+    "body_events",
 ];
 
 #[cfg(test)]
@@ -214,13 +235,36 @@ mod tests {
         Census, MapPopulation, MapView, MassLayer, ParameterGroup, SystemsInRange,
     };
     use crate::orbit::HierarchyDto;
-    use crate::primitives::{GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime};
+    use crate::planetary::{
+        BodyKindDto, BodyRecordDto, BodyStateDto, DetailLevelDto, OrbitHostDto, SectionDto,
+    };
+    use crate::primitives::{
+        BodyIdHex, GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
+    };
     use crate::stellar::SystemExistenceDto;
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
 
     fn universe() -> UniverseIdHex {
         UniverseIdHex::from_u64(42)
+    }
+
+    fn system() -> SystemIdHex {
+        SystemIdHex::from_u64(0x0200_0800_2000_0000)
+    }
+
+    /// The summary of a system not yet born, with no stars.
+    fn unborn_system() -> SystemSummaryDto {
+        SystemSummaryDto {
+            universe: universe(),
+            system: system(),
+            time: UniverseTime::default(),
+            existence: SystemExistenceDto::NotYetBorn,
+            age_myr: -0.5,
+            fe_h_dex: 0.0,
+            stars: Vec::new(),
+            hierarchy: HierarchyDto { nodes: Vec::new() },
+        }
     }
 
     fn universe_info() -> UniverseInfo {
@@ -275,11 +319,36 @@ mod tests {
             Some(RequestBody::SystemsInRange(_)) => {
                 Some(RequestBody::SystemSummary(SystemSummaryRequest {
                     universe,
-                    system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                    system: system(),
                     time: UniverseTime::default(),
                 }))
             }
-            Some(RequestBody::SystemSummary(_)) => None,
+            Some(RequestBody::SystemSummary(_)) => {
+                Some(RequestBody::SystemBodies(SystemBodiesRequest {
+                    universe,
+                    system: system(),
+                    time: UniverseTime::default(),
+                    detail: DetailLevelDto::Full,
+                }))
+            }
+            Some(RequestBody::SystemBodies(_)) => {
+                Some(RequestBody::BodyDetail(BodyDetailRequest {
+                    universe,
+                    body: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                    time: UniverseTime::default(),
+                    detail: DetailLevelDto::MassAndOrbit,
+                }))
+            }
+            Some(RequestBody::BodyDetail(_)) => Some(RequestBody::BodyEvents(BodyEventsRequest {
+                universe,
+                system: system(),
+                from: UniverseTime::default(),
+                to: UniverseTime {
+                    seconds: 3_155_760_000,
+                    nanos: 0,
+                },
+            })),
+            Some(RequestBody::BodyEvents(_)) => None,
         }
     }
 
@@ -336,18 +405,49 @@ mod tests {
                 }))
             }
             Some(ResponseBody::SystemsInRange(_)) => {
-                Some(ResponseBody::SystemSummary(SystemSummaryDto {
-                    universe,
-                    system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
-                    time: UniverseTime::default(),
-                    existence: SystemExistenceDto::NotYetBorn,
-                    age_myr: -0.5,
-                    fe_h_dex: 0.0,
-                    stars: Vec::new(),
-                    hierarchy: HierarchyDto { nodes: Vec::new() },
-                }))
+                Some(ResponseBody::SystemSummary(unborn_system()))
             }
-            Some(ResponseBody::SystemSummary(_)) => None,
+            Some(ResponseBody::SystemSummary(_)) => {
+                Some(ResponseBody::SystemBodies(Box::new(SystemBodiesDto {
+                    granted: DetailLevelDto::Full,
+                    hosts: unborn_system(),
+                    zones: Vec::new(),
+                    system_plane: None,
+                    belts: SectionDto::NotModelled,
+                    halo: SectionDto::NotModelled,
+                    bodies: Vec::new(),
+                })))
+            }
+            Some(ResponseBody::SystemBodies(_)) => {
+                Some(ResponseBody::BodyDetail(Box::new(BodyDetailDto {
+                    universe,
+                    time: UniverseTime::default(),
+                    granted: DetailLevelDto::Contact,
+                    record: BodyRecordDto {
+                        id: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                        kind: BodyKindDto::Unresolved,
+                        label: SectionDto::NotResolved,
+                        parent: Some(OrbitHostDto::Star { body_index: 0 }),
+                        state: BodyStateDto::NotYetFormed,
+                        position_m: None,
+                        mass_kg: SectionDto::NotResolved,
+                        orbit: SectionDto::NotResolved,
+                        moons: SectionDto::NotResolved,
+                        rings: SectionDto::NotResolved,
+                        bulk: SectionDto::NotResolved,
+                        surface: SectionDto::NotResolved,
+                        hooks: SectionDto::NotResolved,
+                    },
+                })))
+            }
+            Some(ResponseBody::BodyDetail(_)) => Some(ResponseBody::BodyEvents(BodyEventsDto {
+                universe,
+                system: system(),
+                from: UniverseTime::default(),
+                to: UniverseTime::default(),
+                events: Vec::new(),
+            })),
+            Some(ResponseBody::BodyEvents(_)) => None,
         }
     }
 
@@ -610,6 +710,9 @@ mod tests {
                 "density_map",
                 "systems_in_range",
                 "system_summary",
+                "system_bodies",
+                "body_detail",
+                "body_events",
             ]
         );
     }

@@ -3378,3 +3378,60 @@ planetary_context_golden`. The tests cover:
     - (c) In the kernel, e = ΔM ÷ M_after, and a circular orbit is unbound from half. A 12 M☉ neutron star unbinds Jupiters at 60–1,000 au. A 25 M☉ complete-fallback black hole, which loses 10⁻⁸ of its mass, keeps them with e < 10⁻⁶, and engulfs one born at 3 au, inside its 4.2 au reach. A 20 M☉ black hole (8.30 → 6.81 M☉) leaves e = 0.219. A circumbinary planet of 20 + 3 M☉ sees the pair's loss. Kicked bodies are unbound (in the kernel).
     - A scalar axis stands in for the orbit's in the search, and is tested to agree with it bit for bit.
   - New golden `planetary/fate` (formation draws, the reach, and histories on the 1 M☉, 12 M☉, 25 M☉ and 20 + 3 M☉ hosts), blessed at 11.
+- **Deviations in T35.b–c and T37, as built (round 7, `wire`, second pass).**
+  - _Records (ruling 53)._ `BodySummaryDto { id, kind, label, parent, state, position_m, mass_kg,
+orbit, moons, rings, bulk }`, and `BodyRecordDto`, the same with `surface` and `hooks`, mirror
+    `record::BodyRecord`: the mass is its own `mass_and_orbit` section, `mass_kg`;
+    `BodyKindDto::Planet` carries no class, which is `BulkPropertiesDto::class`; the label is a
+    `SectionDto<String>`; the mass fractions are the bulk's `mass_fractions`; moons, rings, belts
+    and halo are lists of bodies (the halo `SectionDto<Option<BodyIdHex>>`), by `BodyIdHex` rather
+    than the bare index, as `OrbitHostDto::Body` names a body and `parseBodyId` reads one. The plan's summary
+    list has no mass or position; both are added. The ID, parent, state and position are plain
+    fields at every level, as `degrade` keeps them: `parent: Option<OrbitHostDto>`, `null` only for
+    a root body, which `BodyOrbitDto.parent` repeats, since the tree is rebuilt at `contact`, when
+    the orbit is withheld; `position_m: Option<[f64; 3]>` in the system frame, `null` for a body not
+    present or a population. `BodyKindDto` and `BodyStateDto` are tagged by `type`, with every
+    variant: `{"type": "moon", "origin": "giant_impact"}`, `{"type": "belt", "belt_kind":
+"kuiper"}`, `{"type": "destroyed", "cause": "engulfed", "at": …}`.
+  - _`body_detail` answers with a wrapper._ `ResponseBody` is tagged by `kind`, and a record has a
+    `kind` of its own, so the two cannot share an object: `BodyDetailDto { universe, time, granted,
+record: BodyRecordDto }`. `ResponseBody::SystemBodies` and `BodyDetail` hold their DTOs boxed
+    (Clippy's `large_enum_variant`); the wire and TypeScript are unchanged by it. **For the
+    orchestrator to rule.**
+  - _SI units_, as the task says: `mass_kg`, `radius_m`, `density_kg_m3`, `surface_gravity_m_s2`,
+    `equilibrium_temperature_k`, and metres for every zone. The display's M⊕ (D19) divides by the
+    sim's `EARTH_MASS_KG`, GM⊕ ÷ G = 5.972 17 × 10²⁴ kg, and a client constant that differs moves
+    the last digits. **For the orchestrator:** the alternative is `mass_mearth`, the sim's own unit.
+  - _No value yet._ `BodySurfaceDto` and `BodyEventDto` are uninhabited enums, TypeScript's
+    `never`, as the sim's `Surface` and `Hooks` are, so no `ok` surface and no event parses.
+    `BodyHooksDto { surface_seed: SurfaceSeedHex }` holds the one hook whose form the plan fixes,
+    in a new 16-hex-digit newtype; T23–T26 add the others, as `Modelled` fields where a hook lands
+    before its section's others. **For the orchestrator:** an uninhabited `BodyHooksDto` would
+    mirror the sim exactly.
+  - _Zones._ `ZoneDto { host, inner_m, outer_m, snow_line_m, plane: SystemPlaneDto, architecture:
+ArchitectureClassDto, habitable_zone: Option<HabitableZoneDto> }`, one per `stable_zones`
+    entry, in its order. `HabitableZoneDto` has Kopparapu's five limits in metres and
+    `extrapolated`; a limit the sim puts at +∞ is `null`, since JSON has no infinity. Beyond the
+    plan's list, for the orchestrator: `architecture`, since T43.b's readout names the class and
+    nothing else carries it; and `SystemBodiesDto.system_plane`, D21's reference plane, chosen by
+    the server, which knows which host is a close binary's. Zones are not sections and do not
+    degrade; the Knowledge overlay may want the plane and the class withheld below
+    `mass_and_orbit`.
+  - _`body_events`._ Its string is in `REQUEST_KINDS` with the other two, as T35.c says, and so it
+    has its variants now (`BodyEventsRequest { universe, system, from, to }`, `BodyEventsDto { …,
+events }`): plan 04's `request_kinds_lists_every_variant` and the server's
+    `kind_names_every_body_as_the_wire_does` need a variant per string, and a string without one is
+    answered `bad_request`, not `unsupported`. All three kinds answer `unsupported` until T36 and
+    T31. The window's ends, `from` inclusive and `to` exclusive, and `to` as the field a refusal
+    names, are provisional until then. **For the orchestrator:** the slice note's "two in the slice" is three.
+  - _Server._ `is_large` is true for `system_bodies` (up to 255 members a belt) and `body_events`
+    (comet tracks), false for `body_detail`; a test checks the three kinds answer `unsupported`.
+  - _T37._ `packages/protocol/fixtures/planetary.json` holds ten messages: the slice's
+    `system_bodies` answer; a populated one with every kind, state and section state, shapes rather
+    than a generator's output; `body_detail` at `full`, `mass_and_orbit` and `contact`;
+    `unknown_body`; a `body_events` answer, with no events; and the three requests. `hyperion-protocol` requires each to round-trip exactly
+    and the slice's to equal its wire-form builders, and `planetary.test.ts` decodes them through
+    `decodeServerMessage`, rebuilds the tree from `parent` and writes the requests. Its numbers
+    have twelve significant figures, because serde_json's default parser (no `float_roundtrip`)
+    misread a 17-digit position by an ulp; the server only writes floats, so the wire is exact. No
+    `ErrorCode` is new, so `settledState` is unchanged.

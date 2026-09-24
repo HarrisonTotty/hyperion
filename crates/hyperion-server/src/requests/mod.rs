@@ -58,9 +58,10 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), and plan 06's `system_summary`
 /// (P06.T34). A later plan's kind that this server's [`REQUEST_KINDS`] does not hold is refused
-/// before it reaches here, as `unsupported`; a kind the protocol defines before its handler lands
-/// is answered `unsupported` here, under its own ID, as an older server would answer it (plan 04,
-/// design note 15). Each handler that names a universe starts from
+/// before it reaches here, as `unsupported`. A kind the protocol already defines but whose handler
+/// has not landed is answered `unsupported` here, under its own ID, as an older server would answer
+/// it (plan 04, design note 15): `system_bodies` and `body_detail` until plan 14's P14.T36, and
+/// `body_events` until its P14.T31. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
@@ -77,8 +78,22 @@ impl Handler for Handlers {
                 Box::pin(galaxy::systems(state, request, token))
             }
             RequestBody::SystemSummary(request) => Box::pin(system::summary(state, request, token)),
+            RequestBody::SystemBodies(_) => Box::pin(ready(Err(not_served_yet("system_bodies")))),
+            RequestBody::BodyDetail(_) => Box::pin(ready(Err(not_served_yet("body_detail")))),
+            RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
         }
     }
+}
+
+/// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
+/// as an older server would answer it (plan 04, design note 15). Plan 14's kinds take it until
+/// their handlers land.
+#[must_use]
+fn not_served_yet(kind: &str) -> RequestError {
+    request_error(
+        ErrorCode::Unsupported,
+        format!("request kind `{kind}` is not served by this server yet"),
+    )
 }
 
 /// A request's `kind` string, as it is on the wire and in [`REQUEST_KINDS`].
@@ -91,19 +106,30 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::DensityMap(_) => "density_map",
         RequestBody::SystemsInRange(_) => "systems_in_range",
         RequestBody::SystemSummary(_) => "system_summary",
+        RequestBody::SystemBodies(_) => "system_bodies",
+        RequestBody::BodyDetail(_) => "body_detail",
+        RequestBody::BodyEvents(_) => "body_events",
     }
 }
 
 /// Whether a response can run to megabytes of JSON, and so is serialised on the CPU pool rather
 /// than on the runtime (design note 22). A new kind must say which it is.
+///
+/// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
+/// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
+/// record cannot.
 fn is_large(body: &ResponseBody) -> bool {
     match body {
-        ResponseBody::DensityMap(_) | ResponseBody::SystemsInRange(_) => true,
+        ResponseBody::DensityMap(_)
+        | ResponseBody::SystemsInRange(_)
+        | ResponseBody::SystemBodies(_)
+        | ResponseBody::BodyEvents(_) => true,
         ResponseBody::CreateUniverse(_)
         | ResponseBody::ListUniverses(_)
         | ResponseBody::OpenUniverse(_)
         | ResponseBody::GalaxyParameters(_)
-        | ResponseBody::SystemSummary(_) => false,
+        | ResponseBody::SystemSummary(_)
+        | ResponseBody::BodyDetail(_) => false,
     }
 }
 
@@ -626,9 +652,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use hyperion_protocol::{
-        CreateUniverseRequest, DensityMap, DensityMapRequest, GalacticPosition,
-        GalaxyParametersRequest, MapPopulation, MapView, MassLayer, OpenUniverseRequest,
-        SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
+        DensityMapRequest, DetailLevelDto, GalacticPosition, GalaxyParametersRequest,
+        MapPopulation, MapView, MassLayer, OpenUniverseRequest, SystemBodiesRequest, SystemIdHex,
+        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
     };
 
     use super::*;
@@ -667,9 +694,27 @@ mod tests {
                 include_stellar: false,
             }),
             RequestBody::SystemSummary(SystemSummaryRequest {
-                universe,
+                universe: universe.clone(),
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 time: UniverseTime::default(),
+            }),
+            RequestBody::SystemBodies(SystemBodiesRequest {
+                universe: universe.clone(),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
+                detail: DetailLevelDto::Full,
+            }),
+            RequestBody::BodyDetail(BodyDetailRequest {
+                universe: universe.clone(),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+                time: UniverseTime::default(),
+                detail: DetailLevelDto::Full,
+            }),
+            RequestBody::BodyEvents(BodyEventsRequest {
+                universe,
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                from: UniverseTime::default(),
+                to: UniverseTime::default(),
             }),
         ]
     }
@@ -798,6 +843,32 @@ mod tests {
             assert_eq!(wire["kind"], kind(&body));
             assert!(REQUEST_KINDS.contains(&kind(&body)));
         }
+    }
+
+    #[tokio::test]
+    async fn plan_14_s_kinds_are_unsupported_until_their_handlers_land() {
+        // The kinds are the protocol's (P14.T35.c), so they parse and reach the handlers, which
+        // answer them as an older server would until P14.T36 and T31 serve them.
+        let harness = Harness::start(Handlers).await;
+        let planetary = every_body().into_iter().filter(|body| {
+            matches!(
+                body,
+                RequestBody::SystemBodies(_)
+                    | RequestBody::BodyDetail(_)
+                    | RequestBody::BodyEvents(_)
+            )
+        });
+        let mut kinds = Vec::new();
+        for body in planetary {
+            let name = kind(&body);
+            let answer = Handlers
+                .handle(Arc::clone(harness.state()), body, CancelToken::new())
+                .await;
+            assert_eq!(answer, Err(not_served_yet(name)), "{name}");
+            kinds.push(name);
+        }
+        assert_eq!(kinds, ["system_bodies", "body_detail", "body_events"]);
+        harness.stop().await;
     }
 
     #[test]

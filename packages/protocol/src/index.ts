@@ -1,17 +1,33 @@
 // The types in ./generated are produced by ts-rs from crates/hyperion-protocol
 // (run `just gen-protocol`). Re-export each new message type here.
+import type { ArchitectureClassDto } from "./generated/ArchitectureClassDto";
+import type { BeltKindDto } from "./generated/BeltKindDto";
+import type { BodyDetailDto } from "./generated/BodyDetailDto";
+import type { BodyDetailRequest } from "./generated/BodyDetailRequest";
+import type { BodyEventDto } from "./generated/BodyEventDto";
+import type { BodyEventsDto } from "./generated/BodyEventsDto";
+import type { BodyEventsRequest } from "./generated/BodyEventsRequest";
+import type { BodyHooksDto } from "./generated/BodyHooksDto";
 import type { BodyIdHex } from "./generated/BodyIdHex";
+import type { BodyKindDto } from "./generated/BodyKindDto";
 import type { BodyOrbitDto } from "./generated/BodyOrbitDto";
+import type { BodyRecordDto } from "./generated/BodyRecordDto";
+import type { BodyStateDto } from "./generated/BodyStateDto";
+import type { BodySummaryDto } from "./generated/BodySummaryDto";
+import type { BodySurfaceDto } from "./generated/BodySurfaceDto";
+import type { BulkPropertiesDto } from "./generated/BulkPropertiesDto";
 import type { Census } from "./generated/Census";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { CreateUniverseRequest } from "./generated/CreateUniverseRequest";
 import type { DensityMap } from "./generated/DensityMap";
 import type { DensityMapRequest } from "./generated/DensityMapRequest";
+import type { DestructionCauseDto } from "./generated/DestructionCauseDto";
 import type { DetailLevelDto } from "./generated/DetailLevelDto";
 import type { ErrorCode } from "./generated/ErrorCode";
 import type { GalacticPosition } from "./generated/GalacticPosition";
 import type { GalaxyParameters } from "./generated/GalaxyParameters";
 import type { GalaxyParametersRequest } from "./generated/GalaxyParametersRequest";
+import type { HabitableZoneDto } from "./generated/HabitableZoneDto";
 import type { HierarchyDto } from "./generated/HierarchyDto";
 import type { HierarchyNodeDto } from "./generated/HierarchyNodeDto";
 import type { KickModeDto } from "./generated/KickModeDto";
@@ -19,7 +35,9 @@ import type { LayerCensus } from "./generated/LayerCensus";
 import type { LayerStatus } from "./generated/LayerStatus";
 import type { MapPopulation } from "./generated/MapPopulation";
 import type { MapView } from "./generated/MapView";
+import type { MassFractionsDto } from "./generated/MassFractionsDto";
 import type { MassLayer } from "./generated/MassLayer";
+import type { MoonOriginDto } from "./generated/MoonOriginDto";
 import type { NatalKickDto } from "./generated/NatalKickDto";
 import type { ObjectKindDto } from "./generated/ObjectKindDto";
 import type { OpenUniverseRequest } from "./generated/OpenUniverseRequest";
@@ -30,6 +48,7 @@ import type { ParameterGroup } from "./generated/ParameterGroup";
 import type { ParameterOrigin } from "./generated/ParameterOrigin";
 import type { ParameterValue } from "./generated/ParameterValue";
 import type { PhaseDto } from "./generated/PhaseDto";
+import type { PlanetClassDto } from "./generated/PlanetClassDto";
 import type { PlanetaryNebulaDto } from "./generated/PlanetaryNebulaDto";
 import type { Population } from "./generated/Population";
 import type { PulsarDto } from "./generated/PulsarDto";
@@ -45,8 +64,12 @@ import type { StarEventDto } from "./generated/StarEventDto";
 import type { StarEventKindDto } from "./generated/StarEventKindDto";
 import type { StarSummaryDto } from "./generated/StarSummaryDto";
 import type { StellarBriefDto } from "./generated/StellarBriefDto";
+import type { SurfaceSeedHex } from "./generated/SurfaceSeedHex";
+import type { SystemBodiesDto } from "./generated/SystemBodiesDto";
+import type { SystemBodiesRequest } from "./generated/SystemBodiesRequest";
 import type { SystemExistenceDto } from "./generated/SystemExistenceDto";
 import type { SystemIdHex } from "./generated/SystemIdHex";
+import type { SystemPlaneDto } from "./generated/SystemPlaneDto";
 import type { SystemRecord } from "./generated/SystemRecord";
 import type { SystemSummaryDto } from "./generated/SystemSummaryDto";
 import type { SystemSummaryRequest } from "./generated/SystemSummaryRequest";
@@ -60,20 +83,37 @@ import type { UniverseStatus } from "./generated/UniverseStatus";
 import type { UniverseTime } from "./generated/UniverseTime";
 import type { VariabilityDto } from "./generated/VariabilityDto";
 import type { VariableKindDto } from "./generated/VariableKindDto";
+import type { ZoneDto } from "./generated/ZoneDto";
 
 export type {
+  ArchitectureClassDto,
+  BeltKindDto,
+  BodyDetailDto,
+  BodyDetailRequest,
+  BodyEventDto,
+  BodyEventsDto,
+  BodyEventsRequest,
+  BodyHooksDto,
   BodyIdHex,
+  BodyKindDto,
   BodyOrbitDto,
+  BodyRecordDto,
+  BodyStateDto,
+  BodySummaryDto,
+  BodySurfaceDto,
+  BulkPropertiesDto,
   Census,
   ClientMessage,
   CreateUniverseRequest,
   DensityMap,
   DensityMapRequest,
+  DestructionCauseDto,
   DetailLevelDto,
   ErrorCode,
   GalacticPosition,
   GalaxyParameters,
   GalaxyParametersRequest,
+  HabitableZoneDto,
   HierarchyDto,
   HierarchyNodeDto,
   KickModeDto,
@@ -81,7 +121,9 @@ export type {
   LayerStatus,
   MapPopulation,
   MapView,
+  MassFractionsDto,
   MassLayer,
+  MoonOriginDto,
   NatalKickDto,
   ObjectKindDto,
   OpenUniverseRequest,
@@ -92,6 +134,7 @@ export type {
   ParameterOrigin,
   ParameterValue,
   PhaseDto,
+  PlanetClassDto,
   PlanetaryNebulaDto,
   Population,
   PulsarDto,
@@ -107,8 +150,12 @@ export type {
   StarEventKindDto,
   StarSummaryDto,
   StellarBriefDto,
+  SurfaceSeedHex,
+  SystemBodiesDto,
+  SystemBodiesRequest,
   SystemExistenceDto,
   SystemIdHex,
+  SystemPlaneDto,
   SystemRecord,
   SystemSummaryDto,
   SystemSummaryRequest,
@@ -122,6 +169,7 @@ export type {
   UniverseTime,
   VariabilityDto,
   VariableKindDto,
+  ZoneDto,
 };
 
 export { PROTOCOL_VERSION } from "./generated/ProtocolVersion";

@@ -1,0 +1,1078 @@
+{
+  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number to twelve significant figures: the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels.",
+  "system_bodies_request": {
+    "type": "request",
+    "id": 21,
+    "body": {
+      "kind": "system_bodies",
+      "universe": "000000000000002a",
+      "system": "0200080020000000",
+      "time": {
+        "seconds": 0,
+        "nanos": 0
+      },
+      "detail": "full"
+    }
+  },
+  "system_bodies_response": {
+    "type": "response",
+    "id": 21,
+    "body": {
+      "kind": "system_bodies",
+      "granted": "full",
+      "hosts": {
+        "universe": "000000000000002a",
+        "system": "0200080020000000",
+        "time": {
+          "seconds": 0,
+          "nanos": 0
+        },
+        "existence": "exists",
+        "age_myr": 4570.0,
+        "fe_h_dex": 0.0,
+        "stars": [
+          {
+            "body_index": 0,
+            "kind": "dwarf",
+            "phase": "main_sequence",
+            "class": "G2V",
+            "initial_mass_msun": 1.0,
+            "mass_msun": 0.99975,
+            "core_mass_msun": 0.0,
+            "luminosity_lsun": 1.0,
+            "radius_rsun": 1.0,
+            "teff_k": 5772.0,
+            "absolute_v_mag": 4.825,
+            "colour_b_v_mag": 0.65,
+            "mass_loss_rate_msun_per_yr": 2.5e-14,
+            "remnant": null,
+            "death_time": null
+          }
+        ],
+        "hierarchy": {
+          "nodes": [
+            {
+              "type": "star",
+              "body_index": 0,
+              "mass_msun": 1.0
+            }
+          ]
+        }
+      },
+      "zones": [
+        {
+          "host": {
+            "type": "star",
+            "body_index": 0
+          },
+          "inner_m": null,
+          "outer_m": null,
+          "snow_line_m": 337938907867.0,
+          "plane": {
+            "inclination_rad": 1.0,
+            "ascending_node_rad": 2.5
+          },
+          "architecture": "solar_like",
+          "habitable_zone": {
+            "recent_venus_m": 112000000000.0,
+            "runaway_greenhouse_m": 147000000000.0,
+            "moist_greenhouse_m": 148000000000.0,
+            "maximum_greenhouse_m": 253000000000.0,
+            "early_mars_m": 265000000000.0,
+            "extrapolated": false
+          }
+        }
+      ],
+      "system_plane": {
+        "inclination_rad": 1.0,
+        "ascending_node_rad": 2.5
+      },
+      "belts": {
+        "state": "not_modelled"
+      },
+      "halo": {
+        "state": "not_modelled"
+      },
+      "bodies": [
+        {
+          "id": "0200080020000000.0300",
+          "kind": {
+            "type": "planet"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+          "mass_kg": {
+            "state": "ok",
+            "value": 5.97216786779e24
+          },
+          "orbit": {
+            "state": "ok",
+            "value": {
+              "parent": {
+                "type": "star",
+                "body_index": 0
+              },
+              "orbit": {
+                "period_s": 31558148.6281,
+                "semi_major_axis_m": 149597870700.0,
+                "eccentricity": 0.0167,
+                "inclination_rad": 1.0,
+                "ascending_node_rad": 2.5,
+                "argument_of_periapsis_rad": 1.75,
+                "mean_anomaly_at_epoch_rad": 0.5,
+                "mu_m3_s2": 1.327128386e20
+              },
+              "valid_until": null
+            }
+          },
+          "moons": {
+            "state": "not_modelled"
+          },
+          "rings": {
+            "state": "not_modelled"
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 6371000.0,
+              "density_kg_m3": 5513.41371156,
+              "surface_gravity_m_s2": 9.82024945724,
+              "class": "rocky",
+              "mass_fractions": {
+                "iron": 0.323,
+                "rock": 0.677,
+                "water": 0.0,
+                "envelope": 0.0
+              },
+              "equilibrium_temperature_k": 254.6
+            }
+          }
+        },
+        {
+          "id": "0200080020000000.0500",
+          "kind": {
+            "type": "planet"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": [-229947709407.0, -361488388382.0, 694387237710.0],
+          "mass_kg": {
+            "state": "ok",
+            "value": 1.89812459734e27
+          },
+          "orbit": {
+            "state": "ok",
+            "value": {
+              "parent": {
+                "type": "star",
+                "body_index": 0
+              },
+              "orbit": {
+                "period_s": 374033065.135,
+                "semi_major_axis_m": 777908927640.0,
+                "eccentricity": 0.0489,
+                "inclination_rad": 1.02,
+                "ascending_node_rad": 2.48,
+                "argument_of_periapsis_rad": 4.8,
+                "mean_anomaly_at_epoch_rad": 3.1,
+                "mu_m3_s2": 1.3283912653e20
+              },
+              "valid_until": null
+            }
+          },
+          "moons": {
+            "state": "not_modelled"
+          },
+          "rings": {
+            "state": "not_modelled"
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 71482620.0,
+              "density_kg_m3": 1240.60841266,
+              "surface_gravity_m_s2": 24.7930249122,
+              "class": "gas_giant",
+              "mass_fractions": {
+                "iron": 0.05,
+                "rock": 0.06,
+                "water": 0.072,
+                "envelope": 0.818
+              },
+              "equilibrium_temperature_k": 128.9
+            }
+          }
+        }
+      ]
+    }
+  },
+  "system_bodies_populated": {
+    "type": "response",
+    "id": 22,
+    "body": {
+      "kind": "system_bodies",
+      "granted": "bulk",
+      "hosts": {
+        "universe": "000000000000002a",
+        "system": "0200080020000000",
+        "time": {
+          "seconds": 0,
+          "nanos": 0
+        },
+        "existence": "exists",
+        "age_myr": 4570.0,
+        "fe_h_dex": 0.0,
+        "stars": [
+          {
+            "body_index": 0,
+            "kind": "dwarf",
+            "phase": "main_sequence",
+            "class": "G2V",
+            "initial_mass_msun": 1.0,
+            "mass_msun": 0.99975,
+            "core_mass_msun": 0.0,
+            "luminosity_lsun": 1.0,
+            "radius_rsun": 1.0,
+            "teff_k": 5772.0,
+            "absolute_v_mag": 4.825,
+            "colour_b_v_mag": 0.65,
+            "mass_loss_rate_msun_per_yr": 2.5e-14,
+            "remnant": null,
+            "death_time": null
+          }
+        ],
+        "hierarchy": {
+          "nodes": [
+            {
+              "type": "star",
+              "body_index": 0,
+              "mass_msun": 1.0
+            }
+          ]
+        }
+      },
+      "zones": [
+        {
+          "host": {
+            "type": "star",
+            "body_index": 0
+          },
+          "inner_m": null,
+          "outer_m": null,
+          "snow_line_m": 337938907867.0,
+          "plane": {
+            "inclination_rad": 1.0,
+            "ascending_node_rad": 2.5
+          },
+          "architecture": "solar_like",
+          "habitable_zone": {
+            "recent_venus_m": 112000000000.0,
+            "runaway_greenhouse_m": 147000000000.0,
+            "moist_greenhouse_m": 148000000000.0,
+            "maximum_greenhouse_m": 253000000000.0,
+            "early_mars_m": 265000000000.0,
+            "extrapolated": false
+          }
+        }
+      ],
+      "system_plane": {
+        "inclination_rad": 1.0,
+        "ascending_node_rad": 2.5
+      },
+      "belts": {
+        "state": "ok",
+        "value": ["0200080020000000.e000"]
+      },
+      "halo": {
+        "state": "ok",
+        "value": "0200080020000000.e100"
+      },
+      "bodies": [
+        {
+          "id": "0200080020000000.0100",
+          "kind": {
+            "type": "planet"
+          },
+          "label": {
+            "state": "ok",
+            "value": "A b"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+          "mass_kg": {
+            "state": "ok",
+            "value": 5.97216786779e24
+          },
+          "orbit": {
+            "state": "ok",
+            "value": {
+              "parent": {
+                "type": "star",
+                "body_index": 0
+              },
+              "orbit": {
+                "period_s": 31558148.6281,
+                "semi_major_axis_m": 149597870700.0,
+                "eccentricity": 0.0167,
+                "inclination_rad": 1.0,
+                "ascending_node_rad": 2.5,
+                "argument_of_periapsis_rad": 1.75,
+                "mean_anomaly_at_epoch_rad": 0.5,
+                "mu_m3_s2": 1.327128386e20
+              },
+              "valid_until": null
+            }
+          },
+          "moons": {
+            "state": "ok",
+            "value": ["0200080020000000.0101"]
+          },
+          "rings": {
+            "state": "ok",
+            "value": ["0200080020000000.0180"]
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 6371000.0,
+              "density_kg_m3": 5513.41371156,
+              "surface_gravity_m_s2": 9.82024945724,
+              "class": "rocky",
+              "mass_fractions": {
+                "iron": 0.323,
+                "rock": 0.677,
+                "water": 0.0,
+                "envelope": 0.0
+              },
+              "equilibrium_temperature_k": 254.6
+            }
+          }
+        },
+        {
+          "id": "0200080020000000.0101",
+          "kind": {
+            "type": "moon",
+            "origin": "giant_impact"
+          },
+          "label": {
+            "state": "ok",
+            "value": "A b I"
+          },
+          "parent": {
+            "type": "body",
+            "id": "0200080020000000.0100"
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": [39461101553.4, -105520721023.0, 95232836817.8],
+          "mass_kg": {
+            "state": "ok",
+            "value": 7.34578907151e22
+          },
+          "orbit": {
+            "state": "ok",
+            "value": {
+              "parent": {
+                "type": "body",
+                "id": "0200080020000000.0100"
+              },
+              "orbit": {
+                "period_s": 2357390.045,
+                "semi_major_axis_m": 384400000.0,
+                "eccentricity": 0.0549,
+                "inclination_rad": 0.09,
+                "ascending_node_rad": 1.2,
+                "argument_of_periapsis_rad": 5.5,
+                "mean_anomaly_at_epoch_rad": 2.0,
+                "mu_m3_s2": 403503200000000.0
+              },
+              "valid_until": null
+            }
+          },
+          "moons": {
+            "state": "not_applicable"
+          },
+          "rings": {
+            "state": "not_applicable"
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 1737400.0,
+              "density_kg_m3": 3344.0,
+              "surface_gravity_m_s2": 1.62,
+              "class": "rocky",
+              "mass_fractions": {
+                "iron": 0.02,
+                "rock": 0.98,
+                "water": 0.0,
+                "envelope": 0.0
+              },
+              "equilibrium_temperature_k": 270.4
+            }
+          }
+        },
+        {
+          "id": "0200080020000000.0180",
+          "kind": {
+            "type": "ring"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "body",
+            "id": "0200080020000000.0100"
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 1.5e19
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "not_applicable"
+          },
+          "rings": {
+            "state": "not_applicable"
+          },
+          "bulk": {
+            "state": "not_applicable"
+          }
+        },
+        {
+          "id": "0200080020000000.0200",
+          "kind": {
+            "type": "planet"
+          },
+          "label": {
+            "state": "ok",
+            "value": "A c"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "destroyed",
+            "cause": "engulfed",
+            "at": {
+              "seconds": -15778800000,
+              "nanos": 0
+            }
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 3e24
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "ok",
+            "value": []
+          },
+          "rings": {
+            "state": "ok",
+            "value": []
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 5100000.0,
+              "density_kg_m3": 5513.41371156,
+              "surface_gravity_m_s2": 9.82024945724,
+              "class": "rocky",
+              "mass_fractions": {
+                "iron": 0.323,
+                "rock": 0.677,
+                "water": 0.0,
+                "envelope": 0.0
+              },
+              "equilibrium_temperature_k": 254.6
+            }
+          }
+        },
+        {
+          "id": "0200080020000000.0300",
+          "kind": {
+            "type": "planet"
+          },
+          "label": {
+            "state": "ok",
+            "value": "A d"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "not_yet_formed"
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 1.89812459734e27
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "not_modelled"
+          },
+          "rings": {
+            "state": "not_modelled"
+          },
+          "bulk": {
+            "state": "not_modelled"
+          }
+        },
+        {
+          "id": "0200080020000000.0400",
+          "kind": {
+            "type": "planet"
+          },
+          "label": {
+            "state": "ok",
+            "value": "A e"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "unbound",
+            "at": {
+              "seconds": -3155760000,
+              "nanos": 500000000
+            }
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 1e26
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "ok",
+            "value": []
+          },
+          "rings": {
+            "state": "ok",
+            "value": []
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 6371000.0,
+              "density_kg_m3": 5513.41371156,
+              "surface_gravity_m_s2": 9.82024945724,
+              "class": "ice_giant",
+              "mass_fractions": {
+                "iron": 0.323,
+                "rock": 0.677,
+                "water": 0.0,
+                "envelope": 0.0
+              },
+              "equilibrium_temperature_k": 254.6
+            }
+          }
+        },
+        {
+          "id": "0200080020000000.e000",
+          "kind": {
+            "type": "belt",
+            "belt_kind": "asteroid"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 2.39e21
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "not_applicable"
+          },
+          "rings": {
+            "state": "not_applicable"
+          },
+          "bulk": {
+            "state": "not_applicable"
+          }
+        },
+        {
+          "id": "0200080020000000.e001",
+          "kind": {
+            "type": "dwarf_planet"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "body",
+            "id": "0200080020000000.e000"
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": [410000000000.0, -12000000000.0, 3000000000.0],
+          "mass_kg": {
+            "state": "ok",
+            "value": 9.38e20
+          },
+          "orbit": {
+            "state": "ok",
+            "value": {
+              "parent": {
+                "type": "body",
+                "id": "0200080020000000.e000"
+              },
+              "orbit": {
+                "period_s": 145489557.507,
+                "semi_major_axis_m": 414386101839.0,
+                "eccentricity": 0.0785,
+                "inclination_rad": 0.19,
+                "ascending_node_rad": 1.4,
+                "argument_of_periapsis_rad": 1.3,
+                "mean_anomaly_at_epoch_rad": 2.6,
+                "mu_m3_s2": 1.3271244e20
+              },
+              "valid_until": null
+            }
+          },
+          "moons": {
+            "state": "ok",
+            "value": []
+          },
+          "rings": {
+            "state": "ok",
+            "value": []
+          },
+          "bulk": {
+            "state": "ok",
+            "value": {
+              "radius_m": 469700.0,
+              "density_kg_m3": 2162.0,
+              "surface_gravity_m_s2": 0.28,
+              "class": "icy",
+              "mass_fractions": {
+                "iron": 0.0,
+                "rock": 0.75,
+                "water": 0.25,
+                "envelope": 0.0
+              },
+              "equilibrium_temperature_k": 163.0
+            }
+          }
+        },
+        {
+          "id": "0200080020000000.e100",
+          "kind": {
+            "type": "cometary_halo"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "barycentre"
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 3e25
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "not_applicable"
+          },
+          "rings": {
+            "state": "not_applicable"
+          },
+          "bulk": {
+            "state": "not_applicable"
+          }
+        },
+        {
+          "id": "0200080020000000.e200",
+          "kind": {
+            "type": "protoplanetary_disc"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "destroyed",
+            "cause": "dispersed",
+            "at": {
+              "seconds": -94672800000000,
+              "nanos": 0
+            }
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 2e28
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "not_applicable"
+          },
+          "rings": {
+            "state": "not_applicable"
+          },
+          "bulk": {
+            "state": "not_applicable"
+          }
+        },
+        {
+          "id": "0200080020000000.e300",
+          "kind": {
+            "type": "debris_disc"
+          },
+          "label": {
+            "state": "not_modelled"
+          },
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "state": {
+            "type": "present"
+          },
+          "position_m": null,
+          "mass_kg": {
+            "state": "ok",
+            "value": 1e20
+          },
+          "orbit": {
+            "state": "not_applicable"
+          },
+          "moons": {
+            "state": "not_applicable"
+          },
+          "rings": {
+            "state": "not_applicable"
+          },
+          "bulk": {
+            "state": "not_applicable"
+          }
+        }
+      ]
+    }
+  },
+  "body_detail_request": {
+    "type": "request",
+    "id": 23,
+    "body": {
+      "kind": "body_detail",
+      "universe": "000000000000002a",
+      "body": "0200080020000000.0300",
+      "time": {
+        "seconds": 0,
+        "nanos": 0
+      },
+      "detail": "full"
+    }
+  },
+  "body_detail_response": {
+    "type": "response",
+    "id": 23,
+    "body": {
+      "kind": "body_detail",
+      "universe": "000000000000002a",
+      "time": {
+        "seconds": 0,
+        "nanos": 0
+      },
+      "granted": "full",
+      "record": {
+        "id": "0200080020000000.0300",
+        "kind": {
+          "type": "planet"
+        },
+        "label": {
+          "state": "not_modelled"
+        },
+        "parent": {
+          "type": "star",
+          "body_index": 0
+        },
+        "state": {
+          "type": "present"
+        },
+        "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+        "mass_kg": {
+          "state": "ok",
+          "value": 5.97216786779e24
+        },
+        "orbit": {
+          "state": "ok",
+          "value": {
+            "parent": {
+              "type": "star",
+              "body_index": 0
+            },
+            "orbit": {
+              "period_s": 31558148.6281,
+              "semi_major_axis_m": 149597870700.0,
+              "eccentricity": 0.0167,
+              "inclination_rad": 1.0,
+              "ascending_node_rad": 2.5,
+              "argument_of_periapsis_rad": 1.75,
+              "mean_anomaly_at_epoch_rad": 0.5,
+              "mu_m3_s2": 1.327128386e20
+            },
+            "valid_until": null
+          }
+        },
+        "moons": {
+          "state": "not_modelled"
+        },
+        "rings": {
+          "state": "not_modelled"
+        },
+        "bulk": {
+          "state": "ok",
+          "value": {
+            "radius_m": 6371000.0,
+            "density_kg_m3": 5513.41371156,
+            "surface_gravity_m_s2": 9.82024945724,
+            "class": "rocky",
+            "mass_fractions": {
+              "iron": 0.323,
+              "rock": 0.677,
+              "water": 0.0,
+              "envelope": 0.0
+            },
+            "equilibrium_temperature_k": 254.6
+          }
+        },
+        "surface": {
+          "state": "not_modelled"
+        },
+        "hooks": {
+          "state": "not_modelled"
+        }
+      }
+    }
+  },
+  "body_detail_mass_and_orbit": {
+    "type": "response",
+    "id": 24,
+    "body": {
+      "kind": "body_detail",
+      "universe": "000000000000002a",
+      "time": {
+        "seconds": 0,
+        "nanos": 0
+      },
+      "granted": "mass_and_orbit",
+      "record": {
+        "id": "0200080020000000.0300",
+        "kind": {
+          "type": "planet"
+        },
+        "label": {
+          "state": "not_modelled"
+        },
+        "parent": {
+          "type": "star",
+          "body_index": 0
+        },
+        "state": {
+          "type": "present"
+        },
+        "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+        "mass_kg": {
+          "state": "ok",
+          "value": 5.97216786779e24
+        },
+        "orbit": {
+          "state": "ok",
+          "value": {
+            "parent": {
+              "type": "star",
+              "body_index": 0
+            },
+            "orbit": {
+              "period_s": 31558148.6281,
+              "semi_major_axis_m": 149597870700.0,
+              "eccentricity": 0.0167,
+              "inclination_rad": 1.0,
+              "ascending_node_rad": 2.5,
+              "argument_of_periapsis_rad": 1.75,
+              "mean_anomaly_at_epoch_rad": 0.5,
+              "mu_m3_s2": 1.327128386e20
+            },
+            "valid_until": null
+          }
+        },
+        "moons": {
+          "state": "not_modelled"
+        },
+        "rings": {
+          "state": "not_modelled"
+        },
+        "bulk": {
+          "state": "not_resolved"
+        },
+        "surface": {
+          "state": "not_resolved"
+        },
+        "hooks": {
+          "state": "not_resolved"
+        }
+      }
+    }
+  },
+  "body_detail_contact": {
+    "type": "response",
+    "id": 25,
+    "body": {
+      "kind": "body_detail",
+      "universe": "000000000000002a",
+      "time": {
+        "seconds": 0,
+        "nanos": 0
+      },
+      "granted": "contact",
+      "record": {
+        "id": "0200080020000000.0300",
+        "kind": {
+          "type": "unresolved"
+        },
+        "label": {
+          "state": "not_resolved"
+        },
+        "parent": {
+          "type": "star",
+          "body_index": 0
+        },
+        "state": {
+          "type": "present"
+        },
+        "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+        "mass_kg": {
+          "state": "not_resolved"
+        },
+        "orbit": {
+          "state": "not_resolved"
+        },
+        "moons": {
+          "state": "not_resolved"
+        },
+        "rings": {
+          "state": "not_resolved"
+        },
+        "bulk": {
+          "state": "not_resolved"
+        },
+        "surface": {
+          "state": "not_resolved"
+        },
+        "hooks": {
+          "state": "not_resolved"
+        }
+      }
+    }
+  },
+  "unknown_body": {
+    "type": "request_error",
+    "id": 26,
+    "error": {
+      "code": "unknown_body",
+      "message": "no body 0200080020000000.0900 in its system",
+      "field": "body"
+    }
+  },
+  "body_events_response": {
+    "type": "response",
+    "id": 27,
+    "body": {
+      "kind": "body_events",
+      "universe": "000000000000002a",
+      "system": "0200080020000000",
+      "from": {
+        "seconds": -1577880000,
+        "nanos": 0
+      },
+      "to": {
+        "seconds": 1577880000,
+        "nanos": 0
+      },
+      "events": []
+    }
+  },
+  "body_events_request": {
+    "type": "request",
+    "id": 27,
+    "body": {
+      "kind": "body_events",
+      "universe": "000000000000002a",
+      "system": "0200080020000000",
+      "from": {
+        "seconds": -1577880000,
+        "nanos": 0
+      },
+      "to": {
+        "seconds": 1577880000,
+        "nanos": 0
+      }
+    }
+  }
+}

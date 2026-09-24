@@ -454,7 +454,7 @@ pub enum StarEventKindDto {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use serde_json::{Value, json};
 
     use super::*;
@@ -483,7 +483,7 @@ mod tests {
     }
 
     /// A Sun-like primary, with every field this generator version computes and none it does not.
-    fn sunlike() -> StarSummaryDto {
+    pub(crate) fn sunlike() -> StarSummaryDto {
         StarSummaryDto {
             body_index: 0,
             kind: ObjectKindDto::Dwarf,
@@ -508,7 +508,7 @@ mod tests {
         }
     }
 
-    fn sunlike_json() -> Value {
+    pub(crate) fn sunlike_json() -> Value {
         json!({
             "body_index": 0,
             "kind": "dwarf",

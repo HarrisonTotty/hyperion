@@ -1,13 +1,28 @@
-//! Planetary wire types shared by plan 14's records: the detail levels, the tagged sections every
-//! optional part of a record is carried in, and a body's orbit (plan 14, P14.T35.a).
+//! Planetary wire types (plan 14, P14.T35): the detail levels, the tagged sections every optional
+//! part of a record is carried in and a body's orbit (T35.a, here), the records of bodies and
+//! zones (T35.b, in `record` and `zones`), and the `system_bodies`, `body_detail` and
+//! `body_events` requests with their answers (T35.c, in `requests`).
 //!
-//! The records themselves (`BodySummaryDto`, `BodyDetailDto` and the zones) and the
-//! `system_bodies` and `body_detail` kinds follow in P14.T35.b and c, once the simulation's
-//! `planetary::record` exists; body IDs are [`BodyIdHex`](crate::BodyIdHex), beside the system
-//! IDs.
+//! They mirror the simulation's `planetary::record` without depending on it; body IDs are
+//! [`BodyIdHex`](crate::BodyIdHex), beside the system IDs.
+
+mod record;
+mod requests;
+mod zones;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+pub use record::{
+    BeltKindDto, BodyDetailDto, BodyHooksDto, BodyKindDto, BodyRecordDto, BodyStateDto,
+    BodySummaryDto, BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto, MassFractionsDto,
+    MoonOriginDto, PlanetClassDto,
+};
+pub use requests::{
+    BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
+    SystemBodiesRequest,
+};
+pub use zones::{ArchitectureClassDto, HabitableZoneDto, SystemPlaneDto, ZoneDto};
 
 use crate::orbit::OrbitDto;
 use crate::primitives::{BodyIdHex, UniverseTime};

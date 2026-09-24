@@ -147,6 +147,13 @@ hex64_newtype!(
 );
 
 hex64_newtype!(
+    /// The seed of a body's surface map: one block output of the universe's seed on `body.surface`,
+    /// keyed by the body's ID, which depends on nothing else about the body (plan 14, P14.T23).
+    SurfaceSeedHex,
+    "a surface seed"
+);
+
+hex64_newtype!(
     /// A star system's ID, which also says where to regenerate the system from.
     ///
     /// The server resolves every system ID a client sends before using it, since a well-formed ID
@@ -326,6 +333,16 @@ mod tests {
         assert_wire_form(
             &SystemIdHex::from_u64(0x0200_0800_2000_0000),
             json!("0200080020000000"),
+        );
+    }
+
+    #[test]
+    fn a_surface_seed_is_sixteen_hex_digits() {
+        let seed = SurfaceSeedHex::from_u64(u64::MAX - 1);
+        assert_wire_form(&seed, json!("fffffffffffffffe"));
+        assert_eq!(
+            SurfaceSeedHex::try_from("FFFFFFFFFFFFFFFE".to_owned()),
+            Err(ParseHex64Error::InvalidDigit)
         );
     }
 
