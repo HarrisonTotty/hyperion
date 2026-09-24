@@ -4,7 +4,10 @@
 //! A request's fields are checked here, once, by a `TryFrom` from its wire type; a field that
 //! cannot be used becomes a [`ConvertRequestError`], answered `bad_request` with the field named.
 //! Answers are built here too, by `From` from the server's types to the wire's, as are the request
-//! errors that the server's own errors become.
+//! errors that the server's own errors become. The `system_summary` request and its answer are in
+//! [`stellar`].
+
+mod stellar;
 
 use std::error::Error;
 use std::fmt;
@@ -36,6 +39,7 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+pub(crate) use self::stellar::{SummaryRequest, system_summary, unknown_system};
 use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};
 use crate::universe::{
@@ -370,8 +374,11 @@ pub(crate) fn systems_in_range(
 /// One system found, as the wire carries it: the state at the epoch but for the position and the
 /// age, which are at the query's time.
 ///
-/// The row never carries a stellar brief yet, whatever the request's `include_stellar` says: the
-/// briefs come with plan 06's range handler (P06.T34), and until then every row is plan 04's.
+/// The row never carries a stellar brief yet, whatever the request's `include_stellar` says, and
+/// every row is plan 04's. A brief builds the primary's track, 1–2 ms for an evolved star (ruling
+/// 46 of 2026-09-22), so a brief on every row of a 20,000-system answer would cost seconds; the
+/// briefs are the part of plan 06's P06.T34 that waits for the track integrator's optimisation,
+/// which ruling 46 puts first. The client reads an absent `stellar` as no brief sent.
 #[must_use]
 fn system_record(hit: &SystemHit, time: UniverseTime) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
@@ -1559,9 +1566,9 @@ mod tests {
     }
 
     #[test]
-    fn a_request_for_briefs_gets_rows_without_them_until_p06_t34() {
-        // The flag is the protocol's (P06.T33), but no brief is built before plan 06's range
-        // handler lands, so every row is still plan 04's.
+    fn a_request_for_briefs_gets_rows_without_them_until_the_integrator_is_fast() {
+        // The flag is the protocol's (P06.T33), but no brief is built until the track integrator's
+        // optimisation lands (ruling 46), so every row is still plan 04's.
         let mut request = sunlike(50.0, 5_000, MassLayer::A);
         request.include_stellar = true;
         let answer = answer(&request);

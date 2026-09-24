@@ -2697,3 +2697,49 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
   figures, E notation below 0.001), with `KM_PER_RSUN` (695,700, IAU 2015 B3) and `formatRadiusKm` for
   ruling 36's compact remnants, and their drawn units, `SolarUnit` (`L☉`, "solar luminosities";
   `R☉`, "solar radii").
+- **Deviations in T34, as built (round 7, `srvstars`), without the range briefs.** The code is
+  `hyperion-server`'s `requests/system.rs` (`summary`), `convert/stellar.rs` (`SummaryRequest`,
+  `system_summary`, `unknown_system`, `orbit_dto`) and `compute/systems.rs` (`SharedSystemCache`).
+  `config.rs` gains `--system-cache` (`HYPERION_SYSTEM_CACHE_MB`, default 128 MiB), there is a new
+  `ServerStats::systems()`, and the README's table of options gains the row.
+  - _The cache._ It is a `SharedByteLru<(GalaxyKey, SystemId), SystemStars>`, with
+    `impl HeapBytes for SystemStars` through the sim's new `SystemStars::heap_bytes` (every track's
+    segments, knots and samples by capacity, and the hierarchy's lists). Measured charges: 10.6 KB
+    for a pair of living dwarfs, 16.2 KB for the pinned triple, 21 KB for a quadruple of dwarfs, and
+    30–80 KB where a star is a white dwarf with its whole track. So 128 MiB holds some 1,600–12,000
+    systems. Entries are epoch state, so a request at another time is a hit. A hit skips `resolve`,
+    since only IDs that resolved are stored. There is no `SingleFlight`: two concurrent misses both
+    generate, and the second insert replaces an equal value (`SharedByteLru`'s rule).
+  - _The order of checks_ is the universe, then `time` (plan 04's `query_time`: `bad_request`
+    naming `time`), then the ID, then the galaxy, then one interactive pool job. The job looks up
+    the cache, and on a miss resolves and generates, then summarises at the time and converts. The
+    small frame is serialised on the runtime. **For the orchestrator to rule:** a well-formed
+    16-digit `SystemIdHex` whose bits fail `SystemId::from_raw` is neither `resolve`'s refusal nor a
+    parse failure. It is answered `unknown_system` naming `system`, as the code's doc ("a
+    well-formed system ID that names no system") reads.
+  - _Wire rules (ruling 54)._ Rotation, activity, variability, a nebula, active events, a pulsar's
+    detail and a black hole's spin are absent. A natal kick is sent when the sim has one (none
+    before T19). `teff_k` is `null` where L = 0. A white dwarf's cooling age is its age less its
+    age at death. The hierarchy's nodes come from `SystemSummary::hierarchy`, empty before birth.
+    A star node's mass is its initial mass. An orbit's fields are `KeplerElements`' accessors, bit
+    for bit.
+  - _Not this round: `include_stellar`'s briefs._ A brief builds a track, 1–2 ms (ruling 46), so a
+    brief per row of a 20,000-system answer is seconds. The flag is accepted and every row still
+    has no `stellar`. `convert.rs` documents this, and its test is renamed
+    `a_request_for_briefs_gets_rows_without_them_until_the_integrator_is_fast`. The test "a range
+    request with `include_stellar` returns a brief on every row" waits with the briefs.
+  - _Tests._ `tests/system_summary.rs` holds five tests:
+    - four pinned systems (one to four stars) equal the sim's field by field, companions included,
+      at three times;
+    - P11.T13's triple returns three stars and two orbits, with the elements, μ = G ΣM and the
+      masses;
+    - `bad_request` naming `time`, and `unknown_system` naming `system`, for `u64::MAX` and for the
+      index after a cell's last candidate; a malformed ID is `bad_request`;
+    - a summary cancelled while its cold galaxy builds ends with exactly one terminal message:
+      `cancelled`, or the answer on a machine that finishes the build first;
+    - the same request twice gives the same frame, a miss then a hit, and a second universe of the
+      seed shares the entry.
+
+    There are unit tests for the conversion and the cache. `websocket.rs`'s "unsupported until its
+    handler lands" test, and `Handlers`' `not_served_yet`, are removed. The server's
+    `galaxy_parameters` and `systems_in_range` goldens are unchanged.

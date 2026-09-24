@@ -7,6 +7,7 @@
 
 use tokio::sync::watch;
 
+use crate::AppState;
 use crate::cache::LruCounters;
 use crate::compute::{GalaxyCounters, PoolCounters};
 
@@ -20,26 +21,22 @@ pub struct ServerStats {
     galaxies: GalaxyCounters,
     maps: LruCounters,
     cells: LruCounters,
+    systems: LruCounters,
 }
 
 impl ServerStats {
-    pub(crate) fn new(
-        connections: usize,
-        requests: RequestCounters,
-        outbound: OutboundCounters,
-        pool: PoolCounters,
-        galaxies: GalaxyCounters,
-        maps: LruCounters,
-        cells: LruCounters,
-    ) -> Self {
+    /// A snapshot of `state`: its connections, requests and outbound queues now, and each part's
+    /// own counters, the pool's and every cache's.
+    pub(crate) fn of(state: &AppState) -> Self {
         Self {
-            connections,
-            requests,
-            outbound,
-            pool,
-            galaxies,
-            maps,
-            cells,
+            connections: state.connections.open_count(),
+            requests: state.request_stats.snapshot(),
+            outbound: state.outbound_stats.snapshot(),
+            pool: state.pool.counters(),
+            galaxies: state.galaxies.counters(),
+            maps: state.maps.counters(),
+            cells: state.cells.counters(),
+            systems: state.systems.counters(),
         }
     }
 
@@ -86,6 +83,13 @@ impl ServerStats {
     #[must_use]
     pub fn cells(&self) -> LruCounters {
         self.cells
+    }
+
+    /// The system cache's contents and use, including its byte budget: a repeated
+    /// `system_summary` for one system is a hit and builds no star.
+    #[must_use]
+    pub fn systems(&self) -> LruCounters {
+        self.systems
     }
 }
 

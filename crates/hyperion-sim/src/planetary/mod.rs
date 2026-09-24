@@ -23,22 +23,26 @@
 //!   (Roche, Hill and satellite stability, T15), with their assembly `derive_body` (T16.a).
 //! - [`record`]: what a query returns and how it degrades, the body record and the system snapshot
 //!   with their sections' four states (P14.T34, ruling 34).
-//! - [`fate`]: the states a body can be in at a time, which the record carries; the fate transform
-//!   that produces them is P14.T28's.
+//! - [`fate`]: the fate transform, a body's state and orbit at a time (P14.T28.a–c): formation on
+//!   young hosts, expansion and engulfment on evolved ones, and supernovae with a zero kick until
+//!   P06.T19 (ruling 33); [`hosts`] holds its closed forms.
 //! - [`placement`]: placing planets: the Hill-spacing primitives and the spacing draw (P14.T6),
 //!   the masses (P14.T7), the class placers that turn a host's class, disc and zone into planets
 //!   on orbits with D5's second fallback (P14.T8), and the stable zones of multiple systems with
 //!   their hosts and discs (P14.T9).
 //! - [`params`]: the parameters that belong to the generator version, as named constants.
-//! - [`context`] and [`system`]: what the stage reads from the stages above, and the assembled
-//!   generator. Documentation only until their tasks (P14.T1.d and T30).
+//! - [`context`]: [`SystemContext`], everything the stage reads from the stages above, for a real
+//!   system ([`SystemContext::for_system`]) or a synthetic host ([`SystemContext::builder`])
+//!   (P14.T1.d). The crate's `testing` feature adds `testing`: synthetic hosts and samples of real
+//!   systems for the statistical tests.
+//! - [`system`]: the assembled generator. Documentation only until P14.T30.
 //!
 //! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
 //! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
 //! its host's mass, \[Fe/H\], zero-age luminosity and radius, its lifetime and its truncation
 //! radii, not a [`context`] (P14.T1.d) or an orbit zone (P14.T9); the class draw takes the host's
 //! mass and \[Fe/H\], its disc, the zone's outer limit if any and whether the host is in a close
-//! binary.
+//! binary. The assembled generator (P14.T30) passes them from the context and its zones.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -60,6 +64,21 @@
 //! | 11 | a planet's orbit (P14.T8) | [`orbit::KeplerElements::from_semi_major_axis`](crate::orbit::KeplerElements::from_semi_major_axis) with [`orbit::Orientation`](crate::orbit::Orientation) and μ = G (M★ + m) as [`units::GravitationalParameter`](crate::units::GravitationalParameter); [`rng::tags::PLANET_COUNT`](crate::rng::tags::PLANET_COUNT), [`PLANET_PLANE`](crate::rng::tags::PLANET_PLANE) and [`PLANET_ORBIT`](crate::rng::tags::PLANET_ORBIT) |
 //! | 11 | a pair's orbit | [`orbit::Eccentricity`](crate::orbit::Eccentricity) and a semi-major axis in [`Metres`](crate::units::Metres), as `KeplerElements` gives them |
 //! | 11 | the hierarchy | [`stellar::multiplicity::SystemHierarchy`](crate::stellar::multiplicity::SystemHierarchy), read through [`placement::ZoneHierarchy`]'s `From<&SystemHierarchy>`: each star's index, initial mass and [`SlotKind`](crate::stellar::multiplicity::SlotKind), and each pair's members and orbit at birth |
+//! | 02 | the sphere of influence (P14.T1.d, until plan 09) | [`PotentialTables::tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) `(SolarMasses, &PointLy) -> Metres` of [`Galaxy::potential`](crate::galaxy::Galaxy::potential), at [`PointLy::from`](crate::galaxy::PointLy) the record's epoch position |
+//! | 03 | resolving a system (P14.T1.d) | [`galaxy::placement::resolve`](crate::galaxy::placement::resolve) and [`ResolveSystemError`](crate::galaxy::placement::ResolveSystemError) (`NoSuchSystem`, `LayerNotGenerated`, `KindNotGenerated`); [`SystemRecord`](crate::galaxy::placement::SystemRecord)'s `id`, `epoch_position`, `primary_initial_mass` and `age_at_epoch`, and the arithmetic of its `age_at` and `existence_at` ([`Existence`](crate::galaxy::placement::Existence)) |
+//! | 06 | the stars (P14.T1.d, ruling 34) | [`stellar::system::SystemStars`](crate::stellar::system::SystemStars)'s `generate` and `stars`; [`StarModel`](crate::stellar::system::StarModel), `new` for synthetic hosts with [`MAX_STAR_MASS`](crate::stellar::system::MAX_STAR_MASS); [`StarDraws::for_star`](crate::stellar::draws::StarDraws::for_star) and [`StarDraws::median`](crate::stellar::draws::StarDraws::median) |
+//! | 06 | \[Fe/H\] of a real system (P14.T1.d) | [`stellar::system::draw_metallicity`](crate::stellar::system::draw_metallicity), through `SystemStars`; [`Composition::from_fe_h`](crate::stellar::Composition::from_fe_h) with no helium excess for a synthetic host; \[α/Fe\] is in no plan's code yet and is `None` |
+//! | 06 | a brown dwarf's zero-age state (design note 6) | [`stellar::substellar::cooling`](crate::stellar::substellar::cooling) at 10 Myr, a [`StarState`](crate::stellar::StarState) |
+//! | 11 | a real system's hierarchy (P14.T1.d) | [`SystemStars::hierarchy`](crate::stellar::system::SystemStars::hierarchy), the one [`draw_hierarchy`](crate::stellar::multiplicity::draw_hierarchy) draws under [`MultiplicityContext::Free`](crate::stellar::multiplicity::MultiplicityContext::Free) (P11.T2.c) |
+//! | 11 | a synthetic binary (P14.T1.d) | [`TIDAL_CUT_SHARE`](crate::stellar::multiplicity::TIDAL_CUT_SHARE), [`MIN_COMPANION_MASS`](crate::stellar::multiplicity::MIN_COMPANION_MASS) and [`MIN_SUBSTELLAR_COMPANION_MASS`](crate::stellar::multiplicity::MIN_SUBSTELLAR_COMPANION_MASS); the hierarchy through `SystemHierarchy`'s crate-private `single` and `binary` |
+//! | 01 | time and the clock window (P14.T1.d) | [`time::UniverseTime`](crate::time::UniverseTime) (`since_epoch`), [`time::CLOCK_WINDOW_H`](crate::time::CLOCK_WINDOW_H) for the youngest age, and [`units`](crate::units)' `Years`, `Days`, `HeliumExcess`, `PerCubicLightYear` and `KilometresPerSecond`, with [`units::consts::METRES_PER_KILOPARSEC`](crate::units::consts::METRES_PER_KILOPARSEC) |
+//! | 02, 03 | the sample of real systems (`testing`, P14.T1.d) | [`Galaxy::from_params`](crate::galaxy::Galaxy::from_params) with [`GalaxyParams::milky_way_like`](crate::galaxy::params::GalaxyParams::milky_way_like); [`galaxy::placement::generate_cell`](crate::galaxy::placement::generate_cell), [`STELLAR_LAYERS`](crate::galaxy::placement::STELLAR_LAYERS) and each layer's [`MassBand`](crate::galaxy::imf::MassBand); [`galaxy::query::QuerySphere`](crate::galaxy::query::QuerySphere), [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere) and [`count_cells_in_sphere`](crate::galaxy::query::count_cells_in_sphere) |
+//! | 11 | a synthetic binary's period and eccentricity (P14.T1.d) | [`LOG_PERIOD_MIN`](crate::stellar::multiplicity::LOG_PERIOD_MIN), [`LOG_PERIOD_MAX`](crate::stellar::multiplicity::LOG_PERIOD_MAX), [`MultiplicityModel::eccentricity_distribution`](crate::stellar::multiplicity::MultiplicityModel::eccentricity_distribution)'s `e_max`, and [`orbit::OpenOrbit::MIN_ECCENTRICITY`](crate::orbit::OpenOrbit::MIN_ECCENTRICITY) |
+//! | 09 | sphere of influence and encounter environment | not built: T1.d's interim rule, the galactic tidal radius and `None`; [`context::EncounterEnvironment`] holds what P14.T29 reads of a feature member |
+//! | 13 | free-floating hosts, `SystemRecord::kind` | not built: every context is [`HostKind::Stellar`] |
+//! | 06 | a star at any time (ruling 34) | [`stellar::system::StarModel`](crate::stellar::system::StarModel): `state_at`, `age_at`, `max_radius_until`, `death`, `remnant` and `natal_kick`, which [`fate`] reads |
+//! | 06 | how a star dies | [`stellar::remnant::Death`](crate::stellar::remnant::Death), its [`DeathKind::is_sudden`](crate::stellar::remnant::DeathKind::is_sudden) and [`ProgenitorAtDeath`](crate::stellar::remnant::ProgenitorAtDeath), and [`NatalKick`](crate::stellar::remnant::NatalKick) (`None` until P06.T19) |
+//! | 11, 14 | an orbit's expansion and its inverse | [`orbit::KeplerElements::scaled`](crate::orbit::KeplerElements::scaled) (P14.T2.a) and [`orbit::elements_from_state`](crate::orbit::elements_from_state), whose [`orbit::Orbit`](crate::orbit::Orbit) is bound or open (P14.T2.c) |
 
 pub mod architecture;
 pub mod context;
@@ -67,11 +86,15 @@ pub mod derive;
 pub mod disc;
 pub mod error;
 pub mod fate;
+pub mod hosts;
 pub mod index;
 pub mod params;
 pub mod placement;
 pub mod record;
 pub mod system;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
+pub use context::{HostKind, SystemContext};
 pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};
 pub use index::{BodyIndex, BodySlot, BodySub};

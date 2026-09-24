@@ -463,6 +463,21 @@ impl Track {
         self.initial_mass
     }
 
+    /// The bytes the track owns on the heap, beyond `size_of::<Track>()`: its segments and each
+    /// segment's knots and samples, by capacity. For the server's byte-bounded caches (plan 06,
+    /// P06.T34); nothing generated reads it.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.segments.iter().fold(
+            self.segments.capacity() * size_of::<Segment>(),
+            |bytes, segment| {
+                bytes
+                    + segment.knots.capacity() * size_of::<Knot>()
+                    + segment.samples.capacity() * size_of::<Sample>()
+            },
+        )
+    }
+
     /// The composition the track was built for.
     #[must_use]
     pub const fn composition(&self) -> &Composition {

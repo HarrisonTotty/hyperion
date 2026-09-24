@@ -208,15 +208,7 @@ impl Harness {
             .await
             .expect("timed out shutting the server down")
             .expect("the server shuts down cleanly");
-        let stats = ServerStats::new(
-            shared.connections.open_count(),
-            shared.request_stats.snapshot(),
-            shared.outbound_stats.snapshot(),
-            shared.pool.counters(),
-            shared.galaxies.counters(),
-            shared.maps.counters(),
-            shared.cells.counters(),
-        );
+        let stats = ServerStats::of(&shared);
         let (requests, outbound, pool) = (stats.requests(), stats.outbound(), stats.pool());
         assert_eq!(
             (

@@ -1417,3 +1417,56 @@ m₂)`, C = 2.8 "determined empirically", "holds for q_out ≤ 5"; their reducti
   - A system not yet formed has no nodes, as it has no stars.
   - `body_index` and `SystemSummaryDto.hierarchy` are required fields, since they land with the
     `system_summary` kind itself; `binary_class` and `star_count` wait for the rest of T13.
+- **Two constructors for plan 14's synthetic hosts (`context`, round 7, P14.T1.d).**
+  `stellar/multiplicity/hierarchy.rs` gains the crate-private `SystemHierarchy::single` (an ID, a
+  mass and a slot kind) and `SystemHierarchy::binary` (an ID, two masses, the companion's kind, a
+  and e), next to the test-only `hand_built`, so that `planetary::context`'s builder can make a
+  star or a binary under a chosen ID. Nodes, stars and node masses are laid out as the draw lays
+  out a single star and a binary, and the orbit lies in the reference plane at periapsis at the
+  epoch. A pair with no third body passes Mardling and Aarseth whatever its orbit. The builder
+  checks the draw's other conditions before calling `binary`: the companion no heavier than the
+  primary, a period of 0.1–10¹¹ days, an eccentricity inside the envelope at that period (circular
+  below 12 days) and under 0.9999, and the apocentre inside `TIDAL_CUT_SHARE` of its sphere of
+  influence. So `SystemHierarchy` stays stable by construction outside tests. It departs from the
+  draw in one place: a companion under `MIN_COMPANION_MASS` is a `SlotKind::BrownDwarf` slot,
+  which the draw makes only from P11.T2.d. Nothing drawn changes.
+- **Deviations in P11.T2.c, as built** (round 7, the `srvstars` lane, with P06.T34). The code is
+  `stellar/system.rs`; `multiplicity/{mod,hierarchy}.rs` gain only doc lines and a crate-private
+  `SystemHierarchy::heap_bytes`, and `sse/track.rs` a crate-private `Track::heap_bytes`.
+  - _Built._ `SystemStars::{generate, generate_in, hierarchy, star_count, heap_bytes}`. `generate`
+    is `generate_in(.., MultiplicityContext::Free)`. The hierarchy is
+    `draw_hierarchy(galaxy, record, ctx, GRID_ATTEMPT)`, and each companion is
+    `StarModel::new(slot.initial_mass(), composition, StarDraws::for_attempt(seed, slot.body(), 0),
+record.age_at_epoch())`. The primary is built as plan 06 built it, through a named private seam
+    `primary_draws` (`for_star`, attempt 0, until P08.T12.c's `mark_attempt`). `GRID_ATTEMPT`
+    (`RedrawAttempt::FIRST`) is the second named seam, for T6–T8's redraws. The stripped share and
+    the interacting range stay where T2.a–b put them, in `stellar::multiplicity` (ruling 51.2).
+  - _Summaries._ `StarSummary` gains `body()`. `SystemSummary` gains `hierarchy()`, an
+    `Option<&SystemHierarchy>` that is `None` before birth. The Provides' `HierarchySummary` is
+    therefore the drawn hierarchy until T4 gives a pair a state at each time. **For the
+    orchestrator to rule** whether T4 adds a type of its own or evolves this one. `StellarBrief`
+    gains `star_count()`, and the rest of the brief stays the primary's. `binary_class` waits for
+    T5, and `binary_state_at`, `system_mass_at` and `recoil` wait for T4.
+  - **The version stays 11** (the orchestrator's brief), although the task asks for a bump. Nothing
+    generated that anything reads changes: range rows carry no brief, and `system_summary` is first
+    answered in the same change. Only `stellar/summaries` moved. It is rewritten so that the
+    primaries come first exactly as before, followed by a new part for the companions of the 6 of
+    its 12 systems that are multiple. `golden_diff.py`: "Extended only (1): new values pinned, every
+    existing value unchanged … 399 new".
+  - _Tests._ `companions_move_no_primary` covers the 12 pinned IDs. Each primary equals plan 06's
+    `StarModel` built from the record alone, and its summaries match `ForcedSingle`'s bit for bit.
+    `every_companion_is_its_slots_star_with_the_systems_composition_and_age` checks each companion.
+    The property test of life and death now holds every star, companions included. The multiple
+    share is checked against Σ `multiple_fraction` of the sampled primaries within 3.29σ, on 400
+    systems (fast) and 10⁴ (slow), sampled five layers in turn rather than by the mass function.
+    Measured: 5,118 multiple of 10,000 against 5,102.0 (z = 0.33), and 203 of 400 against 204.5.
+    Over the 10⁴, systems of one to six stars number 4,882 : 2,569 : 1,206 : 647 : 328 : 368. The
+    model's PMF sums are 4,898 : 2,629 : 1,180 : 587 : 311 : 395, and the difference is the dropped
+    companions. Layer E (8–150 M☉) has 8% sextuples (227 of 2,805). That follows from the capped geometric
+    count with a mean near 2.2 for O stars, a property of the model, not of this wiring.
+  - _A pinned triple_, `42002cb200000009` of seed `0x4d2` at the epoch, answers as follows. An
+    F3 IV subgiant of 1.681 M☉ (11.3 L☉, 6,743 K) and a K7.5 V star of 0.628 M☉ orbit each other in
+    3.96 d (a = 0.0648 au, e = 0, circularised). An F8.5 V star of 1.149 M☉ orbits that pair in
+    274.6 d (a = 1.250 au, e = 0.525). The system is 1.516 Gyr old with [Fe/H] −0.014, and its
+    cached `SystemStars` is charged 16.2 KB. Until T4 the inner pair is two single stars on an
+    orbit (ruling 33).

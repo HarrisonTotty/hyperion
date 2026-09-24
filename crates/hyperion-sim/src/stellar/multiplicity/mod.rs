@@ -18,8 +18,9 @@
 //! The model, the distributions and the quadratures open no stream. The hierarchy draw opens
 //! `system.multiplicity` under the system's ID and `binary.orbit`,
 //! `binary.orientation` and `binary.phase` under each companion's body ID, and reads plan 06's
-//! companion-stripped mark of a massive primary. Nothing generated calls it yet (P11.T2.c wires it
-//! in). Periods are in [`Days`](crate::units::Days) and, for densities and cumulative
+//! companion-stripped mark of a massive primary. Plan 06's
+//! [`SystemStars`](crate::stellar::system::SystemStars) calls it for every system (P11.T2.c).
+//! Periods are in [`Days`](crate::units::Days) and, for densities and cumulative
 //! distributions, in x = log₁₀(P ÷ 1 d); masses in [`SolarMasses`](crate::units::SolarMasses).
 
 mod dist;

@@ -406,6 +406,16 @@ impl SystemHierarchy {
     pub const fn dropped_companions(&self) -> u8 {
         self.dropped
     }
+
+    /// The bytes the hierarchy owns on the heap, beyond `size_of::<SystemHierarchy>()`: its lists
+    /// of nodes, stars and node masses, by capacity. For the server's byte-bounded system cache
+    /// (plan 06, P06.T34); nothing generated reads it.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.nodes.capacity() * size_of::<HierarchyNode>()
+            + self.stars.capacity() * size_of::<StarSlot>()
+            + self.node_masses.capacity() * size_of::<SolarMasses>()
+    }
 }
 
 /// Draws the stars of the system `record` and the orbits that bind them (plan 11, P11.T2.a–b).
@@ -429,9 +439,11 @@ impl SystemHierarchy {
 /// tries, and they keep the share of stripped primaries at the mark's. The mark is read at
 /// attempt 0 until plan 08's `SystemRecord::mark_attempt` exists (P11.T2.c's second seam).
 ///
-/// Nothing generated calls this yet: P11.T2.c wires it into the system stage with
+/// P11.T2.c wires it into the system stage:
+/// [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) calls
 /// `draw_hierarchy(galaxy, record, MultiplicityContext::Free, RedrawAttempt::FIRST)` for grid
-/// systems, with a version bump.
+/// systems, and [`SystemStars::generate_in`](crate::stellar::system::SystemStars::generate_in)
+/// passes any other context.
 ///
 /// A system at the galactic centre itself has a tidal radius of zero, so it has no room for any
 /// companion and comes out single.
@@ -1058,6 +1070,90 @@ impl Draft {
                 (index, mass)
             }
         }
+    }
+}
+
+// Plan 14's synthetic hosts (P14.T1.d): hierarchies of one and two stars built from their parts,
+// for `planetary::context`'s builder.
+impl SystemHierarchy {
+    /// One star of initial mass `mass`, M☉, and kind `kind`, body 0 of `system`: the hierarchy a
+    /// draw gives a single star.
+    ///
+    /// A single star passes every test of the draw, so the hierarchy is one a draw could give.
+    #[must_use]
+    pub(crate) fn single(system: SystemId, mass: SolarMasses, kind: SlotKind) -> Self {
+        Self {
+            nodes: vec![HierarchyNode::Star(StarIndex::PRIMARY)],
+            stars: vec![StarSlot {
+                body: BodyId::new(system, 0),
+                initial_mass: mass,
+                kind,
+            }],
+            node_masses: vec![mass],
+            dropped: 0,
+        }
+    }
+
+    /// Two stars of `system` on a relative orbit: the primary, star 0, of initial mass `m0` M☉, and
+    /// the companion, star 1, of `m1` M☉ and kind `kind`, with semi-major axis `a` and
+    /// eccentricity `e` about their total mass, in the reference plane and at periapsis at the
+    /// epoch, as the tests' `hand_built` makes its pairs.
+    ///
+    /// The nodes are laid out as the draw lays out a binary: the pair, then the primary, then the
+    /// companion. A pair with no third body passes Mardling and Aarseth's criterion whatever its
+    /// orbit, so the draw's other tests are left to the caller, which holds them: the companion
+    /// no heavier than the primary, the period inside the draw's range, the eccentricity inside
+    /// its envelope at that period, and the apocentre inside
+    /// [`TIDAL_CUT_SHARE`](super::TIDAL_CUT_SHARE) of the system's tidal radius. A brown-dwarf
+    /// companion is one the draw makes only from P11.T2.d.
+    ///
+    /// # Errors
+    ///
+    /// What [`KeplerElements::from_semi_major_axis`] refuses: a semi-major axis that is not
+    /// positive and finite, masses whose parameter is not, or a period that overflows or
+    /// underflows.
+    pub(crate) fn binary(
+        system: SystemId,
+        m0: SolarMasses,
+        (m1, kind): (SolarMasses, SlotKind),
+        a: Metres,
+        e: Eccentricity,
+    ) -> Result<Self, crate::orbit::BuildOrbitError> {
+        let mass = m0 + m1;
+        let flat = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)
+            .expect("zero angles are an orientation");
+        let orbit = KeplerElements::from_semi_major_axis(
+            a,
+            GravitationalParameter::from_solar_masses(mass),
+            e,
+            flat,
+            Radians::ZERO,
+        )?;
+        Ok(Self {
+            nodes: vec![
+                HierarchyNode::Pair {
+                    inner: NodeIndex(1),
+                    outer: NodeIndex(2),
+                    orbit,
+                },
+                HierarchyNode::Star(StarIndex::PRIMARY),
+                HierarchyNode::Star(StarIndex(1)),
+            ],
+            stars: vec![
+                StarSlot {
+                    body: BodyId::new(system, 0),
+                    initial_mass: m0,
+                    kind: SlotKind::Star,
+                },
+                StarSlot {
+                    body: BodyId::new(system, 1),
+                    initial_mass: m1,
+                    kind,
+                },
+            ],
+            node_masses: vec![mass, m0, m1],
+            dropped: 0,
+        })
     }
 }
 

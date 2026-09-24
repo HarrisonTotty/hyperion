@@ -5,8 +5,7 @@ mod common;
 
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, PROTOCOL_VERSION, RequestBody, RequestId, ResponseBody, ServerMessage, SystemIdHex,
-    SystemSummaryRequest, UniverseTime,
+    ErrorCode, PROTOCOL_VERSION, RequestBody, RequestId, ResponseBody, ServerMessage,
 };
 use hyperion_server::limits::{MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES};
 
@@ -133,39 +132,6 @@ async fn a_request_that_does_not_parse_is_answered_under_its_id() {
     assert_eq!(
         error_code(&client.next_message().await, 4),
         ErrorCode::Unsupported
-    );
-    client.close().await;
-    server.stop().await;
-}
-
-#[tokio::test]
-async fn a_system_summary_is_unsupported_until_its_handler_lands() {
-    // The kind is the protocol's (plan 06, P06.T33), so it parses and reaches the handlers, which
-    // answer it as an older server would until P06.T34 serves it.
-    let server = TestServer::start().await;
-    let mut client = server.connect().await;
-    client.hello().await;
-    let talos = client.create_universe("Talos", 1234).await;
-    let error = client
-        .request(RequestBody::SystemSummary(SystemSummaryRequest {
-            universe: talos.id,
-            system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
-            time: UniverseTime::default(),
-        }))
-        .await
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::Unsupported);
-    assert_eq!(error.field, None);
-    assert!(
-        error.message.contains("`system_summary`"),
-        "unexpected message: {}",
-        error.message
-    );
-    // Answered, not malformed: the connection carries on.
-    let second = client.request(RequestBody::ListUniverses).await;
-    assert!(
-        matches!(second, Ok(ResponseBody::ListUniverses(_))),
-        "{second:?}"
     );
     client.close().await;
     server.stop().await;

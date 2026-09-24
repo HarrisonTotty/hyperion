@@ -1,9 +1,9 @@
 //! HYPERION game server: hosts the simulation and serves bridge clients.
 //!
 //! The server owns everything the sim may not: universes and their saves ([`universe`]), the CPU
-//! pool that runs generation off the async runtime ([`compute`]), the caches of generated data
-//! ([`cache`]), and the WebSocket clients speak `hyperion-protocol` over. Every limit it enforces
-//! is in [`limits`].
+//! pool that runs generation off the async runtime and the caches of galaxies, maps, cells and
+//! systems ([`compute`]), the byte-bounded cache they are built on ([`cache`]), and the WebSocket
+//! clients speak `hyperion-protocol` over. Every limit it enforces is in [`limits`].
 //!
 //! [`Server::start`] builds the shared state from a [`ServerConfig`], [`Server::router`] serves
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
@@ -32,7 +32,8 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    CpuPool, DensityMapService, GalaxyCache, SharedCellCache, ShutDownPoolError, StartPoolError,
+    CpuPool, DensityMapService, GalaxyCache, SharedCellCache, SharedSystemCache, ShutDownPoolError,
+    StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -80,6 +81,9 @@ pub(crate) struct AppState {
     /// A query takes its own [`CellCacheHandle`](compute::CellCacheHandle) from this on the pool
     /// job that runs it, since the handle borrows the cache and cannot cross an `.await`.
     pub(crate) cells: SharedCellCache,
+    /// The systems' stars generated so far, in the configured byte budget: what a
+    /// `system_summary` reads (plan 06, P06.T34).
+    pub(crate) systems: SharedSystemCache,
     /// What answers each request: [`Handlers`], or a test's double.
     pub(crate) handler: Arc<dyn Handler>,
     /// The open WebSocket connections, which shutdown closes and waits for.
@@ -139,11 +143,13 @@ impl Server {
             config.map_cache_bytes(),
         );
         let cells = SharedCellCache::new(config.cell_cache_bytes());
+        let systems = SharedSystemCache::new(config.system_cache_bytes());
         tracing::info!(
             data_dir = %config.data_dir().display(),
             workers = config.workers().get(),
             cell_cache_mib = config.cell_cache_bytes() / (1 << 20),
             map_cache_mib = config.map_cache_bytes() / (1 << 20),
+            system_cache_mib = config.system_cache_bytes() / (1 << 20),
             "server started"
         );
         Ok(Self {
@@ -153,6 +159,7 @@ impl Server {
                 galaxies,
                 maps,
                 cells,
+                systems,
                 handler,
                 connections: Connections::new(),
                 request_stats: RequestStats::new(),
@@ -173,15 +180,7 @@ impl Server {
     /// What the server is doing now and has done so far.
     #[must_use]
     pub fn stats(&self) -> ServerStats {
-        ServerStats::new(
-            self.state.connections.open_count(),
-            self.state.request_stats.snapshot(),
-            self.state.outbound_stats.snapshot(),
-            self.state.pool.counters(),
-            self.state.galaxies.counters(),
-            self.state.maps.counters(),
-            self.state.cells.counters(),
-        )
+        ServerStats::of(&self.state)
     }
 
     /// Tears the server down once serving has stopped.
@@ -337,29 +336,44 @@ mod tests {
         let (handler, mut calls) = Scripted::new();
         let harness = Harness::start(handler).await;
         let stats = || harness.server().stats();
-        // Every counter starts at zero. The map and cell caches' budgets are configuration rather
-        // than counters, so the snapshot of a fresh server is the default one but for those.
+        // Every counter starts at zero. The map, cell and system caches' budgets are configuration
+        // rather than counters, so they are compared with the configuration's.
+        let fresh = stats();
         assert_eq!(
-            stats(),
-            ServerStats::new(
+            (
+                fresh.connections(),
+                fresh.requests(),
+                fresh.outbound(),
+                fresh.pool(),
+                fresh.galaxies()
+            ),
+            (
                 0,
                 RequestCounters::default(),
                 OutboundCounters::default(),
                 crate::compute::PoolCounters::default(),
                 crate::compute::GalaxyCounters::default(),
-                stats().maps(),
-                stats().cells(),
             )
         );
-        assert_eq!(
-            (stats().maps().entries(), stats().cells().entries()),
-            (0, 0)
-        );
         let defaults = ServerConfig::builder().build();
-        assert_eq!(
-            (stats().maps().budget(), stats().cells().budget()),
-            (defaults.map_cache_bytes(), defaults.cell_cache_bytes())
-        );
+        for (cache, budget) in [
+            (fresh.maps(), defaults.map_cache_bytes()),
+            (fresh.cells(), defaults.cell_cache_bytes()),
+            (fresh.systems(), defaults.system_cache_bytes()),
+        ] {
+            assert_eq!(
+                (
+                    cache.entries(),
+                    cache.bytes(),
+                    cache.hits(),
+                    cache.misses(),
+                    cache.evictions(),
+                    cache.refused(),
+                    cache.budget()
+                ),
+                (0, 0, 0, 0, 0, 0, budget)
+            );
+        }
         let mut client = harness.connect().await;
         assert_eq!(stats().connections(), 1);
         client.hello().await;

@@ -10,7 +10,7 @@
 
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
-use crate::units::{EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin};
+use crate::units::{EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin, Megayears};
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
 /// bound: 0.4895 of the planet's Hill radius (design note 14).
@@ -164,3 +164,50 @@ pub const GIANT_INFLATION_ONSET: Kelvin = Kelvin::new(1_000.0);
 /// The equilibrium temperature below which no giant is held above its cooling radius: 500 K, the
 /// coolest line of Thorngren and Fortney's (2018) Fig. 2 (P14.T11.d).
 pub const GIANT_INFLATION_FADE_START: Kelvin = Kelvin::new(500.0);
+
+/// The earliest host age at which a giant planet forms: 0.5 Myr (design note 12, P14.T28.a).
+///
+/// A giant's formation age is uniform in log between this and its disc's lifetime. It is the end
+/// of the protostellar phase, classes 0 and I, the first 0.5 Myr of plan 06's tracks
+/// ([`Phase::Protostar`](crate::stellar::Phase::Protostar)), while the disc is still being fed and
+/// the star is still gaining mass. The plan gives the figure without a source.
+pub const EARLIEST_GIANT_FORMATION: Megayears = Megayears::new(0.5);
+
+/// The earliest host age at which a terrestrial planet's magma ocean ends: 10 Myr (design note 12,
+/// P14.T28.a).
+///
+/// The end is drawn uniform in log between this and [`MAGMA_OCEAN_END_LATEST`]. The plan gives the
+/// range without a source; it spans the giant-impact phase that ends terrestrial accretion, whose
+/// last impact on Earth, the Moon's, came some 30–100 Myr after the Solar System formed.
+pub const MAGMA_OCEAN_END_EARLIEST: Megayears = Megayears::new(10.0);
+
+/// The latest host age at which a terrestrial planet's magma ocean ends: 100 Myr (design note 12,
+/// P14.T28.a). See [`MAGMA_OCEAN_END_EARLIEST`].
+pub const MAGMA_OCEAN_END_LATEST: Megayears = Megayears::new(100.0);
+
+/// The tidal mass `M_c` of a planet's engulfment reach f, f⁸ = 1 + `M_p` ÷ `M_c`: 3.1 M⊕ (design
+/// note 11, P14.T28.b; ruling 62).
+///
+/// A planet is destroyed once its semi-major axis is inside f times the largest radius its host
+/// has had, with f⁸ = 1 + `M_p` ÷ `M_c`
+/// ([`engulfment_reach`](crate::planetary::hosts::evolved::engulfment_reach)). Zahn's (1977)
+/// equilibrium tide in a convective envelope, which Mustill and Villaver (2012, ApJ 761, 121,
+/// eqs. 1–5) integrate, draws a planet in at ȧ ∝ `M_p` (R★ ÷ a)⁸, so the reach beyond the
+/// photosphere grows as the eighth root of the planet's mass, and a planet of negligible mass is
+/// engulfed only by the photosphere itself, f = 1.
+///
+/// `M_c` is fitted to their Figure 7: the initial semi-major axes, at the start of the thermally
+/// pulsing AGB, of the outermost circular Terrestrial (1 M⊕), Neptunian (17.1 M⊕) and Jovian
+/// (318 M⊕) planets engulfed about stars of 1, 1.5, 2, 2.5, 3.5 and 5 M☉, read from the figure's
+/// vector paths against each star's largest AGB radius there (1.58, 2.41, 3.00, 3.30, 4.15 and
+/// 5.18 au). Each ratio is f times the share of the star's mass left at its largest radius, a
+/// factor of each star alone, which the transform's adiabatic expansion supplies from the host's
+/// own track. The least-squares fit of the logarithms, with one such factor per star, gives
+/// `M_c` = 3.10 M⊕ with the exponent held at Zahn's ⅛, and an exponent of 0.129 when it is left
+/// free; the eighteen critical axes are reproduced to 1.8% rms and 4% at worst. So f is 1.036 for
+/// the Earth, 1.264 for Neptune and 1.786 for Jupiter, and does not depend on the host's mass:
+/// the Jovian-to-Terrestrial ratio of their critical axes is 1.65–1.82 with no trend from 1 to
+/// 5 M☉. Their eccentric planets (e = 0.2) are engulfed from 5% further out for a Jupiter, whose
+/// orbit the tides circularise first, to 22% for an Earth, whose pericentre meets the envelope;
+/// the transform tests the semi-major axis alone.
+pub const ENGULFMENT_TIDAL_MASS: EarthMasses = EarthMasses::new(3.1);

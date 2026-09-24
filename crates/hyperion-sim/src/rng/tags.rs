@@ -409,6 +409,12 @@ domain_tags! {
     /// anomaly at the epoch, words 0–4 (`planetary::placement::classes::orbits`).
     PLANET_ORBIT: Body = "planet.orbit";
 
+    /// A planet's formation (P14.T28.a): the rank of a giant's formation age between 0.5 Myr and
+    /// its disc's lifetime, word 0, and the rank of the host age at which a terrestrial planet's
+    /// magma ocean ends, word 1, one uniform each, drawn for every planet; words 2–7 are reserved
+    /// (`planetary::hosts::young::FormationDraws`).
+    PLANET_ORIGIN: Body = "planet.origin";
+
     // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
     // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
     // (`stellar::multiplicity::RedrawAttempt`) reads words 64n to 64n + 63 of every stream here.
@@ -569,6 +575,13 @@ mod tests {
                 .iter()
                 .all(|tag| ALL.contains(tag))
         );
+    }
+
+    #[test]
+    fn plan_14_registers_the_origin_tag_with_body_scope() {
+        assert_eq!(PLANET_ORIGIN.name(), "planet.origin");
+        assert_eq!(PLANET_ORIGIN.scope(), crate::rng::TagScope::Body);
+        assert!(ALL.contains(&PLANET_ORIGIN));
     }
 
     #[test]

@@ -12,9 +12,10 @@
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], and the galaxy's in [`galaxy`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], and the system's in [`system`].
 
 mod galaxy;
+mod system;
 mod universe;
 
 use std::collections::HashMap;
@@ -55,11 +56,12 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 
 /// The server's handlers: every request kind, and the code that answers it.
 ///
-/// Every kind of the first milestone is served (plan 04, P04.T14). A later plan's kind that this
-/// server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`.
-/// A kind the protocol already defines but whose handler has not landed is answered `unsupported`
-/// here, under its own ID: `system_summary` until plan 06's P06.T34. Each handler that names a
-/// universe starts from [`universe::openable_universe`].
+/// Every kind of the first milestone is served (plan 04, P04.T14), and plan 06's `system_summary`
+/// (P06.T34). A later plan's kind that this server's [`REQUEST_KINDS`] does not hold is refused
+/// before it reaches here, as `unsupported`; a kind the protocol defines before its handler lands
+/// is answered `unsupported` here, under its own ID, as an older server would answer it (plan 04,
+/// design note 15). Each handler that names a universe starts from
+/// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
@@ -74,19 +76,9 @@ impl Handler for Handlers {
             RequestBody::SystemsInRange(request) => {
                 Box::pin(galaxy::systems(state, request, token))
             }
-            RequestBody::SystemSummary(_) => Box::pin(ready(Err(not_served_yet("system_summary")))),
+            RequestBody::SystemSummary(request) => Box::pin(system::summary(state, request, token)),
         }
     }
-}
-
-/// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
-/// as an older server would answer it (plan 04, design note 15).
-#[must_use]
-fn not_served_yet(kind: &str) -> RequestError {
-    request_error(
-        ErrorCode::Unsupported,
-        format!("request kind `{kind}` is not served by this server yet"),
-    )
 }
 
 /// A request's `kind` string, as it is on the wire and in [`REQUEST_KINDS`].

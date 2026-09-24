@@ -15,7 +15,8 @@ bench = false
 libm.workspace = true
 
 [features]
-# Test helpers (`events::testing`) for this crate's tests and for other crates' tests.
+# Test helpers (`events::testing`, `planetary::testing`) for this crate's tests and for other
+# crates' tests.
 testing = []
 
 [dev-dependencies]

@@ -14,10 +14,10 @@
 //! ruling 34 of 2026-09-22 it is how plans 11 and 14 read every star, never a
 //! [`Track`] directly.
 //!
-//! [`SystemStars`] (P06.T29.b) is a grid system's stars from its record: today its primary alone,
-//! body 0 of the system (plan 11's P11.T2.c adds the companions). Its [`SystemSummary`] is what the
-//! server's `system_summary` answers from, and its [`StellarBrief`] what a range query's row
-//! carries.
+//! [`SystemStars`] (P06.T29.b, with plan 11's P11.T2.c) is a grid system's stars from its record:
+//! its primary, body 0 of the system, and the companions of its [`SystemHierarchy`], each a
+//! [`StarModel`] of the system's composition and age. Its [`SystemSummary`] is what the server's
+//! `system_summary` answers from, and its [`StellarBrief`] what a range query's row carries.
 
 use std::error::Error;
 use std::fmt;
@@ -30,6 +30,9 @@ use crate::math;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::classify::{ClassExtras, Classification, LuminosityClass, classify};
 use crate::stellar::draws::StarDraws;
+use crate::stellar::multiplicity::{
+    MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy,
+};
 use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{CompactRemnant, Death, DeathKind, NatalKick};
@@ -419,6 +422,16 @@ impl StarModel {
         self.remnant.and_then(|stage| stage.natal_kick)
     }
 
+    /// The bytes the model owns on the heap, beyond `size_of::<StarModel>()`: its boxed track and
+    /// what the track owns, and nothing below 0.1 M☉ (for [`SystemStars::heap_bytes`]).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        match &self.evolution {
+            Evolution::Track(track) => size_of::<Track>() + track.heap_bytes(),
+            Evolution::Cooling => 0,
+        }
+    }
+
     /// The initial mass the track is built for: the star's own, held to the formulae's 100 M☉
     /// until P06.T14.
     #[must_use]
@@ -498,14 +511,16 @@ pub enum ClockDeath {
     AlreadyRemnantAtBirth,
 }
 
-/// A star's summary at one clock time (plan 06, P06.T29.b): its state, what kind of object it is,
-/// its class and absolute magnitudes, its remnant once it is dead, and its death if that falls
-/// inside the clock window.
+/// A star's summary at one clock time (plan 06, P06.T29.b): which body of its system it is, its
+/// state, what kind of object it is, its class and absolute magnitudes, its remnant once it is
+/// dead, and its death if that falls inside the clock window.
 ///
-/// Variability (P06.T26), rotation and magnetism (T25), a planetary nebula (T16) and the active
-/// events (T28) are added by their tasks; this generator version computes none of them.
+/// Variability (P06.T26), rotation and magnetism (T25), a planetary nebula (T16), the active
+/// events (T28) and plan 11's binary class (P11.T5) are added by their tasks; this generator
+/// version computes none of them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarSummary {
+    body: BodyId,
     state: StarState,
     kind: ObjectKind,
     classification: Classification,
@@ -516,6 +531,14 @@ pub struct StarSummary {
 }
 
 impl StarSummary {
+    /// Which body of its system the star is: its body index is its
+    /// [`StarIndex`](crate::stellar::multiplicity::StarIndex) in the system's hierarchy, 0 for the
+    /// primary (plan 11, design note 5).
+    #[must_use]
+    pub const fn body(&self) -> BodyId {
+        self.body
+    }
+
     /// The star's state.
     #[must_use]
     pub const fn state(&self) -> &StarState {
@@ -562,14 +585,16 @@ impl StarSummary {
     }
 }
 
-/// A system's summary at one clock time: whether it exists, its composition, and its stars, of
-/// which there are none before it is born (plan 06's Provides).
+/// A system's summary at one clock time: whether it exists, its composition, its stars, and the
+/// hierarchy of orbits that holds them, of which there are none before it is born (plan 06's
+/// Provides, with plan 11's P11.T2.c).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SystemSummary {
     time: UniverseTime,
     existence: SystemExistence,
     composition: Composition,
     stars: Vec<StarSummary>,
+    hierarchy: Option<SystemHierarchy>,
 }
 
 impl SystemSummary {
@@ -591,24 +616,44 @@ impl SystemSummary {
         &self.composition
     }
 
-    /// Its stars, primary first; empty before the system is born.
+    /// Its stars by body index, primary first; empty before the system is born.
     #[must_use]
     pub fn stars(&self) -> &[StarSummary] {
         &self.stars
     }
+
+    /// The hierarchy of its stars at the time summarised, or `None` before it is born: plan 11's
+    /// `HierarchySummary`.
+    ///
+    /// Until plan 11's binary engine (P11.T4) gives a pair a state at each time, a pair is two
+    /// single stars on the orbit drawn at the system's formation (ruling 33 of 2026-09-22), so the
+    /// hierarchy at any time the system exists is [`SystemStars::hierarchy`]. Its stars are listed
+    /// in the same body order as [`SystemSummary::stars`].
+    #[must_use]
+    pub const fn hierarchy(&self) -> Option<&SystemHierarchy> {
+        self.hierarchy.as_ref()
+    }
 }
 
-/// What a range query's row says of a system's primary (plan 06's Provides): cheap, the state and
-/// classification only.
+/// What a range query's row says of a system (plan 06's Provides): cheap, the primary's state and
+/// classification only, and how many stars the system has (plan 11's Provides).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StellarBrief {
     kind: ObjectKind,
     class: Classification,
     log_luminosity: Option<Dex>,
     effective_temperature: Kelvin,
+    star_count: u8,
 }
 
 impl StellarBrief {
+    /// How many stars the system has, the primary included: 1 to 1 +
+    /// [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
+    #[must_use]
+    pub const fn star_count(&self) -> u8 {
+        self.star_count
+    }
+
     /// What kind of object the primary is.
     #[must_use]
     pub const fn kind(&self) -> ObjectKind {
@@ -708,13 +753,29 @@ const WOLF_RAYET_FLOOR_L_SUN: f64 = 79_432.823_472_428_15;
 /// The floor's slope in Z ÷ 0.02, −0.4 (P06.T24.a).
 const WOLF_RAYET_FLOOR_Z_SLOPE: f64 = -0.4;
 
-/// A grid system's stars from its record (plan 06, P06.T29.b): today the primary alone, body 0 of
-/// the system; plan 11's P11.T2.c adds the companions.
+/// The redraw attempt a grid system's companions are drawn at: the first, [`RedrawAttempt::FIRST`].
 ///
-/// [`SystemStars::generate`] takes three steps, because plan 08's P08.T12.c repeats only the last:
-/// the primary's draws ([`StarDraws::for_star`] of body 0; plan 08 makes it `for_attempt` of the
-/// record's mark attempt), its track, and the remnant stage on that track ([`StarModel`]). With no
-/// kick constraint, which is every record of this generator version, the last runs once.
+/// **A named seam** (plan 11, P11.T2.c). The grid redraws a system whose binary falls into a
+/// catalogue class or explodes as a Type Ia (P11.T6–T8, plan 08's `SystemRecord::mark_attempt`),
+/// and then reads a later attempt here, for the hierarchy and for each companion's own draws alike
+/// ([`StarDraws::for_attempt`]), since both are blocks of [`ATTEMPT_WORDS`](crate::stellar::draws::ATTEMPT_WORDS)
+/// words. No record of this generator version is redrawn.
+const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
+
+/// A grid system's stars from its record (plan 06, P06.T29.b, with plan 11's P11.T2.c): its
+/// primary, body 0 of the system, its companions, and the hierarchy of orbits that holds them.
+///
+/// [`SystemStars::generate`] takes three steps for the primary, because plan 08's P08.T12.c
+/// repeats only the last: the primary's draws ([`StarDraws::for_star`] of body 0; plan 08 makes it
+/// `for_attempt` of the record's mark attempt), its track, and the remnant stage on that track
+/// ([`StarModel`]). With no kick constraint, which is every record of this generator version, the
+/// last runs once. The companions and their orbits are plan 11's [`draw_hierarchy`], and each
+/// companion is a [`StarModel`] of its slot's initial mass, on its own body's draws, with the
+/// system's composition and age. The primary never depends on the companions: its model is plan
+/// 06's, bit for bit, whatever the hierarchy.
+///
+/// Until plan 11's binary engine (P11.T4) a pair is two single stars on an orbit (ruling 33 of
+/// 2026-09-22): each star evolves alone, and no star's evolution reads its companion.
 ///
 /// # Examples
 ///
@@ -735,6 +796,8 @@ const WOLF_RAYET_FLOOR_Z_SLOPE: f64 = -0.4;
 /// let stars = SystemStars::generate(&galaxy, record);
 /// let summary = stars.summary_at(UniverseTime::EPOCH);
 /// if summary.existence() == SystemExistence::Exists {
+///     // Every star of the system, by body index: the primary first.
+///     assert_eq!(summary.stars().len(), usize::from(stars.star_count()));
 ///     let primary = &summary.stars()[0];
 ///     println!("{} {:?}", primary.classification(), primary.kind());
 /// }
@@ -743,30 +806,60 @@ const WOLF_RAYET_FLOOR_Z_SLOPE: f64 = -0.4;
 #[derive(Debug, Clone, PartialEq)]
 pub struct SystemStars {
     record: SystemRecord,
+    hierarchy: SystemHierarchy,
     stars: Vec<StarModel>,
 }
 
 impl SystemStars {
-    /// The stars of the grid system `record` in `galaxy`: its [`draw_metallicity`], the primary's
-    /// draws, and the primary's [`StarModel`] at the record's initial mass and age.
+    /// The stars of the grid system `record` in `galaxy`, with the model's own multiplicity:
+    /// [`SystemStars::generate_in`] with [`MultiplicityContext::Free`].
     ///
     /// # Panics
     ///
     /// As [`draw_metallicity`] does, for a record of another galaxy.
     #[must_use]
     pub fn generate(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        Self::generate_in(galaxy, record, MultiplicityContext::Free)
+    }
+
+    /// The stars of the system `record` in `galaxy` under the multiplicity context `ctx` (plan 11,
+    /// P11.T2.c): its [`draw_metallicity`], the hierarchy [`draw_hierarchy`] draws for `ctx`, the
+    /// primary's [`StarModel`] at the record's initial mass and age on its own draws, and each
+    /// companion's at its slot's initial mass and the same age, on the draws of its own body
+    /// ([`StarDraws::for_attempt`] at the system's attempt, 0 for every grid record).
+    ///
+    /// Grid systems take [`MultiplicityContext::Free`] ([`SystemStars::generate`]); plan 09's
+    /// cluster members will pass `ForcedMultiple`, and `ForcedSingle` gives the primary alone, which
+    /// is exactly plan 06's single-star system.
+    ///
+    /// # Panics
+    ///
+    /// As [`draw_metallicity`] does, for a record of another galaxy.
+    #[must_use]
+    pub fn generate_in(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> Self {
         let composition = draw_metallicity(galaxy, record);
-        let draws = StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0));
-        let primary = StarModel::new(
-            record.primary_initial_mass(),
-            composition,
-            draws,
-            record.age_at_epoch(),
-        )
-        .expect("a grid record's primary is of 0.08-150 M_sun with a finite age");
+        let hierarchy = draw_hierarchy(galaxy, record, ctx, GRID_ATTEMPT);
+        let age = record.age_at_epoch();
+        let mut stars = Vec::with_capacity(hierarchy.stars().len());
+        stars.push(
+            StarModel::new(
+                record.primary_initial_mass(),
+                composition,
+                primary_draws(galaxy, record),
+                age,
+            )
+            .expect("a grid record's primary is of 0.08-150 M_sun with a finite age"),
+        );
+        stars.extend(hierarchy.stars().iter().skip(1).map(|slot| {
+            let draws =
+                StarDraws::for_attempt(galaxy.seed(), slot.body(), u32::from(GRID_ATTEMPT.get()));
+            StarModel::new(slot.initial_mass(), composition, draws, age)
+                .expect("a companion is of 0.08 M_sun up to its primary's mass, with a finite age")
+        }));
         Self {
             record: *record,
-            stars: vec![primary],
+            hierarchy,
+            stars,
         }
     }
 
@@ -776,7 +869,8 @@ impl SystemStars {
         &self.record
     }
 
-    /// The system's stars, primary first: what plan 14's `SystemContext` holds (ruling 34).
+    /// The system's stars by body index, primary first: what plan 14's `SystemContext` holds
+    /// (ruling 34). Star k is the hierarchy's star k.
     #[must_use]
     pub fn stars(&self) -> &[StarModel] {
         &self.stars
@@ -788,9 +882,36 @@ impl SystemStars {
         &self.stars[0]
     }
 
-    /// The system at `t`: whether it exists ([`SystemRecord::existence_at`]), its composition, and
-    /// each star's [`StarSummary`] at its age then ([`SystemRecord::age_at`]), none before the
-    /// system is born.
+    /// The hierarchy of the system's stars and the orbits that hold them (plan 11, P11.T2.a–b).
+    #[must_use]
+    pub const fn hierarchy(&self) -> &SystemHierarchy {
+        &self.hierarchy
+    }
+
+    /// How many stars the system has, the primary included: 1 to 1 +
+    /// [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
+    #[must_use]
+    pub fn star_count(&self) -> u8 {
+        self.hierarchy.star_count()
+    }
+
+    /// The bytes the system's stars own on the heap, beyond `size_of::<SystemStars>()`: each
+    /// star's model and track and the hierarchy's lists, by capacity.
+    ///
+    /// It is what the server charges a cached system against its byte budget (plan 06, P06.T34;
+    /// plan 04, design note 23), as [`Galaxy::heap_bytes`] is for a galaxy. A system of one living
+    /// dwarf owns a few kilobytes; nothing generated reads it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.stars.iter().fold(
+            self.stars.capacity() * size_of::<StarModel>() + self.hierarchy.heap_bytes(),
+            |bytes, star| bytes + star.heap_bytes(),
+        )
+    }
+
+    /// The system at `t`: whether it exists ([`SystemRecord::existence_at`]), its composition,
+    /// each star's [`StarSummary`] at its age then ([`SystemRecord::age_at`]), and its hierarchy;
+    /// no star and no hierarchy before the system is born.
     ///
     /// # Panics
     ///
@@ -798,24 +919,29 @@ impl SystemStars {
     #[must_use]
     pub fn summary_at(&self, t: UniverseTime) -> SystemSummary {
         let existence = SystemExistence::from(self.record.existence_at(t));
-        let stars = match existence {
-            SystemExistence::NotYetBorn => Vec::new(),
-            SystemExistence::Exists => self
-                .stars
-                .iter()
-                .filter_map(|star| star_summary(star, t))
-                .collect(),
+        let (stars, hierarchy) = match existence {
+            SystemExistence::NotYetBorn => (Vec::new(), None),
+            SystemExistence::Exists => (
+                self.stars
+                    .iter()
+                    .zip(self.hierarchy.stars())
+                    .filter_map(|(star, slot)| star_summary(star, slot.body(), t))
+                    .collect(),
+                Some(self.hierarchy.clone()),
+            ),
         };
         SystemSummary {
             time: t,
             existence,
             composition: *self.primary().composition(),
             stars,
+            hierarchy,
         }
     }
 
-    /// The primary's brief at `t`, for a range query's row, or `None` before the system is born:
-    /// its state's kind, class, luminosity and temperature, with no photometry and no death.
+    /// The system's brief at `t`, for a range query's row, or `None` before the system is born:
+    /// its primary's kind, class, luminosity and temperature, with no photometry and no death, and
+    /// how many stars it has.
     ///
     /// # Panics
     ///
@@ -836,6 +962,7 @@ impl SystemStars {
             class,
             log_luminosity: (luminosity > 0.0).then(|| Dex::new(math::log10(luminosity))),
             effective_temperature: state.effective_temperature(),
+            star_count: self.star_count(),
         })
     }
 
@@ -867,6 +994,15 @@ impl SystemStars {
     }
 }
 
+/// The primary's draws: body 0's at attempt 0, [`StarDraws::for_star`].
+///
+/// **A named seam** (plan 06, P06.T29.b; plan 11, P11.T2.c's second): plan 08's P08.T12.c makes it
+/// `for_attempt` of the record's `mark_attempt()`, which does not exist before then.
+#[must_use]
+fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws {
+    StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0))
+}
+
 /// The clock time of `death` for a star whose age at the epoch is `age_at_epoch`.
 #[must_use]
 fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
@@ -879,9 +1015,9 @@ fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
     }
 }
 
-/// The summary of `star` at `t`, or `None` if it has not formed by then.
+/// The summary of `star`, the system's body `body`, at `t`, or `None` if it has not formed by then.
 #[must_use]
-fn star_summary(star: &StarModel, t: UniverseTime) -> Option<StarSummary> {
+fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarSummary> {
     let state = star.state_at(t)?;
     let classification = classify(&state, star.composition(), star.draws(), &ClassExtras::NONE);
     let remnant = if state.phase().is_remnant() {
@@ -901,6 +1037,7 @@ fn star_summary(star: &StarModel, t: UniverseTime) -> Option<StarSummary> {
             },
         );
     Some(StarSummary {
+        body,
         kind: object_kind(&state, &classification, star.composition()),
         classification,
         absolute_magnitude_v: absolute_magnitude_v(&state),
@@ -1364,6 +1501,8 @@ mod tests {
         let primary = &summary.stars()[0];
         assert_eq!(brief.kind(), primary.kind());
         assert_eq!(brief.class(), primary.classification());
+        assert_eq!(brief.star_count(), stars.star_count());
+        assert_eq!(summary.stars().len(), usize::from(stars.star_count()));
         assert_eq!(
             brief.effective_temperature(),
             primary.state().effective_temperature()
@@ -1385,6 +1524,58 @@ mod tests {
             phase_fraction: 0.0,
         });
         assert_eq!(kind_of(&dark, &Composition::SOLAR), ObjectKind::BlackHole);
+    }
+
+    /// A system's heap bytes are its stars' models and tracks and its hierarchy's lists, so a
+    /// multiple system owns more than its primary alone, and a star below 0.1 M☉ owns no track.
+    #[test]
+    fn a_systems_heap_bytes_count_every_stars_track() {
+        let galaxy = galaxy();
+        let record = (0..256)
+            .map(|i| young_disc_record(&galaxy, i, 2.0e9))
+            .find(|r| SystemStars::generate(&galaxy, r).star_count() > 1)
+            .expect("a multiple system among 256 Sun-like primaries");
+        let multiple = SystemStars::generate(&galaxy, &record);
+        let single = SystemStars::generate_in(&galaxy, &record, MultiplicityContext::ForcedSingle);
+        let Evolution::Track(track) = &single.primary().evolution else {
+            panic!("a star of 1 M☉ has a track");
+        };
+        assert_eq!(
+            single.heap_bytes(),
+            single.stars.capacity() * size_of::<StarModel>()
+                + size_of::<Track>()
+                + track.heap_bytes()
+                + single.hierarchy().heap_bytes()
+        );
+        assert!(track.heap_bytes() > 0);
+        assert!(multiple.heap_bytes() > single.heap_bytes());
+        let brown = StarModel::new(
+            SolarMasses::new(0.05),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(1e9),
+        )
+        .unwrap();
+        assert_eq!(brown.heap_bytes(), 0);
+    }
+
+    /// The primary's draws, which the hierarchy's stripped-mark conditioning reads (P11.T2.a), and
+    /// the companions' are at one attempt: when plan 08's `mark_attempt` moves one seam, this fails
+    /// until the other moves with it.
+    #[test]
+    fn the_primary_and_its_companions_are_drawn_at_the_grid_attempt() {
+        let galaxy = galaxy();
+        let record = young_disc_record(&galaxy, 11, 1.0e8);
+        let primary = BodyId::new(record.id(), 0);
+        assert_eq!(
+            primary_draws(&galaxy, &record),
+            StarDraws::for_attempt(galaxy.seed(), primary, u32::from(GRID_ATTEMPT.get()))
+        );
+        assert_eq!(
+            primary_draws(&galaxy, &record).stripped(),
+            StarDraws::for_star(galaxy.seed(), primary).stripped(),
+            "the mark `draw_hierarchy` conditions on is the primary's own"
+        );
     }
 
     /// `age_at` is `SystemRecord::age_at`'s arithmetic.

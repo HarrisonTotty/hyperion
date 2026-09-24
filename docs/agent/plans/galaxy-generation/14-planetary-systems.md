@@ -477,10 +477,10 @@ closed-form:
 - _Expansion._ Stellar mass loss is slow against any planetary period inside about 1,000 au, so
   orbits expand adiabatically: a(t) = a₀ × M₀ ÷ M(t), eccentricity unchanged. The cometary halo is
   not adiabatic and loses a mass-loss-dependent share (Veras et al. 2011).
-- _Engulfment._ A planet is destroyed at the first age at which a(t) < f × R★(t), with f = 2 for a
-  rocky planet rising to 3 for a Jovian one, because tides drag in planets from beyond the
-  photosphere (Mustill and Villaver 2012). That needs the largest stellar radius before a given age,
-  a monotone helper asked of plan 06.
+- _Engulfment._ A planet is destroyed at the first age at which a(t) < f × R★(t), with f = (1 +
+  M_p ÷ 3.1 M⊕)^⅛, 1.04 for an Earth rising to 1.79 for a Jupiter, because tides drag in planets
+  from beyond the photosphere (Mustill and Villaver 2012; ruling 62 fits f to their critical
+  axes). That needs the largest stellar radius before a given age, a monotone helper asked of plan 06.
 - _Scorching._ Surface and atmosphere derivations read the largest luminosity before the age as well
   as the present one, so a survivor at 3 au of a white dwarf has lost its volatiles.
 - _Supernovae._ Mass loss is instantaneous. The planet's orbital phase at the death time is known in
@@ -1416,9 +1416,12 @@ elements into elements at a time.
   slice task fills; it is added under this subtask, with a bump, alongside phase D's belts (T21),
   and the second half of test (a) waits with it. `BodyKindDto` has the variant from the start (T35).
 - **P14.T28.b Expansion and engulfment.** Adiabatic expansion and the engulfment test of D11, using
-  the host's mass at age + t and its largest radius before that age. The destruction time is found
-  by bisection on the monotone function a(t) − f R_max(t) with a fixed number of steps. Moons go
-  with their planet. Circularisation (T8.e) is applied first.
+  the host's mass at age + t and its largest radius before that age, with the reach f = (1 + M_p ÷
+  3.1 M⊕)^⅛ fitted to Mustill and Villaver (2012) (ruling 62). The clearance a(t) − f R_max(t) is
+  not monotone, since after the red-giant tip the winds widen the orbit while R_max holds, so the
+  destruction time is its first crossing, found by a scan of fixed points and then a bisection
+  with a fixed number of steps (ruling 62). Moons go with their planet. Circularisation (T8.e) is
+  applied first.
 - **P14.T28.c Supernovae.** At the host's death time: the planet's state vector from its elements,
   the host's velocity change from the death record's kick, the remnant's mass, then new elements
   from `elements_from_state` (T2.c) or `Unbound`. A body whose new pericentre is inside the
@@ -3233,3 +3236,145 @@ class, first_slot) -> HostPlacement`: `PlacementHost::new(number, DiscHost, Host
     composition at formation flux with a drawn rank, and T11.d's giant radius and internal heat;
     stars from HPT's track at 0.1, 1, 5 and 12 Gyr. Both tests pass: no body hotter than its
     hottest host at ±H, and no jump of 10⁻³ per year in temperature, radius or envelope.
+- **Deviations in T1.a and T1.d, as built (`context`, round 7).**
+  - _Shape._ `planetary/context.rs`: `SystemContext` (re-exported from `planetary` with `HostKind`)
+    has these getters:
+    - `id`, `host_kind`, `stars() -> &[StarModel]` (by body index) and `hierarchy() ->
+&SystemHierarchy`;
+    - `composition`, `fe_h` and `alpha_fe() -> Option<Dex>`;
+    - `age_at_epoch`, `age_at` and `existence_at` (plan 03's `Existence`, in `SystemRecord`'s
+      arithmetic);
+    - `tidal_radius`, `strip_radius` and `encounter_environment() ->
+Option<&EncounterEnvironment>`.
+
+    Two conveniences serve T30.a. `zones()` is P14.T9's `stable_zones(&ZoneHierarchy::from(..))`,
+    the zones at birth. `zone_stars()` gives the `ZoneStar`s that `ZoneDiscInputs::for_zone` reads.
+    `for_system(galaxy, id)` is `resolve` followed by the public `from_record(galaxy, &record)`, for
+    callers that already hold a record. `builder()` is as Provides has it. The ID (`system`), the
+    stars (`star` or `binary`) and `age_at_epoch` are required, or the build fails with
+    `BuildSystemContextError::Missing*`; `fe_h`, `star_draws`, `tidal_radius` and
+    `encounter_environment` have defaults. New beside them:
+    - `UNIVERSE_AGE`, 13.787 Gyr (Planck 2020, Table 2, TT,TE,EE+lowE+lensing+BAO);
+    - `solar_neighbourhood_tidal_radius`, `SyntheticDraws` and `EncounterEnvironment`;
+    - the two build errors.
+
+    The re-validation of `for_system` that the `doc` lane's bullet above left pending on P06.T29.b
+    is done here. P11.T2.c remains.
+
+  - _The companions are not in._ P11.T2.c had not merged, so a real system is its primary alone.
+    That is `SystemStars::generate`'s one `StarModel`, with the single-star hierarchy that
+    `draw_hierarchy(.., ForcedSingle, RedrawAttempt::FIRST)` gives, which draws nothing. The sphere
+    of influence is `tidal_radius(hierarchy.system_mass(), &PointLy::from(epoch_position))`, so it
+    is taken at the primary's initial mass until then.
+
+    A test checks that each hierarchy slot is its model's star. It fails once `SystemStars` holds
+    companions and the hierarchy does not. At that merge `from_record` takes `SystemStars`'
+    hierarchy instead. The golden then gains the companions, and its tidal-radius, strip-radius and
+    zone lines move under that task's bump.
+
+  - _As the slice says._
+    - \[α/Fe\] is `None`, documented as not modelled rather than solar.
+    - The encounter environment is `None`.
+    - The strip radius is `SATELLITE_STABILITY_FRACTION` (0.4895) times the tidal radius. T29 folds
+      the encounter cut into the same `strip_radius()`, so the stage has one strip radius; until
+      then a synthetic host's environment is carried but not applied.
+    - Every context is `HostKind::Stellar`.
+
+    `EncounterEnvironment` holds what T29 reads of a feature member: the number density (per ly³),
+    the one-dimensional velocity dispersion (km s⁻¹) and the mean member mass (M☉), validated.
+    **For the orchestrator to rule:** its shape is set here, ahead of plan 09. The relative speed
+    T29's rate needs is T29's to form from the dispersion. `hierarchy()` returns a
+    `&SystemHierarchy`, which a rogue planet's context (T27.b) cannot fill; T27.b decides.
+
+  - _Synthetic hosts._ The builder accepts:
+    - a primary of 0.08–150 M☉;
+    - a companion of 13 Jupiter masses up to the primary's mass, in a brown-dwarf slot below
+      `MIN_COMPANION_MASS`, which plan 11's draw makes only from P11.T2.d;
+    - a period of plan 11's 0.1–10¹¹ days;
+    - an eccentricity inside Moe and Di Stefano's envelope at that period (circular below 12 days)
+      and under 0.9999;
+    - an apocentre inside `TIDAL_CUT_SHARE` of the sphere of influence;
+    - an age from −H to `UNIVERSE_AGE`.
+
+    The orbit lies in the reference plane at periapsis at the epoch. Plan 11's `SystemHierarchy`
+    has no public constructor, so `stellar/multiplicity/hierarchy.rs` gains crate-private `single`
+    and `binary` beside the test-only `hand_built` (recorded in plan 11's Risks). The type stays
+    stable by construction. **For the orchestrator to rule:**
+    - Stars take the median star's draws unless `star_draws(SyntheticDraws::OfUniverse(seed))`
+      asks for plan 06's own draws of each body. So `synthetic_star` gives every sample the median
+      disc lifetime (design note 12), and only its planetary streams differ.
+    - With no `tidal_radius`, a synthetic host's sphere of influence is King's (1962, eq. 24) r_J =
+      (G m ÷ 4A(A − B))^⅓. It uses Bovy's (2017, eqs. 5–6) Oort constants, 15.3 and −11.9 km s⁻¹
+      kpc⁻¹, and gives 1.372 pc for 1 M☉. Plan 02's Milky-Way fixture gives 1.296 pc at the Sun-like
+      point, 5.5% less. A synthetic host has no place from which to read the potential tables.
+
+  - _Zero-age states (`zone_stars`)._ A star takes Tout et al.'s zero-age main sequence at its
+    initial mass and the system's composition (design note 6). A brown-dwarf companion takes its
+    cooling fit at 10 Myr. The disc-lifetime rank is each model's own. **For the orchestrator to
+    rule:** Tout et al. fit from 0.1 M☉ and call extrapolation in mass "inaccurate but still
+    reasonable" (their §2), but grid primaries start at 0.08 M☉. At 0.08 M☉ the fit gives 4.69 ×
+    10⁻⁴ L☉ and 0.102 R☉. The cooling fits' main sequence (their 5 Gyr state) gives 2.52 × 10⁻⁴ L☉
+    and 0.098 R☉, so the snow line comes out 1.37 times as far. At 0.1 M☉ the two agree to 4 ×
+    10⁻⁶. The alternative is the cooling fits' main-sequence state below 0.1 M☉, where `StarModel`
+    already evolves stars on those fits.
+  - _`planetary::testing`_ (`cfg(any(test, feature = "testing"))`).
+    - `synthetic_star(id, mass, fe_h, age)` and `synthetic_binary(id, m1, m2, a, e, fe_h, age)`
+      return the builder's `Result`.
+    - `sample_contexts(n, seed, filter)` builds the Milky-Way-parameter galaxy of `seed` and
+      returns `Result<Vec<SystemContext>, SampleContextsError>`, each `from_record` of
+      `sample_records(&galaxy, n, filter)`.
+    - `sample_records` lists the `n` systems nearest `SAMPLE_CENTRE_LY`, (0, 26,000, 0) ly, at the
+      epoch that pass the filter, nearest first with ties broken by ID. Over all masses the sample
+      is volume-limited, and the sample of k is the first k of any larger one. The search starts
+      at 16 ly and doubles the radius until a sphere holds `n`. A sphere may cover at most
+      `MAX_SAMPLE_CELLS` = 2¹⁸ cells; beyond that the answer is `TooFewSystems`.
+    - `SampleFilter` is a band of primary mass, which also skips the layers it cannot reach, and a
+      `fn(&SystemRecord) -> bool`. Filters on \[Fe/H\] or on the stars' states apply to the
+      contexts afterwards.
+    - `solar_system_bodies` is not T1.d's and is not built.
+
+    **For the orchestrator to rule:** this definition of the sample. The crate's `Cargo.toml`
+    comment on the `testing` feature names the module.
+
+  - _T1.a._ `planetary/mod.rs`'s table gains the items T1.d consumes:
+    - plan 01's time, clock window and units;
+    - plan 02's `tidal_radius` and the galaxy and cells the sample reads;
+    - plan 03's `resolve`, `ResolveSystemError`, `SystemRecord` and `Existence`;
+    - plan 06's `SystemStars`, `StarModel`, `MAX_STAR_MASS`, `StarDraws`, `draw_metallicity`,
+      `Composition::from_fe_h` and `substellar::cooling`;
+    - plan 11's `draw_hierarchy`, `ForcedSingle`, `TIDAL_CUT_SHARE`, the companion floors, the
+      period range and the eccentricity envelope.
+
+    Plans 09 and 13 are listed as not built. The \[α/Fe\] and the X-ray and ultraviolet closed
+    forms still wait with their consumers, as T1.a's _Slice_ note says.
+
+  - _Tests and golden._ Accept with `cargo test -p hyperion-sim --lib -- planetary::context
+planetary::testing` (17 and 7 tests) and `cargo test -p hyperion-sim --test
+planetary_context_golden`. The tests cover:
+    - `NoSuchSystem`;
+    - the builder refusing a negative mass (primary or companion), an age beyond the universe's or
+      before −H, an orbit plan 11 would not draw, and every other invalid input;
+    - each field of a real context against the stage it comes from, bit for bit;
+    - two galaxies built apart giving equal contexts, and `assert_order_independent` over
+      `for_system` and over builders;
+    - the synthetic binary's zones against the same pair built for T9, and the zero-age states;
+    - the sample's nearest-first order, its completeness inside its farthest member, its refusals,
+      and `sample_contexts` equalling `for_system`.
+
+    The new golden, `planetary/context` at 11, holds six real systems of layers A, C and E and
+    three synthetic hosts. Nothing existing moved.
+- **Deviations in T28.a–c, as built (`fate`, round 7). Ruled (ruling 62).**
+  - _API._ `fate::state_at(&FateBody, &FateHost, t) -> FateAt`, and `BodyFate::resolve(body, host)` with `at(t)`, `formed_at()` and `ending()`: a body's history is fixed once, from the body and its host alone, and read at any time, so the prefix property holds by construction. `FateAt` has `state()`, `orbit()` (the `KeplerElements` at `t`, only while `Present`), `valid_until()` (the next formation, ending or supernova inside the clock window) and `body_orbit()`, T34's `BodyOrbit`. It is the plan's `(BodyState, Elements)`: a body not present has no elements. `BodyState::ended_at()` is added, and `record`'s types are otherwise untouched.
+  - _The seam T30.b fills._ Plain inputs, since `SystemContext` and the placer are being built beside this. `FateHost::star(&StarModel)`, or `FateHost::stars(..)` for a circumbinary body, every star below its pair (non-empty and coeval), summed in the order given. `FateBody::new(Formation, orbit, mass, density)`, with the primordial `KeplerElements` about the host's initial mass and the bulk density for the Roche test, then `.with_circularisation(Circularisation)`. The formation distance is not read: nothing in T28.a–c depends on it. The disc lifetime enters through `hosts::young::Formation::draw(seed, BodyId, mass, lifetime)`, which is primordial and which T30.a draws with the body. T8.e's τ_c enters as `Circularisation::new(Years)`, since its constant-Q form is the `place` lane's. This lane applies e(t) = e₀ exp(−(age + t) ÷ τ_c) at constant a(1 − e²) (`hosts::evolved::circularised`). **Ruled (ruling 62):** T8.e (`place`'s `classes/tides.rs`) defines τ_c, the transform applies it, and at the merge the transform calls `place`'s τ_c rather than a copy.
+  - _T28.a._ `planet.origin` (`Body`) is registered after `planet.mass`, and `tags.golden` gains its one line. Every planet reads word 0 (the giant's rank) and word 1 (the magma ocean's), and words 2–7 are reserved. A giant is a planet from 0.1 M_J, design note 7's `SPACING_GIANT_MASS`. It forms at 0.5^(1−u) L^u Myr, held to 0.5 Myr–L, or at L itself for a disc shorter than 0.5 Myr (`EARLIEST_GIANT_FORMATION`); a small planet forms at L. The magma ocean ends at a host age log-uniform over 10–100 Myr, no earlier than the formation (`MAGMA_OCEAN_END_EARLIEST`, `_LATEST`), which nothing reads until T13 and T24. The log-uniform law is this lane's reading of "(drawn)" (**ruled, ruling 62**: it stands). There is no `ProtoplanetaryDisc` body (the _Slice_ note). A body whose formation age falls at or after a host star's death never forms.
+  - _T28.b._ The reach follows Mustill and Villaver (2012), not the plan's f = 2–3 (**ruled, ruling 62**). `params.rs` gains `ENGULFMENT_TIDAL_MASS`, M_c = 3.1 M⊕, and `engulfment_reach` is f = (1 + M_p ÷ M_c)^⅛: Zahn's (1977) equilibrium tide, which they integrate, drags a planet in at ȧ ∝ M_p (R★ ÷ a)⁸. M_c is fitted to their Figure 7, read from its vector paths. The figure gives the initial axes at the start of the thermally pulsing AGB of the outermost circular Terrestrial, Neptunian and Jovian planets engulfed about 1–5 M☉ stars, beside each star's largest AGB radius. Each ratio of axis to radius is f times the share of the star's mass left at its largest radius, one factor a star, which the transform's own expansion supplies. The least-squares fit gives M_c = 3.10 M⊕ at Zahn's ⅛, and an exponent of 0.129 when it is free. It reproduces all eighteen axes to 1.8% rms and 4% at worst. f is 1.036 for the Earth, 1.264 for Neptune and 1.786 for Jupiter, with no dependence on the host's mass: their Jovian-to-Terrestrial ratio is 1.65–1.82 with no trend from 1 to 5 M☉. a(t) = a_c(t) M₀ ÷ M(t), with M from `StarModel::state_at` of each host star. The radius is the largest `max_radius_until` among the host's stars not dead by the segment's start. **The clearance a − f R_max is not monotone**, as T28.b took it to be (**ruled, ruling 62**, and T28.b corrected). After the red-giant tip R_max holds while the winds widen the orbit. So along the 1 M☉ track an Earth born at 0.55–0.68 au is inside the tip's reach there, and outside the final radius's reach by the end (1.25 au against 1.05 for one at 0.65 au). A bisection on the whole interval would find no crossing for it. So the first crossing is found by a scan of fixed points, then a bisection. The scan evaluates the start, then end − span × 0.75ᵏ for k = 1–64, then the end. The bisection works on the clock's nanoseconds to 1 s, in at most 64 halvings. The points depend on the segment alone, from the formation to the end of the window or the last death. A dip shorter than a quarter of the time then left to the end would be missed, and none is on the tracks tried: a tip's engulfment lasts through core helium burning. A body that no host can reach costs two evaluations. One that it can costs about 124: 163 µs a body at a load of 12.6 and 2.3 GHz, where `math::exp` took 8 ns, so about 20,000 `exp`s.
+  - _The limits against theirs (for the orchestrator)._ On plan 06's tracks the limits at birth are 0.680, 0.830 and 1.173 au (Earth, Neptune, Jupiter) about 1 M☉, where the red-giant tip (0.862 au at 0.759 M☉) sets them, so the Earth survives the Sun at 1.924 au; 1.048, 1.279 and 1.807 au about 1.5 M☉; and 1.330, 1.623 and 2.294 au about 2 M☉. At the start of the AGB, whose mass is what their axis reads, the 1.5 and 2 M☉ tracks' limits are 1.115, 1.361 and 1.923 au at 1.41 M☉ against their 1.80, 2.17 and 3.10 au there, and 1.347, 1.644 and 2.323 au at 1.975 M☉ against 2.13, 2.48 and 3.51. The tracks' limits are 62–66% of theirs because SSE's largest AGB radius is 61–63% of Vassiliadis and Wood's (1993) there: 1.42 au against 2.26 at 1.41 M☉, and 1.82 against 2.97 at 1.975 M☉. The pattern is theirs: Jovian over Terrestrial is 1.72 against 1.71 and 1.65. Their §5 names the stellar model as the larger uncertainty. Matching their astronomical units would mean larger AGB radii in plan 06, not a larger f.
+  - _T28.c._ At a sudden death (`DeathKind::is_sudden`), the orbit just before is taken about the progenitor's helium core plus envelope (plus the other stars), with `relative_state_at(t_d)`. The kick is subtracted from the velocity, and a circumbinary body takes the remnant's share m_rem ÷ M_after of it. μ afterwards is μ₀ M_after ÷ M₀, and `elements_from_state` gives the new orbit. A bound orbit starts a new segment, with no further circularisation. An open orbit is `Unbound`, including a bound one from e = 0.9999, whose apocentre is over 2 × 10⁴ pericentres out. A pericentre inside the remnant's fluid Roche limit, 2.456 (3M ÷ 4πρ)^⅓, is `Destroyed { TidallyDisrupted }` at the next pericentre, or at once for a plunge. The kick is `StarModel::natal_kick`, `None` until P06.T19, so it is zero (ruling 33). The transform applies one as soon as the model returns it, which moves output with P06.T19's bump. A white dwarf's own kick, at an envelope-loss death, is not applied, and e ≥ 0.9999 after a supernova counts as unbound (**ruled, ruling 62**). A companion's planets take their own star as host, so they see only its mass loss (P11.T4 waits).
+  - _Envelope-loss deaths step for 7.7–8.1 M☉ (ruled, ruling 62: adiabatic, the step the cap's artefact)._ A white dwarf's birth is adiabatic and no event. Under ruling 57.1 these tracks end the AGB with 5.4–5.9 M☉ of envelope still on, so the mass steps from about 7.6 to 1.37 M☉ at the death, and the orbit widens by 5.6 at once. The end state is right, since a super-AGB superwind of 10⁴–10⁵ years is adiabatic. But the elements step, and the continuity test exempts those deaths. Plan 06 could give the track a finite superwind.
+  - _Tests_, in `planetary/fate/tests.rs` and `planetary/hosts/`, all on synthetic hosts, with bodies placed by hand.
+    - The prefix property and continuity over 10 hosts of 0.08–25 M☉ × 44 bodies × about 110 times through each life. Continuity is a relative 10⁻³ in a and 10⁻³ in e over a year, and angles bit for bit.
+    - (a) 10⁴ draws: no giant after its disc, and a Kolmogorov–Smirnov test of the log-uniform law.
+    - (b) Along the 1 M☉ track every Jupiter of 0.02–1.1 au and every Earth of 0.02–0.6 au is engulfed by the death: "about 1 au" holds for the Jovian limit, 1.17 au, and the rocky one is 0.68 au (ruling 62). Survivors of 1.5–100 au end at a₀ × 1.9244 (M_wd = 0.51965 M☉) to 10⁻⁹. The limits follow f times the red-giant tip's 0.862 au times 0.759 to 1%, and at 1.5 and 2 M☉ keep Mustill and Villaver's pattern. The Earth at 0.65 au is a regression test for the scan. The fit itself is tested against the eighteen critical axes read from their Figure 7.
+    - (c) In the kernel, e = ΔM ÷ M_after, and a circular orbit is unbound from half. A 12 M☉ neutron star unbinds Jupiters at 60–1,000 au. A 25 M☉ complete-fallback black hole, which loses 10⁻⁸ of its mass, keeps them with e < 10⁻⁶, and engulfs one born at 3 au, inside its 4.2 au reach. A 20 M☉ black hole (8.30 → 6.81 M☉) leaves e = 0.219. A circumbinary planet of 20 + 3 M☉ sees the pair's loss. Kicked bodies are unbound (in the kernel).
+    - A scalar axis stands in for the orbit's in the search, and is tested to agree with it bit for bit.
+  - New golden `planetary/fate` (formation draws, the reach, and histories on the 1 M☉, 12 M☉, 25 M☉ and 20 + 3 M☉ hosts), blessed at 11.
