@@ -287,6 +287,50 @@ pub fn radius_chen_kipping(mass: EarthMasses, quantile: UnitUniform) -> EarthRad
     EarthRadii::new(math::exp10(log_r))
 }
 
+/// The rank at which [`radius_chen_kipping`] gives `radius` at `mass`: Φ((log₁₀ R − C − S log₁₀
+/// M) ÷ σ), on the segment of [`MassRadiusClass::of`], in 0–1.
+///
+/// This is the inverse of [`radius_chen_kipping`] in its rank, the cumulative distribution of
+/// Chen and Kipping's radii at one mass. The derivation assembly uses it to confine a body's
+/// drawn rank to the radii the composition curves can hold (ruling 47 of 2026-09-22; plan 14,
+/// P14.T16.a). Φ is `½ erfc(−z ÷ √2)`, accurate in the lower tail; it rounds to 1 beyond about
+/// 8.3 σ above the relation and to 0 beyond about 38 σ below it.
+///
+/// # Panics
+///
+/// In debug builds, if `mass` or `radius` is not positive and finite.
+///
+/// # Examples
+///
+/// Earth is a little below the Terran median of 1.008 R⊕, at the 47th percentile:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::radius::{chen_kipping_rank, radius_chen_kipping};
+/// use hyperion_sim::stellar::draws::UnitUniform;
+/// use hyperion_sim::units::{EarthMasses, EarthRadii};
+///
+/// let earth = EarthMasses::new(1.0);
+/// let rank = chen_kipping_rank(earth, EarthRadii::new(1.0));
+/// assert!((rank - 0.466).abs() < 1e-3);
+/// let back = radius_chen_kipping(earth, UnitUniform::new(rank).expect("inside (0, 1)"));
+/// assert!((back.value() - 1.0).abs() < 1e-12);
+/// ```
+#[must_use]
+pub fn chen_kipping_rank(mass: EarthMasses, radius: EarthRadii) -> f64 {
+    debug_assert!(
+        mass.value().is_finite() && mass.value() > 0.0,
+        "a mass is positive and finite, got {mass:?}"
+    );
+    debug_assert!(
+        radius.value().is_finite() && radius.value() > 0.0,
+        "a radius is positive and finite, got {radius:?}"
+    );
+    let class = MassRadiusClass::of(mass);
+    let median = class.offset() + class.index() * math::log10(mass.value());
+    let z = (math::log10(radius.value()) - median) / class.scatter().value();
+    0.5 * math::erfc(-z * core::f64::consts::FRAC_1_SQRT_2)
+}
+
 /// Zeng, Sasselov and Jacobsen's (2016) Table 2: radius (R⊕ of 6,371 km) at masses of 0.125 × 2ⁱ
 /// M⊕, i = 0 to 8, for (by column) 100%, 50%, 30%, 25% and 20% iron, pure rock, and 25%, 50% and
 /// 100% water. Their iron is the core of Earth's seismic model extrapolated in pressure, their rock
@@ -955,6 +999,23 @@ mod tests {
 
     fn rank(q: f64) -> UnitUniform {
         UnitUniform::new(q).unwrap()
+    }
+
+    #[test]
+    fn chen_kipping_rank_inverts_the_radius_on_every_segment() {
+        for m in [
+            1e-3, 0.5, 1.9, 2.04, 5.0, 100.0, 131.0, 131.6, 318.0, 30_000.0,
+        ] {
+            let mass = EarthMasses::new(m);
+            for q in [1e-6, 0.01, 0.3, 0.5, 0.7, 0.99] {
+                let r = radius_chen_kipping(mass, rank(q));
+                let back = chen_kipping_rank(mass, r);
+                assert!(
+                    (back - q).abs() < 1e-12 * q.max(1e-3),
+                    "{m} M⊕ at {q}: {back}"
+                );
+            }
+        }
     }
 
     fn median(mass: f64) -> f64 {

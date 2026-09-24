@@ -101,6 +101,48 @@ pub const COMPOSITION_REFERENCE_AGE: Gigayears = Gigayears::new(5.0);
 /// The Bond albedo of every body until the atmosphere loop of P14.T13 closes: 0.3 (P14.T12.a).
 pub const BOND_ALBEDO_BEFORE_ATMOSPHERES: BondAlbedo = BondAlbedo::from_fraction(0.3);
 
+/// The envelope below which a body is classed by its core: 0.1% of its mass (P14.T16.a).
+///
+/// Venus's atmosphere is 10⁻⁴ of its mass, so an envelope this thin is an atmosphere over a
+/// surface rather than the deep hydrogen of a sub-Neptune, whose envelopes Lopez and Fortney (2014)
+/// model from 0.1% up. This plan's classification, not a source's.
+pub const THIN_ENVELOPE_FRACTION: f64 = 0.001;
+
+/// The water fraction from which a body without an envelope is icy rather than rocky: 10% of its
+/// mass (P14.T16.a).
+///
+/// Europa, about 8% water, is then rocky, and Ganymede, Callisto and Titan, near half water, icy.
+/// This plan's classification, not a source's.
+pub const ICY_WATER_FRACTION: f64 = 0.1;
+
+/// The mass from which a body with an envelope, not dominated by it, is an ice giant rather than a
+/// sub-Neptune: 10 M⊕ (P14.T16.a).
+///
+/// The critical core mass beyond which a core accretes gas in runaway (Mizuno 1980, Progress of
+/// Theoretical Physics 64, 544; Pollack et al. 1996, Icarus 124, 62), which the observed
+/// sub-Neptunes of 2–4 R⊕ mostly lie below and Uranus and Neptune (14.5 and 17.1 M⊕) above.
+pub const ICE_GIANT_MASS: EarthMasses = EarthMasses::new(10.0);
+
+/// The envelope fraction from which a body is a gas giant: half its mass (P14.T16.a).
+///
+/// Saturn's envelope is about 74% of its mass (its 25 M⊕ of heavy elements, Saumon and Guillot
+/// 2004, as Fortney, Marley and Barnes 2007, §6.1, quote) and Uranus's and Neptune's 10–20% in
+/// interior models (the solve gives 71%, 8% and 6%), so any fraction between separates them; half
+/// is where hydrogen and helium dominate.
+pub const GAS_GIANT_ENVELOPE_FRACTION: f64 = 0.5;
+
+/// The tidal Love number k₂ of a rocky body: 0.3 (plan 14, P14.T14.b, after Gladman et al. 1996,
+/// Icarus 122, 166).
+pub const ROCKY_LOVE_NUMBER: f64 = 0.3;
+
+/// The tidal quality factor Q of a rocky body: 100 (P14.T14.b, after Gladman et al. 1996).
+pub const ROCKY_TIDAL_Q: f64 = 100.0;
+
+/// The tidal Love number k₂ of a giant: 0.4 (P14.T14.b, after Gladman et al. 1996).
+pub const GIANT_LOVE_NUMBER: f64 = 0.4;
+
+/// The tidal quality factor Q of a giant: 10⁵ (P14.T14.b, after Gladman et al. 1996).
+pub const GIANT_TIDAL_Q: f64 = 1e5;
 /// The largest radius a giant planet takes: 2 Jupiter radii (P14.T11.d).
 ///
 /// Plan 14's cap on the inflated radius of

@@ -18,14 +18,18 @@
 //! - [`error`]: the errors of encoding, decoding and resolving a body.
 //! - [`disc`]: the protoplanetary disc of one orbit host, its budget and ruler (design note 5).
 //! - [`derive`](mod@derive): the derivation of a body's properties; so far its radius and
-//!   composition (P14.T11.a–c), irradiation and habitable zone (T12), and limits (Roche, Hill and
-//!   satellite stability, T15).
+//!   composition (P14.T11.a–c, with rocky compositions from the observed spread, ruling 53), giant
+//!   planets' radii and compositions (T11.d), irradiation and habitable zone (T12), and limits
+//!   (Roche, Hill and satellite stability, T15), with their assembly `derive_body` (T16.a).
+//! - [`record`]: what a query returns and how it degrades, the body record and the system snapshot
+//!   with their sections' four states (P14.T34, ruling 34).
+//! - [`fate`]: the states a body can be in at a time, which the record carries; the fate transform
+//!   that produces them is P14.T28's.
 //! - [`placement`]: placing planets; so far the Hill-spacing primitives and the spacing draw
 //!   (P14.T6), and the stable zones of multiple systems with their hosts and discs (P14.T9).
 //! - [`params`]: the parameters that belong to the generator version, as named constants.
-//! - [`context`], [`system`] and [`record`]: what the stage reads from the stages above, the
-//!   assembled generator, and what a query returns. Documentation only until their tasks
-//!   (P14.T1.d, T30 and T34).
+//! - [`context`] and [`system`]: what the stage reads from the stages above, and the assembled
+//!   generator. Documentation only until their tasks (P14.T1.d and T30).
 //!
 //! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
 //! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
@@ -59,6 +63,7 @@ pub mod context;
 pub mod derive;
 pub mod disc;
 pub mod error;
+pub mod fate;
 pub mod index;
 pub mod params;
 pub mod placement;

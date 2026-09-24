@@ -519,6 +519,7 @@ impl Disc {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DiscProfile {
     host_mass: SolarMasses,
+    host_luminosity: SolarLuminosities,
     lifetime: Megayears,
     snow_line: Metres,
     inner_edge: Metres,
@@ -539,6 +540,12 @@ impl DiscProfile {
     #[must_use]
     pub const fn host_mass(&self) -> SolarMasses {
         self.host_mass
+    }
+
+    /// The host's zero-age luminosity, which set the snow line (design note 6).
+    #[must_use]
+    pub const fn host_luminosity(&self) -> SolarLuminosities {
+        self.host_luminosity
     }
 
     /// How long the gas disc lives: the lifetime [`derive()`] was given.
@@ -798,6 +805,7 @@ pub fn derive(
     }
     let mut profile = DiscProfile {
         host_mass: host.mass,
+        host_luminosity: host.zams_luminosity,
         lifetime,
         snow_line: snow_line(host.zams_luminosity),
         inner_edge: Metres::new(inner_edge),

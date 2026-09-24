@@ -529,6 +529,11 @@ unit!(
     EarthFluxes
 );
 dimension!(WattsPerSquareMetre; EarthFluxes = consts::SOLAR_CONSTANT_W_PER_M2);
+unit!(
+    /// An acceleration in metres per second squared, such as a body's surface gravity, G M ÷ R²
+    /// (plan 14). Earth's is 9.8 m s⁻².
+    MetresPerSecondSquared
+);
 
 #[cfg(test)]
 mod tests {

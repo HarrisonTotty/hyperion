@@ -2840,6 +2840,153 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     second fallback instead, or it may stay informative.
   - _Goldens._ New `planetary/masses` (draws, every template group's masses in seven discs, and
     their cores), blessed at 11; `tags.golden` gains `planet.mass`. Nothing else moved.
+- **Deviations in T16.a and T34, as built (`record`, round 7).**
+  - _T16.a, API._ `derive::derive_body(&PlacedBody, &BodyHosts, &DiscProfile, age: Years, t:
+UniverseTime) -> Result<DerivedBody, DeriveBodyError>`. `PlacedBody::new(mass, orbit:
+KeplerElements, formation_distance, radius_rank: UnitUniform)` stands in for T8's
+    `PlacedPlanet`, which converts into it; its orbit is the primordial one, and `with_orbit_now`
+    sets T28's orbit at `t`, which only the steps at the time read. The rank is a
+    plain argument: `planet.radius` is not registered here, and T30 opens it (for the
+    orchestrator). `BodyHosts::new(primary_mass: Kilograms, orbited: &[HostLight], companions:
+&[Illumination])` takes each host as plain L, T_eff and R (ruling 34.2), and the mass the
+    body orbits at `t` for T15. The order kept: T11 (fixed at formation), T12 (T13 will iterate
+    there), the radius at the time (T13.b will strip there), T14's place, T15. Bond albedo 0.3.
+    `DerivedBody` holds the mass, the confined rank, the side of the snow line, the
+    `SolvedComposition`, the flux, T_eq, the radius at `age + t`, density, surface gravity
+    (`units::MetresPerSecondSquared`, new), `PlanetClass`, the circular Hill radius, both
+    satellite limits (e_s = 0) and `maximum_surviving_moon_mass` at `age + t`, with
+    `roche_limit_fluid` and `roche_limit_rigid` for a satellite density. `NotYetFormed` for a
+    system age at `t` that is not positive. Giants (T11.d, wired at the merge, ruling 56): from
+    0.3 M_J, where `giant_share` rises from zero, `giant_cooling(m, age + t, composition)` and
+    `radius_giant(m, &interior, flux)` give the radius, blended into the envelope model's
+    radius and `giant_composition`'s fractions into the solve's up to 0.414 M_J and alone above
+    it, where `composition()` is `None`; the giant's internal luminosity enters T_eq through
+    `with_internal_heat`. `BodyHosts::new` gains the system's `Composition`, which the cooling
+    reads. Above 13 M_J, `DeriveBodyError::Giant` or `GiantCooling`. Saturn, at 0.2994 M_J, stays
+    below the blend.
+  - _T16.a, the formation flux (for the orchestrator)._ Composition is fixed at formation (ruling
+    47.2), so the solve reads the flux of the disc host's zero-age luminosity at the body's
+    primordial orbit, never at the orbit at `t` (tested with a widened orbit),
+    companions left out as D6 leaves them out of the snow line; `DiscProfile` gains
+    `host_luminosity()`. The envelope's radius at `t` reads the present flux and `age + t`.
+  - _T16.a, ruling 47.1._ `composition::radius_window(mass, side, flux) -> RadiusWindow` gives the
+    radii the solve keeps, with the solve's own expressions (`largest_envelope` is shared with
+    `enveloped`; no output moved): from the iron curve to the envelope limit where a body may take
+    an envelope, or its dry curve when that is larger, and to the capped rock or ice curve for
+    cores under 1.5 M⊕, whose clamps are the same kind of boundary as the envelope limit the
+    ruling names. `radius::chen_kipping_rank(mass, radius)` is Chen and Kipping's CDF, and
+    `radius_rank_in_window(rank, &window)` rescales the rank (the window carries its mass). Over
+    999 ranks at 10 F⊕, before → after: 1 M⊕
+    inside, 1.4% raised to iron and 26.8% clamped to rock → 0 and 0; 2.1 M⊕, 25.4% iron → 0; 3
+    M⊕, 15.3% → 0; 5 M⊕, 6.0% → 0; 100 M⊕, 56.4% at the envelope limit → 0; 131 M⊕, 71.6% → 0;
+    beyond the snow line 0.8–1.7% clamped to ice → 0. After it no rank of 13 masses (10⁻⁴–131
+    M⊕), both sides and three fluxes lands on a boundary. Where the upper edge is over 8.3 σ above
+    the median (1.6 M⊕ inside at 10⁻³ F⊕) Φ rounds to 1 and the rank is held below 1, still
+    inside; a rank within 10⁻¹² of 0 or 1 can meet an edge by rounding.
+  - _T16.a, what the mapping did to iron._ Inside the snow line below 1.5 M⊕ the 27% once clamped
+    to rock were spread over the window, so the share over half iron rose from 30% to 40% and the
+    median core mass fraction of dry bodies from 0.29 to 0.42. Ruled (ruling 53, amending 47.1):
+    rocky compositions come from the observed spread, below.
+  - _T16.a, rocky outcomes (ruling 53)._ `derive/rocky.rs` holds Plotnykov and Valencia's (2020,
+    MNRAS 499, 932, abstract; re-checked on arXiv:2010.06480) population of 33 rocky exoplanets'
+    core mass fractions, 0.24 +0.33 −0.18, read as the median and the 16th and 84th percentiles.
+    The paper's distribution is a kernel density estimate with no functional form, so it is built
+    as a two-piece logit-normal through those three points (scales 1.599 below and 1.435 above
+    in logit): inside (0, 1), continuous, and exact at the three; 21% of it is over half iron,
+    and Earth sits at its 62nd percentile. `rocky_core_mass_fraction(rank, &window)`: a confined
+    rank between the iron and rock curves' is at a share s of the rocky part, and its core mass
+    fraction is the distribution's at 1 − s, with the radius Zeng's at it (`dry_composition`);
+    above the rock curve the rank keeps Chen and Kipping's radius and the solve. One quantile per
+    body still. `RadiusWindow` gains `mass()` and `rock()`, and for a core under 1.5 M⊕ inside the
+    snow line now ends at the rock curve, below the 0.1% water sliver the solve keeps, so that the
+    window is continuous in mass at the floor (it stepped the radius by 8 × 10⁻⁵ there).
+    Measured over 999 ranks of nine masses of 0.1–1.9 M⊕ at 1 F⊕, inside the snow line, as built
+    (47.1) → now: 16th percentile 0.145 → 0.060, median 0.410 → 0.240, 84th 0.681 → 0.569, over
+    half iron 38.7% → 21.1% (2.1 M⊕: median 0.563 → 0.239; 5 M⊕: 0.489 → 0.241). The radius is
+    continuous in the rank across the rock curve (to the envelope model's 1.1 × 10⁻⁵ where an
+    envelope begins) and in mass everywhere but at Chen and Kipping's transitions, where their
+    radii already step (T11.a); tested.
+  - _T16.a, rocky outcomes beyond the snow line (for the orchestrator)._ The ruling's "between the
+    iron and rock curves" is applied on both sides. Beyond the snow line the solve reads a radius
+    between the Earth-like and rock curves as water, up to about 12% at 1 M⊕, on an Earth-like
+    core; those ranks are now dry rock of the observed spread instead. Of the bodies of 0.1–1.9 M⊕
+    beyond it, 2,596 of 8,991 are watery against 5,071 before, and the dry ones' median core
+    fraction is 0.24 instead of 0.56. The alternative is to remap only the dry part below the
+    Earth-like curve there, which keeps every water world but leaves dry bodies beyond the snow
+    line at 0.325 and over.
+  - _For the owner: design note 8's reading._ The brainstorm's "radius from mass (Chen and Kipping
+    2017), refined by composition with Zeng et al." is read, for rocky bodies, as composition
+    refining the radius: the one drawn quantile picks the composition from the observed spread,
+    and the radius follows from Zeng's curves, since Chen and Kipping's 0.040 dex at low mass
+    mixes measurement error and sub-Neptunes into a spread wider than all of iron to rock. For
+    everything above the rock curve the quantile still places the body within Chen and Kipping's
+    scatter and the composition is solved from that radius. Radius, composition and envelope are
+    never drawn apart (ruling 53).
+  - _T16.a, classes and tides (for the orchestrator)._ `PlanetClass { Rocky, Icy, SubNeptune,
+IceGiant, GasGiant }`, in `derive`, with its thresholds in `params.rs`: an envelope from 0.1% of
+    the mass
+    (`THIN_ENVELOPE_FRACTION`; Venus's air is 10⁻⁴) makes a sub-Neptune, an ice giant from 10 M⊕
+    (`ICE_GIANT_MASS`, the critical core mass), a gas giant from half the mass
+    (`GAS_GIANT_ENVELOPE_FRACTION`); without one, water from 10% (`ICY_WATER_FRACTION`) is icy.
+    `has_surface()` is false for the two giants only, so a sub-Neptune's surface is T13.c's "gas
+    envelope" state. T15's moon limit takes T14.b's k₂ and Q (0.3 and 100 for classes with a
+    surface, 0.4 and 10⁵ for giants), also in `params.rs`.
+  - _T16.a, the Solar System_, each planet at the rank that keeps its radius, about the present
+    Sun (1 L☉) in the zero-age Sun's disc (snow line 2.26 au) at 4.57 Gyr: core mass fractions
+    Mercury 0.708, Venus 0.288, Earth 0.323, Mars 0.216; envelopes Saturn 71.4% (9.145 R⊕ against
+    9.140), Uranus 8.2% (3.992 against 3.981), Neptune 6.4% (3.874 against 3.865); classes Rocky,
+    GasGiant and IceGiant; T_eq at A = 0.3 Earth 254.6 K, Mars 206.5 K, Venus 299.3 K, each T12's
+    to the bit (T12's figures at each planet's own albedo, Venus 229 K, Mars 210 K, Jupiter 110
+    K, stay T12's tests, since the slice fixes A = 0.3); Earth 9.82 m s⁻² and 5,513 kg m⁻³;
+    Earth's Hill radius 1.497 × 10⁹ m; the Moon, Phobos, Deimos, Titan, Iapetus, Phoebe
+    (retrograde) and Triton (retrograde) inside their limits; Saturn's fluid Roche limit for 600
+    kg m⁻³ within 2.5–2.7 of its radius and outside the A ring's edge at 136,775 km; an Earth at
+    0.05 au
+    keeps no moon over 10⁻⁶ M⊕ for 5 Gyr. Jupiter, through T11.d: 11.22 R⊕ (1.001 R_J of 71,492
+    km; its volumetric mean is 10.97), 57.9 M⊕ of heavy elements (an envelope of 81.8%), T_eq
+    128.9 K with its internal luminosity of 4.4 × 10¹⁷ W (111.7 K from sunlight alone at
+    A = 0.3; measured, about 3.3 × 10¹⁷ W and an effective temperature of 124 K). New golden
+    `planetary/derive_body` (the eight planets and five synthetic bodies, two of them giants) at
+    11; the `giants` lane's `planetary/derive_giants` is unchanged.
+  - _T34, API._ `record::{DetailLevel, Section<T>, SectionState, RecordSection, BodyRecord,
+BodyRecordBuilder, BodyIdentity, BodyLabel, BodyOrbit, BulkProperties, Surface, Hooks,
+BodyKind, MoonOrigin, BeltKind, SystemSnapshot, SystemSection}` and their build errors;
+    `fate::{BodyState, DestructionCause}` (the states only; T28's transform produces them).
+    `BodyRecord::builder(identity)` starts every section `NotModelled`, `.derived(&DerivedBody)`
+    sets the slice's mass, bulk and surface tags, and `build()` rejects `NotResolved` and
+    `BodyKind::Unresolved`, so `degrade` is their only producer. `degrade(level)` keeps the ID,
+    parent, state and position, withholds the kind and label at `Contact`, and turns every section
+    above the level `NotResolved`; `degrade(a).degrade(b) == degrade(min(a, b))`.
+    `SystemSnapshot::new(system, time, bodies)` takes full records in index order, with the belts
+    and halo `NotModelled`; `with_populations(belts, halo)`, T21's, checks that each index names a
+    body of its kind; and `degrade` drops belt members' records below `Bulk`.
+  - _T34, shape (for the orchestrator; T35 mirrors it)._ (1) The mass is a section of its own at
+    `MassAndOrbit`, not the bulk section's, since that level shows it and a rogue planet or a
+    belt has a mass without an orbit. (2) `BodyKind::Planet` carries no class: D16 puts the class
+    at `Bulk`, and the kind shows from `MassAndOrbit`, so the class is `BulkProperties::class`.
+    (3) The label is a `Section<BodyLabel>`, `NotModelled` until T30.c and `NotResolved` at
+    `Contact`. (4) `parent` is `Option<OrbitHost>` (ruling 53), T9's type: `Star(n)` for a planet,
+    `Pair(n)` for a circumbinary one, `Body(i)` for a moon, ring or member, `None` only for a
+    system's root host, a free-floating object; T35's `BodyOrbitDto.parent` is an
+    `OrbitHostDto`.
+    (5) Belts, the halo and belt members are bodies (D3), so the snapshot's `belts` is
+    `Section<Vec<BodyIndex>>` and `halo` `Section<Option<BodyIndex>>` (`Ok(None)`: no halo), and
+    T21 puts a belt's population in its own record. (6) `Surface` and `Hooks` have no variants
+    until T13, T14, T24 and T23–T26 give them contents, so no record can claim either. (7) Moons,
+    rings, belts and halo belong to `MassAndOrbit`. (8) The JSON test of a `MassAndOrbit` record
+    moves to T35; here its equivalent asserts that the bulk, surface and hooks sections are
+    withheld. (9) `BodyOrbit::valid_until` is `None` until T28. (10) The mass fractions sit in the
+    bulk section at `Bulk`, as the brief asks, where D16 lists "composition" among `Full`'s
+    hooks; T23's `BulkComposition`, with the volatile inventory and the host's abundances, stays
+    at `Full`. (11) `BodyLabel` is a checked `String` in `record.rs`; T30.c may move it to
+    `label.rs` with a re-export. (12) `degrade` takes `&self`, as Provides has it, so it clones
+    what it keeps.
+  - _T16.b._ `tests/planetary_properties.rs` holds the core-fraction test (ruling 53):
+    `rocky_core_mass_fractions_follow_plotnykov_and_valencia`, over 35,964 hand-placed bodies of
+    0.1–1.9 M⊕ at 0.1–1.5 au of the present Sun (T8's placer is not built), whose rocky outcomes'
+    16th, 50th and 84th percentiles are within 0.01 of 0.06, 0.24 and 0.57, with 21% ± 1% over
+    half iron and a largest gap to the source's cumulative distribution under 0.01. "No planet
+    hotter" and the continuity in time wait for `StarModel` (P06.T29.a), which has not merged.
 - **Deviations in T11.d, as built (`giants`, round 7).**
   - _Files and API._ `planetary/derive/{radius, composition}.rs`; `params.rs` gains
     `GIANT_RADIUS_CAP` (2 R_J), `GIANT_INFLATION_ONSET` (1,000 K) and

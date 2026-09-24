@@ -188,13 +188,24 @@ impl Illumination {
 /// In debug builds, if `a` is not positive or `e` is outside 0–1.
 #[must_use]
 pub(crate) fn flux(host: &HostLight, a: Metres, e: f64) -> EarthFluxes {
+    luminosity_flux(host.luminosity, a, e)
+}
+
+/// The flux from a luminosity `luminosity` along an orbit of semi-major axis `a` and eccentricity
+/// `e`, averaged over the orbit: [`flux`] for a bare luminosity, such as a host's zero-age one.
+///
+/// # Panics
+///
+/// In debug builds, if `a` is not positive or `e` is outside 0–1.
+#[must_use]
+pub(crate) fn luminosity_flux(luminosity: SolarLuminosities, a: Metres, e: f64) -> EarthFluxes {
     debug_assert!(a.value() > 0.0, "a semi-major axis is positive, got {a:?}");
     debug_assert!(
         (0.0..1.0).contains(&e),
         "a bound orbit's eccentricity, got {e}"
     );
     let a_au = AstronomicalUnits::from(a).value();
-    EarthFluxes::new(host.luminosity.value() / (a_au * a_au * (1.0 - e * e).sqrt()))
+    EarthFluxes::new(luminosity.value() / (a_au * a_au * (1.0 - e * e).sqrt()))
 }
 
 /// The flux a body receives from every host in `sources`, added in the order given.

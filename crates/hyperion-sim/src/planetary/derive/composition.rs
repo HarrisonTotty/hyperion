@@ -323,6 +323,20 @@ pub fn composition(
     })
 }
 
+/// A dry body of mass `mass` and core mass fraction `core_mass_fraction` (0–1), at the radius of
+/// [`radius_zeng`] for that composition: the composition of a rocky outcome, which the derivation
+/// takes from the observed spread rather than from a radius (ruling 53).
+///
+/// Beyond the snow line such a body can lie between the Earth-like and rock curves, where
+/// [`composition`] would read its radius as water on an Earth-like core; the rocky outcome is the
+/// other reading of the same radius.
+#[must_use]
+pub(crate) fn dry_composition(mass: EarthMasses, core_mass_fraction: f64) -> SolvedComposition {
+    let cmf = core_mass_fraction.clamp(0.0, 1.0);
+    let radius = radius_zeng(mass, CoreComposition::from_fractions(cmf, 0.0));
+    dry_body(cmf, radius.value(), RadiusAdjustment::Unchanged)
+}
+
 /// A dry body of core mass fraction `cmf` and radius `radius` (R⊕).
 #[must_use]
 fn dry_body(cmf: f64, radius: f64, adjustment: RadiusAdjustment) -> SolvedComposition {
@@ -377,6 +391,133 @@ fn watery(
     }
 }
 
+/// The radii a body keeps unchanged through [`composition`]: from the iron curve up to the
+/// largest radius the rules of the [module](self) documentation allow its mass and side of the
+/// snow line, at the flux given.
+///
+/// Every radius inside the window is kept as given (to the rounding of the envelope solve); one
+/// below it is raised to iron and one above it clamped
+/// ([`RadiusAdjustment`]), with one exception: for a core under [`ENVELOPE_CORE_FLOOR`] inside the
+/// snow line the window ends at the rock curve, below the trace of water up to
+/// [`INNER_WATER_CAP`] that the solve would still keep, so that the window is continuous in mass
+/// at the floor, where that sliver ends (ruling 53). The derivation assembly confines a body's
+/// drawn radius to the window (ruling 47 of 2026-09-22; plan 14, P14.T16.a).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadiusWindow {
+    mass: EarthMasses,
+    least: EarthRadii,
+    rock: EarthRadii,
+    greatest: EarthRadii,
+}
+
+impl RadiusWindow {
+    /// The mass the window is of, positive and finite.
+    #[must_use]
+    pub const fn mass(&self) -> EarthMasses {
+        self.mass
+    }
+
+    /// The smallest radius kept: the pure-iron curve at the body's mass.
+    #[must_use]
+    pub const fn least(&self) -> EarthRadii {
+        self.least
+    }
+
+    /// The pure-rock curve at the body's mass, the top of the rocky outcomes (ruling 53): between
+    /// it and [`least`](Self::least) a body is dry rock and iron, on either side of the snow line.
+    #[must_use]
+    pub const fn rock(&self) -> EarthRadii {
+        self.rock
+    }
+
+    /// The largest radius kept: the largest envelope the mass allows on the side's core
+    /// ([`ENVELOPE_CORE_FLOOR`] of core left) where a body may take one and that is larger than the
+    /// dry curve beneath it, and otherwise that curve (rock inside the snow line, [`OUTER_WATER_CAP`]
+    /// of water on an Earth-like core beyond it).
+    #[must_use]
+    pub const fn greatest(&self) -> EarthRadii {
+        self.greatest
+    }
+}
+
+/// The [`RadiusWindow`] of a body of mass `mass`, formed on `side` of its snow line and receiving
+/// `flux`: the radii [`composition`] keeps unchanged.
+///
+/// It is computed with the solve's own expressions, so that a radius inside it is never adjusted
+/// and one outside it always is (tested).
+///
+/// # Errors
+///
+/// As [`composition`]'s, for the mass and flux: [`SolveCompositionError::GiantPlanet`] from 0.414
+/// Jupiter masses, and the other variants for a mass that is not positive and finite or a flux
+/// that is negative or not finite.
+///
+/// # Examples
+///
+/// Earth's mass inside the snow line keeps radii from pure iron to pure rock, and
+/// Earth itself lies inside:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::composition::{SnowLineSide, radius_window};
+/// use hyperion_sim::units::{EarthFluxes, EarthMasses};
+///
+/// let window = radius_window(EarthMasses::new(1.0), SnowLineSide::Inside, EarthFluxes::new(1.0))?;
+/// assert!((window.least().value() - 0.823).abs() < 1e-3);
+/// assert!((window.greatest().value() - 1.067).abs() < 1e-3);
+/// # Ok::<(), hyperion_sim::planetary::derive::composition::SolveCompositionError>(())
+/// ```
+pub fn radius_window(
+    mass: EarthMasses,
+    side: SnowLineSide,
+    flux: EarthFluxes,
+) -> Result<RadiusWindow, SolveCompositionError> {
+    let m = mass.value();
+    if !(m.is_finite() && m > 0.0) {
+        return Err(SolveCompositionError::MassNotPositive);
+    }
+    if !(flux.value().is_finite() && flux.value() >= 0.0) {
+        return Err(SolveCompositionError::FluxNotValid);
+    }
+    if m >= NEPTUNIAN_JOVIAN_TRANSITION.value() {
+        return Err(SolveCompositionError::GiantPlanet { mass });
+    }
+    let dry = TablePosition::of(mass).dry_radii();
+    let (rock, iron) = (dry[0], dry[DRY_CURVES.len() - 1]);
+    let with_envelope = |curve: f64, core: CoreComposition| {
+        if m > ENVELOPE_CORE_FLOOR.value() {
+            curve.max(largest_envelope(mass, core, flux).1.value())
+        } else {
+            curve
+        }
+    };
+    let greatest = match side {
+        SnowLineSide::Inside if m > ENVELOPE_CORE_FLOOR.value() => {
+            with_envelope(rock, CoreComposition::EARTH_LIKE)
+        }
+        SnowLineSide::Inside => rock,
+        SnowLineSide::Beyond => with_envelope(radius_zeng(mass, ICY_CORE).value(), ICY_CORE),
+    };
+    Ok(RadiusWindow {
+        mass,
+        least: EarthRadii::new(iron),
+        rock: EarthRadii::new(rock),
+        greatest: EarthRadii::new(greatest),
+    })
+}
+
+/// The largest envelope fraction a body of mass `mass` may take on a core of `core`, leaving
+/// [`ENVELOPE_CORE_FLOOR`] of core, and its radius at [`COMPOSITION_REFERENCE_AGE`] and `flux`.
+#[must_use]
+fn largest_envelope(
+    mass: EarthMasses,
+    core: CoreComposition,
+    flux: EarthFluxes,
+) -> (f64, EarthRadii) {
+    let most = 1.0 - ENVELOPE_CORE_FLOOR.value() / mass.value();
+    let largest = radius_with_envelope(mass, core, most, flux, COMPOSITION_REFERENCE_AGE);
+    (most, largest)
+}
+
 /// Bisection steps in the envelope solve: enough to close the interval to adjacent floats.
 const ENVELOPE_BISECTIONS: u32 = 64;
 
@@ -394,8 +535,7 @@ fn enveloped(
     flux: EarthFluxes,
 ) -> SolvedComposition {
     let model = |f: f64| radius_with_envelope(mass, core, f, flux, COMPOSITION_REFERENCE_AGE);
-    let most = 1.0 - ENVELOPE_CORE_FLOOR.value() / mass.value();
-    let largest = model(most);
+    let (most, largest) = largest_envelope(mass, core, flux);
     let (envelope, radius, adjustment) = if largest.value() < radius.value() {
         (most, largest, RadiusAdjustment::ClampedToEnvelopeLimit)
     } else {
@@ -544,6 +684,8 @@ pub fn giant_composition(
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
     use crate::planetary::derive::radius::radius_chen_kipping;
     use crate::stellar::draws::UnitUniform;
@@ -564,6 +706,57 @@ mod tests {
 
     fn sum(f: MassFractions) -> f64 {
         f.iron() + f.rock() + f.water() + f.envelope()
+    }
+
+    #[test]
+    fn the_window_is_what_the_solve_keeps() {
+        // Just inside either edge the radius is kept; just outside it is moved. The masses include
+        // both sides of the envelope floor and cores whose largest envelope is below their dry
+        // curve.
+        for m in [
+            1e-3, 0.1, 1.0, 1.5, 1.500_01, 1.51, 1.6, 3.0, 10.0, 40.0, 131.0,
+        ] {
+            let mass = EarthMasses::new(m);
+            for side in [SnowLineSide::Inside, SnowLineSide::Beyond] {
+                for s in [1e-3, 1.0, 300.0] {
+                    let window = radius_window(mass, side, EarthFluxes::new(s)).unwrap();
+                    let (least, greatest) = (window.least().value(), window.greatest().value());
+                    let at = |r: f64| solve(m, r, side, s).adjustment();
+                    let label = format!("{m} M⊕ {side:?} at {s} F⊕");
+                    assert_eq!(
+                        at(least * (1.0 + 1e-9)),
+                        RadiusAdjustment::Unchanged,
+                        "{label}"
+                    );
+                    assert_eq!(
+                        at(greatest * (1.0 - 1e-9)),
+                        RadiusAdjustment::Unchanged,
+                        "{label}"
+                    );
+                    assert_eq!(
+                        at(least * (1.0 - 1e-9)),
+                        RadiusAdjustment::RaisedToIron,
+                        "{label}"
+                    );
+                    let above = solve(m, greatest * (1.0 + 1e-9), side, s);
+                    if side == SnowLineSide::Inside && m <= ENVELOPE_CORE_FLOOR.value() {
+                        // The window stops at the rock curve, under the trace of water the solve
+                        // still keeps.
+                        assert_eq!(above.adjustment(), RadiusAdjustment::Unchanged, "{label}");
+                        assert!(above.fractions().water() > 0.0, "{label}");
+                        assert_same_bits(greatest, window.rock().value());
+                    } else {
+                        assert_ne!(above.adjustment(), RadiusAdjustment::Unchanged, "{label}");
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            radius_window(EarthMasses::new(200.0), SnowLineSide::Inside, ONE),
+            Err(SolveCompositionError::GiantPlanet {
+                mass: EarthMasses::new(200.0)
+            })
+        );
     }
 
     /// Masses spanning the solve's range, M⊕.
