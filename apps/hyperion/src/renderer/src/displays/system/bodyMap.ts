@@ -269,22 +269,33 @@ export interface ZoneLayers {
   readonly stable: boolean;
   readonly snowLine: boolean;
   readonly habitable: boolean;
+  /** The optimistic habitable zone, from recent Venus to early Mars (ruling 65.4). */
+  readonly optimistic: boolean;
 }
 
 /** Every zone annulus drawn, as the map opens. */
-export const ALL_ZONE_LAYERS: ZoneLayers = { stable: true, snowLine: true, habitable: true };
+export const ALL_ZONE_LAYERS: ZoneLayers = {
+  stable: true,
+  snowLine: true,
+  habitable: true,
+  optimistic: true,
+};
 
 /**
  * The zones as annuli on the reference plane about their hosts at the display time, labelled: each
- * zone's stable limits (`STABLE ZONE`), its snow line (`SNOW LINE`) and its conservative habitable
- * zone (`HABITABLE ZONE`), drawn in `--text-muted` as the orchestrator's ruling 35.6 has it.
+ * zone's stable limits (`STABLE ZONE`), its snow line (`SNOW LINE`), its conservative habitable
+ * zone (`HABITABLE ZONE`) and its optimistic one (`OPTIMISTIC`), drawn in `--text-muted` as the
+ * orchestrator's ruling 35.6 has it.
  *
  * @remarks
  * A stable zone is drawn where its companions bound it: an edge the disc bounds (`null`) is not
  * drawn, and a zone bounded on neither side, a single star's, draws nothing. A habitable zone runs
  * from the moist greenhouse to the maximum greenhouse; an inner edge beyond every orbit leaves no
  * zone, an outer one beyond every orbit leaves its inner edge alone, and a host with no light, whose
- * limits are all zero, draws none. The annuli lie in the system's plane, which is a companion's own
+ * limits are all zero, draws none. The optimistic zone runs from recent Venus to early Mars, the
+ * same fit's other pair of limits (Kopparapu et al. 2013, 2014), which the server sends with the
+ * conservative pair, by the same rules; its edges carry short ticks into the band, so that it
+ * differs from the conservative pair by shape and not by colour (ruling 65.4). The annuli lie in the system's plane, which is a companion's own
  * planets' plane only approximately.
  */
 export function zoneAnnuli(
@@ -321,6 +332,16 @@ export function zoneAnnuli(
     if (layers.habitable && innerM !== null && innerM > 0) {
       const outerM = habitable?.maximumGreenhouseM ?? innerM;
       annuli.push(band("habitable", innerM, Math.max(innerM, outerM), "HABITABLE ZONE"));
+    }
+    const optimisticInnerM = habitable?.recentVenusM ?? null;
+    if (layers.optimistic && optimisticInnerM !== null && optimisticInnerM > 0) {
+      const outerM = habitable?.earlyMarsM ?? optimisticInnerM;
+      annuli.push({
+        ...band("optimistic", optimisticInnerM, Math.max(optimisticInnerM, outerM), "OPTIMISTIC"),
+        edgeTicks: true,
+        // Its outer edge lies just beyond the conservative zone's, whose label stands rimward.
+        labelSpinward: true,
+      });
     }
   }
   return annuli;

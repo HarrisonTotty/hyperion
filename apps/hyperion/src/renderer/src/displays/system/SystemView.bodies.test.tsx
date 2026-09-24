@@ -3,10 +3,11 @@
  * P14.T41.b, T42 and T43 for bodies).
  */
 import type { ResponseFor } from "@hyperion/protocol";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   earthDetail,
@@ -218,7 +219,31 @@ describe("SystemView with the slice's bodies", () => {
     expect(reading("ARCH")).toBe("SOLAR-LIKE");
     expect(reading("SNOW LINE")).toBe("2.26 AU");
     expect(reading("HABITABLE ZONE")).toBe("0.989 AU – 1.69 AU");
+    expect(reading("OPTIMISTIC")).toBe("0.749 AU – 1.77 AU");
     expect(terms("STABLE ZONE")).toHaveLength(0);
+  });
+
+  it("switches the optimistic habitable zone's annulus off and on, apart from the conservative", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    const toggle = within(mapPanel()).getByRole("button", { name: "OPTIMISTIC" });
+    const label = (text: string) =>
+      within(mapPanel()).queryByText(text, { selector: ".spatial-label" });
+
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(label("OPTIMISTIC")).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(label("OPTIMISTIC")).not.toBeInTheDocument();
+    expect(label("HABITABLE ZONE")).toBeInTheDocument();
+    // The readout reads the zone whatever the map draws.
+    expect(reading("OPTIMISTIC")).toBe("0.749 AU – 1.77 AU");
+
+    await user.click(toggle);
+
+    expect(label("OPTIMISTIC")).toBeInTheDocument();
   });
 
   it("switches the habitable zone's annulus off and on", async () => {
@@ -371,5 +396,117 @@ describe("SystemView with every kind of body", () => {
     expect(within(bodiesPanel()).getAllByText("DETAIL")[0]?.nextElementSibling).toHaveTextContent(
       "TO BULK",
     );
+  });
+});
+
+/**
+ * The bodies panel's two scrolling regions as the built client laid them out in Electron, with a
+ * planet selected in a system of twelve bodies (round 8, measured over the DevTools protocol): at
+ * 1920 × 1080 the list's rows had 366 px and the readout 395 px, at 1280 × 720 170 px and 214 px.
+ * The readout's 26 readings then ran to 431 px at 1280 px, about 16.6 px apiece as they stand two
+ * to a line with some a line of their own; jsdom lays nothing out, so the readings are placed so.
+ */
+const WINDOWS = [
+  { name: "1920 × 1080", listPx: 366, readoutPx: 395 },
+  { name: "1280 × 720", listPx: 170, readoutPx: 214 },
+] as const;
+const READING_PX = 431 / 26;
+const ROW_PX = 32;
+
+/** Lays the panel out: each region's visible height, and each reading a line of its own. */
+function layOut(listPx: number, readoutPx: number): void {
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function height(
+    this: HTMLElement,
+  ) {
+    if (this.getAttribute("role") === "tree") {
+      return listPx;
+    }
+    return this.classList.contains("body-readout__scroll") ? readoutPx : HEIGHT_PX;
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function top(
+    this: HTMLElement,
+  ) {
+    const readings = this.closest("dl")?.querySelectorAll("dt");
+    const index = readings === undefined ? -1 : [...readings].indexOf(this);
+    return index < 0 ? 0 : index * READING_PX;
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function tall(
+    this: HTMLElement,
+  ) {
+    return this.tagName === "DT" ? READING_PX - 1 : 0;
+  });
+  FakeResizeObserver.resizeAll();
+}
+
+function readoutRegion(): HTMLElement {
+  return screen.getByRole("region", { name: "Readings" });
+}
+
+/** The position readout under the readings: `1-13 of 26`. */
+function readingsPosition(): string {
+  return readoutRegion().nextElementSibling?.textContent ?? "";
+}
+
+describe.each(WINDOWS)("SystemView's bodies panel at $name", ({ listPx, readoutPx }) => {
+  it("scrolls the planet's readings, with those in view and their total under them", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+    act(() => {
+      layOut(listPx, readoutPx);
+    });
+    const total = within(readout()).getAllByRole("term").length;
+    const inView = Math.min(total, Math.ceil(readoutPx / READING_PX));
+
+    expect(readingsPosition()).toBe(`1-${inView} of ${total}`);
+
+    const region = readoutRegion();
+    act(() => {
+      region.scrollTop = total * READING_PX - readoutPx;
+      fireEvent.scroll(region);
+    });
+
+    expect(readingsPosition()).toMatch(new RegExp(`^\\d+-${total} of ${total}$`));
+  });
+
+  it("keeps the focus on the list and the selected row in view as the keys select", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+    act(() => {
+      layOut(listPx, readoutPx);
+    });
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    const rows = within(tree).getAllByRole("treeitem");
+    act(() => {
+      tree.focus();
+    });
+
+    await user.keyboard("{End}{Enter}");
+
+    expect(tree).toHaveFocus();
+    expect(rows.at(-1)).toHaveAttribute("aria-selected", "true");
+    // The last row's bottom edge meets the list's, or the list holds every row.
+    expect(tree.scrollTop).toBe(Math.max(0, rows.length * ROW_PX - listPx));
+  });
+
+  it("returns the readings to their top when another body is selected", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+    act(() => {
+      layOut(listPx, readoutPx);
+    });
+    const region = readoutRegion();
+    act(() => {
+      region.scrollTop = 120;
+      fireEvent.scroll(region);
+    });
+
+    await selectRow(user, /\/1280/);
+
+    expect(region.scrollTop).toBe(0);
+    expect(readingsPosition()).toMatch(/^1-/);
   });
 });

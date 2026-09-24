@@ -36,6 +36,7 @@ const ZONE_TOGGLES: ReadonlyArray<{ readonly layer: keyof ZoneLayers; readonly l
   { layer: "stable", label: "STABLE ZONE" },
   { layer: "snowLine", label: "SNOW LINE" },
   { layer: "habitable", label: "HABITABLE ZONE" },
+  { layer: "optimistic", label: "OPTIMISTIC" },
 ];
 
 /**
@@ -87,7 +88,7 @@ export interface OrbitMapPanelProps {
  * is still pending or failed, the bodies' not counted while the server answers them `unsupported`
  * (the orchestrator's ruling 59.1); a bodies' answer the display cannot use reads
  * `BODY DATA INVALID` there, with `RETRY`, and the stars are drawn alone. With zones, the head also
- * offers `STABLE ZONE`, `SNOW LINE` and `HABITABLE ZONE`, each switching its annuli on and off. An answer that is a stale snapshot, its link
+ * offers `STABLE ZONE`, `SNOW LINE`, `HABITABLE ZONE` and `OPTIMISTIC`, each switching its annuli on and off. An answer that is a stale snapshot, its link
  * down or the newer request its display time asked for refused or timed out, is drawn and read as
  * stale. The chosen zoom preset is pressed while the view shows it: a zoom by hand releases it,
  * since the view no longer matches it, and `Z`, which fits the view to its radius again, presses it

@@ -355,10 +355,51 @@ function onPlaneAt(scene: SpatialScene, centre: Vec3, radius: number, angleDeg: 
   );
 }
 
+/**
+ * An annulus's edge ticks: at each edge every 10° from coreward, a tick of the data edge's length
+ * on screen, pointing across the band towards its other edge, or outwards from a lone edge, and no
+ * longer than half the band's width on screen.
+ */
+function edgeTickSegments(
+  scene: SpatialScene,
+  centre: Vec3,
+  radii: ReadonlyArray<number>,
+  toScreen: (point: Vec3) => ScreenPoint,
+  lengthPx: number,
+): TicksOp["segments"] {
+  const segments: Array<{ from: ScreenPoint; to: ScreenPoint }> = [];
+  const [inner, outer] = radii;
+  for (const radius of radii) {
+    // Towards the other edge; a lone edge towards twice its radius, outwards.
+    const towards = outer === undefined ? 2 * radius : radius === inner ? outer : inner;
+    if (radius <= 0 || towards === undefined) {
+      continue;
+    }
+    for (let angleDeg = 0; angleDeg < 360; angleDeg += TICK_EVERY_DEG) {
+      const from = toScreen(onPlaneAt(scene, centre, radius, angleDeg));
+      const aim = toScreen(onPlaneAt(scene, centre, towards, angleDeg));
+      const dx = aim.xPx - from.xPx;
+      const dy = aim.yPx - from.yPx;
+      const spanPx = Math.hypot(dx, dy);
+      // Seen edge-on at this angle, the band has no width on screen to point across.
+      if (!(spanPx > SAME_RADIUS_TOLERANCE)) {
+        continue;
+      }
+      const reachPx = Math.min(lengthPx, outer === undefined ? lengthPx : spanPx / 2);
+      segments.push({
+        from,
+        to: { xPx: from.xPx + (dx / spanPx) * reachPx, yPx: from.yPx + (dy / spanPx) * reachPx },
+      });
+    }
+  }
+  return segments;
+}
+
 function annulusOps(
   annulus: AnnulusMark,
   scene: SpatialScene,
   toScreen: (point: Vec3) => ScreenPoint,
+  remPx: number,
 ): DrawOp[] {
   const ops: DrawOp[] = [];
   const centre = footOnPlane(annulus, scene.frame.north);
@@ -381,6 +422,13 @@ function annulusOps(
       });
     }
     ops.push({ kind: "ticks", segments, stroke: "textMuted", widthPx: ANNULUS_WIDTH_PX });
+  }
+  if (annulus.edgeTicks === true) {
+    const edges = radii.filter((edge) => edge > 0);
+    const segments = edgeTickSegments(scene, centre, edges, toScreen, TICK_LENGTH_REM * remPx);
+    if (segments.length > 0) {
+      ops.push({ kind: "ticks", segments, stroke: "textMuted", widthPx: ANNULUS_WIDTH_PX });
+    }
   }
   return ops;
 }
@@ -413,7 +461,7 @@ function planeOps(
     });
   }
   for (const annulus of scene.annuli ?? []) {
-    ops.push(...annulusOps(annulus, scene, toScreen));
+    ops.push(...annulusOps(annulus, scene, toScreen, viewport.remPx));
   }
   return ops;
 }
@@ -565,8 +613,9 @@ function ringLabels(
 }
 
 /**
- * The labels of the annuli, each at its outer edge's rimward point, away from the rings' labels at
- * their coreward points; then those of the paths, each at its anchor.
+ * The labels of the annuli, each at its outer edge's rimward point, or its spinward point where it
+ * asks, away from the rings' labels at their coreward points; then those of the paths, each at its
+ * anchor.
  */
 function markCurveLabels(
   scene: SpatialScene,
@@ -587,7 +636,7 @@ function markCurveLabels(
     pointLabel(
       `annulus:${annulus.id}`,
       annulus.label,
-      onPlaneAt(scene, centre, annulus.outerRadius, 180),
+      onPlaneAt(scene, centre, annulus.outerRadius, annulus.labelSpinward === true ? 90 : 180),
     );
   }
   for (const path of scene.paths ?? []) {
@@ -614,7 +663,8 @@ function markCurveLabels(
  * reference ones. Each piece is a polyline, 1 px wide in `--text-muted` for a reference path and
  * 2 px wide in `--text` for the selected one. An annulus is drawn with the plane, after its rings: each edge a
  * `--text-muted` polyline and, for a belt, one `--text-muted` `ticks` op of radial segments between
- * the edges every 10° from coreward. Neither a path nor an annulus gives an anchor, so neither is
+ * the edges every 10° from coreward; an annulus with edge ticks, the optimistic habitable zone,
+ * then one `ticks` op of short ticks from each edge into the band. Neither a path nor an annulus gives an anchor, so neither is
  * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and
  * the plane's rings (the orchestrator's ruling 35).
  */

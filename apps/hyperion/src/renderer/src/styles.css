@@ -2305,9 +2305,14 @@ body {
   text-transform: none;
 }
 
+/*
+ * The list and the readout share what the panel leaves, each from its own content's height, and
+ * give way in proportion to it, each scrolling inside itself: neither falls below three rows'
+ * height, so that at 1280 x 720 a planet's readout and a system of many bodies both stay usable.
+ */
 .body-list {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   flex-direction: column;
   min-height: 0;
 }
@@ -2332,7 +2337,7 @@ body {
 
 .body-list__scroll {
   flex: 1 1 auto;
-  min-height: 2rem;
+  min-height: 6rem;
   overflow-y: auto;
 }
 
@@ -2394,6 +2399,24 @@ body {
 .body-list__unit {
   color: var(--text-muted);
   font-family: var(--font-sans);
+}
+
+/* The readings scroll inside their own region, the offset parent their position is measured by. */
+.body-readout__scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 6rem;
+  overflow-y: auto;
+}
+
+/* Inset, so that the panel's edge never clips it. */
+.body-readout__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.bodies-panel > .list-position {
+  flex: none;
 }
 
 /* Everything known about the selected body, two labelled values to a line. */

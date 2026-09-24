@@ -119,8 +119,21 @@ export interface AnnulusMark {
   readonly outerRadius: number;
   /** Whether the edges are joined by radial ticks every 10°, which marks a belt. */
   readonly ticks: boolean;
+  /**
+   * Whether each edge carries short ticks every 10° pointing into the band, a limit's hachure,
+   * which marks the optimistic habitable zone apart from the conservative one by shape (the
+   * orchestrator's ruling 65.4); with equal radii the one edge's ticks point outwards, the band
+   * running on beyond it. None when absent.
+   */
+  readonly edgeTicks?: boolean | undefined;
   /** Text of its label, at the outer edge's rimward point; empty for none. */
   readonly label: string;
+  /**
+   * Whether its label stands at its outer edge's spinward point instead, clear of a band whose
+   * outer edge lies just inside its own and is labelled at its rimward point, as the conservative
+   * habitable zone is. The rimward point when absent.
+   */
+  readonly labelSpinward?: boolean | undefined;
 }
 
 /** Everything a spatial view draws, in scene units about the view centre. */

@@ -746,6 +746,60 @@ describe("buildDrawList annuli", () => {
     });
   });
 
+  it("ticks each edge of an annulus with edge ticks into the band, 0.25rem long", () => {
+    const scene = bareScene({ annuli: [annulus("optimistic", 10, 20, { edgeTicks: true })] });
+
+    const ticks = buildDrawList(scene, TOP, VIEWPORT).ops.filter(
+      (op): op is TicksOp => op.kind === "ticks",
+    );
+
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0]?.stroke).toBe("textMuted");
+    const segments = ticks[0]?.segments ?? [];
+    // 36 on each edge, the inner's first, each 4 px at 16 px to the rem.
+    expect(segments).toHaveLength(72);
+    const radius = (point: { xPx: number; yPx: number }): number =>
+      Math.hypot(point.xPx - CENTRE.xPx, point.yPx - CENTRE.yPx);
+    segments.forEach((segment, index) => {
+      const inner = index < 36;
+      expect(radius(segment.from)).toBeCloseTo((inner ? 10 : 20) * K, 9);
+      expect(radius(segment.to)).toBeCloseTo((inner ? 10 : 20) * K + (inner ? 4 : -4), 9);
+    });
+  });
+
+  it("ticks a lone edge with edge ticks outwards", () => {
+    const scene = bareScene({ annuli: [annulus("from", 10, 10, { edgeTicks: true })] });
+
+    const segments = buildDrawList(scene, TOP, VIEWPORT).ops.flatMap((op) =>
+      op.kind === "ticks" ? op.segments : [],
+    );
+
+    expect(segments).toHaveLength(36);
+    for (const segment of segments) {
+      expect(Math.hypot(segment.to.xPx - CENTRE.xPx, segment.to.yPx - CENTRE.yPx)).toBeCloseTo(
+        10 * K + 4,
+        9,
+      );
+    }
+  });
+
+  it("keeps an edge tick within half a narrow band", () => {
+    // A band 2 px wide on screen: each tick reaches 1 px, to its middle, and no further.
+    const scene = bareScene({
+      annuli: [annulus("narrow", 10, 10 + 2 / K, { edgeTicks: true })],
+    });
+
+    const segments = buildDrawList(scene, TOP, VIEWPORT).ops.flatMap((op) =>
+      op.kind === "ticks" ? op.segments : [],
+    );
+
+    for (const segment of segments) {
+      expect(
+        Math.hypot(segment.to.xPx - segment.from.xPx, segment.to.yPx - segment.from.yPx),
+      ).toBeCloseTo(1, 9);
+    }
+  });
+
   it("draws one edge for equal radii and none of radius 0", () => {
     const scene = bareScene({
       annuli: [annulus("snow", 15, 15, { ticks: true }), annulus("inside", 0, 5)],
@@ -786,6 +840,20 @@ describe("buildDrawList annuli", () => {
         stack: 0,
       },
     ]);
+  });
+
+  it("labels an annulus that asks at its outer edge's spinward point", () => {
+    const scene = bareScene({
+      annuli: [annulus("wide", 10, 20, { label: "OPTIMISTIC", labelSpinward: true })],
+    });
+
+    const label = buildDrawList(scene, TOP, VIEWPORT).curveLabels.find(
+      (candidate) => candidate.key === "annulus:wide",
+    );
+    const spinward = project(local(0, 20, 0), viewBasis(FRAME, TOP), TOP, VIEWPORT);
+
+    expect(label?.xPx).toBeCloseTo(spinward.xPx, 9);
+    expect(label?.yPx).toBeCloseTo(spinward.yPx, 9);
   });
 
   it("gives an annulus no anchor, so that it is never picked", () => {

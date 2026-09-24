@@ -16,7 +16,14 @@ import {
   KM_PER_RSUN,
 } from "../../lib/format";
 import { architectureLabel } from "../../lib/system/bodyWords";
-import type { HostBody, HostRemnant, Modelled, Pending, Zone } from "../../lib/system/model";
+import type {
+  HabitableZone,
+  HostBody,
+  HostRemnant,
+  Modelled,
+  Pending,
+  Zone,
+} from "../../lib/system/model";
 import {
   objectKindLabel,
   phaseLabel,
@@ -129,22 +136,38 @@ function stableZone(zone: Zone): string | null {
 }
 
 /**
- * A zone's conservative habitable zone, from the moist greenhouse to the maximum greenhouse:
- * `NONE` where there is none (no light, or an inner edge beyond every orbit), `FROM` its inner edge
- * where its outer edge lies beyond every orbit; each limit `~` where the host's temperature lay
- * outside the fit's range.
+ * One pair of a habitable zone's limits as a span: `NONE` where there is none (no light, or an
+ * inner edge beyond every orbit), `FROM` its inner edge where its outer edge lies beyond every
+ * orbit; each limit `~` where the host's temperature lay outside the fit's range.
  */
-function habitableZone(zone: Zone): string {
-  const habitable = zone.habitableZone;
-  const innerM = habitable?.moistGreenhouseM ?? null;
-  if (habitable === null || innerM === null || !(innerM > 0)) {
+function habitableSpan(
+  habitable: HabitableZone | null,
+  edges: (zone: HabitableZone) => readonly [number | null, number | null],
+): string {
+  if (habitable === null) {
+    return "NONE";
+  }
+  const [innerM, outerM] = edges(habitable);
+  if (innerM === null || !(innerM > 0)) {
     return "NONE";
   }
   const inner = zoneDistance(innerM, habitable.extrapolated);
-  const outerM = habitable.maximumGreenhouseM;
   return outerM === null
     ? `FROM ${inner}`
     : `${inner} – ${zoneDistance(outerM, habitable.extrapolated)}`;
+}
+
+/** A zone's conservative habitable zone, from the moist greenhouse to the maximum greenhouse. */
+function habitableZone(zone: Zone): string {
+  return habitableSpan(zone.habitableZone, (hz) => [hz.moistGreenhouseM, hz.maximumGreenhouseM]);
+}
+
+/**
+ * A zone's optimistic habitable zone, from recent Venus to early Mars, the same fit's other pair of
+ * limits (ruling 65.4).
+ */
+function optimisticZone(zone: Zone): string {
+  return habitableSpan(zone.habitableZone, (hz) => [hz.recentVenusM, hz.earlyMarsM]);
 }
 
 /** The rows of one zone that holds a host. */
@@ -157,6 +180,7 @@ function zoneReadings({ zone, about }: HostZone): ReactNode {
       {stable === null ? null : <ReadoutRow label="STABLE ZONE" shown={value(stable)} wide />}
       <ReadoutRow label="SNOW LINE" shown={value(zoneDistance(zone.snowLineM, false))} wide />
       <ReadoutRow label="HABITABLE ZONE" shown={value(habitableZone(zone))} wide />
+      <ReadoutRow label="OPTIMISTIC" shown={value(optimisticZone(zone))} wide />
     </>
   );
 }
@@ -183,7 +207,7 @@ export interface HostReadingsProps {
  * remnant has nothing whose mass, light or size could be read, so those rows are left out, as a
  * section that does not apply is (ruling 34). Then each zone that holds it, its own first: what the
  * zone is about, its host's architecture class, its stable limits where companions set them, its
- * snow line and its conservative habitable zone.
+ * snow line, its conservative habitable zone and its optimistic one (`OPTIMISTIC`, ruling 65.4).
  */
 export function HostReadings({ host, zones }: HostReadingsProps) {
   const gone = host.kind === "no_remnant";

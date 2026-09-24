@@ -1828,16 +1828,21 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
 
 - **P14.T42.a Marks.** Hosts and bodies as point marks at `composePosition`, orbits as `path` marks,
   stable-zone limits, the snow line and the habitable zone as `annulus` marks that can be switched
-  off, belts as ticked annuli (T38.a), the cometary halo as a labelled outer ring only when it is
+  off (the habitable zone as two pairs of edges, each switchable: the conservative pair, moist to
+  maximum greenhouse, and the optimistic pair, recent Venus to early Mars, whose edges carry short
+  ticks into the band so that the two differ by shape and not by colour; ruling 65.4), belts as ticked annuli (T38.a), the cometary halo as a labelled outer ring only when it is
   inside the view. Orbits and every annulus edge are solid `--text-muted`, and the selected body's
   orbit, the one `"selected"` path, a solid `--text` hairline; `--line` is for the plane's grid and
   scale rings only (ruling 35.6, T38.a). Symbols, where shape
   encodes type and one shape means one thing on every display: hosts keep their symbols from the
   registry of plans 06 and 13 (`lib/galaxy/starSymbols.ts`, P06.T35.b: circle, ringed circle,
-  diamond for a white dwarf, triangle for a neutron star, square for a black hole). A planet, bound
-  or free-floating, is plan 13's `triangle-down`, with plan 05's size class telling giant (3) from
-  smaller planet (1) from dwarf planet (0), under a `SYMBOLS NOT TO SCALE` legend; a moon is a
-  `pentagon`; an unresolved contact is a `hexagon`. Both new outlines are closed, because plan 05's
+  diamond for a white dwarf, triangle for a neutron star, square for a black hole), and a host's
+  size class is its mass layer (0–4), as on the chart, so that size means one thing on both
+  displays (ruling 36, point 4). A planet, bound or free-floating, is plan 13's `triangle-down`,
+  with plan 05's size class telling giant (3) from smaller planet (1) from dwarf planet (0, raised
+  to 1 by ruling 35.5's floor); a moon is a `pentagon`; an unresolved contact is a `hexagon`. The
+  map says `BODIES NOT TO SCALE` once, and its legend carries no second `SYMBOLS NOT TO SCALE`,
+  since every symbol on it is a body (ruling 36, point 3); the `GALAXY` chart keeps its own label. Both new outlines are closed, because plan 05's
   filled-above, open-below rule needs a shape that can be filled, which rules out a plain cross. The
   list names every kind in words, so shape is never the only signal. Destroyed and unbound bodies
   are not drawn but stay in the list. Colour stays free: only the selection reticle and, later,
@@ -1892,7 +1897,9 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   ever a blank or a zero. _Slice:_ the surface, atmosphere, rotation, habitability and resources
   sections arrive tagged `not_modelled` and read `NOT YET MODELLED`; the hosts' rows show the
   stellar summary of P06.T33 (kind, phase, MK class without peculiar suffixes, initial mass and mass
-  now, L, R, T_eff, and for a remnant its kind, mass and cooling age), with the guide's em dash for
+  now, L, R, T_eff, and for a remnant its kind, mass and cooling age), R in R☉ for every star and
+  white dwarf and in km for a neutron star or a black hole (ruling 36, point 5), and each zone that
+  holds a host with both habitable-zone pairs (`HABITABLE ZONE` and `OPTIMISTIC`, ruling 65.4), with the guide's em dash for
   what plan 06 does not model yet (variability, rotation, activity, spins, kicks, binary class).
 - **P14.T43.c Events.** A list of the body events of the century around the display time, from a
   `body_events` request, each with its time in the chart's time system and a countdown in the
@@ -3638,3 +3645,35 @@ masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (
   - _T36.b, the handlers,_ in `requests/system.rs` beside `summary`, with the conversions in `convert/planetary.rs`. The order of checks is the summary's: the universe; `time` (`bad_request` naming `time`, which keeps every query inside ±H); the ID; the galaxy; the cache's job; then a second interactive job that evaluates and converts. `system_bodies` refuses a system as `system_summary` does (`unknown_system` naming `system`). `body_detail` names `body` for each refusal of its ID: a system part that is no system ID or that `resolve` refuses is `unknown_system`, an index that `BodyIndex::decode` rejects is `bad_request`, and an index at which the system holds no planetary body is `unknown_body`. **For the orchestrator:** a star's index (sub-indices `0000`–`000f`) is `unknown_body` too, since T30.b's `body_at` holds stars' records to be plan 06's; the message says to ask `system_summary`. The level granted is the level asked for until the Knowledge overlay, and the records are `snapshot_at` and `body_at` at the time, then `degrade`d. `hosts` is the `system_summary` answer for the same system and time. Zones, in the sim's order, carry the zone's own limits (not the strip-cut ones), the host's snow line from its zero-age luminosity by the disc's expression (`snow_line(ZoneDiscInputs::for_zone(..).host().zams_luminosity())`), so that a host whose disc is cut to nothing still has one, and `habitable_zone_at`; before the system is born the zones are empty and the plane `null`. **For the orchestrator:** `system_plane` is the plane of the innermost zone holding star 0, or, when that zone's host is a close-binary component (`HostMultiplicity::CloseBinary`), of the next zone out, the binary's circumbinary one, which shares the binary's plane; failing both, the first zone's. A surface or hooks section never converts a value, since both types are uninhabited.
   - _Ruling 64.7._ The workspace's `serde_json` has `float_roundtrip`. `558138600491200.44` m, the shortest text of its `f64`, was read as `…200.5` without it; `hyperion-protocol`'s `a_seventeen_digit_float_is_read_exactly` and the server's `a_seventeen_digit_client_float_is_read_exactly` (through the frame parser, as a range query's centre) pin it. No server golden moved. `packages/protocol/fixtures/planetary.json` is back at full precision: every number the wire lane had cut to twelve figures is its `f64` again, computed from its definition with the sim's constants and orbits (the Earth's μ = GM☉ + GM⊕, period, epoch position, mass GM⊕ ÷ G, density and gravity; the Jupiter's, the Moon's and the Ceres-like member's the same way; the snow line of 0.7 L☉), and the Rust builders, `planetary.test.ts` and two app tests (`bodiesWire.test.ts`, `bodyMap.test.ts`) read the same values.
   - _Tests._ `compute::bodies` unit tests: two concurrent requests generate once (the closure's count and `generated()`), systems past the byte bound are evicted and the bound never exceeded, and a refused ID is neither generated nor stored. `tests/system_bodies.rs` over a real socket: three pinned systems of seed `0x4d2` (a single star with a rocky planet and a giant, `42002cb200000003`; a pair with eight planets in three zones, `…0000`; a white-dwarf triple with fifteen, one engulfed, `…0005`) at −500, 0 and +731 yr equal the sim's `snapshot_at` bit for bit (positions, masses, orbits, bulk, labels, states, section states, zones and habitable zones), with the hosts equal to `system_summary`; each body's `body_detail` is `body_at` and the list's entry less its surface and hooks; `unknown_body` for an unused slot, a planetless system and two stars; `bad_request` naming `body` for a reserved slot and sub-index, `unknown_system` naming `body` or `system`, and `time` named first; `mass_and_orbit` sends no bulk key, and `contact` withholds the kind, label and mass; and a repeat is a cache hit with the same frame, generating once for two universes of one seed, a time elsewhere and a body's record. `plan_14_s_kinds_are_unsupported_until_their_handlers_land` is now `body_events_is_unsupported_until_its_handler_lands`.
+- **Ruling 65's queue and ruling 36 in the text, as built (round 8, `ui8`).**
+  - _Ruling 36._ T42.a and T43.b now say what the code already did: one `BODIES NOT TO SCALE` on the
+    orbit map, whose legend has no `SYMBOLS NOT TO SCALE` (`OrbitLegend`); a host's size class is
+    its mass layer by the census's bands (`orbitMap.ts`'s `layerOfMass` and `starSizeClass`, a
+    ringed circle raised to 2); and a neutron star's or a black hole's radius reads in km
+    (`HostReadings`'s `radiusInKm`). Nothing in the code changed for it.
+  - _The bodies panel scrolls (ruling 65, queued)._ The readout's readings stand in their own
+    scrolling region (`body-readout__scroll`, a `section` named `Readings`, reached by `Tab`), with
+    the readings in view and their total under it (`1-13 of 26`), measured from the DOM by
+    `lib/itemsInView.ts` since the readings are not one height; the live region inside it stays
+    mounted, and a new selection returns the region to its top. The list and the readout share what
+    the panel leaves from their content's heights and give way in proportion, neither below three
+    rows (6rem). Selecting by the keys leaves the focus on the tree and the selected row in view
+    (tested). Measured in the built client over the DevTools protocol, with a planet selected in a
+    system of twelve bodies: at 1920 × 1080 the list shows 366 of 384 px and the readout 395 of
+    413 px (`1-12 of 12`, `1-25 of 26`); at 1280 × 720 170 of 384 px and 214 of 431 px
+    (`1-6 of 12`, `1-13 of 26`, `14-26 of 26` scrolled). **For the orchestrator to rule:** a
+    readout is not one of the guide's "lists, logs and procedures"; it is read here as a list of
+    readings, and the position counts readings.
+  - _The optimistic habitable zone (ruling 65.4)._ The wire already carries it:
+    `HabitableZoneDto.recent_venus_m` and `early_mars_m`, the same Kopparapu et al. (2013, erratum
+    coefficients) fit and the same server call as the conservative pair, so the client computes
+    nothing. `zoneAnnuli` draws it as a fourth switchable layer (`OPTIMISTIC`), an annulus with the
+    new `AnnulusMark.edgeTicks`: each edge carries a `ticks` op of 0.25rem ticks every 10° pointing
+    into the band (no longer than half the band on screen; a lone edge, early Mars beyond every
+    orbit, ticks outwards), and its label stands at its outer edge's spinward point
+    (`labelSpinward`), since early Mars lies just beyond the maximum greenhouse, whose label holds
+    the rimward point. The host's readout reads `OPTIMISTIC` under `HABITABLE ZONE`, by the same
+    `NONE`, `FROM` and `~` rules. **For the orchestrator to rule:** the name `OPTIMISTIC` alone for
+    the toggle, the label and the row; the ticked edge as the non-colour cue; the layer shown by
+    default; the readout reading both pairs whatever the map's toggles. `GALAXY`'s draw lists are
+    byte for byte unchanged (the 1,152-scene probe, SHA-256 `9cf26949…`).
