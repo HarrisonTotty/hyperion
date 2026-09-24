@@ -194,7 +194,7 @@ describe("zoneAnnuli", () => {
         annulus.ticks,
       ]),
     ).toEqual([
-      ["SNOW LINE", 337_938_907_867, 337_938_907_867, false],
+      ["SNOW LINE", 337_938_907_867.118_65, 337_938_907_867.118_65, false],
       ["HABITABLE ZONE", 148_000_000_000, 253_000_000_000, false],
     ]);
   });

@@ -74,7 +74,10 @@ describe("toSystemBodiesModel", () => {
     const earth = bodiesOf().bodies.bodies[0];
 
     expect(EARTH_MASS_KG).toBe(3.986_004e14 / 6.674_3e-11);
-    expect(earth?.massMearth).toEqual({ state: "ok", value: 5.972_167_867_79e24 / EARTH_MASS_KG });
+    expect(earth?.massMearth).toEqual({
+      state: "ok",
+      value: 5.972_167_867_791_379e24 / EARTH_MASS_KG,
+    });
     expect(earth?.massMearth.state === "ok" ? earth.massMearth.value : 0).toBeCloseTo(1, 9);
   });
 

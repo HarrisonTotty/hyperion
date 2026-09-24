@@ -239,7 +239,7 @@ pub(crate) fn orbit_dto(orbit: &KeplerElements) -> OrbitDto {
 
 /// A clock time as the wire carries it.
 #[must_use]
-fn wire_time(t: UniverseTime) -> hyperion_protocol::UniverseTime {
+pub(super) fn wire_time(t: UniverseTime) -> hyperion_protocol::UniverseTime {
     hyperion_protocol::UniverseTime {
         seconds: t.seconds(),
         nanos: t.subsec_nanos(),

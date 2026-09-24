@@ -56,12 +56,12 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 
 /// The server's handlers: every request kind, and the code that answers it.
 ///
-/// Every kind of the first milestone is served (plan 04, P04.T14), and plan 06's `system_summary`
-/// (P06.T34). A later plan's kind that this server's [`REQUEST_KINDS`] does not hold is refused
-/// before it reaches here, as `unsupported`. A kind the protocol already defines but whose handler
-/// has not landed is answered `unsupported` here, under its own ID, as an older server would answer
-/// it (plan 04, design note 15): `system_bodies` and `body_detail` until plan 14's P14.T36, and
-/// `body_events` until its P14.T31. Each handler that names a universe starts from
+/// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
+/// (P06.T34), and plan 14's `system_bodies` and `body_detail` (P14.T36). A later plan's kind that
+/// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
+/// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
+/// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
+/// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
@@ -78,16 +78,16 @@ impl Handler for Handlers {
                 Box::pin(galaxy::systems(state, request, token))
             }
             RequestBody::SystemSummary(request) => Box::pin(system::summary(state, request, token)),
-            RequestBody::SystemBodies(_) => Box::pin(ready(Err(not_served_yet("system_bodies")))),
-            RequestBody::BodyDetail(_) => Box::pin(ready(Err(not_served_yet("body_detail")))),
+            RequestBody::SystemBodies(request) => Box::pin(system::bodies(state, request, token)),
+            RequestBody::BodyDetail(request) => Box::pin(system::detail(state, request, token)),
             RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
         }
     }
 }
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
-/// as an older server would answer it (plan 04, design note 15). Plan 14's kinds take it until
-/// their handlers land.
+/// as an older server would answer it (plan 04, design note 15). Plan 14's `body_events` takes it
+/// until P14.T31 lands.
 #[must_use]
 fn not_served_yet(kind: &str) -> RequestError {
     request_error(
@@ -766,6 +766,29 @@ mod tests {
         );
     }
 
+    /// Ruling 64.7 of 2026-09-22: a client's float is read as the number it sent, to the bit.
+    ///
+    /// `558138600491200.44` m, an offset inside one light-year's cell, is the shortest text of its
+    /// `f64`, seventeen digits long, and `serde_json` without its `float_roundtrip` feature reads it
+    /// one ulp high, as `558138600491200.5`: a range query's centre would reach the server a
+    /// sixteenth of a millimetre from where the client put it.
+    #[test]
+    fn a_seventeen_digit_client_float_is_read_exactly() {
+        let sent = 558_138_600_491_200.44_f64;
+        assert_eq!(format!("{sent:?}"), "558138600491200.44");
+        let frame = format!(
+            r#"{{"type":"request","id":3,"body":{{"kind":"systems_in_range","universe":"000000000000002a","centre":{{"cell_ly":[0,26000,0],"offset_m":[{sent:?},0.5,0.25]}},"radius_ly":50.0,"time":{{"seconds":0,"nanos":0}},"min_layer":"a","limit":5000,"include_stellar":false}}}}"#
+        );
+        let Inbound::Message(ClientMessage::Request {
+            body: RequestBody::SystemsInRange(request),
+            ..
+        }) = parse(&frame)
+        else {
+            panic!("the frame parses as a range query: {frame}");
+        };
+        assert_eq!(request.centre.offset_m[0].to_bits(), sent.to_bits());
+    }
+
     #[test]
     fn a_frame_with_no_usable_id_gives_the_connection_level_error() {
         for text in [
@@ -846,28 +869,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_14_s_kinds_are_unsupported_until_their_handlers_land() {
-        // The kinds are the protocol's (P14.T35.c), so they parse and reach the handlers, which
-        // answer them as an older server would until P14.T36 and T31 serve them.
+    async fn body_events_is_unsupported_until_its_handler_lands() {
+        // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
+        // answer it as an older server would until P14.T31 serves it.
         let harness = Harness::start(Handlers).await;
-        let planetary = every_body().into_iter().filter(|body| {
-            matches!(
-                body,
-                RequestBody::SystemBodies(_)
-                    | RequestBody::BodyDetail(_)
-                    | RequestBody::BodyEvents(_)
-            )
-        });
-        let mut kinds = Vec::new();
-        for body in planetary {
+        let events = every_body()
+            .into_iter()
+            .filter(|body| matches!(body, RequestBody::BodyEvents(_)))
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 1);
+        for body in events {
             let name = kind(&body);
             let answer = Handlers
                 .handle(Arc::clone(harness.state()), body, CancelToken::new())
                 .await;
             assert_eq!(answer, Err(not_served_yet(name)), "{name}");
-            kinds.push(name);
         }
-        assert_eq!(kinds, ["system_bodies", "body_detail", "body_events"]);
         harness.stop().await;
     }
 

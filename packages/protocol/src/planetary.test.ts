@@ -132,11 +132,13 @@ describe("system_bodies", () => {
     expect(earth.parent).toEqual(parent);
     expect(orbit.semi_major_axis_m).toBe(METRES_PER_AU);
     expect(orbit.eccentricity).toBe(0.0167);
-    expect(orbit.mu_m3_s2).toBe(1.327128386e20);
+    expect(orbit.mu_m3_s2).toBe(1.327128386004e20);
     expect(validUntil).toBeNull();
-    expect(okValue(earth.mass_kg)).toBe(5.97216786779e24);
+    expect(okValue(earth.mass_kg)).toBe(5.972167867791379e24);
     expect(okValue(earth.bulk).radius_m).toBe(6_371_000);
-    expect(earth.position_m).toEqual([39_081_101_553.4, -105_520_721_023, 95_232_836_817.8]);
+    expect(earth.position_m).toEqual([
+      39_081_101_553.427_47, -105_520_721_023.434_39, 95_232_836_817.832_58,
+    ]);
   });
 
   it("rebuilds a populated system's tree from each body's parent", () => {

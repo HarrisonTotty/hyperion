@@ -575,6 +575,19 @@ impl PlanetarySystem {
             .map(|at| &self.bodies[at])
     }
 
+    /// The bytes the system owns on the heap, beyond `size_of::<PlanetarySystem>()`: its zones,
+    /// hosts and bodies, by capacity. None of them owns anything further, so the charge grows with
+    /// the body count and the host count alone.
+    ///
+    /// It is what a server charges a cached system against its byte budget (plan 14, P14.T36.a),
+    /// beside [`SystemContext::heap_bytes`]; nothing generated reads it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.zones.capacity() * size_of::<OrbitZone>()
+            + self.hosts.capacity() * size_of::<PlanetaryHost>()
+            + self.bodies.capacity() * size_of::<Body>()
+    }
+
     /// The bodies whose parent is body `index`: a planet's moons and rings, a belt's members. None
     /// in this generator version, which generates planets only.
     pub fn children(&self, index: BodyIndex) -> impl Iterator<Item = &Body> {

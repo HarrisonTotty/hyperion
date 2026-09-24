@@ -559,6 +559,21 @@ mod tests {
         );
     }
 
+    /// Ruling 64.7 of 2026-09-22: a float the client writes with seventeen significant digits is
+    /// read back exactly. `558138600491200.44` m is the shortest text of its `f64`, and
+    /// `serde_json` without its `float_roundtrip` feature, which the workspace turns on, reads it
+    /// one ulp high.
+    #[test]
+    fn a_seventeen_digit_float_is_read_exactly() {
+        let sent = 558_138_600_491_200.44_f64;
+        let read: GalacticPosition = serde_json::from_str(&format!(
+            r#"{{"cell_ly": [0, 26000, 0], "offset_m": [{sent:?}, 0.5, 0.25]}}"#
+        ))
+        .unwrap();
+        assert_eq!(read.offset_m[0].to_bits(), sent.to_bits());
+        assert_eq!(serde_json::to_string(&sent).unwrap(), "558138600491200.44");
+    }
+
     #[test]
     fn galactic_position_wire_form() {
         assert_wire_form(

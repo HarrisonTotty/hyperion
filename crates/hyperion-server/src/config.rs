@@ -13,6 +13,7 @@
 //! | `--cell-cache`   | `HYPERION_CELL_CACHE_MB`   | 256 (MiB)                                    |
 //! | `--map-cache`    | `HYPERION_MAP_CACHE_MB`    | 64 (MiB)                                     |
 //! | `--system-cache` | `HYPERION_SYSTEM_CACHE_MB` | 128 (MiB)                                    |
+//! | `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | 128 (MiB)                                    |
 
 use std::error::Error;
 use std::fmt;
@@ -41,6 +42,8 @@ pub const ENV_CELL_CACHE_MB: &str = "HYPERION_CELL_CACHE_MB";
 pub const ENV_MAP_CACHE_MB: &str = "HYPERION_MAP_CACHE_MB";
 /// The variable giving the system cache's budget in MiB, for `--system-cache`.
 pub const ENV_SYSTEM_CACHE_MB: &str = "HYPERION_SYSTEM_CACHE_MB";
+/// The variable giving the body cache's budget in MiB, for `--body-cache`.
+pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
 
 /// The data directory when `--data-dir` is not given, relative to the working directory.
 pub const DEFAULT_DATA_DIR: &str = "./hyperion-data";
@@ -50,6 +53,8 @@ pub const DEFAULT_CELL_CACHE_MIB: usize = 256;
 pub const DEFAULT_MAP_CACHE_MIB: usize = 64;
 /// The system cache's budget when `--system-cache` is not given, in MiB (plan 06, P06.T34).
 pub const DEFAULT_SYSTEM_CACHE_MIB: usize = 128;
+/// The body cache's budget when `--body-cache` is not given, in MiB (plan 14, P14.T36.a).
+pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -62,6 +67,9 @@ const DEFAULT_MAP_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_SYSTEM_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SYSTEM_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_BODY_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_BODY_CACHE_MIB * BYTES_PER_MIB,
 };
 
 /// The server's command line.
@@ -98,6 +106,10 @@ pub struct ServerArgs {
     /// Budget of the cache of generated systems' stars, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_SYSTEM_CACHE_MB, default_value_t = DEFAULT_SYSTEM_CACHE)]
     system_cache: CacheBudget,
+
+    /// Budget of the cache of generated planetary systems, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_BODY_CACHE_MB, default_value_t = DEFAULT_BODY_CACHE)]
+    body_cache: CacheBudget,
 }
 
 impl From<ServerArgs> for ServerConfig {
@@ -110,6 +122,7 @@ impl From<ServerArgs> for ServerConfig {
             cell_cache,
             map_cache,
             system_cache,
+            body_cache,
         } = args;
         Self::builder()
             .addr(SocketAddr::new(address, port))
@@ -118,6 +131,7 @@ impl From<ServerArgs> for ServerConfig {
             .cell_cache_bytes(cell_cache.bytes)
             .map_cache_bytes(map_cache.bytes)
             .system_cache_bytes(system_cache.bytes)
+            .body_cache_bytes(body_cache.bytes)
             .build()
     }
 }
@@ -177,6 +191,7 @@ pub struct ServerConfig {
     cell_cache_bytes: usize,
     map_cache_bytes: usize,
     system_cache_bytes: usize,
+    body_cache_bytes: usize,
     entropy: Arc<dyn Entropy>,
 }
 
@@ -223,6 +238,12 @@ impl ServerConfig {
         self.system_cache_bytes
     }
 
+    /// The body cache's budget, in bytes.
+    #[must_use]
+    pub fn body_cache_bytes(&self) -> usize {
+        self.body_cache_bytes
+    }
+
     /// Where seeds and universe IDs are drawn from.
     #[must_use]
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
@@ -246,6 +267,7 @@ impl Default for ServerConfigBuilder {
                 cell_cache_bytes: DEFAULT_CELL_CACHE.bytes,
                 map_cache_bytes: DEFAULT_MAP_CACHE.bytes,
                 system_cache_bytes: DEFAULT_SYSTEM_CACHE.bytes,
+                body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 entropy: Arc::new(OsEntropy),
             },
         }
@@ -292,6 +314,14 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn system_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.system_cache_bytes = bytes;
+        self
+    }
+
+    /// The body cache's budget, in bytes. Zero caches nothing, though concurrent requests for one
+    /// system still share its generation.
+    #[must_use]
+    pub fn body_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.body_cache_bytes = bytes;
         self
     }
 
@@ -349,7 +379,7 @@ mod tests {
         parse(args).unwrap_err().kind()
     }
 
-    fn fields(config: &ServerConfig) -> (SocketAddr, &Path, usize, usize, usize, usize) {
+    fn fields(config: &ServerConfig) -> (SocketAddr, &Path, usize, usize, usize, usize, usize) {
         (
             config.addr(),
             config.data_dir(),
@@ -357,6 +387,7 @@ mod tests {
             config.cell_cache_bytes(),
             config.map_cache_bytes(),
             config.system_cache_bytes(),
+            config.body_cache_bytes(),
         )
     }
 
@@ -379,6 +410,7 @@ mod tests {
                 256 * 1024 * 1024,
                 64 * 1024 * 1024,
                 128 * 1024 * 1024,
+                128 * 1024 * 1024,
             )
         );
     }
@@ -400,6 +432,8 @@ mod tests {
             "0",
             "--system-cache",
             "2",
+            "--body-cache",
+            "5",
         ]);
         assert_eq!(
             fields(&config),
@@ -409,7 +443,8 @@ mod tests {
                 3,
                 1 << 20,
                 0,
-                2 << 20
+                2 << 20,
+                5 << 20
             )
         );
     }
@@ -439,6 +474,7 @@ mod tests {
                 (Some("cell-cache"), Some("HYPERION_CELL_CACHE_MB")),
                 (Some("map-cache"), Some("HYPERION_MAP_CACHE_MB")),
                 (Some("system-cache"), Some("HYPERION_SYSTEM_CACHE_MB")),
+                (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
             ]
         );
     }
@@ -522,6 +558,7 @@ mod tests {
         assert_eq!(DEFAULT_CELL_CACHE.to_string(), "256");
         assert_eq!(DEFAULT_MAP_CACHE.to_string(), "64");
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
+        assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
     }
 
     #[test]
@@ -568,6 +605,7 @@ mod tests {
             .cell_cache_bytes(10)
             .map_cache_bytes(20)
             .system_cache_bytes(30)
+            .body_cache_bytes(40)
             .build();
         assert_eq!(
             fields(&config),
@@ -577,7 +615,8 @@ mod tests {
                 2,
                 10,
                 20,
-                30
+                30,
+                40
             )
         );
     }

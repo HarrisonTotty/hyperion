@@ -7,10 +7,12 @@
 //! give it up. Whatever is computed this way fails only as a [`ComputeError`].
 //!
 //! [`GalaxyCache`] holds the galaxies built from universes' seeds, [`SharedCellCache`] the
-//! generated cells a range query reads and [`SharedSystemCache`] the systems' stars a
-//! `system_summary` reads, each keyed by a [`GalaxyKey`]. A density map is computed and cached as a
+//! generated cells a range query reads, [`SharedSystemCache`] the systems' stars a
+//! `system_summary` reads and [`SharedBodyCache`] the planetary systems `system_bodies` and
+//! `body_detail` read, each keyed by a [`GalaxyKey`]. A density map is computed and cached as a
 //! [`RawDensityMap`] and quantised for each response by [`quantise_map`].
 
+mod bodies;
 mod cancel;
 mod cells;
 mod density_map;
@@ -21,6 +23,7 @@ mod pool;
 mod single_flight;
 mod systems;
 
+pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
 pub use cancel::{CancelOnDrop, CancelToken};
 pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
 pub use density_map::{

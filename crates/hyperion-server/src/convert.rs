@@ -5,8 +5,9 @@
 //! cannot be used becomes a [`ConvertRequestError`], answered `bad_request` with the field named.
 //! Answers are built here too, by `From` from the server's types to the wire's, as are the request
 //! errors that the server's own errors become. The `system_summary` request and its answer are in
-//! [`stellar`].
+//! [`stellar`], and plan 14's `system_bodies` and `body_detail` in [`planetary`].
 
+mod planetary;
 mod stellar;
 
 use std::error::Error;
@@ -39,6 +40,9 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+pub(crate) use self::planetary::{
+    BodiesRequest, DetailRequest, body_detail, body_refusal, hosts_request, system_bodies,
+};
 pub(crate) use self::stellar::{SummaryRequest, system_summary, unknown_system};
 use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};

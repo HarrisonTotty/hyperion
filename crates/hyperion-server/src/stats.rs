@@ -9,7 +9,7 @@ use tokio::sync::watch;
 
 use crate::AppState;
 use crate::cache::LruCounters;
-use crate::compute::{GalaxyCounters, PoolCounters};
+use crate::compute::{BodyCacheCounters, GalaxyCounters, PoolCounters};
 
 /// A snapshot of the server's activity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -22,6 +22,7 @@ pub struct ServerStats {
     maps: LruCounters,
     cells: LruCounters,
     systems: LruCounters,
+    bodies: BodyCacheCounters,
 }
 
 impl ServerStats {
@@ -37,6 +38,7 @@ impl ServerStats {
             maps: state.maps.counters(),
             cells: state.cells.counters(),
             systems: state.systems.counters(),
+            bodies: state.bodies.counters(),
         }
     }
 
@@ -90,6 +92,14 @@ impl ServerStats {
     #[must_use]
     pub fn systems(&self) -> LruCounters {
         self.systems
+    }
+
+    /// The body cache's contents and use, including its byte budget, and the planetary systems it
+    /// has generated: a repeated `system_bodies` or `body_detail` for one system is a hit and
+    /// generates nothing (plan 14, P14.T36).
+    #[must_use]
+    pub fn bodies(&self) -> BodyCacheCounters {
+        self.bodies
     }
 }
 

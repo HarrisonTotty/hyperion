@@ -25,7 +25,10 @@ getrandom = "0.4.3"
 # is a generator-version change. `arch` is off so that there is one code path to reason about.
 libm = { version = "=0.2.16", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+# `float_roundtrip` (ruling 64.7): the default parser can read a 17-digit float one ulp off, so a
+# client's coordinates would reach the server a bit away from what it sent. Writing is exact either
+# way, so no server output moves.
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = [
     "macros",

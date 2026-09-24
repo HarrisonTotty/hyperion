@@ -315,7 +315,19 @@ impl SystemContext {
     /// As [`SystemStars::generate`] does, for a record of another galaxy.
     #[must_use]
     pub fn from_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
-        let stars = SystemStars::generate(galaxy, record);
+        Self::from_stars(galaxy, &SystemStars::generate(galaxy, record))
+    }
+
+    /// The context of the grid system whose stars `stars` are, for a caller that holds them
+    /// already, such as a server's cache of [`SystemStars`]: [`from_record`](Self::from_record)
+    /// without generating the stars again.
+    ///
+    /// The models are copied with their built tracks, so nothing is evolved twice, and the
+    /// context equals `from_record(galaxy, stars.record())` exactly. `stars` must be of `galaxy`,
+    /// whose potential gives the sphere of influence.
+    #[must_use]
+    pub fn from_stars(galaxy: &Galaxy, stars: &SystemStars) -> Self {
+        let record = stars.record();
         let hierarchy = stars.hierarchy().clone();
         let tidal_radius = galaxy.potential().tidal_radius(
             hierarchy.system_mass(),
@@ -496,6 +508,20 @@ impl SystemContext {
     #[must_use]
     pub const fn encounter_environment(&self) -> Option<&EncounterEnvironment> {
         self.encounter_environment.as_ref()
+    }
+
+    /// The bytes the context owns on the heap, beyond `size_of::<SystemContext>()`: each star's
+    /// model and track and the hierarchy's lists, by capacity, as [`SystemStars::heap_bytes`]
+    /// counts them.
+    ///
+    /// It is what a server charges a cached context against its byte budget (plan 14, P14.T36.a);
+    /// nothing generated reads it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.stars.iter().fold(
+            self.stars.capacity() * size_of::<StarModel>() + self.hierarchy.heap_bytes(),
+            |bytes, star| bytes + star.heap_bytes(),
+        )
     }
 }
 
@@ -1048,6 +1074,25 @@ mod tests {
             SystemContext::for_system(&galaxy, unplaced),
             Err(ResolveSystemError::NoSuchSystem)
         );
+    }
+
+    #[test]
+    fn a_context_from_held_stars_is_the_context_from_the_record() {
+        let galaxy = galaxy();
+        for record in records(&galaxy) {
+            let stars = SystemStars::generate(&galaxy, &record);
+            let held = SystemContext::from_stars(&galaxy, &stars);
+            assert_eq!(held, SystemContext::from_record(&galaxy, &record));
+            // Its heap is its stars' own, less the spare capacity of the stars' list, which the
+            // copy does not keep.
+            let models = size_of_val(stars.stars());
+            assert!(
+                (models..=stars.heap_bytes()).contains(&held.heap_bytes()),
+                "{} bytes held, the stars {}",
+                held.heap_bytes(),
+                stars.heap_bytes()
+            );
+        }
     }
 
     #[test]

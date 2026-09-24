@@ -334,19 +334,19 @@ pub(crate) mod tests {
 
     /// An Earth's orbit about a Sun: 1 au, e = 0.0167, in a system plane inclined 1 rad to the
     /// galactic plane with its node at 2.5 rad, and μ = GM☉ + GM⊕, whose period Kepler's third law
-    /// gives. Every number has twelve significant figures, as in the shared fixture.
+    /// gives. Every number is its `f64` in full, as in the shared fixture.
     pub(crate) fn earth_orbit() -> BodyOrbitDto {
         BodyOrbitDto {
             parent: OrbitHostDto::Star { body_index: 0 },
             orbit: OrbitDto {
-                period_s: 31_558_148.628_1,
+                period_s: 31_558_148.628_135_167,
                 semi_major_axis_m: 149_597_870_700.0,
                 eccentricity: 0.0167,
                 inclination_rad: 1.0,
                 ascending_node_rad: 2.5,
                 argument_of_periapsis_rad: 1.75,
                 mean_anomaly_at_epoch_rad: 0.5,
-                mu_m3_s2: 1.327_128_386e20,
+                mu_m3_s2: 1.327_128_386_004e20,
             },
             valid_until: None,
         }
@@ -356,29 +356,33 @@ pub(crate) mod tests {
         json!({
             "parent": { "type": "star", "body_index": 0 },
             "orbit": {
-                "period_s": 31_558_148.628_1,
+                "period_s": 31_558_148.628_135_167,
                 "semi_major_axis_m": 149_597_870_700.0,
                 "eccentricity": 0.0167,
                 "inclination_rad": 1.0,
                 "ascending_node_rad": 2.5,
                 "argument_of_periapsis_rad": 1.75,
                 "mean_anomaly_at_epoch_rad": 0.5,
-                "mu_m3_s2": 1.327_128_386e20,
+                "mu_m3_s2": 1.327_128_386_004e20,
             },
             "valid_until": null,
         })
     }
 
     /// Where [`earth_orbit`] puts the planet at the epoch, with its star at the barycentre.
-    const EARTH_AT_EPOCH_M: [f64; 3] = [39_081_101_553.4, -105_520_721_023.0, 95_232_836_817.8];
+    const EARTH_AT_EPOCH_M: [f64; 3] = [
+        39_081_101_553.427_47,
+        -105_520_721_023.434_39,
+        95_232_836_817.832_58,
+    ];
 
     /// Earth's bulk as the generator derives it (P14.T16.a's Solar System): 1 R⊕, the density
     /// and gravity of GM⊕ at that radius, a core mass fraction of 0.323 and 254.6 K.
     pub(crate) fn earth_bulk() -> BulkPropertiesDto {
         BulkPropertiesDto {
             radius_m: 6_371_000.0,
-            density_kg_m3: 5_513.413_711_56,
-            surface_gravity_m_s2: 9.820_249_457_24,
+            density_kg_m3: 5_513.413_711_557_57,
+            surface_gravity_m_s2: 9.820_249_457_244_522,
             class: PlanetClassDto::Rocky,
             mass_fractions: MassFractionsDto {
                 iron: 0.323,
@@ -393,8 +397,8 @@ pub(crate) mod tests {
     pub(crate) fn earth_bulk_json() -> Value {
         json!({
             "radius_m": 6_371_000.0,
-            "density_kg_m3": 5_513.413_711_56,
-            "surface_gravity_m_s2": 9.820_249_457_24,
+            "density_kg_m3": 5_513.413_711_557_57,
+            "surface_gravity_m_s2": 9.820_249_457_244_522,
             "class": "rocky",
             "mass_fractions": { "iron": 0.323, "rock": 0.677, "water": 0.0, "envelope": 0.0 },
             "equilibrium_temperature_k": 254.6,
@@ -410,7 +414,7 @@ pub(crate) mod tests {
             parent: Some(OrbitHostDto::Star { body_index: 0 }),
             state: BodyStateDto::Present,
             position_m: Some(EARTH_AT_EPOCH_M),
-            mass_kg: SectionDto::Ok(5.972_167_867_79e24),
+            mass_kg: SectionDto::Ok(5.972_167_867_791_379e24),
             orbit: SectionDto::Ok(earth_orbit()),
             moons: SectionDto::NotModelled,
             rings: SectionDto::NotModelled,
@@ -426,7 +430,7 @@ pub(crate) mod tests {
             "parent": { "type": "star", "body_index": 0 },
             "state": { "type": "present" },
             "position_m": EARTH_AT_EPOCH_M,
-            "mass_kg": { "state": "ok", "value": 5.972_167_867_79e24 },
+            "mass_kg": { "state": "ok", "value": 5.972_167_867_791_379e24 },
             "orbit": { "state": "ok", "value": earth_orbit_json() },
             "moons": { "state": "not_modelled" },
             "rings": { "state": "not_modelled" },

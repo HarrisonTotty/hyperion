@@ -1,5 +1,5 @@
 {
-  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number to twelve significant figures: the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels.",
+  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels.",
   "system_bodies_request": {
     "type": "request",
     "id": 21,
@@ -67,7 +67,7 @@
           },
           "inner_m": null,
           "outer_m": null,
-          "snow_line_m": 337938907867.0,
+          "snow_line_m": 337938907867.11865,
           "plane": {
             "inclination_rad": 1.0,
             "ascending_node_rad": 2.5
@@ -109,10 +109,10 @@
           "state": {
             "type": "present"
           },
-          "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+          "position_m": [39081101553.42747, -105520721023.43439, 95232836817.83258],
           "mass_kg": {
             "state": "ok",
-            "value": 5.97216786779e24
+            "value": 5.972167867791379e24
           },
           "orbit": {
             "state": "ok",
@@ -122,14 +122,14 @@
                 "body_index": 0
               },
               "orbit": {
-                "period_s": 31558148.6281,
+                "period_s": 31558148.628135167,
                 "semi_major_axis_m": 149597870700.0,
                 "eccentricity": 0.0167,
                 "inclination_rad": 1.0,
                 "ascending_node_rad": 2.5,
                 "argument_of_periapsis_rad": 1.75,
                 "mean_anomaly_at_epoch_rad": 0.5,
-                "mu_m3_s2": 1.327128386e20
+                "mu_m3_s2": 1.327128386004e20
               },
               "valid_until": null
             }
@@ -144,8 +144,8 @@
             "state": "ok",
             "value": {
               "radius_m": 6371000.0,
-              "density_kg_m3": 5513.41371156,
-              "surface_gravity_m_s2": 9.82024945724,
+              "density_kg_m3": 5513.41371155757,
+              "surface_gravity_m_s2": 9.820249457244522,
               "class": "rocky",
               "mass_fractions": {
                 "iron": 0.323,
@@ -172,10 +172,10 @@
           "state": {
             "type": "present"
           },
-          "position_m": [-229947709407.0, -361488388382.0, 694387237710.0],
+          "position_m": [-229947709406.6273, -361488388381.50775, 694387237709.8896],
           "mass_kg": {
             "state": "ok",
-            "value": 1.89812459734e27
+            "value": 1.8981245973360505e27
           },
           "orbit": {
             "state": "ok",
@@ -185,7 +185,7 @@
                 "body_index": 0
               },
               "orbit": {
-                "period_s": 374033065.135,
+                "period_s": 374033065.13490295,
                 "semi_major_axis_m": 777908927640.0,
                 "eccentricity": 0.0489,
                 "inclination_rad": 1.02,
@@ -207,8 +207,8 @@
             "state": "ok",
             "value": {
               "radius_m": 71482620.0,
-              "density_kg_m3": 1240.60841266,
-              "surface_gravity_m_s2": 24.7930249122,
+              "density_kg_m3": 1240.608412660714,
+              "surface_gravity_m_s2": 24.793024912209912,
               "class": "gas_giant",
               "mass_fractions": {
                 "iron": 0.05,
@@ -276,7 +276,7 @@
           },
           "inner_m": null,
           "outer_m": null,
-          "snow_line_m": 337938907867.0,
+          "snow_line_m": 337938907867.11865,
           "plane": {
             "inclination_rad": 1.0,
             "ascending_node_rad": 2.5
@@ -321,10 +321,10 @@
           "state": {
             "type": "present"
           },
-          "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+          "position_m": [39081101553.42747, -105520721023.43439, 95232836817.83258],
           "mass_kg": {
             "state": "ok",
-            "value": 5.97216786779e24
+            "value": 5.972167867791379e24
           },
           "orbit": {
             "state": "ok",
@@ -334,14 +334,14 @@
                 "body_index": 0
               },
               "orbit": {
-                "period_s": 31558148.6281,
+                "period_s": 31558148.628135167,
                 "semi_major_axis_m": 149597870700.0,
                 "eccentricity": 0.0167,
                 "inclination_rad": 1.0,
                 "ascending_node_rad": 2.5,
                 "argument_of_periapsis_rad": 1.75,
                 "mean_anomaly_at_epoch_rad": 0.5,
-                "mu_m3_s2": 1.327128386e20
+                "mu_m3_s2": 1.327128386004e20
               },
               "valid_until": null
             }
@@ -358,8 +358,8 @@
             "state": "ok",
             "value": {
               "radius_m": 6371000.0,
-              "density_kg_m3": 5513.41371156,
-              "surface_gravity_m_s2": 9.82024945724,
+              "density_kg_m3": 5513.41371155757,
+              "surface_gravity_m_s2": 9.820249457244522,
               "class": "rocky",
               "mass_fractions": {
                 "iron": 0.323,
@@ -388,10 +388,10 @@
           "state": {
             "type": "present"
           },
-          "position_m": [39461101553.4, -105520721023.0, 95232836817.8],
+          "position_m": [39461101553.42747, -105520721023.43439, 95232836817.83258],
           "mass_kg": {
             "state": "ok",
-            "value": 7.34578907151e22
+            "value": 7.3457890715131185e22
           },
           "orbit": {
             "state": "ok",
@@ -401,7 +401,7 @@
                 "id": "0200080020000000.0100"
               },
               "orbit": {
-                "period_s": 2357390.045,
+                "period_s": 2357390.0449994896,
                 "semi_major_axis_m": 384400000.0,
                 "eccentricity": 0.0549,
                 "inclination_rad": 0.09,
@@ -510,8 +510,8 @@
             "state": "ok",
             "value": {
               "radius_m": 5100000.0,
-              "density_kg_m3": 5513.41371156,
-              "surface_gravity_m_s2": 9.82024945724,
+              "density_kg_m3": 5513.41371155757,
+              "surface_gravity_m_s2": 9.820249457244522,
               "class": "rocky",
               "mass_fractions": {
                 "iron": 0.323,
@@ -542,7 +542,7 @@
           "position_m": null,
           "mass_kg": {
             "state": "ok",
-            "value": 1.89812459734e27
+            "value": 1.8981245973360505e27
           },
           "orbit": {
             "state": "not_applicable"
@@ -597,8 +597,8 @@
             "state": "ok",
             "value": {
               "radius_m": 6371000.0,
-              "density_kg_m3": 5513.41371156,
-              "surface_gravity_m_s2": 9.82024945724,
+              "density_kg_m3": 5513.41371155757,
+              "surface_gravity_m_s2": 9.820249457244522,
               "class": "ice_giant",
               "mass_fractions": {
                 "iron": 0.323,
@@ -672,7 +672,7 @@
                 "id": "0200080020000000.e000"
               },
               "orbit": {
-                "period_s": 145489557.507,
+                "period_s": 145489557.50710782,
                 "semi_major_axis_m": 414386101839.0,
                 "eccentricity": 0.0785,
                 "inclination_rad": 0.19,
@@ -855,10 +855,10 @@
         "state": {
           "type": "present"
         },
-        "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+        "position_m": [39081101553.42747, -105520721023.43439, 95232836817.83258],
         "mass_kg": {
           "state": "ok",
-          "value": 5.97216786779e24
+          "value": 5.972167867791379e24
         },
         "orbit": {
           "state": "ok",
@@ -868,14 +868,14 @@
               "body_index": 0
             },
             "orbit": {
-              "period_s": 31558148.6281,
+              "period_s": 31558148.628135167,
               "semi_major_axis_m": 149597870700.0,
               "eccentricity": 0.0167,
               "inclination_rad": 1.0,
               "ascending_node_rad": 2.5,
               "argument_of_periapsis_rad": 1.75,
               "mean_anomaly_at_epoch_rad": 0.5,
-              "mu_m3_s2": 1.327128386e20
+              "mu_m3_s2": 1.327128386004e20
             },
             "valid_until": null
           }
@@ -890,8 +890,8 @@
           "state": "ok",
           "value": {
             "radius_m": 6371000.0,
-            "density_kg_m3": 5513.41371156,
-            "surface_gravity_m_s2": 9.82024945724,
+            "density_kg_m3": 5513.41371155757,
+            "surface_gravity_m_s2": 9.820249457244522,
             "class": "rocky",
             "mass_fractions": {
               "iron": 0.323,
@@ -937,10 +937,10 @@
         "state": {
           "type": "present"
         },
-        "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+        "position_m": [39081101553.42747, -105520721023.43439, 95232836817.83258],
         "mass_kg": {
           "state": "ok",
-          "value": 5.97216786779e24
+          "value": 5.972167867791379e24
         },
         "orbit": {
           "state": "ok",
@@ -950,14 +950,14 @@
               "body_index": 0
             },
             "orbit": {
-              "period_s": 31558148.6281,
+              "period_s": 31558148.628135167,
               "semi_major_axis_m": 149597870700.0,
               "eccentricity": 0.0167,
               "inclination_rad": 1.0,
               "ascending_node_rad": 2.5,
               "argument_of_periapsis_rad": 1.75,
               "mean_anomaly_at_epoch_rad": 0.5,
-              "mu_m3_s2": 1.327128386e20
+              "mu_m3_s2": 1.327128386004e20
             },
             "valid_until": null
           }
@@ -1006,7 +1006,7 @@
         "state": {
           "type": "present"
         },
-        "position_m": [39081101553.4, -105520721023.0, 95232836817.8],
+        "position_m": [39081101553.42747, -105520721023.43439, 95232836817.83258],
         "mass_kg": {
           "state": "not_resolved"
         },

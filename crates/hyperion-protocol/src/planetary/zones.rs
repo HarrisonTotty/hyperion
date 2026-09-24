@@ -125,7 +125,7 @@ pub(crate) mod tests {
             host: OrbitHostDto::Star { body_index: 0 },
             inner_m: None,
             outer_m: None,
-            snow_line_m: 337_938_907_867.0,
+            snow_line_m: 337_938_907_867.118_65,
             plane: SystemPlaneDto {
                 inclination_rad: 1.0,
                 ascending_node_rad: 2.5,
@@ -147,7 +147,7 @@ pub(crate) mod tests {
             "host": { "type": "star", "body_index": 0 },
             "inner_m": null,
             "outer_m": null,
-            "snow_line_m": 337_938_907_867.0,
+            "snow_line_m": 337_938_907_867.118_65,
             "plane": { "inclination_rad": 1.0, "ascending_node_rad": 2.5 },
             "architecture": "solar_like",
             "habitable_zone": {
