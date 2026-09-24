@@ -1390,44 +1390,36 @@ mod tests {
     const POPULATION_SEED: u64 = 0x0618_d000_0000_0001;
     const POPULATION_STARS: u32 = 20_000;
 
-    /// Black holes are 38 ± 5% of the compact remnants of a Kroupa sample of 8–150 M☉ at Z = 0.02
-    /// (P06.T18; the research figure behind "about four fifths" of layer-E remnants staying),
-    /// on the generator's tracks. Black holes of 2–5 M☉ exist, and every neutron star lies in
-    /// 1.13–2.0 M☉.
+    /// Three shares of one Kroupa sample of 8–150 M☉ at Z = 0.02 (P06.T18), on the generator's
+    /// tracks, checked in one test so that the 20,000 tracks are built once:
+    ///
+    /// - black holes are 38 ± 5% of the compact remnants (the research figure behind "about four
+    ///   fifths" of layer-E remnants staying), black holes of 2–5 M☉ exist, and every neutron star
+    ///   lies in 1.13–2.0 M☉;
+    /// - complete fallback is 70–80% of black holes (the brainstorm's "three quarters of them");
+    /// - electron captures are 2–6% of the neutron stars, all single stars (the 0.1 M☉ window of
+    ///   design note 12).
     #[test]
     #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
-    fn black_holes_are_38_percent_of_compact_remnants_on_real_tracks() {
+    fn remnant_shares_of_a_kroupa_sample_on_real_tracks() {
         let p = kroupa_population(POPULATION_SEED, POPULATION_STARS);
+
         let share = Population::share(p.black_holes, p.compact());
         eprintln!("{p:?}: black holes {share:.4} of compact remnants");
-        assert!((0.33..=0.43).contains(&share), "{share}");
+        assert!((0.33..=0.43).contains(&share), "black holes: {share}");
         assert!(p.light_black_holes > 0, "no black hole of 2–5 M☉: {p:?}");
         let (lo, hi) = p.neutron_star_masses;
         assert!(
             lo >= MIN_NEUTRON_STAR_MASS.value() && hi <= MAX_NEUTRON_STAR_MASS.value(),
             "{lo}–{hi}"
         );
-    }
 
-    /// Complete fallback is 70–80% of black holes in the same sample (P06.T18; the brainstorm's
-    /// "three quarters of them").
-    #[test]
-    #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
-    fn complete_fallback_is_70_to_80_percent_of_black_holes_on_real_tracks() {
-        let p = kroupa_population(POPULATION_SEED, POPULATION_STARS);
         let share = Population::share(p.complete_fallback, p.black_holes);
-        eprintln!("{p:?}: complete fallback {share:.4} of black holes");
-        assert!((0.70..=0.80).contains(&share), "{share}");
-    }
+        eprintln!("complete fallback {share:.4} of black holes");
+        assert!((0.70..=0.80).contains(&share), "complete fallback: {share}");
 
-    /// Electron captures are 2–6% of the neutron stars of the same sample, all single stars
-    /// (P06.T18; the 0.1 M☉ window of design note 12).
-    #[test]
-    #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
-    fn electron_captures_are_2_to_6_percent_of_single_star_neutron_stars_on_real_tracks() {
-        let p = kroupa_population(POPULATION_SEED, POPULATION_STARS);
         let share = Population::share(p.electron_captures, p.neutron_stars);
-        eprintln!("{p:?}: electron captures {share:.4} of neutron stars");
-        assert!((0.02..=0.06).contains(&share), "{share}");
+        eprintln!("electron captures {share:.4} of neutron stars");
+        assert!((0.02..=0.06).contains(&share), "electron captures: {share}");
     }
 }

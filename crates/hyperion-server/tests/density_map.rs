@@ -601,6 +601,11 @@ async fn density_map_512_builds_within_budget() {
         * (RASTER_PAIR_EXP_CALLS / workers_f64)
             .max(FACE_ON_EXP_CALLS / workers_f64 + DEAREST_BAND_EXP_CALLS);
     let budget = Duration::from_secs_f64(budget_calls * exp_ns * 1e-9);
+    eprintln!(
+        "both 512-pixel maps took {elapsed:?} on {workers} workers against a budget of {budget:?}: \
+         {:.2} of the expected work",
+        elapsed.as_secs_f64() * 1e9 / exp_ns / (RASTER_PAIR_EXP_CALLS / workers_f64)
+    );
     assert!(
         elapsed <= budget,
         "both 512-pixel maps took {elapsed:?} on {workers} workers, over the budget of {budget:?}: \

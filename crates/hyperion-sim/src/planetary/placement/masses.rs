@@ -1,6 +1,6 @@
 //! Planet masses: a characteristic mass per group, members correlated about it ("peas in a pod"),
 //! and every group held to what its disc can supply (plan 14, P14.T7; design notes 4 and 5;
-//! rulings 38, 55 and 60).
+//! rulings 38, 55, 60 and 68).
 //!
 //! # The model
 //!
@@ -8,7 +8,7 @@
 //!   ([`MassLaw::Correlated`]) has one characteristic mass `m_c`, held to the template's range,
 //!   whose median follows how the group grew ([`is_drift_fed`], [`characteristic_mass`]):
 //!   - a *drift-fed* group, a compact chain, a warm giant's companions or a substellar chain:
-//!     `m_c` = 4 M⊕ × (M★ ÷ M☉) × 10^(`σ_b` z), with `σ_b` = 0.5 dex
+//!     `m_c` = 7.7 M⊕ × (M★ ÷ M☉) × 10^(`σ_b` z), with `σ_b` = 0.5 dex
 //!     ([`BETWEEN_SYSTEM_SCATTER_DEX`]). The host sets it; the disc's solids and metallicity do not;
 //!   - an *in-situ* rocky group: `m_c` = 0.5 M⊕ × (`M_s` ÷ [`REFERENCE_SOLID_MASS`]), as P14.T7.a
 //!     wrote it, `M_s` being the whole solid mass of the host's disc between its edges, already
@@ -68,12 +68,30 @@
 //! formation, the average planet mass scales almost linearly with the local surface density of
 //! the planetesimal disk" (Pascucci et al. 2018, §4, after Kokubo et al. 2006).
 //!
-//! The 4 M⊕ median is plan 14's. Pascucci et al.'s G hosts' law (Table 1: indices 0.76 below the
-//! break and −2.9 above) has its median at 0.55 of the break, 5.1 M⊕ at 1 M☉, if extended to the
-//! smallest masses, and at 0.70 of it, 6.5 M⊕, inside the range they fitted, (0.5–8) × 10⁻⁵;
-//! Mulders et al. (2021, §2.1) find a de-biased median of about 5 M⊕ for the radial-velocity
-//! planets. The plan's 4 M⊕ lies 20–40% under those, at the edge of their errors, and is kept as
-//! the plan's (ruling 55.4).
+//! # The normalisation (ruling 68.2)
+//!
+//! The median, 7.7 M⊕ × (M★ ÷ M☉), is the occurrence-weighted one: the peak of the distribution
+//! of every close-in planet's mass, not of the planets whose masses have been measured.
+//!
+//! - Wu (2019, ApJ 874, 91, §3.1 and Table 1) fits the Gaia–Kepler sample's radius distribution,
+//!   corrected for detection, with a population whose masses are log-normal about
+//!   `M_c` = `M_0` (M★ ÷ M☉), the form used here, and finds `M_0` = 7.70 ± 1.5 M⊕ for an Earth-like
+//!   core (her preferred model), the photo-evaporation valley's position across M to F hosts
+//!   giving the host-mass slope β ≈ 1 (§4: "a single scaling law, `M_p` ∝ M★^β, with β ≈ 1" from
+//!   0.2 to 2 M☉; her eq. 7 allows β of 0.95–1.35) and no dependence on the host's metallicity.
+//! - Pascucci et al. (2018, ApJ 856, L28, §3) forward-model Kepler's G hosts with EPOS and find
+//!   the break, where the occurrence per log mass ratio peaks, at 7.7 ± 1.7 M⊕, q = (2.5 ± 0.6) ×
+//!   10⁻⁵, for the median host of 0.91 M☉; their binned Table 1 gives 2.8–2.9 × 10⁻⁵ for M, K
+//!   and G hosts alike, "from ∼3.5-4.5 M⊕ around M dwarfs up to ∼8-9 M⊕ around G stars" (§2).
+//!
+//! Both put q near 2.5 × 10⁻⁵, 8.3 M⊕ at 1 M☉, and Wu's figure at 1 M☉ is taken. Plan 14's 4 M⊕,
+//! which ruling 55.4 kept provisionally, is half of it; the literature's 5–6.5 M⊕ that ruling 55
+//! set aside were medians of radial-velocity samples, and of the break-law extended below the
+//! surveys' reach. The slope stays 1: both sources find it linear.
+//!
+//! Wu's width is 0.29 dex; this module's is `σ_b` and `σ_w` together, about 0.54 dex, fitted to
+//! Weiss et al.'s pair statistics (below). Held to the template's 1–20 M⊕, the broader law puts
+//! 14% of a Sun's chain planets at exactly the 20 M⊕ ceiling (7% under the 4 M⊕ median).
 //!
 //! # The solid budget (ruling 38, point 4; ruling 60)
 //!
@@ -97,13 +115,15 @@
 //! explained "if planet formation starts in Class 0 phase with an efficiency of ∼15%". Plan 14's
 //! median solar disc holds 32.2 M⊕, 3.2 times the ∼10 M⊕ of a Sun-like Class II disc (Mulders et
 //! al. 2021, §1), which is a Class I disc; so the budget is the Class 0 reservoir, three times the
-//! disc ([`SOLID_BUDGET_EFFICIENCY`]), of which the median Sun-like chain (3.5 planets of 4 M⊕)
-//! takes 14%, Tychoniec et al.'s efficiency. At efficiency 1 the budget held M dwarfs to about 1.7
-//! small planets inside 200 days, under Dressing and Charbonneau's window, however steep
+//! disc ([`SOLID_BUDGET_EFFICIENCY`]), of which the median Sun-like chain (3.5 planets of
+//! 7.7 M⊕) takes 28%, twice Tychoniec et al.'s efficiency. At efficiency 1 the budget held M
+//! dwarfs to about 1.7 small planets inside 200 days, under Dressing and Charbonneau's window,
+//! however steep
 //! P14.T4.b's compact exponent; Mulders, Pascucci and Apai (2015, ApJ 814, 130, abstract) find the
 //! heavy-element mass of close-in planets rising "roughly inversely with stellar mass from 4 M⊕ in
 //! F stars to 5 M⊕ in G and K stars to 7 M⊕ in M stars ... in stark contrast with observed
-//! protoplanetary disk masses". It truncates 246 of 2,000 Sun-like chains (this module's tests).
+//! protoplanetary disk masses". It truncates 333 of 2,000 Sun-like chains (this module's tests;
+//! 246 under the 4 M⊕ median).
 //!
 //! The local isolation mass keeps what it describes: the core a giant starts from beyond the snow
 //! line ([`giant_core`]).
@@ -121,12 +141,13 @@
 //! A drift-fed group's mass no longer carries its disc's scatter, so `σ_b` is the whole of the
 //! scatter between systems. With `σ_w` = 0.2 dex, `σ_b` = 0.5 dex and the step s = 0.21 dex were
 //! fitted together on P14.T10.b's placed hosts, through P14.T11's Chen and Kipping radius with
-//! each planet's own quantile: the adjacent log radii correlate at 0.633 about FGK primaries of
-//! drawn \[Fe/H\] and 0.638 about single Suns, and the outer planet is the larger in 0.652 of
-//! pairs, all inside Weiss et al.'s windows. Ruling 55.1 proposed the step ("a larger outward step
-//! with the scatter re-fitted"); the plan's 0.1 dex gave 0.58. In this module's sample of 2,000
-//! chains in solar discs the log radii correlate at 0.635, the log masses at 0.830, and the outer
-//! planet is the heavier in 0.703 of pairs and the larger in 0.658. Chen and Kipping's scatter,
+//! each planet's own quantile: the adjacent log radii correlate at 0.618 about FGK primaries of
+//! drawn \[Fe/H\] and 0.620 about single Suns, and the outer planet is the larger in 0.652 of
+//! pairs, all inside Weiss et al.'s windows (0.633, 0.638 and 0.652 under the 4 M⊕ median, before
+//! ruling 68.2). Ruling 55.1 proposed the step ("a larger outward step with the scatter
+//! re-fitted"); the plan's 0.1 dex gave 0.58. In this module's sample of 2,000 chains in solar
+//! discs the log radii correlate at 0.607, the log masses at 0.822, and the outer planet is the
+//! heavier in 0.709 of pairs and the larger in 0.653. Chen and Kipping's scatter,
 //! 0.146 dex in radius above 2.04 M⊕ and independent for each planet (design note 8), is what
 //! separates the radius statistics from the mass ones; He, Ford and Ragozzine (2019, MNRAS 490,
 //! 4575, §3.7) fit a within-system width of 0.31 ± 0.07 in ln R, 0.135 dex, which that scatter
@@ -171,14 +192,17 @@ const GROUP_WORD: u64 = 2;
 /// The word of a group law's rank in a planet's block.
 const RANK_WORD: u64 = 4;
 
-/// The characteristic mass of a drift-fed group about a host of 1 M☉: 4 M⊕ (plan 14, P14.T7.a).
+/// The characteristic mass of a drift-fed group about a host of 1 M☉: 7.7 M⊕ (P14.T7.a; ruling
+/// 68.2).
 ///
-/// Plan 14's figure, 20–40% under the medians of Pascucci et al. (2018) and Mulders et al. (2021),
-/// 5–6.5 M⊕ at a solar mass, at the edge of their errors (see the [module documentation](self)).
-/// It is the median of a compact chain's, a warm giant's companions' and a substellar chain's
-/// characteristic mass about a solar-mass host, and scales in proportion to the host's mass
+/// Wu's (2019, ApJ 874, 91, Table 1) `M_0` = 7.70 ± 1.5 M⊕, the peak of the occurrence-weighted
+/// log-normal mass distribution of Kepler's close-in planets at 1 M☉, which Pascucci et al.'s
+/// (2018, §3) forward-modelled break, 7.7 ± 1.7 M⊕ at 0.91 M☉, confirms; plan 14's 4 M⊕ is half
+/// of it (see the [module documentation](self)). It is the median of a compact chain's, a warm
+/// giant's companions' and a substellar chain's characteristic mass about a solar-mass host, and
+/// scales in proportion to the host's mass
 /// (Pascucci et al. 2018; ruling 60).
-pub const COMPACT_CHARACTERISTIC_MASS: EarthMasses = EarthMasses::new(4.0);
+pub const COMPACT_CHARACTERISTIC_MASS: EarthMasses = EarthMasses::new(7.7);
 
 /// The characteristic mass of a rocky group in the median solar disc: 0.5 M⊕.
 ///
@@ -607,8 +631,9 @@ fn formed_within(masses: &[EarthMasses], limit: EarthMasses) -> usize {
 /// # Examples
 ///
 /// Every variate at its median shows the law's shape: a chain of five about a Sun centred on its
-/// characteristic mass, each planet 0.21 dex heavier than the one inside it; and in a disc with a
-/// tenth of the metals, the same chain's three inner planets, all that its budget can build.
+/// characteristic mass, each planet 0.21 dex heavier than the one inside it but the outermost,
+/// held at the range's 20 M⊕; and in a disc with a tenth of the metals, the same chain's two inner
+/// planets, all that its budget can build.
 ///
 /// ```
 /// use hyperion_sim::planetary::architecture::ArchitectureClass;
@@ -635,13 +660,13 @@ fn formed_within(masses: &[EarthMasses], limit: EarthMasses) -> usize {
 /// let solar = group_masses_from(chain, &disc_at(0.0)?, &draws);
 /// let m = solar.masses();
 /// assert_eq!(solar.cap(), GroupCap::AsDrawn);
-/// assert!((m[2].value() - 4.0).abs() < 0.01);
+/// assert!((m[2].value() - 7.7).abs() < 0.01);
 /// assert!(m[0] < m[1] && m[3] < m[4]);
 ///
 /// let poor = disc_at(-1.0)?;
 /// let held = group_masses_from(chain, &poor, &draws);
 /// assert_eq!(held.cap(), GroupCap::Truncated);
-/// assert_eq!(held.masses(), &m[..3]);
+/// assert_eq!(held.masses(), &m[..2]);
 /// assert!(held.total() <= solid_budget(&poor));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -715,7 +740,7 @@ pub fn group_masses_from(
 /// # Examples
 ///
 /// A compact chain of four planets about a Sun-like star: similar masses about a characteristic
-/// mass drawn about 4 M⊕, and never more than the disc's budget.
+/// mass drawn about 7.7 M⊕, and never more than the disc's budget.
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -749,10 +774,10 @@ pub fn group_masses_from(
 ///     .collect::<Result<Vec<_>, _>>()?;
 /// let group = group_masses(seed, system, chain, profile, &members);
 /// assert_eq!(group.masses().len(), 4);
-/// // A Sun's chains are 4 M⊕ times the group's own between-system scatter.
+/// // A Sun's chains are 7.7 M⊕ times the group's own between-system scatter.
 /// let z = MassDraws::for_planet(seed, system, members[0]).group.value();
 /// let typical = group.characteristic().expect("a correlated group").value();
-/// let expected = (4.0 * hyperion_sim::math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * z)).clamp(1.0, 20.0);
+/// let expected = (7.7 * hyperion_sim::math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * z)).clamp(1.0, 20.0);
 /// assert!((typical / expected - 1.0).abs() < 1e-9);
 /// assert!(group.total() <= solid_budget(profile));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1138,9 +1163,9 @@ mod tests {
         let solids = disc.solid_mass() / REFERENCE_SOLID_MASS;
         assert!((solids - 1.0).abs() < 2e-4, "{}", disc.solid_mass().value());
         // So its rocky groups are 0.5 M⊕, exactly as far as the constant's four figures allow,
-        // and its compact groups, which follow the host, 4 M⊕.
+        // and its compact groups, which follow the host, 7.7 M⊕.
         let rocky = &template(ArchitectureClass::TerrestrialOnly).groups()[0];
-        for (group, expected) in [(chain(), 4.0), (rocky, 0.5)] {
+        for (group, expected) in [(chain(), 7.7), (rocky, 0.5)] {
             let m = characteristic_mass(group, &disc, StandardNormal::ZERO);
             assert!((m.value() / expected - 1.0).abs() < 2e-4, "{m:?}");
         }
@@ -1167,12 +1192,13 @@ mod tests {
         assert!(solid_budget(&disc).value() > 2.0 * mmen);
     }
 
-    /// P14.T7.a, as ruling 60 calibrates it: the median characteristic mass of 10⁴ compact groups
-    /// about Suns is 3.6–4.4 M⊕. It does not move when the discs' solids double, and halves with
+    /// P14.T7.a, as rulings 60 and 68.2 calibrate it: the median characteristic mass of 10⁴
+    /// compact groups about Suns is 6.9–8.5 M⊕, Wu's (2019) 7.7 M⊕ within 10%, as the plan held
+    /// its 4 M⊕ to 3.6–4.4. It does not move when the discs' solids double, and halves with
     /// the host's mass (Pascucci et al. 2018); a rocky group's still doubles with its disc's
     /// solids.
     #[test]
-    fn compact_groups_about_suns_have_a_median_of_four_earth_masses() {
+    fn compact_groups_about_suns_have_wu_s_median_mass() {
         let sun = zams_host(1.0, 0.0);
         // The Sun's zero-age luminosity and radius at every mass and [Fe/H], so that only the
         // mass or the metals change.
@@ -1197,7 +1223,7 @@ mod tests {
             median(&mut masses)
         };
         let solar = median_of(1.0, 0.0);
-        assert!((3.6..4.4).contains(&solar), "{solar} M⊕");
+        assert!((6.9..8.5).contains(&solar), "{solar} M⊕");
         // [Fe/H] = log₁₀ 2 doubles every disc's solids, and the gas does not change.
         let doubled = median_of(1.0, core::f64::consts::LOG10_2);
         assert_same_bits(doubled, solar);
@@ -1277,7 +1303,7 @@ mod tests {
         // P14.T7.b's window for the log masses, corrected for Chen and Kipping's scatter.
         assert!((0.80..0.90).contains(&mass_r), "{mass_r}");
         assert!((0.55..0.75).contains(&outer_heavier), "{outer_heavier}");
-        // Weiss et al.'s 65.4%, to three binomial standard errors of this sample's 4,546 pairs
+        // Weiss et al.'s 65.4%, to three binomial standard errors of this sample's 4,259 pairs
         // (ruling 60's step); P14.T10.b holds its placed hosts to their 65.0–65.8%.
         assert!((0.633..0.675).contains(&outer_larger), "{outer_larger}");
     }
@@ -1307,10 +1333,10 @@ mod tests {
                 truncated += 1;
             }
         }
-        // An eighth of Sun-like chains are short of their reservoir (246 of 2,000): the heavy
+        // A sixth of Sun-like chains are short of their reservoir (333 of 2,000): the heavy
         // chains, and the poorest discs.
         assert!(
-            (180..320).contains(&truncated),
+            (240..430).contains(&truncated),
             "{truncated} of 2,000 truncated to the budget"
         );
         // Every template's groups in an M dwarf's poor disc, where the budget binds.
@@ -1442,13 +1468,14 @@ mod tests {
         assert_same_bits(steps_from_middle(3, 4), 1.5);
         assert_same_bits(steps_from_middle(2, 5), 0.0);
         // With no scatter, each chain member is 0.21 dex heavier than the one inside it, and the
-        // middle one is the characteristic mass; a rocky group's members are all alike.
+        // middle one is the characteristic mass (three members, since a fifth 0.42 dex above
+        // 7.7 M⊕ is held at 20 M⊕); a rocky group's members are all alike.
         let disc = median_disc(&zams_host(1.0, 0.0), 2.0);
-        let draws = [MassDraws::MEDIAN; 5];
+        let draws = [MassDraws::MEDIAN; 3];
         let group = group_masses_from(chain(), &disc, &draws);
         let m_c = group.characteristic().unwrap().value();
         let masses = group.masses();
-        assert!((masses[2].value() / m_c - 1.0).abs() < 1e-15);
+        assert!((masses[1].value() / m_c - 1.0).abs() < 1e-15);
         for pair in masses.windows(2) {
             assert!((pair[1] / pair[0] - math::exp10(OUTWARD_STEP_DEX)).abs() < 1e-12);
         }
@@ -1489,8 +1516,8 @@ mod tests {
         let substellar = &template(ArchitectureClass::SubstellarCompact).groups()[0];
         for group in TEMPLATES.iter().flat_map(ClassTemplate::groups) {
             let range = group.masses();
-            // A substellar chain's hosts have discs of a few hundredths of the solar one: 4 M⊕
-            // at 0.08 M☉ is 0.32 M⊕, inside its range.
+            // A substellar chain's hosts have discs of a few hundredths of the solar one: 7.7 M⊕
+            // at 0.08 M☉ is 0.62 M⊕, inside its range.
             let reference = if group == substellar {
                 reference_mass(group) * 0.08
             } else {
@@ -1504,7 +1531,7 @@ mod tests {
         let rocky = &template(ArchitectureClass::SolarLike).groups()[0];
         assert_same_bits(reference_mass(rocky).value(), 0.5);
         let companions = &template(ArchitectureClass::WarmGiant).groups()[1];
-        assert_same_bits(reference_mass(companions).value(), 4.0);
+        assert_same_bits(reference_mass(companions).value(), 7.7);
         let ice = &template(ArchitectureClass::SolarLike).groups()[2];
         assert!((reference_mass(ice).value() - 300.0_f64.sqrt()).abs() < 1e-12);
     }

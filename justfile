@@ -52,9 +52,12 @@ test:
     cargo test --workspace
     pnpm test
 
-# Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile. About 19 minutes.
-test-slow:
-    cargo test --workspace --profile slow-test -- --ignored
+# Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
+# (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
+# Nextest runs no doctests, but no doctest is slow. `.config/nextest.toml` holds the `slow` profile.
+[positional-arguments]
+test-slow *args:
+    cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@"
 
 # Run the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
 test-wasm:
@@ -104,5 +107,5 @@ build:
 # The gate before a commit: everything but the slow tests and the other architectures.
 ci: fmt-check check lint test gen-protocol-check
 
-# `ci` plus the slow statistical tests: the full gate, about 22 minutes.
+# `ci` plus the slow statistical tests: the full gate.
 ci-slow: ci test-slow

@@ -1,16 +1,30 @@
 //! Golden values of plan 14's built pieces: the disc's draws and discs, plan 06's disc-lifetime
 //! law, the closed forms of the limits and the spacing floor, and the architecture classes'
-//! probabilities and draws (P14.T3, T4, T6.a, T15; P06.T15.c).
+//! probabilities and draws (P14.T3, T4, T6.a, T15; P06.T15.c); and the golden systems (P14.T32),
+//! whole systems of the Milky Way fixture found once by `tests/common`'s `find_system` and pinned
+//! by ID, each with its `snapshot_at` at the epoch and at +H.
 //!
 //! They pin the arithmetic, not only the draws: a reordered sum, a changed power or a moved word
 //! changes a line here, which is a generator-version change. CI checks the same file on 64-bit Arm
 //! and on wasm32.
 
+#[expect(
+    dead_code,
+    reason = "the golden systems use the search helper of tests/common alone"
+)]
+mod common;
+
+use common::{Candidate, find_system};
 use hyperion_sim::coords::{CellSize, GenCell};
+use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
+use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::planetary::architecture::CLOSE_BINARY_CUTOFF_AU;
 use hyperion_sim::planetary::architecture::template::{
     CountLaw, EccentricityLaw, Location, MassLaw, PeriodLaw, TEMPLATES,
 };
+use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{
     ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
 };
@@ -20,14 +34,24 @@ use hyperion_sim::planetary::derive::{
     satellite_stability_limit,
 };
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
+use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
+use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis, satisfies_floor,
     spacing_floor,
 };
+use hyperion_sim::planetary::record::{BodyRecord, Section, SystemSnapshot};
+use hyperion_sim::planetary::{self, Body, PlanetarySystem, SystemContext};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::UnitUniform;
 use hyperion_sim::stellar::premain::disc_lifetime;
+use hyperion_sim::stellar::remnant::DeathKind;
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
+use hyperion_sim::stellar::state::Phase;
+use hyperion_sim::stellar::state::StarState;
+use hyperion_sim::time::ClockWindow;
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::Days;
 use hyperion_sim::units::consts::{
     EARTH_MASS_KG, JUPITER_MASS_KG, METRES_PER_AU, SECONDS_PER_GIGAYEAR, SOLAR_MASS_KG,
 };
@@ -423,4 +447,577 @@ fn limits_and_spacing_are_pinned() {
         satisfies_floor(&inner, &outer, one)
     ));
     golden!("planetary/limits", w.as_str());
+}
+
+// --- P14.T32: the golden systems ---
+
+/// The universe the golden systems are found and pinned in: the Milky Way fixture at this seed.
+const SYSTEMS_SEED: u64 = 0x5eed_0000_0014_0032;
+
+/// The Milky Way fixture the golden systems live in.
+fn fixture() -> Galaxy {
+    Galaxy::from_params(Seed::new(SYSTEMS_SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
+}
+
+/// One of the slice's golden systems (P14.T32): the description it stands for, the layer it is
+/// searched in, the most records the search may read, its predicate and the ID found.
+struct GoldenSystem {
+    name: &'static str,
+    layer: Layer,
+    budget: u32,
+    predicate: fn(&Candidate<'_>) -> bool,
+    id: u64,
+}
+
+/// A planet's mass in Jupiter masses.
+fn jupiters(body: &Body) -> f64 {
+    body.mass().value() / EARTH_MASSES_PER_JUPITER_MASS
+}
+
+/// The phase of star `n` at the epoch, `None` before it forms.
+fn phase_of(c: &Candidate<'_>, n: usize) -> Option<Phase> {
+    c.context().stars()[n]
+        .state_at(UniverseTime::EPOCH)
+        .map(|s| s.phase())
+}
+
+/// The states of `c`'s bodies at the epoch, in index order.
+fn states(c: &Candidate<'_>) -> Vec<BodyState> {
+    c.system()
+        .snapshot_at(c.context(), UniverseTime::EPOCH)
+        .bodies()
+        .iter()
+        .map(|r| r.identity().state())
+        .collect()
+}
+
+/// The bodies of `c` present at the epoch.
+fn present<'c>(c: &'c Candidate<'_>) -> Vec<&'c Body> {
+    c.system()
+        .bodies()
+        .iter()
+        .zip(states(c))
+        .filter(|(_, s)| *s == BodyState::Present)
+        .map(|(b, _)| b)
+        .collect()
+}
+
+/// A single star on the main sequence at the epoch, of initial mass `lo`–`hi` M☉.
+fn single_dwarf(c: &Candidate<'_>, lo: f64, hi: f64) -> bool {
+    (lo..=hi).contains(&c.record().primary_initial_mass().value())
+        && c.context().stars().len() == 1
+        && phase_of(c, 0) == Some(Phase::MainSequence)
+}
+
+/// A G dwarf: a single main-sequence star of 0.9–1.1 M☉ of 5,300–6,000 K at the epoch.
+fn g_dwarf(c: &Candidate<'_>) -> bool {
+    single_dwarf(c, 0.9, 1.1)
+        && c.context().stars()[0]
+            .state_at(UniverseTime::EPOCH)
+            .is_some_and(|s| (5_300.0..=6_000.0).contains(&s.effective_temperature().value()))
+}
+
+/// Whether every star of `c` is on the main sequence at the epoch.
+fn all_dwarfs(c: &Candidate<'_>) -> bool {
+    (0..c.context().stars().len()).all(|n| phase_of(c, n) == Some(Phase::MainSequence))
+}
+
+/// The pairs of `c`'s hierarchy, by semi-major axis in au.
+fn pair_separations_au(c: &Candidate<'_>) -> Vec<f64> {
+    c.context()
+        .hierarchy()
+        .pairs()
+        .map(|(_, orbit)| orbit.semi_major_axis().value() / METRES_PER_AU)
+        .collect()
+}
+
+/// An M dwarf with a resonant chain: a single main-sequence star of 0.08–0.5 M☉ whose chain of
+/// three or more planets was marked resonant (P14.T8.a).
+fn m_dwarf_with_a_resonant_chain(c: &Candidate<'_>) -> bool {
+    single_dwarf(c, 0.08, 0.5) && {
+        let chain: Vec<&Body> = c
+            .system()
+            .bodies()
+            .iter()
+            .filter(|b| b.placed().role() == GroupRole::Chain && !b.placed().hot())
+            .collect();
+        chain.len() >= 3 && chain.iter().any(|b| b.placed().resonance().is_some())
+    }
+}
+
+/// A metal-rich G dwarf with a hot Jupiter: \[Fe/H\] of +0.2 or more, and a planet of 0.3
+/// Jupiter masses or more inside 10 days, present at the epoch.
+fn metal_rich_g_dwarf_with_a_hot_jupiter(c: &Candidate<'_>) -> bool {
+    g_dwarf(c)
+        && c.context().fe_h().value() >= 0.2
+        && present(c)
+            .iter()
+            .any(|b| jupiters(b) >= 0.3 && Days::from(b.placed().orbit().period()).value() < 10.0)
+}
+
+/// A Solar-like system: a G dwarf of the `SolarLike` class with a rocky planet and a giant
+/// present at the epoch.
+fn solar_like_system(c: &Candidate<'_>) -> bool {
+    g_dwarf(c)
+        && c.system().architecture(OrbitHost::Star(0)) == Some(ArchitectureClass::SolarLike)
+        && {
+            let bodies = present(c);
+            bodies.iter().any(|b| b.placed().role() == GroupRole::Rocky)
+                && bodies.iter().any(|b| b.placed().role() == GroupRole::Giant)
+        }
+}
+
+/// An eccentric giant: a single FGK dwarf (0.7–1.3 M☉) of the `EccentricGiant` class whose giant
+/// has an eccentricity of 0.3 or more.
+fn eccentric_giant(c: &Candidate<'_>) -> bool {
+    single_dwarf(c, 0.7, 1.3)
+        && c.system().architecture(OrbitHost::Star(0)) == Some(ArchitectureClass::EccentricGiant)
+        && present(c).iter().any(|b| {
+            b.placed().role() == GroupRole::Giant
+                && b.placed().orbit().eccentricity().value() >= 0.3
+        })
+}
+
+/// A halo star: a single main-sequence star of the stellar halo, with a planet present at the
+/// epoch.
+fn halo_star(c: &Candidate<'_>) -> bool {
+    c.record().population() == Population::Halo
+        && c.context().stars().len() == 1
+        && all_dwarfs(c)
+        && !present(c).is_empty()
+}
+
+/// A close binary with a circumbinary planet: two main-sequence stars under 47 au apart (Kraus
+/// et al. 2016's cut) with a planet about the pair present at the epoch.
+fn close_binary_with_a_circumbinary_planet(c: &Candidate<'_>) -> bool {
+    c.context().stars().len() == 2
+        && all_dwarfs(c)
+        && pair_separations_au(c)
+            .iter()
+            .all(|&a| a < CLOSE_BINARY_CUTOFF_AU)
+        && present(c)
+            .iter()
+            .any(|b| matches!(b.host(), OrbitHost::Pair(_) | OrbitHost::Barycentre))
+}
+
+/// A wide binary with planets about both stars: two main-sequence stars 47 au or more apart,
+/// each with a planet of its own present at the epoch.
+fn wide_binary_with_planets_about_both(c: &Candidate<'_>) -> bool {
+    c.context().stars().len() == 2
+        && all_dwarfs(c)
+        && pair_separations_au(c)
+            .iter()
+            .all(|&a| a >= CLOSE_BINARY_CUTOFF_AU)
+        && {
+            let bodies = present(c);
+            [0, 1]
+                .iter()
+                .all(|&n| bodies.iter().any(|b| b.host() == OrbitHost::Star(n)))
+        }
+}
+
+/// A hierarchical triple: three main-sequence stars, with a planet present at the epoch.
+fn hierarchical_triple(c: &Candidate<'_>) -> bool {
+    c.context().stars().len() == 3 && all_dwarfs(c) && !present(c).is_empty()
+}
+
+/// A T Tauri star with its disc: a single pre-main-sequence star of 0.1–2 M☉ younger than its
+/// disc's lifetime, with bodies to come.
+fn t_tauri_star(c: &Candidate<'_>) -> bool {
+    (0.1..=2.0).contains(&c.record().primary_initial_mass().value())
+        && c.record().age_at_epoch().value() < 5.0e7
+        && c.context().stars().len() == 1
+        && phase_of(c, 0) == Some(Phase::PreMainSequence)
+        && c.system()
+            .disc(OrbitHost::Star(0))
+            .and_then(|d| d.profile())
+            .is_some_and(|d| c.record().age_at_epoch().value() < d.lifetime().value() * 1e6)
+        && !c.system().bodies().is_empty()
+}
+
+/// A subgiant: a single star crossing the Hertzsprung gap at the epoch, with a planet present.
+fn subgiant(c: &Candidate<'_>) -> bool {
+    c.record().age_at_epoch().value() > 1.0e8
+        && c.context().stars().len() == 1
+        && phase_of(c, 0) == Some(Phase::HertzsprungGap)
+        && !present(c).is_empty()
+}
+
+/// A red giant mid engulfment: a single star on the first giant branch at the epoch that has
+/// engulfed a planet and still has one.
+fn red_giant_mid_engulfment(c: &Candidate<'_>) -> bool {
+    c.record().age_at_epoch().value() > 1.0e8
+        && c.context().stars().len() == 1
+        && phase_of(c, 0) == Some(Phase::FirstGiantBranch)
+        && {
+            let states = states(c);
+            states.contains(&BodyState::Present)
+                && states.iter().any(|s| {
+                    matches!(
+                        s,
+                        BodyState::Destroyed {
+                            cause: DestructionCause::Engulfed,
+                            ..
+                        }
+                    )
+                })
+        }
+}
+
+/// A fallback black hole with survivors: a single star dead at the epoch by direct collapse, a
+/// black hole of complete fallback with no kick (P06.T18), with a planet present.
+fn fallback_black_hole_with_survivors(c: &Candidate<'_>) -> bool {
+    c.context().stars().len() == 1
+        && phase_of(c, 0) == Some(Phase::BlackHole)
+        && c.context().stars()[0]
+            .death()
+            .is_some_and(|d| d.kind() == DeathKind::DirectCollapse)
+        && !present(c).is_empty()
+}
+
+/// An ordinary filler: a single main-sequence star with a planet present at the epoch.
+fn filler(c: &Candidate<'_>) -> bool {
+    c.context().stars().len() == 1
+        && phase_of(c, 0) == Some(Phase::MainSequence)
+        && !present(c).is_empty()
+}
+
+/// Fourteen of the fifteen of P14.T32's twenty-four that the slice can make (its _Slice:_ line),
+/// in the order the plan lists them; the fifteenth, the T Tauri star, is [`T_TAURI`]. Each was
+/// checked by eye from its golden, and its comment says what it holds at the epoch.
+const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
+    GoldenSystem {
+        // A 0.138 M☉ M dwarf, [Fe/H] +0.04, `CompactMulti`: six planets of 0.37–7.1 M⊕ at
+        // 0.078–0.50 au, the inner pairs 1% wide of 3:2.
+        name: "m_dwarf_resonant_chain",
+        layer: Layer::A,
+        budget: 200_000,
+        predicate: m_dwarf_with_a_resonant_chain,
+        id: 0x01ff_fb2c_2000_0000,
+    },
+    GoldenSystem {
+        // A 1.02 M☉ G dwarf of 5,730 K, [Fe/H] +0.29, `HotJupiter`: 2.3 Jupiter masses at 0.044 au
+        // (3.4 days), circular, and a cold giant of 1.3 Jupiter masses at 13.9 au.
+        name: "hot_jupiter",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: metal_rich_g_dwarf_with_a_hot_jupiter,
+        id: 0x41fe_acda_0000_0001,
+    },
+    GoldenSystem {
+        // A 0.975 M☉ G dwarf of 5,460 K, [Fe/H] +0.25, `SolarLike`: five rocky planets of 0.8–2 M⊕
+        // at 0.16–1.06 au, giants of 5.5, 0.34 and 0.80 Jupiter masses at 2.9–21.5 au, and ice
+        // giants of 13.5 and 16.9 M⊕ at 35 and 51 au.
+        name: "solar_like",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: solar_like_system,
+        id: 0x4200_aca2_0000_0003,
+    },
+    GoldenSystem {
+        // A 0.902 M☉ dwarf of 5,110 K, [Fe/H] +0.08, `EccentricGiant`: one giant of 0.58 Jupiter
+        // masses at 1.17 au, e = 0.45.
+        name: "eccentric_giant",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: eccentric_giant,
+        id: 0x4200_acaa_0000_000a,
+    },
+    GoldenSystem {
+        // A 0.321 M☉ M dwarf of the halo, [Fe/H] −0.34 (the metal-rich tail of the halo's
+        // abundances), `CompactMulti`: one planet of 1.17 M⊕ at 0.109 au.
+        name: "halo_star",
+        layer: Layer::A,
+        budget: 200_000,
+        predicate: halo_star,
+        id: 0x01fd_bb36_6000_0000,
+    },
+    GoldenSystem {
+        // A 0.927 + 0.411 M☉ pair of main-sequence stars 1.97 au apart (e 0.19), [Fe/H] +0.44: the
+        // circumbinary zone is `CompactWithColdGiant`, with giants of 5.5 and 0.62 Jupiter masses at
+        // 6.0 and 27.8 au about the pair; neither star has planets of its own.
+        name: "close_binary",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: close_binary_with_a_circumbinary_planet,
+        id: 0x41ff_ecae_0000_0001,
+    },
+    GoldenSystem {
+        // A 0.780 + 0.776 M☉ pair of K dwarfs 748 au apart (e 0.41), [Fe/H] +0.14: A has one planet
+        // of 1.9 M⊕ at 0.080 au (`CompactMulti`), B five rocky and icy planets of 0.26–0.78 M⊕ at
+        // 0.21–1.9 au (`TerrestrialOnly`).
+        name: "wide_binary",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: wide_binary_with_planets_about_both,
+        id: 0x41ff_acaa_0000_0008,
+    },
+    GoldenSystem {
+        // A 0.870 M☉ K dwarf with a 0.397 + 0.367 M☉ pair of M dwarfs 57 au apart, 413 au out,
+        // [Fe/H] +0.22: every star `CompactMulti`, with three, two and three planets of 0.40–18 M⊕
+        // inside 0.3 au.
+        name: "hierarchical_triple",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: hierarchical_triple,
+        id: 0x4200_2cb2_0000_0003,
+    },
+    GoldenSystem {
+        // A 1.56 M☉ star crossing the Hertzsprung gap at 9.4 L☉, [Fe/H] +0.42,
+        // `CompactWithColdGiant`: an 11.3 M⊕ planet at 0.113 au and a 0.47 Jupiter-mass giant at
+        // 13.8 au, e = 0.43.
+        name: "subgiant",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: subgiant,
+        id: 0x4200_acaa_0000_0004,
+    },
+    GoldenSystem {
+        // A 1.59 M☉ star on the first giant branch at 88 L☉, [Fe/H] −0.11,
+        // `CompactWithColdGiant`: its chain planet of 1.59 M⊕ engulfed 2.6 Myr before the epoch, and
+        // giants of 1.3 and 2.7 Jupiter masses at 7.9 and 30 au still present.
+        name: "red_giant",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: red_giant_mid_engulfment,
+        id: 0x4200_2c5e_0000_0007,
+    },
+    GoldenSystem {
+        // A black hole of a 27.6 M☉ star that died by direct collapse, [Fe/H] +0.09,
+        // `TerrestrialOnly`: six rocky survivors of 1.3–2 M⊕ at 480–1,020 au, their orbits widened
+        // by the progenitor's mass loss.
+        name: "fallback_black_hole",
+        layer: Layer::E,
+        budget: 200_000,
+        predicate: fallback_black_hole_with_survivors,
+        id: 0x8200_b2e0_0000_000d,
+    },
+    GoldenSystem {
+        // A 0.335 M☉ M dwarf, [Fe/H] 0.00, `CompactMulti`: one planet of 0.77 M⊕ at 0.065 au.
+        name: "filler_a",
+        layer: Layer::A,
+        budget: 200_000,
+        predicate: filler,
+        id: 0x01ff_fb2c_6000_0000,
+    },
+    GoldenSystem {
+        // A 0.677 M☉ K dwarf, [Fe/H] +0.17, `CompactMulti`: two planets of 0.72 and 0.68 M⊕ at
+        // 0.035 and 0.044 au, circularised.
+        name: "filler_b",
+        layer: Layer::B,
+        budget: 200_000,
+        predicate: filler,
+        id: 0x2200_1659_8000_0000,
+    },
+    GoldenSystem {
+        // A 1.14 M☉ F dwarf, [Fe/H] +0.04, `TerrestrialOnly`: nine rocky and icy planets of 0.15–2.1
+        // M⊕ at 0.44–6.8 au.
+        name: "filler_c",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: filler,
+        id: 0x4200_2cb2_0000_0000,
+    },
+];
+
+/// The T Tauri star with its disc, the fifteenth of the slice, which no search finds: plan 06's
+/// `StarModel` starts every star at the zero-age main sequence, so no star of this generator
+/// version is in [`Phase::PreMainSequence`] (P14.T32.a's _Slice:_ line allows a description the
+/// grid cannot fill to wait).
+const T_TAURI: GoldenSystem = GoldenSystem {
+    name: "t_tauri",
+    layer: Layer::C,
+    budget: 200_000,
+    predicate: t_tauri_star,
+    id: 0,
+};
+
+/// The context and planets of a pinned ID.
+fn pinned(galaxy: &Galaxy, id: u64) -> (SystemRecord, SystemContext, PlanetarySystem) {
+    let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
+    let record = resolve(galaxy, id).expect("a pinned ID names a system");
+    let context = SystemContext::for_system(galaxy, id).expect("a pinned ID names a system");
+    let system = planetary::generate(galaxy.seed(), &context);
+    (record, context, system)
+}
+
+/// P14.T32.a: every pinned ID resolves, and its system is still what its name says.
+#[test]
+fn pinned_ids_satisfy_their_own_predicates() {
+    let galaxy = fixture();
+    for golden in &GOLDEN_SYSTEMS {
+        let id = SystemId::from_raw(golden.id).expect("a pinned ID is well formed");
+        assert_eq!(id.layer(), Some(golden.layer), "{}", golden.name);
+        let record = resolve(&galaxy, id).expect("a pinned ID names a system");
+        assert!(
+            (golden.predicate)(&Candidate::new(&galaxy, &record)),
+            "{} ({:#018x}) no longer satisfies its predicate",
+            golden.name,
+            golden.id
+        );
+    }
+}
+
+/// P14.T32.a: the search, run again, finds the pinned IDs, and still finds no T Tauri star.
+#[test]
+#[ignore = "slow: searches for the golden systems"]
+fn the_search_reproduces_the_pinned_ids() {
+    let galaxy = fixture();
+    let moved: Vec<String> = GOLDEN_SYSTEMS
+        .iter()
+        .filter_map(|golden| {
+            let found = find_system(&galaxy, golden.layer, golden.predicate, golden.budget)
+                .map(SystemId::raw);
+            (found != Some(golden.id)).then(|| {
+                let found = found.map_or_else(|| "none".to_owned(), |id| format!("{id:#018x}"));
+                format!("{}: found {found}", golden.name)
+            })
+        })
+        .collect();
+    assert!(moved.is_empty(), "{moved:#?}");
+    let t_tauri = find_system(&galaxy, T_TAURI.layer, T_TAURI.predicate, T_TAURI.budget);
+    assert_eq!(
+        t_tauri, None,
+        "a T Tauri star is found: pin it, with its golden"
+    );
+}
+
+/// A section's state, where it has no value to write.
+fn write_section_state<T>(w: &mut GoldenWriter, name: &str, section: &Section<T>) {
+    w.line(&format!("{name}: {:?}", section.state()));
+}
+
+fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
+    let identity = record.identity();
+    let label = identity
+        .label()
+        .ok()
+        .map_or_else(|| "(no label)".to_owned(), ToString::to_string);
+    w.line(&format!(
+        "body {:04x} {label}: {:?} about {:?}, {:?}",
+        record.index().get(),
+        identity.kind(),
+        identity.parent(),
+        identity.state()
+    ));
+    match record.mass() {
+        Section::Ok(mass) => w.f64("mass_mearth", mass.value()),
+        other => write_section_state(w, "mass", other),
+    }
+    match record.orbit() {
+        Section::Ok(orbit) => {
+            let e = orbit.elements();
+            w.f64("a_m", e.semi_major_axis().value());
+            w.f64("e", e.eccentricity().value());
+            w.f64("i_rad", e.inclination().value());
+            w.f64("node_rad", e.ascending_node().value());
+            w.f64("periapsis_rad", e.argument_of_periapsis().value());
+            w.f64(
+                "mean_anomaly_at_epoch_rad",
+                e.mean_anomaly_at_epoch().value(),
+            );
+            w.f64("period_s", e.period().value());
+            w.f64("mu_m3_s2", e.gravitational_parameter().value());
+            w.line(&format!("valid_until: {:?}", orbit.valid_until()));
+        }
+        other => write_section_state(w, "orbit", other),
+    }
+    match record.position() {
+        Some(position) => {
+            for (axis, x) in ["x_m", "y_m", "z_m"].into_iter().zip(position.metres()) {
+                w.f64(axis, x);
+            }
+        }
+        None => w.line("position: none"),
+    }
+    match record.bulk() {
+        Section::Ok(bulk) => {
+            w.f64("radius_rearth", bulk.radius().value());
+            w.f64("density_kg_m3", bulk.density().value());
+            w.f64("gravity_m_s2", bulk.surface_gravity().value());
+            w.line(&format!("class: {:?}", bulk.class()));
+            let f = bulk.fractions();
+            w.f64("iron", f.iron());
+            w.f64("rock", f.rock());
+            w.f64("water", f.water());
+            w.f64("envelope", f.envelope());
+            w.f64("t_eq_k", bulk.equilibrium_temperature().value());
+        }
+        other => write_section_state(w, "bulk", other),
+    }
+    write_section_state(w, "moons", record.moons());
+    write_section_state(w, "rings", record.rings());
+    write_section_state(w, "surface", record.surface());
+    write_section_state(w, "hooks", record.hooks());
+}
+
+fn write_snapshot(w: &mut GoldenWriter, name: &str, snapshot: &SystemSnapshot) {
+    w.line("");
+    w.line(&format!(
+        "{name}: {} bodies at {:?}",
+        snapshot.bodies().len(),
+        snapshot.time()
+    ));
+    write_section_state(w, "belts", snapshot.belts());
+    write_section_state(w, "halo", snapshot.halo());
+    for record in snapshot.bodies() {
+        write_record(w, record);
+    }
+}
+
+/// P14.T32.b: each golden system's whole `snapshot_at` at the epoch and at +H, with the stars it
+/// is about. The events of a century wait for P14.T31.
+#[test]
+fn golden_systems_are_pinned() {
+    let galaxy = fixture();
+    for golden in &GOLDEN_SYSTEMS {
+        let (record, context, system) = pinned(&galaxy, golden.id);
+        let mut w = GoldenWriter::new();
+        w.header(GENERATOR_VERSION.get());
+        w.line(&format!(
+            "{} {:#018x}: {:?}, {} stars",
+            golden.name,
+            golden.id,
+            record.population(),
+            context.stars().len()
+        ));
+        w.f64("fe_h", context.fe_h().value());
+        w.f64("age_at_epoch_yr", context.age_at_epoch().value());
+        for (n, star) in context.stars().iter().enumerate() {
+            let state = star.state_at(UniverseTime::EPOCH);
+            w.line(&format!(
+                "star {n}: {:?} at the epoch",
+                state.as_ref().map(StarState::phase)
+            ));
+            w.f64("initial_mass_msun", star.initial_mass().value());
+            if let Some(state) = state {
+                w.f64("mass_msun", state.mass().value());
+                w.f64("luminosity_lsun", state.luminosity().value());
+                w.f64("teff_k", state.effective_temperature().value());
+            }
+        }
+        for (node, orbit) in context.hierarchy().pairs() {
+            w.line(&format!("pair {}:", node.get()));
+            w.f64("a_au", orbit.semi_major_axis().value() / METRES_PER_AU);
+            w.f64("e", orbit.eccentricity().value());
+        }
+        for host in system.hosts() {
+            w.line(&format!(
+                "host {:?}: drawn {:?}, placed {:?}",
+                host.host(),
+                host.drawn_class(),
+                host.class()
+            ));
+        }
+        for t in [UniverseTime::EPOCH, ClockWindow::END] {
+            let label = if t == UniverseTime::EPOCH {
+                "epoch"
+            } else {
+                "+H"
+            };
+            write_snapshot(&mut w, label, &system.snapshot_at(&context, t));
+        }
+        golden!(&format!("planetary/systems/{}", golden.name), w.as_str());
+    }
 }

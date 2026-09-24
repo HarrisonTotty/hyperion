@@ -57,9 +57,14 @@ pedantic = { level = "warn", priority = -1 }
 lto = "thin"
 
 # Slow statistical tests (`just test-slow`): release speed, but with the debug assertions and
-# overflow checks that the sim's bound checks rely on.
+# overflow checks that the sim's bound checks rely on. Without the release build's thin LTO: the
+# slow tests check statistics, not speed, and LTO links each of some 55 test binaries in a build
+# that took over ten minutes with it. Generated output does not move, for the reasons given under
+# the dev profile's `opt-level` below. The one timed slow test, the density map's budget, is stated
+# in `math::exp` calls timed in the same binary, so it scales with the build.
 [profile.slow-test]
 inherits = "release"
+lto = false
 debug-assertions = true
 overflow-checks = true
 
@@ -68,8 +73,7 @@ overflow-checks = true
 # `opt-level = 2`, against about 18 s more on a build from scratch and no measurable change to an
 # incremental one (measured 2026-09-22 on 8 cores). Debug assertions and overflow checks stay on, so
 # the sim's bound checks still fire. Generated output does not change: the whole fast suite, golden
-# files included, passes bit for bit under `slow-test`, which optimises harder still (opt-level 3,
-# thin LTO).
+# files included, passes bit for bit at opt-level 3 with thin LTO, which optimises harder still.
 [profile.dev.package.hyperion-sim]
 opt-level = 2
 
@@ -87,6 +91,6 @@ opt-level = 2
 # is most of the work in the protocol's and the server's golden tests. Generated output is
 # unaffected: Rust neither contracts float operations nor enables fast-math, so IEEE results are
 # identical at every optimisation level, `libm` is pinned with `=`, and the whole fast suite, golden
-# files included, already passes bit for bit under `slow-test` at opt-level 3 with thin LTO.
+# files included, already passes bit for bit at opt-level 3 with thin LTO.
 [profile.dev.package."*"]
 opt-level = 2

@@ -101,24 +101,24 @@ planet 0d00 m0 = 0x400d466f5b9ed82a  # 3.6593920858240567
 planet 0d00 formed = 0x42660bd8157f1b8f  # 757503929336.8612
 planet 0d00 role IceRich hot false beyond true resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 0 compact_multi -> compact_multi next 2
-planet 0100 mass = 0x40035ac4350c102f  # 2.4193195480638887
-planet 0100 a = 0x4209d101dbd5f429  # 13860092794.744219
-planet 0100 e = 0x3fc7e07035dd5401  # 0.18653681402307146
+planet 0100 mass = 0x4012a0f6730ecf94  # 4.657190130022986
+planet 0100 a = 0x4209d105a63cf492  # 13860123847.61942
+planet 0100 e = 0x3fc7d7b6a16498e5  # 0.18627055054202582
 planet 0100 i = 0x3ffa0c3c878e65c3  # 1.6279874129453311
 planet 0100 node = 0x3fea41b97669020c  # 0.8205230057429289
 planet 0100 periapsis = 0x3fefba94cbe505e9  # 0.9915260298077416
 planet 0100 m0 = 0x4013c5eadb0a6fe9  # 4.94327871562198
-planet 0100 formed = 0x4209d101dbd5f429  # 13860092794.744219
+planet 0100 formed = 0x4209d105a63cf492  # 13860123847.61942
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 0 compact_with_cold_giant -> compact_with_cold_giant next 4
-planet 0100 mass = 0x3ff0000000000000  # 1.0
-planet 0100 a = 0x421016ccc6ceaad1  # 17275498931.666813
-planet 0100 e = 0x3faf240502755ced  # 0.06082168250093809
+planet 0100 mass = 0x3ffa57daa7d7527b  # 1.6464487606328067
+planet 0100 a = 0x421016cd75815c66  # 17275510112.340233
+planet 0100 e = 0x3faf24ce25e572b3  # 0.06082767689324466
 planet 0100 i = 0x3fe9a93de761d115  # 0.8019094008618902
 planet 0100 node = 0x3fe4382ceb7b16d5  # 0.6318573569521627
 planet 0100 periapsis = 0x4010a5831defd8b2  # 4.161632983936373
 planet 0100 m0 = 0x3fee360518addea8  # 0.9440942270293435
-planet 0100 formed = 0x421016ccc6ceaad1  # 17275498931.666813
+planet 0100 formed = 0x421016cd75815c66  # 17275510112.340233
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 planet 0200 mass = 0x4068e4a702ed70dc  # 199.14538713812988
 planet 0200 a = 0x42575439cd1cc87c  # 400789288051.13257
@@ -416,24 +416,24 @@ planet 0d00 m0 = 0x400d466f5b9ed82a  # 3.6593920858240567
 planet 0d00 formed = 0x42660bd8157f1b8f  # 757503929336.8612
 planet 0d00 role IceRich hot false beyond true resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 1 compact_multi -> compact_multi next 2
-planet 0100 mass = 0x40035ac4350c102f  # 2.4193195480638887
-planet 0100 a = 0x4209d101dbd5f429  # 13860092794.744219
-planet 0100 e = 0x3fc7e07035dd5401  # 0.18653681402307146
+planet 0100 mass = 0x4012a0f6730ecf94  # 4.657190130022986
+planet 0100 a = 0x4209d105a63cf492  # 13860123847.61942
+planet 0100 e = 0x3fc7d7b6a16498e5  # 0.18627055054202582
 planet 0100 i = 0x3ffa0c3c878e65c3  # 1.6279874129453311
 planet 0100 node = 0x3fea41b97669020c  # 0.8205230057429289
 planet 0100 periapsis = 0x3fefba94cbe505e9  # 0.9915260298077416
 planet 0100 m0 = 0x4013c5eadb0a6fe9  # 4.94327871562198
-planet 0100 formed = 0x4209d101dbd5f429  # 13860092794.744219
+planet 0100 formed = 0x4209d105a63cf492  # 13860123847.61942
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 1 compact_with_cold_giant -> compact_multi next 2
-planet 0100 mass = 0x3ff0000000000000  # 1.0
-planet 0100 a = 0x421016ccc6ceaad1  # 17275498931.666813
-planet 0100 e = 0x3faf240502755ced  # 0.06082168250093809
+planet 0100 mass = 0x3ffa57daa7d7527b  # 1.6464487606328067
+planet 0100 a = 0x421016cd75815c66  # 17275510112.340233
+planet 0100 e = 0x3faf24ce25e572b3  # 0.06082767689324466
 planet 0100 i = 0x3fe9a93de761d115  # 0.8019094008618902
 planet 0100 node = 0x3fe4382ceb7b16d5  # 0.6318573569521627
 planet 0100 periapsis = 0x4010a5831defd8b2  # 4.161632983936373
 planet 0100 m0 = 0x3fee360518addea8  # 0.9440942270293435
-planet 0100 formed = 0x421016ccc6ceaad1  # 17275498931.666813
+planet 0100 formed = 0x421016cd75815c66  # 17275510112.340233
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 1 solar_like -> terrestrial_only next 14
 planet 0100 mass = 0x3fc17c47dad60a58  # 0.13660524545055597
@@ -645,52 +645,43 @@ planet 0a00 m0 = 0x3ff847097db46d88  # 1.5173430357307058
 planet 0a00 formed = 0x4240696708d0efc4  # 140975673761.87317
 planet 0a00 role Rocky hot false beyond false resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 1 warm_giant -> compact_multi next 3
-planet 0100 mass = 0x3ff34764fb78b3fd  # 1.2049302886109665
-planet 0100 a = 0x41f593c9dd16cab6  # 5792112081.42449
+planet 0100 mass = 0x40028e51320a93a3  # 2.3194908055761103
+planet 0100 a = 0x41f593cb7108fdfa  # 5792118544.562006
 planet 0100 e = 0x3fb8d2d584ba585b  # 0.09696707239558704
 planet 0100 i = 0x4004293ed3cf7154  # 2.520139364975117
 planet 0100 node = 0x3fdcdd70fc5821aa  # 0.4510157074260187
 planet 0100 periapsis = 0x3ffc2be2abc87721  # 1.7607142172123036
 planet 0100 m0 = 0x400a5b93f7dd6a76  # 3.2947158207364806
-planet 0100 formed = 0x41f593c9dd16cab6  # 5792112081.42449
+planet 0100 formed = 0x41f593cb7108fdfa  # 5792118544.562006
 planet 0100 role Chain hot false beyond false resonance None rescaled false
-planet 0200 mass = 0x40119172f82febc8  # 4.392040136265628
-planet 0200 a = 0x41fe3ab2f6eede98  # 8114614126.929344
+planet 0200 mass = 0x4020e8cb7547b957  # 8.454677262311334
+planet 0200 a = 0x420072644c81aaab  # 8829831568.208334
 planet 0200 e = 0x3fa72a8aee4cbe93  # 0.04524645003254792
 planet 0200 i = 0x40044dff32e69367  # 2.5380844093910357
 planet 0200 node = 0x3fe059213d1bdbbb  # 0.5108801072627708
 planet 0200 periapsis = 0x40136406181b37ab  # 4.847679497395727
 planet 0200 m0 = 0x3fe0f4a563f8c972  # 0.5298640205931362
-planet 0200 formed = 0x41fe3ab2f6eede98  # 8114614126.929344
+planet 0200 formed = 0x420072644c81aaab  # 8829831568.208334
 planet 0200 role Chain hot false beyond false resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 1 hot_jupiter -> compact_multi next 5
-planet 0100 mass = 0x3ff1084f72262fe3  # 1.064528890509785
-planet 0100 a = 0x4210749c19e82a27  # 17668966010.041164
+planet 0100 mass = 0x400064cc7777f47e  # 2.049218114231336
+planet 0100 a = 0x4210749d2a12949e  # 17668983428.645134
 planet 0100 e = 0x3fbc5e264899a176  # 0.11081160805190912
 planet 0100 i = 0x4004ba6aa44ac561  # 2.591023715526419
 planet 0100 node = 0x3ffa08d2132d3ee7  # 1.6271534680453728
 planet 0100 periapsis = 0x3fe7c23989a2214a  # 0.7424590767050543
 planet 0100 m0 = 0x3fe3d0724fb7689b  # 0.6191951329194753
-planet 0100 formed = 0x4210749c19e82a27  # 17668966010.041164
+planet 0100 formed = 0x4210749d2a12949e  # 17668983428.645134
 planet 0100 role Chain hot false beyond false resonance None rescaled false
-planet 0200 mass = 0x40077ad90f007766  # 2.9349843189256033
-planet 0200 a = 0x4216931c9ab34f2a  # 24239351468.82731
+planet 0200 mass = 0x40169970eb3d3fb8  # 5.649844813931786
+planet 0200 a = 0x42186de4faef41a4  # 26230734523.814102
 planet 0200 e = 0x3fa7f34602c4a585  # 0.046777904355916035
 planet 0200 i = 0x40050fca3b6edd09  # 2.6327099459846335
 planet 0200 node = 0x3ff87703ff82d6ee  # 1.5290565472509416
 planet 0200 periapsis = 0x3fee7932aa1ead5f  # 0.9522946665432918
 planet 0200 m0 = 0x40167056ebf19587  # 5.609706579799769
-planet 0200 formed = 0x4216931c9ab34f2a  # 24239351468.82731
+planet 0200 formed = 0x42186de4faef41a4  # 26230734523.814102
 planet 0200 role Chain hot false beyond false resonance None rescaled false
-planet 0300 mass = 0x4011be8a1a0a4022  # 4.436073691249506
-planet 0300 a = 0x421fc9a1fba6624d  # 34131705577.595997
-planet 0300 e = 0x3fb464a1d2b59513  # 0.07966052431364216
-planet 0300 i = 0x40052e64e3d5d3af  # 2.6476533698682583
-planet 0300 node = 0x3ffad420d226404d  # 1.6767891129457155
-planet 0300 periapsis = 0x4011798f41e19002  # 4.368710545913929
-planet 0300 m0 = 0x3ff72912edf224b5  # 1.447527818180146
-planet 0300 formed = 0x421fc9a1fba6624d  # 34131705577.595997
-planet 0300 role Chain hot false beyond false resonance None rescaled false
 host 1 M_sun [Fe/H] 0 disc 1 substellar_compact -> substellar_compact next 4
 planet 0100 mass = 0x3ffcd6917434e840  # 1.802384809429455
 planet 0100 a = 0x4214563b2dc93e72  # 21836516210.31098
@@ -794,24 +785,24 @@ planet 0d00 m0 = 0x400d466f5b9ed82a  # 3.6593920858240567
 planet 0d00 formed = 0x4244e1a1e830c536  # 179369660513.5407
 planet 0d00 role IceRich hot false beyond true resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 0 compact_multi -> compact_multi next 2
-planet 0100 mass = 0x3feef7a054e019e6  # 0.9677278192255556
-planet 0100 a = 0x4203058ee52fddbe  # 10212203685.983273
-planet 0100 e = 0x3fc7e0917f5be36d  # 0.18654078215311234
+planet 0100 mass = 0x3ffdce571e7e18ed  # 1.8628760520091945
+planet 0100 a = 0x42030591b02f7faf  # 10212226565.937346
+planet 0100 e = 0x3fc7e20139a2526f  # 0.18658461870349494
 planet 0100 i = 0x3ffa0c3c878e65c3  # 1.6279874129453311
 planet 0100 node = 0x3fea41b97669020c  # 0.8205230057429289
 planet 0100 periapsis = 0x3fefba94cbe505e9  # 0.9915260298077416
 planet 0100 m0 = 0x4013c5eadb0a6fe9  # 4.94327871562198
-planet 0100 formed = 0x4203058ee52fddbe  # 10212203685.983273
+planet 0100 formed = 0x42030591b02f7faf  # 10212226565.937346
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 0 compact_with_cold_giant -> compact_with_cold_giant next 4
-planet 0100 mass = 0x3fd999999999999a  # 0.4
-planet 0100 a = 0x4207b583f3de61d9  # 12728696443.797777
-planet 0100 e = 0x3faf227417db1732  # 0.06080973426064275
+planet 0100 mass = 0x3fe513155312a863  # 0.6585795042531227
+planet 0100 a = 0x4207b584f54e4e9e  # 12728704681.788387
+planet 0100 e = 0x3faf235382d38e30  # 0.06081639263154803
 planet 0100 i = 0x3fe9a93de761d115  # 0.8019094008618902
 planet 0100 node = 0x3fe4382ceb7b16d5  # 0.6318573569521627
 planet 0100 periapsis = 0x4010a5831defd8b2  # 4.161632983936373
 planet 0100 m0 = 0x3fee360518addea8  # 0.9440942270293435
-planet 0100 formed = 0x4207b583f3de61d9  # 12728696443.797777
+planet 0100 formed = 0x4207b584f54e4e9e  # 12728704681.788387
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 planet 0200 mass = 0x405a7e8063f25b87  # 105.97658632915237
 planet 0200 a = 0x4230779be71cd22b  # 70726182684.82097
@@ -1091,24 +1082,24 @@ planet 0d00 m0 = 0x400d466f5b9ed82a  # 3.6593920858240567
 planet 0d00 formed = 0x4244e1a1e830c536  # 179369660513.5407
 planet 0d00 role IceRich hot false beyond true resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 1 compact_multi -> compact_multi next 2
-planet 0100 mass = 0x3feef7a054e019e6  # 0.9677278192255556
-planet 0100 a = 0x4203058ee52fddbe  # 10212203685.983273
-planet 0100 e = 0x3fc7e0917f5be36d  # 0.18654078215311234
+planet 0100 mass = 0x3ffdce571e7e18ed  # 1.8628760520091945
+planet 0100 a = 0x42030591b02f7faf  # 10212226565.937346
+planet 0100 e = 0x3fc7e20139a2526f  # 0.18658461870349494
 planet 0100 i = 0x3ffa0c3c878e65c3  # 1.6279874129453311
 planet 0100 node = 0x3fea41b97669020c  # 0.8205230057429289
 planet 0100 periapsis = 0x3fefba94cbe505e9  # 0.9915260298077416
 planet 0100 m0 = 0x4013c5eadb0a6fe9  # 4.94327871562198
-planet 0100 formed = 0x4203058ee52fddbe  # 10212203685.983273
+planet 0100 formed = 0x42030591b02f7faf  # 10212226565.937346
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 1 compact_with_cold_giant -> compact_multi next 2
-planet 0100 mass = 0x3fd999999999999a  # 0.4
-planet 0100 a = 0x4207b583f3de61d9  # 12728696443.797777
-planet 0100 e = 0x3faf227417db1732  # 0.06080973426064275
+planet 0100 mass = 0x3fe513155312a863  # 0.6585795042531227
+planet 0100 a = 0x4207b584f54e4e9e  # 12728704681.788387
+planet 0100 e = 0x3faf235382d38e30  # 0.06081639263154803
 planet 0100 i = 0x3fe9a93de761d115  # 0.8019094008618902
 planet 0100 node = 0x3fe4382ceb7b16d5  # 0.6318573569521627
 planet 0100 periapsis = 0x4010a5831defd8b2  # 4.161632983936373
 planet 0100 m0 = 0x3fee360518addea8  # 0.9440942270293435
-planet 0100 formed = 0x4207b583f3de61d9  # 12728696443.797777
+planet 0100 formed = 0x4207b584f54e4e9e  # 12728704681.788387
 planet 0100 role Chain hot true beyond false resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 1 solar_like -> terrestrial_only next 14
 planet 0100 mass = 0x3fba4939ba30aac8  # 0.1026798324170769
@@ -1320,42 +1311,33 @@ planet 0a00 m0 = 0x3ff847097db46d88  # 1.5173430357307058
 planet 0a00 formed = 0x4225a7c86cc6d0df  # 46504621667.40795
 planet 0a00 role Rocky hot false beyond false resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 1 warm_giant -> compact_multi next 6
-planet 0100 mass = 0x3fd999999999999a  # 0.4
-planet 0100 a = 0x41efcbec365792d9  # 4267663794.7366757
+planet 0100 mass = 0x3fdcbfe9512c11de  # 0.4492133419701342
+planet 0100 a = 0x41efcbec780d24c5  # 4267664320.4107385
 planet 0100 e = 0x3fb8d2d584ba585b  # 0.09696707239558704
 planet 0100 i = 0x4004293ed3cf7154  # 2.520139364975117
 planet 0100 node = 0x3fdcdd70fc5821aa  # 0.4510157074260187
 planet 0100 periapsis = 0x3ffc2be2abc87721  # 1.7607142172123036
 planet 0100 m0 = 0x400a5b93f7dd6a76  # 3.2947158207364806
-planet 0100 formed = 0x41efcbec365792d9  # 4267663794.7366757
+planet 0100 formed = 0x41efcbec780d24c5  # 4267664320.4107385
 planet 0100 role Chain hot false beyond false resonance None rescaled false
-planet 0200 mass = 0x3feb38213df39b5a  # 0.8506017885200479
-planet 0200 a = 0x41f4f8151a47effc  # 5628842404.49609
+planet 0200 mass = 0x3ffa32d332074586  # 1.637408442901092
+planet 0200 a = 0x41f618b3335b50c3  # 5931479861.707217
 planet 0200 e = 0x3fa72a8aee4cbe93  # 0.04524645003254792
 planet 0200 i = 0x40044dff32e69367  # 2.5380844093910357
 planet 0200 node = 0x3fe059213d1bdbbb  # 0.5108801072627708
 planet 0200 periapsis = 0x40136406181b37ab  # 4.847679497395727
 planet 0200 m0 = 0x3fe0f4a563f8c972  # 0.5298640205931362
-planet 0200 formed = 0x41f4f8151a47effc  # 5628842404.49609
+planet 0200 formed = 0x41f618b3335b50c3  # 5931479861.707217
 planet 0200 role Chain hot false beyond false resonance None rescaled false
-planet 0300 mass = 0x3ff5f6b0a03a631e  # 1.3727270373257805
-planet 0300 a = 0x41fbbf17f34985cc  # 7448133428.595165
+planet 0300 mass = 0x400523d6cd6b65cc  # 2.642499546852127
+planet 0300 a = 0x41ff5865762a5f70  # 8414189410.6483
 planet 0300 e = 0x3fa033a9373d81e6  # 0.031644142144390305
 planet 0300 i = 0x40048cfc97e6245d  # 2.568841158591154
 planet 0300 node = 0x3fdda01fb35829c4  # 0.46289818300342866
 planet 0300 periapsis = 0x3ff18e40b643841f  # 1.0972296828915729
 planet 0300 m0 = 0x401661c0e9145770  # 5.595462457529592
-planet 0300 formed = 0x41fbbf17f34985cc  # 7448133428.595165
+planet 0300 formed = 0x41ff5865762a5f70  # 8414189410.6483
 planet 0300 role Chain hot false beyond false resonance None rescaled false
-planet 0400 mass = 0x40139581fc2529da  # 4.896003665703086
-planet 0400 a = 0x420369237dcbbc3d  # 10421039033.466913
-planet 0400 e = 0x3fa72ac8739db184  # 0.045248283494262714
-planet 0400 i = 0x4003e3f72b957e8e  # 2.4863112835881287
-planet 0400 node = 0x3fdda6be760a8912  # 0.4633022454019208
-planet 0400 periapsis = 0x3fec94012d8f6a7e  # 0.8930669679496785
-planet 0400 m0 = 0x3fe60112593d2a12  # 0.6876308196017951
-planet 0400 formed = 0x420369237dcbbc3d  # 10421039033.466913
-planet 0400 role Chain hot false beyond false resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 1 hot_jupiter -> compact_multi next 8
 planet 0100 mass = 0x3fd999999999999a  # 0.4
 planet 0100 a = 0x42083fc12286a1b7  # 13018604624.828962
@@ -1366,51 +1348,42 @@ planet 0100 periapsis = 0x3fe7c23989a2214a  # 0.7424590767050543
 planet 0100 m0 = 0x3fe3d0724fb7689b  # 0.6191951329194753
 planet 0100 formed = 0x42083fc12286a1b7  # 13018604624.828962
 planet 0100 role Chain hot false beyond false resonance None rescaled false
-planet 0200 mass = 0x3fe2307554a47ee4  # 0.5684153226065658
-planet 0200 a = 0x420faa1e0eea8bba  # 16999760349.318226
+planet 0200 mass = 0x3ff181d754ab2088  # 1.094199496017639
+planet 0200 a = 0x421083681f19030f  # 17731028934.252987
 planet 0200 e = 0x3fa7f34602c4a585  # 0.046777904355916035
 planet 0200 i = 0x40050fca3b6edd09  # 2.6327099459846335
 planet 0200 node = 0x3ff87703ff82d6ee  # 1.5290565472509416
 planet 0200 periapsis = 0x3fee7932aa1ead5f  # 0.9522946665432918
 planet 0200 m0 = 0x40167056ebf19587  # 5.609706579799769
-planet 0200 formed = 0x420faa1e0eea8bba  # 16999760349.318226
+planet 0200 formed = 0x421083681f19030f  # 17731028934.252987
 planet 0200 role Chain hot false beyond false resonance None rescaled false
-planet 0300 mass = 0x3feb7dfd9cb44943  # 0.8591297207479233
-planet 0300 a = 0x4214b16297a14e29  # 22218843624.32633
+planet 0300 mass = 0x3ffa7610e6d3ecea  # 1.6538247124397523
+planet 0300 a = 0x421710b6dc9bf77e  # 24766166822.99169
 planet 0300 e = 0x3fb464a1d2b59513  # 0.07966052431364216
 planet 0300 i = 0x40052e64e3d5d3af  # 2.6476533698682583
 planet 0300 node = 0x3ffad420d226404d  # 1.6767891129457155
 planet 0300 periapsis = 0x4011798f41e19002  # 4.368710545913929
 planet 0300 m0 = 0x3ff72912edf224b5  # 1.447527818180146
-planet 0300 formed = 0x4214b16297a14e29  # 22218843624.32633
+planet 0300 formed = 0x421710b6dc9bf77e  # 24766166822.99169
 planet 0300 role Chain hot false beyond false resonance None rescaled false
-planet 0400 mass = 0x3feed15b3f88961a  # 0.9630562058343373
-planet 0400 a = 0x421aa032c2caffde  # 28589207730.74987
+planet 0400 mass = 0x3ffda9816d26aa12  # 1.853883196231099
+planet 0400 a = 0x421f9701f51149c4  # 33919368516.322037
 planet 0400 e = 0x3fa161d82e6a8079  # 0.03394961897470323
 planet 0400 i = 0x40048cf4fb0dc32e  # 2.5688266385626752
 planet 0400 node = 0x3ff9239867ae19da  # 1.5711902666094972
 planet 0400 periapsis = 0x4016e31dbbadcc15  # 5.721793110354175
 planet 0400 m0 = 0x3ff1c5c6117161a0  # 1.1107845956194993
-planet 0400 formed = 0x421aa032c2caffde  # 28589207730.74987
+planet 0400 formed = 0x421f9701f51149c4  # 33919368516.322037
 planet 0400 role Chain hot false beyond false resonance None rescaled false
-planet 0500 mass = 0x3ff7e016493e6ff5  # 1.4922087536897355
-planet 0500 a = 0x4222703660662072  # 39596011571.06337
+planet 0500 mass = 0x4006fae24018e55c  # 2.872501850852741
+planet 0500 a = 0x4227bb7a28d723da  # 50964796523.57002
 planet 0500 e = 0x3fab58583af46413  # 0.053408391186344904
 planet 0500 i = 0x4004e2e5a5051ffe  # 2.610789574831869
 planet 0500 node = 0x3ff9ee7fbc74024b  # 1.6207272874309122
 planet 0500 periapsis = 0x401036a45eb0cd16  # 4.053361396351894
 planet 0500 m0 = 0x400eca4ee0b7045d  # 3.84878325994991
-planet 0500 formed = 0x4222703660662072  # 39596011571.06337
+planet 0500 formed = 0x4227bb7a28d723da  # 50964796523.57002
 planet 0500 role Chain hot false beyond false resonance None rescaled false
-planet 0600 mass = 0x40056ad30e2729f6  # 2.6771603685094716
-planet 0600 a = 0x422af1a13933114c  # 57861512345.53378
-planet 0600 e = 0x3f9cede70f257503  # 0.02825127630182057
-planet 0600 i = 0x4004bd7350507fb5  # 2.5925050997320462
-planet 0600 node = 0x3ffa0e65c8a7a7dd  # 1.6285150373537285
-planet 0600 periapsis = 0x4018745e4d62d32a  # 6.113640984684745
-planet 0600 m0 = 0x4012c76be4ae7783  # 4.694747517727481
-planet 0600 formed = 0x422af1a13933114c  # 57861512345.53378
-planet 0600 role Chain hot false beyond false resonance None rescaled false
 host 0.4 M_sun [Fe/H] 0.2 disc 1 substellar_compact -> substellar_compact next 6
 planet 0100 mass = 0x3ff1c80dfce8af08  # 1.1113414649252622
 planet 0100 a = 0x420df7f9afe563cd  # 16089298428.67373

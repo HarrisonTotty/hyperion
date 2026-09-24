@@ -130,10 +130,13 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 `just ci` is the gate before a commit: the four checks above plus a check that the generated
 protocol bindings are up to date. It takes about three minutes.
 
-- `just ci-slow` is `just ci` plus `just test-slow`. The slow tests add about nineteen minutes, so
-  run it before a push that changes the sim, and after a `GENERATOR_VERSION` bump.
+- `just ci-slow` is `just ci` plus `just test-slow`. The slow tests take far longer than the rest,
+  so run it before a push that changes the sim, and after a `GENERATOR_VERSION` bump.
 - `just test-slow` runs the slow statistical tests, marked `#[ignore = "slow: ..."]`, under the
-  `slow-test` profile (release speed with debug assertions on).
+  `slow-test` profile (release speed with debug assertions on). It uses
+  [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`), which runs the tests
+  of every binary side by side instead of one binary at a time; `just test-slow <filter>` narrows
+  it.
 - `just bench` runs the Criterion benchmarks (`just bench -- <filter>` narrows them); a regression
   is a finding to raise, never a failure.
 - `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate

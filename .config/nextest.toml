@@ -1,0 +1,19 @@
+# cargo-nextest, which `just test-slow` runs the slow tests under. Unlike `cargo test`, which runs
+# its test binaries one after another and so leaves most cores idle while a binary with one long
+# test finishes, nextest schedules every test of every binary on one pool of `num-cpus` slots.
+#
+# Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
+# not once per binary: slow tests that would share expensive data are written as one test instead.
+
+[profile.slow]
+# Report every failure of a 20-minute run, not only the first.
+fail-fast = false
+# A slow test is flagged after 2 minutes; none is ever killed.
+slow-timeout = "120s"
+
+# The budget of the 512-pixel density maps is stated in `math::exp` calls timed at the pool's
+# width, and the test asserts that the pool is seen running a band on every worker at once. It
+# takes every slot, so it runs alone rather than contending with the other slow tests.
+[[profile.slow.overrides]]
+filter = "package(hyperion-server) & binary(density_map) & test(=density_map_512_builds_within_budget)"
+threads-required = "num-cpus"

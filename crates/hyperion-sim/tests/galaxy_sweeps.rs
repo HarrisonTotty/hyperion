@@ -25,27 +25,19 @@ fn sweep() -> impl Iterator<Item = GalaxyParams> {
     })
 }
 
-/// P02.T5.a and P02.T5.b over 10⁴ seeds: every getter within its range, N within 0.5–1.8 × 10¹¹
-/// (0.528–1.775 × 10¹¹), the population masses summing to M★, M₂₀₀ within its bracket.
-#[test]
-#[ignore = "slow: builds the parameters of 10⁴ galaxies"]
-fn every_getter_lies_in_its_range_over_ten_thousand_seeds() {
-    for p in sweep() {
-        assert_params_in_ranges(&p, 9.0);
-        assert_derived_consistent(&p);
-    }
-}
-
-/// Sizes follow their masses as mass^⅓ (P02.T5.b).
+/// Two checks over the same 10⁴ seeds, in one test so that the parameters are built once.
 ///
-/// The scatter spreads sizes about the law and the clamp cuts them off, so a least-squares fit
-/// over the clamped points would be biased towards zero. Instead the seeds are sorted by mass
-/// into ten bins of equal count, and a line is fitted through each bin's median ln mass and
+/// P02.T5.a and P02.T5.b: every getter within its range, N within 0.5–1.8 × 10¹¹
+/// (0.528–1.775 × 10¹¹), the population masses summing to M★, M₂₀₀ within its bracket.
+///
+/// And sizes follow their masses as mass^⅓ (P02.T5.b). The scatter spreads sizes about the law and
+/// the clamp cuts them off, so a least-squares fit over the clamped points would be biased towards
+/// zero. Instead the seeds are sorted by mass into ten bins of equal count, and a line is fitted through each bin's median ln mass and
 /// median ln size, over the bins whose median size lies inside the clamp: clamping moves no
 /// median that lies inside it, and the scatter is symmetric in ln size.
 #[test]
 #[ignore = "slow: builds the parameters of 10⁴ galaxies"]
-fn sizes_correlate_with_masses_at_the_cube_root() {
+fn every_getter_lies_in_its_range_and_sizes_follow_the_cube_root_over_ten_thousand_seeds() {
     const BINS: usize = 10;
     let median = |values: &mut Vec<f64>| {
         values.sort_by(f64::total_cmp);
@@ -84,6 +76,8 @@ fn sizes_correlate_with_masses_at_the_cube_root() {
     let mut bar = Vec::new();
     let mut nuclear = Vec::new();
     for p in sweep() {
+        assert_params_in_ranges(&p, 9.0);
+        assert_derived_consistent(&p);
         let mass = |pop| p.population_mass(pop).value();
         let thin_mass = mass(Population::YoungThinDisc) + mass(Population::OldThinDisc);
         thin.push((thin_mass, p.thin_disc().length().value()));

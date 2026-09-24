@@ -902,6 +902,9 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     leaves the masses of the others bit-identical. (c) No giant exceeds its disc's gas mass, and a
     disc with under 10 M⊕ of solids beyond the snow line yields the fallback.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement::masses`.
+  - _As built (rulings 60, 66 and 68.2):_ a drift-fed group's median is 7.7 M⊕ × (M★ ÷ M☉)
+    (Wu 2019), not the disc-scaled 4 M⊕, and test (a) holds it to 6.9–8.5 M⊕; see "Risks and open
+    points", the calibration bullets.
 
 #### P14.T8 Class placers
 
@@ -1553,6 +1556,9 @@ register the five event tags of Provides, each in `rng/tags.rs` (scope `Event`) 
   with a brown-dwarf companion, the two rogue planets, the nuclear-cluster and globular members and
   the layer-E death inside the clock window) are added by the tasks that make them possible, each
   with its bump.
+- _As built (`calib2`, round 8):_ fourteen of the fifteen are pinned, blessed at version 11 with no
+  bump (the orchestrator's bump to 12 re-blesses them); the T Tauri star waits for a pre-main-sequence
+  `StarModel`. See "Risks and open points", the T32 bullet.
 
 The twenty-four, at Milky Way parameters: an M dwarf with a resonant chain, a metal-rich G dwarf
 with a hot Jupiter, a Solar-like system, an eccentric giant, a halo star, a close binary with a
@@ -3714,3 +3720,85 @@ masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (
     does, and `bodies_in_every_state_are_the_sims_snapshot` holds four more systems (a black hole's
     survivors, a neutron star's unbound planets, an engulfment, giants still forming) to the sim
     bit for bit at −H, the epoch and +H.
+- **Ruling 68.2, the chains' mass normalisation, as built (`calib2`, round 8).**
+  - _The normalisation._ `COMPACT_CHARACTERISTIC_MASS` 4 → 7.7 M⊕, the slope in M★ kept at 1. Wu
+    (2019, ApJ 874, 91, §3.1 and Table 1) fits the Gaia–Kepler radius distribution, corrected for
+    detection, with masses log-normal about `M_0` (M★ ÷ M☉), this module's form, and finds
+    `M_0` = 7.70 ± 1.5 M⊕ (Earth-like cores, her preferred model), σ = 0.29 dex, the host-mass slope
+    β ≈ 1 (§4: "a single scaling law ... with β ≈ 1" from 0.2 to 2 M☉) and no metallicity
+    dependence. Pascucci et al.'s (2018, §3) forward-modelled break is 7.7 ± 1.7 M⊕, q = (2.5 ±
+    0.6) × 10⁻⁵, at 0.91 M☉, and their binned Table 1 gives 2.8–2.9 × 10⁻⁵ for M, K and G hosts.
+    Both are occurrence-weighted, not the radial-velocity medians ruling 55 set aside. Ruling 68.1's
+    floor (1 M⊕ × M★, never under 0.05 M⊕) and 68.3's no-chain rule are unchanged. Paper under
+    `calib`'s `target/scratch/papers/calib/wu2019.pdf`.
+  - _T10.b, every window, before → after (window):_ small planets per FGK star 0.719 → 0.714
+    (0.5–1.2; by radius 0.631 → 0.586); hot Jupiters 0.72% → 0.72%; Cumming's giants 10.19% →
+    10.19%; η⊕ 0.382 → 0.382 (0.37–0.60); adjacent log radii, FGK 0.630 → 0.618 and single Suns
+    0.638 → 0.620 (0.60–0.70); outer larger 0.657 → 0.652 (0.650–0.658); 0.1–0.5 M☉ multiples
+    0.594 → 0.569 (≥ 0.40); their giants 1.55% → 1.55% (< 5%); −2 against solar 0.007 → 0.005
+    (< 0.25); the giants' slope 2.025 → 2.025 (1.7–2.3); the anchors 10.50%, 0.82%, 30.5% unmoved.
+    The findings: Dressing and Charbonneau 1.151 → 1.285 (1.8–3.2; by radius 1.080 → 1.148),
+    re-pinned at 1.25–1.32; mid-M inside 10 days 0.384 → 0.341 and their multiples 0.093 → 0.080;
+    \[Fe/H\] −0.8 0.456 → 0.419; close binaries 0.143 → 0.135; pairs ≥ 10 R_H 0.995 → 0.993, all
+    inside their pins. No window was widened. T7's unit sample: log radii 0.607 (0.60–0.70),
+    outer larger 0.653, 333 of 2,000 Sun-like chains truncated by the budget (246 before; the test's
+    180–320 re-centred to 240–430). The radius valley (T16.c) has no test in the slice (T13's
+    escape is not built), so it was not re-run.
+  - _For the owner: what no normalisation reaches._ About M dwarfs of 0.35–0.6 M☉ the chains place
+    only 1.72 planets per star inside 200 days, whatever their masses, and the rocky groups 0.78,
+    of which 0.71 are under 1 M⊕; with every chain planet in 1–20 M⊕ the count would be about 1.8,
+    the window's floor. At 7.7 M⊕ × M★ 0.50 of the 1.72 are still under 1 M⊕, since this module's
+    width is σ_b and σ_w together, about 0.54 dex, fitted to Weiss et al.'s pairs, against Wu's
+    0.29 dex. Reaching 2.5 needs more chain planets about M dwarfs (T4.b's share, T5's count, or
+    the spacing inside 200 days), not heavier ones.
+  - _For the orchestrator to rule._ (1) Held to the template's 1–20 M⊕, the wider law piles chain
+    planets at exactly 20 M⊕: 14.2% of those about hosts of 0.9–1.1 M☉ (7.1% under 4 M⊕), the
+    ceiling's twin of ruling 66's floor. A truncated draw (the normal's rank mapped inside the
+    range) or a narrower width at Wu's 0.29 dex with the step re-fitted are the in-source dials;
+    either moves the Weiss statistics, whose FGK log-radius correlation now sits at 0.618 of
+    0.60–0.70. (2) Rocky groups, unchanged here, sit at their template's 2 M⊕ ceiling in 5.2% and
+    at the 0.05 M⊕ floor in 11.0% of rocky planets about FGK hosts; the Solar-like, filler and
+    black-hole golden systems show it.
+  - _Goldens._ `planetary/masses` (every drift-fed group's characteristic and member masses, and
+    four groups now `Truncated` in the poor discs) and `planetary/classes` (the chains' masses, and
+    their spacings and eccentricities, which follow the masses through the Hill radii; 27 lines of
+    truncated chains gone) moved, at version 11 with no bump as ruled; nothing else.
+- **P14.T32.a–b, the golden systems, as built (`calib2`, round 8).**
+  - _The search._ `tests/common/mod.rs` gains `find_system(galaxy, layer, predicate, budget) ->
+Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `system()` built on
+    first use, so a predicate rules most records out on the record alone). The plan's signature
+    gains `layer`, since each layer is its own grid. The walk starts at the layer's cell holding the
+    Sun-like point and takes square rings of cells about it in the plane, each cell's records in
+    `generate_cell`'s order, so the hosts stay near the solar circle; a row along +x ran out of the
+    disc. The universe is the Milky Way fixture at seed `0x5eed000000140032`, and every budget is
+    200,000 records.
+  - _The fourteen,_ in `tests/planetary_golden.rs`'s `GOLDEN_SYSTEMS`, each checked by eye from its
+    golden and described in its comment: the M dwarf `01fffb2c20000000` (0.138 M☉, six planets,
+    the inner pairs 1% wide of 3:2); the hot Jupiter `41feacda00000001` (1.02 M☉, +0.29, 2.3 M_J
+    at 3.4 days); the Solar-like `4200aca200000003` (0.975 M☉, five rocky planets, three giants,
+    two ice giants); the eccentric giant `4200acaa0000000a` (0.58 M_J, e 0.45); the halo star
+    `01fdbb3660000000` (0.321 M☉, \[Fe/H\] −0.34, one planet); the close binary
+    `41ffecae00000001` (1.97 au, two circumbinary giants); the wide binary `41ffacaa00000008`
+    (748 au, planets about both); the triple `42002cb200000003` (three main-sequence stars, eight
+    planets); the subgiant `4200acaa00000004`; the red giant `42002c5e00000007` (a planet engulfed
+    2.6 Myr before the epoch, two giants left); the fallback black hole `8200b2e00000000d` (27.6 M☉
+    by direct collapse, six rocky survivors at 480–1,020 au); the fillers `01fffb2c60000000`,
+    `2200165980000000` and `42002cb200000000`, from layers A, B and C.
+  - _Choices, for the orchestrator to rule._ Every golden system has a planet present at the epoch,
+    since it pins a planetary system; the halo star, binaries and triple are main-sequence stars,
+    after the first search found a 0.084 M☉ substellar halo object, a white-dwarf primary and a
+    white-dwarf triple, which are the names' letter but not what they say (the white dwarf has its
+    own golden, with plan 09). "Close" is Kraus et al.'s 47 au, the placer's cut; "metal-rich" is
+    \[Fe/H\] +0.2 or more; "mid engulfment" is a planet engulfed before the epoch and one still
+    present; the fallback black hole is a `DirectCollapse` death, the complete fallback of P06.T18.
+  - _The T Tauri star is not pinned._ `StarModel` starts every star at the zero-age main sequence,
+    so no star is in `Phase::PreMainSequence` at any age: of 155 layer-C systems under 20 Myr in
+    the first 200,000 records, every primary is `MainSequence`. `T_TAURI` keeps its predicate, and
+    the slow search asserts it still finds none, so that the first pre-main-sequence star fails it
+    and is pinned then.
+  - _The goldens._ `tests/golden/planetary/systems/<name>.golden`, through `GoldenWriter`: the
+    stars at the epoch, the pairs, each host's drawn and placed class, and the full `snapshot_at`
+    at the epoch and at +H, every body's identity, mass, orbit elements, position, bulk and section
+    states. No events until T31. `pinned_ids_satisfy_their_own_predicates` checks every ID's layer
+    and predicate; `the_search_reproduces_the_pinned_ids` is the slow test. Blessed at 11, no
+    bump, as the round's brief rules.

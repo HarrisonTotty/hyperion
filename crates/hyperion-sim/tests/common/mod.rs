@@ -3,6 +3,10 @@
 //!
 //! The ranges are written out here from plan 02's table, independently of the sim's own
 //! constants, so that a wrong constant in the sim fails a test instead of moving the bracket.
+//!
+//! It also holds the search for plan 14's golden systems (P14.T32.a, [`find_system`]).
+
+use std::cell::OnceCell;
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
@@ -11,11 +15,12 @@ use hyperion_sim::galaxy::imf::{MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::{
     ArmCount, GalaxyParams, HaloComponentKind, HaloComponentParams, ProgenitorKind,
 };
-use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord};
+use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{PAD_SPEED, SystemHit, pad_for, position_at};
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
+use hyperion_sim::planetary::{self, PlanetarySystem, SystemContext};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{Degrees, LightYears};
 
@@ -693,4 +698,103 @@ pub fn whole_ly(ly: f64) -> i32 {
 fn count_as_f64(count: u64) -> f64 {
     let exact = u32::try_from(count).expect("an ensemble of fewer than 2³² seeds");
     f64::from(exact)
+}
+
+// --- Planetary systems (plan 14) ---
+
+/// A system [`find_system`] is looking at: its record, and its context and planets, built only
+/// when a predicate first asks for them, since a record's own fields rule most candidates out.
+pub struct Candidate<'g> {
+    galaxy: &'g Galaxy,
+    record: &'g SystemRecord,
+    generated: OnceCell<(SystemContext, PlanetarySystem)>,
+}
+
+impl<'g> Candidate<'g> {
+    /// The system of `record`, of `galaxy`, as a predicate reads it: how a pinned ID is checked
+    /// against its own predicate.
+    #[must_use]
+    pub const fn new(galaxy: &'g Galaxy, record: &'g SystemRecord) -> Self {
+        Self {
+            galaxy,
+            record,
+            generated: OnceCell::new(),
+        }
+    }
+
+    /// The candidate's record.
+    #[must_use]
+    pub const fn record(&self) -> &SystemRecord {
+        self.record
+    }
+
+    /// The candidate's context, built as the server builds it (P14.T1.d).
+    #[must_use]
+    pub fn context(&self) -> &SystemContext {
+        &self.generated().0
+    }
+
+    /// The candidate's planets, generated from its context (P14.T30.a).
+    #[must_use]
+    pub fn system(&self) -> &PlanetarySystem {
+        &self.generated().1
+    }
+
+    fn generated(&self) -> &(SystemContext, PlanetarySystem) {
+        self.generated.get_or_init(|| {
+            let context = SystemContext::from_record(self.galaxy, self.record);
+            let system = planetary::generate(self.galaxy.seed(), &context);
+            (context, system)
+        })
+    }
+}
+
+/// The cells of the square ring `d` cells out from `centre` in the plane z = 0: every cell whose
+/// larger offset along x or y is `d`, in rows of increasing y and, within a row, increasing x.
+fn ring(centre: [i32; 2], d: i32) -> impl Iterator<Item = [i32; 3]> {
+    (-d..=d).flat_map(move |dy| {
+        let xs: Vec<i32> = if dy.abs() == d {
+            (-d..=d).collect()
+        } else {
+            vec![-d, d]
+        };
+        xs.into_iter()
+            .map(move |dx| [centre[0] + dx, centre[1] + dy, 0])
+    })
+}
+
+/// The first system of `layer` that satisfies `predicate` among the first `budget` records of a
+/// fixed walk, or `None` (P14.T32.a).
+///
+/// The walk starts at the cell of `layer` holding the Sun-like point ([`sunlike_point`]), 26,000
+/// ly out along +y in the plane, and takes the cells of the plane's layer of cells around it in
+/// square rings of growing size ([`ring`]), each cell's records in the order [`generate_cell`]
+/// gives them, so that the same galaxy and predicate always find the same ID and the hosts stay
+/// near the solar circle. A predicate reads the record first and asks for the context or the
+/// planets only when the record passes, since generating them evolves the stars.
+pub fn find_system(
+    galaxy: &Galaxy,
+    layer: Layer,
+    mut predicate: impl FnMut(&Candidate<'_>) -> bool,
+    budget: u32,
+) -> Option<SystemId> {
+    let size = i32::try_from(layer.cell_size_ly()).expect("a cell is at most 128 ly across");
+    let centre = [0, 26_000 / size];
+    let (mut seen, mut records) = (0_u32, Vec::new());
+    for d in 0.. {
+        for cell in ring(centre, d) {
+            let key = CellKey::new(layer, cell).expect("the walk stays near the solar circle");
+            generate_cell(galaxy, key, &mut records);
+            for record in &records {
+                if seen == budget {
+                    return None;
+                }
+                seen += 1;
+                if predicate(&Candidate::new(galaxy, record)) {
+                    return Some(record.id());
+                }
+            }
+        }
+    }
+    unreachable!("the walk ends at its budget")
 }
