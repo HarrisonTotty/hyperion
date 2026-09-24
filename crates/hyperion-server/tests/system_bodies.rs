@@ -19,10 +19,12 @@ use hyperion_protocol::{
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count};
 use hyperion_sim::id::SystemId;
+use hyperion_sim::planetary::architecture::HostMultiplicity;
+use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::BodyState;
-use hyperion_sim::planetary::placement::OrbitHost;
+use hyperion_sim::planetary::placement::{OrbitHost, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{BodyRecord, Section};
-use hyperion_sim::planetary::{PlanetarySystem, SystemContext, generate};
+use hyperion_sim::planetary::{PlanetaryHost, PlanetarySystem, SystemContext, generate};
 use hyperion_sim::units::{Kilograms, Metres};
 use hyperion_sim::{Seed, time};
 
@@ -193,8 +195,21 @@ fn assert_body_is_the_sims(
     match (state, identity.state()) {
         (BodyStateDto::Present, BodyState::Present)
         | (BodyStateDto::NotYetFormed, BodyState::NotYetFormed) => {}
-        (BodyStateDto::Destroyed { at, .. }, BodyState::Destroyed { at: sim, .. })
-        | (BodyStateDto::Unbound { at }, BodyState::Unbound { at: sim }) => {
+        (
+            BodyStateDto::Destroyed { cause, at },
+            BodyState::Destroyed {
+                cause: sim_cause,
+                at: sim,
+            },
+        ) => {
+            assert_eq!(sim_time(at), sim, "{what}");
+            assert_eq!(
+                serde_json::to_value(cause).unwrap(),
+                snake_case(&format!("{sim_cause:?}")),
+                "{what}: cause"
+            );
+        }
+        (BodyStateDto::Unbound { at }, BodyState::Unbound { at: sim }) => {
             assert_eq!(sim_time(at), sim, "{what}");
         }
         (wire, sim) => panic!("{what}: the wire says {wire:?}, the sim {sim:?}"),
@@ -292,21 +307,25 @@ fn assert_bulk_is_the_sims(
             }
             assert_eq!(
                 serde_json::to_value(wire.class).unwrap(),
-                format!("{:?}", sim.class()).chars().enumerate().fold(
-                    String::new(),
-                    |mut out, (i, c)| {
-                        if c.is_ascii_uppercase() && i > 0 {
-                            out.push('_');
-                        }
-                        out.push(c.to_ascii_lowercase());
-                        out
-                    }
-                ),
+                snake_case(&format!("{:?}", sim.class())),
                 "{what}: class"
             );
         }
         (wire, sim) => assert_same_state(what, wire, sim),
     }
+}
+
+/// A Rust variant's name as the wire's snake-case string: `GasGiant` is `gas_giant`.
+fn snake_case(name: &str) -> String {
+    name.chars()
+        .enumerate()
+        .fold(String::new(), |mut out, (i, c)| {
+            if c.is_ascii_uppercase() && i > 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+            out
+        })
 }
 
 /// Holds a `system_bodies` answer to the sim's own system at the answer's time.
@@ -336,6 +355,18 @@ fn assert_bodies_are_the_sims(
     }
     assert_same_state("belts", &answer.belts, snapshot.belts());
     assert_same_state("halo", &answer.halo, snapshot.halo());
+    assert_zones_are_the_sims(answer, ctx, planets, t);
+    assert_system_plane_is_the_sims(answer, planets);
+}
+
+/// Holds a `system_bodies` answer's zones to the sim's at `t`: their hosts, limits, classes, snow
+/// lines, planes and habitable zones, bit for bit.
+fn assert_zones_are_the_sims(
+    answer: &SystemBodiesDto,
+    ctx: &SystemContext,
+    planets: &PlanetarySystem,
+    t: time::UniverseTime,
+) {
     assert_eq!(answer.zones.len(), planets.zones().len());
     for ((wire, zone), host) in answer
         .zones
@@ -351,6 +382,24 @@ fn assert_bodies_are_the_sims(
         assert_eq!(
             wire.outer_m.map(f64::to_bits),
             zone.outer().map(|m| m.value().to_bits())
+        );
+        assert_eq!(
+            serde_json::to_value(wire.architecture).unwrap(),
+            snake_case(&format!("{:?}", host.class())),
+            "the zone's class is its host's as placed"
+        );
+        let inputs = ZoneDiscInputs::for_zone(
+            Seed::new(SEED),
+            planets.system(),
+            zone,
+            &ctx.zone_stars(),
+            ctx.fe_h(),
+        )
+        .unwrap();
+        assert_eq!(
+            wire.snow_line_m.to_bits(),
+            snow_line(inputs.host().zams_luminosity()).value().to_bits(),
+            "the zone's snow line is its host's at zero age"
         );
         if let Some(disc) = host.disc().profile() {
             assert_eq!(
@@ -371,20 +420,53 @@ fn assert_bodies_are_the_sims(
         assert_eq!(wire.habitable_zone.is_some(), habitable.is_some());
         if let (Some(wire), Some(sim)) = (&wire.habitable_zone, habitable) {
             let finite = |m: Metres| Some(m.value()).filter(|v| v.is_finite()).map(f64::to_bits);
-            assert_eq!(
-                wire.moist_greenhouse_m.map(f64::to_bits),
-                finite(sim.moist_greenhouse())
-            );
-            assert_eq!(
-                wire.early_mars_m.map(f64::to_bits),
-                finite(sim.early_mars())
-            );
+            for (wire, sim) in [
+                (wire.recent_venus_m, sim.recent_venus()),
+                (wire.runaway_greenhouse_m, sim.runaway_greenhouse()),
+                (wire.moist_greenhouse_m, sim.moist_greenhouse()),
+                (wire.maximum_greenhouse_m, sim.maximum_greenhouse()),
+                (wire.early_mars_m, sim.early_mars()),
+            ] {
+                assert_eq!(
+                    wire.map(f64::to_bits),
+                    finite(sim),
+                    "a habitable zone's limit"
+                );
+            }
             assert_eq!(wire.extrapolated, sim.extrapolated());
         }
     }
-    assert!(
-        answer.system_plane.is_some(),
-        "every pinned system has a zone"
+}
+
+/// Holds a `system_bodies` answer's system plane to the sim's host planes by ruling 69.4's rule.
+fn assert_system_plane_is_the_sims(answer: &SystemBodiesDto, planets: &PlanetarySystem) {
+    // Plan 14's reference plane (ruling 69.4): the innermost zone holding star 0, or the next one
+    // out when that zone's host is a member of a close binary, or failing both the first zone.
+    let mut holding = planets
+        .zones()
+        .iter()
+        .zip(planets.hosts())
+        .filter(|(zone, _)| zone.members().any(|member| member == 0));
+    let primary = match holding.next() {
+        Some((zone, _)) if zone.host_multiplicity() == HostMultiplicity::CloseBinary => {
+            holding.next()
+        }
+        innermost => innermost,
+    };
+    let plane = primary
+        .map(|(_, host)| host)
+        .or_else(|| planets.hosts().first())
+        .map(PlanetaryHost::plane);
+    let born = !answer.zones.is_empty();
+    assert_eq!(
+        answer
+            .system_plane
+            .map(|p| (p.inclination_rad.to_bits(), p.ascending_node_rad.to_bits())),
+        plane.filter(|_| born).map(|p| (
+            p.inclination().value().to_bits(),
+            p.node().value().to_bits()
+        )),
+        "the system plane"
     );
 }
 
@@ -426,6 +508,53 @@ async fn a_pinned_systems_bodies_are_the_sims_snapshot() {
         shapes,
         [(1, 1), (2, 3), (3, 5)],
         "the pinned systems are what their names say"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// Systems whose bodies are in every state a record can carry, one found for each by sampling the
+/// universe of [`SEED`] (`val14`, round 8): a black hole whose survivors a supernova left on
+/// eccentric orbits, a neutron star whose planets it unbound, a white dwarf that engulfed a planet,
+/// and a young star with giants still forming.
+const VARIED: [u64; 4] = [
+    0x81ff_b29f_f000_0007,
+    0x81ff_b2a0_0000_0002,
+    0x41ff_6cae_0000_0005,
+    0x01ff_fb2b_2005_0000,
+];
+
+/// The wire carries every state a body can be in exactly as the sim has it, at both ends of the
+/// clock window and the epoch: the states and their times and causes, the orbits after a
+/// supernova, and the zones and their habitable zones about remnants.
+#[tokio::test]
+async fn bodies_in_every_state_are_the_sims_snapshot() {
+    let (server, mut client, universe) = started().await;
+    let mut seen = [false; 4];
+    for raw in VARIED {
+        let (ctx, planets) = sim_system(raw);
+        for years in [-1_000, 0, 1_000] {
+            let time = at_years(years);
+            let answer = bodies(
+                &mut client,
+                bodies_request(&universe, raw, time, DetailLevelDto::Full),
+            )
+            .await;
+            assert_bodies_are_the_sims(&answer, &ctx, &planets);
+            for body in &answer.bodies {
+                let state = match body.state {
+                    BodyStateDto::Present => 0,
+                    BodyStateDto::Unbound { .. } => 1,
+                    BodyStateDto::Destroyed { .. } => 2,
+                    BodyStateDto::NotYetFormed => 3,
+                };
+                seen[state] = true;
+            }
+        }
+    }
+    assert_eq!(
+        seen, [true; 4],
+        "present, unbound, destroyed and unformed bodies"
     );
     client.close().await;
     server.stop().await;

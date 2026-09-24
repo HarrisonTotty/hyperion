@@ -13,6 +13,7 @@ use super::*;
 use crate::galaxy::placement::CellKey;
 use crate::id::Layer;
 use crate::orbit::Eccentricity;
+use crate::planetary::architecture::HostMultiplicity;
 use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
@@ -793,4 +794,77 @@ fn circularisation_is_t8e_s_and_hot_jupiters_circularise() {
         }
     }
     assert!(hot >= 5, "{hot} hot Jupiters");
+}
+
+// Round 8's validation of the slice (`val14`).
+
+/// A query at one time is a function of the system, its context and that time alone: asking the
+/// same system at other times first, and for single bodies, changes no record of a later snapshot
+/// (sim-determinism, "Order independence").
+#[test]
+fn a_query_does_not_depend_on_the_queries_before_it() {
+    for (ctx, system) in generated().iter().take(80) {
+        let fresh = generate_planets(SEED, ctx);
+        let expected: Vec<_> = window()
+            .iter()
+            .map(|&t| fresh.snapshot_at(ctx, t))
+            .collect();
+        // The same queries in the other order, with single-body queries between them.
+        for (i, &t) in window().iter().enumerate().rev() {
+            // The answers between are not the point, only that asking them moves nothing after.
+            for body in system.bodies() {
+                let _ = system.position_at(ctx, body.index(), t);
+                let _ = system.body_at(ctx, body.index(), t);
+            }
+            for zone in system.zones() {
+                let _ = system.habitable_zone_at(ctx, zone.host(), t);
+            }
+            assert_eq!(system.snapshot_at(ctx, t), expected[i], "{:?}", ctx.id());
+        }
+    }
+}
+
+/// Design note 10's close-binary flag is Kraus et al.'s (2016) 47 au cut: a component of a pair
+/// inside it has its planets suppressed and its circumbinary zone takes the pair's plane, and one
+/// of a pair outside it neither.
+#[test]
+fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
+    let e = Eccentricity::new(0.3).unwrap();
+    for (index, (au, close)) in [(45.0, true), (50.0, false)].into_iter().enumerate() {
+        let ctx = synthetic_binary(
+            id(900 + u32::try_from(index).unwrap()),
+            SolarMasses::new(1.0),
+            SolarMasses::new(0.8),
+            Metres::from(AstronomicalUnits::new(au)),
+            e,
+            Dex::ZERO,
+            Years::new(4.57e9),
+        )
+        .unwrap();
+        let system = generate_planets(SEED, &ctx);
+        let star = system
+            .zone(OrbitHost::Star(0))
+            .expect("the primary keeps a zone");
+        assert_eq!(
+            star.host_multiplicity(),
+            if close {
+                HostMultiplicity::CloseBinary
+            } else {
+                HostMultiplicity::SingleOrWide
+            },
+            "{au} au"
+        );
+        let pair = ctx.hierarchy().pairs().next().unwrap().1;
+        let aligned = SystemPlane::of_orbit(pair.orientation());
+        let barycentre = system.host(OrbitHost::Barycentre).unwrap();
+        assert_eq!(
+            system
+                .zone(OrbitHost::Barycentre)
+                .unwrap()
+                .host_multiplicity(),
+            HostMultiplicity::SingleOrWide,
+            "a pair's own circumbinary zone is never flagged"
+        );
+        assert_eq!(barycentre.plane() == aligned, close, "{au} au");
+    }
 }

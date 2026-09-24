@@ -34,9 +34,9 @@
 //!   μ = 0.9 however light the host.
 //! - S-type, e > 0.8: the value at 0.8 times ((1 − e) ÷ 0.2)^1.2, the eccentricity law of the
 //!   invariant-loop limits of Pichardo et al. (2005), as Jaime, Aguilar and Pichardo (2014, MNRAS
-//!   443, 260, eq. 11) give it, R = `R_Egg` 0.733 (1 − e)^1.2 q^0.07. For equal masses that law
-//!   is within 1.4% and 2.7% of Holman and Wiegert's fit at e = 0 and 0.5, and gives their Table
-//!   3's 0.04 at e = 0.8, where the fit gives 0.036. The zone closes
+//!   443, 260, eq. 11) give it, R = `R_Egg` 0.733 (1 − e)^1.2 q^0.07. For equal masses (their
+//!   q = 0.5) that law is within 3.4% and 2.2% of Holman and Wiegert's fit at e = 0 and 0.5, and
+//!   gives 0.038 at e = 0.8, near their Table 3's 0.04, where the fit gives 0.036. The zone closes
 //!   as e → 1, a little faster than the companion's pericentre. A clamp would keep it at its size
 //!   for e = 0.8 while the pericentre closed in. (The fit's own slope at e = 0.8 is (1 − e)^1.4; for
 //!   γ Vir, at e = 0.881, Holman and Wiegert extrapolate the polynomial itself, to 0.61 au, where

@@ -111,9 +111,10 @@ pub const ROCK_MASS_FRACTION: f64 = 0.004_89;
 /// The mass fraction of a solar-composition gas that condenses as water ice: 0.571%.
 ///
 /// Lodders (2003), Table 11, "H₂O ice" for the solar-system composition (water ice to rock 1.17).
-/// Ammonia hydrate (0.097%) condenses at 131 K, about 4.6 au × √(L ÷ L☉), and methane ice
-/// (0.330%) at 41 K, about 47 au × √(L ÷ L☉), beyond most discs; both are left out, the ammonia a
-/// step of 9% beyond its own line (Lodders 2003, Tables 10 and 11).
+/// Ammonia ice (Table 11's "NH₃ ice", 0.097%), which condenses as ammonia hydrate at 131 K,
+/// about 4.6 au × √(L ÷ L☉), and methane ice (0.330%) at 41 K, about 47 au × √(L ÷ L☉), beyond
+/// most discs; both are left out, the ammonia a step of 9% beyond its own line (Lodders 2003,
+/// Tables 10 and 11).
 pub const WATER_ICE_MASS_FRACTION: f64 = 0.005_71;
 
 /// How many times more solid a solar-composition gas is beyond the snow line than inside it:
@@ -180,7 +181,7 @@ pub const FEEDING_ZONE_HALF_WIDTH_HILL: f64 = 3.464_101_615_137_754_6;
 /// The untruncated outer edge, in characteristic radii: 3 (ruling 38).
 ///
 /// The profile's mass beyond a radius r is a fraction exp(−(r − `r_in`) ÷ `r_c`) of the whole, so
-/// 3 `r_c` encloses 1 − e⁻³ = 95.0% of it for an inner edge far inside `r_c`, and a little more
+/// 3 `r_c` encloses 1 − e⁻³ = 95.0% of it for an inner edge far inside `r_c`, and a little less
 /// otherwise.
 pub const OUTER_EDGE_CHARACTERISTIC_RADII: f64 = 3.0;
 

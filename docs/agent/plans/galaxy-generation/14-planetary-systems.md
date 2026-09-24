@@ -3677,3 +3677,40 @@ masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (
     the toggle, the label and the row; the ticked edge as the non-colour cue; the layer shown by
     default; the readout reading both pairs whatever the map's toggles. `GALAXY`'s draw lists are
     byte for byte unchanged (the 1,152-scene probe, SHA-256 `9cf26949…`).
+- **Validation of the slice as built (`val14`, round 8).** Every constant sampled matches its paper
+  (37 of disc, limits, spacing and zones; Chen and Kipping, Zeng's 81 cells, Lopez and Fortney's
+  792, Fortney et al.'s 72, Thorngren and Fortney's eq. 34, Plotnykov and Valencia; Kopparapu's
+  erratum's 25 coefficients, the irradiation, the supernova kernel, the remnant's Roche limit, the
+  damping time and the disc lifetime); two doc comments were wrong and are corrected, with no
+  output moved (`placement/zones.rs`: Jaime et al.'s law at q = 0.5 is within 3.4% and 2.2% of the
+  fit and gives 0.038 at e = 0.8; `disc.rs`: 3 r_c holds a little less than 95%, not more).
+  - _Sampled_, 12,000 systems of seeds `0x4d2` and `0x9e3779b9` at the solar circle (48,603 bodies)
+    and 2,000 with primaries over 8 M☉, at −H, the epoch and +H: no orbit crossing or 2√3 R_H gap
+    missed at birth, no body outside its birth zone or the strip radius at birth, no NaN, negative
+    or non-finite value, no radius under the iron curve, none over 2.05 R_J, no present body inside
+    its host's photosphere, its largest past radius or its rigid Roche limit, none about a
+    neutron star alone or a star that left no remnant, none hotter than its hottest host, and
+    `snapshot_at` equal to `body_at` everywhere.
+  - _For the orchestrator to rule (moves output):_ **orbits cross after a supernova.** A sudden death
+    gives each survivor its own eccentricity and apsis, so pairs about a black hole or a neutron-star
+    pair cross: 72 of 138 pair checks about such hosts (seed `0x4d2`, system `81ffb29ff0000007`),
+    6 of 105 (`0x9e3779b9`), 3,039 of 6,204 among primaries over 8 M☉. T30.b's
+    `no_overlapping_orbits_in_generated_systems` asserts the gap at every time but its 400 systems hold
+    no surviving pair of a supernova host, so it cannot see this. Such pairs would scatter; the
+    options are to exempt them from the property, recorded, or to resolve them (one unbound or
+    destroyed at the death), which moves bodies' states.
+  - _Known and measured:_ about hosts that lost mass without a sudden death, 2.0% and 2.3% of pairs
+    at a time miss 2√3 Hill radii of the host's present mass (20% over 8 M☉; ruling 68.4's bound is
+    5% of the 400-system sample), and 2.9% and 3.4% of zone-bounded bodies at a time lie beyond
+    their birth zone (33% over 8 M☉; ruling 67.5, until P11.T4).
+  - _Mutations._ Of 16 single-constant mutations, 15 turned tests red. `CLOSE_BINARY_CUTOFF_AU`
+    (47 → 40 au) turned none, so `the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut` now
+    pins it (45 and 50 au binaries). The damping time's 4/63 is caught only by its own restated
+    formula, and Ford and Rasio's 2.16 only by `placed_planets_are_pinned`: nothing pins the
+    assembled system (slots across hosts, planes, radius ranks, the strip cut, labels, τ_c), which
+    is T32's. `a_query_does_not_depend_on_the_queries_before_it` is added for the order check.
+  - _The wire._ `tests/system_bodies.rs` compared neither a destruction's cause, a zone's class,
+    three of the five habitable-zone limits, every zone's snow line nor the system plane; it now
+    does, and `bodies_in_every_state_are_the_sims_snapshot` holds four more systems (a black hole's
+    survivors, a neutron star's unbound planets, an engulfment, giants still forming) to the sim
+    bit for bit at −H, the epoch and +H.
