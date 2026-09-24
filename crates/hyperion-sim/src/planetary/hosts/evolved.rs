@@ -6,8 +6,11 @@
 //! - **Circularisation** (P14.T8.e, applied first): tides raised on the planet by its host damp
 //!   its eccentricity as e(t) = e₀ exp(−(age + t) ÷ `τ_c`) at constant orbital angular momentum, so
 //!   a (1 − e²) is kept and a(t) = a₀ (1 − e₀²) ÷ (1 − e(t)²), which stays between the primordial
-//!   pericentre and semi-major axis (design note 9). The time `τ_c` is T8.e's constant-Q form
-//!   (Goldreich and Soter 1966), which the caller passes as a [`Circularisation`].
+//!   pericentre and semi-major axis (design note 9). Circularisation has one definition, T8.e's
+//!   (ruling 62.5): the time `τ_c` is its constant-Q form
+//!   ([`circularisation_time`](crate::planetary::placement::classes::tides::circularisation_time),
+//!   Goldreich and Soter 1966), which the generator passes as a [`Circularisation`], and the
+//!   damping is its [`circularise`](crate::planetary::placement::classes::tides::circularise).
 //! - **Expansion** (design note 11): winds are slow against any planetary period inside about
 //!   1,000 au, so an orbit expands adiabatically, a(t) = a₀ M₀ ÷ M(t) with the eccentricity kept,
 //!   M being the mass the body orbits: its star's, or a circumbinary body's pair's
@@ -32,6 +35,7 @@ use crate::math;
 use crate::orbit::{Eccentricity, InvertStateError, KeplerElements, Orbit, elements_from_state};
 use crate::planetary::derive::roche_limit_fluid;
 use crate::planetary::params::ENGULFMENT_TIDAL_MASS;
+use crate::planetary::placement::classes::tides;
 use crate::time::{NANOS_PER_SECOND, Span, UniverseTime};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
@@ -164,6 +168,9 @@ pub(crate) fn circularised_axis(
 
 /// The eccentricity and axis `orbit` is damped to at `host_age`, or `None` if it is circular or
 /// does not circularise.
+///
+/// The damping is P14.T8.e's own, [`tides::circularise`], which defines it (ruling 62.5): the
+/// transform keeps no copy of the law.
 fn damped(
     orbit: &KeplerElements,
     circularisation: Circularisation,
@@ -174,11 +181,9 @@ fn damped(
     if e0 <= 0.0 {
         return None;
     }
-    let e = e0 * math::exp(-host_age.value().max(0.0) / timescale.value());
-    Some((
-        e,
-        orbit.semi_major_axis() * ((1.0 - e0 * e0) / (1.0 - e * e)),
-    ))
+    let elapsed = Years::new(host_age.value().max(0.0));
+    let (a, e) = tides::circularise(orbit.semi_major_axis(), e0, timescale, elapsed);
+    Some((e, a))
 }
 
 /// `orbit`, whose elements are about the mass `reference`, expanded adiabatically to the mass

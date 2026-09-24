@@ -54,7 +54,7 @@ use crate::stellar::multiplicity::{
     LOG_PERIOD_MAX, LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS,
     MultiplicityModel, SlotKind, SystemHierarchy, TIDAL_CUT_SHARE,
 };
-use crate::stellar::sse::{ZCoeffs, zams};
+use crate::stellar::sse::{self, ZCoeffs, zams};
 use crate::stellar::system::{MAX_STAR_MASS, StarModel, SystemStars};
 use crate::stellar::{Composition, substellar};
 use crate::time::{CLOCK_WINDOW_H, UniverseTime};
@@ -79,6 +79,16 @@ const OORT_B_KM_S_KPC: f64 = -11.9;
 /// The age of a brown dwarf's disc in design note 6: a substellar host, which has no main
 /// sequence, reads its snow line from its cooling fit's luminosity at 10 Myr.
 const SUBSTELLAR_DISC_AGE: Years = Years::new(1.0e7);
+
+/// The age at which a star of 0.08–0.1 M☉ reads its zero-age main sequence from plan 06's cooling
+/// fits (ruling 61.3): 5 Gyr, by which the fits' contraction has settled on their hydrogen-burning
+/// floor (BHAC15's isochrone, which the fits follow there), within 5 K of the 3 and 10 Gyr states
+/// at 0.09 M☉ and within 4 × 10⁻⁶ of Tout et al.'s zero-age values at 0.1 M☉.
+///
+/// [`StarModel`] evolves these stars on the cooling fits and never on a track, so the disc must see
+/// the same star: Tout et al.'s fits extrapolated below 0.1 M☉ give 1.9 times the luminosity at
+/// 0.08 M☉ and a snow line 1.37 times as far.
+const COOLING_MAIN_SEQUENCE_AGE: Years = Years::new(5.0e9);
 
 /// The tidal (Jacobi) radius of a system of mass `m` (M☉, positive and finite) in the solar
 /// neighbourhood, m: the sphere of influence of a synthetic host, which has no place in a galaxy.
@@ -370,21 +380,27 @@ impl SystemContext {
     /// What each component's disc reads (P14.T9.c), by body index: its zero-age luminosity and
     /// radius, and its `star.disc_lifetime` rank.
     ///
-    /// - A star takes plan 06's zero-age main sequence
-    ///   ([`zams::luminosity`] and [`zams::radius`]) at its initial mass and the system's
-    ///   composition (design note 6). Tout et al.'s (1996) fits are calibrated from 0.1 M☉; a star
-    ///   of 0.08–0.1 M☉ takes them extrapolated, which they call "inaccurate but still reasonable"
-    ///   in mass (their §2).
+    /// - A star of 0.1 M☉ or more takes plan 06's zero-age main sequence ([`zams::luminosity`]
+    ///   and [`zams::radius`], Tout et al. 1996) at its initial mass and the system's composition
+    ///   (design note 6).
+    /// - A star of 0.08–0.1 M☉ takes the cooling fits' main sequence, their state at 5 Gyr
+    ///   ([`substellar::cooling`], ruling 61.3): [`StarModel`] evolves it on those fits, so its
+    ///   disc sees the star the model does, not Tout et al.'s fits extrapolated below their 0.1 M☉.
     /// - A brown-dwarf companion takes its cooling fit's luminosity and radius at 10 Myr, the
-    ///   substellar rule of design note 6 ([`substellar::cooling`]).
+    ///   substellar rule of design note 6.
     ///
     /// # Panics
     ///
-    /// Never for a context this module builds: a brown-dwarf slot's mass lies inside the cooling
-    /// fits.
+    /// Never for a context this module builds: a brown-dwarf slot's mass and a star's below
+    /// 0.1 M☉ lie inside the cooling fits.
     #[must_use]
     pub fn zone_stars(&self) -> Vec<ZoneStar> {
         let coeffs = ZCoeffs::new(self.composition.z_fit());
+        let cooling = |mass: SolarMasses, age: Years| {
+            let state = substellar::cooling(mass, age, &self.composition)
+                .expect("a mass below 0.1 M_sun in a context lies inside the cooling fits");
+            (state.luminosity(), state.radius())
+        };
         self.hierarchy
             .stars()
             .iter()
@@ -392,17 +408,13 @@ impl SystemContext {
             .map(|(slot, star)| {
                 let mass = slot.initial_mass();
                 let (zams_luminosity, zams_radius) = match slot.kind() {
+                    SlotKind::Star if mass < sse::MIN_INITIAL_MASS => {
+                        cooling(mass, COOLING_MAIN_SEQUENCE_AGE)
+                    }
                     SlotKind::Star => {
                         (zams::luminosity(mass, &coeffs), zams::radius(mass, &coeffs))
                     }
-                    SlotKind::BrownDwarf => {
-                        let state =
-                            substellar::cooling(mass, SUBSTELLAR_DISC_AGE, &self.composition)
-                                .expect(
-                                    "a brown-dwarf companion's mass lies inside the cooling fits",
-                                );
-                        (state.luminosity(), state.radius())
-                    }
+                    SlotKind::BrownDwarf => cooling(mass, SUBSTELLAR_DISC_AGE),
                 };
                 ZoneStar {
                     zams_luminosity,
@@ -1001,6 +1013,17 @@ mod tests {
             .age_at_epoch(Years::new(4.57e9))
     }
 
+    /// A single star of `m` M☉ at \[Fe/H\] `fe_h`, 2 Gyr old.
+    fn synthetic(m: f64, fe_h: f64) -> SystemContext {
+        SystemContext::builder()
+            .system(id(8))
+            .star(SolarMasses::new(m))
+            .fe_h(Dex::new(fe_h))
+            .age_at_epoch(Years::new(2.0e9))
+            .build()
+            .unwrap()
+    }
+
     fn binary(m1: f64, m2: f64, a_au: f64, e: f64) -> SystemContextBuilder {
         SystemContext::builder()
             .system(id(7))
@@ -1440,6 +1463,38 @@ mod tests {
         for (zone_star, model) in zone_stars.iter().zip(context.stars()) {
             assert_eq!(zone_star.disc_lifetime_rank, model.draws().disc_lifetime());
         }
+    }
+
+    /// Ruling 61.3: a star of 0.08–0.1 M☉ reads its zero-age state from the cooling fits' main
+    /// sequence, which its model evolves on, and meets Tout et al.'s at 0.1 M☉.
+    #[test]
+    fn a_star_below_a_tenth_of_a_sun_reads_the_cooling_fits_main_sequence() {
+        for fe_h in [-1.0, 0.0, 0.3] {
+            let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+            let coeffs = ZCoeffs::new(composition.z_fit());
+            for m in [0.08, 0.09, 0.099] {
+                let context = synthetic(m, fe_h);
+                let star = context.zone_stars()[0];
+                let settled =
+                    substellar::cooling(SolarMasses::new(m), Years::new(5e9), &composition)
+                        .unwrap();
+                assert_same_bits(star.zams_luminosity.value(), settled.luminosity().value());
+                assert_same_bits(star.zams_radius.value(), settled.radius().value());
+            }
+            // At the edge the two main sequences meet, and above it Tout et al.'s is kept.
+            let below = synthetic(0.1 * (1.0 - 1e-12), fe_h).zone_stars()[0];
+            let at = synthetic(0.1, fe_h).zone_stars()[0];
+            let tenth = SolarMasses::new(0.1);
+            assert_same_bits(
+                at.zams_luminosity.value(),
+                zams::luminosity(tenth, &coeffs).value(),
+            );
+            let ratio = below.zams_luminosity.value() / at.zams_luminosity.value();
+            assert!((ratio - 1.0).abs() < 0.01, "[Fe/H] {fe_h}: {ratio}");
+        }
+        // At 0.08 M☉ and solar composition the snow line's luminosity is about half Tout's.
+        let low = synthetic(0.08, 0.0).zone_stars()[0].zams_luminosity.value();
+        assert!((2.4e-4..2.7e-4).contains(&low), "{low}");
     }
 
     #[test]

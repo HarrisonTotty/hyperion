@@ -28,11 +28,12 @@
 //!
 //! 1. **Radius and composition** (T11, fixed at formation). The body's drawn rank is confined to
 //!    the radii its composition can hold ([`radius_rank_in_window`], ruling 47). Where it falls
-//!    between the iron and rock curves the outcome is rocky: its composition is the same quantile
-//!    of the observed spread of rocky planets' ([`rocky_core_mass_fraction`], ruling 53) and its
-//!    radius Zeng et al.'s at it. Above the rock curve the rank places the body within Chen and
-//!    Kipping's scatter at its mass, and that radius is solved into a composition on the side of
-//!    the disc's snow line where it formed, at the flux of its host's zero-age luminosity.
+//!    between the iron curve and the rock curve (the Earth-like curve beyond the snow line, ruling
+//!    58) the outcome is rocky: its composition is the same quantile of the observed spread of
+//!    rocky planets' ([`rocky_core_mass_fraction`], ruling 53) and its radius Zeng et al.'s at it.
+//!    Above that curve the rank places the body within Chen and Kipping's scatter at its mass, and
+//!    that radius is solved into a composition on the side of the disc's snow line where it
+//!    formed, at the flux of its host's zero-age luminosity.
 //! 2. **Irradiation** (T12): the flux from its hosts at the time and the equilibrium temperature,
 //!    with a Bond albedo of 0.3 until T13's atmospheres close the loop (T13 will iterate here).
 //! 3. **The radius at the time** (T11): an envelope's radius at the body's age and present flux
@@ -599,18 +600,28 @@ impl From<EvaluateGiantCoolingError> for DeriveBodyError {
 }
 
 /// The core mass fraction of a rocky outcome: `Some` when the confined rank `radius_rank` falls
-/// between the iron and rock curves of `window`, and then the fraction at the same position in
-/// the observed distribution of rocky planets' (ruling 53, amending ruling 47.1).
+/// between the iron curve of `window` and the top of its rocky outcomes
+/// ([`RadiusWindow::dry_top`]), and then the fraction at the same position in the observed
+/// distribution of rocky planets' (ruling 53, amending ruling 47.1; ruling 58).
 ///
 /// With F Chen and Kipping's distribution at the window's mass, a rank r in (F(`R_iron`),
-/// F(`R_rock`)] is at s = (r − F(`R_iron`)) ÷ (F(`R_rock`) − F(`R_iron`)) of the rocky part, and
-/// its core mass fraction is [`rocky::core_mass_fraction_at`] of 1 − s, so that the rocky part's
-/// ranks, uniform in s, follow Plotnykov and Valencia's (2020) spread; the radius is then Zeng et
-/// al.'s at that composition. The fraction is 1 at the iron curve's rank and 0 at the rock curve's,
-/// where the radius meets Chen and Kipping's, which every rank above keeps: the radius is
-/// continuous in the rank, and in the mass wherever Chen and Kipping's is, which is everywhere but
-/// their segment transitions (P14.T11.a). Still one quantile per body (design note 8). `None`
-/// above the rock curve: envelopes, sub-Neptunes and water worlds.
+/// F(`R_top`)] is at s = (r − F(`R_iron`)) ÷ (F(`R_top`) − F(`R_iron`)) of the rocky part, and its
+/// core mass fraction is [`rocky::core_mass_fraction_at_least`] of 1 − s above the top's own
+/// fraction, so that the rocky part's ranks, uniform in s, follow Plotnykov and Valencia's (2020)
+/// spread; the radius is then Zeng et al.'s at that composition.
+///
+/// - Inside the snow line the top is the rock curve and its fraction 0, so the rocky part takes
+///   the whole distribution ([`rocky::core_mass_fraction_at`] of 1 − s, bit for bit).
+/// - Beyond it the top is the Earth-like curve (ruling 58), and the rocky part takes the
+///   distribution held to Earth's 0.325 and above: the ranks between the Earth-like and rock
+///   curves keep Chen and Kipping's radius, which the solve reads as water on an Earth-like core,
+///   so a body formed where ice condenses keeps its water.
+///
+/// The fraction is 1 at the iron curve's rank and the top's own at the top's rank, where the
+/// radius meets Chen and Kipping's, which every rank above keeps: the radius is continuous in the
+/// rank, and in the mass wherever Chen and Kipping's is, which is everywhere but their segment
+/// transitions (P14.T11.a). Still one quantile per body (design note 8). `None` above the top:
+/// envelopes, sub-Neptunes and water worlds.
 ///
 /// # Examples
 ///
@@ -631,11 +642,11 @@ impl From<EvaluateGiantCoolingError> for DeriveBodyError {
 #[must_use]
 pub fn rocky_core_mass_fraction(radius_rank: UnitUniform, window: &RadiusWindow) -> Option<f64> {
     let iron = chen_kipping_rank(window.mass(), window.least());
-    let rock = chen_kipping_rank(window.mass(), window.rock());
+    let top = chen_kipping_rank(window.mass(), window.dry_top());
     let r = radius_rank.value();
-    (r <= rock).then(|| {
-        let share = ((r - iron) / (rock - iron)).clamp(0.0, 1.0);
-        rocky::core_mass_fraction_at(1.0 - share)
+    (r <= top).then(|| {
+        let share = ((r - iron) / (top - iron)).clamp(0.0, 1.0);
+        rocky::core_mass_fraction_at_least(1.0 - share, window.dry_top_core_mass_fraction())
     })
 }
 
@@ -1029,15 +1040,17 @@ pub(crate) mod solar {
         let least = chen_kipping_rank(mass, window.least());
         let greatest = chen_kipping_rank(mass, window.greatest());
         let radius = EarthRadii::new(radius_km * 1e3 / EARTH_RADIUS_M);
-        let confined = if radius <= window.rock() {
+        let confined = if radius <= window.dry_top() {
             // A rocky outcome: the rank whose share of the rocky part puts the observed
-            // composition at its place in the observed spread.
+            // composition at its place in the observed spread, held to the top's fraction.
             let cmf = composition(mass, radius, SnowLineSide::Inside, EarthFluxes::new(1.0))
                 .unwrap()
                 .core()
                 .core_mass_fraction();
-            let rock = chen_kipping_rank(mass, window.rock());
-            least + (1.0 - rocky::core_mass_fraction_rank(cmf)) * (rock - least)
+            let top = chen_kipping_rank(mass, window.dry_top());
+            let below = rocky::core_mass_fraction_rank(window.dry_top_core_mass_fraction());
+            let held = (rocky::core_mass_fraction_rank(cmf) - below) / (1.0 - below);
+            least + (1.0 - held) * (top - least)
         } else {
             chen_kipping_rank(mass, radius)
         };
@@ -1532,27 +1545,28 @@ mod tests {
     }
 
     #[test]
-    fn the_radius_is_continuous_across_the_rock_curve_and_in_mass() {
+    fn the_radius_is_continuous_across_the_top_of_the_rocky_outcomes_and_in_mass() {
         let flux = EarthFluxes::new(1.0);
         for m in [0.3, 1.0, 1.6, 3.0, 10.0, 60.0] {
             let mass = EarthMasses::new(m);
             for side in [SnowLineSide::Inside, SnowLineSide::Beyond] {
-                // Either side of the rock curve's rank: the rocky outcome's lightest composition,
-                // pure rock, meets Chen and Kipping's radius there, to the envelope model's own
-                // resolution where an envelope begins (dips of up to 1.1 × 10⁻⁵ of the radius,
-                // `envelope`'s documentation).
+                // Either side of the top's rank (the rock curve inside the snow line, the
+                // Earth-like curve beyond it, ruling 58): the rocky outcome's lightest composition
+                // meets Chen and Kipping's radius there, to the envelope model's own resolution
+                // where an envelope begins (dips of up to 1.1 × 10⁻⁵ of the radius, `envelope`'s
+                // documentation).
                 let window = radius_window(mass, side, flux).unwrap();
-                let rock = chen_kipping_rank(mass, window.rock());
+                let top = chen_kipping_rank(mass, window.dry_top());
                 let at = |r: f64| {
                     confined_radius(mass, UnitUniform::new(r).unwrap(), &window, side, flux)
                 };
-                let (below, above) = (at(rock * (1.0 - 1e-12)), at(rock * (1.0 + 1e-12)));
+                let (below, above) = (at(top * (1.0 - 1e-12)), at(top * (1.0 + 1e-12)));
                 assert!(
                     (above / below - 1.0).abs() < 1.1e-5,
                     "{m} M⊕ {side:?}: {below}, {above}"
                 );
                 assert!(
-                    rocky_core_mass_fraction(UnitUniform::new(rock).unwrap(), &window).is_some()
+                    rocky_core_mass_fraction(UnitUniform::new(top).unwrap(), &window).is_some()
                 );
             }
         }
@@ -1593,6 +1607,59 @@ mod tests {
         assert_same_bits(solved.radius().value(), zeng.value());
         assert!(
             rocky_core_mass_fraction(UnitUniform::new(rock * 1.001).unwrap(), &window).is_none()
+        );
+    }
+
+    /// Ruling 58: beyond the snow line only the ranks below the Earth-like curve are rocky
+    /// outcomes, held to Earth's core fraction and above, and every rank above that curve keeps
+    /// its water; inside the snow line the rocky outcomes still reach the rock curve.
+    #[test]
+    fn beyond_the_snow_line_rocky_outcomes_end_at_the_earth_like_curve_and_bodies_keep_water() {
+        let flux = EarthFluxes::new(0.05);
+        let (mut watery, mut above_earth, mut between) = (0_u32, 0_u32, 0_u32);
+        for m in [0.1, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 1.7, 1.9] {
+            let mass = EarthMasses::new(m);
+            let window = radius_window(mass, SnowLineSide::Beyond, flux).unwrap();
+            let earth = chen_kipping_rank(mass, window.dry_top());
+            let rock = chen_kipping_rank(mass, window.rock());
+            assert!(
+                earth < rock,
+                "{m} M⊕: the Earth-like curve lies below the rock curve"
+            );
+            let inside = radius_window(mass, SnowLineSide::Inside, flux).unwrap();
+            assert_same_bits(inside.dry_top().value(), inside.rock().value());
+            assert!(inside.dry_top_core_mass_fraction().abs() < f64::EPSILON);
+            for i in 1..1_000_u32 {
+                let rank =
+                    radius_rank_in_window(UnitUniform::new(f64::from(i) / 1e3).unwrap(), &window);
+                let solved = if let Some(cmf) = rocky_core_mass_fraction(rank, &window) {
+                    assert!(rank.value() <= earth);
+                    assert!(
+                        cmf >= radius::EARTH_CORE_MASS_FRACTION - 1e-12,
+                        "{m}: {cmf}"
+                    );
+                    dry_composition(mass, cmf)
+                } else {
+                    above_earth += 1;
+                    if rank.value() <= rock {
+                        between += 1;
+                    }
+                    let r = radius_chen_kipping(mass, rank);
+                    composition(mass, r, SnowLineSide::Beyond, flux).unwrap()
+                };
+                if solved.fractions().water() > 0.0 {
+                    watery += 1;
+                }
+            }
+        }
+        // Every body above the Earth-like curve is watery, and those between it and the rock
+        // curve, dry under ruling 53 alone, are among them: 5,071 of the 8,991, the count before
+        // ruling 53, against 2,596 under it.
+        assert_eq!(watery, above_earth);
+        assert_eq!(watery, 5_071);
+        assert!(
+            between > 500,
+            "{between} bodies between the Earth-like and rock curves"
         );
     }
 
@@ -1647,6 +1714,35 @@ mod tests {
         }
         let snow = AstronomicalUnits::from(disc.snow_line()).value();
         w.f64("solar_snow_line_au", snow);
+        // Ruling 58: beyond the snow line, a body among the rocky outcomes, held to Earth's core
+        // fraction and above, and one between the Earth-like and rock curves, which keeps Chen
+        // and Kipping's radius and its water.
+        for (name, dry) in [("beyond_dry", true), ("beyond_watery", false)] {
+            let (earths, a_au, eccentricity) = (1.0, 4.0, 0.05);
+            let mass = EarthMasses::new(earths);
+            let axis = Metres::new(a_au * METRES_PER_AU);
+            let flux = luminosity_flux(disc.host_luminosity(), axis, eccentricity);
+            let window = radius_window(mass, SnowLineSide::Beyond, flux).unwrap();
+            let rank = |r: EarthRadii| chen_kipping_rank(mass, r);
+            let (least, greatest) = (rank(window.least()), rank(window.greatest()));
+            let (top, rock) = (rank(window.dry_top()), rank(window.rock()));
+            let target = if dry {
+                f64::midpoint(least, top)
+            } else {
+                f64::midpoint(top, rock)
+            };
+            let u = (target - least) / (greatest - least);
+            let placed = placed(earths * EARTH_MASS_KG, a_au, eccentricity, u);
+            let body = derive(&placed, &disc).unwrap();
+            assert_eq!(body.formed(), SnowLineSide::Beyond);
+            if dry {
+                assert!(body.fractions().water() <= 0.0);
+                assert!(body.core().core_mass_fraction() >= radius::EARTH_CORE_MASS_FRACTION);
+            } else {
+                assert!(body.fractions().water() > 0.0);
+            }
+            pin(&mut w, name, &body);
+        }
         golden!("planetary/derive_body", w.as_str());
     }
 }

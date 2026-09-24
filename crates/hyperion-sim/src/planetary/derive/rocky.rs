@@ -21,6 +21,15 @@
 //! a core mass fraction must, is continuous and increasing in the rank, and matches the quoted
 //! percentiles exactly; Earth's 0.325 is at its 62nd percentile and Mercury's 0.70 at its 92nd.
 //! Its share over half iron is 21%.
+//!
+//! # Beyond the snow line (ruling 58)
+//!
+//! The measured fractions are those of close-in rocky planets, and correct the iron excess of
+//! Chen and Kipping's radii, not a body's water. A body formed beyond the snow line is ice-rich
+//! (design note 8), so there only the part of its rank below the Earth-like curve is a rocky
+//! outcome: its composition is the same distribution held to Earth's core mass fraction and above
+//! ([`core_mass_fraction_at_least`]), and every rank above that curve keeps Chen and Kipping's
+//! radius, and with it the water the solve reads there.
 
 use crate::math;
 
@@ -107,8 +116,37 @@ pub fn core_mass_fraction_rank(core_mass_fraction: f64) -> f64 {
     0.5 * math::erfc(-offset / scale * core::f64::consts::FRAC_1_SQRT_2)
 }
 
+/// The core mass fraction at rank `rank` of the observed distribution held to `floor` and above:
+/// the distribution conditioned on a core mass fraction of at least `floor` (ruling 58).
+///
+/// With F the distribution's cumulative probability ([`core_mass_fraction_rank`]), it is
+/// [`core_mass_fraction_at`] of F(`floor`) + `rank` (1 − F(`floor`)): `floor` at rank 0, pure iron
+/// at rank 1, and increasing between. A floor of 0 is the whole distribution, bit for bit, which
+/// is a rocky outcome's inside the snow line; beyond it the floor is Earth's 0.325, the Earth-like
+/// curve that tops the rocky outcomes there.
+///
+/// # Examples
+///
+/// The whole distribution with no floor, and Earth's composition at the bottom of the part held
+/// to Earth's and above:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::rocky::{core_mass_fraction_at, core_mass_fraction_at_least};
+///
+/// assert!((core_mass_fraction_at_least(0.3, 0.0) - core_mass_fraction_at(0.3)).abs() < 1e-15);
+/// assert!((core_mass_fraction_at_least(0.0, 0.325) - 0.325).abs() < 1e-12);
+/// assert!(core_mass_fraction_at_least(0.5, 0.325) > core_mass_fraction_at(0.5));
+/// ```
+#[must_use]
+pub fn core_mass_fraction_at_least(rank: f64, floor: f64) -> f64 {
+    let below = core_mass_fraction_rank(floor);
+    core_mass_fraction_at(below + rank * (1.0 - below))
+}
+
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
 
     #[test]
@@ -141,6 +179,29 @@ mod tests {
         assert!((core_mass_fraction_at(1.0) - 1.0).abs() < f64::EPSILON);
         assert!(core_mass_fraction_at(1e-300) < 1e-12);
         assert!(core_mass_fraction_at(1.0 - 1e-16) > 0.999);
+    }
+
+    #[test]
+    fn the_distribution_held_to_a_floor_rises_from_the_floor_to_iron() {
+        let floor = crate::planetary::derive::radius::EARTH_CORE_MASS_FRACTION;
+        let mut previous = 0.0;
+        for i in 0..=1_000_u32 {
+            let rank = f64::from(i) / 1_000.0;
+            let whole = core_mass_fraction_at(rank);
+            // No floor is the whole distribution, bit for bit.
+            assert_same_bits(core_mass_fraction_at_least(rank, 0.0), whole);
+            let held = core_mass_fraction_at_least(rank, floor);
+            assert!(held >= floor - 1e-12 && held >= previous, "{rank}: {held}");
+            // The conditional distribution: its rank is the whole one's, rescaled.
+            if i > 0 && i < 1_000 {
+                let below = core_mass_fraction_rank(floor);
+                let conditional = (core_mass_fraction_rank(held) - below) / (1.0 - below);
+                assert!((conditional - rank).abs() < 1e-9, "{rank}: {conditional}");
+            }
+            previous = held;
+        }
+        assert!((core_mass_fraction_at_least(0.0, floor) - floor).abs() < 1e-12);
+        assert!((core_mass_fraction_at_least(1.0, floor) - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

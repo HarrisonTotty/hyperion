@@ -152,3 +152,17 @@ star 1 inner none
 star 1 outer_m = 0x4230e4dc65528e0b  # 72559125842.55486
 barycentre inner_m = 0x428cfff33972e670  # 3985702858332.8047
 barycentre outer none
+
+late M dwarf below a tenth of a Sun: Stellar, 1 stars, 1 zones
+id = 0x42002cb200000387
+fe_h = 0xbfd3333333333333  # -0.3
+age_at_epoch_yr = 0x41f2a05f20000000  # 5000000000.0
+tidal_radius_m = 0x4350da6182b18fc4  # 1.897484786691253e16
+strip_radius_m = 0x43407fc76617d119  # 9288188030853682.0
+star 0 Star
+star 0 mass = 0x3fb70a3d70a3d70a  # 0.09
+star 0 zams_l = 0x3f412c743b93f5a1  # 0.0005240981619462523
+star 0 zams_r = 0x3fbe9289b79180c6  # 0.11942349177980124
+star 0 disc_rank = 0x3fe0000000000000  # 0.5
+star 0 inner none
+star 0 outer none

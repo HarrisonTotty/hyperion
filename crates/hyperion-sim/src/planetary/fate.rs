@@ -742,8 +742,16 @@ impl<'a> BodyFate<'a> {
         expanded_axis(self.base_axis(segment, t), segment.reference, mass)
     }
 
-    /// The mass the body orbits at `t`: its host stars' masses, summed in their order.
-    fn host_mass(&self, t: UniverseTime) -> SolarMasses {
+    /// The mass the body orbits at `t`, M☉: its host stars' masses then, summed in their order,
+    /// the mass [`BodyFate::at`]'s elements are about (the derivation's primary, P14.T30.b).
+    ///
+    /// # Panics
+    ///
+    /// If a host star has not formed by `t`: the body's host has formed by the time it is
+    /// present, which is when the question has an answer. In debug builds also as
+    /// [`BodyFate::at`].
+    #[must_use]
+    pub fn host_mass(&self, t: UniverseTime) -> SolarMasses {
         self.host
             .stars
             .iter()

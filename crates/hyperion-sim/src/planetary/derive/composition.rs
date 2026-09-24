@@ -402,11 +402,18 @@ fn watery(
 /// [`INNER_WATER_CAP`] that the solve would still keep, so that the window is continuous in mass
 /// at the floor, where that sliver ends (ruling 53). The derivation assembly confines a body's
 /// drawn radius to the window (ruling 47 of 2026-09-22; plan 14, P14.T16.a).
+///
+/// The window also says where its rocky outcomes end ([`dry_top`](Self::dry_top)): the radii from
+/// the iron curve up to it are the ones whose composition the derivation takes from the observed
+/// spread of rocky planets' (ruling 53), the rock curve inside the snow line and the Earth-like
+/// curve beyond it, above which a body formed there keeps its water (ruling 58).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RadiusWindow {
     mass: EarthMasses,
     least: EarthRadii,
     rock: EarthRadii,
+    dry_top: EarthRadii,
+    dry_top_core_mass_fraction: f64,
     greatest: EarthRadii,
 }
 
@@ -423,11 +430,27 @@ impl RadiusWindow {
         self.least
     }
 
-    /// The pure-rock curve at the body's mass, the top of the rocky outcomes (ruling 53): between
-    /// it and [`least`](Self::least) a body is dry rock and iron, on either side of the snow line.
+    /// The pure-rock curve at the body's mass: between it and [`least`](Self::least) the solve
+    /// reads a radius as dry rock and iron inside the snow line, and above the Earth-like curve as
+    /// water on an Earth-like core beyond it.
     #[must_use]
     pub const fn rock(&self) -> EarthRadii {
         self.rock
+    }
+
+    /// The top of the rocky outcomes (rulings 53 and 58): the pure-rock curve inside the snow
+    /// line, and beyond it the Earth-like curve, above which a body formed there keeps Chen and
+    /// Kipping's radius and the water the solve reads in it.
+    #[must_use]
+    pub const fn dry_top(&self) -> EarthRadii {
+        self.dry_top
+    }
+
+    /// The core mass fraction of the composition at [`dry_top`](Self::dry_top): 0, pure rock,
+    /// inside the snow line, and Earth's [`EARTH_CORE_MASS_FRACTION`], 0.325, beyond it.
+    #[must_use]
+    pub const fn dry_top_core_mass_fraction(&self) -> f64 {
+        self.dry_top_core_mass_fraction
     }
 
     /// The largest radius kept: the largest envelope the mass allows on the side's core
@@ -497,10 +520,19 @@ pub fn radius_window(
         SnowLineSide::Inside => rock,
         SnowLineSide::Beyond => with_envelope(radius_zeng(mass, ICY_CORE).value(), ICY_CORE),
     };
+    let (dry_top, dry_top_core_mass_fraction) = match side {
+        SnowLineSide::Inside => (rock, 0.0),
+        SnowLineSide::Beyond => (
+            dry_radius(&dry, EARTH_CORE_MASS_FRACTION),
+            EARTH_CORE_MASS_FRACTION,
+        ),
+    };
     Ok(RadiusWindow {
         mass,
         least: EarthRadii::new(iron),
         rock: EarthRadii::new(rock),
+        dry_top: EarthRadii::new(dry_top),
+        dry_top_core_mass_fraction,
         greatest: EarthRadii::new(greatest),
     })
 }

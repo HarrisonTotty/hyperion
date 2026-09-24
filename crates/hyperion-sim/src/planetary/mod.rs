@@ -35,7 +35,10 @@
 //!   system ([`SystemContext::for_system`]) or a synthetic host ([`SystemContext::builder`])
 //!   (P14.T1.d). The crate's `testing` feature adds `testing`: synthetic hosts and samples of real
 //!   systems for the statistical tests.
-//! - [`system`]: the assembled generator. Documentation only until P14.T30.
+//! - [`system`]: the assembled generator, [`generate`] and [`generate_planets`], and the
+//!   [`PlanetarySystem`] they return with its queries at a time, `body_at`, `snapshot_at`,
+//!   `position_at` and `habitable_zone_at` (P14.T30.a–b).
+//! - [`label`]: bodies' labels for people, `A b` onwards (design note 22, P14.T30.c).
 //!
 //! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
 //! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
@@ -79,6 +82,8 @@
 //! | 06 | a star at any time (ruling 34) | [`stellar::system::StarModel`](crate::stellar::system::StarModel): `state_at`, `age_at`, `max_radius_until`, `death`, `remnant` and `natal_kick`, which [`fate`] reads |
 //! | 06 | how a star dies | [`stellar::remnant::Death`](crate::stellar::remnant::Death), its [`DeathKind::is_sudden`](crate::stellar::remnant::DeathKind::is_sudden) and [`ProgenitorAtDeath`](crate::stellar::remnant::ProgenitorAtDeath), and [`NatalKick`](crate::stellar::remnant::NatalKick) (`None` until P06.T19) |
 //! | 11, 14 | an orbit's expansion and its inverse | [`orbit::KeplerElements::scaled`](crate::orbit::KeplerElements::scaled) (P14.T2.a) and [`orbit::elements_from_state`](crate::orbit::elements_from_state), whose [`orbit::Orbit`](crate::orbit::Orbit) is bound or open (P14.T2.c) |
+//! | 11 | where the stars are (P14.T30.b) | [`stellar::multiplicity::star_positions_at`](crate::stellar::multiplicity::star_positions_at)'s walk of [`SystemHierarchy`](crate::stellar::multiplicity::SystemHierarchy) (`root`, `node`, `node_mass`, `pairs` and each pair's [`orbit::KeplerElements::relative_state_at`](crate::orbit::KeplerElements::relative_state_at)), which `position_at` follows to a star or a pair's barycentre |
+//! | 01 | a planet's radius rank (P14.T30.a) | [`rng::tags::PLANET_RADIUS`](crate::rng::tags::PLANET_RADIUS) (`Body`), opened with `ObjectKey::from(BodyId)` |
 
 pub mod architecture;
 pub mod context;
@@ -88,6 +93,7 @@ pub mod error;
 pub mod fate;
 pub mod hosts;
 pub mod index;
+pub mod label;
 pub mod params;
 pub mod placement;
 pub mod record;
@@ -98,3 +104,5 @@ pub mod testing;
 pub use context::{HostKind, SystemContext};
 pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};
 pub use index::{BodyIndex, BodySlot, BodySub};
+pub use label::BodyLabel;
+pub use system::{Body, PlanetaryHost, PlanetarySystem, generate, generate_planets};

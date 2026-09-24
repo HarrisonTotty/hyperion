@@ -415,6 +415,11 @@ domain_tags! {
     /// (`planetary::hosts::young::FormationDraws`).
     PLANET_ORIGIN: Body = "planet.origin";
 
+    /// A planet's radius rank (P14.T30.a, design note 8): the one uniform that places it within
+    /// Chen and Kipping's scatter at its mass, or for a rocky outcome within the observed spread of
+    /// core fractions, word 0; words 1–7 are reserved (`planetary::system::RADIUS_WORDS`).
+    PLANET_RADIUS: Body = "planet.radius";
+
     // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
     // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
     // (`stellar::multiplicity::RedrawAttempt`) reads words 64n to 64n + 63 of every stream here.
@@ -575,6 +580,13 @@ mod tests {
                 .iter()
                 .all(|tag| ALL.contains(tag))
         );
+    }
+
+    #[test]
+    fn plan_14_registers_the_radius_tag_with_body_scope() {
+        assert_eq!(PLANET_RADIUS.name(), "planet.radius");
+        assert_eq!(PLANET_RADIUS.scope(), crate::rng::TagScope::Body);
+        assert!(ALL.contains(&PLANET_RADIUS));
     }
 
     #[test]

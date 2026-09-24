@@ -109,6 +109,7 @@ planet.count (System) = 0x82ad3ceed872ec3e
 planet.plane (System) = 0xd43576566c93973f
 planet.orbit (Body) = 0xcb6e0442fe54c3a9
 planet.origin (Body) = 0x7a866aac41847cf9
+planet.radius (Body) = 0x3731912972f6e875
 system.multiplicity (System) = 0x67f0daa4e4855ad9
 binary.orbit (Body) = 0xbfe68175d1446676
 binary.orientation (Body) = 0x657a1d2460bf8488

@@ -144,6 +144,15 @@ fn system_contexts_are_pinned() {
                 .age_at_epoch(Years::new(8.0e8))
                 .star_draws(SyntheticDraws::OfUniverse(seed)),
         ),
+        (
+            // Ruling 61.3: below 0.1 M☉ the zero-age state is the cooling fits' main sequence.
+            "late M dwarf below a tenth of a Sun",
+            SystemContext::builder()
+                .system(id(903))
+                .star(SolarMasses::new(0.09))
+                .fe_h(Dex::new(-0.3))
+                .age_at_epoch(Years::new(5.0e9)),
+        ),
     ];
     for (name, builder) in synthetic {
         write_context(&mut w, name, &builder.build().unwrap());

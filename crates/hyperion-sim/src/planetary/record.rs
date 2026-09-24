@@ -34,6 +34,7 @@ use crate::orbit::KeplerElements;
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::fate::BodyState;
 use crate::planetary::index::{BodyIndex, BodySub};
+pub use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
 use crate::time::UniverseTime;
 use crate::units::{
@@ -255,34 +256,6 @@ pub enum BeltKind {
     Kuiper,
 }
 
-/// A body's label for people: host letter, planets lettered from `b` by semi-major axis, moons in
-/// Roman numerals, belts numbered (design note 22), such as `A b` or `A d II`.
-///
-/// Labels are derived for a whole system (P14.T30.c, not built); the designation of record stays
-/// plan 01's, which parses back to the ID.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BodyLabel(String);
-
-impl BodyLabel {
-    /// The label `text`, or `None` if it is empty.
-    #[must_use]
-    pub fn new(text: String) -> Option<Self> {
-        (!text.is_empty()).then_some(Self(text))
-    }
-
-    /// The label's text.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for BodyLabel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// Who a body is: its ID, kind, label, parent and state. Every record has one; the kind and the
 /// label are what a contact withholds.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -297,7 +270,8 @@ pub struct BodyIdentity {
 
 impl BodyIdentity {
     /// Body `index` of `system`, of kind `kind`, orbiting `parent`, in state `state`, with its label
-    /// [`Section::NotModelled`] until P14.T30.c labels systems.
+    /// [`Section::NotModelled`] until [`with_label`](Self::with_label) gives it the one P14.T30.c
+    /// derives ([`label`](crate::planetary::label)).
     ///
     /// `parent` is what the record's body orbits (ruling 53): [`OrbitHost::Star`] for a planet of
     /// one star, [`OrbitHost::Pair`] for a circumbinary one, [`OrbitHost::Barycentre`] for what is
