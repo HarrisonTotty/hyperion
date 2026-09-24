@@ -959,3 +959,76 @@ fn the_thermal_pulses_count_up_through_the_pulsing_agb() {
     assert!(last > 3.0, "{last} pulses");
     assert_eq!(track.pulse_phase_at(Years::new(segment.start * 0.5)), None);
 }
+
+/// A main sequence or helium main sequence rebuilt at its current mass carries the lifetime the
+/// integration of its fractional age would otherwise evaluate again, bit for bit, and its state
+/// is [`Model::point`]'s.
+#[test]
+fn a_rebuilt_main_sequence_carries_its_lifetime_bit_for_bit() {
+    for z in [1e-4, 0.004, 0.02, 0.03] {
+        let comp = composition(z);
+        let coeffs = ZCoeffs::new(comp.z_fit());
+        let phys = Physics {
+            coeffs: &coeffs,
+            z: comp.z_fit(),
+            remnant: RemnantRecipe::default(),
+        };
+        for i in 0..60 {
+            let mt = SolarMasses::new(math::exp10(-0.7 + 2.7 * f64::from(i) / 59.0));
+            let lifetimes = [
+                super::super::ms::t_ms(mt, &coeffs),
+                super::super::helium::main_sequence_lifetime(mt),
+            ];
+            let models = [
+                model::Model::MainSequence { fixed: None },
+                model::Model::HeliumMainSequence { fixed: None },
+            ];
+            for (model, lifetime) in models.iter().zip(lifetimes) {
+                for x in [0.0, 0.3, 0.999, 1.0] {
+                    let (point, rebuilt) = model.rebuilt_point(&phys, x, mt, 1e7);
+                    assert_eq!(rebuilt, Some(lifetime), "{model:?} at {mt:?}");
+                    assert_eq!(
+                        point,
+                        model.point(&phys, x, mt, 1e7),
+                        "{model:?} at {mt:?}, {x}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Whether a star falls in the electron-capture window is decided without the window's root far
+/// from it, and the decision is the root's, at every mass of a fine sweep through and around the
+/// window at five metallicities.
+#[test]
+fn the_electron_capture_window_is_decided_as_its_root_decides() {
+    for z in [1e-4, 3e-4, 0.004, 0.02, 0.03] {
+        let comp = composition(z);
+        let coeffs = ZCoeffs::new(comp.z_fit());
+        let window =
+            crate::stellar::remnant::collapse::ElectronCaptureWindows::new(&coeffs).single();
+        let builder = Builder::new(
+            &coeffs,
+            &comp,
+            TrackOptions::default(),
+            reimers_eta(0.0),
+            RemnantDraws::of(&StarDraws::median()),
+            Resolution::GENERATOR,
+            build::Keep::Lifetime,
+        );
+        let m_cc = window.upper().value();
+        let near = (-3_000..=3_000).map(|k| m_cc + 1e-4 * f64::from(k));
+        let far = (0..400).map(|i| math::exp10(-0.5 + 2.0 * f64::from(i) / 399.0));
+        let edges = [window.lower().value(), m_cc]
+            .into_iter()
+            .flat_map(|x| [x, x.next_up(), x.next_down()]);
+        let mut inside = 0;
+        for m in near.chain(far).chain(edges) {
+            let expected = window.contains(SolarMasses::new(m));
+            inside += usize::from(expected);
+            assert_eq!(builder.captures_electrons(m), expected, "Z = {z}, m = {m}");
+        }
+        assert!(inside > 900, "the sweep crosses the window: {inside}");
+    }
+}

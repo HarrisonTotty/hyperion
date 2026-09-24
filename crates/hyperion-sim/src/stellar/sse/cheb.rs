@@ -24,7 +24,7 @@ use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::PhasePoint;
 use super::coeffs::ZCoeffs;
-use super::gb::{self, FirstGiantBranch, RadiusLaw};
+use super::gb::{self, FirstGiantBranch, LuminosityPowers, RadiusLaw};
 use super::helium;
 use super::ms;
 
@@ -165,11 +165,11 @@ impl ZeroAgeHorizontalBranch {
 #[must_use]
 fn r_mhe_low_with(
     m: SolarMasses,
-    l_zahb: SolarLuminosities,
+    l_zahb: &LuminosityPowers,
     at_hef: f64,
     c: &ZCoeffs,
 ) -> SolarRadii {
-    gb::radius(m, l_zahb, c) * math::powf(at_hef, m.value() / c.m_hef().value())
+    RadiusLaw::giant(m, c).at_powers(l_zahb) * math::powf(at_hef, m.value() / c.m_hef().value())
 }
 
 /// `R_mHe`(`M_HeF`) ÷ `R_GB`(`L_ZAHB`(`M_HeF`)), the constant of [`r_mhe_low_with`].
@@ -296,8 +296,62 @@ pub(crate) struct CoreHeliumBurning {
     at_hef: f64,
     /// The radius at helium ignition from `M_FGB` up.
     ignition: Option<gb::IgnitionRadius>,
+    /// From `M_FGB` up, what the blue phase's shape reads at the initial mass whatever the current
+    /// one: `R_mHe` and equation 50's exponent µ (see [`CoreHeliumBurning::radii_at`]).
+    high_blue: Option<HighBlue>,
     /// The radius formulae at [`CoreHeliumBurning::mass`].
     radii: Radii,
+    /// The constant luminosities' powers in the radius laws at the current mass: `L_x` and
+    /// `L_HeI` in the giant's, `L_BAGB` in the asymptotic giant's.
+    powers: PhasePowers,
+}
+
+/// [`CoreHeliumBurning`]'s constant luminosities' powers in its radius laws.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PhasePowers {
+    /// `L_x`'s, in the giant's law.
+    blue_start: LuminosityPowers,
+    /// `L_HeI`'s, in the giant's law.
+    ignition: LuminosityPowers,
+    /// `L_BAGB`'s, in the asymptotic giant's law.
+    agb_base: LuminosityPowers,
+}
+
+/// The terms of the blue phase's shape from `M_FGB` up that keep the initial mass: `R_mHe`
+/// (equation 55) and, below 12 M☉, µ = log(M ÷ 12) ÷ log(`M_FGB` ÷ 12) of equation 50. They are
+/// constants of the phase, evaluated once rather than at every step of the track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HighBlue {
+    r_mhe: SolarRadii,
+    /// µ, where M is below 12 M☉.
+    mu: Option<f64>,
+}
+
+impl HighBlue {
+    /// The terms for a star of initial mass `m` at the metallicity of `c`.
+    #[must_use]
+    fn new(m: SolarMasses, c: &ZCoeffs) -> Self {
+        let (m0, m_fgb) = (m.value(), c.m_fgb().value());
+        Self {
+            r_mhe: gb::r_mhe_intermediate(m, c),
+            mu: (m0 < 12.0).then(|| math::log10(m0 / 12.0) / math::log10(m_fgb / 12.0)),
+        }
+    }
+
+    /// ξ of equation 62 from `R_mHe` and equation 50's printed radius at ignition, `R_mHe`
+    /// (`R_GB`(`L_HeI`) ÷ `R_mHe`)^µ below 12 M☉ with `giant` at the current mass: with the radius,
+    /// what [`BlueShape::new`] makes of them.
+    #[must_use]
+    fn printed_and_xi(&self, giant: &RadiusLaw, l_hei: &LuminosityPowers) -> (SolarRadii, f64) {
+        let r_mhe = self.r_mhe;
+        let printed = match self.mu {
+            None => r_mhe,
+            Some(mu) => {
+                SolarRadii::new(r_mhe.value() * math::powf(giant.at_powers(l_hei) / r_mhe, mu))
+            }
+        };
+        (printed, (r_mhe / printed).clamp(0.4, 2.5))
+    }
 }
 
 /// Which of HPT's three regimes of core helium burning a star is in, by its mass.
@@ -423,6 +477,15 @@ impl CoreHeliumBurning {
             zahb,
             at_hef: r_mhe_low_constant(c),
             ignition: (regime == Regime::High).then(|| gb::IgnitionRadius::new(m, c)),
+            high_blue: (regime == Regime::High).then(|| HighBlue::new(m, c)),
+            powers: {
+                let (giant, asymptotic) = (RadiusLaw::giant(m, c), RadiusLaw::asymptotic(m, c));
+                PhasePowers {
+                    blue_start: LuminosityPowers::new(&giant, l_x),
+                    ignition: LuminosityPowers::new(&giant, l_hei),
+                    agb_base: LuminosityPowers::new(&asymptotic, l_bagb),
+                }
+            },
             radii: Radii {
                 blue: BluePhase::Fixed(BlueShape {
                     xi: 1.0,
@@ -448,7 +511,6 @@ impl CoreHeliumBurning {
     /// (`hrdiag`'s `texp`).
     #[must_use]
     fn radii_at(&self, mt: SolarMasses, c: &ZCoeffs) -> Radii {
-        let (m0, m_fgb) = (self.mass.value(), c.m_fgb().value());
         let giant = RadiusLaw::giant(mt, c);
         let asymptotic = RadiusLaw::asymptotic(mt, c);
         let blue = match self.regime {
@@ -457,28 +519,25 @@ impl CoreHeliumBurning {
                     || ZeroAgeHorizontalBranch::new(mt, c),
                     |zahb| zahb.at_mass(mt, c),
                 ),
-                r_mhe: r_mhe_low_with(mt, self.l_x, self.at_hef, c),
-                r_y: asymptotic.at(self.l_bagb),
+                r_mhe: r_mhe_low_with(mt, &self.powers.blue_start, self.at_hef, c),
+                r_y: asymptotic.at_powers(&self.powers.agb_base),
             },
             Regime::Intermediate => {
-                let r_x = giant.at(self.l_x);
+                let r_x = giant.at_powers(&self.powers.blue_start);
                 BluePhase::Fixed(BlueShape::new(
                     r_x,
                     gb::r_mhe_intermediate(mt, c),
                     r_x,
-                    asymptotic.at(self.l_bagb),
+                    asymptotic.at_powers(&self.powers.agb_base),
                 ))
             }
             Regime::High => {
                 // `R_mHe` at the initial mass, as [`gb::r_hei_at`] explains.
-                let r_mhe = gb::r_mhe_intermediate(self.mass, c);
-                let printed = if m0 >= 12.0 {
-                    r_mhe
-                } else {
-                    let mu = math::log10(m0 / 12.0) / math::log10(m_fgb / 12.0);
-                    SolarRadii::new(r_mhe.value() * math::powf(giant.at(self.l_hei) / r_mhe, mu))
-                };
-                let xi = (r_mhe / printed).clamp(0.4, 2.5);
+                let high = self
+                    .high_blue
+                    .unwrap_or_else(|| HighBlue::new(self.mass, c));
+                let r_mhe = high.r_mhe;
+                let (printed, xi) = high.printed_and_xi(&giant, &self.powers.ignition);
                 let l_y = SolarLuminosities::new(
                     self.l_hei.value()
                         * math::powf(self.l_bagb / self.l_hei, math::powf(self.tau_bl, xi)),
@@ -533,7 +592,66 @@ impl CoreHeliumBurning {
     /// In debug builds, as `CoreHeliumBurning::at`.
     #[must_use]
     pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        // Only the radius formulae the age needs are evaluated: before `τ_x` the giant's alone,
+        // and from `M_FGB` up after the blue phase the asymptotic giant's with ξ. The result is
+        // `point` with every formula of `radii_at`, bit for bit; the blue phase itself takes the
+        // whole set. (Plan 06's integrator speed: `radii_at` was most of core helium burning's
+        // `pow` calls, which a track evaluates at every step of the phase.)
+        let tau = self.tau_at(t);
+        if tau < self.tau_x {
+            let luminosity = self.luminosity_at(tau, || {
+                unreachable!("before τ_x the luminosity does not read ξ")
+            });
+            return PhasePoint {
+                luminosity,
+                radius: RadiusLaw::giant(mt, c).at(luminosity),
+                core_mass: self.core_mass_at_tau(tau),
+            };
+        }
+        if let Some(high) = &self.high_blue
+            && (tau > self.tau_y || self.tau_y <= self.tau_x)
+        {
+            let (_, xi) = high.printed_and_xi(&RadiusLaw::giant(mt, c), &self.powers.ignition);
+            let luminosity = self.luminosity_at(tau, || xi);
+            return PhasePoint {
+                luminosity,
+                radius: RadiusLaw::asymptotic(mt, c).at(luminosity),
+                core_mass: self.core_mass_at_tau(tau),
+            };
+        }
         self.point(t, &self.radii_at(mt, c))
+    }
+
+    /// The relative age τ at `t`, held to 0–1.
+    #[must_use]
+    fn tau_at(&self, t: Megayears) -> f64 {
+        let tau = (t - self.t_hei) / self.t_he;
+        debug_assert!(
+            (-1e-9..=1.0 + 1e-9).contains(&tau),
+            "core helium burning runs from t_HeI to t_BAGB, not τ = {tau}"
+        );
+        // Rounding may put τ a hair outside 0–1, where the descent's λ′ divides by a zero `τ_x`.
+        tau.clamp(0.0, 1.0)
+    }
+
+    /// The core at relative age `tau` (equation 67).
+    #[must_use]
+    fn core_mass_at_tau(&self, tau: f64) -> SolarMasses {
+        self.mc_hei * (1.0 - tau) + self.mc_bagb * tau
+    }
+
+    /// The luminosity at relative age `tau` (equations 61 and 63), with ξ from `xi` from `τ_x` on.
+    #[must_use]
+    fn luminosity_at(&self, tau: f64, xi: impl FnOnce() -> f64) -> SolarLuminosities {
+        let tau_x = self.tau_x;
+        let l_x = self.l_x.value();
+        SolarLuminosities::new(if tau < tau_x {
+            let lambda = math::powi((tau_x - tau) / tau_x, 3);
+            l_x * math::powf(self.l_hei.value() / l_x, lambda)
+        } else {
+            let lambda = math::powf(((tau - tau_x) / (1.0 - tau_x)).max(0.0), xi());
+            l_x * math::powf(self.l_bagb.value() / l_x, lambda)
+        })
     }
 
     /// The core mass at `t` (`CoreHeliumBurning::at`'s), M☉.
@@ -546,15 +664,9 @@ impl CoreHeliumBurning {
     /// L, R and core at `t` with the radius formulae `radii`.
     #[must_use]
     fn point(&self, t: Megayears, radii: &Radii) -> PhasePoint {
-        let tau = (t - self.t_hei) / self.t_he;
-        debug_assert!(
-            (-1e-9..=1.0 + 1e-9).contains(&tau),
-            "core helium burning runs from t_HeI to t_BAGB, not τ = {tau}"
-        );
-        // Rounding may put τ a hair outside 0–1, where the descent's λ′ divides by a zero `τ_x`.
-        let tau = tau.clamp(0.0, 1.0);
+        let tau = self.tau_at(t);
         let (tau_x, tau_y) = (self.tau_x, self.tau_y);
-        let core_mass = self.mc_hei * (1.0 - tau) + self.mc_bagb * tau;
+        let core_mass = self.core_mass_at_tau(tau);
         let shape = match &radii.blue {
             BluePhase::Fixed(shape) => *shape,
             BluePhase::HorizontalBranch { zahb, r_mhe, r_y } => {
@@ -562,14 +674,7 @@ impl CoreHeliumBurning {
                 BlueShape::new(r_x, *r_mhe, r_x, *r_y)
             }
         };
-        let l_x = self.l_x.value();
-        let luminosity = SolarLuminosities::new(if tau < tau_x {
-            let lambda = math::powi((tau_x - tau) / tau_x, 3);
-            l_x * math::powf(self.l_hei.value() / l_x, lambda)
-        } else {
-            let lambda = math::powf(((tau - tau_x) / (1.0 - tau_x)).max(0.0), shape.xi);
-            l_x * math::powf(self.l_bagb.value() / l_x, lambda)
-        });
+        let luminosity = self.luminosity_at(tau, || shape.xi);
         let radius = if tau < tau_x {
             radii.giant.at(luminosity)
         } else if tau > tau_y || tau_y <= tau_x {
@@ -599,6 +704,37 @@ mod tests {
 
     fn coeffs(z: f64) -> ZCoeffs {
         ZCoeffs::new(MetalFraction::new(z))
+    }
+
+    /// Core helium burning evaluated with only the radius formulae its age needs is the phase with
+    /// every formula at the current mass, bit for bit, in each regime, at masses below the phase's
+    /// and at `τ_x`, `τ_y` and their neighbours.
+    #[test]
+    fn core_helium_burning_at_a_current_mass_is_the_full_evaluation_bit_for_bit() {
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            for m in [0.7, 1.2, 1.9, 2.3, 4.0, 7.0, 11.0, 14.0, 20.0, 40.0, 90.0] {
+                let phase = CoreHeliumBurning::new(SolarMasses::new(m), &c);
+                let (t0, t1) = (phase.t_start().value(), phase.t_end().value());
+                let mut fractions: Vec<f64> = (0..=40).map(|i| f64::from(i) / 40.0).collect();
+                for edge in [phase.tau_x, phase.tau_y] {
+                    fractions.extend([edge, edge.next_up(), edge.next_down(), edge + 1e-6]);
+                }
+                for share in [1.0, 0.97, 0.8, 0.5] {
+                    let mt = SolarMasses::new(m * share);
+                    let radii = phase.radii_at(mt, &c);
+                    for &x in &fractions {
+                        let t =
+                            Megayears::new((1.0 - x.clamp(0.0, 1.0)) * t0 + x.clamp(0.0, 1.0) * t1);
+                        assert_eq!(
+                            phase.at_mass(t, mt, &c),
+                            phase.point(t, &radii),
+                            "Z = {z}, M = {m}, Mt = {mt:?}, x = {x}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn mass(m: f64) -> SolarMasses {

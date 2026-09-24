@@ -145,6 +145,10 @@ protocol bindings are up to date. It takes about three minutes.
   `wasm32-wasip1` under wasmtime, where `usize` is 32 bits. It needs wasmtime and the target
   (`rustup target add wasm32-wasip1`), so it is part of neither `ci` nor `ci-slow`. Run it, and the
   same tests on AArch64, to check generated output bit for bit on three architectures.
+- `just test`, `just test-slow` and `just bench` build first, then run under one lock shared by
+  every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second run waits for the first to
+  finish, and says so, because two suites at once each take twice as long, and the load fails the
+  timing-sensitive server tests.
 
 ### Git hooks
 

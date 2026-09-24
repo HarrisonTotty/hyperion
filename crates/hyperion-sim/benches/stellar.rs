@@ -17,7 +17,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::math;
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::sse::{Track, ZCoeffs, zams};
-use hyperion_sim::stellar::{Composition, lifetime};
+use hyperion_sim::stellar::{Composition, evolve, lifetime};
 use hyperion_sim::units::{MetalFraction, SolarMasses, Years};
 
 /// One `math::exp`, the unit the track figures are normalised by, before the other groups.
@@ -92,6 +92,25 @@ fn tracks(c: &mut Criterion) {
     ] {
         group.bench_function(name, |b| {
             b.iter(|| Track::full(black_box(SolarMasses::new(m)), &solar, &draws));
+        });
+    }
+    // `evolve` at a typical age for its mass: a dwarf, the Sun, an intermediate-mass star on its
+    // main sequence and a massive one halfway through its main sequence.
+    for (name, m, age) in [
+        ("evolve (0.3 Msun at 5 Gyr)", 0.3, 5e9),
+        ("evolve (1 Msun at 4.6 Gyr)", 1.0, 4.6e9),
+        ("evolve (2 Msun at 0.6 Gyr)", 2.0, 6e8),
+        ("evolve (20 Msun at 4 Myr)", 20.0, 4e6),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                evolve(
+                    black_box(SolarMasses::new(m)),
+                    &solar,
+                    &draws,
+                    Years::new(age),
+                )
+            });
         });
     }
     let sun = Track::full(SolarMasses::new(1.0), &solar, &draws);

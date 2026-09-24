@@ -79,7 +79,9 @@ use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
-use crate::units::{SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
+use crate::units::{
+    Megayears, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
+};
 
 use super::coeffs::ZCoeffs;
 use super::wind::{self, ReimersEta, WindRecipe};
@@ -464,7 +466,7 @@ impl Track {
     }
 
     /// The bytes the track owns on the heap, beyond `size_of::<Track>()`: its segments and each
-    /// segment's knots and samples, by capacity. For the server's byte-bounded caches (plan 06,
+    /// segment's knots, samples and boxed closed forms, by capacity. For the server's byte-bounded caches (plan 06,
     /// P06.T34); nothing generated reads it.
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {
@@ -474,6 +476,7 @@ impl Track {
                 bytes
                     + segment.knots.capacity() * size_of::<Knot>()
                     + segment.samples.capacity() * size_of::<Sample>()
+                    + segment.model.heap_bytes()
             },
         )
     }
@@ -795,7 +798,35 @@ impl Segment {
         mass: f64,
     ) -> Evaluated {
         let mt = SolarMasses::new(mass.max(build::MIN_EVALUATED_MASS));
-        let mut point = self.model.point(phys, coord, mt, age);
+        self.finish_point(self.model.point(phys, coord, mt, age), age, coord, mt)
+    }
+
+    /// [`Segment::evaluate_at`], with the lifetime at the current mass, Myr, of a main sequence or
+    /// helium main sequence whose closed forms are rebuilt at it (`None` for any other segment),
+    /// which the integration of its fractional age reads.
+    #[must_use]
+    pub(crate) fn evaluate_with_lifetime(
+        &self,
+        phys: &Physics<'_>,
+        age: f64,
+        coord: f64,
+        mass: f64,
+    ) -> (Evaluated, Option<Megayears>) {
+        let mt = SolarMasses::new(mass.max(build::MIN_EVALUATED_MASS));
+        let (point, lifetime) = self.model.rebuilt_point(phys, coord, mt, age);
+        (self.finish_point(point, age, coord, mt), lifetime)
+    }
+
+    /// The segment's state from the model's `point` at `age`, coordinate `coord` and evaluated
+    /// mass `mt`: with the junction's offsets, the mass never below the core, and the fraction.
+    #[must_use]
+    fn finish_point(
+        &self,
+        mut point: model::Point,
+        age: f64,
+        coord: f64,
+        mt: SolarMasses,
+    ) -> Evaluated {
         let ramp = build::ramp(self.ramp_coordinate(coord));
         if ramp < 1.0 {
             let keep = 1.0 - ramp;

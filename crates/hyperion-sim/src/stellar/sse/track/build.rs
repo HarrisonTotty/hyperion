@@ -375,9 +375,13 @@ impl<'a> Builder<'a> {
             .collect();
         let derive = |tau: f64, state: [f64; 2]| -> ([f64; 2], Knot) {
             let [age, m] = state;
-            let evaluated = segment.evaluate_at(&self.phys, age, tau, m);
+            // The rebuilt closed forms carry the lifetime at the mass, `duration`'s bit for bit.
+            let (evaluated, rebuilt) = segment.evaluate_with_lifetime(&self.phys, age, tau, m);
             let rate = self.wind_rate(&evaluated, age);
-            let lifetime = duration(m.max(MIN_EVALUATED_MASS));
+            let lifetime = rebuilt.map_or_else(
+                || duration(m.max(MIN_EVALUATED_MASS)),
+                |t_ms| t_ms.value() * 1e6,
+            );
             let knot = Knot {
                 age,
                 mass: m,
@@ -412,21 +416,22 @@ impl<'a> Builder<'a> {
     }
 
     /// A segment of `model` whose phase clock runs over `span` from `start`, entered with `mass`,
-    /// that ends at the end of its span or when its envelope `envelope`(age, M) (M☉, positive while
-    /// the phase can go on) is gone, whichever comes first.
+    /// that ends at the end of its span or when its envelope ([`EnvelopeLaws::envelope`], M☉,
+    /// positive while the phase can go on) is gone, whichever comes first.
     ///
-    /// With mass loss the knots sit at fixed values of u = 1 − (1 − x)(1 − y), with x =
-    /// `progress`(age) the phase's progress, 0 at its start and 1 at the end of its span, and y the
+    /// With mass loss the knots sit at fixed values of u = 1 − (1 − x)(1 − y), with x the phase's
+    /// progress ([`EnvelopeLaws::progress`]), 0 at its start and 1 at the end of its span, and y the
     /// fraction of the entry envelope lost: u runs from 0 to 1 whatever the mass does, reaching 1 at
     /// the span's end or the envelope's, and follows whichever of the two is advancing, so that a
     /// wind that strips the envelope in a small part of the phase gets the knots it needs. The
     /// knots are clustered towards u = 1, where the envelope's last thousandths (and the
     /// small-envelope perturbation) or the tip of a giant branch lie ([`clustered_grid`]).
-    /// `pulse_period`(age, M), where it is given, is the interpulse period in years, whose inverse
-    /// the knots integrate (the thermally pulsing AGB).
+    /// `pulse_period`(Mc, `M_env`), where it is given, is the interpulse period in years at the
+    /// core and the envelope of the moment, whose inverse the knots integrate (the thermally
+    /// pulsing AGB).
     #[expect(
         clippy::too_many_arguments,
-        reason = "a phase's model, span, entry state, knot count and three laws"
+        reason = "a phase's model, span, entry state, knot count and its laws"
     )]
     pub(super) fn envelope_segment(
         &self,
@@ -436,8 +441,7 @@ impl<'a> Builder<'a> {
         mass: f64,
         previous: Option<[f64; 3]>,
         knots: usize,
-        progress: impl Fn(f64) -> f64,
-        envelope: impl Fn(f64, f64) -> f64,
+        laws: &EnvelopeLaws<impl Fn(f64) -> f64, impl Fn(f64) -> f64, impl Fn(f64, f64) -> f64>,
         pulse_period: Option<&dyn Fn(f64, f64) -> f64>,
     ) -> EnvelopeBuilt {
         let nominal_end = start + span.years();
@@ -453,7 +457,7 @@ impl<'a> Builder<'a> {
             max_before: [0.0; 2],
         };
         segment.junction = self.junction(&segment, previous, 0.0, mass, start);
-        let envelope0 = envelope(start, mass);
+        let envelope0 = laws.envelope(start, mass);
         // Written so that a NaN envelope, like a negative one, ends the phase at once.
         let has_envelope = envelope0 > 0.0;
         if !has_envelope {
@@ -470,8 +474,8 @@ impl<'a> Builder<'a> {
         });
         if !significant(rates, span.years(), mass) {
             // Constant mass: the phase ends at its span's end, or where its core reaches the mass.
-            if envelope(nominal_end, mass) <= 0.0 {
-                segment.end = bisect(start, nominal_end, |age| envelope(age, mass));
+            if laws.envelope(nominal_end, mass) <= 0.0 {
+                segment.end = bisect(start, nominal_end, |age| laws.envelope(age, mass));
                 return EnvelopeBuilt {
                     ending: Ending::Envelope,
                     end: segment.end,
@@ -494,21 +498,33 @@ impl<'a> Builder<'a> {
             delta: 1e-7 * span.years(),
         };
         let delta = clock.delta;
-        // The derivative of the mass and the pulses in age at (age, M), the knot there, and u and
-        // du ÷ dt there.
-        let derive = |age: f64, m: f64, pulses: f64| -> ([f64; 2], Knot, f64, f64) {
+        // The derivative of the mass and the pulses in age at (age, M), the knot there, u and du ÷
+        // dt there, and the envelope's probes there. Each core mass is evaluated once, at the
+        // age and at the age ± δ, and shared by the envelope, its rate and the progress.
+        let derive = |age: f64, m: f64, pulses: f64| -> Derived {
             let coord = segment_coordinate(start, span, age);
             let evaluated = segment.evaluate_at(&self.phys, age, coord, m);
             let rate = self.wind_rate(&evaluated, age);
-            let x = progress(age).clamp(0.0, 1.0);
-            let y = (1.0 - envelope(age, m) / envelope0).clamp(0.0, 1.0);
-            let advance = (progress(age + delta) - progress(age - delta)) / (2.0 * delta);
-            let lost = (envelope(age - delta, m + rate * delta)
-                - envelope(age + delta, m - rate * delta))
-                / (2.0 * delta * envelope0);
+            let core = if laws.core_in_point {
+                evaluated.point.point.core_mass.value()
+            } else {
+                (laws.core)(age)
+            };
+            let (core_before, core_after) = ((laws.core)(age - delta), (laws.core)(age + delta));
+            let envelope = (laws.shell)(m) - core;
+            let x = (laws.progress)(age, core).clamp(0.0, 1.0);
+            let y = (1.0 - envelope / envelope0).clamp(0.0, 1.0);
+            let advance = ((laws.progress)(age + delta, core_after)
+                - (laws.progress)(age - delta, core_before))
+                / (2.0 * delta);
+            // The envelope δ earlier with the mass the wind has not yet taken, less the envelope
+            // δ later with the mass it has.
+            let fall = ((laws.shell)(m + rate * delta) - core_before)
+                - ((laws.shell)(m - rate * delta) - core_after);
+            let lost = fall / (2.0 * delta * envelope0);
             let u = 1.0 - (1.0 - x) * (1.0 - y);
             let du_dt = (1.0 - y) * advance.max(0.0) + (1.0 - x) * lost.max(0.0);
-            let pulse_rate = pulse_period.map_or(0.0, |period| 1.0 / period(age, m));
+            let pulse_rate = pulse_period.map_or(0.0, |period| 1.0 / period(core, envelope));
             let knot = Knot {
                 age,
                 mass: m,
@@ -520,35 +536,41 @@ impl<'a> Builder<'a> {
                 luminosity: evaluated.point.point.luminosity.value(),
                 radius: evaluated.point.point.radius.value(),
             };
-            ([-rate, pulse_rate], knot, u, du_dt)
+            Derived {
+                rates: [-rate, pulse_rate],
+                knot,
+                u,
+                du_dt,
+                envelope,
+                fall,
+            }
         };
-        let built = self.envelope_knots(&derive, &envelope, [start, mass], clock, knots);
+        let (built, last_envelope) = self.envelope_knots(&derive, [start, mass], clock, knots);
         segment.knots = built;
-        envelope_ending(segment, &envelope, nominal_end)
+        envelope_ending(segment, laws, last_envelope, nominal_end)
     }
 
     /// The knots of an envelope segment ([`Builder::envelope_segment`]) entered at `entry` = (age,
     /// M) on `n` knots of u, with `derive`(age, M, pulses) giving the rates of M and the pulses in
-    /// age, the knot, u and du ÷ dt, and `envelope`(age, M) the envelope left: from the entry to the
-    /// first knot at which the envelope is gone or the span has ended.
+    /// age, the knot, u, du ÷ dt and the envelope's probes: from the entry to the first knot at
+    /// which the envelope is gone or the span has ended. Returns the knots and the envelope left
+    /// at the last.
     ///
     /// Each interval is integrated in u from the state reached, with [`Resolution::steps`]
     /// midpoint steps, so no error in u builds up. Past the grid, or where u stalls, the interval
     /// is integrated in age instead (see the comments within).
     fn envelope_knots(
         &self,
-        derive: &impl Fn(f64, f64, f64) -> ([f64; 2], Knot, f64, f64),
-        envelope: &impl Fn(f64, f64) -> f64,
+        derive: &impl Fn(f64, f64, f64) -> Derived,
         entry: [f64; 2],
         clock: EnvelopeClock,
         n: usize,
-    ) -> Vec<Knot> {
+    ) -> (Vec<Knot>, f64) {
         let EnvelopeClock {
             nominal_end,
             years,
             delta,
         } = clock;
-        let ended = |knot: &Knot| envelope(knot.age, knot.mass) <= 0.0 || knot.age >= nominal_end;
         let grid = clustered_grid(n);
         let steps = self.resolution.steps;
         // d(age, M, pulses) ÷ du at a state, from its rates in age.
@@ -562,15 +584,17 @@ impl<'a> Builder<'a> {
         };
         let in_u = |state: [f64; 3]| -> [f64; 3] {
             let [age, m, pulses] = state;
-            let (rates, _, _, du_dt) = derive(age, m, pulses);
-            per_u(rates, du_dt)
+            let derived = derive(age, m, pulses);
+            per_u(derived.rates, derived.du_dt)
         };
         let mut built: Vec<Knot> = Vec::with_capacity(2 * grid.len());
-        let (mut slope, first, mut u, mut du_dt) = derive(entry[0], entry[1], 0.0);
-        built.push(first);
+        let mut last = derive(entry[0], entry[1], 0.0);
+        built.push(last.knot);
         let mut target = 1;
-        while !ended(&built[built.len() - 1]) {
-            let knot = built[built.len() - 1];
+        // The envelope at the last knot is its derivative's own, at the knot's age and mass.
+        while !(last.envelope <= 0.0 || last.knot.age >= nominal_end) {
+            let knot = last.knot;
+            let (slope, u, du_dt) = (last.rates, last.u, last.du_dt);
             // The next value of the grid past the knot's own u, or 1 past the grid's end: each
             // interval starts from the state reached, so no error in u builds up.
             while target < grid.len() && grid[target] <= u {
@@ -585,15 +609,12 @@ impl<'a> Builder<'a> {
                 // Past the grid, u approaches 1 only as the envelope's loss slows: the last knot
                 // instead goes, in age, to twice the envelope's remaining life at its present
                 // rate of loss, or to the span's end if that is sooner, so that the phase ends in
-                // one interval.
-                let [age, mass, _] = state;
-                let (rate, _, _, _) = derive(age, mass, knot.pulses);
-                let left = envelope(age, mass);
-                let falling = (envelope(age - delta, mass - rate[0] * delta)
-                    - envelope(age + delta, mass + rate[0] * delta))
-                    / (2.0 * delta);
+                // one interval. The knot's derivative already holds the envelope and its fall
+                // over ± δ at the knot's age and mass.
+                let age = knot.age;
+                let falling = last.fall / (2.0 * delta);
                 let reach = if falling > 0.0 {
-                    age + 2.0 * left / falling
+                    age + 2.0 * last.envelope / falling
                 } else {
                     nominal_end
                 };
@@ -602,7 +623,7 @@ impl<'a> Builder<'a> {
                 } else {
                     nominal_end
                 };
-                state = self.midpoint_in_age(derive, [age, mass, knot.pulses], slope, next_age);
+                state = self.midpoint_in_age(derive, state, slope, next_age);
             } else if !extra && advancing {
                 for i in 0..steps {
                     let from = lerp(u, u1, index_fraction(i, steps + 1));
@@ -627,19 +648,18 @@ impl<'a> Builder<'a> {
                     nominal_end,
                 );
             }
-            let (next_slope, next, next_u, next_du_dt) = derive(state[0], state[1], state[2]);
-            built.push(next);
-            (slope, u, du_dt) = (next_slope, next_u, next_du_dt);
+            last = derive(state[0], state[1], state[2]);
+            built.push(last.knot);
             target += 1;
         }
-        built
+        (built, last.envelope)
     }
 
     /// The state (age, M, pulses) after [`Resolution::steps`] midpoint steps in age from `state`,
     /// whose rates are `slope`, to `end`, with `derive` giving the rates of M and the pulses.
     fn midpoint_in_age(
         &self,
-        derive: &impl Fn(f64, f64, f64) -> ([f64; 2], Knot, f64, f64),
+        derive: &impl Fn(f64, f64, f64) -> Derived,
         state: [f64; 3],
         slope: [f64; 2],
         end: f64,
@@ -653,9 +673,9 @@ impl<'a> Builder<'a> {
             let k1 = if i == 0 {
                 slope
             } else {
-                derive(a, m, pulses).0
+                derive(a, m, pulses).rates
             };
-            let k2 = derive(a + 0.5 * h, m + 0.5 * h * k1[0], pulses + 0.5 * h * k1[1]).0;
+            let k2 = derive(a + 0.5 * h, m + 0.5 * h * k1[0], pulses + 0.5 * h * k1[1]).rates;
             m += h * k2[0];
             pulses += h * k2[1];
         }
@@ -910,13 +930,17 @@ impl<'a> Builder<'a> {
         quantity: impl Fn(&PhasePoint) -> f64,
     ) -> (f64, f64, f64) {
         const INVERSE_PHI: f64 = 0.618_033_988_749_894_8;
-        let value = |age: f64| quantity(&segment.evaluate(&self.phys, age).point.point);
+        // Each probe keeps its whole state, so the peak's needs no evaluation of its own.
+        let value = |age: f64| {
+            let point = segment.evaluate(&self.phys, age).point.point;
+            (quantity(&point), point)
+        };
         let (mut lo, mut hi) = (a, b);
         let mut x1 = hi - INVERSE_PHI * (hi - lo);
         let mut x2 = lo + INVERSE_PHI * (hi - lo);
         let (mut f1, mut f2) = (value(x1), value(x2));
         for _ in 0..PEAK_SEARCH {
-            if f1 < f2 {
+            if f1.0 < f2.0 {
                 lo = x1;
                 x1 = x2;
                 f1 = f2;
@@ -930,8 +954,7 @@ impl<'a> Builder<'a> {
                 f1 = value(x1);
             }
         }
-        let age = if f1 < f2 { x2 } else { x1 };
-        let p = segment.evaluate(&self.phys, age).point.point;
+        let (age, p) = if f1.0 < f2.0 { (x2, f2.1) } else { (x1, f1.1) };
         (age, p.radius.value(), p.luminosity.value())
     }
 }
@@ -953,6 +976,47 @@ struct EnvelopeClock {
     delta: f64,
 }
 
+/// The laws of a phase that ends by the loss of its envelope ([`Builder::envelope_segment`]).
+pub(super) struct EnvelopeLaws<C, S, P> {
+    /// The core mass at an age, M☉.
+    pub(super) core: C,
+    /// What the core can grow into at a current mass, M☉: the mass itself, or a helium star's core
+    /// limit.
+    pub(super) shell: S,
+    /// The phase's progress x at an age, given the core mass `core`(age) there, 0 at the start of
+    /// its span and 1 at its end.
+    pub(super) progress: P,
+    /// Whether the core mass of the segment's evaluated state is `core`(age), bit for bit, so that
+    /// the integration reads it there rather than evaluating it again.
+    pub(super) core_in_point: bool,
+}
+
+impl<C: Fn(f64) -> f64, S: Fn(f64) -> f64, P: Fn(f64, f64) -> f64> EnvelopeLaws<C, S, P> {
+    /// The envelope at `age` with the current mass `m`, M☉: `shell`(m) − `core`(age), positive
+    /// while the phase can go on.
+    #[must_use]
+    pub(super) fn envelope(&self, age: f64, m: f64) -> f64 {
+        (self.shell)(m) - (self.core)(age)
+    }
+}
+
+/// What the derivative of an envelope segment gives at one state.
+#[derive(Debug, Clone, Copy)]
+struct Derived {
+    /// dM ÷ d age and the pulses per year.
+    rates: [f64; 2],
+    /// The knot at the state.
+    knot: Knot,
+    /// The coordinate u and du ÷ d age.
+    u: f64,
+    du_dt: f64,
+    /// The envelope at the state, M☉.
+    envelope: f64,
+    /// The envelope δ before the state, with the mass the wind has yet to remove, less the envelope
+    /// δ after it, without the mass it has removed: 2δ times the envelope's rate of loss, M☉.
+    fall: f64,
+}
+
 /// A phase built on its clock.
 pub(super) struct EnvelopeBuilt {
     pub(super) ending: Ending,
@@ -971,20 +1035,22 @@ pub(super) enum Ending {
     Envelope,
 }
 
-/// How an envelope `segment` whose knots are built ends: at the root of its `envelope`(age, M) on
-/// the knot interpolant if its last knot has none left, or at the end of its span, `nominal_end`.
+/// How an envelope `segment` whose knots are built ends: at the root of its envelope
+/// ([`EnvelopeLaws::envelope`]) on the knot interpolant if its last knot has none left
+/// (`last_envelope`, the envelope there), or at the end of its span, `nominal_end`.
 fn envelope_ending(
     mut segment: Segment,
-    envelope: &impl Fn(f64, f64) -> f64,
+    laws: &EnvelopeLaws<impl Fn(f64) -> f64, impl Fn(f64) -> f64, impl Fn(f64, f64) -> f64>,
+    last_envelope: f64,
     nominal_end: f64,
 ) -> EnvelopeBuilt {
     let n = segment.knots.len();
     let last = segment.knots[n - 1];
-    if envelope(last.age, last.mass) <= 0.0 {
+    if last_envelope <= 0.0 {
         let a = segment.knots[n - 2].age;
         let end = bisect(a, last.age, |age| {
             let (_, m) = segment.coordinate_and_mass(age);
-            envelope(age, m)
+            laws.envelope(age, m)
         });
         segment.end = end;
         let (_, end_mass) = segment.coordinate_and_mass(end);

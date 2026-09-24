@@ -54,6 +54,15 @@ pub struct ZCoeffs {
     m_hook: SolarMasses,
     m_hef: SolarMasses,
     m_fgb: SolarMasses,
+    /// A = min(b4 M^−b5, b6 M^−b7) of the giant's radius (HPT equation 46).
+    giant_radius_scale: LesserPowerLaw,
+    /// A = min(b51 M^−b52, b53 M^−b54) of the asymptotic giant's radius from `M_HeF` up (HPT
+    /// equation 74).
+    agb_radius_scale: LesserPowerLaw,
+    /// min(a34 ÷ M^a35, a36 ÷ M^a37) of the luminosity hook's amplitude (HPT equation 16).
+    hook_luminosity_scale: LesserPowerLaw,
+    /// 0.0258 (1 + X)^(5/3) of the degenerate radius floor (HPT equation 24), R☉ M☉^⅓.
+    degenerate_radius: f64,
 }
 
 impl ZCoeffs {
@@ -89,6 +98,18 @@ impl ZCoeffs {
             m_hook: SolarMasses::new(m_hook),
             m_hef: SolarMasses::new(m_hef),
             m_fgb: SolarMasses::new(m_fgb),
+            giant_radius_scale: LesserPowerLaw::new(PowerForm::Product, [b[4], b[5]], [b[6], b[7]]),
+            agb_radius_scale: LesserPowerLaw::new(
+                PowerForm::Product,
+                [b[51], b[52]],
+                [b[53], b[54]],
+            ),
+            hook_luminosity_scale: LesserPowerLaw::new(
+                PowerForm::Quotient,
+                [a[34], a[35]],
+                [a[36], a[37]],
+            ),
+            degenerate_radius: 0.0258 * math::powf(1.0 + super::ms::hydrogen(z), 5.0 / 3.0),
         };
         // b46 = −b46 log₁₀(`M_HeF` ÷ `M_FGB`) needs the critical masses (Appendix, after b49).
         coeffs.b[46] = -coeffs.b[46] * math::log10(m_hef / m_fgb);
@@ -154,6 +175,31 @@ impl ZCoeffs {
         alpha_r_power_law(&self.a, m)
     }
 
+    /// The giant's radius scale A = min(b4 M^−b5, b6 M^−b7) of HPT equation 46.
+    #[must_use]
+    pub(crate) const fn giant_radius_scale(&self) -> &LesserPowerLaw {
+        &self.giant_radius_scale
+    }
+
+    /// The asymptotic giant's radius scale A = min(b51 M^−b52, b53 M^−b54) of HPT equation 74 from
+    /// `M_HeF` up.
+    #[must_use]
+    pub(crate) const fn agb_radius_scale(&self) -> &LesserPowerLaw {
+        &self.agb_radius_scale
+    }
+
+    /// The luminosity hook's amplitude scale min(a34 ÷ M^a35, a36 ÷ M^a37) of HPT equation 16.
+    #[must_use]
+    pub(crate) const fn hook_luminosity_scale(&self) -> &LesserPowerLaw {
+        &self.hook_luminosity_scale
+    }
+
+    /// 0.0258 (1 + X)^(5/3), R☉ M☉^⅓, the degenerate radius floor of HPT equation 24 times M^⅓.
+    #[must_use]
+    pub(crate) const fn degenerate_radius(&self) -> f64 {
+        self.degenerate_radius
+    }
+
     /// Tout et al.'s (1996) zero-age main-sequence luminosity coefficients α, β, γ, δ, ε, ζ, η.
     #[must_use]
     pub(crate) const fn zams_l(&self) -> &[f64; 7] {
@@ -164,6 +210,118 @@ impl ZCoeffs {
     #[must_use]
     pub(crate) const fn zams_r(&self) -> &[f64; 9] {
         &self.zams_r
+    }
+}
+
+/// The relative distance from a crossing of two power laws within which [`LesserPowerLaw::at`] and
+/// [`lesser_of_crossing_laws`] evaluate both laws. Two laws whose exponents differ by δe stand in
+/// the ratio (x ÷ x*)^δe near their crossing x*, which at this distance is 1 ± δe × 10⁻⁹, while
+/// `libm`'s `pow` errs by under an ulp (10⁻¹⁶) and the crossing itself by a few: the lesser law is
+/// certain outside it, so the laws are only both evaluated where it is not.
+const CROSSING_MARGIN: f64 = 1e-9;
+
+/// The smallest difference of exponents for which [`LesserPowerLaw`] uses its crossing: below it the
+/// ratio near the crossing is too close to 1 for [`CROSSING_MARGIN`] to decide, and both laws are
+/// evaluated everywhere.
+const MIN_EXPONENT_GAP: f64 = 1e-3;
+
+/// min(k₁ x^−e₁, k₂ x^−e₂), a coefficient of HPT's formulae, which evaluates only the lesser law
+/// where it is certain which that is (plan 06's integrator speed: each `pow` costs about seven calls
+/// of `math::exp`, and a track evaluates these at every step of its phases).
+///
+/// The result is the printed `min` of the two laws bit for bit, in the arithmetic form the formula
+/// is written in ([`PowerForm`]): away from the crossing x* the lesser law's own value is what `min`
+/// would return, and within [`CROSSING_MARGIN`] of it both are evaluated and `min` decides.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LesserPowerLaw {
+    form: PowerForm,
+    first: [f64; 2],
+    second: [f64; 2],
+    /// Where the laws cross, and whether the first is the lesser below it; `None` where the
+    /// crossing does not decide (see [`LesserPowerLaw::new`]).
+    crossing: Option<(f64, bool)>,
+}
+
+impl LesserPowerLaw {
+    /// The lesser of k₁ x^−e₁ and k₂ x^−e₂, from `first` = [k₁, e₁] and `second` = [k₂, e₂],
+    /// evaluated in `form`.
+    ///
+    /// The laws cross at x* = (k₂ ÷ k₁)^(1 ÷ (e₂ − e₁)), below which the first is the lesser if
+    /// e₂ > e₁. Without two positive finite coefficients, or with exponents closer than
+    /// [`MIN_EXPONENT_GAP`], there is no crossing to use, and both laws are always evaluated.
+    #[must_use]
+    pub(crate) fn new(form: PowerForm, first: [f64; 2], second: [f64; 2]) -> Self {
+        let [k1, e1] = first;
+        let [k2, e2] = second;
+        let gap = e2 - e1;
+        let usable = k1 > 0.0
+            && k2 > 0.0
+            && k1.is_finite()
+            && k2.is_finite()
+            && gap.abs() > MIN_EXPONENT_GAP;
+        let crossing = usable
+            .then(|| (math::powf(k2 / k1, 1.0 / gap), gap > 0.0))
+            .filter(|(x, _)| x.is_finite() && *x > 0.0);
+        Self {
+            form,
+            first,
+            second,
+            crossing,
+        }
+    }
+
+    /// min(k₁ x^−e₁, k₂ x^−e₂) at `x`.
+    #[must_use]
+    pub(crate) fn at(&self, x: f64) -> f64 {
+        let law = |[k, e]: [f64; 2]| match self.form {
+            PowerForm::Product => k * math::powf(x, -e),
+            PowerForm::Quotient => k / math::powf(x, e),
+        };
+        let first = || law(self.first);
+        let second = || law(self.second);
+        match self
+            .crossing
+            .map(|(crossing, first_below)| lesser_side(x, crossing, first_below))
+        {
+            Some(Some(Side::First)) => first(),
+            Some(Some(Side::Second)) => second(),
+            Some(None) | None => first().min(second()),
+        }
+    }
+}
+
+/// How a law k x^−e is written in the formula it comes from, which its arithmetic follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PowerForm {
+    /// k × x^(−e).
+    Product,
+    /// k ÷ x^e.
+    Quotient,
+}
+
+/// Which of two crossing laws is the lesser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    First,
+    Second,
+}
+
+/// Which of two laws that cross at `crossing` is the lesser at `x`, if it is certain: `First`
+/// below the crossing when `first_below`, and the other side above it; `None` within
+/// [`CROSSING_MARGIN`] of it, or for an `x` that is not positive (or NaN).
+#[must_use]
+pub(crate) fn lesser_side(x: f64, crossing: f64, first_below: bool) -> Option<Side> {
+    let (below, above) = if first_below {
+        (Side::First, Side::Second)
+    } else {
+        (Side::Second, Side::First)
+    };
+    if x > 0.0 && x < crossing * (1.0 - CROSSING_MARGIN) {
+        Some(below)
+    } else if x > crossing * (1.0 + CROSSING_MARGIN) {
+        Some(above)
+    } else {
+        None
     }
 }
 
@@ -322,6 +480,8 @@ fn b_coefficients(z: f64, zeta: f64) -> [f64; 58] {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::bits;
+
     use super::*;
 
     /// The five metallicities of the published SSE comparison (P06.T12).
@@ -331,6 +491,79 @@ mod tests {
     fn z_sweep() -> impl Iterator<Item = f64> {
         let (lo, hi) = (math::log10(1e-4), math::log10(0.03));
         (0..200).map(move |i| math::exp10(lo + (hi - lo) * f64::from(i) / 199.0).clamp(1e-4, 0.03))
+    }
+
+    /// A law as the formula prints it.
+    type Printed<'a> = Box<dyn Fn(f64) -> f64 + 'a>;
+
+    /// Masses from 0.05 to 200 M☉, denser within 10⁻⁶ of `crossing` on either side, and the
+    /// crossing's neighbours to the ulp.
+    fn masses_around(crossing: Option<f64>) -> Vec<f64> {
+        let mut xs: Vec<f64> = (0..400)
+            .map(|i| math::exp10(-1.3 + 3.6 * f64::from(i) / 399.0))
+            .collect();
+        if let Some(x) = crossing {
+            xs.extend((-50..=50).map(|k| x * (1.0 + 1e-8 * f64::from(k))));
+            xs.extend([x, x.next_up(), x.next_down(), x.next_up().next_up()]);
+        }
+        xs
+    }
+
+    /// The lesser of two power laws is `min` of both, bit for bit, everywhere, including at and
+    /// around their crossing, for every radius and hook coefficient of the sweep of Z.
+    #[test]
+    fn the_lesser_power_law_is_the_printed_min_bit_for_bit() {
+        let mut crossings = 0;
+        for z in z_sweep() {
+            let c = ZCoeffs::new(MetalFraction::new(z));
+            let b = |n| c.b(n);
+            let a = |n| c.a(n);
+            let laws: [(&LesserPowerLaw, Printed); 3] = [
+                (
+                    c.giant_radius_scale(),
+                    Box::new(move |m| {
+                        (b(4) * math::powf(m, -b(5))).min(b(6) * math::powf(m, -b(7)))
+                    }),
+                ),
+                (
+                    c.agb_radius_scale(),
+                    Box::new(move |m| {
+                        (b(51) * math::powf(m, -b(52))).min(b(53) * math::powf(m, -b(54)))
+                    }),
+                ),
+                (
+                    c.hook_luminosity_scale(),
+                    Box::new(move |m| {
+                        (a(34) / math::powf(m, a(35))).min(a(36) / math::powf(m, a(37)))
+                    }),
+                ),
+            ];
+            for (law, printed) in &laws {
+                let crossing = law.crossing.map(|(x, _)| x);
+                crossings += usize::from(crossing.is_some());
+                for m in masses_around(crossing) {
+                    assert_eq!(
+                        bits(law.at(m)),
+                        bits(printed(m)),
+                        "Z = {z}, M = {m}: {law:?}"
+                    );
+                }
+            }
+        }
+        assert!(crossings > 0, "some law has a crossing to test");
+    }
+
+    /// A pair of laws with no usable crossing evaluates both everywhere.
+    #[test]
+    fn a_lesser_power_law_without_a_crossing_evaluates_both() {
+        let law = LesserPowerLaw::new(PowerForm::Product, [1.0, 0.3], [2.0, 0.3]);
+        assert_eq!(law.crossing, None);
+        assert_eq!(bits(law.at(3.0)), bits(math::powf(3.0, -0.3)));
+        let negative = LesserPowerLaw::new(PowerForm::Product, [-1.0, 0.1], [2.0, 0.3]);
+        assert_eq!(negative.crossing, None);
+        assert_eq!(bits(negative.at(3.0)), bits(-math::powf(3.0, -0.1)));
+        assert_eq!(lesser_side(-1.0, 2.0, true), None);
+        assert_eq!(lesser_side(f64::NAN, 2.0, true), None);
     }
 
     #[test]

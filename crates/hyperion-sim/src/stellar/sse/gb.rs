@@ -14,7 +14,7 @@ use crate::math;
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::PhasePoint;
-use super::coeffs::ZCoeffs;
+use super::coeffs::{Side, ZCoeffs, lesser_side};
 use super::ms;
 
 /// c₁ of HPT equation 44.
@@ -109,9 +109,16 @@ impl GiantBranch {
     #[must_use]
     pub(crate) fn luminosity(&self, mc: SolarMasses) -> SolarLuminosities {
         let mc = mc.value();
-        SolarLuminosities::new(
-            (self.b * math::powf(mc, self.q)).min(self.d * math::powf(mc, self.p)),
-        )
+        let high = || self.b * math::powf(mc, self.q);
+        let low = || self.d * math::powf(mc, self.p);
+        // Below M_x the low-luminosity law D Mc^p is the lesser, since p > q; only where that is
+        // uncertain are both evaluated, so the result is `min`'s bit for bit (see
+        // `coeffs::lesser_side`).
+        SolarLuminosities::new(match lesser_side(mc, self.m_x, false) {
+            Some(Side::First) => high(),
+            Some(Side::Second) => low(),
+            None => high().min(low()),
+        })
     }
 
     /// Core mass from luminosity: the inverse of [`GiantBranch::luminosity`].
@@ -275,7 +282,7 @@ impl RadiusLaw {
     #[must_use]
     pub(crate) fn giant(m: SolarMasses, c: &ZCoeffs) -> Self {
         let m = m.value();
-        let a = (c.b(4) * math::powf(m, -c.b(5))).min(c.b(6) * math::powf(m, -c.b(7)));
+        let a = c.giant_radius_scale().at(m);
         Self {
             a,
             b1: c.b(1),
@@ -290,8 +297,7 @@ impl RadiusLaw {
         let m = m.value();
         let m_hef = c.m_hef().value();
         let m1 = m_hef - 0.2;
-        let high_a =
-            |m: f64| (c.b(51) * math::powf(m, -c.b(52))).min(c.b(53) * math::powf(m, -c.b(54)));
+        let high_a = |m: f64| c.agb_radius_scale().at(m);
         let low_a = |m: f64| c.b(56) + c.b(57) * m;
         let (x, a) = if m >= m_hef {
             (c.b(55) * c.b(3), high_a(m))
@@ -318,6 +324,49 @@ impl RadiusLaw {
     pub(crate) fn at(&self, l: SolarLuminosities) -> SolarRadii {
         let l = l.value();
         SolarRadii::new(self.a * (math::powf(l, self.b1) + self.b2 * math::powf(l, self.x)))
+    }
+
+    /// [`RadiusLaw::at`] at the luminosity of `powers`, bit for bit, reading the powers of it
+    /// that this law shares with the one `powers` was built from.
+    #[must_use]
+    pub(crate) fn at_powers(&self, powers: &LuminosityPowers) -> SolarRadii {
+        let l = powers.l;
+        let power = |exponent: f64, cached: [f64; 2]| {
+            // The same exponent, to the bit, gives the same power.
+            if exponent.total_cmp(&cached[0]).is_eq() {
+                cached[1]
+            } else {
+                math::powf(l, exponent)
+            }
+        };
+        SolarRadii::new(self.a * (power(self.b1, powers.b1) + self.b2 * power(self.x, powers.x)))
+    }
+}
+
+/// A fixed luminosity's powers L^b1 and L^x in a [`RadiusLaw`], which a phase evaluates at every
+/// step of a track with the law at the current mass (plan 06's integrator speed: its two `pow`
+/// calls were a sixth of a giant's). The coefficient A of the law follows the mass; b1 is a
+/// constant of the metallicity, and x is too except on the asymptotic giant branch between `M_HeF`
+/// − 0.2 and `M_HeF`, where [`RadiusLaw::at_powers`] finds it changed and evaluates it afresh.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LuminosityPowers {
+    l: f64,
+    /// b1 and L^b1.
+    b1: [f64; 2],
+    /// x and L^x.
+    x: [f64; 2],
+}
+
+impl LuminosityPowers {
+    /// The powers of `l` in `law`.
+    #[must_use]
+    pub(crate) fn new(law: &RadiusLaw, l: SolarLuminosities) -> Self {
+        let l = l.value();
+        Self {
+            l,
+            b1: [law.b1, math::powf(l, law.b1)],
+            x: [law.x, math::powf(l, law.x)],
+        }
     }
 }
 
@@ -456,6 +505,9 @@ pub(crate) fn r_hei_at(m0: SolarMasses, mt: SolarMasses, c: &ZCoeffs) -> SolarRa
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct IgnitionRadius {
     l_hei: SolarLuminosities,
+    /// `L_HeI`'s powers in the giant's radius law, or in the asymptotic giant's for
+    /// [`IgnitionForm::Asymptotic`].
+    powers: LuminosityPowers,
     form: IgnitionForm,
 }
 
@@ -490,21 +542,31 @@ impl IgnitionRadius {
                 mu: math::log10(mass / 12.0) / math::log10(m_fgb / 12.0),
             }
         };
+        let l_hei = l_hei(m0, c);
+        let law = match form {
+            IgnitionForm::Asymptotic => RadiusLaw::asymptotic(m0, c),
+            IgnitionForm::Giant | IgnitionForm::Minimum(_) | IgnitionForm::Interpolated { .. } => {
+                RadiusLaw::giant(m0, c)
+            }
+        };
         Self {
-            l_hei: l_hei(m0, c),
+            l_hei,
+            powers: LuminosityPowers::new(&law, l_hei),
             form,
         }
     }
 
-    /// The radius at ignition at current mass `mt`.
+    /// The radius at ignition at current mass `mt`: [`radius`] or [`agb_radius`] at `L_HeI` as
+    /// equation 50 takes them, bit for bit.
     #[must_use]
     pub(crate) fn at(&self, mt: SolarMasses, c: &ZCoeffs) -> SolarRadii {
         match self.form {
-            IgnitionForm::Giant => radius(mt, self.l_hei, c),
-            IgnitionForm::Asymptotic => agb_radius(mt, self.l_hei, c),
+            IgnitionForm::Giant => RadiusLaw::giant(mt, c).at_powers(&self.powers),
+            IgnitionForm::Asymptotic => RadiusLaw::asymptotic(mt, c).at_powers(&self.powers),
             IgnitionForm::Minimum(r_mhe) => r_mhe,
             IgnitionForm::Interpolated { r_mhe, mu } => {
-                SolarRadii::new(r_mhe * math::powf(radius(mt, self.l_hei, c).value() / r_mhe, mu))
+                let giant = RadiusLaw::giant(mt, c).at_powers(&self.powers);
+                SolarRadii::new(r_mhe * math::powf(giant.value() / r_mhe, mu))
             }
         }
     }
@@ -572,12 +634,19 @@ impl FirstGiantBranch {
         self.relation.core_mass_at(&self.times, t)
     }
 
+    /// Whether the core the branch reports ([`FirstGiantBranch::core_mass`]) is the relation's
+    /// ([`FirstGiantBranch::relation_core`]), bit for bit: below `M_HeF`, where the core is
+    /// degenerate.
+    #[must_use]
+    pub(crate) const fn reports_relation_core(&self) -> bool {
+        self.linear_core.is_none()
+    }
+
     /// The core mass the branch reports at `t` (`FirstGiantBranch::at`'s).
     #[must_use]
     pub(crate) fn core_mass(&self, t: Megayears) -> SolarMasses {
-        let relation_core = self.relation.core_mass_at(&self.times, t);
         match self.linear_core {
-            None => relation_core,
+            None => self.relation.core_mass_at(&self.times, t),
             Some((mc_bgb, mc_hei)) => {
                 let tau = (t - self.t_bgb) / (self.t_hei - self.t_bgb);
                 mc_bgb + (mc_hei - mc_bgb) * tau
@@ -637,6 +706,8 @@ impl FirstGiantBranch {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::bits;
+
     use super::super::continuity::assert_continuous_over;
     use super::*;
     use crate::units::MetalFraction;
@@ -649,6 +720,65 @@ mod tests {
 
     fn mass(m: f64) -> SolarMasses {
         SolarMasses::new(m)
+    }
+
+    /// The relation's luminosity is the printed min(B Mc^q, D Mc^p), bit for bit, across the
+    /// core masses, at `M_x` and its neighbours, for giant, early-AGB, pulsing and helium-giant
+    /// relations.
+    #[test]
+    fn the_relation_luminosity_is_the_printed_min_bit_for_bit() {
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            let relations = [0.5, 1.0, 1.99, 2.2, 2.5, 5.0, 12.0, 40.0]
+                .map(|m| GiantBranch::new(mass(m), &c))
+                .into_iter()
+                .chain([0.4, 0.8, 2.0, 6.0].map(|m| GiantBranch::helium_giant(mass(m), 7.66e-5)));
+            for relation in relations {
+                let x = relation.m_x().value();
+                let cores = (0..300)
+                    .map(|i| math::exp10(-2.0 + 3.0 * f64::from(i) / 299.0))
+                    .chain((-40..=40).map(|k| x * (1.0 + 1e-9 * f64::from(k))))
+                    .chain([x, x.next_up(), x.next_down(), 0.0, -0.1]);
+                for mc in cores {
+                    let printed = (relation.b * math::powf(mc, relation.q))
+                        .min(relation.d * math::powf(mc, relation.p));
+                    let ours = relation.luminosity(mass(mc)).value();
+                    if printed.is_nan() {
+                        assert!(ours.is_nan(), "Z = {z}, Mc = {mc}: {ours}");
+                    } else {
+                        assert_eq!(
+                            bits(ours),
+                            bits(printed),
+                            "Z = {z}, Mc = {mc}: {relation:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A radius law at a fixed luminosity's powers is the law at that luminosity, bit for bit,
+    /// whatever mass the law is at, including the asymptotic giant's band below `M_HeF`, where its
+    /// exponent changes with the mass.
+    #[test]
+    fn a_radius_law_at_cached_powers_is_the_law_at_the_luminosity_bit_for_bit() {
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            let m_hef = c.m_hef().value();
+            for built_at in [0.8, m_hef - 0.1, m_hef, 5.0, 30.0] {
+                for l in [3.0, 150.0, 2.4e3, 8.0e4] {
+                    let l = SolarLuminosities::new(l);
+                    let giant = LuminosityPowers::new(&RadiusLaw::giant(mass(built_at), &c), l);
+                    let agb = LuminosityPowers::new(&RadiusLaw::asymptotic(mass(built_at), &c), l);
+                    for i in 0..120 {
+                        let mt = mass(math::exp10(-1.0 + 2.0 * f64::from(i) / 119.0));
+                        let (g, a) = (RadiusLaw::giant(mt, &c), RadiusLaw::asymptotic(mt, &c));
+                        assert_eq!(bits(g.at_powers(&giant).value()), bits(g.at(l).value()));
+                        assert_eq!(bits(a.at_powers(&agb).value()), bits(a.at(l).value()));
+                    }
+                }
+            }
+        }
     }
 
     /// Masses from 0.5 to 100 M☉, evenly in log mass.

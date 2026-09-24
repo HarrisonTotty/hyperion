@@ -171,7 +171,7 @@ pub(crate) fn l_bgb(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
 fn delta_l(m: f64, c: &ZCoeffs) -> f64 {
     let m_hook = c.m_hook().value();
     let a33 = c.a(33);
-    let high = |m: f64| (c.a(34) / math::powf(m, c.a(35))).min(c.a(36) / math::powf(m, c.a(37)));
+    let high = |m: f64| c.hook_luminosity_scale().at(m);
     if m <= m_hook {
         0.0
     } else if m < a33 {
@@ -321,11 +321,11 @@ fn gamma(m: f64, c: &ZCoeffs) -> f64 {
     value.max(0.0)
 }
 
-/// The hydrogen mass fraction of the models HPT fit, X = 0.76 − 3Z (Pols et al. 1998, MNRAS 298,
-/// 525).
+/// The hydrogen mass fraction of the models HPT fit at metal fraction `z`, X = 0.76 − 3Z (Pols et
+/// al. 1998, MNRAS 298, 525); [`ZCoeffs::degenerate_radius`] reads it.
 #[must_use]
-fn hydrogen(c: &ZCoeffs) -> f64 {
-    0.76 - 3.0 * c.z().value()
+pub(crate) fn hydrogen(z: f64) -> f64 {
+    0.76 - 3.0 * z
 }
 
 /// A star of one mass on the main sequence: every mass-dependent quantity of HPT section 5.1.1,
@@ -360,7 +360,7 @@ impl MainSequence {
         // HPT equation 24: low-mass stars are partly degenerate (Tout et al. 1997), so the radius
         // is held above 0.0258 (1 + X)^(5/3) M^(−1/3). The floor binds only near 0.1 M☉ and is
         // applied at every mass, which changes nothing above.
-        let r_degenerate = 0.0258 * math::powf(1.0 + hydrogen(c), 5.0 / 3.0) / math::cbrt(mass);
+        let r_degenerate = c.degenerate_radius() / math::cbrt(mass);
         Self {
             t_ms,
             t_hook,

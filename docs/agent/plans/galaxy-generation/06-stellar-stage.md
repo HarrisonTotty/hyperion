@@ -2824,3 +2824,38 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     - `stellar/summaries`: the three white dwarfs' L, T_eff and B − V at their three times, and
       their Sion types (DA5.3 to DA4.5, DA8.2 to DA7.9, and DC11.0 to DA9.9, since the atmosphere
       draw's threshold moves with T_eff). Their masses, radii and ages are unchanged.
+- **The integrator's speed, as optimised (round 8, `speed`; ruling 46).** No output bit moved: no
+  golden changed, and a scratch fingerprint of 480 tracks under all four option sets (segments,
+  knots, samples, fates, 60 states and maxima each, `to_age` prefixes, `lifetime`, `evolve`, doubled
+  resolution) is identical before and after.
+  - _Profile_ (in-process sampling at 2 kHz, and a count of every `math` call by site). `libm`'s
+    `pow` is 74–77% of a track's time; one costs about 57 ns, 4–5 `math::exp`. A full 5 M☉ track made
+    19,176 `pow` and 5,000 other transcendental calls; the rest of the integrator is under 15%.
+    About a quarter of the calls repeated an earlier one's arguments. Before: core helium burning
+    20%, the pulsing AGB 20%, the early AGB 15%, the maxima's samples 11% of a full track.
+  - _What changed._ Only one side of a `min` of two power laws is evaluated where the crossing
+    decides it (`coeffs::LesserPowerLaw`, `lesser_side`; equation 37's L, the radius scales of 46
+    and 74, the hook's ΔL); the envelope integration evaluates each core mass once and shares it
+    with the envelope, its rate, the progress and the interpulse period, and reads it from the
+    evaluated state where that is the same number; a fixed luminosity's powers in a radius law are
+    kept (`gb::LuminosityPowers`); core helium burning evaluates only the radius formulae its age
+    needs; the rebuilt main sequences hand their lifetime to the integration; `(1 + X)^(5/3)` is a
+    `ZCoeffs` constant; the electron-capture window's root is found only near the window; the peak
+    search keeps its states; `Model::CoreHeliumBurning` is boxed. Each has a bit-equality test.
+  - _Result_ (A/B in one process group at load 13–17 and 2.3–2.9 GHz, `math::exp` 11–12 ns; `pow`
+    calls before → after): `lifetime` 4 M☉ 129k → 87k `exp` (14,750 → 11,018 `pow`), 20 M☉ 88k →
+    66k; `to_age` of a 2 M☉ giant 55k → 39k; `full` of 1, 5 and 20 M☉ 194k, 260k, 160k → 137k,
+    158k, 119k; `evolve` at 20 M☉ 4 Myr 42k → 41k. A factor of 1.4–1.75, still 5–8 times over the
+    track targets, and `lifetime` 100–130 times over its 5 µs.
+  - **For the orchestrator to rule: the targets cannot be met without moving output.** `lifetime`
+    must equal `Track::lifetime` bit for bit, and so integrate the whole grid (the wind reads L and
+    R at every step); 5 µs is about 650 `exp`, fewer than one phase's knots. Measured options:
+    - `math::powf` as `exp(y ln x)` for finite positive x (every caller in the sim): tracks a
+      further 1.1–1.8 times faster (`full` 20 M☉ ×0.57); worst moves over 280 stars: lifetime 1 ×
+      10⁻¹¹, remnant mass 2 × 10⁻⁹ M☉, log L and log R 5 × 10⁻⁹ dex. Every golden would move in
+      its last bits; a version-12 change.
+    - `STEPS_PER_KNOT` 4 → 2: ×0.49; lifetime up to 1.5 × 10⁻³ (p99 1.7 × 10⁻⁴), remnant mass up to
+      0.14 M☉, log L p99 7.5 × 10⁻⁴ dex but 0.18 at worst, log R up to 1.2 dex where a stripping
+      burst moves. Fewer knots (8/16) is worse for less gain. Not recommended.
+    - A fitted lifetime table through `hyperion-fit` for plan 08's bulk calls, which gives up
+      equality with `Track::lifetime` and is the only route to about 5 µs.

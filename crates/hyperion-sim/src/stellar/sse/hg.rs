@@ -24,6 +24,8 @@ pub(crate) struct HertzsprungGap {
     l_tms: SolarLuminosities,
     r_tms: SolarRadii,
     l_ehg: SolarLuminosities,
+    /// `L_EHG`'s powers in the giant's radius law, for the end of the gap at the current mass.
+    l_ehg_powers: gb::LuminosityPowers,
     r_ehg: SolarRadii,
     mc_ehg: SolarMasses,
     rho: f64,
@@ -61,6 +63,7 @@ impl HertzsprungGap {
             l_tms: ms::l_tms(m, c),
             r_tms: ms::r_tms(m, c),
             l_ehg,
+            l_ehg_powers: gb::LuminosityPowers::new(&gb::RadiusLaw::giant(m, c), l_ehg),
             r_ehg,
             mc_ehg,
             // HPT equation 29.
@@ -111,7 +114,7 @@ impl HertzsprungGap {
     #[must_use]
     pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
         let r_ehg = match &self.ignition {
-            None => gb::radius(mt, self.l_ehg, c),
+            None => gb::RadiusLaw::giant(mt, c).at_powers(&self.l_ehg_powers),
             Some(ignition) => ignition.at(mt, c),
         };
         self.point(t, r_ehg)
@@ -151,6 +154,30 @@ mod tests {
 
     fn coeffs(z: f64) -> ZCoeffs {
         ZCoeffs::new(MetalFraction::new(z))
+    }
+
+    /// The gap at a current mass, with the end's luminosity's powers held, is the gap with the
+    /// giant's radius at `L_EHG` at that mass, bit for bit.
+    #[test]
+    fn the_gap_at_a_current_mass_is_the_printed_evaluation_bit_for_bit() {
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            for m in masses(40) {
+                let gap = HertzsprungGap::new(m, &c);
+                for share in [1.0, 0.9, 0.6] {
+                    let mt = SolarMasses::new(m.value() * share);
+                    let r_ehg = match &gap.ignition {
+                        None => gb::radius(mt, gap.l_ehg, &c),
+                        Some(ignition) => ignition.at(mt, &c),
+                    };
+                    for i in 0..=20 {
+                        let x = f64::from(i) / 20.0;
+                        let t = gap.t_ms * (1.0 - x) + gap.t_bgb * x;
+                        assert_eq!(gap.at_mass(t, mt, &c), gap.point(t, r_ehg), "{m:?} at {x}");
+                    }
+                }
+            }
+        }
     }
 
     fn masses(n: u32) -> Vec<SolarMasses> {

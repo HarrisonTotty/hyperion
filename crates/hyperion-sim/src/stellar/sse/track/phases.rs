@@ -20,8 +20,9 @@ use super::super::cheb::CoreHeliumBurning;
 use super::super::gb::FirstGiantBranch;
 use super::super::helium::{self, HeliumStar};
 use super::super::hg::HertzsprungGap;
+use super::super::m_c_bagb;
 use super::super::ms::{self, MainSequence};
-use super::build::{Builder, Ending, Entry, FLASH_YEARS, Step, segment_coordinate};
+use super::build::{Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, Step, segment_coordinate};
 use super::model::{HeliumCore, Model, Span};
 use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment};
 
@@ -84,8 +85,12 @@ impl Builder<'_> {
             mass,
             previous,
             self.resolution.knots,
-            |age| segment_coordinate(start, span, age),
-            |age, m| m - core_mass(age),
+            &EnvelopeLaws {
+                core: &core_mass,
+                shell: |m| m,
+                progress: |age, _| segment_coordinate(start, span, age),
+                core_in_point: false,
+            },
             None,
         );
         let next = match built.ending {
@@ -129,16 +134,23 @@ impl Builder<'_> {
             }
         };
         // The branch's progress in the relation's core mass, which sets the luminosity and so the
-        // wind: even steps in time would crowd the tip into the last interval.
+        // wind: even steps in time would crowd the tip into the last interval. Where the branch
+        // reports the relation's core, that is the core mass the integration has at hand.
         let progress = {
             let branch = branch.clone();
             let (mc0, mc1) = (
                 branch.relation_core(span.start).value(),
                 branch.relation_core(span.end).value(),
             );
-            move |age: f64| {
-                let clock = span.at(segment_coordinate(start, span, age));
-                (branch.relation_core(clock).value() - mc0) / (mc1 - mc0)
+            let reports_relation = branch.reports_relation_core();
+            move |age: f64, core: f64| {
+                let relation_core = if reports_relation {
+                    core
+                } else {
+                    let clock = span.at(segment_coordinate(start, span, age));
+                    branch.relation_core(clock).value()
+                };
+                (relation_core - mc0) / (mc1 - mc0)
             }
         };
         let built = self.envelope_segment(
@@ -148,8 +160,12 @@ impl Builder<'_> {
             mass,
             previous,
             self.resolution.knots,
-            progress,
-            |age, m| m - core_mass(age),
+            &EnvelopeLaws {
+                core: &core_mass,
+                shell: |m| m,
+                progress,
+                core_in_point: true,
+            },
             None,
         );
         let next = match (built.ending, core) {
@@ -211,7 +227,15 @@ impl Builder<'_> {
             start: phase.t_start(),
             end: phase.t_end(),
         };
-        let horizontal = self.state_of(&Model::CoreHeliumBurning { phase, span }, 0.0, mass, start);
+        let horizontal = self.state_of(
+            &Model::CoreHeliumBurning {
+                phase: Box::new(phase),
+                span,
+            },
+            0.0,
+            mass,
+            start,
+        );
         let end = start + FLASH_YEARS;
         let segment = Segment {
             model: Model::FlashBridge {
@@ -260,14 +284,21 @@ impl Builder<'_> {
             }
         };
         let built = self.envelope_segment(
-            Model::CoreHeliumBurning { phase, span },
+            Model::CoreHeliumBurning {
+                phase: Box::new(phase),
+                span,
+            },
             start,
             span,
             mass,
             previous,
             self.resolution.knots,
-            |age| segment_coordinate(start, span, age),
-            |age, m| m - core_mass(age),
+            &EnvelopeLaws {
+                core: &core_mass,
+                shell: |m| m,
+                progress: |age, _| segment_coordinate(start, span, age),
+                core_in_point: false,
+            },
             None,
         );
         let next = match built.ending {
@@ -315,7 +346,7 @@ impl Builder<'_> {
                 phase.co_core_mass(span.start).value(),
                 phase.co_core_mass(span.end).value(),
             );
-            move |age: f64| {
+            move |age: f64, _| {
                 let clock = span.at(segment_coordinate(start, span, age));
                 (phase.co_core_mass(clock).value() - co0) / (co1 - co0)
             }
@@ -331,8 +362,12 @@ impl Builder<'_> {
             mass,
             previous,
             self.resolution.knots,
-            progress,
-            |_, m| m - mc_bagb,
+            &EnvelopeLaws {
+                core: |_| mc_bagb,
+                shell: |m| m,
+                progress,
+                core_in_point: false,
+            },
             None,
         );
         match built.ending {
@@ -453,10 +488,9 @@ impl Builder<'_> {
                 .core_mass(span.at(segment_coordinate(start, span, age)))
                 .value()
         };
-        let period = |age: f64, m: f64| {
-            let mc = core_mass(age);
+        let period = |mc: f64, envelope: f64| {
             phase
-                .interpulse_period(SolarMasses::new(mc), SolarMasses::new((m - mc).max(0.0)))
+                .interpulse_period(SolarMasses::new(mc), SolarMasses::new(envelope.max(0.0)))
                 .value()
         };
         let built = self.envelope_segment(
@@ -469,8 +503,12 @@ impl Builder<'_> {
             mass,
             previous,
             self.resolution.pulsing_knots,
-            |age| segment_coordinate(start, span, age),
-            |age, m| m - core_mass(age),
+            &EnvelopeLaws {
+                core: &core_mass,
+                shell: |m| m,
+                progress: |age, _| segment_coordinate(start, span, age),
+                core_in_point: true,
+            },
             Some(&period),
         );
         let end = built.end;
@@ -653,8 +691,7 @@ impl Builder<'_> {
         };
         let progress = {
             let (mc0, mc1) = (core_mass(start), core_mass(start + span.years()));
-            let core_mass = core_mass.clone();
-            move |age: f64| (core_mass(age) - mc0) / (mc1 - mc0)
+            move |_, core: f64| (core - mc0) / (mc1 - mc0)
         };
         let built = self.envelope_segment(
             Model::HeliumShellBurning {
@@ -666,8 +703,12 @@ impl Builder<'_> {
             mass,
             previous,
             self.resolution.knots,
-            progress,
-            |age, m| limit(m) - core_mass(age),
+            &EnvelopeLaws {
+                core: &core_mass,
+                shell: &limit,
+                progress,
+                core_in_point: false,
+            },
             None,
         );
         let mc = core_mass(built.end).min(limit(built.end_mass));
@@ -787,13 +828,27 @@ impl Builder<'_> {
     /// A companion-stripped star's 1 M☉ window waits for P06.T19.c, which decides the provisional
     /// stripped mark (design note 11), and for plan 11: the track never sets
     /// [`Stripping::Companion`].
+    ///
+    /// A star whose `m_c_bagb` 0.01 M☉ lighter already makes an iron core lies above the window,
+    /// and one whose `m_c_bagb` 0.2 M☉ heavier does not yet lies below it, since `m_c_bagb` grows
+    /// with the mass: the root is found only between (plan 06's integrator speed; it costs about 110
+    /// `pow` calls, and every white dwarf of the AGB asked for it).
     #[must_use]
-    fn captures_electrons(&self, m0: f64) -> bool {
+    pub(super) fn captures_electrons(&self, m0: f64) -> bool {
+        const ABOVE: f64 = 0.01;
+        const BELOW: f64 = 0.2;
         match self.options.remnant() {
             RemnantRecipe::Hurley2000 => false,
-            RemnantRecipe::MandelMuller2020 => ElectronCaptureWindows::new(self.phys.coeffs)
-                .single()
-                .contains(SolarMasses::new(m0)),
+            RemnantRecipe::MandelMuller2020 => {
+                let c = self.phys.coeffs;
+                let makes_iron = |m: f64| m_c_bagb(SolarMasses::new(m), c) >= IRON_CORE_MC_BAGB;
+                if makes_iron(m0 - ABOVE) || !makes_iron(m0 + BELOW) {
+                    return false;
+                }
+                ElectronCaptureWindows::new(c)
+                    .single()
+                    .contains(SolarMasses::new(m0))
+            }
         }
     }
 

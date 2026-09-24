@@ -114,9 +114,9 @@ pub(crate) enum Model {
         /// The same on the zero-age horizontal branch.
         to: [f64; 3],
     },
-    /// Core helium burning.
+    /// Core helium burning, boxed: its closed forms are the largest of any phase's.
     CoreHeliumBurning {
-        phase: CoreHeliumBurning,
+        phase: Box<CoreHeliumBurning>,
         span: Span,
     },
     /// The early asymptotic giant branch; `helium` is the naked helium star of its helium core,
@@ -174,18 +174,12 @@ impl Model {
     pub(super) fn point(&self, phys: &Physics<'_>, coord: f64, mt: SolarMasses, age: f64) -> Point {
         let c = phys.coeffs;
         match self {
-            Self::MainSequence { fixed } => {
-                let rebuilt;
-                let ms = if let Some(ms) = fixed {
-                    ms
-                } else {
-                    rebuilt = MainSequence::new(mt, c);
-                    &rebuilt
-                };
-                Point {
-                    phase: Phase::MainSequence,
-                    point: ms.at(ms.t_ms() * coord),
-                }
+            Self::MainSequence { fixed: Some(ms) } => Point {
+                phase: Phase::MainSequence,
+                point: ms.at(ms.t_ms() * coord),
+            },
+            Self::MainSequence { fixed: None } | Self::HeliumMainSequence { fixed: None } => {
+                self.rebuilt_point(phys, coord, mt, age).0
             }
             Self::HertzsprungGap { gap, core, span } => {
                 let point = gap.at_mass(span.at(coord), mt, c);
@@ -232,19 +226,10 @@ impl Model {
                     ),
                 }
             }
-            Self::HeliumMainSequence { fixed } => {
-                let rebuilt;
-                let star = if let Some(star) = fixed {
-                    star
-                } else {
-                    rebuilt = HeliumStar::new(mt);
-                    &rebuilt
-                };
-                Point {
-                    phase: Phase::HeliumMainSequence,
-                    point: star.at(star.t_ms() * coord),
-                }
-            }
+            Self::HeliumMainSequence { fixed: Some(star) } => Point {
+                phase: Phase::HeliumMainSequence,
+                point: star.at(star.t_ms() * coord),
+            },
             Self::HeliumShellBurning { star, span } => {
                 let clock = span.at(coord);
                 let point = star.at_mass(clock, mt);
@@ -269,6 +254,67 @@ impl Model {
                 phase: *phase,
                 point: remnant(*phase, *mass, age - birth, *origin, phys),
             },
+        }
+    }
+}
+
+impl Model {
+    /// The bytes the model owns on the heap, beyond `size_of::<Model>()`.
+    #[must_use]
+    pub(super) fn heap_bytes(&self) -> usize {
+        match self {
+            Self::CoreHeliumBurning { .. } => size_of::<CoreHeliumBurning>(),
+            Self::MainSequence { .. }
+            | Self::HertzsprungGap { .. }
+            | Self::FirstGiantBranch { .. }
+            | Self::FlashBridge { .. }
+            | Self::EarlyAgb { .. }
+            | Self::ThermallyPulsingAgb { .. }
+            | Self::HeliumMainSequence { .. }
+            | Self::HeliumShellBurning { .. }
+            | Self::Remnant { .. } => 0,
+        }
+    }
+
+    /// The state at fractional age `coord` of a main sequence or helium main sequence whose closed
+    /// forms are rebuilt at the current mass `mt`, with the phase's lifetime at `mt`, Myr, which
+    /// the rebuild computes on the way: `None` for every other model. [`Model::point`] is its
+    /// state, bit for bit.
+    #[must_use]
+    pub(super) fn rebuilt_point(
+        &self,
+        phys: &Physics<'_>,
+        coord: f64,
+        mt: SolarMasses,
+        age: f64,
+    ) -> (Point, Option<Megayears>) {
+        match self {
+            Self::MainSequence { fixed: None } => {
+                let ms = MainSequence::new(mt, phys.coeffs);
+                let point = Point {
+                    phase: Phase::MainSequence,
+                    point: ms.at(ms.t_ms() * coord),
+                };
+                (point, Some(ms.t_ms()))
+            }
+            Self::HeliumMainSequence { fixed: None } => {
+                let (point, t_ms) = helium::main_sequence_at_fraction(mt, coord);
+                let point = Point {
+                    phase: Phase::HeliumMainSequence,
+                    point,
+                };
+                (point, Some(t_ms))
+            }
+            Self::MainSequence { fixed: Some(_) }
+            | Self::HeliumMainSequence { fixed: Some(_) }
+            | Self::HertzsprungGap { .. }
+            | Self::FirstGiantBranch { .. }
+            | Self::FlashBridge { .. }
+            | Self::CoreHeliumBurning { .. }
+            | Self::EarlyAgb { .. }
+            | Self::ThermallyPulsingAgb { .. }
+            | Self::HeliumShellBurning { .. }
+            | Self::Remnant { .. } => (self.point(phys, coord, mt, age), None),
         }
     }
 }

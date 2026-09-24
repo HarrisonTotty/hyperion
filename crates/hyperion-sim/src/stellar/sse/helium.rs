@@ -78,6 +78,36 @@ pub(crate) fn main_sequence_point(m: SolarMasses, tau: f64) -> (SolarLuminositie
     )
 }
 
+/// [`HeliumStar::new`]`(m)`[`.at`](HeliumStar::at)`(t_HeMS × x)` and `t_HeMS`, bit for bit, building
+/// only the main sequence where the age falls on it (x < 1): the helium main sequence evaluates its
+/// star at the current mass (HPT section 7.1), so a track rebuilds it at every step of the phase,
+/// and the rest of the star was most of that cost.
+#[must_use]
+pub(crate) fn main_sequence_at_fraction(m: SolarMasses, x: f64) -> (PhasePoint, Megayears) {
+    let mass = m.value();
+    let t_ms = main_sequence_lifetime(m);
+    let t = t_ms * x;
+    if t < t_ms {
+        debug_assert!(
+            t.value() >= -1e-9 * t_ms.value(),
+            "a helium star lives from 0 to its end, not {t:?}"
+        );
+        // `HeliumStar::new`'s terms and `HeliumStar::point`'s main sequence, in their order.
+        let l_zams = zams_luminosity(m);
+        let alpha = (0.85 - 0.08 * mass).max(0.0);
+        let r_zams = zams_radius(m);
+        let beta = (0.4 - 0.22 * math::log10(mass)).max(0.0);
+        let tau = t / t_ms;
+        let point = PhasePoint {
+            luminosity: l_zams * (1.0 + 0.45 * tau + alpha * tau * tau),
+            radius: r_zams * (1.0 + beta * (tau - math::powi(tau, 6))),
+            core_mass: SolarMasses::ZERO,
+        };
+        return (point, t_ms);
+    }
+    (HeliumStar::new(m).at(t), t_ms)
+}
+
 /// A naked helium star of one mass, from its helium zero-age main sequence through the helium
 /// Hertzsprung gap and giant branch until its carbon–oxygen core reaches its limit (HPT section
 /// 6.1).
@@ -399,6 +429,22 @@ mod tests {
         (0..n)
             .map(|i| math::exp10(lo + (hi - lo) * f64::from(i) / f64::from(n - 1)))
             .collect()
+    }
+
+    /// The main sequence built alone is the whole star's, bit for bit, at every fractional age
+    /// including its end, with its lifetime.
+    #[test]
+    fn the_main_sequence_alone_is_the_whole_stars_bit_for_bit() {
+        for m in helium_masses(60) {
+            let m = SolarMasses::new(m);
+            let star = HeliumStar::new(m);
+            for i in 0..=64 {
+                let x = f64::from(i) / 64.0;
+                let (point, t_ms) = main_sequence_at_fraction(m, x);
+                assert_eq!(t_ms, star.t_ms());
+                assert_eq!(point, star.at(star.t_ms() * x), "{m:?} at x = {x}");
+            }
+        }
     }
 
     fn mass(m: f64) -> SolarMasses {

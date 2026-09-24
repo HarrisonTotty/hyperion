@@ -47,17 +47,37 @@ fmt-check:
     cargo fmt --all -- --check
     pnpm format:check
 
-# Run all tests.
+# One lock, shared by every worktree of this clone (it lives in the common git directory), around
+# the test runs that use every core. Parallel lanes build freely, but only one runs its tests at a
+# time: two suites at once each take twice as long, and the load fails the timing-sensitive server
+# tests (`ws`, `outbound`) and time budgets for no fault of the code. Builds happen before the lock.
+heavy_lock := `git rev-parse --path-format=absolute --git-common-dir` / "hyperion-heavy-tests.lock"
+
+# Run a command under the heavy-test lock, waiting for its turn (a crashed holder releases it).
+[positional-arguments]
+_locked +cmd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec 9>"{{ heavy_lock }}"
+    if ! flock -n 9; then
+        echo "waiting for another heavy test run to finish (lock {{ heavy_lock }})..." >&2
+        flock 9
+        echo "lock taken, running: $*" >&2
+    fi
+    "$@"
+
+# Run all tests (built first, then run under the heavy-test lock).
 test:
-    cargo test --workspace
-    pnpm test
+    cargo test --workspace --no-run
+    just _locked bash -c 'cargo test --workspace && pnpm test'
 
 # Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
 # (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
 # Nextest runs no doctests, but no doctest is slow. `.config/nextest.toml` holds the `slow` profile.
 [positional-arguments]
 test-slow *args:
-    cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@"
+    cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only --no-run
+    just _locked cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@"
 
 # Run the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
 test-wasm:
@@ -78,7 +98,8 @@ test-wasm:
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
 bench *args:
-    cargo bench --workspace {{ args }}
+    cargo bench --workspace --no-run {{ args }}
+    just _locked cargo bench --workspace {{ args }}
 
 # Regenerate the golden files after a deliberate GENERATOR_VERSION bump.
 bless:
