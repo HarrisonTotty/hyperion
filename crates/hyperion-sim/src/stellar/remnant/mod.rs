@@ -20,6 +20,9 @@ pub use death::{Death, DeathKind, ProgenitorAtDeath, Stripping, SupernovaType};
 pub(crate) mod neutron_star;
 pub(crate) mod white_dwarf;
 
+// The Montreal cooling of white dwarfs under the default recipe (P06.T20.a, ruling 57.2).
+pub(crate) mod cooling;
+
 use crate::units::SolarMasses;
 
 /// Which prescription sets a remnant's mass and structure.

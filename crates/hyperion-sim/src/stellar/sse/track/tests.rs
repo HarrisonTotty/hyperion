@@ -344,7 +344,7 @@ fn light_helium_star_hand_over(options: TrackOptions) -> ([f64; 3], StarState) {
 /// Ruling 46: a helium star below 0.689 M☉ keeps its unburnt helium on its white dwarf, so under
 /// `Hurley2000`, as in SSE, its luminosity steps up at the hand-over by log₁₀(M ÷ Mc): the dwarf
 /// is heavier than the core the perturbation drew the star towards. Under
-/// the generator's recipe Hurley and Shara's law is matched to the star's last luminosity
+/// the generator's recipe the Montreal cooling law is matched to the star's last luminosity
 /// (P06.T20.a), and the step is gone.
 #[test]
 fn a_light_helium_stars_white_dwarf_steps_in_luminosity_only_under_hurley2000() {
@@ -390,10 +390,12 @@ fn a_white_dwarf_takes_over_at_its_stars_luminosity_and_then_fades() {
                 ln < l && tn < t,
                 "{m} M☉ at Z = {z}, step {i}: {ln} L☉, {tn} K"
             );
-            // No step: over a stride that is a small share of the age, a small change.
+            // No step: over a stride that is a small share of the age, a small change. The
+            // largest, 25% at 5 Gyr, is the 7 M☉ oxygen–neon dwarf's Debye plunge, which the
+            // Montreal cooling has from 10⁻⁵ to 10⁻⁷ L☉ in 0.6 Gyr (P06.T20.a, ruling 57.2).
             if i > 1 {
                 assert!(
-                    ln / l > 0.8,
+                    ln / l > 0.7,
                     "{m} M☉ at Z = {z}, step {i}: L from {l} to {ln}"
                 );
             }

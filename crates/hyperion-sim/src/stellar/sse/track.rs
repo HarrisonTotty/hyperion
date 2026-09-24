@@ -65,9 +65,9 @@
 //! Under the default, [`RemnantRecipe::MandelMuller2020`] (P06.T18.d), an iron core's collapse
 //! leaves the neutron star or black hole of Mandel and Müller (2020) that the star's remnant draws
 //! decide, a star inside the single-star electron-capture window leaves their 1.26 M☉ neutron star,
-//! and a white dwarf cools by Hurley and Shara's (2003) law (P06.T20.a). A neutron star cools by
-//! HPT's equation 93 under both until P06.T21 (ruling 33). A black hole's luminosity is exactly
-//! zero, so no consumer may take its logarithm unguarded (ruling 40). See `phases.rs`,
+//! and a white dwarf cools by the Montreal sequences' law (P06.T20.a, ruling 57.2). A neutron
+//! star cools by HPT's equation 93 under both until P06.T21 (ruling 33). A black hole's
+//! luminosity is exactly zero, so no consumer may take its logarithm unguarded (ruling 40). See `phases.rs`,
 //! `iron_core_fate`, for the collapse, and `model.rs` for the remnants' states.
 
 mod build;

@@ -4,3 +4,4 @@
 pub mod giant_cooling;
 pub mod mge;
 mod render;
+pub mod wd_cooling;

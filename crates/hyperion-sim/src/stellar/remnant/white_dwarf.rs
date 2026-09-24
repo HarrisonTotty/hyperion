@@ -5,18 +5,22 @@
 //! follows from that luminosity and the radius of its mass (P06.T11's
 //! `structure::white_dwarf_radius`, HPT's equation 91).
 //!
-//! - Under the generator's default, [`RemnantRecipe::MandelMuller2020`], the law is the
-//!   two-piece modified Mestel cooling of Hurley and Shara (2003, ApJ 589, 179, section 2)
-//!   ([`hurley_shara_luminosity`]).
+//! - Under the generator's default, [`RemnantRecipe::MandelMuller2020`], the law is the fit to
+//!   the Montreal evolutionary sequences of Bédard et al. (2020, ApJ 901, 93) in `cooling`
+//!   (ruling 57.2 of 2026-09-22), which replaced the two-piece modified Mestel cooling of Hurley
+//!   and Shara (2003, ApJ 589, 179, section 2) ([`hurley_shara_luminosity`]): that law ran 13–20%
+//!   cool in `T_eff` against the 0.6 M☉ sequence.
 //! - Under [`RemnantRecipe::Hurley2000`] it is the Mestel law of Hurley, Pols and Tout (2000,
 //!   MNRAS 315, 543, "HPT", section 6.2.1, equation 90) ([`hpt_luminosity`]), kept for good,
 //!   since P06.T12.b compares with the published SSE code (ruling 33 of 2026-09-22).
 //!
-//! The same law, at the instant of formation, is the white dwarf that HPT section 6.3's
-//! small-envelope perturbation draws a thinning giant towards ([`formation_luminosity`]), so that
-//! under either recipe the star and its white dwarf agree where one hands over to the other. Under
-//! the default the law's clock is also matched to the star's last luminosity, which removes what
-//! step the hand-over leaves ([`cooling_origin`]).
+//! The white dwarf that HPT section 6.3's small-envelope perturbation draws a thinning giant
+//! towards is a closed-form law at the instant of formation ([`formation_luminosity`]): equation 90
+//! under `Hurley2000` and Hurley and Shara's law under the default. The Montreal sequences cannot
+//! stand in there, since each starts where its model was started (0.2 L☉ at 0.2 M☉, 56 L☉ at
+//! 0.6 M☉), not at the dwarf's formation. Under the default the cooling law's clock is then matched
+//! to the star's last luminosity, so the luminosity is continuous at the hand-over whatever the
+//! perturbation's target ([`cooling_origin`]).
 //!
 //! The spectral types of P06.T20.b are `wd_spectral`'s.
 
@@ -24,7 +28,7 @@ use crate::math;
 use crate::stellar::Phase;
 use crate::units::{Megayears, MetalFraction, SolarLuminosities, SolarMasses, Years};
 
-use super::RemnantRecipe;
+use super::{RemnantRecipe, cooling};
 
 /// What a white dwarf is made of, which sets the effective baryon number A of its cooling law.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,40 +179,11 @@ pub(crate) fn hurley_shara_luminosity(
     })
 }
 
-/// The inverse of [`hurley_shara_luminosity`] in time: the point of the law at which a
-/// white dwarf of `mass` and `core` from a star of metal fraction `z` has `luminosity`, always
-/// above −0.1 Myr.
-///
-/// # Panics
-///
-/// In debug builds, if `mass` or `luminosity` is not positive and finite.
-#[must_use]
-fn hurley_shara_time_at(
-    core: WhiteDwarfCore,
-    mass: SolarMasses,
-    luminosity: SolarLuminosities,
-    z: MetalFraction,
-) -> Megayears {
-    debug_assert!(
-        mass.value() > 0.0 && luminosity.value() > 0.0 && luminosity.value().is_finite(),
-        "a white dwarf of {mass:?} at {luminosity:?}"
-    );
-    let a = core.baryon_number();
-    let ratio = HS_SCALE * mass.value() * math::powf(z.value(), 0.4) / luminosity.value();
-    let early = math::powf(ratio, 1.0 / HS_EARLY_EXPONENT) / a - CLOCK_OFFSET_MYR;
-    if early < HS_BREAK_MYR {
-        return Megayears::new(early);
-    }
-    let knee = a * (HS_BREAK_MYR + CLOCK_OFFSET_MYR);
-    let late = ratio * math::powf(knee, HS_KNEE_EXPONENT);
-    Megayears::new(math::powf(late, 1.0 / HS_LATE_EXPONENT) / a - CLOCK_OFFSET_MYR)
-}
-
 /// The luminosity of a white dwarf of `mass` and `core`, from a star of metal fraction `z`, at
 /// `cooling_age` after its formation, under `recipe`, whose law's clock starts at `origin`
-/// ([`cooling_origin`]): Hurley and Shara's law at `cooling_age` + `origin` under
-/// [`RemnantRecipe::MandelMuller2020`], and HPT's equation 90 under
-/// [`RemnantRecipe::Hurley2000`], which starts at zero whatever `origin` says.
+/// ([`cooling_origin`]): the Montreal law (`cooling::luminosity`) at `cooling_age` + `origin`
+/// under [`RemnantRecipe::MandelMuller2020`], which does not read `z`, and HPT's equation 90
+/// under [`RemnantRecipe::Hurley2000`], which starts at zero whatever `origin` says.
 ///
 /// # Panics
 ///
@@ -231,15 +206,18 @@ pub(crate) fn luminosity(
                 "a white dwarf's cooling age is not negative: {cooling_age:?}"
             );
             let law_time = Megayears::new(cooling_age.value() * 1e-6 + origin.value());
-            hurley_shara_luminosity(core, mass, law_time, z)
+            cooling::luminosity(core, mass, law_time)
         }
     }
 }
 
-/// The luminosity of a white dwarf of `mass` and `core` at the instant it forms, under `recipe`'s
-/// law with its clock at zero: what HPT section 6.3's small-envelope perturbation draws a thinning
-/// giant's luminosity towards (HPT use equation 90 at t = 0; the published SSE code the modified
-/// law at t = 0 when it cools by it, `hrdiag`, stellar types 3, 5 and 6 with `wdflag` > 0).
+/// The luminosity of a white dwarf of `mass` and `core` at the instant it forms: what HPT section
+/// 6.3's small-envelope perturbation draws a thinning giant's luminosity towards. HPT use equation
+/// 90 at t = 0, and so does [`RemnantRecipe::Hurley2000`]; the published SSE code uses Hurley and
+/// Shara's law at t = 0 when it cools by it (`hrdiag`, stellar types 3, 5 and 6 with `wdflag` >
+/// 0), and so does the default, whose cooling law, the Montreal fit, has no instant of formation
+/// (see the module's documentation). The cooling law is matched to where the perturbation leaves
+/// the star ([`cooling_origin`]).
 ///
 /// # Panics
 ///
@@ -251,39 +229,43 @@ pub(crate) fn formation_luminosity(
     mass: SolarMasses,
     z: MetalFraction,
 ) -> SolarLuminosities {
-    luminosity(recipe, core, mass, Years::ZERO, Megayears::ZERO, z)
+    match recipe {
+        RemnantRecipe::Hurley2000 => hpt_luminosity(core, mass, Years::ZERO, z),
+        RemnantRecipe::MandelMuller2020 => hurley_shara_luminosity(core, mass, Megayears::ZERO, z),
+    }
 }
 
 /// Where a white dwarf's cooling law starts under `recipe`, in the law's own clock: the point at which
-/// a white dwarf of `mass` and `core` from a star of metal fraction `z` has `last_luminosity`, the
+/// a white dwarf of `mass` and `core` has `last_luminosity`, the
 /// luminosity of the star's last living instant, so that the luminosity is continuous across the
 /// hand-over (plan 06, P06.T20.a: the law "is matched to" the luminosity it takes over from).
 ///
-/// Under [`RemnantRecipe::MandelMuller2020`] it is Hurley and Shara's law inverted at
-/// `last_luminosity`, above −0.1 Myr; zero where the star's last luminosity is unknown (`None`: a
+/// Under [`RemnantRecipe::MandelMuller2020`] it is the Montreal law inverted at
+/// `last_luminosity` (`cooling::time_at`), above −0.1 Myr, which does not read the metal
+/// fraction (`_z`, kept for the call's shape); zero where the star's last luminosity is unknown (`None`: a
 /// helium star too light to burn helium, which is a white dwarf at once). Under
 /// [`RemnantRecipe::Hurley2000`] it is zero, since HPT's law and the published SSE code start
 /// every white dwarf at t = 0, steps and all.
 ///
 /// Until P06.T16 the star hands over at the loss of its envelope, directly (T10.d), and the
-/// dwarf's cooling age counts from there. Carbon–oxygen dwarfs from the AGB then start within
-/// about 10⁻⁴ Myr of zero, because the perturbation has drawn the star's luminosity to the law's
-/// value at formation. What the match removes is the step where the dwarf is not the one the
-/// perturbation drew towards: about 0.06 dex for an oxygen–neon dwarf, whose nucleus is heavier
-/// than the perturbation's carbon–oxygen one, and 0.26–0.34 dex for a helium star below
-/// 0.689 M☉, whose dwarf keeps the unburnt helium (ruling 46 of 2026-09-22). Once P06.T16's
-/// post-AGB bridge lands, the match is to the bridge's end.
+/// dwarf's cooling age counts from there. The perturbation has drawn the star's luminosity to
+/// Hurley and Shara's value at formation ([`formation_luminosity`]), 23 L☉ for a 0.6 M☉
+/// carbon–oxygen dwarf, which the Montreal law reaches 0.18 Myr after its sequence's first
+/// model; the match puts the clock there, so there is no step: not the 0.06 dex an oxygen–neon
+/// dwarf would take, nor the 0.26–0.34 dex of a helium star below 0.689 M☉, whose dwarf keeps the
+/// unburnt helium (ruling 46 of 2026-09-22), nor any the Montreal law's own start would leave.
+/// Once P06.T16's post-AGB bridge lands, the match is to the bridge's end (ruling 46.2).
 #[must_use]
 pub(crate) fn cooling_origin(
     recipe: RemnantRecipe,
     core: WhiteDwarfCore,
     mass: SolarMasses,
     last_luminosity: Option<SolarLuminosities>,
-    z: MetalFraction,
+    _z: MetalFraction,
 ) -> Megayears {
     match (recipe, last_luminosity) {
         (RemnantRecipe::MandelMuller2020, Some(l)) if l.value() > 0.0 && l.value().is_finite() => {
-            hurley_shara_time_at(core, mass, l, z)
+            cooling::time_at(core, mass, l)
         }
         (RemnantRecipe::MandelMuller2020 | RemnantRecipe::Hurley2000, _) => Megayears::ZERO,
     }
@@ -334,17 +316,37 @@ mod tests {
             let l = at(myr);
             assert!((l / expected - 1.0).abs() < 1e-12, "{myr} Myr: {l}");
         }
-        // The default recipe reads it, Hurley2000 keeps equation 90.
+        // The default recipe's perturbation reads it at formation, and its cooling is the
+        // Montreal law's, at the cooling age plus the origin; Hurley2000 keeps equation 90.
+        let formation = formation_luminosity(
+            RemnantRecipe::MandelMuller2020,
+            WhiteDwarfCore::CarbonOxygen,
+            m,
+            z,
+        );
+        assert_same_bits(formation.value(), at(0.0));
         let age = Years::new(1e9);
         let default = luminosity(
             RemnantRecipe::MandelMuller2020,
             WhiteDwarfCore::CarbonOxygen,
             m,
             age,
-            Megayears::ZERO,
+            Megayears::new(0.3),
             z,
         );
-        assert!((default.value() / at(1_000.0) - 1.0).abs() < 1e-15);
+        let montreal =
+            cooling::luminosity(WhiteDwarfCore::CarbonOxygen, m, Megayears::new(1_000.3));
+        assert_same_bits(default.value(), montreal.value());
+        assert_same_bits(
+            formation_luminosity(
+                RemnantRecipe::Hurley2000,
+                WhiteDwarfCore::CarbonOxygen,
+                m,
+                z,
+            )
+            .value(),
+            hpt_luminosity(WhiteDwarfCore::CarbonOxygen, m, Years::ZERO, z).value(),
+        );
         let hpt = luminosity(
             RemnantRecipe::Hurley2000,
             WhiteDwarfCore::CarbonOxygen,
@@ -387,111 +389,56 @@ mod tests {
         }
     }
 
-    /// Inverting the law in time and applying it again returns the luminosity, on both pieces and
-    /// above the law's value at formation, where the clock starts before zero.
+    /// Under the default the origin is the Montreal law inverted at the star's last luminosity,
+    /// and applying the law there returns that luminosity: for the perturbation's target at
+    /// formation, which a 0.6 M☉ carbon–oxygen dwarf reaches 0.18 Myr into the law, and for a
+    /// giant's luminosity far above it, where the clock starts before zero. Under `Hurley2000`, and
+    /// where the last luminosity is unknown, it is zero.
     #[test]
-    fn the_cooling_origin_inverts_the_law() {
+    fn the_cooling_origin_matches_the_last_luminosity() {
         let z = MetalFraction::new(0.02);
-        let m = SolarMasses::new(0.7);
-        let core = WhiteDwarfCore::OxygenNeon;
-        for myr in [
-            -0.09, -0.01, 0.0, 0.3, 50.0, 8_999.0, 9_000.0, 9_500.0, 13_000.0,
+        let recipe = RemnantRecipe::MandelMuller2020;
+        for core in [
+            WhiteDwarfCore::Helium,
+            WhiteDwarfCore::CarbonOxygen,
+            WhiteDwarfCore::OxygenNeon,
         ] {
-            let l = hurley_shara_luminosity(core, m, Megayears::new(myr), z);
-            let origin =
-                cooling_origin(RemnantRecipe::MandelMuller2020, core, m, Some(l), z).value();
-            assert!(
-                (origin - myr).abs() < 1e-9 * (1.0 + myr.abs()),
-                "{myr}: {origin}"
-            );
+            for m in [0.3, 0.6, 1.2, 1.37] {
+                let mass = SolarMasses::new(m);
+                for l in [
+                    formation_luminosity(recipe, core, mass, z).value(),
+                    5e4,
+                    3.0,
+                    1e-4,
+                ] {
+                    let last = SolarLuminosities::new(l);
+                    let origin = cooling_origin(recipe, core, mass, Some(last), z);
+                    assert!(origin.value() > -0.1, "{core:?} {m} at {l}: {origin:?}");
+                    let first = luminosity(recipe, core, mass, Years::ZERO, origin, z).value();
+                    assert!(
+                        (first / l - 1.0).abs() < 1e-9,
+                        "{core:?} {m} M☉ from {l} L☉: {first} L☉ at the hand-over"
+                    );
+                }
+            }
         }
-        let bright = SolarLuminosities::new(5e4);
-        let origin = cooling_origin(RemnantRecipe::MandelMuller2020, core, m, Some(bright), z);
-        assert!(
-            origin.value() > -0.1 && origin.value() < -0.09,
-            "{origin:?}"
-        );
-        assert!((hurley_shara_luminosity(core, m, origin, z).value() / 5e4 - 1.0).abs() < 1e-9);
-        assert_same_bits(
-            cooling_origin(RemnantRecipe::Hurley2000, core, m, Some(bright), z).value(),
-            0.0,
-        );
-        assert_same_bits(
-            cooling_origin(RemnantRecipe::MandelMuller2020, core, m, None, z).value(),
-            0.0,
-        );
-    }
-
-    /// P06.T20.a's check against a published cooling sequence: the 0.6 M☉ carbon–oxygen sequence
-    /// with a thick hydrogen layer (`q_H` = 10⁻⁴) of Bédard et al. (2020, ApJ 901, 93), as the
-    /// Montreal group distributes it (`seq_060_thick.txt`,
-    /// <https://www.astro.umontreal.ca/~bergeron/CoolingModels/>, retrieved 2026-09-23), at the
-    /// model nearest each age from 0.01 to 10 Gyr, against Hurley and Shara's law at solar Z with
-    /// T11's radius (0.012 78 R☉), `T_eff` = 5,772 K (L ÷ L☉)^¼ (R ÷ R☉)^−½.
-    ///
-    /// **The plan's 10% is not met.** Hurley and Shara's law is within 10% only at 0.01–0.02 Gyr
-    /// and at 2–3 Gyr: it is up to 20% cool from 0.05 to 1 Gyr, where the model cools more slowly
-    /// than their fit to Hansen (1999), and 11–17% cool from 5 to 10 Gyr, where crystallisation's
-    /// latent heat and phase separation, which the Montreal models include, hold the dwarf warm.
-    /// HPT's equation 90 is 9–45% cool at every age. So the test pins the law as better than
-    /// equation 90 everywhere, and pins the measured deviations to half a percentage point, so that
-    /// any change to the law is seen here; the bracket is the orchestrator's to rule (plan 06's
-    /// Risks, T20.a).
-    #[test]
-    fn the_cooling_is_compared_with_bedard_et_al_2020() {
-        // (model, age in years, T_eff in K) from the sequence, and the deviation of Hurley and
-        // Shara's temperature from it, per cent, as measured.
-        const MODELS: [(u32, f64, f64, f64); 13] = [
-            (47, 10_144_770.0, 28_895.190_5, -0.89),
-            (56, 20_839_830.0, 24_288.427_3, -4.51),
-            (66, 50_198_350.0, 20_600.186_5, -13.06),
-            (75, 99_924_400.0, 17_883.196, -18.23),
-            (87, 201_932_700.0, 14_854.944_7, -20.00),
-            (118, 499_565_200.0, 10_935.176_4, -16.80),
-            (148, 1_001_402_000.0, 8_374.660_5, -11.51),
-            (171, 1_957_222_000.0, 6_490.504_1, -6.30),
-            (181, 3_074_970_000.0, 5_593.044_2, -4.83),
-            (188, 4_881_002_000.0, 5_221.204_8, -11.04),
-            (195, 6_901_942_000.0, 4_911.308, -14.62),
-            (206, 8_993_564_000.0, 4_345.017_7, -10.74),
-            (213, 9_985_524_000.0, 3_960.314_2, -17.26),
-        ];
-        let z = MetalFraction::new(0.02);
+        let co = WhiteDwarfCore::CarbonOxygen;
         let m = SolarMasses::new(0.6);
-        let radius = crate::stellar::remnant::structure::white_dwarf_radius(
-            RemnantRecipe::MandelMuller2020,
-            m,
+        let target = formation_luminosity(recipe, co, m, z);
+        let origin = cooling_origin(recipe, co, m, Some(target), z).value();
+        assert!(origin > 0.15 && origin < 0.2, "{origin} Myr");
+        let bright = SolarLuminosities::new(5e4);
+        assert!(cooling_origin(recipe, co, m, Some(bright), z).value() < 0.0);
+        assert_same_bits(
+            cooling_origin(RemnantRecipe::Hurley2000, co, m, Some(bright), z).value(),
+            0.0,
         );
-        let teff = |l: SolarLuminosities| {
-            crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K * math::powf(l.value(), 0.25)
-                / radius.value().sqrt()
-        };
-        for (model, age, published, deviation) in MODELS {
-            let age = Years::new(age);
-            let ours = teff(luminosity(
-                RemnantRecipe::MandelMuller2020,
-                WhiteDwarfCore::CarbonOxygen,
-                m,
-                age,
-                Megayears::ZERO,
-                z,
-            ));
-            let hpt = teff(hpt_luminosity(WhiteDwarfCore::CarbonOxygen, m, age, z));
-            let off = 100.0 * (ours / published - 1.0);
-            assert!(
-                (ours - published).abs() < (hpt - published).abs(),
-                "model {model}: {ours} K and equation 90's {hpt} K against {published} K"
-            );
-            assert!(
-                (off - deviation).abs() < 0.5,
-                "model {model}: {off:.2}% against the recorded {deviation}%"
-            );
-        }
+        assert_same_bits(cooling_origin(recipe, co, m, None, z).value(), 0.0);
     }
 
-    /// Pins both cooling laws and the cooling origin bit for bit, for the three compositions at
-    /// three masses and ages on both of Hurley and Shara's pieces, so that any change to their
-    /// arithmetic is seen.
+    /// Pins the three cooling laws and the cooling origin bit for bit, for the three compositions
+    /// at three masses and ages on both of Hurley and Shara's pieces and across the Montreal
+    /// table, so that any change to their arithmetic is seen.
     #[test]
     fn the_cooling_laws_are_pinned() {
         let mut w = hyperion_testkit::golden::GoldenWriter::new();
@@ -515,6 +462,10 @@ mod tests {
                 for myr in [0.0, 100.0, 12_000.0] {
                     let l = hpt_luminosity(core, mass, Years::new(myr * 1e6), z);
                     w.f64(&format!("  HPT at {myr} Myr"), l.value());
+                }
+                for myr in [-0.05, 0.0, 1.0, 100.0, 1_000.0, 5_000.0, 12_000.0] {
+                    let l = cooling::luminosity(core, mass, Megayears::new(myr));
+                    w.f64(&format!("  Montreal at {myr} Myr"), l.value());
                 }
             }
         }

@@ -390,7 +390,7 @@ fn perturb_to_white_dwarf(
 
 /// A remnant of `phase` and `mass`, `years_since_birth` after its formation (a negative span
 /// reads as zero): a white dwarf cools by the
-/// recipe's law from `origin` of its clock (Hurley and Shara 2003 under the default, HPT's equation
+/// recipe's law from `origin` of its clock (the Montreal fit under the default, HPT's equation
 /// 90 under `Hurley2000`; P06.T20.a), a neutron star by equation 93, and a black hole is dark
 /// (HPT's 10⁻¹⁰ L☉ of equation 96 guards a division, not a physical luminosity; P06.T22). The
 /// radii are those of the track's remnant recipe (P06.T11). `NoRemnant` has neither.

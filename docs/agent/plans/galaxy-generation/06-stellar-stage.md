@@ -1057,14 +1057,16 @@ nothing of plans 02 or 03.
 
 #### P06.T20 White dwarfs: cooling and spectral types
 
-- **P06.T20.a Cooling.** Luminosity from cooling age by the two-piece modified Mestel law of Hurley
-  and Shara (2003, ApJ 589, 179), which depends on mass and core composition (He, CO, ONe); T_eff
-  from L and the radius of T11. The cooling age counts from the end of the post-AGB bridge, whose
-  end luminosity the law is matched to; T16.a, which hands over to this law and so lands after it,
-  moves the origin there from T10.d's direct hand-over at envelope loss. Check against one published
-  cooling sequence for 0.6 M☉ CO
-  (the task chooses and cites; Bédard et al. 2020 is a candidate): T_eff within 10% from 0.01 to 10
-  Gyr.
+- **P06.T20.a Cooling.** Luminosity from cooling age, by mass and core composition (He, CO, ONe),
+  under the modern recipe by a fit to the Montreal evolutionary sequences of Bédard et al. (2020,
+  ApJ 901, 93), through `hyperion-fit run wd_cooling` into `tables/wd_cooling.rs` (ruling 57.2;
+  first built as the two-piece modified Mestel law of Hurley and Shara 2003, ApJ 589, 179, which
+  failed the check below and is kept as the §6.3 perturbation's target). `Hurley2000` keeps HPT's
+  equation 90. T_eff from L and the radius of T11. The cooling age counts from the end of the
+  post-AGB bridge, whose end luminosity the law is matched to; T16.a, which hands over to this law
+  and so lands after it, moves the origin there from T10.d's direct hand-over at envelope loss.
+  Check against the 0.6 M☉ CO thick-hydrogen sequence of Bédard et al. (2020), at models held out
+  of the fit: T_eff within 10% from 0.01 to 10 Gyr; and continuity in mass across the fitted range.
 - **P06.T20.b Spectral type** by fixed draws against thresholds that move with temperature, the
   pattern the brainstorm's determinism section prescribes. `u_atm` (`star.wd.atmosphere`) against
   the helium-atmosphere fraction f_He(T_eff): low near the DB gap (30,000–45,000 K), about 10% at
@@ -2743,3 +2745,82 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     There are unit tests for the conversion and the cache. `websocket.rs`'s "unsupported until its
     handler lands" test, and `Handlers`' `not_served_yet`, are removed. The server's
     `galaxy_parameters` and `systems_in_range` goldens are unchanged.
+- **T20.a refitted to the Montreal sequences, as built (round 8, `wdcool`; ruling 57.2).** Under
+  the modern recipe a white dwarf now cools by `stellar::remnant::cooling`, which reads
+  `tables/wd_cooling.rs`, the output of `hyperion-fit run wd_cooling` (task version 0).
+  - _Data and licence._ The input is the 23 thick-hydrogen (DA) sequences of Bédard, Bergeron,
+    Brassard and Fontaine (2020, ApJ 901, 93), 0.2–1.3 M☉ in steps of 0.05, from
+    <https://www.astro.umontreal.ca/~bergeron/CoolingModels/>, retrieved 2026-09-24. The page states
+    no licence. It asks users of its tables to acknowledge the site and cite the papers, and the
+    table's header does both. The raw files are therefore **not committed**. The fit reads them from
+    `target/data/montreal_cooling/` (or `--data`), and the header records their FNV-1a digest,
+    `0x632cda247f9d4def`. `hyperion-fit`'s reproduction test and residual test run only where the
+    files are present, and say so on stderr otherwise. The sim's own tests quote the held-out models
+    they check, as T20.a's first check quoted thirteen.
+  - _The fit._ For each sequence, the table holds log₁₀(t + 0.1 Myr) at 96 luminosities evenly
+    spaced over log₁₀ L = −7.5 to 2.5. That is the age as a function of the luminosity, which stays
+    gentle through a crystallised dwarf's Debye plunge, where L(t) does not. The values are least
+    squares for linear interpolation in log L, with a 10⁻⁶ curvature penalty. Every model whose
+    number is a multiple of 5 is held out. Past a sequence's brighter end the column goes on
+    straight. Past its fainter end, about 1,500 K, it follows Mestel's L ∝ t^−1.4. Carried on at
+    the last models' slope, a 1.3 M☉ dwarf would have been 46 dex fainter at 10 Gyr. A dwarf in the
+    Debye regime really fades faster than Mestel's law, so the extension bounds L from above. Between
+    sequences, the clock is linear in mass at fixed log L, and L(t) is that column inverted. Every
+    column falls strictly, so the inverse exists and L falls with age at every mass. **Residuals**
+    in log L at the models' ages: the 4,221 fitted models are within 0.009 dex (rms 0.0010); the
+    1,046 held-out models are within 0.028 dex (rms 0.0020), the worst being 1.05 M☉'s last model,
+    at 11.4 Gyr, in the Mestel extension.
+  - _The 0.6 M☉ check_ runs at all 35 held-out models of `seq_060_thick.txt` from 8.8 Myr to
+    10.2 Gyr, with T11's radius. T_eff is within 10% everywhere and within 5.5% at the worst,
+    +5.4% at 8.8 Myr. All of that is the radius: the young model is 1.11 times T11's cold radius,
+    and L is within 0.01 dex. The error is under 2.2% past 0.5 Gyr. Hurley and Shara's law was
+    −20% at worst. Luminosities at held-out models of 0.2, 0.45, 0.9 and 1.3 M☉ are within 0.02 dex.
+  - _Continuity in mass._ At 1 Myr–3 Gyr no step of 0.001 M☉ moves L by 0.015 dex. At 10 Gyr the
+    steps reach 0.12 dex, smoothly, between 1.10 and 1.15 M☉, where one sequence is still plunging
+    and the next has ended, below 2,000 K. Over 10⁻⁷ M☉ no step exceeds 10⁻⁴ dex, and L meets each
+    sequence at its mass. Interpolation itself was checked by holding whole sequences out, 0.1 M☉
+    apart, which is twice the table's spacing. Above 3,000 K it is within 0.05 dex from 0.45 to
+    0.95 M☉. It is off by 0.07–0.19 dex below 0.45 M☉ at 10–50 Myr, where the sequences start at
+    different luminosities, by 0.08–0.11 dex at 1.0–1.1 M☉, and by 0.3–1.8 dex at 1.15–1.25 M☉ in
+    the Debye plunge.
+  - _Where Montreal has no sequence._ **For the orchestrator to rule.**
+    - Helium and oxygen–neon cores read the carbon–oxygen table at their law time × A ÷ A_CO,
+      Mestel's heat-capacity scaling (Mestel 1952; the A of HPT §6.2.1 and HS03 §2). A is 4 for
+      helium, 16.67 for HS03's 80:20 O:Ne by mass, and 13.71 for Montreal's 50:50 C:O (the harmonic
+      mean, since the ions count). A helium dwarf therefore takes 3.4 times as long as a
+      carbon–oxygen one to reach a given L, and an oxygen–neon one 0.82 times as long. Both factors
+      come from the scaling alone. Detailed models agree in direction only: Althaus et al. (2013,
+      A&A 557, A19) for helium, mostly by residual hydrogen burning, and Camisassa et al. (2022,
+      MNRAS 511, 5198) for carbon–oxygen against oxygen–neon. Their sequences would do better, if
+      their terms allow.
+    - Masses outside 0.2–1.3 M☉ read the nearest sequence, which covers oxygen–neon dwarfs up to
+      the 1.37 M☉ cap.
+    - The law no longer reads Z. HS03's Z^0.4 was a fit, and the sequences take no progenitor
+      metallicity. They omit its small real effects: residual hydrogen burning at low Z (Renedo et
+      al. 2010) and ²²Ne sedimentation (Camisassa et al. 2016). So metal-poor dwarfs moved most: at Z = 0.001, +0.73 dex at 1 Gyr for a 1 M☉
+      star's dwarf.
+  - _The perturbation's target stays Hurley and Shara's law at t = 0._ **For the orchestrator to
+    rule.** This is `formation_luminosity`, 23 L☉ for 0.6 M☉. The Montreal sequences start where
+    their models were started (0.2 L☉ at 0.2 M☉, 56 L☉ at 0.6 M☉), not at formation, so they
+    cannot stand in. Every track is therefore unchanged up to its death. `cooling_origin` inverts
+    the new law at the star's last luminosity: a 0.6 M☉ dwarf starts 0.18 Myr into the law, and a
+    brighter hand-over starts before zero, above −0.1 Myr. **Ruling 46.2 holds.**
+    `a_white_dwarf_takes_over_at_its_stars_luminosity_and_then_fades` (1, 2, 3 M☉ CO, 7 M☉ ONe)
+    and the light helium star's test still show under 10⁻⁶ dex at the hand-over. The origin test
+    covers all three cores at 0.3–1.37 M☉ and from 10⁻⁴ to 5 × 10⁴ L☉, to 10⁻⁹.
+  - _Outside the owned files._ `track/tests.rs` is `speed`'s. The fading test's per-stride floor
+    goes from 0.8 to 0.7, with a comment. The 7 M☉ oxygen–neon dwarf's Debye plunge drops 25% in
+    one stride at 5 Gyr, from 10⁻⁵ to 10⁻⁷ L☉ in 0.6 Gyr, as the 1.3 M☉ sequence does. Three doc
+    comments in `track.rs`, `track/model.rs` and `track/tests.rs` now name the Montreal law. No
+    code in `track/` changed: `luminosity`, `formation_luminosity` and `cooling_origin` keep their
+    signatures, and `cooling_origin`'s `z` is `_z`, unread.
+  - _Goldens (at 11; the orchestrator bumps to 12)._ Three moved, and only white dwarfs' values
+    in them.
+    - `stellar/white_dwarf_cooling`: 72 origins now invert the new law, and 63 `Montreal at`
+      lines are new. The Hurley and Shara and HPT lines are unchanged.
+    - `stellar/endings`: 32 values, the luminosity at +1 Myr and +1 Gyr of every white dwarf. At
+      1 Gyr each is brighter by 0.17–0.90 dex. At 1 Myr the dwarfs of 1.0–1.37 M☉ are 0.15–0.67 dex
+      fainter, and the lighter ones 0.29–0.70 dex brighter. Masses and deaths are unchanged.
+    - `stellar/summaries`: the three white dwarfs' L, T_eff and B − V at their three times, and
+      their Sion types (DA5.3 to DA4.5, DA8.2 to DA7.9, and DC11.0 to DA9.9, since the atmosphere
+      draw's threshold moves with T_eff). Their masses, radii and ages are unchanged.
