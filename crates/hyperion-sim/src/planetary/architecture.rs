@@ -20,10 +20,10 @@
 //! | Class | What it holds | The observation behind it |
 //! | ----- | ------------- | ------------------------- |
 //! | [`Barren`](ArchitectureClass::Barren) | No body above 0.02 M⊕; belts allowed | Stars with no detected planets, and disc failures. Indistinguishable from `TerrestrialOnly` in every survey, so the split between them is a judgement (plan 14, Risks) |
-//! | [`TerrestrialOnly`](ArchitectureClass::TerrestrialOnly) | 2–6 rocky planets of 0.05–2 M⊕ from 0.2–0.5 au × √L to the snow line; 0–3 ice-rich bodies of 0.02–5 M⊕ beyond it | The population below survey limits. Buchhave et al. (2012, Nature 486, 375, abstract): planets under 4 R⊕ form around hosts with a wide range of metallicities, so small planets need no enhanced metallicity |
+//! | [`TerrestrialOnly`](ArchitectureClass::TerrestrialOnly) | Rocky planets of 0.05–2 M⊕ from 0.2–0.5 au × √L to the snow line, as many as the spacing fits there (at most 10; plan 14 had 2–6); 0–3 ice-rich bodies of 0.02–5 M⊕ beyond it | The population below survey limits. Buchhave et al. (2012, Nature 486, 375, abstract): planets under 4 R⊕ form around hosts with a wide range of metallicities, so small planets need no enhanced metallicity |
 //! | [`CompactMulti`](ArchitectureClass::CompactMulti) | A chain of 1–20 M⊕ planets whose first period follows Mulders et al.'s broken power law about 12 days (1–50 days), cold with a zero-truncated Poisson count (mean 3.5 at 1 M☉, 6.1 for M dwarfs, at most 10); in 40% of systems the dynamically hot variant, 1–2 planets with larger e and i | Kepler's multis. Weiss et al. (2018, AJ 155, 48): adjacent planets alike in size and regularly spaced. Pu and Wu (2015, ApJ 807, 44): spacing near the stability limit. Mulders et al. (2018, AJ 156, 24, Table 2): innermost planets at 12 (+3 −2) days, 38 ± 8% of systems isotropic (the Kepler dichotomy), 10 planets per system. Ballard and Johnson (2016, ApJ 816, 66, abstract): an M dwarf's coplanar system holds 6.1 ± 1.9 planets |
 //! | [`CompactWithColdGiant`](ArchitectureClass::CompactWithColdGiant) | A `CompactMulti` chain plus 1–2 giants of 0.3–10 M♃ at 1–3 snow-line radii, with Kipping's Betas by period | Zhu and Wu (2018, AJ 156, 92, §4): 32 ± 8% of super-Earth hosts have a cold Jupiter, and 90 ± 20% of cold-Jupiter hosts have super-Earths. Bryan et al. (2019, AJ 157, 52, abstract): 39 ± 7% have a 0.5–20 M♃ companion at 1–20 au |
-//! | [`SolarLike`](ArchitectureClass::SolarLike) | 2–6 rocky planets, 1–3 low-eccentricity giants from 1–2 snow-line radii, 0–2 ice giants of 10–30 M⊕ beyond them, and both belts | Solar System analogues: cold Jupiters with no super-Earths, which Zhu and Wu (2018, eq. 2) put at about 1% of stars. Jupiter analogues themselves, 6.2 (+2.8 −1.6)% at 3–7 au (Wittenmyer et al. 2016, ApJ 819, 28, abstract), come mostly from `CompactWithColdGiant` |
+//! | [`SolarLike`](ArchitectureClass::SolarLike) | Rocky planets as `TerrestrialOnly`'s up to the giants' chaotic zones, 1–3 low-eccentricity giants from 1–2 snow-line radii, 0–2 ice giants of 10–30 M⊕ beyond them, and both belts | Solar System analogues: cold Jupiters with no super-Earths, which Zhu and Wu (2018, eq. 2) put at about 1% of stars. Jupiter analogues themselves, 6.2 (+2.8 −1.6)% at 3–7 au (Wittenmyer et al. 2016, ApJ 819, 28, abstract), come mostly from `CompactWithColdGiant` |
 //! | [`EccentricGiant`](ArchitectureClass::EccentricGiant) | 1–2 giants at 0.5–5 au × √L, scattered in from beyond the snow line, with eccentricities from Kipping's Beta(0.867, 3.03); 0–1 small survivor | The radial-velocity giants, and planet–planet scattering. Kipping (2013, MNRAS 434, L51, abstract): the eccentricities of 396 radial-velocity planets |
 //! | [`WarmGiant`](ArchitectureClass::WarmGiant) | A giant at 10–200 days with moderate e (Kipping's Betas by period); in half of systems 1–2 small companions flanking it | Disc migration, as plan 14 reads it. Huang, Wu and Triaud (2016, ApJ 825, 98, abstract): half of warm Jupiters (10–200 days) are closely flanked by small planets, and those, they propose, formed in situ |
 //! | [`HotJupiter`](ArchitectureClass::HotJupiter) | A giant at 1–10 days, log-normal about 3.5 days; nothing else inside 100 days; in 60% of systems an outer giant of 1–10 M♃ at 2–8 snow-line radii | Wright et al. (2012, ApJ 753, 160) and Howard et al. (2012, ApJS 201, 15) for the rate; the pile-up near 3 days (Cumming et al. 2008, PASP 120, 531, §3.3.2 and Fig. 12). Huang et al. (2016): no companion inside 50 days (the 100 days is plan 14's). Bryan et al. (2016, ApJ 821, 89, abstract): 52 ± 5% of giant hosts have a 1–20 M♃ companion at 5–20 au, hot giants more often |
@@ -48,7 +48,7 @@
 //! | ----- | -- | ------------ | ------------------- |
 //! | `Barren` | 0.24 | 1 | 1, plus the weight the other classes lose in the halo |
 //! | `TerrestrialOnly` | 0.35 | 1 | s(\[Fe/H\]) |
-//! | `CompactMulti` | 0.21 | (M ÷ M☉)^−1.5 | s(\[Fe/H\]) |
+//! | `CompactMulti` | 0.21 | (M ÷ M☉)^−3.0 | s(\[Fe/H\]) |
 //! | `CompactWithColdGiant` | 0.1701 (0.10 × 1.701) | g(M) | z(\[Fe/H\]) |
 //! | `SolarLike` | 0.01701 (0.01 × 1.701) | g(M) | z(\[Fe/H\]) |
 //! | `EccentricGiant` | 0.06804 (0.04 × 1.701) | g(M) | z(\[Fe/H\]) |
@@ -71,17 +71,17 @@
 //!   P14.T7's masses decide: between Zhu et al.'s 30 ± 3% and 0.9, and Yang, Xie and Zhou's
 //!   (2020, AJ 159, 164, abstract) 73 ± 13% or Mulders et al.'s (2018, AJ 156, 24, abstract) "at
 //!   least 42%" (ruling 48, point f).
-//! - `CompactMulti`'s (M ÷ M☉)^−1.5: chosen, with the M-dwarf multiplicity of [`template`]'s
-//!   chains, to move a 0.48 M☉ host, Dressing and Charbonneau's (2015, ApJ 807, 45, §2) median
-//!   (0.47 R☉), towards their 2.5 ± 0.2 small planets per M dwarf (1–4 R⊕, under 200 days;
-//!   abstract): 2.4 if every chain planet lay inside 200 days, about 1.9 when, at P14.T6.b's
-//!   spacing, about 30% of an M dwarf's chain lies beyond, against 1.5 with plan 14's −0.9. The
-//!   compact classes then hold 2.7 times as many planets per star at 0.35 M☉ as at 0.9 M☉, 0.82
-//!   times as many at 1.1 M☉, and 3.3 times as many at 0.35 M☉ as at 1.1 M☉, against Mulders,
-//!   Pascucci and Apai's (2015, ApJ 798, 112, abstract and Table 1, whose M, G and F bins have
-//!   median masses of 0.35, 0.9 and 1.1 M☉) planets around M stars "twice as frequently as around
-//!   G stars, and thrice as frequently as around F stars", and their (2015, ApJ 814, 130,
-//!   abstract) 3.5 times more 1.0–2.8 R⊕ planets around M dwarfs than around FGK stars.
+//! - `CompactMulti`'s (M ÷ M☉)^−3.0: re-fitted by ruling 60 on P14.T10.b's placed M dwarfs (plan
+//!   14 had −0.9, P14.T4 −1.5, which placed gave 0.98 small planets per M dwarf), to Dressing and
+//!   Charbonneau's (2015, ApJ 807, 45, abstract) 2.5 ± 0.2 small planets per M dwarf (1–4 R⊕,
+//!   under 200 days), hosts of median 0.47 R☉ (§2): placed primaries of 0.35–0.6 M☉ with their
+//!   companions have 1.90, inside T10.b's 1.8–3.2, together with P14.T7's host-scaled masses and
+//!   Class 0 budget; −2.5 gave 1.75. Planets of 1–8 M⊕ (about 1–2.8 R⊕) at 2–50 days are then 2.4
+//!   times as common about those M dwarfs as about FGK stars, between Mulders, Pascucci and Apai's
+//!   (2015, ApJ 798, 112, abstract) "twice as frequently as around G stars, and thrice as
+//!   frequently as around F stars" and their (2015, ApJ 814, 130, abstract) 3.5 times more
+//!   1.0–2.8 R⊕ planets. The weight is 1 at 1 M☉, so no Sun-like anchor moves; a 0.3 M☉ host is
+//!   93% compact and a 0.1 M☉ host over 99%.
 //! - The giant classes' w₀ (ruling 48, point c): plan 14's 0.10, 0.01, 0.04 and 0.02, in their
 //!   ratios, times 1.701, and `HotJupiter`'s 0.0127, set together over the solar-disc sample of
 //!   this module's tests (83.4% of whose discs have the solids for a giant, and 71.1% grow its core
@@ -125,8 +125,9 @@
 //!   "regardless of metallicity" over −0.4 to +0.4). It is flat only below 1.7 R⊕: Petigura et
 //!   al.'s warm sub-Neptunes (1.7–4.0 R⊕) double over the same range, and Buchhave et al. (2014,
 //!   Nature 509, 593, abstract) find three metallicity regimes, divided at 1.7 and 3.9 R⊕. The
-//!   class frequency stays flat, and that trend is left to P14.T7, whose masses scale with the
-//!   disc's solids and so with 10^\[Fe/H\]. The knee at −1.5 is plan 14's, from the brainstorm's
+//!   class frequency stays flat. P14.T7 no longer carries that trend in the masses: Zhu (2019,
+//!   ApJ 873, 8, §2) finds the hosts of 1–2 and 2–4 R⊕ planets of "statistically the same"
+//!   metallicity (ruling 60). The knee at −1.5 is plan 14's, from the brainstorm's
 //!   halo; no survey measures it.
 //! - The halo: what s and z take from the other classes goes to `Barren`, so that thinning the
 //!   small planets in the halo does not raise every other class's share by normalisation.
@@ -152,7 +153,7 @@
 //! | Hot Jupiters (Wright et al. 2012, ApJ 753, 160; Howard et al. 2012, ApJS 201, 15) | 1.2 ± 0.38% of FGK dwarfs (Wright, abstract); 0.004 ± 0.001 per star for P < 10 days and 8–32 R⊕, 0.005 ± 0.001 to Kp < 16 (Howard, §3.2 and Table 4) | Yes, full text | 0.82% at 1 M☉ (1.15% in the table before the fallbacks) |
 //! | Zhu et al. (2018, ApJ 860, 101) | "the fraction of Sun-like stars with Kepler-like planets ... is 30 ± 3%", with 3.0 ± 0.3 planets within 400 days per system and about 0.9 per star (abstract). Yang, Xie and Zhou (2020, AJ 159, 164, abstract and §5.1) find 73 ± 13% and 2.3 ± 0.4 with DR25 and efficiency corrections | Yes, full text | 35.7% at 1 M☉, 2.7 planets per system, 0.97 per star from the compact classes; roughly 40–50% and 1.2 counting `TerrestrialOnly`'s Earth-mass planets |
 //! | Zhu and Wu (2018, AJ 156, 92) | P(CJ ∣ SE) = 32 ± 8%, rising to 60% or more for \[Fe/H\] > 0.1; P(SE ∣ CJ) = 90 ± 20%; cold Jupiters without super-Earths ∼1% of stars (abstract, eq. 2, §4) | Yes, full text | P(CJ ∣ SE) 30.7% at 1 M☉, and 67% at +0.2 before the fallbacks; P(SE ∣ CJ) about 75%, and about 4% of stars with a cold Jupiter and no super-Earth |
-//! | Dressing and Charbonneau (2015, ApJ 807, 45) | "2.5 ± 0.2 planets per M dwarf with radii 1–4 R⊕ and periods shorter than 200 days" (abstract), hosts under 4,000 K, median 3,746 K and 0.47 R☉ (§2) | Yes, full text | At 0.48 M☉, 2.4 counting every compact planet and a fifth of the rocky ones; about 1.9 inside 200 days at P14.T6.b's spacing (an estimate until P14.T8 places them) |
+//! | Dressing and Charbonneau (2015, ApJ 807, 45) | "2.5 ± 0.2 planets per M dwarf with radii 1–4 R⊕ and periods shorter than 200 days" (abstract), hosts under 4,000 K, median 3,746 K and 0.47 R☉ (§2) | Yes, full text | Placed (ruling 60), 1.90 about primaries of 0.35–0.6 M☉ with their companions (P14.T10.b) |
 //! | Giants around about 3% of M dwarfs | Johnson et al. (2010, abstract): "3% around M dwarfs (0.5 M☉)" inside 2.5 au; Cumming et al. (2008, §3.4): 1.0%; Bonfils et al. (2013, A&A 549, A109, abstract): ≲1% at 1–10 days and 2 (+3 −1)% at 10–100 days; Montet et al. (2014, ApJ 781, 28, abstract): 6.5 ± 3.0% for 1–13 M♃ within 20 au | Yes, full text | 2.3% at 0.3 M☉, where half the discs cannot form a giant (the median disc has just under 10 M⊕ of solids beyond its snow line), and 7.2% at 0.5 M☉, about 5.6% inside Johnson et al.'s window; 4.6% and 11.3% in the table before the fallbacks |
 //! | Johnson et al. (2010, PASP 122, 905) | f(M★, \[Fe/H\]) = 0.07 ± 0.01 (M★ ÷ M☉)^(1.0 ± 0.3) 10^((1.2 ± 0.2) \[Fe/H\]), for K > 20 m s⁻¹ and a < 2.5 au, over 0.2–1.9 M☉ (eq. 8, Table 1) | Yes, full text | g(M) = M ÷ M☉ to 1.9 M☉. Their metallicity exponent is 1.2, and 1.7 ± 0.3 on Fischer and Valenti's stars alone (§6.1); the brainstorm keeps 2 |
 //! | Reffert et al. (2015, A&A 574, A116) | A Gaussian in mass with µ = 1.9 (+0.1 −0.5) M☉ and σ = 0.5 (+0.5 −0.2) M☉, half its peak at 1.2 and 2.6 M☉; no planet above 2.7 M☉, under 1.6% for 2.7–5 M☉ (abstract, eq. 3, §5) | Yes, full text | g falls with σ = 0.5 M☉ above 1.9 M☉ (plan 14 had 0.8) |
@@ -179,9 +180,9 @@
 //!   which have super-Earths (Zhu and Wu: 90 ± 20% of cold-Jupiter hosts do) and so belong to
 //!   `CompactWithColdGiant`; Zhu and Wu's ∼1% of cold Jupiters without super-Earths bounds what is
 //!   left, which the eccentric and outer giants already fill.
-//! - `CompactMulti`'s mass exponent −0.9 → −1.5: with −0.9 and the draft's counts the table gave
-//!   1.4 small planets per M dwarf against Dressing and Charbonneau's 2.5 ± 0.2, counting every
-//!   chain planet.
+//! - `CompactMulti`'s mass exponent −0.9 → −1.5 → −3.0: with −0.9 and the draft's counts the
+//!   table gave 1.4 small planets per M dwarf against Dressing and Charbonneau's 2.5 ± 0.2,
+//!   counting every chain planet, and placed, −1.5 gave 0.98 (ruling 60).
 //! - Reffert et al.'s width 0.8 → 0.5 M☉: their σ is 0.5 (+0.5 −0.2) M☉; 0.8 kept 60% of the peak
 //!   at 2.7 M☉, where they find no planets.
 //! - Below \[Fe/H\] = −0.5 the giant weight is thinned by s and not only held: held, it made giants
@@ -379,12 +380,13 @@ pub const SMALL_PLANET_METALLICITY_KNEE: Dex = Dex::new(-1.5);
 /// 10^(2 \[Fe/H\]) far below the knee, as the giants' law does above −0.5 (plan 14).
 pub const SMALL_PLANET_METALLICITY_SLOPE: f64 = 2.0;
 
-/// `CompactMulti`'s mass exponent: (M ÷ M☉)^−1.5.
+/// `CompactMulti`'s mass exponent: (M ÷ M☉)^−3.0.
 ///
-/// Chosen, with the M-dwarf multiplicity of [`template`]'s chains, to give 2.4 small planets per
-/// host of 0.48 M☉ against Dressing and Charbonneau's (2015, ApJ 807, 45, abstract) 2.5 ± 0.2 per
-/// M dwarf; see the [module documentation](self).
-pub const COMPACT_MASS_EXPONENT: f64 = -1.5;
+/// Re-fitted by ruling 60 on P14.T10.b's placed M dwarfs, as ruling 48 (b) and (e) asked, to
+/// Dressing and Charbonneau's (2015, ApJ 807, 45, abstract) 2.5 ± 0.2 small planets per M dwarf
+/// inside 200 days, the T10.b window 1.8–3.2; see the [module documentation](self). Plan 14 had
+/// −0.9 and P14.T4 −1.5.
+pub const COMPACT_MASS_EXPONENT: f64 = -3.0;
 
 /// The factor by which the giant classes' w₀ are raised over plan 14's draft (0.10, 0.01, 0.04 and
 /// 0.02 for `CompactWithColdGiant`, `SolarLike`, `EccentricGiant` and `WarmGiant`), so that the
@@ -1199,8 +1201,9 @@ mod tests {
     }
 
     /// P14.T4.c: at 0.3 M☉ the giants under 0.05 and the compact classes over 0.45; at 1 M☉ the
-    /// compact classes 0.27–0.35. As built, in the table before design note 5's fallbacks: 0.046
-    /// and 0.68; at 1 M☉ giants 0.274 and compact 0.345. The plan's 0.14–0.20 for giants at 1 M☉
+    /// compact classes 0.27–0.35. As built, in the table before design note 5's fallbacks: 0.011
+    /// and 0.926 (with ruling 60's compact exponent of −3.0); at 1 M☉ giants 0.274 and compact
+    /// 0.345. The plan's 0.14–0.20 for giants at 1 M☉
     /// is an observed rate, so it holds after the fallbacks, where the giants are 0.195
     /// (`the_anchors_hold_after_the_disc_fallback`, rulings 48 and 55.3).
     #[test]
@@ -1212,8 +1215,8 @@ mod tests {
             "{}",
             m_dwarf.compact_share()
         );
-        assert!((0.045..0.047).contains(&m_dwarf.giant_share()));
-        assert!((0.67..0.69).contains(&m_dwarf.compact_share()));
+        assert!((0.010..0.012).contains(&m_dwarf.giant_share()));
+        assert!((0.92..0.93).contains(&m_dwarf.compact_share()));
         let sun = probabilities(1.0, 0.0);
         assert!((0.27..=0.35).contains(&sun.compact_share()));
         assert!((0.27..0.28).contains(&sun.giant_share()));

@@ -503,15 +503,17 @@ fn a_companion_s_light_pushes_a_star_s_habitable_zone_out() {
 /// orbit of a host by M₀ ÷ M, the gaps with them, so in that frame the spacing checked at
 /// placement holds at every time. About the host's mass at the time a Hill radius grows by a
 /// further (M₀ ÷ M)^⅓, and a pair spaced near the floor about a star that has since become a white
-/// dwarf is no longer Hill-stable (Debes and Sigurdsson 2002): 15 of this sample's 3,945 checks
-/// of a pair at a time, all about hosts that have lost mass. The slice does not model that
-/// instability.
+/// dwarf is no longer Hill-stable (Debes and Sigurdsson 2002): 84 of this sample's 3,612 checks of
+/// a pair at a time once the calibration (ruling 66) filled rocky groups to the snow line, all
+/// about hosts that have lost mass (15 of 3,945 before it). Packed systems are the ones that
+/// post-main-sequence mass loss destabilises, so the share rose with the packing. The slice does
+/// not model that instability; the bound below holds it to under 5%.
 ///
 /// The zone is the one at birth, its outer limit widened as its host's orbits are, by the
 /// host's initial mass over its mass then (design note 11's a₀ M₀ ÷ M): until plan 11's binary
 /// evolution (P11.T4) a pair's orbit does not widen as its stars lose mass (ruling 33), while
 /// their planets' orbits do, so an evolved star's planet can outgrow the zone its companion bounds
-/// at birth: 4 of this sample's bodies at the epoch, all about hosts that have lost mass.
+/// at birth: 7 of this sample's 4,830 bodies at the epoch, all about hosts that have lost mass.
 #[test]
 fn no_overlapping_orbits_in_generated_systems() {
     let (mut pairs, mut bodies, mut outgrown, mut unstable) = (0_u32, 0_u32, 0_u32, 0_u32);
@@ -579,7 +581,10 @@ fn no_overlapping_orbits_in_generated_systems() {
         pairs > 300 && bodies > 900,
         "{pairs} pairs, {bodies} bodies"
     );
-    assert!(outgrown < bodies / 100 && unstable < pairs / 100);
+    assert!(
+        outgrown < bodies / 100 && unstable < pairs / 20,
+        "{outgrown} of {bodies} bodies outgrew their zone, {unstable} of {pairs} pairs unsettled"
+    );
 }
 
 /// The effective temperature a body is to be kept below: the hottest of the stars that light it,

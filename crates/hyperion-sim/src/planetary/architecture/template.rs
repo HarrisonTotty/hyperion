@@ -9,10 +9,10 @@
 //! | Class | Groups, inside out |
 //! | ----- | ------------------ |
 //! | `Barren` | none |
-//! | `TerrestrialOnly` | rocky 2–6 of 0.05–2 M⊕ from 0.2–0.5 au × √L to the snow line; ice-rich 0–3 of 0.02–5 M⊕ from 1–2 snow-line radii |
+//! | `TerrestrialOnly` | rocky of 0.05–2 M⊕ from 0.2–0.5 au × √L to the snow line, as many as the spacing fits (at most 10); ice-rich 0–3 of 0.02–5 M⊕ from 1–2 snow-line radii |
 //! | `CompactMulti` | a chain of 1–20 M⊕, first period by Mulders et al. (1–50 days), count zero-truncated Poisson (mean 3.5 at 1 M☉, 6.1 at and below 0.48 M☉, at most 10); hot variant in 40%: 1–2 planets |
 //! | `CompactWithColdGiant` | the chain; giants 1–2 of 0.3–10 M♃ at 1–3 snow-line radii, Kipping's Betas by period |
-//! | `SolarLike` | rocky 2–6; giants 1–3 at 1–2 snow-line radii, low e; ice giants 0–2 of 10–30 M⊕ beyond them; both belts |
+//! | `SolarLike` | rocky as `TerrestrialOnly`'s, up to the giants' chaotic zones; giants 1–3 at 1–2 snow-line radii, low e; ice giants 0–2 of 10–30 M⊕ beyond them; both belts |
 //! | `EccentricGiant` | giants 1–2 at 0.5–5 au × √L, scattered in, Beta(0.867, 3.03); a survivor 0–1 of 0.05–10 M⊕ |
 //! | `WarmGiant` | a giant at 10–200 days, log-uniform, Kipping's Betas by period, migrated; in half of systems 1–2 companions of 1–20 M⊕ flanking it |
 //! | `HotJupiter` | a giant at 1–10 days, log-normal about 3.5 days, migrated, nothing else inside 100 days; in 60% of systems an outer giant of 1–10 M♃ at 2–8 snow-line radii |
@@ -66,7 +66,16 @@
 //!   are closely flanked by small companions".
 //! - **Small planets.** Rocky 0.05–2 M⊕, chains 1–20 M⊕, substellar chains 0.01–2 M⊕ and the
 //!   hot variant's 1–2 planets are plan 14's; their masses are P14.T7's correlated law
-//!   ([`MassLaw::Correlated`]), held to the range. The ice-rich bodies' 0.02–5 M⊕, the survivor's
+//!   ([`MassLaw::Correlated`]), held to the range. A rocky group fills its reach ([`CountLaw::Fill`],
+//!   ruling 60): P14.T8.b places "rocky planets from about 0.3 au × √L to the snow line", and
+//!   plan 14's count of 2–6, drawn uniformly, left them short of it, the habitable zone included,
+//!   at P14.T6.b's terrestrial spacing of about 30 mutual Hill radii (the outermost rocky planet at
+//!   0.66 of the zone's inner edge in the median system, η⊕ 0.09 against Bryson et al.'s (2021, AJ
+//!   161, 36, Table 3) 0.37–0.60). Filled to the snow line, most groups have 5–10 planets, 38% of
+//!   `TerrestrialOnly`'s about Sun-like stars reaching the cap of 10, the chain's (Mulders et al.
+//!   2018 fix 10 planets per system), and η⊕ is 0.38 (P14.T10.b). The Solar System, with giants,
+//!   is a `SolarLike` system, whose rocky group stops at its giants' chaotic zones: its four
+//!   rocky planets end at 1.52 au, inside its snow line. The ice-rich bodies' 0.02–5 M⊕, the survivor's
 //!   0.05–10 M⊕ and the ice giants' 10–30 M⊕ (Uranus 14.5, Neptune 17.1; below the spacing's
 //!   giant mass of 0.1 M♃) are this module's, where plan 14 gave none.
 //! - **Spacing and eccentricity.** The families of P14.T6.b ([`SpacingFamily`]) and the
@@ -123,6 +132,13 @@ pub enum CountLaw {
         /// The greatest count.
         max: u8,
     },
+    /// As many bodies as the group's spacing fits between its first body and the end of its
+    /// reach, at most `max`: no draw, the count being where the walk outward stops (P14.T8.b's
+    /// rocky planets "from about 0.3 au × √L to the snow line"; ruling 60).
+    Fill {
+        /// The greatest count.
+        max: u8,
+    },
 }
 
 impl CountLaw {
@@ -131,7 +147,7 @@ impl CountLaw {
     pub const fn range(&self) -> (u8, u8) {
         match *self {
             Self::Uniform { min, max } => (min, max),
-            Self::ZeroTruncatedPoisson { max, .. } => (1, max),
+            Self::ZeroTruncatedPoisson { max, .. } | Self::Fill { max } => (1, max),
         }
     }
 
@@ -139,7 +155,7 @@ impl CountLaw {
     #[must_use]
     pub fn poisson_rate(&self, host_mass: SolarMasses) -> Option<f64> {
         match *self {
-            Self::Uniform { .. } => None,
+            Self::Uniform { .. } | Self::Fill { .. } => None,
             Self::ZeroTruncatedPoisson {
                 rate,
                 mass_exponent,
@@ -149,11 +165,13 @@ impl CountLaw {
         }
     }
 
-    /// The mean count for a host of `host_mass`, with the cap applied.
+    /// The mean count for a host of `host_mass`, with the cap applied; for a [`Fill`](Self::Fill)
+    /// law, which draws nothing, its cap.
     #[must_use]
     pub fn mean(&self, host_mass: SolarMasses) -> f64 {
         match *self {
             Self::Uniform { min, max } => f64::midpoint(f64::from(min), f64::from(max)),
+            Self::Fill { max } => f64::from(max),
             Self::ZeroTruncatedPoisson {
                 rate,
                 mass_exponent,
@@ -618,13 +636,23 @@ const HOT_VARIANT: HotVariant = HotVariant {
     eccentricity: HOT,
 };
 
-/// The rocky planets of `TerrestrialOnly` and `SolarLike`.
+/// The most rocky planets one group places: 10, as many as a chain's cap (Mulders et al. 2018).
+pub const ROCKY_MAX_COUNT: u8 = 10;
+
+/// The least mass of a rocky planet: 0.05 M⊕ (plan 14), which a drift-fed group's floor, scaled
+/// with its host's mass, never goes under (ruling 66).
+pub const ROCKY_MASS_FLOOR: EarthMasses = earth(0.05);
+
+/// The rocky planets of `TerrestrialOnly` and `SolarLike`: as many as P14.T6.b's terrestrial
+/// spacing fits from their first body to the snow line, at most [`ROCKY_MAX_COUNT`].
 const ROCKY: PlanetGroup = PlanetGroup {
     role: GroupRole::Rocky,
     presence: 1.0,
-    count: CountLaw::Uniform { min: 2, max: 6 },
+    count: CountLaw::Fill {
+        max: ROCKY_MAX_COUNT,
+    },
     masses: MassRange {
-        min: earth(0.05),
+        min: ROCKY_MASS_FLOOR,
         max: earth(2.0),
         law: MassLaw::Correlated,
     },

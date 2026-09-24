@@ -398,38 +398,69 @@ fn small_by_radius(systems: &[System], days: f64, lcg: &mut Lcg) -> f64 {
     ratio(n, systems.len())
 }
 
-/// Adjacent pairs of cold chain planets about the primaries of `systems`: their log radii at drawn
-/// ranks, and their spacings in mutual Hill radii.
-fn chain_pairs(systems: &[System], lcg: &mut Lcg) -> (Vec<(f64, f64)>, Vec<f64>) {
-    let (mut radii, mut spacings) = (Vec::new(), Vec::new());
+/// Weiss and Marcy's (2014) mass of a planet of radius `r` R⊕, in M⊕, as Weiss et al. (2018, AJ
+/// 155, 48, §5.2, eqs. 6–9) apply it to turn the California–Kepler Survey's radii into masses for
+/// their spacings: a density of 2.43 + 3.39 R g cm⁻³ under 1.5 R⊕, 2.69 R^0.93 to 4 R⊕,
+/// 0.86 R^1.89 to 9 R⊕, and 100 M⊕ above.
+fn weiss_marcy_mass(r: f64) -> EarthMasses {
+    let m = if r < 1.5 {
+        (2.43 + 3.39 * r) / 5.51 * r * r * r
+    } else if r <= 4.0 {
+        2.69 * math::powf(r, 0.93)
+    } else if r < 9.0 {
+        0.86 * math::powf(r, 1.89)
+    } else {
+        100.0
+    };
+    EarthMasses::new(m)
+}
+
+/// Adjacent pairs of cold chain planets about the primaries of `systems`.
+#[derive(Default)]
+struct ChainPairs {
+    /// Their log radii, at drawn ranks.
+    radii: Vec<(f64, f64)>,
+    /// Their spacings in mutual Hill radii, from their own masses.
+    spacings: Vec<f64>,
+    /// Their spacings in mutual Hill radii from the masses Weiss and Marcy's relation gives their
+    /// radii, as Weiss et al. (2018) measure them.
+    measured_spacings: Vec<f64>,
+}
+
+/// Adjacent pairs of cold chain planets about the primaries of `systems`, their radii drawn from
+/// `lcg`.
+fn chain_pairs(systems: &[System], lcg: &mut Lcg) -> ChainPairs {
+    let mut pairs = ChainPairs::default();
     for s in systems {
         for host in s.hosts.iter().filter(|h| orbits_primary(h)) {
             let chain: Vec<PlacedPlanet> = sorted(host)
                 .into_iter()
                 .filter(|p| p.role() == GroupRole::Chain && !p.hot())
                 .collect();
-            let logs: Vec<f64> = chain
+            let radii: Vec<f64> = chain
                 .iter()
-                .map(|p| math::log10(radius_chen_kipping(p.mass(), rank(lcg)).value()))
+                .map(|p| radius_chen_kipping(p.mass(), rank(lcg)).value())
                 .collect();
             for (i, pair) in chain.windows(2).enumerate() {
-                radii.push((logs[i], logs[i + 1]));
+                pairs
+                    .radii
+                    .push((math::log10(radii[i]), math::log10(radii[i + 1])));
                 let (a1, a2) = (
                     pair[0].orbit().semi_major_axis(),
                     pair[1].orbit().semi_major_axis(),
                 );
-                let hill = mutual_hill_radius(
-                    pair[0].mass(),
-                    pair[1].mass(),
-                    host.zone.host_mass(),
-                    a1,
-                    a2,
-                );
-                spacings.push((a2 - a1) / hill);
+                let spacing = |m1: EarthMasses, m2: EarthMasses| {
+                    (a2 - a1) / mutual_hill_radius(m1, m2, host.zone.host_mass(), a1, a2)
+                };
+                pairs.spacings.push(spacing(pair[0].mass(), pair[1].mass()));
+                pairs.measured_spacings.push(spacing(
+                    weiss_marcy_mass(radii[i]),
+                    weiss_marcy_mass(radii[i + 1]),
+                ));
             }
         }
     }
-    (radii, spacings)
+    pairs
 }
 
 /// η⊕ of `systems`' primaries of 4,800–6,300 K at the zero-age main sequence: planets of 0.5–1.5
@@ -488,40 +519,46 @@ fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<
         cumming,
         (0.07, 0.14),
     );
-    report.finding(
+    report.check(
         "eta-Earth (Bryson et al. 2021)",
         eta_earth(&fgk),
         (0.37, 0.60),
-        (0.07, 0.12),
     );
-    let (radii, mut spacings) = chain_pairs(&fgk, ranks);
-    report.finding(
+    let mut pairs = chain_pairs(&fgk, ranks);
+    report.check(
         "adjacent log radii's correlation (Weiss et al. 2018)",
-        pearson(&radii),
+        pearson(&pairs.radii),
         (0.60, 0.70),
-        (0.74, 0.82),
     );
-    let larger = radii.iter().filter(|(inner, outer)| outer > inner).count();
-    report.finding(
+    let larger = pairs
+        .radii
+        .iter()
+        .filter(|(inner, outer)| outer > inner)
+        .count();
+    report.check(
         "outer planet the larger (Weiss et al. 2018)",
-        ratio(larger, radii.len()),
+        ratio(larger, pairs.radii.len()),
         (0.650, 0.658),
-        (0.55, 0.61),
     );
-    spacings.sort_by(f64::total_cmp);
-    let wide = ratio(
-        spacings.iter().filter(|&&d| d >= 10.0).count(),
-        spacings.len(),
-    );
+    let wide = |spacings: &[f64]| {
+        ratio(
+            spacings.iter().filter(|&&d| d >= 10.0).count(),
+            spacings.len(),
+        )
+    };
     report.finding(
-        "small pairs at 10 mutual Hill radii or more (Weiss et al. 2018)",
-        wide,
+        "small pairs at 10 mutual Hill radii or more, measured as Weiss et al. (2018) measure them",
+        wide(&pairs.measured_spacings),
         (0.92, 0.94),
-        (1.0, 1.0),
+        (0.99, 1.0),
     );
+    pairs.spacings.sort_by(f64::total_cmp);
+    pairs.measured_spacings.sort_by(f64::total_cmp);
     report.note(format!(
-        "  their median: {:.2} mutual Hill radii",
-        spacings[spacings.len() / 2]
+        "  from their own masses: {:.4}, median {:.2} mutual Hill radii; as measured, median {:.2}",
+        wide(&pairs.spacings),
+        pairs.spacings[pairs.spacings.len() / 2],
+        pairs.measured_spacings[pairs.measured_spacings.len() / 2]
     ));
 
     fgk
@@ -536,7 +573,7 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
         "small planets per M dwarf inside 200 days (Dressing and Charbonneau 2015)",
         per_m,
         (1.8, 3.2),
-        (0.85, 1.10),
+        (1.10, 1.20),
     );
     report.note(format!(
         "  by radius at drawn ranks: {:.4}",
@@ -563,14 +600,14 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
         "M3-M5.5 planets per star inside 10 days (Hardegree-Ullman et al. 2019)",
         hu_per_star,
         (0.70, 1.89),
-        (0.10, 0.18),
+        (0.30, 0.40),
     );
     let hu_multiple = share_with_at_least(&late, 2, |p| period_days(p) < 10.0);
     report.finding(
         "M3-M5.5 compact multiples (Hardegree-Ullman et al. 2019)",
         hu_multiple,
         (0.11, 0.89),
-        (0.02, 0.07),
+        (0.05, 0.10),
     );
 }
 
@@ -588,7 +625,7 @@ fn metallicity_statistics(galaxy: &Galaxy, report: &mut Report) {
         "small planets at -0.8 against solar",
         poor / solar,
         (0.8, 1.2),
-        (0.38, 0.52),
+        (0.41, 0.51),
     );
     report.check(
         "small planets at -2 against solar",
@@ -643,7 +680,7 @@ fn close_binary_statistics(fgk: &[System], report: &mut Report) {
         "close-binary hosts' planets against single stars' (Kraus et al. 2016)",
         suppression,
         (0.25, 0.5),
-        (0.19, 0.26),
+        (0.12, 0.17),
     );
 }
 
@@ -688,10 +725,10 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
         cold,
         (0.24, 0.40),
     );
-    let (sun_radii, _) = chain_pairs(&singles, ranks);
+    let sun_pairs = chain_pairs(&singles, ranks);
     report.check(
         "adjacent log radii's correlation around single Suns (ruling 55.1)",
-        pearson(&sun_radii),
+        pearson(&sun_pairs.radii),
         (0.60, 0.70),
     );
     report.note(format!("single Suns: compact systems {compact:.4}"));
@@ -735,34 +772,40 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   (2018, AJ 155, 48, §3) r = 0.65, window 0.60–0.70, and the outer the larger in 65.4 ± 0.4%
 ///   of pairs (§5.3);
 /// - (52.5) placed spacings of small pairs against Weiss et al.'s (§5.2) 93% at 10 mutual Hill
-///   radii or more, peaking near 20;
+///   radii or more, peaking near 20, measured as they measure them: each planet's mass from its
+///   radius by Weiss and Marcy's (2014) relation (their eqs. 6–9; [`weiss_marcy_mass`]);
 /// - (P14.T9.c) hosts in binaries inside 47 au have planets 0.25–0.5 as often as single stars of
 ///   the same mass (Kraus et al. 2016, AJ 152, 8: `S_bin` = 0.34 (+0.14 −0.15)).
 ///
 /// # Findings, pinned as built
 ///
-/// Each of these misses its source by more than any setting of P14.T4.b's weights inside their
-/// sources can reach, and is reported to the orchestrator with its dial:
+/// After ruling 60's calibration (P14.T7's masses and budget, P14.T8's chains and rocky groups,
+/// P14.T4.b's compact exponent), η⊕ and both of Weiss et al.'s pair statistics meet their sources.
+/// Each of these still misses its source by more than any change inside the sources reaches, and
+/// is reported with its dial:
 ///
-/// - η⊕ is about 0.09: rocky groups of 2–6 planets from 0.2–0.5 au × √L at a spacing of about 30
-///   mutual Hill radii end short of the habitable zone in most systems (P14.T5, T6.b), and even
-///   with all of `Barren`'s weight in `TerrestrialOnly` it would be about 0.16;
-/// - adjacent log radii correlate at 0.78 on these hosts, whose masses and \[Fe/H\] spread the
-///   discs' solids (0.66 on single Suns, where P14.T7 calibrated `σ_w`; ruling 55.1), and the outer
-///   planet is the larger in 0.58 of pairs (ruling 55.1's finding);
-/// - M dwarfs have 0.98 small planets inside 200 days (0.85 by radius): a third of their chains'
-///   planets lie under 1 M⊕ and a quarter beyond 200 days (P14.T7's solid budget, P14.T6.b's
-///   spacing; ruling 48 e), and a steeper `CompactMulti` exponent would break Mulders et al.'s
-///   (2015) factor of two to three between M and G stars before reaching 1.8;
-/// - mid-to-late M dwarfs have 0.14 planets per star and 4% compact multiples inside 10 days:
-///   the disc's inner edge near 8 days (P14.T3.b) holds the chains outside it;
-/// - small planets at \[Fe/H\] = −0.8 are 0.45 of solar by mass: a disc's solids scale as
-///   10^\[Fe/H\], and so do P14.T7's masses, while P14.T4.b's weights are 0.96 of solar there;
-/// - close-binary hosts have planets 0.23 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
-///   0.34 compounds with their truncated discs, inside Kraus et al.'s 1σ (0.19–0.48) but under the
-///   plan's quarter;
-/// - small pairs are never under 10 mutual Hill radii, against Weiss et al.'s 7%, the floor of
-///   design note 7 by construction; their median is 17.2 against a peak near 20 (ruling 52.5).
+/// - M dwarfs have 1.15 small planets inside 200 days, against Dressing and Charbonneau's 2.5:
+///   ruling 66's floor of 1 M⊕ × M★ lets their chains' planets under 1 M⊕ (half of those about
+///   hosts of 0.2–0.4 M☉), where the fixed 1 M⊕ floor had counted them and gave 1.90;
+///
+/// - mid-to-late M dwarfs have 0.35 planets per star and 7% compact multiples inside 10 days,
+///   against Hardegree-Ullman et al.'s 1.19 and 0.44; the early M dwarfs have 0.30 against
+///   Dressing and Charbonneau's (2015, Table 5) 0.63 for the same radii and periods. The chains'
+///   first period follows Mulders et al.'s (2018) law, measured about Kepler's FGK hosts, at every
+///   host mass (Mulders et al. 2015b find the break at one period), so no M dwarf's chain starts
+///   closer in than a Sun's;
+/// - small planets at \[Fe/H\] = −0.8 are 0.46 of solar: the compact classes' share there is about
+///   0.72 of solar, as `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars
+///   with Kepler-like planets rises by 1.4 between −0.2 and +0.2 in Zhu 2019, which the table
+///   follows), metal-poor discs hold fewer planets under the solid budget, and rocky planets, whose
+///   masses follow their discs, fall under 1 M⊕;
+/// - close-binary hosts have planets 0.14 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
+///   0.34 compounds with their truncated discs, whose budgets now build no chain at all where they
+///   cannot build its first planet (ruling 66), under Kraus et al.'s 1σ (0.19–0.48);
+/// - small pairs are at 10 mutual Hill radii or more in 99.5% of pairs measured as Weiss et al.
+///   measure them, from masses their mass–radius relation gives each radius, and in all of them by
+///   their own masses, the floor of design note 7 by construction, against Weiss et al.'s 93%; the
+///   median is 17.0 against a peak near 20 (ruling 52.5).
 #[test]
 #[ignore = "slow: places planets about a quarter of a million sampled hosts"]
 fn the_statistics_of_architecture_meet_their_surveys() {

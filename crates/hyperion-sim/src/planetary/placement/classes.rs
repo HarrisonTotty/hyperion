@@ -18,8 +18,10 @@
 //!    and places a count drawn from its law (a chain takes its dynamically hot variant in 40% of
 //!    systems). Its members take consecutive planet slots from `first_slot`, group by group inside
 //!    out (design note 3), before anything is placed, so that their masses (P14.T7) and every other
-//!    draw keyed by slot are fixed by the counts alone. A member that cannot be placed leaves its
-//!    slot unused.
+//!    draw keyed by slot are fixed by the counts alone. A member that cannot be placed, or that its
+//!    budget did not form (P14.T7's truncation), leaves its slot unused. A rocky group's count is
+//!    [`CountLaw::Fill`]'s cap: it reserves that many and places as many as its walk reaches
+//!    towards the snow line (ruling 60).
 //! 3. **Positions** (P14.T8.a–c). A group whose template gives its first body a location (a period
 //!    law, au × √L or snow-line radii) draws it inside the range its bounds allow, the law's shape
 //!    kept (a range wholly inside the inner bound is held at it); a group placed "outward" or
@@ -27,7 +29,9 @@
 //!    drawn by P14.T6.b ([`draw_pair_spacing`]) against the floor of the pair's masses and the
 //!    eccentricities it assumes. A member is placed only where it is admitted:
 //!    - inside the zone's limits and the disc's edges, and inside the snow line for a group that
-//!      stays inside it;
+//!      stays inside it; a compact chain is not held by the disc's inner edge, since its first
+//!      period's law (Mulders et al. 2018) is the innermost planets' as observed, which the spread
+//!      of discs' inner edges already shapes (Lee and Chiang 2017; ruling 60);
 //!    - at least D7's circular floor from each neighbour already placed, and, towards a later
 //!      group's first body, at D7's floor with that body's eccentricity and its own largest;
 //!    - for a small planet, outside every giant's chaotic zone twice over, 2 × 1.3 (m ÷ M★)^(2⁄7)
@@ -46,9 +50,11 @@
 //!    truncated at its own limit, the largest whose periapsis stays outside the zone's inner limit
 //!    and twice the Roche limit and whose apoapsis stays inside the zone's outer limit. Its
 //!    inclination to its host's plane, node, periapsis and mean anomaly follow. Then D7 is
-//!    checked on every adjacent pair with those eccentricities, and where it fails the outer
-//!    body's eccentricity is scaled down until it holds (the inner body's too, should that not be
-//!    enough), which is deterministic and needs no redraw.
+//!    checked on every adjacent pair with those eccentricities, and with the outer body
+//!    circularised to a(1 − e²) against the same floor, the closest tides (P14.T8.e) can bring the
+//!    pair at any age; where either fails the outer body's eccentricity is scaled down until both
+//!    hold (the inner body's too, should that not be enough), which is deterministic and needs no
+//!    redraw.
 //!
 //! Tidal circularisation (P14.T8.e) is [`tides`]'s, for the fate transform (P14.T28).
 //!
@@ -109,7 +115,7 @@ use crate::planetary::params::SPACING_GIANT_MASS;
 use crate::planetary::placement::masses::{GiantCore, giant_core, group_masses};
 use crate::planetary::placement::spacing::{
     MAX_SPACING_STEP, Neighbour, SpacingDraws, SpacingKind, draw_pair_spacing, mutual_hill_factor,
-    next_semi_major_axis, satisfies_floor, spacing_floor,
+    mutual_hill_radius, next_semi_major_axis, satisfies_floor, spacing_floor,
 };
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::UnitUniform;
@@ -732,10 +738,12 @@ const fn spacing_kind(family: SpacingFamily) -> SpacingKind {
     }
 }
 
-/// The count of a law at its draws, for a host of `mass`.
+/// The count of a law at its draws, for a host of `mass`: for a [`CountLaw::Fill`] law its cap,
+/// every one of which is reserved and as many placed as the walk outward reaches.
 #[must_use]
 fn draw_count(law: CountLaw, mass: SolarMasses, draws: &GroupDraws) -> u8 {
     match law {
+        CountLaw::Fill { max } => max,
         CountLaw::Uniform { min, max } => {
             let span = u128::from(max - min) + 1;
             let step = (u128::from(draws.count.get()) * span) >> 53;
@@ -976,10 +984,15 @@ impl<'a> Placer<'a> {
         // A giant that migrated to an orbit drawn by period, the hot and warm Jupiters, arrives
         // by high-eccentricity migration and tidal circularisation, whose inner edge is twice the
         // Roche limit (Ford and Rasio 2006), inside the gas disc's magnetospheric cavity: the
-        // disc's inner edge does not hold it.
-        let inside_cavity = group.places_giants()
+        // disc's inner edge does not hold it. Nor does it hold a compact chain, whose first period
+        // is Mulders et al.'s (2018) law for the innermost planets as observed, a law that already
+        // carries the inner edges of discs: its rise inside 12 days is those edges' spread (Lee and
+        // Chiang 2017), and holding it outside this disc's own edge as well cut it twice (ruling
+        // 60).
+        let inside_cavity = (group.places_giants()
             && group.origin().is_migrated()
-            && matches!(group.location(), Location::Period(_));
+            && matches!(group.location(), Location::Period(_)))
+            || group.role() == GroupRole::Chain;
         let floor = if inside_cavity {
             self.zone_inner.unwrap_or(Metres::ZERO)
         } else {
@@ -1399,25 +1412,25 @@ impl<'a> Placer<'a> {
             let p = &self.placed[i];
             Neighbour::new(self.members[p.member].mass, p.a, e)
         };
+        let holds = |i: usize, ei: f64, j: usize, ej: f64| {
+            let (inner, outer) = (neighbour(i, ei), neighbour(j, ej));
+            satisfies_floor(&inner, &outer, host) && keeps_floor_circularised(&inner, &outer, host)
+        };
         for pair in order.windows(2) {
             let (i, j) = (pair[0], pair[1]);
-            if satisfies_floor(&neighbour(i, e[i]), &neighbour(j, e[j]), host) {
+            if holds(i, e[i], j, e[j]) {
                 continue;
             }
-            let outer = largest_scale(|s| {
-                satisfies_floor(&neighbour(i, e[i]), &neighbour(j, s * e[j]), host)
-            });
+            let outer = largest_scale(|s| holds(i, e[i], j, s * e[j]));
             e[j] *= outer;
             rescaled[j] = true;
-            if !satisfies_floor(&neighbour(i, e[i]), &neighbour(j, e[j]), host) {
-                let inner = largest_scale(|s| {
-                    satisfies_floor(&neighbour(i, s * e[i]), &neighbour(j, e[j]), host)
-                });
+            if !holds(i, e[i], j, e[j]) {
+                let inner = largest_scale(|s| holds(i, s * e[i], j, e[j]));
                 e[i] *= inner;
                 rescaled[i] = true;
             }
             debug_assert!(
-                satisfies_floor(&neighbour(i, e[i]), &neighbour(j, e[j]), host),
+                holds(i, e[i], j, e[j]),
                 "every placed pair clears D7's circular floor"
             );
         }
@@ -1481,6 +1494,25 @@ impl<'a> Placer<'a> {
         planets.sort_by_key(PlacedPlanet::index);
         planets
     }
+}
+
+/// Whether a pair still clears D7's semi-major-axis floor of its epoch eccentricities with its
+/// outer body circularised to a(1 − e²) and its inner one where it is (P14.T8.e).
+///
+/// Circularisation lowers every body's a and e together and never raises them (design note 9),
+/// so this is the closest the pair can come under the fate transform at any age, against the
+/// highest floor it can have. D7's other condition, Gladman's gap between apocentre and
+/// pericentre, only widens as both orbits circularise.
+#[must_use]
+fn keeps_floor_circularised(inner: &Neighbour, outer: &Neighbour, host: SolarMasses) -> bool {
+    let (a1, e2) = (inner.semi_major_axis(), outer.eccentricity());
+    let a2 = outer.semi_major_axis() * (1.0 - e2 * e2);
+    if a2 <= a1 {
+        return false;
+    }
+    let hill = mutual_hill_radius(inner.mass(), outer.mass(), host, a1, a2);
+    let floor = spacing_floor(inner.mass(), outer.mass(), inner.eccentricity(), e2);
+    (a2 - a1) / hill >= floor
 }
 
 /// Which side of a planet another is placed on.
@@ -1707,8 +1739,9 @@ mod tests {
 
     /// P14.T8 (a), (b), (c) and (d): every placed planet lies inside the limits passed in and
     /// outside its disc's inner edge (a hot or warm Jupiter, which migrates inside the disc's
-    /// cavity, outside twice its Roche limit instead), its whole orbit inside the zone, and every
-    /// adjacent pair satisfies both of D7's conditions at the epoch.
+    /// cavity, and a compact chain's planet, whose first period's law carries the discs' edges
+    /// (ruling 60), outside twice its Roche limit instead), its whole orbit inside the zone, and
+    /// every adjacent pair satisfies both of D7's conditions at the epoch.
     #[test]
     fn every_planet_lies_inside_its_limits_and_every_pair_clears_d7() {
         let mut planets = 0;
@@ -1720,13 +1753,14 @@ mod tests {
                     planets += 1;
                     let orbit = p.orbit();
                     let a = orbit.semi_major_axis();
-                    let cavity = is_giant(p)
+                    let cavity = (is_giant(p)
                         && p.migrated()
                         && matches!(
                             class,
                             ArchitectureClass::HotJupiter | ArchitectureClass::WarmGiant
                         )
-                        && p.group() == 0;
+                        && p.group() == 0)
+                        || p.role() == GroupRole::Chain;
                     assert!(cavity || a >= profile.inner_edge(), "{class:?}");
                     assert!(a <= profile.outer_edge(), "{class:?}");
                     if let Some(inner) = s.limits.inner() {
@@ -1873,7 +1907,7 @@ mod tests {
     fn cold_chain_eccentricities_are_rayleigh() {
         let mut drawn = Vec::new();
         let (mut all, mut rescaled) = (0_u32, 0_u32);
-        for s in sample(ArchitectureClass::CompactMulti, 6_000) {
+        for s in sample(ArchitectureClass::CompactMulti, 7_000) {
             if s.limits != Truncation::NONE {
                 continue;
             }

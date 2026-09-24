@@ -3516,3 +3516,120 @@ events }`): plan 04's `request_kinds_lists_every_variant` and the server's
   - _T30.b, tests,_ in `planetary/system/tests.rs` over the 400 systems of `sample_contexts` nearest the solar circle and synthetic hosts: determinism, `assert_order_independent`, `generate` equal to `generate_planets`, every index decoding, sorted, unique and never in slot `0x00` (a brown-dwarf companion included), slots host by host, the chain test, the strip cut, `NoSuchBody`, an unborn system's bodies all `NotYetFormed`, `snapshot_at` equal to `body_at` and `position_at`, the section tags, positions, the habitable zone, states a prefix of a life, T8.e's τ_c and circular hot Jupiters, and T10.a and T16.b rerun on whole systems at −H, the epoch and +H. The continuity half of T16.b runs on 12 systems at yearly steps, and on all 400 under `just test-slow`.
   - _T30.b, findings (for the orchestrator)._ (1) Until P11.T4 a pair's orbit does not widen as its stars lose mass while their planets' orbits do, so an evolved star's planet can outgrow the zone its companion bounds at birth: 4 bodies of the sample at the epoch, all about hosts that have lost mass; the T10.a rerun widens a zone's outer limit by its host's M₀ ÷ M. (2) About the host's mass at the time, 15 of 3,945 pair checks fail 2√3 Hill radii, all about hosts that have lost mass (Debes and Sigurdsson 2002's post-main-sequence instability), since a Hill radius grows by (M₀ ÷ M)^⅓ beyond the orbits' M₀ ÷ M; the rerun asserts the spacing about the birth mass, design note 9's frame, and the slice models no such instability. (3) For `calib`: in the triple `02000b2ca0000001` host B's four planets are 0.0003–0.001 M⊕ at 0.118–0.126 au.
   - _T30.c._ `planetary/label.rs`: `BodyLabel` moves there from `record.rs`, which re-exports it, with `BodyLabel::{planet, moon, belt}`, `host_letters`, `labels(&PlanetarySystem)` in index order and `label(&PlanetarySystem, index)`. A host is its components' letters, `A` to `P` by body index (`AB` for a circumbinary planet, Kepler-16's convention without its parentheses); planets take `b` onwards by primordial semi-major axis about their host, ties by index, then `aa` after `z`; moons Roman numerals from `I` (`A d II`), belts `BELT 1`. Tests: uniqueness and the ordering on every sampled system, a host of eight lettered `A b` to `A i`, circumbinary letters, and stability under `degrade` down to `MassAndOrbit` (a contact withholds it). The Solar-like golden's `A b` to `A i` and the moon and belt labels on generated bodies wait for T32 and phase D.
+- **Calibration (ruling 60), as built (`calib`, round 7). Ruled (ruling 66): stands as built, the
+  floor below amended by it.** T10.b's placed sample, diagnosed before
+  any change, with each miss's carrier; papers under the lane's `target/scratch/papers/calib/`.
+  - _Diagnosis._ η⊕ 0.09: the rocky groups' reach (T5's uniform 2–6 count at T6.b's spacing of 30
+    left the outermost rocky planet at 0.66 of the zone's inner edge in the median system), not
+    the rocky 0.5 M⊕ (η⊕ counts 0.08–2.9 M⊕; 0.64 M⊕ moves it by 0.005). Adjacent log radii 0.78
+    on FGK hosts: T7.a's exponent of 1 on the disc's solids, which passed the gas fraction's 0.5
+    dex, the hosts' \[Fe/H\] and the budget's scaling into the between-system variance. Outer
+    larger 0.58: T7.b's 0.1 dex step. M dwarfs 0.98 inside 200 days: T7.a's exponent (a third of
+    their chain planets under 1 M⊕), the budget at efficiency 1 (with no budget 1.56), and T4.b's
+    compact exponent (−1.5); the spacing at low host mass leaves 17% of cold-chain planets beyond
+    200 days and was not changed (with masses ∝ M★ the period ratios do not depend on the host);
+    the disc's M★ scaling is not a carrier (Pascucci et al. 2016's steeper M★^1.3–1.9 would thin
+    M dwarfs further). M3–M5.5 inside 10 days 0.14: T5's first period held outside the disc's
+    8-day edge, cutting Mulders et al.'s (2018) innermost-planet law, which already carries the
+    edges (Lee and Chiang 2017), a second time. \[Fe/H\] −0.8 at 0.45: T7.a's exponent (the masses
+    ∝ 10^\[Fe/H\]), the budget, and T4.b's table, whose compact share at −0.8 is 0.72 of solar
+    because `CompactWithColdGiant` falls with its giants. Pairs ≥ 10 R_H at 100%: D7's floor.
+  - _T7.a._ A drift-fed group's `m_c` (chain, companions, substellar chain; `is_drift_fed`) is 4 M⊕
+    × (M★ ÷ M☉) × 10^(0.5 z), independent of the disc's solids and metals: Pascucci et al. (2018,
+    §2, Table 1: the mass-ratio break at 2.9, 2.8, 2.8 × 10⁻⁵ for M, K, G, "the most common
+    planetary mass ... increases linearly with stellar mass"), Zhu (2019, §2: 1–2 and 2–4 R⊕ hosts
+    of "statistically the same" metallicity), Lambrechts et al. (2019, abstract: super-Earths
+    "bounded by the pebble isolation mass"). A rocky group keeps T7.a's law (in situ, ∝ the
+    disc's solids; Pascucci et al. 2018, §4). `characteristic_mass` takes the `&DiscProfile`, not
+    the solid mass. T7's test (a) now asserts the chain's median 3.6–4.4 M⊕ unchanged by doubled
+    solids and halved by a halved host; the rocky median still doubles with the solids.
+  - _T7.b._ σ_b = 0.5 dex, σ_w = 0.2, the outward step 0.21 dex for drift-fed groups (ruling
+    55.1's "a larger outward step with the scatter re-fitted"), fitted together on T10.b's placed
+    hosts; 0 for rocky groups (the Solar System's, and Kokubo and Genda 2010's largest planet mid-
+    region; a step centred on a filled group's reserved count would also lighten the groups that
+    stop early). T7's sample of 2,000 solar-disc chains: log radii 0.635, log masses 0.830, outer
+    heavier 0.703, outer larger 0.658, asserted at 0.633–0.675 (Weiss's 65.4% to three binomial
+    errors of its 4,546 pairs), where it had 0.55–0.65 "short of Weiss".
+  - _The budget, for the orchestrator._ `SOLID_BUDGET_EFFICIENCY` 1 → 3, the Class 0 reservoir:
+    Tychoniec et al. (2020, A&A 640, A19, abstract) measure Class 0 and I discs at least 10 and 3
+    times Class II's dust (158 and 52 M⊕ medians) and planets explained from Class 0 "with an
+    efficiency of ∼15%"; plan 14's disc (32.2 M⊕ about the Sun) is 3.2 times a Sun-like Class II
+    disc's ∼10 M⊕ (Mulders et al. 2021, §1), a Class I disc, and Mulders et al. conclude (§5)
+    "the reservoir ... was likely larger". The median Sun-like chain takes 14% of it. At
+    efficiency 1 no compact exponent brought M dwarfs past 1.71. This departs from ruling 55's
+    efficiency of 1 and from T7's test "no group exceeds its disc's solids", which now reads "its
+    budget". A correlated group over its budget forms its innermost members at their drawn masses
+    (`GroupCap::Truncated`; the first alone at the budget if even it does not fit), since a scaled
+    group passed the disc's scatter into the correlation (FGK 0.71 against single Suns' 0.62);
+    law groups are still scaled. `GroupMasses::masses()` may then be shorter than the members, and
+    the placer leaves the rest of the reserved slots unused. 246 of 2,000 Sun-like chains are
+    truncated.
+  - _T5 and T8.b._ The rocky group's count is `CountLaw::Fill { max: 10 }` (`ROCKY_MAX_COUNT`, the
+    chain's cap): it reserves 10 slots and places as many as T6.b's terrestrial spacing fits to
+    the snow line (T8.b's "from about 0.3 au × √L to the snow line"). About Sun-like stars most
+    `TerrestrialOnly` groups have 5–10 planets and 38% reach 10, against the table's 2–6 (for the
+    owner: the Solar System's 4 are a `SolarLike` group, which stops at its giants' chaotic zones).
+    T6.b's terrestrial mean of 30 is kept; a Solar-System mean near 43 (26, 40, 63) left η⊕ at
+    0.35. The reserved slots make `next_slot` larger (the placed golden's "next 7" is "next 14").
+  - _T8.a._ A compact chain (role `Chain`, its hot variant and the substellar chain) is not held by
+    the disc's inner edge, only by the zone and twice its Roche limit, as the hot and warm Jupiters
+    are (ruling 60, point 3's cavity). T8's test (a) exempts chain planets as it did those giants.
+  - _T8.d, a finding fixed._ The placed pairs cleared D7 only at the epoch: two chain pairs of the
+    unit sample, placed within 1% of the floor of 12, fell under it at 5 Gyr once the outer body
+    circularised (T8's test (e)). `finish` now also requires the floor of the epoch's
+    eccentricities with the outer body at a(1 − e²), the closest tides can bring the pair at any
+    age, and scales eccentricities down until both hold; T8.d's KS test still passes.
+  - _T4.b._ `COMPACT_MASS_EXPONENT` −1.5 → −3.0, re-fitted on the placed M dwarfs as ruling 48
+    (b, e) asked (−2.5 gave 1.75). At 1 M☉ the weight is unchanged, so no Sun-like anchor moves; a
+    0.3 M☉ host is 93% compact (T4.c's pinned 0.046 and 0.68 at 0.3 M☉ are now 0.011 and 0.926),
+    a 0.1 M☉ host over 99%. 1–8 M⊕ planets at 2–50 days are 2.4 times as common about M dwarfs of
+    0.35–0.6 M☉ as about FGK stars, between Mulders et al.'s (2015) 2 (M/G, 1–4 R⊕) and 3.5.
+  - _T10.b as built_ (before → after, window): small planets per FGK star 0.70 → 0.82 (0.5–1.2);
+    η⊕ 0.09 → 0.382 (0.37–0.60); adjacent log radii, FGK 0.787 → 0.633, single Suns 0.648 →
+    0.638 (0.60–0.70); outer larger 0.577 → 0.652 (0.650–0.658); M dwarfs inside 200 days 0.98 →
+    1.90 (1.8–3.2); M3–M5.5 inside 10 days 0.140 → 0.353 (0.70–1.89) and their multiples 0.043 →
+    0.075 (0.11–0.89); \[Fe/H\] −0.8 against solar 0.446 → 0.530 (0.8–1.2); pairs ≥ 10 R_H 1.000
+    → 0.995 measured as Weiss et al. measure them (Weiss and Marcy's masses from each planet's
+    radius; 1.000 from its own mass; 0.92–0.94); hot Jupiters 0.73% → 0.72%, Cumming's giants
+    10.4% → 10.2%, the giants' slope 2.01 → 2.03, M-dwarf multiples 0.61 → 0.58, M-dwarf giants
+    3.7% → 1.6%, halo 0.003 → 0.015, close binaries 0.226 → 0.227. The anchors on placed single
+    Suns hold: Cumming's 10.50%, hot Jupiters 0.82%, cold giants in 30.5% of compact systems, so
+    `GIANT_WEIGHT_SCALE` and `HOT_JUPITER_WEIGHT` stand. η⊕, both of Weiss et al.'s pair
+    statistics and the M dwarfs are now asserted; the rest stay pinned findings.
+  - _For the owner, what no in-source change reaches._ (1) Mid-M dwarfs inside 10 days, 0.35
+    against Hardegree-Ullman et al.'s 1.19 (and early M dwarfs 0.30 against Dressing and
+    Charbonneau's Table 5, 0.63): the chains' first period is Mulders et al.'s FGK law at every
+    host mass, and Mulders et al. (2015b) find the break at one period; a host-mass-dependent
+    inner edge (Lee and Chiang 2017, Fig. 2: lower-mass pre-main-sequence stars rotate faster)
+    has no quantitative law to cite yet. (2) \[Fe/H\] −0.8 at 0.53: the table follows Zhu (2019,
+    §4: stars with Kepler-like planets 25% at −0.2 and 36% at +0.2), whose trend, extrapolated,
+    puts −0.8 near half of solar, against the brainstorm's "only weakly" read by T10.b as within
+    20%; the Class 0 budget and the rocky masses take the rest. (3) Pairs ≥ 10 R_H: D7's floor of
+    10 is the brainstorm's; Weiss et al.'s 7% below it do not come from mass–radius scatter
+    (99.5% as they measure). (4) A chain member under 1 M⊕ is held to the template's 1 M⊕ floor,
+    which, with masses ∝ M★, piles planets at exactly 1 M⊕ about hosts under about 0.4 M☉; a
+    range in planet-to-star mass ratio would move them under D&C's 1 R⊕.
+  - _Goldens._ `planetary/architecture` (probabilities off 1 M☉, the rocky count), `planetary/
+masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (placed
+    planets) moved, at version 11 as ruled; nothing else.
+  - _Ruling 66's floor, as built._ A drift-fed group's floor is `mass_floor`: the template's floor ×
+    M★ ÷ M☉, never under the smaller of it and a rocky planet's `ROCKY_MASS_FLOOR` (0.05 M⊕).
+    Chain members about hosts of 0.2–0.4 M☉ at exactly 1 M⊕: 39% before, none after; at their own
+    scaled floor: 20%, against 16.5% about hosts of 0.9–1.1 M☉ at theirs, so the clamp remains
+    at every host's floor as it is at a Sun's, now not excess at M dwarfs. **For the
+    orchestrator:** the 1 M⊕ pile-up had counted those planets as 1–4 R⊕: Dressing and
+    Charbonneau's statistic falls from 1.90 to 1.15 and is pinned again as a finding (a
+    reference mass of 5.1 or 6.5 M⊕ gives only 1.23 and 1.28); reverting the floor is one line of
+    `mass_floor`. The other T10.b statistics after: FGK small 0.72, η⊕ 0.382, log radii 0.630
+    and 0.638, outer larger 0.657, pairs ≥ 10 R_H 0.995, mid-M inside 10 days 0.384 and
+    multiples 0.093, \[Fe/H\] −0.8 0.46, close binaries 0.143; the anchors unmoved (10.50%, 0.82%,
+    30.5%).
+  - _A chain its budget cannot start, ruling 66 with `integ`'s finding._ In the triple
+    `02000b2ca0000001`, star B (0.409 M☉) has an S-type zone ending at 0.132 au, so its disc holds
+    a few thousandths of an Earth mass of solids: the previous model scaled its four-planet chain
+    down to 0.0003–0.001 M⊕, and the truncation above left one body of 0.006 M⊕ at its budget. Both
+    are artefacts: a chain is planets of 1 M⊕ × M★ and up, built by pebbles to their isolation
+    mass (Lambrechts et al. 2019), and `Barren` is defined as nothing above 0.02 M⊕. A correlated
+    group whose budget cannot build even its innermost member now forms none; star B places no
+    planet. Groups drawn from a law (ice-rich bodies, ice giants, survivors) are still scaled
+    and may fall under their floors in starved discs.
