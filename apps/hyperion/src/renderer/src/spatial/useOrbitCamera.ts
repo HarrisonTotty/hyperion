@@ -157,9 +157,23 @@ function anglesAt(transition: Transition, elapsedMs: number): CameraAngles {
  * @param fittedPxPerUnit - The zoom that fits the view's fit radius, or `null` before the view is
  *   laid out, when moves are ignored; a turn to a preset then sets the angles the view will open
  *   with.
+ * @param fitRequest - Changing it returns the camera to the fitted zoom, as `Z` does, keeping its
+ *   angles: a display's zoom preset changes it with each press, so that the preset fits whatever
+ *   the operator zoomed to before. Absent, as on the star chart, nothing is asked.
  */
-export function useOrbitCamera(fittedPxPerUnit: number | null): OrbitCamera {
+export function useOrbitCamera(fittedPxPerUnit: number | null, fitRequest?: number): OrbitCamera {
   const [camera, setCamera] = useState<OrbitCameraState>(INITIAL_CAMERA);
+  const [fitRequestSeen, setFitRequestSeen] = useState(fitRequest);
+  let shownCamera = camera;
+  // Adjusted during render, as a derived reset, so that the preset's fit is drawn in the render it
+  // is chosen in.
+  if (fitRequest !== fitRequestSeen) {
+    setFitRequestSeen(fitRequest);
+    if (camera.pxPerUnit !== null) {
+      shownCamera = { angles: camera.angles, pxPerUnit: null };
+      setCamera(shownCamera);
+    }
+  }
   const pendingRef = useRef<CameraMove[]>([]);
   const transitionRef = useRef<Transition | null>(null);
   const schedulerRef = useRef<RedrawScheduler | null>(null);
@@ -250,5 +264,5 @@ export function useOrbitCamera(fittedPxPerUnit: number | null): OrbitCamera {
     scheduler.request(step);
   }, []);
 
-  return { camera, move, turnTo };
+  return { camera: shownCamera, move, turnTo };
 }

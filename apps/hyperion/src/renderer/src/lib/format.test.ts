@@ -10,11 +10,14 @@ import {
   formatGravity,
   formatLengthLy,
   formatListPosition,
+  formatLuminosityLsun,
   formatMassMearth,
   formatMassMsun,
   formatNumber,
   formatPeriod,
   formatPressure,
+  formatRadiusKm,
+  formatRadiusRsun,
   formatScaleLength,
   formatSci,
   formatSignedDeg,
@@ -312,6 +315,62 @@ describe("formatBodyDistance", () => {
   });
 });
 
+describe("formatLuminosityLsun", () => {
+  it.each([
+    [1, "1.00"],
+    [0.085, "0.0850"],
+    [0.001_08, "0.00108"],
+    [25_400, "25,400"],
+    [999_400, "999,000"],
+  ])("writes %f L☉ to three significant figures as %s", (luminosity, text) => {
+    expect(formatLuminosityLsun(luminosity)).toBe(text);
+  });
+
+  it.each([
+    // The pinned white dwarf's 0.0001075 is a hair below the half in binary, and so reads 1.07E-4.
+    [0.000_107_6, "1.08E-4"],
+    [2_500_000, "2.50E6"],
+  ])("writes %f L☉, outside the unit's range, in E notation as %s", (luminosity, text) => {
+    expect(formatLuminosityLsun(luminosity)).toBe(text);
+  });
+
+  it("refuses a negative luminosity", () => {
+    expect(() => formatLuminosityLsun(-1)).toThrow(RangeError);
+  });
+});
+
+describe("formatRadiusRsun", () => {
+  it.each([
+    [1, "1.00"],
+    [0.011_5, "0.0115"],
+    [1_500, "1500"],
+  ])("writes %f R☉ to three significant figures as %s", (radius, text) => {
+    expect(formatRadiusRsun(radius)).toBe(text);
+  });
+
+  it("writes a radius below 0.001 R☉ in E notation", () => {
+    expect(formatRadiusRsun(0.000_175_4)).toBe("1.75E-4");
+  });
+
+  it("refuses a negative radius", () => {
+    expect(() => formatRadiusRsun(-0.5)).toThrow(RangeError);
+  });
+});
+
+describe("formatRadiusKm", () => {
+  it.each([
+    [12.2, "12.2"],
+    [36.87, "36.9"],
+    [69_911, "69,900"],
+  ])("writes %f km to three significant figures as %s", (radius, text) => {
+    expect(formatRadiusKm(radius)).toBe(text);
+  });
+
+  it("writes a radius below 0.01 km in E notation", () => {
+    expect(formatRadiusKm(0.004)).toBe("4.00E-3");
+  });
+});
+
 describe("formatTemperatureK", () => {
   it.each([
     [2.7, "3"],
@@ -446,10 +505,11 @@ describe("formatMassMearth", () => {
   });
 
   it.each([
-    // Ceres, 9.38E20 kg (Park et al. 2016): 1.57E-4 of the Earth's mass.
-    [9.38e20 / 5.972e24, "1.6E-4"],
-    [0.000_94, "9.4E-4"],
-    [1.8e-9, "1.8E-9"],
+    // Ceres, 9.38E20 kg (Park et al. 2016): 1.57E-4 of the Earth's mass. E notation keeps the
+    // guide's three significant figures (the orchestrator's ruling 44.1).
+    [9.38e20 / 5.972e24, "1.57E-4"],
+    [0.000_94, "9.40E-4"],
+    [1.8e-9, "1.80E-9"],
   ])("writes %f Earth masses, below 0.001, in E notation as %s", (massMearth, expected) => {
     expect(formatMassMearth(massMearth)).toBe(expected);
   });

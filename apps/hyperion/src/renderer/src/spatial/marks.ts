@@ -74,7 +74,9 @@ export interface PlaneSpec {
  * as the selected body's orbit is because it carries the selection (plan 14, T38.a).
  *
  * @remarks
- * Both are solid hairlines. An orbit says where something lies, so it takes the guide's 6:1 for the
+ * Both are solid: a reference path a 1 px hairline, the selected one 2 px wide, so that the
+ * selection is not carried by colour alone (the orchestrator's ruling 44.2). An orbit says where
+ * something lies, so it takes the guide's 6:1 for the
  * parts of a symbol that carry meaning, which `--text-muted` reaches (7.22:1 on `--surface-0`) and
  * `--line` (1.38:1) does not; `--line` stays for the plane's grid and scale rings (the
  * orchestrator's ruling 35). Dashes are kept for predicted paths and `--target` for commanded ones,

@@ -29,7 +29,7 @@
  */
 import type { UniverseTime } from "@hyperion/protocol";
 
-import { add, type Vec3 } from "../spatial/vec3";
+import { add, scale, type Vec3 } from "../spatial/vec3";
 
 /**
  * The number of Halley iterations {@link solveKepler} runs from Mikkola's starter: always this
@@ -82,17 +82,27 @@ export interface OrbitState {
 }
 
 /**
- * Where a body is placed, for {@link composePosition}: at the origin of the system's frame, or on an
- * orbit about another body.
+ * Where a body is placed, for {@link composePosition}: at the origin of the system's frame, on an
+ * orbit about another body, or as a member of a pair about the pair's barycentre.
  *
  * @remarks
  * A host alone at its system's barycentre is at the origin. Hosts that orbit a barycentre together
- * are placed by the stars' masses on their pair's orbit, which plan 11's `HierarchyDto` (P11.T13)
- * carries and which is not built yet; until it is, a host is at the origin.
+ * are placed as plan 11's `HierarchyDto` says: a pair's orbit gives its outer member's barycentre
+ * relative to its inner member's, r, and each member sits about the pair's barycentre at `share`
+ * times r, the inner one at −(M₂ ÷ M) r and the outer one at +(M₁ ÷ M) r, where M₁ and M₂ are the
+ * inner and outer members' masses and M their sum. The `parentId` of a member is its pair's own
+ * placement, which is itself a member of an outer pair, or the origin for the system's root.
  */
 export type BodyPlacement =
   | { readonly kind: "origin" }
-  | { readonly kind: "orbit"; readonly parentId: string; readonly orbit: KeplerOrbit };
+  | { readonly kind: "orbit"; readonly parentId: string; readonly orbit: KeplerOrbit }
+  | {
+      readonly kind: "member";
+      readonly parentId: string;
+      readonly orbit: KeplerOrbit;
+      /** The member's share of the pair's relative orbit: −M₂ ÷ M inside, +M₁ ÷ M outside. */
+      readonly share: number;
+    };
 
 const TAU = 2 * Math.PI;
 const NANOS_PER_SECOND = 1_000_000_000;
@@ -411,7 +421,9 @@ export function orbitPolyline(orbit: KeplerOrbit, segments: number): ReadonlyArr
  * Each body's position is its parent's plus its own position about the parent, so a moon's is its
  * planet's plus its offset from the planet, exactly. A planet's elements are in the system frame
  * and a moon's in its parent's body frame (P14.T35.a), and both are translations with the galactic
- * axes (plan 01's `coords`), so composing them is a sum and needs no rotation.
+ * axes (plan 01's `coords`), so composing them is a sum and needs no rotation. A pair's member is
+ * at its share of the pair's relative position about the pair's barycentre, so the two members'
+ * mass-weighted positions sum to the barycentre's.
  *
  * @param bodies - Every body's placement, keyed by its ID as the wire has it.
  * @throws Error naming the body when `id` or a parent on its chain is not in `bodies`, or when the
@@ -423,7 +435,7 @@ export function composePosition(
   id: string,
   time: UniverseTime,
 ): Vec3 {
-  const chain: KeplerOrbit[] = [];
+  const chain: Array<{ readonly orbit: KeplerOrbit; readonly share: number | null }> = [];
   let at = id;
   for (;;) {
     const placement = bodies.get(at);
@@ -436,12 +448,16 @@ export function composePosition(
     if (chain.length >= bodies.size) {
       throw new Error(`the chain of parents of ${id} does not reach the origin`);
     }
-    chain.push(placement.orbit);
+    chain.push({
+      orbit: placement.orbit,
+      share: placement.kind === "member" ? placement.share : null,
+    });
     at = placement.parentId;
   }
   let positionM: Vec3 = { x: 0, y: 0, z: 0 };
-  for (const orbit of chain.toReversed()) {
-    positionM = add(positionM, positionAt(orbit, time));
+  for (const { orbit, share } of chain.toReversed()) {
+    const offsetM = positionAt(orbit, time);
+    positionM = add(positionM, share === null ? offsetM : scale(offsetM, share));
   }
   return positionM;
 }

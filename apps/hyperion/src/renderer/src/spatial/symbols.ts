@@ -99,9 +99,8 @@ const HEXAGON = regularPolygon(6, 30);
  * a filled ringed circle from a filled circle, and the hole in the open disc, which tells it open
  * from filled (plan 06, D17). At size class 2 both are 2 px across at 100% and 1.2 px at 80%. At
  * the smallest class no split leaves both a pixel wide, since two outlines already take 6 of its 8
- * px, so a caller should give a ringed circle size class 2 or more: the smallest a giant is
- * expected to take, which plan 06's record of this task puts to the orchestrator. Nothing here
- * enforces it.
+ * px, so a ringed circle is drawn at size class 2 or more: `starSizeClass` in
+ * `lib/galaxy/starSymbols.ts` raises it there (the orchestrator's ruling 35.4).
  */
 const RINGED_DISC_SHARE = 1 / 3;
 

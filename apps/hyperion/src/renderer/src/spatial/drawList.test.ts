@@ -591,10 +591,25 @@ describe("buildDrawList paths", () => {
     expect(kinds).toEqual(["polyline", "line", "symbol"]);
   });
 
-  it("draws a path 1 px wide", () => {
+  it("draws a reference path 1 px wide", () => {
     const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 0))] });
 
     expect(polylines(buildDrawList(scene, TOP, VIEWPORT).ops).map((op) => op.widthPx)).toEqual([1]);
+  });
+
+  it("draws the selected path 2 px wide, so that width and not colour alone carries it", () => {
+    const scene = bareScene({
+      paths: [
+        path("selected", tiltedCircle(20, 0), { role: "selected" }),
+        path("reference", tiltedCircle(10, 0)),
+      ],
+    });
+
+    // The orchestrator's ruling 44.2: --text against --text-muted is only 1.88:1, and a stale view
+    // mutes both.
+    expect(polylines(buildDrawList(scene, TOP, VIEWPORT).ops).map((op) => op.widthPx)).toEqual([
+      1, 2,
+    ]);
   });
 
   it("gives a path no anchor, so that a pick on it finds nothing", () => {

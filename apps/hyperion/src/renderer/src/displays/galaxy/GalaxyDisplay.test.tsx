@@ -70,7 +70,7 @@ function renderDisplay(): Rendered {
   render(
     <ServerLinkHarness>
       <UniverseProvider>
-        <GalaxyDisplay />
+        <GalaxyDisplay onOpenSystem={() => undefined} />
       </UniverseProvider>
     </ServerLinkHarness>,
   );

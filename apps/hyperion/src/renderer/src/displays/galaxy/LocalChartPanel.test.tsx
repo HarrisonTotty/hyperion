@@ -83,7 +83,7 @@ async function renderChart({ radiusLy = 80, answered = true } = {}): Promise<Ren
   render(
     <ServerLinkHarness>
       <UniverseProvider>
-        <GalaxyDisplay />
+        <GalaxyDisplay onOpenSystem={() => undefined} />
       </UniverseProvider>
     </ServerLinkHarness>,
   );
@@ -182,7 +182,7 @@ describe("LocalChartPanel", () => {
     render(
       <ServerLinkHarness>
         <UniverseProvider>
-          <GalaxyDisplay />
+          <GalaxyDisplay onOpenSystem={() => undefined} />
         </UniverseProvider>
       </ServerLinkHarness>,
     );

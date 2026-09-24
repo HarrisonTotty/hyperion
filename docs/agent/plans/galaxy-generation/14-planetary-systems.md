@@ -3067,3 +3067,82 @@ BodyKind, MoonOrigin, BeltKind, SystemSnapshot, SystemSection}` and their build 
        slope from their Fig. 12.
     8. The 0.414–0.5 M_J giants that only the cap holds, below TF's sample and their 3 m s⁻²
        floor of observed gravities.
+- **P14.T41–T42, T43.a–b for hosts and T44.a, as built (round 7c, `ui`).** Against `FakeWebSocket`
+  fixtures copied from the protocol's wire-form pins (`test/systemFixtures.ts`); the server still
+  answers `system_summary` with `unsupported`, which reads `REJECTED: …` as a fault with `RETRY`.
+  - _Navigation (T41.a)._ `"system"` in `DisplayId` and `DISPLAYS` (`System`, `F3`) and its case in
+    `App`. `OPEN SYSTEM` follows `SystemReadout` in `SystemsPanel.tsx`, outside its `role="status"`,
+    held back with `NO SYSTEM SELECTED` while nothing is selected. It carries a `SystemTarget`: the ID
+    and `universeTimeFromYears` of the chart answer's time, and also the designation, the galactic
+    position and the census's `LayerBand`s, since `system_summary` carries none of them and the
+    display needs them for body designations, ruling 34.5's `centre` and ruling 36's size classes.
+    `App` keeps a `SystemOpening { target, sequence }`, and each opening is a new `key`, so opening a
+    system again starts it afresh; another universe opened reads `NO SYSTEM SELECTED`.
+    `GalaxyDisplay` takes a stable `onOpenSystem`, so its three tests pass a no-op.
+  - _Requests._ `useSystemSummary(target, time, generation)` over `useServerRequest` keeps the last
+    answer for its system through a newer request, converted once by `lib/system/wire.ts`'s
+    `toSystemModel`, which reports an answer it cannot place as a fault in words
+    (`SYSTEM DATA INVALID: hierarchy malformed`, with `RETRY`) rather than throwing in a render.
+    `useSystemData(target, displayTime, generation)` holds D18's request time and moves it to the
+    display time once that is more than a Julian year away, decided on whole seconds and then
+    nanoseconds, or past a star's `death_time` or, unborn, the birth its age gives
+    (`requestTime.ts`); `useSystemBodies` joins it there with `valid_until`.
+  - _Data states (T41.b)._ The request's states through `RequestStatus`, in the map's head once there
+    is an answer, so the map does not move; `NOT YET FORMED`; `NO BODIES` when nothing is drawable
+    (a star with no remnant); stale with the `S` on link loss, and when the newer request a step
+    asked for is refused or times out, which leaves an answer for a time the display has left.
+    `systemNote(BodiesKnown)` composes the
+    note from `not_modelled` tags (`MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED` for the
+    slice's, `null` for `ok`). **For the orchestrator to rule:** with no bodies kind in this
+    protocol there are no tags, so the display passes `{ kind: "unserved" }` and the note reads
+    `PLANETS, MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED`, the client's statement that
+    it cannot ask for bodies, lest the space round the stars read as empty; the UX review notes that
+    rulings 55–56 have the sim computing planets, so "not computed by this generator version" is
+    arguable, and the alternatives are to drop `PLANETS` from the note or to give "not served" a
+    phrase of its own. `DETAIL:` waits for `system_bodies`, which carries the granted level.
+  - _Orbit map (T42 for hosts)._ Scene unit the AU. `composePosition` gains a `member` placement
+    (`share` times the pair's relative orbit: −M₂ ÷ M inside, +M₁ ÷ M outside), and
+    `lib/system/hierarchy.ts` lays out `HierarchyDto`: placements, each pair's members, each star's
+    reach, the orbit each star keys and the plane. Each star's path about its pair's barycentre, and
+    an inner pair's barycentre's, is a `reference` path about where the barycentre is now; the
+    selected star's is `selected`, 2 px (`drawList`'s per-role width, ruling 44.2). The frame reads
+    `SYSTEM BARYCENTRIC`, the centre the system's `RADIUS`, `ANGLE`, `HEIGHT`, `coreDistance` its
+    `RADIUS`, `axes` its `localFrameAt`. `ORBIT_SCALE_UNITS` puts the bar on `formatBodyDistance`'s
+    bands (AU from 0.1 AU, Gm, Mm, km); a 1-2-5 bar steps, so it keeps no unit from before.
+    `SpatialView` gains an optional `fitRequest`, which `INNER`/`ALL` (`I`, `A`) bump so a preset
+    fits after a zoom; absent on the chart. The legend: `BODIES NOT TO SCALE` alone (ruling 36), each
+    kind drawn with its symbol, the census's `INIT MASS` sizes, the fill words, orbit and selected
+    orbit samples, the bracket. **For the orchestrator to rule:** (1) the plane, until planets, is
+    the innermost pair holding the primary's orbit, normal along its angular momentum, for a wide
+    binary too; a single star is drawn on the galactic plane, named `GALACTIC PLANE`; (2) D21's
+    "frame label says `SYSTEM PLANE`" is met by the legend's `FILLED ABOVE SYSTEM PLANE` /
+    `OPEN BELOW SYSTEM PLANE`, the `FRAME` reading keeping the draft's name alone; (3) `INNER` fits the
+    nearest non-zero reach (the sum of each orbit's share of its apoapsis up the chain), `ALL` the
+    farthest, a lone star 1 AU (`LONE_STAR_FIT_AU`); (4) orbits are unlabelled, their stars are.
+    Picking is plan 05's; a click on an orbit selects nothing (tested). A zoom preset stays pressed
+    through a manual zoom, since the grid still covers its radius and `Z` returns to it (the camera
+    presets release; **for the orchestrator to rule**). A zoom key repeating in the frame a preset is
+    pressed applies against the old fit, a known edge left as it is so that the chart's camera is
+    untouched.
+  - _Bodies (T43.a–b for hosts)._ `BodyList` is a `tree` of `treeitem`s (`aria-level`, set position
+    and size per parent): arrows move the active row, `Enter`/`Space` select, a click selects, and
+    `1-2 of 2` shows position and total. Rows read designation (`<system> /<index>`), kind in words,
+    and for a companion the SMA of the orbit it keys; the primary's cell is empty (**for the
+    orchestrator to rule**). The primary is selected until another is chosen. `BodyReadout` (a
+    `div role="status"`, ruling 14) reads DESIG, ID, KIND, PHASE, CLASS, INIT MASS, MASS, LUM, RADIUS
+    (km for neutron stars and black holes), T EFF, REMNANT, COOLING AGE, PULSAR PERIOD, SPIN, KICK,
+    ROTATION, ACTIVITY, VARIABILITY, with the em dash where not modelled and `NONE` where modelled as
+    none; no light reads `—` with `NO LIGHT` for LUM and T EFF, and a star with no remnant omits its
+    physical rows as not applicable. Binary class has no field and no row. The panel names the system
+    with its `AGE` at the answer's time and `[Fe/H]` in dex. `LUM`, `T EFF` and `SMA` are the
+    draft's proposed abbreviations.
+  - _Time (T44.a)._ `useDisplayTime` holds the time and step (`1 h` … `100 yr`, keys `1`–`6`,
+    default `1 d`); `[` / `]` step, `R` resets, all through plan 05's redraw scheduler, so steps before
+    a frame land in one state update and one paint, and no frame is asked for after it (tested with
+    fake frames). `stepTime` adds whole seconds and stops at ±H exactly; `CLOCK WINDOW LIMIT` stands
+    in an always-present `output` and holds back the step towards the edge. The time reads
+    `DISPLAY TIME UT +12 yr 183/14:08:33` in the panel, an `output` so that each step is announced
+    once (ruling 16's precedent), and silently in the view's furniture.
+  - _Also._ `formatMassMearth` keeps three significant figures in E notation (`1.57E-4`, ruling
+    44.1). `GALAXY`'s draw lists are byte for byte unchanged: the round-7 probe's 1,152 chart scenes
+    written to JSON before any edit and after give SHA-256 `9cf26949…` both times.

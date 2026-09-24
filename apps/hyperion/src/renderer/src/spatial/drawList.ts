@@ -158,7 +158,6 @@ const RETICLE_MARGIN_REM = 0.5;
 const TICK_EVERY_DEG = 10;
 const TICK_LENGTH_REM = 0.25;
 const SAME_RADIUS_TOLERANCE = 1e-9;
-const PATH_WIDTH_PX = 1;
 const ANNULUS_WIDTH_PX = 1;
 /** How often a belt's radial ticks join its edges. */
 const BELT_TICK_EVERY_DEG = 10;
@@ -314,6 +313,16 @@ const PATH_STROKE: Readonly<Record<PathRole, ColourToken>> = {
   selected: "text",
 };
 
+/**
+ * The width each path is drawn at: the selected one 2 px, since `--text` against `--text-muted` is
+ * only 1.88:1 and a stale view mutes both, so width, beside the reticle on the body, is the cue that
+ * is not colour (the orchestrator's ruling 44.2).
+ */
+const PATH_WIDTH_PX: Readonly<Record<PathRole, number>> = {
+  reference: 1,
+  selected: 2,
+};
+
 function pathOp(
   piece: PathPiece,
   basis: ViewBasis,
@@ -324,7 +333,7 @@ function pathOp(
     kind: "polyline",
     points: piece.points.map((point) => screen(project(point, basis, camera, viewport))),
     stroke: PATH_STROKE[piece.path.role],
-    widthPx: PATH_WIDTH_PX,
+    widthPx: PATH_WIDTH_PX[piece.path.role],
   };
 }
 
@@ -602,8 +611,8 @@ function markCurveLabels(
  * A scene's paths and annuli (plan 14, T40.a) add to that order and change nothing else in it. A
  * path is cut where it crosses the plane, and each piece opens its own half, before the half's
  * marks, so that no line crosses a symbol; in each half the selected path comes after the
- * reference ones. Each piece is a polyline 1 px wide, in `--text-muted` for a reference path and
- * `--text` for the selected one. An annulus is drawn with the plane, after its rings: each edge a
+ * reference ones. Each piece is a polyline, 1 px wide in `--text-muted` for a reference path and
+ * 2 px wide in `--text` for the selected one. An annulus is drawn with the plane, after its rings: each edge a
  * `--text-muted` polyline and, for a belt, one `--text-muted` `ticks` op of radial segments between
  * the edges every 10° from coreward. Neither a path nor an annulus gives an anchor, so neither is
  * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and

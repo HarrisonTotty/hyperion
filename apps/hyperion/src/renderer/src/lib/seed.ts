@@ -3,10 +3,11 @@
  *
  * @remarks
  * Every `u64` is 16 lower-case hex digits on the wire (plan 04, design note 8) and upper case on
- * screen, the guide's annunciator convention. These two functions are the only places that change
- * case (plan 05, design note D8).
+ * screen, the guide's annunciator convention; a body's ID is its system's with a full stop and its
+ * index in 4 more hex digits. These functions are the only places that change case (plan 05,
+ * design note D8).
  */
-import { isHex64, type SeedHex } from "@hyperion/protocol";
+import { type BodyIdHex, isHex64, type SeedHex } from "@hyperion/protocol";
 
 /** What {@link parseSeedHex} made of the operator's text. */
 export type ParsedSeed = { readonly ok: true; readonly seed: SeedHex } | { readonly ok: false };
@@ -32,4 +33,12 @@ export function parseSeedHex(text: string): ParsedSeed {
 /** Writes a seed or an ID for the screen: its 16 hex digits in upper case. */
 export function formatHex64(hex: string): string {
   return hex.toUpperCase();
+}
+
+/**
+ * Writes a body's ID for the screen: its system's 16 hex digits, the full stop and its 4-digit
+ * index, in upper case, as {@link formatHex64} writes a system's (`0200080020000000.010A`).
+ */
+export function formatBodyIdHex(id: BodyIdHex): string {
+  return id.toUpperCase();
 }

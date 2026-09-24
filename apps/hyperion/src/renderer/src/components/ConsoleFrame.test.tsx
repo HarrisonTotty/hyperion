@@ -26,7 +26,7 @@ describe("ConsoleFrame", () => {
   it("offers every display as a button showing its key, in order", () => {
     renderFrame("link", () => {});
 
-    expect(tabs().map((tab) => tab.textContent)).toEqual(["F1 Link", "F2 Galaxy"]);
+    expect(tabs().map((tab) => tab.textContent)).toEqual(["F1 Link", "F2 Galaxy", "F3 System"]);
     expect(screen.getByRole("button", { name: "F1 Link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "F2 Galaxy" })).toBeInTheDocument();
   });

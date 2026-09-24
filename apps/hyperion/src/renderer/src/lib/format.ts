@@ -222,9 +222,12 @@ const MASS_MEARTH_TWO_DECIMALS_BELOW = 10;
 const MASS_MEARTH_ONE_DECIMAL_BELOW = 100;
 /** Below this many Earth masses two decimals would drop a figure, so two significant ones are kept. */
 const MASS_MEARTH_TWO_FIGURES_BELOW = 0.1;
-/** Below this many Earth masses two significant figures need a run of zeros: E notation. */
+/**
+ * Below this many Earth masses two significant figures need a run of zeros: E notation, in the
+ * guide's three figures.
+ */
 const MASS_MEARTH_SCI_BELOW = 0.001;
-/** The significant figures of a mass below {@link MASS_MEARTH_TWO_FIGURES_BELOW}. */
+/** The significant figures of a decimal mass from 0.001 up to {@link MASS_MEARTH_TWO_FIGURES_BELOW}. */
 const MASS_MEARTH_SMALL_FIGURES = 2;
 
 /**
@@ -237,14 +240,15 @@ const MASS_MEARTH_SMALL_FIGURES = 2;
  * D19); the unit is drawn by `EarthMassUnit`, never typed. Each step is decided on the rounded
  * text, so that 9.996 reads `10.0` and never `10.00`, and 0.0996 reads `0.10` on either side.
  * Below 0.1 M⊕ two decimals would keep one figure or none, so the Moon would read `0.01`; there the
- * mass keeps two significant figures instead, `0.012`, and below 0.001 M⊕ it is in E notation with
- * the same two, `1.6E-4` for Ceres (the orchestrator's ruling 35).
+ * mass keeps two significant figures instead, `0.012` (the orchestrator's ruling 35), and below
+ * 0.001 M⊕ it is in the guide's E notation with its three, `1.57E-4` for Ceres (ruling 44.1, which
+ * keeps the two figures to the decimals from 0.001 to 0.1 M⊕).
  */
 export function formatMassMearth(massMearth: number): string {
   requireFinite(massMearth, "mass");
   const twoFigures = Math.abs(roundSignificant(massMearth, MASS_MEARTH_SMALL_FIGURES));
   if (massMearth !== 0 && twoFigures < MASS_MEARTH_SCI_BELOW) {
-    return formatSci(massMearth, "reading", MASS_MEARTH_SMALL_FIGURES);
+    return formatSci(massMearth);
   }
   if (massMearth !== 0 && twoFigures < MASS_MEARTH_TWO_FIGURES_BELOW) {
     return numberFormat(`significant:${MASS_MEARTH_SMALL_FIGURES}`, {
@@ -294,6 +298,19 @@ function significantOrSci(value: number, low: number, high: number): string {
   return value !== 0 && (magnitude < low || magnitude >= high)
     ? formatSci(value)
     : significant(value);
+}
+
+/**
+ * Formats a value to the guide's three significant figures, without its unit, digits grouped from
+ * five: `0.0893`, `265`, `12,500`; below 0.001 and from 1,000,000 in magnitude in E notation.
+ *
+ * @remarks
+ * For a quantity with no ladder of its own, such as a pulsar's spin period in seconds or a kick in
+ * km/s.
+ */
+export function formatSignificant(value: number): string {
+  requireFinite(value, "value");
+  return significantOrSci(value, 0.001, 1_000_000);
 }
 
 /** Days in a Julian year, the year of every `yr` on the wire. */
@@ -423,6 +440,65 @@ export function formatBodyDistance(
       ? significantOrSci(inUnit, 0.01, Number.POSITIVE_INFINITY)
       : significantOrSci(inUnit, 0, chosen.unit === "AU" ? 1_000_000 : Number.POSITIVE_INFINITY);
   return { value, unit: chosen.unit };
+}
+
+/**
+ * Formats a star's luminosity in solar luminosities to three significant figures, without the unit:
+ * `1.00`, `0.0850`, `25,400`; below 0.001 L☉, as a white dwarf's or a brown dwarf's, and from
+ * 1,000,000 L☉ in E notation: `1.08E-4`.
+ *
+ * @remarks
+ * The unit, `L☉`, is drawn by `SolarUnit`, never typed (the owner's draft of the guide's units).
+ *
+ * @throws RangeError for a negative luminosity.
+ */
+export function formatLuminosityLsun(luminosityLsun: number): string {
+  requireFinite(luminosityLsun, "luminosity");
+  if (luminosityLsun < 0) {
+    throw new RangeError(`a luminosity cannot be ${luminosityLsun} L☉`);
+  }
+  return significantOrSci(luminosityLsun, 0.001, 1_000_000);
+}
+
+/**
+ * Formats a star's radius in solar radii to three significant figures, without the unit: `1.00`,
+ * `0.0115` for a white dwarf, `1500` for a red supergiant; below 0.001 R☉ and from 100,000 R☉ in E
+ * notation.
+ *
+ * @remarks
+ * Neutron stars and black holes are read in kilometres instead ({@link formatRadiusKm}), where
+ * `1.75E-5 R☉` would read as a failure of the unit (the orchestrator's ruling 36). The unit, `R☉`, is
+ * drawn by `SolarUnit`, never typed.
+ *
+ * @throws RangeError for a negative radius.
+ */
+export function formatRadiusRsun(radiusRsun: number): string {
+  requireFinite(radiusRsun, "radius");
+  if (radiusRsun < 0) {
+    throw new RangeError(`a radius cannot be ${radiusRsun} R☉`);
+  }
+  return significantOrSci(radiusRsun, 0.001, 100_000);
+}
+
+/**
+ * Kilometres in the nominal solar radius, 695,700 (IAU 2015 Resolution B3), the value of
+ * `units::consts::SOLAR_RADIUS_M` in `hyperion-sim`.
+ */
+export const KM_PER_RSUN = 695_700;
+
+/**
+ * Formats a radius in kilometres to three significant figures, without the unit, digits grouped
+ * from five: `12.2` for a neutron star, `36.9` for a black hole's horizon; below 0.01 km in E
+ * notation.
+ *
+ * @throws RangeError for a negative radius.
+ */
+export function formatRadiusKm(radiusKm: number): string {
+  requireFinite(radiusKm, "radius");
+  if (radiusKm < 0) {
+    throw new RangeError(`a radius cannot be ${radiusKm} km`);
+  }
+  return significantOrSci(radiusKm, 0.01, Number.POSITIVE_INFINITY);
 }
 
 /**

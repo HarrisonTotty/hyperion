@@ -534,6 +534,21 @@ describe("SpatialView from the keyboard", () => {
     expect(edgeRadius(recorder)).toBeCloseTo((118 / 50) * 1.25 * 25, 9);
   });
 
+  it("fits a new fit radius, a chosen zoom notwithstanding, when a fit is requested with it", async () => {
+    const { user, recorder, rerender } = setup();
+    await user.keyboard("+");
+    nextFrame();
+
+    rerender({
+      fitRadius: 25,
+      fitRequest: 1,
+      scene: aScene({ spheres: [{ radius: 25, role: "data_edge", label: "QUERY EDGE 25 ly" }] }),
+    });
+
+    // A zoom preset's press: the new radius fits the view as 50 ly did, 118 px.
+    expect(edgeRadius(recorder)).toBeCloseTo(118, 9);
+  });
+
   it("fits the view again with Z", async () => {
     const { user, recorder } = setup();
     await user.keyboard("++");

@@ -4,6 +4,7 @@ import { memo, useState } from "react";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { useUniverse } from "../../lib/universe";
+import type { SystemTarget } from "../system/systemTarget";
 import { CentreEntry } from "./CentreEntry";
 import { type GalaxyPage, GalaxyPages } from "./GalaxyPages";
 import { SystemsPanel } from "./SystemsPanel";
@@ -28,7 +29,16 @@ interface PageChoice {
   readonly page: GalaxyPage;
 }
 
-function GalaxyPanels() {
+/** Props of {@link GalaxyDisplay}. */
+interface GalaxyDisplayProps {
+  /**
+   * Opens the `SYSTEM` display on a system of the chart; stable across renders, so that the
+   * memoised display is not rendered again by `App`.
+   */
+  readonly onOpenSystem: (target: SystemTarget) => void;
+}
+
+function GalaxyPanels({ onOpenSystem }: GalaxyDisplayProps) {
   const { open, createUnconfirmed } = useUniverse();
   const { status } = useServerLink();
   const openId = open?.id ?? null;
@@ -82,7 +92,7 @@ function GalaxyPanels() {
             heldBack={linkDownReason(status)}
           />
         )}
-        {open === null ? null : <SystemsPanel chart={chart} />}
+        {open === null ? null : <SystemsPanel chart={chart} onOpenSystem={onOpenSystem} />}
       </div>
     </div>
   );
@@ -102,7 +112,8 @@ function GalaxyPanels() {
  * chart, and, through `useLocalChart`, the chart itself, since its picture and its list stand in
  * different columns. All of it lasts across a visit to another display (plan 05, design note D1).
  * With no universe open, `UNIVERSE` is whole and says `NO UNIVERSE OPEN`, and nothing else is shown.
- * Memoised: it takes no props and reads the server link and the universe from context, so a latency
- * update, which re-renders `App`, does not re-render it.
+ * Memoised: its one prop, the way to open the `SYSTEM` display, is stable, and it reads the server
+ * link and the universe from context, so a latency update, which re-renders `App`, does not
+ * re-render it.
  */
 export const GalaxyDisplay = memo(GalaxyPanels);

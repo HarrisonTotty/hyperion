@@ -154,6 +154,12 @@ export interface SpatialViewProps {
   readonly scene: SpatialScene;
   /** The radius, in scene units, that the default zoom fits into the view: the query radius. */
   readonly fitRadius: number;
+  /**
+   * Changing it returns the view to the zoom that fits `fitRadius`, as `Z` does: a zoom preset
+   * changes it with each press, so that the preset fits even after the operator has zoomed. Absent,
+   * a new radius keeps a zoom the operator chose, as the star chart's does.
+   */
+  readonly fitRequest?: number | undefined;
   /** Writes a length in scene units with its unit, for the scale bar: `20 ly`, `500 AU`. */
   readonly formatLength: (length: number) => string;
   /**
@@ -233,6 +239,7 @@ export interface SpatialViewProps {
 export function SpatialView({
   scene,
   fitRadius,
+  fitRequest,
   formatLength,
   scaleUnits,
   frameName,
@@ -263,7 +270,7 @@ export function SpatialView({
 
   const fittedPxPerUnit =
     viewport === null ? null : fitPxPerUnit(fitRadius, viewport, FIT_MARGIN_REM * viewport.remPx);
-  const { camera: cameraState, move, turnTo } = useOrbitCamera(fittedPxPerUnit);
+  const { camera: cameraState, move, turnTo } = useOrbitCamera(fittedPxPerUnit, fitRequest);
   const reducedMotion = usePrefersReducedMotion();
   const choosePreset = useCallback(
     (name: PresetName): void => {

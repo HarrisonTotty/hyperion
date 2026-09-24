@@ -2680,3 +2680,20 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
   - _Outside the owned files._ `remnant/mod.rs` gains `mod kick` beside the `class` lane's
     `pub mod wd_spectral` (applied from `class-P06T23T20b.patch`, with its `McElroy` in `clippy.toml`
     and its Risks bullet above). `sse/mod.rs` re-exports `fate_of`.
+- **P06.T35.b's registry, as built alone (round 7c, `ui`).** `lib/galaxy/starSymbols.ts` exports
+  `starSymbol(kind: ObjectKindDto): SymbolShape | null`, an exhaustive `switch` over the wire's 13
+  kinds: circle for a protostar, pre-main-sequence star, dwarf, subgiant, hot subdwarf and
+  `substellar` (a brown dwarf), ringed circle for a giant, supergiant and Wolf-Rayet star, diamond
+  for a white dwarf, triangle for a neutron star, square for a black hole, and `null` for
+  `no_remnant`, which is listed and not drawn (the owner's draft of the symbol set). `ObjectKind` is
+  the wire's `ObjectKindDto`; no client alias was added. `starSizeClass(shape, layer)` gives the mass
+  layer's class and raises a ringed circle to `RINGED_CIRCLE_MIN_SIZE_CLASS` (2), ruling 35.4's
+  floor, which a test pins for every layer. Its first caller is plan 14's orbit map; the chart's
+  `STARS` filter, legend entries and class column, `wire.ts`'s brief and `include_stellar` still wait
+  for P06.T34, which fills the brief. P06.T36's readout was built for the `SYSTEM` display's host,
+  not the chart's `SystemReadout` (plan 14's round-7c bullet), and its words (`objectKindLabel`,
+  `phaseLabel`, `remnantLabel`) are in `lib/system/words.ts` for the chart to reuse. Luminosity and
+  radius have their formatters, `formatLuminosityLsun` and `formatRadiusRsun` (three significant
+  figures, E notation below 0.001), with `KM_PER_RSUN` (695,700, IAU 2015 B3) and `formatRadiusKm` for
+  ruling 36's compact remnants, and their drawn units, `SolarUnit` (`L☉`, "solar luminosities";
+  `R☉`, "solar radii").

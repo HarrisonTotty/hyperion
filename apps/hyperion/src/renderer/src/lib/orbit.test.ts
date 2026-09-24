@@ -324,4 +324,48 @@ describe("composePosition", () => {
 
     expect(() => composePosition(looped, "a", TIME)).toThrow("does not reach the origin");
   });
+
+  describe("with the members of a pair", () => {
+    // Sirius-like: a 2.5 M☉ inner member and a 1 M☉ outer one, 23.5 au apart on average, as the
+    // protocol's wire-form pin of a system summary has them.
+    const PAIR = orbitOf({ semiMajorAxisM: 3.515_625e12, eccentricity: 0.5, periodS: 1.921_7e9 });
+    const INNER_MSUN = 2.5;
+    const OUTER_MSUN = 1;
+    const TOTAL_MSUN = INNER_MSUN + OUTER_MSUN;
+    const STARS: ReadonlyMap<string, BodyPlacement> = new Map<string, BodyPlacement>([
+      ["pair", { kind: "origin" }],
+      ["a", { kind: "member", parentId: "pair", orbit: PAIR, share: -OUTER_MSUN / TOTAL_MSUN }],
+      ["b", { kind: "member", parentId: "pair", orbit: PAIR, share: INNER_MSUN / TOTAL_MSUN }],
+      ["planet", { kind: "orbit", parentId: "a", orbit: PLANET }],
+    ]);
+
+    it("puts each member at its share of the relative orbit about the barycentre", () => {
+      const relativeM = positionAt(PAIR, TIME);
+
+      expect(composePosition(STARS, "a", TIME)).toEqual(scale(relativeM, -OUTER_MSUN / TOTAL_MSUN));
+      expect(composePosition(STARS, "b", TIME)).toEqual(scale(relativeM, INNER_MSUN / TOTAL_MSUN));
+    });
+
+    it("keeps the barycentre where the pair is placed", () => {
+      const a = composePosition(STARS, "a", TIME);
+      const b = composePosition(STARS, "b", TIME);
+      const barycentre = scale(add(scale(a, INNER_MSUN), scale(b, OUTER_MSUN)), 1 / TOTAL_MSUN);
+
+      expect(norm(barycentre)).toBeLessThan(1e-9 * norm(sub(b, a)));
+    });
+
+    it("keeps the members apart by the relative orbit", () => {
+      const apart = sub(composePosition(STARS, "b", TIME), composePosition(STARS, "a", TIME));
+
+      expect(norm(sub(apart, positionAt(PAIR, TIME)))).toBeLessThan(
+        1e-12 * norm(positionAt(PAIR, TIME)),
+      );
+    });
+
+    it("places a body on a member's orbit about the member where it is now", () => {
+      expect(composePosition(STARS, "planet", TIME)).toEqual(
+        add(composePosition(STARS, "a", TIME), positionAt(PLANET, TIME)),
+      );
+    });
+  });
 });
