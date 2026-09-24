@@ -38,6 +38,7 @@ mod helium;
 mod evolve;
 mod track;
 pub use evolve::{evolve, lifetime, turn_off_mass};
+pub(crate) use track::fate_of;
 pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.

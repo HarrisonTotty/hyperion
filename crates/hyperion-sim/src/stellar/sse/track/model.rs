@@ -136,11 +136,14 @@ pub(crate) enum Model {
     HeliumMainSequence { fixed: Option<HeliumStar> },
     /// A naked helium star after its main sequence: the helium Hertzsprung gap and giant branch.
     HeliumShellBurning { star: HeliumStar, span: Span },
-    /// A remnant, from its formation at `birth` (years since the onset of collapse).
+    /// A remnant, from its formation at `birth` (years since the onset of collapse); a white
+    /// dwarf's cooling law starts at `origin` of its own clock (`white_dwarf::cooling_origin`,
+    /// zero for every other remnant).
     Remnant {
         phase: Phase,
         mass: SolarMasses,
         birth: f64,
+        origin: Megayears,
     },
 }
 
@@ -257,9 +260,14 @@ impl Model {
                     ),
                 }
             }
-            Self::Remnant { phase, mass, birth } => Point {
+            Self::Remnant {
+                phase,
+                mass,
+                birth,
+                origin,
+            } => Point {
                 phase: *phase,
-                point: remnant(*phase, *mass, Years::new((age - birth).max(0.0)), phys),
+                point: remnant(*phase, *mass, age - birth, *origin, phys),
             },
         }
     }
@@ -354,8 +362,9 @@ fn giant(
     Point { phase, point }
 }
 
-/// `point` perturbed towards the white dwarf of its core at formation (HPT section 6.3: equation
-/// 90 with t = 0 and A = 4 for helium or 15 for carbon–oxygen, and equation 91's radius).
+/// `point` perturbed towards the white dwarf of its core at formation (HPT section 6.3: the
+/// recipe's cooling law at t = 0, with A = 4 for helium or 15 for carbon–oxygen, and equation 91's
+/// radius; `white_dwarf::formation_luminosity`).
 #[must_use]
 fn perturb_to_white_dwarf(
     point: PhasePoint,
@@ -373,24 +382,33 @@ fn perturb_to_white_dwarf(
         mt,
         mu,
         CoreRemnant {
-            luminosity: white_dwarf::hpt_luminosity(core, mc, Years::ZERO, phys.z),
+            luminosity: white_dwarf::formation_luminosity(phys.remnant, core, mc, phys.z),
             radius: white_dwarf_radius(phys.remnant, mc),
         },
     )
 }
 
-/// A remnant of `phase` and `mass`, `age` after its formation: a white dwarf cools by HPT's
-/// equation 90, a neutron star by equation 93, and a black hole is dark (HPT's 10⁻¹⁰ L☉ of
-/// equation 96 guards a division, not a physical luminosity; P06.T22). The radii are those of
-/// the track's remnant recipe (P06.T11). `NoRemnant` has neither.
+/// A remnant of `phase` and `mass`, `years_since_birth` after its formation (a negative span
+/// reads as zero): a white dwarf cools by the
+/// recipe's law from `origin` of its clock (Hurley and Shara 2003 under the default, HPT's equation
+/// 90 under `Hurley2000`; P06.T20.a), a neutron star by equation 93, and a black hole is dark
+/// (HPT's 10⁻¹⁰ L☉ of equation 96 guards a division, not a physical luminosity; P06.T22). The
+/// radii are those of the track's remnant recipe (P06.T11). `NoRemnant` has neither.
 #[must_use]
-fn remnant(phase: Phase, mass: SolarMasses, age: Years, phys: &Physics<'_>) -> PhasePoint {
+fn remnant(
+    phase: Phase,
+    mass: SolarMasses,
+    years_since_birth: f64,
+    origin: Megayears,
+    phys: &Physics<'_>,
+) -> PhasePoint {
+    let age = Years::new(years_since_birth.max(0.0));
     let (luminosity, radius) = match phase {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             let core =
                 WhiteDwarfCore::of(phase).expect("a white dwarf phase has a white dwarf core");
             (
-                white_dwarf::hpt_luminosity(core, mass, age, phys.z),
+                white_dwarf::luminosity(phys.remnant, core, mass, age, origin, phys.z),
                 white_dwarf_radius(phys.remnant, mass),
             )
         }

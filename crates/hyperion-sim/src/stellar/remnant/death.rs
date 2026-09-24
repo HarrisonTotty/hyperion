@@ -99,10 +99,11 @@ impl DeathKind {
 }
 
 /// The spectral type of a core-collapse supernova, set by what the progenitor kept of its
-/// envelopes: IIP above 2 M☉ of hydrogen envelope, IIL from 0.1 M☉, IIb below that, Ib with no
+/// envelopes: IIP above 2 M☉ of hydrogen envelope, IIL from 0.5 M☉, IIb below that, Ib with no
 /// hydrogen and more than 0.14 M☉ of helium outside the carbon–oxygen core, and Ic with less (plan
-/// 06, P06.T10.e; the thresholds are generator defaults, after Heger et al. 2003, ApJ 591, 288,
-/// and Hachinger et al. 2012, MNRAS 422, 70).
+/// 06, P06.T10.e and ruling 46 of 2026-09-22; the thresholds are generator defaults, after Heger
+/// et al. 2003, ApJ 591, 288, Sravan et al. 2019, ApJ 885, 130, and Hachinger et al. 2012, MNRAS
+/// 422, 70).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SupernovaType {
     /// A plateau light curve from a massive hydrogen envelope.
@@ -125,14 +126,23 @@ pub enum SupernovaType {
 /// decline.
 pub(crate) const PLATEAU_ENVELOPE: SolarMasses = SolarMasses::new(2.0);
 
-/// The hydrogen envelope, M☉, below which a core collapse is a Type IIb supernova: 0.1 M☉, plan
-/// 06's generator default (P06.T10.e).
+/// The hydrogen envelope, M☉, below which a core collapse is a Type IIb supernova: 0.5 M☉, the
+/// upper end of the envelopes inferred for Type IIb supernovae (ruling 46 of 2026-09-22).
 ///
-/// It is the envelope of about 0.1 M☉ that Bersten et al. (2012, ApJ 757, 31) find for SN
-/// 2011dh, whose hydrogen itself is about 0.02 M☉. The prototype, SN 1993J, kept an envelope of
-/// 0.20 ± 0.05 M☉ (Woosley et al. 1994, ApJ 429, 300), which this threshold calls Type IIL, so the
-/// threshold is a lower bound of the observed envelopes rather than their boundary.
-pub(crate) const THIN_HYDROGEN_ENVELOPE: SolarMasses = SolarMasses::new(0.1);
+/// Sravan, Marchant and Kalogera (2019, ApJ 885, 130, section 2.3) collect them: the hydrogen
+/// envelopes inferred for every Type IIb supernova with a detected progenitor are ≲ 0.5 M☉ (SN
+/// 1993J, Woosley et al. 1994, ApJ 429, 300, and Houck and Fransson 1996; SN 2011dh, Bersten et
+/// al. 2012, ApJ 757, 31; SN 2011fu; SN 2016gkg), those from larger samples of Type IIb light
+/// curves are below it too, and 0.01–0.5 M☉ is their strict definition of a Type IIb progenitor.
+/// The bound admits the prototype, SN 1993J, whose envelope was 0.20 ± 0.05 M☉ (Woosley et al.),
+/// SN 2011dh's of about 0.1 M☉, whose hydrogen itself is about 0.02 M☉ (Bersten et al.), and Cas
+/// A, whose light echo shows a Type IIb spectrum nearly identical to SN 1993J's (Krause et al.
+/// 2008, Science 320, 1195). P06.T10.e first had 0.1 M☉, which called SN 1993J Type IIL.
+///
+/// Any hydrogen at all below the bound makes a Type IIb here. Sravan et al. take a star with under
+/// 0.01 M☉ of envelope for stripped, and so a Type Ib or Ic (their section 2); ruling 46 moves only
+/// the upper bound, and the lower is left at zero.
+pub(crate) const THIN_HYDROGEN_ENVELOPE: SolarMasses = SolarMasses::new(0.5);
 
 /// The helium outside the carbon–oxygen core, M☉, below which a stripped star's supernova is Type
 /// Ic: 0.14 M☉, the upper end of the 0.06–0.14 M☉ of helium that Hachinger et al. (2012, MNRAS 422,
@@ -143,7 +153,7 @@ pub(crate) const HIDDEN_HELIUM: SolarMasses = SolarMasses::new(0.14);
 impl SupernovaType {
     /// The type of a core-collapse supernova whose progenitor kept `hydrogen` M☉ of hydrogen
     /// envelope and `helium` M☉ of helium outside its carbon–oxygen core: IIP above 2 M☉ of
-    /// hydrogen, IIL from 0.1 to 2, IIb below 0.1, Ib with no hydrogen and more than 0.14 M☉ of
+    /// hydrogen, IIL from 0.5 to 2, IIb below 0.5, Ib with no hydrogen and more than 0.14 M☉ of
     /// helium, Ic with less (plan 06's T10.e; the thresholds are the generator's defaults, with
     /// their sources at [`PLATEAU_ENVELOPE`], [`THIN_HYDROGEN_ENVELOPE`] and [`HIDDEN_HELIUM`]).
     #[must_use]
@@ -263,12 +273,25 @@ mod tests {
             SupernovaType::IIL
         );
         assert_eq!(
-            SupernovaType::of_envelopes(m(0.1), m(3.0)),
+            SupernovaType::of_envelopes(m(0.5), m(3.0)),
             SupernovaType::IIL
         );
         assert_eq!(
             SupernovaType::of_envelopes(m(0.05), m(3.0)),
             SupernovaType::IIb
+        );
+        // Ruling 46: the prototype SN 1993J (0.20 ± 0.05 M☉ of envelope) and SN 2011dh (about
+        // 0.1 M☉) are Type IIb, and an envelope just above Sravan et al.'s 0.5 M☉ is Type IIL.
+        for envelope in [0.15, 0.2, 0.25, 0.1, 0.499] {
+            assert_eq!(
+                SupernovaType::of_envelopes(m(envelope), m(3.0)),
+                SupernovaType::IIb,
+                "{envelope} M☉"
+            );
+        }
+        assert_eq!(
+            SupernovaType::of_envelopes(m(0.51), m(3.0)),
+            SupernovaType::IIL
         );
         assert_eq!(
             SupernovaType::of_envelopes(m(0.0), m(0.5)),

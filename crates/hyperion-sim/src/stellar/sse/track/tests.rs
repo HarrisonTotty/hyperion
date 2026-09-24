@@ -277,6 +277,7 @@ fn a_light_helium_star_leaves_a_white_dwarf_of_its_whole_mass() {
         &comp,
         TrackOptions::hurley2000(),
         ReimersEta::new(0.5),
+        RemnantDraws::of(&StarDraws::median()),
         Resolution::GENERATOR,
         build::Keep::Track,
     );
@@ -302,6 +303,234 @@ fn a_light_helium_star_leaves_a_white_dwarf_of_its_whole_mass() {
     );
     assert!((fate.remnant.mass().value() - whole).abs() < 1e-15);
     assert!((core - (1.45 * whole - 0.31)).abs() < 1e-6, "{core}");
+}
+
+/// The helium star of 0.5 M☉ at Z = 0.02 of the test above, built by `options`: its last living
+/// state (log₁₀ L, log₁₀ R, core) and the state of its white dwarf at birth.
+fn light_helium_star_hand_over(options: TrackOptions) -> ([f64; 3], StarState) {
+    let comp = composition(0.02);
+    let coeffs = ZCoeffs::new(comp.z_fit());
+    let builder = build::Builder::new(
+        &coeffs,
+        &comp,
+        options,
+        ReimersEta::new(0.5),
+        RemnantDraws::of(&StarDraws::median()),
+        Resolution::GENERATOR,
+        build::Keep::Track,
+    );
+    let mut step = builder.helium_main_sequence(0.0, 0.5, 0.0, None);
+    let (fate, last) = loop {
+        match step.next {
+            build::Entry::HeliumShellBurning { star, clock0, mass } => {
+                step = builder.helium_shell_burning(step.end, &star, clock0, mass, step.end_state);
+            }
+            build::Entry::Dead(fate) => break (fate, step.end_state),
+            other => panic!("a helium star of 0.5 M☉ does not enter {other:?}"),
+        }
+    };
+    let last = last.expect("the helium star's last segment was evaluated");
+    let segment = builder.remnant_segment(fate, [0.0; 2], Some(last));
+    let physics = Physics {
+        coeffs: &coeffs,
+        z: comp.z_fit(),
+        remnant: options.remnant(),
+    };
+    let birth = fate.death.age().value();
+    let state = StarState::new(segment.evaluate(&physics, birth).parts(birth));
+    (last, state)
+}
+
+/// Ruling 46: a helium star below 0.689 M☉ keeps its unburnt helium on its white dwarf, so under
+/// `Hurley2000`, as in SSE, its luminosity steps up at the hand-over by log₁₀(M ÷ Mc): the dwarf
+/// is heavier than the core the perturbation drew the star towards. Under
+/// the generator's recipe Hurley and Shara's law is matched to the star's last luminosity
+/// (P06.T20.a), and the step is gone.
+#[test]
+fn a_light_helium_stars_white_dwarf_steps_in_luminosity_only_under_hurley2000() {
+    let (last, hpt) = light_helium_star_hand_over(TrackOptions::hurley2000());
+    let step = math::log10(hpt.luminosity().value()) - last[0];
+    assert!(step > 0.05 && step < 0.35, "the SSE step is {step} dex");
+    let (last, modern) = light_helium_star_hand_over(TrackOptions::default());
+    let step = math::log10(modern.luminosity().value()) - last[0];
+    assert!(step.abs() < 1e-9, "the matched step is {step} dex");
+    assert_eq!(modern.phase(), Phase::CarbonOxygenWhiteDwarf);
+}
+
+/// Under the generator's recipe a white dwarf takes over at the luminosity its star ended with,
+/// whether it leaves the AGB as carbon–oxygen or oxygen–neon or a giant's degenerate core as
+/// helium, and then fades, in luminosity and in temperature, continuously to 13 Gyr (P06.T20.a).
+#[test]
+fn a_white_dwarf_takes_over_at_its_stars_luminosity_and_then_fades() {
+    for (m, z, phase) in [
+        (1.0, 0.02, Phase::CarbonOxygenWhiteDwarf),
+        (2.0, 0.001, Phase::CarbonOxygenWhiteDwarf),
+        (3.0, 0.02, Phase::CarbonOxygenWhiteDwarf),
+        (7.0, 0.02, Phase::OxygenNeonWhiteDwarf),
+    ] {
+        let track = Track::full(SolarMasses::new(m), &composition(z), &StarDraws::median());
+        let death = track.lifetime().expect("a full track dies").value();
+        let before = track.state_at(Years::new(death * (1.0 - 1e-13)));
+        let after = track.state_at(Years::new(death));
+        assert_eq!(after.phase(), phase, "{m} M☉ at Z = {z}");
+        let step = math::log10(after.luminosity() / before.luminosity());
+        assert!(
+            step.abs() < 1e-6,
+            "{m} M☉ at Z = {z}: {step} dex at the hand-over"
+        );
+        let (mut l, mut t) = (f64::INFINITY, f64::INFINITY);
+        for i in 0..=2_000 {
+            let x = f64::from(i) / 2_000.0;
+            let state = track.state_at(Years::new(death + 1.3e10 * x * x * x));
+            let (ln, tn) = (
+                state.luminosity().value(),
+                state.effective_temperature().value(),
+            );
+            assert!(
+                ln < l && tn < t,
+                "{m} M☉ at Z = {z}, step {i}: {ln} L☉, {tn} K"
+            );
+            // No step: over a stride that is a small share of the age, a small change.
+            if i > 1 {
+                assert!(
+                    ln / l > 0.8,
+                    "{m} M☉ at Z = {z}, step {i}: L from {l} to {ln}"
+                );
+            }
+            (l, t) = (ln, tn);
+        }
+    }
+}
+
+/// P06.T18.d at Z = 0.02 under the generator's recipes: a star inside the single-star window,
+/// tested in the mass its early AGB's `m_c_bagb` reads, collapses by electron capture into the
+/// 1.26 M☉ neutron star; one just below it ends as an oxygen–neon white dwarf, and one just above
+/// it collapses an iron core, with no gap between the two (ruling 45).
+#[test]
+fn the_electron_capture_window_meets_the_iron_cores() {
+    let solar = composition(0.02);
+    let end = |m: f64| {
+        let track = Track::full(SolarMasses::new(m), &solar, &StarDraws::median());
+        (track.death().unwrap(), track.remnant().unwrap())
+    };
+    let (death, remnant) = end(8.25);
+    assert_eq!(death.kind(), DeathKind::ElectronCapture);
+    assert_eq!(remnant.kind(), RemnantKind::NeutronStar);
+    assert!((remnant.mass().value() - 1.26).abs() < 1e-15);
+    let (death, remnant) = end(8.1);
+    assert_eq!(death.kind(), DeathKind::EnvelopeLoss);
+    assert_eq!(remnant.kind(), RemnantKind::WhiteDwarf);
+    let (death, _) = end(8.35);
+    assert!(
+        matches!(death.kind(), DeathKind::CoreCollapse { .. }),
+        "{death:?}"
+    );
+    // Across the window's upper end the deaths change from electron capture to an iron core.
+    let windows = crate::stellar::remnant::collapse::ElectronCaptureWindows::new(&ZCoeffs::new(
+        solar.z_fit(),
+    ));
+    let mut last = DeathKind::ElectronCapture;
+    for i in 0..=40 {
+        let m = 8.26 + 0.002 * f64::from(i);
+        let kind = end(m).0.kind();
+        match (last, kind) {
+            (
+                DeathKind::ElectronCapture,
+                DeathKind::ElectronCapture | DeathKind::CoreCollapse { .. },
+            )
+            | (DeathKind::CoreCollapse { .. }, DeathKind::CoreCollapse { .. }) => {}
+            other => panic!(
+                "{m} M☉: {other:?} across m_cc = {:?}",
+                windows.iron_core_mass()
+            ),
+        }
+        last = kind;
+    }
+    assert!(matches!(last, DeathKind::CoreCollapse { .. }));
+}
+
+/// Ruling 57: under the generator's recipes no white dwarf is heavier than the electron-capture
+/// mass of an oxygen–neon core, 1.37 M☉, and none sits at the neutron star's radius, over 5–9 M☉
+/// (where the heaviest dwarfs come from) at five metallicities; under `Hurley2000`, as in SSE,
+/// the pulses still grow some oxygen–neon cores to 1.44 M☉.
+#[test]
+fn no_white_dwarf_is_heavier_than_the_electron_capture_mass() {
+    use crate::stellar::remnant::collapse::OXYGEN_NEON_CAPTURE_MASS;
+    use crate::stellar::remnant::structure::neutron_star_radius;
+    let cap = OXYGEN_NEON_CAPTURE_MASS.value();
+    let floor = neutron_star_radius(RemnantRecipe::MandelMuller2020).value();
+    let (mut heaviest, mut smallest, mut capped) = (0.0_f64, f64::INFINITY, 0);
+    for z in [1e-4, 1e-3, 4e-3, 0.02, 0.03] {
+        for i in 0..=160 {
+            let m = 5.0 + 0.025 * f64::from(i);
+            let track = Track::full(SolarMasses::new(m), &composition(z), &StarDraws::median());
+            let remnant = track.remnant().expect("a full track leaves a remnant");
+            if remnant.kind() != RemnantKind::WhiteDwarf {
+                continue;
+            }
+            let death = track.lifetime().expect("a full track dies").value();
+            let state = track.state_at(Years::new(death + 1e6));
+            let (mass, radius) = (remnant.mass().value(), state.radius().value());
+            assert!(mass <= cap, "{m} M☉ at Z = {z}: a white dwarf of {mass} M☉");
+            assert!(radius > 20.0 * floor, "{m} M☉ at Z = {z}: {radius} R☉");
+            heaviest = heaviest.max(mass);
+            smallest = smallest.min(radius);
+            capped += u32::from(mass >= cap);
+        }
+    }
+    assert!(
+        capped > 0 && heaviest > 1.36,
+        "{heaviest} M☉, {capped} at the cap"
+    );
+    assert!(smallest > 1e-3, "{smallest} R☉");
+    let hpt = Track::full_with(
+        SolarMasses::new(8.1),
+        &composition(0.02),
+        &StarDraws::median(),
+        TrackOptions::hurley2000(),
+    );
+    assert_eq!(hpt.death().unwrap().kind(), DeathKind::ElectronCapture);
+}
+
+/// Pins the endings of P06.T18.d and the white dwarfs of P06.T20.a bit for bit under the
+/// generator's recipes: for masses from a white dwarf's through the electron-capture window to
+/// black holes, at two metallicities and two sets of remnant draws, the death's age and kind, the
+/// remnant, and the remnant's luminosity and radius a million and a billion years on.
+#[test]
+fn the_endings_are_pinned() {
+    use hyperion_testkit::golden::GoldenWriter;
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    let low = StarDraws::from_parts(StarDrawsParts {
+        remnant_type: crate::rng::Mark::from_word(u64::MAX / 9),
+        remnant_fallback: crate::rng::Mark::from_word(u64::MAX / 5 * 4),
+        remnant_mass: StandardNormal::new(-0.8).expect("finite"),
+        ..StarDrawsParts::MEDIAN
+    });
+    for z in [0.02, 0.001] {
+        for (name, draws) in [("median", StarDraws::median()), ("low marks", low.clone())] {
+            for m in [
+                1.0, 2.0, 5.0, 7.0, 8.1, 8.25, 8.35, 12.0, 20.0, 25.0, 40.0, 100.0,
+            ] {
+                let track = Track::full(SolarMasses::new(m), &composition(z), &draws);
+                let death = track.death().expect("a full track dies");
+                let remnant = track.remnant().expect("and leaves a remnant");
+                w.line(&format!(
+                    "Z = {z}, {name}, {m} M_sun: {:?}, {:?}",
+                    death.kind(),
+                    remnant.kind()
+                ));
+                w.f64("  death", death.age().value());
+                w.f64("  remnant mass", remnant.mass().value());
+                for after in [1e6, 1e9] {
+                    let s = track.state_at(Years::new(death.age().value() + after));
+                    w.f64(&format!("  L at +{after} yr"), s.luminosity().value());
+                    w.f64(&format!("  R at +{after} yr"), s.radius().value());
+                }
+            }
+        }
+    }
+    hyperion_testkit::golden!("stellar/endings", w.as_str());
 }
 
 /// The endings by initial mass that P06.T11 left to the tracks: under HPT's recipes a 20 M☉ star

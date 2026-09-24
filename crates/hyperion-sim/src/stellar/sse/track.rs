@@ -47,20 +47,28 @@
 //! core's fall at the second dredge-up, and an early-AGB star losing its envelope while its
 //! remnant is still passing from the helium main sequence to the helium giants), the step in log L
 //! and log R is carried as an offset that decays to zero over the first 2% of the new phase. Until
-//! P06.T16's post-AGB bridge the end of the AGB hands over to the white dwarf directly, which HPT's
-//! perturbation makes continuous for carbon–oxygen white dwarfs and leaves a step for oxygen–neon
-//! ones, whose cooling law reads a heavier nucleus. A helium star below 0.689 M☉ also steps where
-//! it becomes a white dwarf, since the dwarf keeps the helium the star did not burn while the
-//! perturbation approaches the white dwarf of its core (see `phases.rs`, `helium_star_end`).
-//! Both steps are at the star's death, which the continuity tests exclude.
+//! P06.T16's post-AGB bridge the end of the AGB hands over to the white dwarf directly. HPT's
+//! perturbation makes that continuous for carbon–oxygen white dwarfs and leaves a step for
+//! oxygen–neon ones, whose cooling law reads a heavier nucleus, and a helium star below 0.689 M☉
+//! steps where it becomes a white dwarf, since the dwarf keeps the helium the star did not burn
+//! while the perturbation approaches the white dwarf of its core (see `phases.rs`,
+//! `helium_star_end`). Under [`RemnantRecipe::Hurley2000`] both steps stand, in luminosity and
+//! radius, as in SSE. Under the default the white dwarf's cooling law is matched to the star's
+//! last luminosity (P06.T20.a, `white_dwarf::cooling_origin`), so the luminosity is continuous at
+//! every such hand-over and only the radius steps. Every step is at the star's death, which the
+//! continuity tests exclude.
 //!
 //! # Remnants
 //!
-//! A white dwarf cools by HPT's equation 90 and a neutron star by equation 93 under both recipes
-//! until P06.T20 and T21 (ruling 33). A black hole's luminosity is exactly zero, so no consumer may
-//! take its logarithm unguarded (ruling 40). Under
-//! [`RemnantRecipe::MandelMuller2020`] a core collapse leaves HPT's remnant until P06.T18.d (see
-//! `phases.rs`, `collapse_remnant`).
+//! Under [`RemnantRecipe::Hurley2000`] a white dwarf cools by HPT's equation 90, a neutron star by
+//! equation 93, and a supernova leaves HPT's remnant (equation 92), as in the published SSE code.
+//! Under the default, [`RemnantRecipe::MandelMuller2020`] (P06.T18.d), an iron core's collapse
+//! leaves the neutron star or black hole of Mandel and Müller (2020) that the star's remnant draws
+//! decide, a star inside the single-star electron-capture window leaves their 1.26 M☉ neutron star,
+//! and a white dwarf cools by Hurley and Shara's (2003) law (P06.T20.a). A neutron star cools by
+//! HPT's equation 93 under both until P06.T21 (ruling 33). A black hole's luminosity is exactly
+//! zero, so no consumer may take its logarithm unguarded (ruling 40). See `phases.rs`,
+//! `iron_core_fate`, for the collapse, and `model.rs` for the remnants' states.
 
 mod build;
 mod interp;
@@ -68,7 +76,8 @@ mod model;
 mod phases;
 
 use crate::stellar::draws::StarDraws;
-use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe};
+use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
@@ -227,6 +236,18 @@ pub(crate) struct Fate {
     pub(crate) remnant: CompactRemnant,
     /// The remnant's phase, which tells the kind of white dwarf.
     pub(crate) phase: Phase,
+    /// What an iron core's collapse was built from, if the star died so: the remnant draws decide
+    /// its remnant under [`RemnantRecipe::MandelMuller2020`], and [`Track::fate_with`] redraws it.
+    pub(crate) iron_core: Option<IronCore>,
+}
+
+/// An iron core's collapse before the remnant draws are read: the supernova its envelopes make,
+/// and the carbon–oxygen core HPT's remnant reads.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IronCore {
+    pub(crate) supernova: SupernovaType,
+    /// The carbon–oxygen core HPT's equation 92 reads under [`RemnantRecipe::Hurley2000`].
+    pub(crate) co_core: SolarMasses,
 }
 
 impl Track {
@@ -312,8 +333,16 @@ impl Track {
         let coeffs = ZCoeffs::new(comp.z_fit());
         let m0 = checked_initial_mass(m0);
         let eta = reimers_eta(draws.eta().value());
-        let outcome = Builder::new(&coeffs, comp, options, eta, resolution, build::Keep::Track)
-            .run(m0.value(), age_max);
+        let outcome = Builder::new(
+            &coeffs,
+            comp,
+            options,
+            eta,
+            RemnantDraws::of(draws),
+            resolution,
+            build::Keep::Track,
+        )
+        .run(m0.value(), age_max);
         Self {
             coeffs,
             composition: *comp,
@@ -361,11 +390,38 @@ impl Track {
     ///
     /// A white dwarf's mass is the core mass the track ends with (plan 06, design note 9). Under
     /// [`RemnantRecipe::Hurley2000`] a supernova leaves HPT's neutron star or black hole (their
-    /// equation 92). Under [`RemnantRecipe::MandelMuller2020`] the same stands in until P06.T18.d
-    /// replaces it with Mandel and Müller's; see `phases::collapse_remnant`.
+    /// equation 92). Under [`RemnantRecipe::MandelMuller2020`] an iron core leaves Mandel and
+    /// Müller's (2020) neutron star or black hole, decided by the star's remnant draws
+    /// ([`StarDraws::remnant_type`], [`remnant_fallback`](StarDraws::remnant_fallback) and
+    /// [`remnant_mass`](StarDraws::remnant_mass)), or nothing after pair instability, and electron
+    /// capture leaves their 1.26 M☉ neutron star (P06.T18.d).
     #[must_use]
     pub fn remnant(&self) -> Option<CompactRemnant> {
         self.fate.map(|fate| fate.remnant)
+    }
+
+    /// The star's death and remnant as the remnant draws `draws` would decide them on this track,
+    /// if the build has reached the death: the track's own for a star that did not die by an iron
+    /// core's collapse, or under [`RemnantRecipe::Hurley2000`], whose remnants read no draws.
+    ///
+    /// This is the remnant stage of P06.T29 (`StarModel`), which plan 08's kick loop repeats with
+    /// the same fields of later attempts on the one built track. For the draws the track was built
+    /// with it is the track's own fate, bit for bit. The track's remnant segment keeps the remnant
+    /// of its own draws.
+    #[must_use]
+    pub(crate) fn fate_with(&self, draws: RemnantDraws) -> Option<Fate> {
+        let fate = self.fate?;
+        Some(match (self.options.remnant, fate.iron_core) {
+            (RemnantRecipe::MandelMuller2020, Some(core)) => phases::iron_core_fate(
+                self.options.remnant,
+                fate.death.age().value(),
+                core.supernova,
+                core.co_core,
+                fate.death.progenitor(),
+                draws,
+            ),
+            (RemnantRecipe::Hurley2000, _) | (RemnantRecipe::MandelMuller2020, None) => fate,
+        })
     }
 
     /// The largest radius the star has had up to `age`: non-decreasing in age and never below
@@ -533,6 +589,19 @@ pub(crate) fn lifetime_of(
     draws: &StarDraws,
     options: TrackOptions,
 ) -> Years {
+    fate_of(m0, comp, draws, options).death.age()
+}
+
+/// The fate, death and remnant, of a star of initial mass `m0`, `comp` and `draws` under
+/// `options`: [`Track::full`]'s, bit for bit, from a build that keeps no segment (the cost of
+/// [`lifetime_of`]).
+#[must_use]
+pub(crate) fn fate_of(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+) -> Fate {
     let coeffs = ZCoeffs::new(comp.z_fit());
     let m0 = checked_initial_mass(m0);
     let eta = reimers_eta(draws.eta().value());
@@ -541,6 +610,7 @@ pub(crate) fn lifetime_of(
         comp,
         options,
         eta,
+        RemnantDraws::of(draws),
         Resolution::GENERATOR,
         build::Keep::Lifetime,
     )
@@ -548,8 +618,6 @@ pub(crate) fn lifetime_of(
     outcome
         .fate
         .expect("a build with no age to stop at runs to the star's death")
-        .death
-        .age()
 }
 
 /// The initial mass `m0` within the range the formulae cover.

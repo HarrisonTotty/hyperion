@@ -7,15 +7,39 @@
 //! [`draw_metallicity`] (P06.T3) gives every star of a grid system one [`Composition`]: its
 //! \[Fe/H\] is drawn once per system from the distribution plan 02's fields give the system's own
 //! density component at its place and age (brainstorm, "Fields": metallicity "falls with galactic
-//! radius … and, beyond about 8 Gyr, with age, with scatter"). The stars' models and the summaries
-//! (P06.T29) come later.
+//! radius … and, beyond about 8 Gyr, with age, with scatter").
+//!
+//! [`StarModel`] (P06.T29.a) is one star at any clock time: its track, or below 0.1 M☉ its cooling
+//! fits, and its remnant. It needs no record, so plan 14 builds its synthetic hosts with it, and by
+//! ruling 34 of 2026-09-22 it is how plans 11 and 14 read every star, never a
+//! [`Track`] directly.
+//!
+//! [`SystemStars`] (P06.T29.b) is a grid system's stars from its record: today its primary alone,
+//! body 0 of the system (plan 11's P11.T2.c adds the companions). Its [`SystemSummary`] is what the
+//! server's `system_summary` answers from, and its [`StellarBrief`] what a range query's row
+//! carries.
+
+use std::error::Error;
+use std::fmt;
 
 use crate::galaxy::fields::Component;
-use crate::galaxy::placement::SystemRecord;
+use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
+use crate::id::BodyId;
+use crate::math;
 use crate::rng::{ObjectKey, Stream, tags};
-use crate::stellar::Composition;
-use crate::units::{Dex, HeliumExcess, Years};
+use crate::stellar::classify::{ClassExtras, Classification, LuminosityClass, classify};
+use crate::stellar::draws::StarDraws;
+use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
+use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::{CompactRemnant, Death, DeathKind, NatalKick};
+use crate::stellar::sse::{self, Track, TrackOptions};
+use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
+use crate::time::{ClockWindow, Span, UniverseTime};
+use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+use crate::units::{
+    Dex, HeliumExcess, Kelvin, Magnitudes, SolarLuminosities, SolarMasses, SolarRadii, Years,
+};
 
 /// The composition every star of the grid system `record` shares: \[Fe/H\] drawn from its density
 /// component's distribution at its epoch position and age, and no helium excess.
@@ -110,6 +134,781 @@ fn component_of<'g>(galaxy: &'g Galaxy, record: &SystemRecord) -> &'g Component 
             .find(|c| c.population() == record.population())
             .expect("every population has at least one density component"),
     }
+}
+
+/// The heaviest star a [`StarModel`] takes, 150 M☉: the upper end of plan 02's initial mass
+/// function ([`MASS_BAND_EDGES`](crate::galaxy::imf::MASS_BAND_EDGES)).
+pub const MAX_STAR_MASS: SolarMasses = SolarMasses::new(150.0);
+
+/// A [`StarModel`] could not be built from its parts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildStarModelError {
+    /// The initial mass is outside [`substellar::MIN_MASS`]–[`MAX_STAR_MASS`], 0.01–150 M☉, or not
+    /// a number.
+    MassOutsideRange(SolarMasses),
+    /// The age at the epoch is not finite.
+    AgeNotFinite(Years),
+}
+
+impl fmt::Display for BuildStarModelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MassOutsideRange(m) => {
+                write!(f, "initial mass {} M_sun is outside 0.01-150", m.value())
+            }
+            Self::AgeNotFinite(age) => {
+                write!(f, "age at the epoch {} yr is not finite", age.value())
+            }
+        }
+    }
+}
+
+impl Error for BuildStarModelError {}
+
+/// One star at any clock time: its evolution from its initial mass, composition and draws, its
+/// age at the epoch, and its remnant (plan 06, P06.T29.a).
+///
+/// A star of 0.1 M☉ or more follows its [`Track`], built to its age at the end of the clock window
+/// (the epoch + H, [`ClockWindow::END`]) and so completed to its death if it is dead by then
+/// (design note 19). A lighter object follows P06.T13's cooling fits
+/// ([`substellar::cooling`], ruling 33), whose luminosity and radius fall with age, and never
+/// dies. Every question takes a [`UniverseTime`] and reads the star at its age then, the age at
+/// the epoch plus the time since it, as [`SystemRecord::age_at`] does (design note 23).
+///
+/// The remnant stage reads only the star's remnant draws (`star.remnant.*`): the remnant of an
+/// iron core's collapse is redrawn from them on the built track (`Track::fate_with`), which is the
+/// step plan 08's kick loop repeats with later attempts' draws, costing a remnant and never a
+/// track. It will read `star.stripped` and `star.kick.*` with P06.T19; until then no remnant has
+/// a kick ([`StarModel::natal_kick`]).
+///
+/// Until P06.T14 the formulae stop at 100 M☉ (`sse::MAX_INITIAL_MASS`), so a star of 100–150 M☉
+/// is evolved as one of 100 M☉ and keeps its own initial mass.
+///
+/// # Examples
+///
+/// A host star for plan 14: the Sun at 4.57 Gyr, and whether it can have swallowed a planet at
+/// 0.1 AU yet.
+///
+/// ```
+/// use hyperion_sim::stellar::draws::StarDraws;
+/// use hyperion_sim::stellar::system::StarModel;
+/// use hyperion_sim::stellar::{Composition, Phase};
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::{SolarMasses, Years};
+///
+/// let sun = StarModel::new(
+///     SolarMasses::new(1.0),
+///     Composition::SOLAR,
+///     StarDraws::median(),
+///     Years::new(4.57e9),
+/// )?;
+/// let today = sun.state_at(UniverseTime::EPOCH).ok_or("the Sun has formed")?;
+/// assert_eq!(today.phase(), Phase::MainSequence);
+/// // 0.1 AU is 21.5 R☉, which the Sun has never reached.
+/// assert!(sun.max_radius_until(UniverseTime::EPOCH).value() < 21.5);
+/// // The Sun outlives the clock window, so its death is found by building the rest of its life.
+/// assert!(sun.lifetime().ok_or("a star dies")?.value() > 1.1e10);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct StarModel {
+    initial_mass: SolarMasses,
+    composition: Composition,
+    draws: StarDraws,
+    age_at_epoch: Years,
+    evolution: Evolution,
+    remnant: Option<RemnantStage>,
+}
+
+/// How a [`StarModel`] evolves.
+#[derive(Debug, Clone, PartialEq)]
+enum Evolution {
+    /// From 0.1 M☉: the track, to the end of the clock window or the star's death.
+    Track(Box<Track>),
+    /// Below 0.1 M☉: P06.T13's cooling fits.
+    Cooling,
+}
+
+/// What the remnant stage decides from a built track and the star's remnant draws: the death and
+/// the remnant, and the natal kick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RemnantStage {
+    death: Death,
+    remnant: CompactRemnant,
+    natal_kick: Option<NatalKick>,
+}
+
+/// The remnant stage of a star whose `track` has reached its death, from its `draws`, or `None`
+/// if the track has not: the death and remnant that `track` gives the remnant draws
+/// (`star.remnant.*`), and no natal kick until P06.T19's law, which will read `star.stripped` and
+/// `star.kick.*` here (ruling 33 of 2026-09-22).
+#[must_use]
+fn remnant_stage(track: &Track, draws: &StarDraws) -> Option<RemnantStage> {
+    let fate = track.fate_with(RemnantDraws::of(draws))?;
+    Some(RemnantStage {
+        death: fate.death,
+        remnant: fate.remnant,
+        natal_kick: None,
+    })
+}
+
+impl StarModel {
+    /// The star of initial mass `m0`, `composition` and `draws` whose age at the epoch is
+    /// `age_at_epoch` (Julian years since its onset of collapse, negative for a star that forms
+    /// after the epoch).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildStarModelError::MassOutsideRange`] if `m0` is outside 0.01–150 M☉ or not a number,
+    /// and [`BuildStarModelError::AgeNotFinite`] if `age_at_epoch` is not finite.
+    pub fn new(
+        m0: SolarMasses,
+        composition: Composition,
+        draws: StarDraws,
+        age_at_epoch: Years,
+    ) -> Result<Self, BuildStarModelError> {
+        if !(substellar::MIN_MASS.value()..=MAX_STAR_MASS.value()).contains(&m0.value()) {
+            return Err(BuildStarModelError::MassOutsideRange(m0));
+        }
+        if !age_at_epoch.value().is_finite() {
+            return Err(BuildStarModelError::AgeNotFinite(age_at_epoch));
+        }
+        let mut model = Self {
+            initial_mass: m0,
+            composition,
+            draws,
+            age_at_epoch,
+            evolution: Evolution::Cooling,
+            remnant: None,
+        };
+        if m0 >= sse::MIN_INITIAL_MASS {
+            let end = model.age_at(ClockWindow::END).value();
+            let track = Track::to_age(
+                model.track_mass(),
+                &model.composition,
+                &model.draws,
+                Years::new(if end > 0.0 { end } else { 0.0 }),
+            );
+            model.remnant = remnant_stage(&track, &model.draws);
+            model.evolution = Evolution::Track(Box::new(track));
+        }
+        Ok(model)
+    }
+
+    /// The initial mass, M☉, as given.
+    #[must_use]
+    pub const fn initial_mass(&self) -> SolarMasses {
+        self.initial_mass
+    }
+
+    /// The composition.
+    #[must_use]
+    pub const fn composition(&self) -> &Composition {
+        &self.composition
+    }
+
+    /// The star's fixed draws.
+    #[must_use]
+    pub const fn draws(&self) -> &StarDraws {
+        &self.draws
+    }
+
+    /// The age at the epoch, Julian years since the onset of collapse.
+    #[must_use]
+    pub const fn age_at_epoch(&self) -> Years {
+        self.age_at_epoch
+    }
+
+    /// The star's age at `t`: its age at the epoch plus the time from the epoch to `t`, in the same
+    /// arithmetic as [`SystemRecord::age_at`].
+    #[must_use]
+    pub fn age_at(&self, t: UniverseTime) -> Years {
+        Years::new(self.age_at_epoch.value() + t.since_epoch().as_julian_years_f64())
+    }
+
+    /// The star's state at `t`, or `None` if it has not formed by then: a star exists once its age
+    /// is positive, as [`SystemRecord::existence_at`] says of a system.
+    ///
+    /// `t` may lie anywhere before the end of the clock window, +H; after it only for a star that
+    /// has died by then, since the track of one still living is built no further.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `t` is after the end of the clock window and the star lives past it.
+    #[must_use]
+    pub fn state_at(&self, t: UniverseTime) -> Option<StarState> {
+        let age = self.age_at(t);
+        if age.value() <= 0.0 {
+            return None;
+        }
+        Some(match &self.evolution {
+            Evolution::Track(track) => track.state_at(age),
+            Evolution::Cooling => self.cooling_at(age),
+        })
+    }
+
+    /// The age at which the star dies, Julian years since its onset of collapse, or `None` for an
+    /// object below 0.1 M☉, which never dies.
+    ///
+    /// For a star that outlives the clock window the model holds no death, and this builds the
+    /// rest of its life to find it: the cost of a whole track (a millisecond or two for an evolved
+    /// star; plan 06's Risks, T10.c–e). It is [`Track::lifetime`] of the full track, bit for bit.
+    #[must_use]
+    pub fn lifetime(&self) -> Option<Years> {
+        self.death().map(|death| death.age())
+    }
+
+    /// How and when the star dies, and what it was at its last living instant, or `None` for an
+    /// object below 0.1 M☉, at the cost [`StarModel::lifetime`] states.
+    #[must_use]
+    pub fn death(&self) -> Option<Death> {
+        self.fate().map(|stage| stage.death)
+    }
+
+    /// The remnant the star leaves or will leave, or `None` for an object below 0.1 M☉, at the
+    /// cost [`StarModel::lifetime`] states.
+    #[must_use]
+    pub fn remnant(&self) -> Option<CompactRemnant> {
+        self.fate().map(|stage| stage.remnant)
+    }
+
+    /// The largest radius the star has had up to `t`: non-decreasing in `t`, never below the
+    /// radius at `t`, and zero before the star forms (plans 11 and 14).
+    ///
+    /// Below 0.1 M☉ the radius falls monotonically with age, so the largest is the first the fits
+    /// give (their 1 Myr state).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`].
+    #[must_use]
+    pub fn max_radius_until(&self, t: UniverseTime) -> SolarRadii {
+        let age = self.age_at(t);
+        if age.value() <= 0.0 {
+            return SolarRadii::ZERO;
+        }
+        match &self.evolution {
+            Evolution::Track(track) => track.max_radius_until(age),
+            Evolution::Cooling => self.cooling_at(Years::ZERO).radius(),
+        }
+    }
+
+    /// The largest luminosity the star has had up to `t`, in the same way as
+    /// [`StarModel::max_radius_until`] (plan 14).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`].
+    #[must_use]
+    pub fn max_luminosity_until(&self, t: UniverseTime) -> SolarLuminosities {
+        let age = self.age_at(t);
+        if age.value() <= 0.0 {
+            return SolarLuminosities::ZERO;
+        }
+        match &self.evolution {
+            Evolution::Track(track) => track.max_luminosity_until(age),
+            Evolution::Cooling => self.cooling_at(Years::ZERO).luminosity(),
+        }
+    }
+
+    /// The natal kick of the star's remnant: `None` until P06.T19 builds the kick law (ruling 33 of
+    /// 2026-09-22), and afterwards `None` for a star alive at the end of the clock window, or
+    /// below 0.1 M☉.
+    #[must_use]
+    pub fn natal_kick(&self) -> Option<NatalKick> {
+        self.remnant.and_then(|stage| stage.natal_kick)
+    }
+
+    /// The initial mass the track is built for: the star's own, held to the formulae's 100 M☉
+    /// until P06.T14.
+    #[must_use]
+    fn track_mass(&self) -> SolarMasses {
+        if self.initial_mass > sse::MAX_INITIAL_MASS {
+            sse::MAX_INITIAL_MASS
+        } else {
+            self.initial_mass
+        }
+    }
+
+    /// The cooling fits' state at `age`, for an object below 0.1 M☉.
+    #[must_use]
+    fn cooling_at(&self, age: Years) -> StarState {
+        substellar::cooling(self.initial_mass, age, &self.composition)
+            .expect("a mass of 0.01-0.1 M_sun at a finite non-negative age is inside the fits")
+    }
+
+    /// The remnant stage: the model's own if its track reached the death, otherwise the rest of
+    /// the star's life built to find it; `None` below 0.1 M☉.
+    #[must_use]
+    fn fate(&self) -> Option<RemnantStage> {
+        match &self.evolution {
+            Evolution::Cooling => None,
+            Evolution::Track(_) => Some(self.remnant.unwrap_or_else(|| {
+                let fate = sse::fate_of(
+                    self.track_mass(),
+                    &self.composition,
+                    &self.draws,
+                    TrackOptions::default(),
+                );
+                RemnantStage {
+                    death: fate.death,
+                    remnant: fate.remnant,
+                    natal_kick: None,
+                }
+            })),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// P06.T29.b: a grid system's stars.
+
+/// Whether a system exists at a clock time (plan 06's Provides): plan 03's
+/// [`Existence`] in the stellar stage's terms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SystemExistence {
+    /// The system's age at that time is zero or negative: nothing has formed yet, which the
+    /// consoles read as `NOT YET FORMED` (ruling 34 of 2026-09-22).
+    NotYetBorn,
+    /// The system exists.
+    Exists,
+}
+
+impl From<Existence> for SystemExistence {
+    fn from(existence: Existence) -> Self {
+        match existence {
+            Existence::NoSystemYet => Self::NotYetBorn,
+            Existence::Exists => Self::Exists,
+        }
+    }
+}
+
+/// When a system's primary dies on the universe clock (plan 06's Provides).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClockDeath {
+    /// At this clock time, T = lifetime − age at the epoch, in this way. T is before the epoch
+    /// for a star already dead then.
+    At(UniverseTime, DeathKind),
+    /// Beyond what the clock can hold: T's whole seconds do not fit an `i64` (about ±2.9 × 10¹¹
+    /// years), or the object never dies, as one below 0.1 M☉ does not.
+    BeyondClockRange,
+    /// The system was a remnant already when it was born. No grid system is (a grid record's age
+    /// at the epoch starts from its star's formation); plan 09's and plan 10's records of other
+    /// origins may be.
+    AlreadyRemnantAtBirth,
+}
+
+/// A star's summary at one clock time (plan 06, P06.T29.b): its state, what kind of object it is,
+/// its class and absolute magnitudes, its remnant once it is dead, and its death if that falls
+/// inside the clock window.
+///
+/// Variability (P06.T26), rotation and magnetism (T25), a planetary nebula (T16) and the active
+/// events (T28) are added by their tasks; this generator version computes none of them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StarSummary {
+    state: StarState,
+    kind: ObjectKind,
+    classification: Classification,
+    absolute_magnitude_v: Option<Magnitudes>,
+    colour_b_v: Option<Magnitudes>,
+    remnant: Option<CompactRemnant>,
+    death_in_window: Option<(UniverseTime, DeathKind)>,
+}
+
+impl StarSummary {
+    /// The star's state.
+    #[must_use]
+    pub const fn state(&self) -> &StarState {
+        &self.state
+    }
+
+    /// What kind of object the star is ([`object_kind`]).
+    #[must_use]
+    pub const fn kind(&self) -> ObjectKind {
+        self.kind
+    }
+
+    /// The star's MK or remnant class (P06.T23, T20.b).
+    #[must_use]
+    pub const fn classification(&self) -> Classification {
+        self.classification
+    }
+
+    /// The absolute visual magnitude, `M_V`, where the tables of P06.T23.a reach (none for a remnant
+    /// or an object cooler than L5).
+    #[must_use]
+    pub const fn absolute_magnitude_v(&self) -> Option<Magnitudes> {
+        self.absolute_magnitude_v
+    }
+
+    /// The colour B − V, where the tables reach (none for an object with no luminosity or cooler
+    /// than M9).
+    #[must_use]
+    pub const fn colour_b_v(&self) -> Option<Magnitudes> {
+        self.colour_b_v
+    }
+
+    /// The remnant, once the star has died: its kind and mass.
+    #[must_use]
+    pub const fn remnant(&self) -> Option<CompactRemnant> {
+        self.remnant
+    }
+
+    /// The star's death, its clock time and kind, if it falls inside the clock window [−H, +H]
+    /// (the client's `DIES IN 312 yr`).
+    #[must_use]
+    pub const fn death_in_window(&self) -> Option<(UniverseTime, DeathKind)> {
+        self.death_in_window
+    }
+}
+
+/// A system's summary at one clock time: whether it exists, its composition, and its stars, of
+/// which there are none before it is born (plan 06's Provides).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemSummary {
+    time: UniverseTime,
+    existence: SystemExistence,
+    composition: Composition,
+    stars: Vec<StarSummary>,
+}
+
+impl SystemSummary {
+    /// The clock time summarised.
+    #[must_use]
+    pub const fn time(&self) -> UniverseTime {
+        self.time
+    }
+
+    /// Whether the system exists then.
+    #[must_use]
+    pub const fn existence(&self) -> SystemExistence {
+        self.existence
+    }
+
+    /// The composition all its stars share.
+    #[must_use]
+    pub const fn composition(&self) -> &Composition {
+        &self.composition
+    }
+
+    /// Its stars, primary first; empty before the system is born.
+    #[must_use]
+    pub fn stars(&self) -> &[StarSummary] {
+        &self.stars
+    }
+}
+
+/// What a range query's row says of a system's primary (plan 06's Provides): cheap, the state and
+/// classification only.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StellarBrief {
+    kind: ObjectKind,
+    class: Classification,
+    log_luminosity: Option<Dex>,
+    effective_temperature: Kelvin,
+}
+
+impl StellarBrief {
+    /// What kind of object the primary is.
+    #[must_use]
+    pub const fn kind(&self) -> ObjectKind {
+        self.kind
+    }
+
+    /// Its class.
+    #[must_use]
+    pub const fn class(&self) -> Classification {
+        self.class
+    }
+
+    /// log₁₀ of its luminosity in L☉, or `None` for an object with none (a black hole, or
+    /// nothing), whose logarithm no consumer may take (ruling 40 of 2026-09-22).
+    #[must_use]
+    pub const fn log_luminosity(&self) -> Option<Dex> {
+        self.log_luminosity
+    }
+
+    /// Its effective temperature, K; zero for an object with no luminosity.
+    #[must_use]
+    pub const fn effective_temperature(&self) -> Kelvin {
+        self.effective_temperature
+    }
+}
+
+/// What kind of object a star of `state`, `classification` and `composition` is (plan 06, design
+/// note 17), from its phase and, for a star burning hydrogen or helium in a shell or core, its
+/// luminosity class:
+///
+/// - V and the subdwarf classes are dwarfs, IV subgiants, III and II giants, and Ib to Ia⁺
+///   supergiants;
+/// - a naked helium star (HPT types 7–9) is a Wolf-Rayet star above P06.T24.a's luminosity floor
+///   of 10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4, where Z is the metal fraction the formulae see, and a hot
+///   subdwarf below it; the Wolf-Rayet rule's other half, a hydrogen-rich star nearly stripped
+///   (`WNh`), and the floor's recorded source are T24.a's;
+/// - an object on P06.T13's cooling fits is substellar below the hydrogen-burning limit
+///   ([`substellar::hydrogen_burning_limit`]) and a dwarf above it;
+/// - protostars, pre-main-sequence stars and the remnants are their phases, and a post-AGB star is
+///   classed as a living star by its luminosity class until P06.T24 gives it a class of its own.
+#[must_use]
+pub fn object_kind(
+    state: &StarState,
+    classification: &Classification,
+    composition: &Composition,
+) -> ObjectKind {
+    match state.phase() {
+        Phase::Protostar => ObjectKind::Protostar,
+        Phase::PreMainSequence => ObjectKind::PreMainSequence,
+        Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
+            ObjectKind::WhiteDwarf
+        }
+        Phase::NeutronStar => ObjectKind::NeutronStar,
+        Phase::BlackHole => ObjectKind::BlackHole,
+        Phase::NoRemnant => ObjectKind::NoRemnant,
+        Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch => {
+            let floor = WOLF_RAYET_FLOOR_L_SUN
+                * math::powf(composition.z_fit().value() / 0.02, WOLF_RAYET_FLOOR_Z_SLOPE);
+            if state.luminosity().value() > floor {
+                ObjectKind::WolfRayet
+            } else {
+                ObjectKind::HotSubdwarf
+            }
+        }
+        Phase::Substellar if state.mass() < substellar::hydrogen_burning_limit(composition) => {
+            ObjectKind::Substellar
+        }
+        Phase::Substellar
+        | Phase::MainSequence
+        | Phase::HertzsprungGap
+        | Phase::FirstGiantBranch
+        | Phase::CoreHeliumBurning
+        | Phase::EarlyAgb
+        | Phase::ThermallyPulsingAgb
+        | Phase::PostAgb => match classification.luminosity_class() {
+            Some(
+                LuminosityClass::Dwarf
+                | LuminosityClass::Subdwarf
+                | LuminosityClass::ExtremeSubdwarf,
+            )
+            | None => ObjectKind::Dwarf,
+            Some(LuminosityClass::Subgiant) => ObjectKind::Subgiant,
+            Some(LuminosityClass::Giant | LuminosityClass::BrightGiant) => ObjectKind::Giant,
+            Some(
+                LuminosityClass::LessLuminousSupergiant
+                | LuminosityClass::Supergiant
+                | LuminosityClass::LuminousSupergiant
+                | LuminosityClass::Hypergiant,
+            ) => ObjectKind::Supergiant,
+        },
+    }
+}
+
+/// P06.T24.a's luminosity floor of a Wolf-Rayet star at Z = 0.02, 10⁴·⁹ L☉.
+const WOLF_RAYET_FLOOR_L_SUN: f64 = 79_432.823_472_428_15;
+
+/// The floor's slope in Z ÷ 0.02, −0.4 (P06.T24.a).
+const WOLF_RAYET_FLOOR_Z_SLOPE: f64 = -0.4;
+
+/// A grid system's stars from its record (plan 06, P06.T29.b): today the primary alone, body 0 of
+/// the system; plan 11's P11.T2.c adds the companions.
+///
+/// [`SystemStars::generate`] takes three steps, because plan 08's P08.T12.c repeats only the last:
+/// the primary's draws ([`StarDraws::for_star`] of body 0; plan 08 makes it `for_attempt` of the
+/// record's mark attempt), its track, and the remnant stage on that track ([`StarModel`]). With no
+/// kick constraint, which is every record of this generator version, the last runs once.
+///
+/// # Examples
+///
+/// The first system of a cell at the solar circle, as the `SYSTEM` display summarises it:
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::stellar::system::{SystemExistence, SystemStars};
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// let record = cell.first().ok_or("the cell has systems")?;
+/// let stars = SystemStars::generate(&galaxy, record);
+/// let summary = stars.summary_at(UniverseTime::EPOCH);
+/// if summary.existence() == SystemExistence::Exists {
+///     let primary = &summary.stars()[0];
+///     println!("{} {:?}", primary.classification(), primary.kind());
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemStars {
+    record: SystemRecord,
+    stars: Vec<StarModel>,
+}
+
+impl SystemStars {
+    /// The stars of the grid system `record` in `galaxy`: its [`draw_metallicity`], the primary's
+    /// draws, and the primary's [`StarModel`] at the record's initial mass and age.
+    ///
+    /// # Panics
+    ///
+    /// As [`draw_metallicity`] does, for a record of another galaxy.
+    #[must_use]
+    pub fn generate(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        let composition = draw_metallicity(galaxy, record);
+        let draws = StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0));
+        let primary = StarModel::new(
+            record.primary_initial_mass(),
+            composition,
+            draws,
+            record.age_at_epoch(),
+        )
+        .expect("a grid record's primary is of 0.08-150 M_sun with a finite age");
+        Self {
+            record: *record,
+            stars: vec![primary],
+        }
+    }
+
+    /// The system's record.
+    #[must_use]
+    pub const fn record(&self) -> &SystemRecord {
+        &self.record
+    }
+
+    /// The system's stars, primary first: what plan 14's `SystemContext` holds (ruling 34).
+    #[must_use]
+    pub fn stars(&self) -> &[StarModel] {
+        &self.stars
+    }
+
+    /// The primary star.
+    #[must_use]
+    pub fn primary(&self) -> &StarModel {
+        &self.stars[0]
+    }
+
+    /// The system at `t`: whether it exists ([`SystemRecord::existence_at`]), its composition, and
+    /// each star's [`StarSummary`] at its age then ([`SystemRecord::age_at`]), none before the
+    /// system is born.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`], for a `t` after the clock window's end.
+    #[must_use]
+    pub fn summary_at(&self, t: UniverseTime) -> SystemSummary {
+        let existence = SystemExistence::from(self.record.existence_at(t));
+        let stars = match existence {
+            SystemExistence::NotYetBorn => Vec::new(),
+            SystemExistence::Exists => self
+                .stars
+                .iter()
+                .filter_map(|star| star_summary(star, t))
+                .collect(),
+        };
+        SystemSummary {
+            time: t,
+            existence,
+            composition: *self.primary().composition(),
+            stars,
+        }
+    }
+
+    /// The primary's brief at `t`, for a range query's row, or `None` before the system is born:
+    /// its state's kind, class, luminosity and temperature, with no photometry and no death.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`].
+    #[must_use]
+    pub fn brief_at(&self, t: UniverseTime) -> Option<StellarBrief> {
+        let primary = self.primary();
+        let state = primary.state_at(t)?;
+        let class = classify(
+            &state,
+            primary.composition(),
+            primary.draws(),
+            &ClassExtras::NONE,
+        );
+        let luminosity = state.luminosity().value();
+        Some(StellarBrief {
+            kind: object_kind(&state, &class, primary.composition()),
+            class,
+            log_luminosity: (luminosity > 0.0).then(|| Dex::new(math::log10(luminosity))),
+            effective_temperature: state.effective_temperature(),
+        })
+    }
+
+    /// When the primary dies on the clock: T = lifetime − age at the epoch.
+    ///
+    /// It costs the rest of the star's life where the star outlives the clock window
+    /// ([`StarModel::lifetime`]).
+    #[must_use]
+    pub fn death_time(&self) -> ClockDeath {
+        let primary = self.primary();
+        let Some(death) = primary.death() else {
+            return ClockDeath::BeyondClockRange;
+        };
+        clock_death(primary.age_at_epoch(), death)
+    }
+
+    /// The primary remnant's natal kick: `None` until P06.T19's law ([`StarModel::natal_kick`]).
+    #[must_use]
+    pub fn natal_kick(&self) -> Option<NatalKick> {
+        self.primary().natal_kick()
+    }
+
+    /// The clock interval in which the primary is a luminous blue variable: `None` until
+    /// P06.T24.a builds the criterion and `Track::window_where` (plan 09's catalogue class reads
+    /// it).
+    #[must_use]
+    pub fn lbv_window(&self) -> Option<(UniverseTime, UniverseTime)> {
+        None
+    }
+}
+
+/// The clock time of `death` for a star whose age at the epoch is `age_at_epoch`.
+#[must_use]
+fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
+    let years = death.age().value() - age_at_epoch.value();
+    match Span::from_seconds_f64(years * SECONDS_PER_JULIAN_YEAR)
+        .and_then(|span| UniverseTime::EPOCH.checked_add(span))
+    {
+        Some(t) => ClockDeath::At(t, death.kind()),
+        None => ClockDeath::BeyondClockRange,
+    }
+}
+
+/// The summary of `star` at `t`, or `None` if it has not formed by then.
+#[must_use]
+fn star_summary(star: &StarModel, t: UniverseTime) -> Option<StarSummary> {
+    let state = star.state_at(t)?;
+    let classification = classify(&state, star.composition(), star.draws(), &ClassExtras::NONE);
+    let remnant = if state.phase().is_remnant() {
+        star.remnant()
+    } else {
+        None
+    };
+    // A death inside the window is always one the model holds, because its track is built to
+    // the window's end: nothing further is built for it.
+    let death_in_window =
+        star.remnant.and_then(
+            |stage| match clock_death(star.age_at_epoch(), stage.death) {
+                ClockDeath::At(when, kind) if ClockWindow::contains(when) => Some((when, kind)),
+                ClockDeath::At(..)
+                | ClockDeath::BeyondClockRange
+                | ClockDeath::AlreadyRemnantAtBirth => None,
+            },
+        );
+    Some(StarSummary {
+        kind: object_kind(&state, &classification, star.composition()),
+        classification,
+        absolute_magnitude_v: absolute_magnitude_v(&state),
+        colour_b_v: colour_b_v(state.effective_temperature()),
+        remnant,
+        death_in_window,
+        state,
+    })
 }
 
 #[cfg(test)]
@@ -211,5 +1010,404 @@ mod tests {
         hyperion_testkit::order::assert_order_independent(&records, |r| {
             draw_metallicity(&galaxy, r)
         });
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // P06.T29.a: `StarModel`.
+
+    use crate::stellar::Phase;
+    use crate::stellar::draws::{StandardNormal, StarDrawsParts};
+    use crate::stellar::remnant::{DeathKind, RemnantKind};
+    use crate::time::Span;
+
+    /// Stars across the backbone and around it: (initial mass, [Fe/H], age at the epoch).
+    const STARS: [(f64, f64, f64); 12] = [
+        (0.3, 0.0, 8.0e9),
+        (1.0, 0.0, 4.57e9),
+        (1.0, -1.2, 1.2e10),
+        (2.0, 0.0, 1.2e9),
+        (2.0, 0.3, 5.0e9),
+        (5.0, -0.5, 1.2e8),
+        (8.25, 0.0, 6.0e7),
+        (20.0, 0.0, 8.0e6),
+        (20.0, 0.0, 5.0e7),
+        (40.0, -2.0, 1.0e9),
+        (100.0, 0.0, 2.0e6),
+        (0.05, 0.0, 3.0e9),
+    ];
+
+    fn star_draws(i: usize) -> StarDraws {
+        let mut s = Stream::open(
+            Seed::new(0x0629_a000 + u64::try_from(i).unwrap()),
+            tags::SELFTEST_STREAM,
+            ObjectKey::galaxy(),
+        );
+        StarDraws::from_parts(StarDrawsParts {
+            eta: StandardNormal::new(s.standard_normal()).unwrap(),
+            remnant_type: s.mark(),
+            remnant_fallback: s.mark(),
+            remnant_mass: StandardNormal::new(s.standard_normal()).unwrap(),
+            ..StarDrawsParts::MEDIAN
+        })
+    }
+
+    fn comp(fe_h: f64) -> Composition {
+        Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO)
+    }
+
+    fn model(i: usize) -> StarModel {
+        let (m, fe_h, age) = STARS[i];
+        StarModel::new(
+            SolarMasses::new(m),
+            comp(fe_h),
+            star_draws(i),
+            Years::new(age),
+        )
+        .unwrap()
+    }
+
+    fn years(y: i64) -> UniverseTime {
+        UniverseTime::from_julian_years(y).unwrap()
+    }
+
+    #[test]
+    fn the_state_at_the_epoch_is_the_tracks_at_the_age_at_the_epoch_bit_for_bit() {
+        for (i, &(m, fe_h, age)) in STARS.iter().enumerate() {
+            let star = model(i);
+            let state = star.state_at(UniverseTime::EPOCH).expect("formed");
+            let expected = if m < 0.1 {
+                substellar::cooling(SolarMasses::new(m), Years::new(age), &comp(fe_h)).unwrap()
+            } else {
+                Track::to_age(
+                    SolarMasses::new(m),
+                    &comp(fe_h),
+                    &star_draws(i),
+                    Years::new(age),
+                )
+                .state_at(Years::new(age))
+            };
+            assert_eq!(state, expected, "{m} M☉ at {age} yr");
+            hyperion_testkit::float::assert_same_bits(
+                state.luminosity().value(),
+                expected.luminosity().value(),
+            );
+        }
+    }
+
+    /// A star dead at the epoch has its whole track and its remnant, which are the full track's;
+    /// a living one finds its death by building the rest of its life, which is the full track's
+    /// too, bit for bit.
+    #[test]
+    fn a_star_dead_at_the_epoch_has_its_full_track_and_a_remnant() {
+        for (i, &(m, fe_h, age)) in STARS.iter().enumerate() {
+            let star = model(i);
+            if m < 0.1 {
+                assert_eq!(star.lifetime(), None);
+                assert_eq!(star.death(), None);
+                assert_eq!(star.remnant(), None);
+                continue;
+            }
+            let full = Track::full(SolarMasses::new(m), &comp(fe_h), &star_draws(i));
+            let life = full.lifetime().unwrap();
+            let lifetime = star.lifetime().unwrap();
+            hyperion_testkit::float::assert_same_bits(lifetime.value(), life.value());
+            assert_eq!(star.death(), full.death(), "{m} M☉");
+            assert_eq!(star.remnant(), full.remnant(), "{m} M☉");
+            let dead = age > life.value();
+            assert_eq!(star.remnant.is_some(), dead || age + 1_000.0 > life.value());
+            let now = star.state_at(UniverseTime::EPOCH).unwrap();
+            assert_eq!(
+                now.phase().is_remnant(),
+                dead,
+                "{m} M☉ at {age}: {:?}",
+                now.phase()
+            );
+            if dead {
+                assert_eq!(now, full.state_at(Years::new(age)));
+                let Evolution::Track(track) = &star.evolution else {
+                    panic!("a star of {m} M☉ has a track");
+                };
+                assert!(track.built_until().value().is_infinite());
+            }
+        }
+    }
+
+    #[test]
+    fn a_model_does_not_depend_on_what_was_asked_before() {
+        let times: Vec<UniverseTime> = [-1_000_i64, -999, -250, -1, 0, 1, 17, 500, 999, 1_000]
+            .into_iter()
+            .map(years)
+            .collect();
+        for i in 0..STARS.len() {
+            let star = model(i);
+            hyperion_testkit::order::assert_order_independent(&times, |t| {
+                (
+                    star.state_at(*t),
+                    star.max_radius_until(*t),
+                    star.max_luminosity_until(*t),
+                )
+            });
+        }
+        let indices: Vec<usize> = (0..STARS.len()).collect();
+        hyperion_testkit::order::assert_order_independent(&indices, |&i| model(i));
+        assert_eq!(model(3), model(3));
+    }
+
+    /// The largest radius and luminosity so far never fall across the window and never lie below
+    /// the state's, for every kind of star, and a substellar object's are its youngest state's.
+    #[test]
+    fn the_largest_radius_and_luminosity_so_far_never_fall() {
+        for i in 0..STARS.len() {
+            let star = model(i);
+            let (mut r, mut l) = (0.0, 0.0);
+            for y in (-1_000..=1_000).step_by(50) {
+                let t = years(y);
+                let (rm, lm) = (
+                    star.max_radius_until(t).value(),
+                    star.max_luminosity_until(t).value(),
+                );
+                assert!(rm >= r && lm >= l, "star {i} at {y}");
+                let now = star.state_at(t).unwrap();
+                assert!(rm >= now.radius().value() && lm >= now.luminosity().value());
+                (r, l) = (rm, lm);
+            }
+        }
+        let brown = model(11);
+        let youngest =
+            substellar::cooling(SolarMasses::new(0.05), Years::ZERO, &comp(0.0)).unwrap();
+        assert_eq!(
+            brown.max_radius_until(UniverseTime::EPOCH),
+            youngest.radius()
+        );
+        assert_eq!(
+            brown.state_at(UniverseTime::EPOCH).unwrap().phase(),
+            Phase::Substellar
+        );
+    }
+
+    /// A star whose onset of collapse is 500 years after the epoch has no state and no radius
+    /// until then, and exists after it.
+    #[test]
+    fn a_star_not_yet_formed_has_no_state() {
+        let star = StarModel::new(
+            SolarMasses::new(1.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(-500.0),
+        )
+        .unwrap();
+        assert_eq!(star.state_at(UniverseTime::EPOCH), None);
+        assert_eq!(star.state_at(years(500)), None);
+        assert_eq!(star.max_radius_until(years(400)), SolarRadii::ZERO);
+        assert_eq!(
+            star.max_luminosity_until(years(400)),
+            SolarLuminosities::ZERO
+        );
+        let later = star.state_at(years(600)).unwrap();
+        assert!((later.age().value() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_model_refuses_masses_and_ages_outside_its_range() {
+        let build = |m: f64, age: f64| {
+            StarModel::new(
+                SolarMasses::new(m),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(age),
+            )
+        };
+        for m in [0.005, 150.5, f64::NAN, -1.0] {
+            assert!(
+                matches!(build(m, 1e9), Err(BuildStarModelError::MassOutsideRange(_))),
+                "{m}"
+            );
+        }
+        assert!(matches!(
+            build(1.0, f64::INFINITY),
+            Err(BuildStarModelError::AgeNotFinite(_))
+        ));
+        assert!(build(0.01, 1e9).is_ok() && build(150.0, 1e6).is_ok());
+        assert_eq!(
+            build(0.005, 1e9).unwrap_err().to_string(),
+            "initial mass 0.005 M_sun is outside 0.01-150"
+        );
+    }
+
+    /// Until P06.T14 a star above 100 M☉ is evolved as one of 100 M☉, and keeps its own mass.
+    #[test]
+    fn a_star_above_a_hundred_solar_masses_is_evolved_at_a_hundred() {
+        let (heavy, limit) = (
+            StarModel::new(
+                SolarMasses::new(130.0),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(1e6),
+            )
+            .unwrap(),
+            StarModel::new(
+                SolarMasses::new(100.0),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(1e6),
+            )
+            .unwrap(),
+        );
+        assert_eq!(heavy.initial_mass(), SolarMasses::new(130.0));
+        assert_eq!(
+            heavy.state_at(UniverseTime::EPOCH),
+            limit.state_at(UniverseTime::EPOCH)
+        );
+    }
+
+    /// The remnant stage of a dead star is its track's for its own draws, and on the same track
+    /// other remnant draws redraw only the remnant and the kind of death, never its age: what plan
+    /// 08's attempts repeat. No remnant has a kick before P06.T19.
+    #[test]
+    fn the_remnant_stage_redraws_only_the_remnant() {
+        let star = model(8);
+        let Evolution::Track(track) = &star.evolution else {
+            panic!("a 20 M☉ star has a track");
+        };
+        let own = star.remnant.expect("dead at 50 Myr");
+        assert_eq!(Some(own.death), track.death());
+        assert_eq!(Some(own.remnant), track.remnant());
+        assert_eq!(star.natal_kick(), None);
+        let mut kinds = Vec::new();
+        for word in [0_u64, u64::MAX / 3, u64::MAX / 3 * 2, u64::MAX] {
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                remnant_type: crate::rng::Mark::from_word(word),
+                remnant_fallback: crate::rng::Mark::from_word(word),
+                ..star.draws().parts().clone()
+            });
+            let stage = remnant_stage(track, &draws).unwrap();
+            hyperion_testkit::float::assert_same_bits(
+                stage.death.age().value(),
+                own.death.age().value(),
+            );
+            assert_eq!(stage.death.progenitor(), own.death.progenitor());
+            kinds.push(stage.remnant.kind());
+            if stage.remnant.kind() == RemnantKind::BlackHole {
+                assert!(matches!(
+                    stage.death.kind(),
+                    DeathKind::DirectCollapse | DeathKind::CoreCollapse { .. }
+                ));
+            }
+        }
+        assert!(
+            kinds.contains(&RemnantKind::NeutronStar) && kinds.contains(&RemnantKind::BlackHole)
+        );
+    }
+
+    /// A living state of `phase` with mass `m`, luminosity `l` and radius `r` (solar units).
+    fn living(phase: Phase, m: f64, l: f64, r: f64) -> StarState {
+        StarState::new(crate::stellar::StarStateParts {
+            phase,
+            age: Years::new(1e7),
+            mass: SolarMasses::new(m),
+            core_mass: SolarMasses::new(0.5 * m),
+            luminosity: SolarLuminosities::new(l),
+            radius: SolarRadii::new(r),
+            mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
+            phase_fraction: 0.5,
+        })
+    }
+
+    fn kind_of(state: &StarState, composition: &Composition) -> ObjectKind {
+        let class = classify(state, composition, &StarDraws::median(), &ClassExtras::NONE);
+        object_kind(state, &class, composition)
+    }
+
+    /// The kind follows the phase and the luminosity class: the Sun is a dwarf, Arcturus a giant,
+    /// Betelgeuse a supergiant, a luminous naked helium star a Wolf-Rayet star and a faint one a
+    /// hot subdwarf, and a cooling-fit object a brown dwarf below the hydrogen-burning limit.
+    #[test]
+    fn the_kind_follows_the_phase_and_the_luminosity_class() {
+        let solar = Composition::SOLAR;
+        assert_eq!(
+            kind_of(&living(Phase::MainSequence, 1.0, 1.0, 1.0), &solar),
+            ObjectKind::Dwarf
+        );
+        assert_eq!(
+            kind_of(&living(Phase::FirstGiantBranch, 1.1, 170.0, 25.4), &solar),
+            ObjectKind::Giant
+        );
+        assert_eq!(
+            kind_of(
+                &living(Phase::CoreHeliumBurning, 18.0, 1.1e5, 760.0),
+                &solar
+            ),
+            ObjectKind::Supergiant
+        );
+        // The floor is 10^4.9 L☉ at Z = 0.02 and 10^4.9 × 10^0.4 at Z = 0.002.
+        let hot = |l: f64| living(Phase::HeliumMainSequence, 10.0, l, 0.8);
+        assert_eq!(kind_of(&hot(1.0e5), &solar), ObjectKind::WolfRayet);
+        assert_eq!(kind_of(&hot(6.0e4), &solar), ObjectKind::HotSubdwarf);
+        let poor = comp(-1.0);
+        assert_eq!(kind_of(&hot(1.5e5), &poor), ObjectKind::HotSubdwarf);
+        assert_eq!(kind_of(&hot(2.5e5), &poor), ObjectKind::WolfRayet);
+        let cool = |m: f64| {
+            substellar::cooling(SolarMasses::new(m), Years::new(5e9), &solar).expect("in the fits")
+        };
+        assert_eq!(kind_of(&cool(0.05), &solar), ObjectKind::Substellar);
+        assert_eq!(kind_of(&cool(0.09), &solar), ObjectKind::Dwarf);
+    }
+
+    /// The brief is the summary's primary, in brief, and a black hole is a black hole.
+    #[test]
+    fn the_brief_is_the_summary_in_brief() {
+        let galaxy = galaxy();
+        let record = young_disc_record(&galaxy, 7, 3.0e9);
+        let stars = SystemStars::generate(&galaxy, &record);
+        let summary = stars.summary_at(UniverseTime::EPOCH);
+        let brief = stars.brief_at(UniverseTime::EPOCH).unwrap();
+        let primary = &summary.stars()[0];
+        assert_eq!(brief.kind(), primary.kind());
+        assert_eq!(brief.class(), primary.classification());
+        assert_eq!(
+            brief.effective_temperature(),
+            primary.state().effective_temperature()
+        );
+        assert!(
+            (brief.log_luminosity().unwrap().value()
+                - math::log10(primary.state().luminosity().value()))
+            .abs()
+                < 1e-15
+        );
+        let dark = StarState::new(crate::stellar::StarStateParts {
+            phase: Phase::BlackHole,
+            age: Years::new(1e8),
+            mass: SolarMasses::new(8.0),
+            core_mass: SolarMasses::new(8.0),
+            luminosity: SolarLuminosities::ZERO,
+            radius: SolarRadii::new(3.4e-5),
+            mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
+            phase_fraction: 0.0,
+        });
+        assert_eq!(kind_of(&dark, &Composition::SOLAR), ObjectKind::BlackHole);
+    }
+
+    /// `age_at` is `SystemRecord::age_at`'s arithmetic.
+    #[test]
+    fn the_age_at_a_time_is_the_records() {
+        let galaxy = galaxy();
+        let record = young_disc_record(&galaxy, 3, 2.5e7);
+        let star = StarModel::new(
+            SolarMasses::new(1.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            record.age_at_epoch(),
+        )
+        .unwrap();
+        for t in [
+            UniverseTime::EPOCH,
+            years(-731),
+            years(1_000),
+            UniverseTime::EPOCH
+                .checked_add(Span::new(12_345, 678_901_234).unwrap())
+                .unwrap(),
+        ] {
+            assert_eq!(star.age_at(t), record.age_at(t));
+        }
     }
 }

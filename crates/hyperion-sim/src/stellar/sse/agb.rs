@@ -235,6 +235,29 @@ impl EarlyAgb {
         self.mc_sn
     }
 
+    /// The core mass after the second dredge-up, `Mc,DU`, M☉: where the carbon–oxygen core ends
+    /// the phase for the thermal pulses.
+    #[must_use]
+    pub(crate) const fn mc_du(&self) -> SolarMasses {
+        self.mc_du
+    }
+
+    /// When the carbon–oxygen core reaches `mc` (equation 39 with `A_He` inverted), held to the
+    /// phase: `t_BAGB` for a core it starts above, its end for one it never reaches.
+    #[must_use]
+    pub(crate) fn time_of_co_core_mass(&self, mc: SolarMasses) -> Megayears {
+        let t = self
+            .relation
+            .time_of_luminosity(&self.times, self.relation.luminosity(mc));
+        if t < self.t_bagb {
+            self.t_bagb
+        } else if t > self.t_end {
+            self.t_end
+        } else {
+            t
+        }
+    }
+
     /// L, R and core at `t` with `asymptotic` for equation 74.
     #[must_use]
     fn point(&self, t: Megayears, asymptotic: &RadiusLaw) -> PhasePoint {

@@ -14,8 +14,10 @@
 //! segment depends only on those before it, so [`Track::to_age`](super::Track::to_age)'s segments
 //! are bit for bit [`Track::full`](super::Track::full)'s.
 
+use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::{Composition, StarState};
-use crate::units::{Megayears, SolarMasses};
+use crate::units::{Megayears, SolarLuminosities, SolarMasses};
 
 use super::super::PhasePoint;
 use super::super::agb::ThermallyPulsingAgb;
@@ -160,8 +162,11 @@ pub(super) enum Entry {
         m0: f64,
         mass: f64,
     },
+    /// The thermal pulses of a star whose early AGB had the initial mass `m0`, the mass
+    /// `m_c_bagb` read, and a core at the base of the AGB of `mc_bagb`.
     ThermallyPulsingAgb {
         phase: Box<ThermallyPulsingAgb>,
+        m0: f64,
         mc_bagb: f64,
         mass: f64,
     },
@@ -185,8 +190,8 @@ pub(super) struct Step {
     pub(super) segment: Option<Segment>,
     pub(super) next: Entry,
     pub(super) end: f64,
-    /// log₁₀ L, log₁₀ R and the core mass at the end, for the next junction; `None` if the next
-    /// junction is a declared step.
+    /// log₁₀ L, log₁₀ R and the core mass at the end, for the next junction or, where the star
+    /// dies, for the white dwarf's cooling origin; `None` where nothing was evaluated.
     pub(super) end_state: Option<[f64; 3]>,
 }
 
@@ -197,6 +202,9 @@ pub(crate) struct Builder<'a> {
     composition: &'a Composition,
     pub(super) options: TrackOptions,
     eta: ReimersEta,
+    /// The star's remnant draws, which decide an iron core's collapse under
+    /// [`RemnantRecipe::MandelMuller2020`](crate::stellar::remnant::RemnantRecipe).
+    pub(super) remnant_draws: RemnantDraws,
     pub(super) resolution: Resolution,
     keep: Keep,
     /// The core at helium ignition of an `M_HeF` star, the lightest helium star that burns helium
@@ -205,13 +213,15 @@ pub(crate) struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    /// A builder for a star of `composition` (whose coefficients are `coeffs`) and Reimers `eta`.
+    /// A builder for a star of `composition` (whose coefficients are `coeffs`), Reimers `eta` and
+    /// the remnant draws `remnant_draws`.
     #[must_use]
     pub(crate) fn new(
         coeffs: &'a ZCoeffs,
         composition: &'a Composition,
         options: TrackOptions,
         eta: ReimersEta,
+        remnant_draws: RemnantDraws,
         resolution: Resolution,
         keep: Keep,
     ) -> Self {
@@ -226,6 +236,7 @@ impl<'a> Builder<'a> {
             composition,
             options,
             eta,
+            remnant_draws,
             resolution,
             keep,
             lightest_helium_star: lightest.value(),
@@ -244,7 +255,7 @@ impl<'a> Builder<'a> {
         loop {
             if let Entry::Dead(fate) = entry {
                 if self.keep == Keep::Track {
-                    segments.push(self.remnant_segment(fate, max_before));
+                    segments.push(self.remnant_segment(fate, max_before, previous));
                 }
                 return Outcome {
                     segments,
@@ -288,9 +299,10 @@ impl<'a> Builder<'a> {
             Entry::EarlyAgb { m0, mass } => self.early_agb(start, m0, mass, previous),
             Entry::ThermallyPulsingAgb {
                 phase,
+                m0,
                 mc_bagb,
                 mass,
-            } => self.pulsing_agb(start, &phase, mc_bagb, mass, previous),
+            } => self.pulsing_agb(start, &phase, m0, mc_bagb, mass, previous),
             Entry::HeliumMainSequence { mass, tau0 } => {
                 self.helium_main_sequence(start, mass, tau0, previous)
             }
@@ -750,7 +762,9 @@ impl<'a> Builder<'a> {
         previous: Option<[f64; 3]>,
     ) -> Step {
         let end_state = match (&next, &segment) {
-            (Entry::Dead(_), _) => None,
+            // Nothing follows a death but the remnant, which needs only the star's last luminosity:
+            // a build that keeps no remnant evaluates nothing for it.
+            (Entry::Dead(_), Some(_)) if self.keep == Keep::Lifetime => None,
             (_, Some(segment)) => Some(self.end_state(segment)),
             (_, None) => previous,
         };
@@ -769,14 +783,31 @@ impl<'a> Builder<'a> {
         wind::rate(self.options.wind(), &state, self.composition, self.eta).value()
     }
 
-    /// The remnant segment of `fate`, from its death on, after maxima of `max_before`.
-    fn remnant_segment(&self, fate: Fate, max_before: [f64; 2]) -> Segment {
+    /// The remnant segment of `fate`, from its death on, after maxima of `max_before`, where the
+    /// star's last living state was `last` (log₁₀ L, log₁₀ R and the core mass), if it is known.
+    #[must_use]
+    pub(super) fn remnant_segment(
+        &self,
+        fate: Fate,
+        max_before: [f64; 2],
+        last: Option<[f64; 3]>,
+    ) -> Segment {
         let age = fate.death.age().value();
+        let origin = WhiteDwarfCore::of(fate.phase).map_or(Megayears::ZERO, |core| {
+            white_dwarf::cooling_origin(
+                self.options.remnant(),
+                core,
+                fate.remnant.mass(),
+                last.map(|[log_l, ..]| SolarLuminosities::new(crate::math::exp10(log_l))),
+                self.phys.z,
+            )
+        });
         let mut segment = Segment {
             model: Model::Remnant {
                 phase: fate.phase,
                 mass: fate.remnant.mass(),
                 birth: age,
+                origin,
             },
             start: age,
             end: f64::INFINITY,

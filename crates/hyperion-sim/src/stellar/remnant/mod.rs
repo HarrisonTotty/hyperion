@@ -93,3 +93,7 @@ impl CompactRemnant {
 // Mandel and Müller's (2020) neutron stars and black holes, electron capture and pair instability
 // (P06.T18.a–c), which the track's death (P06.T18.d) calls.
 pub mod collapse;
+
+// The natal kick's value type, which `StarModel` returns (P06.T29.a); the law is P06.T19's.
+mod kick;
+pub use kick::{KickMode, NatalKick};

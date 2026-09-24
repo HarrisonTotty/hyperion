@@ -2,6 +2,10 @@
 //! with the rules of section 7.1 for the initial mass), and how each ends.
 
 use crate::stellar::Phase;
+use crate::stellar::remnant::collapse::{
+    CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB, OXYGEN_NEON_CAPTURE_MASS,
+    RemnantDraws, core_collapse, electron_capture_remnant,
+};
 use crate::stellar::remnant::structure::{
     DegenerateCore, OXYGEN_NEON_MC_BAGB, hurley_supernova_remnant, white_dwarf_kind,
 };
@@ -19,7 +23,7 @@ use super::super::hg::HertzsprungGap;
 use super::super::ms::{self, MainSequence};
 use super::build::{Builder, Ending, Entry, FLASH_YEARS, Step, segment_coordinate};
 use super::model::{HeliumCore, Model, Span};
-use super::{Bridges, Coordinate, Fate, Junction, Segment};
+use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment};
 
 impl Builder<'_> {
     /// The main sequence of a star of `mass`, whose initial mass follows the current one.
@@ -290,13 +294,20 @@ impl Builder<'_> {
     ) -> Step {
         let phase = EarlyAgb::new(SolarMasses::new(m0), self.phys.coeffs);
         let mc_bagb = phase.mc_bagb().value();
+        // An oxygen–neon core that would pass the white dwarf's cap before the thermal pulses
+        // ends the AGB there ([`Builder::oxygen_neon_cap`]).
+        let cap = self.oxygen_neon_cap(m0, mc_bagb).filter(|&cap| {
+            phase.end() == EarlyAgbEnd::ThermalPulses && cap < phase.mc_du().value()
+        });
         let span = Span {
             start: phase.t_start(),
-            end: phase.t_end(),
+            end: cap.map_or(phase.t_end(), |cap| {
+                phase.time_of_co_core_mass(SolarMasses::new(cap))
+            }),
         };
         if span.years() <= 0.0 {
             // The carbon–oxygen core is at `Mc,SN` already (HPT equation 75, 40–80 M☉).
-            return self.early_agb_end(&phase, start, mass, None, previous);
+            return self.early_agb_end(&phase, start, m0, mass, None, previous);
         }
         let progress = {
             let phase = phase.clone();
@@ -325,9 +336,30 @@ impl Builder<'_> {
             None,
         );
         match built.ending {
-            Ending::Nominal => {
-                self.early_agb_end(&phase, built.end, built.end_mass, built.segment, previous)
+            Ending::Nominal if let Some(cap) = cap => {
+                // The core reaches the cap at the span's end, to rounding.
+                let core = cap.min(built.end_mass);
+                let white_dwarf = self.white_dwarf(
+                    built.end,
+                    Phase::OxygenNeonWhiteDwarf,
+                    core,
+                    ProgenitorAtDeath::new(
+                        SolarMasses::new(core),
+                        SolarMasses::new(mc_bagb.min(built.end_mass)),
+                        SolarMasses::new((built.end_mass - mc_bagb).max(0.0)),
+                        Stripping::None,
+                    ),
+                );
+                self.finish(built.segment, built.end, Entry::Dead(white_dwarf), previous)
             }
+            Ending::Nominal => self.early_agb_end(
+                &phase,
+                built.end,
+                m0,
+                built.end_mass,
+                built.segment,
+                previous,
+            ),
             Ending::Envelope => {
                 // The helium giant of the helium core, at the age at which its core has the early
                 // AGB's carbon–oxygen core (HPT section 6).
@@ -343,12 +375,14 @@ impl Builder<'_> {
         }
     }
 
-    /// What follows the early AGB's nominal end at `age`, with `mass`: the thermal pulses, or a
-    /// core-collapse supernova where the carbon–oxygen core reaches `Mc,SN` first.
+    /// What follows the early AGB's nominal end at `age` of a star of initial mass `m0`, with
+    /// `mass`: the thermal pulses, or an iron core's collapse where the carbon–oxygen core reaches
+    /// `Mc,SN` first.
     fn early_agb_end(
         &self,
         phase: &EarlyAgb,
         age: f64,
+        m0: f64,
         mass: f64,
         segment: Option<Segment>,
         previous: Option<[f64; 3]>,
@@ -357,20 +391,20 @@ impl Builder<'_> {
         let next = match (phase.end(), phase.thermal_pulses()) {
             (EarlyAgbEnd::ThermalPulses, Some(pulsing)) => Entry::ThermallyPulsingAgb {
                 phase: Box::new(pulsing),
+                m0,
                 mc_bagb,
                 mass,
             },
             (EarlyAgbEnd::ThermalPulses | EarlyAgbEnd::Supernova, _) => {
                 let co = phase.mc_sn().value();
                 let envelope = (mass - mc_bagb).max(0.0);
-                Entry::Dead(self.remnant_fate(
+                let supernova = SupernovaType::of_envelopes(
+                    SolarMasses::new(envelope),
+                    SolarMasses::new((mc_bagb - co).max(0.0)),
+                );
+                Entry::Dead(self.iron_core(
                     age,
-                    DeathKind::CoreCollapse {
-                        supernova: SupernovaType::of_envelopes(
-                            SolarMasses::new(envelope),
-                            SolarMasses::new((mc_bagb - co).max(0.0)),
-                        ),
-                    },
+                    supernova,
                     co,
                     ProgenitorAtDeath::new(
                         SolarMasses::new(co),
@@ -384,25 +418,35 @@ impl Builder<'_> {
         self.finish(segment, age, next, previous)
     }
 
-    /// The thermally pulsing AGB of a star whose core at the base of the AGB was `mc_bagb`,
-    /// entered with `mass`, on [`PULSING_KNOTS`](super::build::PULSING_KNOTS) knots: it ends when
-    /// the envelope is gone (a white dwarf) or the core reaches `Mc,SN` first. Each knot carries
-    /// the thermal pulses since the phase began.
+    /// The thermally pulsing AGB of a star whose early AGB had the initial mass `m0` and a core at
+    /// the base of the AGB of `mc_bagb`, entered with `mass`, on
+    /// [`PULSING_KNOTS`](super::build::PULSING_KNOTS) knots: it ends when the envelope is gone (a
+    /// white dwarf) or the core reaches `Mc,SN` first. Each knot carries the thermal pulses since
+    /// the phase began.
     pub(super) fn pulsing_agb(
         &self,
         start: f64,
         phase: &ThermallyPulsingAgb,
+        m0: f64,
         mc_bagb: f64,
         mass: f64,
         previous: Option<[f64; 3]>,
     ) -> Step {
+        let mc_du = phase.mc_du().value();
+        // An oxygen–neon core ends the pulses at the white dwarf's cap if it reaches it before
+        // `Mc,SN` ([`Builder::oxygen_neon_cap`]).
+        let cap = self
+            .oxygen_neon_cap(m0, mc_bagb)
+            .filter(|&cap| phase.end() == CoreEnd::Supernova && cap > mc_du);
         let span = Span {
             start: phase.t_start(),
-            end: phase.t_end(),
+            end: cap.map_or(phase.t_end(), |cap| {
+                let t = phase.time_of_core_mass(SolarMasses::new(cap));
+                if t < phase.t_end() { t } else { phase.t_end() }
+            }),
         };
-        let mc_du = phase.mc_du().value();
         if span.years() <= 0.0 || mass <= mc_du {
-            return self.pulsing_agb_end(start, mc_bagb, mc_du, mass, None, previous);
+            return self.pulsing_agb_end(start, m0, mc_bagb, mc_du, mass, None, previous);
         }
         let core_mass = |age: f64| {
             phase
@@ -432,15 +476,36 @@ impl Builder<'_> {
         let end = built.end;
         let mc = core_mass(end);
         match (built.ending, phase.end()) {
-            (Ending::Nominal, CoreEnd::Supernova) => {
-                self.pulsing_agb_end(end, mc_bagb, mc, built.end_mass, built.segment, previous)
-            }
-            (Ending::Envelope | Ending::Nominal, _) => {
+            (Ending::Nominal, CoreEnd::Supernova) if let Some(cap) = cap => {
+                // The core reaches the cap at the span's end, to rounding.
+                let core = cap.min(built.end_mass);
                 let white_dwarf = self.white_dwarf(
                     end,
-                    white_dwarf_kind(DegenerateCore::CarbonOxygen {
-                        mc_bagb: SolarMasses::new(mc_bagb),
-                    }),
+                    Phase::OxygenNeonWhiteDwarf,
+                    core,
+                    ProgenitorAtDeath::new(
+                        SolarMasses::new(core),
+                        SolarMasses::new(core),
+                        SolarMasses::new((built.end_mass - mc).max(0.0)),
+                        Stripping::None,
+                    ),
+                );
+                self.finish(built.segment, end, Entry::Dead(white_dwarf), previous)
+            }
+            (Ending::Nominal, CoreEnd::Supernova) => self.pulsing_agb_end(
+                end,
+                m0,
+                mc_bagb,
+                mc,
+                built.end_mass,
+                built.segment,
+                previous,
+            ),
+            (Ending::Envelope | Ending::Nominal, _) => {
+                let white_dwarf = self.agb_white_dwarf(
+                    end,
+                    m0,
+                    mc_bagb,
                     mc,
                     ProgenitorAtDeath::new(
                         SolarMasses::new(mc),
@@ -455,12 +520,20 @@ impl Builder<'_> {
     }
 
     /// The thermally pulsing AGB's end at `age` where the core of `mc` reaches `Mc,SN` with `mass`
-    /// and the envelope still on: carbon ignites in a degenerate core below `Mc,BAGB` = 1.6 M☉ and
-    /// leaves nothing, and an oxygen–neon core above it collapses by electron capture (HPT section
-    /// 6). A pulsing phase entered with no envelope is a white dwarf at once.
+    /// and the envelope still on, for a star whose early AGB had the initial mass `m0`: carbon
+    /// ignites in a degenerate core below `Mc,BAGB` = 1.6 M☉ and leaves nothing, and an
+    /// oxygen–neon core above it collapses by electron capture (HPT section 6), under
+    /// [`RemnantRecipe::MandelMuller2020`] only inside the electron-capture window
+    /// ([`Builder::oxygen_neon_core`]). A pulsing phase entered with no envelope is a white dwarf at
+    /// once.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the end's age, the star's two masses at the AGB, its core and mass, and the step"
+    )]
     fn pulsing_agb_end(
         &self,
         age: f64,
+        m0: f64,
         mc_bagb: f64,
         mc: f64,
         mass: f64,
@@ -475,18 +548,11 @@ impl Builder<'_> {
             Stripping::None,
         );
         let fate = if mass <= mc {
-            self.white_dwarf(
-                age,
-                white_dwarf_kind(DegenerateCore::CarbonOxygen {
-                    mc_bagb: SolarMasses::new(mc_bagb),
-                }),
-                mass,
-                progenitor,
-            )
+            self.agb_white_dwarf(age, m0, mc_bagb, mass, progenitor)
         } else if mc_bagb < OXYGEN_NEON_MC_BAGB.value() {
             no_remnant(age, DeathKind::ThermonuclearDisruption, progenitor)
         } else {
-            self.remnant_fate(age, DeathKind::ElectronCapture, mc, progenitor)
+            self.oxygen_neon_core(age, m0, mc, progenitor)
         };
         self.finish(segment, age, Entry::Dead(fate), previous)
     }
@@ -652,7 +718,7 @@ impl Builder<'_> {
                 SolarMasses::ZERO,
                 SolarMasses::new((mass - mc).max(0.0)),
             );
-            self.remnant_fate(age, DeathKind::CoreCollapse { supernova }, mc, progenitor)
+            self.iron_core(age, supernova, mc, progenitor)
         } else {
             no_remnant(age, DeathKind::ThermonuclearDisruption, progenitor)
         };
@@ -675,29 +741,142 @@ impl Builder<'_> {
             death: Death::new(Years::new(age), DeathKind::EnvelopeLoss, progenitor),
             remnant: CompactRemnant::new(RemnantKind::WhiteDwarf, SolarMasses::new(mass)),
             phase,
+            iron_core: None,
         }
     }
 
-    /// A death of `kind` at `age` leaving the neutron star or black hole of a carbon–oxygen core
-    /// of `co_core` (M☉).
-    fn remnant_fate(
+    /// The end at `age` of the thermal pulses of a star whose early AGB had the initial mass `m0`
+    /// and a core at the base of the AGB of `mc_bagb`, leaving a white dwarf of `mass`: under
+    /// [`RemnantRecipe::MandelMuller2020`] a star inside the single-star electron-capture window
+    /// collapses by electron capture instead, however its pulses end (plan 06, design note 12).
+    #[must_use]
+    fn agb_white_dwarf(
         &self,
         age: f64,
-        kind: DeathKind,
+        m0: f64,
+        mc_bagb: f64,
+        mass: f64,
+        progenitor: ProgenitorAtDeath,
+    ) -> Fate {
+        if self.captures_electrons(m0) {
+            return electron_capture(age, progenitor);
+        }
+        self.white_dwarf(
+            age,
+            white_dwarf_kind(DegenerateCore::CarbonOxygen {
+                mc_bagb: SolarMasses::new(mc_bagb),
+            }),
+            mass,
+            progenitor,
+        )
+    }
+
+    /// Whether a star whose early AGB had the initial mass `m0` dies by electron capture under
+    /// the track's remnant recipe whatever its thermal pulses do: never under
+    /// [`RemnantRecipe::Hurley2000`], and under [`RemnantRecipe::MandelMuller2020`] inside the
+    /// single-star window [`m_cc` − 0.1 M☉, `m_cc`) (plan 06, design note 12;
+    /// [`ElectronCaptureWindows::single`]).
+    ///
+    /// The window is tested in `m0`, the mass the early AGB's `m_c_bagb` reads, which the main
+    /// sequence's wind has lowered from the star's initial mass (HPT section 7.1), because
+    /// `m_c_bagb` of that mass is what decides an iron core ([`Builder::early_agb`]): the window
+    /// then ends exactly where the iron cores begin, with no gap (ruling 45 of 2026-09-22). The
+    /// windows are found here, at the end of the pulses, so that a star that never reaches them
+    /// does not pay for the root.
+    ///
+    /// A companion-stripped star's 1 M☉ window waits for P06.T19.c, which decides the provisional
+    /// stripped mark (design note 11), and for plan 11: the track never sets
+    /// [`Stripping::Companion`].
+    #[must_use]
+    fn captures_electrons(&self, m0: f64) -> bool {
+        match self.options.remnant() {
+            RemnantRecipe::Hurley2000 => false,
+            RemnantRecipe::MandelMuller2020 => ElectronCaptureWindows::new(self.phys.coeffs)
+                .single()
+                .contains(SolarMasses::new(m0)),
+        }
+    }
+
+    /// The largest core, M☉, an oxygen–neon white dwarf of a star whose early AGB had the initial
+    /// mass `m0` and a core at the base of the AGB of `mc_bagb` can have, if the track caps it:
+    /// under [`RemnantRecipe::MandelMuller2020`], for an oxygen–neon core (`mc_bagb` of 1.6–2.25
+    /// M☉) outside the electron-capture window, [`OXYGEN_NEON_CAPTURE_MASS`] (ruling 57 of
+    /// 2026-09-22). The AGB ends when the core reaches it, and the envelope goes then.
+    ///
+    /// Such a star, below the window, loses its envelope before its core reaches the mass at
+    /// which electron captures would collapse it: the competition between the core's growth and
+    /// the super-AGB wind decides a super-AGB star's fate, and the window of electron capture that
+    /// wins it is at most about 0.2 M☉ of initial mass wide (Doherty et al. 2015, MNRAS 446, 2599,
+    /// sections 3.2 and 5). HPT's pulses outrun that wind: on the tracks as built they grow such
+    /// cores to `Mc,SN` = 1.44 M☉ with up to 5.9 M☉ of envelope still on, which left dwarfs at the
+    /// neutron star's radius. Under [`RemnantRecipe::Hurley2000`] there is no cap, as in HPT and
+    /// SSE.
+    #[must_use]
+    fn oxygen_neon_cap(&self, m0: f64, mc_bagb: f64) -> Option<f64> {
+        let oxygen_neon =
+            (OXYGEN_NEON_MC_BAGB.value()..IRON_CORE_MC_BAGB.value()).contains(&mc_bagb);
+        match self.options.remnant() {
+            RemnantRecipe::MandelMuller2020 if oxygen_neon && !self.captures_electrons(m0) => {
+                Some(OXYGEN_NEON_CAPTURE_MASS.value())
+            }
+            RemnantRecipe::MandelMuller2020 | RemnantRecipe::Hurley2000 => None,
+        }
+    }
+
+    /// An oxygen–neon core of `mc` that reaches `Mc,SN` at `age` on the thermal pulses, with its
+    /// envelope still on, of a star whose early AGB had the initial mass `m0`.
+    ///
+    /// Under [`RemnantRecipe::Hurley2000`] it collapses by electron capture into HPT's remnant of
+    /// the core (their section 6 and equation 92), as in the published SSE code. Under
+    /// [`RemnantRecipe::MandelMuller2020`] a star inside the single-star window
+    /// ([`Builder::captures_electrons`]) collapses by electron capture into Mandel and Müller's
+    /// 1.26 M☉ neutron star, and one below it ends as an oxygen–neon white dwarf (plan 06, design
+    /// note 12: below the window "the star ends as an `ONe` or CO white dwarf through the AGB").
+    /// The window is the brainstorm's: electron capture in a window 0.1 M☉ wide in single stars.
+    /// Below the window the pulses end at [`Builder::oxygen_neon_cap`] first, so this is only a
+    /// guard: the dwarf is held to the cap.
+    #[must_use]
+    fn oxygen_neon_core(&self, age: f64, m0: f64, mc: f64, progenitor: ProgenitorAtDeath) -> Fate {
+        match self.options.remnant() {
+            RemnantRecipe::Hurley2000 => {
+                let remnant = hurley_supernova_remnant(SolarMasses::new(mc));
+                Fate {
+                    death: Death::new(Years::new(age), DeathKind::ElectronCapture, progenitor),
+                    remnant,
+                    phase: collapse_phase(remnant.kind()),
+                    iron_core: None,
+                }
+            }
+            RemnantRecipe::MandelMuller2020 => {
+                if self.captures_electrons(m0) {
+                    electron_capture(age, progenitor)
+                } else {
+                    let dwarf = mc.min(OXYGEN_NEON_CAPTURE_MASS.value());
+                    self.white_dwarf(age, Phase::OxygenNeonWhiteDwarf, dwarf, progenitor)
+                }
+            }
+        }
+    }
+
+    /// The collapse at `age` of an iron core whose carbon–oxygen core, as the track's formulae
+    /// give it, is `co_core` (M☉), from `progenitor`, whose envelopes make the supernova
+    /// `supernova`: under the track's remnant recipe ([`iron_core_fate`]).
+    #[must_use]
+    fn iron_core(
+        &self,
+        age: f64,
+        supernova: SupernovaType,
         co_core: f64,
         progenitor: ProgenitorAtDeath,
     ) -> Fate {
-        let remnant = collapse_remnant(self.options.remnant(), SolarMasses::new(co_core));
-        let phase = match remnant.kind() {
-            RemnantKind::BlackHole => Phase::BlackHole,
-            RemnantKind::NeutronStar | RemnantKind::WhiteDwarf => Phase::NeutronStar,
-            RemnantKind::None => Phase::NoRemnant,
-        };
-        Fate {
-            death: Death::new(Years::new(age), kind, progenitor),
-            remnant,
-            phase,
-        }
+        iron_core_fate(
+            self.options.remnant(),
+            age,
+            supernova,
+            SolarMasses::new(co_core),
+            progenitor,
+            self.remnant_draws,
+        )
     }
 }
 
@@ -708,21 +887,86 @@ fn no_remnant(age: f64, kind: DeathKind, progenitor: ProgenitorAtDeath) -> Fate 
         death: Death::new(Years::new(age), kind, progenitor),
         remnant: CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO),
         phase: Phase::NoRemnant,
+        iron_core: None,
     }
 }
 
-/// The remnant of a core collapse of a carbon–oxygen core of `co_core` under `recipe`: a neutron
-/// star or a black hole.
-///
-/// Under [`RemnantRecipe::Hurley2000`] it is HPT's equation 92 (P06.T11's
-/// [`hurley_supernova_remnant`]). **This is the seam of P06.T18.d**: under
-/// [`RemnantRecipe::MandelMuller2020`] HPT's remnant stands in until P06.T18.d replaces this arm
-/// with Mandel and Müller's (2020) type and mass, which read the star's draws too.
+/// An electron-capture supernova at `age` from `progenitor`, leaving Mandel and Müller's 1.26 M☉
+/// neutron star ([`electron_capture_remnant`]).
 #[must_use]
-pub(crate) fn collapse_remnant(recipe: RemnantRecipe, co_core: SolarMasses) -> CompactRemnant {
-    match recipe {
-        RemnantRecipe::Hurley2000 | RemnantRecipe::MandelMuller2020 => {
-            hurley_supernova_remnant(co_core)
+fn electron_capture(age: f64, progenitor: ProgenitorAtDeath) -> Fate {
+    Fate {
+        death: Death::new(Years::new(age), DeathKind::ElectronCapture, progenitor),
+        remnant: electron_capture_remnant(),
+        phase: Phase::NeutronStar,
+        iron_core: None,
+    }
+}
+
+/// The phase of the neutron star or black hole a collapse leaves, or `NoRemnant`. A collapse never
+/// leaves a white dwarf.
+#[must_use]
+const fn collapse_phase(kind: RemnantKind) -> Phase {
+    match kind {
+        RemnantKind::BlackHole => Phase::BlackHole,
+        RemnantKind::NeutronStar | RemnantKind::WhiteDwarf => Phase::NeutronStar,
+        RemnantKind::None => Phase::NoRemnant,
+    }
+}
+
+/// The collapse at `age` of an iron core from `progenitor`, whose envelopes make the supernova
+/// `supernova`, under `recipe` (P06.T18.d; **the seam that P06.T10.e left for it**).
+///
+/// - Under [`RemnantRecipe::Hurley2000`] the remnant is HPT's equation 92 of the carbon–oxygen
+///   core `co_core` (P06.T11's [`hurley_supernova_remnant`]), a neutron star or a black hole,
+///   and the death is always [`DeathKind::CoreCollapse`], as in the published SSE code.
+/// - Under [`RemnantRecipe::MandelMuller2020`] the star's remnant `draws` decide the type and
+///   mass from the progenitor's carbon–oxygen and helium cores
+///   ([`core_collapse`](crate::stellar::remnant::collapse::core_collapse), Mandel and Müller
+///   2020, section 3, with Belczynski et al.'s 2016 pair instability first). A neutron star, or a
+///   black hole with some fallback, ends a [`DeathKind::CoreCollapse`] supernova of `supernova`'s
+///   type; complete fallback, and the collapse after pulsational pair instability, is a
+///   [`DeathKind::DirectCollapse`] with no supernova; a pair-instability supernova is
+///   [`DeathKind::PairInstability`] and leaves nothing.
+///
+/// The fate records `supernova`, so that the remnant stage of P06.T29 can redraw the remnant on
+/// the built track ([`Track::fate_with`](super::Track::fate_with)).
+#[must_use]
+pub(super) fn iron_core_fate(
+    recipe: RemnantRecipe,
+    age: f64,
+    supernova: SupernovaType,
+    co_core: SolarMasses,
+    progenitor: ProgenitorAtDeath,
+    draws: RemnantDraws,
+) -> Fate {
+    let (kind, remnant) = match recipe {
+        RemnantRecipe::Hurley2000 => (
+            DeathKind::CoreCollapse { supernova },
+            hurley_supernova_remnant(co_core),
+        ),
+        RemnantRecipe::MandelMuller2020 => {
+            let outcome = core_collapse(
+                progenitor.co_core_mass(),
+                progenitor.helium_core_mass(),
+                draws,
+            );
+            let kind = match outcome {
+                CoreCollapse::NeutronStar { .. } | CoreCollapse::BlackHole { .. } => {
+                    DeathKind::CoreCollapse { supernova }
+                }
+                CoreCollapse::DirectCollapse { .. } | CoreCollapse::PulsationalPairInstability => {
+                    DeathKind::DirectCollapse
+                }
+                CoreCollapse::PairInstabilitySupernova => DeathKind::PairInstability,
+            };
+            (kind, outcome.remnant())
         }
+    };
+    Fate {
+        death: Death::new(Years::new(age), kind, progenitor),
+        remnant,
+        phase: collapse_phase(remnant.kind()),
+        iron_core: Some(IronCore { supernova, co_core }),
     }
 }

@@ -116,6 +116,17 @@ pub const SINGLE_STAR_WINDOW: SolarMasses = SolarMasses::new(0.1);
 /// P06.T19's `KickLawParams` carries it as `ec_window_stripped`, whose default must be this value.
 pub const COMPANION_STRIPPED_WINDOW: SolarMasses = SolarMasses::new(1.0);
 
+/// The core mass at which electron captures on ²⁴Mg and ²⁰Ne collapse a degenerate oxygen–neon
+/// core, and so the heaviest oxygen–neon white dwarf the default recipe leaves: 1.37 M☉ (ruling
+/// 57 of 2026-09-22).
+///
+/// Miyaji et al. (1980, PASJ 32, 303) and Nomoto (1984, ApJ 277, 791) find the collapse at about
+/// 1.375 M☉, the figure Doherty et al. (2015, MNRAS 446, 2599, sections 1 and 3.2) use for a
+/// super-AGB core's electron-capture limit; model assumptions move it slightly (1.367 M☉ in
+/// Takahashi et al. 2013, as Doherty et al. note). HPT use the Chandrasekhar mass, 1.44 M☉, which
+/// `RemnantRecipe::Hurley2000` keeps.
+pub const OXYGEN_NEON_CAPTURE_MASS: SolarMasses = SolarMasses::new(1.37);
+
 /// The gravitational mass of the neutron star an electron-capture supernova leaves: 1.26 M☉
 /// (MM20, section 3).
 pub const ELECTRON_CAPTURE_NEUTRON_STAR_MASS: SolarMasses = SolarMasses::new(1.26);
@@ -579,8 +590,10 @@ impl InitialMassWindow {
 ///
 /// `m_cc` is found at constant mass, as equation 66 is written. A track's `m_c_bagb` reads the
 /// initial mass that main-sequence winds have left (HPT section 7.1), so on a track the iron cores
-/// begin a little higher in initial mass. The window's caller chooses the mass it tests
-/// (P06.T18.d).
+/// begin a little higher in initial mass. The track therefore tests the window in the mass its
+/// early AGB's `m_c_bagb` reads, which is what decides its iron core, so that the window ends
+/// exactly where the iron cores begin (P06.T18.d, ruling 45 of 2026-09-22): the window of a solar
+/// star, [8.103, 8.203) M☉ in that mass, is about [8.20, 8.30) M☉ of initial mass.
 ///
 /// MM20's own criterion is HPT's whole oxygen–neon band, 1.6–2.25 M☉ of core at the base of the
 /// AGB, which at Z = 0.02 is 1.9 M☉ of initial mass. The brainstorm's widths narrow it and keep
@@ -698,7 +711,7 @@ mod tests {
     use crate::id::{BodyId, Layer, SystemId};
     use crate::rng::{ObjectKey, Seed, Stream, tags};
     use crate::stellar::draws::StarDrawsParts;
-    use crate::units::MetalFraction;
+    use crate::units::{MetalFraction, Years};
 
     fn m(v: f64) -> SolarMasses {
         SolarMasses::new(v)
@@ -1273,5 +1286,148 @@ mod tests {
             }
         }
         golden!("stellar/collapse", w.as_str());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // P06.T18.d: the recipe on real tracks.
+
+    /// What the massive stars of a population leave, counted over a sample.
+    #[derive(Debug, Default)]
+    struct Population {
+        stars: u32,
+        neutron_stars: u32,
+        electron_captures: u32,
+        black_holes: u32,
+        complete_fallback: u32,
+        light_black_holes: u32,
+        white_dwarfs: u32,
+        no_remnant: u32,
+        neutron_star_masses: (f64, f64),
+    }
+
+    impl Population {
+        fn compact(&self) -> u32 {
+            self.neutron_stars + self.black_holes
+        }
+
+        fn share(part: u32, whole: u32) -> f64 {
+            f64::from(part) / f64::from(whole)
+        }
+    }
+
+    /// The Kroupa sample of P06.T18's tests: `n` single stars of 8–150 M☉ at Z = 0.02, drawn as
+    /// m^−2.3 (Kroupa 2001 above 0.5 M☉) from `seed`, with their own Reimers η and remnant draws
+    /// and every other draw at its median, each built to its death under the generator's options.
+    ///
+    /// The track covers 0.1–100 M☉ until P06.T14, so a star above 100 M☉ is built at 100, as
+    /// `Track` itself clamps; at Z = 0.02 every star above about 60 M☉ ends on the same Wolf–Rayet
+    /// plateau of carbon–oxygen core, so the clamp moves none of these shares' categories.
+    fn kroupa_population(seed: u64, n: u32) -> Population {
+        use crate::rng::PowerLaw;
+        use crate::stellar::sse::{MAX_INITIAL_MASS, Track};
+        use crate::stellar::{Composition, Phase};
+
+        use super::super::DeathKind;
+
+        let imf = PowerLaw::new(2.3, 8.0, 150.0).expect("a valid power law");
+        let mut s = stream(seed);
+        let mut population = Population {
+            neutron_star_masses: (f64::INFINITY, f64::NEG_INFINITY),
+            ..Population::default()
+        };
+        for _ in 0..n {
+            let m0 = s.power_law(&imf);
+            let eta = normal(s.standard_normal());
+            let draws = random_draws(&mut s);
+            let star = StarDraws::from_parts(StarDrawsParts {
+                eta,
+                remnant_type: draws.remnant_type(),
+                remnant_fallback: draws.fallback(),
+                remnant_mass: draws.mass(),
+                ..StarDrawsParts::MEDIAN
+            });
+            let track = Track::full(
+                m(m0.min(MAX_INITIAL_MASS.value())),
+                &Composition::SOLAR,
+                &star,
+            );
+            let death = track.death().expect("a full track dies");
+            let remnant = track.remnant().expect("a full track leaves its remnant");
+            population.stars += 1;
+            match remnant.kind() {
+                RemnantKind::NeutronStar => {
+                    population.neutron_stars += 1;
+                    let (lo, hi) = population.neutron_star_masses;
+                    let mass = remnant.mass().value();
+                    population.neutron_star_masses = (lo.min(mass), hi.max(mass));
+                    if death.kind() == DeathKind::ElectronCapture {
+                        population.electron_captures += 1;
+                    }
+                }
+                RemnantKind::BlackHole => {
+                    population.black_holes += 1;
+                    if death.kind() == DeathKind::DirectCollapse {
+                        population.complete_fallback += 1;
+                    }
+                    if remnant.mass().value() <= 5.0 {
+                        population.light_black_holes += 1;
+                    }
+                }
+                RemnantKind::WhiteDwarf => population.white_dwarfs += 1,
+                RemnantKind::None => population.no_remnant += 1,
+            }
+            let after = track.state_at(Years::new(death.age().value() * (1.0 + 1e-9)));
+            assert!(after.phase().is_remnant(), "{m0} M☉: {:?}", after.phase());
+            if remnant.kind() == RemnantKind::BlackHole {
+                assert_eq!(after.phase(), Phase::BlackHole);
+            }
+        }
+        population
+    }
+
+    /// The seed of the population tests' sample, and its size: the three shares' sampling errors
+    /// are then about 0.4%, 0.6% and 0.2%, well inside their bands.
+    const POPULATION_SEED: u64 = 0x0618_d000_0000_0001;
+    const POPULATION_STARS: u32 = 20_000;
+
+    /// Black holes are 38 ± 5% of the compact remnants of a Kroupa sample of 8–150 M☉ at Z = 0.02
+    /// (P06.T18; the research figure behind "about four fifths" of layer-E remnants staying),
+    /// on the generator's tracks. Black holes of 2–5 M☉ exist, and every neutron star lies in
+    /// 1.13–2.0 M☉.
+    #[test]
+    #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
+    fn black_holes_are_38_percent_of_compact_remnants_on_real_tracks() {
+        let p = kroupa_population(POPULATION_SEED, POPULATION_STARS);
+        let share = Population::share(p.black_holes, p.compact());
+        eprintln!("{p:?}: black holes {share:.4} of compact remnants");
+        assert!((0.33..=0.43).contains(&share), "{share}");
+        assert!(p.light_black_holes > 0, "no black hole of 2–5 M☉: {p:?}");
+        let (lo, hi) = p.neutron_star_masses;
+        assert!(
+            lo >= MIN_NEUTRON_STAR_MASS.value() && hi <= MAX_NEUTRON_STAR_MASS.value(),
+            "{lo}–{hi}"
+        );
+    }
+
+    /// Complete fallback is 70–80% of black holes in the same sample (P06.T18; the brainstorm's
+    /// "three quarters of them").
+    #[test]
+    #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
+    fn complete_fallback_is_70_to_80_percent_of_black_holes_on_real_tracks() {
+        let p = kroupa_population(POPULATION_SEED, POPULATION_STARS);
+        let share = Population::share(p.complete_fallback, p.black_holes);
+        eprintln!("{p:?}: complete fallback {share:.4} of black holes");
+        assert!((0.70..=0.80).contains(&share), "{share}");
+    }
+
+    /// Electron captures are 2–6% of the neutron stars of the same sample, all single stars
+    /// (P06.T18; the 0.1 M☉ window of design note 12).
+    #[test]
+    #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
+    fn electron_captures_are_2_to_6_percent_of_single_star_neutron_stars_on_real_tracks() {
+        let p = kroupa_population(POPULATION_SEED, POPULATION_STARS);
+        let share = Population::share(p.electron_captures, p.neutron_stars);
+        eprintln!("{p:?}: electron captures {share:.4} of neutron stars");
+        assert!((0.02..=0.06).contains(&share), "{share}");
     }
 }

@@ -2590,3 +2590,93 @@ Instant}`); `TrackOptions::hurley2000()` is T12.b's (both HPT recipes, no bridge
     compile), which would otherwise have read them as faults. Both files are the `ui` lane's.
   - The server's `galaxy_parameters` and `systems_in_range` goldens are unchanged
     (`golden_diff.py`: "No golden files changed").
+- **Deviations in T18.d, T20.a and T29, as built (round 7, `model`).** No existing golden moved.
+  Three goldens are new at 11: `stellar/summaries`, `stellar/endings` (T18.d's and T20.a's endings
+  on real tracks, bit for bit) and `stellar/white_dwarf_cooling`. **Ruled (ruling 57):** the
+  version stays 11, as `SYSTEM-VIEWER-PATH.md` §3 has it ("land T20.a before T29.b's goldens and it
+  costs no bump"). But the default recipe's `Track` output does move: white-dwarf luminosities, the
+  §6.3 perturbation's target, iron-core remnants, and the IIb bound. Through the perturbation's
+  target, the wind also moves the lifetimes and white-dwarf masses of stars with thin envelopes. No
+  golden at HEAD pinned any of it, and nothing seeded read it; ruling 33 had expected a bump.
+  - _T18.d's wiring._ The builder carries the star's `RemnantDraws`. Every iron-core death (the
+    early AGB's supernova and an oxygen–neon helium star's) goes through `phases::iron_core_fate`:
+    HPT's equation 92 under `Hurley2000`, so T12.b is untouched, and `collapse::core_collapse` under
+    `MandelMuller2020`. A neutron star or partial fallback keeps `CoreCollapse { supernova }`;
+    complete fallback and pulsational pair instability are `DirectCollapse`; a pair-instability
+    supernova is `PairInstability` with `NoRemnant`. The fate records the supernova type, so that
+    `Track::fate_with(RemnantDraws)` redraws the remnant on the built track (T29's remnant stage,
+    which plan 08 repeats). The single-star window is tested at the end of the thermal pulses on the
+    early AGB's initial mass, the mass `m_c_bagb` reads (ruling 45): inside it the star collapses
+    by electron capture into the 1.26 M☉ neutron star however its pulses end. At Z = 0.02 that is
+    [8.103, 8.203) M☉ in that mass, about [8.20, 8.30) M☉ initially, and it meets the iron cores
+    with no gap. The windows are found only when a star reaches the pulses' end. The stripped
+    window waits for T19.c's mark: the track never sets `Stripping::Companion`.
+  - **Below the window. Ruled (ruling 57).** On the tracks as built, the pulses of stars 0.13 M☉
+    (Z = 0.02) to 0.34 M☉ (Z = 10⁻⁴) below the window grew oxygen–neon cores to `Mc,SN` = 1.44 M☉
+    with up to 5.9 M☉ of envelope still on. That left 1.44 M☉ dwarfs at the neutron-star radius
+    floor, 2.0–2.2% of an 8–150 M☉ sample. Under the default an oxygen–neon white dwarf is now
+    capped at `collapse::OXYGEN_NEON_CAPTURE_MASS`, 1.37 M☉. That is the electron-capture mass of
+    Miyaji et al. (1980) and Nomoto (1984), about 1.375 M☉. Outside the window the AGB ends when the
+    core reaches the cap, on the thermal pulses or, where `Mc,DU` is already above it, on the early
+    AGB, and the envelope goes then. This follows Doherty et al. (2015, MNRAS 446, 2599): a
+    super-AGB star below the window loses its envelope first. `Hurley2000` keeps HPT's electron
+    capture there. Over 5–9 M☉ at five metallicities the heaviest white dwarf is exactly 1.37 M☉,
+    at 0.002 96 R☉ (2,062 km), against the floor's 1.75 × 10⁻⁵ R☉; 125 of the scan's dwarfs sit at
+    the cap. A test holds that no dwarf passes the cap or comes within 20 times the floor. The
+    three shares and T12.b are unchanged. In `stellar/endings` the rows of 7 and 8.1 M☉ at Z = 0.02
+    moved, and no other golden did. At 7 M☉ the shorter span of the pulses moves the knots: the
+    death comes 530 years earlier and the dwarf is 6 × 10⁻⁵ M☉ lighter. At 8.1 M☉ the 1.44 M☉
+    dwarf becomes 1.37 M☉.
+  - _Shares on real tracks_ (Kroupa 8–150 M☉ at Z = 0.02, own η and remnant draws, tracks held to
+    100 M☉ until T14, 20,000 stars). Seed `0x0618d00000000001`, which the slow tests use, gives 35.98%
+    black holes, 71.59% complete fallback and 2.68% electron capture. Seeds 2 and 3 give
+    36.37–36.67%, 70.39–70.87% and 2.52–2.70%. All are in band: complete fallback sits 0.4–1.6
+    points above its floor, as the forecast said. Neutron stars span 1.132–1.997 M☉, and 1,661
+    black holes are of 2–5 M☉. The tests are slow, 20 s each at the slow-test profile.
+  - _The IIb bound is 0.5 M☉_ (ruling 46.1). It is the upper end of the envelopes inferred for SNe
+    IIb, from Sravan, Marchant and Kalogera (2019, ApJ 885, 130, §2.3): ≲ 0.5 M☉ for every one with
+    a detected progenitor (1993J, 2011dh, 2011fu, 2016gkg), and below it for larger samples.
+    SN 1993J (0.20 ± 0.05 M☉), 2011dh (about 0.1) and Cas A (a 1993J twin by its light echo, Krause
+    et al. 2008) are IIb. The lower bound stays zero. The sample gives 90.9% IIP, 1.0% IIL, 3.4%
+    IIb, 4.7% Ib and no Ic, as single stars should.
+  - _T20.a._ `white_dwarf::{hurley_shara_luminosity, luminosity, formation_luminosity,
+cooling_origin}`, with the paper's 300, 1.18 and 6.48, the 9,000 Myr break, and HPT's A of 4, 15
+    and 17 (HS03's 20:80 C:O and 80:20 O:Ne give 15.2 and 16.8). The late factor is SSE's
+    (9,000.1 A)^5.3, because the printed (9,000 A)^5.3 leaves a 6 × 10⁻⁵ step at 9 Gyr. §6.3's
+    perturbation reads the recipe's law at t = 0, as SSE does with `wdflag` > 0. Under the default,
+    the law's clock starts where it gives the star's last luminosity, above −0.1 Myr, so L is
+    continuous at every hand-over. **Ruling 46.2:** the light helium stars' 0.26–0.34 dex step is
+    therefore gone now, at T10.d's direct hand-over, and not only once T16 lands. The oxygen–neon
+    dwarfs' 0.06 dex step goes with it, and only the radius still steps. `Hurley2000` keeps both
+    steps; a test shows each. When T16 lands, the match moves to the bridge's end.
+  - **The 10% check fails.** Against Bédard et al.'s (2020) 0.6 M☉ thick-H sequence (the Montreal
+    `seq_060_thick.txt`), Hurley and Shara's T_eff is within 10% only at 0.01–0.02 Gyr and 2–3 Gyr.
+    It is 13–20% cool from 0.05 to 1 Gyr and 11–17% cool from 5 to 10 Gyr, worst −20.0% at 0.2 Gyr.
+    Equation 90 is 9–45% cool. The test pins these deviations and that the law beats equation 90 at
+    all 13 ages; it does not claim the plan's bracket. **Ruled (ruling 57):** HS03 stands
+    provisionally, with these deviations pinned; a fit to the Montreal sequences replaces it in
+    version 12's batch.
+  - _T29.a._ `stellar::system::{StarModel, BuildStarModelError, MAX_STAR_MASS}`. It has
+    `StarModel::new(m0, Composition, StarDraws, age_at_epoch) -> Result` for 0.01–150 M☉. It also
+    has `state_at(t) -> Option<StarState>`, `None` while the age is not positive, as
+    `existence_at` has it. The remaining methods are `lifetime()`, `death()` and `remnant()`, each
+    an `Option` that is `None` below 0.1 M☉; `max_radius_until(t)` and `max_luminosity_until(t)`,
+    zero before formation; `natal_kick()`, `None` until T19; and `age_at(t)`, `initial_mass()`,
+    `composition()`, `draws()` and `age_at_epoch()`. The track is built to `age_at(+H)`. A star
+    living past +H finds its death on demand by `sse::fate_of`, which is `Track::full`'s bit for
+    bit and costs a whole build, 1–2 ms for an evolved star. Stars above 100 M☉ are evolved at 100
+    until T14. `remnant::{NatalKick, KickMode}` are the Provides shape, with no law.
+  - _T29.b._ `SystemStars::{generate, record, stars, primary, summary_at, brief_at, death_time,
+natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
+    `SystemExistence`, `ClockDeath` and `object_kind`. `StarSummary` holds the state, `ObjectKind`,
+    classification (T23 with `ClassExtras::NONE`), M_V, B − V, the remnant once dead, and the death
+    if it falls in [−H, +H]. Variability, rotation, magnetism, nebula and events wait for their
+    tasks. `brief_at` is `None` before birth, and its log L is `None` where L = 0. `lbv_window` is
+    `None` until T24.a. `death_time` is `BeyondClockRange` for T past `i64` seconds (the lightest
+    dwarfs, whose lifetimes pass 2.9 × 10¹¹ years) and for objects below 0.1 M☉. `ObjectKind` for helium stars uses T24.a's floor of
+    10⁴·⁹ (Z ÷ 0.02)^−0.4 L☉: Wolf–Rayet above it, hot subdwarf below.
+  - _Tests._ 10⁵ random systems across the layers near the solar circle at random clock times hold
+    the brainstorm's property (a slow test; 400 in the fast suite).
+  - _Outside the owned files._ `remnant/mod.rs` gains `mod kick` beside the `class` lane's
+    `pub mod wd_spectral` (applied from `class-P06T23T20b.patch`, with its `McElroy` in `clippy.toml`
+    and its Risks bullet above). `sse/mod.rs` re-exports `fate_of`.
