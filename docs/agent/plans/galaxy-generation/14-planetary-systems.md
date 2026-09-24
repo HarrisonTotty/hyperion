@@ -2981,7 +2981,7 @@ BodyKind, MoonOrigin, BeltKind, SystemSnapshot, SystemSection}` and their build 
     at `Full`. (11) `BodyLabel` is a checked `String` in `record.rs`; T30.c may move it to
     `label.rs` with a re-export. (12) `degrade` takes `&self`, as Provides has it, so it clones
     what it keeps.
-  - _T16.b._ `tests/planetary_properties.rs` holds the core-fraction test (ruling 53):
+  - _T16.b._ `tests/planetary_rocky_properties.rs` (moved from `planetary_properties.rs` at the merge, which `place`'s T16.b tests took) holds the core-fraction test (ruling 53):
     `rocky_core_mass_fractions_follow_plotnykov_and_valencia`, over 35,964 hand-placed bodies of
     0.1–1.9 M⊕ at 0.1–1.5 au of the present Sun (T8's placer is not built), whose rocky outcomes'
     16th, 50th and 84th percentiles are within 0.01 of 0.06, 0.24 and 0.57, with 21% ± 1% over
@@ -3146,3 +3146,90 @@ BodyKind, MoonOrigin, BeltKind, SystemSnapshot, SystemSection}` and their build 
   - _Also._ `formatMassMearth` keeps three significant figures in E notation (`1.57E-4`, ruling
     44.1). `GALAXY`'s draw lists are byte for byte unchanged: the round-7 probe's 1,152 chart scenes
     written to JSON before any edit and after give SHA-256 `9cf26949…` both times.
+- **Deviations in T8 and T10, as built (`place`, round 7),** with ruling 55.3 and T16.b's
+  property test.
+  - _Shape._ `planetary/placement/classes.rs` with `classes/orbits.rs` (T8.d) and
+    `classes/tides.rs` (T8.e). `place(seed, system, &PlacementHost, limits: Truncation, &Disc,
+class, first_slot) -> HostPlacement`: `PlacementHost::new(number, DiscHost, HostPlane)` carries
+    the host's zero-age parameters as the disc's host does (T9.c's `ZoneDiscInputs::host`), and
+    the limits are the zone's `truncation()`. `HostPlacement` has `drawn_class()`, `class()`,
+    `core()`, `planets()` in slot order and `next_slot()`, which the next host takes as its
+    `first_slot`. `PlacedPlanet` has `index`, `group`, `role`, `mass`, `orbit` (a
+    `KeplerElements` with μ = G (M★ + m)), `formation_distance`, `formed()`
+    (`SnowLineSide`), `origin`, `hot`, `resonance`, `drawn_eccentricity` and `rescaled`; T30.a
+    builds T16.a's `PlacedBody` from its mass, orbit and formation distance. The close-binary
+    flag is not an argument: it enters the class draw (T9.c); the placer takes `HostPlane`
+    instead, `Aligned` with a close pair's orbital plane for its circumbinary zone.
+  - _Tags._ `planet.orbit` (`Body`) and `planet.plane` (`System`), as the brief asked, and
+    `planet.count` (`System`) for the group-level draws: presence, count, first location, the hot
+    variant, resonance, a flanking side, and per pair a resonance offset. **For the orchestrator
+    to rule:** the brief named two tags; the counts need a system-level stream (design note 4) and
+    Provides lists `planet.count`, so `tags.golden` gains three lines.
+  - _Slots._ Every group's drawn count is reserved in consecutive slots before anything is placed,
+    so that masses and spacings, keyed by slot, are fixed; a member that cannot be placed leaves
+    its slot unused, and generation order is template order, a flanking companion after its giant.
+  - _Where a group starts._ Its location law is drawn inside the range its bounds allow, the shape
+    kept (a range wholly inside the inner bound is held at it), rather than clamped, and a small
+    group's range stops at the chaotic-zone gap of a giant anchored beyond it. Later groups'
+    first bodies are barriers to earlier walks: D7's floor with the barrier's eccentricity and the
+    walker's largest, and the gap. Spacings are drawn against `spacing_floor` at the
+    eccentricities assumed (the pair's drawn and the outer's largest), so few are rescaled (under
+    10% of cold chain planets).
+  - _Hot and warm Jupiters_ (for the orchestrator to rule). T8's test says every planet lies
+    outside the disc's inner edge, but that edge sits near an 8-day corotation period (T3.b, over
+    10 days in 35% of discs), and so held 30% of hot Jupiters beyond 10 days and the rest near 8.
+    A migrated giant drawn by a period law is placed inside the disc's cavity, bounded by twice its
+    Roche limit (Ford and Rasio 2006) and the zone; placed hot Jupiters around single Suns then
+    meet the class's 0.82%.
+  - _Roche limit._ Ford and Rasio's (2006, §1) a_R = 2.16 R_p (M★ ÷ M_p)^⅓, their own definition of
+    the "twice the Roche limit" edge, with R_p Chen and Kipping's median radius at the mass, not
+    T15's fluid 2.456. Every planet's periapsis stays outside twice it, and inside the zone.
+  - _Resonance offsets_ (for the orchestrator to rule). Fabrycky et al. (2014, §4, eq. 11) find the
+    excess at −0.2 < ζ₁ < −0.1, which is 0.28–0.56% wide of 4:3, 0.56–1.11% of 3:2 and
+    1.67–3.33% of 2:1, not the plan's 0.5–2% for all; ζ is drawn uniform in 0.1–0.2 and 5:3 takes
+    the same ζ (they find no second-order excess). A snap is kept only where admitted; otherwise
+    the pair keeps its spacing.
+  - _Eccentricity and inclination._ Laws are truncated at each planet's limit by drawing the rank
+    in the truncated range, with a numerical cap of 0.99. Beta laws by Press et al.'s `invbetai`
+    (fixed steps). σ_i is 1.5° for cold chains (Fabrycky et al.'s range 1.0–2.2°, best fit 1.8°),
+    and otherwise half the Rayleigh scale with the law's mean square eccentricity. Re-checked: Xie
+    et al. (2016) give means (multis ē = 0.04, σ ≈ 0.032) and Van Eylen et al. (2019) Rayleigh
+    σ = 0.061 for multis and half-Gaussian 0.32 ± 0.06 for singles; the templates' 0.04 and 0.3
+    stand inside those. Kipping's Betas are as the templates have them. Wisdom's 1.3 is derived
+    from his eq. 56 (s ≃ 0.51 μ^(−2⁄7)), as Chiang et al. (2009) print it.
+  - _T8.e._ τ = (4 ÷ 63) Q′ (m ÷ M★) (a ÷ R)⁵ ÷ n (Rasio et al. 1996, eq. 9; Jackson et al. 2008,
+    eq. 1), with Q′ 10⁶ and 10² (Ogilvie 2014: Jupiter's 1.2 × 10⁶; Jackson et al.'s 10^6.5).
+    Goldreich and Soter (1966) were not reachable. **Finding:** hot Jupiters within 5 days are
+    circular to 0.01 at 5 Gyr only up to 1.5 Jupiter masses; 95% of those of 1.5–2, 85% of 2–4 and
+    65% of heavier ones are, as massive eccentric hot Jupiters are observed (HAT-P-2 b, XO-3 b), so
+    test (e) asserts it up to 1.5.
+  - _Ruling 55.3._ `core_fallback` applies T7.c's `giant_core` after the class draw. Re-fitted by
+    `arch`'s method, extended to both fallbacks, over the solar-disc sample with each disc living
+    its star's drawn lifetime (83.4% have the solids, 71.1% grow the core in time):
+    `GIANT_WEIGHT_SCALE` 1.373 → 1.701 (+24%) and `HOT_JUPITER_WEIGHT` 0.0103 → 0.0127 (+23%).
+    After both: Cumming's window 10.50%, hot Jupiters 0.82%, a cold giant in 30.7% of compact
+    systems, giants in all 19.5%, compact 35.7%; on the placed sample of single Suns 10.51%, 0.82%
+    and 30.5%. T4.c's brackets still hold, some narrowly: the log-slope is 1.851 (1.85–2.0), the
+    compact share at 1 M☉ 0.345 (0.27–0.35), the giants at 0.3 M☉ 0.046 (under 0.05).
+    `planetary/architecture` moves (251 values), without a bump as ruled.
+  - _T10._ `tests/planetary_placement.rs`, with a shared `tests/planetary_support/mod.rs` that builds
+    systems as T30.a will (records at the Sun-like point, plan 11's hierarchies,
+    `ZoneHierarchy::from`, `zams` values, each star's disc-lifetime rank); `SystemContext` does
+    not exist. T10.a runs on 4,000 systems and, slow, on a million; it also checks T9.c's "no planet
+    outside its zone". T10.b asserts on mass (1–20 M⊕ for 1–4 R⊕), the radius rank being
+    `planet.radius`'s (T30). As built: small planets 0.70 per FGK star (0.57 by radius at drawn
+    ranks), hot Jupiters 0.73%, Cumming's giants 10.4%, the giants' slope 2.01, 61% of 0.1–0.5 M☉
+    hosts with two or more inside 200 days and 3.7% with a giant, at −2 0.003 of solar.
+    **Findings, pinned as built, for the orchestrator:** η⊕ 0.09 against Bryson et al.'s 0.37–0.60
+    (rocky groups end short of the zone; all of `Barren` in `TerrestrialOnly` gives about 0.16);
+    adjacent log radii's correlation 0.78 on these hosts (0.65 on single Suns) and the outer the
+    larger in 0.58; 0.98 small planets per M dwarf inside 200 days (0.86 by radius) against 2.5 ±
+    0.2; 0.14 planets per M3–M5.5 dwarf and 4% compact multiples inside 10 days against 1.19 and
+    0.44 (the disc's inner edge near 8 days); small planets at −0.8 0.45 of solar (T7's masses
+    scale with the solids); close-binary hosts' planets 0.23 of single stars' (inside Kraus's 1σ,
+    under the plan's quarter); no small pair under 10 mutual Hill radii (Weiss 7%), median 17.2.
+  - _T16.b._ `tests/planetary_properties.rs`, built against this tree's derivation pieces, not
+    `derive_body` (not merged here): T12.a's flux of the zone's stars, the 0.3 albedo, the
+    composition at formation flux with a drawn rank, and T11.d's giant radius and internal heat;
+    stars from HPT's track at 0.1, 1, 5 and 12 Gyr. Both tests pass: no body hotter than its
+    hottest host at ±H, and no jump of 10⁻³ per year in temperature, radius or envelope.

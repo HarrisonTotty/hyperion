@@ -38,36 +38,36 @@
 //!
 //! Each class has a weight w(M★, \[Fe/H\]) = w₀ × (mass scaling) × (metallicity scaling), and its
 //! probability is its weight over the sum of all nine ([`ClassWeights::probabilities`]). At 1 M☉
-//! and solar metallicity the weights sum to 1.044, so w₀ reads nearly as a probability there.
+//! and solar metallicity the weights sum to 1.102, so w₀ reads nearly as a probability there.
 //! The anchors are observed rates, which see the outcome and not the table, so the table is set
-//! to meet them after design note 5's fallback (ruling 48, point c): the giant classes' w₀ are
-//! plan 14's draft times [`GIANT_WEIGHT_SCALE`], 1.373, and `HotJupiter`'s is
-//! [`HOT_JUPITER_WEIGHT`].
+//! to meet them after both of design note 5's fallbacks (ruling 48, point c; ruling 55.3): the
+//! giant classes' w₀ are plan 14's draft times [`GIANT_WEIGHT_SCALE`], 1.701, and `HotJupiter`'s
+//! is [`HOT_JUPITER_WEIGHT`].
 //!
 //! | Class | w₀ | Mass scaling | Metallicity scaling |
 //! | ----- | -- | ------------ | ------------------- |
 //! | `Barren` | 0.24 | 1 | 1, plus the weight the other classes lose in the halo |
 //! | `TerrestrialOnly` | 0.35 | 1 | s(\[Fe/H\]) |
 //! | `CompactMulti` | 0.21 | (M ÷ M☉)^−1.5 | s(\[Fe/H\]) |
-//! | `CompactWithColdGiant` | 0.1373 (0.10 × 1.373) | g(M) | z(\[Fe/H\]) |
-//! | `SolarLike` | 0.01373 (0.01 × 1.373) | g(M) | z(\[Fe/H\]) |
-//! | `EccentricGiant` | 0.05492 (0.04 × 1.373) | g(M) | z(\[Fe/H\]) |
-//! | `WarmGiant` | 0.02746 (0.02 × 1.373) | g(M) | z(\[Fe/H\]) |
-//! | `HotJupiter` | 0.0103 | g(M) | z(\[Fe/H\]) |
+//! | `CompactWithColdGiant` | 0.1701 (0.10 × 1.701) | g(M) | z(\[Fe/H\]) |
+//! | `SolarLike` | 0.01701 (0.01 × 1.701) | g(M) | z(\[Fe/H\]) |
+//! | `EccentricGiant` | 0.06804 (0.04 × 1.701) | g(M) | z(\[Fe/H\]) |
+//! | `WarmGiant` | 0.03402 (0.02 × 1.701) | g(M) | z(\[Fe/H\]) |
+//! | `HotJupiter` | 0.0127 | g(M) | z(\[Fe/H\]) |
 //! | `SubstellarCompact` | 1 | `TerrestrialOnly` + `CompactMulti` at 0.08 M☉ | s(\[Fe/H\]) |
 //!
 //! The sources of each row:
 //!
 //! - `Barren` and `TerrestrialOnly`, 0.24 and 0.35: plan 14's split of what no survey sees, a
-//!   judgement (Risks). Their sum, with the compact classes at 33.9% and the giants at 19.5%
+//!   judgement (Risks). Their sum, with the compact classes at 35.7% and the giants at 19.5%
 //!   after the fallback, is what is left at 1 M☉.
-//! - `CompactMulti`, 0.21, and `CompactWithColdGiant`, 0.1373: together, after the fallback,
-//!   33.9% of Sun-like stars with 0.92 planets per star, against Zhu et al.'s (2018, ApJ 860,
+//! - `CompactMulti`, 0.21, and `CompactWithColdGiant`, 0.1701: together, after the fallbacks,
+//!   35.7% of Sun-like stars with 0.97 planets per star, against Zhu et al.'s (2018, ApJ 860,
 //!   101, abstract) 30 ± 3% with Kepler-like planets (at least 1 R⊕, inside 400 days) and about
-//!   0.9 per star; a cold giant in 32.4% of those, Zhu and Wu's (2018, AJ 156, 92, §4) 32 ± 8%.
+//!   0.9 per star; a cold giant in 30.7% of those, Zhu and Wu's (2018, AJ 156, 92, §4) 32 ± 8%.
 //!   Plan 14's draft had 0.24 and 0.07, which gave 23% a cold giant. `TerrestrialOnly`'s rocky
 //!   planets of an Earth mass or more, inside 400 days around a Sun-like star, are Kepler-like
-//!   too, so η rises to roughly 40–50% and the planets per star from 0.92 to about 1.2, as
+//!   too, so η rises to roughly 40–50% and the planets per star from 0.97 to about 1.2, as
 //!   P14.T7's masses decide: between Zhu et al.'s 30 ± 3% and 0.9, and Yang, Xie and Zhou's
 //!   (2020, AJ 159, 164, abstract) 73 ± 13% or Mulders et al.'s (2018, AJ 156, 24, abstract) "at
 //!   least 42%" (ruling 48, point f).
@@ -83,9 +83,10 @@
 //!   G stars, and thrice as frequently as around F stars", and their (2015, ApJ 814, 130,
 //!   abstract) 3.5 times more 1.0–2.8 R⊕ planets around M dwarfs than around FGK stars.
 //! - The giant classes' w₀ (ruling 48, point c): plan 14's 0.10, 0.01, 0.04 and 0.02, in their
-//!   ratios, times 1.373, and `HotJupiter`'s 0.0103, set together over the solar-disc sample of
-//!   this module's tests (83.4% of whose discs can form a giant) so that after the fallback, at 1
-//!   M☉ and \[Fe/H\] = 0: giants of 0.3–10 M♃ at 2–2,000 days lie around 10.5% of hosts, with the
+//!   ratios, times 1.701, and `HotJupiter`'s 0.0127, set together over the solar-disc sample of
+//!   this module's tests (83.4% of whose discs have the solids for a giant, and 71.1% grow its core
+//!   within their star's own disc lifetime) so that after both fallbacks, at 1 M☉ and
+//!   \[Fe/H\] = 0: giants of 0.3–10 M♃ at 2–2,000 days lie around 10.5% of hosts, with the
 //!   templates' orbits, Cumming et al.'s (2008, PASP 120, 531, abstract) figure; giants in all
 //!   around 19.5%, inside their extrapolated 17–20% within 20 au; and hot Jupiters around 0.82%,
 //!   between Howard et al.'s (2012, ApJS 201, 15, §3.2 and Table 4) 0.4–0.5% of Kepler's Sun-like
@@ -93,7 +94,7 @@
 //!   neighbourhood's. `SolarLike`'s share is bounded by Zhu and Wu's (2018, eq. 2) P(no SE, CJ) =
 //!   (1 − P(SE ∣ CJ)) P(CJ) ≈ 1%, which counts every cold Jupiter without super-Earths: with
 //!   `EccentricGiant`'s cold giants and the hot Jupiters' outer giants, about 4% of Sun-like stars
-//!   have such a system after the fallback, and P(SE ∣ CJ) is about 75%, inside their 90 ± 20%
+//!   have such a system after the fallbacks, and P(SE ∣ CJ) is about 75%, inside their 90 ± 20%
 //!   (plan 14's `SolarLike` of 0.03 gave about 6% and 64%). `EccentricGiant`'s and `WarmGiant`'s
 //!   shares of the giants are plan 14's.
 //! - g(M), the giant classes' mass scaling: M ÷ M☉ up to 1.9 M☉, Johnson et al.'s (2010, PASP
@@ -136,8 +137,8 @@
 //!   planets; the weight is continuous with the stars' at the limit.
 //!
 //! The ratio form keeps each giant class proportional to 10^(2 \[Fe/H\]) while giants are rare and
-//! saturates their total near three quarters at +0.5 (75% at 1 M☉, before the fallback). The
-//! share of giants at 1 M☉ has a log-slope of 1.88 between −0.5 and −0.2, and bends as it
+//! saturates their total near four fifths at +0.5 (79% at 1 M☉, before the fallbacks). The
+//! share of giants at 1 M☉ has a log-slope of 1.85 between −0.5 and −0.2, and bends as it
 //! saturates.
 //!
 //! # The anchors, re-checked
@@ -148,11 +149,11 @@
 //! | Anchor | What the paper says | Re-checked | What the table gives, after the fallback |
 //! | ------ | ------------------- | ---------- | -------------------- |
 //! | Cumming et al. (2008, PASP 120, 531) | "10.5% of solar type stars have a planet with mass in the range 0.3–10 M♃ and orbital period 2–2000 days"; "17–20% of stars having gas giant planets within 20 AU"; dN ∝ M^(−0.31 ± 0.2) P^(0.26 ± 0.1) d ln M d ln P (abstract); M dwarfs 1.0%, under 5.4% at 2σ (§3.4) | Yes, full text | 10.5% at 2–2,000 days with the templates' orbits; 19.5% in all at 1 M☉ |
-//! | Hot Jupiters (Wright et al. 2012, ApJ 753, 160; Howard et al. 2012, ApJS 201, 15) | 1.2 ± 0.38% of FGK dwarfs (Wright, abstract); 0.004 ± 0.001 per star for P < 10 days and 8–32 R⊕, 0.005 ± 0.001 to Kp < 16 (Howard, §3.2 and Table 4) | Yes, full text | 0.82% at 1 M☉ (0.99% in the table before it) |
-//! | Zhu et al. (2018, ApJ 860, 101) | "the fraction of Sun-like stars with Kepler-like planets ... is 30 ± 3%", with 3.0 ± 0.3 planets within 400 days per system and about 0.9 per star (abstract). Yang, Xie and Zhou (2020, AJ 159, 164, abstract and §5.1) find 73 ± 13% and 2.3 ± 0.4 with DR25 and efficiency corrections | Yes, full text | 33.9% at 1 M☉, 2.7 planets per system, 0.92 per star from the compact classes; roughly 40–50% and 1.2 counting `TerrestrialOnly`'s Earth-mass planets |
-//! | Zhu and Wu (2018, AJ 156, 92) | P(CJ ∣ SE) = 32 ± 8%, rising to 60% or more for \[Fe/H\] > 0.1; P(SE ∣ CJ) = 90 ± 20%; cold Jupiters without super-Earths ∼1% of stars (abstract, eq. 2, §4) | Yes, full text | P(CJ ∣ SE) 32.4% at 1 M☉, and 62% at +0.2 before the fallback; P(SE ∣ CJ) about 75%, and about 4% of stars with a cold Jupiter and no super-Earth |
+//! | Hot Jupiters (Wright et al. 2012, ApJ 753, 160; Howard et al. 2012, ApJS 201, 15) | 1.2 ± 0.38% of FGK dwarfs (Wright, abstract); 0.004 ± 0.001 per star for P < 10 days and 8–32 R⊕, 0.005 ± 0.001 to Kp < 16 (Howard, §3.2 and Table 4) | Yes, full text | 0.82% at 1 M☉ (1.15% in the table before the fallbacks) |
+//! | Zhu et al. (2018, ApJ 860, 101) | "the fraction of Sun-like stars with Kepler-like planets ... is 30 ± 3%", with 3.0 ± 0.3 planets within 400 days per system and about 0.9 per star (abstract). Yang, Xie and Zhou (2020, AJ 159, 164, abstract and §5.1) find 73 ± 13% and 2.3 ± 0.4 with DR25 and efficiency corrections | Yes, full text | 35.7% at 1 M☉, 2.7 planets per system, 0.97 per star from the compact classes; roughly 40–50% and 1.2 counting `TerrestrialOnly`'s Earth-mass planets |
+//! | Zhu and Wu (2018, AJ 156, 92) | P(CJ ∣ SE) = 32 ± 8%, rising to 60% or more for \[Fe/H\] > 0.1; P(SE ∣ CJ) = 90 ± 20%; cold Jupiters without super-Earths ∼1% of stars (abstract, eq. 2, §4) | Yes, full text | P(CJ ∣ SE) 30.7% at 1 M☉, and 67% at +0.2 before the fallbacks; P(SE ∣ CJ) about 75%, and about 4% of stars with a cold Jupiter and no super-Earth |
 //! | Dressing and Charbonneau (2015, ApJ 807, 45) | "2.5 ± 0.2 planets per M dwarf with radii 1–4 R⊕ and periods shorter than 200 days" (abstract), hosts under 4,000 K, median 3,746 K and 0.47 R☉ (§2) | Yes, full text | At 0.48 M☉, 2.4 counting every compact planet and a fifth of the rocky ones; about 1.9 inside 200 days at P14.T6.b's spacing (an estimate until P14.T8 places them) |
-//! | Giants around about 3% of M dwarfs | Johnson et al. (2010, abstract): "3% around M dwarfs (0.5 M☉)" inside 2.5 au; Cumming et al. (2008, §3.4): 1.0%; Bonfils et al. (2013, A&A 549, A109, abstract): ≲1% at 1–10 days and 2 (+3 −1)% at 10–100 days; Montet et al. (2014, ApJ 781, 28, abstract): 6.5 ± 3.0% for 1–13 M♃ within 20 au | Yes, full text | 1.9% at 0.3 M☉, where half the discs cannot form a giant (the median disc has just under 10 M⊕ of solids beyond its snow line), and 6.2% at 0.5 M☉, about 4.8% inside Johnson et al.'s window; 3.8% and 9.3% in the table before the fallback |
+//! | Giants around about 3% of M dwarfs | Johnson et al. (2010, abstract): "3% around M dwarfs (0.5 M☉)" inside 2.5 au; Cumming et al. (2008, §3.4): 1.0%; Bonfils et al. (2013, A&A 549, A109, abstract): ≲1% at 1–10 days and 2 (+3 −1)% at 10–100 days; Montet et al. (2014, ApJ 781, 28, abstract): 6.5 ± 3.0% for 1–13 M♃ within 20 au | Yes, full text | 2.3% at 0.3 M☉, where half the discs cannot form a giant (the median disc has just under 10 M⊕ of solids beyond its snow line), and 7.2% at 0.5 M☉, about 5.6% inside Johnson et al.'s window; 4.6% and 11.3% in the table before the fallbacks |
 //! | Johnson et al. (2010, PASP 122, 905) | f(M★, \[Fe/H\]) = 0.07 ± 0.01 (M★ ÷ M☉)^(1.0 ± 0.3) 10^((1.2 ± 0.2) \[Fe/H\]), for K > 20 m s⁻¹ and a < 2.5 au, over 0.2–1.9 M☉ (eq. 8, Table 1) | Yes, full text | g(M) = M ÷ M☉ to 1.9 M☉. Their metallicity exponent is 1.2, and 1.7 ± 0.3 on Fischer and Valenti's stars alone (§6.1); the brainstorm keeps 2 |
 //! | Reffert et al. (2015, A&A 574, A116) | A Gaussian in mass with µ = 1.9 (+0.1 −0.5) M☉ and σ = 0.5 (+0.5 −0.2) M☉, half its peak at 1.2 and 2.6 M☉; no planet above 2.7 M☉, under 1.6% for 2.7–5 M☉ (abstract, eq. 3, §5) | Yes, full text | g falls with σ = 0.5 M☉ above 1.9 M☉ (plan 14 had 0.8) |
 //! | Fischer and Valenti (2005, ApJ 622, 1102) | Giant occurrence rises as "the square of the number of metal atoms"; under 3% for −0.5 < \[Fe/H\] < 0.0 and 25% above +0.3, for K > 30 m s⁻¹ and P < 4 yr (abstract) | Abstract only: the paper has no preprint and the publisher's full text was not reachable, so the fitted interval of ±0.5 is plan 14's reading, consistent with the abstract's bins | z = 10^(2 \[Fe/H\]) on −0.5 to +0.5 exactly |
@@ -161,16 +162,19 @@
 //! The table gives a host's frequencies where its disc can form giants. With plan 14's disc
 //! (P14.T3's draws) that is 83.4% of solar-mass, solar-metallicity hosts, 67% at 0.5 M☉, 50% at
 //! 0.3 M☉ and 48% of solar-mass hosts at \[Fe/H\] = −0.5, and the rest fall back (design note 5).
-//! The last column is measured after the fallback, as P14.T10.b measures, and the test
-//! `the_anchors_hold_after_the_disc_fallback` asserts it at 1 M☉. The fallback also steepens the
+//! Of discs living their star's own lifetime, a core grows in time (P14.T7.c, the second fallback,
+//! which P14.T8's placer applies; ruling 55.3) in 71.1%, 63.8%, 49.2% and 28.5% of them. The last
+//! column is measured after both fallbacks, as P14.T10.b measures, and the test
+//! `the_anchors_hold_after_the_disc_fallback` asserts it at 1 M☉. The fallbacks also steepen the
 //! giants' fall below solar metallicity.
 //!
 //! # Where the table departs from plan 14's first draft
 //!
 //! - `CompactWithColdGiant` 0.07 → 0.10 and `CompactMulti` 0.24 → 0.21: the draft gave 23% of
 //!   compact systems a cold giant, below Zhu and Wu's 32 ± 8% and Bryan et al.'s 39 ± 7%.
-//! - The giant classes then × 1.373, and `HotJupiter` 0.008 → 0.0103, so that the anchors hold
-//!   after the fallback, which removes 16.6% of Sun-like hosts' giants (ruling 48, point c).
+//! - The giant classes then × 1.701, and `HotJupiter` 0.008 → 0.0127, so that the anchors hold
+//!   after both fallbacks, which remove 28.9% of Sun-like hosts' giants (ruling 48, point c, which
+//!   gave × 1.373 and 0.0103 after the first alone; ruling 55.3).
 //! - `SolarLike` 0.03 → 0.01: the draft's 3% counted Wittenmyer et al.'s Jupiter analogues, most of
 //!   which have super-Earths (Zhu and Wu: 90 ± 20% of cold-Jupiter hosts do) and so belong to
 //!   `CompactWithColdGiant`; Zhu and Wu's ∼1% of cold Jupiters without super-Earths bounds what is
@@ -197,8 +201,10 @@
 //!   are under [`GIANT_SOLID_BUDGET`], 10 M⊕: each giant class's weight moves to its giant-free
 //!   sibling ([`ArchitectureClass::giant_free_sibling`]), the in-situ giants' (`SolarLike`,
 //!   `EccentricGiant`) to `TerrestrialOnly` and the migrating ones' (`CompactWithColdGiant`,
-//!   `WarmGiant`, `HotJupiter`) to `CompactMulti`. P14.T7.c adds the disc lifetime to what a giant
-//!   needs, which needs its growth law.
+//!   `WarmGiant`, `HotJupiter`) to `CompactMulti`. The disc's lifetime is the second fallback,
+//!   P14.T7.c's core grown in time, which P14.T8's placer applies after the draw
+//!   ([`core_fallback`](crate::planetary::placement::classes::core_fallback); ruling 55.3), to the
+//!   same sibling.
 //! - **A close binary** (design note 10), inside Kraus et al.'s cut-off: every class but `Barren`
 //!   keeps [`CLOSE_BINARY_SUPPRESSION`], 0.34, of its weight and `Barren` takes the rest.
 //!
@@ -382,25 +388,27 @@ pub const COMPACT_MASS_EXPONENT: f64 = -1.5;
 
 /// The factor by which the giant classes' w₀ are raised over plan 14's draft (0.10, 0.01, 0.04 and
 /// 0.02 for `CompactWithColdGiant`, `SolarLike`, `EccentricGiant` and `WarmGiant`), so that the
-/// anchors hold after design note 5's fallback (ruling 48, point c): 1.373.
+/// anchors hold after both of design note 5's fallbacks (ruling 48, point c; ruling 55.3): 1.701.
 ///
 /// Observed rates see the outcome, not the table. Over the solar-disc sample of this module's
-/// tests (20,000 median-host discs at 1 M☉ and \[Fe/H\] = 0), 83.4% of discs can form a giant,
-/// and the rest fall back to their giant-free siblings. With this factor, and
+/// tests (20,000 discs of a 1 M☉ host at \[Fe/H\] = 0, each living its star's own drawn lifetime),
+/// 83.4% of discs have the solids for a giant (P14.T4.c) and 71.1% grow its core in time
+/// (P14.T7.c), and the rest fall back to their giant-free siblings. With this factor, and
 /// [`HOT_JUPITER_WEIGHT`], giants of 0.3–10 M♃ at 2–2,000 days come out around 10.5% of those
-/// hosts after the fallback, Cumming et al.'s (2008, PASP 120, 531, abstract) figure, and a cold
-/// giant in about a third of compact systems, Zhu and Wu's (2018, AJ 156, 92, §4) 32 ± 8%. The
-/// ratios between these four classes are the draft's.
-pub const GIANT_WEIGHT_SCALE: f64 = 1.373;
+/// hosts after both fallbacks, Cumming et al.'s (2008, PASP 120, 531, abstract) figure, and a cold
+/// giant in 30.7% of compact systems, Zhu and Wu's (2018, AJ 156, 92, §4) 32 ± 8%. The ratios
+/// between these four classes are the draft's. After the first fallback alone the factor was
+/// 1.373 (ruling 48); the second raised it by 24%.
+pub const GIANT_WEIGHT_SCALE: f64 = 1.701;
 
-/// `HotJupiter`'s w₀: 0.0103, so that hot Jupiters come out around 0.82% of Sun-like hosts after
-/// design note 5's fallback (ruling 48, point c), between Howard et al.'s (2012, ApJS 201, 15,
-/// §3.2 and Table 4) 0.4–0.5% of Kepler's stars and Wright et al.'s (2012, ApJ 753, 160,
-/// abstract) 1.2 ± 0.38% of the solar neighbourhood's.
+/// `HotJupiter`'s w₀: 0.0127, so that hot Jupiters come out around 0.82% of Sun-like hosts after
+/// both of design note 5's fallbacks (ruling 48, point c; ruling 55.3), between Howard et al.'s
+/// (2012, ApJS 201, 15, §3.2 and Table 4) 0.4–0.5% of Kepler's stars and Wright et al.'s (2012,
+/// ApJ 753, 160, abstract) 1.2 ± 0.38% of the solar neighbourhood's.
 ///
-/// It is the draft's 0.008 raised by 1.29 rather than by [`GIANT_WEIGHT_SCALE`], since the hot
-/// Jupiters' rate is an anchor of its own.
-pub const HOT_JUPITER_WEIGHT: f64 = 0.0103;
+/// It is the draft's 0.008 raised by 1.59 rather than by [`GIANT_WEIGHT_SCALE`], since the hot
+/// Jupiters' rate is an anchor of its own; after the first fallback alone it was 0.0103.
+pub const HOT_JUPITER_WEIGHT: f64 = 0.0127;
 
 /// The solids a giant needs beyond the snow line: 10 M⊕ (design note 5; P14.T7.c).
 ///
@@ -816,8 +824,8 @@ impl ClassProbabilities {
 /// # Examples
 ///
 /// A Sun-like star whose disc can form giants has a compact inner system about a third of the
-/// time and a giant nearly a quarter of the time (a fifth after design note 5's fallback); an M
-/// dwarf is dominated by compact systems and seldom has a giant.
+/// time and a giant more than a quarter of the time (a fifth after design note 5's fallbacks); an
+/// M dwarf is dominated by compact systems and seldom has a giant.
 ///
 /// ```
 /// use hyperion_sim::planetary::architecture::{ArchitectureClass, class_weights};
@@ -825,7 +833,7 @@ impl ClassProbabilities {
 ///
 /// let sun = class_weights(SolarMasses::new(1.0), Dex::new(0.0)).probabilities();
 /// assert!((0.27..0.35).contains(&sun.compact_share()));
-/// assert!((0.20..0.25).contains(&sun.giant_share()));
+/// assert!((0.25..0.30).contains(&sun.giant_share()));
 ///
 /// let m_dwarf = class_weights(SolarMasses::new(0.3), Dex::new(0.0)).probabilities();
 /// assert!(m_dwarf.compact_share() > 0.45 && m_dwarf.giant_share() < 0.05);
@@ -1066,10 +1074,14 @@ mod tests {
     use super::template::{Location, PeriodLaw};
     use super::*;
     use crate::coords::{CellSize, GenCell};
+    use crate::id::BodyId;
     use crate::id::Layer;
     use crate::planetary::disc::{self, DiscDraws, DiscHost, Truncation, snow_line};
+    use crate::planetary::placement::masses::giant_core;
     use crate::rng::Thresholds;
     use crate::stellar::Composition;
+    use crate::stellar::draws::StarDraws;
+    use crate::stellar::premain::disc_lifetime;
     use crate::stellar::sse::{ZCoeffs, zams};
     use crate::units::consts::{GM_SUN, SECONDS_PER_DAY};
     use crate::units::{AstronomicalUnits, HeliumExcess, Megayears, SolarLuminosities, SolarRadii};
@@ -1117,13 +1129,13 @@ mod tests {
             assert_eq!(row.class(), class);
             assert_eq!(class.index(), i);
         }
-        // At 1 M☉ and solar metallicity the stellar rows' w₀ sum to 1.044.
+        // At 1 M☉ and solar metallicity the stellar rows' w₀ sum to 1.102.
         let stellar: f64 = ARCHITECTURE_TABLE
             .iter()
             .filter(|row| row.hosts() != Hosts::Substellar)
             .map(ClassRow::base_weight)
             .sum();
-        assert!((stellar - 1.043_71).abs() < 1e-12, "{stellar}");
+        assert!((stellar - 1.101_87).abs() < 1e-12, "{stellar}");
     }
 
     /// P14.T4.c: the probabilities sum to 1 over masses 0.08–150 M☉ and \[Fe/H\] −2.5 to +0.5.
@@ -1180,17 +1192,17 @@ mod tests {
         };
         let sun = slope(1.0, -0.5, -0.2);
         assert!((1.85..=2.0).contains(&sun), "{sun}");
-        assert!((1.87..1.89).contains(&sun), "{sun}");
+        assert!((1.85..1.86).contains(&sun), "{sun}");
         assert!(slope(1.0, 0.2, 0.5) < sun, "the share saturates");
         let m_dwarf = slope(0.3, -0.5, -0.2);
         assert!((1.85..=2.0).contains(&m_dwarf), "{m_dwarf}");
     }
 
     /// P14.T4.c: at 0.3 M☉ the giants under 0.05 and the compact classes over 0.45; at 1 M☉ the
-    /// compact classes 0.27–0.35. As built, in the table before design note 5's fallback: 0.038
-    /// and 0.68; at 1 M☉ giants 0.234 and compact 0.333. The plan's 0.14–0.20 for giants at 1 M☉
-    /// is an observed rate, so it holds after the fallback, where the giants are 0.195
-    /// (`the_anchors_hold_after_the_disc_fallback`, ruling 48).
+    /// compact classes 0.27–0.35. As built, in the table before design note 5's fallbacks: 0.046
+    /// and 0.68; at 1 M☉ giants 0.274 and compact 0.345. The plan's 0.14–0.20 for giants at 1 M☉
+    /// is an observed rate, so it holds after the fallbacks, where the giants are 0.195
+    /// (`the_anchors_hold_after_the_disc_fallback`, rulings 48 and 55.3).
     #[test]
     fn m_dwarfs_and_sun_like_stars_meet_their_brackets() {
         let m_dwarf = probabilities(0.3, 0.0);
@@ -1200,17 +1212,17 @@ mod tests {
             "{}",
             m_dwarf.compact_share()
         );
-        assert!((0.037..0.039).contains(&m_dwarf.giant_share()));
+        assert!((0.045..0.047).contains(&m_dwarf.giant_share()));
         assert!((0.67..0.69).contains(&m_dwarf.compact_share()));
         let sun = probabilities(1.0, 0.0);
         assert!((0.27..=0.35).contains(&sun.compact_share()));
-        assert!((0.23..0.24).contains(&sun.giant_share()));
-        assert!((0.33..0.335).contains(&sun.compact_share()));
-        // Before the fallback: hot Jupiters 0.99%, a cold giant in 40% of compact systems.
+        assert!((0.27..0.28).contains(&sun.giant_share()));
+        assert!((0.34..0.35).contains(&sun.compact_share()));
+        // Before the fallbacks: hot Jupiters 1.15%, a cold giant in 45% of compact systems.
         let hot = sun.get(ArchitectureClass::HotJupiter);
-        assert!((0.0098..0.0100).contains(&hot), "{hot}");
+        assert!((0.0114..0.0116).contains(&hot), "{hot}");
         let cold = sun.get(ArchitectureClass::CompactWithColdGiant) / sun.compact_share();
-        assert!((0.39..0.40).contains(&cold), "{cold}");
+        assert!((0.44..0.45).contains(&cold), "{cold}");
     }
 
     /// P14.T4.c: the small-planet classes' weights at \[Fe/H\] = −0.8 are within 5% of solar and
@@ -1243,14 +1255,14 @@ mod tests {
             let barren = |x: f64| probabilities(m, x).get(ArchitectureClass::Barren);
             assert!(barren(-2.5) > barren(-1.5) && barren(-1.5) > barren(-0.5));
         }
-        // In the halo giants thin with the small planets, keeping their ratio at −0.5, so they
-        // never outnumber them (held at −0.5 instead, they would: at −2.5, 3.0% of hosts with a
-        // giant against 1.9% in the compact classes).
+        // In the halo giants thin with the small planets, keeping their ratio at −0.5 (0.134),
+        // so they never outnumber them (held at −0.5 instead, they would: at −2.5, 3.0% of hosts
+        // with a giant against 1.9% in the compact classes, before ruling 55.3's re-fit).
         let ratio = |x: f64| {
             let p = probabilities(1.0, x);
             p.giant_share() / p.compact_share()
         };
-        assert!(ratio(-2.5) < 0.12);
+        assert!(ratio(-2.5) < 0.14);
         assert!(relative(ratio(-2.5), ratio(-0.5)) < 0.02);
     }
 
@@ -1355,8 +1367,9 @@ mod tests {
     }
 
     /// Ruling 48's solar-disc sample: the discs of 20,000 systems' host 0, a 1 M☉ star of
-    /// \[Fe/H\] = 0 at plan 06's zero-age state, as drawn on `planet.disc`; and the host's zero-age
-    /// luminosity.
+    /// \[Fe/H\] = 0 at plan 06's zero-age state, as drawn on `planet.disc`, each living its star's
+    /// own lifetime, P06.T15.c's law of its `star.disc_lifetime` rank (ruling 55.3); and the host's
+    /// zero-age luminosity.
     fn solar_disc_sample() -> (Vec<Disc>, SolarLuminosities) {
         let mass = SolarMasses::new(1.0);
         let composition = Composition::from_fe_h(Dex::new(0.0), HeliumExcess::ZERO);
@@ -1374,19 +1387,39 @@ mod tests {
             .map(|i| {
                 let id = SystemId::from_parts(Layer::A, cell, i).unwrap();
                 let draws = DiscDraws::for_host(Seed::new(9), id, 0);
-                disc::derive(&host, Megayears::new(2.5), &draws, Truncation::NONE)
+                let star = StarDraws::for_star(Seed::new(9), BodyId::new(id, 0));
+                let lifetime = disc_lifetime(mass, star.disc_lifetime());
+                disc::derive(&host, lifetime, &draws, Truncation::NONE)
             })
             .collect();
         (discs, luminosity)
     }
 
-    /// Each class's probability after design note 5's fallback, averaged over `discs`.
+    /// `weights` with each giant class's weight moved to its giant-free sibling.
+    fn without_giants(weights: &ClassWeights) -> ClassWeights {
+        let mut moved = weights.0;
+        for class in ArchitectureClass::ALL {
+            if class.has_giants() {
+                moved[class.giant_free_sibling().index()] += moved[class.index()];
+                moved[class.index()] = 0.0;
+            }
+        }
+        ClassWeights(moved)
+    }
+
+    /// Each class's probability after both of design note 5's fallbacks, averaged over `discs`:
+    /// the solids beyond the snow line (P14.T4.c), then a giant's core grown within the disc's
+    /// lifetime (P14.T7.c, applied by P14.T8's placer; ruling 55.3).
     fn after_fallback(weights: &ClassWeights, discs: &[Disc]) -> [f64; CLASS_COUNT] {
         let mut sum = [0.0; CLASS_COUNT];
         for disc in discs {
             let c =
                 ClassConstraints::new(disc, ZoneLimit::Unbounded, HostMultiplicity::SingleOrWide);
-            let p = weights.constrained(&c).probabilities();
+            let mut kept = weights.constrained(&c);
+            if !giant_core(disc, ZoneLimit::Unbounded).forms() {
+                kept = without_giants(&kept);
+            }
+            let p = kept.probabilities();
             for (total, q) in sum.iter_mut().zip(p.as_array()) {
                 *total += q;
             }
@@ -1448,10 +1481,12 @@ mod tests {
     }
 
     /// Ruling 48 (c): the anchors are observed rates, so they hold after design note 5's
-    /// fallback, at 1 M☉ and \[Fe/H\] = 0, over the solar-disc sample. As built: 83.4% of the discs
-    /// can form giants; then giants of 0.3–10 M♃ at 2–2,000 days around 10.5% of hosts
-    /// (Cumming et al. 2008), hot Jupiters around 0.82%, a cold giant in 32% of compact systems
-    /// (Zhu and Wu 2018), and giants in all around 19.5% (Cumming et al.'s 17–20% within 20 au).
+    /// fallbacks, at 1 M☉ and \[Fe/H\] = 0, over the solar-disc sample; ruling 55.3 adds the
+    /// second, a giant's core grown within the disc's lifetime (P14.T7.c). As built: 83.4% of the
+    /// discs have the solids for giants and 71.1% grow a core in time; then giants of 0.3–10 M♃ at
+    /// 2–2,000 days around 10.5% of hosts (Cumming et al. 2008), hot Jupiters around 0.82%, a cold
+    /// giant in 30.7% of compact systems (Zhu and Wu 2018), and giants in all around 19.5%
+    /// (Cumming et al.'s 17–20% within 20 au).
     #[test]
     fn the_anchors_hold_after_the_disc_fallback() {
         let (discs, l) = solar_disc_sample();
@@ -1464,6 +1499,11 @@ mod tests {
             })
             .count();
         assert!((16_500..16_900).contains(&capable), "{capable}");
+        let cores = discs
+            .iter()
+            .filter(|d| giant_core(d, ZoneLimit::Unbounded).forms())
+            .count();
+        assert!((14_000..14_400).contains(&cores), "{cores}");
         let p = after_fallback(&weights(1.0, 0.0), &discs);
         let get = |class: ArchitectureClass| p[class.index()];
         let cumming: f64 = ArchitectureClass::ALL

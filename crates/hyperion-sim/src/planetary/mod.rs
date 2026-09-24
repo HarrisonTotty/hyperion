@@ -25,8 +25,10 @@
 //!   with their sections' four states (P14.T34, ruling 34).
 //! - [`fate`]: the states a body can be in at a time, which the record carries; the fate transform
 //!   that produces them is P14.T28's.
-//! - [`placement`]: placing planets; so far the Hill-spacing primitives and the spacing draw
-//!   (P14.T6), and the stable zones of multiple systems with their hosts and discs (P14.T9).
+//! - [`placement`]: placing planets: the Hill-spacing primitives and the spacing draw (P14.T6),
+//!   the masses (P14.T7), the class placers that turn a host's class, disc and zone into planets
+//!   on orbits with D5's second fallback (P14.T8), and the stable zones of multiple systems with
+//!   their hosts and discs (P14.T9).
 //! - [`params`]: the parameters that belong to the generator version, as named constants.
 //! - [`context`] and [`system`]: what the stage reads from the stages above, and the assembled
 //!   generator. Documentation only until their tasks (P14.T1.d and T30).
@@ -55,6 +57,7 @@
 //! | 06 | the disc's lifetime (ruling 33) | [`stellar::premain::disc_lifetime`](crate::stellar::premain::disc_lifetime) of [`StarDraws::disc_lifetime`](crate::stellar::draws::StarDraws::disc_lifetime), a [`UnitUniform`](crate::stellar::draws::UnitUniform); the caller passes the result to [`disc::derive`] |
 //! | 06 | \[Fe/H\] | [`Composition::fe_h`](crate::stellar::Composition::fe_h), as drawn |
 //! | 11 | stars in slot `0x00` | [`stellar::multiplicity::STAR_BODY_INDEX_END`](crate::stellar::multiplicity::STAR_BODY_INDEX_END) = 16; [`index::STELLAR_SUB_END`] states the same bound |
+//! | 11 | a planet's orbit (P14.T8) | [`orbit::KeplerElements::from_semi_major_axis`](crate::orbit::KeplerElements::from_semi_major_axis) with [`orbit::Orientation`](crate::orbit::Orientation) and μ = G (M★ + m) as [`units::GravitationalParameter`](crate::units::GravitationalParameter); [`rng::tags::PLANET_COUNT`](crate::rng::tags::PLANET_COUNT), [`PLANET_PLANE`](crate::rng::tags::PLANET_PLANE) and [`PLANET_ORBIT`](crate::rng::tags::PLANET_ORBIT) |
 //! | 11 | a pair's orbit | [`orbit::Eccentricity`](crate::orbit::Eccentricity) and a semi-major axis in [`Metres`](crate::units::Metres), as `KeplerElements` gives them |
 //! | 11 | the hierarchy | [`stellar::multiplicity::SystemHierarchy`](crate::stellar::multiplicity::SystemHierarchy), read through [`placement::ZoneHierarchy`]'s `From<&SystemHierarchy>`: each star's index, initial mass and [`SlotKind`](crate::stellar::multiplicity::SlotKind), and each pair's members and orbit at birth |
 

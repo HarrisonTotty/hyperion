@@ -393,6 +393,22 @@ domain_tags! {
     /// law, one uniform.
     PLANET_MASS: System = "planet.mass";
 
+    /// The group-level draws of a host's class placer (P14.T8): whether each group of its class
+    /// template is present, how many bodies it places and where its first body goes, the chain's
+    /// dynamically hot variant and resonance, and a flanking group's side; orbit host h reads words
+    /// 64h onwards, and the pair whose outer planet is in slot s its resonance offset at word
+    /// 16,384 + 4s (`planetary::placement::classes`).
+    PLANET_COUNT: System = "planet.count";
+
+    /// An orbit host's planetary plane (P14.T8.d): its normal, isotropic, from two uniforms; orbit
+    /// host h reads words 4h and 4h + 1 (`planetary::placement::classes::orbits`).
+    PLANET_PLANE: System = "planet.plane";
+
+    /// A planet's own orbit (P14.T8.d): the ranks of its eccentricity and of its inclination to its
+    /// host's plane, and the uniform angles of its node on that plane, its periapsis and its mean
+    /// anomaly at the epoch, words 0–4 (`planetary::placement::classes::orbits`).
+    PLANET_ORBIT: Body = "planet.orbit";
+
     // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
     // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
     // (`stellar::multiplicity::RedrawAttempt`) reads words 64n to 64n + 63 of every stream here.
@@ -538,6 +554,21 @@ mod tests {
         assert_eq!(PLANET_MASS.name(), "planet.mass");
         assert_eq!(PLANET_MASS.scope(), crate::rng::TagScope::System);
         assert!(ALL.contains(&PLANET_MASS));
+    }
+
+    #[test]
+    fn plan_14_registers_the_placer_s_three_tags() {
+        assert_eq!(PLANET_COUNT.name(), "planet.count");
+        assert_eq!(PLANET_COUNT.scope(), crate::rng::TagScope::System);
+        assert_eq!(PLANET_PLANE.name(), "planet.plane");
+        assert_eq!(PLANET_PLANE.scope(), crate::rng::TagScope::System);
+        assert_eq!(PLANET_ORBIT.name(), "planet.orbit");
+        assert_eq!(PLANET_ORBIT.scope(), crate::rng::TagScope::Body);
+        assert!(
+            [PLANET_COUNT, PLANET_PLANE, PLANET_ORBIT]
+                .iter()
+                .all(|tag| ALL.contains(tag))
+        );
     }
 
     #[test]
