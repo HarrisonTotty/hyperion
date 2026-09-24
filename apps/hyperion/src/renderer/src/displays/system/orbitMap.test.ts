@@ -226,19 +226,20 @@ describe("orbitScene", () => {
     const { model, layout, plane } = built();
     const input = { hosts: model.hosts, layout, plane, time: TIME, bands: BANDS, fitRadiusAu: 17 };
 
-    const scene = orbitScene({ ...input, selectedId: STAR_1 });
+    const scene = orbitScene({ bodies: null, ...input, selectedId: STAR_1 });
 
     expect(scene.plane.spacing).toBe(gridSpacing(17));
     expect(scene.plane.extent).toBe(17);
     expect(scene.spheres).toEqual([]);
     expect(scene.selectedId).toBe(STAR_1);
     expect(scene.paths?.filter((path) => path.role === "selected")).toHaveLength(1);
-    expect(orbitScene({ ...input, selectedId: "elsewhere" }).selectedId).toBeNull();
+    expect(orbitScene({ bodies: null, ...input, selectedId: "elsewhere" }).selectedId).toBeNull();
   });
 
   it("places no mark off the centre for a single star", () => {
     const { model, layout, plane } = built(aSingleStarSummary());
     const scene = orbitScene({
+      bodies: null,
       hosts: model.hosts,
       layout,
       plane,

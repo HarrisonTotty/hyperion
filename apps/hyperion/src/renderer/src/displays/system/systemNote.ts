@@ -5,6 +5,8 @@
  */
 import type { SectionDto } from "@hyperion/protocol";
 
+import type { SystemBodies } from "../../lib/system/model";
+
 /** The state a record's section is tagged with, which the server sets and the client never infers. */
 export type SectionState = SectionDto<unknown>["state"];
 
@@ -28,10 +30,11 @@ export interface SmallBodySections {
  * What the display holds of the bodies beyond its hosts.
  *
  * @remarks
- * `tagged` is the server's word on each section, from `system_bodies`. `unserved` is this client's
- * protocol having no way to ask for any body but the stars, which no server it speaks to can
- * answer: the planets are then as absent from the display as the generator's `not_modelled`
- * sections, and the note names them too, until `system_bodies` exists and the tags take over.
+ * `tagged` is the server's word on each section, from `system_bodies`. `unserved` is a server that
+ * answers `system_bodies` with `unsupported`, as one built before P14.T36 does: no planet data
+ * reaches the console, so the planets are as absent from the display as the generator's
+ * `not_modelled` sections, and the note names them too, until the bodies arrive and the tags take
+ * over (the orchestrator's ruling 59.1).
  */
 export type BodiesKnown =
   { readonly kind: "unserved" } | { readonly kind: "tagged"; readonly sections: SmallBodySections };
@@ -77,4 +80,18 @@ export function systemNote(bodies: BodiesKnown): string | null {
     }
   }
   return names.length === 0 ? null : `${joinNames(names)}: ${NOT_YET_MODELLED}`;
+}
+
+/**
+ * The tags a system's bodies carry for the note: the system's belts and halo, and each planet's
+ * and dwarf planet's moons and rings (the orchestrator's ruling 34.3).
+ */
+export function smallBodySections(bodies: SystemBodies): SmallBodySections {
+  return {
+    belts: bodies.belts.state,
+    halo: bodies.halo.state,
+    planets: bodies.bodies
+      .filter((body) => body.kind.kind === "planet" || body.kind.kind === "dwarf_planet")
+      .map((body) => ({ moons: body.moons.state, rings: body.rings.state })),
+  };
 }

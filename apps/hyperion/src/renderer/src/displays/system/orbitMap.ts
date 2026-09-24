@@ -7,21 +7,22 @@
  * positions offsets from the system's barycentre along the galactic axes, and its frame the
  * system's reference plane (D21). Hosts are drawn with the registry's symbols at their mass layer's
  * size, each where its chain of orbits puts it at the display time; each star's path about its
- * pair's barycentre is drawn through it, and the selected star's path in `--text` 2 px wide. The
- * planets, moons, belts and zones join the same scene with `system_bodies`.
+ * pair's barycentre is drawn through it, and the selected body's path in `--text` 2 px wide. The
+ * bodies `system_bodies` sends, and their zones, join the same scene through `bodyMap.ts`.
  */
-import type { UniverseTime } from "@hyperion/protocol";
+import type { SystemIdHex, UniverseTime } from "@hyperion/protocol";
 
 import { starSizeClass, starSymbol } from "../../lib/galaxy/starSymbols";
 import type { LayerIndex } from "../../lib/galaxy/model";
 import { composePosition, orbitPolyline } from "../../lib/orbit";
-import type { HierarchyLayout } from "../../lib/system/hierarchy";
-import type { HostBody } from "../../lib/system/model";
+import { type HierarchyLayout, orbitNormal } from "../../lib/system/hierarchy";
+import type { HostBody, SystemBodies, SystemPlane } from "../../lib/system/model";
 import { type LocalFrame, localFrameAt, planeFrame } from "../../spatial/frame";
 import type { PathMark, PlaneRing, PointMark, SpatialScene } from "../../spatial/marks";
 import { gridSpacing } from "../../spatial/scale";
 import { add, scale, type Vec3 } from "../../spatial/vec3";
 import type { LayerBand } from "../galaxy/chartModel";
+import { type BodiesLayout, bodyMarks, bodyPaths, type ZoneLayers, zoneAnnuli } from "./bodyMap";
 import { METRES_PER_AU } from "./orbitScale";
 
 /** A zoom preset of the orbit map, which sets the radius the view fits. */
@@ -36,7 +37,7 @@ export interface ZoomPresetControl {
 
 /**
  * The orbit map's zoom presets in the order they are offered: `INNER` and `ALL` (plan 14,
- * P14.T42.b). `BELTS` joins them with the belts.
+ * P14.T42.b). `BELTS` joins them when belts have radii to fit (phase D).
  */
 export const ZOOM_PRESETS: ReadonlyArray<ZoomPresetControl> = [
   { name: "inner", label: "INNER", key: "I" },
@@ -62,19 +63,34 @@ export interface OrbitPlane {
 }
 
 /**
- * The orbit map's reference plane: the plane of the innermost pair that holds the primary, its
- * normal along the pair's angular momentum and its coreward the galactic coreward laid onto it (D21;
- * `planeFrame`); or, for a single star, the galactic plane at the system.
+ * The orbit map's reference plane, its coreward the galactic coreward laid onto it (D21;
+ * `planeFrame`): the system's plane as the server gives it with the bodies; before there are bodies,
+ * the plane of the innermost pair that holds the primary, its normal along the pair's angular
+ * momentum; or, for a single star, the galactic plane at the system.
  *
  * @remarks
- * D21's plane is the primary's planetary plane, or a close binary's. Until `system_bodies` brings
- * the planets, the stars' innermost orbit about the primary is the only plane the system has; a
- * single star has none, and its map is drawn on the galactic plane, which the legend names as such.
+ * D21's plane is the primary's planetary plane, or a close binary's, which the server chooses
+ * (`SystemBodiesDto.system_plane`). Until the bodies arrive, or for a system with no zone, the
+ * stars' innermost orbit about the primary is the only plane the system has; a single star has
+ * none, and its map is drawn on the galactic plane, which the legend names as such (the
+ * orchestrator's ruling 59.2).
  *
  * @param positionLy - The system's position in the `GALACTIC` frame.
+ * @param systemPlane - The server's system plane, or `null` before the bodies or without a zone.
  */
-export function orbitPlane(layout: HierarchyLayout, positionLy: Vec3): OrbitPlane {
+export function orbitPlane(
+  layout: HierarchyLayout,
+  positionLy: Vec3,
+  systemPlane: SystemPlane | null = null,
+): OrbitPlane {
   const galactic = localFrameAt(positionLy);
+  if (systemPlane !== null) {
+    return {
+      frame: planeFrame(orbitNormal(systemPlane), galactic.coreward),
+      name: "SYSTEM PLANE",
+      isSystemPlane: true,
+    };
+  }
   if (layout.primaryPairNormal === null) {
     return { frame: galactic, name: "GALACTIC PLANE", isSystemPlane: false };
   }
@@ -88,25 +104,63 @@ export function orbitPlane(layout: HierarchyLayout, positionLy: Vec3): OrbitPlan
 /** The radius each zoom preset fits, in astronomical units. */
 export type FitRadii = Readonly<Record<ZoomPreset, number>>;
 
+/** The count of bodies `INNER` fits when there is no habitable zone to fit: the fifth body. */
+export const INNER_BODY_COUNT = 5;
+
+/** What the zoom presets fit besides the stars: the bodies' reaches and the habitable zone's. */
+export interface BodyFit {
+  /** The farthest each drawn body other than a moon can be from the barycentre, AU, nearest first. */
+  readonly bodyReachesAu: ReadonlyArray<number>;
+  /** How far out the primary's habitable zone reaches from the barycentre, AU; `null` for none. */
+  readonly habitableOuterAu: number | null;
+}
+
 /**
- * The radius each zoom preset fits, until there are planets: `ALL` the farthest any drawn star's
- * orbits can take it from the barycentre, `INNER` the nearest such reach that is not zero, so that a
- * binary's primary fills `INNER` and both stars fit `ALL` (plan 14, P14.T42.b).
+ * The radius each zoom preset fits (plan 14, P14.T42.b).
  *
  * @remarks
- * A reach is the sum of the star's share of each orbit's apoapsis distance up its chain, which
- * bounds where it can be at any time, so that neither preset moves as the display time does. A
- * system with no drawn star off its barycentre fits {@link LONE_STAR_FIT_AU}.
+ * A reach is the sum of each orbit's apoapsis distance up a body's chain, the star's share of it
+ * for a star, which bounds where it can be at any time, so that neither preset moves as the display
+ * time does.
+ *
+ * With bodies, `INNER` fits the outer limit of the primary's habitable zone or the fifth body out,
+ * whichever is nearer, so that it shows the inner system however the planets fall; with neither, it
+ * fits the stars as below. `ALL` fits the farthest of the bodies, the stars and `INNER`'s radius,
+ * so that everything drawn is in it.
+ *
+ * Without bodies, as before `system_bodies` answers, `ALL` fits the farthest any drawn star's orbits
+ * can take it from the barycentre and `INNER` the nearest such reach that is not zero, so that a
+ * binary's primary fills `INNER` and both stars fit `ALL` (the orchestrator's ruling 59.4); a system
+ * with nothing off its barycentre fits {@link LONE_STAR_FIT_AU}.
  */
-export function fitRadiiAu(layout: HierarchyLayout, hosts: ReadonlyArray<HostBody>): FitRadii {
+export function fitRadiiAu(
+  layout: HierarchyLayout,
+  hosts: ReadonlyArray<HostBody>,
+  bodies: BodyFit | null = null,
+): FitRadii {
   const reaches = hosts
     .filter((host) => starSymbol(host.kind) !== null)
     .map((host) => (layout.reachM.get(host.id) ?? 0) / METRES_PER_AU)
     .filter((reach) => reach > 0);
-  if (reaches.length === 0) {
-    return { inner: LONE_STAR_FIT_AU, all: LONE_STAR_FIT_AU };
+  const bodyReaches = bodies?.bodyReachesAu ?? [];
+  const innerCandidates = [
+    bodies?.habitableOuterAu ?? null,
+    bodyReaches[INNER_BODY_COUNT - 1] ?? bodyReaches.at(-1) ?? null,
+  ].filter((radius): radius is number => radius !== null && radius > 0);
+  let inner: number;
+  if (innerCandidates.length > 0) {
+    inner = Math.min(...innerCandidates);
+  } else if (reaches.length > 0) {
+    inner = Math.min(...reaches);
+  } else {
+    inner = LONE_STAR_FIT_AU;
   }
-  return { inner: Math.min(...reaches), all: Math.max(...reaches) };
+  const farthest = [...reaches, ...bodyReaches];
+  const all =
+    farthest.length === 0 && innerCandidates.length === 0
+      ? LONE_STAR_FIT_AU
+      : Math.max(inner, ...farthest);
+  return { inner, all };
 }
 
 /**
@@ -213,6 +267,15 @@ function planeRings(fitRadiusAu: number, spacingAu: number): ReadonlyArray<Plane
   return rings;
 }
 
+/** The bodies an orbit map's scene draws beside its hosts, and which of their zones. */
+export interface OrbitSceneBodies {
+  /** The system the bodies are of, whose ID their hosts' IDs extend. */
+  readonly system: SystemIdHex;
+  readonly bodies: SystemBodies;
+  readonly layout: BodiesLayout;
+  readonly zoneLayers: ZoneLayers;
+}
+
 /** What an orbit map's scene is built from. */
 export interface OrbitSceneInput {
   readonly hosts: ReadonlyArray<HostBody>;
@@ -224,22 +287,33 @@ export interface OrbitSceneInput {
   readonly bands: ReadonlyArray<LayerBand>;
   /** The radius the view fits, which the grid covers. */
   readonly fitRadiusAu: number;
+  /** The system's bodies, from `system_bodies`; `null` before them, or while the kind is unserved. */
+  readonly bodies: OrbitSceneBodies | null;
 }
 
 /**
- * The orbit map at the display time, as the scene the spatial view draws: the hosts, their paths,
- * and the reference plane's grid out to the fitted radius.
+ * The orbit map at the display time, as the scene the spatial view draws: the hosts, the bodies,
+ * their paths, the zones' annuli, and the reference plane's grid out to the fitted radius.
  */
 export function orbitScene(input: OrbitSceneInput): SpatialScene {
-  const { hosts, layout, plane, time, selectedId, bands, fitRadiusAu } = input;
-  const points = hostMarks(hosts, layout, time, bands);
+  const { hosts, layout, plane, time, selectedId, bands, fitRadiusAu, bodies } = input;
+  const bodyScene =
+    bodies === null
+      ? null
+      : {
+          points: bodyMarks(bodies.bodies.bodies, bodies.layout, time),
+          paths: bodyPaths(bodies.bodies.bodies, bodies.layout, time, selectedId),
+          annuli: zoneAnnuli(bodies.bodies.zones, bodies.system, layout, time, bodies.zoneLayers),
+        };
+  const points = [...hostMarks(hosts, layout, time, bands), ...(bodyScene?.points ?? [])];
   const spacingAu = gridSpacing(fitRadiusAu);
   return {
     frame: plane.frame,
     points,
     spheres: [],
     plane: { spacing: spacingAu, extent: fitRadiusAu, rings: planeRings(fitRadiusAu, spacingAu) },
-    paths: orbitPaths(hosts, layout, time, selectedId),
+    paths: [...orbitPaths(hosts, layout, time, selectedId), ...(bodyScene?.paths ?? [])],
+    ...(bodyScene === null ? {} : { annuli: bodyScene.annuli }),
     selectedId: points.some((mark) => mark.id === selectedId) ? selectedId : null,
     destinationId: null,
   };

@@ -160,6 +160,13 @@ export interface SpatialViewProps {
    * a new radius keeps a zoom the operator chose, as the star chart's does.
    */
   readonly fitRequest?: number | undefined;
+  /**
+   * Called as the operator leaves the fitted zoom by hand, with `false` for a zoom key, the wheel
+   * or a pinch, and returns to it, with `true` for `Z`, so that a display's zoom preset shows
+   * whether the view still matches it (the orchestrator's ruling 59.6). Absent, as on the star
+   * chart, nothing is told.
+   */
+  readonly onFitChange?: ((fitting: boolean) => void) | undefined;
   /** Writes a length in scene units with its unit, for the scale bar: `20 ly`, `500 AU`. */
   readonly formatLength: (length: number) => string;
   /**
@@ -240,6 +247,7 @@ export function SpatialView({
   scene,
   fitRadius,
   fitRequest,
+  onFitChange,
   formatLength,
   scaleUnits,
   frameName,
@@ -270,7 +278,27 @@ export function SpatialView({
 
   const fittedPxPerUnit =
     viewport === null ? null : fitPxPerUnit(fitRadius, viewport, FIT_MARGIN_REM * viewport.remPx);
-  const { camera: cameraState, move, turnTo } = useOrbitCamera(fittedPxPerUnit, fitRequest);
+  const {
+    camera: cameraState,
+    move: moveCamera,
+    turnTo,
+  } = useOrbitCamera(fittedPxPerUnit, fitRequest);
+  // Every move the operator makes goes through here, from the keys, the wheel and a pinch alike, so
+  // that a zoom made by hand is reported from the event that made it, never from an effect.
+  const move = useCallback(
+    (next: CameraMove): void => {
+      moveCamera(next);
+      if (onFitChange === undefined || fittedPxPerUnit === null) {
+        return;
+      }
+      if (next.kind === "zoom") {
+        onFitChange(false);
+      } else if (next.kind === "fit") {
+        onFitChange(true);
+      }
+    },
+    [moveCamera, onFitChange, fittedPxPerUnit],
+  );
   const reducedMotion = usePrefersReducedMotion();
   const choosePreset = useCallback(
     (name: PresetName): void => {

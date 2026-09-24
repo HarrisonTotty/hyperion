@@ -134,11 +134,11 @@ function sameAngles(a: CameraAngles, b: CameraAngles): boolean {
 }
 
 /** The angles part of the way along a transition, on the guide's ease-out. */
-function anglesAt(transition: Transition, elapsedMs: number): CameraAngles {
+function anglesAt(turn: Transition, elapsedMs: number): CameraAngles {
   const progress = easeOut(elapsedMs / TRANSITION_MS);
   const { azimuthDeg, elevationDeg } = tweenCamera(
-    { ...transition.from, pxPerUnit: 1 },
-    { ...transition.to, pxPerUnit: 1 },
+    { ...turn.from, pxPerUnit: 1 },
+    { ...turn.to, pxPerUnit: 1 },
     progress,
   );
   return { azimuthDeg, elevationDeg };

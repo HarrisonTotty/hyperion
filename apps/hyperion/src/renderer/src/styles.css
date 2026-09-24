@@ -2314,12 +2314,13 @@ body {
 
 /*
  * Columns shared by the head and every row: designation, kind, and semi-major axis, whose column
- * holds the widest a wide binary's can read, `531,000 AU`.
+ * holds the widest a wide binary's can read, `531,000 AU`, and the longest state that stands in
+ * for it, `NOT YET FORMED`.
  */
 .body-list__head,
 .body-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 10.5ch;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 15ch;
   align-items: center;
   gap: 0 0.375rem;
 }
@@ -2379,6 +2380,11 @@ body {
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
+}
+
+/* A body's state in the axis's place: words, in the words' face. */
+.body-list__state {
+  font-family: var(--font-sans);
 }
 
 .body-list__head > .body-list__number {

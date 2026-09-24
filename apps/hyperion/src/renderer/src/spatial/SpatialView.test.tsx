@@ -560,6 +560,20 @@ describe("SpatialView from the keyboard", () => {
     expect(edgeRadius(recorder)).toBeCloseTo(118, 9);
   });
 
+  it("tells onFitChange of a zoom by hand and of Z, and of no turn", async () => {
+    const onFitChange = vi.fn<(fitting: boolean) => void>();
+    const { user, canvas } = setup({ onFitChange });
+
+    await user.keyboard("+");
+    await user.keyboard("z");
+    act(() => {
+      canvas.focus();
+    });
+    await user.keyboard("{ArrowLeft}");
+
+    expect(onFitChange.mock.calls).toEqual([[false], [true]]);
+  });
+
   it("zooms from the fitted scale after Z in the same frame", async () => {
     const { user, recorder } = setup();
 
@@ -814,6 +828,15 @@ describe("SpatialView from a pointer", () => {
     nextFrame();
 
     expect(edgeRadius(recorder)).toBeCloseTo(118 * 2, 9);
+  });
+
+  it("tells onFitChange that the wheel zoomed by hand", () => {
+    const onFitChange = vi.fn<(fitting: boolean) => void>();
+    const { canvas } = setup({ onFitChange });
+
+    fireEvent.wheel(canvas, { deltaY: -400, deltaMode: 0 });
+
+    expect(onFitChange.mock.calls).toEqual([[false]]);
   });
 
   it("keeps the page from scrolling under the wheel", () => {

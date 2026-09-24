@@ -3435,3 +3435,70 @@ events }`): plan 04's `request_kinds_lists_every_variant` and the server's
     have twelve significant figures, because serde_json's default parser (no `float_roundtrip`)
     misread a 17-digit position by an ulp; the server only writes floats, so the wire is exact. No
     `ErrorCode` is new, so `settledState` is unchanged.
+- **P14.T41–T43 for bodies, and ruling 59's fixes, as built (round 7d, `ui`).** Against
+  `packages/protocol/fixtures/planetary.json`, imported by `test/planetaryFixture.ts` and decoded
+  through `decodeServerMessage`; the server still answers `system_bodies` and `body_detail` with
+  `unsupported`.
+  - _Ruling 59._ The primary's SMA cell reads the em dash (`readout__missing`). `SpatialView` gains
+    an optional `onFitChange(fitting)`, called from the key, wheel and pinch handlers (never an
+    effect): a zoom by hand releases the pressed zoom preset, and `Z` presses it again, since the
+    view then fits its radius once more. The `useOrbitCamera.ts:137` lint error was the heuristic
+    reading the parameter annotation `transition: Transition` as a CSS declaration; the parameter is
+    renamed `turn`. The camera's turn already honours reduced motion (`turnTo(…, instantly)`).
+  - _Requests (T41.a)._ `useSystemBodies` beside `useSystemSummary` inside `useSystemData`, both
+    asked at the same request time with `detail: "full"`; D18's re-request also fires one
+    nanosecond past each body orbit's `valid_until`, the last instant its elements hold. While a
+    bodies answer is on show the hosts are drawn from its own `hosts`, so that bodies and stars are
+    one answer; otherwise from the summary. `unsupported` from `system_bodies` is ruling 59.1's
+    transitional state: no fault, the hosts alone, and the note keeps `PLANETS, …` until bodies
+    arrive. `useBodyDetail` asks `body_detail` for a selected body (not a host) at the request time;
+    the list's entry is read until the record comes, and the record's own `RequestStatus` stands
+    under the readout, outside its live region (ruling 13). `lib/system/bodiesWire.ts` converts and
+    checks both answers (IDs of the system and in index order, hosts that exist, no circular parent
+    chain, propagatable orbits, positive masses and bulk values) into a fault in words:
+    `BODY DATA INVALID: …` with `RETRY`, the stars drawn alone. Masses are held in M⊕ by
+    `EARTH_MASS_KG`, the sim's GM⊕ ÷ G to the bit.
+  - _Orbit map (T42.a–b)._ `bodyMap.ts`: bodies placed by `composePosition` on their orbit about
+    their `OrbitHostDto` parent (a `pair` through `HierarchyLayout.pairKeyedBy`, `barycentre` the
+    root); a population's member (a belt's dwarf planet) orbits what the population orbits. A body
+    not present is not drawn. A contact, whose orbit is withheld, stands at the server's
+    `position_m`. Symbols: planet `triangle-down`, giant (gas or ice giant by the bulk class) 3,
+    planet 1, dwarf planet 0 raised to ruling 35.5's floor of 1; moon `pentagon` 1, contact
+    `hexagon` 2, each the smallest class whose flattest side lies at least half the 1.5 px outline
+    inside a same-size circle (tested); populations take none. A moon's orbit is not drawn in the
+    system frame (its elements are about its planet's equator, which the wire lacks; FOCUS BODY).
+    The plane is `system_plane` once bodies arrive (ruling 59.2's fallback before). Zones: the
+    stable zone where companions bound it, the snow line, and the conservative habitable zone
+    (moist to maximum greenhouse), in the system plane about their host, each switchable
+    (`STABLE ZONE`, `SNOW LINE`, `HABITABLE ZONE` toggles). `INNER` fits the nearer of the primary
+    zone's habitable-zone outer limit and the fifth body's reach; `ALL` the farthest of bodies,
+    stars and `INNER`. Belts, rings, discs and the halo have no geometry on the wire yet and are
+    listed, not drawn. The legend names each body kind drawn at its size (`GIANT PLANET`,
+    `PLANET`, …).
+  - _List and readout (T43.a–b)._ `systemRows`: hosts, each body under its star or the body it
+    orbits, by SMA, then those with no orbit by index; what orbits a pair or the barycentre
+    follows the hosts at the top. A body not present reads its state in words in the SMA column
+    (widened to 15ch). The readout renders every section from its tag: `NOT RESOLVED` or
+    `NOT YET MODELLED` once in place of the section, `not_applicable` no row. Rows: DESIG, ID,
+    LABEL, KIND, ORIGIN (moon), STATE, CAUSE and SINCE (`UT …`), PARENT, DETAIL, MASS (M⊕), SMA,
+    PERIOD, ECC, INC, DIST, CLASS, RADIUS (km), DENSITY, GRAVITY, T EQ, IRON/ROCK/WATER/ENVELOPE
+    (%), MOONS, RINGS, and from the whole record SURFACE and HOOKS (SURFACE SEED). The bodies
+    panel reads `DETAIL` (granted level) and `ARCH` (the primary's zone's class); a star's readout
+    reads each zone that holds it: ZONE, ARCH, STABLE ZONE (left out about a single star),
+    SNOW LINE, HABITABLE ZONE (`~` when extrapolated, `FROM` with an outer limit beyond every
+    orbit, `NONE` without one).
+  - _System note (T41.b)._ `smallBodySections`: belts and halo from the system, moons and rings
+    from each planet and dwarf planet.
+  - **For the orchestrator to rule:** (1) a dwarf planet at the floor is a smaller planet's size,
+    so size no longer tells them apart on the map (the list and legend do); (2) DIST is derived on
+    the client, from the server's elements at the display time (agreeing to 10⁻⁹, T39), against
+    D18's "every number in a readout comes from the server", since the answer is up to a year old;
+    INC of a planet is to the system plane (the angle between two server normals), a moon's the
+    wire's, to its planet's equator; (3) the state words stand in the SMA column; (4) only the
+    conservative habitable zone is drawn and read; (5) level words `CONTACT ONLY`,
+    `MASS AND ORBIT ONLY`, `TO BULK`, `TO SURFACE`, `FULL`, and `ARCH`, `DETAIL`, `DIST`, `SINCE`,
+    `PARENT` as labels, none yet on the nomenclature list; (6) moon and contact sizes 1 and 2 by the
+    half-outline test; (7) a pair reads `PAIR /0 /1`. The by-eye check at 1920×1080 and 1280×720 is
+    still to do: the bodies panel does not scroll, and a planet's readout is about sixteen lines.
+    `GALAXY`'s draw lists are byte for byte unchanged (the 1,152-scene probe, SHA-256 `9cf26949…`
+    before and after).

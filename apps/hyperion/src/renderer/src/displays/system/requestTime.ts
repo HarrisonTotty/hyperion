@@ -6,8 +6,8 @@
  * server's, and the server's answer holds only near the time it was asked for. So the display asks
  * again, at its own time, once that time has moved more than a year from the time it last asked
  * for, or past an instant at which something the answer describes changes: a star's death, or, for
- * a system not yet formed, its birth. Next to these a body's `valid_until` joins with
- * `system_bodies`.
+ * a system not yet formed, its birth, or the first instant past a body's orbit's
+ * `valid_until`, the last at which its elements hold.
  */
 import { SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
 

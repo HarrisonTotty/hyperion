@@ -27,7 +27,9 @@ export interface BodyListProps {
 function rowName(row: BodyRow): string {
   const sma =
     row.semiMajorAxis === null ? "" : `, SMA ${row.semiMajorAxis.value} ${row.semiMajorAxis.unit}`;
-  return `${row.designation}, ${row.kind}${sma}`;
+  return row.state === null
+    ? `${row.designation}, ${row.kind}${sma}`
+    : `${row.designation}, ${row.kind}, ${row.state}`;
 }
 
 /**
@@ -41,7 +43,8 @@ function rowName(row: BodyRow): string {
  * `ArrowUp` and `ArrowDown` move the active row, `Home` and `End` go to the ends, and `Enter` or
  * `Space` selects it; a click selects a row at once. Selection is shared with the map, and a
  * selection made there makes its row the active one. Each row reads the designation, the kind in
- * words and the semi-major axis, and the list says which rows are in view and how many there are.
+ * words and the semi-major axis, or, for a body not present, its state in words (`DESTROYED`,
+ * `NOT YET FORMED`, `UNBOUND`); the list says which rows are in view and how many there are.
  */
 export function BodyList({ rows, selectedId, onSelect }: BodyListProps) {
   const baseId = useId();
@@ -179,7 +182,15 @@ export function BodyList({ rows, selectedId, onSelect }: BodyListProps) {
               <span className="body-list__designation">{row.designation}</span>
               <span className="body-list__kind">{row.kind}</span>
               <span className="body-list__number">
-                {row.semiMajorAxis === null ? null : (
+                {row.state !== null ? (
+                  // A body not present is on no orbit now: its state, in words, stands in the
+                  // column, so that the list says it is gone without a column of its own.
+                  <span className="body-list__state">{row.state}</span>
+                ) : row.semiMajorAxis === null ? (
+                  // A row cannot leave its cell out, so a body listed on no orbit of its own reads
+                  // the em dash, never a blank (the orchestrator's ruling 59.5).
+                  <span className="readout__missing">—</span>
+                ) : (
                   <>
                     {row.semiMajorAxis.value}{" "}
                     <span className="body-list__unit">{row.semiMajorAxis.unit}</span>

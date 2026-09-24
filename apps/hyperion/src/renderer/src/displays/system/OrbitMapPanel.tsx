@@ -13,8 +13,12 @@ import { isTextEntry } from "../../lib/textEntry";
 import { AXIS_TOLERANCE_LY, cylindrical, localFrameAt } from "../../spatial/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import { SpatialView } from "../../spatial/SpatialView";
+import { bodySymbol } from "../../lib/system/bodySymbols";
+import { bodyKindLabel } from "../../lib/system/bodyWords";
+import type { SpatialScene } from "../../spatial/marks";
+import type { ZoneLayers } from "./bodyMap";
 import { DISPLAY_TIME_LABEL, DISPLAY_TIME_WIDTH_CH } from "./displayTime";
-import { OrbitLegend } from "./OrbitLegend";
+import { type BodyLegendEntry, OrbitLegend } from "./OrbitLegend";
 import { ZOOM_PRESETS } from "./orbitMap";
 import { formatOrbitScaleLength, ORBIT_SCALE_UNITS } from "./orbitScale";
 import type { SystemViewState } from "./useSystemView";
@@ -26,6 +30,39 @@ const HEIGHT_WIDTH_CH = 9;
 
 /** The precision the centre's radius is read at, which the core arrow's distance shares. */
 const CENTRE_DECIMALS = 1;
+
+/** The zones' annuli the map can switch, in the order offered, with their labels. */
+const ZONE_TOGGLES: ReadonlyArray<{ readonly layer: keyof ZoneLayers; readonly label: string }> = [
+  { layer: "stable", label: "STABLE ZONE" },
+  { layer: "snowLine", label: "SNOW LINE" },
+  { layer: "habitable", label: "HABITABLE ZONE" },
+];
+
+/**
+ * The legend's entry of each kind of body the scene draws, once each, in the order first drawn: a
+ * gas or ice giant apart from a smaller planet, since its mark is larger.
+ */
+function bodyLegendEntries(
+  view: SystemViewState,
+  scene: SpatialScene,
+): ReadonlyArray<BodyLegendEntry> {
+  const drawn = new Set(scene.points.map((mark) => mark.id));
+  const entries = new Map<string, BodyLegendEntry>();
+  for (const body of view.bodies?.bodies ?? []) {
+    const symbol = bodySymbol(body);
+    if (symbol === null || !drawn.has(body.id)) {
+      continue;
+    }
+    const giant =
+      body.bulk.state === "ok" &&
+      (body.bulk.value.planetClass === "gas_giant" || body.bulk.value.planetClass === "ice_giant");
+    const label = body.kind.kind === "planet" && giant ? "GIANT PLANET" : bodyKindLabel(body.kind);
+    if (!entries.has(label)) {
+      entries.set(label, { label, ...symbol });
+    }
+  }
+  return [...entries.values()];
+}
 
 /** Props of {@link OrbitMapPanel}. */
 export interface OrbitMapPanelProps {
@@ -46,15 +83,21 @@ export interface OrbitMapPanelProps {
  * reads the request's state in words and draws nothing; a system not yet formed reads
  * `NOT YET FORMED`; a system with nothing to draw reads `NO BODIES`; an answer the display cannot
  * use reads `SYSTEM DATA INVALID` with `RETRY`. A newer request's state stands in the panel's head,
- * so that the map does not move as it comes and goes. An answer that is a stale snapshot, its link
+ * so that the map does not move as it comes and goes: the stars' or the bodies' request, whichever
+ * is still pending or failed, the bodies' not counted while the server answers them `unsupported`
+ * (the orchestrator's ruling 59.1); a bodies' answer the display cannot use reads
+ * `BODY DATA INVALID` there, with `RETRY`, and the stars are drawn alone. With zones, the head also
+ * offers `STABLE ZONE`, `SNOW LINE` and `HABITABLE ZONE`, each switching its annuli on and off. An answer that is a stale snapshot, its link
  * down or the newer request its display time asked for refused or timed out, is drawn and read as
- * stale. The chosen zoom preset stays pressed through a manual zoom, since the grid still covers
- * its radius and `Z` returns to it. Under the map stand the legend and the system note, which names what this
- * generator version does not model so that the space round the stars is not read as empty.
+ * stale. The chosen zoom preset is pressed while the view shows it: a zoom by hand releases it,
+ * since the view no longer matches it, and `Z`, which fits the view to its radius again, presses it
+ * once more (the orchestrator's ruling 59.6). The grid still covers its radius. Under the map
+ * stand the legend and the system note, which names what this generator version does not model so
+ * that the space round the stars is not read as empty.
  */
 export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
   const titleId = useId();
-  const { target, summary, model, fault, stale, scene, plane, fitRadii, zoom, displayTime } = view;
+  const { target, status, model, fault, stale, scene, plane, fitRadii, zoom, displayTime } = view;
   const { chooseZoom } = view;
   const drawn = scene !== null && scene.points.length > 0;
 
@@ -119,7 +162,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
       />
     );
   } else if (model === null) {
-    body = <RequestStatus state={summary} onRetry={view.retry} />;
+    body = <RequestStatus state={status} onRetry={view.retry} />;
   } else if (!model.formed) {
     body = <p className="panel__empty orbit-map__empty">NOT YET FORMED</p>;
   } else if (scene === null || !drawn || plane === null || fitRadii === null) {
@@ -131,6 +174,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
           scene={scene}
           fitRadius={fitRadii[zoom]}
           fitRequest={view.fitRequest}
+          onFitChange={view.fitChanged}
           formatLength={formatOrbitScaleLength}
           scaleUnits={ORBIT_SCALE_UNITS}
           frameName="SYSTEM BARYCENTRIC"
@@ -144,6 +188,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
         />
         <OrbitLegend
           kinds={model.hosts.map((host) => host.kind)}
+          bodies={bodyLegendEntries(view, scene)}
           bands={target.bands}
           plane={plane}
         />
@@ -170,7 +215,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
                 key={name}
                 type="button"
                 className="control orbit-map__zoom-button"
-                aria-pressed={zoom === name}
+                aria-pressed={view.zoomHeld && zoom === name}
                 aria-keyshortcuts={key}
                 onClick={() => {
                   chooseZoom(name);
@@ -181,8 +226,32 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
             ))}
           </fieldset>
         ) : null}
+        {drawn && (view.bodies?.zones.length ?? 0) > 0 ? (
+          <fieldset className="orbit-map__zoom" aria-label="Zones">
+            {ZONE_TOGGLES.map(({ layer, label }) => (
+              <button
+                key={layer}
+                type="button"
+                className="control orbit-map__zoom-button"
+                aria-pressed={view.zoneLayers[layer]}
+                onClick={() => {
+                  view.toggleZoneLayer(layer);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </fieldset>
+        ) : null}
         {model === null || fault !== null ? null : (
-          <RequestStatus state={summary} onRetry={view.retry} />
+          <RequestStatus state={status} onRetry={view.retry} />
+        )}
+        {view.bodiesFault === null ? null : (
+          <StatusLine
+            text={`BODY DATA INVALID: ${view.bodiesFault}`}
+            standing="fault"
+            action={{ label: "RETRY", onAction: view.retry }}
+          />
         )}
       </div>
       {body}

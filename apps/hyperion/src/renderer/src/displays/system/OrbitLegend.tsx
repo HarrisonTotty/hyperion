@@ -3,7 +3,7 @@ import type { ObjectKindDto } from "@hyperion/protocol";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { starSymbol } from "../../lib/galaxy/starSymbols";
 import { objectKindLabel } from "../../lib/system/words";
-import type { SymbolShape } from "../../spatial/marks";
+import type { SizeClass, SymbolShape } from "../../spatial/marks";
 import { SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
 import { formatBandMsun, type LayerBand } from "../galaxy/chartModel";
 import type { OrbitPlane } from "./orbitMap";
@@ -109,10 +109,23 @@ function Reticle() {
   );
 }
 
+/** A kind of body the map draws, with the symbol and the size it is drawn at. */
+export interface BodyLegendEntry {
+  /** The kind in words, which keys the entry: `GIANT PLANET`, `MOON`. */
+  readonly label: string;
+  readonly shape: SymbolShape;
+  readonly sizeClass: SizeClass;
+}
+
 /** Props of {@link OrbitLegend}. */
 export interface OrbitLegendProps {
-  /** The kinds of the bodies drawn, each named once with its symbol, in the order first drawn. */
+  /** The kinds of the stars drawn, each named once with its symbol, in the order first drawn. */
   readonly kinds: ReadonlyArray<ObjectKindDto>;
+  /**
+   * The kinds of the other bodies drawn, each named once, at the size it is drawn at, since size
+   * tells a giant planet from a smaller one.
+   */
+  readonly bodies: ReadonlyArray<BodyLegendEntry>;
   /** The chart census's mass bands, which each host's size stands for. */
   readonly bands: ReadonlyArray<LayerBand>;
   readonly plane: OrbitPlane;
@@ -125,12 +138,14 @@ export interface OrbitLegendProps {
  * @remarks
  * `BODIES NOT TO SCALE` first and alone, since every symbol here is a body and one name per thing
  * wants one label (the orchestrator's ruling 36). Then each kind drawn, with its symbol and its
- * name, so that shape is never the only signal; what size stands for, the initial-mass bands of the
- * chart's census, as on the chart (ruling 36); which side of the reference plane fill marks, named
- * for the plane the map is drawn on; the orbit's line and the selected orbit's wider one, since
- * width, not colour alone, carries the selection (ruling 44.2); and the reticle.
+ * name, so that shape is never the only signal; each other kind of body drawn, at the size it is
+ * drawn at, so that a giant planet's larger mark is read as its class; what a star's size stands
+ * for, the initial-mass bands of the chart's census, as on the chart (ruling 36); which side of
+ * the reference plane fill marks, named for the plane the map is drawn on; the orbit's line and the
+ * selected orbit's wider one, since width, not colour alone, carries the selection (ruling 44.2);
+ * and the reticle.
  */
-export function OrbitLegend({ kinds, bands, plane }: OrbitLegendProps) {
+export function OrbitLegend({ kinds, bodies, bands, plane }: OrbitLegendProps) {
   const lightest = bands[0];
   const heaviest = bands.at(-1);
   const [above, below] = plane.isSystemPlane
@@ -150,6 +165,12 @@ export function OrbitLegend({ kinds, bands, plane }: OrbitLegendProps) {
         <p className="symbol-legend__item" key={kind}>
           <LegendSymbol shape={shape} diameterRem={SIZE_CLASS_REM[4]} filled />
           {objectKindLabel(kind)}
+        </p>
+      ))}
+      {bodies.map(({ label, shape, sizeClass }) => (
+        <p className="symbol-legend__item" key={label}>
+          <LegendSymbol shape={shape} diameterRem={SIZE_CLASS_REM[sizeClass]} filled />
+          {label}
         </p>
       ))}
       {lightest === undefined || heaviest === undefined ? null : (

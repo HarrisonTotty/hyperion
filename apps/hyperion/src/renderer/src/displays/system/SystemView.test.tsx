@@ -24,6 +24,7 @@ import {
   anUnsupportedError,
   aSingleStarSummary,
   aSummaryResponse,
+  anUnsupportedBodiesError,
   aSystemSummary,
   aSystemTarget,
   BANDS,
@@ -71,6 +72,11 @@ function renderView() {
 async function answer(socket: FakeWebSocket, summary: SystemSummaryDto = aSystemSummary()) {
   await server(() => {
     socket.serverAnswers("system_summary", () => aSummaryResponse(summary));
+    // As the owner's server answers until P14.T36: the hosts alone (the orchestrator's ruling 59.1).
+    const [bodies] = socket.requestsOfKind("system_bodies").toReversed();
+    if (bodies !== undefined) {
+      socket.serverRejects(bodies.id, anUnsupportedBodiesError());
+    }
   });
 }
 
@@ -102,6 +108,7 @@ function anchorsOfPinnedBinary() {
   const fitRadiusAu = fitRadiiAu(layout, hosts).all;
   const viewport = { widthPx: WIDTH_PX, heightPx: HEIGHT_PX, remPx: REM_PX };
   const scene = orbitScene({
+    bodies: null,
     hosts,
     layout,
     plane,
@@ -284,6 +291,29 @@ describe("SystemView's orbit map", () => {
     expect(allBar).toMatch(/ AU$/);
   });
 
+  it("releases a zoom preset when the operator zooms by hand, and presses it again on Z", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    const all = within(mapPanel()).getByRole("button", { name: "A ALL" });
+
+    await user.keyboard("+");
+
+    expect(all).toHaveAttribute("aria-pressed", "false");
+    expect(within(mapPanel()).getByRole("button", { name: "I INNER" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    await user.keyboard("z");
+
+    expect(all).toHaveAttribute("aria-pressed", "true");
+
+    await user.keyboard("-");
+    await user.keyboard("a");
+
+    expect(all).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("selects the star a click lands on, and nothing for a click on an orbit", async () => {
     const { user, socket } = renderView();
     await answer(socket);
@@ -344,6 +374,18 @@ describe("SystemView's bodies", () => {
         .map((item) => item.getAttribute("aria-label")),
     ).toEqual(["H7K 4C0RFZ D-7 /0, WHITE DWARF", "H7K 4C0RFZ D-7 /1, DWARF, SMA 23.5 AU"]);
     expect(screen.getByText("1-2 of 2")).toBeInTheDocument();
+  });
+
+  it("reads the em dash, never a blank, in the primary's semi-major-axis cell", async () => {
+    const { socket } = renderView();
+    await answer(socket);
+
+    const [primary, companion] = within(screen.getByRole("tree", { name: "Bodies" })).getAllByRole(
+      "treeitem",
+    );
+    expect(primary?.lastElementChild).toHaveTextContent(/^—$/);
+    expect(within(primary ?? document.body).getByText("—")).toHaveClass("readout__missing");
+    expect(companion?.lastElementChild).toHaveTextContent("23.5 AU");
   });
 
   it("opens with the primary selected, and moves with the arrows and selects with Enter", async () => {

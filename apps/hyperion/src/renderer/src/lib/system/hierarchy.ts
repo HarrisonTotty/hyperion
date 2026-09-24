@@ -54,13 +54,26 @@ export interface HierarchyLayout {
    * none.
    */
   readonly keyedOrbits: ReadonlyMap<string, KeplerOrbit>;
+  /**
+   * The placement key of the system's barycentre: the root node's, a single star's body ID or the
+   * outermost pair's `pair:0`; `null` for a system with no stars.
+   */
+  readonly rootKey: string | null;
+  /**
+   * The placement key of the pair each star keys, by the star's body ID: the pair a planet's
+   * `pair` host names by its key body index (the protocol's `OrbitHostDto`).
+   */
+  readonly pairKeyedBy: ReadonlyMap<string, string>;
+  /** The body IDs of the stars each pair holds, by the pair's placement key, in body-index order. */
+  readonly pairStars: ReadonlyMap<string, ReadonlyArray<string>>;
 }
 
 /**
  * The unit normal of an orbit's plane, along its angular momentum, in the axes the orbit is given
- * in: (sin i sin Ω, −sin i cos Ω, cos i).
+ * in: (sin i sin Ω, −sin i cos Ω, cos i). A system's plane, given by the same two angles, has the
+ * same normal.
  */
-export function orbitNormal(orbit: KeplerOrbit): Vec3 {
+export function orbitNormal(orbit: Pick<KeplerOrbit, "inclinationRad" | "ascendingNodeRad">): Vec3 {
   const sinI = Math.sin(orbit.inclinationRad);
   return vec3(
     sinI * Math.sin(orbit.ascendingNodeRad),
@@ -129,6 +142,24 @@ export function layoutHierarchy(
   const reachM = new Map<string, number>();
   const keyedOrbits = new Map<string, KeplerOrbit>();
   const members: PairMember[] = [];
+  const pairKeyedBy = new Map<string, string>();
+  const starsMemo = new Map<number, ReadonlyArray<string>>();
+  const starsOf = (index: number): ReadonlyArray<string> => {
+    const known = starsMemo.get(index);
+    if (known !== undefined) {
+      return known;
+    }
+    const node = nodes[index];
+    if (node === undefined) {
+      throw new Error(`the hierarchy has no node ${index}`);
+    }
+    // The inner member holds the lower-indexed stars, so inner then outer is body-index order.
+    const stars =
+      node.kind === "star" ? [keyOf(index)] : [...starsOf(node.inner), ...starsOf(node.outer)];
+    starsMemo.set(index, stars);
+    return stars;
+  };
+  const pairStars = new Map<string, ReadonlyArray<string>>();
   if (nodes.length > 0) {
     placements.set(keyOf(0), { kind: "origin" });
     reachM.set(keyOf(0), 0);
@@ -144,6 +175,8 @@ export function layoutHierarchy(
     const parentReach = reachM.get(parent) ?? 0;
     const apoapsisM = node.orbit.semiMajorAxisM * (1 + node.orbit.eccentricity);
     keyedOrbits.set(firstStarOf(node.outer), node.orbit);
+    pairKeyedBy.set(firstStarOf(node.outer), parent);
+    pairStars.set(parent, starsOf(index));
     for (const [child, share, outer] of [
       [node.inner, -outerMass / total, false],
       [node.outer, innerMass / total, true],
@@ -169,5 +202,14 @@ export function layoutHierarchy(
     primaryPairNormal = orbitNormal(at.orbit);
     at = nodes[at.inner];
   }
-  return { placements, members, reachM, primaryPairNormal, keyedOrbits };
+  return {
+    placements,
+    members,
+    reachM,
+    primaryPairNormal,
+    keyedOrbits,
+    rootKey: nodes.length > 0 ? keyOf(0) : null,
+    pairKeyedBy,
+    pairStars,
+  };
 }

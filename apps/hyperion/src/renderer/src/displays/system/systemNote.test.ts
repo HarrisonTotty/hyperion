@@ -6,7 +6,9 @@ import {
   SECTION_NOT_RESOLVED,
   SECTION_OK_LIST,
 } from "../../test/systemFixtures";
-import { systemNote } from "./systemNote";
+import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
+import { populatedBodies, sliceBodies } from "../../test/planetaryFixture";
+import { smallBodySections, systemNote } from "./systemNote";
 
 /** The slice's tags: every small-body section not modelled, on the system and on one planet. */
 const SLICE = {
@@ -69,5 +71,23 @@ describe("systemNote", () => {
     expect(systemNote({ kind: "unserved" })).toBe(
       "PLANETS, MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED",
     );
+  });
+});
+
+function noteOf(response: ReturnType<typeof sliceBodies>): string | null {
+  const result = toSystemBodiesModel(response, "H7K 4C0RFZ D-7");
+  if (result.kind !== "ok") {
+    throw new Error(result.fault);
+  }
+  return systemNote({ kind: "tagged", sections: smallBodySections(result.bodies) });
+}
+describe("smallBodySections", () => {
+  it("names all four kinds from the slice's tags", () => {
+    expect(noteOf(sliceBodies())).toBe("MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED");
+  });
+
+  it("names only the moons and rings of the one planet whose tags leave them unmodelled", () => {
+    // Its belts and halo are ok; its unformed planet's moons and rings are not modelled.
+    expect(noteOf(populatedBodies())).toBe("MOONS AND RINGS: NOT YET MODELLED");
   });
 });

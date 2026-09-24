@@ -1,12 +1,13 @@
 import { useId } from "react";
 
-import { annunciation } from "../../components/RequestStatus";
+import { annunciation, RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
+import { StatusLine } from "../../components/StatusLine";
 import { formatAge, formatSigned } from "../../lib/format";
+import { architectureLabel, detailLevelLabel } from "../../lib/system/bodyWords";
 import { formatHex64 } from "../../lib/seed";
 import { BodyList } from "./BodyList";
 import { BodyReadout } from "./BodyReadout";
-import { hostRows } from "./bodyRows";
 import type { SystemViewState } from "./useSystemView";
 
 /** Props of {@link BodiesPanel}. */
@@ -15,8 +16,9 @@ export interface BodiesPanelProps {
 }
 
 /**
- * The `BODIES` panel: the system named, its age and metallicity, its bodies as a tree, and
- * everything known about the one selected (plan 14, P14.T43.a–b).
+ * The `BODIES` panel: the system named, its age and metallicity, the detail level its bodies were
+ * granted and the architecture class of the primary's planets, its bodies as a tree, and everything
+ * known about the one selected (plan 14, P14.T41.b and T43.a–b).
  *
  * @remarks
  * The list and the readout share one panel, as the chart's do, beside the orbit map they are paired
@@ -29,18 +31,33 @@ export interface BodiesPanelProps {
  */
 export function BodiesPanel({ view }: BodiesPanelProps) {
   const titleId = useId();
-  const { target, model, fault, stale, layout, summary, selected } = view;
+  const { target, model, fault, stale, status, selected, bodies, primaryZone } = view;
   const formed = model?.formed === true ? model : null;
-  const rows = formed === null || layout === null ? [] : hostRows(formed.hosts, layout);
   const age = model === null ? null : formatAge(model.ageMyr);
 
   let empty: string | null = null;
   if (fault !== null) {
     empty = "SYSTEM DATA INVALID";
   } else if (model === null) {
-    empty = annunciation(summary)?.text ?? null;
+    empty = annunciation(status)?.text ?? null;
   } else if (formed === null) {
     empty = "NOT YET FORMED";
+  }
+
+  // The record's own request stands under the readout, outside its live region: `PENDING` until
+  // the whole record comes, then nothing, or why it did not.
+  let detailStatus = null;
+  if (selected?.kind === "body" && !selected.whole) {
+    detailStatus =
+      view.detailFault === null ? (
+        <RequestStatus state={view.detailState} onRetry={view.retry} />
+      ) : (
+        <StatusLine
+          text={`BODY DATA INVALID: ${view.detailFault}`}
+          standing="fault"
+          action={{ label: "RETRY", onAction: view.retry }}
+        />
+      );
   }
 
   return (
@@ -80,11 +97,38 @@ export function BodiesPanel({ view }: BodiesPanelProps) {
             </>
           )}
         </dd>
+        <dt>DETAIL</dt>
+        <dd>
+          {bodies === null ? (
+            <span className="readout__missing">—</span>
+          ) : (
+            detailLevelLabel(bodies.granted)
+          )}
+        </dd>
+        <dt>ARCH</dt>
+        <dd>
+          {primaryZone === null ? (
+            <span className="readout__missing">—</span>
+          ) : (
+            architectureLabel(primaryZone.architecture)
+          )}
+        </dd>
       </dl>
       {empty === null ? (
         <>
-          <BodyList rows={rows} selectedId={selected?.id ?? null} onSelect={view.select} />
-          <BodyReadout host={selected} />
+          <BodyList
+            rows={view.rows}
+            selectedId={
+              selected === null
+                ? null
+                : selected.kind === "host"
+                  ? selected.host.id
+                  : selected.body.id
+            }
+            onSelect={view.select}
+          />
+          <BodyReadout selected={selected} />
+          {detailStatus}
         </>
       ) : (
         <p className="panel__empty">{empty}</p>

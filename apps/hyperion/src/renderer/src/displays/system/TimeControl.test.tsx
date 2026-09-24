@@ -3,7 +3,7 @@
  * the requests that stepping makes (plan 14, D18, D24 and P14.T44.a), with frames and timeouts
  * faked.
  */
-import { SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
+import { type ResponseFor, SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,13 +15,16 @@ import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import {
   A_CENTURY,
   aSummaryResponse,
+  anUnsupportedBodiesError,
   aNotYetBornSummary,
+  aSingleStarSummary,
   aSunlikeStar,
   aSystemSummary,
   aSystemTarget,
   aWhiteDwarf,
 } from "../../test/systemFixtures";
 import { CLOCK_WINDOW_S } from "./displayTime";
+import { sliceBodiesWith } from "../../test/planetaryFixture";
 import { SystemView } from "./SystemView";
 
 const DAY_S = 86_400;
@@ -54,6 +57,7 @@ interface Rendered {
 async function renderAnswered(
   time: UniverseTime = A_CENTURY,
   summary = aSystemSummary(),
+  bodies: ResponseFor<"system_bodies"> | null = null,
 ): Promise<Rendered> {
   const advance = fakeFramesAndTimeouts();
   const user = userEvent.setup({ advanceTimers: advance });
@@ -72,6 +76,14 @@ async function renderAnswered(
   });
   await server(() => {
     socket.serverAnswers("system_summary", () => aSummaryResponse(summary));
+    // Without bodies, as the owner's server answers until P14.T36: the hosts alone (the
+    // orchestrator's ruling 59.1).
+    const [request] = socket.requestsOfKind("system_bodies").toReversed();
+    if (request !== undefined && bodies === null) {
+      socket.serverRejects(request.id, anUnsupportedBodiesError());
+    } else if (request !== undefined && bodies !== null) {
+      socket.serverResponds(request.id, bodies);
+    }
   });
   return { user, socket, recorder };
 }
@@ -236,6 +248,35 @@ describe("TimeControl", () => {
 
     expect(screen.getByRole("heading", { name: "Orbit map stale" })).toBeInTheDocument();
     expect(screen.getByRole("application", { name: "Orbit map, stale" })).toBeInTheDocument();
+  });
+
+  it("asks for the bodies again exactly once when the time moves past an orbit's valid_until", async () => {
+    const validUntil = { seconds: A_CENTURY.seconds + 2 * DAY_S, nanos: 0 };
+    const bodies = sliceBodiesWith((body) =>
+      body.orbit.state === "ok"
+        ? {
+            ...body,
+            orbit: { state: "ok", value: { ...body.orbit.value, valid_until: validUntil } },
+          }
+        : body,
+    );
+    const { user, socket } = await renderAnswered(A_CENTURY, aSingleStarSummary(), bodies);
+    const bodyTimes = () => socket.requestsOfKind("system_bodies").map(({ body }) => body.time);
+
+    await user.keyboard("]]");
+    nextFrame();
+
+    // The last instant at which the elements hold is not past it.
+    expect(bodyTimes()).toEqual([A_CENTURY]);
+
+    await user.keyboard("]");
+    nextFrame();
+    await user.keyboard("]");
+    nextFrame();
+
+    const past = { seconds: A_CENTURY.seconds + 3 * DAY_S, nanos: 0 };
+    expect(bodyTimes()).toEqual([A_CENTURY, past]);
+    expect(requestTimes(socket)).toEqual([A_CENTURY, past]);
   });
 
   it("asks again when the time moves past the birth of a system not yet formed", async () => {

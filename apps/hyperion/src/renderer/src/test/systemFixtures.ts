@@ -266,6 +266,15 @@ export function anUnsupportedError(): RequestError {
   };
 }
 
+/** The server's answer to `system_bodies` before P14.T36, as `Handlers` answers it. */
+export function anUnsupportedBodiesError(): RequestError {
+  return {
+    code: "unsupported",
+    message: "system_bodies is not served yet",
+    field: null,
+  };
+}
+
 /** `planetary.rs`'s `section_not_modelled_wire_form`. */
 export const SECTION_NOT_MODELLED: SectionDto<never> = { state: "not_modelled" };
 
