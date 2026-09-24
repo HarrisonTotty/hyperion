@@ -10,7 +10,7 @@
 
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
-use crate::units::{EarthMasses, Gigayears, JupiterMasses};
+use crate::units::{EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin};
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
 /// bound: 0.4895 of the planet's Hill radius (design note 14).
@@ -100,3 +100,25 @@ pub const COMPOSITION_REFERENCE_AGE: Gigayears = Gigayears::new(5.0);
 
 /// The Bond albedo of every body until the atmosphere loop of P14.T13 closes: 0.3 (P14.T12.a).
 pub const BOND_ALBEDO_BEFORE_ATMOSPHERES: BondAlbedo = BondAlbedo::from_fraction(0.3);
+
+/// The largest radius a giant planet takes: 2 Jupiter radii (P14.T11.d).
+///
+/// Plan 14's cap on the inflated radius of
+/// [`radius_giant`](crate::planetary::derive::radius::radius_giant). The largest hot Jupiters come
+/// close to it (Thorngren and Fortney 2018, §1: radii "sometimes approaching 2 Jupiter radii"),
+/// and Thorngren and Fortney's models pass it for strongly heated planets below about 0.6 Jupiter
+/// masses, a population that is not observed (their §2).
+pub const GIANT_RADIUS_CAP: JupiterRadii = JupiterRadii::new(2.0);
+
+/// The equilibrium temperature from which a giant is held at Thorngren and Fortney's (2018) model
+/// radius in full: 1,000 K (P14.T11.d).
+///
+/// Plan 14's "equilibrium temperatures over 1,000 K", which is Thorngren and Fortney's threshold
+/// of inflation, 0.2 × 10⁹ erg s⁻¹ cm⁻² (their §1, after Miller and Fortney 2011). Below it the
+/// model radius fades out to [`GIANT_INFLATION_FADE_START`]
+/// ([`radius_giant`](crate::planetary::derive::radius::radius_giant)).
+pub const GIANT_INFLATION_ONSET: Kelvin = Kelvin::new(1_000.0);
+
+/// The equilibrium temperature below which no giant is held above its cooling radius: 500 K, the
+/// coolest line of Thorngren and Fortney's (2018) Fig. 2 (P14.T11.d).
+pub const GIANT_INFLATION_FADE_START: Kelvin = Kelvin::new(500.0);

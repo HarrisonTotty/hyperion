@@ -387,6 +387,12 @@ domain_tags! {
     /// 4h + 1 to 4h + 3 are reserved.
     PLANET_CLASS: System = "planet.class";
 
+    /// Planet masses (P14.T7): the planet in slot s reads words 8s onwards
+    /// (`planetary::placement::masses::MASS_WORDS_PER_SLOT`), its own within-system scatter and
+    /// its group's between-system scatter, two standard normals, then the rank of a group's mass
+    /// law, one uniform.
+    PLANET_MASS: System = "planet.mass";
+
     // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
     // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
     // (`stellar::multiplicity::RedrawAttempt`) reads words 64n to 64n + 63 of every stream here.
@@ -525,6 +531,13 @@ mod tests {
         assert_eq!(PLANET_CLASS.name(), "planet.class");
         assert_eq!(PLANET_CLASS.scope(), crate::rng::TagScope::System);
         assert!(ALL.contains(&PLANET_CLASS));
+    }
+
+    #[test]
+    fn plan_14_registers_the_mass_tag_with_system_scope() {
+        assert_eq!(PLANET_MASS.name(), "planet.mass");
+        assert_eq!(PLANET_MASS.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&PLANET_MASS));
     }
 
     #[test]

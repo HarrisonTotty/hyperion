@@ -884,9 +884,15 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
   disc, exponent 1 on solid mass, held to the template's range) with between-system scatter σ_b.
 - **P14.T7.b Members.** ln mᵢ = ln m_c + σ_w εᵢ + 0.1 dex per step outward, with σ_b and σ_w chosen
   so that the correlation of adjacent log radii after P14.T11 is 0.65 (Weiss et al. 2018) and the
-  outer planet of a pair is the larger in about 65% of pairs. Each mass is capped by
-  `Disc::isolation_mass` times 10 (pebble and merger growth) and the group's total by the solids
-  available. Draw numbers are the planet's slot, so inserting a group never shifts another.
+  outer planet of a pair is the larger in about 65% of pairs. The group's total is held to a solid
+  budget drawn from the disc's whole solid mass, not the local annulus, by one factor for every
+  member (ruling 38, point 4): close-in planets are made of solids carried inward, which the local
+  isolation mass cannot give (2.3 × 10⁻⁴ M⊕ at 0.1 au in the median solar disc, where the compact
+  classes place 1–20 M⊕), as Chiang and Laughlin's (2013) minimum-mass extrasolar nebula shows,
+  and Mulders et al. (2021) find the solid masses of observed systems matching those of discs only
+  at an efficiency near 100%. The local isolation mass stays for what it describes, a giant's core
+  beyond the snow line (T7.c). Draw numbers are the planet's slot, so inserting a group never
+  shifts another.
 - **P14.T7.c Giants.** Mass from the template's law, capped by the gas mass of the disc. A giant
   needs 10 M⊕ of solids beyond the snow line within the disc lifetime, else D5's fallback.
   - _Tests:_ (a) the median characteristic mass of 10⁴ compact groups in a solar disc is 3.6–4.4 M⊕
@@ -2775,3 +2781,142 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     - _Goldens._ `planetary/zones` does not move under the ruling: no zone of its hierarchies is
       set by either bound below the root. Against HEAD it changes only in ruling 52.4's labels,
       which `golden_diff.py` reports as changed values (a false positive of its label matching).
+- **Deviations in T7, as built (`masses`, round 7).**
+  - _Shape._ `placement/masses.rs`. `MassDraws::for_planet(seed, system, planet)` reads words 8s
+    to 8s + 7 of `planet.mass` (`System`, the one line `tags.golden` gains) for the planet in slot
+    s: its own scatter εᵢ at words 0–1, its group's between-system normal at 2–3 (read at the
+    group's first member, so that every draw number is a slot and none a group number), a law's
+    rank at 4. T8 calls `group_masses(seed, system, group, disc, members)`, with the template's
+    `&PlanetGroup`, the host's `&DiscProfile` and the members' `BodyIndex`es inside out for the
+    count it drew, and gets a `GroupMasses`
+    (`masses()`, `characteristic()`, `cap()`: `GroupCap::{AsDrawn, SolidBudget, GasMass}`, and
+    `total()`); `group_masses_from` is its pure core, with `characteristic_mass`, `reference_mass`,
+    `solid_budget` and `gas_budget`. The 0.1 dex step is centred on the group,
+    0.1 (i − (n − 1) ÷ 2), so that m_c stays the group's typical mass at any count (for the
+    orchestrator). Members are held to the template's range, then the group to its limit, which
+    outranks the range's floor.
+  - _The solid budget (ruling 38, point 4)._ The disc's whole solid mass between its edges, already
+    cut to the zone, at an efficiency of 1 (`SOLID_BUDGET_EFFICIENCY`), per group, so that changing
+    one group moves no other. Sources: Chiang and Laughlin's (2013, eq. 4) nebula holds 12.7 M⊕
+    at 0.05–0.5 au, where the median solar disc has 0.23 M⊕ (its isolation mass is 2.3 × 10⁻⁴ M⊕
+    at 0.1 au, not the ruling's 5 × 10⁻⁴); Mulders et al. (2021, ApJ 920, 66) find observed
+    systems and Class II discs both peaking near 10 M⊕, "a discrepancy only when the planet
+    formation efficiency is below 100%"; the pebble models' own efficiencies, 50% (Lambrechts and
+    Johansen, 2014) and 15–20% into one core, would cap half of Sun-like chains, since the plan's
+    4 M⊕ × 3.5 is 43% of the median disc's 32.2 M⊕. Measured: the budget holds 9.9% of solar
+    chains, 47% at 0.5 M☉ and 59% at 0.3 M☉, where arch's count rises to 6.1 as the solids fall;
+    the median chain planet is then 3.75, 1.69 and 1.02 M⊕, 6.5%, 29% and 44% of them under
+    1 M⊕. **For the orchestrator:** that thins T10.b's count of 1–4 R⊕ planets per M dwarf
+    (ruling 48, e).
+  - _σ_b and σ_w (for the orchestrator to rule)._ The disc's 0.5 dex gas scatter already enters
+    m_c at the power 1, more between-system scatter than the correlation needs, so σ_b = 0 (the
+    normal is drawn, so a later σ_b moves no draw) and σ_w = 0.2 dex. Over 2,000 solar-disc chains
+    (5,001 pairs) the adjacent log radii after T11 correlate at 0.66, the log masses at 0.87, and
+    the outer planet is the more massive in 0.58 and the larger in 0.58 of pairs. Weiss et al.'s
+    65% is out of reach with the plan's 0.1 dex step once Chen and Kipping's independent scatter
+    (0.146 dex) enters, and σ_w ≈ 0.13 for 65% in mass would put the radius correlation near 0.71.
+    So test (b)'s mass window 0.5–0.8, which assumed radii tracking masses, is corrected to
+    0.80–0.90, and the calibration's radius correlation is asserted at 0.60–0.70.
+  - _Re-checked._ Weiss et al. (2018): r = 0.65 (§3; Fig. 2's caption 0.62; 0.53 above 1 R⊕),
+    outer larger in 65.4 ± 0.4% (§5.3, in radius, tied to photo-evaporation). The 4 M⊕ median:
+    Pascucci et al. (2018) find the typical mass inside the snow line linear in the host's mass,
+    and their G-star law's median is 5.1 M⊕ at 1 M☉ extended to the smallest masses, 6.5 M⊕
+    inside their fitted range; Mulders et al.'s de-biased median is about 5 M⊕. The plan's 4 M⊕,
+    20–40% under, at the edge of their errors, is kept (for the owner). The rocky groups' 0.5 M⊕
+    (`ROCKY_CHARACTERISTIC_MASS`: the Solar System's mean; Kokubo and Genda 2010) is this lane's
+    choice, where the plan gives none, and the dial of ruling 48 (f)'s η⊕.
+  - _T7.c._ Giants take Cumming et al.'s law by inversion (KS against it) and are held together to
+    the disc's gas mass. "Within the disc lifetime" is Lambrechts and Johansen's (2014, eq. 35)
+    pebble growth at the snow line, seeded with the local isolation mass there (ruling 38's use for
+    it): the median solar disc's core reaches 10 M⊕ by 0.32 Myr (0.50 Myr at 5 au, their "about
+    1 Myr"). As a 10 M⊕ gate the isolation mass alone would forbid almost every giant (0.20 M⊕ at
+    5 au, under 1 M⊕ anywhere). `giant_core(&Disc, ZoneLimit)` returns a `GiantCore`: `NoDisc`,
+    `TooFewSolids`, `TooSlow { by }` or `Forms { by }`. Of discs living their star's lifetime, solids
+    alone admit 83% at 1 M☉ and the core in time 71%; 49% and 29% at \[Fe/H\] = −0.5; 94% and 89%
+    at +0.3; 66% and 64% at 0.5 M☉; 89% and 62% at 1.5 M☉. **For the orchestrator to rule:** it
+    is not wired into `ClassConstraints` (arch's file), which would move `planetary/architecture`
+    and ruling 48 (c)'s anchors (`GIANT_WEIGHT_SCALE` re-solved) and steepen the giants' fall
+    with metallicity (eq. 35 goes as Z^(25/6)) against T10.b's 2.0 ± 0.3; T8 may apply it as a
+    second fallback instead, or it may stay informative.
+  - _Goldens._ New `planetary/masses` (draws, every template group's masses in seven discs, and
+    their cores), blessed at 11; `tags.golden` gains `planet.mass`. Nothing else moved.
+- **Deviations in T11.d, as built (`giants`, round 7).**
+  - _Files and API._ `planetary/derive/{radius, composition}.rs`; `params.rs` gains
+    `GIANT_RADIUS_CAP` (2 R_J), `GIANT_INFLATION_ONSET` (1,000 K) and
+    `GIANT_INFLATION_FADE_START` (500 K). `radius_giant(EarthMasses, &CoolingState, EarthFluxes)
+-> Result<GiantRadius, DeriveGiantError>` takes plan 13's `giant_cooling` at the body's age
+    (ruling 34) and the total orbit-averaged flux, with `radius()`, `cooling_radius()`,
+    `inflated_radius()`, `is_inflated()`, `heating_efficiency()`, `share()`,
+    `internal_luminosity()` and `blended(EarthRadii)`; `giant_share(EarthMasses)` is the blend's
+    weight and `heating_efficiency(EarthFluxes)` Thorngren and Fortney's eq. 34.
+    `giant_composition(EarthMasses, SnowLineSide) -> Result<GiantComposition, DeriveGiantError>`
+    has `fractions()`, `core()`, `heavy_elements()` and `blended(MassFractions)`. `composition`
+    still refuses 0.414 M_J and above with `GiantPlanet`, the seam at which `derive_body` takes
+    these; from 0.3 M_J (`giant_share` above zero) it blends them into the solve's. New golden
+    `planetary/derive_giants`, blessed at 11; no existing golden moved.
+  - _The fit, re-checked on the paper_ (arXiv:1709.04539v2, eq. 34): ε = 2.37 (+1.3 −0.26)% ×
+    exp[−(log₁₀ F − 0.14 (+0.060 −0.069))² ÷ (2 × 0.37 (+0.038 −0.059)²)], F in 10⁹ erg s⁻¹
+    cm⁻², with T_eq = (F ÷ 4σ)^¼. It peaks at 1,570 K and is 0.22% at 2,500 K (their abstract's
+    0.2%). At equilibrium the interior radiates ε π R² F (their eq. 35, T_int = ε^¼ T_eq), which
+    is the internal heat given to T12.
+  - _The inflated radius is their models', not the cooling fit's._ The direct reading, the
+    cooling track's own state at ε^¼ T_eq, was built first. It puts HD 209458 b at 1.47 R_J
+    against 1.359. Since εF peaks at 1,880 K, it shrinks planets beyond that as the flux rises.
+    Against 650 transiting giants of 0.5–10 M_J (NASA Exoplanet Archive) its medians are +13,
+    +11, +6.5, −5, −11 and −23% in the bands 1,000–1,250, 1,250–1,500, 1,500–1,750,
+    1,750–2,000, 2,000–2,500 and beyond 2,500 K. The fit is isolated and coreless, and their
+    models have irradiated atmospheres and heavy elements. As built, a giant takes the larger of
+    its cooling radius and their Fig. 2 model radius at its mass and T_eq (5 Gyr, mean
+    composition). The lines at 500, 1,000, 1,250, 1,500 and 2,000 K were read from the figure's
+    vector paths on their own 50-mass log grid, and 34 masses from 0.299 to 12 M_J are kept. Where
+    the 2,000 K line leaves the plot, below 0.586 M_J, the next value down is recovered from where
+    its segment is cut and the lighter ones carry that segment on. The lines are interpolated
+    linearly in T_eq and carried on beyond 2,000 K, an extrapolation: εF falls beyond 1,880 K, but
+    their Gaussian model's radius in their Fig. 12 still rises to about 2,500 K in every mass bin, and at
+    2,500 K the carried-on line is 0.2% above it at 0.9–1.2 M_J and 6–8% above it at 1.2–10 M_J.
+    The figure uses their Gaussian-process ε, which their DIC does not tell from eq. 34's. The
+    medians are then −1.0 to
+    +5.9% in every band below 2,500 K and +9.9% beyond (11 planets). HD 209458 b comes out at
+    1.336 R_J (−1.7%) and HD 189733 b at 1.126 (−1.1%), against 0.984 and 0.997 from cooling
+    alone.
+  - _The threshold._ Below 1,000 K the model radius fades linearly to nothing at 500 K. Their
+    5 Gyr radii there belong to planets still cooling, and holding one at every later age would
+    keep old giants up, by up to 4.3% at 13 M_J and 13.8 Gyr. No giant cooler than 900 K is held
+    at any age to 13.8 Gyr.
+  - _The blend and the cap._ Between the giant's radius and the body's radius without T11.d
+    (Chen and Kipping's through the solve and the envelope model at its age), ln R is linear in
+    log mass, weighted by `giant_share`: 0 at 0.3 M_J and 1 at 0.414 M_J. The internal
+    luminosity takes the same weight and the fractions blend linearly. Both ends are continuous
+    to 10⁻⁶ over ages, fluxes and quantiles (the plan asks 5%). Their models inflate planets below
+    0.5 M_J, outside their sample, far beyond what is observed (none has a surface gravity under
+    about 3 m s⁻², their §2). Below 0.414 M_J the blend holds these back; from 0.414 to 0.5 M_J
+    only the 2 R_J cap does, and a 0.42 M_J giant at the cap has 2.6 m s⁻².
+  - _Composition._ The heavy elements follow Thorngren et al.'s (2016) mean relation,
+    M_z = 57.9 M⊕ (M ÷ M_J)^0.61. They take the solve's core on the body's side of the snow line
+    (53.9% water on Earth-like rock beyond it, Earth-like inside), and the rest is envelope.
+    Jupiter comes out 82% envelope (57.9 M⊕, against their model's 37), 0.3 M_J 71% and 13 M_J
+    93%. Their 1.82× scatter is not drawn: the fit has no heavy elements for a draw to move the
+    radius by, and design note 8 keeps radius and composition from being drawn apart. The radius
+    quantile is unused above 0.414 M_J.
+  - _Test (d), bracket by bracket._
+    - Jupiter rests on the cooling fit: 71,478 km, within 0.02% of 71,492.
+    - Uranus rests on Chen and Kipping: its median is 1.8% small.
+    - Neptune's median is 4.31 R⊕, 11.5% large, with Neptune 0.32σ below it. So the plan's 10%
+      at the median does not hold, and the test asserts the paper's median and Neptune within
+      1σ, as T11.a did for Jupiter.
+    - Saturn (0.2994 M_J) has no giant share. Its median is 29% large (−0.77σ) and the coreless
+      fit 12%. From Thorngren et al.'s 27 M⊕ of heavy elements, the envelope model gives +0.2%.
+  - _For the orchestrator to rule._
+    1. Their model radii, digitised from a figure, over the direct reading.
+    2. The 500–1,000 K fade.
+    3. Neptune's and Saturn's brackets. By this lane's estimate, ruling 47.1's mapping moves the
+       median body to +10.7% for Neptune and −5.5% for Saturn.
+    4. Giant radii carry no compositional scatter, which is what they credit with the observed
+       one.
+    5. The seam stays at 0.414 M_J, and `derive_body` calls T11.d from 0.3.
+    6. The mass-only relation, rather than their Z_p ÷ Z★ = 9.7 (M ÷ M_J)^−0.45 with the host's
+       metallicity.
+    7. The 1,500–2,000 K line carried on beyond 2,000 K, rather than held or given a second
+       slope from their Fig. 12.
+    8. The 0.414–0.5 M_J giants that only the cap holds, below TF's sample and their 3 m s⁻²
+       floor of observed gravities.

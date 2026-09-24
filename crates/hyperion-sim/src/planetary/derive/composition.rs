@@ -31,22 +31,47 @@
 //! The envelope is solved at [`COMPOSITION_REFERENCE_AGE`] and the flux the caller passes. Its
 //! radius at other ages, and its loss to escape (P14.T13), follow from the solved fraction.
 //!
-//! Above 0.414 Jupiter masses, Chen and Kipping's Jovian class, radius and composition come from
-//! plan 13's cooling of giant planets (P14.T11.d), which is not built; [`composition`] returns
-//! [`SolveCompositionError::GiantPlanet`] there, never a fallback.
+//! # Giants (P14.T11.d)
+//!
+//! From 0.414 Jupiter masses, Chen and Kipping's Jovian class, [`composition`] returns
+//! [`SolveCompositionError::GiantPlanet`], never a fallback: that is the seam at which a giant's
+//! radius is [`radius_giant`]'s and its composition [`giant_composition`]'s.
+//!
+//! A giant is a hydrogen and helium envelope over its heavy elements, whose mass is Thorngren et
+//! al.'s (2016, ApJ 831, 64, §5.1; arXiv:1511.07854v2) fit to 47 transiting giants cool enough not
+//! to be inflated, `M_z` = 57.9 M⊕ × (M ÷ `M_J`)^0.61 ([`giant_heavy_elements`]). It gives 57.9 M⊕
+//! for Jupiter and 27.7 M⊕ at Saturn's mass, against the 37 and 27 M⊕ their own models give the two
+//! (their Table 1). The same relation is Thorngren and Fortney's (2018) prior on the composition of
+//! the hot Jupiters whose radii [`radius_giant`] reads, so a giant's radius and composition come
+//! from one model. It is the mean relation: the planets scatter about it by a factor of 1.82 (1σ),
+//! which is not drawn, because plan 13's cooling fit has no heavy elements for a draw to move the
+//! radius by, and design note 8 keeps radius and composition from being drawn apart.
+//!
+//! The heavy elements are the core's composition of the solve on the same side of the snow line:
+//! beyond it, [`OUTER_WATER_CAP`] of water on Earth-like rock and iron, close to the half ice, half
+//! rock of Thorngren et al.'s models; inside it, Earth-like rock and iron. They count here as the
+//! core, though those models hold up to 10 M⊕ of them in a core and mix the rest into the envelope
+//! (their §3.1), and Thorngren and Fortney's (2018, §3), whose radii [`radius_giant`] reads, have
+//! no core at all. From 0.3 to 0.414 Jupiter masses a
+//! body's fractions are the solve's blended into the giant's by [`giant_share`], as its radius is
+//! ([`GiantComposition::blended`]).
 
 use std::error::Error;
 use std::fmt;
 
+use crate::math;
 use crate::planetary::derive::envelope::radius_with_envelope;
+#[cfg(doc)]
+use crate::planetary::derive::radius::radius_giant;
 use crate::planetary::derive::radius::{
-    CoreComposition, DRY_CURVES, EARTH_CORE_MASS_FRACTION, NEPTUNIAN_JOVIAN_TRANSITION,
-    TablePosition, dry_radius, radius_zeng, water_fraction_of_blend,
+    CoreComposition, DRY_CURVES, DeriveGiantError, EARTH_CORE_MASS_FRACTION,
+    NEPTUNIAN_JOVIAN_TRANSITION, TablePosition, dry_radius, giant_mass, giant_share, radius_zeng,
+    water_fraction_of_blend,
 };
 use crate::planetary::params::{
     COMPOSITION_REFERENCE_AGE, ENVELOPE_CORE_FLOOR, INNER_WATER_CAP, OUTER_WATER_CAP,
 };
-use crate::units::{EarthFluxes, EarthMasses, EarthRadii};
+use crate::units::{EarthFluxes, EarthMasses, EarthRadii, JupiterMasses};
 
 /// The core of an icy body with the most water it can hold: [`OUTER_WATER_CAP`] of water on an
 /// Earth-like core.
@@ -184,7 +209,7 @@ pub enum SolveCompositionError {
     /// The flux was negative or not finite.
     FluxNotValid,
     /// The body is a giant, of 0.414 Jupiter masses or more, whose radius and composition are
-    /// P14.T11.d's, from plan 13's cooling of giant planets.
+    /// P14.T11.d's: [`radius_giant`] and [`giant_composition`].
     GiantPlanet {
         /// The body's mass.
         mass: EarthMasses,
@@ -393,11 +418,136 @@ fn enveloped(
     }
 }
 
+/// The heavy elements of a giant of 1 Jupiter mass, 57.9 M⊕ (Thorngren et al. 2016, §5.1: 57.9 ±
+/// 7.03 M⊕).
+pub const GIANT_HEAVY_ELEMENTS_AT_ONE_JUPITER_MASS: EarthMasses = EarthMasses::new(57.9);
+
+/// How a giant's heavy elements grow with its mass, `M_z` ∝ M^0.61 (Thorngren et al. 2016, §5.1:
+/// 0.61 ± 0.08).
+pub const GIANT_HEAVY_ELEMENT_INDEX: f64 = 0.61;
+
+/// The mass of heavy elements in a giant of mass `mass`: Thorngren et al.'s (2016) mean relation,
+/// 57.9 M⊕ × (M ÷ `M_J`)^0.61 (see the [module](self) documentation).
+///
+/// # Panics
+///
+/// In debug builds, if `mass` is not positive and finite.
+#[must_use]
+pub fn giant_heavy_elements(mass: EarthMasses) -> EarthMasses {
+    debug_assert!(
+        mass.value().is_finite() && mass.value() > 0.0,
+        "a mass is positive and finite, got {mass:?}"
+    );
+    let jupiters = JupiterMasses::from(mass).value();
+    GIANT_HEAVY_ELEMENTS_AT_ONE_JUPITER_MASS * math::powf(jupiters, GIANT_HEAVY_ELEMENT_INDEX)
+}
+
+/// A giant's bulk composition (P14.T11.d), from [`giant_composition`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GiantComposition {
+    fractions: MassFractions,
+    core: CoreComposition,
+    heavy_elements: EarthMasses,
+    share: f64,
+}
+
+impl GiantComposition {
+    /// The giant's mass fractions: its heavy elements as iron, rock and water, and the rest
+    /// hydrogen and helium envelope. They are the body's from 0.414 Jupiter masses; below that,
+    /// [`blended`](Self::blended) are.
+    #[must_use]
+    pub const fn fractions(&self) -> MassFractions {
+        self.fractions
+    }
+
+    /// The composition of the heavy elements.
+    #[must_use]
+    pub const fn core(&self) -> CoreComposition {
+        self.core
+    }
+
+    /// The mass of the heavy elements ([`giant_heavy_elements`]).
+    #[must_use]
+    pub const fn heavy_elements(&self) -> EarthMasses {
+        self.heavy_elements
+    }
+
+    /// The fractions of a body whose composition solve gave `below`: the solve's and the giant's
+    /// blended linearly by [`giant_share`], so `below` at 0.3 Jupiter masses and
+    /// [`fractions`](Self::fractions) from 0.414. They still sum to 1.
+    #[must_use]
+    pub fn blended(&self, below: MassFractions) -> MassFractions {
+        let w = self.share;
+        if w >= 1.0 {
+            return self.fractions;
+        }
+        if w <= 0.0 {
+            return below;
+        }
+        let mix = |a: f64, b: f64| (1.0 - w) * a + w * b;
+        let giant = self.fractions;
+        MassFractions {
+            iron: mix(below.iron, giant.iron),
+            rock: mix(below.rock, giant.rock),
+            water: mix(below.water, giant.water),
+            envelope: mix(below.envelope, giant.envelope),
+        }
+    }
+}
+
+/// The bulk composition of a giant planet of mass `mass` that formed on `side` of its snow line
+/// (P14.T11.d): Thorngren et al.'s (2016) heavy elements, as the core of the composition solve on
+/// that side, under a hydrogen and helium envelope (see the [module](self) documentation).
+///
+/// It is what fills the [`SolveCompositionError::GiantPlanet`] seam of [`composition`].
+///
+/// # Errors
+///
+/// [`DeriveGiantError::MassOutsideGiants`] outside 0.3–13 Jupiter masses, plan 13's cooling fit,
+/// which [`radius_giant`] reads.
+///
+/// # Examples
+///
+/// A Jupiter is 82% hydrogen and helium; one formed beyond the snow line holds its heavy elements
+/// half as water:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::composition::{SnowLineSide, giant_composition};
+/// use hyperion_sim::planetary::derive::radius::DeriveGiantError;
+/// use hyperion_sim::units::{EarthMasses, JupiterMasses};
+///
+/// let jupiter = EarthMasses::from(JupiterMasses::new(1.0));
+/// let giant = giant_composition(jupiter, SnowLineSide::Beyond)?;
+/// assert!((giant.heavy_elements().value() - 57.9).abs() < 1e-9);
+/// let f = giant.fractions();
+/// assert!((f.envelope() - 0.818).abs() < 0.001);
+/// assert!((f.water() / (1.0 - f.envelope()) - 0.539).abs() < 0.001);
+/// # Ok::<(), DeriveGiantError>(())
+/// ```
+pub fn giant_composition(
+    mass: EarthMasses,
+    side: SnowLineSide,
+) -> Result<GiantComposition, DeriveGiantError> {
+    giant_mass(mass)?;
+    let heavy_elements = giant_heavy_elements(mass);
+    let core = match side {
+        SnowLineSide::Inside => CoreComposition::EARTH_LIKE,
+        SnowLineSide::Beyond => ICY_CORE,
+    };
+    Ok(GiantComposition {
+        fractions: MassFractions::of(core, 1.0 - heavy_elements.value() / mass.value()),
+        core,
+        heavy_elements,
+        share: giant_share(mass),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::planetary::derive::radius::radius_chen_kipping;
     use crate::stellar::draws::UnitUniform;
+    use crate::stellar::substellar::{GIANT_MAX_MASS, GIANT_MIN_MASS};
     use crate::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M};
 
     const ONE: EarthFluxes = EarthFluxes::new(1.0);
@@ -611,5 +761,121 @@ mod tests {
         let a = solve(7.3, 2.61, SnowLineSide::Inside, 55.0);
         let b = solve(7.3, 2.61, SnowLineSide::Inside, 55.0);
         assert_eq!(a, b);
+    }
+
+    fn jupiters(m_j: f64) -> EarthMasses {
+        EarthMasses::from(JupiterMasses::new(m_j))
+    }
+
+    #[test]
+    fn giants_hold_thorngren_et_al_s_heavy_elements() {
+        // Their fit: 57.9 M⊕ at 1 Jupiter mass, growing as M^0.61; at Saturn's mass 27.7 M⊕,
+        // against the 27 M⊕ of their own Saturn model, and Jupiter's 57.9 within their scatter,
+        // a factor of 1.82, of the 37 M⊕ of theirs (Thorngren et al. 2016, Table 1).
+        assert!((giant_heavy_elements(jupiters(1.0)).value() - 57.9).abs() < 1e-12);
+        let saturn = giant_heavy_elements(EarthMasses::new(568.32e24 / EARTH_MASS_KG)).value();
+        assert!((saturn - 27.7).abs() < 0.05, "{saturn} M⊕");
+        let ratio = 57.9 / 37.0;
+        assert!(ratio < 1.82);
+        let doubled = giant_heavy_elements(jupiters(2.0)) / giant_heavy_elements(jupiters(1.0));
+        assert!((doubled - math::powf(2.0, 0.61)).abs() < 1e-12);
+        // Fractions sum to 1 from 0.3 to 13 Jupiter masses; the heavy elements are the solve's
+        // core on each side of the snow line, and the envelope rises from 71% to 93%.
+        for i in 0..=100_u32 {
+            let m_j = 0.3 * math::powf(13.0 / 0.3, f64::from(i) / 100.0);
+            for side in [SnowLineSide::Inside, SnowLineSide::Beyond] {
+                let giant = giant_composition(jupiters(m_j), side).unwrap();
+                let f = giant.fractions();
+                assert!((sum(f) - 1.0).abs() < 1e-14, "{m_j} MJ: {f:?}");
+                let heavy = 1.0 - f.envelope();
+                let z = giant.heavy_elements().value() / jupiters(m_j).value();
+                assert!((heavy - z).abs() < 1e-14);
+                assert!((0.06..0.32).contains(&heavy), "{m_j} MJ: {heavy}");
+                match side {
+                    SnowLineSide::Inside => {
+                        assert!(f.water().abs() < f64::MIN_POSITIVE);
+                        assert!((f.iron() / heavy - EARTH_CORE_MASS_FRACTION).abs() < 1e-12);
+                        assert_eq!(giant.core(), CoreComposition::EARTH_LIKE);
+                    }
+                    SnowLineSide::Beyond => {
+                        assert!((f.water() / heavy - OUTER_WATER_CAP).abs() < 1e-12);
+                        assert_eq!(giant.core(), ICY_CORE);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_giant_seam_is_filled() {
+        // Where the solve refuses a giant, giant_composition answers, and it answers from 0.3
+        // Jupiter masses, where the blend begins.
+        let jupiter = jupiters(1.0);
+        let refused = composition(jupiter, EarthRadii::new(11.2), SnowLineSide::Beyond, ONE);
+        assert_eq!(
+            refused,
+            Err(SolveCompositionError::GiantPlanet { mass: jupiter })
+        );
+        assert!(giant_composition(jupiter, SnowLineSide::Beyond).is_ok());
+        let edge = EarthMasses::from(GIANT_MIN_MASS);
+        assert!(giant_composition(edge, SnowLineSide::Beyond).is_ok());
+        assert!(giant_composition(EarthMasses::from(GIANT_MAX_MASS), SnowLineSide::Inside).is_ok());
+        for m in [
+            EarthMasses::new(95.0),
+            jupiters(13.1),
+            EarthMasses::new(f64::NAN),
+        ] {
+            assert!(matches!(
+                giant_composition(m, SnowLineSide::Beyond),
+                Err(DeriveGiantError::MassOutsideGiants(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_giant_s_fractions_are_continuous_where_the_giants_begin() {
+        // Chen and Kipping's radius through the solve below, the giant's fractions above, and the
+        // two blended between: continuous at 0.3 and 0.414 Jupiter masses, summing to 1.
+        let lower = |m: f64, q: f64, s: f64| {
+            let mass = EarthMasses::new(m);
+            let r = radius_chen_kipping(mass, UnitUniform::new(q).unwrap());
+            solve(m, r.value(), SnowLineSide::Beyond, s).fractions()
+        };
+        let body = |m: f64, q: f64, s: f64| {
+            let giant = giant_composition(EarthMasses::new(m), SnowLineSide::Beyond);
+            if m < EarthMasses::from(GIANT_MIN_MASS).value() {
+                lower(m, q, s)
+            } else if m >= NEPTUNIAN_JOVIAN_TRANSITION.value() {
+                giant.unwrap().fractions()
+            } else {
+                giant.unwrap().blended(lower(m, q, s))
+            }
+        };
+        let edges = [
+            EarthMasses::from(GIANT_MIN_MASS).value(),
+            NEPTUNIAN_JOVIAN_TRANSITION.value(),
+        ];
+        for q in [0.1, 0.5, 0.9] {
+            for s in [0.01, 1.0, 1_000.0] {
+                for edge in edges {
+                    let (a, b) = (
+                        body(edge * (1.0 - 1e-9), q, s),
+                        body(edge * (1.0 + 1e-9), q, s),
+                    );
+                    for (x, y) in [
+                        (a.iron(), b.iron()),
+                        (a.rock(), b.rock()),
+                        (a.water(), b.water()),
+                        (a.envelope(), b.envelope()),
+                    ] {
+                        assert!((x - y).abs() < 1e-6, "{edge} M⊕, {q}, {s} F⊕: {a:?} {b:?}");
+                    }
+                    assert!((sum(b) - 1.0).abs() < 1e-14);
+                }
+            }
+        }
+        let giant = giant_composition(jupiters(1.0), SnowLineSide::Beyond).unwrap();
+        let other = lower(100.0, 0.5, 1.0);
+        assert_eq!(giant.blended(other), giant.fractions());
     }
 }

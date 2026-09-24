@@ -6,12 +6,17 @@
 //!   floor of design note 7 (P14.T6.a), and the spacing draw (P14.T6.b).
 //! - [`zones`]: Holman and Wiegert's stability limits, the stable zones of a hierarchy, and each
 //!   zone's disc and close-binary flag (P14.T9, design note 10).
+//! - [`masses`]: the planets' masses, a characteristic mass per group with members correlated
+//!   about it, each group held to its disc's solids or gas, and whether a disc can grow a giant's
+//!   core (P14.T7).
 //!
-//! Masses (T7) and the class placers (T8) follow.
+//! The class placers (T8) follow.
 
+pub mod masses;
 pub mod spacing;
 pub mod zones;
 
+pub use masses::{GiantCore, GroupCap, GroupMasses, MassDraws, giant_core, group_masses};
 pub use spacing::{
     HillFactor, Neighbour, PairSpacing, SpacingDraws, SpacingKind, SpacingOutcome,
     draw_pair_spacing, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
