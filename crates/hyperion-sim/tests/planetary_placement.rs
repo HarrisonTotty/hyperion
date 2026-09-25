@@ -573,7 +573,7 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
         "small planets per M dwarf inside 200 days (Dressing and Charbonneau 2015)",
         per_m,
         (1.8, 3.2),
-        (1.25, 1.32),
+        (1.20, 1.26),
     );
     report.note(format!(
         "  by radius at drawn ranks: {:.4}",
@@ -784,28 +784,32 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 /// Each of these still misses its source by more than any change inside the sources reaches, and
 /// is reported with its dial:
 ///
-/// - M dwarfs have 1.28 small planets inside 200 days, against Dressing and Charbonneau's 2.5
-///   (1.15 before ruling 68.2 raised the chains' median to Wu's 7.7 M⊕ × M★). Ruling 66's floor
-///   of 1 M⊕ × M★ lets their chains' planets under 1 M⊕, where the fixed 1 M⊕ floor had counted
-///   them and gave 1.90. No normalisation reaches the window: their chains place 1.72 planets per
-///   star inside 200 days in all, 0.50 of them still under 1 M⊕ at the 0.54 dex width fitted to
-///   Weiss et al.'s pairs, and their rocky groups 0.78, 0.71 of them under 1 M⊕;
+/// - M dwarfs have 1.23 small planets inside 200 days, against Dressing and Charbonneau's 2.5
+///   (1.15 before ruling 68.2 raised the chains' median to Wu's 7.7 M⊕ × M★, 1.28 before ruling
+///   73's budget and truncated masses). Ruling 66's floor of 1 M⊕ × M★ lets their chains' planets
+///   under 1 M⊕, where the fixed 1 M⊕ floor had counted them and gave 1.90. By radius the model
+///   has half of Dressing and Charbonneau's 1–4 R⊕ planets at every period from 10 to 200 days
+///   (their Table 5) and a third inside 10 days, and more 0.5–1 R⊕ planets than they find: 72% of
+///   these M dwarfs host a chain, 40% of those the dynamically hot one or two, where Hsu et al.
+///   (2020) find the planets consistent with every M dwarf hosting a system and Ballard and
+///   Johnson (2016) about five planets inside 200 days in the multiple systems (ruling 73.1);
 ///
-/// - mid-to-late M dwarfs have 0.34 planets per star and 8% compact multiples inside 10 days,
-///   against Hardegree-Ullman et al.'s 1.19 and 0.44; the early M dwarfs have 0.30 against
-///   Dressing and Charbonneau's (2015, Table 5) 0.63 for the same radii and periods. The chains'
-///   first period follows Mulders et al.'s (2018) law, measured about Kepler's FGK hosts, at every
-///   host mass (Mulders et al. 2015b find the break at one period), so no M dwarf's chain starts
-///   closer in than a Sun's;
-/// - small planets at \[Fe/H\] = −0.8 are 0.42 of solar (0.46 before ruling 68.2): the compact classes' share there is about
-///   0.72 of solar, as `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars
-///   with Kepler-like planets rises by 1.4 between −0.2 and +0.2 in Zhu 2019, which the table
-///   follows), metal-poor discs hold fewer planets under the solid budget, and rocky planets, whose
-///   masses follow their discs, fall under 1 M⊕;
+/// - mid-to-late M dwarfs have 0.35 planets per star and 9% compact multiples inside 10 days,
+///   against Hardegree-Ullman et al.'s 1.19 and 0.44; the early M dwarfs have 0.28 against Dressing
+///   and Charbonneau's (2015, Table 5) 0.63 for the same radii and periods. The chains' first
+///   period follows Mulders et al.'s (2018) law, measured about Kepler's FGK hosts, at every host
+///   mass (Mulders, Pascucci and Apai 2015, ApJ 798, 112, find the break at one period), so no M
+///   dwarf's chain starts closer in than a Sun's;
+/// - small planets at \[Fe/H\] = −0.8 are 0.44 of solar (0.46 before ruling 68.2, 0.42 before
+///   ruling 73): the compact classes' share there is about 0.72 of solar, as
+///   `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars with Kepler-like
+///   planets rises by 1.4 between −0.2 and +0.2 in Zhu 2019, which the table follows), metal-poor
+///   discs hold fewer planets under the solid budget, and rocky planets, whose masses follow their
+///   discs, fall under 1 M⊕;
 /// - close-binary hosts have planets 0.14 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
 ///   0.34 compounds with their truncated discs, whose budgets now build no chain at all where they
 ///   cannot build its first planet (ruling 66), under Kraus et al.'s 1σ (0.19–0.48);
-/// - small pairs are at 10 mutual Hill radii or more in 99.3% of pairs measured as Weiss et al.
+/// - small pairs are at 10 mutual Hill radii or more in 99.4% of pairs measured as Weiss et al.
 ///   measure them, from masses their mass–radius relation gives each radius, and in all of them by
 ///   their own masses, the floor of design note 7 by construction, against Weiss et al.'s 93%; the
 ///   median is 17.1 against a peak near 20 (ruling 52.5).

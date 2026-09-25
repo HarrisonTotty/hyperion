@@ -102,6 +102,72 @@ impl StandardNormal {
         self.0
     }
 
+    /// The value at this variate's rank Φ(z) of a normal of `mean` and `sigma` truncated to
+    /// [`lower`, `upper`]: the distribution of redrawing a normal until it falls inside, from this
+    /// one variate, increasing in it, so that a held draw piles nothing at either end.
+    ///
+    /// With a = (`lower` − `mean`) ÷ `sigma`, b likewise and w = Φ(b) − Φ(a), the rank's distance
+    /// below it is p = Φ(a) + Φ(z) w and above it q = Q(b) + Q(z) w, Q being the upper tail
+    /// ½ erfc(x ÷ √2), and the standardised value is Φ⁻¹(p) or −Φ⁻¹(q), whichever of p and q is
+    /// smaller, so that neither tail loses its precision. The result is clamped to the interval
+    /// against rounding. An interval too narrow or too far in a tail for w to be positive, beyond
+    /// about 38 standard deviations, gives the point of it nearest the mean.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `sigma` is not positive or `lower` exceeds `upper`.
+    ///
+    /// # Examples
+    ///
+    /// A planet's mass of median 7.7 M⊕ and 0.54 dex of scatter, held to 1–20 M⊕ by its rank
+    /// rather than by clamping: a variate far above the range still lands inside it, below the
+    /// ceiling, and the median variate lands below the median, since more of the law lies above
+    /// the range than below it.
+    ///
+    /// ```
+    /// use hyperion_sim::stellar::draws::StandardNormal;
+    ///
+    /// let (median, sigma, lo, hi) = (7.7_f64.log10(), 0.54, 0.0, 20.0_f64.log10());
+    /// let high = StandardNormal::new(3.0).expect("finite");
+    /// let x = high.truncated(median, sigma, lo, hi);
+    /// assert!(x < hi && x > median);
+    /// let mid = StandardNormal::ZERO.truncated(median, sigma, lo, hi);
+    /// assert!(mid < median);
+    /// ```
+    #[must_use]
+    pub fn truncated(self, mean: f64, sigma: f64, lower: f64, upper: f64) -> f64 {
+        debug_assert!(
+            sigma > 0.0 && lower <= upper,
+            "a truncated normal needs σ > 0 and a non-empty range: σ = {sigma}, [{lower}, {upper}]"
+        );
+        let (a, b) = ((lower - mean) / sigma, (upper - mean) / sigma);
+        let inside = if a >= 0.0 {
+            upper_tail(a) - upper_tail(b)
+        } else if b <= 0.0 {
+            upper_tail(-b) - upper_tail(-a)
+        } else {
+            1.0 - upper_tail(-a) - upper_tail(b)
+        };
+        if inside <= 0.0 || inside.is_nan() {
+            return mean.clamp(lower, upper);
+        }
+        let z = self.0;
+        let below = upper_tail(-a) + upper_tail(-z) * inside;
+        let above = upper_tail(b) + upper_tail(z) * inside;
+        let x = if below <= above {
+            if below > 0.0 {
+                math::normal_quantile(below)
+            } else {
+                a
+            }
+        } else if above > 0.0 {
+            -math::normal_quantile(above)
+        } else {
+            b
+        };
+        (mean + sigma * x).clamp(lower, upper)
+    }
+
     /// The next two words of `stream` as a standard normal. Two words.
     fn draw(stream: &mut Stream) -> Self {
         Self(stream.standard_normal())
@@ -111,6 +177,13 @@ impl StandardNormal {
     fn draw_array<const N: usize>(stream: &mut Stream) -> [Self; N] {
         core::array::from_fn(|_| Self::draw(stream))
     }
+}
+
+/// The upper tail of the standard normal, Q(x) = 1 − Φ(x) = ½ erfc(x ÷ √2), accurate in both
+/// tails.
+#[must_use]
+fn upper_tail(x: f64) -> f64 {
+    0.5 * math::erfc(x * core::f64::consts::FRAC_1_SQRT_2)
 }
 
 /// The mark in the middle of the range, so that it lies below a threshold of probability p exactly

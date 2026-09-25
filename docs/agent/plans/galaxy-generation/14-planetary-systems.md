@@ -906,6 +906,14 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
   - _As built (rulings 60, 66 and 68.2):_ a drift-fed group's median is 7.7 M⊕ × (M★ ÷ M☉)
     (Wu 2019), not the disc-scaled 4 M⊕, and test (a) holds it to 6.9–8.5 M⊕; see "Risks and open
     points", the calibration bullets.
+  - _As built (ruling 73):_ each member is its log-normal law's truncated quantile at its own rank
+    (`StandardNormal::truncated`), so no mass sits at a bound; for drift-fed groups `σ_b` 0.7,
+    `σ_w` 0.24 and the step 0.34 dex, re-fitted, and for rocky groups `σ_w` stays 0.2
+    (`ROCKY_WITHIN_SYSTEM_SCATTER_DEX`, `within_scatter`); a drift-fed group's budget is the solid
+    budget × M☉ ÷ M★ (`drift_budget`, Mulders et al. 2015b), and `group_budget(group, disc)` picks
+    each group's (gas, drift or solid). Test (b)'s sample gives log radii 0.610, log masses 0.815,
+    outer heavier 0.743 and larger 0.651, and 306 of its 2,000 Sun-like chains are truncated (333
+    before; the test's 240–430 is unchanged). See "Risks and open points", the `calib3` bullet.
 
 #### P14.T8 Class placers
 
@@ -3887,3 +3895,90 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     sudden death, so a single-body query (`body_at`, `position_at`) about such a host costs O(n)
     resolutions. The overlap test checks 2√3 Hill radii only about single stars that died
     suddenly, and crossings alone about pairs (ruling 71.2).
+- **Ruling 73, the M dwarfs' chains and no mass at a bound, as built (`calib3`, round 8).**
+  - _Ruling 73.2, no mass at a bound._ A correlated group's member is no longer clamped to its
+    range: log₁₀ m is normal about log₁₀ `m_c` + s (i − (n − 1) ÷ 2) with `σ_w`, truncated to the
+    range (a drift-fed group's host-scaled floor to its ceiling), and drawn at the rank Φ(εᵢ) of the
+    member's own variate (`StandardNormal::truncated`, moved from `stellar/remnant/collapse.rs`,
+    which now calls it; no output of it moves). No word is added. A drift-fed `m_c` is no longer
+    held: holding it, or truncating it too, cut the between-system scatter and put the FGK log-radius
+    correlation at 0.52–0.57. `mass_floor` never exceeds the template's ceiling (only a host over
+    20 M☉ reached it, where `clamp` would have panicked). Before → after, exactly at a bound: chain
+    planets about 0.9–1.1 M☉ at 20 M⊕ 13.6% → 0, at their floor 7.3% → 0; chain planets about
+    0.2–0.4 M☉ at their floor 11.4% → 0; rocky planets about FGK hosts at 2 M⊕ 5.3% → 0 and at
+    0.05 M⊕ 10.5% → 0. Within 0.02 dex of a bound, where a truncated law crowds: 1.0% → 4.7%
+    under 20 M⊕, 0.6% → 3.4% over the Sun-like floor, 0.7% → 4.4% over the M dwarfs' floor, and
+    0.6% → 0.8% and 1.0% → 1.5% for the rocky ceiling and floor.
+  - _The widths._ Truncated at the clamped settings (0.5, 0.2, 0.21 dex) the FGK log-radius
+    correlation fell to 0.523 and the outer-larger share to 0.644. Re-fitted, `σ_b` 0.7, `σ_w` 0.24
+    and the step 0.34 hold every window, including T7's test (b) (outer heavier 0.743, under
+    0.75; a truncated member has no tie at the ceiling to lose). They are the chains' only: rocky
+    groups keep ruling 55.1's `σ_w` of 0.2 (`ROCKY_WITHIN_SYSTEM_SCATTER_DEX`), since Weiss et al.'s
+    pairs are Kepler's compact multis. **For the orchestrator to rule:** ruling 73.2 said to keep
+    the 0.54 dex width if Wu's failed; truncated at it, the FGK correlation is 0.523, outside
+    0.60–0.70, so the width is re-fitted wider (about 0.74 dex), further from Wu's. **Wu's 0.29 dex was tried and
+    fails:** as `σ_b` 0.21, `σ_w` 0.2 the correlation is 0.47 (0.41 with `m_c` truncated as well); as
+    0.28–0.29 and 0.03–0.07 with steps of 0.15–0.20 it is 0.575–0.613 with the outer larger in
+    0.652–0.696, never both, and the outer heavier in 0.98 of T7's sample. It would have raised
+    Dressing and Charbonneau's count to 1.42–1.64.
+  - _Ruling 73.1, the diagnosis_ (primaries of 0.35–0.6 M☉, T10.b's sample, before the change):
+    71.7% of zones about the primary host a chain, 40.4% of those the hot variant of one or two;
+    a cold chain draws 5.69 members (Ballard and Johnson's 6.1, capped at 10), its budget forms
+    4.34, 4.18 are placed and 3.25 lie inside 200 days; 31.6% of chain groups were truncated by
+    the budget (22.8% about FGK stars) and 8.7% formed none; the walk stopped at the zone or disc
+    edge in 1.1% and on admission in 3.3%; the strip radius never binds a field system. The cold
+    chains' first period has a median of 14.7 days, 28% inside 10 days, the same at every host
+    mass; adjacent period ratios have a median of 1.78. Per star inside 200 days the chains place
+    1.72 planets (0.50 under 1 M⊕) and the rocky groups 0.78 (0.71 under 1 M⊕). By Chen and
+    Kipping radius the cumulative 1–4 R⊕ count at 10, 50, 100, 150 and 200 days is 0.15, 0.78,
+    1.00, 1.09 and 1.15 against Dressing and Charbonneau's Table 5, 0.47, 1.60, 2.03, 2.36 and
+    2.47: half at every period beyond 10 days, a third inside it; 0.5–1 R⊕ is 1.02 against
+    their 0.60. The planets' heavy-element inventory (0.7–150 days, 0.5–16 R⊕) is 6.4 M⊕ per M
+    dwarf and 6.1 per FGK star, against Mulders et al.'s (2015b, Table 2) 7.3 ± 0.7 and 5.0–5.4.
+  - _The change, cited._ `drift_budget`: a drift-fed group's budget is `solid_budget` × M☉ ÷ M★,
+    after Mulders, Pascucci and Apai (2015, ApJ 814, 130, §3.3, Table 2): the close-in planets'
+    heavy-element mass rises "roughly inversely with stellar mass" while discs fall, the drift of
+    building blocks being "more efficient for lower mass stars". About M dwarfs it binds 21% of
+    chains (from 31.6%), the cold chains form 4.83 of 5.69, and the inventory is 7.6 M⊕, inside
+    their 7.3 ± 0.7; at 1 M☉ nothing changes, so the anchors stand. `group_budget(group, disc)`
+    gives each group its limit (the gas mass for giants, `drift_budget` for drift-fed groups,
+    `solid_budget` otherwise). **For the orchestrator to rule:** the factor is not bounded;
+    Mulders et al.'s bins span medians of 0.42–1.08 M☉, so a substellar chain about a 0.03 M☉ host
+    gets 33 times its solid budget (such chains are 0.01–2 M⊕ and rarely bind), and a 2 M☉ host
+    half. Holding the factor to their range is the alternative.
+  - _What no in-source change reaches, for the owner._ The miss is the count, not the masses:
+    - Hsu, Ford and Terrien (2020, MNRAS 498, 2249, §5) find the M dwarfs' planets consistent with
+      every early M dwarf hosting a system (4.2 or 8.4 planets per star at 0.5–4 R⊕ and 0.5–256
+      days, by prior), and Ballard and Johnson (2016, §3.3) about five planets inside 200 days in
+      45% of planet-hosting M dwarfs and one in 55%, 2.8 per host. Here 72% of these M dwarfs host
+      a chain and a cold chain has 3.5 planets inside 200 days (after the change), because its
+      count is the chain's whole length from about 15 days at ratios near 1.8, not Ballard and
+      Johnson's 1–200 day window. Reading their 6.1 as a count inside 200 days, or raising the
+      chain share towards Hsu et al.'s "potentially all", are the dials; both are T4.b's and
+      T5's figures, which the sources bound only loosely, and are not made here.
+    - Inside 10 days the first period is Mulders et al.'s (2018) FGK law at every host mass, as
+      Mulders, Pascucci and Apai (2015a, ApJ 798, 112) find the break at one period; Hardegree-Ullman et al.'s mid-M excess
+      (1.19 against 0.35) has no host-mass law to cite.
+  - _T10.b, every window, before → after (window):_ FGK small planets 0.714 → 0.720 (0.5–1.2;
+    by radius 0.586 → 0.585); hot Jupiters 0.72% → 0.72%; Cumming's giants 10.19% → 10.19%; η⊕
+    0.382 → 0.400 (0.37–0.60); adjacent log radii, FGK 0.618 → 0.642 and single Suns 0.620 →
+    0.636 (0.60–0.70); outer larger 0.652 → 0.656 (0.650–0.658); 0.1–0.5 M☉ multiples 0.569 →
+    0.611 (≥ 0.40); their giants 1.55% → 1.55%; −2 against solar 0.005 → 0.006 (< 0.25); the
+    giants' slope 2.025 → 2.025 (1.7–2.3); the anchors 10.50%, 0.82%, 30.5% unmoved. Findings:
+    Dressing and Charbonneau 1.285 → 1.227 (1.8–3.2; by radius 1.148 → 1.081), re-pinned at
+    1.20–1.26; mid-M inside 10 days 0.341 → 0.351, their multiples 0.080 → 0.086; \[Fe/H\] −0.8
+    0.419 → 0.439; close binaries 0.135 → 0.138; pairs ≥ 10 R_H 0.993 → 0.994, all inside their
+    pins. No window was widened. The wider law puts more M-dwarf chain planets under 1 M⊕ (0.68 per
+    star inside 200 days), which is why the count falls although the budget forms more of them.
+    **For the orchestrator to rule:** with a drift-fed `m_c` no longer held, a group centred
+    above 20 M⊕ crowds its members just under the ceiling: 4.7% of a Sun's chain planets lie
+    within 0.02 dex of it, about three times an even spread's share, though none sit on it.
+  - _Goldens,_ at 11 with no bump as the round rules: `planetary/masses` and `planetary/classes`,
+    and eleven of the fourteen T32 systems (the M dwarf, the Solar-like, the halo star, the wide
+    binary, the triple, which now holds eleven bodies instead of eight, the subgiant, the red giant's
+    engulfed planet's mass and engulfment time, the fallback black hole and the three fillers); the hot Jupiter, the
+    eccentric giant and the close binary do not move. Every pinned ID still satisfies its
+    predicate (`pinned_ids_satisfy_their_own_predicates`), but the slow search now finds an earlier
+    halo star, so the halo star is re-pinned: `02025b2be0000001`, 0.400 M☉, \[Fe/H\] −0.77, one
+    rocky planet of 1.50 M⊕ at 8.6 days (it was `01fdbb3660000000`, 0.321 M☉, −0.34); the other
+    thirteen are found again.

@@ -5,22 +5,30 @@
 //! # The model
 //!
 //! - **Characteristic mass** (P14.T7.a, as ruling 60 calibrates it). A group of the correlated law
-//!   ([`MassLaw::Correlated`]) has one characteristic mass `m_c`, held to the template's range,
-//!   whose median follows how the group grew ([`is_drift_fed`], [`characteristic_mass`]):
+//!   ([`MassLaw::Correlated`]) has one characteristic mass `m_c`, whose median follows how the
+//!   group grew ([`is_drift_fed`], [`characteristic_mass`]):
 //!   - a *drift-fed* group, a compact chain, a warm giant's companions or a substellar chain:
-//!     `m_c` = 7.7 M⊕ × (M★ ÷ M☉) × 10^(`σ_b` z), with `σ_b` = 0.5 dex
-//!     ([`BETWEEN_SYSTEM_SCATTER_DEX`]). The host sets it; the disc's solids and metallicity do not;
+//!     `m_c` = 7.7 M⊕ × (M★ ÷ M☉) × 10^(`σ_b` z), with `σ_b` = 0.7 dex
+//!     ([`BETWEEN_SYSTEM_SCATTER_DEX`]). The host sets it; the disc's solids and metallicity do
+//!     not. It is the centre of its members' law, not a planet, and is not held to the template's
+//!     range (ruling 73.2, below);
 //!   - an *in-situ* rocky group: `m_c` = 0.5 M⊕ × (`M_s` ÷ [`REFERENCE_SOLID_MASS`]), as P14.T7.a
-//!     wrote it, `M_s` being the whole solid mass of the host's disc between its edges, already
-//!     cut to the host's stable zone (P14.T9).
-//! - **Members** (P14.T7.b). Member i of n, counted inside out, has
-//!   log₁₀ mᵢ = log₁₀ `m_c` + `σ_w` εᵢ + s (i − (n − 1) ÷ 2), held to the template's range: the
-//!   same scatter `σ_w` = 0.2 dex ([`WITHIN_SYSTEM_SCATTER_DEX`]) for every member, and s more per
-//!   step outward, centred on the group so that `m_c` stays its typical mass whatever its count:
-//!   s = 0.21 dex for a drift-fed group ([`OUTWARD_STEP_DEX`]) and 0 for a rocky one
-//!   ([`ROCKY_OUTWARD_STEP_DEX`]).
-//! - **The solid budget** (ruling 38, point 4; ruling 60). A group's members together hold at most
-//!   [`solid_budget`], three times its disc's whole solid mass. A correlated group whose drawn
+//!     wrote it, held to the template's range, `M_s` being the whole solid mass of the host's disc
+//!     between its edges, already cut to the host's stable zone (P14.T9).
+//! - **Members** (P14.T7.b). Member i of n, counted inside out, has log₁₀ mᵢ normal about
+//!   log₁₀ `m_c` + s (i − (n − 1) ÷ 2) with the same scatter `σ_w` for every member, 0.24 dex for
+//!   a drift-fed group ([`WITHIN_SYSTEM_SCATTER_DEX`]) and 0.2 for a rocky one
+//!   ([`ROCKY_WITHIN_SYSTEM_SCATTER_DEX`]), truncated to the template's range (for a
+//!   drift-fed group, its host-scaled [`mass_floor`] to its ceiling): s more per step outward,
+//!   centred on the group so that `m_c` stays its typical mass whatever its count, s = 0.34 dex for
+//!   a drift-fed group ([`OUTWARD_STEP_DEX`]) and 0 for a rocky one ([`ROCKY_OUTWARD_STEP_DEX`]).
+//!   The member's own variate εᵢ is taken at its rank Φ(εᵢ) in the truncated law
+//!   ([`StandardNormal::truncated`]), so the same words draw it and no mass sits at a bound it did
+//!   not draw (ruling 73.2).
+//! - **The solid budget** (ruling 38, point 4; rulings 60 and 73.1). A group's members together
+//!   hold at most [`solid_budget`], three times its disc's whole solid mass, and a drift-fed
+//!   group's at most [`drift_budget`], that times M☉ ÷ M★ (Mulders, Pascucci and Apai 2015,
+//!   ApJ 814, 130). A correlated group whose drawn
 //!   members hold more forms only its innermost members that fit, each at its drawn mass, and
 //!   none if even the first does not fit ([`GroupCap::Truncated`]), so that no member lies under
 //!   its floor (ruling 66: a chain of 1 M⊕ × M★ planets cannot be built from less; Lambrechts et
@@ -89,9 +97,26 @@
 //! set aside were medians of radial-velocity samples, and of the break-law extended below the
 //! surveys' reach. The slope stays 1: both sources find it linear.
 //!
-//! Wu's width is 0.29 dex; this module's is `σ_b` and `σ_w` together, about 0.54 dex, fitted to
-//! Weiss et al.'s pair statistics (below). Held to the template's 1–20 M⊕, the broader law puts
-//! 14% of a Sun's chain planets at exactly the 20 M⊕ ceiling (7% under the 4 M⊕ median).
+//! Wu's width is 0.29 dex for her preferred Earth-like cores; her Table 1 trades it against the
+//! cores' density (0.54 dex at 2 g cm⁻³, about 3 M⊕). This module's is `σ_b` and `σ_w` together,
+//! about 0.74 dex (0.54 before ruling 73.2), fitted to Weiss et al.'s pair statistics (below), and
+//! Wu's 0.29 does not meet them (ruling 73.2): split as `σ_b` 0.21 and `σ_w` 0.2 it puts the
+//! adjacent log radii's correlation at 0.47, and split as 0.28–0.29 and 0.03–0.07 it reaches
+//! 0.58–0.61 only with a step that makes the outer planet the larger in 68–70% of pairs, against
+//! 65.4%, and the heavier in 98% of this module's sample, against P14.T7.b's 0.55–0.75.
+//!
+//! # No mass at a bound it did not draw (ruling 73.2)
+//!
+//! Held to the template's 1–20 M⊕ by clamping, the 0.54 dex law of ruling 68.2 had put 14% of a
+//! Sun's chain planets at exactly the 20 M⊕ ceiling, 7% at its 1 M⊕ floor, and 11% of the chain
+//! planets about hosts of 0.2–0.4 M☉ at their host-scaled floor; rocky planets about FGK hosts sat
+//! at their 2 M⊕ ceiling in 5% of cases and at their 0.05 M⊕ floor in 10%. Each member is now its
+//! law's truncated quantile at its own rank, the distribution of redrawing it until it falls inside
+//! the range, from the same words, and none sits at a bound. A drift-fed group's `m_c` is not
+//! truncated or held itself: holding it, or truncating its own law to the range, narrowed the
+//! scatter between systems that carries Weiss et al.'s correlation (0.52–0.57 against 0.60–0.70),
+//! so a group whose `m_c` lies above the ceiling has members crowded just under it (4.7% of a Sun's
+//! chain planets within 0.02 dex of 20 M⊕, where none are exactly at it).
 //!
 //! # The solid budget (ruling 38, point 4; ruling 60)
 //!
@@ -122,8 +147,8 @@
 //! P14.T4.b's compact exponent; Mulders, Pascucci and Apai (2015, ApJ 814, 130, abstract) find the
 //! heavy-element mass of close-in planets rising "roughly inversely with stellar mass from 4 M⊕ in
 //! F stars to 5 M⊕ in G and K stars to 7 M⊕ in M stars ... in stark contrast with observed
-//! protoplanetary disk masses". It truncates 333 of 2,000 Sun-like chains (this module's tests;
-//! 246 under the 4 M⊕ median).
+//! protoplanetary disk masses". It truncates 306 of 2,000 Sun-like chains (this module's tests;
+//! 333 under ruling 68.2's clamped law, 246 under the 4 M⊕ median).
 //!
 //! The local isolation mass keeps what it describes: the core a giant starts from beyond the snow
 //! line ([`giant_core`]).
@@ -139,19 +164,23 @@
 //! plan 14 reads it as log radii.
 //!
 //! A drift-fed group's mass no longer carries its disc's scatter, so `σ_b` is the whole of the
-//! scatter between systems. With `σ_w` = 0.2 dex, `σ_b` = 0.5 dex and the step s = 0.21 dex were
-//! fitted together on P14.T10.b's placed hosts, through P14.T11's Chen and Kipping radius with
-//! each planet's own quantile: the adjacent log radii correlate at 0.618 about FGK primaries of
-//! drawn \[Fe/H\] and 0.620 about single Suns, and the outer planet is the larger in 0.652 of
-//! pairs, all inside Weiss et al.'s windows (0.633, 0.638 and 0.652 under the 4 M⊕ median, before
-//! ruling 68.2). Ruling 55.1 proposed the step ("a larger outward step with the scatter
-//! re-fitted"); the plan's 0.1 dex gave 0.58. In this module's sample of 2,000 chains in solar
-//! discs the log radii correlate at 0.607, the log masses at 0.822, and the outer planet is the
-//! heavier in 0.709 of pairs and the larger in 0.653. Chen and Kipping's scatter,
-//! 0.146 dex in radius above 2.04 M⊕ and independent for each planet (design note 8), is what
-//! separates the radius statistics from the mass ones; He, Ford and Ragozzine (2019, MNRAS 490,
-//! 4575, §3.7) fit a within-system width of 0.31 ± 0.07 in ln R, 0.135 dex, which that scatter
-//! alone more than fills.
+//! scatter between systems. `σ_w`, `σ_b` and the step s were fitted together on P14.T10.b's placed
+//! hosts, through P14.T11's Chen and Kipping radius with each planet's own quantile, and on this
+//! module's sample below. With the members truncated to their range (ruling 73.2) and the M dwarfs'
+//! chains under [`drift_budget`] (ruling 73.1) they are 0.24, 0.7 and 0.34 dex, where clamped
+//! members had taken 0.2, 0.5 and 0.21: the adjacent log radii correlate at 0.642 about FGK
+//! primaries of drawn \[Fe/H\] and 0.636 about single Suns, and the outer planet is the larger in
+//! 0.656 of pairs, all inside Weiss et al.'s windows (0.618, 0.620 and 0.652 clamped). A truncated
+//! member has no tie at the ceiling to lose, so the outer planet is the heavier more often at a
+//! given step; the three settings are the ones found that hold that share inside P14.T7.b's
+//! 0.55–0.75 together with Weiss et al.'s 65.4% by radius and the correlation. Ruling 55.1 proposed
+//! the step ("a larger outward step with the scatter re-fitted"); the plan's 0.1 dex gave 0.58. In
+//! this module's sample of 2,000 chains in solar discs the log radii correlate at 0.610, the log
+//! masses at 0.815, and the outer planet is the heavier in 0.743 of pairs and the larger in 0.651.
+//! Chen and Kipping's scatter, 0.146 dex in radius above 2.04 M⊕ and independent for each planet
+//! (design note 8), is what separates the radius statistics from the mass ones; He, Ford and
+//! Ragozzine (2019, MNRAS 490, 4575, §3.7) fit a within-system width of 0.31 ± 0.07 in ln R, 0.135
+//! dex, which that scatter alone more than fills.
 //!
 //! # Draws
 //!
@@ -227,33 +256,54 @@ pub const ROCKY_CHARACTERISTIC_MASS: EarthMasses = EarthMasses::new(0.5);
 /// [`DiscDraws::MEDIAN`]: crate::planetary::disc::DiscDraws::MEDIAN
 pub const REFERENCE_SOLID_MASS: EarthMasses = EarthMasses::new(32.20);
 
-/// The between-system scatter `σ_b` of a drift-fed group's characteristic mass, in dex: 0.5
-/// (P14.T7.a–b; ruling 60).
+/// The between-system scatter `σ_b` of a drift-fed group's characteristic mass, in dex: 0.7
+/// (P14.T7.a–b; rulings 60 and 73.2).
 ///
 /// Plan 14 leaves `σ_b` to be chosen, with `σ_w`, so that adjacent planets' log radii correlate at
 /// 0.65 (Weiss et al. 2018). A drift-fed group's mass no longer follows its disc, so this is the
 /// whole of the scatter between systems, fitted with [`OUTWARD_STEP_DEX`] on P14.T10.b's placed
-/// hosts (see the [module documentation](self)). It is drawn on words 2–3 of the group's first
+/// hosts (see the [module documentation](self)): 0.5 with members clamped to their range, 0.7
+/// with them truncated to it (ruling 73.2). It is drawn on words 2–3 of the group's first
 /// member's block. A rocky group takes none: its disc's own scatter carries it.
-pub const BETWEEN_SYSTEM_SCATTER_DEX: f64 = 0.5;
+pub const BETWEEN_SYSTEM_SCATTER_DEX: f64 = 0.7;
 
-/// The within-system scatter `σ_w` of a member about its group's characteristic mass, in dex: 0.2
-/// (P14.T7.b).
+/// The within-system scatter `σ_w` of a member about its group's characteristic mass, in dex:
+/// 0.24 (P14.T7.b; ruling 73.2; 0.2 before its members were truncated to their range).
 ///
 /// Chosen so that the adjacent log radii of compact systems in solar discs, after P14.T11's Chen
 /// and Kipping radius, correlate at Weiss et al.'s (2018) 0.65; see the [module
 /// documentation](self) for what it gives and what it cannot.
-pub const WITHIN_SYSTEM_SCATTER_DEX: f64 = 0.2;
+pub const WITHIN_SYSTEM_SCATTER_DEX: f64 = 0.24;
 
-/// How much heavier each member of a drift-fed group is than the one inside it, in dex: 0.21
-/// (P14.T7.b; ruling 60).
+/// The within-system scatter `σ_w` of a rocky group's members, in dex: 0.2 (P14.T7.b; ruling
+/// 55.1).
 ///
-/// Plan 14 had 0.1, for Weiss et al.'s (2018) outer planets being the larger in most pairs; 0.21
-/// is the step that, with [`WITHIN_SYSTEM_SCATTER_DEX`] and Chen and Kipping's scatter, makes the
-/// outer planet the larger in their 65.4% of pairs on P14.T10.b's placed hosts (ruling 55.1
-/// proposed it: "a larger outward step with the scatter re-fitted"). It is centred on the group's
-/// middle member.
-pub const OUTWARD_STEP_DEX: f64 = 0.21;
+/// Ruling 55.1's 0.2 dex, kept for the in-situ groups when the drift-fed groups' scatter was
+/// re-fitted on Weiss et al.'s (2018) pairs of Kepler's compact multis (ruling 73.2), which say
+/// nothing of terrestrial groups.
+pub const ROCKY_WITHIN_SYSTEM_SCATTER_DEX: f64 = 0.2;
+
+/// The within-system scatter of `group`'s members, in dex: [`WITHIN_SYSTEM_SCATTER_DEX`] for a
+/// drift-fed group, [`ROCKY_WITHIN_SYSTEM_SCATTER_DEX`] for any other.
+#[must_use]
+pub const fn within_scatter(group: &PlanetGroup) -> f64 {
+    if is_drift_fed(group.role()) {
+        WITHIN_SYSTEM_SCATTER_DEX
+    } else {
+        ROCKY_WITHIN_SYSTEM_SCATTER_DEX
+    }
+}
+
+/// How much heavier each member of a drift-fed group's law is than the one inside it, in dex:
+/// 0.34 (P14.T7.b; rulings 60 and 73.2).
+///
+/// Plan 14 had 0.1, for Weiss et al.'s (2018) outer planets being the larger in most pairs; 0.34
+/// is the step that, with [`WITHIN_SYSTEM_SCATTER_DEX`], the members' truncation to their range
+/// and Chen and Kipping's scatter, makes the outer planet the larger in their 65.4% of pairs on
+/// P14.T10.b's placed hosts (ruling 55.1 proposed it: "a larger outward step with the scatter
+/// re-fitted"). Clamped members needed 0.21; truncated ones, drawn inside the ceiling rather than
+/// at it and with the wider scatter, need more. It is centred on the group's middle member.
+pub const OUTWARD_STEP_DEX: f64 = 0.34;
 
 /// How much heavier each member of a rocky group is than the one inside it, in dex: 0 (ruling 60).
 ///
@@ -415,13 +465,15 @@ pub const fn is_drift_fed(role: GroupRole) -> bool {
 }
 
 /// The characteristic mass of `group` about the host of `disc`, at the group's between-system
-/// variate `between` (P14.T7.a, as ruling 60 calibrates it), held to the group's range.
+/// variate `between` (P14.T7.a, as ruling 60 calibrates it): the centre of its members' law.
 ///
 /// - A drift-fed group ([`is_drift_fed`]): [`reference_mass`] × (M★ ÷ M☉) × 10^(`σ_b` z), with
 ///   [`BETWEEN_SYSTEM_SCATTER_DEX`], M★ being the disc's host mass (a pair's total, for a
-///   circumbinary disc). Neither the disc's solids nor its metallicity enter.
+///   circumbinary disc). Neither the disc's solids nor its metallicity enter. It is not held to
+///   the group's range, which holds the members instead (ruling 73.2): it may lie beyond it.
 /// - Any other: [`reference_mass`] × (`M_s` ÷ [`REFERENCE_SOLID_MASS`]), `M_s` being the disc's
-///   whole solid mass between its edges, as P14.T7.a wrote it, with no added scatter.
+///   whole solid mass between its edges, as P14.T7.a wrote it, with no added scatter, held to the
+///   group's range as P14.T7.a holds it (no variate enters it).
 ///
 /// See the [module documentation](self) for the sources of each.
 #[must_use]
@@ -430,13 +482,16 @@ pub fn characteristic_mass(
     disc: &DiscProfile,
     between: StandardNormal,
 ) -> EarthMasses {
-    let drawn = if is_drift_fed(group.role()) {
+    if is_drift_fed(group.role()) {
         let median = reference_mass(group) * disc.host_mass().value();
         median * math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * between.value())
     } else {
-        reference_mass(group) * (disc.solid_mass() / REFERENCE_SOLID_MASS)
-    };
-    held_between(drawn, mass_floor(group, disc), group.masses().max())
+        held_between(
+            reference_mass(group) * (disc.solid_mass() / REFERENCE_SOLID_MASS),
+            mass_floor(group, disc),
+            group.masses().max(),
+        )
+    }
 }
 
 /// The least mass a member of `group` about the host of `disc` is held to (ruling 66).
@@ -444,8 +499,9 @@ pub fn characteristic_mass(
 /// A drift-fed group's floor follows the same law as its masses, the template's floor times
 /// M★ ÷ M☉, held no lower than the smaller of the template's floor and a rocky planet's,
 /// [`ROCKY_MASS_FLOOR`]: 1 M⊕ about a Sun, 0.3 M⊕ about a 0.3 M☉ host. A floor fixed at 1 M⊕
-/// held 39% of the chain planets about hosts of 0.2–0.4 M☉ at exactly 1 M⊕. Any other group's is
-/// the template's.
+/// held 39% of the chain planets about hosts of 0.2–0.4 M☉ at exactly 1 M⊕. It never rises
+/// above the template's ceiling, which it would reach only about a host of over 20 M☉. Any other
+/// group's is the template's.
 ///
 /// [`ROCKY_MASS_FLOOR`]: crate::planetary::architecture::template::ROCKY_MASS_FLOOR
 #[must_use]
@@ -453,7 +509,8 @@ pub fn mass_floor(group: &PlanetGroup, disc: &DiscProfile) -> EarthMasses {
     let floor = group.masses().min();
     if is_drift_fed(group.role()) {
         let lowest = floor.value().min(ROCKY_MASS_FLOOR.value());
-        EarthMasses::new((floor.value() * disc.host_mass().value()).max(lowest))
+        let scaled = (floor.value() * disc.host_mass().value()).max(lowest);
+        EarthMasses::new(scaled.min(group.masses().max().value()))
     } else {
         floor
     }
@@ -480,18 +537,21 @@ pub const fn outward_step(group: &PlanetGroup) -> f64 {
 }
 
 /// A member's mass about `characteristic`, at its scatter `scatter` and `steps` outside the
-/// middle of a group whose members step outward by `step` dex, held to `floor`–`ceiling`
-/// (P14.T7.b; ruling 66).
+/// middle of a group whose members step outward by `step` dex with a scatter of `sigma` dex,
+/// drawn inside `floor`–`ceiling` (P14.T7.b; rulings 66 and 73.2): the log-normal law about
+/// `characteristic` shifted by the steps, truncated to the range, at the scatter's rank
+/// ([`StandardNormal::truncated`]).
 #[must_use]
 fn member_mass(
     characteristic: EarthMasses,
     scatter: StandardNormal,
     steps: f64,
-    step: f64,
+    (step, sigma): (f64, f64),
     (floor, ceiling): (EarthMasses, EarthMasses),
 ) -> EarthMasses {
-    let offset = WITHIN_SYSTEM_SCATTER_DEX * scatter.value() + step * steps;
-    held_between(characteristic * math::exp10(offset), floor, ceiling)
+    let (low, high) = (math::log10(floor.value()), math::log10(ceiling.value()));
+    let mean = math::log10(characteristic.value()) + step * steps;
+    EarthMasses::new(math::exp10(scatter.truncated(mean, sigma, low, high)))
 }
 
 /// The mass at `rank` of a group law over `range`: the inverse of its cumulative distribution
@@ -537,6 +597,58 @@ pub fn solid_budget(disc: &DiscProfile) -> EarthMasses {
     disc.solid_mass() * SOLID_BUDGET_EFFICIENCY
 }
 
+/// The most that one drift-fed group's members may hold of `disc`'s solids: [`solid_budget`]
+/// times M☉ ÷ M★ (ruling 73.1), M★ being the disc's host mass (a pair's total, for a circumbinary
+/// disc).
+///
+/// Mulders, Pascucci and Apai (2015, ApJ 814, 130, §3.3 and Table 2) find the heavy-element mass
+/// in Kepler's planets inside 150 days, where the survey is complete for every spectral type,
+/// rising "roughly inversely with stellar mass": 3.6 ± 0.1 M⊕ about F stars (median 1.08 M☉),
+/// 5.0 ± 0.1 about G (0.91), 5.4 ± 0.2 about K (0.73) and 7.3 ± 0.7 about M dwarfs (0.42), "in
+/// stark contrast" with discs' dust masses, which fall with the star's, and conclude that inward
+/// drift of planetary building blocks is "more efficient for lower mass stars" (abstract). A
+/// budget in proportion to the disc, as a rocky group's is, bound 32% of the chains about M dwarfs
+/// of 0.35–0.6 M☉ against 23% about FGK stars, and left their planets' inventory at 6.4 M⊕; this
+/// one binds 21% of them and puts it at 7.6 M⊕, Mulders et al.'s 7.3 ± 0.7 (0.7–150 days,
+/// 0.5–16 R⊕). At 1 M☉ it is [`solid_budget`] itself, so no Sun-like anchor moves.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+/// use hyperion_sim::planetary::placement::masses::{drift_budget, solid_budget};
+/// use hyperion_sim::units::{Dex, Megayears, SolarLuminosities, SolarMasses, SolarRadii};
+///
+/// let host = DiscHost::new(
+///     SolarMasses::new(0.4),
+///     Dex::new(0.0),
+///     SolarLuminosities::new(0.025),
+///     SolarRadii::new(0.37),
+/// )?;
+/// let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+/// let profile = disc.profile().expect("an untruncated disc");
+/// assert!((drift_budget(profile) / solid_budget(profile) - 2.5).abs() < 1e-12);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn drift_budget(disc: &DiscProfile) -> EarthMasses {
+    solid_budget(disc) * (1.0 / disc.host_mass().value())
+}
+
+/// The most that `group`'s members together may hold of `disc` ([`group_masses_from`]): the gas
+/// mass for a group that places giants ([`gas_budget`]), [`drift_budget`] for a drift-fed group
+/// ([`is_drift_fed`]) and [`solid_budget`] for any other.
+#[must_use]
+pub fn group_budget(group: &PlanetGroup, disc: &DiscProfile) -> EarthMasses {
+    if group.places_giants() {
+        gas_budget(disc)
+    } else if is_drift_fed(group.role()) {
+        drift_budget(disc)
+    } else {
+        solid_budget(disc)
+    }
+}
+
 /// The most that one group of giants may hold: `disc`'s gas mass between its edges (P14.T7.c).
 #[must_use]
 pub fn gas_budget(disc: &DiscProfile) -> EarthMasses {
@@ -551,7 +663,7 @@ pub enum GroupCap {
     /// The drawn masses of a group drawn from a law held more than [`solid_budget`], and were
     /// scaled down to it.
     SolidBudget,
-    /// The drawn masses of a correlated group held more than [`solid_budget`], so only its
+    /// The drawn masses of a correlated group held more than its [`group_budget`], so only its
     /// innermost members that fit formed, each at its drawn mass; where even the first did not
     /// fit, none formed (ruling 66).
     Truncated,
@@ -624,16 +736,17 @@ fn formed_within(masses: &[EarthMasses], limit: EarthMasses) -> usize {
 /// Member i of the group is `draws[i]`, the group's count is `draws.len()`, and the group's
 /// between-system variate is the first member's. A correlated group scatters its members about
 /// [`characteristic_mass`]; any other draws each mass from its law at the member's rank. The
-/// members are then held together to [`solid_budget`], or for a group that places giants to
-/// [`gas_budget`]: a correlated group over it forms its innermost members that fit
-/// ([`GroupCap::Truncated`]), any other is scaled down by one factor for every member.
+/// members are then held together to their [`group_budget`]: a correlated group over it forms its
+/// innermost members that fit ([`GroupCap::Truncated`]), any other is scaled down by one factor for
+/// every member.
 ///
 /// # Examples
 ///
 /// Every variate at its median shows the law's shape: a chain of five about a Sun centred on its
-/// characteristic mass, each planet 0.21 dex heavier than the one inside it but the outermost,
-/// held at the range's 20 M⊕; and in a disc with a tenth of the metals, the same chain's two inner
-/// planets, all that its budget can build.
+/// characteristic mass, each planet's law 0.34 dex heavier than the one inside it, and the
+/// outermost, whose law is centred above the range's 20 M⊕, drawn inside it at its law's
+/// truncated median; and in a disc with a tenth of the metals, the same chain's two inner planets,
+/// all that its budget can build.
 ///
 /// ```
 /// use hyperion_sim::planetary::architecture::ArchitectureClass;
@@ -660,8 +773,8 @@ fn formed_within(masses: &[EarthMasses], limit: EarthMasses) -> usize {
 /// let solar = group_masses_from(chain, &disc_at(0.0)?, &draws);
 /// let m = solar.masses();
 /// assert_eq!(solar.cap(), GroupCap::AsDrawn);
-/// assert!((m[2].value() - 7.7).abs() < 0.01);
-/// assert!(m[0] < m[1] && m[3] < m[4]);
+/// assert!((7.0..7.7).contains(&m[2].value()));
+/// assert!(m[0] < m[1] && m[3] < m[4] && m[4].value() < 20.0);
 ///
 /// let poor = disc_at(-1.0)?;
 /// let held = group_masses_from(chain, &poor, &draws);
@@ -682,14 +795,14 @@ pub fn group_masses_from(
             None => (Vec::new(), None),
             Some(first) => {
                 let characteristic = characteristic_mass(group, disc, first.group);
-                let step = outward_step(group);
+                let (step, sigma) = (outward_step(group), within_scatter(group));
                 let limits = (mass_floor(group, disc), range.max());
                 let masses = draws
                     .iter()
                     .enumerate()
                     .map(|(i, d)| {
                         let steps = steps_from_middle(i, draws.len());
-                        member_mass(characteristic, d.scatter, steps, step, limits)
+                        member_mass(characteristic, d.scatter, steps, (step, sigma), limits)
                     })
                     .collect();
                 (masses, Some(characteristic))
@@ -700,10 +813,11 @@ pub fn group_masses_from(
             None,
         ),
     };
-    let (limit, reached) = if group.places_giants() {
-        (gas_budget(disc), GroupCap::GasMass)
+    let limit = group_budget(group, disc);
+    let reached = if group.places_giants() {
+        GroupCap::GasMass
     } else {
-        (solid_budget(disc), GroupCap::SolidBudget)
+        GroupCap::SolidBudget
     };
     let unscaled = total(&masses);
     let cap = if unscaled <= limit {
@@ -777,8 +891,10 @@ pub fn group_masses_from(
 /// // A Sun's chains are 7.7 M⊕ times the group's own between-system scatter.
 /// let z = MassDraws::for_planet(seed, system, members[0]).group.value();
 /// let typical = group.characteristic().expect("a correlated group").value();
-/// let expected = (7.7 * hyperion_sim::math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * z)).clamp(1.0, 20.0);
+/// let expected = 7.7 * hyperion_sim::math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * z);
 /// assert!((typical / expected - 1.0).abs() < 1e-9);
+/// // Every member is drawn inside the chain's 1–20 M⊕, wherever its characteristic mass lies.
+/// assert!(group.masses().iter().all(|m| (1.0..=20.0).contains(&m.value())));
 /// assert!(group.total() <= solid_budget(profile));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -1333,7 +1449,7 @@ mod tests {
                 truncated += 1;
             }
         }
-        // A sixth of Sun-like chains are short of their reservoir (333 of 2,000): the heavy
+        // A sixth of Sun-like chains are short of their reservoir (306 of 2,000): the heavy
         // chains, and the poorest discs.
         assert!(
             (240..430).contains(&truncated),
@@ -1351,11 +1467,10 @@ mod tests {
         ));
         for group in TEMPLATES.iter().flat_map(ClassTemplate::groups) {
             let masses = group_masses(SEED, system(9), group, &poor, &slots(1, 10));
-            let limit = if group.places_giants() {
-                gas_budget(&poor)
-            } else {
-                solid_budget(&poor)
-            };
+            let limit = group_budget(group, &poor);
+            if is_drift_fed(group.role()) && !group.places_giants() {
+                assert!((limit / solid_budget(&poor) - 1.0 / 0.3).abs() < 1e-12);
+            }
             assert!(masses.total().value() <= limit.value() * (1.0 + 1e-12));
             assert!(masses.masses().iter().all(|m| m.value() > 0.0));
         }
@@ -1451,13 +1566,18 @@ mod tests {
             assert!((mass_floor(chain(), &disc).value() - chain_floor).abs() < 1e-15);
             assert_same_bits(mass_floor(rocky, &disc).value(), 0.05);
             assert!(mass_floor(substellar, &disc).value() >= 0.01);
-            // No member of a far-scattered chain is held at 1 M⊕ about an M dwarf.
+            // A far-scattered chain member about an M dwarf lies just above its own floor, not at
+            // 1 M⊕, and not at the floor itself (ruling 73.2).
             let low = [MassDraws {
                 scatter: StandardNormal::new(-8.0).unwrap(),
                 ..MassDraws::MEDIAN
             }];
-            let held = group_masses_from(chain(), &disc, &low).masses()[0].value();
-            assert_same_bits(held, mass_floor(chain(), &disc).value());
+            let drawn = group_masses_from(chain(), &disc, &low).masses()[0].value();
+            let floor = mass_floor(chain(), &disc).value();
+            assert!(
+                drawn > floor && drawn < floor * 1.001,
+                "{drawn} against {floor}"
+            );
         }
     }
 
@@ -1467,43 +1587,49 @@ mod tests {
         assert_same_bits(steps_from_middle(0, 4), -1.5);
         assert_same_bits(steps_from_middle(3, 4), 1.5);
         assert_same_bits(steps_from_middle(2, 5), 0.0);
-        // With no scatter, each chain member is 0.21 dex heavier than the one inside it, and the
-        // middle one is the characteristic mass (three members, since a fifth 0.42 dex above
-        // 7.7 M⊕ is held at 20 M⊕); a rocky group's members are all alike.
-        let disc = median_disc(&zams_host(1.0, 0.0), 2.0);
+        // With no scatter each chain member's law is 0.34 dex heavier than the one inside it, and
+        // the middle one's is centred on the characteristic mass. About a 0.3 M☉ host all three
+        // laws lie over two standard deviations inside the range, and each member sits within 2%
+        // of its law's centre; about a Sun
+        // the outermost's reaches past the 20 M⊕ ceiling, and it is drawn below its centre,
+        // inside the range (ruling 73.2). A rocky group's members are all alike, at its truncated
+        // law's median.
         let draws = [MassDraws::MEDIAN; 3];
+        let step = math::exp10(OUTWARD_STEP_DEX);
+        let low_mass = group_masses_from(chain(), &median_disc(&zams_host(0.3, 0.0), 2.0), &draws);
+        let m_c = low_mass.characteristic().unwrap().value();
+        let masses = low_mass.masses();
+        assert!((masses[1].value() / m_c - 1.0).abs() < 0.02, "{masses:?}");
+        for pair in masses.windows(2) {
+            assert!((pair[1] / pair[0] / step - 1.0).abs() < 0.02, "{masses:?}");
+        }
+        let disc = median_disc(&zams_host(1.0, 0.0), 2.0);
         let group = group_masses_from(chain(), &disc, &draws);
         let m_c = group.characteristic().unwrap().value();
         let masses = group.masses();
-        assert!((masses[1].value() / m_c - 1.0).abs() < 1e-15);
-        for pair in masses.windows(2) {
-            assert!((pair[1] / pair[0] - math::exp10(OUTWARD_STEP_DEX)).abs() < 1e-12);
-        }
+        assert!(masses[2].value() < m_c * step && masses[2].value() < 20.0);
+        assert!(masses[0] < masses[1] && masses[1] < masses[2], "{masses:?}");
         let rocky = &template(ArchitectureClass::TerrestrialOnly).groups()[0];
         let flat = group_masses_from(rocky, &disc, &draws);
         let m_c = flat.characteristic().unwrap().value();
-        assert!(
-            flat.masses()
-                .iter()
-                .all(|m| (m.value() / m_c - 1.0).abs() < 1e-15)
-        );
-        // Held to the template's range at both ends.
+        let first = flat.masses()[0].value();
+        for m in flat.masses() {
+            assert_same_bits(m.value(), first);
+        }
+        assert!((first / m_c - 1.0).abs() < 0.02, "{first} against {m_c}");
+        // Drawn inside the template's range at both ends, never on it.
         let far = [MassDraws {
             scatter: StandardNormal::new(8.0).unwrap(),
             ..MassDraws::MEDIAN
         }];
-        assert_same_bits(
-            group_masses_from(chain(), &disc, &far).masses()[0].value(),
-            20.0,
-        );
+        let high = group_masses_from(chain(), &disc, &far).masses()[0].value();
+        assert!(high < 20.0 && high > 19.99, "{high}");
         let near = [MassDraws {
             scatter: StandardNormal::new(-8.0).unwrap(),
             ..MassDraws::MEDIAN
         }];
-        assert_same_bits(
-            group_masses_from(chain(), &disc, &near).masses()[0].value(),
-            1.0,
-        );
+        let low = group_masses_from(chain(), &disc, &near).masses()[0].value();
+        assert!(low > 1.0 && low < 1.001, "{low}");
         assert!(group_masses_from(chain(), &disc, &[]).masses().is_empty());
         assert_eq!(
             group_masses_from(chain(), &disc, &[]).characteristic(),

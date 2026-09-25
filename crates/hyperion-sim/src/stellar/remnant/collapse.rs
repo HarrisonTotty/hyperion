@@ -44,9 +44,6 @@
 //! the quantile of the normal truncated to that range. This has the distribution of redrawing
 //! until the mass is inside, spends no further words, and is monotone in the draw.
 
-use core::f64::consts::FRAC_1_SQRT_2;
-
-use crate::math;
 use crate::rng::{Mark, Threshold};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::sse::{ZCoeffs, m_c_bagb};
@@ -496,54 +493,12 @@ fn fallback_black_hole_mass(co: f64, helium: f64, z: StandardNormal) -> SolarMas
     ))
 }
 
-/// The upper tail of the standard normal, Q(x) = 1 − Φ(x) = ½ erfc(x ÷ √2), accurate in both
-/// tails.
-#[must_use]
-fn upper_tail(x: f64) -> f64 {
-    0.5 * math::erfc(x * FRAC_1_SQRT_2)
-}
-
 /// The value at the rank Φ(`z`) of a normal of `mean` and `sigma` truncated to
-/// [`lower`, `upper`]: the distribution of redrawing a normal until it falls inside, from one
-/// standard normal, increasing in `z`.
-///
-/// With a = (`lower` − `mean`) ÷ `sigma`, b likewise and w = Φ(b) − Φ(a), the rank's distance
-/// below it is p = Φ(a) + Φ(z) w and above it q = Q(b) + Q(z) w, and the standardised value is
-/// Φ⁻¹(p) or −Φ⁻¹(q), whichever of p and q is smaller, so that neither tail loses its precision.
-/// The result is clamped to the interval against rounding. An interval too narrow or too far in a
-/// tail for w to be positive gives the point of it nearest the mean.
+/// [`lower`, `upper`]: [`StandardNormal::truncated`], the distribution of redrawing a normal until
+/// it falls inside, from one standard normal, increasing in `z`.
 #[must_use]
 fn truncated_normal(mean: f64, sigma: f64, lower: f64, upper: f64, z: StandardNormal) -> f64 {
-    debug_assert!(
-        sigma > 0.0 && lower <= upper,
-        "a truncated normal needs σ > 0 and a non-empty range: σ = {sigma}, [{lower}, {upper}]"
-    );
-    let (a, b) = ((lower - mean) / sigma, (upper - mean) / sigma);
-    let inside = if a >= 0.0 {
-        upper_tail(a) - upper_tail(b)
-    } else if b <= 0.0 {
-        upper_tail(-b) - upper_tail(-a)
-    } else {
-        1.0 - upper_tail(-a) - upper_tail(b)
-    };
-    if inside <= 0.0 || inside.is_nan() {
-        return mean.clamp(lower, upper);
-    }
-    let z = z.value();
-    let below = upper_tail(-a) + upper_tail(-z) * inside;
-    let above = upper_tail(b) + upper_tail(z) * inside;
-    let x = if below <= above {
-        if below > 0.0 {
-            math::normal_quantile(below)
-        } else {
-            a
-        }
-    } else if above > 0.0 {
-        -math::normal_quantile(above)
-    } else {
-        b
-    };
-    (mean + sigma * x).clamp(lower, upper)
+    z.truncated(mean, sigma, lower, upper)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -709,6 +664,7 @@ mod tests {
     use crate::GENERATOR_VERSION;
     use crate::coords::{CellSize, GenCell};
     use crate::id::{BodyId, Layer, SystemId};
+    use crate::math;
     use crate::rng::{ObjectKey, Seed, Stream, tags};
     use crate::stellar::draws::StarDrawsParts;
     use crate::units::{MetalFraction, Years};

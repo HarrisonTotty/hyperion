@@ -725,13 +725,14 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4200_acaa_0000_000a,
     },
     GoldenSystem {
-        // A 0.321 M☉ M dwarf of the halo, [Fe/H] −0.34 (the metal-rich tail of the halo's
-        // abundances), `CompactMulti`: one planet of 1.17 M⊕ at 0.109 au.
+        // A 0.400 M☉ M dwarf of the halo, [Fe/H] −0.77, 11.7 Gyr old, `CompactMulti`: one rocky
+        // planet of 1.50 M⊕ at 0.061 au (8.6 days). Re-pinned by ruling 73 (`calib3`): the first
+        // halo star with a planet is now this one, before `01fdbb3660000000`.
         name: "halo_star",
         layer: Layer::A,
         budget: 200_000,
         predicate: halo_star,
-        id: 0x01fd_bb36_6000_0000,
+        id: 0x0202_5b2b_e000_0001,
     },
     GoldenSystem {
         // A 0.927 + 0.411 M☉ pair of main-sequence stars 1.97 au apart (e 0.19), [Fe/H] +0.44: the

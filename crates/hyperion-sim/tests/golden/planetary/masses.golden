@@ -30,13 +30,13 @@ gas budget = 0x40a8b686f454f101  # 3163.2635828537173
 giant core forms by (Myr) = 0x3fd4b608dd1ce128  # 0.32361051171348487
 TerrestrialOnly group 0 ×1 characteristic = 0x3fdffff7ac8da083  # 0.49999801493550694
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x3fe88dbee1feff66  # 0.7673029340730693
+TerrestrialOnly group 0 ×1 [0] = 0x3fe881c2b70a28dd  # 0.7658399176591747
 TerrestrialOnly group 0 ×4 characteristic = 0x3fdffff7ac8da083  # 0.49999801493550694
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x3fe88dbee1feff66  # 0.7673029340730693
-TerrestrialOnly group 0 ×4 [1] = 0x3fd751367b60b46d  # 0.36433183716400813
-TerrestrialOnly group 0 ×4 [2] = 0x3fd7d702c90b0648  # 0.37249822266685273
-TerrestrialOnly group 0 ×4 [3] = 0x3fdb5650e81ccd0d  # 0.4271433130954428
+TerrestrialOnly group 0 ×4 [0] = 0x3fe881c2b70a28dd  # 0.7658399176591747
+TerrestrialOnly group 0 ×4 [1] = 0x3fd74e69f395c0a3  # 0.36416100299448767
+TerrestrialOnly group 0 ×4 [2] = 0x3fd7d410ba55695e  # 0.37231844135899006
+TerrestrialOnly group 0 ×4 [3] = 0x3fdb5239a9752274  # 0.42689363049115703
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap AsDrawn
@@ -44,24 +44,24 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 [1] = 0x3ff2c63eb4196943  # 1.1733996424796522
 TerrestrialOnly group 1 ×4 [2] = 0x3fc6fc8f76a989ab  # 0.17958253187232506
 TerrestrialOnly group 1 ×4 [3] = 0x3fed79596bbc4e9d  # 0.9210631469927254
-CompactMulti group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×1 cap AsDrawn
-CompactMulti group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactMulti group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 [0] = 0x40325469726b002f  # 18.329733992694113
+CompactMulti group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×4 cap AsDrawn
-CompactMulti group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactMulti group 0 ×4 [1] = 0x40258cd755729b36  # 10.77508036636355
-CompactMulti group 0 ×4 [2] = 0x4031dde8d3084e20  # 17.866833867576247
-CompactMulti group 0 ×4 [3] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactMulti group 0 ×4 [1] = 0x402405d644280f72  # 10.011400346651246
+CompactMulti group 0 ×4 [2] = 0x402ba75e715400c0  # 13.826892415527595
+CompactMulti group 0 ×4 [3] = 0x4030bd893f825470  # 16.740375489538962
+CompactWithColdGiant group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×1 cap AsDrawn
-CompactWithColdGiant group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactWithColdGiant group 0 ×1 [0] = 0x40325469726b002f  # 18.329733992694113
+CompactWithColdGiant group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×4 cap AsDrawn
-CompactWithColdGiant group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactWithColdGiant group 0 ×4 [1] = 0x40258cd755729b36  # 10.77508036636355
-CompactWithColdGiant group 0 ×4 [2] = 0x4031dde8d3084e20  # 17.866833867576247
-CompactWithColdGiant group 0 ×4 [3] = 0x4034000000000000  # 20.0
+CompactWithColdGiant group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactWithColdGiant group 0 ×4 [1] = 0x402405d644280f72  # 10.011400346651246
+CompactWithColdGiant group 0 ×4 [2] = 0x402ba75e715400c0  # 13.826892415527595
+CompactWithColdGiant group 0 ×4 [3] = 0x4030bd893f825470  # 16.740375489538962
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap AsDrawn
@@ -71,13 +71,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x406ff6795ec0b88c  # 255.702315689476
 CompactWithColdGiant group 1 ×4 [3] = 0x4085b616112744b7  # 694.7607749049993
 SolarLike group 0 ×1 characteristic = 0x3fdffff7ac8da083  # 0.49999801493550694
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x3fe88dbee1feff66  # 0.7673029340730693
+SolarLike group 0 ×1 [0] = 0x3fe881c2b70a28dd  # 0.7658399176591747
 SolarLike group 0 ×4 characteristic = 0x3fdffff7ac8da083  # 0.49999801493550694
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x3fe88dbee1feff66  # 0.7673029340730693
-SolarLike group 0 ×4 [1] = 0x3fd751367b60b46d  # 0.36433183716400813
-SolarLike group 0 ×4 [2] = 0x3fd7d702c90b0648  # 0.37249822266685273
-SolarLike group 0 ×4 [3] = 0x3fdb5650e81ccd0d  # 0.4271433130954428
+SolarLike group 0 ×4 [0] = 0x3fe881c2b70a28dd  # 0.7658399176591747
+SolarLike group 0 ×4 [1] = 0x3fd74e69f395c0a3  # 0.36416100299448767
+SolarLike group 0 ×4 [2] = 0x3fd7d410ba55695e  # 0.37231844135899006
+SolarLike group 0 ×4 [3] = 0x3fdb5239a9752274  # 0.42689363049115703
 SolarLike group 1 ×1 cap AsDrawn
 SolarLike group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 SolarLike group 1 ×4 cap AsDrawn
@@ -113,15 +113,15 @@ WarmGiant group 0 ×4 [0] = 0x405a4a410809f131  # 105.16021920176424
 WarmGiant group 0 ×4 [1] = 0x407f6dae7f4a1350  # 502.8551018613407
 WarmGiant group 0 ×4 [2] = 0x407027201c387b7d  # 258.4453394132941
 WarmGiant group 0 ×4 [3] = 0x4082a0c458639100  # 596.0958717135072
-WarmGiant group 1 ×1 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×1 cap AsDrawn
-WarmGiant group 1 ×1 [0] = 0x4026cded8276d3bc  # 11.40220267963911
-WarmGiant group 1 ×4 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 [0] = 0x4026bf0b8dad60a0  # 11.373135020651091
+WarmGiant group 1 ×4 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×4 cap AsDrawn
-WarmGiant group 1 ×4 [0] = 0x401615206a516a8a  # 5.520631467074631
-WarmGiant group 1 ×4 [1] = 0x401800dd09fe410a  # 6.000843197005688
-WarmGiant group 1 ×4 [2] = 0x40335c60d5c2a621  # 19.360852584859575
-WarmGiant group 1 ×4 [3] = 0x402a848de0807062  # 13.258894935301388
+WarmGiant group 1 ×4 [0] = 0x4010721bb9bb2006  # 4.111433889433107
+WarmGiant group 1 ×4 [1] = 0x40159c304408899e  # 5.402527869244663
+WarmGiant group 1 ×4 [2] = 0x40309f9ff824a73e  # 16.62353468794685
+WarmGiant group 1 ×4 [3] = 0x402767c52e4dea77  # 11.702676245700088
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap AsDrawn
@@ -136,15 +136,15 @@ HotJupiter group 1 ×4 [0] = 0x40890e557fc21c69  # 801.7917475857658
 HotJupiter group 1 ×4 [1] = 0x408f75cb1dd7ed6e  # 1006.7241780156453
 HotJupiter group 1 ×4 [2] = 0x407c83656d40e135  # 456.21226239532126
 HotJupiter group 1 ×4 [3] = 0x408c14487d194990  # 898.5353948569846
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×1 cap AsDrawn
-SubstellarCompact group 0 ×1 [0] = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 [0] = 0x3fff4f9e7a0e7a34  # 1.9569382446130819
+SubstellarCompact group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
-SubstellarCompact group 0 ×4 [1] = 0x3ff24f41d98eeaba  # 1.1443499086732758
-SubstellarCompact group 0 ×4 [2] = 0x3ffe5c3be87b833c  # 1.8975180703493626
-SubstellarCompact group 0 ×4 [3] = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×4 [0] = 0x3ffed992e48d7579  # 1.928118603499881
+SubstellarCompact group 0 ×4 [1] = 0x3fface04d232b5d1  # 1.6752975664961591
+SubstellarCompact group 0 ×4 [2] = 0x3ffc18e670e1681d  # 1.756079140605386
+SubstellarCompact group 0 ×4 [3] = 0x3ffd92ddf79e6844  # 1.848356215725759
 
 disc: a drawn disc of 0.9 M☉ at +0.1
 solid budget = 0x40523082d0fd205e  # 72.75798439711932
@@ -152,13 +152,13 @@ gas budget = 0x409caf1093bba501  # 1835.7661885566197
 giant core forms by (Myr) = 0x3ffaa92b02c185cd  # 1.6663007838873114
 TerrestrialOnly group 0 ×1 characteristic = 0x3fd81a1e3b9cc9e4  # 0.3765941221382987
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x3fe27e5e5708ec4b  # 0.5779258441829226
+TerrestrialOnly group 0 ×1 [0] = 0x3fe27d60c99b1577  # 0.577804940949746
 TerrestrialOnly group 0 ×4 characteristic = 0x3fd81a1e3b9cc9e4  # 0.3765941221382987
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x3fe27e5e5708ec4b  # 0.5779258441829226
-TerrestrialOnly group 0 ×4 [1] = 0x3fd18ff572295b75  # 0.2744115462168602
-TerrestrialOnly group 0 ×4 [2] = 0x3fd1f4bbfb0969a6  # 0.2805623961955014
-TerrestrialOnly group 0 ×4 [3] = 0x3fd49711ff210f52  # 0.32172059931712227
+TerrestrialOnly group 0 ×4 [0] = 0x3fe27d60c99b1577  # 0.577804940949746
+TerrestrialOnly group 0 ×4 [1] = 0x3fd18fc1368f5405  # 0.2743990929423606
+TerrestrialOnly group 0 ×4 [2] = 0x3fd1f484683942e5  # 0.2805491464433046
+TerrestrialOnly group 0 ×4 [3] = 0x3fd496c0f8b4bd30  # 0.3217012814302107
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap AsDrawn
@@ -166,24 +166,24 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 [1] = 0x3ff2c63eb4196943  # 1.1733996424796522
 TerrestrialOnly group 1 ×4 [2] = 0x3fc6fc8f76a989ab  # 0.17958253187232506
 TerrestrialOnly group 1 ×4 [3] = 0x3fed79596bbc4e9d  # 0.9210631469927254
-CompactMulti group 0 ×1 characteristic = 0x4030f2d85ab35f71  # 16.94861380461902
+CompactMulti group 0 ×1 characteristic = 0x40383ce57502b6d0  # 24.23787623707068
 CompactMulti group 0 ×1 cap AsDrawn
-CompactMulti group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactMulti group 0 ×4 characteristic = 0x4030f2d85ab35f71  # 16.94861380461902
+CompactMulti group 0 ×1 [0] = 0x403222eb06b7b499  # 18.136398715829817
+CompactMulti group 0 ×4 characteristic = 0x40383ce57502b6d0  # 24.23787623707068
 CompactMulti group 0 ×4 cap AsDrawn
-CompactMulti group 0 ×4 [0] = 0x40292fab39361120  # 12.593103206491435
-CompactMulti group 0 ×4 [1] = 0x40236528334d8bb2  # 9.697572329727198
-CompactMulti group 0 ×4 [2] = 0x40301484bdeddfea  # 16.080150480818624
-CompactMulti group 0 ×4 [3] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×1 characteristic = 0x4030f2d85ab35f71  # 16.94861380461902
+CompactMulti group 0 ×4 [0] = 0x402783ac821a3162  # 11.75717550821054
+CompactMulti group 0 ×4 [1] = 0x4022d031e84ff64d  # 9.40663076377964
+CompactMulti group 0 ×4 [2] = 0x402ae5d12409976a  # 13.44886124245723
+CompactMulti group 0 ×4 [3] = 0x403092a13fae9545  # 16.572772960779975
+CompactWithColdGiant group 0 ×1 characteristic = 0x40383ce57502b6d0  # 24.23787623707068
 CompactWithColdGiant group 0 ×1 cap AsDrawn
-CompactWithColdGiant group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×4 characteristic = 0x4030f2d85ab35f71  # 16.94861380461902
+CompactWithColdGiant group 0 ×1 [0] = 0x403222eb06b7b499  # 18.136398715829817
+CompactWithColdGiant group 0 ×4 characteristic = 0x40383ce57502b6d0  # 24.23787623707068
 CompactWithColdGiant group 0 ×4 cap AsDrawn
-CompactWithColdGiant group 0 ×4 [0] = 0x40292fab39361120  # 12.593103206491435
-CompactWithColdGiant group 0 ×4 [1] = 0x40236528334d8bb2  # 9.697572329727198
-CompactWithColdGiant group 0 ×4 [2] = 0x40301484bdeddfea  # 16.080150480818624
-CompactWithColdGiant group 0 ×4 [3] = 0x4034000000000000  # 20.0
+CompactWithColdGiant group 0 ×4 [0] = 0x402783ac821a3162  # 11.75717550821054
+CompactWithColdGiant group 0 ×4 [1] = 0x4022d031e84ff64d  # 9.40663076377964
+CompactWithColdGiant group 0 ×4 [2] = 0x402ae5d12409976a  # 13.44886124245723
+CompactWithColdGiant group 0 ×4 [3] = 0x403092a13fae9545  # 16.572772960779975
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap GasMass
@@ -193,13 +193,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x4068d239dbb33caa  # 198.56956276900502
 CompactWithColdGiant group 1 ×4 [3] = 0x4080dc379dd7af2a  # 539.5271565294581
 SolarLike group 0 ×1 characteristic = 0x3fd81a1e3b9cc9e4  # 0.3765941221382987
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x3fe27e5e5708ec4b  # 0.5779258441829226
+SolarLike group 0 ×1 [0] = 0x3fe27d60c99b1577  # 0.577804940949746
 SolarLike group 0 ×4 characteristic = 0x3fd81a1e3b9cc9e4  # 0.3765941221382987
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x3fe27e5e5708ec4b  # 0.5779258441829226
-SolarLike group 0 ×4 [1] = 0x3fd18ff572295b75  # 0.2744115462168602
-SolarLike group 0 ×4 [2] = 0x3fd1f4bbfb0969a6  # 0.2805623961955014
-SolarLike group 0 ×4 [3] = 0x3fd49711ff210f52  # 0.32172059931712227
+SolarLike group 0 ×4 [0] = 0x3fe27d60c99b1577  # 0.577804940949746
+SolarLike group 0 ×4 [1] = 0x3fd18fc1368f5405  # 0.2743990929423606
+SolarLike group 0 ×4 [2] = 0x3fd1f484683942e5  # 0.2805491464433046
+SolarLike group 0 ×4 [3] = 0x3fd496c0f8b4bd30  # 0.3217012814302107
 SolarLike group 1 ×1 cap AsDrawn
 SolarLike group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 SolarLike group 1 ×4 cap GasMass
@@ -235,15 +235,15 @@ WarmGiant group 0 ×4 [0] = 0x405a4a410809f131  # 105.16021920176424
 WarmGiant group 0 ×4 [1] = 0x407f6dae7f4a1350  # 502.8551018613407
 WarmGiant group 0 ×4 [2] = 0x407027201c387b7d  # 258.4453394132941
 WarmGiant group 0 ×4 [3] = 0x4082a0c458639100  # 596.0958717135072
-WarmGiant group 1 ×1 characteristic = 0x4023f1fad3624dd1  # 9.972616773366925
+WarmGiant group 1 ×1 characteristic = 0x40271237ba233793  # 11.535581414030991
 WarmGiant group 1 ×1 cap AsDrawn
-WarmGiant group 1 ×1 [0] = 0x402486228f048b5c  # 10.261982411675199
-WarmGiant group 1 ×4 characteristic = 0x4023f1fad3624dd1  # 9.972616773366925
+WarmGiant group 1 ×1 [0] = 0x402540de31909726  # 10.626695202732275
+WarmGiant group 1 ×4 characteristic = 0x40271237ba233793  # 11.535581414030991
 WarmGiant group 1 ×4 cap AsDrawn
-WarmGiant group 1 ×4 [0] = 0x4013dfd05fafacaf  # 4.968568320367168
-WarmGiant group 1 ×4 [1] = 0x40159a6088fe6dbc  # 5.400758877305119
-WarmGiant group 1 ×4 [2] = 0x40316cbd8d2f2f1e  # 17.42476732637362
-WarmGiant group 1 ×4 [3] = 0x4027ddb2e3a6cb8b  # 11.933005441771249
+WarmGiant group 1 ×4 [0] = 0x400d9e920af0c658  # 3.702426991913665
+WarmGiant group 1 ×4 [1] = 0x40139e7a272e86ad  # 4.904762851919867
+WarmGiant group 1 ×4 [2] = 0x403030f7dd8589f6  # 16.191282124616883
+WarmGiant group 1 ×4 [3] = 0x402696e25158cf4c  # 11.294695417490992
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap AsDrawn
@@ -258,15 +258,15 @@ HotJupiter group 1 ×4 [0] = 0x407d14faf1695db8  # 465.3112653842795
 HotJupiter group 1 ×4 [1] = 0x408241eed102383f  # 584.2416095899024
 HotJupiter group 1 ×4 [2] = 0x40708c20634c2714  # 264.75790719744805
 HotJupiter group 1 ×4 [3] = 0x40804ba4ac1a4f5e  # 521.4554063849898
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x40383ce57502b6d0  # 24.23787623707068
 SubstellarCompact group 0 ×1 cap AsDrawn
-SubstellarCompact group 0 ×1 [0] = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 [0] = 0x3fff48e371a5374c  # 1.9552950324318372
+SubstellarCompact group 0 ×4 characteristic = 0x40383ce57502b6d0  # 24.23787623707068
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
-SubstellarCompact group 0 ×4 [1] = 0x3ff24f41d98eeaba  # 1.1443499086732758
-SubstellarCompact group 0 ×4 [2] = 0x3ffe5c3be87b833c  # 1.8975180703493626
-SubstellarCompact group 0 ×4 [3] = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×4 [0] = 0x3ffec78c09646dd0  # 1.9237175337683432
+SubstellarCompact group 0 ×4 [1] = 0x3ffa9b6441d45f4d  # 1.6629374095409333
+SubstellarCompact group 0 ×4 [2] = 0x3ffbfa35bf5ff401  # 1.7485864139155185
+SubstellarCompact group 0 ×4 [3] = 0x3ffd82c41881bd10  # 1.8444252927109268
 
 disc: a solar disc cut at 6 au
 solid budget = 0x402df276bc9286d8  # 14.973562138449253
@@ -274,13 +274,13 @@ gas budget = 0x4082a34091b4f410  # 596.4065279137594
 giant core: TooFewSolids
 TerrestrialOnly group 0 ×1 characteristic = 0x3fb3d73b0e28e542  # 0.07750290961930253
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x3fbe72a5edd5f983  # 0.1189368920949843
+TerrestrialOnly group 0 ×1 [0] = 0x3fc01cd38b27566f  # 0.12587971014606888
 TerrestrialOnly group 0 ×4 characteristic = 0x3fb3d73b0e28e542  # 0.07750290961930253
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x3fbe72a5edd5f983  # 0.1189368920949843
-TerrestrialOnly group 0 ×4 [1] = 0x3facea2194a74e20  # 0.05647377910250051
-TerrestrialOnly group 0 ×4 [2] = 0x3fad900c33384857  # 0.05773962140314442
-TerrestrialOnly group 0 ×4 [3] = 0x3fb0f322d5a266de  # 0.06620996204074056
+TerrestrialOnly group 0 ×4 [0] = 0x3fc01cd38b27566f  # 0.12587971014606888
+TerrestrialOnly group 0 ×4 [1] = 0x3fb11fcd5776bf8c  # 0.06689151177738334
+TerrestrialOnly group 0 ×4 [2] = 0x3fb1640bf7b9c05d  # 0.06793284223545144
+TerrestrialOnly group 0 ×4 [3] = 0x3fb342cac4b7ae0f  # 0.0752379160182317
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap AsDrawn
@@ -288,16 +288,16 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 [1] = 0x3ff2c63eb4196943  # 1.1733996424796522
 TerrestrialOnly group 1 ×4 [2] = 0x3fc6fc8f76a989ab  # 0.17958253187232506
 TerrestrialOnly group 1 ×4 [3] = 0x3fed79596bbc4e9d  # 0.9210631469927254
-CompactMulti group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×1 cap Truncated
-CompactMulti group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×4 cap Truncated
-CompactMulti group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactWithColdGiant group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactWithColdGiant group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×1 cap Truncated
-CompactWithColdGiant group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactWithColdGiant group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×4 cap Truncated
-CompactWithColdGiant group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
+CompactWithColdGiant group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap GasMass
@@ -307,13 +307,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x405020bdc8152769  # 64.51158334794822
 CompactWithColdGiant group 1 ×4 [3] = 0x4065e9097c999696  # 175.28240804670048
 SolarLike group 0 ×1 characteristic = 0x3fb3d73b0e28e542  # 0.07750290961930253
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x3fbe72a5edd5f983  # 0.1189368920949843
+SolarLike group 0 ×1 [0] = 0x3fc01cd38b27566f  # 0.12587971014606888
 SolarLike group 0 ×4 characteristic = 0x3fb3d73b0e28e542  # 0.07750290961930253
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x3fbe72a5edd5f983  # 0.1189368920949843
-SolarLike group 0 ×4 [1] = 0x3facea2194a74e20  # 0.05647377910250051
-SolarLike group 0 ×4 [2] = 0x3fad900c33384857  # 0.05773962140314442
-SolarLike group 0 ×4 [3] = 0x3fb0f322d5a266de  # 0.06620996204074056
+SolarLike group 0 ×4 [0] = 0x3fc01cd38b27566f  # 0.12587971014606888
+SolarLike group 0 ×4 [1] = 0x3fb11fcd5776bf8c  # 0.06689151177738334
+SolarLike group 0 ×4 [2] = 0x3fb1640bf7b9c05d  # 0.06793284223545144
+SolarLike group 0 ×4 [3] = 0x3fb342cac4b7ae0f  # 0.0752379160182317
 SolarLike group 1 ×1 cap AsDrawn
 SolarLike group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 SolarLike group 1 ×4 cap GasMass
@@ -349,13 +349,13 @@ WarmGiant group 0 ×4 [0] = 0x404570f95c5da4df  # 42.88260988781416
 WarmGiant group 0 ×4 [1] = 0x4069a1cb294d19f7  # 205.05604996737358
 WarmGiant group 0 ×4 [2] = 0x405a58f1e40c09d9  # 105.38976384330398
 WarmGiant group 0 ×4 [3] = 0x406e627fd4694827  # 243.07810421526776
-WarmGiant group 1 ×1 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×1 cap AsDrawn
-WarmGiant group 1 ×1 [0] = 0x4026cded8276d3bc  # 11.40220267963911
-WarmGiant group 1 ×4 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 [0] = 0x4026bf0b8dad60a0  # 11.373135020651091
+WarmGiant group 1 ×4 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×4 cap Truncated
-WarmGiant group 1 ×4 [0] = 0x401615206a516a8a  # 5.520631467074631
-WarmGiant group 1 ×4 [1] = 0x401800dd09fe410a  # 6.000843197005688
+WarmGiant group 1 ×4 [0] = 0x4010721bb9bb2006  # 4.111433889433107
+WarmGiant group 1 ×4 [1] = 0x40159c304408899e  # 5.402527869244663
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap GasMass
@@ -370,15 +370,15 @@ HotJupiter group 1 ×4 [0] = 0x4062e579200afdec  # 151.17103578707554
 HotJupiter group 1 ×4 [1] = 0x4067b9e5d9d21272  # 189.80930796651552
 HotJupiter group 1 ×4 [2] = 0x405580f5016830f5  # 86.01495394873548
 HotJupiter group 1 ×4 [3] = 0x40652d28cc42a767  # 169.41123021143287
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×1 cap AsDrawn
-SubstellarCompact group 0 ×1 [0] = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 [0] = 0x3fff4f9e7a0e7a34  # 1.9569382446130819
+SubstellarCompact group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
-SubstellarCompact group 0 ×4 [1] = 0x3ff24f41d98eeaba  # 1.1443499086732758
-SubstellarCompact group 0 ×4 [2] = 0x3ffe5c3be87b833c  # 1.8975180703493626
-SubstellarCompact group 0 ×4 [3] = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×4 [0] = 0x3ffed992e48d7579  # 1.928118603499881
+SubstellarCompact group 0 ×4 [1] = 0x3fface04d232b5d1  # 1.6752975664961591
+SubstellarCompact group 0 ×4 [2] = 0x3ffc18e670e1681d  # 1.756079140605386
+SubstellarCompact group 0 ×4 [3] = 0x3ffd92ddf79e6844  # 1.848356215725759
 
 disc: a poor M dwarf's disc
 solid budget = 0x3ffae579c041981f  # 1.681024313927544
@@ -386,13 +386,13 @@ gas budget = 0x406517feca745e06  # 168.7498523972319
 giant core: TooFewSolids
 TerrestrialOnly group 0 ×1 characteristic = 0x3fa999999999999a  # 0.05
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x3fb3a49dd12ca237  # 0.07673059803767833
+TerrestrialOnly group 0 ×1 [0] = 0x3fb7dcf6762c6398  # 0.09321537385075229
 TerrestrialOnly group 0 ×4 characteristic = 0x3fa999999999999a  # 0.05
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x3fb3a49dd12ca237  # 0.07673059803767833
-TerrestrialOnly group 0 ×4 [1] = 0x3fa999999999999a  # 0.05
-TerrestrialOnly group 0 ×4 [2] = 0x3fa999999999999a  # 0.05
-TerrestrialOnly group 0 ×4 [3] = 0x3fa999999999999a  # 0.05
+TerrestrialOnly group 0 ×4 [0] = 0x3fb7dcf6762c6398  # 0.09321537385075229
+TerrestrialOnly group 0 ×4 [1] = 0x3fad92af75e7793d  # 0.057759745733835
+TerrestrialOnly group 0 ×4 [2] = 0x3fadd9f9524884da  # 0.05830363397058998
+TerrestrialOnly group 0 ×4 [3] = 0x3fafe12dbdfee070  # 0.06226485199243903
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap SolidBudget
@@ -400,14 +400,16 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fd9c5d6db5dc77c  # 0.40270015165798845
 TerrestrialOnly group 1 ×4 [1] = 0x3fe51b885975388f  # 0.6596109149193284
 TerrestrialOnly group 1 ×4 [2] = 0x3fb9d7da9609352b  # 0.10094991839396943
 TerrestrialOnly group 1 ×4 [3] = 0x3fe09184669ded4c  # 0.5177633289562578
-CompactMulti group 0 ×1 characteristic = 0x4016992078ef29eb  # 5.649537934873005
+CompactMulti group 0 ×1 characteristic = 0x40202898f8ac79e0  # 8.07929207902356
 CompactMulti group 0 ×1 cap Truncated
-CompactMulti group 0 ×4 characteristic = 0x4016992078ef29eb  # 5.649537934873005
+CompactMulti group 0 ×4 characteristic = 0x40202898f8ac79e0  # 8.07929207902356
 CompactMulti group 0 ×4 cap Truncated
-CompactWithColdGiant group 0 ×1 characteristic = 0x4016992078ef29eb  # 5.649537934873005
+CompactMulti group 0 ×4 [0] = 0x4010b1d728f572bf  # 4.173672332745524
+CompactWithColdGiant group 0 ×1 characteristic = 0x40202898f8ac79e0  # 8.07929207902356
 CompactWithColdGiant group 0 ×1 cap Truncated
-CompactWithColdGiant group 0 ×4 characteristic = 0x4016992078ef29eb  # 5.649537934873005
+CompactWithColdGiant group 0 ×4 characteristic = 0x40202898f8ac79e0  # 8.07929207902356
 CompactWithColdGiant group 0 ×4 cap Truncated
+CompactWithColdGiant group 0 ×4 [0] = 0x4010b1d728f572bf  # 4.173672332745524
 CompactWithColdGiant group 1 ×1 cap GasMass
 CompactWithColdGiant group 1 ×1 [0] = 0x406517feca745e07  # 168.74985239723193
 CompactWithColdGiant group 1 ×4 cap GasMass
@@ -417,13 +419,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x403240d0e50746c8  # 18.253187479282843
 CompactWithColdGiant group 1 ×4 [3] = 0x4048cc2e6279e64b  # 49.59516554786804
 SolarLike group 0 ×1 characteristic = 0x3fa999999999999a  # 0.05
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x3fb3a49dd12ca237  # 0.07673059803767833
+SolarLike group 0 ×1 [0] = 0x3fb7dcf6762c6398  # 0.09321537385075229
 SolarLike group 0 ×4 characteristic = 0x3fa999999999999a  # 0.05
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x3fb3a49dd12ca237  # 0.07673059803767833
-SolarLike group 0 ×4 [1] = 0x3fa999999999999a  # 0.05
-SolarLike group 0 ×4 [2] = 0x3fa999999999999a  # 0.05
-SolarLike group 0 ×4 [3] = 0x3fa999999999999a  # 0.05
+SolarLike group 0 ×4 [0] = 0x3fb7dcf6762c6398  # 0.09321537385075229
+SolarLike group 0 ×4 [1] = 0x3fad92af75e7793d  # 0.057759745733835
+SolarLike group 0 ×4 [2] = 0x3fadd9f9524884da  # 0.05830363397058998
+SolarLike group 0 ×4 [3] = 0x3fafe12dbdfee070  # 0.06226485199243903
 SolarLike group 1 ×1 cap GasMass
 SolarLike group 1 ×1 [0] = 0x406517feca745e07  # 168.74985239723193
 SolarLike group 1 ×4 cap GasMass
@@ -459,11 +461,13 @@ WarmGiant group 0 ×4 [0] = 0x4028444beedabc8c  # 12.133391823006853
 WarmGiant group 0 ×4 [1] = 0x404d027d4e89a265  # 58.0194490596812
 WarmGiant group 0 ×4 [2] = 0x403dd1c6a5606f22  # 29.81943734745358
 WarmGiant group 0 ×4 [3] = 0x405131c3c6707780  # 68.77757416709028
-WarmGiant group 1 ×1 characteristic = 0x400a97f919d867c1  # 3.324205591122308
-WarmGiant group 1 ×1 cap Truncated
-WarmGiant group 1 ×4 characteristic = 0x400a97f919d867c1  # 3.324205591122308
+WarmGiant group 1 ×1 characteristic = 0x400ec2f4f82ef4c3  # 3.8451938046769967
+WarmGiant group 1 ×1 cap AsDrawn
+WarmGiant group 1 ×1 [0] = 0x400fcd832e19f015  # 3.975347862402496
+WarmGiant group 1 ×4 characteristic = 0x400ec2f4f82ef4c3  # 3.8451938046769967
 WarmGiant group 1 ×4 cap Truncated
-WarmGiant group 1 ×4 [0] = 0x3ffa7fc07f94e63e  # 1.6561894401223891
+WarmGiant group 1 ×4 [0] = 0x3ff3c25e83f79961  # 1.234953418251813
+WarmGiant group 1 ×4 [1] = 0x3ffaa21d07332986  # 1.6645784646267159
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap GasMass
@@ -478,11 +482,14 @@ HotJupiter group 1 ×4 [0] = 0x404562f14f5dd3b1  # 42.772989197553564
 HotJupiter group 1 ×4 [1] = 0x404ada4cd49e13fe  # 53.705469681917734
 HotJupiter group 1 ×4 [2] = 0x40385662c38da332  # 24.337444517211402
 HotJupiter group 1 ×4 [3] = 0x4047f78ba40ebed0  # 47.933949000549205
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×1 cap Truncated
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x40202898f8ac79e0  # 8.07929207902356
+SubstellarCompact group 0 ×1 cap AsDrawn
+SubstellarCompact group 0 ×1 [0] = 0x3ffed4b23dcea6ec  # 1.9269277967782115
+SubstellarCompact group 0 ×4 characteristic = 0x40202898f8ac79e0  # 8.07929207902356
 SubstellarCompact group 0 ×4 cap Truncated
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
+SubstellarCompact group 0 ×4 [0] = 0x3ffd1c56153ac526  # 1.8194180325775249
+SubstellarCompact group 0 ×4 [1] = 0x3ff75db7faa2a6c5  # 1.460380534214367
+SubstellarCompact group 0 ×4 [2] = 0x3ffa26926c1667f8  # 1.6344169828575996
 
 disc: a metal-poor solar disc
 solid budget = 0x403e41ccc8eee3b0  # 30.25703101951848
@@ -490,13 +497,13 @@ gas budget = 0x40a8b686f454f101  # 3163.2635828537173
 giant core: TooFewSolids
 TerrestrialOnly group 0 ×1 characteristic = 0x3fc40bcafce8792a  # 0.15660989140537512
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x3fcec34f906db17c  # 0.24033541252300583
+TerrestrialOnly group 0 ×1 [0] = 0x3fced39c216ec8f5  # 0.24083282120188412
 TerrestrialOnly group 0 ×4 characteristic = 0x3fc40bcafce8792a  # 0.15660989140537512
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x3fcec34f906db17c  # 0.24033541252300583
-TerrestrialOnly group 0 ×4 [1] = 0x3fbd36bb5b6ca4e2  # 0.11411639196434778
-TerrestrialOnly group 0 ×4 [2] = 0x3fbdde5d860add0e  # 0.11667427561302565
-TerrestrialOnly group 0 ×4 [3] = 0x3fc1200a1a79afc6  # 0.13379026692143564
+TerrestrialOnly group 0 ×4 [0] = 0x3fced39c216ec8f5  # 0.24083282120188412
+TerrestrialOnly group 0 ×4 [1] = 0x3fbd6ce96a78f0bc  # 0.11494311189102552
+TerrestrialOnly group 0 ×4 [2] = 0x3fbe12f225f888dc  # 0.11747659136793537
+TerrestrialOnly group 0 ×4 [3] = 0x3fc13670ffd6d85b  # 0.13447391979360898
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap AsDrawn
@@ -504,20 +511,20 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 [1] = 0x3ff2c63eb4196943  # 1.1733996424796522
 TerrestrialOnly group 1 ×4 [2] = 0x3fc6fc8f76a989ab  # 0.17958253187232506
 TerrestrialOnly group 1 ×4 [3] = 0x3fed79596bbc4e9d  # 0.9210631469927254
-CompactMulti group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×1 cap AsDrawn
-CompactMulti group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactMulti group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 [0] = 0x40325469726b002f  # 18.329733992694113
+CompactMulti group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×4 cap Truncated
-CompactMulti group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactMulti group 0 ×4 [1] = 0x40258cd755729b36  # 10.77508036636355
-CompactWithColdGiant group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactMulti group 0 ×4 [1] = 0x402405d644280f72  # 10.011400346651246
+CompactWithColdGiant group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×1 cap AsDrawn
-CompactWithColdGiant group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactWithColdGiant group 0 ×1 [0] = 0x40325469726b002f  # 18.329733992694113
+CompactWithColdGiant group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×4 cap Truncated
-CompactWithColdGiant group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactWithColdGiant group 0 ×4 [1] = 0x40258cd755729b36  # 10.77508036636355
+CompactWithColdGiant group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactWithColdGiant group 0 ×4 [1] = 0x402405d644280f72  # 10.011400346651246
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap AsDrawn
@@ -527,13 +534,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x406ff6795ec0b88c  # 255.702315689476
 CompactWithColdGiant group 1 ×4 [3] = 0x4085b616112744b7  # 694.7607749049993
 SolarLike group 0 ×1 characteristic = 0x3fc40bcafce8792a  # 0.15660989140537512
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x3fcec34f906db17c  # 0.24033541252300583
+SolarLike group 0 ×1 [0] = 0x3fced39c216ec8f5  # 0.24083282120188412
 SolarLike group 0 ×4 characteristic = 0x3fc40bcafce8792a  # 0.15660989140537512
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x3fcec34f906db17c  # 0.24033541252300583
-SolarLike group 0 ×4 [1] = 0x3fbd36bb5b6ca4e2  # 0.11411639196434778
-SolarLike group 0 ×4 [2] = 0x3fbdde5d860add0e  # 0.11667427561302565
-SolarLike group 0 ×4 [3] = 0x3fc1200a1a79afc6  # 0.13379026692143564
+SolarLike group 0 ×4 [0] = 0x3fced39c216ec8f5  # 0.24083282120188412
+SolarLike group 0 ×4 [1] = 0x3fbd6ce96a78f0bc  # 0.11494311189102552
+SolarLike group 0 ×4 [2] = 0x3fbe12f225f888dc  # 0.11747659136793537
+SolarLike group 0 ×4 [3] = 0x3fc13670ffd6d85b  # 0.13447391979360898
 SolarLike group 1 ×1 cap AsDrawn
 SolarLike group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 SolarLike group 1 ×4 cap AsDrawn
@@ -569,13 +576,14 @@ WarmGiant group 0 ×4 [0] = 0x405a4a410809f131  # 105.16021920176424
 WarmGiant group 0 ×4 [1] = 0x407f6dae7f4a1350  # 502.8551018613407
 WarmGiant group 0 ×4 [2] = 0x407027201c387b7d  # 258.4453394132941
 WarmGiant group 0 ×4 [3] = 0x4082a0c458639100  # 596.0958717135072
-WarmGiant group 1 ×1 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×1 cap AsDrawn
-WarmGiant group 1 ×1 [0] = 0x4026cded8276d3bc  # 11.40220267963911
-WarmGiant group 1 ×4 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 [0] = 0x4026bf0b8dad60a0  # 11.373135020651091
+WarmGiant group 1 ×4 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×4 cap Truncated
-WarmGiant group 1 ×4 [0] = 0x401615206a516a8a  # 5.520631467074631
-WarmGiant group 1 ×4 [1] = 0x401800dd09fe410a  # 6.000843197005688
+WarmGiant group 1 ×4 [0] = 0x4010721bb9bb2006  # 4.111433889433107
+WarmGiant group 1 ×4 [1] = 0x40159c304408899e  # 5.402527869244663
+WarmGiant group 1 ×4 [2] = 0x40309f9ff824a73e  # 16.62353468794685
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap AsDrawn
@@ -590,15 +598,15 @@ HotJupiter group 1 ×4 [0] = 0x40890e557fc21c69  # 801.7917475857658
 HotJupiter group 1 ×4 [1] = 0x408f75cb1dd7ed6e  # 1006.7241780156453
 HotJupiter group 1 ×4 [2] = 0x407c83656d40e135  # 456.21226239532126
 HotJupiter group 1 ×4 [3] = 0x408c14487d194990  # 898.5353948569846
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×1 cap AsDrawn
-SubstellarCompact group 0 ×1 [0] = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 [0] = 0x3fff4f9e7a0e7a34  # 1.9569382446130819
+SubstellarCompact group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
-SubstellarCompact group 0 ×4 [1] = 0x3ff24f41d98eeaba  # 1.1443499086732758
-SubstellarCompact group 0 ×4 [2] = 0x3ffe5c3be87b833c  # 1.8975180703493626
-SubstellarCompact group 0 ×4 [3] = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×4 [0] = 0x3ffed992e48d7579  # 1.928118603499881
+SubstellarCompact group 0 ×4 [1] = 0x3fface04d232b5d1  # 1.6752975664961591
+SubstellarCompact group 0 ×4 [2] = 0x3ffc18e670e1681d  # 1.756079140605386
+SubstellarCompact group 0 ×4 [3] = 0x3ffd92ddf79e6844  # 1.848356215725759
 
 disc: a heavy, short-lived A star's disc
 solid budget = 0x40896233c8bdbac2  # 812.2752852270717
@@ -606,13 +614,13 @@ gas budget = 0x40d19575e8441255  # 18005.842301385786
 giant core forms by (Myr) = 0x3f800fcee6d37c8a  # 0.007842651767019388
 TerrestrialOnly group 0 ×1 characteristic = 0x4000000000000000  # 2.0
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x4000000000000000  # 2.0
+TerrestrialOnly group 0 ×1 [0] = 0x3ffce1b043509727  # 1.8050997380718827
 TerrestrialOnly group 0 ×4 characteristic = 0x4000000000000000  # 2.0
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x4000000000000000  # 2.0
-TerrestrialOnly group 0 ×4 [1] = 0x3ff7513c8c7de395  # 1.457333134456552
-TerrestrialOnly group 0 ×4 [2] = 0x3ff7d708fcf83a0a  # 1.4899988061548606
-TerrestrialOnly group 0 ×4 [3] = 0x3ffb565804fc77c6  # 1.708580035664896
+TerrestrialOnly group 0 ×4 [0] = 0x3ffce1b043509727  # 1.8050997380718827
+TerrestrialOnly group 0 ×4 [1] = 0x3ff2c0fe9e59eb46  # 1.1721178231807285
+TerrestrialOnly group 0 ×4 [2] = 0x3ff313a4a8ee037e  # 1.192295703775215
+TerrestrialOnly group 0 ×4 [3] = 0x3ff51b54e6b75441  # 1.3191727650021365
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap AsDrawn
@@ -620,24 +628,24 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 [1] = 0x3ff2c63eb4196943  # 1.1733996424796522
 TerrestrialOnly group 1 ×4 [2] = 0x3fc6fc8f76a989ab  # 0.17958253187232506
 TerrestrialOnly group 1 ×4 [3] = 0x3fed79596bbc4e9d  # 0.9210631469927254
-CompactMulti group 0 ×1 characteristic = 0x4034000000000000  # 20.0
+CompactMulti group 0 ×1 characteristic = 0x40483ce57502b6d0  # 48.47575247414136
 CompactMulti group 0 ×1 cap AsDrawn
-CompactMulti group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactMulti group 0 ×4 characteristic = 0x4034000000000000  # 20.0
+CompactMulti group 0 ×1 [0] = 0x4032fd5e4b6a1c98  # 18.989720071226287
+CompactMulti group 0 ×4 characteristic = 0x40483ce57502b6d0  # 48.47575247414136
 CompactMulti group 0 ×4 cap AsDrawn
-CompactMulti group 0 ×4 [0] = 0x402db87db6f812ca  # 14.860334127218625
-CompactMulti group 0 ×4 [1] = 0x4026e3124ff2a568  # 11.443499086732757
-CompactMulti group 0 ×4 [2] = 0x4032f9a5714d3206  # 18.975180703493628
-CompactMulti group 0 ×4 [3] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×1 characteristic = 0x4034000000000000  # 20.0
+CompactMulti group 0 ×4 [0] = 0x4030a9108b57b05d  # 16.66040869608729
+CompactMulti group 0 ×4 [1] = 0x4029c8ea165161ab  # 12.89241094344546
+CompactMulti group 0 ×4 [2] = 0x402edfeb25b8e884  # 15.437340906926927
+CompactMulti group 0 ×4 [3] = 0x40317513052e2016  # 17.457321475754803
+CompactWithColdGiant group 0 ×1 characteristic = 0x40483ce57502b6d0  # 48.47575247414136
 CompactWithColdGiant group 0 ×1 cap AsDrawn
-CompactWithColdGiant group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×4 characteristic = 0x4034000000000000  # 20.0
+CompactWithColdGiant group 0 ×1 [0] = 0x4032fd5e4b6a1c98  # 18.989720071226287
+CompactWithColdGiant group 0 ×4 characteristic = 0x40483ce57502b6d0  # 48.47575247414136
 CompactWithColdGiant group 0 ×4 cap AsDrawn
-CompactWithColdGiant group 0 ×4 [0] = 0x402db87db6f812ca  # 14.860334127218625
-CompactWithColdGiant group 0 ×4 [1] = 0x4026e3124ff2a568  # 11.443499086732757
-CompactWithColdGiant group 0 ×4 [2] = 0x4032f9a5714d3206  # 18.975180703493628
-CompactWithColdGiant group 0 ×4 [3] = 0x4034000000000000  # 20.0
+CompactWithColdGiant group 0 ×4 [0] = 0x4030a9108b57b05d  # 16.66040869608729
+CompactWithColdGiant group 0 ×4 [1] = 0x4029c8ea165161ab  # 12.89241094344546
+CompactWithColdGiant group 0 ×4 [2] = 0x402edfeb25b8e884  # 15.437340906926927
+CompactWithColdGiant group 0 ×4 [3] = 0x40317513052e2016  # 17.457321475754803
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap AsDrawn
@@ -647,13 +655,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x406ff6795ec0b88c  # 255.702315689476
 CompactWithColdGiant group 1 ×4 [3] = 0x4085b616112744b7  # 694.7607749049993
 SolarLike group 0 ×1 characteristic = 0x4000000000000000  # 2.0
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x4000000000000000  # 2.0
+SolarLike group 0 ×1 [0] = 0x3ffce1b043509727  # 1.8050997380718827
 SolarLike group 0 ×4 characteristic = 0x4000000000000000  # 2.0
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x4000000000000000  # 2.0
-SolarLike group 0 ×4 [1] = 0x3ff7513c8c7de395  # 1.457333134456552
-SolarLike group 0 ×4 [2] = 0x3ff7d708fcf83a0a  # 1.4899988061548606
-SolarLike group 0 ×4 [3] = 0x3ffb565804fc77c6  # 1.708580035664896
+SolarLike group 0 ×4 [0] = 0x3ffce1b043509727  # 1.8050997380718827
+SolarLike group 0 ×4 [1] = 0x3ff2c0fe9e59eb46  # 1.1721178231807285
+SolarLike group 0 ×4 [2] = 0x3ff313a4a8ee037e  # 1.192295703775215
+SolarLike group 0 ×4 [3] = 0x3ff51b54e6b75441  # 1.3191727650021365
 SolarLike group 1 ×1 cap AsDrawn
 SolarLike group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 SolarLike group 1 ×4 cap AsDrawn
@@ -689,15 +697,15 @@ WarmGiant group 0 ×4 [0] = 0x405a4a410809f131  # 105.16021920176424
 WarmGiant group 0 ×4 [1] = 0x407f6dae7f4a1350  # 502.8551018613407
 WarmGiant group 0 ×4 [2] = 0x407027201c387b7d  # 258.4453394132941
 WarmGiant group 0 ×4 [3] = 0x4082a0c458639100  # 596.0958717135072
-WarmGiant group 1 ×1 characteristic = 0x4033f1fad3624dd1  # 19.94523354673385
+WarmGiant group 1 ×1 characteristic = 0x40371237ba233793  # 23.071162828061983
 WarmGiant group 1 ×1 cap AsDrawn
-WarmGiant group 1 ×1 [0] = 0x4034000000000000  # 20.0
-WarmGiant group 1 ×4 characteristic = 0x4033f1fad3624dd1  # 19.94523354673385
+WarmGiant group 1 ×1 [0] = 0x402d7c4e6633061d  # 14.742785638550282
+WarmGiant group 1 ×4 characteristic = 0x40371237ba233793  # 23.071162828061983
 WarmGiant group 1 ×4 cap AsDrawn
-WarmGiant group 1 ×4 [0] = 0x4023dfd05fafacaf  # 9.937136640734336
-WarmGiant group 1 ×4 [1] = 0x40259a6088fe6dbc  # 10.801517754610238
-WarmGiant group 1 ×4 [2] = 0x4034000000000000  # 20.0
-WarmGiant group 1 ×4 [3] = 0x4034000000000000  # 20.0
+WarmGiant group 1 ×4 [0] = 0x401cfa59b7e3af40  # 7.244482873222125
+WarmGiant group 1 ×4 [1] = 0x40213b8b3e7a4b78  # 8.61629672282082
+WarmGiant group 1 ×4 [2] = 0x40321ba3ee892ce1  # 18.10797015046126
+WarmGiant group 1 ×4 [3] = 0x402b1e1391687fe5  # 13.558743041998193
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap AsDrawn
@@ -712,15 +720,15 @@ HotJupiter group 1 ×4 [0] = 0x4092221a2ba00ffe  # 1160.525557042099
 HotJupiter group 1 ×4 [1] = 0x4096c4976b54ed92  # 1457.1478703756334
 HotJupiter group 1 ×4 [2] = 0x4084a2a0e3f65bea  # 660.3285598036575
 HotJupiter group 1 ×4 [3] = 0x40945237129bd9b7  # 1300.5537819244034
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x40483ce57502b6d0  # 48.47575247414136
 SubstellarCompact group 0 ×1 cap AsDrawn
-SubstellarCompact group 0 ×1 [0] = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 [0] = 0x3fff6dd40e01029d  # 1.9643135592488428
+SubstellarCompact group 0 ×4 characteristic = 0x40483ce57502b6d0  # 48.47575247414136
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
-SubstellarCompact group 0 ×4 [1] = 0x3ff24f41d98eeaba  # 1.1443499086732758
-SubstellarCompact group 0 ×4 [2] = 0x3ffe5c3be87b833c  # 1.8975180703493626
-SubstellarCompact group 0 ×4 [3] = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×4 [0] = 0x3fff22ae7efd4350  # 1.9459671936530931
+SubstellarCompact group 0 ×4 [1] = 0x3ffbb322c38c3b64  # 1.73123432527401
+SubstellarCompact group 0 ×4 [2] = 0x3ffca86307ff748f  # 1.7911100685517203
+SubstellarCompact group 0 ×4 [3] = 0x3ffddfe653077d38  # 1.8671630137758495
 
 disc: a light solar disc of 0.3 Myr
 solid budget = 0x404b2935dd975236  # 54.32195634735801
@@ -728,13 +736,13 @@ gas budget = 0x409bcb55d8dee225  # 1778.8338351083305
 giant core too slow, by (Myr) = 0x3fe8e3eef30fd6d2  # 0.7778239009191685
 TerrestrialOnly group 0 ×1 characteristic = 0x3fd1feae8d827720  # 0.2811695463113768
 TerrestrialOnly group 0 ×1 cap AsDrawn
-TerrestrialOnly group 0 ×1 [0] = 0x3fdb9d781468f9c0  # 0.43148614876909264
+TerrestrialOnly group 0 ×1 [0] = 0x3fdb9d8f2979f7b5  # 0.43149165201600265
 TerrestrialOnly group 0 ×4 characteristic = 0x3fd1feae8d827720  # 0.2811695463113768
 TerrestrialOnly group 0 ×4 cap AsDrawn
-TerrestrialOnly group 0 ×4 [0] = 0x3fdb9d781468f9c0  # 0.43148614876909264
-TerrestrialOnly group 0 ×4 [1] = 0x3fca397858288f61  # 0.20487884811984272
-TerrestrialOnly group 0 ×4 [2] = 0x3fcacff350d2c52d  # 0.20947114416552762
-TerrestrialOnly group 0 ×4 [3] = 0x3fcebee277606e29  # 0.24020033673228738
+TerrestrialOnly group 0 ×4 [0] = 0x3fdb9d8f2979f7b5  # 0.43149165201600265
+TerrestrialOnly group 0 ×4 [1] = 0x3fca3a198efc38e1  # 0.20489806634618105
+TerrestrialOnly group 0 ×4 [2] = 0x3fcad08f2eeb0d73  # 0.20948972502638305
+TerrestrialOnly group 0 ×4 [3] = 0x3fcebf637335996b  # 0.2402157127900851
 TerrestrialOnly group 1 ×1 cap AsDrawn
 TerrestrialOnly group 1 ×1 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 cap AsDrawn
@@ -742,22 +750,24 @@ TerrestrialOnly group 1 ×4 [0] = 0x3fe6ec897fb360d6  # 0.7163741583017564
 TerrestrialOnly group 1 ×4 [1] = 0x3ff2c63eb4196943  # 1.1733996424796522
 TerrestrialOnly group 1 ×4 [2] = 0x3fc6fc8f76a989ab  # 0.17958253187232506
 TerrestrialOnly group 1 ×4 [3] = 0x3fed79596bbc4e9d  # 0.9210631469927254
-CompactMulti group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactMulti group 0 ×1 cap AsDrawn
-CompactMulti group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactMulti group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
-CompactMulti group 0 ×4 cap Truncated
-CompactMulti group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactMulti group 0 ×4 [1] = 0x40258cd755729b36  # 10.77508036636355
-CompactMulti group 0 ×4 [2] = 0x4031dde8d3084e20  # 17.866833867576247
-CompactWithColdGiant group 0 ×1 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
+CompactMulti group 0 ×1 [0] = 0x40325469726b002f  # 18.329733992694113
+CompactMulti group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
+CompactMulti group 0 ×4 cap AsDrawn
+CompactMulti group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactMulti group 0 ×4 [1] = 0x402405d644280f72  # 10.011400346651246
+CompactMulti group 0 ×4 [2] = 0x402ba75e715400c0  # 13.826892415527595
+CompactMulti group 0 ×4 [3] = 0x4030bd893f825470  # 16.740375489538962
+CompactWithColdGiant group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 CompactWithColdGiant group 0 ×1 cap AsDrawn
-CompactWithColdGiant group 0 ×1 [0] = 0x4034000000000000  # 20.0
-CompactWithColdGiant group 0 ×4 characteristic = 0x4032d4f064c74d99  # 18.83179311624335
-CompactWithColdGiant group 0 ×4 cap Truncated
-CompactWithColdGiant group 0 ×4 [0] = 0x402bfc1394e6bdb0  # 13.992336896101591
-CompactWithColdGiant group 0 ×4 [1] = 0x40258cd755729b36  # 10.77508036636355
-CompactWithColdGiant group 0 ×4 [2] = 0x4031dde8d3084e20  # 17.866833867576247
+CompactWithColdGiant group 0 ×1 [0] = 0x40325469726b002f  # 18.329733992694113
+CompactWithColdGiant group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
+CompactWithColdGiant group 0 ×4 cap AsDrawn
+CompactWithColdGiant group 0 ×4 [0] = 0x402962000a63fdd4  # 12.691406559663768
+CompactWithColdGiant group 0 ×4 [1] = 0x402405d644280f72  # 10.011400346651246
+CompactWithColdGiant group 0 ×4 [2] = 0x402ba75e715400c0  # 13.826892415527595
+CompactWithColdGiant group 0 ×4 [3] = 0x4030bd893f825470  # 16.740375489538962
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap GasMass
@@ -767,13 +777,13 @@ CompactWithColdGiant group 1 ×4 [2] = 0x40680d29ce9df26d  # 192.41135340546626
 CompactWithColdGiant group 1 ×4 [3] = 0x4080565be91d46b0  # 522.7948782241056
 SolarLike group 0 ×1 characteristic = 0x3fd1feae8d827720  # 0.2811695463113768
 SolarLike group 0 ×1 cap AsDrawn
-SolarLike group 0 ×1 [0] = 0x3fdb9d781468f9c0  # 0.43148614876909264
+SolarLike group 0 ×1 [0] = 0x3fdb9d8f2979f7b5  # 0.43149165201600265
 SolarLike group 0 ×4 characteristic = 0x3fd1feae8d827720  # 0.2811695463113768
 SolarLike group 0 ×4 cap AsDrawn
-SolarLike group 0 ×4 [0] = 0x3fdb9d781468f9c0  # 0.43148614876909264
-SolarLike group 0 ×4 [1] = 0x3fca397858288f61  # 0.20487884811984272
-SolarLike group 0 ×4 [2] = 0x3fcacff350d2c52d  # 0.20947114416552762
-SolarLike group 0 ×4 [3] = 0x3fcebee277606e29  # 0.24020033673228738
+SolarLike group 0 ×4 [0] = 0x3fdb9d8f2979f7b5  # 0.43149165201600265
+SolarLike group 0 ×4 [1] = 0x3fca3a198efc38e1  # 0.20489806634618105
+SolarLike group 0 ×4 [2] = 0x3fcad08f2eeb0d73  # 0.20948972502638305
+SolarLike group 0 ×4 [3] = 0x3fcebf637335996b  # 0.2402157127900851
 SolarLike group 1 ×1 cap AsDrawn
 SolarLike group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 SolarLike group 1 ×4 cap GasMass
@@ -809,15 +819,15 @@ WarmGiant group 0 ×4 [0] = 0x405a4a410809f131  # 105.16021920176424
 WarmGiant group 0 ×4 [1] = 0x407f6dae7f4a1350  # 502.8551018613407
 WarmGiant group 0 ×4 [2] = 0x407027201c387b7d  # 258.4453394132941
 WarmGiant group 0 ×4 [3] = 0x4082a0c458639100  # 596.0958717135072
-WarmGiant group 1 ×1 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×1 cap AsDrawn
-WarmGiant group 1 ×1 [0] = 0x4026cded8276d3bc  # 11.40220267963911
-WarmGiant group 1 ×4 characteristic = 0x4026294f9589abcc  # 11.080685303741028
+WarmGiant group 1 ×1 [0] = 0x4026bf0b8dad60a0  # 11.373135020651091
+WarmGiant group 1 ×4 characteristic = 0x4029a276ced1cbf8  # 12.817312682256656
 WarmGiant group 1 ×4 cap AsDrawn
-WarmGiant group 1 ×4 [0] = 0x401615206a516a8a  # 5.520631467074631
-WarmGiant group 1 ×4 [1] = 0x401800dd09fe410a  # 6.000843197005688
-WarmGiant group 1 ×4 [2] = 0x40335c60d5c2a621  # 19.360852584859575
-WarmGiant group 1 ×4 [3] = 0x402a848de0807062  # 13.258894935301388
+WarmGiant group 1 ×4 [0] = 0x4010721bb9bb2006  # 4.111433889433107
+WarmGiant group 1 ×4 [1] = 0x40159c304408899e  # 5.402527869244663
+WarmGiant group 1 ×4 [2] = 0x40309f9ff824a73e  # 16.62353468794685
+WarmGiant group 1 ×4 [3] = 0x402767c52e4dea77  # 11.702676245700088
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap AsDrawn
@@ -832,12 +842,12 @@ HotJupiter group 1 ×4 [0] = 0x407c2e171388de93  # 450.8806338640654
 HotJupiter group 1 ×4 [1] = 0x4081b0fb1a186214  # 566.1226083664828
 HotJupiter group 1 ×4 [2] = 0x407008c08bac88e8  # 256.54700820347216
 HotJupiter group 1 ×4 [3] = 0x407f948990155cf2  # 505.2835846743102
-SubstellarCompact group 0 ×1 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×1 cap AsDrawn
-SubstellarCompact group 0 ×1 [0] = 0x4000000000000000  # 2.0
-SubstellarCompact group 0 ×4 characteristic = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×1 [0] = 0x3fff4f9e7a0e7a34  # 1.9569382446130819
+SubstellarCompact group 0 ×4 characteristic = 0x403aee54491f75cb  # 26.9309735967452
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff7c6caf8c6756e  # 1.4860334127218624
-SubstellarCompact group 0 ×4 [1] = 0x3ff24f41d98eeaba  # 1.1443499086732758
-SubstellarCompact group 0 ×4 [2] = 0x3ffe5c3be87b833c  # 1.8975180703493626
-SubstellarCompact group 0 ×4 [3] = 0x4000000000000000  # 2.0
+SubstellarCompact group 0 ×4 [0] = 0x3ffed992e48d7579  # 1.928118603499881
+SubstellarCompact group 0 ×4 [1] = 0x3fface04d232b5d1  # 1.6752975664961591
+SubstellarCompact group 0 ×4 [2] = 0x3ffc18e670e1681d  # 1.756079140605386
+SubstellarCompact group 0 ×4 [3] = 0x3ffd92ddf79e6844  # 1.848356215725759
