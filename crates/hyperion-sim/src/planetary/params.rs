@@ -211,3 +211,45 @@ pub const MAGMA_OCEAN_END_LATEST: Megayears = Megayears::new(100.0);
 /// orbit the tides circularise first, to 22% for an Earth, whose pericentre meets the envelope;
 /// the transform tests the semi-major axis alone.
 pub const ENGULFMENT_TIDAL_MASS: EarthMasses = EarthMasses::new(3.1);
+
+/// The probability that a giant colder than 170 K at its cloud tops has a massive icy ring system
+/// like Saturn's: 0.15 (P14.T20).
+///
+/// A parameter of the generator version, as plan 14 has it, because ring lifetimes are disputed:
+/// Saturn's rings may be young, 10–100 Myr (Iess et al. 2019, Science 364, eaat2965; Kempf et al.
+/// 2023, Science Advances 9, eadf8537), or as old as the Solar System (Crida et al. 2019, Nature
+/// Astronomy 3, 967), and so a snapshot of the giants could hold them far more or less often. One
+/// of the Solar System's four giants has one.
+pub const MASSIVE_ICY_RING_PROBABILITY: f64 = 0.15;
+
+/// The probability that a giant at 170 K or warmer at its cloud tops has a massive rocky ring:
+/// 0.03 (P14.T20).
+///
+/// A parameter of the generator version, as [`MASSIVE_ICY_RING_PROBABILITY`] is. No such ring is
+/// known: the transit of J1407 (Mamajek et al. 2012, AJ 143, 72) is the one candidate ring system
+/// seen outside the Solar System, and it lies about a companion of unknown nature.
+pub const MASSIVE_ROCKY_RING_PROBABILITY: f64 = 0.03;
+
+/// The probability that a Kuiper-like belt is bright, keeping a sizeable share of its solids:
+/// 0.60 (P14.T21.b; ruling 84.1's starting value 0.25, fitted on the slow test's sample of
+/// [`belts`](crate::planetary::belts) to the detected share after ruling 84's amendment).
+///
+/// Most bright belts lie too close in, just beyond compact systems' outermost planets, or too
+/// faint for a 100 µm survey to see, so the share of hosts with a detected belt is 0.173.
+///
+/// Cold belts are bimodal: Sibthorpe et al. (2018, MNRAS 475, 3046, §5.3) find that about half of
+/// Sun-like stars either depleted their Kuiper belts or formed fewer planetesimals, the Kuiper
+/// belt itself having lost "nearly three orders of magnitude" of its mass.
+pub const BRIGHT_KUIPER_BELT_PROBABILITY: f64 = 0.60;
+
+/// The median share of its solids a bright Kuiper-like belt keeps, as a log: −0.25 dex (ruling
+/// 84.1's starting value −1, fitted on the slow test's sample).
+pub const BRIGHT_KUIPER_EFFICIENCY_DEX: f64 = -0.25;
+
+/// The scatter of a bright Kuiper-like belt's share, dex: 0.5 (ruling 84.1's 0.5–0.8, fitted on
+/// the slow test's sample).
+pub const BRIGHT_KUIPER_EFFICIENCY_SIGMA_DEX: f64 = 0.5;
+
+/// The share of its solids a faint Kuiper-like belt keeps: 10⁻³, the Kuiper belt's loss of
+/// "nearly three orders of magnitude" (Sibthorpe et al. 2018, §5.3; ruling 84.1).
+pub const FAINT_KUIPER_EFFICIENCY: f64 = 1e-3;

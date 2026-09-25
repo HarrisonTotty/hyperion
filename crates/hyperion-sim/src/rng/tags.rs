@@ -491,6 +491,30 @@ domain_tags! {
 
     /// A companion's mean anomaly at the epoch: one uniform, try r of attempt n at word 64n + r.
     BINARY_PHASE: Body = "binary.phase";
+
+    // Plan 14, phase D: rings, belts and the cometary halo (P14.T20, T21), under the names and
+    // scopes of the "Plan 14" heading above. Appended here, after plan 11's entries, because the
+    // macro's order fixes `ALL`.
+
+    /// A giant's rings (P14.T20), keyed by the planet: the massive ring's mark, word 0, and the
+    /// ranks of its outer edge, its mass, the dusty ring's outer edge and its optical depth, words
+    /// 1–4, one uniform each; words 5–7 are reserved (`planetary::rings::RingDraws`).
+    RING_SYSTEM: Body = "ring.system";
+
+    /// A system's belts (P14.T21.a–b): the belt in belt slot n reads words 8n onwards, the ranks of
+    /// its depletion factor and of its size slope, one uniform each, a Kuiper-like belt's bright
+    /// mark and its bright efficiency's standard normal (words 8n + 3 and 8n + 4); words 8n + 5 to
+    /// 8n + 7 are reserved (`planetary::belts::BeltDraws`).
+    BELT_POPULATION: System = "belt.population";
+
+    /// A belt's named member (P14.T21.c), keyed by the member: the rank of its component, its
+    /// semi-major axis, eccentricity and inclination, its node, periapsis and mean anomaly, and
+    /// its radius rank, words 0–7, one uniform each (`planetary::belts::MemberDraws`).
+    BELT_MEMBER: Body = "belt.member";
+
+    /// A system's cometary halo (P14.T21.d): the rank of its number of comets, word 0, one
+    /// uniform; words 1–7 are reserved (`planetary::halo`).
+    COMETARY_POPULATION: System = "cometary.population";
 }
 
 #[cfg(test)]

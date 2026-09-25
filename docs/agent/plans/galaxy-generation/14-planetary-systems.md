@@ -1429,6 +1429,20 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
   inner edge ≥ the planet's radius, for every sampled ring; about 15% of cold giants have massive
   rings (Poisson interval).
 - _Accept:_ `cargo test -p hyperion-sim planetary::rings`.
+- _As built (`belts`, round 8):_ `planetary/rings.rs`: `rings(&RingParent, &[RingMoon], &RingDraws)
+-> Vec<Ring>` and `generate_rings(seed, system, parent, moons)`, from plain inputs, as T22.a will
+  pass them: the planet's index, `PlanetClass`, mass, radius and cloud-top temperature (the
+  derivation's equilibrium temperature with internal heat), and the regular moons' semi-major axes
+  and masses; nothing of `moons` is read. A giant is `GasGiant` or `IceGiant`. The dusty ring is
+  `Ring(0)`, silicate, τ log-uniform over 10⁻⁷–10⁻⁵ (Jupiter's rings, de Pater et al. 2017), from
+  1.1 radii to 0.6–1.0 of the way to the Roche limit for rock, so that every giant denser than 225
+  kg m⁻³ has one (the plan gives no extent), its mass that of 15 µm grains. The massive ring is
+  `Ring(1)`; its optical depth is its surface density times 1.56 × 10⁻³ m² kg⁻¹ for ice, from an
+  s⁻³ size distribution of 1 cm–5 m (Zebker et al. 1985), about 0.6 for Saturn's mass. "Over 10
+  km" is a mass: a 10 km sphere of the ring's material; such a moon inside the drawn edge cuts the
+  ring back to its orbit. Gaps are every passed moon's 2:1 and 3:2 inner resonances inside the
+  ring. The probabilities are `params::MASSIVE_ICY_RING_PROBABILITY` and
+  `MASSIVE_ROCKY_RING_PROBABILITY`. Draws: `ring.system`, words 0–4 of the planet's stream.
 
 #### P14.T21 Belts, their largest members and the cometary halo
 
@@ -1441,13 +1455,14 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
   system without giants, a belt occupies any gap between planets wider than 40 mutual Hill radii,
   between the two chaotic zones. Mass: the disc's solids in the band times a depletion factor of
   10⁻³–10⁻¹ with giants and 10⁻²–1 without, then worn down collisionally as 1 ÷ (1 + age ÷ t_c)
-  (Wyatt et al. 2007).
+  (Wyatt et al. 2007). _Amended by ruling 84.3:_ 10⁻⁴–10⁻² with giants.
 - **P14.T21.b Kuiper-like belt and debris brightness.** Outside the outermost planet, from its 3:2
   to its 2:1 resonance (1.31–1.59 of its semi-major axis) plus a scattered component to the disc's
   outer edge; without planets, the disc's outer third. Mass from the solids there, depleted a
   hundredfold if a giant lies within a factor of 3 in radius. Every belt gets a fractional
   luminosity f = L_dust ÷ L★ from its mass, radius and age (Wyatt 2008), which is what an infrared
-  sensor will see.
+  sensor will see. _Amended by ruling 84.1:_ the scattered component has no mass, a belt is bright
+  or faint in place of the giant rule, and G is Wyatt et al.'s full form.
 - **P14.T21.c Largest members.** Sizes follow N(> D) ∝ D^−q with q = 2.5–3.5 normalised to the
   belt's mass. The largest members over 400 km, at most eight per belt, become bodies in the belt's
   slot with sub-indices 1 upward: orbits drawn inside the belt (eccentricity Rayleigh 0.1,
@@ -1460,7 +1475,9 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
   10¹¹–10¹² scaled by disc mass and present only if the system has a planet over 10 M⊕ beyond the
   snow line to scatter them; and a rate of new comets reaching the inner system, which T31 turns
   into events. Evolved hosts lose part of it (D11). A halo whose outer radius falls below its inner
-  one does not exist, which is the case throughout the nuclear cluster.
+  one does not exist, which is the case throughout the nuclear cluster. _Amended by ruling
+  84.2–84.5:_ the outer radius is 10⁵ au × (M★ ÷ M☉)^⅓, the loss depends on radius, and the rate
+  counts every long-period comet.
   - _Tests:_ (a, b) belts never overlap a planet's chaotic zone, and a Solar System input gives
     belts at 2.1–3.3 au and 39–48 au; (b) the share of FGK hosts of 1–10 Gyr with a cold belt of f >
     10⁻⁶ is 0.15–0.30 (Eiroa et al. 2013; Montesinos et al. 2016; slow); (c) members are inside
@@ -1468,6 +1485,92 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
     extends beyond 0.49 of the sphere of influence, and a system with no planet over 10 M⊕ beyond
     the snow line has none.
   - _Accept:_ `cargo test -p hyperion-sim planetary::belts planetary::halo`.
+  - _As built (`belts`, round 8):_ `planetary/belts.rs` and `planetary/halo.rs`, from plain inputs;
+    nothing generated calls them until T22.a and T30.a.
+    - _T21.a–b._ `host_belts(seed, system, &BeltHost, first_slot) -> HostBelts` for one orbit
+      host: its disc profile, its planets as `placement::Neighbour`s, its plane and its
+      `OrbitHost`. A giant is a planet of 10 M⊕ or more (`ICE_GIANT_MASS`); the asteroid belt inside a giant needs one at or beyond the snow
+      line, and "without giants" means none there. A planet's chaotic zone is 1.3 μ^(2⁄7) a beyond
+      its pericentre and apocentre, and every belt is cut to the disc's edges. Both `BeltRule`s place a
+      belt wherever these rules find room. Each belt's mass wears as M₀ ÷ (1 + t ÷ `t_c`), and
+      `fractional_luminosity(age, L)` is f = 0.37 r⁻² `D_bl`^(−½) `D_c`^(−½) M (Wyatt et al.
+      2007a, eqs. 6, 14 and 17, with the full G of eqs. 17–18, ruling 84.1), with `D_c` 450 km (Kains, Wyatt and Greaves 2011), e 0.05 and `Q_D*` 495 J kg⁻¹
+      (ruling 84's amendment, below).
+    - _T21.c._ Members are `D_max` k^(−1⁄q) for k = 1–8 over 400 km, `D_max` normalising N(> D)
+      from 1 km to the belt's primordial mass, at 2,700 or 2,000 kg m⁻³ by composition. Each is
+      placed with a by the disc's solids, e and i truncated so that it stays clear of the chaotic
+      zones and inside the disc, and so inside the strip radius. `BeltMember::placed_body()` is
+      the `PlacedBody` T16 derives it from. The moon of T18 is left to T22.a. The draws are on
+      `belt.member`, words 0–7 of the member's stream (its radius rank is word 7).
+    - _Slots._ Belts take `0xE1`–`0xED` (`FIRST_BELT_SLOT`, `LAST_BELT_SLOT`), host by host in
+      the caller's order and inside out; `0xE0` stays T28.a's disc, `0xEE` is left for T28.d's
+      debris disc and `0xEF` is the halo (`HALO_SLOT`). `belt.population` gives belt slot n words
+      8n to 8n + 4: the asteroid depletion's rank, the size slope's, the bright mark and the
+      bright efficiency's normal.
+    - _T21.d._ `halo(seed, system, &HaloHost, Scatterer) -> Option<CometaryHalo>`: the host's
+      zero-age mass, its disc's solids, the strip radius and the nearest wide companion's
+      distance. The count, log-uniform over 10¹¹–10¹², is scaled by solids against the median
+      solar disc's 32.2 M⊕ (tested). `new_comet_rate(L)` is an `EventsPerSecond`: 3.9 × 10⁻¹² of
+      the comets a year per 4 au of perihelion (Kaib and Volk 2022), counted to 5 au × √L.
+      `comet_rate(L)`, every long-period comet, is three times it (ruling 84.5): 10.9 a year for
+      the Solar System's 7.5 × 10¹¹ comets. `at(mass_now, mass_loss_rate)` applies D11's loss by
+      radius (ruling 84.4): `surviving_fraction` is 1 − `L_inst` × the mean over an r^(−3.5) halo
+      of clamp(ln(Ψ ÷ 0.1) ÷ ln 30, 0, 1), Ψ Veras et al.'s eq. 15 at the host's initial mass and
+      `L_inst` the instantaneous loss of a thermal distribution, 0.24 at the Sun's 0.54. The rate
+      is the fastest phase's mean (a TPAGB's mass over its duration; infinite for a supernova),
+      which T30 passes. Radii widen by M₀ ÷ M, cut again at the strip radius.
+    - _Tests,_ in the files and in `planetary/belts/tests.rs`, which runs the property sample on
+      300 real systems' placed planets. There is a new golden, `planetary/small_bodies`, blessed at 11. The four tags join `tags.golden`.
+    - _Measured._ A Solar System input gives 2.065–3.279 au, with gaps at 2.502, 2.825 and 2.958
+      au, and 39.4–47.7 au. Massive rings on 4,000 cold and 4,000 hot giants fall
+      inside the Poisson intervals of 0.15 and 0.03.
+    - _Ruling 84, as built._
+      - _Cold belts (84.1)._ A Kuiper-like belt (beyond the planets or the outer third) keeps ε of
+        the solids of the belt proper: with probability `BRIGHT_KUIPER_BELT_PROBABILITY` log₁₀ ε
+        ~ N(`BRIGHT_KUIPER_EFFICIENCY_DEX`, `…_SIGMA_DEX`), held to 1, else
+        `FAINT_KUIPER_EFFICIENCY` = 10⁻³ (all in `params.rs`). Its scattered component keeps its
+        bounds, for its members' wider orbits, and has no mass. The giant rule is gone.
+      - _Detection (84, amended)._ A belt counts when f × `detection_weight(T)` ≥ 10⁻⁶: the 100 µm
+        excess R₁₀₀(T) ÷ R₁₀₀(60 K) of a blackbody belt, at T of the blackbody radius r ÷ 2.5
+        (`Belt::detectable_luminosity`, `blackbody_temperature`). The earlier T < 100 K cut is
+        gone.
+      - _The collisional cap._ M₀ ÷ (1 + t ÷ `t_c`) never exceeds `M_max`(t) = M₀ `t_c` ÷ t, so the
+        cap holds after any ε. The slow test checks f ≤ `maximum_fractional_luminosity` for every
+        Kuiper-like belt. The 5.7% of warm belts came from Kains et al.'s `Q_D*` = 3,700 J kg⁻¹,
+        whose `D_c`^½ `Q_D*`^(5⁄6) e^(−5⁄3) is 2.9 × 10⁶.
+      - _The FGK prefactor now used._ Sibthorpe et al.'s (2018, §4) DEBRIS FGK fit of that
+        combination, 5.5 × 10⁵: `Q_D*` = 495 J kg⁻¹ with `D_c` 450 km and e 0.05. Their §6
+        prints 10⁴ for it. `f_max` is 6.5 × 10⁻⁷ at 3 au (dr ÷ r = 0.2) about the Sun at 1 Gyr.
+        Eq. 20's A0V prefactor gives 1.6 × 10⁻⁸.
+      - _Re-fitted_ on the slow test's 1,749 hosts: **p = 0.60, μ = −0.25, σ = 0.5**. Measured:
+        detected 0.173, weighted f > 10⁻⁷ 0.303, detected warm (T_bb ≥ 100 K) 0.011. Under
+        Kains's prefactor no set met all three: p = 0.40 and μ = −0.5 gave 0.135, 0.303 and 0.027.
+      - _The Solar System's faint belt_ keeps 2.4 × 10⁻³ M⊕ at 39–48 au, a tenth of the measured
+        0.02 M⊕. Its f of order 10⁻⁸ is held to 10⁻⁸–3 × 10⁻⁷.
+      - _Full G (84.1):_ the small-`X_c` form is 0.5–0.8 of G at 40 au (`X_c` = 0.20). It is zero
+        from `X_c` ≥ 1, where `t_c` is infinite.
+      - _84.2–84.3:_ the halo's outer radius is 10⁵ au × (M★ ÷ M☉)^⅓, and asteroid-belt depletion
+        with giants is 10⁻⁴–10⁻².
+      - _The golden_ `planetary/small_bodies` is re-blessed at 11.
+    - _Deviations and choices._
+      - The Solar System test asserts the resonances themselves, 2.065 and 3.279 au to 0.005 au;
+        the plan's 2.1–3.3 rounds them.
+      - The halo's count scales with the disc's solids, not its gas mass. The solids are D5's
+        budget, so the count carries 10^\[Fe/H\].
+      - The companion bound is a third of the nearest wide companion's pericentre, which the
+        caller passes.
+      - A belt that would need a slot past `0xED` is not placed.
+      - A Kuiper-like belt whose resonant band lies beyond the disc's edge keeps its scattered part
+        as its belt proper, with mass.
+      - A member's semi-major axis lies inside its belt. Its pericentre and apocentre are bounded
+        only by the chaotic zones and the disc.
+      - The belt's own record and `SystemSnapshot::with_populations` wait for T30.b and T35, since
+        this lane was kept out of `record.rs`.
+      - `cometary.population` has no host in its draw number: one halo per system.
+      - A ring carries no orientation. Its plane is its planet's equator by convention until T14's
+        pole and T22.a give it one.
+      - The acceptance command runs as `cargo test -p hyperion-sim -- planetary::belts
+planetary::halo`, since cargo takes one positional filter.
 
 #### P14.T22 Satellite assembly and small-body property tests
 
@@ -1718,6 +1821,10 @@ register the five event tags of Provides, each in `rng/tags.rs` (scope `Event`) 
   white spots) and `body.duststorm` for desert planets with thin atmospheres with P = the orbital
   period, a skip mark of two in three and events held to the perihelion season (Mars).
 - **P14.T31.c `events_between`** merges them, sorted by time then `EventId`.
+- _Ruling 84.5 (from `belts`, round 8):_ the halo's `comet_rate(L)` counts every long-period comet,
+  new and returning, three times `new_comet_rate`. Returning comets need `system.comet`'s
+  eccentricities widened from 1 − 10⁻⁴–1 to about 1 − 10⁻²–1. Test (a)'s 5–20 comets a year inside
+  5 au then holds: the Solar System's 7.5 × 10¹¹ comets give 10.9.
   - _Tests:_ (a, b) counts over 10⁴ years match the rates (Poisson interval); (a) a Solar System
     input gives a Shoemaker–Levy-class impact on Jupiter every 50–500 years and 5–20 comets a year
     inside 5 au; (b) dust storms fall only in the perihelion season and about one Mars year in three
@@ -4172,3 +4279,24 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   over `moons::regular::locking_time`, and T14.a's obliquity and T24.b's surface age read whether a
   giant-impact moon exists; the giant-impact moon's elements are to its parent's equator until T14
   places it.
+- **The cold-belt share and T21's other figures (P14.T21, `belts`, round 8). Ruled (ruling 84),
+  and built: see T21's "Ruling 84, as built".** Before the ruling the plan's Kuiper-like belt gave
+  0.938 of single FGK hosts a belt over 10⁻⁶, against Eiroa et al.'s (2013) 20.2 ± 2% and
+  Montesinos et al.'s (2016) 0.22. The halo was cut at 50,000 au, asteroid-belt depletion was
+  10⁻³–10⁻¹, the halo's loss was the non-adiabatic bound, and the comet rate counted first passages
+  only. Ruling 84 replaced all five.
+- **For the orchestrator: the cold-belt fit (`belts`, round 8, after ruling 84's amendment).**
+  - _p = 0.60 and μ = −0.25_ against the amendment's 0.40 and −0.5. With Sibthorpe et al.'s FGK
+    prefactor the collisional cap is lower, and p = 0.40, μ = −0.5 detect only 0.115 of hosts.
+  - _`Q_D*` = 495 J kg⁻¹_ is set from Sibthorpe's combination, and `D_c` stays Kains's 450 km;
+    only the combination is sourced.
+  - _Which of Sibthorpe's values:_ §4.3 ("Best fit parameters") gives 5.5 × 10⁵ km^½ J^(5⁄6) kg^(−5⁄6),
+    and §6 (Summary, vi) prints 10⁴. The build uses §4.3's value, and that choice sets the
+    collisional cap: 10⁴ would lower `f_max` by a further factor of 55. Ruled (ruling 84, last
+    points): A = 5.5 × 10⁵ stands, since §4.3 and Fig. 5's legend agree and §6's 10⁴ is a typo;
+    `Q_D*` = 495 J kg⁻¹ is solved from it. The re-fit p = 0.60, μ = −0.25, σ = 0.5 stands.
+  - _The checks count every belt:_ the warm share (0.011) and the collisional cap cover asteroid
+    belts as well as Kuiper-like ones. No asteroid belt is detected warm in the sample.
+  - _The comet rate:_ 10.9 a year inside 5 au for 7.5 × 10¹¹ comets, just under the ruling's
+    11–14; its test accepts 10.5–14. The 11 a year of Vokrouhlický et al. are inside 4 au, where
+    this gives 8.7.

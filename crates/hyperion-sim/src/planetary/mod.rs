@@ -39,6 +39,9 @@
 //!   [`PlanetarySystem`] they return with its queries at a time, `body_at`, `snapshot_at`,
 //!   `position_at` and `habitable_zone_at` (P14.T30.a–b).
 //! - [`label`]: bodies' labels for people, `A b` onwards (design note 22, P14.T30.c).
+//! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
+//!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
+//!   cometary halo (P14.T21.d), each from plain arguments until P14.T22.a and T30.a call them.
 //!
 //! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
 //! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
@@ -86,11 +89,13 @@
 //! | 01 | a planet's radius rank (P14.T30.a) | [`rng::tags::PLANET_RADIUS`](crate::rng::tags::PLANET_RADIUS) (`Body`), opened with `ObjectKey::from(BodyId)` |
 
 pub mod architecture;
+pub mod belts;
 pub mod context;
 pub mod derive;
 pub mod disc;
 pub mod error;
 pub mod fate;
+pub mod halo;
 pub mod hosts;
 pub mod index;
 pub mod label;
@@ -98,6 +103,7 @@ pub mod moons;
 pub mod params;
 pub mod placement;
 pub mod record;
+pub mod rings;
 pub mod system;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
