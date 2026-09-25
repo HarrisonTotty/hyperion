@@ -5,7 +5,8 @@
 //!
 //! - **Eccentricity**, from the group's [`EccentricityLaw`] (P14.T5), by inversion of one rank:
 //!   Rayleigh with σ = 0.04 for cold compact chains, half-normal with σ = 0.3 for the dynamically
-//!   hot variant, Rayleigh with σ = 0.05 for the Solar-like and terrestrial groups, and Kipping's
+//!   hot variant of one or two planets and 0.046 × (n ÷ 5)^−1.74 for one of n ≥ 3 (ruling 94.6;
+//!   [`HotVariant::eccentricity_for`]), Rayleigh with σ = 0.05 for the Solar-like and terrestrial groups, and Kipping's
 //!   (2013) Betas for giants. Each law is truncated at the planet's own limit, the largest
 //!   eccentricity whose periapsis and apoapsis stay inside the zone and outside twice the host's
 //!   Roche limit (see [`super`]), by drawing its rank inside the truncated range, so that the law's
@@ -43,6 +44,8 @@
 //! periapsis and the mean anomaly, each uniform ([`OrbitDraws`]); words 5–7 are reserved. On
 //! [`tags::PLANET_PLANE`], keyed by the system's ID, orbit host h reads words 4h and 4h + 1, the
 //! cosine of its plane's inclination and its node ([`PLANE_WORDS_PER_HOST`]).
+//!
+//! [`HotVariant::eccentricity_for`]: crate::planetary::architecture::template::HotVariant::eccentricity_for
 
 use core::f64::consts::{PI, SQRT_2, TAU};
 

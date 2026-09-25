@@ -104,7 +104,9 @@ use crate::planetary::architecture::template::{
     ClassTemplate, CountLaw, EARLY_M_DWARF_FIRST_PERIOD_SCALE, EccentricityLaw, GroupRole,
     Location, Origin, PeriodLaw, PlanetGroup, Reach, SpacingFamily, template,
 };
-use crate::planetary::architecture::{ArchitectureClass, ZoneLimit, early_m_dwarf_share};
+use crate::planetary::architecture::{
+    ArchitectureClass, ZoneLimit, early_m_dwarf_share, first_period_share,
+};
 use crate::planetary::derive::composition::SnowLineSide;
 use crate::planetary::derive::radius::radius_chen_kipping;
 use crate::planetary::disc::{Disc, DiscHost, DiscProfile, Truncation};
@@ -347,6 +349,7 @@ pub struct PlacedPlanet {
     hot: bool,
     resonance: Option<Resonance>,
     drawn_eccentricity: f64,
+    eccentricity_law: EccentricityLaw,
     rescaled: bool,
 }
 
@@ -433,6 +436,13 @@ impl PlacedPlanet {
     #[must_use]
     pub const fn drawn_eccentricity(&self) -> f64 {
         self.drawn_eccentricity
+    }
+
+    /// The law the planet's eccentricity was drawn from (P14.T8.d): its group's, or its hot
+    /// variant's for the variant's count (ruling 94.6).
+    #[must_use]
+    pub const fn eccentricity_law(&self) -> EccentricityLaw {
+        self.eccentricity_law
     }
 
     /// Whether D7's re-check scaled the drawn eccentricity down.
@@ -904,7 +914,6 @@ impl<'a> Placer<'a> {
                     .hot_variant
                     .is_below(Threshold::from_probability(variant.probability_about(mass)))
             });
-            let law = hot.map_or(group.eccentricity(), |variant| variant.eccentricity());
             let wanted = match (present, hot) {
                 (false, _) => 0,
                 (true, None) => draw_count(group.count(), mass, &draws),
@@ -922,6 +931,8 @@ impl<'a> Placer<'a> {
                     .saturating_sub(u16::from(slot))
             });
             let n = u8::try_from(u16::from(wanted).min(room)).expect("at most a count");
+            // Ruling 94.6: a hot variant's eccentricities narrow with its count.
+            let law = hot.map_or(group.eccentricity(), |variant| variant.eccentricity_for(n));
             let indices: Vec<BodyIndex> = (slot..slot + n).map(planet_index).collect();
             slot += n;
             let masses = if indices.is_empty() {
@@ -1106,9 +1117,9 @@ impl<'a> Placer<'a> {
                     return None;
                 }
                 let (a, b) = (min.max_of(p_lo), max.min_of(p_hi));
-                // Ruling 85.4: an early M dwarf's chain starts closer in.
+                // Rulings 85.4 and 94.1: an M dwarf's chain starts closer in.
                 let law = if group.role() == GroupRole::Chain {
-                    let blend = early_m_dwarf_share(self.host_mass());
+                    let blend = first_period_share(self.host_mass());
                     law.with_break_scaled(math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, blend))
                 } else {
                     law
@@ -1526,6 +1537,7 @@ impl<'a> Placer<'a> {
                     hot: m.hot,
                     resonance: p.resonance,
                     drawn_eccentricity: p.e,
+                    eccentricity_law: m.law,
                     rescaled: rescaled[i],
                 }
             })
@@ -1970,9 +1982,59 @@ mod tests {
         });
         assert_p_value("cold chains' eccentricities", ks.p_value, ALPHA);
         // Few cold chain planets are scaled down: the spacing is drawn against the floor of the
-        // eccentricities assumed. (The hot variant's half-normal 0.3 is scaled down more often,
-        // most about the early M dwarfs, whose hot variant has the cold chain's count; ruling
-        // 87.2.)
+        // eccentricities assumed. (The hot variant's are bounded in
+        // `hot_chain_eccentricities_narrow_with_their_count`.)
+        assert!(
+            f64::from(rescaled) < 0.1 * f64::from(all),
+            "{rescaled} of {all}"
+        );
+    }
+
+    /// Ruling 94.6: a hot chain of three or more draws its eccentricities from the half-normal
+    /// law of scale 0.046 × (n ÷ 5)^−1.74, few of them are scaled down to the spacing floor,
+    /// and a hot variant of one or two keeps the half-normal 0.3.
+    #[test]
+    fn hot_chain_eccentricities_narrow_with_their_count() {
+        use crate::planetary::architecture::template::{
+            HOT_MULTIPLE_ECCENTRICITY_SCALE, HOT_MULTIPLE_ECCENTRICITY_SLOPE,
+        };
+        let scale = |n: u8| {
+            HOT_MULTIPLE_ECCENTRICITY_SCALE
+                * math::powf(f64::from(n) / 5.0, HOT_MULTIPLE_ECCENTRICITY_SLOPE)
+        };
+        let mut ranks = Vec::new();
+        let (mut all, mut rescaled, mut pairs) = (0_u32, 0_u32, 0_u32);
+        for s in sample(ArchitectureClass::CompactMulti, 7_000) {
+            if s.limits != Truncation::NONE {
+                continue;
+            }
+            let hot: Vec<&PlacedPlanet> = s.placed.planets().iter().filter(|p| p.hot()).collect();
+            for p in &hot {
+                let EccentricityLaw::HalfNormal { sigma } = p.eccentricity_law() else {
+                    panic!(
+                        "a hot chain's law is half-normal: {:?}",
+                        p.eccentricity_law()
+                    );
+                };
+                if (sigma - 0.3).abs() < 1e-12 {
+                    pairs += 1;
+                    continue;
+                }
+                assert!(
+                    (3..=10).any(|n| (scale(n) - sigma).abs() < 1e-12),
+                    "a count's scale: {sigma}"
+                );
+                all += 1;
+                rescaled += u32::from(p.rescaled());
+                ranks.push(math::erf(p.drawn_eccentricity() / (sigma * SQRT_2)));
+            }
+            if s.host.zams().mass().value() > 0.7 {
+                assert!(hot.len() <= 2, "an FGK host's hot variant has one or two");
+            }
+        }
+        assert!(all > 2_000 && pairs > 500, "{all} {pairs}");
+        let ks = ks_one_sample(&mut ranks, |u| u.clamp(0.0, 1.0));
+        assert_p_value("hot chains' eccentricities", ks.p_value, ALPHA);
         assert!(
             f64::from(rescaled) < 0.1 * f64::from(all),
             "{rescaled} of {all}"

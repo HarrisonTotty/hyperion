@@ -8,18 +8,20 @@
 //!   ([`MassLaw::Correlated`]) has one characteristic mass `m_c`, whose median follows how the
 //!   group grew ([`is_drift_fed`], [`characteristic_mass`]):
 //!   - a *drift-fed* group, a compact chain, a warm giant's companions or a substellar chain:
-//!     `m_c` = 7.7 M⊕ × (M★ ÷ M☉) × 10^(`σ_b` z), with `σ_b` = 0.515 dex
-//!     ([`BETWEEN_SYSTEM_SCATTER_DEX`]). The host sets it; the disc's solids and metallicity do
-//!     not. It is the centre of its members' law, not a planet, and is not held to the template's
-//!     range (ruling 73.2, below);
+//!     `m_c` = 7.7 M⊕ × (M★ ÷ M☉) × 10^(`σ_b` z), with `σ_b` = 0.513 dex
+//!     ([`BETWEEN_SYSTEM_SCATTER_DEX`]), M★ held at 0.35 M☉ for a star below it
+//!     ([`MEDIAN_HOST_MASS_FLOOR`], ruling 94.5). The host sets it; the disc's solids and
+//!     metallicity do not. It is the centre of its members' law, not a planet, and is not held to
+//!     the template's range (ruling 73.2, below);
 //!   - an *in-situ* rocky group: `m_c` = 0.5 M⊕ × (`M_s` ÷ [`REFERENCE_SOLID_MASS`]), as P14.T7.a
 //!     wrote it, held to the template's range, `M_s` being the whole solid mass of the host's disc
 //!     between its edges, already cut to the host's stable zone (P14.T9).
 //! - **Members** (P14.T7.b). Member i of n, counted inside out, has log₁₀ mᵢ normal about
-//!   log₁₀ `m_c` + s (i − (n − 1) ÷ 2) with the same scatter `σ_w` for every member, 0.165 dex for
+//!   log₁₀ `m_c` + s (i − (n − 1) ÷ 2) with the same scatter `σ_w` for every member, 0.17 dex for
 //!   a drift-fed group ([`WITHIN_SYSTEM_SCATTER_DEX`]) and 0.2 for a rocky one
 //!   ([`ROCKY_WITHIN_SYSTEM_SCATTER_DEX`]), truncated to the template's range (for a
-//!   drift-fed group, its host-scaled [`mass_floor`] to its ceiling): s more per step outward,
+//!   drift-fed group about a star, truncated at its host-scaled [`mass_floor`] and tapered as
+//!   q^−2.9 above its ceiling to a giant's mass, [`taper_limit`], ruling 94.4): s more per step outward,
 //!   centred on the group so that `m_c` stays its typical mass whatever its count, s = 0.21 dex for
 //!   a drift-fed group ([`OUTWARD_STEP_DEX`]) and 0 for a rocky one ([`ROCKY_OUTWARD_STEP_DEX`]).
 //!   The member's own variate εᵢ is taken at its rank Φ(εᵢ) in the truncated law
@@ -99,7 +101,7 @@
 //!
 //! Wu's width is 0.29 dex for her preferred Earth-like cores; her Table 1 trades it against the
 //! cores' density, to 0.54 dex at 2 g cm⁻³. This module's is `σ_b` and `σ_w` together, 0.54 dex
-//! (ruling 85.1), split as 0.515 and 0.165 to meet Weiss et al.'s pair statistics compared like
+//! (ruling 85.1), split as 0.513 and 0.17 (0.515 and 0.165 before ruling 94.4's taper) to meet Weiss et al.'s pair statistics compared like
 //! with like (below). Wu's 0.29 does not meet them (ruling 73.2): split as `σ_b` 0.21 and `σ_w`
 //! 0.2 it puts the adjacent log radii's correlation at 0.47, and split as 0.28–0.29 and 0.03–0.07
 //! it reaches 0.58–0.61 only with a step that makes the outer planet the larger in 68–70% of pairs
@@ -116,9 +118,31 @@
 //! the range, from the same words, and none sits at a bound. A drift-fed group's `m_c` is not
 //! truncated or held itself: holding it, or truncating its own law to the range, narrowed the
 //! scatter between systems that carries Weiss et al.'s correlation (0.52–0.57 against 0.60–0.70),
-//! so a group whose `m_c` lies above the ceiling has members crowded just under it. The ceiling is
-//! 20 M⊕ × (M★ ÷ M☉) since ruling 85.2 ([`mass_ceiling`]): 4.8% of the chain planets about hosts
-//! of 0.9–1.1 M☉ and 6.6% of those about 0.2–0.4 M☉ lie within 0.02 dex under it, none at it.
+//! so a group whose `m_c` lies above the ceiling had members crowded just under it. The ceiling is
+//! 20 M⊕ × (M★ ÷ M☉) since ruling 85.2 ([`mass_ceiling`]), where 4.8% of the chain planets about
+//! hosts of 0.9–1.1 M☉ and 6.6% of those about 0.2–0.4 M☉ lay within 0.02 dex under it.
+//!
+//! # The taper (ruling 94.4)
+//!
+//! The hard ceiling excluded real planets: CD Cet b (3.95 M⊕ in m sin i at 0.161 M☉, against a
+//! ceiling of 3.2), LP 819-052 b (7.4 at 0.178, against 3.6) and Ross 1020 b (8.0 at 0.272, against
+//! 5.4), three of Sabotta et al.'s (2021, Table 1) ten late-M planets at 1–10 days, and it made
+//! Kaminski et al.'s (2025, Table 7) 3–10 M⊕ bin about hosts under 0.16 M☉, 0.11 (+0.11 −0.06) at
+//! 1–10 days, structurally empty. Above the ceiling a drift-fed member's law now falls as Pascucci
+//! et al.'s (2018, Table 1) mass-ratio function does above its break, dN ÷ d log q ∝ q^−2.9
+//! ([`MASS_TAPER_INDEX`]), never above the member's own law and continuous with it at the ceiling
+//! ([`tapered_log_mass`]), and ends at a giant's
+//! mass, so that a chain's planets stay small planets ([`taper_limit`]). The taper starts at the
+//! ceiling, not at Pascucci et al.'s break (q ≈ 2.8 × 10⁻⁵, 9.3 M⊕ × M★): here the break is the
+//! law's median, Wu's 7.7 M⊕ × M★, which their forward-modelled 7.7 ± 1.7 M⊕ confirms, and the
+//! log-normal above it already falls; a wall of slope −2.9 from the break would crowd the 44% of
+//! a Sun's members that the 0.54 dex law puts above 9.3 M⊕ into the next 0.15 dex. On
+//! P14.T10.b's placed sample, of the drift-fed planets 11.4% about FGK primaries, 16.0% about
+//! early M and 22.9% about late M primaries (0.08–0.337 M☉) lie above the old ceiling, and 2.2%,
+//! 2.2% and 2.9% within 0.02 dex under it; none about hosts under 1.59 M☉ reaches a giant's mass.
+//! The taper let the outer members of chains centred near the ceiling grow past it, so the outer
+//! planet became the heavier in 0.752 of P14.T7.b's sample, over its 0.55–0.75; `σ_b` and `σ_w`
+//! were re-split, 0.515 and 0.165 to 0.513 and 0.17, the same 0.54 dex, which gives 0.746.
 //!
 //! # The solid budget (ruling 38, point 4; ruling 60)
 //!
@@ -167,15 +191,15 @@
 //!
 //! A drift-fed group's mass no longer carries its disc's scatter, so `σ_b` is the whole of the
 //! scatter between systems. The width is 0.54 dex (ruling 85.1), and its split between `σ_b` and
-//! `σ_w`, 0.515 and 0.165 dex, is fitted with the step kept at ruling 60's 0.21 dex, on
+//! `σ_w`, 0.513 and 0.17 dex, is fitted with the step kept at ruling 60's 0.21 dex, on
 //! P14.T10.b's placed hosts through P14.T11's Chen and Kipping radius with each planet's own
 //! quantile, compared like with like with Weiss et al.'s pairs: all pairs' log radii correlate at
-//! 0.642 about FGK primaries of drawn \[Fe/H\] (0.60–0.70) and 0.646 about single Suns, and pairs
-//! of planets above 1 R⊕ at 0.589 (0.53, within two standard errors, 0.46–0.60); in linear radius
-//! 0.540 and 0.486. The outer planet is the larger in 0.638 of pairs against their 65.4 ± 0.4%,
-//! which the split does not reach and ruling 85.1 records rather than tunes. In this module's
-//! sample of 2,000 chains in solar discs the log radii correlate at 0.620, the log masses at 0.867,
-//! and the outer planet is the heavier in 0.750 of pairs and the larger in 0.640.
+//! 0.660 about FGK primaries of drawn \[Fe/H\] (0.60–0.70) and 0.654 about single Suns, and pairs
+//! of planets above 1 R⊕ at 0.614 (0.53; ruling 87.1's window 0.45–0.62); in linear radius
+//! 0.552 and 0.504. The outer planet is the larger in 0.651 of pairs against their 65.4 ± 2.1%
+//! (ruling 87.4), which it meets since ruling 94.4's taper (0.638–0.640 before). In this module's
+//! sample of 2,000 chains in solar discs the log radii correlate at 0.636, the log masses at 0.859,
+//! and the outer planet is the heavier in 0.746 of pairs and the larger in 0.642.
 //! Chen and Kipping's scatter, 0.146 dex in radius above 2.04 M⊕ and independent for each planet
 //! (design note 8), is what separates the radius statistics from the mass ones; He, Ford and
 //! Ragozzine (2019, MNRAS 490, 4575, §3.7) fit a within-system width of 0.31 ± 0.07 in ln R, 0.135
@@ -202,6 +226,7 @@ use crate::planetary::architecture::{
 };
 use crate::planetary::disc::{Disc, DiscProfile};
 use crate::planetary::index::{BodyIndex, BodySlot, BodySub};
+use crate::planetary::params::SPACING_GIANT_MASS;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::draws::{StandardNormal, UnitUniform};
 use crate::units::consts::METRES_PER_AU;
@@ -257,8 +282,8 @@ pub const ROCKY_CHARACTERISTIC_MASS: EarthMasses = EarthMasses::new(0.5);
 /// [`DiscDraws::MEDIAN`]: crate::planetary::disc::DiscDraws::MEDIAN
 pub const REFERENCE_SOLID_MASS: EarthMasses = EarthMasses::new(32.20);
 
-/// The between-system scatter `σ_b` of a drift-fed group's characteristic mass, in dex: 0.515
-/// (P14.T7.a–b; rulings 60 and 85.1).
+/// The between-system scatter `σ_b` of a drift-fed group's characteristic mass, in dex: 0.513
+/// (P14.T7.a–b; rulings 60, 85.1 and 94.4; 0.515 before the taper).
 ///
 /// Plan 14 leaves `σ_b` to be chosen, with `σ_w`, so that adjacent planets' log radii correlate at
 /// 0.65 (Weiss et al. 2018). A drift-fed group's mass no longer follows its disc, so this is the
@@ -266,15 +291,16 @@ pub const REFERENCE_SOLID_MASS: EarthMasses = EarthMasses::new(32.20);
 /// hosts (see the [module documentation](self)): with [`WITHIN_SYSTEM_SCATTER_DEX`] it makes the
 /// 0.54 dex of ruling 85.1 (0.5 and 0.2 when members were clamped). It is drawn on words 2–3 of the group's first
 /// member's block. A rocky group takes none: its disc's own scatter carries it.
-pub const BETWEEN_SYSTEM_SCATTER_DEX: f64 = 0.515;
+pub const BETWEEN_SYSTEM_SCATTER_DEX: f64 = 0.513;
 
 /// The within-system scatter `σ_w` of a drift-fed group's member about its characteristic mass,
-/// in dex: 0.165 (P14.T7.b; ruling 85.1; 0.2 before its members were truncated to their range).
+/// in dex: 0.17 (P14.T7.b; rulings 85.1 and 94.4; 0.165 before the taper, 0.2 before its members
+/// were truncated to their range).
 ///
 /// Chosen so that the adjacent log radii of compact systems in solar discs, after P14.T11's Chen
 /// and Kipping radius, correlate at Weiss et al.'s (2018) 0.65; see the [module
 /// documentation](self) for what it gives and what it cannot.
-pub const WITHIN_SYSTEM_SCATTER_DEX: f64 = 0.165;
+pub const WITHIN_SYSTEM_SCATTER_DEX: f64 = 0.17;
 
 /// The within-system scatter `σ_w` of a rocky group's members, in dex: 0.2 (P14.T7.b; ruling
 /// 55.1).
@@ -301,7 +327,8 @@ pub const fn within_scatter(group: &PlanetGroup) -> f64 {
 /// Plan 14 had 0.1, for Weiss et al.'s (2018) outer planets being the larger in most pairs; 0.21
 /// made the outer planet the larger in their 65.4% of pairs on P14.T10.b's placed hosts with
 /// clamped members (ruling 55.1 proposed it: "a larger outward step with the scatter re-fitted").
-/// With truncated members it gives 0.638, which ruling 85.1 records rather than tunes. It is
+/// With truncated members it gave 0.638, which ruling 85.1 recorded rather than tuned, and with
+/// ruling 94.4's taper 0.651, inside the ±2.1% of their 504 pairs (ruling 87.4). It is
 /// centred on the group's middle member.
 pub const OUTWARD_STEP_DEX: f64 = 0.21;
 
@@ -469,7 +496,8 @@ pub const fn is_drift_fed(role: GroupRole) -> bool {
 ///
 /// - A drift-fed group ([`is_drift_fed`]): [`reference_mass`] × (M★ ÷ M☉) × 10^(`σ_b` z), with
 ///   [`BETWEEN_SYSTEM_SCATTER_DEX`], M★ being the disc's host mass (a pair's total, for a
-///   circumbinary disc). Neither the disc's solids nor its metallicity enter. It is not held to
+///   circumbinary disc), held at [`MEDIAN_HOST_MASS_FLOOR`] for a star below it
+///   ([`median_host_mass`]). Neither the disc's solids nor its metallicity enter. It is not held to
 ///   the group's range, which holds the members instead (ruling 73.2): it may lie beyond it.
 /// - Any other: [`reference_mass`] × (`M_s` ÷ [`REFERENCE_SOLID_MASS`]), `M_s` being the disc's
 ///   whole solid mass between its edges, as P14.T7.a wrote it, with no added scatter, held to the
@@ -483,7 +511,7 @@ pub fn characteristic_mass(
     between: StandardNormal,
 ) -> EarthMasses {
     if is_drift_fed(group.role()) {
-        let median = reference_mass(group) * disc.host_mass().value();
+        let median = reference_mass(group) * median_host_mass(disc.host_mass()).value();
         median * math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * between.value())
     } else {
         held_between(
@@ -494,7 +522,38 @@ pub fn characteristic_mass(
     }
 }
 
-/// The greatest mass a member of `group` about the host of `disc` is drawn under (ruling 85.2).
+/// The least host mass a drift-fed group's median follows: 0.35 M☉ (ruling 94.5), below which a
+/// star's chains keep the median of a 0.35 M☉ host, 2.7 M⊕.
+///
+/// A calibration, not a law. Wu's (2019, ApJ 874, 91, §2) linear scaling is calibrated on hosts
+/// from about 0.65 M☉ up, and Pascucci et al.'s (2018, §2) M bin has a median of 0.42 M☉ with
+/// "very few exoplanet candidates around M dwarfs"; below about 0.4 M☉ nothing constrains it,
+/// and its extrapolation misses the late M dwarfs' planets. With ruling 94's closer first period
+/// and taper, single stars of 0.14–0.337 M☉ (median 0.24, Ribas et al.'s) held 0.400 planets of
+/// 1–10 M⊕ in m sin i at 1–10 days against Ribas et al.'s (2023, A&A 670, A139, §5)
+/// 0.56 (+0.15 −0.14), under ruling 94.5's 0.42, and hosts under 0.16 M☉ 0.41 of 0.5–3 M⊕
+/// against Kaminski et al.'s (2025, Table 7) 0.88 (+0.36 −0.28). Holding the median at 0.35 M☉,
+/// as ruling 94.5 directs, gives 0.50 and 0.63, inside both windows (P14.T10.b), and Kaminski et
+/// al.'s 3–10 M⊕ bin 0.065 (0.03–0.3). The chains' inward mass step was separated first: the
+/// chain planets at 1–10 days are 1–10 M⊕ in m sin i in 31% of cases against 49% of the chains'
+/// planets at 1–1,000 days, and the host masses, drawn uniform to Ribas et al.'s median, give
+/// 0.23, 0.39 and 0.44 at 0.08–0.16, 0.16–0.24 and 0.24–0.337 M☉ before the hold. A substellar
+/// host's chain keeps the linear law, its template's 0.01–2 M⊕ being its hosts' range already.
+pub const MEDIAN_HOST_MASS_FLOOR: SolarMasses = SolarMasses::new(0.35);
+
+/// The host mass a drift-fed group's median scales with (ruling 94.5): the host's own, held at
+/// [`MEDIAN_HOST_MASS_FLOOR`] for a star below it.
+#[must_use]
+pub fn median_host_mass(host: SolarMasses) -> SolarMasses {
+    if host >= SUBSTELLAR_LIMIT && host < MEDIAN_HOST_MASS_FLOOR {
+        MEDIAN_HOST_MASS_FLOOR
+    } else {
+        host
+    }
+}
+
+/// The mass above which a member of `group` about the host of `disc` is tapered, or under which
+/// it is truncated (rulings 85.2 and 94.4; [`taper_limit`]).
 ///
 /// A drift-fed group about a star scales its template's ceiling with its host, as its floor and
 /// its masses do: 20 M⊕ × (M★ ÷ M☉) for a compact chain or a warm giant's companions. Any other
@@ -552,22 +611,167 @@ pub const fn outward_step(group: &PlanetGroup) -> f64 {
     }
 }
 
+/// How steeply the occurrence of a drift-fed group's members falls above its ceiling: dN ÷
+/// d log q ∝ q^−2.9 (ruling 94.4).
+///
+/// Pascucci et al. (2018, ApJ 856, L28, §2, eq. 1 and Table 1) fit the occurrence of Kepler's
+/// planets inside 100 days against the planet-to-star mass ratio q with a broken power law whose
+/// index above the break is −2.7 ± 0.7, −2.9 ± 0.4 and −2.9 ± 0.4 for M, K and G hosts
+/// (−1.9 ± 0.2 for F), and "n ∼ −2.9 (q > `q_br`)" for the universal law of hosts under 1 M☉.
+pub const MASS_TAPER_INDEX: f64 = 2.9;
+
+/// Where the taper above `group`'s [`mass_ceiling`] ends about the host of `disc`, if its members
+/// are tapered rather than truncated at the ceiling (ruling 94.4): for a drift-fed group about a
+/// star whose ceiling, ruling 85.2's 20 M⊕ × (M★ ÷ M☉), lies under a giant's mass, at that mass,
+/// [`SPACING_GIANT_MASS`] (0.1 Jupiter masses, about 32 M⊕).
+///
+/// A chain's planets stay small planets: one of a giant's mass would be spaced, gapped and
+/// placed by the placer's rules for giants, and counted as formed at the giants' core site
+/// (P14.T8). The taper is truncated there, as ruling 85.2 truncated the law at its ceiling, so
+/// nothing piles at it; about a Sun it has fallen to 10^(−2.9 × 0.2) ≈ 0.26 of its value at the
+/// ceiling, about an M dwarf of 0.3 M☉ to 0.8%. Hosts above about 1.6 M☉, whose ceiling lies
+/// above the giant's mass, keep the truncated law, and so does a substellar host's chain (its
+/// template's hard 2 M⊕) and every other group (its template's range).
+///
+/// [`SPACING_GIANT_MASS`]: crate::planetary::params::SPACING_GIANT_MASS
+#[must_use]
+pub fn taper_limit(group: &PlanetGroup, disc: &DiscProfile) -> Option<EarthMasses> {
+    let giant = EarthMasses::from(SPACING_GIANT_MASS);
+    (is_drift_fed(group.role())
+        && disc.host_mass() >= SUBSTELLAR_LIMIT
+        && mass_ceiling(group, disc) < giant)
+        .then_some(giant)
+}
+
 /// A member's mass about `characteristic`, at its scatter `scatter` and `steps` outside the
 /// middle of a group whose members step outward by `step` dex with a scatter of `sigma` dex,
-/// drawn inside `floor`–`ceiling` (P14.T7.b; rulings 66 and 73.2): the log-normal law about
-/// `characteristic` shifted by the steps, truncated to the range, at the scatter's rank
-/// ([`StandardNormal::truncated`]).
+/// drawn above `floor` and under `ceiling`, or tapered above the ceiling to `taper` (P14.T7.b;
+/// rulings 66, 73.2 and 94.4): the log-normal law about `characteristic` shifted by the steps,
+/// truncated to the range ([`StandardNormal::truncated`]) or tapered ([`tapered_log_mass`]), at
+/// the scatter's rank.
 #[must_use]
 fn member_mass(
     characteristic: EarthMasses,
     scatter: StandardNormal,
     steps: f64,
     (step, sigma): (f64, f64),
-    (floor, ceiling): (EarthMasses, EarthMasses),
+    (floor, ceiling, taper): (EarthMasses, EarthMasses, Option<EarthMasses>),
 ) -> EarthMasses {
     let (low, high) = (math::log10(floor.value()), math::log10(ceiling.value()));
     let mean = math::log10(characteristic.value()) + step * steps;
-    EarthMasses::new(math::exp10(scatter.truncated(mean, sigma, low, high)))
+    let log_mass = match taper {
+        Some(limit) => tapered_log_mass(
+            scatter,
+            mean,
+            sigma,
+            (low, high, math::log10(limit.value())),
+        ),
+        None => scatter.truncated(mean, sigma, low, high),
+    };
+    EarthMasses::new(math::exp10(log_mass))
+}
+
+/// The upper tail of the standard normal, Q(x) = 1 − Φ(x), accurate in both tails.
+#[must_use]
+fn upper_tail(x: f64) -> f64 {
+    0.5 * math::erfc(x * core::f64::consts::FRAC_1_SQRT_2)
+}
+
+/// The standard normal's density.
+#[must_use]
+fn density(x: f64) -> f64 {
+    math::exp(-0.5 * x * x) / (2.0 * core::f64::consts::PI).sqrt()
+}
+
+/// The log₁₀ mass at `scatter`'s rank Φ(z) of a normal law about `mean` of width `sigma` dex,
+/// truncated below at `low`, tapered above `high` and truncated at `limit` (ruling 94.4).
+///
+/// Above `high` the density in x = log₁₀ m is the smaller of the member's own normal law and a
+/// wall falling from the law's value at `high` as 10^(−[`MASS_TAPER_INDEX`] (x − `high`)),
+/// Pascucci et al.'s mass-ratio function above its break. So the taper never adds mass the
+/// member's law would not have: a member centred well under the ceiling keeps its whole law,
+/// whose own fall there is already the steeper, and one centred above it falls as the wall does
+/// instead of crowding under it, as the truncated law made it.
+///
+/// In units of σ, with a, b and c the floor, the ceiling and the limit less `mean`, over σ, and
+/// λ = 2.9 ln 10 σ, the wall meets the normal again at 2λ − b (solving −t²/2 = −b²/2 − λ(t − b)),
+/// and binds only between b and that, so for b ≥ λ the law is the normal truncated to a–c. The
+/// law's parts, inside out: the body Φ(b) − Φ(a); the wall (φ(b) ÷ λ)(1 − e^(−λ(e − b))) to
+/// e = min(2λ − b, c); the normal's tail Q(e) − Q(c). A rank is inverted in whichever part holds
+/// it, from the top down for Q(z) W of the whole W above it. One word, the member's own, as
+/// before.
+#[must_use]
+fn tapered_log_mass(
+    scatter: StandardNormal,
+    mean: f64,
+    sigma: f64,
+    (low, high, limit): (f64, f64, f64),
+) -> f64 {
+    debug_assert!(
+        sigma > 0.0 && low <= high && high <= limit,
+        "a tapered law needs σ > 0 and floor ≤ ceiling ≤ limit: σ = {sigma}, [{low}, {high}, \
+         {limit}]"
+    );
+    let (lo, hi, top) = (
+        (low - mean) / sigma,
+        (high - mean) / sigma,
+        (limit - mean) / sigma,
+    );
+    let lambda = MASS_TAPER_INDEX * core::f64::consts::LN_10 * sigma;
+    // Where the wall gives way to the normal again, at or beyond the ceiling.
+    let rejoin = (2.0 * lambda - hi).max(hi).min(top);
+    // The body's weight, taken from the side that keeps its digits.
+    let body = if lo >= 0.0 {
+        upper_tail(lo) - upper_tail(hi)
+    } else if hi <= 0.0 {
+        upper_tail(-hi) - upper_tail(-lo)
+    } else {
+        1.0 - upper_tail(-lo) - upper_tail(hi)
+    }
+    .max(0.0);
+    let wall = density(hi) / lambda;
+    let beyond = math::exp(-lambda * (rejoin - hi));
+    let walled = -wall * math::exp_m1(-lambda * (rejoin - hi));
+    let tail = (upper_tail(rejoin) - upper_tail(top)).max(0.0);
+    let whole = body + walled + tail;
+    if !(whole > 0.0 && whole.is_finite()) {
+        // Unreachable for any drawn centre: the ceiling would need to lie 38 σ from it.
+        return mean.clamp(low, high);
+    }
+    let variate = scatter.value();
+    let (below, above) = (upper_tail(-variate) * whole, upper_tail(variate) * whole);
+    let t = if above < tail {
+        // In the normal's tail beyond the wall: Q(t) = Q(c) + above.
+        let q = upper_tail(top) + above;
+        if q > 0.0 {
+            -math::normal_quantile(q)
+        } else {
+            top
+        }
+        .max(rejoin)
+    } else if above < tail + walled {
+        // On the wall: (φ(b) ÷ λ)(e^(−λ(t − b)) − e^(−λ(e − b))) = above − tail.
+        (hi - math::ln((above - tail) / wall + beyond) / lambda).clamp(hi, rejoin)
+    } else if lo < 0.0 {
+        // In the body, `below` of the whole lies under the rank: Φ(t) = Φ(a) + below.
+        let p = upper_tail(-lo) + below;
+        if p > 0.0 {
+            math::normal_quantile(p)
+        } else {
+            lo
+        }
+        .min(hi)
+    } else {
+        // Both ends above the centre: Q(t) = Q(a) − below.
+        let q = upper_tail(lo) - below;
+        if q > 0.0 {
+            -math::normal_quantile(q)
+        } else {
+            hi
+        }
+        .min(hi)
+    };
+    (mean + sigma * t).clamp(low, limit)
 }
 
 /// The mass at `rank` of a group law over `range`: the inverse of its cumulative distribution
@@ -830,7 +1034,11 @@ pub fn group_masses_from(
             Some(first) => {
                 let characteristic = characteristic_mass(group, disc, first.group);
                 let (step, sigma) = (outward_step(group), within_scatter(group));
-                let limits = (mass_floor(group, disc), mass_ceiling(group, disc));
+                let limits = (
+                    mass_floor(group, disc),
+                    mass_ceiling(group, disc),
+                    taper_limit(group, disc),
+                );
                 let masses = draws
                     .iter()
                     .enumerate()
@@ -927,8 +1135,9 @@ pub fn group_masses_from(
 /// let typical = group.characteristic().expect("a correlated group").value();
 /// let expected = 7.7 * hyperion_sim::math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * z);
 /// assert!((typical / expected - 1.0).abs() < 1e-9);
-/// // Every member is drawn inside the chain's 1–20 M⊕, wherever its characteristic mass lies.
-/// assert!(group.masses().iter().all(|m| (1.0..=20.0).contains(&m.value())));
+/// // Every member is drawn above the chain's 1 M⊕ floor and under a giant's mass, about 32 M⊕,
+/// // wherever its characteristic mass lies: the law tapers above 20 M⊕ (ruling 94.4).
+/// assert!(group.masses().iter().all(|m| (1.0..31.8).contains(&m.value())));
 /// assert!(group.total() <= solid_budget(profile));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -1454,8 +1663,7 @@ mod tests {
         assert!((0.80..0.90).contains(&mass_r), "{mass_r}");
         assert!((0.55..0.75).contains(&outer_heavier), "{outer_heavier}");
         // Weiss et al.'s 65.4%, to three binomial standard errors of this sample's 4,259 pairs
-        // (ruling 60's step); P14.T10.b's placed hosts now miss their 65.0–65.8%, at 0.638, a
-        // finding (ruling 85.1).
+        // (ruling 60's step); P14.T10.b's placed hosts give 0.651 since ruling 94.4's taper.
         assert!((0.633..0.675).contains(&outer_larger), "{outer_larger}");
     }
 
@@ -1484,7 +1692,8 @@ mod tests {
                 truncated += 1;
             }
         }
-        // A sixth of Sun-like chains are short of their reservoir (328 of 2,000): the heavy
+        // A sixth of Sun-like chains are short of their reservoir (328 of 2,000 before ruling
+        // 94.4's taper): the heavy
         // chains, and the poorest discs.
         assert!(
             (240..430).contains(&truncated),
@@ -1618,6 +1827,57 @@ mod tests {
         }
     }
 
+    /// Ruling 94.4: the tapered law's ranks follow its density, the smaller of the member's
+    /// normal law and the wall falling from it at the ceiling, and its mass rises with the rank,
+    /// for centres well under the ceiling (where the wall never binds), about it and far above it.
+    #[test]
+    fn the_taper_follows_its_density() {
+        let sigma = WITHIN_SYSTEM_SCATTER_DEX;
+        let (low, high, limit) = (0.0, 1.0, 1.5);
+        let kappa = MASS_TAPER_INDEX * core::f64::consts::LN_10;
+        for mean in [0.5, 0.9, 1.0, 1.1, 1.4, 2.0] {
+            let normal = |x: f64| math::exp(-0.5 * ((x - mean) / sigma) * ((x - mean) / sigma));
+            let density = |x: f64| {
+                if x <= high {
+                    normal(x)
+                } else {
+                    normal(x).min(normal(high) * math::exp(-kappa * (x - high)))
+                }
+            };
+            // The cumulative distribution by the trapezoid rule on a fine grid.
+            let steps = 60_000_u32;
+            let width = (limit - low) / f64::from(steps);
+            let grid: Vec<f64> = (0..=steps).map(|k| low + width * f64::from(k)).collect();
+            let mut cumulative = vec![0.0];
+            for pair in grid.windows(2) {
+                let last = cumulative[cumulative.len() - 1];
+                cumulative.push(last + 0.5 * width * (density(pair[0]) + density(pair[1])));
+            }
+            let total = cumulative[cumulative.len() - 1];
+            let cdf = |x: f64| {
+                let k = grid.partition_point(|&g| g <= x).clamp(1, grid.len() - 1);
+                let frac = (x - grid[k - 1]) / width;
+                (cumulative[k - 1] + frac * (cumulative[k] - cumulative[k - 1])) / total
+            };
+            let mut last = low;
+            for k in 1..400_u32 {
+                let u = f64::from(k) / 400.0;
+                let z = StandardNormal::new(math::normal_quantile(u)).unwrap();
+                let x = tapered_log_mass(z, mean, sigma, (low, high, limit));
+                assert!(
+                    x >= last && (low..=limit).contains(&x),
+                    "{mean}: {x} after {last}"
+                );
+                last = x;
+                assert!(
+                    (cdf(x) - u).abs() < 1e-3,
+                    "{mean}: F({x}) = {} at {u}",
+                    cdf(x)
+                );
+            }
+        }
+    }
+
     #[test]
     fn members_step_outward_about_the_characteristic_mass() {
         assert_same_bits(steps_from_middle(0, 1), 0.0);
@@ -1661,8 +1921,10 @@ mod tests {
             scatter: StandardNormal::new(8.0).unwrap(),
             ..MassDraws::MEDIAN
         }];
+        // Above the ceiling the law tapers to a giant's mass (ruling 94.4).
         let high = group_masses_from(chain(), &disc, &far).masses()[0].value();
-        assert!(high < 20.0 && high > 19.99, "{high}");
+        let giant = EarthMasses::from(SPACING_GIANT_MASS).value();
+        assert!(high < giant && high > giant * 0.999, "{high}");
         let near = [MassDraws {
             scatter: StandardNormal::new(-8.0).unwrap(),
             ..MassDraws::MEDIAN

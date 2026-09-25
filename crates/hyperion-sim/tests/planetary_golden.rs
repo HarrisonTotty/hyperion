@@ -28,7 +28,7 @@ use hyperion_sim::planetary::architecture::template::{
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{
     ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
-    early_m_dwarf_share,
+    first_period_share,
 };
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
 use hyperion_sim::planetary::derive::{
@@ -325,10 +325,13 @@ fn write_template_group(
             );
             w.f64(
                 &format!("{name} first period break factor at {m}"),
-                math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, early_m_dwarf_share(host)),
+                math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, first_period_share(host)),
             );
         }
         write_eccentricity(w, &format!("{name} hot"), hot.eccentricity());
+        for n in [1, 2, 3, 5, 7, 10] {
+            write_eccentricity(w, &format!("{name} hot of {n}"), hot.eccentricity_for(n));
+        }
     }
     w.line(&format!(
         "{name} reach {:?} spacing {:?} origin {:?}",

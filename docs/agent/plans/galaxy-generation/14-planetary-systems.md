@@ -850,6 +850,9 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
 - _Tests:_ every template's ranges are ordered and non-empty; a template never asks for a giant
   inside the snow line unless its group is marked migrated.
 - _Accept:_ `cargo test -p hyperion-sim planetary::architecture::template`.
+- _As built (ruling 94):_ the chains' first-period factor holds at every star up to 0.6 M☉
+  (`first_period_share`), and the hot variant's eccentricities narrow with its count
+  (`HotVariant::eccentricity_for`); see "Risks and open points", the `calib5` bullet.
 
 ### Phase B: placement
 
@@ -920,6 +923,12 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     budget × (M★ ÷ M☉)^−0.67 (`DRIFT_BUDGET_EXPONENT`, the slope of Mulders et al. 2015b's
     Table 2) with M★ held to 0.42–1.08 M☉ (`DRIFT_BUDGET_HOST_RANGE`). Test (b): log radii 0.620,
     log masses 0.867, outer heavier 0.750, larger 0.640; 328 of 2,000 chains truncated.
+  - _As built (ruling 94, superseding the ceiling and the split above):_ above the drift-fed
+    ceiling a star's chain members taper as q^−2.9 to a giant's mass (`tapered_log_mass`,
+    `taper_limit`, `MASS_TAPER_INDEX`); the median is held at 0.35 M☉ for stars below it
+    (`median_host_mass`, `MEDIAN_HOST_MASS_FLOOR`); `σ_b` 0.513 and `σ_w` 0.17. Test (b): log
+    radii 0.636, log masses 0.859, outer heavier 0.746, larger 0.642. See "Risks and open points",
+    the `calib5` bullet.
 
 #### P14.T8 Class placers
 
@@ -965,6 +974,10 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
     a(t) stays between the original pericentre and semi-major axis, and every adjacent pair still
     satisfies D7 at ±H.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement`.
+  - _As built (ruling 94):_ the hot variant's half-normal σ is 0.3 for one or two planets and
+    0.046 × (n ÷ 5)^−1.74 for n ≥ 3, n its reserved count; each planet records its law
+    (`PlacedPlanet::eccentricity_law`); `hot_chain_eccentricities_narrow_with_their_count` tests
+    it. See "Risks and open points", the `calib5` bullet.
 
 #### P14.T9 Stable zones in multiple systems
 
@@ -1023,6 +1036,9 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
   - _Accept:_ `cargo test -p hyperion-sim --test planetary_placement` and `just test-slow`. If an
     assertion fails, the weights of T4.b are tuned inside their sources' uncertainty, the change is
     recorded in the table's documentation, and the windows here are not widened.
+  - _As built (ruling 94):_ the late M dwarfs are tested against Ribas et al. 2023, Kaminski et
+    al. 2025 and Ment and Charbonneau 2023, and the early M dwarfs' hot chains' rescaled share is
+    asserted; see "Risks and open points", the `calib5` bullet.
 
 ### Phase C: derivation
 
@@ -4588,3 +4604,123 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   belt of 3.2 × 10⁻⁷ M⊕ at its age can list members of 1.2 × 10⁻³ M⊕ (`belts.rs`,
   `largest_diameter(initial, …)`). (5) Moons are referred to their planet's orbital plane until
   T14 gives planets poles. The output moves at version 11; the round's bump to 12 carries it.
+- **Ruling 94, the late M dwarfs, as built (`calib5`, round 9).** Papers under
+  `_orchestration/research/latem/` and `calib3-papers/`. The ruling amends P14.T4.b, T5, T7, T8.d
+  and T10.b. Before → after, on T10.b's placed sample.
+  - _94.1, the first period._ `first_period_share(mass)` in `architecture.rs`: 1 for every star up
+    to 0.6 M☉ and blended away to 0.70 M☉ as `early_m_dwarf_share` is, 0 for a substellar host,
+    whose chain keeps its template's law (Ribas, Kaminski and Ment sample stars only, and
+    `SubstellarCompact` has its own template). The chains' break is 12 days × 0.38^share, so a
+    late M dwarf's chain starts at the early M dwarfs' 4.6-day break: its median first period
+    falls from 12.7 to 5.8 days, and planets of any mass at 1–10 days per single late M dwarf of
+    0.14–0.337 M☉ rise from 0.54 to 1.23.
+  - _94.2, the retargeted test._ Single late M dwarfs (or wider than 200 au), primaries uniform on
+    0.14–0.337 M☉ (this lane's choice, to match Ribas et al.'s median of 0.24 M☉), 1–10 M⊕ in m sin i with i seen along galactic
+    north (each host's plane is one isotropic draw, and its planets share it, as one line of sight
+    sees them): at 1–10 days 0.164 → 0.502 (0.35–0.85), at 10–100 days 0.974 → 1.067 (0.35–1.1).
+    Sabotta et al.'s 1.06 and 0.55 are reported beside them: 0.143 → 0.490 and 0.855 → 1.019 over
+    0.08–0.337 M☉. By host mass, 0.08–0.16, 0.16–0.24 and 0.24–0.337 M☉: 0.08, 0.14, 0.20 → 0.47,
+    0.52, 0.48 at 1–10 days.
+  - _94.3, the new checks._ Kaminski et al., single hosts under 0.16 M☉ at 1–10 days, m sin i:
+    0.5–3 M⊕ 0.162 → 0.632 (0.5–1.4), 3–10 M⊕ 0.0001 → 0.065 (0.03–0.3). Ment and Charbonneau,
+    every primary of 0.1–0.3 M☉, 0.5–2 R⊕ at 1–7 days by Chen and Kipping's radius: 0.192 →
+    0.591 (0.35–1.0); Ment's sample is volume-complete, so it is tested on every primary, not
+    single stars only. Findings, pinned: planets above 1.5 R⊕ are 0.197 of the planets at
+    0.5–7 days against their 1 in 15 (terrestrials outnumber sub-Neptunes 14 to 1), and 0.019 →
+    0.131 per star against their ≤ 0.07; 0.5–0.9 R⊕ against 1–1.5 R⊕ is 2.04 → 1.26 (their 0.29,
+    0.13–0.56). The 0.54 dex width about a held median puts too many planets in both tails. Ribas
+    at 10–100 days, 1.067, lies 1.9σ above their 0.63 (+0.23) and just inside its window, and the
+    0.24–0.337 M☉ bin gives 1.13.
+  - _94.4, the taper._ `tapered_log_mass` in `masses.rs`, for a drift-fed group about a star
+    (`taper_limit`): above ruling 85.2's ceiling, 20 M⊕ × (M★ ÷ M☉), the member's density is the
+    smaller of its own normal law and a wall falling from the law's value at the ceiling as
+    10^(−2.9 Δlog m) (`MASS_TAPER_INDEX`; Pascucci et al. 2018, Table 1: −2.7 ± 0.7 for M, −2.9 ±
+    0.4 for K and G hosts). The wall meets the normal again at 2λ − b in units of σ, so it binds
+    only for members centred within λσ = 2.9 ln 10 σ_w² ≈ 0.19 dex under the ceiling or above it; the law is
+    inverted piecewise at the member's own rank, with no word added. **Two choices, for the
+    orchestrator:**
+    - _The taper starts at the old ceiling, not at Pascucci et al.'s break_ (q ≈ 2.8 × 10⁻⁵,
+      9.3 M⊕ × M★). Here the break is the law's median, Wu's 7.7 M⊕ × M★, which Pascucci et
+      al.'s forward-modelled 7.7 ± 1.7 M⊕ confirms. A wall from the break would crowd the 44% of
+      a Sun's members that the 0.54 dex law puts above 9.3 M⊕ into the next 0.15 dex. A
+      multiplicative taper would only shift a heavy group's members down by 0.18 dex, so it would
+      not bound them.
+    - _The taper ends at a giant's mass_ (`SPACING_GIANT_MASS`, 31.8 M⊕), truncated there as the
+      ceiling was. The first build, with no end and with the wall above the normal (the density's
+      replacement, not its minimum), gave chain planets above 0.1 M_J that the placer spaced and
+      gapped as giants and counted as formed at the core site. It also put the placed hot Jupiters
+      about single Suns at 1.10%, outside ruling 55.3's 0.78–0.86%. Hosts above about 1.6 M☉,
+      whose ceiling already exceeds that mass, keep the truncated law.
+
+    The tail's share above the old ceiling among drift-fed planets: FGK primaries 11.4%, early M
+    16.0%, late M 22.9%; within 0.02 dex under it 2.2%, 2.2% and 2.9% (4.8% and 6.6% under the
+    hard ceiling, ruling 85.2); none about hosts under 1.59 M☉ at a giant's mass. The taper put
+    T7's test (b) outer-heavier share at 0.752, over its 0.55–0.75. The window was not widened:
+    `σ_b` and `σ_w` were re-split within ruling 85.1's 0.54 dex, from 0.515 and 0.165 to 0.513 and
+    0.17. T7's sample now gives log radii 0.636, log masses 0.859, outer heavier 0.746 and larger
+    0.642.
+
+  - _94.5, fired._ After points 1 and 4 the Ribas figure was 0.400 (under 0.42; Kaminski's 0.5–3 M⊕
+    0.413 and 3–10 M⊕ 0.029, both under their windows). The step and the host masses were
+    separated first:
+    - the chain planets at 1–10 days are 1–10 M⊕ in m sin i in 31% of cases, against 49% of the
+      chains' planets at 1–1,000 days (the inward step);
+    - the host masses, drawn uniformly to Ribas's median, give 0.23, 0.39 and 0.44 by mass bin.
+
+    So the median is held: `median_host_mass`, 7.7 M⊕ × max(M★, 0.35 M☉) for a star
+    (`MEDIAN_HOST_MASS_FLOOR`), recorded as a calibration. Wu's linear law is extrapolated below
+    about 0.4 M☉. Substellar chains keep the linear law.
+
+  - _94.6, the hot variant's eccentricities._ `HotVariant::eccentricity_for(n)`: the half-normal
+    0.3 for one or two planets, and 0.046 × (n ÷ 5)^−1.74 for n ≥ 3 (`HOT_MULTIPLE_*`; He, Ford
+    and Ragozzine 2020, eq. 51, median ÷ 0.674). n is the variant's drawn count, its reserved
+    members, capped by the slots left, not the number placed (the law is fixed before the walk).
+    `PlacedPlanet::eccentricity_law()` records the law. FGK hosts' hot variants have one or
+    two planets and are unchanged.
+    - The early M dwarfs' hot chain planets scaled down to the spacing floor fall from 0.540 to
+      0.0008 (< 0.10, asserted).
+    - `hot_chain_eccentricities_narrow_with_their_count` K–S tests the drawn ranks against the
+      law.
+    - **Finding:** over sixteen isotropic lines of sight per system, transiting early M systems
+      with a hot chain show one planet in 0.675 → 0.270 of cases, and every early M system in
+      0.574 → 0.330, against Ballard and Johnson's 55% in the singles' mode. With σ_i = σ_e ÷ 2 a
+      hot chain of five is nearly coplanar (about 0.9°), so ruling 87.2's dichotomy of inclination
+      no longer makes singles.
+  - _T10.b, every other window, before → after:_
+    - FGK: small planets 0.689 → 0.649, by radius 0.587 → 0.566 (planets above 20 M⊕ leave the
+      1–20 M⊕ proxy); hot Jupiters 0.71% → 0.71%; Cumming's giants 9.98% → 9.98%; η⊕ 0.393 →
+      0.393; log radii 0.648 → 0.660, above 1 R⊕ 0.595 → 0.614 (0.45–0.62), linear 0.543 →
+      0.552.
+    - Outer larger 0.640 → 0.651, now inside Weiss et al.'s 65.4 ± 2.1% (0.633–0.675), so it is
+      asserted rather than pinned. Pairs at 10 R_H or more 0.994 → 0.993.
+    - Early M: Dressing and Charbonneau 2.828 → 2.760 (1.8–3.2), 0.5–10 days 0.460 → 0.465,
+      single or wider than 200 au 3.672 → 3.584 (2.9–4.4); Hsu 4.80 → 4.67; 0.1–0.5 M☉ multiples
+      0.686 → 0.676 and giants 1.79% → 1.79%.
+    - Hardegree-Ullman et al.: 0.672 → 1.059 per star and multiples 0.183 → 0.319, both now inside
+      their intervals (0.70–1.89 and 0.11–0.89), so they are asserted, no longer pinned.
+    - 0.65–0.75 M☉: 1.234 → 1.186, re-pinned at 1.14–1.21, still between FGK (0.759) and the early
+      M dwarfs (2.760). \[Fe/H\] −0.8 0.439 → 0.447; −2 0.006 → 0.006; the giants' slope 2.025 →
+      2.025; close binaries 0.126 → 0.126.
+    - Anchors: Cumming 10.50% → 10.50%, hot Jupiters 0.82% → 0.82%, cold giants 30.5% → 30.5%;
+      single Suns' log radii 0.643 → 0.654.
+
+    No window was widened.
+
+  - _Goldens,_ at 11, joining the version-12 batch (the orchestrator's bump re-blesses them):
+    - `planetary/architecture`: the first-period factor at 0.1 and 0.32 M☉, and new lines for
+      the hot variant's law at six counts.
+    - `planetary/classes`: the 0.4 M☉ host's hot chains, their laws and rescalings, and every
+      chain's masses by the re-split.
+    - `planetary/masses`: the taper, the hold and the re-split.
+    - Eight T32 systems:
+      - the M dwarf (0.138 M☉): masses × 2.5 by the hold, 0.35–2.7 → 0.87–11.5 M⊕; its outer
+        planet lies in the taper; its classes go from Rocky, Rocky, Icy, Rocky, Icy, Icy to
+        Rocky, Rocky, SubNeptune, SubNeptune, SubNeptune, IceGiant;
+      - the subgiant's planet, 19.4 → 22.5 M⊕, above its old ceiling;
+      - filler A (0.335 M☉), by the hold and the re-split;
+      - the triple, filler B, the halo star, the wide binary's A b (10.6 → 11.0 M⊕) and the red
+        giant's engulfed planets, by the re-split.
+
+    The close binary, the hot Jupiter, the Solar-like system, the eccentric giant, the fallback
+    black hole and filler C do not move. `pinned_ids_satisfy_their_own_predicates` holds and the
+    slow search reproduces all fourteen IDs, so none is re-pinned.

@@ -880,6 +880,45 @@ pub fn early_m_dwarf_share(mass: SolarMasses) -> f64 {
     }
 }
 
+/// How far a star of `mass` takes the early M dwarfs' closer first period
+/// ([`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]; rulings 85.4 and 94.1): 1 for every star up to
+/// 0.6 M☉, the upper end of [`EARLY_M_DWARF_MASSES`], blended as [`early_m_dwarf_share`] is to 0
+/// at 0.70 M☉, and 0 for a substellar host, whose chain keeps its template's law.
+///
+/// Below 0.35 M☉ the factor is held rather than blended away: Ribas et al. (2023, A&A 670, A139,
+/// §5) find that the drop in occurrence inside 10 days "does not hold for targets with masses
+/// below 0.4 M☉", and Kaminski et al. (2025) that the rates below 3 M⊕ "appear to be constant with
+/// respect to orbital periods" about hosts under 0.16 M☉. Ment and Charbonneau (2023, Table 6)
+/// still find dN ÷ d ln P rising through 0.4–7 days about hosts of 0.1–0.3 M☉, so the break
+/// stays, at 4.6 days (`research/latem/NOTES.md` §3). Those surveys sample stars only, and a
+/// substellar host's `SubstellarCompact` chain has its own template, so it is left out.
+///
+/// [`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]: template::EARLY_M_DWARF_FIRST_PERIOD_SCALE
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::architecture::{early_m_dwarf_share, first_period_share};
+/// use hyperion_sim::units::SolarMasses;
+///
+/// let late = SolarMasses::new(0.2);
+/// assert_eq!(early_m_dwarf_share(late), 0.0);
+/// assert_eq!(first_period_share(late), 1.0);
+/// let edge = SolarMasses::new(0.65);
+/// assert_eq!(first_period_share(edge), early_m_dwarf_share(edge));
+/// assert_eq!(first_period_share(SolarMasses::new(0.05)), 0.0);
+/// ```
+#[must_use]
+pub fn first_period_share(mass: SolarMasses) -> f64 {
+    if mass < SUBSTELLAR_LIMIT {
+        0.0
+    } else if mass <= EARLY_M_DWARF_MASSES.0 {
+        1.0
+    } else {
+        early_m_dwarf_share(mass)
+    }
+}
+
 /// The class weights of a host of initial mass `mass` and metallicity `fe_h` (P14.T4.b): the rows
 /// of [`ARCHITECTURE_TABLE`] that apply to the host, with `Barren` taking what the halo takes from
 /// the others.
@@ -1245,6 +1284,15 @@ mod tests {
             panic!("a broken power law stays one");
         };
         assert!((break_period.value() - 5.4).abs() < 1e-12);
+        // Ruling 94.1: the closer first period holds below 0.35 M☉, for stars only.
+        let first = |m: f64| first_period_share(SolarMasses::new(m));
+        for m in [0.08, 0.1, 0.2, 0.3, 0.35, 0.45, 0.6] {
+            assert_same_bits(first(m), 1.0);
+        }
+        for m in [0.62, 0.65, 0.68, 0.7, 1.0] {
+            assert_same_bits(first(m), share(m));
+        }
+        assert_same_bits(first(0.07), 0.0);
         assert_same_bits(min.value(), 1.0);
         assert_same_bits(max.value(), 50.0);
     }

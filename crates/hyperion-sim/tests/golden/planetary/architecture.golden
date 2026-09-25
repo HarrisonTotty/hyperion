@@ -478,9 +478,9 @@ compact_multi group 0 hot early M mean at 1 = 0x400bfbfece25b1e6  # 3.4980445962
 compact_multi group 0 hot early M rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
 compact_multi group 0 hot early M mean at 1.3 = 0x400755310cd7a6d5  # 2.916597462016265
 compact_multi group 0 hot probability at 0.1 = 0x3fd999999999999a  # 0.4
-compact_multi group 0 first period break factor at 0.1 = 0x3ff0000000000000  # 1.0
+compact_multi group 0 first period break factor at 0.1 = 0x3fd851eb851eb852  # 0.38
 compact_multi group 0 hot probability at 0.32 = 0x3fdd9e8708827255  # 0.4628007491208213
-compact_multi group 0 first period break factor at 0.32 = 0x3fe55753de72b7a8  # 0.666910109013533
+compact_multi group 0 first period break factor at 0.32 = 0x3fd851eb851eb852  # 0.38
 compact_multi group 0 hot probability at 0.48 = 0x3fe199999999999a  # 0.55
 compact_multi group 0 first period break factor at 0.48 = 0x3fd851eb851eb852  # 0.38
 compact_multi group 0 hot probability at 0.65 = 0x3fde37177b2e7d09  # 0.4721125319428699
@@ -488,6 +488,12 @@ compact_multi group 0 first period break factor at 0.65 = 0x3fe418d3d73d9f3c  # 
 compact_multi group 0 hot probability at 1 = 0x3fd999999999999a  # 0.4
 compact_multi group 0 first period break factor at 1 = 0x3ff0000000000000  # 1.0
 compact_multi group 0 hot e half-normal = 0x3fd3333333333333  # 0.3
+compact_multi group 0 hot of 1 e half-normal = 0x3fd3333333333333  # 0.3
+compact_multi group 0 hot of 2 e half-normal = 0x3fd3333333333333  # 0.3
+compact_multi group 0 hot of 3 e half-normal = 0x3fbca48aded0b349  # 0.11188571872544374
+compact_multi group 0 hot of 5 e half-normal = 0x3fa78d4fdf3b645a  # 0.046
+compact_multi group 0 hot of 7 e half-normal = 0x3f9a3ad447b18e17  # 0.025615040660694612
+compact_multi group 0 hot of 10 e half-normal = 0x3f8c33f9046852fd  # 0.013771005103117679
 compact_multi group 0 reach Open spacing SmallPlanets origin Migrated
 
 compact_with_cold_giant group 0: Chain
@@ -521,9 +527,9 @@ compact_with_cold_giant group 0 hot early M mean at 1 = 0x400bfbfece25b1e6  # 3.
 compact_with_cold_giant group 0 hot early M rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
 compact_with_cold_giant group 0 hot early M mean at 1.3 = 0x400755310cd7a6d5  # 2.916597462016265
 compact_with_cold_giant group 0 hot probability at 0.1 = 0x3fd999999999999a  # 0.4
-compact_with_cold_giant group 0 first period break factor at 0.1 = 0x3ff0000000000000  # 1.0
+compact_with_cold_giant group 0 first period break factor at 0.1 = 0x3fd851eb851eb852  # 0.38
 compact_with_cold_giant group 0 hot probability at 0.32 = 0x3fdd9e8708827255  # 0.4628007491208213
-compact_with_cold_giant group 0 first period break factor at 0.32 = 0x3fe55753de72b7a8  # 0.666910109013533
+compact_with_cold_giant group 0 first period break factor at 0.32 = 0x3fd851eb851eb852  # 0.38
 compact_with_cold_giant group 0 hot probability at 0.48 = 0x3fe199999999999a  # 0.55
 compact_with_cold_giant group 0 first period break factor at 0.48 = 0x3fd851eb851eb852  # 0.38
 compact_with_cold_giant group 0 hot probability at 0.65 = 0x3fde37177b2e7d09  # 0.4721125319428699
@@ -531,6 +537,12 @@ compact_with_cold_giant group 0 first period break factor at 0.65 = 0x3fe418d3d7
 compact_with_cold_giant group 0 hot probability at 1 = 0x3fd999999999999a  # 0.4
 compact_with_cold_giant group 0 first period break factor at 1 = 0x3ff0000000000000  # 1.0
 compact_with_cold_giant group 0 hot e half-normal = 0x3fd3333333333333  # 0.3
+compact_with_cold_giant group 0 hot of 1 e half-normal = 0x3fd3333333333333  # 0.3
+compact_with_cold_giant group 0 hot of 2 e half-normal = 0x3fd3333333333333  # 0.3
+compact_with_cold_giant group 0 hot of 3 e half-normal = 0x3fbca48aded0b349  # 0.11188571872544374
+compact_with_cold_giant group 0 hot of 5 e half-normal = 0x3fa78d4fdf3b645a  # 0.046
+compact_with_cold_giant group 0 hot of 7 e half-normal = 0x3f9a3ad447b18e17  # 0.025615040660694612
+compact_with_cold_giant group 0 hot of 10 e half-normal = 0x3f8c33f9046852fd  # 0.013771005103117679
 compact_with_cold_giant group 0 reach Open spacing SmallPlanets origin Migrated
 
 compact_with_cold_giant group 1: Giant
@@ -687,9 +699,9 @@ substellar_compact group 0 hot early M mean at 1 = 0x400bfbfece25b1e6  # 3.49804
 substellar_compact group 0 hot early M rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
 substellar_compact group 0 hot early M mean at 1.3 = 0x400755310cd7a6d5  # 2.916597462016265
 substellar_compact group 0 hot probability at 0.1 = 0x3fd999999999999a  # 0.4
-substellar_compact group 0 first period break factor at 0.1 = 0x3ff0000000000000  # 1.0
+substellar_compact group 0 first period break factor at 0.1 = 0x3fd851eb851eb852  # 0.38
 substellar_compact group 0 hot probability at 0.32 = 0x3fdd9e8708827255  # 0.4628007491208213
-substellar_compact group 0 first period break factor at 0.32 = 0x3fe55753de72b7a8  # 0.666910109013533
+substellar_compact group 0 first period break factor at 0.32 = 0x3fd851eb851eb852  # 0.38
 substellar_compact group 0 hot probability at 0.48 = 0x3fe199999999999a  # 0.55
 substellar_compact group 0 first period break factor at 0.48 = 0x3fd851eb851eb852  # 0.38
 substellar_compact group 0 hot probability at 0.65 = 0x3fde37177b2e7d09  # 0.4721125319428699
@@ -697,4 +709,10 @@ substellar_compact group 0 first period break factor at 0.65 = 0x3fe418d3d73d9f3
 substellar_compact group 0 hot probability at 1 = 0x3fd999999999999a  # 0.4
 substellar_compact group 0 first period break factor at 1 = 0x3ff0000000000000  # 1.0
 substellar_compact group 0 hot e half-normal = 0x3fd3333333333333  # 0.3
+substellar_compact group 0 hot of 1 e half-normal = 0x3fd3333333333333  # 0.3
+substellar_compact group 0 hot of 2 e half-normal = 0x3fd3333333333333  # 0.3
+substellar_compact group 0 hot of 3 e half-normal = 0x3fbca48aded0b349  # 0.11188571872544374
+substellar_compact group 0 hot of 5 e half-normal = 0x3fa78d4fdf3b645a  # 0.046
+substellar_compact group 0 hot of 7 e half-normal = 0x3f9a3ad447b18e17  # 0.025615040660694612
+substellar_compact group 0 hot of 10 e half-normal = 0x3f8c33f9046852fd  # 0.013771005103117679
 substellar_compact group 0 reach Open spacing SmallPlanets origin Migrated

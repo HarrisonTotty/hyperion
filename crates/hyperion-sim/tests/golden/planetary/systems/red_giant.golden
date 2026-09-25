@@ -12,8 +12,8 @@ host Star(0): drawn CompactWithColdGiant, placed CompactWithColdGiant
 epoch: 29 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: [e100, e200]
 halo: ef00
-body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2357766757074220, nanos: 208535226 } }
-mass_mearth = 0x400166a31440ee59  # 2.1751157362285025
+body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2358430496561981, nanos: 716872436 } }
+mass_mearth = 0x40016efb02bdabee  # 2.1791897024281672
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -22,8 +22,8 @@ rings: []
 population: NotApplicable
 surface: NotApplicable
 hooks: NotModelled
-body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2357766757074220, nanos: 208535226 } }
-mass_mearth = 0x3f983f5f21507cb1  # 0.023679243477201243
+body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2358430496561981, nanos: 716872436 } }
+mass_mearth = 0x3f984aff78bdbcd4  # 0.02372359442182133
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -32,8 +32,8 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
 hooks: NotModelled
-body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1155833270771026, nanos: 950210213 } }
-mass_mearth = 0x4009a3a5a1c633ee  # 3.2049057615863523
+body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1155338788636353, nanos: 573110747 } }
+mass_mearth = 0x4009945b4a5b5960  # 3.1974397477271594
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -712,8 +712,8 @@ hooks: NotApplicable
 +H: 29 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100, e200]
 halo: ef00
-body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2357766757074220, nanos: 208535226 } }
-mass_mearth = 0x400166a31440ee59  # 2.1751157362285025
+body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2358430496561981, nanos: 716872436 } }
+mass_mearth = 0x40016efb02bdabee  # 2.1791897024281672
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -722,8 +722,8 @@ rings: []
 population: NotApplicable
 surface: NotApplicable
 hooks: NotModelled
-body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2357766757074220, nanos: 208535226 } }
-mass_mearth = 0x3f983f5f21507cb1  # 0.023679243477201243
+body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2358430496561981, nanos: 716872436 } }
+mass_mearth = 0x3f984aff78bdbcd4  # 0.02372359442182133
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -732,8 +732,8 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
 hooks: NotModelled
-body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1155833270771026, nanos: 950210213 } }
-mass_mearth = 0x4009a3a5a1c633ee  # 3.2049057615863523
+body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1155338788636353, nanos: 573110747 } }
+mass_mearth = 0x4009945b4a5b5960  # 3.1974397477271594
 orbit: NotApplicable
 position: none
 bulk: NotApplicable

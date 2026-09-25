@@ -84,6 +84,7 @@
 //!   Solar-like and terrestrial classes; those plans re-check their figures.
 
 use super::ArchitectureClass;
+use crate::math;
 use crate::units::consts::{EARTH_MASS_KG, JUPITER_MASS_KG};
 use crate::units::{Days, EarthMasses, SolarMasses};
 
@@ -521,12 +522,69 @@ impl HotVariant {
         self.early_m_dwarf_count
     }
 
-    /// The variant's eccentricities.
+    /// The variant's eccentricities for one or two planets.
     #[must_use]
     pub const fn eccentricity(&self) -> EccentricityLaw {
         self.eccentricity
     }
+
+    /// The eccentricities of a variant of `count` planets (ruling 94.6): [`eccentricity`] for one
+    /// or two, and for three or more a half-normal law of scale
+    /// [`HOT_MULTIPLE_ECCENTRICITY_SCALE`] × (n ÷ [`HOT_MULTIPLE_PIVOT`])^[`HOT_MULTIPLE_ECCENTRICITY_SLOPE`].
+    ///
+    /// He, Ford and Ragozzine (2020, AJ 160, 276, abstract and eq. 51) find the median
+    /// eccentricity of a system of n planets at the limit of AMD stability to be
+    /// 0.031 (+0.004 −0.003) × (n ÷ 5)^−1.74 (+0.11 −0.07); the scale is that median ÷ 0.674, a
+    /// half-normal law's median over its scale: 0.11 at n = 3, 0.046 at n = 5 and 0.027 at n = 7.
+    /// Van Eylen et al.'s (2019) half-normal 0.32 for singles is a law of one or two planets, and a
+    /// chain of five to seven at that scale is not dynamically possible: about the early M dwarfs,
+    /// whose hot variant takes the cold chain's count (ruling 87.2), 55% of its planets were
+    /// scaled down to the spacing floor. `count` is the variant's drawn count, its reserved
+    /// members, as He et al.'s n is a system's intrinsic multiplicity; no word is added.
+    ///
+    /// [`eccentricity`]: Self::eccentricity
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::architecture::ArchitectureClass;
+    /// use hyperion_sim::planetary::architecture::template::{EccentricityLaw, template};
+    ///
+    /// let hot = template(ArchitectureClass::CompactMulti).groups()[0]
+    ///     .hot_variant()
+    ///     .expect("a chain has a hot variant");
+    /// assert_eq!(hot.eccentricity_for(2), hot.eccentricity());
+    /// let EccentricityLaw::HalfNormal { sigma } = hot.eccentricity_for(5) else {
+    ///     panic!("a hot chain of five is half-normal");
+    /// };
+    /// assert!((sigma - 0.046).abs() < 1e-12);
+    /// ```
+    #[must_use]
+    pub fn eccentricity_for(&self, count: u8) -> EccentricityLaw {
+        if count <= 2 {
+            self.eccentricity
+        } else {
+            let n = f64::from(count) / f64::from(HOT_MULTIPLE_PIVOT);
+            EccentricityLaw::HalfNormal {
+                sigma: HOT_MULTIPLE_ECCENTRICITY_SCALE
+                    * math::powf(n, HOT_MULTIPLE_ECCENTRICITY_SLOPE),
+            }
+        }
+    }
 }
+
+/// The half-normal scale of a hot variant's eccentricities at [`HOT_MULTIPLE_PIVOT`] planets:
+/// 0.046 (ruling 94.6; He, Ford and Ragozzine 2020's AMD-stability median 0.031 ÷ 0.674). See
+/// [`HotVariant::eccentricity_for`].
+pub const HOT_MULTIPLE_ECCENTRICITY_SCALE: f64 = 0.046;
+
+/// How a hot variant's eccentricity scale falls with its count: (n ÷ 5)^−1.74 (ruling 94.6; He,
+/// Ford and Ragozzine 2020, eq. 51).
+pub const HOT_MULTIPLE_ECCENTRICITY_SLOPE: f64 = -1.74;
+
+/// The count at which [`HOT_MULTIPLE_ECCENTRICITY_SCALE`] applies: 5 (He, Ford and Ragozzine
+/// 2020).
+pub const HOT_MULTIPLE_PIVOT: u8 = 5;
 
 /// One group of bodies a class places.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -736,14 +794,15 @@ pub const CHAIN_COUNT: CountLaw = CountLaw::ZeroTruncatedPoisson {
 /// mutually inclined, where [`HOT_VARIANT`]'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
 pub const EARLY_M_DWARF_HOT_VARIANT_PROBABILITY: f64 = 0.55;
 
-/// What a chain's first period law's break is multiplied by about an early M dwarf: 0.38
-/// (ruling 85.4, re-fitted after ruling 87.2), blended by
-/// [`early_m_dwarf_share`](super::early_m_dwarf_share).
+/// What a chain's first period law's break is multiplied by about an M dwarf: 0.38
+/// (ruling 85.4, re-fitted after ruling 87.2), raised to
+/// [`first_period_share`](super::first_period_share), which holds it at every star up to
+/// 0.6 M☉ (ruling 94.1) and blends it away by 0.70 M☉.
 ///
 /// Dressing and Charbonneau (2015, ApJ 807, 45, Table 5) find 0.47 of the 2.47 planets of
 /// 1–4 R⊕ per M dwarf inside 200 days at 0.5–10 days, 19%, where Mulders et al.'s (2018) FGK
 /// break at 12 days put 13% of this model's there. The factor, which moves the break to 4.6 days,
-/// is fitted to their 0.47 on P14.T10.b's placed sample (0.460): 0.45 was, until the hot
+/// is fitted to their 0.47 on P14.T10.b's placed sample (0.460; 0.465 after ruling 94): 0.45 was, until the hot
 /// variant's count (ruling 87.2) put longer chains, whose inner members are lighter, about these
 /// hosts, and gave 0.389 then. Mulders, Pascucci and Apai (2015, ApJ 798, 112) find the break at
 /// one period for F to M hosts binned by type, so this is a calibration to the M dwarfs' own
@@ -774,8 +833,9 @@ const HOT_VARIANT: HotVariant = HotVariant {
 /// binaries' suppression taken out, is 3.6 ± 0.4 per single star. About the other hosts the
 /// variant keeps its ordinary one or two, and the draw blends the two laws by
 /// [`early_m_dwarf_share`](super::early_m_dwarf_share) (P14.T8). On P14.T10.b's placed sample
-/// the early M dwarfs have 3.67 small planets per single star (or one wider than 200 au)
-/// inside 200 days, 2.83 per primary, and 4.8 planets of 0.5–4 R⊕ at 0.5–256 days per primary.
+/// the early M dwarfs have 3.58 small planets per single star (or one wider than 200 au)
+/// inside 200 days, 2.76 per primary, and 4.67 planets of 0.5–4 R⊕ at 0.5–256 days per primary
+/// (after ruling 94's taper; 3.67, 2.83 and 4.8 before).
 pub const EARLY_M_DWARF_HOT_VARIANT_COUNT: CountLaw = CHAIN_COUNT;
 
 /// The most rocky planets one group places: 10, as many as a chain's cap (Mulders et al. 2018).

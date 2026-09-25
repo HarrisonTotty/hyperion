@@ -35,6 +35,7 @@ use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::CLOCK_WINDOW_H;
 use hyperion_sim::units::consts::{
     EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, SOLAR_EFFECTIVE_TEMPERATURE_K, SOLAR_MASS_KG,
+    SOLAR_RADIUS_M,
 };
 use hyperion_sim::units::{
     AstronomicalUnits, Days, Dex, EarthMasses, HeliumExcess, Kelvin, Megayears, Metres,
@@ -535,10 +536,38 @@ fn eta_earth(systems: &[System]) -> f64 {
     ratio(n, hosts.len())
 }
 
+/// Ruling 94.4's taper, reported: of the drift-fed planets (chains and a warm giant's companions)
+/// about `systems`' primaries, the shares above ruling 85.2's old ceiling of 20 M⊕ × (M★ ÷ M☉),
+/// within 0.02 dex under it, and at a giant's mass.
+fn ceiling_note(systems: &[System], label: &str, report: &mut Report) {
+    let (mut n, mut above, mut crowded, mut giant) = (0_usize, 0_usize, 0_usize, 0_usize);
+    for s in systems {
+        for (h, p) in primary_planets(s) {
+            if !matches!(p.role(), GroupRole::Chain | GroupRole::Companions) {
+                continue;
+            }
+            let over = math::log10(p.mass().value() / (20.0 * h.zone.host_mass().value()));
+            n += 1;
+            above += usize::from(over > 0.0);
+            crowded += usize::from((-0.02..=0.0).contains(&over));
+            // Hosts above about 1.6 M☉ (a circumbinary pair's total) keep the truncated law.
+            giant += usize::from(is_giant(p) && h.zone.host_mass().value() < 1.59);
+        }
+    }
+    report.note(format!(
+        "  {label}'s drift-fed planets above 20 M_earth x M_star {:.4}, within 0.02 dex under it \
+         {:.4}, at a giant's mass about hosts under 1.59 M_sun {:.4} ({n} planets)",
+        ratio(above, n),
+        ratio(crowded, n),
+        ratio(giant, n)
+    ));
+}
+
 /// P14.T10.b's FGK statistics and ruling 55.1's, on 60,000 FGK primaries of drawn \[Fe/H\].
 fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<System> {
     // FGK stars at the Sun-like point, their [Fe/H] drawn.
     let fgk = sample(galaxy, 2_000_000, 60_000, uniform(0.7, 1.3), drawn);
+    ceiling_note(&fgk, "FGK primaries", report);
     let small_close = per_star(&fgk, |_, p| small(p) && period_days(p) < 100.0);
     report.check(
         "small planets per FGK star inside 100 days",
@@ -585,11 +614,10 @@ fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<
         .iter()
         .filter(|(inner, outer)| outer > inner)
         .count();
-    report.finding(
+    report.check(
         "outer planet the larger (Weiss et al. 2018)",
         ratio(larger, pairs.radii.len()),
         (0.633, 0.675),
-        (0.630, 0.645),
     );
     let wide = |spacings: &[f64]| {
         ratio(
@@ -650,6 +678,9 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
         (0.37, 0.57),
     );
 
+    hot_chain_statistics(&m, report);
+    ceiling_note(&m, "early M primaries", report);
+
     // Ruling 87.2: single stars and binaries wider than 200 au, against 2.47 ÷ 0.68.
     let total = m.len();
     let (alone, close): (Vec<System>, Vec<System>) = m
@@ -686,39 +717,106 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
     per_m
 }
 
-/// Ruling 85.3's and 87.5's late M dwarfs, P14.T10.b's hosts of 0.1–0.5 M☉, and ruling 48 (b)'s
-/// mid-to-late M dwarfs.
-fn late_m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report) {
-    // Late M dwarfs of Sabotta et al.'s (2021) CARMENES sample, under 0.34 M☉: planets of
-    // 1-10 M⊕ in minimum mass, m sin i with i seen along galactic north.
-    let late_rv = sample(galaxy, 4_500_000, 30_000, uniform(0.1, 0.34), drawn);
-    let rv_small = |p: &PlacedPlanet| {
-        let m_sin_i = p.mass().value() * math::sin(p.orbit().inclination().value()).abs();
-        (1.0..=10.0).contains(&m_sin_i)
+/// Planets per star of `systems` that `counts`, over a subset.
+fn rate(systems: &[&System], counts: impl Fn(&Host, &PlacedPlanet) -> bool) -> f64 {
+    let n: usize = systems
+        .iter()
+        .map(|s| primary_planets(s).filter(|(h, p)| counts(h, p)).count())
+        .sum();
+    ratio(n, systems.len())
+}
+
+/// A planet's minimum mass as a radial-velocity survey measures it, M⊕: m sin i with i seen along
+/// galactic north. Each host's plane is one isotropic draw (P14.T8.d), so sin i is isotropic
+/// across systems and shared by a system's planets, as one line of sight sees them.
+fn minimum_mass(p: &PlacedPlanet) -> f64 {
+    p.mass().value() * math::sin(p.orbit().inclination().value()).abs()
+}
+
+/// Ruling 94's late M dwarfs against Ribas et al. (2023), Kaminski et al. (2025) and Ment and
+/// Charbonneau (2023), with Sabotta et al.'s (2021) figures beside them.
+fn late_m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
+    // Primaries uniform on 0.08-0.337 M☉, CARMENES's cut below the early M dwarfs.
+    let late = sample(galaxy, 4_500_000, 40_000, uniform(0.08, 0.337), drawn);
+    let mass = |s: &System| s.star_mass(0).value();
+    let alone: Vec<&System> = late
+        .iter()
+        .filter(|s| nearest_companion_au(s).is_none_or(|a| a > 200.0))
+        .collect();
+    let within = |lo: f64, hi: f64| -> Vec<&System> {
+        alone
+            .iter()
+            .copied()
+            .filter(|s| (lo..hi).contains(&mass(s)))
+            .collect()
     };
-    report.finding(
-        "late M dwarfs' 1-10 M_earth (m sin i) planets at 1-10 days (Sabotta et al. 2021)",
-        per_star(&late_rv, |_, p| {
-            rv_small(p) && (1.0..10.0).contains(&period_days(p))
-        }),
-        (0.78, 1.41),
-        (0.10, 0.15),
+    let rv = |lo: f64, hi: f64, days: (f64, f64)| {
+        move |_: &Host, p: &PlacedPlanet| {
+            (lo..=hi).contains(&minimum_mass(p)) && (days.0..days.1).contains(&period_days(p))
+        }
+    };
+    let (inner, outer) = ((1.0, 10.0), (10.0, 100.0));
+    ceiling_note(&late, "late M primaries", report);
+
+    // Ruling 94.2: Ribas et al. (2023, A&A 670, A139, §5), single stars under 0.337 M☉ of median
+    // 0.24 M☉: here 0.14-0.337 M☉, whose median is theirs.
+    let ribas = within(0.14, 0.337);
+    let ribas_inner = rate(&ribas, rv(1.0, 10.0, inner));
+    report.check(
+        "late M dwarfs' 1-10 M_earth (m sin i) planets at 1-10 days (Ribas et al. 2023)",
+        ribas_inner,
+        (0.35, 0.85),
     );
-    report.finding(
-        "late M dwarfs' 1-10 M_earth (m sin i) planets at 10-100 days (Sabotta et al. 2021)",
-        per_star(&late_rv, |_, p| {
-            rv_small(p) && (10.0..100.0).contains(&period_days(p))
-        }),
-        (0.29, 0.95),
-        (0.69, 0.75),
+    report.check(
+        "late M dwarfs' 1-10 M_earth (m sin i) planets at 10-100 days (Ribas et al. 2023)",
+        rate(&ribas, rv(1.0, 10.0, outer)),
+        (0.35, 1.1),
     );
-    let rv_inner = per_star(&late_rv, |_, p| {
-        rv_small(p) && (1.0..10.0).contains(&period_days(p))
-    });
-    let rv_all = per_star(&late_rv, |_, p| {
-        rv_small(p) && (1.0..100.0).contains(&period_days(p))
-    });
-    let mut first_periods: Vec<f64> = late_rv
+    let all: Vec<&System> = within(0.08, 0.337);
+    report.note(format!(
+        "  {} single or wide primaries of 0.14-0.337 M_sun, {} of 0.08-0.337 M_sun: {:.4} and \
+         {:.4} (Sabotta et al. 2021, under 0.34 M_sun: 1.06 and 0.55)",
+        ribas.len(),
+        all.len(),
+        rate(&all, rv(1.0, 10.0, inner)),
+        rate(&all, rv(1.0, 10.0, outer)),
+    ));
+    let bins: Vec<String> = [(0.08, 0.16), (0.16, 0.24), (0.24, 0.337), (0.16, 0.337)]
+        .iter()
+        .map(|&(lo, hi)| {
+            let bin = within(lo, hi);
+            format!(
+                "{lo}-{hi} M_sun {:.4} and {:.4}",
+                rate(&bin, rv(1.0, 10.0, inner)),
+                rate(&bin, rv(1.0, 10.0, outer))
+            )
+        })
+        .collect();
+    report.note(format!("  by host mass: {}", bins.join("; ")));
+    // Ruling 94.5: what the chain's inward step and the host masses carry, apart from the law.
+    let share_rv = |days: (f64, f64)| {
+        let (mut n, mut hit) = (0_usize, 0_usize);
+        for s in &ribas {
+            for (_, p) in primary_planets(s) {
+                if p.role() == GroupRole::Chain && (days.0..days.1).contains(&period_days(p)) {
+                    n += 1;
+                    hit += usize::from((1.0..=10.0).contains(&minimum_mass(p)));
+                }
+            }
+        }
+        ratio(hit, n)
+    };
+    report.note(format!(
+        "  chain planets' share of 1-10 M_earth (m sin i): at 1-10 days {:.4}, at 1-100 days \
+         {:.4}, at 1-1,000 days {:.4}; planets of any mass at 1-10 days {:.4}, at 10-100 days \
+         {:.4}",
+        share_rv(inner),
+        share_rv((1.0, 100.0)),
+        share_rv((1.0, 1_000.0)),
+        rate(&ribas, |_, p| (1.0..10.0).contains(&period_days(p))),
+        rate(&ribas, |_, p| (10.0..100.0).contains(&period_days(p))),
+    ));
+    let mut first_periods: Vec<f64> = ribas
         .iter()
         .flat_map(|s| s.hosts.iter().filter(|h| orbits_primary(h)))
         .filter_map(|h| {
@@ -730,20 +828,99 @@ fn late_m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report) {
         .collect();
     first_periods.sort_by(f64::total_cmp);
     report.note(format!(
-        "  planets of any mass at 1-10 days {:.4} and 10-100 days {:.4}; of 1-10 M_earth (true) \
-         at 1-10 days {:.4}; chains' median first period {:.2} days",
-        per_star(&late_rv, |_, p| (1.0..10.0).contains(&period_days(p))),
-        per_star(&late_rv, |_, p| (10.0..100.0).contains(&period_days(p))),
-        per_star(&late_rv, |_, p| {
-            (1.0..=10.0).contains(&p.mass().value()) && (1.0..10.0).contains(&period_days(p))
-        }),
+        "  chains' median first period {:.2} days",
         first_periods[first_periods.len() / 2]
     ));
-    report.note(format!(
-        "  their share at 1-10 days of 1-100 days: {:.4}, against Sabotta et al.'s 0.66",
-        rv_inner / rv_all
-    ));
 
+    kaminski_and_ment_statistics(&late, &within(0.08, 0.16), report, ranks);
+}
+
+/// Ruling 94.3's checks: Kaminski et al. (2025) about single stars under 0.16 M☉, `kaminski`,
+/// and Ment and Charbonneau (2023) about every primary of 0.1–0.3 M☉ of `late`.
+fn kaminski_and_ment_statistics(
+    late: &[System],
+    kaminski: &[&System],
+    report: &mut Report,
+    ranks: &mut Lcg,
+) {
+    let inner = (1.0, 10.0);
+    let rv = |lo: f64, hi: f64, days: (f64, f64)| {
+        move |_: &Host, p: &PlacedPlanet| {
+            (lo..=hi).contains(&minimum_mass(p)) && (days.0..days.1).contains(&period_days(p))
+        }
+    };
+    // Ruling 94.3: Kaminski et al. (2025, Table 7), single stars under 0.16 M☉, at 1-10 days.
+    report.check(
+        "0.5-3 M_earth (m sin i) planets at 1-10 days about hosts under 0.16 M_sun (Kaminski \
+         et al. 2025)",
+        rate(kaminski, rv(0.5, 3.0, inner)),
+        (0.5, 1.4),
+    );
+    report.check(
+        "3-10 M_earth (m sin i) planets at 1-10 days about hosts under 0.16 M_sun (Kaminski et \
+         al. 2025)",
+        rate(kaminski, rv(3.0, 10.0, inner)),
+        (0.03, 0.3),
+    );
+
+    // Ruling 94.3: Ment and Charbonneau (2023, Tables 5-7), every primary of 0.1-0.3 M☉ in their
+    // volume-complete sample, by Chen and Kipping's radius at a drawn rank.
+    let ment: Vec<&System> = late
+        .iter()
+        .filter(|s| (0.1..0.3).contains(&s.star_mass(0).value()))
+        .collect();
+    let (mut terrestrial, mut sub_neptunes, mut small, mut earths, mut close) =
+        (0_usize, 0, 0, 0, 0);
+    for s in &ment {
+        for (_, p) in primary_planets(s) {
+            let (r, days) = (
+                radius_chen_kipping(p.mass(), rank(ranks)).value(),
+                period_days(p),
+            );
+            if (0.5..=2.0).contains(&r) && (1.0..7.0).contains(&days) {
+                terrestrial += 1;
+            }
+            if (0.5..7.0).contains(&days) {
+                close += 1;
+                sub_neptunes += usize::from(r > 1.5);
+                small += usize::from((0.5..0.9).contains(&r));
+                earths += usize::from((1.0..1.5).contains(&r));
+            }
+        }
+    }
+    report.check(
+        "0.5-2 R_earth planets at 1-7 days about 0.1-0.3 M_sun primaries (Ment and Charbonneau \
+         2023)",
+        ratio(terrestrial, ment.len()),
+        (0.35, 1.0),
+    );
+    // Their terrestrials outnumber their sub-Neptunes 14 to 1, and the sub-Neptunes' rate is
+    // ≤ 0.07 per star (Table 7).
+    report.finding(
+        "share of the planets at 0.5-7 days above 1.5 R_earth about 0.1-0.3 M_sun primaries \
+         (Ment and Charbonneau 2023)",
+        ratio(sub_neptunes, close),
+        (0.0, 1.0 / 15.0),
+        (0.18, 0.21),
+    );
+    report.finding(
+        "planets above 1.5 R_earth at 0.5-7 days per 0.1-0.3 M_sun primary (Ment and \
+         Charbonneau 2023)",
+        ratio(sub_neptunes, ment.len()),
+        (0.0, 0.07),
+        (0.12, 0.14),
+    );
+    report.finding(
+        "planets of 0.5-0.9 R_earth against 1-1.5 R_earth at 0.5-7 days (Ment and Charbonneau \
+         2023)",
+        ratio(small, earths),
+        (0.13, 0.56),
+        (1.2, 1.4),
+    );
+}
+
+/// P14.T10.b's hosts of 0.1–0.5 M☉, and ruling 48 (b)'s mid-to-late M dwarfs.
+fn low_mass_statistics(galaxy: &Galaxy, report: &mut Report) {
     // Hosts of 0.1-0.5 M☉.
     let low = sample(galaxy, 4_000_000, 30_000, uniform(0.1, 0.5), drawn);
     let multiple = share_with_at_least(&low, 2, |p| period_days(p) < 200.0);
@@ -760,18 +937,16 @@ fn late_m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report) {
     let hu_per_star = per_star(&late, |_, p| {
         (0.08..=6.8).contains(&p.mass().value()) && (0.5..10.0).contains(&period_days(p))
     });
-    report.finding(
+    report.check(
         "M3-M5.5 planets per star inside 10 days (Hardegree-Ullman et al. 2019)",
         hu_per_star,
         (0.70, 1.89),
-        (0.64, 0.70),
     );
     let hu_multiple = share_with_at_least(&late, 2, |p| period_days(p) < 10.0);
-    report.finding(
+    report.check(
         "M3-M5.5 compact multiples (Hardegree-Ullman et al. 2019)",
         hu_multiple,
         (0.11, 0.89),
-        (0.17, 0.20),
     );
 }
 
@@ -828,11 +1003,81 @@ fn early_m_dwarf_diagnosis(systems: &[System], report: &mut Report) {
         per_star(systems, |_, p| p.mass().value() < 1.0
             && period_days(p) < 200.0),
     ));
-    let hot_chain = |_: &Host, p: &PlacedPlanet| p.role() == GroupRole::Chain && p.hot();
+}
+
+/// Ruling 94.6's hot chains about the early M dwarfs' primaries: how many have their
+/// eccentricities scaled down to the spacing floor, and how often a transiting system shows one
+/// planet.
+fn hot_chain_statistics(systems: &[System], report: &mut Report) {
+    let hot_chain = |_: &Host, p: &PlacedPlanet| hot_chain_planet(p);
+    report.check(
+        "early M dwarfs' hot chain planets scaled down to the spacing floor (ruling 94.6)",
+        per_star(systems, |h, p| hot_chain(h, p) && p.rescaled()) / per_star(systems, hot_chain),
+        (0.0, 0.10),
+    );
+    // Sixteen lines of sight per system, isotropic; a planet transits where the line of sight
+    // lies within R★ ÷ a of its orbit's plane.
+    let mut sight = Lcg::new(0x7a45_17ed);
+    let (mut hot, mut hot_single, mut any, mut any_single) = (0_usize, 0_usize, 0_usize, 0_usize);
+    for s in systems {
+        let coeffs = ZCoeffs::new(s.composition.z_fit());
+        let radius = zams::radius(s.star_mass(0), &coeffs).value() * SOLAR_RADIUS_M;
+        let planets: Vec<(bool, [f64; 3], f64)> = s
+            .hosts
+            .iter()
+            .filter(|h| h.zone.members().eq([0]))
+            .flat_map(|h| h.placement.planets())
+            .map(|p| {
+                let orbit = p.orbit();
+                let (i, node) = (orbit.inclination().value(), orbit.ascending_node().value());
+                let normal = [
+                    math::sin(i) * math::sin(node),
+                    -math::sin(i) * math::cos(node),
+                    math::cos(i),
+                ];
+                (
+                    hot_chain_planet(p),
+                    normal,
+                    radius / orbit.semi_major_axis().value(),
+                )
+            })
+            .collect();
+        if planets.is_empty() {
+            continue;
+        }
+        let has_hot = planets.iter().any(|p| p.0);
+        for _ in 0..16 {
+            let z = 2.0 * sight.next_f64() - 1.0;
+            let azimuth = 2.0 * core::f64::consts::PI * sight.next_f64();
+            let rho = (1.0 - z * z).sqrt();
+            let d = [rho * math::cos(azimuth), rho * math::sin(azimuth), z];
+            let transiting = planets
+                .iter()
+                .filter(|(_, n, grazing)| {
+                    (n[0] * d[0] + n[1] * d[1] + n[2] * d[2]).abs() < *grazing
+                })
+                .count();
+            if transiting > 0 {
+                any += 1;
+                any_single += usize::from(transiting == 1);
+                if has_hot {
+                    hot += 1;
+                    hot_single += usize::from(transiting == 1);
+                }
+            }
+        }
+    }
     report.note(format!(
-        "  hot chain planets whose eccentricity is scaled down to the spacing floor: {:.4}",
-        per_star(systems, |h, p| hot_chain(h, p) && p.rescaled()) / per_star(systems, hot_chain)
+        "  transiting systems showing one planet: with a hot chain {:.4} ({hot} lines of sight), \
+         every system {:.4} ({any}); Ballard and Johnson 2016: 55% in the singles' mode",
+        ratio(hot_single, hot),
+        ratio(any_single, any)
     ));
+}
+
+/// Whether `p` is a hot chain's planet.
+fn hot_chain_planet(p: &PlacedPlanet) -> bool {
+    p.role() == GroupRole::Chain && p.hot()
 }
 
 /// Ruling 87.3's finding: small planets per star inside 200 days about primaries of 0.65–0.75 M☉,
@@ -850,7 +1095,7 @@ fn blend_statistics(galaxy: &Galaxy, fgk: &[System], early_m: f64, report: &mut 
         "small planets per star of 0.65-0.75 M_sun inside 200 days (ruling 87.3)",
         blend,
         (fgk.min(early_m), fgk.max(early_m)),
-        (1.20, 1.27),
+        (1.14, 1.21),
     );
 }
 
@@ -1034,7 +1279,27 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   radii or more, peaking near 20, measured as they measure them: each planet's mass from its
 ///   radius by Weiss and Marcy's (2014) relation (their eqs. 6–9; [`weiss_marcy_mass`]);
 /// - (P14.T9.c) hosts in binaries inside 47 au have planets 0.25–0.5 as often as single stars of
-///   the same mass (Kraus et al. 2016, AJ 152, 8: `S_bin` = 0.34 (+0.14 −0.15)).
+///   the same mass (Kraus et al. 2016, AJ 152, 8: `S_bin` = 0.34 (+0.14 −0.15));
+/// - (48 b) mid-to-late M dwarfs, as above: 1.06 per star and 32% compact multiples, inside
+///   Hardegree-Ullman et al.'s intervals since ruling 94's closer first period and held median;
+/// - (94.2) single late M dwarfs (or wider than 200 au) of 0.14–0.337 M☉, whose median is Ribas
+///   et al.'s (2023, A&A 670, A139, §5) 0.24 M☉ for their hosts under 0.337 M☉: planets of
+///   1–10 M⊕ in m sin i (i seen along galactic north, isotropic as every host's plane is), 0.56
+///   (+0.15 −0.14) at 1–10 days, window 0.35–0.85, and 0.63 (+0.23 −0.18) at 10–100 days, window
+///   0.35–1.1; Sabotta et al.'s (2021, A&A 653, A114, Table 4) 1.06 and 0.55 below 0.34 M☉,
+///   which Ribas et al. supersede with the same survey's 238 stars, are reported beside them;
+/// - (94.3) Kaminski et al. (2025, Table 7), single stars under 0.16 M☉ at 1–10 days: 0.88
+///   (+0.36 −0.28) planets of 0.5–3 M⊕ in m sin i, window 0.5–1.4, and 0.11 (+0.11 −0.06) of
+///   3–10 M⊕, window 0.03–0.3, which tests the taper above the chains' old ceiling;
+/// - (94.3) Ment and Charbonneau (2023, AJ 165, 265, Tables 5–7), every primary of 0.1–0.3 M☉
+///   of their volume-complete sample: 0.61 (+0.24 −0.19) planets of 0.5–2 R⊕ at 0.4–7 days, less
+///   their 0.4–1 day bin about 0.57, window 0.35–1.0, by Chen and Kipping's radius;
+/// - (94.6) under 10% of the early M dwarfs' hot chain planets have their eccentricities scaled
+///   down to the spacing floor;
+/// - (87.4) the outer planet of a pair is the larger in Weiss et al.'s 65.4% with the ±2.1%
+///   sampling spread of their 504 pairs (a re-run of their cuts gives 64.5%), 0.633–0.675: a
+///   finding at 0.640 until ruling 94.4's taper let the outer members of chains centred near the
+///   ceiling grow past it (0.651).
 ///
 /// # Findings, pinned as built
 ///
@@ -1043,29 +1308,24 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 /// Each of these still misses its source by more than any change inside the sources reaches, or
 /// is a finding a ruling records rather than tunes, and is reported with its dial:
 ///
-/// - the outer planet of a pair is the larger in 0.640 of pairs, against Weiss et al.'s 65.4%
-///   with the ±2.1% sampling spread of their 504 pairs (ruling 87.4; a re-run of their cuts gives
-///   64.5%), at the 0.54 dex width ruling 85.1 restores; it is recorded, not tuned;
 /// - (87.3) small planets per star inside 200 days about primaries of 0.65–0.75 M☉, which ruling
-///   85.4's blend reaches, are 1.23, between the FGK stars' 0.81 and the early M dwarfs' 2.83;
-/// - late M dwarfs under 0.34 M☉ have 0.12 planets of 1–10 M⊕ in m sin i at 1–10 days, against
-///   Sabotta et al.'s (2021, A&A 653, A114, Table 4) 1.06 (+0.35 −0.28), and 0.72 at 10–100 days,
-///   inside their 0.55 (+0.40 −0.26) (rulings 85.3 and 87.5): below the blend of ruling 85.4 these
-///   hosts' chains start at the FGK law's first period, a median of 15 days, so 0.43 planets of
-///   any mass lie at 1–10 days, and their masses, 7.7 M⊕ × M★, put most of those under 1 M⊕;
-/// - mid-to-late M dwarfs have 0.67 planets per star and 18% compact multiples inside 10 days,
-///   against Hardegree-Ullman et al.'s 1.19 and 0.44 (the multiples inside their interval), their
-///   hosts above 0.30 M☉ in ruling 85.4's blend;
-/// - small planets at \[Fe/H\] = −0.8 are 0.44 of solar (0.46 before ruling 68.2, 0.42 before
+///   85.4's blend reaches, are 1.19, between the FGK stars' 0.76 and the early M dwarfs' 2.76;
+/// - (94.3) about 0.1–0.3 M☉ primaries, 0.20 of the planets at 0.5–7 days lie above 1.5 R⊕,
+///   against Ment and Charbonneau's 1 in 15 (terrestrials outnumber sub-Neptunes 14 to 1), and
+///   0.13 per star against their ≤ 0.07; planets of 0.5–0.9 R⊕ are 1.26 times those of
+///   1–1.5 R⊕ against
+///   their 0.29 (0.13–0.56, a "tentative downturn"): the chains' 0.54 dex width about a median
+///   of 2.7 M⊕ puts too many planets in both tails;
+/// - small planets at \[Fe/H\] = −0.8 are 0.45 of solar (0.46 before ruling 68.2, 0.42 before
 ///   ruling 73): the compact classes' share there is about 0.72 of solar, as
 ///   `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars with Kepler-like
 ///   planets rises by 1.4 between −0.2 and +0.2 in Zhu 2019, which the table follows), metal-poor
 ///   discs hold fewer planets under the solid budget, and rocky planets, whose masses follow their
 ///   discs, fall under 1 M⊕;
-/// - close-binary hosts have planets 0.14 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
+/// - close-binary hosts have planets 0.13 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
 ///   0.34 compounds with their truncated discs, whose budgets now build no chain at all where they
 ///   cannot build its first planet (ruling 66), under Kraus et al.'s 1σ (0.19–0.48);
-/// - small pairs are at 10 mutual Hill radii or more in 99.4% of pairs measured as Weiss et al.
+/// - small pairs are at 10 mutual Hill radii or more in 99.3% of pairs measured as Weiss et al.
 ///   measure them, from masses their mass–radius relation gives each radius, and in all of them by
 ///   their own masses, the floor of design note 7 by construction, against Weiss et al.'s 93%; the
 ///   median is 17.1 against a peak near 20 (ruling 52.5).
@@ -1077,7 +1337,8 @@ fn the_statistics_of_architecture_meet_their_surveys() {
     let mut ranks = Lcg::new(0x00ad_1ace);
     let fgk = fgk_statistics(&galaxy, &mut report, &mut ranks);
     let early_m = m_dwarf_statistics(&galaxy, &mut report, &mut ranks);
-    late_m_dwarf_statistics(&galaxy, &mut report);
+    late_m_dwarf_statistics(&galaxy, &mut report, &mut Lcg::new(0x00ad_1acf));
+    low_mass_statistics(&galaxy, &mut report);
     blend_statistics(&galaxy, &fgk, early_m, &mut report);
     metallicity_statistics(&galaxy, &mut report);
     close_binary_statistics(&fgk, &mut report);
