@@ -1193,7 +1193,8 @@ for regular moons and rings and to its orbital plane for the rest.
 
 - **P14.T17.a Count, masses, orbits.** For a parent over 10 M⊕ with an envelope: total satellite
   mass = M_p × 10^N(−3.8, 0.3), the 1–2.5 × 10⁻⁴ of Canup and Ward (2006), split among 1–6 major
-  moons (zero-truncated Poisson, mean 3.5) by the peas-in-a-pod law of T7 with the planet as host.
+  moons (zero-truncated Poisson, mean 3.5) by T7's correlated form, with the moons' own step and
+  spread (ruling 86: s = 0.30 dex, σ_w = 0.40 dex; a Titan-like branch with probability 1⁄3).
   The innermost sits at 3–8 planetary radii and outside the fluid Roche limit; the rest follow by
   T6's spacing about the planet (mean 15 mutual Hill radii), adjacent pairs snapping to 2:1 with
   probability 0.5, as the Galilean moons and those of TRAPPIST-1's analogues do. Everything must lie
@@ -1211,6 +1212,89 @@ for regular moons and rings and to its orbital plane for the rest.
     the fluid Roche limit. (b) Io's elements give a heat flux of 1–4 W/m²; Europa's give the
     subsurface-ocean flag; all regular moons lock.
   - _Accept:_ `cargo test -p hyperion-sim planetary::moons::regular`.
+  - _As built (`moons`, round 8)._ `planetary/moons/{mod, regular}.rs`. Every kind reads a
+    `MoonParent` (`MoonParent::from_derived(id, ParentKind, &DerivedBody, orbit, host_mass)`, or
+    `MoonParent::new(MoonParentParts)` for a synthetic one): the parent's ID, mass, radius, class,
+    orbit, host mass and T15's moon-mass limit, at the epoch, since moons are primordial (D1).
+    `regular_moons(seed, &MoonParent) -> RegularMoons` (`drawn_mass`, `moons`, `moonlets`,
+    `without_beyond`), each `RegularMoon` with its `ordinal` (1 inside out, by which it draws), mass,
+    orbit about the planet (μ = G (M_p + m), referred to the equator) and `Resonance`. Tags
+    `moon.count`, `moon.mass` and `moon.orbit` (`Body`, the planet's key), their word layouts in
+    `rng/tags.rs`. Choices where the plan is silent: the count's λ is 3.5, whose capped truncated
+    mean is 3.4995; a resonant pair sits at exactly twice the inner period, and both members take
+    the forced eccentricity; the innermost moon is held outside the fluid Roche limit for 500
+    kg m⁻³ (`PLACEMENT_DENSITY`), below every derived moon's density; "dropped from the outside in"
+    keeps the longest inner run whose apocentres are inside R_H(1 − e) ÷ 20 and whose running total
+    is inside T15's limit; the moonlets are Poisson of mean 6 (`MOONLET_MEAN`, the lane's choice:
+    Jupiter has 4 inner moons, Neptune 6, Uranus 13), and none when no major moon is kept. T17.b:
+    `MoonNursery::new(&parent, &Composition, &star_disc, formation_distance)`,
+    `MoonSky::new(&planet_now, &planet_orbit_now, &planet_hosts)` and
+    `derive_regular_moon(&moon, &parent, &nursery, &sky, radius_rank, age, t) -> DerivedMoon`
+    (`flux`, `equilibrium_temperature`, `hill_radius`, `tidal_heating`, `heat_flux`, `volcanism`,
+    `subsurface_ocean`, `locking_time`).
+    `derive_body` reads the moon with the planet's mass as its primary, the planet's own glow as
+    the host it orbits and the stars at the planet's orbit as companions; its composition comes
+    from a circumplanetary disc built by `disc::derive` at the planet's mass, radius and early
+    luminosity, of which only the snow line (170 K, 2.7 au × √L) and the luminosity are read. The
+    early luminosity is plan 13's `giant_cooling` at the star's disc lifetime, when the last
+    generation of satellites forms (Canup and Ward 2006); below 0.3 M_J it follows the fit's own
+    power law in mass from 0.3 to 0.6 M_J (provisional: no cooling model covers ice giants). A
+    planet formed inside its star's snow line has no ice line. The radius rank is a plain argument,
+    as `derive_body`'s is, until T22 numbers the moons. `locking_time` is T14.b's formula
+    (I = 0.35 M R², k₂ = 0.3, Q = 100, from 15 h), here until T14 owns it. `Volcanism` has four
+    levels at 0.01, 0.1 and 1 W m⁻² (the lane's, provisional). The ocean flag: an ice shell
+    conducting the tidal flux, 651 ln(273 K ÷ T_s) ÷ F thick (Petrenko and Whitworth 1999), thinner
+    than the moon's water spread at 1,000 kg m⁻³. Measured: over 2,001 IDs, the median kept total
+    is 1.35 × 10⁻⁴ of Jupiter (real 2.07 × 10⁻⁴, a factor of 0.65; drawn 1.57 × 10⁻⁴) and
+    1.51 × 10⁻⁴ of Saturn (real 2.47 × 10⁻⁴, 0.61), with 3.19 and 3.41 moons kept on average.
+    Jupiter derived at the epoch has an early luminosity of 4.4 × 10⁻⁶ L☉ at the zero-age Sun's
+    3 Myr and its ice line at 11.9 R_J, so Io and Europa form dry and Ganymede and Callisto icy.
+    Io's elements give 2.2 W m⁻² at Lainey's k₂ ÷ Q (2.5 through `derive_regular_moon`, whose
+    radius is 1,882 km).
+  - _Ruling 86, as built._ The split no longer reads T7's fitted σ_w and step, which `calib3`'s
+    refit moved (the outer-heavier share reached 0.852): `MOON_OUTWARD_STEP_DEX` = 0.30 and
+    `MOON_SCATTER_DEX` = 0.40, no σ_b. With probability 1⁄3 (`TITAN_PROBABILITY`, provisional) the
+    outermost moon takes 0.90–0.98 of the total, uniform (`TITAN_SHARE`), and the others split the
+    rest by the law; `moon.count` words 4–5 carry the branch and the share. The outermost is the
+    lane's reading of "one outer moon". Tested over 15,000 systems of 4–6 moons, 10,082 on the main
+    branch: outer-heavier 0.700 (0.65–0.75), median within-system spread of log mass 0.592 dex
+    (0.45–0.70), median largest share 0.539 (0.45–0.65); 32.8% Titan-like, each dominant share in
+    0.90–0.98. It replaces the old 0.55–0.85 check. A one-moon system is never Titan-like, since its share is 1
+    in either branch. Re-measured under ruling 86 over 2,001 IDs: the median kept total is
+    1.30 × 10⁻⁴ of Jupiter (0.63 of the real) and 1.48 × 10⁻⁴ of Saturn (0.60), with 3.24 and
+    3.51 moons kept on average, which supersede the figures above.
+  - _T17, three more choices._ Where an eccentricity breaks the 2√3 gap, the outer moon's is halved,
+    at most eight times and then zero, as T8.d does for planets, so a forced eccentricity can end
+    below 0.004. Where the fluid Roche limit for 500 kg m⁻³ lies beyond 3 R_p, the innermost range
+    moves out keeping its 8:3 ratio, so that moon can sit beyond 8 R_p. A 2:1 snap is kept only
+    where design note 7's floor holds, and otherwise the pair takes its drawn spacing, so the
+    resonant share of pairs is 0.3–0.55 (tested), not 0.5.
+  - _T17, for the orchestrator to rule._ (1) The heating's k₂ ÷ Q is Io's measured 0.015 (Lainey
+    et al. 2009, abstract), `MOON_TIDAL_RESPONSE`, provisional: T14.b's rocky 0.3 and 100 give
+    0.003 and Io 0.45 W m⁻², outside the test's 1–4. (2) The 21⁄2 form is Segatz et al.'s (1988,
+    Icarus 75, 187) with k₂ ÷ Q, not Peale et al.'s (1979), who wrote a uniform body's rigidity
+    form (research agent, unverified in their text). (3) A Europa formed inside the ice line is
+    dry, so a generated Europa has no ocean although Europa's elements (8% water) give the flag;
+    Ganymede and Callisto analogues hold 12–13% water at the median rank, where the real ones hold
+    about 45%, and are 13% small (Zeng's curves are extrapolated below 0.125 M⊕). (4) The ice line
+    moves from about 25 R_J at 1 Myr to 6.5 at 10 Myr (Baraffe et al. 2003's 1 M_J: log L ÷ L☉ =
+    −4.72, −5.52, −5.87 at 1, 5, 10 Myr), so the disc lifetime sets it; Heller and Pudritz (2015,
+    A&A 578, A19) put it at 15–30 R_J while the last moons form, set by accretion heating, which
+    the plan's luminosity-only line leaves out.
+
+  - _Ruling 83, as built._ (1) The heating's k₂ ÷ Q stays 0.015 for every moon, provisional for
+    icy ones (83.1). (7, as amended) A moon formed beyond the circumplanetary ice line carries
+    0.35–0.50 ice by mass, uniform in its radius rank (`ICY_MOON_ICE_FRACTION`; 0.35–0.41 sourced
+    by Fortney et al. 2007 and the inversion of their Eq. 7, the upper end unsourced), and none
+    inside it; its radius is `moon_radius(mass, ice)`: Fortney, Marley and Barnes's (2007) Eq. 7
+    from 0.01 M⊕, and an uncompressed sphere of rock at 3,300 kg m⁻³ and ice at 940 below, so
+    Zeng's curves are no longer extrapolated for moons. `DerivedMoon` gains `ice_fraction`,
+    `radius`, `density` and `class`, which replace `derive_body`'s radius and composition for
+    moons (no longer exposed); it still gives the flux, T_eq and the moon's Hill radius. The
+    ocean flag reads the ice fraction. The dry sphere and Eq. 7 meet 10% apart at 0.01 M⊕ (1,629
+    against 1,804 km), a step in mass only. The test: Ganymede's 1.942, Callisto's 1.834 and
+    Titan's 1.881 g cm⁻³ each lie between the model's densities at 0.35 and 0.50 ice for its own
+    mass (Ganymede 2.07–1.74, Callisto 1.89–1.57, Titan 2.02–1.69).
 
 #### P14.T18 Giant-impact moons
 
@@ -1225,6 +1309,35 @@ planet's obliquity to the isotropic branch of T14 and its surface age clock.
 - _Tests:_ Earth–Moon values give 3–5 × 10⁸ m at 4.5 Gyr for an effective Q of 30–40; the orbit is
   monotone in time; a moon of a planet at 0.1 au is lost within 1 Gyr.
 - _Accept:_ `cargo test -p hyperion-sim planetary::moons::impact`.
+- _As built (`moons`, round 8; superseded in part by ruling 83, below)._ `planetary/moons/impact.rs`, tag `moon.impact` (`Body`: the
+  mark, the ratio's rank and the mean anomaly, words 0–2). `giant_impact_moon(seed, &MoonParent) ->
+Option<ImpactMoon>` takes any parent of class `Rocky` or `Icy` and of 0.001–5 M⊕ with a
+  `ParentKind` of `Planet` or `DwarfPlanet`, so T22 calls it for T21.c's members as for planets.
+  `ImpactMoon` has `mass`, `density`, `formed`, `semi_major_axis_at(age)`, `lost_at()`,
+  `orbit_at(&parent, age)` and `state_at(age, t) -> BodyState` (`NotYetFormed`, `Present`,
+  `Unbound { at }`); `recession_coefficient` and `receded_axis` are the closed form. Choices: the
+  moon forms at 1.2 fluid Roche limits (`FORMATION_ROCHE_RADII`: "just outside", Ida, Canup and
+  Stewart 1997; the 1.2 of Kokubo, Ida and Makino 2000 not re-checked), 3.5 Earth radii for the
+  Moon; its density is the parent's or a mantle's 3,300 kg m⁻³, whichever is less (Charon's
+  parent gives 1,854 against Charon's 1,702); the tides are the parent's, T14.b's k₂ = 0.3 and
+  Q = 100; the impact is at the system's birth, the plan's (age + t); the orbit is circular on the
+  parent's equator, whose tilt to the orbital plane is T14.a's isotropic obliquity, so this moon's
+  elements are to the equator, not to the orbital plane as phase D's header puts "the rest" (a
+  deviation); the obliquity and surface-age clock wait for T14 and T24, which read whether a moon
+  exists. Measured: from 3.50 Earth radii the Moon reaches 3.92, 3.82 and 3.75 × 10⁸ m at 4.5 Gyr
+  for Q = 30, 35 and 40, and 3.25 × 10⁸ m at the generator's Q = 100; every moon of a 0.01–5 M⊕
+  planet at 0.1 au is lost before 1 Gyr. For the orchestrator: Vanth is 0.16 ± 0.02 of Orcus
+  (Brown and Butler 2023), above the dwarf planets' 0.15; Elser et al.'s range is 1 in 45 to 1
+  in 4 about their "more than 1 in 12".
+
+- _Ruling 83, as built._ (5) The moon forms at 2.15 ± 0.27 fluid Roche limits, normal truncated
+  to 1.3–2.4 by inversion (`FORMATION_ROCHE_RADII`, `formation_roche_radii`; Salmon and Canup
+  2012), on word 3 of `moon.impact`: 3.8–7.0 Earth radii for the Moon, from which the Earth–Moon
+  test still gives 3–5 × 10⁸ m at 4.5 Gyr for Q = 30–40 and 100 at every rank tried. The
+  truncation at 2.4, 0.93 σ above the mean, puts the median at 2.09. (6) A dwarf
+  planet's moon is, with equal odds on word 4, an intact impactor of 0.03–0.2 or a disc moon of
+  0.0005–0.01, both log-uniform (`DWARF_INTACT_MASS_RATIO`, `DWARF_DISC_MASS_RATIO`,
+  `DWARF_INTACT_SHARE`); the planets' 0.002–0.05 stands.
 
 #### P14.T19 Irregular moons
 
@@ -1240,6 +1353,66 @@ next to a belt has one or two kilometre-scale captured moons with probability 0.
 - _Tests:_ every irregular lies inside its stability limit at pericentre and apocentre; no
   inclination falls in the gap; a Triton-like capture leaves no regular moon outside it.
 - _Accept:_ `cargo test -p hyperion-sim planetary::moons::irregular`.
+- _As built (`moons`, round 8; superseded in part by ruling 83, below)._ `planetary/moons/irregular.rs`, tag `moon.capture` (`Body`, layout in
+  `rng/tags.rs`). `captures(seed, &MoonParent, Option<NearestBelt>) -> Captures` (`population`,
+  `moons`, `large`, `prune(&MoonParent, &RegularMoons)`); the nearest belt is a plain `NearestBelt` of a mass and a
+  `BeltAdjacency`, as T22.a passes the belts' masses. A giant, gas or ice, with a belt
+  has an `IrregularPopulation` of N(r > 1 km) = Poisson(100 × (R_H ÷ R_H,J)² × (M_belt ÷ 4.0 ×
+  10⁻⁴ M⊕)), the asteroid belt beside Jupiter as the normalisation, with a cumulative slope of 1
+  (Jewitt and Haghighipour 2007's differential q = 2), and no belt means none. Its largest
+  members, up to four, are the top of that sample by Rényi's order statistics, r₍ₖ₎ = 1 km × N ÷
+  Γₖ, kept from 5 km and held at 125 km in radius: the plan's 10–250 km read as diameters.
+  `CapturedMoon` has its `kind` (`Irregular`, `Large`, `Small`), `ordinal`, `radius`, `mass`
+  (at 1,700 kg m⁻³), `sense` and orbit about the parent's orbital plane. A captured orbit draws
+  its eccentricity (0.1–0.6) and sense (2⁄3 retrograde) first, then its axis in 0.1–0.45 R_H held
+  so that the apocentre is inside T15's limit for that sense and eccentricity and the pericentre
+  outside the fluid Roche limit; a body that fits nowhere is not kept. Inclinations are isotropic
+  outside the gap, cos i uniform in (cos 60°, 1] or [−1, cos 120°). The Triton-like capture is
+  circular at 10–20 planetary radii, log-uniform (the lane's reading of "close in"; Triton is at
+  14.3), retrograde; `prune(&parent, &regular)` keeps the regular moons inside it whose apocentre
+  is at least 2√3 mutual Hill radii inside its pericentre, so none crosses it. A rocky planet's
+  captures need `BeltAdjacency::Neighbouring`, are one or two with equal odds, 1–15 km in radius
+  (the lane's "kilometre-scale", Phobos 11.1 and Deimos 6.2), on the same capture orbits, which
+  is the lane's reading and provisional: Phobos and Deimos are at 0.003–0.007 R_H, nearly circular
+  and equatorial. Measured, over 2,000 each of Jupiter, Saturn, Neptune, an
+  eccentric Jupiter and a warm ice giant beside a belt of 4 × 10⁻⁴ M⊕: 65.4% of 28,072 captured
+  bodies retrograde (the plan's 2⁄3, less the prograde bodies that fit nowhere); 798 Triton-like
+  captures of 4,000 ice giants (19.95%); mean populations of 100.8, 151.5 and 479.7 above 1 km at
+  Jupiter, Saturn and Neptune; Jupiter's captured bodies a median 48 km in radius, the largest
+  held at 125 km in over half of Jupiters (N ÷ Γ₁ = 100 km ÷ E₁, where Himalia is 85); 1,977 of
+  10,000 Mars-like planets beside a belt with small captures.
+  - _T19, for the orchestrator to rule_ (research agent's figures). (1) Retrograde: 88 of 107
+    irregulars (82%; Jewitt and Haghighipour 2007) and 315 of 393 in JPL's present elements
+    (80%), against the plan's two thirds. (2) The Kozai gap is 60–130° or 55–130° in Jewitt and
+    Haghighipour (2007, §3 and §5) and 50–140° in Nesvorný et al. (2003), against 60–120°; three
+    Neptunian irregulars sit at 119.6°, 127.8° and 128.4°. (3) Scaled linearly with the nearest
+    belt's mass, the Kuiper belt (0.02–0.1 M⊕) gives a Neptune some 10⁴–10⁵ irregulars above 1
+    km, where the four giants' populations are similar (Jewitt and Haghighipour 2007, §4). (4)
+    Jupiter's 100 above 1 km (Sheppard and Jewitt 2003) and the Triton-like capture's 0.2 have no
+    re-checked source; Agnor and Hamilton (2006) give the mechanism, not a rate. (5) "10–250 km"
+    is ambiguous: as diameters it fits Himalia, Phoebe and Sycorax but not Nereid (340 km). Each
+    is built as the plan says and marked provisional.
+  - _T19, for the owner._ P14.T22.b asks the moons of one planet to satisfy T10.a's non-overlap rule
+    about the planet. The regular moons do, and the Triton-like capture's pruning keeps them clear
+    of it, but the irregulars cannot: at e = 0.1–0.6 over 0.1–0.45 R_H they cross one another, and
+    their pericentres reach 0.04 R_H, inside the regular moons' 0.05, as the real ones' do:
+    Jupiter's retrograde groups overlap in their ranges of distance. T22.b needs the rule restricted to the regular
+    moons, or the irregulars' orbits changed.
+
+- _Ruling 83, as built._ (2) Captured orbits are retrograde with probability 0.8, with Ashton et
+  al.'s (2022) argument for a bias against finding prograde moons recorded; measured, a share
+  slightly above it, since prograde bodies fit their smaller limit less often. (3) The Kozai gap
+  stays 60–120°. (4, as amended) A giant's population no longer reads its belt: its count above
+  2.8 km across is `round(90 × 10^(0.25 z))` from a standard normal on words 0–1 of
+  `moon.capture`, and its largest member's diameter D₁ is log-uniform over 150–350 km, word 2.
+  The law (`IrregularPopulation::count_above`, `diameter_at`) is N(> D) = D₁ ÷ D (q = 2) down to
+  the break `D_b` = (N × 2.8^2.5 ÷ D₁)^(2⁄3) km clamped to 2.8–10 km, and q = 3.5 below; the fit is
+  this plan's. The first body is D₁ across and the next, up to four, sit where the law's count is
+  1 + Γₖ₋₁ (Rényi), down to 10 km across. Tested: D₁ passes a Kolmogorov–Smirnov test against its
+  log-uniform law; N(> 2.8 km) equals the drawn count to 10⁻⁹ wherever the break is not clamped;
+  the first body is D₁ whenever its orbit fits, in over half of giants. The belt is read only for a rocky planet's
+  captures. (5) The Triton-like 0.2 is a design choice with no source. (8) T22.b's amendment is
+  recorded under T22.b.
 
 #### P14.T20 Rings
 
@@ -1315,6 +1488,10 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
   satellites against the whole system belongs to T30.a, where `generate` exists.
   - _Accept:_ `cargo test -p hyperion-sim --test planetary_properties moons rings`, and the
     million-system run under `just test-slow`.
+  - _Amended by ruling 83.8:_ the non-crossing rule exempts irregular moons, whose orbits cross as
+    the Himalia group's do (JPL mean elements). Each irregular instead stays inside its stability
+    limit, has a pericentre beyond the outermost regular moon's apocentre, and has no inclination
+    in the Kozai gap. Regular and giant-impact moons keep the rule.
 
 ### Phase E: hooks
 
@@ -3982,3 +4159,16 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     halo star, so the halo star is re-pinned: `02025b2be0000001`, 0.400 M☉, \[Fe/H\] −0.77, one
     rocky planet of 1.50 M⊕ at 8.6 days (it was `01fdbb3660000000`, 0.321 M☉, −0.34); the other
     thirteen are found again.
+- **Moons, as built (round 8, `moons`, P14.T17–T19).** Built alone, called from nothing: T22.a
+  runs the three kinds for one planet, numbers the moons by design note 3, opens each moon's own
+  `planet.radius` rank for `derive_regular_moon`, and passes the nearest belt's mass and adjacency
+  from T21; T30 then calls it, which moves every golden system that has a giant or an eligible
+  rocky body, and needs the bump. Ruling 83 settled the k₂ ÷ Q, the icy moons' composition and
+  radius, the retrograde share, the Kozai gap, the irregular population, the impact moon's
+  distance, the dwarf planets' moons and the Triton-like 0.2 (a design choice). Its amendment
+  settled the icy moons' ice range (0.35–0.50) and the irregulars' sizes (D₁ of 150–350 km over a
+  broken law). Still open: the ice line in the planet's luminosity at its star's disc lifetime
+  leaves accretion heating out. T14 should take
+  over `moons::regular::locking_time`, and T14.a's obliquity and T24.b's surface age read whether a
+  giant-impact moon exists; the giant-impact moon's elements are to its parent's equator until T14
+  places it.

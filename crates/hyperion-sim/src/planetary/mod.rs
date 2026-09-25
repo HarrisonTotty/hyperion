@@ -94,6 +94,7 @@ pub mod fate;
 pub mod hosts;
 pub mod index;
 pub mod label;
+pub mod moons;
 pub mod params;
 pub mod placement;
 pub mod record;

@@ -426,6 +426,39 @@ domain_tags! {
     /// share of a turn, word 4k + 1, one open uniform each; words 4k + 2 and 4k + 3 are reserved
     /// (`planetary::fate::ScatterDraws`).
     PLANET_SCATTER: Body = "planet.scatter";
+    /// A giant's regular satellite system (P14.T17.a), on the planet's own key: the standard
+    /// normal of its total mass, words 0–1; the rank of its count of major moons, word 2; the
+    /// count of its small inner moonlets, a Poisson draw from word 3; whether it is Titan-like and
+    /// its outermost moon's share if so, one uniform each at words 4 and 5; words 6–7 are reserved
+    /// (`planetary::moons::regular`).
+    MOON_COUNT: Body = "moon.count";
+
+    /// The masses of a giant's regular moons (P14.T17.a): moon k, counted from 1 inside out,
+    /// reads its within-system scatter, a standard normal, at words 2(k − 1) and 2(k − 1) + 1
+    /// (`planetary::moons::regular`).
+    MOON_MASS: Body = "moon.mass";
+
+    /// The orbits of a giant's regular moons (P14.T17.a): the innermost moon's place, one uniform
+    /// at word 0, words 1–15 reserved; then moon k, from 1 inside out, at words 16 + 64(k − 1)
+    /// onwards: its spacing from its inner neighbour, seventeen attempts of two words each, the
+    /// rank of that pair's resonance, its free and forced eccentricities, its inclination, and
+    /// its node, periapsis and mean anomaly, one uniform each at offsets 34–40
+    /// (`planetary::moons::regular`).
+    MOON_ORBIT: Body = "moon.orbit";
+
+    /// A planet's or dwarf planet's giant-impact moon (P14.T18): whether it has one, the rank of
+    /// its mass ratio, its mean anomaly at the epoch, the rank of its formation distance and, for
+    /// a dwarf planet, its class, one uniform each at words 0–4; words 5–7 are reserved
+    /// (`planetary::moons::impact`).
+    MOON_IMPACT: Body = "moon.impact";
+
+    /// A planet's captured moons (P14.T19): a giant's population count, a standard normal at
+    /// words 0–1, and the rank of its largest member's diameter, word 2; whether a large capture (an ice giant's) or small ones (a rocky planet's)
+    /// happened, and how many, words 8 and 9; a large capture's mass ratio, axis, inclination and
+    /// angles, words 16–21; and captured body k, from 1, at words 32 + 16(k − 1) onwards: its size
+    /// (a giant's body 1 is its largest member and reads none), sense, inclination, axis, eccentricity, node, periapsis and mean anomaly, one uniform each
+    /// (`planetary::moons::irregular`).
+    MOON_CAPTURE: Body = "moon.capture";
 
     // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
     // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
