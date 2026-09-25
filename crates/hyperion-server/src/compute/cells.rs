@@ -178,7 +178,7 @@ mod tests {
 
     use hyperion_sim::coords::GalacticPosition;
     use hyperion_sim::galaxy::placement::NoCache;
-    use hyperion_sim::galaxy::query::{QuerySphere, cells_in_sphere};
+    use hyperion_sim::galaxy::query::{QuerySphere, RangeQuery, cells_in_sphere, range_query};
     use hyperion_sim::id::Layer;
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::units::LightYears;
@@ -284,6 +284,30 @@ mod tests {
         let records = total * size_of::<SystemRecord>();
         let overhead = cells.len() * (size_of::<CachedCell>() + ENTRY_OVERHEAD_BYTES);
         assert_eq!(counters.bytes(), records + overhead);
+    }
+
+    /// A whole range query, census included, through the handle equals the same query through
+    /// plan 03's `NoCache`, with a roomy budget cold and warm and with a budget of 1 KiB, which
+    /// evicts on almost every cell (P04.T12; `range_query` has been in the tree since T14.d).
+    #[test]
+    fn a_range_query_through_the_handle_answers_as_no_cache_does() {
+        let centre = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube");
+        let query = RangeQuery::builder(centre, LightYears::new(60.0))
+            .build()
+            .expect("a valid query");
+        let uncached = range_query(galaxy(), &mut NoCache::new(), &[], &query);
+        assert!(
+            !uncached.systems().is_empty(),
+            "a 60 ly sphere at the Sun is not empty"
+        );
+        for budget in [ROOMY, 1 << 10] {
+            let cache = SharedCellCache::new(budget);
+            for pass in ["cold", "warm"] {
+                let cached = range_query(galaxy(), &mut cache.handle(key()), &[], &query);
+                assert_eq!(cached, uncached, "{pass}, with a budget of {budget} bytes");
+            }
+            assert!(cache.counters().misses() > 0);
+        }
     }
 
     #[test]

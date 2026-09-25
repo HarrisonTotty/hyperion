@@ -129,6 +129,26 @@ mod tests {
     use crate::galaxy::params::GalaxyParams;
     use crate::math;
 
+    /// The thresholds fall where Design note 12 puts them, written out here as numbers: at
+    /// 3,800 K cm⁻³ gas is hot below 3,800 ÷ (2.3 × 10⁵) = 0.016522 cm⁻³, warm below
+    /// 3,800 ÷ (1.1 × 5,000) = 0.69091 cm⁻³ and cold above it, and molecular above 100 cm⁻³.
+    /// Swapping the two particle counts, or either temperature, moves a boundary and fails here.
+    #[test]
+    fn the_phase_boundaries_lie_where_design_note_12_puts_them() {
+        let p = KelvinPerCm3::new(3_800.0);
+        let phase = |n: f64| GasPhase::of(HydrogenPerCm3::new(n), p);
+        let (hot, warm): (f64, f64) = (3_800.0 / 2.3e5, 3_800.0 / 5_500.0);
+        assert!((hot - 0.016_522).abs() < 1e-6 && (warm - 0.690_91).abs() < 1e-5);
+        for (edge, below, above) in [
+            (hot, GasPhase::Hot, GasPhase::Warm),
+            (warm, GasPhase::Warm, GasPhase::Cold),
+            (100.0, GasPhase::Cold, GasPhase::Molecular),
+        ] {
+            assert_eq!(phase(edge * (1.0 - 1e-9)), below, "below {edge}");
+            assert_eq!(phase(edge * (1.0 + 1e-9)), above, "above {edge}");
+        }
+    }
+
     /// At every pressure from 1 to 10⁸ K cm⁻³ the phase never goes back as the density rises:
     /// hot, warm, cold, molecular, in that order, each possibly absent.
     #[test]

@@ -2029,7 +2029,7 @@ idle motion, DOM text, keyboard for everything.
   frame always shown, dashes for predicted paths, `--target` for commanded ones, shape for type):
   orbits are solid `--text-muted` ellipses (7.22:1 on `--surface-0`), reference marks like range
   rings and not predictions, so never dashed, and the selected body's orbit is a solid `--text`
-  hairline because it carries the selection; zones and belts are labelled annuli drawn as their two
+  line 2 px wide because colour alone must not carry the selection (ruling 44.2); zones and belts are labelled annuli drawn as their two
   edges in `--text-muted`, a belt's edges joined by short radial ticks every 10°, with no fill,
   hatch or dots, since hazard striping is the guide's only pattern fill; `--line` (1.38:1) stays for
   the grid and the scale rings on the reference plane only, because orbits and zone and belt edges
@@ -2046,6 +2046,8 @@ idle motion, DOM text, keyboard for everything.
     display shows are drafted for the owner (the orchestration notes' `ux-draft-system-display.md`).
     The client is built to the draft and marked for the owner's confirmation, as ruling 15's
     `DRIVE RANGE` row was, and the acceptance above holds once the owner has made the edits.
+    The owner accepted the round-9 drafts (`UX-GUIDE-DRAFTS-r9.md`, which superseded that file) on
+    2026-09-25, and they are in the guide.
 - **P14.T38.b Formatters.** In plan 05's `lib/format.ts`: `formatPeriod` (`d` under 1,000 days, `yr`
   above), `formatBodyDistance` (the guide's scaled units from km to AU with hysteresis),
   `formatTemperatureK`, `formatPressure` (Pa, kPa, MPa), `formatGravity` (m/s²),
@@ -2150,7 +2152,7 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   maximum greenhouse, and the optimistic pair, recent Venus to early Mars, whose edges carry short
   ticks into the band so that the two differ by shape and not by colour; ruling 65.4), belts as ticked annuli (T38.a), the cometary halo as a labelled outer ring only when it is
   inside the view. Orbits and every annulus edge are solid `--text-muted`, and the selected body's
-  orbit, the one `"selected"` path, a solid `--text` hairline; `--line` is for the plane's grid and
+  orbit, the one `"selected"` path, a solid `--text` line 2 px wide (ruling 44.2); `--line` is for the plane's grid and
   scale rings only (ruling 35.6, T38.a). Symbols, where shape
   encodes type and one shape means one thing on every display: hosts keep their symbols from the
   registry of plans 06 and 13 (`lib/galaxy/starSymbols.ts`, P06.T35.b: circle, ringed circle,
@@ -3981,7 +3983,8 @@ masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (
     413 px (`1-12 of 12`, `1-25 of 26`); at 1280 × 720 170 of 384 px and 214 of 431 px
     (`1-6 of 12`, `1-13 of 26`, `14-26 of 26` scrolled). **For the orchestrator to rule:** a
     readout is not one of the guide's "lists, logs and procedures"; it is read here as a list of
-    readings, and the position counts readings.
+    readings, and the position counts readings. (Ruled by the owner on 2026-09-25: the guide's
+    scrolling rule now names readouts, "which are lists of readings".)
   - _The optimistic habitable zone (ruling 65.4)._ The wire already carries it:
     `HabitableZoneDto.recent_venus_m` and `early_mars_m`, the same Kopparapu et al. (2013, erratum
     coefficients) fit and the same server call as the conservative pair, so the client computes
@@ -4370,3 +4373,86 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     whose planets are rocky groups or giants about hosts above 0.7 M☉, and the hot Jupiter, the
     eccentric giant and the close binary do not move. The slow search reproduces all fourteen IDs,
     so none is re-pinned; the golden systems' descriptions are brought up to their goldens.
+- **Ruling 87, the M dwarfs after ruling 85, as built (`calib4`, round 9).** Papers under
+  `_orchestration/research/calib3b-papers/` and `calib3-papers/`.
+  - _87.1, log radius._ T10.b asserts Weiss et al.'s correlation in log radius and reports linear:
+    all pairs 0.648 (linear 0.543; 0.545 without the pairs holding a planet above 16 R⊕, one pair
+    in 24,601), pairs above 1 R⊕ 0.595 against the new window 0.45–0.62 (linear 0.489; 0.491).
+    The finding stands: log and linear differ by 0.10 here, about 0.03 in the CKS data, and the
+    giants above 16 R⊕ do not explain it.
+  - _87.2, a test per single star._ Ballard and Johnson (2016, §3.3, eq. 5) model the excess
+    singles as a mode that "produces only singly transiting planets", and write that "it's not
+    possible to know, from counting statistics alone, whether these singly transiting systems
+    occurs because less planets exist around the star, or because they are very highly
+    inclined"; their 2.8 per host counts that mode as one planet. Their "1–2" is a transiting
+    multiplicity, a lower bound on the intrinsic count. So the dial is T5's: about an early M
+    dwarf the hot variant takes the cold chain's count (`EARLY_M_DWARF_HOT_VARIANT_COUNT` =
+    `CHAIN_COUNT`, `HotVariant::early_m_dwarf_count`), and the draw blends it with the ordinary
+    one or two by `early_m_dwarf_share` as the mixture's quantile at the count's own rank
+    (`CountLaw::cumulative`, `draw_blended_count` in `placement/classes.rs`; no word is added,
+    and FGK hosts draw exactly as before). The early M dwarfs' first-period break is re-fitted
+    to Dressing and Charbonneau's 0.47 at 0.5–10 days, 0.45 → 0.38 (4.6 days): the longer hot
+    chains' inner members are lighter, and at 0.45 it gave 0.389. The hot variant's share (0.55)
+    and the close binaries' suppression are unchanged. Of the hot chain planets about early M dwarfs,
+    55% have their eccentricities scaled down to the spacing floor (**for the orchestrator:** the
+    hot variant's half-normal 0.3 was set for one or two planets), so
+    P14.T8.d's unit test now bounds the rescaled share of cold chain planets only.
+  - _The windows, before → after:_ every early M primary 1.736 → 2.828 (1.8–3.2, now a check; by
+    radius 1.635 → 2.712); single or wider than 200 au (new) 2.244 → 3.672 (2.9–4.4; 72% of
+    primaries), of which 0.8% have no planet inside 200 days; 0.5–10 days 0.459 → 0.460; planets
+    of 0.5–4 R⊕ at 0.5–256 days per primary 4.80 (Hsu et al. 2020: 4.2–8.4). FGK small planets
+    0.689, hot Jupiters 0.71%, Cumming's giants 9.98%, η⊕ 0.393, the anchors and the giants'
+    slope 2.025 unmoved; 0.1–0.5 M☉ multiples 0.587 → 0.686, their giants 1.79%. The FGK and
+    single Suns' correlations move (0.641 → 0.648 and 0.641 → 0.643) though no FGK host's law
+    does: a circumbinary zone's planets take later slots, and so other draws, when an early-M
+    companion's zone before it reserves more, and the radius ranks the test shares then shift. No window was widened beyond rulings 87.1 (pairs above 1 R⊕: 0.46–0.60 → 0.45–0.62) and 87.4 (the outer-larger bracket).
+  - _Findings, pinned:_ (87.3) 0.65–0.75 M☉ primaries have 1.23 small planets inside 200 days,
+    between FGK's 0.81 and the early M dwarfs' 2.83. (87.4) outer larger 0.640 against 65.4 ±
+    2.1%. Hardegree-Ullman et al.'s mid-M 0.529 → 0.672 and multiples 0.131 → 0.183, re-pinned
+    (their hosts reach the blend); Sabotta et al. 0.124 → 0.121 at 1–10 days and 0.689 → 0.717 at
+    10–100 days (re-pinned 0.69–0.75).
+  - _87.5, proposed, not built._ Below 0.34 M☉ the chains start at the FGK law's break (median
+    first period 15 days), so only 0.43 planets of any mass lie at 1–10 days. Holding the early M
+    dwarfs' first-period factor below 0.35 M☉ as well (the blend's low side only) gives 1.05
+    planets of any mass at 1–10 days (Sabotta: 1.06), Hardegree-Ullman et al.'s 1.13 and 0.34
+    (their 1.19 and 0.44, both inside), and costs nothing else measured (10–100 days 0.73,
+    0.1–0.5 M☉ multiples 0.686, the early M and FGK windows untouched). Sabotta's 1–10 M⊕ at 1–10 days rises only to
+    0.30, since 7.7 M⊕ × M★ puts most of those planets under 1 M⊕ in m sin i; holding the chains'
+    median mass at 0.35 M☉ as well gives 0.39 (10–100 days 0.83), so the rest of that gap is the
+    mass law's, not the periods'.
+  - _Goldens,_ at 11: `planetary/architecture` (new lines: the hot variant's counts, its share and the
+    first-period factor at five host masses),
+    `planetary/classes` (the 0.4 M☉ host's hot chain and first periods), and five T32 systems:
+    filler A (0.335 M☉, one planet → seven), filler B (0.677 M☉, four → six), the halo star and
+    the triple's M-dwarf pair (first periods), and the close binary, whose circumbinary planets
+    take later slots after its 0.411 M☉ star's zone reserves more. The slow search reproduces all
+    fourteen IDs, so none is re-pinned.
+- **P14.T44.b, as built (round 9, `ui9`).** `useDisplayTime(openedAt, runHeldBy)` gains `running`,
+  `rateIndex`, `runHeldBy`, `run`, `hold`, `chooseRate` and `frameTime`; `displayTime.ts` gains
+  `RUN_RATES` (`1 h/s`, `1 d/s`, `10 d/s`, `1 yr/s`), `DEFAULT_RUN_RATE` (`1 d/s`),
+  `READOUT_PERIOD_MS` (250) and `runModeLabel`. The display opens in `HOLD` and runs only on `RUN`.
+  - _Keys and words._ `RUN` is `G` and `HOLD` `H`, a congruent pair in that order with the one in
+    force pressed; the rates are on `7`–`0`, after the steps' `1`–`6`. A `MODE` output reads `HOLD`
+    or `RUN 1 d/s`. `RUN` is held back at `+H`, described by `CLOCK WINDOW LIMIT`, and while the
+    link is down, described by the link's state. **For the owner:** `RUN`, `HOLD`, `MODE`, the rate
+    labels and the two keys join the draft nomenclature.
+  - _Frames and readouts._ While running, one animation frame asks for the next. Each frame's time,
+    whole seconds from the run's start by the frame's own timestamp, goes to the orbit map alone
+    through an external store (`FrameTime`, `useFrameTime`), and `useSystemView` gains `sceneAt(time)`
+    for it, so nothing else renders per frame. The display time that the readouts and D18's
+    requests read moves once a quarter second. Under reduced motion a 250 ms timeout chain steps it
+    a quarter second's worth at a time, one paint each, with no frame between.
+  - _Holds._ At `+H` the run stops there. Leaving the display (the `Activity` hidden) or unmounting
+    it holds, and so does losing the link, which is adjusted during render from `runHeldBy`. A step
+    or `RESET` while running holds first, so the step lands where the map stood. Holding keeps the
+    frame's time. A change of the motion setting mid-run goes on from where the run reached.
+  - _Tests._ `TimeControl.run.test.tsx`, twelve with fake frames and timeouts. They cover: no timer
+    or frame left after `HOLD`, after unmounting, or at `+H`; `HOLD` at `+H`, on hiding and on link
+    loss; readout changes at most four a second while the map paints each frame; four paints a
+    second and no pending frame under reduced motion.
+  - _By eye_ (headless Chromium over the built renderer, since `xvfb-run` is not installed): at
+    1 d/s the innermost planet of a 0.1 M☉ dwarf, at 4.7 Gm, moves about 40° a second while the
+    outer ones barely move, and nothing moves in `HOLD`.
+  - **For the owner:** the guide's 3D rule "redraws on demand only, never on a loop" and `RUN`'s
+    per-frame redraw, which D24 and this risk's "Time control and the guide" bullet allow, need one
+    wording.

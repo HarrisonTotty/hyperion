@@ -75,6 +75,15 @@ async function renderCharted() {
   return { user, socket };
 }
 
+/** Answers every `system_summary` request still open, each for the system it asked about. */
+async function answerSummaries(socket: FakeWebSocket): Promise<void> {
+  await server(() => {
+    socket.serverAnswers("system_summary", (body) =>
+      aSummaryResponse(aSystemSummary({ universe: body.universe, system: body.system })),
+    );
+  });
+}
+
 beforeEach(() => {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -114,6 +123,8 @@ describe("the SYSTEM display", () => {
   it("opens the selected system at the chart's time with one request", async () => {
     const { user, socket } = await renderCharted();
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    // The GALAXY readout's own request for the selected system's stars (P06.T36).
+    const beforeOpening = socket.requestsOfKind("system_summary").length;
 
     await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
 
@@ -121,7 +132,12 @@ describe("the SYSTEM display", () => {
       "aria-current",
       "page",
     );
-    expect(socket.requestsOfKind("system_summary").map((request) => request.body)).toEqual([
+    expect(
+      socket
+        .requestsOfKind("system_summary")
+        .slice(beforeOpening)
+        .map((request) => request.body),
+    ).toEqual([
       {
         kind: "system_summary",
         universe: aUniverse().id,
@@ -137,6 +153,8 @@ describe("the SYSTEM display", () => {
   it("starts afresh at the chart's time when the system is opened again", async () => {
     const { user, socket } = await renderCharted();
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    await answerSummaries(socket);
+    const beforeOpening = socket.requestsOfKind("system_summary").length;
     await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
     const opened = "+12 yr 182/15:00:00";
     expect(displayTime()).toHaveTextContent(opened);
@@ -149,7 +167,7 @@ describe("the SYSTEM display", () => {
     await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
 
     expect(displayTime()).toHaveTextContent(opened);
-    expect(socket.requestsOfKind("system_summary")).toHaveLength(2);
+    expect(socket.requestsOfKind("system_summary")).toHaveLength(beforeOpening + 2);
   });
 
   it("says NO SYSTEM SELECTED again once another universe is opened", async () => {
@@ -173,16 +191,16 @@ describe("the SYSTEM display", () => {
   it("asks nothing again for its answer when the display is left and shown again", async () => {
     const { user, socket } = await renderCharted();
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    await answerSummaries(socket);
     await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
-    await server(() => {
-      socket.serverAnswers("system_summary", (body) =>
-        aSummaryResponse(aSystemSummary({ universe: body.universe, system: body.system })),
-      );
-    });
+    await answerSummaries(socket);
+    const asked = socket.requestsOfKind("system_summary").length;
 
     await user.keyboard("{F2}");
     await user.keyboard("{F3}");
 
-    expect(socket.requestsOfKind("system_summary")).toHaveLength(1);
+    // One from the GALAXY readout and one from the display, and none again.
+    expect(asked).toBe(2);
+    expect(socket.requestsOfKind("system_summary")).toHaveLength(asked);
   });
 });

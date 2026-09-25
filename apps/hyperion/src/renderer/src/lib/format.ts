@@ -442,6 +442,49 @@ export function formatBodyDistance(
   return { value, unit: chosen.unit };
 }
 
+/** Decimals every eccentricity is read to, on every display that shows one. */
+export const ECCENTRICITY_DECIMALS = 4;
+
+/** Metres in a kilometre. */
+const M_PER_KM = 1_000;
+
+/** Seconds in a day of 86,400 s, the day of every `d`. */
+const SECONDS_IN_DAY = 86_400;
+
+/** An orbit's period, semi-major axis and eccentricity, each as it is read (plan 11, P11.T14). */
+export interface FormattedOrbit {
+  readonly period: FormattedPeriod;
+  readonly semiMajorAxis: FormattedDistance;
+  /** Plain, to {@link ECCENTRICITY_DECIMALS} decimals: `0.0167`. */
+  readonly eccentricity: string;
+}
+
+/**
+ * Formats an orbit's period, semi-major axis and eccentricity as every orbit is read on the ship: the
+ * period by {@link formatPeriod}, the axis by {@link formatBodyDistance} with no unit held from
+ * before, since an orbit's elements do not move, and the eccentricity to four decimals (plan 11,
+ * P11.T14).
+ *
+ * @param periodS - Seconds.
+ * @param semiMajorAxisM - Metres.
+ * @throws RangeError for a value that is not finite, or an eccentricity outside [0, 1).
+ */
+export function formatOrbit(
+  periodS: number,
+  semiMajorAxisM: number,
+  eccentricity: number,
+): FormattedOrbit {
+  requireFinite(eccentricity, "eccentricity");
+  if (eccentricity < 0 || eccentricity >= 1) {
+    throw new RangeError(`a bound orbit's eccentricity cannot be ${eccentricity}`);
+  }
+  return {
+    period: formatPeriod(periodS / SECONDS_IN_DAY),
+    semiMajorAxis: formatBodyDistance(semiMajorAxisM / M_PER_KM, null),
+    eccentricity: formatNumber(eccentricity, ECCENTRICITY_DECIMALS),
+  };
+}
+
 /**
  * Formats a star's luminosity in solar luminosities to three significant figures, without the unit:
  * `1.00`, `0.0850`, `25,400`; below 0.001 L☉, as a white dwarf's or a brown dwarf's, and from

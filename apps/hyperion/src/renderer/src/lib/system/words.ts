@@ -6,7 +6,12 @@
  * Every term is spelled out: the guide allows only abbreviations on its nomenclature list, which has
  * none for the asymptotic giant branch or a Wolf-Rayet star.
  */
-import type { ObjectKindDto, PhaseDto, VariableKindDto } from "@hyperion/protocol";
+import type {
+  ObjectKindDto,
+  PhaseDto,
+  StarEventKindDto,
+  VariableKindDto,
+} from "@hyperion/protocol";
 
 import type { HostRemnant } from "./model";
 
@@ -152,4 +157,33 @@ export function remnantLabel(remnant: HostRemnant): string {
  */
 export function variableKindLabel(kind: VariableKindDto): string {
   return kind.replaceAll("_", " ").toUpperCase();
+}
+
+/** A kind of event in progress on a star, in words: `FLARE`, `THERMAL PULSE` (plan 06, P06.T28). */
+export function starEventLabel(kind: StarEventKindDto): string {
+  let label: string;
+  switch (kind) {
+    case "flare":
+      label = "FLARE";
+      break;
+    case "glitch":
+      label = "GLITCH";
+      break;
+    case "magnetar_burst":
+      label = "MAGNETAR BURST";
+      break;
+    case "magnetar_giant_flare":
+      label = "MAGNETAR GIANT FLARE";
+      break;
+    case "fu_orionis_outburst":
+      label = "FU ORIONIS OUTBURST";
+      break;
+    case "giant_eruption":
+      label = "GIANT ERUPTION";
+      break;
+    case "thermal_pulse":
+      label = "THERMAL PULSE";
+      break;
+  }
+  return label;
 }

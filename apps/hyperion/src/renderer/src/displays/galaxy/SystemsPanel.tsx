@@ -1,7 +1,11 @@
-import { useId } from "react";
+import { universeTimeFromYears } from "@hyperion/protocol";
+import { useId, useState } from "react";
 
+import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
+import { StatusLine } from "../../components/StatusLine";
 import { useUniverse } from "../../lib/universe";
+import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
 import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
 import { SystemList } from "./SystemList";
 import { SystemReadout } from "./SystemReadout";
@@ -30,6 +34,13 @@ interface SystemsPanelProps {
  * and 14). It opens the `SYSTEM` display on the selected system at the time of the chart on show
  * (plan 14, P14.T41.a). A display control, it only changes what the console shows, so it needs no
  * link; with nothing selected it is held back and says why.
+ *
+ * Selecting a system asks the server for its stars at the chart's time (`system_summary`, plan 06,
+ * P06.T36), through the `SYSTEM` display's own hook, whose channel lets the latest selection win and
+ * drops an answer to a superseded one. Where that request stands is said between the readout and
+ * `OPEN SYSTEM`, outside the live region, with `RETRY` after a failure; an answer the client cannot
+ * read says `SYSTEM DATA INVALID` there. The answer on show while the chart's time has moved on, or
+ * after the newer request failed, is read as stale.
  */
 export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
@@ -42,6 +53,25 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
     open === null || result === null || selected === null || bands === null
       ? null
       : systemTargetFor(open.id, selected, result.timeYr, bands);
+  const [generation, setGeneration] = useState(0);
+  const summaryTarget: SummaryTarget | null =
+    open === null || result === null || selected === null
+      ? null
+      : { universe: open.id, system: selected.id, designation: selected.designation };
+  const chartTime = universeTimeFromYears(result?.timeYr ?? chart.timeYr);
+  const summary = useSystemSummary(summaryTarget, chartTime, generation);
+  const stars = summary.shown?.kind === "ok" ? summary.shown.model : null;
+  // An answer for a time the chart has left, or kept through a newer request that failed, is a
+  // snapshot the chart no longer stands on.
+  const starsStale =
+    stars !== null &&
+    (stars.time.seconds !== chartTime.seconds ||
+      stars.time.nanos !== chartTime.nanos ||
+      summary.state.kind === "rejected" ||
+      summary.state.kind === "timed_out");
+  const retry = (): void => {
+    setGeneration((count) => count + 1);
+  };
   return (
     <section
       className={
@@ -75,7 +105,18 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         driveRangeLy={chart.driveRangeLy}
         timeYr={result?.timeYr ?? chart.timeYr}
         distanceDecimals={chart.distanceDecimals}
+        stars={stars}
+        starsStale={starsStale}
       />
+      {summary.shown?.kind === "fault" ? (
+        <StatusLine
+          text={`SYSTEM DATA INVALID: ${summary.shown.fault}`}
+          standing="fault"
+          action={{ label: "RETRY", onAction: retry }}
+        />
+      ) : (
+        <RequestStatus state={summary.state} onRetry={retry} />
+      )}
       <div className="systems-panel__actions">
         <button
           type="button"

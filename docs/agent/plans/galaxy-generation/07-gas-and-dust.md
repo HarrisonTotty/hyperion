@@ -1049,7 +1049,9 @@ variants exist.
     that ruling. `<sup>` and `<sub>` would work — they shift and scale ordinary glyphs rather than
     calling for superscript characters — but allowing them reverses a shipped rule and would raise the
     question of what becomes of `formatSci` and the legend's ticks. Until the owner rules, this task
-    keeps E notation and writes the nomenclature names in parentheses.
+    keeps E notation and writes the nomenclature names in parentheses. **Ruled by the owner on
+    2026-09-25:** no. The guide now says `<sup>` and `<sub>` are not used, because they set text
+    below the smallest size allowed, and a symbol's subscript is written in parentheses (`A(V)`).
   - **Rasters.** Allow a second raster quantity on the galaxy map with its own legend, and an overlay
     only when both legends are shown and the overlay is named on the display. The rule as built allows
     one raster, one hue and one mandatory legend, and already names dust among the fields it covers
@@ -1092,7 +1094,7 @@ variants exist.
   chart centre at the chart's time and the readout gains four rows: `A(V)`, `E(B-V)`, `A(K)` in `mag`
   to two decimals, and `N(H)` in `/cm²` in E notation through `formatSci` (there is no formatter that
   writes a mantissa and a separate power of ten, and the guide's standing rule is E notation; if the
-  owner allows `<sup>` under T11.a, this row changes with it). The request lives in a new
+  owner had allowed `<sup>` under T11.a, this row would have changed with it; the owner did not). The request lives in a new
   `useExtinction.ts` beside `useRangeQuery.ts`, on
   `useServerRequest<"extinction">(body, timeoutMs, generation)` with one `System` target, so a newer
   selection supersedes the older request on the client and cancels it on the server. It is called from
@@ -1316,7 +1318,8 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   would allow `cm⁻²`, `A_V` and `10⁻⁴`, since they shift ordinary glyphs rather than needing superscript
   characters — reverses the guide's standing E-notation rule, on which plan 05 built `formatSci` and
   `DensityLegend`'s ticks. Until it is ruled on, the nomenclature names are `A(V)`, `A(K)`, `E(B-V)` and
-  `N(H)` and `N(H)` is written in E notation.
+  `N(H)` and `N(H)` is written in E notation. Ruled on 2026-09-25: the owner kept E notation and the
+  parenthesised names, and accepted the four units and the second raster quantity with its overlay.
 - **For the owner: the four units themselves**, and the second raster quantity with its overlay, which
   P07.T11.a adds to the guide. Plan 05's own guide additions needed the owner's confirmation and these
   are of the same kind.
@@ -1573,3 +1576,35 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     `hydrogen_column`, `neutral_hydrogen_column`; `Sightline` is `Copy`, 32 bytes, with no heap.
     `Galaxy::from_params` now returns a `Result`, which the server's two test sites already
     `expect`.
+- **Validation of T3–T9 (`val07`, round 9, 2026-09-25), at version 11.** Every task conforms, with
+  the deviations above and ruling 31's. Fixed: in `Realised` mode the neutral column could exceed
+  the whole column by an ulp on a line that stays in cold gas, because the corona entered the one
+  step by step and the other in closed form; it is now held to the whole, with a regression test
+  over short neutral lines. No golden moved. Added: a test pinning the phase boundaries as numbers,
+  `gas::map` unit tests (a rendered pixel is its single-pixel value; rows past the raster panic),
+  since `--lib galaxy::gas::map` ran none. Recorded, not changed:
+  - _Ruling 31's corner proof_ (`gas::params`,
+    `the_neutral_share_is_least_at_a_corner_of_the_draws`). The warm layer's mass is **not** monotone
+    in the hole scale or the gas disc's length, but it is log-convex in the hole scale and the
+    inverse length, so its greatest value is at a corner. The least corner leaves **−0.059** of the
+    gas neutral: Kroupa, 3 × 10¹⁰ M☉, every other share at its top, a 5 Gyr formation timescale, a
+    gas fraction of 0.175, the thin disc at 11,500 ly and the gas disc twice that, the bar 40% of the bulge at
+    18,000 ly with a hole 1.2 times it, 3 × 10⁶ M☉ molecular, and the warm layer at 0.035 cm⁻³ and
+    3,500 ly. A drawn galaxy
+    gets there only with a thin-disc length scatter of 0.236 dex (4.7σ) or more and every other draw
+    at its end. So `Galaxy::new`'s `expect` is reachable in principle, and its message now says so.
+    Ruling 31's remedy, a clamp on the warm density, would move generated output for any seed it
+    binds on, and is left to the orchestrator.
+  - Provides still shows `GasField::new -> GasField` (it returns `Result`, ruling 22), and Design
+    note 20 still shows R and I at 0.66 and 0.81 µm (0.64 and 0.79 are built, ruling 31).
+    `SmoothingScale` lives in `noise.rs` and `GasPhase` in `phase.rs`, not `field.rs`. T4.b's fast
+    counterpart holds ln F's variance to 10%, not 2%, because at 10⁴ seeds the variance's own
+    standard error is 1.4%.
+  - The benches in `benches/gas.rs` miss four targets as measured under load: 6.9 ms against 3 ms,
+    259 µs against 0.2 ms, 189 ms against 100 ms and 2.25 s against 1 s. They are findings, not
+    gates.
+  - `sightline` at `Quality::Full` has no cap on its steps. A segment far outside the root cube is
+    marched in 32 ly steps, which can take minutes. Clipping it to the cube would move the last bits
+    of the exponential tails for segments that leave the cube. A `GasModifier` with a non-positive
+    radius trips a `debug_assert!` in `density_with`, and its fields are public; plan 09, which
+    makes the first ones, should validate them.

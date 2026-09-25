@@ -52,7 +52,9 @@ pub(crate) fn list(state: &AppState) -> ResponseBody {
 ///
 /// Those of [`openable_universe`], and those of
 /// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built: a full
-/// interactive queue is `queue_full`, and a build the client cancelled is `cancelled`.
+/// interactive queue is `queue_full`, and a galaxy too dense for plan 03's index, or a build that
+/// panicked, is `internal`. `open` holds no request token, so its build is never cancelled while
+/// it waits.
 pub(crate) async fn open(
     state: Arc<AppState>,
     request: OpenUniverseRequest,

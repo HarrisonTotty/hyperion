@@ -74,15 +74,17 @@
 //! - The early M dwarfs (ruling 85.4): about hosts of 0.35–0.6 M☉, blended over 0.30–0.35 and
 //!   0.60–0.70 M☉ ([`early_m_dwarf_share`]), `Barren` and `TerrestrialOnly` take no weight, so
 //!   every such host draws a system (Hsu, Ford and Terrien 2020, MNRAS 498, 2249, §5), 55% of its
-//!   chains the hot variant of one or two and the rest cold chains of about five planets inside
-//!   200 days (Ballard and Johnson 2016, ApJ 816, 66, §3.3), their first periods calibrated to
-//!   Dressing and Charbonneau's (2015, Table 5) 19% inside 10 days (P14.T5's constants).
+//!   chains the hot variant and the rest cold chains of about five planets inside 200 days
+//!   (Ballard and Johnson 2016, ApJ 816, 66, §3.3), the hot variant with the cold chain's count,
+//!   since Ballard and Johnson's single-transiting mode is a transiting multiplicity (ruling
+//!   87.2), their first periods calibrated to Dressing and Charbonneau's (2015, Table 5) 19%
+//!   inside 10 days (P14.T5's constants).
 //! - `CompactMulti`'s (M ÷ M☉)^−3.0: re-fitted by ruling 60 on P14.T10.b's placed M dwarfs (plan
 //!   14 had −0.9, P14.T4 −1.5, which placed gave 0.98 small planets per M dwarf), to Dressing and
 //!   Charbonneau's (2015, ApJ 807, 45, abstract) 2.5 ± 0.2 small planets per M dwarf (1–4 R⊕,
 //!   under 200 days), hosts of median 0.47 R☉ (§2): placed primaries of 0.35–0.6 M☉ with their
 //!   companions had 1.90, inside T10.b's 1.8–3.2, together with P14.T7's host-scaled masses and
-//!   Class 0 budget, before ruling 66's floor (1.75 now, under ruling 85.4's systems, a finding);
+//!   Class 0 budget, before ruling 66's floor (2.83 now, after ruling 87.2's hot variant);
 //!   −2.5 gave 1.75. Planets of 1–8 M⊕ (about 1–2.8 R⊕) at 2–50 days are then 2.4
 //!   times as common about those M dwarfs as about FGK stars, between Mulders, Pascucci and Apai's
 //!   (2015, ApJ 798, 112, abstract) "twice as frequently as around G stars, and thrice as
@@ -839,12 +841,14 @@ pub const EARLY_M_DWARF_BLEND: (SolarMasses, SolarMasses) =
 /// about five coplanar planets inside 200 days and 55% single or inclined, and Hsu, Ford and
 /// Terrien (2020, MNRAS 498, 2249, §5) the planets consistent with every early M dwarf hosting a
 /// system. Inside the range, then, `Barren` and `TerrestrialOnly` take no weight (the table's
-/// giant classes keep theirs), the compact chain's hot variant of one or two planets takes 55% of
-/// chains ([`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]), and its cold chain places about five
+/// giant classes keep theirs), the compact chain's hot variant takes 55% of chains
+/// ([`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]) with the cold chain's count
+/// ([`EARLY_M_DWARF_HOT_VARIANT_COUNT`]; ruling 87.2), and its cold chain places about five
 /// planets inside 200 days ([`CHAIN_COUNT`]'s factor), starting closer in
 /// ([`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]).
 ///
 /// [`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]: template::EARLY_M_DWARF_HOT_VARIANT_PROBABILITY
+/// [`EARLY_M_DWARF_HOT_VARIANT_COUNT`]: template::EARLY_M_DWARF_HOT_VARIANT_COUNT
 /// [`CHAIN_COUNT`]: template::CHAIN_COUNT
 /// [`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]: template::EARLY_M_DWARF_FIRST_PERIOD_SCALE
 ///

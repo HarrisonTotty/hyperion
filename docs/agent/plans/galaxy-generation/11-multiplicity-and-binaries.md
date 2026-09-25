@@ -1617,3 +1617,23 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   - _Also._ Ruling 74's extended anchors (`FRACTION_ANCHORS` above 2 M☉) now serve only the
     quadratures (T1.c), the blend's spine share and subsystem rates below 2 M☉. P11.T1.d must
     re-derive the quadratures from the direct construction above 1.5 M☉.
+- **P11.T14, as built in part (round 9, `ui9`).** `components/StarList.tsx` is in the `GALAXY`
+  readout, under the primary's readings, and is built from `lib/system/starList.ts`'s
+  `starListRows`.
+  - _Stars._ A `STARS` table lists each star under its letter, `A` then `B`, `C` in the hierarchy's
+    depth-first order, which is body-index order. Each row reads `CLASS`, `MASS` in `M☉` (the mass
+    now; the em dash where no remnant is left) and `STATE`, the kind in words.
+  - _Orbits._ An `ORBITS` table lists each pair's orbit, outermost first, named by the letters it
+    joins (`AB–C`, `A–B`). Each reads `PERIOD`, `SMA` and `ECC` through the new `formatOrbit`. That
+    is `formatPeriod`, then `formatBodyDistance` with no held unit, then four decimals,
+    `ECCENTRICITY_DECIMALS`.
+  - _Designator._ The `STAR` column holds the letter alone, since the system's designation stands in
+    `DESIG` above the list.
+  - **For the owner:** `STARS`, `ORBITS`, `STAR`, `STATE`, `ORBIT`, `PERIOD` and the new
+    abbreviation `ECC` join the draft nomenclature (`SMA` was proposed with P14.T43).
+  - _Not built:_ the system list's star-count column, which needs `StellarBriefDto.star_count` on
+    the range rows (P06.T34's blocked briefs), and the binary class in words, which is not on the
+    wire (T5, T13). The chart symbol is unchanged.
+  - The round's brief placed the star list "in the `SYSTEM` display". This task puts it in the
+    `GALAXY` readout, and the `SYSTEM` display's body list already lists the hosts (P14.T43.a), so
+    it was built here.

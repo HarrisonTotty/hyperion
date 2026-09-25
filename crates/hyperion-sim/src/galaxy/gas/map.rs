@@ -264,3 +264,62 @@ fn vertical_means(field: &GasField, z_lo: f64, z_hi: f64) -> [f64; 3] {
     GasLayer::ALL
         .map(|layer| smooth::layer_thickness(field.smooth().height(layer), z_lo, z_hi) / height)
 }
+
+#[cfg(test)]
+mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+    use crate::Seed;
+    use crate::galaxy::fields::Fields;
+    use crate::galaxy::gas::params::GasParams;
+    use crate::galaxy::map::{MapSelection, MapSpec};
+    use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::potential::MassModel;
+
+    fn fixture() -> GasField {
+        let params = GalaxyParams::milky_way_like();
+        let fields = Fields::new(&params, &MassModel::new(&params));
+        GasField::with_params(Seed::new(7), GasParams::milky_way_like(), &fields)
+    }
+
+    fn spec(view: MapView) -> MapSpec {
+        MapSpec::new(view, MapSelection::AllSystems, [16, 8], [0.0, 0.0], 8_192.0)
+            .expect("a legal raster")
+    }
+
+    /// Each rendered pixel is the single-pixel function at that pixel's own geometry, bit for bit,
+    /// in both views, and `out` is cleared before it is filled.
+    #[test]
+    fn a_rendered_pixel_is_its_single_pixel_value() {
+        let field = fixture();
+        for view in [MapView::FaceOn, MapView::EdgeOn] {
+            let spec = spec(view);
+            let mut out = vec![f64::NAN; 3];
+            render_extinction_rows(&field, &spec, 2..5, &mut out);
+            assert_eq!(out.len(), 3 * 16);
+            for (row, line) in (2..5).zip(out.chunks(16)) {
+                for (column, &value) in (0..16).zip(line) {
+                    let single = match view {
+                        MapView::FaceOn => {
+                            let [x, y] = spec.pixel_centre(column, row);
+                            extinction_face_on(&field, x, y, spec.ly_per_px())
+                        }
+                        MapView::EdgeOn => {
+                            let x = spec.pixel_centre(column, row)[0];
+                            let [z_lo, z_hi] = spec.pixel_span(row);
+                            extinction_edge_on(&field, x, z_lo, z_hi)
+                        }
+                    };
+                    assert_same_bits(value, single.value());
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "reach past the map's 8 rows")]
+    fn rows_past_the_raster_are_refused() {
+        render_extinction_rows(&fixture(), &spec(MapView::EdgeOn), 6..9, &mut Vec::new());
+    }
+}

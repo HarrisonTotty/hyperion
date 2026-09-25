@@ -259,10 +259,19 @@ pub fn sightline(
         sums.neutral += column;
         sums.dust += cloud.zeta * column;
     }
+    // In `Realised` mode a wholly neutral sample carries the corona into the neutral column step by
+    // step, while the whole column takes it in closed form, so on a line that never leaves cold
+    // gas the two sums can differ in their last bit either way. The neutral column is part of the
+    // whole, so it is held to it, by comparison rather than `f64::min`.
+    let neutral = if sums.neutral > sums.hydrogen {
+        sums.hydrogen
+    } else {
+        sums.neutral
+    };
     Sightline {
         dust: sums.dust,
         hydrogen: sums.hydrogen,
-        neutral: sums.neutral,
+        neutral,
         steps: plan.steps,
     }
 }

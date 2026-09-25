@@ -1314,39 +1314,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_groups_are_the_plans_table_in_its_order() {
-        let response = fixture();
-        let groups: Vec<&str> = response
-            .groups
-            .iter()
-            .map(|group| group.key.as_str())
-            .collect();
-        assert_eq!(
-            groups,
-            [
-                "identity",
-                "mass",
-                "populations",
-                "population_masses",
-                "population_mean_masses",
-                "discs",
-                "bulge_and_bar",
-                "nuclear_disc",
-                "halo",
-                "arms",
-                "history",
-                "rotation",
-            ]
-        );
-        let per_population: Vec<&str> = response.groups[2]
-            .parameters
-            .iter()
-            .map(|parameter| parameter.key.as_str())
-            .collect();
-        assert_eq!(
-            per_population,
-            [
+    /// Plan 04's P04.T14.b table, group by group and key by key, in its order, written out
+    /// independently of the builder. The parameters panel shows groups and keys in this order, so
+    /// the order is part of the contract with plan 05's glossary (ruling 11 of 2026-09-22), and a
+    /// golden blessed from the builder would not catch a key moved within its group.
+    const PLAN_TABLE: [(&str, &[&str]); 12] = [
+        ("identity", &["seed", "generator_version", "mass_function"]),
+        (
+            "mass",
+            &[
+                "stellar_mass",
+                "system_count",
+                "mean_system_mass",
+                "mean_formed_mass",
+                "gas.mass",
+                "black_hole.mass",
+                "nuclear_cluster.mass",
+                "dark_halo.mass",
+                "dark_halo.concentration",
+                "dark_halo.virial_radius",
+                "dark_halo.f_star",
+            ],
+        ),
+        (
+            "populations",
+            &[
                 "population.young_thin_disc.share",
                 "population.old_thin_disc.share",
                 "population.thick_disc.share",
@@ -1354,8 +1346,127 @@ mod tests {
                 "population.long_bar.share",
                 "population.nuclear_disc.share",
                 "population.halo.share",
-            ]
-        );
+            ],
+        ),
+        (
+            "population_masses",
+            &[
+                "population.young_thin_disc.mass",
+                "population.old_thin_disc.mass",
+                "population.thick_disc.mass",
+                "population.bulge.mass",
+                "population.long_bar.mass",
+                "population.nuclear_disc.mass",
+                "population.halo.mass",
+            ],
+        ),
+        (
+            "population_mean_masses",
+            &[
+                "population.young_thin_disc.mean_system_mass",
+                "population.old_thin_disc.mean_system_mass",
+                "population.thick_disc.mean_system_mass",
+                "population.bulge.mean_system_mass",
+                "population.long_bar.mean_system_mass",
+                "population.nuclear_disc.mean_system_mass",
+                "population.halo.mean_system_mass",
+            ],
+        ),
+        (
+            "discs",
+            &[
+                "disc.thin.scale_length",
+                "disc.thin.scale_height",
+                "disc.young.scale_length",
+                "disc.young.scale_height",
+                "disc.thick.scale_length",
+                "disc.thick.scale_height",
+                "disc.gas.scale_length",
+            ],
+        ),
+        (
+            "bulge_and_bar",
+            &[
+                "bulge.scale_x",
+                "bulge.scale_y",
+                "bulge.scale_z",
+                "bulge.boxiness",
+                "bar.share_of_bulge",
+                "bar.half_length",
+                "bar.width",
+                "bar.height",
+                "bar.corotation_ratio",
+                "bar.corotation_radius",
+                "bar.pattern_speed",
+            ],
+        ),
+        (
+            "nuclear_disc",
+            &["nuclear_disc.scale_length", "nuclear_disc.scale_height"],
+        ),
+        (
+            "halo",
+            &[
+                "halo.in_situ.share",
+                "halo.dominant_merger.share",
+                "halo.lesser.share",
+                "halo.globular_debris.share",
+                "halo.in_situ.slope",
+                "halo.dominant_merger.slope",
+                "halo.globular_debris.slope",
+                "halo.in_situ.core",
+                "halo.dominant_merger.core",
+                "halo.globular_debris.core",
+                "halo.in_situ.flattening",
+                "halo.dominant_merger.flattening",
+                "halo.dominant_merger.break_radius",
+                "halo.dominant_merger.break_steepening",
+            ],
+        ),
+        (
+            "arms",
+            &[
+                "arms.count",
+                "arms.pitch",
+                "arms.young_width",
+                "arms.young_fraction",
+                "arms.old_amplitude",
+            ],
+        ),
+        (
+            "history",
+            &[
+                "history.formation_timescale",
+                "history.last_major_merger",
+                "history.globular_clusters",
+            ],
+        ),
+        (
+            "rotation",
+            &[
+                "rotation.radius",
+                "rotation.circular_speed",
+                "rotation.escape_speed",
+            ],
+        ),
+    ];
+
+    #[test]
+    fn the_groups_are_the_plans_table_in_its_order() {
+        let response = fixture();
+        let sent: Vec<(&str, Vec<&str>)> = response
+            .groups
+            .iter()
+            .map(|group| {
+                let keys = group.parameters.iter().map(|p| p.key.as_str()).collect();
+                (group.key.as_str(), keys)
+            })
+            .collect();
+        let table: Vec<(&str, Vec<&str>)> = PLAN_TABLE
+            .iter()
+            .map(|(group, keys)| (*group, keys.to_vec()))
+            .collect();
+        assert_eq!(sent, table);
     }
 
     #[test]

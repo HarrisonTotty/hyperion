@@ -69,6 +69,45 @@ describe("toSystemModel", () => {
     expect(star?.activityLogLxLbol).toEqual({ kind: "not_modelled" });
   });
 
+  it("carries a star's magnitude, and its nebula and events as not modelled until the wire has them", () => {
+    const [, sun] = modelOf().hosts;
+
+    expect(sun?.absoluteVMag).toBe(4.825);
+    expect(sun?.planetaryNebula).toEqual({ kind: "not_modelled" });
+    expect(sun?.activeEvents).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a nebula and the events in progress once the wire carries them", () => {
+    const onset = { seconds: 10, nanos: 0 };
+    const summary = aSystemSummary({
+      stars: [
+        aWhiteDwarf({
+          planetary_nebula: {
+            radius_ly: 0.25,
+            expansion_speed_km_s: 20,
+            age_yr: 5_000,
+            ionised_mass_msun: 0.1,
+            excitation_class: 5,
+          },
+          active_events: [{ kind: "flare", onset, duration_s: 600 }],
+        }),
+        aSunlikeStar({ body_index: 1, planetary_nebula: null, active_events: [] }),
+      ],
+    });
+    const [dwarf, sun] = modelOf(summary).hosts;
+
+    expect(dwarf?.planetaryNebula).toEqual({
+      kind: "value",
+      value: { radiusLy: 0.25, expansionSpeedKmS: 20, ageYr: 5_000 },
+    });
+    expect(dwarf?.activeEvents).toEqual({
+      kind: "value",
+      value: [{ kind: "flare", onset, durationS: 600 }],
+    });
+    expect(sun?.planetaryNebula).toEqual({ kind: "none" });
+    expect(sun?.activeEvents).toEqual({ kind: "value", value: [] });
+  });
+
   it("takes the pair's orbit as the elements the client propagates", () => {
     const [pair] = modelOf().hierarchy;
 

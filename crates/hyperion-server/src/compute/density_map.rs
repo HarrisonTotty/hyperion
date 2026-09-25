@@ -905,24 +905,52 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn a_map_every_waiter_gave_up_on_can_be_asked_for_again() {
         let (pool, service) = service(1);
+        // Another map of the same galaxy first, so that the galaxy is cached and the abandoned
+        // flight gets as far as queueing its bands.
+        get(&service, key(MapView::FaceOn, MapPopulation::Young)).await;
+        // Occupy the only worker, so that the bands wait in the queue where a cancel reaches them.
+        let (started, has_started) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let held = pool
+            .try_submit(Priority::Interactive, CancelToken::new(), move |_| {
+                started.send(()).unwrap();
+                // Blocks this worker, not the runtime.
+                let _ = wait.recv();
+            })
+            .unwrap();
+        timeout(WAIT, has_started)
+            .await
+            .expect("timed out waiting for the worker")
+            .unwrap();
+
+        // The only waiter gives up once its bands are queued, which drops the flight and with it
+        // the `CancelOnDrop` that skips them (design note 5). The key must be free afterwards: a
+        // dead flight left in the registry would make every later request for this map wait for a
+        // result that never comes.
         let key = key(MapView::FaceOn, MapPopulation::All);
-        // The only waiter gives up before the raster is done, which drops the flight and with it
-        // the `CancelOnDrop` that skips the bands still queued (design note 5). Whether it got as
-        // far as a band or not, the key must be free afterwards: a dead flight left in the registry
-        // would make every later request for this map wait for a result that never comes.
-        let abandoned = timeout(Duration::from_millis(1), service.get(key)).await;
-        assert!(
-            abandoned.is_err(),
-            "a 128-pixel raster is not one millisecond of work"
-        );
-        assert_eq!(service.counters().entries(), 0, "nothing was cached");
+        let bands = 128_usize.div_ceil(usize::from(BAND_ROWS));
+        let mut abandoned = Box::pin(service.get(key));
+        assert!(futures_util::poll!(&mut abandoned).is_pending());
+        assert_eq!(pool.counters().queued_bulk(), bands, "every band is queued");
+        drop(abandoned);
+        release.send(()).unwrap();
+        timeout(WAIT, held)
+            .await
+            .expect("timed out releasing the worker")
+            .unwrap()
+            .unwrap();
 
         let map = get(&service, key).await;
         assert_eq!(map.log10().len(), 128 * 128);
-        assert_eq!(service.counters().entries(), 1);
+        assert_eq!(
+            pool.counters().cancelled(),
+            u64::try_from(bands).unwrap(),
+            "the abandoned bands were skipped, not rendered"
+        );
+        assert_eq!(service.counters().entries(), 2);
         pool.shutdown().await.unwrap();
     }
 

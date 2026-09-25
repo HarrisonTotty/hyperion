@@ -1160,7 +1160,7 @@ for `hello`.
 #### P09.T42 Client: the centre's fine radius steps
 
 The query-radius selector and the scale bar run down in 1-2-5 steps to 0.01 ly and 0.001 ly, the
-readout gives distances in light-years to four decimals or in au below 0.01 ly, and the census line
+readout gives distances in light-years to four decimals or in AU below 0.01 ly, and the census line
 is shown at every step. A `BLACK HOLE` readout shows mass and luminosity at the chart's time. Tests:
 selector steps, unit switching, formatting under the guide's number rules.
 

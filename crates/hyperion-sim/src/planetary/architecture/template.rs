@@ -10,7 +10,7 @@
 //! | ----- | ------------------ |
 //! | `Barren` | none |
 //! | `TerrestrialOnly` | rocky of 0.05–2 M⊕ from 0.2–0.5 au × √L to the snow line, as many as the spacing fits (at most 10); ice-rich 0–3 of 0.02–5 M⊕ from 1–2 snow-line radii |
-//! | `CompactMulti` | a chain of 1–20 M⊕, first period by Mulders et al. (1–50 days), count zero-truncated Poisson (mean 3.5 at 1 M☉, 6.1 at and below 0.48 M☉, at most 10); hot variant in 40%: 1–2 planets |
+//! | `CompactMulti` | a chain of 1–20 M⊕, first period by Mulders et al. (1–50 days), count zero-truncated Poisson (mean 3.5 at 1 M☉, 6.1 at and below 0.48 M☉, at most 10); hot variant in 40%: 1–2 planets (about early M dwarfs 55%, with the cold chain's count) |
 //! | `CompactWithColdGiant` | the chain; giants 1–2 of 0.3–10 M♃ at 1–3 snow-line radii, Kipping's Betas by period |
 //! | `SolarLike` | rocky as `TerrestrialOnly`'s, up to the giants' chaotic zones; giants 1–3 at 1–2 snow-line radii, low e; ice giants 0–2 of 10–30 M⊕ beyond them; both belts |
 //! | `EccentricGiant` | giants 1–2 at 0.5–5 au × √L, scattered in, Beta(0.867, 3.03); a survivor 0–1 of 0.05–10 M⊕ |
@@ -190,6 +190,46 @@ impl CountLaw {
 }
 
 impl CountLaw {
+    /// P(N ≤ `k`) for a host of `host_mass`, with the cap applied; for a [`Fill`](Self::Fill) law
+    /// 1 at its cap and 0 below it.
+    #[must_use]
+    pub fn cumulative(&self, k: u8, host_mass: SolarMasses) -> f64 {
+        match *self {
+            Self::Uniform { min, max } => {
+                if k < min {
+                    0.0
+                } else if k >= max {
+                    1.0
+                } else {
+                    f64::from(k - min + 1) / (f64::from(max - min) + 1.0)
+                }
+            }
+            Self::Fill { max } => {
+                if k >= max {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Self::ZeroTruncatedPoisson { max, .. } => {
+                if k == 0 {
+                    return 0.0;
+                }
+                if k >= max {
+                    return 1.0;
+                }
+                let lambda = self.rate_at(host_mass);
+                let zero = crate::math::exp(-lambda);
+                let (mut term, mut below) = (zero, zero);
+                for j in 1..=k {
+                    term *= lambda / f64::from(j);
+                    below += term;
+                }
+                (below - zero) / (1.0 - zero)
+            }
+        }
+    }
+
     /// A Poisson law's λ about `host_mass`, or 0 for any other.
     fn rate_at(&self, host_mass: SolarMasses) -> f64 {
         match *self {
@@ -445,6 +485,7 @@ impl Origin {
 pub struct HotVariant {
     probability: f64,
     count: CountLaw,
+    early_m_dwarf_count: CountLaw,
     eccentricity: EccentricityLaw,
 }
 
@@ -466,10 +507,18 @@ impl HotVariant {
         self.probability + (EARLY_M_DWARF_HOT_VARIANT_PROBABILITY - self.probability) * blend
     }
 
-    /// The variant's count.
+    /// The variant's count about most hosts.
     #[must_use]
     pub const fn count(&self) -> CountLaw {
         self.count
+    }
+
+    /// The variant's count about an early M dwarf ([`EARLY_M_DWARF_HOT_VARIANT_COUNT`]; ruling
+    /// 87.2), to which [`count`](Self::count) is blended by
+    /// [`early_m_dwarf_share`](super::early_m_dwarf_share) in P14.T8's draw.
+    #[must_use]
+    pub const fn early_m_dwarf_count(&self) -> CountLaw {
+        self.early_m_dwarf_count
     }
 
     /// The variant's eccentricities.
@@ -682,28 +731,52 @@ pub const CHAIN_COUNT: CountLaw = CountLaw::ZeroTruncatedPoisson {
     max: 10,
 };
 
-/// The share of an early M dwarf's chains that take the hot variant of one or two planets: 0.55
+/// The share of an early M dwarf's chains that take the hot variant: 0.55
 /// (ruling 85.4), Ballard and Johnson's (2016, §3.3) 55 (+23 −12)% of M-dwarf systems single or
 /// mutually inclined, where [`HOT_VARIANT`]'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
 pub const EARLY_M_DWARF_HOT_VARIANT_PROBABILITY: f64 = 0.55;
 
-/// What a chain's first period law's break is multiplied by about an early M dwarf: 0.45 (ruling
-/// 85.4), blended by [`early_m_dwarf_share`](super::early_m_dwarf_share).
+/// What a chain's first period law's break is multiplied by about an early M dwarf: 0.38
+/// (ruling 85.4, re-fitted after ruling 87.2), blended by
+/// [`early_m_dwarf_share`](super::early_m_dwarf_share).
 ///
 /// Dressing and Charbonneau (2015, ApJ 807, 45, Table 5) find 0.47 of the 2.47 planets of
 /// 1–4 R⊕ per M dwarf inside 200 days at 0.5–10 days, 19%, where Mulders et al.'s (2018) FGK
-/// break at 12 days put 13% of this model's there. The factor, which moves the break to 5.4 days,
-/// is fitted to their 0.47 on P14.T10.b's placed sample; Mulders, Pascucci and Apai (2015, ApJ
-/// 798, 112) find the break at one period for F to M hosts binned by type, so this is a
-/// calibration to the M dwarfs' own distribution, not a law in host mass.
-pub const EARLY_M_DWARF_FIRST_PERIOD_SCALE: f64 = 0.45;
+/// break at 12 days put 13% of this model's there. The factor, which moves the break to 4.6 days,
+/// is fitted to their 0.47 on P14.T10.b's placed sample (0.460): 0.45 was, until the hot
+/// variant's count (ruling 87.2) put longer chains, whose inner members are lighter, about these
+/// hosts, and gave 0.389 then. Mulders, Pascucci and Apai (2015, ApJ 798, 112) find the break at
+/// one period for F to M hosts binned by type, so this is a calibration to the M dwarfs' own
+/// distribution, not a law in host mass.
+pub const EARLY_M_DWARF_FIRST_PERIOD_SCALE: f64 = 0.38;
 
 /// The dynamically hot variant: 40% of systems, 1–2 planets, half-normal eccentricities.
 const HOT_VARIANT: HotVariant = HotVariant {
     probability: 0.4,
     count: CountLaw::Uniform { min: 1, max: 2 },
+    early_m_dwarf_count: EARLY_M_DWARF_HOT_VARIANT_COUNT,
     eccentricity: HOT,
 };
+
+/// The count of an early M dwarf's hot variant (ruling 87.2): the cold chain's own,
+/// [`CHAIN_COUNT`], so that about these hosts the dichotomy is one of mutual inclination and
+/// eccentricity, not of how many planets a system holds.
+///
+/// Ballard and Johnson (2016, ApJ 816, 66, §3.3, eq. 5) model the excess of singly transiting M
+/// dwarfs as a mode that "produces only singly transiting planets", and say that "it's not
+/// possible to know, from counting statistics alone, whether these singly transiting systems
+/// occurs because less planets exist around the star, or because they are very highly
+/// inclined": their "1–2 planets" (and the 2.8 per host that counts the mode as one) are a
+/// transiting multiplicity, a lower bound on the intrinsic count. Hsu, Ford and Terrien (2020,
+/// MNRAS 498, 2249, §5) find the Kepler M dwarfs consistent with every early M dwarf hosting
+/// 4.2–8.4 planets of 0.5–4 R⊕ at 0.5–256 days, and Dressing and Charbonneau's (2015, ApJ 807,
+/// 45) 2.47 per target, with Moe and Kratter's (2021, MNRAS 507, 3593, §4 and Fig. 6) close
+/// binaries' suppression taken out, is 3.6 ± 0.4 per single star. About the other hosts the
+/// variant keeps its ordinary one or two, and the draw blends the two laws by
+/// [`early_m_dwarf_share`](super::early_m_dwarf_share) (P14.T8). On P14.T10.b's placed sample
+/// the early M dwarfs have 3.67 small planets per single star (or one wider than 200 au)
+/// inside 200 days, 2.83 per primary, and 4.8 planets of 0.5–4 R⊕ at 0.5–256 days per primary.
+pub const EARLY_M_DWARF_HOT_VARIANT_COUNT: CountLaw = CHAIN_COUNT;
 
 /// The most rocky planets one group places: 10, as many as a chain's cap (Mulders et al. 2018).
 pub const ROCKY_MAX_COUNT: u8 = 10;
@@ -1079,8 +1152,10 @@ mod tests {
             }
             if let Some(hot) = group.hot_variant() {
                 assert!(hot.probability() > 0.0 && hot.probability() < 1.0, "{at}");
-                let (least, most) = hot.count().range();
-                assert!(least >= 1 && least <= most, "{at}: hot count");
+                for count in [hot.count(), hot.early_m_dwarf_count()] {
+                    let (least, most) = count.range();
+                    assert!(least >= 1 && least <= most, "{at}: hot count");
+                }
             }
         }
         // A group that follows another has one to follow.
@@ -1199,6 +1274,43 @@ mod tests {
         };
         let expected = 2.0 / (1.0 - crate::math::exp(-2.0));
         assert!((far.mean(SolarMasses::new(1.0)) - expected).abs() < 1e-12);
+    }
+
+    /// A law's cumulative distribution rises to 1 at its cap and gives its mean, Σ (1 − F(k)).
+    #[test]
+    fn a_count_law_s_cumulative_distribution_gives_its_mean() {
+        for law in [
+            CHAIN_COUNT,
+            CountLaw::Uniform { min: 1, max: 2 },
+            CountLaw::Uniform { min: 0, max: 3 },
+        ] {
+            for m in [0.1, 0.32, 0.48, 0.65, 1.0, 1.3] {
+                let host = SolarMasses::new(m);
+                let (least, most) = law.range();
+                assert!(least == 0 || law.cumulative(least - 1, host) <= 0.0);
+                assert!((law.cumulative(most, host) - 1.0).abs() < 1e-15);
+                let mut from_cumulative = 0.0;
+                for k in 0..most {
+                    assert!(law.cumulative(k, host) <= law.cumulative(k + 1, host));
+                    from_cumulative += 1.0 - law.cumulative(k, host);
+                }
+                assert!(
+                    (from_cumulative - law.mean(host)).abs() < 1e-12,
+                    "{law:?} at {m}: {from_cumulative} against {}",
+                    law.mean(host)
+                );
+            }
+        }
+    }
+
+    /// About an early M dwarf the hot variant takes the cold chain's count (ruling 87.2), and
+    /// about other hosts its one or two.
+    #[test]
+    fn the_hot_variant_s_count_is_the_chain_s_about_an_early_m_dwarf() {
+        let hot = CHAIN.hot_variant().expect("a chain has a hot variant");
+        assert_eq!(hot.count(), CountLaw::Uniform { min: 1, max: 2 });
+        assert_eq!(hot.early_m_dwarf_count(), CHAIN_COUNT);
+        assert_eq!(EARLY_M_DWARF_HOT_VARIANT_COUNT, CHAIN_COUNT);
     }
 
     #[test]

@@ -49,6 +49,41 @@ export const TIME_STEPS: ReadonlyArray<TimeStep> = [
 /** The step a display opens with: a day. */
 export const DEFAULT_TIME_STEP = 1;
 
+/** A rate `RUN` can advance the display time at. */
+export interface RunRate {
+  /** Its label, which is also its value with its unit: `1 h/s`, `1 yr/s`. */
+  readonly label: string;
+  /** Seconds of display time per second of the operator's; a year is the Julian year. */
+  readonly secondsPerSecond: number;
+  /** The single key that chooses it, shown on its control. */
+  readonly key: string;
+}
+
+/**
+ * The rates `RUN` can advance the display time at, slowest first (P14.T44.b), on the keys that
+ * follow the steps' `1`–`6` along the row.
+ */
+export const RUN_RATES: ReadonlyArray<RunRate> = [
+  { label: "1 h/s", secondsPerSecond: SECONDS_PER_HOUR, key: "7" },
+  { label: "1 d/s", secondsPerSecond: SECONDS_PER_DAY, key: "8" },
+  { label: "10 d/s", secondsPerSecond: 10 * SECONDS_PER_DAY, key: "9" },
+  { label: "1 yr/s", secondsPerSecond: SECONDS_PER_JULIAN_YEAR, key: "0" },
+];
+
+/** The rate a display opens with: a day a second. */
+export const DEFAULT_RUN_RATE = 1;
+
+/**
+ * The period at which a running display's numeric readouts change, and at which it steps under
+ * reduced motion: the guide's 4 Hz, in milliseconds.
+ */
+export const READOUT_PERIOD_MS = 250;
+
+/** Whether the display is held or running, and at which rate: `HOLD`, `RUN 1 d/s`. */
+export function runModeLabel(running: boolean, rate: RunRate | undefined): string {
+  return running && rate !== undefined ? `RUN ${rate.label}` : "HOLD";
+}
+
 /** Which edge of the clock window a time stands at, if either. */
 export type ClockLimit = "start" | "end" | null;
 

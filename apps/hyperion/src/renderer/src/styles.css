@@ -1622,11 +1622,15 @@ body {
   font-size: 0.875rem;
 }
 
+/*
+ * The list and the readout share what the panel leaves, half each, and each scrolls inside itself
+ * with its position shown, so that at 1280 x 720 neither is cut off (plan 06, P06.T36).
+ */
 .system-list {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: column;
-  min-height: 0;
+  min-height: 6rem;
 }
 
 /* Columns shared by the head and every row: designation, distance, mass, and range in words. */
@@ -1643,10 +1647,6 @@ body {
   letter-spacing: 0.15em;
 }
 
-/*
- * The list gives way to the readout, down to one row, since it says which rows it is showing and the
- * readout does not scroll: at 1280 px with the link down the column has no other give.
- */
 .system-list__scroll {
   flex: 1 1 auto;
   min-height: 2rem;
@@ -1705,6 +1705,82 @@ body {
   letter-spacing: 0.1em;
 }
 
+/*
+ * The readings' own scrolling region; their offset parent, so that each is measured in it. Inset
+ * by the focus ring's width, so that the ring never covers a reading, and a container, so that a
+ * narrow column sets one reading to a line rather than scrolling sideways.
+ */
+.system-readout__scroll {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 6rem;
+  overflow-y: auto;
+  padding: 0.125rem 0.25rem;
+  container-type: inline-size;
+}
+
+/* Inset, so that the panel's edge never clips it. */
+.system-readout__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.systems-panel > .list-position,
+.systems-panel > .request-status {
+  flex: none;
+}
+
+/* The primary's readings, under their own heading, as a panel's title is set. */
+.system-readout__heading {
+  margin: 0.75rem 0 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+/* `[Fe/H]` is a symbol, and keeps its case. */
+.readout dt.system-readout__symbol {
+  text-transform: none;
+}
+
+/* Every star and orbit of the selected system, a table each, numbers right-aligned. */
+.star-list__table {
+  margin-top: 0.75rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.star-list__caption {
+  color: var(--text-muted);
+  letter-spacing: 0.2em;
+  text-align: left;
+}
+
+.star-list__table th {
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-align: left;
+}
+
+.star-list__table :is(th, td) {
+  padding: 0.125rem 1.5rem 0.125rem 0;
+}
+
+.star-list__table td {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.star-list__table .star-list__number {
+  text-align: right;
+}
+
+.star-list__unit {
+  color: var(--text-muted);
+}
+
 /* Everything known about the selected system, two labelled values to a line. */
 .system-readout__values {
   grid-template-columns: repeat(2, max-content minmax(0, 1fr));
@@ -1714,6 +1790,17 @@ body {
 
 .system-readout__wide {
   grid-column: 2 / -1;
+}
+
+/* In a narrow column, one reading to a line; after the rules above, so that it overrides them. */
+@container (max-width: 30rem) {
+  .system-readout__values {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .system-readout__wide {
+    grid-column: 2;
+  }
 }
 
 .system-readout__value {
@@ -2281,8 +2368,15 @@ body {
   gap: 0.25rem;
 }
 
-.time-control__limit {
+.time-control__limit,
+.time-control__reason {
   letter-spacing: 0.15em;
+}
+
+/* The mode in words, sized for its longest, RUN 10 d/s, so that the controls after it keep still. */
+.time-control__mode .field__value {
+  display: inline-block;
+  min-width: 10ch;
 }
 
 /* The system's name, age and metallicity above its bodies. */

@@ -2,7 +2,7 @@ import { useEffect, useId } from "react";
 
 import { formatUniverseTimeDhms } from "../../lib/format";
 import { isTextEntry } from "../../lib/textEntry";
-import { DISPLAY_TIME_LABEL, TIME_STEPS } from "./displayTime";
+import { DISPLAY_TIME_LABEL, RUN_RATES, runModeLabel, TIME_STEPS } from "./displayTime";
 import type { DisplayTime } from "./useDisplayTime";
 
 /** The keys that step the display time back and ahead. */
@@ -11,6 +11,10 @@ const AHEAD_KEY = "]";
 
 /** The key that returns the display time to the time the display was opened at. */
 const RESET_KEY = "R";
+
+/** The keys that run the display time and hold it, a congruent pair in that order (P14.T44.b). */
+const RUN_KEY = "G";
+const HOLD_KEY = "H";
 
 /** The words said when the display time has reached the edge of the clock window (plan 14, D24). */
 const CLOCK_WINDOW_LIMIT = "CLOCK WINDOW LIMIT";
@@ -34,15 +38,28 @@ export interface TimeControlProps {
  * opened at. At the edge of the clock window, ±1000 yr, the time stops, `CLOCK WINDOW LIMIT` is said,
  * and the step towards the edge is held back and described by it; the words stand in an `output`
  * that is always there, so that they are announced as they appear. Every control shows its key.
+ *
+ * `RUN`, key `G`, advances the time at the chosen rate, `1 h/s` to `1 yr/s` on keys `7` to `0`, and
+ * `HOLD`, key `H`, stops it: a congruent pair in that order, the one in force pressed (P14.T44.b).
+ * The mode is always shown in words beside them, `HOLD` or `RUN 1 d/s`. The display opens held and
+ * never runs on its own; at `+H`, on leaving the display and on losing the link it drops to `HOLD`,
+ * and `RUN` is held back and says why (`CLOCK WINDOW LIMIT`, or the link's state). A step or
+ * `RESET` holds a running display first. While it runs the time here changes four times a second.
  */
 export function TimeControl({ time }: TimeControlProps) {
   const titleId = useId();
   const limitId = useId();
   const labelId = useId();
+  const runReasonId = useId();
+  const modeId = useId();
   const { step, reset, chooseStep, stepIndex, limit } = time;
+  const { run, hold, chooseRate, rateIndex, running, runHeldBy } = time;
   const chosen = TIME_STEPS[stepIndex];
   const backHeld = limit === "start";
   const aheadHeld = limit === "end";
+  // At `+H` the edge's own words say why; otherwise the reason the display may not run.
+  const runHeld = aheadHeld || runHeldBy !== null;
+  const runDescription = aheadHeld ? limitId : runReasonId;
 
   // The keys act from anywhere on the display but a text field; the steps repeat while held, and
   // the redraw scheduler takes them a frame at a time.
@@ -59,22 +76,35 @@ export function TimeControl({ time }: TimeControlProps) {
       if (event.repeat || event.shiftKey) {
         return;
       }
-      if (event.key.toUpperCase() === RESET_KEY) {
+      const letter = event.key.toUpperCase();
+      if (letter === RESET_KEY || letter === RUN_KEY || letter === HOLD_KEY) {
         event.preventDefault();
-        reset();
+        if (letter === RESET_KEY) {
+          reset();
+        } else if (letter === RUN_KEY) {
+          run();
+        } else {
+          hold();
+        }
         return;
       }
       const index = TIME_STEPS.findIndex((candidate) => candidate.key === event.key);
       if (index >= 0) {
         event.preventDefault();
         chooseStep(index);
+        return;
+      }
+      const rate = RUN_RATES.findIndex((candidate) => candidate.key === event.key);
+      if (rate >= 0) {
+        event.preventDefault();
+        chooseRate(rate);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [step, reset, chooseStep]);
+  }, [step, reset, chooseStep, run, hold, chooseRate]);
 
   return (
     <section className="panel system__time time-control" aria-labelledby={titleId}>
@@ -143,6 +173,59 @@ export function TimeControl({ time }: TimeControlProps) {
         <output className="time-control__limit" id={limitId} aria-label="Clock window">
           {limit === null ? null : CLOCK_WINDOW_LIMIT}
         </output>
+      </div>
+      <div className="time-control__controls">
+        <fieldset className="time-control__steps" aria-label="Run or hold">
+          <button
+            type="button"
+            className="control"
+            aria-keyshortcuts={RUN_KEY}
+            aria-pressed={running}
+            aria-disabled={runHeld ? "true" : undefined}
+            aria-describedby={runHeld ? runDescription : undefined}
+            onClick={run}
+          >
+            <span className="control__key">{RUN_KEY}</span> RUN
+          </button>
+          <button
+            type="button"
+            className="control"
+            aria-keyshortcuts={HOLD_KEY}
+            aria-pressed={!running}
+            onClick={hold}
+          >
+            <span className="control__key">{HOLD_KEY}</span> HOLD
+          </button>
+        </fieldset>
+        <fieldset className="time-control__steps" aria-label="Rate">
+          {RUN_RATES.map((candidate, index) => (
+            <button
+              key={candidate.label}
+              type="button"
+              className="control"
+              aria-pressed={index === rateIndex}
+              aria-keyshortcuts={candidate.key}
+              onClick={() => {
+                chooseRate(index);
+              }}
+            >
+              <span className="control__key">{candidate.key}</span> {candidate.label}
+            </button>
+          ))}
+        </fieldset>
+        <p className="field time-control__mode">
+          <span className="field__label" id={modeId}>
+            MODE
+          </span>{" "}
+          <output className="field__value" aria-labelledby={modeId}>
+            {runModeLabel(running, RUN_RATES[rateIndex])}
+          </output>
+        </p>
+        {runHeldBy === null ? null : (
+          <span className="time-control__reason" id={runReasonId}>
+            {runHeldBy}
+          </span>
+        )}
       </div>
     </section>
   );

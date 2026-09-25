@@ -766,6 +766,35 @@ fn draw_count(law: CountLaw, mass: SolarMasses, draws: &GroupDraws) -> u8 {
     }
 }
 
+/// The count of a law blended from `ordinary` to `early_m_dwarf` by `share` (ruling 87.2): at a
+/// share of 0 or 1 that law's own draw, and between them the least count at which the mixture of
+/// the two cumulative distributions, weighted 1 − `share` and `share`, reaches the group's count
+/// rank, so that no word is added and no count steps at a host mass.
+#[must_use]
+fn draw_blended_count(
+    ordinary: CountLaw,
+    early_m_dwarf: CountLaw,
+    share: f64,
+    mass: SolarMasses,
+    draws: &GroupDraws,
+) -> u8 {
+    if share <= 0.0 {
+        return draw_count(ordinary, mass, draws);
+    }
+    if share >= 1.0 {
+        return draw_count(early_m_dwarf, mass, draws);
+    }
+    let ((lo_a, hi_a), (lo_b, hi_b)) = (ordinary.range(), early_m_dwarf.range());
+    let (lo, hi) = (lo_a.min(lo_b), hi_a.max(hi_b));
+    let target = draws.count_rank.value();
+    (lo..hi)
+        .find(|&k| {
+            (1.0 - share) * ordinary.cumulative(k, mass) + share * early_m_dwarf.cumulative(k, mass)
+                >= target
+        })
+        .unwrap_or(hi)
+}
+
 /// One reserved member of a group: its slot, mass and draws.
 #[derive(Debug, Clone, Copy)]
 struct Member {
@@ -875,14 +904,17 @@ impl<'a> Placer<'a> {
                     .hot_variant
                     .is_below(Threshold::from_probability(variant.probability_about(mass)))
             });
-            let (count, law) = match hot {
-                Some(variant) => (variant.count(), variant.eccentricity()),
-                None => (group.count(), group.eccentricity()),
-            };
-            let wanted = if present {
-                draw_count(count, mass, &draws)
-            } else {
-                0
+            let law = hot.map_or(group.eccentricity(), |variant| variant.eccentricity());
+            let wanted = match (present, hot) {
+                (false, _) => 0,
+                (true, None) => draw_count(group.count(), mass, &draws),
+                (true, Some(variant)) => draw_blended_count(
+                    variant.count(),
+                    variant.early_m_dwarf_count(),
+                    early_m_dwarf_share(mass),
+                    mass,
+                    &draws,
+                ),
             };
             let room = last.map_or(0, |last| {
                 u16::from(last)
@@ -1919,14 +1951,14 @@ mod tests {
                 continue;
             }
             for p in s.placed.planets() {
-                all += 1;
                 if p.rescaled() {
-                    rescaled += 1;
                     assert!(p.orbit().eccentricity().value() < p.drawn_eccentricity());
                 } else {
                     assert_same_bits(p.orbit().eccentricity().value(), p.drawn_eccentricity());
                 }
                 if !p.hot() && p.role() == GroupRole::Chain {
+                    all += 1;
+                    rescaled += u32::from(p.rescaled());
                     drawn.push(p.drawn_eccentricity());
                 }
             }
@@ -1937,8 +1969,10 @@ mod tests {
             -math::exp_m1(-(e * e) / (2.0 * sigma * sigma))
         });
         assert_p_value("cold chains' eccentricities", ks.p_value, ALPHA);
-        // Few are scaled down: the spacing is drawn against the floor of the eccentricities
-        // assumed.
+        // Few cold chain planets are scaled down: the spacing is drawn against the floor of the
+        // eccentricities assumed. (The hot variant's half-normal 0.3 is scaled down more often,
+        // most about the early M dwarfs, whose hot variant has the cold chain's count; ruling
+        // 87.2.)
         assert!(
             f64::from(rescaled) < 0.1 * f64::from(all),
             "{rescaled} of {all}"
@@ -2171,6 +2205,34 @@ mod tests {
             }
         }
         assert!(planets > 30, "{planets}");
+    }
+
+    /// The hot variant's blended count (ruling 87.2) is the ordinary law's own draw where the
+    /// early M dwarfs' share is 0, the early law's where it is 1, and between them never outside
+    /// the two, its mean rising with the share.
+    #[test]
+    fn a_blended_count_is_each_law_s_own_draw_at_the_ends() {
+        let ordinary = CountLaw::Uniform { min: 1, max: 2 };
+        let early = crate::planetary::architecture::template::CHAIN_COUNT;
+        let mass = SolarMasses::new(0.45);
+        let mut means = [0.0; 5];
+        for i in 0..2_000_u32 {
+            let draws = HostDraws::for_host(SEED, system(i), 0).groups[0];
+            assert_eq!(
+                draw_blended_count(ordinary, early, 0.0, mass, &draws),
+                draw_count(ordinary, mass, &draws)
+            );
+            assert_eq!(
+                draw_blended_count(ordinary, early, 1.0, mass, &draws),
+                draw_count(early, mass, &draws)
+            );
+            for (j, share) in [0.0, 0.25, 0.5, 0.75, 1.0].into_iter().enumerate() {
+                let n = draw_blended_count(ordinary, early, share, mass, &draws);
+                assert!((1..=10).contains(&n), "{n}");
+                means[j] += f64::from(n) / 2_000.0;
+            }
+        }
+        assert!(means.windows(2).all(|w| w[0] < w[1]), "{means:?}");
     }
 
     #[test]

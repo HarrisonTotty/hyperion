@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ChartSystem } from "../../lib/galaxy/model";
+import type { SystemModel } from "../../lib/system/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../spatial/frame";
 import { vec3 } from "../../spatial/vec3";
@@ -25,7 +26,11 @@ function aSystem(
   return system;
 }
 
-function renderReadout(system: ChartSystem | null, { timeYr = 0, driveRangeLy = 50 } = {}) {
+function renderReadout(
+  system: ChartSystem | null,
+  { timeYr = 0, driveRangeLy = 50 } = {},
+  stars: SystemModel | null = null,
+) {
   render(
     <SystemReadout
       system={system}
@@ -33,6 +38,8 @@ function renderReadout(system: ChartSystem | null, { timeYr = 0, driveRangeLy = 
       driveRangeLy={driveRangeLy}
       timeYr={timeYr}
       distanceDecimals={2}
+      stars={stars}
+      starsStale={false}
     />,
   );
   return screen.getByRole("status", { name: "Selected system" });

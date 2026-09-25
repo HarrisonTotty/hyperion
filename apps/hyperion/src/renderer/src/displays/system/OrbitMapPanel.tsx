@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId } from "react";
+import { type ReactNode, useEffect, useId, useMemo } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
@@ -21,6 +21,7 @@ import { DISPLAY_TIME_LABEL, DISPLAY_TIME_WIDTH_CH } from "./displayTime";
 import { type BodyLegendEntry, OrbitLegend } from "./OrbitLegend";
 import { ZOOM_PRESETS } from "./orbitMap";
 import { formatOrbitScaleLength, ORBIT_SCALE_UNITS } from "./orbitScale";
+import { useFrameTime } from "./useDisplayTime";
 import type { SystemViewState } from "./useSystemView";
 
 /** Room for the longest value of each of the centre's coordinates, in characters, as on the chart. */
@@ -92,14 +93,22 @@ export interface OrbitMapPanelProps {
  * down or the newer request its display time asked for refused or timed out, is drawn and read as
  * stale. The chosen zoom preset is pressed while the view shows it: a zoom by hand releases it,
  * since the view no longer matches it, and `Z`, which fits the view to its radius again, presses it
- * once more (the orchestrator's ruling 59.6). The grid still covers its radius. Under the map
+ * once more (the orchestrator's ruling 59.6). The grid still covers its radius. While the display
+ * time runs, the map follows it at each frame, which is the one thing on the display that does:
+ * the readings and the time in the view's furniture change at the guide's 4 Hz. Under the map
  * stand the legend and the system note, which names what this generator version does not model so
  * that the space round the stars is not read as empty.
  */
 export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
   const titleId = useId();
-  const { target, status, model, fault, stale, scene, plane, fitRadii, zoom, displayTime } = view;
-  const { chooseZoom } = view;
+  const { target, status, model, fault, stale, plane, fitRadii, zoom, displayTime } = view;
+  const { chooseZoom, sceneAt } = view;
+  // While the display time runs, the map alone follows it frame by frame (P14.T44.b).
+  const frameTime = useFrameTime(displayTime.frameTime);
+  const scene = useMemo(
+    () => (frameTime === null ? view.scene : sceneAt(frameTime)),
+    [frameTime, view.scene, sceneAt],
+  );
   const drawn = scene !== null && scene.points.length > 0;
 
   // The zoom keys act from anywhere on the display but a text field, as the view's own keys do.

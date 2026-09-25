@@ -1555,7 +1555,7 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
   exhaustive switch over `SymbolShape` gains the case). `lib/galaxy/wire.ts` and `model.ts` carry
   the brief into `ChartSystem`. The chart requests `include_stellar`. A `STARS` selector (`ALL`,
   `LIVING`, `REMNANTS`) with a single-key binding filters marks and list alike, and the count line
-  says what is hidden (`412 OF 1630 SHOWN — LIVING`, digits grouped from five as the guide and
+  says what is hidden (`412 OF 1630 SHOWN: LIVING`, digits grouped from five as the guide and
   plan 05's `lib/format.ts` have it), per the guide's honest-data rule. Legend
   entries for the five shapes. The list gains a class column.
 - **Files:** `docs/frontend/ux-guidelines.md`; under `apps/hyperion/src/renderer/src/`:
@@ -2923,3 +2923,32 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     a nearly unbound orbit amplifies the remnant mass's change, and its mean anomaly by 4.8 × 10⁻³
     rad after some 2,300 orbits. Every golden outside the stellar stage and its planetary readers is
     unchanged.
+- **P06.T36, as built on the `GALAXY` readout (round 9, `ui9`).** `SystemsPanel` asks
+  `system_summary` for the selected system at the chart's answered time. It reuses the `SYSTEM`
+  display's `displays/system/useSystemSummary.ts`, whose channel lets the latest selection win and
+  drops a superseded reply, rather than a second hook in `displays/galaxy/`. The fixtures are
+  `test/systemFixtures.ts`'s, not a new `aSystemSummary` in `galaxyFixtures.ts`.
+  - _Rows._ `SystemReadout` gains `MASS` (the primary's mass now) beside `INIT MASS`, and `[Fe/H]`
+    in `dex` after `POPULATION`; both are the em dash until the answer, so no row moves. A `STAR A`
+    heading follows with `PrimaryReadings`: `KIND`, `PHASE`, `CLASS`, `DIES IN 312 yr` (or
+    `DIED 312 yr AGO`, counted from the answer's time), `LUM`, `RADIUS`, `T EFF`, `M V` in `mag`,
+    `REMNANT` and its rows, `ROTATION`, `VARIABILITY`, `NEBULA` and `EVENTS`. These are the words,
+    units, `NO LIGHT` and em dashes of the `SYSTEM` host readout, with km radii for neutron stars
+    and black holes (ruling 36). Then plan 11's star list. An unborn system reads
+    `STARS NOT YET FORMED`.
+  - _Tests._ `SystemReadout.summary.test.tsx`, through `App`, covers every remnant kind. That
+    includes `no_remnant`, whose light and size rows are left out and whose mass is the em dash.
+  - _Model._ `HostBody` gains `absoluteVMag`, `planetaryNebula: Modelled` and
+    `activeEvents: Pending`, read by `wire.ts`. `words.ts` gains `starEventLabel`.
+  - _States._ Pending, refused, timed out and link down are `RequestStatus` between the readout and
+    `OPEN SYSTEM`, outside the live region, with `RETRY` (rulings 13 and 14). An unreadable answer
+    reads `SYSTEM DATA INVALID: …`. An answer kept for a time the chart has left, or after a newer
+    request failed, is stale: muted, with the `S`.
+  - _Layout._ The readings scroll in their own tabbable region with their position, and each
+    reading and each star-list table counts one (ruling 70.6). A container query sets one reading
+    to a line in a column under 30 rem, so nothing scrolls sideways. The list and the readout share
+    the panel equally. At 1280 × 720 that is two list rows and seven readings. Before, the readout
+    overlapped the list there, which was an existing fault.
+  - **For the owner:** `STAR A`, `M V`, `mag`, `DIES IN`, `DIED … AGO`, `NEBULA` (it reads the
+    nebula's radius) and `EVENTS` join the draft nomenclature. `RADIUS` now names the galactic
+    coordinate and, under `STAR A`, the star's radius in one readout.

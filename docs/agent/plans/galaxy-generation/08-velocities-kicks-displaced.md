@@ -826,7 +826,7 @@ constants of Design notes 9, 10 and 24, with the figure.
 
 - **P08.T15.a Placement in the record.** `SystemRecord.placement: PlacementKind`, `snake_case` on
   the wire, with a pinned wire-form test and `just gen-protocol`; the readout's `ORIGIN` line
-  (`THIN DISC · DISPLACED REMNANT`); the list's text repeats it; the UX guide's nomenclature table
+  (`OLD THIN DISC · DISPLACED REMNANT`); the list's text repeats it; the UX guide's nomenclature table
   gains the five terms. Files: `crates/hyperion-protocol/src/**`, `crates/hyperion-server/src/**`,
   `packages/protocol/src/generated/**`, `displays/galaxy/{SystemReadout,SystemList}.tsx` and their
   tests, `docs/frontend/ux-guidelines.md`.

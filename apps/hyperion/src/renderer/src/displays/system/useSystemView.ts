@@ -1,4 +1,4 @@
-import type { DetailLevelDto, RequestKind } from "@hyperion/protocol";
+import type { DetailLevelDto, RequestKind, UniverseTime } from "@hyperion/protocol";
 import { useCallback, useMemo, useState } from "react";
 
 import { stateAt } from "../../lib/orbit";
@@ -123,6 +123,11 @@ export interface SystemViewState {
   readonly zoneLayers: ZoneLayers;
   /** What the orbit map draws at the display time; `null` without a formed system. */
   readonly scene: SpatialScene | null;
+  /**
+   * What the orbit map draws at another time, as it does at each frame while the display time runs
+   * (P14.T44.b); `null` without a formed system.
+   */
+  readonly sceneAt: (time: UniverseTime) => SpatialScene | null;
   /** The body list's rows: the hosts, and the bodies under them. */
   readonly rows: ReadonlyArray<BodyRow>;
   /** The zone that holds the primary, whose class is the system's; `null` for none. */
@@ -226,19 +231,22 @@ function zonesHolding(
  * again starts it afresh at the chart's time. The layouts, the plane and the fitted radii depend on
  * the answers alone and keep their identity while they do; the scene depends on the display time,
  * the selection, the zoom and the zones shown too, and keeps its identity while none of them
- * changes, so that the map paints only when what it shows has changed. The selection is derived:
+ * changes, so that the map paints only when what it shows has changed; while the display time runs,
+ * the map builds its own scene at each frame's time through `sceneAt`, so that nothing else renders
+ * per frame, and a lost link holds the run (P14.T44.b). The selection is derived:
  * the body chosen while it is in the answer on show, and the primary otherwise. The selected body's
  * record is asked for at the time the system last was, and its list entry is read until it comes.
  */
 export function useSystemView(target: SystemTarget): SystemViewState {
-  const displayTime = useDisplayTime(target.time);
+  const { status: linkStatus } = useServerLink();
+  // Losing the link holds a running display (P14.T44.b).
+  const displayTime = useDisplayTime(target.time, linkDownReason(linkStatus));
   const [generation, setGeneration] = useState(0);
   const [chosenId, setChosenId] = useState<string | null>(null);
   const [zoom, setZoom] = useState<ZoomPreset>("all");
   const [zoomHeld, setZoomHeld] = useState(true);
   const [fitRequest, setFitRequest] = useState(0);
   const [zoneLayers, setZoneLayers] = useState<ZoneLayers>(ALL_ZONE_LAYERS);
-  const { status: linkStatus } = useServerLink();
   const data = useSystemData(target, displayTime.time, generation);
 
   const shown = data.shown;
@@ -297,15 +305,15 @@ export function useSystemView(target: SystemTarget): SystemViewState {
   const detail = useBodyDetail(target, chosenBody?.id ?? null, data.requestTime, generation);
   const time = displayTime.time;
 
-  const scene = useMemo(
-    () =>
+  const sceneAt = useCallback(
+    (at: UniverseTime): SpatialScene | null =>
       formed === null || layout === null || plane === null || fitRadii === null
         ? null
         : orbitScene({
             hosts: formed.hosts,
             layout,
             plane,
-            time,
+            time: at,
             selectedId,
             bands: target.bands,
             fitRadiusAu: fitRadii[zoom],
@@ -319,7 +327,6 @@ export function useSystemView(target: SystemTarget): SystemViewState {
       layout,
       plane,
       fitRadii,
-      time,
       selectedId,
       target.bands,
       zoom,
@@ -328,6 +335,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
       zoneLayers,
     ],
   );
+  const scene = useMemo(() => sceneAt(time), [sceneAt, time]);
 
   const rows =
     formed === null || layout === null
@@ -429,6 +437,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     fitRequest,
     zoneLayers,
     scene,
+    sceneAt,
     rows,
     primaryZone: zoneOfPrimary,
     selected,

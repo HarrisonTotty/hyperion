@@ -1535,3 +1535,19 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     whole frame as it arrived, including its `type`, `id` and `body` envelope, and checks that its
     parse equals the parsed response. Re-blessed in the same window, the file differs from its
     version-10 form only in the envelope, the indentation, the version and nine last-bit values.
+- **Validation of T11.a, T11.b, T12, T14.a and T14.b (`val07`, round 9, 2026-09-25).** T11.a,
+  T11.b, T12 and T14.a conform, with the deviations recorded above. T14.b has gaps, from ruling 11:
+  - _Fixed._ `convert.rs`'s test now holds every group's keys in the table's order, written out
+    independently of the builder. Before, it held only the group order and the populations group,
+    and the golden, blessed from the builder, could not catch a key moved within its group.
+  - _Not fixed._ The client's `parameterLabels.test.ts` still compares sorted key sets, which is the
+    client lane's to change. `population.<p>.share` is a share of systems
+    (`GalaxyParams::population_share`), but neither the table above nor the client's label says so.
+    `rotation.escape_speed` is still the untruncated √(−2Φ): 622.9 km/s for the golden's seed,
+    against 500–580. Ruling 11 asks for the halo truncated at r₂₀₀, which is plan 02's potential and
+    moves `galaxy_parameters.golden`.
+  - Also fixed: T12 gains a query-level test (`range_query` through the handle equals `NoCache`,
+    cold and warm, and under a 1 KiB budget), since the reason recorded for testing walks only no
+    longer holds. The test that a map every waiter gave up on frees its key now queues its bands
+    behind a held worker and checks that the pool skipped them, where it used to rely on a 1 ms
+    timeout. `open`'s documentation no longer promises a `cancelled` it cannot give.

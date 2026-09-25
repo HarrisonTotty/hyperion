@@ -592,7 +592,7 @@ fn a_galaxy_whose_warm_layer_outweighs_its_gas_is_refused() {
     assert_eq!(source, Some(error.to_string()));
     let (seed, gas) = built.expect("some seed leaves the corner neutral gas");
     assert!(gas.neutral_fraction() > 0.0);
-    assert!(Galaxy::from_params(seed, params).is_ok());
+    Galaxy::from_params(seed, params).expect("a seed that leaves neutral gas builds");
 }
 
 /// The mean neutral gas over a cell is bounded above by `neutral_bound` at every point of the cell
@@ -1073,6 +1073,50 @@ fn a_clouds_column_through_its_centre_is_four_thirds_of_its_core() {
             1e-9,
         );
     }
+}
+
+/// P07.T8.d: the neutral column is never above the whole column on short lines that stay in cold
+/// or molecular gas, where every sample is wholly neutral and the corona is summed two ways: step
+/// by step into the neutral column, and in closed form into the whole column.
+#[test]
+fn the_neutral_column_is_never_above_the_whole_on_short_neutral_lines() {
+    let fields = milky_way_fields();
+    let gas = milky_way_gas(&fields, Seed::new(10));
+    let mut cache = NoiseCache::with_capacity(4_096);
+    let mut lcg = Lcg::new(0x0708_d001);
+    let mut neutral_lines = 0;
+    for _ in 0..4_000 {
+        let r = 200.0 + 30_000.0 * lcg.next_f64();
+        let theta = core::f64::consts::TAU * lcg.next_f64();
+        let (sin, cos) = math::sin_cos(theta);
+        let a = [r * cos, r * sin, 20.0 * (lcg.next_f64() - 0.5)];
+        let length = 1.0 + 60.0 * lcg.next_f64();
+        let b = [a[0] + length * cos, a[1] + length * sin, a[2]];
+        let line = sightline(
+            &gas,
+            &at(a),
+            &at(b),
+            NoiseMode::Realised,
+            Quality::Full,
+            &[],
+            &mut cache,
+        );
+        let (neutral, whole) = (
+            line.neutral_hydrogen_column().value(),
+            line.hydrogen_column().value(),
+        );
+        if neutral > 0.999_999 * whole {
+            neutral_lines += 1;
+        }
+        assert!(
+            neutral <= whole,
+            "{neutral:e} > {whole:e} from {a:?} to {b:?}"
+        );
+    }
+    assert!(
+        neutral_lines > 100,
+        "only {neutral_lines} wholly neutral lines"
+    );
 }
 
 /// P07.T8.d: the neutral column is never above the whole column; on in-plane lines of 3,000 ly at

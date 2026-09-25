@@ -14,6 +14,7 @@ import {
   formatMassMearth,
   formatMassMsun,
   formatNumber,
+  formatOrbit,
   formatPeriod,
   formatPressure,
   formatRadiusKm,
@@ -516,5 +517,30 @@ describe("formatMassMearth", () => {
 
   it("reads zero as 0.00, not in E notation", () => {
     expect(formatMassMearth(0)).toBe("0.00");
+  });
+});
+
+describe("formatOrbit", () => {
+  it("reads a period, a semi-major axis and an eccentricity as every orbit is read", () => {
+    // The Earth's: 365.256 d, which is under 1,000 d and so in days, 1 AU, e = 0.0167.
+    expect(formatOrbit(31_558_150, 149_597_870_700, 0.016_7)).toEqual({
+      period: { value: "365", unit: "d" },
+      semiMajorAxis: { value: "1.00", unit: "AU" },
+      eccentricity: "0.0167",
+    });
+  });
+
+  it("reads a close pair's period in days and its axis in Gm", () => {
+    expect(formatOrbit(86_400 * 2.5, 5e9, 0)).toEqual({
+      period: { value: "2.50", unit: "d" },
+      semiMajorAxis: { value: "5.00", unit: "Gm" },
+      eccentricity: "0.0000",
+    });
+  });
+
+  it("refuses an eccentricity outside a bound orbit's", () => {
+    expect(() => formatOrbit(1, 1, 1)).toThrow(RangeError);
+    expect(() => formatOrbit(1, 1, -0.1)).toThrow(RangeError);
+    expect(() => formatOrbit(Number.NaN, 1, 0)).toThrow(RangeError);
   });
 });

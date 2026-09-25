@@ -574,7 +574,7 @@ and receives the same `contact` at `resolved` with the pinned host; a JSON-level
 
 Edit `docs/frontend/ux-guidelines.md`, on top of plan 05's edits (which add `yr`, E notation, the
 direction names and the 3D conventions): under "Data states" add **Observed**: a value that is as
-old as its light is shown with its light age available beside it (`LIGHT AGE 4,210 yr`), and a
+old as its light is shown with its light age available beside it (`LIGHT AGE 4210 yr`), and a
 position extrapolated from it is Estimated (`~`); under "Numbers, units and time" add `kyr` and
 `W/m²`, with small fluxes in plan 05's E notation (`3.20E-12 W/m²`, since B612 has no superscript
 minus), and define a direction as azimuth and signed elevation, `047° +12°`, the azimuth following

@@ -31,11 +31,11 @@ defaults that a console may break with a stated reason.
 
 ## What to take from the references
 
-| Reference                    | Take                                                                                                                                                                                                    | Leave                                                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| NASA crew displays, cockpits | Reserved colour meanings, alert classes, number and time formats, stale-data marking, arm-then-execute commanding, fixed display frame                                                                  | Light backgrounds, dense 1990s widget chrome                                                          |
-| _The Expanse_ (Rocinante)    | "Everything is there for a purpose", restrained palette with sparse accents, faint reference grids and orbit lines on spatial displays, an under-the-hood engineering tone, no giant flashing alert box | Holograms and gesture input, faction palettes that reuse red as decoration, legibility-for-camera art |
-| _Starfield_ ("NASA-punk")    | Technology extrapolated from present-day hardware, thin rules and tick marks, stencilled labels with designators, flat matte surfaces, segmented power and level bars, off-white rather than pure white | Controller radial menus, large empty margins, decorative multi-colour stripes inside consoles         |
+| Reference                    | Take                                                                                                                                                                                                         | Leave                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| NASA crew displays, cockpits | Reserved colour meanings, alert classes, number and time formats, stale-data marking, arm-then-execute commanding, fixed display frame                                                                       | Light backgrounds, dense 1990s widget chrome                                                          |
+| _The Expanse_ (Rocinante)    | "Everything is there for a purpose", restrained palette with sparse accents, faint reference grids and thin orbit lines on spatial displays, an under-the-hood engineering tone, no giant flashing alert box | Holograms and gesture input, faction palettes that reuse red as decoration, legibility-for-camera art |
+| _Starfield_ ("NASA-punk")    | Technology extrapolated from present-day hardware, thin rules and tick marks, stencilled labels with designators, flat matte surfaces, segmented power and level bars, off-white rather than pure white      | Controller radial menus, large empty margins, decorative multi-colour stripes inside consoles         |
 
 ## Colour
 
@@ -81,14 +81,14 @@ never use them for decoration, branding, chart series or hover effects.
   table. They were designed for aircraft cockpit displays. Both are bundled through
   `@fontsource` and exposed as `--font-sans` and `--font-mono`. Never fetch a font at
   runtime.
-- B612 covers Latin text and a small symbol set, including `°`, `µ`, `×`, `−`, `—`, `↑` and
-  `↓`. Check that a new symbol exists in the font before using it, because a fallback glyph
+- B612 covers Latin text and a small symbol set, including `°`, `µ`, `×`, `·`, `−`, `—`, `↑`
+  and `↓`. Check that a new symbol exists in the font before using it, because a fallback glyph
   from the system font will not match. Draw anything else as an SVG icon.
 - `☉` (U+2609) is in neither B612 nor B612 Mono. It is drawn as an inline SVG sized to the
   text, a circle with a centre dot in `currentColor`, and the accessible name "solar
-  masses" goes on the unit as a whole. `⊕` (U+2295) is reserved, to be drawn the same way
-  when planets need it. Neither character may be typed into a string that reaches the
-  screen.
+  masses" goes on the unit as a whole. `⊕` (U+2295) is drawn the same way, a circle with a
+  cross in `currentColor`, and the accessible name "Earth masses" goes on the unit as a whole.
+  Neither character may be typed into a string that reaches the screen.
 - The typeface must tell `0` from `O` and `1` from `l` and `I`.
 - Numbers are always monospaced with tabular figures, so that a changing value never
   shifts its neighbours.
@@ -108,12 +108,28 @@ never use them for decoration, branding, chart series or hover effects.
 - Every numeric value shows its unit, either beside the value or once for a labelled
   group. Units are SI, written with correct symbols and a space: `12.4 km/s`, `310 K`.
 - Beside SI, stellar and system masses are in solar masses, `M☉` (drawn, see
-  "Typography"), and ages are in `Myr` and `Gyr`. Universe time is in years, `yr`. Rates
+  "Typography"), and ages are in `kyr`, `Myr` and `Gyr`. Universe time is in years, `yr`. Rates
   and densities compose allowed units: `°/Myr`, `/ly³`, `SYSTEMS/ly²`.
+- Gas and dust take the astronomers' units: extinction and other magnitudes in `mag`, column
+  density in `/cm²`, number density in `/cm³`, and pressure over Boltzmann's constant in `K/cm³`.
+  They are composed as the rates are, because `cm⁻²` cannot be set.
+- Stars also take the astronomers' units of luminosity and radius, `L☉` and `R☉`, with the `☉`
+  drawn (see "Typography"); their accessible names are "solar luminosities" and "solar radii". A
+  neutron star's or black hole's radius is in `km`. Metallicity, `[Fe/H]`, is in `dex`: the
+  base-10 logarithm of a star's iron-to-hydrogen ratio over the Sun's. As a label, `[Fe/H]` keeps
+  its case, as unit symbols do. Magnetic fields are in gauss, `G`, `kG` and `MG`.
+- Every planetary mass, from a moon to a giant of 13 Jupiter masses (`4131 M⊕`), is in Earth
+  masses, `M⊕`, with the `⊕` drawn (see "Typography"). A brown dwarf's mass is in `M☉`, the unit
+  of the stellar sequence it continues. There is no Jupiter-mass unit. Planetary radii are in `km`.
+- Orbital, rotation and pulsation periods are in days, `d`, up to 1000 d, and in `yr` above.
+  Distances within a system run `km`, `Mm` and `Gm`, then `AU` from 0.1 AU. Both switch with
+  hysteresis, as any scaled unit does.
 - A value outside its unit's ladder is written in E notation with three significant
   figures: `5.20E10 M☉`. A legend tick at an exact power of ten is written `1E-4`. B612 has
   no superscript digits beyond `¹`, `²` and `³` and no superscript minus, so `10⁻⁴` cannot be
-  set, and long digit strings are not allowed.
+  set, and long digit strings are not allowed. `<sup>` and `<sub>` are not used either: they
+  set text smaller than the smallest size allowed. A symbol's subscript is written in
+  parentheses: `A(V)`, `E(B-V)`, `N(H)`, `M(V)`.
 - The same quantity uses the same unit and precision everywhere on the ship. Show the
   precision the operator can act on, not the precision the simulation has.
 - Scale units rather than printing long numbers: `m`, `km`, `Mm`, `Gm`, then `AU` and `ly`.
@@ -123,12 +139,27 @@ never use them for decoration, branding, chart series or hover effects.
 - Group digits in threes once a value has five or more digits: `12,480 km`.
 - A field has a fixed width sized for its longest possible value and its status marks.
 - Angles are degrees with a degree sign, `000°` to `359°` for bearings, zero-padded.
+- Fluxes are in `W/m²`, and small fluxes in E notation: `3.20E-12 W/m²`.
+- A direction from the ship is an azimuth and a signed elevation, `047° +12°`. The azimuth follows
+  the bearing rule and runs from `COREWARD` through `SPINWARD`. The elevation runs from `-90°` to
+  `+90°`, positive `NORTH`, zero-padded to two digits and always signed. Within a light-year of
+  the galactic axis, where `COREWARD` is undefined, the azimuth runs from +x and the direction
+  says so (`FROM +X`).
 - Times use a 24-hour clock and always carry a label naming the time system:
   `MET 57/14:08:33` (days/hours:minutes:seconds), `UTC 14:08:33`. Countdown timers are
   negative before the event and positive after it: `T-00:04:12`, `T+00:00:30`.
 - Universe time, the galaxy's own clock counted from the generator's epoch, is labelled `UT`
   and shown as signed years: `UT +12.50 yr`. `UT` never means Universal Time; the wall
   clock in the header strip is `UTC`.
+- A display that can be stepped away from the chart's time shows its own time, labelled
+  `DISPLAY TIME`. It is universe time and not the ship's clock. It is shown as signed whole years,
+  then days/hours:minutes:seconds in the `MET` form: `DISPLAY TIME UT +12 yr 183/14:08:33`. The
+  year is the Julian year of 365.25 days, so the day runs from `000` to `365`. The sign applies to
+  the whole time: `UT -0 yr 000/00:00:01` is one second before the epoch. The field is sized for
+  `UT -1000 yr 000/00:00:00`, the edge of the clock window. A display time never moves unless the
+  operator steps it or runs it. At the clock window's edge it stops and says `CLOCK WINDOW LIMIT`.
+  This long form is used only on a display that steps finer than 0.01 yr; every other display
+  shows universe time as `UT +12.50 yr`.
 - Present information in directly usable form. Never make the operator do arithmetic:
   show time to closest approach, not just range and closing speed.
 
@@ -149,8 +180,8 @@ Every console is built on the same fixed frame:
 - A display should contain what its task needs without visiting another display. Nothing
   is more than four actions deep.
 - Consoles fill the window and do not scroll. Vertical scrolling is allowed only inside
-  lists, logs and procedures, and must show position and total (`12-24 of 87`). Never
-  scroll horizontally.
+  lists, logs, procedures and readouts, which are lists of readings, and must show position and
+  total (`12-24 of 87`). Never scroll horizontally.
 - Lay out on a `0.25rem` base unit. Panels are rectangles with a `1px` `--line` border and
   square or `2px` corners. A panel has an upper-case title and may carry a system
   designator (`EPS-2`, `RCS FWD`).
@@ -167,23 +198,40 @@ Every console is built on the same fixed frame:
 
 A live value is always in exactly one of these states, and each looks the same everywhere.
 
-| State            | Presentation                                                                                           |
-| ---------------- | ------------------------------------------------------------------------------------------------------ |
-| Nominal          | `--text`                                                                                               |
-| Caution limit    | Value in `--status-caution`, followed by `↑` or `↓` for the limit that was crossed                     |
-| Warning limit    | Value in `--status-warning`, followed by `↑` or `↓`                                                    |
-| Off scale        | Pegged indicator plus `↑`/`↓`; gauges never wrap or clip silently                                      |
-| Stale            | Last value in `--text-muted` with a trailing `S` mark; the age is available on request                 |
-| Missing          | An em dash `—` in `--text-muted`. Never `0`, `NaN`, `null` or an empty field                           |
-| Overflow         | Every digit replaced by `*` in `--status-caution`, keeping the sign and decimal point                  |
-| Estimated        | Prefixed with `~`. Used for derived or sensor-limited values, such as the mass of an unscanned contact |
-| Commanded/target | `--target`, shown beside the actual value rather than replacing it                                     |
+| State            | Presentation                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Nominal          | `--text`                                                                                                                                         |
+| Caution limit    | Value in `--status-caution`, followed by `↑` or `↓` for the limit that was crossed                                                               |
+| Warning limit    | Value in `--status-warning`, followed by `↑` or `↓`                                                                                              |
+| Off scale        | Pegged indicator plus `↑`/`↓`; gauges never wrap or clip silently                                                                                |
+| Stale            | Last value in `--text-muted` with a trailing `S` mark; the age is available on request                                                           |
+| Missing          | An em dash `—` in `--text-muted`. Never `0`, `NaN`, `null` or an empty field                                                                     |
+| Overflow         | Every digit replaced by `*` in `--status-caution`, keeping the sign and decimal point                                                            |
+| Estimated        | Prefixed with `~`. Used for derived or sensor-limited values, such as the mass of an unscanned contact                                           |
+| Observed         | The value as its light shows it, with its light age available beside it (`LIGHT AGE 4210 yr`); a present value extrapolated from it is Estimated |
+| Commanded/target | `--target`, shown beside the actual value rather than replacing it                                                                               |
 
 - A value becomes stale when its source has not updated within twice its expected period.
   Loss of the server link makes every live value on the console stale at once.
 - Elements with states or modes always show the current one. Automation always shows its
   level (`AUTO`, `MAN`, `INHIBITED`) and who is in control of a system.
 - Historical data on a graph is labelled as such and is distinguishable from live data.
+- A readout's sections carry one of four states, which the server sets and the console never
+  infers, and each looks the same everywhere:
+
+  | State            | Presentation                                                                                        |
+  | ---------------- | --------------------------------------------------------------------------------------------------- |
+  | Shown            | The section's values, each in its own data state                                                    |
+  | Not resolved     | `NOT RESOLVED`, once, in place of the section: the detail level granted to the console withholds it |
+  | Not yet modelled | `NOT YET MODELLED`, once, in place of the section: this generator version does not compute it       |
+  | Not applicable   | Nothing: the section and its rows are left out, as a gas giant has no surface section               |
+  - `NOT YET MODELLED` must never be read as "none", so a display whose empty space could be read
+    as absence also says what is not modelled, composed from the same states:
+    `MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED`. That note is a label followed by
+    a three-word annunciation, so it is in upper case.
+  - "None" is a value, not a state: an airless world's atmosphere is shown, with no gas in it.
+  - A single value the generator does not compute, inside a section that is shown, is Missing: the
+    em dash. So is an empty cell in a table column.
 
 ## Alerts
 
@@ -197,6 +245,10 @@ Four classes, shared by the whole ship:
 | Advisory  | `--status-advisory` | Awareness only                      | Coloured text in the alert list, no sound                     |
 
 - Alerts are raised by the server from simulation state. A console never invents one.
+- A sensor detection is an Advisory alert raised by the server. It names the sensor system, the
+  kind of event, its direction and whether its source is resolved:
+  `SENSORS TRANSIENT 047° +12°: unresolved`. It clears when the event's flux at the ship falls
+  below the sensor's detection limit.
 - The header strip shows the count of active emergency, warning and caution alerts and the
   number that are unacknowledged. The newest unacknowledged alert is shown in full.
 - An alert names the system, says what is wrong and, where known, the cause and the
@@ -250,6 +302,10 @@ Four classes, shared by the whole ship:
   a label or legend for each series. Limit lines are drawn in the alert colour they
   trigger. Series are told apart by line style and label first and by colour second.
   Series colours are tints of `--text` and `--accent`, never the status colours.
+- A scatter plot may run an axis in reverse where its science does: the HR diagram plots
+  temperature falling from left to right. A logarithmic axis says `LOG SCALE`, and its ticks at
+  exact powers of ten follow the E-notation rule (`1E-4 L☉`). A point beyond an axis is pegged at
+  its edge with a drawn arrowhead, and the caption counts the pegged points and those not plotted.
 - A schematic labels every component. Flow lines are solid for a single medium, and use
   labelled line styles when several media share a diagram. Crossing lines that connect
   have a dot. Crossing lines without a dot do not connect. Arrows show flow direction
@@ -258,15 +314,27 @@ Four classes, shared by the whole ship:
   `--surface-0`, with a faint `--line` reference grid or range rings for scale. They always
   show scale, orientation and the reference frame. Predicted paths are dashed and
   commanded paths use `--target`. Contacts use a small fixed symbol set in which shape
-  encodes the type and the label carries identity, so that colour stays free for status.
+  encodes the type and the label carries identity, so that colour stays free for status. A
+  feature is the exception: its shape tells it from a system or body, and its kind is named
+  beside the mark (see below).
 - Spatial displays are true to scale by default. Any exaggeration of size or distance
   made for visibility must be labelled on the display (`BODIES NOT TO SCALE`).
+- A bearing without a range is a solid ray from the observer, ending at the display's edge with
+  its label. An apparent position, where the light shows a system, is a tick joined to its present
+  position by a dashed line, since dashes mean prediction. The display's mode, `NOW` or
+  `OBSERVED FROM`, is shown with its frame and time.
 - A continuous field, such as column density or dust, may be drawn as a raster rather than
   in vector lines. It uses a single hue, from `--surface-0` to `--text`. The ramp is
   logarithmic when the data span more than two orders of magnitude, and the legend says
   which (`LOG SCALE`). The floor is stated, and values at or below it are exactly
   `--surface-0`. A legend with tick values and the unit is mandatory. Each pixel shows the
   value computed for it: no smoothing or interpolation that invents values.
+- A display may offer a second raster quantity in place of the first, such as extinction in
+  place of column density. Each has its own legend with its title, unit, scale and floor. One
+  raster may modify another only as a named overlay. Both legends are then shown, and the display
+  names the overlay and its quantity: `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`. A mark or line
+  drawn over a raster has a `1px` `--surface-0` casing on each side, so that it reads over every
+  ramp value. A casing is a solid outline, never a blur or a glow.
 - A three-dimensional spatial display (star chart, tactical plot, orbit map) follows one set
   of conventions, so that every such display reads alike:
   - The projection is orthographic only, so the whole picture has one scale.
@@ -278,6 +346,9 @@ Four classes, shared by the whole ship:
     nothing else on a spatial display.
   - Size may encode a class, never depth, and a legend says so (`SYMBOLS NOT TO SCALE`).
     Nothing is dimmed by depth.
+  - The legend names every symbol the display can draw, in words. A filter that hides marks
+    hides them from the list as well, and the count line gives what is shown, the total and the
+    filter: `412 OF 1630 SHOWN: LIVING`.
   - `--accent` marks what is available, such as a reachable system. A bracket reticle marks
     the selection, and the reticle in `--target` marks a commanded destination.
   - A range sphere's outline is a circle drawn at 6:1 contrast, and is labelled apart from
@@ -285,9 +356,67 @@ Four classes, shared by the whole ship:
     never looks empty.
   - The view always shows an axis triad, the azimuth and elevation, a 1-2-5 scale bar, the
     frame name, the centre and the time.
-  - It redraws on demand only, never on a loop.
+  - It redraws only when something it shows changes, never on an idle loop. While the operator
+    runs its time, it redraws at frame rate and stops when the time is held; its time readout
+    still updates at about 4 Hz, as any live value does.
   - The canvas is paired with a DOM list of its marks, from which they are selected with the
     keyboard.
+- The orbit map, the three-dimensional spatial display of one system, keeps those conventions and
+  adds these:
+  - Its reference plane is the system's own, labelled `SYSTEM PLANE`: the orbital plane of the
+    primary host's planets, or for a close binary the binary's. Until a system has planets, the
+    plane is `GALACTIC PLANE`. The grid, rings, stalks, fill rule and the `TOP`, `SIDE` and
+    `FRONT` presets follow that plane, and the legend names it (`FILLED ABOVE SYSTEM PLANE`). The
+    axis triad and the core arrow still point galactic `NORTH`, `COREWARD` and `SPINWARD`. The
+    frame is `SYSTEM BARYCENTRIC`, or `BODY <designation>` while a body is focused with
+    `FOCUS BODY`, in which its moons and rings are drawn and distances are in `km` and `Mm`.
+  - Orbits are solid `--text-muted` ellipses. They say where a body lies, so they meet the 6:1 that
+    the parts of a symbol carrying meaning need; they are reference marks and not predictions, so
+    they are never dashed. The selected body's orbit is a solid `--text` line `2px` wide, because
+    colour alone must not carry the selection. An orbit in `--text-muted` is not stale:
+    staleness is carried by the `S` and the view's stale marking, never by a line's colour.
+  - Stable zones, the snow line and the habitable zone are labelled annuli, drawn as their two
+    edges in solid `--text-muted`, and each can be switched off. The optimistic habitable zone's
+    edges carry short ticks every 10° pointing into the band, so that it differs from the
+    conservative zone by shape.
+  - A belt, and a planet's rings in the `BODY` frame, are annuli whose two edges are joined by
+    short radial ticks every 10°. The cometary halo is one labelled circle at its outer radius,
+    drawn only when it is inside the view. No annulus is filled, hatched or dotted.
+  - `--line` is for the reference plane's grid and scale rings only.
+  - Distances are true to scale, with a 1-2-5 scale bar. Bodies are not, and the display says
+    `BODIES NOT TO SCALE` once, in place of the legend's `SYMBOLS NOT TO SCALE`.
+  - Bodies move only when the display time changes, never on their own, so a held map is still.
+  - The zoom presets `INNER`, `ALL` and `BELTS` fit the outer limit of the habitable zone or the
+    fifth body, the outermost planet, and the outermost belt. Zooming by hand releases a preset.
+- The ship-wide symbol set. Every outline is closed, so that it can be filled above the reference
+  plane and drawn open below it. The list and readout name every kind in words, so shape is never
+  the only signal.
+
+  | Symbol            | Outline                                                      | Meaning                                                                                                             |
+  | ----------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+  | Circle            | A circle                                                     | A protostar, pre-main-sequence star, dwarf, subgiant or hot subdwarf, or a brown dwarf                              |
+  | Ringed circle     | A circle inside an outer ring; only the inner disc is filled | A giant, supergiant or Wolf-Rayet star                                                                              |
+  | Diamond           | A square on its corner                                       | A white dwarf                                                                                                       |
+  | Triangle          | Point up                                                     | A neutron star                                                                                                      |
+  | Square            | A square                                                     | A black hole                                                                                                        |
+  | Inverted triangle | Point down                                                   | A planet, bound or free-floating; its size tells a giant from a planet from a dwarf planet                          |
+  | Pentagon          | A regular pentagon, point up                                 | A moon                                                                                                              |
+  | Hexagon           | A regular hexagon, flat at top and bottom                    | An unresolved contact: a body whose kind the sensors have not resolved                                              |
+  | Four-point star   | A closed four-pointed star                                   | A transient: the source of a sensor detection                                                                       |
+  | Greek cross       | A cross of four equal arms                                   | A feature: a group of systems or a cloud of gas, its kind named beside it; shells and superbubbles are circles only |
+
+  A system whose star left no remnant is listed and not drawn. A host keeps its symbol and its
+  mass layer's size on every display.
+
+- A feature, a group of systems or a cloud of gas, is marked by one outline that no system or
+  body uses, a Greek cross, and its kind is named by an abbreviation beside the mark and in words
+  in the list and readout. A feature wider than its mark is also drawn at its true radius as a
+  solid `--text-muted` circle. So are a remnant shell and a superbubble, which are labelled at the
+  circle and have no mark of their own. On a display without a reference plane, such as the
+  galaxy map, feature marks are drawn open. A feature layer still being computed says
+  `FEATURES PENDING`, so that unfetched features never look absent.
+- A stellar stream's track is a solid `1px` `--text-muted` line, labelled at one end, cased as
+  any line over a raster is. A dwarf core takes the feature mark.
 - Render fast-changing instruments on a canvas. Text that must be read stays in the DOM.
 
 ## Motion and sound
@@ -311,6 +440,7 @@ Four classes, shared by the whole ship:
 - An error says what is wrong, what caused it if known, and what the operator can do.
 - One name per thing. Systems, displays, commands and abbreviations come from a single
   ship-wide nomenclature list, and an abbreviation is used only if it is on that list.
+- A reading made of parts, such as a system's origin, joins them with a middle dot `·`.
 - Real engineering and astronautical terms are preferred to invented ones: `DELTA-V`,
   `PERIAPSIS`, `RCS`, `EPS`. Invented technology is named in the same register.
 - Directions in the galaxy are named for the galaxy itself: `COREWARD` and `RIMWARD`
@@ -319,25 +449,100 @@ Four classes, shared by the whole ship:
   rotates counter-clockwise, and −z). They are local to a point, and undefined on the axis.
 - The galaxy-wide reference frame is named `GALACTIC`. Its coordinates are given as
   `RADIUS` (distance from the axis), `ANGLE` (from +x, counter-clockwise seen from the
-  north) and `HEIGHT` (along +z).
+  north) and `HEIGHT` (along +z). A readout groups the three under the heading `GALACTIC`.
 
 ### Nomenclature list
 
-| Name        | Kind         | Meaning                                                  |
-| ----------- | ------------ | -------------------------------------------------------- |
-| `LINK`      | Display      | The server link: endpoint, versions, latency             |
-| `GALAXY`    | Display      | The universe, its galaxy parameters, map and local chart |
-| `AZM`       | Abbreviation | Azimuth of a spatial display's camera                    |
-| `ELV`       | Abbreviation | Elevation of a spatial display's camera                  |
-| `DESIG`     | Abbreviation | Designation                                              |
-| `DIST`      | Abbreviation | Distance                                                 |
-| `ID`        | Abbreviation | Identifier: a system's or universe's 16-digit hex ID     |
-| `INIT MASS` | Abbreviation | Initial mass                                             |
-| `MIN MASS`  | Abbreviation | Minimum mass: the lowest initial mass a query includes   |
-| `GEN VER`   | Abbreviation | Generator version                                        |
-| `EXP`       | Abbreviation | Expected count                                           |
-| `RET`       | Abbreviation | Returned count                                           |
-| `UT`        | Time system  | Universe time, from the generator's epoch                |
+| Name                                                                   | Kind                   | Meaning                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LINK`                                                                 | Display                | The server link: endpoint, versions, latency                                                                                                                                                                                             |
+| `GALAXY`                                                               | Display                | The universe, its galaxy parameters, map and local chart                                                                                                                                                                                 |
+| `SYSTEM`                                                               | Display                | One system: its hosts and bodies, the orbit map, the body list and readout, and the display time                                                                                                                                         |
+| `AZM`                                                                  | Abbreviation           | Azimuth of a spatial display's camera                                                                                                                                                                                                    |
+| `ELV`                                                                  | Abbreviation           | Elevation of a spatial display's camera                                                                                                                                                                                                  |
+| `DESIG`                                                                | Abbreviation           | Designation                                                                                                                                                                                                                              |
+| `DIST`                                                                 | Abbreviation           | Distance                                                                                                                                                                                                                                 |
+| `ID`                                                                   | Abbreviation           | Identifier: a system's or universe's 16-digit hex ID                                                                                                                                                                                     |
+| `INIT MASS`                                                            | Abbreviation           | Initial mass                                                                                                                                                                                                                             |
+| `MIN MASS`                                                             | Abbreviation           | Minimum mass: the lowest initial mass a query includes                                                                                                                                                                                   |
+| `GEN VER`                                                              | Abbreviation           | Generator version                                                                                                                                                                                                                        |
+| `EXP`                                                                  | Abbreviation           | Expected count                                                                                                                                                                                                                           |
+| `RET`                                                                  | Abbreviation           | Returned count                                                                                                                                                                                                                           |
+| `UT`                                                                   | Time system            | Universe time, from the generator's epoch                                                                                                                                                                                                |
+| `DISPLAY TIME`                                                         | Time system            | A display's own universe time, stepped by the operator; not the ship's clock                                                                                                                                                             |
+| `CLOCK WINDOW LIMIT`                                                   | Status                 | The display time has reached the edge of the clock window, 1000 yr either side of the epoch                                                                                                                                              |
+| `DRIVE RANGE`                                                          | Setting                | The range a chart counts systems within. `RANGE` on the chart's curve labels, `PLANE` for its trace in the galactic plane, `SET` after every drawn value; `IN RANGE` / `OUT OF RANGE` (`OUT` in the system list) for a system's standing |
+| `STARS`                                                                | Filter                 | Which systems the chart shows and lists: `ALL`, `LIVING` or `REMNANTS`                                                                                                                                                                   |
+| `LIVING`                                                               | Filter                 | Systems whose brightest star has not yet died                                                                                                                                                                                            |
+| `REMNANTS`                                                             | Filter, map population | Systems whose brightest object is a white dwarf, neutron star or black hole; as the map's third population, the remnants of stars born above 8 M☉, which its legend states (`INIT MASS ABOVE 8 M☉`)                                      |
+| `OPEN SYSTEM`                                                          | Command                | Opens the `SYSTEM` display on the system selected on the `GALAXY` display, at the chart's time                                                                                                                                           |
+| `FOCUS BODY`                                                           | Command                | Centres the orbit map on the selected planet, in its `BODY` frame                                                                                                                                                                        |
+| `SYSTEM PLANE`                                                         | Reference plane        | The orbit map's reference plane: the primary host's planetary plane, or a close binary's orbit                                                                                                                                           |
+| `GALACTIC PLANE`                                                       | Reference plane        | The orbit map's plane before a system has planets                                                                                                                                                                                        |
+| `SYSTEM BARYCENTRIC`                                                   | Frame                  | A system's frame, centred on its barycentre, with galactic axes                                                                                                                                                                          |
+| `BODY`                                                                 | Frame                  | `BODY <designation>`: a focused body's frame, in which its moons and rings are drawn                                                                                                                                                     |
+| `INNER`                                                                | Preset                 | Orbit map zoom to the habitable zone's outer limit or the fifth body                                                                                                                                                                     |
+| `ALL`                                                                  | Preset                 | Orbit map zoom to the outermost planet                                                                                                                                                                                                   |
+| `BELTS`                                                                | Preset                 | Orbit map zoom to the outermost belt                                                                                                                                                                                                     |
+| `BODIES NOT TO SCALE`                                                  | Label                  | Body symbols are drawn larger than the bodies; distances are to scale                                                                                                                                                                    |
+| `RINGS`                                                                | Label                  | A planet's ring system                                                                                                                                                                                                                   |
+| `COMETARY HALO`                                                        | Label                  | A system's outer cloud of comets, drawn as a circle at its outer radius                                                                                                                                                                  |
+| `OPTIMISTIC`                                                           | Label                  | The optimistic habitable zone, recent Venus to early Mars (Kopparapu et al. 2013), beside `HABITABLE ZONE`, the conservative one: the orbit map's toggle and annulus label, and the host readout's row                                   |
+| `READINGS`                                                             | Region                 | The selected body's readout as a scrolling region, its position and total under it (`1-13 of 26`)                                                                                                                                        |
+| `NOT RESOLVED`                                                         | Data state             | A section the granted detail level withholds                                                                                                                                                                                             |
+| `NOT YET MODELLED`                                                     | Data state             | A quantity this generator version does not compute; never "none"                                                                                                                                                                         |
+| `NOT YET FORMED`                                                       | State                  | A system, star or planet not yet born at the time shown                                                                                                                                                                                  |
+| `CONTACT ONLY`, `MASS AND ORBIT ONLY`, `TO BULK`, `TO SURFACE`, `FULL` | Detail level           | What the granted detail level shows of a body                                                                                                                                                                                            |
+| `DETAIL`                                                               | Label                  | The granted detail level                                                                                                                                                                                                                 |
+| `ARCH`                                                                 | Label                  | A host's architecture class                                                                                                                                                                                                              |
+| `SINCE`                                                                | Label                  | When a body's state began (`DESTROYED`, `UNBOUND`)                                                                                                                                                                                       |
+| `PARENT`                                                               | Label                  | What a body orbits: a star, a pair, the barycentre or a planet                                                                                                                                                                           |
+| `PAIR /0 /1`                                                           | Designation            | A pair of stars, by their body indices                                                                                                                                                                                                   |
+| `COLLIDED`                                                             | Cause                  | The body collided with a heavier neighbour whose orbit its own crossed after a supernova, and merged into it                                                                                                                             |
+| `SMA`                                                                  | Abbreviation           | Semi-major axis                                                                                                                                                                                                                          |
+| `ECC`                                                                  | Abbreviation           | Eccentricity                                                                                                                                                                                                                             |
+| `INC`                                                                  | Abbreviation           | Inclination                                                                                                                                                                                                                              |
+| `T EQ`                                                                 | Abbreviation           | Equilibrium temperature                                                                                                                                                                                                                  |
+| `T EFF`                                                                | Abbreviation           | Effective temperature                                                                                                                                                                                                                    |
+| `LUM`                                                                  | Abbreviation           | Luminosity                                                                                                                                                                                                                               |
+| `KICK`                                                                 | Label                  | A remnant's natal kick speed                                                                                                                                                                                                             |
+| `NEBULA RADIUS`                                                        | Label                  | The radius of a star's planetary nebula                                                                                                                                                                                                  |
+| `M(V)`                                                                 | Abbreviation           | Absolute visual magnitude, in `mag`                                                                                                                                                                                                      |
+| `WD`                                                                   | Abbreviation           | White dwarf, in census lines (`ACCRETING WD PENDING`)                                                                                                                                                                                    |
+| `VEL`                                                                  | Abbreviation           | Velocity, with its `COREWARD`, `SPINWARD` and `NORTH` components                                                                                                                                                                         |
+| `ORIGIN`                                                               | Label                  | Where and how an object formed: a system's birth population and placement (`OLD THIN DISC · DISPLACED REMNANT`) or feature (`GC 47 TUC · FIELD`), or a moon's origin (`CAPTURED`)                                                        |
+| `FIELD`                                                                | Placement              | A system where its population places it                                                                                                                                                                                                  |
+| `RETAINED`                                                             | Placement              | A remnant that stayed with its population after its kick                                                                                                                                                                                 |
+| `DISPLACED REMNANT`                                                    | Placement              | A remnant whose kick carried it out of its population's volume                                                                                                                                                                           |
+| `RUNAWAY`                                                              | Placement              | A star ejected fast, by a supernova in its binary or an encounter                                                                                                                                                                        |
+| `WALKAWAY`                                                             | Placement              | A star ejected slowly, as a runaway is                                                                                                                                                                                                   |
+| `EXTINCTION`                                                           | Map quantity           | Dimming by dust, as the galaxy map's second raster quantity                                                                                                                                                                              |
+| `DUST OVERLAY`                                                         | Map overlay            | The column-density map dimmed by the extinction along each pixel                                                                                                                                                                         |
+| `A(V)`                                                                 | Abbreviation           | Extinction in the visual band, in `mag`                                                                                                                                                                                                  |
+| `A(K)`                                                                 | Abbreviation           | Extinction in the K band, in `mag`                                                                                                                                                                                                       |
+| `E(B-V)`                                                               | Abbreviation           | Colour excess, B band minus V band, in `mag`                                                                                                                                                                                             |
+| `N(H)`                                                                 | Abbreviation           | Hydrogen column density, in `/cm²`                                                                                                                                                                                                       |
+| `FEATURES`                                                             | Map overlay            | The galaxy map's globulars, centre and bright shells, each kind switchable                                                                                                                                                               |
+| `GC`                                                                   | Abbreviation           | Globular cluster                                                                                                                                                                                                                         |
+| `OC`                                                                   | Abbreviation           | Open cluster                                                                                                                                                                                                                             |
+| `OB`                                                                   | Abbreviation           | OB association                                                                                                                                                                                                                           |
+| `SFR`                                                                  | Abbreviation           | Star-forming region                                                                                                                                                                                                                      |
+| `MC`                                                                   | Abbreviation           | Molecular cloud                                                                                                                                                                                                                          |
+| `CENTRE`                                                               | Feature                | The galactic centre and its black hole                                                                                                                                                                                                   |
+| `SUPERBUBBLE`                                                          | Feature                | A cavity blown by many supernovae, drawn at its true radius                                                                                                                                                                              |
+| `STREAM`                                                               | Feature                | A tidal stream of stars stripped from a globular or a dwarf galaxy                                                                                                                                                                       |
+| `DWARF CORE`                                                           | Feature                | The surviving core of a dwarf galaxy                                                                                                                                                                                                     |
+| `H II`                                                                 | Abbreviation           | Emission class: ionised hydrogen region                                                                                                                                                                                                  |
+| `SNR`                                                                  | Abbreviation           | Emission class: supernova remnant shell                                                                                                                                                                                                  |
+| `PWN`                                                                  | Abbreviation           | Emission class: pulsar wind nebula                                                                                                                                                                                                       |
+| `REFLECTION`                                                           | Emission class         | Reflection nebula                                                                                                                                                                                                                        |
+| `DARK CLOUD`                                                           | Emission class         | Dark cloud                                                                                                                                                                                                                               |
+| `OBS`                                                                  | Abbreviation           | Observed: as the light arriving now shows it                                                                                                                                                                                             |
+| `LIGHT AGE`                                                            | Label                  | How long the light from a thing has travelled to the observer                                                                                                                                                                            |
+| `TRANSIENT`                                                            | Event kind             | A detected event, such as a nova, whose source may not yet be resolved                                                                                                                                                                   |
+| `NOW`                                                                  | Mode                   | A display showing present positions                                                                                                                                                                                                      |
+| `OBSERVED FROM`                                                        | Mode                   | A display showing what an observer's light shows, followed by the observer                                                                                                                                                               |
+| `AS OBSERVED`                                                          | State                  | A readout showing a system as its light shows it                                                                                                                                                                                         |
 
 ## Accessibility
 

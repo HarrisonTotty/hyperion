@@ -165,11 +165,24 @@ function toHost(system: SystemIdHex, designation: string, star: StarSummaryDto):
     luminosityLsun: star.luminosity_lsun,
     radiusRsun: star.radius_rsun,
     teffK: star.teff_k,
+    absoluteVMag: star.absolute_v_mag,
     remnant: star.remnant === null ? null : toRemnant(star.remnant),
     deathTime: star.death_time,
     rotationPeriodD: modelled(star.rotation_period_d, (period) => period),
     activityLogLxLbol: modelled(star.activity_log_lx_lbol, (activity) => activity),
     variability: modelled(star.variability, toVariability),
+    planetaryNebula: modelled(star.planetary_nebula, (nebula) => ({
+      radiusLy: nebula.radius_ly,
+      expansionSpeedKmS: nebula.expansion_speed_km_s,
+      ageYr: nebula.age_yr,
+    })),
+    activeEvents: pending(star.active_events, (events) =>
+      events.map((event) => ({
+        kind: event.kind,
+        onset: event.onset,
+        durationS: event.duration_s,
+      })),
+    ),
   };
 }
 

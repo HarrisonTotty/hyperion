@@ -22,11 +22,13 @@ use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::planetary::architecture::CLOSE_BINARY_CUTOFF_AU;
 use hyperion_sim::planetary::architecture::template::{
-    CountLaw, EccentricityLaw, Location, MassLaw, PeriodLaw, TEMPLATES,
+    CountLaw, EARLY_M_DWARF_FIRST_PERIOD_SCALE, EccentricityLaw, Location, MassLaw, PeriodLaw,
+    TEMPLATES,
 };
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{
     ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
+    early_m_dwarf_share,
 };
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
 use hyperion_sim::planetary::derive::{
@@ -59,7 +61,7 @@ use hyperion_sim::units::{
     AstronomicalUnits, Dex, EarthMasses, HeliumExcess, Kilograms, KilogramsPerCubicMetre,
     Megayears, Metres, Seconds, SolarMasses,
 };
-use hyperion_sim::{GENERATOR_VERSION, Seed};
+use hyperion_sim::{GENERATOR_VERSION, Seed, math};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 
@@ -261,16 +263,7 @@ fn write_template_group(
     group: &hyperion_sim::planetary::architecture::template::PlanetGroup,
 ) {
     w.f64(&format!("{name} presence"), group.presence());
-    let (least, most) = group.count().range();
-    w.line(&format!("{name} count {least}-{most}"));
-    if let CountLaw::ZeroTruncatedPoisson { .. } = group.count() {
-        for m in [0.1, 0.48, 1.0, 1.3] {
-            let host = SolarMasses::new(m);
-            let rate = group.count().poisson_rate(host).unwrap();
-            w.f64(&format!("{name} rate at {m}"), rate);
-            w.f64(&format!("{name} mean at {m}"), group.count().mean(host));
-        }
-    }
+    write_count(w, name, group.count());
     let masses = group.masses();
     w.f64(&format!("{name} mass min"), masses.min().value());
     w.f64(&format!("{name} mass max"), masses.max().value());
@@ -320,6 +313,19 @@ fn write_template_group(
     write_eccentricity(w, name, group.eccentricity());
     if let Some(hot) = group.hot_variant() {
         w.f64(&format!("{name} hot probability"), hot.probability());
+        write_count(w, &format!("{name} hot"), hot.count());
+        write_count(w, &format!("{name} hot early M"), hot.early_m_dwarf_count());
+        for m in [0.1, 0.32, 0.48, 0.65, 1.0] {
+            let host = SolarMasses::new(m);
+            w.f64(
+                &format!("{name} hot probability at {m}"),
+                hot.probability_about(host),
+            );
+            w.f64(
+                &format!("{name} first period break factor at {m}"),
+                math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, early_m_dwarf_share(host)),
+            );
+        }
         write_eccentricity(w, &format!("{name} hot"), hot.eccentricity());
     }
     w.line(&format!(
@@ -328,6 +334,19 @@ fn write_template_group(
         group.spacing(),
         group.origin()
     ));
+}
+
+fn write_count(w: &mut GoldenWriter, name: &str, law: CountLaw) {
+    let (least, most) = law.range();
+    w.line(&format!("{name} count {least}-{most}"));
+    if let CountLaw::ZeroTruncatedPoisson { .. } = law {
+        for m in [0.1, 0.48, 1.0, 1.3] {
+            let host = SolarMasses::new(m);
+            let rate = law.poisson_rate(host).unwrap();
+            w.f64(&format!("{name} rate at {m}"), rate);
+            w.f64(&format!("{name} mean at {m}"), law.mean(host));
+        }
+    }
 }
 
 fn write_eccentricity(w: &mut GoldenWriter, name: &str, law: EccentricityLaw) {

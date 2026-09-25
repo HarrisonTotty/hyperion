@@ -195,10 +195,13 @@ impl Galaxy {
     ///
     /// # Panics
     ///
-    /// Never, on the evidence of the seeds swept: a drawn galaxy's gas is built from its own
-    /// parameters, and over 2,000 seeds the neutral layer keeps at least 0.53 of the gas
-    /// (`tests/gas_statistics.rs`), where [`from_params`](Self::from_params) refuses a galaxy that
-    /// leaves it none (plan 07, ruling 22).
+    /// If the seed's warm ionised layer and molecular disc outweigh its gas disc, which
+    /// [`from_params`](Self::from_params) refuses (plan 07, ruling 22). No seed is known to: over
+    /// 2,000 seeds the neutral layer keeps at least 0.529 of the gas (`tests/gas_statistics.rs`),
+    /// and ruling 31's evaluation at the corners of the draws finds the refusal only where the
+    /// thin disc's length scatter is 4.7 standard deviations or more above its mean while every
+    /// draw feeding the gas sits at its worst end. That corner is reachable, so this is evidence
+    /// and not a proof; the corner proof and its figures are in `gas::params`'s tests.
     #[must_use]
     pub fn new(seed: Seed) -> Self {
         Self::with_mass_function(seed, MassFunctionKind::default())
@@ -209,11 +212,15 @@ impl Galaxy {
     ///
     /// # Panics
     ///
-    /// Never, on the evidence of the seeds swept, as [`new`](Self::new) says.
+    /// As [`new`](Self::new) says: if the seed's gas leaves the neutral layer nothing, which no
+    /// seed is known to do.
     #[must_use]
     pub fn with_mass_function(seed: Seed, kind: MassFunctionKind) -> Self {
-        Self::from_params(seed, GalaxyParams::from_seed(seed, kind))
-            .expect("a drawn galaxy keeps most of its gas neutral")
+        Self::from_params(seed, GalaxyParams::from_seed(seed, kind)).expect(
+            "a drawn galaxy keeps its gas neutral: at least 0.529 over 2,000 seeds, and none \
+                 only past a 4.7σ thin-disc length scatter with every gas draw at its worst end \
+                 (plan 07, ruling 31)",
+        )
     }
 
     /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03) and

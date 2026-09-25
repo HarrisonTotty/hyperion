@@ -657,7 +657,8 @@ mod tests {
     use super::super::IONISED_PARTICLES_PER_HYDROGEN;
     use super::*;
     use crate::galaxy::imf::MassFunctionKind;
-    use crate::galaxy::params::GasDiscParams;
+    use crate::galaxy::params::{GalaxyParamsBuilder, GasDiscParams};
+    use crate::units::{Dex, Years};
 
     /// Seeds of the sweeps: the same form plan 02's tests use, with this plan's own prefix.
     fn seeds(count: u64) -> impl Iterator<Item = Seed> {
@@ -833,5 +834,168 @@ mod tests {
         let worst = 300.0 / (IONISED_PARTICLES_PER_HYDROGEN * 1.2e-3);
         assert!(worst > 1e5, "the worst case is {worst} K");
         assert!(temperature(&GasParams::milky_way_like()) > 1.5e5);
+    }
+
+    /// The least neutral share of the gas over the corners of every draw that feeds it (plan 07,
+    /// ruling 31 of 2026-09-22): below zero, so the corners do not prove
+    /// [`Galaxy::new`](crate::galaxy::Galaxy::new) panic-free.
+    ///
+    /// The share is `1 − (W + M_c) ÷ G`, with `G` plan 02's gas mass, `M_c` the molecular disc's
+    /// drawn mass and `W` the warm ionised layer's mass. `W` is linear in the warm layer's drawn
+    /// density and height, and `ln W` is convex in the hole scale and in the inverse of the gas
+    /// disc's scale length (the log of an integral of exponentials linear in both, plus a linear
+    /// term), so over any box of those draws `W` is greatest at a corner. It is **not** monotone in
+    /// either length: at a short disc a larger hole lightens the layer and at a long one it weighs
+    /// it down, which is why both ends are evaluated rather than assumed. `G` is linear in the
+    /// stellar mass and the gas fraction, and the thin disc's part of the stellar mass falls as any
+    /// other population's share rises. The formation timescale, the bar's part of the bulge and the
+    /// mass function move the mean masses, and are evaluated at their ends; the thin disc's and the
+    /// bar's lengths are taken at their clamps, which their scatters reach at any mass.
+    ///
+    /// The least corner is Kroupa's mass function, 3 × 10¹⁰ M☉ of stars with every other
+    /// population at its largest share, a 5 Gyr formation timescale, the bar 40% of the bulge, a
+    /// gas fraction of 0.175, the thin disc at its 11,500 ly clamp with the gas disc twice as long,
+    /// the bar at its 18,000 ly clamp with a hole 1.2 times it, and the warm layer at 0.035 cm⁻³
+    /// and 3,500 ly with a 3 × 10⁶ M☉ molecular disc, which together weigh 1.059 times the gas. A
+    /// drawn galaxy reaches it only with the thin disc's length scatter at least
+    /// [`LEAST_FAILING_THIN_SCATTER`] above its mass's length, 4.7 times its 0.05 dex σ, while every
+    /// uniform draw above sits at its end; with no scatter the same corner keeps 0.32 of its gas
+    /// neutral, and over 2,000 drawn galaxies the least is 0.529 (`tests/gas_statistics.rs`).
+    /// Ruling 31's remedy, a clamp on the warm layer's density draw, moves generated output and is
+    /// the orchestrator's to make with a version bump.
+    const LEAST_CORNER_NEUTRAL_SHARE: f64 = -0.0586;
+
+    /// The least thin-disc length scatter, dex, at which a drawn galaxy at the corner of
+    /// [`LEAST_CORNER_NEUTRAL_SHARE`] leaves its neutral layer nothing.
+    const LEAST_FAILING_THIN_SCATTER: f64 = 0.236;
+
+    /// The neutral share `1 − (W + M_c) ÷ G` of `galaxy` with the warm layer at `warm` cm⁻³ and
+    /// `height` ly, the hole at `hole` times the bar and `molecular` M☉ of molecular gas, checked
+    /// against [`GasParams::of_galaxy`], which must refuse exactly where it is not positive.
+    fn corner_share(galaxy: &GalaxyParams, [hole, warm, height, molecular]: [f64; 4]) -> f64 {
+        let warm_mass = smooth::warm_mass(
+            warm,
+            galaxy.bar().half_length().value() * hole,
+            galaxy.gas_disc().length().value(),
+            height,
+        );
+        let share = 1.0 - (warm_mass + molecular) / galaxy.gas_disc().mass().value();
+        let mut drawn = MILKY_WAY_DRAWN;
+        drawn[..4].copy_from_slice(&[hole, warm, height, molecular]);
+        match GasParams::of_galaxy(galaxy, drawn) {
+            Ok(gas) => {
+                assert!(share > 0.0, "built at a share of {share}");
+                assert!((gas.neutral_fraction() - share).abs() < 1e-12);
+            }
+            Err(BuildGasParamsError::NoNeutralGas { .. }) => {
+                assert!(share <= 0.0, "refused at a share of {share}");
+            }
+        }
+        share
+    }
+
+    /// A galaxy with the least gas plan 02's draws allow: the least stellar mass and gas fraction,
+    /// and every population other than the thin disc at the top of its share.
+    fn least_gas(kind: MassFunctionKind, sfh: f64, bar_of_bulge: f64) -> GalaxyParamsBuilder {
+        GalaxyParamsBuilder::new()
+            .mass_function(kind)
+            .stellar_mass(SolarMasses::new(3e10))
+            .thick_share(0.14)
+            .bulge_bar_share(0.35)
+            .bar_share_of_bulge(bar_of_bulge)
+            .nuclear_disc_share(0.025)
+            .halo_share(0.014)
+            .sfh_timescale(Years::new(sfh))
+            .gas_mass_fraction(0.175)
+    }
+
+    /// Ruling 31: the neutral share at every corner of the draws that feed it, which is where its
+    /// minimum over the drawn ranges lies ([`LEAST_CORNER_NEUTRAL_SHARE`] gives the argument), and
+    /// the thin-disc scatter a drawn galaxy needs to reach the least corner.
+    #[test]
+    fn the_neutral_share_is_least_at_a_corner_of_the_draws() {
+        let ends = |lo: f64, hi: f64| [lo, hi];
+        let mut gas_corners = Vec::new();
+        for hole in ends(0.8, 1.2) {
+            for warm in ends(0.025, 0.035) {
+                for height in ends(2_500.0, 3_500.0) {
+                    for molecular in ends(2e6, 3e6) {
+                        gas_corners.push([hole, warm, height, molecular]);
+                    }
+                }
+            }
+        }
+        let (mut least, mut least_at) = (f64::INFINITY, String::new());
+        for kind in [MassFunctionKind::Kroupa, MassFunctionKind::Chabrier] {
+            for sfh in ends(5e9, 9e9) {
+                for bar_of_bulge in ends(0.30, 0.40) {
+                    for thin in ends(7_000.0, 11_500.0) {
+                        for ratio in ends(1.5, 2.0) {
+                            for bar in ends(10_000.0, 18_000.0) {
+                                let galaxy = least_gas(kind, sfh, bar_of_bulge)
+                                    .thin_length(LightYears::new(thin))
+                                    .gas_length_ratio(ratio)
+                                    .bar_half_length(LightYears::new(bar))
+                                    .build()
+                                    .expect("every value is inside plan 02's drawn ranges");
+                                for corner in &gas_corners {
+                                    let share = corner_share(&galaxy, *corner);
+                                    if share < least {
+                                        least = share;
+                                        least_at = format!(
+                                            "{kind:?}, {sfh:e} yr, {bar_of_bulge}, {thin} ly × \
+                                             {ratio}, {bar} ly, {corner:?}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            (least - LEAST_CORNER_NEUTRAL_SHARE).abs() < 5e-4,
+            "the least corner share is {least:.4} ({least_at}), not the documented \
+             {LEAST_CORNER_NEUTRAL_SHARE}: correct it and `Galaxy::new`'s message"
+        );
+        // The least corner as a drawn galaxy reaches it: its lengths coupled to their masses, the
+        // bar's scatter at 0.1 dex (which puts it at its clamp) and the thin disc's either side of
+        // the least that fails.
+        let worst = [1.2, 0.035, 3_500.0, 3e6];
+        let drawn = |scatter: f64| {
+            least_gas(MassFunctionKind::Kroupa, 5e9, 0.40)
+                .gas_length_ratio(2.0)
+                .thin_length_scatter(Dex::new(scatter))
+                .bar_length_scatter(Dex::new(0.1))
+                .build()
+                .expect("every value is inside plan 02's drawn ranges")
+        };
+        let below = corner_share(&drawn(LEAST_FAILING_THIN_SCATTER - 0.001), worst);
+        let above = corner_share(&drawn(LEAST_FAILING_THIN_SCATTER + 0.001), worst);
+        assert!(below > 0.0 && above < 0.0, "{below} and {above}");
+        assert!(corner_share(&drawn(0.0), worst) > 0.3);
+        // Why the corners suffice for the two radial scales: the warm layer's mass is log-convex in
+        // the hole scale and in the inverse radial scale, so on a line between two drawn ends it
+        // never rises above the chord. Checked on a grid over the drawn ranges.
+        let log_mass = |hole: f64, inverse: f64| {
+            math::ln(smooth::warm_mass(0.035, hole, 1.0 / inverse, 3_500.0))
+        };
+        let (holes, inverses) = ((8_000.0, 21_600.0), (1.0 / 23_000.0, 1.0 / 10_500.0));
+        let at = |(lo, hi): (f64, f64), t: f64| lo + t * (hi - lo);
+        for i in 0..=16_u32 {
+            for j in 0..=16_u32 {
+                let (s, t) = (f64::from(i) / 16.0, f64::from(j) / 16.0);
+                let (hole, inverse) = (at(holes, s), at(inverses, t));
+                let here = log_mass(hole, inverse);
+                let across =
+                    (1.0 - s) * log_mass(holes.0, inverse) + s * log_mass(holes.1, inverse);
+                let along = (1.0 - t) * log_mass(hole, inverses.0) + t * log_mass(hole, inverses.1);
+                assert!(
+                    here <= across + 1e-9 && here <= along + 1e-9,
+                    "not convex at {s}, {t}"
+                );
+            }
+        }
     }
 }

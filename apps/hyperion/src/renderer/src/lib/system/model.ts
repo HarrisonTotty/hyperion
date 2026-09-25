@@ -21,6 +21,7 @@ import type {
   ObjectKindDto,
   PhaseDto,
   PlanetClassDto,
+  StarEventKindDto,
   SystemIdHex,
   UniverseIdHex,
   UniverseTime,
@@ -91,6 +92,20 @@ export interface Variability {
   readonly amplitudeMag: number;
 }
 
+/** The planetary nebula a star lights. */
+export interface PlanetaryNebula {
+  readonly radiusLy: number;
+  readonly expansionSpeedKmS: number;
+  readonly ageYr: number;
+}
+
+/** An event in progress on a star at the answer's time. */
+export interface StarEvent {
+  readonly kind: StarEventKindDto;
+  readonly onset: UniverseTime;
+  readonly durationS: number;
+}
+
 /** One star of a system, as it is at the answer's time. */
 export interface HostBody {
   /** Its body ID as the wire writes it, the system's ID and its body index. */
@@ -112,6 +127,8 @@ export interface HostBody {
   readonly radiusRsun: number;
   /** `null` for an object with no light. */
   readonly teffK: number | null;
+  /** Its absolute visual magnitude `M_V`; `null` where the bolometric corrections have none. */
+  readonly absoluteVMag: number | null;
   /** `null` for a star still living. */
   readonly remnant: HostRemnant | null;
   /** When it dies, within the clock window; `null` when that is outside it. */
@@ -120,6 +137,9 @@ export interface HostBody {
   /** log₁₀ of the ratio of its X-ray to its bolometric luminosity. */
   readonly activityLogLxLbol: Modelled<number>;
   readonly variability: Modelled<Variability>;
+  readonly planetaryNebula: Modelled<PlanetaryNebula>;
+  /** Its events in progress, by onset; none is an empty list. */
+  readonly activeEvents: Pending<ReadonlyArray<StarEvent>>;
 }
 
 /**
