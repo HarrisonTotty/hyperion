@@ -102,8 +102,8 @@ pub fn render(fit: &KickRankFit) -> String {
         "/// The carbon–oxygen cores, M☉, over which a companion-stripped progenitor's chance of the\n\
          /// low kick mode falls from 1 to 0 (the brainstorm's \"Open questions\").\n\
          pub const LOW_RAMP: (f64, f64) = ({}, {});\n\n\
-         /// The factor on a black hole's ordinary kick: a HYPERION default (Mandel and Müller 2020\n\
-         /// have 0.5).\n\
+         /// The factor on a black hole's ordinary kick: HYPERION's calibration against Nagarajan\n\
+         /// and El-Badry 2025 and Atri et al. 2019 (Mandel and Müller 2020 have 0.5; ruling 96.4).\n\
          pub const BH_FACTOR: f64 = {};\n\n\
          /// The single star's electron-capture window, M☉ of the mass `m_c_bagb` reads (the\n\
          /// brainstorm's 0.1; ruling 45.1).\n\

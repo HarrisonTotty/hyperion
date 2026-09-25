@@ -22,7 +22,11 @@ use crate::id::{BodyId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::rng::{DomainTag, Mark, ObjectKey, Stream, Threshold, Thresholds, tags};
+use crate::stellar::Composition;
 use crate::stellar::draws::{ATTEMPT_WORDS, StarDraws};
+use crate::stellar::remnant::collapse::ElectronCaptureWindows;
+use crate::stellar::sse::ZCoeffs;
+use crate::stellar::system::draw_metallicity;
 use crate::units::consts::{GM_SUN, METRES_PER_AU};
 use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, SolarMasses};
 
@@ -89,11 +93,38 @@ const _: () = assert!(
 /// window only bounds a rejection loop, so a wider one costs nothing but a rare extra try.
 const WINDOW_MARGIN: f64 = 1e-6;
 
-/// The primary mass from which a star dies by core collapse and plan 06's companion-stripped
-/// mark applies: 8 M☉ (plan 11, Design note 1; plan 06's kick law).
-pub const STRIPPED_MARK_MIN_MASS: SolarMasses = SolarMasses::new(8.0);
+/// The primary mass from which plan 06's companion-stripped mark applies at `composition`:
+/// `m_cc(Z)` − 1 M☉, the lower end of the companion-stripped electron-capture window, from which
+/// the track reads the same mark (ruling 93.3 of 2026-09-22, after ruling 45.2; plan 11, Design
+/// note 1). It is 7.2 M☉ at Z = 0.02 and never below 5.72 M☉, the lowest `m_cc` of the fits
+/// ([`STRIPPED_MARK_FLOOR`]).
+///
+/// The track tests its window in the mass its early AGB's `m_c_bagb` reads, a little below the
+/// initial mass after the main sequence's winds (ruling 45.1); this compares the initial mass,
+/// so a primary within about 0.1 M☉ above the bound is marked here and dies as a white dwarf.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::stellar::Composition;
+/// use hyperion_sim::stellar::multiplicity::stripped_mark_min_mass;
+///
+/// let solar = stripped_mark_min_mass(&Composition::SOLAR);
+/// assert!((solar.value() - 7.203).abs() < 1e-3);
+/// ```
+#[must_use]
+pub fn stripped_mark_min_mass(composition: &Composition) -> SolarMasses {
+    ElectronCaptureWindows::new(&ZCoeffs::new(composition.z_fit()))
+        .companion_stripped()
+        .lower()
+}
 
-/// The provisional share of primaries of [`STRIPPED_MARK_MIN_MASS`] and up whose envelope a
+/// A bound below [`stripped_mark_min_mass`] at every metallicity, 5.7 M☉ (the fits' lowest `m_cc`,
+/// 6.72 M☉ near Z = 3 × 10⁻⁴, less 1 M☉ and a margin), below which no primary's mark is read and
+/// no root is found.
+const STRIPPED_MARK_FLOOR: SolarMasses = SolarMasses::new(5.7);
+
+/// The provisional share of primaries of [`stripped_mark_min_mass`] and up whose envelope a
 /// companion strips: 0.25, plan 06's provisional `KickLawParams::stripped_share` (its design note
 /// 11), the probability the mark `star.stripped` is read against.
 ///
@@ -454,7 +485,7 @@ impl SystemHierarchy {
 /// [`tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) at the record's
 /// epoch position; the context is `ctx`.
 ///
-/// For a primary of [`STRIPPED_MARK_MIN_MASS`] or more (except under
+/// For a primary of [`stripped_mark_min_mass`] or more (except under
 /// [`ForcedSingle`](MultiplicityContext::ForcedSingle)), plan 06's companion-stripped mark,
 /// [`StarDraws::stripped`] of the primary at attempt 0, is read against
 /// [`PROVISIONAL_STRIPPED_SHARE`] first (Design note 1). When it is set the system is multiple and
@@ -667,7 +698,8 @@ fn innermost(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -
         MultiplicityContext::ForcedSingle => return Innermost::Free,
         MultiplicityContext::Free | MultiplicityContext::ForcedMultiple { .. } => {}
     }
-    if record.primary_initial_mass() < STRIPPED_MARK_MIN_MASS {
+    let m1 = record.primary_initial_mass();
+    if m1 < STRIPPED_MARK_FLOOR || m1 < stripped_mark_min_mass(&draw_metallicity(galaxy, record)) {
         return Innermost::Free;
     }
     let primary = BodyId::new(record.id(), 0);

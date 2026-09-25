@@ -638,6 +638,12 @@ ly chart.
   0.18, 0.125, 0.08, 0.07, 0.08 (the mean of the research's two stripped mixes) and the black holes'
   first bin holds 0.78–0.88.
 
+- **The kick loop keeps attempt 0's companion-stripped mark** (ruling 93.2 of 2026-09-22). The
+  mark (`star.stripped`) changes the track in the wide electron-capture window (plan 06, design
+  note 11 as amended by ruling 93.1), so a later attempt reusing the one built track must not
+  redraw it: every attempt reads the mark of attempt 0, and redraws only `star.remnant.*` and
+  `star.kick.*`.
+
 **Files.** `galaxy/displaced/{binarity,kick_bins}.rs`. **Acceptance.** Tests pass.
 
 ### P08.T9 The class table

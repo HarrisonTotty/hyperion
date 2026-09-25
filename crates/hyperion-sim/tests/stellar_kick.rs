@@ -97,7 +97,7 @@ fn observables() -> KickObservables {
 
 /// Test 1: ordinary-mode neutron speeds against Disberg and Mandel's (2025) log-normal: the
 /// moments of ln v within 5.60 ± 0.12 and 0.68 ± 0.10, and K–S against the log-normal truncated
-/// at the rank clamp. The clamp holds the 0.1% of ranks below 0.001 at 0.001 and those above
+/// at 1,000 km/s as their fit is (ruling 96.2), Φ(z) ÷ Φ(b), and at the rank clamp. The clamp holds the 0.1% of ranks below 0.001 at 0.001 and those above
 /// 0.999 at 0.999, so the speeds' distribution function is the log-normal's own at every speed
 /// inside the clamp and at both of its ends, which is the function the K–S test reads there. It
 /// pins the rank table and the clamp. The sample is the reference population's
@@ -119,7 +119,10 @@ fn ordinary_neutron_star_speeds_follow_the_log_normal() {
     assert!((mean - 5.60).abs() <= 0.12, "mean ln v {mean}");
     assert!((sd - 0.68).abs() <= 0.10, "sd ln v {sd}");
     let mut speeds = o.reference_ln_speeds.clone();
-    let ks = ks_one_sample(&mut speeds, |x| normal_cdf((x - p.ln_mu) / p.ln_sigma));
+    let below = normal_cdf((math::ln(p.max_speed_km_s) - p.ln_mu) / p.ln_sigma);
+    let ks = ks_one_sample(&mut speeds, |x| {
+        (normal_cdf((x - p.ln_mu) / p.ln_sigma) / below).clamp(0.0, 1.0)
+    });
     eprintln!(
         "K-S against the log-normal: D = {:.5}, p = {:.4}",
         ks.statistic, ks.p_value
@@ -129,13 +132,27 @@ fn ordinary_neutron_star_speeds_follow_the_log_normal() {
 
 /// Test 2: isolated pulsars (every ordinary-mode neutron star, and the low-mode ones of single
 /// stars, the electron captures of the 0.1 M☉ window): 5 ± 2% under 50 km/s on the sky, averaged
-/// over isotropic viewing directions (Willcox et al. 2021). It pins the single-star window.
+/// over isotropic viewing directions (Willcox et al. 2021), and 7–13% under 100 km/s in three
+/// dimensions, between Disberg and Mandel's (2025) 7% and Igoshev's (2020) 13% for the same
+/// isolated pulsars (ruling 96.3). It pins the single-star window.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
-fn isolated_pulsars_are_rarely_slow_on_the_sky() {
-    let share = observables().isolated_slow_share;
-    eprintln!("isolated pulsars under 50 km/s on the sky: {share:.4}");
-    assert!((0.03..=0.07).contains(&share), "{share}");
+fn isolated_pulsars_are_rarely_slow() {
+    let o = observables();
+    let (sky, slow) = (o.isolated_slow_share, o.isolated_under_100_share);
+    eprintln!("isolated pulsars under 50 km/s on the sky: {sky:.4}; under 100 km/s: {slow:.4}");
+    assert!((0.03..=0.07).contains(&sky), "{sky}");
+    assert!((0.07..=0.13).contains(&slow), "{slow}");
+}
+
+/// The share of neutron stars that leave the disc, their kicks added to a 230 km/s circular speed
+/// against a 570 km/s escape speed: 12–20%, about a sixth (ruling 96.3; the research's 13–18%).
+#[test]
+#[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
+fn about_a_sixth_of_neutron_stars_leave_the_disc() {
+    let share = observables().escape_share;
+    eprintln!("neutron stars above the escape speed with the rotation: {share:.4}");
+    assert!((0.12..=0.20).contains(&share), "{share}");
 }
 
 /// Test 3: the low mode is 20 ± 10% of neutron stars (Igoshev et al. 2021). It pins the 2–3 M☉
@@ -149,18 +166,24 @@ fn the_low_mode_is_a_fifth_of_neutron_stars() {
 }
 
 /// Test 4: retention, judging low-mode neutron stars on a pair recoil of a third of their kick:
-/// at least a tenth under 50 km/s; the shares under 20 and 100 km/s are reported against the
-/// brainstorm's 8–12% and 18–26%. It pins the low mode's σ and the ramp.
+/// at least a tenth under 50 km/s, and 15–25% under 20 km/s (ruling 96.3: with σ = 5 km/s every
+/// low-mode star is retained there, so the share cannot fall below the low mode's); the share
+/// under 100 km/s is reported against the brainstorm's 18–26%. It pins the low mode's σ and the
+/// ramp.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn a_tenth_of_neutron_stars_is_retained_by_a_cluster() {
     let [under_20, under_50, under_100] = observables().retention;
     eprintln!("retained under 20 / 50 / 100 km/s: {under_20:.4} / {under_50:.4} / {under_100:.4}");
     assert!(under_50 >= 0.10, "{under_50}");
+    assert!((0.15..=0.25).contains(&under_20), "{under_20}");
 }
 
-/// Test 5: the toy double neutron stars (Hills 1983; Brandt and Podsiadlowski 1995): more than
-/// half of the pairs that survive have e < 0.3. It pins the ramp for companion-stripped stars.
+/// Test 5: the toy double neutron stars (Hills 1983; Brandt and Podsiadlowski 1995), whose
+/// exploding star is its carbon–oxygen core, Tauris et al.'s (2015, 2017) ultra-stripped
+/// progenitor (ruling 96.3): 50–90% of the pairs that survive have e < 0.3, about Grichener et
+/// al.'s (2026) 13 of 21 observed. The helium core's figure is reported. It pins the ramp for
+/// companion-stripped stars.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn most_double_neutron_stars_are_nearly_circular() {
@@ -171,11 +194,12 @@ fn most_double_neutron_stars_are_nearly_circular() {
         "toy double neutron stars: {survivors} of {pairs} survive, {share:.4} with e < 0.3; with \
          the helium core as the exploding mass, {helium_survivors} survive, {helium:.4} with e < 0.3"
     );
-    assert!(share > 0.5, "{share}");
+    assert!((0.5..=0.9).contains(&share), "{share}");
 }
 
-/// Test 6: black holes. At least half are unkicked; among those under 12 M☉, 50–70% unkicked and
-/// 12–26% above 100 km/s (Nagarajan and El-Badry 2025). It pins the black-hole factor of 0.75.
+/// Test 6: black holes. At least half are unkicked; among those under 12 M☉, 30–70% unkicked and
+/// 12–50% above 100 km/s, the 90% binomial ranges on Nagarajan and El-Badry's (2025) 5 and 4 of 11
+/// (ruling 96.3). It pins the black-hole factor of 0.75.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn most_black_holes_are_unkicked() {
@@ -187,8 +211,8 @@ fn most_black_holes_are_unkicked() {
         o.counts.1, o.black_holes_unkicked
     );
     assert!(o.black_holes_unkicked >= 0.5, "{}", o.black_holes_unkicked);
-    assert!((0.50..=0.70).contains(&light_unkicked), "{light_unkicked}");
-    assert!((0.12..=0.26).contains(&light_fast), "{light_fast}");
+    assert!((0.30..=0.70).contains(&light_unkicked), "{light_unkicked}");
+    assert!((0.12..=0.50).contains(&light_fast), "{light_fast}");
 }
 
 /// The electron-capture windows (design note 12, one of the four defaults): at Z = 0.02 the

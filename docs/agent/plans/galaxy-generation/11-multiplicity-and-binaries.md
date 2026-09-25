@@ -1387,7 +1387,8 @@ m₂)`, C = 2.8 "determined empirically", "holds for q_out ≤ 5"; their reducti
     **For the orchestrator to rule** whether it should.
   - **Design note 1 is built into `draw_hierarchy`**, so that P11.T2.c calls it unchanged:
     `draw_hierarchy(galaxy, record, MultiplicityContext::Free, RedrawAttempt::FIRST)`. For a
-    primary of 8 M☉ or more (`STRIPPED_MARK_MIN_MASS`) the mark `StarDraws::for_star(..)
+    primary of 8 M☉ or more (`STRIPPED_MARK_MIN_MASS`; since ruling 93.3,
+    `stripped_mark_min_mass(&Composition)`, m_cc(Z) − 1 M☉) the mark `StarDraws::for_star(..)
 .stripped()`, attempt 0 until plan 08's `mark_attempt`, is read against
     `PROVISIONAL_STRIPPED_SHARE` = 0.25. A set mark makes the system multiple with the primary's
     own orbit's periastron under `PROVISIONAL_INTERACTING_PERIASTRON` = 10 au; an unset one makes
@@ -1637,3 +1638,11 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   - The round's brief placed the star list "in the `SYSTEM` display". This task puts it in the
     `GALAXY` readout, and the `SYSTEM` display's body list already lists the hosts (P14.T43.a), so
     it was built here.
+- **Ruling 93.3, as built (round 9, `kick` follow-up).** The primary mass from which the
+  companion-stripped mark is read is `stripped_mark_min_mass(&Composition)`, m_cc(Z) − 1 M☉ at
+  the system's drawn metallicity (7.20 M☉ at Z = 0.02, never below 5.72), in place of 8 M☉, so
+  that plans 06 and 11 mark the same stars. It compares the initial mass, while the track tests
+  its window in the mass its early AGB's `m_c_bagb` reads, about 0.1 M☉ lower. `PERIOD_CORRECTION`
+  was fitted with the 8 M☉ floor at rows of 3.5, 7, 12 and 28 M☉; at solar metallicity the 7 M☉
+  row stays below the new 7.20 M☉ floor, so the table is not refitted now, and it is refitted
+  when P11.T1.d replaces the seam.

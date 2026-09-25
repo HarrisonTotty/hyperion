@@ -6,7 +6,7 @@ CoreCollapse { supernova: IIP }, None, NeutronStar
 co core = 0x40035c86cade4a5c  # 2.4201789712035815
 remnant mass = 0x3ff9dbb0637c9d44  # 1.616135014171804
 mode Ordinary
-speed m/s = 0x4112891d3c9cb64a  # 303687.3091915591
+speed m/s = 0x41120c4fb866920a  # 295699.9300787753
 direction x = 0x3feede27a279b680  # 0.9646185086582619
 direction y = 0x3fcf967fb8648e01  # 0.24678036216310775
 direction z = 0x3fb7c14c400ff1b0  # 0.09279324115772769
@@ -28,7 +28,7 @@ CoreCollapse { supernova: IIb }, None, BlackHole
 co core = 0x400e845de4aa1881  # 3.8146322121056646
 remnant mass = 0x4009acc8017a8fb9  # 3.20936585574415
 mode Ordinary
-speed m/s = 0x40f6f3637c15a40c  # 94006.21779407578
+speed m/s = 0x40f6b06d3e386aa6  # 92934.82769052181
 direction x = 0x3fa61a41f5525eb0  # 0.04316907996797903
 direction y = 0xbfca8aae57091935  # -0.20735720872671384
 direction z = 0x3fef462489a61b36  # 0.9773123444036631

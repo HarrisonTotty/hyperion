@@ -11,8 +11,9 @@
 //!   rank r = `F_x(x)` over the reference population ([`KickRankTable`], P06.T19.b), clamped to
 //!   0.001–0.999, is mapped onto the measured speeds of isolated pulsars younger than 10 Myr, the
 //!   log-normal of Disberg and Mandel (2025, ApJ Lett. 989, L8, table 1 and abstract: μ = 5.60 ± 0.12
-//!   and σ = 0.68 ± 0.10 in ln(km/s), three-dimensional speeds): v = exp(μ + σ Φ⁻¹(r)) km/s, 33 to
-//!   2,210 km/s. So the distribution is the measurement and only the ordering by progenitor is a
+//!   and σ = 0.68 ± 0.10 in ln(km/s), three-dimensional speeds), truncated at 1,000 km/s as their
+//!   eq. 5 is renormalised (ruling 96.2): v = exp(μ + σ Φ⁻¹(r Φ(b))) km/s with
+//!   b = (ln 1,000 − μ) ÷ σ, 32 to 990 km/s. So the distribution is the measurement and only the ordering by progenitor is a
 //!   model. The direction is isotropic.
 //! - **The low mode**, a Maxwellian of σ = 5 km/s, the model Valli et al. (2025, arXiv:2505.08857)
 //!   propose for the progenitors that stay bound to their companions (their fit gives
@@ -31,8 +32,13 @@
 //! The 2–3 M☉ ramp, the black-hole factor and the two electron-capture windows are the four
 //! defaults of the brainstorm's "Open questions" (the fifth, the fate of merged binaries, is plan
 //! 11's), each a field of [`KickLawParams`] and a constant of [`tables::kick_rank`], and each
-//! pinned by one of T19.d's tests. **The black-hole factor of 0.75 is a HYPERION default, not
-//! Mandel and Müller's**: their table 1 has `v_BH` ÷ `v_NS` = 200 ÷ 400 = 0.5, applied to the score.
+//! pinned by one of T19.d's tests. **The black-hole factor of 0.75 is HYPERION's calibration**
+//! (ruling 96.4), against the black holes' measured motions: Nagarajan and El-Badry (2025, §4.1)
+//! find 6 of 12 with evidence of a kick and 4 hotter than 90% of their local stars, kicks of
+//! ≳ 100 km/s, all minimum kicks from a sample whose selection favours weak ones; Atri et al.
+//! (2019, MNRAS 489, 3116) fit 16 black-hole X-ray binaries with a mean potential kick of
+//! 107 ± 16 km/s. It departs from Mandel and Müller's prescription (their table 1, `v_BH` ÷ `v_NS`
+//! = 200 ÷ 400 = 0.5, applied to the score), which would put fewer still above 100 km/s.
 //!
 //! A kick is drawn from the star's `star.kick.*` draws ([`KickDraws`]), so that plan 08's kick
 //! loop can redraw it from a later attempt's draws on the same track.
@@ -170,8 +176,9 @@ pub struct KickLawParams {
     /// The carbon–oxygen cores, M☉, over which a companion-stripped progenitor's chance of the
     /// low mode falls from 1 to 0: 2 to 3 ([`kick_rank::LOW_RAMP`]).
     pub low_ramp: (f64, f64),
-    /// The factor on a black hole's ordinary kick: 0.75 ([`kick_rank::BH_FACTOR`]), a HYPERION
-    /// default.
+    /// The factor on a black hole's ordinary kick: 0.75 ([`kick_rank::BH_FACTOR`]), HYPERION's
+    /// calibration against Nagarajan and El-Badry (2025) and Atri et al. (2019); Mandel and
+    /// Müller (2020) have 0.5 (ruling 96.4).
     pub bh_factor: f64,
     /// The single-star electron-capture window's width, M☉ of the mass `m_c_bagb` reads: 0.1
     /// ([`kick_rank::EC_WINDOW_SINGLE`]). The track reads its own copy,
@@ -184,8 +191,11 @@ pub struct KickLawParams {
     pub ec_window_stripped: f64,
     /// The white dwarfs' Maxwellian σ, km/s: 1, the brainstorm's "about 1 km/s".
     pub wd_sigma_km_s: f64,
-    /// The ranks the ordinary mode's rank is held to: 0.001–0.999 (P06.T19.a), 33–2,210 km/s.
+    /// The ranks the ordinary mode's rank is held to: 0.001–0.999 (P06.T19.a).
     pub rank_clamp: (f64, f64),
+    /// The ordinary mode's truncation, km/s: 1,000, where Disberg and Mandel's (2025, eq. 5)
+    /// fit is renormalised (ruling 96.2).
+    pub max_speed_km_s: f64,
     /// The provisional share of progenitors a companion strips (plan 06, design note 11): 0.25,
     /// which plan 11 replaces.
     pub stripped_share: f64,
@@ -204,6 +214,7 @@ impl Default for KickLawParams {
             ec_window_stripped: kick_rank::EC_WINDOW_STRIPPED,
             wd_sigma_km_s: 1.0,
             rank_clamp: (0.001, 0.999),
+            max_speed_km_s: 1_000.0,
             stripped_share: 0.25,
         }
     }
@@ -226,15 +237,18 @@ impl KickLawParams {
         ((hi - co_core.value()) / (hi - lo)).clamp(0.0, 1.0)
     }
 
-    /// The ordinary mode's speed, km/s, at the rank `rank`: exp(μ + σ Φ⁻¹(r)), with the rank
-    /// first held to [`KickLawParams::rank_clamp`].
+    /// The ordinary mode's speed, km/s, at the rank `rank`: the log-normal truncated at
+    /// [`max_speed_km_s`](KickLawParams::max_speed_km_s), exp(μ + σ Φ⁻¹(r Φ(b))) with
+    /// b = (ln `v_max` − μ) ÷ σ, the rank first held to [`KickLawParams::rank_clamp`].
     #[must_use]
     pub fn ordinary_speed_km_s(&self, rank: f64) -> f64 {
         let (lo, hi) = self.rank_clamp;
         let r = rank.clamp(lo, hi);
+        let b = (math::ln(self.max_speed_km_s) - self.ln_mu) / self.ln_sigma;
+        let below = 0.5 * math::erfc(-b * core::f64::consts::FRAC_1_SQRT_2);
         math::exp(math::mul_add(
             self.ln_sigma,
-            math::normal_quantile(r),
+            math::normal_quantile(r * below),
             self.ln_mu,
         ))
     }
@@ -728,10 +742,19 @@ mod tests {
                 .abs()
                 < 1e-15
         );
-        // The clamp spans 33–2,210 km/s.
-        assert!((p.ordinary_speed_km_s(0.0) - 33.1).abs() < 0.1);
-        assert!((p.ordinary_speed_km_s(1.0) - 2_210.0).abs() < 2.0);
-        assert!((p.ordinary_speed_km_s(0.5) - math::exp(5.6)).abs() < 1e-9);
+        // The clamp spans 32–990 km/s under the truncation at 1,000 km/s, whose median lies
+        // below the log-normal's 270 km/s.
+        assert!((p.ordinary_speed_km_s(0.0) - 32.5).abs() < 0.5);
+        let top = p.ordinary_speed_km_s(1.0);
+        // Rank 0.999 of the truncated law: 990 km/s.
+        assert!(top < 1_000.0 && top > 985.0, "{top}");
+        let median = p.ordinary_speed_km_s(0.5);
+        assert!(median < math::exp(5.6) && median > 255.0, "{median}");
+        let untruncated = KickLawParams {
+            max_speed_km_s: f64::INFINITY,
+            ..p
+        };
+        assert!((untruncated.ordinary_speed_km_s(0.5) - math::exp(5.6)).abs() < 1e-9);
     }
 
     #[test]
@@ -776,7 +799,9 @@ mod tests {
             &ns(1.4),
             &draws_with(0.0, 0, [1.0, 0.0, 0.0]),
         );
-        let expected = math::exp(5.6 + 0.68 * math::normal_quantile(0.25)) * 1e3;
+        // The log-normal truncated at 1,000 km/s: rank 0.25 of its mass below 1,000 km/s.
+        let below = 0.5 * math::erfc(-(math::ln(1_000.0) - 5.6) / 0.68 / 2_f64.sqrt());
+        let expected = math::exp(5.6 + 0.68 * math::normal_quantile(0.25 * below)) * 1e3;
         assert!((kick.speed().value() - expected).abs() < 1e-6 * expected);
         assert_eq!(kick.mode(), KickMode::Ordinary);
         assert_eq!(kick.direction(), UnitVector::X);

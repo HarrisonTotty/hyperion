@@ -473,10 +473,13 @@ generation?)` with its exhaustive `ErrorCode` switch `settledState` in `lib/useS
     This touches a few thousand long-dead halo and thick-disc systems. Flagged under Risks.
 11. **The companion-stripped mark is provisional.** The low kick mode belongs to electron capture,
     to accretion-induced collapse and to companion-stripped progenitors, but companions arrive in
-    plan 11. Until then each star of 8 M☉ or more draws `Stripping::Companion` with probability
-    `KickLawParams::stripped_share` (default 0.25, between the 20% and 33% mixes of the brainstorm's
-    scratch Monte Carlo) on its own stream. The mark widens the electron-capture window and selects
-    the low-mode ramp; it does not change the track. Plan 11 replaces the constant with the
+    plan 11. Until then each star of m_cc(Z) − 1 M☉ or more (ruling 45.2) draws
+    `Stripping::Companion` with probability `KickLawParams::stripped_share` (default 0.25, between
+    the 20% and 33% mixes of the brainstorm's scratch Monte Carlo) on its own stream. The mark
+    widens the electron-capture window and selects the low-mode ramp. It changes the track in the
+    wide window (ruling 93.1): a marked star in [m_cc − 1, m_cc) dies by electron capture, not as a
+    white dwarf, so the track reads `star.stripped`; its envelope is still a single star's. Plan
+    08's kick loop keeps attempt 0's mark, so no attempt rebuilds the track (ruling 93.2). Plan 11 replaces the constant with the
     quadrature over periods and mass ratios and draws its binaries conditional on the mark, so the
     mark's stream and meaning are reserved now.
 12. **Electron-capture windows are in initial mass** and end at the lowest initial mass that makes
@@ -3033,3 +3036,27 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
   sends `Phase::Substellar` with any kind but `ObjectKind::Substellar` as `PhaseDto::MainSequence`,
   since the star burns hydrogen; only brown dwarfs are sent as `PhaseDto::Substellar`. Tested at
   0.09, 0.0999, 0.05 and 0.1 M☉. No sim output or golden moves.
+- **Rulings 96 and 93.1–3, as built (round 9, `kick` follow-up).**
+  - _96.2._ `KickLawParams::max_speed_km_s` = 1,000: the ordinary map is the log-normal truncated
+    there, exp(μ + σ Φ⁻¹(r Φ(b))), b = (ln 1,000 − μ) ÷ σ, so the clamp spans 32–990 km/s and
+    the median rank gives 264 km/s. Test 1's K–S reads the truncated CDF.
+  - _96.3._ The tests are retargeted: isolated pulsars under 100 km/s in 7–13% (beside Willcox's
+    5 ± 2% on the sky, kept); retention under 20 km/s 15–25%; black holes under 12 M☉ 30–70%
+    unkicked and 12–50% above 100 km/s; the double-neutron-star toy's carbon–oxygen core, e < 0.3
+    in 50–90%; and a new test, the escape share with a 230 km/s rotation against 570 km/s, 12–20%
+    (`KickObservables::{isolated_under_100_share, escape_share}`, averaged exactly over isotropic
+    directions).
+  - _96.4._ The black-hole factor's documentation cites Nagarajan and El-Badry (2025) and Atri et
+    al. (2019), with Mandel and Müller's 0.5 as the prescription it departs from.
+  - _93.1–2_ are in design note 11 above and in plan 08's T8.
+  - _93.3._ Plan 11's `STRIPPED_MARK_MIN_MASS` is replaced by
+    `multiplicity::stripped_mark_min_mass(&Composition)`, the companion-stripped window's lower
+    end at the system's metallicity (7.20 M☉ at Z = 0.02), read at the system's
+    `draw_metallicity`, with a 5.7 M☉ floor below which no root is found.
+  - _Measured_ (seed `0x0619d00000000001`, 20,000 stars): reference ln v 5.561 ± 0.630 (K–S
+    p = 0.66); isolated pulsars 6.79% under 50 km/s on the sky and 8.65% under 100 km/s; low mode
+    19.1%; retention 19.1 / 19.6 / 24.2% under 20 / 50 / 100 km/s; 77.5% of 9,924 surviving
+    double neutron stars with e < 0.3 (7.5% with the helium core); black holes 71.0% unkicked,
+    and under 12 M☉ 67.1% unkicked and 14.4% above 100 km/s; 15.0% of neutron stars leave the
+    disc with the rotation. The 3D mean falls to 269 km/s. Only `stellar/kicks` moved: the two
+    ordinary speeds. No multiplicity golden moved, and the T32 search reproduces every pinned ID.

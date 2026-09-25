@@ -395,6 +395,13 @@ pub struct KickObservables {
     /// low-mode ones of progenitors no companion stripped (the electron captures of the single
     /// star's window).
     pub isolated_slow_share: f64,
+    /// Test 2 (ruling 96.3): the share of the same isolated pulsars whose three-dimensional speed
+    /// is under 100 km/s.
+    pub isolated_under_100_share: f64,
+    /// Ruling 96.3: the share of neutron stars that leave the disc, their kick added to the
+    /// circular speed [`ROTATION_KM_S`] from an isotropic direction and compared with the
+    /// escape speed [`ESCAPE_SPEED_KM_S`], averaged over the directions.
+    pub escape_share: f64,
     /// Test 3: the low mode's share of all neutron stars.
     pub low_mode_share: f64,
     /// Test 4: the share of neutron stars under 20, 50 and 100 km/s, judging the low-mode ones by
@@ -421,6 +428,13 @@ pub const RETENTION_SPEEDS_KM_S: [f64; 3] = [20.0, 50.0, 100.0];
 
 /// The sky-projected speed test 2 counts under, km/s (Willcox et al. 2021).
 pub const SLOW_TRANSVERSE_KM_S: f64 = 50.0;
+
+/// The circular speed near the Sun that a kick is added to, km/s: the brainstorm's 230.
+pub const ROTATION_KM_S: f64 = 230.0;
+
+/// The escape speed near the Sun, km/s: the brainstorm's 570 (Piffl et al. 2014 find 533 +54 −41,
+/// Deason et al. 2019 528, Monari et al. 2018 580 ± 63).
+pub const ESCAPE_SPEED_KM_S: f64 = 570.0;
 
 /// The toy binary's neutron star, M☉ (test 5).
 pub const TOY_NEUTRON_STAR: SolarMasses = SolarMasses::new(1.4);
@@ -457,6 +471,8 @@ pub fn kick_observables(
     let mut reference = Vec::new();
     let mut ordinary = Vec::new();
     let mut isolated = Tally::default();
+    let mut isolated_slow = Tally::default();
+    let mut escaping = Tally::default();
     let (mut neutron_stars, mut low) = (0_u64, 0_u64);
     let mut retained = [0_u64; 3];
     let (mut pairs, mut survivors, mut circular) = (0_u64, 0_u64, 0_u64);
@@ -481,7 +497,9 @@ pub fn kick_observables(
                 }
                 if kick.mode() == KickMode::Ordinary || (is_low && !stripped) {
                     isolated.add(slow_on_the_sky(v));
+                    isolated_slow.add(if v < 100.0 { 1.0 } else { 0.0 });
                 }
+                escaping.add(escapes(v));
                 let judged = if is_low { v / 3.0 } else { v };
                 for (count, limit) in retained.iter_mut().zip(RETENTION_SPEEDS_KM_S) {
                     *count += u64::from(judged < limit);
@@ -520,6 +538,8 @@ pub fn kick_observables(
         reference_ln_speeds: reference,
         ordinary_ln_moments: (om, os, count(ordinary.len())),
         isolated_slow_share: isolated.mean(),
+        isolated_under_100_share: isolated_slow.mean(),
+        escape_share: escaping.mean(),
         low_mode_share: share(low, neutron_stars),
         retention: retained.map(|r| share(r, neutron_stars)),
         double_neutron_stars: (share(circular, survivors), survivors, pairs),
@@ -557,6 +577,19 @@ enum ToyStar {
     UltraStripped,
     /// Its whole helium core: a star no companion stripped further.
     HeliumCore,
+}
+
+/// The chance that a kick of `v` km/s from an isotropic direction, added to the circular speed
+/// [`ROTATION_KM_S`], passes [`ESCAPE_SPEED_KM_S`]: |v + V|² = v² + V² + 2vV cos θ with cos θ
+/// uniform on [−1, 1].
+#[must_use]
+fn escapes(v: f64) -> f64 {
+    let (rot, esc) = (ROTATION_KM_S, ESCAPE_SPEED_KM_S);
+    if v <= 0.0 {
+        return if rot > esc { 1.0 } else { 0.0 };
+    }
+    let cos = (esc * esc - v * v - rot * rot) / (2.0 * v * rot);
+    (0.5 * (1.0 - cos)).clamp(0.0, 1.0)
 }
 
 /// The eccentricity of test 5's toy binary after the supernova of `sampled`, whose exploding star

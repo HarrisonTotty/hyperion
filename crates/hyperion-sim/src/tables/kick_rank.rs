@@ -280,8 +280,8 @@ pub const SCORE_QUANTILES: [f64; 257] = [
 /// low kick mode falls from 1 to 0 (the brainstorm's "Open questions").
 pub const LOW_RAMP: (f64, f64) = (2.0, 3.0);
 
-/// The factor on a black hole's ordinary kick: a HYPERION default (Mandel and Müller 2020
-/// have 0.5).
+/// The factor on a black hole's ordinary kick: HYPERION's calibration against Nagarajan
+/// and El-Badry 2025 and Atri et al. 2019 (Mandel and Müller 2020 have 0.5; ruling 96.4).
 pub const BH_FACTOR: f64 = 0.75;
 
 /// The single star's electron-capture window, M☉ of the mass `m_c_bagb` reads (the
