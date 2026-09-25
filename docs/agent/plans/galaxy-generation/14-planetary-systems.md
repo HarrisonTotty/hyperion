@@ -3985,6 +3985,13 @@ masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (
     readout is not one of the guide's "lists, logs and procedures"; it is read here as a list of
     readings, and the position counts readings. (Ruled by the owner on 2026-09-25: the guide's
     scrolling rule now names readouts, "which are lists of readings".)
+  - _Layout at 1280 × 720, amended (`ui10`, round 9)._ The readings' region is a container, and
+    under 30 rem it sets one reading to a line, as the `GALAXY` readout does, so the body readout
+    no longer scrolls sideways at 1280 × 720 (it did by 9 px with two readings to a line). The
+    display time's title and its time share the first line, the controls under them, so the panel
+    is 112 px rather than 138 and the orbit map's stage 180 px rather than 154 at 1280 × 720 (634
+    at 1920 × 1080). The map's own head, frame line and legend still wrap at its 787 px there. The
+    measurements above predate both changes.
   - _The optimistic habitable zone (ruling 65.4)._ The wire already carries it:
     `HabitableZoneDto.recent_venus_m` and `early_mars_m`, the same Kopparapu et al. (2013, erratum
     coefficients) fit and the same server call as the conservative pair, so the client computes

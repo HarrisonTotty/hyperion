@@ -109,7 +109,8 @@ pub enum PhaseDto {
     BlackHole,
     /// Nothing: the star was destroyed and left no remnant (type 15).
     NoRemnant,
-    /// An object below 0.1 M☉ on the cooling fits: the latest M dwarfs and the brown dwarfs.
+    /// A brown dwarf, below the hydrogen-burning limit, on the cooling fits. A star above the limit
+    /// on the same fits, one of the latest M dwarfs, burns hydrogen and is sent as `MainSequence`.
     Substellar,
 }
 

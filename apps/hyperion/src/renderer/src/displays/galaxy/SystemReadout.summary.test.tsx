@@ -165,7 +165,7 @@ describe("the GALAXY readout's stars", () => {
     expect(valuesOf("RADIUS")[0]?.startsWith("26,000")).toBe(true);
     expect(valuesOf("RADIUS")[1]).toBe("1.00 R");
     expect(valueOf("T EFF")).toBe("5772 K");
-    expect(valueOf("M V")).toBe("+4.83 mag");
+    expect(valueOf("M(V)")).toBe("+4.83 mag");
     expect(valueOf("[Fe/H]")).toBe("-0.13 dex");
     expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
   });
@@ -173,7 +173,7 @@ describe("the GALAXY readout's stars", () => {
   it("reads what this generator version does not model as the em dash, never a zero", async () => {
     await selectAnswered(aSingleStarSummary(aSunlikeStar()));
 
-    for (const label of ["ROTATION", "VARIABILITY", "NEBULA", "EVENTS"]) {
+    for (const label of ["ROTATION", "VARIABILITY", "NEBULA RADIUS", "EVENTS"]) {
       expect(valueOf(label)).toBe("—");
     }
     expect(valuesOf("DIES IN")).toEqual([]);
@@ -196,7 +196,7 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("KIND")).toBe("WHITE DWARF");
     expect(valueOf("REMNANT")).toBe("WHITE DWARF");
     expect(valueOf("COOLING AGE")).toBe("3.95 Gyr");
-    expect(valueOf("M V")).toBe("—");
+    expect(valueOf("M(V)")).toBe("—");
     expect(valueOf("KICK")).toBe("—");
   });
 
@@ -235,7 +235,7 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("KIND")).toBe("NO REMNANT");
     expect(valueOf("REMNANT")).toBe("NONE");
     expect(valueOf("MASS")).toBe("—");
-    for (const label of ["LUM", "T EFF", "M V", "ROTATION", "EVENTS"]) {
+    for (const label of ["LUM", "T EFF", "M(V)", "ROTATION", "EVENTS"]) {
       expect(valuesOf(label)).toEqual([]);
     }
     const stars = within(readout()).getByRole("table", { name: "STARS" });

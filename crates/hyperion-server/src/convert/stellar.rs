@@ -122,7 +122,7 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
     StarSummaryDto {
         body_index: star.body().body_index(),
         kind: object_kind(star.kind()),
-        phase: phase(state.phase()),
+        phase: phase(state.phase(), star.kind()),
         class: star.classification().to_string(),
         initial_mass_msun: model.initial_mass().value(),
         mass_msun: state.mass().value(),
@@ -275,10 +275,20 @@ fn object_kind(kind: ObjectKind) -> ObjectKindDto {
     }
 }
 
-/// A star's phase, as the wire says it.
+/// A star's phase, as the wire says it, from its phase in the sim and what kind of object it is.
+///
+/// The sim's [`Phase::Substellar`] is the track of P06.T13's cooling fits, which hold every object
+/// of initial mass below 0.1 M☉, where Hurley, Pols and Tout's formulae stop (ruling 33 of
+/// 2026-09-22): the brown dwarfs, and above the hydrogen-burning limit
+/// ([`hyperion_sim::stellar::substellar::hydrogen_burning_limit`], 0.065–0.083 M☉ with
+/// metallicity) the latest M dwarfs, which burn hydrogen in their cores for longer than the
+/// universe's age. The sim's [`ObjectKind`] already tells the two apart, so the wire follows it:
+/// an object on the cooling fits that is substellar is sent as [`PhaseDto::Substellar`], and one
+/// above the limit, a dwarf, as [`PhaseDto::MainSequence`], the phase its hydrogen burning is.
 #[must_use]
-fn phase(phase: Phase) -> PhaseDto {
+fn phase(phase: Phase, kind: ObjectKind) -> PhaseDto {
     match phase {
+        Phase::Substellar if kind != ObjectKind::Substellar => PhaseDto::MainSequence,
         Phase::Protostar => PhaseDto::Protostar,
         Phase::PreMainSequence => PhaseDto::PreMainSequence,
         Phase::MainSequence => PhaseDto::MainSequence,
@@ -421,6 +431,24 @@ mod tests {
                 })
             })
         ));
+    }
+
+    /// An object on the cooling fits reads as its hydrogen burning makes it: a star above the
+    /// hydrogen-burning limit, a dwarf, is on the main sequence, and a brown dwarf below it is
+    /// substellar.
+    #[test]
+    fn a_hydrogen_burning_star_on_the_cooling_fits_is_on_the_main_sequence() {
+        for mass in [0.09, 0.0999] {
+            let star = &answer(&system(mass, 5.0e9), 0).stars[0];
+            assert_eq!(star.kind, ObjectKindDto::Dwarf, "{mass} M☉");
+            assert_eq!(star.phase, PhaseDto::MainSequence, "{mass} M☉");
+        }
+        let brown = &answer(&system(0.05, 5.0e9), 0).stars[0];
+        assert_eq!(brown.kind, ObjectKindDto::Substellar);
+        assert_eq!(brown.phase, PhaseDto::Substellar);
+        // The track's own ends: from 0.1 M☉ the backbone's main sequence, unchanged.
+        let backbone = &answer(&system(0.1, 5.0e9), 0).stars[0];
+        assert_eq!(backbone.phase, PhaseDto::MainSequence);
     }
 
     /// What this generator version does not compute is absent from the wire, not `null`; what it

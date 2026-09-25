@@ -203,7 +203,7 @@ export interface PrimaryReadingsProps {
  * The same readings the `SYSTEM` display's host readout gives, in the same words and units: its
  * kind, phase and class in words; its luminosity in `L☉` and radius in `R☉`, or in `km` for a
  * neutron star or a black hole (ruling 36); its effective temperature in `K` and its absolute visual
- * magnitude, `M V`, in `mag`; what this generator version does not model yet (rotation, variability,
+ * magnitude, `M(V)`, in `mag`; what this generator version does not model yet (rotation, variability,
  * the nebula, the events in progress, a pulsar's and a black hole's spin, kicks) is the guide's em
  * dash, and what is modelled as none reads `NONE`; an object with no light has the em dash with the
  * reason, `NO LIGHT`. Dead, it reads what it left and what is known of it; a star that left no
@@ -247,7 +247,7 @@ export function PrimaryReadings({ host, at, stale }: PrimaryReadingsProps) {
             stale={stale}
           />
           <Reading
-            label="M V"
+            label="M(V)"
             reading={
               host.absoluteVMag === null
                 ? MISSING
@@ -281,7 +281,7 @@ export function PrimaryReadings({ host, at, stale }: PrimaryReadingsProps) {
             stale={stale}
           />
           <Reading
-            label="NEBULA"
+            label="NEBULA RADIUS"
             reading={modelled(host.planetaryNebula, (nebula) =>
               shown(formatSignificant(nebula.radiusLy), "ly"),
             )}

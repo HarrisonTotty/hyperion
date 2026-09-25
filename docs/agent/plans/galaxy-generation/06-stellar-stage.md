@@ -2931,11 +2931,13 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
   - _Rows._ `SystemReadout` gains `MASS` (the primary's mass now) beside `INIT MASS`, and `[Fe/H]`
     in `dex` after `POPULATION`; both are the em dash until the answer, so no row moves. A `STAR A`
     heading follows with `PrimaryReadings`: `KIND`, `PHASE`, `CLASS`, `DIES IN 312 yr` (or
-    `DIED 312 yr AGO`, counted from the answer's time), `LUM`, `RADIUS`, `T EFF`, `M V` in `mag`,
-    `REMNANT` and its rows, `ROTATION`, `VARIABILITY`, `NEBULA` and `EVENTS`. These are the words,
+    `DIED 312 yr AGO`, counted from the answer's time), `LUM`, `RADIUS`, `T EFF`, `M(V)` in `mag`,
+    `REMNANT` and its rows, `ROTATION`, `VARIABILITY`, `NEBULA RADIUS` and `EVENTS`. These are the words,
     units, `NO LIGHT` and em dashes of the `SYSTEM` host readout, with km radii for neutron stars
     and black holes (ruling 36). Then plan 11's star list. An unborn system reads
-    `STARS NOT YET FORMED`.
+    `STARS NOT YET FORMED`. The system's galactic `RADIUS`, `ANGLE` and `HEIGHT` stand under a
+    `GALACTIC` heading, set as `STAR A` is, after `[Fe/H]` and before `STAR A`, as the guide groups
+    them (`ui10`, round 9).
   - _Tests._ `SystemReadout.summary.test.tsx`, through `App`, covers every remnant kind. That
     includes `no_remnant`, whose light and size rows are left out and whose mass is the em dash.
   - _Model._ `HostBody` gains `absoluteVMag`, `planetaryNebula: Modelled` and
@@ -2947,10 +2949,12 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
   - _Layout._ The readings scroll in their own tabbable region with their position, and each
     reading and each star-list table counts one (ruling 70.6). A container query sets one reading
     to a line in a column under 30 rem, so nothing scrolls sideways. The list and the readout share
-    the panel equally. At 1280 × 720 that is two list rows and seven readings. Before, the readout
-    overlapped the list there, which was an existing fault.
-  - **For the owner:** `STAR A`, `M V`, `mag`, `DIES IN`, `DIED … AGO`, `NEBULA` (it reads the
-    nebula's radius) and `EVENTS` join the draft nomenclature. `RADIUS` now names the galactic
+    the panel equally, but the list's scrolling region never falls below four rows (8 rem), and the
+    panel's gaps are 0.25 rem. At 1280 × 720 that is four list rows and five readings, where the
+    equal share alone left two rows (`ui10`, round 9). Before `ui9`, the readout overlapped the list
+    there, which was an existing fault.
+  - **For the owner:** `STAR A`, `M(V)` (the guide's absolute visual magnitude), `mag`, `DIES IN`,
+    `DIED … AGO`, `NEBULA RADIUS` and `EVENTS` join the draft nomenclature. `RADIUS` now names the galactic
     coordinate and, under `STAR A`, the star's radius in one readout.
 - **Deviations in T19.a–d, as built (round 9, `kick`).** T19.e is left as the plan has it: plan
   15's P15.T5.a replaces `tables/kick_rank.rs`, with the bump. No existing golden moved; the new
@@ -3020,3 +3024,12 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     - Against the older fits: the 3D mean is 294 km/s (Hobbs et al. 2005: 400 ± 40), the 1D rms
       233 km/s (265), and the share under 100 km/s 24% (Verbunt et al. 2017, 16%; Igoshev 2020,
       13%), with the low mode in it.
+- **P06.T34, amended (round 9, `ui10`).** The phase sent is read from the phase and the kind
+  together, so `PhaseDto` is no longer one value per `Phase`. Ruling 33 puts every object of initial
+  mass below 0.1 M☉ on the cooling fits, whose phase is `Phase::Substellar` on both sides of the
+  hydrogen-burning limit (`substellar::hydrogen_burning_limit`, 0.065–0.083 M☉, rising as
+  metallicity falls), while `object_kind` already calls the objects above the limit dwarfs. So a
+  0.1 M☉ M6V star read `PHASE SUBSTELLAR` beside `KIND DWARF`. `convert/stellar.rs`'s `phase` now
+  sends `Phase::Substellar` with any kind but `ObjectKind::Substellar` as `PhaseDto::MainSequence`,
+  since the star burns hydrogen; only brown dwarfs are sent as `PhaseDto::Substellar`. Tested at
+  0.09, 0.0999, 0.05 and 0.1 M☉. No sim output or golden moves.

@@ -100,6 +100,17 @@ describe("SystemReadout", () => {
     expect(valueOf(readout, "HEIGHT")).toBe("+12.0 ly");
   });
 
+  it("groups the galactic radius, angle and height under the heading GALACTIC", () => {
+    const readout = renderReadout(aSystem([4, 0, 12]));
+
+    // The guide's § Voice: "A readout groups the three under the heading `GALACTIC`."
+    const heading = within(readout).getByRole("heading", { name: "GALACTIC" });
+    const group = heading.nextElementSibling;
+    expect(group?.tagName).toBe("DL");
+    const terms = [...(group?.querySelectorAll("dt") ?? [])].map((term) => term.textContent);
+    expect(terms).toEqual(["RADIUS", "ANGLE", "HEIGHT"]);
+  });
+
   it("says in words whether the system is within the drive range", () => {
     const readout = renderReadout(aSystem([60, 0, 0], { radiusLy: 80 }), { driveRangeLy: 50 });
 

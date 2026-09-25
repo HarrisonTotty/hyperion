@@ -27,7 +27,9 @@ import { populationLabel } from "../../lib/galaxy/wire";
 export const GROUP_LABELS: Readonly<Record<string, string>> = {
   identity: "IDENTITY",
   mass: "MASS",
-  populations: "POPULATION SHARES",
+  // `population.<p>.share` is each population's share of the systems (`population_share` in plan
+  // 02), not of the stellar mass, which `POPULATION MASSES` gives.
+  populations: "SHARE OF SYSTEMS",
   population_masses: "POPULATION MASSES",
   population_mean_masses: "MEAN SYSTEM MASSES",
   discs: "DISCS",
@@ -52,18 +54,19 @@ const POPULATIONS = [
 
 /**
  * Each population's three parameters, labelled with the population's name as the chart names it:
- * the group heading says which quantity the row is.
+ * the group heading says which quantity the row is. In P04.T14.b's order, a group to a quantity:
+ * every share, then every mass, then every mean system mass.
  */
 const POPULATION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
-  POPULATIONS.flatMap((population) =>
-    ["share", "mass", "mean_system_mass"].map((quantity) => [
+  ["share", "mass", "mean_system_mass"].flatMap((quantity) =>
+    POPULATIONS.map((population) => [
       `population.${population}.${quantity}`,
       populationLabel(population),
     ]),
   ),
 );
 
-/** Labels of the parameters, keyed by the parameter's dotted key. */
+/** Labels of the parameters, keyed by the parameter's dotted key, in P04.T14.b's table's order. */
 export const PARAMETER_LABELS: Readonly<Record<string, string>> = {
   seed: "SEED",
   generator_version: "GEN VER",

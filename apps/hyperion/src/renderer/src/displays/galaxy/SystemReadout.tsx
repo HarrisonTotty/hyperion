@@ -65,7 +65,8 @@ export interface SystemReadoutProps {
  * along the named directions at the chart centre; `NORTH` is the offset from the reference plane,
  * the only non-visual source of the chart's fill cue, and the legend's `FILLED NORTH OF PLANE`
  * names the same direction. `RADIUS`, `ANGLE` and `HEIGHT` are the system's own place in the
- * `GALACTIC` frame, whose coordinates the guide names in those words; the angle is missing on the
+ * `GALACTIC` frame, whose coordinates the guide names in those words, and stand under that
+ * heading, as the guide groups them, after the system's own readings; the angle is missing on the
  * galactic axis, where it is undefined. The age is the age at the chart time, which is given beside
  * it, since a query at another time gives another age. Whether the system is within the drive
  * range is in words, never colour alone. With nothing selected every value is an em dash.
@@ -159,20 +160,6 @@ export function SystemReadout({
               unit="ly"
             />
             <Reading
-              label="RADIUS"
-              value={galactic === null ? null : formatLengthLy(galactic.radiusLy, 1)}
-              unit="ly"
-            />
-            <Reading
-              label="ANGLE"
-              value={galactic === null || onAxis ? null : formatBearingDeg(galactic.angleDeg, 1)}
-            />
-            <Reading
-              label="HEIGHT"
-              value={system === null ? null : formatSigned(system.positionLy.z, 1)}
-              unit="ly"
-            />
-            <Reading
               label="INIT MASS"
               value={system === null ? null : formatMassMsun(system.initialMassMsun)}
               unit={<SolarMassUnit />}
@@ -204,6 +191,24 @@ export function SystemReadout({
             {stars === null || formed !== null ? null : (
               <Reading label="STARS" value="NOT YET FORMED" wide stale={starsStale} />
             )}
+          </dl>
+          {/* The guide's § Voice: a readout groups the three under the heading `GALACTIC`. */}
+          <h3 className="system-readout__heading">GALACTIC</h3>
+          <dl className="readout system-readout__values">
+            <Reading
+              label="RADIUS"
+              value={galactic === null ? null : formatLengthLy(galactic.radiusLy, 1)}
+              unit="ly"
+            />
+            <Reading
+              label="ANGLE"
+              value={galactic === null || onAxis ? null : formatBearingDeg(galactic.angleDeg, 1)}
+            />
+            <Reading
+              label="HEIGHT"
+              value={system === null ? null : formatSigned(system.positionLy.z, 1)}
+              unit="ly"
+            />
           </dl>
           {primary === null || formed === null ? null : (
             <>

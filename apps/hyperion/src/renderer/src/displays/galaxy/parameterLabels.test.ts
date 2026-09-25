@@ -20,11 +20,16 @@ describe("the parameter glossary", () => {
     expect(Object.hasOwn(PARAMETER_LABELS, key)).toBe(true);
   });
 
-  it("names nothing that P04.T14.b does not send", () => {
-    expect(Object.keys(PARAMETER_LABELS).toSorted()).toEqual(sentKeys.toSorted());
-    expect(Object.keys(GROUP_LABELS).toSorted()).toEqual(
-      groups.map((group) => group.key).toSorted(),
-    );
+  // In order, not as sets: the fixture copies P04.T14.b's table, group by group and key by key,
+  // so a key the glossary moves within its group, or a group moved, is caught (val07, round 9).
+  it("names nothing that P04.T14.b does not send, in its table's order", () => {
+    expect(Object.keys(PARAMETER_LABELS)).toEqual(sentKeys);
+    expect(Object.keys(GROUP_LABELS)).toEqual(groups.map((group) => group.key));
+  });
+
+  it("says the populations' shares are shares of the systems", () => {
+    expect(groupLabel("populations")).toBe("SHARE OF SYSTEMS");
+    expect(parameterLabel("population.thick_disc.share")).toBe("THICK DISC");
   });
 
   it("sends each key once", () => {

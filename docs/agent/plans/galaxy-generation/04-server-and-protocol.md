@@ -1546,6 +1546,10 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     `rotation.escape_speed` is still the untruncated √(−2Φ): 622.9 km/s for the golden's seed,
     against 500–580. Ruling 11 asks for the halo truncated at r₂₀₀, which is plan 02's potential and
     moves `galaxy_parameters.golden`.
+  - _Fixed later (`ui10`, round 9)._ `parameterLabels.test.ts` compares the glossary's keys and
+    groups with the fixture's in the table's order, and the glossary's population labels follow it
+    (every share, then every mass, then every mean system mass). The `populations` group reads
+    `SHARE OF SYSTEMS`. `rotation.escape_speed` is still open.
   - Also fixed: T12 gains a query-level test (`range_query` through the handle equals `NoCache`,
     cold and warm, and under a 1 KiB budget), since the reason recorded for testing walks only no
     longer holds. The test that a map every waiter gave up on frees its key now queues its bands
