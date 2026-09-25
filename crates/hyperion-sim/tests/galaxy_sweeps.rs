@@ -282,15 +282,38 @@ fn the_fields_over_a_thousand_seeds() {
 ///   and at least 55% in 210–270.
 /// - `v_c(1 kpc)` ÷ `v_c(8 kpc)` had a median of 0.785 (1–99%: 0.66–0.93), against the plan's
 ///   0.85–0.97, which is the brainstorm's research model (202 ÷ 230 = 0.88) and not a
-///   measurement: the dynamical models' 161–191 km/s at 1 kpc over Eilers et al.'s 229 give the
-///   Milky Way 0.70–0.83 (R23). The bracket was the research model's, not the draws' fault, and
-///   was checked at 0.75–0.97.
+///   measurement: dynamical models give the Milky Way 0.75–0.86 (McMillan 2017; Portail et al.
+///   2017; ruling 82 of 2026-09-22; R23's 0.70–0.83 had no published floor). The bracket was the
+///   research model's, not the draws' fault, and was checked at 0.75–0.97.
 ///
 /// Since the thin discs' hole (P02.T12.b), which moves each seed's thin disc outwards at a fixed
 /// mass, `v_c(8 kpc)` has a median of 221.7 km/s with 2,352 seeds (59%) in 210–270, the slope's
 /// median is −0.85 km/s per kpc, `v_c(1 kpc)` reaches 209 km/s at the 99th percentile, and the
-/// ratio's median is 0.717 (1–99%: 0.59–0.88). That is inside the Milky Way's measured 0.70–0.83,
-/// whose floor the ratio is now checked from (P02.T12.a).
+/// ratio's median is 0.717 (1–99%: 0.59–0.88).
+///
+/// Ruling 82 of 2026-09-22 reads the ratio twice. The Milky Way sits at the top of the drawn
+/// bulge-and-bar share: Portail et al.'s (2017, MNRAS 465, 1621, Table 2) 1.88 × 10¹⁰ M☉ of stars
+/// in the bar and bulge over Bland-Hawthorn and Gerhard's (2016, ARA&A 54, 529, §6.4.4) 5 ± 1 ×
+/// 10¹⁰ is 0.38 (0.29–0.50), where Milky-Way-mass spirals hold about 0.28 (Weinzirl et al. 2009,
+/// ApJ 696, 411, §5.2: 18.9% in bulges and 9.6% in bars; Kruk et al. 2018, MNRAS 473, 4731: a
+/// median B/T of 0.14 and Bar/T of about 0.14), and the inner rotation curve follows the bulge's
+/// share (Noordermeer et al. 2007). So the Milky-Way-like seeds are checked against the Milky
+/// Way's own bracket, and the median of every seed is pinned at what the model gives, 0.71–0.73: a
+/// property of the drawn population, not a bracket, since no published figure gives a population's
+/// floor.
+///
+/// A seed is Milky-Way-like (ruling 82, the subset defined after a third research) when its
+/// bulge-and-bar *mass* over its stellar mass lies in 0.29–0.50, the Milky Way's 0.376 with its
+/// errors (Portail et al. 2017, Table 2, 1.88 ± 0.12 × 10¹⁰ M☉, over Bland-Hawthorn and Gerhard
+/// 2016's 5 ± 1 × 10¹⁰), and its thin scale length in 2.0–3.1 kpc, 6,520–10,110 ly (Bland-Hawthorn
+/// and Gerhard 2016 §5.1.2, 2.6 ± 0.5; Bovy and Rix 2013, 2.15 ± 0.14; McMillan 2017 Table 2, 2.53
+/// ± 0.14). The mass share is computed here from the parameters' population masses, bulge plus
+/// long bar over `stellar_mass`, since the drawn share is one of systems. Its median lies in
+/// 0.71–0.97. The floor is our derivation, not a published figure: McMillan's (2017, MNRAS 465, 76,
+/// Table 2) ±10% prior on the bulge's mass (9.13 ± 0.91 × 10⁹ M☉, v₀ = 232.8 ± 3.0 km/s)
+/// propagated through the ratio of his model gives 0.711–0.787 about 0.750. The 0.97 is ruling
+/// 32's, not re-verified; Sofue's (2013) terminal velocities give 0.93 and run high inside the
+/// bar (Chemin et al. 2015).
 #[test]
 #[ignore = "slow: builds the parameters and mass models of 4,000 galaxies"]
 fn the_rotation_curve_over_four_thousand_seeds() {
@@ -299,6 +322,7 @@ fn the_rotation_curve_over_four_thousand_seeds() {
     let mut slopes = Vec::with_capacity(4_000);
     let mut inner = Vec::with_capacity(4_000);
     let mut ratios = Vec::with_capacity(4_000);
+    let mut milky_way_like = Vec::new();
     for n in 0..4_000_u64 {
         let params = GalaxyParams::from_seed(
             Seed::new(0x0211_5ee9_0000_0000 | n),
@@ -311,7 +335,15 @@ fn the_rotation_curve_over_four_thousand_seeds() {
         slopes.push((v_c(16.0) - v_c(5.0)) / 11.0);
         inner.push(one);
         ratios.push(one / eight);
+        let bulge_and_bar = params.population_mass(Population::Bulge).value()
+            + params.population_mass(Population::LongBar).value();
+        let mass_share = bulge_and_bar / params.stellar_mass().value();
+        let length = params.thin_disc().length().value();
+        if (0.29..=0.50).contains(&mass_share) && (6_520.0..=10_110.0).contains(&length) {
+            milky_way_like.push(one / eight);
+        }
     }
+    milky_way_like.sort_by(f64::total_cmp);
     for values in [&mut sun, &mut slopes, &mut inner, &mut ratios] {
         values.sort_by(f64::total_cmp);
     }
@@ -343,11 +375,27 @@ fn the_rotation_curve_over_four_thousand_seeds() {
         "99th percentile of v_c(1 kpc): {}",
         inner[3_960]
     );
-    // Provisional (ruling 82 of 2026-09-22): the bracket is 0.75–0.97, from McMillan 2017's
-    // M(< 1 kpc) of 7.1e9 M☉ against 233 km/s (0.75) and Portail et al. 2017 §10.1 (0.83); terminal
-    // velocities' higher values are inflated (Chemin et al. 2015). The drawn centres are too light
-    // (median 0.717), a finding being fixed for version 12; until then the floor is 0.70.
-    assert_within("median v_c(1) ÷ v_c(8)", ratios[2_000], 0.70, 0.97);
+    // Ruling 82 of 2026-09-22 (see above): the Milky-Way-like seeds' median in 0.71–0.97, the
+    // floor our propagation of McMillan 2017's ±10% bulge-mass prior.
+    let like = milky_way_like.len();
+    let like_median = milky_way_like[like / 2];
+    eprintln!(
+        "{like} of 4,000 Milky-Way-like seeds (bulge and bar 0.29–0.50 of M★, R_d 2.0–3.1 kpc): \
+         median v_c(1) ÷ v_c(8) {like_median:.3}; every seed's median {:.3}",
+        ratios[2_000]
+    );
+    // A tenth of the draw at least, or the draws themselves have moved.
+    assert!(like >= 400, "only {like} Milky-Way-like seeds");
+    assert_within(
+        "median v_c(1) ÷ v_c(8) of the Milky-Way-like seeds",
+        like_median,
+        0.71,
+        0.97,
+    );
+    // Every seed's median, a property of the drawn population pinned at what the model gives:
+    // Milky-Way-mass spirals hold less bulge and bar than the Milky Way (Weinzirl et al. 2009 §5.2;
+    // Kruk et al. 2018), so their centres are lighter.
+    assert_within("median v_c(1) ÷ v_c(8)", ratios[2_000], 0.71, 0.73);
 }
 
 /// The densities over 1,000 seeds (P02.T11): the in-plane density at 26,000 ly lies in

@@ -221,8 +221,9 @@ fn the_fixture_s_enclosed_masses_are_the_milky_ways() {
         // Launhardt, Zylka and Mezger 2002, A&A 384, 112.
         ("230 pc", 230.0 * pc, 0.8e9, 2.0e9),
         // Cited since ruling 76.6 of 2026-09-22; the plan's 7.5–10.5 × 10⁹ was not. The floor is
-        // McMillan's (2017, MNRAS 465, 76, Table 3) best-fitting model, integrated here to 7.1 ×
-        // 10⁹ M☉ (bulge 4.0, thin disc 1.9, thick disc 0.24, dark matter 1.0); the ceiling is
+        // McMillan's (2017, MNRAS 465, 76, Table 3) best-fitting model, which states no mass inside
+        // 1 kpc: integrated from it, 7.1 × 10⁹ M☉ (bulge 4.0, thin disc 1.9, thick disc 0.24, dark
+        // matter 1.0). The ceiling is
         // Sofue's (2013, PASJ 65, 118, Table 3) rotation curve, v²r ÷ G for 216 km/s at 1.02 kpc,
         // 11.1 × 10⁹, an upper reading for a flattened mass. The fixture gives 7.54 × 10⁹.
         ("1 kpc", kpc, 7.1e9, 11.1e9),
@@ -347,8 +348,9 @@ fn bulge_box_mass(galaxy: &Galaxy) -> f64 {
 /// 34% over theirs. The thin discs' central hole (P02.T12.b) takes it out, and the row checks the
 /// published bracket again. The printed breakdown of `v_c²` at 2 kpc names each part's share.
 ///
-/// `v_c(1 kpc) ÷ v_c(8 kpc)` is checked from 0.75: the published inner curve over Eilers et al.'s
-/// 229 km/s gives the Milky Way 0.70–0.83 (R23).
+/// `v_c(1 kpc) ÷ v_c(8 kpc)` is checked in 0.75–0.97: dynamical models give the Milky Way
+/// 0.75–0.86 (McMillan 2017; Portail et al. 2017; ruling 82 of 2026-09-22), where R23's 0.70 has no
+/// published source.
 #[test]
 #[ignore = "slow: builds the fixture's fields and in-plane tables"]
 fn the_fixture_s_rotation_curve_is_the_milky_ways() {
@@ -373,7 +375,13 @@ fn the_fixture_s_rotation_curve_is_the_milky_ways() {
         one / sun
     );
     print_inner_breakdown(&galaxy, 2.0 * kpc);
-    assert_within("v_c(1 kpc) ÷ v_c(8 kpc)", one / sun, 0.75, 1.1);
+    // Dynamical models give the Milky Way 0.75–0.86 (ruling 82 of 2026-09-22): the 7.1 × 10⁹ M☉
+    // inside 1 kpc integrated from McMillan's (2017, MNRAS 465, 76) best-fitting model, which states
+    // no such figure, against his 233 km/s gives 0.75, a lower bound for a flattened bar, and
+    // Portail et al.'s (2017, MNRAS 465, 1621, §9.2) 185 km/s of stellar support
+    // at 94% against their V₀ of 238 gives 0.83. Gas terminal velocities, up to 0.93 (Sofue 2013),
+    // run high inside the bar (Chemin et al. 2015, A&A 578, A14). The fixture gives 0.753.
+    assert_within("v_c(1 kpc) ÷ v_c(8 kpc)", one / sun, 0.75, 0.97);
     // Eilers et al. 2019, ApJ 871, 120: 229.0 ± 0.2 km/s at R₀ (formal, with a systematic 2–5%)
     // and a slope of −1.7 ± 0.1 km/s per kpc.
     assert_within("v_c(8 kpc), km/s", sun, 215.0, 245.0);

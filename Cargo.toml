@@ -61,12 +61,16 @@ lto = "thin"
 # slow tests check statistics, not speed, and LTO links each of some 55 test binaries in a build
 # that took over ten minutes with it. Generated output does not move, for the reasons given under
 # the dev profile's `opt-level` below. The one timed slow test, the density map's budget, is stated
-# in `math::exp` calls timed in the same binary, so it scales with the build.
+# in `math::exp` calls timed in the same binary, so it scales with the build. Incremental, unlike
+# release: after an edit to the sim a rebuild took 1m12s instead of 10m03s, the workspace crates
+# being 87% of the build, and the slow tests ran 2% faster to 14% slower (measured 2026-09-24, on a
+# busy machine). Generated output does not move, for the same reasons.
 [profile.slow-test]
 inherits = "release"
 lto = false
 debug-assertions = true
 overflow-checks = true
+incremental = true
 
 # The sim's arithmetic dominates `just test`, and an unoptimised build pays for all of it: the fast
 # suite spends about 120 s in its test binaries at `opt-level = 0` and about 65 s at

@@ -925,7 +925,7 @@ At `GalaxyParams::milky_way_like()`:
 | at 230 pc                              | 0.8–2.0 × 10⁹ M☉ (Launhardt et al. 2002)                    |
 | at 1 kpc                               | 7.1–11.1 × 10⁹ M☉ (McMillan 2017; Sofue 2013; P02.T12)      |
 | at 2 kpc                               | 1.8–2.6 × 10¹⁰ M☉ (Portail et al. 2017)                     |
-| v_c(1 kpc) ÷ v_c(8 kpc)                | 0.75–1.1                                                    |
+| v_c(1 kpc) ÷ v_c(8 kpc)                | 0.75–0.97 (McMillan 2017; Portail et al. 2017; ruling 82)   |
 | v_c at 0.5, 1 and 2 kpc                | 140–190, 165–195, 180–200 km/s (see below and R22)          |
 | v_c at 8 kpc                           | 215–245 km/s (Eilers et al. 2019)                           |
 | Escape speed at 8 kpc                  | 545–605 km/s (brainstorm: 574)                              |
@@ -2089,7 +2089,7 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     | M(< 2 kpc)                   | 2.48e10               | 1.95e10               | 1.8–2.6e10                          |
     | Portail's box                | 2.48e10               | 1.97e10               | 1.80–2.06e10 (was ≤ 2.74)           |
     | v_c 0.5, 1, 2 kpc            | 152, 187, 227         | 142, 165, 200         | 140–190, 160–195, 180–200           |
-    | v_c(8 kpc); ratio            | 230.7; 0.809          | 219.0; 0.753          | 215–245; 0.75–1.1                   |
+    | v_c(8 kpc); ratio            | 230.7; 0.809          | 219.0; 0.753          | 215–245; 0.75–0.97 (ruling 82)      |
     | Escape; pattern speed; tidal | 570; 39.5; 4.23       | 558; 37.0; 4.44       | 545–605; 33–41; 3.7–5.1             |
     | n☉; ρ★; Σ★                   | 0.00205; 0.0417; 30.5 | 0.00210; 0.0425; 31.1 | 0.0018–0.0021; 0.0375–0.0455; 29–38 |
     | Nuclear share; centre        | 1.75%; 18.89          | 2.06%; 18.99          | 1.2–2.4%; 12–19                     |
@@ -2103,7 +2103,8 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     The σ sweep needs 80% in 90–135 km/s, not 85%: no measurement gives 90%, pseudobulges' mean
     σ₀ is near 90 km/s (Fisher and Drory 2016, Fig. 1.11), and small-bulge hosts sit near σ_e ≈
     100 (Cappellari et al. 2013, §5). The 32-seed σ bracket goes 80 → 70 km/s. The ratio sweep's
-    floor goes 0.75 → 0.70, the Milky Way's measured floor (R23). The fixture's system count
+    floor went 0.75 → 0.70 (superseded by ruling 82's re-ruling, below: no published figure gives
+    0.70). The fixture's system count
     becomes 0.85–1.3 × 10¹¹, Bland-Hawthorn and Gerhard's 5 ± 1 × 10¹⁰ M☉ at 0.55–0.59 M☉ per
     system. P03.T12.b's tidal radii are its own 4.4, 3.5 and 23 ly again (4.438, 3.523, 23.582).
     Without a citation, these follow from the model: the envelope-bound test takes the hole's factor
@@ -2137,7 +2138,7 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     at 26,000 ly: at least 95% of seeds in 0.0008–0.008 and none beyond 1.25 times either edge. (5)
     The arm-ridge χ² family is held at a family-wise α of 10⁻³ by Bonferroni, each test at α ÷ n
     with n counted in the test. (6) The M(< 1 kpc) row is 7.1–11.1 × 10⁹ M☉: McMillan's (2017,
-    Table 3) best fit integrated to 7.1 × 10⁹, and Sofue's (2013, Table 3) curve, v²r ÷ G at 216
+    Table 3) best fit, which states no such figure, integrated to 7.1 × 10⁹, and Sofue's (2013, Table 3) curve, v²r ÷ G at 216
     km/s and 1.02 kpc, 11.1 × 10⁹, an upper reading for a flattened mass. (7) The thick disc's 0.1 dex
     per Gyr is the brainstorm's decline beyond 8 Gyr (Fields, "Metallicity"), which ruling 42.5 moved
     to the thick disc, and its −0.55 at 11 Gyr is this plan's: no checked paper gives the −0.55
@@ -2163,8 +2164,70 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     - The median v_c(1) ÷ v_c(8) floor is 0.70 in `galaxy_sweeps.rs`, below ruling 32's upheld 0.75.
       Ruling 82 keeps ruling 32's 0.75: no published figure gives 0.70. The seeds' 0.717 is a
       finding (the drawn centres are too light, and the box/bar is 1.97 against Portail's 2.48 ×
-      10¹⁰ M☉), fixed for version 12. Until then the 0.70 floor is provisional.
+      10¹⁰ M☉), fixed for version 12. Until then the 0.70 floor is provisional. (Superseded by
+      ruling 82's re-ruling, below; the "2.48" was this model's own old box mass.)
   - _The young disc's floor (R23, for plan 08)._ At the fixture's 335 ly the floor is met at the
     Sun's radius. R23's finding still stands for the drawn range and along the disc: plan 08's clamp
     (P08.T2.c) binds over most of the young disc. Copy it into plan 08's Risks when plan 08 is
     re-validated.
+- **R25, continued: ruling 82 investigated (`gal12`, round 8); nothing built, no output moved.**
+  - _The ruling's target has no source._ Portail et al. (2017, MNRAS 465, 1621, Table 2) give 1.85
+    ± 0.05 × 10¹⁰ M☉ in the bulge box (dynamical: stars 1.32, nuclear disc 0.20, dark matter 0.32)
+    and 1.88 ± 0.12 × 10¹⁰ of stars in the bar and bulge; 2.48 × 10¹⁰ was this model's own box mass
+    before P02.T12 (R23). No figure of 2.2–2.5 × 10¹⁰ appears in Portail et al. 2017, Portail et al.
+    2015 or Wegg, Gerhard and Portail 2015; the nearest are Wegg et al.'s total bar mass of 1.99 and
+    older virial estimates (Zhao 1994, 2; Blum 1995, up to 2.8), which Portail et al. 2015 set aside.
+    The fixture's box, 1.97 × 10¹⁰, is already 6% over the measurement, and its v_c(2 kpc), 199.8
+    km/s, is at the row's top, so the box cannot rise.
+  - _Where the seeds' central mass went._ Over 1,000 rotation-sweep seeds the median v_c(1) ÷
+    v_c(8) is 0.719, and 0.788 with the thin disc's Gaussians replaced by the hole-free ones: the
+    hole costs 0.068 (the fixture 0.080, 0.753 against 0.833). Moving the fixture to the draws'
+    medians one parameter at a time, the bulge-and-bar share (0.350 → 0.274) costs 0.067 (to
+    0.686); every other draw together adds about 0.03 (M★ +0.002, the coupled thin length +0.007,
+    the coupled bulge +0.005, the thick share +0.006, f★ −0.005, c ÷ a −0.006, the nuclear share
+    −0.010); all together 0.717, the sweep's median. So after the hole the Milky Way needs the top of
+    the drawn 20–35%: Portail et al.'s (2017, Table 2) 1.88 × 10¹⁰ M☉ of stars in the bar and bulge
+    over Bland-Hawthorn and Gerhard's (2016, §6.4.4) 5 ± 1 × 10¹⁰ is 0.376 (0.29–0.50). (This bullet
+    first divided by "5.12", the fixture's own M★, which ruling 82's re-ruling read as Portail's bar
+    length in kpc; either way the cited ratio is the one above.)
+  - _What restores it, measured._ With the share drawn uniform on 0.25–0.40, 0.28–0.42 or 0.30–0.45
+    the median ratio is 0.743, 0.753 or 0.762 (without the hole 0.806–0.822), the σ sweep's 90–135
+    km/s holds 859, 870 or 861 of 1,000 (807 now) and v_c(8 kpc)'s 210–270 holds 58% throughout.
+    0.28–0.42, centred on the fixture's 0.35, restores the floor of 0.75. It contradicts the
+    brainstorm's "20–35% with the long bar" (after Bland-Hawthorn and Gerhard's "roughly a quarter
+    to 30%"), so it is the owner's to decide; the sweep's floor stays at the provisional 0.70 of
+    ruling 82.4 until then. (Superseded by the re-ruling below.)
+  - _Re-ruled (ruling 82, "Re-ruled on the second research"), built as tests and docs; no output
+    moves._ The 20–35% draw stands with no brainstorm edit: Milky-Way-mass spirals hold about
+    0.28–0.29 in bulge and bar (Weinzirl et al. 2009, §5.2: 18.9% in bulges and 9.6% in bars; Kruk et
+    al. 2018: median B/T 0.14, Bar/T about 0.14), the Milky Way is at the top at 0.376, and the inner
+    curve follows the share (Noordermeer et al. 2007), so a population median below the Milky Way's
+    ratio is expected. Three checks replace the provisional floor: the fixture's v_c(1) ÷ v_c(8) in
+    0.75–0.97 (`galaxy_milky_way.rs`; McMillan 2017 as integrated, Portail et al. 2017 §9.2), where the table's row
+    was 0.75–1.1, and it gives 0.753; among the rotation sweep's seeds with a drawn share of at least
+    0.31, the median in 0.75–0.97 (red at first: 1,080 of 4,000 seeds, median 0.744; superseded below); and every seed's median pinned at its measured 0.71–0.73
+    (0.717) as a model property, not a bracket.
+    - _Finding, for a ruling: the subset check fails at every cut._ Over the rotation sweep's 4,000
+      seeds the median ratio of the seeds with a drawn share of at least 0.29, 0.30, 0.31, 0.32,
+      0.33 or 0.34 is 0.740, 0.744, 0.744, 0.748, 0.748 or 0.746 (1,587, 1,341, 1,080, 787, 533 and
+      265 seeds; lower quartiles 0.697–0.703). It levels off under 0.75, where the fixture, at 0.35,
+      gives 0.753. The share is not what holds the seeds down: the Milky-Way-like seeds carry the
+      rest of the draws' medians, a thin disc 19% longer than the fixture's (8,360 ly against
+      7,000; owner's item 6), whose hole is 19% wider since R_h is 0.55 R_d, plus the coupled bulge,
+      the thick share, f★ and c ÷ a, together about −0.005 to +0.03 (the attribution above). Left
+      red in the tree, not re-cut: the orchestrator's to rule (the share test by stellar mass rather
+      than systems, as the conformance check noted, does not change the draws' medians).
+  - _The subset, defined by ruling 82's third research, built._ A seed is Milky-Way-like when its
+    bulge-and-bar mass over its stellar mass is 0.29–0.50 (Portail et al. 2017's 1.88 ± 0.12 over
+    Bland-Hawthorn and Gerhard's 5 ± 1 × 10¹⁰; the test computes it from `population_mass` of the
+    bulge and the long bar over `stellar_mass`, since the drawn share counts systems) and its thin
+    R_d is 2.0–3.1 kpc (6,520–10,110 ly: Bland-Hawthorn and Gerhard §5.1.2, Bovy and Rix 2013,
+    McMillan 2017 Table 2). **1,293 of 4,000 seeds**, median **0.743**, checked in 0.71–0.97. The
+    floor is our derivation, not a published figure: McMillan's ±10% bulge-mass prior (Table 2,
+    9.13 ± 0.91 × 10⁹ M☉, v₀ 232.8 ± 3.0 km/s) propagated through the ratio, 0.711–0.787 about
+    0.750; the 0.97 is ruling 32's, not re-verified. The fixture keeps 0.75–0.97 (0.753). Every
+    seed's median stays pinned at 0.71–0.73 (0.717). Citations corrected: McMillan 2017 states no
+    M(< 1 kpc), so the 7.1 × 10⁹ is cited as integrated from his model; Portail et al.'s 185 km/s
+    at 94% is their §9.2, not §10.1.
+  - _Unchecked, recorded._ The median seed's hole, 0.55 × 2.56 kpc = 1.41 kpc, against Robin et
+    al.'s (2003) 1.32 ± 0.14 kpc, is not verified in Robin et al.'s text.
