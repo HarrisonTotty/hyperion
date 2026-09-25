@@ -92,6 +92,34 @@ mod tests {
         }
     }
 
+    /// Eggleton's claim, "better than 1%" for every q, against Roche lobes integrated here
+    /// independently of his fit: the volume inside the critical equipotential through the inner
+    /// Lagrangian point of a circular corotating binary, by rays from the star on a 400 × 200 grid
+    /// in (cos θ, φ), each crossing found by bisection, and turned into the radius of a sphere of
+    /// that volume (round 8's validation). At q = 1 it is 0.3799, the textbook value. The fit
+    /// lies within 0.81% of every one, worst at q = 0.05.
+    #[test]
+    fn the_lobe_is_within_one_per_cent_of_the_integrated_lobe_volume() {
+        let integrated = [
+            (1e-3, 0.048_22),
+            (0.01, 0.101_24),
+            (0.05, 0.166_99),
+            (0.1, 0.205_40),
+            (0.2, 0.250_64),
+            (0.5, 0.320_64),
+            (1.0, 0.379_86),
+            (2.0, 0.441_97),
+            (5.0, 0.523_32),
+            (10.0, 0.580_30),
+            (100.0, 0.718_16),
+            (1000.0, 0.781_65),
+        ];
+        for (q, lobe) in integrated {
+            let error = ratio(q) / lobe - 1.0;
+            assert!(error.abs() < 0.01, "q = {q}: {} against {lobe}", ratio(q));
+        }
+    }
+
     #[test]
     fn the_lobe_scales_with_the_separation() {
         assert_same_bits(

@@ -5,8 +5,13 @@
 //! their streams (Design note 5), where each companion goes, the laws it is drawn from, and the
 //! draw numbers of each attempt (Design note 9).
 
+use std::cmp::Ordering;
 use std::f64::consts::TAU;
 
+use super::direct::{
+    DirectPeriods, PERIOD_CORRECTION, direct_count_pmf, direct_mass_ratio_law,
+    direct_multiple_fraction, direct_weight,
+};
 use super::dist::{MIN_COMPANION_MASS, PeriodDistribution};
 use super::model::{MAX_COMPANIONS, MultiplicityModel};
 use super::stability::{Innermost, Limits, MAX_ECCENTRICITY, NECESSARY_AXIS_RATIO};
@@ -52,6 +57,22 @@ pub const MAX_STABILITY_REDRAWS: u64 = 16;
 
 /// Words of `binary.orbit` and of `binary.orientation` that one try of an orbit reads.
 const WORDS_PER_TRY: u64 = 3;
+
+/// Tries of a direct companion in one attempt's block of one stream: 21, the most the block holds
+/// at three words a try.
+const DIRECT_TRIES_PER_KEY: u64 = DRAWS_PER_ATTEMPT / WORDS_PER_TRY;
+
+/// Redraws of a direct companion that fails the whole test before it is dropped (ruling 81 as
+/// amended): tries 0 to 41, the first 21 keyed by the companion's draw slot k and the next 21 by
+/// slot k + [`DIRECT_OVERFLOW_SLOT`]. With a quarter to three fifths of all tries rejected
+/// (A/late-B to O stars), 21 tries leave 1.3% of O stars' direct companions dropped; 42 keep every
+/// mass bin under the 1% the ruling sets.
+const DIRECT_REDRAWS: u64 = 2 * DIRECT_TRIES_PER_KEY - 1;
+
+/// The offset of the draw slot that keys a direct companion's tries beyond the first
+/// [`DIRECT_TRIES_PER_KEY`]: slots 9–11, inside the stellar body indices (Design note 5),
+/// which no star of these systems takes, since a system holds at most four stars.
+const DIRECT_OVERFLOW_SLOT: u8 = 8;
 
 const _: () = assert!(
     (MAX_STABILITY_REDRAWS + 1) * WORDS_PER_TRY <= DRAWS_PER_ATTEMPT,
@@ -331,10 +352,10 @@ impl SystemHierarchy {
     ///
     /// # Panics
     ///
-    /// Never: a hierarchy holds at most six stars.
+    /// Never: a hierarchy holds at most four stars.
     #[must_use]
     pub fn star_count(&self) -> u8 {
-        u8::try_from(self.stars.len()).expect("a hierarchy holds at most six stars")
+        u8::try_from(self.stars.len()).expect("a hierarchy holds at most four stars")
     }
 
     /// The total initial mass of the stars under `index`, M☉.
@@ -388,6 +409,10 @@ impl SystemHierarchy {
 
     /// The body whose ID keys the `binary.*` streams of pair `index`: the lowest-indexed star of
     /// its outer member, the star the orbit brought in (Design note 5); `None` for a star.
+    ///
+    /// For a primary drawn by the direct construction ([`draw_hierarchy`], "Massive primaries"),
+    /// the streams are keyed by draw slot instead, and this is only a distinct body of the pair
+    /// (ruling 81).
     ///
     /// # Panics
     ///
@@ -471,6 +496,27 @@ impl SystemHierarchy {
 ///    numbers of the same attempt, up to [`MAX_STABILITY_REDRAWS`] times; then the companion, and
 ///    every later one, is dropped. No orbit already placed is ever redrawn.
 ///
+/// # Massive primaries: direct companions as Moe and Di Stefano count them (ruling 81)
+///
+/// From 3 M☉ up, and for a share of primaries of 1.5–3 M☉ rising linearly in ln M₁ from 0 to 1
+/// (one mark, word 64n + 2 of `system.multiplicity`), the draw is not the spine construction
+/// below. The number n of direct companions, 0–3, is drawn from Moe and Di Stefano's (2017)
+/// Table 13 (`direct_count_pmf`, on words 64n and 64n + 1 as the spine construction's count).
+/// Each of draw slots 1 to n draws its companion independently, its period from their
+/// `f_logP;q>0.1` with a fitted correction (`PERIOD_CORRECTION`) and its mass ratio on q = 0.1–1
+/// from their laws at that period. The companions are kept sorted by period, each an outer orbit
+/// about everything inside it. Slot by slot, the newest companion is inserted and the whole
+/// hierarchy must pass the whole test; if it fails, that companion alone is drawn again on its
+/// slot's next try, up to 41 redraws (the last 21 keyed by draw slot k + 8), and then it is
+/// dropped and counted (ruling 81 as amended). Then each direct companion may gain one
+/// subsystem companion of its own, at its own mass's rate times Tokovinin's ε, on the words of
+/// draw slot 3 + k, kept only if it passes the whole test (Tokovinin's dynamical truncation; see
+/// `Draw::place_subsystem`), while the system holds fewer than four stars.
+///
+/// Draws are keyed by the draw slot, and body indices are given after sorting, depth first, so
+/// the paragraph below does not hold for these systems: companion k is not body k, and a pair's
+/// streams are keyed by its draw slot, not by [`SystemHierarchy::pair_key`].
+///
 /// # Numbering and keys (Design note 5)
 ///
 /// The primary is star 0. A companion only ever joins the outer spine, and the new star becomes
@@ -492,13 +538,16 @@ impl SystemHierarchy {
 /// axis ratio, 1.96 (C = 2.8 times the smallest inclination factor, 0.7), against the orbit the
 /// new one encloses; against the orbit that encloses it, the criterion with that orbit's own
 /// eccentricity, which is known; and the tidal cut for a new outermost orbit. Each node's window
-/// has a weight, its period distribution's share inside the window. One mark then picks both the
+/// has a weight, its period distribution's share inside the window, times Tokovinin's (2014)
+/// correlation of subsystems for a node inside a secondary component ([`SUBSYSTEM_WEIGHT_SINGLE`]
+/// and [`SUBSYSTEM_WEIGHT_PAIRED`], ruling 74). One mark then picks both the
 /// node, by integer thresholds on the weights, and the period, by inverse transform inside that
 /// node's window of the mark's residual, and the whole test accepts or rejects the try.
 ///
 /// That is rejection sampling of the pair (node, orbit), so it is exact: a companion joins a node
-/// with probability proportional to the chance that an orbit drawn for that node from the model's
-/// distributions passes the test, and its orbit is the model's, conditioned on passing. The
+/// with probability proportional to the node's correlation weight times the chance that an orbit
+/// drawn for that node from the model's distributions passes the test, and its orbit is the
+/// model's, conditioned on passing. The
 /// windows only make it cheap, because every period outside them would fail. The one inexact
 /// case is the cap of 17 tries, after which the companion is dropped.
 ///
@@ -564,6 +613,19 @@ pub fn draw_hierarchy(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> SystemHierarchy {
+    draw_hierarchy_with(galaxy, record, ctx, attempt, &PERIOD_CORRECTION)
+}
+
+/// [`draw_hierarchy`] with the direct companions' period law corrected by `correction`, for the
+/// fit of [`PERIOD_CORRECTION`].
+#[must_use]
+pub(super) fn draw_hierarchy_with(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+    correction: &[[f64; 8]; 4],
+) -> SystemHierarchy {
     let model = MultiplicityModel::default_v1();
     let draw = Draw {
         model: &model,
@@ -577,9 +639,13 @@ pub fn draw_hierarchy(
             },
             innermost(galaxy, record, ctx),
         ),
+        correction,
     };
     let m0 = record.primary_initial_mass();
-    let count = draw.companion_count(m0, ctx);
+    if draw.is_direct(m0) {
+        return draw.direct(m0, ctx);
+    }
+    let count = draw.companion_count(&model.companion_count_pmf(m0), ctx);
     let mut draft = Draft::single(m0);
     let mut placed = 0;
     for k in 1..=count {
@@ -647,10 +713,13 @@ impl Streams {
 }
 
 /// One system's draw: the model, the streams and the limits.
+#[derive(Clone, Copy)]
 struct Draw<'a> {
     model: &'a MultiplicityModel,
     streams: Streams,
     limits: Limits<'a>,
+    /// The correction of the direct companions' period law ([`PERIOD_CORRECTION`]).
+    correction: &'a [[f64; 8]; 4],
 }
 
 /// A node the next companion may join, with its period window and the window's weight.
@@ -669,11 +738,10 @@ struct Host {
 }
 
 impl Draw<'_> {
-    /// How many companions the primary of initial mass `m0` has under `ctx`, before stability:
-    /// 0 to [`MAX_COMPANIONS`].
+    /// How many companions a primary whose count distribution is `pmf` has under `ctx`, before
+    /// stability: 0 to [`MAX_COMPANIONS`].
     #[must_use]
-    fn companion_count(&self, m0: SolarMasses, ctx: MultiplicityContext) -> u8 {
-        let pmf = self.model.companion_count_pmf(m0);
+    fn companion_count(&self, pmf: &[f64; MAX_COMPANIONS + 1], ctx: MultiplicityContext) -> u8 {
         let multiples = &pmf[1..];
         let multiple_share = multiples.iter().fold(0.0, |sum, &p| sum + p);
         let multiple = match (ctx, self.limits.innermost()) {
@@ -700,7 +768,7 @@ impl Draw<'_> {
             .system_mark(tags::SYSTEM_MULTIPLICITY, 1)
             .pick_weighted(multiples, multiple_share)
             .expect("the last count's threshold is the whole share, which every mark lies below");
-        u8::try_from(1 + extra).expect("at most five companions")
+        u8::try_from(1 + extra).expect("at most three companions")
     }
 
     /// The draft with companion `k` placed, or `None` if it cannot be.
@@ -749,26 +817,11 @@ impl Draw<'_> {
             .model
             .mass_ratio_distribution(host.first_mass, period)
             .sample(orbits);
-        let e = self.model.eccentricity_distribution(period).sample(orbits);
-        let cos_i = 1.0 - 2.0 * orientations.uniform();
-        let node = TAU * orientations.uniform();
-        let argument = TAU * orientations.uniform();
-        let mean_anomaly = TAU * phases.uniform();
-        if e >= MAX_ECCENTRICITY {
-            return None;
-        }
-        let orbit = DraftOrbit {
-            period: Seconds::from(period),
-            eccentricity: Eccentricity::new(e)
-                .expect("an eccentricity drawn in [0, e_max) is bound"),
-            orientation: Orientation::new(
-                Radians::new(math::acos(cos_i)),
-                Radians::new(node),
-                Radians::new(argument),
-            )
-            .expect("an inclination from acos lies in [0, π]"),
-            mean_anomaly: Radians::new(mean_anomaly),
-        };
+        let e = self
+            .model
+            .eccentricity_distribution(host.first_mass, period)
+            .sample(orbits);
+        let orbit = draft_orbit(period, e, orientations, phases)?;
         Some((host.first_mass * q, orbit))
     }
 
@@ -805,8 +858,12 @@ impl Draw<'_> {
                 let shortest = math::exp10(periods.support().0);
                 let lo = Days::new(Days::from(p_lo).value().max(shortest));
                 let hi = Days::from(p_hi);
+                let placement = match level.checked_sub(1).map(|up| spine[up]) {
+                    None => 1.0,
+                    Some(parent) => subsystem_weight(draft, parent),
+                };
                 let weight = if hi > lo {
-                    periods.share_in(lo, hi)
+                    placement * periods.share_in(lo, hi)
                 } else {
                     0.0
                 };
@@ -821,6 +878,376 @@ impl Draw<'_> {
             })
             .collect()
     }
+}
+
+/// Tokovinin's (2014, AJ 147, 87, §4.1) factor on a direct companion's own subsystem rate when the
+/// primary has no inner pair inside that companion's orbit: ε₋ = 0.5.
+const SUBSYSTEM_EPSILON_WITHOUT_INNER: f64 = 0.5;
+
+/// Tokovinin's (2014, §4.1) factor on a direct companion's own subsystem rate when the primary
+/// already has an inner pair inside that companion's orbit: ε₊ = 1.2.
+const SUBSYSTEM_EPSILON_WITH_INNER: f64 = 1.2;
+
+/// The word of `system.multiplicity`, within an attempt's block, that picks the construction of a
+/// primary in the blend (1.5–3 M☉).
+const BLEND_WORD: u64 = 2;
+
+/// The first word of `system.multiplicity`, within an attempt's block, that decides the
+/// subsystem of direct companion k: word `SUBSYSTEM_WORD + k`, k = 1–3.
+const SUBSYSTEM_WORD: u64 = 3;
+
+/// One direct companion as drawn: its draw slot, initial mass and orbit.
+#[derive(Debug, Clone, Copy)]
+struct DirectCompanion {
+    slot: u8,
+    mass: SolarMasses,
+    orbit: DraftOrbit,
+}
+
+/// The rate at which a direct companion of initial mass `m` has a companion of its own, before
+/// Tokovinin's ε: the share of primaries of that mass with a direct companion, Moe and Di
+/// Stefano's Table 13 from 2 M☉ up and Duchêne and Kraus's multiple fraction below (ruling 81).
+#[must_use]
+fn subsystem_rate(model: &MultiplicityModel, m: SolarMasses) -> f64 {
+    if m.value() >= 2.0 {
+        direct_multiple_fraction(m)
+    } else {
+        model.multiple_fraction(m)
+    }
+}
+
+/// A draft of the primary of `m0` and its direct companions, each an outer orbit about all that
+/// lies inside it, in period order, with the subsystem of each if it has one: the nodes laid out
+/// so that body indices run depth first (Design note 5). Also the arena index of the pair each
+/// direct companion's orbit forms.
+#[must_use]
+fn assemble(
+    m0: SolarMasses,
+    companions: &[DirectCompanion],
+    subsystems: &[Option<(SolarMasses, DraftOrbit)>],
+) -> (Draft, Vec<usize>) {
+    let mut draft = Draft::single(m0);
+    let mut pairs = Vec::with_capacity(companions.len());
+    for (j, companion) in companions.iter().enumerate() {
+        let body = u8::try_from(draft.masses.len()).expect("at most four stars");
+        draft.masses.push(companion.mass);
+        let star = draft.nodes.len();
+        draft.nodes.push(DraftNode::Star(body));
+        let outer = match subsystems.get(j).copied().flatten() {
+            Some((mass, orbit)) => {
+                let body = u8::try_from(draft.masses.len()).expect("at most four stars");
+                draft.masses.push(mass);
+                let sub = draft.nodes.len();
+                draft.nodes.push(DraftNode::Star(body));
+                draft.nodes.push(DraftNode::Pair {
+                    inner: star,
+                    outer: sub,
+                    orbit,
+                });
+                draft.nodes.len() - 1
+            }
+            None => star,
+        };
+        draft.nodes.push(DraftNode::Pair {
+            inner: draft.root,
+            outer,
+            orbit: companion.orbit,
+        });
+        draft.root = draft.nodes.len() - 1;
+        pairs.push(draft.root);
+    }
+    (draft, pairs)
+}
+
+impl Draw<'_> {
+    /// Whether the primary of `m0` has its direct companions drawn as Moe and Di Stefano count
+    /// them: always from 3 M☉, never up to 1.5 M☉, and between by a mark on `system.multiplicity`
+    /// with the weight [`direct_weight`].
+    #[must_use]
+    fn is_direct(&self, m0: SolarMasses) -> bool {
+        let weight = direct_weight(m0);
+        if weight <= 0.0 {
+            false
+        } else if weight >= 1.0 {
+            true
+        } else {
+            self.streams
+                .system_mark(tags::SYSTEM_MULTIPLICITY, BLEND_WORD)
+                .is_below(Threshold::from_probability(weight))
+        }
+    }
+
+    /// The `binary.orbit`, `binary.orientation` and `binary.phase` streams of draw slot `slot`,
+    /// at try `try_index` of the direct construction: tries 0–20 on the slot's own key, tries
+    /// 21–41 on slot + [`DIRECT_OVERFLOW_SLOT`], each three words of the first two streams and one
+    /// of the third within the attempt's block.
+    #[must_use]
+    fn try_streams(&self, slot: u8, try_index: u64) -> [Stream; 3] {
+        let (key, local) = if try_index < DIRECT_TRIES_PER_KEY {
+            (slot, try_index)
+        } else {
+            (
+                slot + DIRECT_OVERFLOW_SLOT,
+                try_index - DIRECT_TRIES_PER_KEY,
+            )
+        };
+        let base = self.streams.base;
+        let mut orbits = self.streams.body_stream(tags::BINARY_ORBIT, key);
+        let mut orientations = self.streams.body_stream(tags::BINARY_ORIENTATION, key);
+        let mut phases = self.streams.body_stream(tags::BINARY_PHASE, key);
+        orbits.seek(base + WORDS_PER_TRY * local);
+        orientations.seek(base + WORDS_PER_TRY * local);
+        phases.seek(base + local);
+        [orbits, orientations, phases]
+    }
+
+    /// One draw of direct companion slot `k`, on try `r` of the attempt's block: its period from
+    /// the corrected law, its mass ratio from Moe and Di Stefano's law at that period, its
+    /// eccentricity, orientation and phase; `None` for an eccentricity an open orbit would carry.
+    #[must_use]
+    fn direct_try(
+        &self,
+        m0: SolarMasses,
+        periods: &DirectPeriods,
+        slot: u8,
+        try_index: u64,
+    ) -> Option<DirectCompanion> {
+        let [mut orbits, mut orientations, mut phases] = self.try_streams(slot, try_index);
+        let log_period = periods.quantile(orbits.uniform_open());
+        let period = Days::new(math::exp10(log_period));
+        let q = direct_mass_ratio_law(m0, log_period).sample(&mut orbits);
+        let e = self
+            .model
+            .eccentricity_distribution(m0, period)
+            .sample(&mut orbits);
+        let orbit = draft_orbit(period, e, &mut orientations, &mut phases)?;
+        Some(DirectCompanion {
+            slot,
+            mass: m0 * q,
+            orbit,
+        })
+    }
+
+    /// The hierarchy of a primary of `m0` drawn by the direct construction (ruling 81).
+    ///
+    /// The number of direct companions n comes from [`direct_count_pmf`] on the words that pick
+    /// the spine construction's count. Slot by slot, each companion is drawn independently
+    /// ([`Draw::direct_try`]), inserted by period as a nested outer orbit about the primary, and
+    /// the whole hierarchy must pass the whole test; a companion that fails is drawn again on its
+    /// slot's next try, up to [`DIRECT_REDRAWS`] times, and then dropped and counted. Each
+    /// direct companion then may gain one subsystem companion (`place_subsystem`) while the
+    /// system holds fewer than four stars.
+    #[must_use]
+    fn direct(&self, m0: SolarMasses, ctx: MultiplicityContext) -> SystemHierarchy {
+        // An unset stripped mark is not held against the direct companions: under Table 13
+        // nearly every O star has a close companion, which P11.T2.c's provisional share of 0.25
+        // contradicts, and holding every companion of three quarters of the primaries above
+        // 8 M☉ outside 10 au rejects most sets whole. A set mark still asks for an interacting
+        // innermost orbit. P11.T1.d's stripped share, computed from this model, closes the gap.
+        // The count still reads the mark as the spine construction does, (MF − s) ÷ (1 − s) for an
+        // unset one, so that the multiple share stays Table 13's.
+        let n = self.companion_count(&direct_count_pmf(m0), ctx);
+        let direct = Draw {
+            limits: self.limits.without_wide_innermost(),
+            ..*self
+        };
+        direct.direct_under_limits(m0, n)
+    }
+
+    /// [`Draw::direct`] for `n` direct companions under this draw's own limits.
+    #[must_use]
+    fn direct_under_limits(&self, m0: SolarMasses, n: u8) -> SystemHierarchy {
+        let periods = DirectPeriods::new(m0, self.correction);
+        let system = self.streams.system;
+        let (chosen, dropped, _) = self.direct_set(m0, n, &periods);
+        // Subsystems come on top while the system holds fewer than four stars (ruling 74.2).
+        let mut subsystems: Vec<Option<(SolarMasses, DraftOrbit)>> = vec![None; chosen.len()];
+        for j in 0..chosen.len() {
+            let stars = 1 + chosen.len() + subsystems.iter().flatten().count();
+            if stars > MAX_COMPANIONS {
+                break;
+            }
+            subsystems[j] = self.place_subsystem(m0, &chosen, &subsystems, j);
+        }
+        let (draft, _) = assemble(m0, &chosen, &subsystems);
+        draft.build(system, dropped)
+    }
+
+    /// The `n` direct companions of a primary of `m0`, sorted by period, with the number dropped
+    /// and the number of tries drawn. The newest companion alone is redrawn (ruling 81 as
+    /// amended): slot k's tries run until one, inserted into the set by period, passes the whole
+    /// test, and after [`DIRECT_REDRAWS`] redraws it is dropped.
+    #[must_use]
+    fn direct_set(
+        &self,
+        m0: SolarMasses,
+        n: u8,
+        periods: &DirectPeriods,
+    ) -> (Vec<DirectCompanion>, u8, u64) {
+        let system = self.streams.system;
+        let mut chosen: Vec<DirectCompanion> = Vec::with_capacity(usize::from(n));
+        let (mut dropped, mut tries) = (0_u8, 0_u64);
+        for k in 1..=n {
+            let placed = (0..=DIRECT_REDRAWS).find_map(|r| {
+                tries += 1;
+                let companion = self.direct_try(m0, periods, k, r)?;
+                let mut set = chosen.clone();
+                let at = set.partition_point(|c| {
+                    c.orbit
+                        .period
+                        .value()
+                        .total_cmp(&companion.orbit.period.value())
+                        != Ordering::Greater
+                });
+                set.insert(at, companion);
+                let (draft, _) = assemble(m0, &set, &[]);
+                self.limits.admits(&draft.build(system, 0)).then_some(set)
+            });
+            match placed {
+                Some(set) => chosen = set,
+                None => dropped += 1,
+            }
+        }
+        (chosen, dropped, tries)
+    }
+
+    /// The subsystem of direct companion `j` of `chosen`, given the subsystems placed so far, or
+    /// `None`.
+    ///
+    /// The companion is offered one with probability its own rate ([`subsystem_rate`]) times
+    /// Tokovinin's (2014, §4.1) ε: ε₋ = 0.5 for the innermost companion, about the primary alone,
+    /// and ε₊ = 1.2 for any other, about a primary that already has an inner pair. As in
+    /// Tokovinin's simulation (§4.3), the subsystem's period is drawn once from the companion's
+    /// own period law, its mass ratio and eccentricity from its laws at its mass, and it is kept
+    /// only if the whole hierarchy with it passes the whole test: dynamical truncation, not a
+    /// dropped companion, since his ε were fitted before that truncation. This rests on
+    /// Tokovinin's solar-type sample; the subsystem rate of the companions of O and B stars is
+    /// unconstrained (Sana et al. 2014, §4.3; Moe and Di Stefano 2017, §11). It is decided on word
+    /// [`SUBSYSTEM_WORD`] + k of `system.multiplicity` and drawn on try 0 of draw slot 3 + k, k
+    /// being the companion's own slot, so neither depends on the order the set was sorted in.
+    /// Subsystems never count towards the anchors.
+    #[must_use]
+    fn place_subsystem(
+        &self,
+        m0: SolarMasses,
+        chosen: &[DirectCompanion],
+        placed: &[Option<(SolarMasses, DraftOrbit)>],
+        j: usize,
+    ) -> Option<(SolarMasses, DraftOrbit)> {
+        let companion = chosen[j];
+        let epsilon = if j == 0 {
+            SUBSYSTEM_EPSILON_WITHOUT_INNER
+        } else {
+            SUBSYSTEM_EPSILON_WITH_INNER
+        };
+        let p = (subsystem_rate(self.model, companion.mass) * epsilon).clamp(0.0, 1.0);
+        let wanted = self
+            .streams
+            .system_mark(
+                tags::SYSTEM_MULTIPLICITY,
+                SUBSYSTEM_WORD + u64::from(companion.slot),
+            )
+            .is_below(Threshold::from_probability(p));
+        if !wanted {
+            return None;
+        }
+        let first_mass = companion.mass;
+        let periods = self.model.period_distribution(first_mass);
+        let (lo, hi) = periods.support();
+        let host = Host {
+            node: 0,
+            first_mass,
+            periods,
+            lo: Days::new(math::exp10(lo)),
+            hi: Days::new(math::exp10(hi)),
+            weight: 1.0,
+        };
+        let slot = companion.slot + u8::try_from(MAX_COMPANIONS).expect("three");
+        let [mut orbits, mut orientations, mut phases] = self.try_streams(slot, 0);
+        let u = orbits.uniform_open();
+        let (mass, orbit) =
+            self.try_orbit(&host, u, &mut orbits, &mut orientations, &mut phases)?;
+        let mut trial = placed.to_vec();
+        trial[j] = Some((mass, orbit));
+        let (candidate, _) = assemble(m0, chosen, &trial);
+        self.limits
+            .admits(&candidate.build(self.streams.system, 0))
+            .then_some((mass, orbit))
+    }
+}
+
+/// Tokovinin's (2014, AJ 147, 87, §4.3) correlation of subsystems: the weight of a new orbit
+/// inside the secondary component of a pair, relative to a new outermost orbit, when that pair's
+/// primary component is a single star; it multiplies the host's window weight, and so costs no
+/// word (ruling 74).
+///
+/// Fitted, with [`SUBSYSTEM_WEIGHT_PAIRED`], to his completeness-corrected counts (his Table 3,
+/// last column). This one sets the share of Sun-like triples with their inner pair about the
+/// primary against those with it in the outer member, 478 − 196 = 282 against 348 − 196 = 152,
+/// 1.86: 0.275 gives 1.86 in 20,000 hierarchies of 0.8–1.2 M☉ (1,294 against 696). A generator
+/// choice, defended by that data. Tokovinin's own simulation multiplies the frequency of
+/// secondary subsystems by ε₋ = 0.5 without a primary one and ε₊ = 1.2 with one; in this draw,
+/// which places a known number of companions one at a time, those give 1.40 and 51%.
+const SUBSYSTEM_WEIGHT_SINGLE: f64 = 0.275;
+
+/// Tokovinin's (2014, §4.3) correlation of subsystems: the weight of a new orbit inside the
+/// secondary component of a pair whose primary component is itself a pair (a 2 + 2 in the
+/// making), relative to a new outermost orbit (ruling 74; see [`SUBSYSTEM_WEIGHT_SINGLE`]).
+///
+/// His corrected counts make 151 of 204 quadruples 2 + 2, 74%. That share is out of this draw's
+/// reach: companions join the outer spine only, so a 2 + 2 forms only from a triple whose inner
+/// pair is about the primary, and with triples split 1.86 : 1 those are 65% of the triples a
+/// fourth star can join. The weight takes the share to its reach, 65% (572 of 878 Sun-like
+/// quadruples), where it no longer moves: 1.2 gives 59%, 4 gives 63% and 1,000 gives 66%.
+const SUBSYSTEM_WEIGHT_PAIRED: f64 = 20.0;
+
+/// The placement weight of a new orbit inside the outer member of the pair `parent`:
+/// [`SUBSYSTEM_WEIGHT_PAIRED`] if the pair's inner member is a pair, and
+/// [`SUBSYSTEM_WEIGHT_SINGLE`] if it is a star.
+#[must_use]
+fn subsystem_weight(draft: &Draft, parent: usize) -> f64 {
+    let DraftNode::Pair { inner, .. } = draft.nodes[parent] else {
+        unreachable!("a spine node's parent is a pair");
+    };
+    match draft.nodes[inner] {
+        DraftNode::Pair { .. } => SUBSYSTEM_WEIGHT_PAIRED,
+        DraftNode::Star(_) => SUBSYSTEM_WEIGHT_SINGLE,
+    }
+}
+
+/// For the tests: the direct companions a record's draw places, the tries it draws and the
+/// companions it drops, under `correction`, or `None` for a primary the spine construction draws.
+#[cfg(test)]
+#[must_use]
+pub(super) fn direct_tries(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    correction: &[[f64; 8]; 4],
+) -> Option<(usize, u64, u8)> {
+    let model = MultiplicityModel::default_v1();
+    let ctx = MultiplicityContext::Free;
+    let draw = Draw {
+        model: &model,
+        streams: Streams::new(galaxy, record.id(), RedrawAttempt::FIRST),
+        limits: Limits::new(
+            galaxy.potential(),
+            PointLy::from(record.epoch_position()),
+            None,
+            innermost(galaxy, record, ctx),
+        ),
+        correction,
+    };
+    let m0 = record.primary_initial_mass();
+    if !draw.is_direct(m0) {
+        return None;
+    }
+    let n = draw.companion_count(&direct_count_pmf(m0), ctx);
+    let draw = Draw {
+        limits: draw.limits.without_wide_innermost(),
+        ..draw
+    };
+    let (set, dropped, tries) = draw.direct_set(m0, n, &DirectPeriods::new(m0, correction));
+    Some((set.len(), tries, dropped))
 }
 
 /// The widest semi-major axis that a new pair can have as the outer member of the pair `parent`,
@@ -899,6 +1326,36 @@ fn pick_window(windows: &Thresholds, mark: Mark) -> (usize, f64) {
     )]
     let (offset, width) = (offset as f64, width as f64);
     (index, (offset + 0.5) / width)
+}
+
+/// The orbit of `period` and eccentricity `e` with an isotropic orientation, three words of
+/// `orientations`, and a mean anomaly at the epoch, one word of `phases`; `None` for an
+/// eccentricity an open orbit would have to carry, after the words are read.
+#[must_use]
+fn draft_orbit(
+    period: Days,
+    e: f64,
+    orientations: &mut Stream,
+    phases: &mut Stream,
+) -> Option<DraftOrbit> {
+    let cos_i = 1.0 - 2.0 * orientations.uniform();
+    let node = TAU * orientations.uniform();
+    let argument = TAU * orientations.uniform();
+    let mean_anomaly = TAU * phases.uniform();
+    if e >= MAX_ECCENTRICITY {
+        return None;
+    }
+    Some(DraftOrbit {
+        period: Seconds::from(period),
+        eccentricity: Eccentricity::new(e).expect("an eccentricity drawn in [0, e_max) is bound"),
+        orientation: Orientation::new(
+            Radians::new(math::acos(cos_i)),
+            Radians::new(node),
+            Radians::new(argument),
+        )
+        .expect("an inclination from acos lies in [0, π]"),
+        mean_anomaly: Radians::new(mean_anomaly),
+    })
 }
 
 /// An orbit as drawn, before its semi-major axis is fixed by its members' masses.
@@ -985,7 +1442,7 @@ impl Draft {
     #[must_use]
     fn joined(&self, host: usize, mass: SolarMasses, orbit: DraftOrbit) -> Self {
         let mut next = self.clone();
-        let body = u8::try_from(next.masses.len()).expect("at most six stars");
+        let body = u8::try_from(next.masses.len()).expect("at most four stars");
         next.masses.push(mass);
         let star = next.nodes.len();
         next.nodes.push(DraftNode::Star(body));
@@ -1034,7 +1491,7 @@ impl Draft {
 
     /// Appends `node` and its subtree to `out` depth first; its index and total initial mass.
     fn emit(&self, node: usize, out: &mut SystemHierarchy) -> (NodeIndex, SolarMasses) {
-        let index = NodeIndex(u8::try_from(out.nodes.len()).expect("at most eleven nodes"));
+        let index = NodeIndex(u8::try_from(out.nodes.len()).expect("at most seven nodes"));
         match self.nodes[node] {
             DraftNode::Star(body) => {
                 let mass = self.masses[usize::from(body)];
@@ -1262,9 +1719,11 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::order::assert_order_independent;
 
+    use super::super::direct::DirectPeriods;
     use super::super::testing::{
         SAMPLE, galaxy, imf_records, inner_disc, log_uniform_records, records_of_mass, sunlike,
     };
+    use super::direct_tries;
     use super::*;
     use crate::galaxy::imf::MassBand;
 
@@ -1626,12 +2085,13 @@ mod tests {
     }
 
     /// The decisions follow the model: at 1 M☉ the multiple share is 44% and the companions
-    /// asked for average 0.62 per system, each within 3.29 standard errors (α = 10⁻³).
+    /// asked for average 0.62 per system, each within 3.29 standard errors (α = 10⁻³). The masses
+    /// lie below the direct construction's blend (ruling 81), which its own test covers.
     #[test]
     fn multiplicity_follows_the_model() {
         let galaxy = galaxy();
         let model = MultiplicityModel::default_v1();
-        for mass in [0.3, 1.0, 3.0] {
+        for mass in [0.3, 1.0, 1.4] {
             let m1 = SolarMasses::new(mass);
             let records = records_of_mass(&galaxy, SAMPLE, &sunlike(), mass);
             let (mut multiples, mut asked, mut asked_sq) = (0_u32, 0.0, 0.0);
@@ -1656,6 +2116,235 @@ mod tests {
             );
             assert!((share - mf).abs() < 3.29 * sigma, "{share} against {mf}");
             assert!((mean - cf).abs() < 3.29 * sigma_mean, "{mean} against {cf}");
+        }
+    }
+
+    /// Ruling 81: from 3 M☉ up the direct companions number Moe and Di Stefano's Table 13 counts.
+    /// At each row mass the share of systems with n direct companions, those dropped included,
+    /// is the count distribution's within 3.29 standard errors (α = 10⁻³), and no system holds
+    /// more than four stars.
+    #[test]
+    fn direct_companions_of_massive_primaries_follow_table_13() {
+        let galaxy = galaxy();
+        for mass in [3.5, 12.0, 28.0] {
+            let pmf = direct_count_pmf(SolarMasses::new(mass));
+            let (mut counts, mut with_drops) = ([0_u32; 4], 0_u32);
+            for record in records_of_mass(&galaxy, SAMPLE, &sunlike(), mass) {
+                let h = free(&galaxy, &record);
+                assert!(h.star_count() <= 4, "{} stars", h.star_count());
+                let direct = u8::try_from(direct_log_periods(&h).len()).expect("few");
+                counts[usize::from(direct)] += 1;
+                with_drops += u32::from(h.dropped_companions() > 0);
+            }
+            let total = f64::from(SAMPLE);
+            // A system that lost a companion may sit one count low; it widens the bracket.
+            let dropped = f64::from(with_drops) / total;
+            for (n, (&count, &p)) in counts.iter().zip(&pmf).enumerate() {
+                let share = f64::from(count) / total;
+                let sigma = (p * (1.0 - p) / total).sqrt();
+                println!(
+                    "{mass} M☉: {n} direct companions {share:.4} against {p:.4} ({dropped:.4} \
+                     of systems lost one)"
+                );
+                assert!(
+                    (share - p).abs() < 3.29 * sigma + dropped,
+                    "{n} at {mass} M☉"
+                );
+            }
+            assert!(
+                dropped < 0.01,
+                "{dropped} of systems lost a companion at {mass} M☉"
+            );
+        }
+    }
+
+    /// Ruling 81.5's cross-check that the two conventions fit together: counted as Moe and Di
+    /// Stefano count (direct companions of q > 0.1 and log P < 8), Sun-like primaries drawn by the
+    /// spine construction give their `f_mult;q>0.1` = 0.50 ± 0.04 and Table 13's single, binary and
+    /// triple-plus fractions (0.60 ± 0.04, 0.30 ± 0.04, 0.10 ± 0.02), each within 2σ. Their §9.4
+    /// count of Raghavan's sample, 0.63 : 0.27 : 0.09 : 0.010, is printed beside it.
+    #[test]
+    fn sun_like_direct_companions_meet_moe_and_di_stefanos_counts() {
+        let galaxy = galaxy();
+        let mut counts = [0_u32; 4];
+        for record in records_of_mass(&galaxy, SAMPLE, &sunlike(), 1.0) {
+            let h = free(&galaxy, &record);
+            let m0 = h.stars()[0].initial_mass().value();
+            let counted = h
+                .pairs()
+                .filter(|(pair, orbit)| {
+                    let HierarchyNode::Pair { inner, outer, .. } = *h.node(*pair) else {
+                        unreachable!("pairs are pairs")
+                    };
+                    let q = h.star(h.first_star(outer)).initial_mass().value() / m0;
+                    h.first_star(inner) == StarIndex::PRIMARY
+                        && q > 0.1
+                        && Days::from(orbit.period()).value() < 1e8
+                })
+                .count();
+            counts[counted.min(3)] += 1;
+        }
+        let share = counts.map(|c| f64::from(c) / f64::from(SAMPLE));
+        let frequency = share[1] + 2.0 * share[2] + 3.0 * share[3];
+        println!(
+            "Sun-like direct companions: {share:.3?}, f_mult {frequency:.3} (§9.4: 0.63 : 0.27 : \
+             0.09 : 0.010, 0.50 ± 0.04)"
+        );
+        assert!((frequency - 0.50).abs() < 2.0 * 0.04, "{frequency}");
+        assert!((share[0] - 0.60).abs() < 2.0 * 0.04, "{share:?}");
+        assert!((share[1] - 0.30).abs() < 2.0 * 0.04, "{share:?}");
+        assert!((share[2] + share[3] - 0.10).abs() < 2.0 * 0.02, "{share:?}");
+    }
+
+    /// What [`direct_companions_meet_table_13_counted_as_moe_and_di_stefano_count`] measures at
+    /// one mass: the shares of systems with 0–3 counted direct companions, the counted companions
+    /// per system in the decades about log P = 1, 3, 5 and 7, those below log P = 3.7, the share
+    /// of compact triples and the share of direct companions dropped.
+    struct Counted {
+        shares: [f64; 4],
+        decades: [f64; 4],
+        close: f64,
+        compact: f64,
+        lost: f64,
+    }
+
+    /// [`Counted`] over 10⁴ systems of primaries of `mass` at the Sun-like point.
+    fn count_direct_companions(galaxy: &Galaxy, mass: f64) -> Counted {
+        let n = f64::from(SAMPLE);
+        let (mut shares, mut decades, mut close) = ([0.0; 4], [0.0; 4], 0.0);
+        let (mut compact, mut kept, mut dropped) = (0.0, 0_u32, 0_u32);
+        for record in records_of_mass(galaxy, SAMPLE, &sunlike(), mass) {
+            let h = free(galaxy, &record);
+            let m0 = h.stars()[0].initial_mass().value();
+            let mut periods: Vec<f64> = h
+                .pairs()
+                .filter_map(|(pair, orbit)| {
+                    let HierarchyNode::Pair { inner, outer, .. } = *h.node(pair) else {
+                        unreachable!("pairs are pairs")
+                    };
+                    let q = h.star(h.first_star(outer)).initial_mass().value() / m0;
+                    let x = math::log10(Days::from(orbit.period()).value());
+                    (h.first_star(inner) == StarIndex::PRIMARY && q > 0.1 && x < 8.0).then_some(x)
+                })
+                .collect();
+            periods.sort_by(f64::total_cmp);
+            shares[periods.len().min(3)] += 1.0 / n;
+            for &x in &periods {
+                for (decade, centre) in decades.iter_mut().zip([1.0, 3.0, 5.0, 7.0]) {
+                    if (x - centre).abs() <= 0.5 {
+                        *decade += 1.0 / n;
+                    }
+                }
+                if x < 3.7 {
+                    close += 1.0 / n;
+                }
+            }
+            if periods.len() >= 2 && periods[1] < 3.7 {
+                compact += 1.0 / n;
+            }
+            kept += u32::try_from(periods.len()).expect("few");
+            dropped += u32::from(h.dropped_companions());
+        }
+        let lost = f64::from(dropped) / f64::from(kept + dropped);
+        Counted {
+            shares,
+            decades,
+            close,
+            compact,
+            lost,
+        }
+    }
+
+    /// Ruling 81.8's acceptance, at Moe and Di Stefano's mean mass of each interval (3.5, 7, 12
+    /// and 28 M☉), 10⁴ systems each at the Sun-like point, counted as they count (direct
+    /// companions of q > 0.1 and log P < 8): `f_mult`, F0, F1, F≥2, the frequencies per decade at
+    /// log P = 1, 3, 5 and 7 and the close frequency below log P = 3.7, each within 2σ of Table
+    /// 13; direct companions dropped under 1%. The compact triples (a second direct companion
+    /// inside log P = 3.7), which the ruling asks for as a check at 10–20% of O stars, are
+    /// printed.
+    #[test]
+    fn direct_companions_meet_table_13_counted_as_moe_and_di_stefano_count() {
+        // Mass; F0, F1, F≥2, f_mult and the close frequency; the four per-decade frequencies;
+        // each a Table 13 value and its 1σ.
+        type Measured = (f64, f64);
+        let rows: [(f64, [Measured; 5], [Measured; 4]); 4] = [
+            (
+                3.5,
+                [
+                    (0.41, 0.08),
+                    (0.37, 0.06),
+                    (0.22, 0.07),
+                    (0.84, 0.11),
+                    (0.37, 0.08),
+                ],
+                [(0.07, 0.02), (0.12, 0.04), (0.13, 0.03), (0.09, 0.02)],
+            ),
+            (
+                7.0,
+                [
+                    (0.24, 0.08),
+                    (0.36, 0.08),
+                    (0.40, 0.10),
+                    (1.3, 0.2),
+                    (0.63, 0.13),
+                ],
+                [(0.14, 0.04), (0.22, 0.07), (0.20, 0.06), (0.11, 0.03)],
+            ),
+            (
+                12.0,
+                [
+                    (0.16, 0.09),
+                    (0.32, 0.10),
+                    (0.52, 0.13),
+                    (1.6, 0.2),
+                    (0.8, 0.2),
+                ],
+                [(0.19, 0.06), (0.26, 0.09), (0.23, 0.07), (0.13, 0.04)],
+            ),
+            (
+                28.0,
+                [
+                    (0.06, 0.06),
+                    (0.21, 0.11),
+                    (0.73, 0.16),
+                    (2.1, 0.3),
+                    (1.0, 0.2),
+                ],
+                [(0.29, 0.08), (0.32, 0.11), (0.30, 0.09), (0.18, 0.05)],
+            ),
+        ];
+        let galaxy = galaxy();
+        for (mass, counts, per_decade) in rows {
+            let c = count_direct_companions(&galaxy, mass);
+            let s = c.shares;
+            let values = [
+                s[0],
+                s[1],
+                s[2] + s[3],
+                s[1] + 2.0 * s[2] + 3.0 * s[3],
+                c.close,
+            ];
+            println!(
+                "{mass} M☉: F0, F1, F≥2, f_mult, close {values:.3?}; per decade {:.3?}; compact \
+                 triples {:.3}; {:.2}% dropped",
+                c.decades,
+                c.compact,
+                100.0 * c.lost
+            );
+            let names = ["F0", "F1", "F≥2", "f_mult", "close"];
+            for ((name, value), (mean, sigma)) in names.iter().zip(values).zip(counts) {
+                assert!(
+                    (value - mean).abs() <= 2.0 * sigma,
+                    "{name} {value} at {mass} M☉"
+                );
+            }
+            for (value, (mean, sigma)) in c.decades.iter().zip(per_decade) {
+                assert!(
+                    (value - mean).abs() <= 2.0 * sigma,
+                    "per decade {value} at {mass} M☉"
+                );
+            }
+            assert!(c.lost < 0.01, "{} dropped at {mass} M☉", c.lost);
         }
     }
 
@@ -1727,7 +2416,7 @@ mod tests {
     fn a_massive_primarys_stripped_mark_decides_its_orbit() {
         let galaxy = galaxy();
         let records = log_uniform_records(&galaxy, 4_000, &sunlike(), (8.0, 120.0), 14);
-        let (mut stripped, mut lost) = (0_u32, 0_u32);
+        let (mut stripped, mut lost, mut close_unstripped) = (0_u32, 0_u32, 0_u32);
         for record in &records {
             let h = free(&galaxy, record);
             let mark = StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0)).stripped();
@@ -1740,21 +2429,113 @@ mod tests {
                     assert!(h.dropped_companions() > 0);
                     lost += 1;
                 }
-            } else if let Some(o) = orbit {
-                assert!(o.periapsis() >= PROVISIONAL_INTERACTING_PERIASTRON);
+            } else if orbit.is_some_and(|o| o.periapsis() < PROVISIONAL_INTERACTING_PERIASTRON) {
+                // Every primary here is drawn by the direct construction, which does not hold an
+                // unset mark's orbit outside the threshold (ruling 81; P11.T1.d closes it).
+                close_unstripped += 1;
             }
         }
         let share = f64::from(stripped) / 4_000.0;
         let sigma = (0.25 * 0.75 / 4_000.0_f64).sqrt();
         println!(
-            "{stripped} of 4000 massive primaries stripped ({share:.4}); {lost} lost their companion"
+            "{stripped} of 4000 massive primaries stripped ({share:.4}); {lost} lost their \
+             companion; {close_unstripped} unstripped ones have an orbit inside the threshold"
         );
-        assert!((share - PROVISIONAL_STRIPPED_SHARE).abs() < 3.29 * sigma);
+        // Plan 06's design note 11 sets the provisional share at a quarter; held to that figure
+        // rather than to the constant, so that a change to the constant fails here.
+        assert!((share - 0.25).abs() < 3.29 * sigma, "{share}");
         assert!(lost < 4, "{lost} stripped primaries have no companion");
     }
 
-    /// The shapes the draw makes for Sun-like primaries, printed for the record: which member of
-    /// a triple holds the inner pair, and how many quadruples are 2 + 2.
+    /// The periods of the companions of `h` that orbit its primary directly, as x = log₁₀(P ÷ 1 d).
+    fn direct_log_periods(h: &SystemHierarchy) -> Vec<f64> {
+        h.pairs()
+            .filter(|(pair, _)| {
+                let HierarchyNode::Pair { inner, .. } = *h.node(*pair) else {
+                    unreachable!("pairs are pairs")
+                };
+                h.first_star(inner) == StarIndex::PRIMARY
+            })
+            .map(|(_, orbit)| math::log10(Days::from(orbit.period()).value()))
+            .collect()
+    }
+
+    /// The share of `periods` in each of the correction's eight bins, 0.2–1, 1–2, …, 7–8.
+    fn bin_shares(periods: &[f64]) -> [f64; 8] {
+        let mut counts = [0.0; 8];
+        for &x in periods {
+            let bin = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+                .iter()
+                .filter(|&&edge| x >= edge)
+                .count();
+            counts[bin] += 1.0;
+        }
+        let total: f64 = counts.iter().sum();
+        counts.map(|c| c / total)
+    }
+
+    /// The target shares of the eight bins at `m`: Moe and Di Stefano's law, uncorrected.
+    fn target_shares(m: f64) -> [f64; 8] {
+        let law = DirectPeriods::new(SolarMasses::new(m), &[[1.0; 8]; 4]);
+        let edges = [0.2, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        std::array::from_fn(|i| law.share(edges[i], edges[i + 1]))
+    }
+
+    /// Fits [`PERIOD_CORRECTION`] (ruling 81.3) and prints it: at each row's mass, 20,000 systems
+    /// at the Sun-like point are drawn with the table so far, and each bin's factor is multiplied
+    /// by the target share over the share of the direct companions that survive rejection, twelve
+    /// times from a table of ones.
+    #[test]
+    #[ignore = "slow: the fit of the direct companions' period correction, about 10⁶ hierarchies"]
+    fn fit_the_direct_period_correction() {
+        let galaxy = galaxy();
+        let mut table = [[1.0; 8]; 4];
+        for iteration in 0..12 {
+            for (row, &m) in super::super::direct::CORRECTION_MASSES.iter().enumerate() {
+                let target = target_shares(m);
+                let mut periods = Vec::new();
+                for record in records_of_mass(&galaxy, 2 * SAMPLE, &sunlike(), m) {
+                    let h = draw_hierarchy_with(
+                        &galaxy,
+                        &record,
+                        MultiplicityContext::Free,
+                        RedrawAttempt::FIRST,
+                        &table,
+                    );
+                    periods.extend(direct_log_periods(&h));
+                }
+                let (mut placed, mut tries, mut lost) = (0_usize, 0_u64, 0_u32);
+                for record in records_of_mass(&galaxy, 2 * SAMPLE, &sunlike(), m) {
+                    if let Some((n, t, d)) = direct_tries(&galaxy, &record, &table) {
+                        (placed, tries, lost) = (placed + n, tries + t, lost + u32::from(d));
+                    }
+                }
+                #[expect(clippy::cast_precision_loss, reason = "counts of a few 10⁴")]
+                let rejected = 1.0 - (placed as f64) / (tries as f64);
+                println!(
+                    "iteration {iteration}, {m} M☉: {:.2}% of tries rejected, {lost} of {} \
+                     direct companions dropped",
+                    100.0 * rejected,
+                    placed + lost as usize
+                );
+                let measured = bin_shares(&periods);
+                for bin in 0..8 {
+                    if measured[bin] > 0.0 {
+                        table[row][bin] *= target[bin] / measured[bin];
+                    }
+                }
+                let worst = (0..8)
+                    .map(|b| (measured[b] / target[b] - 1.0).abs())
+                    .fold(0.0, f64::max);
+                println!("iteration {iteration}, {m} M☉: worst relative miss {worst:.4}");
+            }
+        }
+        println!("PERIOD_CORRECTION = {table:?}");
+    }
+
+    /// The shapes the draw makes for Sun-like primaries: which member of a triple holds the inner
+    /// pair, and how many quadruples are 2 + 2, against Tokovinin's (2014, Table 3) corrected
+    /// 282 : 152 and 74% (ruling 74; the 2 + 2 share is held to this draw's reach).
     #[test]
     fn sun_like_hierarchies_take_every_shape() {
         let galaxy = galaxy();
@@ -1773,10 +2554,16 @@ mod tests {
                 _ => {}
             }
         }
+        let ratio = f64::from(primary_side) / f64::from(secondary_side);
+        let share = f64::from(two_two) / f64::from(two_two + three_one);
         println!(
             "Sun-like triples: inner pair about the primary {primary_side}, in the outer member \
-             {secondary_side}; quadruples 2 + 2 {two_two}, 3 + 1 {three_one}"
+             {secondary_side} ({ratio:.2}; Tokovinin 1.86); quadruples 2 + 2 {two_two}, 3 + 1 \
+             {three_one} ({share:.3}; Tokovinin 0.74, this draw's reach 0.65)"
         );
         assert!(primary_side > 0 && secondary_side > 0 && two_two > 0 && three_one > 0);
+        // Tokovinin's correlation (ruling 74), each bracket about 4 standard errors wide.
+        assert!((1.55..=2.2).contains(&ratio), "{ratio}");
+        assert!((0.58..=0.72).contains(&share), "{share}");
     }
 }

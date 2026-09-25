@@ -23,6 +23,7 @@ use hyperion_sim::stellar::multiplicity::HierarchyNode;
 use hyperion_sim::stellar::remnant::RemnantKind;
 use hyperion_sim::stellar::system::{SystemExistence, SystemStars};
 use hyperion_sim::units::consts::GM_SUN;
+use hyperion_sim::units::{Megayears, Years};
 use hyperion_sim::{Seed, time};
 
 /// The seed of every universe these tests create, the other integration tests' own.
@@ -41,9 +42,10 @@ const PINNED: [u64; 4] = [
     0x4200_acb2_0000_0009,
 ];
 
-/// A pinned triple of three living stars, an F3 IV subgiant with a K7.5 V and an F8.5 V companion
-/// (P11.T13's integration test).
-const TRIPLE: u64 = 0x4200_2cb2_0000_0009;
+/// A pinned triple of three living main-sequence stars (P11.T13's integration test). Until
+/// ruling 74's placement weights it was `0x4200_2cb2_0000_0009`, an F3 IV subgiant with a K7.5 V
+/// and an F8.5 V companion, which now draws as a binary.
+const TRIPLE: u64 = 0x4200_2cb2_0000_000d;
 
 /// The galaxy the server builds for [`SEED`], to hold its answers to.
 fn galaxy() -> &'static Galaxy {
@@ -106,16 +108,14 @@ async fn refused(client: &mut TestClient, body: RequestBody) -> RequestError {
     }
 }
 
-/// Whether `a` and `b` agree to a relative `1e-15`: `serde_json` writes a float that round-trips,
-/// but its own parser is exact only with `float_roundtrip`, so the test's reading can be a last
-/// bit out. A browser's `JSON.parse` is correctly rounded.
-fn close(a: f64, b: f64) -> bool {
-    (a - b).abs() <= 1e-15 * a.abs().max(b.abs())
-}
-
-fn assert_close(what: &str, wire: f64, sim: f64) {
-    assert!(
-        close(wire, sim),
+/// Holds a float on the wire to the sim's, bit for bit: `serde_json` writes the shortest decimal
+/// that round-trips, and the workspace builds it with `float_roundtrip` (ruling 64.7), so its
+/// parser reads that decimal back to the same bits, as a browser's correctly rounded `JSON.parse`
+/// does. A summary that matches only to a tolerance is a summary that differs.
+fn assert_bits(what: &str, wire: f64, sim: f64) {
+    assert_eq!(
+        wire.to_bits(),
+        sim.to_bits(),
         "{what}: the wire says {wire}, the sim {sim}"
     );
 }
@@ -148,38 +148,38 @@ fn snake(name: &str) -> String {
 
 /// Holds an orbit on the wire to the sim's elements.
 fn assert_orbit_is_the_sims(wire: &OrbitDto, sim: &KeplerElements) {
-    assert_close("period", wire.period_s, sim.period().value());
-    assert_close(
+    assert_bits("period", wire.period_s, sim.period().value());
+    assert_bits(
         "semi-major axis",
         wire.semi_major_axis_m,
         sim.semi_major_axis().value(),
     );
-    assert_close(
+    assert_bits(
         "eccentricity",
         wire.eccentricity,
         sim.eccentricity().value(),
     );
-    assert_close(
+    assert_bits(
         "inclination",
         wire.inclination_rad,
         sim.inclination().value(),
     );
-    assert_close(
+    assert_bits(
         "ascending node",
         wire.ascending_node_rad,
         sim.ascending_node().value(),
     );
-    assert_close(
+    assert_bits(
         "argument of periapsis",
         wire.argument_of_periapsis_rad,
         sim.argument_of_periapsis().value(),
     );
-    assert_close(
+    assert_bits(
         "mean anomaly at the epoch",
         wire.mean_anomaly_at_epoch_rad,
         sim.mean_anomaly_at_epoch().value(),
     );
-    assert_close("mu", wire.mu_m3_s2, sim.gravitational_parameter().value());
+    assert_bits("mu", wire.mu_m3_s2, sim.gravitational_parameter().value());
 }
 
 /// Holds one star on the wire to the sim's summary of it.
@@ -197,26 +197,26 @@ fn assert_star_is_the_sims(
         snake(&format!("{:?}", state.phase()))
     );
     assert_eq!(wire.class, sim.classification().to_string());
-    assert_close(
+    assert_bits(
         "initial mass",
         wire.initial_mass_msun,
         model.initial_mass().value(),
     );
-    assert_close("mass", wire.mass_msun, state.mass().value());
-    assert_close("core mass", wire.core_mass_msun, state.core_mass().value());
-    assert_close(
+    assert_bits("mass", wire.mass_msun, state.mass().value());
+    assert_bits("core mass", wire.core_mass_msun, state.core_mass().value());
+    assert_bits(
         "luminosity",
         wire.luminosity_lsun,
         state.luminosity().value(),
     );
-    assert_close("radius", wire.radius_rsun, state.radius().value());
-    assert_close(
+    assert_bits("radius", wire.radius_rsun, state.radius().value());
+    assert_bits(
         "mass-loss rate",
         wire.mass_loss_rate_msun_per_yr,
         state.mass_loss_rate().value(),
     );
     match wire.teff_k {
-        Some(teff) => assert_close("T_eff", teff, state.effective_temperature().value()),
+        Some(teff) => assert_bits("T_eff", teff, state.effective_temperature().value()),
         None => assert_eq!(
             state.luminosity().value().to_bits(),
             0,
@@ -228,11 +228,11 @@ fn assert_star_is_the_sims(
         sim.absolute_magnitude_v().is_some()
     );
     if let (Some(wire), Some(sim)) = (wire.absolute_v_mag, sim.absolute_magnitude_v()) {
-        assert_close("M_V", wire, sim.value());
+        assert_bits("M_V", wire, sim.value());
     }
     assert_eq!(wire.colour_b_v_mag.is_some(), sim.colour_b_v().is_some());
     if let (Some(wire), Some(sim)) = (wire.colour_b_v_mag, sim.colour_b_v()) {
-        assert_close("B-V", wire, sim.value());
+        assert_bits("B-V", wire, sim.value());
     }
     match (&wire.remnant, sim.remnant()) {
         (None, None) => {}
@@ -248,10 +248,10 @@ fn assert_star_is_the_sims(
                 .expect("a white dwarf's star died")
                 .age()
                 .value();
-            assert_close(
+            assert_bits(
                 "cooling age",
                 *cooling_age_myr,
-                (state.age().value() - died) / 1e6,
+                Megayears::from(Years::new(state.age().value() - died)).value(),
             );
         }
         (Some(RemnantDto::NeutronStar { .. }), Some(remnant)) => {
@@ -282,12 +282,12 @@ fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
             SystemExistence::Exists => SystemExistenceDto::Exists,
         }
     );
-    assert_close(
+    assert_bits(
         "age",
         wire.age_myr,
-        stars.record().age_at(time).value() / 1e6,
+        Megayears::from(stars.record().age_at(time)).value(),
     );
-    assert_close("[Fe/H]", wire.fe_h_dex, sim.composition().fe_h().value());
+    assert_bits("[Fe/H]", wire.fe_h_dex, sim.composition().fe_h().value());
     assert_eq!(wire.stars.len(), sim.stars().len());
     for (star, summary) in wire.stars.iter().zip(sim.stars()) {
         assert_star_is_the_sims(star, stars, summary);
@@ -308,7 +308,7 @@ fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
             ) => {
                 let slot = hierarchy.star(*index);
                 assert_eq!(*body_index, slot.body().body_index());
-                assert_close("star node mass", *mass_msun, slot.initial_mass().value());
+                assert_bits("star node mass", *mass_msun, slot.initial_mass().value());
             }
             (
                 HierarchyNodeDto::Pair {
@@ -387,7 +387,7 @@ async fn a_pinned_triple_returns_three_stars_and_two_orbits() {
             .map(|star| (star.body_index, star.kind))
             .collect::<Vec<_>>(),
         [
-            (0, ObjectKindDto::Subgiant),
+            (0, ObjectKindDto::Dwarf),
             (1, ObjectKindDto::Dwarf),
             (2, ObjectKindDto::Dwarf)
         ]

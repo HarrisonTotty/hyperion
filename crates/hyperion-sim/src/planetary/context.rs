@@ -820,22 +820,26 @@ fn synthetic_hierarchy(
             let hierarchy = SystemHierarchy::binary(id, primary, (companion, kind), a, e)
                 .map_err(BuildSystemContextError::Orbit)?;
             if let Some((_, orbit)) = hierarchy.pairs().next() {
-                check_orbit(Days::from(orbit.period()), e)?;
+                check_orbit(primary, Days::from(orbit.period()), e)?;
             }
             Ok(hierarchy)
         }
     }
 }
 
-/// Checks a synthetic binary's orbit of period `period` and eccentricity `e` against plan 11's
-/// draw: its period range and its eccentricity envelope.
-fn check_orbit(period: Days, e: Eccentricity) -> Result<(), BuildSystemContextError> {
+/// Checks a synthetic binary's orbit of period `period` and eccentricity `e` about a primary of
+/// `primary` against plan 11's draw: its period range and its eccentricity envelope.
+fn check_orbit(
+    primary: SolarMasses,
+    period: Days,
+    e: Eccentricity,
+) -> Result<(), BuildSystemContextError> {
     let log_period = math::log10(period.value());
     if !(LOG_PERIOD_MIN..=LOG_PERIOD_MAX).contains(&log_period) {
         return Err(BuildSystemContextError::PeriodOutsideRange(period));
     }
     let e_max = MultiplicityModel::default_v1()
-        .eccentricity_distribution(period)
+        .eccentricity_distribution(primary, period)
         .e_max();
     if e.value() > e_max || e.value() >= OpenOrbit::MIN_ECCENTRICITY {
         return Err(BuildSystemContextError::EccentricityAboveEnvelope {

@@ -516,10 +516,12 @@ async fn a_pinned_systems_bodies_are_the_sims_snapshot() {
 /// Systems whose bodies are in every state a record can carry, one found for each by sampling the
 /// universe of [`SEED`] (`val14`, round 8): a black hole whose survivors a supernova left on
 /// eccentric orbits, a neutron star whose planets it unbound, a white dwarf that engulfed a planet,
-/// and a young star with giants still forming.
+/// and a young star with giants still forming. The neutron star is re-picked after plan 11's
+/// ruling 81 (`0x81ff_b2a0_0000_0002` no longer unbinds a planet): `0x81fa_b2e0_0000_0002`, a
+/// neutron star and its companion, the first such system of layer E at the solar circle.
 const VARIED: [u64; 4] = [
     0x81ff_b29f_f000_0007,
-    0x81ff_b2a0_0000_0002,
+    0x81fa_b2e0_0000_0002,
     0x41ff_6cae_0000_0005,
     0x01ff_fb2b_2005_0000,
 ];

@@ -46,8 +46,8 @@ pub(super) const NECESSARY_AXIS_RATIO: f64 = MARDLING_AARSETH_C * (1.0 - INCLINA
 /// at the system's epoch position and at the sum of its stars' initial masses, the mass the
 /// orbits are bound to, [`SystemHierarchy::system_mass`]. The frame rule (plan 03), which reads
 /// the radius at the primary's mass alone, therefore always finds a companion inside its system's
-/// sphere of influence: at most six stars, each no heavier than the primary, put the cut at no
-/// more than 0.91 of that radius.
+/// sphere of influence: at most four stars, each no heavier than the primary, put the cut at no
+/// more than 0.5 × 4^⅓ = 0.79 of that radius.
 pub const TIDAL_CUT_SHARE: f64 = 0.5;
 
 /// The largest eccentricity a companion's orbit may have: plan 14's
@@ -227,6 +227,18 @@ impl<'g> Limits<'g> {
     #[must_use]
     pub(super) fn innermost(&self) -> Innermost {
         self.innermost
+    }
+
+    /// These limits with an unset stripped mark no longer holding the primary's orbit outside
+    /// its threshold: the direct construction's (ruling 81), for which see
+    /// [`Draw::direct`](super::hierarchy).
+    #[must_use]
+    pub(super) fn without_wide_innermost(self) -> Self {
+        let innermost = match self.innermost {
+            Innermost::Wide(_) => Innermost::Free,
+            other => other,
+        };
+        Self { innermost, ..self }
     }
 
     /// The tidal cut of a system of total initial mass `mass`: [`TIDAL_CUT_SHARE`] of its tidal

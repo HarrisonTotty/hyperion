@@ -207,9 +207,10 @@ mod tests {
             "worst barycentre offset {worst:.3e} m, with a star {worst_at:.3e} m out; the \
              farthest star is {widest:.3e} m out"
         );
-        // The plan's 1 m, where the positions can resolve it: the fixture's sample since plan 02's
-        // P02.T12 has its worst offset, 1.29 m, beside a star 1.56 × 10¹⁶ m out, where an f64 is
-        // spaced 2 m apart and ε × 1.56 × 10¹⁶ is 3.5 m.
+        // The plan's 1 m, where the positions can resolve it. The widest orbits now reach
+        // 1.5–1.6 × 10¹⁶ m, where an f64 is spaced 2 m apart: since plan 02's P02.T12 (the
+        // fixture's worst offset 1.29 m) and ruling 74's heavier massive-star anchors (1.48 m), so
+        // the bound is the positions' own resolution there.
         assert!(
             worst < f64::max(1.0, f64::EPSILON * worst_at),
             "a barycentre {worst} m from the origin, with a star {worst_at} m out"

@@ -441,7 +441,9 @@ given; where it is not, the task that builds it is named.
    and rings never collide with a star. A pair's streams (`binary.*`) are keyed by the `BodyId` of
    the lowest-indexed star of its outer member, "the star the orbit brings in"; with the numbering
    above no two pairs share a key. A system's ID, layer and census band stay those of its primary's
-   initial mass, whatever mass transfer does later.
+   initial mass, whatever mass transfer does later. _(Ruling 81: above the 1.5–3 M☉ blend, draws
+   are keyed by draw slot and bodies numbered after sorting; later `binary.*` tags key by
+   `pair_key`, still distinct per pair. See Risks, "Ruling 81 as built".)_
 6. **"Run forward once" means a timeline.** `evolve` integrates a binary once, from zero age to its
    age at +H, and returns an ordered list of segments with their boundary ages and parameters. State
    at any age is a lookup plus closed forms inside the segment (single-star evolution of each
@@ -571,12 +573,16 @@ late are re-validated against the code when their turn comes (README). The re-va
   2), `multiple_fraction`, `companion_frequency`, `companion_count_pmf`. Doc comments cite Duchêne
   and Kraus (2013) and Raghavan et al. (2010), re-checked. Tests: anchors are reproduced; the PMF
   sums to 1 and its mean equals frequency ÷ fraction to 1% before truncation. Acceptance:
-  `cargo test -p hyperion-sim multiplicity::model`.
+  `cargo test -p hyperion-sim multiplicity::model`. _As built after ruling 74 (round 8, `mult3`):_
+  from 2 M☉ up the anchors are Moe and Di Stefano's (2017) Table 13 at 3.5, 7, 12 and 28 M☉,
+  extended over the model's laws, and `MAX_COMPANIONS` is 3 (see Risks).
 - **P11.T1.b Distributions.** `PeriodDistribution`, `MassRatioDistribution`,
   `EccentricityDistribution` with densities, CDFs and samplers on a supplied stream (Design note 3).
   Tests: Kolmogorov–Smirnov of 10⁵ samples against each CDF at five primary masses; the Sun-like
   period mode lies within 0.1 dex of 10⁵ days; no companion under 0.08 M☉. Acceptance:
-  `cargo test -p hyperion-sim multiplicity::dist`.
+  `cargo test -p hyperion-sim multiplicity::dist`. _As built after ruling 74:_ eccentricities are
+  Moe and Di Stefano's `e^η` (eqs. 17–18), so `eccentricity_distribution` takes the primary's mass
+  as well as the period (see Risks).
 - **P11.T1.c Quadratures.** `all_stars_fraction_below`, `mean_companion_mass_per_system`,
   `stripped_share` (the share of primaries whose periastron passes the `can_interact` threshold
   before core collapse; it takes the threshold as a function so that T4.a can supply the real one,
@@ -626,7 +632,12 @@ Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`, 
   tags. Draw numbers follow Design note 9. Body indices and stream keys follow Design note 5.
   Orbits are T3.a's `KeplerElements`. Nothing calls it yet. Tests: the numbering rule gives every
   pair of 10⁴ hierarchies a distinct key; attempt n drawn alone equals attempt n drawn after
-  attempts 0 to n − 1.
+  attempts 0 to n − 1. _As built after ruling 74:_ a node inside a secondary component is weighted
+  by Tokovinin's (2014) correlation of subsystems, 0.275 or 20 (see Risks). _As built after ruling
+  81:_ from 3 M☉ up (blended across 1.5–3 M☉) the direct companions are drawn from Moe and Di
+  Stefano's Table 13 laws, each newest companion redrawn until the whole test passes, and bodies
+  are numbered after sorting; Design note 5's "companion k is body k" holds only below the blend
+  (see Risks).
 - **P11.T2.b Stability and the tidal cut.** The Mardling–Aarseth condition and the half-tidal-radius
   cut as redraws of the outer orbit only, at most 16 (each on the next draw numbers of the same
   attempt block, which 64 leaves room for), then the companion is dropped (counted by a test, under
@@ -635,7 +646,10 @@ Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`, 
   at a cluster's hard–soft boundary, the separation at which a pair's orbital speed equals plan 09's
   `ClusterModel::sigma(r)` at the member's radius; T8.f supplies it. _Slice:_ plan 09 is not built,
   so `ForcedMultiple` is defined and tested with an explicit `max_separation`, and no caller passes
-  it until T8.f; grid systems use `Free`.
+  it until T8.f; grid systems use `Free`. _As built after ruling 81:_ direct companions from 1.5 M☉
+  up (blended) get 42 tries rather than 17, 21 on their draw slot's key and 21 on slot + 8, three
+  words each inside the same attempt block (Design note 9). A subsystem gets one try on slot 3 + k,
+  and one that fails is truncated (Tokovinin 2014, §4.3), not counted as dropped (see Risks).
 - **P11.T2.c Wire into the system stage (version bump).** `SystemStars::generate` calls
   `draw_hierarchy` with `Free` for grid systems (`generate_in` takes the context for everything
   else); each companion gets a `StarModel` from `StarDraws::for_attempt` on its own body index, with
@@ -1464,9 +1478,142 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     model's PMF sums are 4,898 : 2,629 : 1,180 : 587 : 311 : 395, and the difference is the dropped
     companions. Layer E (8–150 M☉) has 8% sextuples (227 of 2,805). That follows from the capped geometric
     count with a mean near 2.2 for O stars, a property of the model, not of this wiring.
-  - _A pinned triple_, `42002cb200000009` of seed `0x4d2` at the epoch, answers as follows. An
+  - _A pinned triple_ (superseded: since rulings 74 and 81 `…0009` draws as a binary, and the
+    server's test pins `0x4200_2cb2_0000_000d`, three main-sequence dwarfs; the paragraph below
+    is the answer as it was), `42002cb200000009` of seed `0x4d2` at the epoch, answered as follows. An
     F3 IV subgiant of 1.681 M☉ (11.3 L☉, 6,743 K) and a K7.5 V star of 0.628 M☉ orbit each other in
     3.96 d (a = 0.0648 au, e = 0, circularised). An F8.5 V star of 1.149 M☉ orbits that pair in
     274.6 d (a = 1.250 au, e = 0.525). The system is 1.516 Gyr old with [Fe/H] −0.014, and its
     cached `SystemStars` is charged 16.2 KB. Until T4 the inner pair is two single stars on an
     orbit (ruling 33).
+- **Validated as built (round 8, `val11`: T1.a–c, T2.a–c, T3.a–b, T13's slice, P06.T33–T34).** An
+  independent sample of 140,000 hierarchies (seven mass bins at the Sun-like point) and independent
+  solutions for the orbits. Nothing generated moved; four tests were added where a constant could
+  change unnoticed, and the server's summary test now holds the wire to the sim bit for bit.
+  - _Stability._ No pair of 162,000 fails Mardling and Aarseth's eq. 90 written out afresh, and no
+    apocentre leaves the half tidal radius; the smallest margin is 1.000 005. The criterion is
+    applied beyond its stated q_out ≤ 5 for 0.4% of Sun-like pairs and 10% of O-star pairs.
+  - _Orbits._ Against 70-digit decimal solutions, bound states agree to 1.1 × 10⁻¹⁴ (e = 0.9998,
+    10⁹ periods out) and open ones to 6 × 10⁻¹⁶ (e from 1 − 10⁻⁷ through the parabola to 3); the
+    mean anomaly 10⁹ periods out is within one unit in the last place of the exact rational.
+    Eggleton's lobe is within 0.81% of lobes integrated from the equipotential (worst at q = 0.05).
+    `tests/orbit_reference.rs` and the Roche test pin these.
+  - **For the orchestrator to rule (each moves output):** (1) the massive stars' fractions are
+    Duchêne and Kraus's lower limits; counted as Moe and Di Stefano (2017, Table 13) count, their
+    single fraction is 0.53 at 9–16 M☉ and 0.44 above 16 against 0.16 and 0.06, and their
+    companion frequency 0.59 and 0.70 against 1.6 and 2.1 (Offner et al. 2023, Table 1: MF 93% and
+    96%). (2) Sextuples are 8–9% of systems above 8 M☉ because the count is geometric capped at
+    five; Moe and Di Stefano's own model stops at quadruples. (3) Tokovinin's (2014) correlated
+    subsystems: Sun-like triples split 1,005 : 943 against 282 : 152, and 42% of quadruples are
+    2 + 2 against 74%. (4) Eccentricities are flat on [0, e_max] (mean e ÷ e_max 0.46–0.50) against
+    Moe and Di Stefano's e^η with η ≈ 0.4 for solar-type and 0.8 for early-type pairs (their eqs.
+    17–18). (5) The provisional stripped share, 0.25, removes a third of O stars' close
+    companions (0.22 per star inside 10^3.7 d against 0.33 without the mark), until T1.d.
+- **Ruling 74 as built (round 8, `mult3`; moves output, version still 11, for the batch of 12).**
+  Every decision draws the words it drew before: the weights and laws change, the draws do not.
+  - _Massive anchors._ `FRACTION_ANCHORS` keeps Duchêne and Kraus below 2 M☉ and takes Moe and Di
+    Stefano's (2017) Table 13 at 3.5, 7, 12 and 28 M☉ (their §9.1 masses): f_mult;q>0.1 0.84, 1.3,
+    1.6, 2.1 and F_n=0 0.41, 0.24, 0.16, 0.06. Each is extended over the model's own laws by the
+    share s they would count (q > 0.1, log P < 8: 0.785, 0.698, 0.703, 0.718), MF and CF solved so
+    that, thinned by s, the counts are Table 13's: MF 0.688, 0.874, 0.919, 0.961 and CF 1.070,
+    1.861, 2.275, 2.884. At 28 M☉ the cap binds: every multiple has three companions, the single
+    fraction is met and the counted frequency is 2.07. The 2.7, 11 and 30 M☉ anchors and the B
+    star's surveyed share are gone; the O-star period anchor keeps its shape.
+  - _Cap._ `MAX_COMPANIONS` is 3, so the count PMF has four entries and a hierarchy at most four
+    stars and seven nodes. Sun-like systems split 56 : 30.3 : 9.4 : 4.3 (Raghavan 56 : 33 : 8 : 3,
+    all within 2σ; Tokovinin's 4.3% quadruples).
+  - _Tokovinin's correlation._ A new orbit inside a secondary component weighs 0.275 when the
+    primary component is a star and 20 when it is a pair. The first gives Sun-like triples 1.86 :
+    1 (1,294 : 696). **For the orchestrator to rule:** the 2 + 2 share cannot reach 74%, because
+    companions join the outer spine only, so a 2 + 2 forms only from an L11 triple, 65% of them.
+    The second weight takes the share to that reach (65.1%; 1.2 gives 59%, 1,000 gives 66%).
+    Reaching 74% needs a third, count-aware weight on the second companion.
+  - _Eccentricities._ `p(e) ∝ e^η` under the envelope, η from eqs. 17–18, interpolated linearly
+    across 3–7 M☉, held beyond log P = 6 (late) and 5 (early) and at 12 d below it, eq. 17 below
+    0.8 M☉. `eccentricity_distribution(m1, period)` takes the primary mass: a change to the
+    Provides sketch. `stripped_share`'s eccentricity integral follows.
+  - _Measured (`val11`'s sampler, 20,000 per bin)._ Mardling and Aarseth hold for every pair, and
+    no apocentre leaves the cut. Dropped companions are at most 0.19% (O stars). No quintuples or
+    sextuples. **A finding for the orchestrator:** counted as Moe and Di Stefano count, directly
+    about the primary, the massive stars' frequencies are 0.68, 0.81, 0.85 and 0.98 against 0.84,
+    1.3, 1.6 and 2.1. The fit assumes every companion orbits the primary directly, but the draw
+    puts about half of a massive star's companions in subsystems of its companions (L12 in 75% of
+    O systems), where the stability windows leave the most room. Closing it needs the placement,
+    not the anchors. Mean e ÷ e_max is 0.55–0.60, against (1 + η) ÷ (2 + η), because stability
+    rejects eccentric outer orbits.
+  - _Consequences._ Chabrier's function as published gives 1.463 stars per system, just above
+    T1.d's 1.33–1.45; the default gives 1.436 and Kroupa 1.406. The barycentre test's 1 m is
+    exceeded at the positions' resolution (1.48 m with a star 1.5 × 10¹⁶ m out). The P11.T13
+    triple is now `0x4200_2cb2_0000_000d`, because `…0009` draws as a binary.
+- **Ruling 79's placement weight was built and taken out again (ruling 81.1).** A factor
+  `(1.5 M☉ ÷ m₀)^k` on subsystem weights moved O stars' counted frequency only from 0.98 to 1.03
+  at k = 0.5, and to 1.18 with subsystems barred, while dropping 16% of companions: the spine
+  construction left too few companions near log P = 3 and piled them up at 7.
+- **Ruling 81 as built (round 8, `mult3`; moves output, version still 11, for the batch of 12).**
+  From 3 M☉ up, and for a share of 1.5–3 M☉ primaries rising linearly in ln M₁ (one mark, word
+  64n + 2 of `system.multiplicity`), a system's direct companions are drawn as Moe and Di Stefano
+  count them (`stellar/multiplicity/direct.rs`).
+  - _Count._ n = 0–3 from Table 13's F_n=0 and f_mult at 1, 3.5, 7, 12 and 28 M☉, interpolated in
+    ln M₁: F_n=0 for none, and a capped geometric of mean f_mult ÷ (1 − F_n=0) for a multiple.
+    The unset stripped mark still gives the multiple decision (MF − s) ÷ (1 − s).
+  - _Each companion._ Its period is drawn from their `f_logP;q>0.1` (eqs. 20–23, converted from
+    q > 0.3 by their mass-ratio law) on log P = 0.2–8, times a fitted correction, and its mass
+    ratio from their laws on q = 0.1–1 (eqs. 5–7, 9–15), with eccentricity e^η. The flat
+    extension below q = 0.1 does not apply to direct companions.
+  - _Rejection (as amended)._ Slot by slot, the newest companion is inserted by period and the
+    whole hierarchy must pass the whole test. A failure redraws that companion alone, up to 42
+    tries: 21 on its slot's key and 21 on slot + 8, since an attempt's block holds 21 tries of
+    three words. Tries rejected: 29%, 50%, 59% and 64% at 3.5, 7, 12 and 28 M☉. Direct
+    companions dropped: 0.04%, 0.20%, 0.31% and 0.49%. Seventeen tries dropped 1.8% at 28 M☉.
+  - _Blend._ Ruling 81.2's "M₁ ≥ 2 M☉" is read through 81.5's blend: at 2 M☉ 41% of systems use
+    the direct construction.
+  - _Correction._ The fit targets the bin shares of Moe and Di Stefano's own eqs. 20–23 law,
+    normalised, not the research's per-decade figures directly; the absolute frequencies follow
+    from the count law. `PERIOD_CORRECTION`, 4 masses × 8 decade bins, is solved by the ignored test
+    `fit_the_direct_period_correction` (c ← c × target ÷ measured, twelve iterations, every bin
+    within 0.2%). It absorbs the provisional stripped mark's set branch above 8 M☉, and is to be
+    refitted when P11.T1.d replaces the seam.
+  - _Subsystems._ Each direct companion is offered one at its own mass's rate (Table 13 from
+    2 M☉, Duchêne and Kraus below) times Tokovinin's ε₋ = 0.5 (innermost) or ε₊ = 1.2. One draw
+    from its own laws, kept only if the whole hierarchy passes: Tokovinin's dynamical truncation,
+    not a dropped companion. Subsystems never count, and they are only offered while the system
+    holds fewer than four stars. This rests on solar-type evidence; the subsystem rate of O and B
+    stars is unconstrained.
+  - _The cap (ruling 81 as amended): four stars in total, a game-side departure._ An O system
+    with three direct companions (about 38%) holds no subsystem, one with two may take one.
+    Ruling 81 says one with one may take two; this build offers each direct companion at most one
+    subsystem, so it takes at most one. Real sextuples exist (ν Sco, AR Cas; Offner et al. 2023
+    §2.1), and the cap is revisited if subsystem statistics are ever measured.
+  - _Draw order and numbering (Design note 5)._ Draws are keyed by draw slot (direct 1–3, their
+    overflow tries 9–11, subsystems 4–6), and body indices are given after sorting, depth first.
+    Slot keys are distinct by construction and never body 0. `system.multiplicity` reads word
+    64n + 2 for the blend and words 64n + 4 to 64n + 6 for the subsystem decisions of slots 1–3;
+    word 64n + 3 is unused, and `system.hierarchy` is still not read. A subsystem's one try uses
+    words 0–2 of slot 3 + k's block. A companion's own star draws (`StarDraws::for_attempt`) are
+    keyed by its body index after sorting, not its draw slot: deterministic, but two companions
+    can swap star draws if one's period changes.
+    So above the blend "companion k is body k when its orbit is drawn" no longer holds, and
+    `SystemHierarchy::pair_key` is a distinct body of each pair, not its stream key.
+  - _Measured (ruling 81.8; `direct_companions_meet_table_13_counted_as_moe_and_di_stefano_count`,
+    10⁴ systems at each of 3.5, 7, 12 and 28 M☉)._ F0 / F1 / F≥2 / f_mult: 0.412/0.403/0.184/0.830,
+    0.243/0.399/0.358/1.284, 0.161/0.366/0.472/1.577, 0.059/0.272/0.668/2.079. Per decade at log P
+    = 1, 3, 5, 7: 0.080/0.113/0.128/0.101, 0.132/0.198/0.199/0.121, 0.190/0.243/0.230/0.136,
+    0.293/0.321/0.292/0.171. Close frequency 0.336, 0.579, 0.754 and 1.039. All are within 2σ of
+    Table 13 and most within 1σ. Direct companions dropped: 0.07%, 0.22%, 0.32%, 0.46%. **Compact
+    triples are 25% of O stars, against the ruling's 10–20% check**, and 3–13% below: a finding.
+    Sun-like targets are unchanged, and the 1 M☉ cross-check passes against Table 13, but F1 is 2.1σ
+    above §9.4's 0.27 ± 0.03 (0.33).
+  - _After the merge onto `abf2a54`._ Plan 14's supernova-overlap test samples 360 massive
+    systems rather than 120, since only 18 of 120 are now single and 120 held 33 surviving pairs
+    about exploded hosts (it asks for more than 60). No orbits crossed. P14.T32's
+    `fallback_black_hole` is re-pinned to `0x8201_b2e0_0000_0010`, and the server's unbound-body
+    system to `0x81fa_b2e0_0000_0002`.
+  - **For the orchestrator to rule:** an unset stripped mark no longer holds a direct
+    construction's orbits outside 10 au. Under Table 13 nearly every O star has a close
+    companion, which the provisional share of 0.25 contradicts. Holding every companion of three
+    quarters of the primaries above 8 M☉ outside 10 au rejected most sets and dropped 18–27% of
+    their companions. A set mark still asks for an interacting innermost orbit. P11.T1.d's stripped
+    share, computed from this model, closes the gap.
+  - _Also._ Ruling 74's extended anchors (`FRACTION_ANCHORS` above 2 M☉) now serve only the
+    quadratures (T1.c), the blend's spine share and subsystem rates below 2 M☉. P11.T1.d must
+    re-derive the quadratures from the direct construction above 1.5 M☉.

@@ -59,47 +59,72 @@ star 1 zams_l = 0x3fa5a5ea5d054e2f  # 0.04228145967013252
 star 1 zams_r = 0x3fde86d2d20edb8d  # 0.4769789744709037
 star 1 disc_rank = 0x3fc2a691cc368284  # 0.14570829840979027
 star 0 inner none
-star 0 outer_m = 0x4219c1781d73bee8  # 27655014236.93643
+star 0 outer_m = 0x421918b3fc8f3293  # 26947157795.79939
 star 1 inner none
-star 1 outer_m = 0x4214033650f03440  # 21488309308.051025
-barycentre inner_m = 0x424b2883267cbabf  # 233287601401.45895
+star 1 outer_m = 0x421387fec535def9  # 20971499853.467747
+barycentre inner_m = 0x424bd9f3acdcac44  # 239241484729.34583
 barycentre outer none
 
-layer E: Stellar, 1 stars, 1 zones
+layer E: Stellar, 4 stars, 6 zones
 id = 0x8200b2e000000000
 fe_h = 0xbf889b1d181b72ca  # -0.0120146058065357
 age_at_epoch_yr = 0x41f2ea553584f047  # 5077554008.308661
-tidal_radius_m = 0x4372fee5a4e9c509  # 8.554898957666318e16
-strip_radius_m = 0x436298c6b5ac8a5e  # 4.187623039777662e16
+tidal_radius_m = 0x4376787201bcdfc6  # 1.0119808861431306e17
+strip_radius_m = 0x4365ffa4dc534698  # 4.953646437670624e16
 star 0 Star
 star 0 mass = 0x4020e59765b0dcce  # 8.448420694198287
 star 0 zams_l = 0x40a91be7ea9e8e6f  # 3213.9529618786687
 star 0 zams_r = 0x400c6f94751bedfa  # 3.5544823788784443
 star 0 disc_rank = 0x3fe2ba96a682e97f  # 0.5852769138503361
+star 1 Star
+star 1 mass = 0x3ff49eb88c033e06  # 1.288750216412042
+star 1 zams_l = 0x4002d572b8830ab1  # 2.3542227187147877
+star 1 zams_r = 0x3ff4211f807ba5f3  # 1.2580866831652855
+star 1 disc_rank = 0x3fe6baf34b8fca25  # 0.7103210902990368
+star 2 Star
+star 2 mass = 0x40076fc31a8b1693  # 2.929571349496493
+star 2 zams_l = 0x40525d48bde102b6  # 73.45756480191889
+star 2 zams_r = 0x3fff2284eaa7aa9d  # 1.9459275404175636
+star 2 disc_rank = 0x3fdcfd921641979e  # 0.4529767243715187
+star 3 Star
+star 3 mass = 0x3ff515a654c765d4  # 1.317785578887528
+star 3 zams_l = 0x4004dd85a36019ac  # 2.6081650508596876
+star 3 zams_r = 0x3ff4abf9eb574cad  # 1.2919863884933804
+star 3 disc_rank = 0x3fd6712fa793b3e6  # 0.35065833439767713
 star 0 inner none
-star 0 outer none
+star 0 outer_m = 0x41ea60c31914ab14  # 3540392136.6458836
+star 1 inner none
+star 1 outer_m = 0x41d1201308d09c09  # 1149258787.2595236
+pair 1 inner_m = 0x4210632fbba855ba  # 17595887338.083717
+pair 1 outer_m = 0x42458df6452099f2  # 185152080449.2027
+star 2 inner none
+star 2 outer_m = 0x42382fdeed54b62e  # 103882354004.71164
+star 3 inner none
+star 3 outer_m = 0x42a050e5120ff2b1  # 8969813297145.346
+barycentre inner_m = 0x4325b5d2e278b97d  # 3055445929123006.5
+barycentre outer none
 
 layer E: Stellar, 2 stars, 3 zones
 id = 0x8200b2e000000001
 fe_h = 0xbfaae1fcc9e011d9  # -0.05250539745614775
 age_at_epoch_yr = 0x420233b061987ba3  # 9772076083.06037
-tidal_radius_m = 0x43775abe4ba34bd6  # 1.051791651779864e17
-strip_radius_m = 0x4366dd30923dd1ab  # 5.1485201354624344e16
+tidal_radius_m = 0x4377ffb0f27096f3  # 1.0808095857819218e17
+strip_radius_m = 0x43677eac7690877e  # 5.290562922402507e16
 star 0 Star
 star 0 mass = 0x402bb9de8865c6f8  # 13.86302591555021
 star 0 zams_l = 0x40cd747ba4ea262a  # 15080.965970295558
 star 0 zams_r = 0x4012d481d2e1d281  # 4.707526488335703
 star 0 disc_rank = 0x3f8629743bd030c0  # 0.010821254802089064
 star 1 Star
-star 1 mass = 0x3ffdccbfe8d2828e  # 1.8624877066251062
-star 1 zams_l = 0x4028947300ae3558  # 12.289939900651618
-star 1 zams_r = 0x3ff8a7431cc90d52  # 1.5408354877880197
+star 1 mass = 0x40099a2dc98e377b  # 3.200282644894228
+star 1 zams_l = 0x405a4808bf31f394  # 105.12553386571955
+star 1 zams_r = 0x400020d3266ffc93  # 2.0160277369428257
 star 1 disc_rank = 0x3fefd384e760f3a7  # 0.9945702094188292
 star 0 inner none
-star 0 outer_m = 0x426798393e4499a2  # 810705089060.801
+star 0 outer_m = 0x42503182139a4bc8  # 278200340073.1841
 star 1 inner none
-star 1 outer_m = 0x42529139dd8f4983  # 318983599677.1486
-barycentre inner_m = 0x42b2a883ec25efba  # 20514977097199.727
+star 1 outer_m = 0x424034140334f542  # 139186407017.91608
+barycentre inner_m = 0x42ab59e91ed738d1  # 15036488575900.408
 barycentre outer none
 
 median sun: Stellar, 1 stars, 1 zones

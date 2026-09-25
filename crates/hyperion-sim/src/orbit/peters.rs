@@ -367,6 +367,34 @@ mod tests {
         }
     }
 
+    /// Peters's (1964, eq. 5.10) circular merger time, T = (5 ÷ 256) c⁵ a⁴ ÷ (G³ m₁ m₂ (m₁ +
+    /// m₂)), written out from the paper: the eccentric quadrature at e = 0 and the inverse agree
+    /// with it to rounding.
+    #[test]
+    fn a_circular_orbit_merges_at_peters_closed_form() {
+        for (m1, m2, a) in [(0.6, 0.6, 3.0e7), (1.4, 1.3, 2.0e9), (10.0, 0.08, 7.0e10)] {
+            let (gm1, gm2) = (GM_SUN * m1, GM_SUN * m2);
+            let c5 = math::powf(SPEED_OF_LIGHT, 5.0);
+            let closed = 5.0 / 256.0 * c5 * math::powf(a, 4.0) / (gm1 * gm2 * (gm1 + gm2));
+            let (s1, s2) = (SolarMasses::new(m1), SolarMasses::new(m2));
+            let t = Seconds::from(peters_merger_time(
+                s1,
+                s2,
+                Metres::new(a),
+                Eccentricity::CIRCULAR,
+            ));
+            assert!(
+                (t.value() / closed - 1.0).abs() < 1e-12,
+                "{t:?} against {closed} s"
+            );
+            let back = peters_separation_for(s1, s2, Years::from(Seconds::new(closed)));
+            assert!(
+                (back.value() / a - 1.0).abs() < 1e-12,
+                "{back:?} against {a} m"
+            );
+        }
+    }
+
     #[test]
     fn the_hulse_taylor_pulsar_merges_in_about_three_hundred_million_years() {
         // Weisberg and Huang (2016, ApJ 829, 55): m_p = 1.438, m_c = 1.390 M☉, P_b = 0.322 997 d,

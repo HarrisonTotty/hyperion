@@ -71,7 +71,7 @@ pub(super) const TWIN_MIN_MASS_RATIO: f64 = 0.95;
 
 /// The mass ratio above which Moe and Di Stefano (2017, §2) count the companions that their
 /// excess twin fraction is a share of.
-const TWIN_REFERENCE_MASS_RATIO: f64 = 0.3;
+pub(super) const TWIN_REFERENCE_MASS_RATIO: f64 = 0.3;
 
 /// The period, as x = log₁₀(P ÷ 1 d), that divides an O star's close companions from its wide
 /// ones in the period law: 3.5, about 3,000 days, the upper edge of the range Sana et al. (2012)
@@ -420,7 +420,7 @@ fn by_primary_mass(m: f64, solar: f64, a_late_b: f64, early: f64) -> f64 {
 ///
 /// Their 1σ is 0.3 everywhere (eq. 12).
 #[must_use]
-fn gamma_large(m: f64, log_period: f64) -> f64 {
+pub(super) fn gamma_large(m: f64, log_period: f64) -> f64 {
     let x = log_period.clamp(0.2, 8.0);
     let solar = if x < 5.0 {
         -0.5
@@ -459,7 +459,7 @@ fn gamma_large(m: f64, log_period: f64) -> f64 {
 ///
 /// Their 1σ runs from 0.4 to 0.6 (eq. 16).
 #[must_use]
-fn gamma_small(m: f64, log_period: f64) -> f64 {
+pub(super) fn gamma_small(m: f64, log_period: f64) -> f64 {
     let x = log_period.clamp(0.2, 8.0);
     let a_late_b = if x < 2.5 {
         0.2
@@ -1052,7 +1052,7 @@ impl MassRatioDistribution {
     /// `(end, γᵢ)` of `pieces` (the last ending at 1), continuous at every break; segments that
     /// end at or below `lo` are left out.
     #[must_use]
-    fn smooth(lo: f64, pieces: &[(f64, f64)]) -> Self {
+    pub(super) fn smooth(lo: f64, pieces: &[(f64, f64)]) -> Self {
         let placeholder = Segment {
             power: PowerLaw::new(0.0, 0.5, 1.0).expect("a flat law on [0.5, 1] is valid"),
             share: 0.0,
@@ -1154,7 +1154,7 @@ impl MassRatioDistribution {
 
     /// This law with twins of Moe and Di Stefano's excess fraction `excess` added.
     #[must_use]
-    fn with_twins(mut self, excess: f64) -> Self {
+    pub(super) fn with_twins(mut self, excess: f64) -> Self {
         self.twin_share = self.twin_weight(excess);
         self
     }
@@ -1273,50 +1273,111 @@ impl MassRatioDistribution {
     }
 }
 
-/// The distribution of a companion orbit's eccentricity for one period
-/// ([`MultiplicityModel::eccentricity_distribution`]): circular under
-/// [`CIRCULARISATION_PERIOD`], and uniform on `[0, e_max]` above it.
+/// The primary masses, M☉, between which Moe and Di Stefano (2017, §9.2) interpolate their
+/// late-type (eq. 17, up to 3 M☉) and early-type (eq. 18, from 7 M☉) eccentricity exponents,
+/// linearly in M₁.
+const ECCENTRICITY_EXPONENT_MASSES: (f64, f64) = (3.0, 7.0);
+
+/// The longest periods, as x = log₁₀(P ÷ 1 d), of Moe and Di Stefano's (2017) fits of the
+/// eccentricity exponent: 6 for late-type primaries (eq. 17) and 5 for early-type ones (eq. 18).
+/// Beyond them each exponent is held, as their §9.2 suggests for the widest pairs: "the power-law
+/// slope η ≈ 0.5 may continue to the widest separations" for solar-type binaries (Tokovinin and
+/// Kiyaeva 2015), and "η ≈ 0.8 may still continue across 5 < log `P_outer` < 8" for early-type ones.
+const ECCENTRICITY_EXPONENT_MAX_LOG_PERIOD: (f64, f64) = (6.0, 5.0);
+
+/// The periods, as x = log₁₀(P ÷ 1 d), where the eccentricity exponent of a given primary has a
+/// kink ([`ECCENTRICITY_EXPONENT_MAX_LOG_PERIOD`]), for quadratures' panel edges.
+pub(super) const ECCENTRICITY_EXPONENT_KINKS: [f64; 2] = [
+    ECCENTRICITY_EXPONENT_MAX_LOG_PERIOD.1,
+    ECCENTRICITY_EXPONENT_MAX_LOG_PERIOD.0,
+];
+
+/// Moe and Di Stefano's (2017, ApJS 230, 15, §9.2) exponent η of the eccentricity distribution
+/// `p(e) ∝ e^η` for a primary of `m1` on an orbit of x = `log_period` = log₁₀(P ÷ 1 d),
+/// re-checked against the paper:
 ///
-/// Duchêne and Kraus (2013, §5.1.4) find the distribution "essentially flat" beyond about 100 days
-/// at every primary mass, and "inconsistent with the so-called thermal distribution"; Raghavan et
-/// al. (2010, §5.3.4) find it roughly flat above their 12-day circularisation limit. The plan's
-/// thermal law above 10³ days is Duquennoy and Mayor's (1991), whose own bias-corrected
-/// distribution Duchêne and Kraus show to be flat beyond e ≈ 0.3, and is replaced by the flat
-/// law. The cap is Moe and Di Stefano's (2017, ApJS 230, 15, eq. 3) envelope, `e_max = 1 −
-/// (P ÷ 2 d)^(−2/3)`, which keeps the pair's Roche-lobe fill factors under about 70% at
-/// periastron and so the periastron `a (1 − e)` at or beyond the separation of a circular 2-day
-/// orbit about the same masses ([`ECCENTRICITY_ENVELOPE_PERIOD`]; ruling 37). It is the rising
-/// upper envelope of the period–eccentricity plane that Duchêne and Kraus describe, and at
-/// 12 days it already allows 0.70. Under the circularisation period every orbit is circular,
-/// which is a separate, tidal statement.
+/// - late type, 0.8 < M₁ < 3 M☉ and 0.5 < log P < 6: `η = 0.6 − 0.7 ÷ (log P − 0.5)` (eq. 17);
+/// - early type, M₁ > 7 M☉ and 0.5 < log P < 5: `η = 0.9 − 0.2 ÷ (log P − 0.5)` (eq. 18);
+/// - between 3 and 7 M☉, interpolated linearly in M₁ ("we interpolate across M1 = 3 - 7 M⊙
+///   between Eqns. 17 and 18").
+///
+/// Their 1σ is 0.3 across 1 < log P < 5 (eq. 19). They measured η across 0 < e < 0.8 `e_max` (Table
+/// 13: 0.4 ± 0.3 for solar-type pairs at log P = 4, 0.8 ± 0.3 for early-B and O-type ones), and
+/// the law is applied across the whole envelope. Beyond the fits' longest periods each is held
+/// ([`ECCENTRICITY_EXPONENT_MAX_LOG_PERIOD`]); below 0.8 M☉, outside their range, eq. 17 is used,
+/// since Duchêne and Kraus (2013, §5.1.4) find eccentricities to depend little on primary mass.
+/// Under [`CIRCULARISATION_PERIOD`] every orbit is circular and η is taken at that period, where
+/// it is least, −0.61 for a late-type primary: always above −1, so the law is normalisable.
+#[must_use]
+pub(super) fn eccentricity_exponent(m1: SolarMasses, log_period: f64) -> f64 {
+    let x = log_period.max(math::log10(CIRCULARISATION_PERIOD.value()));
+    let (late_top, early_top) = ECCENTRICITY_EXPONENT_MAX_LOG_PERIOD;
+    let late = 0.6 - 0.7 / (x.min(late_top) - 0.5);
+    let early = 0.9 - 0.2 / (x.min(early_top) - 0.5);
+    let (lo, hi) = ECCENTRICITY_EXPONENT_MASSES;
+    let m = m1.value();
+    if m <= lo {
+        late
+    } else if m >= hi {
+        early
+    } else {
+        lerp(late, early, (m - lo) / (hi - lo))
+    }
+}
+
+/// The distribution of a companion orbit's eccentricity for one primary mass and period
+/// ([`MultiplicityModel::eccentricity_distribution`]): circular under
+/// [`CIRCULARISATION_PERIOD`], and above it Moe and Di Stefano's (2017, ApJS 230, 15, §9.2)
+/// power law `p(e) ∝ e^η` on `[0, e_max]`, with η from their eqs. 17–18
+/// ([`eccentricity_exponent`]).
+///
+/// So solar-type pairs are sub-thermal, η ≈ 0.4 at intermediate periods, and early-type ones near
+/// thermal, η ≈ 0.8 ("consistent with a Maxwellian 'thermal' eccentricity distribution (η = 1)",
+/// their §12). Raghavan et al. (2010, §5.3.4) and Duchêne and Kraus (2013, §5.1.4) find the
+/// solar-type distribution roughly flat above the circularisation period, which η ≈ 0.1–0.5 is
+/// close to; plan 11's first model took it flat (ruling 74 replaced it). The cap is Moe and Di
+/// Stefano's (eq. 3) envelope, `e_max = 1 − (P ÷ 2 d)^(−2/3)`, which keeps the pair's Roche-lobe
+/// fill factors under about 70% at periastron and so the periastron `a (1 − e)` at or beyond the
+/// separation of a circular 2-day orbit about the same masses ([`ECCENTRICITY_ENVELOPE_PERIOD`];
+/// ruling 37). At 12 days it already allows 0.70. Under the circularisation period every orbit is
+/// circular, which is a separate, tidal statement.
 ///
 /// # Examples
 ///
 /// ```
 /// use hyperion_sim::stellar::multiplicity::MultiplicityModel;
-/// use hyperion_sim::units::Days;
+/// use hyperion_sim::units::{Days, SolarMasses};
 ///
 /// let model = MultiplicityModel::default_v1();
-/// assert_eq!(model.eccentricity_distribution(Days::new(5.0)).e_max(), 0.0);
+/// let sun = SolarMasses::new(1.0);
+/// assert_eq!(model.eccentricity_distribution(sun, Days::new(5.0)).e_max(), 0.0);
 /// // Eight times the envelope's period: the separation is 4 times a 2-day orbit's.
-/// let wide = model.eccentricity_distribution(Days::new(16.0));
+/// let wide = model.eccentricity_distribution(sun, Days::new(16.0));
 /// assert!((wide.e_max() - 0.75).abs() < 1e-12);
+/// // At 10⁴ days an O star's companions are near thermal and a Sun-like star's are not.
+/// let o_star = model.eccentricity_distribution(SolarMasses::new(28.0), Days::new(1e4));
+/// let sun_like = model.eccentricity_distribution(sun, Days::new(1e4));
+/// assert!(o_star.eta() > 0.8 && sun_like.eta() < 0.45);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EccentricityDistribution {
     /// The largest eccentricity, in [0, 1); 0 for a circular orbit.
     e_max: f64,
+    /// The exponent η of the density `e^η`, above −1.
+    eta: f64,
 }
 
 impl EccentricityDistribution {
     #[must_use]
-    fn for_period(period: Days) -> Self {
+    fn for_orbit(m1: SolarMasses, period: Days) -> Self {
+        let eta = eccentricity_exponent(m1, math::log10(period.value()));
         if period < CIRCULARISATION_PERIOD {
-            return Self { e_max: 0.0 };
+            return Self { e_max: 0.0, eta };
         }
         let ratio = period / ECCENTRICITY_ENVELOPE_PERIOD;
         Self {
             e_max: 1.0 - math::powf(ratio, -2.0 / 3.0),
+            eta,
         }
     }
 
@@ -1327,36 +1388,46 @@ impl EccentricityDistribution {
         self.e_max
     }
 
-    /// The density at `e`; 0 everywhere for a circular orbit, whose eccentricity is always 0.
+    /// The exponent η of the density `e^η` on `[0, e_max]`, above −1 (Moe and Di Stefano 2017,
+    /// eqs. 17–18).
+    #[must_use]
+    pub fn eta(&self) -> f64 {
+        self.eta
+    }
+
+    /// The density at `e`, `(1 + η) e^η ÷ e_max^(1 + η)` on `[0, e_max]`; 0 everywhere for a
+    /// circular orbit, whose eccentricity is always 0.
     #[must_use]
     pub fn pdf(&self, e: f64) -> f64 {
         if self.e_max > 0.0 && (0.0..=self.e_max).contains(&e) {
-            1.0 / self.e_max
+            let g = 1.0 + self.eta;
+            g * math::powf(e / self.e_max, self.eta) / self.e_max
         } else {
             0.0
         }
     }
 
-    /// The probability that the eccentricity is at most `e`.
+    /// The probability that the eccentricity is at most `e`, `(e ÷ e_max)^(1 + η)`.
     #[must_use]
     pub fn cdf(&self, e: f64) -> f64 {
         if e < 0.0 {
             0.0
         } else if self.e_max > 0.0 {
-            (e / self.e_max).clamp(0.0, 1.0)
+            math::powf((e / self.e_max).clamp(0.0, 1.0), 1.0 + self.eta)
         } else {
             1.0
         }
     }
 
-    /// The eccentricity below which a share `u` of orbits lies, for `u` in [0, 1].
+    /// The eccentricity below which a share `u` of orbits lies, for `u` in [0, 1]:
+    /// `e_max u^(1 ÷ (1 + η))`.
     #[must_use]
     pub fn quantile(&self, u: f64) -> f64 {
-        self.e_max * u.clamp(0.0, 1.0)
+        self.e_max * math::powf(u.clamp(0.0, 1.0), 1.0 / (1.0 + self.eta))
     }
 
-    /// An eccentricity drawn from the distribution, in `[0, e_max)`: `e_max` times
-    /// [`Stream::uniform`]. One word, also for a circular orbit.
+    /// An eccentricity drawn from the distribution, in `[0, e_max)`: the
+    /// [`quantile`](Self::quantile) of [`Stream::uniform`]. One word, also for a circular orbit.
     pub fn sample(&self, stream: &mut Stream) -> f64 {
         self.quantile(stream.uniform())
     }
@@ -1527,14 +1598,55 @@ impl MultiplicityModel {
         self.over_periods(m1, MassRatioDistribution::mean)
     }
 
-    /// The distribution of a companion orbit's eccentricity at `period`, the same for every
-    /// primary mass (Duchêne and Kraus 2013, §5.1.4: "remarkably little dependency on primary
-    /// mass").
+    /// The share of a primary of `m1`'s companions that Moe and Di Stefano (2017, §2, §8.1 and
+    /// Table 13) count: a mass ratio above [`COUNTED_MIN_MASS_RATIO`] and a period under
+    /// x = [`COUNTED_MAX_LOG_PERIOD`], under the model's own period and mass-ratio laws, twins
+    /// included. The ratio of two integrals by [`integrate_log_period`] as
+    /// [`companion_mass_ratio_cdf`](Self::companion_mass_ratio_cdf) takes them.
+    ///
+    /// The massive anchors of the multiplicity fractions are extended from their counts by it
+    /// (plan 11, ruling 74).
+    ///
+    /// # Panics
+    ///
+    /// If `m1` is not positive and finite.
+    #[cfg(test)]
     #[must_use]
-    pub fn eccentricity_distribution(&self, period: Days) -> EccentricityDistribution {
-        EccentricityDistribution::for_period(period)
+    pub(super) fn counted_share(&self, m1: SolarMasses) -> f64 {
+        let periods = self.period_distribution(m1);
+        let (lo, hi) = periods.support();
+        let kinks = Self::mass_ratio_period_kinks(m1);
+        let top = hi.min(COUNTED_MAX_LOG_PERIOD);
+        let counted = integrate_log_period(&periods, lo, top, &kinks, 1.0, |x| {
+            periods.pdf(x) * (1.0 - self.mass_ratio_at(m1, x).cdf(COUNTED_MIN_MASS_RATIO))
+        });
+        let total = integrate_log_period(&periods, lo, hi, &kinks, 1.0, |x| periods.pdf(x));
+        counted / total
+    }
+
+    /// The distribution of the eccentricity of a companion's orbit of `period` about a primary
+    /// of initial mass `m1`: Moe and Di Stefano's (2017) power law `e^η` of eqs. 17–18 under the
+    /// envelope of their eq. 3, circular under [`CIRCULARISATION_PERIOD`]
+    /// ([`EccentricityDistribution`]).
+    #[must_use]
+    pub fn eccentricity_distribution(
+        &self,
+        m1: SolarMasses,
+        period: Days,
+    ) -> EccentricityDistribution {
+        EccentricityDistribution::for_orbit(m1, period)
     }
 }
+
+/// The lowest mass ratio of a companion that Moe and Di Stefano (2017, §2) count in their
+/// multiplicity statistics (Table 13): q = 0.1.
+#[cfg(test)]
+pub(super) const COUNTED_MIN_MASS_RATIO: f64 = 0.1;
+
+/// The longest period, as x = log₁₀(P ÷ 1 d), of a companion that Moe and Di Stefano (2017, §2
+/// and §8.1) count in their multiplicity statistics (Table 13): 8, about 3 × 10⁵ years.
+#[cfg(test)]
+pub(super) const COUNTED_MAX_LOG_PERIOD: f64 = 8.0;
 
 #[cfg(test)]
 mod tests {
@@ -1660,10 +1772,12 @@ mod tests {
         let model = model();
         // Periods above the circularisation period: under it every orbit is circular.
         for (item, p) in (40_u64..).zip([15.0, 30.0, 300.0, 1e4, 1e7]) {
-            let law = model.eccentricity_distribution(Days::new(p));
-            let mut s = stream(item);
-            let samples = (0..SAMPLES).map(|_| law.sample(&mut s)).collect();
-            ks(&format!("e at {p} d"), samples, |e| law.cdf(e));
+            for (offset, m) in (0_u64..).step_by(100).zip([0.3, 1.0, 5.0, 12.0, 28.0]) {
+                let law = model.eccentricity_distribution(SolarMasses::new(m), Days::new(p));
+                let mut s = stream(item + offset);
+                let samples = (0..SAMPLES).map(|_| law.sample(&mut s)).collect();
+                ks(&format!("e at {m} M☉ and {p} d"), samples, |e| law.cdf(e));
+            }
         }
     }
 
@@ -1705,7 +1819,7 @@ mod tests {
         let mut s = stream(51);
         for i in 0_u32..=80 {
             let period = Days::new(math::exp10(-1.0 + f64::from(i) * 0.15));
-            let law = model.eccentricity_distribution(period);
+            let law = model.eccentricity_distribution(SolarMasses::new(1.0), period);
             let floor = if period < CIRCULARISATION_PERIOD {
                 1.0
             } else {
@@ -1721,6 +1835,74 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Raghavan et al.'s (2010, §5.3.4) circularisation limit, 12 days, and Moe and Di Stefano's
+    /// (2017, eq. 3) envelope just above it, written out from the papers rather than from the
+    /// module's constants: an orbit of 11.9 days is circular and one of 12 days may reach
+    /// 1 − 6^(−2/3) = 0.6972.
+    #[test]
+    fn orbits_circularise_below_twelve_days_and_open_to_the_envelope_at_twelve() {
+        let model = model();
+        let sun = SolarMasses::new(1.0);
+        assert_same_bits(
+            model
+                .eccentricity_distribution(sun, Days::new(11.9))
+                .e_max(),
+            0.0,
+        );
+        let at_twelve = model
+            .eccentricity_distribution(sun, Days::new(12.0))
+            .e_max();
+        assert!((at_twelve - (1.0 - math::powf(6.0, -2.0 / 3.0))).abs() < 1e-15);
+        assert!((at_twelve - 0.697_2).abs() < 1e-4, "{at_twelve}");
+    }
+
+    /// Moe and Di Stefano's (2017) eqs. 17 and 18, written out from the paper: η = 0.6 −
+    /// 0.7 ÷ (log P − 0.5) for late-type primaries and 0.9 − 0.2 ÷ (log P − 0.5) for early-type
+    /// ones, interpolated linearly in M₁ across 3–7 M☉; and their Table 13's measurements at
+    /// log P = 2 and 4 for the five mass intervals (M₁ = 1, 3.5, 7, 12, 28 M☉), each met within its
+    /// 1σ of 0.3, as they say their fit does.
+    #[test]
+    fn eccentricity_exponents_follow_moe_and_di_stefanos_fits() {
+        for x in [1.2, 2.0, 3.0, 4.0, 4.9] {
+            let late = 0.6 - 0.7 / (x - 0.5);
+            let early = 0.9 - 0.2 / (x - 0.5);
+            let at = |m: f64| eccentricity_exponent(SolarMasses::new(m), x);
+            assert!((at(1.0) - late).abs() < 1e-15, "{x}");
+            assert!((at(0.3) - late).abs() < 1e-15, "{x}");
+            assert!((at(28.0) - early).abs() < 1e-15, "{x}");
+            assert!((at(5.0) - f64::midpoint(late, early)).abs() < 1e-15, "{x}");
+        }
+        let table = [
+            (1.0, 0.1, 0.4),
+            (3.5, 0.3, 0.5),
+            (7.0, 0.6, 0.7),
+            (12.0, 0.7, 0.8),
+            (28.0, 0.7, 0.8),
+        ];
+        for (m, at_two, at_four) in table {
+            let m1 = SolarMasses::new(m);
+            let (two, four) = (
+                eccentricity_exponent(m1, 2.0),
+                eccentricity_exponent(m1, 4.0),
+            );
+            println!(
+                "{m} M☉: η {two:.3} at log P = 2 (Table 13 {at_two}), {four:.3} at 4 ({at_four})"
+            );
+            assert!(
+                (two - at_two).abs() <= 0.3 && (four - at_four).abs() <= 0.3,
+                "{m} M☉"
+            );
+        }
+        // Held beyond the fits' longest periods, and at its least at the circularisation period.
+        let sun = SolarMasses::new(1.0);
+        assert_same_bits(eccentricity_exponent(sun, 9.0), 0.6 - 0.7 / 5.5);
+        let o_star = SolarMasses::new(28.0);
+        assert_same_bits(eccentricity_exponent(o_star, 9.0), 0.9 - 0.2 / 4.5);
+        let least = eccentricity_exponent(sun, 0.0);
+        assert_same_bits(least, eccentricity_exponent(sun, math::log10(12.0)));
+        assert!((-0.62..-0.6).contains(&least), "{least}");
     }
 
     #[test]
@@ -1840,9 +2022,9 @@ mod tests {
                     .sample_in(&mut s, Days::new(1.0), Days::new(10.0));
             let _ = model.mass_ratio_distribution(m1, period).sample(&mut s);
             let _ = model
-                .eccentricity_distribution(Days::new(5.0))
+                .eccentricity_distribution(m1, Days::new(5.0))
                 .sample(&mut s);
-            let _ = model.eccentricity_distribution(period).sample(&mut s);
+            let _ = model.eccentricity_distribution(m1, period).sample(&mut s);
             assert_eq!(s.position() - start, 5, "at {m1:?}");
         }
     }
@@ -1857,7 +2039,7 @@ mod tests {
                     let m1 = SolarMasses::new(0.08 + 0.5 * f64::from(i));
                     let p = model.period_distribution(m1).sample(&mut s);
                     let q = model.mass_ratio_distribution(m1, p).sample(&mut s);
-                    let e = model.eccentricity_distribution(p).sample(&mut s);
+                    let e = model.eccentricity_distribution(m1, p).sample(&mut s);
                     [p.value(), q, e]
                 })
                 .collect::<Vec<_>>()
@@ -1928,25 +2110,36 @@ mod tests {
         assert!((to_800 - 0.219).abs() <= 0.026, "{to_800}");
         assert!((to_10_000 - 0.338).abs() <= 0.026, "{to_10_000}");
         assert!((0.18..=0.21).contains(&one_to_ten), "{one_to_ten}");
-        // O stars, counted as the surveys count, q ≥ 0.1: 0.69 companions inside 10^3.5 d (Sana
-        // et al. 2012), 30% of stars inside 10 d and 45 ± 5% visual companions over two decades
-        // of separation (Duchêne and Kraus §3.5.2–3).
+        // O stars, counted as the surveys count, q ≥ 0.1. The anchor's shape holds Duchêne and
+        // Kraus's 1.3 companions per star (§3.5.2–3) as shares: Sana et al.'s (2012) 0.69 inside
+        // 10^3.5 d, 30% of stars with one inside 10 d and 45 ± 5% visual companions over two
+        // decades of separation. Its frequency is Moe and Di Stefano's since ruling 74, and their
+        // Table 13 close frequency, f(log P < 3.7; q > 0.1) = 1.0 ± 0.2, is met within its 1σ.
         let o_mass = SolarMasses::new(30.0);
         let o_star = at(30.0);
-        let frequency = model.companion_frequency(o_mass);
         let close_above = surveyed_share(&model, o_mass, (0.15, CLOSE_MAX_LOG_PERIOD));
-        let sana = frequency * o_star.cdf(CLOSE_MAX_LOG_PERIOD) * close_above;
-        let inside_ten_days = frequency * o_star.cdf(1.0) * close_above;
-        let two_decades = frequency
+        let wide_above = surveyed_share(&model, o_mass, (CLOSE_MAX_LOG_PERIOD, 7.76));
+        let above = o_star.cdf(CLOSE_MAX_LOG_PERIOD) * close_above
+            + (1.0 - o_star.cdf(CLOSE_MAX_LOG_PERIOD)) * wide_above;
+        let per_surveyed = 1.3 / above;
+        let sana = per_surveyed * o_star.cdf(CLOSE_MAX_LOG_PERIOD) * close_above;
+        let inside_ten_days = per_surveyed * o_star.cdf(1.0) * close_above;
+        let two_decades = per_surveyed
             * (o_star.cdf(log_period_of(3_000.0, 40.5)) - o_star.cdf(log_period_of(30.0, 40.5)))
-            * surveyed_share(&model, o_mass, (CLOSE_MAX_LOG_PERIOD, 7.76));
+            * wide_above;
+        let frequency = model.companion_frequency(o_mass);
+        let close = frequency
+            * (o_star.cdf(CLOSE_MAX_LOG_PERIOD) * close_above
+                + (o_star.cdf(3.7) - o_star.cdf(CLOSE_MAX_LOG_PERIOD)) * wide_above);
         println!(
-            "O stars, q ≥ 0.1: {sana:.3} within 10^3.5 d, {inside_ten_days:.3} within 10 d, \
-             {two_decades:.3} over 30–3000 au"
+            "O stars, q ≥ 0.1, per 1.3 surveyed: {sana:.3} within 10^3.5 d, {inside_ten_days:.3} \
+             within 10 d, {two_decades:.3} over 30–3000 au; at the model's frequency {close:.3} \
+             within 10^3.7 d"
         );
         assert!((sana - O_STAR_CLOSE_SURVEYED).abs() < 1e-12, "{sana}");
         assert!((inside_ten_days - 0.30).abs() < 0.02, "{inside_ten_days}");
         assert!((two_decades - 0.45).abs() <= 0.05, "{two_decades}");
+        assert!((close - 1.0).abs() <= 0.2, "{close}");
     }
 
     /// The share above q = 0.1, twins included, of the companions whose periods lie in `range`

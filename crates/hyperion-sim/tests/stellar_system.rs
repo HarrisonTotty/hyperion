@@ -315,7 +315,8 @@ fn sample_records(galaxy: &Galaxy, seed: u64, n: usize) -> Vec<SystemRecord> {
 
 /// Over a pinned sample of `n` systems near the solar circle, the systems the multiplicity draw
 /// made multiple number the model's expectation, the sum of
-/// [`MultiplicityModel::multiple_fraction`] over their primaries, to within 3.29 standard
+/// [`MultiplicityModel::drawn_multiple_fraction`] over their primaries (ruling 81's blend of the
+/// spine and direct constructions), to within 3.29 standard
 /// deviations (α = 10⁻³, two-sided). A system whose every companion the stability test dropped
 /// still counts as drawn multiple.
 fn check_multiple_share(seed: u64, n: usize) {
@@ -327,7 +328,7 @@ fn check_multiple_share(seed: u64, n: usize) {
         let stars = SystemStars::generate(&galaxy, record);
         let h = stars.hierarchy();
         multiples += u32::from(h.star_count() > 1 || h.dropped_companions() > 0);
-        let p = model.multiple_fraction(record.primary_initial_mass());
+        let p = model.drawn_multiple_fraction(record.primary_initial_mass());
         expected += p;
         variance += p * (1.0 - p);
     }

@@ -23,6 +23,7 @@
 //! Periods are in [`Days`](crate::units::Days) and, for densities and cumulative
 //! distributions, in x = log₁₀(P ÷ 1 d); masses in [`SolarMasses`](crate::units::SolarMasses).
 
+mod direct;
 mod dist;
 mod hierarchy;
 mod model;

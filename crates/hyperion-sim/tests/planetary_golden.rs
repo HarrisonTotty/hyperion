@@ -785,14 +785,15 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4202_6cc2_0000_0003,
     },
     GoldenSystem {
-        // A black hole of a 27.6 M☉ star that died by direct collapse, [Fe/H] +0.09,
-        // `TerrestrialOnly`: six rocky survivors of 1.3–2 M⊕ at 480–1,020 au, their orbits widened
-        // by the progenitor's mass loss.
+        // A black hole of a 32.4 M☉ star that died by direct collapse, [Fe/H] −0.10: seven rocky
+        // survivors of 1.3–1.9 M⊕ at 112–894 au, their orbits widened by the progenitor's mass
+        // loss, and three planets it unbound. Re-pinned after plan 11's ruling 81: the first pin,
+        // 0x8200_b2e0_0000_000d, no longer satisfies the predicate.
         name: "fallback_black_hole",
         layer: Layer::E,
         budget: 200_000,
         predicate: fallback_black_hole_with_survivors,
-        id: 0x8200_b2e0_0000_000d,
+        id: 0x8201_b2e0_0000_0010,
     },
     GoldenSystem {
         // A 0.335 M☉ M dwarf, [Fe/H] 0.00, `CompactMulti`: one planet of 0.77 M⊕ at 0.065 au.
