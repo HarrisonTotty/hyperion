@@ -71,12 +71,19 @@
 //!   P14.T7's masses decide: between Zhu et al.'s 30 ± 3% and 0.9, and Yang, Xie and Zhou's
 //!   (2020, AJ 159, 164, abstract) 73 ± 13% or Mulders et al.'s (2018, AJ 156, 24, abstract) "at
 //!   least 42%" (ruling 48, point f).
+//! - The early M dwarfs (ruling 85.4): about hosts of 0.35–0.6 M☉, blended over 0.30–0.35 and
+//!   0.60–0.70 M☉ ([`early_m_dwarf_share`]), `Barren` and `TerrestrialOnly` take no weight, so
+//!   every such host draws a system (Hsu, Ford and Terrien 2020, MNRAS 498, 2249, §5), 55% of its
+//!   chains the hot variant of one or two and the rest cold chains of about five planets inside
+//!   200 days (Ballard and Johnson 2016, ApJ 816, 66, §3.3), their first periods calibrated to
+//!   Dressing and Charbonneau's (2015, Table 5) 19% inside 10 days (P14.T5's constants).
 //! - `CompactMulti`'s (M ÷ M☉)^−3.0: re-fitted by ruling 60 on P14.T10.b's placed M dwarfs (plan
 //!   14 had −0.9, P14.T4 −1.5, which placed gave 0.98 small planets per M dwarf), to Dressing and
 //!   Charbonneau's (2015, ApJ 807, 45, abstract) 2.5 ± 0.2 small planets per M dwarf (1–4 R⊕,
 //!   under 200 days), hosts of median 0.47 R☉ (§2): placed primaries of 0.35–0.6 M☉ with their
-//!   companions have 1.90, inside T10.b's 1.8–3.2, together with P14.T7's host-scaled masses and
-//!   Class 0 budget; −2.5 gave 1.75. Planets of 1–8 M⊕ (about 1–2.8 R⊕) at 2–50 days are then 2.4
+//!   companions had 1.90, inside T10.b's 1.8–3.2, together with P14.T7's host-scaled masses and
+//!   Class 0 budget, before ruling 66's floor (1.75 now, under ruling 85.4's systems, a finding);
+//!   −2.5 gave 1.75. Planets of 1–8 M⊕ (about 1–2.8 R⊕) at 2–50 days are then 2.4
 //!   times as common about those M dwarfs as about FGK stars, between Mulders, Pascucci and Apai's
 //!   (2015, ApJ 798, 112, abstract) "twice as frequently as around G stars, and thrice as
 //!   frequently as around F stars" and their (2015, ApJ 814, 130, abstract) 3.5 times more
@@ -153,7 +160,7 @@
 //! | Hot Jupiters (Wright et al. 2012, ApJ 753, 160; Howard et al. 2012, ApJS 201, 15) | 1.2 ± 0.38% of FGK dwarfs (Wright, abstract); 0.004 ± 0.001 per star for P < 10 days and 8–32 R⊕, 0.005 ± 0.001 to Kp < 16 (Howard, §3.2 and Table 4) | Yes, full text | 0.82% at 1 M☉ (1.15% in the table before the fallbacks) |
 //! | Zhu et al. (2018, ApJ 860, 101) | "the fraction of Sun-like stars with Kepler-like planets ... is 30 ± 3%", with 3.0 ± 0.3 planets within 400 days per system and about 0.9 per star (abstract). Yang, Xie and Zhou (2020, AJ 159, 164, abstract and §5.1) find 73 ± 13% and 2.3 ± 0.4 with DR25 and efficiency corrections | Yes, full text | 35.7% at 1 M☉, 2.7 planets per system, 0.97 per star from the compact classes; roughly 40–50% and 1.2 counting `TerrestrialOnly`'s Earth-mass planets |
 //! | Zhu and Wu (2018, AJ 156, 92) | P(CJ ∣ SE) = 32 ± 8%, rising to 60% or more for \[Fe/H\] > 0.1; P(SE ∣ CJ) = 90 ± 20%; cold Jupiters without super-Earths ∼1% of stars (abstract, eq. 2, §4) | Yes, full text | P(CJ ∣ SE) 30.7% at 1 M☉, and 67% at +0.2 before the fallbacks; P(SE ∣ CJ) about 75%, and about 4% of stars with a cold Jupiter and no super-Earth |
-//! | Dressing and Charbonneau (2015, ApJ 807, 45) | "2.5 ± 0.2 planets per M dwarf with radii 1–4 R⊕ and periods shorter than 200 days" (abstract), hosts under 4,000 K, median 3,746 K and 0.47 R☉ (§2) | Yes, full text | Placed (ruling 60), 1.90 about primaries of 0.35–0.6 M☉ with their companions (P14.T10.b) |
+//! | Dressing and Charbonneau (2015, ApJ 807, 45) | "2.5 ± 0.2 planets per M dwarf with radii 1–4 R⊕ and periods shorter than 200 days" (abstract), hosts under 4,000 K, median 3,746 K and 0.47 R☉ (§2) | Yes, full text | Placed, 1.75 about primaries of 0.35–0.6 M☉ with their companions (P14.T10.b, ruling 85.4), a finding under the 1.8–3.2 window |
 //! | Giants around about 3% of M dwarfs | Johnson et al. (2010, abstract): "3% around M dwarfs (0.5 M☉)" inside 2.5 au; Cumming et al. (2008, §3.4): 1.0%; Bonfils et al. (2013, A&A 549, A109, abstract): ≲1% at 1–10 days and 2 (+3 −1)% at 10–100 days; Montet et al. (2014, ApJ 781, 28, abstract): 6.5 ± 3.0% for 1–13 M♃ within 20 au | Yes, full text | 2.3% at 0.3 M☉, where half the discs cannot form a giant (the median disc has just under 10 M⊕ of solids beyond its snow line), and 7.2% at 0.5 M☉, about 5.6% inside Johnson et al.'s window; 4.6% and 11.3% in the table before the fallbacks |
 //! | Johnson et al. (2010, PASP 122, 905) | f(M★, \[Fe/H\]) = 0.07 ± 0.01 (M★ ÷ M☉)^(1.0 ± 0.3) 10^((1.2 ± 0.2) \[Fe/H\]), for K > 20 m s⁻¹ and a < 2.5 au, over 0.2–1.9 M☉ (eq. 8, Table 1) | Yes, full text | g(M) = M ÷ M☉ to 1.9 M☉. Their metallicity exponent is 1.2, and 1.7 ± 0.3 on Fischer and Valenti's stars alone (§6.1); the brainstorm keeps 2 |
 //! | Reffert et al. (2015, A&A 574, A116) | A Gaussian in mass with µ = 1.9 (+0.1 −0.5) M☉ and σ = 0.5 (+0.5 −0.2) M☉, half its peak at 1.2 and 2.6 M☉; no planet above 2.7 M☉, under 1.6% for 2.7–5 M☉ (abstract, eq. 3, §5) | Yes, full text | g falls with σ = 0.5 M☉ above 1.9 M☉ (plan 14 had 0.8) |
@@ -815,6 +822,60 @@ impl ClassProbabilities {
     }
 }
 
+/// The early M dwarfs of Dressing and Charbonneau's (2015) sample whose systems ruling 85.4 sets:
+/// 0.35–0.6 M☉, blended to the ordinary law over 0.30–0.35 and 0.60–0.70 M☉.
+pub const EARLY_M_DWARF_MASSES: (SolarMasses, SolarMasses) =
+    (SolarMasses::new(0.35), SolarMasses::new(0.6));
+
+/// The ends of the blends about [`EARLY_M_DWARF_MASSES`]: 0.30 and 0.70 M☉, this module's choice,
+/// so that no statistic steps at a host mass.
+pub const EARLY_M_DWARF_BLEND: (SolarMasses, SolarMasses) =
+    (SolarMasses::new(0.30), SolarMasses::new(0.70));
+
+/// How far a host of `mass` takes the early M dwarfs' systems (ruling 85.4): 1 inside
+/// [`EARLY_M_DWARF_MASSES`], 0 outside [`EARLY_M_DWARF_BLEND`], and linear in ln M between.
+///
+/// Ballard and Johnson (2016, ApJ 816, 66, §3.3) find 45% of Kepler's planet-hosting M dwarfs with
+/// about five coplanar planets inside 200 days and 55% single or inclined, and Hsu, Ford and
+/// Terrien (2020, MNRAS 498, 2249, §5) the planets consistent with every early M dwarf hosting a
+/// system. Inside the range, then, `Barren` and `TerrestrialOnly` take no weight (the table's
+/// giant classes keep theirs), the compact chain's hot variant of one or two planets takes 55% of
+/// chains ([`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]), and its cold chain places about five
+/// planets inside 200 days ([`CHAIN_COUNT`]'s factor), starting closer in
+/// ([`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]).
+///
+/// [`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]: template::EARLY_M_DWARF_HOT_VARIANT_PROBABILITY
+/// [`CHAIN_COUNT`]: template::CHAIN_COUNT
+/// [`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]: template::EARLY_M_DWARF_FIRST_PERIOD_SCALE
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::architecture::early_m_dwarf_share;
+/// use hyperion_sim::units::SolarMasses;
+///
+/// assert_eq!(early_m_dwarf_share(SolarMasses::new(0.45)), 1.0);
+/// assert_eq!(early_m_dwarf_share(SolarMasses::new(1.0)), 0.0);
+/// let edge = early_m_dwarf_share(SolarMasses::new(0.65));
+/// assert!(edge > 0.0 && edge < 1.0);
+/// ```
+#[must_use]
+pub fn early_m_dwarf_share(mass: SolarMasses) -> f64 {
+    let (m, (inner, outer), (low, high)) =
+        (mass.value(), EARLY_M_DWARF_MASSES, EARLY_M_DWARF_BLEND);
+    let across = |from: SolarMasses, to: SolarMasses| {
+        ((math::ln(m) - math::ln(from.value())) / (math::ln(to.value()) - math::ln(from.value())))
+            .clamp(0.0, 1.0)
+    };
+    if m < inner.value() {
+        across(low, inner)
+    } else if m <= outer.value() {
+        1.0
+    } else {
+        1.0 - across(outer, high)
+    }
+}
+
 /// The class weights of a host of initial mass `mass` and metallicity `fe_h` (P14.T4.b): the rows
 /// of [`ARCHITECTURE_TABLE`] that apply to the host, with `Barren` taking what the halo takes from
 /// the others.
@@ -858,7 +919,14 @@ pub fn class_weights(mass: SolarMasses, fe_h: Dex) -> ClassWeights {
         if !row.hosts.admit(mass) {
             continue;
         }
-        let raw = row.base_weight * mass_factor(row.mass_scaling, mass);
+        let mut raw = row.base_weight * mass_factor(row.mass_scaling, mass);
+        // Ruling 85.4: every early M dwarf hosts a system.
+        if matches!(
+            row.class,
+            ArchitectureClass::Barren | ArchitectureClass::TerrestrialOnly
+        ) {
+            raw *= 1.0 - early_m_dwarf_share(mass);
+        }
         let i = row.class.index();
         match row.metallicity_scaling {
             MetallicityScaling::TakesHaloLoss => barren_rows += raw,
@@ -1118,6 +1186,63 @@ mod tests {
 
     fn relative(a: f64, b: f64) -> f64 {
         ((a - b) / b).abs()
+    }
+
+    #[test]
+    fn early_m_dwarfs_all_host_a_system() {
+        use crate::planetary::architecture::template::{
+            EARLY_M_DWARF_HOT_VARIANT_PROBABILITY, PeriodLaw, template,
+        };
+        use crate::units::Days;
+        let share = |m: f64| early_m_dwarf_share(SolarMasses::new(m));
+        assert_same_bits(share(0.30), 0.0);
+        assert_same_bits(share(0.35), 1.0);
+        assert_same_bits(share(0.6), 1.0);
+        assert_same_bits(share(0.70), 0.0);
+        assert!(share(0.32) > 0.0 && share(0.32) < 1.0);
+        for fe_h in [-0.5, 0.0, 0.3] {
+            let p = class_weights(SolarMasses::new(0.45), Dex::new(fe_h)).probabilities();
+            assert_same_bits(p.get(ArchitectureClass::TerrestrialOnly), 0.0);
+            let barren = p.get(ArchitectureClass::Barren);
+            assert!(
+                barren < 0.03,
+                "only the metallicity losses are barren: {barren}"
+            );
+            assert!(p.compact_share() > 0.9, "{}", p.compact_share());
+        }
+        // A Sun is untouched.
+        let sun = class_weights(SolarMasses::new(1.0), Dex::ZERO).probabilities();
+        assert!(sun.get(ArchitectureClass::Barren) > 0.1);
+        let hot = template(ArchitectureClass::CompactMulti).groups()[0]
+            .hot_variant()
+            .expect("a chain has a hot variant");
+        assert_same_bits(
+            hot.probability_about(SolarMasses::new(1.0)),
+            hot.probability(),
+        );
+        assert_same_bits(
+            hot.probability_about(SolarMasses::new(0.45)),
+            EARLY_M_DWARF_HOT_VARIANT_PROBABILITY,
+        );
+        let law = PeriodLaw::BrokenPowerLaw {
+            break_period: Days::new(12.0),
+            rising: 1.6,
+            falling: -0.9,
+            min: Days::new(1.0),
+            max: Days::new(50.0),
+        };
+        let PeriodLaw::BrokenPowerLaw {
+            break_period,
+            min,
+            max,
+            ..
+        } = law.with_break_scaled(0.45)
+        else {
+            panic!("a broken power law stays one");
+        };
+        assert!((break_period.value() - 5.4).abs() < 1e-12);
+        assert_same_bits(min.value(), 1.0);
+        assert_same_bits(max.value(), 50.0);
     }
 
     #[test]

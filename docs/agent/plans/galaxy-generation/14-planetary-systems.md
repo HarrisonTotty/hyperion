@@ -914,6 +914,12 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     each group's (gas, drift or solid). Test (b)'s sample gives log radii 0.610, log masses 0.815,
     outer heavier 0.743 and larger 0.651, and 306 of its 2,000 Sun-like chains are truncated (333
     before; the test's 240–430 is unchanged). See "Risks and open points", the `calib3` bullet.
+  - _As built (ruling 85, superseding the widths and budget above):_ `σ_b` 0.515, `σ_w` 0.165
+    (0.54 dex together) and the step 0.21 dex; the drift-fed ceiling is 20 M⊕ × M★ ÷ M☉
+    (`mass_ceiling`; substellar hosts keep their template's 2 M⊕); `drift_budget` is the solid
+    budget × (M★ ÷ M☉)^−0.67 (`DRIFT_BUDGET_EXPONENT`, the slope of Mulders et al. 2015b's
+    Table 2) with M★ held to 0.42–1.08 M☉ (`DRIFT_BUDGET_HOST_RANGE`). Test (b): log radii 0.620,
+    log masses 0.867, outer heavier 0.750, larger 0.640; 328 of 2,000 chains truncated.
 
 #### P14.T8 Class placers
 
@@ -4300,3 +4306,67 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - _The comet rate:_ 10.9 a year inside 5 au for 7.5 × 10¹¹ comets, just under the ruling's
     11–14; its test accepts 10.5–14. The 11 a year of Vokrouhlický et al. are inside 4 au, where
     this gives 8.7.
+- **Ruling 85, the chains' mass law and the early M dwarfs' systems, as built (`calib3`, round 8).**
+  Papers under `_orchestration/research/calib3-papers/`.
+  - _85.1, width._ The chains' total width returns to 0.54 dex (Wu 2019, Table 1 at 2 g cm⁻³),
+    split `σ_b` 0.515 and `σ_w` 0.165 (0.5 and 0.2 gave an FGK correlation of 0.602 and single
+    Suns 0.583, outside 0.60–0.70); the step stays ruling 60's 0.21 dex, not tuned. T10.b now
+    compares like with like with Weiss et al. (2018, §3): all pairs in log radius against 0.60–0.70
+    (0.642; in linear radius 0.540), and pairs of planets both above 1 R⊕ against 0.53, window
+    0.46–0.60, two standard errors of their 504 pairs (0.589; linear 0.486; 86% of pairs). Their SNR
+    swap test needs each star's photometric noise, which the placed sample does not carry, and is
+    not applied. **Finding:** the outer planet is the larger in 0.638 of pairs against 65.4 ±
+    0.4%, pinned at 0.630–0.645, not tuned.
+  - _85.2, ceiling._ `mass_ceiling`: 20 M⊕ × M★ ÷ M☉ for a star's drift-fed groups; a substellar
+    host's chain keeps its template's 2 M⊕ (already its hosts' range, TRAPPIST-1 its limiting case).
+    The M★ scaling of the pebble-isolation mass is inferred (Lambrechts et al. 2014 eq. 12; Bitsch
+    et al. 2018 eqs. 10–11), and Pascucci et al.'s (2018) soft taper was considered, not built.
+    Crowding within 0.02 dex under it, none at it: 4.8% of chain planets about 0.9–1.1 M☉ hosts, 6.6%
+    about 0.2–0.4 M☉.
+  - _85.3, budget._ `DRIFT_BUDGET_EXPONENT` −0.67, the unweighted least-squares slope (−0.6705) of
+    log MP against log M★ over Mulders, Pascucci and Apai's (2015, ApJ 814, 130) Table 2 (7.3, 5.4,
+    5.0, 3.6 M⊕ at 0.42, 0.73, 0.91, 1.08 M☉), M★ held to that range. New findings on late M
+    dwarfs under 0.34 M☉ against Sabotta et al. (2021, A&A 653, A114, Table 4), 1–10 M⊕ in m sin i
+    (i seen along galactic north): 0.125 per star at 1–10 days against 1.06 (+0.35 −0.28), pinned
+    0.10–0.15; 0.69 at 10–100 days against 0.55 (+0.40 −0.26), pinned 0.66–0.72.
+  - _85.4, early M dwarfs._ `early_m_dwarf_share(mass)`: 1 over 0.35–0.6 M☉ (`EARLY_M_DWARF_MASSES`),
+    linear in ln M to 0 at 0.30 and 0.70 M☉ (`EARLY_M_DWARF_BLEND`, this plan's choice). Inside it
+    `Barren` and `TerrestrialOnly` take no T4.b weight (Hsu et al. 2020, §5); the hot variant's
+    share is `HotVariant::probability_about(mass)`, blended from 0.4 to 0.55
+    (`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`; Ballard and Johnson 2016, §3.3); `CHAIN_COUNT` gains
+    `early_m_dwarf_factor` 2.3, fitted so that a cold chain places 5.0 planets inside 200 days
+    (T5's count window: Ballard and Johnson's systems are counted inside 1–200 days); and the chain's
+    first-period break is × 0.45 (`EARLY_M_DWARF_FIRST_PERIOD_SCALE`, `PeriodLaw::with_break_scaled`,
+    5.4 days), fitted to Dressing and Charbonneau's 0.47 at 0.5–10 days (Table 5). No word is added:
+    the hot variant and the count read the same marks. Placed (0.35–0.6 M☉): 89.8% of the
+    primaries' zones host a chain, 54% of them hot; cold chains draw 9.2 (λ 14.2, so 90% of them at the cap of 10: the count inside 200 days is set by the spacing and the period cut, not the law), form 7.6, place 7.2, 5.0
+    inside 200 days; 98.8% of single primaries have a planet inside 200 days; the planets'
+    inventory is 7.6 M⊕ (Mulders et al. 2015b: 7.3 ± 0.7). A new T10.b check asserts D&C's
+    0.5–10 days: 0.462 (0.37–0.57; Table 5's errors in quadrature are about +0.065 −0.05, and
+    the window is ±0.10). The blend reaches K dwarfs of 0.6–0.7 M☉ (filler B, 0.677 M☉, moves),
+    which T10.b's FGK sample of 0.7–1.3 M☉ does not hold; **for the orchestrator to rule:** keep
+    the outward blend, or move it inside 0.35–0.6 M☉, which lowers the M-dwarf count.
+  - _What the change leaves, a finding, not tuned:_ Dressing and Charbonneau's count is 1.750
+    (1.8–3.2; by radius 1.652), re-pinned at 1.72–1.78. Of the 20.8% of these primaries with no
+    planet inside 200 days, 96% are in multiples: 94% of them have a companion inside Kraus's 47 au
+    (25% under 1 au, 46% at 1–10 au, 23% at 10–47 au), and 75% of all primaries with such a
+    companion have no planet there (the close-binary suppression and the truncated S-type discs);
+    3.7% are single stars. And 0.93 of the 2.68 planets per star inside 200 days are under 1 M⊕
+    (the ceiling at 20 M⊕ × M★ and the width). Dressing and Charbonneau's hosts are Kepler targets
+    whose close binaries are partly excluded, which the placed sample does not mimic.
+  - _T10.b before (ruling 73) → after (window):_ FGK small planets 0.720 → 0.701 (0.5–1.2); hot
+    Jupiters 0.72% → 0.72%; Cumming's giants 10.19% → 10.20%; η⊕ 0.400 → 0.400 (0.37–0.60); FGK log
+    radii 0.642 → 0.642 and single Suns 0.636 → 0.646 (0.60–0.70); above 1 R⊕ (new) 0.589
+    (0.46–0.60); 0.1–0.5 M☉ multiples 0.611 → 0.590 (≥ 0.40), their giants 1.55% → 1.81% (< 5%);
+    −2 against solar 0.006 → 0.006; the giants' slope 2.025 → 2.024; anchors 10.50%, 0.82%, 30.5%
+    unmoved. Findings: outer larger 0.656 → 0.638 (now a finding); D&C 1.227 → 1.750; mid-M inside 10
+    days 0.351 → 0.532 and their multiples 0.086 → 0.132 (now inside Hardegree-Ullman et al.'s
+    0.11–0.89); \[Fe/H\] −0.8 0.439 → 0.440; close binaries 0.138 → 0.134; pairs ≥ 10 R_H 0.994 →
+    0.995. No window was widened.
+  - _Goldens,_ at 11: `planetary/architecture` (the chain count's rate and mean at 0.48 M☉),
+    `planetary/masses`, `planetary/classes`, and eight T32 systems (the M dwarf, the halo star, the
+    wide binary, the triple, the subgiant, the red giant, fillers A and B), each through the chains'
+    masses, spacings and eccentricities; the Solar-like, the fallback black hole and filler C,
+    whose planets are rocky groups or giants about hosts above 0.7 M☉, and the hot Jupiter, the
+    eccentric giant and the close binary do not move. The slow search reproduces all fourteen IDs,
+    so none is re-pinned; the golden systems' descriptions are brought up to their goldens.

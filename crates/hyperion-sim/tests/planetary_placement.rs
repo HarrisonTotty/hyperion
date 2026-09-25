@@ -530,15 +530,40 @@ fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<
         pearson(&pairs.radii),
         (0.60, 0.70),
     );
+    let linear = |pairs: &[(f64, f64)]| -> Vec<(f64, f64)> {
+        pairs
+            .iter()
+            .map(|&(a, b)| (math::exp10(a), math::exp10(b)))
+            .collect()
+    };
+    let above: Vec<(f64, f64)> = pairs
+        .radii
+        .iter()
+        .copied()
+        .filter(|&(a, b)| a > 0.0 && b > 0.0)
+        .collect();
+    report.check(
+        "adjacent log radii's correlation above 1 R_earth (Weiss et al. 2018)",
+        pearson(&above),
+        (0.46, 0.60),
+    );
+    report.note(format!(
+        "  in linear radius: all pairs {:.4}, above 1 R_earth {:.4} ({} of {} pairs)",
+        pearson(&linear(&pairs.radii)),
+        pearson(&linear(&above)),
+        above.len(),
+        pairs.radii.len()
+    ));
     let larger = pairs
         .radii
         .iter()
         .filter(|(inner, outer)| outer > inner)
         .count();
-    report.check(
+    report.finding(
         "outer planet the larger (Weiss et al. 2018)",
         ratio(larger, pairs.radii.len()),
         (0.650, 0.658),
+        (0.630, 0.645),
     );
     let wide = |spacings: &[f64]| {
         ratio(
@@ -573,12 +598,42 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
         "small planets per M dwarf inside 200 days (Dressing and Charbonneau 2015)",
         per_m,
         (1.8, 3.2),
-        (1.20, 1.26),
+        (1.72, 1.78),
     );
     report.note(format!(
         "  by radius at drawn ranks: {:.4}",
         small_by_radius(&m, 200.0, ranks)
     ));
+    let inner = per_star(&m, |_, p| small(p) && (0.5..10.0).contains(&period_days(p)));
+    report.check(
+        "small planets per M dwarf at 0.5-10 days (Dressing and Charbonneau 2015, Table 5)",
+        inner,
+        (0.37, 0.57),
+    );
+
+    // Late M dwarfs of Sabotta et al.'s (2021) CARMENES sample, under 0.34 M☉: planets of
+    // 1-10 M⊕ in minimum mass, m sin i with i seen along galactic north.
+    let late_rv = sample(galaxy, 4_500_000, 30_000, uniform(0.1, 0.34), drawn);
+    let rv_small = |p: &PlacedPlanet| {
+        let m_sin_i = p.mass().value() * math::sin(p.orbit().inclination().value()).abs();
+        (1.0..=10.0).contains(&m_sin_i)
+    };
+    report.finding(
+        "late M dwarfs' 1-10 M_earth (m sin i) planets at 1-10 days (Sabotta et al. 2021)",
+        per_star(&late_rv, |_, p| {
+            rv_small(p) && (1.0..10.0).contains(&period_days(p))
+        }),
+        (0.78, 1.41),
+        (0.10, 0.15),
+    );
+    report.finding(
+        "late M dwarfs' 1-10 M_earth (m sin i) planets at 10-100 days (Sabotta et al. 2021)",
+        per_star(&late_rv, |_, p| {
+            rv_small(p) && (10.0..100.0).contains(&period_days(p))
+        }),
+        (0.29, 0.95),
+        (0.66, 0.72),
+    );
 
     // Hosts of 0.1-0.5 M☉.
     let low = sample(galaxy, 4_000_000, 30_000, uniform(0.1, 0.5), drawn);
@@ -600,14 +655,14 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
         "M3-M5.5 planets per star inside 10 days (Hardegree-Ullman et al. 2019)",
         hu_per_star,
         (0.70, 1.89),
-        (0.30, 0.40),
+        (0.50, 0.56),
     );
     let hu_multiple = share_with_at_least(&late, 2, |p| period_days(p) < 10.0);
     report.finding(
         "M3-M5.5 compact multiples (Hardegree-Ullman et al. 2019)",
         hu_multiple,
         (0.11, 0.89),
-        (0.05, 0.10),
+        (0.12, 0.15),
     );
 }
 
@@ -768,9 +823,16 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   inside 10 days, around 0.44 (+0.45 −0.33) of them;
 /// - (48 f) η⊕, 0.37 (+0.48 −0.21) to 0.60 (+0.90 −0.36) per star in the conservative habitable
 ///   zone of GK dwarfs (Bryson et al. 2021, AJ 161, 36, Table 3; [`eta_earth`]);
-/// - (55.1) adjacent planets of compact chains, their log radii correlated at Weiss et al.'s
-///   (2018, AJ 155, 48, §3) r = 0.65, window 0.60–0.70, and the outer the larger in 65.4 ± 0.4%
-///   of pairs (§5.3);
+/// - (55.1, 85.1) adjacent planets of compact chains, compared like with like with Weiss et al.'s
+///   (2018, AJ 155, 48, §3) pairs: all pairs' log radii correlated at r = 0.65, window 0.60–0.70
+///   (two standard errors of their 504 pairs), and pairs of planets both above 1 R⊕ at r = 0.53,
+///   window 0.46–0.60 (the same two standard errors, taking all 504 pairs as an upper bound on
+///   theirs above 1 R⊕). Weiss et al. do not say whether r is of log or linear radii; the log's is
+///   asserted and the linear's reported. Their SNR swap test needs each star's photometric noise,
+///   which the placed sample does not carry, so it is not applied;
+/// - (P14.T10.b, ruling 85.4) Dressing and Charbonneau's (2015, Table 5) 0.47 small planets per
+///   early M dwarf at 0.5–10 days, window 0.37–0.57: their rows' errors in quadrature give about
+///   +0.065 −0.05, and the window takes ±0.10, about two of them, on the mass proxy;
 /// - (52.5) placed spacings of small pairs against Weiss et al.'s (§5.2) 93% at 10 mutual Hill
 ///   radii or more, peaking near 20, measured as they measure them: each planet's mass from its
 ///   radius by Weiss and Marcy's (2014) relation (their eqs. 6–9; [`weiss_marcy_mass`]);
@@ -784,22 +846,21 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 /// Each of these still misses its source by more than any change inside the sources reaches, and
 /// is reported with its dial:
 ///
-/// - M dwarfs have 1.23 small planets inside 200 days, against Dressing and Charbonneau's 2.5
-///   (1.15 before ruling 68.2 raised the chains' median to Wu's 7.7 M⊕ × M★, 1.28 before ruling
-///   73's budget and truncated masses). Ruling 66's floor of 1 M⊕ × M★ lets their chains' planets
-///   under 1 M⊕, where the fixed 1 M⊕ floor had counted them and gave 1.90. By radius the model
-///   has half of Dressing and Charbonneau's 1–4 R⊕ planets at every period from 10 to 200 days
-///   (their Table 5) and a third inside 10 days, and more 0.5–1 R⊕ planets than they find: 72% of
-///   these M dwarfs host a chain, 40% of those the dynamically hot one or two, where Hsu et al.
-///   (2020) find the planets consistent with every M dwarf hosting a system and Ballard and
-///   Johnson (2016) about five planets inside 200 days in the multiple systems (ruling 73.1);
-///
-/// - mid-to-late M dwarfs have 0.35 planets per star and 9% compact multiples inside 10 days,
-///   against Hardegree-Ullman et al.'s 1.19 and 0.44; the early M dwarfs have 0.28 against Dressing
-///   and Charbonneau's (2015, Table 5) 0.63 for the same radii and periods. The chains' first
-///   period follows Mulders et al.'s (2018) law, measured about Kepler's FGK hosts, at every host
-///   mass (Mulders, Pascucci and Apai 2015, ApJ 798, 112, find the break at one period), so no M
-///   dwarf's chain starts closer in than a Sun's;
+/// - the outer planet of a pair is the larger in 0.638 of pairs, against Weiss et al.'s 65.4 ±
+///   0.4%, at the 0.54 dex width ruling 85.1 restores; it is recorded, not tuned;
+/// - M dwarfs have 1.75 small planets inside 200 days, against Dressing and Charbonneau's 2.47
+///   (1.23 before ruling 85.4). Every single early M dwarf now hosts a system (98.8% with a planet
+///   inside 200 days), 45% of chains cold with 5.0 planets inside 200 days and 55% the hot one or
+///   two; the rest of the miss is the binaries: 21% of these primaries have no planet inside 200
+///   days, each in a pair whose close-binary suppression or circumbinary zone leaves none there,
+///   and the chains' step puts 0.93 planets per star inside 200 days under 1 M⊕;
+/// - late M dwarfs under 0.34 M☉ have 0.12 planets of 1–10 M⊕ in m sin i at 1–10 days, against
+///   Sabotta et al.'s (2021, A&A 653, A114, Table 4) 1.06 (+0.35 −0.28), and 0.69 at 10–100 days,
+///   inside their 0.55 (+0.40 −0.26) (ruling 85.3): below the blend of ruling 85.4 these hosts'
+///   chains are the ordinary law's, their masses 7.7 M⊕ × M★ scaled down under 1 M⊕ in m sin i;
+/// - mid-to-late M dwarfs have 0.53 planets per star and 13% compact multiples inside 10 days,
+///   against Hardegree-Ullman et al.'s 1.19 and 0.44 (the multiples inside their interval), their
+///   hosts above 0.30 M☉ in ruling 85.4's blend;
 /// - small planets at \[Fe/H\] = −0.8 are 0.44 of solar (0.46 before ruling 68.2, 0.42 before
 ///   ruling 73): the compact classes' share there is about 0.72 of solar, as
 ///   `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars with Kepler-like

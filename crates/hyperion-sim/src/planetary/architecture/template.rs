@@ -120,8 +120,8 @@ pub enum CountLaw {
         max: u8,
     },
     /// A zero-truncated Poisson law of rate
-    /// λ(M) = `rate` × (max(M, `mass_floor`) ÷ M☉)^`mass_exponent`, with a draw above `max` held
-    /// at `max`.
+    /// λ(M) = `rate` × (max(M, `mass_floor`) ÷ M☉)^`mass_exponent`, times its early M dwarfs'
+    /// factor blended in, with a draw above `max` held at `max`.
     ZeroTruncatedPoisson {
         /// λ at 1 M☉.
         rate: f64,
@@ -129,6 +129,9 @@ pub enum CountLaw {
         mass_exponent: f64,
         /// The mass below which λ is held.
         mass_floor: SolarMasses,
+        /// What λ is multiplied by about an early M dwarf, blended by
+        /// [`early_m_dwarf_share`](super::early_m_dwarf_share) (ruling 85.4); 1 for none.
+        early_m_dwarf_factor: f64,
         /// The greatest count.
         max: u8,
     },
@@ -156,12 +159,7 @@ impl CountLaw {
     pub fn poisson_rate(&self, host_mass: SolarMasses) -> Option<f64> {
         match *self {
             Self::Uniform { .. } | Self::Fill { .. } => None,
-            Self::ZeroTruncatedPoisson {
-                rate,
-                mass_exponent,
-                mass_floor,
-                ..
-            } => Some(held_rate(rate, mass_exponent, mass_floor, host_mass)),
+            Self::ZeroTruncatedPoisson { .. } => Some(self.rate_at(host_mass)),
         }
     }
 
@@ -172,13 +170,8 @@ impl CountLaw {
         match *self {
             Self::Uniform { min, max } => f64::midpoint(f64::from(min), f64::from(max)),
             Self::Fill { max } => f64::from(max),
-            Self::ZeroTruncatedPoisson {
-                rate,
-                mass_exponent,
-                mass_floor,
-                max,
-            } => {
-                let lambda = held_rate(rate, mass_exponent, mass_floor, host_mass);
+            Self::ZeroTruncatedPoisson { max, .. } => {
+                let lambda = self.rate_at(host_mass);
                 let zero = crate::math::exp(-lambda);
                 // P(N = k) for k = 1..max − 1 by recurrence, and P(N ≥ max) held at max.
                 let mut term = zero;
@@ -191,6 +184,26 @@ impl CountLaw {
                 }
                 mean += f64::from(max) * (1.0 - below);
                 mean / (1.0 - zero)
+            }
+        }
+    }
+}
+
+impl CountLaw {
+    /// A Poisson law's λ about `host_mass`, or 0 for any other.
+    fn rate_at(&self, host_mass: SolarMasses) -> f64 {
+        match *self {
+            Self::Uniform { .. } | Self::Fill { .. } => 0.0,
+            Self::ZeroTruncatedPoisson {
+                rate,
+                mass_exponent,
+                mass_floor,
+                early_m_dwarf_factor,
+                ..
+            } => {
+                let blend = super::early_m_dwarf_share(host_mass);
+                held_rate(rate, mass_exponent, mass_floor, host_mass)
+                    * (1.0 + (early_m_dwarf_factor - 1.0) * blend)
             }
         }
     }
@@ -285,6 +298,28 @@ pub enum PeriodLaw {
 }
 
 impl PeriodLaw {
+    /// The law with its break, for a broken power law, multiplied by `factor`; any other law as it
+    /// is.
+    #[must_use]
+    pub const fn with_break_scaled(self, factor: f64) -> Self {
+        match self {
+            Self::BrokenPowerLaw {
+                break_period,
+                rising,
+                falling,
+                min,
+                max,
+            } => Self::BrokenPowerLaw {
+                break_period: Days::new(break_period.value() * factor),
+                rising,
+                falling,
+                min,
+                max,
+            },
+            Self::LogNormal { .. } | Self::LogUniform { .. } => self,
+        }
+    }
+
     /// The shortest and longest periods.
     #[must_use]
     pub const fn range(&self) -> (Days, Days) {
@@ -414,10 +449,21 @@ pub struct HotVariant {
 }
 
 impl HotVariant {
-    /// The share of systems that take the variant.
+    /// The share of systems that take the variant about most hosts.
     #[must_use]
     pub const fn probability(&self) -> f64 {
         self.probability
+    }
+
+    /// The share of systems about a host of `host_mass` that take the variant: [`probability`]
+    /// blended to [`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`] about an early M dwarf
+    /// ([`early_m_dwarf_share`](super::early_m_dwarf_share); ruling 85.4).
+    ///
+    /// [`probability`]: Self::probability
+    #[must_use]
+    pub fn probability_about(&self, host_mass: SolarMasses) -> f64 {
+        let blend = super::early_m_dwarf_share(host_mass);
+        self.probability + (EARLY_M_DWARF_HOT_VARIANT_PROBABILITY - self.probability) * blend
     }
 
     /// The variant's count.
@@ -621,13 +667,36 @@ const FIRST_PERIOD: PeriodLaw = PeriodLaw::BrokenPowerLaw {
     max: Days::new(50.0),
 };
 
-/// A chain's count: mean 3.5 at 1 M☉ and 6.1 at and below 0.48 M☉, at most 10.
+/// A chain's count: mean 3.5 at 1 M☉ and 6.1 at and below 0.48 M☉, at most 10, and about the
+/// early M dwarfs of 0.35–0.6 M☉ a rate 2.3 times as high (ruling 85.4).
+///
+/// Ballard and Johnson's (2016, ApJ 816, 66, §3.3) multiple systems hold about five planets inside
+/// 200 days, the window their periods were drawn in; a cold chain about these hosts, under its
+/// solid budget and at P14.T6.b's spacing, places 5.0 there at this factor (P14.T10.b's placed
+/// sample), where the ordinary law placed 3.5. The factor is fitted to that count.
 pub const CHAIN_COUNT: CountLaw = CountLaw::ZeroTruncatedPoisson {
     rate: 3.38,
     mass_exponent: -0.82,
     mass_floor: SolarMasses::new(0.48),
+    early_m_dwarf_factor: 2.3,
     max: 10,
 };
+
+/// The share of an early M dwarf's chains that take the hot variant of one or two planets: 0.55
+/// (ruling 85.4), Ballard and Johnson's (2016, §3.3) 55 (+23 −12)% of M-dwarf systems single or
+/// mutually inclined, where [`HOT_VARIANT`]'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
+pub const EARLY_M_DWARF_HOT_VARIANT_PROBABILITY: f64 = 0.55;
+
+/// What a chain's first period law's break is multiplied by about an early M dwarf: 0.45 (ruling
+/// 85.4), blended by [`early_m_dwarf_share`](super::early_m_dwarf_share).
+///
+/// Dressing and Charbonneau (2015, ApJ 807, 45, Table 5) find 0.47 of the 2.47 planets of
+/// 1–4 R⊕ per M dwarf inside 200 days at 0.5–10 days, 19%, where Mulders et al.'s (2018) FGK
+/// break at 12 days put 13% of this model's there. The factor, which moves the break to 5.4 days,
+/// is fitted to their 0.47 on P14.T10.b's placed sample; Mulders, Pascucci and Apai (2015, ApJ
+/// 798, 112) find the break at one period for F to M hosts binned by type, so this is a
+/// calibration to the M dwarfs' own distribution, not a law in host mass.
+pub const EARLY_M_DWARF_FIRST_PERIOD_SCALE: f64 = 0.45;
 
 /// The dynamically hot variant: 40% of systems, 1–2 planets, half-normal eccentricities.
 const HOT_VARIANT: HotVariant = HotVariant {
@@ -1085,8 +1154,37 @@ mod tests {
     fn chain_counts_have_the_means_of_their_sources() {
         let mean = |m: f64| CHAIN_COUNT.mean(SolarMasses::new(m));
         assert!((mean(1.0) - 3.5).abs() < 0.01, "{}", mean(1.0));
-        assert!((mean(0.48) - 6.1).abs() < 0.02, "{}", mean(0.48));
-        assert!((mean(0.1) - mean(0.48)).abs() < 1e-12, "held below 0.48 M☉");
+        // The ordinary law, without the early M dwarfs' factor (ruling 85.4).
+        let CountLaw::ZeroTruncatedPoisson {
+            rate,
+            mass_exponent,
+            mass_floor,
+            max,
+            ..
+        } = CHAIN_COUNT
+        else {
+            panic!("the chain's count is Poisson");
+        };
+        let ordinary = CountLaw::ZeroTruncatedPoisson {
+            rate,
+            mass_exponent,
+            mass_floor,
+            early_m_dwarf_factor: 1.0,
+            max,
+        };
+        let plain = ordinary.mean(SolarMasses::new(0.48));
+        assert!((plain - 6.1).abs() < 0.02, "{plain}");
+        assert!(
+            (mean(0.1) - plain).abs() < 1e-12,
+            "held below 0.48 M☉, outside the blend"
+        );
+        // About an early M dwarf the rate is 2.3 times as high, most chains at the cap.
+        assert!((9.5..10.0).contains(&mean(0.48)), "{}", mean(0.48));
+        assert!(
+            mean(0.32) > plain && mean(0.32) < mean(0.48),
+            "{}",
+            mean(0.32)
+        );
         assert!((2.8..3.0).contains(&mean(1.3)), "{}", mean(1.3));
         // The mean of a uniform law and of a zero-truncated Poisson law far from its cap.
         assert!(
@@ -1096,6 +1194,7 @@ mod tests {
             rate: 2.0,
             mass_exponent: 0.0,
             mass_floor: SolarMasses::new(0.1),
+            early_m_dwarf_factor: 1.0,
             max: 60,
         };
         let expected = 2.0 / (1.0 - crate::math::exp(-2.0));

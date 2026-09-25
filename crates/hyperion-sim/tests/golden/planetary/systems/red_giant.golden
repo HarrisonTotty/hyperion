@@ -12,8 +12,8 @@ host Star(0): drawn CompactWithColdGiant, placed CompactWithColdGiant
 epoch: 4 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: NotModelled
 halo: NotModelled
-body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2322608025687290, nanos: 851377895 } }
-mass_mearth = 0x3ff9479d17b77faf  # 1.579983799594611
+body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2425721234143493, nanos: 112262256 } }
+mass_mearth = 0x400166a31440ee59  # 2.1751157362285025
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -21,8 +21,8 @@ moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
 hooks: NotModelled
-body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1238187894784567, nanos: 304244672 } }
-mass_mearth = 0x40039578b6212909  # 2.4479841450566977
+body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1208537960278945, nanos: 848936342 } }
+mass_mearth = 0x4009a3a5a1c633ee  # 3.2049057615863523
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -88,8 +88,8 @@ hooks: NotModelled
 +H: 4 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: NotModelled
 halo: NotModelled
-body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2322608025687290, nanos: 851377895 } }
-mass_mearth = 0x3ff9479d17b77faf  # 1.579983799594611
+body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2425721234143493, nanos: 112262256 } }
+mass_mearth = 0x400166a31440ee59  # 2.1751157362285025
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -97,8 +97,8 @@ moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
 hooks: NotModelled
-body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1238187894784567, nanos: 304244672 } }
-mass_mearth = 0x40039578b6212909  # 2.4479841450566977
+body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1208537960278945, nanos: 848936342 } }
+mass_mearth = 0x4009a3a5a1c633ee  # 3.2049057615863523
 orbit: NotApplicable
 position: none
 bulk: NotApplicable

@@ -101,10 +101,10 @@ use crate::id::SystemId;
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements};
 use crate::planetary::architecture::template::{
-    ClassTemplate, CountLaw, EccentricityLaw, GroupRole, Location, Origin, PeriodLaw, PlanetGroup,
-    Reach, SpacingFamily, template,
+    ClassTemplate, CountLaw, EARLY_M_DWARF_FIRST_PERIOD_SCALE, EccentricityLaw, GroupRole,
+    Location, Origin, PeriodLaw, PlanetGroup, Reach, SpacingFamily, template,
 };
-use crate::planetary::architecture::{ArchitectureClass, ZoneLimit};
+use crate::planetary::architecture::{ArchitectureClass, ZoneLimit, early_m_dwarf_share};
 use crate::planetary::derive::composition::SnowLineSide;
 use crate::planetary::derive::radius::radius_chen_kipping;
 use crate::planetary::disc::{Disc, DiscHost, DiscProfile, Truncation};
@@ -873,7 +873,7 @@ impl<'a> Placer<'a> {
             let hot = group.hot_variant().filter(|variant| {
                 self.draws
                     .hot_variant
-                    .is_below(Threshold::from_probability(variant.probability()))
+                    .is_below(Threshold::from_probability(variant.probability_about(mass)))
             });
             let (count, law) = match hot {
                 Some(variant) => (variant.count(), variant.eccentricity()),
@@ -1074,6 +1074,13 @@ impl<'a> Placer<'a> {
                     return None;
                 }
                 let (a, b) = (min.max_of(p_lo), max.min_of(p_hi));
+                // Ruling 85.4: an early M dwarf's chain starts closer in.
+                let law = if group.role() == GroupRole::Chain {
+                    let blend = early_m_dwarf_share(self.host_mass());
+                    law.with_break_scaled(math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, blend))
+                } else {
+                    law
+                };
                 let period = truncated_period(law, a, b, u);
                 Some(self.axis(first, period).max_of(lo).min_of(hi))
             }

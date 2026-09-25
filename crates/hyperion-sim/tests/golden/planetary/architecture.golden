@@ -452,8 +452,8 @@ compact_multi group 0 presence = 0x3ff0000000000000  # 1.0
 compact_multi group 0 count 1-10
 compact_multi group 0 rate at 0.1 = 0x4018ae47956cd7e3  # 6.170194945114392
 compact_multi group 0 mean at 0.1 = 0x40185c73b3335f13  # 6.090285110483609
-compact_multi group 0 rate at 0.48 = 0x4018ae47956cd7e3  # 6.170194945114392
-compact_multi group 0 mean at 0.48 = 0x40185c73b3335f13  # 6.090285110483609
+compact_multi group 0 rate at 0.48 = 0x402c620585705eab  # 14.1914483737631
+compact_multi group 0 mean at 0.48 = 0x402396fac6b05616  # 9.79488202002089
 compact_multi group 0 rate at 1 = 0x400b0a3d70a3d70a  # 3.38
 compact_multi group 0 mean at 1 = 0x400bfbfece25b1e6  # 3.498044596219404
 compact_multi group 0 rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
@@ -475,8 +475,8 @@ compact_with_cold_giant group 0 presence = 0x3ff0000000000000  # 1.0
 compact_with_cold_giant group 0 count 1-10
 compact_with_cold_giant group 0 rate at 0.1 = 0x4018ae47956cd7e3  # 6.170194945114392
 compact_with_cold_giant group 0 mean at 0.1 = 0x40185c73b3335f13  # 6.090285110483609
-compact_with_cold_giant group 0 rate at 0.48 = 0x4018ae47956cd7e3  # 6.170194945114392
-compact_with_cold_giant group 0 mean at 0.48 = 0x40185c73b3335f13  # 6.090285110483609
+compact_with_cold_giant group 0 rate at 0.48 = 0x402c620585705eab  # 14.1914483737631
+compact_with_cold_giant group 0 mean at 0.48 = 0x402396fac6b05616  # 9.79488202002089
 compact_with_cold_giant group 0 rate at 1 = 0x400b0a3d70a3d70a  # 3.38
 compact_with_cold_giant group 0 mean at 1 = 0x400bfbfece25b1e6  # 3.498044596219404
 compact_with_cold_giant group 0 rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466
@@ -621,8 +621,8 @@ substellar_compact group 0 presence = 0x3ff0000000000000  # 1.0
 substellar_compact group 0 count 1-10
 substellar_compact group 0 rate at 0.1 = 0x4018ae47956cd7e3  # 6.170194945114392
 substellar_compact group 0 mean at 0.1 = 0x40185c73b3335f13  # 6.090285110483609
-substellar_compact group 0 rate at 0.48 = 0x4018ae47956cd7e3  # 6.170194945114392
-substellar_compact group 0 mean at 0.48 = 0x40185c73b3335f13  # 6.090285110483609
+substellar_compact group 0 rate at 0.48 = 0x402c620585705eab  # 14.1914483737631
+substellar_compact group 0 mean at 0.48 = 0x402396fac6b05616  # 9.79488202002089
 substellar_compact group 0 rate at 1 = 0x400b0a3d70a3d70a  # 3.38
 substellar_compact group 0 mean at 1 = 0x400bfbfece25b1e6  # 3.498044596219404
 substellar_compact group 0 rate at 1.3 = 0x4005ce4c92fb9a51  # 2.725731991103466

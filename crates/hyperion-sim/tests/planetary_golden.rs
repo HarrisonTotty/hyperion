@@ -688,8 +688,8 @@ fn filler(c: &Candidate<'_>) -> bool {
 /// checked by eye from its golden, and its comment says what it holds at the epoch.
 const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
     GoldenSystem {
-        // A 0.138 M☉ M dwarf, [Fe/H] +0.04, `CompactMulti`: six planets of 0.37–7.1 M⊕ at
-        // 0.078–0.50 au, the inner pairs 1% wide of 3:2.
+        // A 0.138 M☉ M dwarf, [Fe/H] +0.04, `CompactMulti`: six planets of 0.35–2.7 M⊕ at
+        // 0.078–0.50 au (ruling 85's masses, under the host's 2.8 M⊕ ceiling).
         name: "m_dwarf_resonant_chain",
         layer: Layer::A,
         budget: 200_000,
@@ -725,9 +725,9 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4200_acaa_0000_000a,
     },
     GoldenSystem {
-        // A 0.400 M☉ M dwarf of the halo, [Fe/H] −0.77, 11.7 Gyr old, `CompactMulti`: one rocky
-        // planet of 1.50 M⊕ at 0.061 au (8.6 days). Re-pinned by ruling 73 (`calib3`): the first
-        // halo star with a planet is now this one, before `01fdbb3660000000`.
+        // A 0.400 M☉ M dwarf of the halo, [Fe/H] −0.77, 11.7 Gyr old, `CompactMulti`: two rocky
+        // planets of 0.87 and 0.69 M⊕ at 0.038 and 0.048 au, circularised. Re-pinned by ruling 73
+        // (`calib3`): the first halo star with a planet is this one, before `01fdbb3660000000`.
         name: "halo_star",
         layer: Layer::A,
         budget: 200_000,
@@ -745,9 +745,9 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x41ff_ecae_0000_0001,
     },
     GoldenSystem {
-        // A 0.780 + 0.776 M☉ pair of K dwarfs 748 au apart (e 0.41), [Fe/H] +0.14: A has one planet
-        // of 1.9 M⊕ at 0.080 au (`CompactMulti`), B five rocky and icy planets of 0.26–0.78 M⊕ at
-        // 0.21–1.9 au (`TerrestrialOnly`).
+        // A 0.905 + 0.687 M☉ pair of K dwarfs, [Fe/H] +0.03: A has one planet
+        // of 10.6 M⊕ at 0.126 au (`CompactMulti`), B ten rocky and icy planets of 0.05–1.7 M⊕ at
+        // 0.13–1.16 au (`TerrestrialOnly`).
         name: "wide_binary",
         layer: Layer::C,
         budget: 200_000,
@@ -756,8 +756,8 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
     },
     GoldenSystem {
         // A 0.870 M☉ K dwarf with a 0.397 + 0.367 M☉ pair of M dwarfs 57 au apart, 413 au out,
-        // [Fe/H] +0.22: every star `CompactMulti`, with three, two and three planets of 0.40–18 M⊕
-        // inside 0.3 au.
+        // [Fe/H] +0.22: every star `CompactMulti`, with four, seven and ten planets of 0.37–14 M⊕
+        // inside 0.75 au.
         name: "hierarchical_triple",
         layer: Layer::C,
         budget: 200_000,
@@ -765,9 +765,9 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4200_2cb2_0000_0003,
     },
     GoldenSystem {
-        // A 1.56 M☉ star crossing the Hertzsprung gap at 9.4 L☉, [Fe/H] +0.42,
-        // `CompactWithColdGiant`: an 11.3 M⊕ planet at 0.113 au and a 0.47 Jupiter-mass giant at
-        // 13.8 au, e = 0.43.
+        // A 1.02 M☉ star crossing the Hertzsprung gap at 2.6 L☉, [Fe/H] −0.06,
+        // drawn `CompactWithColdGiant`, placed `CompactMulti` (its core does not grow in time): a
+        // 19.4 M⊕ planet at 0.050 au, circularised.
         name: "subgiant",
         layer: Layer::C,
         budget: 200_000,
@@ -775,9 +775,9 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x41ff_2cc2_0000_0007,
     },
     GoldenSystem {
-        // A 1.59 M☉ star on the first giant branch at 88 L☉, [Fe/H] −0.11,
-        // `CompactWithColdGiant`: its chain planet of 1.59 M⊕ engulfed 2.6 Myr before the epoch, and
-        // giants of 1.3 and 2.7 Jupiter masses at 7.9 and 30 au still present.
+        // A 1.06 M☉ star on the first giant branch at 38 L☉, [Fe/H] +0.03,
+        // `CompactWithColdGiant`: its chain planets of 2.2 and 3.2 M⊕ engulfed 77 and 38 Myr before
+        // the epoch, and giants of 0.81 and 0.99 Jupiter masses at 4.6 and 10.9 au still present.
         name: "red_giant",
         layer: Layer::C,
         budget: 200_000,
@@ -796,7 +796,7 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x8201_b2e0_0000_0010,
     },
     GoldenSystem {
-        // A 0.335 M☉ M dwarf, [Fe/H] 0.00, `CompactMulti`: one planet of 0.77 M⊕ at 0.065 au.
+        // A 0.335 M☉ M dwarf, [Fe/H] 0.00, `CompactMulti`: one planet of 0.77 M⊕ at 0.046 au.
         name: "filler_a",
         layer: Layer::A,
         budget: 200_000,
@@ -804,8 +804,9 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x01ff_fb2c_6000_0000,
     },
     GoldenSystem {
-        // A 0.677 M☉ K dwarf, [Fe/H] +0.17, `CompactMulti`: two planets of 0.72 and 0.68 M⊕ at
-        // 0.035 and 0.044 au, circularised.
+        // A 0.677 M☉ K dwarf, [Fe/H] +0.17, `CompactWithColdGiant`: two planets of 0.90 and 0.69 M⊕
+        // at 0.032 and 0.041 au, circularised, and giants of 1.8 and 5.3 Jupiter masses at 1.8 and
+        // 14.3 au.
         name: "filler_b",
         layer: Layer::B,
         budget: 200_000,
