@@ -80,7 +80,7 @@ use crate::planetary::derive::{
 };
 use crate::planetary::disc::{self, Disc, Truncation};
 use crate::planetary::error::ResolveBodyError;
-use crate::planetary::fate::{BodyFate, BodyState, FateBody, FateHost};
+use crate::planetary::fate::{BodyFate, BodyState, FateBody, FateHost, ScatterDraws};
 use crate::planetary::hosts::evolved::Circularisation;
 use crate::planetary::hosts::young::Formation;
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
@@ -226,7 +226,8 @@ impl Body {
         let density = KilogramsPerCubicMetre::new(Kilograms::from(mass).value() / volume);
         let fate = FateBody::new(formation, *placed.orbit(), mass, density)
             .expect("a placed planet's mass and its density are positive")
-            .with_circularisation(circularisation(&placed, zone.host_mass(), radius));
+            .with_circularisation(circularisation(&placed, zone.host_mass(), radius))
+            .with_scatter_draws(ScatterDraws::Stream { seed, body: id });
         Self {
             placed,
             host: zone.host(),
@@ -610,11 +611,33 @@ impl PlanetarySystem {
     #[must_use]
     pub fn snapshot_at(&self, ctx: &SystemContext, t: UniverseTime) -> SystemSnapshot {
         let epoch = Epoch::new(self, ctx, t);
+        let hosts: Vec<FateHost<'_>> = self.zones.iter().map(|zone| fate_host(ctx, zone)).collect();
+        // Each host's bodies are resolved together, for the scattering after a supernova
+        // (ruling 71), and each exactly once.
+        let mut fates: Vec<Option<BodyFate<'_>>> = vec![None; self.bodies.len()];
+        for (zone, host) in self.zones.iter().zip(&hosts) {
+            let members: Vec<usize> = (0..self.bodies.len())
+                .filter(|&k| self.bodies[k].host == zone.host())
+                .collect();
+            let bodies: Vec<&FateBody> = members.iter().map(|&k| &self.bodies[k].fate).collect();
+            for (k, fate) in members
+                .into_iter()
+                .zip(BodyFate::resolve_all(&bodies, host))
+            {
+                fates[k] = Some(fate);
+            }
+        }
         let records = self
             .bodies
             .iter()
             .zip(label::labels(self))
-            .map(|(body, (_, label))| self.record(&epoch, body, label))
+            .zip(&fates)
+            .map(|((body, (_, label)), fate)| {
+                let fate = fate
+                    .as_ref()
+                    .expect("every body orbits one of its system's zones");
+                self.record(&epoch, body, label, fate)
+            })
             .collect();
         SystemSnapshot::new(self.system, t, records)
             .expect("a system's records are its own, in index order, at full detail")
@@ -625,7 +648,8 @@ impl PlanetarySystem {
     ///
     /// - The identity: the kind, the label (P14.T30.c), the host the body orbits as its parent,
     ///   and its state at `t` from the fate transform (P14.T28).
-    /// - The mass, always: a body not yet formed, destroyed or unbound has the mass it had.
+    /// - The mass, always: a body not yet formed, destroyed or unbound has the mass it had, and a
+    ///   present one carries any neighbour that collided with it and merged into it (ruling 71).
     /// - For a body present at `t`: its orbit at `t` with the time it holds until, its position,
     ///   and its bulk from [`derive_body`] about its hosts at `t`, with the surface
     ///   [`Section::NotModelled`] ([`Section::NotApplicable`] for a giant).
@@ -649,7 +673,9 @@ impl PlanetarySystem {
     ) -> Result<BodyRecord, ResolveBodyError> {
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
         let label = label::label(self, index).expect("every body of a system has a label");
-        Ok(self.record(&Epoch::new(self, ctx, t), body, label))
+        let host = fate_host(ctx, self.zone_of(body));
+        let fate = self.fate_of(body, &host);
+        Ok(self.record(&Epoch::new(self, ctx, t), body, label, &fate))
     }
 
     /// Where body `index` is at `t`, in the system frame from its barycentre (plan 01's `coords`):
@@ -673,7 +699,7 @@ impl PlanetarySystem {
         let epoch = Epoch::new(self, ctx, t);
         let zone = self.zone_of(body);
         let host = fate_host(ctx, zone);
-        let fate = BodyFate::resolve(&body.fate, &host).at(t);
+        let fate = self.fate_of(body, &host).at(t);
         Ok(fate.orbit().map(|orbit| epoch.position(zone, orbit)))
     }
 
@@ -707,12 +733,30 @@ impl PlanetarySystem {
             .expect("every body orbits one of its system's zones")
     }
 
-    /// The record of `body` at the epoch's time, labelled `label`.
+    /// The history of `body` on `host`, its zone's stars, among the other bodies of its host
+    /// (P14.T28, [`BodyFate::resolve_among`]): they meet it only in the scattering after a
+    /// supernova (ruling 71).
     #[must_use]
-    fn record(&self, epoch: &Epoch<'_>, body: &Body, label: BodyLabel) -> BodyRecord {
+    fn fate_of<'s>(&'s self, body: &Body, host: &'s FateHost<'s>) -> BodyFate<'s> {
+        let siblings: Vec<&Body> = self.bodies.iter().filter(|b| b.host == body.host).collect();
+        let index = siblings
+            .iter()
+            .position(|b| b.index() == body.index())
+            .expect("a body is among its host's bodies");
+        let bodies: Vec<&FateBody> = siblings.iter().map(|b| &b.fate).collect();
+        BodyFate::resolve_among(&bodies, index, host)
+    }
+
+    /// The record of `body` at the epoch's time, labelled `label`, with its history `fate`.
+    #[must_use]
+    fn record(
+        &self,
+        epoch: &Epoch<'_>,
+        body: &Body,
+        label: BodyLabel,
+        fate: &BodyFate<'_>,
+    ) -> BodyRecord {
         let zone = self.zone_of(body);
-        let host = fate_host(epoch.ctx, zone);
-        let fate = BodyFate::resolve(&body.fate, &host);
         let at = fate.at(epoch.t);
         let identity = BodyIdentity::new(
             self.system,
@@ -722,14 +766,15 @@ impl PlanetarySystem {
             at.state(),
         )
         .with_label(label);
-        let builder = BodyRecord::builder(identity).mass(Section::Ok(body.mass()));
+        let builder = BodyRecord::builder(identity).mass(Section::Ok(at.mass()));
         let builder = match at.state() {
             BodyState::Present => {
                 let orbit = at.orbit().expect("a present body has an orbit");
                 let section = at
                     .body_orbit()
                     .expect("a present body has an orbit section");
-                let derived = self.derive(epoch, body, zone, orbit, fate.host_mass(epoch.t));
+                let derived =
+                    self.derive(epoch, body, zone, orbit, at.mass(), fate.host_mass(epoch.t));
                 builder
                     .derived(&derived)
                     .orbit(Section::Ok(section))
@@ -748,7 +793,8 @@ impl PlanetarySystem {
     }
 
     /// Everything [`derive_body`] computes of the present `body` of `zone` at the epoch's time,
-    /// on its orbit `orbit` then, about hosts of total mass `host_mass`.
+    /// on its orbit `orbit` then and of its mass `mass` then (its own, or with the neighbours
+    /// merged into it, ruling 71), about hosts of total mass `host_mass`.
     #[must_use]
     fn derive(
         &self,
@@ -756,6 +802,7 @@ impl PlanetarySystem {
         body: &Body,
         zone: &OrbitZone,
         orbit: &KeplerElements,
+        mass: EarthMasses,
         host_mass: SolarMasses,
     ) -> DerivedBody {
         let disc = self
@@ -776,7 +823,7 @@ impl PlanetarySystem {
         )
         .expect("a present body orbits a positive mass and at least one star");
         let placed = PlacedBody::new(
-            body.mass(),
+            mass,
             *body.orbit(),
             body.placed.formation_distance(),
             body.radius_rank,

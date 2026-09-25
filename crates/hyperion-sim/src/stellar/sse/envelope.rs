@@ -77,14 +77,14 @@ pub(crate) fn perturb(
     let (l, r) = (point.luminosity.value(), point.radius.value());
     let scale = 1.0_f64.max(2.5 / mt.value());
     let luminosity = if mu > 0.0 {
-        lc * math::powf(l / lc, exponent(mu, 0.002 * scale))
+        lc * math::powf_positive(l / lc, exponent(mu, 0.002 * scale))
     } else {
         lc
     };
     let radius = if mu > 0.0 && r > rc {
         let q = math::ln(r / rc);
-        let power = exponent(mu, 0.006 * scale) * math::powf(mu, 0.1 / q);
-        rc * math::powf(r / rc, power)
+        let power = exponent(mu, 0.006 * scale) * math::powf_positive(mu, 0.1 / q);
+        rc * math::powf_positive(r / rc, power)
     } else {
         rc
     };

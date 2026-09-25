@@ -75,11 +75,11 @@ impl GiantBranch {
                 d0 - (d0 - (0.975 * d0 - 0.18 * top)) * fraction,
             )
         };
-        let b_coefficient = 3e4_f64.max(500.0 + 1.75e4 * math::powf(m, 0.6));
+        let b_coefficient = 3e4_f64.max(500.0 + 1.75e4 * math::powf_positive(m, 0.6));
         let d_coefficient = math::exp10(log_d);
         let log_a_h = (-4.8_f64).max((-5.7 + 0.8 * m).min(-4.1 + 0.14 * m));
         // HPT equation 38: the two power laws cross at M_x = (B ÷ D)^(1 ÷ (p − q)).
-        let m_x = math::powf(b_coefficient / d_coefficient, 1.0 / (p - q));
+        let m_x = math::powf_positive(b_coefficient / d_coefficient, 1.0 / (p - q));
         Self {
             p,
             q,
@@ -87,7 +87,7 @@ impl GiantBranch {
             d: d_coefficient,
             a_h: math::exp10(log_a_h),
             m_x,
-            l_x: d_coefficient * math::powf(m_x, p),
+            l_x: d_coefficient * math::powf_positive(m_x, p),
         }
     }
 
@@ -109,8 +109,8 @@ impl GiantBranch {
     #[must_use]
     pub(crate) fn luminosity(&self, mc: SolarMasses) -> SolarLuminosities {
         let mc = mc.value();
-        let high = || self.b * math::powf(mc, self.q);
-        let low = || self.d * math::powf(mc, self.p);
+        let high = || self.b * math::powf_positive(mc, self.q);
+        let low = || self.d * math::powf_positive(mc, self.p);
         // Below M_x the low-luminosity law D Mc^p is the lesser, since p > q; only where that is
         // uncertain are both evaluated, so the result is `min`'s bit for bit (see
         // `coeffs::lesser_side`).
@@ -126,9 +126,9 @@ impl GiantBranch {
     pub(crate) fn core_mass(&self, l: SolarLuminosities) -> SolarMasses {
         let l = l.value();
         SolarMasses::new(if l <= self.l_x {
-            math::powf(l / self.d, 1.0 / self.p)
+            math::powf_positive(l / self.d, 1.0 / self.p)
         } else {
-            math::powf(l / self.b, 1.0 / self.q)
+            math::powf_positive(l / self.b, 1.0 / self.q)
         })
     }
 
@@ -138,11 +138,12 @@ impl GiantBranch {
     pub(crate) fn times(&self, t_bgb: Megayears, l_bgb: SolarLuminosities) -> GiantTimes {
         let (p, q) = (self.p, self.q);
         let (t_bgb, l_bgb) = (t_bgb.value(), l_bgb.value());
-        let t_inf1 =
-            t_bgb + math::powf(self.d / l_bgb, (p - 1.0) / p) / ((p - 1.0) * self.a_h * self.d);
-        let t_x = t_inf1 - (t_inf1 - t_bgb) * math::powf(l_bgb / self.l_x, (p - 1.0) / p);
-        let t_inf2 =
-            t_x + math::powf(self.b / self.l_x, (q - 1.0) / q) / ((q - 1.0) * self.a_h * self.b);
+        let t_inf1 = t_bgb
+            + math::powf_positive(self.d / l_bgb, (p - 1.0) / p) / ((p - 1.0) * self.a_h * self.d);
+        let t_x = t_inf1 - (t_inf1 - t_bgb) * math::powf_positive(l_bgb / self.l_x, (p - 1.0) / p);
+        let t_inf2 = t_x
+            + math::powf_positive(self.b / self.l_x, (q - 1.0) / q)
+                / ((q - 1.0) * self.a_h * self.b);
         GiantTimes {
             t_inf1: Megayears::new(t_inf1),
             t_x: Megayears::new(t_x),
@@ -155,12 +156,12 @@ impl GiantBranch {
     pub(crate) fn core_mass_at(&self, times: &GiantTimes, t: Megayears) -> SolarMasses {
         let t = t.value();
         SolarMasses::new(if t <= times.t_x.value() {
-            math::powf(
+            math::powf_positive(
                 (self.p - 1.0) * self.a_h * self.d * (times.t_inf1.value() - t),
                 1.0 / (1.0 - self.p),
             )
         } else {
-            math::powf(
+            math::powf_positive(
                 (self.q - 1.0) * self.a_h * self.b * (times.t_inf2.value() - t),
                 1.0 / (1.0 - self.q),
             )
@@ -174,10 +175,10 @@ impl GiantBranch {
         let l = l.value();
         Megayears::new(if l <= self.l_x {
             times.t_inf1.value()
-                - math::powf(self.d / l, (p - 1.0) / p) / ((p - 1.0) * self.a_h * self.d)
+                - math::powf_positive(self.d / l, (p - 1.0) / p) / ((p - 1.0) * self.a_h * self.d)
         } else {
             times.t_inf2.value()
-                - math::powf(self.b / l, (q - 1.0) / q) / ((q - 1.0) * self.a_h * self.b)
+                - math::powf_positive(self.b / l, (q - 1.0) / q) / ((q - 1.0) * self.a_h * self.b)
         })
     }
 
@@ -200,7 +201,7 @@ impl GiantBranch {
         let (p, q) = (5.0, 3.0);
         let b_coefficient = 4.1e4;
         let d_coefficient = 5.5e4 / (1.0 + 0.4 * math::powi(m.value(), 4));
-        let m_x = math::powf(b_coefficient / d_coefficient, 1.0 / (p - q));
+        let m_x = math::powf_positive(b_coefficient / d_coefficient, 1.0 / (p - q));
         Self {
             p,
             q,
@@ -208,7 +209,7 @@ impl GiantBranch {
             d: d_coefficient,
             a_h: rate_msun_per_lsun_myr,
             m_x,
-            l_x: d_coefficient * math::powf(m_x, p),
+            l_x: d_coefficient * math::powf_positive(m_x, p),
         }
     }
 
@@ -225,11 +226,14 @@ impl GiantBranch {
         let (p, q) = (self.p, self.q);
         let mc0 = self.core_mass(l0).value();
         GiantTimes {
-            t_inf1: t0 + Megayears::new(math::powf(mc0, 1.0 - p) / ((p - 1.0) * self.a_h * self.d)),
+            t_inf1: t0
+                + Megayears::new(
+                    math::powf_positive(mc0, 1.0 - p) / ((p - 1.0) * self.a_h * self.d),
+                ),
             t_x: t0,
             t_inf2: t0
                 + Megayears::new(
-                    math::powf(self.b / l0.value(), (q - 1.0) / q)
+                    math::powf_positive(self.b / l0.value(), (q - 1.0) / q)
                         / ((q - 1.0) * self.a_h * self.b),
                 ),
         }
@@ -323,7 +327,9 @@ impl RadiusLaw {
     #[must_use]
     pub(crate) fn at(&self, l: SolarLuminosities) -> SolarRadii {
         let l = l.value();
-        SolarRadii::new(self.a * (math::powf(l, self.b1) + self.b2 * math::powf(l, self.x)))
+        SolarRadii::new(
+            self.a * (math::powf_positive(l, self.b1) + self.b2 * math::powf_positive(l, self.x)),
+        )
     }
 
     /// [`RadiusLaw::at`] at the luminosity of `powers`, bit for bit, reading the powers of it
@@ -336,7 +342,7 @@ impl RadiusLaw {
             if exponent.total_cmp(&cached[0]).is_eq() {
                 cached[1]
             } else {
-                math::powf(l, exponent)
+                math::powf_positive(l, exponent)
             }
         };
         SolarRadii::new(self.a * (power(self.b1, powers.b1) + self.b2 * power(self.x, powers.x)))
@@ -364,8 +370,8 @@ impl LuminosityPowers {
         let l = l.value();
         Self {
             l,
-            b1: [law.b1, math::powf(l, law.b1)],
-            x: [law.x, math::powf(l, law.x)],
+            b1: [law.b1, math::powf_positive(l, law.b1)],
+            x: [law.x, math::powf_positive(l, law.x)],
         }
     }
 }
@@ -374,8 +380,8 @@ impl LuminosityPowers {
 /// (b36 M^b37 + b38)^¼.
 #[must_use]
 pub(crate) fn mc_bagb(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
-    SolarMasses::new(math::powf(
-        c.b(36) * math::powf(m.value(), c.b(37)) + c.b(38),
+    SolarMasses::new(math::powf_positive(
+        c.b(36) * math::powf_positive(m.value(), c.b(37)) + c.b(38),
         0.25,
     ))
 }
@@ -386,10 +392,12 @@ pub(crate) fn mc_bagb(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
 fn mc_intermediate(m: f64, l_at_hef: SolarLuminosities, c: &ZCoeffs) -> f64 {
     let m_hef = c.m_hef();
     let mc_at_hef = GiantBranch::new(m_hef, c).core_mass(l_at_hef).value();
-    let constant = math::powi(mc_at_hef, 4) - MC_BGB_C1 * math::powf(m_hef.value(), MC_BGB_C2);
+    let constant =
+        math::powi(mc_at_hef, 4) - MC_BGB_C1 * math::powf_positive(m_hef.value(), MC_BGB_C2);
     let cap = 0.95 * mc_bagb(SolarMasses::new(m), c).value();
+    // `powf`, not `powf_positive`: below `M_HeF` the sum can be negative, and its NaN leaves the cap.
     cap.min(math::powf(
-        constant + MC_BGB_C1 * math::powf(m, MC_BGB_C2),
+        constant + MC_BGB_C1 * math::powf_positive(m, MC_BGB_C2),
         0.25,
     ))
 }
@@ -409,11 +417,11 @@ pub(crate) fn mc_bgb(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
 pub(crate) fn l_hei(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
     let m = m.value();
     let m_hef = c.m_hef().value();
-    let high = |m: f64| (c.b(11) + c.b(12) * math::powf(m, 3.8)) / (c.b(13) + m * m);
+    let high = |m: f64| (c.b(11) + c.b(12) * math::powf_positive(m, 3.8)) / (c.b(13) + m * m);
     SolarLuminosities::new(if m < m_hef {
         let at_hef = high(m_hef);
-        let alpha1 = (c.b(9) * math::powf(m_hef, c.b(10)) - at_hef) / at_hef;
-        c.b(9) * math::powf(m, c.b(10)) / (1.0 + alpha1 * math::exp(15.0 * (m - m_hef)))
+        let alpha1 = (c.b(9) * math::powf_positive(m_hef, c.b(10)) - at_hef) / at_hef;
+        c.b(9) * math::powf_positive(m, c.b(10)) / (1.0 + alpha1 * math::exp(15.0 * (m - m_hef)))
     } else {
         high(m)
     })
@@ -436,8 +444,10 @@ pub(crate) fn mc_hei(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
 #[must_use]
 pub(crate) fn r_mhe_intermediate(m: SolarMasses, c: &ZCoeffs) -> SolarRadii {
     let m = m.value();
-    let m_b28 = math::powf(m, c.b(28));
-    SolarRadii::new((c.b(24) * m + math::powf(c.b(25) * m, c.b(26)) * m_b28) / (c.b(27) + m_b28))
+    let m_b28 = math::powf_positive(m, c.b(28));
+    SolarRadii::new(
+        (c.b(24) * m + math::powf_positive(c.b(25) * m, c.b(26)) * m_b28) / (c.b(27) + m_b28),
+    )
 }
 
 /// Below this, the blue-phase fraction of core helium burning is zero (the published SSE code's
@@ -451,7 +461,7 @@ pub(crate) const NO_BLUE_PHASE: f64 = 1e-10;
 #[must_use]
 fn blue_shape(m: SolarMasses, c: &ZCoeffs) -> f64 {
     let ratio = r_mhe_intermediate(m, c) / agb_radius(m, l_hei(m, c), c);
-    math::powf(m.value(), c.b(48)) * math::powf((1.0 - ratio).max(1e-12), c.b(49))
+    math::powf_positive(m.value(), c.b(48)) * math::powf_positive((1.0 - ratio).max(1e-12), c.b(49))
 }
 
 /// The fraction of core helium burning spent in the blue phase above `M_FGB` (HPT equation 58):
@@ -566,7 +576,7 @@ impl IgnitionRadius {
             IgnitionForm::Minimum(r_mhe) => r_mhe,
             IgnitionForm::Interpolated { r_mhe, mu } => {
                 let giant = RadiusLaw::giant(mt, c).at_powers(&self.powers);
-                SolarRadii::new(r_mhe * math::powf(giant.value() / r_mhe, mu))
+                SolarRadii::new(r_mhe * math::powf_positive(giant.value() / r_mhe, mu))
             }
         }
     }
@@ -724,7 +734,8 @@ mod tests {
 
     /// The relation's luminosity is the printed min(B Mc^q, D Mc^p), bit for bit, across the
     /// core masses, at `M_x` and its neighbours, for giant, early-AGB, pulsing and helium-giant
-    /// relations.
+    /// relations. Both sides take the stellar formulae's power, `math::powf_positive`, whose domain
+    /// is a positive core (ruling 77.1).
     #[test]
     fn the_relation_luminosity_is_the_printed_min_bit_for_bit() {
         for z in REFERENCE_Z {
@@ -738,20 +749,16 @@ mod tests {
                 let cores = (0..300)
                     .map(|i| math::exp10(-2.0 + 3.0 * f64::from(i) / 299.0))
                     .chain((-40..=40).map(|k| x * (1.0 + 1e-9 * f64::from(k))))
-                    .chain([x, x.next_up(), x.next_down(), 0.0, -0.1]);
+                    .chain([x, x.next_up(), x.next_down()]);
                 for mc in cores {
-                    let printed = (relation.b * math::powf(mc, relation.q))
-                        .min(relation.d * math::powf(mc, relation.p));
+                    let printed = (relation.b * math::powf_positive(mc, relation.q))
+                        .min(relation.d * math::powf_positive(mc, relation.p));
                     let ours = relation.luminosity(mass(mc)).value();
-                    if printed.is_nan() {
-                        assert!(ours.is_nan(), "Z = {z}, Mc = {mc}: {ours}");
-                    } else {
-                        assert_eq!(
-                            bits(ours),
-                            bits(printed),
-                            "Z = {z}, Mc = {mc}: {relation:?}"
-                        );
-                    }
+                    assert_eq!(
+                        bits(ours),
+                        bits(printed),
+                        "Z = {z}, Mc = {mc}: {relation:?}"
+                    );
                 }
             }
         }

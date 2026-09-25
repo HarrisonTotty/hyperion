@@ -423,7 +423,10 @@ pub(crate) fn supernova(
 ///
 /// A planet is held together by its gravity, not its strength, so the fluid limit, not the rigid
 /// one, is where tides pull it apart.
-fn remnant_roche_limit(mu: GravitationalParameter, density: KilogramsPerCubicMetre) -> Metres {
+pub(crate) fn remnant_roche_limit(
+    mu: GravitationalParameter,
+    density: KilogramsPerCubicMetre,
+) -> Metres {
     let mass = mu.value() / GRAVITATIONAL_CONSTANT;
     let radius = math::cbrt(3.0 * mass / (4.0 * PI * density.value()));
     roche_limit_fluid(Metres::new(radius), density, density)

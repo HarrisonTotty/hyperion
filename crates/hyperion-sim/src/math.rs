@@ -24,8 +24,9 @@
 //! fuses them itself.
 //!
 //! Every function here is `#[inline]` and, for the wrappers, exactly `libm`'s result. The
-//! hand-written functions are [`powi`] and [`normal_quantile`], which uses only the wrappers, the
-//! four operators and `sqrt`.
+//! hand-written functions are [`powi`], [`powf_positive`] (`libm`'s `exp` of `libm`'s `log`, for
+//! the stellar formulae alone) and [`normal_quantile`], which uses only the wrappers, the four
+//! operators and `sqrt`.
 
 /// The sine of `x` radians.
 #[inline]
@@ -186,6 +187,56 @@ pub fn ln_1p(x: f64) -> f64 {
 #[must_use]
 pub fn powf(x: f64, y: f64) -> f64 {
     libm::pow(x, y)
+}
+
+/// `x` raised to the real power `y` for a finite positive `x`, as `exp(y × ln x)` on the pinned
+/// `libm`: it costs about four [`exp`] against [`powf`]'s eight (`benches/stellar.rs`), and is less
+/// accurate by an amount that grows with |y ln x|.
+///
+/// **Where it may be used:** only in HPT's stellar formulae under `stellar::sse` (galaxy-generation
+/// ruling 77.1), whose bases are masses, luminosities, radii, metallicities and ratios of them, all
+/// positive, and whose |y ln x| stays under about 50. Everything else calls [`powf`]: the galaxy and
+/// planetary code has not been checked against this error, and the substitution moves output bits,
+/// so a new caller is a generator-version change.
+///
+/// **Error.** `libm`'s `log` and `exp` each err by under an ulp, and the product y × ln x rounds
+/// once, so the logarithm's relative error of at most 2⁻⁵² and the product's 2⁻⁵³ become an
+/// absolute error of at most 1.5 × 2⁻⁵² × |y ln x| in the exponent, which `exp` turns into the
+/// same relative error. To first order the result is within
+///
+/// > 2⁻⁵² × (1 + 1.5 |y ln x|) ≈ 2.2 × 10⁻¹⁶ × (1 + 1.5 |y ln x|)
+///
+/// of x^y, relatively, against [`powf`]'s under an ulp: 1.7 × 10⁻¹⁴ at |y ln x| = 50, about the
+/// most HPT's fits reach (M^10.25 at 130 M☉ in the helium main sequence's luminosity). A unit test
+/// checks the bound against [`powf`] over those ranges. y = 0 or x = 1 gives exactly 1, as
+/// [`powf`] does; an overflowing or underflowing power gives infinity or zero, as [`powf`] does.
+///
+/// # Panics
+///
+/// In debug builds, if `x` is not finite and positive or `y` is not finite. (Zero, the one
+/// non-positive base [`powf`] handles that `exp(y ln x)` also would, is outside the domain too, so
+/// that a formula whose base can reach it keeps [`powf`].)
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::math::{ln, powf, powf_positive};
+///
+/// // A 5 M☉ star's M^3.8, within the bound plus `powf`'s own ulp.
+/// let (m, e) = (5.0, 3.8);
+/// let bound = 2.3e-16 * (2.0 + 1.5 * (e * ln(m)).abs());
+/// assert!((powf_positive(m, e) / powf(m, e) - 1.0).abs() < bound);
+/// assert_eq!(powf_positive(1.0, 7.5), 1.0);
+/// assert_eq!(powf_positive(3.0, 0.0), 1.0);
+/// ```
+#[inline]
+#[must_use]
+pub fn powf_positive(x: f64, y: f64) -> f64 {
+    debug_assert!(
+        x > 0.0 && x.is_finite() && y.is_finite(),
+        "powf_positive needs a finite positive base and a finite power, not {x}^{y}"
+    );
+    libm::exp(y * libm::log(x))
 }
 
 /// The cube root of `x`.
@@ -565,6 +616,36 @@ mod tests {
             let host = x.mul_add(a, b);
             assert_same_bits(mul_add(x, a, b), host);
         }
+    }
+
+    /// `powf_positive` is within 2⁻⁵² × (2 + 1.5 |y ln x|) of `powf` (its own bound plus `powf`'s
+    /// ulp) over the ranges of HPT's fits: bases from 10⁻⁵ (metallicities, small cores) to 10⁸
+    /// (luminosities, and ratios of them), and powers within ±11 (M^10.25 in the helium main
+    /// sequence's luminosity), with the special cases exact.
+    #[test]
+    fn powf_positive_is_within_its_bound_of_powf_over_the_stellar_ranges() {
+        let mut g = hyperion_testkit::lcg::Lcg::new(0x9f0f);
+        let mut worst: f64 = 0.0;
+        for _ in 0..200_000 {
+            let x = exp10(-5.0 + 13.0 * g.next_f64());
+            let y = -11.0 + 22.0 * g.next_f64();
+            let t = (y * ln(x)).abs();
+            let error = (powf_positive(x, y) / powf(x, y) - 1.0).abs();
+            let bound = f64::EPSILON * (2.0 + 1.5 * t);
+            assert!(
+                error <= bound,
+                "{x}^{y}: error {error:e} over the bound {bound:e}"
+            );
+            worst = worst.max(error / (f64::EPSILON * (1.0 + t)));
+        }
+        // The bound is not slack by orders of magnitude: the worst case uses a fair share of it.
+        assert!(worst > 0.1, "worst error {worst} of 2⁻⁵² (1 + |y ln x|)");
+        for x in [1e-5, 0.3, 1.0, 7.0, 1e8] {
+            assert_same_bits(powf_positive(x, 0.0), 1.0);
+        }
+        assert_same_bits(powf_positive(1.0, -7.5), 1.0);
+        assert_same_bits(powf_positive(1e10, 40.0), f64::INFINITY);
+        assert_same_bits(powf_positive(1e-10, 40.0), 0.0);
     }
 
     /// For bases whose small powers are exact the two orders of multiplication cannot differ.

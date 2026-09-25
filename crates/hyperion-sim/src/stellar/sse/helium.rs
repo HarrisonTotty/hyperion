@@ -39,8 +39,11 @@ use super::gb::{GiantBranch, GiantTimes};
 pub(crate) fn zams_luminosity(m: SolarMasses) -> SolarLuminosities {
     let m = m.value();
     SolarLuminosities::new(
-        15_262.0 * math::powf(m, 10.25)
-            / (math::powi(m, 9) + 29.54 * math::powf(m, 7.5) + 31.18 * math::powi(m, 6) + 0.0469),
+        15_262.0 * math::powf_positive(m, 10.25)
+            / (math::powi(m, 9)
+                + 29.54 * math::powf_positive(m, 7.5)
+                + 31.18 * math::powi(m, 6)
+                + 0.0469),
     )
 }
 
@@ -50,7 +53,8 @@ pub(crate) fn zams_luminosity(m: SolarMasses) -> SolarLuminosities {
 pub(crate) fn zams_radius(m: SolarMasses) -> SolarRadii {
     let m = m.value();
     SolarRadii::new(
-        0.2391 * math::powf(m, 4.6) / (math::powi(m, 4) + 0.162 * math::powi(m, 3) + 0.0065),
+        0.2391 * math::powf_positive(m, 4.6)
+            / (math::powi(m, 4) + 0.162 * math::powi(m, 3) + 0.0065),
     )
 }
 
@@ -60,7 +64,8 @@ pub(crate) fn zams_radius(m: SolarMasses) -> SolarRadii {
 pub(crate) fn main_sequence_lifetime(m: SolarMasses) -> Megayears {
     let m = m.value();
     Megayears::new(
-        (0.4129 + 18.81 * math::powi(m, 4) + 1.853 * math::powi(m, 6)) / math::powf(m, 6.5),
+        (0.4129 + 18.81 * math::powi(m, 4) + 1.853 * math::powi(m, 6))
+            / math::powf_positive(m, 6.5),
     )
 }
 
@@ -385,9 +390,9 @@ impl HeliumStar {
         lambda: SolarLuminosities,
     ) -> (SolarRadii, SolarRadii) {
         let (l, l_tms, lambda) = (l.value(), self.l_tms.value(), lambda.value());
-        let r1 = r_zams * math::powf(l / l_tms, 0.2)
+        let r1 = r_zams * math::powf_positive(l / l_tms, 0.2)
             + SolarRadii::new(0.02 * (math::exp(l / lambda) - math::exp(l_tms / lambda)));
-        (r1, SolarRadii::new(0.08 * math::powf(l, 0.75)))
+        (r1, SolarRadii::new(0.08 * math::powf_positive(l, 0.75)))
     }
 }
 
@@ -395,7 +400,7 @@ impl HeliumStar {
 #[must_use]
 fn shell_lambda(m: SolarMasses) -> SolarLuminosities {
     let mass = m.value();
-    SolarLuminosities::new(500.0 * (2.0 + math::powi(mass, 5)) / math::powf(mass, 2.5))
+    SolarLuminosities::new(500.0 * (2.0 + math::powi(mass, 5)) / math::powf_positive(mass, 2.5))
 }
 
 /// `Mc,max` of HPT equation 89 for a helium star of current mass `mt`: min(1.45 M − 0.31, M) at

@@ -54,7 +54,7 @@ impl HertzsprungGap {
         } else {
             gb::mc_hei(m, c)
         };
-        let m525 = math::powf(m.value(), 5.25);
+        let m525 = math::powf_positive(m.value(), 5.25);
         Self {
             mass: m,
             ignition: (m.value() >= m_fgb).then(|| gb::IgnitionRadius::new(m, c)),
@@ -135,8 +135,8 @@ impl HertzsprungGap {
             (-1e-9..=1.0 + 1e-9).contains(&tau),
             "the gap runs from t_MS to t_BGB, not τ = {tau}"
         );
-        let l = self.l_tms.value() * math::powf(self.l_ehg / self.l_tms, tau);
-        let r = self.r_tms.value() * math::powf(r_ehg / self.r_tms, tau);
+        let l = self.l_tms.value() * math::powf_positive(self.l_ehg / self.l_tms, tau);
+        let r = self.r_tms.value() * math::powf_positive(r_ehg / self.r_tms, tau);
         PhasePoint {
             luminosity: SolarLuminosities::new(l),
             radius: SolarRadii::new(r),

@@ -1189,7 +1189,13 @@ The designation format and the text forms are not part of the generator version.
   displacement adds its own rounding at the separation (128 m spacing at 100 ly); fused
   multiply-adds go through `math::mul_add` (`libm::fma`), and `f64::mul_add` is disallowed, because
   without hardware FMA it calls the platform's `fma`; T3's acceptance command is
-  `cargo test -p hyperion-sim -- units version`.
+  `cargo test -p hyperion-sim -- units version`. `math` holds two hand-written functions besides
+  the wrappers:
+  - `normal_quantile`;
+  - since ruling 77.1 of 2026-09-22, `powf_positive(x, y)`, which is exp(y · ln x) on the pinned
+    `libm`, for finite positive x only, within 2⁻⁵² (1 + 1.5 |y ln x|) of `powf`. Its use is
+    limited to `stellar::sse`'s positive-base powers (plan 06, T10's speed note), because its error
+    grows with |y ln x| and no other caller has been checked against that.
 - **Deviations in T6 and T7.b, as built.** `id/reserved.rs` is split into `reserved`, `nested`,
   `global`, `catalogue` and `system`; the builders and parsers need
   `BuildSystemIdError::FieldOutOfRange` and `NotCanonical`, `DecodeSystemIdError::BandOutOfRange`

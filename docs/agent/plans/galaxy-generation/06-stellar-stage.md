@@ -820,6 +820,12 @@ nothing of plans 02 or 03.
   random inputs.
 - **Files:** `stellar/sse/wind.rs`, `track.rs`, `evolve.rs`. **Accept:** tests pass; bench targets
   of "Verification" reported.
+- **Speed note (ruling 77).** HPT's formulae under `stellar/sse/` raise their positive bases with
+  `math::powf_positive` (exp(y ln x) on the pinned `libm`), not `math::powf`; a base that can reach
+  zero keeps `math::powf`. Everything outside `stellar/sse/` stays on `math::powf`. `lifetime` stays
+  bit-equal to `Track::lifetime`, and its 5 µs target passes to a fitted lifetime table built with its
+  first bulk consumer (P06.T30 or plan 08's placement). See "The integrator's speed, as optimised"
+  and "`powf_positive` in the stellar formulae" under Risks.
 
 #### P06.T11 Remnant structure from the backbone
 
@@ -1505,6 +1511,12 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
 
 #### P06.T34 Server
 
+- **Blocked in part (ruling 77.3):** the `system_summary` handler is built. The range handler's
+  `stellar` briefs are blocked on speed: a brief needs each star's state at the requested time, so
+  a track per system, and tracks are still 4–7 times over the Verification's `generate` targets
+  after ruling 77.1. That misses the Verification's 15 ms for 1,600 briefs. The fitted lifetime
+  table alone does not unblock them, since it gives the lifetime and not the state. What does is
+  open, and queued for a ruling: tracks within their targets, or a fitted table of brief states.
 - **Needs:** plan 04's P04.T14, which lands the range handler, the universe registry and the caches
   in `AppState` (through P04.T13 every kind still answers `unsupported`), and plan 03's `resolve`.
 - **Build:** the range handler fills `stellar` when asked, on the CPU pool inside the range job,
@@ -1608,10 +1620,13 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
 - **Class fractions by population** and expected galaxy-wide counts: T31. The mean mass per system:
   T30.
 - **Benchmarks** (this plan's targets, set inside the brainstorm's "a full system with its bodies in
-  under a millisecond"; a miss is a finding): `ZCoeffs::new` under 5 µs; `stellar::lifetime` about 5
-  µs for a primary of layer D or E (plan 08's 5 ms query budget counts on it: its design note 28 and
-  P08.T16); `generate` for a main-sequence dwarf under 10 µs, for a giant under 60 µs, for a remnant
-  (full track) under 150 µs, so that a triple of evolved stars under plan 11 still leaves plan 14
+  under a millisecond"; a miss is a finding): `ZCoeffs::new` under 5 µs; a lifetime for a primary of
+  layer D or E in about 5 µs (plan 08's 5 ms query budget counts on it: its design note 28 and
+  P08.T16), met not by `stellar::lifetime`, which keeps bit-equality with `Track::lifetime` at
+  0.5–0.75 ms, but by a **fitted lifetime table** (`hyperion-fit`, in log M, Z and the draws that
+  matter, with a stated tolerance against `Track::lifetime`), built with its first bulk consumer,
+  P06.T30 or plan 08's placement (ruling 77.3); `generate` for a main-sequence dwarf under 10 µs,
+  for a giant under 60 µs, for a remnant (full track) under 150 µs, so that a triple of evolved stars under plan 11 still leaves plan 14
   half the millisecond for the bodies; `brief_at` on a built model under 2 µs; briefs for a cold 50
   ly query of 1,600 systems adding under 15 ms to plan 03's 5 ms; ten Poisson bins under 2 µs; one
   phase root under 3 µs.
@@ -2859,3 +2874,52 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
       burst moves. Fewer knots (8/16) is worse for less gain. Not recommended.
     - A fitted lifetime table through `hyperion-fit` for plan 08's bulk calls, which gives up
       equality with `Track::lifetime` and is the only route to about 5 µs.
+- **`powf_positive` in the stellar formulae (round 8, `speed2`; ruling 77.1).**
+  `math::powf_positive(x, y)` = `libm::exp(y × libm::log(x))`, debug-asserted to a finite positive x and a finite y. Its
+  relative error is within 2⁻⁵² (1 + 1.5 |y ln x|) to first order (log and exp under an ulp each,
+  one rounding of the product), 1.7 × 10⁻¹⁴ at |y ln x| = 50; a unit test checks 2⁻⁵² (2 + 1.5 |y
+  ln x|) against `powf` over 2 × 10⁵ draws of x in 10⁻⁵–10⁸ and y in ±11.
+  - _Where._ Every `pow` of `stellar/sse/` with a base that cannot reach zero, the winds and the
+    envelope perturbation included. These keep `powf`: the zero-age main sequence's τ^η at τ = 0 (a
+    branch), µ^b of the horizontal branch at µ = 0 (`envelope_power`), |M − a78|^a79, the
+    core-helium-burning times' `complement` and τ_bl's `depth`, τ_bl^ξ and the blue loop's λ base,
+    `mc_intermediate`'s fourth root (its sum can be negative below `M_HeF`, and the NaN falls to the
+    cap), and the degenerate radius floor (1 + X)^(5/3), which `stellar::substellar` recomputes with
+    `powf` and pins bit for bit (P06.T13). The relation-luminosity test no longer probes Mc = 0 and
+    −0.1, outside the new domain.
+  - _Deviations, as built._ Ruling 77.1 expected `speed`'s bit-equality tests to become tolerance
+    tests against `powf`. None broke, so they stay bit-equality tests, and the tolerance against
+    `powf` is tested once, in `math`'s unit test; the 280-star change below was measured by a
+    scratch test and is not kept. `powf_positive` is `math`'s third hand-written function (plan 01
+    lists `math` as thin `libm` wrappers; its module doc now names it). The orchestrator made ruling 77.3's
+    corrections at merge: the Verification's lifetime target now names the fitted table, and
+    P06.T34's range briefs are marked blocked.
+  - _Bit-equality tests._ All of `speed`'s still hold bit for bit, because each shortcut and its
+    unshortened form now call the same power: the lesser power law against the printed `min`, the
+    relation luminosity, the radius law at cached powers, the main sequence alone, the gap and core
+    helium burning at a current mass, the rebuilt main sequence's lifetime, the electron-capture
+    window, and the fast `lifetime` against `Track::lifetime`. `CROSSING_MARGIN`'s 10⁻⁹ still
+    decides: the laws' ratio there is at least 10⁻¹², against a power error under 2 × 10⁻¹⁴.
+  - _Output change_ over `speed`'s 280 stars (80 on T12's grid, 200 random; default options):
+    lifetime 1.0 × 10⁻¹¹ relative, remnant mass 2.4 × 10⁻⁹ M☉, log L 3.8 × 10⁻⁹ and log R 4.9 ×
+    10⁻⁹ dex at 100 fractions of each life. At seven fractions of every phase the median is 2 ×
+    10⁻¹⁴ dex and the 99th percentile 7.8 × 10⁻⁹, but the worst is 9.3 × 10⁻⁷ dex in L and 6.9 ×
+    10⁻⁷ in R, all on short thermally pulsing AGBs (0.8 M☉ at Z = 0.004, 6.8 × 10⁴ years), where the
+    phase's end moves with the envelope and L and R move steeply. No segment count changed, and
+    T12.b passes unchanged.
+  - _Speed_ (A/B of the two bench binaries in one lock, the base built with `powf_positive` as
+    `libm::pow`; round two at load 5.1–5.2 and 2.8–2.9 GHz, `math::exp` 11 ns on both sides): `powf`
+    8.0 `exp`, `powf_positive` 4.1; `lifetime` 4 M☉ 1.24 → 0.75 ms (×0.61), 20 M☉ 1.10 → 0.49 ms
+    (×0.44); `to_age` of a 2 M☉ giant 445 → 288 µs (×0.65); `full` of 1, 5 and 20 M☉ 1.46, 1.68,
+    1.13 → 0.93, 1.12, 0.63 ms (×0.64, ×0.67, ×0.56); `evolve` at 20 M☉ 4 Myr 371 → 168 µs
+    (×0.45). Round one agreed within its noisier `exp`. Tracks remain 4–7 times over the 150 µs and
+    60 µs targets.
+  - _Goldens_ (re-blessed at 11; the bump waits for the version-12 batch). Largest relative change
+    per golden: `stellar/sse` 2.6 × 10⁻¹⁴, `collapse` 3 × 10⁻¹⁶, `endings` 4.5 × 10⁻⁹, `summaries`
+    3.1 × 10⁻¹⁰ (death times by 5 × 10⁻¹²), planetary `systems/subgiant` 1.9 × 10⁻¹⁶,
+    `systems/red_giant` 1.7 × 10⁻⁹ (an engulfment a fraction of a second earlier), and
+    `systems/fallback_black_hole` 1.3 × 10⁻⁷ in a position. `planetary/fate` moves most: a
+    circumbinary orbit after the 20 M☉ supernova changes a by 2.3 × 10⁻⁷ and e by 1.2 × 10⁻⁵, as
+    a nearly unbound orbit amplifies the remnant mass's change, and its mean anomaly by 4.8 × 10⁻³
+    rad after some 2,300 orbits. Every golden outside the stellar stage and its planetary readers is
+    unchanged.

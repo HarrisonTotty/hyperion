@@ -126,6 +126,9 @@ pub enum DestructionCauseDto {
     Engulfed,
     /// Its pericentre fell inside its primary's Roche limit (P14.T28.c).
     TidallyDisrupted,
+    /// It collided with a heavier neighbour whose orbit its own crossed after a supernova, and
+    /// merged into it (P14.T28.c, ruling 71).
+    Collided,
 }
 
 /// A planet's class by composition (plan 14, P14.T16.a's `PlanetClass`).
@@ -775,6 +778,7 @@ pub(crate) mod tests {
             (DestructionCauseDto::Dispersed, "dispersed"),
             (DestructionCauseDto::Engulfed, "engulfed"),
             (DestructionCauseDto::TidallyDisrupted, "tidally_disrupted"),
+            (DestructionCauseDto::Collided, "collided"),
         ]);
     }
 

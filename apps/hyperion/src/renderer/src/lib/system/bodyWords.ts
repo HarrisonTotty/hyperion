@@ -111,6 +111,9 @@ export function destructionCauseLabel(cause: DestructionCauseDto): string {
     case "tidally_disrupted":
       label = "TIDALLY DISRUPTED";
       break;
+    case "collided":
+      label = "COLLIDED";
+      break;
   }
   return label;
 }

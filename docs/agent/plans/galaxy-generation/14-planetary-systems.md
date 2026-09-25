@@ -176,8 +176,9 @@ halo's prefix in plans 02 and 08).
   `planet.plane`, `planet.class`, `planet.count`, `planet.spacing`, `planet.mass`,
   `planet.secondgen`, `belt.population`, `cometary.population`.
 - Scope `Body` (opened with `ObjectKey::from(BodyId)`): `planet.orbit`, `planet.radius`,
-  `planet.volatiles`, `planet.spin`, `planet.origin`, `moon.count`, `moon.mass`, `moon.orbit`,
-  `moon.impact`, `moon.capture`, `ring.system`, `belt.member`, `body.surface`, `body.resources`.
+  `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80), `moon.count`,
+  `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`, `belt.member`,
+  `body.surface`, `body.resources`.
 - Scope `Event`, each also an entry of plan 01's `event_tags!` in the block 0x0400–0x04FF that plan
   06 sets aside for this plan: `0x0400 BODY_IMPACT` (`body.impact`), `0x0401 BODY_ERUPTION`
   (`body.eruption`), `0x0402 BODY_STORM` (`body.storm`), `0x0403 BODY_DUSTSTORM` (`body.duststorm`),
@@ -1430,9 +1431,19 @@ elements into elements at a time.
   from `elements_from_state` (T2.c) or `Unbound`. A body whose new pericentre is inside the
   remnant's Roche limit is destroyed. For a star in a binary the companion's planets see the same
   mass loss through plan 11's post-explosion orbit; circumbinary planets are treated as orbiting the
-  pair's total mass. _Slice:_ until P06.T19 there is no kick law, so `SystemStars::natal_kick()` is
-  `None` and T28.c applies a zero kick; the kick changes output later, with P06.T19's bump. Until
-  P11.T4 the companion's planets see the mass loss as a single star's.
+  pair's total mass. Then the scattering step (ruling 71): the bodies of one host the death left
+  bound are walked in slot order, and repeated until no pair crosses or is closer than 2√3 mutual
+  Hill radii at the remnant's mass. Each such pair loses its lighter body, by the Safronov number Θ =
+  ½ (v_esc ÷ v_orb)² of the heavier at its own orbit (Ford and Rasio 2008; Petrovich et al. 2014):
+  from Θ = 1 the lighter is `Unbound` and the heavier takes the pair's binding energy (Ford and
+  Rasio's eq. 2) in its own plane and line of apsides, with an eccentricity drawn from Ford and
+  Rasio's Table 1 at the pair's mass ratio and a drawn phase, and re-enters the walk (rulings 75.3
+  and 80); below it the lighter is `Destroyed { Collided }` and merges into the heavier, which takes
+  both masses and the pair's mass-weighted specific angular momentum and energy. Its only draws are
+  an ejection survivor's, on `planet.scatter`. _Slice:_ until P06.T19
+  there is no kick law, so `SystemStars::natal_kick()` is `None` and T28.c applies a zero kick; the
+  kick changes output later, with P06.T19's bump. Until P11.T4 the companion's planets see the mass
+  loss as a single star's.
 - **P14.T28.d White dwarfs.** The pollution mark and the dusty disc of D11 on `belt.population`, the
   disc as a `DebrisDisc` body inside the white dwarf's Roche limit of about 1 R☉, present from the
   start of the white dwarf phase with a lifetime set by the cooling age.
@@ -1448,8 +1459,11 @@ elements into elements at a time.
     unbound from a circular orbit; black holes from complete fallback keep bodies and kicked ones do
     not. (d) 25–50% of white dwarfs of 1–3 Gyr cooling age with a belt and a planet are polluted.
     (e) Under 1% of neutron stars have second-generation planets, none earlier than 10 Myr after the
-    death, and the share is 0.005 to a Poisson interval.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::fate planetary::hosts`.
+    death, and the share is 0.005 to a Poisson interval. (f) The scattering step (ruling 71): a pair
+    for each outcome, a chain that takes several passes, at most n − 1 passes, the mass conserved,
+    and no crossing among generated systems of primaries over 8 M☉.
+  - _Accept:_ `cargo test -p hyperion-sim -- planetary::fate planetary::hosts
+planetary::system::tests::no_orbits_cross`.
 
 #### P14.T29 Tidal and encounter stripping
 
@@ -3377,7 +3391,7 @@ planetary_context_golden`. The tests cover:
     The new golden, `planetary/context` at 11, holds six real systems of layers A, C and E and
     three synthetic hosts. Nothing existing moved.
 - **Deviations in T28.a–c, as built (`fate`, round 7). Ruled (ruling 62).**
-  - _API._ `fate::state_at(&FateBody, &FateHost, t) -> FateAt`, and `BodyFate::resolve(body, host)` with `at(t)`, `formed_at()` and `ending()`: a body's history is fixed once, from the body and its host alone, and read at any time, so the prefix property holds by construction. `FateAt` has `state()`, `orbit()` (the `KeplerElements` at `t`, only while `Present`), `valid_until()` (the next formation, ending or supernova inside the clock window) and `body_orbit()`, T34's `BodyOrbit`. It is the plan's `(BodyState, Elements)`: a body not present has no elements. `BodyState::ended_at()` is added, and `record`'s types are otherwise untouched.
+  - _API._ `fate::state_at(&FateBody, &FateHost, t) -> FateAt`, and `BodyFate::resolve(body, host)` with `at(t)`, `formed_at()` and `ending()`: a body's history is fixed once, from the body and its host alone (and, since round 8, its host's other bodies in the scattering after a supernova; see the scattering bullet), and read at any time, so the prefix property holds by construction. `FateAt` has `state()`, `orbit()` (the `KeplerElements` at `t`, only while `Present`), `valid_until()` (the next formation, ending or supernova inside the clock window) and `body_orbit()`, T34's `BodyOrbit`. It is the plan's `(BodyState, Elements)`: a body not present has no elements. `BodyState::ended_at()` is added, and `record`'s types are otherwise untouched.
   - _The seam T30.b fills._ Plain inputs, since `SystemContext` and the placer are being built beside this. `FateHost::star(&StarModel)`, or `FateHost::stars(..)` for a circumbinary body, every star below its pair (non-empty and coeval), summed in the order given. `FateBody::new(Formation, orbit, mass, density)`, with the primordial `KeplerElements` about the host's initial mass and the bulk density for the Roche test, then `.with_circularisation(Circularisation)`. The formation distance is not read: nothing in T28.a–c depends on it. The disc lifetime enters through `hosts::young::Formation::draw(seed, BodyId, mass, lifetime)`, which is primordial and which T30.a draws with the body. T8.e's τ_c enters as `Circularisation::new(Years)`, since its constant-Q form is the `place` lane's. This lane applies e(t) = e₀ exp(−(age + t) ÷ τ_c) at constant a(1 − e²) (`hosts::evolved::circularised`). **Ruled (ruling 62):** T8.e (`place`'s `classes/tides.rs`) defines τ_c, the transform applies it, and at the merge the transform calls `place`'s τ_c rather than a copy.
   - _T28.a._ `planet.origin` (`Body`) is registered after `planet.mass`, and `tags.golden` gains its one line. Every planet reads word 0 (the giant's rank) and word 1 (the magma ocean's), and words 2–7 are reserved. A giant is a planet from 0.1 M_J, design note 7's `SPACING_GIANT_MASS`. It forms at 0.5^(1−u) L^u Myr, held to 0.5 Myr–L, or at L itself for a disc shorter than 0.5 Myr (`EARLIEST_GIANT_FORMATION`); a small planet forms at L. The magma ocean ends at a host age log-uniform over 10–100 Myr, no earlier than the formation (`MAGMA_OCEAN_END_EARLIEST`, `_LATEST`), which nothing reads until T13 and T24. The log-uniform law is this lane's reading of "(drawn)" (**ruled, ruling 62**: it stands). There is no `ProtoplanetaryDisc` body (the _Slice_ note). A body whose formation age falls at or after a host star's death never forms.
   - _T28.b._ The reach follows Mustill and Villaver (2012), not the plan's f = 2–3 (**ruled, ruling 62**). `params.rs` gains `ENGULFMENT_TIDAL_MASS`, M_c = 3.1 M⊕, and `engulfment_reach` is f = (1 + M_p ÷ M_c)^⅛: Zahn's (1977) equilibrium tide, which they integrate, drags a planet in at ȧ ∝ M_p (R★ ÷ a)⁸. M_c is fitted to their Figure 7, read from its vector paths. The figure gives the initial axes at the start of the thermally pulsing AGB of the outermost circular Terrestrial, Neptunian and Jovian planets engulfed about 1–5 M☉ stars, beside each star's largest AGB radius. Each ratio of axis to radius is f times the share of the star's mass left at its largest radius, one factor a star, which the transform's own expansion supplies. The least-squares fit gives M_c = 3.10 M⊕ at Zahn's ⅛, and an exponent of 0.129 when it is free. It reproduces all eighteen axes to 1.8% rms and 4% at worst. f is 1.036 for the Earth, 1.264 for Neptune and 1.786 for Jupiter, with no dependence on the host's mass: their Jovian-to-Terrestrial ratio is 1.65–1.82 with no trend from 1 to 5 M☉. a(t) = a_c(t) M₀ ÷ M(t), with M from `StarModel::state_at` of each host star. The radius is the largest `max_radius_until` among the host's stars not dead by the segment's start. **The clearance a − f R_max is not monotone**, as T28.b took it to be (**ruled, ruling 62**, and T28.b corrected). After the red-giant tip R_max holds while the winds widen the orbit. So along the 1 M☉ track an Earth born at 0.55–0.68 au is inside the tip's reach there, and outside the final radius's reach by the end (1.25 au against 1.05 for one at 0.65 au). A bisection on the whole interval would find no crossing for it. So the first crossing is found by a scan of fixed points, then a bisection. The scan evaluates the start, then end − span × 0.75ᵏ for k = 1–64, then the end. The bisection works on the clock's nanoseconds to 1 s, in at most 64 halvings. The points depend on the segment alone, from the formation to the end of the window or the last death. A dip shorter than a quarter of the time then left to the end would be missed, and none is on the tracks tried: a tip's engulfment lasts through core helium burning. A body that no host can reach costs two evaluations. One that it can costs about 124: 163 µs a body at a load of 12.6 and 2.3 GHz, where `math::exp` took 8 ns, so about 20,000 `exp`s.
@@ -3802,3 +3816,74 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     states. No events until T31. `pinned_ids_satisfy_their_own_predicates` checks every ID's layer
     and predicate; `the_search_reproduces_the_pinned_ids` is the slow test. Blessed at 11, no
     bump, as the round's brief rules.
+- **The scattering step after a supernova, as built (`scatter`, round 8; ruling 71.1 and 71.3).**
+  `planetary/fate/scatter.rs`, called by `BodyFate::resolve_all(bodies, host)` right after each
+  sudden death. It moves output (bodies' states about remnants), so it joins the version-12 batch.
+  - _API._ `BodyFate::resolve_all(&[&FateBody], &FateHost)` resolves one host's bodies together, in
+    slot order, and `BodyFate::resolve_among(bodies, index, host)` one of them, resolving the rest
+    only where the host has a sudden death. `BodyFate::resolve` and `state_at` are a body alone on
+    its host, bit for bit what `resolve_all` gives wherever the step changes nothing. `FateAt`
+    gains `mass()`: a merged body's record carries both masses, and so does its derivation.
+    `DestructionCause::Collided`, `DestructionCauseDto::Collided` (`collided`) and the client's
+    `COLLIDED` are added. T30.b's `snapshot_at` resolves each host's bodies once.
+  - _The outcome._ Θ = (m ÷ M) (a ÷ R) with R = (3m ÷ 4πρ)^⅓ from the body's primordial density, a
+    its semi-major axis just after the death and M the remnant's mass: Ford and Rasio's (2008) eq. 4
+    θ² with r = a. Petrovich et al.'s (2014) eq. 1 θ² is (v_esc ÷ v_orb)², 2Θ; **ruled (ruling
+    75.1):** Ford and Rasio's definition stands, and the doc comment names it. Ford and Rasio take
+    r at the apocentre a (1 + e); **ruled (ruling 75.2):** Θ stays at the semi-major axis, since the
+    factor (1 + e) enters a quantity that decides only the outcome, not its geometry.
+  - _The merger._ The mass-weighted means of h (as a vector) and ε give a = −μ ÷ 2ε, Ford and
+    Rasio's eq. 1, and e = √(1 − h² ÷ μa), with μ the heavier's. Where h² > μa (near-circular
+    neighbours of close axes) the orbit is circular at h² ÷ μ: the angular momentum is kept and the
+    energy rises to the least it allows. The pericentre is along the mean eccentricity vector
+    projected on the new plane, and the merged body is at its pericentre at the death. A merger
+    whose pericentre is inside the remnant's Roche limit is `Destroyed { TidallyDisrupted }` at the
+    death, and one whose orbit is open is `Unbound`. Either way the merged body keeps both masses,
+    and it keeps the heavier's density for any later Roche test.
+  - _The survivor of an ejection (ruling 80, replacing ruling 78 and ruling 75.3's encounter
+    radius)._ Its axis is Ford and Rasio's eq. 2, m₁ ε_f = m₁ ε₁ + m₂ ε₂, so 1 ÷ a_f = 1 ÷ a₁ +
+    (m₂ ÷ m₁) ÷ a₂, and it keeps its plane and line of apsides but not its angular momentum, which
+    a scattering exchanges. Its eccentricity is a normal N(ē(β), σ(β)) truncated to [0, 1), β = m₂ ÷
+    (m₁ + m₂), linear in β through Ford and Rasio's Table 1 (β = 0.20–0.50, rows re-checked against
+    the paper), and below β = 0.2 ē = 1.44 β^1.23 (their §4.2) with σ = 0.28 ē, this generator's
+    extrapolation (Table 1's own 0.056 ÷ 0.202). It is drawn by inverse distribution
+    (`truncated_eccentricity`), and the mean anomaly at the death is drawn uniform over a turn. The
+    draws are on the new tag `planet.scatter` (Body scope, `ObjectKey::from(BodyId)`): the k-th
+    ejection a body survives reads words 4k (the eccentricity's rank) and 4k + 1 (the phase's),
+    open uniforms, with 4k + 2 and 4k + 3 reserved (`SCATTER_WORDS_PER_EJECTION`). The generator
+    sets `FateBody::with_scatter_draws(ScatterDraws::Stream { seed, body })`, and a body built by
+    hand takes `ScatterDraws::Median`, the law's median at its pericentre. A pericentre inside the
+    remnant's Roche limit is `Destroyed { TidallyDisrupted }`. The survivor then re-enters the
+    walk. `tags.golden` gains its one line. Superseded as built: ruling 75.3's encounter radius and
+    ruling 78's cap, which pinned 32% of ejection survivors at e = 0.8 in this lane's count by bodies (ruling 80 quotes the research agent's 24%).
+  - _Extrapolations (ruling 80.6)._ Ford and Rasio start their planets at e ≤ 0.05, while orbits
+    after a supernova already carry e = ΔM ÷ M_after. And their planet-to-star mass ratios µ run
+    from 3 × 10⁻⁴ to 10⁻², so µ above 10⁻² (a giant about a light remnant) lies outside them; µ
+    matters only weakly there, their mean e being 0.57–0.64 across that range.
+  - _Measured_ (`val14`'s sampler, 2,000 systems of primaries over 8 M☉ per seed, −H, the epoch and
+    +H): orbits crossing about hosts after a sudden death fall from 3,039 of 6,204 pair checks
+    (seed `0x4d2`) and 3,468 of 5,985 (`0x9e3779b9`) to 0 of 1,491 and 0 of 1,272. Of the bodies
+    the step removes, 1,564 are ejected and 175 collide (90 : 10; 1,577 and 187 for the other
+    seed). Counted in bodies, one resolution per host, the 3,104 ejection survivors of both seeds
+    have e in bins of 0.1 of 74, 135, 253, 405, 489, 639, 587, 360, 122 and 40, against 69, 120,
+    260, 389, 533, 645, 581, 347, 130 and 30 from the truncated normals at their drawn β. 162
+    (5.2%) are above 0.8, against 159.6 (5.1%) expected. β is concentrated at equal masses: 53,
+    58, 274, 767 and 1,952 in bins of 0.1 from 0 to 0.5, 111 below Table 1's 0.2. None is
+    disrupted. About single stars that died suddenly, no pair is left within 2√3 Hill radii. Over
+    6,000 systems of all masses (`0x4d2`) no orbit crosses, with 31 ejections and 5 collisions.
+    No system golden moved: none holds two survivors of a supernova, and T32's will.
+  - _Tests._ `planetary/fate/scatter/tests.rs`: the Safronov number against Ford and Rasio's eq. 5,
+    an ejection (eq. 2's axis, the law's median at β = 0.24, the plane and apsides kept) and a
+    collision on hand-built pairs about a 20 M☉ black hole's progenitor, the law at and between
+    Table 1's rows and below them, the truncated normal's moments and its tail above 0.8 at β =
+    0.5 (9.4%), a body's draws as its own stream's words, the circular merger and the plunge, a
+    packed chain of six that takes several passes, 60 random crowded hosts (at most n − 1 passes,
+    every pair settled, the mass conserved to 10⁻¹²), and a host without a supernova, bit for bit
+    alone. `planetary/system/tests.rs`: `no_orbits_cross_about_hosts_that_lost_mass_at_once`, 120
+    systems of primaries over 8 M☉, which fails without the step. Ruling 80.7's histogram is a
+    measurement recorded here, not a committed test.
+  - _As built, also:_ a merged body's derivation reads the merged mass with the heavier's radius
+    rank and primordial density. `resolve_among` resolves every sibling only when the host has a
+    sudden death, so a single-body query (`body_at`, `position_at`) about such a host costs O(n)
+    resolutions. The overlap test checks 2√3 Hill radii only about single stars that died
+    suddenly, and crossings alone about pairs (ruling 71.2).

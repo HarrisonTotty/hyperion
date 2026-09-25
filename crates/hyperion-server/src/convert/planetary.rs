@@ -532,6 +532,7 @@ fn body_state(state: BodyState) -> BodyStateDto {
                 DestructionCause::Dispersed => DestructionCauseDto::Dispersed,
                 DestructionCause::Engulfed => DestructionCauseDto::Engulfed,
                 DestructionCause::TidallyDisrupted => DestructionCauseDto::TidallyDisrupted,
+                DestructionCause::Collided => DestructionCauseDto::Collided,
             },
             at: wire_time(at),
         },

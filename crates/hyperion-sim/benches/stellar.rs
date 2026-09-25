@@ -29,6 +29,19 @@ fn exp_before(c: &mut Criterion) {
     group.finish();
 }
 
+/// `math::powf` against `math::powf_positive`, the stellar formulae's power (ruling 77.1), at a
+/// mass-luminosity law's arguments.
+fn powers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("stellar/reference");
+    group.bench_function("math::powf", |b| {
+        b.iter(|| math::powf(black_box(5.3), black_box(3.8)));
+    });
+    group.bench_function("math::powf_positive", |b| {
+        b.iter(|| math::powf_positive(black_box(5.3), black_box(3.8)));
+    });
+    group.finish();
+}
+
 /// [`exp_before`] again, after every other group.
 fn exp_after(c: &mut Criterion) {
     let mut group = c.benchmark_group("stellar/reference");
@@ -127,5 +140,5 @@ fn tracks(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(stellar, exp_before, backbone, tracks, exp_after);
+criterion_group!(stellar, exp_before, powers, backbone, tracks, exp_after);
 criterion_main!(stellar);

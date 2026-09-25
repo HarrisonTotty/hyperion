@@ -363,9 +363,9 @@ domain_tags! {
     // `belt.population`, `cometary.population`.
     //
     // Scope `Body`, opened with `ObjectKey::from(BodyId)`: `planet.orbit`, `planet.radius`,
-    // `planet.volatiles`, `planet.spin`, `planet.origin`, `moon.count`, `moon.mass`, `moon.orbit`,
-    // `moon.impact`, `moon.capture`, `ring.system`, `belt.member`, `body.surface`,
-    // `body.resources`.
+    // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
+    // `moon.count`, `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`,
+    // `belt.member`, `body.surface`, `body.resources`.
     //
     // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
     // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
@@ -419,6 +419,13 @@ domain_tags! {
     /// Chen and Kipping's scatter at its mass, or for a rocky outcome within the observed spread of
     /// core fractions, word 0; words 1–7 are reserved (`planetary::system::RADIUS_WORDS`).
     PLANET_RADIUS: Body = "planet.radius";
+
+    /// What a planet takes from each ejection it survives after a supernova (P14.T28.c, ruling
+    /// 80): its k-th such ejection reads words 4k to 4k + 3, the rank of its new eccentricity in
+    /// Ford and Rasio's (2008) truncated normal, word 4k, and its mean anomaly at the death as a
+    /// share of a turn, word 4k + 1, one open uniform each; words 4k + 2 and 4k + 3 are reserved
+    /// (`planetary::fate::ScatterDraws`).
+    PLANET_SCATTER: Body = "planet.scatter";
 
     // Plan 11: multiplicity and binaries. Every name the plan uses is fixed in its Provides; each
     // entry arrives with the task that first opens a stream under it. Attempt n of a redraw
@@ -587,6 +594,13 @@ mod tests {
         assert_eq!(PLANET_RADIUS.name(), "planet.radius");
         assert_eq!(PLANET_RADIUS.scope(), crate::rng::TagScope::Body);
         assert!(ALL.contains(&PLANET_RADIUS));
+    }
+
+    #[test]
+    fn plan_14_registers_the_scatter_tag_with_body_scope() {
+        assert_eq!(PLANET_SCATTER.name(), "planet.scatter");
+        assert_eq!(PLANET_SCATTER.scope(), crate::rng::TagScope::Body);
+        assert!(ALL.contains(&PLANET_SCATTER));
     }
 
     #[test]

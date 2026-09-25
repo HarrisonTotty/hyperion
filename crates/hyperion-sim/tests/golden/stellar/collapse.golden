@@ -1,24 +1,24 @@
 # generator_version = 11
 Z = 0.0001
-m_cc = 0x401b53016c6f0b0f  # 6.831060117986239
-single window lower = 0x401aec9b0608a4a9  # 6.73106011798624
-companion-stripped window lower = 0x401753016c6f0b0f  # 5.831060117986239
+m_cc = 0x401b53016c6f0b10  # 6.83106011798624
+single window lower = 0x401aec9b0608a4aa  # 6.731060117986241
+companion-stripped window lower = 0x401753016c6f0b10  # 5.83106011798624
 Z = 0.001
-m_cc = 0x401ba9dd0ddaba09  # 6.915882317042368
-single window lower = 0x401b4376a77453a3  # 6.815882317042369
-companion-stripped window lower = 0x4017a9dd0ddaba09  # 5.915882317042368
+m_cc = 0x401ba9dd0ddaba0b  # 6.91588231704237
+single window lower = 0x401b4376a77453a5  # 6.81588231704237
+companion-stripped window lower = 0x4017a9dd0ddaba0b  # 5.91588231704237
 Z = 0.004
 m_cc = 0x401dc3b1da97e371  # 7.441108146210227
 single window lower = 0x401d5d4b74317d0b  # 7.341108146210227
 companion-stripped window lower = 0x4019c3b1da97e371  # 6.441108146210227
 Z = 0.02
-m_cc = 0x40206817f90b6df9  # 8.203307898183072
-single window lower = 0x402034e4c5d83ac6  # 8.103307898183072
-companion-stripped window lower = 0x401cd02ff216dbf2  # 7.203307898183072
+m_cc = 0x40206817f90b6dfa  # 8.203307898183073
+single window lower = 0x402034e4c5d83ac7  # 8.103307898183074
+companion-stripped window lower = 0x401cd02ff216dbf4  # 7.203307898183073
 Z = 0.03
-m_cc = 0x4020a35d737d5a05  # 8.319072350551332
-single window lower = 0x4020702a404a26d2  # 8.219072350551333
-companion-stripped window lower = 0x401d46bae6fab40a  # 7.319072350551332
+m_cc = 0x4020a35d737d5a06  # 8.319072350551334
+single window lower = 0x4020702a404a26d3  # 8.219072350551334
+companion-stripped window lower = 0x401d46bae6fab40c  # 7.319072350551334
 
 seed 0x0123456789abcdef body A 0
 M_CO 1.44 in 2.3: neutron star = 0x3ff30f6b7db45c85  # 1.1912646208127466

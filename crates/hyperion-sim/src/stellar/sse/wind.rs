@@ -175,7 +175,7 @@ pub(crate) fn small_envelope_mu(
     ((m - mc) / m)
         * MU_CLAMP
             .1
-            .min(MU_CLAMP.0.max(math::powf(l / MU_L0, MU_KAPPA)))
+            .min(MU_CLAMP.0.max(math::powf_positive(l / MU_L0, MU_KAPPA)))
 }
 
 /// Kudritzki and Reimers' coefficient, M☉ yr⁻¹ per (L☉ R☉ ÷ M☉): `Ṁ_R` = η × 4 × 10⁻¹³ L R ÷ M
@@ -446,8 +446,9 @@ fn modern(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
                 hot_or_cool(s, hurley_evolved(s, eta, agb))
             }
         }
-        Regime::NakedHelium => reimers(s, eta)
-            .max(WOLF_RAYET * s.l * s.l.sqrt() * math::powf(s.z_ratio, WOLF_RAYET_Z_POWER)),
+        Regime::NakedHelium => reimers(s, eta).max(
+            WOLF_RAYET * s.l * s.l.sqrt() * math::powf_positive(s.z_ratio, WOLF_RAYET_Z_POWER),
+        ),
     }
 }
 
@@ -484,9 +485,9 @@ fn nieuwenhuijzen_de_jager(s: &Surface) -> f64 {
     let (pr, pl, pm) = NJ_POWERS;
     NJ_COEFFICIENT
         * ramp
-        * math::powf(s.r, pr)
-        * math::powf(s.l, pl)
-        * math::powf(s.m, pm)
+        * math::powf_positive(s.r, pr)
+        * math::powf_positive(s.l, pl)
+        * math::powf_positive(s.m, pm)
         * s.z_ratio.sqrt()
 }
 

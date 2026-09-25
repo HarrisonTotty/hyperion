@@ -86,8 +86,8 @@ impl ZCoeffs {
         // HPT equations 1–3; see `m_fgb` for the form of equation 3.
         let m_hook = 1.0185 + zeta * (0.16015 + zeta * 0.0892);
         let m_hef = 1.995 + zeta * (0.25 + zeta * 0.087);
-        let m_fgb =
-            13.048 * math::powf(z / 0.02, 0.06) / (1.0 + 0.0012 * math::powf(0.02 / z, 1.27));
+        let m_fgb = 13.048 * math::powf_positive(z / 0.02, 0.06)
+            / (1.0 + 0.0012 * math::powf_positive(0.02 / z, 1.27));
         let mut coeffs = Self {
             z: z_fit,
             zeta,
@@ -109,6 +109,8 @@ impl ZCoeffs {
                 [a[34], a[35]],
                 [a[36], a[37]],
             ),
+            // `powf`: `stellar::substellar` pins its cooling fits to this floor at 0.1 M☉ and
+            // computes it again, outside `sse`, with `powf` (P06.T13); once per Z, it costs nothing.
             degenerate_radius: 0.0258 * math::powf(1.0 + super::ms::hydrogen(z), 5.0 / 3.0),
         };
         // b46 = −b46 log₁₀(`M_HeF` ÷ `M_FGB`) needs the critical masses (Appendix, after b49).
@@ -215,9 +217,10 @@ impl ZCoeffs {
 
 /// The relative distance from a crossing of two power laws within which [`LesserPowerLaw::at`] and
 /// [`lesser_of_crossing_laws`] evaluate both laws. Two laws whose exponents differ by δe stand in
-/// the ratio (x ÷ x*)^δe near their crossing x*, which at this distance is 1 ± δe × 10⁻⁹, while
-/// `libm`'s `pow` errs by under an ulp (10⁻¹⁶) and the crossing itself by a few: the lesser law is
-/// certain outside it, so the laws are only both evaluated where it is not.
+/// the ratio (x ÷ x*)^δe near their crossing x*, which at this distance is 1 ± δe × 10⁻⁹ (at least
+/// 10⁻¹² above [`MIN_EXPONENT_GAP`]), while [`math::powf_positive`] errs by 2.2 × 10⁻¹⁶ ×
+/// (1 + 1.5 |e ln x|), under 2 × 10⁻¹⁴ for these laws, and the crossing itself by a few ulps: the
+/// lesser law is certain outside it, so the laws are only both evaluated where it is not.
 const CROSSING_MARGIN: f64 = 1e-9;
 
 /// The smallest difference of exponents for which [`LesserPowerLaw`] uses its crossing: below it the
@@ -260,7 +263,7 @@ impl LesserPowerLaw {
             && k2.is_finite()
             && gap.abs() > MIN_EXPONENT_GAP;
         let crossing = usable
-            .then(|| (math::powf(k2 / k1, 1.0 / gap), gap > 0.0))
+            .then(|| (math::powf_positive(k2 / k1, 1.0 / gap), gap > 0.0))
             .filter(|(x, _)| x.is_finite() && *x > 0.0);
         Self {
             form,
@@ -274,8 +277,8 @@ impl LesserPowerLaw {
     #[must_use]
     pub(crate) fn at(&self, x: f64) -> f64 {
         let law = |[k, e]: [f64; 2]| match self.form {
-            PowerForm::Product => k * math::powf(x, -e),
-            PowerForm::Quotient => k / math::powf(x, e),
+            PowerForm::Product => k * math::powf_positive(x, -e),
+            PowerForm::Quotient => k / math::powf_positive(x, e),
         };
         let first = || law(self.first);
         let second = || law(self.second);
@@ -332,7 +335,7 @@ pub(crate) fn lesser_side(x: f64, crossing: f64, first_below: bool) -> Option<Si
 /// denominator as a59 M^a61.
 #[must_use]
 fn alpha_r_power_law(a: &[f64; 82], m: f64) -> f64 {
-    a[58] * math::powf(m, a[60]) / (a[59] + math::powf(m, a[61]))
+    a[58] * math::powf_positive(m, a[60]) / (a[59] + math::powf_positive(m, a[61]))
 }
 
 /// The aₙ at Z, with the Appendix's special cases in its order.
@@ -351,7 +354,7 @@ fn a_coefficients(z: f64, zeta: f64) -> [f64; 82] {
     a[18] *= a[20];
     a[19] *= a[20];
     // a29 = a′29^a32.
-    a[29] = math::powf(a[29], a[32]);
+    a[29] = math::powf_positive(a[29], a[32]);
     // a33 = min(1.4, 1.5135 + 0.3769ζ); a33 = max(0.6355 − 0.4192ζ, max(1.25, a33)).
     a[33] = 1.4_f64.min(1.5135 + 0.3769 * zeta);
     a[33] = (0.6355 - 0.4192 * zeta).max(1.25_f64.max(a[33]));
@@ -418,13 +421,13 @@ fn b_coefficients(z: f64, zeta: f64) -> [f64; 58] {
     b[2] = math::exp10(-4.6739 - 0.9394 * sigma);
     b[2] = b[2]
         .max(-0.04167 + 55.67 * z)
-        .min(0.4771 - 9329.21 * math::powf(z, 2.94));
+        .min(0.4771 - 9329.21 * math::powf_positive(z, 2.94));
     // b′3 = max(−0.1451, −2.2794 − 1.5175σ − 0.254σ²); b3 = 10^b′3;
     // b3 = max(b3, 0.7307 + 14265.1 Z^3.395) for Z > 0.004.
     let b3_log = (-0.1451_f64).max(-2.2794 + sigma * (-1.5175 - sigma * 0.254));
     b[3] = math::exp10(b3_log);
     if z > 0.004 {
-        b[3] = b[3].max(0.7307 + 14_265.1 * math::powf(z, 3.395));
+        b[3] = b[3].max(0.7307 + 14_265.1 * math::powf_positive(z, 3.395));
     }
     // b4 = b4 + 0.1231572ζ⁵; b6 = b6 + 0.01640687ζ⁵.
     b[4] += 0.123_157_2 * zeta5;
@@ -433,30 +436,30 @@ fn b_coefficients(z: f64, zeta: f64) -> [f64; 58] {
     b[11] *= b[11];
     b[13] *= b[13];
     // b14 = b′14^b15, b16 = b′16^b15.
-    b[14] = math::powf(b[14], b[15]);
-    b[16] = math::powf(b[16], b[15]);
+    b[14] = math::powf_positive(b[14], b[15]);
+    b[16] = math::powf_positive(b[16], b[15]);
     // b17 = 1.0, or 1.0 − 0.3880523 (ζ + 1.0)^0.6371760 for ζ > −1.0. Both versions of the paper
     // print the exponent as 2.862149, which is b′16's second coefficient: a misprint that the SSE
     // code (`zdata.h`) settles.
     b[17] = if zeta > -1.0 {
-        1.0 - 0.388_052_3 * math::powf(zeta + 1.0, 0.637_176)
+        1.0 - 0.388_052_3 * math::powf_positive(zeta + 1.0, 0.637_176)
     } else {
         1.0
     };
     // b24 = b′24^b28; b26 = 5.0 − 0.09138012 Z^−0.3671407; b27 = b′27^(2 b28).
-    b[24] = math::powf(b[24], b[28]);
-    b[26] = 5.0 - 0.091_380_12 * math::powf(z, -0.367_140_7);
-    b[27] = math::powf(b[27], 2.0 * b[28]);
+    b[24] = math::powf_positive(b[24], b[28]);
+    b[26] = 5.0 - 0.091_380_12 * math::powf_positive(z, -0.367_140_7);
+    b[27] = math::powf_positive(b[27], 2.0 * b[28]);
     // b31 = b′31^b33, b34 = b′34^b33.
-    b[31] = math::powf(b[31], b[33]);
-    b[34] = math::powf(b[34], b[33]);
+    b[31] = math::powf_positive(b[31], b[33]);
+    b[34] = math::powf_positive(b[34], b[33]);
     // b36 = b′36⁴, b37 = 4.0 b′37, b38 = b′38⁴.
     b[36] = math::powi(b[36], 4);
     b[37] *= 4.0;
     b[38] = math::powi(b[38], 4);
     // b40 = max(b40, 1.0); b41 = b′41^b42; b44 = b′44⁵.
     b[40] = b[40].max(1.0);
-    b[41] = math::powf(b[41], b[42]);
+    b[41] = math::powf_positive(b[41], b[42]);
     b[44] = math::powi(b[44], 5);
     // b45 = 1.0 − (2.47162ρ − 5.401682ρ² + 3.247361ρ³), or 1.0 for ρ ≤ 0.0 (the text layer of the
     // paper drops the parentheses; the printed page and the SSE code have them);
@@ -472,7 +475,7 @@ fn b_coefficients(z: f64, zeta: f64) -> [f64; 58] {
     // b56 = b′56 + 0.1140142ζ⁵; b57 = b′57 − 0.01308728ζ⁵.
     b[51] -= 0.134_379_8 * zeta5;
     b[53] += 0.442_692_9 * zeta5;
-    b[55] = (0.991_64 - 743.123 * math::powf(z, 2.83)).min(b[55]);
+    b[55] = (0.991_64 - 743.123 * math::powf_positive(z, 2.83)).min(b[55]);
     b[56] += 0.114_014_2 * zeta5;
     b[57] -= 0.013_087_28 * zeta5;
     b
@@ -522,19 +525,22 @@ mod tests {
                 (
                     c.giant_radius_scale(),
                     Box::new(move |m| {
-                        (b(4) * math::powf(m, -b(5))).min(b(6) * math::powf(m, -b(7)))
+                        (b(4) * math::powf_positive(m, -b(5)))
+                            .min(b(6) * math::powf_positive(m, -b(7)))
                     }),
                 ),
                 (
                     c.agb_radius_scale(),
                     Box::new(move |m| {
-                        (b(51) * math::powf(m, -b(52))).min(b(53) * math::powf(m, -b(54)))
+                        (b(51) * math::powf_positive(m, -b(52)))
+                            .min(b(53) * math::powf_positive(m, -b(54)))
                     }),
                 ),
                 (
                     c.hook_luminosity_scale(),
                     Box::new(move |m| {
-                        (a(34) / math::powf(m, a(35))).min(a(36) / math::powf(m, a(37)))
+                        (a(34) / math::powf_positive(m, a(35)))
+                            .min(a(36) / math::powf_positive(m, a(37)))
                     }),
                 ),
             ];
@@ -558,10 +564,13 @@ mod tests {
     fn a_lesser_power_law_without_a_crossing_evaluates_both() {
         let law = LesserPowerLaw::new(PowerForm::Product, [1.0, 0.3], [2.0, 0.3]);
         assert_eq!(law.crossing, None);
-        assert_eq!(bits(law.at(3.0)), bits(math::powf(3.0, -0.3)));
+        assert_eq!(bits(law.at(3.0)), bits(math::powf_positive(3.0, -0.3)));
         let negative = LesserPowerLaw::new(PowerForm::Product, [-1.0, 0.1], [2.0, 0.3]);
         assert_eq!(negative.crossing, None);
-        assert_eq!(bits(negative.at(3.0)), bits(-math::powf(3.0, -0.1)));
+        assert_eq!(
+            bits(negative.at(3.0)),
+            bits(-math::powf_positive(3.0, -0.1))
+        );
         assert_eq!(lesser_side(-1.0, 2.0, true), None);
         assert_eq!(lesser_side(f64::NAN, 2.0, true), None);
     }

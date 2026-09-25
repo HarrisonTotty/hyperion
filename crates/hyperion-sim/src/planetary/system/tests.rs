@@ -588,6 +588,77 @@ fn no_overlapping_orbits_in_generated_systems() {
     );
 }
 
+/// How many real systems of primaries over 8 M☉ the supernova overlap test samples.
+const MASSIVE_SAMPLE: usize = 120;
+
+/// Ruling 71.3: the overlap property on post-supernova survivors. A sudden death gives each
+/// survivor its own eccentricity, and the scattering step (P14.T28.c) must leave no two orbits of
+/// a host crossing at −H, the epoch or +H. About a single star that died suddenly, whose mass has
+/// not changed since, the survivors also keep 2√3 mutual Hill radii at the remnant's mass. The
+/// ordinary sample holds no surviving pair of a supernova host, so this one samples primaries of
+/// 8 M☉ and more.
+#[test]
+fn no_orbits_cross_about_hosts_that_lost_mass_at_once() {
+    let massive = SampleFilter::primary_masses(SolarMasses::new(8.0), SolarMasses::new(1e9));
+    let contexts = sample_contexts(MASSIVE_SAMPLE, SEED, massive).unwrap();
+    let (mut pairs, mut after_supernovae) = (0_u32, 0_u32);
+    for ctx in &contexts {
+        let system = generate_planets(SEED, ctx);
+        for t in window() {
+            let snapshot = system.snapshot_at(ctx, t);
+            for zone in system.zones() {
+                let mut orbits: Vec<(EarthMasses, KeplerElements)> = snapshot
+                    .bodies()
+                    .iter()
+                    .filter(|record| record.identity().parent() == Some(zone.host()))
+                    .filter_map(|record| {
+                        let mass = *record.mass().ok()?;
+                        Some((mass, *record.orbit().ok()?.elements()))
+                    })
+                    .collect();
+                orbits.sort_by(|a, b| a.1.semi_major_axis().total_cmp(&b.1.semi_major_axis()));
+                let exploded = zone.members().any(|m| {
+                    let star = &ctx.stars()[usize::from(m)];
+                    star.death().is_some_and(|d| d.kind().is_sudden())
+                        && star.state_at(t).is_some_and(|s| s.phase().is_remnant())
+                });
+                let alone = zone.members().count() == 1;
+                let host = zone
+                    .members()
+                    .map(|m| ctx.stars()[usize::from(m)].state_at(t).unwrap().mass())
+                    .fold(SolarMasses::ZERO, |sum, m| sum + m);
+                for pair in orbits.windows(2) {
+                    let ((m1, o1), (m2, o2)) = (pair[0], pair[1]);
+                    let gap = o2.periapsis().value() - o1.apoapsis().value();
+                    assert!(
+                        gap > 0.0,
+                        "{:?} at {t:?}: orbits cross by {} m",
+                        system.system(),
+                        -gap
+                    );
+                    if exploded && alone {
+                        let (a1, a2) = (o1.semi_major_axis(), o2.semi_major_axis());
+                        let hill = mutual_hill_radius(m1, m2, host, a1, a2).value();
+                        assert!(
+                            gap >= HILL_STABLE_GAP * hill * (1.0 - 1e-9),
+                            "{:?} at {t:?}: {gap} m against {HILL_STABLE_GAP} Hill radii of {hill} m",
+                            system.system()
+                        );
+                    }
+                    pairs += 1;
+                    if exploded {
+                        after_supernovae += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        after_supernovae > 60 && pairs > after_supernovae,
+        "{after_supernovae} of {pairs} pairs about hosts after a supernova"
+    );
+}
+
 /// The effective temperature a body is to be kept below: the hottest of the stars that light it,
 /// or `None` if one it orbits is a black hole (T16.b leaves those hosts out).
 fn hottest_light(ctx: &SystemContext, t: UniverseTime) -> Option<Kelvin> {

@@ -57,8 +57,11 @@ pub(crate) fn l_min_he(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
     let mass = m.value();
     let m_fgb = c.m_fgb().value();
     let (b14, b15, b16, b17) = (c.b(14), c.b(15), c.b(16), c.b(17));
-    let c_fit = b17 / math::powf(m_fgb, 0.1) + (b16 * b17 - b14) / math::powf(m_fgb, b15 + 0.1);
-    gb::l_hei(m, c) * ((b14 + c_fit * math::powf(mass, b15 + 0.1)) / (b16 + math::powf(mass, b15)))
+    let c_fit = b17 / math::powf_positive(m_fgb, 0.1)
+        + (b16 * b17 - b14) / math::powf_positive(m_fgb, b15 + 0.1);
+    gb::l_hei(m, c)
+        * ((b14 + c_fit * math::powf_positive(mass, b15 + 0.1))
+            / (b16 + math::powf_positive(mass, b15)))
 }
 
 /// The luminosity of the zero-age horizontal branch of a star of mass `m` below `M_HeF` with a
@@ -122,6 +125,17 @@ impl ZeroAgeHorizontalBranch {
         ((self.mass - mc) / (self.m_hef - mc)).clamp(0.0, 1.0)
     }
 
+    /// µ^`exponent`: [`math::powf_positive`] for a positive µ, and [`math::powf`] at the envelope's
+    /// end, µ = 0, which is outside its domain.
+    #[must_use]
+    fn envelope_power(mu: f64, exponent: f64) -> f64 {
+        if mu > 0.0 {
+            math::powf_positive(mu, exponent)
+        } else {
+            math::powf(mu, exponent)
+        }
+    }
+
     /// `L_ZAHB` (HPT equation 53):
     /// `L_ZHe`(Mc) + (1 + b20) ÷ (1 + b20 µ^1.6479) × b18 µ^b19 ÷ (1 + α₂ e^(15 (M − `M_HeF`))),
     /// with α₂ = (b18 + `L_ZHe`(Mc) − `L_min,He`(`M_HeF`)) ÷ (`L_min,He`(`M_HeF`) − `L_ZHe`(Mc)).
@@ -136,8 +150,8 @@ impl ZeroAgeHorizontalBranch {
         let alpha2 = (b18 + l_zhe - self.l_min_hef) / (self.l_min_hef - l_zhe);
         SolarLuminosities::new(
             l_zhe
-                + (1.0 + b20) * b18 * math::powf(mu, b19)
-                    / ((1.0 + b20 * math::powf(mu, ZAHB_EXPONENT))
+                + (1.0 + b20) * b18 * Self::envelope_power(mu, b19)
+                    / ((1.0 + b20 * Self::envelope_power(mu, ZAHB_EXPONENT))
                         * (1.0 + alpha2 * math::exp(15.0 * (self.mass - self.m_hef)))),
         )
     }
@@ -149,7 +163,8 @@ impl ZeroAgeHorizontalBranch {
     fn radius(&self, mc: SolarMasses) -> SolarRadii {
         let mu = self.envelope_fraction(mc);
         let [.., b21, b22, b23] = self.b;
-        let f = (1.0 + b21) * math::powf(mu, b22) / (1.0 + b21 * math::powf(mu, b23));
+        let f = (1.0 + b21) * Self::envelope_power(mu, b22)
+            / (1.0 + b21 * Self::envelope_power(mu, b23));
         helium::zams_radius(mc) * (1.0 - f) + self.giant.at(self.luminosity(mc)) * f
     }
 }
@@ -169,7 +184,8 @@ fn r_mhe_low_with(
     at_hef: f64,
     c: &ZCoeffs,
 ) -> SolarRadii {
-    RadiusLaw::giant(m, c).at_powers(l_zahb) * math::powf(at_hef, m.value() / c.m_hef().value())
+    RadiusLaw::giant(m, c).at_powers(l_zahb)
+        * math::powf_positive(at_hef, m.value() / c.m_hef().value())
 }
 
 /// `R_mHe`(`M_HeF`) ÷ `R_GB`(`L_ZAHB`(`M_HeF`)), the constant of [`r_mhe_low_with`].
@@ -189,12 +205,14 @@ pub(crate) fn l_bagb(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
     let mass = m.value();
     let m_hef = c.m_hef().value();
     let high = |m: f64| {
-        (c.b(31) + c.b(32) * math::powf(m, c.b(33) + 1.8)) / (c.b(34) + math::powf(m, c.b(33)))
+        (c.b(31) + c.b(32) * math::powf_positive(m, c.b(33) + 1.8))
+            / (c.b(34) + math::powf_positive(m, c.b(33)))
     };
     SolarLuminosities::new(if mass < m_hef {
         let at_hef = high(m_hef);
-        let alpha3 = (c.b(29) * math::powf(m_hef, c.b(30)) - at_hef) / at_hef;
-        c.b(29) * math::powf(mass, c.b(30)) / (1.0 + alpha3 * math::exp(15.0 * (mass - m_hef)))
+        let alpha3 = (c.b(29) * math::powf_positive(m_hef, c.b(30)) - at_hef) / at_hef;
+        c.b(29) * math::powf_positive(mass, c.b(30))
+            / (1.0 + alpha3 * math::exp(15.0 * (mass - m_hef)))
     } else {
         high(mass)
     })
@@ -220,7 +238,8 @@ pub(crate) fn t_he(m: SolarMasses, c: &ZCoeffs) -> Megayears {
 #[must_use]
 fn t_he_high(m: SolarMasses, c: &ZCoeffs) -> Megayears {
     let m5 = math::powi(m.value(), 5);
-    ms::t_bgb(m, c) * ((c.b(41) * math::powf(m.value(), c.b(42)) + c.b(43) * m5) / (c.b(44) + m5))
+    ms::t_bgb(m, c)
+        * ((c.b(41) * math::powf_positive(m.value(), c.b(42)) + c.b(43) * m5) / (c.b(44) + m5))
 }
 
 /// Equation 57 below `M_HeF` for a star of mass `m` with a core of `mc` at ignition.
@@ -232,6 +251,7 @@ fn t_he_low(m: SolarMasses, mc: SolarMasses, c: &ZCoeffs) -> Megayears {
     let alpha4 = (t_he_high(c.m_hef(), c).value() - b39) / b39;
     let t_hems = helium::main_sequence_lifetime(mc).value();
     Megayears::new(
+        // `powf`, not `powf_positive`, here and for `depth`, `τ_bl` and λ below: the base can be 0.
         (b39 + (t_hems - b39) * math::powf(complement, c.b(40)))
             * (1.0 + alpha4 * math::exp(15.0 * (mass - m_hef))),
     )
@@ -260,9 +280,9 @@ pub(crate) fn blue_fraction(m: SolarMasses, c: &ZCoeffs) -> f64 {
         return gb::blue_fraction_massive(m, c);
     }
     let b45 = c.b(45);
-    let a_bl = 1.0 - b45 * math::powf(m_hef / m_fgb, BLUE_FRACTION_EXPONENT);
+    let a_bl = 1.0 - b45 * math::powf_positive(m_hef / m_fgb, BLUE_FRACTION_EXPONENT);
     let depth = (math::log10(mass / m_fgb) / math::log10(m_hef / m_fgb)).max(0.0);
-    let tau = (b45 * math::powf(mass / m_fgb, BLUE_FRACTION_EXPONENT)
+    let tau = (b45 * math::powf_positive(mass / m_fgb, BLUE_FRACTION_EXPONENT)
         + a_bl * math::powf(depth, c.b(46)))
     .clamp(0.0, 1.0);
     if tau < gb::NO_BLUE_PHASE { 0.0 } else { tau }
@@ -346,9 +366,9 @@ impl HighBlue {
         let r_mhe = self.r_mhe;
         let printed = match self.mu {
             None => r_mhe,
-            Some(mu) => {
-                SolarRadii::new(r_mhe.value() * math::powf(giant.at_powers(l_hei) / r_mhe, mu))
-            }
+            Some(mu) => SolarRadii::new(
+                r_mhe.value() * math::powf_positive(giant.at_powers(l_hei) / r_mhe, mu),
+            ),
         };
         (printed, (r_mhe / printed).clamp(0.4, 2.5))
     }
@@ -540,7 +560,10 @@ impl CoreHeliumBurning {
                 let (printed, xi) = high.printed_and_xi(&giant, &self.powers.ignition);
                 let l_y = SolarLuminosities::new(
                     self.l_hei.value()
-                        * math::powf(self.l_bagb / self.l_hei, math::powf(self.tau_bl, xi)),
+                        * math::powf_positive(
+                            self.l_bagb / self.l_hei,
+                            math::powf(self.tau_bl, xi),
+                        ),
                 );
                 let r_x = self
                     .ignition
@@ -647,10 +670,10 @@ impl CoreHeliumBurning {
         let l_x = self.l_x.value();
         SolarLuminosities::new(if tau < tau_x {
             let lambda = math::powi((tau_x - tau) / tau_x, 3);
-            l_x * math::powf(self.l_hei.value() / l_x, lambda)
+            l_x * math::powf_positive(self.l_hei.value() / l_x, lambda)
         } else {
             let lambda = math::powf(((tau - tau_x) / (1.0 - tau_x)).max(0.0), xi());
-            l_x * math::powf(self.l_bagb.value() / l_x, lambda)
+            l_x * math::powf_positive(self.l_bagb.value() / l_x, lambda)
         })
     }
 

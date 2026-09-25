@@ -5,4 +5,4 @@
  *
  * A moon destroyed with its planet takes its planet's cause.
  */
-export type DestructionCauseDto = "dispersed" | "engulfed" | "tidally_disrupted";
+export type DestructionCauseDto = "dispersed" | "engulfed" | "tidally_disrupted" | "collided";

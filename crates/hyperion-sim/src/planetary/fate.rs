@@ -6,14 +6,16 @@
 //! [`BodyState::NotYetFormed`] before its formation age (P14.T28.a,
 //! [`hosts::young`](crate::planetary::hosts::young)), then [`BodyState::Present`] on an orbit that
 //! circularises under tides (P14.T8.e) and widens as its host loses mass, until its host swallows
-//! it (P14.T28.b) or a supernova unbinds or disrupts it (P14.T28.c,
-//! [`hosts::evolved`](crate::planetary::hosts::evolved)). The state sequence of every body is a
-//! prefix of not yet formed → present → destroyed or unbound, and its elements are continuous in
-//! time except at a supernova.
+//! it (P14.T28.b), a supernova unbinds or disrupts it (P14.T28.c,
+//! [`hosts::evolved`](crate::planetary::hosts::evolved)), or a neighbour whose orbit the
+//! supernova made cross its own ejects it or merges with it (ruling 71). The state sequence of
+//! every body is a prefix of not yet formed → present → destroyed or unbound, and its elements are
+//! continuous in time except at a supernova.
 //!
 //! # The transform
 //!
-//! [`BodyFate::resolve`] fixes a body's history once, from its [`FateBody`] and its [`FateHost`]:
+//! [`BodyFate::resolve_all`] fixes the histories of one host's bodies once, from their
+//! [`FateBody`]s and their [`FateHost`], and [`BodyFate::resolve`] one body's alone there:
 //!
 //! 1. Its formation time: the clock time of its formation age on its host.
 //! 2. Segments of its life between its host's sudden deaths. In each, the orbit is the segment's
@@ -30,10 +32,20 @@
 //!    `Destroyed { TidallyDisrupted }` at its next pericentre if that is inside the remnant's
 //!    Roche limit. A white dwarf's birth is a star's envelope lost by winds, slow against the
 //!    orbit, so it is part of the expansion and no event.
+//! 5. Right after each sudden death, the scattering step (P14.T28.c, ruling 71): the bodies it
+//!    left bound are walked in slot order until no two orbits cross or come within 2√3 mutual Hill
+//!    radii, and each such pair loses its lighter body, `Unbound` where the heavier's Safronov
+//!    number is 1 or more, the heavier taking the pair's binding energy with an eccentricity drawn
+//!    from Ford and Rasio's Table 1 (rulings 75.3 and 80, [`ScatterDraws`]), and otherwise
+//!    `Destroyed { Collided }` and merged into the heavier, which takes both masses and the pair's
+//!    mass-weighted angular momentum and energy (Ford and Rasio 2008; Petrovich et al. 2014).
+//!    This is the one step in which a body's history depends on another's; pairs that come
+//!    within 2√3 Hill radii under slow mass loss stay as they are (ruling 71.2), since their
+//!    instability takes up to gigayears.
 //!
 //! [`BodyFate::at`] then reads the history at any time, so every query of one body agrees with
-//! every other, whatever their order: the history depends on the body and its host alone, never on
-//! the time asked about. [`state_at`] is both in one call.
+//! every other, whatever their order: the history depends on the host's bodies and the host alone,
+//! never on the time asked about. [`state_at`] is both in one call, for a body alone on its host.
 //!
 //! # The seam to the generator
 //!
@@ -61,7 +73,9 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::Seed;
 use crate::coords::SystemVelocity;
+use crate::id::BodyId;
 use crate::orbit::KeplerElements;
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
@@ -126,6 +140,10 @@ pub enum DestructionCause {
     /// The body's pericentre fell inside its primary's Roche limit, as after a supernova that
     /// leaves a planet on a plunging orbit about the remnant (P14.T28.c).
     TidallyDisrupted,
+    /// The body collided with a heavier neighbour whose orbit its own crossed after a supernova,
+    /// and merged into it (P14.T28.c's scattering step, ruling 71): the heavier's Safronov number
+    /// was under 1, too small to eject it (Ford and Rasio 2008; [`scatter`]).
+    Collided,
 }
 
 /// A [`FateBody`] could not be built from the values given.
@@ -158,8 +176,29 @@ impl fmt::Display for BuildFateBodyError {
 
 impl Error for BuildFateBodyError {}
 
+/// Words of a body's `planet.scatter` stream that each ejection it survives reads or reserves
+/// (ruling 80, [`ScatterDraws`]): its eccentricity's rank and its phase's, then two reserved.
+pub const SCATTER_WORDS_PER_EJECTION: u64 = 4;
+
+/// Where the draws a body takes from each ejection it survives come from (P14.T28.c, ruling 80):
+/// the rank of its new eccentricity and its phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScatterDraws {
+    /// Every draw at its median: the eccentricity at its law's median and the survivor at its
+    /// pericentre. For a body built by hand, as in a test.
+    Median,
+    /// The body's own `planet.scatter` stream in the universe of `seed`
+    /// ([`SCATTER_WORDS_PER_EJECTION`] words an ejection), which the generator gives every planet.
+    Stream {
+        /// The universe.
+        seed: Seed,
+        /// The body.
+        body: BodyId,
+    },
+}
+
 /// What the fate transform reads of a body: its formation, its primordial orbit, its mass, its
-/// bulk density and how its orbit circularises.
+/// bulk density, how its orbit circularises, and the draws of the ejections it survives.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FateBody {
     formation: Formation,
@@ -167,6 +206,7 @@ pub struct FateBody {
     mass: EarthMasses,
     density: KilogramsPerCubicMetre,
     circularisation: Circularisation,
+    scatter: ScatterDraws,
 }
 
 impl FateBody {
@@ -201,6 +241,7 @@ impl FateBody {
             mass,
             density,
             circularisation: Circularisation::NONE,
+            scatter: ScatterDraws::Median,
         })
     }
 
@@ -211,6 +252,18 @@ impl FateBody {
             circularisation,
             ..self
         }
+    }
+
+    /// The same body, taking the draws of the ejections it survives from `scatter` (ruling 80).
+    #[must_use]
+    pub const fn with_scatter_draws(self, scatter: ScatterDraws) -> Self {
+        Self { scatter, ..self }
+    }
+
+    /// Where the draws of the ejections it survives come from.
+    #[must_use]
+    pub const fn scatter_draws(&self) -> ScatterDraws {
+        self.scatter
     }
 
     /// When the body forms.
@@ -344,6 +397,7 @@ pub struct FateAt {
     state: BodyState,
     orbit: Option<KeplerElements>,
     valid_until: Option<UniverseTime>,
+    mass: EarthMasses,
 }
 
 impl FateAt {
@@ -368,6 +422,14 @@ impl FateAt {
     #[must_use]
     pub const fn valid_until(&self) -> Option<UniverseTime> {
         self.valid_until
+    }
+
+    /// The body's mass at the time, M⊕: its own, plus that of every neighbour that collided with
+    /// it and merged into it by then (ruling 71). A body not yet formed has its own mass, and a
+    /// body gone the mass it had when it went.
+    #[must_use]
+    pub const fn mass(&self) -> EarthMasses {
+        self.mass
     }
 
     /// The record's orbit section: the elements and [`FateAt::valid_until`], if the body is
@@ -405,6 +467,9 @@ struct Segment {
     reference: SolarMasses,
     /// Whether the orbit circularises, which only the primordial one does.
     circularises: bool,
+    /// The body's mass through the segment, M⊕: its own, or with the neighbours merged into it
+    /// at the segment's start ([`scatter`]).
+    mass: EarthMasses,
 }
 
 /// A body's whole history on its host: when it forms, its orbit between its host's sudden deaths,
@@ -479,10 +544,12 @@ pub struct BodyFate<'a> {
     formed_at: Option<UniverseTime>,
     segments: Vec<Segment>,
     ending: Option<BodyState>,
+    /// How many ejections the body has survived so far, which picks the words of its next draw.
+    recoils: u64,
 }
 
 impl<'a> BodyFate<'a> {
-    /// The history of `body` on `host`.
+    /// The history of `body` on `host`, alone there: [`BodyFate::resolve_all`] of `body` alone.
     ///
     /// It reads the host's stars up to the end of the clock window, or to the last death where
     /// every star is dead by then; the cost is a few state evaluations per star, and for a body
@@ -491,9 +558,137 @@ impl<'a> BodyFate<'a> {
     /// A body whose formation age falls at or after one of its host stars' deaths never forms,
     /// since the death ends its disc; it needs a disc that outlives a star of over 13 M☉, which
     /// P06.T15.c's lifetimes make vanishingly rare.
+    ///
+    /// # Panics
+    ///
+    /// Never: one body has one history.
     #[must_use]
     pub fn resolve(body: &'a FateBody, host: &'a FateHost<'a>) -> Self {
+        let mut fates = Self::resolve_all(&[body], host);
+        fates.pop().expect("one body has one history")
+    }
+
+    /// The histories of `bodies`, every body of one host in slot order, on `host`: each as
+    /// [`BodyFate::resolve`] would have it alone, but for the scattering step after each of the
+    /// host's sudden deaths (P14.T28.c, ruling 71, [`scatter`]).
+    ///
+    /// A supernova gives each survivor its own eccentricity, and orbits that cross, or come within
+    /// 2√3 mutual Hill radii, scatter within a few orbits. So at each sudden death the bodies it
+    /// leaves bound are walked in slot order until no such pair remains, and each pair found
+    /// loses its lighter body, ejected or merged into the heavier. Nothing else couples one body's
+    /// history to another's, so a host without a sudden death gives every body its history alone,
+    /// bit for bit, and so does a body the step leaves untouched.
+    ///
+    /// The result is in the order given.
+    ///
+    /// # Examples
+    ///
+    /// Two giants on circular orbits 300 and 400 au from a 20 M☉ star: the black hole's birth
+    /// sheds a fifth of the mass, both orbits take e = 0.22 and cross, and the lighter is ejected.
+    ///
+    /// ```
+    /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// use hyperion_sim::planetary::fate::{BodyFate, BodyState, FateBody, FateHost};
+    /// use hyperion_sim::planetary::hosts::young::{Formation, FormationDraws};
+    /// use hyperion_sim::stellar::Composition;
+    /// use hyperion_sim::stellar::draws::StarDraws;
+    /// use hyperion_sim::stellar::system::StarModel;
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::{
+    ///     AstronomicalUnits, EarthMasses, GravitationalParameter, KilogramsPerCubicMetre,
+    ///     Megayears, Metres, Radians, SolarMasses, Years,
+    /// };
+    ///
+    /// let star = StarModel::new(
+    ///     SolarMasses::new(20.0),
+    ///     Composition::SOLAR,
+    ///     StarDraws::median(),
+    ///     Years::new(3e7),
+    /// )?;
+    /// let host = FateHost::star(&star);
+    /// let jupiter = |a_au: f64, mass: f64| -> Result<FateBody, Box<dyn std::error::Error>> {
+    ///     let mass = EarthMasses::new(mass);
+    ///     Ok(FateBody::new(
+    ///         Formation::from_draws(mass, Megayears::new(0.3), &FormationDraws::MEDIAN)?,
+    ///         KeplerElements::from_semi_major_axis(
+    ///             Metres::from(AstronomicalUnits::new(a_au)),
+    ///             GravitationalParameter::from_solar_masses(SolarMasses::new(20.0)),
+    ///             Eccentricity::CIRCULAR,
+    ///             Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?,
+    ///             Radians::new(a_au / 100.0),
+    ///         )?,
+    ///         mass,
+    ///         KilogramsPerCubicMetre::new(1_326.0),
+    ///     )?)
+    /// };
+    /// let (inner, outer) = (jupiter(300.0, 317.8)?, jupiter(400.0, 100.0)?);
+    ///
+    /// // Alone, each would survive the supernova.
+    /// for body in [&inner, &outer] {
+    ///     let alone = BodyFate::resolve(body, &host).at(UniverseTime::EPOCH);
+    ///     assert_eq!(alone.state(), BodyState::Present);
+    /// }
+    /// // Together, the lighter is ejected, and the heavier takes the pair's binding energy: its
+    /// // orbit shrinks and grows more eccentric.
+    /// let fates = BodyFate::resolve_all(&[&inner, &outer], &host);
+    /// assert!(matches!(fates[1].ending(), Some(BodyState::Unbound { .. })));
+    /// let alone = BodyFate::resolve(&inner, &host).at(UniverseTime::EPOCH);
+    /// let before = alone.orbit().ok_or("bound")?;
+    /// let after = fates[0].at(UniverseTime::EPOCH);
+    /// let after = after.orbit().ok_or("the survivor is bound")?;
+    /// assert!(after.semi_major_axis() < before.semi_major_axis());
+    /// assert!(after.eccentricity().value() > before.eccentricity().value());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn resolve_all(bodies: &[&'a FateBody], host: &'a FateHost<'a>) -> Vec<Self> {
         let deaths: Vec<Option<StarDeath>> = host.stars.iter().map(|star| death_of(star)).collect();
+        let mut sudden: Vec<(UniverseTime, usize)> = deaths
+            .iter()
+            .enumerate()
+            .filter_map(|(k, death)| death.filter(|d| d.sudden).map(|d| (d.at, k)))
+            .collect();
+        sudden.sort_unstable();
+        let mut fates: Vec<Self> = bodies
+            .iter()
+            .map(|&body| Self::begin(body, host, deaths.clone()))
+            .collect();
+        for &death in &sudden {
+            for fate in &mut fates {
+                fate.live_to(Some(death));
+            }
+            let passes = scatter::scatter(&mut fates, death.0);
+            debug_assert!(passes < fates.len().max(1), "each pass removes a body");
+        }
+        for fate in &mut fates {
+            fate.live_to(None);
+        }
+        fates
+    }
+
+    /// The history of `bodies[index]` among `bodies`, every body of one host in slot order:
+    /// [`BodyFate::resolve_all`]'s, resolving the others only where the host has a sudden death
+    /// for the scattering step to follow.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is out of `bodies`' range.
+    #[must_use]
+    pub fn resolve_among(bodies: &[&'a FateBody], index: usize, host: &'a FateHost<'a>) -> Self {
+        let body = bodies[index];
+        let sudden = host
+            .stars
+            .iter()
+            .any(|star| death_of(star).is_some_and(|death| death.sudden));
+        if sudden {
+            Self::resolve_all(bodies, host).swap_remove(index)
+        } else {
+            Self::resolve(body, host)
+        }
+    }
+
+    /// The body's formation and its first segment, before any of its life is followed.
+    fn begin(body: &'a FateBody, host: &'a FateHost<'a>, deaths: Vec<Option<StarDeath>>) -> Self {
         let formed_at = clock_time(host.first(), Years::from(body.formation.formed_at()))
             .filter(|formed| deaths.iter().flatten().all(|death| death.at > *formed));
         let mut fate = Self {
@@ -503,6 +698,7 @@ impl<'a> BodyFate<'a> {
             formed_at,
             segments: Vec::new(),
             ending: None,
+            recoils: 0,
         };
         if let Some(formed) = formed_at {
             fate.segments.push(Segment {
@@ -510,12 +706,8 @@ impl<'a> BodyFate<'a> {
                 orbit: body.orbit,
                 reference: host.initial_mass(),
                 circularises: true,
+                mass: body.mass,
             });
-            // A body that forms after the clock window, about a host alive then, has no history
-            // the host's models can tell yet.
-            if formed <= fate.known_until() {
-                fate.live();
-            }
         }
         fate
     }
@@ -547,6 +739,7 @@ impl<'a> BodyFate<'a> {
                 state: BodyState::NotYetFormed,
                 orbit: None,
                 valid_until: None,
+                mass: self.body.mass,
             };
         };
         if t < formed {
@@ -554,6 +747,7 @@ impl<'a> BodyFate<'a> {
                 state: BodyState::NotYetFormed,
                 orbit: None,
                 valid_until: within(formed),
+                mass: self.body.mass,
             };
         }
         if let Some(ending) = self.ending
@@ -563,6 +757,7 @@ impl<'a> BodyFate<'a> {
                 state: ending,
                 orbit: None,
                 valid_until: None,
+                mass: self.segments.last().map_or(self.body.mass, |s| s.mass),
             };
         }
         let index = self.segments.partition_point(|segment| segment.start <= t) - 1;
@@ -575,67 +770,58 @@ impl<'a> BodyFate<'a> {
             state: BodyState::Present,
             orbit: Some(self.orbit_in(segment, t, self.host_mass(t))),
             valid_until: next.and_then(within),
+            mass: segment.mass,
         }
     }
 
-    /// Follows the body from its formation, no later than [`BodyFate::known_until`], through its
-    /// host's sudden deaths until it ends or the host's known history does.
-    fn live(&mut self) {
-        let mut sudden: Vec<(UniverseTime, usize)> = self
-            .deaths
-            .iter()
-            .enumerate()
-            .filter_map(|(k, death)| death.filter(|d| d.sudden).map(|d| (d.at, k)))
-            .collect();
-        sudden.sort_unstable();
-        let last = self.known_until();
-        let reach = engulfment_reach(self.body.mass);
-        let mut pending = sudden.into_iter();
-        loop {
-            let segment = *self.segments.last().expect("a formed body has a segment");
-            let next = pending.next();
-            let end = next.map_or(last, |(at, _)| {
-                at.checked_sub(Span::new(0, 1).expect("one nanosecond"))
-                    .expect("a death after a formation is not the clock's first instant")
+    /// Follows the body on its last segment up to the sudden death `next` of one of its host
+    /// stars, and through it, or with `None` to the end of its host's known history
+    /// ([`BodyFate::known_until`]): the engulfment search on the segment, then the death's
+    /// aftermath. A body not formed, not formed by then, or gone already is left as it is.
+    fn live_to(&mut self, next: Option<(UniverseTime, usize)>) {
+        let (Some(formed), None) = (self.formed_at, self.ending) else {
+            return;
+        };
+        // A body that forms after the clock window, about a host alive then, has no history the
+        // host's models can tell yet.
+        if formed > self.known_until() {
+            return;
+        }
+        let segment = *self.segments.last().expect("a formed body has a segment");
+        let end = next.map_or(self.known_until(), |(at, _)| {
+            at.checked_sub(Span::new(0, 1).expect("one nanosecond"))
+                .expect("a death after a formation is not the clock's first instant")
+        });
+        if let Some(at) = self.engulfment(&segment, end, engulfment_reach(segment.mass)) {
+            self.ending = Some(BodyState::Destroyed {
+                cause: DestructionCause::Engulfed,
+                at,
             });
-            if let Some(at) = self.engulfment(&segment, end, reach) {
+            return;
+        }
+        let Some((at, star)) = next else {
+            return;
+        };
+        let (aftermath, reference) = self.explode(&segment, at, star);
+        let after = |orbit| Segment {
+            start: at,
+            orbit,
+            reference,
+            circularises: false,
+            mass: segment.mass,
+        };
+        match aftermath {
+            Aftermath::Bound(orbit) => self.segments.push(after(orbit)),
+            Aftermath::Disrupted { orbit, at: when } => {
+                if let Some(orbit) = orbit {
+                    self.segments.push(after(orbit));
+                }
                 self.ending = Some(BodyState::Destroyed {
-                    cause: DestructionCause::Engulfed,
-                    at,
+                    cause: DestructionCause::TidallyDisrupted,
+                    at: when,
                 });
-                return;
             }
-            let Some((at, star)) = next else {
-                return;
-            };
-            let (aftermath, reference) = self.explode(&segment, at, star);
-            match aftermath {
-                Aftermath::Bound(orbit) => self.segments.push(Segment {
-                    start: at,
-                    orbit,
-                    reference,
-                    circularises: false,
-                }),
-                Aftermath::Disrupted { orbit, at: when } => {
-                    if let Some(orbit) = orbit {
-                        self.segments.push(Segment {
-                            start: at,
-                            orbit,
-                            reference,
-                            circularises: false,
-                        });
-                    }
-                    self.ending = Some(BodyState::Destroyed {
-                        cause: DestructionCause::TidallyDisrupted,
-                        at: when,
-                    });
-                    return;
-                }
-                Aftermath::Unbound => {
-                    self.ending = Some(BodyState::Unbound { at });
-                    return;
-                }
-            }
+            Aftermath::Unbound => self.ending = Some(BodyState::Unbound { at }),
         }
     }
 
@@ -774,8 +960,9 @@ impl<'a> BodyFate<'a> {
     }
 }
 
-/// The state and orbit of `body` on `host` at `t`: [`BodyFate::resolve`] then [`BodyFate::at`],
-/// the fate transform of P14.T28.
+/// The state and orbit of `body`, alone on `host`, at `t`: [`BodyFate::resolve`] then
+/// [`BodyFate::at`], the fate transform of P14.T28. A body among others on its host takes
+/// [`BodyFate::resolve_all`] or [`BodyFate::resolve_among`], for the scattering after a supernova.
 ///
 /// # Panics
 ///
@@ -846,6 +1033,8 @@ fn living_state(model: &StarModel, t: UniverseTime) -> StarState {
         .state_at(t)
         .expect("a host star has formed by the time its body has, 0.3 Myr at the earliest")
 }
+
+mod scatter;
 
 #[cfg(test)]
 mod tests;

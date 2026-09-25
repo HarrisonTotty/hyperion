@@ -282,8 +282,32 @@ mod tests {
         let cache = SharedBodyCache::new(Arc::clone(&pool), 64 << 20);
         let calls = Arc::new(AtomicUsize::new(0));
         let id = systems(1)[0];
-        let (first, second) = tokio::join!(get(&cache, id, &calls), get(&cache, id, &calls));
-        let (first, second) = (first.unwrap(), second.unwrap());
+        // The generation is held until both requests have missed: a system can generate before
+        // the first request first awaits its job, which would then answer the second from the
+        // cache, and the two would no longer be concurrent.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let gated = {
+            let calls = Arc::clone(&calls);
+            move || {
+                held.recv_timeout(WAIT)
+                    .expect("the test releases the generation");
+                calls.fetch_add(1, Ordering::SeqCst);
+                SystemContext::for_system(galaxy(), id)
+            }
+        };
+        let first = timeout(WAIT, cache.get_or_generate(key(), id, gated));
+        let second = get(&cache, id, &calls);
+        let both_missed = async {
+            while cache.counters().cache().misses() < 2 {
+                tokio::task::yield_now().await;
+            }
+            release.send(()).expect("the generation is waiting");
+        };
+        let (first, second, ()) = tokio::join!(first, second, both_missed);
+        let (first, second) = (
+            first.expect("timed out generating a system").unwrap(),
+            second.unwrap(),
+        );
         assert!(Arc::ptr_eq(&first, &second), "both hold the one system");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "one generation");
         let counters = cache.counters();

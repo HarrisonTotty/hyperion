@@ -363,7 +363,7 @@ fn early_agb(
     let blend = coord / EARLY_AGB_REMNANT_BLEND;
     let luminosity = if blend < 1.0 {
         let l_tms = helium.l_tms().value();
-        SolarLuminosities::new(l_tms * crate::math::powf(relation.value() / l_tms, blend))
+        SolarLuminosities::new(l_tms * crate::math::powf_positive(relation.value() / l_tms, blend))
     } else {
         relation
     };

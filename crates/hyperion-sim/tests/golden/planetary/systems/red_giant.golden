@@ -4,15 +4,15 @@ fe_h = 0x3f9b85a70dd7309d  # 0.026877031535875607
 age_at_epoch_yr = 0x420268653611b2fe  # 9882609346.212399
 star 0: Some(FirstGiantBranch) at the epoch
 initial_mass_msun = 0x3ff10a2480e9f187  # 1.0649762187668743
-mass_msun = 0x3ff0eef13be322da  # 1.0583355273576474
-luminosity_lsun = 0x404320b4936634ef  # 38.2555107354218
-teff_k = 0x40b1842253d978ea  # 4484.134091941853
+mass_msun = 0x3ff0eef13be363e2  # 1.058335527361344
+luminosity_lsun = 0x404320b4936634f2  # 38.25551073542182
+teff_k = 0x40b1842253d98197  # 4484.134091943873
 host Star(0): drawn CompactWithColdGiant, placed CompactWithColdGiant
 
 epoch: 4 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: NotModelled
 halo: NotModelled
-body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2423537708357184, nanos: 435543953 } }
+body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2423537708424659, nanos: 81263017 } }
 mass_mearth = 0x40014b8fd93af6ba  # 2.1618954630965534
 orbit: NotApplicable
 position: none
@@ -21,7 +21,7 @@ moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
 hooks: NotModelled
-body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1208246965468251, nanos: 328551481 } }
+body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1208246965520498, nanos: 953128793 } }
 mass_mearth = 0x40093f98a8db222c  # 3.1560528938173515
 orbit: NotApplicable
 position: none
@@ -32,18 +32,18 @@ surface: NotApplicable
 hooks: NotModelled
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x407025c596de3f6e  # 258.36073958220993
-a_m = 0x4263eb5385c0681b  # 684419984899.2533
+a_m = 0x4263eb5385c01b9b  # 684419984896.8627
 e = 0x3f7b072d5141e567  # 0.006598641415729168
 i_rad = 0x3ff6a0a86d9c6f03  # 1.4142231256182078
 node_rad = 0x40183d14979a30a4  # 6.059648865495692
 periapsis_rad = 0x40118244f5c25ec4  # 4.377216186512388
 mean_anomaly_at_epoch_rad = 0x40170033a0a317ad  # 5.75019694323957
-period_s = 0x41b1e2dea993dcd9  # 300080809.5775886
-mu_m3_s2 = 0x441e7a75dbbe68c0  # 1.4055663071675915e20
+period_s = 0x41b1e2dea9935376  # 300080809.57549226
+mu_m3_s2 = 0x441e7a75dbbeddcd  # 1.405566307172501e20
 valid_until: None
-x_m = 0xc25e8607eceec840  # -524390740923.1289
-y_m = 0x422706a7524cde4f  # 49447938342.4342
-z_m = 0xc259155d978ab08a  # -430930550314.7584
+x_m = 0xc25e8607ecee5306  # -524390740921.29724
+y_m = 0x422706a7524c85e1  # 49447938342.26148
+z_m = 0xc259155d978a5034  # -430930550313.2532
 radius_rearth = 0x4025b4439da179c8  # 10.852078367196455
 density_kg_m3 = 0x40916a4a46a2fdbd  # 1114.5725350825662
 gravity_m_s2 = 0x40358b395ced859c  # 21.54384403990626
@@ -52,25 +52,25 @@ iron = 0x3f9e5273ca17dd6e  # 0.02961140557269231
 rock = 0x3faf7d0216ca037c  # 0.06150061157405326
 water = 0x3fbb3c68a6242ccf  # 0.10639051490959449
 envelope = 0x3fe9ae0f2b7e1b43  # 0.80249746794366
-t_eq_k = 0x40728569d0bfc8e1  # 296.33833384433643
+t_eq_k = 0x40728569d0bfec4b  # 296.3383338448518
 moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
 hooks: NotModelled
 body 0400 A e: Planet about Some(Star(0)), Present
 mass_mearth = 0x4073a9a5f30fc4aa  # 314.6030150047251
-a_m = 0x4277a34773ed65f7  # 1624377867990.3728
+a_m = 0x4277a34773ed0b2f  # 1624377867984.699
 e = 0x3fd80961bba26a03  # 0.3755726177566034
 i_rad = 0x3ff7aab569ac2167  # 1.479176914961579
 node_rad = 0x401732075357f4bc  # 5.798856069796951
 periapsis_rad = 0x40160454a3940a52  # 5.5042291220766675
 mean_anomaly_at_epoch_rad = 0x4000f6a363cdc4d3  # 2.120428828923289
-period_s = 0x41d05924fdf02437  # 1097110519.7522104
-mu_m3_s2 = 0x441e7bb2741b208a  # 1.4057890912091626e20
+period_s = 0x41d05924fdefa6a6  # 1097110519.7445464
+mu_m3_s2 = 0x441e7bb2741b959c  # 1.4057890912140729e20
 valid_until: None
-x_m = 0xc256e55bf484920e  # -393349157394.2821
-y_m = 0x42580b50fee6b129  # 413076290458.7681
-z_m = 0x427ce47210ed19ea  # 1985468239569.6196
+x_m = 0xc256e55bf4843a20  # -393349157392.9082
+y_m = 0x42580b50fee654d3  # 413076290457.3254
+z_m = 0x427ce47210ecaaf4  # 1985468239562.6846
 radius_rearth = 0x4025f67587a16765  # 10.981365431263564
 density_kg_m3 = 0x409477505e0a0ef2  # 1309.8284837314245
 gravity_m_s2 = 0x40399e9f86e5723f  # 25.61962168790546
@@ -79,7 +79,7 @@ iron = 0x3f9c14864ca29e32  # 0.027422045161669746
 rock = 0x3fad29019e5a1a6e  # 0.056953478412698696
 water = 0x3fb938e4e0c35bb5  # 0.09852438437825024
 envelope = 0x3fea25af179cddf1  # 0.8171000920473813
-t_eq_k = 0x4068ac75209b543e  # 197.3892977746745
+t_eq_k = 0x4068ac75209b8226  # 197.38929777500852
 moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
@@ -88,7 +88,7 @@ hooks: NotModelled
 +H: 4 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: NotModelled
 halo: NotModelled
-body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2423537708357184, nanos: 435543953 } }
+body 0100 A b: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -2423537708424659, nanos: 81263017 } }
 mass_mearth = 0x40014b8fd93af6ba  # 2.1618954630965534
 orbit: NotApplicable
 position: none
@@ -97,7 +97,7 @@ moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
 hooks: NotModelled
-body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1208246965468251, nanos: 328551481 } }
+body 0200 A c: Planet about Some(Star(0)), Destroyed { cause: Engulfed, at: UniverseTime { seconds: -1208246965520498, nanos: 953128793 } }
 mass_mearth = 0x40093f98a8db222c  # 3.1560528938173515
 orbit: NotApplicable
 position: none
@@ -108,18 +108,18 @@ surface: NotApplicable
 hooks: NotModelled
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x407025c596de3f6e  # 258.36073958220993
-a_m = 0x4263eb53a0c1e6f7  # 684420040207.2177
+a_m = 0x4263eb53a0c19a78  # 684420040204.8271
 e = 0x3f7b072d5141e567  # 0.006598641415729168
 i_rad = 0x3ff6a0a86d9c6f03  # 1.4142231256182078
 node_rad = 0x40183d14979a30a4  # 6.059648865495692
 periapsis_rad = 0x40118244f5c25ec4  # 4.377216186512388
 mean_anomaly_at_epoch_rad = 0x40170033a0a317ad  # 5.75019694323957
-period_s = 0x41b1e2deda139e8f  # 300080858.07663816
-mu_m3_s2 = 0x441e7a75b26c188c  # 1.4055661935838174e20
+period_s = 0x41b1e2deda13152e  # 300080858.0745419
+mu_m3_s2 = 0x441e7a75b26c8d99  # 1.4055661935887268e20
 valid_until: None
-x_m = 0x423431662035e0c6  # 86728122421.87802
-y_m = 0xc23d9357db591e2c  # -127026060121.11786
-z_m = 0xc2634a8e7b59dbd1  # -662841842382.8693
+x_m = 0x423431662c38ac1a  # 86728125496.67227
+y_m = 0xc23d9357ddc1278e  # -127026060737.15451
+z_m = 0xc2634a8e7b19cb26  # -662841841870.3484
 radius_rearth = 0x4025b4439caeecb7  # 10.852078338959798
 density_kg_m3 = 0x40916a4a48eada4a  # 1114.572543782781
 gravity_m_s2 = 0x40358b395ecf0a79  # 21.54384415201864
@@ -128,25 +128,25 @@ iron = 0x3f9e5273ca17dd6e  # 0.02961140557269231
 rock = 0x3faf7d0216ca037c  # 0.06150061157405326
 water = 0x3fbb3c68a6242ccf  # 0.10639051490959449
 envelope = 0x3fe9ae0f2b7e1b43  # 0.80249746794366
-t_eq_k = 0x4072856e79811e1d  # 296.33947134434294
+t_eq_k = 0x4072856e79814185  # 296.33947134485817
 moons: NotModelled
 rings: NotModelled
 surface: NotApplicable
 hooks: NotModelled
 body 0400 A e: Planet about Some(Star(0)), Present
 mass_mearth = 0x4073a9a5f30fc4aa  # 314.6030150047251
-a_m = 0x4277a34793f98505  # 1624377999256.3137
+a_m = 0x4277a34793f92a3e  # 1624377999250.6401
 e = 0x3fd80961bba26a03  # 0.3755726177566034
 i_rad = 0x3ff7aab569ac2167  # 1.479176914961579
 node_rad = 0x401732075357f4bc  # 5.798856069796951
 periapsis_rad = 0x40160454a3940a52  # 5.5042291220766675
 mean_anomaly_at_epoch_rad = 0x4000f6a363cdc4d3  # 2.120428828923289
-period_s = 0x41d059252a444c91  # 1097110697.0671732
-mu_m3_s2 = 0x441e7bb24ac7231b  # 1.4057889776073853e20
+period_s = 0x41d059252a43cf00  # 1097110697.0595093
+mu_m3_s2 = 0x441e7bb24ac7982d  # 1.4057889776122955e20
 valid_until: None
-x_m = 0x426d202a0660ad60  # 1000749413125.418
-y_m = 0xc25ae15f95ae6536  # -461801150137.5814
-z_m = 0x426224aa2f2eae55  # 623396354421.4479
+x_m = 0x426d202a06353308  # 1000749412777.5947
+y_m = 0xc25ae15f953fb452  # -461801149694.8175
+z_m = 0x426224aa30677306  # 623396356923.5945
 radius_rearth = 0x4025f67586a7d8dd  # 10.981365402211333
 density_kg_m3 = 0x4094775060c3b5cd  # 1309.8284941272461
 gravity_m_s2 = 0x40399e9f892baa15  # 25.619621823463678
@@ -155,7 +155,7 @@ iron = 0x3f9c14864ca29e32  # 0.027422045161669746
 rock = 0x3fad29019e5a1a6e  # 0.056953478412698696
 water = 0x3fb938e4e0c35bb5  # 0.09852438437825024
 envelope = 0x3fea25af179cddf1  # 0.8171000920473813
-t_eq_k = 0x4068ac7b2a6bbcff  # 197.3900348762763
+t_eq_k = 0x4068ac7b2a6beae5  # 197.39003487661026
 moons: NotModelled
 rings: NotModelled
 surface: NotApplicable

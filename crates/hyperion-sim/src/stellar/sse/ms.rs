@@ -53,8 +53,8 @@ fn t_bgb_myr(m: f64, c: &ZCoeffs) -> f64 {
 /// max(0.5, 1.0 − 0.01 max(a6 ÷ M^a7, a8 + a9 ÷ M^a10)).
 #[must_use]
 fn hook_fraction(m: f64, c: &ZCoeffs) -> f64 {
-    let first = c.a(6) / math::powf(m, c.a(7));
-    let second = c.a(8) + c.a(9) / math::powf(m, c.a(10));
+    let first = c.a(6) / math::powf_positive(m, c.a(7));
+    let second = c.a(8) + c.a(9) / math::powf_positive(m, c.a(10));
     0.5_f64.max(1.0 - 0.01 * first.max(second))
 }
 
@@ -105,9 +105,9 @@ pub(crate) fn t_ms(m: SolarMasses, c: &ZCoeffs) -> Megayears {
 pub(crate) fn l_tms(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
     let m = m.value();
     let m3 = m * m * m;
-    let m_a16 = math::powf(m, c.a(16));
+    let m_a16 = math::powf_positive(m, c.a(16));
     SolarLuminosities::new(
-        (c.a(11) * m3 + c.a(12) * m3 * m + c.a(13) * m_a16 * math::powf(m, 1.8))
+        (c.a(11) * m3 + c.a(12) * m3 * m + c.a(13) * m_a16 * math::powf_positive(m, 1.8))
             / (c.a(14) + c.a(15) * m3 * m * m + m_a16),
     )
 }
@@ -116,7 +116,8 @@ pub(crate) fn l_tms(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
 /// (a18 + a19 M^a21) ÷ (a20 + M^a22).
 #[must_use]
 fn r_tms_low(m: f64, c: &ZCoeffs) -> f64 {
-    (c.a(18) + c.a(19) * math::powf(m, c.a(21))) / (c.a(20) + math::powf(m, c.a(22)))
+    (c.a(18) + c.a(19) * math::powf_positive(m, c.a(21)))
+        / (c.a(20) + math::powf_positive(m, c.a(22)))
 }
 
 /// HPT equation 9b, the terminal radius in R☉ at high mass `m` in M☉:
@@ -124,7 +125,7 @@ fn r_tms_low(m: f64, c: &ZCoeffs) -> f64 {
 #[must_use]
 fn r_tms_high(m: f64, c: &ZCoeffs) -> f64 {
     let m3 = m * m * m;
-    let m_a26 = math::powf(m, c.a(26));
+    let m_a26 = math::powf_positive(m, c.a(26));
     (C1 * m3 + c.a(23) * m_a26 + c.a(24) * m_a26 * m * m.sqrt()) / (c.a(25) + m3 * m * m)
 }
 
@@ -161,8 +162,8 @@ pub(crate) fn r_tms(m: SolarMasses, c: &ZCoeffs) -> SolarRadii {
 pub(crate) fn l_bgb(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
     let m = m.value();
     SolarLuminosities::new(
-        (c.a(27) * math::powf(m, c.a(31)) + c.a(28) * math::powf(m, C2))
-            / (c.a(29) + c.a(30) * math::powf(m, C3) + math::powf(m, c.a(32))),
+        (c.a(27) * math::powf_positive(m, c.a(31)) + c.a(28) * math::powf_positive(m, C2))
+            / (c.a(29) + c.a(30) * math::powf_positive(m, C3) + math::powf_positive(m, c.a(32))),
     )
 }
 
@@ -175,7 +176,7 @@ fn delta_l(m: f64, c: &ZCoeffs) -> f64 {
     if m <= m_hook {
         0.0
     } else if m < a33 {
-        high(a33) * math::powf((m - m_hook) / (a33 - m_hook), 0.4)
+        high(a33) * math::powf_positive((m - m_hook) / (a33 - m_hook), 0.4)
     } else {
         high(m)
     }
@@ -187,7 +188,8 @@ fn delta_r(m: f64, c: &ZCoeffs) -> f64 {
     let m_hook = c.m_hook().value();
     let (a42, a43) = (c.a(42), c.a(43));
     let high = |m: f64| {
-        (c.a(38) + c.a(39) * m * m * m * m.sqrt()) / (c.a(40) * m * m * m + math::powf(m, c.a(41)))
+        (c.a(38) + c.a(39) * m * m * m * m.sqrt())
+            / (c.a(40) * m * m * m + math::powf_positive(m, c.a(41)))
             - 1.0
     };
     if m <= m_hook {
@@ -195,7 +197,7 @@ fn delta_r(m: f64, c: &ZCoeffs) -> f64 {
     } else if m <= a42 {
         a43 * ((m - m_hook) / (a42 - m_hook)).sqrt()
     } else if m < 2.0 {
-        a43 + (high(2.0) - a43) * math::powf((m - a42) / (2.0 - a42), c.a(44))
+        a43 + (high(2.0) - a43) * math::powf_positive((m - a42) / (2.0 - a42), c.a(44))
     } else {
         high(m)
     }
@@ -218,8 +220,8 @@ fn eta(m: f64, c: &ZCoeffs) -> f64 {
 #[must_use]
 fn alpha_l(m: f64, c: &ZCoeffs) -> f64 {
     let high = |m: f64| {
-        (c.a(45) + c.a(46) * math::powf(m, c.a(48)))
-            / (math::powf(m, 0.4) + c.a(47) * math::powf(m, 1.9))
+        (c.a(45) + c.a(46) * math::powf_positive(m, c.a(48)))
+            / (math::powf_positive(m, 0.4) + c.a(47) * math::powf_positive(m, 1.9))
     };
     let (a49, a50, a51, a52, a53) = (c.a(49), c.a(50), c.a(51), c.a(52), c.a(53));
     if m >= 2.0 {
@@ -241,7 +243,7 @@ fn alpha_l(m: f64, c: &ZCoeffs) -> f64 {
 /// above a57, while positive, falling linearly to zero over 0.1 M☉ from its value at a57.
 #[must_use]
 fn beta_l(m: f64, c: &ZCoeffs) -> f64 {
-    let base = |m: f64| 0.0_f64.max(c.a(54) - c.a(55) * math::powf(m, c.a(56)));
+    let base = |m: f64| 0.0_f64.max(c.a(54) - c.a(55) * math::powf_positive(m, c.a(56)));
     let beta = base(m);
     let a57 = c.a(57);
     if m > a57 && beta > 0.0 {
@@ -279,7 +281,8 @@ fn alpha_r(m: f64, c: &ZCoeffs) -> f64 {
 /// a74; the published SSE code has a74 − 1.0, a misprint settled.
 #[must_use]
 fn beta_r(m: f64, c: &ZCoeffs) -> f64 {
-    let power_law = |m: f64| c.a(69) * m * m * m * m.sqrt() / (c.a(70) + math::powf(m, c.a(71)));
+    let power_law =
+        |m: f64| c.a(69) * m * m * m * m.sqrt() / (c.a(70) + math::powf_positive(m, c.a(71)));
     let (a72, a74) = (c.a(72), c.a(74));
     let beta_prime = if m <= 1.0 {
         1.06
@@ -308,12 +311,13 @@ fn gamma(m: f64, c: &ZCoeffs) -> f64 {
     if m > a75 + 0.1 {
         return 0.0;
     }
+    // `powf`: the base is 0 at M = a78.
     let low = |m: f64| c.a(76) + c.a(77) * math::powf((m - c.a(78)).abs(), c.a(79));
     let b = 0.0_f64.max(low(1.0));
     let value = if m <= 1.0 {
         low(m)
     } else if m <= a75 {
-        b + (a80 - b) * math::powf((m - 1.0) / (a75 - 1.0), c.a(81))
+        b + (a80 - b) * math::powf_positive((m - 1.0) / (a75 - 1.0), c.a(81))
     } else {
         let c_value = if a75 > 1.0 { a80 } else { b };
         c_value - 10.0 * (m - a75) * c_value
@@ -408,7 +412,13 @@ impl MainSequence {
         let tau_squared = tau * tau;
         let tau_cubed = tau_squared * tau;
         let log_l = self.alpha_l * tau
-            + self.beta_l * math::powf(tau, self.eta)
+            // τ is 0 at the zero-age main sequence, outside `powf_positive`'s domain.
+            + self.beta_l
+                * if tau > 0.0 {
+                    math::powf_positive(tau, self.eta)
+                } else {
+                    math::powf(tau, self.eta)
+                }
             + (self.log_l_tms - self.alpha_l - self.beta_l) * tau_squared
             - self.delta_l * (tau1 * tau1 - tau2 * tau2);
         let tau_10 = math::powi(tau, 10);
