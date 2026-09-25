@@ -515,6 +515,18 @@ domain_tags! {
     /// A system's cometary halo (P14.T21.d): the rank of its number of comets, word 0, one
     /// uniform; words 1–7 are reserved (`planetary::halo`).
     COMETARY_POPULATION: System = "cometary.population";
+
+    // Plan 06's reference population (P06.T19.b), under the name and scope the "Plan 06" heading
+    // reserves. Appended here, after plan 14's phase D, because the macro's order fixes `ALL`.
+
+    /// The kick law's reference population and its test sample (P06.T19.b, T19.d), keyed by
+    /// `ObjectKey::galaxy_item(i)` of sample i: its initial mass's rank, word 0; Reimers η's
+    /// standard normal, words 1–2; the remnant's type and fallback marks, words 3 and 4, and its
+    /// mass's standard normal, words 5–6; the kick score's eight tries, words 7–22; the stripped
+    /// and kick-mode marks, words 23 and 24; the low mode's three normals, words 25–30; the kick's
+    /// direction, words 31–32; the test-only toy binary's separation rank, word 33; words 34–63
+    /// are reserved (`stellar::remnant::reference`).
+    STELLAR_REFERENCE: Galaxy = "stellar.reference";
 }
 
 #[cfg(test)]
@@ -674,5 +686,12 @@ mod tests {
         assert_eq!(EVENT_SELFTEST.name(), "event.selftest");
         assert_eq!(EVENT_SELFTEST.scope(), crate::rng::TagScope::Event);
         assert!(ALL.contains(&SELFTEST_STREAM) && ALL.contains(&EVENT_SELFTEST));
+    }
+
+    #[test]
+    fn plan_06_registers_the_reference_tag_with_galaxy_scope() {
+        assert_eq!(STELLAR_REFERENCE.name(), "stellar.reference");
+        assert_eq!(STELLAR_REFERENCE.scope(), crate::rng::TagScope::Galaxy);
+        assert_eq!(ALL.last(), Some(&STELLAR_REFERENCE));
     }
 }

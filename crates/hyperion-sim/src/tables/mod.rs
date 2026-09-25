@@ -7,5 +7,6 @@
 
 pub mod gauss_legendre;
 pub mod giant_cooling;
+pub mod kick_rank;
 pub mod mge;
 pub mod wd_cooling;

@@ -205,6 +205,9 @@ pub(crate) struct Builder<'a> {
     /// The star's remnant draws, which decide an iron core's collapse under
     /// [`RemnantRecipe::MandelMuller2020`](crate::stellar::remnant::RemnantRecipe).
     pub(super) remnant_draws: RemnantDraws,
+    /// Whether the star's provisional companion-stripped mark is set (plan 06, design note 11):
+    /// it widens the electron-capture window ([`Builder::stripped_by_companion`]).
+    pub(super) companion_stripped: bool,
     pub(super) resolution: Resolution,
     keep: Keep,
     /// The core at helium ignition of an `M_HeF` star, the lightest helium star that burns helium
@@ -237,9 +240,24 @@ impl<'a> Builder<'a> {
             options,
             eta,
             remnant_draws,
+            companion_stripped: false,
             resolution,
             keep,
             lightest_helium_star: lightest.value(),
+        }
+    }
+
+    /// This builder for a star whose provisional companion-stripped mark is `stripped` (plan 06,
+    /// design note 11, P06.T19.c): a marked star's electron-capture window is the companion-stripped
+    /// one, 1 M☉ wide, and not the single star's 0.1 M☉ ([`ElectronCaptureWindows`]). Nothing
+    /// else on the track reads the mark: its envelope is a single star's until plan 11.
+    ///
+    /// [`ElectronCaptureWindows`]: crate::stellar::remnant::collapse::ElectronCaptureWindows
+    #[must_use]
+    pub(crate) fn stripped_by_companion(self, stripped: bool) -> Self {
+        Self {
+            companion_stripped: stripped,
+            ..self
         }
     }
 

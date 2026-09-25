@@ -250,7 +250,8 @@ pub enum Stripping {
     Wind,
     /// A companion removed it (plan 06, design note 11; the provisional mark of P06.T19, which
     /// plan 11 replaces). The track never sets it: a companion-stripped star follows an unstripped
-    /// track until plan 11.
+    /// track until plan 11, with the wider electron-capture window, and the remnant stage of
+    /// `StarModel` marks its collapse (`StandardKickLaw::with_stripped_mark`).
     Companion,
 }
 

@@ -344,6 +344,7 @@ impl Track {
             resolution,
             build::Keep::Track,
         )
+        .stripped_by_companion(is_companion_stripped(draws))
         .run(m0.value(), age_max);
         Self {
             coeffs,
@@ -632,10 +633,19 @@ pub(crate) fn fate_of(
         Resolution::GENERATOR,
         build::Keep::Lifetime,
     )
+    .stripped_by_companion(is_companion_stripped(draws))
     .run(m0.value(), None);
     outcome
         .fate
         .expect("a build with no age to stop at runs to the star's death")
+}
+
+/// Whether the provisional companion-stripped mark of `draws` is set, against the kick law's
+/// [`stripped_share`](crate::stellar::remnant::KickLawParams::stripped_share) (plan 06, design
+/// note 11): the one question the track asks of it, for the electron-capture window.
+#[must_use]
+fn is_companion_stripped(draws: &StarDraws) -> bool {
+    crate::stellar::remnant::KickLawParams::default().is_stripped(draws.stripped())
 }
 
 /// The initial mass `m0` within the range the formulae cover.

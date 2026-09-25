@@ -24,8 +24,8 @@
 //! - [`record`]: what a query returns and how it degrades, the body record and the system snapshot
 //!   with their sections' four states (P14.T34, ruling 34).
 //! - [`fate`]: the fate transform, a body's state and orbit at a time (P14.T28.a–c): formation on
-//!   young hosts, expansion and engulfment on evolved ones, and supernovae with a zero kick until
-//!   P06.T19 (ruling 33); [`hosts`] holds its closed forms.
+//!   young hosts, expansion and engulfment on evolved ones, and supernovae with the remnant's
+//!   natal kick (P06.T19); [`hosts`] holds its closed forms.
 //! - [`placement`]: placing planets: the Hill-spacing primitives and the spacing draw (P14.T6),
 //!   the masses (P14.T7), the class placers that turn a host's class, disc and zone into planets
 //!   on orbits with D5's second fallback (P14.T8), and the stable zones of multiple systems with

@@ -192,7 +192,7 @@ const MEDIAN_MARK: Mark = Mark::from_word(1 << 63);
 
 /// An isotropic direction along the galactic axes from the next two words of `stream`: z uniform
 /// on (−1, 1), then the azimuth from +x uniform on [0, 2π).
-fn isotropic(stream: &mut Stream) -> UnitVector {
+pub(crate) fn isotropic(stream: &mut Stream) -> UnitVector {
     let z = 2.0 * stream.uniform_open() - 1.0;
     let azimuth = TAU * stream.uniform();
     let (sin, cos) = math::sin_cos(azimuth);

@@ -124,3 +124,4 @@ ring.system (Body) = 0x9bf4733d70fa483e
 belt.population (System) = 0xa33bc2e2222facf5
 belt.member (Body) = 0x846c8ac47f318574
 cometary.population (System) = 0x47a58a69d59a0928
+stellar.reference (Galaxy) = 0x244db901e1536551

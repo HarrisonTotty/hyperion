@@ -640,3 +640,90 @@ fn the_engulfment_searchs_axis_is_the_orbits_to_the_bit() {
         }
     }
 }
+
+/// Measured for P06.T19's lift of P14.T28.c's zero kick: the share of planets a supernova
+/// unbinds around a Kroupa sample of 8–150 M☉ hosts at Z = 0.02 (the kick law's reference
+/// sample), with the remnant's natal kick and with the mass loss alone, for Jupiters on circular
+/// orbits of 10–300 au that survive to the explosion. Printed for the plan's record: around
+/// neutron stars the mass loss alone unbinds nearly all of them, the kick unbinds more around
+/// black holes of partial fallback, and after complete fallback it changes nothing.
+#[test]
+#[ignore = "slow: 800 full tracks of massive stars and their planets' fates"]
+fn natal_kicks_unbind_planets_the_mass_loss_alone_would_keep() {
+    use crate::Seed;
+    use crate::stellar::remnant::RemnantKind;
+    use crate::stellar::remnant::reference::ReferencePopulation;
+
+    let pop = ReferencePopulation::default();
+    let seed = Seed::new(0x1428_c000_0000_0019);
+    // By remnant (neutron star, partial-fallback black hole, complete fallback): planets present
+    // just before, unbound with the kick, unbound by the mass loss alone.
+    let mut tally = [[0_u32; 3]; 3];
+    for i in 0..400 {
+        let s = pop.star(seed, i);
+        let m0 = s.initial_mass();
+        let probe = StarModel::new(m0, Composition::SOLAR, s.draws().clone(), Years::new(1e6))
+            .expect("a valid star");
+        let life = probe.lifetime().expect("a star dies").value();
+        let model = StarModel::new(
+            m0,
+            Composition::SOLAR,
+            s.draws().clone(),
+            Years::new(life + 1e6),
+        )
+        .expect("a valid star");
+        let Some(death) = death_of(&model).filter(|d| d.sudden) else {
+            continue;
+        };
+        let row = match (model.remnant().map(|r| r.kind()), model.natal_kick()) {
+            (Some(RemnantKind::NeutronStar), _) => 0,
+            (Some(RemnantKind::BlackHole), Some(k)) if k.speed().value() > 0.0 => 1,
+            (Some(RemnantKind::BlackHole), _) => 2,
+            _ => continue,
+        };
+        let host = FateHost::star(&model);
+        for a in [10.0, 30.0, 100.0, 300.0] {
+            let planet = body(a, 0.0, jupiter_mass(), m0.value(), 0.3);
+            let fate = BodyFate::resolve(&planet, &host);
+            let before = fate.at(after(death.at, -1));
+            let Some(orbit) = before.orbit() else {
+                continue;
+            };
+            tally[row][0] += 1;
+            let kicked = matches!(fate.at(death.at).state(), BodyState::Unbound { .. });
+            tally[row][1] += u32::from(kicked);
+            let mu_after = GravitationalParameter::from_solar_masses(death.after);
+            let alone = matches!(
+                supernova(
+                    orbit,
+                    death.at,
+                    mu_after,
+                    SystemVelocity::ZERO,
+                    JUPITER_DENSITY
+                ),
+                Aftermath::Unbound
+            );
+            tally[row][2] += u32::from(alone);
+        }
+    }
+    for (name, [present, kicked, alone]) in
+        ["neutron stars", "kicked black holes", "complete fallback"]
+            .into_iter()
+            .zip(tally)
+    {
+        let share = |k: u32| f64::from(k) / f64::from(present.max(1));
+        eprintln!(
+            "{name}: {present} Jupiters at the explosion; unbound {:.3} with the kick, {:.3} by \
+             the mass loss alone",
+            share(kicked),
+            share(alone)
+        );
+    }
+    // A neutron star keeps under half the mass, so its mass loss alone unbinds nearly every
+    // circular orbit; a kick along a planet's motion can keep one of them. Partial fallback loses
+    // under half, and its kick unbinds more; complete fallback has no kick to add.
+    let [ns, bh, fallback] = tally;
+    assert!(ns[0] > 0 && 20 * ns[1] >= 19 * ns[0], "{ns:?}");
+    assert!(bh[0] > 0 && bh[1] >= bh[2], "{bh:?}");
+    assert_eq!(fallback[1], fallback[2], "{fallback:?}");
+}

@@ -97,6 +97,13 @@ impl CompactRemnant {
 // (P06.T18.a–c), which the track's death (P06.T18.d) calls.
 pub mod collapse;
 
-// The natal kick's value type, which `StarModel` returns (P06.T29.a); the law is P06.T19's.
+// The natal kick law behind one interface (P06.T19.a, T19.c), which `StarModel`'s remnant stage
+// calls (P06.T29.a).
 mod kick;
-pub use kick::{KickMode, NatalKick};
+pub use kick::{
+    BuildKickRankTableError, CollapseChannel, KickDraws, KickLaw, KickLawParams, KickMode,
+    KickRankTable, NatalKick, StandardKickLaw, ordinary_score,
+};
+
+// The kick law's reference population and the observables its tests assert (P06.T19.b, T19.d).
+pub mod reference;

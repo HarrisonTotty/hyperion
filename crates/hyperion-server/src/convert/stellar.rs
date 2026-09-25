@@ -6,8 +6,8 @@
 //! 2026-09-22): a field this generator version does not compute is absent, one computed that the
 //! object lacks is `null`, and the rest carry their values. So rotation, activity, variability, a
 //! planetary nebula and the active events are absent for every star (plan 06's T16 and T25–T28),
-//! as are a pulsar's detail (T21), a black hole's spin (T22) and every natal kick until P06.T19
-//! gives a remnant one ([`StarModel::natal_kick`]).
+//! as are a pulsar's detail (T21) and a black hole's spin (T22). A remnant's natal kick is
+//! P06.T19's ([`StarModel::natal_kick`]), `null` where the model holds none.
 
 use hyperion_protocol::{
     ErrorCode, HierarchyDto, HierarchyNodeDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto,
@@ -386,11 +386,19 @@ mod tests {
         match primary.remnant {
             Some(RemnantDto::WhiteDwarf {
                 cooling_age_myr,
-                natal_kick: None,
-            }) => assert!(
-                (cooling_age_myr - (5.0e9 - died) / 1e6).abs() < 1e-6,
-                "{cooling_age_myr} Myr"
-            ),
+                natal_kick:
+                    Some(NatalKickDto {
+                        speed_km_s,
+                        mode: KickModeDto::WhiteDwarf,
+                    }),
+            }) => {
+                assert!(
+                    (cooling_age_myr - (5.0e9 - died) / 1e6).abs() < 1e-6,
+                    "{cooling_age_myr} Myr"
+                );
+                // A Maxwellian of σ = 1 km/s (P06.T19.c).
+                assert!((0.0..10.0).contains(&speed_km_s), "{speed_km_s} km/s");
+            }
             ref other => panic!("expected a white dwarf, got {other:?}"),
         }
         assert!(primary.teff_k.is_some());
@@ -407,7 +415,10 @@ mod tests {
             hole.remnant,
             Some(RemnantDto::BlackHole {
                 dimensionless_spin: None,
-                natal_kick: None
+                natal_kick: Some(NatalKickDto {
+                    mode: KickModeDto::Ordinary | KickModeDto::FallbackNone,
+                    ..
+                })
             })
         ));
     }

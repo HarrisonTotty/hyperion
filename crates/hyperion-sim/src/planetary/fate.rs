@@ -64,9 +64,10 @@
 //!
 //! # In the vertical slice
 //!
-//! There is no kick law until P06.T19, so every [`StarModel::natal_kick`] is `None` and a
-//! supernova applies a zero kick (ruling 33); the transform applies the kick as soon as the model
-//! returns one, which moves output with P06.T19's bump. The protoplanetary disc body of T28.a
+//! The kick is [`StarModel::natal_kick`], P06.T19's law, along the galactic axes, which the
+//! system frame's are parallel to; T28.c first applied a zero kick, since there was no law
+//! (ruling 33), and P06.T19 lifted it. A white dwarf's own kick of about 1 km/s is not applied,
+//! since its birth is no sudden death (ruling 62.6). The protoplanetary disc body of T28.a
 //! arrives with phase D's belts (T21), and T28.d–e (white dwarf pollution and second-generation
 //! planets) are not in the slice.
 
@@ -452,7 +453,8 @@ struct StarDeath {
     before: SolarMasses,
     /// The remnant's mass, M☉; zero where there is none.
     after: SolarMasses,
-    /// The remnant's natal kick, m s⁻¹ along the system frame's axes; zero until P06.T19.
+    /// The remnant's natal kick, m s⁻¹ along the system frame's axes (P06.T19's law); zero where
+    /// the model has none.
     kick: SystemVelocity,
 }
 

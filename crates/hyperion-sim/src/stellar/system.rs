@@ -35,7 +35,7 @@ use crate::stellar::multiplicity::{
 };
 use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
 use crate::stellar::remnant::collapse::RemnantDraws;
-use crate::stellar::remnant::{CompactRemnant, Death, DeathKind, NatalKick};
+use crate::stellar::remnant::{CompactRemnant, Death, DeathKind, NatalKick, StandardKickLaw};
 use crate::stellar::sse::{self, Track, TrackOptions};
 use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
 use crate::time::{ClockWindow, Span, UniverseTime};
@@ -178,11 +178,15 @@ impl Error for BuildStarModelError {}
 /// dies. Every question takes a [`UniverseTime`] and reads the star at its age then, the age at
 /// the epoch plus the time since it, as [`SystemRecord::age_at`] does (design note 23).
 ///
-/// The remnant stage reads only the star's remnant draws (`star.remnant.*`): the remnant of an
-/// iron core's collapse is redrawn from them on the built track (`Track::fate_with`), which is the
-/// step plan 08's kick loop repeats with later attempts' draws, costing a remnant and never a
-/// track. It will read `star.stripped` and `star.kick.*` with P06.T19; until then no remnant has
-/// a kick ([`StarModel::natal_kick`]).
+/// The remnant stage reads only the star's remnant draws (`star.remnant.*`), its provisional
+/// companion-stripped mark (`star.stripped`) and its kick draws (`star.kick.*`): the remnant of an
+/// iron core's collapse is redrawn from them on the built track (`Track::fate_with`), and the
+/// natal kick drawn by the generator's law
+/// ([`StandardKickLaw::natal_kick`](crate::stellar::remnant::StandardKickLaw::natal_kick),
+/// P06.T19), which is the step plan 08's kick loop repeats with later attempts' draws, costing a
+/// remnant and a kick and never a track. The death it reports carries the stripped mark
+/// ([`Stripping::Companion`](crate::stellar::remnant::Stripping::Companion)) where it is set; the
+/// track itself is the single star's (plan 06, design note 11).
 ///
 /// Until P06.T14 the formulae stop at 100 M☉ (`sse::MAX_INITIAL_MASS`), so a star of 100–150 M☉
 /// is evolved as one of 100 M☉ and keeps its own initial mass.
@@ -232,8 +236,8 @@ enum Evolution {
     Cooling,
 }
 
-/// What the remnant stage decides from a built track and the star's remnant draws: the death and
-/// the remnant, and the natal kick.
+/// What the remnant stage decides from a built track and the star's remnant, stripped and kick
+/// draws: the death and the remnant, and the natal kick.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RemnantStage {
     death: Death,
@@ -241,18 +245,29 @@ struct RemnantStage {
     natal_kick: Option<NatalKick>,
 }
 
+impl RemnantStage {
+    /// The stage of a star that died `death` leaving `remnant`, with its `draws`: the death with
+    /// the provisional companion-stripped mark applied, and the kick of the generator's law
+    /// (P06.T19), which read `star.stripped` and `star.kick.*`.
+    #[must_use]
+    fn new(death: Death, remnant: CompactRemnant, draws: &StarDraws) -> Self {
+        let law = StandardKickLaw::default();
+        let death = law.with_stripped_mark(death, draws);
+        Self {
+            death,
+            remnant,
+            natal_kick: law.natal_kick(&death, &remnant, draws),
+        }
+    }
+}
+
 /// The remnant stage of a star whose `track` has reached its death, from its `draws`, or `None`
 /// if the track has not: the death and remnant that `track` gives the remnant draws
-/// (`star.remnant.*`), and no natal kick until P06.T19's law, which will read `star.stripped` and
-/// `star.kick.*` here (ruling 33 of 2026-09-22).
+/// (`star.remnant.*`), and the natal kick from `star.stripped` and `star.kick.*`.
 #[must_use]
 fn remnant_stage(track: &Track, draws: &StarDraws) -> Option<RemnantStage> {
     let fate = track.fate_with(RemnantDraws::of(draws))?;
-    Some(RemnantStage {
-        death: fate.death,
-        remnant: fate.remnant,
-        natal_kick: None,
-    })
+    Some(RemnantStage::new(fate.death, fate.remnant, draws))
 }
 
 impl StarModel {
@@ -414,9 +429,9 @@ impl StarModel {
         }
     }
 
-    /// The natal kick of the star's remnant: `None` until P06.T19 builds the kick law (ruling 33 of
-    /// 2026-09-22), and afterwards `None` for a star alive at the end of the clock window, or
-    /// below 0.1 M☉.
+    /// The natal kick of the star's remnant (P06.T19's law): `None` for a star alive at the end of
+    /// the clock window, for an object below 0.1 M☉, and where the star left nothing. A white
+    /// dwarf's kick of about 1 km/s is its own, which a planet's orbit does not feel (ruling 62.6).
     #[must_use]
     pub fn natal_kick(&self) -> Option<NatalKick> {
         self.remnant.and_then(|stage| stage.natal_kick)
@@ -463,11 +478,7 @@ impl StarModel {
                     &self.draws,
                     TrackOptions::default(),
                 );
-                RemnantStage {
-                    death: fate.death,
-                    remnant: fate.remnant,
-                    natal_kick: None,
-                }
+                RemnantStage::new(fate.death, fate.remnant, &self.draws)
             })),
         }
     }
@@ -979,7 +990,7 @@ impl SystemStars {
         clock_death(primary.age_at_epoch(), death)
     }
 
-    /// The primary remnant's natal kick: `None` until P06.T19's law ([`StarModel::natal_kick`]).
+    /// The primary remnant's natal kick, as [`StarModel::natal_kick`] gives it (P06.T19).
     #[must_use]
     pub fn natal_kick(&self) -> Option<NatalKick> {
         self.primary().natal_kick()
@@ -1397,9 +1408,10 @@ mod tests {
         );
     }
 
-    /// The remnant stage of a dead star is its track's for its own draws, and on the same track
-    /// other remnant draws redraw only the remnant and the kind of death, never its age: what plan
-    /// 08's attempts repeat. No remnant has a kick before P06.T19.
+    /// The remnant stage of a dead star is its track's for its own draws, with the stripped mark
+    /// applied and the kick law's kick, and on the same track other remnant draws redraw only the
+    /// remnant and the kind of death, never its age, and other kick draws only the kick: what
+    /// plan 08's attempts repeat.
     #[test]
     fn the_remnant_stage_redraws_only_the_remnant() {
         let star = model(8);
@@ -1407,9 +1419,31 @@ mod tests {
             panic!("a 20 M☉ star has a track");
         };
         let own = star.remnant.expect("dead at 50 Myr");
-        assert_eq!(Some(own.death), track.death());
+        let law = StandardKickLaw::default();
+        let death = track.death().expect("dead at 50 Myr");
+        assert_eq!(own.death, law.with_stripped_mark(death, star.draws()));
+        assert_eq!(own.death.kind(), death.kind());
+        assert_same_bits(own.death.age().value(), death.age().value());
         assert_eq!(Some(own.remnant), track.remnant());
-        assert_eq!(star.natal_kick(), None);
+        let kick = star
+            .natal_kick()
+            .expect("a collapse leaves a kicked remnant");
+        assert_eq!(
+            Some(kick),
+            law.natal_kick(&own.death, &own.remnant, star.draws())
+        );
+        let turned = StarDraws::from_parts(StarDrawsParts {
+            kick_direction: crate::coords::UnitVector::X,
+            kick_low: [crate::stellar::draws::StandardNormal::new(0.6).unwrap(); 3],
+            ..star.draws().parts().clone()
+        });
+        let stage = remnant_stage(track, &turned).unwrap();
+        assert_eq!((stage.death, stage.remnant), (own.death, own.remnant));
+        assert_ne!(
+            stage.natal_kick,
+            Some(kick),
+            "the kick draws redraw the kick"
+        );
         let mut kinds = Vec::new();
         for word in [0_u64, u64::MAX / 3, u64::MAX / 3 * 2, u64::MAX] {
             let draws = StarDraws::from_parts(StarDrawsParts {

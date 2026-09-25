@@ -11,12 +11,14 @@
 //! [`hyperion_sim::galaxy::quad`], and every fit takes a fixed number of steps with no randomness
 //! and no threads, so a table comes out bit for bit the same on every platform. Each task's test
 //! renders the fit again and compares it with the committed table, so a stale or hand-edited
-//! table fails CI.
+//! table fails CI; `kick_rank`'s fit takes a quarter of an hour, so its test renders the committed
+//! quantiles instead, and a slow test of the sim checks them against fresh scores.
 //!
-//! Three tasks exist so far: plan 02's [`tasks::mge`] (P02.T6.a), run as `hyperion-fit run mge`,
-//! plan 13's [`tasks::giant_cooling`] (P13.T5.b), run as `hyperion-fit run giant_cooling`, and plan
-//! 06's [`tasks::wd_cooling`] (P06.T20.a), run as `hyperion-fit run wd_cooling [--data <dir>]`.
-//! Plan 15 extends the crate.
+//! Four tasks exist so far: plan 02's [`tasks::mge`] (P02.T6.a), run as `hyperion-fit run mge`,
+//! plan 13's [`tasks::giant_cooling`] (P13.T5.b), run as `hyperion-fit run giant_cooling`, plan
+//! 06's [`tasks::wd_cooling`] (P06.T20.a), run as `hyperion-fit run wd_cooling [--data <dir>]`,
+//! and plan 06's provisional [`tasks::kick_rank`] (P06.T19.b), run as `hyperion-fit run
+//! kick_rank`. Plan 15 extends the crate.
 
 pub mod tasks;
 
@@ -46,9 +48,16 @@ pub const DEFAULT_WD_COOLING_OUT: &str = concat!(
     "/../hyperion-sim/src/tables/wd_cooling.rs"
 );
 
+/// Where `run kick_rank` writes its table unless `--out` says otherwise: the sim's
+/// `tables/kick_rank.rs`.
+pub const DEFAULT_KICK_RANK_OUT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../hyperion-sim/src/tables/kick_rank.rs"
+);
+
 /// The command line's usage, for error messages.
-pub const USAGE: &str = "usage: hyperion-fit run <mge | giant_cooling | wd_cooling> [--out <path>] \
-                         [--data <dir>, wd_cooling only]";
+pub const USAGE: &str = "usage: hyperion-fit run <mge | giant_cooling | wd_cooling | kick_rank> \
+                         [--out <path>] [--data <dir>, wd_cooling only]";
 
 /// What the command line asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -72,16 +81,23 @@ pub enum Command {
         /// The directory holding the sequences' files.
         data: PathBuf,
     },
+    /// Tabulate the kick law's provisional rank table ([`tasks::kick_rank`]) and write it to
+    /// `out`.
+    RunKickRank {
+        /// The file to write.
+        out: PathBuf,
+    },
 }
 
 impl Command {
     /// Parses the arguments after the program's name: `run <task> [--out <path>]`, the task
-    /// `mge`, `giant_cooling` or `wd_cooling`, and for `wd_cooling` also `[--data <dir>]`.
+    /// `mge`, `giant_cooling`, `wd_cooling` or `kick_rank`, and for `wd_cooling` also
+    /// `[--data <dir>]`.
     ///
     /// # Errors
     ///
     /// [`RunFitError::Usage`] for a malformed command line, [`RunFitError::UnknownTask`] for a
-    /// task other than `mge`, `giant_cooling` and `wd_cooling`.
+    /// task other than `mge`, `giant_cooling`, `wd_cooling` and `kick_rank`.
     ///
     /// # Examples
     ///
@@ -114,6 +130,7 @@ impl Command {
                     },
                     DEFAULT_WD_COOLING_OUT,
                 ),
+                Some("kick_rank") => (|out, _| Self::RunKickRank { out }, DEFAULT_KICK_RANK_OUT),
                 Some(other) => return Err(RunFitError::UnknownTask(other.to_owned())),
                 None => return Err(RunFitError::Usage("no task given".to_owned())),
             };
@@ -209,6 +226,7 @@ pub fn run(command: &Command) -> Result<PathBuf, RunFitError> {
                 tasks::wd_cooling::render(&tasks::wd_cooling::fit(&sequences)),
             )
         }
+        Command::RunKickRank { out } => (out, tasks::kick_rank::render(&tasks::kick_rank::fit())),
     };
     std::fs::write(out, source).map_err(|source| RunFitError::Write {
         path: out.clone(),
@@ -281,6 +299,18 @@ mod tests {
             parse(&["run", "mge", "--data", "seqs"]),
             Err(RunFitError::Usage(_))
         ));
+    }
+
+    #[test]
+    fn run_kick_rank_defaults_to_the_sims_table() {
+        let Ok(Command::RunKickRank { out }) = parse(&["run", "kick_rank"]) else {
+            panic!("`run kick_rank` parses to `RunKickRank`");
+        };
+        assert!(
+            out.ends_with("hyperion-sim/src/tables/kick_rank.rs"),
+            "{}",
+            out.display()
+        );
     }
 
     #[test]

@@ -2952,3 +2952,71 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
   - **For the owner:** `STAR A`, `M V`, `mag`, `DIES IN`, `DIED … AGO`, `NEBULA` (it reads the
     nebula's radius) and `EVENTS` join the draft nomenclature. `RADIUS` now names the galactic
     coordinate and, under `STAR A`, the star's radius in one readout.
+- **Deviations in T19.a–d, as built (round 9, `kick`).** T19.e is left as the plan has it: plan
+  15's P15.T5.a replaces `tables/kick_rank.rs`, with the bump. No existing golden moved; the new
+  golden `stellar/kicks` pins three systems of layer E (an ordinary-mode neutron star
+  `0x8200b2e000000000`, a low-mode one `…000c` and a kicked black hole `…0005`), which a slow
+  search reproduces. Output moves at 11 all the same: every remnant's kick, the stripped window's
+  deaths, the `Stripping` of `StarModel::death`, the wire's `natal_kick` and the planets of
+  sudden-death hosts. The version-12 bump carries them.
+  - _API._ `CollapseChannel` gains `CompleteFallback` and `EnvelopeLoss`: neither the progenitor
+    nor the remnant tells the law of a complete fallback or of a white dwarf's birth.
+    `CollapseChannel::of(DeathKind)`. `KickRankTable::{generator, new, rank, quantiles}`.
+    `StandardKickLaw::{new, params, table, ordinary_speed_km_s, with_stripped_mark, natal_kick}`,
+    the last two being `StarModel`'s remnant stage. `KickLawParams::{is_stripped,
+low_mode_probability, ordinary_speed_km_s, score_factor}`. `NatalKick::velocity`.
+    `reference::{ReferencePopulation::{new, star, fate, score, scores}, quantiles_of,
+score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables` has public
+    fields and holds the sorted ln v of test 1.
+  - _Draws._ A white dwarf's Maxwellian reads the three `star.kick.low` normals, since a white
+    dwarf never takes the low mode. A Maxwellian's direction is its own normals'. If all eight ξ
+    tries fail, ξ = 1. `stellar.reference` is appended at the end of `rng/tags.rs`, not under the
+    "Plan 06" heading, because the macro's order fixes `ALL`. Its sample's word layout is in the
+    tag's documentation.
+  - _The stripped mark._ The track reads it for one thing only: a marked star's
+    electron-capture window is the companion-stripped one, 1 M☉ wide
+    (`Builder::stripped_by_companion`; a test finds captures from 7.3 M☉ at Z = 0.02 against
+    8.2 unmarked, and iron cores from 8.35). The remnant stage marks every collapse's progenitor
+    `Stripping::Companion`; the track's own `Death` does not. Every collapse lies above
+    m_cc − 1 M☉, so ruling 45.2's floor holds. **For plan 08:** a later attempt's `star.stripped`
+    can turn a wide-window star's white dwarf into an electron capture at a different age, so for
+    those stars the kick loop must rebuild the track or keep attempt 0's mark. **For plan 11:**
+    `STRIPPED_MARK_MIN_MASS` is 8 M☉ while ruling 45.2 draws the mark from m_cc − 1 (6.7–7.3
+    M☉), so a marked star of m_cc − 1 to 8 M☉ is stripped here with no interacting companion there.
+    **For P15.T5.b:** the track reads the defaults, not a caller's `KickLawParams`, so a changed
+    `stripped_share` or `ec_window_*` passed to `kick_observables` moves the kick stage's mark
+    but not the track's window; vary them through the constants. **Design note 11** ("it does
+    not change the track") no longer holds for the wide window, and is the orchestrator's to
+    amend.
+  - _The table_ is written by a new `hyperion-fit run kick_rank` from `score_quantiles` with 10⁶
+    scores of seed `0x0619b00000000000`. The fit took 13 min 56 s single-threaded (0.45 ms a
+    track; load 7.5). The task's test compares the committed file with the rendering of its
+    quantiles; the fit is not rerun. The slow K–S of 10⁵ fresh ranks stands in: D = 0.0033,
+    p = 0.23. Plan 15's P15.T5.a takes the task over.
+  - _Tests._ Test 1 asserts the reference population's own ordinary neutron stars, the single and
+    wind-stripped ones: ln v 5.605 ± 0.674, n = 9,036, K–S p = 0.66. The whole ordinary mode is
+    5.658 ± 0.685 (n = 10,135), since the companion-stripped stars above the ramp are the fast
+    tail. Test 5's toy explodes the carbon–oxygen core, an ultra-stripped star (Tauris, Langer and
+    Podsiadlowski 2015). It treats every neutron star of the sample as companion-stripped. "Unkicked"
+    in test 6 is `FallbackNone`. On seed `0x0619d00000000001` (20,000 stars):
+    - 6.67% of isolated pulsars are under 50 km/s on the sky;
+    - the low mode is 19.1%;
+    - retention is 19.1 / 19.5 / 24.1% under 20 / 50 / 100 km/s;
+    - 78.1% of 9,830 surviving double neutron stars have e < 0.3, and 7.4% with the helium core
+      as the exploding mass;
+    - 71.0% of black holes are unkicked, and of those under 12 M☉ 67.1% unkicked and 14.6% above
+      100 km/s.
+  - **For the orchestrator (physics, researched):**
+    - The black-hole factor 0.75 is ours. Mandel and Müller's table 1 has v_BH ÷ v_NS = 0.5, on the
+      score.
+    - Nagarajan and El-Badry (2025, §4.1) find 6 of 12 black holes unkicked and at least 4 above
+      100 km/s; without Cyg X-1 that is 45% and 36%, outside test 6's bands.
+    - "An eighth unbound" is 13.1% of kicks above 570 km/s, but 16.6% once added to a 230 km/s
+      rotation (18.0% at 550).
+    - Disberg and Mandel fit 0–1,000 km/s, and the clamp puts 2.7% above that.
+    - Igoshev et al.'s 20% is a mode of σ = 45 km/s, not 5.
+    - Retention under 20 km/s is 19%, against the brainstorm's 8–12%.
+    - Test 5 passes only with the ultra-stripped star.
+    - Against the older fits: the 3D mean is 294 km/s (Hobbs et al. 2005: 400 ± 40), the 1D rms
+      233 km/s (265), and the share under 100 km/s 24% (Verbunt et al. 2017, 16%; Igoshev 2020,
+      13%), with the low mode in it.

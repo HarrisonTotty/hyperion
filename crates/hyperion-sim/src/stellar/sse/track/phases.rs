@@ -3,8 +3,9 @@
 
 use crate::stellar::Phase;
 use crate::stellar::remnant::collapse::{
-    CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB, OXYGEN_NEON_CAPTURE_MASS,
-    RemnantDraws, core_collapse, electron_capture_remnant,
+    COMPANION_STRIPPED_WINDOW, CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB,
+    OXYGEN_NEON_CAPTURE_MASS, RemnantDraws, SINGLE_STAR_WINDOW, core_collapse,
+    electron_capture_remnant,
 };
 use crate::stellar::remnant::structure::{
     DegenerateCore, OXYGEN_NEON_MC_BAGB, hurley_supernova_remnant, white_dwarf_kind,
@@ -815,8 +816,10 @@ impl Builder<'_> {
     /// Whether a star whose early AGB had the initial mass `m0` dies by electron capture under
     /// the track's remnant recipe whatever its thermal pulses do: never under
     /// [`RemnantRecipe::Hurley2000`], and under [`RemnantRecipe::MandelMuller2020`] inside the
-    /// single-star window [`m_cc` − 0.1 M☉, `m_cc`) (plan 06, design note 12;
-    /// [`ElectronCaptureWindows::single`]).
+    /// electron-capture window [`m_cc` − w, `m_cc`), w being 0.1 M☉ for a single star
+    /// ([`ElectronCaptureWindows::single`]) and 1 M☉ for one whose provisional companion-stripped
+    /// mark is set ([`ElectronCaptureWindows::companion_stripped`]; plan 06, design notes 11 and
+    /// 12, P06.T19.c).
     ///
     /// The window is tested in `m0`, the mass the early AGB's `m_c_bagb` reads, which the main
     /// sequence's wind has lowered from the star's initial mass (HPT section 7.1), because
@@ -825,28 +828,29 @@ impl Builder<'_> {
     /// windows are found here, at the end of the pulses, so that a star that never reaches them
     /// does not pay for the root.
     ///
-    /// A companion-stripped star's 1 M☉ window waits for P06.T19.c, which decides the provisional
-    /// stripped mark (design note 11), and for plan 11: the track never sets
-    /// [`Stripping::Companion`].
-    ///
     /// A star whose `m_c_bagb` 0.01 M☉ lighter already makes an iron core lies above the window,
-    /// and one whose `m_c_bagb` 0.2 M☉ heavier does not yet lies below it, since `m_c_bagb` grows
-    /// with the mass: the root is found only between (plan 06's integrator speed; it costs about 110
-    /// `pow` calls, and every white dwarf of the AGB asked for it).
+    /// and one whose `m_c_bagb` the window's width plus 0.1 M☉ heavier does not yet lies below it,
+    /// since `m_c_bagb` grows with the mass: the root is found only between (plan 06's integrator
+    /// speed; it costs about 110 `pow` calls, and every white dwarf of the AGB asked for it).
     #[must_use]
     pub(super) fn captures_electrons(&self, m0: f64) -> bool {
         const ABOVE: f64 = 0.01;
-        const BELOW: f64 = 0.2;
+        const MARGIN: f64 = 0.1;
         match self.options.remnant() {
             RemnantRecipe::Hurley2000 => false,
             RemnantRecipe::MandelMuller2020 => {
+                let width = if self.companion_stripped {
+                    COMPANION_STRIPPED_WINDOW
+                } else {
+                    SINGLE_STAR_WINDOW
+                };
                 let c = self.phys.coeffs;
                 let makes_iron = |m: f64| m_c_bagb(SolarMasses::new(m), c) >= IRON_CORE_MC_BAGB;
-                if makes_iron(m0 - ABOVE) || !makes_iron(m0 + BELOW) {
+                if makes_iron(m0 - ABOVE) || !makes_iron(m0 + width.value() + MARGIN) {
                     return false;
                 }
                 ElectronCaptureWindows::new(c)
-                    .single()
+                    .window(width)
                     .contains(SolarMasses::new(m0))
             }
         }

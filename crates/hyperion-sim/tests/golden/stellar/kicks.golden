@@ -1,0 +1,34 @@
+# generator_version = 11
+
+an ordinary-mode neutron star = 0x8200b2e000000000
+initial mass = 0x4028512fa4298b62  # 12.158566598960252
+CoreCollapse { supernova: IIP }, None, NeutronStar
+co core = 0x40035c86cade4a5c  # 2.4201789712035815
+remnant mass = 0x3ff9dbb0637c9d44  # 1.616135014171804
+mode Ordinary
+speed m/s = 0x4112891d3c9cb64a  # 303687.3091915591
+direction x = 0x3feede27a279b680  # 0.9646185086582619
+direction y = 0x3fcf967fb8648e01  # 0.24678036216310775
+direction z = 0x3fb7c14c400ff1b0  # 0.09279324115772769
+
+a low-mode neutron star = 0x8200b2e00000000c
+initial mass = 0x402022172783de79  # 8.066582903716368
+ElectronCapture, None, NeutronStar
+co core = 0x3ff70a3d70a3d70a  # 1.44
+remnant mass = 0x3ff428f5c28f5c29  # 1.26
+mode Low
+speed m/s = 0x40c225c8cf3b9429  # 9291.568824241012
+direction x = 0x3fdb162ec8b543c5  # 0.4232289276160908
+direction y = 0x3fecbd421bf29025  # 0.898102812371239
+direction z = 0x3fbe99d84e18eed3  # 0.11953498751330054
+
+a kicked black hole = 0x8200b2e000000005
+initial mass = 0x4030f7cc6f864dfb  # 16.96796319035455
+CoreCollapse { supernova: IIb }, None, BlackHole
+co core = 0x400e845de4aa1881  # 3.8146322121056646
+remnant mass = 0x4009acc8017a8fb9  # 3.20936585574415
+mode Ordinary
+speed m/s = 0x40f6f3637c15a40c  # 94006.21779407578
+direction x = 0x3fa61a41f5525eb0  # 0.04316907996797903
+direction y = 0xbfca8aae57091935  # -0.20735720872671384
+direction z = 0x3fef462489a61b36  # 0.9773123444036631

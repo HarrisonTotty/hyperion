@@ -4456,3 +4456,18 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - **For the owner:** the guide's 3D rule "redraws on demand only, never on a loop" and `RUN`'s
     per-frame redraw, which D24 and this risk's "Time control and the guide" bullet allow, need one
     wording.
+- **T28.c's zero kick lifted (round 9, `kick`, with P06.T19).** The transform had applied
+  `StarModel::natal_kick` since T28.c; the law now returns one, so no code of the transform
+  changed. The kick is along the galactic axes, which the system frame's are parallel to. A white
+  dwarf's own kick is not applied (ruling 62.6). No golden moved: the neutron-star host of
+  `planetary/fate` loses its planets to the mass loss either way, its black hole and the
+  circumbinary pair's are complete fallbacks, and no T32 system has a sudden-death host with a
+  survivor. The move joins version 12. Measured by
+  `natal_kicks_unbind_planets_the_mass_loss_alone_would_keep`, for Jupiters on circular orbits of
+  10–300 au that survive to the explosion around 400 Kroupa hosts of 8–150 M☉:
+  - neutron stars (992 planets): 99.2% unbound with the kick, 99.6% by the mass loss alone, since a
+    kick along a planet's motion can keep it;
+  - kicked black holes (178): 100% with the kick, 51.7% alone;
+  - complete fallback (355): 2.3% either way.
+
+  Rulings 71 and 80's scattering then walks the survivors, which now carry the kick's orientation.
