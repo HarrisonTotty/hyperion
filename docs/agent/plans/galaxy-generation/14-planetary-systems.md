@@ -1494,8 +1494,8 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
   - _As built (`belts`, round 8):_ `planetary/belts.rs` and `planetary/halo.rs`, from plain inputs;
     nothing generated calls them until T22.a and T30.a.
     - _T21.a–b._ `host_belts(seed, system, &BeltHost, first_slot) -> HostBelts` for one orbit
-      host: its disc profile, its planets as `placement::Neighbour`s, its plane and its
-      `OrbitHost`. A giant is a planet of 10 M⊕ or more (`ICE_GIANT_MASS`); the asteroid belt inside a giant needs one at or beyond the snow
+      host: its disc profile, its planets as `placement::Neighbour`s, its plane, its
+      `OrbitHost` and the system's age at the epoch (ruling 95.2). A giant is a planet of 10 M⊕ or more (`ICE_GIANT_MASS`); the asteroid belt inside a giant needs one at or beyond the snow
       line, and "without giants" means none there. A planet's chaotic zone is 1.3 μ^(2⁄7) a beyond
       its pericentre and apocentre, and every belt is cut to the disc's edges. Both `BeltRule`s place a
       belt wherever these rules find room. Each belt's mass wears as M₀ ÷ (1 + t ÷ `t_c`), and
@@ -1503,7 +1503,7 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
       2007a, eqs. 6, 14 and 17, with the full G of eqs. 17–18, ruling 84.1), with `D_c` 450 km (Kains, Wyatt and Greaves 2011), e 0.05 and `Q_D*` 495 J kg⁻¹
       (ruling 84's amendment, below).
     - _T21.c._ Members are `D_max` k^(−1⁄q) for k = 1–8 over 400 km, `D_max` normalising N(> D)
-      from 1 km to the belt's primordial mass, at 2,700 or 2,000 kg m⁻³ by composition. Each is
+      from 1 km to the belt's mass worn to the system's age at the epoch (ruling 95.2), at 2,700 or 2,000 kg m⁻³ by composition. Each is
       placed with a by the disc's solids, e and i truncated so that it stays clear of the chaotic
       zones and inside the disc, and so inside the strip radius. `BeltMember::placed_body()` is
       the `PlacedBody` T16 derives it from. The moon of T18 is left to T22.a. The draws are on
@@ -1577,6 +1577,26 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
         pole and T22.a give it one.
       - The acceptance command runs as `cargo test -p hyperion-sim -- planetary::belts
 planetary::halo`, since cargo takes one positional filter.
+    - _Ruling 95.2, as built (`belts2`, round 9)._
+      - _Composition follows the belt's mass._ Each component's solids beyond the snow line are
+        weighted by that component's mass, so a Kuiper-like belt's massless scattered part counts
+        for nothing: a belt proper inside the snow line is `Rocky` whatever its scattered part
+        holds (`a_cold_belt_inside_the_snow_line_is_rocky`).
+      - _Members are sized from the worn mass._ `BeltHost::new` takes the system's age at the
+        epoch (T30.a passes `ctx.age_at_epoch()`), and `D_max` normalises N(> D) to the belt's
+        mass worn to that age, `largest_diameter()` included; a member is kept only while it
+        weighs no more than that mass, which the size law already ensures
+        (`members_are_sized_from_the_worn_mass`). A system not yet born at the epoch counts its
+        whole mass. Members are sized once, at the epoch; the belt's `mass_at(t)` keeps wearing
+        after it while they stay fixed. The mass check is a backstop that removes none.
+      - _Weighting._ Composition weights each part by its starting mass; since only the belt
+        proper has mass (ruling 84.1), its mass at the epoch would give the same class.
+      - _Goldens,_ re-blessed at 11: belts, members and members' moons only, no planet, planet
+        moon, ring or halo. Seven belts in six T32 goldens (`close_binary`, `filler_a`,
+        `hierarchical_triple` twice, `m_dwarf_resonant_chain`, `red_giant`, `wide_binary`) lose
+        41 members with their moons; `hierarchical_triple` and `wide_binary` each have a belt
+        inside the snow line turn `Rocky`. The Solar-like golden's bright cold belt, 1.29 M⊕ at
+        66.8–81.0 au, barely wears, and its eight members, 0.077–0.0089 M⊕, lose about 1.5%.
 
 #### P14.T22 Satellite assembly and small-body property tests
 

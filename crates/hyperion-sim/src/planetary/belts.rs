@@ -93,8 +93,9 @@
 //! # Largest members
 //!
 //! Sizes follow N(> D) ∝ D^(−q), q drawn uniform over 2.5–3.5 per belt ([`SIZE_SLOPE`]),
-//! normalised so that the bodies from [`SMALLEST_BODY`] (1 km) up hold the belt's primordial mass;
-//! the k-th largest has N(> D) = k, D = `D_max` k^(−1⁄q). Those over [`MEMBER_MIN_DIAMETER`]
+//! normalised so that the bodies from [`SMALLEST_BODY`] (1 km) up hold the belt's mass worn down
+//! to the system's age at the epoch ([`BeltHost::new`]; ruling 95.2), so that no member outweighs
+//! its belt; the k-th largest has N(> D) = k, D = `D_max` k^(−1⁄q). Those over [`MEMBER_MIN_DIAMETER`]
 //! (400 km), at most [`MAX_MEMBERS`] (8), become bodies in the belt's slot with sub-indices 1
 //! upward (design note 3), on orbits drawn inside the belt ([`BeltMember`]): the semi-major axis
 //! as the disc's solids lie, eccentricity Rayleigh with σ = 0.1 and inclination Rayleigh with
@@ -104,7 +105,9 @@
 //! a dwarf planet ([`BeltMember::placed_body`]), and is eligible for P14.T18's giant-impact moon,
 //! which P14.T22.a gives it: this module calls nothing of `moons`. The rest of the belt stays a
 //! population: its mass, size slope, bounds, mean eccentricity and inclination, and composition
-//! class by the side of the snow line its solids lie on.
+//! class by the side of the snow line its mass lies on: its components' solids weighted by each
+//! component's mass, so that a Kuiper-like belt's massless scattered component does not count
+//! (ruling 95.2).
 //!
 //! # Slots and draws
 //!
@@ -338,12 +341,14 @@ pub enum BeltSite {
     OuterDisc,
 }
 
-/// Which side of the snow line a belt's solids lie on, which is its composition class.
+/// Which side of the snow line a belt's mass lies on, which is its composition class: each
+/// component's solids weighted by that component's mass (ruling 95.2), so a Kuiper-like belt's
+/// massless scattered component does not count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BeltComposition {
-    /// Mostly rock: more of its solids lie inside the snow line than beyond.
+    /// Mostly rock: more of its mass lies inside the snow line than beyond.
     Rocky,
-    /// Rock and ice: at least half its solids lie beyond the snow line.
+    /// Rock and ice: at least half its mass lies beyond the snow line.
     Icy,
 }
 
@@ -595,13 +600,14 @@ impl Belt {
         self.size_slope
     }
 
-    /// Its composition class, by the side of the snow line its solids lie on.
+    /// Its composition class, by the side of the snow line its mass lies on.
     #[must_use]
     pub const fn composition(&self) -> BeltComposition {
         self.composition
     }
 
-    /// The diameter of its largest body, at which N(> D) = 1.
+    /// The diameter of its largest body, at which N(> D) = 1, in the size distribution of its mass
+    /// at the system's age at the epoch (ruling 95.2).
     #[must_use]
     pub const fn largest_diameter(&self) -> Metres {
         self.largest_diameter
@@ -653,9 +659,7 @@ impl Belt {
     /// Its mass at age `age`, each component worn down collisionally.
     #[must_use]
     pub fn mass_at(&self, age: Years) -> EarthMasses {
-        self.components().fold(EarthMasses::ZERO, |sum, c| {
-            sum + c.mass_at(age, self.host_mass)
-        })
+        worn_mass(self.components(), age, self.host_mass)
     }
 
     /// Its fractional luminosity `L_dust` ÷ L★ at age `age` about a host now of luminosity
@@ -673,6 +677,47 @@ impl Belt {
                 )
             })
             .sum()
+    }
+}
+
+/// The mass at age `age` of the components `components` about a host of mass `host_mass`, each
+/// worn down collisionally, summed in order.
+#[must_use]
+fn worn_mass<'a>(
+    components: impl IntoIterator<Item = &'a BeltComponent>,
+    age: Years,
+    host_mass: SolarMasses,
+) -> EarthMasses {
+    components
+        .into_iter()
+        .fold(EarthMasses::ZERO, |sum, c| sum + c.mass_at(age, host_mass))
+}
+
+/// The composition class of a belt of components `components` in `disc`: icy when at least half
+/// its mass lies beyond the snow line, each component's mass split as the disc's solids lie
+/// between its edges (ruling 95.2). A massless component, such as a Kuiper-like belt's scattered
+/// one, counts for nothing.
+#[must_use]
+fn composition<'a>(
+    disc: &DiscProfile,
+    components: impl IntoIterator<Item = &'a BeltComponent>,
+) -> BeltComposition {
+    let snow = disc.snow_line().value();
+    let (beyond, total) = components
+        .into_iter()
+        .fold((0.0, 0.0), |(beyond, total), c| {
+            let mass = c.initial_mass.value();
+            if mass <= 0.0 || c.solids.value() <= 0.0 {
+                return (beyond, total);
+            }
+            let from = Metres::new(snow.clamp(c.inner_edge.value(), c.outer_edge.value()));
+            let share = disc.solid_mass_between(from, c.outer_edge).value() / c.solids.value();
+            (beyond + mass * share, total + mass)
+        });
+    if beyond * 2.0 >= total {
+        BeltComposition::Icy
+    } else {
+        BeltComposition::Rocky
     }
 }
 
@@ -760,33 +805,39 @@ impl BeltMember {
     }
 }
 
-/// An orbit host as its belts read it (P14.T21): which host it is, its disc, its planets and its
-/// plane, all plain arguments.
+/// An orbit host as its belts read it (P14.T21): which host it is, its disc, its planets, its
+/// plane and its system's age, all plain arguments.
 ///
-/// P14.T30.a builds it from the host's zone, disc and placed planets.
+/// P14.T30.a builds it from the host's zone, disc and placed planets, and the system's age at the
+/// epoch.
 #[derive(Debug, Clone, Copy)]
 pub struct BeltHost<'a> {
     host: OrbitHost,
     disc: &'a DiscProfile,
     planets: &'a [Neighbour],
     plane: SystemPlane,
+    age: Years,
 }
 
 impl<'a> BeltHost<'a> {
-    /// The orbit host `host`, with its disc `disc`, its planets `planets` (in any order) and its
-    /// planetary plane `plane`.
+    /// The orbit host `host`, with its disc `disc`, its planets `planets` (in any order), its
+    /// planetary plane `plane`, and its system's age at the epoch `age`, Julian years, at which its
+    /// belts' largest members are counted: from the belt's mass worn down to that age (ruling
+    /// 95.2), or its whole mass at an age of zero or less.
     #[must_use]
     pub const fn new(
         host: OrbitHost,
         disc: &'a DiscProfile,
         planets: &'a [Neighbour],
         plane: SystemPlane,
+        age: Years,
     ) -> Self {
         Self {
             host,
             disc,
             planets,
             plane,
+            age,
         }
     }
 
@@ -1180,7 +1231,7 @@ enum Depletion {
 /// use hyperion_sim::planetary::record::BeltKind;
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::units::{AstronomicalUnits, Dex, EarthMasses, Megayears, Metres, Radians};
-/// use hyperion_sim::units::{SolarLuminosities, SolarMasses, SolarRadii};
+/// use hyperion_sim::units::{SolarLuminosities, SolarMasses, SolarRadii, Years};
 ///
 /// let au = |x: f64| Metres::from(AstronomicalUnits::new(x));
 /// let sun = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
@@ -1193,7 +1244,7 @@ enum Depletion {
 ///     Neighbour::new(EarthMasses::new(17.15), au(30.07), 0.009),
 /// ];
 /// let plane = SystemPlane::new(Radians::ZERO, Radians::ZERO)?;
-/// let host = BeltHost::new(OrbitHost::Star(0), disc, &planets, plane);
+/// let host = BeltHost::new(OrbitHost::Star(0), disc, &planets, plane, Years::new(4.6e9));
 /// let system = SystemId::from_raw(0x0200_0800_2000_0000)?;
 /// let belts = host_belts(Seed::new(7), system, &host, FIRST_BELT_SLOT);
 /// let [main, kuiper] = belts.belts() else { panic!("two belts") };
@@ -1375,22 +1426,15 @@ fn build(
     };
     let index = BodyIndex::new(BodySlot::Belt(slot), BodySub::Primary)
         .expect("a belt slot of 1–13 is in the layout");
-    let (inner, outer) = (
-        main.inner_edge,
-        scattered.map_or(main.outer_edge, |s| s.outer_edge),
-    );
-    let snow = disc.snow_line();
-    let beyond = disc.solid_mass_between(Metres::new(snow.value().max(inner.value())), outer);
-    let total = disc.solid_mass_between(inner, outer);
-    let composition = if beyond.value() * 2.0 >= total.value() {
-        BeltComposition::Icy
-    } else {
-        BeltComposition::Rocky
-    };
+    let inner = main.inner_edge;
+    let parts = || core::iter::once(&main).chain(scattered.as_ref());
+    let composition = composition(disc, parts());
     let size_slope = SIZE_SLOPE.0 + (SIZE_SLOPE.1 - SIZE_SLOPE.0) * draws.size_slope.value();
-    let initial = main.initial_mass + scattered.map_or(EarthMasses::ZERO, |s| s.initial_mass);
+    // The members are the largest bodies of what the belt holds at the epoch (ruling 95.2), so
+    // none outweighs it there.
+    let worn = worn_mass(parts(), host.age, disc.host_mass());
     let density = composition.member_density();
-    let largest = largest_diameter(initial, size_slope, density);
+    let largest = largest_diameter(worn, size_slope, density);
     let gaps = plan
         .gaps
         .into_iter()
@@ -1416,7 +1460,8 @@ fn build(
 }
 
 /// The named members of `belt` (P14.T21.c): its bodies over [`MEMBER_MIN_DIAMETER`], at most
-/// [`MAX_MEMBERS`], largest first, each on an orbit inside the belt.
+/// [`MAX_MEMBERS`], largest first, each on an orbit inside the belt, and none heavier than the
+/// belt at the system's age at the epoch (ruling 95.2).
 fn members(
     seed: Seed,
     system: SystemId,
@@ -1430,12 +1475,17 @@ fn members(
     let density = belt.composition.member_density().value();
     let total = belt.components().map(|c| c.solids.value()).sum::<f64>();
     let main_share = belt.main.solids.value() / total;
+    // The size distribution already holds each member under the belt's mass at the epoch; the
+    // bound is ruling 95.2's rule, kept explicit.
+    let held = belt.mass_at(host.age);
     (1..=MAX_MEMBERS)
         .map_while(|k| {
             let diameter = belt.largest_diameter.value() * math::powf(f64::from(k), -1.0 / q);
-            (diameter > MEMBER_MIN_DIAMETER.value()).then_some((k, diameter))
+            let r = diameter / 2.0;
+            let mass = EarthMasses::new(4.0 / 3.0 * PI * r * r * r * density / EARTH_MASS_KG);
+            (diameter > MEMBER_MIN_DIAMETER.value() && mass <= held).then_some((k, diameter, mass))
         })
-        .map(|(k, diameter)| {
+        .map(|(k, diameter, mass)| {
             let index = BodyIndex::new(BodySlot::Belt(slot), BodySub::Member(k))
                 .expect("members 1–8 of a belt slot are in the layout");
             let draws = MemberDraws::for_member(seed, system, index);
@@ -1443,8 +1493,6 @@ fn members(
                 Some(scattered) if draws.part.value() >= main_share => scattered,
                 Some(_) | None => &belt.main,
             };
-            let r = diameter / 2.0;
-            let mass = EarthMasses::new(4.0 / 3.0 * PI * r * r * r * density / EARTH_MASS_KG);
             let a = member_axis(host.disc, component, draws.semi_major_axis);
             let (e_width, i_width) = widths(component.part);
             let e_limit = eccentricity_limit(a, planets, zones, host.disc);

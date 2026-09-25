@@ -645,7 +645,13 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         let found = host_belts(
             seed,
             id,
-            &BeltHost::new(zone.host(), profile, &neighbours, host.plane),
+            &BeltHost::new(
+                zone.host(),
+                profile,
+                &neighbours,
+                host.plane,
+                ctx.age_at_epoch(),
+            ),
             slot,
         );
         slot = found.next_slot();

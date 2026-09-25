@@ -16,8 +16,8 @@ use crate::time::UniverseTime;
 const SEED: Seed = Seed::new(0x00be_1750);
 
 /// One host's belts, from its disc, plane and placed planets, in the order the system lists its
-/// hosts.
-fn belts_of(system: &PlanetarySystem) -> Vec<Belt> {
+/// hosts, with its members counted at the system's age at the epoch `age`.
+fn belts_of(system: &PlanetarySystem, age: Years) -> Vec<Belt> {
     let mut slot = FIRST_BELT_SLOT;
     let mut out = Vec::new();
     for host in system.hosts() {
@@ -35,7 +35,7 @@ fn belts_of(system: &PlanetarySystem) -> Vec<Belt> {
                 )
             })
             .collect();
-        let belt_host = BeltHost::new(host.host(), disc, &planets, host.plane());
+        let belt_host = BeltHost::new(host.host(), disc, &planets, host.plane(), age);
         let belts = host_belts(SEED, system.system(), &belt_host, slot);
         slot = belts.next_slot();
         out.extend(belts.into_belts());
@@ -85,7 +85,7 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
     let mut belts_seen = 0;
     for ctx in &contexts {
         let system = generate_planets(SEED, ctx);
-        let belts = belts_of(&system);
+        let belts = belts_of(&system, ctx.age_at_epoch());
         // P14.T30.a wires these belts into `generate` as they are built here.
         let whole = crate::planetary::generate(SEED, ctx);
         assert_eq!(whole.belts(), belts.as_slice());
@@ -174,7 +174,7 @@ fn a_fifth_of_fgk_hosts_have_a_detected_cold_belt() {
             .state_at(UniverseTime::EPOCH)
             .expect("a main-sequence star")
             .luminosity();
-        let belts = belts_of(&system);
+        let belts = belts_of(&system, age);
         let kuiper = || belts.iter().filter(|b| b.kind() == BeltKind::Kuiper);
         for belt in &belts {
             let part = belt.main();
@@ -223,6 +223,9 @@ mod solar {
     use crate::units::{AstronomicalUnits, Dex, Kelvin, Kilograms, Megayears, SolarRadii};
 
     pub(super) const SYSTEM: u64 = 0x0200_0800_2000_0000;
+
+    /// The Sun's age, at which a Solar System input's members are counted.
+    pub(super) const SOLAR_AGE: Years = Years::new(4.6e9);
 
     pub(super) fn au(x: f64) -> Metres {
         Metres::from(AstronomicalUnits::new(x))
@@ -277,7 +280,7 @@ mod solar {
     }
 
     pub(super) fn belts_about(planets: &[Neighbour], disc: &DiscProfile, first: u8) -> HostBelts {
-        let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane());
+        let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane(), SOLAR_AGE);
         host_belts(SEED, system(), &host, first)
     }
 
@@ -325,7 +328,7 @@ mod solar {
     #[test]
     fn the_solar_system_s_cold_belt_shines_at_ten_to_the_minus_seven() {
         let disc = disc();
-        let host = BeltHost::new(OrbitHost::Star(0), &disc, &[], plane());
+        let host = BeltHost::new(OrbitHost::Star(0), &disc, &[], plane(), SOLAR_AGE);
         let planets = planets();
         let host = BeltHost {
             planets: &planets,
@@ -399,6 +402,62 @@ mod solar {
         assert!(belt.scattered().is_none());
     }
 
+    /// Ruling 95.2: a Kuiper-like belt inside the snow line is rocky, although its massless
+    /// scattered component reaches beyond it and holds more solids: its composition follows its
+    /// mass.
+    #[test]
+    fn a_cold_belt_inside_the_snow_line_is_rocky() {
+        let disc = disc();
+        let planets = [Neighbour::new(EarthMasses::new(1.0), au(0.3), 0.0)];
+        let belts = belts_about(&planets, &disc, FIRST_BELT_SLOT);
+        let [belt] = belts.belts() else {
+            panic!("{:?}", belts.belts());
+        };
+        assert_eq!(belt.kind(), BeltKind::Kuiper);
+        let scattered = belt.scattered().expect("the disc reaches beyond the 2:1");
+        assert!(belt.main().outer_edge() < disc.snow_line());
+        // The old rule, the solids between the belt's edges, would read it icy.
+        let beyond = disc.solid_mass_between(disc.snow_line(), scattered.outer_edge());
+        assert!(beyond * 2.0 >= belt.main().solids() + scattered.solids());
+        assert_eq!(scattered.initial_mass(), EarthMasses::ZERO);
+        assert_eq!(belt.composition(), BeltComposition::Rocky);
+    }
+
+    /// Ruling 95.2: members are sized from the belt's mass worn down to the system's age, so an
+    /// old belt close in, worn to a sliver of its start, keeps no member heavier than itself,
+    /// while the same belt young keeps its dwarf planets.
+    #[test]
+    fn members_are_sized_from_the_worn_mass() {
+        let disc = disc();
+        let planets = [Neighbour::new(EarthMasses::new(1.0), au(1.0), 0.02)];
+        let at = |age: f64| {
+            let host = BeltHost::new(
+                OrbitHost::Star(0),
+                &disc,
+                &planets,
+                plane(),
+                Years::new(age),
+            );
+            host_belts(SEED, system(), &host, FIRST_BELT_SLOT).into_belts()
+        };
+        let (young, old) = (at(1e6), at(4.6e9));
+        let (young, old) = (&young[0], &old[0]);
+        assert!(!young.members().is_empty());
+        for (belt, age) in [(young, 1e6), (old, 4.6e9)] {
+            let held = belt.mass_at(Years::new(age));
+            let density = belt.composition().member_density();
+            assert_eq!(
+                belt.largest_diameter(),
+                largest_diameter(held, belt.size_slope(), density)
+            );
+            for member in belt.members() {
+                assert!(member.mass() <= held, "{member:?} outweighs {held:?}");
+            }
+        }
+        assert!(old.mass_at(Years::new(4.6e9)) < young.initial_mass() * 1e-2);
+        assert!(old.members().len() < young.members().len());
+    }
+
     /// Ruling 84.1: a Kuiper-like belt is bright with probability 0.60, keeping a median 10^−0.25
     /// of its solids, and otherwise keeps 10⁻³.
     #[test]
@@ -446,12 +505,20 @@ mod solar {
 
     /// P14.T21.c (c): a massive belt's members are its bodies over 400 km, at most eight, largest
     /// first, inside its bounds and clear of the planets' chaotic zones, in its slot from
-    /// sub-index 1; and P14.T16 derives each as a dwarf planet.
+    /// sub-index 1; and P14.T16 derives each as a dwarf planet. The belt is young, before it has
+    /// worn down (ruling 95.2).
     #[test]
     fn a_belt_s_largest_members_are_dwarf_planets_inside_it() {
         let disc = disc();
         let planets = [Neighbour::new(EarthMasses::new(1.0), au(1.0), 0.02)];
-        let belts = belts_about(&planets, &disc, FIRST_BELT_SLOT);
+        let host = BeltHost::new(
+            OrbitHost::Star(0),
+            &disc,
+            &planets,
+            plane(),
+            Years::new(1e6),
+        );
+        let belts = host_belts(SEED, system(), &host, FIRST_BELT_SLOT);
         let belt = &belts.belts()[0];
         let members = belt.members();
         assert!(!members.is_empty() && members.len() <= usize::from(MAX_MEMBERS));
