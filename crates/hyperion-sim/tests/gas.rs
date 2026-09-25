@@ -359,18 +359,20 @@ fn a_states_pressure_is_never_below_the_floor() {
             match state.phase() {
                 GasPhase::Hot => assert!(t > 1e5, "{state:?}"),
                 GasPhase::Warm => {
-                    assert!(
-                        (5_000.0 * (1.0 - 1e-12)..=1e5 * (1.0 + 1e-12)).contains(&t),
-                        "{state:?}"
-                    );
+                    // Ruling 98: warm gas reads 5,000–10,000 K.
+                    assert!((5_000.0..=10_000.0).contains(&t), "{state:?}");
                 }
                 GasPhase::Cold | GasPhase::Molecular => assert!(t <= 5_000.0, "{state:?}"),
             }
-            // Ruling 91: T × x n = P with the state's own particle count.
+            // Rulings 91 and 98: T × x n = P with the state's own particle count, wherever the
+            // warm clamp does not bind.
             let balance = t * state.particles_per_hydrogen() * state.density().value()
                 / state.pressure().value();
-            assert!((balance - 1.0).abs() < 1e-15, "{state:?}");
+            if !state.temperature_clamped() {
+                assert!((balance - 1.0).abs() < 1e-15, "{state:?}");
+            }
             assert!(state.thermal_sound_speed().value() > 0.0);
+            assert!(state.isothermal_sound_speed() < state.thermal_sound_speed());
         }
     }
 }
@@ -660,7 +662,7 @@ fn gas_ccm_is_pinned() {
     for band in Band::ALL {
         w.f64(&format!("ratio.{}", band.name()), band.ratio());
     }
-    for microns in [0.1, 0.125, 0.2, 0.2175, 0.3, 3.3, 5.0] {
+    for microns in [0.1, 0.125, 0.2, 0.2175, 0.3, 0.95, 1.0, 1.05, 3.3, 5.0] {
         let ratio = extinction_ratio(Micrometres::new(microns)).expect("inside the law's range");
         w.f64(&format!("ratio.at_{microns}_um"), ratio);
     }
@@ -1464,7 +1466,8 @@ fn a_horizons_edges_are_as_documented() {
 }
 
 /// A site's sound speed is `√(γ P ÷ ρ)` with `γ = 5 ÷ 3` and `ρ = 1.4 m_H n`: some 10 km/s in the
-/// plane's warm and cold gas and some 100 km/s in the corona.
+/// plane's warm and cold gas and some 100 km/s in the corona. Its isothermal sound speed, which a
+/// supernova shell merges against (ruling 98), is `√(P ÷ ρ)`, `√(3 ÷ 5)` of it.
 #[test]
 fn a_sites_sound_speed_is_the_adiabatic_one() {
     use hyperion_sim::units::consts::{BOLTZMANN_CONSTANT, HYDROGEN_MASS_KG};
@@ -1480,6 +1483,13 @@ fn a_sites_sound_speed_is_the_adiabatic_one() {
         let expected = (5.0 / 3.0 * p * BOLTZMANN_CONSTANT / (1.4 * HYDROGEN_MASS_KG * n)).sqrt();
         let speed = state.thermal_sound_speed().value();
         assert_relative("the sound speed", speed, expected, 1e-12);
+        let isothermal = state.isothermal_sound_speed().value();
+        assert_relative(
+            "the isothermal",
+            isothermal,
+            expected * 0.6_f64.sqrt(),
+            1e-12,
+        );
         assert!((lo..hi).contains(&speed), "{speed} m/s at {point:?}");
     }
 }

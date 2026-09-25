@@ -48,10 +48,10 @@
 //!
 //! In [`NoiseMode::Realised`] each sample's phase is read from its density and pressure, and its
 //! neutral share follows Design note 12: none of the hot gas, all of the cold and molecular gas,
-//! and `n_neutral ÷ (n_neutral + n_warm)` of the warm, less where warm gas that share would read
-//! above 10⁵ K is taken as ionised until it sits there ([`ThermalState`], ruling 91). In [`NoiseMode::Mean`] there is no local
-//! density to classify, so the neutral column is the integral of `n_neutral + n_mol`. Holes are
-//! hot and add none; clouds are neutral and add all of theirs.
+//! and `n_neutral ÷ (n_neutral + n_warm)` of the warm, never adjusted ([`ThermalState`], rulings
+//! 91 and 98). In [`NoiseMode::Mean`] there is no local density to classify, so the neutral
+//! column is the integral of `n_neutral + n_mol`. Holes are hot and add none; clouds are neutral
+//! and add all of theirs.
 
 use std::num::NonZeroU32;
 

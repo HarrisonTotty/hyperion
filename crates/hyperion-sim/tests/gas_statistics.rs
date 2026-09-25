@@ -28,7 +28,7 @@ use hyperion_sim::galaxy::gas::field::GasField;
 use hyperion_sim::galaxy::gas::noise::{NoiseCache, SmoothingScale, log_normal_factor};
 use hyperion_sim::galaxy::gas::params::GasParams;
 use hyperion_sim::galaxy::gas::phase::{
-    GasPhase, HOT_TEMPERATURE, ThermalState, warm_neutral_share,
+    GasPhase, ThermalState, WARM_CEILING, WARM_TEMPERATURE, warm_neutral_share,
 };
 use hyperion_sim::galaxy::gas::pressure::Pressure;
 use hyperion_sim::galaxy::gas::smooth::{GasLayer, SmoothGas};
@@ -478,19 +478,21 @@ fn the_centre_lies_behind_thirty_magnitudes() {
 
 /// A supernova shell's observable window `W` at ambient density `n` (cm⁻³) and pressure
 /// `p_over_k` (K cm⁻³), Myr: the closed form plan 09's P09.T15.a will own, copied here until then
-/// (plan 07, P07.T12).
+/// (plan 07, P07.T12, as ruling 98 of 2026-09-22 corrects it).
 ///
-/// `W = t_PDS [¾ (v_PDS ÷ β c_net)^(10⁄7) − ¼]`, with Cioffi, McKee and Bertschinger's (1988, ApJ
+/// `W = t_PDS [¾ (v_PDS ÷ β c_net)^(10⁄7) + ¼]`, with Cioffi, McKee and Bertschinger's (1988, ApJ
 /// 334, 252) pressure-driven snowplough at 10⁵¹ erg and solar metallicity, `t_PDS = 1.33 × 10⁴ yr ×
-/// n^(−4⁄7)` and `v_PDS = 413 km/s × n^(1⁄7)`; the shell merges when it slows to `β = 2` times the
-/// ambient's effective sound speed, `c_net² = γ P ÷ ρ + (8 km/s)²`, with `γ = 5 ÷ 3`, `ρ = 1.4 m_H
-/// n` and 8 km/s of turbulence.
+/// n^(−4⁄7)` (eqs. 3.10–3.11) and `v_PDS = 413 km/s × n^(1⁄7)` (eq. 3.33b). The shell merges when
+/// it slows to `β = 2` times the ambient's effective sound speed, `c_net² = C₀² + (8 km/s)²`, with
+/// `C₀² = P ÷ ρ` CMB88's "ambient isothermal sound speed" (p. 264), `ρ = 1.4 m_H n`, and 8 km/s of
+/// turbulence. The `+ ¼` is the exact inverse of eq. 3.32b, `v = v_PDS (4⁄3 t ÷ t_PDS − 1⁄3)^(−7⁄10)`,
+/// where their eq. 4.4a drops it; the plan's first copy had `− ¼` and `γ P ÷ ρ`.
 fn shell_window_myr(n: f64, p_over_k: f64) -> f64 {
-    let thermal = (5.0 / 3.0) * p_over_k * BOLTZMANN_CONSTANT / (1.4 * HYDROGEN_MASS_KG * n);
+    let thermal = p_over_k * BOLTZMANN_CONSTANT / (1.4 * HYDROGEN_MASS_KG * n);
     let c_net = (thermal + 8e3 * 8e3).sqrt();
     let t_pds = 1.33e4 * math::powf(n, -4.0 / 7.0);
     let v_pds = 413e3 * math::powf(n, 1.0 / 7.0);
-    t_pds * (0.75 * math::powf(v_pds / (2.0 * c_net), 10.0 / 7.0) - 0.25) / 1e6
+    t_pds * (0.75 * math::powf(v_pds / (2.0 * c_net), 10.0 / 7.0) + 0.25) / 1e6
 }
 
 /// The largest shell window over a fixed scan of 4,001 densities from 10⁻³ to 10 cm⁻³, evenly in
@@ -505,23 +507,11 @@ fn largest_shell_window(p_over_k: f64) -> (f64, f64) {
         .expect("a non-empty scan")
 }
 
-/// The ceiling the pressure floor sets on the shell window: **provisional**, 1.5–2.0 Myr, where the
-/// plan's target is the brainstorm's 2–4 Myr. With the plan's closed form the drawn floor of
-/// 300–500 K cm⁻³ gives 1.61–1.94 Myr; a ceiling of 2 Myr needs a floor under about 270 K cm⁻³,
-/// where ruling 91's corona of up to 0.8 × 10⁻³ cm⁻³ is no longer hot over the inner disc. The two
-/// cannot both hold; the conflict is reported for a ruling, and the floor's range is unmoved.
-const PROVISIONAL_FLOOR_WINDOW_MYR: (f64, f64) = (1.5, 2.0);
-
-/// Where, provisionally, the largest window falls at the plane's pressure, cm⁻³: the plan's 0.1–0.5
-/// is missed at the fixture's 4,145 K cm⁻³, where it falls at 0.61 (0.56 at the measured 3,800), so
-/// the range is widened to 0.1–0.7 until it is ruled on.
-const PROVISIONAL_PLANE_PEAK_DENSITY: (f64, f64) = (0.1, 0.7);
-
 /// P07.T12: the shell window's ceiling, which is what the pressure floor is for. At the floor the
-/// largest window over the scan is the brainstorm's 2–4 Myr — **provisionally 1.5–2.0**
-/// ([`PROVISIONAL_FLOOR_WINDOW_MYR`]) — for the Milky Way fixture and every one of 200 seeds; at
-/// the Milky Way plane's pressure, the fixture's at 26,000 ly, it is 0.5–1 Myr and falls at a
-/// density of 0.1–0.5 cm⁻³ (provisionally 0.1–0.7, [`PROVISIONAL_PLANE_PEAK_DENSITY`]).
+/// largest window over the scan is the brainstorm's 2–4 Myr for the Milky Way fixture and every one
+/// of 200 seeds; at the Milky Way plane's pressure, the fixture's at 26,000 ly, it is 0.5–1 Myr and
+/// falls at a density of 0.1–0.5 cm⁻³ (ruling 98 of 2026-09-22, which restores both windows with
+/// the isothermal merge criterion and trims the floor to 300–450 K cm⁻³).
 #[test]
 #[ignore = "slow: 200 galaxies' parameters and 201 scans of the shell window"]
 fn the_pressure_floor_caps_the_shell_window() {
@@ -531,8 +521,7 @@ fn the_pressure_floor_caps_the_shell_window() {
         let (window, _) = largest_shell_window(params.pressure_floor().value());
         least = least.min(window);
         most = most.max(window);
-        let (lo, hi) = PROVISIONAL_FLOOR_WINDOW_MYR;
-        assert_within("the largest window at the floor, Myr", window, lo, hi);
+        assert_within("the largest window at the floor, Myr", window, 2.0, 4.0);
     };
     check(&fixture);
     for n in 0..200_u64 {
@@ -545,16 +534,15 @@ fn the_pressure_floor_caps_the_shell_window() {
     let (window, density) = largest_shell_window(plane);
     let (at_floor, _) = largest_shell_window(fixture.pressure_floor().value());
     let (at_300, _) = largest_shell_window(300.0);
-    let (at_500, _) = largest_shell_window(500.0);
+    let (at_450, _) = largest_shell_window(450.0);
     eprintln!(
         "largest shell window: {at_floor:.2} Myr at the fixture's floor, {least:.2}–{most:.2} Myr \
-         over 200 seeds' floors ({at_300:.2} at 300 and {at_500:.2} at 500 K cm⁻³; the plan's \
+         over 200 seeds' floors ({at_300:.2} at 300 and {at_450:.2} at 450 K cm⁻³; the plan's \
          2–4); at the plane's {plane:.0} K cm⁻³ {window:.3} Myr at n = {density:.3} cm⁻³ (the \
          plan's 0.5–1 Myr at 0.1–0.5 cm⁻³)"
     );
     assert_within("the largest window in the plane, Myr", window, 0.5, 1.0);
-    let (lo, hi) = PROVISIONAL_PLANE_PEAK_DENSITY;
-    assert_within("the density it falls at, cm⁻³", density, lo, hi);
+    assert_within("the density it falls at, cm⁻³", density, 0.1, 0.5);
 }
 
 /// A point drawn uniformly over the annulus of radii 20,000–30,000 ly, at height `z` ly.
@@ -564,15 +552,97 @@ fn annulus_point(lcg: &mut Lcg, z: f64) -> GalacticPosition {
     at([r * math::cos(phi), r * math::sin(phi), z])
 }
 
+/// The warm gas 3,000–6,000 ly from the fixture's plane at radii of 20,000–30,000 ly, over
+/// 2 × 10⁵ points: every warm point reads 5,000–10,000 K and `T × x n = P` wherever the clamp does
+/// not bind (ruling 98 of 2026-09-22). Returns, for the record, the mass-weighted percentiles of
+/// the temperature, the share the clamp binds on by number and by mass at each end, and the spread
+/// of `x n T ÷ P` where it binds.
+fn warm_gas_far_from_the_plane(gas: &GasField, lcg: &mut Lcg, cache: &mut NoiseCache) -> String {
+    let mut warm = Vec::new();
+    for _ in 0..200_000 {
+        let height = 3_000.0 + 3_000.0 * lcg.next_f64();
+        let z = if lcg.next_below(2) == 0 {
+            height
+        } else {
+            -height
+        };
+        let state = gas.state(&annulus_point(lcg, z), SmoothingScale::Full, cache);
+        if state.phase() == GasPhase::Warm {
+            // x n T ÷ P: 1 where the clamp does not bind (ruling 98).
+            let balance = state.temperature().value()
+                * state.particles_per_hydrogen()
+                * state.density().value()
+                / state.pressure().value();
+            warm.push((
+                state.temperature().value(),
+                state.density().value(),
+                state.temperature_clamped(),
+                balance,
+            ));
+        }
+    }
+    warm.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let total: f64 = warm.iter().map(|w| w.1).sum();
+    let weighted = |fraction: f64| {
+        let mut sum = 0.0;
+        warm.iter()
+            .find(|w| {
+                sum += w.1;
+                sum >= fraction * total
+            })
+            .map_or(f64::NAN, |w| w.0)
+    };
+    // Ruling 98's record: the share of the warm gas the clamp binds on, by number and by mass,
+    // at each end, and the spread of x n T ÷ P where it binds.
+    let bound_mass = |pick: fn(f64) -> bool| -> f64 {
+        warm.iter()
+            .filter(|w| w.2 && pick(w.0))
+            .map(|w| w.1)
+            .sum::<f64>()
+            / total
+    };
+    let (bound, all) = warm.iter().fold((0_u32, 0_u32), |(bound, all), w| {
+        (bound + u32::from(w.2), all + 1)
+    });
+    let bound_count = f64::from(bound) / f64::from(all);
+    let mut balances: Vec<f64> = warm.iter().filter(|w| w.2).map(|w| w.3).collect();
+    balances.sort_by(f64::total_cmp);
+    let balance_at = |q: usize| {
+        balances
+            .get(balances.len().saturating_sub(1) * q / 100)
+            .copied()
+            .unwrap_or(f64::NAN)
+    };
+    assert!(
+        warm.iter()
+            .all(|w| (WARM_TEMPERATURE.value()..=WARM_CEILING.value()).contains(&w.0))
+    );
+    assert!(warm.iter().all(|w| w.2 || (w.3 - 1.0).abs() < 1e-15));
+    format!(
+        "warm gas at |z| 3,000–6,000 ly, by mass: 16/50/84% {:.0}/{:.0}/{:.0} K over {} points; \
+         the clamp binds on {bound_count:.3} of them by number, {:.3} of the mass at 5,000 K and \
+         {:.3} at 10,000 K, with x n T ÷ P at 16/50/84% {:.3}/{:.3}/{:.3} where it binds",
+        weighted(0.16),
+        weighted(0.5),
+        weighted(0.84),
+        warm.len(),
+        bound_mass(|t| t <= WARM_TEMPERATURE.value()),
+        bound_mass(|t| t >= WARM_CEILING.value()),
+        balance_at(16),
+        balance_at(50),
+        balance_at(84),
+    )
+}
+
 /// P07.T12's filling factors by Monte Carlo, for the Milky Way fixture at its `σ_ln` of 2.3: over
 /// 10⁵ points in the plane at radii of 20,000–30,000 ly the hot share is 0.20–0.40 (the
 /// brainstorm's "a fifth to two fifths") and the molecular share under 2%; at |z| = 20,000 ly over
 /// the same radii the hot share is above 0.95.
 ///
-/// Ruling 91's warm temperature is recorded, not tuned: the mass-weighted median of the warm gas
-/// 3,000–6,000 ly from the plane over the same radii, which a pressure-balance temperature from a
-/// log-normal density keeps near 16–20 kK, not the 8,000 K of a thermostatted warm ionised
-/// medium (plan 07, Risks).
+/// The warm temperature is recorded, not tuned: the mass-weighted percentiles of the warm gas
+/// 3,000–6,000 ly from the plane over the same radii, which ruling 98 clamps to 5,000–10,000 K for
+/// readout, with the share of that gas the clamp binds on and the ratio `x n T ÷ P` there (plan
+/// 07, Risks).
 #[test]
 #[ignore = "slow: 4 × 10⁵ states of the fixture's gas"]
 fn the_phases_fill_the_plane_as_the_brainstorm_says() {
@@ -581,6 +651,7 @@ fn the_phases_fill_the_plane_as_the_brainstorm_says() {
     let mut cache = NoiseCache::with_capacity(4_096);
     let mut lcg = Lcg::new(0x0712_f111);
     let (mut hot, mut molecular, mut hot_high) = (0_u32, 0_u32, 0_u32);
+    let (mut plane_warm, mut plane_clamped) = (0_u32, 0_u32);
     let points = 100_000_u32;
     for _ in 0..points {
         let state = gas.state(
@@ -591,7 +662,11 @@ fn the_phases_fill_the_plane_as_the_brainstorm_says() {
         match state.phase() {
             GasPhase::Hot => hot += 1,
             GasPhase::Molecular => molecular += 1,
-            GasPhase::Warm | GasPhase::Cold => {}
+            GasPhase::Warm => {
+                plane_warm += 1;
+                plane_clamped += u32::from(state.temperature_clamped());
+            }
+            GasPhase::Cold => {}
         }
         let z = if lcg.next_below(2) == 0 {
             20_000.0
@@ -608,45 +683,14 @@ fn the_phases_fill_the_plane_as_the_brainstorm_says() {
         }
     }
     let share = |count: u32| f64::from(count) / f64::from(points);
-    let mut warm = Vec::new();
-    for _ in 0..200_000 {
-        let height = 3_000.0 + 3_000.0 * lcg.next_f64();
-        let z = if lcg.next_below(2) == 0 {
-            height
-        } else {
-            -height
-        };
-        let state = gas.state(
-            &annulus_point(&mut lcg, z),
-            SmoothingScale::Full,
-            &mut cache,
-        );
-        if state.phase() == GasPhase::Warm {
-            warm.push((state.temperature().value(), state.density().value()));
-        }
-    }
-    warm.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let total: f64 = warm.iter().map(|w| w.1).sum();
-    let weighted = |fraction: f64| {
-        let mut sum = 0.0;
-        warm.iter()
-            .find(|w| {
-                sum += w.1;
-                sum >= fraction * total
-            })
-            .map_or(f64::NAN, |w| w.0)
-    };
+    let warm = warm_gas_far_from_the_plane(&gas, &mut lcg, &mut cache);
     eprintln!(
         "in the plane at 20,000–30,000 ly: hot {:.3}, molecular {:.4}; at |z| 20,000 ly hot \
-         {:.4}; warm gas at |z| 3,000–6,000 ly, by mass: 16/50/84% {:.0}/{:.0}/{:.0} K over {} \
-         points",
+         {:.4}; {warm}; in the plane the warm clamp binds on {:.3} of the warm points",
         share(hot),
         share(molecular),
         share(hot_high),
-        weighted(0.16),
-        weighted(0.5),
-        weighted(0.84),
-        warm.len(),
+        f64::from(plane_clamped) / f64::from(plane_warm),
     );
     assert_within("the hot share of the plane", share(hot), 0.20, 0.40);
     assert!(
@@ -658,10 +702,6 @@ fn the_phases_fill_the_plane_as_the_brainstorm_says() {
         share(hot_high) > 0.95,
         "a hot share of {} far above",
         share(hot_high)
-    );
-    assert!(
-        warm.iter()
-            .all(|w| w.0 <= HOT_TEMPERATURE.value() * (1.0 + 1e-12))
     );
 }
 
@@ -774,7 +814,7 @@ fn assert_gas_in_ranges(seed: Seed, galaxy: &GalaxyParams, gas: &GasParams) {
             0.5e-3,
             0.8e-3,
         ),
-        ("pressure floor", gas.pressure_floor().value(), 300.0, 500.0),
+        ("pressure floor", gas.pressure_floor().value(), 300.0, 450.0),
         ("sigma_ln", gas.sigma_ln(), 2.0, 2.5),
         ("lane offset", gas.lane().offset().value(), 300.0, 600.0),
         ("lane width", gas.lane().width().value(), 150.0, 300.0),

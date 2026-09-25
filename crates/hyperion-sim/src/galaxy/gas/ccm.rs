@@ -12,25 +12,36 @@
 //!   curvature terms `F_a`, `F_b` above `x = 5.9`;
 //! - far ultraviolet, `8 < x ≤ 10`: two cubics in `x − 8`.
 //!
-//! At `R_V = 3.1`, the diffuse medium's mean, the ratio is about a ninth at 2.2 µm and the Milky
-//! Way's centre lies behind some thirty magnitudes in V and about three in K (brainstorm, "What
-//! dust and gas do"). Above `x = 10` (below 0.1 µm, the Lyman limit's side of the far ultraviolet)
-//! the fit has no data and [`extinction_ratio`] refuses rather than extrapolates. Radio is
-//! untouched.
+//! At `R_V = 3.1`, the diffuse medium's mean, the Milky Way's centre lies behind some thirty
+//! magnitudes in V and about three in K (brainstorm, "What dust and gas do"). Above `x = 10`
+//! (below 0.1 µm, the Lyman limit's side of the far ultraviolet) the fit has no data and
+//! [`extinction_ratio`] refuses rather than extrapolates. Radio is untouched.
 //!
-//! Beyond 3.3 µm the curve is Gordon et al.'s (2023, ApJ 950, 86, eqs. 8–13 and Table 4) near- and
-//! mid-infrared intercept at `R_V = 3.1`, which carries the silicate features at 10 and 20 µm
-//! (plan 07, ruling 91 of 2026-09-22). Continuing Cardelli, Clayton and Mathis's power law there,
-//! as Design note 20 first chose, gave 0.010 of `A_V` at 10 µm against the measured 0.08: two power
-//! laws, `g₁ λ^−α₁` and `g₁ λ_b^(α₂−α₁) λ^−α₂`, joined by the smooth step `W = 3z² − 2z³` with `z =
-//! (λ − λ_b + δ ÷ 2) ÷ δ` clamped to 0–1, plus two modified Drude profiles `S (γ ÷ λ₀)² ÷ ((λ ÷ λ₀
-//! − λ₀ ÷ λ)² + (γ ÷ λ₀)²)` with `γ = 2γ₀ ÷ (1 + e^(a (λ − λ₀)))`. The coefficients are Table 4's
-//! as the authors' `dust_extinction` package (`G23`) carries them, with the second feature at
-//! 19.58 µm (the arXiv text layer reads "19.258294", a typesetting artefact). The two curves do
-//! not meet at 3.3 µm: CCM gives 0.059 and Gordon et al. 0.049 there, a step of 16% that the
-//! ruling accepts, since no band lies near it. The feature alone gives `A_V ÷ τ_9.7` = 16.6, Rieke
-//! and Lebofsky's (1985, ApJ 288, 618) 16.6 ± 2.1, against Roche and Aitken's (1984) 18 ± 1 as
-//! Chiar and Tielens (2006, ApJ 637, 774, §7) adopt it for the local medium.
+//! From 1.1 µm the curve is Gordon et al.'s (2023, ApJ 950, 86, eqs. 8–13 and 15, Table 4) near-
+//! and mid-infrared intercept at `R_V = 3.1`, where their `b` term drops out, and over 0.9–1.1 µm
+//! it is joined to Cardelli, Clayton and Mathis's law (the infrared power law below `x = 1.1`,
+//! at 0.909–1.1 µm, and the optical polynomial above) by their eq. 17's weight
+//! `W₂ = W(λ, 1.0 µm, 0.2 µm)`: `(1 − W₂) CCM + W₂ G23` (ruling 98 of 2026-09-22). Cardelli,
+//! Clayton and Mathis's infrared power law, `λ^−1.61`, is the shallowest of the measured laws
+//! (Decleir et al. 2022, ApJ 930, 15, Table 5: 1.71 for the diffuse average) and runs 5–16% high
+//! over 1–4 µm against both Gordon et al. and Decleir et al.'s measured curve, whose `A_K ÷ A_V`
+//! is 0.102 ± 0.010; Gordon et al. give 0.1016 at 2.2 µm, about a tenth, where Cardelli, Clayton
+//! and Mathis gave 0.1135. The two laws differ by 4–5% across the join, so it has no step; ruling
+//! 91 joined them at 3.3 µm instead, with a step of 16%.
+//!
+//! Gordon et al.'s form is two power laws, `g₁ λ^−α₁` and `g₁ λ_b^(α₂−α₁) λ^−α₂`, joined by the
+//! smooth step `W = 3z² − 2z³` with `z = (λ − λ_b + δ ÷ 2) ÷ δ` clamped to 0–1 (their eq. 10), plus
+//! the silicate features at 10 and 20 µm as two modified Drude profiles `S (γ ÷ λ₀)² ÷ ((λ ÷ λ₀ −
+//! λ₀ ÷ λ)² + (γ ÷ λ₀)²)` with `γ = 2γ₀ ÷ (1 + e^(a (λ − λ₀)))`. Continuing Cardelli, Clayton and
+//! Mathis's power law into the mid infrared, as Design note 20 first chose, gave 0.010 of `A_V` at
+//! 10 µm against the measured 0.08 (ruling 91). The coefficients are Table 4's as the authors'
+//! `dust_extinction` package (`G23`) carries them, without the package's 0.9854 renormalisation,
+//! which is not in the paper. The second feature's centre is the package's 19.58294 µm; Table 4 as
+//! typeset prints 19.258294 µm, and which is the intended value cannot be settled from the paper
+//! (ruling 98; the effect is at most 6% at 15 µm and 0.06% at 10 µm, and Gordon et al.'s 2021
+//! sightlines fit 19.3–20.0 µm). The 10 µm feature alone gives `A_V ÷ τ_9.7` = 16.6, Rieke and
+//! Lebofsky's (1985, ApJ 288, 618) 16.6 ± 2.1, against Roche and Aitken's (1984) 18 ± 1 as Chiar
+//! and Tielens (2006, ApJ 637, 774, §7) adopt it for the local medium.
 //!
 //! [`HYDROGEN_COLUMN_PER_MAG`] ties the curve to the gas: Bohlin, Savage and Drake (1978, ApJ 224,
 //! 132) measured `N(H) ÷ E(B − V) = 5.8 × 10²¹` atoms cm⁻² mag⁻¹ for the diffuse medium, so at
@@ -60,9 +71,9 @@ pub const HYDROGEN_COLUMN_PER_MAG: f64 = HYDROGEN_COLUMN_PER_REDDENING / R_V;
 /// The largest inverse wavelength the fit covers, 10 µm⁻¹ (0.1 µm).
 const FAR_ULTRAVIOLET_LIMIT: f64 = 10.0;
 
-/// The wavelength beyond which the curve is Gordon et al.'s (2023) near- and mid-infrared form,
-/// 3.3 µm (ruling 91 of 2026-09-22).
-const MID_INFRARED_FROM_UM: f64 = 3.3;
+/// The centre of the join between Cardelli, Clayton and Mathis's law and Gordon et al.'s (2023)
+/// infrared form, 1.0 µm, and its width, 0.2 µm: their eq. 17's `W₂` (ruling 98 of 2026-09-22).
+const INFRARED_JOIN_UM: (f64, f64) = (1.0, 0.2);
 
 /// Gordon et al.'s (2023) Table 4 intercept `a_ir`: the power laws' `g₁`, `α₁` and `α₂`, the break
 /// `λ_b` and the transition's width `δ` (µm).
@@ -70,7 +81,9 @@ const G23_POWER: [f64; 5] = [0.385_26, 1.684_67, 0.787_91, 4.305_78, 4.783_38];
 
 /// Gordon et al.'s (2023) Table 4 silicate features: amplitude `S`, centre `λ₀` (µm), width `γ₀`
 /// (µm) and asymmetry `a` (µm⁻¹) of the 10 and 20 µm features. The second's width and asymmetry
-/// are fixed there after Gordon et al. (2021).
+/// are fixed there after Gordon et al. (2021). Its centre is `dust_extinction`'s 19.58294 µm; the
+/// typeset Table 4 prints 19.258294, and the paper alone cannot say which is meant (module
+/// documentation).
 const G23_SILICATES: [[f64; 4]; 2] = [
     [0.066_52, 9.843_4, 2.212_05, -0.247_03],
     [0.026_7, 19.582_94, 17.0, -0.27],
@@ -108,8 +121,8 @@ impl fmt::Display for EvaluateExtinctionError {
 
 impl Error for EvaluateExtinctionError {}
 
-/// `A_λ ÷ A_V` at `wavelength`, at `R_V = 3.1` (Cardelli, Clayton and Mathis 1989; module
-/// documentation).
+/// `A_λ ÷ A_V` at `wavelength`, at `R_V = 3.1`: Cardelli, Clayton and Mathis (1989) to 0.9 µm,
+/// Gordon et al. (2023) from 1.1 µm and a smooth blend between (module documentation).
 ///
 /// # Errors
 ///
@@ -123,9 +136,9 @@ impl Error for EvaluateExtinctionError {}
 /// use hyperion_sim::galaxy::gas::ccm::extinction_ratio;
 /// use hyperion_sim::units::Micrometres;
 ///
-/// // In K, at 2.2 µm, about a ninth of the visual extinction: why the centre is seen there.
+/// // In K, at 2.2 µm, about a tenth of the visual extinction: why the centre is seen there.
 /// let k = extinction_ratio(Micrometres::new(2.2))?;
-/// assert!((0.105..0.125).contains(&k));
+/// assert!((0.090..0.115).contains(&k));
 /// // Blue light is reddened: A_B − A_V is E(B − V), and A_V ÷ E(B − V) is R_V.
 /// let b = extinction_ratio(Micrometres::new(0.44))?;
 /// assert!(((b - 1.0) * 3.1 - 1.0).abs() < 0.03);
@@ -140,25 +153,37 @@ pub fn extinction_ratio(wavelength: Micrometres) -> Result<f64, EvaluateExtincti
     if lambda.is_infinite() {
         return Ok(0.0);
     }
-    if lambda > MID_INFRARED_FROM_UM {
-        return Ok(mid_infrared(lambda));
+    let (centre, width) = INFRARED_JOIN_UM;
+    if lambda >= centre + 0.5 * width {
+        return Ok(infrared(lambda));
     }
     let x = 1.0 / lambda;
     if x > FAR_ULTRAVIOLET_LIMIT {
         return Err(EvaluateExtinctionError::BeyondFarUltraviolet { wavelength });
     }
     let (a, b) = coefficients(x);
-    Ok(a + b / R_V)
+    let optical = a + b / R_V;
+    if lambda <= centre - 0.5 * width {
+        return Ok(optical);
+    }
+    let weight = smooth_step(lambda, centre, width);
+    Ok((1.0 - weight) * optical + weight * infrared(lambda))
 }
 
-/// `A_λ ÷ A_V` at `lambda` µm beyond 3.3 µm: Gordon et al.'s (2023) intercept, eqs. 8–13, which is
+/// Gordon et al.'s (2023) eq. 10 weight `W(λ, λ_b, δ) = 3z² − 2z³`, `z = (λ − λ_b + δ ÷ 2) ÷ δ`
+/// clamped to 0–1: 0 below `λ_b − δ ÷ 2`, 1 above `λ_b + δ ÷ 2`.
+fn smooth_step(lambda: f64, centre: f64, width: f64) -> f64 {
+    let z = ((lambda - (centre - 0.5 * width)) / width).clamp(0.0, 1.0);
+    z * z * (3.0 - 2.0 * z)
+}
+
+/// `A_λ ÷ A_V` at `lambda` µm from 1.1 µm: Gordon et al.'s (2023) intercept, eqs. 8–13, which is
 /// the whole ratio at `R_V = 3.1` (module documentation).
-fn mid_infrared(lambda: f64) -> f64 {
+fn infrared(lambda: f64) -> f64 {
     let [g1, alpha1, alpha2, break_at, width] = G23_POWER;
     let first = g1 * math::powf(lambda, -alpha1);
     let second = g1 * math::powf(break_at, alpha2 - alpha1) * math::powf(lambda, -alpha2);
-    let z = ((lambda - (break_at - 0.5 * width)) / width).clamp(0.0, 1.0);
-    let step = z * z * (3.0 - 2.0 * z);
+    let step = smooth_step(lambda, break_at, width);
     let features: f64 = G23_SILICATES
         .iter()
         .map(|&feature| silicate(lambda, feature))
@@ -175,8 +200,8 @@ fn silicate(lambda: f64, [amplitude, centre, width, asymmetry]: [f64; 4]) -> f64
     amplitude * g * g / (offset * offset + g * g)
 }
 
-/// `a(x)` and `b(x)` of Cardelli, Clayton and Mathis (1989), equations 2–5, for `1 ÷ 3.3 ≤ x ≤
-/// 10` µm⁻¹.
+/// `a(x)` and `b(x)` of Cardelli, Clayton and Mathis (1989), equations 2–5, for `1 ÷ 1.1 < x ≤
+/// 10` µm⁻¹ (the infrared branch, below `x = 1.1`, is read only across the join and by the tests).
 fn coefficients(x: f64) -> (f64, f64) {
     if x < 1.1 {
         // Equation 2, the infrared.
@@ -345,16 +370,65 @@ mod tests {
         a + b / R_V
     }
 
+    /// V is 1 and K about a tenth (ruling 98 of 2026-09-22: T7's window becomes 0.090–0.115):
+    /// Gordon et al.'s (2023) 0.1016 at 2.2 µm, against Decleir et al.'s (2022, Table 4) measured
+    /// 0.102 ± 0.010.
     #[test]
-    fn v_is_one_and_k_is_about_a_ninth() {
+    fn v_is_one_and_k_is_about_a_tenth() {
         assert!((Band::V.ratio() - 1.0).abs() < 0.01, "{}", Band::V.ratio());
-        assert!(
-            (0.105..=0.125).contains(&Band::K.ratio()),
-            "{}",
-            Band::K.ratio()
-        );
+        let k = Band::K.ratio();
+        assert!((0.090..=0.115).contains(&k), "{k}");
+        assert!((k - 0.1016).abs() < 5e-4, "{k}");
         // At CCM's own normalisation, x = 1.82 µm⁻¹, the ratio is 1 exactly.
         assert_same_bits(at_x(1.82), 1.0);
+    }
+
+    /// Ruling 98: from 1.1 µm the curve is Gordon et al.'s, which agrees with Decleir et al.'s
+    /// (2022, Table 4) measured J, H, K and 3.3 µm points within their errors: 0.264 ± 0.017,
+    /// 0.162 ± 0.013, 0.102 ± 0.010 and 0.054 ± 0.009, where Cardelli, Clayton and Mathis run
+    /// 5–16% high.
+    #[test]
+    fn the_near_infrared_is_gordon_et_als() {
+        for (microns, gordon, measured, error) in [
+            (1.25, 0.2645, 0.264, 0.017),
+            (1.65, 0.166, 0.162, 0.013),
+            (2.2, 0.1016, 0.102, 0.010),
+            (3.3, 0.0494, 0.054, 0.009),
+        ] {
+            let value = ratio(microns);
+            assert_same_bits(value, infrared(microns));
+            assert!((value - gordon).abs() < 5e-4, "{value} at {microns} µm");
+            assert!((value - measured).abs() < error, "{value} at {microns} µm");
+            let ccm = at_x(1.0 / microns);
+            assert!(
+                (1.04..1.20).contains(&(ccm / value)),
+                "CCM {ccm} at {microns} µm"
+            );
+        }
+        assert_same_bits(Band::J.ratio(), infrared(1.25));
+        assert_same_bits(Band::H.ratio(), infrared(1.65));
+    }
+
+    /// Ruling 98: the two laws are joined over 0.9–1.1 µm by Gordon et al.'s eq. 17 weight, with
+    /// no step: Cardelli, Clayton and Mathis's to 0.9 µm, bit for bit, Gordon et al.'s from 1.1,
+    /// halfway at 1.0, and across each end of the join the curve moves by under 10⁻⁹.
+    #[test]
+    fn the_laws_are_joined_smoothly_over_nine_tenths_to_one_point_one_microns() {
+        assert_same_bits(ratio(0.9), at_x(1.0 / 0.9));
+        assert_same_bits(ratio(0.85), at_x(1.0 / 0.85));
+        assert_same_bits(Band::I.ratio(), at_x(1.0 / 0.79));
+        assert_same_bits(ratio(1.1), infrared(1.1));
+        let middle = f64::midpoint(at_x(1.0), infrared(1.0));
+        assert!((ratio(1.0) - middle).abs() < 1e-15, "{}", ratio(1.0));
+        // The laws differ by 4–5% there.
+        assert!((0.94..0.97).contains(&(infrared(1.0) / at_x(1.0))));
+        for edge in [0.9, 1.1] {
+            let (below, above) = (ratio(edge - 1e-10), ratio(edge + 1e-10));
+            assert!(
+                (above - below).abs() < 1e-9,
+                "{below} and {above} at {edge} µm"
+            );
+        }
     }
 
     /// `A_B ÷ A_V − 1 = E(B − V) ÷ A_V = 1 ÷ R_V`, to 3%: the fit reproduces its own `R_V`.
@@ -382,14 +456,22 @@ mod tests {
         }
     }
 
-    /// The curve rises with inverse wavelength from the infrared through the optical to the
-    /// ultraviolet bump's near side.
+    /// Cardelli, Clayton and Mathis's law rises with inverse wavelength from the infrared through
+    /// the optical to the ultraviolet bump's near side, and so does the curve as built, joined to
+    /// Gordon et al.'s, from 6.8 µm (below the silicate feature's blue wing) to 0.22 µm.
     #[test]
     fn the_curve_rises_with_inverse_wavelength_to_the_bump() {
         let mut previous = 0.0;
         for i in 0..=4_200 {
             let x = 0.3 + 0.001 * f64::from(i);
             let value = at_x(x);
+            assert!(value > previous, "{value} at x = {x} after {previous}");
+            previous = value;
+        }
+        let mut previous = 0.0;
+        for i in 0..=4_400 {
+            let x = 1.0 / 6.8 + 0.001 * f64::from(i);
+            let value = ratio(1.0 / x);
             assert!(value > previous, "{value} at x = {x} after {previous}");
             previous = value;
         }
@@ -431,27 +513,17 @@ mod tests {
         assert!(ratio(18.0) < ratio(9.8));
     }
 
-    /// The two laws meet at 3.3 µm with the step the ruling accepts: Cardelli, Clayton and Mathis
-    /// on the near side, 0.059, and Gordon et al. on the far side, 0.049.
+    /// The continuum falls to about 6.8 µm, where the silicate feature's blue wing takes over, and
+    /// crosses 3.3 µm, where ruling 91 joined the laws with a step of 16%, without one.
     #[test]
-    fn the_mid_infrared_form_starts_at_three_point_three_microns() {
-        let (near, far) = (ratio(3.3), ratio(3.3 * (1.0 + 1e-12)));
-        assert_same_bits(near, at_x(1.0 / 3.3));
-        assert!(
-            (near - 0.0591).abs() < 5e-4 && (far - 0.0494).abs() < 5e-4,
-            "{near}, {far}"
-        );
-        // The near infrared is untouched: K is still Cardelli, Clayton and Mathis's.
-        assert_same_bits(Band::K.ratio(), at_x(1.0 / 2.2));
-        // The continuum falls to about 6.8 µm, where the silicate feature's blue wing takes over.
+    fn the_infrared_continuum_falls_to_the_silicate_feature() {
+        let (near, far) = (ratio(3.3 * (1.0 - 1e-12)), ratio(3.3 * (1.0 + 1e-12)));
+        assert!((far / near - 1.0).abs() < 1e-9, "{near}, {far}");
         let mut previous = f64::INFINITY;
-        for i in 0..=340 {
-            let value = ratio(3.3 + 0.01 * f64::from(i) + 1e-9);
-            assert!(
-                value < previous,
-                "{value} at {} µm",
-                3.3 + 0.01 * f64::from(i)
-            );
+        for i in 0..=570 {
+            let microns = 1.1 + 0.01 * f64::from(i);
+            let value = ratio(microns);
+            assert!(value < previous, "{value} at {microns} µm");
             previous = value;
         }
         assert!(ratio(7.5) > ratio(6.8));

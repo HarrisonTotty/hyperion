@@ -438,21 +438,41 @@ impl GasState {
         self.thermal.particles_per_hydrogen()
     }
 
-    /// The equilibrium temperature `(P ÷ k) ÷ (x n)` (Design note 12); infinite where the density
-    /// is 0.
+    /// The temperature (Design note 12): the equilibrium `(P ÷ k) ÷ (x n)`, held to 5,000–10,000 K
+    /// when warm (ruling 98 of 2026-09-22; [`ThermalState::temperature`]); infinite where the
+    /// density is 0.
     #[must_use]
     pub fn temperature(&self) -> Kelvin {
         self.thermal.temperature(self.density, self.pressure)
     }
 
-    /// The thermal sound speed `c = √(γ P ÷ ρ)`, with `γ = 5 ÷ 3` and `ρ = 1.4 m_H n`: what a
-    /// supernova shell's pressure-driven stage stalls against. Infinite where the density is 0.
+    /// Whether the gas is warm and its temperature clamped to 5,000 or 10,000 K
+    /// ([`ThermalState::clamped`]), so that `T × x n` is not `P`.
+    #[must_use]
+    pub fn temperature_clamped(&self) -> bool {
+        self.thermal.clamped()
+    }
+
+    /// `P ÷ ρ` in m² s⁻²: `(P ÷ k) k × 10⁶` over `1.4 m_H n × 10⁶`, the two cm⁻³-to-m⁻³ factors
+    /// cancelling.
+    fn pressure_per_mass(&self) -> f64 {
+        self.pressure.value() * BOLTZMANN_CONSTANT
+            / (MASS_PER_HYDROGEN_FACTOR * HYDROGEN_MASS_KG * self.density.value())
+    }
+
+    /// The adiabatic sound speed `c = √(γ P ÷ ρ)`, with `γ = 5 ÷ 3` and `ρ = 1.4 m_H n`: how fast
+    /// a small disturbance crosses the gas. Infinite where the density is 0.
     #[must_use]
     pub fn thermal_sound_speed(&self) -> MetresPerSecond {
-        // P ÷ ρ in m² s⁻²: (P ÷ k) k × 10⁶ over 1.4 m_H n × 10⁶, the two cm⁻³-to-m⁻³ factors
-        // cancelling.
-        let per_mass = self.pressure.value() * BOLTZMANN_CONSTANT
-            / (MASS_PER_HYDROGEN_FACTOR * HYDROGEN_MASS_KG * self.density.value());
-        MetresPerSecond::new((ADIABATIC_INDEX * per_mass).sqrt())
+        MetresPerSecond::new((ADIABATIC_INDEX * self.pressure_per_mass()).sqrt())
+    }
+
+    /// The isothermal sound speed `C₀ = √(P ÷ ρ)`, `ρ = 1.4 m_H n`: what a supernova shell merges
+    /// with the ambient gas against, when its shock has slowed to a few times it (Cioffi, McKee and
+    /// Bertschinger 1988, ApJ 334, 252, p. 264: "the ambient isothermal sound speed"; ruling 98 of
+    /// 2026-09-22). Infinite where the density is 0.
+    #[must_use]
+    pub fn isothermal_sound_speed(&self) -> MetresPerSecond {
+        MetresPerSecond::new(self.pressure_per_mass().sqrt())
     }
 }

@@ -174,7 +174,7 @@ impl Drawn {
             },
             Self::PressureFloor => Law::Uniform {
                 lo: 300.0,
-                hi: 500.0,
+                hi: 450.0,
             },
             Self::SigmaLn => Law::Uniform { lo: 2.0, hi: 2.5 },
             Self::LaneOffset => Law::Uniform {
@@ -626,12 +626,18 @@ impl GasParams {
         self.corona_density
     }
 
-    /// The pressure floor `P_cor` ÷ k, 300–500 K cm⁻³: what the pressure falls to far from the
+    /// The pressure floor `P_cor` ÷ k, 300–450 K cm⁻³: what the pressure falls to far from the
     /// plane.
     ///
     /// The floor is what caps a supernova shell's observable window at the brainstorm's 2–4 Myr,
-    /// which P07.T12 pins (see the plan's Risks for why it and the corona's density are independent
-    /// parameters).
+    /// which P07.T12 pins. With Cioffi, McKee and Bertschinger's (1988, ApJ 334, 252, p. 264)
+    /// merge criterion, against the ambient's isothermal sound speed `C₀² = P ÷ ρ` and 8 km/s of
+    /// turbulence, the largest window is 2.39 Myr at 300 K cm⁻³ and 2.06 at 450; the range stopped
+    /// at 500 until ruling 98 of 2026-09-22 trimmed it, since 470–500 fall short of 2 Myr by up to
+    /// 2%. Miller and Bregman's (2015, ApJ 800, 14) hot halo has this pressure 20–30 kpc from the
+    /// centre, the outer edge of the disc. Above the inner disc the real corona is at some
+    /// 2 × 10⁶ K and 1,000–3,000 K cm⁻³; here the floor and the corona's density are independent
+    /// parameters, coupled only through the corona's temperature (see the plan's Risks).
     #[must_use]
     pub fn pressure_floor(&self) -> KelvinPerCm3 {
         self.pressure_floor
@@ -742,7 +748,7 @@ mod tests {
             0.5e-3,
             0.8e-3,
         );
-        within("pressure floor", gas.pressure_floor().value(), 300.0, 500.0);
+        within("pressure floor", gas.pressure_floor().value(), 300.0, 450.0);
         assert_eq!(gas.pressure_height(), GasParams::PRESSURE_HEIGHT);
         assert_eq!(gas.pressure_speed(), GasParams::PRESSURE_SPEED);
         within("sigma_ln", gas.sigma_ln(), 2.0, 2.5);

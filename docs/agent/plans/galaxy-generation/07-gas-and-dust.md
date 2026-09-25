@@ -133,16 +133,19 @@ impl GasField {
 }
 pub enum SmoothingScale { Full, AtLeast(LightYears) }
 pub struct GasState { /* density(), pressure(), temperature(), thermal_sound_speed(), phase(),
-                         neutral_share(), particles_per_hydrogen() (ruling 91) */ }
+                         neutral_share(), particles_per_hydrogen() (ruling 91),
+                         temperature_clamped(), isothermal_sound_speed() (ruling 98) */ }
 
 // phase.rs (P07.T5; ruling 91 in P07.T12)
 pub enum GasPhase { Hot, Warm, Cold, Molecular }
 impl GasPhase { pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3) -> GasPhase; }
-pub struct ThermalState { /* phase(), neutral_share(), particles_per_hydrogen(), temperature(n, p) */ }
+pub struct ThermalState { /* phase(), neutral_share(), particles_per_hydrogen(), temperature(n, p),
+                            clamped() (ruling 98) */ }
 impl ThermalState {
     pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3, neutral_share: f64) -> ThermalState;
 }
 pub fn warm_neutral_share(neutral: f64, warm: f64) -> f64;   // n_neutral ÷ (n_neutral + n_warm)
+pub const WARM_CEILING: Kelvin;  // 10,000 K, the warm clamp's top (ruling 98); WARM_TEMPERATURE its foot
 pub fn warm_particles_per_hydrogen(neutral_share: f64) -> f64; // 1.1 + 1.2 (1 − f_n)
 
 // noise.rs
@@ -427,7 +430,7 @@ targets; the targets are binding, these are not.
    | Molecular disc scale length R_c       | the nuclear disc's scale length                      | 290 ly       |
    | Molecular disc height h_c             | 0.15–0.25 × R_c                                      | 58 ly        |
    | Corona density n_cor                  | 0.5–0.8 × 10⁻³ cm⁻³, log-uniform (note 12; rul. 91)  | 6 × 10⁻⁴     |
-   | Pressure floor P_cor ÷ k              | 300–500 K cm⁻³, uniform                              | 400          |
+   | Pressure floor P_cor ÷ k              | 300–450 K cm⁻³, uniform (ruling 98)                  | 400          |
    | Pressure height h_P                   | generator-version constant                           | 1,500 ly     |
    | Pressure speed σ_P                    | generator-version constant                           | 5.15 km/s    |
    | Log-normal width σ_ln                 | 2.0–2.5, uniform                                     | 2.3          |
@@ -559,9 +562,11 @@ targets; the targets are binding, these are not.
     0.8 × 10⁻³ cm⁻³ against a floor that can be as low as 300 K cm⁻³. Within the warm phase the
     neutral share is the smooth ratio f_n = n_neutral ÷ (n_neutral + n_warm) at that point, and the
     temperature is taken with **x = 1.1 + 1.2 (1 − f_n)** (ruling 91: taking 1.1 for every warm point
-    read warm ionised gas up to 2.1 times too warm), except that warm gas is held between 5,000 and
-    10⁵ K, its share moving where the smooth one would put it outside (P07.T12, as built); hot gas is
-    fully ionised; cold and molecular gas are neutral. That rule gives the neutral hydrogen column in
+    read warm ionised gas up to 2.1 times too warm), never adjusted; for readout the warm
+    temperature is clamped to 5,000–10,000 K (ruling 98, which replaces P07.T12's first build, where
+    the share moved to hold warm gas inside 5,000–10⁵ K), so T × x n = P holds where the clamp does
+    not bind. The thresholds keep each phase's own count, 2.3 for hot and 1.1 for cold (ruling 97.1,
+    confirmed by ruling 98.4). Hot gas is fully ionised; cold and molecular gas are neutral. That rule gives the neutral hydrogen column in
     `Realised` mode. In `Mean` mode there is no local density to classify, so the neutral column is
     the integral of n_neutral + n_mol.
 
@@ -635,9 +640,13 @@ targets; the targets are binding, these are not.
 20. **Bands.** `extinction_ratio` takes a wavelength and is the real interface. `Band` is a
     convenience set at the Johnson–Cousins and near-infrared effective wavelengths (U 0.36, B 0.44,
     V 0.55, R 0.64, I 0.79, J 1.25, H 1.65, K 2.2 µm; R and I per ruling 31), a mid-infrared point at
-    10 µm, and `Radio`, whose ratio is zero. Beyond 3.3 µm the curve is Gordon et al.'s (2023, ApJ
-    950, 86) near- and mid-infrared intercept at R_V = 3.1, which carries the silicate features
-    (ruling 91; it was the extended CCM power law, 0.010 of A_V at 10 µm against the measured 0.08).
+    10 µm, and `Radio`, whose ratio is zero. From 1.1 µm the curve is Gordon et al.'s (2023, ApJ
+    950, 86) near- and mid-infrared intercept at R_V = 3.1, which carries the silicate features,
+    joined to CCM's law (its infrared power law below x = 1.1, its optical polynomial above) over
+    0.9–1.1 µm by their eq. 17's weight (ruling 98; ruling 91
+    started it at 3.3 µm with a 16% step, and before that it was the extended CCM power law, 0.010
+    of A_V at 10 µm against the measured 0.08). K is 0.1016, about a tenth, against Decleir et
+    al.'s (2022) measured 0.102 ± 0.010; CCM gave 0.1135.
 
 ## Tasks
 
@@ -773,7 +782,8 @@ window itself.
 
 - **P07.T6.a Facade and hooks.** Assemble `GasField` (`new`, `mean_density`, `density`,
   `density_with`, `pressure`, `phase`, `dust_per_hydrogen`, `state`), `GasState` with `temperature`
-  (Design note 12) and `thermal_sound_speed` (c² = γ P ÷ ρ, γ = 5/3, ρ = 1.4 m_H n), and
+  (Design note 12) and `thermal_sound_speed` (c² = γ P ÷ ρ, γ = 5/3, ρ = 1.4 m_H n; ruling 98 adds
+  `isothermal_sound_speed`, C₀² = P ÷ ρ, which the shell window merges against), and
   `gas::modifiers` (`GasModifier`, `GasModifierSource`, `NoModifiers`, the point rule of Design note
   16). `state` is what plan 09's P09.T15 and P09.T16 read as `SiteGas`, with
   `SmoothingScale::AtLeast(250 ly)`; plan 09 as it now reads calls `GasField::state` directly and
@@ -835,7 +845,8 @@ are copied from Cardelli, Clayton and Mathis (1989), equations 1–5, and re-che
 `Band`, `R_V`, `HYDROGEN_COLUMN_PER_MAG`.
 
 - Files: `crates/hyperion-sim/src/galaxy/gas/ccm.rs`.
-- Tests: ratio at V is 1 to 1%; at K (2.2 µm) 0.105–0.125, the brainstorm's "about a ninth"; A_B ÷
+- Tests: ratio at V is 1 to 1%; at K (2.2 µm) 0.090–0.115 (ruling 98, for Gordon et al. 2023's
+  0.1016; it was 0.105–0.125, the brainstorm's "about a ninth", which becomes "about a tenth"); A_B ÷
   A_V − 1 equals 1 ÷ R_V to 3%; continuity at x = 1.1, 3.3, 5.9 and 8 to 2%; monotone rising with x
   from 0.3 to 4.5; `Radio` is exactly zero; golden values at the ten bands
   (`tests/golden/gas/ccm.golden`).
@@ -1167,13 +1178,15 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   disc only a lattice cell or two across, a typical seed's line lies well below the mean. A median
   under 10 mag is a finding for the owner, not a failure.
 - The shell window's ceiling, which is what the pressure floor is for. With the closed form plan
-  09's P09.T15.a will own, copied into the test until then (W = t_PDS × [¾ (v_PDS ÷ β c_net)^(10⁄7)
-  - ¼], t_PDS = 1.33 × 10⁴ yr × n^(−4⁄7), v_PDS = 413 km/s × n^(1⁄7), at 10⁵¹ erg and solar
-    metallicity, β = 2, c_net² = γP ÷ ρ + (8 km/s)²; Cioffi, McKee and Bertschinger 1988; re-check),
-    the largest W over a fixed scan of n from 10⁻³ to 10 cm⁻³ at P = `pressure_floor` is 2–4 Myr for
-    the MW fixture and for every seed of 200, and at the MW plane's pressure the largest W is 0.5–1
-    Myr and falls at n of 0.1–0.5 cm⁻³. If the floor's drawn range of 300–500 K cm⁻³ misses the
-    band, the range moves, not the band.
+  09's P09.T15.a will own, copied into the test until then (W = t_PDS × [¾ (v_PDS ÷ β c_net)^(10⁄7) +
+  ¼], t_PDS = 1.33 × 10⁴ yr × n^(−4⁄7), v_PDS = 413 km/s × n^(1⁄7), at 10⁵¹ erg and solar
+  metallicity, β = 2, c_net² = C₀² + (8 km/s)² with C₀² = P ÷ ρ the ambient's isothermal sound
+  speed; Cioffi, McKee and Bertschinger 1988, p. 264, and the exact inverse of their eq. 3.32b;
+  ruling 98 corrected the first copy's γP ÷ ρ and − ¼),
+  the largest W over a fixed scan of n from 10⁻³ to 10 cm⁻³ at P = `pressure_floor` is 2–4 Myr for
+  the MW fixture and for every seed of 200, and at the MW plane's pressure the largest W is 0.5–1
+  Myr and falls at n of 0.1–0.5 cm⁻³. If the floor's drawn range of 300–450 K cm⁻³ misses the
+  band, the range moves, not the band.
 - Filling factors by Monte Carlo: over 10⁵ points in the plane at R = 20,000–30,000 ly the hot share
   is 0.20–0.40 for MW σ_ln, and above 0.95 at |z| = 20,000 ly; the molecular share in the plane is
   under 2%.
@@ -1184,7 +1197,14 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   0.2 µm and the feature alone giving A_V ÷ τ₉.₇ in 15–20; the warm density clamped where the warm
   layer would weigh ½ G − M_c, with the corner proof that the neutral share is never below 0.5; the
   corona drawn at 0.5–0.8 × 10⁻³ cm⁻³ and hot at 20,000 ly above R = 8,000–40,000 ly for every seed;
-  and the in-plane window above.
+  and the in-plane window above. (Ruling 98.4 replaces the warm figures, 10⁵ K and T × x n = P
+  exactly; see the next bullet.)
+- Ruling 98's five points, in the version-12 batch: the shell window above against CMB88's
+  isothermal C₀ with + ¼, the floor drawn at 300–450 K cm⁻³ and T12's 2–4 Myr and 0.1–0.5 cm⁻³
+  windows restored; Gordon et al. 2023 from 1.1 µm with the 0.9–1.1 µm blend, T7's K window
+  0.090–0.115; warm temperatures clamped to 5,000–10,000 K for readout, x from the smooth share
+  exactly, T × x n = P where the clamp does not bind, and the binding share recorded; the 20 µm
+  feature's centre documented; and the two later refinements in Risks.
 - Mean preservation in space: the volume average of F over a 16,384 ly cube sampled at 10⁶ points is
   1 within the tolerance implied by its correlated variance (documented in the test).
 - Over 200 seeds: gas mass within 2% of plan 02's parameter; every parameter in range; plane
@@ -1267,6 +1287,48 @@ golden. Measured:
   `galaxy_parameters` (`rotation.escape_speed` 622.90 → 574.04 km/s). `gas/map`, `gas/noise` and
   every stellar and planetary golden are unmoved.
 
+**Ruling 98, as built (`gas13`, round 9, 2026-09-25, at version 11; the output moves are in the
+version-12 batch).** Measured against the windows the ruling sets:
+
+| Check                                                       | Window                    | Measured                                                              |
+| ----------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------- |
+| Largest shell window at the floor, fixture and 200 seeds    | 2–4 Myr (restored)        | 2.15; 2.06–2.39 (2.39 at 300, 2.06 at 450 K cm⁻³)                     |
+| At the plane's 4,144 K cm⁻³                                 | 0.5–1 Myr at 0.1–0.5 cm⁻³ | 0.907 at 0.352                                                        |
+| A_K ÷ A_V (2.2 µm)                                          | 0.090–0.115 (T7)          | 0.1016 (J 0.2645, H 0.1657; Decleir et al. 2022: 0.264, 0.162, 0.102) |
+| A_K to the centre, mean mode                                | 2.6–4.5                   | 3.334 (was 3.725; A_V 32.81 unmoved)                                  |
+| Warm temperatures, \|z\| 3,000–6,000 ly, by mass, 16/50/84% | 5,000–10,000 K            | 5,000/10,000/10,000 K                                                 |
+| Warm points the clamp binds on, \|z\| 3,000–6,000 ly        | recorded                  | 0.917 by number; by mass 0.232 at 5,000 K and 0.523 at 10,000 K       |
+| x n T ÷ P where it binds, 16/50/84%                         | recorded                  | 0.113/0.213/0.574                                                     |
+| Warm points the clamp binds on, plane, 20,000–30,000 ly     | recorded                  | 0.863                                                                 |
+
+- _98.1._ `tests/gas_statistics.rs`'s closed form takes C₀² = P ÷ ρ and + ¼; the floor is drawn
+  uniform on 300–450 K cm⁻³ (`params.rs`, the same word 6, so every seed's floor moves); the
+  provisional constants are gone. `GasState::isothermal_sound_speed` is added beside
+  `thermal_sound_speed` (which stays adiabatic, as its name says) for plan 09 to merge against.
+  Plan 09's P09.T15.a text is corrected, and its window table re-pinned at 3,800 K cm⁻³: 4.8, 8.4,
+  8.4, 4.4, 1.9, 0.82, 0.35 × 10⁵ yr at 10⁻² … 10⁴ cm⁻³, with the hot branch's 2.0 at 10⁻³ not
+  re-derived.
+- _98.3._ `ccm::extinction_ratio` is CCM to 0.9 µm, Gordon et al.'s intercept from 1.1 µm, and
+  `(1 − W₂) CCM + W₂ G23` between, W₂ their eq. 10 step centred at 1.0 µm, 0.2 µm wide. The curve
+  moves by under 10⁻⁹ across either end of the join and is continuous at 3.3 µm; it rises with
+  inverse wavelength from 6.8 to 0.22 µm. The V horizon is unmoved; the K horizon from the Sun in
+  mean mode moves from 26,388 to 32,346 ly.
+- _98.4._ `ThermalState` keeps the smooth share and its `x` for every warm point and clamps the
+  temperature, with `clamped()` (`GasState::temperature_clamped`). **A finding for the record: the
+  clamp is the rule, not the exception.** It binds on 86% of the plane's warm points and 92% of
+  those 3,000–6,000 ly up, three quarters of that warm mass, so T × x n = P holds on about a tenth
+  of the warm gas and the warm temperature is, in effect, a thermostat at 5,000 or 10,000 K. That
+  is what the research predicted (a decade of density noise at a smooth pressure), and it is why
+  the two-phase split is the refinement in Risks. The `Realised` neutral column moves back to the
+  smooth share at every warm point.
+- _98.5._ The 20 µm centre stays 19.58294 µm, documented in `ccm.rs` against Table 4's typeset
+  19.258294.
+- _Output moved (at 11, re-blessed in the lane):_ `gas/params` (the three seeds' `pressure_floor`),
+  `gas/field` (24 pressures and 24 temperatures; no phase, share or density moved), `gas/ccm` (J, H,
+  K and 3.3 µm, and three new rows at 0.95, 1.0 and 1.05 µm), `gas/extinction` (the realised
+  neutral columns and the K horizon), `gas/sightlines` (A_K and the neutral columns). No star,
+  planet, stellar, planetary or server golden moved.
+
 ## Verification
 
 - `just ci` after every task; `just ci-slow` (which adds `just test-slow`) after T4.b, T5, T6.b and
@@ -1323,7 +1385,11 @@ golden. Measured:
   300–500 give 1.61–1.94 Myr, and 2 Myr needs a floor under about 270 K cm⁻³, where ruling 91's
   corona of up to 0.8 × 10⁻³ cm⁻³ is no longer hot over the inner disc (the corner proof's 104,000 K
   at 300 falls to about 94,000 K at 270). The floor is unmoved and the window test carries a
-  provisional 1.5–2.0 Myr, for a ruling (T12, "As built").
+  provisional 1.5–2.0 Myr, for a ruling (T12, "As built"). **Ruled (ruling 98):** those figures
+  used the adiabatic γP ÷ ρ where Cioffi, McKee and Bertschinger's merge criterion takes the
+  ambient's isothermal sound speed, P ÷ ρ. With it (and the exact + ¼) the floor gives 2.06–2.39
+  Myr once its range is trimmed to 300–450 K cm⁻³, the plane 0.9 Myr at 0.35 cm⁻³, and T12's
+  windows are restored; the corner proof's lowest floor, 300, is unchanged.
 - **The smooth molecular disc is a tenth of the real central molecular zone's mass** (Design note
   5), so that the mean extinction to the centre is the brainstorm's thirty magnitudes, which is the
   outcome the brainstorm states; it gives the central disc no mass. The rest must arrive as plan
@@ -1718,4 +1784,20 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   temperature 3,000–6,000 ly from the plane of the fixture is 5,000/10,730/40,240 K at its 16th,
   50th and 84th percentiles, where the warm ionised medium is measured at 6,000–10,000 K (Haffner et
   al. 2009). A temperature from a log-normal density at a smooth pressure cannot hold one phase's
-  temperature; it is recorded, not tuned.
+  temperature; it is recorded, not tuned. **Ruled (ruling 98):** the warm temperature is clamped
+  to 5,000–10,000 K for readout, with the smooth share never adjusted; the clamp binds on some 86–92%
+  of the warm points (T12, "Ruling 98, as built").
+- **Later refinement: a corona with its own temperature (ruling 98.2).** The disc's pressure floor
+  and the corona's density are coupled only in this model, through the corona's temperature, which
+  comes out near 10⁵ K, some twenty times cooler than the real halo's 2 × 10⁶ K (Miller and Bregman
+  2015, a β-model with n₀ r_c^(3β) = 1.35 × 10⁻² cm⁻³ kpc^(3β), β = 0.50). The real halo has the
+  floor's 300–450 K cm⁻³ only 20–30 kpc from the centre; above the inner disc it is at 1,000–3,000
+  K cm⁻³. A density-profiled corona with its own T_h, taking P_floor(r) = 1.92 n_e(r) k T_h in place
+  of a constant, would reconcile the two; its largest shell window (P ≈ 440 K cm⁻³ at 24 kpc) is
+  about 2.0 Myr. It moves the pressure and every phase above the disc, so it is a version bump,
+  not built now.
+- **Later refinement: a two-phase warm medium (ruling 98.4).** The clamp stands in for a sub-grid
+  split: each warm point a warm ionised part near 8,000 K (rising towards 10⁴ K with |z|; Haffner et
+  al. 2009) and a warm neutral part at Wolfire et al.'s (2003) T(P), each in pressure balance, with
+  the noised density setting the filling factors of hot, warm and cold gas rather than the
+  temperature. It moves labels and filling factors, so it is a version bump, not built now.

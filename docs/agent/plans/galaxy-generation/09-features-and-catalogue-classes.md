@@ -701,15 +701,25 @@ Pure functions. The processes that use them are in phase 7.
 #### P09.T15 The shell window
 
 - **P09.T15.a Closed form.** `shell_window(site: &SiteGas, energy, metallicity) -> ShellWindow`. The
-  shell is distinct until its shock slows to β c_net, β = 2, c_net² = c_th² + σ², σ = 8 km/s, c_th²
-  = γP ÷ ρ from the site's pressure and density. Radiative branch (Cioffi, McKee and Bertschinger
-  1988): W = t_PDS × [¾ (v_PDS ÷ β c_net)^(10⁄7) + ¼], with t_PDS = 1.33 × 10⁴ yr E₅₁^(3⁄14)
+  shell is distinct until its shock slows to β c_net, β = 2, c_net² = C₀² + σ², σ = 8 km/s, with
+  C₀² = P ÷ ρ the ambient's isothermal sound speed from the site's pressure and density
+  (`GasState::isothermal_sound_speed`; Cioffi, McKee and Bertschinger 1988, p. 264, "the ambient
+  isothermal sound speed"; ruling 98 of 2026-09-22 replaced the adiabatic γP ÷ ρ this text first
+  had). Radiative branch (Cioffi, McKee and Bertschinger 1988): W = t_PDS × [¾ (v_PDS ÷ β
+  c_net)^(10⁄7) + ¼], the exact inverse of their eq. 3.32b (their eq. 4.4a drops the ¼), with
+  t_PDS = 1.33 × 10⁴ yr E₅₁^(3⁄14)
   ζ^(−5⁄14) n^(−4⁄7) and v_PDS = 413 km/s n^(1⁄7) ζ^(3⁄14) E₅₁^(1⁄14). Hot branch (Tang and Wang
   2005), taken when the blast turns sonic before t_PDS: W = 0.41 t_c, with t_c their characteristic
   time from energy, pressure and sound speed. `SiteGas` comes from `GasField::state` with
   `SmoothingScale::AtLeast(250 ly)`, floored at the corona's pressure. β, σ and the smoothing scale
   belong to the generator version. Files: `galaxy/snr.rs`. Tests: `window_table` at P ÷ k = 3,800 K
-  cm⁻³ reproduces 2.0, 3.5, 6.2, 7.5, 4.3, 1.9 and 0.35 × 10⁵ yr at n = 10⁻³ … 10⁴ to 25%;
+  cm⁻³ reproduces, to 25%, the radiative branch's 4.8, 8.4, 8.4, 4.4, 1.9, 0.82 and 0.35 × 10⁵ yr at
+  n = 10⁻², 10⁻¹, 1, 10, 10², 10³ and 10⁴ cm⁻³, and the hot branch's 2.0 × 10⁵ yr at 10⁻³ (ruling
+  98 re-pinned the radiative entries with the isothermal C₀; the table first read 3.5, 6.2, 7.5,
+  4.3, 1.9 and 0.35, the adiabatic form's, with no 10³ entry; the hot branch's 2.0 is Tang and
+  Wang's and was not re-derived; with this form plan 07's floor of 300–450 K cm⁻³ gives a largest
+  window of 2.06–2.39 Myr at E₅₁ = 1, which rises as E₅₁^0.32, so P09.T15.b's supremum over the drawn
+  energies is larger);
   continuity across the branch; W → 0 at both ends of density; the longest windows, 0.5–1 Myr, fall
   at 0.1–0.5 cm⁻³ in the model's own pressure field.
 - **P09.T15.b Caps.** `ShellEnvironment { Field, TypeIa, Bubble }` and `WindowCaps::from_galaxy`:

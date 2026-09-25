@@ -22,16 +22,22 @@
 //! 100 cm⁻³ and cold gas vanishes, which happens only at the centre of the most compact molecular
 //! discs, whose mid-plane pressure reaches some 10⁶ K cm⁻³.
 //!
-//! **Warm gas stays between 5,000 and 10⁵ K** ([`ThermalState`]). Its smooth share can put it
-//! outside: near the hot limit a point of the neutral disc would read up to 2.1 × 10⁵ K, and near
-//! the cold limit a point of the ionised layer as low as 2,400 K. Neither is an equilibrium — gas
-//! above 10⁵ K is collisionally ionised, and ionised gas below 5,000 K recombines — so the share
-//! moves until the gas sits at the edge it would cross, `x = P ÷ (10⁵ k n)` or `P ÷ (5,000 k n)`.
-//! Ruling 91 put the smooth `x` into the warm/cold threshold instead; that labels as cold, and so
-//! as neutral with 1.1 particles, gas that then reads up to 10,450 K, so the thresholds keep each
-//! label's own count and the edges are held here. The bands are a factor of at most 2.1 in
-//! density at either end of the warm phase, and the one near the hot limit holds its most
-//! rarefied gas.
+//! **Warm gas reads 5,000–10,000 K** ([`ThermalState`], ruling 98 of 2026-09-22). A smooth
+//! pressure over a decade of density noise would scatter `P ÷ (x n)` by a decade, where the warm
+//! media are measured at 6,000–10,000 K (Haffner et al. 2009, §II.A; 7,000–10,000 K in the warm
+//! ionised medium) and the warm neutral medium at 4,240–8,800 K (Wolfire et al. 2003, ApJ 587,
+//! 278, Table 3); Jenkins and Tripp (2011, ApJ 734, 65) find the thermal pressure scattered by
+//! only some 0.175 dex. So the density contrast within the phase is mostly turbulent support or
+//! unresolved hot and cold gas, not temperature, and the warm temperature is clamped to 5,000–10⁴
+//! K for readout. The particle count is the smooth share's `x` exactly, never adjusted, and so is
+//! the neutral share; `T × x n = P` holds where the clamp does not bind, and where it does the
+//! ratio `x n T ÷ P` is the part of the pressure the model does not resolve. Ruling 91 put the
+//! smooth `x` into the warm/cold threshold; that labels as cold, and so as neutral with 1.1
+//! particles, gas that then reads up to 10,450 K, so the thresholds keep each label's own count,
+//! 2.3 for hot and 1.1 for cold, which is the count of the phase each boundary admits. A split of
+//! each warm point into a warm ionised part near 8,000 K and a warm neutral part at Wolfire et
+//! al.'s `T(P)`, each in pressure balance, would let the noise set filling factors instead; it
+//! moves labels, and is a later refinement (plan 07, Risks).
 //!
 //! With these thresholds a log-normal of `σ_ln` 2 to 2.5 around the Milky Way plane's density at
 //! its pressure puts some 17% to 38% of the plane's volume in the hot phase, the brainstorm's "a
@@ -46,8 +52,13 @@ use crate::units::{HydrogenPerCm3, Kelvin, KelvinPerCm3};
 /// The temperature above which gas is hot, 10⁵ K (Design note 12).
 pub const HOT_TEMPERATURE: Kelvin = Kelvin::new(1e5);
 
-/// The temperature above which gas that is not hot is warm, 5,000 K (Design note 12).
+/// The temperature above which gas that is not hot is warm, 5,000 K (Design note 12), and the
+/// least a warm point reads (ruling 98 of 2026-09-22).
 pub const WARM_TEMPERATURE: Kelvin = Kelvin::new(5_000.0);
+
+/// The most a warm point reads, 10,000 K: the top of the warm media's measured 6,000–10,000 K
+/// (Haffner et al. 2009, Rev. Mod. Phys. 81, 969, §II.A; ruling 98 of 2026-09-22).
+pub const WARM_CEILING: Kelvin = Kelvin::new(10_000.0);
 
 /// The density above which gas that is neither hot nor warm is molecular, 100 cm⁻³ (Design note
 /// 12).
@@ -119,11 +130,12 @@ impl GasPhase {
 }
 
 /// The gas at a point as its phase and ionisation describe it: the phase, the share of its
-/// hydrogen that is neutral, and the particles per hydrogen nucleus its temperature is taken with
+/// hydrogen that is neutral, the particles per hydrogen nucleus, and the temperature it reads
 /// (module documentation).
 ///
-/// The two agree everywhere: `x = 2.3 − 1.2 f`, and the temperature `(P ÷ k) ÷ (x n)` is above 10⁵
-/// K when hot, 5,000–10⁵ K when warm and at most 5,000 K when cold or molecular.
+/// `x = 2.3 − 1.2 f` everywhere. The temperature is `(P ÷ k) ÷ (x n)` above 10⁵ K when hot and
+/// at most 5,000 K when cold or molecular; when warm it is that clamped to 5,000–10,000 K, and
+/// [`clamped`](Self::clamped) says whether the clamp binds.
 ///
 /// # Examples
 ///
@@ -131,22 +143,25 @@ impl GasPhase {
 /// use hyperion_sim::galaxy::gas::phase::{GasPhase, ThermalState};
 /// use hyperion_sim::units::{HydrogenPerCm3, KelvinPerCm3};
 ///
-/// let (n, p) = (HydrogenPerCm3::new(0.02), KelvinPerCm3::new(3_800.0));
-/// // Warm ionised gas, where the warm layer holds most of the hydrogen, has 2.3 particles.
+/// let (n, p) = (HydrogenPerCm3::new(0.5), KelvinPerCm3::new(3_800.0));
+/// // Warm ionised gas, where the warm layer holds all the hydrogen, has 2.3 particles, and here
+/// // reads 3,800 ÷ (2.3 × 0.5) = 3,304 K, which is clamped to 5,000 K.
 /// let ionised = ThermalState::of(n, p, 0.0);
 /// assert_eq!(ionised.phase(), GasPhase::Warm);
-/// assert!((ionised.temperature(n, p).value() - 3_800.0 / (2.3 * 0.02)).abs() < 1e-9);
-/// // The same density in the neutral disc would read above 10⁵ K, so it is ionised until it sits
-/// // at 10⁵ K.
-/// let neutral = ThermalState::of(n, p, 0.96);
-/// assert!(neutral.neutral_share() < 0.96);
-/// assert!((neutral.temperature(n, p).value() - 1e5).abs() < 1e-6);
+/// assert!(ionised.clamped());
+/// assert!((ionised.temperature(n, p).value() - 5_000.0).abs() < 1e-9);
+/// // Neutral gas of the same density reads 3,800 ÷ (1.1 × 0.5) = 6,909 K, unclamped.
+/// let neutral = ThermalState::of(n, p, 1.0);
+/// assert!(!neutral.clamped() && (neutral.neutral_share() - 1.0).abs() < f64::EPSILON);
+/// assert!((neutral.temperature(n, p).value() - 3_800.0 / 0.55).abs() < 1e-9);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThermalState {
     phase: GasPhase,
     neutral_share: f64,
     particles: f64,
+    /// The temperature a warm point is held at where `P ÷ (x n)` falls outside 5,000–10,000 K.
+    clamp: Option<Kelvin>,
 }
 
 impl ThermalState {
@@ -155,35 +170,27 @@ impl ThermalState {
     #[must_use]
     pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3, neutral_share: f64) -> Self {
         let phase = GasPhase::of(n, p_over_k);
-        let (share, particles) = match phase {
-            GasPhase::Hot => (0.0, IONISED_PARTICLES_PER_HYDROGEN),
+        let (share, particles, clamp) = match phase {
+            GasPhase::Hot => (0.0, IONISED_PARTICLES_PER_HYDROGEN, None),
             GasPhase::Warm => {
-                let smooth = warm_particles_per_hydrogen(neutral_share);
-                // The counts at which the gas would sit at 10⁵ K and at 5,000 K: at most 2.3 and
-                // above 1.1, since it is neither hot nor cold.
-                let at_hot = p_over_k.value() / (n.value() * HOT_TEMPERATURE.value());
-                let at_cold = p_over_k.value() / (n.value() * WARM_TEMPERATURE.value());
-                let held = if smooth < at_hot {
-                    at_hot
-                } else if smooth > at_cold {
-                    at_cold
+                let particles = warm_particles_per_hydrogen(neutral_share);
+                let t = p_over_k.value() / (particles * n.value());
+                let clamp = if t < WARM_TEMPERATURE.value() {
+                    Some(WARM_TEMPERATURE)
+                } else if t > WARM_CEILING.value() {
+                    Some(WARM_CEILING)
                 } else {
-                    return Self {
-                        phase,
-                        neutral_share,
-                        particles: smooth,
-                    };
+                    None
                 };
-                let share = (IONISED_PARTICLES_PER_HYDROGEN - held)
-                    / (IONISED_PARTICLES_PER_HYDROGEN - NEUTRAL_PARTICLES_PER_HYDROGEN);
-                (share.clamp(0.0, 1.0), held)
+                (neutral_share, particles, clamp)
             }
-            GasPhase::Cold | GasPhase::Molecular => (1.0, NEUTRAL_PARTICLES_PER_HYDROGEN),
+            GasPhase::Cold | GasPhase::Molecular => (1.0, NEUTRAL_PARTICLES_PER_HYDROGEN, None),
         };
         Self {
             phase,
             neutral_share: share,
             particles,
+            clamp,
         }
     }
 
@@ -193,9 +200,8 @@ impl ThermalState {
         self.phase
     }
 
-    /// The share of the hydrogen that is neutral: 0 when hot, 1 when cold or molecular, and when
-    /// warm the smooth layers' share, moved where the gas would otherwise read above 10⁵ K or
-    /// below 5,000 K. It is what the 21 cm column counts.
+    /// The share of the hydrogen that is neutral: 0 when hot, 1 when cold or molecular, and the
+    /// smooth layers' share when warm. It is what the 21 cm column counts.
     #[must_use]
     pub fn neutral_share(&self) -> f64 {
         self.neutral_share
@@ -208,11 +214,20 @@ impl ThermalState {
         self.particles
     }
 
-    /// The equilibrium temperature `(P ÷ k) ÷ (x n)` of gas of density `n` at pressure
-    /// `p_over_k`, which must be the ones the state was taken at; infinite where the density is 0.
+    /// Whether the gas is warm and its temperature clamped to 5,000 or 10,000 K, so that `T × x n`
+    /// is not `P` (module documentation).
+    #[must_use]
+    pub fn clamped(&self) -> bool {
+        self.clamp.is_some()
+    }
+
+    /// The temperature of gas of density `n` at pressure `p_over_k`, which must be the ones the
+    /// state was taken at: the equilibrium `(P ÷ k) ÷ (x n)`, held to 5,000–10,000 K when warm;
+    /// infinite where the density is 0.
     #[must_use]
     pub fn temperature(&self, n: HydrogenPerCm3, p_over_k: KelvinPerCm3) -> Kelvin {
-        Kelvin::new(p_over_k.value() / (self.particles * n.value()))
+        self.clamp
+            .unwrap_or_else(|| Kelvin::new(p_over_k.value() / (self.particles * n.value())))
     }
 }
 
@@ -282,52 +297,74 @@ mod tests {
         }
     }
 
-    /// Ruling 91: a state's temperature agrees with its label at every share — above 10⁵ K when
-    /// hot, 5,000–10⁵ K when warm, never above 5,000 K when cold — and `T × x n = P` with the
-    /// state's own `x`, which is `2.3 − 1.2 f` with its own neutral share `f`, and the smooth
-    /// share's `x` wherever that keeps the gas inside the warm phase's temperatures.
+    /// Rulings 91 and 98: a state's temperature agrees with its label at every share — above 10⁵ K
+    /// when hot, 5,000–10,000 K when warm, never above 5,000 K when cold — the warm gas's `x` is
+    /// `2.3 − 1.2 f` with the smooth share `f` exactly, and `T × x n = P` wherever the warm clamp
+    /// does not bind.
     #[test]
     fn a_states_temperature_agrees_with_its_label() {
+        let (mut warm, mut clamped) = (0_u32, 0_u32);
         for share in SHARES {
             for pressure in [400.0, 3_800.0, 40_000.0] {
                 for j in 0..=1_200 {
                     let density = math::exp10(-6.0 + 0.01 * f64::from(j));
-                    check_state(density, pressure, share);
+                    let state = check_state(density, pressure, share);
+                    if state.phase() == GasPhase::Warm {
+                        warm += 1;
+                        clamped += u32::from(state.clamped());
+                    }
                 }
             }
         }
+        // The scan crosses the whole warm band at every share, so the clamp binds at both ends
+        // and not everywhere.
+        assert!(clamped > 0 && clamped < warm, "{clamped} of {warm}");
     }
 
     /// One point of [`a_states_temperature_agrees_with_its_label`], at `density` cm⁻³, `pressure`
     /// K cm⁻³ and the smooth share `share`.
-    fn check_state(density: f64, pressure: f64, share: f64) {
+    fn check_state(density: f64, pressure: f64, share: f64) -> ThermalState {
         let (n, p) = (HydrogenPerCm3::new(density), KelvinPerCm3::new(pressure));
         let state = ThermalState::of(n, p, share);
         let t = state.temperature(n, p).value();
         let particles = state.particles_per_hydrogen();
         let balance = t * particles * density / pressure;
-        assert!((balance - 1.0).abs() < 1e-15, "T x n ÷ P = {balance}");
+        if !state.clamped() {
+            assert!((balance - 1.0).abs() < 1e-15, "T x n ÷ P = {balance}");
+        }
         let f = state.neutral_share();
         assert!((0.0..=1.0).contains(&f), "a share of {f}");
         assert!((warm_particles_per_hydrogen(f) - particles).abs() < 1e-14);
         match state.phase() {
-            GasPhase::Hot => assert!(t > HOT_TEMPERATURE.value()),
+            GasPhase::Hot => assert!(t > HOT_TEMPERATURE.value() && !state.clamped()),
             GasPhase::Warm => {
-                let smooth = pressure / (warm_particles_per_hydrogen(share) * density);
-                assert!(t >= WARM_TEMPERATURE.value() * (1.0 - 1e-12), "{t} K warm");
-                assert!(t <= HOT_TEMPERATURE.value() * (1.0 + 1e-12), "{t} K warm");
-                if (WARM_TEMPERATURE.value()..=HOT_TEMPERATURE.value()).contains(&smooth) {
-                    assert!(f.total_cmp(&share).is_eq(), "{f} moved from {share}");
-                }
+                assert!(f.total_cmp(&share).is_eq(), "{f} moved from {share}");
+                assert!(
+                    particles
+                        .total_cmp(&warm_particles_per_hydrogen(share))
+                        .is_eq(),
+                    "{particles} is not the smooth count"
+                );
+                assert!(
+                    (WARM_TEMPERATURE.value()..=WARM_CEILING.value()).contains(&t),
+                    "{t} K warm"
+                );
+                let smooth = pressure / (particles * density);
+                let inside = (WARM_TEMPERATURE.value()..=WARM_CEILING.value()).contains(&smooth);
+                assert_eq!(state.clamped(), !inside, "{smooth} K before the clamp");
             }
             GasPhase::Cold | GasPhase::Molecular => {
-                assert!(t <= WARM_TEMPERATURE.value(), "{t} K is {state:?}");
+                assert!(
+                    t <= WARM_TEMPERATURE.value() && !state.clamped(),
+                    "{t} K is {state:?}"
+                );
             }
         }
+        state
     }
 
     /// The share of the hydrogen a 21 cm column counts: none of the hot gas, all of the cold, and
-    /// the neutral layer's share of the warm where the gas is not near the hot limit.
+    /// the smooth layers' share of the warm.
     #[test]
     fn the_neutral_share_follows_the_phase() {
         let p = KelvinPerCm3::new(3_800.0);
@@ -337,10 +374,12 @@ mod tests {
         assert!((state(300.0, 0.0).neutral_share() - 1.0).abs() < f64::EPSILON);
         assert!((state(0.3, 0.8).neutral_share() - 0.8).abs() < 1e-15);
         assert!(state(0.1, 0.0).neutral_share().abs() < f64::MIN_POSITIVE);
-        // Near the hot limit neutral-disc gas is ionised to 10⁵ K, and near the cold limit
-        // ionised gas recombines to 5,000 K.
-        assert!(state(0.02, 0.96).neutral_share() < 0.5);
-        assert!(state(0.6, 0.0).neutral_share() > 0.5);
+        // Ruling 98: near either edge of the warm phase the share is still the smooth one; the
+        // temperature is clamped instead.
+        assert!(state(0.02, 0.96).neutral_share().total_cmp(&0.96).is_eq());
+        assert!(state(0.02, 0.96).clamped());
+        assert!(state(0.6, 0.0).neutral_share().abs() < f64::MIN_POSITIVE);
+        assert!(state(0.6, 0.0).clamped());
     }
 
     /// The analytic hot filling factor at `σ_ln`: the chance that `n_disc F + n_cor` is below the
