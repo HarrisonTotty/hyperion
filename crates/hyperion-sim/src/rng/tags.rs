@@ -503,13 +503,15 @@ domain_tags! {
 
     /// A system's belts (P14.T21.a–b): the belt in belt slot n reads words 8n onwards, the ranks of
     /// its depletion factor and of its size slope, one uniform each, a Kuiper-like belt's bright
-    /// mark and its bright efficiency's standard normal (words 8n + 3 and 8n + 4); words 8n + 5 to
-    /// 8n + 7 are reserved (`planetary::belts::BeltDraws`).
+    /// mark and its bright efficiency's standard normal (words 8n + 3 and 8n + 4), and the rank of
+    /// its largest member's share (word 8n + 5, ruling 100.3); words 8n + 6 and 8n + 7 are
+    /// reserved (`planetary::belts::BeltDraws`).
     BELT_POPULATION: System = "belt.population";
 
     /// A belt's named member (P14.T21.c), keyed by the member: the rank of its component, its
     /// semi-major axis, eccentricity and inclination, its node, periapsis and mean anomaly, and
-    /// its radius rank, words 0–7, one uniform each (`planetary::belts::MemberDraws`).
+    /// its radius rank, words 0–7, and the growth-cap spread of the rank law's candidate of its
+    /// sub-index, word 8 (ruling 100.4), one uniform each (`planetary::belts::MemberDraws`).
     BELT_MEMBER: Body = "belt.member";
 
     /// A system's cometary halo (P14.T21.d): the rank of its number of comets, word 0, one

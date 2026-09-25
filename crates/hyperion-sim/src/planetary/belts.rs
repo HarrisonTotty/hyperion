@@ -92,13 +92,17 @@
 //!
 //! # Largest members
 //!
-//! Sizes follow N(> D) ∝ D^(−q), q drawn uniform over 2.5–3.5 per belt ([`SIZE_SLOPE`]),
-//! normalised so that the bodies from [`SMALLEST_BODY`] (1 km) up hold the belt's mass worn down
-//! to the system's age at the epoch ([`BeltHost::new`]; ruling 95.2), so that no member outweighs
-//! its belt; the k-th largest has N(> D) = k, D = `D_max` k^(−1⁄q). Those over [`MEMBER_MIN_DIAMETER`]
-//! (400 km), at most [`MAX_MEMBERS`] (8), become bodies in the belt's slot with sub-indices 1
-//! upward (design note 3), on orbits drawn inside the belt ([`BeltMember`]): the semi-major axis
-//! as the disc's solids lie, eccentricity Rayleigh with σ = 0.1 and inclination Rayleigh with
+//! The belt's population follows N(> D) ∝ D^(−q), q drawn uniform over 2.5–3.5 per belt
+//! ([`SIZE_SLOPE`]), but its largest bodies follow their own shallow tail under a growth cap
+//! (ruling 100; [`member_sizes`]): the largest holds 0.1–0.4 of the belt's primordial mass, the
+//! k-th is D₁ k^(−1⁄1.8), icy ones stop at 3,300 km × `x_m`^0.2 with a per-member spread and rocky
+//! ones at 0.1 M⊕. They lie above the collisional cascade's top, so they are sized from the belt's
+//! primordial mass, depleted but unworn, and do not wear: the belt's cascade is its mass less its
+//! members', and the belt reports its worn cascade plus its members ([`Belt::mass_at`]), so no
+//! member outweighs its belt (ruling 95.2), and the members hold at most 0.75 of its mass at the
+//! start. Those over [`MEMBER_MIN_DIAMETER`] (400 km), at most [`MAX_MEMBERS`] (8), become bodies
+//! in the belt's slot with sub-indices 1 upward (design note 3), largest first, on orbits drawn
+//! inside the belt ([`BeltMember`]): the semi-major axis as the disc's solids lie, eccentricity Rayleigh with σ = 0.1 and inclination Rayleigh with
 //! σ = 8° to the host's plane, 0.3 and 20° in a scattered component, each eccentricity truncated
 //! so that the orbit stays clear of the planets' chaotic zones and inside the disc, and so inside
 //! the strip radius (design note 14). A member is derived by P14.T16 as
@@ -120,10 +124,12 @@
 //!
 //! On [`tags::BELT_POPULATION`], keyed by the system's ID with the slot in the draw number (design
 //! note 4), the belt in belt slot n reads words 8n (an asteroid belt's depletion rank), 8n + 1 (its
-//! size slope's rank), 8n + 2 (a Kuiper-like belt's bright mark) and 8n + 3 to 8n + 4 (its bright
-//! efficiency's standard normal); 8n + 5 to 8n + 7 are reserved ([`BeltDraws`]). Each member draws its orbit and
-//! radius rank on [`tags::BELT_MEMBER`], keyed by its own [`BodyId`](crate::id::BodyId)
-//! ([`MemberDraws`]).
+//! size slope's rank), 8n + 2 (a Kuiper-like belt's bright mark), 8n + 3 to 8n + 4 (its bright
+//! efficiency's standard normal) and 8n + 5 (its largest member's share, ruling 100.3); 8n + 6
+//! and 8n + 7 are reserved ([`BeltDraws`]). Each member draws its orbit and radius rank on
+//! [`tags::BELT_MEMBER`], keyed by its own [`BodyId`](crate::id::BodyId), words 0–7, and word 8
+//! of the k-th member's stream is the growth-cap spread of the rank law's k-th candidate, before
+//! the candidates are sorted by size (ruling 100.4; [`MemberDraws`]).
 
 use core::f64::consts::{PI, TAU};
 
@@ -151,6 +157,15 @@ use crate::units::{
     SolarLuminosities, SolarMasses, Years,
 };
 
+mod sizes;
+
+pub use sizes::{
+    GROWTH_SPREAD, ICY_GROWTH_CAP, LARGEST_MEMBER_SHARE, MEMBER_CANDIDATES, MEMBER_MASS_SHARE_CAP,
+    MEMBER_RANK_SLOPE, MemberSize, MemberSizes, NEBULA_RATIO_EXPONENT, NEBULA_RATIO_RANGE,
+    NEBULA_SOLID_SURFACE_DENSITY, ROCKY_MEMBER_MASS_CAP, SizeDraws, member_sizes,
+    minimum_mass_nebula_solids, nebula_ratio,
+};
+
 /// The first belt slot a belt takes: `Belt(1)`, slot `0xE1`, since `0xE0` is P14.T28.a's
 /// protoplanetary disc.
 pub const FIRST_BELT_SLOT: u8 = 1;
@@ -163,8 +178,9 @@ pub const LAST_BELT_SLOT: u8 = 13;
 /// words 8n onwards.
 pub const BELT_WORDS_PER_SLOT: u64 = 8;
 
-/// Words of a member's [`tags::BELT_MEMBER`] stream it reads: eight uniforms.
-pub const MEMBER_WORDS: u64 = 8;
+/// Words of a member's [`tags::BELT_MEMBER`] stream it reads: nine uniforms (ruling 100.5 added the
+/// ninth, its growth-cap spread).
+pub const MEMBER_WORDS: u64 = 9;
 
 /// The inner resonances of a giant that bound an asteroid belt, as the belt body's orbits to the
 /// giant's, (4, 1) and (2, 1): the 4:1 and 2:1, at
@@ -278,14 +294,11 @@ pub const BLOWOUT_DIAMETER_SOLAR: f64 = 0.8;
 pub const BLOWOUT_DIAMETER_FLOOR: f64 = 0.01;
 
 /// The range of a belt's size slope q in N(> D) ∝ D^(−q), uniform: 2.5–3.5 (P14.T21.c; plan 14's
-/// figures, given without a source). Fraser et al. (2014, ApJ 782, 100) fit the largest Kuiper
-/// belt objects with steeper cumulative slopes, about 4.3 for the hot population and 7.5 for the
-/// cold one above their magnitude breaks, and about 1 below them.
+/// figures, given without a source), the population's below its named members, which follow their
+/// own tail ([`member_sizes`], ruling 100). Fraser et al. (2014, ApJ 782, 100) fit the largest
+/// Kuiper belt objects with steeper cumulative slopes, about 4.3 for the hot population and 7.5
+/// for the cold one between their break near 110–140 km and about 1,000 km, and about 1 below it.
 pub const SIZE_SLOPE: (f64, f64) = (2.5, 3.5);
-
-/// The smallest body counted in a belt's size distribution, m: 1 km, the size the cometary halo
-/// counts from (P14.T21.d).
-pub const SMALLEST_BODY: Metres = Metres::new(1e3);
 
 /// The diameter above which a belt's largest bodies are named members, m: 400 km (P14.T21.c; plan
 /// 14's figure, given without a source), about where a body of rock or ice becomes round.
@@ -323,10 +336,6 @@ pub const ROCKY_MEMBER_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre:
 /// 1,854 (Stern et al. 2015, Science 350, aad1815) and Eris's 2,520 (Holler et al. 2021, Icarus
 /// 355, 114130).
 pub const ICY_MEMBER_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(2_000.0);
-
-/// Bisection steps of the largest body's diameter: 96, a fixed count that brackets it to the last
-/// bit on every platform.
-const DIAMETER_STEPS: u32 = 96;
 
 /// Where a belt lies, by the rule that placed it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -424,8 +433,9 @@ impl BeltComponent {
         self.solids
     }
 
-    /// Its mass at the start, after depletion and before collisional wear: none for a scattered
-    /// component (ruling 84.1).
+    /// Its cascade's mass at the start, after depletion and before collisional wear, less the
+    /// belt's members for the belt proper (ruling 100.2): none for a scattered component (ruling
+    /// 84.1).
     #[must_use]
     pub const fn initial_mass(&self) -> EarthMasses {
         self.initial_mass
@@ -606,8 +616,8 @@ impl Belt {
         self.composition
     }
 
-    /// The diameter of its largest body, at which N(> D) = 1, in the size distribution of its mass
-    /// at the system's age at the epoch (ruling 95.2).
+    /// The diameter of its largest body, the largest candidate of its members' law (ruling 100),
+    /// whether or not it is over [`MEMBER_MIN_DIAMETER`] and so a member.
     #[must_use]
     pub const fn largest_diameter(&self) -> Metres {
         self.largest_diameter
@@ -649,17 +659,27 @@ impl Belt {
         f * detection_weight(self.blackbody_temperature(luminosity))
     }
 
-    /// Its mass at the start, after depletion.
+    /// Its mass at the start, after depletion: its cascade's plus its members'.
     #[must_use]
     pub fn initial_mass(&self) -> EarthMasses {
         self.components()
             .fold(EarthMasses::ZERO, |sum, c| sum + c.initial_mass)
+            + self.members_mass()
     }
 
-    /// Its mass at age `age`, each component worn down collisionally.
+    /// Its members' mass, summed largest first, which does not wear (ruling 100.2).
+    #[must_use]
+    pub fn members_mass(&self) -> EarthMasses {
+        self.members
+            .iter()
+            .fold(EarthMasses::ZERO, |sum, m| sum + m.mass)
+    }
+
+    /// Its mass at age `age`: its cascade's, each component worn down collisionally, plus its
+    /// members', which do not wear (ruling 100.2).
     #[must_use]
     pub fn mass_at(&self, age: Years) -> EarthMasses {
-        worn_mass(self.components(), age, self.host_mass)
+        worn_mass(self.components(), age, self.host_mass) + self.members_mass()
     }
 
     /// Its fractional luminosity `L_dust` ÷ L★ at age `age` about a host now of luminosity
@@ -762,7 +782,7 @@ impl BeltMember {
         self.part
     }
 
-    /// Its diameter in the belt's size distribution, D = `D_max` k^(−1⁄q) for the k-th largest.
+    /// Its diameter by its belt's members' law ([`member_sizes`], ruling 100).
     #[must_use]
     pub const fn diameter(&self) -> Metres {
         self.diameter
@@ -805,39 +825,34 @@ impl BeltMember {
     }
 }
 
-/// An orbit host as its belts read it (P14.T21): which host it is, its disc, its planets, its
-/// plane and its system's age, all plain arguments.
+/// An orbit host as its belts read it (P14.T21): which host it is, its disc, its planets and its
+/// plane, all plain arguments.
 ///
-/// P14.T30.a builds it from the host's zone, disc and placed planets, and the system's age at the
-/// epoch.
+/// P14.T30.a builds it from the host's zone, disc and placed planets. Its belts are primordial:
+/// their members are sized from their unworn mass (ruling 100.2), so no age is read here.
 #[derive(Debug, Clone, Copy)]
 pub struct BeltHost<'a> {
     host: OrbitHost,
     disc: &'a DiscProfile,
     planets: &'a [Neighbour],
     plane: SystemPlane,
-    age: Years,
 }
 
 impl<'a> BeltHost<'a> {
-    /// The orbit host `host`, with its disc `disc`, its planets `planets` (in any order), its
-    /// planetary plane `plane`, and its system's age at the epoch `age`, Julian years, at which its
-    /// belts' largest members are counted: from the belt's mass worn down to that age (ruling
-    /// 95.2), or its whole mass at an age of zero or less.
+    /// The orbit host `host`, with its disc `disc`, its planets `planets` (in any order) and its
+    /// planetary plane `plane`.
     #[must_use]
     pub const fn new(
         host: OrbitHost,
         disc: &'a DiscProfile,
         planets: &'a [Neighbour],
         plane: SystemPlane,
-        age: Years,
     ) -> Self {
         Self {
             host,
             disc,
             planets,
             plane,
-            age,
         }
     }
 
@@ -888,6 +903,9 @@ pub struct BeltDraws {
     /// A bright Kuiper-like belt's efficiency, the standard normal of its log. Words 8n + 3 and
     /// 8n + 4.
     pub efficiency: StandardNormal,
+    /// The rank of its largest member's share of its primordial mass in [`LARGEST_MEMBER_SHARE`]
+    /// (ruling 100.3). Word 8n + 5.
+    pub largest_share: UnitUniform,
 }
 
 impl BeltDraws {
@@ -905,11 +923,13 @@ impl BeltDraws {
         let bright = Mark::from_word(stream.next_u64());
         let efficiency =
             StandardNormal::new(stream.standard_normal()).expect("a Box–Muller variate is finite");
+        let largest_share = open_rank(&mut stream);
         Self {
             depletion,
             size_slope,
             bright,
             efficiency,
+            largest_share,
         }
     }
 
@@ -934,7 +954,7 @@ impl BeltDraws {
     }
 }
 
-/// A member's draws on [`tags::BELT_MEMBER`], keyed by its own ID: words 0–7 in field order.
+/// A member's draws on [`tags::BELT_MEMBER`], keyed by its own ID: words 0–8 in field order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MemberDraws {
     /// Which component it orbits in, by the shares of the disc's solids between their edges. Word
@@ -954,6 +974,10 @@ pub struct MemberDraws {
     pub mean_anomaly: UnitUniform,
     /// Its radius rank (design note 8). Word 7.
     pub radius_rank: UnitUniform,
+    /// The rank of the growth-cap spread of the rank law's candidate of its sub-index, in
+    /// [`GROWTH_SPREAD`] (ruling 100.4): the candidates are sized before they are sorted, so the
+    /// member at sub-index k may be another candidate. Word 8.
+    pub growth_spread: UnitUniform,
 }
 
 impl MemberDraws {
@@ -975,6 +999,7 @@ impl MemberDraws {
             periapsis: rank(),
             mean_anomaly: rank(),
             radius_rank: rank(),
+            growth_spread: rank(),
         }
     }
 }
@@ -1160,36 +1185,6 @@ pub fn fractional_luminosity(
         / (r_au * r_au * (blowout * CASCADE_TOP_DIAMETER).sqrt())
 }
 
-/// The diameter `D_max` of the largest body of a belt of mass `mass` whose bodies from
-/// [`SMALLEST_BODY`] up follow N(> D) = (D ÷ `D_max`)^(−q), at density `density`.
-///
-/// The mass of that population is (π ÷ 6) ρ q ∫ D^(2 − q) `D_max`^q dD from the smallest body to
-/// `D_max`, increasing in `D_max`; the bisection on ln `D_max` takes a fixed number of steps.
-#[must_use]
-pub fn largest_diameter(mass: EarthMasses, q: f64, density: KilogramsPerCubicMetre) -> Metres {
-    let target = mass.value() * EARTH_MASS_KG;
-    let d_min = SMALLEST_BODY.value();
-    let population = |d_max: f64| {
-        let integral = if (q - 3.0).abs() < 1e-12 {
-            math::ln(d_max / d_min)
-        } else {
-            (math::powf(d_max, 3.0 - q) - math::powf(d_min, 3.0 - q)) / (3.0 - q)
-        };
-        PI / 6.0 * density.value() * q * math::powf(d_max, q) * integral
-    };
-    // 10⁶ km bounds every belt: its population would outweigh any disc.
-    let (mut lo, mut hi) = (math::ln(d_min), math::ln(1e9));
-    for _ in 0..DIAMETER_STEPS {
-        let mid = f64::midpoint(lo, hi);
-        if population(math::exp(mid)) < target {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    Metres::new(math::exp(f64::midpoint(lo, hi)))
-}
-
 /// A belt's place before its mass: its kind, site, components' edges and gaps, and its
 /// depletion's range, or the fixed depletion of a Kuiper-like belt.
 struct Plan {
@@ -1231,7 +1226,7 @@ enum Depletion {
 /// use hyperion_sim::planetary::record::BeltKind;
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::units::{AstronomicalUnits, Dex, EarthMasses, Megayears, Metres, Radians};
-/// use hyperion_sim::units::{SolarLuminosities, SolarMasses, SolarRadii, Years};
+/// use hyperion_sim::units::{SolarLuminosities, SolarMasses, SolarRadii};
 ///
 /// let au = |x: f64| Metres::from(AstronomicalUnits::new(x));
 /// let sun = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
@@ -1244,7 +1239,7 @@ enum Depletion {
 ///     Neighbour::new(EarthMasses::new(17.15), au(30.07), 0.009),
 /// ];
 /// let plane = SystemPlane::new(Radians::ZERO, Radians::ZERO)?;
-/// let host = BeltHost::new(OrbitHost::Star(0), disc, &planets, plane, Years::new(4.6e9));
+/// let host = BeltHost::new(OrbitHost::Star(0), disc, &planets, plane);
 /// let system = SystemId::from_raw(0x0200_0800_2000_0000)?;
 /// let belts = host_belts(Seed::new(7), system, &host, FIRST_BELT_SLOT);
 /// let [main, kuiper] = belts.belts() else { panic!("two belts") };
@@ -1427,14 +1422,36 @@ fn build(
     let index = BodyIndex::new(BodySlot::Belt(slot), BodySub::Primary)
         .expect("a belt slot of 1–13 is in the layout");
     let inner = main.inner_edge;
-    let parts = || core::iter::once(&main).chain(scattered.as_ref());
-    let composition = composition(disc, parts());
+    let composition = composition(disc, core::iter::once(&main).chain(scattered.as_ref()));
     let size_slope = SIZE_SLOPE.0 + (SIZE_SLOPE.1 - SIZE_SLOPE.0) * draws.size_slope.value();
-    // The members are the largest bodies of what the belt holds at the epoch (ruling 95.2), so
-    // none outweighs it there.
-    let worn = worn_mass(parts(), host.age, disc.host_mass());
-    let density = composition.member_density();
-    let largest = largest_diameter(worn, size_slope, density);
+    // The members are sized from the belt's primordial mass, depleted but unworn, since they lie
+    // above the cascade's top (ruling 100.2); only the belt proper has mass (ruling 84.1).
+    let member_draws: [MemberDraws; MEMBER_CANDIDATES] = core::array::from_fn(|k| {
+        let sub = u8::try_from(k + 1).expect("eight candidates fit a byte");
+        let member = BodyIndex::new(BodySlot::Belt(slot), BodySub::Member(sub))
+            .expect("members 1–8 of a belt slot are in the layout");
+        MemberDraws::for_member(seed, system, member)
+    });
+    let ratio = nebula_ratio(
+        main.solids,
+        main.inner_edge,
+        main.outer_edge,
+        disc.host_mass(),
+    );
+    let sizes = member_sizes(
+        main.initial_mass,
+        composition,
+        ratio,
+        &SizeDraws {
+            largest_share: draws.largest_share,
+            spreads: member_draws.map(|d| d.growth_spread),
+        },
+    );
+    // The cascade is what the members leave, and it alone wears and shines.
+    let main = BeltComponent {
+        initial_mass: EarthMasses::new((main.initial_mass - sizes.total_mass()).value().max(0.0)),
+        ..main
+    };
     let gaps = plan
         .gaps
         .into_iter()
@@ -1452,43 +1469,33 @@ fn build(
         depletion,
         size_slope,
         composition,
-        largest_diameter: largest,
+        largest_diameter: sizes.largest_diameter(),
         members: Vec::new(),
     };
-    belt.members = members(seed, system, host, planets, zones, &belt, slot);
+    belt.members = members(host, planets, zones, &belt, &sizes, &member_draws);
     Some(belt)
 }
 
-/// The named members of `belt` (P14.T21.c): its bodies over [`MEMBER_MIN_DIAMETER`], at most
-/// [`MAX_MEMBERS`], largest first, each on an orbit inside the belt, and none heavier than the
-/// belt at the system's age at the epoch (ruling 95.2).
+/// The named members of `belt` (P14.T21.c): the bodies `sizes` gives it, largest first, each on
+/// an orbit inside the belt drawn from `draws`, the k-th member's draws at index k − 1.
 fn members(
-    seed: Seed,
-    system: SystemId,
     host: &BeltHost<'_>,
     planets: &[Neighbour],
     zones: &[(f64, f64)],
     belt: &Belt,
-    slot: u8,
+    sizes: &MemberSizes,
+    draws: &[MemberDraws; MEMBER_CANDIDATES],
 ) -> Vec<BeltMember> {
-    let q = belt.size_slope;
-    let density = belt.composition.member_density().value();
+    let slot = belt.index.slot();
     let total = belt.components().map(|c| c.solids.value()).sum::<f64>();
     let main_share = belt.main.solids.value() / total;
-    // The size distribution already holds each member under the belt's mass at the epoch; the
-    // bound is ruling 95.2's rule, kept explicit.
-    let held = belt.mass_at(host.age);
     (1..=MAX_MEMBERS)
-        .map_while(|k| {
-            let diameter = belt.largest_diameter.value() * math::powf(f64::from(k), -1.0 / q);
-            let r = diameter / 2.0;
-            let mass = EarthMasses::new(4.0 / 3.0 * PI * r * r * r * density / EARTH_MASS_KG);
-            (diameter > MEMBER_MIN_DIAMETER.value() && mass <= held).then_some((k, diameter, mass))
-        })
-        .map(|(k, diameter, mass)| {
-            let index = BodyIndex::new(BodySlot::Belt(slot), BodySub::Member(k))
+        .zip(sizes.members())
+        .zip(draws)
+        .map(|((k, size), draws)| {
+            let index = BodyIndex::new(slot, BodySub::Member(k))
                 .expect("members 1–8 of a belt slot are in the layout");
-            let draws = MemberDraws::for_member(seed, system, index);
+            let mass = size.mass();
             let component = match belt.scattered.as_ref() {
                 Some(scattered) if draws.part.value() >= main_share => scattered,
                 Some(_) | None => &belt.main,
@@ -1519,7 +1526,7 @@ fn members(
             BeltMember {
                 index,
                 part: component.part,
-                diameter: Metres::new(diameter),
+                diameter: size.diameter(),
                 mass,
                 orbit,
                 radius_rank: draws.radius_rank,

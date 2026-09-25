@@ -16,8 +16,8 @@ use crate::time::UniverseTime;
 const SEED: Seed = Seed::new(0x00be_1750);
 
 /// One host's belts, from its disc, plane and placed planets, in the order the system lists its
-/// hosts, with its members counted at the system's age at the epoch `age`.
-fn belts_of(system: &PlanetarySystem, age: Years) -> Vec<Belt> {
+/// hosts.
+fn belts_of(system: &PlanetarySystem) -> Vec<Belt> {
     let mut slot = FIRST_BELT_SLOT;
     let mut out = Vec::new();
     for host in system.hosts() {
@@ -35,7 +35,7 @@ fn belts_of(system: &PlanetarySystem, age: Years) -> Vec<Belt> {
                 )
             })
             .collect();
-        let belt_host = BeltHost::new(host.host(), disc, &planets, host.plane(), age);
+        let belt_host = BeltHost::new(host.host(), disc, &planets, host.plane());
         let belts = host_belts(SEED, system.system(), &belt_host, slot);
         slot = belts.next_slot();
         out.extend(belts.into_belts());
@@ -85,7 +85,7 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
     let mut belts_seen = 0;
     for ctx in &contexts {
         let system = generate_planets(SEED, ctx);
-        let belts = belts_of(&system, ctx.age_at_epoch());
+        let belts = belts_of(&system);
         // P14.T30.a wires these belts into `generate` as they are built here.
         let whole = crate::planetary::generate(SEED, ctx);
         assert_eq!(whole.belts(), belts.as_slice());
@@ -101,7 +101,21 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
                 panic!("a belt in slot {:?}", belt.index().slot());
             };
             assert!(belt.members().len() <= 8);
+            // Ruling 100: no member over 0.1 M⊕, the largest at most 0.4 of the belt's primordial
+            // mass, and the members together at most 0.75 of it.
+            let primordial = belt.initial_mass().value();
+            assert!(
+                belt.members_mass().value() <= MEMBER_MASS_SHARE_CAP * primordial * (1.0 + 1e-12)
+            );
+            if let Some(first) = belt.members().first() {
+                assert!(
+                    first.mass().value() <= 0.4 * primordial * (1.0 + 1e-9),
+                    "{belt:?}"
+                );
+                assert_eq!(first.diameter(), belt.largest_diameter());
+            }
             for member in belt.members() {
+                assert!(member.mass() <= ROCKY_MEMBER_MASS_CAP, "{member:?}");
                 assert_eq!(member.index().slot(), BodySlot::Belt(slot));
                 assert_eq!(
                     BodyIndex::decode(member.index().get()),
@@ -174,7 +188,7 @@ fn a_fifth_of_fgk_hosts_have_a_detected_cold_belt() {
             .state_at(UniverseTime::EPOCH)
             .expect("a main-sequence star")
             .luminosity();
-        let belts = belts_of(&system, age);
+        let belts = belts_of(&system);
         let kuiper = || belts.iter().filter(|b| b.kind() == BeltKind::Kuiper);
         for belt in &belts {
             let part = belt.main();
@@ -223,9 +237,6 @@ mod solar {
     use crate::units::{AstronomicalUnits, Dex, Kelvin, Kilograms, Megayears, SolarRadii};
 
     pub(super) const SYSTEM: u64 = 0x0200_0800_2000_0000;
-
-    /// The Sun's age, at which a Solar System input's members are counted.
-    pub(super) const SOLAR_AGE: Years = Years::new(4.6e9);
 
     pub(super) fn au(x: f64) -> Metres {
         Metres::from(AstronomicalUnits::new(x))
@@ -280,7 +291,7 @@ mod solar {
     }
 
     pub(super) fn belts_about(planets: &[Neighbour], disc: &DiscProfile, first: u8) -> HostBelts {
-        let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane(), SOLAR_AGE);
+        let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane());
         host_belts(SEED, system(), &host, first)
     }
 
@@ -328,7 +339,7 @@ mod solar {
     #[test]
     fn the_solar_system_s_cold_belt_shines_at_ten_to_the_minus_seven() {
         let disc = disc();
-        let host = BeltHost::new(OrbitHost::Star(0), &disc, &[], plane(), SOLAR_AGE);
+        let host = BeltHost::new(OrbitHost::Star(0), &disc, &[], plane());
         let planets = planets();
         let host = BeltHost {
             planets: &planets,
@@ -344,9 +355,7 @@ mod solar {
             .expect("a faint belt in 64 systems");
         let solids = faint.main().solids().value();
         assert!((2.0..3.0).contains(&solids), "{solids}");
-        let classical = faint
-            .main()
-            .mass_at(Years::new(4.6e9), SolarMasses::new(1.0));
+        let classical = faint.mass_at(Years::new(4.6e9));
         assert!((2e-3..4e-3).contains(&classical.value()), "{classical:?}");
         let f = faint.fractional_luminosity(Years::new(4.6e9), SolarLuminosities::new(1.0));
         // 2.4 × 10⁻⁸, a quarter of Vitense et al.'s 10⁻⁷: its 2.4 × 10⁻³ M⊕ is a tenth of the
@@ -423,39 +432,61 @@ mod solar {
         assert_eq!(belt.composition(), BeltComposition::Rocky);
     }
 
-    /// Ruling 95.2: members are sized from the belt's mass worn down to the system's age, so an
-    /// old belt close in, worn to a sliver of its start, keeps no member heavier than itself,
-    /// while the same belt young keeps its dwarf planets.
+    /// Ruling 100.2: members are sized from the belt's primordial mass and do not wear. The belt's
+    /// cascade is its mass less its members', and it alone wears, so an old belt close in, its
+    /// cascade worn to a sliver, keeps its members and reports them in its mass; no member
+    /// outweighs its belt (ruling 95.2), and together they hold at most 0.75 of its start.
     #[test]
-    fn members_are_sized_from_the_worn_mass() {
+    fn members_are_sized_from_the_primordial_mass_and_do_not_wear() {
         let disc = disc();
         let planets = [Neighbour::new(EarthMasses::new(1.0), au(1.0), 0.02)];
-        let at = |age: f64| {
-            let host = BeltHost::new(
-                OrbitHost::Star(0),
-                &disc,
-                &planets,
-                plane(),
-                Years::new(age),
-            );
-            host_belts(SEED, system(), &host, FIRST_BELT_SLOT).into_belts()
-        };
-        let (young, old) = (at(1e6), at(4.6e9));
-        let (young, old) = (&young[0], &old[0]);
-        assert!(!young.members().is_empty());
-        for (belt, age) in [(young, 1e6), (old, 4.6e9)] {
-            let held = belt.mass_at(Years::new(age));
-            let density = belt.composition().member_density();
-            assert_eq!(
-                belt.largest_diameter(),
-                largest_diameter(held, belt.size_slope(), density)
-            );
-            for member in belt.members() {
-                assert!(member.mass() <= held, "{member:?} outweighs {held:?}");
-            }
+        let host = BeltHost::new(OrbitHost::Star(0), &disc, &planets, plane());
+        let belts = host_belts(SEED, system(), &host, FIRST_BELT_SLOT);
+        let belt = &belts.belts()[0];
+        assert!(!belt.members().is_empty());
+        let primordial = belt.main().solids() * belt.depletion();
+        assert!((belt.initial_mass().value() / primordial.value() - 1.0).abs() < 1e-12);
+        let cascade = belt.main().initial_mass();
+        let members = belt.members_mass();
+        assert!(((cascade + members).value() / primordial.value() - 1.0).abs() < 1e-12);
+        assert!(members.value() <= MEMBER_MASS_SHARE_CAP * primordial.value());
+        let (young, old) = (
+            belt.mass_at(Years::new(1e6)),
+            belt.mass_at(Years::new(4.6e9)),
+        );
+        let worn = belt
+            .main()
+            .mass_at(Years::new(4.6e9), SolarMasses::new(1.0));
+        assert!(worn < cascade * 1e-2, "{worn:?} of {cascade:?}");
+        assert!(((old - worn - members).value() / old.value()).abs() < 1e-12);
+        assert!(young > old && old > members);
+        for member in belt.members() {
+            assert!(member.mass() <= old, "{member:?} outweighs {old:?}");
         }
-        assert!(old.mass_at(Years::new(4.6e9)) < young.initial_mass() * 1e-2);
-        assert!(old.members().len() < young.members().len());
+        let sizes = member_sizes(
+            primordial,
+            belt.composition(),
+            nebula_ratio(
+                belt.main().solids(),
+                belt.main().inner_edge(),
+                belt.main().outer_edge(),
+                SolarMasses::new(1.0),
+            ),
+            &SizeDraws {
+                largest_share: BeltDraws::for_slot(SEED, system(), FIRST_BELT_SLOT).largest_share,
+                spreads: core::array::from_fn(|k| {
+                    let sub = u8::try_from(k + 1).unwrap();
+                    let index =
+                        BodyIndex::new(BodySlot::Belt(FIRST_BELT_SLOT), BodySub::Member(sub))
+                            .unwrap();
+                    MemberDraws::for_member(SEED, system(), index).growth_spread
+                }),
+            },
+        );
+        assert_eq!(sizes.largest_diameter(), belt.largest_diameter());
+        let expected: Vec<Metres> = sizes.members().iter().map(MemberSize::diameter).collect();
+        let found: Vec<Metres> = belt.members().iter().map(BeltMember::diameter).collect();
+        assert_eq!(found, expected);
     }
 
     /// Ruling 84.1: a Kuiper-like belt is bright with probability 0.60, keeping a median 10^−0.25
@@ -505,19 +536,12 @@ mod solar {
 
     /// P14.T21.c (c): a massive belt's members are its bodies over 400 km, at most eight, largest
     /// first, inside its bounds and clear of the planets' chaotic zones, in its slot from
-    /// sub-index 1; and P14.T16 derives each as a dwarf planet. The belt is young, before it has
-    /// worn down (ruling 95.2).
+    /// sub-index 1; and P14.T16 derives each as a dwarf planet.
     #[test]
     fn a_belt_s_largest_members_are_dwarf_planets_inside_it() {
         let disc = disc();
         let planets = [Neighbour::new(EarthMasses::new(1.0), au(1.0), 0.02)];
-        let host = BeltHost::new(
-            OrbitHost::Star(0),
-            &disc,
-            &planets,
-            plane(),
-            Years::new(1e6),
-        );
+        let host = BeltHost::new(OrbitHost::Star(0), &disc, &planets, plane());
         let belts = host_belts(SEED, system(), &host, FIRST_BELT_SLOT);
         let belt = &belts.belts()[0];
         let members = belt.members();
@@ -545,7 +569,7 @@ mod solar {
             assert_eq!(member.index().parent(), Some(belt.index()));
             assert!(member.diameter() > MEMBER_MIN_DIAMETER);
             if k > 0 {
-                assert!(member.diameter() < members[k - 1].diameter());
+                assert!(member.diameter() <= members[k - 1].diameter());
             }
             let orbit = member.orbit();
             let a = orbit.semi_major_axis();
@@ -570,32 +594,6 @@ mod solar {
             assert!((0.5..2.0).contains(&ratio), "{ratio}");
         }
     }
-}
-
-/// The size distribution's largest body holds the belt's mass exactly, for slopes below, at and
-/// above 3.
-#[test]
-fn the_largest_body_holds_the_belt_s_mass() {
-    let density = KilogramsPerCubicMetre::new(2_000.0);
-    for q in [2.5, 3.0, 3.5] {
-        for mass in [1e-4, 0.02, 3.0] {
-            let d = largest_diameter(EarthMasses::new(mass), q, density).value();
-            let d_min = SMALLEST_BODY.value();
-            let integral = if (q - 3.0_f64).abs() < 1e-12 {
-                math::ln(d / d_min)
-            } else {
-                (math::powf(d, 3.0 - q) - math::powf(d_min, 3.0 - q)) / (3.0 - q)
-            };
-            let held = PI / 6.0 * 2_000.0 * q * math::powf(d, q) * integral / EARTH_MASS_KG;
-            assert!(
-                (held / mass - 1.0).abs() < 1e-9,
-                "q {q}, mass {mass}: {held}"
-            );
-        }
-    }
-    // The main belt's mass with q = 2.5 has a largest body near Ceres's 940 km.
-    let ceres = largest_diameter(EarthMasses::new(4.0e-4), 2.5, ROCKY_MEMBER_DENSITY).value();
-    assert!((600e3..1_000e3).contains(&ceres), "{ceres}");
 }
 
 /// Wyatt et al. (2007a): a belt's mass halves at its collisional lifetime and fades as 1 ÷ age
@@ -655,8 +653,9 @@ fn belts_wear_down_as_wyatt_s_model_has_it() {
     assert!(fractional_luminosity(m_max, r, SolarLuminosities::ZERO, sun).abs() < 1e-300);
 }
 
-/// Design note 4: a belt's draws are words 8n to 8n + 4 of the system's `belt.population`
-/// stream for belt slot n, and a member's are words 0–7 of its own `belt.member` stream.
+/// Design note 4: a belt's draws are words 8n to 8n + 5 of the system's `belt.population`
+/// stream for belt slot n, and a member's are words 0–8 of its own `belt.member` stream (ruling
+/// 100.5 added words 8n + 5 and 8).
 #[test]
 fn belt_and_member_draws_are_their_own_words() {
     let system = solar::system();
@@ -669,6 +668,8 @@ fn belt_and_member_draws_are_their_own_words() {
     assert_eq!(draws.bright, Mark::from_word(at.next_u64()));
     assert!((draws.efficiency.value() - at.standard_normal()).abs() < 1e-300);
     assert_eq!(at.position(), 29);
+    assert!((draws.largest_share.value() - at.uniform_open()).abs() < 1e-300);
+    assert_eq!(at.position(), 30);
     let member = BodyIndex::new(BodySlot::Belt(3), BodySub::Member(2)).unwrap();
     let mut own = Stream::open(
         SEED,
@@ -679,6 +680,8 @@ fn belt_and_member_draws_are_their_own_words() {
     assert!((words.part.value() - own.uniform_open()).abs() < 1e-300);
     own.seek(7);
     assert!((words.radius_rank.value() - own.uniform_open()).abs() < 1e-300);
+    assert!((words.growth_spread.value() - own.uniform_open()).abs() < 1e-300);
+    assert_eq!(own.position(), MEMBER_WORDS);
     let disc = solar::disc();
     assert_eq!(
         solar::belts_about(&solar::planets(), &disc, FIRST_BELT_SLOT),

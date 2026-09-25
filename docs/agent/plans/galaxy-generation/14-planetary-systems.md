@@ -382,7 +382,7 @@ as `slot << 8 | sub`, decodable without generating anything:
 | `0x00`        | The stellar level                       | `0x00`–`0x0F` plan 11's components (plan 06's primary at `0x00`, companions, brown-dwarf companions included, from `0x01`); in a free-floating brown dwarf's or rogue planet's system `0x00` is the object itself and `0x80`–`0x8F` are its rings |
 | `0x01`–`0xBF` | Primordial planets, in generation order | `0x00` the planet, `0x01`–`0x7F` moons, `0x80`–`0x8F` rings, rest reserved                                                                                                                                                                        |
 | `0xC0`–`0xCF` | Second-generation planets (D11)         | as for planets                                                                                                                                                                                                                                    |
-| `0xE0`–`0xEF` | Belts, discs and the cometary halo      | `0x00` the population, `0x01`–`0x7F` its named members, `0x80` + k the giant-impact moon of member k (ruling 95)                                                                                                                                  |
+| `0xE0`–`0xEF` | Belts, discs and the cometary halo      | `0x00` the population, `0x01`–`0x7F` its named members (at most eight are built, `0x01`–`0x08`, ruling 100.5), `0x80` + k the giant-impact moon of member k (ruling 95)                                                                           |
 | other         | Reserved                                | zero                                                                                                                                                                                                                                              |
 
 Generation order is host by host in hierarchy order, then inside out, so an index never depends on a
@@ -402,6 +402,15 @@ properties. Everything that belongs to one body (radius quantile, volatiles, spi
 surface seed, resources) is drawn on that body's own streams keyed by `BodyId`. Adding a property to
 moons can then never move a planet, and `generate_satellites` for one planet equals the same
 planet's satellites inside `generate`.
+
+_The belts' words (T21, rulings 84 and 100)._ On `belt.population` the belt in belt slot n owns words
+8n to 8n + 7: 8n its depletion's rank, 8n + 1 its size slope's, 8n + 2 a Kuiper-like belt's bright
+mark, 8n + 3 and 8n + 4 its bright efficiency's normal, 8n + 5 its largest member's share of its
+primordial mass (ruling 100.3); 8n + 6 and 8n + 7 are reserved. A member's own `belt.member` stream
+has nine words: 0–7 its orbit and radius rank, and 8 the growth-cap spread of the rank law's k-th
+candidate for the member at sub-index k (ruling 100.4). The candidates are sized, then sorted, so
+word 8 of member k's stream may size another member: a belt's sizes are a joint property, drawn on
+its members' streams only because the belt's own words are too few.
 
 **D5. The disc is a budget and a ruler, the class table is the frequency.** The brainstorm's
 approach C takes class frequencies from observation and everything else from the star. The disc (gas
@@ -1519,16 +1528,18 @@ the planet's equator. No moon over 10 km is placed inside a massive ring.
       2007a, eqs. 6, 14 and 17, with the full G of eqs. 17–18, ruling 84.1), with `D_c` 450 km (Kains, Wyatt and Greaves 2011), e 0.05 and `Q_D*` 495 J kg⁻¹
       (ruling 84's amendment, below).
     - _T21.c._ Members are `D_max` k^(−1⁄q) for k = 1–8 over 400 km, `D_max` normalising N(> D)
-      from 1 km to the belt's mass worn to the system's age at the epoch (ruling 95.2), at 2,700 or 2,000 kg m⁻³ by composition. Each is
+      from 1 km to the belt's mass worn to the system's age at the epoch (ruling 95.2), at 2,700 or 2,000 kg m⁻³ by composition
+      (_sizing replaced by ruling 100: see "Ruling 100, as built" below_). Each is
       placed with a by the disc's solids, e and i truncated so that it stays clear of the chaotic
       zones and inside the disc, and so inside the strip radius. `BeltMember::placed_body()` is
       the `PlacedBody` T16 derives it from. The moon of T18 is left to T22.a. The draws are on
-      `belt.member`, words 0–7 of the member's stream (its radius rank is word 7).
+      `belt.member`, words 0–7 of the member's stream (its radius rank is word 7; ruling 100 adds
+      word 8).
     - _Slots._ Belts take `0xE1`–`0xED` (`FIRST_BELT_SLOT`, `LAST_BELT_SLOT`), host by host in
       the caller's order and inside out; `0xE0` stays T28.a's disc, `0xEE` is left for T28.d's
       debris disc and `0xEF` is the halo (`HALO_SLOT`). `belt.population` gives belt slot n words
       8n to 8n + 4: the asteroid depletion's rank, the size slope's, the bright mark and the
-      bright efficiency's normal.
+      bright efficiency's normal (ruling 100 adds 8n + 5, design note 4).
     - _T21.d._ `halo(seed, system, &HaloHost, Scatterer) -> Option<CometaryHalo>`: the host's
       zero-age mass, its disc's solids, the strip radius and the nearest wide companion's
       distance. The count, log-uniform over 10¹¹–10¹², is scaled by solids against the median
@@ -1613,6 +1624,72 @@ planetary::halo`, since cargo takes one positional filter.
         41 members with their moons; `hierarchical_triple` and `wide_binary` each have a belt
         inside the snow line turn `Rocky`. The Solar-like golden's bright cold belt, 1.29 M⊕ at
         66.8–81.0 au, barely wears, and its eight members, 0.077–0.0089 M⊕, lose about 1.5%.
+    - _Ruling 100, as built (`belts3`, round 9). Replaces 95.2's sizing._
+      - _The law_ is `belts/sizes.rs`'s `member_sizes(mass, composition, x_m, &SizeDraws) ->
+MemberSizes`. The largest member holds F₁ of the primordial mass, F₁ log-uniform over
+        0.1–0.4 (`LARGEST_MEMBER_SHARE`). The k-th candidate is D₁ k^(−1⁄1.8). Icy candidates are
+        capped at 3,300 km × `x_m`^0.2 × u_k, with u_k log-uniform over 0.8–1.2. Rocky ones are
+        capped at 0.1 M⊕. The eight candidates are sorted largest first, and those over 400 km are
+        kept. The smallest are then dropped while the members hold more than 0.75 of the
+        primordial mass, which never happens, since the law gives 0.705 at most.
+      - _`x_m`_ is the belt proper's starting solids over the minimum-mass nebula's in its ring,
+        held to 1⁄3–3: `nebula_ratio`, `minimum_mass_nebula_solids`, Σ₀ = 29.6 g cm⁻² × M★ ÷
+        M☉ (Krivov and Wyatt 2021, eq. 7). KB08's radial taper (eq. 29), its age factor and the
+        oligarch are not built.
+      - _Members don't wear._ They are sized from the depleted, unworn mass. The belt proper's
+        `initial_mass` is its cascade, that mass less the members, and only the cascade wears and
+        shines. `Belt::initial_mass` and `mass_at(t)` add the members back (`members_mass`), so
+        the record's mass is the worn cascade plus the members. Members from 400 km to the
+        cascade's 450 km top are treated like the rest.
+      - _`BeltHost::new` no longer takes an age_, since nothing in the belts reads it. T30.a's
+        call and the small-bodies golden drop it. `largest_diameter()` is the largest candidate
+        (member 1 when there is one). `largest_diameter(mass, q, ρ)` and `SMALLEST_BODY` are gone.
+        q stays as the population's slope below the members.
+      - _Words (design note 4)._ `belt.population` word 8n + 5 is F₁'s rank. `belt.member` gains
+        word 8 (`MemberDraws::growth_spread`, `MEMBER_WORDS` = 9), which is the spread of the k-th
+        candidate before the sort.
+      - _Tests,_ in `sizes.rs` on pinned masses, over a grid of extreme draws:
+        - rocky 4.5 × 10⁻⁴ M⊕: D₁ of 575–913 km, 1–4 members, and 873, 594, 474 and 404 km at
+          F₁ = 0.35;
+        - icy 0.02 M⊕ (`x_m` 0.27, held to 1⁄3): D₁ of 2,126–3,188 km, and at least 4 members over
+          1,000 km;
+        - icy 1.29 M⊕ at `x_m` 0.1–0.3: 8 members of 2,126–3,188 km, each ≤ 0.0057 M⊕, together ≤
+          3.5% of the belt;
+        - no member over 0.1 M⊕, a rocky 100 M⊕ belt's eight all at 0.1 M⊕, and the MMSN's 11.47
+          M⊕ at 66.8–81.0 au and 8.78 at 39.4–47.7 au.
+
+        The top-eight share of 0.02 M⊕ is 0.185 at the 5% point, 0.296 at the median and 0.478 at
+        the 95% point. About 3% of draws exceed 0.5 (0.59 at F₁ = 0.4 with every u = 1.2), so the
+        0.1–0.5 window is tested on 90% of draws, and 0.1–0.6 on all. In `belts/tests.rs`,
+        `members_are_sized_from_the_primordial_mass_and_do_not_wear` covers the wear, and the
+        300-system property test checks the caps.
+
+      - _Ruling 100.7._ The 438 km was the Solar System input's member (`small_bodies`, after
+        95.2), which weighed 1.47 × 10⁻⁵ M⊕ at 2,000 kg m⁻³, since that belt reads icy. The 8.2 ×
+        10⁻⁵ M⊕ was the belt's own mass at 4.6 Gyr, not the member's.
+      - _Goldens,_ re-blessed at 11. Only belts, members and members' moons moved, in
+        `small_bodies` and all fourteen T32 systems; no planet, planet moon, ring or halo moved.
+        - Belts that had no members gain them: `close_binary` 8, `filler_a` 8,
+          `hierarchical_triple` 8, `m_dwarf_resonant_chain` 8, `wide_binary` 8 and `red_giant`'s
+          asteroid belt 1. `halo_star` goes from 4 members to 2.
+        - The Solar-like golden's belt now reports 1.287 M⊕ (f 5.53 × 10⁻⁶), and its eight
+          members are 3,555–2,525 km, 7.9 × 10⁻³–2.8 × 10⁻³ M⊕ (3.0% of the belt), against Pluto's
+          2,377 km and 2.2 × 10⁻³ M⊕.
+        - Its ring started with at least 0.6 of the nebula's solids (`x_m` ≳ 0.6, from the starting solids, where the research's 0.11 was the belt's own 1.29 M⊕ over 11.2), so its top three exceed
+          3,200 km and two exceed 0.006 M⊕: ruling 100.6's window for this belt assumed `x_m`
+          0.1–0.3.
+      - _Ruling 84's windows after the change_ (1,739 FGK hosts): detected 0.165 (was 0.173),
+        weighted f > 10⁻⁷ 0.298 (0.303), detected warm 0.011 (0.011). The Solar System's faint
+        belt still shines inside 10⁻⁸–3 × 10⁻⁷.
+      - _Deviations, for ruling._
+        - The 0.75 backstop is measured against the primordial mass (`initial_mass`), since
+          members don't wear. At the epoch they can hold more than 0.75 of `mass_at` in an inner
+          belt whose cascade has worn away (KB08: the large objects then hold most of the mass).
+        - `x_m` is taken from the starting solids, as the research did for the Kuiper case.
+        - The 1.29 M⊕ window is tested at `x_m` 0.1–0.3, which the clamp makes 1⁄3.
+        - The MMSN's 11.47 M⊕ is about 1 M☉. The research's 11.2 is for the golden's 0.9754 M☉
+          host.
+        - The 0.02 M⊕ top-eight window holds on 90% of draws, not all.
 
 #### P14.T22 Satellite assembly and small-body property tests
 

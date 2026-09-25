@@ -60,7 +60,7 @@ fn median_disc(mass: f64) -> DiscProfile {
 
 fn belts(w: &mut GoldenWriter, name: &str, disc: &DiscProfile, planets: &[Neighbour]) {
     let plane = SystemPlane::new(Radians::new(1.1), Radians::new(0.4)).unwrap();
-    let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane, Years::new(4.6e9));
+    let host = BeltHost::new(OrbitHost::Star(0), disc, planets, plane);
     let belts = host_belts(SEED, system(), &host, FIRST_BELT_SLOT);
     w.line("");
     w.line(&format!("belts of {name}, next slot {}", belts.next_slot()));
