@@ -1,0 +1,12 @@
+# The cooling of giant planets (plan 13, P13.T5.b), fitted to Sonora Bobcat's rows. The parameters
+# are constants of `src/tasks/giant_cooling.rs`, recorded here so that the inputs hash covers them;
+# the task refuses a manifest that disagrees with its code.
+task = "giant_cooling"
+datasets = ["giant_cooling"]
+
+[params]
+masses = 12
+ages = 12
+mass_range_mjup = [0.3, 13.0]
+age_range_yr = [1000000.0, 15000000000.0]
+smoothing = 0.0001

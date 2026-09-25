@@ -74,10 +74,13 @@ test:
 # Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
 # (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
 # Nextest runs no doctests, but no doctest is slow. `.config/nextest.toml` holds the `slow` profile.
+# Then the fitted tables' check reruns every fast fit and compares bytes (plan 15, P15.T2).
 [positional-arguments]
 test-slow *args:
     cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only --no-run
+    cargo build -q -p hyperion-fit
     just _locked cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@"
+    cargo run -q -p hyperion-fit -- check --rerun-fast
 
 # Run the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
 test-wasm:
@@ -100,6 +103,18 @@ test-wasm:
 bench *args:
     cargo bench --workspace --no-run {{ args }}
     just _locked cargo bench --workspace {{ args }}
+
+# The sim's GENERATOR_VERSION, read from its source for `--since`.
+generator_version := `sed -n 's/^pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(\([0-9]*\));$/\1/p' crates/hyperion-sim/src/version.rs`
+
+# Run an offline fit into the sim's tables at the current generator version, updating
+# crates/hyperion-fit/tables.lock and tables::MANIFEST (plan 15), e.g. `just fit mge`.
+fit task *args:
+    cargo run --release -p hyperion-fit -- run {{ task }} --since {{ generator_version }} {{ args }}
+
+# Fail if a fitted table is stale, hand-edited, ahead of the generator version or unregistered.
+fit-check:
+    cargo run -q -p hyperion-fit -- check
 
 # Regenerate the golden files after a deliberate GENERATOR_VERSION bump.
 bless:
@@ -126,7 +141,7 @@ build:
     pnpm build
 
 # The gate before a commit: everything but the slow tests and the other architectures.
-ci: fmt-check check lint test gen-protocol-check
+ci: fmt-check check lint test fit-check gen-protocol-check
 
 # `ci` plus the slow statistical tests: the full gate.
 ci-slow: ci test-slow

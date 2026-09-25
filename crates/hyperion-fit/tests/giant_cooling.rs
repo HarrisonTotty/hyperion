@@ -1,16 +1,30 @@
-//! The committed giant-planet cooling table is exactly what `run giant_cooling` produces (plan 13,
-//! P13.T5.b), and it reproduces the grid it was fitted to.
+//! The committed giant-planet cooling table is exactly what `run giant_cooling --since <current>`
+//! would write (plan 13, P13.T5.b; plan 15, P15.T2), and it reproduces the grid it was fitted to.
 //!
 //! CI runs this, so a table that is stale, or edited by hand, fails it.
 
-use hyperion_fit::tasks::giant_cooling::{AGES, MASSES, fit, grid, render};
+use std::num::NonZeroUsize;
+
+use hyperion_fit::emit::Workspace;
+use hyperion_fit::pipeline::rerender;
+use hyperion_fit::task::{find, registry};
+use hyperion_fit::tasks::giant_cooling::{AGES, MASSES, fit, grid};
+use hyperion_sim::GENERATOR_VERSION;
 
 /// The table the sim compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/giant_cooling.rs");
 
 #[test]
 fn giant_cooling_table_is_reproduced() {
-    let rendered = render(&fit());
+    let planned = rerender(
+        registry(),
+        find("giant_cooling").expect("giant_cooling is registered"),
+        &Workspace::repository(),
+        NonZeroUsize::MIN,
+        GENERATOR_VERSION.get(),
+    )
+    .expect("the giant_cooling task runs");
+    let rendered = planned.text;
     if rendered != COMMITTED {
         let line = rendered
             .lines()
@@ -19,7 +33,7 @@ fn giant_cooling_table_is_reproduced() {
             .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
         panic!(
             "crates/hyperion-sim/src/tables/giant_cooling.rs differs from the fit at {line}: run \
-             `cargo run -p hyperion-fit -- run giant_cooling`"
+             `just fit giant_cooling`"
         );
     }
 }

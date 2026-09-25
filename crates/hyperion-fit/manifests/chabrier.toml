@@ -1,0 +1,6 @@
+# The scale of Chabrier's high-mass branch (plan 15, P15.T4). Until P15.T4.b fits it, the task
+# emits this scratch value, plan 02's (Design note 5), moved unchanged from `galaxy::imf`.
+task = "chabrier"
+
+[params]
+scratch_scale = 0.68

@@ -1,0 +1,18 @@
+# The Gaussian expansions behind the galaxy's potential (plan 02, P02.T6.a; plan 15, P15.T3). The
+# parameters are constants of `src/tasks/mge.rs`, recorded here so that the inputs hash covers them;
+# the task refuses a manifest that disagrees with its code.
+task = "mge"
+
+[params]
+widths = 14
+sweeps = 50000
+exp_range = [0.02, 12.0]
+exp_samples = 300
+exp_widths = [0.04, 3.5]
+bar_width = 0.1
+bar_level = 0.85
+bar_end = 0.15
+bar_reach = 2.0
+bar_samples = 321
+bar_mass_weight = 5.0
+bar_widths = [0.04, 0.8]

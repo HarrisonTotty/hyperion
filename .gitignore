@@ -1,6 +1,10 @@
 # Rust
 target/
 
+# Fetched datasets of the fitting crate (plan 15, Design note 12): only their PROVENANCE.toml is
+# committed, under crates/hyperion-fit/data/<dataset>/.
+crates/hyperion-fit/data/cache/
+
 # Stray ts-rs output: a `cargo test` that misses `.cargo/config.toml`'s TS_RS_EXPORT_DIR writes the
 # bindings here instead of packages/protocol/src/generated.
 /bindings/

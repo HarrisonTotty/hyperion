@@ -327,6 +327,45 @@ with `toml`); `list_prints_registered_tasks`.
 **Acceptance.** `just ci` green; `cargo run -p hyperion-fit -- list` prints one row, `mge`;
 `tables/mge.rs` is untouched (`git diff --exit-code` on it).
 
+**As built (round 9, lane `fit15`).**
+
+- `main.rs` parses with `clap` (`cli::Cli`) and calls `cli::run`. Plan 02's hand-written
+  `Command` enum and `Command::parse` are gone. `RunFitError` is a `thiserror` enum in `lib.rs`
+  with the variants `UnknownTask`, `Manifest`, `Task(RunTaskError)`, `Emit(EmitTableError)`,
+  `Check(CheckReport)`, `OtherManifestNeedsOut`, `DataNeedsOneDataset` and `Output`. Command-line
+  errors exit with 2, everything else with 1.
+- `FitTask` has the sketched methods plus `items()`, the item names the smoke run checks, and
+  the supertraits `Sync + Debug`. `registry()` returns `&'static [&'static dyn FitTask]`, the
+  static `task::REGISTRY` in name order, and `task::find(name)` looks one up. Five tasks are
+  registered, so `list` prints five rows: `chabrier` (fast, provisional, P15.T4.a),
+  `giant_cooling` (fast), `kick_rank` (slow, provisional), `mge` (fast, provisional) and
+  `wd_cooling` (fast).
+- `mge` is registered at revision 1, not the plan's 0, which keeps the "version 1" that P02.T12.b's
+  refit gave its header. Its `fit()` is unchanged. Its `render()` now returns the table's contents, a
+  `RustTable`, and no longer a `String`. `mge_table_is_reproduced` compares
+  `pipeline::rerender`, the bytes `run mge --since <current>` would write, with the committed
+  file.
+- `run` has two options beyond the sketch. `--data DIR` keeps `wd_cooling`'s option: it reads
+  the task's one dataset from DIR. `--manifest PATH` runs another manifest and, like `--smoke`,
+  needs `--out`: a committed table is always made from `manifests/<task>.toml`. P15.T5.a's
+  production run uses it.
+- `parallel::map_reduce_chunks(n_items, chunk, threads, map, reduce)`: `map` receives a chunk's
+  item range, and `reduce` is an `FnMut(T)` called in index order. Chunks are mapped in waves of
+  eight per thread. It returns `Result<(), BuildThreadPoolError>`.
+- `pipeline.rs` (not in the plan) holds what `cli` and `check` share: `prepare` runs a task and
+  builds its header, `rerender` works out what a run would write without writing, and the
+  manifest paths.
+- Dependencies added: `rayon` 1.11, `sha2` 0.10, `thiserror` 2 and `toml` 1.1; `clap` and
+  `serde` were already there. `serde_json` and `csv` are not added, because nothing reads JSON
+  or CSV yet.
+- **Adding a task** (plan 06's `stellar_fates`, which the `briefs` lane adds, for one) touches none of the
+  toolchain. Add `tasks/<name>.rs` with a unit struct implementing `FitTask`, whose `run` reads
+  its manifest's `[params]` and returns `TableItem`s. Add its `pub mod` line and one
+  `task::REGISTRY` entry, in name order, and `manifests/<name>.toml`, plus `<name>.smoke.toml`
+  if the task is slow. Then `just fit <name>` writes the table, its lock entry and its
+  `MANIFEST` row, and you add the table's `pub mod` line to the sim's `tables/mod.rs`.
+  `task.rs`'s module documentation says the same.
+
 ### P15.T2 Emitter, manifests, lock file and the staleness check
 
 **Build.**
@@ -365,6 +404,72 @@ temporary directory with a toy task; `emitter_refuses_changed_body_without_new_s
 **Acceptance.** `just ci` green including `just fit-check`. The first real table (P15.T3) is the
 proof that emitted source passes `cargo fmt --check` and Clippy pedantic; until then a toy table is
 checked once by hand in the pull request.
+
+**As built (round 9, lane `fit15`).**
+
+- **The header** follows Design note 5, with three details.
+  - `data` entries are in backticks (`` `montreal_cooling@66d339259a79` ``), because Clippy's
+    `doc_markdown` rejects a bare snake-case identifier in a doc comment.
+  - A long value continues on lines indented by two more spaces.
+  - A provisional table made by a task keeps every line and says both who made it and why it is
+    provisional: `@provisional by hyperion-fit 0.1.0, task `mge` revision 1 (P02.T6.a)`.
+- **The body** is everything after the leading `//!` lines. Its SHA-256 is the lock file's body
+  hash, so rewriting a header to the grammar leaves the body, and the table, unchanged.
+- **Tables written before the emitter.** `mge`, `giant_cooling`, `wd_cooling` and `kick_rank` keep
+  their bodies verbatim as `TableItem::Source`. Their rustfmt-shaped layout (no
+  `#[rustfmt::skip]`, and `MASS_NODES` packed several to a line) cannot come out of the generic
+  items without changing bytes. New tables use the structured items. `chabrier` is the first: a
+  scalar, so it needs no `#[rustfmt::skip]`.
+- **The toy check by hand.** A toy table of every item kind passed `rustfmt --check` and Clippy
+  pedantic at `-D warnings`.
+- **Shared files** use the markers `// @begin-table <name>` and `// @end-table <name>`, with the
+  block's header in `//` comments. A task gets a block when another registered task has the same
+  `table_path()`.
+- **Hashes.**
+  - `inputs-sha256`: SHA-256 over the name, the revision (`u32`, little-endian), the manifest's
+    bytes and each dataset's recorded hash, each field prefixed by its length as a
+    little-endian `u64`.
+  - A dataset's recorded hash: the SHA-256 of its `PROVENANCE.toml` file list, as
+    `<name> <sha256>` lines.
+  - `sim-fingerprint`: the SHA-256 of the probe values written as shortest round-trip decimals,
+    one per line. The crate's `clippy.toml` forbids hashing float bits.
+- **Manifests** hold `task`, `datasets` and `[params]`.
+  - `mge`, `giant_cooling` and `wd_cooling` take their parameters from constants in their code.
+    Their manifests record those constants, and `Manifest::expect_params` refuses a manifest that
+    disagrees.
+  - `kick_rank` and `chabrier` read their parameters from the manifest.
+- **Fingerprints.** Every task but `chabrier` reads constants of the sim, so each has probes (the
+  sketch had none for a task using only `math`):
+  - `mge`: `THIN_DISC_HOLE_LENGTHS`;
+  - `giant_cooling`: `JUPITER_MASS_KG`, `SOLAR_LUMINOSITY_W` and `SOLAR_RADIUS_M`;
+  - `wd_cooling`: the last two;
+  - `kick_rank`: the carbon–oxygen core and remnant masses at 8, 10, 12, 15, 20, 30, 50 and
+    100 M☉, on `Track::full` with the median draws at Z = 0.02, and the score's scatter.
+- **Data.** The `data` module (`Dataset`, `Provenance`, `load_dataset`, `LoadDatasetError`) is
+  built here, because the inputs hash needs the recorded hashes. Two datasets are registered:
+  - `data/giant_cooling/PROVENANCE.toml`: committed, under CC BY 4.0;
+  - `data/montreal_cooling/PROVENANCE.toml`: fetched, its 23 files' SHA-256 recorded. The raw
+    files move from `target/data/montreal_cooling/` to the ignored
+    `data/cache/montreal_cooling/`, and `wd_cooling::DEFAULT_DATA_DIR` follows them. Plan 06's
+    P06.T20.a text still names the old path.
+- **`check`** has every rule of Design note 8, and also fails in three more cases:
+  - the lock file and the header disagree (on `since`, provisional, inputs hash, task, revision
+    or fingerprint hash);
+  - a registered task has no lock entry;
+  - a lock entry names a task that is not registered.
+- **`--rerun-fast`** reruns each fast task in memory (`pipeline::rerender`) rather than into a
+  temporary directory, and compares the same bytes. A fast task whose fetched dataset is absent
+  is skipped with a warning; this is `wd_cooling` on any machine without the Montreal files.
+- **Today's tables.** The five tables have `since-generator-version` 11: every body last changed
+  while the generator was at 11. The headers of `mge`, `giant_cooling`, `wd_cooling` and
+  `kick_rank` are rewritten, and their bodies are byte-identical to HEAD's (the SHA-256 of each
+  body is unchanged). `giant_cooling` and `wd_cooling` are registered as generated, being real
+  fits. `mge` and `kick_rank` are provisional.
+- **Recipes.** `just fit <task>` reads `GENERATOR_VERSION` from `version.rs` with `sed`.
+  `fit-check` is part of `ci`, after `test`. `test-slow` ends with `check --rerun-fast`.
+- **Output of `just fit-check`** on today's tables:
+  `fresh giant_cooling`, `fresh wd_cooling`, warnings for the provisional `chabrier`, `kick_rank`
+  and `mge`, and `2 fresh, 3 warnings, 0 failures`.
 
 ### P15.T3 Gaussian-sum coefficients of each density profile
 
@@ -448,6 +553,17 @@ et al. 2010).
 **Files.** `src/tasks/chabrier.rs`, `manifests/chabrier.toml`, `tables/chabrier.rs`,
 `galaxy/imf.rs`.
 
+**As built, P15.T4.a (round 9, lane `fit15`).**
+
+- The move is registered as task `chabrier` (fast, revision 0). It emits its manifest's
+  `scratch_scale`, 0.68, as a provisional `TableItem::Scalar`.
+- `Chabrier::PROVISIONAL_HIGH_MASS_SCALE` keeps its name, which plan 11 uses, and now reads
+  `tables::chabrier::HIGH_MASS_BRANCH_SCALE`.
+- The move is bit-identical: `imf`'s test `assert_same_bits(Chabrier::default().high_mass_scale(),
+0.68)` still passes, and no golden moves.
+- P15.T4.b replaces the run with the bisection, bumps the revision, and drops `scratch_scale` from
+  the manifest.
+
 ### P15.T5 Kick-law rank table and its four defaults
 
 **Source.** The measured log-normal of young isolated pulsars (Disberg and Mandel 2025), the
@@ -493,6 +609,31 @@ fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_B
 **Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `manifests/kick_*.toml` with
 their smoke manifests, `tables/kick_rank.rs`. All three are `Slow`: 10⁷ tracks are tens of minutes
 on one core, so CI never reruns them and relies on the hash, the fingerprint and the smoke run.
+
+**As built, P15.T5.a (round 9, lane `fit15`).**
+
+- `tasks::kick_rank::KickRankTask` (slow, provisional P06.T19.b) runs `fit_parallel`. Its
+  `scores_parallel` scores the sample stars in rounds, each of twice the members still wanted,
+  in chunks of 1,024 through `map_reduce_chunks`. It joins the chunks in index order and cuts
+  at the n-th member. That gives exactly the scores `score_quantiles` sorts, and a test checks
+  the quantiles bit for bit on one thread and on four.
+- Plan 06's module was not touched. It already exposes the per-chunk scorer
+  (`ReferencePopulation::scores`) and the quantile step (`quantiles_of`).
+- The quantiles come from one sort of all the scores (80 MB at 10⁷), not from chunk histograms
+  merged on a fine grid. The sort is exact and independent of the chunking.
+- **Manifests:**
+  - `kick_rank.toml`: the committed table's 10⁶ scores, with 10⁵ fresh ones for the acceptance
+    figures;
+  - `kick_rank.production.toml`: 10⁷ scores, with 10⁶ fresh ones, not the plan's 10⁷, because
+    ±0.01 on the moments needs far fewer and the second 10⁷ tracks would double the run;
+  - `kick_rank.smoke.toml`: 300 scores.
+- **Acceptance figures.** Fresh scores go through the new table; ln(v ÷ km/s) is taken with the
+  rank clamped to 0.001–0.999 and without the truncation at 1,000 km/s. The report also gives
+  the largest shift of a knot's rank from the committed table. The lane reads "before the clamp" as before the truncation, which ruling 96.2 added after the plan was written. The rank clamp alone narrows the spread by a few thousandths (0.6758 over 10⁵ fresh scores of the committed table), inside the ±0.01. This reading is the orchestrator's to confirm. The committed header's `source` was corrected afterwards ("ApJL", which Clippy's `doc_markdown` rejects, became "ApJ Letters") by re-rendering it from the committed quantiles and the recorded acceptance figures, which is what a rerun writes, rather than by a second half-hour run.
+- **The hand-over to P06.T19.e.** A committed table is always made from `kick_rank.toml`. So
+  P06.T19.e moves the production parameters into `kick_rank.toml` (its inputs hash changes with
+  them, as it should), bumps the generator version, and either reruns `just fit kick_rank` or
+  commits the scratch file after correcting its `manifest:` line.
 
 ### P15.T6 Displaced-population form table
 

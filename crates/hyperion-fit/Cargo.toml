@@ -6,11 +6,22 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-# Nothing depends on this crate, so it is not in `[workspace.dependencies]`. Its only dependency is
-# the sim, for `hyperion_sim::math` and the quadratures, so that a fit is bit-identical on every
-# platform.
+# Nothing depends on this crate, so it is not in `[workspace.dependencies]`. It depends on the sim
+# for `hyperion_sim::math`, the quadratures and the generator's own code, so that a fit is
+# bit-identical on every platform. The ordinary crates below are allowed here and only here (plan
+# 15, Design note 3): none of them computes a table's numbers, and `rayon` is used only inside
+# `parallel::map_reduce_chunks`, whose reduction is in index order.
 [dependencies]
+clap.workspace = true
 hyperion-sim.workspace = true
+rayon.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,61 @@
+# The fitted tables' lock file (plan 15, P15.T2): written by `hyperion-fit run`, read by
+# `hyperion-fit check`. Do not edit.
+
+[[table]]
+name = "chabrier"
+path = "chabrier.rs"
+task = "chabrier"
+revision = 0
+inputs_sha256 = "749e2b53688e44fe5f7b8dda1bd0a497c5713835cb1a71b67fe92aae6bb758c8"
+body_sha256 = "dc2e308daa296c899b15ad91ebcd1604b8bfbe3921bbb391c72d111730350c55"
+since_generator_version = 11
+provisional = true
+acceptance = "none yet: a scratch value, fitted by P15.T4.b"
+
+[[table]]
+name = "giant_cooling"
+path = "giant_cooling.rs"
+task = "giant_cooling"
+revision = 0
+inputs_sha256 = "f468826f1e3c3c80cb8a90021e776d20b834b36407311a7071a70d65408269ce"
+body_sha256 = "a5901b07a48e7903906a7b223bf0a5311a8a372b71cb4cfe2b02f978bf743637"
+fingerprint = [1898124597336050500000000000.0, 382800000000000000000000000.0, 695700000.0]
+since_generator_version = 11
+provisional = false
+acceptance = "over the 455 rows, fit minus grid, log₁₀ L within 0.046 dex (rms 0.008) and R within 0.60% (rms 0.12%)"
+
+[[table]]
+name = "kick_rank"
+path = "kick_rank.rs"
+task = "kick_rank"
+revision = 0
+inputs_sha256 = "fa8f39b842a7e1923a9f272d9d935285e2c52f2959fec5b98179bd5edcc44541"
+body_sha256 = "c2c3b8823bd0912d93f7feaaf9322b89de69177a846d0b3622d9fa49854d68f7"
+fingerprint = [1.37, 1.37, 1.8421637164291416, 1.2000058311463526, 2.4084669107893766, 1.6042334553946882, 3.325212015735506, 1.4325212016188156, 5.001514944854197, 6.806572198789263, 6.741676439979783, 8.869634622099678, 7.999273581353981, 10.444950159496061, 11.634476448342019, 15.292022176446476, 0.45]
+since_generator_version = 11
+provisional = true
+acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5993 and standard deviation 0.6758, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00000"
+
+[[table]]
+name = "mge"
+path = "mge.rs"
+task = "mge"
+revision = 1
+inputs_sha256 = "74e52180fba4ca14be6a2ad32f71fa447ed13e8c96a830856c3068daca748140"
+body_sha256 = "516c9a020f2618c0b499ac48ca2252ef12f646cac0d7d96ecc4f37b705a3aa0b"
+fingerprint = [0.55]
+since_generator_version = 11
+provisional = true
+acceptance = "`MGE_EXP` within 1.289% of e^(−s) over s = 0.05–10; `MGE_BAR` within 2.88% of its central value over u = 0–2 and its mass within 0.212%"
+
+[[table]]
+name = "wd_cooling"
+path = "wd_cooling.rs"
+task = "wd_cooling"
+revision = 0
+inputs_sha256 = "7c0c2c873e68f5239bdc5f16fcd19a09d1e2b68510437e071261a24ac2ec2ac0"
+body_sha256 = "82470f60f0a5192e2d2e4f1272c8b39c4dc27c9e5ff9f4758ee7e8ad4503b410"
+fingerprint = [382800000000000000000000000.0, 695700000.0]
+since_generator_version = 11
+provisional = false
+acceptance = "log₁₀ L at the models' ages within 0.009 dex (rms 0.0010) over the 4221 fitted models and 0.028 dex (rms 0.0020) over the 1046 held out"

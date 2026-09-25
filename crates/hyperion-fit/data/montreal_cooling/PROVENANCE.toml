@@ -1,0 +1,102 @@
+# The Montreal white-dwarf cooling sequences (plan 06, P06.T20.a; plan 15, Design note 12). A
+# fetched dataset: the site states no licence, so only this file is committed, and the raw files
+# are downloaded into `crates/hyperion-fit/data/cache/montreal_cooling/`, which git ignores.
+dataset = "montreal_cooling"
+class = "fetched"
+citation = "Bédard, Bergeron, Brassard and Fontaine (2020), ApJ 901, 93: the thick-hydrogen sequences (q_H = 1e-4, q_He = 1e-2) on equimassic carbon-oxygen cores"
+url = "https://www.astro.umontreal.ca/~bergeron/CoolingModels/CoolingModels/"
+retrieved = "2026-09-24"
+release = "the 23 files seq_020_thick.txt to seq_130_thick.txt as the site served them on that date"
+licence = "none stated; the site asks users to acknowledge it and cite the papers"
+
+[[files]]
+name = "seq_020_thick.txt"
+sha256 = "5d951a52c2f01e986ba384db22bef07069d10fd42431824e9f561b363871f803"
+
+[[files]]
+name = "seq_025_thick.txt"
+sha256 = "8d9a7de46f1ff63296f6278d9c57678871e7c6b5b0f92246fb0024ee75f47d9e"
+
+[[files]]
+name = "seq_030_thick.txt"
+sha256 = "f3e36f8efb69cd7e9bfb3a5b29de304f14b4835d7b58bc406eae901693b55708"
+
+[[files]]
+name = "seq_035_thick.txt"
+sha256 = "c1eff9e8d7112f023a2acd4d240ed83b6d7b6b0eb801d55efd0ad5715bc2a18f"
+
+[[files]]
+name = "seq_040_thick.txt"
+sha256 = "fca42c1ed8e2803b704b9546e32ab01a18af0f418eb7e3ce127a416c88573124"
+
+[[files]]
+name = "seq_045_thick.txt"
+sha256 = "d4f4df58a8d854053c36d80f9e0f877d5b81b4da33d1994c701917faab27a1f0"
+
+[[files]]
+name = "seq_050_thick.txt"
+sha256 = "21eb5de88935e9647815650e4e7c87c2b59dc903c0f904e5eeb501114c571df9"
+
+[[files]]
+name = "seq_055_thick.txt"
+sha256 = "53f0a23174bc0e793404b04e0c58f391fb76acabb8c725993d2b1194cb6f8905"
+
+[[files]]
+name = "seq_060_thick.txt"
+sha256 = "fa3493278e2f7994fa469145e7cee1ae2d6ed78ce30d474dced845ab9ba8f7b6"
+
+[[files]]
+name = "seq_065_thick.txt"
+sha256 = "18bb7426abf7aadf3761a8afa10f4b98a261bd1b22e8389d77b780c72b53789b"
+
+[[files]]
+name = "seq_070_thick.txt"
+sha256 = "d7bb53f0458140f7b581896ef9f2d79b9538dd9bcf42e1c492cd029b5eb08db9"
+
+[[files]]
+name = "seq_075_thick.txt"
+sha256 = "262edc0bf28ece108e0fb76bdde0fff3bca89007c39e0b036f5f9db9fe9f0bd8"
+
+[[files]]
+name = "seq_080_thick.txt"
+sha256 = "8d8512ac20abd9dca121e3b2f81061d03f5147081e4961915a3546af7828c27c"
+
+[[files]]
+name = "seq_085_thick.txt"
+sha256 = "726afac6635ce95f3b849f9e20d62f4b2c227ddabcc17465c8c771d378253187"
+
+[[files]]
+name = "seq_090_thick.txt"
+sha256 = "72a740bb8eb3a0d2c35f1f91bd0745809098f0de87dc9b8f1db1ce33b12545a4"
+
+[[files]]
+name = "seq_095_thick.txt"
+sha256 = "9398b669513cd07d1b2602cb9497ec37583fbb0bd9400214f2f6ea4980e3b4dc"
+
+[[files]]
+name = "seq_100_thick.txt"
+sha256 = "698aca8d55772c8130233a95d063c52136a937ded6af0288dd87d920c660c871"
+
+[[files]]
+name = "seq_105_thick.txt"
+sha256 = "0cc83136cb53606b909eec860acedc7a8359ef114df48031afd22b509acec1cc"
+
+[[files]]
+name = "seq_110_thick.txt"
+sha256 = "d094a066d7c2dbaa43af39c4f6525b72ed15dbe793bca6877888539cb412249f"
+
+[[files]]
+name = "seq_115_thick.txt"
+sha256 = "a54008fb61183c6edb0361a84bd559501c8f6261b0c09c3a43a9e00d1fd6a747"
+
+[[files]]
+name = "seq_120_thick.txt"
+sha256 = "344c4569a80e154b209af7a272bae278f9546c0f94d5dd17512316f05c3a427c"
+
+[[files]]
+name = "seq_125_thick.txt"
+sha256 = "45435b4430c2ca10f658157a7b8114cd4a13af5a068ccac5cf8422c3f41ec569"
+
+[[files]]
+name = "seq_130_thick.txt"
+sha256 = "eb742c69f306a56783492680551bafb377d506e4200d2386898710f154e479d6"

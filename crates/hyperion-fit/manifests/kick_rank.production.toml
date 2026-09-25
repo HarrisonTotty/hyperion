@@ -1,0 +1,11 @@
+# The production rank table (plan 15, P15.T5.a): 10⁷ reference scores, the first 10⁶ of them the
+# committed table's, and 10⁶ fresh scores of another seed for the acceptance figures, which put
+# the moments' standard errors under 0.001. Run with `--manifest` and `--out` to a scratch path;
+# plan 06's P06.T19.e swaps it in with a bump, moving these parameters into `kick_rank.toml`.
+task = "kick_rank"
+
+[params]
+draws = 10_000_000
+seed = 0x0619_b000_0000_0000
+acceptance_draws = 1_000_000
+acceptance_seed = 0x0619_b000_0000_0001

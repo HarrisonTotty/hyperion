@@ -509,8 +509,10 @@ impl Chabrier {
     /// The power law's exponent per unit mass above [`BREAK`](Self::BREAK).
     pub const HIGH_EXPONENT: f64 = 2.3;
 
-    /// The provisional scale of the branch above 1 M☉, until plan 15 fits it.
-    pub const PROVISIONAL_HIGH_MASS_SCALE: f64 = 0.68;
+    /// The provisional scale of the branch above 1 M☉, 0.68, until plan 15's P15.T4.b fits it:
+    /// [`tables::chabrier::HIGH_MASS_BRANCH_SCALE`](crate::tables::chabrier::HIGH_MASS_BRANCH_SCALE),
+    /// where P15.T4.a moved it unchanged.
+    pub const PROVISIONAL_HIGH_MASS_SCALE: f64 = crate::tables::chabrier::HIGH_MASS_BRANCH_SCALE;
 
     /// Chabrier's function with its branch above 1 M☉ multiplied by `high_mass_scale`.
     ///

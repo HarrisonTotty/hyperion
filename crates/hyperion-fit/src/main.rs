@@ -1,17 +1,22 @@
-//! `hyperion-fit`: runs an offline fit and writes its table. See the library's documentation.
+//! `hyperion-fit`: runs an offline fit and writes its table, or checks the tables. See the
+//! library's documentation.
 
 use std::process::ExitCode;
 
-use hyperion_fit::{Command, run};
+use clap::Parser;
+use hyperion_fit::cli::{Cli, run};
 
 fn main() -> ExitCode {
-    match Command::parse(std::env::args().skip(1)).and_then(|command| run(&command)) {
-        Ok(path) => {
-            println!("wrote {}", path.display());
-            ExitCode::SUCCESS
-        }
+    let cli = Cli::parse();
+    match run(&cli, &mut std::io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("hyperion-fit: {error}");
+            let mut source = std::error::Error::source(&error);
+            while let Some(cause) = source {
+                eprintln!("  caused by: {cause}");
+                source = cause.source();
+            }
             ExitCode::from(error.exit_code())
         }
     }

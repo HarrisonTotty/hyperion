@@ -1,16 +1,22 @@
-//! The committed white-dwarf cooling table is exactly what `run wd_cooling` produces from the
-//! Montreal sequences (plan 06, P06.T20.a), and it reproduces them, the held-out models included.
+//! The committed white-dwarf cooling table is exactly what `run wd_cooling --since <current>` would
+//! write from the Montreal sequences (plan 06, P06.T20.a; plan 15, P15.T2), and it reproduces them,
+//! the held-out models included.
 //!
 //! The sequences are not redistributed (`tasks::wd_cooling`), so these tests need them in
-//! `target/data/montreal_cooling/`, downloaded from the Montreal group's site. Without them each
+//! `crates/hyperion-fit/data/cache/montreal_cooling/`, downloaded from the Montreal group's site. Without them each
 //! test says so on stderr and checks nothing more; the sim's own tests of the table
 //! (`stellar::remnant::cooling`) run either way, against held-out models they quote.
 
+use std::num::NonZeroUsize;
 use std::path::Path;
 
+use hyperion_fit::emit::Workspace;
+use hyperion_fit::pipeline::rerender;
+use hyperion_fit::task::{find, registry};
 use hyperion_fit::tasks::wd_cooling::{
-    DEFAULT_DATA_DIR, LUMINOSITIES, SEQUENCES, Sequences, fit, read, render,
+    DEFAULT_DATA_DIR, LUMINOSITIES, SEQUENCES, Sequences, fit, read,
 };
+use hyperion_sim::GENERATOR_VERSION;
 
 /// The table the sim compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/wd_cooling.rs");
@@ -39,7 +45,15 @@ fn wd_cooling_table_is_reproduced() {
         "the downloaded sequences' digest {digest} is not the committed table's: they differ from \
          the files it was fitted to"
     );
-    let rendered = render(&fit(&sequences));
+    let rendered = rerender(
+        registry(),
+        find("wd_cooling").expect("wd_cooling is registered"),
+        &Workspace::repository(),
+        NonZeroUsize::MIN,
+        GENERATOR_VERSION.get(),
+    )
+    .expect("the wd_cooling task runs on the downloaded sequences")
+    .text;
     if rendered != COMMITTED {
         let line = rendered
             .lines()
@@ -48,7 +62,7 @@ fn wd_cooling_table_is_reproduced() {
             .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
         panic!(
             "crates/hyperion-sim/src/tables/wd_cooling.rs differs from the fit at {line}: run \
-             `cargo run -p hyperion-fit -- run wd_cooling`"
+             `just fit wd_cooling`"
         );
     }
 }

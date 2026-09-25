@@ -3067,7 +3067,8 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     <https://www.astro.umontreal.ca/~bergeron/CoolingModels/>, retrieved 2026-09-24. The page states
     no licence. It asks users of its tables to acknowledge the site and cite the papers, and the
     table's header does both. The raw files are therefore **not committed**. The fit reads them from
-    `target/data/montreal_cooling/` (or `--data`), and the header records their FNV-1a digest,
+    `crates/hyperion-fit/data/cache/montreal_cooling/` (moved by P15.T2, ruling 101.5) or `--data`,
+    and the header records their FNV-1a digest,
     `0x632cda247f9d4def`. `hyperion-fit`'s reproduction test and residual test run only where the
     files are present, and say so on stderr otherwise. The sim's own tests quote the held-out models
     they check, as T20.a's first check quoted thirteen.
