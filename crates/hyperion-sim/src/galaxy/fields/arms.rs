@@ -396,6 +396,37 @@ impl SharpArm {
         })
     }
 
+    /// This arm with the width `width` in place of its own, and the same geometry and fraction:
+    /// the young disc's arm blurred by the drift of stars away from their birth ridges (plan 08,
+    /// P08.T1 and Design note 21, which widens `σ_w² + (0.8 ⟨uτ⟩ R_d)²`).
+    ///
+    /// Every sharp arm averages exactly 1 around a circle whatever its width, so blurring it moves
+    /// no systems between radii.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildFieldError`] if the width is not positive and finite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::fields::arms::SharpArm;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let arm = SharpArm::young_disc(&GalaxyParams::milky_way_like());
+    /// let blurred = arm.with_width(LightYears::new(2_000.0))?;
+    /// let (r, theta) = (26_000.0, arm.geometry().ridge_azimuth(26_000.0, 0));
+    /// let ridge = arm.geometry().point_polar(r, theta);
+    /// // A wider arm is lower on its ridge.
+    /// assert!(blurred.factor(&ridge) < arm.factor(&ridge));
+    /// assert_eq!(blurred.fraction(), arm.fraction());
+    /// # Ok::<(), hyperion_sim::galaxy::fields::BuildFieldError>(())
+    /// ```
+    pub fn with_width(&self, width: LightYears) -> Result<Self, BuildFieldError> {
+        Self::new(self.geometry, width, self.fraction)
+    }
+
     /// The young disc's arm: the galaxy's geometry with its drawn `σ_w` and A.
     ///
     /// # Panics
@@ -981,6 +1012,34 @@ mod tests {
             assert!(sharp.k(lo) <= k && k <= sharp.k(hi), "at ({x}, {y})");
             assert!(sharp.geometry().fade(lo) <= sharp.geometry().fade(r));
         }
+    }
+
+    /// Plan 08, P08.T1: a sharp arm blurred to any width from 100 to 3,000 ly still averages 1
+    /// around a circle, to 10⁻⁶, by 4,096-point azimuthal sums at 24 radii; and `with_width`
+    /// keeps the geometry and the fraction.
+    #[test]
+    fn sharp_arm_mean_is_one_at_any_width() {
+        let young = SharpArm::young_disc(&crate::galaxy::params::GalaxyParams::milky_way_like());
+        for width in [100.0, 250.0, 500.0, 1_000.0, 2_000.0, 3_000.0] {
+            let arm = young.with_width(LightYears::new(width)).unwrap();
+            assert_eq!(arm.geometry(), young.geometry());
+            assert_same_bits(arm.fraction(), young.fraction());
+            assert_same_bits(arm.width().value(), width);
+            for i in 1..=24 {
+                let r = 60_000.0 * f64::from(i) / 24.0;
+                let mut sum = 0.0;
+                for j in 0..4_096 {
+                    let theta = 2.0 * PI * f64::from(j) / 4_096.0;
+                    sum += arm.factor(&arm.geometry().point_polar(r, theta));
+                }
+                let mean = sum / 4_096.0;
+                assert!(
+                    (mean - 1.0).abs() < 1e-6,
+                    "width {width} ly, R {r} ly: {mean}"
+                );
+            }
+        }
+        assert!(young.with_width(LightYears::new(0.0)).is_err());
     }
 
     #[test]

@@ -169,7 +169,10 @@ function options(): HTMLElement[] {
 /** The text of the selected system readout's value for `label`. */
 function reading(label: string): string {
   const readout = screen.getByRole("status", { name: "Selected system" });
-  return within(readout).getByText(label, { exact: true }).nextElementSibling?.textContent ?? "";
+  // The first reading of that name: the velocity's `COREWARD`, `SPINWARD` and `NORTH` follow the
+  // offsets' (plan 08, P08.T7.b).
+  const [term] = within(readout).getAllByText(label, { exact: true });
+  return term?.nextElementSibling?.textContent ?? "";
 }
 
 describe("LocalChartPanel", () => {

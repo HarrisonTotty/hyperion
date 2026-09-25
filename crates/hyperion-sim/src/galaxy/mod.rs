@@ -21,11 +21,13 @@
 pub mod ages;
 pub mod bounds;
 pub mod consts;
+pub mod displaced;
 pub mod fates;
 pub mod fields;
 pub mod frame;
 pub mod gas;
 pub mod imf;
+pub mod kinematics;
 pub mod map;
 pub mod params;
 pub mod placement;
@@ -42,6 +44,7 @@ use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
 use self::imf::{BandShares, Chabrier, Kroupa, MassFunction, MassFunctionKind};
+use self::kinematics::KinematicTables;
 use self::params::GalaxyParams;
 use self::potential::{MassModel, PotentialTables};
 use self::shares::ShareMatrix;
@@ -188,6 +191,7 @@ pub struct Galaxy {
     fields: Fields,
     gas: GasField,
     shares: ShareMatrix,
+    kinematics: Option<Box<KinematicTables>>,
 }
 
 impl Galaxy {
@@ -249,20 +253,41 @@ impl Galaxy {
             fields,
             gas,
             shares,
+            kinematics: None,
         })
     }
 
-    /// This galaxy with the potential's (R, |z|) grid added, for plans 08–10.
+    /// This galaxy with the potential's (R, |z|) grid added, and the kinematic tables that read
+    /// it (plan 08, P08.T5): what velocities, and so every position away from the epoch, need.
     ///
-    /// They read the potential off the plane. The grid takes about 3 s to build (plan 02, Risks,
-    /// R15); a galaxy that has it already is returned as it is. Nothing else changes.
+    /// Plans 08–10 read the potential off the plane. The grid takes about 2 s to build (plan 02,
+    /// Risks, R15) and the kinematic tables some tens of milliseconds more; a galaxy that has them
+    /// already is returned as it is. Nothing else changes.
     #[must_use]
     pub fn with_full_potential(self) -> Self {
-        if self.potential.has_grid() {
+        if self.potential.has_grid() && self.kinematics.is_some() {
             return self;
         }
-        let potential = self.potential.with_grid(&self.model);
-        Self { potential, ..self }
+        let potential = if self.potential.has_grid() {
+            self.potential
+        } else {
+            self.potential.with_grid(&self.model)
+        };
+        let kinematics = KinematicTables::new(self.seed, &self.params, &self.fields, &potential);
+        Self {
+            potential,
+            kinematics: Some(Box::new(kinematics)),
+            ..self
+        }
+    }
+
+    /// The velocity laws of every population (plan 08), which
+    /// [`with_full_potential`](Self::with_full_potential) builds; `None` for a galaxy built
+    /// without them, whose systems keep their epoch positions at every time
+    /// ([`query::epoch_velocity`](query::epoch_velocity)).
+    #[must_use]
+    pub fn kinematics(&self) -> Option<&KinematicTables> {
+        self.kinematics.as_deref()
     }
 
     /// The seed: for a galaxy built from one, the seed its parameters were drawn from, and for
@@ -351,8 +376,8 @@ impl Galaxy {
     ///
     /// It varies little between seeds, since the parts are fixed-size tables but for the halo's
     /// three to six components. Most of it is the mass model's Gaussians (some 770, each with its
-    /// quadrature nodes); the (R, |z|) grid adds 128 KiB. The gas field is held inline and adds
-    /// nothing.
+    /// quadrature nodes); the (R, |z|) grid adds 128 KiB and the kinematic tables that read it
+    /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
@@ -361,6 +386,10 @@ impl Galaxy {
             + self.fields.heap_bytes()
             + self.gas.heap_bytes()
             + self.shares.heap_bytes()
+            + self
+                .kinematics
+                .as_ref()
+                .map_or(0, |k| size_of::<KinematicTables>() + k.heap_bytes())
     }
 }
 

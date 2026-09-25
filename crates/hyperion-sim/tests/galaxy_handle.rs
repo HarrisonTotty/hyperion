@@ -8,6 +8,7 @@ use std::panic::{RefUnwindSafe, UnwindSafe};
 
 use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
 use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
+use hyperion_sim::galaxy::kinematics::KinematicTables;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::{POPULATION_COLUMNS, ShareMatrix};
@@ -358,7 +359,7 @@ fn the_galaxy_handle_reports_its_heap_size() {
 
 #[test]
 #[ignore = "slow: the (R, z) grid takes seconds to build"]
-fn a_galaxy_handle_with_the_full_potential_adds_the_grid_alone() {
+fn a_galaxy_handle_with_the_full_potential_adds_the_grid_and_the_kinematics_alone() {
     let galaxy = Galaxy::new(Seed::new(PINNED[1]));
     // Built afresh rather than cloned, since a clone holds its vectors without spare capacity.
     let full = Galaxy::new(Seed::new(PINNED[1])).with_full_potential();
@@ -372,8 +373,15 @@ fn a_galaxy_handle_with_the_full_potential_adds_the_grid_alone() {
     assert_same("mass model", full.mass_model(), galaxy.mass_model());
     assert_same("fields", full.fields(), galaxy.fields());
     assert_same("shares", full.shares(), galaxy.shares());
-    // The grid: 64 × 64 points of four values.
-    assert_eq!(full.heap_bytes() - galaxy.heap_bytes(), 64 * 64 * 32);
+    // The grid, 64 × 64 points of four values, and plan 08's kinematic tables that read it.
+    let kinematics = full
+        .kinematics()
+        .expect("the full potential builds the kinematics");
+    assert!(galaxy.kinematics().is_none());
+    assert_eq!(
+        full.heap_bytes() - galaxy.heap_bytes(),
+        64 * 64 * 32 + size_of::<KinematicTables>() + kinematics.heap_bytes()
+    );
     let sun = LightYears::new(26_000.0);
     assert!(
         full.potential()

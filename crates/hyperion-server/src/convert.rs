@@ -30,13 +30,14 @@ use hyperion_sim::galaxy::placement::layer_spec;
 use hyperion_sim::galaxy::potential::PotentialTables;
 use hyperion_sim::galaxy::query::{
     BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult, SystemHit,
+    epoch_velocity,
 };
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
 use hyperion_sim::id::Layer;
 use hyperion_sim::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
 use hyperion_sim::units::{
-    Degrees, Gigayears, KilometresPerSecond, LightYears, Megayears, PerYear, Radians, SolarMasses,
-    Years,
+    Degrees, Gigayears, KilometresPerSecond, LightYears, Megayears, MetresPerSecond, PerYear,
+    Radians, SolarMasses, Years,
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
@@ -362,6 +363,7 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
 /// If `briefs` does not hold one brief per system found, which only a handler bug can cause.
 #[must_use]
 pub(crate) fn systems_in_range(
+    galaxy: &Galaxy,
     request: SystemsInRangeRequest,
     query: &RangeQuery,
     result: &RangeResult,
@@ -373,12 +375,12 @@ pub(crate) fn systems_in_range(
             assert_eq!(briefs.len(), hits.len(), "one brief per system found");
             hits.iter()
                 .zip(briefs)
-                .map(|(hit, brief)| system_record(hit, query.time(), brief))
+                .map(|(hit, brief)| system_record(galaxy, hit, query.time(), brief))
                 .collect()
         }
         None => hits
             .iter()
-            .map(|hit| system_record(hit, query.time(), None))
+            .map(|hit| system_record(galaxy, hit, query.time(), None))
             .collect(),
     };
     SystemsInRange {
@@ -393,17 +395,21 @@ pub(crate) fn systems_in_range(
 
 /// One system found, as the wire carries it: the state at the epoch but for the position and the
 /// age, which are at the query's time, and its primary's `brief` at that time if one was built.
+/// The velocity is the epoch's, from `galaxy`'s kinematic tables (plan 08, P08.T7.a), and is what
+/// moved the system to its position.
 ///
 /// A row without a brief is plan 04's, with no `stellar` key; the client reads it as no brief
 /// sent. A brief of a system not yet formed at the query's time is `None` too, and such a row has
 /// none either: it has no star to describe.
 #[must_use]
 fn system_record(
+    galaxy: &Galaxy,
     hit: &SystemHit,
     time: UniverseTime,
     brief: Option<StellarBriefDto>,
 ) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
+    let velocity = epoch_velocity(galaxy, record).metres_per_second();
     hyperion_protocol::SystemRecord {
         id: SystemIdHex::from_u64(record.id().raw()),
         designation: record.id().designation().to_string(),
@@ -412,6 +418,7 @@ fn system_record(
         initial_mass_msun: record.primary_initial_mass().value(),
         age_myr: Megayears::from(record.age_at(time)).value(),
         population: wire_population(record.population()),
+        velocity_km_s: velocity.map(|v| KilometresPerSecond::from(MetresPerSecond::new(v)).value()),
         stellar: brief,
     }
 }
@@ -1708,7 +1715,7 @@ mod tests {
                 })
                 .collect()
         });
-        systems_in_range(request.clone(), &query, &result, briefs)
+        systems_in_range(milky_way(), request.clone(), &query, &result, briefs)
     }
 
     #[test]

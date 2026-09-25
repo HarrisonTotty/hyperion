@@ -147,10 +147,18 @@ pub struct GalaxyCache {
 }
 
 impl GalaxyCache {
-    /// An empty cache that builds its galaxies with [`Galaxy::new`] on `pool`.
+    /// An empty cache that builds its galaxies with [`Galaxy::new`] and their full potential
+    /// ([`Galaxy::with_full_potential`]) on `pool`.
+    ///
+    /// The full potential's (R, z) grid and the kinematic tables it feeds are what give systems
+    /// their velocities, so that a range query away from the epoch finds them where they have
+    /// moved (plan 08, P08.T7.a). They add about 2 s to a galaxy's build, once per universe.
     #[must_use]
     pub fn new(pool: Arc<CpuPool>) -> Self {
-        Self::with_build(pool, Arc::new(Galaxy::new))
+        Self::with_build(
+            pool,
+            Arc::new(|seed| Galaxy::new(seed).with_full_potential()),
+        )
     }
 
     /// An empty cache whose galaxies come from `build` rather than [`Galaxy::new`], so that a test

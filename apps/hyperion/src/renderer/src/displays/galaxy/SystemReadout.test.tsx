@@ -45,10 +45,13 @@ function renderReadout(
   return screen.getByRole("status", { name: "Selected system" });
 }
 
-/** The value beside a label in the readout. */
-function valueOf(readout: HTMLElement, label: string): string | null {
-  const term = within(readout).getByText(label);
-  const value = term.nextElementSibling;
+/**
+ * The value beside a label in the readout: the `nth` reading of that name, since the velocity's
+ * `COREWARD`, `SPINWARD` and `NORTH` (the second of each) follow the offsets' (the first).
+ */
+function valueOf(readout: HTMLElement, label: string, nth = 0): string | null {
+  const term = within(readout).getAllByText(label)[nth];
+  const value = term?.nextElementSibling ?? null;
   if (value === null) {
     throw new Error(`${label} has no value`);
   }
@@ -151,5 +154,29 @@ describe("SystemReadout", () => {
     ]) {
       expect(valueOf(readout, label)).toBe("—");
     }
+  });
+
+  it("gives the velocity, its speed and its components at the system's own position", () => {
+    const readout = renderReadout(
+      aSystem([1, 0, 0], {
+        systems: [{ relLy: [1, 0, 0], layer: "c", velocityKmS: [3.5, 231.25, -7] }],
+      }),
+    );
+
+    // At (26,001, 0, 0) spinward is +y and coreward −x: a disc star turning with the galaxy,
+    // drifting a little outward and south (plan 08, P08.T7.b).
+    expect(valueOf(readout, "VEL")).toBe("231.4 km/s");
+    expect(valueOf(readout, "COREWARD", 1)).toBe("-3.5 km/s");
+    expect(valueOf(readout, "SPINWARD", 1)).toBe("+231.3 km/s");
+    expect(valueOf(readout, "NORTH", 1)).toBe("-7.0 km/s");
+    // The offsets keep their own rows.
+    expect(valueOf(readout, "COREWARD")).toBe("-1.00 ly");
+  });
+
+  it("reads every velocity value as the em dash with nothing selected", () => {
+    const readout = renderReadout(null);
+
+    expect(valueOf(readout, "VEL")).toBe("—");
+    expect(valueOf(readout, "SPINWARD", 1)).toBe("—");
   });
 });

@@ -250,7 +250,8 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// # Panics
 ///
 /// If a system's drift would take it out of the addressable cube, which
-/// [`position_at`](super::query::position_at) cannot do while velocities are zero.
+/// [`position_at`](super::query::position_at) rules out: velocities are cut below the padding
+/// speeds, which move a system by at most 10 ly over the clock window (plan 08).
 ///
 /// # Examples
 ///

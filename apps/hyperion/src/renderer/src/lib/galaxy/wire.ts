@@ -64,6 +64,7 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     ageMyr: record.age_myr,
     // Every chart query asks for the briefs, so a row without one is a system not yet formed.
     star: record.stellar === undefined ? null : toStarBrief(record.stellar),
+    velocityKmS: toVec3(record.velocity_km_s),
   };
 }
 

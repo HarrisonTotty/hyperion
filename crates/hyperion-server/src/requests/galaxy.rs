@@ -142,7 +142,13 @@ pub(crate) async fn systems(
                 query.time(),
             )
         });
-        Queried::Answered(systems_in_range(request, &query, &result, briefs))
+        Queried::Answered(systems_in_range(
+            &job_galaxy,
+            request,
+            &query,
+            &result,
+            briefs,
+        ))
     };
     let (request, query, result) = match run(&state, &token, queried).await? {
         Queried::Answered(answer) => return Ok(ResponseBody::SystemsInRange(answer)),
@@ -184,7 +190,8 @@ pub(crate) async fn systems(
                 .unwrap_or_else(|closed| Err(JobError::from(closed)))?,
         );
     }
-    let convert = move |_: &CancelToken| systems_in_range(request, &query, &result, Some(briefs));
+    let convert =
+        move |_: &CancelToken| systems_in_range(&galaxy, request, &query, &result, Some(briefs));
     // As a chunk does, the conversion waits for room rather than refusing a query that has run.
     let answered = state
         .pool

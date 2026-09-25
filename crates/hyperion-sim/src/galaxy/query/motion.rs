@@ -7,15 +7,18 @@
 //! system it finds at `t`, against the unpadded radius ([`hit_at`]). The pad is tiny — 0.33 ly a
 //! century, 2% of a 50 ly sphere — and costs only a few more cells.
 //!
-//! Systems do not move yet: [`epoch_velocity`] is zero until plan 08 draws velocities on the
-//! reserved `system.velocity` tag, so [`position_at`] returns the epoch position for every `t`. The
-//! time argument is here from the start so that plan 08 moves no position at the epoch and changes
-//! no signature.
+//! Systems move in straight lines at their velocities, which plan 08 draws on the reserved
+//! `system.velocity` tag ([`kinematics::draw_velocity`](crate::galaxy::kinematics::draw_velocity)):
+//! [`position_at`] is the epoch position plus the drift since the epoch. A galaxy built without its
+//! kinematic tables (without [`Galaxy::with_full_potential`]) has no velocities, and its systems
+//! keep their epoch positions at every `t`, as every system did before plan 08. No position at the
+//! epoch moves either way.
 
 use super::result::SystemHit;
 use super::walk::QuerySphere;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
+use crate::galaxy::kinematics::draw_velocity;
 use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::id::Layer;
 use crate::time::UniverseTime;
@@ -33,21 +36,28 @@ use crate::units::{KilometresPerSecond, LightYears, MetresPerSecond, Seconds};
 /// unbound class, which needs more and raises [`pad_speed`] for layer E above this.
 pub const PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(1_000.0);
 
+/// The speed layer E's spheres are padded by, 3,000 km/s: above anything plan 08 places there
+/// (plan 08, Design note 27).
+///
+/// The brainstorm says only that "the unbound class needs more" than [`PAD_SPEED`]. The fastest
+/// object plan 08 places is a remnant at the kick law's upper clamp, about 2,200 km/s, launched
+/// along a rotation of up to about 300 km/s, and the reserved hypervelocity survivors move at up to
+/// 2,500 km/s; 3,000 km/s covers both with a fifth to spare, and the draw caps the exempt classes
+/// at it. Padding chooses cells and changes no generated output.
+pub const UNBOUND_PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(3_000.0);
+
 /// The speed the sphere is padded by when walking `layer`.
 ///
-/// It is [`PAD_SPEED`] for every layer in the first milestone. Plan 08 raises it for the unbound
-/// class of layer E, which is the brainstorm's "only the unbound class needs more"; it lives behind
-/// one function so that raising it moves no other layer's cells (plan 03, Design note 13).
+/// [`UNBOUND_PAD_SPEED`] for layer E, the only layer whose cells hold plan 08's unbound class, and
+/// [`PAD_SPEED`] for every other layer (plan 08, Design note 27). It lives behind one function so
+/// that raising one layer's moves no other layer's cells (plan 03, Design note 13).
 #[must_use]
 pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
     match layer {
-        Layer::A
-        | Layer::B
-        | Layer::C
-        | Layer::D
-        | Layer::E
-        | Layer::BrownDwarf
-        | Layer::RoguePlanet => PAD_SPEED,
+        Layer::E => UNBOUND_PAD_SPEED,
+        Layer::A | Layer::B | Layer::C | Layer::D | Layer::BrownDwarf | Layer::RoguePlanet => {
+            PAD_SPEED
+        }
     }
 }
 
@@ -77,33 +87,41 @@ pub fn pad_for(t: UniverseTime, speed: KilometresPerSecond) -> LightYears {
 
 /// The velocity a system has at the epoch, in the galactic frame.
 ///
-/// Zero for every system in the first milestone. Plan 08 draws it on the reserved domain tag
-/// `system.velocity`, keyed by the system's ID, so no position at the epoch moves when it does, and
-/// nothing else here changes.
+/// Plan 08's draw on the reserved domain tag `system.velocity`, keyed by the system's ID
+/// ([`draw_velocity`]), for a galaxy with its kinematic tables
+/// ([`Galaxy::with_full_potential`]); zero for a galaxy built without them, which has no
+/// velocities. A displaced record, once plan 08's P08.T12.d places them, has its class's law; until
+/// then every record is a field record and takes its component's.
 #[must_use]
 pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity {
-    let _ = (galaxy, record);
-    GalacticVelocity::default()
+    if galaxy.kinematics().is_some() {
+        draw_velocity(galaxy, record)
+    } else {
+        GalacticVelocity::default()
+    }
 }
 
 /// Where a system is at `t`: its epoch position plus its drift over the time since the epoch.
 ///
 /// The drift is [`epoch_velocity`] times the span from the epoch to `t`, through plan 01's
 /// coordinate arithmetic, so it is exact in whole light-years and rounds only in the offset inside a
-/// light-year. It is zero everywhere until plan 08.
+/// light-year. At the epoch it is the epoch position itself, and the velocity is not drawn.
 ///
 /// # Panics
 ///
-/// If the drift would take the position out of the addressable cube. It cannot while the velocity
-/// is zero; plan 08, which fills the velocity in, decides what a system drifting off the grid
-/// means.
+/// If the drift would take the position out of the addressable cube. It cannot: plan 08 cuts
+/// every velocity below [`PAD_SPEED`], and layer E's fastest below [`UNBOUND_PAD_SPEED`], which
+/// over the clock window move a position by at most 10 ly, while every grid system lies inside
+/// the root cube, 65,536 ly from the centre against the addressable range's 2³¹ ly.
 #[must_use]
 pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> GalacticPosition {
+    if t == UniverseTime::EPOCH {
+        return *record.epoch_position();
+    }
     drifted(record, epoch_velocity(galaxy, record), t)
 }
 
-/// [`position_at`] with the velocity given, which is how a test moves a system that the first
-/// milestone leaves still.
+/// [`position_at`] with the velocity given.
 #[must_use]
 fn drifted(record: &SystemRecord, velocity: GalacticVelocity, t: UniverseTime) -> GalacticPosition {
     let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
@@ -111,7 +129,7 @@ fn drifted(record: &SystemRecord, velocity: GalacticVelocity, t: UniverseTime) -
         .epoch_position()
         .translated(velocity.displacement_over(elapsed))
         .expect(
-            "a speed under 1,000 km/s over the clock window moves a position by at most 3.4 ly, \
+            "a speed under 3,000 km/s over the clock window moves a position by at most 10 ly, \
              which no cell of the root cube can leave the addressable range by",
         )
 }
@@ -193,15 +211,24 @@ mod tests {
         assert!((CLOCK_WINDOW_H.as_julian_years_f64() - 1_000.0).abs() < f64::EPSILON);
     }
 
+    /// Plan 08, P08.T6: layer E pads at the unbound class's 3,000 km/s, every other layer at plan
+    /// 03's 1,000 km/s; at |t| = H that is 10 ly, against layer E's 128 ly cells.
     #[test]
-    fn motion_pads_every_layer_at_the_same_speed_for_now() {
+    fn motion_pads_layer_e_for_the_unbound_class() {
         for layer in Layer::ALL {
-            assert_eq!(pad_speed(layer), PAD_SPEED);
+            let expected = if layer == Layer::E {
+                UNBOUND_PAD_SPEED
+            } else {
+                PAD_SPEED
+            };
+            assert_eq!(pad_speed(layer), expected, "{layer:?}");
         }
+        let pad = pad_for(ClockWindow::END, UNBOUND_PAD_SPEED).value();
+        assert!((pad - 10.007).abs() < 1e-3, "{pad} ly");
     }
 
     #[test]
-    fn motion_leaves_every_system_where_it_was_at_the_epoch() {
+    fn motion_leaves_every_system_still_without_kinematic_tables() {
         let galaxy = galaxy();
         let mut cell = Vec::new();
         generate_cell(

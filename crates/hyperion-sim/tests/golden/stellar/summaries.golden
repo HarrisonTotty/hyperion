@@ -580,41 +580,41 @@ companions at t = 500 yr: Exists
   [2] no death in the window
 
 companions of C system = 0x42002cb200000000
-[1] initial mass = 0x3fef90f9e9e588dd  # 0.9864472931187965
+[1] initial mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
 companions at t = -500 yr: Exists
   [1] MainSequence Dwarf G7V
   [1] age = 0x41ed5a733e7129ca  # 3939736051.536351
-  [1] mass = 0x3fef90f9e9e588dd  # 0.9864472931187965
+  [1] mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3fe7cdc4356c81e3  # 0.7438679736551957
-  [1] R = 0x3fede7a6a1c145ab  # 0.9345276984478706
-  [1] Teff = 0x40b5a908a7ebefb5  # 5545.033812280676
-  [1] M_V = 0x4014bfd05ce0918e  # 5.187318278509691
-  [1] B-V = 0x3fe6c3e01c2e7665  # 0.7114105749530607
+  [1] L = 0x3fe7cdc4356beb70  # 0.7438679736509197
+  [1] R = 0x3fede7a6a1c11758  # 0.934527698446554
+  [1] Teff = 0x40b5a908a7ebde42  # 5545.033812276613
+  [1] M_V = 0x4014bfd05ce0b0d1  # 5.187318278516799
+  [1] B-V = 0x3fe6c3e01c2e9f0b  # 0.711410574954216
   [1] remnant none
   [1] no death in the window
 companions at t = 0 yr: Exists
   [1] MainSequence Dwarf G7V
   [1] age = 0x41ed5a737cf129ca  # 3939736551.536351
-  [1] mass = 0x3fef90f9e9e588dd  # 0.9864472931187965
+  [1] mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3fe7cdc442c0f68a  # 0.7438679984840786
-  [1] R = 0x3fede7a6a706d445  # 0.9345277082671904
-  [1] Teff = 0x40b5a908a90b7b98  # 5545.033829419779
-  [1] M_V = 0x4014bfd05a333872  # 5.187318238617182
-  [1] B-V = 0x3fe6c3e01991180b  # 0.7114105700827634
+  [1] L = 0x3fe7cdc442c06018  # 0.7438679984798027
+  [1] R = 0x3fede7a6a706a5f1  # 0.9345277082658737
+  [1] Teff = 0x40b5a908a90b6a26  # 5545.033829415717
+  [1] M_V = 0x4014bfd05a3357b3  # 5.187318238624289
+  [1] B-V = 0x3fe6c3e0199140a2  # 0.7114105700839171
   [1] remnant none
   [1] no death in the window
 companions at t = 500 yr: Exists
   [1] MainSequence Dwarf G7V
   [1] age = 0x41ed5a73bb7129ca  # 3939737051.536351
-  [1] mass = 0x3fef90f9e9e588dd  # 0.9864472931187965
+  [1] mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3fe7cdc450156b40  # 0.7438680233129631
-  [1] R = 0x3fede7a6ac4c62e3  # 0.9345277180865107
-  [1] Teff = 0x40b5a908aa2b077a  # 5545.033846558881
-  [1] M_V = 0x4014bfd05785df53  # 5.187318198724671
-  [1] B-V = 0x3fe6c3e016f3b9b1  # 0.7114105652124662
+  [1] L = 0x3fe7cdc45014d4cd  # 0.7438680233086871
+  [1] R = 0x3fede7a6ac4c3490  # 0.9345277180851941
+  [1] Teff = 0x40b5a908aa2af607  # 5545.033846554818
+  [1] M_V = 0x4014bfd05785fe94  # 5.187318198731777
+  [1] B-V = 0x3fe6c3e016f3e248  # 0.7114105652136198
   [1] remnant none
   [1] no death in the window
 

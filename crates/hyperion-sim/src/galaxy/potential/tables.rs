@@ -179,6 +179,47 @@ impl Grid {
         }
         sum
     }
+
+    /// The Gaussians' `∂Φ ÷ ∂ln R` and `∂Φ ÷ ∂ln |z|` at a point inside the grid's range: the
+    /// derivatives of the bicubic interpolant [`at`](Self::at) reads, which equal the stored exact
+    /// derivatives at the grid points.
+    fn log_derivatives(&self, r_cyl: f64, height: f64) -> [f64; 2] {
+        let (row, across) = cell(r_cyl);
+        let (column, up) = cell(height);
+        let radial = hermite(across);
+        let vertical = hermite(up);
+        let radial_rate = hermite_slope(across);
+        let vertical_rate = hermite_slope(up);
+        // Basis weights of the value and of the slope, along each axis: `[value, slope]` pairs.
+        let weights = |basis: [f64; 4], k: usize| [basis[k], basis[k + 2]];
+        let (mut by_ln_r, mut by_ln_z) = (0.0, 0.0);
+        for di in 0..2 {
+            for dj in 0..2 {
+                let node = self.points[(row + di) * POINTS + column + dj];
+                let term = |[r_value, r_slope]: [f64; 2], [z_value, z_slope]: [f64; 2]| {
+                    let [phi, by_r, by_z, by_both] = node;
+                    r_value * z_value * phi
+                        + STEP * (r_slope * z_value * by_r + r_value * z_slope * by_z)
+                        + STEP * STEP * r_slope * z_slope * by_both
+                };
+                by_ln_r += term(weights(radial_rate, di), weights(vertical, dj));
+                by_ln_z += term(weights(radial, di), weights(vertical_rate, dj));
+            }
+        }
+        // The basis's rates are per cell; one cell is STEP in the logarithm.
+        [by_ln_r / STEP, by_ln_z / STEP]
+    }
+}
+
+/// The derivative in `t` of the cubic Hermite basis of [`hermite`].
+fn hermite_slope(t: f64) -> [f64; 4] {
+    let t2 = t * t;
+    [
+        6.0 * t2 - 6.0 * t,
+        -6.0 * t2 + 6.0 * t,
+        3.0 * t2 - 4.0 * t + 1.0,
+        3.0 * t2 - 2.0 * t,
+    ]
 }
 
 /// The galaxy's potential as tables: circular speed, its radial derivative and the potential on
@@ -422,6 +463,50 @@ impl PotentialTables {
         self.omega(self.bar_corotation)
     }
 
+    /// `R ∂Φ ÷ ∂R`, (km/s)², and `K_z = ∂Φ ÷ ∂z`, (km/s)² per light-year, at `(R, z)` (ly),
+    /// everything included; `None` without the (R, z) grid (plan 08, the kinematics' force source).
+    ///
+    /// They are the derivatives of what [`potential`](Self::potential) interpolates, so they agree
+    /// with it to the interpolation's accuracy and are exact at the grid points. `K_z` is odd in z.
+    /// Below 2⁻⁴ ly in R the Gaussians' radial term is continued as solid-body, as in the plane.
+    pub(crate) fn forces(&self, r_cyl: f64, z: f64) -> Option<[f64; 2]> {
+        let grid = self.grid.as_ref()?;
+        let height = z.abs();
+        let r = r_cyl.max(FIRST);
+        let [mut radial, mut vertical] = if r > LAST || height > LAST {
+            // A point mass beyond the grid: Φ = Φ_edge h_edge ÷ h.
+            let (rc, zc) = (r.min(LAST), height.min(LAST));
+            let h = math::hypot(r, height);
+            let phi = grid.at(rc, zc) * math::hypot(rc, zc) / h;
+            [-phi * r * r / (h * h), -phi * height / (h * h)]
+        } else if height < FIRST {
+            let plane = self.in_plane.at(r);
+            let edge = grid.at(r, FIRST);
+            let [edge_by_ln_r, _] = grid.log_derivatives(r, FIRST);
+            let blend = (height / FIRST) * (height / FIRST);
+            [
+                plane.v_circ_sq + (edge_by_ln_r - plane.v_circ_sq) * blend,
+                2.0 * (edge - plane.potential) * height / (FIRST * FIRST),
+            ]
+        } else {
+            let [by_ln_r, by_ln_z] = grid.log_derivatives(r, height);
+            [by_ln_r, by_ln_z / height]
+        };
+        if r_cyl < FIRST {
+            radial *= (r_cyl / FIRST) * (r_cyl / FIRST);
+        }
+        let h = math::hypot(r_cyl, height);
+        if h > 0.0 {
+            let radius = LightYears::new(h);
+            for c in self.spherical() {
+                let v2 = c.v_circ_sq(radius);
+                radial += v2 * (r_cyl / h) * (r_cyl / h);
+                vertical += v2 * height / (h * h);
+            }
+        }
+        Some([radial, vertical.copysign(z)])
+    }
+
     /// The Gaussians' total mass, for tests of the far field.
     #[cfg(test)]
     fn extended_edge(&self) -> f64 {
@@ -460,6 +545,44 @@ mod tests {
                 .abs()
                 < f64::EPSILON
         );
+    }
+
+    /// The tables' forces are the mass model's, to the interpolation's accuracy, across the disc,
+    /// the bulge and the halo, above and below the plane, and beyond the grid (plan 08's force
+    /// source).
+    #[test]
+    fn the_grid_forces_match_the_mass_model() {
+        let params = crate::galaxy::params::GalaxyParams::milky_way_like();
+        let model = MassModel::new(&params);
+        let tables = PotentialTables::full(&model);
+        assert!(PotentialTables::in_plane(&model).forces(1.0, 1.0).is_none());
+        for (r, z) in [
+            (26_000.0, 300.0),
+            (26_000.0, -1_500.0),
+            (3_000.0, 400.0),
+            (500.0, 60.0),
+            (12_000.0, 0.03),
+            (40_000.0, 20_000.0),
+            (0.02, 800.0),
+            (300_000.0, 10.0),
+        ] {
+            let [radial, vertical] = tables.forces(r, z).unwrap();
+            let k_z = model.vertical_force(LightYears::new(r), LightYears::new(z));
+            // R ∂Φ ÷ ∂R by a central difference of the model's potential in ln R.
+            let d = 1e-4;
+            let (lo, hi) = (r * math::exp(-d), r * math::exp(d));
+            let by_ln_r = (model.potential(LightYears::new(hi), LightYears::new(z))
+                - model.potential(LightYears::new(lo), LightYears::new(z)))
+                / (2.0 * d);
+            assert!(
+                (vertical - k_z).abs() <= 5e-3 * k_z.abs() + 1e-9 * (by_ln_r.abs() / r),
+                "K_z at ({r}, {z}): {vertical} against {k_z}"
+            );
+            assert!(
+                (radial - by_ln_r).abs() <= 5e-3 * by_ln_r.abs() + 1e-3,
+                "R ∂Φ/∂R at ({r}, {z}): {radial} against {by_ln_r}"
+            );
+        }
     }
 
     #[test]

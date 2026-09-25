@@ -529,6 +529,41 @@ domain_tags! {
     /// direction, words 31–32; the test-only toy binary's separation rank, word 33; words 34–63
     /// are reserved (`stellar::remnant::reference`).
     STELLAR_REFERENCE: Galaxy = "stellar.reference";
+
+    // Plan 08: velocities, kicks and displaced objects (P08.T1). Appended here, after plan 06's
+    // reference population, because the macro's order fixes `ALL`. `system.velocity` is plan 03's
+    // reserved tag above, which plan 08 opens. Scope `System` tags are opened with
+    // `ObjectKey::from(SystemId)`; `halo.kinematics` with `ObjectKey::galaxy_item(n)`, n the halo
+    // component's item number (`HaloComponentKind::item`).
+
+    /// A displaced or layer-E record's kind (alive, retained, a displaced class's remnant, runaway
+    /// or walkaway), and layer D's runaway reduction: one mark per attempt (P08.T12.c).
+    DISPLACED_KIND: System = "displaced.kind";
+
+    /// A displaced or layer-E record's initial mass from its class's conditional table: one
+    /// uniform per attempt (P08.T12.c).
+    DISPLACED_MASS: System = "displaced.mass";
+
+    /// A displaced or retained record's time since death, and its birth component: one uniform
+    /// each per attempt (P08.T12.c).
+    DISPLACED_DEATH: System = "displaced.death";
+
+    /// A displaced record's formation radius in the mixed age bins: one uniform (P08.T12.c).
+    DISPLACED_BIRTH: System = "displaced.birth";
+
+    /// The speed bin an unbound record's kick is drawn in, for the fastest classes: one mark
+    /// (P08.T12.c).
+    DISPLACED_ORIGIN_BIN: System = "displaced.origin_bin";
+
+    /// A runaway or walkaway's ejection speed: one uniform (P08.T12.c).
+    RUNAWAY_SPEED: System = "runaway.speed";
+
+    /// A runaway or walkaway's ejection channel and age: one mark and two uniforms (P08.T12.c).
+    RUNAWAY_EJECTION: System = "runaway.ejection";
+
+    /// A lesser halo progenitor's kinematics (P08.T3): its anisotropy β, uniform on 0.3–0.7, word
+    /// 0; its net rotation, uniform on ±0.25 `v_c`, word 1.
+    HALO_KINEMATICS: Galaxy = "halo.kinematics";
 }
 
 #[cfg(test)]
@@ -694,6 +729,28 @@ mod tests {
     fn plan_06_registers_the_reference_tag_with_galaxy_scope() {
         assert_eq!(STELLAR_REFERENCE.name(), "stellar.reference");
         assert_eq!(STELLAR_REFERENCE.scope(), crate::rng::TagScope::Galaxy);
-        assert_eq!(ALL.last(), Some(&STELLAR_REFERENCE));
+        assert!(ALL.contains(&STELLAR_REFERENCE));
+    }
+
+    #[test]
+    fn plan_08_registers_its_tags_with_their_scopes() {
+        let system = [
+            DISPLACED_KIND,
+            DISPLACED_MASS,
+            DISPLACED_DEATH,
+            DISPLACED_BIRTH,
+            DISPLACED_ORIGIN_BIN,
+            RUNAWAY_SPEED,
+            RUNAWAY_EJECTION,
+        ];
+        for tag in system {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(ALL.contains(&tag));
+        }
+        assert_eq!(SYSTEM_VELOCITY.name(), "system.velocity");
+        assert_eq!(SYSTEM_VELOCITY.scope(), crate::rng::TagScope::System);
+        assert_eq!(HALO_KINEMATICS.name(), "halo.kinematics");
+        assert_eq!(HALO_KINEMATICS.scope(), crate::rng::TagScope::Galaxy);
+        assert_eq!(ALL.last(), Some(&HALO_KINEMATICS));
     }
 }

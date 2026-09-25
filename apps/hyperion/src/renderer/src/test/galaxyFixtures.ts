@@ -482,6 +482,8 @@ export interface SystemRecordSpec {
    * yet formed, when `null`.
    */
   readonly stellar?: StellarBriefDto | null;
+  /** Velocity along the `GALACTIC` axes, km/s; a disc star's near the Sun by default. */
+  readonly velocityKmS?: readonly [number, number, number];
 }
 
 /** One system of a range query's answer, as a query with `include_stellar` returns it. */
@@ -493,6 +495,7 @@ export function aSystemRecord({
   ageMyr = 4_600,
   population = "old_thin_disc",
   stellar,
+  velocityKmS = [-231.25, 12.5, -7],
 }: SystemRecordSpec): SystemRecord {
   const [low, high] = BANDS_MSUN[layer];
   const record: SystemRecord = {
@@ -503,6 +506,7 @@ export function aSystemRecord({
     initial_mass_msun: initialMassMsun ?? (low + high) / 2,
     age_myr: ageMyr,
     population,
+    velocity_km_s: [...velocityKmS],
   };
   // A row without a brief leaves the key out, as the server writes it.
   return stellar === null ? record : { ...record, stellar: stellar ?? aStellarBrief(layer) };
@@ -597,6 +601,8 @@ export interface RelativeSystemSpec {
   readonly layer: MassLayer;
   /** Its primary's brief, as {@link SystemRecordSpec.stellar} has it. */
   readonly stellar?: StellarBriefDto | null;
+  /** Velocity along the `GALACTIC` axes, km/s; {@link aSystemRecord}'s default if absent. */
+  readonly velocityKmS?: readonly [number, number, number];
 }
 
 /** What {@link aSystemsInRange} builds. */
@@ -631,13 +637,14 @@ export function aSystemsInRange({
   universe = UNIVERSE_ID,
 }: SystemsInRangeSpec = {}): ResponseFor<"systems_in_range"> {
   const returned: Partial<Record<MassLayer, number>> = {};
-  const records = systems.map(({ relLy, layer, stellar }, position) => {
+  const records = systems.map(({ relLy, layer, stellar, velocityKmS }, position) => {
     returned[layer] = (returned[layer] ?? 0) + 1;
     return aSystemRecord({
       positionLy: [centreLy[0] + relLy[0], centreLy[1] + relLy[1], centreLy[2] + relLy[2]],
       layer,
       index: position + 1,
       ...(stellar === undefined ? {} : { stellar }),
+      ...(velocityKmS === undefined ? {} : { velocityKmS }),
     });
   });
   return {

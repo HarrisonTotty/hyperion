@@ -68,7 +68,8 @@ Not in scope:
 ```rust
 pub struct KinematicTables { /* discs, halo, spheroids; built from PotentialTables::full */ }
 impl KinematicTables {
-    pub fn new(params: &GalaxyParams, fields: &Fields, potential: &PotentialTables) -> Self;
+    pub fn new(seed: Seed, params: &GalaxyParams, fields: &Fields,
+               potential: &PotentialTables) -> Self;       // seed: halo.kinematics (T1)
     pub fn ellipsoid(&self, component: ComponentId, p: &PointLy) -> VelocityEllipsoid;
     pub fn bulge_projected_sigma(&self) -> KilometresPerSecond;   // of the final tables; for tests
     pub fn heap_bytes(&self) -> usize;
@@ -79,6 +80,7 @@ pub struct VelocityEllipsoid { /* axes: EllipsoidAxes, mean: [KilometresPerSecon
                                   sigma: [KilometresPerSecond; 3] */ }
 pub enum EllipsoidAxes { Cylindrical, Spherical }
 pub fn draw_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity;
+pub fn draw(galaxy: &Galaxy, record: &SystemRecord) -> VelocityDraw;   // with attempts and cut
 pub const ESCAPE_CUT_ATTEMPTS: u32 = 16;
 pub const YOUNG_DISC_SIGMA_FLOOR: KilometresPerSecond;    // 5 km/s
 pub mod discs   { pub struct DiscKinematics;
@@ -86,15 +88,19 @@ pub mod discs   { pub struct DiscKinematics;
 pub mod halo    { pub struct HaloKinematics; pub struct HaloComponentKinematics; }
 pub mod spheroid {
     pub struct JeansTable;
-    pub trait ForceSource;                 // K_z and v_c²; for PotentialTables and MassModel
+    pub trait ForceSource { fn forces_at(&self, r_cyl: f64, z: f64) -> Forces; }
+                                           // Forces { vertical: K_z, v_circ_sq: R ∂Φ/∂R };
+                                           // for PotentialTables and MassModel
     pub fn bar_streaming(..) -> [KilometresPerSecond; 2];
     /// The σ that M–σ reads, from a black-hole-free `MassModel` alone: what replaces plan 02's D8.
     pub fn bulge_projected_sigma(model: &MassModel, params: &GalaxyParams) -> KilometresPerSecond;
 }
 ```
 
-`Galaxy::kinematics() -> &KinematicTables` and `Galaxy::class_table() -> &ClassTable`, both built by
-`Galaxy::with_full_potential` (plan 02, D7), which this plan extends.
+`Galaxy::kinematics() -> Option<&KinematicTables>` and `Galaxy::class_table() -> &ClassTable`, both
+built by `Galaxy::with_full_potential` (plan 02, D7), which this plan extends. A galaxy built without
+it has no kinematic tables, and its systems keep their epoch positions (T1's reconcile, 2026-09-25:
+the grid costs 2 s, so `Galaxy::new` does not build it; the server builds every galaxy full).
 
 ### `hyperion_sim::galaxy::query` (plan 03's hooks, now filled)
 
@@ -146,7 +152,8 @@ pub mod marks { pub struct ConditionalMarks; pub struct DisplacedMarks; /* initi
                 death or ejection, birth component, origin speed bin, kick constraint */
                 pub struct LifetimeBracket; /* per mass node, bounds on plan 06's lifetime */ }
 pub mod runaway { pub struct RunawayModel; /* shares, speeds and ejection ages; constants */ }
-pub mod binarity { pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64; } // the seam
+pub mod binarity { pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64; } // the seam:
+                  // plan 11's built stellar::multiplicity::stripped_share behind it (T8.a)
 pub mod kick_bins { pub fn speed_bin_shares(law: &impl KickLaw, m: SolarMasses, z: MetalFraction,
                     scales: &GalaxyScales) -> KickBinShares; }   // by remnant kind and mode
 pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<ExplosionSite>;
@@ -227,7 +234,7 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
 - **Plan 06:** `stellar::lifetime(m0, &Composition, &StarDraws)` (the re-export of
   `stellar::sse::lifetime`) and `Composition`; from `stellar::remnant`, the kick law, which is plan
   06's and is consumed under exactly these names: `KickLaw`, `StandardKickLaw`, `KickLawParams`
-  (with `stripped_share`), `KickDraws`, `NatalKick`, `KickMode`, `CompactRemnant`,
+  (whose `stripped_share` P08.T1 replaced with plan 11's, below), `KickDraws`, `NatalKick`, `KickMode`, `CompactRemnant`,
   `ProgenitorAtDeath`, `Stripping` and `CollapseChannel`;
   `StarDraws::{for_star, for_attempt, from_parts, median}` and `KickDraws::{of, from_parts}`, which
   let the quadrature drive the law from explicit variates;
@@ -238,6 +245,9 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
   `star.remnant.*`, `star.stripped` and `star.kick.*` fields of `StarDraws::for_attempt` at the
   attempts after `mark_attempt`) on one built track, so that an attempt costs a remnant and a kick
   and never a track (P08.T12.c makes that change).
+- **Plan 11 (P08.T1's reconcile):** `stellar::multiplicity::{stripped_share, MultiplicityModel}`,
+  `stripped_share(&model, m1, &composition, interacting_periastron)` with `interacting_periastron`
+  a closure of the primary's mass, the ratio and the composition (P11.T1.d), behind P08.T8.a's seam.
 - **Plan 07:** nothing directly. The gas is read by plan 09's test at the site this plan supplies.
 - **Plan 15:** `tables::displaced_forms` with the format given under P15.T6.
 - **Plans 04 and 05:** the `SystemsInRange` message and its `SystemRecord`, `MapPopulation` and
@@ -625,9 +635,13 @@ ly chart.
 
 ### P08.T8 Binarity seam and kick-bin shares
 
-- **P08.T8.a `binarity::stripped_share`.** Returns `KickLawParams::stripped_share` today. It is the
-  one function the class quadrature and plan 06's provisional mark both read, so plan 11 repoints
-  one place. Test: equal to plan 06's constant; used by `ClassTable` (asserted through
+- **P08.T8.a `binarity::stripped_share`.** Returns plan 11's built
+  `stellar::multiplicity::stripped_share(model, m1, composition, threshold)` (P11.T1.d, in
+  `stellar/multiplicity/quadrature.rs`), with plan 11's model (`MultiplicityModel::default_v1()`)
+  and its interacting-periastron closure, re-targeted by P08.T1 (2026-09-25) from `KickLawParams::
+stripped_share`, the provisional constant it named before plan 11 existed. It is the one function
+  the class quadrature and plan 11's systems both read, so a later change repoints one place. Test:
+  equal to plan 11's function at 33 masses; used by `ClassTable` (asserted through
   `stripped_share_used`).
 - **P08.T8.b `kick_bins::speed_bin_shares`.** Per Design note 18: for a mass and metallicity, the
   probability of each of the eight speed bins, split by remnant kind (neutron star, black hole) and
@@ -940,3 +954,80 @@ Provides.
   plan 07 is done.
 - **Expected counts in the young disc**, flagged by plan 03, now matter slightly more for layer E;
   T12.a's 1% test covers it at one point, and a miss means a finer rule for bands D and E only.
+- **The young disc's floor binds (ruling 32 of 2026-09-22, copied here at re-validation).** Plan
+  02's P02.T11 left the young disc's drawn heights below what the 5 km/s floor implies: the floor
+  binds for 95% of seeds at 225 ly and 51% at their own heights. P08.T2.c holds it by its clamp,
+  which is what binds, and the clamp is applied again after interpolation so that no reading falls
+  a bit under it.
+- **T1–T7, as built (lane `kin08`, 2026-09-25, at `GENERATOR_VERSION` 11).** Names that differ
+  from the sketches: `KinematicTables::new` takes the seed, for the lesser progenitors'
+  `halo.kinematics` draws (keyed by `HaloComponentKind::item`); `Galaxy::kinematics` returns an
+  `Option`, and `query::epoch_velocity` is zero for a galaxy built without its full potential;
+  `ForceSource::forces_at` returns `Forces { vertical, v_circ_sq }` in one pass, since a mass-model
+  point costs about a millisecond; `draw` returns a `VelocityDraw` with the attempts and the cut;
+  `SharpArm::with_width(&self, width)`, since `SharpArm::new` already took a width;
+  `MassModel::without_centre` is public for T4.d; `PotentialTables::forces` (crate-private) reads
+  `R ∂Φ ÷ ∂R` and `K_z` off the grid's interpolant. T1's `displaced` modules hold the class indices,
+  kinds, `PlacementClass`, `GalaxyScales` and `marks::age_between`; the rest are module
+  documentation naming their tasks, with no stub types. The server builds every galaxy with its
+  full potential (about 2 s more per universe).
+- **Findings of T1–T7 against the plan's figures (for the owner, after research).** Each was built
+  as the plan says and the test holds the measured value, with the plan's figure in its comment:
+  - T1: `R_d ÷ v_c` is 9.4 Myr against 10.5–11.5 (the window is the 2.6 kpc disc; ruling 32's 2.15
+    kpc fixture gives 9.4). The escape ratio, 2.57, is in 2.3–2.6.
+  - T2.a: σ_z e-folds in 2.28–2.38 scale lengths for the sub-discs (plan 1.7–2.3) and 2.8 for the
+    thick disc.
+  - T2.b: Design note 4's σ_z ÷ σ_R of 0.5–0.6 fails against Sharma et al.'s (2021, Table 2)
+    exponents, 0.441 vertical and 0.251 radial (radial σ₀ 39.4 km/s, γ_z 0.12 per kpc), which give
+    0.31–0.52 across the sub-discs; so, as this section asked, the sub-discs take σ_R from their
+    radial law (`RadialRatio::Sharma`). The young disc keeps 0.5 and the thick disc 0.54. At the
+    Sun: old-disc σ_R 33.7 km/s, σ_φ ÷ σ_R 0.66, thick disc (64.9, 42.8, 35.0) lagging 58.4.
+  - T2.c: with Design note 8's phases the arm streaming's density-weighted rotation shift is 7.8
+    km/s at A = 10 km/s (plan: under 3). A linear density-wave solution puts the inward radial
+    motion in phase with the ridge and the along-arm part in quadrature, which gives no shift.
+  - T3: the halo mixture's σ_r over 15,000–65,000 ly is 159.7 km/s (plan 135–155; Bond et al.
+    2010: 141 ± 5), with β 0.686, as the first bullet of this section expected. The in-situ
+    component's 0.35 `v_c` rotation is about 80 km/s against the Splash's 25 (Belokurov et al.
+    2020).
+  - T4.b: Design note 11's ω(m), set on the ellipse through R = m √(ab), gives an azimuthal mean
+    tangential speed 1–8% off the table where the table outruns the pattern (plan: 1%); inside
+    1,000 ly the bulge's table does not rotate (`⟨v_φ²⟩ < σ_R²`) and the bulge turns with the
+    pattern, 37.0 km/s per kpc.
+  - T4.c: the nuclear disc's σ_R is 71 km/s at 65 ly but 19 at 1,000 ly (plan 25–40; Sormani et
+    al. 2022's fit is near-flat to its 200 pc edge), and β_z = 0 contradicts plan 02's ruling 5
+    (σ_z about half σ_R). Rotation 82–105 km/s at 300–500 ly passes.
+  - T4.d: the face-on σ is 97.2 km/s at Milky Way values (plan 105–115, accepting 100–120;
+    McConnell and Ma 2013 list 103 ± 20, measured edge-on), 11% under plan 02's spherical 109.5.
+    The fixture's M–σ offset is re-set to +0.0806 dex to keep Sgr A*'s 4.30 × 10⁶ M☉; plan 02's
+    offset bracket becomes the relation's ±0.38 dex, and its 32-seed floor 60 km/s. The reduced
+    solution (64 forces) and the final table agree to 0.2%; it costs 60–120 ms under load.
+  - T6: the century's curvature exceeds 10⁻⁴ of a solar mass's tidal radius out to about 38 ly
+    (the brainstorm says "the central few light-years", the plan 10 ly); the drift test's "to a
+    metre" is 4 m, the last bits of a light-year's offset in metres.
+- **T4 and T6 deviations, as built.** `AZIMUTHAL_FLOOR`: where the Jeans equation's `⟨v_φ²⟩` falls
+  below zero, where the tracer falls faster than the potential holds it, it is floored at 0.05
+  σ_R² (never inside the three bodies at Milky Way values). T4.d integrates the face-on projection
+  `2 ∫ z ν K_z dz` over the aperture at 64 force points of the black-hole-free mass model, not a
+  reduced 24 × 24 grid: a mass-model point costs about a millisecond, so a grid with its panels
+  would take hundreds; it agrees with the final table to 0.2%. T4.b's divergence test holds 10⁻⁶ of
+  `|u| ÷ a`, not 10⁻⁹, for the finite differences' rounding and the bilinear table's slope changes;
+  the flow is divergence-free analytically. T6's curvature test holds the bound beyond 40 ly. The
+  server draws a returned system's velocity twice, once to move it and once for the wire, which
+  costs microseconds a row. Plan 02's own brackets that T4.d moved (`tests/galaxy_potential.rs`:
+  the fixture's M–σ offset, now ±0.38 dex; the 32-seed σ floor, now 60 km/s) are changed in its
+  tests only; plan 02's text still has the old figures. A planetary test's Hill-gap check
+  (`planetary/system/tests.rs`) gained the 10⁻¹² tolerance its companion assertion has: the moved
+  sample holds a pair placed exactly on the limit, which rounding put a bit under it.
+- **T2–T6 timings, as built** (the test profile, under the heavy-test lock, 3.0 GHz, load 9–10;
+  `math::exp` 9.0 ns there against 7.4–7.9 idle): `KinematicTables::new` 129 ms for all seven disc
+  tables, the three Jeans tables and the halo (targets 200 ms for the discs, 300 ms a table);
+  `bulge_projected_sigma` 79 ms a parameter set (target 100); the (R, z) grid itself 4.8 s; the 50
+  ly cold query 10.8 ms with velocities against 12.5 without, no regression within the noise;
+  `draw_velocity` 0.72 µs, against P08.T16's 200 ns, a finding for that task.
+- **Findings of the slow suite, as built.** T3's 200-seed check holds from 10,000 ly out: a constant
+  β of 0.9 in a cored profile cannot hold near the core (An and Evans 2006, ApJ 642, 752: β(0) ≤
+  γ(0) ÷ 2, and a core has γ(0) = 0), and the dominant merger's σ_r reaches 356 km/s at 2,000 ly
+  for seed 0, above half its 587 km/s escape speed. T4.d's σ over plan 02's 10³ seeds: 5th
+  percentile 75.5, median 96.0, 95th 118.7 km/s, 639 in plan 02's 90–135 band; plan 02's sweep
+  now checks 80–125 km/s for 80%, the median at 90–110 and the tails at 70–90 and 110–140. The
+  reduced solution's 60–80 ms per parameter set makes plan 02's 10⁴-seed sweep take 18 minutes.

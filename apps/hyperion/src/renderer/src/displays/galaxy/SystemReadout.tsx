@@ -7,6 +7,7 @@ import {
   formatLengthLy,
   formatListPosition,
   formatMassMsun,
+  formatNumber,
   formatSigned,
   formatUniverseTimeYr,
   TIME_SYSTEM_LABEL,
@@ -16,7 +17,13 @@ import { populationLabel } from "../../lib/galaxy/wire";
 import { useItemsInView } from "../../lib/itemsInView";
 import type { SystemModel } from "../../lib/system/model";
 import { formatHex64 } from "../../lib/seed";
-import { AXIS_TOLERANCE_LY, cylindrical, type LocalFrame, toLocal } from "../../spatial/frame";
+import {
+  AXIS_TOLERANCE_LY,
+  cylindrical,
+  type LocalFrame,
+  localFrameAt,
+  toLocal,
+} from "../../spatial/frame";
 import { PrimaryReadings } from "./PrimaryReadings";
 import { SystemReading as Reading } from "./SystemReading";
 
@@ -27,6 +34,9 @@ function rangeWords(system: ChartSystem | null, driveRangeLy: number): string | 
   }
   return system.distanceLy <= driveRangeLy ? "IN RANGE" : "OUT OF RANGE";
 }
+
+/** Decimals of a speed in km/s, as the guide writes one (`12.4 km/s`). */
+const SPEED_DECIMALS = 1;
 
 /** Props of {@link SystemReadout}. */
 export interface SystemReadoutProps {
@@ -71,6 +81,11 @@ export interface SystemReadoutProps {
  * it, since a query at another time gives another age. Whether the system is within the drive
  * range is in words, never colour alone. With nothing selected every value is an em dash.
  *
+ * `VEL` is the system's speed at the epoch, and the next list gives its velocity's `COREWARD`,
+ * `SPINWARD` and `NORTH` components, signed, in km/s, along the named directions at the system's
+ * own position, where its rotation is spinward (plan 08, P08.T7.b); the system moves at it, and
+ * the chart, which asks again when its time changes, shows it moved.
+ *
  * With the stars' answer, the primary's mass now stands beside its initial mass and the system's
  * metallicity, `[Fe/H]` in `dex`, follows its population, each the em dash until then, so that no
  * row moves as the answer comes; then, under `STAR A`, the primary as
@@ -96,6 +111,12 @@ export function SystemReadout({
   starsStale,
 }: SystemReadoutProps) {
   const local = system === null ? null : toLocal(frame, system.relLy);
+  const velocity =
+    system === null ? null : toLocal(localFrameAt(system.positionLy), system.velocityKmS);
+  const speed =
+    system === null
+      ? null
+      : Math.hypot(system.velocityKmS.x, system.velocityKmS.y, system.velocityKmS.z);
   const galactic = system === null ? null : cylindrical(system.positionLy);
   const onAxis = galactic !== null && !(galactic.radiusLy > AXIS_TOLERANCE_LY);
   const age = system === null ? null : formatAge(system.ageMyr);
@@ -191,6 +212,29 @@ export function SystemReadout({
             {stars === null || formed !== null ? null : (
               <Reading label="STARS" value="NOT YET FORMED" wide stale={starsStale} />
             )}
+          </dl>
+          {/* `VEL` and its components, in km/s beside the offsets' ly, in a list of their own. */}
+          <dl className="readout system-readout__values" aria-label="Velocity">
+            <Reading
+              label="VEL"
+              value={speed === null ? null : formatNumber(speed, SPEED_DECIMALS)}
+              unit="km/s"
+            />
+            <Reading
+              label="COREWARD"
+              value={velocity === null ? null : formatSigned(velocity.coreward, SPEED_DECIMALS)}
+              unit="km/s"
+            />
+            <Reading
+              label="SPINWARD"
+              value={velocity === null ? null : formatSigned(velocity.spinward, SPEED_DECIMALS)}
+              unit="km/s"
+            />
+            <Reading
+              label="NORTH"
+              value={velocity === null ? null : formatSigned(velocity.north, SPEED_DECIMALS)}
+              unit="km/s"
+            />
           </dl>
           {/* The guide's § Voice: a readout groups the three under the heading `GALACTIC`. */}
           <h3 className="system-readout__heading">GALACTIC</h3>

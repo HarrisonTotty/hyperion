@@ -77,6 +77,11 @@ function list(): HTMLElement {
   return screen.getByRole("listbox", { name: "Systems by distance" });
 }
 
+/** The list's first row. */
+function firstOption(): HTMLElement | undefined {
+  return within(screen.getByRole("listbox")).getAllByRole("option")[0];
+}
+
 describe("SystemList", () => {
   it("renders only the rows around the window, whatever the chart holds", () => {
     stubViewport();
@@ -240,5 +245,40 @@ describe("SystemList", () => {
 
     const row = screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, NOT YET FORMED, /u });
     expect(within(row).getByText("—")).toBeInTheDocument();
+  });
+
+  it("shows a system where the chart time's answer puts it", () => {
+    // The chart asks again when its time changes (plan 05); the answer a thousand years on has the
+    // system moved by its velocity, 300 km/s outward being 1.00 ly, and the list reads it there
+    // (plan 08, P08.T7.b).
+    const at = (relX: number) =>
+      toChartResult(
+        aSystemsInRange({
+          centreLy: CENTRE,
+          systems: [{ relLy: [relX, 0, 0], layer: "c", velocityKmS: [300, 0, 0] }],
+        }),
+      ).systems;
+    const onSelect = vi.fn<(id: SystemIdHex) => void>();
+    const view = render(
+      <SystemList
+        systems={at(12)}
+        selectedId={null}
+        onSelect={onSelect}
+        driveRangeLy={50}
+        distanceDecimals={2}
+      />,
+    );
+    expect(firstOption()).toHaveTextContent("12.00");
+    view.rerender(
+      <SystemList
+        systems={at(13)}
+        selectedId={null}
+        onSelect={onSelect}
+        driveRangeLy={50}
+        distanceDecimals={2}
+      />,
+    );
+    expect(firstOption()).toHaveTextContent("13.00");
+    expect(firstOption()).not.toHaveTextContent("12.00");
   });
 });

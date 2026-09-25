@@ -385,6 +385,11 @@ pub struct SystemRecord {
     pub age_myr: f64,
     /// The population it was placed from.
     pub population: Population,
+    /// Its velocity at the epoch, in km/s along the `GALACTIC` frame's axes (plan 08, P08.T7.a):
+    /// +x along the bar, +z to galactic north. Systems move in straight lines at it, so its
+    /// position at the query's time is its epoch position plus this times the time since the
+    /// epoch.
+    pub velocity_km_s: [f64; 3],
     /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
     ///
     /// Absent otherwise: the key is left out rather than written `null`, so that a row without a
@@ -675,6 +680,7 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: None,
             },
             SystemRecord {
@@ -688,6 +694,7 @@ mod tests {
                 initial_mass_msun: 0.625,
                 age_myr: 45.0,
                 population: Population::YoungThinDisc,
+                velocity_km_s: [3.5, -228.0, -0.75],
                 stellar: None,
             },
         ]
@@ -754,6 +761,7 @@ mod tests {
                         "initial_mass_msun": 11.25,
                         "age_myr": 7_250.5,
                         "population": "old_thin_disc",
+                        "velocity_km_s": [-12.5, 231.25, 7.0],
                     },
                     {
                         "id": "6000000000000001",
@@ -766,6 +774,7 @@ mod tests {
                         "initial_mass_msun": 0.625,
                         "age_myr": 45.0,
                         "population": "young_thin_disc",
+                        "velocity_km_s": [3.5, -228.0, -0.75],
                     },
                 ],
             }),
@@ -886,6 +895,7 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: Some(StellarBriefDto {
                     kind: ObjectKindDto::NeutronStar,
                     class: "NS".to_owned(),
@@ -905,6 +915,7 @@ mod tests {
                 "initial_mass_msun": 11.25,
                 "age_myr": 7_250.5,
                 "population": "old_thin_disc",
+                "velocity_km_s": [-12.5, 231.25, 7.0],
                 "stellar": {
                     "kind": "neutron_star",
                     "class": "NS",
@@ -927,6 +938,7 @@ mod tests {
             "initial_mass_msun": 0.625,
             "age_myr": 45.0,
             "population": "young_thin_disc",
+            "velocity_km_s": [3.5, -228.0, -0.75],
         });
         let record: SystemRecord = serde_json::from_value(row.clone()).unwrap();
         assert_eq!(record.stellar, None);

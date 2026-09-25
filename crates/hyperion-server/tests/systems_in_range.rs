@@ -11,6 +11,7 @@ mod common;
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::sync::OnceLock;
 
 use common::{TestClient, TestServer, pretty_json_frame};
 use hyperion_protocol::{
@@ -37,6 +38,13 @@ const SEED: u64 = 0x4d2;
 
 /// Seconds in a Julian year, the sim's year: the wire carries a time as whole seconds.
 const SECONDS_PER_JULIAN_YEAR: i64 = 31_557_600;
+
+/// The galaxy of [`SEED`] as the server builds it, with its full potential and so its velocities
+/// (plan 08, P08.T7.a), built once for the binary.
+fn galaxy() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| Galaxy::new(Seed::new(SEED)).with_full_potential())
+}
 
 /// The terms of one `systems_in_range` request, so that a test changes only what it means to.
 #[derive(Debug, Clone)]
@@ -308,7 +316,7 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
     );
 
     // The same galaxy the server built, to resolve what it sent.
-    let galaxy = Galaxy::new(Seed::new(SEED));
+    let galaxy = galaxy();
     let mut ids: Vec<&str> = Vec::with_capacity(answer.systems.len());
     for record in &answer.systems {
         let id = record.id.as_str();
@@ -325,7 +333,7 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
         );
         // The ID resolves, without generating its cell, to the very system that was sent.
         let system = SystemId::from_raw(record.id.to_u64()).expect("a record carries a system ID");
-        let resolved = resolve(&galaxy, system).expect("a system the query returned resolves");
+        let resolved = resolve(galaxy, system).expect("a system the query returned resolves");
         assert_eq!(record.designation, system.designation().to_string());
         assert_eq!(record.id.to_u64(), resolved.id().raw());
         // To a relative 10⁻¹⁵ rather than to the bit, because it is this client that rounds:
@@ -356,7 +364,7 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
     assert_eq!(ids.len(), unique, "two records share an ID");
 
     // And the whole answer is the sim's own for the same terms, census and all.
-    let (sim_query, result) = sim_answer(&galaxy, &query);
+    let (sim_query, result) = sim_answer(galaxy, &query);
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;
@@ -434,7 +442,7 @@ async fn the_answer_to_a_fixed_query_is_the_golden_response() {
         );
     }
     // And it is the sim's own answer, so the golden pins what the sim and the wire agree on.
-    let (sim_query, result) = sim_answer(&Galaxy::new(Seed::new(SEED)), &query);
+    let (sim_query, result) = sim_answer(galaxy(), &query);
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     // The frame the client received, envelope and all, under the golden header that ties it to the
@@ -504,17 +512,21 @@ async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born() {
         "the census does not depend on the time asked about"
     );
 
-    // Five hundred years is 0.0005 Myr, and no system has moved: plan 08 draws the velocities, and
-    // until then a position is the position at the epoch (this test changes with that plan).
+    // Five hundred years is 0.0005 Myr, and every system has moved by its velocity times it (plan
+    // 08, P08.T7.a): a system present in both answers is where its epoch position less 500 years
+    // of drift puts it, to 10⁻⁶ ly. One that is in only one of them was not born yet, or crossed
+    // the sphere's edge, which at under 1,000 km/s is within 1.7 ly of it.
     let five_hundred_years_myr = 0.0005;
     let then = by_id(&earlier);
     let mut dropped = 0;
     for record in &epoch.systems {
         let born_by_then = record.age_myr > five_hundred_years_myr;
         let Some(earlier_record) = then.get(record.id.as_str()) else {
+            let from_centre = distance_ly(&record.position, &Query::sunlike().centre);
             assert!(
-                !born_by_then,
-                "{record:?} was born before the query's time and is missing from it"
+                !born_by_then || from_centre > 50.0 - 1.7,
+                "{record:?} was born before the query's time, deep inside the sphere, and is \
+                 missing from it"
             );
             dropped += 1;
             continue;
@@ -523,7 +535,12 @@ async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born() {
             born_by_then,
             "{record:?} was not born yet at the query's time"
         );
-        assert_eq!(earlier_record.position, record.position);
+        // The same velocity, bit for bit: it is the epoch's, whatever the query's time.
+        assert_eq!(
+            earlier_record.velocity_km_s.map(f64::to_bits),
+            record.velocity_km_s.map(f64::to_bits)
+        );
+        assert_moved_by(earlier_record, record, -500.0);
         assert_eq!(earlier_record.layer, record.layer);
         assert_eq!(earlier_record.population, record.population);
         let younger = record.age_myr - earlier_record.age_myr;
@@ -532,24 +549,85 @@ async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born() {
             "{younger} Myr younger, not {five_hundred_years_myr}: {earlier_record:?}"
         );
     }
-    // Nothing is dropped here, and nothing can be: the youngest of these systems is 0.71 Myr old
-    // (generator version 8), and a system under the clock window's 1,000 years would take a sphere
-    // of about a million, fifty times the largest census. The drop itself is plan 03's, pinned by
-    // `motion_drops_a_system_that_is_not_born_yet`; what the wire adds is the time, which the ages
-    // above and the comparison with the sim below hold.
-    assert_eq!(
-        dropped, 0,
-        "{dropped} systems were born within five centuries of the epoch"
+    // Nothing is dropped as unborn: the youngest of these systems is 0.71 Myr old (generator
+    // version 8), and a system under the clock window's 1,000 years would take a sphere of about a
+    // million, fifty times the largest census. The drop itself is plan 03's, pinned by
+    // `motion_drops_a_system_that_is_not_born_yet`. A few cross the edge.
+    assert!(
+        dropped * 20 < epoch.systems.len(),
+        "{dropped} of {} systems left the sphere",
+        epoch.systems.len()
     );
-    assert_eq!(earlier.systems.len(), epoch.systems.len());
 
-    // Both answers are the sim's own, ages at the query's time included.
-    let galaxy = Galaxy::new(Seed::new(SEED));
+    // Both answers are the sim's own, ages at the query's time included; the sim moves them with
+    // its kinematic tables, as the server does.
+    let galaxy = galaxy();
     for (answer, query) in [(&epoch, Query::sunlike()), (&earlier, earlier_query)] {
-        let (sim_query, result) = sim_answer(&galaxy, &query);
+        let (sim_query, result) = sim_answer(galaxy, &query);
         assert_answer_is_the_sims(answer, &sim_query, &result);
     }
 
+    client.close().await;
+    server.stop().await;
+}
+
+/// Asserts that `later` is `earlier` moved by its velocity over `years`, to 10⁻⁶ ly.
+fn assert_moved_by(later: &SystemRecord, earlier: &SystemRecord, years: f64) {
+    let km_per_ly = METRES_PER_LIGHT_YEAR / 1e3;
+    let seconds = years * 31_557_600.0;
+    let cell = |p: &GalacticPosition, axis: usize| {
+        f64::from(p.cell_ly[axis]) + p.offset_m[axis] / METRES_PER_LIGHT_YEAR
+    };
+    for axis in 0..3 {
+        let moved = cell(&later.position, axis) - cell(&earlier.position, axis);
+        let expected = earlier.velocity_km_s[axis] * seconds / km_per_ly;
+        assert!(
+            (moved - expected).abs() < 1e-6,
+            "{later:?}: moved {moved} ly on axis {axis}, against v t = {expected} ly"
+        );
+    }
+}
+
+/// P08.T7.a: over the wire, a system's position a thousand years after the epoch is its epoch
+/// position plus its velocity times the thousand years, to 10⁻⁶ ly, and the velocity is the one
+/// the sim draws.
+#[tokio::test]
+async fn a_system_a_thousand_years_on_has_moved_by_its_velocity() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let mut query = Query::sunlike();
+    query.radius_ly = 20.0;
+    let epoch = ask(&mut client, &universe.id, &query).await.unwrap();
+    query.time = at_years(1_000);
+    let later = ask(&mut client, &universe.id, &query).await.unwrap();
+    let then = by_id(&later);
+    let galaxy = galaxy();
+    let mut moved = 0;
+    for record in &epoch.systems {
+        let Some(later_record) = then.get(record.id.as_str()) else {
+            continue;
+        };
+        assert_moved_by(later_record, record, 1_000.0);
+        let sim = resolve(
+            galaxy,
+            SystemId::from_raw(record.id.to_u64()).expect("a system ID"),
+        )
+        .expect("a returned system resolves");
+        let v = hyperion_sim::galaxy::query::epoch_velocity(galaxy, &sim).metres_per_second();
+        for (wire, sim) in record.velocity_km_s.iter().zip(v) {
+            assert!((wire - sim / 1e3).abs() < 1e-9, "{record:?}");
+        }
+        let speed = record
+            .velocity_km_s
+            .iter()
+            .map(|v| v * v)
+            .sum::<f64>()
+            .sqrt();
+        assert!((50.0..600.0).contains(&speed), "{record:?}");
+        moved += 1;
+    }
+    assert!(moved > 10, "{moved} systems in both answers");
     client.close().await;
     server.stop().await;
 }
@@ -585,7 +663,7 @@ async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so() {
             assert_eq!(line.returned, 0, "{line:?}");
         }
     }
-    let (sim_query, result) = sim_answer(&Galaxy::new(Seed::new(SEED)), &query);
+    let (sim_query, result) = sim_answer(galaxy(), &query);
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;

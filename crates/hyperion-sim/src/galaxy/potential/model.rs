@@ -117,8 +117,12 @@ impl MassModel {
     }
 
     /// The model without the black hole and the nuclear cluster, from which the bulge's
-    /// dispersion is read before the black hole's mass exists (plan 02, Design note 8).
-    pub(crate) fn without_centre(params: &GalaxyParams) -> Self {
+    /// dispersion is read before the black hole's mass exists (plan 02, Design note 8; plan 08,
+    /// P08.T4.d, whose
+    /// [`bulge_projected_sigma`](crate::galaxy::kinematics::spheroid::bulge_projected_sigma)
+    /// takes it).
+    #[must_use]
+    pub fn without_centre(params: &GalaxyParams) -> Self {
         Self::assemble(params, Centre::Excluded)
     }
 

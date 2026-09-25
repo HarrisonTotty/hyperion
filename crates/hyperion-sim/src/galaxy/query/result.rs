@@ -234,8 +234,8 @@ impl Census {
 ///
 /// The record is the state at the epoch, which is what a cache holds and what an ID resolves to;
 /// [`position`](Self::position) and [`distance`](Self::distance) are the only parts that depend on
-/// the query's time. Until plan 08 draws velocities the position is the epoch position, and the
-/// distance is the distance from the sphere's centre to it.
+/// the query's time. The position is the epoch position moved by plan 08's velocity to that time,
+/// and the distance is the distance from the sphere's centre to it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SystemHit {
     record: SystemRecord,
@@ -364,8 +364,8 @@ impl QueryStats {
     /// The widest radius any layer's cells were chosen by: the query's radius plus the largest pad
     /// for motion over |t|.
     ///
-    /// Each layer is walked with its own pad, which is the same for all of them until plan 08 raises
-    /// one, so this is that pad today and the largest of them afterwards.
+    /// Each layer is walked with its own pad: layer E's is plan 08's unbound class's, 3,000 km/s,
+    /// and every other layer's plan 03's 1,000 km/s, so this is layer E's whenever it is walked.
     #[must_use]
     pub const fn padded_radius(&self) -> LightYears {
         self.padded_radius

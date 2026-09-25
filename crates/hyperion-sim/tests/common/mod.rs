@@ -181,9 +181,10 @@ pub fn assert_params_in_ranges(p: &GalaxyParams, max_sigmas: f64) {
     );
     assert_within("concentration", dark.concentration(), 2.0, 40.0);
     assert_within("r200", dark.r200().value(), 400_000.0, 1_400_000.0);
-    // The fixture's one scatter is the Milky Way's measured offset from M–σ, 0.55 times the
-    // relation's 0.38 dex at the estimator's 109.5 km/s (plan 02, Risks, R13 and R22, and
-    // P02.T12.d; 1.35 times at P02.T11's 123.8 km/s), so this bound never falls below 1.5 of it.
+    // The fixture's one scatter is the Milky Way's measured offset from M–σ, 0.21 times the
+    // relation's 0.38 dex at plan 08's face-on 97.2 km/s (P08.T4.d; 0.55 times at plan 02's
+    // spherical 109.5 km/s, 1.35 times at P02.T11's 123.8 km/s), so this bound never falls below
+    // 1.5 of it.
     let bh_sigmas = max_sigmas.max(1.5);
     assert_within(
         "black hole scatter",

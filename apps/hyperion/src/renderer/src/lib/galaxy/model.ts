@@ -91,6 +91,8 @@ export interface ChartSystem {
    * server sends without a brief.
    */
   readonly star: StarBrief | null;
+  /** Velocity at the epoch along the `GALACTIC` axes, in km/s (plan 08, P08.T7.a). */
+  readonly velocityKmS: Vec3;
 }
 
 /**

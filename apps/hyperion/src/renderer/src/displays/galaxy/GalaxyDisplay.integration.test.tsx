@@ -209,10 +209,14 @@ function options(): HTMLElement[] {
   return within(systemList()).getAllByRole("option");
 }
 
-/** The text of the selected system readout's value for `label`. */
+/**
+ * The text of the selected system readout's value for `label`: the first reading of that name, since
+ * the velocity's `COREWARD`, `SPINWARD` and `NORTH` follow the offsets'.
+ */
 function reading(label: string): string {
   const readout = screen.getByRole("status", { name: "Selected system" });
-  return within(readout).getByText(label, { exact: true }).nextElementSibling?.textContent ?? "";
+  const [term] = within(readout).getAllByText(label, { exact: true });
+  return term?.nextElementSibling?.textContent ?? "";
 }
 
 /** The text of a reading shown with the chart, such as the camera's `AZM` or the chart's time. */

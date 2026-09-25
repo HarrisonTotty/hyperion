@@ -752,7 +752,9 @@ fn no_overlapping_orbits_in_generated_systems() {
                     let hill = mutual_hill_radius(m1, m2, zone.host_mass(), a1, a2).value();
                     let gap = o2.periapsis().value() - o1.apoapsis().value();
                     let now = mutual_hill_radius(m1, m2, host, a1, a2).value();
-                    if gap < HILL_STABLE_GAP * now {
+                    // With the host's mass unchanged `now` is `hill`, and a pair placed at the
+                    // limit sits on it to rounding: the same tolerance as the assertion below.
+                    if gap < HILL_STABLE_GAP * now * (1.0 - 1e-12) {
                         assert!(widening > 1.01, "only mass loss unsettles a placed pair");
                         unstable += 1;
                     }

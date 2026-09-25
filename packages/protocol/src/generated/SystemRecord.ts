@@ -38,6 +38,13 @@ age_myr: number,
  */
 population: Population, 
 /**
+ * Its velocity at the epoch, in km/s along the `GALACTIC` frame's axes (plan 08, P08.T7.a):
+ * +x along the bar, +z to galactic north. Systems move in straight lines at it, so its
+ * position at the query's time is its epoch position plus this times the time since the
+ * epoch.
+ */
+velocity_km_s: [number, number, number], 
+/**
  * What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
  *
  * Absent otherwise: the key is left out rather than written `null`, so that a row without a

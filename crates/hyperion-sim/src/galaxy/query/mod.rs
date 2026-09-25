@@ -26,7 +26,9 @@ use std::fmt;
 
 pub use census::decide_census;
 pub use expected::expected_counts;
-pub use motion::{PAD_SPEED, epoch_velocity, hit_at, pad_for, pad_speed, position_at};
+pub use motion::{
+    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, hit_at, pad_for, pad_speed, position_at,
+};
 pub use request::{
     DEFAULT_CELL_BUDGET, DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, RangeQueryBuilder,
     SubstellarRequest,

@@ -24,6 +24,7 @@ use std::error::Error;
 use std::fmt;
 
 pub use model::MassModel;
+pub(crate) use model::bulge_spheroid;
 pub use tables::PotentialTables;
 
 /// A mass component could not be built: `quantity` is `value`, which is not finite or lies
