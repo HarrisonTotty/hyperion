@@ -23,7 +23,7 @@ use crate::galaxy::gas::lanes::Lanes;
 use crate::galaxy::gas::modifiers::{self, GasModifier};
 use crate::galaxy::gas::noise::{NoiseCache, SmoothingScale, log_normal_factor};
 use crate::galaxy::gas::params::{BuildGasParamsError, GasParams};
-use crate::galaxy::gas::phase::GasPhase;
+use crate::galaxy::gas::phase::{GasPhase, ThermalState, warm_neutral_share};
 use crate::galaxy::gas::pressure::Pressure;
 use crate::galaxy::gas::smooth::{GasLayer, SmoothGas};
 use crate::galaxy::params::GalaxyParams;
@@ -207,8 +207,7 @@ impl GasField {
     /// the height (Design note 11).
     #[must_use]
     pub fn pressure(&self, p: &GalacticPosition) -> KelvinPerCm3 {
-        let site = Site::of(p);
-        KelvinPerCm3::new(self.pressure.at(&self.smooth, site.r, site.z))
+        self.pressure_at(&Site::of(p))
     }
 
     /// The phase of gas of density `n` at pressure `p_over_k` (Design note 12).
@@ -237,12 +236,12 @@ impl GasField {
         scale: SmoothingScale,
         cache: &mut NoiseCache,
     ) -> GasState {
+        let site = Site::of(p);
         let density = self.density(p, scale, cache);
-        let pressure = self.pressure(p);
         GasState {
             density,
-            pressure,
-            phase: GasPhase::of(density, pressure),
+            pressure: self.pressure_at(&site),
+            thermal: self.thermal(&site, density),
         }
     }
 
@@ -312,6 +311,24 @@ impl GasField {
         }
     }
 
+    /// The thermal pressure `P ÷ k` at `site`, K cm⁻³.
+    #[must_use]
+    pub(crate) fn pressure_at(&self, site: &Site) -> KelvinPerCm3 {
+        KelvinPerCm3::new(self.pressure.at(&self.smooth, site.r, site.z))
+    }
+
+    /// The thermal state of gas of density `n` at `site`: at the pressure there, with the smooth
+    /// layers' neutral share there.
+    #[must_use]
+    pub(crate) fn thermal(&self, site: &Site, n: HydrogenPerCm3) -> ThermalState {
+        let layers = self.layers(site);
+        ThermalState::of(
+            n,
+            self.pressure_at(site),
+            warm_neutral_share(layers.neutral, layers.warm),
+        )
+    }
+
     /// The log-normal factor at `p` at `scale`, with this galaxy's seed and `σ_ln`.
     #[must_use]
     pub(crate) fn noise(
@@ -379,13 +396,13 @@ impl Layers {
     }
 }
 
-/// The gas at one site: its density, pressure and phase, and the temperature and sound speed
-/// they give (plan 09's `SiteGas`).
+/// The gas at one site: its density, pressure, phase and ionisation, and the temperature and sound
+/// speed they give (plan 09's `SiteGas`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GasState {
     density: HydrogenPerCm3,
     pressure: KelvinPerCm3,
-    phase: GasPhase,
+    thermal: ThermalState,
 }
 
 impl GasState {
@@ -404,14 +421,28 @@ impl GasState {
     /// The phase.
     #[must_use]
     pub fn phase(&self) -> GasPhase {
-        self.phase
+        self.thermal.phase()
     }
 
-    /// The equilibrium temperature `(P ÷ k) ÷ (x n)`, with the phase's particles per hydrogen
-    /// nucleus (Design note 12); infinite where the density is 0.
+    /// The share of the hydrogen that is neutral ([`ThermalState::neutral_share`]).
+    #[must_use]
+    pub fn neutral_share(&self) -> f64 {
+        self.thermal.neutral_share()
+    }
+
+    /// The particles per hydrogen nucleus `x` the temperature is taken with: 2.3 when hot, 1.1
+    /// when cold, and `1.1 + 1.2 (1 − f)` when warm with `f` the neutral share (ruling 91 of
+    /// 2026-09-22).
+    #[must_use]
+    pub fn particles_per_hydrogen(&self) -> f64 {
+        self.thermal.particles_per_hydrogen()
+    }
+
+    /// The equilibrium temperature `(P ÷ k) ÷ (x n)` (Design note 12); infinite where the density
+    /// is 0.
     #[must_use]
     pub fn temperature(&self) -> Kelvin {
-        self.phase.temperature(self.density, self.pressure)
+        self.thermal.temperature(self.density, self.pressure)
     }
 
     /// The thermal sound speed `c = √(γ P ÷ ρ)`, with `γ = 5 ÷ 3` and `ρ = 1.4 m_H n`: what a

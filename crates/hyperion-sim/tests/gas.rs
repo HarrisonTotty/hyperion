@@ -358,9 +358,18 @@ fn a_states_pressure_is_never_below_the_floor() {
             let t = state.temperature().value();
             match state.phase() {
                 GasPhase::Hot => assert!(t > 1e5, "{state:?}"),
-                GasPhase::Warm => assert!(t > 5_000.0, "{state:?}"),
+                GasPhase::Warm => {
+                    assert!(
+                        (5_000.0 * (1.0 - 1e-12)..=1e5 * (1.0 + 1e-12)).contains(&t),
+                        "{state:?}"
+                    );
+                }
                 GasPhase::Cold | GasPhase::Molecular => assert!(t <= 5_000.0, "{state:?}"),
             }
+            // Ruling 91: T × x n = P with the state's own particle count.
+            let balance = t * state.particles_per_hydrogen() * state.density().value()
+                / state.pressure().value();
+            assert!((balance - 1.0).abs() < 1e-15, "{state:?}");
             assert!(state.thermal_sound_speed().value() > 0.0);
         }
     }
@@ -530,6 +539,8 @@ fn gas_field_is_pinned() {
             w.f64(&label("density"), state.density().value());
             w.f64(&label("pressure"), state.pressure().value());
             w.line(&format!("{} = {:?}", label("phase"), state.phase()));
+            w.f64(&label("neutral_share"), state.neutral_share());
+            w.f64(&label("temperature"), state.temperature().value());
             w.f64(&label("dust_per_hydrogen"), gas.dust_per_hydrogen(p));
         }
     }
@@ -539,7 +550,7 @@ fn gas_field_is_pinned() {
 /// The corner of plan 02's ranges that ruling 22 names: the lightest thin disc, the least gas and
 /// the longest gas disc, with the longest bar, whose large hole makes the warm layer's density at
 /// the Sun's radius stand for the most mass. Some 34 seeds in 4,096 draw a warm layer heavier than
-/// its 2.5 × 10⁹ M☉ of gas, and the rest leave the neutral layer as little as 0.05% of it.
+/// its 2.5 × 10⁹ M☉ of gas, which ruling 22 refused until ruling 91 clamped the layer.
 fn corner_galaxy() -> GalaxyParams {
     GalaxyParamsBuilder::new()
         .stellar_mass(SolarMasses::new(3e10))
@@ -555,44 +566,46 @@ fn corner_galaxy() -> GalaxyParams {
         .expect("every value is inside plan 02's ranges")
 }
 
-/// Ruling 22: a galaxy the public API can build whose drawn warm layer and molecular disc outweigh
-/// its gas is refused with a typed error, not a panic — by `GasParams::from_galaxy`, which is the
-/// first place the caller can be told, and so by `GasField::new` and `Galaxy::from_params`, while
-/// the seeds whose draws leave it some neutral gas build as before.
+/// Ruling 91: at the corner that ruling 22 refused, every one of 4,096 seeds builds, with at least
+/// half its gas neutral. The warm layer is clamped where it would weigh more than half the gas less
+/// the molecular disc — on some seeds of the corner, and on no drawn galaxy — and elsewhere keeps
+/// its drawn density; the clamped galaxies build through `GasField::new` and `Galaxy::from_params`
+/// too. The error ruling 22 added stays in the API, and reads as it did.
 #[test]
-fn a_galaxy_whose_warm_layer_outweighs_its_gas_is_refused() {
+fn the_warm_layer_is_clamped_so_that_every_galaxy_keeps_half_its_gas_neutral() {
     let params = corner_galaxy();
     let fields = Fields::new(&params, &MassModel::new(&params));
-    let (mut refused, mut built) = (None, None);
+    let (mut clamped, mut least) = (None, f64::INFINITY);
     for n in 0..4_096 {
         let seed = Seed::new(0x0722_0000 | n);
-        match GasParams::from_galaxy(seed, &params) {
-            Err(error) => refused = refused.or(Some((seed, error))),
-            Ok(gas) => built = built.or(Some((seed, gas))),
+        let gas = GasParams::from_galaxy(seed, &params).expect("the clamp leaves half the gas");
+        let share = gas.neutral_fraction();
+        assert!(share > 0.5 - 1e-12, "{seed}: {share}");
+        least = least.min(share);
+        if (share - 0.5).abs() < 1e-12 {
+            clamped = clamped.or(Some(seed));
         }
     }
-    let (seed, error) = refused.expect("some seed's warm layer outweighs the corner's gas");
-    let BuildGasParamsError::NoNeutralGas {
-        gas_mass,
-        warm_mass,
-        molecular_mass,
-    } = error;
-    assert_eq!(gas_mass, params.gas_disc().mass());
-    assert!(warm_mass.value() + molecular_mass.value() >= gas_mass.value());
+    assert!((least - 0.5).abs() < 1e-12, "the least share is {least}");
+    let seed = clamped.expect("the clamp binds at the corner");
+    let gas = GasField::new(seed, &params, &fields).expect("a clamped galaxy's gas");
+    assert!((gas.params().neutral_fraction() - 0.5).abs() < 1e-12);
+    assert!(gas.params().warm_density().value() < 0.025);
+    Galaxy::from_params(seed, params.clone()).expect("a clamped galaxy builds");
+    let error = BuildGasParamsError::NoNeutralGas {
+        gas_mass: params.gas_disc().mass(),
+        warm_mass: params.gas_disc().mass(),
+        molecular_mass: SolarMasses::new(3e6),
+    };
     assert!(
         error
             .to_string()
             .ends_with("M☉ gas disc for the neutral layer"),
         "{error}"
     );
-    assert_eq!(GasField::new(seed, &params, &fields), Err(error));
-    let galaxy = Galaxy::from_params(seed, params.clone());
-    assert_eq!(galaxy.as_ref().err(), Some(&BuildGalaxyError::Gas(error)));
-    let source = std::error::Error::source(&galaxy.expect_err("refused")).map(ToString::to_string);
+    let wrapped = BuildGalaxyError::Gas(error);
+    let source = std::error::Error::source(&wrapped).map(ToString::to_string);
     assert_eq!(source, Some(error.to_string()));
-    let (seed, gas) = built.expect("some seed leaves the corner neutral gas");
-    assert!(gas.neutral_fraction() > 0.0);
-    Galaxy::from_params(seed, params).expect("a seed that leaves neutral gas builds");
 }
 
 /// The mean neutral gas over a cell is bounded above by `neutral_bound` at every point of the cell

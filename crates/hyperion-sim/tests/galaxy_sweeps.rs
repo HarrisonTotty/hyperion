@@ -314,6 +314,15 @@ fn the_fields_over_a_thousand_seeds() {
 /// propagated through the ratio of his model gives 0.711–0.787 about 0.750. The 0.97 is ruling
 /// 32's, not re-verified; Sofue's (2013) terminal velocities give 0.93 and run high inside the
 /// bar (Chemin et al. 2015).
+///
+/// Ruling 88 of 2026-09-22 adds a population bracket beside the pin: every seed's median lies in
+/// 0.60–1.00, the interquartile range of v(1 kpc) ÷ v(8 kpc) over SPARC's Milky-Way-mass spirals
+/// (Lelli et al. 2016, AJ 152, 157: the 11 galaxies of flat speed 200–260 km/s and
+/// quality 1–2 whose rotation curves start inside 1 kpc, median 0.887, interquartile range
+/// 0.61–1.00, bootstrap 95% interval on the median 0.61–1.03; the derivation is ruling 88's
+/// research, from SPARC's published curves). The pin stays as a regression pin on the model: it
+/// sits at SPARC's 36th percentile, and SPARC's sample in this mass range is bulge-heavy, which
+/// biases its median high, so the model's median being 0.17 under it is recorded, not tuned.
 #[test]
 #[ignore = "slow: builds the parameters and mass models of 4,000 galaxies"]
 fn the_rotation_curve_over_four_thousand_seeds() {
@@ -392,9 +401,17 @@ fn the_rotation_curve_over_four_thousand_seeds() {
         0.71,
         0.97,
     );
+    // Ruling 88: every seed's median inside SPARC's interquartile range for Milky-Way-mass spirals
+    // (Lelli et al. 2016; see above), the population bracket.
+    assert_within(
+        "median v_c(1) ÷ v_c(8) against SPARC",
+        ratios[2_000],
+        0.60,
+        1.00,
+    );
     // Every seed's median, a property of the drawn population pinned at what the model gives:
     // Milky-Way-mass spirals hold less bulge and bar than the Milky Way (Weinzirl et al. 2009 §5.2;
-    // Kruk et al. 2018), so their centres are lighter.
+    // Kruk et al. 2018), so their centres are lighter. A regression pin, not a bracket (ruling 88).
     assert_within("median v_c(1) ÷ v_c(8)", ratios[2_000], 0.71, 0.73);
 }
 

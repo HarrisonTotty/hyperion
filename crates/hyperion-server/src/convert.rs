@@ -888,7 +888,7 @@ fn rotation(potential: &PotentialTables) -> Vec<Parameter> {
         derived(
             "rotation.escape_speed",
             Unit::KmPerS,
-            km_per_s(potential.escape_speed_in_plane(ROTATION_RADIUS)),
+            km_per_s(potential.galactic_escape_speed_in_plane(ROTATION_RADIUS)),
         ),
     ]
 }
@@ -1537,7 +1537,8 @@ mod tests {
         );
         assert!((1.0..=4.0).contains(&pattern), "{pattern} °/Myr");
         // The rotation curve at the fixed radius, in km/s, against the brainstorm's Milky Way
-        // figures: 210–270 km/s at 8 kpc, and an escape speed of 574 km/s there (500–580 measured).
+        // figures: 210–270 km/s at 8 kpc, and an escape speed there of 500–580 km/s, measured as
+        // the speed that reaches twice r₂₀₀ (Deason et al. 2019; plan 07, ruling 91).
         let circular = value_in(&response, "rotation.circular_speed", Unit::KmPerS);
         assert!(
             (210.0..=270.0).contains(&circular),

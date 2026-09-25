@@ -358,6 +358,34 @@ impl PotentialTables {
         KilometresPerSecond::new((-2.0 * self.potential_in_plane(r)).sqrt())
     }
 
+    /// How far a star must go to have escaped the galaxy: twice the dark halo's `r₂₀₀`, where
+    /// Deason et al. (2019, MNRAS 485, 3514) measure the Milky Way's escape speed to (plan 07,
+    /// ruling 91 of 2026-09-22).
+    #[must_use]
+    pub fn escape_boundary(&self) -> LightYears {
+        self.dark_halo.r200() * 2.0
+    }
+
+    /// The escape speed from the galaxy in the plane at radius `r > 0`: the speed that reaches
+    /// [`escape_boundary`](Self::escape_boundary), `√(2 [Φ(2 r₂₀₀) − Φ(R)])`, with Φ in the plane
+    /// out to the boundary (Deason et al. 2019, MNRAS 485, 3514: 528 +24 −25 km/s at the Sun). It is
+    /// what the Milky Way's measured 500–580 km/s is, where [`escape_speed_in_plane`]'s `√(−2Φ)` is
+    /// the speed to infinity through an untruncated halo: 512.0 against 558.1 km/s for the Milky
+    /// Way fixture at 26,000 ly. Piffl et al. (2014, A&A 562, A91) and Monari et al. (2018, A&A
+    /// 616, L9) measure to three virial radii `r₃₄₀`, about 2.4 `r₂₀₀`, which Koppelman and Helmi
+    /// (2021, A&A 649, A55) find differs by 5 km/s. Zero at or beyond the boundary.
+    ///
+    /// [`escape_speed_in_plane`]: Self::escape_speed_in_plane
+    #[must_use]
+    pub fn galactic_escape_speed_in_plane(&self, r: LightYears) -> KilometresPerSecond {
+        let depth = self.potential_in_plane(self.escape_boundary()) - self.potential_in_plane(r);
+        KilometresPerSecond::new(if depth > 0.0 {
+            (2.0 * depth).sqrt()
+        } else {
+            0.0
+        })
+    }
+
     /// The escape speed `√(−2Φ)` at `(R, z)`; `None` without the (R, z) grid.
     #[must_use]
     pub fn escape_speed(&self, r_cyl: LightYears, z: LightYears) -> Option<KilometresPerSecond> {
@@ -404,6 +432,35 @@ impl PotentialTables {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::galaxy::params::GalaxyParams;
+
+    /// Ruling 91: the escape speed from the Milky Way fixture at the Sun's radius, measured to
+    /// twice `r₂₀₀` as Deason et al. (2019) measure it, lies in the Milky Way's 500–580 km/s
+    /// (Deason et al. 528 +24 −25; Piffl et al. 2014, 533 +54 −41; Monari et al. 2018, 580 ± 63),
+    /// at 512.0 km/s, below the untruncated `√(−2Φ)` of 558.1; and it falls outward to nothing at
+    /// the boundary. Ruling 91's 528.6 was the research's own model of an earlier fixture, whose
+    /// `√(−2Φ)` it put at 574.
+    #[test]
+    fn the_fixtures_escape_speed_to_twice_r200_is_the_milky_ways() {
+        let tables = PotentialTables::in_plane(&MassModel::new(&GalaxyParams::milky_way_like()));
+        let sun = LightYears::new(26_000.0);
+        let escape = tables.galactic_escape_speed_in_plane(sun).value();
+        assert!((500.0..=580.0).contains(&escape), "{escape} km/s");
+        assert!((escape - 512.0).abs() < 1.0, "{escape} km/s");
+        let infinity = tables.escape_speed_in_plane(sun).value();
+        assert!(escape < infinity, "{escape} against {infinity} km/s");
+        let boundary = tables.escape_boundary();
+        assert!((boundary.value() / (2.0 * tables.dark_halo.r200().value()) - 1.0).abs() < 1e-15);
+        let farther = tables.galactic_escape_speed_in_plane(LightYears::new(60_000.0));
+        assert!(farther.value() < escape);
+        assert!(
+            tables
+                .galactic_escape_speed_in_plane(boundary)
+                .value()
+                .abs()
+                < f64::EPSILON
+        );
+    }
 
     #[test]
     fn the_grid_spans_two_to_the_minus_four_to_two_to_the_eighteen() {

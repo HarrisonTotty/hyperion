@@ -48,7 +48,8 @@
 //!
 //! In [`NoiseMode::Realised`] each sample's phase is read from its density and pressure, and its
 //! neutral share follows Design note 12: none of the hot gas, all of the cold and molecular gas,
-//! and `n_neutral ÷ (n_neutral + n_warm)` of the warm. In [`NoiseMode::Mean`] there is no local
+//! and `n_neutral ÷ (n_neutral + n_warm)` of the warm, less where warm gas that share would read
+//! above 10⁵ K is taken as ionised until it sits there ([`ThermalState`], ruling 91). In [`NoiseMode::Mean`] there is no local
 //! density to classify, so the neutral column is the integral of `n_neutral + n_mol`. Holes are
 //! hot and add none; clouds are neutral and add all of theirs.
 
@@ -60,7 +61,7 @@ use crate::galaxy::gas::ccm::{Band, HYDROGEN_COLUMN_PER_MAG};
 use crate::galaxy::gas::field::{GasField, Site};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::gas::noise::{NoiseCache, SmoothingScale};
-use crate::galaxy::gas::phase::{GasPhase, neutral_share};
+use crate::galaxy::gas::phase::{ThermalState, warm_neutral_share};
 use crate::galaxy::gas::smooth::GasLayer;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{HydrogenPerCm3, KelvinPerCm3, LightYears, Magnitudes, PerCm2};
@@ -806,11 +807,15 @@ impl<'a> Marcher<'a> {
                     .field
                     .pressure_model()
                     .at(self.field.smooth(), site.r, site.z);
-                let phase = GasPhase::of(HydrogenPerCm3::new(local), KelvinPerCm3::new(pressure));
+                let thermal = ThermalState::of(
+                    HydrogenPerCm3::new(local),
+                    KelvinPerCm3::new(pressure),
+                    warm_neutral_share(layers.neutral, layers.warm),
+                );
                 Sample {
                     dust: gas * zeta,
                     gas,
-                    neutral: neutral_share(phase, layers.neutral, layers.warm) * local,
+                    neutral: thermal.neutral_share() * local,
                 }
             }
         }

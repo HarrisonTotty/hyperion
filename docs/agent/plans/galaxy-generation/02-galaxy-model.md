@@ -2231,3 +2231,14 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     at 94% is their §9.2, not §10.1.
   - _Unchecked, recorded._ The median seed's hole, 0.55 × 2.56 kpc = 1.41 kpc, against Robin et
     al.'s (2003) 1.32 ± 0.14 kpc, is not verified in Robin et al.'s text.
+- **Ruling 88, built (`gas12`, round 9; tests and docs only, no output moves).** The rotation sweep
+  (`galaxy_sweeps.rs`, `the_rotation_curve_over_four_thousand_seeds`) now also holds every seed's
+  median v_c(1) ÷ v_c(8) to a population bracket of 0.60–1.00: the interquartile range of v(1 kpc)
+  ÷ v(8 kpc) over SPARC's Milky-Way-mass spirals (Lelli, McGaugh and Schombert 2016, AJ 152, 157:
+  V_flat 200–260 km/s, quality 1–2, first point inside 1 kpc, 11 galaxies, median 0.887, bootstrap
+  95% interval on the median 0.61–1.03). The pin at 0.71–0.73 stays beside it, as a regression pin
+  on the model, not a bracket; the fixture's 0.75–0.97 and the Milky-Way-like subset's 0.71–0.97
+  are unchanged (ruling 88's point 4 says "0.75–0.97" for the subset, which ruling 82's third
+  research had already set to 0.71–0.97; the code keeps 0.71). The model's median sitting about
+  0.17 under SPARC's, where SPARC's sample in this mass range is bulge-heavy, is recorded for the
+  owner's item 6, not tuned.

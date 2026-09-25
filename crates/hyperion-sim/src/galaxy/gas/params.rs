@@ -150,8 +150,11 @@ impl Drawn {
     /// 2012, as McKee, Parravano and Hollenbach 2015, ApJ 814, 13, Table 2 adopt it: 0.0154 cm⁻³
     /// over 1,590 pc, the same column in a taller, thinner layer). The molecular disc's mass is
     /// Design note 5's 2–3 × 10⁶ M☉ of diffuse central gas. The corona's range is the brainstorm's
-    /// 10⁻³ cm⁻³, trimmed above so that the corona comes out hot for every seed (Design note 12
-    /// and the plan's Risks); `σ_ln` is the brainstorm's 2–2.5.
+    /// "about 10⁻³ cm⁻³", trimmed to 0.5–0.8 × 10⁻³ so that the corona comes out hot 20,000 ly
+    /// above every radius from 8,000 to 40,000 ly for every draw (ruling 91 of 2026-09-22; Design
+    /// note 12); Miller and Bregman's (2015, ApJ 800, 14) β-model of the hot halo, `n₀ r_c^(3β)` of
+    /// 1.35 × 10⁻² cm⁻³ kpc^(3β) with β = 0.50, gives 4–7 × 10⁻⁴ cm⁻³ at 7–10 kpc from the centre.
+    /// `σ_ln` is the brainstorm's 2–2.5.
     const fn law(self) -> Law {
         match self {
             Self::HoleRatio => Law::Uniform { lo: 0.8, hi: 1.2 },
@@ -167,7 +170,7 @@ impl Drawn {
             Self::MolecularHeightRatio => Law::Uniform { lo: 0.15, hi: 0.25 },
             Self::CoronaDensity => Law::LogUniform {
                 lo: 0.5e-3,
-                hi: 1.2e-3,
+                hi: 0.8e-3,
             },
             Self::PressureFloor => Law::Uniform {
                 lo: 300.0,
@@ -292,11 +295,12 @@ pub enum BuildGasParamsError {
     /// The warm ionised layer and the central molecular disc drawn for the galaxy weigh at least as
     /// much as its whole gas disc, which leaves the neutral layer nothing.
     ///
-    /// Both are drawn in absolute terms (ruling 19), so a galaxy with too little gas for them is
-    /// possible. No drawn galaxy comes near it — over 2,000 seeds the neutral layer keeps at least
-    /// 0.53 of the gas, because plan 02 couples a light galaxy to a short disc — but a galaxy built
-    /// by hand at the corner of plan 02's ranges can: the lightest thin disc with the longest scale
-    /// length and the least gas.
+    /// Since ruling 91 of 2026-09-22 the warm layer is clamped to half the gas less the molecular
+    /// disc, so this is refused only where the molecular disc alone weighs half the gas: a gas
+    /// disc under 6 × 10⁶ M☉, four hundred times lighter than the lightest plan 02's ranges
+    /// allow (`the_neutral_share_is_at_least_half_at_every_corner_of_the_draws`). No galaxy the
+    /// public API builds reaches it; the variant stays so that a later range cannot turn it into a
+    /// panic (ruling 22).
     NoNeutralGas {
         /// Plan 02's gas disc mass.
         gas_mass: SolarMasses,
@@ -415,12 +419,12 @@ impl GasParams {
     ///
     /// # Errors
     ///
-    /// [`BuildGasParamsError::NoNeutralGas`] if the warm ionised layer and the molecular disc drawn
+    /// [`BuildGasParamsError::NoNeutralGas`] if the molecular disc and the warm ionised layer drawn
     /// here outweigh plan 02's gas mass, so that nothing is left for the neutral disc (ruling 22 of
-    /// 2026-09-22). No seeded galaxy comes near it — over 2,000 seeds the neutral disc keeps at
-    /// least half the gas (`tests/gas_statistics.rs`) — because plan 02 couples a light galaxy to a
-    /// short disc; a galaxy built by hand at the corner of plan 02's ranges, the lightest thin disc
-    /// with the longest scale length and the least gas, can reach it.
+    /// 2026-09-22). The warm layer's clamp (ruling 91; [`warm_density`](Self::warm_density)) keeps
+    /// half the gas neutral wherever the molecular disc weighs less than half of it, which holds at
+    /// every corner of plan 02's ranges by a factor of some four hundred, so no galaxy the public
+    /// API builds is refused.
     pub fn from_galaxy(seed: Seed, params: &GalaxyParams) -> Result<Self, BuildGasParamsError> {
         let mut stream = Stream::open(seed, tags::GAS_PARAMS, ObjectKey::galaxy());
         let drawn = core::array::from_fn(|i| Drawn::ALL[i].draw(&mut stream));
@@ -433,8 +437,9 @@ impl GasParams {
     /// Its values are Design note 3's table: the gas disc is plan 02's fixture (8.2 × 10⁹ M☉,
     /// 12,250 ly long, 700 ly tall), the hole scale is the bar's half-length of 16,000 ly, the
     /// molecular disc is the nuclear disc's 290 ly by 58 ly, and the rest are the measured values
-    /// where the brainstorm states one and the middle of the range otherwise. P07.T12 tunes them
-    /// against the brainstorm's targets.
+    /// where the brainstorm states one and the middle of the range otherwise. P07.T12 tuned them
+    /// against the brainstorm's targets (`tests/gas_statistics.rs`): only the corona moved, from
+    /// 10⁻³ to 6 × 10⁻⁴ cm⁻³, when ruling 91 narrowed its range.
     ///
     /// # Panics
     ///
@@ -467,12 +472,22 @@ impl GasParams {
         let disc = params.gas_disc();
         let gas_mass = disc.mass();
         let hole_scale = params.bar().half_length() * hole_ratio;
-        let warm_mass = smooth::warm_mass(
+        let drawn_warm_mass = smooth::warm_mass(
             warm_density,
             hole_scale.value(),
             disc.length().value(),
             warm_height,
         );
+        // Ruling 91: the warm layer weighs at most half the gas less the molecular disc, so the
+        // neutral layer keeps at least half. The mass is linear in the density, so the density is
+        // scaled by the same factor; the comparison, not `f64::min`, keeps the drawn bits exactly
+        // where the clamp does not bind, which is every one of 2,000 drawn galaxies.
+        let warm_cap = 0.5 * gas_mass.value() - molecular_mass;
+        let (warm_density, warm_mass) = if drawn_warm_mass > warm_cap && warm_cap > 0.0 {
+            (warm_density * (warm_cap / drawn_warm_mass), warm_cap)
+        } else {
+            (warm_density, drawn_warm_mass)
+        };
         let neutral_mass = gas_mass.value() - warm_mass - molecular_mass;
         if neutral_mass.is_nan() || neutral_mass <= 0.0 {
             return Err(BuildGasParamsError::NoNeutralGas {
@@ -551,8 +566,9 @@ impl GasParams {
     /// The neutral layer's share of the gas mass, `1 − f_w − f_c`.
     ///
     /// It is most of the gas: 0.85 for the Milky Way fixture, against the 0.87 of McKee, Parravano
-    /// and Hollenbach's (2015) local column that is atomic or molecular, and at least 0.53 over
-    /// 2,000 seeds (plan 07, Risks).
+    /// and Hollenbach's (2015) local column that is atomic or molecular, at least 0.53 over 2,000
+    /// seeds (plan 07, Risks), and never below 0.5 for any galaxy the public API builds, by the
+    /// warm layer's clamp (ruling 91).
     #[must_use]
     pub fn neutral_fraction(&self) -> f64 {
         1.0 - self.warm_fraction() - self.molecular.fraction
@@ -560,6 +576,12 @@ impl GasParams {
 
     /// The warm ionised layer's mid-plane density at [`REFERENCE_RADIUS`](Self::REFERENCE_RADIUS),
     /// 0.025–0.035 cm⁻³: the brainstorm's "about 0.03 atoms per cubic centimetre", drawn.
+    ///
+    /// It is clamped where the layer would weigh more than half the gas less the molecular disc,
+    /// `½ G − M_c`, so that the neutral share is never below 0.5 (ruling 91 of 2026-09-22). The
+    /// layer's mass is linear in its density, so the clamp scales the density by `(½ G − M_c) ÷
+    /// W`. It binds on none of 2,000 drawn galaxies, whose least neutral share is 0.529, and only
+    /// on galaxies built by hand at the corner of plan 02's ranges.
     #[must_use]
     pub fn warm_density(&self) -> HydrogenPerCm3 {
         self.warm_density
@@ -591,12 +613,14 @@ impl GasParams {
         self.molecular
     }
 
-    /// The hot corona's density `n_cor`, 0.5–1.2 × 10⁻³ cm⁻³: the brainstorm's "a hot corona of
+    /// The hot corona's density `n_cor`, 0.5–0.8 × 10⁻³ cm⁻³: the brainstorm's "a hot corona of
     /// about 10⁻³".
     ///
     /// It is an additive floor and carries no dust, because grains do not survive in it (Design
-    /// note 10). The range stops at 1.2 × 10⁻³ so that the corona is hot for every seed even at
-    /// the lowest pressure floor (Design note 12).
+    /// note 10). The range stops at 0.8 × 10⁻³ so that the corona, with the warm layer's tail, is
+    /// hot 20,000 ly above every radius from 8,000 to 40,000 ly even at the lowest pressure floor:
+    /// the worst corner of the draws gives about 104,000 K (ruling 91 of 2026-09-22; Design note
+    /// 12). Miller and Bregman's (2015, ApJ 800, 14) hot halo is 4–7 × 10⁻⁴ cm⁻³ at 7–10 kpc.
     #[must_use]
     pub fn corona_density(&self) -> HydrogenPerCm3 {
         self.corona_density
@@ -647,7 +671,10 @@ const MILKY_WAY_DRAWN: [f64; DRAWN_COUNT] = [
     // 2.5 × 10⁶ M☉ of diffuse central gas, the middle of Design note 5's 2–3 × 10⁶.
     2.5e6,
     // 58 ly against the nuclear disc's 290 ly, half of Sormani et al.'s (2022) 28 pc height.
-    0.20, 1e-3, 400.0, 2.3, 450.0, 200.0, 0.12,
+    0.20,
+    // The corona at the Sun's radius as Miller and Bregman's (2015) β-model gives it,
+    // 1.35 × 10⁻² × 8.2^(−1.5) = 5.7 × 10⁻⁴ cm⁻³ at 8.2 kpc, to one figure (P07.T12, ruling 91).
+    0.6e-3, 400.0, 2.3, 450.0, 200.0, 0.12,
 ];
 
 #[cfg(test)]
@@ -713,7 +740,7 @@ mod tests {
             "corona density",
             gas.corona_density().value(),
             0.5e-3,
-            1.2e-3,
+            0.8e-3,
         );
         within("pressure floor", gas.pressure_floor().value(), 300.0, 500.0);
         assert_eq!(gas.pressure_height(), GasParams::PRESSURE_HEIGHT);
@@ -816,8 +843,8 @@ mod tests {
 
     /// The corona alone must classify as hot, so that the gas far from the disc is hot for every
     /// seed: T = (`P_cor` ÷ k) ÷ (2.3 `n_cor`) above 10⁵ K (Design note 12). The worst case is the
-    /// lowest floor against the highest density, which is why the density's range stops at
-    /// 1.2 × 10⁻³ cm⁻³.
+    /// lowest floor against the highest density, 163,000 K; the warm layer's tail brings it to
+    /// about 104,000 K over the inner disc (`gas::phase`'s corner proof, ruling 91).
     #[test]
     fn the_corona_is_hotter_than_a_hundred_thousand_kelvin_for_every_seed() {
         let temperature = |gas: &GasParams| {
@@ -831,14 +858,14 @@ mod tests {
             assert!(hot > 1e5, "the corona is {hot} K for {seed:?}");
         }
         // The extremes of the two ranges, which no sweep of seeds is sure to reach.
-        let worst = 300.0 / (IONISED_PARTICLES_PER_HYDROGEN * 1.2e-3);
-        assert!(worst > 1e5, "the worst case is {worst} K");
+        let worst = 300.0 / (IONISED_PARTICLES_PER_HYDROGEN * 0.8e-3);
+        assert!(worst > 1.6e5, "the worst case is {worst} K");
         assert!(temperature(&GasParams::milky_way_like()) > 1.5e5);
     }
 
-    /// The least neutral share of the gas over the corners of every draw that feeds it (plan 07,
-    /// ruling 31 of 2026-09-22): below zero, so the corners do not prove
-    /// [`Galaxy::new`](crate::galaxy::Galaxy::new) panic-free.
+    /// The least neutral share of the gas the *drawn* warm layer would leave, over the corners of
+    /// every draw that feeds it (plan 07, ruling 31 of 2026-09-22): below zero, which is why ruling
+    /// 91 clamps the layer.
     ///
     /// The share is `1 − (W + M_c) ÷ G`, with `G` plan 02's gas mass, `M_c` the molecular disc's
     /// drawn mass and `W` the warm ionised layer's mass. `W` is linear in the warm layer's drawn
@@ -861,37 +888,56 @@ mod tests {
     /// [`LEAST_FAILING_THIN_SCATTER`] above its mass's length, 4.7 times its 0.05 dex σ, while every
     /// uniform draw above sits at its end; with no scatter the same corner keeps 0.32 of its gas
     /// neutral, and over 2,000 drawn galaxies the least is 0.529 (`tests/gas_statistics.rs`).
-    /// Ruling 31's remedy, a clamp on the warm layer's density draw, moves generated output and is
-    /// the orchestrator's to make with a version bump.
-    const LEAST_CORNER_NEUTRAL_SHARE: f64 = -0.0586;
+    const LEAST_DRAWN_CORNER_SHARE: f64 = -0.0586;
 
     /// The least thin-disc length scatter, dex, at which a drawn galaxy at the corner of
-    /// [`LEAST_CORNER_NEUTRAL_SHARE`] leaves its neutral layer nothing.
+    /// [`LEAST_DRAWN_CORNER_SHARE`] would leave its neutral layer nothing without the clamp.
     const LEAST_FAILING_THIN_SCATTER: f64 = 0.236;
 
-    /// The neutral share `1 − (W + M_c) ÷ G` of `galaxy` with the warm layer at `warm` cm⁻³ and
-    /// `height` ly, the hole at `hole` times the bar and `molecular` M☉ of molecular gas, checked
-    /// against [`GasParams::of_galaxy`], which must refuse exactly where it is not positive.
-    fn corner_share(galaxy: &GalaxyParams, [hole, warm, height, molecular]: [f64; 4]) -> f64 {
+    /// The least gas mass over the corners of plan 02's ranges, M☉, to two figures: some 420 times
+    /// the 6 × 10⁶ M☉ below which the molecular disc's largest draw would weigh half of it, the one
+    /// case the clamp cannot help.
+    const LEAST_CORNER_GAS_MASS: f64 = 2.5e9;
+
+    /// The neutral share `1 − (W + M_c) ÷ G` the drawn warm layer would leave in `galaxy`, with it
+    /// at `warm` cm⁻³ and `height` ly, the hole at `hole` times the bar and `molecular` M☉ of
+    /// molecular gas; and the share [`GasParams::of_galaxy`] builds with the clamp, which must be
+    /// the drawn share where that is at least half and half otherwise (ruling 91).
+    fn corner_share(
+        galaxy: &GalaxyParams,
+        [hole, warm, height, molecular]: [f64; 4],
+    ) -> (f64, f64) {
         let warm_mass = smooth::warm_mass(
             warm,
             galaxy.bar().half_length().value() * hole,
             galaxy.gas_disc().length().value(),
             height,
         );
-        let share = 1.0 - (warm_mass + molecular) / galaxy.gas_disc().mass().value();
-        let mut drawn = MILKY_WAY_DRAWN;
-        drawn[..4].copy_from_slice(&[hole, warm, height, molecular]);
-        match GasParams::of_galaxy(galaxy, drawn) {
-            Ok(gas) => {
-                assert!(share > 0.0, "built at a share of {share}");
-                assert!((gas.neutral_fraction() - share).abs() < 1e-12);
-            }
-            Err(BuildGasParamsError::NoNeutralGas { .. }) => {
-                assert!(share <= 0.0, "refused at a share of {share}");
-            }
+        let drawn = 1.0 - (warm_mass + molecular) / galaxy.gas_disc().mass().value();
+        let mut values = MILKY_WAY_DRAWN;
+        values[..4].copy_from_slice(&[hole, warm, height, molecular]);
+        let gas = GasParams::of_galaxy(galaxy, values).expect("the clamp leaves half the gas");
+        let built = gas.neutral_fraction();
+        if drawn >= NEUTRAL_SHARE_FLOOR {
+            assert!((built - drawn).abs() < 1e-12, "{built} built at {drawn}");
+            assert_same_bits(gas.warm_density().value(), warm);
+        } else {
+            assert!(
+                (built - NEUTRAL_SHARE_FLOOR).abs() < 1e-12,
+                "{built} at {drawn}"
+            );
+            assert!(gas.warm_density().value() < warm);
+            // The clamped density is what the smooth layer reads, so the mass and the density
+            // still agree.
+            let clamped = smooth::warm_mass(
+                gas.warm_density().value(),
+                gas.hole_scale().value(),
+                gas.radial_scale().value(),
+                height,
+            );
+            assert!((clamped / gas.warm_mass().value() - 1.0).abs() < 1e-12);
         }
-        share
+        (drawn, built)
     }
 
     /// A galaxy with the least gas plan 02's draws allow: the least stellar mass and gas fraction,
@@ -909,11 +955,18 @@ mod tests {
             .gas_mass_fraction(0.175)
     }
 
-    /// Ruling 31: the neutral share at every corner of the draws that feed it, which is where its
-    /// minimum over the drawn ranges lies ([`LEAST_CORNER_NEUTRAL_SHARE`] gives the argument), and
-    /// the thin-disc scatter a drawn galaxy needs to reach the least corner.
+    /// Ruling 91's proof that [`Galaxy::new`](crate::galaxy::Galaxy::new)'s `expect` cannot fire,
+    /// replacing ruling 31's corner search: the neutral share at every corner of the draws that
+    /// feed it, which is where its minimum over the drawn ranges lies
+    /// ([`LEAST_DRAWN_CORNER_SHARE`] gives the argument).
+    ///
+    /// With the clamp the share is `1 − (min(W, ½ G − M_c) + M_c) ÷ G ≥ ½` wherever `½ G > M_c`,
+    /// whatever `W` is; so the corners need only show that the least gas mass is far above twice
+    /// the largest molecular disc, and the sweep checks the algebra as built, to 10⁻¹². The drawn
+    /// share the clamp replaces is still found at its documented corner, and a drawn galaxy's
+    /// thin-disc scatter either side of the least that would fail builds at 0.5.
     #[test]
-    fn the_neutral_share_is_least_at_a_corner_of_the_draws() {
+    fn the_neutral_share_is_at_least_half_at_every_corner_of_the_draws() {
         let ends = |lo: f64, hi: f64| [lo, hi];
         let mut gas_corners = Vec::new();
         for hole in ends(0.8, 1.2) {
@@ -926,6 +979,7 @@ mod tests {
             }
         }
         let (mut least, mut least_at) = (f64::INFINITY, String::new());
+        let (mut least_built, mut least_gas_mass) = (f64::INFINITY, f64::INFINITY);
         for kind in [MassFunctionKind::Kroupa, MassFunctionKind::Chabrier] {
             for sfh in ends(5e9, 9e9) {
                 for bar_of_bulge in ends(0.30, 0.40) {
@@ -938,10 +992,13 @@ mod tests {
                                     .bar_half_length(LightYears::new(bar))
                                     .build()
                                     .expect("every value is inside plan 02's drawn ranges");
+                                least_gas_mass =
+                                    least_gas_mass.min(galaxy.gas_disc().mass().value());
                                 for corner in &gas_corners {
-                                    let share = corner_share(&galaxy, *corner);
-                                    if share < least {
-                                        least = share;
+                                    let (drawn, built) = corner_share(&galaxy, *corner);
+                                    least_built = least_built.min(built);
+                                    if drawn < least {
+                                        least = drawn;
                                         least_at = format!(
                                             "{kind:?}, {sfh:e} yr, {bar_of_bulge}, {thin} ly × \
                                              {ratio}, {bar} ly, {corner:?}"
@@ -955,10 +1012,19 @@ mod tests {
             }
         }
         assert!(
-            (least - LEAST_CORNER_NEUTRAL_SHARE).abs() < 5e-4,
-            "the least corner share is {least:.4} ({least_at}), not the documented \
-             {LEAST_CORNER_NEUTRAL_SHARE}: correct it and `Galaxy::new`'s message"
+            (least - LEAST_DRAWN_CORNER_SHARE).abs() < 5e-4,
+            "the least drawn corner share is {least:.4} ({least_at}), not the documented \
+             {LEAST_DRAWN_CORNER_SHARE}"
         );
+        assert!(
+            (least_built - NEUTRAL_SHARE_FLOOR).abs() < 1e-12,
+            "the least built share is {least_built}"
+        );
+        assert!(
+            (least_gas_mass / LEAST_CORNER_GAS_MASS - 1.0).abs() < 0.05,
+            "the least gas mass is {least_gas_mass:e} M☉"
+        );
+        assert!(0.5 * least_gas_mass > 400.0 * 3e6);
         // The least corner as a drawn galaxy reaches it: its lengths coupled to their masses, the
         // bar's scatter at 0.1 dex (which puts it at its clamp) and the thin disc's either side of
         // the least that fails.
@@ -973,8 +1039,9 @@ mod tests {
         };
         let below = corner_share(&drawn(LEAST_FAILING_THIN_SCATTER - 0.001), worst);
         let above = corner_share(&drawn(LEAST_FAILING_THIN_SCATTER + 0.001), worst);
-        assert!(below > 0.0 && above < 0.0, "{below} and {above}");
-        assert!(corner_share(&drawn(0.0), worst) > 0.3);
+        assert!(below.0 > 0.0 && above.0 < 0.0, "{below:?} and {above:?}");
+        assert!((below.1 - 0.5).abs() < 1e-12 && (above.1 - 0.5).abs() < 1e-12);
+        assert!(corner_share(&drawn(0.0), worst).0 > 0.3);
         // Why the corners suffice for the two radial scales: the warm layer's mass is log-convex in
         // the hole scale and in the inverse radial scale, so on a line between two drawn ends it
         // never rises above the chord. Checked on a grid over the drawn ranges.

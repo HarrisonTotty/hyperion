@@ -195,13 +195,12 @@ impl Galaxy {
     ///
     /// # Panics
     ///
-    /// If the seed's warm ionised layer and molecular disc outweigh its gas disc, which
-    /// [`from_params`](Self::from_params) refuses (plan 07, ruling 22). No seed is known to: over
-    /// 2,000 seeds the neutral layer keeps at least 0.529 of the gas (`tests/gas_statistics.rs`),
-    /// and ruling 31's evaluation at the corners of the draws finds the refusal only where the
-    /// thin disc's length scatter is 4.7 standard deviations or more above its mean while every
-    /// draw feeding the gas sits at its worst end. That corner is reachable, so this is evidence
-    /// and not a proof; the corner proof and its figures are in `gas::params`'s tests.
+    /// Never: [`from_params`](Self::from_params) refuses a galaxy only if its molecular disc and
+    /// warm ionised layer leave the neutral layer nothing (plan 07, ruling 22), and since ruling 91
+    /// the warm layer is clamped so that the neutral layer keeps at least half the gas wherever the
+    /// molecular disc, at most 3 × 10⁶ M☉, weighs less than half of it. Every galaxy plan 02 draws
+    /// has at least 2.5 × 10⁹ M☉ of gas, the least at any corner of its ranges; the proof is
+    /// `gas::params`'s `the_neutral_share_is_at_least_half_at_every_corner_of_the_draws`.
     #[must_use]
     pub fn new(seed: Seed) -> Self {
         Self::with_mass_function(seed, MassFunctionKind::default())
@@ -212,14 +211,13 @@ impl Galaxy {
     ///
     /// # Panics
     ///
-    /// As [`new`](Self::new) says: if the seed's gas leaves the neutral layer nothing, which no
-    /// seed is known to do.
+    /// Never, as [`new`](Self::new) says.
     #[must_use]
     pub fn with_mass_function(seed: Seed, kind: MassFunctionKind) -> Self {
         Self::from_params(seed, GalaxyParams::from_seed(seed, kind)).expect(
-            "a drawn galaxy keeps its gas neutral: at least 0.529 over 2,000 seeds, and none \
-                 only past a 4.7σ thin-disc length scatter with every gas draw at its worst end \
-                 (plan 07, ruling 31)",
+            "a drawn galaxy keeps at least half its gas neutral: the warm layer is clamped to \
+                 half the gas less a molecular disc of at most 3e6 M☉, and every drawn galaxy has \
+                 at least 2.5e9 M☉ of gas (plan 07, ruling 91)",
         )
     }
 
@@ -231,9 +229,10 @@ impl Galaxy {
     ///
     /// # Errors
     ///
-    /// [`BuildGalaxyError::Gas`] if the gas field cannot be built: for a galaxy built by hand whose
-    /// warm ionised layer and molecular disc, drawn for `seed`, outweigh its gas disc (plan 07,
-    /// ruling 22). No drawn galaxy comes near it.
+    /// [`BuildGalaxyError::Gas`] if the gas field cannot be built: for a galaxy whose molecular
+    /// disc and warm ionised layer, drawn for `seed`, outweigh its gas disc (plan 07, ruling 22).
+    /// Since the warm layer's clamp (ruling 91) that needs a gas disc under 6 × 10⁶ M☉, which no
+    /// galaxy the builder accepts has.
     pub fn from_params(seed: Seed, params: GalaxyParams) -> Result<Self, BuildGalaxyError> {
         let mass_function = HeldMassFunction::of(params.mass_function());
         let model = MassModel::new(&params);

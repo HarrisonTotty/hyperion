@@ -84,7 +84,7 @@ impl GasParams {
     pub fn neutral_height(&self) -> LightYears; // h_n, plan 02's GasDiscParams::HEIGHT
     pub fn neutral_mass(&self) -> SolarMasses;  // what the other two layers leave (ruling 19)
     pub fn neutral_fraction(&self) -> f64;      // 1 − f_w − f_c
-    pub fn warm_density(&self) -> HydrogenPerCm3; // w at REFERENCE_RADIUS, drawn
+    pub fn warm_density(&self) -> HydrogenPerCm3; // w at REFERENCE_RADIUS, drawn, clamped (ruling 91)
     pub fn warm_mass(&self) -> SolarMasses;     // derived from w, h_w and the radial form
     pub fn warm_fraction(&self) -> f64;         // f_w, derived
     pub fn warm_height(&self) -> LightYears;    // h_w
@@ -117,7 +117,8 @@ impl SmoothGas {
 // field.rs
 pub struct GasField { /* params + normalisations + borrowed arm geometry and metallicity */ }
 impl GasField {
-    pub fn new(seed: Seed, galaxy_params: &GalaxyParams, fields: &Fields) -> GasField;
+    pub fn new(seed: Seed, galaxy_params: &GalaxyParams, fields: &Fields)
+        -> Result<GasField, BuildGasParamsError>;                              // ruling 22
     pub fn mean_density(&self, p: &GalacticPosition) -> HydrogenPerCm3;        // no noise
     pub fn density(&self, p: &GalacticPosition, scale: SmoothingScale,
                    cache: &mut NoiseCache) -> HydrogenPerCm3;                   // noise applied
@@ -131,8 +132,18 @@ impl GasField {
     pub fn neutral_bound(&self, cell: &CellBox) -> HydrogenPerCm3; // mean neutral gas, for thinning
 }
 pub enum SmoothingScale { Full, AtLeast(LightYears) }
-pub struct GasState { /* density(), pressure(), temperature(), thermal_sound_speed(), phase() */ }
+pub struct GasState { /* density(), pressure(), temperature(), thermal_sound_speed(), phase(),
+                         neutral_share(), particles_per_hydrogen() (ruling 91) */ }
+
+// phase.rs (P07.T5; ruling 91 in P07.T12)
 pub enum GasPhase { Hot, Warm, Cold, Molecular }
+impl GasPhase { pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3) -> GasPhase; }
+pub struct ThermalState { /* phase(), neutral_share(), particles_per_hydrogen(), temperature(n, p) */ }
+impl ThermalState {
+    pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3, neutral_share: f64) -> ThermalState;
+}
+pub fn warm_neutral_share(neutral: f64, warm: f64) -> f64;   // n_neutral ÷ (n_neutral + n_warm)
+pub fn warm_particles_per_hydrogen(neutral_share: f64) -> f64; // 1.1 + 1.2 (1 − f_n)
 
 // noise.rs
 pub struct NoiseCache { /* caller-owned, fixed capacity, direct-mapped */ }
@@ -410,15 +421,15 @@ targets; the targets are binding, these are not.
    | Radial scale R_g                      | `GasDiscParams::length()`, 1.5–2 × the thin disc's   | 12,250 ly    |
    | Neutral scale height h_n              | `GasDiscParams::HEIGHT`, a generator constant        | 700 ly       |
    | Hole scale R_m                        | 0.8–1.2 × the bar's half-length                      | 16,000 ly    |
-   | Warm ionised density w at R₀          | 0.025–0.035 cm⁻³, uniform (word 1)                   | 0.030        |
+   | Warm ionised density w at R₀          | 0.025–0.035 cm⁻³, uniform (word 1); clamped, rul. 91 | 0.030        |
    | Warm ionised scale height h_w         | 2,500–3,500 ly, uniform                              | 3,000 ly     |
    | Molecular disc mass M_c               | 2–3 × 10⁶ M☉, log-uniform (word 3; note 5)           | 2.5 × 10⁶ M☉ |
    | Molecular disc scale length R_c       | the nuclear disc's scale length                      | 290 ly       |
    | Molecular disc height h_c             | 0.15–0.25 × R_c                                      | 58 ly        |
-   | Corona density n_cor                  | 0.5–1.2 × 10⁻³ cm⁻³, log-uniform (note 12)           | 10⁻³         |
+   | Corona density n_cor                  | 0.5–0.8 × 10⁻³ cm⁻³, log-uniform (note 12; rul. 91)  | 6 × 10⁻⁴     |
    | Pressure floor P_cor ÷ k              | 300–500 K cm⁻³, uniform                              | 400          |
    | Pressure height h_P                   | generator-version constant                           | 1,500 ly     |
-   | Pressure speed σ_P                    | generator-version constant                           | 5.5 km/s     |
+   | Pressure speed σ_P                    | generator-version constant                           | 5.15 km/s    |
    | Log-normal width σ_ln                 | 2.0–2.5, uniform                                     | 2.3          |
    | Lane offset d (inward, perpendicular) | 300–600 ly, uniform                                  | 450 ly       |
    | Lane width σ_w                        | 150–300 ly, uniform                                  | 200 ly       |
@@ -542,11 +553,15 @@ targets; the targets are binding, these are not.
     gas: hot above 10⁵ K (n < P ÷ 2.3 × 10⁵ k), warm down to 5,000 K (n < P ÷ 5,500 k), molecular
     above 100 cm⁻³, cold between. With these thresholds a log-normal of σ_ln 2 to 2.5 around 0.75
     cm⁻³ at 3,800 K cm⁻³ puts 18% to 39% of the plane's volume in the hot phase, which is the
-    brainstorm's "a fifth to two fifths". The corona itself must come out hot for every seed, which
-    needs P_cor ÷ (2.3 k n_cor) above 10⁵ K: that is why the corona's density range stops at 1.2 ×
-    10⁻³ cm⁻³ against a floor that can be as low as 300 K cm⁻³. Within the warm phase the neutral
-    share is the smooth ratio n_neutral ÷ (n_neutral + n_warm) at that point; hot gas is fully
-    ionised; cold and molecular gas are neutral. That rule gives the neutral hydrogen column in
+    brainstorm's "a fifth to two fifths". The corona itself must come out hot for every seed, 20,000
+    ly above every radius from 8,000 to 40,000 ly (ruling 91), which needs P_cor ÷ (2.3 k (n_cor +
+    n_w)) above 10⁵ K with the warm layer's tail n_w: that is why the corona's density range stops at
+    0.8 × 10⁻³ cm⁻³ against a floor that can be as low as 300 K cm⁻³. Within the warm phase the
+    neutral share is the smooth ratio f_n = n_neutral ÷ (n_neutral + n_warm) at that point, and the
+    temperature is taken with **x = 1.1 + 1.2 (1 − f_n)** (ruling 91: taking 1.1 for every warm point
+    read warm ionised gas up to 2.1 times too warm), except that warm gas is held between 5,000 and
+    10⁵ K, its share moving where the smooth one would put it outside (P07.T12, as built); hot gas is
+    fully ionised; cold and molecular gas are neutral. That rule gives the neutral hydrogen column in
     `Realised` mode. In `Mean` mode there is no local density to classify, so the neutral column is
     the integral of n_neutral + n_mol.
 
@@ -619,8 +634,10 @@ targets; the targets are binding, these are not.
 
 20. **Bands.** `extinction_ratio` takes a wavelength and is the real interface. `Band` is a
     convenience set at the Johnson–Cousins and near-infrared effective wavelengths (U 0.36, B 0.44,
-    V 0.55, R 0.66, I 0.81, J 1.25, H 1.65, K 2.2 µm), a mid-infrared point at 10 µm on the extended
-    infrared power law, and `Radio`, whose ratio is zero.
+    V 0.55, R 0.64, I 0.79, J 1.25, H 1.65, K 2.2 µm; R and I per ruling 31), a mid-infrared point at
+    10 µm, and `Radio`, whose ratio is zero. Beyond 3.3 µm the curve is Gordon et al.'s (2023, ApJ
+    950, 86) near- and mid-infrared intercept at R_V = 3.1, which carries the silicate features
+    (ruling 91; it was the extended CCM power law, 0.010 of A_V at 10 µm against the measured 0.08).
 
 ## Tasks
 
@@ -1137,8 +1154,12 @@ Because it changes drawn ranges and the MW fixture's values, T12 **bumps `GENERA
 time** and re-blesses every golden, this plan's included; only P07.T6's bump is free of value changes.
 
 - Mean-mode extinction along in-plane lines of 3,000 ly centred at R = 26,000 ly, averaged over 64
-  azimuths: 0.8–1.3 mag, the brainstorm's "about one magnitude per 3,000 ly". The `Realised` average
-  over the same lines and 32 seeds agrees with the mean-mode figure within four standard errors.
+  azimuths: 0.9–2.0 mag (ruling 91.6, replacing the brainstorm's "about one magnitude per 3,000 ly"
+  of 0.8–1.3: McKee et al. 2015's mean mid-plane 1.17 cm⁻³ ± 10% gives 1.60–1.96, and a mean is
+  never below the typical stellar lines' 0.64–0.92), for the fixture only. The `Realised` average
+  over the same lines and 32 seeds agrees with the mean-mode figure within four standard errors; the
+  realised median line is recorded against 0.64–0.92, and the drawn galaxies' mean-mode rates and
+  gas surface densities at 26,000 ly are recorded in a sweep.
 - From (26,000 ly, 0, 0) to the centre, mean mode: A_V of 24–38 mag and A_K of 2.6–4.5 mag, the
   brainstorm's "some thirty" and "about three". The same line in `Realised` mode over 256 seeds: the
   mean agrees within four standard errors, and the median and the 16th and 84th percentiles are
@@ -1156,6 +1177,14 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
 - Filling factors by Monte Carlo: over 10⁵ points in the plane at R = 20,000–30,000 ly the hot share
   is 0.20–0.40 for MW σ_ln, and above 0.95 at |z| = 20,000 ly; the molecular share in the plane is
   under 2%.
+- Ruling 91's six points, in the version-12 batch: the warm gas's particle count x = 1.1 + 1.2 (1 −
+  f_n), with no warm point above 10⁵ K and T × x n = P exactly; the escape speed to 2 r₂₀₀ (Deason et
+  al. 2019) for `rotation.escape_speed`, the fixture in 500–580 km/s; Gordon et al. 2023's
+  mid-infrared form beyond 3.3 µm, with A(λ) ÷ A_V in 0.075–0.090 at 9.7 and 10 µm, the peak at 9.8 ±
+  0.2 µm and the feature alone giving A_V ÷ τ₉.₇ in 15–20; the warm density clamped where the warm
+  layer would weigh ½ G − M_c, with the corner proof that the neutral share is never below 0.5; the
+  corona drawn at 0.5–0.8 × 10⁻³ cm⁻³ and hot at 20,000 ly above R = 8,000–40,000 ly for every seed;
+  and the in-plane window above.
 - Mean preservation in space: the volume average of F over a 16,384 ly cube sampled at 10⁶ points is
   1 within the tolerance implied by its correlated variance (documented in the test).
 - Over 200 seeds: gas mass within 2% of plan 02's parameter; every parameter in range; plane
@@ -1166,6 +1195,77 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
 - Acceptance: `just ci-slow` green (which is `just ci` plus `just test-slow`); the tuned MW values are
   written back into `GasParams::milky_way_like` and this plan's table, and every golden is regenerated
   with `just bless` in the same commit as the version bump.
+
+**As built (`gas12`, round 9, 2026-09-25, at version 11; the bump to 12 is the orchestrator's, in
+the version-12 batch).** The slow tests are in `tests/gas_statistics.rs`; the golden
+(`gas/sightlines.golden`, ten realised lines through two drawn galaxies at `Full` and
+`Budget(64)`) and the order-independence test there are fast, so that `just bless` writes the
+golden. Measured:
+
+| Check                                                          | Window                                          | Measured                                                                                         |
+| -------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| In-plane A_V per 3,000 ly, mean mode, 64 azimuths              | 0.9–2.0 mag                                     | 1.287                                                                                            |
+| The same, `Realised`, 32 seeds                                 | 4 SE of mean                                    | 1.146 ± 0.055                                                                                    |
+| Realised lines' median (typical lines 0.64–0.92, recorded)     | —                                               | 0.430 (16–84%: 0.119–1.716)                                                                      |
+| A_V and A_K to the centre, mean mode                           | 24–38, 2.6–4.5                                  | 32.81, 3.725                                                                                     |
+| A_V to the centre, `Realised`, 256 seeds                       | 4 SE of mean                                    | 38.97 ± 9.52; 16/50/84%: 9.39/18.33/42.12                                                        |
+| Hot share in the plane, R 20,000–30,000 ly, 10⁵ points         | 0.20–0.40                                       | 0.294                                                                                            |
+| Hot share at \|z\| = 20,000 ly                                 | > 0.95                                          | 0.9955                                                                                           |
+| Molecular share in the plane                                   | < 2%                                            | 0.07%                                                                                            |
+| Mean of F over a 16,384 ly cube, 10⁶ points                    | 1 ± 4 × 0.100                                   | 1.021                                                                                            |
+| Largest shell window at the floor, fixture and 200 seeds       | 2–4 Myr (provisional 1.5–2.0)                   | 1.75; 1.61–1.94                                                                                  |
+| At the plane's 4,144 K cm⁻³                                    | 0.5–1 Myr at 0.1–0.5 cm⁻³ (provisional 0.1–0.7) | 0.742 at 0.612                                                                                   |
+| Coolest corona 20,000 ly up, R 8,000–40,000 ly, 2,000 galaxies | > 10⁵ K                                         | 137,581 K (corners: 104,000)                                                                     |
+| Least neutral share, 2,000 galaxies                            | ≥ 0.5                                           | 0.529 (clamp binds on none)                                                                      |
+| Escape speed to 2 r₂₀₀ at 26,000 ly: fixture; golden seed      | 500–580 km/s                                    | 512.0; 574.04                                                                                    |
+| In-plane A_V, mean mode, 200 drawn galaxies (recorded)         | —                                               | 0.37–4.96, median 1.21 (16–84%: 0.79–2.37); Σ_gas(R₀) 5.3 M☉ pc⁻² at the least, 22.7 at the most |
+| Escape speed to 2 r₂₀₀, 200 drawn galaxies                     | 300–1,100 km/s                                  | 1/16/50/84/99%: 389/450/545/639/760                                                              |
+
+- _Ruling 91.1, a deviation for the orchestrator to confirm._ The warm gas's temperature is taken
+  with x = 1.1 + 1.2 (1 − f_n) (`phase::ThermalState`, `warm_particles_per_hydrogen`), but the
+  labels keep each phase's own count, hot 2.3 and cold 1.1, so **no label moves**; only warm
+  temperatures and the `Realised` neutral column do. Taken literally, the ruling's own tests
+  contradict each other: with x in the warm/cold threshold, gas labelled cold (neutral, 1.1) reads
+  up to 10,450 K; and with the hot threshold at 2.3, neutral-disc gas near it reads up to 2.1 × 10⁵
+  K, against "no warm point above 10⁵ K". Neither is an equilibrium, so warm gas is held at the edge
+  it would cross, its share moving to x = P ÷ (10⁵ k n) or P ÷ (5,000 k n): T × x n = P holds
+  exactly and every warm point lies in 5,000–10⁵ K. The mass-weighted warm temperature at \|z\| =
+  3,000–6,000 ly is 16/50/84%: 5,000/10,730/40,240 K (the research's 16–20 kK median was before the
+  edges were held), recorded, not tuned. `GasState` gains `neutral_share()` and
+  `particles_per_hydrogen()`; `GasField::phase` and `GasPhase::of` keep their signatures.
+- _Ruling 91.2._ `PotentialTables::galactic_escape_speed_in_plane(r)` = √(2 [Φ(2 r₂₀₀) − Φ(R)]) and
+  `escape_boundary()`, beside the kept `escape_speed_in_plane` (motion's padding reads that one);
+  `convert.rs`'s `rotation.escape_speed` sends it. The fixture gives 512.0 km/s, not the ruling's
+  528.6: the research modelled the fixture's untruncated √(−2Φ) as 574, and the tables give 558.1.
+  The golden seed gives 574.04, the ruling's 574.0. Over 200 drawn galaxies the value is recorded and
+  held only to 300–1,100 km/s.
+- _Ruling 91.6._ The window is the fixture's alone. The drawn galaxies' mean-mode rate runs to 4.96
+  mag per 3,000 ly in this sample (val07's 6.46 was another sample's), with 22.7 M☉ pc⁻² of gas at
+  26,000 ly against the Milky Way's 13.7 ± 1.6: the rate follows each galaxy's gas surface density
+  there, as it should, and nothing is tuned.
+- _Ruling 91.3._ Beyond 3.3 µm, `ccm::extinction_ratio` is Gordon et al.'s (2023) intercept, eqs. 8–13
+  and Table 4 as `dust_extinction`'s `G23` carries them (the second feature at 19.58 µm; the arXiv
+  text reads "19.258294"), without the package's 0.9854 renormalisation, which is not in the paper.
+  A_10 ÷ A_V is 0.0824 and A_9.7 ÷ A_V 0.0829, the peak 9.83 µm, and the feature alone gives A_V ÷
+  τ₉.₇ = 16.6. The two laws step by 16% at 3.3 µm (CCM 0.059, Gordon 0.049), which no band is near.
+  `ccm.golden`'s 10 µm and 5 µm rows move.
+- _Ruling 91.4._ `GasParams::of_galaxy` scales the warm density by (½ G − M_c) ÷ W where W would
+  exceed it; `the_neutral_share_is_at_least_half_at_every_corner_of_the_draws` replaces the corner
+  search, finds the least built share 0.5 to 10⁻¹² (the drawn layer would still leave −0.0586) and the
+  least gas mass over plan 02's corners 2.51 × 10⁹ M☉, some 420 times what ½ G > M_c needs.
+  `Galaxy::new`'s `expect` states the floor. `BuildGasParamsError` stays (ruling 22) but no galaxy the
+  builder accepts reaches it; ruling 22's refusal test becomes the clamp's test at the same corner.
+- _Ruling 91.5._ n_cor is log-uniform on 0.5–0.8 × 10⁻³ cm⁻³ and **the fixture's is 6 × 10⁻⁴**,
+  Miller and Bregman's β-model at 8.2 kpc (10⁻³ is outside the new range): the one fixture value
+  T12 moved. `gas::phase`'s `the_corona_is_hot_at_every_corner_of_the_draws` proves the corona hot at
+  every radius from 8,000 to 40,000 ly, 20,000 ly up.
+- _Shell window, pending a ruling._ See Risks, "The corona's density and the pressure floor".
+- _Output moved (at 11, re-blessed in the lane):_ `gas/params` (the corona of the three seeds),
+  `gas/field` (densities with the corona; two new lines per point, `neutral_share` and
+  `temperature`; no phase moved), `gas/extinction` (hydrogen columns with the corona and `Realised`
+  neutral columns; no A_V moved, the corona having no dust), `gas/ccm` (5 and 10 µm), the server's
+  `galaxy_parameters` (`rotation.escape_speed` 622.90 → 574.04 km/s). `gas/map`, `gas/noise` and
+  every stellar and planetary golden are unmoved.
 
 ## Verification
 
@@ -1214,12 +1314,16 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   which implies a corona near 2 × 10⁵ K far from the disc. The brainstorm never states the corona's
   temperature, so nothing it says is contradicted, and of its two figures the one with a stated
   outcome, the 2–4 Myr window borne out by the oldest known remnant, is the one P07.T12 pins. The
-  density range is trimmed to 0.5–1.2 × 10⁻³ cm⁻³ so that the corona classifies as hot for every
-  seed (Design note 12). A corona whose density falls outward would reconcile them and is a later
+  density range is trimmed to 0.5–0.8 × 10⁻³ cm⁻³ (ruling 91; it was 0.5–1.2) so that the corona
+  classifies as hot for every seed at every radius (Design note 12). A corona whose density falls outward would reconcile them and is a later
   refinement with a version bump. The window test uses plan 09's closed form and its 8 km/s
   turbulent term; at a floor of 400 K cm⁻³ that form gives a ceiling a little under 2 Myr, so
   P07.T12 may move the floor's range down towards 250–400, and plan 09's P09.T15.b then re-pins the
-  cap with its production code.
+  cap with its production code. **As measured by P07.T12 (round 9), it cannot:** the drawn floors of
+  300–500 give 1.61–1.94 Myr, and 2 Myr needs a floor under about 270 K cm⁻³, where ruling 91's
+  corona of up to 0.8 × 10⁻³ cm⁻³ is no longer hot over the inner disc (the corner proof's 104,000 K
+  at 300 falls to about 94,000 K at 270). The floor is unmoved and the window test carries a
+  provisional 1.5–2.0 Myr, for a ruling (T12, "As built").
 - **The smooth molecular disc is a tenth of the real central molecular zone's mass** (Design note
   5), so that the mean extinction to the centre is the brainstorm's thirty magnitudes, which is the
   outcome the brainstorm states; it gives the central disc no mass. The rest must arrive as plan
@@ -1231,7 +1335,8 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   (mean-preserving, σ of 2–2.5), and the brainstorm also says the centre lies behind some thirty
   magnitudes. Both hold only on average: half of this plan's 28 mag comes from a molecular disc a
   few lattice cells across, where one log-normal factor with a median a fourteenth of its mean
-  decides the realised figure. P07.T12 records the realised distribution. If the owner wants the
+  decides the realised figure. P07.T12 records the realised distribution: over 256 seeds the mean is
+  38.97 ± 9.52 mag, the median 18.33 and the 16th and 84th percentiles 9.39 and 42.12. If the owner wants the
   typical seed to read thirty, the remedy is a narrower σ_ln inside the central few hundred
   light-years, which is a change to the brainstorm and not made here.
 - **The mean and a typical line differ.** With σ_ln above 2 the median of the factor is a tenth of
@@ -1608,3 +1713,9 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     of the exponential tails for segments that leave the cube. A `GasModifier` with a non-positive
     radius trips a `debug_assert!` in `density_with`, and its fields are public; plan 09, which
     makes the first ones, should validate them.
+- **The warm gas's temperature is a pressure balance, not a thermostat** (ruling 91.1, recorded by
+  P07.T12). With x = 1.1 + 1.2 (1 − f_n) and warm gas held at 5,000–10⁵ K, the mass-weighted warm
+  temperature 3,000–6,000 ly from the plane of the fixture is 5,000/10,730/40,240 K at its 16th,
+  50th and 84th percentiles, where the warm ionised medium is measured at 6,000–10,000 K (Haffner et
+  al. 2009). A temperature from a log-normal density at a smooth pressure cannot hold one phase's
+  temperature; it is recorded, not tuned.
