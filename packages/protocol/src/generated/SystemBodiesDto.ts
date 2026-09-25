@@ -36,12 +36,13 @@ zones: Array<ZoneDto>,
 system_plane: SystemPlaneDto | null, 
 /**
  * The system's belts, by the ID of each belt's population, in index order (`mass_and_orbit`);
- * `ok` with an empty list for a system with none. `not_modelled` in this generator version.
+ * `ok` with an empty list for a system with none. Each belt's extent is its record's
+ * `population` section.
  */
 belts: SectionDto<Array<BodyIdHex>>, 
 /**
  * The system's cometary halo, by its population's ID (`mass_and_orbit`); `ok` with `null`
- * for a system with none. `not_modelled` in this generator version.
+ * for a system with none. The halo's extent is its record's `population` section.
  */
 halo: SectionDto<BodyIdHex | null>, 
 /**

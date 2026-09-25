@@ -39,11 +39,13 @@ use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation}
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
-    Neighbour, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis, satisfies_floor,
-    spacing_floor,
+    Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
+    satisfies_floor, spacing_floor,
 };
-use hyperion_sim::planetary::record::{BodyRecord, Section, SystemSnapshot};
-use hyperion_sim::planetary::{self, Body, PlanetarySystem, SystemContext};
+use hyperion_sim::planetary::record::{
+    BodyKind, BodyRecord, Population as BodyPopulation, Section, SystemSnapshot,
+};
+use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::UnitUniform;
 use hyperion_sim::stellar::premain::disc_lifetime;
@@ -501,25 +503,33 @@ fn phase_of(c: &Candidate<'_>, n: usize) -> Option<Phase> {
         .map(|s| s.phase())
 }
 
-/// The states of `c`'s bodies at the epoch, in index order.
+/// The states of `c`'s planets at the epoch, in index order.
 fn states(c: &Candidate<'_>) -> Vec<BodyState> {
     c.system()
         .snapshot_at(c.context(), UniverseTime::EPOCH)
         .bodies()
         .iter()
+        .filter(|r| r.identity().kind() == BodyKind::Planet)
         .map(|r| r.identity().state())
         .collect()
 }
 
-/// The bodies of `c` present at the epoch.
+/// The planets of `c` present at the epoch.
 fn present<'c>(c: &'c Candidate<'_>) -> Vec<&'c Body> {
+    let snapshot = c.system().snapshot_at(c.context(), UniverseTime::EPOCH);
     c.system()
-        .bodies()
-        .iter()
-        .zip(states(c))
-        .filter(|(_, s)| *s == BodyState::Present)
-        .map(|(b, _)| b)
+        .planets()
+        .filter(|b| {
+            snapshot
+                .body(b.index())
+                .is_some_and(|r| r.identity().state() == BodyState::Present)
+        })
         .collect()
+}
+
+/// A planet as placed.
+fn placed(b: &Body) -> &PlacedPlanet {
+    b.placed().expect("a planet is placed")
 }
 
 /// A single star on the main sequence at the epoch, of initial mass `lo`–`hi` M☉.
@@ -557,11 +567,10 @@ fn m_dwarf_with_a_resonant_chain(c: &Candidate<'_>) -> bool {
     single_dwarf(c, 0.08, 0.5) && {
         let chain: Vec<&Body> = c
             .system()
-            .bodies()
-            .iter()
-            .filter(|b| b.placed().role() == GroupRole::Chain && !b.placed().hot())
+            .planets()
+            .filter(|b| placed(b).role() == GroupRole::Chain && !placed(b).hot())
             .collect();
-        chain.len() >= 3 && chain.iter().any(|b| b.placed().resonance().is_some())
+        chain.len() >= 3 && chain.iter().any(|b| placed(b).resonance().is_some())
     }
 }
 
@@ -572,7 +581,7 @@ fn metal_rich_g_dwarf_with_a_hot_jupiter(c: &Candidate<'_>) -> bool {
         && c.context().fe_h().value() >= 0.2
         && present(c)
             .iter()
-            .any(|b| jupiters(b) >= 0.3 && Days::from(b.placed().orbit().period()).value() < 10.0)
+            .any(|b| jupiters(b) >= 0.3 && Days::from(placed(b).orbit().period()).value() < 10.0)
 }
 
 /// A Solar-like system: a G dwarf of the `SolarLike` class with a rocky planet and a giant
@@ -582,8 +591,8 @@ fn solar_like_system(c: &Candidate<'_>) -> bool {
         && c.system().architecture(OrbitHost::Star(0)) == Some(ArchitectureClass::SolarLike)
         && {
             let bodies = present(c);
-            bodies.iter().any(|b| b.placed().role() == GroupRole::Rocky)
-                && bodies.iter().any(|b| b.placed().role() == GroupRole::Giant)
+            bodies.iter().any(|b| placed(b).role() == GroupRole::Rocky)
+                && bodies.iter().any(|b| placed(b).role() == GroupRole::Giant)
         }
 }
 
@@ -593,8 +602,7 @@ fn eccentric_giant(c: &Candidate<'_>) -> bool {
     single_dwarf(c, 0.7, 1.3)
         && c.system().architecture(OrbitHost::Star(0)) == Some(ArchitectureClass::EccentricGiant)
         && present(c).iter().any(|b| {
-            b.placed().role() == GroupRole::Giant
-                && b.placed().orbit().eccentricity().value() >= 0.3
+            placed(b).role() == GroupRole::Giant && placed(b).orbit().eccentricity().value() >= 0.3
         })
 }
 
@@ -652,7 +660,7 @@ fn t_tauri_star(c: &Candidate<'_>) -> bool {
             .disc(OrbitHost::Star(0))
             .and_then(|d| d.profile())
             .is_some_and(|d| c.record().age_at_epoch().value() < d.lifetime().value() * 1e6)
-        && !c.system().bodies().is_empty()
+        && c.system().planets().next().is_some()
 }
 
 /// A subgiant: a single star crossing the Hertzsprung gap at the epoch, with a planet present.
@@ -910,6 +918,60 @@ fn write_section_state<T>(w: &mut GoldenWriter, name: &str, section: &Section<T>
     w.line(&format!("{name}: {:?}", section.state()));
 }
 
+/// A list of bodies, by index, or its section's state.
+fn write_indices(w: &mut GoldenWriter, name: &str, section: &Section<Vec<BodyIndex>>) {
+    match section {
+        Section::Ok(indices) => {
+            let listed: Vec<String> = indices.iter().map(|i| format!("{:04x}", i.get())).collect();
+            w.line(&format!("{name}: [{}]", listed.join(", ")));
+        }
+        other => write_section_state(w, name, other),
+    }
+}
+
+/// A population body's extent (P14.T20–T21).
+fn write_population(w: &mut GoldenWriter, population: &BodyPopulation) {
+    match population {
+        BodyPopulation::Ring(ring) => {
+            w.line(&format!("ring: {:?} of {:?}", ring.kind(), ring.material()));
+            w.f64("inner_m", ring.inner_edge().value());
+            w.f64("outer_m", ring.outer_edge().value());
+            w.f64("optical_depth", ring.optical_depth());
+            for gap in ring.gaps() {
+                w.f64(
+                    &format!("gap_{:?}_m", gap.resonance()),
+                    gap.radius().value(),
+                );
+            }
+        }
+        BodyPopulation::Belt(belt) => {
+            w.line(&format!(
+                "belt: {:?} about {:?}, {:?}",
+                belt.site(),
+                belt.host(),
+                belt.composition()
+            ));
+            w.f64("main_inner_m", belt.main().0.value());
+            w.f64("main_outer_m", belt.main().1.value());
+            if let Some((inner, outer)) = belt.scattered() {
+                w.f64("scattered_inner_m", inner.value());
+                w.f64("scattered_outer_m", outer.value());
+            }
+            w.f64("size_slope", belt.size_slope());
+            w.f64("largest_diameter_m", belt.largest_diameter().value());
+            w.f64("fractional_luminosity", belt.fractional_luminosity());
+            write_indices(w, "members", belt.members());
+        }
+        BodyPopulation::CometaryHalo(halo) => {
+            w.line(&format!("halo about {:?}", halo.host()));
+            w.f64("inner_m", halo.inner_edge().value());
+            w.f64("outer_m", halo.outer_edge().value());
+            w.f64("comets", halo.comets());
+            w.f64("comet_rate_per_s", halo.comet_rate().value());
+        }
+    }
+}
+
 fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
     let identity = record.identity();
     let label = identity
@@ -968,8 +1030,12 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
         }
         other => write_section_state(w, "bulk", other),
     }
-    write_section_state(w, "moons", record.moons());
-    write_section_state(w, "rings", record.rings());
+    write_indices(w, "moons", record.moons());
+    write_indices(w, "rings", record.rings());
+    match record.population() {
+        Section::Ok(population) => write_population(w, population),
+        other => write_section_state(w, "population", other),
+    }
     write_section_state(w, "surface", record.surface());
     write_section_state(w, "hooks", record.hooks());
 }
@@ -981,8 +1047,14 @@ fn write_snapshot(w: &mut GoldenWriter, name: &str, snapshot: &SystemSnapshot) {
         snapshot.bodies().len(),
         snapshot.time()
     ));
-    write_section_state(w, "belts", snapshot.belts());
-    write_section_state(w, "halo", snapshot.halo());
+    write_indices(w, "belts", snapshot.belts());
+    match snapshot.halo() {
+        Section::Ok(halo) => w.line(&format!(
+            "halo: {}",
+            halo.map_or_else(|| "none".to_owned(), |index| format!("{:04x}", index.get()))
+        )),
+        other => write_section_state(w, "halo", other),
+    }
     for record in snapshot.bodies() {
         write_record(w, record);
     }
@@ -1042,4 +1114,44 @@ fn golden_systems_are_pinned() {
         }
         golden!(&format!("planetary/systems/{}", golden.name), w.as_str());
     }
+}
+
+/// P14.T30.c on the Solar-like golden: its ten planets are lettered `A b` to `A k` from the inside
+/// out, its giants' moons take Roman numerals (`A g II`), and its one belt is `BELT 1`.
+#[test]
+fn the_solar_like_golden_is_labelled_by_its_layout() {
+    let galaxy = fixture();
+    let solar = GOLDEN_SYSTEMS
+        .iter()
+        .find(|golden| golden.name == "solar_like")
+        .expect("the Solar-like golden is pinned");
+    let (_, _, system) = pinned(&galaxy, solar.id);
+    let labels = planetary::label::labels(&system);
+    let text = |index: BodyIndex| {
+        labels
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, label)| label.as_str().to_owned())
+            .expect("every body is labelled")
+    };
+    let mut planets: Vec<&Body> = system.planets().collect();
+    planets.sort_by(|a, b| {
+        let a = a
+            .orbit()
+            .expect("a planet orbits")
+            .semi_major_axis()
+            .value();
+        a.total_cmp(
+            &b.orbit()
+                .expect("a planet orbits")
+                .semi_major_axis()
+                .value(),
+        )
+    });
+    let letters: Vec<String> = planets.iter().map(|planet| text(planet.index())).collect();
+    let expected: Vec<String> = "bcdefghijk".chars().map(|c| format!("A {c}")).collect();
+    assert_eq!(letters, expected);
+    let all: Vec<&str> = labels.iter().map(|(_, label)| label.as_str()).collect();
+    assert!(all.contains(&"A g II"), "{all:?}");
+    assert!(all.contains(&"BELT 1"), "{all:?}");
 }

@@ -9,17 +9,19 @@
 //! level asked for.
 
 use hyperion_protocol::{
-    ArchitectureClassDto, BeltKindDto, BodyDetailDto, BodyDetailRequest, BodyHooksDto, BodyIdHex,
-    BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
-    BulkPropertiesDto, DestructionCauseDto, DetailLevelDto, ErrorCode, HabitableZoneDto,
-    MassFractionsDto, MoonOriginDto, OrbitHostDto, PlanetClassDto, RequestError, SectionDto,
-    SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest,
-    ZoneDto,
+    ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,
+    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyHooksDto, BodyIdHex, BodyKindDto,
+    BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto,
+    CometaryHaloDto, DestructionCauseDto, DetailLevelDto, ErrorCode, HabitableZoneDto,
+    MassFractionsDto, MoonOriginDto, OrbitHostDto, PlanetClassDto, PopulationDto, RequestError,
+    RingDto, RingGapDto, RingKindDto, RingMaterialDto, SectionDto, SystemBodiesDto,
+    SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
+use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
 use hyperion_sim::planetary::derive::{HabitableZone, PlanetClass};
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
@@ -27,9 +29,12 @@ use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
     BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, Hooks, MoonOrigin,
-    Section, Surface,
+    Population, Section, Surface,
 };
-use hyperion_sim::planetary::{BodyIndex, PlanetarySystem, ResolveBodyError, SystemContext};
+use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
+use hyperion_sim::planetary::{
+    BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
+};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{Kilograms, Metres};
 
@@ -420,6 +425,7 @@ fn body_summary(record: &BodyRecord) -> BodySummaryDto {
         orbit: full.orbit,
         moons: full.moons,
         rings: full.rings,
+        population: full.population,
         bulk: full.bulk,
     }
 }
@@ -444,23 +450,130 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
         state: body_state(identity.state()),
         position_m: record.position().map(|position| position.metres()),
         mass_kg: section(record.mass(), |&mass| Kilograms::from(mass).value()),
-        orbit: section(record.orbit(), |orbit| body_orbit(parent.clone(), orbit)),
+        orbit: section(record.orbit(), |orbit| {
+            body_orbit(system, parent.clone(), orbit)
+        }),
         moons: section(record.moons(), ids),
         rings: section(record.rings(), ids),
+        population: section(record.population(), |population| {
+            population_dto(system, population)
+        }),
         bulk: section(record.bulk(), bulk),
         surface: section(record.surface(), |&value| surface(value)),
         hooks: section(record.hooks(), |&value| hooks(value)),
     }
 }
 
-/// A body's orbit, about `parent`, the host its identity names.
+/// A body's orbit, about `parent`, the host its identity names, or the host the orbit says it
+/// is about where that differs (a belt's member, listed under its belt, orbits the belt's host).
 #[must_use]
-fn body_orbit(parent: Option<OrbitHostDto>, orbit: &BodyOrbit) -> BodyOrbitDto {
+fn body_orbit(system: SystemId, parent: Option<OrbitHostDto>, orbit: &BodyOrbit) -> BodyOrbitDto {
     BodyOrbitDto {
-        parent: parent.expect("a body with an orbit orbits a host"),
+        parent: orbit
+            .host()
+            .map(|host| orbit_host(system, host))
+            .or(parent)
+            .expect("a body with an orbit orbits a host"),
         orbit: orbit_dto(orbit.elements()),
         valid_until: orbit.valid_until().map(wire_time),
     }
+}
+
+/// A population's extent as the wire carries it (P14.T35.b's `BeltDto` and the halo section).
+#[must_use]
+fn population_dto(system: SystemId, population: &Population) -> PopulationDto {
+    let ids = |indices: &Vec<BodyIndex>| {
+        indices
+            .iter()
+            .map(|&index| body_id(system, index))
+            .collect::<Vec<_>>()
+    };
+    match population {
+        Population::Ring(ring) => PopulationDto::Ring(RingDto {
+            ring_kind: match ring.kind() {
+                RingKind::Dusty => RingKindDto::Dusty,
+                RingKind::Massive => RingKindDto::Massive,
+            },
+            material: match ring.material() {
+                RingMaterial::PorousIce => RingMaterialDto::PorousIce,
+                RingMaterial::Rock => RingMaterialDto::Rock,
+            },
+            inner_edge_m: ring.inner_edge().value(),
+            outer_edge_m: ring.outer_edge().value(),
+            optical_depth: ring.optical_depth(),
+            gaps: ring
+                .gaps()
+                .iter()
+                .map(|gap| {
+                    let (outer, inner) = gap.resonance();
+                    RingGapDto {
+                        moon: ring_gap_moon(system, ring, gap.moon()),
+                        resonance: [outer, inner],
+                        radius_m: gap.radius().value(),
+                    }
+                })
+                .collect(),
+        }),
+        Population::Belt(belt) => {
+            let component = |(inner, outer): (Metres, Metres)| BeltComponentDto {
+                inner_edge_m: inner.value(),
+                outer_edge_m: outer.value(),
+            };
+            PopulationDto::Belt(BeltDto {
+                host: orbit_host(system, belt.host()),
+                site: match belt.site() {
+                    BeltSite::InsideGiant => BeltSiteDto::InsideGiant,
+                    BeltSite::Gap => BeltSiteDto::Gap,
+                    BeltSite::BeyondPlanets => BeltSiteDto::BeyondPlanets,
+                    BeltSite::OuterDisc => BeltSiteDto::OuterDisc,
+                },
+                inner_edge_m: belt.inner_edge().value(),
+                outer_edge_m: belt.outer_edge().value(),
+                main: component(belt.main()),
+                scattered: belt.scattered().map(component),
+                gaps: belt
+                    .gaps()
+                    .iter()
+                    .map(|gap| {
+                        let (outer, inner) = gap.resonance();
+                        BeltGapDto {
+                            resonance: [outer, inner],
+                            radius_m: gap.radius().value(),
+                        }
+                    })
+                    .collect(),
+                size_slope: belt.size_slope(),
+                largest_diameter_m: belt.largest_diameter().value(),
+                composition: match belt.composition() {
+                    BeltComposition::Rocky => BeltCompositionDto::Rocky,
+                    BeltComposition::Icy => BeltCompositionDto::Icy,
+                },
+                mean_eccentricity: belt.mean_eccentricity(),
+                mean_inclination_rad: belt.mean_inclination().value(),
+                fractional_luminosity: belt.fractional_luminosity(),
+                members: section(belt.members(), ids),
+            })
+        }
+        Population::CometaryHalo(halo) => PopulationDto::CometaryHalo(CometaryHaloDto {
+            host: orbit_host(system, halo.host()),
+            inner_edge_m: halo.inner_edge().value(),
+            outer_edge_m: halo.outer_edge().value(),
+            comets: halo.comets(),
+            comet_rate_per_s: halo.comet_rate().value(),
+        }),
+    }
+}
+
+/// The moon whose resonance clears a ring's gap: the `n`-th regular moon of the ring's planet,
+/// counted from 0 inside out, which is sub-index n + 1 (P14.T22.a numbers the regular moons
+/// first).
+#[must_use]
+fn ring_gap_moon(system: SystemId, ring: &Ring, n: usize) -> BodyIdHex {
+    let planet = ring.index().parent().expect("a ring belongs to its planet");
+    let sub = u8::try_from(n + 1).expect("a planet has at most six regular moons");
+    let moon = BodyIndex::new(planet.slot(), BodySub::Moon(sub))
+        .expect("a planet's regular moons are in its moon block");
+    body_id(system, moon)
 }
 
 /// A body's bulk section as the wire carries it, in SI units.

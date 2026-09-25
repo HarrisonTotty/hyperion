@@ -1,4 +1,4 @@
-import type { DetailLevelDto } from "@hyperion/protocol";
+import { type DetailLevelDto, SECONDS_PER_JULIAN_YEAR } from "@hyperion/protocol";
 import { type ReactNode, useState } from "react";
 
 import { EarthMassUnit } from "../../components/EarthMassUnit";
@@ -10,21 +10,32 @@ import {
   formatNumber,
   formatPeriod,
   formatRadiusKm,
+  formatSci,
   formatSignificant,
   formatTemperatureK,
   formatUniverseTimeDhms,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
 import {
+  beltCompositionLabel,
+  beltSiteLabel,
   bodyKindLabel,
   bodyStateLabel,
   destructionCauseLabel,
   detailLevelLabel,
   moonOriginLabel,
   planetClassLabel,
+  ringKindLabel,
+  ringMaterialLabel,
   sectionStateLabel,
 } from "../../lib/system/bodyWords";
-import type { BodyRecord, BulkProperties, Section, SystemBody } from "../../lib/system/model";
+import type {
+  BodyRecord,
+  BulkProperties,
+  Population,
+  Section,
+  SystemBody,
+} from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
 import { ReadoutRow, shown as value } from "./ReadoutRow";
 
@@ -80,6 +91,136 @@ function percent(fraction: number): string {
   return formatNumber(fraction * 100, PERCENT_DECIMALS);
 }
 
+/** A distance with its unit, as one string: `2.06 AU`. */
+function distanceText(metres: number): string {
+  const distance = formatBodyDistance(metres * KM_PER_M, null);
+  return `${distance.value} ${distance.unit}`;
+}
+
+/** An annulus's two edges as a span: `66.0 Mm – 137 Mm`. */
+function span(innerM: number, outerM: number): string {
+  return `${distanceText(innerM)} – ${distanceText(outerM)}`;
+}
+
+/** A gap's row: the resonance it is cleared at in its label, `GAP 2:1`, and where it lies. */
+function gapRow(resonance: readonly [number, number], radiusM: number): ReactNode {
+  const label = `GAP ${resonance[0]}:${resonance[1]}`;
+  const at = formatBodyDistance(radiusM * KM_PER_M, null);
+  return <ReadoutRow key={`${label}:${radiusM}`} label={label} shown={value(at.value, at.unit)} />;
+}
+
+/**
+ * The rows of a population section: a ring's kind, material, edges from its planet's centre,
+ * optical depth and gaps; a belt's site, edges from its host (the belt proper's and a scattered
+ * component's apart), composition, size slope, largest body, mean eccentricity and inclination,
+ * dust luminosity, gaps and members; the halo's edges, comets and comet rate.
+ */
+function populationRows(population: Population): ReactNode {
+  let rows: ReactNode;
+  switch (population.kind) {
+    case "ring":
+      rows = (
+        <>
+          <ReadoutRow label="TYPE" shown={value(ringKindLabel(population.ringKind))} />
+          <ReadoutRow label="MATERIAL" shown={value(ringMaterialLabel(population.material))} />
+          <ReadoutRow
+            label="EDGES"
+            shown={value(span(population.innerEdgeM, population.outerEdgeM))}
+            wide
+          />
+          <ReadoutRow
+            label="OPTICAL DEPTH"
+            shown={value(formatSignificant(population.opticalDepth))}
+          />
+          {population.gaps.map((gap) => gapRow(gap.resonance, gap.radiusM))}
+        </>
+      );
+      break;
+    case "belt":
+      rows = (
+        <>
+          <ReadoutRow label="SITE" shown={value(beltSiteLabel(population.site))} />
+          <ReadoutRow
+            label="COMPOSITION"
+            shown={value(beltCompositionLabel(population.composition))}
+          />
+          <ReadoutRow
+            label="EDGES"
+            shown={value(span(population.innerEdgeM, population.outerEdgeM))}
+            wide
+          />
+          {population.scattered === null ? null : (
+            <>
+              <ReadoutRow
+                label="BELT PROPER"
+                shown={value(span(population.main.innerEdgeM, population.main.outerEdgeM))}
+                wide
+              />
+              <ReadoutRow
+                label="SCATTERED DISC"
+                shown={value(
+                  span(population.scattered.innerEdgeM, population.scattered.outerEdgeM),
+                )}
+                wide
+              />
+            </>
+          )}
+          <ReadoutRow label="SIZE SLOPE" shown={value(formatNumber(population.sizeSlope, 2))} />
+          <ReadoutRow
+            label="LARGEST DIAMETER"
+            shown={value(formatRadiusKm(population.largestDiameterM * KM_PER_M), "km")}
+          />
+          <ReadoutRow
+            label="MEAN ECC"
+            shown={value(formatNumber(population.meanEccentricity, ECCENTRICITY_DECIMALS))}
+          />
+          <ReadoutRow
+            label="MEAN INC"
+            shown={value(
+              `${formatNumber((population.meanInclinationRad * 180) / Math.PI, ANGLE_DECIMALS)}°`,
+            )}
+          />
+          <ReadoutRow
+            label="DUST LUMINOSITY"
+            shown={
+              population.fractionalLuminosity === 0
+                ? value("NONE")
+                : value(formatSci(population.fractionalLuminosity), "× HOST")
+            }
+          />
+          {population.gaps.map((gap) => gapRow(gap.resonance, gap.radiusM))}
+          {sectionRows("MEMBERS", population.members, (members) => (
+            <ReadoutRow label="MEMBERS" shown={value(countOf(members))} />
+          ))}
+        </>
+      );
+      break;
+    case "cometary_halo":
+      rows = (
+        <>
+          <ReadoutRow
+            label="EDGES"
+            shown={value(span(population.innerEdgeM, population.outerEdgeM))}
+            wide
+          />
+          <ReadoutRow
+            label="COMETS OVER 1 km"
+            shown={value(formatSignificant(population.comets))}
+          />
+          <ReadoutRow
+            label="COMET RATE"
+            shown={value(
+              formatSignificant(population.cometRatePerS * SECONDS_PER_JULIAN_YEAR),
+              "/yr",
+            )}
+          />
+        </>
+      );
+      break;
+  }
+  return rows;
+}
+
 /** The rows of a bulk section. */
 function bulkRows(bulk: BulkProperties): ReactNode {
   const { massFractions: fractions } = bulk;
@@ -111,7 +252,10 @@ export interface BodyRecordReadingsProps {
   readonly parentName: string | null;
   /** Its distance from what it orbits at the display time, m; `null` without an orbit. */
   readonly distanceM: number | null;
-  /** Its orbit's inclination to the orbit map's plane, or to its planet's equator for a moon, rad. */
+  /**
+   * Its orbit's inclination to the orbit map's system plane, or to its planet's equator for a moon,
+   * rad; `null` when there is no plane to read it to.
+   */
   readonly inclinationRad: number | null;
 }
 
@@ -125,7 +269,8 @@ export interface BodyRecordReadingsProps {
  * Then each section as its tag says: the mass in `M⊕` (ruling 64.3); the orbit's semi-major axis,
  * period, eccentricity and inclination, and the distance from what it orbits now; the bulk's class,
  * radius in `km`, density, gravity, equilibrium temperature and composition by mass; its moons and
- * rings, counted; and, from the whole record only, its surface and its hooks, whose surface seed is
+ * rings, counted; for a ring, a belt or the cometary halo, what the population is and where it
+ * lies; and, from the whole record only, its surface and its hooks, whose surface seed is
  * the one hook the wire carries. A section withheld or not modelled reads so, once, in place of its
  * rows; one that does not apply is left out.
  *
@@ -133,7 +278,9 @@ export interface BodyRecordReadingsProps {
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
  * year old; it keeps its unit with `formatBodyDistance`'s hysteresis as the time moves. The
  * inclination of a planet is to the plane the map is drawn on, the angle between the two normals the
- * server gives.
+ * server gives; a moon's is to its planet's equator, taken in this generator version to be the
+ * planet's orbital plane, since a satellite's elements are in its planet's body frame, whose axes
+ * are the galactic axes.
  */
 export function BodyRecordReadings({
   body,
@@ -212,6 +359,7 @@ export function BodyRecordReadings({
       {sectionRows("RINGS", body.rings, (rings) => (
         <ReadoutRow label="RINGS" shown={value(countOf(rings))} />
       ))}
+      {sectionRows("POPULATION", body.population, populationRows)}
       {whole === null ? null : (
         <>
           {sectionRows("SURFACE", whole.surface, () => null)}

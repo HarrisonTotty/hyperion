@@ -10,10 +10,14 @@ import type { SystemBodies } from "../../lib/system/model";
 /** The state a record's section is tagged with, which the server sets and the client never infers. */
 export type SectionState = SectionDto<unknown>["state"];
 
-/** A planet's tags that the note reads: its moons and its rings. */
+/** A planet's or a dwarf planet's tags that the note reads: its moons, and a planet's rings. */
 export interface PlanetSections {
   readonly moons: SectionState;
-  readonly rings: SectionState;
+  /**
+   * A planet's rings; `null` for a dwarf planet, whose rings the note does not read, since no
+   * generator version gives dwarf planets rings and its own readout says `NOT YET MODELLED`.
+   */
+  readonly rings: SectionState | null;
 }
 
 /**
@@ -55,7 +59,9 @@ function joinNames(names: ReadonlyArray<string>): string {
  *
  * @remarks
  * Each kind is named when its tag says `not_modelled`, and drops out as the server starts to model
- * it: moons and rings when any planet's are not modelled, belts and the halo from the system's own
+ * it: moons when any planet's or dwarf planet's are not modelled, rings when any planet's are (a
+ * dwarf planet's rings are read on its own readout, so that a belt's members do not hold the word
+ * for ever), belts and the halo from the system's own
  * tags. `NOT RESOLVED` and not applicable are not named, since neither says the generator lacks the
  * model. The note is a field label followed by the three-word state, both in upper case, as the
  * owner's draft reads it: `MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED`.
@@ -83,8 +89,8 @@ export function systemNote(bodies: BodiesKnown): string | null {
 }
 
 /**
- * The tags a system's bodies carry for the note: the system's belts and halo, and each planet's
- * and dwarf planet's moons and rings (the orchestrator's ruling 34.3).
+ * The tags a system's bodies carry for the note: the system's belts and halo, each planet's and
+ * dwarf planet's moons, and each planet's rings (the orchestrator's ruling 34.3).
  */
 export function smallBodySections(bodies: SystemBodies): SmallBodySections {
   return {
@@ -92,6 +98,9 @@ export function smallBodySections(bodies: SystemBodies): SmallBodySections {
     halo: bodies.halo.state,
     planets: bodies.bodies
       .filter((body) => body.kind.kind === "planet" || body.kind.kind === "dwarf_planet")
-      .map((body) => ({ moons: body.moons.state, rings: body.rings.state })),
+      .map((body) => ({
+        moons: body.moons.state,
+        rings: body.kind.kind === "planet" ? body.rings.state : null,
+      })),
   };
 }

@@ -382,7 +382,7 @@ as `slot << 8 | sub`, decodable without generating anything:
 | `0x00`        | The stellar level                       | `0x00`–`0x0F` plan 11's components (plan 06's primary at `0x00`, companions, brown-dwarf companions included, from `0x01`); in a free-floating brown dwarf's or rogue planet's system `0x00` is the object itself and `0x80`–`0x8F` are its rings |
 | `0x01`–`0xBF` | Primordial planets, in generation order | `0x00` the planet, `0x01`–`0x7F` moons, `0x80`–`0x8F` rings, rest reserved                                                                                                                                                                        |
 | `0xC0`–`0xCF` | Second-generation planets (D11)         | as for planets                                                                                                                                                                                                                                    |
-| `0xE0`–`0xEF` | Belts, discs and the cometary halo      | `0x00` the population, `0x01`–`0xFF` its named members                                                                                                                                                                                            |
+| `0xE0`–`0xEF` | Belts, discs and the cometary halo      | `0x00` the population, `0x01`–`0x7F` its named members, `0x80` + k the giant-impact moon of member k (ruling 95)                                                                                                                                  |
 | other         | Reserved                                | zero                                                                                                                                                                                                                                              |
 
 Generation order is host by host in hierarchy order, then inside out, so an index never depends on a
@@ -1601,6 +1601,26 @@ planetary::halo`, since cargo takes one positional filter.
     the Himalia group's do (JPL mean elements). Each irregular instead stays inside its stability
     limit, has a pericentre beyond the outermost regular moon's apocentre, and has no inclination
     in the Kozai gap. Regular and giant-impact moons keep the rule.
+- _As built (`wireD`, round 9)._ `planetary/satellites.rs`:
+  `generate_satellites(seed, ctx, planet: &Body, belt: Option<NearestBelt>) -> Satellites`, the
+  nearest belt's mass and adjacency passed in as the task says (`PlanetarySystem::nearest_belt`
+  finds it; T27.b passes `None`). The parent is P14.T16.a's derivation at the epoch, or at +H for
+  a system not yet born then (`MoonParent::from_derived`), on its primordial orbit about its
+  zone's initial mass. Order: `regular_moons`, `giant_impact_moon`, `captures`, then the removals:
+  a Triton-like capture is made only inside its planet's retrograde stability limit and moon-mass
+  limit (T19 places it at 10–20 R_p whatever the Hill sphere, which about a close-in ice giant
+  lies outside it), and only then prunes; an irregular or a rocky planet's small capture is kept
+  only where its pericentre lies beyond every other moon's apocentre (the giant-impact moon's at
+  +H) and beyond the planet's radius (T19 bounds it by the fluid Roche limit alone, which about a
+  bloated giant lies inside the planet); the regular moons are kept as their longest inner run that keeps the 2√3 gap (T17.a's halving can end at e = 0 with the inner moon still breaking it, about one planet in a million, found by the million-system run); then `generate_rings` with the regular moons kept. Moons
+  take `Moon(1)` upward in that order, each with its own `planet.radius` rank; rings `Ring(0)`,
+  `Ring(1)`. A belt member's giant-impact moon is `Member(0x80 + k)` (design note 3's table, ruling 95), since design note 3 gave a
+  member no moon block (for a ruling). `Satellite::orbit_at` gives a moon's elements in the
+  parent's body frame (galactic axes), taking the equator to be the orbital plane until T14.
+  `derive_moon` (in `moons/regular.rs`) derives any moon; `DerivedMoon::fractions` splits its rock
+  as the derivation does. T22.b: `tests/planetary_properties.rs`'s `satellites` module, on whole
+  systems of layer C cells, at −H, the epoch and +H; a rocky planet's small captures are exempt
+  from non-crossing like the irregulars; the slow run is a million systems, streamed.
 
 ### Phase E: hooks
 
@@ -1792,6 +1812,20 @@ and T21.d as the halo's bound, and is asserted again after placement.
     children in `generate`, for 1,000 systems; every index in a system decodes and is unique; a
     system of plan 11 with a brown-dwarf companion gains no body in slot `0x00`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::system::generate`.
+  - _As built (`wireD`, round 9)._ `generate` = `generate_planets`, then belts host by host
+    (`host_belts`, slots `0xE1` up) with their members as dwarf planets, then every planet's and
+    member's `generate_satellites`, then the halo about the zone holding the primary with the most
+    members, cut at a third of the pericentre of the nearest companion outside it. Belts come
+    before satellites because a rocky planet's captures read them; each stage keeps its own
+    streams and slots, so no planet moves (the fourteen T32 goldens keep every planet line). A
+    member's formation is at its disc's lifetime with no draw, and its history is its own, alone
+    about its host, so it never enters a planets' scattering. A belt's state and widening follow a
+    circular proxy orbit at the geometric mean of its edges through the fate transform; the halo
+    loses what `CometaryHalo::at` says, with the mass-loss rate the mean over the host's thermally
+    pulsing AGB (found by bisection on its phase), infinite after a sudden death, and zero before
+    the AGB. T28.e, T27, T28.a's disc and T28.d's debris disc stay deferred, their streams and
+    slots reserved. `bodies()` holds planets, moons, rings and members; `belts()` and `halo()`
+    the populations; `indices()` every record's index.
 - **P14.T30.b Queries at a time.** Derivation and hooks are evaluated lazily by `body_at` and
   `snapshot_at`, since they depend on time: fate (T28), then `derive_body` (T16), then hooks
   (T23–T26). `position_at` composes the host's position from plan 11's `star_positions_at` with the
@@ -1805,6 +1839,12 @@ and T21.d as the halo's bound, and is asserted again after placement.
 - **P14.T30.c Labels.** `BodyLabel` per D22 in `planetary/label.rs`.
   - _Tests:_ the golden Solar-like layout labels `A b` to `A i`, a moon `A d II`, a belt `BELT 1`;
     labels are unique within a system and stable under `degrade` down to `MassAndOrbit`.
+  - _As built (`wireD`, round 9)._ Moons take their parent's label and a Roman numeral by
+    semi-major axis as formed (`A g II`); rings `A g RING n` in index order; belts `BELT n` in
+    index order; a member `BELT n-k` by its sub-index; the halo `HALO` (design note 22 names no
+    form for the last four). The Solar-like golden has ten planets, `A b` to `A k`, and its `A d`
+    has one moon, `A d I`, so its test pins `A b`–`A k`, `A g II` and `BELT 1`
+    (`tests/planetary_golden.rs`).
   - _Accept:_ `cargo test -p hyperion-sim planetary::label`.
 
 #### P14.T31 Events on bodies
@@ -1936,6 +1976,14 @@ planet's record `moons` and `rings`, so that T41.b composes its system note from
   `hooks` are `NotModelled` at a granted level of `Full`, a gas giant's `surface` is
   `NotApplicable`, and the system's `belts` and `halo` are `NotModelled`.
 - _Accept:_ `cargo test -p hyperion-sim planetary::record`.
+- _As built (`wireD`, round 9)._ A ninth section, `population` (`RecordSection::Population`, at
+  `MassAndOrbit`): a ring's extent (`rings::Ring`), a belt's at a time (`BeltRecord`, its edges
+  widened with its host's mass loss, its fractional luminosity then, and its `members` a
+  `Section` that `degrade` makes `NotResolved` below `Bulk`: the "member lists" dropped), or the
+  halo's (`HaloRecord`). Every other body's is `NotApplicable`. Planets' moons and rings and the
+  system's belts and halo are `Ok`; a dwarf planet's rings `NotModelled`; a halo's mass
+  `NotModelled`. A member is listed under its belt, and `BodyOrbit::about` names the belt's host,
+  which its elements are about.
 
 #### P14.T35 Wire types
 
@@ -1979,6 +2027,11 @@ convention": a variant of `RequestBody` and of `ResponseBody` per kind, the kind
     each in the subtask that adds the type; (a) `BodyIdHex` round trip and rejection of malformed
     strings; (c) `REQUEST_KINDS` holds the three new strings (two in the slice).
   - _Accept:_ `cargo test -p hyperion-protocol`; `just gen-protocol-check` passes.
+- _As built (`wireD`, round 9)._ `planetary/population.rs`: `PopulationDto` (tagged `ring`,
+  `belt`, `cometary_halo`) of `RingDto`, `BeltDto` and `CometaryHaloDto`, carried as the
+  `population` section of `BodySummaryDto` and `BodyRecordDto`; `SystemBodiesDto`'s `belts` and
+  `halo` keep their shape, lists of IDs. `BodyOrbitDto.parent` of a member is its belt's host.
+  One wire-form test per type; the shared fixture gains the populations.
 
 #### P14.T36 Server handlers
 
@@ -2002,6 +2055,9 @@ convention": a variant of `RequestBody` and of `ResponseBody` per kind, the kind
 - _Slice:_ `system_bodies` and `body_detail` only; `body_events` and its window test come with
   T31. The hosts' `SystemSummaryDto` is P06.T33–T34's, whose `system_summary` handler and
   `SystemStars` cache the slice builds first.
+- _As built (`wireD`, round 9)._ The handlers answer phase D's bodies; `heap_bytes` counts
+  satellites, belts, their members and gaps and rings' gaps. `a_pinned_system_with_moons_returns_them`
+  checks a pinned system's moons, rings, belts and halo against the sim.
 
 #### P14.T37 Client protocol helpers
 
@@ -2192,6 +2248,14 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     the scale bar's unit; `BODIES NOT TO SCALE` and the legend are present. (c) A click within
     tolerance of a body selects it and one on an orbit selects nothing.
   - _Accept:_ `pnpm test`; by eye against the golden Solar-like system and the circumbinary one.
+  - _As built (`wireD`, round 9)._ Belts are ticked annuli labelled by their label, a
+    scattered component a plain annulus (`SCATTERED DISC`); the halo is drawn only inside the
+    fitted radius. Moons are drawn only in the `BODY <designation>` frame (`FOCUS BODY`, key `C`,
+    held back with `NO PLANET SELECTED`; `bodyFrame.ts`), on the planet's `EQUATORIAL PLANE`,
+    which is its orbital plane until T14; its scale ladder adds a Gm rung for irregulars. `BELTS`
+    (key `B`) is offered only in a system with a belt and fits the belt proper. The list sorts
+    rings, belts and the halo by inner edge, members under their belt. The system note reads the
+    rings tag of planets only, since a dwarf planet's rings are `not_modelled` on its readout.
 
 #### P14.T43 Body list and readouts
 
@@ -3992,6 +4056,13 @@ masses` (budgets, rocky and chain masses, `Truncated`) and `planetary/classes` (
     is 112 px rather than 138 and the orbit map's stage 180 px rather than 154 at 1280 × 720 (634
     at 1920 × 1080). The map's own head, frame line and legend still wrap at its 787 px there. The
     measurements above predate both changes.
+  - _Layout at 1280 × 720, amended (`ui10`, round 9)._ The readings' region is a container, and
+    under 30 rem it sets one reading to a line, as the `GALAXY` readout does, so the body readout
+    no longer scrolls sideways at 1280 × 720 (it did by 9 px with two readings to a line). The
+    display time's title and its time share the first line, the controls under them, so the panel
+    is 112 px rather than 138 and the orbit map's stage 180 px rather than 154 at 1280 × 720 (634
+    at 1920 × 1080). The map's own head, frame line and legend still wrap at its 787 px there. The
+    measurements above predate both changes.
   - _The optimistic habitable zone (ruling 65.4)._ The wire already carries it:
     `HabitableZoneDto.recent_venus_m` and `early_mars_m`, the same Kopparapu et al. (2013, erratum
     coefficients) fit and the same server call as the conservative pair, so the client computes
@@ -4478,3 +4549,13 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - complete fallback (355): 2.3% either way.
 
   Rulings 71 and 80's scattering then walks the survivors, which now carry the kick's orientation.
+
+- **Phase D wired (`wireD`, round 9), for rulings.** (0) T17.a places an outer moon even where, at e = 0, its inner neighbour's eccentricity breaks the 2√3 gap; T22.a now drops it and those beyond. (1) A belt member's giant-impact moon has no
+  index in design note 3; it is `Member(0x80 + k)`, which decodes as a member (ruled by 95: design note 3 gains the row). (2)
+  P14.T19's Triton-like capture ignores T15's limits and its captures' pericentres may fall inside
+  a bloated giant; T22.a now drops both. (3) A Kuiper-like belt's composition counts its massless
+  scattered component's solids, so a belt at 0.47–0.57 au about a K5 V star, inside a 1.10 au snow
+  line, reads icy (`belts.rs`). (4) A belt's members are sized from its mass before wear, so a
+  belt of 3.2 × 10⁻⁷ M⊕ at its age can list members of 1.2 × 10⁻³ M⊕ (`belts.rs`,
+  `largest_diameter(initial, …)`). (5) Moons are referred to their planet's orbital plane until
+  T14 gives planets poles. The output moves at version 11; the round's bump to 12 carries it.

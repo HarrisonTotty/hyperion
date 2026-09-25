@@ -207,6 +207,23 @@ describe("body_detail", () => {
     ]);
   });
 
+  it("carries a ring's, a belt's and a halo's extent as their population", () => {
+    const { bodies } = response("system_bodies_populated", "system_bodies");
+    const population = (type: string) =>
+      bodies.flatMap((body) => {
+        const section = body.population;
+        return section.state === "ok" && section.value.type === type ? [section.value] : [];
+      });
+    const [ring] = population("ring");
+    const [belt] = population("belt");
+    const [halo] = population("cometary_halo");
+    expect(ring?.type === "ring" && ring.inner_edge_m < ring.outer_edge_m).toBe(true);
+    expect(belt?.type === "belt" && belt.members.state).toBe("ok");
+    expect(halo?.type === "cometary_halo" && halo.comets).toBeGreaterThan(0);
+    const planet = bodies.find((body) => body.kind.type === "planet");
+    expect(planet?.population).toEqual({ state: "not_applicable" });
+  });
+
   it("holds the same body in the list and in its whole record", () => {
     const [listed] = response("system_bodies_response", "system_bodies").bodies;
     const { record } = response("body_detail_response", "body_detail");
@@ -224,6 +241,7 @@ describe("body_detail", () => {
       orbit: asListed.orbit,
       moons: asListed.moons,
       rings: asListed.rings,
+      population: asListed.population,
       bulk: asListed.bulk,
     });
   });

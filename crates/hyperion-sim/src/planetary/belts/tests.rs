@@ -25,14 +25,13 @@ fn belts_of(system: &PlanetarySystem) -> Vec<Belt> {
             continue;
         };
         let planets: Vec<Neighbour> = system
-            .bodies()
-            .iter()
+            .planets()
             .filter(|body| body.host() == host.host())
             .map(|body| {
                 Neighbour::new(
                     body.mass(),
-                    body.orbit().semi_major_axis(),
-                    body.orbit().eccentricity().value(),
+                    body.orbit().unwrap().semi_major_axis(),
+                    body.orbit().unwrap().eccentricity().value(),
                 )
             })
             .collect();
@@ -42,6 +41,21 @@ fn belts_of(system: &PlanetarySystem) -> Vec<Belt> {
         out.extend(belts.into_belts());
     }
     out
+}
+
+/// Whether any host of `system` has a planet over 10 M⊕ beyond its snow line (P14.T21.d).
+fn scatterer_of(system: &PlanetarySystem) -> Scatterer {
+    system.hosts().iter().fold(Scatterer::Absent, |s, host| {
+        let Some(disc) = host.disc().profile() else {
+            return s;
+        };
+        let planets: Vec<Neighbour> = system
+            .planets()
+            .filter(|b| b.host() == host.host())
+            .map(|b| Neighbour::new(b.mass(), b.orbit().unwrap().semi_major_axis(), 0.0))
+            .collect();
+        s.or(Scatterer::among(&planets, disc.snow_line()))
+    })
 }
 
 /// The contexts of single FGK stars, 0.6–1.5 M☉, on the main sequence at the epoch at 1–10 Gyr,
@@ -72,6 +86,15 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
     for ctx in &contexts {
         let system = generate_planets(SEED, ctx);
         let belts = belts_of(&system);
+        // P14.T30.a wires these belts into `generate` as they are built here.
+        let whole = crate::planetary::generate(SEED, ctx);
+        assert_eq!(whole.belts(), belts.as_slice());
+        if scatterer_of(&system) == Scatterer::Absent {
+            assert!(whole.halo().is_none());
+        }
+        if let Some(halo) = whole.halo() {
+            assert!(halo.outer_edge() <= ctx.strip_radius());
+        }
         for belt in &belts {
             belts_seen += 1;
             let BodySlot::Belt(slot) = belt.index().slot() else {
@@ -95,11 +118,11 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
             assert!(disc.inner_edge() <= belt.inner_edge());
             assert!(belt.outer_edge() <= disc.outer_edge());
             // (a, b): no belt overlaps a planet's chaotic zone.
-            for body in system.bodies().iter().filter(|b| b.host() == belt.host()) {
+            for body in system.planets().filter(|b| b.host() == belt.host()) {
                 let planet = Neighbour::new(
                     body.mass(),
-                    body.orbit().semi_major_axis(),
-                    body.orbit().eccentricity().value(),
+                    body.orbit().unwrap().semi_major_axis(),
+                    body.orbit().unwrap().eccentricity().value(),
                 );
                 let (lo, hi) = chaotic_zone(&planet, disc.host_mass());
                 for part in belt.components() {
@@ -108,18 +131,7 @@ fn belts_and_halos_of_placed_systems_keep_their_bounds() {
                 }
             }
         }
-        let scatterer = system.hosts().iter().fold(Scatterer::Absent, |s, host| {
-            let Some(disc) = host.disc().profile() else {
-                return s;
-            };
-            let planets: Vec<Neighbour> = system
-                .bodies()
-                .iter()
-                .filter(|b| b.host() == host.host())
-                .map(|b| Neighbour::new(b.mass(), b.orbit().semi_major_axis(), 0.0))
-                .collect();
-            s.or(Scatterer::among(&planets, disc.snow_line()))
-        });
+        let scatterer = scatterer_of(&system);
         let Some(primary) = system.hosts().first() else {
             continue;
         };

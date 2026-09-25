@@ -23,7 +23,7 @@ use hyperion_sim::planetary::architecture::HostMultiplicity;
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::BodyState;
 use hyperion_sim::planetary::placement::{OrbitHost, ZoneDiscInputs};
-use hyperion_sim::planetary::record::{BodyRecord, Section};
+use hyperion_sim::planetary::record::{BodyKind, BodyRecord, Population, Section};
 use hyperion_sim::planetary::{PlanetaryHost, PlanetarySystem, SystemContext, generate};
 use hyperion_sim::units::{Kilograms, Metres};
 use hyperion_sim::{Seed, time};
@@ -179,7 +179,22 @@ fn assert_body_is_the_sims(
     let system = identity.system();
     let what = id.as_str();
     assert_eq!(id.to_parts(), (system.raw(), identity.index().get()));
-    assert_eq!(kind, BodyKindDto::Planet, "{what}: every body of the slice");
+    let sim_kind = match identity.kind() {
+        BodyKind::Moon(origin) => serde_json::json!({
+            "type": "moon",
+            "origin": snake_case(&format!("{origin:?}")),
+        }),
+        BodyKind::Belt(belt) => serde_json::json!({
+            "type": "belt",
+            "belt_kind": snake_case(&format!("{belt:?}")),
+        }),
+        other => serde_json::json!({ "type": snake_case(&format!("{other:?}")) }),
+    };
+    assert_eq!(
+        serde_json::to_value(kind).unwrap(),
+        sim_kind,
+        "{what}: kind"
+    );
     match (label, identity.label()) {
         (SectionDto::Ok(wire), Section::Ok(sim)) => assert_eq!(wire, sim.as_str(), "{what}"),
         (wire, sim) => assert_same_state(what, wire, sim),
@@ -243,7 +258,14 @@ fn assert_orbit_is_the_sims(
     match (orbit, sim) {
         (SectionDto::Ok(wire), Section::Ok(sim)) => {
             let elements = sim.elements();
-            assert_eq!(Some(&wire.parent), parent, "{what}: the orbit's parent");
+            // A belt's member is listed under its belt and orbits the belt's host.
+            let system = SystemId::from_raw(wire_system(what)).expect("a body's system");
+            let about = sim.host().map(|host| host_dto(system, host));
+            assert_eq!(
+                Some(&wire.parent),
+                about.as_ref().or(parent),
+                "{what}: the orbit's parent"
+            );
             for (wire, sim) in [
                 (wire.orbit.period_s, elements.period().value()),
                 (
@@ -315,6 +337,13 @@ fn assert_bulk_is_the_sims(
     }
 }
 
+/// The system part of a body ID's text, `what`.
+fn wire_system(what: &str) -> u64 {
+    BodyIdHex::try_from(what.to_owned())
+        .map(|id| id.to_parts().0)
+        .expect("a body ID's text")
+}
+
 /// A Rust variant's name as the wire's snake-case string: `GasGiant` is `gas_giant`.
 fn snake_case(name: &str) -> String {
     name.chars()
@@ -352,6 +381,7 @@ fn assert_bodies_are_the_sims(
         );
         assert_same_state(wire.id.as_str(), &wire.moons, sim.moons());
         assert_same_state(wire.id.as_str(), &wire.rings, sim.rings());
+        assert_same_state(wire.id.as_str(), &wire.population, sim.population());
     }
     assert_same_state("belts", &answer.belts, snapshot.belts());
     assert_same_state("halo", &answer.halo, snapshot.halo());
@@ -513,6 +543,130 @@ async fn a_pinned_systems_bodies_are_the_sims_snapshot() {
     server.stop().await;
 }
 
+/// Holds the extents of the belts `belts` in a `system_bodies` answer to the sim's `snapshot`.
+fn assert_belts_are_the_sims(
+    answer: &SystemBodiesDto,
+    belts: &[BodyIdHex],
+    snapshot: &hyperion_sim::planetary::record::SystemSnapshot,
+) {
+    let listed = |wanted: &BodyIdHex| {
+        answer
+            .bodies
+            .iter()
+            .find(|body| &body.id == wanted)
+            .expect("a listed body")
+    };
+    for belt in belts {
+        let (_, index) = belt.to_parts();
+        let sim = snapshot
+            .bodies()
+            .iter()
+            .find(|record| record.index().get() == index)
+            .expect("a belt's record");
+        match (&listed(belt).population, sim.population()) {
+            (
+                SectionDto::Ok(hyperion_protocol::PopulationDto::Belt(wire)),
+                Section::Ok(Population::Belt(sim)),
+            ) => {
+                assert_eq!(
+                    wire.inner_edge_m.to_bits(),
+                    sim.inner_edge().value().to_bits()
+                );
+                assert_eq!(
+                    wire.outer_edge_m.to_bits(),
+                    sim.outer_edge().value().to_bits()
+                );
+                assert_eq!(wire.size_slope.to_bits(), sim.size_slope().to_bits());
+            }
+            (wire, sim) => assert_same_state(belt.as_str(), wire, sim),
+        }
+    }
+}
+
+/// P14.T36 with phase D: a pinned system with a gas giant returns the giant's moons and rings in
+/// its list, each listed under its planet, the system's belts and halo by ID, and a moon's own
+/// record by `body_detail`, all the sim's.
+#[tokio::test]
+async fn a_pinned_system_with_moons_returns_them() {
+    let (server, mut client, universe) = started().await;
+    let raw = PINNED[0];
+    let (ctx, planets) = sim_system(raw);
+    let time = at_years(0);
+    let answer = bodies(
+        &mut client,
+        bodies_request(&universe, raw, time, DetailLevelDto::Full),
+    )
+    .await;
+    assert_bodies_are_the_sims(&answer, &ctx, &planets);
+    let snapshot = planets.snapshot_at(&ctx, sim_time(time));
+    let id = |index: hyperion_sim::planetary::BodyIndex| BodyIdHex::from_parts(raw, index.get());
+    let listed = |wanted: &BodyIdHex| {
+        answer
+            .bodies
+            .iter()
+            .find(|body| &body.id == wanted)
+            .expect("a listed body")
+    };
+    let mut moons = 0;
+    for planet in planets.planets() {
+        let wire = listed(&id(planet.index()));
+        let SectionDto::Ok(listed_moons) = &wire.moons else {
+            panic!("a planet's moons are modelled");
+        };
+        let SectionDto::Ok(listed_rings) = &wire.rings else {
+            panic!("a planet's rings are modelled");
+        };
+        for moon in listed_moons.iter().chain(listed_rings) {
+            let child = listed(moon);
+            assert_eq!(
+                child.parent,
+                Some(OrbitHostDto::Body {
+                    id: id(planet.index())
+                })
+            );
+        }
+        moons += listed_moons.len();
+    }
+    assert!(moons > 0, "the pinned giant has moons");
+    let belts: Vec<BodyIdHex> = planets
+        .belts()
+        .iter()
+        .map(|belt| id(belt.index()))
+        .collect();
+    assert_eq!(answer.belts, SectionDto::Ok(belts.clone()));
+    assert_eq!(
+        answer.halo,
+        SectionDto::Ok(planets.halo().map(|halo| id(halo.index())))
+    );
+    assert_belts_are_the_sims(&answer, &belts, &snapshot);
+    let moon = planets
+        .bodies()
+        .iter()
+        .find(|body| matches!(body.kind(), BodyKind::Moon(_)))
+        .expect("a moon");
+    let record = detail(
+        &mut client,
+        detail_request(&universe, id(moon.index()), time, DetailLevelDto::Full),
+    )
+    .await
+    .record;
+    let sim = planets.body_at(&ctx, moon.index(), sim_time(time)).unwrap();
+    assert_body_is_the_sims(
+        &sim,
+        &record.id,
+        record.kind,
+        &record.label,
+        record.parent.as_ref(),
+        record.state,
+        record.position_m,
+        &record.mass_kg,
+        &record.orbit,
+        &record.bulk,
+    );
+    client.close().await;
+    server.stop().await;
+}
+
 /// Systems whose bodies are in every state a record can carry, one found for each by sampling the
 /// universe of [`SEED`] (`val14`, round 8): a black hole whose survivors a supernova left on
 /// eccentric orbits, a neutron star whose planets it unbound, a white dwarf that engulfed a planet,
@@ -576,7 +730,8 @@ async fn each_bodys_record_is_the_sims_and_the_lists() {
     )
     .await;
     let mut states = Vec::new();
-    for (body, summary) in planets.bodies().iter().zip(&list.bodies) {
+    assert_eq!(planets.indices().len(), list.bodies.len());
+    for (index, summary) in planets.indices().into_iter().zip(&list.bodies) {
         let answer = detail(
             &mut client,
             detail_request(&universe, summary.id.clone(), time, DetailLevelDto::Full),
@@ -587,7 +742,7 @@ async fn each_bodys_record_is_the_sims_and_the_lists() {
             (universe.clone(), time)
         );
         assert_eq!(answer.granted, DetailLevelDto::Full);
-        let sim = planets.body_at(&ctx, body.index(), sim_time(time)).unwrap();
+        let sim = planets.body_at(&ctx, index, sim_time(time)).unwrap();
         let record = &answer.record;
         assert_body_is_the_sims(
             &sim,
@@ -603,7 +758,11 @@ async fn each_bodys_record_is_the_sims_and_the_lists() {
         );
         assert_same_state(record.id.as_str(), &record.surface, sim.surface());
         assert_same_state(record.id.as_str(), &record.hooks, sim.hooks());
-        assert_eq!(record.hooks, SectionDto::NotModelled);
+        // Every hooks section is not modelled; a population's is not applicable.
+        assert!(matches!(
+            record.hooks,
+            SectionDto::NotModelled | SectionDto::NotApplicable
+        ));
         // The list's entry is the record, less its surface and hooks.
         assert_eq!(
             serde_json::to_value(summary).unwrap(),

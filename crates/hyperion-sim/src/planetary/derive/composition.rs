@@ -113,6 +113,19 @@ impl MassFractions {
         }
     }
 
+    /// The fractions of a solid body with no envelope, `iron`, `rock` and `water` of its mass,
+    /// which the caller makes sum to 1: a moon's, whose composition phase D derives apart from
+    /// the planets' curves (P14.T17.b, ruling 83.7; P14.T22.a).
+    #[must_use]
+    pub(crate) const fn solid(iron: f64, rock: f64, water: f64) -> Self {
+        Self {
+            iron,
+            rock,
+            water,
+            envelope: 0.0,
+        }
+    }
+
     /// The mass fraction of iron.
     #[must_use]
     pub const fn iron(&self) -> f64 {

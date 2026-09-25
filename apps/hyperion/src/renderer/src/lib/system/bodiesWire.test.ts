@@ -7,6 +7,7 @@ import {
   FIXTURE_EARTH,
   FIXTURE_SYSTEM,
   populatedBodies,
+  populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
 } from "../../test/planetaryFixture";
@@ -107,6 +108,67 @@ describe("toSystemBodiesModel", () => {
     ]);
     expect(bodies.belts).toEqual({ state: "ok", value: [`${FIXTURE_SYSTEM}.e000`] });
     expect(bodies.halo).toEqual({ state: "ok", value: `${FIXTURE_SYSTEM}.e100` });
+  });
+
+  it("reads a ring's, a belt's and the halo's populations in metres, each section as tagged", () => {
+    const { bodies } = bodiesOf(populatedBodies());
+    const population = (index: number) => {
+      const section = bodies.bodies.find((body) => body.bodyIndex === index)?.population;
+      return section?.state === "ok" ? section.value : section;
+    };
+
+    expect(population(0x0180)).toMatchObject({
+      kind: "ring",
+      ringKind: "massive",
+      material: "porous_ice",
+      innerEdgeM: 66_000_000,
+      outerEdgeM: 136_800_000,
+      gaps: [{ moon: `${FIXTURE_SYSTEM}.0101`, resonance: [2, 1], radiusM: 117_000_000 }],
+    });
+    expect(population(0xe000)).toMatchObject({
+      kind: "belt",
+      host: { kind: "star", bodyIndex: 0 },
+      site: "inside_giant",
+      main: { innerEdgeM: 308_900_000_000, outerEdgeM: 490_500_000_000 },
+      scattered: null,
+      members: { state: "ok", value: [`${FIXTURE_SYSTEM}.e001`] },
+    });
+    expect(population(0xe100)).toMatchObject({
+      kind: "cometary_halo",
+      host: { kind: "barycentre" },
+      comets: 750_000_000_000,
+      cometRatePerS: 3.45e-7,
+    });
+    expect(population(0x0100)).toEqual({ state: "not_applicable" });
+  });
+
+  it("refuses a population whose edges are reversed", () => {
+    const reversed = populatedBodiesWith((body) =>
+      body.population.state === "ok" && body.population.value.type === "ring"
+        ? {
+            ...body,
+            population: { state: "ok", value: { ...body.population.value, inner_edge_m: 2e8 } },
+          }
+        : body,
+    );
+
+    expect(faultOf(reversed)).toBe("ring edges unusable");
+  });
+
+  it("refuses a belt about a star the system does not have", () => {
+    const stray = populatedBodiesWith((body) =>
+      body.population.state === "ok" && body.population.value.type === "belt"
+        ? {
+            ...body,
+            population: {
+              state: "ok",
+              value: { ...body.population.value, host: { type: "star", body_index: 3 } },
+            },
+          }
+        : body,
+    );
+
+    expect(faultOf(stray)).toBe("body 57344 host unknown");
   });
 
   it("refuses an orbit the client cannot propagate", () => {

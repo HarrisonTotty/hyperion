@@ -6,8 +6,8 @@
 //! | Level | Adds |
 //! | ----- | ---- |
 //! | [`Contact`](DetailLevel::Contact) | the identity with the kind unknown, and the position (the brainstorm's "unresolved contact") |
-//! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, and the lists of moons and rings; on a system, its belts and halo |
-//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; on a system, the belts' members |
+//! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
+//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; on a system, the belts' members, as bodies and in each belt's list |
 //! | [`Surface`](DetailLevel::Surface) | atmosphere, surface conditions, rotation and global figures (P14.T13, T14, T24) |
 //! | [`Full`](DetailLevel::Full) | the hooks: surface seed, bulk composition, habitability, resources (P14.T23–T26) |
 //!
@@ -20,25 +20,31 @@
 //! generator is the authority on what it computes, so it sets every other state; a reader never
 //! infers one. "None" is data, not a state: a planet with no moons has an `Ok` empty list.
 //!
-//! In the vertical slice (ruling 33) a planet's surface and hooks sections, its moons and rings,
-//! and a system's belts and halo are [`Section::NotModelled`], and a giant's surface is
-//! [`Section::NotApplicable`]. The contents of the surface and hooks sections, [`Surface`] and
-//! [`Hooks`], have no value until their tasks define them.
+//! Phase D's populations are bodies too, and carry what they are as their `population` section
+//! ([`Population`]): a ring's extent, a belt's at a time with its members, and the cometary
+//! halo's. A planet's moons and rings and a system's belts and halo are [`Section::Ok`] lists
+//! (P14.T34). A body's surface and hooks sections are [`Section::NotModelled`] until P14.T13, T14
+//! and T23–T26, and a giant's surface is [`Section::NotApplicable`]. The contents of the surface
+//! and hooks sections, [`Surface`] and [`Hooks`], have no value until their tasks define them.
 
 use std::error::Error;
 use std::fmt;
 
 use crate::coords::SystemPosition;
+use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
+use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::fate::BodyState;
 use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
+use crate::planetary::rings::Ring;
 use crate::time::UniverseTime;
 use crate::units::{
-    EarthMasses, EarthRadii, Kelvin, KilogramsPerCubicMetre, MetresPerSecondSquared,
+    EarthMasses, EarthRadii, Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared,
+    Radians,
 };
 
 /// How much of a body a record holds, from least to most; each level holds everything the levels
@@ -158,6 +164,8 @@ pub enum RecordSection {
     Moons,
     /// The body's rings.
     Rings,
+    /// What a population body is and where it lies: a ring, a belt or the cometary halo.
+    Population,
     /// The bulk properties.
     Bulk,
     /// The surface.
@@ -168,12 +176,13 @@ pub enum RecordSection {
 
 impl RecordSection {
     /// Every section, in the record's order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Label,
         Self::Mass,
         Self::Orbit,
         Self::Moons,
         Self::Rings,
+        Self::Population,
         Self::Bulk,
         Self::Surface,
         Self::Hooks,
@@ -183,9 +192,12 @@ impl RecordSection {
     #[must_use]
     pub const fn level(self) -> DetailLevel {
         match self {
-            Self::Label | Self::Mass | Self::Orbit | Self::Moons | Self::Rings => {
-                DetailLevel::MassAndOrbit
-            }
+            Self::Label
+            | Self::Mass
+            | Self::Orbit
+            | Self::Moons
+            | Self::Rings
+            | Self::Population => DetailLevel::MassAndOrbit,
             Self::Bulk => DetailLevel::Bulk,
             Self::Surface => DetailLevel::Surface,
             Self::Hooks => DetailLevel::Full,
@@ -201,6 +213,7 @@ impl fmt::Display for RecordSection {
             Self::Orbit => "orbit",
             Self::Moons => "moons",
             Self::Rings => "rings",
+            Self::Population => "population",
             Self::Bulk => "bulk",
             Self::Surface => "surface",
             Self::Hooks => "hooks",
@@ -352,6 +365,7 @@ impl BodyIdentity {
 pub struct BodyOrbit {
     elements: KeplerElements,
     valid_until: Option<UniverseTime>,
+    about: Option<OrbitHost>,
 }
 
 impl BodyOrbit {
@@ -363,10 +377,30 @@ impl BodyOrbit {
         Self {
             elements,
             valid_until,
+            about: None,
         }
     }
 
-    /// The Kepler elements, in the system frame for a planet and in the parent's for a moon.
+    /// The same orbit, about `host` where that is not the record's parent: a belt's member is
+    /// listed under its belt ([`BodyIdentity::parent`]) but orbits the belt's host (P14.T21.c).
+    #[must_use]
+    pub const fn about(self, host: OrbitHost) -> Self {
+        Self {
+            about: Some(host),
+            ..self
+        }
+    }
+
+    /// What the elements are about, where it is not the record's parent ([`about`](Self::about));
+    /// `None` for an orbit about the parent.
+    #[must_use]
+    pub const fn host(&self) -> Option<OrbitHost> {
+        self.about
+    }
+
+    /// The Kepler elements: in the system frame for a planet or a belt's member, and for a moon
+    /// in its planet's body frame, a translation of the system frame with the galactic axes
+    /// (plan 01's `coords`), about the planet.
     #[must_use]
     pub const fn elements(&self) -> &KeplerElements {
         &self.elements
@@ -405,6 +439,28 @@ impl From<&DerivedBody> for BulkProperties {
 }
 
 impl BulkProperties {
+    /// The bulk of a body derived apart from [`derive_body`](crate::planetary::derive::derive_body)'s
+    /// radius and composition, a moon's (P14.T17.b, ruling 83.7): its radius, density, surface
+    /// gravity, class, mass fractions and equilibrium temperature at the record's time.
+    #[must_use]
+    pub const fn new(
+        radius: EarthRadii,
+        density: KilogramsPerCubicMetre,
+        surface_gravity: MetresPerSecondSquared,
+        class: PlanetClass,
+        fractions: MassFractions,
+        equilibrium_temperature: Kelvin,
+    ) -> Self {
+        Self {
+            radius,
+            density,
+            surface_gravity,
+            class,
+            fractions,
+            equilibrium_temperature,
+        }
+    }
+
     /// The radius at the record's time.
     #[must_use]
     pub const fn radius(&self) -> EarthRadii {
@@ -459,6 +515,241 @@ pub enum Surface {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Hooks {}
 
+/// What a population body is and where it lies at a record's time: a planet's ring, a belt or
+/// the cometary halo (P14.T20–T21, the record's `population` section).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Population {
+    /// A giant's ring, as generated: its edges are fixed in time (P14.T20).
+    Ring(Ring),
+    /// A belt at the record's time (P14.T21.a–c).
+    Belt(BeltRecord),
+    /// The cometary halo at the record's time (P14.T21.d).
+    CometaryHalo(HaloRecord),
+}
+
+impl Population {
+    /// The population as a reader granted `level` holds it: a belt withholds its members below
+    /// [`DetailLevel::Bulk`].
+    #[must_use]
+    fn granted(self, level: DetailLevel) -> Self {
+        match self {
+            Self::Belt(belt) => Self::Belt(BeltRecord {
+                members: belt.members.granted(DetailLevel::Bulk, level),
+                ..belt
+            }),
+            Self::Ring(_) | Self::CometaryHalo(_) => self,
+        }
+    }
+
+    /// Whether any part of it is [`Section::NotResolved`], which only degrading makes.
+    #[must_use]
+    fn withholds(&self) -> bool {
+        match self {
+            Self::Belt(belt) => belt.members.state() == SectionState::NotResolved,
+            Self::Ring(_) | Self::CometaryHalo(_) => false,
+        }
+    }
+}
+
+/// A belt as a record holds it at a time: where it lies about its host, what its population is,
+/// and its largest members (P14.T21.a–c).
+///
+/// Its edges have widened with its host's mass loss by the time (design note 11), and its
+/// fractional luminosity is its dust's then; its mass is the record's mass section.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeltRecord {
+    host: OrbitHost,
+    site: BeltSite,
+    main: (Metres, Metres),
+    scattered: Option<(Metres, Metres)>,
+    gaps: Vec<BeltGap>,
+    size_slope: f64,
+    largest_diameter: Metres,
+    composition: BeltComposition,
+    mean_eccentricity: f64,
+    mean_inclination: Radians,
+    fractional_luminosity: f64,
+    members: Section<Vec<BodyIndex>>,
+}
+
+impl BeltRecord {
+    /// The record of `belt` at a time when its host's orbits have widened by `expansion` (1 with
+    /// no mass lost) and its dust shines at `fractional_luminosity`, with its members `members`.
+    #[must_use]
+    pub(crate) fn new(
+        belt: &Belt,
+        expansion: f64,
+        fractional_luminosity: f64,
+        members: Vec<BodyIndex>,
+    ) -> Self {
+        let widen = |m: Metres| Metres::new(m.value() * expansion);
+        let edges = |c: &BeltComponent| (widen(c.inner_edge()), widen(c.outer_edge()));
+        Self {
+            host: belt.host(),
+            site: belt.site(),
+            main: edges(belt.main()),
+            scattered: belt.scattered().map(edges),
+            gaps: belt
+                .gaps()
+                .iter()
+                .map(|gap| gap.widened(expansion))
+                .collect(),
+            size_slope: belt.size_slope(),
+            largest_diameter: belt.largest_diameter(),
+            composition: belt.composition(),
+            mean_eccentricity: BeltPart::Main.mean_eccentricity(),
+            mean_inclination: BeltPart::Main.mean_inclination(),
+            fractional_luminosity,
+            members: Section::Ok(members),
+        }
+    }
+
+    /// The orbit host it goes round.
+    #[must_use]
+    pub const fn host(&self) -> OrbitHost {
+        self.host
+    }
+
+    /// The rule that placed it.
+    #[must_use]
+    pub const fn site(&self) -> BeltSite {
+        self.site
+    }
+
+    /// The belt proper's inner and outer edges, from its host.
+    #[must_use]
+    pub const fn main(&self) -> (Metres, Metres) {
+        self.main
+    }
+
+    /// A Kuiper-like belt's scattered component's edges, if it has one.
+    #[must_use]
+    pub const fn scattered(&self) -> Option<(Metres, Metres)> {
+        self.scattered
+    }
+
+    /// The inner edge of the whole belt.
+    #[must_use]
+    pub const fn inner_edge(&self) -> Metres {
+        self.main.0
+    }
+
+    /// The outer edge of the whole belt, its scattered component included.
+    #[must_use]
+    pub fn outer_edge(&self) -> Metres {
+        self.scattered.map_or(self.main.1, |(_, outer)| outer)
+    }
+
+    /// The gaps its giant's resonances clear.
+    #[must_use]
+    pub fn gaps(&self) -> &[BeltGap] {
+        &self.gaps
+    }
+
+    /// Its population's size slope q.
+    #[must_use]
+    pub const fn size_slope(&self) -> f64 {
+        self.size_slope
+    }
+
+    /// The diameter of its largest body.
+    #[must_use]
+    pub const fn largest_diameter(&self) -> Metres {
+        self.largest_diameter
+    }
+
+    /// Its composition class.
+    #[must_use]
+    pub const fn composition(&self) -> BeltComposition {
+        self.composition
+    }
+
+    /// The mean eccentricity of the belt proper's population.
+    #[must_use]
+    pub const fn mean_eccentricity(&self) -> f64 {
+        self.mean_eccentricity
+    }
+
+    /// The mean inclination of the belt proper's population to its host's plane.
+    #[must_use]
+    pub const fn mean_inclination(&self) -> Radians {
+        self.mean_inclination
+    }
+
+    /// Its dust's fractional luminosity at the record's time; 0 when its host does not shine.
+    #[must_use]
+    pub const fn fractional_luminosity(&self) -> f64 {
+        self.fractional_luminosity
+    }
+
+    /// Its largest members, by index: [`Section::NotResolved`] below [`DetailLevel::Bulk`].
+    #[must_use]
+    pub const fn members(&self) -> &Section<Vec<BodyIndex>> {
+        &self.members
+    }
+}
+
+/// The cometary halo as a record holds it at a time (P14.T21.d).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HaloRecord {
+    host: OrbitHost,
+    inner_edge: Metres,
+    outer_edge: Metres,
+    comets: f64,
+    comet_rate: EventsPerSecond,
+}
+
+impl HaloRecord {
+    /// The halo about `host` from `inner_edge` to `outer_edge` holding `comets` comets over 1 km,
+    /// which sends long-period comets to its inner system at `comet_rate`.
+    #[must_use]
+    pub(crate) const fn new(
+        host: OrbitHost,
+        inner_edge: Metres,
+        outer_edge: Metres,
+        comets: f64,
+        comet_rate: EventsPerSecond,
+    ) -> Self {
+        Self {
+            host,
+            inner_edge,
+            outer_edge,
+            comets,
+            comet_rate,
+        }
+    }
+
+    /// What it surrounds.
+    #[must_use]
+    pub const fn host(&self) -> OrbitHost {
+        self.host
+    }
+
+    /// Its inner radius.
+    #[must_use]
+    pub const fn inner_edge(&self) -> Metres {
+        self.inner_edge
+    }
+
+    /// Its outer radius.
+    #[must_use]
+    pub const fn outer_edge(&self) -> Metres {
+        self.outer_edge
+    }
+
+    /// Its comets over 1 km, a statistical figure.
+    #[must_use]
+    pub const fn comets(&self) -> f64 {
+        self.comets
+    }
+
+    /// The rate of long-period comets reaching its inner system.
+    #[must_use]
+    pub const fn comet_rate(&self) -> EventsPerSecond {
+        self.comet_rate
+    }
+}
+
 /// What a body query returns: a body at a time, at a detail level (design note 16).
 ///
 /// Built at [`DetailLevel::Full`] by [`BodyRecord::builder`], and reduced by
@@ -503,6 +794,7 @@ pub struct BodyRecord {
     orbit: Section<BodyOrbit>,
     moons: Section<Vec<BodyIndex>>,
     rings: Section<Vec<BodyIndex>>,
+    population: Section<Population>,
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
@@ -520,6 +812,7 @@ impl BodyRecord {
             orbit: Section::NotModelled,
             moons: Section::NotModelled,
             rings: Section::NotModelled,
+            population: Section::NotModelled,
             bulk: Section::NotModelled,
             surface: Section::NotModelled,
             hooks: Section::NotModelled,
@@ -575,6 +868,13 @@ impl BodyRecord {
         &self.rings
     }
 
+    /// What a population body is and where it lies: a ring, a belt or the cometary halo;
+    /// [`Section::NotApplicable`] for every other body.
+    #[must_use]
+    pub const fn population(&self) -> &Section<Population> {
+        &self.population
+    }
+
     /// The bulk properties.
     #[must_use]
     pub const fn bulk(&self) -> &Section<BulkProperties> {
@@ -602,6 +902,7 @@ impl BodyRecord {
             RecordSection::Orbit => self.orbit.state(),
             RecordSection::Moons => self.moons.state(),
             RecordSection::Rings => self.rings.state(),
+            RecordSection::Population => self.population.state(),
             RecordSection::Bulk => self.bulk.state(),
             RecordSection::Surface => self.surface.state(),
             RecordSection::Hooks => self.hooks.state(),
@@ -613,6 +914,8 @@ impl BodyRecord {
     /// Every section above the level becomes [`Section::NotResolved`], whatever its state, and
     /// every section at or below it is untouched; at [`DetailLevel::Contact`] the kind also becomes
     /// [`BodyKind::Unresolved`]. The ID, the parent, the state and the position are always kept.
+    /// Below [`DetailLevel::Bulk`] a belt's population withholds its list of members, which a
+    /// population seen as a whole does not resolve (P14.T34).
     ///
     /// Degrading never adds detail: the result holds the lower of `level` and the record's own
     /// level, so `degrade(a).degrade(b)` is `degrade(min(a, b))`, and `degrade` is idempotent.
@@ -643,6 +946,10 @@ impl BodyRecord {
             orbit: self.orbit.granted(at(RecordSection::Orbit), granted),
             moons: self.moons.granted(at(RecordSection::Moons), granted),
             rings: self.rings.granted(at(RecordSection::Rings), granted),
+            population: self
+                .population
+                .granted(at(RecordSection::Population), granted)
+                .map(|population| population.granted(granted)),
             bulk: self.bulk.granted(at(RecordSection::Bulk), granted),
             surface: self.surface.granted(at(RecordSection::Surface), granted),
             hooks: self.hooks.granted(at(RecordSection::Hooks), granted),
@@ -659,6 +966,7 @@ pub struct BodyRecordBuilder {
     orbit: Section<BodyOrbit>,
     moons: Section<Vec<BodyIndex>>,
     rings: Section<Vec<BodyIndex>>,
+    population: Section<Population>,
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
@@ -696,6 +1004,12 @@ impl BodyRecordBuilder {
     #[must_use]
     pub fn rings(self, rings: Section<Vec<BodyIndex>>) -> Self {
         Self { rings, ..self }
+    }
+
+    /// The population section.
+    #[must_use]
+    pub fn population(self, population: Section<Population>) -> Self {
+        Self { population, ..self }
     }
 
     /// The bulk section.
@@ -753,10 +1067,14 @@ impl BodyRecordBuilder {
             orbit: self.orbit,
             moons: self.moons,
             rings: self.rings,
+            population: self.population,
             bulk: self.bulk,
             surface: self.surface,
             hooks: self.hooks,
         };
+        if record.population.ok().is_some_and(Population::withholds) {
+            return Err(BuildBodyRecordError::NotResolved(RecordSection::Population));
+        }
         match RecordSection::ALL
             .into_iter()
             .find(|&section| record.section_state(section) == SectionState::NotResolved)
@@ -1354,6 +1672,43 @@ mod tests {
             .unwrap()
             .with_populations(Section::Ok(vec![belt]), Section::Ok(None))
             .unwrap()
+    }
+
+    /// P14.T34: below `Bulk` a belt's record withholds its list of members, and at `Bulk` and
+    /// above keeps it; its extent stays from `MassAndOrbit`.
+    #[test]
+    fn below_bulk_a_belt_withholds_its_member_list() {
+        use crate::planetary::system::tests::whole;
+        let mut belts = 0;
+        for (ctx, system) in whole().iter().take(100) {
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            for record in snapshot.bodies() {
+                let Section::Ok(Population::Belt(belt)) = record.population() else {
+                    continue;
+                };
+                assert_eq!(belt.members().state(), SectionState::Ok);
+                for level in DetailLevel::ALL {
+                    let degraded = record.degrade(level);
+                    let expected = match level {
+                        DetailLevel::Contact => None,
+                        DetailLevel::MassAndOrbit => Some(SectionState::NotResolved),
+                        DetailLevel::Bulk | DetailLevel::Surface | DetailLevel::Full => {
+                            Some(SectionState::Ok)
+                        }
+                    };
+                    let got = match degraded.population() {
+                        Section::Ok(Population::Belt(belt)) => Some(belt.members().state()),
+                        _ => None,
+                    };
+                    assert_eq!(got, expected, "{level:?}");
+                    assert_eq!(degraded.degrade(level), degraded);
+                }
+                let below = snapshot.degrade(DetailLevel::MassAndOrbit);
+                assert!(below.body(record.index()).is_some());
+                belts += 1;
+            }
+        }
+        assert!(belts > 10, "{belts} belts");
     }
 
     #[test]

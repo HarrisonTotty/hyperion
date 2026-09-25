@@ -5,6 +5,7 @@ import type { BodyOrbitDto } from "./BodyOrbitDto";
 import type { BodyStateDto } from "./BodyStateDto";
 import type { BulkPropertiesDto } from "./BulkPropertiesDto";
 import type { OrbitHostDto } from "./OrbitHostDto";
+import type { PopulationDto } from "./PopulationDto";
 import type { SectionDto } from "./SectionDto";
 
 /**
@@ -58,14 +59,20 @@ mass_kg: SectionDto<number>,
 orbit: SectionDto<BodyOrbitDto>, 
 /**
  * Its moons, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a body with
- * none. `not_modelled` for every planet in this generator version.
+ * none, and `not_applicable` for a moon, a ring or a population.
  */
 moons: SectionDto<Array<BodyIdHex>>, 
 /**
- * Its rings, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a body with
- * none. `not_modelled` for every planet in this generator version.
+ * Its rings, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a planet with
+ * none, `not_modelled` for a dwarf planet, and `not_applicable` for a moon, a ring or a
+ * population.
  */
 rings: SectionDto<Array<BodyIdHex>>, 
+/**
+ * What a population body is and where it lies, a ring, a belt or the cometary halo
+ * (`mass_and_orbit`); `not_applicable` for every other body.
+ */
+population: SectionDto<PopulationDto>, 
 /**
  * Its bulk properties (`bulk`).
  */

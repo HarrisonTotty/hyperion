@@ -16,6 +16,7 @@ import {
   FIXTURE_JUPITER,
   jupiterDetail,
   populatedBodies,
+  populatedBodiesWith,
   sliceBodies,
 } from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
@@ -28,6 +29,8 @@ import {
   aSystemTarget,
   PIN_SYSTEM,
 } from "../../test/systemFixtures";
+import { orbitNormal } from "../../lib/system/hierarchy";
+import { dot } from "../../spatial/vec3";
 import { SystemView } from "./SystemView";
 
 const WIDTH_PX = 400;
@@ -396,6 +399,220 @@ describe("SystemView with every kind of body", () => {
     expect(within(bodiesPanel()).getAllByText("DETAIL")[0]?.nextElementSibling).toHaveTextContent(
       "TO BULK",
     );
+  });
+});
+
+describe("SystemView with moons, rings, belts and the cometary halo", () => {
+  function scaleBar(): string {
+    return (
+      within(mapPanel())
+        .getByRole("img", { name: /^Scale bar/ })
+        .getAttribute("aria-label") ?? ""
+    );
+  }
+
+  function mapLabel(text: string): HTMLElement | null {
+    return within(mapPanel()).queryByText(text, { selector: ".spatial-label" });
+  }
+
+  it("draws the belt as a labelled annulus and offers BELTS, which fits it", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+    const belts = within(mapPanel()).getByRole("button", { name: "B BELTS" });
+
+    expect(belts).toHaveAttribute("aria-keyshortcuts", "B");
+    expect(belts).toHaveAttribute("aria-pressed", "false");
+
+    await user.keyboard("b");
+
+    expect(belts).toHaveAttribute("aria-pressed", "true");
+    expect(scaleBar()).toMatch(/ AU$/);
+
+    // The test's small view has room for the belt's label once the optimistic zone's is gone.
+    await user.click(within(mapPanel()).getByRole("button", { name: "OPTIMISTIC" }));
+
+    expect(mapLabel("ASTEROID BELT")).toBeInTheDocument();
+  });
+
+  it("offers no BELTS in a system with no belt", async () => {
+    const { socket } = renderView();
+    await answer(socket);
+
+    expect(within(mapPanel()).queryByRole("button", { name: "B BELTS" })).not.toBeInTheDocument();
+  });
+
+  it("does not draw the cometary halo, far outside the view, but lists it", async () => {
+    const { socket } = renderView();
+    await answer(socket, populatedBodies());
+
+    expect(mapLabel("COMETARY HALO")).not.toBeInTheDocument();
+    expect(rowNames()).toContain("H7K 4C0RFZ D-7 /57600, COMETARY HALO");
+  });
+
+  it("lists moons and rings under their planet and a belt's members under the belt", async () => {
+    const { socket } = renderView();
+    await answer(socket, populatedBodies());
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    const item = (name: RegExp) => within(tree).getByRole("treeitem", { name });
+
+    expect(item(/\/384, RING/)).toHaveAttribute("aria-level", "3");
+    expect(item(/\/257, MOON/)).toHaveAttribute("aria-level", "3");
+    expect(item(/\/57344, ASTEROID BELT/)).toHaveAttribute("aria-level", "2");
+    expect(item(/\/57345, DWARF PLANET/)).toHaveAttribute("aria-level", "3");
+    expect(item(/\/57345, DWARF PLANET/)).toHaveAttribute("aria-setsize", "1");
+  });
+
+  it("focuses the selected planet with C, in its own frame, and returns with C", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+    const focus = within(mapPanel()).getByRole("button", { name: "C FOCUS BODY" });
+
+    expect(focus).toHaveAttribute("aria-disabled", "true");
+    expect(focus).toHaveAccessibleDescription("NO PLANET SELECTED");
+    await user.keyboard("c");
+    expect(within(mapPanel()).getByText("SYSTEM BARYCENTRIC")).toBeInTheDocument();
+    expect(within(mapPanel()).getByText("SYSTEM BARYCENTRIC")).toBeInTheDocument();
+
+    await selectRow(user, /\/256,/);
+
+    expect(focus).not.toHaveAttribute("aria-disabled");
+
+    await user.keyboard("c");
+
+    expect(focus).toHaveAttribute("aria-pressed", "true");
+    expect(within(mapPanel()).getByText("BODY H7K 4C0RFZ D-7 /256")).toBeInTheDocument();
+    expect(within(mapPanel()).queryByText("SYSTEM BARYCENTRIC")).not.toBeInTheDocument();
+    expect(scaleBar()).toMatch(/ (Mm|km)$/);
+    expect(mapLabel("MASSIVE RING")).toBeInTheDocument();
+    const legend = screen.getByRole("group", { name: "Orbit map legend" });
+    expect(within(legend).getByText("MOON")).toBeInTheDocument();
+    expect(within(legend).getByText("FILLED ABOVE EQUATORIAL PLANE")).toBeInTheDocument();
+    expect(within(legend).getByText("BODIES NOT TO SCALE")).toBeInTheDocument();
+    expect(within(mapPanel()).queryByRole("button", { name: "SNOW LINE" })).not.toBeInTheDocument();
+
+    await user.keyboard("c");
+
+    expect(focus).toHaveAttribute("aria-pressed", "false");
+    expect(within(mapPanel()).getByText("SYSTEM BARYCENTRIC")).toBeInTheDocument();
+    expect(scaleBar()).toMatch(/ AU$/);
+  });
+
+  it("focuses a moon's planet from the moon, and a zoom preset returns to the system", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+
+    await selectRow(user, /\/257,/);
+    await user.click(within(mapPanel()).getByRole("button", { name: "C FOCUS BODY" }));
+
+    expect(within(mapPanel()).getByText("BODY H7K 4C0RFZ D-7 /256")).toBeInTheDocument();
+
+    await user.keyboard("a");
+
+    expect(within(mapPanel()).getByText("SYSTEM BARYCENTRIC")).toBeInTheDocument();
+    expect(within(mapPanel()).getByRole("button", { name: "A ALL" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("reads a moon's origin and its inclination to its planet's equator", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+
+    await selectRow(user, /\/257,/);
+
+    expect(reading("KIND")).toBe("MOON");
+    expect(reading("ORIGIN")).toBe("GIANT IMPACT");
+    expect(reading("PARENT")).toBe("H7K 4C0RFZ D-7 /256");
+    expect(reading("LABEL")).toBe("A b I");
+    // The angle between the moon's orbit normal (i 0.09, Ω 1.2) and its planet's (i 1.0, Ω 2.5).
+    const cosine = dot(
+      orbitNormal({ inclinationRad: 0.09, ascendingNodeRad: 1.2 }),
+      orbitNormal({ inclinationRad: 1, ascendingNodeRad: 2.5 }),
+    );
+    expect(reading("INC")).toBe(`${((Math.acos(cosine) * 180) / Math.PI).toFixed(1)}°`);
+  });
+
+  it("reads no inclination for a moon whose planet's orbit is withheld", async () => {
+    const { user, socket } = renderView();
+    await answer(
+      socket,
+      populatedBodiesWith((body) =>
+        body.id.endsWith(".0100") ? { ...body, orbit: { state: "not_resolved" } } : body,
+      ),
+    );
+
+    await selectRow(user, /\/257,/);
+
+    expect(reading("INC")).toBe("—");
+  });
+
+  it("reads a ring's kind, material, edges, optical depth and gaps", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+
+    await selectRow(user, /\/384,/);
+
+    expect(reading("KIND")).toBe("RING");
+    expect(reading("LABEL")).toBe("NOT YET MODELLED");
+    expect(reading("TYPE")).toBe("MASSIVE");
+    expect(reading("MATERIAL")).toBe("POROUS ICE");
+    expect(reading("EDGES")).toBe("66.0 Mm – 137 Mm");
+    expect(reading("OPTICAL DEPTH")).toBe("0.600");
+    expect(reading("GAP 2:1")).toBe("117 Mm");
+    expect(terms("ORBIT")).toHaveLength(0);
+    expect(terms("POPULATION")).toHaveLength(0);
+  });
+
+  it("reads a belt's site, edges, statistics and members", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+
+    await selectRow(user, /\/57344,/);
+
+    expect(reading("SITE")).toBe("INSIDE GIANT");
+    expect(reading("COMPOSITION")).toBe("ROCKY");
+    expect(reading("EDGES")).toBe("2.06 AU – 3.28 AU");
+    expect(reading("SIZE SLOPE")).toBe("3.00");
+    expect(reading("LARGEST DIAMETER")).toBe("940 km");
+    expect(reading("MEAN ECC")).toBe("0.1250");
+    expect(reading("MEAN INC")).toBe("10.0°");
+    expect(reading("DUST LUMINOSITY")).toBe("1.00E-9 × HOST");
+    expect(reading("GAP 3:1")).toBe("2.50 AU");
+    expect(reading("MEMBERS")).toBe("1");
+    expect(terms("BELT PROPER")).toHaveLength(0);
+  });
+
+  it("reads NOT RESOLVED for a belt's members withheld below the bulk level", async () => {
+    const withheld = populatedBodiesWith((body) =>
+      body.population.state === "ok" && body.population.value.type === "belt"
+        ? {
+            ...body,
+            population: {
+              state: "ok",
+              value: { ...body.population.value, members: { state: "not_resolved" } },
+            },
+          }
+        : body,
+    );
+    const { user, socket } = renderView();
+    await answer(socket, withheld);
+
+    await selectRow(user, /\/57344,/);
+
+    expect(reading("MEMBERS")).toBe("NOT RESOLVED");
+  });
+
+  it("reads the cometary halo's edges, comets and comet rate", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+
+    await selectRow(user, /\/57600,/);
+
+    expect(reading("PARENT")).toBe("BARYCENTRE");
+    expect(reading("EDGES")).toBe("2000 AU – 100,000 AU");
+    expect(reading("COMETS OVER 1 km")).toBe("7.50E11");
+    expect(reading("COMET RATE")).toBe("10.9 /yr");
   });
 });
 

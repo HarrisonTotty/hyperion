@@ -434,6 +434,7 @@ mod tests {
                         orbit: SectionDto::NotResolved,
                         moons: SectionDto::NotResolved,
                         rings: SectionDto::NotResolved,
+                        population: SectionDto::NotResolved,
                         bulk: SectionDto::NotResolved,
                         surface: SectionDto::NotResolved,
                         hooks: SectionDto::NotResolved,

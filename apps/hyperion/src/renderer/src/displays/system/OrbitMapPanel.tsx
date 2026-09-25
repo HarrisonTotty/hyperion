@@ -20,7 +20,12 @@ import type { ZoneLayers } from "./bodyMap";
 import { DISPLAY_TIME_LABEL, DISPLAY_TIME_WIDTH_CH } from "./displayTime";
 import { type BodyLegendEntry, OrbitLegend } from "./OrbitLegend";
 import { ZOOM_PRESETS } from "./orbitMap";
-import { formatOrbitScaleLength, ORBIT_SCALE_UNITS } from "./orbitScale";
+import {
+  BODY_SCALE_UNITS,
+  formatBodyScaleLength,
+  formatOrbitScaleLength,
+  ORBIT_SCALE_UNITS,
+} from "./orbitScale";
 import { useFrameTime } from "./useDisplayTime";
 import type { SystemViewState } from "./useSystemView";
 
@@ -31,6 +36,9 @@ const HEIGHT_WIDTH_CH = 9;
 
 /** The precision the centre's radius is read at, which the core arrow's distance shares. */
 const CENTRE_DECIMALS = 1;
+
+/** The key of `FOCUS BODY`, which focuses the selected planet and returns the map from it. */
+export const FOCUS_KEY = "C";
 
 /** The zones' annuli the map can switch, in the order offered, with their labels. */
 const ZONE_TOGGLES: ReadonlyArray<{ readonly layer: keyof ZoneLayers; readonly label: string }> = [
@@ -80,8 +88,12 @@ export interface OrbitMapPanelProps {
  * barycentre's `RADIUS`, `ANGLE` and `HEIGHT` in the `GALACTIC` frame, which is the system's
  * position, and the display time; the core arrow's distance is the centre's `RADIUS`, and the triad
  * and the arrow point the galactic directions at the system while the plane, grid and presets
- * follow the system's (D21; the orchestrator's rulings 33 and 34.5). The zoom presets `INNER` and
- * `ALL`, keys `I` and `A`, fit the view again on each press. Until there is an answer the panel
+ * follow the system's (D21; the orchestrator's rulings 33 and 34.5). The zoom presets `INNER`,
+ * `ALL` and, in a system with a belt, `BELTS`, keys `I`, `A` and `B`, fit the view again on each
+ * press. `FOCUS BODY`, key `C`, draws the selected planet, or a selected moon's or ring's, in its own
+ * frame, `BODY <designation>`, with its moons and rings about it, its equatorial plane for
+ * reference and the scale bar in `Mm` and `km`; pressed again, or on a zoom preset, the map returns
+ * to `SYSTEM BARYCENTRIC` (P14.T42.b). The zones' switches stand only in the system frame. Until there is an answer the panel
  * reads the request's state in words and draws nothing; a system not yet formed reads
  * `NOT YET FORMED`; a system with nothing to draw reads `NO BODIES`; an answer the display cannot
  * use reads `SYSTEM DATA INVALID` with `RETRY`. A newer request's state stands in the panel's head,
@@ -101,8 +113,9 @@ export interface OrbitMapPanelProps {
  */
 export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
   const titleId = useId();
-  const { target, status, model, fault, stale, plane, fitRadii, zoom, displayTime } = view;
-  const { chooseZoom, sceneAt } = view;
+  const focusHeldId = useId();
+  const { target, status, model, fault, stale, plane, fitRadiusAu, zoom, displayTime } = view;
+  const { chooseZoom, toggleFocus, hasBelts, sceneAt } = view;
   // While the display time runs, the map alone follows it frame by frame (P14.T44.b).
   const frameTime = useFrameTime(displayTime.frameTime);
   const scene = useMemo(
@@ -110,6 +123,9 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
     [frameTime, view.scene, sceneAt],
   );
   const drawn = scene !== null && scene.points.length > 0;
+  const focused = view.focused !== null;
+  const focusHeld = !focused && view.focusable === null;
+  const presets = ZOOM_PRESETS.filter((control) => control.name !== "belts" || hasBelts);
 
   // The zoom keys act from anywhere on the display but a text field, as the view's own keys do.
   useEffect(() => {
@@ -123,8 +139,14 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
       if (isTextEntry(event.target)) {
         return;
       }
-      const preset = ZOOM_PRESETS.find((control) => control.key === event.key.toUpperCase());
-      if (preset === undefined) {
+      const key = event.key.toUpperCase();
+      if (key === FOCUS_KEY) {
+        event.preventDefault();
+        toggleFocus();
+        return;
+      }
+      const preset = ZOOM_PRESETS.find((control) => control.key === key);
+      if (preset === undefined || (preset.name === "belts" && !hasBelts)) {
         return;
       }
       event.preventDefault();
@@ -134,7 +156,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [drawn, chooseZoom]);
+  }, [drawn, chooseZoom, toggleFocus, hasBelts]);
 
   const centre = cylindrical(target.positionLy);
   const onAxis = !(centre.radiusLy > AXIS_TOLERANCE_LY);
@@ -175,19 +197,19 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
     body = <RequestStatus state={status} onRetry={view.retry} />;
   } else if (!model.formed) {
     body = <p className="panel__empty orbit-map__empty">NOT YET FORMED</p>;
-  } else if (scene === null || !drawn || plane === null || fitRadii === null) {
+  } else if (scene === null || !drawn || plane === null || fitRadiusAu === null) {
     body = <p className="panel__empty orbit-map__empty">NO BODIES</p>;
   } else {
     body = (
       <>
         <SpatialView
           scene={scene}
-          fitRadius={fitRadii[zoom]}
+          fitRadius={fitRadiusAu}
           fitRequest={view.fitRequest}
           onFitChange={view.fitChanged}
-          formatLength={formatOrbitScaleLength}
-          scaleUnits={ORBIT_SCALE_UNITS}
-          frameName="SYSTEM BARYCENTRIC"
+          formatLength={focused ? formatBodyScaleLength : formatOrbitScaleLength}
+          scaleUnits={focused ? BODY_SCALE_UNITS : ORBIT_SCALE_UNITS}
+          frameName={view.frameName}
           centre={centreReadings}
           time={time}
           coreDistance={coreDistance}
@@ -197,9 +219,10 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
           onSelect={view.select}
         />
         <OrbitLegend
-          kinds={model.hosts.map((host) => host.kind)}
+          // A body's frame draws no star, so its legend names none, nor what a star's size means.
+          kinds={focused ? [] : model.hosts.map((host) => host.kind)}
           bodies={bodyLegendEntries(view, scene)}
-          bands={target.bands}
+          bands={focused ? [] : target.bands}
           plane={plane}
         />
       </>
@@ -220,12 +243,12 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
         <span className="orbit-map__system">{target.designation}</span>
         {drawn ? (
           <fieldset className="orbit-map__zoom" aria-label="Zoom">
-            {ZOOM_PRESETS.map(({ name, label, key }) => (
+            {presets.map(({ name, label, key }) => (
               <button
                 key={name}
                 type="button"
                 className="control orbit-map__zoom-button"
-                aria-pressed={view.zoomHeld && zoom === name}
+                aria-pressed={!focused && view.zoomHeld && zoom === name}
                 aria-keyshortcuts={key}
                 onClick={() => {
                   chooseZoom(name);
@@ -234,9 +257,26 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
                 <span className="control__key">{key}</span> {label}
               </button>
             ))}
+            <button
+              type="button"
+              className="control orbit-map__zoom-button"
+              aria-pressed={focused}
+              aria-keyshortcuts={FOCUS_KEY}
+              // Held back rather than disabled, so that it keeps its focus and can say why.
+              aria-disabled={focusHeld ? "true" : undefined}
+              aria-describedby={focusHeld ? focusHeldId : undefined}
+              onClick={toggleFocus}
+            >
+              <span className="control__key">{FOCUS_KEY}</span> FOCUS BODY
+            </button>
           </fieldset>
         ) : null}
-        {drawn && (view.bodies?.zones.length ?? 0) > 0 ? (
+        {drawn && focusHeld ? (
+          <p className="panel__inhibit" id={focusHeldId}>
+            NO PLANET SELECTED
+          </p>
+        ) : null}
+        {drawn && !focused && (view.bodies?.zones.length ?? 0) > 0 ? (
           <fieldset className="orbit-map__zoom" aria-label="Zones">
             {ZONE_TOGGLES.map(({ layer, label }) => (
               <button

@@ -22,11 +22,18 @@ import type { PathMark, PlaneRing, PointMark, SpatialScene } from "../../spatial
 import { gridSpacing } from "../../spatial/scale";
 import { add, scale, type Vec3 } from "../../spatial/vec3";
 import type { LayerBand } from "../galaxy/chartModel";
-import { type BodiesLayout, bodyMarks, bodyPaths, type ZoneLayers, zoneAnnuli } from "./bodyMap";
+import {
+  type BodiesLayout,
+  bodyMarks,
+  bodyPaths,
+  populationAnnuli,
+  type ZoneLayers,
+  zoneAnnuli,
+} from "./bodyMap";
 import { METRES_PER_AU } from "./orbitScale";
 
 /** A zoom preset of the orbit map, which sets the radius the view fits. */
-export type ZoomPreset = "inner" | "all";
+export type ZoomPreset = "inner" | "all" | "belts";
 
 /** A zoom preset's control: the preset, its label and its single key. */
 export interface ZoomPresetControl {
@@ -36,12 +43,13 @@ export interface ZoomPresetControl {
 }
 
 /**
- * The orbit map's zoom presets in the order they are offered: `INNER` and `ALL` (plan 14,
- * P14.T42.b). `BELTS` joins them when belts have radii to fit (phase D).
+ * The orbit map's zoom presets in the order they are offered: `INNER`, `ALL` and `BELTS` (plan 14,
+ * P14.T42.b). `BELTS` is offered only for a system with a belt to fit.
  */
 export const ZOOM_PRESETS: ReadonlyArray<ZoomPresetControl> = [
   { name: "inner", label: "INNER", key: "I" },
   { name: "all", label: "ALL", key: "A" },
+  { name: "belts", label: "BELTS", key: "B" },
 ];
 
 /**
@@ -107,12 +115,17 @@ export type FitRadii = Readonly<Record<ZoomPreset, number>>;
 /** The count of bodies `INNER` fits when there is no habitable zone to fit: the fifth body. */
 export const INNER_BODY_COUNT = 5;
 
-/** What the zoom presets fit besides the stars: the bodies' reaches and the habitable zone's. */
+/**
+ * What the zoom presets fit besides the stars: the bodies' reaches, the habitable zone's and the
+ * outermost belt's.
+ */
 export interface BodyFit {
   /** The farthest each drawn body other than a moon can be from the barycentre, AU, nearest first. */
   readonly bodyReachesAu: ReadonlyArray<number>;
   /** How far out the primary's habitable zone reaches from the barycentre, AU; `null` for none. */
   readonly habitableOuterAu: number | null;
+  /** How far out the outermost belt proper reaches from the barycentre, AU; `null` for none. */
+  readonly beltsOuterAu: number | null;
 }
 
 /**
@@ -126,7 +139,8 @@ export interface BodyFit {
  * With bodies, `INNER` fits the outer limit of the primary's habitable zone or the fifth body out,
  * whichever is nearer, so that it shows the inner system however the planets fall; with neither, it
  * fits the stars as below. `ALL` fits the farthest of the bodies, the stars and `INNER`'s radius,
- * so that everything drawn is in it.
+ * so that everything drawn is in it. `BELTS` fits the outermost belt proper, and `ALL`'s radius in
+ * a system with no belt, where it is not offered.
  *
  * Without bodies, as before `system_bodies` answers, `ALL` fits the farthest any drawn star's orbits
  * can take it from the barycentre and `INNER` the nearest such reach that is not zero, so that a
@@ -160,7 +174,7 @@ export function fitRadiiAu(
     farthest.length === 0 && innerCandidates.length === 0
       ? LONE_STAR_FIT_AU
       : Math.max(inner, ...farthest);
-  return { inner, all };
+  return { inner, all, belts: bodies?.beltsOuterAu ?? all };
 }
 
 /**
@@ -293,7 +307,8 @@ export interface OrbitSceneInput {
 
 /**
  * The orbit map at the display time, as the scene the spatial view draws: the hosts, the bodies,
- * their paths, the zones' annuli, and the reference plane's grid out to the fitted radius.
+ * their paths, the zones' and the belts' annuli, the cometary halo when it is inside the fitted
+ * radius, and the reference plane's grid out to that radius.
  */
 export function orbitScene(input: OrbitSceneInput): SpatialScene {
   const { hosts, layout, plane, time, selectedId, bands, fitRadiusAu, bodies } = input;
@@ -303,7 +318,10 @@ export function orbitScene(input: OrbitSceneInput): SpatialScene {
       : {
           points: bodyMarks(bodies.bodies.bodies, bodies.layout, time),
           paths: bodyPaths(bodies.bodies.bodies, bodies.layout, time, selectedId),
-          annuli: zoneAnnuli(bodies.bodies.zones, bodies.system, layout, time, bodies.zoneLayers),
+          annuli: [
+            ...zoneAnnuli(bodies.bodies.zones, bodies.system, layout, time, bodies.zoneLayers),
+            ...populationAnnuli(bodies.bodies.bodies, bodies.system, layout, time, fitRadiusAu),
+          ],
         };
   const points = [...hostMarks(hosts, layout, time, bands), ...(bodyScene?.points ?? [])];
   const spacingAu = gridSpacing(fitRadiusAu);

@@ -2,6 +2,17 @@
 // (run `just gen-protocol`). Re-export each new message type here.
 import type { ArchitectureClassDto } from "./generated/ArchitectureClassDto";
 import type { BeltKindDto } from "./generated/BeltKindDto";
+import type { BeltComponentDto } from "./generated/BeltComponentDto";
+import type { BeltCompositionDto } from "./generated/BeltCompositionDto";
+import type { BeltDto } from "./generated/BeltDto";
+import type { BeltGapDto } from "./generated/BeltGapDto";
+import type { BeltSiteDto } from "./generated/BeltSiteDto";
+import type { CometaryHaloDto } from "./generated/CometaryHaloDto";
+import type { PopulationDto } from "./generated/PopulationDto";
+import type { RingDto } from "./generated/RingDto";
+import type { RingGapDto } from "./generated/RingGapDto";
+import type { RingKindDto } from "./generated/RingKindDto";
+import type { RingMaterialDto } from "./generated/RingMaterialDto";
 import type { BodyDetailDto } from "./generated/BodyDetailDto";
 import type { BodyDetailRequest } from "./generated/BodyDetailRequest";
 import type { BodyEventDto } from "./generated/BodyEventDto";
@@ -86,6 +97,17 @@ import type { VariableKindDto } from "./generated/VariableKindDto";
 import type { ZoneDto } from "./generated/ZoneDto";
 
 export type {
+  BeltComponentDto,
+  BeltCompositionDto,
+  BeltDto,
+  BeltGapDto,
+  BeltSiteDto,
+  CometaryHaloDto,
+  PopulationDto,
+  RingDto,
+  RingGapDto,
+  RingKindDto,
+  RingMaterialDto,
   ArchitectureClassDto,
   BeltKindDto,
   BodyDetailDto,

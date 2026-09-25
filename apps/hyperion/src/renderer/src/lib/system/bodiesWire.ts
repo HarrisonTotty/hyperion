@@ -23,6 +23,7 @@ import {
   isBodyId,
   type OrbitHostDto,
   parseBodyId,
+  type PopulationDto,
   type RequestOf,
   type SectionDto,
   type SystemBodiesDto,
@@ -45,6 +46,7 @@ import type {
   HabitableZone,
   HierarchyNode,
   OrbitHost,
+  Population,
   Section,
   SystemBodies,
   SystemBody,
@@ -251,6 +253,106 @@ function toIds(ids: ReadonlyArray<BodyIdHex>): ReadonlyArray<BodyIdHex> {
   return [...ids];
 }
 
+/** Checks an annulus's two edges: positive, finite and in order. */
+function checkEdges(innerM: number, outerM: number, what: string): void {
+  check(positive(innerM) && positive(outerM) && innerM <= outerM, `${what} edges unusable`);
+}
+
+/** A resonance as the wire gives it: two positive integers. */
+function toResonance(resonance: [number, number]): readonly [number, number] {
+  check(
+    resonance.every((term) => Number.isInteger(term) && term > 0),
+    "resonance unusable",
+  );
+  return [resonance[0], resonance[1]];
+}
+
+/** A ring, a belt or the halo, checked: edges positive and in order, statistics in range. */
+function toPopulation(population: PopulationDto): Population {
+  let result: Population;
+  switch (population.type) {
+    case "ring":
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "ring");
+      check(positive(population.optical_depth), "ring optical depth unusable");
+      result = {
+        kind: "ring",
+        ringKind: population.ring_kind,
+        material: population.material,
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
+        opticalDepth: population.optical_depth,
+        gaps: population.gaps.map((gap) => {
+          check(isBodyId(gap.moon) && positive(gap.radius_m), "ring gap unusable");
+          return { moon: gap.moon, resonance: toResonance(gap.resonance), radiusM: gap.radius_m };
+        }),
+      };
+      break;
+    case "belt": {
+      check(population.host.type !== "body", "belt host malformed");
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "belt");
+      checkEdges(population.main.inner_edge_m, population.main.outer_edge_m, "belt");
+      const scattered = population.scattered;
+      if (scattered !== null) {
+        checkEdges(scattered.inner_edge_m, scattered.outer_edge_m, "belt");
+      }
+      check(
+        positive(population.size_slope) &&
+          positive(population.largest_diameter_m) &&
+          atLeastZero(population.mean_eccentricity) &&
+          population.mean_eccentricity < 1 &&
+          atLeastZero(population.mean_inclination_rad) &&
+          population.mean_inclination_rad <= Math.PI &&
+          atLeastZero(population.fractional_luminosity),
+        "belt statistics unusable",
+      );
+      result = {
+        kind: "belt",
+        host: toHost(population.host),
+        site: population.site,
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
+        main: {
+          innerEdgeM: population.main.inner_edge_m,
+          outerEdgeM: population.main.outer_edge_m,
+        },
+        scattered:
+          scattered === null
+            ? null
+            : { innerEdgeM: scattered.inner_edge_m, outerEdgeM: scattered.outer_edge_m },
+        gaps: population.gaps.map((gap) => {
+          check(positive(gap.radius_m), "belt gap unusable");
+          return { resonance: toResonance(gap.resonance), radiusM: gap.radius_m };
+        }),
+        sizeSlope: population.size_slope,
+        largestDiameterM: population.largest_diameter_m,
+        composition: population.composition,
+        meanEccentricity: population.mean_eccentricity,
+        meanInclinationRad: population.mean_inclination_rad,
+        fractionalLuminosity: population.fractional_luminosity,
+        members: toSection(population.members, toIds),
+      };
+      break;
+    }
+    case "cometary_halo":
+      check(population.host.type !== "body", "halo host malformed");
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "halo");
+      check(
+        atLeastZero(population.comets) && atLeastZero(population.comet_rate_per_s),
+        "halo statistics unusable",
+      );
+      result = {
+        kind: "cometary_halo",
+        host: toHost(population.host),
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
+        comets: population.comets,
+        cometRatePerS: population.comet_rate_per_s,
+      };
+      break;
+  }
+  return result;
+}
+
 /** A body of the list, checked and in the display's units. */
 function toBody(body: BodySummaryDto, system: SystemIdHex, designation: string): SystemBody {
   check(isBodyId(body.id), "body ID malformed");
@@ -274,6 +376,7 @@ function toBody(body: BodySummaryDto, system: SystemIdHex, designation: string):
     orbit: toSection(body.orbit, toOrbit),
     moons: toSection(body.moons, toIds),
     rings: toSection(body.rings, toIds),
+    population: toSection(body.population, toPopulation),
     bulk: toSection(body.bulk, toBulk),
   };
 }
@@ -378,7 +481,12 @@ function checkHosts(model: SystemModel, bodies: SystemBodies): void {
     check(known(zone.host), "zone host unknown");
   }
   for (const body of bodies.bodies) {
-    const hosts = [body.parent, body.orbit.state === "ok" ? body.orbit.value.parent : null];
+    const population = body.population.state === "ok" ? body.population.value : null;
+    const hosts = [
+      body.parent,
+      body.orbit.state === "ok" ? body.orbit.value.parent : null,
+      population === null || population.kind === "ring" ? null : population.host,
+    ];
     for (const host of hosts) {
       check(host === null || known(host), `body ${body.bodyIndex} host unknown`);
     }

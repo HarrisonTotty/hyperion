@@ -32,11 +32,13 @@ pub use galaxy::{
 pub use modelled::Modelled;
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
-    ArchitectureClassDto, BeltKindDto, BodyDetailDto, BodyDetailRequest, BodyEventDto,
-    BodyEventsDto, BodyEventsRequest, BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyRecordDto,
-    BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto,
-    DetailLevelDto, HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitHostDto,
-    PlanetClassDto, SectionDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, ZoneDto,
+    ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,
+    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest,
+    BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto,
+    BodySurfaceDto, BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto,
+    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitHostDto, PlanetClassDto, PopulationDto,
+    RingDto, RingGapDto, RingKindDto, RingMaterialDto, SectionDto, SystemBodiesDto,
+    SystemBodiesRequest, SystemPlaneDto, ZoneDto,
 };
 pub use primitives::{
     BodyIdHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex, SurfaceSeedHex,

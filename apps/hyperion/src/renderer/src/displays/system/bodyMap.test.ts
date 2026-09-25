@@ -1,4 +1,4 @@
-import type { ResponseFor, UniverseTime } from "@hyperion/protocol";
+import type { BodySummaryDto, ResponseFor, UniverseTime } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { composePosition, positionAt } from "../../lib/orbit";
@@ -17,17 +17,20 @@ import {
   FIXTURE_JUPITER,
   FIXTURE_SYSTEM,
   populatedBodies,
+  populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
 } from "../../test/planetaryFixture";
 import { BANDS } from "../../test/systemFixtures";
 import {
   ALL_ZONE_LAYERS,
+  beltsOuterAu,
   bodyMarks,
   bodyPaths,
   bodyReachesAu,
   habitableOuterAu,
   layoutBodies,
+  populationAnnuli,
   primaryZone,
   zoneAnnuli,
 } from "./bodyMap";
@@ -92,7 +95,7 @@ describe("bodyMarks", () => {
     ]);
   });
 
-  it("leaves destroyed, unbound and unformed bodies and populations undrawn", () => {
+  it("leaves destroyed, unbound and unformed bodies, populations and moons undrawn", () => {
     const { bodies, bodiesLayout } = built(populatedBodies());
 
     expect(
@@ -103,7 +106,6 @@ describe("bodyMarks", () => {
       ]),
     ).toEqual([
       ["0100", "triangle-down", 1],
-      ["0101", "pentagon", MOON_SIZE_CLASS],
       ["e001", "triangle-down", BODY_MIN_SIZE_CLASS],
     ]);
   });
@@ -264,6 +266,113 @@ describe("zoneAnnuli", () => {
   });
 });
 
+/** The populated answer with its belt's population changed by `change`. */
+function withBelt(change: (body: BodySummaryDto) => BodySummaryDto): ResponseFor<"system_bodies"> {
+  return populatedBodiesWith((body) => (body.kind.type === "belt" ? change(body) : body));
+}
+
+/** The fixture's halo's inner and outer edges, AU: 2,000 AU and 100,000 AU. */
+const HALO_INNER_AU = 299_195_741_400_000 / METRES_PER_AU;
+const HALO_OUTER_AU = 1.495_978_707e16 / METRES_PER_AU;
+
+describe("populationAnnuli", () => {
+  it("draws a belt as a ticked annulus about its star, named by its kind while unlabelled", () => {
+    const { bodies, layout } = built(populatedBodies());
+
+    expect(
+      populationAnnuli(bodies.bodies, FIXTURE_SYSTEM, layout, TIME, 10).map((annulus) => [
+        annulus.id,
+        annulus.label,
+        annulus.innerRadius * METRES_PER_AU,
+        annulus.outerRadius * METRES_PER_AU,
+        annulus.ticks,
+        annulus.centre,
+      ]),
+    ).toEqual([
+      [
+        `belt:${FIXTURE_SYSTEM}.e000`,
+        "ASTEROID BELT",
+        308_900_000_000,
+        490_500_000_000,
+        true,
+        { x: 0, y: 0, z: 0 },
+      ],
+    ]);
+  });
+
+  it("names a belt by its label, and draws a scattered component apart, without ticks", () => {
+    const { bodies, layout } = built(
+      withBelt((body) => {
+        if (body.population.state !== "ok" || body.population.value.type !== "belt") {
+          throw new Error("the populated answer's belt has its population");
+        }
+        const scattered = { inner_edge_m: 7e12, outer_edge_m: 1.5e13 };
+        return {
+          ...body,
+          label: { state: "ok", value: "BELT 1" },
+          population: {
+            state: "ok",
+            value: { ...body.population.value, outer_edge_m: 1.5e13, scattered },
+          },
+        };
+      }),
+    );
+
+    expect(
+      populationAnnuli(bodies.bodies, FIXTURE_SYSTEM, layout, TIME, 10).map((annulus) => [
+        annulus.label,
+        annulus.outerRadius * METRES_PER_AU,
+        annulus.ticks,
+      ]),
+    ).toEqual([
+      ["BELT 1", 490_500_000_000, true],
+      ["SCATTERED DISC", 1.5e13, false],
+    ]);
+  });
+
+  it("draws the cometary halo only as far as it lies inside the view", () => {
+    const { bodies, layout } = built(populatedBodies());
+    const halo = (viewAu: number) =>
+      populationAnnuli(bodies.bodies, FIXTURE_SYSTEM, layout, TIME, viewAu)
+        .filter((annulus) => annulus.id.startsWith("halo:"))
+        .map((annulus) => [annulus.label, annulus.innerRadius, annulus.outerRadius, annulus.ticks]);
+
+    expect(halo(1_000)).toEqual([]);
+    expect(halo(5_000)).toEqual([
+      ["COMETARY HALO INNER EDGE", HALO_INNER_AU, HALO_INNER_AU, false],
+    ]);
+    expect(halo(200_000)).toEqual([["COMETARY HALO", HALO_INNER_AU, HALO_OUTER_AU, false]]);
+  });
+
+  it("draws no belt that is not present", () => {
+    const at = { seconds: 0, nanos: 0 };
+    const { bodies, layout } = built(
+      withBelt((body) => ({ ...body, state: { type: "destroyed", cause: "dispersed", at } })),
+    );
+
+    expect(
+      populationAnnuli(bodies.bodies, FIXTURE_SYSTEM, layout, TIME, 10).map((a) => a.id),
+    ).toEqual([]);
+    expect(beltsOuterAu(bodies.bodies, FIXTURE_SYSTEM, layout)).toBeNull();
+  });
+});
+
+describe("beltsOuterAu", () => {
+  it("reaches the outermost belt proper's outer edge from the barycentre", () => {
+    const { bodies, layout } = built(populatedBodies());
+
+    expect(beltsOuterAu(bodies.bodies, FIXTURE_SYSTEM, layout)).toBe(
+      490_500_000_000 / METRES_PER_AU,
+    );
+  });
+
+  it("is null for a system with no belt", () => {
+    const { bodies, layout } = built();
+
+    expect(beltsOuterAu(bodies.bodies, FIXTURE_SYSTEM, layout)).toBeNull();
+  });
+});
+
 describe("the zoom presets with bodies", () => {
   it("fit the habitable zone's outer limit at INNER and the outermost planet at ALL", () => {
     const { model, bodies, layout, bodiesLayout } = built();
@@ -271,6 +380,7 @@ describe("the zoom presets with bodies", () => {
     const fit = fitRadiiAu(layout, model.hosts, {
       bodyReachesAu: bodyReachesAu(bodies.bodies, bodiesLayout),
       habitableOuterAu: habitableOuterAu(zone, FIXTURE_SYSTEM, layout),
+      beltsOuterAu: null,
     });
 
     expect(fit.inner).toBeCloseTo(253_000_000_000 / METRES_PER_AU, 12);
@@ -282,17 +392,36 @@ describe("the zoom presets with bodies", () => {
     const reaches = [0.02, 0.03, 0.05, 0.07, 0.09, 0.12];
 
     expect(
-      fitRadiiAu(layout, model.hosts, { bodyReachesAu: reaches, habitableOuterAu: 0.2 }),
-    ).toEqual({ inner: 0.09, all: 0.12 });
+      fitRadiiAu(layout, model.hosts, {
+        bodyReachesAu: reaches,
+        habitableOuterAu: 0.2,
+        beltsOuterAu: null,
+      }),
+    ).toEqual({ inner: 0.09, all: 0.12, belts: 0.12 });
+  });
+
+  it("fit the outermost belt at BELTS", () => {
+    const { model, layout } = built();
+
+    expect(
+      fitRadiiAu(layout, model.hosts, {
+        bodyReachesAu: [0.4, 1, 5.2],
+        habitableOuterAu: 1.7,
+        beltsOuterAu: 3.3,
+      }),
+    ).toEqual({ inner: 1.7, all: 5.2, belts: 3.3 });
   });
 
   it("fit the habitable zone at both when there are no planets", () => {
     const { model, layout } = built();
 
-    expect(fitRadiiAu(layout, model.hosts, { bodyReachesAu: [], habitableOuterAu: 1.7 })).toEqual({
-      inner: 1.7,
-      all: 1.7,
-    });
+    expect(
+      fitRadiiAu(layout, model.hosts, {
+        bodyReachesAu: [],
+        habitableOuterAu: 1.7,
+        beltsOuterAu: null,
+      }),
+    ).toEqual({ inner: 1.7, all: 1.7, belts: 1.7 });
   });
 });
 

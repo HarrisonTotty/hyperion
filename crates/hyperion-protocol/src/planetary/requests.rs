@@ -49,10 +49,11 @@ pub struct SystemBodiesDto {
     /// host's planets, or for a close binary the binary's; `null` when the system has no zone.
     pub system_plane: Option<SystemPlaneDto>,
     /// The system's belts, by the ID of each belt's population, in index order (`mass_and_orbit`);
-    /// `ok` with an empty list for a system with none. `not_modelled` in this generator version.
+    /// `ok` with an empty list for a system with none. Each belt's extent is its record's
+    /// `population` section.
     pub belts: SectionDto<Vec<BodyIdHex>>,
     /// The system's cometary halo, by its population's ID (`mass_and_orbit`); `ok` with `null`
-    /// for a system with none. `not_modelled` in this generator version.
+    /// for a system with none. The halo's extent is its record's `population` section.
     pub halo: SectionDto<Option<BodyIdHex>>,
     /// Every body's record, in index order. Below the `bulk` level a belt's members are left out,
     /// since a population seen as a whole does not resolve them.
@@ -441,6 +442,7 @@ pub(crate) mod tests {
                 orbit: SectionDto::NotResolved,
                 moons: SectionDto::NotResolved,
                 rings: SectionDto::NotResolved,
+                population: SectionDto::NotResolved,
                 bulk: SectionDto::NotResolved,
                 surface: SectionDto::NotResolved,
                 hooks: SectionDto::NotResolved,

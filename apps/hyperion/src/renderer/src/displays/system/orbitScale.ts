@@ -67,3 +67,33 @@ export function formatOrbitScaleLength(lengthAu: number): string {
   }
   return `${lengthFormat.format(lengthAu * KM_PER_AU)} km`;
 }
+
+/**
+ * The scale bar's unit ladder in a body's frame, where `FOCUS BODY` draws a planet's moons and
+ * rings: `Mm` from 1 Mm and `km` below (plan 14, P14.T42.b), and `Gm` from 1 Gm, so that the
+ * view of a distant giant's irregular moons, tens of gigametres out, prints no long number.
+ */
+export const BODY_SCALE_UNITS: ReadonlyArray<ScaleUnit> = [
+  { perSceneUnit: GM_PER_AU, minSceneLength: 1 / GM_PER_AU },
+  { perSceneUnit: MM_PER_AU, minSceneLength: 1 / MM_PER_AU },
+  { perSceneUnit: KM_PER_AU, minSceneLength: 0 },
+];
+
+/**
+ * Writes a scale bar's length, given in astronomical units, in the unit {@link BODY_SCALE_UNITS}
+ * reads it in: `20 Gm`, `500 Mm`, `200 km`.
+ *
+ * @throws RangeError when the length is not positive and finite, which no scale bar is.
+ */
+export function formatBodyScaleLength(lengthAu: number): string {
+  if (!(Number.isFinite(lengthAu) && lengthAu > 0)) {
+    throw new RangeError(`a scale bar cannot be ${String(lengthAu)} AU long`);
+  }
+  if (lengthAu * GM_PER_AU >= 1 - EDGE_TOLERANCE) {
+    return `${lengthFormat.format(lengthAu * GM_PER_AU)} Gm`;
+  }
+  if (lengthAu * MM_PER_AU >= 1 - EDGE_TOLERANCE) {
+    return `${lengthFormat.format(lengthAu * MM_PER_AU)} Mm`;
+  }
+  return `${lengthFormat.format(lengthAu * KM_PER_AU)} km`;
+}

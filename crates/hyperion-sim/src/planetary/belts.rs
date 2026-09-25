@@ -482,6 +482,16 @@ impl BeltGap {
     pub const fn radius(&self) -> Metres {
         self.radius
     }
+
+    /// The same gap once its host's orbits have widened by `factor` (design note 11): the record
+    /// of a belt at a time (P14.T30.b).
+    #[must_use]
+    pub(crate) fn widened(self, factor: f64) -> Self {
+        Self {
+            radius: Metres::new(self.radius.value() * factor),
+            ..self
+        }
+    }
 }
 
 /// A belt's population (P14.T21.a–b), with its largest members (P14.T21.c): a body in its belt
@@ -601,6 +611,13 @@ impl Belt {
     #[must_use]
     pub fn members(&self) -> &[BeltMember] {
         &self.members
+    }
+
+    /// The bytes the belt owns on the heap, its gaps' and members' (P14.T36.a's byte bound).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.gaps.capacity() * size_of::<BeltGap>()
+            + self.members.capacity() * size_of::<BeltMember>()
     }
 
     /// The blackbody temperature of its dust about a host of luminosity `luminosity`, at the

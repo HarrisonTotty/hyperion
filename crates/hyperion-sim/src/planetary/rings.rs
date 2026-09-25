@@ -436,6 +436,12 @@ impl Ring {
         &self.gaps
     }
 
+    /// The bytes the ring owns on the heap, its gaps' (P14.T36.a's byte bound).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.gaps.capacity() * size_of::<RingGap>()
+    }
+
     /// The ring's area in its plane, m².
     #[must_use]
     fn area(inner: Metres, outer: Metres) -> f64 {

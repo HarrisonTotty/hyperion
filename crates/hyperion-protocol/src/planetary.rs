@@ -6,6 +6,7 @@
 //! They mirror the simulation's `planetary::record` without depending on it; body IDs are
 //! [`BodyIdHex`](crate::BodyIdHex), beside the system IDs.
 
+mod population;
 mod record;
 mod requests;
 mod zones;
@@ -13,6 +14,10 @@ mod zones;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub use population::{
+    BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltSiteDto, CometaryHaloDto,
+    PopulationDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto,
+};
 pub use record::{
     BeltKindDto, BodyDetailDto, BodyHooksDto, BodyKindDto, BodyRecordDto, BodyStateDto,
     BodySummaryDto, BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto, MassFractionsDto,

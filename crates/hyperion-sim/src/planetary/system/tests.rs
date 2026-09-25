@@ -20,7 +20,8 @@ use crate::planetary::fate::DestructionCause;
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::HILL_STABLE_GAP;
 use crate::planetary::placement::mutual_hill_radius;
-use crate::planetary::record::{DetailLevel, RecordSection, SectionState};
+use crate::planetary::record::{DetailLevel, Population, RecordSection, SectionState};
+use crate::planetary::satellites::generate_satellites;
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
 use crate::stellar::multiplicity::star_positions_at;
@@ -46,6 +47,17 @@ pub(crate) fn generated() -> &'static [(SystemContext, PlanetarySystem)] {
         sample()
             .iter()
             .map(|ctx| (ctx.clone(), generate_planets(SEED, ctx)))
+            .collect()
+    })
+}
+
+/// The sample's systems, generated whole (P14.T30.a's `generate`), once.
+pub(crate) fn whole() -> &'static [(SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        sample()
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
             .collect()
     })
 }
@@ -93,27 +105,115 @@ fn generate_is_order_independent() {
 }
 
 #[test]
-fn generate_is_generate_planets_in_the_slice() {
-    for (ctx, system) in generated().iter().take(40) {
+fn generate_is_the_same_twice_and_order_independent() {
+    for (ctx, system) in whole().iter().take(40) {
         assert_eq!(&generate(SEED, ctx), system);
     }
+    let contexts: Vec<SystemContext> = sample().iter().take(30).cloned().collect();
+    assert_order_independent(&contexts, |ctx| generate(SEED, ctx));
+}
+
+/// P14.T30.a: `generate_planets` is `generate` with the satellites, belts and halo removed, so
+/// that phase D moves no planet.
+#[test]
+fn generate_planets_is_generate_with_its_satellites_removed() {
+    let (mut moons, mut belts, mut halos) = (0, 0, 0);
+    for ((ctx, planets), (_, whole)) in generated().iter().zip(whole()) {
+        assert_eq!(planets.zones(), whole.zones(), "{:?}", ctx.id());
+        assert_eq!(planets.hosts(), whole.hosts());
+        let kept: Vec<&Body> = whole.planets().collect();
+        assert_eq!(kept, planets.bodies().iter().collect::<Vec<_>>());
+        assert!(planets.belts().is_empty() && planets.halo().is_none());
+        moons += whole
+            .bodies()
+            .iter()
+            .filter(|b| matches!(b.kind(), BodyKind::Moon(_)))
+            .count();
+        belts += whole.belts().len();
+        halos += usize::from(whole.halo().is_some());
+    }
+    assert!(
+        moons > 100 && belts > 50 && halos > 20,
+        "{moons} moons, {belts} belts, {halos} halos"
+    );
+}
+
+/// P14.T30.a: `generate_satellites` for a planet equals its children in `generate`, over 1,000
+/// systems.
+#[test]
+fn generate_satellites_is_each_planet_s_children_in_generate() {
+    let contexts = sample_contexts(1_000, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
+    let mut compared = 0;
+    for ctx in &contexts {
+        let system = generate(SEED, ctx);
+        for planet in system.planets() {
+            let alone = generate_satellites(SEED, ctx, planet, system.nearest_belt(planet.index()));
+            assert_eq!(
+                alone,
+                system.satellites_of(planet.index()),
+                "{:?}",
+                planet.index()
+            );
+            let children: Vec<BodyIndex> =
+                system.children(planet.index()).map(Body::index).collect();
+            let expected: Vec<BodyIndex> = alone
+                .moons()
+                .iter()
+                .map(Satellite::index)
+                .chain(alone.rings().iter().map(Ring::index))
+                .collect();
+            let mut sorted = expected.clone();
+            sorted.sort_unstable();
+            assert_eq!(children, sorted);
+            compared += 1;
+        }
+    }
+    assert!(compared > 1_000, "{compared} planets");
 }
 
 #[test]
 fn every_index_decodes_is_unique_and_none_is_at_the_stellar_level() {
     let mut bodies = 0_u32;
-    for (_, system) in generated() {
+    for (_, system) in whole() {
         let mut previous: Option<BodyIndex> = None;
         for body in system.bodies() {
             let index = body.index();
             let (slot, sub) = BodyIndex::decode(index.get()).unwrap();
             assert_eq!((slot, sub), (index.slot(), index.sub()));
-            assert!(matches!(slot, BodySlot::Planet(n) if n >= 1), "{index:?}");
-            assert_eq!(sub, BodySub::Primary);
+            match body.kind() {
+                BodyKind::Planet => {
+                    assert!(matches!(slot, BodySlot::Planet(n) if n >= 1), "{index:?}");
+                    assert_eq!(sub, BodySub::Primary);
+                }
+                BodyKind::Moon(_) => assert!(
+                    matches!((slot, sub), (BodySlot::Planet(_), BodySub::Moon(_)))
+                        || matches!((slot, sub), (BodySlot::Belt(_), BodySub::Member(n)) if n > 0x80),
+                    "{index:?}"
+                ),
+                BodyKind::Ring => assert!(matches!(sub, BodySub::Ring(_)), "{index:?}"),
+                BodyKind::DwarfPlanet => {
+                    assert!(matches!(
+                        (slot, sub),
+                        (BodySlot::Belt(_), BodySub::Member(_))
+                    ));
+                }
+                other => panic!("{other:?} among the bodies"),
+            }
             assert!(previous.is_none_or(|p| p < index), "sorted and unique");
             assert_eq!(system.body(index), Some(body));
             previous = Some(index);
             bodies += 1;
+        }
+        let indices = system.indices();
+        let mut unique = indices.clone();
+        unique.dedup();
+        assert_eq!(indices, unique);
+        for belt in system.belts() {
+            assert!(matches!(belt.index().slot(), BodySlot::Belt(1..=13)));
+            assert_eq!(belt.index().sub(), BodySub::Primary);
+        }
+        if let Some(halo) = system.halo() {
+            assert_eq!(halo.index().slot(), BodySlot::Belt(15));
         }
     }
     assert!(bodies > 300, "{bodies} bodies");
@@ -134,7 +234,7 @@ fn a_brown_dwarf_companion_gains_no_body_in_slot_zero() {
             Years::new(3e9),
         )
         .unwrap();
-        let system = generate_planets(SEED, &ctx);
+        let system = generate(SEED, &ctx);
         assert_eq!(
             system.zones().len(),
             3,
@@ -209,15 +309,15 @@ fn each_host_is_the_chain_of_its_stages() {
                 .bodies()
                 .iter()
                 .filter(|body| body.host() == zone.host())
-                .map(Body::placed)
+                .filter_map(Body::placed)
                 .collect();
             assert_eq!(bodies, placed.planets().iter().collect::<Vec<_>>());
             for body in system.bodies().iter().filter(|b| b.host() == zone.host()) {
                 let body_id = body.index().body_id(id);
-                assert_eq!(body.radius_rank(), radius_rank(seed, body_id));
+                assert_eq!(body.radius_rank(), Some(radius_rank(seed, body_id)));
                 let formation =
                     Formation::draw(seed, body_id, body.mass(), inputs.lifetime()).unwrap();
-                assert_eq!(body.formation(), &formation);
+                assert_eq!(body.formation(), Some(&formation));
             }
             hosts += 1;
         }
@@ -248,7 +348,11 @@ fn nothing_is_generated_beyond_the_strip_radius() {
             cut += 1;
         }
         for body in system.bodies() {
-            assert!(body.orbit().apoapsis() <= strip, "{:?}", body.index());
+            assert!(
+                body.orbit().unwrap().apoapsis() <= strip,
+                "{:?}",
+                body.index()
+            );
         }
     }
     assert!(cut > 30, "{cut}");
@@ -327,65 +431,147 @@ fn an_unborn_system_s_bodies_are_all_not_yet_formed() {
 
 #[test]
 fn a_snapshot_is_body_at_body_by_body() {
-    for (ctx, system) in generated().iter().take(80) {
+    for (ctx, system) in whole().iter().take(80) {
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
             assert_eq!(snapshot.system(), system.system());
             assert_eq!(snapshot.time(), t);
-            assert_eq!(snapshot.bodies().len(), system.bodies().len());
-            for (record, body) in snapshot.bodies().iter().zip(system.bodies()) {
-                assert_eq!(record, &system.body_at(ctx, body.index(), t).unwrap());
+            assert_eq!(snapshot.bodies().len(), system.indices().len());
+            for (record, index) in snapshot.bodies().iter().zip(system.indices()) {
+                assert_eq!(record, &system.body_at(ctx, index, t).unwrap());
                 assert_eq!(
                     record.position(),
-                    system.position_at(ctx, body.index(), t).unwrap()
+                    system.position_at(ctx, index, t).unwrap()
                 );
             }
         }
     }
 }
 
-/// The slice's section states (ruling 34): what is not computed says so, and what does not apply
-/// to a giant is not applicable.
+/// The section states (ruling 34): what is not computed says so, what does not apply to a kind
+/// is not applicable, and phase D's sections are `Ok` where modelled (P14.T34).
 #[test]
-fn a_record_tags_what_the_slice_does_not_compute() {
-    let (mut present, mut giants) = (0, 0);
-    for (ctx, system) in generated().iter().take(120) {
+fn a_record_tags_what_the_generator_does_not_compute() {
+    let (mut present, mut giants, mut moons, mut rings) = (0, 0, 0, 0);
+    for (ctx, system) in whole().iter().take(120) {
         let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
-        assert_eq!(snapshot.belts(), &Section::NotModelled);
-        assert_eq!(snapshot.halo(), &Section::NotModelled);
-        for (record, body) in snapshot.bodies().iter().zip(system.bodies()) {
+        let belts: Vec<BodyIndex> = system.belts().iter().map(Belt::index).collect();
+        assert_eq!(snapshot.belts(), &Section::Ok(belts));
+        assert_eq!(
+            snapshot.halo(),
+            &Section::Ok(system.halo().map(CometaryHalo::index))
+        );
+        assert_eq!(snapshot.bodies().len(), system.indices().len());
+        for record in snapshot.bodies() {
             let identity = record.identity();
-            assert_eq!(identity.kind(), BodyKind::Planet);
-            assert_eq!(identity.parent(), Some(body.host()));
-            assert_eq!(identity.id(), body.index().body_id(system.system()));
+            assert_eq!(identity.id(), record.index().body_id(system.system()));
             assert_eq!(identity.label().state(), SectionState::Ok);
             assert_eq!(record.level(), DetailLevel::Full);
-            for section in [
-                RecordSection::Moons,
-                RecordSection::Rings,
-                RecordSection::Hooks,
-            ] {
-                assert_eq!(record.section_state(section), SectionState::NotModelled);
-            }
-            if identity.state() == BodyState::Present {
-                present += 1;
-                let bulk = record.bulk().ok().unwrap();
-                let surface = record.section_state(RecordSection::Surface);
-                if bulk.class().has_surface() {
-                    assert_eq!(surface, SectionState::NotModelled);
-                } else {
-                    assert_eq!(surface, SectionState::NotApplicable);
-                    giants += 1;
+            match identity.kind() {
+                BodyKind::Planet => {
+                    let body = system.body(record.index()).unwrap();
+                    assert_eq!(identity.parent(), Some(body.host()));
+                    assert_eq!(record.section_state(RecordSection::Moons), SectionState::Ok);
+                    assert_eq!(record.section_state(RecordSection::Rings), SectionState::Ok);
+                    assert_eq!(
+                        record.section_state(RecordSection::Population),
+                        SectionState::NotApplicable
+                    );
+                    assert_eq!(
+                        record.section_state(RecordSection::Hooks),
+                        SectionState::NotModelled
+                    );
+                    if identity.state() == BodyState::Present {
+                        present += 1;
+                        let bulk = record.bulk().ok().unwrap();
+                        let surface = record.section_state(RecordSection::Surface);
+                        if bulk.class().has_surface() {
+                            assert_eq!(surface, SectionState::NotModelled);
+                        } else {
+                            assert_eq!(surface, SectionState::NotApplicable);
+                            giants += 1;
+                        }
+                        assert!(record.position().is_some());
+                        assert_eq!(record.section_state(RecordSection::Orbit), SectionState::Ok);
+                    }
                 }
-                assert!(record.position().is_some());
-                assert_eq!(record.section_state(RecordSection::Orbit), SectionState::Ok);
+                BodyKind::Moon(_) => {
+                    moons += 1;
+                    assert!(matches!(identity.parent(), Some(OrbitHost::Body(_))));
+                    if identity.state() == BodyState::Present {
+                        assert_eq!(record.section_state(RecordSection::Bulk), SectionState::Ok);
+                        assert_eq!(record.section_state(RecordSection::Orbit), SectionState::Ok);
+                    }
+                }
+                BodyKind::Ring => {
+                    rings += 1;
+                    if identity.state() == BodyState::Present {
+                        assert!(matches!(
+                            record.population(),
+                            Section::Ok(Population::Ring(_))
+                        ));
+                    }
+                }
+                BodyKind::Belt(_) => {
+                    if identity.state() == BodyState::Present {
+                        assert!(matches!(
+                            record.population(),
+                            Section::Ok(Population::Belt(_))
+                        ));
+                    }
+                    assert_eq!(record.position(), None);
+                }
+                BodyKind::CometaryHalo => {
+                    assert_eq!(
+                        record.section_state(RecordSection::Mass),
+                        SectionState::NotModelled
+                    );
+                }
+                BodyKind::DwarfPlanet => {
+                    assert_eq!(
+                        record.section_state(RecordSection::Rings),
+                        SectionState::NotModelled
+                    );
+                }
+                other => panic!("{other:?} in a snapshot"),
             }
         }
     }
     assert!(
-        present > 100 && giants > 5,
-        "{present} present, {giants} giants"
+        present > 100 && giants > 5 && moons > 20 && rings > 5,
+        "{present} present, {giants} giants, {moons} moons, {rings} rings"
     );
+}
+
+/// P14.T30.b: a moon's position is its planet's plus its own offset, and a ring's its planet's.
+#[test]
+fn a_moon_is_at_its_planet_s_position_plus_its_own_offset() {
+    let mut moons = 0;
+    for (ctx, system) in whole().iter().take(200) {
+        for t in window() {
+            for body in system.bodies() {
+                let OrbitHost::Body(parent) = body.host() else {
+                    continue;
+                };
+                let Some(at) = system.position_at(ctx, body.index(), t).unwrap() else {
+                    continue;
+                };
+                let centre = system.position_at(ctx, parent, t).unwrap().unwrap();
+                let record = system.body_at(ctx, body.index(), t).unwrap();
+                let expected = match record.orbit().ok() {
+                    Some(orbit) => centre.translated(orbit.elements().relative_state_at(t).0),
+                    None => centre,
+                };
+                for (x, y) in at.metres().into_iter().zip(expected.metres()) {
+                    assert_same_bits(x, y);
+                }
+                if record.orbit().ok().is_some() {
+                    moons += 1;
+                }
+            }
+        }
+    }
+    assert!(moons > 50, "{moons} moons");
 }
 
 /// The host's position is plan 11's walk: a star's is `star_positions_at`'s bit for bit, and a
@@ -518,7 +704,10 @@ fn a_companion_s_light_pushes_a_star_s_habitable_zone_out() {
 #[test]
 fn no_overlapping_orbits_in_generated_systems() {
     let (mut pairs, mut bodies, mut outgrown, mut unstable) = (0_u32, 0_u32, 0_u32, 0_u32);
-    for (ctx, system) in generated() {
+    // On whole systems (P14.T30.b): the planets about each host, the records whose parent is the
+    // host; moons keep T22.b's rule about their planet, and a belt's members, listed under their
+    // belt, keep T21.c's clearance of the chaotic zones instead.
+    for (ctx, system) in whole() {
         let strip = ctx.strip_radius();
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
@@ -685,7 +874,8 @@ fn hottest_light(ctx: &SystemContext, t: UniverseTime) -> Option<Kelvin> {
 #[test]
 fn no_planet_hotter_than_its_star_in_generated_systems() {
     let (mut bodies, mut giants) = (0_u32, 0_u32);
-    for (ctx, system) in generated() {
+    // On whole systems (P14.T30.b): planets, moons and belt members.
+    for (ctx, system) in whole() {
         for t in window() {
             let Some(hottest) = hottest_light(ctx, t) else {
                 continue;
@@ -835,9 +1025,9 @@ fn circularisation_is_t8e_s_and_hot_jupiters_circularise() {
         for body in system.bodies() {
             let zone = system.zone(body.host()).unwrap();
             let radius = primordial_radius(body.mass());
-            let expected = circularisation(body.placed(), zone.host_mass(), radius);
-            assert_eq!(body.circularisation(), expected);
-            assert_eq!(body.fate().circularisation(), expected);
+            let expected = circularisation(body.placed().unwrap(), zone.host_mass(), radius);
+            assert_eq!(body.circularisation(), Some(expected));
+            assert_eq!(body.fate().unwrap().circularisation(), expected);
         }
     }
     let mut hot = 0;
@@ -852,7 +1042,7 @@ fn circularisation_is_t8e_s_and_hot_jupiters_circularise() {
         let system = generate_planets(SEED, &ctx);
         for body in system.bodies() {
             let jupiters = body.mass().value() / EARTH_MASSES_PER_JUPITER_MASS;
-            let days = body.orbit().period().value() / 86_400.0;
+            let days = body.orbit().unwrap().period().value() / 86_400.0;
             if (0.3..1.5).contains(&jupiters) && days < 5.0 {
                 let record = system
                     .body_at(&ctx, body.index(), UniverseTime::EPOCH)
@@ -941,4 +1131,82 @@ fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
         );
         assert_eq!(barycentre.plane() == aligned, close, "{au} au");
     }
+}
+
+/// P14.T30.b: on whole systems, every body lies inside its zone and the strip radius at ±H, and
+/// every population inside the strip radius; an unborn system's bodies are all not yet formed.
+#[test]
+fn every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius() {
+    let mut checked = 0;
+    for (ctx, system) in whole() {
+        let strip = ctx.strip_radius();
+        for t in window() {
+            for record in system.snapshot_at(ctx, t).bodies() {
+                match (
+                    record.identity().kind(),
+                    record.orbit().ok(),
+                    record.population().ok(),
+                ) {
+                    (BodyKind::Planet | BodyKind::DwarfPlanet, Some(orbit), _) => {
+                        let body = system.body(record.index()).unwrap();
+                        let zone = system.zone(body.host()).unwrap();
+                        let elements = orbit.elements();
+                        assert!(elements.apoapsis() <= strip, "{:?}", record.index());
+                        if let Some(outer) = zone.outer() {
+                            // The zone is the one at birth; orbits widen with mass loss.
+                            let widened = elements.semi_major_axis().value()
+                                / body.orbit().unwrap().semi_major_axis().value();
+                            assert!(
+                                elements.apoapsis().value() <= outer.value() * widened.max(1.0),
+                                "{:?}",
+                                record.index()
+                            );
+                        }
+                        checked += 1;
+                    }
+                    (BodyKind::Belt(_), _, Some(Population::Belt(belt))) => {
+                        assert!(belt.outer_edge() <= strip * 1.000_000_1 * widening(ctx, t));
+                        checked += 1;
+                    }
+                    (BodyKind::CometaryHalo, _, Some(Population::CometaryHalo(halo))) => {
+                        assert!(halo.outer_edge() <= strip);
+                        checked += 1;
+                    }
+                    (_, _, _) => {}
+                }
+            }
+        }
+    }
+    assert!(checked > 1_000, "{checked}");
+    for i in 0..20 {
+        let ctx = synthetic_star(
+            id(900 + i),
+            SolarMasses::new(1.0),
+            Dex::ZERO,
+            Years::new(-500.0),
+        )
+        .unwrap();
+        let system = generate(SEED, &ctx);
+        let snapshot = system.snapshot_at(&ctx, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
+            assert_eq!(
+                record.identity().state(),
+                BodyState::NotYetFormed,
+                "{:?}",
+                record.index()
+            );
+            assert_eq!(record.position(), None);
+        }
+    }
+}
+
+/// How far the orbits of the primary's host have widened by `t` from its mass lost: its initial
+/// mass over its mass then.
+fn widening(ctx: &SystemContext, t: UniverseTime) -> f64 {
+    let star = &ctx.stars()[0];
+    star.state_at(t)
+        .map_or(1.0, |state| {
+            star.initial_mass().value() / state.mass().value()
+        })
+        .max(1.0)
 }

@@ -104,6 +104,7 @@ pub mod params;
 pub mod placement;
 pub mod record;
 pub mod rings;
+pub mod satellites;
 pub mod system;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

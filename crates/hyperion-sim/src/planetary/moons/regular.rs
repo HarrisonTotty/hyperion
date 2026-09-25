@@ -56,7 +56,7 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::{
     BodyHosts, BuildBodyHostsError, BuildPlacedBodyError, DeriveBodyError, DerivedBody, HostLight,
-    Illumination, PlacedBody, PlanetClass, derive_body,
+    Illumination, MassFractions, PlacedBody, PlanetClass, derive_body,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
 use crate::planetary::moons::{MoonParent, draw_rank, log_uniform, moon_orbit, rayleigh};
@@ -911,6 +911,26 @@ impl DerivedMoon {
         self.density
     }
 
+    /// The moon's mass fractions: its ice as water, and the rest split between iron and rock as
+    /// P14.T16's derivation splits the solids of a rocky body of its mass and radius rank
+    /// (P14.T22.a's record of a moon).
+    #[must_use]
+    pub fn fractions(&self) -> MassFractions {
+        let own = self.body.fractions();
+        let solids = own.iron() + own.rock();
+        let iron_share = if solids > 0.0 {
+            own.iron() / solids
+        } else {
+            0.0
+        };
+        let rock = 1.0 - self.ice_fraction;
+        MassFractions::solid(
+            rock * iron_share,
+            rock * (1.0 - iron_share),
+            self.ice_fraction,
+        )
+    }
+
     /// The moon's class: [`PlanetClass::Icy`] with ice, [`PlanetClass::Rocky`] without.
     #[must_use]
     pub const fn class(&self) -> PlanetClass {
@@ -1179,6 +1199,45 @@ pub fn derive_regular_moon(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
+    derive_moon(
+        moon.mass,
+        &moon.orbit,
+        parent,
+        nursery,
+        sky,
+        radius_rank,
+        age,
+        t,
+    )
+}
+
+/// A moon of mass `mass` on `orbit` about `parent`, derived as [`derive_regular_moon`] derives a
+/// regular one: what P14.T22.a's satellites share, whatever their origin (a giant-impact moon's
+/// or a capture's flux and temperature come from here, beside their own radius and density).
+///
+/// # Errors
+///
+/// As [`derive_regular_moon`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "derive_regular_moon's inputs with the moon's mass and orbit in place of the moon"
+)]
+pub fn derive_moon(
+    mass: EarthMasses,
+    orbit: &KeplerElements,
+    parent: &MoonParent,
+    nursery: &MoonNursery,
+    sky: &MoonSky,
+    radius_rank: UnitUniform,
+    age: Years,
+    t: UniverseTime,
+) -> Result<DerivedMoon, DeriveMoonError> {
+    let moon = RegularMoon {
+        ordinal: 1,
+        mass,
+        orbit: *orbit,
+        resonance: Resonance::None,
+    };
     let a = moon.orbit.semi_major_axis();
     let formation = match nursery.ice_line() {
         Some(_) => a,

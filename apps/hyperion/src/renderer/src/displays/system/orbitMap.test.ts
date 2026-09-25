@@ -203,6 +203,7 @@ describe("fitRadiiAu", () => {
     expect(fitRadiiAu(layout, model.hosts)).toEqual({
       inner: LONE_STAR_FIT_AU,
       all: LONE_STAR_FIT_AU,
+      belts: LONE_STAR_FIT_AU,
     });
   });
 });

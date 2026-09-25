@@ -10,10 +10,14 @@
  */
 import type {
   ArchitectureClassDto,
+  BeltCompositionDto,
+  BeltSiteDto,
   DestructionCauseDto,
   DetailLevelDto,
   MoonOriginDto,
   PlanetClassDto,
+  RingKindDto,
+  RingMaterialDto,
 } from "@hyperion/protocol";
 
 import type { BodyKind, BodyState, Section } from "./model";
@@ -197,6 +201,71 @@ export function detailLevelLabel(level: DetailLevelDto): string {
       break;
     case "full":
       label = "FULL";
+      break;
+  }
+  return label;
+}
+
+/** Which of a giant's rings a ring is, in words: `MASSIVE`, `DUSTY`. */
+export function ringKindLabel(kind: RingKindDto): string {
+  let label: string;
+  switch (kind) {
+    case "massive":
+      label = "MASSIVE";
+      break;
+    case "dusty":
+      label = "DUSTY";
+      break;
+  }
+  return label;
+}
+
+/** What a ring is made of, in words: `POROUS ICE`, `ROCK`. */
+export function ringMaterialLabel(material: RingMaterialDto): string {
+  let label: string;
+  switch (material) {
+    case "porous_ice":
+      label = "POROUS ICE";
+      break;
+    case "rock":
+      label = "ROCK";
+      break;
+  }
+  return label;
+}
+
+/**
+ * Where a belt lies, by the rule that placed it, in words: `INSIDE GIANT` (inside a giant's
+ * orbit), `IN GAP` (in a gap between planets), `BEYOND PLANETS`, `OUTER DISC`.
+ */
+export function beltSiteLabel(site: BeltSiteDto): string {
+  let label: string;
+  switch (site) {
+    case "inside_giant":
+      label = "INSIDE GIANT";
+      break;
+    case "gap":
+      label = "IN GAP";
+      break;
+    case "beyond_planets":
+      label = "BEYOND PLANETS";
+      break;
+    case "outer_disc":
+      label = "OUTER DISC";
+      break;
+  }
+  return label;
+}
+
+/** Which side of the snow line most of a belt's solids lie on, in words: `ROCKY`, `ICY`. */
+export function beltCompositionLabel(composition: BeltCompositionDto): string {
+  let label: string;
+  switch (composition) {
+    case "rocky":
+      label = "ROCKY";
+      break;
+    case "icy":
+      label = "ICY";
       break;
   }
   return label;

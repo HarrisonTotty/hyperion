@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { formatBodyDistance, KM_PER_AU } from "../../lib/format";
 import { scaleBar } from "../../spatial/scale";
-import { formatOrbitScaleLength, METRES_PER_AU, ORBIT_SCALE_UNITS } from "./orbitScale";
+import {
+  BODY_SCALE_UNITS,
+  formatBodyScaleLength,
+  formatOrbitScaleLength,
+  METRES_PER_AU,
+  ORBIT_SCALE_UNITS,
+} from "./orbitScale";
 
 /** The bar's label for the longest bar that fits `longestAu`, as the view's scale bar reads it. */
 function barFor(longestAu: number): string {
@@ -34,5 +40,20 @@ describe("the orbit map's scale bar", () => {
 
   it("refuses a bar with no length", () => {
     expect(() => formatOrbitScaleLength(0)).toThrow(RangeError);
+  });
+});
+
+describe("the body frame's scale bar", () => {
+  it.each([
+    [0.2, "20 Gm"],
+    [0.004, "500 Mm"],
+    [2e-6, "200 km"],
+  ])("reads a bar of at most %f AU in Gm, Mm and km, never AU: %s", (longestAu, label) => {
+    const { length } = scaleBar(1, longestAu, BODY_SCALE_UNITS);
+    expect(formatBodyScaleLength(length)).toBe(label);
+  });
+
+  it("refuses a bar with no length", () => {
+    expect(() => formatBodyScaleLength(0)).toThrow(RangeError);
   });
 });

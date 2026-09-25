@@ -310,3 +310,420 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
     }
     assert!(steps > 50_000, "{steps}");
 }
+
+// --- P14.T22.b: moons and rings of whole generated systems (ruling 83.8) ---
+
+mod satellites {
+    //! Moons and rings of whole systems as `planetary::generate` makes them, about the real
+    //! hosts of layer C cells near the solar circle (P14.T22.b, as ruling 83.8 amends it).
+
+    use hyperion_sim::Seed;
+    use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+    use hyperion_sim::id::Layer;
+    use hyperion_sim::orbit::KeplerElements;
+    use hyperion_sim::planetary::derive::OrbitSense;
+    use hyperion_sim::planetary::fate::BodyState;
+    use hyperion_sim::planetary::moons::irregular::KOZAI_GAP;
+    use hyperion_sim::planetary::moons::{CaptureKind, MoonParent};
+    use hyperion_sim::planetary::placement::mutual_hill_radius;
+    use hyperion_sim::planetary::record::{BodyRecord, Population, Section};
+    use hyperion_sim::planetary::satellites::{Satellite, SatelliteMoon, Satellites};
+    use hyperion_sim::planetary::{PlanetarySystem, SystemContext, generate};
+    use hyperion_sim::time::{ClockWindow, UniverseTime};
+    use hyperion_sim::units::{Metres, SolarMasses, Years};
+
+    use super::planetary_support::galaxy;
+
+    const SEED: Seed = Seed::new(0x5eed_0000_0014_0022);
+
+    /// 2√3, design note 7's gap between one moon's apocentre and the next one's pericentre.
+    const GAP: f64 = 3.464_101_615_137_754_6;
+
+    /// The cells of the walk: rows along x at the solar circle, then the rows beside them, then
+    /// the planes above and below, a fixed order that stays in the disc near 26,000 ly.
+    fn walk() -> impl Iterator<Item = CellKey> {
+        let planes = (0_i32..).flat_map(|k| if k == 0 { vec![0] } else { vec![k, -k] });
+        planes.take(41).flat_map(|z| {
+            (780..=844).flat_map(move |y| {
+                (-100..=100).map(move |x| {
+                    CellKey::new(Layer::C, [x, y, z]).expect("a cell near the solar circle")
+                })
+            })
+        })
+    }
+
+    /// The first `count` systems of [`walk`]'s cells, as each cell and how many of its records
+    /// to take.
+    fn plan(galaxy: &hyperion_sim::galaxy::Galaxy, count: usize) -> Vec<(CellKey, usize)> {
+        let mut records: Vec<SystemRecord> = Vec::new();
+        let mut left = count;
+        let mut plan = Vec::new();
+        for key in walk() {
+            generate_cell(galaxy, key, &mut records);
+            let take = records.len().min(left);
+            if take > 0 {
+                plan.push((key, take));
+                left -= take;
+            }
+            if left == 0 {
+                return plan;
+            }
+        }
+        panic!(
+            "the walk holds {} systems, fewer than {count}",
+            count - left
+        );
+    }
+
+    /// Calls `visit` on each of the first `count` systems of [`walk`], whole, one at a time, so
+    /// that a large run holds one system at once.
+    pub(super) fn each_system(
+        seed: Seed,
+        count: usize,
+        mut visit: impl FnMut(&SystemContext, &PlanetarySystem),
+    ) {
+        let galaxy = galaxy(seed);
+        let mut records: Vec<SystemRecord> = Vec::new();
+        for (key, take) in plan(&galaxy, count) {
+            generate_cell(&galaxy, key, &mut records);
+            for record in records.iter().take(take) {
+                let ctx = SystemContext::from_record(&galaxy, record);
+                let system = generate(galaxy.seed(), &ctx);
+                visit(&ctx, &system);
+            }
+        }
+    }
+
+    /// What the checks counted.
+    #[derive(Debug, Default)]
+    pub(super) struct Counts {
+        pub(super) moons: usize,
+        pub(super) irregulars: usize,
+        pub(super) rings: usize,
+        pub(super) planets_with_moons: usize,
+    }
+
+    /// The times the properties hold at: −H, the epoch and +H.
+    fn window() -> [UniverseTime; 3] {
+        [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END]
+    }
+
+    /// The sense a moon goes round its parent in.
+    fn sense(moon: &Satellite) -> OrbitSense {
+        match moon.moon() {
+            SatelliteMoon::Captured(captured) => captured.sense(),
+            SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => OrbitSense::Prograde,
+        }
+    }
+
+    /// Whether a moon is exempt from the non-crossing rule: an irregular or a rocky planet's small
+    /// capture (ruling 83.8).
+    fn irregular(moon: &Satellite) -> bool {
+        match moon.moon() {
+            SatelliteMoon::Captured(captured) => captured.kind() != CaptureKind::Large,
+            SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => false,
+        }
+    }
+
+    /// Asserts P14.T22.b's properties for one planet's satellites `found` in `system` at `t`.
+    fn check(
+        ctx: &SystemContext,
+        system: &PlanetarySystem,
+        found: &Satellites,
+        t: UniverseTime,
+        counts: &mut Counts,
+    ) {
+        let Some(parent) = found.parent() else {
+            return;
+        };
+        let record = |index| {
+            system
+                .body_at(ctx, index, t)
+                .expect("a generated body resolves")
+        };
+        let present = |r: &BodyRecord| r.identity().state() == BodyState::Present;
+        let mut ordered: Vec<(KeplerElements, &Satellite)> = Vec::new();
+        for moon in found.moons() {
+            let r = record(moon.index());
+            if !present(&r) {
+                continue;
+            }
+            let orbit = *r
+                .orbit()
+                .ok()
+                .expect("a present moon has an orbit")
+                .elements();
+            let density = r.bulk().ok().expect("a present moon has a bulk").density();
+            let e = orbit.eccentricity().value();
+            let (apo, peri) = (orbit.apoapsis(), orbit.periapsis());
+            let id = moon.index();
+            assert!(
+                apo < parent.hill_radius_at_pericentre(),
+                "{id:?} beyond the Hill radius"
+            );
+            assert!(
+                apo < parent.stability_limit(e, sense(moon)),
+                "{id:?} beyond its limit"
+            );
+            assert!(
+                peri > parent.roche_limit_fluid(density),
+                "{id:?} inside the Roche limit"
+            );
+            assert!(peri > parent.radius(), "{id:?} inside its planet");
+            counts.moons += 1;
+            ordered.push((orbit, moon));
+        }
+        if !ordered.is_empty() {
+            counts.planets_with_moons += 1;
+        }
+        // Regular, giant-impact and Triton-like moons never cross (T10.a's rule about the planet).
+        let mut kept: Vec<&(KeplerElements, &Satellite)> = ordered
+            .iter()
+            .filter(|(_, moon)| !irregular(moon))
+            .collect();
+        kept.sort_by(|a, b| {
+            a.0.semi_major_axis()
+                .value()
+                .total_cmp(&b.0.semi_major_axis().value())
+        });
+        let host = SolarMasses::from(parent.mass());
+        for pair in kept.windows(2) {
+            let ((inner, mi), (outer, mo)) = (pair[0], pair[1]);
+            let hill = mutual_hill_radius(
+                mi.mass(),
+                mo.mass(),
+                host,
+                inner.semi_major_axis(),
+                outer.semi_major_axis(),
+            );
+            assert!(
+                outer.periapsis() - inner.apoapsis() >= hill * GAP * (1.0 - 1e-9),
+                "{:?} crosses {:?} in {:?} at {t:?}: {inner:?} {outer:?} {mi:?} {mo:?} {parent:?}",
+                mi.index(),
+                mo.index(),
+                system.system()
+            );
+        }
+        // Ruling 83.8: each irregular clears every other moon and avoids the Kozai gap.
+        let clear_of = kept
+            .iter()
+            .map(|(orbit, moon)| match moon.moon() {
+                SatelliteMoon::GiantImpact(impact) => {
+                    let end = Years::new(ctx.age_at(ClockWindow::END).value());
+                    impact.orbit_at(parent, end).apoapsis()
+                }
+                SatelliteMoon::Regular(_) | SatelliteMoon::Captured(_) => orbit.apoapsis(),
+            })
+            .fold(Metres::new(0.0), |far, a| if a > far { a } else { far });
+        let (lo, hi) = (KOZAI_GAP.0.value(), KOZAI_GAP.1.value());
+        for (orbit, moon) in ordered.iter().filter(|(_, moon)| irregular(moon)) {
+            assert!(
+                orbit.periapsis() > clear_of,
+                "{:?} reaches the regular moons",
+                moon.index()
+            );
+            let local = moon.local_orbit_at(parent, ctx.age_at(t));
+            let degrees = local.inclination().value().to_degrees();
+            assert!(
+                !(lo < degrees && degrees < hi),
+                "{:?} at {degrees}°",
+                moon.index()
+            );
+            counts.irregulars += 1;
+        }
+        check_rings(ctx, system, found, parent, t, counts);
+    }
+
+    /// Asserts that `found`'s rings about `parent` lie inside its Roche limits at `t` (P14.T20).
+    fn check_rings(
+        ctx: &SystemContext,
+        system: &PlanetarySystem,
+        found: &Satellites,
+        parent: &MoonParent,
+        t: UniverseTime,
+        counts: &mut Counts,
+    ) {
+        let present = |r: &BodyRecord| r.identity().state() == BodyState::Present;
+        // Rings inside Roche limits (P14.T20).
+        for ring in found.rings() {
+            let r = system
+                .body_at(ctx, ring.index(), t)
+                .expect("a generated body resolves");
+            if !present(&r) {
+                continue;
+            }
+            let Section::Ok(Population::Ring(ring)) = r.population() else {
+                panic!("a present ring carries its extent");
+            };
+            assert!(ring.outer_edge() <= parent.roche_limit_fluid(ring.material().density()));
+            assert!(ring.inner_edge() >= parent.radius());
+            counts.rings += 1;
+        }
+    }
+
+    /// Checks every planet's satellites of the first `count` systems of [`each_system`] at −H,
+    /// the epoch and +H.
+    pub(super) fn check_all(seed: Seed, count: usize) -> Counts {
+        let galaxy = galaxy(seed);
+        let plan = plan(&galaxy, count);
+        // The cells are shared out among threads, each counting its own; the checks are per
+        // system and the counts are summed, so the result is the same on any number of threads.
+        let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+        let (galaxy, plan) = (&galaxy, &plan);
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..threads)
+                .map(|k| {
+                    scope.spawn(move || {
+                        let mut counts = Counts::default();
+                        let mut records: Vec<SystemRecord> = Vec::new();
+                        for &(key, take) in plan.iter().skip(k).step_by(threads) {
+                            generate_cell(galaxy, key, &mut records);
+                            for record in records.iter().take(take) {
+                                let ctx = SystemContext::from_record(galaxy, record);
+                                let system = generate(galaxy.seed(), &ctx);
+                                for found in system.satellites() {
+                                    for t in window() {
+                                        check(&ctx, &system, found, t, &mut counts);
+                                    }
+                                }
+                            }
+                        }
+                        counts
+                    })
+                })
+                .collect();
+            workers.into_iter().fold(Counts::default(), |sum, worker| {
+                let part = worker.join().expect("a worker's checks hold");
+                Counts {
+                    moons: sum.moons + part.moons,
+                    irregulars: sum.irregulars + part.irregulars,
+                    rings: sum.rings + part.rings,
+                    planets_with_moons: sum.planets_with_moons + part.planets_with_moons,
+                }
+            })
+        })
+    }
+
+    /// The Solar-like golden system of `planetary_golden` (P14.T32), in its own universe.
+    const SOLAR_LIKE: u64 = 0x4200_aca2_0000_0003;
+
+    /// P14.T22's statistics for the report, printed, not asserted beyond their presence: moons
+    /// per giant, the share of cold and hot giants with a massive ring (0.15 and 0.03, P14.T20),
+    /// the share of single FGK main-sequence hosts of 1–10 Gyr with a detected cold belt
+    /// (0.15–0.30, P14.T21.b), and the Solar-like golden's moons and belts.
+    #[test]
+    #[ignore = "slow: counts the satellites and belts of 100,000 whole systems"]
+    fn moons_and_rings_statistics_slow() {
+        use hyperion_sim::planetary::belts::DETECTION_THRESHOLD;
+        use hyperion_sim::planetary::derive::PlanetClass;
+        use hyperion_sim::planetary::record::BeltKind;
+        use hyperion_sim::planetary::rings::{ICY_RING_TEMPERATURE, RingKind};
+        use hyperion_sim::stellar::Phase;
+
+        let count = 100_000;
+        let (mut gas, mut gas_moons, mut ice, mut ice_moons) = (0_u32, 0_u32, 0_u32, 0_u32);
+        let (mut cold, mut cold_massive, mut hot, mut hot_massive) = (0_u32, 0_u32, 0_u32, 0_u32);
+        let (mut fgk, mut fgk_cold_belt) = (0_u32, 0_u32);
+        each_system(Seed::new(0x5eed_0000_0014_2023), count, |ctx, system| {
+            for found in system.satellites() {
+                let Some(parent) = found.parent() else {
+                    continue;
+                };
+                let n = u32::try_from(found.moons().len()).unwrap();
+                match parent.class() {
+                    PlanetClass::GasGiant => (gas, gas_moons) = (gas + 1, gas_moons + n),
+                    PlanetClass::IceGiant => (ice, ice_moons) = (ice + 1, ice_moons + n),
+                    PlanetClass::Rocky | PlanetClass::Icy | PlanetClass::SubNeptune => continue,
+                }
+                let record = system
+                    .body_at(ctx, found.parent_index(), UniverseTime::EPOCH)
+                    .unwrap();
+                let Some(bulk) = record.bulk().ok() else {
+                    continue;
+                };
+                let massive = found.rings().iter().any(|r| r.kind() == RingKind::Massive);
+                if bulk.equilibrium_temperature() < ICY_RING_TEMPERATURE {
+                    (cold, cold_massive) = (cold + 1, cold_massive + u32::from(massive));
+                } else {
+                    (hot, hot_massive) = (hot + 1, hot_massive + u32::from(massive));
+                }
+            }
+            let star = &ctx.stars()[0];
+            let age = ctx.age_at_epoch();
+            let Some(state) = star.state_at(UniverseTime::EPOCH) else {
+                return;
+            };
+            if ctx.stars().len() == 1
+                && (0.6..=1.5).contains(&star.initial_mass().value())
+                && (1e9..=1e10).contains(&age.value())
+                && state.phase() == Phase::MainSequence
+            {
+                fgk += 1;
+                let seen = system.belts().iter().any(|belt| {
+                    belt.kind() == BeltKind::Kuiper
+                        && belt.detectable_luminosity(Years::new(age.value()), state.luminosity())
+                            >= DETECTION_THRESHOLD
+                });
+                fgk_cold_belt += u32::from(seen);
+            }
+        });
+        let ratio = |a: u32, b: u32| f64::from(a) / f64::from(b.max(1));
+        eprintln!(
+            "{} systems: {gas} gas giants with {:.2} moons each, {ice} ice giants with {:.2}; \
+             massive rings on {cold_massive} of {cold} cold giants ({:.3}) and {hot_massive} of \
+             {hot} hot ({:.3}); detected cold belts about {fgk_cold_belt} of {fgk} FGK hosts ({:.3})",
+            count,
+            ratio(gas_moons, gas),
+            ratio(ice_moons, ice),
+            ratio(cold_massive, cold),
+            ratio(hot_massive, hot),
+            ratio(fgk_cold_belt, fgk),
+        );
+        let galaxy = galaxy(Seed::new(0x5eed_0000_0014_0032));
+        let id = hyperion_sim::id::SystemId::from_raw(SOLAR_LIKE).unwrap();
+        let ctx = SystemContext::for_system(&galaxy, id).unwrap();
+        let system = generate(galaxy.seed(), &ctx);
+        for record in system.snapshot_at(&ctx, UniverseTime::EPOCH).bodies() {
+            let label = record
+                .identity()
+                .label()
+                .ok()
+                .map(|l| l.as_str().to_owned());
+            let extent = match record.population().ok() {
+                Some(Population::Belt(belt)) => format!(
+                    "{:.3}-{:.3} au",
+                    belt.inner_edge().value() / 1.495_978_707e11,
+                    belt.outer_edge().value() / 1.495_978_707e11
+                ),
+                Some(Population::CometaryHalo(halo)) => {
+                    format!("{:.3e} comets", halo.comets())
+                }
+                _ => String::new(),
+            };
+            eprintln!(
+                "solar-like {:?} {:?} {label:?} {:?} {extent}",
+                record.index(),
+                record.identity().kind(),
+                record.mass().ok()
+            );
+        }
+        assert!(gas + ice > 500, "{gas} + {ice} giants");
+    }
+
+    #[test]
+    fn moons_inside_hill_spheres_and_rings_inside_roche_limits() {
+        let counts = check_all(SEED, 1_500);
+        assert!(
+            counts.moons > 300 && counts.irregulars > 30 && counts.rings > 100,
+            "{counts:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "slow: checks the satellites of a million whole systems at ±H"]
+    fn moons_inside_hill_spheres_and_rings_inside_roche_limits_slow() {
+        let counts = check_all(Seed::new(0x5eed_0000_0014_2022), 1_000_000);
+        eprintln!("{counts:?}");
+        assert!(counts.moons > 100_000, "{counts:?}");
+    }
+}

@@ -12,7 +12,9 @@
  */
 import type {
   ArchitectureClassDto,
+  BeltCompositionDto,
   BeltKindDto,
+  BeltSiteDto,
   BodyIdHex,
   DestructionCauseDto,
   DetailLevelDto,
@@ -21,6 +23,8 @@ import type {
   ObjectKindDto,
   PhaseDto,
   PlanetClassDto,
+  RingKindDto,
+  RingMaterialDto,
   StarEventKindDto,
   SystemIdHex,
   UniverseIdHex,
@@ -255,6 +259,94 @@ export interface BulkProperties {
   readonly equilibriumTemperatureK: number;
 }
 
+/** A gap a moon's resonance clears in a massive ring. */
+export interface RingGap {
+  /** The moon whose resonance clears it. */
+  readonly moon: BodyIdHex;
+  /** The moon's period to the gap's, as the pair (p + 1, p): `[2, 1]`. */
+  readonly resonance: readonly [number, number];
+  /** Its distance from the planet's centre. */
+  readonly radiusM: number;
+}
+
+/**
+ * A giant's ring (the protocol's `RingDto`): its edges are distances from its planet's centre in
+ * the planet's equatorial plane, which this generator version takes to be its orbital plane.
+ */
+export interface Ring {
+  readonly ringKind: RingKindDto;
+  readonly material: RingMaterialDto;
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+  /** The normal optical depth, dimensionless. */
+  readonly opticalDepth: number;
+  /** Inside out; none in a dusty ring. */
+  readonly gaps: ReadonlyArray<RingGap>;
+}
+
+/** One annulus of a belt, in metres from the belt's host. */
+export interface BeltComponent {
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+}
+
+/** A gap a planet's resonance clears in an asteroid belt. */
+export interface BeltGap {
+  /** The giant's period to the gap's: `[3, 1]`. */
+  readonly resonance: readonly [number, number];
+  /** Its distance from the belt's host. */
+  readonly radiusM: number;
+}
+
+/**
+ * A belt about an orbit host (the protocol's `BeltDto`): its edges lie in its host's zone's plane,
+ * in metres from the host.
+ */
+export interface Belt {
+  /** A star, a pair or the barycentre. */
+  readonly host: OrbitHost;
+  readonly site: BeltSiteDto;
+  /** The whole belt's, its scattered component included. */
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+  /** The belt proper. */
+  readonly main: BeltComponent;
+  /** A Kuiper-like belt's scattered component; `null` for every other belt. */
+  readonly scattered: BeltComponent | null;
+  /** Inside out. */
+  readonly gaps: ReadonlyArray<BeltGap>;
+  /** The size slope q of N(> D) ∝ D^(−q). */
+  readonly sizeSlope: number;
+  readonly largestDiameterM: number;
+  readonly composition: BeltCompositionDto;
+  readonly meanEccentricity: number;
+  /** To its host's plane. */
+  readonly meanInclinationRad: number;
+  /** Its dust's luminosity over its host's, dimensionless. */
+  readonly fractionalLuminosity: number;
+  /** Its dwarf planets, in index order; `not_resolved` below the `bulk` level. */
+  readonly members: Section<ReadonlyArray<BodyIdHex>>;
+}
+
+/** A system's cometary halo (the protocol's `CometaryHaloDto`), a shell about its host. */
+export interface CometaryHalo {
+  readonly host: OrbitHost;
+  /** The inner radius, from its host. */
+  readonly innerEdgeM: number;
+  /** The outer radius, from its host. */
+  readonly outerEdgeM: number;
+  /** Comets over 1 km across, a statistical figure. */
+  readonly comets: number;
+  /** Long-period comets reaching perihelion inside 5 au × √(L ÷ L☉) of the host, per second. */
+  readonly cometRatePerS: number;
+}
+
+/** What a population body is and where it lies (the protocol's `PopulationDto`). */
+export type Population =
+  | ({ readonly kind: "ring" } & Ring)
+  | ({ readonly kind: "belt" } & Belt)
+  | ({ readonly kind: "cometary_halo" } & CometaryHalo);
+
 /** One body of a system as the system's list carries it (the protocol's `BodySummaryDto`). */
 export interface SystemBody {
   readonly id: BodyIdHex;
@@ -278,6 +370,8 @@ export interface SystemBody {
   readonly orbit: Section<BodyOrbit>;
   readonly moons: Section<ReadonlyArray<BodyIdHex>>;
   readonly rings: Section<ReadonlyArray<BodyIdHex>>;
+  /** What a ring, a belt or the halo is and where it lies; `not_applicable` for any other body. */
+  readonly population: Section<Population>;
   readonly bulk: Section<BulkProperties>;
 }
 

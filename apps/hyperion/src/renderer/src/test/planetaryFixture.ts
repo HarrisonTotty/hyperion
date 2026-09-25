@@ -99,3 +99,11 @@ export function sliceBodiesWith(
   const slice = sliceBodies();
   return { ...slice, bodies: slice.bodies.map(change) };
 }
+
+/** The populated answer with its bodies changed by `change`, as a later generator might send it. */
+export function populatedBodiesWith(
+  change: (body: BodySummaryDto) => BodySummaryDto,
+): ResponseFor<"system_bodies"> {
+  const populated = populatedBodies();
+  return { ...populated, bodies: populated.bodies.map(change) };
+}

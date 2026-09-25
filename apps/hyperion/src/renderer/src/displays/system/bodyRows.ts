@@ -66,10 +66,23 @@ function semiMajorAxisM(body: SystemBody): number | null {
   return body.orbit.state === "ok" ? body.orbit.value.orbit.semiMajorAxisM : null;
 }
 
-/** Bodies nearest their parent first, then those with no orbit on show, each by body index. */
+/**
+ * How far from its parent a body is listed at: its semi-major axis, or a ring's, a belt's or the
+ * halo's inner edge, so that a belt stands among the planets where it lies and a ring among the
+ * moons; `null` for a body with neither on show.
+ */
+function listedDistanceM(body: SystemBody): number | null {
+  const axisM = semiMajorAxisM(body);
+  if (axisM !== null) {
+    return axisM;
+  }
+  return body.population.state === "ok" ? body.population.value.innerEdgeM : null;
+}
+
+/** Bodies nearest their parent first, then those with no distance on show, each by body index. */
 function bySemiMajorAxis(a: SystemBody, b: SystemBody): number {
-  const aM = semiMajorAxisM(a);
-  const bM = semiMajorAxisM(b);
+  const aM = listedDistanceM(a);
+  const bM = listedDistanceM(b);
   if (aM !== null && bM !== null && aM !== bM) {
     return aM - bM;
   }
@@ -101,9 +114,10 @@ function bodyRow(body: SystemBody, parentId: string | null, level: number): Body
  * @remarks
  * A body sits under the row of what it belongs to: its star, or the body it orbits. What orbits a
  * pair or the whole system, as a circumbinary planet or the cometary halo, has no row to sit under
- * and follows the hosts at the top of the tree. Siblings run nearest first by semi-major axis;
- * those with no orbit on show (withheld, not applicable, or gone with the body) follow in body-index
- * order. Every body is listed, drawn or not: a destroyed, unbound or unformed body reads its state
+ * and follows the hosts at the top of the tree. A belt's members sit under the belt, though they
+ * orbit its star. Siblings run nearest first, by semi-major axis, or by inner edge for a ring, a
+ * belt or the halo; those with neither on show (withheld, not applicable, or gone with the body)
+ * follow in body-index order. Every body is listed, drawn or not: a destroyed, unbound or unformed body reads its state
  * in words.
  */
 export function systemRows(

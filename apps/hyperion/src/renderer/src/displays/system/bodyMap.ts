@@ -14,6 +14,7 @@ import { formatBodyId, type SystemIdHex, type UniverseTime } from "@hyperion/pro
 
 import { type BodyPlacement, composePosition, orbitPolyline } from "../../lib/orbit";
 import { bodySymbol } from "../../lib/system/bodySymbols";
+import { bodyKindLabel, ringKindLabel } from "../../lib/system/bodyWords";
 import type { HierarchyLayout } from "../../lib/system/hierarchy";
 import type { BodyKind, OrbitHost, SystemBody, Zone } from "../../lib/system/model";
 import type { AnnulusMark, PathMark, PointMark } from "../../spatial/marks";
@@ -174,6 +175,11 @@ function toAu(positionM: Vec3): Vec3 {
 /**
  * Every drawn body as a point mark at the display time: its symbol, labelled with its
  * designation, heavier bodies labelled first, after every star.
+ *
+ * @remarks
+ * Moons are left to the frame of their planet, which `FOCUS BODY` draws (P14.T42.b): at the
+ * system's scale a moon lies under its planet's symbol, where it would take the planet's label and
+ * its pick.
  */
 export function bodyMarks(
   bodies: ReadonlyArray<SystemBody>,
@@ -182,7 +188,7 @@ export function bodyMarks(
 ): ReadonlyArray<PointMark> {
   const marks: PointMark[] = [];
   for (const body of bodies) {
-    const symbol = bodySymbol(body);
+    const symbol = body.kind.kind === "moon" ? null : bodySymbol(body);
     const positionM = symbol === null ? null : bodyPositionM(body, bodiesLayout, time);
     if (symbol === null || positionM === null) {
       continue;
@@ -205,10 +211,9 @@ export function bodyMarks(
  * selected body's is the one `selected` path, and the rest are `reference` (plan 14, P14.T42.a).
  *
  * @remarks
- * A moon's orbit is left to the body frame that `FOCUS BODY` will draw (P14.T42.b), since its
- * elements are referred to its planet's equator, which the wire does not carry yet; at the system's
- * scale it would lie under its planet's symbol in any case. Paths are not labelled: the marks on
- * them are.
+ * A moon's orbit is left to the body frame that `FOCUS BODY` draws (P14.T42.b), since at the
+ * system's scale it would lie under its planet's symbol. Paths are not labelled: the marks on them
+ * are.
  */
 export function bodyPaths(
   bodies: ReadonlyArray<SystemBody>,
@@ -397,4 +402,138 @@ export function habitableOuterAu(
   const key = hostKeyOf(zone.host, system, layout);
   const hostReachM = key === null ? 0 : (layout.reachM.get(key) ?? 0);
   return (hostReachM + outerM) / METRES_PER_AU;
+}
+
+/**
+ * What a population is called on the map: its label for people when it has one (`BELT 1`), and
+ * its kind in words otherwise (`ASTEROID BELT`, `MASSIVE RING`), so that two rings unlabelled
+ * still read apart.
+ */
+export function populationName(body: SystemBody): string {
+  if (body.label.state === "ok") {
+    return body.label.value;
+  }
+  const population = body.population.state === "ok" ? body.population.value : null;
+  return population?.kind === "ring"
+    ? `${ringKindLabel(population.ringKind)} RING`
+    : bodyKindLabel(body.kind);
+}
+
+/** Where a belt's or the halo's host is at the display time, AU, or `null` for one not held. */
+function hostCentreAu(
+  host: OrbitHost,
+  system: SystemIdHex,
+  layout: HierarchyLayout,
+  time: UniverseTime,
+): Vec3 | null {
+  const key = hostKeyOf(host, system, layout);
+  return key === null ? null : toAu(composePosition(layout.placements, key, time));
+}
+
+/**
+ * The belts as ticked annuli on the reference plane about their hosts at the display time, and the
+ * cometary halo as a labelled ring when it is inside the view (plan 14, P14.T42.a and T38.a).
+ *
+ * @remarks
+ * A belt proper is drawn as its two edges joined by radial ticks every 10°, labelled with its name;
+ * a Kuiper-like belt's scattered component, which runs on beyond it, as its two edges alone,
+ * labelled `SCATTERED DISC`, so that the two differ by shape. Both lie in the reference plane, which
+ * is the host's zone's plane for the primary's belts and a companion's own only approximately, as
+ * the zones' annuli do. The halo is a shell, drawn as the circles where it meets the plane: its
+ * inner edge when that lies inside `viewRadiusAu`, the radius the view fits, labelled as its inner
+ * edge, and its outer edge too when that does, labelled as the halo; beyond the view it draws nothing, since a ring off the map says nothing. A body
+ * not present, or whose section is not `ok`, draws nothing.
+ *
+ * @param viewRadiusAu - The radius the view fits, from the barycentre.
+ */
+export function populationAnnuli(
+  bodies: ReadonlyArray<SystemBody>,
+  system: SystemIdHex,
+  layout: HierarchyLayout,
+  time: UniverseTime,
+  viewRadiusAu: number,
+): ReadonlyArray<AnnulusMark> {
+  const annuli: AnnulusMark[] = [];
+  for (const body of bodies) {
+    const population = body.population.state === "ok" ? body.population.value : null;
+    if (population === null || population.kind === "ring" || body.state.kind !== "present") {
+      continue;
+    }
+    const centre = hostCentreAu(population.host, system, layout, time);
+    if (centre === null) {
+      continue;
+    }
+    const name = populationName(body);
+    if (population.kind === "belt") {
+      annuli.push({
+        id: `belt:${body.id}`,
+        centre,
+        innerRadius: population.main.innerEdgeM / METRES_PER_AU,
+        outerRadius: population.main.outerEdgeM / METRES_PER_AU,
+        ticks: true,
+        label: name,
+        // Spinward, clear of the snow line's and the zones' labels on the rimward ray, which a belt
+        // near the snow line would meet.
+        labelSpinward: true,
+      });
+      if (population.scattered !== null) {
+        annuli.push({
+          id: `belt:${body.id}:scattered`,
+          centre,
+          innerRadius: population.scattered.innerEdgeM / METRES_PER_AU,
+          outerRadius: population.scattered.outerEdgeM / METRES_PER_AU,
+          ticks: false,
+          label: "SCATTERED DISC",
+        });
+      }
+      continue;
+    }
+    const hostKey = hostKeyOf(population.host, system, layout);
+    const hostReachAu = (hostKey === null ? 0 : (layout.reachM.get(hostKey) ?? 0)) / METRES_PER_AU;
+    const innerAu = population.innerEdgeM / METRES_PER_AU;
+    const outerAu = population.outerEdgeM / METRES_PER_AU;
+    if (hostReachAu + innerAu > viewRadiusAu) {
+      continue;
+    }
+    const whole = hostReachAu + outerAu <= viewRadiusAu;
+    annuli.push({
+      id: `halo:${body.id}`,
+      centre,
+      innerRadius: innerAu,
+      outerRadius: whole ? outerAu : innerAu,
+      ticks: false,
+      // A lone circle is the halo's inner edge, and says so.
+      label: whole ? name : `${name} INNER EDGE`,
+    });
+  }
+  return annuli;
+}
+
+/**
+ * How far the outermost belt proper reaches from the barycentre, AU: its host's reach and its outer
+ * edge; `null` for a system with no belt drawn. The radius `BELTS` fits (P14.T42.b).
+ *
+ * @remarks
+ * A Kuiper-like belt's scattered component is left out, since it runs on to many times the belt's
+ * radius and would leave the belt proper a small ring in the middle of the view.
+ */
+export function beltsOuterAu(
+  bodies: ReadonlyArray<SystemBody>,
+  system: SystemIdHex,
+  layout: HierarchyLayout,
+): number | null {
+  let outerAu: number | null = null;
+  for (const body of bodies) {
+    const population = body.population.state === "ok" ? body.population.value : null;
+    if (population?.kind !== "belt" || body.state.kind !== "present") {
+      continue;
+    }
+    const key = hostKeyOf(population.host, system, layout);
+    if (key === null) {
+      continue;
+    }
+    const reachAu = ((layout.reachM.get(key) ?? 0) + population.main.outerEdgeM) / METRES_PER_AU;
+    outerAu = Math.max(outerAu ?? 0, reachAu);
+  }
+  return outerAu;
 }

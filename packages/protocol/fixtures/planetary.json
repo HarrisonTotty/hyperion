@@ -140,6 +140,9 @@
           "rings": {
             "state": "not_modelled"
           },
+          "population": {
+            "state": "not_applicable"
+          },
           "bulk": {
             "state": "ok",
             "value": {
@@ -202,6 +205,9 @@
           },
           "rings": {
             "state": "not_modelled"
+          },
+          "population": {
+            "state": "not_applicable"
           },
           "bulk": {
             "state": "ok",
@@ -354,6 +360,9 @@
             "state": "ok",
             "value": ["0200080020000000.0180"]
           },
+          "population": {
+            "state": "not_applicable"
+          },
           "bulk": {
             "state": "ok",
             "value": {
@@ -419,6 +428,9 @@
           "rings": {
             "state": "not_applicable"
           },
+          "population": {
+            "state": "not_applicable"
+          },
           "bulk": {
             "state": "ok",
             "value": {
@@ -465,6 +477,24 @@
           "rings": {
             "state": "not_applicable"
           },
+          "population": {
+            "state": "ok",
+            "value": {
+              "type": "ring",
+              "ring_kind": "massive",
+              "material": "porous_ice",
+              "inner_edge_m": 66000000.0,
+              "outer_edge_m": 136800000.0,
+              "optical_depth": 0.6,
+              "gaps": [
+                {
+                  "moon": "0200080020000000.0101",
+                  "resonance": [2, 1],
+                  "radius_m": 117000000.0
+                }
+              ]
+            }
+          },
           "bulk": {
             "state": "not_applicable"
           }
@@ -505,6 +535,9 @@
           "rings": {
             "state": "ok",
             "value": []
+          },
+          "population": {
+            "state": "not_applicable"
           },
           "bulk": {
             "state": "ok",
@@ -553,6 +586,9 @@
           "rings": {
             "state": "not_modelled"
           },
+          "population": {
+            "state": "not_applicable"
+          },
           "bulk": {
             "state": "not_modelled"
           }
@@ -592,6 +628,9 @@
           "rings": {
             "state": "ok",
             "value": []
+          },
+          "population": {
+            "state": "not_applicable"
           },
           "bulk": {
             "state": "ok",
@@ -639,6 +678,40 @@
           },
           "rings": {
             "state": "not_applicable"
+          },
+          "population": {
+            "state": "ok",
+            "value": {
+              "type": "belt",
+              "host": {
+                "type": "star",
+                "body_index": 0
+              },
+              "site": "inside_giant",
+              "inner_edge_m": 308900000000.0,
+              "outer_edge_m": 490500000000.0,
+              "main": {
+                "inner_edge_m": 308900000000.0,
+                "outer_edge_m": 490500000000.0
+              },
+              "scattered": null,
+              "gaps": [
+                {
+                  "resonance": [3, 1],
+                  "radius_m": 374300000000.0
+                }
+              ],
+              "size_slope": 3.0,
+              "largest_diameter_m": 940000.0,
+              "composition": "rocky",
+              "mean_eccentricity": 0.125,
+              "mean_inclination_rad": 0.175,
+              "fractional_luminosity": 1e-9,
+              "members": {
+                "state": "ok",
+                "value": ["0200080020000000.e001"]
+              }
+            }
           },
           "bulk": {
             "state": "not_applicable"
@@ -692,6 +765,9 @@
             "state": "ok",
             "value": []
           },
+          "population": {
+            "state": "not_applicable"
+          },
           "bulk": {
             "state": "ok",
             "value": {
@@ -737,6 +813,19 @@
           "rings": {
             "state": "not_applicable"
           },
+          "population": {
+            "state": "ok",
+            "value": {
+              "type": "cometary_halo",
+              "host": {
+                "type": "barycentre"
+              },
+              "inner_edge_m": 299195741400000.0,
+              "outer_edge_m": 1.495978707e16,
+              "comets": 750000000000.0,
+              "comet_rate_per_s": 3.45e-7
+            }
+          },
           "bulk": {
             "state": "not_applicable"
           }
@@ -775,6 +864,9 @@
           "rings": {
             "state": "not_applicable"
           },
+          "population": {
+            "state": "not_applicable"
+          },
           "bulk": {
             "state": "not_applicable"
           }
@@ -806,6 +898,9 @@
             "state": "not_applicable"
           },
           "rings": {
+            "state": "not_applicable"
+          },
+          "population": {
             "state": "not_applicable"
           },
           "bulk": {
@@ -885,6 +980,9 @@
         },
         "rings": {
           "state": "not_modelled"
+        },
+        "population": {
+          "state": "not_applicable"
         },
         "bulk": {
           "state": "ok",
@@ -968,6 +1066,9 @@
         "rings": {
           "state": "not_modelled"
         },
+        "population": {
+          "state": "not_applicable"
+        },
         "bulk": {
           "state": "not_resolved"
         },
@@ -1017,6 +1118,9 @@
           "state": "not_resolved"
         },
         "rings": {
+          "state": "not_resolved"
+        },
+        "population": {
           "state": "not_resolved"
         },
         "bulk": {

@@ -7,7 +7,7 @@ import {
   SECTION_OK_LIST,
 } from "../../test/systemFixtures";
 import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
-import { populatedBodies, sliceBodies } from "../../test/planetaryFixture";
+import { populatedBodies, populatedBodiesWith, sliceBodies } from "../../test/planetaryFixture";
 import { smallBodySections, systemNote } from "./systemNote";
 
 /** The slice's tags: every small-body section not modelled, on the system and on one planet. */
@@ -89,5 +89,49 @@ describe("smallBodySections", () => {
   it("names only the moons and rings of the one planet whose tags leave them unmodelled", () => {
     // Its belts and halo are ok; its unformed planet's moons and rings are not modelled.
     expect(noteOf(populatedBodies())).toBe("MOONS AND RINGS: NOT YET MODELLED");
+  });
+});
+
+describe("smallBodySections of a system with every small body modelled", () => {
+  it("says nothing once moons, rings, belts and the halo are all tagged ok", () => {
+    // The populated answer with its unformed planet's moons and rings modelled as none, as a
+    // phase-D server tags them: every small-body section is then ok.
+    const modelled = populatedBodiesWith((body) =>
+      body.moons.state === "not_modelled"
+        ? { ...body, moons: { state: "ok", value: [] }, rings: { state: "ok", value: [] } }
+        : body,
+    );
+
+    expect(noteOf(modelled)).toBeNull();
+  });
+});
+
+describe("smallBodySections of a belt's members", () => {
+  it("does not name rings for a member whose rings are not modelled when every planet's are", () => {
+    // Every planet's moons and rings modelled; the belt's dwarf planet keeps its rings not modelled,
+    // as the wire tags a dwarf planet's.
+    const modelled = populatedBodiesWith((body) => {
+      if (body.kind.type === "dwarf_planet") {
+        return { ...body, rings: { state: "not_modelled" } };
+      }
+      return body.moons.state === "not_modelled"
+        ? { ...body, moons: { state: "ok", value: [] }, rings: { state: "ok", value: [] } }
+        : body;
+    });
+
+    expect(noteOf(modelled)).toBeNull();
+  });
+
+  it("still names moons for a member whose moons are not modelled", () => {
+    const unmodelled = populatedBodiesWith((body) => {
+      if (body.kind.type === "dwarf_planet") {
+        return { ...body, moons: { state: "not_modelled" }, rings: { state: "not_modelled" } };
+      }
+      return body.moons.state === "not_modelled"
+        ? { ...body, moons: { state: "ok", value: [] }, rings: { state: "ok", value: [] } }
+        : body;
+    });
+
+    expect(noteOf(unmodelled)).toBe("MOONS: NOT YET MODELLED");
   });
 });

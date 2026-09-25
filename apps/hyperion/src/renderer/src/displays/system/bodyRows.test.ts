@@ -73,19 +73,21 @@ describe("systemRows", () => {
     ]);
   });
 
-  it("keeps every body in the tree, moons under their planet, and reads a gone body's state", () => {
+  it("keeps every body in the tree, moons and rings under their planet, and reads a gone body's state", () => {
     expect(
       rowsOf(populatedBodies()).map((row) => [row.id.slice(17), row.level, row.state]),
     ).toEqual([
       ["0000", 1, null],
       ["0100", 2, null],
-      ["0101", 3, null],
+      // The ring's inner edge, 66 Mm, lies inside the moon's orbit, 384 Mm.
       ["0180", 3, null],
+      ["0101", 3, null],
+      // The belt, from 2.06 AU, stands among the planets where it lies, its member under it.
+      ["e000", 2, null],
+      ["e001", 3, null],
       ["0200", 2, "DESTROYED"],
       ["0300", 2, "NOT YET FORMED"],
       ["0400", 2, "UNBOUND"],
-      ["e000", 2, null],
-      ["e001", 3, null],
       ["e200", 2, "DESTROYED"],
       ["e300", 2, null],
       ["e100", 1, null],

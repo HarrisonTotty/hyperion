@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, SectionDto};
+use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};
 use crate::primitives::{BodyIdHex, SurfaceSeedHex, UniverseIdHex, UniverseTime};
 
 /// What a body is (plan 14's `BodyKind`), with every variant from the start, so that a later task
@@ -256,11 +256,15 @@ pub struct BodySummaryDto {
     /// such as a free-floating object.
     pub orbit: SectionDto<BodyOrbitDto>,
     /// Its moons, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a body with
-    /// none. `not_modelled` for every planet in this generator version.
+    /// none, and `not_applicable` for a moon, a ring or a population.
     pub moons: SectionDto<Vec<BodyIdHex>>,
-    /// Its rings, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a body with
-    /// none. `not_modelled` for every planet in this generator version.
+    /// Its rings, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a planet with
+    /// none, `not_modelled` for a dwarf planet, and `not_applicable` for a moon, a ring or a
+    /// population.
     pub rings: SectionDto<Vec<BodyIdHex>>,
+    /// What a population body is and where it lies, a ring, a belt or the cometary halo
+    /// (`mass_and_orbit`); `not_applicable` for every other body.
+    pub population: SectionDto<PopulationDto>,
     /// Its bulk properties (`bulk`).
     pub bulk: SectionDto<BulkPropertiesDto>,
 }
@@ -292,11 +296,15 @@ pub struct BodyRecordDto {
     /// such as a free-floating object.
     pub orbit: SectionDto<BodyOrbitDto>,
     /// Its moons, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a body with
-    /// none. `not_modelled` for every planet in this generator version.
+    /// none, and `not_applicable` for a moon, a ring or a population.
     pub moons: SectionDto<Vec<BodyIdHex>>,
-    /// Its rings, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a body with
-    /// none. `not_modelled` for every planet in this generator version.
+    /// Its rings, by ID in index order (`mass_and_orbit`); `ok` with an empty list for a planet with
+    /// none, `not_modelled` for a dwarf planet, and `not_applicable` for a moon, a ring or a
+    /// population.
     pub rings: SectionDto<Vec<BodyIdHex>>,
+    /// What a population body is and where it lies, a ring, a belt or the cometary halo
+    /// (`mass_and_orbit`); `not_applicable` for every other body.
+    pub population: SectionDto<PopulationDto>,
     /// Its bulk properties (`bulk`).
     pub bulk: SectionDto<BulkPropertiesDto>,
     /// Its surface (`surface`): `not_applicable` for a giant, which has none, and `not_modelled`
@@ -421,6 +429,7 @@ pub(crate) mod tests {
             orbit: SectionDto::Ok(earth_orbit()),
             moons: SectionDto::NotModelled,
             rings: SectionDto::NotModelled,
+            population: SectionDto::NotApplicable,
             bulk: SectionDto::Ok(earth_bulk()),
         }
     }
@@ -437,6 +446,7 @@ pub(crate) mod tests {
             "orbit": { "state": "ok", "value": earth_orbit_json() },
             "moons": { "state": "not_modelled" },
             "rings": { "state": "not_modelled" },
+            "population": { "state": "not_applicable" },
             "bulk": { "state": "ok", "value": earth_bulk_json() },
         })
     }
@@ -455,6 +465,7 @@ pub(crate) mod tests {
             orbit: summary.orbit,
             moons: summary.moons,
             rings: summary.rings,
+            population: summary.population,
             bulk: summary.bulk,
             surface: SectionDto::NotModelled,
             hooks: SectionDto::NotModelled,
@@ -589,6 +600,7 @@ pub(crate) mod tests {
             orbit: SectionDto::NotResolved,
             moons: SectionDto::NotResolved,
             rings: SectionDto::NotResolved,
+            population: SectionDto::NotResolved,
             bulk: SectionDto::NotResolved,
             ..planet_summary()
         };
@@ -606,6 +618,7 @@ pub(crate) mod tests {
                 "orbit": withheld,
                 "moons": withheld,
                 "rings": withheld,
+                "population": withheld,
                 "bulk": withheld,
             }),
         );
