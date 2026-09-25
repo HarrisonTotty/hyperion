@@ -20,6 +20,7 @@ import {
   type Population,
   type RequestOf,
   type ResponseFor,
+  type StellarBriefDto,
   type SystemRecord,
   u64ToHex,
   type UniverseIdHex,
@@ -407,6 +408,65 @@ export function aDensityMap({
   };
 }
 
+/**
+ * A main-sequence primary typical of each layer's band, so that a fixture's symbol and place on
+ * the HR diagram are realistic: an M3 dwarf, a K5, the Sun, a B8 and a B0 (the mean dwarf sequence
+ * of Pecaut and Mamajek, as the server classifies).
+ */
+const DWARF_BRIEFS: Readonly<Record<MassLayer, StellarBriefDto>> = {
+  a: { kind: "dwarf", class: "M3V", log_luminosity_lsun: -1.84, teff_k: 3_410, star_count: 1 },
+  b: { kind: "dwarf", class: "K5V", log_luminosity_lsun: -0.84, teff_k: 4_440, star_count: 1 },
+  c: { kind: "dwarf", class: "G2V", log_luminosity_lsun: 0, teff_k: 5_772, star_count: 1 },
+  d: { kind: "dwarf", class: "B8V", log_luminosity_lsun: 2.2, teff_k: 12_300, star_count: 2 },
+  e: { kind: "dwarf", class: "B0V", log_luminosity_lsun: 4.4, teff_k: 31_400, star_count: 2 },
+};
+
+/**
+ * The stellar brief of a primary of `kind`: a dwarf typical of the layer, or a representative
+ * star of the kind asked for, with no luminosity or temperature for a black hole or no remnant.
+ */
+export function aStellarBrief(
+  layer: MassLayer,
+  kind: StellarBriefDto["kind"] = "dwarf",
+): StellarBriefDto {
+  const dwarf = DWARF_BRIEFS[layer];
+  let brief: StellarBriefDto;
+  switch (kind) {
+    case "dwarf":
+      brief = dwarf;
+      break;
+    case "giant":
+      brief = { ...dwarf, kind, class: "K0III", log_luminosity_lsun: 1.8, teff_k: 4_800 };
+      break;
+    case "supergiant":
+      brief = { ...dwarf, kind, class: "M2Iab", log_luminosity_lsun: 5.1, teff_k: 3_600 };
+      break;
+    case "white_dwarf":
+      brief = { ...dwarf, kind, class: "DA4.2", log_luminosity_lsun: -2.5, teff_k: 12_000 };
+      break;
+    case "neutron_star":
+      brief = { ...dwarf, kind, class: "NS", log_luminosity_lsun: -4.5, teff_k: 600_000 };
+      break;
+    case "black_hole":
+      brief = { ...dwarf, kind, class: "BH", log_luminosity_lsun: null, teff_k: null };
+      break;
+    case "no_remnant":
+      brief = { ...dwarf, kind, class: "NONE", log_luminosity_lsun: null, teff_k: null };
+      break;
+    case "substellar":
+      brief = { ...dwarf, kind, class: "T5", log_luminosity_lsun: -5.2, teff_k: 1_100 };
+      break;
+    case "protostar":
+    case "pre_main_sequence":
+    case "subgiant":
+    case "wolf_rayet":
+    case "hot_subdwarf":
+      brief = { ...dwarf, kind };
+      break;
+  }
+  return brief;
+}
+
 /** What {@link aSystemRecord} builds. */
 export interface SystemRecordSpec {
   /** Position in the `GALACTIC` frame. */
@@ -417,9 +477,14 @@ export interface SystemRecordSpec {
   readonly initialMassMsun?: number;
   readonly ageMyr?: number;
   readonly population?: Population;
+  /**
+   * Its primary's brief: a dwarf typical of the layer when absent, and none, as for a system not
+   * yet formed, when `null`.
+   */
+  readonly stellar?: StellarBriefDto | null;
 }
 
-/** One system of a range query's answer. */
+/** One system of a range query's answer, as a query with `include_stellar` returns it. */
 export function aSystemRecord({
   positionLy,
   layer = "a",
@@ -427,9 +492,10 @@ export function aSystemRecord({
   initialMassMsun,
   ageMyr = 4_600,
   population = "old_thin_disc",
+  stellar,
 }: SystemRecordSpec): SystemRecord {
   const [low, high] = BANDS_MSUN[layer];
-  return {
+  const record: SystemRecord = {
     id: u64ToHex(BigInt(index)),
     designation: `H7K 4C0RFZ ${layer.toUpperCase()}-${index}`,
     position: galacticPositionFromLy(positionLy),
@@ -438,6 +504,8 @@ export function aSystemRecord({
     age_myr: ageMyr,
     population,
   };
+  // A row without a brief leaves the key out, as the server writes it.
+  return stellar === null ? record : { ...record, stellar: stellar ?? aStellarBrief(layer) };
 }
 
 /** What {@link aCensus} builds. */
@@ -501,7 +569,7 @@ export interface RangeRequestSpec {
   readonly universe?: UniverseIdHex;
 }
 
-/** A `systems_in_range` request, for comparing with what the client sends. */
+/** A `systems_in_range` request, for comparing with what the client sends: with the briefs. */
 export function aRangeRequest({
   centreLy = [26_000, 0, 0],
   radiusLy = 50,
@@ -518,6 +586,7 @@ export function aRangeRequest({
     time: universeTimeFromYears(timeYr),
     min_layer: minLayer,
     limit,
+    include_stellar: true,
   };
 }
 
@@ -526,6 +595,8 @@ export interface RelativeSystemSpec {
   /** Offset from the centre along the `GALACTIC` axes. */
   readonly relLy: readonly [number, number, number];
   readonly layer: MassLayer;
+  /** Its primary's brief, as {@link SystemRecordSpec.stellar} has it. */
+  readonly stellar?: StellarBriefDto | null;
 }
 
 /** What {@link aSystemsInRange} builds. */
@@ -560,12 +631,13 @@ export function aSystemsInRange({
   universe = UNIVERSE_ID,
 }: SystemsInRangeSpec = {}): ResponseFor<"systems_in_range"> {
   const returned: Partial<Record<MassLayer, number>> = {};
-  const records = systems.map(({ relLy, layer }, position) => {
+  const records = systems.map(({ relLy, layer, stellar }, position) => {
     returned[layer] = (returned[layer] ?? 0) + 1;
     return aSystemRecord({
       positionLy: [centreLy[0] + relLy[0], centreLy[1] + relLy[1], centreLy[2] + relLy[2]],
       layer,
       index: position + 1,
+      ...(stellar === undefined ? {} : { stellar }),
     });
   });
   return {

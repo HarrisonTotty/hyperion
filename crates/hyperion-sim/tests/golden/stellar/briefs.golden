@@ -1,0 +1,205 @@
+# generator_version = 11
+
+A system = 0x02001b2ca0000000
+initial mass = 0x3fcd810f5d2bb81f  # 0.23050109910349278
+age at epoch = 0x4201a8ef7d5cc207  # 9481088939.59474
+route MainSequence
+t = -500 yr:
+  Dwarf M2.5V in 1 stars
+  log L = 0xc000aacada120895  # -2.083394721675243
+  Teff = 0x40ab18e4ea0116bc  # 3468.4470978107693
+t = 0 yr:
+  Dwarf M2.5V in 1 stars
+  log L = 0xc000aacada0e6fad  # -2.083394721570548
+  Teff = 0x40ab18e4e9fee110  # 3468.4470977449164
+t = 500 yr:
+  Dwarf M2.5V in 1 stars
+  log L = 0xc000aacada0ad6c5  # -2.083394721465853
+  Teff = 0x40ab18e4e9fcab64  # 3468.4470976790635
+
+A system = 0x02002b2ca0000000
+initial mass = 0x3fb79d732268e729  # 0.09224624242861225
+age at epoch = 0x41fc687b781d7637  # 7625750401.841361
+route Exact
+t = -500 yr:
+  Dwarf M7.5V in 2 stars
+  log L = 0xc009a5d074a3db5e  # -3.2059640038018378
+  Teff = 0x40a477efa1838cfd  # 2619.968029128037
+t = 0 yr:
+  Dwarf M7.5V in 2 stars
+  log L = 0xc009a5d074a3e0e5  # -3.205964003802466
+  Teff = 0x40a477efa1838cc9  # 2619.9680291280133
+t = 500 yr:
+  Dwarf M7.5V in 2 stars
+  log L = 0xc009a5d074a3e66b  # -3.205964003803094
+  Teff = 0x40a477efa1838c97  # 2619.9680291279906
+
+B system = 0x2200165980000000
+initial mass = 0x3fe4668ad60acd08  # 0.6375173740874809
+age at epoch = 0x42032e8d400de7ca  # 10298173441.738178
+route MainSequence
+t = -500 yr:
+  Dwarf K4V in 1 stars
+  log L = 0xbfea40bbff29f080  # -0.8204021438282467
+  Teff = 0x40b2087eea9b3be4  # 4616.495767309305
+t = 0 yr:
+  Dwarf K4V in 1 stars
+  log L = 0xbfea40bbfce1f9a7  # -0.8204021395793476
+  Teff = 0x40b2087eeb1d04e2  # 4616.495775045101
+t = 500 yr:
+  Dwarf K4V in 1 stars
+  log L = 0xbfea40bbfa9a02cc  # -0.8204021353304483
+  Teff = 0x40b2087eeb9ecde0  # 4616.495782780898
+
+B system = 0x2200565980000000
+initial mass = 0x3fe3c5bf26eebc59  # 0.6178889999772635
+age at epoch = 0x42012f8ecb4cf080  # 9226541417.617432
+route MainSequence
+t = -500 yr:
+  Dwarf K7V in 1 stars
+  log L = 0xbff0ef802191e4fd  # -1.058471804745124
+  Teff = 0x40aff48c4f86f432  # 4090.2740442441072
+t = 0 yr:
+  Dwarf K7V in 1 stars
+  log L = 0xbff0ef8020ebe13c  # -1.0584718023292927
+  Teff = 0x40aff48c4fea260d  # 4090.274047200341
+t = 500 yr:
+  Dwarf K7V in 1 stars
+  log L = 0xbff0ef802045dd7b  # -1.0584717999134614
+  Teff = 0x40aff48c504d57e9  # 4090.2740501565754
+
+C system = 0x42002cb200000000
+initial mass = 0x3ff175419450ac7c  # 1.0911269944724884
+age at epoch = 0x4201885ff630275c  # 9412804294.019218
+route Exact
+t = -500 yr:
+  WhiteDwarf DA5.7 in 2 stars
+  log L = 0xc007d39d31e344b6  # -2.978327169178182
+  Teff = 0x40c1477afc9188ae  # 8846.960832778681
+t = 0 yr:
+  WhiteDwarf DA5.7 in 2 stars
+  log L = 0xc007d39d712c2689  # -2.9783276406859085
+  Teff = 0x40c1477aade25592  # 8846.958431522162
+t = 500 yr:
+  WhiteDwarf DA5.7 in 2 stars
+  log L = 0xc007d39db0750594  # -2.978328112193319
+  Teff = 0x40c1477a5f332751  # 8846.956030267904
+
+C system = 0x42002cb200000001
+initial mass = 0x3ff575a4666e3cfd  # 1.3412212372966785
+age at epoch = 0x41f768b3af8cea16  # 6283803384.80715
+route Exact
+t = -500 yr:
+  WhiteDwarf DA8.5 in 1 stars
+  log L = 0xc00daa7fb84ac524  # -3.7082514188592928
+  Teff = 0x40b731e7d5aad461  # 5937.905604054308
+t = 0 yr:
+  WhiteDwarf DA8.5 in 1 stars
+  log L = 0xc00daa7fcc24fc17  # -3.708251566771206
+  Teff = 0x40b731e7b4888fa1  # 5937.905098471704
+t = 500 yr:
+  WhiteDwarf DA8.5 in 1 stars
+  log L = 0xc00daa7fdfff32bb  # -3.7082517146830845
+  Teff = 0x40b731e793664b93  # 5937.904592889262
+
+D system = 0x6200596800000000
+initial mass = 0x400acc5fc7cd7fcb  # 3.3497920617664696
+age at epoch = 0x420641949da89869  # 11948692405.074419
+route Exact
+t = -500 yr:
+  WhiteDwarf DC14.9 in 1 stars
+  log L = 0xc0142d0e19202a19  # -5.043999092662966
+  Teff = 0x40aa7c5842a74a57  # 3390.172383525681
+t = 0 yr:
+  WhiteDwarf DC14.9 in 1 stars
+  log L = 0xc0142d0e309ac3b7  # -5.043999442525936
+  Teff = 0x40aa7c57e9294767  # 3390.1717007541333
+t = 500 yr:
+  WhiteDwarf DC14.9 in 1 stars
+  log L = 0xc0142d0e48155d30  # -5.043999792388874
+  Teff = 0x40aa7c578fab4635  # 3390.1710179827883
+
+D system = 0x6200596800000001
+initial mass = 0x401a58fe5cae9615  # 6.586907814174556
+age at epoch = 0x41f71c969325d12f  # 6203992370.36357
+route Exact
+t = -500 yr:
+  WhiteDwarf DC17.6 in 1 stars
+  log L = 0xc0171438cb2f2f8c  # -5.769747900729168
+  Teff = 0x40a65187353044f4  # 2856.764077671449
+t = 0 yr:
+  WhiteDwarf DC17.6 in 1 stars
+  log L = 0xc0171439acfefd4c  # -5.769751265586205
+  Teff = 0x40a651845fe860c1  # 2856.758544217883
+t = 500 yr:
+  WhiteDwarf DC17.6 in 1 stars
+  log L = 0xc017143a8ececa4e  # -5.769754630443073
+  Teff = 0x40a651818aa0db01  # 2856.7530107753123
+
+E system = 0x8200b2e000000000
+initial mass = 0x404a49cdf88e95c6  # 52.57659823381577
+age at epoch = 0x41e83f01df848d48  # 3254259452.1422462
+route Exact
+t = -500 yr:
+  BlackHole BH in 4 stars
+  log L none
+  Teff = 0x0000000000000000  # 0.0
+t = 0 yr:
+  BlackHole BH in 4 stars
+  log L none
+  Teff = 0x0000000000000000  # 0.0
+t = 500 yr:
+  BlackHole BH in 4 stars
+  log L none
+  Teff = 0x0000000000000000  # 0.0
+
+E system = 0x8200b2e000000001
+initial mass = 0x402de953d7b4d99f  # 14.955717793299128
+age at epoch = 0x41ec2a8f32ec68e2  # 3780409751.387803
+route Exact
+t = -500 yr:
+  NeutronStar NS in 2 stars
+  log L = 0xc0217ed314fa0577  # -8.747704177398857
+  Teff = 0x40c18145ccd4148e  # 8962.545313367878
+t = 0 yr:
+  NeutronStar NS in 2 stars
+  log L = 0xc0217ed318d8b715  # -8.747704292730797
+  Teff = 0x40c18145b954a1e5  # 8962.544718340921
+t = 500 yr:
+  NeutronStar NS in 2 stars
+  log L = 0xc0217ed31cb768aa  # -8.74770440806272
+  Teff = 0x40c18145a5d52f7d  # 8962.544123314083
+
+A below 0.1 M_sun system = 0x0200fb2ca0000000
+initial mass = 0x3fb8a884f0290df4  # 0.09632140029230368
+age at epoch = 0x4201c7dc2a71a50f  # 9545942350.205595
+route Exact
+t = -500 yr:
+  Dwarf M6.5V in 1 stars
+  log L = 0xc008bd34c5f39ab7  # -3.0923858132331037
+  Teff = 0x40a55c96995752de  # 2734.2941386498123
+t = 0 yr:
+  Dwarf M6.5V in 1 stars
+  log L = 0xc008bd34c5f39bf1  # -3.092385813233243
+  Teff = 0x40a55c96995752cd  # 2734.2941386498046
+t = 500 yr:
+  Dwarf M6.5V in 1 stars
+  log L = 0xc008bd34c5f39d27  # -3.092385813233381
+  Teff = 0x40a55c96995752c3  # 2734.2941386498
+
+C giant system = 0x42006cb200000003
+initial mass = 0x3ff145a80f6bb1bb  # 1.0795059778566685
+age at epoch = 0x4202649deb110c61  # 9874685282.131044
+route Exact
+t = -500 yr:
+  Subgiant K0.5IV in 1 stars
+  log L = 0x3fe196ef0eb84107  # 0.549674538373467
+  Teff = 0x40b2b77b5a899617  # 4791.4818502417975
+t = 0 yr:
+  Subgiant K0.5IV in 1 stars
+  log L = 0x3fe196f00af39702  # 0.5496750081917698
+  Teff = 0x40b2b77b53bffbe1  # 4791.4817466726245
+t = 500 yr:
+  Subgiant K0.5IV in 1 stars
+  log L = 0x3fe196f1072efbce  # 0.5496754780104938
+  Teff = 0x40b2b77b4cf66103  # 4791.481643103299

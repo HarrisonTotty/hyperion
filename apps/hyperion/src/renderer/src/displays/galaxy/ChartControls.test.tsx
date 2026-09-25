@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { aCensus } from "../../test/galaxyFixtures";
 import { ChartControls } from "./ChartControls";
-import { layerBands } from "./chartModel";
+import { layerBands, type StarFilter } from "./chartModel";
 
 const BANDS = layerBands(aCensus().layers);
 
@@ -14,6 +14,7 @@ function renderControls(overrides: Partial<Parameters<typeof ChartControls>[0]> 
   const onMinLayer = vi.fn<(layer: MassLayer) => void>();
   const onDriveRange = vi.fn<(rangeLy: number) => void>();
   const onTime = vi.fn<(timeYr: number) => void>();
+  const onStarFilter = vi.fn<(filter: StarFilter) => void>();
   render(
     <ChartControls
       radiusChoiceLy={null}
@@ -26,11 +27,13 @@ function renderControls(overrides: Partial<Parameters<typeof ChartControls>[0]> 
       timeYr={0}
       onTime={onTime}
       bands={BANDS}
+      starFilter="all"
+      onStarFilter={onStarFilter}
       heldBack={null}
       {...overrides}
     />,
   );
-  return { onQueryRadius, onMinLayer, onDriveRange, onTime };
+  return { onQueryRadius, onMinLayer, onDriveRange, onTime, onStarFilter };
 }
 
 function radius(): HTMLSelectElement {
@@ -171,5 +174,56 @@ describe("ChartControls", () => {
     expect(onMinLayer).not.toHaveBeenCalled();
     expect(onQueryRadius).not.toHaveBeenCalled();
     expect(onTime).not.toHaveBeenCalled();
+  });
+
+  it("offers the STARS filters with the key that steps through them", () => {
+    renderControls({ starFilter: "living" });
+
+    const group = screen.getByRole("group", { name: "K STARS" });
+    expect(
+      within(group)
+        .getAllByRole("radio")
+        .map((option) => option.closest("label")?.textContent),
+    ).toEqual(["ALL", "LIVING", "REMNANTS"]);
+    expect(within(group).getByRole("radio", { name: "LIVING" })).toBeChecked();
+    expect(group).toHaveAttribute("aria-keyshortcuts", "K");
+  });
+
+  it("reports the STARS filter the operator chooses", async () => {
+    const user = userEvent.setup();
+    const { onStarFilter } = renderControls();
+
+    await user.click(screen.getByRole("radio", { name: "REMNANTS" }));
+
+    expect(onStarFilter).toHaveBeenCalledWith("remnants");
+  });
+
+  it("steps to the next STARS filter when K is pressed", async () => {
+    const user = userEvent.setup();
+    const { onStarFilter } = renderControls({ starFilter: "remnants" });
+
+    await user.keyboard("k");
+
+    expect(onStarFilter).toHaveBeenCalledWith("all");
+  });
+
+  it("leaves K to a text field that has the focus", async () => {
+    const user = userEvent.setup();
+    const { onStarFilter } = renderControls();
+
+    await user.click(screen.getByLabelText("DRIVE RANGE"));
+    await user.keyboard("k");
+
+    expect(onStarFilter).not.toHaveBeenCalled();
+  });
+
+  it("keeps the STARS filter acting while the link is down, since it asks nothing", async () => {
+    const user = userEvent.setup();
+    const { onStarFilter } = renderControls({ heldBack: "NO CARRIER" });
+
+    await user.click(screen.getByRole("radio", { name: "LIVING" }));
+
+    expect(onStarFilter).toHaveBeenCalledWith("living");
+    expect(screen.getByRole("radio", { name: "LIVING" })).not.toHaveAttribute("aria-disabled");
   });
 });

@@ -11,17 +11,19 @@
 
 use hyperion_protocol::{
     ErrorCode, HierarchyDto, HierarchyNodeDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto,
-    OrbitDto, PhaseDto, RemnantDto, RequestError, StarSummaryDto, SystemExistenceDto, SystemIdHex,
-    SystemSummaryDto, SystemSummaryRequest,
+    OrbitDto, PhaseDto, RemnantDto, RequestError, StarSummaryDto, StellarBriefDto,
+    SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
 };
 use hyperion_sim::id::SystemId;
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use hyperion_sim::stellar::remnant::{CompactRemnant, KickMode, NatalKick, RemnantKind};
-use hyperion_sim::stellar::system::{StarModel, StarSummary, SystemExistence, SystemStars};
+use hyperion_sim::stellar::system::{
+    StarModel, StarSummary, StellarBrief, SystemExistence, SystemStars,
+};
 use hyperion_sim::stellar::{ObjectKind, Phase, StarState};
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::{KilometresPerSecond, Magnitudes, Megayears, Years};
+use hyperion_sim::units::{Dex, KilometresPerSecond, Magnitudes, Megayears, Years};
 
 use super::query_time;
 
@@ -142,6 +144,28 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
         variability: Modelled::NotModelled,
         planetary_nebula: Modelled::NotModelled,
         active_events: None,
+    }
+}
+
+/// A range row's brief of its system's primary, as the wire carries it (plan 06, P06.T34).
+///
+/// As in a summary, an object with no light has no photosphere: its log L and `T_eff` are `null`
+/// (ruling 54), where the sim's brief has no logarithm and a temperature of 0 K. The wire's `f32`s
+/// round the sim's values, which is finer than any display of them.
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "log L lies within ±20 and T_eff under 10⁷ K, well inside f32's range, whose seven \
+              digits are finer than the chart and the HR diagram draw them"
+)]
+pub(crate) fn brief_dto(brief: &StellarBrief) -> StellarBriefDto {
+    let log_luminosity = brief.log_luminosity().map(Dex::value);
+    StellarBriefDto {
+        kind: object_kind(brief.kind()),
+        class: brief.class().to_string(),
+        log_luminosity_lsun: log_luminosity.map(|l| l as f32),
+        teff_k: log_luminosity.map(|_| brief.effective_temperature().value() as f32),
+        star_count: brief.star_count(),
     }
 }
 

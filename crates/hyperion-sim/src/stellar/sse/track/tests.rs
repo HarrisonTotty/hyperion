@@ -1032,3 +1032,88 @@ fn the_electron_capture_window_is_decided_as_its_root_decides() {
         assert!(inside > 900, "the sweep crosses the window: {inside}");
     }
 }
+
+/// P06.T38.b: the main-sequence fast path is the track's state bit for bit wherever it answers,
+/// and answers exactly where the track's first segment has no knots and holds the age (the full
+/// 10⁵ inputs are the slow test below).
+#[test]
+fn the_main_sequence_fast_path_is_the_tracks_state_bit_for_bit() {
+    check_main_sequence_fast_path(0x6d73_6661, 2_000);
+}
+
+#[test]
+#[ignore = "slow: 10⁵ random stars and ages, each built to its age"]
+fn the_main_sequence_fast_path_is_the_tracks_over_a_hundred_thousand_stars() {
+    check_main_sequence_fast_path(0x6d73_6662, 100_000);
+}
+
+fn check_main_sequence_fast_path(seed: u64, n: u32) {
+    let mut rng = Lcg::new(seed);
+    let (mut answered, mut with_knots, mut past_end, mut at_zero) = (0_u32, 0_u32, 0_u32, 0_u32);
+    for i in 0..n {
+        let (m, comp, d) = random_star(&mut rng);
+        let t_ms = super::super::ms::t_ms(m, &ZCoeffs::new(comp.z_fit())).value() * 1e6;
+        // Mostly on the main sequence, some past it, one in forty at age zero and one in forty at
+        // the main sequence's end, where the next segment starts.
+        let pick = rng.next_f64();
+        let age = if i % 40 == 0 {
+            0.0
+        } else {
+            t_ms * math::exp10(-4.0 * pick) * if pick < 0.2 { 1.3 } else { 1.0 }
+        };
+        let track = Track::to_age(m, &comp, &d, Years::new(age));
+        let first = &track.segments()[0];
+        let age = if i % 40 == 1 { first.end } else { age };
+        let track = if i % 40 == 1 {
+            Track::to_age(m, &comp, &d, Years::new(age))
+        } else {
+            track
+        };
+        let first = &track.segments()[0];
+        let fast = main_sequence_state_of(m, &comp, &d, TrackOptions::default(), Years::new(age));
+        let what = format!("{m:?}, {comp:?}, {:?}, age {age} of t_ms {t_ms}", d.eta());
+        if !first.knots.is_empty() {
+            with_knots += 1;
+            assert!(fast.is_none(), "a main sequence with knots: {what}");
+        } else if age >= first.end {
+            past_end += 1;
+            assert!(fast.is_none(), "past the main sequence: {what}");
+        } else {
+            answered += 1;
+            at_zero += u32::from(age <= 0.0);
+            let fast = fast.unwrap_or_else(|| panic!("a knot-free main sequence: {what}"));
+            assert_eq!(fast.phase(), Phase::MainSequence, "{what}");
+            let exact = track.state_at(Years::new(age));
+            assert_eq!(state_bits(&fast), state_bits(&exact), "{what}");
+        }
+    }
+    // Every branch is exercised; about half the log-uniform masses have winds enough for knots.
+    assert!(
+        answered > n / 4 && with_knots > 0 && past_end > n / 80 && at_zero > 0,
+        "{answered} answered ({at_zero} at age zero), {with_knots} with knots, {past_end} past the end"
+    );
+}
+
+/// The public fast path refuses what the track does not cover and ages it cannot hold.
+#[test]
+fn the_main_sequence_fast_path_refuses_outside_its_range() {
+    let (comp, d) = (Composition::SOLAR, StarDraws::median());
+    for (m, age) in [
+        (0.09, 1e9),
+        (100.5, 1e5),
+        (1.0, -1.0),
+        (1.0, f64::NAN),
+        (1.0, 2e10),
+    ] {
+        assert!(
+            crate::stellar::sse::main_sequence_state(
+                SolarMasses::new(m),
+                &comp,
+                &d,
+                Years::new(age)
+            )
+            .is_none(),
+            "{m} M☉ at {age} yr"
+        );
+    }
+}

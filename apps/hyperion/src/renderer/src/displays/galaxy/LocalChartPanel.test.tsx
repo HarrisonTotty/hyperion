@@ -4,9 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UniverseProvider } from "../../components/UniverseProvider";
+import { hrXPx, hrYPx } from "../../lib/galaxy/hrProjection";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
+  aStellarBrief,
   aSystemsInRange,
   aUniverse,
   aUniverseList,
@@ -222,9 +224,9 @@ describe("LocalChartPanel", () => {
     await renderChart();
 
     expect(options().map((option) => option.textContent)).toEqual([
-      "H7K 4C0RFZ C-10.001.63IN RANGE",
-      "H7K 4C0RFZ A-210.000.29IN RANGE",
-      "H7K 4C0RFZ E-360.0079.0OUT",
+      "H7K 4C0RFZ C-1G2V0.001.63IN RANGE",
+      "H7K 4C0RFZ A-2M3V10.000.29IN RANGE",
+      "H7K 4C0RFZ E-3B0V60.0079.0OUT",
     ]);
   });
 
@@ -404,7 +406,9 @@ describe("LocalChartPanel", () => {
       within(chartPage()).queryByRole("application", { name: "Local chart" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText("CHART DATA INVALID: retry on the LOCAL CHART page"),
+      within(screen.getByRole("region", { name: "Systems" })).getByText(
+        "CHART DATA INVALID: retry on the LOCAL CHART page",
+      ),
     ).toBeInTheDocument();
 
     const sentBefore = socket.requestsOfKind("systems_in_range").length;
@@ -457,5 +461,80 @@ describe("LocalChartPanel", () => {
     await answerQuery(socket, 100);
 
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: "LOCAL CHART" }));
+  });
+
+  it("filters the list and the count to the living stars when K is pressed", async () => {
+    const { user, socket } = await renderChart({ answered: false });
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: CENTRE,
+          radiusLy: 80,
+          minLayer: body.min_layer,
+          systems: [
+            { relLy: [1, 0, 0], layer: "c" },
+            { relLy: [2, 0, 0], layer: "c", stellar: aStellarBrief("c", "white_dwarf") },
+            { relLy: [3, 0, 0], layer: "a" },
+          ],
+        }),
+      );
+    });
+
+    await user.keyboard("k");
+
+    expect(within(chartPage()).getByRole("radio", { name: "LIVING" })).toBeChecked();
+    expect(options().map((option) => option.getAttribute("aria-label"))).toEqual([
+      "H7K 4C0RFZ C-1, DWARF G2V, 1.00 ly, 1.63 solar masses, IN RANGE",
+      "H7K 4C0RFZ A-3, DWARF M3V, 3.00 ly, 0.29 solar masses, IN RANGE",
+    ]);
+    expect(
+      within(chartPage()).getByText("SYSTEMS", { selector: "dt" }).nextElementSibling,
+    ).toHaveTextContent("2 OF 3 SHOWN: LIVING");
+  });
+
+  it("plots the chart's systems on the HR DIAGRAM page, whose points select everywhere", async () => {
+    const { user } = await renderChart();
+
+    await user.click(options()[1] ?? canvas());
+    await user.click(screen.getByRole("tab", { name: "HR DIAGRAM" }));
+
+    const page = screen.getByRole("tabpanel", { name: "HR DIAGRAM" });
+    expect(
+      within(page).getByRole("img", { name: "Hertzsprung-Russell diagram" }),
+    ).toBeInTheDocument();
+    expect(
+      within(page).getByText("PLOTTED", { selector: "dt" }).nextElementSibling,
+    ).toHaveTextContent("3");
+    expect(reading("DESIG")).toBe("H7K 4C0RFZ A-2");
+
+    // The Sun-like system at the chart centre, where the 400 × 300 stage's plot puts 5772 K and 1 L☉.
+    const plot = { leftPx: 56, topPx: 24, widthPx: 320, heightPx: 252 };
+    await user.pointer({
+      keys: "[MouseLeft]",
+      target: within(page).getByRole("img", { name: "Hertzsprung-Russell diagram" }),
+      coords: { clientX: hrXPx(5_772, plot), clientY: hrYPx(0, plot) },
+    });
+
+    expect(reading("DESIG")).toBe("H7K 4C0RFZ C-1");
+    expect(options()[0]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("hides a selection its filter hides, and shows it again under ALL", async () => {
+    const { user } = await renderChart();
+    await user.click(options()[1] ?? canvas());
+    expect(reading("DESIG")).toBe("H7K 4C0RFZ A-2");
+
+    // LIVING, then REMNANTS, which the three dwarfs of the fixture all fail.
+    await user.keyboard("kk");
+
+    expect(
+      within(screen.getByRole("region", { name: /^Systems/u })).queryAllByRole("option"),
+    ).toHaveLength(0);
+    expect(reading("DESIG")).toBe("—");
+
+    await user.keyboard("k");
+
+    expect(options()[1]).toHaveAttribute("aria-selected", "true");
+    expect(reading("DESIG")).toBe("H7K 4C0RFZ A-2");
   });
 });

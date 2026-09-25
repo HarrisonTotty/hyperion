@@ -23,6 +23,7 @@ pub struct ServerStats {
     cells: LruCounters,
     systems: LruCounters,
     bodies: BodyCacheCounters,
+    briefs: LruCounters,
 }
 
 impl ServerStats {
@@ -39,6 +40,7 @@ impl ServerStats {
             cells: state.cells.counters(),
             systems: state.systems.counters(),
             bodies: state.bodies.counters(),
+            briefs: state.briefs.counters(),
         }
     }
 
@@ -100,6 +102,13 @@ impl ServerStats {
     #[must_use]
     pub fn bodies(&self) -> BodyCacheCounters {
         self.bodies
+    }
+
+    /// The brief cache's contents and use, including its byte budget: a repeated range request
+    /// with `include_stellar` finds its rows' models built already (plan 06, P06.T34).
+    #[must_use]
+    pub fn briefs(&self) -> LruCounters {
+        self.briefs
     }
 }
 

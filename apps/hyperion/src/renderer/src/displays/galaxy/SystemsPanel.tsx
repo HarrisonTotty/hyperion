@@ -92,7 +92,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         </p>
       ) : (
         <SystemList
-          systems={result.systems}
+          systems={chart.systems}
           selectedId={chart.selectedId}
           onSelect={chart.select}
           driveRangeLy={chart.driveRangeLy}

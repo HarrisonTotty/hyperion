@@ -74,6 +74,15 @@ pub const MAX_UNIVERSES: usize = 256;
 /// Longest universe name, in Unicode scalar values after trimming (plan 04, design note 16).
 pub const MAX_UNIVERSE_NAME_CHARS: usize = 48;
 
+/// The most rows whose stellar briefs a range answer builds in its query's own pool job; above it
+/// they are built in chunks of this many rows, one interactive job each, in row order (plan 06,
+/// P06.T34).
+///
+/// At P06.T38.e's measured costs a chunk of main-sequence rows is 10–25 ms of work, and one of dead
+/// rows, each a full track until plan 06's fate table, about a second, so a 20,000-row answer is
+/// spread over the pool's workers rather than held by one.
+pub const BRIEF_CHUNK_ROWS: usize = 1_024;
+
 /// Largest census limit a range query may ask for: the most systems one response returns.
 pub const MAX_CENSUS_LIMIT: u32 = 20_000;
 

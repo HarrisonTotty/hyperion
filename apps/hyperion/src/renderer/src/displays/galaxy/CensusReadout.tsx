@@ -6,11 +6,18 @@ import { annunciation } from "../../components/RequestStatus";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
 import { formatListPosition, formatMassMsun, formatNumber, formatSci } from "../../lib/format";
-import type { ChartResult } from "../../lib/galaxy/model";
+import type { ChartResult, ChartSystem } from "../../lib/galaxy/model";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import type { RequestState } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
-import { censusHint, censusLine, formatBandMsun, inRangeCount } from "./chartModel";
+import {
+  censusHint,
+  censusLine,
+  formatBandMsun,
+  inRangeCount,
+  shownCountText,
+  type StarFilter,
+} from "./chartModel";
 import { usePageTabFocus } from "./pageTabFocus";
 
 /** What a layer's line in the census table says about the layer, in words. */
@@ -130,6 +137,9 @@ function CensusByLayer({ layers, id, hidden }: CensusByLayerProps) {
 interface CensusReadoutProps {
   /** The answer the chart draws, or `null` before the first one arrives. */
   readonly result: ChartResult | null;
+  /** The systems of the answer that pass the `STARS` filter, which the counts are of. */
+  readonly systems: ReadonlyArray<ChartSystem>;
+  readonly starFilter: StarFilter;
   readonly state: RequestState<"systems_in_range">;
   /** The range the counts are taken against (plan 05, design note D9). */
   readonly driveRangeLy: number;
@@ -148,7 +158,8 @@ interface CensusReadoutProps {
  * layer, so it stands beside every chart. Nothing fitting the census limit is an answer, not a
  * failure, and reads in `--status-caution` as a limit reached, with what the operator can do. A
  * layer the server left out adds a hint under it. The counts are of what was returned and of what
- * lies within the drive range. The per-layer table, which is how placement is checked against the
+ * lies within the drive range; under a `STARS` filter other than `ALL` the first says what the
+ * filter hides (`412 OF 1630 SHOWN: LIVING`), and both count the systems shown. The per-layer table, which is how placement is checked against the
  * fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
  * newer query is in flight its `PENDING` stands beside the census and the answer on show stays. An
  * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
@@ -162,7 +173,15 @@ interface CensusReadoutProps {
  * focus to `CENSUS BY LAYER` beside it, or, before the first answer, when there is no toggle, to
  * the page's tab: never to the document's body (the orchestrator's ruling 18).
  */
-export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: CensusReadoutProps) {
+export function CensusReadout({
+  result,
+  systems,
+  starFilter,
+  state,
+  driveRangeLy,
+  stale,
+  onRetry,
+}: CensusReadoutProps) {
   const tableId = useId();
   const stateId = useId();
   const [tableShown, setTableShown] = useState(false);
@@ -233,10 +252,10 @@ export function CensusReadout({ result, state, driveRangeLy, stale, onRetry }: C
           {result === null ? null : (
             <dl className="readout census-readout__counts">
               <dt>SYSTEMS</dt>
-              <dd>{formatNumber(result.systems.length, 0)}</dd>
+              <dd>{shownCountText(systems.length, result.systems.length, starFilter)}</dd>
               <dt>IN RANGE</dt>
               <dd>
-                {formatNumber(inRangeCount(result, driveRangeLy), 0)}
+                {formatNumber(inRangeCount(systems, driveRangeLy), 0)}
                 {stale ? <StaleMark /> : null}
               </dd>
             </dl>

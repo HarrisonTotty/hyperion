@@ -23,16 +23,39 @@ use super::super::helium::{self, HeliumStar};
 use super::super::hg::HertzsprungGap;
 use super::super::m_c_bagb;
 use super::super::ms::{self, MainSequence};
-use super::build::{Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, Step, segment_coordinate};
+use super::build::{
+    Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, FractionBuilt, Step, segment_coordinate,
+};
 use super::model::{HeliumCore, Model, Span};
 use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment};
 
 impl Builder<'_> {
     /// The main sequence of a star of `mass`, whose initial mass follows the current one.
     pub(super) fn main_sequence(&self, start: f64, mass: f64, previous: Option<[f64; 3]>) -> Step {
+        let built = self.main_sequence_segment(start, mass, previous);
+        let (end, end_mass) = (built.segment.end, built.end_mass);
+        self.finish(
+            Some(built.segment),
+            end,
+            Entry::HertzsprungGap {
+                m0: end_mass,
+                mass: end_mass,
+            },
+            previous,
+        )
+    }
+
+    /// The main sequence's segment alone, as [`Builder::main_sequence`] builds it: what the
+    /// state-only fast path reads (P06.T38.b), which skips the next phase's entry state.
+    pub(super) fn main_sequence_segment(
+        &self,
+        start: f64,
+        mass: f64,
+        previous: Option<[f64; 3]>,
+    ) -> FractionBuilt {
         let c = self.phys.coeffs;
         let duration = |m: f64| ms::t_ms(SolarMasses::new(m), c).value() * 1e6;
-        let built = self.fraction_segment(
+        self.fraction_segment(
             Model::MainSequence { fixed: None },
             start,
             mass,
@@ -43,16 +66,6 @@ impl Builder<'_> {
             |m| Model::MainSequence {
                 fixed: Some(MainSequence::new(SolarMasses::new(m), c)),
             },
-        );
-        let (end, end_mass) = (built.segment.end, built.end_mass);
-        self.finish(
-            Some(built.segment),
-            end,
-            Entry::HertzsprungGap {
-                m0: end_mass,
-                mass: end_mass,
-            },
-            previous,
         )
     }
 

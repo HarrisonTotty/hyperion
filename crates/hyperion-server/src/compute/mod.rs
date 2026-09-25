@@ -38,6 +38,6 @@ pub use pool::{
     SubmitJobError,
 };
 pub use single_flight::{Flight, SingleFlight};
-pub use systems::SharedSystemCache;
+pub use systems::{SharedBriefCache, SharedSystemCache};
 
 pub(crate) use pool::panic_message;

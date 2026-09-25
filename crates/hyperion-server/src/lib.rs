@@ -32,8 +32,8 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedCellCache, SharedSystemCache,
-    ShutDownPoolError, StartPoolError,
+    CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedBriefCache, SharedCellCache,
+    SharedSystemCache, ShutDownPoolError, StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -84,6 +84,9 @@ pub(crate) struct AppState {
     /// The systems' stars generated so far, in the configured byte budget: what a
     /// `system_summary` reads (plan 06, P06.T34).
     pub(crate) systems: SharedSystemCache,
+    /// The range briefs' models built so far, in the configured byte budget: what a
+    /// `systems_in_range` with `include_stellar` reads (plan 06, P06.T34).
+    pub(crate) briefs: SharedBriefCache,
     /// The planetary systems generated so far, each with its context, in the configured byte
     /// budget: what `system_bodies` and `body_detail` read (plan 14, P14.T36).
     pub(crate) bodies: SharedBodyCache,
@@ -147,6 +150,7 @@ impl Server {
         );
         let cells = SharedCellCache::new(config.cell_cache_bytes());
         let systems = SharedSystemCache::new(config.system_cache_bytes());
+        let briefs = SharedBriefCache::new(config.brief_cache_bytes());
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
         tracing::info!(
             data_dir = %config.data_dir().display(),
@@ -155,6 +159,7 @@ impl Server {
             map_cache_mib = config.map_cache_bytes() / (1 << 20),
             system_cache_mib = config.system_cache_bytes() / (1 << 20),
             body_cache_mib = config.body_cache_bytes() / (1 << 20),
+            brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
             "server started"
         );
         Ok(Self {
@@ -165,6 +170,7 @@ impl Server {
                 maps,
                 cells,
                 systems,
+                briefs,
                 bodies,
                 handler,
                 connections: Connections::new(),
@@ -366,6 +372,7 @@ mod tests {
             (fresh.maps(), defaults.map_cache_bytes()),
             (fresh.cells(), defaults.cell_cache_bytes()),
             (fresh.systems(), defaults.system_cache_bytes()),
+            (fresh.briefs(), defaults.brief_cache_bytes()),
         ] {
             assert_eq!(
                 (

@@ -14,6 +14,7 @@
 //! | `--map-cache`    | `HYPERION_MAP_CACHE_MB`    | 64 (MiB)                                     |
 //! | `--system-cache` | `HYPERION_SYSTEM_CACHE_MB` | 128 (MiB)                                    |
 //! | `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | 128 (MiB)                                    |
+//! | `--brief-cache`  | `HYPERION_BRIEF_CACHE_MB`  | 64 (MiB)                                     |
 
 use std::error::Error;
 use std::fmt;
@@ -44,6 +45,8 @@ pub const ENV_MAP_CACHE_MB: &str = "HYPERION_MAP_CACHE_MB";
 pub const ENV_SYSTEM_CACHE_MB: &str = "HYPERION_SYSTEM_CACHE_MB";
 /// The variable giving the body cache's budget in MiB, for `--body-cache`.
 pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
+/// The variable giving the brief cache's budget in MiB, for `--brief-cache`.
+pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
 
 /// The data directory when `--data-dir` is not given, relative to the working directory.
 pub const DEFAULT_DATA_DIR: &str = "./hyperion-data";
@@ -55,6 +58,10 @@ pub const DEFAULT_MAP_CACHE_MIB: usize = 64;
 pub const DEFAULT_SYSTEM_CACHE_MIB: usize = 128;
 /// The body cache's budget when `--body-cache` is not given, in MiB (plan 14, P14.T36.a).
 pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
+/// The brief cache's budget when `--brief-cache` is not given, in MiB (plan 06, P06.T34): some
+/// 25,000 main-sequence rows at about 2.5 kB each, or 2,000–2,500 dead ones, whose model holds a
+/// full track, at 25–35 kB (P06.T38.e's measurement).
+pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -70,6 +77,9 @@ const DEFAULT_SYSTEM_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_BODY_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_BODY_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_BRIEF_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_BRIEF_CACHE_MIB * BYTES_PER_MIB,
 };
 
 /// The server's command line.
@@ -110,6 +120,10 @@ pub struct ServerArgs {
     /// Budget of the cache of generated planetary systems, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_BODY_CACHE_MB, default_value_t = DEFAULT_BODY_CACHE)]
     body_cache: CacheBudget,
+
+    /// Budget of the cache of range briefs' star models, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
+    brief_cache: CacheBudget,
 }
 
 impl From<ServerArgs> for ServerConfig {
@@ -123,6 +137,7 @@ impl From<ServerArgs> for ServerConfig {
             map_cache,
             system_cache,
             body_cache,
+            brief_cache,
         } = args;
         Self::builder()
             .addr(SocketAddr::new(address, port))
@@ -132,6 +147,7 @@ impl From<ServerArgs> for ServerConfig {
             .map_cache_bytes(map_cache.bytes)
             .system_cache_bytes(system_cache.bytes)
             .body_cache_bytes(body_cache.bytes)
+            .brief_cache_bytes(brief_cache.bytes)
             .build()
     }
 }
@@ -192,6 +208,7 @@ pub struct ServerConfig {
     map_cache_bytes: usize,
     system_cache_bytes: usize,
     body_cache_bytes: usize,
+    brief_cache_bytes: usize,
     entropy: Arc<dyn Entropy>,
 }
 
@@ -244,6 +261,12 @@ impl ServerConfig {
         self.body_cache_bytes
     }
 
+    /// The brief cache's budget, in bytes.
+    #[must_use]
+    pub fn brief_cache_bytes(&self) -> usize {
+        self.brief_cache_bytes
+    }
+
     /// Where seeds and universe IDs are drawn from.
     #[must_use]
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
@@ -268,6 +291,7 @@ impl Default for ServerConfigBuilder {
                 map_cache_bytes: DEFAULT_MAP_CACHE.bytes,
                 system_cache_bytes: DEFAULT_SYSTEM_CACHE.bytes,
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
+                brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
                 entropy: Arc::new(OsEntropy),
             },
         }
@@ -325,6 +349,14 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// The brief cache's budget, in bytes. Zero caches nothing: every brief is built, answered
+    /// from and dropped.
+    #[must_use]
+    pub fn brief_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.brief_cache_bytes = bytes;
+        self
+    }
+
     /// Where seeds and universe IDs are drawn from; [`OsEntropy`] by default. Tests inject a
     /// [`SequenceEntropy`](crate::universe::SequenceEntropy).
     #[must_use]
@@ -379,7 +411,18 @@ mod tests {
         parse(args).unwrap_err().kind()
     }
 
-    fn fields(config: &ServerConfig) -> (SocketAddr, &Path, usize, usize, usize, usize, usize) {
+    type Fields<'a> = (
+        SocketAddr,
+        &'a Path,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+    );
+
+    fn fields(config: &ServerConfig) -> Fields<'_> {
         (
             config.addr(),
             config.data_dir(),
@@ -388,6 +431,7 @@ mod tests {
             config.map_cache_bytes(),
             config.system_cache_bytes(),
             config.body_cache_bytes(),
+            config.brief_cache_bytes(),
         )
     }
 
@@ -411,6 +455,7 @@ mod tests {
                 64 * 1024 * 1024,
                 128 * 1024 * 1024,
                 128 * 1024 * 1024,
+                64 * 1024 * 1024,
             )
         );
     }
@@ -434,6 +479,8 @@ mod tests {
             "2",
             "--body-cache",
             "5",
+            "--brief-cache",
+            "7",
         ]);
         assert_eq!(
             fields(&config),
@@ -444,7 +491,8 @@ mod tests {
                 1 << 20,
                 0,
                 2 << 20,
-                5 << 20
+                5 << 20,
+                7 << 20
             )
         );
     }
@@ -475,6 +523,7 @@ mod tests {
                 (Some("map-cache"), Some("HYPERION_MAP_CACHE_MB")),
                 (Some("system-cache"), Some("HYPERION_SYSTEM_CACHE_MB")),
                 (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
+                (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
             ]
         );
     }
@@ -559,6 +608,7 @@ mod tests {
         assert_eq!(DEFAULT_MAP_CACHE.to_string(), "64");
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
+        assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
     }
 
     #[test]
@@ -606,6 +656,7 @@ mod tests {
             .map_cache_bytes(20)
             .system_cache_bytes(30)
             .body_cache_bytes(40)
+            .brief_cache_bytes(50)
             .build();
         assert_eq!(
             fields(&config),
@@ -616,7 +667,8 @@ mod tests {
                 10,
                 20,
                 30,
-                40
+                40,
+                50
             )
         );
     }

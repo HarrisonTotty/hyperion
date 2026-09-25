@@ -6,7 +6,13 @@
  * design note D8), so that the rest of the client never reads a wire field name. The census's
  * layers are the one wire type passed through, since they are already a table.
  */
-import type { LayerCensus, MassLayer, Population, SystemIdHex } from "@hyperion/protocol";
+import type {
+  LayerCensus,
+  MassLayer,
+  ObjectKindDto,
+  Population,
+  SystemIdHex,
+} from "@hyperion/protocol";
 
 import type { Vec3 } from "../../spatial/vec3";
 
@@ -44,6 +50,26 @@ export type CentreLy = readonly [xLy: number, yLy: number, zLy: number];
 /** A mass layer's place from the lightest, A, to the heaviest, E. */
 export type LayerIndex = 0 | 1 | 2 | 3 | 4;
 
+/**
+ * What a chart knows of a system's primary at the chart's time, from the range query's brief (plan
+ * 06, P06.T33): enough to draw its symbol and place it on the Hertzsprung-Russell diagram.
+ */
+export interface StarBrief {
+  /** What the primary is now, which decides its symbol. */
+  readonly kind: ObjectKindDto;
+  /** Its class as an astronomer writes it: `G2V`, `M5III`, `DA4.2`, `NS`, `BH`, `NONE`. */
+  readonly spectralClass: string;
+  /**
+   * log₁₀ of its bolometric luminosity over the Sun's; `null` for a black hole or a star that left
+   * no remnant, which have none.
+   */
+  readonly logLuminosityLsun: number | null;
+  /** Its effective temperature; `null` where the luminosity is. */
+  readonly teffK: number | null;
+  /** How many stars the system has, the primary included: 1 to 4. */
+  readonly starCount: number;
+}
+
 /** One star system on a chart, as it is at the chart's time. */
 export interface ChartSystem {
   /** The ID as on the wire, lower case; only `formatHex64` upper-cases it for the screen. */
@@ -60,6 +86,11 @@ export interface ChartSystem {
   /** Initial mass of the primary star. */
   readonly initialMassMsun: number;
   readonly ageMyr: number;
+  /**
+   * Its primary at the chart's time, or `null` for a system not yet formed then, whose row the
+   * server sends without a brief.
+   */
+  readonly star: StarBrief | null;
 }
 
 /**

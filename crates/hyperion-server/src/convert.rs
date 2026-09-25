@@ -18,8 +18,8 @@ use std::sync::Arc;
 use hyperion_protocol::{
     CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, GalaxyParameters, LayerCensus,
     LayerStatus, MassLayer, Parameter, ParameterGroup, ParameterOrigin, ParameterValue,
-    RequestError, SeedHex, SystemIdHex, SystemsInRange, SystemsInRangeRequest, Unit, UniverseInfo,
-    UniverseList,
+    RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemsInRange, SystemsInRangeRequest,
+    Unit, UniverseInfo, UniverseList,
 };
 use hyperion_sim::coords::{GalacticPosition, LyCell};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
@@ -43,7 +43,7 @@ use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, body_detail, body_refusal, hosts_request, system_bodies,
 };
-pub(crate) use self::stellar::{SummaryRequest, system_summary, unknown_system};
+pub(crate) use self::stellar::{SummaryRequest, brief_dto, system_summary, unknown_system};
 use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};
 use crate::universe::{
@@ -353,18 +353,34 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
 ///
 /// `centre`, `radius_ly` and `time` are echoed from the request, which is why it is taken by value:
 /// the job that ran the query owns it and moves them into the answer. The records are in
-/// [`RangeResult`]'s order, nearest first, and each is the system at the query's time.
+/// [`RangeResult`]'s order, nearest first, and each is the system at the query's time. With
+/// `briefs`, which the handler builds when the request sets `include_stellar`, row k carries brief
+/// k; without, no row carries one, and every row is plan 04's.
+///
+/// # Panics
+///
+/// If `briefs` does not hold one brief per system found, which only a handler bug can cause.
 #[must_use]
 pub(crate) fn systems_in_range(
     request: SystemsInRangeRequest,
     query: &RangeQuery,
     result: &RangeResult,
+    briefs: Option<Vec<Option<StellarBriefDto>>>,
 ) -> SystemsInRange {
-    let systems = result
-        .systems()
-        .iter()
-        .map(|hit| system_record(hit, query.time()))
-        .collect();
+    let hits = result.systems();
+    let systems = match briefs {
+        Some(briefs) => {
+            assert_eq!(briefs.len(), hits.len(), "one brief per system found");
+            hits.iter()
+                .zip(briefs)
+                .map(|(hit, brief)| system_record(hit, query.time(), brief))
+                .collect()
+        }
+        None => hits
+            .iter()
+            .map(|hit| system_record(hit, query.time(), None))
+            .collect(),
+    };
     SystemsInRange {
         universe: request.universe,
         centre: request.centre,
@@ -376,15 +392,17 @@ pub(crate) fn systems_in_range(
 }
 
 /// One system found, as the wire carries it: the state at the epoch but for the position and the
-/// age, which are at the query's time.
+/// age, which are at the query's time, and its primary's `brief` at that time if one was built.
 ///
-/// The row never carries a stellar brief yet, whatever the request's `include_stellar` says, and
-/// every row is plan 04's. A brief builds the primary's track, 1–2 ms for an evolved star (ruling
-/// 46 of 2026-09-22), so a brief on every row of a 20,000-system answer would cost seconds; the
-/// briefs are the part of plan 06's P06.T34 that waits for the track integrator's optimisation,
-/// which ruling 46 puts first. The client reads an absent `stellar` as no brief sent.
+/// A row without a brief is plan 04's, with no `stellar` key; the client reads it as no brief
+/// sent. A brief of a system not yet formed at the query's time is `None` too, and such a row has
+/// none either: it has no star to describe.
 #[must_use]
-fn system_record(hit: &SystemHit, time: UniverseTime) -> hyperion_protocol::SystemRecord {
+fn system_record(
+    hit: &SystemHit,
+    time: UniverseTime,
+    brief: Option<StellarBriefDto>,
+) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
     hyperion_protocol::SystemRecord {
         id: SystemIdHex::from_u64(record.id().raw()),
@@ -394,7 +412,7 @@ fn system_record(hit: &SystemHit, time: UniverseTime) -> hyperion_protocol::Syst
         initial_mass_msun: record.primary_initial_mass().value(),
         age_myr: Megayears::from(record.age_at(time)).value(),
         population: wire_population(record.population()),
-        stellar: None,
+        stellar: brief,
     }
 }
 
@@ -1062,6 +1080,8 @@ mod tests {
     use hyperion_sim::Seed;
     use hyperion_sim::galaxy::placement::NoCache;
     use hyperion_sim::galaxy::query::range_query;
+    use hyperion_sim::stellar::brief::range_brief;
+    use hyperion_sim::stellar::system::SystemStars;
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
@@ -1672,27 +1692,60 @@ mod tests {
         range_request([0, 26_000, 0], radius_ly, limit, min_layer)
     }
 
-    /// The answer to `request` over the fixture with no cache: what the handler's pool job builds.
+    /// The answer to `request` over the fixture with no cache: what the handler's pool job builds,
+    /// with a brief for every row when the request asks for them.
     fn answer(request: &SystemsInRangeRequest) -> SystemsInRange {
         let query = RangeRequest::try_from(request)
             .expect("a valid request")
             .into_query();
         let result = range_query(milky_way(), &mut NoCache::new(), &[], &query);
-        systems_in_range(request.clone(), &query, &result)
+        let briefs = request.include_stellar.then(|| {
+            result
+                .systems()
+                .iter()
+                .map(|hit| {
+                    range_brief(milky_way(), hit.record(), query.time()).map(|b| brief_dto(&b))
+                })
+                .collect()
+        });
+        systems_in_range(request.clone(), &query, &result, briefs)
     }
 
     #[test]
-    fn a_request_for_briefs_gets_rows_without_them_until_the_integrator_is_fast() {
-        // The flag is the protocol's (P06.T33), but no brief is built until the track integrator's
-        // optimisation lands (ruling 46), so every row is still plan 04's.
-        let mut request = sunlike(50.0, 5_000, MassLayer::A);
+    fn a_range_request_with_include_stellar_returns_a_brief_on_every_row() {
+        let mut request = sunlike(20.0, 5_000, MassLayer::A);
+        let plain = answer(&request);
         request.include_stellar = true;
         let answer = answer(&request);
         assert!(
             !answer.systems.is_empty(),
-            "a 50 ly sphere at the Sun is not empty"
+            "a 20 ly sphere at the Sun is not empty"
         );
-        assert!(answer.systems.iter().all(|row| row.stellar.is_none()));
+        let query = RangeRequest::try_from(&request).unwrap().into_query();
+        let result = range_query(milky_way(), &mut NoCache::new(), &[], &query);
+        assert_eq!(answer.systems.len(), result.systems().len());
+        for ((row, bare), hit) in answer
+            .systems
+            .iter()
+            .zip(&plain.systems)
+            .zip(result.systems())
+        {
+            // The brief is the full system's, and the rest of the row is plan 04's.
+            let expected = SystemStars::generate(milky_way(), hit.record())
+                .brief_at(query.time())
+                .map(|b| brief_dto(&b));
+            assert!(expected.is_some(), "every system here has formed");
+            assert_eq!(row.stellar, expected);
+            assert_eq!(
+                hyperion_protocol::SystemRecord {
+                    stellar: None,
+                    ..row.clone()
+                },
+                *bare
+            );
+        }
+        // Without the flag the rows are plan 04's, with no brief.
+        assert!(plain.systems.iter().all(|row| row.stellar.is_none()));
     }
 
     /// The field `bad_request` names, for a request that is refused.

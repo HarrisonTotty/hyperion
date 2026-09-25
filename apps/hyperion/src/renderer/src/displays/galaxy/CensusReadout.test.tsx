@@ -8,6 +8,7 @@ import { PENDING, type RequestState } from "../../lib/useServerRequest";
 import { aSystemsInRange } from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { CensusReadout } from "./CensusReadout";
+import { filterSystems, type StarFilter } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 
@@ -26,7 +27,7 @@ const TWO_SYSTEMS = aChart({
 function renderReadout(
   result: ChartResult | null,
   state: RequestState<"systems_in_range"> = { kind: "ok", response: aSystemsInRange() },
-  { stale = false } = {},
+  { stale = false, starFilter = "all" }: { stale?: boolean; starFilter?: StarFilter } = {},
 ) {
   const onRetry = vi.fn<() => void>();
   const readout = (
@@ -35,6 +36,8 @@ function renderReadout(
   ) => (
     <CensusReadout
       result={shownResult}
+      systems={shownResult === null ? [] : filterSystems(shownResult.systems, starFilter)}
+      starFilter={starFilter}
       state={shownState}
       driveRangeLy={50}
       stale={stale}
@@ -92,6 +95,15 @@ describe("CensusReadout", () => {
 
     expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent("2");
     expect(screen.getByText("IN RANGE").nextElementSibling).toHaveTextContent("1");
+  });
+
+  it("says what the STARS filter hides, and counts in range among the systems shown", () => {
+    renderReadout(TWO_SYSTEMS, undefined, { starFilter: "remnants" });
+
+    expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent(
+      "0 OF 2 SHOWN: REMNANTS",
+    );
+    expect(screen.getByText("IN RANGE").nextElementSibling).toHaveTextContent("0");
   });
 
   it("asks for a smaller radius when a layer was over the limit", () => {

@@ -1,11 +1,26 @@
 import type { MassLayer } from "@hyperion/protocol";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { formatNumber, formatScaleLength, formatUniverseTimeYr } from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
+import { isTextEntry } from "../../lib/textEntry";
 import { RADIUS_STEPS_LY } from "../../spatial/scale";
-import { formatBandMsun, formatChartLengthLy, type LayerBand } from "./chartModel";
+import {
+  formatBandMsun,
+  formatChartLengthLy,
+  type LayerBand,
+  nextStarFilter,
+  STAR_FILTERS,
+  type StarFilter,
+  starFilterLabel,
+} from "./chartModel";
+
+/**
+ * The `STARS` selector's single key, which steps to the next filter: `K` for the kind of star, since
+ * the view's presets hold `S` and `CENTRE CHART` holds `C`.
+ */
+export const STARS_KEY = "K";
 
 /** The narrowest and widest drive range the field accepts, in light-years. */
 const DRIVE_RANGE_MIN_LY = 0.01;
@@ -167,7 +182,13 @@ interface ChartControlsProps {
    * answer, when the floors are named by their layer letters alone.
    */
   readonly bands: ReadonlyArray<LayerBand> | null;
-  /** Why the controls are held back, such as `NO CARRIER`, shown above them; `null` when they act. */
+  /** Which systems are shown, by what their primary is now. */
+  readonly starFilter: StarFilter;
+  readonly onStarFilter: (filter: StarFilter) => void;
+  /**
+   * Why the controls that query the server are held back, such as `NO CARRIER`, shown above them;
+   * `null` when they act. The `STARS` filter asks nothing of the server and is never held back.
+   */
   readonly heldBack: string | null;
 }
 
@@ -197,7 +218,13 @@ function floors(
  * operator setting, not a reading (plan 05, design note D9), and says `SET` wherever it is written.
  * The time is universe time, labelled `UT`, within the clock window of ±1,000 years. Both numbers
  * are entered when their field is left or with `Enter`; one outside its range is refused in words
- * and nothing is asked. While the link is down every control is held back and says why.
+ * and nothing is asked. While the link is down every control that asks the server is held back and
+ * says why.
+ *
+ * `STARS` chooses which systems the chart, the list and the HR diagram show, `ALL`, `LIVING` or
+ * `REMNANTS`, from the answer on show: a display control that asks nothing of the server, so it acts
+ * with the link down. Its key, `K`, steps to the next filter from anywhere on the page but a text
+ * field, and is shown on the group, as the guide asks of a frequent action.
  */
 export function ChartControls({
   radiusChoiceLy,
@@ -210,12 +237,35 @@ export function ChartControls({
   timeYr,
   onTime,
   bands,
+  starFilter,
+  onStarFilter,
   heldBack,
 }: ChartControlsProps) {
   const radiusId = useId();
   const floorName = useId();
+  const filterName = useId();
   const heldBackId = useId();
   const held = heldBack === null ? null : heldBackId;
+
+  // The key reaches the selector from anywhere on the chart's page but a text field; the page is
+  // under `Activity`, so the listener goes while another page is shown.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const modified = event.ctrlKey || event.altKey || event.metaKey || event.shiftKey;
+      if (event.repeat || modified || event.key.toUpperCase() !== STARS_KEY) {
+        return;
+      }
+      if (isTextEntry(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      onStarFilter(nextStarFilter(starFilter));
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [starFilter, onStarFilter]);
 
   return (
     <div className="chart-controls">
@@ -269,6 +319,27 @@ export function ChartControls({
                 }}
               />
               {layer === "a" ? `ALL ${text}` : text}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="form-choice chart-controls__stars" aria-keyshortcuts={STARS_KEY}>
+        <legend>
+          <span className="control__key">{STARS_KEY}</span> STARS
+        </legend>
+        <div className="form-choice__options">
+          {STAR_FILTERS.map((filter) => (
+            <label className="form-choice__option" key={filter}>
+              <input
+                type="radio"
+                name={filterName}
+                value={filter}
+                checked={filter === starFilter}
+                onChange={() => {
+                  onStarFilter(filter);
+                }}
+              />
+              {starFilterLabel(filter)}
             </label>
           ))}
         </div>

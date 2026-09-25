@@ -648,6 +648,78 @@ fn is_companion_stripped(draws: &StarDraws) -> bool {
     crate::stellar::remnant::KickLawParams::default().is_stripped(draws.stripped())
 }
 
+/// The state at `age` of a star of initial mass `m0`, `comp` and `draws` under `options`, if its
+/// main sequence has no knots and `age` lies on it: [`Track::state_at`] of its full track, bit for
+/// bit, from a build of the main-sequence segment alone (plan 06, P06.T38.b). `None` if the segment
+/// has knots, if `age` is not before the segment's end (where the full track's next segment
+/// starts), or if `age` is negative or not finite.
+#[must_use]
+pub(crate) fn main_sequence_state_of(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+    age: Years,
+) -> Option<StarState> {
+    let a = age.value();
+    if !(a >= 0.0 && a.is_finite()) {
+        return None;
+    }
+    let track = Track::knot_free_main_sequence(m0, comp, draws, options)?;
+    (a < track.built_until).then(|| track.state_at(age))
+}
+
+impl Track {
+    /// The track of a star of initial mass `m0`, `comp` and `draws` under `options` built to the
+    /// end of its main sequence and no further, with no samples for the maxima, if its main
+    /// sequence has no knots; `None` if it has (plan 06, P06.T38.b).
+    ///
+    /// Its one segment is [`Builder::run`]'s first, from the same builder, entered at age zero with
+    /// no junction, under the builder's own knot rule ([`build::NEGLIGIBLE_LOSS`]). Without knots
+    /// the segment's state is a closed form of the age, so the track's [`Track::state_at`] is the
+    /// full track's, bit for bit, at every age before [`Track::built_until`], the main sequence's
+    /// end. Its maxima are not built: [`Track::max_radius_until`] and
+    /// [`Track::max_luminosity_until`] are not to be asked of it, which is why it stays in the
+    /// crate.
+    #[must_use]
+    pub(crate) fn knot_free_main_sequence(
+        m0: SolarMasses,
+        comp: &Composition,
+        draws: &StarDraws,
+        options: TrackOptions,
+    ) -> Option<Self> {
+        let coeffs = ZCoeffs::new(comp.z_fit());
+        let m0 = checked_initial_mass(m0);
+        let eta = reimers_eta(draws.eta().value());
+        let segment = Builder::new(
+            &coeffs,
+            comp,
+            options,
+            eta,
+            RemnantDraws::of(draws),
+            Resolution::GENERATOR,
+            build::Keep::Track,
+        )
+        .stripped_by_companion(is_companion_stripped(draws))
+        .main_sequence_segment(0.0, m0.value(), None)
+        .segment;
+        if !segment.knots.is_empty() {
+            return None;
+        }
+        let end = segment.end;
+        Some(Self {
+            coeffs,
+            composition: *comp,
+            options,
+            initial_mass: m0,
+            eta,
+            segments: vec![segment],
+            fate: None,
+            built_until: end,
+        })
+    }
+}
+
 /// The initial mass `m0` within the range the formulae cover.
 #[must_use]
 fn checked_initial_mass(m0: SolarMasses) -> SolarMasses {

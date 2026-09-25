@@ -891,6 +891,7 @@ mod tests {
                     class: "NS".to_owned(),
                     log_luminosity_lsun: Some(-4.5),
                     teff_k: Some(250_000.0),
+                    star_count: 3,
                 }),
             },
             json!({
@@ -909,6 +910,7 @@ mod tests {
                     "class": "NS",
                     "log_luminosity_lsun": -4.5,
                     "teff_k": 250_000.0,
+                    "star_count": 3,
                 },
             }),
         );

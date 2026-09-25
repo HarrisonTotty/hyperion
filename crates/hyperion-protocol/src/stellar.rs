@@ -130,6 +130,8 @@ pub struct StellarBriefDto {
     pub log_luminosity_lsun: Option<f32>,
     /// Its effective temperature, K; `null` for an object with no luminosity.
     pub teff_k: Option<f32>,
+    /// How many stars the system has, the primary included: 1 to 4 (plan 11, P11.T13).
+    pub star_count: u8,
 }
 
 /// Asks for every star of one system as it is at one time (`system_summary`), answered with a
@@ -988,12 +990,14 @@ pub(crate) mod tests {
                 class: "K1.5III".to_owned(),
                 log_luminosity_lsun: Some(2.125),
                 teff_k: Some(4_286.0),
+                star_count: 2,
             },
             json!({
                 "kind": "giant",
                 "class": "K1.5III",
                 "log_luminosity_lsun": 2.125,
                 "teff_k": 4_286.0,
+                "star_count": 2,
             }),
         );
         assert_wire_form(
@@ -1002,12 +1006,14 @@ pub(crate) mod tests {
                 class: "BH".to_owned(),
                 log_luminosity_lsun: None,
                 teff_k: None,
+                star_count: 1,
             },
             json!({
                 "kind": "black_hole",
                 "class": "BH",
                 "log_luminosity_lsun": null,
                 "teff_k": null,
+                "star_count": 1,
             }),
         );
     }

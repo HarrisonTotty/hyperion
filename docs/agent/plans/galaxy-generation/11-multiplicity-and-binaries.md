@@ -1646,3 +1646,12 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   was fitted with the 8 M☉ floor at rows of 3.5, 7, 12 and 28 M☉; at solar metallicity the 7 M☉
   row stays below the new 7.20 M☉ floor, so the table is not refitted now, and it is refitted
   when P11.T1.d replaces the seam.
+- **Two pieces of plan 11 landed with plan 06's range briefs (round 9, `briefs`; ruling 90).**
+  - `multiplicity::draw_star_count(galaxy, record, ctx, attempt) -> u8` joins the Provides. It equals
+    `draw_hierarchy(..).star_count()` for every record, context and attempt (tested over 4,500
+    records). It reads the draw's count words, and returns 1 without the tidal limit, the period
+    laws or an orbit for a system drawn single; otherwise it draws in full.
+    `Draw::companion_count` and `Draw::is_direct` now delegate to free functions they share with it,
+    and `draw_hierarchy` is unchanged. P11.T4's binary engine must keep the two equal.
+  - P11.T13's `StellarBriefDto.star_count: u8` landed early, with P06.T34, and required rather than
+    optional, since no brief had been sent before.

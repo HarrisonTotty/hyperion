@@ -1,0 +1,1127 @@
+# generator_version = 11
+{
+  "type": "response",
+  "id": 2,
+  "body": {
+    "kind": "systems_in_range",
+    "universe": "5eed000000000001",
+    "centre": {
+      "cell_ly": [
+        0,
+        26000,
+        0
+      ],
+      "offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "radius_ly": 40.0,
+    "time": {
+      "seconds": -7889400000,
+      "nanos": 0
+    },
+    "census": {
+      "limit": 100,
+      "complete_above_msun": 2.5,
+      "layers": [
+        {
+          "layer": "a",
+          "mass_min_msun": 0.08,
+          "mass_max_msun": 0.5,
+          "expected": 900.9938607237133,
+          "returned": 0,
+          "status": "over_limit"
+        },
+        {
+          "layer": "b",
+          "mass_min_msun": 0.5,
+          "mass_max_msun": 0.75,
+          "expected": 159.20191479633692,
+          "returned": 0,
+          "status": "over_limit"
+        },
+        {
+          "layer": "c",
+          "mass_min_msun": 0.75,
+          "mass_max_msun": 2.5,
+          "expected": 188.71401872092787,
+          "returned": 0,
+          "status": "over_limit"
+        },
+        {
+          "layer": "d",
+          "mass_min_msun": 2.5,
+          "mass_max_msun": 8.0,
+          "expected": 33.9522932035693,
+          "returned": 33,
+          "status": "included"
+        },
+        {
+          "layer": "e",
+          "mass_min_msun": 8.0,
+          "mass_max_msun": 150.0,
+          "expected": 9.388737696324704,
+          "returned": 6,
+          "status": "included"
+        }
+      ]
+    },
+    "systems": [
+      {
+        "id": "6200596800000009",
+        "designation": "GPG 000P00 D-9",
+        "position": {
+          "cell_ly": [
+            10,
+            25999,
+            6
+          ],
+          "offset_m": [
+            6920645450867537.0,
+            4154989895682880.5,
+            9240749522009468.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.345606699259232,
+        "age_myr": 8257.661705998304,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DZ9.5",
+          "log_luminosity_lsun": -4.212127,
+          "teff_k": 5311.253,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "620059680000000e",
+        "designation": "GPG 000P00 D-14",
+        "position": {
+          "cell_ly": [
+            17,
+            25998,
+            2
+          ],
+          "offset_m": [
+            4072947365928578.0,
+            1867293767149077.8,
+            921865834472321.9
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.093402002389267,
+        "age_myr": 5463.190502423186,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA8.8",
+          "log_luminosity_lsun": -3.9593084,
+          "teff_k": 5746.53,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "62005967fe000002",
+        "designation": "GPF 000P1Z D-2",
+        "position": {
+          "cell_ly": [
+            7,
+            26018,
+            -1
+          ],
+          "offset_m": [
+            2740210602483352.0,
+            6363861837858715.0,
+            2006702934723342.5
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 6.1605854394732,
+        "age_myr": 5119.634947763265,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC7.6",
+          "log_luminosity_lsun": -4.1457047,
+          "teff_k": 6668.106,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "6200596800000014",
+        "designation": "GPG 000P00 D-20",
+        "position": {
+          "cell_ly": [
+            13,
+            26002,
+            14
+          ],
+          "offset_m": [
+            5287791275386227.0,
+            1531100233802298.2,
+            9234089005926746.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.155126925753407,
+        "age_myr": 9565.01704201546,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC10.3",
+          "log_luminosity_lsun": -4.236672,
+          "teff_k": 4904.352,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "6200596800000007",
+        "designation": "GPG 000P00 D-7",
+        "position": {
+          "cell_ly": [
+            0,
+            26016,
+            13
+          ],
+          "offset_m": [
+            4241627083525278.5,
+            4793119266323780.0,
+            2108118032618857.5
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.004473846312418,
+        "age_myr": 26.00489207167079,
+        "population": "young_thin_disc",
+        "stellar": {
+          "kind": "dwarf",
+          "class": "B7V",
+          "log_luminosity_lsun": 2.3915565,
+          "teff_k": 14077.215,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "61ffd967fe000016",
+        "designation": "FPF 1Z0P1Z D-22",
+        "position": {
+          "cell_ly": [
+            -8,
+            25995,
+            -21
+          ],
+          "offset_m": [
+            312567042887145.6,
+            5198482099244544.0,
+            4002836617604956.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.107623280094627,
+        "age_myr": 9318.011164332665,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC10.2",
+          "log_luminosity_lsun": -4.2195616,
+          "teff_k": 4936.711,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "61ffd967fe00000d",
+        "designation": "FPF 1Z0P1Z D-13",
+        "position": {
+          "cell_ly": [
+            -17,
+            25993,
+            -15
+          ],
+          "offset_m": [
+            5057266973283999.0,
+            6618210083522917.0,
+            663131970127058.9
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.670457645260327,
+        "age_myr": 5583.780457201096,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC9.2",
+          "log_luminosity_lsun": -3.9670415,
+          "teff_k": 5456.8135,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "61ffd96800000006",
+        "designation": "FPG 1Z0P00 D-6",
+        "position": {
+          "cell_ly": [
+            -4,
+            26017,
+            15
+          ],
+          "offset_m": [
+            5025371490752236.0,
+            8417976987249585.0,
+            8984459909282755.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 5.852895055811926,
+        "age_myr": 393.1941992168016,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DB2.4",
+          "log_luminosity_lsun": -2.0772123,
+          "teff_k": 20920.936,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "61ffd9680000001a",
+        "designation": "FPG 1Z0P00 D-26",
+        "position": {
+          "cell_ly": [
+            -8,
+            26016,
+            16
+          ],
+          "offset_m": [
+            5063184905337446.0,
+            2324843755555595.5,
+            6995364256933989.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 6.604109253068797,
+        "age_myr": 6574.17586560426,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DZ18.5",
+          "log_luminosity_lsun": -5.8168178,
+          "teff_k": 2721.5076,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "8200b2dff0000057",
+        "designation": "GPF 000B0Z E-87",
+        "position": {
+          "cell_ly": [
+            20,
+            25986,
+            -6
+          ],
+          "offset_m": [
+            5296142350886724.0,
+            8524075247162598.0,
+            411918039594653.2
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 8.969266119788237,
+        "age_myr": 1068.493012138957,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "neutron_star",
+          "class": "NS",
+          "log_luminosity_lsun": -7.670304,
+          "teff_k": 16664.084,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "61ffd957fe000004",
+        "designation": "FPF 1Z0N1Z D-4",
+        "position": {
+          "cell_ly": [
+            -13,
+            25976,
+            -11
+          ],
+          "offset_m": [
+            3677544172254885.0,
+            276631533297501.22,
+            462279109212733.1
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.7490577784928494,
+        "age_myr": 5629.091861434472,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA8.6",
+          "log_luminosity_lsun": -3.990709,
+          "teff_k": 5850.681,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "62005967fe00000c",
+        "designation": "GPF 000P1Z D-12",
+        "position": {
+          "cell_ly": [
+            17,
+            25986,
+            -20
+          ],
+          "offset_m": [
+            7301514440443636.0,
+            8357827581518138.0,
+            6032978050652120.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.35572503646108,
+        "age_myr": 7621.965862904737,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC9.4",
+          "log_luminosity_lsun": -4.144867,
+          "teff_k": 5380.768,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "61ffd967fe000000",
+        "designation": "FPF 1Z0P1Z D-0",
+        "position": {
+          "cell_ly": [
+            -28,
+            25988,
+            -7
+          ],
+          "offset_m": [
+            8973045873866993.0,
+            3597060490162371.5,
+            3750998686210812.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.613075868934202,
+        "age_myr": 7199.557026108021,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DAZ9.4",
+          "log_luminosity_lsun": -4.100154,
+          "teff_k": 5358.4434,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "8200b2e00000002d",
+        "designation": "GPG 000B00 E-45",
+        "position": {
+          "cell_ly": [
+            1,
+            26028,
+            11
+          ],
+          "offset_m": [
+            8960202728868480.0,
+            8536431596853509.0,
+            5203640598284314.0
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 11.80099271436342,
+        "age_myr": 11742.030802852194,
+        "population": "halo",
+        "stellar": {
+          "kind": "neutron_star",
+          "class": "NS",
+          "log_luminosity_lsun": -9.653903,
+          "teff_k": 5319.6323,
+          "star_count": 4
+        }
+      },
+      {
+        "id": "61ffd96800000018",
+        "designation": "FPG 1Z0P00 D-24",
+        "position": {
+          "cell_ly": [
+            -27,
+            26005,
+            15
+          ],
+          "offset_m": [
+            3730553569492134.5,
+            4419719921636087.5,
+            4146730303108743.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.3523319039431043,
+        "age_myr": 3540.519975790082,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA7.6",
+          "log_luminosity_lsun": -3.6931586,
+          "teff_k": 6657.9033,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "61ffd9680000000c",
+        "designation": "FPG 1Z0P00 D-12",
+        "position": {
+          "cell_ly": [
+            -3,
+            25995,
+            30
+          ],
+          "offset_m": [
+            9200599430427196.0,
+            111755736344973.22,
+            8221218294771898.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 5.758969783117937,
+        "age_myr": 9012.347269301306,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC10.1",
+          "log_luminosity_lsun": -4.558555,
+          "teff_k": 4966.3457,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "62005967fe00000b",
+        "designation": "GPF 000P1Z D-11",
+        "position": {
+          "cell_ly": [
+            9,
+            26029,
+            -8
+          ],
+          "offset_m": [
+            2154263725282862.0,
+            6104356909018061.0,
+            3446466949124806.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.8417961257357636,
+        "age_myr": 872.1914686577767,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DBZ3.5",
+          "log_luminosity_lsun": -2.35392,
+          "teff_k": 14284.456,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "61ffd957fe00000b",
+        "designation": "FPF 1Z0N1Z D-11",
+        "position": {
+          "cell_ly": [
+            -23,
+            25976,
+            -5
+          ],
+          "offset_m": [
+            2165815667346307.2,
+            9136855988607046.0,
+            2846717108540213.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.8794365755735445,
+        "age_myr": 2104.4148393648907,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC6.2",
+          "log_luminosity_lsun": -3.3472736,
+          "teff_k": 8065.4243,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "61ffd95800000004",
+        "designation": "FPG 1Z0N00 D-4",
+        "position": {
+          "cell_ly": [
+            -19,
+            25976,
+            14
+          ],
+          "offset_m": [
+            8820006763919552.0,
+            290018318497367.75,
+            1355875166111936.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.048537909020415,
+        "age_myr": 3162.3041995054323,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DAZ7.5",
+          "log_luminosity_lsun": -3.6447382,
+          "teff_k": 6715.5884,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "6200596800000019",
+        "designation": "GPG 000P00 D-25",
+        "position": {
+          "cell_ly": [
+            25,
+            25985,
+            14
+          ],
+          "offset_m": [
+            8586609969503612.0,
+            2041808736752566.0,
+            5278427294102413.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.5225215296387655,
+        "age_myr": 7561.43177411874,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC9.9",
+          "log_luminosity_lsun": -4.07777,
+          "teff_k": 5082.426,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "61ffd967fe000003",
+        "designation": "FPF 1Z0P1Z D-3",
+        "position": {
+          "cell_ly": [
+            -17,
+            26015,
+            -26
+          ],
+          "offset_m": [
+            4771443983413601.0,
+            6000866377611966.0,
+            2396231788378085.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 6.598563228477547,
+        "age_myr": 2661.691270922395,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DQZ5.7",
+          "log_luminosity_lsun": -3.8494701,
+          "teff_k": 8864.939,
+          "star_count": 4
+        }
+      },
+      {
+        "id": "62005957fe000006",
+        "designation": "GPF 000N1Z D-6",
+        "position": {
+          "cell_ly": [
+            14,
+            25974,
+            -19
+          ],
+          "offset_m": [
+            8422666390859984.0,
+            6294265503191580.0,
+            8533755883977832.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 7.761722594194765,
+        "age_myr": 8626.264309174507,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC32.9",
+          "log_luminosity_lsun": -7.3490586,
+          "teff_k": 1531.4136,
+          "star_count": 4
+        }
+      },
+      {
+        "id": "61ffd96800000010",
+        "designation": "FPG 1Z0P00 D-16",
+        "position": {
+          "cell_ly": [
+            -3,
+            26018,
+            29
+          ],
+          "offset_m": [
+            3875545145933852.0,
+            582758892481907.6,
+            5191784470748067.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.749503317346491,
+        "age_myr": 39.957053284443035,
+        "population": "young_thin_disc",
+        "stellar": {
+          "kind": "dwarf",
+          "class": "B7.5V",
+          "log_luminosity_lsun": 2.2931314,
+          "teff_k": 13403.657,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "620059580000001e",
+        "designation": "GPG 000N00 D-30",
+        "position": {
+          "cell_ly": [
+            11,
+            25967,
+            1
+          ],
+          "offset_m": [
+            4901378772114267.0,
+            1623086249955640.8,
+            8023961436017784.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.9001805245058474,
+        "age_myr": 3489.4460300867463,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA7.0",
+          "log_luminosity_lsun": -3.6347115,
+          "teff_k": 7222.525,
+          "star_count": 4
+        }
+      },
+      {
+        "id": "61ffd96800000011",
+        "designation": "FPG 1Z0P00 D-17",
+        "position": {
+          "cell_ly": [
+            -11,
+            26013,
+            31
+          ],
+          "offset_m": [
+            8626201139773516.0,
+            4567966196858049.0,
+            2668259689087386.5
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.2645229639429383,
+        "age_myr": 2977.342709529489,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC7.0",
+          "log_luminosity_lsun": -3.5664923,
+          "teff_k": 7248.013,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "61ffd96800000016",
+        "designation": "FPG 1Z0P00 D-22",
+        "position": {
+          "cell_ly": [
+            -20,
+            26007,
+            29
+          ],
+          "offset_m": [
+            4323715639811171.5,
+            2785203964138695.0,
+            4421596191953554.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.021832160148823,
+        "age_myr": 796.6737542178154,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA3.8",
+          "log_luminosity_lsun": -2.6152802,
+          "teff_k": 13254.013,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "620059580000000b",
+        "designation": "GPG 000N00 D-11",
+        "position": {
+          "cell_ly": [
+            6,
+            25964,
+            5
+          ],
+          "offset_m": [
+            4320340614107588.5,
+            8103030972433430.0,
+            3479739456683686.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.914913391298701,
+        "age_myr": 1815.4689177118548,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA5.9",
+          "log_luminosity_lsun": -3.2251296,
+          "teff_k": 8490.985,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "61ffd96800000003",
+        "designation": "FPG 1Z0P00 D-3",
+        "position": {
+          "cell_ly": [
+            -29,
+            26018,
+            13
+          ],
+          "offset_m": [
+            7392513389668518.0,
+            7076662345225953.0,
+            8763953544480507.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.6244523748186106,
+        "age_myr": 6534.055037007603,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA8.9",
+          "log_luminosity_lsun": -4.0814047,
+          "teff_k": 5646.7876,
+          "star_count": 4
+        }
+      },
+      {
+        "id": "6200596800000018",
+        "designation": "GPG 000P00 D-24",
+        "position": {
+          "cell_ly": [
+            14,
+            26019,
+            26
+          ],
+          "offset_m": [
+            9080499933328276.0,
+            9307895217916506.0,
+            8559248958404725.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.974300078290767,
+        "age_myr": 9739.142648026791,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC10.4",
+          "log_luminosity_lsun": -4.25068,
+          "teff_k": 4837.207,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "81ffb2a000000038",
+        "designation": "FPG 0Z0A00 E-56",
+        "position": {
+          "cell_ly": [
+            -7,
+            25983,
+            33
+          ],
+          "offset_m": [
+            5204130111899001.0,
+            5866776155617199.0,
+            1831432445487014.5
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 23.399182143175423,
+        "age_myr": 97.53591735380967,
+        "population": "young_thin_disc",
+        "stellar": {
+          "kind": "black_hole",
+          "class": "BH",
+          "log_luminosity_lsun": null,
+          "teff_k": null,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "61ffd96800000015",
+        "designation": "FPG 1Z0P00 D-21",
+        "position": {
+          "cell_ly": [
+            -12,
+            26026,
+            24
+          ],
+          "offset_m": [
+            7631686884726916.0,
+            6986513924545426.0,
+            8729082725041012.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.7771600803215684,
+        "age_myr": 72.86316725598903,
+        "population": "young_thin_disc",
+        "stellar": {
+          "kind": "dwarf",
+          "class": "B7.5V",
+          "log_luminosity_lsun": 2.342935,
+          "teff_k": 13181.245,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "81ffb2dff0000017",
+        "designation": "FPF 0Z0B0Z E-23",
+        "position": {
+          "cell_ly": [
+            -26,
+            26004,
+            -29
+          ],
+          "offset_m": [
+            5599466770665427.0,
+            7299373374679690.0,
+            5937956554122897.0
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 16.822539365190107,
+        "age_myr": 9832.457564712746,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "neutron_star",
+          "class": "NS",
+          "log_luminosity_lsun": -9.568011,
+          "teff_k": 5589.263,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "61ffd96800000013",
+        "designation": "FPG 1Z0P00 D-19",
+        "position": {
+          "cell_ly": [
+            -30,
+            26024,
+            4
+          ],
+          "offset_m": [
+            1947893614177334.0,
+            5022427280197254.0,
+            1150316518377836.8
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.2503337356139514,
+        "age_myr": 4810.720245966374,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC7.8",
+          "log_luminosity_lsun": -3.8667626,
+          "teff_k": 6464.14,
+          "star_count": 2
+        }
+      },
+      {
+        "id": "8200b2dff0000019",
+        "designation": "GPF 000B0Z E-25",
+        "position": {
+          "cell_ly": [
+            31,
+            26022,
+            -3
+          ],
+          "offset_m": [
+            3224315174767774.0,
+            8601493774172328.0,
+            5355858870905593.0
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 9.739257758396915,
+        "age_myr": 7909.271216167104,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "neutron_star",
+          "class": "NS",
+          "log_luminosity_lsun": -9.436102,
+          "teff_k": 6030.2026,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "6200596800000013",
+        "designation": "GPG 000P00 D-19",
+        "position": {
+          "cell_ly": [
+            18,
+            26014,
+            31
+          ],
+          "offset_m": [
+            6093787317775672.0,
+            5231189929334800.0,
+            1187290415697406.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.6310216501508643,
+        "age_myr": 7211.543879843585,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC9.6",
+          "log_luminosity_lsun": -4.0677876,
+          "teff_k": 5222.9297,
+          "star_count": 3
+        }
+      },
+      {
+        "id": "6200596800000011",
+        "designation": "GPG 000P00 D-17",
+        "position": {
+          "cell_ly": [
+            2,
+            26036,
+            12
+          ],
+          "offset_m": [
+            8242784141024425.0,
+            9029454994154568.0,
+            6010056255811667.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.656327034887574,
+        "age_myr": 7501.191795873864,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC9.4",
+          "log_luminosity_lsun": -4.1355224,
+          "teff_k": 5378.7017,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "62005957fe00001c",
+        "designation": "GPF 000N1Z D-28",
+        "position": {
+          "cell_ly": [
+            3,
+            25967,
+            -23
+          ],
+          "offset_m": [
+            2523709301438290.0,
+            8340100773615469.0,
+            4468107030595896.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.5580479646769967,
+        "age_myr": 5586.9939970400055,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA9.2",
+          "log_luminosity_lsun": -3.963064,
+          "teff_k": 5460.78,
+          "star_count": 1
+        }
+      },
+      {
+        "id": "8200b2dff0000000",
+        "designation": "GPF 000B0Z E-0",
+        "position": {
+          "cell_ly": [
+            0,
+            26039,
+            -4
+          ],
+          "offset_m": [
+            5830138438147586.0,
+            4180225607155452.0,
+            3965390004629240.5
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 16.367408979643034,
+        "age_myr": 9734.499246502544,
+        "population": "old_thin_disc",
+        "stellar": {
+          "kind": "black_hole",
+          "class": "BH",
+          "log_luminosity_lsun": null,
+          "teff_k": null,
+          "star_count": 4
+        }
+      },
+      {
+        "id": "62005967fe000013",
+        "designation": "GPF 000P1Z D-19",
+        "position": {
+          "cell_ly": [
+            4,
+            26016,
+            -36
+          ],
+          "offset_m": [
+            1475464348961552.2,
+            3739388966130229.0,
+            12008711141283.186
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.6035766495457384,
+        "age_myr": 10614.769423928557,
+        "population": "thick_disc",
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DC11.1",
+          "log_luminosity_lsun": -4.336079,
+          "teff_k": 4550.7954,
+          "star_count": 3
+        }
+      }
+    ]
+  }
+}

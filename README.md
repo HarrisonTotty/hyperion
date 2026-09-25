@@ -98,6 +98,7 @@ An option given on the command line wins over its variable.
 | `--map-cache`    | `HYPERION_MAP_CACHE_MB`    | `64`                                         | Cache of galaxy density maps, in MiB         |
 | `--system-cache` | `HYPERION_SYSTEM_CACHE_MB` | `128`                                        | Cache of generated systems' stars, in MiB    |
 | `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | `128`                                        | Cache of generated planetary systems, in MiB |
+| `--brief-cache`  | `HYPERION_BRIEF_CACHE_MB`  | `64`                                         | Cache of range briefs' star models, in MiB   |
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;

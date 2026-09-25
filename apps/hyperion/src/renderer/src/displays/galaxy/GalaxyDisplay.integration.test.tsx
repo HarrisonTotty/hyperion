@@ -488,10 +488,10 @@ describe("the GALAXY display, end to end", () => {
     expect(chartReading("SYSTEMS")).toBe("40");
     expect(options()[0]).toHaveAttribute("aria-setsize", "40");
     expect(options()[0]).toHaveAccessibleName(
-      "H7K 4C0RFZ B-1, 1.00 ly, 0.63 solar masses, IN RANGE",
+      "H7K 4C0RFZ B-1, DWARF K5V, 1.00 ly, 0.63 solar masses, IN RANGE",
     );
     expect(options()[1]).toHaveAccessibleName(
-      "H7K 4C0RFZ C-2, 2.00 ly, 1.63 solar masses, IN RANGE",
+      "H7K 4C0RFZ C-2, DWARF G2V, 2.00 ly, 1.63 solar masses, IN RANGE",
     );
   });
 

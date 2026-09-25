@@ -390,6 +390,16 @@ impl StarDraws {
         })
     }
 
+    /// The Reimers η draw alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
+    /// [`eta`](StarDraws::eta), bit for bit, from its one stream, for a caller that reads no
+    /// other draw (the range brief of a main-sequence star, P06.T38.e).
+    #[must_use]
+    pub(crate) fn eta_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> StandardNormal {
+        let mut stream = Stream::open(seed, tags::STAR_ETA, ObjectKey::from(star));
+        stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
+        StandardNormal::draw(&mut stream)
+    }
+
     /// Draws from explicit variates, for quadratures and tests that need no ID.
     #[must_use]
     pub const fn from_parts(parts: StarDrawsParts) -> Self {
@@ -578,6 +588,21 @@ mod tests {
         let mut s = Stream::open(seed, tag, ObjectKey::from(star));
         s.seek(u64::from(attempt) * ATTEMPT_WORDS);
         s
+    }
+
+    /// The η draw alone is the full draws' η, bit for bit (P06.T38.e).
+    #[test]
+    fn the_eta_draw_alone_is_the_full_draws_eta() {
+        for seed in [Seed::new(0x5eed), Seed::new(0x0065_7461)] {
+            for star in bodies() {
+                for attempt in [0, 1, 7] {
+                    assert_same_bits(
+                        StarDraws::eta_for_attempt(seed, star, attempt).value(),
+                        StarDraws::for_attempt(seed, star, attempt).eta().value(),
+                    );
+                }
+            }
+        }
     }
 
     /// Each field equals a fresh read of its own tag's stream alone, so no field depends on the

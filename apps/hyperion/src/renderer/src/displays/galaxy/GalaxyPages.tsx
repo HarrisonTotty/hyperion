@@ -2,21 +2,24 @@ import { Activity, type KeyboardEvent, useId, useLayoutEffect, useRef } from "re
 
 import type { CentreLy } from "../../lib/galaxy/model";
 import { GalaxyMapPanel } from "./GalaxyMapPanel";
+import { HrDiagram } from "./HrDiagram";
 import { LocalChartPanel } from "./LocalChartPanel";
 import { PageTabFocus } from "./pageTabFocus";
 import { ParametersPanel } from "./ParametersPanel";
 import type { LocalChartState } from "./useLocalChart";
 
 /** The pages that share the column, in the order the selector offers them. */
-export type GalaxyPage = "parameters" | "map" | "chart";
+export type GalaxyPage = "parameters" | "map" | "chart" | "hr";
 
-const GALAXY_PAGES: ReadonlyArray<GalaxyPage> = ["parameters", "map", "chart"];
+const GALAXY_PAGES: ReadonlyArray<GalaxyPage> = ["parameters", "map", "chart", "hr"];
 
 /** Each page's name: full words, as the guide has panels titled. */
 const PAGE_TITLE: Readonly<Record<GalaxyPage, string>> = {
   parameters: "PARAMETERS",
   map: "GALAXY MAP",
   chart: "LOCAL CHART",
+  // `HR` is the astronomers' own name for the diagram; the page's graph carries the full title.
+  hr: "HR DIAGRAM",
 };
 
 /** The ID of a page's tab, from the pages' own ID. */
@@ -74,8 +77,8 @@ interface GalaxyPagesProps {
 }
 
 /**
- * The `PARAMETERS`, `GALAXY MAP` and `LOCAL CHART` pages, sharing one panel behind a page selector,
- * so that the display's two large pictures each have the column's full width and height.
+ * The `PARAMETERS`, `GALAXY MAP`, `LOCAL CHART` and `HR DIAGRAM` pages, sharing one panel behind a
+ * page selector, so that the display's large pictures each have the column's full width and height.
  *
  * @remarks
  * The selector is a tab list and the panel's title: the chosen page's name is marked by a rule
@@ -83,7 +86,9 @@ interface GalaxyPagesProps {
  * one stop in the tab order; the arrow keys, `Home` and `End` choose a page there, and a click or
  * tap chooses the page under it. The map is shown until the operator chooses otherwise, and
  * `CENTRE CHART` shows the chart. Every page stays mounted, the ones not chosen hidden, so that none
- * asks the server again on its return and the chart keeps its camera. A page hidden with the focus
+ * asks the server again on its return and the chart keeps its camera. The HR diagram plots the
+ * chart's answer on show, with its filter and its selection, so it costs no request; the list in
+ * `SYSTEMS` beside it is its keyboard's way in (plan 06, design note 18). A page hidden with the focus
  * in it, as by `C` on a focused map, hands the focus to the tab of the page shown; and each page
  * offers its tab, through {@link PageTabFocus}, to a control of its own that goes as it is pressed.
  */
@@ -207,6 +212,34 @@ export function GalaxyPages({
           >
             <LocalChartPanel chart={chart} />
           </PageTabFocus>
+        </Activity>
+      </div>
+      <div
+        id={panelId("hr")}
+        role="tabpanel"
+        aria-labelledby={tabId("hr")}
+        className="galaxy-pages__page galaxy-pages__page--hr"
+        hidden={page !== "hr"}
+      >
+        {/* Under `Activity`, as the chart is: its effects run only while it is on show. */}
+        <Activity mode={page === "hr" ? "visible" : "hidden"}>
+          {chart.result === null ? (
+            <p className="panel__empty">
+              {chart.fault === null
+                ? "NO CHART: centre one to plot its systems"
+                : "CHART DATA INVALID: retry on the LOCAL CHART page"}
+            </p>
+          ) : (
+            <HrDiagram
+              systems={chart.systems}
+              total={chart.result.systems.length}
+              starFilter={chart.starFilter}
+              selectedId={chart.selectedId}
+              onSelect={chart.select}
+              driveRangeLy={chart.driveRangeLy}
+              stale={chart.stale}
+            />
+          )}
         </Activity>
       </div>
     </div>

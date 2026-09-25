@@ -73,6 +73,47 @@ pub fn lifetime(m0: SolarMasses, composition: &Composition, draws: &StarDraws) -
     track::lifetime_of(m0, composition, draws, TrackOptions::default())
 }
 
+/// The state at `age` of a star on a main sequence without knots: [`Track::state_at`] of its
+/// track, bit for bit, at the cost of the main sequence's closed forms alone (plan 06, P06.T38.b),
+/// or `None` where the star is not on such a main sequence at `age`.
+///
+/// A main sequence has no knots when its wind would remove under a millionth of its mass over the
+/// phase (the track builder's own rule, at the largest of its rates at the start, the middle and the
+/// end). That holds for nearly every star below a few solar masses, so a range query's brief can
+/// read most rows here and build a track only for the rest (ruling 89). `None` means only "ask the
+/// track": the star is lighter than 0.1 M☉ or heavier than 100 M☉, its main sequence has knots,
+/// `age` is at or past the main sequence's end, or `age` is negative or not finite.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::stellar::draws::StarDraws;
+/// use hyperion_sim::stellar::sse::{Track, main_sequence_state};
+/// use hyperion_sim::stellar::{Composition, Phase};
+/// use hyperion_sim::units::{SolarMasses, Years};
+///
+/// let (m, draws, age) = (SolarMasses::new(1.0), StarDraws::median(), Years::new(4.57e9));
+/// let sun = main_sequence_state(m, &Composition::SOLAR, &draws, age).ok_or("on the main sequence")?;
+/// assert_eq!(sun.phase(), Phase::MainSequence);
+/// // The same state as the track's, without building the track.
+/// assert_eq!(sun, Track::to_age(m, &Composition::SOLAR, &draws, age).state_at(age));
+/// // At 12 Gyr the Sun has left its main sequence.
+/// assert!(main_sequence_state(m, &Composition::SOLAR, &draws, Years::new(1.2e10)).is_none());
+/// # Ok::<(), &str>(())
+/// ```
+#[must_use]
+pub fn main_sequence_state(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    age: Years,
+) -> Option<StarState> {
+    if !(MIN_INITIAL_MASS.value()..=MAX_INITIAL_MASS.value()).contains(&m0.value()) {
+        return None;
+    }
+    track::main_sequence_state_of(m0, composition, draws, TrackOptions::default(), age)
+}
+
 /// The initial mass whose main sequence ends at `age` for a star of `composition`: the inverse in
 /// mass of `t_zams` + `t_MS` (HPT equation 5), found by 64 bisections in log mass (plan 02's
 /// [`bisect`]). `t_zams`, the arrival on the zero-age main sequence, is zero until P06.T15.b.

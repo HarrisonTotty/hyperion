@@ -3,74 +3,12 @@ import type { ObjectKindDto } from "@hyperion/protocol";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { starSymbol } from "../../lib/galaxy/starSymbols";
 import { objectKindLabel } from "../../lib/system/words";
+import { LegendReticle } from "../../spatial/LegendReticle";
+import { LegendSymbol } from "../../spatial/LegendSymbol";
 import type { SizeClass, SymbolShape } from "../../spatial/marks";
-import { SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
+import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { formatBandMsun, type LayerBand } from "../galaxy/chartModel";
 import type { OrbitPlane } from "./orbitMap";
-
-/** The unit box every legend mark is drawn in, its centre at the origin. */
-const MARK_BOX = "-5 -5 10 10";
-
-/** Radius of a legend symbol in its box, leaving room for the outline drawn inside the diameter. */
-const MARK_RADIUS = 4.25;
-
-/** The SVG path of a circle about the box's centre, as two half-turn arcs. */
-function circle(radius: number): string {
-  return `M ${-radius} 0 A ${radius} ${radius} 0 1 0 ${radius} 0 A ${radius} ${radius} 0 1 0 ${-radius} 0 Z`;
-}
-
-/** The SVG path of a symbol's outline at the legend's radius, from the shared outlines. */
-function outlinePath(shape: SymbolShape): { readonly d: string; readonly discD: string | null } {
-  const outline = symbolOutline(shape);
-  let d: string;
-  let discD: string | null = null;
-  switch (outline.kind) {
-    case "circle":
-      d = circle(MARK_RADIUS);
-      break;
-    case "ringed-circle":
-      d = circle(MARK_RADIUS);
-      discD = circle(MARK_RADIUS * outline.discRadius);
-      break;
-    case "polygon":
-      d = `${outline.points
-        .map(
-          (point, index) =>
-            `${index === 0 ? "M" : "L"} ${point.x * MARK_RADIUS} ${point.y * MARK_RADIUS}`,
-        )
-        .join(" ")} Z`;
-      break;
-  }
-  return { d, discD };
-}
-
-interface LegendSymbolProps {
-  readonly shape: SymbolShape;
-  /** Diameter in `rem`, from the size class it stands for. */
-  readonly diameterRem: number;
-  readonly filled: boolean;
-}
-
-/** One symbol of the legend, drawn from the outline the map draws it with. */
-function LegendSymbol({ shape, diameterRem, filled }: LegendSymbolProps) {
-  const { d, discD } = outlinePath(shape);
-  // A ringed circle fills its inner disc alone, as the map draws it (plan 06, design note 17).
-  const fillsRing = filled && discD === null;
-  return (
-    <svg
-      className="symbol-legend__mark"
-      style={{ width: `${diameterRem}rem`, height: `${diameterRem}rem` }}
-      viewBox={MARK_BOX}
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d={d} className={fillsRing ? "symbol-legend__filled" : undefined} />
-      {discD === null ? null : (
-        <path d={discD} className={filled ? "symbol-legend__filled" : undefined} />
-      )}
-    </svg>
-  );
-}
 
 interface PathSampleProps {
   readonly selected: boolean;
@@ -90,21 +28,6 @@ function PathSample({ selected }: PathSampleProps) {
       focusable="false"
     >
       <path d="M 0 2 H 16" />
-    </svg>
-  );
-}
-
-/** The bracket reticle that marks the selection. */
-function Reticle() {
-  return (
-    <svg
-      className="symbol-legend__mark"
-      style={{ width: "1.5rem", height: "1.5rem" }}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M4 9V4H9M15 4H20V9M20 15V20H15M9 20H4V15" />
     </svg>
   );
 }
@@ -204,7 +127,7 @@ export function OrbitLegend({ kinds, bodies, bands, plane }: OrbitLegendProps) {
         SELECTED ORBIT OR EDGES
       </p>
       <p className="symbol-legend__item">
-        <Reticle />
+        <LegendReticle />
         BRACKET SELECTED
       </p>
     </div>

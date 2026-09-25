@@ -302,7 +302,7 @@ describe("GalaxyDisplay", () => {
   });
 
   describe("pages", () => {
-    it("offers the parameters, the map and the chart, and shows the map by default", async () => {
+    it("offers the parameters, the map, the chart and the HR diagram, and shows the map by default", async () => {
       await renderWithMaps();
 
       const tabs = within(screen.getByRole("tablist", { name: "Galaxy pages" })).getAllByRole(
@@ -312,6 +312,7 @@ describe("GalaxyDisplay", () => {
         "PARAMETERS",
         "GALAXY MAP",
         "LOCAL CHART",
+        "HR DIAGRAM",
       ]);
       expect(screen.getByRole("tab", { name: "GALAXY MAP" })).toHaveAttribute(
         "aria-selected",
@@ -404,8 +405,8 @@ describe("GalaxyDisplay", () => {
 
       await user.keyboard("{End}");
 
-      expect(screen.getByRole("tab", { name: "LOCAL CHART" })).toHaveFocus();
-      expect(screen.getByRole("tabpanel", { name: "LOCAL CHART" })).toBeVisible();
+      expect(screen.getByRole("tab", { name: "HR DIAGRAM" })).toHaveFocus();
+      expect(screen.getByRole("tabpanel", { name: "HR DIAGRAM" })).toBeVisible();
 
       await user.keyboard("{Home}");
 
@@ -416,8 +417,8 @@ describe("GalaxyDisplay", () => {
     it("wraps round from the last page to the first, and back", async () => {
       const { user } = await renderWithMaps();
       const parameters = screen.getByRole("tab", { name: "PARAMETERS" });
-      const chart = screen.getByRole("tab", { name: "LOCAL CHART" });
-      await user.click(chart);
+      const hr = screen.getByRole("tab", { name: "HR DIAGRAM" });
+      await user.click(hr);
 
       await user.keyboard("{ArrowRight}");
 
@@ -426,8 +427,8 @@ describe("GalaxyDisplay", () => {
 
       await user.keyboard("{ArrowLeft}");
 
-      expect(chart).toHaveFocus();
-      expect(chart).toHaveAttribute("aria-selected", "true");
+      expect(hr).toHaveFocus();
+      expect(hr).toHaveAttribute("aria-selected", "true");
     });
 
     it("shows the map again once another universe is opened", async () => {

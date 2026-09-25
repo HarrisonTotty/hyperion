@@ -1,4 +1,5 @@
-//! The cache of generated systems: each system's stars, bounded in bytes (plan 06, P06.T34).
+//! The caches of generated systems: each system's stars, and each system's range brief, bounded in
+//! bytes (plan 06, P06.T34).
 //!
 //! A system's [`SystemStars`] holds every star's track and remnant, which costs a millisecond or
 //! two per evolved star to build (plan 06's Risks; ruling 46 of 2026-09-22), and the `SYSTEM`
@@ -12,12 +13,19 @@
 //! eviction is always safe, since nothing generated is remembered anywhere else. Two threads may
 //! build one system at the same time; the second insert replaces an equal value, which is cheaper
 //! than coordinating (the same ruling as [`SharedByteLru`]'s).
+//!
+//! [`SharedBriefCache`] holds what a range query's row needs instead: each system's
+//! [`BriefModel`] (plan 06, P06.T38.e), its primary alone by the cheapest exact route and its star
+//! count, under the same key and the same rules. It is a cache of its own because its entries are a
+//! few kilobytes where a system's stars can be tens, and a 20,000-row answer would otherwise evict
+//! every system the `SYSTEM` display is looking at.
 
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
+use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemRecord, resolve};
 use hyperion_sim::id::SystemId;
+use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
 
 use super::GalaxyKey;
@@ -96,6 +104,71 @@ impl SharedSystemCache {
     #[must_use]
     pub fn counters(&self) -> LruCounters {
         self.systems.counters()
+    }
+}
+
+impl HeapBytes for BriefModel {
+    /// The sim's own count of what the model owns on the heap: its primary's track, if it has one
+    /// ([`BriefModel::heap_bytes`]).
+    fn heap_bytes(&self) -> usize {
+        Self::heap_bytes(self)
+    }
+}
+
+/// The range briefs' models of every galaxy the server holds, in one byte budget (plan 06,
+/// P06.T34).
+#[derive(Debug)]
+pub struct SharedBriefCache {
+    briefs: SharedByteLru<SystemEntryKey, BriefModel>,
+}
+
+impl SharedBriefCache {
+    /// An empty cache that holds at most `budget_bytes` of charged models.
+    ///
+    /// A budget of zero caches nothing: every model is built, answered from and dropped.
+    #[must_use]
+    pub fn new(budget_bytes: usize) -> Self {
+        Self {
+            briefs: SharedByteLru::new(budget_bytes),
+        }
+    }
+
+    /// The brief model of the grid system `record` of `galaxy`, the galaxy `key` names: the
+    /// cache's, or built and stored.
+    ///
+    /// The record comes from a range query's hit, so it needs no resolving. Building one costs
+    /// its primary's main sequence or its track ([`BriefModel::new`]), so this belongs on a pool
+    /// job.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the seed of `key`, as [`SharedSystemCache::get_or_generate`].
+    pub fn get_or_build(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+    ) -> Arc<BriefModel> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a brief cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (key, record.id());
+        if let Some(model) = self.briefs.get(&entry_key) {
+            return model;
+        }
+        let model = Arc::new(BriefModel::new(galaxy, record));
+        // A model larger than the whole budget is handed back and still answered from.
+        let _ = self.briefs.insert(entry_key, Arc::clone(&model));
+        model
+    }
+
+    /// The models held, the bytes they are charged, and the hits, misses, evictions and refusals
+    /// so far.
+    #[must_use]
+    pub fn counters(&self) -> LruCounters {
+        self.briefs.counters()
     }
 }
 
@@ -212,5 +285,28 @@ mod tests {
             galaxy(),
             systems(1)[0],
         );
+    }
+
+    #[test]
+    fn a_brief_model_is_built_once_and_every_cache_answers_the_same() {
+        let records: Vec<SystemRecord> = systems(6)
+            .into_iter()
+            .map(|id| resolve(galaxy(), id).unwrap())
+            .collect();
+        let roomy = SharedBriefCache::new(64 << 20);
+        let none = SharedBriefCache::new(0);
+        for _ in 0..2 {
+            for record in &records {
+                let expected = BriefModel::new(galaxy(), record);
+                assert_eq!(*roomy.get_or_build(key(), galaxy(), record), expected);
+                assert_eq!(*none.get_or_build(key(), galaxy(), record), expected);
+            }
+        }
+        let counters = roomy.counters();
+        assert_eq!(
+            (counters.misses(), counters.hits(), counters.entries()),
+            (6, 6, 6)
+        );
+        assert_eq!(none.counters().entries(), 0);
     }
 }

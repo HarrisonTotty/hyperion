@@ -12,6 +12,7 @@ import {
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { formatLengthLy, formatListPosition, formatMassMsun } from "../../lib/format";
 import type { ChartSystem } from "../../lib/galaxy/model";
+import { objectKindLabel } from "../../lib/system/words";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
 
@@ -39,6 +40,17 @@ function rangeName(inRange: boolean): string {
   return inRange ? "IN RANGE" : "OUT OF RANGE";
 }
 
+/**
+ * What a row's primary is, for its accessible name: the kind in words and the class, or that the
+ * system is not yet formed at the chart's time.
+ */
+function starName(system: ChartSystem): string {
+  if (system.star === null) {
+    return "NOT YET FORMED";
+  }
+  return `${objectKindLabel(system.star.kind)} ${system.star.spectralClass}`;
+}
+
 interface SystemListProps {
   readonly systems: ReadonlyArray<ChartSystem>;
   readonly selectedId: SystemIdHex | null;
@@ -60,7 +72,11 @@ interface SystemListProps {
  * and `End` the ends; the selection follows the active row and is reported, and the list scrolls it
  * into view by its index, since a row outside the window is not in the DOM to scroll to. A selection
  * made on the chart scrolls the list to it as well. Whether a system is within the drive range is
- * repeated in words, so that the chart's `--accent` is never the only signal.
+ * repeated in words, so that the chart's `--accent` is never the only signal. The `CLASS` column
+ * holds the primary's spectral class as an astronomer writes it (`G2V`, `DA4.2`, `NS`), and the
+ * row's accessible name its kind in words as well, so that a symbol's shape is never the only signal
+ * of what a star is (plan 06, design note 17); a system not yet formed at the chart's time has no
+ * class, an em dash, and is named `NOT YET FORMED`.
  */
 export function SystemList({
   systems,
@@ -177,6 +193,7 @@ export function SystemList({
     <div className="system-list">
       <div className="system-list__head">
         <span>DESIG</span>
+        <span>CLASS</span>
         <span>DIST ly</span>
         <span>
           INIT MASS <SolarMassUnit />
@@ -231,7 +248,7 @@ export function SystemList({
                 aria-selected={system.id === selectedId}
                 aria-posinset={index + 1}
                 aria-setsize={total}
-                aria-label={`${system.designation}, ${distance} ly, ${mass} solar masses, ${rangeName(inRange)}`}
+                aria-label={`${system.designation}, ${starName(system)}, ${distance} ly, ${mass} solar masses, ${rangeName(inRange)}`}
                 className={
                   inRange ? "system-list__row system-list__row--in-range" : "system-list__row"
                 }
@@ -239,6 +256,11 @@ export function SystemList({
                 data-index={index}
               >
                 <span className="system-list__designation">{system.designation}</span>
+                {system.star === null ? (
+                  <span className="system-list__class readout__missing">—</span>
+                ) : (
+                  <span className="system-list__class">{system.star.spectralClass}</span>
+                )}
                 <span className="system-list__number">{distance}</span>
                 <span className="system-list__number">{mass}</span>
                 <span className="system-list__range">{rangeWords(inRange)}</span>

@@ -38,7 +38,7 @@ mod helium;
 // The track integrator (P06.T10.c–e).
 mod evolve;
 mod track;
-pub use evolve::{evolve, lifetime, turn_off_mass};
+pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
 pub(crate) use track::fate_of;
 pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 

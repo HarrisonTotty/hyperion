@@ -14,6 +14,7 @@ import {
   type MassLayer,
   type Population,
   type RequestOf,
+  type StellarBriefDto,
   type SystemRecord,
   type SystemsInRange,
   type UniverseIdHex,
@@ -29,6 +30,7 @@ import {
   type ChartResult,
   type ChartSystem,
   type LayerIndex,
+  type StarBrief,
 } from "./model";
 
 /** The origin of the `GALACTIC` frame, from which absolute positions are measured. */
@@ -36,6 +38,16 @@ const ORIGIN: GalacticPosition = { cell_ly: [0, 0, 0], offset_m: [0, 0, 0] };
 
 function toVec3([x, y, z]: readonly [number, number, number]): Vec3 {
   return { x, y, z };
+}
+
+function toStarBrief(brief: StellarBriefDto): StarBrief {
+  return {
+    kind: brief.kind,
+    spectralClass: brief.class,
+    logLuminosityLsun: brief.log_luminosity_lsun,
+    teffK: brief.teff_k,
+    starCount: brief.star_count,
+  };
 }
 
 function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSystem {
@@ -50,6 +62,8 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     population: record.population,
     initialMassMsun: record.initial_mass_msun,
     ageMyr: record.age_myr,
+    // Every chart query asks for the briefs, so a row without one is a system not yet formed.
+    star: record.stellar === undefined ? null : toStarBrief(record.stellar),
   };
 }
 
@@ -97,7 +111,9 @@ export function toChartResult(response: SystemsInRange): ChartResult {
  *
  * @remarks
  * The centre is carried exactly as a cell and an offset (`galacticPositionFromLy`), so a negative
- * coordinate falls in the cell below it. Every query carries {@link CHART_SYSTEM_LIMIT}.
+ * coordinate falls in the cell below it. Every query carries {@link CHART_SYSTEM_LIMIT} and asks
+ * for each row's stellar brief, from which the chart draws its symbols and the HR diagram its
+ * points.
  *
  * @param centreLy - The chart centre in the `GALACTIC` frame.
  * @param radiusLy - The query radius.
@@ -120,6 +136,7 @@ export function toRangeRequest(
     time: universeTimeFromYears(timeYr),
     min_layer: minLayer,
     limit: CHART_SYSTEM_LIMIT,
+    include_stellar: true,
   };
 }
 

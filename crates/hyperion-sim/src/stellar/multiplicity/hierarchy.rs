@@ -691,6 +691,82 @@ pub(super) fn draw_hierarchy_with(
     draft.build(record.id(), count - placed)
 }
 
+/// Whether the primary of `m0` has its direct companions drawn as Moe and Di Stefano count them,
+/// read from the attempt's `streams`: what [`Draw::is_direct`] decides, for [`draw_star_count`] too.
+#[must_use]
+fn is_direct(streams: &Streams, m0: SolarMasses) -> bool {
+    let weight = direct_weight(m0);
+    if weight <= 0.0 {
+        false
+    } else if weight >= 1.0 {
+        true
+    } else {
+        streams
+            .system_mark(tags::SYSTEM_MULTIPLICITY, BLEND_WORD)
+            .is_below(Threshold::from_probability(weight))
+    }
+}
+
+/// How many stars the hierarchy [`draw_hierarchy`] draws for `record` under `ctx` at `attempt`
+/// holds: its [`SystemHierarchy::star_count`], always, at the cost of the count alone for a system
+/// drawn single (plan 06, P06.T38.e; ruling 90).
+///
+/// A range query's brief needs a system's star count and nothing else of its hierarchy. The draw
+/// decides first how many companions to try (the words `system.multiplicity` 0–2 and, above
+/// 8 M☉, the primary's stripped mark), and only then builds the tidal limit, the period laws and
+/// the orbits that the stability test keeps or drops. A system drawn with no companion to try is
+/// single whatever follows, so its count is read from those words alone; one with companions is
+/// drawn in full, since which of them survive depends on their orbits. The words read are the
+/// full draw's, so no stream is consumed differently.
+///
+/// # Panics
+///
+/// As [`draw_hierarchy`].
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::stellar::multiplicity::{
+///     MultiplicityContext, RedrawAttempt, draw_hierarchy, draw_star_count,
+/// };
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// for record in &cell {
+///     let (ctx, attempt) = (MultiplicityContext::Free, RedrawAttempt::FIRST);
+///     assert_eq!(
+///         draw_star_count(&galaxy, record, ctx, attempt),
+///         draw_hierarchy(&galaxy, record, ctx, attempt).star_count(),
+///     );
+/// }
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+#[must_use]
+pub fn draw_star_count(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> u8 {
+    let model = MultiplicityModel::default_v1();
+    let streams = Streams::new(galaxy, record.id(), attempt);
+    let m0 = record.primary_initial_mass();
+    let pmf = if is_direct(&streams, m0) {
+        direct_count_pmf(m0)
+    } else {
+        model.companion_count_pmf(m0)
+    };
+    if companion_count(&streams, innermost(galaxy, record, ctx), &pmf, ctx) == 0 {
+        return 1;
+    }
+    draw_hierarchy(galaxy, record, ctx, attempt).star_count()
+}
+
 /// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1).
 #[must_use]
 fn innermost(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> Innermost {
@@ -774,35 +850,48 @@ impl Draw<'_> {
     /// stability: 0 to [`MAX_COMPANIONS`].
     #[must_use]
     fn companion_count(&self, pmf: &[f64; MAX_COMPANIONS + 1], ctx: MultiplicityContext) -> u8 {
-        let multiples = &pmf[1..];
-        let multiple_share = multiples.iter().fold(0.0, |sum, &p| sum + p);
-        let multiple = match (ctx, self.limits.innermost()) {
-            (MultiplicityContext::ForcedSingle, _) => false,
-            (MultiplicityContext::ForcedMultiple { .. }, _)
-            | (MultiplicityContext::Free, Innermost::Interacting(_)) => true,
-            (MultiplicityContext::Free, Innermost::Free) => self
-                .streams
-                .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
-                .is_below(Threshold::from_probability(multiple_share.clamp(0.0, 1.0))),
-            (MultiplicityContext::Free, Innermost::Wide(_)) => {
-                let s = PROVISIONAL_STRIPPED_SHARE;
-                let p = ((multiple_share - s) / (1.0 - s)).clamp(0.0, 1.0);
-                self.streams
-                    .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
-                    .is_below(Threshold::from_probability(p))
-            }
-        };
-        if !multiple {
-            return 0;
-        }
-        let extra = self
-            .streams
-            .system_mark(tags::SYSTEM_MULTIPLICITY, 1)
-            .pick_weighted(multiples, multiple_share)
-            .expect("the last count's threshold is the whole share, which every mark lies below");
-        u8::try_from(1 + extra).expect("at most three companions")
+        companion_count(&self.streams, self.limits.innermost(), pmf, ctx)
     }
+}
 
+/// How many companions a primary whose count distribution is `pmf` and whose innermost orbit is
+/// held to `innermost` has under `ctx`, before stability, read from the attempt's `streams`: what
+/// [`Draw::companion_count`] draws, for [`draw_star_count`] too.
+#[must_use]
+fn companion_count(
+    streams: &Streams,
+    innermost: Innermost,
+    pmf: &[f64; MAX_COMPANIONS + 1],
+    ctx: MultiplicityContext,
+) -> u8 {
+    let multiples = &pmf[1..];
+    let multiple_share = multiples.iter().fold(0.0, |sum, &p| sum + p);
+    let multiple = match (ctx, innermost) {
+        (MultiplicityContext::ForcedSingle, _) => false,
+        (MultiplicityContext::ForcedMultiple { .. }, _)
+        | (MultiplicityContext::Free, Innermost::Interacting(_)) => true,
+        (MultiplicityContext::Free, Innermost::Free) => streams
+            .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
+            .is_below(Threshold::from_probability(multiple_share.clamp(0.0, 1.0))),
+        (MultiplicityContext::Free, Innermost::Wide(_)) => {
+            let s = PROVISIONAL_STRIPPED_SHARE;
+            let p = ((multiple_share - s) / (1.0 - s)).clamp(0.0, 1.0);
+            streams
+                .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
+                .is_below(Threshold::from_probability(p))
+        }
+    };
+    if !multiple {
+        return 0;
+    }
+    let extra = streams
+        .system_mark(tags::SYSTEM_MULTIPLICITY, 1)
+        .pick_weighted(multiples, multiple_share)
+        .expect("the last count's threshold is the whole share, which every mark lies below");
+    u8::try_from(1 + extra).expect("at most three companions")
+}
+
+impl Draw<'_> {
     /// The draft with companion `k` placed, or `None` if it cannot be.
     #[must_use]
     fn place(&self, draft: &Draft, k: u8) -> Option<Draft> {
@@ -997,16 +1086,7 @@ impl Draw<'_> {
     /// with the weight [`direct_weight`].
     #[must_use]
     fn is_direct(&self, m0: SolarMasses) -> bool {
-        let weight = direct_weight(m0);
-        if weight <= 0.0 {
-            false
-        } else if weight >= 1.0 {
-            true
-        } else {
-            self.streams
-                .system_mark(tags::SYSTEM_MULTIPLICITY, BLEND_WORD)
-                .is_below(Threshold::from_probability(weight))
-        }
+        is_direct(&self.streams, m0)
     }
 
     /// The `binary.orbit`, `binary.orientation` and `binary.phase` streams of draw slot `slot`,
@@ -2597,5 +2677,56 @@ mod tests {
         // Tokovinin's correlation (ruling 74), each bracket about 4 standard errors wide.
         assert!((1.55..=2.2).contains(&ratio), "{ratio}");
         assert!((0.58..=0.72).contains(&share), "{share}");
+    }
+
+    /// P06.T38.e's count-only path: `draw_star_count` is the full draw's star count for every
+    /// context, over the mass function and over log-uniform masses to 150 M☉ (ruling 90).
+    #[test]
+    fn the_count_only_path_is_the_full_draws_star_count() {
+        let galaxy = galaxy();
+        let contexts = [
+            MultiplicityContext::Free,
+            MultiplicityContext::ForcedSingle,
+            MultiplicityContext::ForcedMultiple {
+                max_separation: None,
+            },
+            MultiplicityContext::ForcedMultiple {
+                max_separation: Some(Metres::new(100.0 * METRES_PER_AU)),
+            },
+        ];
+        let mut records = imf_records(&galaxy, 3_000, &sunlike(), 0x636f_756e);
+        records.extend(log_uniform_records(
+            &galaxy,
+            1_000,
+            &sunlike(),
+            (0.08, 150.0),
+            0x636f_756f,
+        ));
+        records.extend(log_uniform_records(
+            &galaxy,
+            500,
+            &inner_disc(),
+            (0.08, 150.0),
+            0x636f_7570,
+        ));
+        let mut counts = [0_u32; 5];
+        for record in &records {
+            for ctx in contexts {
+                for attempt in [
+                    RedrawAttempt::FIRST,
+                    RedrawAttempt::all().nth(1).expect("two"),
+                ] {
+                    let full = draw_hierarchy(&galaxy, record, ctx, attempt).star_count();
+                    assert_eq!(
+                        draw_star_count(&galaxy, record, ctx, attempt),
+                        full,
+                        "{record:?} under {ctx:?} at {attempt:?}"
+                    );
+                    counts[usize::from(full)] += 1;
+                }
+            }
+        }
+        // Singles, which take the short path, and every multiplicity are exercised.
+        assert!(counts[1..].iter().all(|&c| c > 0), "{counts:?}");
     }
 }

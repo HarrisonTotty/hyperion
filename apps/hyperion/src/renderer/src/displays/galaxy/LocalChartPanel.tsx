@@ -146,10 +146,14 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         timeYr={chart.timeYr}
         onTime={chart.setTime}
         bands={bands}
+        starFilter={chart.starFilter}
+        onStarFilter={chart.chooseStarFilter}
         heldBack={heldBack}
       />
       <CensusReadout
         result={result}
+        systems={chart.systems}
+        starFilter={chart.starFilter}
         state={state}
         driveRangeLy={driveRangeLy}
         stale={stale}

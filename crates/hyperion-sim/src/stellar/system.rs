@@ -29,7 +29,7 @@ use crate::id::BodyId;
 use crate::math;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::classify::{ClassExtras, Classification, LuminosityClass, classify};
-use crate::stellar::draws::StarDraws;
+use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::multiplicity::{
     MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy,
 };
@@ -658,6 +658,28 @@ pub struct StellarBrief {
 }
 
 impl StellarBrief {
+    /// The brief of a primary in `state`, of `composition` and `draws`, in a system of
+    /// `star_count` stars: its class, its kind, log L and `T_eff`. [`SystemStars::brief_at`] and
+    /// the range brief ([`crate::stellar::brief`]) both make it here, so that a brief is the same
+    /// function of the state whichever built it.
+    #[must_use]
+    pub(crate) fn of(
+        state: &StarState,
+        composition: &Composition,
+        draws: &StarDraws,
+        star_count: u8,
+    ) -> Self {
+        let class = classify(state, composition, draws, &ClassExtras::NONE);
+        let luminosity = state.luminosity().value();
+        Self {
+            kind: object_kind(state, &class, composition),
+            class,
+            log_luminosity: (luminosity > 0.0).then(|| Dex::new(math::log10(luminosity))),
+            effective_temperature: state.effective_temperature(),
+            star_count,
+        }
+    }
+
     /// How many stars the system has, the primary included: 1 to 1 +
     /// [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
     #[must_use]
@@ -771,7 +793,7 @@ const WOLF_RAYET_FLOOR_Z_SLOPE: f64 = -0.4;
 /// and then reads a later attempt here, for the hierarchy and for each companion's own draws alike
 /// ([`StarDraws::for_attempt`]), since both are blocks of [`ATTEMPT_WORDS`](crate::stellar::draws::ATTEMPT_WORDS)
 /// words. No record of this generator version is redrawn.
-const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
+pub(crate) const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
 
 /// A grid system's stars from its record (plan 06, P06.T29.b, with plan 11's P11.T2.c): its
 /// primary, body 0 of the system, its companions, and the hierarchy of orbits that holds them.
@@ -961,20 +983,12 @@ impl SystemStars {
     pub fn brief_at(&self, t: UniverseTime) -> Option<StellarBrief> {
         let primary = self.primary();
         let state = primary.state_at(t)?;
-        let class = classify(
+        Some(StellarBrief::of(
             &state,
             primary.composition(),
             primary.draws(),
-            &ClassExtras::NONE,
-        );
-        let luminosity = state.luminosity().value();
-        Some(StellarBrief {
-            kind: object_kind(&state, &class, primary.composition()),
-            class,
-            log_luminosity: (luminosity > 0.0).then(|| Dex::new(math::log10(luminosity))),
-            effective_temperature: state.effective_temperature(),
-            star_count: self.star_count(),
-        })
+            self.star_count(),
+        ))
     }
 
     /// When the primary dies on the clock: T = lifetime − age at the epoch.
@@ -1010,8 +1024,18 @@ impl SystemStars {
 /// **A named seam** (plan 06, P06.T29.b; plan 11, P11.T2.c's second): plan 08's P08.T12.c makes it
 /// `for_attempt` of the record's `mark_attempt()`, which does not exist before then.
 #[must_use]
-fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws {
+pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws {
     StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0))
+}
+
+/// The primary's η alone: [`primary_draws`]'s [`eta`](StarDraws::eta), bit for bit, from its one
+/// stream, for the range brief of a main-sequence primary (P06.T38.e).
+///
+/// **The same seam as [`primary_draws`]:** plan 08's P08.T12.c changes both to the record's
+/// `mark_attempt()` together.
+#[must_use]
+pub(crate) fn primary_eta(galaxy: &Galaxy, record: &SystemRecord) -> StandardNormal {
+    StarDraws::eta_for_attempt(galaxy.seed(), BodyId::new(record.id(), 0), 0)
 }
 
 /// The clock time of `death` for a star whose age at the epoch is `age_at_epoch`.

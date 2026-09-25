@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChartSystem } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
-import { aSystemsInRange } from "../../test/galaxyFixtures";
+import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
 import { SystemList } from "./SystemList";
 
 const CENTRE = [26_000, 0, 0] as const;
@@ -186,7 +186,7 @@ describe("SystemList", () => {
 
     expect(
       screen.getByRole("option", {
-        name: "H7K 4C0RFZ A-1, 1.00 ly, 0.29 solar masses, IN RANGE",
+        name: "H7K 4C0RFZ A-1, DWARF M3V, 1.00 ly, 0.29 solar masses, IN RANGE",
       }),
     ).toBeInTheDocument();
   });
@@ -209,5 +209,36 @@ describe("SystemList", () => {
 
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(screen.queryByText(/of/u)).not.toBeInTheDocument();
+  });
+
+  it("shows each row's spectral class in its class column", () => {
+    stubViewport();
+    const systems = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [{ relLy: [1, 0, 0], layer: "c", stellar: aStellarBrief("c", "white_dwarf") }],
+      }),
+    ).systems;
+
+    renderList(systems);
+
+    const row = screen.getByRole("option", { name: /^H7K 4C0RFZ C-1, WHITE DWARF DA4\.2, /u });
+    expect(within(row).getByText("DA4.2")).toBeInTheDocument();
+    expect(screen.getByText("CLASS")).toBeInTheDocument();
+  });
+
+  it("names a system not yet formed so and shows its class missing", () => {
+    stubViewport();
+    const systems = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [{ relLy: [1, 0, 0], layer: "a", stellar: null }],
+      }),
+    ).systems;
+
+    renderList(systems);
+
+    const row = screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, NOT YET FORMED, /u });
+    expect(within(row).getByText("—")).toBeInTheDocument();
   });
 });

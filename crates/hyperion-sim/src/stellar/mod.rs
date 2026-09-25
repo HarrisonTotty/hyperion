@@ -16,6 +16,7 @@
 //! [`units`](crate::units) newtypes. Nothing in this module reads plan 03's placement except
 //! [`system`].
 
+pub mod brief;
 pub mod classify;
 pub mod composition;
 pub mod draws;

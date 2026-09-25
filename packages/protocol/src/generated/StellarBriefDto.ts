@@ -24,4 +24,8 @@ log_luminosity_lsun: number | null,
 /**
  * Its effective temperature, K; `null` for an object with no luminosity.
  */
-teff_k: number | null, };
+teff_k: number | null, 
+/**
+ * How many stars the system has, the primary included: 1 to 4 (plan 11, P11.T13).
+ */
+star_count: number, };

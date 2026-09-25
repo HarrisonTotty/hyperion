@@ -287,6 +287,43 @@ metallicity, `TrackFates::at(fe_h: Dex)`, and plan 02's quadrature, which alread
 population, is handed the one for that population's reference [Fe/H] (P06.T30). `mean_companions`
 delegates to plan 02's `ProvisionalFates` until plan 11.
 
+### Range briefs (`stellar::brief`, `stellar::fates`, `tables::stellar_fates`; P06.T38, ruling 89)
+
+```rust
+// stellar::sse: the knot-free main sequence alone, bit-equal to Track::state_at (T38.b)
+pub fn main_sequence_state(m0: SolarMasses, comp: &Composition, draws: &StarDraws, age: Years)
+    -> Option<StarState>;              // None unless on a knot-free main sequence at `age`
+// stellar::fates: one node of the fate table, one Track::full (T38.c), and its reader (T38.d)
+pub struct FateNode { /* t_death, route and SN byte, remnant mass or M_CO, cooling origin,
+    M_He, M_env */ }
+impl FateNode { pub fn of(m0: SolarMasses, comp: &Composition, eta: f64) -> Self; }
+pub struct FittedFates;                // over tables::stellar_fates; ruling 77.3's lifetime table
+impl FittedFates {
+    pub fn lifetime_fitted(&self, m0: SolarMasses, comp: &Composition, eta: f64) -> Option<Years>;
+    pub fn lifetime_bracket(&self, m0: SolarMasses, comp: &Composition, eta: f64)
+        -> Option<(Years, Years)>;     // certified: contains Track::lifetime
+    pub fn fate_fitted(&self, m0: SolarMasses, comp: &Composition, eta: f64)
+        -> Option<FittedFate>;         // route, remnant inputs, error bounds
+}
+// stellar::brief: per-row routing for a range query (T38.e)
+pub struct BriefModel;                 // epoch state, time-independent, cacheable
+impl BriefModel {
+    pub fn new(galaxy: &Galaxy, record: &SystemRecord) -> Self;   // gains the fates with T38.d
+    pub fn brief_at(&self, t: UniverseTime) -> Option<StellarBrief>;
+    pub fn route(&self) -> BriefRoute;  // MainSequence | Exact (later: the table's)
+    pub fn star_count(&self) -> u8;
+    pub fn heap_bytes(&self) -> usize;
+}
+pub fn range_brief(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime)
+    -> Option<StellarBrief>;
+// stellar::multiplicity (plan 11's code; ruling 90): the count alone, equal to the full draw's
+pub fn draw_star_count(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext,
+    attempt: RedrawAttempt) -> u8;     // == draw_hierarchy(..).star_count()
+```
+
+Every `None` of the fast path and the reader sends the caller to the exact integrator. Plan 08's
+placement and P06.T30.b read `FittedFates` too.
+
 ### Protocol (`hyperion-protocol`, mirrored in `@hyperion/protocol`)
 
 Everything here extends plan 04's request convention as its "Extending the convention" prescribes:
@@ -577,7 +614,10 @@ needs the rest of T28. T29.b needs plan 03, T3 and B–F. T30 needs T10, T18 and
 T31 and T32 need T29.b. Phase H needs T29.b; its protocol task can be written against the types of
 T1 as soon as they exist; T34 also needs plan 04's P04.T14 (the range handler) and T35–T37 plan
 05's P05.T9–T11 (the chart, list, readout and legend). T19.e is the only task that waits on another
-plan (plan 15's P15.T5.a) and is done last; the plan is otherwise complete without it.
+plan (plan 15's P15.T5.a) and is done last; the plan is otherwise complete without it. T38, from
+ruling 89, needs T29.b and ruling 77.1's `powf_positive`. T38.a completes T32's benches, and
+T38.b–e need it. T38's subtasks run in order, and T38.a is a stop point. T34's range briefs, T35.b,
+T37 and plan 13's P13.T7 wait on T38.e.
 
 Where a task's acceptance says only that its tests pass, the command is
 `cargo test -p hyperion-sim -- <module paths of its Files>`, for instance
@@ -1495,6 +1535,223 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
   a built model; briefs for the 1,600 systems of a 50 ly query at the reference density.
 - **Files:** `crates/hyperion-sim/benches/stellar.rs`.
 - **Accept:** `just bench` runs them; targets under "Verification"; results recorded.
+- **Completed by P06.T38.a (round 9, `briefs`).** The system and brief benches landed there, and
+  their results are recorded under it. `lifetime` is benched at 1, 4, 5, 12, 20 and 40 M☉ (at load
+  4–13, `math::exp` 7.8–8.1 ns): 606, 562, 583, 535, 445 and 446 µs, 55,000–78,000 `exp`, about 100
+  times the 5 µs target, which the fitted table of T38.c–d is to meet. _Deviation:_ each is timed
+  with `ZCoeffs` built inside the call only, since no public entry takes one already built;
+  `ZCoeffs::new` alone is 1.4–1.7 µs, so the difference is under 0.3%.
+
+#### P06.T38 Fitted fates and range briefs (ruling 89)
+
+A range brief is routed per row. Every exact-routed row is bit-identical to `SystemStars::brief_at`;
+a dead primary read through the fate table agrees with `system_summary` in kind and class exactly,
+and in L and T_eff within the table's stated error (ruling 89.2 as amended by ruling 90).
+Main-sequence primaries (about 90% of rows) take a state-only fast path; living evolved stars and
+stars near death take the exact integrator; dead stars take a **fate table over (m₀, Z, η)**, since
+a remnant's state is a closed form of four numbers
+(`Model::Remnant { phase, mass, birth, origin }`). The table is ruling 77.3's fitted lifetime table: one artefact, one `Track::full` per node,
+giving the death age and the fate. It is over mass, Z and η, never age, so it keeps the brainstorm's
+"no tables binned by age". No existing output moves and no bump is needed; a moved golden is a
+finding. The design study is `_orchestration/research/briefs/ADVICE.md`.
+
+- **P06.T38.a Measure first.** A stop point: report before building b–e. Say so if the draws, the
+  hierarchy or the classification cost more than about 5 µs a row, since then the fast path alone
+  misses the budget, and if the table's error exceeds about 10⁻³, since then the guard's fallback
+  share grows, with how much.
+  - **Build:** P06.T32's missing benches: `SystemStars::generate` for a layer-A dwarf, a giant, a
+    white dwarf and a neutron star; `brief_at` and `summary_at` on a built model; `draw_hierarchy`,
+    `StarDraws::for_star`, `draw_metallicity` and `classify` alone; briefs for the 1,600 systems
+    of a 50 ly query through today's exact path. A route census (main sequence, living evolved,
+    dead) of 50 ly queries at the solar circle, in the thick disc and in the bulge. A scratch fate
+    survey, not kept: dense sweeps in log m₀ of t_death, route, remnant mass, cooling origin and
+    M_CO at 5 Z × 3 η; every jump and kink located against the known `ZCoeffs` loci (m_hef, m_fgb,
+    m_hook, the electron-capture and pair-instability edges); cubic interpolation error at node
+    spacings of 0.01, 0.02 and 0.04 dex, and quadratic error in η.
+  - **Provides:** the benches; the grid, node count, table size and tolerances that T38.c builds.
+  - **Files:** `crates/hyperion-sim/benches/stellar.rs`; the survey in scratch only.
+  - **Tests:** none kept but the benches.
+  - _Accept:_ `just bench stellar` runs them; the measurements (per-row costs, route shares, the
+    survey's errors) are recorded under this task.
+  - _Measured (round 9, `briefs`, at `ea20910`, version 11)._ Benches in two runs at load 2.3–8,
+    `math::exp` 7.8–7.95 ns; instruction counts from a scratch `perf_event_open` counter
+    (user-space instructions, identical in both runs; one `math::exp` is 73), with the census run at
+    load 6–9 and `math::exp` 11 ns. The census uses the benches' seed and fixture at the epoch.
+    - _Benches._ `generate`: a layer-A dwarf 26.6–32.6 µs, a giant 62–77 µs, a white dwarf
+      0.66–1.06 ms, a neutron star 1.11–1.44 ms. `brief_at` 0.17–1.1 µs and `summary_at` 0.44–3.6
+      µs on a built system. `draw_metallicity` 66–82 ns, `StarDraws::for_star` 1.34–1.66 µs,
+      `draw_hierarchy` (the dwarf's system, with a companion) 7.1–7.8 µs, `classify` 0.32–0.57 µs
+      for a living star and under 0.07 µs for a remnant. The 969 rows of the 50 ly query through
+      today's exact path: 89–95 ms, 92–98 µs a row, **147–157 ms per 1,600 rows** (11.5–12.2 M
+      `exp`).
+    - _Route census._ Solar circle, 50 ly (969 rows, complete to layer A): below 0.1 M☉ 7.7%,
+      knot-free main sequence 84.2%, main sequence with loss none, living evolved 0.1%, dead 7.95%
+      (64 white dwarfs, 11 neutron stars, 2 black holes; one within 10⁻³ of its death age). Thick
+      disc (z = 4,500 ly; 50 ly holds 12 rows, so 200 ly, 1,224 rows, 44% thick disc and 7% halo):
+      7.7%, 81.1%, none, 0.65%, 10.6%. Bulge (R = 2,000 ly, z = 1,000 ly), 50 ly: 1,245 rows,
+      complete only to layer D under the default limit, **all dead** (975 white dwarfs, 161 neutron
+      stars, 109 black holes), 5.7 M instructions a row, 1.4–1.8 s for the query.
+    - _Per-row pieces_ (instructions, solar circle): metallicity 460; `for_star` 10.4 k;
+      classification 4.1 k (main sequence), 2.3 k (dead), 11.6 k below 0.1 M☉ (with the cooling
+      fits); the primary's model 55.7 k on the main sequence and 2.84 M dead; companions 138 k a row
+      on average, which a brief does not need. **The hierarchy grows with the primary's mass:**
+      12.5 k a row in layer A, 17 k in B, 43.5 k in C, 227 k in D and 272–335 k in E (about 3, 4,
+      10, 52 and 62–87 µs at the census's load), 26.7 k on average at the solar circle.
+    - _The 5 µs stop rule._ The draws, the metallicity and the classification are under it. **The
+      hierarchy is not:** 7–8 µs for the benched dwarf's system, 5–6 µs a row on average, and 10–90
+      µs for primaries of layers C–E, which are the dead rows. With the fast path (`ZCoeffs::new`
+      1.4–1.7 µs plus the closed form) and a 3 µs table row, 1,600 solar-circle rows project to
+      about 12–13 ms on one idle thread, 56% of it the hierarchy; the bulge's all-dead rows to about
+      45 µs each, 0.9 s at the 20,000-row cap.
+    - _Fate survey_ (scratch, not kept): 21,550 full tracks over 0.7–100 M☉ at 0.0025 dex, [Fe/H]
+      −2, −1, −0.5, 0 and +0.3, and η at −3, −1.5, 0, +1.5 and +3σ; and 21,550 more at 25 [Fe/H]
+      0.125 dex apart at the median η. Route loci: helium to carbon–oxygen white dwarfs at 0.71–0.94
+      M☉ (the one locus that moves with η), oxygen–neon white dwarfs from 4.9–6.5, electron capture
+      from 6.6–8.3, iron cores from 6.7–8.5, the supernova type's steps at 14–38 M☉; none of pair
+      instability or thermonuclear disruption below 100 M☉. Kinks sit at m_hef (t_death's largest),
+      at 6.3–8.0 M☉ (M_He) and at 22–24 M☉ for Z ≥ 0.02 (the stripping onset); none at m_hook or
+      m_fgb.
+    - _Interpolation errors_ (relative; median and p99). Cubic in log m at 0.01 dex: white dwarfs'
+      t_death 1.4 × 10⁻⁶ and 4.1 × 10⁻³, mass 8.1 × 10⁻⁵ and 3.5 × 10⁻³, cooling origin 1.2 × 10⁻⁴
+      and 2 × 10⁻²; iron cores' t_death 5.7 × 10⁻⁷ and 1.3 × 10⁻⁴, M_CO 6.8 × 10⁻⁶ and 4.5 × 10⁻³.
+      Cells straddling a route change are 6.6%, 12.6% and 23% of the IMF weight at 0.01, 0.02 and
+      0.04 dex; cells flagged (a straddle or any column over 10⁻³) 21.5%, 48% and 84%. Quadratic in
+      η: t_death p99 2.5 × 10⁻⁴, white dwarf mass 1.2 × 10⁻⁴ and 8.5 × 10⁻³ (18% over 10⁻³); the
+      iron cores' columns do not depend on η. **In Z the white dwarf mass is structured:** at fixed
+      m₀ it moves by 5–10% within 0.125–0.25 dex (1.5 M☉: 0.663, 0.671 and 0.615 M☉ at [Fe/H] −1.45,
+      −1.33 and −1.20; 0.625, 0.687 and 0.637 at −0.70, −0.58 and −0.45). Cubic at 0.25 dex gives
+      it 7.8 × 10⁻³ and 7.2 × 10⁻² (90% of points over 10⁻³), and even a 0.125 dex fit leaves a
+      residual of 2.2 × 10⁻³. The iron cores' M_CO is 6.5 × 10⁻⁵ and 2.7 × 10⁻² at 0.25 dex.
+      Cubic in log m at 0.02 and 0.04 dex: white dwarfs' t_death 9.6 × 10⁻⁶ and 1.8 × 10⁻², then
+      7.8 × 10⁻⁵ and 4.0 × 10⁻²; mass 2.6 × 10⁻⁴ and 6.2 × 10⁻³, then 6.7 × 10⁻⁴ and 1.2 × 10⁻²;
+      cooling origin 4.6 × 10⁻⁴ and 3.4 × 10⁻², then 2.0 × 10⁻³ and 3.7 × 10⁻²; iron cores' t_death
+      2.8 × 10⁻⁶ and 4.2 × 10⁻⁴, then 1.4 × 10⁻⁵ and 5.2 × 10⁻⁴; M_CO 2.9 × 10⁻⁵ and 1.2 × 10⁻²,
+      then 2.3 × 10⁻⁴ and 1.2 × 10⁻².
+    - _What it means for T38.c._ At the design study's grid (about 0.02 dex in mass, 10 Z nodes, 3
+      η) the medians meet 10⁻³ for death ages and iron cores, and the p99s are the kink cells, which
+      the build flags. White dwarfs, the dead rows' 80–85%, miss it: their mass error is near 10⁻²
+      from the Z axis alone. That moves T_eff by about 0.4% and the temperature index (50,400 ÷
+      T_eff, to one decimal) by 0.04–0.08, so the guard would trip for an estimated 80–100% of them.
+      Each fallback is the primary's full track, 0.6–0.7 ms. The 1,600 solar-circle rows, with some
+      106 white dwarfs, would then cost about 70–90 ms instead of 12–13 ms, 5–6 times the budget.
+      **The 10⁻³ condition is met for iron cores and death ages and missed for white dwarfs.**
+      Reported for a ruling before b–e.
+    - _Deviations, as built._ The fixture's 50 ly query at the Sun-like point holds 969 rows, not
+      1,600, so the brief bench runs those and the per-1,600 figures are scaled. The thick-disc
+      census uses 200 ly, since 50 ly holds 12 rows, and the bulge's is complete only to layer D.
+      The survey sweeps five η values and adds the 25-node Z sweep, beyond 5 Z × 3 η, to measure
+      the Z axis. The giant, white dwarf and neutron star exemplars come from a 150 ly query down
+      to layer D if the 50 ly query has none. `classify` is benched for every exemplar.
+- **P06.T38.b The main-sequence fast path.**
+  - **Build:** the builder's knot rule (loss at the entry rate under 10⁻⁶ of the mass) made
+    shareable; a state-only evaluation of `ZCoeffs`, the main-sequence timescales and the closed
+    form at the age, skipping the maxima samples and the golden-section searches `to_age` builds.
+  - **Provides:** `sse::main_sequence_state(m0, &Composition, &StarDraws, age) ->
+Option<StarState>`, `None` unless the star is on a knot-free main sequence at `age`.
+  - **Files:** `stellar/sse/{evolve.rs, track.rs, track/build.rs, mod.rs}`.
+  - **Tests:** bit-equal to `Track::state_at` wherever `Some`, over 10⁵ random (m₀, Z, η, age),
+    ruling 77.3's pattern for `lifetime`; `None` exactly where the track has knots or has left the
+    main sequence.
+  - _Accept:_ `cargo test -p hyperion-sim -- stellar::sse` and
+    `just test-slow main_sequence_fast_path`; every golden unchanged.
+  - - _As built (round 9, `briefs`)._ `Track::knot_free_main_sequence` (crate-private) builds the
+      main-sequence segment alone through the builder's own `main_sequence_segment`, which
+      `Builder::main_sequence` now calls, so the knot rule is shared by construction and nothing else
+      of the builder moved. `main_sequence_state` answers only before the segment's end, since at the
+      end the full track's next segment starts. `track/build.rs`, which the task lists, is unchanged; `track/phases.rs` holds the shared segment. Tests: 2,000 random stars in `just test` and 10⁵
+      slow, each branch counted (answered, with knots, at or past the end, age zero), plus the
+      refusals outside 0.1–100 M☉ and at negative or non-finite ages; no golden moved. Cost: 2.9 µs
+      for a 0.4 M☉ dwarf (bench, `math::exp` 7.2–7.9 ns), about 27,000 instructions against `to_age`'s
+      6.8 µs.
+- **P06.T38.c The node evaluator and the table task.** **Held (ruling 90)** until the research on
+  the white dwarfs' metallicity structure (T38.a) and the ruling on the table's form.
+  - **Build:** in the sim, a public node evaluator (one `Track::full`, the six columns), since
+    `fate_of` and the remnant segment are crate-private and `hyperion-fit` calls only public API
+    (plan 15, design note 1). In `hyperion-fit`, `tasks/stellar_fates.rs`: the grid T38.a fixed,
+    per-cell validation at the cell centres (error bounds and unsmooth flags), rendered through
+    `tasks/render.rs` with a header as `wd_cooling.rs` has (tool, version 0, source, grid,
+    acceptance figures, since-generator-version); `Command::RunStellarFates` and
+    `DEFAULT_STELLAR_FATES_OUT` in `lib.rs`, and the dispatch in `main.rs`. Split the output by Z
+    row if it passes about 450 kB. Land it after the bump to 12, so its header reads 12.
+  - **Provides:** `stellar::fates::FateNode::of(m0, &Composition, eta)`;
+    `crates/hyperion-sim/src/tables/stellar_fates.rs` and its `tables/mod.rs` line.
+  - **Files:** `stellar/fates.rs`, `stellar/sse/` (the re-export), `tables/stellar_fates.rs`,
+    `tables/mod.rs`, and in `crates/hyperion-fit/src/`: `lib.rs`, `main.rs`, `tasks/mod.rs` and
+    `tasks/stellar_fates.rs`.
+  - **Tests:** a byte-for-byte reproduction of the table (slow); a fingerprint test in `just test`,
+    12 fixed nodes across every route rebuilt with `FateNode::of` and compared bit for bit with the
+    table, so that a stellar change moving a node fails ordinary CI (plan 15, design note 7).
+  - _Accept:_ `just ci` and `just test-slow stellar_fates` green.
+- **P06.T38.d `FittedFates`, the reader.** **Held (ruling 90)** with T38.c.
+  - **Build:** interpolation in fixed-order arithmetic through `math`; `None` outside the domain
+    (m₀ below 0.7 or above 100 M☉, η beyond ±3σ, a non-zero `helium_excess`, an unsmooth cell).
+  - **Provides:** `FittedFates::{lifetime_fitted, lifetime_bracket, fate_fitted}` and
+    `FittedFate` (the route, the remnant inputs and the error bounds).
+  - **Files:** `stellar/fates.rs`, `stellar/mod.rs`; the Verification's lifetime line names it
+    met.
+  - **Tests:** over random stars against `Track::lifetime` and `Track::fate_with` (10⁴ on a
+    subsample in `just test`, 10⁵ slow): the bracket contains the exact lifetime every time, and
+    the columns are within the stated tolerances.
+  - _Accept:_ `cargo test -p hyperion-sim -- stellar::fates` and its slow test green.
+- **P06.T38.e The brief router.** _Ruling 90:_ built before T38.c–d with **dead stars on the exact
+  path** until the table exists, and with the hierarchy's count-only path **required**, as a new
+  plan 11 function beside `draw_hierarchy`, which stays unchanged.
+  - **Build:** route each primary: below 0.1 M☉, the cooling fits; on a knot-free main sequence,
+    T38.b; otherwise by the certified bracket: before it, the exact `Track::to_age`; after it, the
+    table's remnant through the track's own remnant closed form (`remnant_state`, crate-internal,
+    the function the remnant segment already calls), with the star's own remnant draws on the
+    table's progenitor (`iron_core_fate`); inside it, the exact `Track::full`. A guard evaluates
+    kind and class at the corners of the error box (T_eff, L × (1 ± ε), M_CO ± ε) and falls back
+    to the exact path wherever they could differ. Only the primary is built and only the tags the
+    brief reads are opened; the star count comes from the hierarchy (a count-only path, tested
+    equal to `star_count()`, if T38.a finds the hierarchy dominant). A system where plan 11's
+    `can_interact` holds, once P11.T4 exists, routes exact.
+  - **Provides:** `stellar::brief::{BriefModel, range_brief}`.
+  - **Files:** `stellar/brief.rs` (new), `stellar/mod.rs`, `stellar/system.rs` (the shared
+    `object_kind` and `classify` call), `tests/golden/stellar/briefs.golden`.
+  - **Tests:** every exact route bit-equal to `SystemStars::brief_at`; table routes with equal
+    kind and class, and L and T_eff within tolerance, over 10⁵ random records (slow); order and
+    cache independence (no cache, warm, random eviction, four chunks); `None` before birth; a golden
+    of a dozen pinned IDs across the five layers and every route, at t = 0 and ±500 yr; the bench
+    of 1,600 briefs.
+  - _Accept:_ `just ci` and `just test-slow brief` green; 1,600 cold briefs under 15 ms on one
+    thread once T38.d routes the dead rows (ruling 90), and until then measured and recorded with
+    the load and `math::exp`.
+  - - _As built (round 9, `briefs`; ruling 90)._ `BriefRoute` has two routes, `MainSequence` (a
+      knot-free main sequence lasting past +H, its one-segment track) and `Exact` (the primary's
+      `StarModel`: the cooling fits, living evolved stars, stars leaving the main sequence within the
+      window, and every dead star). `BriefModel::new(galaxy, record)` takes no fates until T38.d.
+      `StellarBrief::of` (crate-private, in `system.rs`) is the one brief function that both
+      `SystemStars::brief_at` and the router call. A main-sequence row reads the primary's η alone
+      (`StarDraws::eta_for_attempt`, crate-private, tested equal to `for_attempt(..).eta()`), since
+      neither the main sequence nor `classify` of a living star reads another draw. The star count is
+      `multiplicity::draw_star_count`, which reads the draw's count words and returns 1 without the
+      tidal limit, the period laws or any orbit for a system drawn single, and otherwise draws the
+      hierarchy in full. `Draw::companion_count` and `Draw::is_direct` delegate to free functions it
+      shares; `draw_hierarchy` is unchanged. Tests: the count equals the full draw's over 4,500
+      records of every mass, two positions, four contexts and two attempts; the brief is bit-equal to
+      `SystemStars::brief_at` over 180 pinned records at six times in `just test`, 300 random systems
+      in the integration test and 3 × 10⁴ slow (250 s at 10⁵, so cut); a model built twice is equal
+      and answers the same in any order; `stellar/briefs.golden` pins 12 systems of layers A–E, one
+      below 0.1 M☉ and one subgiant, 12 distinct, at −500, 0 and +500 yr. The main-sequence route reads η at the
+      same seam as `primary_draws` (`system::primary_eta`), which P08.T12.c changes with it. No existing golden moved.
+  - _Cost_ (instruction counts from the scratch counter, one `math::exp` = 73; wall at load 6–9,
+    `math::exp` 11.9 ns; the bench at load 2.5–12, 7.2–7.9 ns). Per solar-circle row: main sequence
+    38,900 instructions (532 `exp`, about 4.2 µs idle) against 111,000 before; living 43,800;
+    dead 3.19 M (the full track, unchanged). **1,600 cold rows: 50 ms idle** (3,964 `exp` a row),
+    87.5% of it the 8% dead rows; without them 6.3 ms. The bench's 969 rows: 85 ms routed against
+    135 ms exact in one run at load 12. **Warm** (built models): 4,360 instructions a row, 0.84 µs,
+    **0.76 ms per 1,600**. A model is charged 2.2 kB on the main sequence and 25 kB dead. The thick
+    disc's 200 ly (10.6% dead) is 97 ms per 1,600 at 11.9 ns; the bulge's all-dead rows 49,000 `exp`
+    each, so 20,000 of them are 7.7 s on one thread and about 1.1 s over the pool's seven workers.
+    **The 15 ms budget is missed by the dead rows alone,** as ruling 90 expected; T38.c–d are
+    what meets it.
+  - _Re-measured after the rebase onto 6ac4458_ (kick's P06.T19 and zsmooth's ruling 92).
+    Instructions per solar-circle row: main sequence 38,700 (unchanged), living 44,600, dead 4.25 M
+    (×1.33 over 3.19 M). **1,600 cold rows: about 65 ms idle**, 90% of it the dead rows; warm
+    unchanged at 4,360 instructions a row. The bulge's dead rows cost 59,000 `exp` each. Both new
+    goldens were re-blessed: only white-dwarf rows moved (L, T_eff and some Sion indices, such as
+    DA8.4 to DA8.5 and DC19.1 to DC17.6), none on the main-sequence route.
 
 ### Phase H: protocol, server and display
 
@@ -1538,12 +1795,22 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
 
 #### P06.T34 Server
 
-- **Blocked in part (ruling 77.3):** the `system_summary` handler is built. The range handler's
-  `stellar` briefs are blocked on speed: a brief needs each star's state at the requested time, so
-  a track per system, and tracks are still 4–7 times over the Verification's `generate` targets
-  after ruling 77.1. That misses the Verification's 15 ms for 1,600 briefs. The fitted lifetime
-  table alone does not unblock them, since it gives the lifetime and not the state. What does is
-  open, and queued for a ruling: tracks within their targets, or a fitted table of brief states.
+- **Blocked in part (ruling 77.3), unblocked by T38 (ruling 89):** the `system_summary` handler is
+  built. The range handler's `stellar` briefs wait on T38.e: a brief needs each star's state at the
+  requested time, and tracks are still 4–7 times over the Verification's `generate` targets after
+  ruling 77.1, which misses the Verification's 15 ms for 1,600 briefs. Ruling 89 settles what
+  unblocks them: neither tracks within their targets nor a table of brief states, but T38's routed
+  briefs (a main-sequence fast path, the exact integrator, and the fate table, whose columns give a
+  dead star's state as well as its lifetime). The remainder, built after T38.e:
+  `convert.rs::system_record` takes an `Option<StellarBriefDto>` and loses its hard-disable;
+  `convert/stellar.rs::brief_dto` (ruling 54's null `teff_k` and log L where L = 0, plan 11's
+  `star_count`); `requests/galaxy.rs`'s range job builds `range_brief`s when asked, in
+  index-ordered chunks on the pool above a row threshold; `compute/systems.rs` gains a
+  `SharedBriefCache` of `BriefModel`s keyed by `(GalaxyKey, SystemId)`, budgeted by
+  `--brief-cache` / `HYPERION_BRIEF_CACHE_MB` in `config.rs` and the README's table. Its tests in
+  `tests/systems_in_range.rs`: a brief on every row, the same request twice identical cold and
+  warm, one chunk against four identical, and a new server golden with briefs;
+  `systems_in_range.golden` stays byte-identical.
 - **Needs:** plan 04's P04.T14, which lands the range handler, the universe registry and the caches
   in `AppState` (through P04.T13 every kind still answers `unsupported`), and plan 03's `resolve`.
 - **Build:** the range handler fills `stellar` when asked, on the CPU pool inside the range job,
@@ -1749,7 +2016,9 @@ Reserved so that later plans move no star:
   a wide margin, the fallback is a once-per-galaxy table of end states over (m, Z), of the kind
   T30.b builds for the quadrature, used for stars dead longer than the source horizon. That is a
   table in mass and metallicity, not in age, so it stays within the brainstorm's rule, but it would
-  smooth the draws' effect on old remnants and is not the default.
+  smooth the draws' effect on old remnants and is not the default. _Round 9:_ ruling 89 makes such
+  a table, over (m₀, Z, η) with the remnant draws applied on top, the default for dead range rows
+  (T38.c–e); `system_summary` and every other reader keep the full track.
 - **Ambiguity: the electron-capture windows.** The brainstorm gives widths (0.1 and about 1 M☉) and
   no position or variable. Read here as intervals of initial mass ending at the lowest mass for
   iron-core collapse (design note 12). Test 2 of T19.d pins the single-star width.
@@ -1792,6 +2061,8 @@ Reserved so that later plans move no star:
 - **Cost of briefs on large queries.** A bulge query returns tens of thousands of rows, nearly all
   old and many dead. `include_stellar` is optional for that reason, and the server cache absorbs
   repeats. If it is still too slow the chart can request briefs for the coarse layers only.
+  _Round 9:_ T38 routes these rows (ruling 89). T38.a measured a 50 ly bulge query as all dead and
+  its hierarchy draw at 50–90 µs a row, about 0.9 s at the 20,000-row cap even through the table.
 - **Interface sketch and neighbours.** Checked against plans 01–05 as validated, and the drafts of
   09, 11, 14 and 15. Points to confirm: plan 01 says the meaning of body indices is plan 14's, while
   this plan fixes index 0 as the primary star and plan 11 numbers companions from 1, so plan 14 must
@@ -3165,3 +3436,94 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     line in `mod.rs`; none of the `briefs` lane's fast path (`evolve.rs`, `track.rs`,
     `track/build.rs`). `ZCoeffs::{giant_radius_scale, agb_radius_scale}` are now test-only, and
     `cheb::ZeroAgeHorizontalBranch::{at_mass, radius}` changed signature.
+- **Range briefs through the fate table (round 9, `briefs`; ruling 89, T38).**
+  - A table-routed dead primary's L and T_eff differ from `system_summary`'s by up to the table's
+    tolerance. Its kind and class agree, which the guard ensures and the slow test checks. The
+    DTO's doc says so.
+  - The per-cell bounds are validated, not proved, so the guard's safety factor is 2–4 times the
+    largest validation error, and the fallback share is reported with T38.e.
+  - The table's mass axis stops at 100 M☉ with the formulae. P06.T14 extends both, and regenerates
+    the table in the same bump.
+  - An interacting binary (P11.T4's `can_interact`) and a non-zero `helium_excess` are routed
+    exact, and the budget is re-measured when P11.T4 lands.
+  - T38.a's survey finds the white-dwarf mass structured in Z by 5–10% within 0.125–0.25 dex, so
+    the design study's 10 Z nodes miss 10⁻³ for white dwarfs. The grid awaits a ruling.
+- **P06.T34's range briefs, as built (round 9, `briefs`; rulings 89 and 90).**
+  - `convert.rs::system_record` takes the row's `Option<StellarBriefDto>`, and its hard-disable is
+    gone. `systems_in_range` takes the briefs in row order. `convert/stellar.rs::brief_dto` gives
+    log L and `teff_k` as `null` where L = 0 (ruling 54), and the wire's `f32`s round the sim's
+    values.
+  - `StellarBriefDto` gains `star_count: u8`, plan 11's P11.T13 field. It is required, not
+    optional, since no brief had been sent before; its wire pins are updated and the TypeScript
+    regenerated.
+  - `requests/galaxy.rs` builds the briefs from a new `compute::SharedBriefCache` of `BriefModel`s
+    keyed by `(GalaxyKey, SystemId)`:
+    - up to `limits::BRIEF_CHUNK_ROWS` = 1,024 rows, in the query's own job;
+    - beyond, in 1,024-row chunks, one interactive job each, in row order, then one conversion job.
+  - _Deviation:_ ADVICE's example threshold was 4,096. A dead row costs a full track until T38.d,
+    so a 4,096-row chunk of them would hold one worker for about 4 s.
+  - `config.rs` gains `--brief-cache` / `HYPERION_BRIEF_CACHE_MB`, default 64 MiB: about 25,000
+    main-sequence models or 2,500 dead ones. The README's table gains the row, and there is a new
+    `ServerStats::briefs()`.
+  - Tests:
+    - in `convert.rs`, the renamed "a range request with `include_stellar` returns a brief on every
+      row", each brief the full system's and each row otherwise plan 04's;
+    - in `requests/galaxy.rs`, the briefs are equal whole and in four chunks, with a warm cache, no
+      cache and a tight one;
+    - in `compute/systems.rs`, a model is built once, and every budget answers the same;
+    - in `tests/systems_in_range.rs`, briefs on every row at 30 and at 65 ly (1,000+ rows, so
+      chunked), each equal to the sim's; the same request cold and warm is identical JSON, with
+      every warm row a cache hit; and a new golden, `systems_in_range_briefs.golden`.
+  - `systems_in_range.golden` is unchanged.
+  - A 20,000-row answer queues 20 chunk jobs and a conversion job; each waits for room in the
+    interactive queue (`CpuPool::submit`), so a query that has run is never refused `queue_full`
+    for its briefs. Dead-row chunks hold a worker for about a second each until T38.d, which
+    `system_summary` jobs queue behind.
+- **P06.T35.b's remainder and P06.T37, as built (round 9, `briefs`).**
+  - Every chart request sends `include_stellar: true`. `model.ts`'s `StarBrief` gives
+    `ChartSystem.star`, which is `null` for a row with no brief (a system not yet formed).
+  - `chartModel.ts` takes marks from `starSymbol` and `starSizeClass`. A system with no remnant,
+    or not yet formed, is listed and not drawn.
+  - `ChartControls.tsx` gains the `STARS` radio group (`ALL`, `LIVING`, `REMNANTS`), stepped by
+    **K**. It is never disabled when the link is down, since it asks nothing of the server. The
+    chart, the list, the counts, the selection and the HR diagram all take the filtered systems,
+    and `shownCountText` reads `412 OF 1630 SHOWN: LIVING`, with the colon of the draft's D2.3
+    rather than the task's em dash, which also means a missing value. `REMNANTS` is a white dwarf,
+    neutron star or black hole (D2.3); a star with no remnant and a system not yet formed show under
+    `ALL` alone.
+  - `SystemList` gains a `CLASS` column, and each row's accessible name gives the kind in words.
+  - `StarShapeLegend.tsx` holds the five shapes. `SymbolLegend` and the orbit map's `OrbitLegend`
+    share the new `spatial/LegendSymbol.tsx` and `LegendReticle.tsx`. The chart legend names each
+    shape's kinds as the draft's D4.4 table does, and says `RINGED CIRCLE SIZE AT LEAST 0.75 M☉`.
+  - _Deviation:_ `star_count` is not shown, since the list has no room. It is left for P11.T14.
+  - `HrDiagram.tsx` and `lib/galaxy/hrProjection.ts` are built as specified, with pure projection,
+    draw list and picking.
+    - The class letters' band edges are Pecaut and Mamajek's dwarf scale, which the server
+      classifies with.
+    - Neutron stars and black holes are counted as `NO PHOTOSPHERE`. A star with no remnant, a
+      system not yet formed and a bad value each have a count of their own.
+    - Every mark is filled, since a graph has no reference plane.
+    - Every tick at a power of ten is in E notation, and each axis ends `, LOG SCALE` (D2.4).
+  - _Deviation:_ the diagram is a fourth page, `HR DIAGRAM`, not a panel on the chart page, which
+    has no room at 1280 px. So the `STARS` selector and **K** live on the chart page, and the
+    diagram's caption says what they hide.
+  - _Deviation:_ the off-scale mark is a drawn arrowhead, since the canvas carries no text, where
+    the guide's mark is `↑`/`↓`.
+  - Pending the owner, with P06.T35.a:
+    - the HR diagram as a permitted scatter plot with a reversed axis;
+    - `L☉`;
+    - the five-shape set and "listed, not drawn";
+    - the arrowhead off-scale mark;
+    - the words in neither the guide nor the drafts: `HR DIAGRAM`, `HERTZSPRUNG-RUSSELL DIAGRAM`,
+      `CLASS`, `PLOTTED`, `OFF SCALE`, `NO PHOTOSPHERE`, `NO REMNANT`, `NO DATA`,
+      `PEGGED OFF SCALE`, `LUMINOSITY`, `EFFECTIVE TEMPERATURE`,
+      `NO REMNANT, NOT YET FORMED: LIST ONLY`, `RINGED CIRCLE SIZE AT LEAST … M☉`,
+      `NO CHART: centre one to plot its systems`, and the server's class strings `NS`, `BH` and
+      `NONE` shown as sent;
+    - the key **K** for `STARS`.
+  - _Deviations of Files:_ `useRangeQuery.ts` is unchanged, since `wire.ts`'s `toRangeRequest`
+    sets `include_stellar`. The filter and the HR page reach `CensusReadout.tsx`, `SystemsPanel.tsx`,
+    `useLocalChart.ts`, `LocalChartPanel.tsx` and `GalaxyPages.tsx`. A selection the filter hides
+    is hidden, not cleared. `OrbitLegend.tsx` takes the shared legend parts with no change in
+    behaviour.
+  - The by-eye checks of "Verification" are not yet made.

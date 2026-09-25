@@ -1,9 +1,11 @@
 //! The range query over a real socket: what it returns, what its census says, and which field a
-//! request it cannot serve names (plan 04, P04.T14.d).
+//! request it cannot serve names (plan 04, P04.T14.d), and the stellar brief each row carries when
+//! the request asks for it (plan 06, P06.T34).
 //!
 //! Every query here is over one fixed seed, so the systems, their IDs and their marks are the ones
 //! the sim resolves for that seed: the test builds the same galaxy and checks the wire against it.
-//! One answer is also pinned whole, as JSON, in `golden/systems_in_range.golden`.
+//! One answer is also pinned whole, as JSON, in `golden/systems_in_range.golden`, and one with
+//! briefs in `golden/systems_in_range_briefs.golden`.
 
 mod common;
 
@@ -12,9 +14,9 @@ use std::num::NonZeroU32;
 
 use common::{TestClient, TestServer, pretty_json_frame};
 use hyperion_protocol::{
-    Census, ErrorCode, GalacticPosition, LayerStatus, MassLayer, RequestBody, RequestError,
-    ResponseBody, ServerMessage, SystemRecord, SystemsInRange, SystemsInRangeRequest,
-    UniverseIdHex, UniverseTime,
+    Census, ErrorCode, GalacticPosition, LayerStatus, MassLayer, ObjectKindDto, RequestBody,
+    RequestError, ResponseBody, ServerMessage, StellarBriefDto, SystemRecord, SystemsInRange,
+    SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::limits::MAX_QUERY_CELLS;
 use hyperion_sim::coords::LyCell;
@@ -22,6 +24,8 @@ use hyperion_sim::galaxy::placement::{NoCache, resolve};
 use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, RangeResult, range_query};
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::stellar::ObjectKind;
+use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
@@ -42,6 +46,7 @@ struct Query {
     time: UniverseTime,
     min_layer: MassLayer,
     limit: u32,
+    include_stellar: bool,
 }
 
 impl Query {
@@ -54,6 +59,7 @@ impl Query {
             time: at_years(0),
             min_layer: MassLayer::A,
             limit: hyperion_server::limits::MAX_CENSUS_LIMIT,
+            include_stellar: false,
         }
     }
 
@@ -65,7 +71,7 @@ impl Query {
             time: self.time,
             min_layer: self.min_layer,
             limit: self.limit,
-            include_stellar: false,
+            include_stellar: self.include_stellar,
         })
     }
 }
@@ -909,6 +915,173 @@ async fn a_radius_that_is_not_a_number_never_reaches_the_query() {
         .unwrap();
     assert!(!answer.systems.is_empty());
 
+    client.close().await;
+    server.stop().await;
+}
+
+/// The wire's kind of an object, written out here rather than read from the server.
+fn wire_kind(kind: ObjectKind) -> ObjectKindDto {
+    match kind {
+        ObjectKind::Protostar => ObjectKindDto::Protostar,
+        ObjectKind::PreMainSequence => ObjectKindDto::PreMainSequence,
+        ObjectKind::Dwarf => ObjectKindDto::Dwarf,
+        ObjectKind::Subgiant => ObjectKindDto::Subgiant,
+        ObjectKind::Giant => ObjectKindDto::Giant,
+        ObjectKind::Supergiant => ObjectKindDto::Supergiant,
+        ObjectKind::WolfRayet => ObjectKindDto::WolfRayet,
+        ObjectKind::HotSubdwarf => ObjectKindDto::HotSubdwarf,
+        ObjectKind::WhiteDwarf => ObjectKindDto::WhiteDwarf,
+        ObjectKind::NeutronStar => ObjectKindDto::NeutronStar,
+        ObjectKind::BlackHole => ObjectKindDto::BlackHole,
+        ObjectKind::NoRemnant => ObjectKindDto::NoRemnant,
+        ObjectKind::Substellar => ObjectKindDto::Substellar,
+    }
+}
+
+/// Every row of `answer` carries its system's brief at `time`, the full system's as the sim
+/// generates it, and the rows are otherwise those of `bare`, the same query without briefs.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the wire's f32s are the sim's f64s rounded, which is what is checked"
+)]
+fn assert_briefs_are_the_sims(
+    galaxy: &Galaxy,
+    answer: &SystemsInRange,
+    bare: &SystemsInRange,
+    time: hyperion_sim::time::UniverseTime,
+) {
+    assert_eq!(answer.systems.len(), bare.systems.len());
+    for (row, plain) in answer.systems.iter().zip(&bare.systems) {
+        assert_eq!(
+            SystemRecord {
+                stellar: None,
+                ..row.clone()
+            },
+            *plain
+        );
+        let id = SystemId::from_raw(row.id.to_u64()).expect("a system ID");
+        let record = resolve(galaxy, id).expect("a system of the galaxy");
+        let expected = SystemStars::generate(galaxy, &record)
+            .brief_at(time)
+            .expect("every system returned has formed");
+        let brief = row.stellar.as_ref().expect("a brief on every row");
+        let lit = expected.log_luminosity();
+        assert_eq!(
+            brief,
+            &StellarBriefDto {
+                kind: wire_kind(expected.kind()),
+                class: expected.class().to_string(),
+                log_luminosity_lsun: lit.map(|l| l.value() as f32),
+                teff_k: lit.map(|_| expected.effective_temperature().value() as f32),
+                star_count: expected.star_count(),
+            },
+            "{}",
+            row.designation
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_range_request_with_include_stellar_returns_a_brief_on_every_row() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let galaxy = Galaxy::new(Seed::new(SEED));
+    // One query answered in its own job and one wide enough that its briefs are built in chunks.
+    for radius_ly in [30.0, 65.0] {
+        let mut query = Query::sunlike();
+        query.radius_ly = radius_ly;
+        query.time = at_years(-250);
+        let bare = ask(&mut client, &universe.id, &query).await.unwrap();
+        assert!(bare.systems.iter().all(|row| row.stellar.is_none()));
+        query.include_stellar = true;
+        let answer = ask(&mut client, &universe.id, &query).await.unwrap();
+        let (sim_query, _) = sim_answer(&galaxy, &query);
+        assert_briefs_are_the_sims(&galaxy, &answer, &bare, sim_query.time());
+        if radius_ly > 50.0 {
+            assert!(
+                answer.systems.len() > hyperion_server::limits::BRIEF_CHUNK_ROWS,
+                "{} rows are not chunked",
+                answer.systems.len()
+            );
+        }
+    }
+    client.close().await;
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn briefs_are_the_same_cold_and_warm() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let mut query = Query::sunlike();
+    query.radius_ly = 30.0;
+    query.include_stellar = true;
+    let cold = ask(&mut client, &universe.id, &query).await.unwrap();
+    let built = server.stats().briefs();
+    assert!(
+        built.entries() > 0,
+        "the briefs' models were kept: {built:?}"
+    );
+    let warm = ask(&mut client, &universe.id, &query).await.unwrap();
+    assert_eq!(
+        serde_json::to_string(&warm).unwrap(),
+        serde_json::to_string(&cold).unwrap()
+    );
+    let after = server.stats().briefs();
+    assert_eq!(
+        after.hits() - built.hits(),
+        u64::try_from(cold.systems.len()).unwrap(),
+        "every row of the second answer was the cache's"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// A short answer with briefs, pinned whole as the frame arrived (as
+/// `the_answer_to_a_fixed_query_is_the_golden_response` pins one without), new at generator
+/// version 11 (plan 06, P06.T34).
+#[tokio::test]
+async fn an_answer_with_briefs_is_the_golden_response() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let mut query = Query::sunlike();
+    query.radius_ly = 40.0;
+    query.time = at_years(-250);
+    query.limit = 100;
+    query.include_stellar = true;
+    let id = client.send_request(query.body(&universe.id)).await;
+    let frame = client.next_text().await;
+    let message: ServerMessage = serde_json::from_str(&frame).unwrap();
+    let answer = match message {
+        ServerMessage::Response {
+            id: answered,
+            body: ResponseBody::SystemsInRange(answer),
+        } if answered == id => answer,
+        other => panic!("expected the systems in range, got {other:?}"),
+    };
+    // The same rows as the golden without briefs, each with its brief, and more than one kind.
+    let mut bare_query = query.clone();
+    bare_query.include_stellar = false;
+    let bare = ask(&mut client, &universe.id, &bare_query).await.unwrap();
+    let galaxy = Galaxy::new(Seed::new(SEED));
+    let (sim_query, _) = sim_answer(&galaxy, &query);
+    assert_briefs_are_the_sims(&galaxy, &answer, &bare, sim_query.time());
+    let kinds: std::collections::BTreeSet<String> = answer
+        .systems
+        .iter()
+        .filter_map(|row| row.stellar.as_ref())
+        .map(|brief| format!("{:?}", brief.kind))
+        .collect();
+    assert!(kinds.len() > 1, "{kinds:?}");
+    let mut golden = GoldenWriter::new();
+    golden.header(GENERATOR_VERSION.get());
+    for line in pretty_json_frame(&frame).lines() {
+        golden.line(line);
+    }
+    golden!("systems_in_range_briefs", &golden.finish());
     client.close().await;
     server.stop().await;
 }

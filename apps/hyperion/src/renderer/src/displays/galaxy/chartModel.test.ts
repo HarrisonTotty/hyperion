@@ -1,9 +1,10 @@
+import type { MassLayer, ObjectKindDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../spatial/frame";
 import { vec3 } from "../../spatial/vec3";
-import { aCensus, aSystemsInRange, LAYERS } from "../../test/galaxyFixtures";
+import { aCensus, aStellarBrief, aSystemsInRange, LAYERS } from "../../test/galaxyFixtures";
 import {
   censusHint,
   censusLine,
@@ -11,9 +12,15 @@ import {
   distanceDecimalsFor,
   formatBandMsun,
   formatChartLengthLy,
+  filterSystems,
   inRangeCount,
   layerBands,
+  nextStarFilter,
+  passesStarFilter,
   queryRadiusForDriveRange,
+  shownCountText,
+  STAR_FILTERS,
+  starFilterLabel,
   toScene,
 } from "./chartModel";
 
@@ -162,7 +169,7 @@ describe("inRangeCount", () => {
   it("counts the systems within the drive range", () => {
     const result = chartOf([{ relLy: [10, 0, 0] }, { relLy: [60, 0, 0] }], 80);
 
-    expect(inRangeCount(result, 50)).toBe(1);
+    expect(inRangeCount(result.systems, 50)).toBe(1);
   });
 });
 
@@ -298,5 +305,172 @@ describe("queryRadiusForDriveRange", () => {
     [600, 500],
   ])("follows a drive range of %s ly with %s ly", (driveRangeLy, radiusLy) => {
     expect(queryRadiusForDriveRange(driveRangeLy)).toBe(radiusLy);
+  });
+});
+
+/** A chart of one system per kind given, 1 ly apart along x, each in the layer given. */
+function chartOfKinds(
+  kinds: ReadonlyArray<ObjectKindDto | null>,
+  layer: MassLayer = "c",
+): ReturnType<typeof toChartResult> {
+  return toChartResult(
+    aSystemsInRange({
+      centreLy: CENTRE,
+      systems: kinds.map((kind, index) => ({
+        relLy: [index + 1, 0, 0] as const,
+        layer,
+        stellar: kind === null ? null : aStellarBrief(layer, kind),
+      })),
+    }),
+  );
+}
+
+describe("toScene's star symbols", () => {
+  it("draws each system with its primary's symbol", () => {
+    const result = chartOfKinds(["dwarf", "giant", "white_dwarf", "neutron_star", "black_hole"]);
+
+    const scene = toScene(result, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+
+    expect(scene.points.map((point) => point.shape)).toEqual([
+      "circle",
+      "ringed-circle",
+      "diamond",
+      "triangle",
+      "square",
+    ]);
+  });
+
+  it("raises a light giant to the ringed circle's smallest size class", () => {
+    const result = chartOfKinds(["giant", "dwarf"], "a");
+
+    const scene = toScene(result, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+
+    expect(scene.points.map((point) => point.sizeClass)).toEqual([2, 0]);
+  });
+
+  it("lists but does not draw a star that left no remnant or a system not yet formed", () => {
+    const result = chartOfKinds(["no_remnant", null, "dwarf"]);
+
+    const scene = toScene(result, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+
+    expect(result.systems).toHaveLength(3);
+    expect(scene.points.map((point) => point.id)).toEqual([result.systems[2]?.id]);
+  });
+
+  it("draws only the systems that pass the STARS filter", () => {
+    const result = chartOfKinds(["dwarf", "white_dwarf", "giant"]);
+
+    const scene = toScene(result, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+      starFilter: "remnants",
+    });
+
+    expect(scene.points.map((point) => point.shape)).toEqual(["diamond"]);
+  });
+});
+
+describe("the STARS filter", () => {
+  const EVERY_KIND: ReadonlyArray<ObjectKindDto> = [
+    "protostar",
+    "pre_main_sequence",
+    "dwarf",
+    "subgiant",
+    "giant",
+    "supergiant",
+    "wolf_rayet",
+    "hot_subdwarf",
+    "white_dwarf",
+    "neutron_star",
+    "black_hole",
+    "no_remnant",
+    "substellar",
+  ];
+
+  it("counts the living stars and brown dwarfs as LIVING", () => {
+    const result = chartOfKinds(EVERY_KIND);
+
+    const living = result.systems.filter((system) => passesStarFilter(system, "living"));
+
+    expect(living.map((system) => system.star?.kind)).toEqual([
+      "protostar",
+      "pre_main_sequence",
+      "dwarf",
+      "subgiant",
+      "giant",
+      "supergiant",
+      "wolf_rayet",
+      "hot_subdwarf",
+      "substellar",
+    ]);
+  });
+
+  it("counts white dwarfs, neutron stars and black holes as REMNANTS", () => {
+    const result = chartOfKinds(EVERY_KIND);
+
+    const remnants = filterSystems(result.systems, "remnants");
+
+    expect(remnants.map((system) => system.star?.kind)).toEqual([
+      "white_dwarf",
+      "neutron_star",
+      "black_hole",
+    ]);
+  });
+
+  it("shows a star that left no remnant under ALL alone", () => {
+    const result = chartOfKinds(["no_remnant"]);
+
+    expect(
+      STAR_FILTERS.filter((filter) => filterSystems(result.systems, filter).length > 0),
+    ).toEqual(["all"]);
+  });
+
+  it("shows a system not yet formed under ALL alone", () => {
+    const result = chartOfKinds([null]);
+
+    expect(
+      STAR_FILTERS.filter((filter) => filterSystems(result.systems, filter).length > 0),
+    ).toEqual(["all"]);
+  });
+
+  it("keeps every system, in order, under ALL", () => {
+    const result = chartOfKinds(["white_dwarf", "dwarf", null]);
+
+    expect(filterSystems(result.systems, "all")).toBe(result.systems);
+  });
+
+  it("steps from ALL to LIVING to REMNANTS and back to ALL", () => {
+    expect(nextStarFilter("all")).toBe("living");
+    expect(nextStarFilter("living")).toBe("remnants");
+    expect(nextStarFilter("remnants")).toBe("all");
+    expect(STAR_FILTERS.map(starFilterLabel)).toEqual(["ALL", "LIVING", "REMNANTS"]);
+  });
+});
+
+describe("shownCountText", () => {
+  it("says what a filter hides, digits grouped from five", () => {
+    expect(shownCountText(412, 1630, "living")).toBe("412 OF 1630 SHOWN: LIVING");
+    expect(shownCountText(9, 12_480, "remnants")).toBe("9 OF 12,480 SHOWN: REMNANTS");
+  });
+
+  it("gives the total alone under ALL", () => {
+    expect(shownCountText(1630, 1630, "all")).toBe("1630");
   });
 });

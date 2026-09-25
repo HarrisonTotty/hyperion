@@ -1,7 +1,12 @@
 import { type Population, universeTimeFromYears } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import { aRangeRequest, aSystemsInRange, UNIVERSE_ID } from "../../test/galaxyFixtures";
+import {
+  aRangeRequest,
+  aStellarBrief,
+  aSystemsInRange,
+  UNIVERSE_ID,
+} from "../../test/galaxyFixtures";
 import { CHART_SYSTEM_LIMIT } from "./model";
 import { layerIndex, populationLabel, toChartResult, toRangeRequest } from "./wire";
 
@@ -86,7 +91,50 @@ describe("toChartResult", () => {
   });
 });
 
+describe("toChartResult's stellar briefs", () => {
+  it("carries each row's brief into its system", () => {
+    const result = toChartResult(
+      aSystemsInRange({
+        systems: [{ relLy: [1, 0, 0], layer: "c", stellar: aStellarBrief("c", "white_dwarf") }],
+      }),
+    );
+
+    expect(result.systems[0]?.star).toEqual({
+      kind: "white_dwarf",
+      spectralClass: "DA4.2",
+      logLuminosityLsun: -2.5,
+      teffK: 12_000,
+      starCount: 1,
+    });
+  });
+
+  it("keeps a black hole's missing luminosity and temperature missing", () => {
+    const result = toChartResult(
+      aSystemsInRange({
+        systems: [{ relLy: [1, 0, 0], layer: "e", stellar: aStellarBrief("e", "black_hole") }],
+      }),
+    );
+
+    expect(result.systems[0]?.star?.logLuminosityLsun).toBeNull();
+    expect(result.systems[0]?.star?.teffK).toBeNull();
+  });
+
+  it("reads a row without a brief as a system not yet formed", () => {
+    const result = toChartResult(
+      aSystemsInRange({ systems: [{ relLy: [1, 0, 0], layer: "a", stellar: null }] }),
+    );
+
+    expect(result.systems[0]?.star).toBeNull();
+  });
+});
+
 describe("toRangeRequest", () => {
+  it("asks for every row's stellar brief", () => {
+    const request = toRangeRequest(UNIVERSE_ID, [26_000, 0, 0], 20, 0, "a");
+
+    expect(request.include_stellar).toBe(true);
+  });
+
   it("carries the centre exactly, flooring a negative coordinate into the cell below", () => {
     const request = toRangeRequest(UNIVERSE_ID, [-0.25, 26_000.5, 0], 50, 12.5, "b");
 

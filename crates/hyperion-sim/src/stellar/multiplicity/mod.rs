@@ -44,7 +44,7 @@ pub use hierarchy::{
     DRAWS_PER_ATTEMPT, HierarchyNode, MAX_REDRAWS, MAX_STABILITY_REDRAWS, MultiplicityContext,
     NodeIndex, PROVISIONAL_INTERACTING_PERIASTRON, PROVISIONAL_STRIPPED_SHARE, RedrawAttempt,
     STAR_BODY_INDEX_END, SlotKind, StarIndex, StarSlot, SystemHierarchy, draw_hierarchy,
-    stripped_mark_min_mass,
+    draw_star_count, stripped_mark_min_mass,
 };
 pub use model::{MAX_COMPANIONS, MultiplicityModel};
 pub use positions::star_positions_at;

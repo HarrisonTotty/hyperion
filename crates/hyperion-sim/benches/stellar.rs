@@ -10,15 +10,36 @@
 //! after the other groups (`stellar/reference`), because this laptop's clock swings 1.9–4.8 GHz
 //! and other work shares it; a per-call cost only means something against that. The measurement
 //! is recorded in plan 06's "Deviations in T10.c–e, as built".
+//!
+//! The `stellar/system` and `stellar/briefs` groups are P06.T32's remaining benches and P06.T38.a's
+//! measurements: `generate` for four kinds of primary found near the Sun-like point, `brief_at` and
+//! `summary_at` on a built system, the draws, hierarchy and classification a range row's brief is
+//! made of, and the briefs of every row of `range_query.rs`'s 50 ly query through today's exact
+//! path. Plan 06's budget for those briefs is 15 ms per 1,600 rows; the results are recorded
+//! under P06.T38.a.
 
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use hyperion_sim::Seed;
+use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::placement::{NoCache, SystemRecord};
+use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, range_query};
+use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::math;
+use hyperion_sim::stellar::brief::{BriefModel, range_brief};
+use hyperion_sim::stellar::classify::{ClassExtras, classify};
 use hyperion_sim::stellar::draws::StarDraws;
-use hyperion_sim::stellar::sse::{Track, ZCoeffs, zams};
-use hyperion_sim::stellar::{Composition, evolve, lifetime};
-use hyperion_sim::units::{MetalFraction, SolarMasses, Years};
+use hyperion_sim::stellar::multiplicity::{
+    MultiplicityContext, RedrawAttempt, draw_hierarchy, draw_star_count,
+};
+use hyperion_sim::stellar::sse::{Track, ZCoeffs, main_sequence_state, zams};
+use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
+use hyperion_sim::stellar::{Composition, ObjectKind, evolve, lifetime};
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::{LightYears, MetalFraction, SolarMasses, Years};
 
 /// One `math::exp`, the unit the track figures are normalised by, before the other groups.
 fn exp_before(c: &mut Criterion) {
@@ -74,9 +95,15 @@ fn tracks(c: &mut Criterion) {
     let solar = Composition::SOLAR;
     let draws = StarDraws::median();
     let mut group = c.benchmark_group("stellar/track");
+    // P06.T32's four masses beside the layer D and E primaries. `ZCoeffs` is always built inside
+    // the call: no public entry takes one already built.
     for (name, m) in [
+        ("lifetime (1 Msun)", 1.0),
         ("lifetime (4 Msun, layer D)", 4.0),
+        ("lifetime (5 Msun)", 5.0),
+        ("lifetime (12 Msun)", 12.0),
         ("lifetime (20 Msun, layer E)", 20.0),
+        ("lifetime (40 Msun)", 40.0),
     ] {
         group.bench_function(name, |b| {
             b.iter(|| lifetime(black_box(SolarMasses::new(m)), &solar, &draws));
@@ -140,5 +167,216 @@ fn tracks(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(stellar, exp_before, powers, backbone, tracks, exp_after);
+/// The seed of the system benches: `range_query.rs`'s, so that the 50 ly query is the one whose
+/// cost plan 03 records.
+const SEED: u64 = 0x0311_1000_0000_0000;
+
+/// A point like the Sun's: in the plane, 26,000 ly out on the +y axis, clear of the bar.
+fn sunlike_point() -> GalacticPosition {
+    GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("26,000 ly is in the root cube")
+}
+
+/// The records of a query of `radius` about the Sun-like point, down to `floor`.
+fn records_near_sun(galaxy: &Galaxy, radius: f64, floor: MassFloor) -> Vec<SystemRecord> {
+    let query = RangeQuery::builder(sunlike_point(), LightYears::new(radius))
+        .mass_floor(floor)
+        .build()
+        .expect("a query about the Sun-like point");
+    range_query(galaxy, &mut NoCache::new(), &[], &query)
+        .systems()
+        .iter()
+        .map(|hit| *hit.record())
+        .collect()
+}
+
+/// The first of `records` whose primary is of `kind` at the epoch, and, for a dwarf, in layer A.
+fn exemplar(galaxy: &Galaxy, records: &[SystemRecord], kind: ObjectKind) -> Option<SystemRecord> {
+    records.iter().copied().find(|record| {
+        (kind != ObjectKind::Dwarf || record.layer() == Layer::A)
+            && SystemStars::generate(galaxy, record)
+                .brief_at(UniverseTime::EPOCH)
+                .is_some_and(|brief| brief.kind() == kind)
+    })
+}
+
+/// The galaxy of the system benches, the records of its 50 ly query about the Sun-like point, and
+/// a primary of each of four kinds.
+struct Fixture {
+    galaxy: Galaxy,
+    local: Vec<SystemRecord>,
+    exemplars: [(&'static str, SystemRecord); 4],
+}
+
+fn fixture() -> Fixture {
+    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
+    let local = records_near_sun(&galaxy, 50.0, MassFloor::default());
+    // The rarer kinds are looked for among the heavier layers of a wider sphere.
+    let heavy = records_near_sun(&galaxy, 150.0, MassFloor::LayerD);
+    let find = |kind| {
+        exemplar(&galaxy, &local, kind)
+            .or_else(|| exemplar(&galaxy, &heavy, kind))
+            .expect("the Sun's neighbourhood holds a primary of every kind benched")
+    };
+    let exemplars = [
+        ("layer-A dwarf", find(ObjectKind::Dwarf)),
+        ("giant", find(ObjectKind::Giant)),
+        ("white dwarf", find(ObjectKind::WhiteDwarf)),
+        ("neutron star", find(ObjectKind::NeutronStar)),
+    ];
+    Fixture {
+        galaxy,
+        local,
+        exemplars,
+    }
+}
+
+/// A system's stars and a range row's brief (P06.T32, and P06.T38.a's measurements): `generate` for
+/// four kinds of primary, `brief_at` and `summary_at` on a built system, the draws and the
+/// classification a brief is made of, and the briefs of a whole 50 ly query through today's exact
+/// path.
+fn systems(c: &mut Criterion) {
+    let Fixture {
+        galaxy,
+        local,
+        exemplars,
+    } = fixture();
+
+    let mut group = c.benchmark_group("stellar/system");
+    for (name, record) in &exemplars {
+        group.bench_function(format!("generate ({name})"), |b| {
+            b.iter(|| SystemStars::generate(&galaxy, black_box(record)));
+        });
+    }
+    for (name, record) in &exemplars {
+        let stars = SystemStars::generate(&galaxy, record);
+        group.bench_function(format!("brief_at ({name})"), |b| {
+            b.iter(|| stars.brief_at(black_box(UniverseTime::EPOCH)));
+        });
+        group.bench_function(format!("summary_at ({name})"), |b| {
+            b.iter(|| stars.summary_at(black_box(UniverseTime::EPOCH)));
+        });
+    }
+    let (_, dwarf) = exemplars[0];
+    group.bench_function("draw_metallicity", |b| {
+        b.iter(|| draw_metallicity(&galaxy, black_box(&dwarf)));
+    });
+    group.bench_function("draw_hierarchy", |b| {
+        b.iter(|| {
+            draw_hierarchy(
+                &galaxy,
+                black_box(&dwarf),
+                MultiplicityContext::Free,
+                RedrawAttempt::FIRST,
+            )
+        });
+    });
+    group.bench_function("StarDraws::for_star", |b| {
+        b.iter(|| StarDraws::for_star(galaxy.seed(), black_box(BodyId::new(dwarf.id(), 0))));
+    });
+    for (name, record) in &exemplars {
+        let stars = SystemStars::generate(&galaxy, record);
+        let primary = stars.primary();
+        let state = primary
+            .state_at(UniverseTime::EPOCH)
+            .expect("an exemplar exists at the epoch");
+        group.bench_function(format!("classify ({name})"), |b| {
+            b.iter(|| {
+                classify(
+                    black_box(&state),
+                    primary.composition(),
+                    primary.draws(),
+                    &ClassExtras::NONE,
+                )
+            });
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("stellar/briefs");
+    group.sample_size(10);
+    group.bench_function(format!("50 ly query, {} rows, cold", local.len()), |b| {
+        b.iter(|| {
+            local
+                .iter()
+                .filter_map(|record| {
+                    SystemStars::generate(&galaxy, record).brief_at(UniverseTime::EPOCH)
+                })
+                .count()
+        });
+    });
+    group.finish();
+}
+
+/// P06.T38.b and T38.e: the routed brief of the same 50 ly query, cold and from built models, the
+/// count-only hierarchy, the main-sequence fast path, and a brief model of each exemplar.
+fn routed(c: &mut Criterion) {
+    let Fixture {
+        galaxy,
+        local,
+        exemplars,
+    } = fixture();
+    let (_, dwarf) = exemplars[0];
+    let mut group = c.benchmark_group("stellar/briefs");
+    group.sample_size(10);
+    group.bench_function(
+        format!("50 ly query, {} rows, routed, cold", local.len()),
+        |b| {
+            b.iter(|| {
+                local
+                    .iter()
+                    .filter_map(|record| range_brief(&galaxy, record, UniverseTime::EPOCH))
+                    .count()
+            });
+        },
+    );
+    let models: Vec<BriefModel> = local
+        .iter()
+        .map(|record| BriefModel::new(&galaxy, record))
+        .collect();
+    group.bench_function(
+        format!("50 ly query, {} rows, routed, warm", local.len()),
+        |b| {
+            b.iter(|| {
+                models
+                    .iter()
+                    .filter_map(|model| model.brief_at(black_box(UniverseTime::EPOCH)))
+                    .count()
+            });
+        },
+    );
+    group.finish();
+
+    let mut group = c.benchmark_group("stellar/routed");
+    group.bench_function("draw_star_count (layer-A dwarf)", |b| {
+        b.iter(|| {
+            draw_star_count(
+                &galaxy,
+                black_box(&dwarf),
+                MultiplicityContext::Free,
+                RedrawAttempt::FIRST,
+            )
+        });
+    });
+    group.bench_function("main_sequence_state (0.4 Msun at 5 Gyr)", |b| {
+        b.iter(|| {
+            main_sequence_state(
+                black_box(SolarMasses::new(0.4)),
+                &Composition::SOLAR,
+                &StarDraws::median(),
+                Years::new(5e9),
+            )
+        });
+    });
+    for (name, record) in &exemplars {
+        group.bench_function(format!("BriefModel::new ({name})"), |b| {
+            b.iter(|| BriefModel::new(&galaxy, black_box(record)));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    stellar, exp_before, powers, backbone, tracks, systems, routed, exp_after
+);
 criterion_main!(stellar);

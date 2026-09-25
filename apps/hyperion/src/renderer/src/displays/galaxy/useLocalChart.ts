@@ -12,9 +12,11 @@ import {
   chartDataFault,
   DEFAULT_DRIVE_RANGE_LY,
   distanceDecimalsFor,
+  filterSystems,
   type LayerBand,
   layerBands,
   queryRadiusForDriveRange,
+  type StarFilter,
   toScene,
 } from "./chartModel";
 import { useRangeQuery } from "./useRangeQuery";
@@ -34,6 +36,13 @@ export interface LocalChartState {
   readonly frame: LocalFrame;
   /** What the spatial view draws, or `null` before the first answer. */
   readonly scene: SpatialScene | null;
+  /**
+   * The systems of the answer on show that pass the `STARS` filter, nearest first: what the chart,
+   * the list and the HR diagram show. Empty before the first answer.
+   */
+  readonly systems: ReadonlyArray<ChartSystem>;
+  /** Which systems are shown, by what their primary is now. */
+  readonly starFilter: StarFilter;
   /** The mass bands of the last census, which label the floors and the legend. */
   readonly bands: ReadonlyArray<LayerBand> | null;
   readonly selected: ChartSystem | null;
@@ -51,6 +60,7 @@ export interface LocalChartState {
   readonly select: (id: SystemIdHex) => void;
   readonly chooseRadius: (radiusLy: number) => void;
   readonly chooseMinLayer: (layer: MassLayer) => void;
+  readonly chooseStarFilter: (filter: StarFilter) => void;
   readonly setDriveRange: (rangeLy: number) => void;
   readonly setTime: (timeYr: number) => void;
   readonly retry: () => void;
@@ -63,8 +73,10 @@ export interface LocalChartState {
  * @remarks
  * Called by the display, since the chart's picture and the list and readout beside it stand in
  * different columns and share this state. The query radius follows the drive range until the
- * operator chooses one. The selection is derived from the answer on show, so a new result keeps it
- * while its system is still there and drops it otherwise. The scene and the frame keep their
+ * operator chooses one. The `STARS` filter is the client's own and asks nothing of the server: it
+ * picks from the answer on show the systems the chart, the list and the HR diagram show. The
+ * selection is derived from those, so a new result or filter keeps it while its system is still
+ * shown and hides it otherwise; choosing a filter that shows it again brings it back. The scene and the frame keep their
  * identity while nothing they are built from changes, so that an idle chart paints nothing.
  *
  * @param centreLy - The chart centre, which `CENTRE CHART` publishes; `null` until it does.
@@ -77,6 +89,7 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const [driveRangeLy, setDriveRange] = useState(DEFAULT_DRIVE_RANGE_LY);
   const [timeYr, setTime] = useState(0);
   const [chosenId, setChosenId] = useState<SystemIdHex | null>(null);
+  const [starFilter, setStarFilter] = useState<StarFilter>("all");
   const [generation, setGeneration] = useState(0);
 
   const queryRadiusLy = radiusChoiceLy ?? queryRadiusForDriveRange(driveRangeLy);
@@ -94,7 +107,12 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const shown = fault === null ? answered : null;
   const heldBack = linkDownReason(status);
 
-  const selected = shown?.systems.find((system) => system.id === chosenId) ?? null;
+  // Filtered once per answer or filter, since the chart's scene is memoised on it.
+  const systems = useMemo(
+    () => (shown === null ? [] : filterSystems(shown.systems, starFilter)),
+    [shown, starFilter],
+  );
+  const selected = systems.find((system) => system.id === chosenId) ?? null;
   const selectedId = selected?.id ?? null;
   const centre = shown?.centreLy ?? null;
   const frame = useMemo(
@@ -105,8 +123,8 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     () =>
       shown === null
         ? null
-        : toScene(shown, { frame, driveRangeLy, selectedId, destinationId: null }),
-    [shown, frame, driveRangeLy, selectedId],
+        : toScene(shown, { frame, driveRangeLy, selectedId, destinationId: null, starFilter }),
+    [shown, frame, driveRangeLy, selectedId, starFilter],
   );
   const bands = useMemo(() => (shown === null ? null : layerBands(shown.layers)), [shown]);
 
@@ -120,6 +138,8 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     hasCentre: centreLy !== null,
     frame,
     scene,
+    systems,
+    starFilter,
     bands,
     selected,
     selectedId,
@@ -133,6 +153,7 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     select: setChosenId,
     chooseRadius: setRadiusChoice,
     chooseMinLayer: setMinLayer,
+    chooseStarFilter: setStarFilter,
     setDriveRange,
     setTime,
     retry: () => {
