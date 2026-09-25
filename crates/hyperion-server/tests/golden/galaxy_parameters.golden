@@ -91,7 +91,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 86423016.28729044,
+              "value": 50043750.5867979,
               "unit": "msun"
             }
           },
@@ -512,7 +512,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 2.2858496279973854,
+              "value": 2.263099655044004,
               "unit": "deg_per_myr"
             }
           }
@@ -771,7 +771,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 242.3730603511825,
+              "value": 242.2898427978207,
               "unit": "km_per_s"
             }
           },
@@ -780,7 +780,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 622.3178544491255,
+              "value": 622.8998522502407,
               "unit": "km_per_s"
             }
           }

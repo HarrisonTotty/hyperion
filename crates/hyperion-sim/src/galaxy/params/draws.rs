@@ -103,12 +103,14 @@ pub(super) const THIN_MEAN_HEIGHT: Law = Law::Uniform {
 };
 // The brainstorm's 130–200 ly gives way to 225–345 ly, 285 ly with the same relative width (plan
 // 02, ruling 3 of 2026-09-22), so that the young disc's height agrees with the brainstorm's own
-// 5 km/s floor on its vertical dispersion: in the Milky Way fixture's potential, at the reference
-// radius, the bottom of the range, 225 ly, gives 4.91 km/s, and 285 ly gives 6.16, where 130–200 ly
-// gave 2–3.5. Other galaxies' potentials meet the floor there only from 170–423 ly (median 283),
-// so 225 ly misses it in 95% of them and their drawn height in half; and the dispersion falls
-// outward (the fixture's is 4.35 km/s at the Sun), so every young disc misses it in its outer
-// parts. The floor is plan 08's (P08.T2.c), not this range's (plan 02, Risks, R23). 285 ly is an
+// 5 km/s floor on its vertical dispersion: in the Milky Way fixture's potential of version 10, at
+// three thin scale lengths, the bottom of the range, 225 ly, gave 4.91 km/s, and 285 ly gave 6.16,
+// where 130–200 ly gave 2–3.5. Other galaxies' potentials meet the floor there only from 170–423
+// ly (median 283), so 225 ly misses it in 95% of them and their drawn height in half; and the
+// dispersion falls outward, so every young disc misses it in its outer parts. Since the profiles
+// are solved at the Sun's radius (plan 02, P02.T12.a) the fixture's 285 ly gave 4.34 km/s there,
+// and the fixture takes 335 ly (5.06 km/s). The floor is plan 08's (P08.T2.c), not this range's
+// (plan 02, Risks, R23). 285 ly is an
 // effective height Σ ÷ 2ρ₀ of 87 pc, where the youngest measured cohorts are: Bovy's (2017, MNRAS
 // 470, 1360, Table 1) A dwarfs have z_d = 37–56 pc in sech²(Z ÷ 2z_d), whose effective height is
 // 2z_d, 75–110 pc. 130–200 ly is 40–60 pc, the molecular gas's rather than a stellar cohort's.

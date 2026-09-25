@@ -72,7 +72,7 @@ pub use vertical::VerticalProfile;
 use self::arms::{Arm, ArmGeometry, ArmPoint, GentleArm, SharpArm};
 use self::bar::LongBar;
 use self::bulge::BoxyBulge;
-use self::disc::ExponentialDisc;
+use self::disc::{ExponentialDisc, RadialProfile, THIN_DISC_HOLE_LENGTHS};
 use self::halo::HaloProfile;
 use self::metallicity::Metallicity;
 use self::sub_discs::DiscProfiles;
@@ -86,6 +86,23 @@ use super::potential::MassModel;
 use super::shares::ShareMatrix;
 use super::{PointLy, Population};
 use crate::units::Years;
+
+/// The Sun's radius in thin-disc scale lengths, R₀ ÷ `R_d`: where every galaxy's thin discs are
+/// solar in the flat part of their metallicity ([`metallicity`]), and where the thin and thick
+/// discs' vertical profiles and `K_z` are solved (plan 02, Design note 9), both because the laws
+/// they carry are measured in the solar neighbourhood.
+///
+/// R₀ is 8.178 ± 0.013 (stat.) ± 0.022 (sys.) kpc (GRAVITY Collaboration 2019, A&A 625, L10) and
+/// `R_d` the mass-weighted scale length, 2.15 ± 0.14 kpc (Bovy and Rix 2013, ApJ 779, 115). Their
+/// ratio is 3.804 ± 0.25, rounded to 3.8 because the scale length's 6.5% leaves the third figure
+/// meaningless; on the fixture's 7,000 ly disc the rounding moves the radius 26 ly.
+///
+/// It stands in the Milky Way's units of scale length for every drawn disc, because discs'
+/// gradients and heating are self-similar in those units. Until version 12 there were two
+/// constants, metallicity's (3.8, ruling 21 of 2026-09-22) and the profiles' (three scale lengths,
+/// the Sun's radius on the 2.6 kpc disc the plan began with, 6.4 kpc on the fixture's 2.15);
+/// ruling 32 made them one (plan 02, P02.T12.a).
+pub const SOLAR_RADIUS_LENGTHS: f64 = 3.8;
 
 /// The most components a galaxy's fields hold: the size of the buffer
 /// [`Fields::densities`] fills. A galaxy has 15 to 18 today; the rest is room for later plans.
@@ -220,6 +237,18 @@ impl Shape {
             Self::Bulge(bulge) => bulge.density_at(site),
             Self::Bar(bar) => bar.density_at(site),
             Self::Halo(halo) => halo.density_at(site),
+        }
+    }
+
+    /// An upper bound on [`envelope_at`](Self::envelope_at) over a cell whose nearest corner is
+    /// `corner` and whose largest cylindrical radius is `r_max` (ly): the envelope at the corner,
+    /// but for a holed disc, whose hole's factor is taken at `r_max` ([`disc`], "The thin disc's
+    /// central hole"). Every other envelope never rises with |x|, |y| or |z|.
+    #[must_use]
+    pub(crate) fn envelope_sup(&self, corner: &Site, r_max: f64) -> f64 {
+        match self {
+            Self::Disc(disc) => disc.envelope_sup(corner.r, r_max, corner.height),
+            Self::Bulge(_) | Self::Bar(_) | Self::Halo(_) => self.envelope_at(corner),
         }
     }
 
@@ -537,6 +566,10 @@ fn push_thin_discs(
     let tau = params.sfh_timescale();
     let thin = params.thin_disc();
     let metallicity = Metallicity::thin_disc(params.metallicity_gradient(), thin.length());
+    // The young disc shares the old disc's scale length, and so its hole (plan 02, P02.T12.b).
+    let holed = RadialProfile::Holed {
+        hole: thin.length() * THIN_DISC_HOLE_LENGTHS,
+    };
 
     let young_ages = AgeDistribution::young_disc(tau, FeatureShare::None).expect(VALID);
     let young = n * params.population_share(Population::YoungThinDisc);
@@ -546,6 +579,7 @@ fn push_thin_discs(
             ExponentialDisc::new(
                 young / young_ages.born_fraction(),
                 params.young_disc().length(),
+                holed,
                 young_profile,
                 Some(Arm::Sharp(SharpArm::young_disc(params))),
             )
@@ -565,7 +599,8 @@ fn push_thin_discs(
         components.push(Component {
             population: Population::OldThinDisc,
             shape: Shape::Disc(
-                ExponentialDisc::new(count, thin.length(), profile, Some(gentle)).expect(VALID),
+                ExponentialDisc::new(count, thin.length(), holed, profile, Some(gentle))
+                    .expect(VALID),
             ),
             count,
             ages: AgeDistribution::old_thin_disc(tau, bin).expect(VALID),
@@ -585,13 +620,13 @@ fn push_inner_populations(
 ) {
     let n = params.system_count();
     let uniform = |[lo, hi]: [Years; 2]| AgeDistribution::uniform(lo, hi).expect(VALID);
-    let mut push = |population, shape: Shape, ages: AgeDistribution, feh| {
+    let mut push = |population, shape: Shape, ages: AgeDistribution, metallicity| {
         components.push(Component {
             population,
             shape,
             count: n * params.population_share(population),
             ages,
-            metallicity: Metallicity::Fixed(feh),
+            metallicity,
             sub_disc: None,
             halo: None,
         });
@@ -605,25 +640,26 @@ fn push_inner_populations(
             ExponentialDisc::new(
                 count(Population::ThickDisc),
                 thick.length(),
+                RadialProfile::Exponential,
                 thick_profile,
                 None,
             )
             .expect(VALID),
         ),
         uniform(THICK_DISC_AGES),
-        metallicity::THICK_DISC,
+        Metallicity::ThickDisc,
     );
     push(
         Population::Bulge,
         Shape::Bulge(BoxyBulge::of(count(Population::Bulge), params.bulge()).expect(VALID)),
         uniform(BULGE_AGES),
-        metallicity::BULGE,
+        Metallicity::Fixed(metallicity::BULGE),
     );
     push(
         Population::LongBar,
         Shape::Bar(LongBar::of(count(Population::LongBar), params.bar()).expect(VALID)),
         uniform(LONG_BAR_AGES),
-        metallicity::LONG_BAR,
+        Metallicity::Fixed(metallicity::LONG_BAR),
     );
     // Still forming: the unborn sliver is extra (plan 02, Design note 13).
     let nuclear_ages = AgeDistribution::nuclear_disc();
@@ -634,13 +670,14 @@ fn push_inner_populations(
             ExponentialDisc::new(
                 count(Population::NuclearDisc) / nuclear_ages.born_fraction(),
                 nuclear.length(),
+                RadialProfile::Exponential,
                 nuclear_profile,
                 None,
             )
             .expect(VALID),
         ),
         nuclear_ages,
-        metallicity::NUCLEAR_DISC,
+        Metallicity::Fixed(metallicity::NUCLEAR_DISC),
     );
 }
 

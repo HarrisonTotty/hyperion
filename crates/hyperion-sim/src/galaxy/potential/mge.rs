@@ -14,8 +14,14 @@
 //!
 //! They hold for prolate Gaussians too (`ε < 0`), which the nuclear disc's tall, narrow terms
 //! produce. The profiles of the mass model are expanded into such Gaussians with the fitted
-//! tables [`MGE_EXP`] and [`MGE_BAR`] by [`double_exponential`], [`spheroidal_exponential`] and
-//! [`bar_disc`].
+//! tables [`MGE_EXP`], [`MGE_HOLED_EXP`] and [`MGE_BAR`] by [`double_exponential`],
+//! [`holed_double_exponential`], [`spheroidal_exponential`] and [`bar_disc`].
+//!
+//! Every formula is linear in M, so a Gaussian of negative mass is the same Gaussian's potential
+//! with its sign turned. The holed thin disc needs them: a sum of centred Gaussians of positive
+//! mass only falls with radius, and cannot rise out of a hole, so [`MGE_HOLED_EXP`] has signed
+//! weights (plan 02, P02.T12.b). A component's total density stays non-negative to the fit's
+//! accuracy.
 //!
 //! # Quadrature
 //!
@@ -42,7 +48,7 @@ use super::BuildComponentError;
 use crate::galaxy::consts::G;
 use crate::math;
 use crate::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
-use crate::tables::mge::{MGE_BAR, MGE_EXP};
+use crate::tables::mge::{MGE_BAR, MGE_EXP, MGE_HOLED_EXP};
 use crate::units::{LightYears, SolarMasses};
 
 /// Where the integrands are cut, in standard deviations of their Gaussian factor: `e^(−9²÷2)`
@@ -153,6 +159,18 @@ impl Gaussian {
     /// or the axis ratio is not positive.
     pub fn new(mass: SolarMasses, sigma: LightYears, q: f64) -> Result<Self, BuildComponentError> {
         BuildComponentError::check_non_negative("mass", mass.value())?;
+        Self::signed(mass, sigma, q)
+    }
+
+    /// A Gaussian whose mass may be negative: one term of a signed expansion
+    /// ([`holed_double_exponential`]), whose sum is a density that does not fall everywhere.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildComponentError`] if any value is not finite, or the width or the axis ratio is not
+    /// positive.
+    fn signed(mass: SolarMasses, sigma: LightYears, q: f64) -> Result<Self, BuildComponentError> {
+        BuildComponentError::check_finite("mass", mass.value())?;
         BuildComponentError::check_positive("width", sigma.value())?;
         BuildComponentError::check_positive("axis ratio", q)?;
         let eps = (1.0 - q) * (1.0 + q);
@@ -512,13 +530,19 @@ fn normalised(
 ) -> Result<Vec<Gaussian>, BuildComponentError> {
     let total = terms.clone().fold(0.0, |sum, (m, _, _)| sum + m);
     terms
-        .map(|(m, sigma, q)| Gaussian::new(mass * (m / total), sigma, q))
+        .map(|(m, sigma, q)| Gaussian::signed(mass * (m / total), sigma, q))
         .collect()
 }
 
 /// The table's terms with a positive weight.
 fn nonzero(table: &[(f64, f64)]) -> impl Iterator<Item = (f64, f64)> + Clone + '_ {
     table.iter().copied().filter(|&(w, _)| w > 0.0)
+}
+
+/// The signed table's terms with a weight other than zero. The fit writes a pruned weight as
+/// exactly 0, which is what is skipped.
+fn signed_terms(table: &[(f64, f64)]) -> impl Iterator<Item = (f64, f64)> + Clone + '_ {
+    table.iter().copied().filter(|&(w, _)| w.abs() > 0.0)
 }
 
 /// Checks a component's mass and two lengths.
@@ -549,6 +573,36 @@ pub fn double_exponential(
 ) -> Result<Vec<Gaussian>, BuildComponentError> {
     check(mass, [("length", length), ("height", height)])?;
     let terms = nonzero(&MGE_EXP).flat_map(move |(wi, si)| {
+        nonzero(&MGE_EXP).map(move |(wj, sj)| {
+            (
+                wi * si * si * wj * sj,
+                length * si,
+                (height * sj) / (length * si),
+            )
+        })
+    });
+    normalised(mass, terms)
+}
+
+/// The thin disc with its central hole, `ρ ∝ e^(−R_h ÷ R − R ÷ length) e^(−|z| ÷ height)` with
+/// `R_h` the fixed [`THIN_DISC_HOLE_LENGTHS`](crate::galaxy::fields::disc::THIN_DISC_HOLE_LENGTHS)
+/// of `length`, as Gaussians of signed mass.
+///
+/// The radial factor is [`MGE_HOLED_EXP`], whose weights are signed, and the vertical factor
+/// [`MGE_EXP`]; the terms are those of [`double_exponential`], radial terms the outer loop. The
+/// masses sum to `mass`: the table's radial mass `Σ wᵢ sᵢ²` is the holed disc's, `2x K₂(2√x)`
+/// of the hole-free disc's, to 10⁻⁵ (tests).
+///
+/// # Errors
+///
+/// [`BuildComponentError`] if the mass is negative or a length is not positive.
+pub fn holed_double_exponential(
+    mass: SolarMasses,
+    length: LightYears,
+    height: LightYears,
+) -> Result<Vec<Gaussian>, BuildComponentError> {
+    check(mass, [("length", length), ("height", height)])?;
+    let terms = signed_terms(&MGE_HOLED_EXP).flat_map(move |(wi, si)| {
         nonzero(&MGE_EXP).map(move |(wj, sj)| {
             (
                 wi * si * si * wj * sj,

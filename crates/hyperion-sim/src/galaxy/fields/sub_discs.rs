@@ -11,7 +11,8 @@
 //! `σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)`,
 //!
 //! up to 2.0 kpc from the plane, where its binned data end, and level above, at the Sun's angular
-//! momentum and metallicity, which the reference radius, three thin-disc scale lengths, stands for.
+//! momentum and metallicity, which the reference radius stands for: the Sun's radius in thin-disc
+//! scale lengths, [`SOLAR_RADIUS_LENGTHS`](super::SOLAR_RADIUS_LENGTHS).
 //! Each sub-disc's vertical
 //! profile is the vertical Jeans equation's solution for that dispersion in the galaxy's potential
 //! at the reference radius ([`vertical`](super::vertical)): cored at the plane, with no free
@@ -45,6 +46,7 @@
 //! radii, which is most of the fields' build; then bisections of the dispersion, each a pass over
 //! the profiles' knots. All of it is part of the generator version.
 
+use super::SOLAR_RADIUS_LENGTHS;
 use super::vertical::{BISECTIONS, JeansIntegral, VerticalForce, VerticalProfile};
 use crate::galaxy::ages::{AgeDistribution, SubDisc};
 use crate::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, YEARS_PER_GIGAYEAR};
@@ -91,10 +93,6 @@ pub fn heating_law(age: Years) -> KilometresPerSecond {
         )
 }
 
-/// Where the thin and thick discs' profiles are solved, in thin-disc scale lengths (plan 02,
-/// Design note 9).
-pub const REFERENCE_RADIUS_LENGTHS: f64 = 3.0;
-
 /// Where the nuclear disc's profile is solved, in its own scale lengths: the mass-weighted mean
 /// radius of an exponential disc.
 pub const NUCLEAR_REFERENCE_RADIUS_LENGTHS: f64 = 2.0;
@@ -137,7 +135,8 @@ pub struct SubDiscHeights {
 }
 
 impl SubDiscHeights {
-    /// `R_ref`, three thin-disc scale lengths, where the Jeans equation is solved.
+    /// `R_ref`, the Sun's radius in thin-disc scale lengths ([`SOLAR_RADIUS_LENGTHS`]), where the
+    /// Jeans equation is solved.
     #[must_use]
     pub fn reference_radius(&self) -> LightYears {
         self.reference_radius
@@ -240,7 +239,7 @@ impl DiscProfiles {
         let gamma = DISPERSION_HEIGHT_GRADIENT_PER_KPC;
         let reach = LightYears::new(DISPERSION_GRADIENT_REACH_KPC * LIGHT_YEARS_PER_KILOPARSEC);
 
-        let reference = REFERENCE_RADIUS_LENGTHS * params.thin_disc().length().value();
+        let reference = SOLAR_RADIUS_LENGTHS * params.thin_disc().length().value();
         let disc_force = force_at(reference);
         let heated = JeansIntegral::new(&disc_force, gamma, reach, LightYears::new(reference));
 

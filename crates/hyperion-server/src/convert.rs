@@ -1394,7 +1394,7 @@ mod tests {
         // to the bit.
         assert_same_bits(
             value_in(&response, "stellar_mass", Unit::Msun),
-            6.0e10, // Licquia and Newman 2015.
+            5.12e10, // Bland-Hawthorn and Gerhard 2016 (plan 02, P02.T12.d).
         );
         assert_same_bits(
             value_in(&response, "disc.thin.scale_length", Unit::Ly),

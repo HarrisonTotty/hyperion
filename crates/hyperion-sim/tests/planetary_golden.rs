@@ -751,7 +751,7 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         layer: Layer::C,
         budget: 200_000,
         predicate: wide_binary_with_planets_about_both,
-        id: 0x41ff_acaa_0000_0008,
+        id: 0x41ff_ecae_0000_0004,
     },
     GoldenSystem {
         // A 0.870 M☉ K dwarf with a 0.397 + 0.367 M☉ pair of M dwarfs 57 au apart, 413 au out,
@@ -771,7 +771,7 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         layer: Layer::C,
         budget: 200_000,
         predicate: subgiant,
-        id: 0x4200_acaa_0000_0004,
+        id: 0x41ff_2cc2_0000_0007,
     },
     GoldenSystem {
         // A 1.59 M☉ star on the first giant branch at 88 L☉, [Fe/H] −0.11,
@@ -781,7 +781,7 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         layer: Layer::C,
         budget: 200_000,
         predicate: red_giant_mid_engulfment,
-        id: 0x4200_2c5e_0000_0007,
+        id: 0x4202_6cc2_0000_0003,
     },
     GoldenSystem {
         // A black hole of a 27.6 M☉ star that died by direct collapse, [Fe/H] +0.09,

@@ -231,8 +231,12 @@ fn layer_densities_of_a_galaxy_handle_sum_to_the_total() {
                 let by_band = MassBand::ALL.iter().fold(0.0, |sum, &band| {
                     sum + shares.component_share(band, component) * density
                 });
+                // A subnormal density keeps fewer bits: its sum is held to a unit in the last
+                // place of the smallest normal number too (the young disc 20,000 ly above the
+                // plane since its height rose to 335 ly, plan 02, P02.T12.d).
                 assert!(
-                    (by_band - density).abs() <= 1e-14 * density,
+                    (by_band - density).abs()
+                        <= 1e-14 * density + 4.0 * f64::MIN_POSITIVE * f64::EPSILON,
                     "seed {}, {p:?}, {:?}: the bands give {by_band:e} against {density:e}",
                     galaxy.seed(),
                     component.population()

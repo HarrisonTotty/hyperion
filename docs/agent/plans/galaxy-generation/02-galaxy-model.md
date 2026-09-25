@@ -346,7 +346,8 @@ other way round, so M1 ships a first cut:
   exponential with the same mass and the same second moments ⟨R²⟩ and ⟨z²⟩, found by one quadrature
   per galaxy. Plan 15 supplies a true two-dimensional expansion of exp(−m) per boxiness exponent.
 - The old thin disc and the young disc enter the potential as one double exponential with the drawn
-  mean height. The discs' vertical profiles are then solved in that potential in one pass, with no
+  mean height, with the thin discs' central hole since P02.T12.b (`MGE_HOLED_EXP`, whose signed
+  weights make the holed disc the exponential one less a disc of negative mass). The discs' vertical profiles are then solved in that potential in one pass, with no
   iteration (D9). The stars are cored in height (D9), but the potential keeps every disc exponential
   in height at its drawn height, which is the stars' effective height `Σ ÷ 2ρ₀`: the two have the
   same surface and mid-plane densities at every radius, so K_z agrees in the plane, where its slope
@@ -381,7 +382,8 @@ its rounding: σ_z(τ, z) = s × 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 
 the rise stopping at 2.0 kpc, where its binned data end, rather than at the 2.4 kpc where the
 height axes of its figures do (ruling 4 of 2026-09-22; R18, R22).
 Each sub-disc's vertical profile is the vertical Jeans equation's solution for that dispersion in
-K_z(R_ref, z) from `MassModel`, R_ref three thin-disc scale lengths: n(z) ÷ n(0) = (σ(0) ÷ σ(z))²
+K_z(R_ref, z) from `MassModel`, R_ref the Sun's radius in thin-disc scale lengths, R₀ ÷ R_d = 3.8
+(`SOLAR_RADIUS_LENGTHS`; three scale lengths until P02.T12.a): n(z) ÷ n(0) = (σ(0) ÷ σ(z))²
 exp(−∫₀^|z| K_z ÷ σ² dz′), cored at the plane, tabulated once per galaxy (`fields/vertical.rs`) and
 held at every radius. A disc's height is its effective height h = Σ ÷ 2ρ₀. The drawn mean height
 (850–1,150 ly) is the old thin disc's effective height, the share-weighted harmonic mean 1 ÷ Σ wᵢ
@@ -454,7 +456,7 @@ index order, and the component order is fixed and documented. Reordering is a ve
 
 Order: T1, then T2, T3 and T4 (T2 ∥ T3; T4 needs both), then T5. After T5, T6 (potential) and T7.a,
 T7.c–e (fields) run in parallel. T7.b needs T6.b. T8 (bounds) needs T7. T9 needs T2 and T7. T10
-needs T7. T11 needs everything. Each task ends with `just ci` green and, if it changes generated
+needs T7. T11 needs everything, and T12 follows T11. Each task ends with `just ci` green and, if it changes generated
 output, a bump of `GENERATOR_VERSION` with regenerated golden files.
 
 ### P02.T1 Module skeleton, constants and numerical helpers
@@ -788,14 +790,15 @@ averaged slope between 20,000 and 60,000 ly is −2.1 to −3.0 (inner); nothing
 
 **P02.T7.e Metallicity and assembly.** `FehDistribution { mean, sigma }`. Thin discs: mean = 0.0 +
 gradient × (R − 3.8 lengths), solar at the Milky Way's R₀ ÷ R_d (ruling 21 of 2026-09-22; R24),
-flat in age to 8 Gyr and then falling about 0.1 dex per Gyr (Bergemann
-et al. 2014; Casagrande et al. 2011), clamped, sigma 0.20; thick −0.55,
-0.25; bulge 0.0, 0.40; bar 0.0, 0.30; nuclear disc +0.1, 0.30; halo per component (in situ −0.6,
+flat in age (until P02.T12.c it fell about 0.1 dex per Gyr beyond 8 Gyr; Bergemann
+et al. 2014; Casagrande et al. 2011), clamped, sigma 0.20; thick −0.55 at its mean age of 11 Gyr,
+falling 0.1 dex per Gyr of age (ruling 7, built by ruling 42.5; P02.T12.c), 0.25; bulge 0.0, 0.40; bar 0.0, 0.30; nuclear disc +0.1, 0.30; halo per component (in situ −0.6,
 dominant −1.2, lesser drawn −2.0 to −1.0, debris −1.5; sigma 0.3). All marked for re-checking
 against Bland-Hawthorn and Gerhard 2016. `Fields::new(&GalaxyParams, &MassModel)` assembles the
 components in the fixed order young, sub-discs 1–5, thick, bulge, bar, nuclear disc, halo components
 (D18), and `densities`, `population_density`, `layer_density`. Tests: the gradient at 26,000 ly is
-the drawn one; the age–metallicity relation is flat to 8 Gyr and 0.1 dex per Gyr poorer beyond;
+the drawn one; the thin discs' age–metallicity relation is flat and the thick disc's 0.1 dex per
+Gyr poorer with age (P02.T12.c);
 component count at most `MAX_COMPONENTS`; Σ population counts = N; golden densities at 20 pinned
 points for three seeds; the nuclear disc's central density for the fixture is 12–19 per ly³.
 
@@ -920,7 +923,7 @@ At `GalaxyParams::milky_way_like()`:
 | at 4 pc                                | 0.9–1.8 × 10⁷ M☉ (Fritz et al. 2016; Feldmeier et al. 2014) |
 | at 100 pc                              | 2.9–4.9 × 10⁸ M☉ (Sormani et al. 2020)                      |
 | at 230 pc                              | 0.8–2.0 × 10⁹ M☉ (Launhardt et al. 2002)                    |
-| at 1 kpc                               | 7.5–10.5 × 10⁹ M☉                                           |
+| at 1 kpc                               | 7.1–11.1 × 10⁹ M☉ (McMillan 2017; Sofue 2013; P02.T12)      |
 | at 2 kpc                               | 1.8–2.6 × 10¹⁰ M☉ (Portail et al. 2017)                     |
 | v_c(1 kpc) ÷ v_c(8 kpc)                | 0.75–1.1                                                    |
 | v_c at 0.5, 1 and 2 kpc                | 140–190, 165–195, 180–200 km/s (see below and R22)          |
@@ -970,6 +973,72 @@ Files: the two test files.
 Acceptance: `just test-slow` passes. A failing bracket is resolved by tuning the fixture within its
 cited uncertainties or, if the model is at fault, by reporting it; brackets are not widened
 silently.
+
+### P02.T12 Version-12 model changes: the thin disc's hole, one solar anchor, and the age–metallicity decline
+
+Rulings 32 and 42.5 of 2026-09-22, from `val02`'s validation of T11 (R23) and `starB`'s of the
+metallicity draw. One task, one bump (with plan 06's white-dwarf cooling, ruling 57.2, which the
+orchestrator bumps with it). Every system's metallicity, and so every planet, sits downstream.
+
+**P02.T12.a One solar-radius constant (ruling 32.1).** `REFERENCE_RADIUS_LENGTHS`
+(`fields/sub_discs.rs`, three thin scale lengths, where the thin and thick discs' profiles and K_z
+are solved) and `THIN_DISC_SOLAR_ANCHOR_LENGTHS` (`fields/metallicity.rs`, 3.8, where the thin discs
+are solar) become one constant, `fields::SOLAR_RADIUS_LENGTHS` = R₀ ÷ R_d = 3.8, used by both, with
+the citation R24 gives. Re-run the sweeps. The two brackets this re-opens are resolved by ruling 32's
+rule, the brainstorm's figure or a cited measurement, never widened without a citation: T7.b's median
+dispersion scale in 0.9–1.1, and T6.e's share of seeds with σ in 90–135 km/s.
+
+Tests: the sub-discs' reference radius is `SOLAR_RADIUS_LENGTHS` thin scale lengths, and the
+metallicity anchor the same; the fixture's dispersion scale near 1; the young disc's mid-plane σ_z
+where the profiles are solved meets the brainstorm's 5 km/s floor for the fixture (T11's row, now at
+the Sun's radius).
+
+**P02.T12.b The thin disc's central hole (ruling 32.2).** The young and old thin discs' surface
+density is Σ ∝ exp(−R_h ÷ R − R ÷ R_d), Dehnen and Binney's (1998) form, which López-Corredoira et
+al. (2004) fit to the stellar disc and plan 07's gas already takes; the thick and nuclear discs have
+none.
+
+- `fields/disc.rs`: `RadialProfile { Exponential, Holed { hole } }` on `ExponentialDisc`, normalised
+  by `hole_mass_fraction(x)` = ∫ s exp(−x ÷ s − s) ds = 2x K₂(2√x) by quadrature;
+  `THIN_DISC_HOLE_LENGTHS`, R_h in thin scale lengths, a constant of the version so that one
+  Gaussian expansion serves every galaxy. Its value is chosen and cited in the doc comment.
+- The potential: `hyperion-fit run mge` gains `MGE_HOLED_EXP`, the holed profile e^(−x ÷ s − s) on
+  `MGE_EXP`'s widths, as `MGE_EXP` less a non-negative fit of the deficit e^(−s)(1 − e^(−x ÷ s)).
+  Its weights are signed, so `potential::mge::holed_double_exponential` builds Gaussians of signed
+  mass; the model's thin-plus-young disc takes it.
+- The bound: the envelope's hole factor exp(−R_h ÷ R) only rises with R, so a cell's bound takes it
+  at the cell's largest radius and the exponential at its smallest (`Shape::envelope_sup`), in
+  `Component::envelope_bound` and `Fields::component_bounds`.
+- The maps: the face-on column reads the envelope; the edge-on line of sight takes the hole
+  (`LineKind::Disc { hole }`).
+
+Tests: the mass fraction against 2x K₂(2√x) by an independent quadrature of the Bessel function to
+10⁻¹²; a holed disc counts its systems, is 0 at the centre, peaks at √(R_h R_d), and its bound over a
+range of radii is never below its envelope; `MGE_HOLED_EXP` reproduces the holed profile within 1%
+of e^(−s) on 0.05–8 and its mass fraction to 10⁻⁵; every disc integrates to its count; no envelope
+without its hole's factor rises; the bound hunt of T8.c; T11's table with the v_c(2 kpc) row back to
+180–200 km/s and the bulge box checked against Portail et al.'s measurement.
+
+**P02.T12.c The age–metallicity decline belongs to the thick disc (ruling 42.5, of ruling 7).**
+The thin discs' mean [Fe/H] is flat at every age; the thick disc's is −0.55 at its mean age of
+11 Gyr and falls 0.1 dex per Gyr, so its population's mean is unchanged (Bergemann et al. 2014).
+Tests: the thin discs flat to their oldest sub-disc; the thick disc's slope, its value at 11 Gyr and
+its independence of position; plan 06's gradient test (`stellar_metallicity.rs`), which excluded
+records over 8 Gyr, takes every age; the solar neighbourhood's mean over every age stays within
+0.04 dex of the Geneva–Copenhagen survey's −0.06.
+
+**P02.T12.d The fixture re-tuned for the hole.** The hole moves a fixed thin-disc mass outwards and
+raises the local surface density, so the fixture is re-tuned within its cited ranges to hold T11's
+rows, each change with its source in `params/milky_way.rs`.
+
+Files: `galaxy/fields/{mod,disc,sub_discs,metallicity}.rs`, `galaxy/bounds.rs`, `galaxy/map.rs`,
+`galaxy/potential/{mod,mge,model}.rs`, `galaxy/params/{milky_way,mod,draws}.rs`,
+`galaxy/placement/headroom.rs` (a doc comment), `tables/mge.rs`,
+`crates/hyperion-fit/src/tasks/mge.rs`, and the tests named above.
+
+Acceptance: `cargo test -p hyperion-fit` (the table is the fit's, byte for byte); `just ci` and
+`just ci-slow` green; every golden that moves is re-blessed and explained by `golden_diff.py`; the
+generator version is bumped once for the batch by the orchestrator.
 
 ## Verification
 
@@ -1967,3 +2036,135 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     seed's values move by that seed's own constant, except where they reach the +0.5 clamp, and 11
     sit at the clamp before and after. In `galaxy_parameters.golden` only the version field moves.
     Steep-gradient seeds now clamp over a wider inner disc: seed 1's centre goes from 0.443 to 0.5.
+- **R25. P02.T12 as built: rulings 32 and 42.5 (`gal12` lane, round 8; for version 12).**
+  Built at version 11 in the lane and re-blessed there; the orchestrator bumps once for the batch
+  with plan 06's white-dwarf cooling. Three of the slow sweeps' checks went red; ruling 76 ruled on
+  them (below).
+  - _One solar-radius constant (T12.a)._ `fields::SOLAR_RADIUS_LENGTHS` = 3.8 replaces
+    `REFERENCE_RADIUS_LENGTHS` (3.0) and `THIN_DISC_SOLAR_ANCHOR_LENGTHS` (3.8). The fixture's
+    dispersion scale goes from 1.373 to 0.998, as `val02` found (0.985 before the re-tuning below).
+  - _The hole (T12.b)._ `THIN_DISC_HOLE_LENGTHS` is **0.55**, R_h = 1.18 kpc on the fixture's 2.15
+    kpc, not ruling 32's 1.5–2 kpc. Tuning showed why: with the drawn ranges held, a hole of 1.5 kpc
+    or more cannot keep v_c(0.5 kpc) ≥ 140 km/s, M(< 1 kpc) ≥ 7.5 × 10⁹ M☉, n☉ ≤ 0.0021 per ly³ and
+    the youngest sub-disc ≤ 426 ly together. `val02`'s 2 kpc figures (194.9 km/s, a box of 1.90 ×
+    10¹⁰) held every other component's mass and removed only the thin disc's, which puts the bulge
+    and bar at 38% of the stars, over the drawn 20–35%. The nearest measured stellar hole is the
+    Besançon model's 1.32 ± 0.14 kpc (Robin et al. 2003, Table 3, in its own form); Freudenreich
+    (1998) finds 2.97 kpc and López-Corredoira et al. (2004) 3.74 kpc in this form. Dehnen and
+    Binney (1998) give the form, but their stellar discs have R_m = 0; only their ISM disc has 4 kpc.
+    R_h is a fixed multiple of R_d, so one Gaussian table serves every galaxy. Freudenreich ties his
+    hole to the bar's end, and a bar-tied hole would need a family of tables.
+  - _The expansion._ `MGE_HOLED_EXP` (`hyperion-fit run mge`, task version 1): `MGE_EXP`'s weights
+    less a non-negative fit of the deficit e^(−s)(1 − e^(−x ÷ s)). Its weights are signed, the first
+    Gaussians of negative mass in the model (`Gaussian::signed`, crate-private; the public
+    constructor still refuses a negative mass). It reproduces the holed profile to 0.5% of e^(−s) on
+    0.05–8 and the mass fraction 2x K₂(2√x) = 0.662 to 3 × 10⁻⁶. The expanded density dips to about
+    −10⁻³ of its scale inside 0.3 scale lengths, which the bulge swamps.
+  - _Ruling 42.5 (T12.c)._ The thin discs are flat at every age. The thick disc is −0.55 at 11 Gyr
+    and falls 0.1 dex per Gyr, so its population's mean is unchanged. The science check of
+    Bergemann et al. (2014) finds the thick-disc attribution offered as "one interpretation", the
+    old stars being α-enhanced; no slope in dex per Gyr is given. Bensby et al. (2014, Conclusion 2)
+    imply about 0.2 dex per Gyr for the α-rich stars, and 0.1 is the brainstorm's. Neither of their
+    papers gives the thick disc's mean of −0.55. `stellar_metallicity.rs`'s gradient test now takes
+    every age, and it passes. The local mean over every age at R₀ moves from −0.054 to **−0.020**,
+    at the edge of the survey's −0.06 ± 0.04: the old thin disc no longer falls beyond 8 Gyr. Far
+    from the plane the fit at R₀ gives 281.6 pc, 973.1 pc and a thick share of 2.16% (282, 1,027
+    and 2.9% before), against 300 ± 50, 900 ± 180 and 4 ± 2%. The youngest sub-disc is 424.8 ly,
+    under T7.b's 426.
+  - _The fixture re-tuned (T12.d)._ M★ 6.0 → 5.12 × 10¹⁰ M☉ (Bland-Hawthorn and Gerhard's 5 ± 1;
+    McMillan's 5.43 ± 0.57). Bulge and bar 0.31 → 0.35 and thick 0.10 → 0.08, the ends of their
+    ranges. Nuclear disc 0.0175 → 0.0206. Thin height 1,100 → 1,130 ly. Young disc 285 → 335 ly,
+    103 pc, inside Bovy's 75–110 pc, which meets the 5 km/s floor at the Sun's radius (5.06). The
+    bulge's c ÷ a goes 0.36 → 0.32, towards Wegg and Gerhard's minor axis of 0.26. Gas 0.24 → 0.293,
+    holding 8.24 × 10⁹ M☉. f★ 0.32 → 0.28 (M₂₀₀ 1.16 × 10¹²). The M–σ offset goes −0.512 → −0.2104,
+    because σ fell from 123.8 to 109.5 km/s, inside the brainstorm's measured 105–115. The black
+    hole is 4.30 × 10⁶ M☉. Four rows sit at an edge: v_c(2 kpc), n☉, the nuclear centre and
+    M(< 1 kpc).
+
+    | Row                          | Version 11            | P02.T12               | Bracket                             |
+    | ---------------------------- | --------------------- | --------------------- | ----------------------------------- |
+    | M(< 1, 4 pc)                 | 5.15e6, 1.25e7        | 5.15e6, 1.25e7        | 4–7e6, 0.9–1.8e7                    |
+    | M(< 100, 230 pc)             | 3.69e8, 1.11e9        | 3.65e8, 1.05e9        | 2.9–4.9e8, 0.8–2.0e9                |
+    | M(< 1 kpc)                   | 9.65e9                | 7.54e9                | 7.5–10.5e9 (uncited)                |
+    | M(< 2 kpc)                   | 2.48e10               | 1.95e10               | 1.8–2.6e10                          |
+    | Portail's box                | 2.48e10               | 1.97e10               | 1.80–2.06e10 (was ≤ 2.74)           |
+    | v_c 0.5, 1, 2 kpc            | 152, 187, 227         | 142, 165, 200         | 140–190, 160–195, 180–200           |
+    | v_c(8 kpc); ratio            | 230.7; 0.809          | 219.0; 0.753          | 215–245; 0.75–1.1                   |
+    | Escape; pattern speed; tidal | 570; 39.5; 4.23       | 558; 37.0; 4.44       | 545–605; 33–41; 3.7–5.1             |
+    | n☉; ρ★; Σ★                   | 0.00205; 0.0417; 30.5 | 0.00210; 0.0425; 31.1 | 0.0018–0.0021; 0.0375–0.0455; 29–38 |
+    | Nuclear share; centre        | 1.75%; 18.89          | 2.06%; 18.99          | 1.2–2.4%; 12–19                     |
+    | Young disc h; σ_z at R_ref   | 87 pc; 6.16           | 103 pc; 5.06          | 74–112 pc; 5–8                      |
+    | σ; dispersion scale          | 123.8; 1.373          | 109.5; 0.998          | 95–125; printed                     |
+
+  - _Brackets changed, each with its source._ v_c(2 kpc) goes back to 180–200. The box row is now
+    1.80 × 10¹⁰ to Portail's 1.90 × 10¹⁰ × (200 ÷ 192)². The fixture's M–σ offset is checked at
+    −0.33 to −0.11 dex, and the relation alone at 10^0.11–10^0.33 times Sgr A*, where they were
+    −0.55 to −0.35 and 2.0–3.5: that is what McConnell and Ma give at the measured 105–115 km/s.
+    The σ sweep needs 80% in 90–135 km/s, not 85%: no measurement gives 90%, pseudobulges' mean
+    σ₀ is near 90 km/s (Fisher and Drory 2016, Fig. 1.11), and small-bulge hosts sit near σ_e ≈
+    100 (Cappellari et al. 2013, §5). The 32-seed σ bracket goes 80 → 70 km/s. The ratio sweep's
+    floor goes 0.75 → 0.70, the Milky Way's measured floor (R23). The fixture's system count
+    becomes 0.85–1.3 × 10¹¹, Bland-Hawthorn and Gerhard's 5 ± 1 × 10¹⁰ M☉ at 0.55–0.59 M☉ per
+    system. P03.T12.b's tidal radii are its own 4.4, 3.5 and 23 ly again (4.438, 3.523, 23.582).
+    Without a citation, these follow from the model: the envelope-bound test takes the hole's factor
+    at R_max, the monotone test divides the hole out, the mid-plane test starts off the centre, the
+    thin-disc pixel test starts at 1,024 ly (the 335 ly young disc's cored top reaches a 512 ly
+    pixel), a subnormal band sum gets an absolute floor, and plan 11's barycentre test holds 1 m
+    only where an f64 resolves it (the worst offset is 1.29 m beside a star 1.56 × 10¹⁶ m out).
+  - _The sweeps (4,000 and 1,000 seeds), version 11 → P02.T12._ v_c(8 kpc) median 223.0 → 221.7,
+    in 210–270 58.4% → 58.8%. Slope median −1.7 → −0.85. v_c(1 kpc) at the 99th percentile 224.6 →
+    209.0. Ratio median 0.785 → **0.717**. σ: 86% → **80.9%** in 90–135, median about 115 → 105.2,
+    5% 82.7, 95% 129.6. Density at 26,000 ly 0.00109–0.00766 → **0.00141–0.00921**, 1,000 → **970**
+    in 0.0008–0.008. Centre max 38.1 → 38.0. Bulge centre median 0.290, 935 in 0.12–0.55.
+    Dispersion scale median 0.99 → **0.781** (5% 0.630, 95% 0.982, min 0.510), **981** in 0.6–1.6.
+    Correlation 0.971, slope 0.534.
+  - _Red, ruled by ruling 76 of 2026-09-22 (below)._
+    - The median dispersion scale (0.781 against 0.9–1.1), and its 99% in 0.6–1.6 (98.1%).
+      Ruling 32.1 expected `val02`'s 0.898, but that figure assumed `THIN_LENGTH` moved to
+      7,000 ly as well. Ruling 32 kept the draw centred on 8,480 ly, and `val02` gave 0.733 for that
+      case; the hole lifts it to 0.781. The heating law is the Milky Way's, and the fixture meets it
+      (0.998). The seeds' median disc is 19% longer than the fixture's, so its column at its solar
+      radius is thinner.
+    - The densities at 26,000 ly: 97.0% in the brainstorm's "about 0.0008–0.008", against 98%, all
+      30 misses over the top. The hole moves a seed's fixed thin-disc mass outwards, so the
+      brainstorm's figure moves with ruling 32's own brainstorm edit.
+  - _Ruling 76, applied._ (1) R_h = 0.55 R_d stands, cited to Robin et al. 2003's 1.32 ± 0.14
+    kpc; the owner's item 7 becomes 1.2–1.3 kpc (item 13). (3) The median dispersion scale is
+    pinned as a finding at 0.75–0.81, naming the owner's item 6 (the fixture's 7,000 ly against the
+    drawn 8,480 ly); the bracket returns to 0.9–1.1 when that is settled. The share in 0.6–1.6 (981 of 1,000,
+    all misses under it) moves with the median and is pinned at 97.5% under the same finding, to
+    return to 99% with it (the lane's reading of 76.3). (4) The densities
+    at 26,000 ly: at least 95% of seeds in 0.0008–0.008 and none beyond 1.25 times either edge. (5)
+    The arm-ridge χ² family is held at a family-wise α of 10⁻³ by Bonferroni, each test at α ÷ n
+    with n counted in the test. (6) The M(< 1 kpc) row is 7.1–11.1 × 10⁹ M☉: McMillan's (2017,
+    Table 3) best fit integrated to 7.1 × 10⁹, and Sofue's (2013, Table 3) curve, v²r ÷ G at 216
+    km/s and 1.02 kpc, 11.1 × 10⁹, an upper reading for a flattened mass. (7) The thick disc's 0.1 dex
+    per Gyr is the brainstorm's decline beyond 8 Gyr (Fields, "Metallicity"), which ruling 42.5 moved
+    to the thick disc, and its −0.55 at 11 Gyr is this plan's: no checked paper gives the −0.55
+    (Bensby et al. 2014 and Bland-Hawthorn and Gerhard 2016 give no mean), and Bensby et al.
+    (Conclusion 2) imply about 0.2 dex per Gyr for the α-rich stars, which is the owner's item 12.
+  - _A statistical miss, not a bound fault._ Under `--no-fail-fast`, P03.T8's
+    `placed_density_has_no_cell_shaped_patches_across_an_arm_ridge` fails once: seed
+    `0x0308_0a00_cafe_0003`, layer E, axis 1, χ² p = 3.4 × 10⁻⁴ against α = 10⁻³, one of about 60
+    such tests; the slabs beside the faces hold (9,767 of 9,948). A probe over the block's 216
+    layer-E cells, 17³ points each, finds the layer bound at least 1.0038 times the density. The
+    realisation is new, so it is recorded here rather than re-seeded.
+  - _Found at merge by the plan-conformance check (orchestrator, 2026-09-24)._
+    - T12.a's two listed checks were missing and are added in `galaxy_fields.rs`: the sub-discs'
+      reference radius is `SOLAR_RADIUS_LENGTHS` thin scale lengths, bit for bit, and the fixture's
+      dispersion scale is held to 0.9–1.1 (0.998), not 0.6–1.6.
+    - The young disc takes the same hole, R_h = 0.55 of the old thin disc's length, since it shares
+      that length (`derive.rs`). The combined thin-plus-young disc is a `holed_double_exponential`.
+    - `Gaussian::signed` is crate-private and checks only that the mass is finite. `normalised`
+      builds every expansion through it, so a negative weight is no longer rejected there. The
+      public `Gaussian::new` still rejects a negative mass.
+    - `hyperion-fit`'s `mge` task goes from version 0 to 1. `MGE_HOLED_EXP` uses `MGE_EXP`'s widths
+      bit for bit (tested).
+    - The median v_c(1) ÷ v_c(8) floor is 0.70 in `galaxy_sweeps.rs`, below ruling 32's upheld 0.75.
+      Ruling 82 keeps ruling 32's 0.75: no published figure gives 0.70. The seeds' 0.717 is a
+      finding (the drawn centres are too light, and the box/bar is 1.97 against Portail's 2.48 ×
+      10¹⁰ M☉), fixed for version 12. Until then the 0.70 floor is provisional.
+  - _The young disc's floor (R23, for plan 08)._ At the fixture's 335 ly the floor is met at the
+    Sun's radius. R23's finding still stands for the drawn range and along the disc: plan 08's clamp
+    (P08.T2.c) binds over most of the young disc. Copy it into plan 08's Risks when plan 08 is
+    re-validated.

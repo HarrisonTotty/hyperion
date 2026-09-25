@@ -483,15 +483,17 @@ impl GalaxyParams {
     /// hole's, for the comparisons of plan 02's P02.T11.
     ///
     /// The default mass function, Chabrier's system function with its branch above 1 M☉ scaled;
-    /// M★ 6.0 × 10¹⁰ M☉ (Licquia and Newman 2015); shares thick 10%, bulge and bar 31% with the
-    /// bar 30% of that (Bland-Hawthorn and Gerhard 2016; Portail et al. 2017), nuclear disc 1.75%
-    /// (Launhardt et al. 2002; Sormani et al. 2022), halo 1%; timescale 7 Gyr; thin disc 7,000 ly
-    /// long with an effective height of 1,100 ly (Bovy and Rix 2013; Bland-Hawthorn and Gerhard
-    /// 2016; plan 02, ruling 8), thick disc 0.9 and 2.7 times that, young disc 285 ly (ruling 3),
-    /// gas 24% of the thin disc's mass (rulings 1 and 19); bulge 2,280 × 1,440 × 820 ly, boxiness 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly
-    /// (Wegg, Gerhard and Portail 2015), corotation ratio 1.24 (Portail et al. 2017); nuclear disc 290 ly by 93 ly
-    /// (Sormani et al. 2022); four arms at 12°; f★ 0.32, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
-    /// McMillan (2017); the black hole 0.512 dex below the M–σ relation, which makes it the 4.30 ×
+    /// M★ 5.12 × 10¹⁰ M☉ (Bland-Hawthorn and Gerhard 2016's 5 ± 1); shares thick 8%, bulge and bar
+    /// 35% with the bar 30% of that (Bland-Hawthorn and Gerhard 2016; Portail et al. 2017),
+    /// nuclear disc 2.06% (Launhardt et al. 2002; Sormani et al. 2022), halo 1%; timescale 7 Gyr;
+    /// thin disc 7,000 ly long with an effective height of 1,130 ly and the thin discs' central
+    /// hole (Bovy and Rix 2013; Bland-Hawthorn and Gerhard 2016; plan 02, rulings 8 and 32), thick
+    /// disc 0.9 and 2.7 times that, young disc 335 ly (ruling 3; P02.T12.d), gas 8.24 × 10⁹ M☉,
+    /// 29.3% of the thin disc's mass (rulings 1 and 19); bulge 2,280 × 1,440 × 730 ly, boxiness
+    /// 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly (Wegg, Gerhard and
+    /// Portail 2015), corotation ratio 1.24 (Portail et al. 2017); nuclear disc 290 ly by 93 ly
+    /// (Sormani et al. 2022); four arms at 12°; f★ 0.28, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
+    /// McMillan (2017); the black hole 0.210 dex below the M–σ relation, which makes it the 4.30 ×
     /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013); the halo's inner
     /// slopes 2.5, and the dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0
     /// (Pila-Díez et al. 2015; Medina et al. 2024). Values without a measurement take the middle

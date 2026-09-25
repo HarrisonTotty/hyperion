@@ -407,7 +407,8 @@ impl Component {
     /// ```
     #[must_use]
     pub fn envelope_bound(&self, cell: &CellBox) -> f64 {
-        self.envelope(&cell.nearest_corner()) * (1.0 + BOUND_MARGIN)
+        let corner = Site::new(&cell.nearest_corner());
+        self.shape().envelope_sup(&corner, cell.r_cyl_range().hi) * (1.0 + BOUND_MARGIN)
     }
 
     /// An upper bound on the component's density over `cell`, systems per cubic light-year: the
@@ -476,7 +477,7 @@ impl Fields {
         let mut last: Option<(&Arm, f64)> = None;
         let (used, rest) = out.split_at_mut(self.components().len());
         for (slot, component) in used.iter_mut().zip(self.components()) {
-            let envelope = component.shape().envelope_at(&corner) * (1.0 + BOUND_MARGIN);
+            let envelope = component.shape().envelope_sup(&corner, radii.hi) * (1.0 + BOUND_MARGIN);
             *slot = match component.arm() {
                 Some(arm) => {
                     let sup = match last {

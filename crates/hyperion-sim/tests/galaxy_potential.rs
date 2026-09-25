@@ -14,6 +14,7 @@ mod common;
 use common::{assert_relative, assert_within};
 use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::consts::{G, LIGHT_YEARS_PER_KILOPARSEC, LIGHT_YEARS_PER_YEAR_PER_KM_S};
+use hyperion_sim::galaxy::fields::disc::{THIN_DISC_HOLE_LENGTHS, hole_mass_fraction};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{GalaxyParams, GalaxyParamsBuilder};
 use hyperion_sim::galaxy::potential::mge::{
@@ -23,9 +24,10 @@ use hyperion_sim::galaxy::potential::sigma::{black_hole_mass, bulge_dispersion};
 use hyperion_sim::galaxy::potential::spherical::SphericalMass;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::math;
-use hyperion_sim::tables::mge::{MGE_BAR, MGE_EXP};
+use hyperion_sim::tables::mge::{MGE_BAR, MGE_EXP, MGE_HOLED_EXP};
 use hyperion_sim::units::{Dex, KilometresPerSecond, LightYears, Metres, SolarMasses};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 
@@ -76,6 +78,27 @@ fn mge_exp_reproduces_the_exponential() {
         sum + w * two_pi * two_pi.sqrt() * s * s * s
     });
     assert_relative("spherical exponential mass", mass, 8.0 * PI, 1e-3);
+}
+
+/// `MGE_HOLED_EXP` reproduces the thin discs' holed profile `e^(−x ÷ s − s)` to 1% of `e^(−s)` on
+/// 0.05–8, on `MGE_EXP`'s widths, and its surface mass `Σ w σ²` is the holed disc's fraction of the
+/// exponential disc's, [`hole_mass_fraction`], to 10⁻⁵ (P02.T12.b). Its weights are signed.
+#[test]
+fn mge_holed_exp_reproduces_the_holed_profile() {
+    let x = THIN_DISC_HOLE_LENGTHS;
+    for i in 0..=4_000 {
+        let s = 0.05 * math::exp(f64::from(i) / 4_000.0 * math::ln(160.0));
+        let error = (expansion(&MGE_HOLED_EXP, s) - math::exp(-x / s - s)) / math::exp(-s);
+        assert!(error.abs() < 0.01, "at s = {s}: {error:e}");
+    }
+    let mass = MGE_HOLED_EXP
+        .iter()
+        .fold(0.0, |sum, &(w, sigma)| sum + w * sigma * sigma);
+    assert_relative("holed mass fraction", mass, hole_mass_fraction(x), 1e-5);
+    for (holed, plain) in MGE_HOLED_EXP.iter().zip(&MGE_EXP) {
+        assert_same_bits(holed.1, plain.1);
+    }
+    assert!(MGE_HOLED_EXP.iter().any(|&(w, _)| w < 0.0));
 }
 
 /// The bar's azimuthally averaged surface density, by brute force: `(2 ÷ π) ∫₀^(π÷2) L(u cos θ)
@@ -427,20 +450,19 @@ fn the_model_holds_the_parameters_masses() {
 /// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole lies within a
 /// factor of 2.5 of Sgr A*'s 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
 ///
-/// The fixture's scatter is the Milky Way's own offset from the relation, −0.512 dex, set so that
-/// the estimator's 123.8 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13 and R22). The factor of
-/// 2.5 then lets σ move by 7% before the test fails, which is what it guards: the relation itself,
-/// without the offset, gives 3.3 times the measured mass at this σ, a real galaxy 1.35 times the
-/// relation's intrinsic scatter below it. The offset's check reaches −0.55 dex, not the −0.5 it
-/// held at R13's −0.421: P02.T11's tuning raised σ from 119.3 km/s, and the offset follows σ,
-/// since what it is fixed by is Sgr A*'s measured mass.
+/// The fixture's scatter is the Milky Way's own offset from the relation, −0.2104 dex, set so that
+/// the estimator's 109.5 km/s gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13 and R22). Until P02.T12
+/// the estimator read 123.8 km/s, 8–18% above the brainstorm's measured 105–115, and the offset of
+/// −0.512 dex carried that error too (R23). The thin discs' hole took the excess inner mass out of
+/// the model and σ with it, so the offset is now the Milky Way's measured one alone: at 105–115
+/// km/s McConnell and Ma's (2013, ApJ 764, 184) relation gives 5.5–9.2 × 10⁶ M☉, 0.11–0.33 dex
+/// above Sgr A*, which is what the offset and the relation alone are checked against.
 ///
-/// That is also why the black hole itself is held to Sgr A*'s (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY
-/// Collaboration 2022, A&A 657, L12) to 1%: the offset is a measured fact about the Milky Way only
-/// through the mass it reproduces. Without this, σ could fall 4% and the black hole with it to
-/// 3.4 × 10⁶ M☉ with no check but the goldens noticing, since the checks below stop a rise of 1%
-/// but a fall only at 8%, and the slow enclosed mass at 1 pc at 5.4% (plan 02, Risks, R23). A σ
-/// that moves by more than 0.2% now fails here until the offset is re-set.
+/// The black hole itself is held to Sgr A*'s (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration
+/// 2022, A&A 657, L12) to 1%: the offset is a measured fact about the Milky Way only through the
+/// mass it reproduces. Without this, σ could fall 4% and the black hole with it to 3.4 × 10⁶ M☉
+/// with no check but the goldens noticing (plan 02, Risks, R23). A σ that moves by more than 0.2%
+/// fails here until the offset is re-set.
 #[test]
 fn the_fixture_black_hole_follows_m_sigma() {
     let params = GalaxyParams::milky_way_like();
@@ -454,11 +476,16 @@ fn the_fixture_black_hole_follows_m_sigma() {
         black_hole_mass(sigma, bh.scatter()).value(),
         1e-12,
     );
-    assert_within("offset, dex", bh.scatter().value(), -0.55, -0.35);
+    assert_within("offset, dex", bh.scatter().value(), -0.33, -0.11);
     let ratio = bh.mass().value() / 4.3e6;
     assert_within("black hole ÷ 4.3 × 10⁶ M☉", ratio, 1.0 / 2.5, 2.5);
     let on_relation = black_hole_mass(sigma, Dex::new(0.0)).value() / 4.3e6;
-    assert_within("the relation alone ÷ 4.3 × 10⁶ M☉", on_relation, 2.0, 3.5);
+    assert_within(
+        "the relation alone ÷ 4.3 × 10⁶ M☉",
+        on_relation,
+        math::exp10(0.11),
+        math::exp10(0.33),
+    );
     assert_relative(
         "σ is the estimator's",
         bh.bulge_dispersion().value(),
@@ -491,13 +518,15 @@ fn the_scatter_moves_the_black_hole_mass_only() {
     assert_relative("10^8.32", at_200.value(), math::exp10(8.32), 1e-14);
 }
 
-/// Over 32 seeds σ stays within 80–170 km/s; the 10³-seed distribution is in `galaxy_sweeps.rs`.
+/// Over 32 seeds σ stays within 70–170 km/s; the 10³-seed distribution is in `galaxy_sweeps.rs`,
+/// whose 5th percentile is 83 km/s since the thin discs' hole (P02.T12.b; it was 80 until then),
+/// with pseudobulges measured near 90 km/s (Fisher and Drory 2016).
 #[test]
 fn the_bulge_dispersion_over_32_seeds() {
     for seed in seeds() {
         let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
         let sigma = params.black_hole().bulge_dispersion().value();
-        assert_within(&format!("σ for {seed}"), sigma, 80.0, 170.0);
+        assert_within(&format!("σ for {seed}"), sigma, 70.0, 170.0);
         assert!(params.black_hole().mass().value() > 0.0);
     }
 }

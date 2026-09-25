@@ -60,7 +60,7 @@ use super::Population;
 use super::fields::arms::Arm;
 use super::fields::bar::LongBar;
 use super::fields::bulge::BoxyBulge;
-use super::fields::disc::ExponentialDisc;
+use super::fields::disc::{ExponentialDisc, radial_exponent};
 use super::fields::halo::HaloProfile;
 use super::fields::{Component, Fields, MAX_COMPONENTS, Shape, VerticalProfile};
 use super::quad::{gl4, gl16, gl32};
@@ -826,11 +826,13 @@ const MAX_PARTS: usize = MAX_COMPONENTS;
 /// The integrand a component integrates along `+y`, at `z = 0` for the separable ones.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LineKind {
-    /// `exp(−R ÷ L)` times an arm factor: every disc of this scale length and arm shares it, and
-    /// each multiplies the integral by its own `n0`.
+    /// `exp(−R ÷ L)`, with a holed disc's `exp(−R_h ÷ R)`, times an arm factor: every disc of
+    /// this scale length, hole and arm shares it, and each multiplies the integral by its own `n0`.
     Disc {
         /// `1 ÷ L`, ly⁻¹.
         inv_length: f64,
+        /// `R_h`, ly; 0 for a disc without a hole.
+        hole_ly: f64,
         /// The disc's arm, if it has one.
         arm: Option<Arm>,
     },
@@ -847,7 +849,8 @@ struct Line {
 }
 
 impl Line {
-    /// The line of sight of a disc: `exp(−R ÷ L)` times its arm factor, without `n0`.
+    /// The line of sight of a disc: `exp(−R ÷ L)`, with its hole's factor, times its arm factor,
+    /// without `n0`.
     fn of_disc(disc: &ExponentialDisc) -> Self {
         let arm = disc.arm().copied();
         let (panels, symmetry) = match arm {
@@ -859,6 +862,7 @@ impl Line {
         Self {
             kind: LineKind::Disc {
                 inv_length: 1.0 / disc.length().value(),
+                hole_ly: disc.hole_ly(),
                 arm,
             },
             panels,
@@ -878,16 +882,18 @@ impl Line {
     /// `∫ f(y) dy` at `x` (ly).
     fn integral(&self, x: f64) -> f64 {
         match self.kind {
-            LineKind::Disc { inv_length, arm } => {
-                along_line(self.panels, self.symmetry, NO_KINK, |y| {
-                    let r = (x * x + y * y).sqrt();
-                    let envelope = math::exp(-(r * inv_length));
-                    match arm {
-                        Some(arm) => envelope * arm.factor(&arm.geometry().point(x, y)),
-                        None => envelope,
-                    }
-                })
-            }
+            LineKind::Disc {
+                inv_length,
+                hole_ly,
+                arm,
+            } => along_line(self.panels, self.symmetry, NO_KINK, |y| {
+                let r = (x * x + y * y).sqrt();
+                let envelope = math::exp(-radial_exponent(r, inv_length, hole_ly));
+                match arm {
+                    Some(arm) => envelope * arm.factor(&arm.geometry().point(x, y)),
+                    None => envelope,
+                }
+            }),
             LineKind::Bar(bar) => {
                 let abs_x = x.abs();
                 along_line(self.panels, self.symmetry, NO_KINK, |y| {

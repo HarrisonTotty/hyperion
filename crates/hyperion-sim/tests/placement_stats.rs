@@ -328,11 +328,12 @@ impl Slabs {
 /// Counts in the eighths of a cell along each axis, across the arm ridge, against their own
 /// integrals: a cell-shaped patch of missing systems would show as a deficit away from the cells'
 /// faces, and a bound that is not a true bound would put one there (P03.T8.a). Returns each layer's
-/// slabs, in `STELLAR_LAYERS` order, for the pooled check.
+/// slabs, in `STELLAR_LAYERS` order, for the pooled check, and adds each χ² to `family`.
 fn assert_no_cell_shaped_patches(
     name: &str,
     galaxy: &Galaxy,
     block: &Block,
+    family: &mut Vec<(String, f64)>,
 ) -> [Slabs; STELLAR_LAYERS.len()] {
     let mut all = [Slabs::EMPTY; STELLAR_LAYERS.len()];
     for (spec, slabs) in STELLAR_LAYERS.iter().zip(&mut all) {
@@ -370,13 +371,15 @@ fn assert_no_cell_shaped_patches(
         );
 
         *slabs = Slabs { observed, expected };
-        assert_slabs_match(name, layer, slabs);
+        assert_slabs_match(name, layer, slabs, family);
     }
     all
 }
 
-/// One layer's slabs against the field, conditioned on the observed total (P03.T8.a).
-fn assert_slabs_match(name: &str, layer: Layer, slabs: &Slabs) {
+/// One layer's slabs against the field, conditioned on the observed total (P03.T8.a). The χ² of
+/// each axis's eighths joins `family`, which the caller tests together; the slabs beside the faces
+/// are asserted here.
+fn assert_slabs_match(name: &str, layer: Layer, slabs: &Slabs, family: &mut Vec<(String, f64)>) {
     let Slabs { observed, expected } = slabs;
     for axis in 0..3 {
         let total = observed[axis].iter().sum::<u64>();
@@ -404,14 +407,13 @@ fn assert_slabs_match(name: &str, layer: Layer, slabs: &Slabs) {
             fit.p_value,
             fit.bins,
         );
-        assert_p_value(
-            &format!(
+        family.push((
+            format!(
                 "{name}, layer {} across the arm, eighths of a cell on axis {axis}",
                 layer.letter()
             ),
             fit.p_value,
-            ALPHA,
-        );
+        ));
         assert_poisson_count(
             &format!(
                 "{name}, layer {}, the slabs either side of a cell face on axis {axis}",
@@ -428,8 +430,9 @@ fn assert_slabs_match(name: &str, layer: Layer, slabs: &Slabs) {
 #[ignore = "slow: the arm block of every layer in four galaxies, cut into eighths of a cell"]
 fn placed_density_has_no_cell_shaped_patches_across_an_arm_ridge() {
     let mut pooled = [Slabs::EMPTY; STELLAR_LAYERS.len()];
+    let mut family = Vec::new();
     for (name, galaxy) in galaxies() {
-        let slabs = assert_no_cell_shaped_patches(&name, &galaxy, &arm_block(&galaxy));
+        let slabs = assert_no_cell_shaped_patches(&name, &galaxy, &arm_block(&galaxy), &mut family);
         for (sum, more) in pooled.iter_mut().zip(&slabs) {
             sum.add(more);
         }
@@ -439,7 +442,17 @@ fn placed_density_has_no_cell_shaped_patches_across_an_arm_ridge() {
     // galaxy's check alone when the generator was perturbed in validation, and failed this one at
     // p = 1.6 × 10⁻⁷.
     for (spec, slabs) in STELLAR_LAYERS.iter().zip(&pooled) {
-        assert_slabs_match("the four galaxies pooled", spec.layer(), slabs);
+        assert_slabs_match("the four galaxies pooled", spec.layer(), slabs, &mut family);
+    }
+    // The χ² of every galaxy, layer and axis, and of the pool, are one family of tests of the same
+    // hypothesis, so they are held at a family-wise α by Bonferroni: each at α ÷ n, with n counted
+    // here (plan 02, ruling 76.5 of 2026-09-22). One seed's p of 3.4 × 10⁻⁴ among some 60 tests at
+    // α each is what chance gives 6% of the time; the bound over that block holds (plan 02, R25).
+    let tests = u32::try_from(family.len()).expect("a few dozen tests");
+    let each = ALPHA / f64::from(tests);
+    println!("{tests} χ² tests of the eighths, each at α ÷ {tests} = {each:e}");
+    for (what, p) in &family {
+        assert_p_value(what, *p, each);
     }
 }
 

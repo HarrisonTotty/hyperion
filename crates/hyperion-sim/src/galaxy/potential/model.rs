@@ -2,7 +2,8 @@
 //! P02.T6.d and Design note 6).
 
 use super::mge::{
-    Gaussian, GridPoint, InPlane, bar_disc, double_exponential, spheroidal_exponential,
+    Gaussian, GridPoint, InPlane, bar_disc, double_exponential, holed_double_exponential,
+    spheroidal_exponential,
 };
 use super::nfw::Nfw;
 use super::spherical::{BrokenPowerLaw, PointMass, SphericalMass};
@@ -68,7 +69,9 @@ pub(crate) fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
 /// sum runs in it: the thin disc with the young disc, the thick disc, the gas disc, the nuclear
 /// disc, the bar and the bulge. Then the dark halo, the nuclear cluster and the black hole. The
 /// thin and young discs are one double exponential of their combined mass and the drawn mean
-/// height (Design note 6). The bar is an axisymmetric disc with its azimuthally averaged surface
+/// height (Design note 6), with the thin discs' central hole
+/// ([`mge::holed_double_exponential`](super::mge::holed_double_exponential); plan 02, P02.T12.b),
+/// whose Gaussians' masses are signed. The bar is an axisymmetric disc with its azimuthally averaged surface
 /// density ([`mge::bar_disc`](super::mge::bar_disc)); the boxy bulge is the spheroidal
 /// exponential with its mass and second moments. The stellar halo's 1% is left out.
 ///
@@ -125,7 +128,7 @@ impl MassModel {
         let (nuclear, bar) = (params.nuclear_disc(), params.bar());
         let (a_r, a_z) = bulge_spheroid(params.bulge());
         let parts = [
-            double_exponential(
+            holed_double_exponential(
                 mass(Population::YoungThinDisc) + mass(Population::OldThinDisc),
                 thin.length(),
                 thin.height(),

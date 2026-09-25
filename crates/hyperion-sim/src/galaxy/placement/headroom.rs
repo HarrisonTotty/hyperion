@@ -10,8 +10,10 @@
 //!
 //! The largest mean needs no search. It is [`Fields::layer_bound`] over one root octant,
 //! `CellBox::new([0, 0, 0], 65_536)`, times the layer's cell volume: that box's nearest corner is
-//! the origin, where every envelope peaks, and its ranges of radius and of arm phase contain every
-//! cell's, in any octant, so its bound is at least every cell's bound (plan 02, R17). It is not the
+//! the origin, where every envelope but the holed thin discs' peaks, and its ranges of radius and
+//! of arm phase contain every cell's, in any octant, so its bound is at least every cell's bound
+//! (plan 02, R17); a holed disc's bound takes its hole's factor at the range's largest radius,
+//! which is the octant's too (plan 02, P02.T12.b). It is not the
 //! sum of the components' density peaks, because plan 02's bound multiplies each envelope by an arm
 //! factor's bound over the cell.
 

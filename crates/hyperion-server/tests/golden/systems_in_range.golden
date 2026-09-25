@@ -30,7 +30,7 @@
           "layer": "a",
           "mass_min_msun": 0.08,
           "mass_max_msun": 0.5,
-          "expected": 697.3813852849585,
+          "expected": 900.9938607237133,
           "returned": 0,
           "status": "over_limit"
         },
@@ -38,7 +38,7 @@
           "layer": "b",
           "mass_min_msun": 0.5,
           "mass_max_msun": 0.75,
-          "expected": 123.2244266254026,
+          "expected": 159.20191479633692,
           "returned": 0,
           "status": "over_limit"
         },
@@ -46,7 +46,7 @@
           "layer": "c",
           "mass_min_msun": 0.75,
           "mass_max_msun": 2.5,
-          "expected": 146.0671926139225,
+          "expected": 188.71401872092787,
           "returned": 0,
           "status": "over_limit"
         },
@@ -54,16 +54,16 @@
           "layer": "d",
           "mass_min_msun": 2.5,
           "mass_max_msun": 8.0,
-          "expected": 26.279532303236113,
-          "returned": 28,
+          "expected": 33.9522932035693,
+          "returned": 33,
           "status": "included"
         },
         {
           "layer": "e",
           "mass_min_msun": 8.0,
           "mass_max_msun": 150.0,
-          "expected": 7.267009450520339,
-          "returned": 5,
+          "expected": 9.388737696324704,
+          "returned": 6,
           "status": "included"
         }
       ]
@@ -230,6 +230,46 @@
         "population": "old_thin_disc"
       },
       {
+        "id": "61ffd9680000001a",
+        "designation": "FPG 1Z0P00 D-26",
+        "position": {
+          "cell_ly": [
+            -8,
+            26016,
+            16
+          ],
+          "offset_m": [
+            5063184905337446.0,
+            2324843755555595.5,
+            6995364256933989.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 6.604109253068797,
+        "age_myr": 6574.17586560426,
+        "population": "old_thin_disc"
+      },
+      {
+        "id": "8200b2dff0000057",
+        "designation": "GPF 000B0Z E-87",
+        "position": {
+          "cell_ly": [
+            20,
+            25986,
+            -6
+          ],
+          "offset_m": [
+            5296142350886724.0,
+            8524075247162598.0,
+            411918039594653.2
+          ]
+        },
+        "layer": "e",
+        "initial_mass_msun": 8.969266119788237,
+        "age_myr": 1068.493012138957,
+        "population": "old_thin_disc"
+      },
+      {
         "id": "61ffd957fe000004",
         "designation": "FPF 1Z0N1Z D-4",
         "position": {
@@ -306,8 +346,28 @@
         },
         "layer": "e",
         "initial_mass_msun": 11.80099271436342,
-        "age_myr": 10463.806891696082,
+        "age_myr": 11742.030802852194,
         "population": "halo"
+      },
+      {
+        "id": "61ffd96800000018",
+        "designation": "FPG 1Z0P00 D-24",
+        "position": {
+          "cell_ly": [
+            -27,
+            26005,
+            15
+          ],
+          "offset_m": [
+            3730553569492134.5,
+            4419719921636087.5,
+            4146730303108743.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.3523319039431043,
+        "age_myr": 3540.519975790082,
+        "population": "old_thin_disc"
       },
       {
         "id": "61ffd9680000000c",
@@ -510,6 +570,26 @@
         "population": "old_thin_disc"
       },
       {
+        "id": "61ffd96800000016",
+        "designation": "FPG 1Z0P00 D-22",
+        "position": {
+          "cell_ly": [
+            -20,
+            26007,
+            29
+          ],
+          "offset_m": [
+            4323715639811171.5,
+            2785203964138695.0,
+            4421596191953554.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 4.021832160148823,
+        "age_myr": 796.6737542178154,
+        "population": "old_thin_disc"
+      },
+      {
         "id": "620059580000000b",
         "designation": "GPG 000N00 D-11",
         "position": {
@@ -587,6 +667,26 @@
         "layer": "e",
         "initial_mass_msun": 23.399182143175423,
         "age_myr": 97.53591735380967,
+        "population": "young_thin_disc"
+      },
+      {
+        "id": "61ffd96800000015",
+        "designation": "FPG 1Z0P00 D-21",
+        "position": {
+          "cell_ly": [
+            -12,
+            26026,
+            24
+          ],
+          "offset_m": [
+            7631686884726916.0,
+            6986513924545426.0,
+            8729082725041012.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 3.7771600803215684,
+        "age_myr": 72.86316725598903,
         "population": "young_thin_disc"
       },
       {
@@ -728,6 +828,26 @@
         "initial_mass_msun": 16.367408979643034,
         "age_myr": 9734.499246502544,
         "population": "old_thin_disc"
+      },
+      {
+        "id": "62005967fe000013",
+        "designation": "GPF 000P1Z D-19",
+        "position": {
+          "cell_ly": [
+            4,
+            26016,
+            -36
+          ],
+          "offset_m": [
+            1475464348961552.2,
+            3739388966130229.0,
+            12008711141283.186
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.6035766495457384,
+        "age_myr": 10614.769423928557,
+        "population": "thick_disc"
       }
     ]
   }

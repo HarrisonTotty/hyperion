@@ -10,8 +10,12 @@ mod common;
 use common::{assert_relative, assert_within};
 use hyperion_sim::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, LIGHT_YEARS_PER_PARSEC};
 use hyperion_sim::galaxy::fields::arms::Arm;
-use hyperion_sim::galaxy::fields::disc::ExponentialDisc;
-use hyperion_sim::galaxy::fields::{Component, ComponentId, Fields, MAX_COMPONENTS, Shape};
+use hyperion_sim::galaxy::fields::disc::{
+    ExponentialDisc, RadialProfile, THIN_DISC_HOLE_LENGTHS, hole_mass_fraction,
+};
+use hyperion_sim::galaxy::fields::{
+    Component, ComponentId, Fields, MAX_COMPONENTS, SOLAR_RADIUS_LENGTHS, Shape,
+};
 use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::{
     ArmCount, GalaxyParams, GalaxyParamsBuilder, HaloComponentKind, HaloComponentParams,
@@ -137,7 +141,13 @@ fn each_disc_integrates_to_its_count() {
                 &[0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0].map(|f| f * h),
             ) / c.density(&at);
         let x = edge / l;
-        let tail = disc.n0() * 2.0 * h * 2.0 * PI * l * l * (1.0 + x) * math::exp(-x);
+        // A holed disc's factor exp(−R_h ÷ R) lies between its value at the edge and 1 over the
+        // tail, a part in 10⁴ of it for the thin discs; it is taken at the edge.
+        let hole = match disc.radial() {
+            RadialProfile::Exponential => 1.0,
+            RadialProfile::Holed { hole } => math::exp(-hole.value() / edge),
+        };
+        let tail = disc.n0() * 2.0 * h * 2.0 * PI * l * l * (1.0 + x) * math::exp(-x) * hole;
         let total = plane * column + tail;
         assert_relative(
             &format!("{:?} {:?}", c.population(), c.sub_disc()),
@@ -199,9 +209,11 @@ fn brainstorm_height(age_gyr: f64) -> f64 {
 ///
 /// The brainstorm's heights, read at the youngest and oldest bins' mean ages of 0.56 and 8.6 Gyr,
 /// are 340 and 1,560 ly; the fixture's are 371 and 1,373, each within a quarter of them. The
-/// dispersion scale is 1.02: the measured heating law in the model's potential gives the drawn
+/// dispersion scale is 0.998: the measured heating law in the model's potential gives the drawn
 /// height almost exactly, as the density rulings' research found (brainstorm, Decisions,
-/// "2026-09-21: local density rulings", 1).
+/// "2026-09-21: local density rulings", 1). Since P02.T12.a the profiles are solved at the Sun's
+/// radius, [`SOLAR_RADIUS_LENGTHS`] thin scale lengths, so the fixture's scale is held near 1
+/// (0.9–1.1); the seeds' spread is `galaxy_sweeps`'s.
 #[test]
 fn the_fixture_s_sub_discs_follow_the_heating_law() {
     let (params, fields) = fixture();
@@ -233,7 +245,11 @@ fn the_fixture_s_sub_discs_follow_the_heating_law() {
         params.thin_disc().height().value(),
         1e-9,
     );
-    assert_within("dispersion scale", sub.scale(), 0.6, 1.6);
+    assert_within("dispersion scale", sub.scale(), 0.9, 1.1);
+    assert_same_bits(
+        sub.reference_radius().value(),
+        SOLAR_RADIUS_LENGTHS * params.thin_disc().length().value(),
+    );
     assert!(ages.windows(2).all(|w| w[0] < w[1]));
     assert_within("youngest age", ages[0], 0.1, 1.0);
     assert_within("oldest age", ages[4], 7.0, 10.0);
@@ -311,8 +327,8 @@ fn every_disc_is_cored_with_its_drawn_effective_height() {
 }
 
 /// The sub-discs together have, in the mid-plane, exactly the density of one disc of the old thin
-/// disc's count and the drawn effective height: the disc the potential holds (plan 02, Design
-/// note 6) and the one the brainstorm's in-plane density is worked for.
+/// disc's count and the drawn effective height, with the thin discs' hole: the disc the potential
+/// holds (plan 02, Design note 6) and the one the brainstorm's in-plane density is worked for.
 #[test]
 fn the_sub_discs_have_the_mid_plane_density_of_the_drawn_height() {
     for (params, fields) in [fixture(), seeded(Seed::new(PINNED[2]))] {
@@ -321,18 +337,24 @@ fn the_sub_discs_have_the_mid_plane_density_of_the_drawn_height() {
             params.thin_disc().length().value(),
             params.thin_disc().height().value(),
         );
-        let n0 = old / (4.0 * PI * l * l * h);
-        for r in [0.0, 5_000.0, 26_000.0, 60_000.0] {
+        let hole = THIN_DISC_HOLE_LENGTHS * l;
+        let n0 = old / (4.0 * PI * l * l * h * hole_mass_fraction(THIN_DISC_HOLE_LENGTHS));
+        for r in [5_000.0, 26_000.0, 60_000.0] {
             let sum = fields.components()[1..6].iter().fold(0.0, |sum, c| {
                 sum + c.envelope(&PointLy::new(0.6 * r, 0.8 * r, 0.0))
             });
             assert_relative(
                 &format!("mid-plane at {r} ly"),
                 sum,
-                n0 * math::exp(-r / l),
+                n0 * math::exp(-r / l - hole / r),
                 1e-12,
             );
         }
+        // The hole empties the centre.
+        let centre = fields.components()[1..6]
+            .iter()
+            .fold(0.0, |sum, c| sum + c.envelope(&PointLy::default()));
+        assert!(centre.abs() < f64::MIN_POSITIVE, "{centre} at the centre");
     }
 }
 
@@ -560,6 +582,17 @@ fn the_other_discs_dispersions_are_physical() {
 
 // P02.T7.c: the bulge and the long bar.
 
+/// The hole's scale `R_h` (ly) of a holed disc, `None` for every other component.
+fn hole_of(c: &Component) -> Option<f64> {
+    match c.shape() {
+        Shape::Disc(disc) => match disc.radial() {
+            RadialProfile::Holed { hole } => Some(hole.value()),
+            RadialProfile::Exponential => None,
+        },
+        Shape::Bulge(_) | Shape::Bar(_) | Shape::Halo(_) => None,
+    }
+}
+
 /// Neither the bulge nor the bar rises with |x|, |y| or |z| over 10⁵ random pairs of points each
 /// (P02.T7.c), nor does a halo component or any disc's envelope over 10⁴ (P02.T7.d). The halo's
 /// points reach 70,000 ly, past its break and its cut; the third galaxy's dominant merger breaks
@@ -598,8 +631,27 @@ fn no_envelope_rises_with_any_coordinate() {
                     PointLy::new(v[0] * flip(0), v[1] * flip(1), v[2] * flip(2))
                 };
                 let s = lcg.next_below(8);
-                let (a, b) = (c.envelope(&sign(near, s)), c.envelope(&sign(far, s)));
-                assert!(b <= a, "{what}: {b} at {far:?} above {a} at {near:?}");
+                let (inner, outer) = (sign(near, s), sign(far, s));
+                let (a, b) = (c.envelope(&inner), c.envelope(&outer));
+                match hole_of(c) {
+                    // A holed disc rises out of its hole: its envelope over the hole's factor
+                    // never rises, to the rounding of the division (P02.T12.b).
+                    // Deep in the hole, where the factor underflows, both are 0.
+                    Some(hole) => {
+                        let factor = |p: &PointLy| math::exp(-hole / math::hypot(p.x, p.y));
+                        let (at_inner, at_outer) = (factor(&inner), factor(&outer));
+                        if at_inner < 1e-250 {
+                            assert!(a < 1e-250, "{what}: {a} at {near:?} inside the hole");
+                            continue;
+                        }
+                        let (a, b) = (a / at_inner, b / at_outer);
+                        assert!(
+                            b <= a * (1.0 + 1e-13),
+                            "{what}: {b} at {far:?} above {a} at {near:?} without the hole"
+                        );
+                    }
+                    None => assert!(b <= a, "{what}: {b} at {far:?} above {a} at {near:?}"),
+                }
             }
         }
     }
@@ -868,7 +920,6 @@ fn the_metallicity_gradient_is_the_drawn_one() {
             );
         }
         let fixed = [
-            (Population::ThickDisc, -0.55, 0.25),
             (Population::Bulge, 0.0, 0.40),
             (Population::LongBar, 0.0, 0.30),
             (Population::NuclearDisc, 0.1, 0.30),
@@ -882,17 +933,28 @@ fn the_metallicity_gradient_is_the_drawn_one() {
             );
         }
     }
-    // The thin discs' age–metallicity relation is flat to 8 Gyr, then 0.1 dex poorer per Gyr.
+    // The thin discs' age–metallicity relation is flat at every age, and the thick disc's falls
+    // 0.1 dex per Gyr about −0.55 at its mean age of 11 Gyr (ruling 42.5 of 2026-09-22; P02.T12.c).
     let (_, fields) = fixture();
-    let young = &fields.components()[0];
-    let at = |gyr: f64| {
-        young
-            .metallicity(&PointLy::new(26_000.0, 0.0, 0.0), Years::new(gyr * 1e9))
+    let at = |c: &Component, gyr: f64| {
+        c.metallicity(&PointLy::new(26_000.0, 0.0, 0.0), Years::new(gyr * 1e9))
             .mean()
             .value()
     };
-    assert_same_bits(at(6.0), at(0.01));
-    assert_relative("falling beyond 8 Gyr", at(9.5) - at(8.0), -0.15, 1e-12);
+    let oldest_sub_disc = &fields.components()[5];
+    assert_same_bits(at(&fields.components()[0], 0.01), at(oldest_sub_disc, 9.9));
+    assert_same_bits(at(oldest_sub_disc, 6.0), at(oldest_sub_disc, 9.9));
+    let thick = component(&fields, Population::ThickDisc);
+    assert_relative("thick disc at 11 Gyr", at(thick, 11.0), -0.55, 1e-15);
+    assert_relative(
+        "thick disc falling",
+        at(thick, 11.5) - at(thick, 10.5),
+        -0.1,
+        1e-12,
+    );
+    let far = thick.metallicity(&PointLy::new(60_000.0, 0.0, 3_000.0), Years::new(1.1e10));
+    assert_relative("thick disc everywhere", far.mean().value(), -0.55, 1e-15);
+    assert_relative("thick disc's sigma", far.sigma().value(), 0.25, 0.0);
 }
 
 /// The mean \[Fe/H\] over every age of the systems at `(R, z)`, azimuthally averaged: each
@@ -927,7 +989,9 @@ fn local_mean_feh(fields: &Fields, r: f64, z: f64) -> f64 {
 /// - The local mean over every age and every component at R₀ and the Sun's height, 20.8 pc
 ///   (Bennett and Bovy 2019), is within 0.04 dex of the survey's −0.06 (Casagrande et al. 2011,
 ///   A&A 530, A138, Table 1), which is a magnitude-limited sample of F and G dwarfs and so weighted
-///   differently from a count of systems. It is −0.054, and was −0.135 at three scale lengths.
+///   differently from a count of systems. It was −0.135 at three scale lengths and −0.054 with
+///   the solar anchor, and is −0.020, at the bracket's edge, since the thin discs are flat at
+///   every age (ruling 42.5; plan 02, P02.T12.c).
 #[test]
 fn the_sun_is_solar_and_the_local_mean_is_near_the_surveys() {
     let (_, fields) = fixture();

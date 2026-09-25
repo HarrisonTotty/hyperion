@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::bounds::{CellBox, ScalarRange, UnimodalFactor};
 use hyperion_sim::galaxy::fields::arms::{Arm, ArmGeometry, GentleArm, SharpArm};
+use hyperion_sim::galaxy::fields::disc::RadialProfile;
 use hyperion_sim::galaxy::fields::{Component, Fields, MAX_COMPONENTS, Shape};
 use hyperion_sim::galaxy::imf::{BandShares, MassBand, MassFunctionKind};
 use hyperion_sim::galaxy::params::{ArmCount, GalaxyParams, GalaxyParamsBuilder};
@@ -218,8 +219,26 @@ fn envelope_probes(cell: &CellBox, n: u32) -> Vec<PointLy> {
     points
 }
 
-/// For every component of `fields`: the envelope bound over `cell` equals the envelope at the
-/// nearest corner to 1 part in 10¹², and no probe exceeds it.
+/// The envelope's supremum over `cell` in closed form: its value at the nearest corner, but for a
+/// holed disc, whose hole's factor `exp(−R_h ÷ R)` is taken at the cell's largest radius
+/// (P02.T12.b), `n0 exp(−R_min ÷ L) f(|z|) exp(−R_h ÷ R_max)`.
+fn envelope_sup(component: &Component, cell: &CellBox) -> f64 {
+    let corner = cell.nearest_corner();
+    if let Shape::Disc(disc) = component.shape()
+        && let RadialProfile::Holed { hole } = disc.radial()
+    {
+        let radii = cell.r_cyl_range();
+        return disc.n0()
+            * math::exp(-radii.lo / disc.length().value())
+            * disc.profile().value(corner.z.abs())
+            * math::exp(-hole.value() / radii.hi);
+    }
+    component.envelope(&corner)
+}
+
+/// For every component of `fields`: the envelope bound over `cell` equals the envelope's
+/// supremum over it, the nearest corner's value but for a holed disc's hole ([`envelope_sup`]),
+/// to 1 part in 10¹², and no probe exceeds it.
 fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
     let probes = envelope_probes(cell, lattice);
     for p in &probes {
@@ -227,7 +246,7 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
     }
     for (i, component) in fields.components().iter().enumerate() {
         let bound = component.envelope_bound(cell);
-        let corner = component.envelope(&cell.nearest_corner());
+        let corner = envelope_sup(component, cell);
         if corner >= f64::MIN_POSITIVE {
             assert!(
                 (bound / corner - 1.0).abs() <= 1e-12,

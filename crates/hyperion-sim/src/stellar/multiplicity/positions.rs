@@ -207,7 +207,13 @@ mod tests {
             "worst barycentre offset {worst:.3e} m, with a star {worst_at:.3e} m out; the \
              farthest star is {widest:.3e} m out"
         );
-        assert!(worst < 1.0, "a barycentre {worst} m from the origin");
+        // The plan's 1 m, where the positions can resolve it: the fixture's sample since plan 02's
+        // P02.T12 has its worst offset, 1.29 m, beside a star 1.56 × 10¹⁶ m out, where an f64 is
+        // spaced 2 m apart and ε × 1.56 × 10¹⁶ is 3.5 m.
+        assert!(
+            worst < f64::max(1.0, f64::EPSILON * worst_at),
+            "a barycentre {worst} m from the origin, with a star {worst_at} m out"
+        );
     }
 
     /// P11.T3.b: a position is the same whatever was asked before, through the testkit's helper.

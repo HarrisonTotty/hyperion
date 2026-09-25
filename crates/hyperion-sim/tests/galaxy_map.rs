@@ -389,10 +389,11 @@ fn galaxy_map_edge_on_columns_match_a_brute_force_integral_at_two_hundred_pixels
 /// height, not a sample at its centre, so the mid-plane pixel of the young thin disc stands above
 /// the point sample by the ratio of its profile's mean to its value there.
 ///
-/// The pixels are all taller than the young disc's effective height, 285 ly for the fixture. A
+/// The pixels are all well above the young disc's effective height, 335 ly for the fixture. A
 /// pixel inside the cored profile's flat top reads it where it is concave, so its mean falls below
 /// the sample at its centre: a 256 ly pixel does, which this test read when the young disc was
-/// 150 ly (plan 02, ruling 3 of 2026-09-22).
+/// 150 ly (plan 02, ruling 3 of 2026-09-22), and so does a 512 ly one since the fixture's young
+/// disc rose from 285 to 335 ly (P02.T12.d).
 #[test]
 fn galaxy_map_keeps_a_thin_disc_in_a_pixel_taller_than_it() {
     let fields = fixture();
@@ -401,13 +402,13 @@ fn galaxy_map_keeps_a_thin_disc_in_a_pixel_taller_than_it() {
     };
     let profile = disc.profile();
     let height = disc.height().value();
-    assert!(height < 512.0, "the young disc is thinner than a pixel");
+    assert!(height < 1_024.0, "the young disc is thinner than a pixel");
     let x = 26_000.0;
     let young = MapSelection::YoungOnly;
     let mean = |lo: f64, hi: f64| {
         (profile.integral_to(hi).value() - profile.integral_to(lo).value()) / (hi - lo)
     };
-    for pixel in [512.0, 1_024.0, 8_192.0, 2.0 * ROOT_HALF] {
+    for pixel in [1_024.0, 8_192.0, 2.0 * ROOT_HALF] {
         let ours = column_density_edge_on(&fields, x, 0.0, pixel, young);
         // A point sample at the pixel's centre: a pixel a tenth of a light-year tall there.
         let middle = 0.5 * pixel;
@@ -437,7 +438,7 @@ fn galaxy_map_keeps_a_thin_disc_in_a_pixel_taller_than_it() {
     // times their heights add up, to the rounding of a sum of 256 terms and to the rows where the
     // disc falls under the map's floor. Each row left out holds under 10⁻⁹ of the column, and the
     // rows beyond it fall geometrically, so on each side the floor drops at most 10⁻⁹ ÷ (1 − r)
-    // for a fall r per row: 1.4 × 10⁻⁹ in all for the fixture's 285 ly young disc, whose tail
+    // for a fall r per row: 1.4 × 10⁻⁹ in all for the fixture's 285 ly young disc of version 11, whose tail
     // falls more slowly per 512 ly row than the 150 ly disc's did.
     let spec = whole_cube(MapView::EdgeOn, young, 512, 256);
     let map = whole_map(&fields, &spec);

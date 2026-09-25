@@ -220,7 +220,12 @@ fn the_fixture_s_enclosed_masses_are_the_milky_ways() {
         ("100 pc", 100.0 * pc, 2.9e8, 4.9e8),
         // Launhardt, Zylka and Mezger 2002, A&A 384, 112.
         ("230 pc", 230.0 * pc, 0.8e9, 2.0e9),
-        ("1 kpc", kpc, 7.5e9, 10.5e9),
+        // Cited since ruling 76.6 of 2026-09-22; the plan's 7.5–10.5 × 10⁹ was not. The floor is
+        // McMillan's (2017, MNRAS 465, 76, Table 3) best-fitting model, integrated here to 7.1 ×
+        // 10⁹ M☉ (bulge 4.0, thin disc 1.9, thick disc 0.24, dark matter 1.0); the ceiling is
+        // Sofue's (2013, PASJ 65, 118, Table 3) rotation curve, v²r ÷ G for 216 km/s at 1.02 kpc,
+        // 11.1 × 10⁹, an upper reading for a flattened mass. The fixture gives 7.54 × 10⁹.
+        ("1 kpc", kpc, 7.1e9, 11.1e9),
         // The plan's table, which cites Portail et al. 2017 (MNRAS 465, 1621), but their figure is
         // the bulge box's mass, not a sphere's: that is the row after this loop. Their curve's
         // 192 km/s implies 1.7 × 10¹⁰ M☉ inside this sphere (plan 02, Risks, R22 and R23).
@@ -246,11 +251,17 @@ fn the_fixture_s_enclosed_masses_are_the_milky_ways() {
     eprintln!(
         "M(bulge box ±2.2 × ±1.4 × ±1.2 kpc) = {in_box:.4e} M☉ (Portail et al. 2017: 1.85 ± 0.05 × 10¹⁰)"
     );
-    // The finding of plan 02's R23: 34% over the measurement, the same excess as v_c(2 kpc)'s in
-    // v_c², (227.2 ÷ 191.9)² = 1.40. The ceiling is the measurement's upper end times 1.2², the
-    // 20% in speed that the v_c(2 kpc) row allows, so that the inner mass cannot drift further
-    // unnoticed while the model is at fault.
-    assert_within("M(bulge box)", in_box, 1.80e10, 1.44 * 1.90e10);
+    // Portail et al.'s dynamical mass, stars and dark matter, 1.85 ± 0.05 × 10¹⁰ M☉. Until the thin
+    // discs' hole (plan 02, P02.T12.b) the model held 2.48 × 10¹⁰ there, 34% over (R23). The floor
+    // is the measurement's lower end; the ceiling is its upper end carried to the v_c(2 kpc) row's
+    // published top through Portail et al.'s own curve, 1.90 × 10¹⁰ × (200 ÷ 192)² = 2.06 × 10¹⁰,
+    // since the box and v_c(2 kpc) move together (P02.T12.d).
+    assert_within(
+        "M(bulge box)",
+        in_box,
+        1.80e10,
+        1.90e10 * (200.0 / 192.0) * (200.0 / 192.0),
+    );
 }
 
 /// Portail, Gerhard, Wegg and Ness's (2017, MNRAS 465, 1621, Table 2) bulge box, `±2.2 × ±1.4 ×
@@ -330,18 +341,14 @@ fn bulge_box_mass(galaxy: &Galaxy) -> f64 {
 /// not data ([`INNER_BRACKETS`]). A value outside them is a finding against the model — the inner
 /// Gaussian fit, the bulge's share or its scale — and never a reason to move the fixture's draws.
 ///
-/// Finding (plan 02, Risks, R22 and R23): `v_c(2 kpc)` is 227.2 km/s, 14% above the top of the
-/// published 180–200, while 0.5 and 1 kpc are inside theirs. The printed breakdown of `v_c²` at
-/// 2 kpc: the bulge's moment-matched spheroid 42%, the thin disc 29%, the dark halo 9%, the bar
-/// 8%, the thick and nuclear discs 4–5% each and the gas 2%. The stand-in is not the cause: the
-/// true boxy bulge, axisymmetrised and integrated by rings, gives 0.5% more `v_c²` at 2 kpc than
-/// the spheroid, so plan 15's two-dimensional tables would leave the row where it is, and R5's
-/// spherical bulge by quadrature takes it only to 223 km/s. The excess is mass between 1 and 3
-/// kpc: the mass in Portail et al.'s bulge box is 34% over theirs (the enclosed-mass test), and a
-/// hole in the thin disc, `exp(−R ÷ R_d − R_h ÷ R)` with `R_h` near 2 kpc and `Σ(R₀)` held, brings
-/// `v_c(2 kpc)` to 195 km/s and the box to 1.90 × 10¹⁰ M☉ (R23). Each is a new model term and a
-/// version bump. Until then the row checks `v_c(2 kpc)` against the published lower end and a
-/// ceiling 20% above the upper one, so that it cannot drift further unnoticed.
+/// Until version 12 (plan 02, Risks, R22 and R23) `v_c(2 kpc)` was 227.2 km/s, 14% above the top
+/// of the published 180–200, and the row checked a ceiling 20% higher. The excess was mass between
+/// 1 and 3 kpc, which a hole-free thin disc put there: the mass in Portail et al.'s bulge box was
+/// 34% over theirs. The thin discs' central hole (P02.T12.b) takes it out, and the row checks the
+/// published bracket again. The printed breakdown of `v_c²` at 2 kpc names each part's share.
+///
+/// `v_c(1 kpc) ÷ v_c(8 kpc)` is checked from 0.75: the published inner curve over Eilers et al.'s
+/// 229 km/s gives the Milky Way 0.70–0.83 (R23).
 #[test]
 #[ignore = "slow: builds the fixture's fields and in-plane tables"]
 fn the_fixture_s_rotation_curve_is_the_milky_ways() {
@@ -377,8 +384,7 @@ fn the_fixture_s_rotation_curve_is_the_milky_ways() {
     let [(lo_half, hi_half), (lo_one, hi_one), (lo_two, hi_two)] = INNER_BRACKETS;
     assert_within("v_c(0.5 kpc), km/s", inner, lo_half, hi_half);
     assert_within("v_c(1 kpc), km/s", one, lo_one, hi_one);
-    // The finding above: the published 180–200, its top raised by 20% until the model is changed.
-    assert_within("v_c(2 kpc), km/s", two, lo_two, 1.2 * hi_two);
+    assert_within("v_c(2 kpc), km/s", two, lo_two, hi_two);
 }
 
 /// The published brackets on the inner Milky Way's circular speed at 0.5, 1 and 2 kpc, km/s, from
@@ -473,11 +479,11 @@ fn print_inner_breakdown(galaxy: &Galaxy, r: f64) {
 /// The solar neighbourhood's densities and the nuclear disc, the rows rulings 1 and 8 exist to fix.
 ///
 /// The stars' surface density at the Sun's radius scales both density rows, and the fixture meets
-/// them by a thin scale length of 2.15 kpc (7,000 ly) and an effective height of 1,100 ly, both
+/// them by a thin scale length of 2.15 kpc (7,000 ly) and an effective height of 1,130 ly, both
 /// measured values, rather than by pushing the surface density below what is measured for it.
 ///
-/// The printed Σ★ is 30.5 M☉ pc⁻²: inside McKee et al.'s (2015, Table 1) 33.4 ± 3 (32.2 without
-/// their 1.2 of brown dwarfs), and 1.9 standard deviations under Bovy and Rix's (2013, §5.2.1)
+/// The printed Σ★ is 31.1 M☉ pc⁻²: inside McKee et al.'s (2015, Table 1) 33.4 ± 3 (32.2 without
+/// their 1.2 of brown dwarfs), and 1.7 standard deviations under Bovy and Rix's (2013, §5.2.1)
 /// 38 ± 4; the "29–38" it is compared with spans those two, not any one measurement.
 #[test]
 #[ignore = "slow: integrates the fixture's densities over the whole height at the Sun's radius"]
@@ -545,9 +551,10 @@ fn the_fixture_s_solar_neighbourhood_is_the_milky_ways() {
     );
     // The young disc's height, the two facts ruling 3 of 2026-09-22 rests it on (plan 02, R22 and
     // R23): its effective height is Bovy's (2017, MNRAS 470, 1360, Table 1) A dwarfs' 2z_d, 74–112
-    // pc in sech²(Z ÷ 2z_d), and in the fixture's potential its mid-plane dispersion at the
-    // reference radius meets the brainstorm's 5 km/s floor, which it does from 229 ly up. Neither
-    // holds across the drawn range or along the disc (R23); both hold for the Milky Way.
+    // pc in sech²(Z ÷ 2z_d), and in the fixture's potential its mid-plane dispersion where the
+    // profiles are solved meets the brainstorm's 5 km/s floor. Since P02.T12 that is the Sun's
+    // radius, where the 285 ly of P02.T11 gave 4.34 km/s; 335 ly (103 pc) meets it with 5.06.
+    // Neither holds across the drawn range or along the disc (R23); both hold for the Milky Way.
     let young = fields
         .components()
         .iter()
@@ -559,8 +566,8 @@ fn the_fixture_s_solar_neighbourhood_is_the_milky_ways() {
     let young_height_pc = young.height().value() / LIGHT_YEARS_PER_PARSEC;
     let young_sigma = young.profile().dispersion().value();
     // Printed, not checked (plan 02, R23): the factor on Sharma et al.'s heating law that meets
-    // the drawn height where the profiles are solved, three thin scale lengths out. It was 1.02
-    // before P02.T11 moved that radius from 7.8 to 6.4 kpc; the law is the solar neighbourhood's.
+    // the drawn height where the profiles are solved, the Sun's radius since P02.T12. It was 1.37
+    // at three thin scale lengths (6.4 kpc) after P02.T11; the law is the solar neighbourhood's.
     eprintln!(
         "young disc: effective height {young_height_pc:.1} pc, mid-plane σ_z {young_sigma:.3} km/s \
          at {:.0} ly; the old thin disc's dispersion scale {:.4}",

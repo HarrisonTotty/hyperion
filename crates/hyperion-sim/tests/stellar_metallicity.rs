@@ -6,7 +6,6 @@
 //! from the field's own scatter and the sample, not from a tolerance chosen to pass.
 
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::galaxy::fields::metallicity::THIN_DISC_FLAT_AGE;
 use hyperion_sim::galaxy::fields::{Component, ComponentId};
 use hyperion_sim::galaxy::params::{GalaxyParams, HaloComponentKind};
 use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, generate_cell};
@@ -91,8 +90,9 @@ fn mean_and_sd(xs: &[f64]) -> (f64, f64) {
 /// the line is the field's 0.20 dex.
 ///
 /// The sample is every young- and old-thin-disc record of layer E in a strip of cells in the plane
-/// along +y, clear of the bar, from 12,800 to 44,800 ly, whose age at the epoch is within the thin
-/// discs' flat age–metallicity relation (at most `THIN_DISC_FLAT_AGE`, 8 Gyr). Over that radial
+/// along +y, clear of the bar, from 12,800 to 44,800 ly, of every age: the thin discs'
+/// age–metallicity relation is flat at every age (plan 02, ruling 42.5 and P02.T12.c; until
+/// version 12 the sample stopped at 8 Gyr, beyond which it fell). Over that radial
 /// range the field's mean is exactly linear in radius (its clamp at −1.0 and +0.5 dex binds only
 /// beyond 90,000 ly and inside the centre for this gradient), so the slope's only error is the
 /// sampling error of a line fitted to normal scatter. The bracket is the slope's standard error
@@ -117,7 +117,7 @@ fn the_thin_discs_radial_gradient_is_the_galaxys_drawn_one() {
                         r.population(),
                         Population::YoungThinDisc | Population::OldThinDisc
                     );
-                    if !thin || r.age_at_epoch().value() > THIN_DISC_FLAT_AGE.value() {
+                    if !thin {
                         continue;
                     }
                     let p = PointLy::from(r.epoch_position());

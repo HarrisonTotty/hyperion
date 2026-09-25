@@ -8,6 +8,14 @@
 //! - `MGE_EXP`, the exponential `e^(−s)`, which serves a disc's radial and vertical profiles and
 //!   the bulge's spheroid. It is fitted on `s` from 0.02 to 12 in relative error: each sample is
 //!   weighted by `1 ÷ e^(−s)`.
+//! - `MGE_HOLED_EXP`, the thin disc's radial profile with its central hole, `e^(−x ÷ s − s)` with
+//!   `x` the sim's `THIN_DISC_HOLE_LENGTHS` (plan 02, ruling 32 of 2026-09-22 and P02.T12.b). A
+//!   sum of centred Gaussians with non-negative weights only falls, so it cannot rise out of a
+//!   hole; the hole is fitted instead as the deficit `e^(−s) (1 − e^(−x ÷ s))`, which falls from 1
+//!   and is non-negative, on `MGE_EXP`'s widths and samples and in the same weighting (each row over
+//!   `e^(−s)`), and the table is `MGE_EXP`'s weights less the deficit's, width by width. Its weights
+//!   are signed: the potential takes the holed disc as the exponential disc less a disc of
+//!   negative mass.
 //! - `MGE_BAR`, the azimuthal average of the long bar's surface density at its nominal shape, in
 //!   units of the half-length. It is fitted in absolute error, with one more row for its total
 //!   mass. A sum of centred Gaussians with non-negative weights is a completely monotone function
@@ -20,6 +28,7 @@
 
 use std::fmt::Write as _;
 
+use hyperion_sim::galaxy::fields::disc::THIN_DISC_HOLE_LENGTHS;
 use hyperion_sim::galaxy::quad::gl_panels;
 use hyperion_sim::galaxy::special::bessel_i0e;
 use hyperion_sim::math;
@@ -28,7 +37,7 @@ use super::render::literal;
 
 /// The task's version, written into the table's header. A change to anything below that moves
 /// the table bumps it.
-pub const VERSION: u32 = 0;
+pub const VERSION: u32 = 1;
 
 /// The number of widths in each expansion.
 pub const WIDTHS: usize = 14;
@@ -61,6 +70,8 @@ const BAR_WIDTHS: (f64, f64) = (0.04, 0.8);
 pub struct MgeTables {
     /// `e^(−s)`.
     pub exp: [(f64, f64); WIDTHS],
+    /// `e^(−x ÷ s − s)`, the holed disc's radial profile; the weights are signed.
+    pub holed_exp: [(f64, f64); WIDTHS],
     /// The long bar's azimuthally averaged surface density, 1 at the centre.
     pub bar: [(f64, f64); WIDTHS],
 }
@@ -131,6 +142,28 @@ fn fit_exp() -> [(f64, f64); WIDTHS] {
     table(nnls(&rows, &rhs), widths)
 }
 
+/// The expansion of the holed profile `e^(−x ÷ s − s)`, `x` = [`THIN_DISC_HOLE_LENGTHS`]: `exp`'s
+/// weights less those of the deficit `e^(−s) (1 − e^(−x ÷ s))`, fitted on the same widths and
+/// samples in error relative to `e^(−s)` (module documentation).
+fn fit_holed_exp(exp: &[(f64, f64); WIDTHS]) -> [(f64, f64); WIDTHS] {
+    let widths: [f64; WIDTHS] = log_spaced(EXP_WIDTHS.0, EXP_WIDTHS.1);
+    let samples: [f64; EXP_SAMPLES] = log_spaced(EXP_RANGE.0, EXP_RANGE.1);
+    let rows: Vec<[f64; WIDTHS]> = samples
+        .iter()
+        .map(|&s| widths.map(|sigma| math::exp(s - s * s / (2.0 * sigma * sigma))))
+        .collect();
+    let rhs: Vec<f64> = samples
+        .iter()
+        .map(|&s| -math::exp_m1(-THIN_DISC_HOLE_LENGTHS / s))
+        .collect();
+    let deficit = nnls(&rows, &rhs);
+    let mut table = [(0.0, 0.0); WIDTHS];
+    for ((entry, &(w, sigma)), d) in table.iter_mut().zip(exp).zip(deficit) {
+        *entry = (w - d, sigma);
+    }
+    table
+}
+
 /// The bar's level profile along its length: 1 to [`BAR_LEVEL`], then a Gaussian end of width
 /// [`BAR_END`].
 fn bar_length_profile(x: f64) -> f64 {
@@ -199,8 +232,10 @@ fn fit_bar() -> [(f64, f64); WIDTHS] {
 /// and platform.
 #[must_use]
 pub fn fit() -> MgeTables {
+    let exp = fit_exp();
     MgeTables {
-        exp: fit_exp(),
+        holed_exp: fit_holed_exp(&exp),
+        exp,
         bar: fit_bar(),
     }
 }
@@ -247,6 +282,9 @@ pub fn render(tables: &MgeTables) -> String {
 //!
 //! - [`MGE_EXP`]: `e^(−s)` at {EXP_SAMPLES} log-spaced `s` from {} to {}, each row weighted by
 //!   `1 ÷ e^(−s)` so that the relative error is what is fitted. Widths from {} to {}.
+//! - [`MGE_HOLED_EXP`]: `e^(−x ÷ s − s)` with `x = {hole}`, the thin disc's central hole in scale
+//!   lengths: [`MGE_EXP`]'s weights less those of the deficit `e^(−s) (1 − e^(−x ÷ s))`, fitted
+//!   on the same widths and samples in the same weighting, so its weights are signed.
 //! - [`MGE_BAR`]: the azimuthal average of the long bar's surface density `L(|x|) exp(−y² ÷ 2w²)`,
 //!   with `w = {}` and `L` level to {} with a Gaussian end of width {}, all in half-lengths.
 //!   At {BAR_SAMPLES} evenly spaced `u` from 0 to {}, in absolute error, with one more row for
@@ -264,6 +302,7 @@ pub fn render(tables: &MgeTables) -> String {
         BAR_WIDTHS.0,
         BAR_WIDTHS.1,
         sweeps = thousands(SWEEPS),
+        hole = literal(THIN_DISC_HOLE_LENGTHS),
     );
     out.push('\n');
     write_table(
@@ -271,6 +310,14 @@ pub fn render(tables: &MgeTables) -> String {
         "/// `e^(−s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`.\n",
         "MGE_EXP",
         &tables.exp,
+    );
+    out.push('\n');
+    write_table(
+        &mut out,
+        "/// `e^(−x ÷ s − s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`, with `x` the thin disc's\n\
+         /// hole in scale lengths; the weights are signed.\n",
+        "MGE_HOLED_EXP",
+        &tables.holed_exp,
     );
     out.push('\n');
     write_table(

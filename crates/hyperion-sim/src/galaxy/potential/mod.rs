@@ -37,6 +37,15 @@ pub struct BuildComponentError {
 }
 
 impl BuildComponentError {
+    /// `Ok` if `value` is finite.
+    pub(crate) fn check_finite(quantity: &'static str, value: f64) -> Result<(), Self> {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(Self { quantity, value })
+        }
+    }
+
     /// `Ok` if `value` is finite and not negative.
     pub(crate) fn check_non_negative(quantity: &'static str, value: f64) -> Result<(), Self> {
         if value.is_finite() && value >= 0.0 {
