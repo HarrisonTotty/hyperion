@@ -16,6 +16,7 @@
 //! `x86_64-w64-mingw32-gfortran` 16.2.0 and run under Wine 11.17 on 2026-09-21; each test states
 //! the options of its run. Only the numbers are committed; no code of the package is.
 
+mod calibration;
 mod coeffs;
 mod coeffs_data;
 #[cfg(test)]

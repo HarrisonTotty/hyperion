@@ -443,7 +443,15 @@ generation?)` with its exhaustive `ErrorCode` switch `settledState` in `lib/useS
 5. **Metal fraction.** Z = 0.02 × 10^[Fe/H], the solar value the formulae were fitted with. [Fe/H]
    is kept as drawn for the consoles and for plan 14; the formulae see Z clamped to 0.0001–0.03.
    Alpha enhancement is a mark of the population and halo component (plan 02) and does not enter the
-   fits.
+   fits. **Between HPT's seven calibration metallicities** (10⁻⁴, 3 × 10⁻⁴, 10⁻³, 0.004, 0.01, 0.02
+   and 0.03, the Pols et al. 1998 models HPT fitted) the giant's and the asymptotic giant's radius
+   laws (HPT equations 46 and 74) are evaluated at the calibration metallicities around Z, and
+   log R is interpolated in log Z by a monotone cubic (ruling 92 of 2026-09-22). This departs from
+   the printed form, which rulings 10, 29 and 40 otherwise follow: the Appendix's min and max clamps
+   on b1–b3 switch between the calibration points and put a sawtooth into giants' radii (up to
+   +0.22/−0.14 dex), temperatures (metal-poor giants up to 700 K cooler than solar ones) and white
+   dwarf masses (±0.08 M☉, three reversals), which no detailed model has. At a calibration
+   metallicity the laws are the printed ones, bit for bit, so T12's comparison with SSE holds.
 6. **Modern winds are the set current population-synthesis codes use**, of which the brainstorm
    names Vink et al. (2001): Vink for hot hydrogen-rich stars (12,500–50,000 K, both sides of the
    bi-stability jump, scaled as Z^0.85); 1.5 × 10⁻⁴ M☉ per year beyond the Humphreys–Davidson limit
@@ -687,7 +695,13 @@ nothing of plans 02 or 03.
   monotone and continuous in Z across 0.0001–0.03 at 200 points. Accept: tests pass; a Criterion
   bench reports the cost (target under 5 µs). The bench is this plan's first: it creates
   `crates/hyperion-sim/benches/stellar.rs` and its `[[bench]]` entry (`harness = false`, as
-  `foundation` and `galaxy` have) in the crate's `Cargo.toml`, which T32 extends.
+  `foundation` and `galaxy` have) in the crate's `Cargo.toml`, which T32 extends. _As built
+  (ruling 92):_ `ZCoeffs::new` also fixes where Z falls among HPT's seven calibration
+  metallicities (`ZCoeffs::radius_in_z`): within 10⁻¹² of one, relatively, it is `Calibrated` and
+  the giant radius laws are the Appendix's at Z; otherwise a `ZBlend` holds the stencil (three
+  nodes in the end intervals, four elsewhere), its spacings in ζ and the Hermite basis at ζ. The
+  nodes' coefficients are literals (`sse::calibration::CALIBRATION`), held to `ZCoeffs::new` bit for
+  bit by a test.
 - **P06.T4.c ZAMS luminosity and radius.** `zams::luminosity(m, &ZCoeffs)` and `zams::radius` (Tout
   et al. 1996 equations 1 and 2). Files: `stellar/sse/zams.rs`. Tests: 1 M☉ at Z = 0.02 gives about
   0.70 L☉ and 0.89 R☉; both are continuous and L is monotone in mass over 0.1–100 M☉ for five
@@ -723,6 +737,15 @@ nothing of plans 02 or 03.
   tip luminosity rises with metallicity (Salaris and Cassisi 1997, MNRAS 289, 406: 1,977 L☉ at Z =
   10⁻⁴ to 2,742 at 0.006). Corrected in round 6's validation from "near 2,500" and "falls".
 - **Files:** `stellar/sse/hg.rs`, `gb.rs`. **Accept:** tests pass.
+- **Radii between the calibration metallicities, as built (round 9, `zsmooth`; ruling 92).**
+  Equation 46 (and T8.a's equation 74) is HPT's printed law only at the seven calibration
+  metallicities; between them `gb::RadiusLaw` holds the law at each node of a three- or four-node
+  stencil (`sse::calibration`) and ln R is the monotone piecewise cubic Hermite in log Z through
+  their radii (design note 5): Brodlie's weighted harmonic mean of the secants inside (Fritsch and
+  Butland 1984), `pchip`'s shape-preserving rule at the two ends (Moler 2004), with the basis fixed
+  per Z and the slopes formed per evaluation, since the node radii depend on M and L. Tests: the laws are the printed ones bit for bit at every
+  calibration metallicity; both are continuous in Z; the red giant at 1 M☉ and 100 L☉ cools
+  monotonically with [Fe/H] (4,858 K at −2.2 to 4,123 K at +0.176). See Risks for the rest.
 
 #### P06.T7 Core helium burning
 
@@ -743,7 +766,8 @@ nothing of plans 02 or 03.
 
 - **P06.T8.a Early AGB:** core mass at the base of the AGB `m_c_bagb`, the helium and carbon–oxygen
   core growth, L from the core mass–luminosity relation, R_AGB. Second dredge-up at the end of the
-  phase.
+  phase. _As built:_ R_AGB is interpolated in Z between HPT's calibration metallicities, each node's
+  equation 74 with its own `M_HeF` (ruling 92; see T6).
 - **P06.T8.b Thermally pulsing AGB:** core growth with third dredge-up (λ), L, R, and the three ends
   of the phase: envelope loss, the core reaching `m_c_sn` (supernova from the AGB, 1.6–2.25 M☉ cores
   at the base giving ONe white dwarfs or electron capture) or Chandrasekhar mass (HPT section 5.4).
@@ -1972,7 +1996,8 @@ domain_tags_are_pinned`, since `events` alone misses the registry tests and the 
   that are wrong for HPT's formulae, SSE agreeing with the formulae: the 5 M☉ loop at Z = 0.02 spans
   4,010–4,665 K and never reaches 5,500–6,500 K (at Z = 0.004 it spans 4,475–7,260 K, and the test
   asserts both); at Z = 0.0005 a horizontal branch with 0.1–0.2 M☉ of envelope sits at 15,400–9,000
-  K, and 6,000–7,500 K takes 0.25–0.30 M☉ (6,910 K for the 0.8 M☉ star that lost nothing). `t_He`(1
+  K, and 6,000–7,500 K takes 0.25–0.30 M☉ (6,910 K for the 0.8 M☉ star that lost nothing; 6,975 K
+  since ruling 92, as Z = 0.0005 lies between calibration metallicities). `t_He`(1
   M☉) is 131.5 Myr at Z = 0.02. Continuity is tested from T6 at ignition above `M_HeF` (to 10⁻⁹ and
   by age sweeps), in τ, and in mass across `M_HeF` and 12 M☉ and, for Z ≤ 0.002, `M_FGB`; for Z >
   0.002 HPT's declared jump at `M_FGB` is excluded and checked to exist (only 0.007 in `τ_bl` at Z =
@@ -3060,3 +3085,83 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     and under 12 M☉ 67.1% unkicked and 14.4% above 100 km/s; 15.0% of neutron stars leave the
     disc with the rotation. The 3D mean falls to 269 km/s. Only `stellar/kicks` moved: the two
     ordinary speeds. No multiplicity golden moved, and the T32 search reproduces every pinned ID.
+- **SSE's giant radii interpolated in Z, as built (round 9, `zsmooth`; ruling 92).** A departure
+  from the printed HPT form that rulings 10, 29 and 40 otherwise follow, made under the owner's
+  delegation on a research agent's advice (`_orchestration/research/wd-ifmr/NOTES.md`) and logged
+  for the owner's review. It amends design note 5, T4.b, T6.c and T8.a.
+  - _Why._ HYPERION matched the published SSE code (to 0.006 M☉ in white dwarf mass) and SSE is
+    converged, so there was no bug. The min and max clamps on b1–b3 in the Appendix switch at
+    [Fe/H] −2.010, −1.301, −0.859, −0.592, −0.567 and −0.340, between HPT's calibration
+    metallicities; the radii of equations 46 and 74 depart there from their own node values by up
+    to +0.22/−0.14 dex, and through the Vassiliadis and Wood superwind the white dwarf mass swung
+    ±0.08 M☉ about its trend. Detailed models (Meng, Chen and Han 2008; Romero, Campos and
+    Kepler 2015) and HPT's own calibration points fall monotonically.
+  - _What._ `stellar/sse/calibration.rs` (new): `CALIBRATION_Z`, the seven metallicities'
+    ζ and radius coefficients as literals (`CALIBRATION`, held to `ZCoeffs::new` bit for bit by a
+    test, so that a metallicity between two costs no evaluation of the Appendix), `RadiusInZ`
+    (`Calibrated` within 10⁻¹² of a node, else `Between(ZBlend)`), and `ZBlend`, the stencil of
+    three or four nodes and the Hermite basis at ζ, fixed in `ZCoeffs::new`. The slopes are Fritsch
+    and Carlson's (1980) monotone ones, Brodlie's weighted harmonic mean inside and the
+    shape-preserving three-point formula at the two ends (Fritsch and Butland 1984; Moler's
+    `pchip`); they depend on the node radii and are formed at each evaluation, since no weights
+    fixed in advance of the data can keep every data set monotone. `gb::RadiusLaw` is the printed
+    law at a calibration metallicity and, between two, the law at each stencil node with its scale
+    as ln A, ln R being the cubic; `gb::LuminosityPowers` keeps each node's powers. `ZCoeffs` gains
+    `radius_in_z` and `radius_coeffs`; `LesserPowerLaw` gains `from_parts` and `exponents`.
+    `cheb::ZeroAgeHorizontalBranch` no longer holds its own copy of the giant's law: `radius` takes
+    the phase's (the same law at the same mass), which keeps `BluePhase` small.
+  - _Acceptance._ At every calibration metallicity both laws are the printed ones bit for bit
+    (test), so T12.b at 10⁻⁴, 10⁻³, 0.004, 0.02 and 0.03 and T12.c pass unchanged
+    (`tests/sse_reference.rs`).
+  - _The ruling's tests_ (all pass). `calibration.rs`: the table is `ZCoeffs::new` bit for bit, a
+    calibration metallicity reached through [Fe/H] snaps to its node, the stencils and basis, the
+    cubic keeps lines and monotone data and meets the node values. `gb.rs`: both laws are the
+    printed ones bit for bit at the seven metallicities, continuous in Z (the jump finder over
+    log Z at five (M, L)), and a law at cached powers is the law at the luminosity bit for bit off
+    the nodes too; `metal_poor_giants_are_hotter`: at 1 M☉ and 100 L☉, T_eff falls monotonically
+    from 4,858 K at [Fe/H] −2.2 to 4,123 K at +0.176 (0.0125 dex steps; it was 4,921 K, then 4,180 K
+    at −0.9 and 4,950 K at −0.6), and R_GB at 2,000 L☉ and R_AGB of 1.4 M☉ at 5,000 L☉ rise
+    monotonically. `tests/sse_reference.rs::white_dwarf_masses_fall_with_metallicity` (slow, about
+    380 full tracks, generator recipes, median draws): 18 initial masses from 0.7 to 3 M☉, each
+    white dwarf non-increasing at every point of a 0.125 dex grid from −2.2 to +0.3; the secant
+    slope from −2.2 to +0.176 is −0.080 M☉ per dex at 1.5 M☉, −0.090 at 1.75 and −0.099 at 2 (the
+    ruling's window is −0.03 to −0.10; Romero et al. give about −0.05, so 2 M☉ sits near the edge).
+    Before, 1.5 M☉ went 0.664 → 0.673 M☉ from −1.425 to −1.3 and 0.566 → 0.677 from −0.925 to
+    −0.55. `cheb.rs`'s horizontal branch at Z = 0.0005 now pins 6,975 K at 0.8 M☉ (SSE's printed
+    form gives 6,912 K; see T7's bullet).
+  - _Cost_ (A/B of scratch binaries against `58e3d48`, the integrator as ruling 46 left it after
+    rulings 46 and 77.1, in one lock; instructions retired, since the machine ran at load 19–23 and
+    2.0–2.1 GHz with `math::exp` at 23–25 ns, where times were ±30%). Off the calibration
+    metallicities, a radius costs up to four node laws, ln R each, and the cubic: at [Fe/H] −0.5,
+    `Track::full` of 1, 2, 5 and 20 M☉ ×1.66, 1.48, 1.30 and 1.17; `lifetime` ×1.59, 1.52, 1.37,
+    1.18; `to_age` at 95% of the life ×1.58, 1.61, 1.36, 1.13; at −1.5, `full` ×1.41, 1.30, 1.35,
+    1.14. At a calibration metallicity (solar) +1.5–3%, and `ZCoeffs::new` +2.3% (5,876 → 6,012
+    instructions). Main-sequence states read neither law. In `math::exp` units, in the same run,
+    `full` of 1 M☉ at −0.5 went from 67,000 to 91,000, so ruling 46's targets (150 µs, about
+    20,000 `exp`; `lifetime` 5 µs) are further off; per giant step, where the radius was about 3
+    transcendental calls, it is now about 14.
+  - _Iron cores_ (ruling 92.4; the P06.T38.a Z sweep rerun: 25 [Fe/H] × 860 masses, median draws).
+    Their Z structure is not from these laws and barely moves: the carbon–oxygen core's residual
+    from a 5-point cubic at 0.125 dex has p99 9.5 × 10⁻³ → 7.3 × 10⁻³; a cubic on a 0.25 dex axis
+    misses 10⁻³ at 19.1% → 17.7% of points (p99 2.7 × 10⁻² → 1.9 × 10⁻²); sign reversals of the
+    slope stay at a median of 1 (max 5 → 4). The kinks sit near [Fe/H] −2.1 for 8–14 M☉ and near
+    +0.05 for 40–85 M☉ (Z ≈ 0.022, where 1 − b47 < 0 ends the blue phase above `M_FGB`, see
+    `gb::r_hei`). The white dwarfs, by contrast, move from 89.8% to 8.7% of points over 10⁻³ at
+    0.25 dex (median 7.8 × 10⁻³ → 2.1 × 10⁻⁴), and 67% → 2.2% at 0.125 dex; death ages are
+    unchanged in structure. This is input for ruling 92.6's re-survey of the fate table (T38.c–d),
+    which stays open.
+  - _Goldens_ (re-blessed at 11; the bump waits for the version-12 batch, ruling 92.5). Four moved,
+    each an off-node star whose giant or gap radius, or whose wind through it, now reads the cubic:
+    `stellar/summaries` (7 of 18 systems, all evolved or dead: white dwarf masses by up to 1.6%,
+    death times by up to 0.9 Myr, and their L, R, T_eff and B − V); `planetary/systems/subgiant`
+    (T_eff 5,288 → 5,271 K through R_EHG, the mass by 6 × 10⁻⁷ M☉ and the planets' μ with it);
+    `planetary/systems/red_giant` (T_eff 4,484 → 4,509 K, so both engulfments come about 2 Myr later
+    and the wind's mass loss moves the survivors' orbits by 6 × 10⁻⁵); and
+    `planetary/systems/fallback_black_hole` (the 32.4 M☉ progenitor's winds read R: the black hole
+    is 9.94 M☉, not 10.14, which moves the unbinding times and the survivors' orbits). The
+    `stellar/sse` backbone golden, pinned at the calibration metallicities, did not move. The T32
+    search still finds all fifteen pinned systems, so nothing is re-pinned.
+  - _Files._ In `stellar/sse/`: `calibration.rs` (new), `coeffs.rs`, `gb.rs`, `cheb.rs` and a `mod`
+    line in `mod.rs`; none of the `briefs` lane's fast path (`evolve.rs`, `track.rs`,
+    `track/build.rs`). `ZCoeffs::{giant_radius_scale, agb_radius_scale}` are now test-only, and
+    `cheb::ZeroAgeHorizontalBranch::{at_mass, radius}` changed signature.

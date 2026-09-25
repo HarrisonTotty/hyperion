@@ -77,7 +77,7 @@ pub(crate) fn l_zahb(m: SolarMasses, mc: SolarMasses, c: &ZCoeffs) -> SolarLumin
 #[cfg(test)]
 #[must_use]
 pub(crate) fn r_zahb(m: SolarMasses, mc: SolarMasses, c: &ZCoeffs) -> SolarRadii {
-    ZeroAgeHorizontalBranch::new(m, c).radius(mc)
+    ZeroAgeHorizontalBranch::new(m, c).radius(mc, &RadiusLaw::giant(m, c))
 }
 
 /// The zero-age horizontal branch of a star of one mass below `M_HeF` as a function of its core
@@ -90,7 +90,6 @@ struct ZeroAgeHorizontalBranch {
     l_min_hef: f64,
     /// b18–b23.
     b: [f64; 6],
-    giant: RadiusLaw,
 }
 
 impl ZeroAgeHorizontalBranch {
@@ -102,17 +101,15 @@ impl ZeroAgeHorizontalBranch {
             m_hef: c.m_hef().value(),
             l_min_hef: l_min_he(c.m_hef(), c).value(),
             b: core::array::from_fn(|i| c.b(18 + i)),
-            giant: RadiusLaw::giant(m, c),
         }
     }
 
     /// The same branch for a star of mass `m`: what [`ZeroAgeHorizontalBranch::new`] gives at `m`,
     /// bit for bit, reusing the terms that depend on the metallicity alone.
     #[must_use]
-    fn at_mass(&self, m: SolarMasses, c: &ZCoeffs) -> Self {
+    fn at_mass(&self, m: SolarMasses) -> Self {
         Self {
             mass: m.value(),
-            giant: RadiusLaw::giant(m, c),
             ..*self
         }
     }
@@ -158,14 +155,15 @@ impl ZeroAgeHorizontalBranch {
 
     /// `R_ZAHB` (HPT equation 54): (1 − f) `R_ZHe`(Mc) + f `R_GB`(`L_ZAHB`), with
     /// f = (1 + b21) µ^b22 ÷ (1 + b21 µ^b23), smaller than the giant's radius at the same
-    /// luminosity.
+    /// luminosity; `giant` is `R_GB`'s law ([`RadiusLaw::giant`]) at the branch's mass, which the
+    /// phase evaluates once for both.
     #[must_use]
-    fn radius(&self, mc: SolarMasses) -> SolarRadii {
+    fn radius(&self, mc: SolarMasses, giant: &RadiusLaw) -> SolarRadii {
         let mu = self.envelope_fraction(mc);
         let [.., b21, b22, b23] = self.b;
         let f = (1.0 + b21) * Self::envelope_power(mu, b22)
             / (1.0 + b21 * Self::envelope_power(mu, b23));
-        helium::zams_radius(mc) * (1.0 - f) + self.giant.at(self.luminosity(mc)) * f
+        helium::zams_radius(mc) * (1.0 - f) + giant.at(self.luminosity(mc)) * f
     }
 }
 
@@ -537,7 +535,7 @@ impl CoreHeliumBurning {
             Regime::Low => BluePhase::HorizontalBranch {
                 zahb: self.zahb.as_ref().map_or_else(
                     || ZeroAgeHorizontalBranch::new(mt, c),
-                    |zahb| zahb.at_mass(mt, c),
+                    |zahb| zahb.at_mass(mt),
                 ),
                 r_mhe: r_mhe_low_with(mt, &self.powers.blue_start, self.at_hef, c),
                 r_y: asymptotic.at_powers(&self.powers.agb_base),
@@ -693,7 +691,7 @@ impl CoreHeliumBurning {
         let shape = match &radii.blue {
             BluePhase::Fixed(shape) => *shape,
             BluePhase::HorizontalBranch { zahb, r_mhe, r_y } => {
-                let r_x = zahb.radius(core_mass);
+                let r_x = zahb.radius(core_mass, &radii.giant);
                 BlueShape::new(r_x, *r_mhe, r_x, *r_y)
             }
         };
@@ -939,7 +937,9 @@ mod tests {
     /// RR Lyrae region, takes 0.25–0.30 M☉ (7,720 K at M = 0.75 M☉, 6,910 K at 0.8). SSE agrees
     /// (at helium ignition, `hrdiag` with no mass loss: 11,162 K at 0.65 M☉, 8,990 K at 0.7, 7,720 K
     /// at 0.75 and 6,912 K at 0.8; lighter stars have μ < 1 there and are perturbed). Less envelope
-    /// is bluer throughout.
+    /// is bluer throughout. Z = 0.0005 lies between HPT's calibration metallicities 3 × 10⁻⁴ and
+    /// 10⁻³, where the giant's radius is the monotone cubic of ruling 92 rather than the printed
+    /// law SSE evaluates, and `R_ZAHB` reads it: 0.8 M☉ comes out 6,975 K, 63 K hotter than SSE.
     #[test]
     fn the_horizontal_branch_is_bluer_with_less_envelope() {
         let c = coeffs(0.0005);
@@ -965,7 +965,7 @@ mod tests {
             (envelope - 0.299).abs() < 0.001,
             "envelope {envelope} at 0.8 M☉"
         );
-        assert!((t - 6_912.0).abs() < 5.0, "{t} K at 0.8 M☉");
+        assert!((t - 6_975.0).abs() < 5.0, "{t} K at 0.8 M☉");
     }
 
     /// `t_He`(1 M☉) at Z = 0.02 is 131.5 Myr, as SSE gives it; 107–135 Myr over the five

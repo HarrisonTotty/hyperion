@@ -14,6 +14,7 @@ use crate::math;
 use crate::stellar::composition::{Z_FIT_MAX, Z_FIT_MIN, Z_SOLAR};
 use crate::units::{MetalFraction, SolarMasses};
 
+use super::calibration::{RadiusCoeffs, RadiusInZ};
 use super::coeffs_data::{A, B, ZAMS_L, ZAMS_R};
 
 /// A polynomial α + βζ + γζ² + ηζ³ + µζ⁴ by Horner's rule.
@@ -63,6 +64,9 @@ pub struct ZCoeffs {
     hook_luminosity_scale: LesserPowerLaw,
     /// 0.0258 (1 + X)^(5/3) of the degenerate radius floor (HPT equation 24), R☉ M☉^⅓.
     degenerate_radius: f64,
+    /// Where Z falls among HPT's calibration metallicities, between which the giant radius laws
+    /// (equations 46 and 74) are interpolated (galaxy-generation ruling 92).
+    radius_in_z: RadiusInZ,
 }
 
 impl ZCoeffs {
@@ -112,6 +116,7 @@ impl ZCoeffs {
             // `powf`: `stellar::substellar` pins its cooling fits to this floor at 0.1 M☉ and
             // computes it again, outside `sse`, with `powf` (P06.T13); once per Z, it costs nothing.
             degenerate_radius: 0.0258 * math::powf(1.0 + super::ms::hydrogen(z), 5.0 / 3.0),
+            radius_in_z: RadiusInZ::new(z, zeta),
         };
         // b46 = −b46 log₁₀(`M_HeF` ÷ `M_FGB`) needs the critical masses (Appendix, after b49).
         coeffs.b[46] = -coeffs.b[46] * math::log10(m_hef / m_fgb);
@@ -178,6 +183,7 @@ impl ZCoeffs {
     }
 
     /// The giant's radius scale A = min(b4 M^−b5, b6 M^−b7) of HPT equation 46.
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn giant_radius_scale(&self) -> &LesserPowerLaw {
         &self.giant_radius_scale
@@ -185,9 +191,35 @@ impl ZCoeffs {
 
     /// The asymptotic giant's radius scale A = min(b51 M^−b52, b53 M^−b54) of HPT equation 74 from
     /// `M_HeF` up.
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn agb_radius_scale(&self) -> &LesserPowerLaw {
         &self.agb_radius_scale
+    }
+
+    /// The coefficients of the giant radius laws (HPT equations 46 and 74) at this Z, as the
+    /// Appendix gives them.
+    #[must_use]
+    pub(crate) const fn radius_coeffs(&self) -> RadiusCoeffs {
+        RadiusCoeffs {
+            b1: self.b[1],
+            b2: self.b[2],
+            b3: self.b[3],
+            giant_scale: self.giant_radius_scale,
+            agb_scale: self.agb_radius_scale,
+            b55: self.b[55],
+            b56: self.b[56],
+            b57: self.b[57],
+            m_hef: self.m_hef.value(),
+        }
+    }
+
+    /// Where Z falls among HPT's calibration metallicities: at one, the giant radius laws are the
+    /// Appendix's at Z ([`ZCoeffs::radius_coeffs`]); between two, they are interpolated
+    /// (galaxy-generation ruling 92; see [`calibration`](super::calibration)).
+    #[must_use]
+    pub(crate) const fn radius_in_z(&self) -> &RadiusInZ {
+        &self.radius_in_z
     }
 
     /// The luminosity hook's amplitude scale min(a34 ÷ M^a35, a36 ÷ M^a37) of HPT equation 16.
@@ -271,6 +303,36 @@ impl LesserPowerLaw {
             second,
             crossing,
         }
+    }
+
+    /// A law from its parts as [`LesserPowerLaw::new`] makes them, for literal tables whose test
+    /// holds them to it.
+    #[must_use]
+    pub(crate) const fn from_parts(
+        form: PowerForm,
+        first: [f64; 2],
+        second: [f64; 2],
+        crossing: Option<(f64, bool)>,
+    ) -> Self {
+        Self {
+            form,
+            first,
+            second,
+            crossing,
+        }
+    }
+
+    /// k₁ and k₂.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn coefficients(&self) -> [f64; 2] {
+        [self.first[0], self.second[0]]
+    }
+
+    /// e₁ and e₂.
+    #[must_use]
+    pub(crate) const fn exponents(&self) -> [f64; 2] {
+        [self.first[1], self.second[1]]
     }
 
     /// min(k₁ x^−e₁, k₂ x^−e₂) at `x`.

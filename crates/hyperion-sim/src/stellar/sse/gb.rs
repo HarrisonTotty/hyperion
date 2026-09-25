@@ -14,6 +14,7 @@ use crate::math;
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::PhasePoint;
+use super::calibration::{Calibration, RadiusCoeffs, RadiusInZ, ZBlend, power_from_ln};
 use super::coeffs::{Side, ZCoeffs, lesser_side};
 use super::ms;
 
@@ -270,15 +271,134 @@ pub(crate) fn agb_radius(m: SolarMasses, l: SolarLuminosities, c: &ZCoeffs) -> S
     RadiusLaw::asymptotic(m, c).at(l)
 }
 
-/// A giant's radius at one mass as a function of luminosity, A (L^b1 + b2 L^x): [`radius`] and
-/// [`agb_radius`] with their mass dependence evaluated once, for the phases of P06.T7 and T8 that
-/// evaluate them along a track.
+/// A giant's radius at one mass as a function of luminosity: [`radius`] and [`agb_radius`] with
+/// their mass dependence evaluated once, for the phases of P06.T7 and T8 that evaluate them along a
+/// track.
+///
+/// At one of HPT's calibration metallicities it is the law A (L^b1 + b2 L^x) with the Appendix's
+/// coefficients at Z. Between two, it is the law at each calibration metallicity of the stencil,
+/// and ln R is the monotone cubic in log Z through their radii (galaxy-generation ruling 92; see
+/// [`calibration`](super::calibration)).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct RadiusLaw {
+pub(crate) struct RadiusLaw(LawInZ);
+
+/// A [`RadiusLaw`] at a calibration metallicity or between two.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LawInZ {
+    /// The law at Z, as printed.
+    Printed(PrintedLaw),
+    /// The laws at the nodes of the stencil (the first [`ZBlend::count`] places), and the cubic's
+    /// weights at Z.
+    Between { nodes: [LogLaw; 4], blend: ZBlend },
+}
+
+/// The radius law A (L^b1 + b2 L^x) at one metallicity and mass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PrintedLaw {
     a: f64,
     b1: f64,
     b2: f64,
     x: f64,
+}
+
+impl PrintedLaw {
+    /// Equation 46 at mass `m` (M☉): x = b3, A = min(b4 M^−b5, b6 M^−b7).
+    #[must_use]
+    fn giant(m: f64, k: &RadiusCoeffs) -> Self {
+        Self {
+            a: k.giant_scale.at(m),
+            b1: k.b1,
+            b2: k.b2,
+            x: k.b3,
+        }
+    }
+
+    /// Equation 74 at mass `m` (M☉; see [`agb_radius`]).
+    #[must_use]
+    fn asymptotic(m: f64, k: &RadiusCoeffs) -> Self {
+        let m_hef = k.m_hef;
+        let m1 = m_hef - 0.2;
+        let high_a = |m: f64| k.agb_scale.at(m);
+        let low_a = |m: f64| k.b56 + k.b57 * m;
+        let (x, a) = if m >= m_hef {
+            (k.b55 * k.b3, high_a(m))
+        } else if m <= m1 {
+            (k.b3, low_a(m))
+        } else {
+            let f = (m - m1) / 0.2;
+            let low = low_a(m1);
+            (
+                k.b3 * (1.0 + (k.b55 - 1.0) * f),
+                low + (high_a(m_hef) - low) * f,
+            )
+        };
+        Self {
+            a,
+            b1: k.b1,
+            b2: k.b2,
+            x,
+        }
+    }
+}
+
+/// The radius law of one calibration metallicity at one mass with its scale as ln A, which is
+/// what the cubic in ln R reads: ln R = ln A + ln(L^b1 + b2 L^x).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LogLaw {
+    ln_a: f64,
+    b1: f64,
+    b2: f64,
+    x: f64,
+}
+
+impl LogLaw {
+    /// The unused places of [`LawInZ::Between`].
+    const UNUSED: Self = Self {
+        ln_a: 0.0,
+        b1: 0.0,
+        b2: 0.0,
+        x: 0.0,
+    };
+
+    /// Equation 46 at a mass whose logarithm is `ln_m`, at calibration metallicity `node`.
+    #[must_use]
+    fn giant(ln_m: f64, node: &Calibration) -> Self {
+        let k = &node.coeffs;
+        Self {
+            ln_a: node.ln_giant_scale(ln_m),
+            b1: k.b1,
+            b2: k.b2,
+            x: k.b3,
+        }
+    }
+
+    /// Equation 74 at mass `m` (M☉), whose logarithm is `ln_m`, at calibration metallicity
+    /// `node`: [`PrintedLaw::asymptotic`] with A in logarithms.
+    #[must_use]
+    fn asymptotic(m: f64, ln_m: f64, node: &Calibration) -> Self {
+        let k = &node.coeffs;
+        let m_hef = k.m_hef;
+        let m1 = m_hef - 0.2;
+        let low_a = |m: f64| k.b56 + k.b57 * m;
+        let (x, ln_a) = if m >= m_hef {
+            (k.b55 * k.b3, node.ln_agb_scale(ln_m))
+        } else if m <= m1 {
+            (k.b3, math::ln(low_a(m)))
+        } else {
+            let f = (m - m1) / 0.2;
+            let low = low_a(m1);
+            (
+                k.b3 * (1.0 + (k.b55 - 1.0) * f),
+                math::ln(low + (k.agb_scale.at(m_hef) - low) * f),
+            )
+        };
+        Self {
+            ln_a,
+            b1: k.b1,
+            b2: k.b2,
+            x,
+        }
+    }
 }
 
 impl RadiusLaw {
@@ -286,12 +406,14 @@ impl RadiusLaw {
     #[must_use]
     pub(crate) fn giant(m: SolarMasses, c: &ZCoeffs) -> Self {
         let m = m.value();
-        let a = c.giant_radius_scale().at(m);
-        Self {
-            a,
-            b1: c.b(1),
-            b2: c.b(2),
-            x: c.b(3),
+        match c.radius_in_z() {
+            RadiusInZ::Calibrated => {
+                Self(LawInZ::Printed(PrintedLaw::giant(m, &c.radius_coeffs())))
+            }
+            RadiusInZ::Between(blend) => {
+                let ln_m = math::ln(m);
+                Self::between(blend, |node| LogLaw::giant(ln_m, node))
+            }
         }
     }
 
@@ -299,68 +421,122 @@ impl RadiusLaw {
     #[must_use]
     pub(crate) fn asymptotic(m: SolarMasses, c: &ZCoeffs) -> Self {
         let m = m.value();
-        let m_hef = c.m_hef().value();
-        let m1 = m_hef - 0.2;
-        let high_a = |m: f64| c.agb_radius_scale().at(m);
-        let low_a = |m: f64| c.b(56) + c.b(57) * m;
-        let (x, a) = if m >= m_hef {
-            (c.b(55) * c.b(3), high_a(m))
-        } else if m <= m1 {
-            (c.b(3), low_a(m))
-        } else {
-            let f = (m - m1) / 0.2;
-            let low = low_a(m1);
-            (
-                c.b(3) * (1.0 + (c.b(55) - 1.0) * f),
-                low + (high_a(m_hef) - low) * f,
-            )
-        };
-        Self {
-            a,
-            b1: c.b(1),
-            b2: c.b(2),
-            x,
+        match c.radius_in_z() {
+            RadiusInZ::Calibrated => Self(LawInZ::Printed(PrintedLaw::asymptotic(
+                m,
+                &c.radius_coeffs(),
+            ))),
+            RadiusInZ::Between(blend) => {
+                let ln_m = math::ln(m);
+                Self::between(blend, |node| LogLaw::asymptotic(m, ln_m, node))
+            }
         }
     }
 
+    /// `law` at each node of `blend`'s stencil.
+    #[must_use]
+    fn between(blend: &ZBlend, law: impl Fn(&Calibration) -> LogLaw) -> Self {
+        let mut nodes = [LogLaw::UNUSED; 4];
+        for (node, calibration) in nodes.iter_mut().zip(blend.nodes()) {
+            *node = law(calibration);
+        }
+        Self(LawInZ::Between {
+            nodes,
+            blend: *blend,
+        })
+    }
+
     /// The radius at luminosity `l`.
+    ///
+    /// Each power L^e is `exp(e ln L)` from one logarithm of L, which is
+    /// [`math::powf_positive`] bit for bit.
     #[must_use]
     pub(crate) fn at(&self, l: SolarLuminosities) -> SolarRadii {
         let l = l.value();
-        SolarRadii::new(
-            self.a * (math::powf_positive(l, self.b1) + self.b2 * math::powf_positive(l, self.x)),
-        )
+        debug_assert!(
+            l > 0.0 && l.is_finite(),
+            "a giant's luminosity is positive: {l}"
+        );
+        let ln_l = math::ln(l);
+        self.radius_of_powers(|_, e| power_from_ln(ln_l, e), |_, e| power_from_ln(ln_l, e))
     }
 
     /// [`RadiusLaw::at`] at the luminosity of `powers`, bit for bit, reading the powers of it
     /// that this law shares with the one `powers` was built from.
     #[must_use]
     pub(crate) fn at_powers(&self, powers: &LuminosityPowers) -> SolarRadii {
-        let l = powers.l;
-        let power = |exponent: f64, cached: [f64; 2]| {
+        let ln_l = powers.ln_l;
+        let power = |exponent: f64, [cached, value]: [f64; 2]| {
             // The same exponent, to the bit, gives the same power.
-            if exponent.total_cmp(&cached[0]).is_eq() {
-                cached[1]
+            if exponent.total_cmp(&cached).is_eq() {
+                value
             } else {
-                math::powf_positive(l, exponent)
+                power_from_ln(ln_l, exponent)
             }
         };
-        SolarRadii::new(self.a * (power(self.b1, powers.b1) + self.b2 * power(self.x, powers.x)))
+        self.radius_of_powers(|j, e| power(e, powers.b1[j]), |j, e| power(e, powers.x[j]))
+    }
+
+    /// The radius from L^b1 and L^x at each node, given as functions of the node's index and the
+    /// exponent: the printed law, or e^(the cubic through each node's ln A + ln(L^b1 + b2 L^x)).
+    ///
+    /// The first three calibration metallicities share b1 = 0.54 (the Appendix's cap), and a node
+    /// whose b1 is its predecessor's, to the bit, reuses its power.
+    #[must_use]
+    fn radius_of_powers(
+        &self,
+        l_b1: impl Fn(usize, f64) -> f64,
+        l_x: impl Fn(usize, f64) -> f64,
+    ) -> SolarRadii {
+        match &self.0 {
+            LawInZ::Printed(law) => {
+                SolarRadii::new(law.a * (l_b1(0, law.b1) + law.b2 * l_x(0, law.x)))
+            }
+            LawInZ::Between { nodes, blend } => {
+                let mut ln_r = [0.0; 4];
+                let mut previous: Option<[f64; 2]> = None;
+                for (j, (y, node)) in ln_r.iter_mut().zip(nodes).take(blend.count()).enumerate() {
+                    let p_b1 = match previous {
+                        Some([b1, p]) if b1.total_cmp(&node.b1).is_eq() => p,
+                        _ => l_b1(j, node.b1),
+                    };
+                    previous = Some([node.b1, p_b1]);
+                    *y = node.ln_a + math::ln(p_b1 + node.b2 * l_x(j, node.x));
+                }
+                SolarRadii::new(math::exp(blend.at(&ln_r)))
+            }
+        }
+    }
+
+    /// Each node's b1 and x, the first [`ZBlend::count`] (or one, at a calibration metallicity).
+    #[must_use]
+    fn exponents(&self) -> ([f64; 4], [f64; 4], usize) {
+        match &self.0 {
+            LawInZ::Printed(law) => ([law.b1, 0.0, 0.0, 0.0], [law.x, 0.0, 0.0, 0.0], 1),
+            LawInZ::Between { nodes, blend } => (
+                nodes.map(|node| node.b1),
+                nodes.map(|node| node.x),
+                blend.count(),
+            ),
+        }
     }
 }
 
-/// A fixed luminosity's powers L^b1 and L^x in a [`RadiusLaw`], which a phase evaluates at every
-/// step of a track with the law at the current mass (plan 06's integrator speed: its two `pow`
-/// calls were a sixth of a giant's). The coefficient A of the law follows the mass; b1 is a
-/// constant of the metallicity, and x is too except on the asymptotic giant branch between `M_HeF`
-/// − 0.2 and `M_HeF`, where [`RadiusLaw::at_powers`] finds it changed and evaluates it afresh.
+/// A fixed luminosity's powers L^b1 and L^x in a [`RadiusLaw`], at each of its nodes, which a
+/// phase evaluates at every step of a track with the law at the current mass (plan 06's
+/// integrator speed: its `pow` calls were a sixth of a giant's). The coefficient A of the law
+/// follows the mass; b1 is a constant of the metallicity, and x is too except on the asymptotic
+/// giant branch between a node's `M_HeF` − 0.2 and its `M_HeF` (between calibration metallicities,
+/// each node has its own, so over about 1.62–2.04 M☉), where [`RadiusLaw::at_powers`] finds it
+/// changed and evaluates it afresh.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LuminosityPowers {
-    l: f64,
-    /// b1 and L^b1.
-    b1: [f64; 2],
-    /// x and L^x.
-    x: [f64; 2],
+    /// ln L.
+    ln_l: f64,
+    /// b1 and L^b1 at each node of the law the powers were built from.
+    b1: [[f64; 2]; 4],
+    /// x and L^x at each node.
+    x: [[f64; 2]; 4],
 }
 
 impl LuminosityPowers {
@@ -368,10 +544,23 @@ impl LuminosityPowers {
     #[must_use]
     pub(crate) fn new(law: &RadiusLaw, l: SolarLuminosities) -> Self {
         let l = l.value();
+        debug_assert!(
+            l > 0.0 && l.is_finite(),
+            "a giant's luminosity is positive: {l}"
+        );
+        let ln_l = math::ln(l);
+        let (b1, x, count) = law.exponents();
+        let powers = |exponents: [f64; 4]| {
+            let mut out = [[0.0; 2]; 4];
+            for (slot, e) in out.iter_mut().zip(exponents).take(count) {
+                *slot = [e, power_from_ln(ln_l, e)];
+            }
+            out
+        };
         Self {
-            l,
-            b1: [law.b1, math::powf_positive(l, law.b1)],
-            x: [law.x, math::powf_positive(l, law.x)],
+            ln_l,
+            b1: powers(b1),
+            x: powers(x),
         }
     }
 }
@@ -718,7 +907,8 @@ impl FirstGiantBranch {
 mod tests {
     use hyperion_testkit::float::bits;
 
-    use super::super::continuity::assert_continuous_over;
+    use super::super::calibration::CALIBRATION_Z;
+    use super::super::continuity::{assert_continuous_over, assert_no_jump};
     use super::*;
     use crate::units::MetalFraction;
 
@@ -769,7 +959,12 @@ mod tests {
     /// exponent changes with the mass.
     #[test]
     fn a_radius_law_at_cached_powers_is_the_law_at_the_luminosity_bit_for_bit() {
-        for z in REFERENCE_Z {
+        // The five reference metallicities and one in each interval between HPT's calibration
+        // metallicities, where the law is the cubic through its nodes' (ruling 92).
+        for z in REFERENCE_Z
+            .into_iter()
+            .chain([2e-4, 6e-4, 2.5e-3, 6.3e-3, 0.015, 0.025])
+        {
             let c = coeffs(z);
             let m_hef = c.m_hef().value();
             for built_at in [0.8, m_hef - 0.1, m_hef, 5.0, 30.0] {
@@ -785,6 +980,122 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// At each of HPT's calibration metallicities the radius laws are the Appendix's own, bit for
+    /// bit: equation 46 as printed, and equation 74 as `agb_radius` evaluated it before ruling 92.
+    #[test]
+    fn the_radius_laws_are_the_printed_ones_at_the_calibration_metallicities() {
+        for z in CALIBRATION_Z {
+            let c = coeffs(z);
+            let m_hef = c.m_hef().value();
+            for m in [
+                0.8,
+                1.0,
+                m_hef - 0.3,
+                m_hef - 0.1,
+                m_hef,
+                3.0,
+                7.0,
+                20.0,
+                60.0,
+            ] {
+                let low_a = c.b(56) + c.b(57) * m;
+                let (x, a) = if m >= m_hef {
+                    (c.b(55) * c.b(3), c.agb_radius_scale().at(m))
+                } else if m <= m_hef - 0.2 {
+                    (c.b(3), low_a)
+                } else {
+                    let f = (m - (m_hef - 0.2)) / 0.2;
+                    let low = c.b(56) + c.b(57) * (m_hef - 0.2);
+                    (
+                        c.b(3) * (1.0 + (c.b(55) - 1.0) * f),
+                        low + (c.agb_radius_scale().at(m_hef) - low) * f,
+                    )
+                };
+                for l in [5.0, 100.0, 2.0e3, 3.0e4] {
+                    let pow = |e: f64| math::powf_positive(l, e);
+                    let giant = c.giant_radius_scale().at(m) * (pow(c.b(1)) + c.b(2) * pow(c.b(3)));
+                    let agb = a * (pow(c.b(1)) + c.b(2) * pow(x));
+                    let l = SolarLuminosities::new(l);
+                    assert_eq!(
+                        bits(radius(mass(m), l, &c).value()),
+                        bits(giant),
+                        "Z = {z}, M = {m}"
+                    );
+                    assert_eq!(
+                        bits(agb_radius(mass(m), l, &c).value()),
+                        bits(agb),
+                        "Z = {z}, M = {m}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Both radius laws are continuous in Z across the range, at the calibration metallicities,
+    /// where the cubic hands over to the node's own law, and across the Appendix's switches that
+    /// the printed laws have between them (ruling 92).
+    #[test]
+    fn the_radius_laws_are_continuous_in_metallicity() {
+        let (lo, hi) = (-4.0, math::log10(0.03));
+        for (m, l) in [
+            (1.0, 100.0),
+            (1.0, 2.0e3),
+            (1.4, 5.0e3),
+            (2.0, 300.0),
+            (5.0, 2.0e4),
+        ] {
+            let l = SolarLuminosities::new(l);
+            let log_r = |law: fn(SolarMasses, SolarLuminosities, &ZCoeffs) -> SolarRadii| {
+                move |log_z: f64| math::log10(law(mass(m), l, &coeffs(math::exp10(log_z))).value())
+            };
+            assert_no_jump(&format!("R_GB({m}, {l:?})"), log_r(radius), lo, hi, 1e-9);
+            assert_no_jump(
+                &format!("R_AGB({m}, {l:?})"),
+                log_r(agb_radius),
+                lo,
+                hi,
+                1e-9,
+            );
+        }
+    }
+
+    /// The red giant at 1 M☉ and 100 L☉ grows cooler with metallicity at every [Fe/H] from −2.2
+    /// to +0.3 (ruling 92: metal-poor giants are hotter), where HPT's printed law made it 4,180 K at
+    /// [Fe/H] −0.9 and 4,950 K at −0.6; and the giant at 2,000 L☉ and the asymptotic giant of
+    /// 1.4 M☉ at 5,000 L☉ grow larger with it. Above [Fe/H] +0.176, Z is held at 0.03.
+    #[test]
+    fn metal_poor_giants_are_hotter() {
+        let t_eff = |l: f64, r: SolarRadii| 5_772.0 * math::powf(l / (r.value() * r.value()), 0.25);
+        let mut previous: Option<[f64; 3]> = None;
+        for k in 0..=200 {
+            let fe_h = -2.2 + 0.0125 * f64::from(k);
+            let c = coeffs((0.02 * math::exp10(fe_h)).clamp(1e-4, 0.03));
+            let now = [
+                t_eff(100.0, radius(mass(1.0), SolarLuminosities::new(100.0), &c)),
+                radius(mass(1.0), SolarLuminosities::new(2.0e3), &c).value(),
+                agb_radius(mass(1.4), SolarLuminosities::new(5.0e3), &c).value(),
+            ];
+            if let Some([t, r_gb, r_agb]) = previous {
+                assert!(
+                    now[0] <= t,
+                    "T_eff rises from {t} to {} K at [Fe/H] {fe_h}",
+                    now[0]
+                );
+                assert!(
+                    now[1] >= r_gb,
+                    "R_GB falls from {r_gb} to {} at [Fe/H] {fe_h}",
+                    now[1]
+                );
+                assert!(
+                    now[2] >= r_agb,
+                    "R_AGB falls from {r_agb} to {} at [Fe/H] {fe_h}",
+                    now[2]
+                );
+            }
+            previous = Some(now);
         }
     }
 

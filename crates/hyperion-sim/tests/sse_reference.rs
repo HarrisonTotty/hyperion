@@ -532,3 +532,55 @@ fn modern_white_dwarf_masses_follow_cummings_2018() {
         );
     }
 }
+
+/// Ruling 92: under the generator's recipes, the white dwarf of every initial mass from 0.7 to
+/// 3 M☉ is lighter at higher metallicity, at every [Fe/H] of a 0.125 dex grid from −2.2 to +0.3
+/// (Z is held at 0.03 above +0.176, so the last points are equal), and it falls by 0.03–0.10 M☉
+/// per dex at 1.5–2 M☉ between −2.2 and +0.176. Detailed models fall by 0.04–0.08 M☉ per dex at
+/// 1.5 M☉ (Meng, Chen and Han 2008, A&A 487, 625, App. A) and about 0.05 at 1.5 and 2 M☉
+/// (Romero, Campos and Kepler 2015, MNRAS 450, 3708, Table 1). With HPT's printed giant radii
+/// between their calibration metallicities the mass swung ±0.08 M☉ about that trend, reversing
+/// three times: at 1.5 M☉, 0.664 M☉ at [Fe/H] −1.425 rose to 0.673 at −1.3 and 0.566 at −0.925 to
+/// 0.677 at −0.55. Measured: −0.080 M☉ per dex at 1.5 M☉, −0.090 at 1.75 and −0.099 at 2.
+#[test]
+#[ignore = "slow: about 380 full tracks"]
+fn white_dwarf_masses_fall_with_metallicity() {
+    const MASSES: [f64; 18] = [
+        0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.75, 1.9, 2.0, 2.1, 2.25, 2.5, 2.75, 3.0,
+    ];
+    let white_dwarf = |m0: f64, fe_h: f64| {
+        let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+        let remnant = Track::full(SolarMasses::new(m0), &composition, &StarDraws::median())
+            .remnant()
+            .expect("a full track leaves its remnant");
+        assert_eq!(
+            remnant.kind(),
+            RemnantKind::WhiteDwarf,
+            "{m0} M☉ at [Fe/H] {fe_h}"
+        );
+        remnant.mass().value()
+    };
+    let top = math::log10(0.03 / 0.02);
+    for m0 in MASSES {
+        let masses: Vec<(f64, f64)> = (0..=20)
+            .map(|k| {
+                let fe_h = -2.2 + 0.125 * f64::from(k);
+                (fe_h, white_dwarf(m0, fe_h))
+            })
+            .collect();
+        for pair in masses.windows(2) {
+            let [(_, before), (fe_h, after)] = [pair[0], pair[1]];
+            assert!(
+                after <= before + 1e-9,
+                "{m0} M☉: the white dwarf rises from {before} to {after} M☉ at [Fe/H] {fe_h}"
+            );
+        }
+        if (1.5..=2.0).contains(&m0) {
+            let slope = (white_dwarf(m0, top) - masses[0].1) / (top + 2.2);
+            assert!(
+                (-0.10..=-0.03).contains(&slope),
+                "{m0} M☉: {slope} M☉ per dex"
+            );
+        }
+    }
+}
