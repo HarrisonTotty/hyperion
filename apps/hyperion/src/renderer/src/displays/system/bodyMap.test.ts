@@ -330,6 +330,45 @@ describe("populationAnnuli", () => {
     ]);
   });
 
+  it("draws the selected belt, its scattered component with it, as selected", () => {
+    const { bodies, layout } = built(
+      withBelt((body) => {
+        if (body.population.state !== "ok" || body.population.value.type !== "belt") {
+          throw new Error("the populated answer's belt has its population");
+        }
+        const scattered = { inner_edge_m: 7e12, outer_edge_m: 1.5e13 };
+        return {
+          ...body,
+          population: {
+            state: "ok",
+            value: { ...body.population.value, outer_edge_m: 1.5e13, scattered },
+          },
+        };
+      }),
+    );
+    const selected = (selectedId: string | null) =>
+      populationAnnuli(bodies.bodies, FIXTURE_SYSTEM, layout, TIME, 200_000, selectedId).map(
+        (annulus) => [annulus.id.split(":")[0], annulus.selected],
+      );
+    const halo = bodies.bodies.find((body) => body.kind.kind === "cometary_halo")?.id ?? null;
+
+    expect(selected(null)).toEqual([
+      ["belt", false],
+      ["belt", false],
+      ["halo", false],
+    ]);
+    expect(selected(`${FIXTURE_SYSTEM}.e000`)).toEqual([
+      ["belt", true],
+      ["belt", true],
+      ["halo", false],
+    ]);
+    expect(selected(halo)).toEqual([
+      ["belt", false],
+      ["belt", false],
+      ["halo", true],
+    ]);
+  });
+
   it("draws the cometary halo only as far as it lies inside the view", () => {
     const { bodies, layout } = built(populatedBodies());
     const halo = (viewAu: number) =>

@@ -320,7 +320,14 @@ export function orbitScene(input: OrbitSceneInput): SpatialScene {
           paths: bodyPaths(bodies.bodies.bodies, bodies.layout, time, selectedId),
           annuli: [
             ...zoneAnnuli(bodies.bodies.zones, bodies.system, layout, time, bodies.zoneLayers),
-            ...populationAnnuli(bodies.bodies.bodies, bodies.system, layout, time, fitRadiusAu),
+            ...populationAnnuli(
+              bodies.bodies.bodies,
+              bodies.system,
+              layout,
+              time,
+              fitRadiusAu,
+              selectedId,
+            ),
           ],
         };
   const points = [...hostMarks(hosts, layout, time, bands), ...(bodyScene?.points ?? [])];

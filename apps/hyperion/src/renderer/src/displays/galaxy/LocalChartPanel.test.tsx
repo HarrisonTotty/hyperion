@@ -294,7 +294,7 @@ describe("LocalChartPanel", () => {
       "SYMBOLS NOT TO SCALE",
       "FILLED NORTH OF PLANE",
       "OPEN SOUTH OF PLANE",
-      "ACCENT WITHIN DRIVE RANGE",
+      "IN DRIVE RANGE",
       "BRACKET SELECTED",
     ]) {
       expect(within(legend).getByText(words)).toBeInTheDocument();

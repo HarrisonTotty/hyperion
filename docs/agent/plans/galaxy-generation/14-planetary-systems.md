@@ -2251,11 +2251,19 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   - _As built (`wireD`, round 9)._ Belts are ticked annuli labelled by their label, a
     scattered component a plain annulus (`SCATTERED DISC`); the halo is drawn only inside the
     fitted radius. Moons are drawn only in the `BODY <designation>` frame (`FOCUS BODY`, key `C`,
-    held back with `NO PLANET SELECTED`; `bodyFrame.ts`), on the planet's `EQUATORIAL PLANE`,
+    held back with `NO PLANET SELECTED`, the planet's kind and state (`PLANET DESTROYED`) or
+    `ORBIT NOT RESOLVED`, `focusHeldReason` (renamed by ruling 95.4, round 9, `ui11`); `bodyFrame.ts`), on the planet's `EQUATORIAL PLANE`,
     which is its orbital plane until T14; its scale ladder adds a Gm rung for irregulars. `BELTS`
     (key `B`) is offered only in a system with a belt and fits the belt proper. The list sorts
     rings, belts and the halo by inner edge, members under their belt. The system note reads the
     rings tag of planets only, since a dwarf planet's rings are `not_modelled` on its readout.
+  - _Renamed by ruling 95.4 (round 9, `ui11`)._ A population's readout section is `SMALL BODIES`,
+    not `POPULATION` (the galaxy's birth population keeps that word); a ring's `TYPE` and
+    `MATERIAL` rows are `CLASS` and `COMPOSITION`; a belt's `SIZE SLOPE` is `SIZE INDEX`; the belt
+    sites `INSIDE GIANT` and `IN GAP` read `INSIDE GIANT ORBIT` and `BETWEEN PLANETS`; the
+    architecture `COMPACT MULTI` reads `COMPACT MULTIPLANET`. A selected belt (with its scattered
+    component), halo or ring has its edges and ticks drawn as the selected orbit is, `--text` 2 px,
+    and the legend's `SELECTED ORBIT` reads `SELECTED ORBIT OR EDGES`.
 
 #### P14.T43 Body list and readouts
 
@@ -3871,9 +3879,10 @@ events }`): plan 04's `request_kinds_lists_every_variant` and the server's
     follows the hosts at the top. A body not present reads its state in words in the SMA column
     (widened to 15ch). The readout renders every section from its tag: `NOT RESOLVED` or
     `NOT YET MODELLED` once in place of the section, `not_applicable` no row. Rows: DESIG, ID,
-    LABEL, KIND, ORIGIN (moon), STATE, CAUSE and SINCE (`UT …`), PARENT, DETAIL, MASS (M⊕), SMA,
+    NAME, KIND, ORIGIN (moon), STATE, CAUSE and SINCE (`UT …`), PARENT, DETAIL, MASS (M⊕), SMA,
     PERIOD, ECC, INC, DIST, CLASS, RADIUS (km), DENSITY, GRAVITY, T EQ, IRON/ROCK/WATER/ENVELOPE
-    (%), MOONS, RINGS, and from the whole record SURFACE and HOOKS (SURFACE SEED). The bodies
+    (%), MOONS, RINGS, and from the whole record SURFACE and GENERATOR INPUTS (SURFACE SEED); `LABEL` became `NAME` and
+    `HOOKS` `GENERATOR INPUTS` (renamed by ruling 95.4, round 9, `ui11`). The bodies
     panel reads `DETAIL` (granted level) and `ARCH` (the primary's zone's class); a star's readout
     reads each zone that holds it: ZONE, ARCH, STABLE ZONE (left out about a single star),
     SNOW LINE, HABITABLE ZONE (`~` when extrapolated, `FROM` with an outer limit beyond every

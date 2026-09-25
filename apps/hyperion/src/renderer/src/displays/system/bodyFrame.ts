@@ -14,6 +14,7 @@ import type { UniverseTime } from "@hyperion/protocol";
 
 import { orbitPolyline, positionAt } from "../../lib/orbit";
 import { bodySymbol } from "../../lib/system/bodySymbols";
+import { bodyKindLabel, bodyStateLabel, sectionStateLabel } from "../../lib/system/bodyWords";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import type { BodyOrbit, SystemBody } from "../../lib/system/model";
 import { type LocalFrame, planeFrame } from "../../spatial/frame";
@@ -77,6 +78,44 @@ export function focusTarget(
     return planet !== undefined && canFocus(planet) ? planet : null;
   }
   return null;
+}
+
+/**
+ * Why `FOCUS BODY` is held back for a selection, in words, or `null` when it is not: `NO PLANET
+ * SELECTED` for a selection that is not a planet, a dwarf planet, or a moon's or ring's; the planet
+ * by its kind and state when it is not present (`PLANET DESTROYED`, `DWARF PLANET NOT YET FORMED`);
+ * `ORBIT NOT RESOLVED` or `ORBIT NOT YET MODELLED` when its orbit is withheld (the UX advisor's
+ * ruling for ui11).
+ */
+export function focusHeldReason(
+  selected: SystemBody | null,
+  bodies: ReadonlyArray<SystemBody>,
+): string | null {
+  if (focusTarget(selected, bodies) !== null) {
+    return null;
+  }
+  let planet: SystemBody | null = null;
+  if (selected !== null) {
+    const parent = selected.parent;
+    if (selected.kind.kind === "planet" || selected.kind.kind === "dwarf_planet") {
+      planet = selected;
+    } else if (
+      (selected.kind.kind === "moon" || selected.kind.kind === "ring") &&
+      parent?.kind === "body"
+    ) {
+      planet = bodies.find((body) => body.id === parent.id) ?? null;
+    }
+  }
+  if (planet === null) {
+    return "NO PLANET SELECTED";
+  }
+  if (planet.state.kind !== "present") {
+    return `${bodyKindLabel(planet.kind)} ${bodyStateLabel(planet.state)}`;
+  }
+  const orbit = planet.orbit.state;
+  return orbit === "not_resolved" || orbit === "not_modelled"
+    ? `ORBIT ${sectionStateLabel(orbit)}`
+    : "NO PLANET SELECTED";
 }
 
 /** The orbit of a body that {@link focusTarget} chose, which it holds. */
@@ -177,7 +216,7 @@ export interface BodySceneInput {
  * The orbit map in a focused body's frame at the display time: the body at the centre, its moons
  * on their orbits, each orbit a path, the selected moon's `selected`, and its rings as annuli on
  * its equatorial plane, labelled, their two edges joined by radial ticks every 10° as the guide
- * draws a belt and a ring (plan 14, P14.T42.a–b).
+ * draws a belt and a ring, the selected ring's drawn as a selected orbit is (plan 14, P14.T42.a–b).
  *
  * @remarks
  * A moon or ring not present is not drawn; it stays in the list. Nothing beyond the body's own
@@ -235,6 +274,7 @@ export function bodyScene(input: BodySceneInput): SpatialScene {
         label: populationName(satellite),
         // A second ring lies about the first, whose label stands rimward.
         labelSpinward: annuli.length % 2 === 1,
+        selected: satellite.id === selectedId,
       });
     }
   }

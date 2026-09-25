@@ -12,7 +12,7 @@ import type { RequestState } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
 import { NewUniverseForm } from "./NewUniverseForm";
 
-/** Height of each row: two lines, the first the `OPEN` button's 2rem target. */
+/** Height of each row: two lines, the first the `OPEN UNIVERSE` button's 2rem target. */
 const ROW_HEIGHT_REM = 3.5;
 
 /** Height of the table's header: two lines of text, with no command in them. */
@@ -31,7 +31,7 @@ interface FormChoice {
   readonly expanded: boolean;
 }
 
-/** Why a universe's `OPEN` is held back while nothing else holds it back, or `null`. */
+/** Why a universe's `OPEN UNIVERSE` is held back while nothing else holds it back, or `null`. */
 function mismatchReason(universe: UniverseInfo, serverGeneratorVersion: number): string | null {
   return universe.status === "generator_mismatch"
     ? `GENERATOR VERSION ${formatNumber(universe.generator_version, 0)}: server runs version ` +
@@ -95,13 +95,16 @@ function OpenUniverseReadout({ open }: OpenUniverseReadoutProps) {
 interface UniverseRowProps {
   readonly universe: UniverseInfo;
   readonly isOpen: boolean;
-  /** Whether this row's `OPEN` was given and its answer is awaited. */
+  /** Whether this row's `OPEN UNIVERSE` was given and its answer is awaited. */
   readonly isPending: boolean;
   readonly serverGeneratorVersion: number;
   /** The IDs of the elements that say why every command is held back, if anything does. */
   readonly inhibitedBy: ReadonlyArray<string>;
   readonly onOpen: (universe: UniverseIdHex) => void;
-  /** Called when the operator points at or focuses this row's `OPEN`, and with `null` after. */
+  /**
+   * Called when the operator points at or focuses this row's `OPEN UNIVERSE`, and with `null`
+   * after.
+   */
   readonly onPoint: (universe: UniverseIdHex | null) => void;
 }
 
@@ -156,7 +159,7 @@ function UniverseRow({
               onPoint(null);
             }}
           >
-            {isPending ? "PENDING" : "OPEN"}
+            {isPending ? "PENDING" : "OPEN UNIVERSE"}
           </button>
         )}
         {reason === null ? null : (
@@ -173,7 +176,7 @@ function UniverseRow({
 interface UniverseTableProps {
   readonly universes: ReadonlyArray<UniverseInfo>;
   readonly openId: UniverseIdHex | null;
-  /** The universe whose `OPEN` awaits its answer, if any. */
+  /** The universe whose `OPEN UNIVERSE` awaits its answer, if any. */
   readonly pendingId: UniverseIdHex | null;
   readonly serverGeneratorVersion: number;
   readonly inhibitedBy: ReadonlyArray<string>;
@@ -181,13 +184,13 @@ interface UniverseTableProps {
 }
 
 /**
- * The server's universes, each with its `OPEN` command, scrolling inside the panel, with the
- * position of the rows in view.
+ * The server's universes, each with its `OPEN UNIVERSE` command, scrolling inside the panel, with
+ * the position of the rows in view.
  *
  * @remarks
  * When a universe of another generator version is listed, a line below the list says why the
- * `OPEN` being pointed at or focused is held back, so that the reason is never clipped by the
- * list's edge.
+ * `OPEN UNIVERSE` being pointed at or focused is held back, so that the reason is never clipped by
+ * the list's edge.
  */
 function UniverseTable({
   universes,
@@ -344,20 +347,20 @@ interface UniversePanelProps {
  *
  * @remarks
  * Its title is a display control that folds the panel to one line, the open universe's name, seed
- * and generator version, with a chevron that shows which; the display decides when it is folded.
- * If the panel folds while the focus is in it, as when an `OPEN` opens its universe, the focus
- * moves to the title control rather than being lost, and so it does from the list's `RETRY`, which
- * goes as it is pressed. Opening and creating change what the server
- * holds, so both are commands: each shows `PENDING` beside the control that gave it and then the
- * server's answer, never an optimistic change, and no other command can be given until it has
- * answered: the `OPEN` given reads `PENDING`, and `CREATE` has its status beside it. While the link
- * is down every command is held back and states the link's reason, as is the `OPEN` of a universe
+ * and generator version, with a chevron that shows which; the display decides when it is folded. If
+ * the panel folds while the focus is in it, as when an `OPEN UNIVERSE` opens its universe, the
+ * focus moves to the title control rather than being lost, and so it does from the list's `RETRY`,
+ * which goes as it is pressed. Opening and creating change what the server holds, so both are
+ * commands: each shows `PENDING` beside the control that gave it and then the server's answer,
+ * never an optimistic change, and no other command can be given until it has answered: the `OPEN
+ * UNIVERSE` given reads `PENDING`, and `CREATE` has its status beside it. While the link is down
+ * every command is held back and states the link's reason, as is the `OPEN UNIVERSE` of a universe
  * made by another generator version, which states both versions. Seeds and IDs are shown in upper
- * case. The `NEW UNIVERSE` fields are shown while no universe is open and folded once one is,
- * since universes are created rarely; the operator can show or fold them at any time, and that
- * choice holds until another universe is opened. A create whose result is unconfirmed keeps the
- * panel and the fields shown, so that its report is seen, and holds both controls back, described
- * by the report, until it is cleared.
+ * case. The `NEW UNIVERSE` fields are shown while no universe is open and folded once one is, since
+ * universes are created rarely; the operator can show or fold them at any time, and that choice
+ * holds until another universe is opened. A create whose result is unconfirmed keeps the panel and
+ * the fields shown, so that its report is seen, and holds both controls back, described by the
+ * report, until it is cleared.
  */
 export function UniversePanel({ expanded, onToggle }: UniversePanelProps) {
   const titleId = useId();

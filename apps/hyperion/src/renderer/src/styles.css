@@ -1732,7 +1732,8 @@ body {
 }
 
 /* The primary's readings, under their own heading, as a panel's title is set. */
-.system-readout__heading {
+.system-readout__heading,
+.cursor-readout__heading {
   margin: 0.75rem 0 0.25rem;
   color: var(--text-muted);
   font-size: 0.875rem;
@@ -1864,6 +1865,11 @@ body {
 /* A control's single-key binding, shown on it as the guide asks. */
 .control__key {
   font-family: var(--font-mono);
+}
+
+/* The cursor's galactic readings, under their frame's heading as the system readout's are. */
+.cursor-readout__heading {
+  margin: 0.5rem 0 0;
 }
 
 .cursor-readout__values {

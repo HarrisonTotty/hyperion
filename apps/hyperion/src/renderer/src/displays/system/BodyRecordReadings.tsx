@@ -121,8 +121,8 @@ function populationRows(population: Population): ReactNode {
     case "ring":
       rows = (
         <>
-          <ReadoutRow label="TYPE" shown={value(ringKindLabel(population.ringKind))} />
-          <ReadoutRow label="MATERIAL" shown={value(ringMaterialLabel(population.material))} />
+          <ReadoutRow label="CLASS" shown={value(ringKindLabel(population.ringKind))} />
+          <ReadoutRow label="COMPOSITION" shown={value(ringMaterialLabel(population.material))} />
           <ReadoutRow
             label="EDGES"
             shown={value(span(population.innerEdgeM, population.outerEdgeM))}
@@ -165,7 +165,7 @@ function populationRows(population: Population): ReactNode {
               />
             </>
           )}
-          <ReadoutRow label="SIZE SLOPE" shown={value(formatNumber(population.sizeSlope, 2))} />
+          <ReadoutRow label="SIZE INDEX" shown={value(formatNumber(population.sizeSlope, 2))} />
           <ReadoutRow
             label="LARGEST DIAMETER"
             shown={value(formatRadiusKm(population.largestDiameterM * KM_PER_M), "km")}
@@ -303,8 +303,8 @@ export function BodyRecordReadings({
     <>
       <ReadoutRow label="DESIG" shown={value(body.designation)} wide />
       <ReadoutRow label="ID" shown={value(formatBodyIdHex(body.id))} wide />
-      {sectionRows("LABEL", body.label, (label) => (
-        <ReadoutRow label="LABEL" shown={value(label)} wide />
+      {sectionRows("NAME", body.label, (label) => (
+        <ReadoutRow label="NAME" shown={value(label)} wide />
       ))}
       <ReadoutRow label="KIND" shown={value(bodyKindLabel(body.kind))} wide />
       {body.kind.kind === "moon" ? (
@@ -359,11 +359,11 @@ export function BodyRecordReadings({
       {sectionRows("RINGS", body.rings, (rings) => (
         <ReadoutRow label="RINGS" shown={value(countOf(rings))} />
       ))}
-      {sectionRows("POPULATION", body.population, populationRows)}
+      {sectionRows("SMALL BODIES", body.population, populationRows)}
       {whole === null ? null : (
         <>
           {sectionRows("SURFACE", whole.surface, () => null)}
-          {sectionRows("HOOKS", whole.hooks, (hooks) => (
+          {sectionRows("GENERATOR INPUTS", whole.hooks, (hooks) => (
             <ReadoutRow label="SURFACE SEED" shown={value(hooks.surfaceSeed.toUpperCase())} wide />
           ))}
         </>

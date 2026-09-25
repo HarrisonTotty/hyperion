@@ -322,7 +322,7 @@ describe("SystemView's body readout", () => {
     await selectRow(user, /\/768/);
     await answerDetail(socket, earthDetail());
 
-    for (const section of ["LABEL", "MOONS", "RINGS", "SURFACE", "HOOKS"]) {
+    for (const section of ["NAME", "MOONS", "RINGS", "SURFACE", "GENERATOR INPUTS"]) {
       expect(terms(section)).toHaveLength(1);
       expect(reading(section)).toBe("NOT YET MODELLED");
     }
@@ -338,7 +338,7 @@ describe("SystemView's body readout", () => {
     expect(reading("DETAIL")).toBe("MASS AND ORBIT ONLY");
     expect(reading("BULK")).toBe("NOT RESOLVED");
     expect(reading("SURFACE")).toBe("NOT RESOLVED");
-    expect(reading("HOOKS")).toBe("NOT RESOLVED");
+    expect(reading("GENERATOR INPUTS")).toBe("NOT RESOLVED");
     expect(terms("RADIUS")).toHaveLength(0);
     expect(reading("SMA")).toBe("1.00 AU");
   });
@@ -352,7 +352,7 @@ describe("SystemView's body readout", () => {
     expect(reading("DESIG")).toBe("H7K 4C0RFZ D-7 /1280");
     expect(reading("CLASS")).toBe("GAS GIANT");
     expect(terms("SURFACE")).toHaveLength(0);
-    expect(reading("HOOKS")).toBe("NOT YET MODELLED");
+    expect(reading("GENERATOR INPUTS")).toBe("NOT YET MODELLED");
     expect(reading("MASS")).toBe("318 M");
   });
 
@@ -524,7 +524,7 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     expect(reading("KIND")).toBe("MOON");
     expect(reading("ORIGIN")).toBe("GIANT IMPACT");
     expect(reading("PARENT")).toBe("H7K 4C0RFZ D-7 /256");
-    expect(reading("LABEL")).toBe("A b I");
+    expect(reading("NAME")).toBe("A b I");
     // The angle between the moon's orbit normal (i 0.09, Ω 1.2) and its planet's (i 1.0, Ω 2.5).
     const cosine = dot(
       orbitNormal({ inclinationRad: 0.09, ascendingNodeRad: 1.2 }),
@@ -554,14 +554,14 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     await selectRow(user, /\/384,/);
 
     expect(reading("KIND")).toBe("RING");
-    expect(reading("LABEL")).toBe("NOT YET MODELLED");
-    expect(reading("TYPE")).toBe("MASSIVE");
-    expect(reading("MATERIAL")).toBe("POROUS ICE");
+    expect(reading("NAME")).toBe("NOT YET MODELLED");
+    expect(reading("CLASS")).toBe("MASSIVE");
+    expect(reading("COMPOSITION")).toBe("POROUS ICE");
     expect(reading("EDGES")).toBe("66.0 Mm – 137 Mm");
     expect(reading("OPTICAL DEPTH")).toBe("0.600");
     expect(reading("GAP 2:1")).toBe("117 Mm");
     expect(terms("ORBIT")).toHaveLength(0);
-    expect(terms("POPULATION")).toHaveLength(0);
+    expect(terms("SMALL BODIES")).toHaveLength(0);
   });
 
   it("reads a belt's site, edges, statistics and members", async () => {
@@ -570,10 +570,10 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
 
     await selectRow(user, /\/57344,/);
 
-    expect(reading("SITE")).toBe("INSIDE GIANT");
+    expect(reading("SITE")).toBe("INSIDE GIANT ORBIT");
     expect(reading("COMPOSITION")).toBe("ROCKY");
     expect(reading("EDGES")).toBe("2.06 AU – 3.28 AU");
-    expect(reading("SIZE SLOPE")).toBe("3.00");
+    expect(reading("SIZE INDEX")).toBe("3.00");
     expect(reading("LARGEST DIAMETER")).toBe("940 km");
     expect(reading("MEAN ECC")).toBe("0.1250");
     expect(reading("MEAN INC")).toBe("10.0°");

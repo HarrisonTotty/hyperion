@@ -100,7 +100,7 @@ export function SymbolLegend({ bands }: SymbolLegendProps) {
       </p>
       <p className="symbol-legend__item">
         <Mark diameterRem={SIZE_CLASS_REM[4]} filled available />
-        ACCENT WITHIN DRIVE RANGE
+        IN DRIVE RANGE
       </p>
       <p className="symbol-legend__item">
         <Reticle />

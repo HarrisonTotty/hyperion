@@ -14,6 +14,7 @@ import {
   bodyFrameName,
   bodyPlane,
   bodyScene,
+  focusHeldReason,
   focusTarget,
   LONE_BODY_FIT_RADII,
 } from "./bodyFrame";
@@ -75,6 +76,41 @@ describe("focusTarget", () => {
     expect(focusTarget(body(BELT, bodies), bodies)).toBeNull();
     expect(focusTarget(body(DESTROYED_PLANET, bodies), bodies)).toBeNull();
     expect(focusTarget(null, bodies)).toBeNull();
+  });
+});
+
+describe("focusHeldReason", () => {
+  it("holds nothing back while there is a planet to focus", () => {
+    const bodies = bodiesOf();
+
+    for (const id of [PLANET, MOON, RING]) {
+      expect(focusHeldReason(body(id, bodies), bodies)).toBeNull();
+    }
+  });
+
+  it("says no planet is selected for a belt or no selection", () => {
+    const bodies = bodiesOf();
+
+    expect(focusHeldReason(body(BELT, bodies), bodies)).toBe("NO PLANET SELECTED");
+    expect(focusHeldReason(null, bodies)).toBe("NO PLANET SELECTED");
+  });
+
+  it("names a planet not present by its kind and state", () => {
+    const bodies = bodiesOf();
+
+    expect(focusHeldReason(body(DESTROYED_PLANET, bodies), bodies)).toBe("PLANET DESTROYED");
+  });
+
+  it("says the orbit is withheld for a planet, or a moon's planet, whose orbit is", () => {
+    const withOrbit = bodiesOf();
+    const withheld: SystemBody = { ...body(PLANET, withOrbit), orbit: { state: "not_resolved" } };
+    const bodies = withOrbit.with(
+      withOrbit.findIndex((candidate) => candidate.id === PLANET),
+      withheld,
+    );
+
+    expect(focusHeldReason(withheld, bodies)).toBe("ORBIT NOT RESOLVED");
+    expect(focusHeldReason(body(MOON, bodies), bodies)).toBe("ORBIT NOT RESOLVED");
   });
 });
 
@@ -160,6 +196,11 @@ describe("bodyScene", () => {
         annulus.centre,
       ]),
     ).toEqual([["MASSIVE RING", 66_000_000, 136_800_000, true, undefined]]);
+  });
+
+  it("draws the ring as selected once it is selected, as a selected orbit is", () => {
+    expect(sceneOf().annuli?.map((annulus) => annulus.selected)).toEqual([false]);
+    expect(sceneOf(RING).annuli?.map((annulus) => annulus.selected)).toEqual([true]);
   });
 
   it("draws no reticle for a selection outside the body's frame", () => {

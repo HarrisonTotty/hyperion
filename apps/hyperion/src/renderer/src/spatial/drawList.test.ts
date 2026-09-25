@@ -679,6 +679,22 @@ describe("buildDrawList annuli", () => {
     ]);
   });
 
+  it("draws a selected annulus's edges and ticks in --text 2 px wide, as a selected orbit", () => {
+    const scene = bareScene({
+      annuli: [annulus("belt", 10, 12, { ticks: true, selected: true })],
+    });
+
+    const { ops } = buildDrawList(scene, TOP, VIEWPORT);
+
+    expect(polylines(ops).map((edge) => [edge.stroke, edge.widthPx])).toEqual([
+      ["text", 2],
+      ["text", 2],
+    ]);
+    expect(ops.flatMap((op) => (op.kind === "ticks" ? [[op.stroke, op.widthPx]] : []))).toEqual([
+      ["text", 2],
+    ]);
+  });
+
   it("leaves --line to the plane's grid and rings when paths and annuli are drawn", () => {
     const withRing = { spacing: 20, extent: 50, rings: [{ radius: 20, label: "20 AU" }] };
     const furniture = buildDrawList(bareScene({ plane: withRing }), cameraAt(30), VIEWPORT).ops;

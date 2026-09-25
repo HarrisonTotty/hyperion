@@ -60,6 +60,10 @@ describe("CentreEntry", () => {
   it("reads the cursor's radius, angle and height in the GALACTIC frame", () => {
     renderEntry();
 
+    // The guide's § Voice: the three stand under the heading GALACTIC.
+    expect(screen.getByRole("heading", { name: "GALACTIC" }).nextElementSibling).toContainElement(
+      screen.getByText("RADIUS", { exact: true }),
+    );
     expect(reading("RADIUS")).toBe("26,000.0 ly");
     expect(reading("ANGLE")).toBe("000.0°");
     expect(reading("HEIGHT")).toBe("+12.0 ly");
@@ -255,7 +259,7 @@ describe("CentreEntry", () => {
     expect(summary).toHaveAttribute("aria-live", "polite");
     expect(summary).toHaveAttribute("aria-atomic", "true");
     expect(summary).toHaveTextContent(
-      "CURSOR X 26,000.0 ly, Y -300.0 ly, Z 12.0 ly, RADIUS 26,001.7 ly, ANGLE 359.3°, " +
+      "CURSOR X 26,000.0 ly, Y -300.0 ly, Z 12.0 ly, GALACTIC RADIUS 26,001.7 ly, ANGLE 359.3°, " +
         "HEIGHT +12.0 ly",
     );
   });

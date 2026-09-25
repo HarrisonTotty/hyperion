@@ -404,13 +404,17 @@ function annulusOps(
   const ops: DrawOp[] = [];
   const centre = footOnPlane(annulus, scene.frame.north);
   const { innerRadius, outerRadius } = annulus;
+  // A selected band is drawn as the selected orbit is: brighter and wider, never by colour alone.
+  const role: PathRole = annulus.selected === true ? "selected" : "reference";
+  const stroke = PATH_STROKE[role];
+  const widthPx = role === "selected" ? PATH_WIDTH_PX.selected : ANNULUS_WIDTH_PX;
   const radii = innerRadius === outerRadius ? [outerRadius] : [innerRadius, outerRadius];
   for (const radius of radii.filter((edge) => edge > 0)) {
     ops.push({
       kind: "polyline",
       points: ringPolyline(radius, scene.frame).map((point) => toScreen(add(centre, point))),
-      stroke: "textMuted",
-      widthPx: ANNULUS_WIDTH_PX,
+      stroke,
+      widthPx,
     });
   }
   if (annulus.ticks && outerRadius > innerRadius) {
@@ -421,13 +425,13 @@ function annulusOps(
         to: toScreen(onPlaneAt(scene, centre, outerRadius, angleDeg)),
       });
     }
-    ops.push({ kind: "ticks", segments, stroke: "textMuted", widthPx: ANNULUS_WIDTH_PX });
+    ops.push({ kind: "ticks", segments, stroke, widthPx });
   }
   if (annulus.edgeTicks === true) {
     const edges = radii.filter((edge) => edge > 0);
     const segments = edgeTickSegments(scene, centre, edges, toScreen, TICK_LENGTH_REM * remPx);
     if (segments.length > 0) {
-      ops.push({ kind: "ticks", segments, stroke: "textMuted", widthPx: ANNULUS_WIDTH_PX });
+      ops.push({ kind: "ticks", segments, stroke, widthPx });
     }
   }
   return ops;

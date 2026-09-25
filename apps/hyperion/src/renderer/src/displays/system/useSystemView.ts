@@ -16,7 +16,14 @@ import type { RequestState } from "../../lib/useServerRequest";
 import type { SpatialScene } from "../../spatial/marks";
 import { localFrameAt } from "../../spatial/frame";
 import { dot, norm } from "../../spatial/vec3";
-import { bodyFitAu, bodyFrameName, bodyPlane, bodyScene, focusTarget } from "./bodyFrame";
+import {
+  bodyFitAu,
+  bodyFrameName,
+  bodyPlane,
+  bodyScene,
+  focusHeldReason,
+  focusTarget,
+} from "./bodyFrame";
 import {
   ALL_ZONE_LAYERS,
   type BodiesLayout,
@@ -127,6 +134,11 @@ export interface SystemViewState {
   readonly focused: SystemBody | null;
   /** The body `FOCUS BODY` would focus for the selection: a planet, or a moon's or ring's planet. */
   readonly focusable: SystemBody | null;
+  /**
+   * Why `FOCUS BODY` is held back for the selection (`NO PLANET SELECTED`, `PLANET DESTROYED`,
+   * `ORBIT NOT RESOLVED`), or `null` when there is a planet to focus.
+   */
+  readonly focusHeld: string | null;
   /** The map's frame, as its `FRAME` reads: `SYSTEM BARYCENTRIC`, or `BODY <designation>`. */
   readonly frameName: string;
   /** The zoom preset whose radius the view fits, and the grid covers. */
@@ -340,6 +352,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
       : focusTarget(bodyList.find((body) => body.id === focusedId) ?? null, bodyList);
   const focusedBody = focused !== null && focused.id === focusedId ? focused : null;
   const focusable = focusTarget(chosenBody ?? null, bodyList);
+  const focusHeld = focusHeldReason(chosenBody ?? null, bodyList);
   const focusPlane = useMemo(
     () => (focusedBody === null ? null : bodyPlane(focusedBody, localFrameAt(target.positionLy))),
     [focusedBody, target.positionLy],
@@ -535,6 +548,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
         : false,
     focused: focusedBody,
     focusable,
+    focusHeld,
     frameName: focusedBody === null ? "SYSTEM BARYCENTRIC" : bodyFrameName(focusedBody),
     zoom,
     zoomHeld,

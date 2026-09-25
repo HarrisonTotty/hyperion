@@ -442,9 +442,12 @@ function hostCentreAu(
  * the zones' annuli do. The halo is a shell, drawn as the circles where it meets the plane: its
  * inner edge when that lies inside `viewRadiusAu`, the radius the view fits, labelled as its inner
  * edge, and its outer edge too when that does, labelled as the halo; beyond the view it draws nothing, since a ring off the map says nothing. A body
- * not present, or whose section is not `ok`, draws nothing.
+ * not present, or whose section is not `ok`, draws nothing. The selected belt, its scattered
+ * component with it, or the selected halo is drawn as the selected orbit is (the guide's selection
+ * rule).
  *
  * @param viewRadiusAu - The radius the view fits, from the barycentre.
+ * @param selectedId - The selected body, or `null`.
  */
 export function populationAnnuli(
   bodies: ReadonlyArray<SystemBody>,
@@ -452,6 +455,7 @@ export function populationAnnuli(
   layout: HierarchyLayout,
   time: UniverseTime,
   viewRadiusAu: number,
+  selectedId: string | null = null,
 ): ReadonlyArray<AnnulusMark> {
   const annuli: AnnulusMark[] = [];
   for (const body of bodies) {
@@ -464,6 +468,7 @@ export function populationAnnuli(
       continue;
     }
     const name = populationName(body);
+    const selected = body.id === selectedId;
     if (population.kind === "belt") {
       annuli.push({
         id: `belt:${body.id}`,
@@ -475,6 +480,7 @@ export function populationAnnuli(
         // Spinward, clear of the snow line's and the zones' labels on the rimward ray, which a belt
         // near the snow line would meet.
         labelSpinward: true,
+        selected,
       });
       if (population.scattered !== null) {
         annuli.push({
@@ -484,6 +490,7 @@ export function populationAnnuli(
           outerRadius: population.scattered.outerEdgeM / METRES_PER_AU,
           ticks: false,
           label: "SCATTERED DISC",
+          selected,
         });
       }
       continue;
@@ -504,6 +511,7 @@ export function populationAnnuli(
       ticks: false,
       // A lone circle is the halo's inner edge, and says so.
       label: whole ? name : `${name} INNER EDGE`,
+      selected,
     });
   }
   return annuli;

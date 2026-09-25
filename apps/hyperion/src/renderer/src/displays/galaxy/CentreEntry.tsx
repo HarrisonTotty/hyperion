@@ -177,15 +177,15 @@ interface CentreEntryProps {
  * four decimals and shown with the decimals it was typed with, up to four, in a field wide enough
  * for the longest, `-65,535.9999`, with `ly` beside it.
  * A value that is not a number, or lies outside the root cube (−65,536 ly up to 65,536 ly, that
- * face excluded), is refused with a message naming its field, and leaves the cursor where it was;
- * a move of the cursor along that axis replaces it. Beside them, the cursor's radius, angle and
- * height in the `GALACTIC` frame; the angle is missing on the galactic axis, where it is undefined
- * (D11). The whole position is announced when the cursor moves. `CENTRE CHART`, or the key `C`
- * pressed outside a text field without a modifier (D3), publishes the cursor as the chart centre;
- * both are held back, saying why, while an entry is refused or while the chart cannot be centred,
- * as when the link is down, whose reason the panel then shows. The key's listener is on the
- * document for as long as the entry is mounted, which under `Activity` is while `GALAXY` is shown
- * with a universe open.
+ * face excluded), is refused with a message naming its field, and leaves the cursor where it was; a
+ * move of the cursor along that axis replaces it. Under them, the cursor's `RADIUS`, `ANGLE` and
+ * `HEIGHT` in the `GALACTIC` frame, grouped under that heading as the guide asks; the angle is
+ * missing on the galactic axis, where it is undefined (D11). The whole position is announced when
+ * the cursor moves. `CENTRE CHART`, or the key `C` pressed outside a text field without a modifier
+ * (D3), publishes the cursor as the chart centre; both are held back, saying why, while an entry is
+ * refused or while the chart cannot be centred, as when the link is down, whose reason the panel
+ * then shows. The key's listener is on the document for as long as the entry is mounted, which
+ * under `Activity` is while `GALAXY` is shown with a universe open.
  */
 export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEntryProps) {
   const titleId = useId();
@@ -364,6 +364,8 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
           </p>
         )}
       </form>
+      {/* The guide's § Voice: a readout groups the three under the heading `GALACTIC`. */}
+      <h3 className="cursor-readout__heading">GALACTIC</h3>
       <dl className="readout cursor-readout__values">
         <Reading label="RADIUS" value={radius} unit="ly" />
         <Reading label="ANGLE" value={angle} unit="°" />
@@ -371,7 +373,8 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
       </dl>
       {/* Heard as a whole each time the cursor moves, from a map's arrow keys most of all. */}
       <p className="visually-hidden" aria-live="polite" aria-atomic="true">
-        {`CURSOR X ${shown(0)} ly, Y ${shown(1)} ly, Z ${shown(2)} ly, RADIUS ${radius} ly, ` +
+        {`CURSOR X ${shown(0)} ly, Y ${shown(1)} ly, Z ${shown(2)} ly, ` +
+          `GALACTIC RADIUS ${radius} ly, ` +
           `ANGLE ${angle === null ? "none" : `${angle}°`}, HEIGHT ${height} ly`}
       </p>
     </section>

@@ -103,7 +103,8 @@ export interface PathMark {
 /**
  * A band on the reference plane between two circles about one centre, such as a habitable zone or
  * a belt: drawn as its two edges in `--text-muted`, a belt's joined by radial ticks every 10°, with
- * no fill, hatch or dots (plan 14, T38.a; the orchestrator's ruling 35).
+ * no fill, hatch or dots, and in `--text` 2 px wide while it is the selection (plan 14, T38.a; the
+ * orchestrator's ruling 35).
  */
 export interface AnnulusMark {
   /** Stable identity, which keys its label. */
@@ -134,6 +135,13 @@ export interface AnnulusMark {
    * habitable zone is. The rimward point when absent.
    */
   readonly labelSpinward?: boolean | undefined;
+  /**
+   * Whether the band is the selected body, as a selected belt or ring is: its edges and ticks are
+   * then drawn in `--text` 2 px wide, as the selected body's orbit is, so that the selection is not
+   * carried by colour alone (plan 14, T38.a; the orchestrator's ruling 44.2). Not selected when
+   * absent.
+   */
+  readonly selected?: boolean | undefined;
 }
 
 /** Everything a spatial view draws, in scene units about the view centre. */

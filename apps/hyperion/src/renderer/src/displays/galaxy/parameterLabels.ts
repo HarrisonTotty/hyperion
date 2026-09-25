@@ -12,7 +12,9 @@
  * always read under its group's heading, which names the component where the label does not:
  * `THIN SCALE LENGTH` under `DISCS`, `SCALE LENGTH` under `NUCLEAR DISC`, a population's name
  * under `POPULATION MASSES`. `HALO` is the stellar halo, as the population is named, and the dark
- * halo is always `DARK HALO`. The halo's dominant component is the debris of the `MAJOR MERGER`,
+ * halo is always `DARK HALO`, but for its `VIRIAL RADIUS`, which only the dark halo has and which
+ * stands beside `DARK HALO MASS` and `DARK HALO CONCENTRATION` (the UX advisor's ruling for
+ * ui11, three words being the limit). The halo's dominant component is the debris of the `MAJOR MERGER`,
  * the event whose time `LAST MAJOR MERGER` gives, and the lesser progenitors are `LESSER MERGERS`.
  * A label is kept short enough to fit the parameters' column at 1280 × 720; at the column's 16rem
  * minimum the longest few end in an ellipsis. Units and values are never part of a label: the server sends each
@@ -81,7 +83,7 @@ export const PARAMETER_LABELS: Readonly<Record<string, string>> = {
   "nuclear_cluster.mass": "NUCLEAR CLUSTER MASS",
   "dark_halo.mass": "DARK HALO MASS",
   "dark_halo.concentration": "DARK HALO CONCENTRATION",
-  "dark_halo.virial_radius": "DARK HALO RADIUS",
+  "dark_halo.virial_radius": "VIRIAL RADIUS",
   "dark_halo.f_star": "STAR FORMATION EFFICIENCY",
 
   ...POPULATION_LABELS,

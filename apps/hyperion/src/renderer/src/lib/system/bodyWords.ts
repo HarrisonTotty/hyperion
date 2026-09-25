@@ -156,7 +156,7 @@ export function architectureLabel(architecture: ArchitectureClassDto): string {
       label = "TERRESTRIAL ONLY";
       break;
     case "compact_multi":
-      label = "COMPACT MULTI";
+      label = "COMPACT MULTIPLANET";
       break;
     case "compact_with_cold_giant":
       label = "COMPACT WITH COLD GIANT";
@@ -235,17 +235,18 @@ export function ringMaterialLabel(material: RingMaterialDto): string {
 }
 
 /**
- * Where a belt lies, by the rule that placed it, in words: `INSIDE GIANT` (inside a giant's
- * orbit), `IN GAP` (in a gap between planets), `BEYOND PLANETS`, `OUTER DISC`.
+ * Where a belt lies, by the rule that placed it, in words: `INSIDE GIANT ORBIT` (inside the orbit
+ * of the innermost giant beyond the snow line), `BETWEEN PLANETS` (in a wide gap between two
+ * planets), `BEYOND PLANETS`, `OUTER DISC`.
  */
 export function beltSiteLabel(site: BeltSiteDto): string {
   let label: string;
   switch (site) {
     case "inside_giant":
-      label = "INSIDE GIANT";
+      label = "INSIDE GIANT ORBIT";
       break;
     case "gap":
-      label = "IN GAP";
+      label = "BETWEEN PLANETS";
       break;
     case "beyond_planets":
       label = "BEYOND PLANETS";

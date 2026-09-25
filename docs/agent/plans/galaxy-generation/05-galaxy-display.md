@@ -273,7 +273,7 @@ to 50 ly. The query radius defaults to it, and then everything shown is reachabl
 exists the field is replaced by the ship's value. The guide's rule on honest data forbids showing a
 number the simulation does not have, so the value is never presented as a reading: it lives in an
 editable field and nowhere in an `output`; every place that repeats it says `SET` (the range
-circle's label is `RANGE 50 ly SET`, the legend's colour key `ACCENT WITHIN SET RANGE`); and the
+circle's label is `RANGE 50 ly SET`, the legend's colour key `IN DRIVE RANGE`, its swatch carrying the colour (renamed by ruling 95.4, round 9, `ui11`)); and the
 list and readout say `IN RANGE`, which is a statement of geometry about the chart centre, never
 `REACHABLE`, which would claim a ship and a drive.
 
@@ -635,14 +635,14 @@ stateless, so a reconnect changes nothing here but the list refresh.
 **P05.T6.b `UniversePanel`: list and open.** A panel titled `UNIVERSE`. The open universe is shown
 in a readout (`NAME`, `SEED`, `GEN VER`, `ID`), or em dashes with `NO UNIVERSE OPEN`. Below it a
 table of universes (columns `NAME`, `SEED`, `GEN VER`), hex and numbers in B612 Mono, each row with
-an `OPEN` button named `Open universe <name>`; the open one shows `OPEN` as text with
+an `OPEN UNIVERSE` button (renamed by ruling 95.4, round 9, `ui11`) named `Open universe <name>`; the open one shows `OPEN` as text with
 `aria-current="true"` in place of the button. A universe whose status is `generator_mismatch` has a
 disabled button described by `GENERATOR VERSION <n>: SERVER IS <m>`, from
 `server_generator_version`. The table scrolls inside the panel and shows `1-8 of 23`
 (`windowRange`). An empty list reads `NO UNIVERSES: CREATE ONE BELOW`.
 
 - Files: `displays/galaxy/UniversePanel.tsx`, `UniversePanel.test.tsx`, `styles.css`.
-- Tests: rows from a fixture list; clicking `OPEN` sends `open_universe`, shows `PENDING`, then the
+- Tests: rows from a fixture list; clicking `OPEN UNIVERSE` sends `open_universe`, shows `PENDING`, then the
   readout shows the name and the seed in upper case; a rejection shows `REJECTED: <reason>`; a
   mismatched universe's button is disabled with its description; with the link down every button is
   disabled and described by `NO CARRIER`.
@@ -799,7 +799,8 @@ named, focus ring, a visible key hint `ARROWS MOVE CURSOR`). A click or tap sets
 `Shift`, clamped to the extent. The cursor is drawn as a DOM crosshair over both canvases (face-on
 at x, y; edge-on at x, z), a thin `--accent` cross with a gap at the centre, positioned by
 `lyToPixel` scaled to the canvas box. A `CURSOR` readout beside the map gives `X`, `Y`, `Z` in ly,
-`RADIUS`, `ANGLE`, `HEIGHT` from `cylindrical`, and the column density under the cursor in each view
+`RADIUS`, `ANGLE`, `HEIGHT` from `cylindrical` under the heading `GALACTIC` (the guide's Voice
+rule; `ui11`, round 9), and the column density under the cursor in each view
 from `log10PerLy2` (`DENSITY 3.16E0 SYSTEMS/ly²`, or `BELOW FLOOR` for code 0), which is what tuning
 by eye needs.
 
@@ -1205,7 +1206,7 @@ range and chart time; computes the frame from the centre (`localFrameAt`), the s
 `toScene`, and passes `SpatialView` its furniture props (`GALACTIC`, the centre's cylindrical
 coordinates, `UT`). Adds `SymbolLegend`: the five sizes with their bands (`0.08-0.5`, … `8-150`,
 `SolarMassUnit`), `SYMBOLS NOT TO SCALE`, and the fill key (`FILLED NORTH OF PLANE`,
-`OPEN SOUTH OF PLANE`), the colour key in words (`ACCENT WITHIN SET RANGE`, D9), and the reticle
+`OPEN SOUTH OF PLANE`), the colour key in words (`IN DRIVE RANGE`, D9 (renamed by ruling 95.4, round 9, `ui11`)), and the reticle
 key. A new result keeps the selection if the system is still present and clears it otherwise. With
 no centre chosen the panel reads `NO CENTRE: PICK ON MAP AND PRESS C`. The destination stays `null`
 in M1.
@@ -1277,7 +1278,7 @@ P05.T12.a (client side, automated against a fake socket). Start from an empty `H
     chart stays. Start the server again: the link returns without a reload, the universe list still
     shows `SURVEY 1`, and changing the radius sends a query that is answered (requests are
     stateless, so nothing had to be re-opened).
-11. Restart the client. `SURVEY 1` is listed; `OPEN` it; the same centre, radius and time give the
+11. Restart the client. `SURVEY 1` is listed; `OPEN UNIVERSE` it (renamed by ruling 95.4, round 9, `ui11`); the same centre, radius and time give the
     system noted in step 8 with the same `ID`, position and mass.
 12. Create a second universe with `RANDOM`. The readout shows a seed the operator did not type, and
     its maps differ from the first's.

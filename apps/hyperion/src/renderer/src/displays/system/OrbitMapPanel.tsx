@@ -124,7 +124,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
   );
   const drawn = scene !== null && scene.points.length > 0;
   const focused = view.focused !== null;
-  const focusHeld = !focused && view.focusable === null;
+  const focusHeld = !focused && view.focusable === null ? view.focusHeld : null;
   const presets = ZOOM_PRESETS.filter((control) => control.name !== "belts" || hasBelts);
 
   // The zoom keys act from anywhere on the display but a text field, as the view's own keys do.
@@ -263,17 +263,17 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
               aria-pressed={focused}
               aria-keyshortcuts={FOCUS_KEY}
               // Held back rather than disabled, so that it keeps its focus and can say why.
-              aria-disabled={focusHeld ? "true" : undefined}
-              aria-describedby={focusHeld ? focusHeldId : undefined}
+              aria-disabled={focusHeld === null ? undefined : "true"}
+              aria-describedby={focusHeld === null ? undefined : focusHeldId}
               onClick={toggleFocus}
             >
               <span className="control__key">{FOCUS_KEY}</span> FOCUS BODY
             </button>
           </fieldset>
         ) : null}
-        {drawn && focusHeld ? (
+        {drawn && focusHeld !== null ? (
           <p className="panel__inhibit" id={focusHeldId}>
-            NO PLANET SELECTED
+            {focusHeld}
           </p>
         ) : null}
         {drawn && !focused && (view.bodies?.zones.length ?? 0) > 0 ? (

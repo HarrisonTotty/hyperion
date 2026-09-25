@@ -185,7 +185,7 @@ describe("UniversePanel", () => {
         "PENDING",
       );
       expect(screen.getByRole("button", { name: "Open universe SURVEY 1" })).toHaveTextContent(
-        "OPEN",
+        "OPEN UNIVERSE",
       );
       expect(reading("NAME")).toHaveTextContent("—");
 
