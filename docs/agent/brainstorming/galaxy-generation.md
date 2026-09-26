@@ -296,8 +296,11 @@ The seed chooses the galaxy's gross properties from the observed ranges for larg
   progenitors with their masses, times and orbits, and the number of globular clusters, which scales
   with the dark halo's mass. See [Streams and accreted structure](#streams-and-accreted-structure).
 - **Central black hole**: its mass follows the M–σ relation with scatter, read from the bulge's
-  projected velocity dispersion of 105–115 km/s. The relation with bulge mass overpredicts the Milky
-  Way's twelvefold, as it does for barred pseudobulges generally.
+  projected velocity dispersion of 100–120 km/s, about the 103–105 ± 20 measured (McConnell and Ma
+  2013; Gültekin et al. 2009). The Milky Way's parameters give 117.7. The relation with bulge mass
+  overpredicts the Milky Way's twelvefold, as it does for barred pseudobulges generally, and the
+  Galaxy lies below the M–σ relation too (Kormendy and Ho 2013, §6): its offset of about −0.39 dex
+  is checked against a ±0.40 window, not against the relation's 0.38 dex scatter.
 
 Once per galaxy the mass model is reduced to **potential tables**: circular speed, the frequencies Ω
 and κ, and the potential on a logarithmic grid of about 64 × 64 points in R and z. The potential is
@@ -832,12 +835,12 @@ spectra. So the backbone needs these around it:
 | Before the main sequence   | Age zero is the onset of collapse, and the first 0.5 Myr is the protostar phase (Class 0 and I), with a closed form for the growth in mass; about a million protostars exist at once. Then contraction tracks ahead of the zero-age main sequence. The young population is under 100 Myr old and a 0.2 M☉ star takes several times that to arrive, so most young dwarfs are still contracting: T Tauri and Herbig Ae/Be stars.                                                                                                                                                      |
 | Winds and remnant masses   | The prescriptions current population-synthesis codes use in place of the originals, which are dated at high mass: Vink et al. (2001) for hot-star winds and Mandel and Müller (2020) for neutron star and black hole masses and kicks, with windows for electron capture 0.1 M☉ wide in single stars and about 1 M☉ in stripped ones.                                                                                                                                                                                                                                               |
 | White dwarfs               | Temperature and luminosity from cooling age. Spectral type (DA, DB, DC, DO, DQ, DZ) from an atmosphere draw whose odds depend on temperature.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Neutron stars              | Birth spin and magnetic field are drawn, and spin-down is a closed form in age. That gives the pulse period, whether the pulsar is still alive, the magnetars, and with a beam direction whether it is seen from a given place.                                                                                                                                                                                                                                                                                                                                                     |
+| Neutron stars              | Birth spin and magnetic field are drawn, and spin-down is a closed form in age. That gives the pulse period, whether the pulsar is still alive, the magnetars, and with a beam direction whether it is seen from a given place. The birth pair, the braking, the decay of the field and the glitches are pinned below the table.                                                                                                                                                                                                                                                    |
 | Black holes                | Mass and spin. Dark unless something feeds them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Classification             | Temperature, luminosity, gravity and surface composition map to a spectral type (O to M with subclass, then L, T, Y) and a luminosity class (Ia⁺ to V, subdwarf, white dwarf), calibrated on Pecaut and Mamajek (2013).                                                                                                                                                                                                                                                                                                                                                             |
 | Classes beyond the MK grid | Wolf-Rayet types (WN, WC, WO) from how far a helium star is stripped. Luminous blue variables near the Humphreys–Davidson limit. Carbon and S stars on the late asymptotic giant branch over the mass range where dredge-up works.                                                                                                                                                                                                                                                                                                                                                  |
-| Variability                | Derived, not rolled. A star inside the instability strip pulsates (classical and type II Cepheids, RR Lyrae, δ Scuti) with a period from its mean density. Late giants are Miras and semiregulars. Cycle-to-cycle irregularity is keyed by cycle number. Flares, outbursts and glitches are [events in time](#events-in-time) on the star's own streams.                                                                                                                                                                                                                            |
-| Rotation and magnetism     | One draw each, giving Be stars, the chemically peculiar Ap and Am stars, and activity levels.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Variability                | Derived, not rolled. A star inside the instability strip pulsates (classical and type II Cepheids, RR Lyrae, δ Scuti) with a period from its mean density and an amplitude that peaks just inside the blue edge. Late giants are Miras and semiregulars. Cycle-to-cycle irregularity is keyed by cycle number. Flares, outbursts and glitches are [events in time](#events-in-time) on the star's own streams.                                                                                                                                                                      |
+| Rotation and magnetism     | One draw each, giving Be stars, the chemically peculiar Ap and Am stars, and activity levels. The Ap and Bp stars' fossil fields are commoner at higher mass.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Interacting binaries       | The companion formulae of Hurley, Tout and Pols (2002), run forward once for each binary close enough to interact: blue stragglers, hot subdwarfs, cataclysmic variables, X-ray binaries, millisecond pulsars, symbiotic stars, Type Ia progenitors. The formulae run forward conditional on the system's class: explosion as a Type Ia is a thinning mark calibrated offline to the observed rate (see [Supernova remnants](#supernova-remnants-one-route-not-two)), and the hosts of rare events are [catalogue classes](#events-in-time) with conditional samplers of their own. |
 | Helium                     | The fits fix helium by metallicity. Second-population members of globular clusters carry up to 0.18 more, which shortens lifetimes and sets the blue end of the horizontal branch, so it enters as a correction fitted offline.                                                                                                                                                                                                                                                                                                                                                     |
 
@@ -855,6 +858,38 @@ dex of [Fe/H] (Meng, Chen and Han 2008; Romero, Campos and Kepler 2015). So thos
 evaluated at the seven calibration metallicities, and log R is interpolated between them in log Z
 by a monotone cubic. That is the printed form exactly at each of the seven. Every other law is the
 printed one.
+
+The binary formulae keep one departure too. Hurley, Tout and Pols merge every pair that comes into
+contact; here, contact during transfer is read by Nelson and Eggleton's (2001) cases. Transfer
+faster than ten times the donor's mass over its thermal timescale (their AD), or past the critical
+mass ratio, merges dynamically. Transfer at the donor's thermal rate that reaches contact within a
+tenth of the main-sequence lifetime after it starts (their AR) gives temporary contact if the
+accretor overfills its lobe by up to 10%: the accretor regains thermal equilibrium and shrinks back
+inside its lobe (de Mink, Pols and Hilditch 2007), and the pair returns to semi-detached transfer.
+Deeper contact merges on the lighter star's thermal timescale. Slower contact is the W UMa
+channel, and contact pairs should number 1/1000–1/250 of main-sequence stars fainter than
+M_V = +1.5 (Rucinski 2002: about 1/500).
+
+Three of the rows are pinned more closely:
+
+- **Neutron stars' birth and braking.** The field is drawn at the equator, log B ~ N(12.95, 0.6),
+  which is Popov et al.'s (2010) polar 13.25 less log 2, with the birth period P₀ ~ N(0.25, 0.10) s,
+  redrawn below 10 ms. Spin-down takes the timing convention B = 3.2 × 10¹⁹ √(PṖ) G (R = 10 km,
+  I = 10⁴⁵ g cm²), because the death line, the magnetar threshold of 4.4 × 10¹³ G and the fields of
+  every population synthesis are defined that way (Faucher-Giguère and Kaspi 2006). Weighted by
+  beaming and luminosity, the pulsars seen have a median period of 0.4–0.9 s and a median log Ṗ of
+  −15.2 to −14.2, against the ATNF catalogue's 0.63 s and −14.66. Some 8–40% are born above the
+  magnetar threshold, and about 90 magnetars are active at once, inside a window of 20–300. The
+  field decays in Colpi, Geppert and Page's (2000) form with α = 1, on Beniamini et al.'s (2019)
+  timescale of 10⁴ years, not Colpi's own 10³. Glitches reverse 1% of the spin-down while |ν̇| is
+  below 10⁻¹⁰·⁵ Hz s⁻¹, for pulsars and magnetars alike (Fuentes et al. 2017, §5); |ν̇| only falls,
+  so each star crosses once and the effect stays a closed form in age.
+- **Fossil fields.** The share of stars with a fossil field rises with initial mass: 0.5% at 1.4–1.8
+  M☉, rising linearly to 11% at 3.6 M☉, flat to 5 M☉, then falling to 7% at 15 M☉ and above (Sikora
+  et al. 2019, §6; Grunhut et al. 2017). Ap and Bp stars are then 1–3% of main-sequence stars of
+  1.4–5 M☉, as Sikora et al. count 52 of 3,254.
+- **Cepheid amplitudes** are zero at both edges of the instability strip, peak 300 K inside the blue
+  edge and fall linearly to the red edge (Bono, Castellani and Marconi 2000, §4).
 
 Statistical tests compare class fractions by population against observed ones, and a
 Hertzsprung–Russell diagram of a sample is the quickest check by eye.
@@ -890,13 +925,25 @@ Three approaches:
    some 20–60 mutual Hill radii apart as late accretion leaves them (Raymond et al. 2009; Kokubo and
    Genda 2010), and do not fill the zone to the snow line.
 4. **Derivation.** Everything else is computed, not rolled: radius from mass (Chen and Kipping 2017,
-   refined by composition with Zeng et al. 2019), equilibrium temperature, whether an atmosphere
+   refined by composition with Zeng et al. 2019), equilibrium temperature from irradiation alone
+   (a giant's internal heat gives it a separate effective temperature), whether an atmosphere
    survives thermal escape, greenhouse warming, tidal locking timescale against system age, the
    habitable zone (Kopparapu et al. 2013), Roche limits for rings, Hill spheres bounding moon
-   orbits.
+   orbits. Tides damp an orbit's eccentricity only down to the forced eccentricity from the dominant
+   neighbour, (5/4)(a/a′)e′, as TRAPPIST-1's planets keep eccentricities of a few thousandths
+   (Agol et al. 2021). A ring's material follows its particles' own temperature,
+   T⁴ = T_bb⁴ + W·T_eff⁴ with T_bb from the star and W the dilution of the planet's own T_eff: icy
+   below 115 K, since a metre-sized ice grain sublimates in about 30 years at 170 K but lasts
+   6 × 10⁹ at 110 K, and rocky or dusty above, as rings inside the ice line must be (Schlichting and
+   Chang 2011).
 5. **Small bodies.** Moons (regular satellites scaled to the planet's mass, captured irregulars, the
    occasional giant-impact moon), asteroid belts at resonances with giants, a Kuiper-like belt, a
-   cometary halo as a statistical population.
+   cometary halo as a statistical population. Irregulars are captured early, into the central half
+   of the Hill sphere (Jewitt and Haghighipour 2007) at the planet's formation distance, and only
+   those whose apocentres lie inside the present stability limit and whose pericentres clear the
+   planet and its Roche limit survive. None are captured after migration, so hot giants hold none.
+   Members of icy belts are rock and ice, as the belts are. A halo is cut after the star's mass loss
+   at a third of a companion's present pericentre and 0.49 of the present sphere of influence.
 
 Free-floating planets and brown dwarfs are "systems" with no star, and reuse this stage for their
 moons and bulk properties. See [Between the stars](#between-the-stars).
@@ -935,7 +982,10 @@ from its own streams.
 - **Dust and gas** are a field, not objects. Three smooth components, all needed once supernova
   shells read the gas they expand into: a thin neutral disc a few hundred light-years tall with a
   hole inside the bar, a warm ionised layer of about 0.03 atoms per cubic centimetre with a scale
-  height near 3,000 ly, and a hot corona of about 10⁻³. With them goes a closed-form pressure,
+  height near 3,000 ly, and a hot corona of about 10⁻³. The warm layer's density is twice Gaensler
+  et al.'s (2008) 0.014 and is kept: its filling factor at 0.9 kpc, about 0.2, meets the 0.15–0.20
+  measured there (Gaensler et al.; Berkhuijsen, Mitra and Müller 2006), but in the plane it is 3.4
+  times Gaensler's and it peaks at 0.9 kpc, not 1.4–2 kpc. With them goes a closed-form pressure,
   falling with height to the corona's floor. The neutral disc has a small dense disc of molecular
   gas at its centre, where the nuclear disc is, and is gathered into lanes along the inner edges of
   the arms by reusing the arm geometry with a phase offset. All of it is broken up by a few octaves
@@ -1007,16 +1057,16 @@ function of seed, ID and time:
 
 Velocities are closed-form in the potential tables, per population:
 
-| Population           | Velocity                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Discs                | Vertical dispersion from the vertical Jeans equation on the population's own vertical profile, so it falls outward with the disc; at the reference radius it is the heating law below times the galaxy's dispersion scale. Radial dispersion follows Sharma et al.'s radial law, 39.4 km/s × the same age factor to the power 0.251, so σ_z ÷ σ_R runs from about 0.30 in the youngest sub-disc to 0.54 in the oldest; the azimuthal follows from κ² ÷ 4Ω². The mean lags the circular speed by the asymmetric drift, about σ_R² ÷ 80 km/s.                                                                                                                                                                                                                                                                                                                                             |
-| Young disc           | The same, with a floor of 5 km/s from the turbulence of the gas, plus streaming of 5–15 km/s along the arms as a closed form of the arm phase.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Thick disc           | About (65, 40, 35) km/s, lagging by about 50.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Halo                 | Per [component](#streams-and-accreted-structure): radial orbits and no rotation for the dominant merger, and for the in-situ part rotation at about 0.11 of the circular speed, the Splash's 25 km/s (Belokurov et al. 2020). The mixture averages an anisotropy near 0.6, rising from zero at each component's core, as a cusp requires (An and Evans 2006). On the r^−3.5 slopes of earlier drafts its radial dispersion came to about 145 km/s against 141 measured. That no longer holds as worked: on the measured inner slopes of 2.2–2.8, a spherical Jeans estimate at the same anisotropy gives about 155–185 km/s at the Sun's radius, but it read the in-plane circular speed, which runs σ_r about 7% high. The Jeans integral takes G M(< r) ÷ r, and the check is made in Bond et al.'s (2010) own volume, 1–5 kpc from the plane at R of 3–13 kpc, against 135–155 km/s. |
-| Bulge and bar        | Rotation at the bar's pattern speed plus streaming along the density's own ellipses, which satisfies continuity exactly and rotates cylindrically by construction. Dispersions from an axisymmetric Jeans solution tabulated once: 160–215 km/s intrinsic near the centre, which projects to the 116–134 km/s that surveys measure at a latitude of 1°.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Nuclear disc         | Rotation of about 100 km/s and a radial dispersion of about 70 (Sormani et al. 2022's 67.7), falling outward, with the vertical one roughly half of it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Nuclear cluster      | The distribution function above: a dispersion rising as r^−½ inside about 3 ly, to 500 km/s at 0.1 ly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Features and streams | The feature's bulk motion plus an internal dispersion; a stream's mean velocity along its tube.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Population           | Velocity                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Discs                | Vertical dispersion from the vertical Jeans equation on the population's own vertical profile, so it falls outward with the disc; at the reference radius it is the heating law below times the galaxy's dispersion scale. Radial dispersion follows Sharma et al.'s radial law, 39.4 km/s × the same age factor to the power 0.251, so σ_z ÷ σ_R runs from about 0.30 in the youngest sub-disc to 0.54 in the oldest; the azimuthal follows from κ² ÷ 4Ω². The mean lags the circular speed by the asymmetric drift, about σ_R² ÷ 80 km/s.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Young disc           | The same, with a floor of 5 km/s from the turbulence of the gas, plus streaming of 5–15 km/s along the arms as a closed form of the arm phase.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Thick disc           | About (65, 40, 35) km/s, lagging by about 50.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Halo                 | Per [component](#streams-and-accreted-structure): radial orbits and no rotation for the dominant merger, and for the in-situ part rotation at about 0.11 of the circular speed, the Splash's 25 km/s (Belokurov et al. 2020). The mixture averages an anisotropy near 0.6, rising from zero at each component's core, as a cusp requires (An and Evans 2006). On the r^−3.5 slopes of earlier drafts its radial dispersion came to about 145 km/s against 141 measured. That no longer holds as worked: on the measured inner slopes of 2.2–2.8, a spherical Jeans estimate at the same anisotropy gives about 155–185 km/s at the Sun's radius, but it read the in-plane circular speed, which runs σ_r about 7% high. The Jeans integral takes G M(< r) ÷ r, and the check is made in Bond et al.'s (2010) own volume, 1–5 kpc from the plane at R of 3–13 kpc, against 140–180 km/s: Bond's 141 and Smith et al.'s (2009) 143 at the bottom, Bird et al.'s (2021) 179 and the Sausage's 175 ± 26 (Belokurov et al. 2020) at the top. The model gives 165. |
+| Bulge and bar        | Rotation at the bar's pattern speed plus streaming along the density's own ellipses, which satisfies continuity exactly and rotates cylindrically by construction. Dispersions from an axisymmetric Jeans solution tabulated once: 160–215 km/s intrinsic near the centre, which projects to the 116–134 km/s that surveys measure at a latitude of 1°.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Nuclear disc         | Rotation of about 100 km/s and a radial dispersion of about 70 (Sormani et al. 2022's 67.7), falling outward, with the vertical one roughly half of it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Nuclear cluster      | The distribution function above: a dispersion rising as r^−½ inside about 3 ly, to 500 km/s at 0.1 ly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Features and streams | The feature's bulk motion plus an internal dispersion; a stream's mean velocity along its tube.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 Draws are cut off at the local escape speed.
 [Kicked remnants and runaway stars](#displaced-objects-kicks-and-runaways) draw theirs from the
@@ -2042,6 +2092,45 @@ line:
 17. **The 0.00184 within 10 pc is a tally of Kirkpatrick et al.'s (2024) Table 4**, not a figure of
     Reylé et al. (2021) (ruling 9).
 
+**2026-09-26: the orchestrator's rulings 110–114.** Rulings 110–112 and 114 of the same file were
+made on research that read the sources' own text, and change what this document says. Rulings 113
+and 115 are display rulings for the UX guide and leave it unchanged. The text has been brought into
+line:
+
+1. **The bulge's projected dispersion is 100–120 km/s, and the model's 117.7 stands** (ruling
+   111.1). Reason: the measured 103–105 has an error of ±20 (McConnell and Ma 2013; Gültekin et al.
+   2009), so 105–115 was too narrow. The Galaxy is a pseudobulge lying below the M–σ relation
+   (Kormendy and Ho 2013, §6). See [Galaxy parameters](#galaxy-parameters).
+2. **The halo's radial dispersion is checked against 140–180 km/s**, in place of the 135–155 of
+   item 16 above, and the model's 165 stands (ruling 111.2). Reason: the measurements span Bond et
+   al.'s 141 and Smith et al.'s 143 to Bird et al.'s 179 and the Sausage's 175 ± 26. See
+   [Orbits and time](#orbits-and-time).
+3. **The warm ionised layer keeps its density**, twice Gaensler et al.'s; its filling factor matches
+   at 0.9 kpc and its shape departs, untuned (ruling 111.3). See [Between the
+   stars](#between-the-stars).
+4. **Neutron stars are born with an equatorial field of log B ~ N(12.95, 0.6) and P₀ ~ N(0.25, 0.10)
+   s, and brake in the timing convention B = 3.2 × 10¹⁹ √(PṖ)** (ruling 110.1). Reason: Popov et
+   al.'s (2010) field is the polar one, and the death line and the magnetar threshold are defined in
+   Faucher-Giguère and Kaspi's (2006) convention, so a polar field braked by it runs 4 times too
+   strong. Glitches reverse 1% of the spin-down below |ν̇| of 10⁻¹⁰·⁵ Hz s⁻¹ (ruling 110.3), and
+   field decay is cited to Colpi, Geppert and Page (2000) on Beniamini et al.'s (2019) 10⁴ years
+   (ruling 110.4).
+5. **Fossil fields rise with mass**, from 0.5% at 1.4–1.8 M☉ to 11% at 3.6–5 M☉, then 7% from 15 M☉
+   (ruling 110.5). Reason: Sikora et al. (2019) and Grunhut et al. (2017).
+6. **Cepheid amplitudes peak 300 K inside the blue edge** and are zero at both edges (ruling 110.7,
+   Bono, Castellani and Marconi 2000). See [Covering every class of
+   star](#covering-every-class-of-star).
+7. **Contact during thermal-rate transfer is temporary when shallow**: an accretor overfilling its
+   lobe by up to 10% relaxes back to semi-detached transfer, and deeper contact merges on the
+   lighter star's thermal timescale (rulings 111.5 and 114), a departure from Hurley, Tout and Pols,
+   who merge every contact. Reason: Nelson and Eggleton (2001) and de Mink, Pols and Hilditch
+   (2007).
+8. **The planetary derivations** (ruling 112): equilibrium temperature is irradiation only, and
+   giants carry an effective temperature beside it; rings are icy below 115 K by the particles' own
+   temperature; tides stop at the forced eccentricity; irregular moons survive by orbit from their
+   capture at the formation distance, so hot giants hold none; members of icy belts are icy; and a
+   halo is re-cut after mass loss. See [Planetary systems](#planetary-systems).
+
 ## Open questions
 
 Three rounds of questions were answered on 2026-09-20 and are now under [Decisions](#decisions). The
@@ -2180,6 +2269,9 @@ Figures above are rounded and should be re-checked against these when they becom
   (white-dwarf masses against metallicity).
 - Hurley, Tout and Pols 2002, _Evolution of binary stars and the effect of tides on binary
   populations_, MNRAS 329.
+- Nelson and Eggleton 2001, _A complete survey of case A binary evolution_, ApJ 552, 664; de Mink,
+  Pols and Hilditch 2007, A&A 467, 1181 (contact); Rucinski 2002, PASP 114, 1124 (contact
+  binaries' frequency).
 - Vink, de Koter and Lamers 2001, _Mass-loss predictions for O and B stars as a function of
   metallicity_, A&A 369.
 - Burrows et al. 2001, _The theory of brown dwarfs and extrasolar giant planets_, Rev. Mod.
@@ -2200,6 +2292,9 @@ Figures above are rounded and should be re-checked against these when they becom
 - Dehnen and Binney 1998, _Mass models of the Milky Way_, MNRAS 294, 429 (the holed disc's form,
   which they give their gas).
 - Bond et al. 2010, _The Milky Way tomography with SDSS III: stellar kinematics_, ApJ 716.
+- Smith et al. 2009, MNRAS 399, 1223; Bird et al. 2021, ApJ 919, 66 (the halo's dispersion).
+- McConnell and Ma 2013, ApJ 764, 184; Gültekin et al. 2009, ApJ 698, 198; Kormendy and Ho 2013,
+  ARA&A 51, 511 (the bulge's dispersion and M–σ).
 - Belokurov et al. 2020, MNRAS 494, 3880 (the Splash); An and Evans 2006, ApJ 642, 752 (the halo's
   central anisotropy).
 - Portail et al. 2017, _Dynamical modelling of the galactic bulge and bar_, MNRAS 465; Sanders,
@@ -2256,6 +2351,11 @@ Figures above are rounded and should be re-checked against these when they becom
 - Stone and Metzger 2016, MNRAS 455; Ponti et al. 2010, ApJ 714; Neilsen et al. 2013, ApJ 774.
 - Contreras Peña, Naylor and Morrell 2019, MNRAS 486; Melatos, Peralta and Wyithe 2008, ApJ 672;
   Fuentes et al. 2017, A&A 608.
+- Popov et al. 2010, MNRAS 401, 2675; Faucher-Giguère and Kaspi 2006, ApJ 643, 332 (pulsars'
+  birth fields and periods); Colpi, Geppert and Page 2000, ApJ 529, L29; Beniamini et al. 2019,
+  MNRAS 487, 1426 (field decay and magnetars).
+- Sikora et al. 2019, MNRAS 483, 2300; Grunhut et al. 2017, MNRAS 465, 2432 (fossil fields).
+- Bono, Castellani and Marconi 2000, _Classical Cepheid pulsation models III_, ApJ 529, 293.
 - Boodram and Heinke 2022, _Millisecond pulsar kicks cause difficulties in explaining the Galactic
   Centre gamma-ray excess_, MNRAS 512.
 - Disberg and Mandel 2025, _The kick velocity distribution of isolated neutron stars_, ApJL 989, L8;
@@ -2286,6 +2386,8 @@ Figures above are rounded and should be re-checked against these when they becom
 - Gordon et al. 2023, ApJ 950, 86; Decleir et al. 2022, ApJ 930, 15 (near- and mid-infrared
   extinction).
 - Wolfire et al. 2003, ApJ 587, 278 (the gas phases in pressure balance).
+- Gaensler et al. 2008, _The vertical structure of warm ionised gas in the Milky Way_, PASA 25,
+  184; Berkhuijsen, Mitra and Müller 2006, AN 327, 82 (its filling factor).
 - Bohlin, Savage and Drake 1978, _A survey of interstellar H I from Lα absorption measurements II_,
   ApJ 224.
 - Wegg, Gerhard and Portail 2015, _The structure of the Milky Way's bar outside the bulge_,
@@ -2307,4 +2409,7 @@ Figures above are rounded and should be re-checked against these when they becom
 - Zhu 2019, ApJ 873, 8; Petigura et al. 2018, AJ 155, 89; Bashi and Zucker 2022, MNRAS
   (arXiv:2112.03927); Boley et al. 2024, arXiv:2407.13821 (small planets against metallicity).
 - Kopparapu et al. 2013, _Habitable zones around main-sequence stars_, ApJ 765.
+- Jewitt and Haghighipour 2007, ARA&A 45, 261 (irregular moons); Agol et al. 2021, PSJ 2, 1
+  (TRAPPIST-1's eccentricities); Schlichting and Chang 2011, ApJ 734, 117 (rings inside the ice
+  line).
 - Dole 1970, _Computer simulation of the formation of planetary systems_, Icarus 13.
