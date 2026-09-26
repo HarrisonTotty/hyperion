@@ -45,7 +45,7 @@ import {
   orbitScene,
   type ZoomPreset,
 } from "./orbitMap";
-import { type BodiesKnown, smallBodySections, systemNote } from "./systemNote";
+import { type BodiesKnown, smallBodySections, systemNotes } from "./systemNote";
 import type { SystemTarget } from "./systemTarget";
 import { useBodyDetail } from "./useBodyDetail";
 import { type DisplayTime, useDisplayTime } from "./useDisplayTime";
@@ -166,8 +166,11 @@ export interface SystemViewState {
   readonly primaryZone: Zone | null;
   /** What is selected on the map or in the list: the primary until another is chosen. */
   readonly selected: Selected | null;
-  /** What the display says is not yet modelled, or `null` when nothing is. */
-  readonly note: string | null;
+  /**
+   * The system note's lines: what is not yet modelled, then what the granted level withholds; empty
+   * when nothing is (ruling 113.2).
+   */
+  readonly notes: ReadonlyArray<string>;
   readonly select: (id: string) => void;
   /** Chooses a zoom preset, which returns the map to the system frame. */
   readonly chooseZoom: (zoom: ZoomPreset) => void;
@@ -182,6 +185,9 @@ export interface SystemViewState {
 
 /** The bodies of a system not yet answered for, one list so that what is built from it keeps. */
 const NO_BODIES: ReadonlyArray<SystemBody> = [];
+
+/** The system note of a display with no system or no word on its bodies yet: no lines. */
+const NO_NOTES: ReadonlyArray<string> = [];
 
 /** Whether a request has not answered: pending, refused, timed out, or cut off by the link. */
 function unanswered(state: RequestState<RequestKind>): boolean {
@@ -567,7 +573,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     rows,
     primaryZone: zoneOfPrimary,
     selected,
-    note: formed === null || known === null ? null : systemNote(known),
+    notes: formed === null || known === null ? NO_NOTES : systemNotes(known),
     select: setChosenId,
     chooseZoom,
     toggleFocus,

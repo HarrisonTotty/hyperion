@@ -81,11 +81,12 @@ export function focusTarget(
 }
 
 /**
- * Why `FOCUS BODY` is held back for a selection, in words, or `null` when it is not: `NO PLANET
- * SELECTED` for a selection that is not a planet, a dwarf planet, or a moon's or ring's; the planet
- * by its kind and state when it is not present (`PLANET DESTROYED`, `DWARF PLANET NOT YET FORMED`);
- * `ORBIT NOT RESOLVED` or `ORBIT NOT YET MODELLED` when its orbit is withheld (the UX advisor's
- * ruling for ui11).
+ * Why `FOCUS BODY` is held back for a selection, in words, or `null` when it is not: `KIND NOT
+ * RESOLVED` for an unresolved contact, which may be a planet (ruling 113.5); `NO PLANET SELECTED`
+ * for a selection that is not a planet, a dwarf planet, or a moon's or ring's; the planet by its
+ * kind and state when it is not present (`PLANET DESTROYED`, `DWARF PLANET NOT YET FORMED`); the
+ * orbit's section state, `ORBIT NOT RESOLVED` or `ORBIT NOT YET MODELLED`, when its orbit is
+ * withheld or not computed (the UX advisor's ruling for ui11; ruling 113.5).
  */
 export function focusHeldReason(
   selected: SystemBody | null,
@@ -93,6 +94,9 @@ export function focusHeldReason(
 ): string | null {
   if (focusTarget(selected, bodies) !== null) {
     return null;
+  }
+  if (selected?.kind.kind === "unresolved") {
+    return `KIND ${sectionStateLabel("not_resolved")}`;
   }
   let planet: SystemBody | null = null;
   if (selected !== null) {

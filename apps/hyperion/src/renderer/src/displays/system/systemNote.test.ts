@@ -8,7 +8,7 @@ import {
 } from "../../test/systemFixtures";
 import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
 import { populatedBodies, populatedBodiesWith, sliceBodies } from "../../test/planetaryFixture";
-import { smallBodySections, systemNote } from "./systemNote";
+import { smallBodySections, systemNotes } from "./systemNote";
 
 /** The slice's tags: every small-body section not modelled, on the system and on one planet. */
 const SLICE = {
@@ -17,11 +17,11 @@ const SLICE = {
   planets: [{ moons: SECTION_NOT_MODELLED.state, rings: SECTION_NOT_MODELLED.state }],
 };
 
-describe("systemNote", () => {
+describe("systemNotes", () => {
   it("names all four kinds the slice's tags leave unmodelled", () => {
-    expect(systemNote({ kind: "tagged", sections: SLICE })).toBe(
+    expect(systemNotes({ kind: "tagged", sections: SLICE })).toEqual([
       "MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED",
-    );
+    ]);
   });
 
   it("says nothing when every kind is modelled", () => {
@@ -31,7 +31,7 @@ describe("systemNote", () => {
       planets: [{ moons: SECTION_OK_LIST.state, rings: SECTION_OK_LIST.state }],
     };
 
-    expect(systemNote({ kind: "tagged", sections: modelled })).toBeNull();
+    expect(systemNotes({ kind: "tagged", sections: modelled })).toEqual([]);
   });
 
   it("drops each kind as the server starts to model it", () => {
@@ -41,7 +41,9 @@ describe("systemNote", () => {
       planets: [{ moons: SECTION_NOT_MODELLED.state, rings: SECTION_OK_LIST.state }],
     };
 
-    expect(systemNote({ kind: "tagged", sections })).toBe("MOONS AND BELTS: NOT YET MODELLED");
+    expect(systemNotes({ kind: "tagged", sections })).toEqual([
+      "MOONS AND BELTS: NOT YET MODELLED",
+    ]);
   });
 
   it("names moons when any planet's are not modelled", () => {
@@ -54,41 +56,70 @@ describe("systemNote", () => {
       ],
     };
 
-    expect(systemNote({ kind: "tagged", sections })).toBe("MOONS: NOT YET MODELLED");
+    expect(systemNotes({ kind: "tagged", sections })).toEqual(["MOONS: NOT YET MODELLED"]);
   });
 
-  it("does not read a section withheld or not applicable as not modelled", () => {
+  it("names a section withheld as not resolved, and one not applicable not at all", () => {
     const sections = {
       belts: SECTION_NOT_RESOLVED.state,
       halo: SECTION_NOT_APPLICABLE.state,
       planets: [{ moons: SECTION_NOT_RESOLVED.state, rings: SECTION_NOT_APPLICABLE.state }],
     };
 
-    expect(systemNote({ kind: "tagged", sections })).toBeNull();
+    expect(systemNotes({ kind: "tagged", sections })).toEqual(["MOONS AND BELTS: NOT RESOLVED"]);
+  });
+
+  it("names the belts and halo a contact withholds on a line of their own", () => {
+    // Ruling 113.2: at `contact` the system's belts and halo are withheld, and no planet's kind is
+    // resolved, so no planet's tags are read.
+    const sections = {
+      belts: SECTION_NOT_RESOLVED.state,
+      halo: SECTION_NOT_RESOLVED.state,
+      planets: [],
+    };
+
+    expect(systemNotes({ kind: "tagged", sections })).toEqual([
+      "BELTS AND COMETARY HALO: NOT RESOLVED",
+    ]);
+  });
+
+  it("puts the not-modelled line first and the withheld line after it", () => {
+    const sections = {
+      belts: SECTION_NOT_RESOLVED.state,
+      halo: SECTION_NOT_RESOLVED.state,
+      planets: [{ moons: SECTION_NOT_MODELLED.state, rings: SECTION_NOT_MODELLED.state }],
+    };
+
+    expect(systemNotes({ kind: "tagged", sections })).toEqual([
+      "MOONS AND RINGS: NOT YET MODELLED",
+      "BELTS AND COMETARY HALO: NOT RESOLVED",
+    ]);
   });
 
   it("names the planets too while this protocol cannot ask for them", () => {
-    expect(systemNote({ kind: "unserved" })).toBe(
+    expect(systemNotes({ kind: "unserved" })).toEqual([
       "PLANETS, MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED",
-    );
+    ]);
   });
 });
 
-function noteOf(response: ReturnType<typeof sliceBodies>): string | null {
+function notesOf(response: ReturnType<typeof sliceBodies>): ReadonlyArray<string> {
   const result = toSystemBodiesModel(response, "H7K 4C0RFZ D-7");
   if (result.kind !== "ok") {
     throw new Error(result.fault);
   }
-  return systemNote({ kind: "tagged", sections: smallBodySections(result.bodies) });
+  return systemNotes({ kind: "tagged", sections: smallBodySections(result.bodies) });
 }
 describe("smallBodySections", () => {
   it("names all four kinds from the slice's tags", () => {
-    expect(noteOf(sliceBodies())).toBe("MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED");
+    expect(notesOf(sliceBodies())).toEqual([
+      "MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED",
+    ]);
   });
 
   it("names only the moons and rings of the one planet whose tags leave them unmodelled", () => {
     // Its belts and halo are ok; its unformed planet's moons and rings are not modelled.
-    expect(noteOf(populatedBodies())).toBe("MOONS AND RINGS: NOT YET MODELLED");
+    expect(notesOf(populatedBodies())).toEqual(["MOONS AND RINGS: NOT YET MODELLED"]);
   });
 });
 
@@ -102,7 +133,7 @@ describe("smallBodySections of a system with every small body modelled", () => {
         : body,
     );
 
-    expect(noteOf(modelled)).toBeNull();
+    expect(notesOf(modelled)).toEqual([]);
   });
 });
 
@@ -119,7 +150,7 @@ describe("smallBodySections of a belt's members", () => {
         : body;
     });
 
-    expect(noteOf(modelled)).toBeNull();
+    expect(notesOf(modelled)).toEqual([]);
   });
 
   it("still names moons for a member whose moons are not modelled", () => {
@@ -132,6 +163,6 @@ describe("smallBodySections of a belt's members", () => {
         : body;
     });
 
-    expect(noteOf(unmodelled)).toBe("MOONS: NOT YET MODELLED");
+    expect(notesOf(unmodelled)).toEqual(["MOONS: NOT YET MODELLED"]);
   });
 });

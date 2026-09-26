@@ -2339,8 +2339,8 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   stable-zone limits, the snow line and the habitable zone as `annulus` marks that can be switched
   off (the habitable zone as two pairs of edges, each switchable: the conservative pair, moist to
   maximum greenhouse, and the optimistic pair, recent Venus to early Mars, whose edges carry short
-  ticks into the band so that the two differ by shape and not by colour; ruling 65.4), belts as ticked annuli (T38.a), the cometary halo as a labelled outer ring only when it is
-  inside the view. Orbits and every annulus edge are solid `--text-muted`, and the selected body's
+  ticks into the band so that the two differ by shape and not by colour; ruling 65.4), belts as ticked annuli (T38.a), the cometary halo as its two edges, or its inner edge alone, when
+  inside the view (ruling 113.1). Orbits and every annulus edge are solid `--text-muted`, and the selected body's
   orbit, the one `"selected"` path, a solid `--text` line 2 px wide (ruling 44.2); `--line` is for the plane's grid and
   scale rings only (ruling 35.6, T38.a). Symbols, where shape
   encodes type and one shape means one thing on every display: hosts keep their symbols from the
@@ -2384,8 +2384,9 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   - _As built (`wireD`, round 9)._ Belts are ticked annuli labelled by their label, a
     scattered component a plain annulus (`SCATTERED DISC`); the halo is drawn only inside the
     fitted radius. Moons are drawn only in the `BODY <designation>` frame (`FOCUS BODY`, key `C`,
-    held back with `NO PLANET SELECTED`, the planet's kind and state (`PLANET DESTROYED`) or
-    `ORBIT NOT RESOLVED`, `focusHeldReason` (renamed by ruling 95.4, round 9, `ui11`); `bodyFrame.ts`), on the planet's `EQUATORIAL PLANE`,
+    held back with `NO PLANET SELECTED`, the planet's kind and state (`PLANET DESTROYED`),
+    `KIND NOT RESOLVED` for a contact, or the orbit's section state (`ORBIT NOT RESOLVED`,
+    `ORBIT NOT YET MODELLED`; ruling 113.5), `focusHeldReason` (renamed by ruling 95.4, round 9, `ui11`); `bodyFrame.ts`), on the planet's `EQUATORIAL PLANE`,
     which is its orbital plane until T14; its scale ladder adds a Gm rung for irregulars. `BELTS`
     (key `B`) is offered only in a system with a belt and fits the belt proper. The list sorts
     rings, belts and the halo by inner edge, members under their belt. The system note reads the

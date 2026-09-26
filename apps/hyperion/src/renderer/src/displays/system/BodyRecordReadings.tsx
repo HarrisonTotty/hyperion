@@ -5,6 +5,7 @@ import { EarthMassUnit } from "../../components/EarthMassUnit";
 import {
   type BodyDistanceUnit,
   formatBodyDistance,
+  formatBodySpan,
   formatGravity,
   formatMassMearth,
   formatNumber,
@@ -91,15 +92,28 @@ function percent(fraction: number): string {
   return formatNumber(fraction * 100, PERCENT_DECIMALS);
 }
 
-/** A distance with its unit, as one string: `2.06 AU`. */
-function distanceText(metres: number): string {
-  const distance = formatBodyDistance(metres * KM_PER_M, null);
-  return `${distance.value} ${distance.unit}`;
+/** Props of {@link SpanRow}. */
+interface SpanRowProps {
+  readonly label: string;
+  /** The span's inner and outer ends, m. */
+  readonly innerM: number;
+  readonly outerM: number;
 }
 
-/** An annulus's two edges as a span: `66.0 Mm – 137 Mm`. */
-function span(innerM: number, outerM: number): string {
-  return `${distanceText(innerM)} – ${distanceText(outerM)}`;
+/**
+ * An annulus's two edges as one reading, `66.0 – 137 Mm`, its unit in the row's unit slot
+ * (ruling 113.3). The unit is the outer end's, held from one reading to the next with
+ * `formatBodySpan`'s hysteresis, adjusted during render as the `DIST` row's is.
+ */
+function SpanRow({ label, innerM, outerM }: SpanRowProps) {
+  const [unit, setUnit] = useState<BodyDistanceUnit>(
+    () => formatBodySpan(innerM * KM_PER_M, outerM * KM_PER_M, null).unit,
+  );
+  const span = formatBodySpan(innerM * KM_PER_M, outerM * KM_PER_M, unit);
+  if (span.unit !== unit) {
+    setUnit(span.unit);
+  }
+  return <ReadoutRow label={label} shown={value(span.value, span.unit)} wide />;
 }
 
 /** A gap's row: the resonance it is cleared at in its label, `GAP 2:1`, and where it lies. */
@@ -123,11 +137,7 @@ function populationRows(population: Population): ReactNode {
         <>
           <ReadoutRow label="CLASS" shown={value(ringKindLabel(population.ringKind))} />
           <ReadoutRow label="COMPOSITION" shown={value(ringMaterialLabel(population.material))} />
-          <ReadoutRow
-            label="EDGES"
-            shown={value(span(population.innerEdgeM, population.outerEdgeM))}
-            wide
-          />
+          <SpanRow label="EDGES" innerM={population.innerEdgeM} outerM={population.outerEdgeM} />
           <ReadoutRow
             label="OPTICAL DEPTH"
             shown={value(formatSignificant(population.opticalDepth))}
@@ -144,24 +154,18 @@ function populationRows(population: Population): ReactNode {
             label="COMPOSITION"
             shown={value(beltCompositionLabel(population.composition))}
           />
-          <ReadoutRow
-            label="EDGES"
-            shown={value(span(population.innerEdgeM, population.outerEdgeM))}
-            wide
-          />
+          <SpanRow label="EDGES" innerM={population.innerEdgeM} outerM={population.outerEdgeM} />
           {population.scattered === null ? null : (
             <>
-              <ReadoutRow
+              <SpanRow
                 label="BELT PROPER"
-                shown={value(span(population.main.innerEdgeM, population.main.outerEdgeM))}
-                wide
+                innerM={population.main.innerEdgeM}
+                outerM={population.main.outerEdgeM}
               />
-              <ReadoutRow
+              <SpanRow
                 label="SCATTERED DISC"
-                shown={value(
-                  span(population.scattered.innerEdgeM, population.scattered.outerEdgeM),
-                )}
-                wide
+                innerM={population.scattered.innerEdgeM}
+                outerM={population.scattered.outerEdgeM}
               />
             </>
           )}
@@ -198,11 +202,7 @@ function populationRows(population: Population): ReactNode {
     case "cometary_halo":
       rows = (
         <>
-          <ReadoutRow
-            label="EDGES"
-            shown={value(span(population.innerEdgeM, population.outerEdgeM))}
-            wide
-          />
+          <SpanRow label="EDGES" innerM={population.innerEdgeM} outerM={population.outerEdgeM} />
           <ReadoutRow
             label="COMETS OVER 1 km"
             shown={value(formatSignificant(population.comets))}

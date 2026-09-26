@@ -443,19 +443,20 @@ function hostCentreAu(
 
 /**
  * The belts as ticked annuli on the reference plane about their hosts at the display time, and the
- * cometary halo as a labelled ring when it is inside the view (plan 14, P14.T42.a and T38.a).
+ * cometary halo as its two edges, or its inner edge alone, when inside the view (plan 14, P14.T42.a
+ * and T38.a; ruling 113.1).
  *
  * @remarks
  * A belt proper is drawn as its two edges joined by radial ticks every 10°, labelled with its name;
  * a Kuiper-like belt's scattered component, which runs on beyond it, as its two edges alone,
  * labelled `SCATTERED DISC`, so that the two differ by shape. Both lie in the reference plane, which
  * is the host's zone's plane for the primary's belts and a companion's own only approximately, as
- * the zones' annuli do. The halo is a shell, drawn as the circles where it meets the plane: its
- * inner edge when that lies inside `viewRadiusAu`, the radius the view fits, labelled as its inner
- * edge, and its outer edge too when that does, labelled as the halo; beyond the view it draws nothing, since a ring off the map says nothing. A body
- * not present, or whose section is not `ok`, draws nothing. The selected belt, its scattered
- * component with it, or the selected halo is drawn as the selected orbit is (the guide's selection
- * rule).
+ * the zones' annuli do. The halo is a shell, drawn without ticks as the circles where it meets the
+ * plane: both edges, labelled `COMETARY HALO`, when its outer edge lies inside `viewRadiusAu`, the
+ * radius the view fits; its inner edge alone, labelled `COMETARY HALO INNER EDGE`, when only that
+ * does; and nothing when neither does, since a ring off the map says nothing. A body not present,
+ * or whose section is not `ok`, draws nothing. The selected belt, its scattered component with it,
+ * or the selected halo is drawn as the selected orbit is (the guide's selection rule).
  *
  * @param viewRadiusAu - The radius the view fits, from the barycentre.
  * @param selectedId - The selected body, or `null`.

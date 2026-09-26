@@ -18,6 +18,7 @@ import {
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
+  sliceBodiesWith,
 } from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
@@ -191,6 +192,36 @@ describe("SystemView with the slice's bodies", () => {
       within(mapPanel()).getByText("MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED"),
     ).toBeInTheDocument();
     expect(within(mapPanel()).queryByText(/^PLANETS/)).not.toBeInTheDocument();
+  });
+
+  it("names the belts and halo a contact withholds on a line of their own", async () => {
+    // The slice as a `contact` reader holds it (ruling 113.2): the system's belts and halo are
+    // withheld, and each body is a contact whose sections are all withheld.
+    const withheld = { state: "not_resolved" } as const;
+    const contacts = sliceBodiesWith((body) => ({
+      ...body,
+      kind: { type: "unresolved" },
+      label: withheld,
+      mass_kg: withheld,
+      orbit: withheld,
+      moons: withheld,
+      rings: withheld,
+      population: withheld,
+      bulk: withheld,
+    }));
+    const contact: ResponseFor<"system_bodies"> = {
+      ...contacts,
+      granted: "contact",
+      belts: withheld,
+      halo: withheld,
+    };
+    const { socket } = renderView();
+    await answer(socket, contact);
+    const notes = within(mapPanel())
+      .getAllByText(/: NOT (RESOLVED|YET MODELLED)$/)
+      .map((note) => note.textContent);
+
+    expect(notes).toEqual(["BELTS AND COMETARY HALO: NOT RESOLVED"]);
   });
 
   it("shows the granted level and the system's architecture class", async () => {
@@ -557,7 +588,7 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     expect(reading("NAME")).toBe("NOT YET MODELLED");
     expect(reading("CLASS")).toBe("MASSIVE");
     expect(reading("COMPOSITION")).toBe("POROUS ICE");
-    expect(reading("EDGES")).toBe("66.0 Mm – 137 Mm");
+    expect(reading("EDGES")).toBe("66.0 – 137 Mm");
     expect(reading("OPTICAL DEPTH")).toBe("0.600");
     expect(reading("GAP 2:1")).toBe("117 Mm");
     expect(terms("ORBIT")).toHaveLength(0);
@@ -572,7 +603,7 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
 
     expect(reading("SITE")).toBe("INSIDE GIANT ORBIT");
     expect(reading("COMPOSITION")).toBe("ROCKY");
-    expect(reading("EDGES")).toBe("2.06 AU – 3.28 AU");
+    expect(reading("EDGES")).toBe("2.06 – 3.28 AU");
     expect(reading("SIZE INDEX")).toBe("3.00");
     expect(reading("LARGEST DIAMETER")).toBe("940 km");
     expect(reading("MEAN ECC")).toBe("0.1250");
@@ -581,6 +612,37 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     expect(reading("GAP 3:1")).toBe("2.50 AU");
     expect(reading("MEMBERS")).toBe("1");
     expect(terms("BELT PROPER")).toHaveLength(0);
+  });
+
+  it("reads a scattered belt's two components each as one span in one unit", async () => {
+    // A Kuiper-like belt: its proper 40 to 48 AU, its scattered disc on to 1,000 AU (ruling 113.3).
+    const au = 149_597_870_700;
+    const scattered = populatedBodiesWith((body) =>
+      body.population.state === "ok" && body.population.value.type === "belt"
+        ? {
+            ...body,
+            population: {
+              state: "ok",
+              value: {
+                ...body.population.value,
+                inner_edge_m: 40 * au,
+                outer_edge_m: 1000 * au,
+                main: { inner_edge_m: 40 * au, outer_edge_m: 48 * au },
+                scattered: { inner_edge_m: 48 * au, outer_edge_m: 1000 * au },
+                gaps: [],
+              },
+            },
+          }
+        : body,
+    );
+    const { user, socket } = renderView();
+    await answer(socket, scattered);
+
+    await selectRow(user, /\/57344,/);
+
+    expect(reading("EDGES")).toBe("40.0 – 1000 AU");
+    expect(reading("BELT PROPER")).toBe("40.0 – 48.0 AU");
+    expect(reading("SCATTERED DISC")).toBe("48.0 – 1000 AU");
   });
 
   it("reads NOT RESOLVED for a belt's members withheld below the bulk level", async () => {
@@ -610,7 +672,7 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     await selectRow(user, /\/57600,/);
 
     expect(reading("PARENT")).toBe("BARYCENTRE");
-    expect(reading("EDGES")).toBe("2000 AU – 100,000 AU");
+    expect(reading("EDGES")).toBe("2000 – 100,000 AU");
     expect(reading("COMETS OVER 1 km")).toBe("7.50E11");
     expect(reading("COMET RATE")).toBe("10.9 /yr");
   });

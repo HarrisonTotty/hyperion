@@ -7,6 +7,7 @@ import {
   formatAge,
   formatBearingDeg,
   formatBodyDistance,
+  formatBodySpan,
   formatGravity,
   formatLengthLy,
   formatListPosition,
@@ -313,6 +314,38 @@ describe("formatBodyDistance", () => {
 
   it("keeps the sign of a negative distance, as a signed offset has", () => {
     expect(formatBodyDistance(-384_400, null)).toEqual({ value: "-384", unit: "Mm" });
+  });
+});
+
+describe("formatBodySpan", () => {
+  it.each([
+    // A dusty ring, whose inner edge alone would read in Mm, in the Gm of its outer edge.
+    [95_000, 1_200_000, "0.0950 – 1.20", "Gm"],
+    [66_000, 137_000, "66.0 – 137", "Mm"],
+    // An inner belt across 0.1 AU, whose inner edge alone would read 12.0 Gm.
+    [12_000_000, 0.15 * KM_PER_AU, "0.0802 – 0.150", "AU"],
+    [0.08 * KM_PER_AU, 0.15 * KM_PER_AU, "0.0800 – 0.150", "AU"],
+    [2000 * KM_PER_AU, 100_000 * KM_PER_AU, "2000 – 100,000", "AU"],
+  ])("writes %f to %f km, first shown, as %s %s", (innerKm, outerKm, value, unit) => {
+    expect(formatBodySpan(innerKm, outerKm, null)).toEqual({ value, unit });
+  });
+
+  it("joins its ends by a spaced en dash, never a hyphen", () => {
+    const { value } = formatBodySpan(66_000, 137_000, null);
+
+    expect(value).toContain(" \u2013 ");
+    expect(value).not.toContain("-");
+  });
+
+  it.each<[number, number, BodyDistanceUnit, string, BodyDistanceUnit]>([
+    // The outer end within 5% above 1,000 Mm keeps Mm, and beyond it takes Gm.
+    [500_000, 1_020_000, "Mm", "500 – 1020", "Mm"],
+    [500_000, 1_060_000, "Mm", "0.500 – 1.06", "Gm"],
+    // The outer end within 5% below 0.1 AU keeps AU, and beyond it takes Gm.
+    [0.05 * KM_PER_AU, 0.098 * KM_PER_AU, "AU", "0.0500 – 0.0980", "AU"],
+    [0.05 * KM_PER_AU, 0.09 * KM_PER_AU, "AU", "7.48 – 13.5", "Gm"],
+  ])("writes %f to %f km last shown in %s as %s %s", (innerKm, outerKm, previous, value, unit) => {
+    expect(formatBodySpan(innerKm, outerKm, previous)).toEqual({ value, unit });
   });
 });
 

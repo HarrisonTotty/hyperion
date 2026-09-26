@@ -434,12 +434,42 @@ export function formatBodyDistance(
       magnitudeKm < kept.belowKm * (1 + DISTANCE_HYSTERESIS);
     chosen = inMargin ? kept : nominal;
   }
-  const inUnit = distanceKm / chosen.kmPerUnit;
-  const value =
-    chosen.unit === "km"
-      ? significantOrSci(inUnit, 0.01, Number.POSITIVE_INFINITY)
-      : significantOrSci(inUnit, 0, chosen.unit === "AU" ? 1_000_000 : Number.POSITIVE_INFINITY);
-  return { value, unit: chosen.unit };
+  return { value: distanceIn(distanceKm, chosen), unit: chosen.unit };
+}
+
+/** A distance's digits in `band`'s unit, to three significant figures, as it is read. */
+function distanceIn(distanceKm: number, band: DistanceBand): string {
+  const inUnit = distanceKm / band.kmPerUnit;
+  return band.unit === "km"
+    ? significantOrSci(inUnit, 0.01, Number.POSITIVE_INFINITY)
+    : significantOrSci(inUnit, 0, band.unit === "AU" ? 1_000_000 : Number.POSITIVE_INFINITY);
+}
+
+/** What joins a span's two ends: a spaced en dash, which both B612 faces draw (ruling 113.3). */
+export const SPAN_JOIN = " – ";
+
+/**
+ * Formats a span of distances in a planetary system, such as an annulus's two edges, as one
+ * reading with one unit: `66.0 – 137 Mm`, `0.0800 – 0.150 AU` (the orchestrator's ruling 113.3).
+ *
+ * @remarks
+ * The unit is the one {@link formatBodyDistance} gives the outer end, with its hysteresis held on
+ * that end, and both ends are written in it to three significant figures, even where the inner end
+ * alone would take a smaller unit. The ends are joined by {@link SPAN_JOIN}, never a hyphen, which
+ * beside digits would read as a minus.
+ *
+ * @param previous - The unit this span was last shown in, which the caller keeps; `null` for the
+ *   first showing.
+ */
+export function formatBodySpan(
+  innerKm: number,
+  outerKm: number,
+  previous: BodyDistanceUnit | null,
+): FormattedDistance {
+  requireFinite(innerKm, "inner distance");
+  const outer = formatBodyDistance(outerKm, previous);
+  const band = bandOf(outer.unit);
+  return { value: `${distanceIn(innerKm, band)}${SPAN_JOIN}${outer.value}`, unit: outer.unit };
 }
 
 /** Decimals every eccentricity is read to, on every display that shows one. */

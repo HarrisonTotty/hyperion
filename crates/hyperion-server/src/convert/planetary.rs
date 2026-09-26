@@ -285,7 +285,10 @@ pub(crate) fn system_bodies(
 /// # Errors
 ///
 /// [`body_refusal`] of [`ResolveBodyError::NoSuchBody`], `unknown_body`, if the system holds no
-/// planetary body at the index.
+/// planetary body at the index, or the level asked for does not resolve the body there
+/// ([`DetailLevel::resolves`]: a belt's member, or a member's moon, below `bulk`). The two
+/// refusals are word for word the same, so that a refusal does not confirm that a withheld member
+/// exists, and `body_detail` resolves only what `system_bodies` lists (ruling 113.4).
 ///
 /// # Panics
 ///
@@ -296,6 +299,9 @@ pub(crate) fn body_detail(
     ctx: &SystemContext,
     planets: &PlanetarySystem,
 ) -> Result<BodyDetailDto, RequestError> {
+    if !wanted.level().resolves(wanted.index()) {
+        return Err(body_refusal(&request.body, ResolveBodyError::NoSuchBody));
+    }
     let record = planets
         .body_at(ctx, wanted.index(), wanted.time())
         .map_err(|error| body_refusal(&request.body, error))?

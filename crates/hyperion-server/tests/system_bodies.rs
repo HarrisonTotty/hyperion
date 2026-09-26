@@ -670,7 +670,10 @@ async fn a_pinned_system_with_moons_returns_them() {
 /// P14.T34 on the wire, with ruling 95.1: below `bulk` a belt's list of members is `not_resolved`
 /// and no member (nor a member's moon) is listed; at `bulk` each belt lists the sim's members,
 /// each listed under its belt, and a member's moon at `Member(0x80 + k)` comes back from
-/// `body_detail` as the sim's record, naming its member as its parent.
+/// `body_detail` as the sim's record, naming its member as its parent. With ruling 113.4,
+/// `body_detail` resolves only what `system_bodies` lists: at `contact` and `mass_and_orbit` a
+/// member and a member's moon are refused `unknown_body`, word for word as an index that names no
+/// body is, and at `bulk` each is answered.
 #[tokio::test]
 async fn belts_withhold_their_members_below_bulk_and_list_them_at_it() {
     let (server, mut client, universe) = started().await;
@@ -735,6 +738,7 @@ async fn belts_withhold_their_members_below_bulk_and_list_them_at_it() {
             }
             members_seen += expected.len();
         }
+        members_resolve_from_bulk_only(&mut client, &universe, raw, &planets).await;
         for moon in planets.bodies().iter().filter(|body| {
             matches!(body.kind(), BodyKind::Moon(_))
                 && matches!(
@@ -771,6 +775,53 @@ async fn belts_withhold_their_members_below_bulk_and_list_them_at_it() {
     assert!(member_moons > 0, "a pinned member has a moon");
     client.close().await;
     server.stop().await;
+}
+
+/// An index in plan 14's layout that names no body: a planet of [`EMPTY`], which has none.
+fn empty_index() -> BodyIdHex {
+    BodyIdHex::from_parts(EMPTY, 0x0100)
+}
+
+/// Ruling 113.4: every belt member and member's moon of `raw` is refused `unknown_body` at
+/// `contact` and `mass_and_orbit`, word for word as [`empty_index`] is, and is answered at `bulk`.
+async fn members_resolve_from_bulk_only(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    raw: u64,
+    planets: &PlanetarySystem,
+) {
+    let time = at_years(0);
+    let no_body = refused(
+        client,
+        detail_request(universe, empty_index(), time, DetailLevelDto::Full),
+    )
+    .await;
+    assert_eq!(no_body.code, ErrorCode::UnknownBody, "{no_body:?}");
+    let members = planets.bodies().iter().filter(|body| {
+        matches!(
+            body.index().sub(),
+            hyperion_sim::planetary::BodySub::Member(_)
+        )
+    });
+    for member in members {
+        let body = BodyIdHex::from_parts(raw, member.index().get());
+        let words = no_body
+            .message
+            .replace(&empty_index().to_string(), &body.to_string());
+        for level in [DetailLevelDto::Contact, DetailLevelDto::MassAndOrbit] {
+            let error = refused(client, detail_request(universe, body.clone(), time, level)).await;
+            assert_eq!(error.code, ErrorCode::UnknownBody, "{body} {level:?}");
+            assert_eq!(error.message, words, "{body} {level:?}");
+            assert_eq!(error.field, no_body.field, "{body} {level:?}");
+        }
+        let answered = detail(
+            client,
+            detail_request(universe, body.clone(), time, DetailLevelDto::Bulk),
+        )
+        .await;
+        assert_eq!(answered.record.id, body, "{body}");
+        assert_eq!(answered.granted, DetailLevelDto::Bulk, "{body}");
+    }
 }
 
 /// Systems whose bodies are in every state a record can carry, one found for each by sampling the

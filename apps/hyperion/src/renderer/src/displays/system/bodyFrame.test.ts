@@ -112,6 +112,25 @@ describe("focusHeldReason", () => {
     expect(focusHeldReason(withheld, bodies)).toBe("ORBIT NOT RESOLVED");
     expect(focusHeldReason(body(MOON, bodies), bodies)).toBe("ORBIT NOT RESOLVED");
   });
+
+  it("says the orbit is not yet modelled for a planet whose orbit is not computed", () => {
+    const withOrbit = bodiesOf();
+    const unmodelled: SystemBody = { ...body(PLANET, withOrbit), orbit: { state: "not_modelled" } };
+    const bodies = withOrbit.with(
+      withOrbit.findIndex((candidate) => candidate.id === PLANET),
+      unmodelled,
+    );
+
+    expect(focusHeldReason(unmodelled, bodies)).toBe("ORBIT NOT YET MODELLED");
+    expect(focusHeldReason(body(RING, bodies), bodies)).toBe("ORBIT NOT YET MODELLED");
+  });
+
+  it("says a selected contact's kind is not resolved, since it may be a planet", () => {
+    const bodies = bodiesOf();
+    const contact: SystemBody = { ...body(PLANET, bodies), kind: { kind: "unresolved" } };
+
+    expect(focusHeldReason(contact, bodies)).toBe("KIND NOT RESOLVED");
+  });
 });
 
 describe("bodyFrameName", () => {

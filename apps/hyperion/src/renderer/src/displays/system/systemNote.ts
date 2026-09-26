@@ -1,10 +1,11 @@
 /**
- * The `SYSTEM` display's system note: what this generator version does not model, said so that the
- * empty space beyond what is drawn is never read as empty (the orchestrator's rulings 33 and 34;
- * plan 14, P14.T41.b).
+ * The `SYSTEM` display's system note: what this generator version does not model, and what the
+ * granted detail level withholds, said so that the empty space beyond what is drawn is never read as
+ * empty (the orchestrator's rulings 33, 34 and 113.2; plan 14, P14.T41.b).
  */
 import type { SectionDto } from "@hyperion/protocol";
 
+import { type SectionStandIn, sectionStateLabel } from "../../lib/system/bodyWords";
 import type { SystemBodies } from "../../lib/system/model";
 
 /** The state a record's section is tagged with, which the server sets and the client never infers. */
@@ -43,8 +44,8 @@ export interface SmallBodySections {
 export type BodiesKnown =
   { readonly kind: "unserved" } | { readonly kind: "tagged"; readonly sections: SmallBodySections };
 
-/** The phrase that follows the named kinds (the owner's draft of the guide's data states). */
-export const NOT_YET_MODELLED = "NOT YET MODELLED";
+/** The states the note names, in its lines' order: not modelled first, then withheld. */
+const STAND_INS: ReadonlyArray<SectionStandIn> = ["not_modelled", "not_resolved"];
 
 /** `A`, `A AND B`, `A, B AND C`: a list of names as the note reads it. */
 function joinNames(names: ReadonlyArray<string>): string {
@@ -55,37 +56,54 @@ function joinNames(names: ReadonlyArray<string>): string {
 }
 
 /**
- * The system note, or `null` when everything the display could show is modelled.
+ * The small-body kinds whose tags say `state`, in the note's order: moons when any planet's or dwarf
+ * planet's are, rings when any planet's are, then belts and the halo from the system's own tags.
+ */
+function kindsIn(sections: SmallBodySections, state: SectionStandIn): string[] {
+  const { belts, halo, planets } = sections;
+  const names: string[] = [];
+  if (planets.some((planet) => planet.moons === state)) {
+    names.push("MOONS");
+  }
+  if (planets.some((planet) => planet.rings === state)) {
+    names.push("RINGS");
+  }
+  if (belts === state) {
+    names.push("BELTS");
+  }
+  if (halo === state) {
+    names.push("COMETARY HALO");
+  }
+  return names;
+}
+
+/**
+ * The system note's lines, one per section state, or none when the display withholds nothing.
  *
  * @remarks
- * Each kind is named when its tag says `not_modelled`, and drops out as the server starts to model
- * it: moons when any planet's or dwarf planet's are not modelled, rings when any planet's are (a
- * dwarf planet's rings are read on its own readout, so that a belt's members do not hold the word
- * for ever), belts and the halo from the system's own
- * tags. `NOT RESOLVED` and not applicable are not named, since neither says the generator lacks the
- * model. The note is a field label followed by the three-word state, both in upper case, as the
- * owner's draft reads it: `MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED`.
+ * The first line names the kinds this generator version does not model, the second those the
+ * granted detail level withholds, so that neither is read as "none" (the guide's data states;
+ * ruling 113.2). Each kind is named when its tag says so, and drops out as the server starts to
+ * model or resolve it: moons when any planet's or dwarf planet's say so, rings when any planet's do
+ * (a dwarf planet's rings are read on its own readout, so that a belt's members do not hold the word
+ * for ever), belts and the halo from the system's own tags. Not applicable is never named. Each line
+ * is a field label followed by the state, both in upper case:
+ * `MOONS, RINGS, BELTS AND COMETARY HALO: NOT YET MODELLED`, then
+ * `BELTS AND COMETARY HALO: NOT RESOLVED`, which at v12 only `contact` gives. A server that cannot
+ * serve the bodies has no tags, so its one line names the planets with every small-body kind.
  */
-export function systemNote(bodies: BodiesKnown): string | null {
-  const names: string[] = [];
+export function systemNotes(bodies: BodiesKnown): ReadonlyArray<string> {
   if (bodies.kind === "unserved") {
-    names.push("PLANETS", "MOONS", "RINGS", "BELTS", "COMETARY HALO");
-  } else {
-    const { belts, halo, planets } = bodies.sections;
-    if (planets.some((planet) => planet.moons === "not_modelled")) {
-      names.push("MOONS");
-    }
-    if (planets.some((planet) => planet.rings === "not_modelled")) {
-      names.push("RINGS");
-    }
-    if (belts === "not_modelled") {
-      names.push("BELTS");
-    }
-    if (halo === "not_modelled") {
-      names.push("COMETARY HALO");
+    return [`PLANETS, MOONS, RINGS, BELTS AND COMETARY HALO: ${sectionStateLabel("not_modelled")}`];
+  }
+  const notes: string[] = [];
+  for (const state of STAND_INS) {
+    const names = kindsIn(bodies.sections, state);
+    if (names.length > 0) {
+      notes.push(`${joinNames(names)}: ${sectionStateLabel(state)}`);
     }
   }
-  return names.length === 0 ? null : `${joinNames(names)}: ${NOT_YET_MODELLED}`;
+  return notes;
 }
 
 /**

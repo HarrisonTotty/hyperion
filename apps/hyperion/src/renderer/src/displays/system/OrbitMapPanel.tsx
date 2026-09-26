@@ -108,8 +108,9 @@ export interface OrbitMapPanelProps {
  * once more (the orchestrator's ruling 59.6). The grid still covers its radius. While the display
  * time runs, the map follows it at each frame, which is the one thing on the display that does:
  * the readings and the time in the view's furniture change at the guide's 4 Hz. Under the map
- * stand the legend and the system note, which names what this generator version does not model so
- * that the space round the stars is not read as empty.
+ * stand the legend and the system note, a line naming what this generator version does not model
+ * and one naming what the granted detail level withholds, so that the space round the stars is not
+ * read as empty (ruling 113.2).
  */
 export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
   const titleId = useId();
@@ -305,7 +306,11 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
         )}
       </div>
       {body}
-      {view.note === null ? null : <p className="orbit-map__note">{view.note}</p>}
+      {view.notes.map((note) => (
+        <p key={note} className="orbit-map__note">
+          {note}
+        </p>
+      ))}
     </section>
   );
 }

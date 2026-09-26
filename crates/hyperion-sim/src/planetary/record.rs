@@ -75,6 +75,18 @@ impl DetailLevel {
         Self::Surface,
         Self::Full,
     ];
+
+    /// Whether a reader granted this level holds a record of the body at `index` at all.
+    ///
+    /// Below [`DetailLevel::Bulk`] a belt's named members, and a member's moons at
+    /// `Member(0x80 + k)`, are not resolved, since a population seen as a whole does not resolve
+    /// its members (P14.T34); every other body is. [`SystemSnapshot::degrade`] lists only the
+    /// bodies this admits, and the server's single-body request refuses the others as it refuses an
+    /// index that names no body, so that the two cannot disagree (ruling 113.4).
+    #[must_use]
+    pub fn resolves(self, index: BodyIndex) -> bool {
+        self >= Self::Bulk || !matches!(index.sub(), BodySub::Member(_))
+    }
 }
 
 /// One optional section of a record, tagged with its state (ruling 34 of 2026-09-22, item 3).
@@ -1312,9 +1324,7 @@ impl SystemSnapshot {
         let bodies = self
             .bodies
             .iter()
-            .filter(|body| {
-                granted >= DetailLevel::Bulk || !matches!(body.index().sub(), BodySub::Member(_))
-            })
+            .filter(|body| granted.resolves(body.index()))
             .map(|body| body.degrade(granted))
             .collect();
         Self {
@@ -1734,6 +1744,46 @@ mod tests {
             );
             for body in degraded.bodies() {
                 assert_eq!(body.level(), level);
+            }
+        }
+    }
+
+    /// Ruling 113.4: below `Bulk` a belt's members and their moons are not resolved, every other
+    /// body is at every level, and a snapshot lists exactly the bodies its level resolves.
+    #[test]
+    fn a_level_resolves_a_belt_s_members_from_bulk_only() {
+        let members = [
+            index(BodySlot::Belt(0), BodySub::Member(1)),
+            index(BodySlot::Belt(3), BodySub::Member(0x80)),
+            index(BodySlot::Belt(3), BodySub::Member(0xff)),
+        ];
+        let others = [
+            planet(3),
+            index(BodySlot::Planet(3), BodySub::Moon(1)),
+            index(BodySlot::Planet(5), BodySub::Ring(0)),
+            index(BodySlot::Belt(0), BodySub::Primary),
+            index(BodySlot::Stellar, BodySub::Primary),
+            index(BodySlot::Stellar, BodySub::Component(1)),
+        ];
+        for level in DetailLevel::ALL {
+            for member in members {
+                assert_eq!(
+                    level.resolves(member),
+                    level >= DetailLevel::Bulk,
+                    "{level:?}"
+                );
+            }
+            for other in others {
+                assert!(level.resolves(other), "{level:?} {other:?}");
+            }
+            let snapshot = belted_snapshot();
+            let degraded = snapshot.degrade(level);
+            for body in snapshot.bodies() {
+                assert_eq!(
+                    degraded.body(body.index()).is_some(),
+                    level.resolves(body.index()),
+                    "{level:?}"
+                );
             }
         }
     }

@@ -128,7 +128,8 @@ pub enum ErrorCode {
     /// A well-formed system ID that names no system of the universe; `field` names the request's
     /// field.
     UnknownSystem,
-    /// A well-formed body ID that names no body of its system; `field` names the request's field.
+    /// A well-formed body ID that names no body of its system, or none the detail level asked for
+    /// resolves; `field` names the request's field.
     UnknownBody,
     /// The universe was created with a generator version this server cannot run.
     GeneratorVersionMismatch,
