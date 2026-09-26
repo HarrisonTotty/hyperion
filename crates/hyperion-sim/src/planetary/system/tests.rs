@@ -20,7 +20,7 @@ use crate::planetary::fate::DestructionCause;
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::HILL_STABLE_GAP;
 use crate::planetary::placement::mutual_hill_radius;
-use crate::planetary::record::{DetailLevel, Population, RecordSection, SectionState};
+use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
 use crate::planetary::satellites::generate_satellites;
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
@@ -169,6 +169,41 @@ fn generate_satellites_is_each_planet_s_children_in_generate() {
         }
     }
     assert!(compared > 1_000, "{compared} planets");
+}
+
+/// P14.T30.a with ruling 95.1: a belt member's satellites alone equal its children in `generate`,
+/// its one possible moon at `Member(0x80 + k)`, whose index names the member as its parent.
+#[test]
+fn generate_satellites_is_each_member_s_children_in_generate() {
+    let contexts = sample_contexts(1_000, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
+    let (mut members, mut moons) = (0u32, 0u32);
+    for ctx in &contexts {
+        let system = generate(SEED, ctx);
+        for member in system.bodies().iter().filter(|b| b.member_of().is_some()) {
+            let alone = generate_satellites(SEED, ctx, member, None);
+            assert_eq!(alone, system.satellites_of(member.index()));
+            assert!(alone.rings().is_empty());
+            assert!(alone.moons().len() <= 1);
+            let children: Vec<BodyIndex> =
+                system.children(member.index()).map(Body::index).collect();
+            let expected: Vec<BodyIndex> = alone.moons().iter().map(Satellite::index).collect();
+            assert_eq!(children, expected);
+            for moon in alone.moons() {
+                let BodySub::Member(k) = member.index().sub() else {
+                    panic!("a member's index is a member's");
+                };
+                assert_eq!(moon.index().slot(), member.index().slot());
+                assert_eq!(moon.index().sub(), BodySub::Member(k + 0x80));
+                assert_eq!(moon.index().parent(), Some(member.index()));
+                assert_eq!(moon.origin(), MoonOrigin::GiantImpact);
+                moons += 1;
+            }
+            members += 1;
+        }
+    }
+    assert!(members > 100, "{members} members");
+    // 567 of 7,985 members in this sample have a giant-impact moon.
+    assert!(moons > 100, "{moons} member moons among {members} members");
 }
 
 #[test]
@@ -1016,6 +1051,51 @@ fn every_body_s_states_across_the_window_are_a_prefix_of_its_life() {
     }
     // Old, evolved hosts in the sample have swallowed some of their planets.
     assert!(engulfed > 0, "{engulfed}");
+}
+
+/// Across the window, in whole systems: a moon or a ring is never present while its parent is
+/// not, and takes its parent's state then (a giant engulfed by its evolved host takes its moons
+/// and rings with it); a regular or captured moon and a ring are present whenever their parent
+/// is; and a belt member's moon is no exception (P14.T30.b).
+#[test]
+fn satellites_share_their_parent_s_state_across_the_window() {
+    let (mut followed, mut engulfed) = (0u32, 0u32);
+    for (ctx, system) in whole() {
+        for t in window() {
+            let snapshot = system.snapshot_at(ctx, t);
+            let state_of = |index: BodyIndex| {
+                snapshot
+                    .bodies()
+                    .iter()
+                    .find(|r| r.index() == index)
+                    .map(|r| r.identity().state())
+                    .unwrap()
+            };
+            for body in system.bodies() {
+                let OrbitHost::Body(parent) = body.host() else {
+                    continue;
+                };
+                let (own, of_parent) = (state_of(body.index()), state_of(parent));
+                match (of_parent, body.kind()) {
+                    (BodyState::Present, BodyKind::Moon(MoonOrigin::GiantImpact)) => {}
+                    (BodyState::Present, _) => assert_eq!(own, BodyState::Present),
+                    (other, _) => {
+                        assert_eq!(own, other, "{:?} of {parent:?}", body.index());
+                        followed += 1;
+                        engulfed += u32::from(matches!(
+                            other,
+                            BodyState::Destroyed {
+                                cause: DestructionCause::Engulfed,
+                                ..
+                            }
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(followed > 0, "no satellite of an absent parent");
+    eprintln!("{followed} satellites followed an absent parent, {engulfed} engulfed");
 }
 
 /// Every body's primordial circularisation is T8.e's damping time with Chen and Kipping's median

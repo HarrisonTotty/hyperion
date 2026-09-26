@@ -132,6 +132,10 @@ pub const TITAN_SHARE: (f64, f64) = (0.90, 0.98);
 /// 200 km. Provisional.
 pub const MOONLET_MEAN: f64 = 6.0;
 
+// The moonlet count takes one word of `tags::MOON_COUNT` only below the Poisson sampler's switch
+// to its two-word method; at or above it, the count would read the words after it.
+const _: () = assert!(MOONLET_MEAN < crate::rng::POISSON_PTRS_MIN_MEAN);
+
 /// Where the innermost regular moon sits: uniformly between 3 and 8 planetary radii (P14.T17.a).
 ///
 /// Mimas at 3.09 Saturn radii, Proteus at 4.75 Neptune radii, Miranda at 5.08 Uranus radii and Io
@@ -689,6 +693,7 @@ fn place(
 /// The longest inner run of `placed` that lies inside a twentieth of the parent's Hill radius at
 /// pericentre and whose total mass tides let survive, as moons: what does not fit is dropped from
 /// the outside in.
+#[must_use]
 fn keep_inside(parent: &MoonParent, placed: Vec<(Placed, MoonDraws)>) -> Vec<RegularMoon> {
     let bound = HILL_FRACTION * parent.hill_radius_at_pericentre().value();
     let limit = parent.maximum_moon_mass().value();
@@ -1496,10 +1501,17 @@ mod tests {
             }
             if let Some(first) = system.moons().first() {
                 assert_eq!(first.resonance(), Resonance::None);
-                let radii = first.orbit().semi_major_axis() / p.radius();
+                // 3–8 planetary radii, the range shifted out (keeping its 8 : 3) where the
+                // pericentre would fall inside the fluid Roche limit.
+                let r = p.radius().value();
+                let e = first.orbit().eccentricity().value();
+                let roche = p.roche_limit_fluid(PLACEMENT_DENSITY).value();
+                let lo = (3.0 * r).max(roche / (1.0 - e));
+                let hi = (8.0 * r).max(lo * 8.0 / 3.0);
+                let a = first.orbit().semi_major_axis().value();
                 assert!(
-                    (3.0..8.0 * 1.000_001).contains(&radii)
-                        || first.orbit().semi_major_axis() > p.roche_limit_fluid(PLACEMENT_DENSITY)
+                    (lo * (1.0 - 1e-6)..hi * (1.0 + 1e-6)).contains(&a),
+                    "{lo} {a} {hi}"
                 );
             }
         }
@@ -1634,6 +1646,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The tidal limit of P14.T15 drops moons from the outside in: under a limit between the
+    /// unlimited system's partial sums, the moons kept are exactly its innermost ones whose
+    /// running total fits, and the drawn total is untouched.
+    #[test]
+    fn the_moon_mass_limit_drops_moons_from_the_outside_in() {
+        let (mut cut, mut kept_some) = (0u32, 0u32);
+        for p in giants(100) {
+            let free = regular_moons(Seed::new(4), &p);
+            if free.moons().len() < 2 {
+                continue;
+            }
+            // Between the first moon's mass and the whole system's.
+            let first = free.moons()[0].mass().value();
+            let limit = EarthMasses::new(f64::midpoint(first, free.total_mass().value()));
+            let limited = MoonParent::new(MoonParentParts {
+                maximum_moon_mass: limit,
+                ..parts(&p)
+            })
+            .unwrap();
+            let system = regular_moons(Seed::new(4), &limited);
+            let n = system.moons().len();
+            assert_eq!(system.moons(), &free.moons()[..n]);
+            assert!(system.total_mass() <= limit);
+            assert!(n < free.moons().len());
+            let next: f64 = free.moons()[..=n].iter().map(|m| m.mass().value()).sum();
+            assert!(next > limit.value(), "the next moon would have fitted");
+            assert_same_bits(system.drawn_mass().value(), free.drawn_mass().value());
+            cut += 1;
+            kept_some += u32::from(n >= 1);
+        }
+        assert!(cut > 100, "{cut}");
+        assert_eq!(kept_some, cut, "the first moon always fits under the limit");
     }
 
     #[test]

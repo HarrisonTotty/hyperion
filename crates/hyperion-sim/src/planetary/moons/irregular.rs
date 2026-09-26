@@ -213,6 +213,7 @@ pub struct IrregularPopulation {
 impl IrregularPopulation {
     /// The population of `count` members above [`POPULATION_MIN_DIAMETER`] whose largest is
     /// `largest` across.
+    #[must_use]
     fn new(count: u64, largest: Metres) -> Self {
         let n = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
         let km = |m: Metres| m.value() / 1e3;
@@ -466,6 +467,7 @@ pub fn captures(seed: Seed, parent: &MoonParent, belt: Option<NearestBelt>) -> C
 }
 
 /// The rank at word `word` of `stream`.
+#[must_use]
 fn rank_at(stream: &Stream, word: u64) -> UnitUniform {
     let mut at = stream.clone();
     at.seek(word);
@@ -473,6 +475,7 @@ fn rank_at(stream: &Stream, word: u64) -> UnitUniform {
 }
 
 /// The first word of captured body `ordinal`'s block.
+#[must_use]
 fn body_block(ordinal: u8) -> u64 {
     BODY_WORDS_START + BODY_WORDS * (u64::from(ordinal) - 1)
 }
@@ -756,6 +759,7 @@ mod tests {
     #[test]
     fn a_triton_like_capture_leaves_no_regular_moon_outside_it() {
         let mut large = 0u64;
+        let (mut kept_moons, mut dropped_moons) = (0usize, 0usize);
         let tries = 2_000;
         for i in 0..tries {
             let ice = neptune(planet_id(i, 8));
@@ -780,8 +784,29 @@ mod tests {
                     .iter()
                     .all(|m| m.orbit().apoapsis() < pericentre)
             );
-            assert!(kept.moons().len() <= regular.moons().len());
+            // The inner moons survive, as a run from the planet out, and every one dropped
+            // lies at or beyond the capture's orbit or too near its pericentre.
+            let n = kept.moons().len();
+            assert_eq!(kept.moons(), &regular.moons()[..n]);
+            for dropped in &regular.moons()[n..] {
+                let hill = mutual_hill_radius(
+                    dropped.mass(),
+                    triton.mass(),
+                    SolarMasses::from(ice.mass()),
+                    dropped.orbit().semi_major_axis(),
+                    a,
+                );
+                assert!(
+                    dropped.orbit().semi_major_axis() >= a
+                        || pericentre - dropped.orbit().apoapsis() < hill * HILL_STABLE_GAP,
+                    "{dropped:?}"
+                );
+            }
+            kept_moons += n;
+            dropped_moons += regular.moons().len() - n;
         }
+        assert!(kept_moons > 100, "{kept_moons} kept");
+        assert!(dropped_moons > 10, "{dropped_moons} dropped");
         assert_poisson_count(
             "large captures",
             large,

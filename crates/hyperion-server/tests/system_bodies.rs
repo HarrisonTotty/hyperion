@@ -667,6 +667,112 @@ async fn a_pinned_system_with_moons_returns_them() {
     server.stop().await;
 }
 
+/// P14.T34 on the wire, with ruling 95.1: below `bulk` a belt's list of members is `not_resolved`
+/// and no member (nor a member's moon) is listed; at `bulk` each belt lists the sim's members,
+/// each listed under its belt, and a member's moon at `Member(0x80 + k)` comes back from
+/// `body_detail` as the sim's record, naming its member as its parent.
+#[tokio::test]
+async fn belts_withhold_their_members_below_bulk_and_list_them_at_it() {
+    let (server, mut client, universe) = started().await;
+    let time = at_years(0);
+    let (mut members_seen, mut member_moons) = (0, 0);
+    for raw in PINNED.into_iter().chain(VARIED) {
+        let (ctx, planets) = sim_system(raw);
+        let id =
+            |index: hyperion_sim::planetary::BodyIndex| BodyIdHex::from_parts(raw, index.get());
+        let is_member = |body: &BodyIdHex| {
+            let (_, index) = body.to_parts();
+            let index = hyperion_sim::planetary::BodyIndex::try_from(index).unwrap();
+            matches!(index.sub(), hyperion_sim::planetary::BodySub::Member(_))
+        };
+        let low = bodies(
+            &mut client,
+            bodies_request(&universe, raw, time, DetailLevelDto::MassAndOrbit),
+        )
+        .await;
+        assert!(
+            low.bodies.iter().all(|body| !is_member(&body.id)),
+            "{raw:x}"
+        );
+        let high = bodies(
+            &mut client,
+            bodies_request(&universe, raw, time, DetailLevelDto::Bulk),
+        )
+        .await;
+        for belt in planets.belts() {
+            let belt_id = id(belt.index());
+            let population = |answer: &SystemBodiesDto| {
+                let listed = answer
+                    .bodies
+                    .iter()
+                    .find(|body| body.id == belt_id)
+                    .expect("a belt is listed from mass_and_orbit");
+                match &listed.population {
+                    SectionDto::Ok(hyperion_protocol::PopulationDto::Belt(wire)) => {
+                        Some(wire.members.clone())
+                    }
+                    // A belt not present at the time (its host destroyed) has no population.
+                    SectionDto::NotApplicable => None,
+                    other => panic!("a belt's population, got {other:?}"),
+                }
+            };
+            let Some(withheld) = population(&low) else {
+                assert_eq!(population(&high), None);
+                continue;
+            };
+            assert_eq!(withheld, SectionDto::NotResolved);
+            let expected: Vec<BodyIdHex> = belt
+                .members()
+                .iter()
+                .map(|member| id(member.index()))
+                .collect();
+            assert_eq!(population(&high), Some(SectionDto::Ok(expected.clone())));
+            for member in &expected {
+                assert!(
+                    high.bodies.iter().any(|body| &body.id == member),
+                    "{member:?}"
+                );
+            }
+            members_seen += expected.len();
+        }
+        for moon in planets.bodies().iter().filter(|body| {
+            matches!(body.kind(), BodyKind::Moon(_))
+                && matches!(
+                    body.index().sub(),
+                    hyperion_sim::planetary::BodySub::Member(_)
+                )
+        }) {
+            let record = detail(
+                &mut client,
+                detail_request(&universe, id(moon.index()), time, DetailLevelDto::Full),
+            )
+            .await
+            .record;
+            let parent = moon.index().parent().expect("a member's moon has a member");
+            assert_eq!(record.parent, Some(OrbitHostDto::Body { id: id(parent) }));
+            let sim = planets.body_at(&ctx, moon.index(), sim_time(time)).unwrap();
+            assert_body_is_the_sims(
+                &sim,
+                &record.id,
+                record.kind,
+                &record.label,
+                record.parent.as_ref(),
+                record.state,
+                record.position_m,
+                &record.mass_kg,
+                &record.orbit,
+                &record.bulk,
+            );
+            member_moons += 1;
+        }
+    }
+    // 58 members and 8 members' moons among the pinned and varied systems.
+    assert!(members_seen > 0, "the pinned systems have belt members");
+    assert!(member_moons > 0, "a pinned member has a moon");
+    client.close().await;
+    server.stop().await;
+}
+
 /// Systems whose bodies are in every state a record can carry, one found for each by sampling the
 /// universe of [`SEED`] (`val14`, round 8): a black hole whose survivors a supernova left on
 /// eccentric orbits, a neutron star whose planets it unbound, a white dwarf that engulfed a planet,

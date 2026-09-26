@@ -4801,3 +4801,12 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     The close binary, the hot Jupiter, the Solar-like system, the eccentric giant, the fallback
     black hole and filler C do not move. `pinned_ids_satisfy_their_own_predicates` holds and the
     slow search reproduces all fourteen IDs, so none is re-pinned.
+
+- **Phase D validated as built (`val14d`, round 9).** T17–T22, T30.a–c, T34–T36 and T42–T43 match
+  the plan as ruled. Fixed without moving output: `BodyIndex::parent` names member k as the parent
+  of `Member(0x80 + k)` (ruling 95.1), where it named the belt; the client releases `FOCUS BODY`
+  when a newer answer drops its planet, and no longer draws a moon or ring seen as a contact on
+  its planet. The acceptance filters that match no test are, as they run:
+  - T30.a: `--lib planetary::system::tests::generate`;
+  - T22.b: `--test planetary_properties -- satellites`;
+  - T30.c: add `--test planetary_golden the_solar_like`.

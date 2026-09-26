@@ -31,6 +31,7 @@ import {
   bodyReachesAu,
   habitableOuterAu,
   hostKeyOf,
+  isPopulation,
   layoutBodies,
   primaryZone,
   type ZoneLayers,
@@ -351,6 +352,13 @@ export function useSystemView(target: SystemTarget): SystemViewState {
       ? null
       : focusTarget(bodyList.find((body) => body.id === focusedId) ?? null, bodyList);
   const focusedBody = focused !== null && focused.id === focusedId ? focused : null;
+  // A focus whose body has gone from an answer on show (destroyed, off its orbit or no longer
+  // listed) is released, and the system frame is fitted afresh rather than opened at the planet
+  // frame's zoom. While no answer is on show the focus waits for one.
+  if (focusedId !== null && focusedBody === null && bodies !== null) {
+    setFocusedId(null);
+    setFitRequest((count) => count + 1);
+  }
   const focusable = focusTarget(chosenBody ?? null, bodyList);
   const focusHeld = focusHeldReason(chosenBody ?? null, bodyList);
   const focusPlane = useMemo(
@@ -444,7 +452,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
           ? bodyList.find((candidate) => candidate.id === orbitParent.id)
           : undefined;
       const reference =
-        parentBody !== undefined && parentBody.population.state === "not_applicable"
+        parentBody !== undefined && !isPopulation(parentBody.kind)
           ? parentBody.orbit.state === "ok"
             ? parentBody.orbit.value.orbit
             : null

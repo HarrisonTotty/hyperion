@@ -8,7 +8,7 @@
 //! | `0x00`        | The stellar level                     | `0x00` the primary, `0x01`–`0x0F` plan 11's other components; in a free-floating brown dwarf's or rogue planet's system `0x00` is the object and `0x80`–`0x8F` are its rings |
 //! | `0x01`–`0xBF` | Primordial planets, in generation order | `0x00` the planet, `0x01`–`0x7F` moons, `0x80`–`0x8F` rings |
 //! | `0xC0`–`0xCF` | Second-generation planets             | as for planets |
-//! | `0xE0`–`0xEF` | Belts, discs and the cometary halo     | `0x00` the population, `0x01`–`0xFF` its named members |
+//! | `0xE0`–`0xEF` | Belts, discs and the cometary halo     | `0x00` the population, `0x01`–`0x7F` its named members, `0x80` + k the moon of member k (ruling 95.1) |
 //! | other         | Reserved                              | |
 //!
 //! Every other value is rejected: slots `0xD0`–`0xDF` and `0xF0`–`0xFF`, and the sub-indices a
@@ -29,6 +29,7 @@
 use std::fmt;
 
 use super::error::{DecodeBodyIndexError, EncodeBodyIndexError};
+use super::satellites::MEMBER_MOON_OFFSET;
 use crate::id::{BodyId, SystemId};
 
 /// The end of the stellar level's component block: components are sub-indices 0–15 of slot
@@ -260,7 +261,8 @@ impl BodyIndex {
 
     /// The body this one belongs to, where the index alone says: a moon's or a ring's parent is
     /// its planet (sub-index 0 of its slot), a ring of the stellar level belongs to the
-    /// free-floating object at `0x0000`, and a belt member to its belt's population.
+    /// free-floating object at `0x0000`, a belt member to its belt's population, and a belt
+    /// member's moon, sub-index `0x80` + k with k from 1 (design note 3, ruling 95.1), to member k.
     ///
     /// `None` for a body whose parent the system resolves: a planet orbits a host that plan 14's
     /// placement chose, a component of the stellar level sits in plan 11's hierarchy, and a
@@ -269,6 +271,13 @@ impl BodyIndex {
     pub fn parent(self) -> Option<Self> {
         match self.sub() {
             BodySub::Primary | BodySub::Component(_) => None,
+            BodySub::Member(n) if n > MEMBER_MOON_OFFSET => {
+                let [slot_byte, _] = self.0.to_be_bytes();
+                Some(Self(u16::from_be_bytes([
+                    slot_byte,
+                    n - MEMBER_MOON_OFFSET,
+                ])))
+            }
             BodySub::Moon(_) | BodySub::Ring(_) | BodySub::Member(_) => {
                 let [slot_byte, _] = self.0.to_be_bytes();
                 Some(Self(u16::from_be_bytes([slot_byte, 0])))
@@ -495,8 +504,21 @@ mod tests {
         let belt = index(BodySlot::Belt(2), BodySub::Primary);
         assert_eq!(belt.parent(), None);
         assert_eq!(
-            index(BodySlot::Belt(2), BodySub::Member(200)).parent(),
+            index(BodySlot::Belt(2), BodySub::Member(0x7F)).parent(),
             Some(belt)
+        );
+        assert_eq!(
+            index(BodySlot::Belt(2), BodySub::Member(0x80)).parent(),
+            Some(belt)
+        );
+        // Ruling 95.1: a member's moon belongs to its member.
+        assert_eq!(
+            index(BodySlot::Belt(2), BodySub::Member(0x83)).parent(),
+            Some(index(BodySlot::Belt(2), BodySub::Member(3)))
+        );
+        assert_eq!(
+            index(BodySlot::Belt(2), BodySub::Member(0xFF)).parent(),
+            Some(index(BodySlot::Belt(2), BodySub::Member(0x7F)))
         );
         assert_eq!(BodyIndex::PRIMARY.parent(), None);
         assert_eq!(
@@ -507,13 +529,21 @@ mod tests {
             index(BodySlot::Stellar, BodySub::Ring(1)).parent(),
             Some(BodyIndex::PRIMARY)
         );
-        // Every canonical index's parent is itself canonical and in the same slot.
+        // Every canonical index's parent is itself canonical and in the same slot: sub-index 0,
+        // or for a member's moon its member, whose own parent is sub-index 0.
         for raw in 0..=u16::MAX {
             if let Ok(index) = BodyIndex::try_from(raw)
                 && let Some(parent) = index.parent()
             {
                 assert_eq!(parent.slot(), index.slot());
-                assert_eq!(parent.sub(), BodySub::Primary);
+                assert_eq!(BodyIndex::try_from(u16::from(parent)), Ok(parent));
+                match index.sub() {
+                    BodySub::Member(n) if n > MEMBER_MOON_OFFSET => {
+                        assert_eq!(parent.sub(), BodySub::Member(n - MEMBER_MOON_OFFSET));
+                        assert_eq!(parent.parent().map(BodyIndex::sub), Some(BodySub::Primary));
+                    }
+                    _ => assert_eq!(parent.sub(), BodySub::Primary),
+                }
             }
         }
     }

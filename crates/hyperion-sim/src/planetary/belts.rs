@@ -1597,6 +1597,7 @@ fn eccentricity_limit(
 }
 
 /// The quantile at `rank` of a Rayleigh law of width `width` truncated at `limit`.
+#[must_use]
 fn truncated_rayleigh(width: f64, limit: f64, rank: UnitUniform) -> f64 {
     if limit <= 0.0 {
         return 0.0;

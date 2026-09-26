@@ -520,6 +520,20 @@ mod solar {
 
     /// Belt slots: a host's belts take consecutive slots from the one given, and none goes beyond
     /// the last belt slot.
+    /// The same seed gives the same belts twice, and the order the planets come in does not
+    /// matter.
+    #[test]
+    fn two_calls_agree_bit_for_bit_whatever_the_planets_order() {
+        let disc = disc();
+        let planets = planets();
+        let once = belts_about(&planets, &disc, FIRST_BELT_SLOT);
+        assert!(!once.belts().is_empty());
+        assert_eq!(once, belts_about(&planets, &disc, FIRST_BELT_SLOT));
+        let mut reversed = planets.clone();
+        reversed.reverse();
+        assert_eq!(once, belts_about(&reversed, &disc, FIRST_BELT_SLOT));
+    }
+
     #[test]
     fn belts_take_consecutive_slots_and_stop_at_the_last() {
         let from_twelve = belts_about(&planets(), &disc(), 12);

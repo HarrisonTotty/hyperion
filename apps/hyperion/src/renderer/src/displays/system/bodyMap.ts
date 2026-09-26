@@ -173,6 +173,17 @@ function toAu(positionM: Vec3): Vec3 {
 }
 
 /**
+ * Whether `body` is left to the frame of the body it orbits rather than drawn at the system's
+ * scale: a moon, and a contact whose record still names a body as its parent (a moon or a ring
+ * whose kind the `contact` detail level withholds), which would stand on its planet's contact.
+ */
+function underItsParent(body: SystemBody): boolean {
+  return (
+    body.kind.kind === "moon" || (body.kind.kind === "unresolved" && body.parent?.kind === "body")
+  );
+}
+
+/**
  * Every drawn body as a point mark at the display time: its symbol, labelled with its
  * designation, heavier bodies labelled first, after every star.
  *
@@ -188,7 +199,7 @@ export function bodyMarks(
 ): ReadonlyArray<PointMark> {
   const marks: PointMark[] = [];
   for (const body of bodies) {
-    const symbol = body.kind.kind === "moon" ? null : bodySymbol(body);
+    const symbol = underItsParent(body) ? null : bodySymbol(body);
     const positionM = symbol === null ? null : bodyPositionM(body, bodiesLayout, time);
     if (symbol === null || positionM === null) {
       continue;
@@ -224,7 +235,7 @@ export function bodyPaths(
   const paths: PathMark[] = [];
   for (const body of bodies) {
     const parentKey = bodiesLayout.parentKeys.get(body.id);
-    if (parentKey === undefined || body.orbit.state !== "ok" || body.kind.kind === "moon") {
+    if (parentKey === undefined || body.orbit.state !== "ok" || underItsParent(body)) {
       continue;
     }
     const aboutM = composePosition(bodiesLayout.placements, parentKey, time);
@@ -257,7 +268,7 @@ export function bodyReachesAu(
 ): ReadonlyArray<number> {
   const reaches: number[] = [];
   for (const body of bodies) {
-    if (bodySymbol(body) === null || body.kind.kind === "moon" || body.state.kind !== "present") {
+    if (bodySymbol(body) === null || underItsParent(body) || body.state.kind !== "present") {
       continue;
     }
     const reachM =

@@ -24,7 +24,7 @@ import {
   aWhiteDwarf,
 } from "../../test/systemFixtures";
 import { CLOCK_WINDOW_S } from "./displayTime";
-import { sliceBodiesWith } from "../../test/planetaryFixture";
+import { populatedBodiesWith, sliceBodiesWith } from "../../test/planetaryFixture";
 import { SystemView } from "./SystemView";
 
 const DAY_S = 86_400;
@@ -104,6 +104,15 @@ function limitStatus(): HTMLElement {
 
 function requestTimes(socket: FakeWebSocket): ReadonlyArray<UniverseTime> {
   return socket.requestsOfKind("system_summary").map((request) => request.body.time);
+}
+
+/** Whether `body` is the populated fixture's first planet, `/256`. */
+function planet(body: { readonly id: string }): boolean {
+  return body.id.endsWith(".0100");
+}
+
+function map(): HTMLElement {
+  return screen.getByRole("region", { name: /^Orbit map/ });
 }
 
 beforeEach(() => {
@@ -277,6 +286,90 @@ describe("TimeControl", () => {
     const past = { seconds: A_CENTURY.seconds + 3 * DAY_S, nanos: 0 };
     expect(bodyTimes()).toEqual([A_CENTURY, past]);
     expect(requestTimes(socket)).toEqual([A_CENTURY, past]);
+  });
+
+  it("releases FOCUS BODY and fits the system when a newer answer has the planet destroyed", async () => {
+    const validUntil = { seconds: A_CENTURY.seconds + 2 * DAY_S, nanos: 0 };
+    const bodies = populatedBodiesWith((body) =>
+      planet(body) && body.orbit.state === "ok"
+        ? {
+            ...body,
+            orbit: { state: "ok", value: { ...body.orbit.value, valid_until: validUntil } },
+          }
+        : body,
+    );
+    const { user, socket } = await renderAnswered(A_CENTURY, aSingleStarSummary(), bodies);
+    const focus = () => within(map()).getByRole("button", { name: "C FOCUS BODY" });
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+    await user.keyboard("c");
+    expect(focus()).toHaveAttribute("aria-pressed", "true");
+    expect(within(map()).getByText("BODY H7K 4C0RFZ D-7 /256")).toBeInTheDocument();
+    const scaleBar = () =>
+      within(map())
+        .getByRole("img", { name: /^Scale bar/ })
+        .getAttribute("aria-label") ?? "";
+    expect(scaleBar()).toMatch(/ (Mm|km)$/);
+
+    // One redraw per step, as the time panel asks for them.
+    await user.keyboard("]");
+    nextFrame();
+    await user.keyboard("]");
+    nextFrame();
+    await user.keyboard("]");
+    nextFrame();
+    const [request] = socket.requestsOfKind("system_bodies").toReversed();
+    if (request === undefined || socket.requestsOfKind("system_bodies").length !== 2) {
+      throw new Error("the display asks again past the orbit's valid_until");
+    }
+    // The newer answer has the planet gone, and a dwarf planet's elements holding two days more,
+    // so that the display asks a third time.
+    const laterUntil = { seconds: A_CENTURY.seconds + 4 * DAY_S, nanos: 0 };
+    await server(() => {
+      socket.serverResponds(
+        request.id,
+        populatedBodiesWith((body) => {
+          if (planet(body)) {
+            return {
+              ...body,
+              state: { type: "destroyed", cause: "engulfed", at: validUntil },
+              orbit: { state: "not_applicable" },
+            };
+          }
+          return body.id.endsWith(".e001") && body.orbit.state === "ok"
+            ? {
+                ...body,
+                orbit: { state: "ok", value: { ...body.orbit.value, valid_until: laterUntil } },
+              }
+            : body;
+        }),
+      );
+    });
+
+    expect(focus()).toHaveAttribute("aria-pressed", "false");
+    expect(within(map()).getByText("SYSTEM BARYCENTRIC")).toBeInTheDocument();
+    expect(within(map()).queryByText("BODY H7K 4C0RFZ D-7 /256")).not.toBeInTheDocument();
+    expect(scaleBar()).toMatch(/ AU$/);
+
+    // A third answer with the planet back does not take the map back to it: the focus was
+    // released, not held in waiting.
+    await user.keyboard("]");
+    nextFrame();
+    await user.keyboard("]");
+    nextFrame();
+    const requests = socket.requestsOfKind("system_bodies");
+    const [third] = requests.toReversed();
+    if (third === undefined || requests.length !== 3) {
+      throw new Error("the display asks again past the dwarf planet's valid_until");
+    }
+    await server(() => {
+      socket.serverResponds(
+        third.id,
+        populatedBodiesWith((body) => body),
+      );
+    });
+    expect(focus()).toHaveAttribute("aria-pressed", "false");
+    expect(within(map()).getByText("SYSTEM BARYCENTRIC")).toBeInTheDocument();
   });
 
   it("asks again when the time moves past the birth of a system not yet formed", async () => {

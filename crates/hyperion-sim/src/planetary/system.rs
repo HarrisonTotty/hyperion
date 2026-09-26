@@ -836,6 +836,13 @@ fn parent_at_epoch(
     let orbited = epoch.lights(zone)?;
     let companions = epoch.companions(zone)?;
     let host_mass = Kilograms::from(zone.host_mass());
+    // Each `.ok()` below turns a parent the moon generators cannot read into "no satellites",
+    // as for a system not born, and the system's other stages go on; none is an error a caller
+    // could act on. `BodyHosts::new` fails only for no orbited light or a zone mass that is not
+    // positive, which a zone with lights at `t` never has; `derive_body` for a system whose age
+    // at `t` is not positive (born after the clock window's end) or a giant above 13 Jupiter
+    // masses, which placement never makes; `MoonParent::from_derived` and `RingParent::new`
+    // only for a mass, radius or temperature that is not positive and finite.
     let hosts = BodyHosts::new(host_mass, *ctx.composition(), &orbited, &companions).ok()?;
     let derived = derive_body(&placed, &hosts, profile, ctx.age_at_epoch(), t).ok()?;
     let id = body.index.body_id(ctx.id());

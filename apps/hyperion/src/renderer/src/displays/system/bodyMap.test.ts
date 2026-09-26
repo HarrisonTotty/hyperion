@@ -40,6 +40,16 @@ import { METRES_PER_AU } from "./orbitScale";
 const TIME: UniverseTime = { seconds: 3_155_760_000, nanos: 0 };
 const POSITION_LY = vec3(26_000, 0, 12);
 
+/** `body` as the `contact` detail level holds it: its kind, orbit and bulk withheld. */
+function contact(body: BodySummaryDto): BodySummaryDto {
+  return {
+    ...body,
+    kind: { type: "unresolved" },
+    orbit: { state: "not_resolved" },
+    bulk: { state: "not_resolved" },
+  };
+}
+
 function built(response: ResponseFor<"system_bodies"> = sliceBodies()) {
   const result = toSystemBodiesModel(response, "H7K 4C0RFZ D-7");
   if (result.kind !== "ok") {
@@ -140,6 +150,26 @@ describe("bodyMarks", () => {
     expect(first.shape).toBe("hexagon");
     expect(first.sizeClass).toBe(CONTACT_SIZE_CLASS);
     expect(first.position).toEqual(scale(positionM, 1 / METRES_PER_AU));
+  });
+
+  it("leaves a moon or ring seen only as a contact to its planet, as it does a moon", () => {
+    const populated = built(populatedBodies());
+    const satellites = populated.bodies.bodies.filter(
+      (body) => body.kind.kind === "moon" || body.kind.kind === "ring",
+    );
+    expect(satellites.length).toBeGreaterThan(0);
+    const { bodies, bodiesLayout } = built(populatedBodiesWith(contact));
+    const marked = new Set(bodyMarks(bodies.bodies, bodiesLayout, TIME).map((mark) => mark.id));
+    for (const satellite of satellites) {
+      expect(marked.has(satellite.id)).toBe(false);
+    }
+    // The planets they orbit are still drawn, as contacts.
+    const parents = new Set(
+      satellites.flatMap((body) => (body.parent?.kind === "body" ? [body.parent.id] : [])),
+    );
+    for (const parent of parents) {
+      expect(marked.has(parent)).toBe(true);
+    }
   });
 });
 

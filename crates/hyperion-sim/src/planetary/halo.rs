@@ -637,6 +637,18 @@ mod tests {
         assert!(seen > 1_000, "only {seen} halos");
     }
 
+    #[test]
+    fn two_calls_agree_bit_for_bit() {
+        for n in 0..50 {
+            let once = halo(SEED, system(n), &sun(1.39e5), Scatterer::Present);
+            assert!(once.is_some());
+            assert_eq!(
+                once,
+                halo(SEED, system(n), &sun(1.39e5), Scatterer::Present)
+            );
+        }
+    }
+
     /// P14.T21.d (d): a system with no planet over 10 M⊕ beyond the snow line has no halo.
     #[test]
     fn a_system_without_a_scatterer_has_no_halo() {

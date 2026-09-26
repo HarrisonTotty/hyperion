@@ -203,16 +203,19 @@ impl MemberSizes {
 }
 
 /// The diameter of a sphere of mass `kg` at density `density`, kg m⁻³.
+#[must_use]
 fn sphere_diameter(kg: f64, density: f64) -> f64 {
     math::cbrt(6.0 * kg / (PI * density))
 }
 
 /// The mass of a sphere of diameter `diameter`, m, at density `density`, kg m⁻³, in kg.
+#[must_use]
 fn sphere_mass(diameter: f64, density: f64) -> f64 {
     PI / 6.0 * diameter * diameter * diameter * density
 }
 
 /// `lo` × (`hi` ÷ `lo`)^`rank`.
+#[must_use]
 fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
     lo * math::powf(hi / lo, rank.value())
 }

@@ -35,10 +35,10 @@
 //!
 //! A planet's moons take the sub-indices `0x01` upward in the order above (regular moons inside
 //! out, the giant-impact moon, then the captures kept in their ordinals), and its rings `0x80`
-//! upward, the dusty ring first ([`generate_rings`]). A belt's member (P14.T21.c), which design
-//! note 3 gives no moon block, numbers its one possible moon, a giant-impact moon, `0x80` above
-//! its own sub-index in its belt's slot: member k's moon is `Member(0x80 + k)` (this lane's
-//! reading, for a ruling).
+//! upward, the dusty ring first ([`generate_rings`]). A belt's member (P14.T21.c) numbers its one
+//! possible moon, a giant-impact moon, `0x80` above its own sub-index in its belt's slot: member
+//! k's moon is `Member(0x80 + k)` (design note 3's row, ruling 95.1), whose
+//! [`BodyIndex::parent`] is member k.
 //!
 //! # Frames
 //!
@@ -394,7 +394,13 @@ fn clear_run(parent: &MoonParent, moons: &[RegularMoon]) -> u8 {
             inner.orbit().semi_major_axis(),
             outer.orbit().semi_major_axis(),
         );
-        if outer.orbit().periapsis() - inner.orbit().apoapsis() < hill * HILL_STABLE_GAP {
+        // Written so that a gap or a Hill radius that is not a number fails the floor.
+        let gap = outer.orbit().periapsis() - inner.orbit().apoapsis();
+        let floor = hill * HILL_STABLE_GAP;
+        if !matches!(
+            gap.partial_cmp(&floor),
+            Some(core::cmp::Ordering::Greater | core::cmp::Ordering::Equal)
+        ) {
             break;
         }
         last = outer.ordinal();
