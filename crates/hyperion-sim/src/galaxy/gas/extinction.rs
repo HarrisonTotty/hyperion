@@ -46,12 +46,12 @@
 //!
 //! # The neutral column
 //!
-//! In [`NoiseMode::Realised`] each sample's phase is read from its density and pressure, and its
-//! neutral share follows Design note 12: none of the hot gas, all of the cold and molecular gas,
-//! and `n_neutral ÷ (n_neutral + n_warm)` of the warm, never adjusted ([`ThermalState`], rulings
-//! 91 and 98). In [`NoiseMode::Mean`] there is no local density to classify, so the neutral
-//! column is the integral of `n_neutral + n_mol`. Holes are hot and add none; clouds are neutral
-//! and add all of theirs.
+//! Columns use the parcel mean (ruling 103 of 2026-09-22): the phase split inside a parcel
+//! ([`PhaseMix`](crate::galaxy::gas::phase::PhaseMix)) keeps its neutral mass neutral, so the
+//! neutral column is the integral of `n_neutral + n_mol` in [`NoiseMode::Mean`] and of
+//! `(n_neutral + n_mol) F` in [`NoiseMode::Realised`], whose expectation over seeds it is. No draw
+//! and no classification is needed. Holes are hot and add none; clouds are neutral and add all of
+//! theirs.
 
 use std::num::NonZeroU32;
 
@@ -61,10 +61,9 @@ use crate::galaxy::gas::ccm::{Band, HYDROGEN_COLUMN_PER_MAG};
 use crate::galaxy::gas::field::{GasField, Site};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::gas::noise::{NoiseCache, SmoothingScale};
-use crate::galaxy::gas::phase::{ThermalState, warm_neutral_share};
 use crate::galaxy::gas::smooth::GasLayer;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{HydrogenPerCm3, KelvinPerCm3, LightYears, Magnitudes, PerCm2};
+use crate::units::{LightYears, Magnitudes, PerCm2};
 
 /// The noise's step at `lod = 0`, ly: half the finest octave's 64 ly (Design note 14).
 const NOISE_STEP_LY: f64 = 32.0;
@@ -260,10 +259,11 @@ pub fn sightline(
         sums.neutral += column;
         sums.dust += cloud.zeta * column;
     }
-    // In `Realised` mode a wholly neutral sample carries the corona into the neutral column step by
-    // step, while the whole column takes it in closed form, so on a line that never leaves cold
-    // gas the two sums can differ in their last bit either way. The neutral column is part of the
-    // whole, so it is held to it, by comparison rather than `f64::min`.
+    // The neutral column is part of the whole, so it is held to it, by comparison rather than
+    // `f64::min`: before ruling 103 a wholly neutral `Realised` sample carried the corona into the
+    // neutral column step by step while the whole column took it in closed form, and the two could
+    // differ in their last bit. Neither sum carries the corona that way now, but a line of clouds
+    // alone still adds the same column to both.
     let neutral = if sums.neutral > sums.hydrogen {
         sums.hydrogen
     } else {
@@ -801,21 +801,12 @@ impl<'a> Marcher<'a> {
                 }
             }
             NoiseMode::Realised => {
-                let gas = layers.disc() * self.field.noise(&p, self.scale, cache);
-                let local = gas + self.field.smooth().corona_density();
-                let pressure = self
-                    .field
-                    .pressure_model()
-                    .at(self.field.smooth(), site.r, site.z);
-                let thermal = ThermalState::of(
-                    HydrogenPerCm3::new(local),
-                    KelvinPerCm3::new(pressure),
-                    warm_neutral_share(layers.neutral, layers.warm),
-                );
+                let factor = self.field.noise(&p, self.scale, cache);
+                let gas = layers.disc() * factor;
                 Sample {
                     dust: gas * zeta,
                     gas,
-                    neutral: thermal.neutral_share() * local,
+                    neutral: (layers.neutral + layers.molecular) * factor,
                 }
             }
         }

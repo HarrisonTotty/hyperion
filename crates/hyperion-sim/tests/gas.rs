@@ -26,7 +26,7 @@ use hyperion_sim::galaxy::gas::map::{
 use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource, NoModifiers};
 use hyperion_sim::galaxy::gas::noise::{NoiseCache, SmoothingScale, log_normal_factor};
 use hyperion_sim::galaxy::gas::params::{BuildGasParamsError, GasParams};
-use hyperion_sim::galaxy::gas::phase::GasPhase;
+use hyperion_sim::galaxy::gas::phase::Medium;
 use hyperion_sim::galaxy::gas::smooth::{GasLayer, SmoothGas};
 use hyperion_sim::galaxy::gas::{CENTIMETRES_PER_LIGHT_YEAR, SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
@@ -40,10 +40,11 @@ use hyperion_sim::units::{
     HydrogenPerCm3, LightYears, Magnitudes, Micrometres, SolarMasses, Years,
 };
 use hyperion_sim::{GENERATOR_VERSION, Seed};
-use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
+use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
 use crate::common::{assert_relative, ensemble_mean, whole_ly};
 
@@ -336,8 +337,10 @@ fn the_state_smoothed_to_250_ly_keeps_the_mean_and_loses_variance() {
     );
 }
 
-/// A site's pressure is never below the floor, anywhere in the root cube, and its phase and
-/// temperature agree.
+/// A site's pressure is never below the floor, anywhere in the root cube, and its drawn phase,
+/// in-situ density and temperature agree (ruling 103): `T × x × n_local = s P`, the label is
+/// `GasPhase::of` of the local state wherever the parcel is not compressed, and the phases' mean
+/// density is the parcel's.
 #[test]
 fn a_states_pressure_is_never_below_the_floor() {
     let fields = milky_way_fields();
@@ -354,23 +357,43 @@ fn a_states_pressure_is_never_below_the_floor() {
                 "{:?} below {floor:?}",
                 state.pressure()
             );
-            assert_eq!(state.phase(), gas.phase(state.density(), state.pressure()));
             let t = state.temperature().value();
-            match state.phase() {
-                GasPhase::Hot => assert!(t > 1e5, "{state:?}"),
-                GasPhase::Warm => {
-                    // Ruling 98: warm gas reads 5,000–10,000 K.
-                    assert!((5_000.0..=10_000.0).contains(&t), "{state:?}");
+            let local = state.local_density().value();
+            let s = state.overpressure();
+            match state.medium() {
+                Medium::Hot => assert!(t >= 1e5 * (1.0 - 1e-12), "{state:?}"),
+                Medium::WarmIonised | Medium::WarmNeutral => {
+                    // Ruling 103: both warm media are at 8,000 K, with no clamp.
+                    assert_same_bits(t, 8_000.0);
                 }
-                GasPhase::Cold | GasPhase::Molecular => assert!(t <= 5_000.0, "{state:?}"),
+                Medium::Cold => assert_same_bits(t, 70.0),
             }
-            // Rulings 91 and 98: T × x n = P with the state's own particle count, wherever the
-            // warm clamp does not bind.
-            let balance = t * state.particles_per_hydrogen() * state.density().value()
-                / state.pressure().value();
-            if !state.temperature_clamped() {
-                assert!((balance - 1.0).abs() < 1e-15, "{state:?}");
+            let expected = if state.medium() == Medium::Hot {
+                1.0
+            } else {
+                s
+            };
+            let balance =
+                t * state.particles_per_hydrogen() * local / state.pressure().value() / expected;
+            assert!((balance - 1.0).abs() < 1e-13, "{state:?}");
+            if s <= 1.0 {
+                let local = if state.medium() == Medium::Hot {
+                    local * (1.0 - 1e-12)
+                } else {
+                    local
+                };
+                assert_eq!(
+                    state.phase(),
+                    gas.phase(HydrogenPerCm3::new(local), state.pressure()),
+                    "{state:?}"
+                );
             }
+            let mix = state.mix();
+            let mean: f64 = Medium::ALL.iter().map(|&m| mix.mass(m).value()).sum();
+            assert!(
+                (mean / state.density().value() - 1.0).abs() < 1e-12,
+                "{state:?}"
+            );
             assert!(state.thermal_sound_speed().value() > 0.0);
             assert!(state.isothermal_sound_speed() < state.thermal_sound_speed());
         }
@@ -501,6 +524,108 @@ fn the_gas_field_is_a_pure_function_of_its_seed() {
     );
 }
 
+/// The point in the Sun's plane the phase draw's tests read, 0.2–0.8 of the way across both phase
+/// octaves' lattice cells.
+fn draw_point() -> GalacticPosition {
+    at([26_004.0, -404.0, 20.0])
+}
+
+/// Ruling 103: at a fixed point the draw `u = Φ(g_u)` is uniform over 10⁵ seeds by a
+/// Kolmogorov–Smirnov test, and each medium is drawn as often as its filling factor, on average
+/// over the seeds: the mean of `[drawn = k] − f_k` is within four standard errors of 0 for each of
+/// the four.
+#[test]
+fn a_points_phase_is_drawn_with_its_filling_factor() {
+    let fields = milky_way_fields();
+    let params = GasParams::milky_way_like();
+    let mut cache = NoiseCache::with_capacity(4_096);
+    let p = draw_point();
+    let seeds = 100_000_u32;
+    let mut draws = Vec::with_capacity(100_000);
+    let mut sums = [0.0_f64; 4];
+    let mut squares = [0.0_f64; 4];
+    for n in 0..seeds {
+        let seed = Seed::new(0x0703_d000_0000_0000 | u64::from(n));
+        let gas = GasField::with_params(seed, params, &fields);
+        let state = gas.state(&p, SmoothingScale::Full, &mut cache);
+        draws.push(state.phase_draw());
+        for (k, medium) in Medium::ALL.into_iter().enumerate() {
+            let difference =
+                f64::from(u8::from(state.medium() == medium)) - state.mix().filling(medium);
+            sums[k] += difference;
+            squares[k] += difference * difference;
+        }
+    }
+    let ks = ks_one_sample(&mut draws, |u| u.clamp(0.0, 1.0));
+    assert_p_value("the phase draw against U(0, 1)", ks.p_value, ALPHA);
+    let n = f64::from(seeds);
+    for (k, medium) in Medium::ALL.into_iter().enumerate() {
+        let mean = sums[k] / n;
+        let error = ((squares[k] / n - mean * mean) / n).sqrt();
+        assert!(
+            mean.abs() < 4.0 * error,
+            "{medium:?}: drawn minus filling {mean} ± {error}"
+        );
+        assert!(error > 0.0, "{medium:?} is never drawn");
+    }
+}
+
+/// Ruling 103: a point's draw is its own. The same point and seed give the same phase and draw bit
+/// for bit, the draw is the same at every smoothing scale (only the filling factors move with it),
+/// and a cache of any capacity, one entry included and shared with the factor's lattice, changes
+/// nothing.
+#[test]
+fn a_points_phase_draw_ignores_the_scale_and_the_cache() {
+    let fields = milky_way_fields();
+    let gas = milky_way_gas(&fields, Seed::new(0x0703_d5ca));
+    let mut lcg = Lcg::new(0x0703_d5ca);
+    let points: Vec<GalacticPosition> = (0..500)
+        .map(|_| random_point(&mut lcg, 40_000.0, 2_000.0))
+        .collect();
+    let scales = [
+        SmoothingScale::Full,
+        SmoothingScale::AtLeast(LightYears::new(250.0)),
+        SmoothingScale::AtLeast(LightYears::new(2_048.0)),
+    ];
+    let run = |cache: &mut NoiseCache| -> Vec<(u64, u64, Medium)> {
+        points
+            .iter()
+            .flat_map(|p| {
+                scales.map(|scale| {
+                    let state = gas.state(p, scale, cache);
+                    (
+                        bits(state.phase_draw()),
+                        bits(state.density().value()),
+                        state.medium(),
+                    )
+                })
+            })
+            .collect()
+    };
+    let reference = run(&mut NoiseCache::with_capacity(0));
+    for capacity in [1, 2, 7, 4_096] {
+        let mut cache = NoiseCache::with_capacity(capacity);
+        assert_eq!(run(&mut cache), reference, "capacity {capacity}");
+        assert_eq!(run(&mut cache), reference, "warm, capacity {capacity}");
+    }
+    for triple in reference.chunks(3) {
+        assert!(
+            triple.iter().all(|t| t.0 == triple[0].0),
+            "the draw moved with the scale"
+        );
+    }
+    // The state's density is `density`'s, bit for bit.
+    let mut cache = NoiseCache::with_capacity(64);
+    for p in &points {
+        assert_same_bits(
+            gas.state(p, SmoothingScale::Full, &mut cache)
+                .density()
+                .value(),
+            gas.density(p, SmoothingScale::Full, &mut cache).value(),
+        );
+    }
+}
+
 /// The twelve positions the field golden pins: the centre, the molecular disc's edge, the bar's
 /// end, a lane and the arm beside it at the Sun's radius, the Sun itself and above it, the outer
 /// disc, the corona, and the cube's far reaches.
@@ -522,7 +647,9 @@ fn field_points() -> [GalacticPosition; 12] {
 }
 
 /// P07.T6.a's field, bit for bit: at twelve positions for two seeds' own galaxies, the mean and the
-/// realised density, the pressure, the phase and the dust-to-gas ratio.
+/// realised density, the pressure, the drawn phase and medium with the draw, the point's and the
+/// parcel's neutral shares, the local density, temperature and overpressure, the four filling
+/// factors (ruling 103) and the dust-to-gas ratio.
 #[test]
 fn gas_field_is_pinned() {
     let mut w = GoldenWriter::new();
@@ -541,8 +668,19 @@ fn gas_field_is_pinned() {
             w.f64(&label("density"), state.density().value());
             w.f64(&label("pressure"), state.pressure().value());
             w.line(&format!("{} = {:?}", label("phase"), state.phase()));
+            w.line(&format!("{} = {:?}", label("medium"), state.medium()));
+            w.f64(&label("phase_draw"), state.phase_draw());
             w.f64(&label("neutral_share"), state.neutral_share());
+            w.f64(&label("parcel_neutral_share"), state.parcel_neutral_share());
+            w.f64(&label("local_density"), state.local_density().value());
             w.f64(&label("temperature"), state.temperature().value());
+            w.f64(&label("overpressure"), state.overpressure());
+            for medium in Medium::ALL {
+                w.f64(
+                    &label(&format!("filling.{medium:?}")),
+                    state.mix().filling(medium),
+                );
+            }
             w.f64(&label("dust_per_hydrogen"), gas.dust_per_hydrogen(p));
         }
     }
@@ -1090,9 +1228,11 @@ fn a_clouds_column_through_its_centre_is_four_thirds_of_its_core() {
     }
 }
 
-/// P07.T8.d: the neutral column is never above the whole column on short lines that stay in cold
-/// or molecular gas, where every sample is wholly neutral and the corona is summed two ways: step
-/// by step into the neutral column, and in closed form into the whole column.
+/// P07.T8.d: the neutral column is never above the whole column on short lines in the plane,
+/// most of them over 90% neutral. Before ruling 103 this was a regression test for lines that
+/// stayed in cold gas, where the corona was summed step by step into the neutral column and in
+/// closed form into the whole; the neutral column is now `∫ (n_n + n_mol) F`, which never carries
+/// the corona, and the test holds the bound on the same lines.
 #[test]
 fn the_neutral_column_is_never_above_the_whole_on_short_neutral_lines() {
     let fields = milky_way_fields();
@@ -1120,7 +1260,7 @@ fn the_neutral_column_is_never_above_the_whole_on_short_neutral_lines() {
             line.neutral_hydrogen_column().value(),
             line.hydrogen_column().value(),
         );
-        if neutral > 0.999_999 * whole {
+        if neutral > 0.9 * whole {
             neutral_lines += 1;
         }
         assert!(
@@ -1130,7 +1270,7 @@ fn the_neutral_column_is_never_above_the_whole_on_short_neutral_lines() {
     }
     assert!(
         neutral_lines > 100,
-        "only {neutral_lines} wholly neutral lines"
+        "only {neutral_lines} lines over 90% neutral"
     );
 }
 
@@ -1465,22 +1605,32 @@ fn a_horizons_edges_are_as_documented() {
     assert_eq!(reach(5.0, 100.0, &edge, &mut cache), LightYears::new(100.0));
 }
 
-/// A site's sound speed is `√(γ P ÷ ρ)` with `γ = 5 ÷ 3` and `ρ = 1.4 m_H n`: some 10 km/s in the
-/// plane's warm and cold gas and some 100 km/s in the corona. Its isothermal sound speed, which a
-/// supernova shell merges against (ruling 98), is `√(P ÷ ρ)`, `√(3 ÷ 5)` of it.
+/// A site's sound speed is `√(γ P ÷ ρ)` with `γ = 5 ÷ 3` and the point's own phase: its pressure
+/// `x n_local k T` over `ρ = 1.4 m_H n_local` (ruling 103). That is some 10 km/s in the warm media,
+/// under 1 km/s in cold gas at 70 K and over 30 km/s in hot gas. Its isothermal sound speed, which
+/// a supernova shell merges against (ruling 98), is `√(P ÷ ρ)`, `√(3 ÷ 5)` of it.
 #[test]
 fn a_sites_sound_speed_is_the_adiabatic_one() {
     use hyperion_sim::units::consts::{BOLTZMANN_CONSTANT, HYDROGEN_MASS_KG};
     let fields = milky_way_fields();
     let gas = milky_way_gas(&fields, Seed::new(18));
-    let mut cache = NoiseCache::with_capacity(256);
-    for (point, lo, hi) in [
-        ([0.0, 26_000.0, 0.0], 1e3, 1e5),
-        ([0.0, 26_000.0, 40_000.0], 3e4, 3e5),
-    ] {
-        let state = gas.state(&at(point), SmoothingScale::Full, &mut cache);
-        let (n, p) = (state.density().value(), state.pressure().value());
-        let expected = (5.0 / 3.0 * p * BOLTZMANN_CONSTANT / (1.4 * HYDROGEN_MASS_KG * n)).sqrt();
+    let mut cache = NoiseCache::with_capacity(4_096);
+    let mut lcg = Lcg::new(0x0706_5050);
+    let mut seen = [false; 4];
+    for i in 0..4_000 {
+        let p = if i % 2 == 0 {
+            random_point(&mut lcg, 30_000.0, 50.0)
+        } else {
+            random_point(&mut lcg, 30_000.0, 40_000.0)
+        };
+        let state = gas.state(&p, SmoothingScale::Full, &mut cache);
+        let (n, t) = (state.local_density().value(), state.temperature().value());
+        if n <= 0.0 {
+            continue;
+        }
+        let local_pressure = state.particles_per_hydrogen() * n * t;
+        let expected =
+            (5.0 / 3.0 * local_pressure * BOLTZMANN_CONSTANT / (1.4 * HYDROGEN_MASS_KG * n)).sqrt();
         let speed = state.thermal_sound_speed().value();
         assert_relative("the sound speed", speed, expected, 1e-12);
         let isothermal = state.isothermal_sound_speed().value();
@@ -1490,8 +1640,16 @@ fn a_sites_sound_speed_is_the_adiabatic_one() {
             expected * 0.6_f64.sqrt(),
             1e-12,
         );
-        assert!((lo..hi).contains(&speed), "{speed} m/s at {point:?}");
+        let (k, lo, hi) = match state.medium() {
+            Medium::Hot => (0, 3e4, 1e6),
+            Medium::WarmIonised => (1, 1e4, 1.4e4),
+            Medium::WarmNeutral => (2, 8e3, 1e4),
+            Medium::Cold => (3, 5e2, 1e3),
+        };
+        seen[k] = true;
+        assert!((lo..hi).contains(&speed), "{speed} m/s: {state:?}");
     }
+    assert_eq!(seen, [true; 4], "every medium is drawn");
 }
 
 /// The order a source lists its clouds in is immaterial to a line of sight, bit for bit.

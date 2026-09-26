@@ -22,7 +22,8 @@
 //!
 //! The ranges are the brainstorm's where it states one ("Between the stars", the bullet "Dust and
 //! gas": a warm layer of about 0.03 cm⁻³ with a scale height near 3,000 ly, a corona of about 10⁻³
-//! cm⁻³, a log-normal of σ 2–2.5) and Design notes 3 and 5's otherwise. The radial form, the hole
+//! cm⁻³) and Design notes 3 and 5's otherwise; the log-normal's σ is 1.0–1.4, not the brainstorm's
+//! 2–2.5 (ruling 103 of 2026-09-22; [`GasParams::sigma_ln`]). The radial form, the hole
 //! inside the bar included, is the one McMillan (2017, MNRAS 465, 76) fits the Milky Way's gas
 //! discs with, `exp(−R_m ÷ R − R ÷ R_d)`: his neutral disc has `R_m` = 4 kpc and `R_d` = 7 kpc,
 //! both inside the ranges here (`R_m` 2.4–6.6 kpc, `R_g` 3.2–7.1 kpc). His molecular disc,
@@ -154,7 +155,9 @@ impl Drawn {
     /// above every radius from 8,000 to 40,000 ly for every draw (ruling 91 of 2026-09-22; Design
     /// note 12); Miller and Bregman's (2015, ApJ 800, 14) β-model of the hot halo, `n₀ r_c^(3β)` of
     /// 1.35 × 10⁻² cm⁻³ kpc^(3β) with β = 0.50, gives 4–7 × 10⁻⁴ cm⁻³ at 7–10 kpc from the centre.
-    /// `σ_ln` is the brainstorm's 2–2.5.
+    /// `σ_ln` is 1.0–1.4 at the lattice scale, not the brainstorm's 2–2.5: with the gas split into
+    /// four phases inside a parcel, 2.3 puts two thirds of the plane in hot gas, and 1.0–1.4 the
+    /// brainstorm's "a fifth to two fifths" (ruling 103 of 2026-09-22).
     const fn law(self) -> Law {
         match self {
             Self::HoleRatio => Law::Uniform { lo: 0.8, hi: 1.2 },
@@ -176,7 +179,7 @@ impl Drawn {
                 lo: 300.0,
                 hi: 450.0,
             },
-            Self::SigmaLn => Law::Uniform { lo: 2.0, hi: 2.5 },
+            Self::SigmaLn => Law::Uniform { lo: 1.0, hi: 1.4 },
             Self::LaneOffset => Law::Uniform {
                 lo: 300.0,
                 hi: 600.0,
@@ -402,13 +405,12 @@ impl GasParams {
     /// together (P07.T5). The mid-plane thermal pressure at 26,000 ly is 3,800 K cm⁻³ (Jenkins and
     /// Tripp 2011, ApJ 734, 65: log(P ÷ k) of 3.58 with a dispersion of at least 0.175 dex among
     /// the cold neutral medium's sight lines), held to 3,400–4,200; and the hot phase fills a fifth
-    /// to two fifths of the plane's volume for `σ_ln` of 2–2.5 (brainstorm, "Between the stars"),
-    /// held to 0.17–0.41, which a denser plane needs a higher pressure for. Design note 11's 5.5
-    /// km/s was set when the fixture's disc gas in the plane was 0.70 cm⁻³; ruling 19 raised it to
-    /// 0.83, which at 5.5 km/s gives 4,670 K cm⁻³, and 4.9 km/s, which gives 3,790, leaves the hot
-    /// phase 16% of the plane at `σ_ln` 2.0. Both hold for 5.10–5.19 km/s; 5.15 gives 4,145 K cm⁻³, 0.04 dex
-    /// above the measured mean, and a hot share of 0.17–0.38 (plan 07, Risks). P07.T12 tunes it
-    /// again with the rest of the fixture.
+    /// to two fifths of the plane's volume (brainstorm, "Between the stars"), which a denser plane
+    /// needs a higher pressure for. Design note 11's 5.5 km/s was set when the fixture's disc gas
+    /// in the plane was 0.70 cm⁻³; ruling 19 raised it to 0.83, which at 5.5 km/s gives 4,670 K
+    /// cm⁻³. 5.15 gives 4,145 K cm⁻³, 0.04 dex above the measured mean; with ruling 103's
+    /// four-phase split the hot share of the plane is then 0.23–0.38 for `σ_ln` of 1.0–1.4 (0.31 at
+    /// the fixture's 1.2; plan 07, P07.T12).
     pub const PRESSURE_SPEED: KilometresPerSecond = KilometresPerSecond::new(5.15);
 
     /// The gas parameters of the galaxy `params`, with `seed` keying this plan's own draws.
@@ -655,8 +657,12 @@ impl GasParams {
         Self::PRESSURE_SPEED
     }
 
-    /// The log-normal's width `σ_ln` in the natural logarithm, 2.0–2.5: the brainstorm's "σ of
-    /// 2–2.5 in the logarithm", wide enough that the volume runs from hot rarefied gas to cloud.
+    /// The log-normal's width `σ_ln` in the natural logarithm at the lattice scale, 1.0–1.4 (ruling
+    /// 103 of 2026-09-22, departing from the brainstorm's "σ of 2–2.5 in the logarithm"). The
+    /// clouds and hot voids inside a lattice cell are the four-phase split's
+    /// ([`PhaseMix`](super::phase::PhaseMix)), so the noise carries only the parcels' spread: at 1.2
+    /// the hot phase fills 0.31 of the plane, a typical line in the plane reads about one
+    /// magnitude per 3,000 ly and a typical line to the centre about thirty.
     #[must_use]
     pub fn sigma_ln(&self) -> f64 {
         self.sigma_ln
@@ -680,7 +686,8 @@ const MILKY_WAY_DRAWN: [f64; DRAWN_COUNT] = [
     0.20,
     // The corona at the Sun's radius as Miller and Bregman's (2015) β-model gives it,
     // 1.35 × 10⁻² × 8.2^(−1.5) = 5.7 × 10⁻⁴ cm⁻³ at 8.2 kpc, to one figure (P07.T12, ruling 91).
-    0.6e-3, 400.0, 2.3, 450.0, 200.0, 0.12,
+    // `σ_ln` is the middle of ruling 103's 1.0–1.4.
+    0.6e-3, 400.0, 1.2, 450.0, 200.0, 0.12,
 ];
 
 #[cfg(test)]
@@ -751,7 +758,7 @@ mod tests {
         within("pressure floor", gas.pressure_floor().value(), 300.0, 450.0);
         assert_eq!(gas.pressure_height(), GasParams::PRESSURE_HEIGHT);
         assert_eq!(gas.pressure_speed(), GasParams::PRESSURE_SPEED);
-        within("sigma_ln", gas.sigma_ln(), 2.0, 2.5);
+        within("sigma_ln", gas.sigma_ln(), 1.0, 1.4);
         let lane = gas.lane();
         within("lane offset", lane.offset().value(), 300.0, 600.0);
         within("lane width", lane.width().value(), 150.0, 300.0);
@@ -849,8 +856,9 @@ mod tests {
 
     /// The corona alone must classify as hot, so that the gas far from the disc is hot for every
     /// seed: T = (`P_cor` ÷ k) ÷ (2.3 `n_cor`) above 10⁵ K (Design note 12). The worst case is the
-    /// lowest floor against the highest density, 163,000 K; the warm layer's tail brings it to
-    /// about 104,000 K over the inner disc (`gas::phase`'s corner proof, ruling 91).
+    /// lowest floor against the highest density, 163,000 K. In ruling 103's split the warm layer's
+    /// tail takes some 2.5% of the volume over the inner disc and leaves the corona about 159,000
+    /// K (`gas::phase`'s corner proof).
     #[test]
     fn the_corona_is_hotter_than_a_hundred_thousand_kelvin_for_every_seed() {
         let temperature = |gas: &GasParams| {

@@ -47,6 +47,17 @@
 //! every machine. Outside the root cube, where the lattice has no points, the factor is its mean,
 //! 1.
 //!
+//! # The phase draw
+//!
+//! Two more octaves, numbers 5 and 6 of the lattice word, with spacings of 32 and 8 ly
+//! ([`PHASE_OCTAVE_WAVELENGTHS_LY`]), carry the normal [`phase_normal`] that picks which of a
+//! parcel's four phases a point lies in (ruling 103 of 2026-09-22; [`super::phase`]). They are
+//! built exactly as the factor's octaves are, variance-normalised and weighted `a_k² ∝ λ_k^⅔`
+//! between the two, so the normal is exactly N(0, 1) at every point. They are on the same tag and
+//! the same lattice words as the factor's, the octave's number keeping every word distinct, so one
+//! [`NoiseCache`] serves both and never returns one lattice's normal for the other's. No
+//! [`SmoothingScale`] reaches them: a scale keeps at most the factor's five octaves.
+//!
 //! # Caching
 //!
 //! The sim holds no caches, so [`NoiseCache`] is the caller's: a direct-mapped table of lattice
@@ -67,11 +78,8 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 /// numbers 5–15 for octaves a later generator version may add.
 pub const OCTAVE_WAVELENGTHS_LY: [u32; 5] = [1_024, 512, 256, 128, 64];
 
-/// The number of octaves.
+/// The number of the factor's octaves.
 const OCTAVES: usize = OCTAVE_WAVELENGTHS_LY.len();
-
-/// Each octave's spacing as a power of two: `λ_k = 2^OCTAVE_LOG2[k]` ly.
-const OCTAVE_LOG2: [u32; OCTAVES] = [10, 9, 8, 7, 6];
 
 /// Each octave's share `a_k²` of the variance of `g`: `λ_k^⅔ ÷ Σ λ^⅔`, so that they sum to 1 and
 /// each is `2^(−⅔)` of the one before (Design note 8).
@@ -96,6 +104,25 @@ const OCTAVE_AMPLITUDES: [f64; OCTAVES] = [
     0.254_354_567_590_485_64,
 ];
 
+/// The lattice spacings of the phase draw's two octaves, light-years, coarser first (ruling 103 of
+/// 2026-09-22): numbers 5 and 6 of the lattice word, which Design note 8 reserved.
+pub const PHASE_OCTAVE_WAVELENGTHS_LY: [u32; 2] = [32, 8];
+
+/// The phase octaves' numbers in the lattice word.
+const PHASE_OCTAVES: [usize; 2] = [OCTAVES, OCTAVES + 1];
+
+/// Each phase octave's share of the phase normal's variance: `λ^⅔ ÷ Σ λ^⅔` over the two, `2^(10⁄3)
+/// ÷ (2^(10⁄3) + 4)` and `4 ÷ (2^(10⁄3) + 4)` (unit-tested against [`math::powf`]).
+pub const PHASE_OCTAVE_VARIANCES: [f64; 2] = [0.715_896_346_583_349_9, 0.284_103_653_416_650_1];
+
+/// Each phase octave's amplitude, the square root of its [`PHASE_OCTAVE_VARIANCES`] entry as
+/// `f64::sqrt` rounds it (unit-tested bit for bit).
+const PHASE_OCTAVE_AMPLITUDES: [f64; 2] = [0.846_106_581_101_547_7, 0.533_013_745_992_211_9];
+
+/// Each octave's spacing as a power of two, the factor's five and the phase draw's two, by the
+/// octave's number in the lattice word: `λ = 2^LATTICE_LOG2[k]` ly.
+const LATTICE_LOG2: [u32; OCTAVES + 2] = [10, 9, 8, 7, 6, 5, 3];
+
 /// The bits of the lattice word each lattice coordinate takes (Design note 8).
 const COORDINATE_BITS: u32 = 20;
 
@@ -106,7 +133,7 @@ const COORDINATE_OFFSET: i64 = 1 << (COORDINATE_BITS - 1);
 const OCTAVE_SHIFT: u32 = 3 * COORDINATE_BITS;
 
 const _: () = assert!(
-    OCTAVES <= 16,
+    OCTAVES + 2 <= 16,
     "the lattice word holds an octave's number in four bits"
 );
 
@@ -248,16 +275,17 @@ impl NoiseCache {
 
 /// The lattice word of octave `octave` at the lattice coordinates `index`: the octave's number in
 /// the top four bits and each coordinate, offset by 2¹⁹, in twenty bits below it, x highest (Design
-/// note 8). The four bits hold sixteen octaves, of which this version uses the first five.
+/// note 8). The four bits hold sixteen octaves, of which this version uses the first seven: the
+/// factor's five and the phase draw's two.
 ///
 /// `None` unless `octave` is one of this version's and every lattice plane the coordinates name
 /// lies inside the root cube, `±ROOT_HALF_WIDTH_LY`: the planes on the cube's far faces are inside,
-/// since a position just below a face interpolates towards them, and at the finest spacing they are
-/// the coordinates ±1,024, far inside the twenty bits.
+/// since a position just below a face interpolates towards them, and at the finest spacing, the
+/// phase draw's 8 ly, they are the coordinates ±8,192, far inside the twenty bits.
 fn lattice_word(octave: usize, index: [i32; 3]) -> Option<u64> {
-    let log2 = *OCTAVE_LOG2.get(octave)?;
+    let log2 = *LATTICE_LOG2.get(octave)?;
     let limit = i64::from(ROOT_HALF_WIDTH_LY) >> log2;
-    let mut word = u64::try_from(octave).expect("one of five octaves") << OCTAVE_SHIFT;
+    let mut word = u64::try_from(octave).expect("one of seven octaves") << OCTAVE_SHIFT;
     for (shift, coordinate) in [2 * COORDINATE_BITS, COORDINATE_BITS, 0]
         .into_iter()
         .zip(index)
@@ -266,7 +294,7 @@ fn lattice_word(octave: usize, index: [i32; 3]) -> Option<u64> {
         if coordinate.abs() > limit {
             return None;
         }
-        // At most 65,536 from 0, well inside ±2¹⁹, so the offset coordinate is not negative.
+        // At most 8,193 from 0, well inside ±2¹⁹, so the offset coordinate is not negative.
         let unsigned = u64::try_from(coordinate + COORDINATE_OFFSET)
             .expect("a coordinate inside the root cube is inside twenty bits");
         word |= unsigned << shift;
@@ -293,8 +321,8 @@ fn fade(t: f64) -> f64 {
 /// floor division for negative cells too, and `t` is the cell's remainder plus the metre offset in
 /// light-years, divided by the spacing: an offset divided by a power of two.
 fn lattice_cell(p: &GalacticPosition, octave: usize) -> ([i32; 3], [f64; 3]) {
-    let log2 = OCTAVE_LOG2[octave];
-    let spacing = f64::from(OCTAVE_WAVELENGTHS_LY[octave]);
+    let log2 = LATTICE_LOG2[octave];
+    let spacing = f64::from(1_u32 << log2);
     let cell = p.cell().to_array();
     let offset = p.offset_metres();
     let mut index = [0_i32; 3];
@@ -390,6 +418,44 @@ pub fn log_normal_factor(
     math::exp(sigma_ln * g - 0.5 * variance)
 }
 
+/// The phase draw's normal of seed `seed`'s gas at `p`: `g_u = Σ a_k g_k` over the two phase
+/// octaves of 32 and 8 ly, exactly N(0, 1) at every point, and independent of the log-normal
+/// factor's octaves (module documentation; ruling 103 of 2026-09-22).
+///
+/// [`GasField::state`](super::field::GasField::state) turns it into the uniform `u = Φ(g_u)` that
+/// picks a point's phase. It depends on no [`SmoothingScale`], so a point's draw is the same at
+/// every scale. Outside the root cube it is 0, the median. `cache` changes what the call costs,
+/// never what it returns, and may be the one the factor reads.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::gas::noise::{NoiseCache, phase_normal};
+///
+/// let p = GalacticPosition::from_light_years([26_000.0, 0.0, 30.0]).expect("inside i32");
+/// let mut cache = NoiseCache::with_capacity(64);
+/// let g = phase_normal(Seed::new(1), &p, &mut cache);
+/// // The same point and seed give the same bits, whatever the cache.
+/// assert_eq!(g, phase_normal(Seed::new(1), &p, &mut NoiseCache::with_capacity(0)));
+/// ```
+#[must_use]
+pub fn phase_normal(seed: Seed, p: &GalacticPosition, cache: &mut NoiseCache) -> f64 {
+    if !p.in_root_cube() {
+        return 0.0;
+    }
+    let mut g = 0.0;
+    for (octave, amplitude) in PHASE_OCTAVES.into_iter().zip(PHASE_OCTAVE_AMPLITUDES) {
+        // Every corner of a lattice cell holding a point of the root cube is inside it.
+        let Some(value) = octave_value(seed, octave, p, cache) else {
+            return 0.0;
+        };
+        g += amplitude * value;
+    }
+    g
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::{assert_same_bits, bits};
@@ -417,10 +483,92 @@ mod tests {
                 OCTAVE_VARIANCES[k]
             );
             assert_same_bits(OCTAVE_AMPLITUDES[k], OCTAVE_VARIANCES[k].sqrt());
-            assert_eq!(1_u32 << OCTAVE_LOG2[k], OCTAVE_WAVELENGTHS_LY[k]);
+            assert_eq!(1_u32 << LATTICE_LOG2[k], OCTAVE_WAVELENGTHS_LY[k]);
         }
         let squares: f64 = OCTAVE_AMPLITUDES.iter().map(|a| a * a).sum();
         assert!((squares - 1.0).abs() < 1e-15, "{squares}");
+    }
+
+    /// Ruling 103: the phase draw's two octaves are 32 and 8 ly, numbers 5 and 6 of the word, with
+    /// variances `λ^⅔` normalised over the two and amplitudes their square roots.
+    #[test]
+    fn the_phase_octaves_follow_the_two_thirds_law() {
+        let weights = PHASE_OCTAVE_WAVELENGTHS_LY.map(|l| math::powf(f64::from(l), 2.0 / 3.0));
+        let sum: f64 = weights.iter().sum();
+        for k in 0..2 {
+            let expected = weights[k] / sum;
+            assert!(
+                (PHASE_OCTAVE_VARIANCES[k] / expected - 1.0).abs() < 1e-15,
+                "phase octave {k}: {} against {expected}",
+                PHASE_OCTAVE_VARIANCES[k]
+            );
+            assert_same_bits(PHASE_OCTAVE_AMPLITUDES[k], PHASE_OCTAVE_VARIANCES[k].sqrt());
+            assert_eq!(
+                1_u32 << LATTICE_LOG2[PHASE_OCTAVES[k]],
+                PHASE_OCTAVE_WAVELENGTHS_LY[k]
+            );
+        }
+        let total: f64 = PHASE_OCTAVE_VARIANCES.iter().sum();
+        assert!((total - 1.0).abs() < 1e-15, "{total}");
+        // No smoothing scale reaches them.
+        assert!(SmoothingScale::AtLeast(LightYears::new(1.0)).kept_octaves() <= OCTAVES);
+    }
+
+    /// At a fixed point the phase normal over 10⁵ seeds is standard normal by a Kolmogorov–Smirnov
+    /// test, at a point 0.2–0.8 of the way across both phase octaves' cells; it is 0 outside the
+    /// root cube; and at a lattice point of both octaves it is their normals' weighted sum.
+    #[test]
+    fn the_phase_normal_is_standard_normal_over_seeds() {
+        let p = position([26_004.0, -404.0, 300.9]);
+        for octave in PHASE_OCTAVES {
+            let (_, t) = lattice_cell(&p, octave);
+            assert!(t.iter().all(|t| (0.2..0.8).contains(t)), "{t:?}");
+        }
+        let mut cache = NoiseCache::with_capacity(64);
+        let mut sample: Vec<f64> = (0..100_000_u64)
+            .map(|n| phase_normal(Seed::new(0x0703_0000_0000_0000 | n), &p, &mut cache))
+            .collect();
+        let ks = ks_one_sample(&mut sample, normal_cdf);
+        assert_p_value("the phase normal against N(0, 1)", ks.p_value, ALPHA);
+        let outside = GalacticPosition::new(LyCell::new([65_536, 0, 0]), [0.0; 3]).unwrap();
+        assert_same_bits(phase_normal(Seed::new(9), &outside, &mut cache), 0.0);
+        let seed = Seed::new(0x0703_1a77);
+        let corner = GalacticPosition::new(LyCell::new([64, -32, 96]), [0.0; 3]).unwrap();
+        let expected = PHASE_OCTAVE_AMPLITUDES[0]
+            * lattice_normal(seed, lattice_word(5, [2, -1, 3]).unwrap())
+            + PHASE_OCTAVE_AMPLITUDES[1]
+                * lattice_normal(seed, lattice_word(6, [8, -4, 12]).unwrap());
+        assert_same_bits(phase_normal(seed, &corner, &mut cache), expected);
+    }
+
+    /// One cache shared between the factor and the phase normal, of any size, one entry included,
+    /// changes neither: the octave's number keeps the two lattices' words apart.
+    #[test]
+    fn a_cache_shared_with_the_phase_draw_changes_no_result() {
+        let seed = Seed::new(0x0703_cace);
+        let points: Vec<GalacticPosition> = (0..200)
+            .map(|i| {
+                let i = f64::from(i);
+                position([26_000.0 + 3.7 * i, -300.0 + 1.1 * i, 40.0 - 0.3 * i])
+            })
+            .collect();
+        let run = |cache: &mut NoiseCache| -> Vec<u64> {
+            points
+                .iter()
+                .flat_map(|p| {
+                    [
+                        bits(log_normal_factor(seed, p, 1.2, SmoothingScale::Full, cache)),
+                        bits(phase_normal(seed, p, cache)),
+                    ]
+                })
+                .collect()
+        };
+        let reference = run(&mut NoiseCache::with_capacity(0));
+        for capacity in [1, 2, 7, 64, 4_096] {
+            let mut cache = NoiseCache::with_capacity(capacity);
+            assert_eq!(run(&mut cache), reference, "capacity {capacity}");
+            assert_eq!(run(&mut cache), reference, "warm, capacity {capacity}");
+        }
     }
 
     /// A scale keeps the octaves at least as coarse as itself, and their share of the variance.
@@ -457,10 +605,15 @@ mod tests {
         assert!(lattice_word(0, [0, 0, -65]).is_none());
         assert!(lattice_word(4, [1_024, -1_024, 1_024]).is_some());
         assert!(lattice_word(4, [1_025, 0, 0]).is_none());
-        assert!(lattice_word(OCTAVES, [0, 0, 0]).is_none());
+        // The phase draw's octaves 5 and 6 reach ±2,048 and ±8,192 cells; octave 7 is not built.
+        assert!(lattice_word(5, [2_048, -2_048, 0]).is_some());
+        assert!(lattice_word(5, [2_049, 0, 0]).is_none());
+        assert!(lattice_word(6, [8_192, -8_192, 8_192]).is_some());
+        assert!(lattice_word(6, [0, -8_193, 0]).is_none());
+        assert!(lattice_word(OCTAVES + 2, [0, 0, 0]).is_none());
         // Distinct points and octaves have distinct words, and none is the empty slot's.
         let mut words = Vec::new();
-        for octave in 0..5 {
+        for octave in 0..OCTAVES + 2 {
             for x in -2..=2 {
                 for y in -2..=2 {
                     for z in -2..=2 {

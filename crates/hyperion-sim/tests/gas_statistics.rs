@@ -27,9 +27,7 @@ use hyperion_sim::galaxy::gas::extinction::{NoiseMode, Quality, Sightline, sight
 use hyperion_sim::galaxy::gas::field::GasField;
 use hyperion_sim::galaxy::gas::noise::{NoiseCache, SmoothingScale, log_normal_factor};
 use hyperion_sim::galaxy::gas::params::GasParams;
-use hyperion_sim::galaxy::gas::phase::{
-    GasPhase, ThermalState, WARM_CEILING, WARM_TEMPERATURE, warm_neutral_share,
-};
+use hyperion_sim::galaxy::gas::phase::{GasPhase, Medium, PhaseMix};
 use hyperion_sim::galaxy::gas::pressure::Pressure;
 use hyperion_sim::galaxy::gas::smooth::{GasLayer, SmoothGas};
 use hyperion_sim::galaxy::gas::{CENTIMETRES_PER_LIGHT_YEAR, SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY};
@@ -43,6 +41,7 @@ use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
+use hyperion_testkit::stats::normal_cdf;
 
 use crate::common::{Running, assert_relative, assert_within, whole_ly};
 
@@ -53,21 +52,22 @@ use crate::common::{Running, assert_relative, assert_within, whole_ly};
 /// that no galaxy falls below it; no drawn galaxy comes near the clamp.
 const NEUTRAL_SHARE_FLOOR: f64 = 0.5;
 
-/// Whether the mean gas 20,000 ly above radius `r` (ly) of `params` is hot, and the temperature it
-/// reads there, K.
-fn corona_far_above(params: &GasParams, r: f64) -> (bool, f64) {
+/// The split of the mean gas 20,000 ly above radius `r` (ly) of `params` (ruling 103): its hot
+/// share and the hot phase's temperature, K.
+fn corona_far_above(params: &GasParams, r: f64) -> (f64, f64) {
     let (gas, pressure) = (SmoothGas::new(params), Pressure::new(params));
     let z = 20_000.0;
-    let n = HydrogenPerCm3::new(gas.mean_density(r, z));
-    let p = KelvinPerCm3::new(pressure.at(&gas, r, z));
-    let share = warm_neutral_share(
-        gas.density(GasLayer::Neutral, r, z),
-        gas.density(GasLayer::Warm, r, z),
+    let mix = PhaseMix::split(
+        HydrogenPerCm3::new(
+            gas.density(GasLayer::Neutral, r, z) + gas.density(GasLayer::Molecular, r, z),
+        ),
+        HydrogenPerCm3::new(gas.density(GasLayer::Warm, r, z)),
+        HydrogenPerCm3::new(gas.corona_density()),
+        KelvinPerCm3::new(pressure.at(&gas, r, z)),
     );
-    let state = ThermalState::of(n, p, share);
     (
-        state.phase() == GasPhase::Hot,
-        state.temperature(n, p).value(),
+        mix.filling(Medium::Hot),
+        mix.temperature(Medium::Hot).value(),
     )
 }
 
@@ -77,9 +77,10 @@ fn corona_far_above(params: &GasParams, r: f64) -> (bool, f64) {
 /// the sweep, which is what moves the share. The warm layer holds its drawn density at the Sun's
 /// radius for every seed: ruling 91's clamp binds on none of them.
 ///
-/// Ruling 91 also holds the corona hot 20,000 ly above every radius from 8,000 to 40,000 ly, for
-/// every seed sampled; the coolest is printed (`gas::phase` proves the bound at the draws' corners,
-/// some 104,000 K).
+/// Rulings 91 and 103 also hold the corona hot 20,000 ly above every radius from 8,000 to
+/// 40,000 ly, for every seed sampled: the mean gas there is more than 95% hot by volume, and its hot
+/// phase above 10⁵ K; the least share and the coolest are printed (`gas::phase` proves the bound
+/// at the draws' corners, a share of about 0.975 at some 159,000 K).
 ///
 /// The distribution of the share is printed, since the lightest galaxies set its floor: their warm
 /// layer weighs what a Milky Way's does, some 10⁹ M☉, against a gas disc of a few 10⁹.
@@ -88,7 +89,7 @@ fn corona_far_above(params: &GasParams, r: f64) -> (bool, f64) {
 fn the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies() {
     let reference = GasParams::REFERENCE_RADIUS.value();
     let mut shares = Vec::with_capacity(2_000);
-    let mut coolest = f64::INFINITY;
+    let (mut coolest, mut least_hot) = (f64::INFINITY, f64::INFINITY);
     for n in 0..2_000_u64 {
         let seed = Seed::new(0x0700_5eed_0000_0000 | n);
         let galaxy = GalaxyParams::from_seed(seed, MassFunctionKind::default());
@@ -114,12 +115,19 @@ fn the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies() {
         for i in 0..=32 {
             let r = 8_000.0 + 1_000.0 * f64::from(i);
             let (hot, t) = corona_far_above(&params, r);
-            assert!(hot, "{seed}: {t} K 20,000 ly above {r} ly");
+            assert!(
+                hot > 0.95 && t > 1e5,
+                "{seed}: {hot} hot at {t} K 20,000 ly above {r} ly"
+            );
             coolest = coolest.min(t);
+            least_hot = least_hot.min(hot);
         }
         shares.push(share);
     }
-    eprintln!("the coolest corona 20,000 ly up, R = 8,000–40,000 ly: {coolest:.0} K");
+    eprintln!(
+        "the mean gas 20,000 ly up, R = 8,000–40,000 ly: least hot share {least_hot:.4}, coolest \
+         hot phase {coolest:.0} K"
+    );
     shares.sort_by(f64::total_cmp);
     let at = |percent: usize| shares[percent * (shares.len() - 1) / 100];
     eprintln!(
@@ -350,15 +358,21 @@ fn in_plane_line(i: u32) -> (GalacticPosition, GalacticPosition) {
 
 /// The mean-mode `A_V` of P07.T12's in-plane lines, averaged over their 64 azimuths.
 fn in_plane_mean(gas: &GasField, cache: &mut NoiseCache) -> f64 {
-    (0..64)
-        .map(|i| {
-            let (a, b) = in_plane_line(i);
-            sightline(gas, &a, &b, NoiseMode::Mean, Quality::Full, &[], cache)
-                .a_v()
-                .value()
-        })
-        .sum::<f64>()
-        / 64.0
+    in_plane_mean_lines(gas, cache).0
+}
+
+/// The mean-mode `A_V`, mag, and neutral hydrogen column, cm⁻², of P07.T12's in-plane lines,
+/// averaged over their 64 azimuths.
+fn in_plane_mean_lines(gas: &GasField, cache: &mut NoiseCache) -> (f64, f64) {
+    let (a_v, neutral) = (0..64).fold((0.0, 0.0), |(a_v, neutral), i| {
+        let (a, b) = in_plane_line(i);
+        let line = sightline(gas, &a, &b, NoiseMode::Mean, Quality::Full, &[], cache);
+        (
+            a_v + line.a_v().value(),
+            neutral + line.neutral_hydrogen_column().value(),
+        )
+    });
+    (a_v / 64.0, neutral / 64.0)
 }
 
 /// The value at `percent` of a sorted sample.
@@ -376,18 +390,21 @@ fn percentile(sorted: &[f64], percent: usize) -> f64 {
 /// stellar lines' 0.7–1.0 mag/kpc (0.64–0.92 per 3,000 ly), since a mean is never below a typical
 /// line. The `Realised` mean over the same lines and 32 seeds agrees within four standard errors,
 /// the error from the 32 seeds' own line averages; its median line is recorded against the typical
-/// lines' 0.64–0.92, not held to it.
+/// lines' 0.64–0.92, not held to it. The `Realised` neutral column, `∫ (n_n + n_mol) F` since
+/// ruling 103, agrees with the mean mode's `∫ (n_n + n_mol)` within four standard errors the same
+/// way: it is its expectation.
 #[test]
 #[ignore = "slow: 2,048 realised lines of 3,000 ly at full quality"]
 fn the_in_plane_extinction_is_the_local_mean_rate() {
     let fields = milky_way_fields();
     let mut cache = NoiseCache::with_capacity(4_096);
     let gas = |seed| GasField::with_params(seed, GasParams::milky_way_like(), &fields);
-    let mean = in_plane_mean(&gas(Seed::new(1)), &mut cache);
+    let (mean, mean_neutral) = in_plane_mean_lines(&gas(Seed::new(1)), &mut cache);
     let (mut averages, mut lines) = (Running::default(), Vec::with_capacity(2_048));
+    let mut neutrals = Running::default();
     for n in 0..32_u64 {
         let field = gas(Seed::new(0x0712_a000_0000_0000 | n));
-        let mut sum = 0.0;
+        let (mut sum, mut neutral) = (0.0, 0.0);
         for i in 0..64 {
             let (a, b) = in_plane_line(i);
             let line = sightline(
@@ -400,20 +417,32 @@ fn the_in_plane_extinction_is_the_local_mean_rate() {
                 &mut cache,
             );
             sum += line.a_v().value();
+            neutral += line.neutral_hydrogen_column().value();
             lines.push(line.a_v().value());
         }
         averages.push(sum / 64.0);
+        neutrals.push(neutral / 64.0);
     }
     let realised = averages.summary();
+    let realised_neutral = neutrals.summary();
     lines.sort_by(f64::total_cmp);
     eprintln!(
         "in-plane A_V per 3,000 ly at 26,000 ly: mean mode {mean:.3} mag; realised {:.3} ± {:.3} \
-         over 32 seeds; realised lines 16/50/84%: {:.3}/{:.3}/{:.3} (typical lines 0.64–0.92)",
+         over 32 seeds; realised lines 16/50/84%: {:.3}/{:.3}/{:.3} (typical lines 0.64–0.92); \
+         neutral column: mean mode {mean_neutral:.4e}, realised {:.4e} ± {:.2e} cm⁻²",
         realised.mean,
         realised.standard_error,
         percentile(&lines, 16),
         percentile(&lines, 50),
         percentile(&lines, 84),
+        realised_neutral.mean,
+        realised_neutral.standard_error,
+    );
+    assert!(
+        (realised_neutral.mean - mean_neutral).abs() < 4.0 * realised_neutral.standard_error,
+        "realised neutral {} ± {} against {mean_neutral}",
+        realised_neutral.mean,
+        realised_neutral.standard_error
     );
     assert_within("mean-mode A_V per 3,000 ly", mean, 0.9, 2.0);
     assert!(
@@ -552,157 +581,211 @@ fn annulus_point(lcg: &mut Lcg, z: f64) -> GalacticPosition {
     at([r * math::cos(phi), r * math::sin(phi), z])
 }
 
-/// The warm gas 3,000–6,000 ly from the fixture's plane at radii of 20,000–30,000 ly, over
-/// 2 × 10⁵ points: every warm point reads 5,000–10,000 K and `T × x n = P` wherever the clamp does
-/// not bind (ruling 98 of 2026-09-22). Returns, for the record, the mass-weighted percentiles of
-/// the temperature, the share the clamp binds on by number and by mass at each end, and the spread
-/// of `x n T ÷ P` where it binds.
-fn warm_gas_far_from_the_plane(gas: &GasField, lcg: &mut Lcg, cache: &mut NoiseCache) -> String {
-    let mut warm = Vec::new();
-    for _ in 0..200_000 {
-        let height = 3_000.0 + 3_000.0 * lcg.next_f64();
-        let z = if lcg.next_below(2) == 0 {
-            height
-        } else {
-            -height
-        };
-        let state = gas.state(&annulus_point(lcg, z), SmoothingScale::Full, cache);
-        if state.phase() == GasPhase::Warm {
-            // x n T ÷ P: 1 where the clamp does not bind (ruling 98).
-            let balance = state.temperature().value()
-                * state.particles_per_hydrogen()
-                * state.density().value()
-                / state.pressure().value();
-            warm.push((
-                state.temperature().value(),
-                state.density().value(),
-                state.temperature_clamped(),
-                balance,
-            ));
-        }
-    }
-    warm.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let total: f64 = warm.iter().map(|w| w.1).sum();
-    let weighted = |fraction: f64| {
-        let mut sum = 0.0;
-        warm.iter()
-            .find(|w| {
-                sum += w.1;
-                sum >= fraction * total
-            })
-            .map_or(f64::NAN, |w| w.0)
-    };
-    // Ruling 98's record: the share of the warm gas the clamp binds on, by number and by mass,
-    // at each end, and the spread of x n T ÷ P where it binds.
-    let bound_mass = |pick: fn(f64) -> bool| -> f64 {
-        warm.iter()
-            .filter(|w| w.2 && pick(w.0))
-            .map(|w| w.1)
-            .sum::<f64>()
-            / total
-    };
-    let (bound, all) = warm.iter().fold((0_u32, 0_u32), |(bound, all), w| {
-        (bound + u32::from(w.2), all + 1)
-    });
-    let bound_count = f64::from(bound) / f64::from(all);
-    let mut balances: Vec<f64> = warm.iter().filter(|w| w.2).map(|w| w.3).collect();
-    balances.sort_by(f64::total_cmp);
-    let balance_at = |q: usize| {
-        balances
-            .get(balances.len().saturating_sub(1) * q / 100)
-            .copied()
-            .unwrap_or(f64::NAN)
-    };
-    assert!(
-        warm.iter()
-            .all(|w| (WARM_TEMPERATURE.value()..=WARM_CEILING.value()).contains(&w.0))
-    );
-    assert!(warm.iter().all(|w| w.2 || (w.3 - 1.0).abs() < 1e-15));
-    format!(
-        "warm gas at |z| 3,000–6,000 ly, by mass: 16/50/84% {:.0}/{:.0}/{:.0} K over {} points; \
-         the clamp binds on {bound_count:.3} of them by number, {:.3} of the mass at 5,000 K and \
-         {:.3} at 10,000 K, with x n T ÷ P at 16/50/84% {:.3}/{:.3}/{:.3} where it binds",
-        weighted(0.16),
-        weighted(0.5),
-        weighted(0.84),
-        warm.len(),
-        bound_mass(|t| t <= WARM_TEMPERATURE.value()),
-        bound_mass(|t| t >= WARM_CEILING.value()),
-        balance_at(16),
-        balance_at(50),
-        balance_at(84),
-    )
+/// What the drawn phases of a set of points came to (ruling 103).
+#[derive(Default)]
+struct Tally {
+    points: u32,
+    /// Points drawn in each medium, in [`Medium::ALL`]'s order.
+    media: [u32; 4],
+    molecular: u32,
+    /// Points in parcels the split does not compress.
+    uncompressed: u32,
+    /// The drawn hot points' temperatures, K.
+    hot_temperatures: Vec<f64>,
+    /// The warm neutral and cold mass of the uncompressed parcels, and the neutral mass of the
+    /// compressed ones and of all, per unit volume summed over the points, cm⁻³.
+    warm_neutral_mass: f64,
+    cold_mass: f64,
+    compressed_neutral_mass: f64,
+    neutral_mass: f64,
 }
 
-/// P07.T12's filling factors by Monte Carlo, for the Milky Way fixture at its `σ_ln` of 2.3: over
-/// 10⁵ points in the plane at radii of 20,000–30,000 ly the hot share is 0.20–0.40 (the
-/// brainstorm's "a fifth to two fifths") and the molecular share under 2%; at |z| = 20,000 ly over
-/// the same radii the hot share is above 0.95.
+impl Tally {
+    /// Adds the state of `gas` at `p` to the tally, and checks that a drawn warm point is at
+    /// exactly 8,000 K: no clamp (ruling 98.4 withdrawn).
+    fn add(&mut self, gas: &GasField, p: &GalacticPosition, cache: &mut NoiseCache) {
+        let state = gas.state(p, SmoothingScale::Full, cache);
+        let mix = state.mix();
+        self.points += 1;
+        let k = Medium::ALL
+            .iter()
+            .position(|&m| m == state.medium())
+            .expect("one of the four");
+        self.media[k] += 1;
+        self.molecular += u32::from(state.phase() == GasPhase::Molecular);
+        let neutral = mix.mass(Medium::WarmNeutral).value() + mix.mass(Medium::Cold).value();
+        self.neutral_mass += neutral;
+        if mix.overpressure() > 1.0 {
+            self.compressed_neutral_mass += neutral;
+        } else {
+            self.uncompressed += 1;
+            self.warm_neutral_mass += mix.mass(Medium::WarmNeutral).value();
+            self.cold_mass += mix.mass(Medium::Cold).value();
+        }
+        match state.medium() {
+            Medium::Hot => self.hot_temperatures.push(state.temperature().value()),
+            Medium::WarmIonised | Medium::WarmNeutral => {
+                assert!(
+                    state.temperature().value().total_cmp(&8_000.0).is_eq(),
+                    "{state:?}"
+                );
+            }
+            Medium::Cold => {}
+        }
+    }
+
+    /// The share of the points drawn in `medium`.
+    fn share(&self, medium: Medium) -> f64 {
+        let k = Medium::ALL
+            .iter()
+            .position(|&m| m == medium)
+            .expect("one of the four");
+        f64::from(self.media[k]) / f64::from(self.points)
+    }
+}
+
+/// The height P07.T12 samples the gas at: `z` or `−z`, evenly.
+fn either_side(lcg: &mut Lcg, z: f64) -> f64 {
+    if lcg.next_below(2) == 0 { z } else { -z }
+}
+
+/// A point at radius `r` ly and height `z` ly, at a uniformly drawn azimuth.
+fn ring_point(lcg: &mut Lcg, r: f64, z: f64) -> GalacticPosition {
+    let phi = core::f64::consts::TAU * lcg.next_f64();
+    at([r * math::cos(phi), r * math::sin(phi), z])
+}
+
+/// The warm ionised share at 26,000 ly by height, from the plane to 10,000 ly up in steps of
+/// 500 ly, over 10⁴ points each: `(height in ly, share)`.
+fn warm_ionised_profile(gas: &GasField, lcg: &mut Lcg, cache: &mut NoiseCache) -> Vec<(f64, f64)> {
+    let mut profile = Vec::with_capacity(21);
+    for step in 0..=20_u32 {
+        let height = 500.0 * f64::from(step);
+        let mut tally = Tally::default();
+        for _ in 0..10_000 {
+            let z = either_side(lcg, height);
+            tally.add(gas, &ring_point(lcg, 26_000.0, z), cache);
+        }
+        profile.push((height, tally.share(Medium::WarmIonised)));
+    }
+    profile
+}
+
+/// P07.T12's filling factors by Monte Carlo, as ruling 103 (research `gas2phase`, NOTES §5) sets
+/// them, for the Milky Way fixture at its `σ_ln` of 1.2, with each point's phase drawn from its
+/// parcel's split:
 ///
-/// The warm temperature is recorded, not tuned: the mass-weighted percentiles of the warm gas
-/// 3,000–6,000 ly from the plane over the same radii, which ruling 98 clamps to 5,000–10,000 K for
-/// readout, with the share of that gas the clamp binds on and the ratio `x n T ÷ P` there (plan
-/// 07, Risks).
+/// - in the plane at radii of 20,000–30,000 ly, over 10⁵ points: hot 0.20–0.40 (the brainstorm's
+///   "a fifth to two fifths"), warm neutral 0.30–0.70 (Heiles and Troland 2003's "about 0.50"),
+///   cold 0.005–0.05 (McKee and Ostriker's 0.02–0.04, widened below, since the model sits under
+///   it), molecular under 2%; the cold share of the uncompressed parcels' atomic mass 0.3–0.7
+///   (Heiles and Troland's 0.4 to Dickey and Lockman's "most"); the hot phase's median
+///   temperature, by volume, 10^5.5–10^6.5 K (Ferrière 2001's ~10⁶); every warm point at 8,000 K;
+///   and at least 95% of the points in parcels the split does not compress;
+/// - at |z| = 20,000 ly, over 10⁵ points: hot above 0.95;
+/// - in the plane at 26,000 ly, over 10⁵ points: warm ionised 0.04–0.15 (Gaensler et al. 2008's
+///   0.04 ± 0.01, Haffner et al. 2009's ~0.1, Ferrière's 5–14%);
+/// - at 26,000 ly from the plane to 10,000 ly up, in steps of 500 ly, over 10⁴ points each: the
+///   warm ionised share peaks at 0.15–0.40 at 1,600–6,500 ly (0.5–2 kpc) and is below the peak at
+///   10,000 ly, Gaensler et al.'s "maximum of ∼ 30% at a height of ≈1–1.5 kpc, before then
+///   declining". The research predicts 0.18 near 1 kpc, some 1.7 times under Gaensler's peak: a
+///   finding for the owner, not tuned.
 #[test]
-#[ignore = "slow: 4 × 10⁵ states of the fixture's gas"]
+#[ignore = "slow: 5 × 10⁵ states of the fixture's gas"]
 fn the_phases_fill_the_plane_as_the_brainstorm_says() {
     let fields = milky_way_fields();
     let gas = GasField::with_params(Seed::new(0x0712_f111), GasParams::milky_way_like(), &fields);
     let mut cache = NoiseCache::with_capacity(4_096);
     let mut lcg = Lcg::new(0x0712_f111);
-    let (mut hot, mut molecular, mut hot_high) = (0_u32, 0_u32, 0_u32);
-    let (mut plane_warm, mut plane_clamped) = (0_u32, 0_u32);
-    let points = 100_000_u32;
+    let points = 100_000;
+    let (mut plane, mut high, mut sun) = (Tally::default(), Tally::default(), Tally::default());
     for _ in 0..points {
-        let state = gas.state(
-            &annulus_point(&mut lcg, 0.0),
-            SmoothingScale::Full,
-            &mut cache,
-        );
-        match state.phase() {
-            GasPhase::Hot => hot += 1,
-            GasPhase::Molecular => molecular += 1,
-            GasPhase::Warm => {
-                plane_warm += 1;
-                plane_clamped += u32::from(state.temperature_clamped());
-            }
-            GasPhase::Cold => {}
-        }
-        let z = if lcg.next_below(2) == 0 {
-            20_000.0
-        } else {
-            -20_000.0
-        };
-        let high = gas.state(
-            &annulus_point(&mut lcg, z),
-            SmoothingScale::Full,
-            &mut cache,
-        );
-        if high.phase() == GasPhase::Hot {
-            hot_high += 1;
-        }
+        plane.add(&gas, &annulus_point(&mut lcg, 0.0), &mut cache);
+        let z = either_side(&mut lcg, 20_000.0);
+        high.add(&gas, &annulus_point(&mut lcg, z), &mut cache);
+        sun.add(&gas, &ring_point(&mut lcg, 26_000.0, 0.0), &mut cache);
     }
-    let share = |count: u32| f64::from(count) / f64::from(points);
-    let warm = warm_gas_far_from_the_plane(&gas, &mut lcg, &mut cache);
+    let profile = warm_ionised_profile(&gas, &mut lcg, &mut cache);
+    let (peak_height, peak) = profile
+        .iter()
+        .copied()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("21 heights");
+    let top = profile[20].1;
+    plane.hot_temperatures.sort_by(f64::total_cmp);
+    let hot_median = percentile(&plane.hot_temperatures, 50);
+    let cold_share = plane.cold_mass / (plane.cold_mass + plane.warm_neutral_mass);
+    let uncompressed = f64::from(plane.uncompressed) / f64::from(plane.points);
+    let profile_text: Vec<String> = profile
+        .iter()
+        .map(|(z, share)| format!("{z:.0} {share:.3}"))
+        .collect();
     eprintln!(
-        "in the plane at 20,000–30,000 ly: hot {:.3}, molecular {:.4}; at |z| 20,000 ly hot \
-         {:.4}; {warm}; in the plane the warm clamp binds on {:.3} of the warm points",
-        share(hot),
-        share(molecular),
-        share(hot_high),
-        f64::from(plane_clamped) / f64::from(plane_warm),
+        "in the plane at 20,000–30,000 ly: hot {:.3}, warm ionised {:.3}, warm neutral {:.3}, \
+         cold {:.4}, molecular {:.4}; cold share of the atomic mass {cold_share:.3} (compressed \
+         parcels hold {:.3} of the neutral mass); hot phase 16/50/84% by volume {:.3e}/\
+         {hot_median:.3e}/{:.3e} K; uncompressed share {uncompressed:.4}; at |z| 20,000 ly hot \
+         {:.4}; at 26,000 ly in the plane warm ionised {:.3}; the warm ionised share by height \
+         (ly) {}: peak {peak:.3} at {peak_height:.0} ly, {top:.3} at 10,000 ly",
+        plane.share(Medium::Hot),
+        plane.share(Medium::WarmIonised),
+        plane.share(Medium::WarmNeutral),
+        plane.share(Medium::Cold),
+        f64::from(plane.molecular) / f64::from(plane.points),
+        plane.compressed_neutral_mass / plane.neutral_mass,
+        percentile(&plane.hot_temperatures, 16),
+        percentile(&plane.hot_temperatures, 84),
+        high.share(Medium::Hot),
+        sun.share(Medium::WarmIonised),
+        profile_text.join(", "),
     );
-    assert_within("the hot share of the plane", share(hot), 0.20, 0.40);
-    assert!(
-        share(molecular) < 0.02,
-        "a molecular share of {}",
-        share(molecular)
+    assert_within(
+        "the hot share of the plane",
+        plane.share(Medium::Hot),
+        0.20,
+        0.40,
     );
+    assert_within(
+        "the warm neutral share of the plane",
+        plane.share(Medium::WarmNeutral),
+        0.30,
+        0.70,
+    );
+    assert_within(
+        "the cold share of the plane",
+        plane.share(Medium::Cold),
+        0.005,
+        0.05,
+    );
+    let molecular = f64::from(plane.molecular) / f64::from(plane.points);
+    assert!(molecular < 0.02, "a molecular share of {molecular}");
+    assert_within("the cold share of the atomic mass", cold_share, 0.3, 0.7);
+    assert_within(
+        "log10 of the hot phase's median temperature",
+        math::log10(hot_median),
+        5.5,
+        6.5,
+    );
+    assert!(uncompressed >= 0.95, "{uncompressed} uncompressed");
     assert!(
-        share(hot_high) > 0.95,
+        high.share(Medium::Hot) > 0.95,
         "a hot share of {} far above",
-        share(hot_high)
+        high.share(Medium::Hot)
     );
+    assert_within(
+        "the warm ionised share at 26,000 ly in the plane",
+        sun.share(Medium::WarmIonised),
+        0.04,
+        0.15,
+    );
+    assert_within("the warm ionised peak", peak, 0.15, 0.40);
+    assert_within(
+        "the warm ionised peak's height, ly",
+        peak_height,
+        1_600.0,
+        6_500.0,
+    );
+    assert!(top < peak, "{top} at 10,000 ly against a peak of {peak}");
 }
 
 /// The mean of the log-normal factor over `points` points drawn uniformly from the cube of
@@ -783,8 +866,8 @@ fn smooth_gas_mass(gas: &SmoothGas, radial_scale: f64) -> f64 {
         .sum()
 }
 
-/// Every drawn gas parameter of `gas` against Design note 3's ranges, as amended by ruling 91: the
-/// corona's 0.5–0.8 × 10⁻³ cm⁻³.
+/// Every drawn gas parameter of `gas` against Design note 3's ranges, as amended by rulings 91 and
+/// 103: the corona's 0.5–0.8 × 10⁻³ cm⁻³ and `σ_ln`'s 1.0–1.4.
 fn assert_gas_in_ranges(seed: Seed, galaxy: &GalaxyParams, gas: &GasParams) {
     let bar = galaxy.bar().half_length().value();
     let rows = [
@@ -815,7 +898,7 @@ fn assert_gas_in_ranges(seed: Seed, galaxy: &GalaxyParams, gas: &GasParams) {
             0.8e-3,
         ),
         ("pressure floor", gas.pressure_floor().value(), 300.0, 450.0),
-        ("sigma_ln", gas.sigma_ln(), 2.0, 2.5),
+        ("sigma_ln", gas.sigma_ln(), 1.0, 1.4),
         ("lane offset", gas.lane().offset().value(), 300.0, 600.0),
         ("lane width", gas.lane().width().value(), 150.0, 300.0),
         ("lane fraction", gas.lane().fraction(), 0.08, 0.20),
@@ -845,7 +928,10 @@ fn assert_gas_in_ranges(seed: Seed, galaxy: &GalaxyParams, gas: &GasParams) {
 /// rate, and the gas's surface density at 26,000 ly that goes with it, against the Milky Way's
 /// 13.7 ± 1.6 M☉ pc⁻² (McKee et al. 2015); and each galaxy's escape speed at 26,000 ly to twice
 /// its `r₂₀₀` (ruling 91.2), bracketed only loosely, at 300–1,100 km/s, since a drawn galaxy is
-/// not the Milky Way: its stellar mass, and so its halo, is drawn over a range around it.
+/// not the Milky Way: its stellar mass, and so its halo, is drawn over a range around it. Also
+/// recorded (ruling 103): the spread of the hot share of each galaxy's plane at 26,000 ly, in the
+/// split's closed form ([`hot_share_in_the_plane`]), since each galaxy's layers, pressure and
+/// `σ_ln` differ.
 #[test]
 #[ignore = "slow: 200 galaxies' parameters, fields, potentials and 12,800 lines"]
 fn the_gas_of_200_galaxies_closes_and_stays_in_range() {
@@ -855,6 +941,7 @@ fn the_gas_of_200_galaxies_closes_and_stays_in_range() {
         * LIGHT_YEARS_PER_PARSEC;
     let mut rows = Vec::with_capacity(200);
     let mut escapes = Vec::with_capacity(200);
+    let mut hot_shares = Vec::with_capacity(200);
     for n in 0..200_u64 {
         let seed = Seed::new(0x0712_0200_0000_0000 | n);
         let galaxy = GalaxyParams::from_seed(seed, MassFunctionKind::default());
@@ -874,6 +961,7 @@ fn the_gas_of_200_galaxies_closes_and_stays_in_range() {
         );
         let a_v = in_plane_mean(&field, &mut cache);
         rows.push((a_v, smooth.disc_column(26_000.0) * per_pc2));
+        hot_shares.push(hot_share_in_the_plane(&params, 26_000.0));
         let tables = PotentialTables::in_plane(&model);
         let escape = tables
             .galactic_escape_speed_in_plane(LightYears::new(26_000.0))
@@ -882,6 +970,16 @@ fn the_gas_of_200_galaxies_closes_and_stays_in_range() {
     }
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     escapes.sort_by(f64::total_cmp);
+    hot_shares.sort_by(f64::total_cmp);
+    eprintln!(
+        "the hot share of the plane at 26,000 ly over 200 galaxies, closed form: least {:.3}, \
+         16/50/84% {:.3}/{:.3}/{:.3}, most {:.3}",
+        hot_shares[0],
+        percentile(&hot_shares, 16),
+        percentile(&hot_shares, 50),
+        percentile(&hot_shares, 84),
+        hot_shares[199],
+    );
     let (least, most) = (rows[0], rows[199]);
     let a_v: Vec<f64> = rows.iter().map(|row| row.0).collect();
     eprintln!(
@@ -908,6 +1006,24 @@ fn the_gas_of_200_galaxies_closes_and_stays_in_range() {
         300.0,
         1_100.0,
     );
+}
+
+/// The hot share of the plane of `params`'s gas at radius `r` ly, azimuthally averaged, in the
+/// four-phase split's closed form (ruling 103; `gas::phase`'s unit test holds it against a Monte
+/// Carlo): `f_Hmin + room Φ(d₁) − K Φ(d₂)`, with `K` the smooth layers' balance volumes, `d₁ =
+/// [ln(room ÷ K) + σ² ÷ 2] ÷ σ` and `d₂ = d₁ − σ`.
+fn hot_share_in_the_plane(params: &GasParams, r: f64) -> f64 {
+    let (gas, pressure) = (SmoothGas::new(params), Pressure::new(params));
+    let p = pressure.at(&gas, r, 0.0);
+    let warm = gas.plane_density(GasLayer::Warm, r);
+    let neutral =
+        gas.plane_density(GasLayer::Neutral, r) + gas.plane_density(GasLayer::Molecular, r);
+    let k = warm * 2.1 * 8_000.0 / p + neutral * 1.1 * 8_000.0 / p;
+    let least = 2.3 * gas.corona_density() * 1e5 / p;
+    let room = 1.0 - least;
+    let sigma = params.sigma_ln();
+    let d1 = (math::ln(room / k) + 0.5 * sigma * sigma) / sigma;
+    least + room * normal_cdf(d1) - k * normal_cdf(d1 - sigma)
 }
 
 /// The ten lines of P07.T12's golden: in the plane at the Sun, to the centre and through it, to

@@ -132,21 +132,28 @@ impl GasField {
     pub fn neutral_bound(&self, cell: &CellBox) -> HydrogenPerCm3; // mean neutral gas, for thinning
 }
 pub enum SmoothingScale { Full, AtLeast(LightYears) }
-pub struct GasState { /* density(), pressure(), temperature(), thermal_sound_speed(), phase(),
-                         neutral_share(), particles_per_hydrogen() (ruling 91),
-                         temperature_clamped(), isothermal_sound_speed() (ruling 98) */ }
+pub struct GasState { /* density() (the parcel's mean), pressure(), mix(), phase_draw(), medium(),
+                         phase(), neutral_share(), parcel_neutral_share(), local_density(),
+                         particles_per_hydrogen(), temperature(), overpressure(),
+                         thermal_sound_speed(), isothermal_sound_speed() (ruling 103) */ }
 
-// phase.rs (P07.T5; ruling 91 in P07.T12)
+// phase.rs (P07.T5; rulings 91 and 103 in P07.T12)
 pub enum GasPhase { Hot, Warm, Cold, Molecular }
-impl GasPhase { pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3) -> GasPhase; }
-pub struct ThermalState { /* phase(), neutral_share(), particles_per_hydrogen(), temperature(n, p),
-                            clamped() (ruling 98) */ }
-impl ThermalState {
-    pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3, neutral_share: f64) -> ThermalState;
+impl GasPhase { pub fn of(n: HydrogenPerCm3, p_over_k: KelvinPerCm3) -> GasPhase; } // hot inclusive
+pub enum Medium { Hot, WarmIonised, WarmNeutral, Cold }   // the draw's order (ruling 103)
+impl Medium { pub const ALL: [Medium; 4]; pub fn particles_per_hydrogen(self) -> f64;
+              pub fn neutral_share(self) -> f64; }
+pub struct PhaseMix { /* filling(m), density(m), temperature(m), mass(m), phase(m), pressure(),
+                         overpressure(), condensed_share(), neutral_mass_share(),
+                         isothermal_sound_speed(m), draw(u) */ }
+impl PhaseMix {
+    pub fn split(neutral: HydrogenPerCm3, ionised: HydrogenPerCm3, corona: HydrogenPerCm3,
+                 p_over_k: KelvinPerCm3) -> PhaseMix;
 }
-pub fn warm_neutral_share(neutral: f64, warm: f64) -> f64;   // n_neutral ÷ (n_neutral + n_warm)
-pub const WARM_CEILING: Kelvin;  // 10,000 K, the warm clamp's top (ruling 98); WARM_TEMPERATURE its foot
-pub fn warm_particles_per_hydrogen(neutral_share: f64) -> f64; // 1.1 + 1.2 (1 − f_n)
+pub const WARM_IONISED_TEMPERATURE: Kelvin;             // 8,000 K
+pub const WARM_NEUTRAL_TEMPERATURE: Kelvin;             // 8,000 K
+pub const COLD_TEMPERATURE: Kelvin;                     // 70 K
+pub const WARM_IONISED_PARTICLES_PER_HYDROGEN: f64;     // 2.1
 
 // noise.rs
 pub struct NoiseCache { /* caller-owned, fixed capacity, direct-mapped */ }
@@ -154,6 +161,8 @@ impl NoiseCache { pub fn with_capacity(entries: usize) -> NoiseCache; pub fn cle
 pub fn log_normal_factor(seed: Seed, p: &GalacticPosition, sigma_ln: f64,
                          scale: SmoothingScale, cache: &mut NoiseCache) -> f64;
 pub const OCTAVE_WAVELENGTHS_LY: [u32; 5];     // 1_024, 512, 256, 128, 64
+pub fn phase_normal(seed: Seed, p: &GalacticPosition, cache: &mut NoiseCache) -> f64; // ruling 103
+pub const PHASE_OCTAVE_WAVELENGTHS_LY: [u32; 2]; // 32, 8: octave numbers 5 and 6
 
 // modifiers.rs
 pub enum GasModifier {
@@ -433,7 +442,7 @@ targets; the targets are binding, these are not.
    | Pressure floor P_cor ÷ k              | 300–450 K cm⁻³, uniform (ruling 98)                  | 400          |
    | Pressure height h_P                   | generator-version constant                           | 1,500 ly     |
    | Pressure speed σ_P                    | generator-version constant                           | 5.15 km/s    |
-   | Log-normal width σ_ln                 | 2.0–2.5, uniform                                     | 2.3          |
+   | Log-normal width σ_ln                 | 1.0–1.4, uniform (ruling 103; was 2.0–2.5)           | 1.2          |
    | Lane offset d (inward, perpendicular) | 300–600 ly, uniform                                  | 450 ly       |
    | Lane width σ_w                        | 150–300 ly, uniform                                  | 200 ly       |
    | Lane fraction A of the neutral gas    | 0.08–0.20, uniform                                   | 0.12         |
@@ -531,7 +540,10 @@ targets; the targets are binding, these are not.
    bits) and three lattice coordinates (20 bits each, offset to unsigned) into the `u64` that
    `ObjectKey::galaxy_item(n: u64)` takes, so sixteen octaves are reserved. The root cube is
    ±`coords::ROOT_HALF_WIDTH_LY`, 65,536 ly, so at the coarsest spacing the lattice index runs
-   −64..=64 and at the finest −1,024..=1,024: every one fits 20 bits with the offset.
+   −64..=64 and at the finest −1,024..=1,024: every one fits 20 bits with the offset. Since ruling
+   103 octave numbers 5 and 6 are the phase draw's, at 32 and 8 ly (Design note 12), whose indices
+   reach ±8,192, still inside the 20 bits; they feed no density, so the 64 ly bound on the
+   integrator's step still holds, and numbers 7–15 stay reserved.
 
 9. **Smoothing to a scale is dropping octaves and their variance.** `SmoothingScale::AtLeast(ℓ)`
    keeps the octaves with λ_k ≥ ℓ and uses σ_eff² = σ_ln² × Σ_kept a_k² in both places of F. That is
@@ -551,24 +563,50 @@ targets; the targets are binding, these are not.
     figure the research behind the brainstorm adopted). The noise does not enter the pressure: the
     phases are in rough pressure balance, which is what makes rarefied gas hot.
 
-12. **Phases** are labels derived from density and pressure through the equilibrium temperature T =
-    (P ÷ k) ÷ (x n), with x = 2.3 particles per hydrogen nucleus for ionised gas and 1.1 for neutral
-    gas: hot above 10⁵ K (n < P ÷ 2.3 × 10⁵ k), warm down to 5,000 K (n < P ÷ 5,500 k), molecular
-    above 100 cm⁻³, cold between. With these thresholds a log-normal of σ_ln 2 to 2.5 around 0.75
-    cm⁻³ at 3,800 K cm⁻³ puts 18% to 39% of the plane's volume in the hot phase, which is the
-    brainstorm's "a fifth to two fifths". The corona itself must come out hot for every seed, 20,000
-    ly above every radius from 8,000 to 40,000 ly (ruling 91), which needs P_cor ÷ (2.3 k (n_cor +
-    n_w)) above 10⁵ K with the warm layer's tail n_w: that is why the corona's density range stops at
-    0.8 × 10⁻³ cm⁻³ against a floor that can be as low as 300 K cm⁻³. Within the warm phase the
-    neutral share is the smooth ratio f_n = n_neutral ÷ (n_neutral + n_warm) at that point, and the
-    temperature is taken with **x = 1.1 + 1.2 (1 − f_n)** (ruling 91: taking 1.1 for every warm point
-    read warm ionised gas up to 2.1 times too warm), never adjusted; for readout the warm
-    temperature is clamped to 5,000–10,000 K (ruling 98, which replaces P07.T12's first build, where
-    the share moved to hold warm gas inside 5,000–10⁵ K), so T × x n = P holds where the clamp does
-    not bind. The thresholds keep each phase's own count, 2.3 for hot and 1.1 for cold (ruling 97.1,
-    confirmed by ruling 98.4). Hot gas is fully ionised; cold and molecular gas are neutral. That rule gives the neutral hydrogen column in
-    `Realised` mode. In `Mean` mode there is no local density to classify, so the neutral column is
-    the integral of n_neutral + n_mol.
+12. **Phases: four media in pressure balance inside every parcel** (ruling 103, which replaces
+    the single-phase labels and ruling 98's warm clamp). A 64 ly parcel whose mean density lies
+    below what pressure-balanced warm gas needs cannot be one warm phase: at the plane of R₀ that is
+    0.47 cm⁻³ of warm neutral gas or 0.25 of warm ionised gas, and read as one phase ruling 98's
+    clamp bound on 86–92% of warm points. So each parcel keeps its masses exactly — neutral and
+    molecular (n̄_n + n̄_mol)δ, ionised n̄_w δ, the corona n_cor — and they fill its volume as four
+    phases at the parcel's pressure P and at measured temperatures: warm ionised at 8,000 K with
+    x = 2.1 particles per H (Gaensler et al. 2008; Ferrière 2001), warm neutral at 8,000 K with 1.1
+    (Wolfire et al. 2003), cold at 70 K with 1.1 (Heiles and Troland 2003), and hot at
+    P f_H ÷ (2.3 n_cor). With n_k = P ÷ (x_k k T_k) and V_k = M_k ÷ n_k: the corona keeps
+    f_Hmin = 2.3 n_cor × 10⁵ K ÷ P, so hot gas is never below 10⁵ K; warm gas takes V_I + V_W of the
+    room 1 − f_Hmin first; the excess condenses to cold by the lever rule, μ = (V_I + V_W − room) ÷
+    (V_W − V_C) of the neutral mass (Krolik, McKee and Tarter 1981, through Wolfire et al.'s eqs.
+    30–31); the rest is hot; and a parcel that cannot fit even all-cold (V_I + V_C > room) is
+    compressed by s = (V_I + V_C) ÷ room and reports it as its overpressure. The branches are
+    decided on the volumes, never on Σ f_k > 1 after the lever rule, where rounding would mark
+    parcels compressed. **δ sets masses and filling factors, never a temperature.** Wolfire et al.'s
+    two-phase pressure range (their eq. 43) is not enforced (Risks). The hot share is then exactly
+    E[max(f_Hmin, 1 − δK)] = f_Hmin + room Φ(d₁) − K Φ(d₂), with K = n̄_w ÷ n_I + n̄_N ÷ n_W and
+    d₁ = [ln(room ÷ K) + σ² ÷ 2] ÷ σ, d₂ = d₁ − σ, which replaces T5's analytic hot filling: at the
+    fixture's R₀ plane it is 0.23–0.38 across σ_ln 1.0–1.4. **The noise width is σ_ln 1.0–1.4
+    (fixture 1.2)**, not the brainstorm's 2–2.5: at 2.3 the split puts two thirds of the plane in hot
+    gas, against the brainstorm's own "a fifth to two fifths" (for the owner). The corona comes out
+    hot for every seed 20,000 ly above every radius from 8,000 to 40,000 ly (ruling 91): there the
+    mean gas is over 95% hot by volume, and T_H ≥ 10⁵ K holds by construction.
+
+    A point's phase is a deterministic draw: u = Φ(g_u), with g_u a lattice normal built as Design
+    note 7 builds an octave, on two octaves of 32 and 8 ly (`gas.noise`'s reserved octave numbers 5
+    and 6, a² ∝ λ^⅔ between them), so u is exactly uniform; the phase is the first of hot, warm
+    ionised, warm neutral, cold whose cumulative filling factor exceeds u, McKee and Ostriker's
+    (1977) clouds of cold cores, warm neutral and warm ionised layers in a hot medium. The draw
+    ignores `SmoothingScale`, which moves only the filling factors, and a `NoiseCache` needs no
+    second key since the octave's number keeps the words distinct. The point reports its phase, its
+    in-situ density s n_k (the hot phase n_cor ÷ f_H), its temperature T_k and its x_k, with
+    T × x × n_local = s P (P for the hot phase and wherever s = 1), and an isothermal sound speed
+    √(x k T ÷ 1.4 m_H); the local density averages over the draw exactly to the parcel's mean,
+    `density()`. `GasPhase::of(n, P)` stays the classifier of an in-situ state: hot at n ≤ P ÷
+    2.3 × 10⁵ k (inclusive, so that the corona at f_Hmin is hot), warm down to 5,000 K (n < P ÷
+    5,500 k), molecular above 100 cm⁻³, cold between, and it agrees with every uncompressed drawn
+    phase; the cold phase is labelled molecular where s n_C > 100 cm⁻³. The warm media are both
+    `Warm`, told apart by their `Medium`, whose neutral share is 0 or 1. **Columns use the parcel
+    mean**: A_V and the hydrogen column do not move, and the `Realised` neutral column is
+    ∫ (n_neutral + n_mol) F ds, whose expectation over seeds is the `Mean` mode's
+    ∫ (n_neutral + n_mol) ds.
 
 13. **Dust-to-gas is linear in metal abundance.** ζ(x) = 10^[M/H], with [M/H] the gas metallicity
     from plan 02's field at the position: `Component::metallicity(&PointLy::from(p), Years::ZERO)`
@@ -777,6 +815,18 @@ window itself.
   for every seed.
 - Acceptance: `cargo test -p hyperion-sim --lib galaxy::gas::pressure`,
   `--lib galaxy::gas::phase` and `--test gas` pass, and `just ci-slow` for the 100-seed sweep.
+- _As built with ruling 103 (`gas14`, round 9, at version 11)._ The analytic hot filling test is
+  now the four-phase split's closed form, f_Hmin + room Φ(d₁) − K Φ(d₂) (Design note 12), at the
+  fixture's R₀ plane: 0.20–0.40 across σ_ln 1.0–1.4, rising, and within four standard errors of a
+  10⁵-factor Monte Carlo of `PhaseMix::split` at 1.2. "Far above the disc the phase is `Hot`" is
+  now the mean gas's split: over 95% hot by volume with its hot phase above 10⁵ K, for the same
+  2,032 seeds, and the corner proof finds the least hot share 0.975 at 159,000 K. `phase.rs` gains
+  `Medium`, `PhaseMix` and the four phases' constants, and loses `ThermalState`,
+  `warm_neutral_share`, `warm_particles_per_hydrogen` and `WARM_CEILING`. `GasPhase::of`'s hot
+  boundary is inclusive (`≤`), so that the corona at exactly f_Hmin is hot; no golden depends on
+  the equality. The split's own tests (NOTES §5) are `a_split_keeps_the_mass_and_the_pressure`
+  over 10⁴ random parcels, `denser_parcels_are_less_hot_and_more_condensed`,
+  `the_warm_media_have_their_measured_sound_speeds` and `a_draw_follows_the_cumulative_filling`.
 
 ### P07.T6 The `GasField` facade, state at a site, bound and hooks
 
@@ -833,6 +883,21 @@ window itself.
   01's, plan 02's six `galaxy_*.golden`, plan 03's, and the server's
   `crates/hyperion-server/tests/golden/{galaxy_parameters,density_map_face_on_128}.golden`, which
   carry the same header — and `golden_diff.py` must report "header only, consistent" for all of them.
+- _As built with ruling 103 (`gas14`, round 9, at version 11)._ `GasField::state` splits the
+  parcel (`PhaseMix::split` of (n_n + n_mol) F, n_w F and n_cor at P) and draws the point's phase
+  from `noise::phase_normal`, the octaves numbered 5 and 6 (32 and 8 ly) on `gas.noise`: no new
+  tag, and `tags.golden` is unmoved. `GasState` holds the parcel's `density()` (bit for bit
+  `density`'s), `pressure()`, `mix()`, `phase_draw()`, `medium()` and the point's `phase()`,
+  `neutral_share()` (0 or 1), `local_density()`, `particles_per_hydrogen()`, `temperature()`,
+  `overpressure()` and the two sound speeds, which now read the point's own phase; the parcel's
+  neutral mass share is `parcel_neutral_share()`, and `temperature_clamped()` is gone.
+  `thermal_sound_speed` and `isothermal_sound_speed` are √(γ x k T ÷ 1.4 m_H) and √(x k T ÷ 1.4
+  m_H): NOTES §1.4 writes the latter with a factor s, which cancels, since a compressed phase's
+  pressure and density both carry it. `GasField::thermal` is gone. The draw's tests are in
+  `tests/gas.rs`: `a_points_phase_is_drawn_with_its_filling_factor` (u over 10⁵ seeds against
+  U(0, 1) by Kolmogorov–Smirnov, and [drawn = k] − f_k within 4 SE of 0 for each medium) and
+  `a_points_phase_draw_ignores_the_scale_and_the_cache`; `noise.rs` holds the phase normal
+  against N(0, 1) over 10⁵ seeds and a cache shared with the factor's lattice.
 
 ### P07.T7 Cardelli–Clayton–Mathis law and bands
 
@@ -1204,7 +1269,19 @@ time** and re-blesses every golden, this plan's included; only P07.T6's bump is 
   windows restored; Gordon et al. 2023 from 1.1 µm with the 0.9–1.1 µm blend, T7's K window
   0.090–0.115; warm temperatures clamped to 5,000–10,000 K for readout, x from the smooth share
   exactly, T × x n = P where the clamp does not bind, and the binding share recorded; the 20 µm
-  feature's centre documented; and the two later refinements in Risks.
+  feature's centre documented; and the two later refinements in Risks. (Ruling 103 withdraws the
+  warm clamp; see the next bullet.)
+- Ruling 103's points, in the version-12 batch (research `gas2phase`, NOTES §5): the four-phase
+  split of Design note 12 and σ_ln drawn uniform on 1.0–1.4 (fixture 1.2). Over 10⁵ points of the
+  fixture, each point's phase drawn: in the plane at R 20,000–30,000 ly, hot 0.20–0.40, warm
+  neutral 0.30–0.70, cold 0.005–0.05, molecular under 2%, the cold share of the uncompressed
+  parcels' atomic mass 0.3–0.7, the hot phase's volume median 10^5.5–10^6.5 K, every warm point at
+  exactly 8,000 K and at least 95% of the volume uncompressed (recorded); hot above 0.95 at |z| =
+  20,000 ly; warm ionised 0.04–0.15 in the plane at R₀, and over |z| a peak of 0.15–0.40 at
+  1,600–6,500 ly that has fallen by 10,000 ly. The `Realised` neutral column over 32 seeds agrees
+  with the mean mode's within four standard errors. Recorded: the realised in-plane median against
+  0.64–0.92, the realised centre median (a finding under 10 mag), and the hot share's spread over
+  200 drawn galaxies.
 - Mean preservation in space: the volume average of F over a 16,384 ly cube sampled at 10⁶ points is
   1 within the tolerance implied by its correlated variance (documented in the test).
 - Over 200 seeds: gas mass within 2% of plan 02's parameter; every parameter in range; plane
@@ -1329,6 +1406,61 @@ version-12 batch).** Measured against the windows the ruling sets:
   neutral columns and the K horizon), `gas/sightlines` (A_K and the neutral columns). No star,
   planet, stellar, planetary or server golden moved.
 
+**Ruling 103, as built (`gas14`, round 9, 2026-09-25, at version 11; the output moves are in the
+version-12 batch).** The fixture at σ_ln 1.2, each point's phase drawn, against NOTES §5's
+windows:
+
+| Check                                                       | Window                              | Measured (research's prediction)                                   |
+| ----------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------ |
+| Hot share, plane, R 20,000–30,000 ly, 10⁵ points            | 0.20–0.40                           | 0.309 (0.31)                                                       |
+| Hot share at \|z\| = 20,000 ly                              | > 0.95                              | 0.9981 (0.998)                                                     |
+| Warm ionised share, plane at R₀                             | 0.04–0.15                           | 0.135 (0.11)                                                       |
+| Warm ionised peak over \|z\| at R₀, 21 heights × 10⁴ points | 0.15–0.40 at 1,600–6,500 ly; falls  | 0.206 at 3,000 ly; 0.044 at 10,000 ly (0.18 at ~3,300 ly)          |
+| Warm neutral share, plane                                   | 0.30–0.70                           | 0.565 (0.57)                                                       |
+| Cold share, plane                                           | 0.005–0.05                          | 0.0096 (0.009)                                                     |
+| Molecular share, plane                                      | < 2%                                | 0.04% (0.04%)                                                      |
+| Cold ÷ (cold + warm neutral) mass, uncompressed parcels     | 0.3–0.7                             | 0.618 (0.61); compressed parcels hold 0.162 of the neutral mass    |
+| Hot phase's temperature by volume, plane, 16/50/84%         | median 10^5.5–10^6.5 K              | 1.18/2.09/2.79 MK (1.18/2.09/2.78)                                 |
+| Warm temperature                                            | exactly 8,000 K, no clamp           | every drawn warm point                                             |
+| Uncompressed share of the plane's volume                    | ≥ 0.95, recorded                    | 0.986 (0.987)                                                      |
+| Hot share at R₀, closed form, σ_ln 1.0 / 1.2 / 1.4          | 0.20–0.40, rising (unit test)       | 0.231 / 0.308 / 0.384; Monte Carlo at 1.2 within 4 SE              |
+| `Realised` neutral column, in-plane lines, 32 seeds         | 4 SE of mean mode                   | 2.207 ± 0.035 against 2.273 × 10²¹ cm⁻²                            |
+| In-plane A_V, `Realised`, 32 seeds; median line             | 4 SE of 1.287; recorded (0.64–0.92) | 1.250 ± 0.020; median 0.971 (16–84%: 0.509–1.907) (~1.0)           |
+| A_V to the centre, `Realised`, 256 seeds                    | 4 SE of 32.81; median recorded      | 33.90 ± 1.66; 16/50/84%: 20.08/27.63/45.96 (median ~28)            |
+| Mean gas 20,000 ly up, R 8,000–40,000 ly, 2,000 galaxies    | > 0.95 hot, hot phase > 10⁵ K       | least 0.9854 at 163,367 K at the coolest (corners: 0.975, 159,000) |
+| Hot share of the plane at 26,000 ly, 200 drawn galaxies     | recorded (closed form)              | 0.220–0.420; 16/50/84%: 0.267/0.313/0.368                          |
+
+- _103.1._ `phase::PhaseMix::split` is NOTES §1.3's closure, the branches decided on the volumes.
+  A pressure that could not hold the corona at 10⁵ K even filling the parcel (under 184 K cm⁻³,
+  below every drawn floor) reserves it half the volume instead, so that its mass is never dropped
+  (NOTES §1.3 asks only for a guard), and a corona of 0 gives a hot phase at infinite temperature,
+  as a zero density did. `GasPhase::of` is kept as the classifier, hot inclusive.
+- _103.2._ The phase normal is `noise::phase_normal`, octaves 5 and 6 of the lattice word at 32
+  and 8 ly, on `gas.noise`; F's octaves and bits are untouched, so `gas/noise` does not move. The
+  draw is `Φ(g) = ½ erfc(−g ÷ √2)` by `math::erfc`. `sightline`'s `Realised` neutral sample is
+  (n_n + n_mol) F, with no pressure and no classification, so it is cheaper; the clamp that holds
+  it under the whole column is kept. Ruling 98.4's clamp is withdrawn: `ThermalState`,
+  `WARM_CEILING` and `GasState::temperature_clamped` are gone.
+- _103.3._ σ_ln is `Law::Uniform { lo: 1.0, hi: 1.4 }` on the same word 7, and the fixture's is
+  1.2, so every seed's σ_ln moves. The warm ionised peak, 0.206 near 1 kpc against Gaensler et
+  al.'s ~0.3, is the ruling's finding, measured higher than the research's 0.18 because 10⁴ points
+  on one ring share the lattice's coarse octaves; not tuned (Risks). The realised centre's median,
+  27.63 mag, is the brainstorm's "some thirty" (it was 18.33), and the realised in-plane median,
+  0.97 mag, the brainstorm's "about one magnitude", just above the typical lines' 0.64–0.92 (it
+  was 0.43).
+- _Also as built:_ P07.T8.d's `the_neutral_column_is_never_above_the_whole_on_short_neutral_lines`
+  now counts lines over 90% neutral rather than wholly neutral: the corona no longer enters the
+  neutral column, so the ulp case it was written for cannot occur, and the bound it holds is
+  unchanged. `PhaseMix::split`'s guard for a pressure that cannot hold the corona is exercised by
+  `a_split_without_room_for_the_corona_still_holds_its_mass`.
+- _Output moved (at 11, re-blessed in the lane):_ `gas/params` (the three seeds' `sigma_ln`, the
+  same word 7 on 1.0–1.4), `gas/field` (densities where the noise acts, since σ_ln moved; phases,
+  neutral shares and temperatures, now the drawn phase's; nine new lines per point: `medium`,
+  `phase_draw`, `parcel_neutral_share`, `local_density`, `overpressure` and the four filling
+  factors), `gas/extinction` (the `Realised` lines' A_V, hydrogen and neutral columns and the two
+  realised horizons; no mean-mode value) and `gas/sightlines` (every realised value). `gas/noise`,
+  `gas/map`, `gas/ccm`, `rng/tags` and every stellar, planetary and server golden are unmoved.
+
 ## Verification
 
 - `just ci` after every task; `just ci-slow` (which adds `just test-slow`) after T4.b, T5, T6.b and
@@ -1362,8 +1494,8 @@ version-12 batch).** Measured against the windows the ruling sets:
   bumps the version. The integrator's rule is output because plan 09's shell test and plan 12's
   magnitudes will read it.
 - Reserved: the two domain tags; the request kinds `extinction_map` and `extinction`; draw indices
-  0–15 on `gas.params` in the table's order, later parameters appending; octave indices 5–15 in the
-  noise counter; the `GasModifier` enum's two variants for plan 09; `SmoothingScale` as the only way
+  0–15 on `gas.params` in the table's order, later parameters appending; octave indices 7–15 in the
+  noise counter (5 and 6 are the phase draw's since ruling 103); the `GasModifier` enum's two variants for plan 09; `SmoothingScale` as the only way
   a consumer selects a scale. The `Unit` values `PerCm3`, `KPerCm3` and `Mag` and the `gas` parameter
   group's keys are reserved on the wire, not in the generator version, and follow plan 04's rule that
   a shipped key is never renamed.
@@ -1404,11 +1536,15 @@ version-12 batch).** Measured against the windows the ruling sets:
   decides the realised figure. P07.T12 records the realised distribution: over 256 seeds the mean is
   38.97 ± 9.52 mag, the median 18.33 and the 16th and 84th percentiles 9.39 and 42.12. If the owner wants the
   typical seed to read thirty, the remedy is a narrower σ_ln inside the central few hundred
-  light-years, which is a change to the brainstorm and not made here.
+  light-years, which is a change to the brainstorm and not made here. **Ruled (ruling 103):** σ_ln
+  is now 1.0–1.4 everywhere (fixture 1.2), which the research estimated puts a typical seed's line
+  to the centre near 28 mag; T12 measures it (the table under "Ruling 103, as built").
 - **The mean and a typical line differ.** With σ_ln above 2 the median of the factor is a tenth of
   its mean or less, so a single short line is usually well below the mean extinction and
   occasionally far above it. That is the physics of a cloudy medium and the tests are written on
-  means, but a console showing 0.002 mag to a star 50 ly away is expected, not a bug.
+  means, but a console showing 0.002 mag to a star 50 ly away is expected, not a bug. Since ruling
+  103 σ_ln is 1.0–1.4, so the factor's median is 0.37–0.61 of its mean (0.49 at the fixture's 1.2),
+  and a typical line in the plane reads about one magnitude per 3,000 ly.
 - **The hole is not in the potential.** Plan 02's potential treats the gas as a plain exponential
   disc. The gas is 15% of the thin disc, so the inner rotation curve is a few per cent high, which
   the research behind the brainstorm already accepted for the stars.
@@ -1786,7 +1922,9 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   al. 2009). A temperature from a log-normal density at a smooth pressure cannot hold one phase's
   temperature; it is recorded, not tuned. **Ruled (ruling 98):** the warm temperature is clamped
   to 5,000–10,000 K for readout, with the smooth share never adjusted; the clamp binds on some 86–92%
-  of the warm points (T12, "Ruling 98, as built").
+  of the warm points (T12, "Ruling 98, as built"). **Superseded (ruling 103):** the clamp is
+  withdrawn; warm gas is two phases at 8,000 K in pressure balance, and the density noise sets
+  filling factors, not temperatures (Design note 12).
 - **Later refinement: a corona with its own temperature (ruling 98.2).** The disc's pressure floor
   and the corona's density are coupled only in this model, through the corona's temperature, which
   comes out near 10⁵ K, some twenty times cooler than the real halo's 2 × 10⁶ K (Miller and Bregman
@@ -1801,3 +1939,50 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   al. 2009) and a warm neutral part at Wolfire et al.'s (2003) T(P), each in pressure balance, with
   the noised density setting the filling factors of hot, warm and cold gas rather than the
   temperature. It moves labels and filling factors, so it is a version bump, not built now.
+  **Built (ruling 103, `gas14`, round 9):** as four phases rather than two — hot, warm ionised at
+  8,000 K, warm neutral at 8,000 K and cold at 70 K, each in pressure balance — with σ_ln narrowed
+  to 1.0–1.4 (Design note 12; T12, "Ruling 103, as built"). The warm neutral temperature is a
+  constant, not Wolfire et al.'s T(P); see the next entries.
+- **No two-phase pressure gate (ruling 103).** Wolfire et al.'s (2003) eq. 43 bounds the pressures
+  at which cold and warm neutral gas coexist, P_min = 1.1 × 10⁴ exp(−R_kpc ÷ 4.9) K cm⁻³ (±17% over
+  3–18 kpc). The split does not enforce it: gating the cold phase out below P_min left 17% of the
+  volume 500 pc up as over-pressured warm neutral gas, which is worse than cold gas at 70 K there
+  (research `gas2phase`, NOTES §1.3). Revisit with a T(P) warm branch.
+- **The phases' temperatures are constants (ruling 103).** The warm ionised medium at 8,000 K
+  everywhere, though it warms with height (Haffner et al. 2009, qualitatively; no source read
+  quantifies it), and the warm neutral medium at 8,000 K, where Wolfire et al.'s Table 3 runs
+  5,040–8,310 K at 8.5 kpc. This is the model's largest physical sensitivity: at 5,040 K the hot
+  share of the plane at σ_ln 1.2 rises from 0.31 to 0.41. A T(P) is a later refinement and a
+  version bump.
+- **The warm ionised medium's filling peaks low (ruling 103, a finding, not tuned).** It rises from
+  about 0.11 in the plane to a peak near 1 kpc and then declines, the shape Gaensler et al. (2008)
+  find, but the peak is about 0.18 against their ~0.3 at 1–1.5 kpc and Haffner et al.'s > 0.3–0.4
+  at 1 kpc, some 1.7 times low; and the plane's 0.11 is high against Gaensler's 0.04 ± 0.01,
+  because the brainstorm's warm layer of 0.030 cm⁻³ is twice Gaensler's 0.014. **As measured
+  (T12, "Ruling 103, as built"):** a peak of 0.206 at 3,000 ly, about 1.5 times under Gaensler's
+  ~0.3, and 0.135 in the plane at R₀. Both sit above the research's one-point figures because each
+  height's 10⁴ points lie on one ring of 26,000 ly and share the lattice's coarse octaves (some 160
+  independent 1,024 ly cells), so the profile carries a correlated scatter of about ±0.02.
+- **Plan 09's shell must choose which gas it reads (ruling 103).** Since the split, `GasState`'s
+  `density()` is the parcel's mean at the caller's `SmoothingScale`, while `temperature()`,
+  `local_density()` and both sound speeds are the drawn phase's, from an 8–32 ly draw that ignores
+  the scale. P09.T15.a's C₀² = P ÷ ρ "from the site's pressure and density
+  (`GasState::isothermal_sound_speed`)" now pairs, in about 31% of the plane, a hot phase of 1–3 MK
+  with nothing of the parcel's mean. NOTES §1.4 recommends the drawn phase's `local_density()` and
+  `isothermal_sound_speed()`, since CMB88's n₀ is the local ambient (the warm neutral medium's 0.47
+  and the warm ionised medium's 0.25 cm⁻³ at the plane sit on the brainstorm's 0.1–0.5); the
+  alternative is √(P ÷ ρ̄) from `density()`. Either moves plan 09's shell statistics, and a phase
+  drawn at 8 ly is not "smoothed to the shell's own scale", so plan 09's text decides it (for the
+  orchestrator, as ruling 98.1 corrected P09.T15.a). `WindowCaps`' supremum is unaffected: the
+  warm neutral medium at the floor, 0.034–0.051 cm⁻³, lies at the window's peak.
+- **The hot share of drawn galaxies reaches 0.42 (ruling 103, recorded).** Over 200 drawn
+  galaxies the closed-form hot share of the plane at 26,000 ly runs 0.220–0.420 (16–84%:
+  0.267–0.368), a little above the brainstorm's "two fifths" at the top. Only the fixture is held
+  to 0.20–0.40; whether the phrase binds every drawn galaxy is the owner's.
+- **For the owner: the noise width (ruling 103).** The brainstorm's "a mean-preserving log-normal,
+  wide enough (σ of 2–2.5 in the logarithm) that the volume runs from hot rarefied gas, a fifth to
+  two fifths of the plane, to cloud" is consistent only under the single-phase reading that made
+  warm gas 10–100 kK. With the split, σ_ln 2.3 gives a plane 0.67 hot and leaves 64% of the neutral
+  mass beyond pressure balance; σ_ln 1.0–1.4 gives 0.23–0.38 hot. The brainstorm's sentence would
+  read "σ of about 1–1.4 at the lattice scale; the clouds and hot voids inside a lattice cell are
+  the phases' sub-grid split". Not edited here.
