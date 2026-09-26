@@ -601,8 +601,8 @@ fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_B
   observables of P06.T19.d pass; for each default the harness reports the interval over which they
   keep passing, and the default lies inside it and not within a tenth of its width from an edge.
 - **P15.T5.c Fate of merged binaries in clusters (M4).** With plan 09's cluster retention and plan
-  11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 13–19% at 50,
-  8–12% at 20, and under 1% in the most massive open clusters, under plan 11 (the merged object
+  11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 15–25% at 50
+  and at 20 (ruling 106.4, after ruling 96.3), and under 1% in the most massive open clusters, under plan 11 (the merged object
   stays a member and is judged on the pair's velocity) and under the alternative. **Acceptance:**
   the default passes all four bands; if only the alternative does, the finding goes to plan 11.
 
