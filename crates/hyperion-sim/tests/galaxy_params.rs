@@ -234,7 +234,7 @@ fn the_milky_way_fixture_has_the_plan_values() {
     );
     assert_relative("f★", p.dark_halo().f_star(), 0.28, 0.0);
     // The Milky Way's own offset from M–σ, which makes its black hole Sgr A*'s mass.
-    assert_same_bits(p.black_hole().scatter().value(), 0.0806);
+    assert_same_bits(p.black_hole().scatter().value(), -0.3876);
     // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "about
     // 0.55–0.59 M☉ under the default, Chabrier's system function" (brainstorm, "Galaxy
     // parameters").

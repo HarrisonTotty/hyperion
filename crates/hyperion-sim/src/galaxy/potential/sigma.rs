@@ -5,12 +5,12 @@
 //! dispersion ("Galaxy parameters"), which its own model takes from plan 08's axisymmetric Jeans
 //! solution. [`bulge_dispersion`] is that: plan 08's
 //! [`bulge_projected_sigma`](crate::galaxy::kinematics::spheroid::bulge_projected_sigma), the
-//! bulge's line-of-sight dispersion seen face-on and mass-weighted inside its effective radius,
-//! solved straight from the mass model without the black hole and the nuclear cluster, since the
+//! relation's own `σ_e` (the line-of-sight `V² + σ²` along the major axis inside the effective radius,
+//! averaged over inclination; ruling 105.1), solved straight from the mass model without the black hole and the nuclear cluster, since the
 //! black hole's mass is what it sets (the two-phase build of P02.T6.e). It replaced plan 02's
 //! spherical, isotropic estimate in plan 08's P08.T4.d.
 //!
-//! The effective radius of the axisymmetrised bulge seen face-on is that of a spherical
+//! The effective radius of the axisymmetrised bulge along its major axis is that of a spherical
 //! exponential of its radial scale, [`EFFECTIVE_RADIUS_IN_SCALES`] of it.
 
 use super::model::MassModel;
@@ -80,12 +80,12 @@ fn projected_outside(x: f64) -> f64 {
 /// requires these very bits.
 pub const EFFECTIVE_RADIUS_IN_SCALES: f64 = 2.026_996_389_655_237_4;
 
-/// The bulge's projected velocity dispersion inside its effective radius, seen face-on, from the
-/// mass model of `params` without the black hole and the nuclear cluster (plan 08, P08.T4.d, which
-/// replaced plan 02's Design note 8 estimate).
+/// The bulge's `σ_e`, which M–σ reads, from the mass model of `params` without the black hole and
+/// the nuclear cluster (plan 08, P08.T4.d with ruling 105.1, which replaced plan 02's Design note 8
+/// estimate).
 ///
-/// It is [`bulge_projected_sigma`] of [`MassModel::without_centre`]: some 64 evaluations of the
-/// model's vertical force, a few tens of milliseconds of the parameters' build.
+/// It is [`bulge_projected_sigma`] of [`MassModel::without_centre`]: some 117 evaluations of the
+/// model's forces, about a hundred milliseconds of the parameters' build.
 #[must_use]
 pub fn bulge_dispersion(params: &GalaxyParams) -> KilometresPerSecond {
     bulge_projected_sigma(&MassModel::without_centre(params), params)

@@ -108,13 +108,9 @@ mod tests {
     use super::*;
     use crate::galaxy::potential::MassModel;
 
-    /// P08.T1: at Milky Way values the escape ratio lies within 2.3–2.6, and the time unit `R_d ÷
-    /// v_c`, which the plan puts at 10.5–11.5 Myr, is 9.4 Myr.
-    ///
-    /// The plan's window is the brainstorm's 2.6 kpc disc in a 230 km/s curve, 11.1 Myr. Since
-    /// ruling 32 of 2026-09-22 the fixture's disc is Bovy and Rix's mass-weighted 2.15 kpc, and 2.15
-    /// kpc at 224 km/s is 9.4 Myr: a finding against the plan's figure, not the scales, which the
-    /// test holds to 9–10 Myr and to `R_d ÷ v_c` computed by hand.
+    /// P08.T1 with ruling 105.4: at Milky Way values the escape ratio lies within 2.3–2.6, and the
+    /// time unit `R_d ÷ v_c` within 9.0–10.0 Myr: the fixture's 2.15 kpc disc (ruling 32) in a 224
+    /// km/s curve gives 9.4, where the brainstorm's 2.6 kpc disc gave 11.
     #[test]
     fn galaxy_scales_at_milky_way_values() {
         let params = GalaxyParams::milky_way_like();

@@ -493,7 +493,7 @@ impl GalaxyParams {
     /// 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly (Wegg, Gerhard and
     /// Portail 2015), corotation ratio 1.24 (Portail et al. 2017); nuclear disc 290 ly by 93 ly
     /// (Sormani et al. 2022); four arms at 12°; f★ 0.28, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
-    /// McMillan (2017); the black hole 0.081 dex above the M–σ relation, which makes it the 4.30 ×
+    /// McMillan (2017); the black hole 0.388 dex below the M–σ relation, which makes it the 4.30 ×
     /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013); the halo's inner
     /// slopes 2.5, and the dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0
     /// (Pila-Díez et al. 2015; Medina et al. 2024). Values without a measurement take the middle

@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use common::assert_within;
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
-use hyperion_sim::galaxy::fields::arms::ArmGeometry;
+use hyperion_sim::galaxy::fields::arms::SharpArm;
 use hyperion_sim::galaxy::fields::{ComponentId, Shape};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::kinematics::YOUNG_DISC_SIGMA_FLOOR;
@@ -128,7 +128,10 @@ fn the_vertical_dispersion_falls_outward() {
     }
 }
 
-/// P08.T2.b: at the Sun-like point the old disc's mass-weighted `σ_R` is 30–40 km/s, `σ_φ ÷ σ_R` is
+/// P08.T2.b: at the Sun-like point each sub-disc's `σ_z ÷ σ_R` is 0.30–0.54 (ruling 105.6, which
+/// takes Sharma et al.'s radial law in place of Design note 4's 0.5–0.6; their ratio's change with
+/// radius, ×1.12 at 4 kpc and ×1.34 at 12 kpc from their `L_z` terms, is not modelled), the old
+/// disc's mass-weighted `σ_R` is 30–40 km/s, `σ_φ ÷ σ_R` is
 /// 0.6–0.75, the asymmetric drift is `σ_R² ÷ 80 km/s` to 15% (Dehnen and Binney 1998, eq. 17: 80
 /// ± 5 km/s), and the thick disc is within 15% of (65, 40, 35) km/s with a lag of 40–60 km/s
 /// (Bensby et al. 2003, 2005; Soubiran et al. 2003).
@@ -139,7 +142,9 @@ fn the_in_plane_dispersions_at_the_sun() {
     let v_c = galaxy.potential().v_circ(LightYears::new(26_000.0)).value();
     let (mut weighted, mut mass) = (0.0, 0.0);
     for id in components(galaxy, Population::OldThinDisc) {
-        let [sr, sp, _, mean] = moments(galaxy, id, &sun);
+        let [sr, sp, sz, mean] = moments(galaxy, id, &sun);
+        // Sharma et al.'s (2021) two laws, as built: 0.30–0.54 across the sub-discs (ruling 105.6).
+        assert_within("σ_z ÷ σ_R", sz / sr, 0.30, 0.54);
         let density = galaxy.fields().component(id).density(&sun);
         weighted += density * sr * sr;
         mass += density;
@@ -188,15 +193,9 @@ fn the_young_disc_holds_its_floor() {
     }
 }
 
-/// P08.T2.c: the arm streaming averages zero around every circle, to 10⁻⁹ of its amplitude; and
-/// weighted by the young disc's density, which crowds onto the arms, it shifts the mean rotation by
-/// what the plan puts under 3 km/s.
-///
-/// A finding: with the plan's phases (along the arm as cos ψ, in phase with the ridge) the shift is
-/// the amplitude times the density-weighted mean of cos ψ, 7.8 km/s at the fixture's 10 km/s. A
-/// linear density-wave solution puts the along-arm part in quadrature with the ridge, which would
-/// give no shift (research for lane `kin08`); the owner rules on the phases. The test holds the
-/// shift under 0.8 of the amplitude, which the plan's form cannot exceed.
+/// P08.T2.c with ruling 105.3: the azimuthal streaming averages zero around every circle, to
+/// 10⁻⁹ of its amplitude; and weighted by the young disc's density, which crowds onto the arms,
+/// neither the rotation nor the radial motion shifts by 0.5 km/s or more.
 #[test]
 fn the_arm_streaming_averages_out() {
     let galaxy = galaxy();
@@ -205,37 +204,72 @@ fn the_arm_streaming_averages_out() {
     let streaming = tables.disc(young).unwrap().streaming().unwrap();
     let amplitude = streaming.amplitude().value();
     let component = galaxy.fields().component(young);
-    let mut worst_shift: f64 = 0.0;
+    let (mut worst_phi, mut worst_r): (f64, f64) = (0.0, 0.0);
     for k in 1..=20 {
         let r = 3_000.0 * f64::from(k);
-        let (mut sum_r, mut sum_phi) = (0.0, 0.0);
-        let (mut weighted_phi, mut weight) = (0.0, 0.0);
+        let mut sum_phi = 0.0;
+        let (mut weighted_r, mut weighted_phi, mut weight) = (0.0, 0.0, 0.0);
         for j in 0..4_096 {
             let theta = std::f64::consts::TAU * f64::from(j) / 4_096.0;
             let (sin, cos) = math::sin_cos(theta);
             let (x, y) = (r * cos, r * sin);
             let [v_r, v_phi] = streaming.at(x, y);
-            sum_r += v_r;
             sum_phi += v_phi;
             let density = component.density(&PointLy::new(x, y, 0.0));
+            weighted_r += density * v_r;
             weighted_phi += density * v_phi;
             weight += density;
         }
         assert!(
-            (sum_r / 4_096.0).abs() < 1e-9 * amplitude
-                && (sum_phi / 4_096.0).abs() < 1e-9 * amplitude,
-            "R {r}: means {} and {}",
-            sum_r / 4_096.0,
+            (sum_phi / 4_096.0).abs() < 1e-9 * amplitude,
+            "R {r}: mean v_φ {}",
             sum_phi / 4_096.0
         );
         if weight > 0.0 {
-            worst_shift = worst_shift.max((weighted_phi / weight).abs());
+            worst_phi = worst_phi.max((weighted_phi / weight).abs());
+            worst_r = worst_r.max((weighted_r / weight).abs());
         }
     }
     eprintln!(
-        "density-weighted rotation shift, worst over radii: {worst_shift:.2} km/s (amplitude {amplitude:.2})"
+        "density-weighted shifts, worst over radii: v_φ {worst_phi:.2e}, v_R {worst_r:.2e} km/s \
+         (amplitude {amplitude:.2})"
     );
-    assert!(worst_shift < 0.8 * amplitude, "{worst_shift} km/s");
+    assert!(worst_phi < 0.5, "{worst_phi} km/s");
+    assert!(worst_r < 0.5, "{worst_r} km/s");
+}
+
+/// Ruling 105.3's phases: on a ridge inside corotation the young disc moves inward and does not
+/// shift its rotation; a quarter turn of phase on, it rotates `A` faster.
+#[test]
+fn the_streaming_is_inward_on_a_ridge_and_azimuthal_in_quadrature() {
+    let galaxy = galaxy();
+    let young = components(galaxy, Population::YoungThinDisc)[0];
+    let streaming = *galaxy
+        .kinematics()
+        .unwrap()
+        .disc(young)
+        .unwrap()
+        .streaming()
+        .unwrap();
+    let arms = galaxy.fields().arms();
+    let r = 1.1 * galaxy.params().bar().half_length().value();
+    let theta = arms.ridge_azimuth(r, 0);
+    let (sin, cos) = math::sin_cos(theta);
+    let [v_r, v_phi] = streaming.at(r * cos, r * sin);
+    assert!(
+        v_r < 0.0 && v_phi.abs() < 1e-9 * streaming.amplitude().value(),
+        "{v_r} {v_phi}"
+    );
+    let n = f64::from(arms.count().get());
+    let quarter = theta + std::f64::consts::FRAC_PI_2 / n;
+    let (sin, cos) = math::sin_cos(quarter);
+    let [_, v_phi] = streaming.at(r * cos, r * sin);
+    let fade = arms.fade(r);
+    assert!(
+        (v_phi - streaming.amplitude().value() * fade).abs() < 1e-6,
+        "{v_phi} against {}",
+        streaming.amplitude().value() * fade
+    );
 }
 
 /// P08.T2.c: over 200 seeds the streaming amplitude lies within 5–15 km/s.
@@ -248,8 +282,7 @@ fn the_streaming_amplitude_over_200_seeds() {
             MassFunctionKind::default(),
         );
         let streaming = ArmStreaming::new(
-            ArmGeometry::of(&params),
-            params.arms().young_fraction(),
+            SharpArm::young_disc(&params),
             params.bar().corotation_radius(),
         );
         let a = streaming.amplitude().value();

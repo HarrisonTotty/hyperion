@@ -802,57 +802,57 @@ companions at t = 500 yr: Exists
   [2] not variable
 
 companions of C system = 0x42002cb200000000
-[1] initial mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
+[1] initial mass = 0x3fef90f9e9e5923d  # 0.986447293119063
 companions at t = -500 yr: Exists
   [1] MainSequence Dwarf G7V
   [1] age = 0x41ed5a733e7129ca  # 3939736051.536351
-  [1] mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
+  [1] mass = 0x3fef90f9e9e5923d  # 0.986447293119063
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3fe7cdc4356beb70  # 0.7438679736509197
-  [1] R = 0x3fede7a6a1c11758  # 0.934527698446554
-  [1] Teff = 0x40b5a908a7ebde42  # 5545.033812276613
-  [1] M_V = 0x4014bfd05ce0b0d1  # 5.187318278516799
-  [1] B-V = 0x3fe6c3e01c2e9f0b  # 0.711410574954216
+  [1] L = 0x3fe7cdc4356cab79  # 0.7438679736563777
+  [1] R = 0x3fede7a6a1c15279  # 0.9345276984482346
+  [1] Teff = 0x40b5a908a7ebf488  # 5545.033812281799
+  [1] M_V = 0x4014bfd05ce088eb  # 5.187318278507727
+  [1] B-V = 0x3fe6c3e01c2e6b2b  # 0.7114105749527416
   [1] remnant none
   [1] no death in the window
-  [1] rotation P = 0x403f7ac31a97b607  # 31.47953954891093
-  [1] v_eq = 0x3ff807efe3688029  # 1.501937759698203
-  [1] dynamo field = 0x4052584b77a18a6d  # 73.37960615897619
-  [1] log Lx/Lbol Low = 0xc019a51c18ef53ee  # -6.4112399955820205
+  [1] rotation P = 0x403f7ac31a976971  # 31.479539548841277
+  [1] v_eq = 0x3ff807efe368ea24  # 1.5019377597042274
+  [1] dynamo field = 0x4052584b77a1656d  # 73.37960615884158
+  [1] log Lx/Lbol Low = 0xc019a51c18ef5210  # -6.411239995581596
   [1] not variable
 companions at t = 0 yr: Exists
   [1] MainSequence Dwarf G7V
   [1] age = 0x41ed5a737cf129ca  # 3939736551.536351
-  [1] mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
+  [1] mass = 0x3fef90f9e9e5923d  # 0.986447293119063
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3fe7cdc442c06018  # 0.7438679984798027
-  [1] R = 0x3fede7a6a706a5f1  # 0.9345277082658737
-  [1] Teff = 0x40b5a908a90b6a26  # 5545.033829415717
-  [1] M_V = 0x4014bfd05a3357b3  # 5.187318238624289
-  [1] B-V = 0x3fe6c3e0199140a2  # 0.7114105700839171
+  [1] L = 0x3fe7cdc442c12021  # 0.7438679984852606
+  [1] R = 0x3fede7a6a706e113  # 0.9345277082675544
+  [1] Teff = 0x40b5a908a90b806b  # 5545.033829420902
+  [1] M_V = 0x4014bfd05a332fcd  # 5.187318238615217
+  [1] B-V = 0x3fe6c3e019910cd1  # 0.7114105700824443
   [1] remnant none
   [1] no death in the window
-  [1] rotation P = 0x403f7ac339b92ba0  # 31.479541404445285
-  [1] v_eq = 0x3ff807efcfe13701  # 1.5019376869490204
-  [1] dynamo field = 0x4052584b5a4cf4a4  # 73.37959916606138
-  [1] log Lx/Lbol Low = 0xc019a51c1d92c261  # -6.411240064699627
+  [1] rotation P = 0x403f7ac339b8df0a  # 31.47954140437563
+  [1] v_eq = 0x3ff807efcfe1a0fd  # 1.501937686955045
+  [1] dynamo field = 0x4052584b5a4ccfa4  # 73.37959916592678
+  [1] log Lx/Lbol Low = 0xc019a51c1d92c083  # -6.411240064699203
   [1] not variable
 companions at t = 500 yr: Exists
   [1] MainSequence Dwarf G7V
   [1] age = 0x41ed5a73bb7129ca  # 3939737051.536351
-  [1] mass = 0x3fef90f9e9e566f3  # 0.9864472931178326
+  [1] mass = 0x3fef90f9e9e5923d  # 0.986447293119063
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3fe7cdc45014d4cd  # 0.7438680233086871
-  [1] R = 0x3fede7a6ac4c3490  # 0.9345277180851941
-  [1] Teff = 0x40b5a908aa2af607  # 5545.033846554818
-  [1] M_V = 0x4014bfd05785fe94  # 5.187318198731777
-  [1] B-V = 0x3fe6c3e016f3e248  # 0.7114105652136198
+  [1] L = 0x3fe7cdc4501594d6  # 0.743868023314145
+  [1] R = 0x3fede7a6ac4c6fb1  # 0.9345277180868746
+  [1] Teff = 0x40b5a908aa2b0c4e  # 5545.033846560005
+  [1] M_V = 0x4014bfd05785d6af  # 5.187318198722706
+  [1] B-V = 0x3fe6c3e016f3ae69  # 0.7114105652121455
   [1] remnant none
   [1] no death in the window
-  [1] rotation P = 0x403f7ac358daa123  # 31.47954325997956
-  [1] v_eq = 0x3ff807efbc59ee16  # 1.5019376141998513
-  [1] dynamo field = 0x4052584b3cf85f2e  # 73.37959217314776
-  [1] log Lx/Lbol Low = 0xc019a51c223630cc  # -6.411240133817227
+  [1] rotation P = 0x403f7ac358da548e  # 31.47954325990991
+  [1] v_eq = 0x3ff807efbc5a5810  # 1.5019376142058753
+  [1] dynamo field = 0x4052584b3cf83a2d  # 73.37959217301314
+  [1] log Lx/Lbol Low = 0xc019a51c22362eed  # -6.4112401338168015
   [1] not variable
 
 companions of D system = 0x6200596800000000

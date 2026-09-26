@@ -255,10 +255,14 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
         } else if corner > 0.0 {
             // A subnormal corner keeps fewer bits, and its margin rounds to the nearest unit in
             // the last place, which can exceed 10⁻¹² of it (`bounds.rs`, "Floating point"): the
-            // young disc far above the plane, the bar's Gaussian end.
+            // young disc far above the plane, the bar's Gaussian end. This reconstruction of a
+            // holed disc's supremum rounds its four factors in another order than the bound does,
+            // so the two may differ by a subnormal unit either way (plan 08 moved the discs'
+            // profiles by bits and exposed it at 4 × 10⁻³¹⁸); the probes below hold the bound
+            // against the envelope itself, exactly.
             let unit = f64::MIN_POSITIVE * f64::EPSILON;
             assert!(
-                corner <= bound && bound - corner <= 1e-12 * corner + unit,
+                corner <= bound + unit && bound - corner <= 1e-12 * corner + unit,
                 "component {i} in {cell:?}: bound {bound:e} against the subnormal corner's \
                  {corner:e}"
             );

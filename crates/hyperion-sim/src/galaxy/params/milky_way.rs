@@ -155,16 +155,17 @@ pub(super) fn inputs() -> Inputs {
         dark_f_star: 0.28,
         dark_concentration_scatter: 0.0,
         // Sgr A* is (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration 2022, A&A 657, L12). At the
-        // fixture's bulge dispersion of 97.2 km/s, plan 08's face-on Jeans reading (P08.T4.d),
-        // the M–σ relation of McConnell and Ma (2013, ApJ 764, 184) gives 3.57 × 10⁶ M☉; the Milky
-        // Way lies 0.081 dex above it, 0.21 times the relation's intrinsic scatter, and this offset
-        // puts the fixture's black hole at 4.30 × 10⁶ M☉. It holds for this σ only, and is set
-        // again whenever σ moves: it was −0.421 at the 119.3 km/s before P02.T11's tuning
-        // concentrated the thin disc, −0.514 and −0.512 at P02.T11's 123.9 and 123.8 km/s, −0.210
-        // at plan 02's spherical estimate of 109.5 km/s after the thin discs' hole (P02.T12.d),
-        // and this at plan 08's, whose 97.2 km/s lies below the brainstorm's 105–115 (a finding of
-        // P08.T4.d: McConnell and Ma list the Milky Way at 103 ± 20 km/s, measured edge-on).
-        bh_scatter: 0.0806,
+        // fixture's σ_e of 117.7 km/s, plan 08's Jeans reading of the relation's own quantity
+        // (P08.T4.d with ruling 105.1: the line-of-sight V² + σ² along the major axis inside R_e,
+        // a third face-on and two thirds edge-on), the M–σ relation of McConnell and Ma (2013, ApJ
+        // 764, 184) gives 1.05 × 10⁷ M☉; the Milky Way lies 0.388 dex below it, 1.02 times the
+        // relation's intrinsic scatter, and this offset puts the fixture's black hole at 4.30 × 10⁶
+        // M☉. It holds for this σ only, and is set again whenever σ moves: −0.421 at 119.3 km/s
+        // before P02.T11's tuning, −0.514 and −0.512 at P02.T11's 123.9 and 123.8, −0.210 at plan
+        // 02's spherical 109.5 after the thin discs' hole (P02.T12.d), +0.081 at plan 08's first,
+        // face-on reading of 97.2, and this. McConnell and Ma list the Milky Way at 103 ± 20 km/s,
+        // 0.06–0.08 dex below the relation.
+        bh_scatter: -0.3876,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges but for

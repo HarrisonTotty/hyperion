@@ -77,7 +77,8 @@ fn a_system_drifts_by_its_velocity_times_the_time() {
                 ahead[axis],
                 v[axis] * seconds
             );
-            assert!((ahead[axis] + behind[axis]).abs() < 4.0);
+            // Each side rounds by up to 4 m, so the two together by up to 8.
+            assert!((ahead[axis] + behind[axis]).abs() < 8.0);
         }
         checked += 1;
     }

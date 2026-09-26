@@ -322,7 +322,8 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
     ω(m) = (v̄_φ − Ω_p R) ÷ (R (a ÷ b + b ÷ a) ÷ 2), floored at zero. The long bar uses its
     half-length and width for a and b.
 12. **Scales.** R_d is the thin disc's scale length; v_c is the circular speed at 3 R_d; the time
-    unit is R_d ÷ v_c (11 Myr for the Milky Way); the escape ratio is v_esc ÷ v_c at 3 R_d in the
+    unit is R_d ÷ v_c (9.4 Myr for the fixture's 2.15 kpc disc, ruling 32's; 11 at 2.6 kpc; ruling
+    105.4); the escape ratio is v_esc ÷ v_c at 3 R_d in the
     plane; the nuclear disc's speeds are taken against the circular speed at 1.5 of its scale
     lengths (about 130 km/s). These match P15.T6.
 13. **Retained, and the lowest speed bin.** The brainstorm says both that a disc-born remnant is
@@ -496,7 +497,7 @@ with module docs and the public types as stubs that compile. Add what is missing
 
 **Tests.** `age_cdf_inverts_on_an_interval` (each component, 1,000 quantiles, 10⁻⁹ relative);
 `sharp_arm_mean_is_one_at_any_width` (widths of 100 to 3,000 ly, azimuthal quadrature, 10⁻⁶);
-`galaxy_scales_at_milky_way_values` (R_d ÷ v_c within 10.5–11.5 Myr, escape ratio within 2.3–2.6);
+`galaxy_scales_at_milky_way_values` (R_d ÷ v_c within 9.0–10.0 Myr, ruling 105.4; escape ratio within 2.3–2.6);
 plan 01's tag-collision test covers the new tags.
 
 **Acceptance.** `just ci` green; no golden changes.
@@ -1024,10 +1025,39 @@ Provides.
   `bulge_projected_sigma` 79 ms a parameter set (target 100); the (R, z) grid itself 4.8 s; the 50
   ly cold query 10.8 ms with velocities against 12.5 without, no regression within the noise;
   `draw_velocity` 0.72 µs, against P08.T16's 200 ns, a finding for that task.
-- **Findings of the slow suite, as built.** T3's 200-seed check holds from 10,000 ly out: a constant
+- **Findings of the slow suite, as built** (superseded by the ruling 105 bullet below for T3's
+  escape check and T4.d's sweep). T3's 200-seed check holds from 10,000 ly out: a constant
   β of 0.9 in a cored profile cannot hold near the core (An and Evans 2006, ApJ 642, 752: β(0) ≤
   γ(0) ÷ 2, and a core has γ(0) = 0), and the dominant merger's σ_r reaches 356 km/s at 2,000 ly
   for seed 0, above half its 587 km/s escape speed. T4.d's σ over plan 02's 10³ seeds: 5th
   percentile 75.5, median 96.0, 95th 118.7 km/s, 639 in plan 02's 90–135 band; plan 02's sweep
   now checks 80–125 km/s for 80%, the median at 90–110 and the tails at 70–90 and 110–140. The
   reduced solution's 60–80 ms per parameter set makes plan 02's 10⁴-seed sweep take 18 minutes.
+- **Ruling 105, as built (lane `kin08`, 2026-09-25, at `GENERATOR_VERSION` 11).** (1) M–σ reads
+  `σ_e`: the line-of-sight `V² + σ²`, `I(r) dr`-weighted along the major axis inside `R_e`, a third
+  face-on and two thirds edge-on; the reduced solution tabulates `∫ z ν K_z dz`, `∫ ν K_z dz` and
+  `v_c²` at nine radii (108 forces, about 100–170 ms a parameter set under load). The fixture reads
+  117.7 km/s (final table 118.4), above 105–115 but inside 100–120; the offset re-derived for Sgr
+  A*'s 4.30 × 10⁶ M☉ is −0.3876 dex, 0.008 beyond the relation's 0.38 dex scatter (a finding;
+  plan 02's offset bracket is ±0.40). (2) The nuclear disc's `σ_R² = max(σ_z², 67.7² e^(−2R ÷
+R_σ))`, `R_σ` = 10^3.7 pc (`RadialLaw::Floored`, `JeansTable::with_radial_law`); at 200 pc σ_R is
+  65.0 km/s and σ_z 28.7 (0.44); Satoh's k re-tuned 0.9 → 0.95, rotation 83.8, 90.6, 93.6 km/s at
+  300, 400, 500 ly. (3) Arm streaming `v_φ = A f sin ψ`, `v_R = ∓(A f ÷ 2)(cos ψ − c̄)` with `c̄ =
+f A_arm I₁(k) ÷ I₀(k)` exactly, so both density-weighted shifts are under 10⁻¹⁴ km/s (bound 0.5);
+  `ArmStreaming::new` takes the young disc's `SharpArm`. (4) The time-unit window is 9.0–10.0 Myr
+  and Design note 12 reads 9.4 Myr. (5) The halo reads the monopole `G M(<r) ÷ r` (the Gaussians'
+  enclosed mass at the 64 table radii, `HaloKinematics::new` and `KinematicTables::new` take the
+  mass model), with `β(r) = β∞ r² ÷ (r² + a²)`, the in-situ rotation 0.11 `v_c`, and the mixture
+  measured in Bond et al.'s volume: σ_r 165.4 km/s, β 0.672 — above 135–155, held at the measured
+  value as provisional (a finding); the escape check starts at 2,000 ly again. (6) σ_z ÷ σ_R's
+  window is 0.30–0.54; Sharma et al.'s change of the ratio with radius (×1.12 at 4 kpc, ×1.34 at
+  12 kpc) is not modelled. Over plan 02's 10³ seeds σ_e's 5th percentile is 91.1 km/s, its
+  median 114.9 and its 95th percentile 141.1, and plan 02's sweep keeps its original bands.
+- **Ruling 105's task criteria, which amend the task texts above:** T2.b's σ_z ÷ σ_R is 0.30–0.54;
+  T2.c's density-weighted shifts of v_φ and v_R are each under 0.5 km/s; T4.c checks σ_R 55–75 km/s
+  and σ_z ÷ σ_R 0.3–0.6 at 200 pc in place of the 65 ly and 1,000 ly windows; T4.d reads σ_e (the
+  line-of-sight V² + σ², a third face-on and two thirds edge-on), not a face-on σ. Plan 02's
+  bounds test (`tests/galaxy_bounds.rs`) lets a holed disc's bound sit one subnormal unit below
+  its reconstructed corner, which rounds its factors in another order; its probes still hold the
+  bound against the envelope exactly. The output these move belongs to the version-12 batch
+  (ruling 105), re-blessed at 11 in the lane.

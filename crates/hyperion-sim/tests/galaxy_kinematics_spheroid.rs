@@ -143,15 +143,10 @@ fn the_pattern_turns_at_the_measured_speed() {
     eprintln!("{compared} of 20 radii rotate faster than the pattern");
 }
 
-/// P08.T4.c: the nuclear disc rotates at 80–120 km/s at 300–500 ly, and its dispersion falls
-/// outward (Sormani et al. 2022).
-///
-/// The plan's windows for the dispersion, 70–85 km/s at 65 ly and 25–40 at 1,000 ly, are a
-/// finding: the table's radial dispersion, with the plan's `β_z` of 0, is 71.0 at 65 ly and 19 at
-/// 1,000 ly, and Sormani et al.'s fit is nearly flat near 65–70 km/s out to its 200 pc edge
-/// (research for lane `kin08`); plan 02's ruling 5 reads the disc's vertical dispersion as half
-/// its radial one, which `β_z = 0` cannot give. The test holds the fall and the inner value to
-/// within 10% of Sormani et al.'s 67.7 km/s.
+/// P08.T4.c with ruling 105.2: the nuclear disc rotates at 80–120 km/s at 300–500 ly (Schönrich,
+/// Aumer and Sale 2015: 123 +19 −7 km/s), and at 200 pc, the edge of Sormani et al.'s (2022) data,
+/// its radial dispersion is 55–75 km/s and its vertical 0.3–0.6 of it (ruling 5: about half).
+/// The radial law is Sormani et al.'s `σ_R² = max(σ_z², 67.7² e^(−2R ÷ R_σ))`, `R_σ` = 10^3.7 pc.
 #[test]
 fn the_nuclear_disc_rotates_and_cools_outward() {
     let galaxy = galaxy();
@@ -159,23 +154,26 @@ fn the_nuclear_disc_rotates_and_cools_outward() {
     let id = component(galaxy, Population::NuclearDisc);
     for r in [300.0, 400.0, 500.0] {
         let mean = tables.ellipsoid(id, &PointLy::new(0.0, r, 0.0)).mean()[1].value();
+        eprintln!("nuclear disc rotation at {r} ly: {mean:.1} km/s");
         assert_within("nuclear disc rotation", mean, 80.0, 120.0);
     }
-    let sigma = |r: f64| tables.ellipsoid(id, &PointLy::new(r, 0.0, 0.0)).sigma()[0].value();
-    let (inner, outer) = (sigma(65.0), sigma(1_000.0));
-    eprintln!("nuclear disc σ_R: {inner:.1} km/s at 65 ly, {outer:.1} at 1,000 ly");
-    assert_relative("inner σ_R ÷ Sormani's 67.7", inner, 67.7, 0.1);
-    assert!(outer < 0.5 * inner);
+    let edge = 200.0 * 3.261_563_777_167_433_6;
+    let sigma = tables.ellipsoid(id, &PointLy::new(edge, 0.0, 0.0)).sigma();
+    let (radial, vertical) = (sigma[0].value(), sigma[2].value());
+    eprintln!("nuclear disc at 200 pc: σ_R {radial:.1} km/s, σ_z {vertical:.1}");
+    assert_within("σ_R at 200 pc", radial, 55.0, 75.0);
+    assert_within("σ_z ÷ σ_R at 200 pc", vertical / radial, 0.3, 0.6);
 }
 
-/// P08.T4.d: the black hole's σ, the bulge's face-on dispersion inside its effective radius,
-/// from the black-hole-free mass model: the reduced solution and the final table agree to 3%,
-/// the black hole before scatter lies within a factor of three of 4.3 × 10⁶ M☉, and the
-/// solution costs under 100 ms.
+/// P08.T4.d with ruling 105.1: the black hole's σ, M–σ's own `σ_e` (the line-of-sight `V² + σ²`
+/// along the major axis inside the effective radius, a third face-on and two thirds edge-on),
+/// from the black-hole-free mass model: the reduced solution and the final table agree to 3%, σ
+/// lies in the plan's accepted 100–120 km/s, and the black hole before scatter within a factor of
+/// three of 4.3 × 10⁶ M☉.
 ///
-/// The plan puts σ at 105–115 km/s (accepting 100–120); the fixture reads 97.2, a finding of
-/// P08.T4.d (McConnell and Ma 2013 list the Milky Way at 103 ± 20 km/s, measured edge-on). The
-/// test holds it to within McConnell and Ma's error.
+/// The fixture reads 117.7 km/s, above the brainstorm's 105–115 but inside its acceptance, a
+/// finding of ruling 105.1 (McConnell and Ma 2013 list the Milky Way at 103 ± 20 km/s). The
+/// reduced solution's cost, which the plan puts under 100 ms, is printed.
 #[test]
 fn the_bulge_dispersion_that_m_sigma_reads() {
     let galaxy = galaxy();
@@ -193,12 +191,7 @@ fn the_bulge_dispersion_that_m_sigma_reads() {
         sigma,
         0.03,
     );
-    assert_within(
-        "σ against McConnell and Ma's 103 ± 20 km/s",
-        sigma,
-        83.0,
-        123.0,
-    );
+    assert_within("σ_e in the plan's accepted window", sigma, 100.0, 120.0);
     let before_scatter = black_hole_mass(reduced, Dex::new(0.0)).value();
     assert_within(
         "black hole ÷ 4.3 × 10⁶ M☉",

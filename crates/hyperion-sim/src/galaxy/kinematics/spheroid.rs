@@ -30,6 +30,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::potential::sigma::EFFECTIVE_RADIUS_IN_SCALES;
 use crate::galaxy::potential::{MassModel, PotentialTables, bulge_spheroid};
 use crate::math;
+use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS};
 use crate::units::{KilometresPerSecond, LightYears};
 
 /// The forces a Jeans solution reads at a point: from the potential tables, or straight from a
@@ -105,12 +106,22 @@ pub const AZIMUTHAL_FLOOR: f64 = 0.05;
 /// `β_z` of the bulge and the bar (plan 08, Design note 10).
 pub const BULGE_BETA_Z: f64 = 0.3;
 
-/// `β_z` of the nuclear disc (plan 08, Design note 10). Provisional: plan 02's ruling 5 reads the
-/// nuclear disc's vertical dispersion as about half its radial one (Sormani et al.'s 67.7 km/s
-/// radial against the profile's 31.5 vertical at two scale lengths), which is `β_z` near 0.78. With
-/// 0 the table's `σ_R` is its `σ_z`, about 30 km/s at two scale lengths as the profile has it, 71 at
-/// 65 ly where the black hole and the cluster pull, and 19 at 1,000 ly.
-pub const NUCLEAR_BETA_Z: f64 = 0.0;
+/// The nuclear disc's central radial dispersion `σ_r,0`, km/s (Sormani et al. 2022, MNRAS 512,
+/// 1857, the quasi-isothermal fit's posterior: 67.7 +4.5 −3.5; ruling 105.2).
+pub const NUCLEAR_SIGMA_R0: f64 = 67.7;
+
+/// The scale `R_σ,r` over which the nuclear disc's radial dispersion falls, `e^(−R ÷ R_σ)`: 10^3.7 pc
+/// (Sormani et al. 2022, `log₁₀ R_σ,r [pc] = 3.7 +0.6 −0.4`; ruling 105.2), in light-years.
+pub const NUCLEAR_SIGMA_SCALE_LY: f64 = 5_011.872_336_272_722 * 3.261_563_777_167_433_6;
+
+/// The nuclear disc's radial law: `σ_R² = max(σ_z², σ_r,0² e^(−2R ÷ R_σ,r))` (ruling 105.2), with
+/// `σ_z` the vertical Jeans integral's on its own profile. It replaces Design note 10's `β_z` of 0,
+/// which gave `σ_R = σ_z` and contradicted plan 02's ruling 5 (the vertical dispersion about half
+/// the radial).
+pub const NUCLEAR_RADIAL_LAW: RadialLaw = RadialLaw::Floored {
+    sigma0: NUCLEAR_SIGMA_R0,
+    scale: NUCLEAR_SIGMA_SCALE_LY,
+};
 
 /// Satoh's `k` for the bulge (plan 08, Design note 10).
 pub const BULGE_SATOH_K: f64 = 0.6;
@@ -118,8 +129,9 @@ pub const BULGE_SATOH_K: f64 = 0.6;
 /// Satoh's `k` for the long bar (plan 08, Design note 10).
 pub const BAR_SATOH_K: f64 = 0.8;
 
-/// Satoh's `k` for the nuclear disc (plan 08, Design note 10).
-pub const NUCLEAR_SATOH_K: f64 = 0.9;
+/// Satoh's `k` for the nuclear disc (plan 08, Design note 10; re-tuned from 0.9 under ruling
+/// 105.2's hotter radial law, against the 80–120 km/s rotation at 300–500 ly).
+pub const NUCLEAR_SATOH_K: f64 = 0.95;
 
 /// The grid point `i` of either axis, ly.
 fn grid_point(i: usize) -> f64 {
@@ -136,10 +148,42 @@ fn cell(x: f64) -> (usize, f64) {
     super::discs::split(u, JEANS_POINTS)
 }
 
+/// How a Jeans table's radial dispersion follows from its vertical one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RadialLaw {
+    /// A constant `β_z = 1 − σ_z² ÷ σ_R²`: `σ_R² = σ_z² ÷ (1 − β_z)`.
+    Anisotropic {
+        /// `β_z`, below 1.
+        beta_z: f64,
+    },
+    /// `σ_R² = max(σ_z², σ₀² e^(−2R ÷ R_σ))`, a radial dispersion of its own that the vertical
+    /// one may only raise: the nuclear disc's (ruling 105.2, from Sormani et al. 2022, eq. 7).
+    Floored {
+        /// `σ₀`, km/s.
+        sigma0: f64,
+        /// `R_σ`, ly.
+        scale: f64,
+    },
+}
+
+impl RadialLaw {
+    /// `σ_R²` at cylindrical radius `r` (ly) for the vertical dispersion squared `sigma_z_sq`,
+    /// (km/s)².
+    #[must_use]
+    pub fn radial_sq(&self, r: f64, sigma_z_sq: f64) -> f64 {
+        match *self {
+            Self::Anisotropic { beta_z } => sigma_z_sq / (1.0 - beta_z),
+            Self::Floored { sigma0, scale } => {
+                sigma_z_sq.max(sigma0 * sigma0 * math::exp(-2.0 * r / scale))
+            }
+        }
+    }
+}
+
 /// An axisymmetric Jeans solution, tabulated on the potential's grid (module documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct JeansTable {
-    beta_z: f64,
+    radial: RadialLaw,
     satoh_k: f64,
     /// Per node `(i, j)`, row-major in R: `σ_R²`, `σ_φ²`, `σ_z²` ((km/s)²) and `v̄_φ` (km/s).
     nodes: Box<[[f64; 4]]>,
@@ -182,6 +226,27 @@ impl JeansTable {
         satoh_k: f64,
         potential: &impl ForceSource,
     ) -> Self {
+        Self::with_radial_law(
+            ln_density,
+            RadialLaw::Anisotropic { beta_z },
+            satoh_k,
+            potential,
+        )
+    }
+
+    /// The solution as [`new`](Self::new) builds it, with the radial dispersion from `radial`
+    /// rather than a constant `β_z`: the nuclear disc's floored law (ruling 105.2).
+    ///
+    /// # Panics
+    ///
+    /// Never: the grid's indices are fixed and in range.
+    #[must_use]
+    pub fn with_radial_law(
+        ln_density: impl Fn(f64, f64) -> f64,
+        radial: RadialLaw,
+        satoh_k: f64,
+        potential: &impl ForceSource,
+    ) -> Self {
         let heights: [f64; JEANS_POINTS] = core::array::from_fn(grid_point);
         let radii = heights;
         // ν σ_z² ÷ ν by panels from the top down, rescaled at each step.
@@ -206,14 +271,14 @@ impl JeansTable {
             // The last height, 2¹⁸ ly, holds nothing of any tracer: level with the one below.
             sigma_z_sq[i][JEANS_POINTS - 1] = sigma_z_sq[i][JEANS_POINTS - 2];
         }
-        let anisotropy = 1.0 / (1.0 - beta_z);
+        let radial_sq_at = |i: usize, j: usize| radial.radial_sq(radii[i], sigma_z_sq[i][j]);
         let mut nodes = Vec::with_capacity(JEANS_POINTS * JEANS_POINTS);
         for (i, &r) in radii.iter().enumerate() {
             let (lo, hi) = (i.saturating_sub(1), (i + 1).min(JEANS_POINTS - 1));
             let span = f64::from(u8::try_from(hi - lo).expect("at most 2")) * STEP;
             for (j, &z) in heights.iter().enumerate() {
-                let radial_sq = sigma_z_sq[i][j] * anisotropy;
-                let d_sigma = (sigma_z_sq[hi][j] - sigma_z_sq[lo][j]) * anisotropy / span;
+                let radial_sq = radial_sq_at(i, j);
+                let d_sigma = (radial_sq_at(hi, j) - radial_sq_at(lo, j)) / span;
                 let d_ln_nu = (ln_nu[hi][j] - ln_nu[lo][j]) / span;
                 let v_circ_sq = potential.forces_at(r, z).v_circ_sq;
                 let second = (radial_sq + d_sigma + radial_sq * d_ln_nu + v_circ_sq)
@@ -228,16 +293,16 @@ impl JeansTable {
             }
         }
         Self {
-            beta_z,
+            radial,
             satoh_k,
             nodes: nodes.into_boxed_slice(),
         }
     }
 
-    /// `β_z = 1 − σ_z² ÷ σ_R²`.
+    /// How the radial dispersion follows from the vertical.
     #[must_use]
-    pub fn beta_z(&self) -> f64 {
-        self.beta_z
+    pub fn radial_law(&self) -> RadialLaw {
+        self.radial
     }
 
     /// Satoh's `k`.
@@ -319,74 +384,184 @@ pub fn bar_streaming(
     ]
 }
 
-/// The face-on aperture's radial panels, in units of the effective radius, each a 4-point rule:
-/// the reduced solution of P08.T4.d.
-const APERTURE_PANELS: [f64; 2] = [0.0, 1.0];
+/// The radii of the reduced solution's midplane profile, in units of the tracer's radial scale
+/// `a_r` (P08.T4.d, ruling 105.1).
+const PROFILE_RADII: [f64; 9] = [0.03, 0.1, 0.25, 0.5, 0.9, 1.5, 2.5, 4.0, 7.0];
 
-/// The face-on projection's vertical panels, in units of the tracer's vertical scale, each a
+/// The reduced solution's vertical panels, in units of the tracer's vertical scale `a_z`, each a
 /// 4-point rule.
-const COLUMN_PANELS: [f64; 5] = [0.0, 1.0, 3.0, 8.0, 20.0];
+const PROFILE_COLUMN: [f64; 4] = [0.0, 1.0, 3.0, 10.0];
 
-/// The mass-weighted mean of `column(R, z)` over the face-on aperture of the spheroidal
-/// exponential `ν = exp(−√(R² ÷ a_r² + z² ÷ a_z²))` inside `R_e = 2.027 a_r`: `∫ R dR ∫ ν column
-/// dz ÷ ∫ R dR ∫ ν dz`, on [`APERTURE_PANELS`] and [`COLUMN_PANELS`].
-fn aperture_mean(
+/// The aperture's panels along the major axis, in units of the effective radius, each a 4-point
+/// rule.
+const SLIT_PANELS: [f64; 4] = [0.0, 0.25, 0.5, 1.0];
+
+/// The panels of a line of sight edge-on, in units of `a_r`, and of a column face-on, in units of
+/// `a_z`, each a 4-point rule.
+const SIGHT_PANELS: [f64; 6] = [0.0, 0.25, 1.0, 3.0, 8.0, 20.0];
+
+/// The inclination average of M–σ's `σ_e²`: `⟨cos² i⟩ = 1 ÷ 3` of the face-on second moment and `2
+/// ÷ 3` of the edge-on one, for a galaxy seen from a random direction (ruling 105.1).
+const FACE_ON_WEIGHT: f64 = 1.0 / 3.0;
+
+/// The luminosity-weighted line-of-sight second moment `⟨V² + σ²⟩` of the spheroidal exponential
+/// `ν = exp(−√(R² ÷ a_r² + z² ÷ a_z²))` along its major axis inside `R_e = 2.027 a_r`, averaged
+/// over inclination: the `σ_e` of the M–σ relation, squared (McConnell and Ma 2013, ApJ 764, 184,
+/// eq. 1; Gültekin et al. 2009; the Nuker practice of `I(r) dr` weighting, Kormendy and Ho 2013),
+/// as ruling 105.1 has it.
+///
+/// `column(R)` is `∫₀^∞ ν σ_z² dz` at radius `R` with `ν(R, 0) = e^(−R ÷ a_r)`, the face-on column
+/// of the second moment, which carries no mean motion; `midplane(R)` is `(σ_R², ⟨v_φ²⟩)` in the
+/// plane, whose line-of-sight mix is the edge-on moment `σ_R² sin²φ + ⟨v_φ²⟩ cos²φ` at azimuth φ
+/// from the line of sight's normal; the edge-on slit is taken in the plane.
+fn sigma_e_sq(
     (a_r, a_z): (f64, f64),
-    radial: &[f64],
-    vertical: &[f64],
-    mut column: impl FnMut(f64, f64) -> f64,
+    mut column: impl FnMut(f64) -> f64,
+    mut midplane: impl FnMut(f64) -> (f64, f64),
 ) -> f64 {
     let r_e = EFFECTIVE_RADIUS_IN_SCALES * a_r;
-    let mut weighted = 0.0;
-    let mut mass = 0.0;
-    for w in radial.windows(2) {
-        weighted += gl4(
-            |r| {
-                let rho = r / a_r;
-                let mut sum = 0.0;
-                for p in vertical.windows(2) {
-                    sum += gl4(
-                        |t| math::exp(-math::hypot(rho, t)) * column(r, a_z * t),
-                        p[0],
-                        p[1],
-                    );
-                }
-                r * sum
+    let panels = |f: &mut dyn FnMut(f64) -> f64, edges: &[f64], scale: f64| {
+        edges
+            .windows(2)
+            .fold(0.0, |sum, w| sum + gl4(&mut *f, w[0] * scale, w[1] * scale))
+    };
+    // Face-on: I(R) dR along the major axis.
+    let face_moment = panels(&mut |r| column(r), &SLIT_PANELS, r_e);
+    let face_light = panels(
+        &mut |r| {
+            let rho = r / a_r;
+            a_z * panels(&mut |t| math::exp(-math::hypot(rho, t)), &SIGHT_PANELS, 1.0)
+        },
+        &SLIT_PANELS,
+        r_e,
+    );
+    // Edge-on: along the major axis X in the plane, each line of sight y through it.
+    let (mut edge_moment, mut edge_light) = (0.0, 0.0);
+    for w in SLIT_PANELS.windows(2) {
+        edge_moment += gl4(
+            |x| {
+                panels(
+                    &mut |y| {
+                        let r = math::hypot(x, y);
+                        let nu = math::exp(-r / a_r);
+                        let (radial_sq, azimuthal_sq) = midplane(r);
+                        if r > 0.0 {
+                            nu * (radial_sq * (y / r) * (y / r) + azimuthal_sq * (x / r) * (x / r))
+                        } else {
+                            nu * radial_sq
+                        }
+                    },
+                    &SIGHT_PANELS,
+                    a_r,
+                )
             },
             w[0] * r_e,
             w[1] * r_e,
         );
-        mass += gl4(
-            |r| {
-                let rho = r / a_r;
-                let mut sum = 0.0;
-                for p in vertical.windows(2) {
-                    sum += gl4(|t| math::exp(-math::hypot(rho, t)), p[0], p[1]);
-                }
-                r * sum
+        edge_light += gl4(
+            |x| {
+                panels(
+                    &mut |y| math::exp(-math::hypot(x, y) / a_r),
+                    &SIGHT_PANELS,
+                    a_r,
+                )
             },
             w[0] * r_e,
             w[1] * r_e,
         );
     }
-    weighted / mass
+    FACE_ON_WEIGHT * face_moment / face_light + (1.0 - FACE_ON_WEIGHT) * edge_moment / edge_light
 }
 
-/// The bulge's line-of-sight dispersion seen face-on, mass-weighted inside its effective radius,
-/// from the mass model `model` alone: the σ that the M–σ relation reads (plan 08, P08.T4.d),
-/// which replaces plan 02's spherical estimate (its Design note 8).
+/// The reduced solution's midplane profile: at each of [`PROFILE_RADII`], `ln ∫₀^∞ z ν K_z dz`
+/// (the face-on column of `ν σ_z²`), `ln ∫₀^∞ ν K_z dz` (`ν σ_z²` in the plane) and `v_c²`, read
+/// linearly in `ln R` between them and level outside.
+struct ReducedProfile {
+    ln_r: [f64; PROFILE_RADII.len()],
+    ln_column: [f64; PROFILE_RADII.len()],
+    ln_midplane: [f64; PROFILE_RADII.len()],
+    v_circ_sq: [f64; PROFILE_RADII.len()],
+}
+
+impl ReducedProfile {
+    fn new(model: &MassModel, (a_r, a_z): (f64, f64)) -> Self {
+        let mut profile = Self {
+            ln_r: [0.0; PROFILE_RADII.len()],
+            ln_column: [0.0; PROFILE_RADII.len()],
+            ln_midplane: [0.0; PROFILE_RADII.len()],
+            v_circ_sq: [0.0; PROFILE_RADII.len()],
+        };
+        for (k, &rho) in PROFILE_RADII.iter().enumerate() {
+            let r = rho * a_r;
+            let (mut column, mut midplane) = (0.0, 0.0);
+            // One force per node serves both integrals: the 4-point rule on each panel in t.
+            for w in PROFILE_COLUMN.windows(2) {
+                let half = 0.5 * (w[1] - w[0]);
+                let mid = w[0] + half;
+                for (&x, &weight) in GL4_NODES.iter().zip(&GL4_WEIGHTS) {
+                    let t = mid + half * x;
+                    let z = a_z * t;
+                    let f = math::exp(-math::hypot(rho, t)) * model.forces_at(r, z).vertical;
+                    column += weight * half * a_z * z * f;
+                    midplane += weight * half * a_z * f;
+                }
+            }
+            profile.ln_r[k] = math::ln(r);
+            profile.ln_column[k] = math::ln(column);
+            profile.ln_midplane[k] = math::ln(midplane);
+            profile.v_circ_sq[k] = model.v_circ_sq(LightYears::new(r));
+        }
+        profile
+    }
+
+    /// The segment holding `ln r` and the offset in it, clamped.
+    fn at(&self, r: f64) -> (usize, f64) {
+        let last = self.ln_r.len() - 1;
+        let u = if r > 0.0 { math::ln(r) } else { self.ln_r[0] };
+        let k = self.ln_r[1..last].partition_point(|&x| x <= u);
+        let t = ((u - self.ln_r[k]) / (self.ln_r[k + 1] - self.ln_r[k])).clamp(0.0, 1.0);
+        (k, t)
+    }
+
+    fn lerp(values: &[f64], (k, t): (usize, f64)) -> f64 {
+        values[k] * (1.0 - t) + values[k + 1] * t
+    }
+
+    /// `∫₀^∞ ν σ_z² dz` at `r`.
+    fn column(&self, r: f64) -> f64 {
+        math::exp(Self::lerp(&self.ln_column, self.at(r)))
+    }
+
+    /// `(σ_R², ⟨v_φ²⟩)` in the plane at `r`, for the anisotropy `beta_z`.
+    fn midplane(&self, r: f64, rho: f64, beta_z: f64) -> (f64, f64) {
+        let (k, t) = self.at(r);
+        let ln_mid = Self::lerp(&self.ln_midplane, (k, t));
+        let slope =
+            (self.ln_midplane[k + 1] - self.ln_midplane[k]) / (self.ln_r[k + 1] - self.ln_r[k]);
+        // ν σ_R² = ∫ ν K_z dz ÷ (1 − β_z), with ν(R, 0) = e^(−ρ).
+        let radial_sq = math::exp(ln_mid + rho) / (1.0 - beta_z);
+        let azimuthal_sq = radial_sq * (1.0 + slope) + Self::lerp(&self.v_circ_sq, (k, t));
+        (radial_sq, azimuthal_sq.max(AZIMUTHAL_FLOOR * radial_sq))
+    }
+}
+
+/// The bulge's `σ_e`, the dispersion the M–σ relation reads, from the mass model `model` alone (plan
+/// 08, P08.T4.d, with ruling 105.1), which replaces plan 02's spherical estimate (its Design note
+/// 8).
 ///
-/// `model` is the black-hole-free model of plan 02's two-phase build, since the black hole's
-/// mass is what this sets; `params` gives the bulge. Face-on the line of sight is z and carries no
-/// mean motion, so `Σ σ_p²(R) = ∫ ν σ_z² dz = 2 ∫₀^∞ z ν K_z dz` by the vertical Jeans equation,
-/// whatever the table's `β_z` and Satoh's `k`. The tracer is the bulge axisymmetrised as the
-/// potential holds it, the spheroidal exponential of the boxy bulge's second moments, whose
-/// face-on effective radius is 2.027 of its radial scale. The reduced solution evaluates `K_z` at
-/// 64 points (4 radii, 16 heights), some 30–60 ms of a parameter build; it integrates the
-/// projection directly rather than tabulating the solution on a reduced grid, which would take
-/// hundreds of force evaluations at a millisecond each. It agrees with the final table's
-/// ([`KinematicTables::bulge_projected_sigma`](super::KinematicTables::bulge_projected_sigma))
-/// to under 3%.
+/// `σ_e` is the relation's own quantity: the line-of-sight second moment `V² + σ²`, weighted by
+/// surface brightness along the major axis out to the effective radius (McConnell and Ma 2013, ApJ
+/// 764, 184, eq. 1), averaged over inclination, a third face-on and two thirds edge-on (ruling
+/// 105.1). Face-on the line of sight is z, `∫ ν σ_z² dz = ∫ z ν K_z dz` by the vertical Jeans
+/// equation; edge-on it mixes `σ_R² = σ_z² ÷ (1 − β_z)` with `⟨v_φ²⟩ = σ_R² (1 + d ln(ν σ_R²) ÷ d ln
+/// R) + v_c²`, which holds the rotation and the azimuthal dispersion together, whatever Satoh's
+/// `k` splits them into. `model` is the black-hole-free model of plan 02's two-phase build, since
+/// the black hole's mass is what this sets; `params` gives the bulge, axisymmetrised as the
+/// potential holds it, whose effective radius is 2.027 of its radial scale. The reduced solution
+/// evaluates `K_z` at 108 points (nine radii, twelve heights) and `v_c²` at nine, some 100 ms of a
+/// parameter build; it agrees with the final table's
+/// ([`KinematicTables::bulge_projected_sigma`](super::KinematicTables::bulge_projected_sigma)) to
+/// under 3%.
 ///
 /// # Examples
 ///
@@ -396,28 +571,44 @@ fn aperture_mean(
 /// use hyperion_sim::galaxy::potential::MassModel;
 ///
 /// let params = GalaxyParams::milky_way_like();
-/// // The fixture's own mass model holds its black hole; its few 10⁶ M☉ change σ by far less
-/// // than a per cent inside the bulge's effective radius.
-/// let sigma = bulge_projected_sigma(&MassModel::new(&params), &params);
-/// assert!((60.0..140.0).contains(&sigma.value()), "{sigma:?}");
+/// let sigma = bulge_projected_sigma(&MassModel::without_centre(&params), &params);
+/// // The Milky Way's `σ_e` is 103–105 ± 20 km/s (McConnell and Ma 2013; Kormendy and Ho 2013).
+/// assert!((80.0..140.0).contains(&sigma.value()), "{sigma:?}");
 /// ```
 #[must_use]
 pub fn bulge_projected_sigma(model: &MassModel, params: &GalaxyParams) -> KilometresPerSecond {
     let axes = bulge_tracer_axes(params);
+    let profile = ReducedProfile::new(model, axes);
     KilometresPerSecond::new(
-        aperture_mean(axes, &APERTURE_PANELS, &COLUMN_PANELS, |r, z| {
-            z * model.forces_at(r, z).vertical
-        })
+        sigma_e_sq(
+            axes,
+            |r| profile.column(r),
+            |r| profile.midplane(r, r / axes.0, BULGE_BETA_Z),
+        )
         .sqrt(),
     )
 }
 
-/// The same aperture's face-on dispersion from a table's `σ_z²`, on finer panels, since a table
-/// lookup costs nothing against a force: for the final tables.
-pub(crate) fn projected_sigma_from_table(table: &JeansTable, axes: (f64, f64)) -> f64 {
-    const RADIAL: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
-    const VERTICAL: [f64; 9] = [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 20.0];
-    aperture_mean(axes, &RADIAL, &VERTICAL, |r, z| table.moments(r, z)[2]).sqrt()
+/// The same `σ_e` from a table, whose lookups cost nothing against a force: for the final tables.
+pub(crate) fn projected_sigma_from_table(table: &JeansTable, (a_r, a_z): (f64, f64)) -> f64 {
+    sigma_e_sq(
+        (a_r, a_z),
+        |r| {
+            let rho = r / a_r;
+            SIGHT_PANELS.windows(2).fold(0.0, |sum, w| {
+                sum + gl4(
+                    |t| math::exp(-math::hypot(rho, t)) * table.moments(r, a_z * t)[2] * a_z,
+                    w[0],
+                    w[1],
+                )
+            })
+        },
+        |r| {
+            let [radial, azimuthal, _, mean] = table.moments(r, 0.0);
+            (radial, azimuthal + mean * mean)
+        },
+    )
+    .sqrt()
 }
 
 /// The axes `(a_r, a_z)` of the bulge's axisymmetrised tracer, ly.

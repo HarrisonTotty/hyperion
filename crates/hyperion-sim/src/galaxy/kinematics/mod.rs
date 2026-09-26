@@ -31,14 +31,15 @@ pub use draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, draw, draw_velocity};
 use self::discs::{ArmStreaming, DiscKinematics, DiscLaw, RadialRatio};
 use self::halo::HaloKinematics;
 use self::spheroid::{
-    BAR_SATOH_K, BULGE_BETA_Z, BULGE_SATOH_K, JeansTable, NUCLEAR_BETA_Z, NUCLEAR_SATOH_K,
+    BAR_SATOH_K, BULGE_BETA_Z, BULGE_SATOH_K, JeansTable, NUCLEAR_RADIAL_LAW, NUCLEAR_SATOH_K,
     bar_streaming, bulge_tracer_axes, projected_sigma_from_table,
 };
 use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
+use crate::galaxy::fields::arms::SharpArm;
 use crate::galaxy::fields::disc::ExponentialDisc;
 use crate::galaxy::fields::{Component, ComponentId, Fields, Shape};
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::potential::PotentialTables;
+use crate::galaxy::potential::{MassModel, PotentialTables};
 use crate::galaxy::{PointLy, Population};
 use crate::math;
 use crate::rng::Seed;
@@ -187,8 +188,9 @@ pub struct KinematicTables {
 }
 
 impl KinematicTables {
-    /// The laws of the galaxy of `params`, `fields` and the full potential tables `potential`,
-    /// with the lesser halo progenitors' draws keyed by `seed`.
+    /// The laws of the galaxy of `params`, `fields`, the mass model `model` (whose monopole the halo
+    /// reads) and its full potential tables `potential`, with the lesser halo progenitors' draws
+    /// keyed by `seed`.
     ///
     /// # Panics
     ///
@@ -199,13 +201,14 @@ impl KinematicTables {
         seed: Seed,
         params: &GalaxyParams,
         fields: &Fields,
+        model: &MassModel,
         potential: &PotentialTables,
     ) -> Self {
         assert!(
             potential.has_grid(),
             "the kinematics need the potential off the plane"
         );
-        let halo = HaloKinematics::new(seed, params, potential);
+        let halo = HaloKinematics::new(seed, params, model, potential);
         let mut build = Build {
             params,
             fields,
@@ -367,8 +370,8 @@ impl KinematicTables {
         self.pattern_speed
     }
 
-    /// The bulge's line-of-sight dispersion seen face-on, mass-weighted inside its effective
-    /// radius, from the final table: the quantity
+    /// The bulge's `σ_e`, the line-of-sight `V² + σ²` along the major axis inside its effective
+    /// radius averaged over inclination (ruling 105.1), from the final table: the quantity
     /// [`spheroid::bulge_projected_sigma`] takes from the mass model before the tables exist, for
     /// the tests that compare the two.
     #[must_use]
@@ -410,8 +413,7 @@ impl Build<'_> {
         match (component.population(), component.shape()) {
             (Population::YoungThinDisc, Shape::Disc(disc)) => {
                 let streaming = ArmStreaming::new(
-                    *self.fields.arms(),
-                    self.params.arms().young_fraction(),
+                    SharpArm::young_disc(self.params),
                     potential.bar_corotation(),
                 );
                 self.disc(
@@ -454,9 +456,9 @@ impl Build<'_> {
             (Population::LongBar, _) => Law::Bar,
             (Population::NuclearDisc, Shape::Disc(disc)) => {
                 let (length, profile) = (disc.length().value(), disc.profile());
-                self.nuclear = Some(JeansTable::new(
+                self.nuclear = Some(JeansTable::with_radial_law(
                     |r, z| -r / length - profile.exponent(z),
-                    NUCLEAR_BETA_Z,
+                    NUCLEAR_RADIAL_LAW,
                     NUCLEAR_SATOH_K,
                     potential,
                 ));

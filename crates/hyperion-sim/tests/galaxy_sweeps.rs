@@ -112,13 +112,9 @@ fn every_getter_lies_in_its_range_and_sizes_follow_the_cube_root_over_ten_thousa
 /// bulges and dominant discs sit near `σ_e` = 100 km/s (Cappellari et al. 2013, MNRAS 432, 1862,
 /// §5). So the band is checked for 80% of seeds (P02.T12.a), with the median and the tails as well.
 ///
-/// Plan 08's P08.T4.d replaced the estimator with the bulge's face-on Jeans dispersion, which reads
-/// a flattened bulge's vertical dispersion and comes out about 11% lower: the fixture reads 97.2
-/// km/s, and over the seeds the 5th percentile is 75.5, the median 96.0 and the 95th percentile
-/// 118.7, with 639 in 90–135. That sits below the brainstorm's 105–115 for the Milky Way, a finding
-/// of P08.T4.d, and on the measured small bulges above (pseudobulges near 90, `σ_e` near 100). The
-/// band is therefore checked at 80–125 km/s for 80% of seeds, the median at 90–110 and the tails at
-/// 70–90 and 110–140, until the owner rules on the reading.
+/// Plan 08's P08.T4.d replaced the estimator with M–σ's own `σ_e` from the bulge's Jeans solution
+/// (ruling 105.1): the fixture reads 117.7 km/s, and over these seeds the 5th percentile is 91.1,
+/// the median 114.9 and the 95th percentile 141.1, which plan 02's bands hold.
 #[test]
 #[ignore = "slow: builds the parameters, and the σ estimator, of 10³ galaxies"]
 fn the_bulge_dispersion_over_a_thousand_seeds() {
@@ -136,16 +132,16 @@ fn the_bulge_dispersion_over_a_thousand_seeds() {
     sigmas.sort_by(f64::total_cmp);
     let inside = sigmas
         .iter()
-        .filter(|&&s| (80.0..=125.0).contains(&s))
+        .filter(|&&s| (90.0..=135.0).contains(&s))
         .count();
     eprintln!(
-        "σ: 5% {:.1}, median {:.1}, 95% {:.1}; {inside} of 1,000 in 80–125 km/s",
+        "σ: 5% {:.1}, median {:.1}, 95% {:.1}; {inside} of 1,000 in 90–135 km/s",
         sigmas[50], sigmas[500], sigmas[950]
     );
-    assert!(inside >= 800, "{inside} of 1,000 in 80–125 km/s");
-    assert_within("median σ", sigmas[500], 90.0, 110.0);
-    assert_within("5th percentile", sigmas[50], 70.0, 90.0);
-    assert_within("95th percentile", sigmas[950], 110.0, 140.0);
+    assert!(inside >= 800, "{inside} of 1,000 in 90–135 km/s");
+    assert_within("median σ", sigmas[500], 105.0, 125.0);
+    assert_within("5th percentile", sigmas[50], 80.0, 100.0);
+    assert_within("95th percentile", sigmas[950], 125.0, 155.0);
 }
 
 /// The fields over 10³ seeds (P02.T7.b, P02.T7.c): the sub-discs' effective heights rise with age

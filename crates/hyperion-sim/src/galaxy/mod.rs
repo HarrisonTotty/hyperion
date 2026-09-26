@@ -273,7 +273,13 @@ impl Galaxy {
         } else {
             self.potential.with_grid(&self.model)
         };
-        let kinematics = KinematicTables::new(self.seed, &self.params, &self.fields, &potential);
+        let kinematics = KinematicTables::new(
+            self.seed,
+            &self.params,
+            &self.fields,
+            &self.model,
+            &potential,
+        );
         Self {
             potential,
             kinematics: Some(Box::new(kinematics)),

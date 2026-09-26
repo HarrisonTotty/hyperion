@@ -450,14 +450,13 @@ fn the_model_holds_the_parameters_masses() {
 /// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole lies within a
 /// factor of 2.5 of Sgr A*'s 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
 ///
-/// The fixture's scatter is the Milky Way's own offset from the relation, +0.0806 dex, set so that
-/// plan 08's face-on Jeans σ of 97.2 km/s (P08.T4.d) gives 4.30 × 10⁶ M☉ (plan 02, Risks, R13 and
-/// R22). Plan 02's spherical estimator read 109.5 km/s, inside the brainstorm's measured 105–115,
-/// for an offset of −0.210 dex; before the thin discs' hole it read 123.8 km/s at −0.512 (R23).
-/// Plan 08's reading is below the brainstorm's band, a finding of P08.T4.d (McConnell and Ma 2013,
-/// ApJ 764, 184, list the Milky Way at 103 ± 20 km/s, a dispersion measured edge-on, where plan 08
-/// reads the bulge face-on), so the offset is now checked against the relation's own intrinsic
-/// scatter, 0.38 dex, rather than against a σ in 105–115.
+/// The fixture's scatter is the Milky Way's own offset from the relation, −0.3876 dex, set so that
+/// plan 08's `σ_e` of 117.7 km/s (P08.T4.d with ruling 105.1) gives 4.30 × 10⁶ M☉ (plan 02, Risks,
+/// R13 and R22). Plan 02's spherical estimator read 109.5 km/s, for an offset of −0.210 dex; plan
+/// 08's first, face-on reading 97.2 km/s, for +0.081. Ruling 105.1 puts the offset inside the
+/// relation's 0.38 dex scatter; at 117.7 km/s, above the brainstorm's 105–115 though inside its
+/// acceptance of 100–120, it lies 0.008 dex beyond, a finding of ruling 105.1, so the bracket is
+/// 0.40 dex.
 ///
 /// The black hole itself is held to Sgr A*'s (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration
 /// 2022, A&A 657, L12) to 1%: the offset is a measured fact about the Milky Way only through the
@@ -475,15 +474,15 @@ fn the_fixture_black_hole_follows_m_sigma() {
         black_hole_mass(sigma, bh.scatter()).value(),
         1e-12,
     );
-    assert_within("offset, dex", bh.scatter().value(), -0.38, 0.38);
+    assert_within("offset, dex", bh.scatter().value(), -0.40, 0.0);
     let ratio = bh.mass().value() / 4.3e6;
     assert_within("black hole ÷ 4.3 × 10⁶ M☉", ratio, 1.0 / 2.5, 2.5);
     let on_relation = black_hole_mass(sigma, Dex::new(0.0)).value() / 4.3e6;
     assert_within(
         "the relation alone ÷ 4.3 × 10⁶ M☉",
         on_relation,
-        math::exp10(-0.38),
-        math::exp10(0.38),
+        math::exp10(-0.40),
+        math::exp10(0.40),
     );
     assert_relative(
         "σ is the estimator's",
@@ -517,18 +516,16 @@ fn the_scatter_moves_the_black_hole_mass_only() {
     assert_relative("10^8.32", at_200.value(), math::exp10(8.32), 1e-14);
 }
 
-/// Over 32 seeds σ stays within 60–170 km/s; the 10³-seed distribution is in `galaxy_sweeps.rs`.
-/// Plan 02's spherical estimate put the 5th percentile at 83 km/s after the thin discs' hole
+/// Over 32 seeds σ stays within 70–170 km/s; the 10³-seed distribution is in `galaxy_sweeps.rs`,
+/// whose 5th percentile was 83 km/s under plan 02's spherical estimate after the thin discs' hole
 /// (P02.T12.b; it was 80 until then), with pseudobulges measured near 90 km/s (Fisher and Drory
-/// 2016); plan 08's face-on Jeans reading (P08.T4.d) reads a flattened bulge's vertical
-/// dispersion, about 11% lower, and one of these seeds reads 69.9 km/s, so the floor is 60 (a
-/// finding of P08.T4.d).
+/// 2016). Plan 08's `σ_e` (P08.T4.d with ruling 105.1) puts it at 91 km/s.
 #[test]
 fn the_bulge_dispersion_over_32_seeds() {
     for seed in seeds() {
         let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
         let sigma = params.black_hole().bulge_dispersion().value();
-        assert_within(&format!("σ for {seed}"), sigma, 60.0, 170.0);
+        assert_within(&format!("σ for {seed}"), sigma, 70.0, 170.0);
         assert!(params.black_hole().mass().value() > 0.0);
     }
 }

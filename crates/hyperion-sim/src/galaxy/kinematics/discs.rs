@@ -9,14 +9,16 @@
 //!   Away from it `K_z` changes and so does `σ_z`, which falls outward with the disc.
 //! - **Radial.** `σ_R = σ_z ÷ r`, with `r` the component's ratio `σ_z ÷ σ_R` ([`RadialRatio`]):
 //!   0.5 for the young disc and 0.54 for the thick disc (Design note 4), and for each sub-disc the
-//!   ratio of Sharma et al.'s (2021) vertical and radial laws at its age and height, since their
-//!   exponents do not give the plan's 0.5–0.6 (plan 08, Risks; provisional).
+//!   ratio of Sharma et al.'s (2021) vertical and radial laws at its age and height, 0.31–0.52,
+//!   since their exponents do not give the plan's 0.5–0.6 (plan 08, Risks; ruling 105.6). Their
+//!   ratio also changes with radius through their angular-momentum terms (×1.12 at 4 kpc, ×1.34 at
+//!   12 kpc against the Sun's), which is not modelled: the Sun's ratio holds at every radius.
 //! - **Azimuthal.** `σ_φ² = σ_R² κ² ÷ 4Ω²`, the epicyclic ratio.
 //! - **Mean rotation.** `v̄_φ = v_c − v_a`, with the asymmetric drift in full (Design note 5,
 //!   [`asymmetric_drift`]), floored at 0.2 `v_c` where the expansion fails in the inner disc.
 //! - **The young disc** floors every dispersion at
 //!   [`YOUNG_DISC_SIGMA_FLOOR`](super::YOUNG_DISC_SIGMA_FLOOR) and streams along its arms
-//!   ([`ArmStreaming`], Design note 8).
+//!   ([`ArmStreaming`], Design note 8 with ruling 105.3's phases).
 //!
 //! Speeds are km/s, lengths light-years, in the local cylindrical axes (rimward R, spinward φ,
 //! north z).
@@ -25,7 +27,7 @@ use super::gl8;
 use super::spheroid::ForceSource;
 use crate::galaxy::PointLy;
 use crate::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, YEARS_PER_GIGAYEAR};
-use crate::galaxy::fields::arms::ArmGeometry;
+use crate::galaxy::fields::arms::SharpArm;
 use crate::galaxy::fields::disc::ExponentialDisc;
 use crate::galaxy::potential::PotentialTables;
 use crate::math;
@@ -95,7 +97,7 @@ pub enum RadialRatio {
     /// Sharma et al.'s (2021) two laws at the sub-disc's mean age: `σ_R ÷ σ_z = (39.4 ÷ 21.1)
     /// ((τ + 0.1) ÷ 10.1)^(0.251 − 0.441) × (1 + 0.12 |z|) ÷ (1 + γ_z |z|)`, with `γ_z` and its cap
     /// the profile's own (plan 08, Risks: the plan's 0.5–0.6 fails against their exponents, which
-    /// give 0.31–0.52 across the sub-discs; provisional until the owner rules).
+    /// give 0.31–0.52 across the sub-discs; ruling 105.6 keeps this).
     Sharma {
         /// The sub-disc's mean age.
         age: Years,
@@ -206,23 +208,22 @@ pub(crate) fn vertical_dispersion_sq(
     out
 }
 
-/// The young disc's streaming along its arms (plan 08, Design note 8): `A × (cos ψ along the arm,
-/// −½ sin ψ across it, outward positive)` with `ψ` the arm phase, zero on a ridge, times the arms'
-/// fade-in, and reversed outside corotation.
+/// The young disc's streaming along its arms (plan 08, Design note 8, with ruling 105.3's phases):
+/// `v_φ = A f sin ψ` and `v_R = ∓(A f ÷ 2)(cos ψ − c̄)`, with `ψ` the arm phase, zero on a ridge,
+/// `f` the arms' fade-in, and `v_R` inward on the ridge inside corotation and outward beyond it.
 ///
-/// "Along the arm" is the unit vector `(−sin p, cos p)` in (R, φ), which runs spinward and, since
-/// the arms trail, inward; "across" is `(cos p, sin p)`. `A = 5 + 10 × (A_arm − 0.7) ÷ 0.2` km/s
-/// with `A_arm` the young arm fraction in its range 0.7–0.9, so 5–15 km/s. The form and its phases
-/// are the plan's and provisional: a linear density-wave derivation puts the inward radial motion
-/// in phase with the ridge and the azimuthal part in quadrature (lane `kin08`'s research), which is
-/// for the owner to rule on.
+/// A linearised, tightly wound density wave puts the radial motion in phase with the ridge and the
+/// azimuthal in quadrature, and only the radial part changes sign at corotation (ruling 105.3, on
+/// the research's derivation; `|v_R| ÷ |v_φ|` is about 0.6 at the Sun, so the plan's ½ stands).
+/// `c̄(R)` is the young disc's density-weighted mean of `cos ψ` around the circle, `f A_arm I₁(k) ÷
+/// I₀(k)` for its sharp arm of fraction `A_arm` and concentration `k`, so that the streaming
+/// carries no net radial flux, and by symmetry `sin ψ` carries no net rotation. `A = 5 + 10 ×
+/// (A_arm − 0.7) ÷ 0.2` km/s with `A_arm` in its range 0.7–0.9, so 5–15 km/s.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ArmStreaming {
-    geometry: ArmGeometry,
+    arm: SharpArm,
     amplitude: f64,
     corotation: f64,
-    sin_pitch: f64,
-    cos_pitch: f64,
 }
 
 /// The young arm fraction's range, which the streaming amplitude spans (plan 02, P02.T5).
@@ -237,19 +238,15 @@ pub const STREAMING_RANGE: (f64, f64) = (5.0, 15.0);
 pub const ARM_TO_BAR_PATTERN_RATIO: f64 = 1.0;
 
 impl ArmStreaming {
-    /// The streaming of arms on `geometry` with the young arm fraction `fraction`, reversing at
-    /// `corotation` (ly).
+    /// The streaming of the young disc's sharp arm `arm`, reversing at `corotation` (ly).
     #[must_use]
-    pub fn new(geometry: ArmGeometry, fraction: f64, corotation: LightYears) -> Self {
+    pub fn new(arm: SharpArm, corotation: LightYears) -> Self {
         let (lo, hi) = ARM_FRACTION_RANGE;
-        let position = ((fraction - lo) / (hi - lo)).clamp(0.0, 1.0);
-        let (sin_pitch, cos_pitch) = math::sin_cos(geometry.pitch().value());
+        let position = ((arm.fraction() - lo) / (hi - lo)).clamp(0.0, 1.0);
         Self {
-            geometry,
+            arm,
             amplitude: STREAMING_RANGE.0 + (STREAMING_RANGE.1 - STREAMING_RANGE.0) * position,
             corotation: corotation.value() * ARM_TO_BAR_PATTERN_RATIO,
-            sin_pitch,
-            cos_pitch,
         }
     }
 
@@ -259,22 +256,73 @@ impl ArmStreaming {
         KilometresPerSecond::new(self.amplitude)
     }
 
+    /// `c̄`, the young disc's density-weighted mean of `cos ψ` around the circle of radius `r`
+    /// (ly): `f A_arm I₁(k) ÷ I₀(k)`.
+    #[must_use]
+    pub fn mean_cos_phase(&self, r: f64) -> f64 {
+        self.arm.geometry().fade(r) * self.arm.fraction() * bessel_i1_over_i0(self.arm.k(r))
+    }
+
     /// The streaming velocity `(v_R, v_φ)` at the in-plane point `(x, y)` (ly), km/s; zero at the
     /// centre.
     #[must_use]
     pub fn at(&self, x: f64, y: f64) -> [f64; 2] {
-        let Some(phase) = self.geometry.phase(x, y) else {
+        let geometry = self.arm.geometry();
+        let Some(phase) = geometry.phase(x, y) else {
             return [0.0, 0.0];
         };
         let r = math::hypot(x, y);
         let (sin_phase, cos_phase) = math::sin_cos(phase);
-        let reversal = if r > self.corotation { -1.0 } else { 1.0 };
-        let amplitude = reversal * self.amplitude * self.geometry.fade(r);
-        let (along, across) = (amplitude * cos_phase, -0.5 * amplitude * sin_phase);
+        // Inward on the ridge inside corotation, outward beyond it.
+        let radial_sign = if r > self.corotation { 1.0 } else { -1.0 };
+        let amplitude = self.amplitude * geometry.fade(r);
         [
-            -along * self.sin_pitch + across * self.cos_pitch,
-            along * self.cos_pitch + across * self.sin_pitch,
+            radial_sign * 0.5 * amplitude * (cos_phase - self.mean_cos_phase(r)),
+            amplitude * sin_phase,
         ]
+    }
+}
+
+/// `I₁(k) ÷ I₀(k)` for `k ≥ 0`: the power series of both below `k = 15`, their asymptotic series
+/// above (Abramowitz and Stegun 1964, §9.6.10 and §9.7.1), as plan 02's `bessel_i0e` sums `I₀`.
+fn bessel_i1_over_i0(k: f64) -> f64 {
+    const LIMIT: f64 = 15.0;
+    const CUTOFF: f64 = 1e-18;
+    if k < LIMIT {
+        let q = 0.25 * k * k;
+        let (mut t0, mut s0, mut t1, mut s1, mut j) = (1.0, 1.0, 1.0, 1.0, 0.0);
+        loop {
+            j += 1.0;
+            t0 *= q / (j * j);
+            t1 *= q / (j * (j + 1.0));
+            s0 += t0;
+            s1 += t1;
+            if t0 <= s0 * CUTOFF && t1 <= s1 * CUTOFF {
+                break;
+            }
+        }
+        0.5 * k * s1 / s0
+    } else {
+        // e^(−k) √(2πk) Iν(k) ~ Σ (−1)ʲ aⱼ(ν), aⱼ = aⱼ₋₁ (4ν² − (2j − 1)²) ÷ (8 j k).
+        let eight_k = 8.0 * k;
+        let (mut a0, mut s0, mut a1, mut s1, mut j) = (1.0_f64, 1.0, 1.0_f64, 1.0, 0.0);
+        loop {
+            j += 1.0;
+            let odd = 2.0 * j - 1.0;
+            let n0 = -a0 * (-odd * odd) / (j * eight_k);
+            let n1 = -a1 * (4.0 - odd * odd) / (j * eight_k);
+            if n0.abs() >= a0.abs() || n1.abs() >= a1.abs() {
+                break;
+            }
+            a0 = n0;
+            a1 = n1;
+            s0 += a0;
+            s1 += a1;
+            if a0.abs() <= s0.abs() * CUTOFF && a1.abs() <= s1.abs() * CUTOFF {
+                break;
+            }
+        }
+        s1 / s0
     }
 }
 
@@ -524,6 +572,29 @@ mod tests {
         assert!(r.factor(3_000.0) < r.factor(0.0));
         assert!((r.factor(20_000.0) - r.factor(2.0 * LIGHT_YEARS_PER_KILOPARSEC)).abs() < 1e-15);
         assert!((RadialRatio::Constant(0.5).factor(123.0) - 2.0).abs() < 1e-15);
+    }
+
+    /// `I₁ ÷ I₀` against `∫ e^(k(cos θ − 1)) cos θ dθ ÷ ∫ e^(k(cos θ − 1)) dθ` by a 20,000-point
+    /// trapezoid, which is exact to the last bits for a periodic integrand, either side of the
+    /// switch at 15.
+    #[test]
+    fn the_bessel_ratio_matches_its_integrals() {
+        for k in [0.0, 0.01, 0.5, 3.0, 14.9, 15.1, 40.0, 1e3] {
+            let (mut num, mut den) = (0.0, 0.0);
+            for i in 0..20_000 {
+                let theta = std::f64::consts::TAU * f64::from(i) / 20_000.0;
+                let (_, cos) = math::sin_cos(theta);
+                let w = math::exp(k * (cos - 1.0));
+                num += w * cos;
+                den += w;
+            }
+            let ratio = bessel_i1_over_i0(k);
+            assert!(
+                (ratio - num / den).abs() < 1e-12,
+                "k {k}: {ratio} against {}",
+                num / den
+            );
+        }
     }
 
     #[test]
