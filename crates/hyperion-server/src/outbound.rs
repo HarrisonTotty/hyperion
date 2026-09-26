@@ -372,17 +372,14 @@ mod tests {
     use crate::limits::{OUTBOUND_BYTES, WRITE_TIMEOUT};
     use crate::requests::{request_error, to_frame};
     use crate::testing::{
-        CLOGGING_BYTES, Client, Harness, Scripted, WAIT, body, bulky_response, clogging_frame_len,
-        response_frame_len, small_response,
+        CLOGGING_BYTES, Client, Harness, NEVER, Scripted, WAIT, body, bulky_response,
+        clogging_frame_len, response_frame_len, small_response,
     };
     use crate::ws::ConnectionLimits;
 
     /// A write timeout short enough for a test to wait out. A write to a client that reads
     /// completes in the first poll, so only a stuck writer reaches it.
     const SHORT_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
-
-    /// Longer than any test runs, for a limit that a test must not reach.
-    const NEVER: Duration = Duration::from_secs(3600);
 
     /// The server's limits, with the given budget and write timeout.
     fn limits(outbound_bytes: usize, write_timeout: Duration) -> ConnectionLimits {
@@ -948,11 +945,66 @@ mod tests {
         harness.stop().await;
     }
 
-    /// A write timeout long enough for a test to hold requests behind the frame that sticks the
-    /// writer before it runs out: it bounds a few steps on loopback, as [`WAIT`] bounds each one.
-    /// Each test that uses it checks that nothing timed out before it was ready, so that a slow
-    /// run fails rather than testing something else.
+    /// The write timeout a test first holds requests behind the frame that sticks the writer
+    /// with: long enough for the few steps on loopback that this takes on an idle machine, and
+    /// short enough to wait out. A loaded machine can take longer, so see
+    /// [`with_holding_write_timeout`].
     const HOLDING_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+
+    /// The longest write timeout [`with_holding_write_timeout`] tries: well inside [`WAIT`], which
+    /// bounds the wait for it to run out.
+    const LONGEST_HOLDING_WRITE_TIMEOUT: Duration = Duration::from_secs(16);
+
+    /// How a run of a scenario under a write timeout went.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Attempt {
+        /// The scenario was ready before the write timed out, and checked everything.
+        Done,
+        /// The write timed out before the scenario was ready, so the run tested nothing.
+        TimedOutFirst,
+    }
+
+    /// Runs `scenario` under [`HOLDING_WRITE_TIMEOUT`], and again under one four times as long
+    /// each time the write timed out before the scenario was ready, up to
+    /// [`LONGEST_HOLDING_WRITE_TIMEOUT`].
+    ///
+    /// Every other step waits on an event, but the write timeout starts with the write, and the
+    /// scenario has to hold requests behind the writer before it runs out: a race against the
+    /// clock that a loaded machine can lose. A run that lost it is not a failure of the server,
+    /// only of the setup, so it is run again with more time rather than failed; a run that won
+    /// checks everything. Only a scenario still not ready within the longest timeout fails.
+    async fn with_holding_write_timeout<F, Run>(mut scenario: F)
+    where
+        F: FnMut(Duration) -> Run,
+        Run: Future<Output = Attempt>,
+    {
+        let mut write_timeout = HOLDING_WRITE_TIMEOUT;
+        while scenario(write_timeout).await == Attempt::TimedOutFirst {
+            assert!(
+                write_timeout < LONGEST_HOLDING_WRITE_TIMEOUT,
+                "the write timed out before the test was ready, even under {write_timeout:?}"
+            );
+            write_timeout *= 4;
+        }
+    }
+
+    /// Ends a run whose write timed out before it was ready: the client goes, and the server
+    /// shuts down, still checking that nothing outlived it.
+    ///
+    /// # Panics
+    ///
+    /// If no write timed out, since then something else ended the run early.
+    async fn timed_out_first(harness: Harness, slow: Client) -> Attempt {
+        // Counted before the connection lets go of its requests, so a call found dropped has it.
+        assert_eq!(
+            harness.server().stats().outbound().write_timeouts(),
+            1,
+            "the run ended before it was ready, and not because the write timed out"
+        );
+        drop(slow);
+        harness.stop().await;
+        Attempt::TimedOutFirst
+    }
 
     /// Duplicates of a request in flight that a test sends behind the frame that sticks the
     /// writer: twice what the outbound queue holds. Each is refused with the connection-level
@@ -969,10 +1021,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn requests_held_when_a_write_times_out_are_abandoned_and_never_sent() {
+        with_holding_write_timeout(held_when_a_write_times_out).await;
+    }
+
+    async fn held_when_a_write_times_out(write_timeout: Duration) -> Attempt {
         // The close waits for the client, which reads again only after the timeout.
         let limits = ConnectionLimits {
             close_timeout: NEVER,
-            ..limits(64 << 10, HOLDING_WRITE_TIMEOUT)
+            ..limits(64 << 10, write_timeout)
         };
         let (handler, mut calls) = Scripted::new();
         let harness = Harness::start_with_limits(handler, limits).await;
@@ -983,13 +1039,22 @@ mod tests {
             finishing.push(calls.next().await);
         }
         harness.stick_writer(&mut calls, &mut slow, 1).await;
-        for call in finishing {
-            assert!(call.respond(small_response()), "the write timed out first");
+        // A call whose task has gone was cancelled with its connection, which the write's timeout
+        // closed.
+        if !finishing
+            .into_iter()
+            .all(|call| call.respond(small_response()))
+        {
+            return timed_out_first(harness, slow).await;
         }
         let counters = harness
-            .outbound_until(|counters| counters.held_requests() == 2)
+            .outbound_until(|counters| {
+                counters.held_requests() == 2 || counters.write_timeouts() > 0
+            })
             .await;
-        assert_eq!(counters.write_timeouts(), 0, "the write timed out first");
+        if counters.write_timeouts() > 0 {
+            return timed_out_first(harness, slow).await;
+        }
 
         // The write times out with both held: they are let go, and end with their connection.
         harness
@@ -1028,13 +1093,18 @@ mod tests {
             (0, 0, 1)
         );
         harness.stop().await;
+        Attempt::Done
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_write_timeout_frees_a_connection_waiting_to_queue_a_frame() {
+        with_holding_write_timeout(frees_a_connection_waiting_to_queue).await;
+    }
+
+    async fn frees_a_connection_waiting_to_queue(write_timeout: Duration) -> Attempt {
         let limits = ConnectionLimits {
             close_timeout: NEVER,
-            ..limits(64 << 10, HOLDING_WRITE_TIMEOUT)
+            ..limits(64 << 10, write_timeout)
         };
         let (handler, mut calls) = Scripted::new();
         let harness = Harness::start_with_limits(handler, limits).await;
@@ -1044,26 +1114,30 @@ mod tests {
         slow.request(3, body(3)).await;
         let mut third = calls.next().await;
         harness.stick_writer(&mut calls, &mut slow, 1).await;
-        assert!(
-            second.respond(small_response()),
-            "the write timed out first"
-        );
-        harness
-            .outbound_until(|counters| counters.held_requests() == 1)
+        if !second.respond(small_response()) {
+            return timed_out_first(harness, slow).await;
+        }
+        let counters = harness
+            .outbound_until(|counters| {
+                counters.held_requests() == 1 || counters.write_timeouts() > 0
+            })
             .await;
+        if counters.write_timeouts() > 0 {
+            return timed_out_first(harness, slow).await;
+        }
         // Refusals fill the queue until the connection waits to queue one more, and so stops
-        // reading, with request 2 held and request 3 running.
+        // reading, with request 2 held and request 3 running. A write that times out first stops
+        // the refusals short, so either ends the wait.
         for _ in 0..duplicates() {
             slow.request(3, body(3)).await;
         }
-        harness
-            .requests_until(|counters| counters.refused() >= read_until_full())
-            .await;
-        assert_eq!(
-            harness.server().stats().outbound().write_timeouts(),
-            0,
-            "the write timed out first"
-        );
+        tokio::select! {
+            _ = harness.requests_until(|counters| counters.refused() >= read_until_full()) => {}
+            _ = harness.outbound_until(|counters| counters.write_timeouts() > 0) => {}
+        }
+        if harness.server().stats().outbound().write_timeouts() > 0 {
+            return timed_out_first(harness, slow).await;
+        }
 
         // The writer, timed out, drops the queued refusals, so the connection queues the one it
         // waited on, sees the timeout, and closes without reading further.
@@ -1100,6 +1174,7 @@ mod tests {
             (0, 0, 1)
         );
         harness.stop().await;
+        Attempt::Done
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

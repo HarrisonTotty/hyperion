@@ -29,7 +29,18 @@ use crate::ws::ConnectionLimits;
 use crate::{AppState, Server, ServerConfig, ServerStats};
 
 /// Upper bound on any single wait.
-pub(crate) const WAIT: Duration = Duration::from_secs(5);
+///
+/// Only a hang should reach it, so it is generous. The longest step here is the server
+/// serialising [`CLOGGING_BYTES`] on the runtime in a debug build, before the response is
+/// counted: measured 2026-09-25 at 0.41–0.47 s alone and 0.75–1.4 s with the lib's tests running
+/// together, on an idle machine. The five seconds this once was ran out for three `ws` tests at a
+/// load average of 15–19, and for every `outbound` test that sticks a writer on a starved core.
+/// No test waits it out: every liveness bound a test relies on is one of the connection's own
+/// limits, which are far shorter, or [`NEVER`].
+pub(crate) const WAIT: Duration = Duration::from_secs(60);
+
+/// Longer than any test runs, for a connection limit that a test must not reach.
+pub(crate) const NEVER: Duration = Duration::from_secs(3600);
 
 /// A server with an injected handler, serving on `127.0.0.1` at a port the OS chose.
 #[derive(Debug)]

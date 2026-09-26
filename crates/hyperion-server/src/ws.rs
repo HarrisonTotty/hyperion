@@ -403,7 +403,7 @@ mod tests {
     use super::*;
     use crate::limits::OUTBOUND_QUEUE_FRAMES;
     use crate::testing::{
-        CLOGGING_BYTES, Call, Calls, Client, Harness, Scripted, body, bulky_response,
+        CLOGGING_BYTES, Call, Calls, Client, Harness, NEVER, Scripted, body, bulky_response,
         small_response,
     };
     use crate::{Server, ServerConfig};
@@ -668,6 +668,18 @@ mod tests {
         u64::try_from(OUTBOUND_QUEUE_FRAMES + 1).expect("the queue is small")
     }
 
+    /// A harness whose connections never time a write out. A test that sticks a writer is about
+    /// the queue behind it, not the write timeout, and under load the steps it takes before the
+    /// client reads again can outlast [`WRITE_TIMEOUT`]; the write timeout's own tests are in
+    /// [`outbound`](crate::outbound).
+    async fn harness_without_write_timeout(handler: Scripted) -> Harness {
+        let limits = ConnectionLimits {
+            write_timeout: NEVER,
+            ..ConnectionLimits::default()
+        };
+        Harness::start_with_limits(handler, limits).await
+    }
+
     /// Makes `client`'s server-side writer stick on a response the client does not read. Then
     /// sends request 2, which stays in flight, [`CLOGGING_DUPLICATES`] duplicates of it and
     /// request 3, and waits until the connection has stopped reading, part-way through the
@@ -693,7 +705,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_full_outbound_queue_stops_the_reader_and_loses_nothing() {
         let (handler, mut calls) = Scripted::new();
-        let harness = Harness::start(handler).await;
+        let harness = harness_without_write_timeout(handler).await;
         let mut slow = harness.connect_slow_reader().await;
         let second = clog(&harness, &mut calls, &mut slow).await;
 
@@ -747,11 +759,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shutdown_is_not_held_up_by_a_connection_whose_queue_is_full() {
         let (handler, mut calls) = Scripted::new();
-        let harness = Harness::start(handler).await;
+        let harness = harness_without_write_timeout(handler).await;
         let mut slow = harness.connect_slow_reader().await;
         let mut second = clog(&harness, &mut calls, &mut slow).await;
-        // Neither the queued frames nor the close frame behind them can be sent; the connection
-        // gives up after `CLOSE_TIMEOUT`, and `stop` checks that nothing is left.
+        // Neither the queued frames nor the close frame behind them can be sent, and no write
+        // times out; the connection gives up after `CLOSE_TIMEOUT`, and `stop` checks that
+        // nothing is left.
         let state = Arc::clone(harness.state());
         harness.stop().await;
         second.dropped().await;
@@ -763,7 +776,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_client_that_stops_reading_and_then_disconnects_frees_its_connection() {
         let (handler, mut calls) = Scripted::new();
-        let harness = Harness::start(handler).await;
+        let harness = harness_without_write_timeout(handler).await;
         let mut slow = harness.connect_slow_reader().await;
         let mut second = clog(&harness, &mut calls, &mut slow).await;
         // Unread data makes the client's end reset the connection, which fails the stuck write.
