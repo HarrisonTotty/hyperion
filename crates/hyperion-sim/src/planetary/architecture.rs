@@ -73,18 +73,19 @@
 //!   least 42%" (ruling 48, point f).
 //! - The early M dwarfs (ruling 85.4): about hosts of 0.35–0.6 M☉, blended over 0.30–0.35 and
 //!   0.60–0.70 M☉ ([`early_m_dwarf_share`]), `Barren` and `TerrestrialOnly` take no weight, so
-//!   every such host draws a system (Hsu, Ford and Terrien 2020, MNRAS 498, 2249, §5), 55% of its
-//!   chains the hot variant and the rest cold chains of about five planets inside 200 days
-//!   (Ballard and Johnson 2016, ApJ 816, 66, §3.3), the hot variant with the cold chain's count,
-//!   since Ballard and Johnson's single-transiting mode is a transiting multiplicity (ruling
-//!   87.2), their first periods calibrated to Dressing and Charbonneau's (2015, Table 5) 19%
-//!   inside 10 days (P14.T5's constants).
+//!   every such host draws a system (Hsu, Ford and Terrien 2020, MNRAS 498, 2249, §5), 43% of its
+//!   chains the hot variant and the rest cold chains of about six planets inside 200 days
+//!   (Ballard and Johnson 2016, ApJ 816, 66, §3.3 and Table 1: cold chains in at most 57%), the
+//!   hot variant intrinsically one or two planets, as Sagear and Ballard (2023) model the
+//!   dichotomy (ruling 102.4, withdrawing ruling 87.2's cold chain's count), their first periods
+//!   calibrated to Dressing and Charbonneau's (2015, Table 5) 19% inside 10 days (P14.T5's
+//!   constants).
 //! - `CompactMulti`'s (M ÷ M☉)^−3.0: re-fitted by ruling 60 on P14.T10.b's placed M dwarfs (plan
 //!   14 had −0.9, P14.T4 −1.5, which placed gave 0.98 small planets per M dwarf), to Dressing and
 //!   Charbonneau's (2015, ApJ 807, 45, abstract) 2.5 ± 0.2 small planets per M dwarf (1–4 R⊕,
 //!   under 200 days), hosts of median 0.47 R☉ (§2): placed primaries of 0.35–0.6 M☉ with their
 //!   companions had 1.90, inside T10.b's 1.8–3.2, together with P14.T7's host-scaled masses and
-//!   Class 0 budget, before ruling 66's floor (2.83 now, after ruling 87.2's hot variant);
+//!   Class 0 budget, before ruling 66's floor (1.99 now, after ruling 102);
 //!   −2.5 gave 1.75. Planets of 1–8 M⊕ (about 1–2.8 R⊕) at 2–50 days are then 2.4
 //!   times as common about those M dwarfs as about FGK stars, between Mulders, Pascucci and Apai's
 //!   (2015, ApJ 798, 112, abstract) "twice as frequently as around G stars, and thrice as
@@ -837,18 +838,20 @@ pub const EARLY_M_DWARF_BLEND: (SolarMasses, SolarMasses) =
 /// How far a host of `mass` takes the early M dwarfs' systems (ruling 85.4): 1 inside
 /// [`EARLY_M_DWARF_MASSES`], 0 outside [`EARLY_M_DWARF_BLEND`], and linear in ln M between.
 ///
-/// Ballard and Johnson (2016, ApJ 816, 66, §3.3) find 45% of Kepler's planet-hosting M dwarfs with
-/// about five coplanar planets inside 200 days and 55% single or inclined, and Hsu, Ford and
+/// Ballard and Johnson (2016, ApJ 816, 66, §3.3 and Table 1) find 45 (+12 −23)% of Kepler's
+/// planet-hosting M dwarfs with about five coplanar planets inside 200 days and the rest single or
+/// inclined, and Hsu, Ford and
 /// Terrien (2020, MNRAS 498, 2249, §5) the planets consistent with every early M dwarf hosting a
 /// system. Inside the range, then, `Barren` and `TerrestrialOnly` take no weight (the table's
-/// giant classes keep theirs), the compact chain's hot variant takes 55% of chains
-/// ([`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]) with the cold chain's count
-/// ([`EARLY_M_DWARF_HOT_VARIANT_COUNT`]; ruling 87.2), and its cold chain places about five
+/// giant classes keep theirs), the compact chain's hot variant takes 43% of chains
+/// ([`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]) with one or two planets (ruling 102.4, which
+/// withdraws ruling 87.2's cold chain's count), and its cold chain places about six
 /// planets inside 200 days ([`CHAIN_COUNT`]'s factor), starting closer in
-/// ([`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]).
+/// ([`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]); its masses step outward less (P14.T7's
+/// `M_DWARF_OUTWARD_STEP_DEX`, ruling 102.2), and its inner planets are rocky unless they draw
+/// an envelope (P14.T11's `derive::m_dwarfs`, ruling 102.1).
 ///
 /// [`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]: template::EARLY_M_DWARF_HOT_VARIANT_PROBABILITY
-/// [`EARLY_M_DWARF_HOT_VARIANT_COUNT`]: template::EARLY_M_DWARF_HOT_VARIANT_COUNT
 /// [`CHAIN_COUNT`]: template::CHAIN_COUNT
 /// [`EARLY_M_DWARF_FIRST_PERIOD_SCALE`]: template::EARLY_M_DWARF_FIRST_PERIOD_SCALE
 ///

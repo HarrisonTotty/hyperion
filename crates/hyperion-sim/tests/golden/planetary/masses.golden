@@ -463,7 +463,7 @@ WarmGiant group 1 ×1 characteristic = 0x400f52285ba44f22  # 3.9151160392301714
 WarmGiant group 1 ×1 cap Truncated
 WarmGiant group 1 ×4 characteristic = 0x400f52285ba44f22  # 3.9151160392301714
 WarmGiant group 1 ×4 cap Truncated
-WarmGiant group 1 ×4 [0] = 0x3fff136e0e664336  # 1.9422436296919847
+WarmGiant group 1 ×4 [0] = 0x40031da7e4ae0035  # 2.389480387268146
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap GasMass
@@ -483,10 +483,10 @@ SubstellarCompact group 0 ×1 cap AsDrawn
 SubstellarCompact group 0 ×1 [0] = 0x3ff08110e42abf56  # 1.0315102494023072
 SubstellarCompact group 0 ×4 characteristic = 0x401afc17801f0f87  # 6.74618339719371
 SubstellarCompact group 0 ×4 cap AsDrawn
-SubstellarCompact group 0 ×4 [0] = 0x3ff02ce150969765  # 1.0109570644358084
-SubstellarCompact group 0 ×4 [1] = 0x3fe3e28197e88d51  # 0.6213996855698644
-SubstellarCompact group 0 ×4 [2] = 0x3fe43ab0889fb989  # 0.6321642559467345
-SubstellarCompact group 0 ×4 [3] = 0x3fe57b6095cde3c2  # 0.6713107038368593
+SubstellarCompact group 0 ×4 [0] = 0x3ff04a181d1b166a  # 1.0180894028611882
+SubstellarCompact group 0 ×4 [1] = 0x3fe3eaf8b62cb86e  # 0.6224330480670355
+SubstellarCompact group 0 ×4 [2] = 0x3fe43449f0745b8a  # 0.6313829132439974
+SubstellarCompact group 0 ×4 [3] = 0x3fe56ba4123378e0  # 0.6693897586335673
 
 disc: a metal-poor solar disc
 solid budget = 0x403e41ccc8eee3b0  # 30.25703101951848

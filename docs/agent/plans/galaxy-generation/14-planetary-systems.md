@@ -862,6 +862,9 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
 - _As built (ruling 94):_ the chains' first-period factor holds at every star up to 0.6 M☉
   (`first_period_share`), and the hot variant's eccentricities narrow with its count
   (`HotVariant::eccentricity_for`); see "Risks and open points", the `calib5` bullet.
+- _As built (ruling 102):_ the hot variant has one or two planets about every host again
+  (`EARLY_M_DWARF_HOT_VARIANT_COUNT` and the blended count are gone), the early M dwarfs' hot share
+  is 0.43 and their first-period factor 0.50; see "Risks and open points", the `calib6` bullet.
 
 ### Phase B: placement
 
@@ -938,6 +941,10 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     (`median_host_mass`, `MEDIAN_HOST_MASS_FLOOR`); `σ_b` 0.513 and `σ_w` 0.17. Test (b): log
     radii 0.636, log masses 0.859, outer heavier 0.746, larger 0.642. See "Risks and open points",
     the `calib5` bullet.
+  - _As built (ruling 102):_ about stars under 0.6 M☉ (blended away by 0.70 M☉) the drift-fed
+    step is 0.15 dex (`M_DWARF_OUTWARD_STEP_DEX`, `outward_step(group, disc)`). The taper stays
+    on the members: moved to the centre it broke test (a) and (b). See "Risks and open points",
+    the `calib6` bullet.
 
 #### P14.T8 Class placers
 
@@ -987,6 +994,8 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
     0.046 × (n ÷ 5)^−1.74 for n ≥ 3, n its reserved count; each planet records its law
     (`PlacedPlanet::eccentricity_law`); `hot_chain_eccentricities_narrow_with_their_count` tests
     it. See "Risks and open points", the `calib5` bullet.
+  - _As built (ruling 102.4):_ with one or two planets a hot variant always takes the half-normal
+    0.3; `hot_variants_have_one_or_two_planets_at_the_half_normal_law` replaces the count test.
 
 #### P14.T9 Stable zones in multiple systems
 
@@ -1048,6 +1057,11 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
   - _As built (ruling 94):_ the late M dwarfs are tested against Ribas et al. 2023, Kaminski et
     al. 2025 and Ment and Charbonneau 2023, and the early M dwarfs' hot chains' rescaled share is
     asserted; see "Risks and open points", the `calib5` bullet.
+  - _As built (ruling 102):_ the M dwarfs' radius checks read the derivation's radius
+    (`derive::formation_composition`); the rocky branch's anchors, Ment and Charbonneau's
+    flat-radius bound and Ballard and Johnson's transiting singles are asserted, the hot chains'
+    rescaled share and Pascucci et al.'s slope are pinned findings. See "Risks and open points",
+    the `calib6` bullet.
 
 ### Phase C: derivation
 
@@ -1084,6 +1098,12 @@ Solar System values without a generator.
     `giant_cooling` at 0.3 M_J to 5%.
   - _Files:_ `planetary/derive/{radius, composition}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::radius planetary::derive::composition`.
+  - _As built (ruling 102.1):_ about stars under 0.6 M☉ (blended away by 0.70 M☉) a body formed
+    inside the snow line is rocky unless it draws an envelope with a probability rising with its
+    mass (`derive::m_dwarfs`: `rocky_host_share`, `envelope_probability`, `envelope_share`), its
+    one rank split at that probability in `derive_body`'s formation step;
+    `derive::formation_composition` exposes that step. See "Risks and open points", the `calib6`
+    bullet.
 
 #### P14.T12 Irradiation, equilibrium temperature and the habitable zone
 
@@ -4810,3 +4830,116 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - T30.a: `--lib planetary::system::tests::generate`;
   - T22.b: `--test planetary_properties -- satellites`;
   - T30.c: add `--test planetary_golden the_solar_like`.
+- **Ruling 102, M dwarfs' inner planets rocky and the singles intrinsic, as built (`calib6`,
+  round 9).** Papers under `_orchestration/research/latem2/`, `latem/` and `calib3-papers/`. The
+  ruling amends P14.T4.b, T5, T7, T8.d, T10.b and T11. Before (ruling 94, `calib5`) → after, on
+  T10.b's placed sample; windows in brackets. No window was widened.
+  - _102.1, the rocky branch._ `derive::m_dwarfs`: about a star under 0.6 M☉, blended away by
+    0.70 M☉ (`rocky_host_share`; 0 below 0.08 M☉, so brown dwarfs and the circumplanetary discs
+    that regular moons are derived in keep the ordinary solve), a body formed inside the snow line
+    takes an envelope with probability `envelope_probability(m, M★)`, a logistic of width
+    0.15 dex about a half mass of 5 M⊕ × (M★ ÷ 0.35 M☉)^−1.5 (14.8 M⊕ at 0.17 M☉, 2.9 M⊕ at
+    0.5 M☉), capped by Chen and Kipping's own share above the rock curve (`envelope_share`).
+    Otherwise it is rocky: the observed core-mass-fraction spread and Zeng's radius at it, as
+    every rocky outcome is. `derive_body`'s formation step (`rocky_branch`) splits the body's
+    one rank at 1 − p, so the radius stays continuous and increasing in the rank (design
+    note 8), and FGK hosts are unchanged bit for bit. `derive::formation_composition` exposes
+    the step, and T10.b's M-dwarf radius checks read it (`derived`). The host slope is a
+    calibration. With one half mass, the anchors pull apart. The late M dwarfs' planets above
+    1.5 R⊕ are 83% dry rock, since rock of low core mass fraction reaches 1.5 R⊕ at about
+    3.3 M⊕, while the early M dwarfs need envelopes.
+    - Late M, every primary of 0.1–0.3 M☉ at 0.5–7 days: above 1.5 R⊕ 0.197 (Chen and
+      Kipping, a finding) → 0.117 of the planets of 0.5 R⊕ or more [0.02–0.12, asserted]. At
+      1.4 R⊕ or more, 0.092 per star [≤ 0.16]. Above 1.5 R⊕, 0.131 → 0.057 per star (Ment's 1σ
+      limit 0.073, median 0.043); of those, enveloped 17%, dry 83%, formed beyond the snow line
+      0.1%.
+    - Early M, every primary of 0.4–0.6 M☉ at 0.5–7 days: 1.5–4 R⊕ 0.120 per star
+      [0.10–0.26], 0.5–1.5 R⊕ 0.382 [0.19–0.39].
+    - Ment's 0.5–2 R⊕ at 1–7 days 0.591 → 0.479 [0.35–1.0].
+  - _102.2, the small-radius ratio._ After 102.1 alone, 0.5–0.9 : 0.9–1.4 R⊕ was 0.82, over
+    model 5's flat bound. So the mass law was retuned: the drift-fed step about stars under
+    0.6 M☉, blended away by 0.70 M☉, is 0.21 → **0.15 dex** (`M_DWARF_OUTWARD_STEP_DEX`;
+    `outward_step` now takes the disc). The ratio is now 0.64 [≤ 0.8, asserted]; model 6 gives
+    0.22. On model 3's bins (0.5–1 : 1–1.5 R⊕) it is 0.93 against 0.30, reported. A smaller step
+    put the late M dwarfs' share above 1.5 R⊕ over 0.12 (0.124 at 0.13), and a larger one the
+    early M dwarfs' 0.5–1.5 R⊕ over 0.39 (0.40 at 0.17).
+  - _102.3, the transiting singles._ `transit_multiplicity`: early M primaries, planets of 1 R⊕
+    or more inside 200 days, sixteen lines of sight each, b < 1. One planet shows in 0.722
+    [0.58–0.76, asserted], two in 0.174 (Ballard's 0.16) and three or more in 0.104 (0.17).
+    Under the old count over every planet, `calib5` had 0.330.
+  - _102.4, the hot variant._ The early M dwarfs' hot variant is back to 1–2 planets
+    (`EARLY_M_DWARF_HOT_VARIANT_COUNT`, `HotVariant::early_m_dwarf_count` and
+    `draw_blended_count` are gone). Its share is 0.55 → 0.43, so cold chains take Ballard's
+    upper bound of 0.57. The first-period factor is re-fitted 0.38 → 0.50 (a 6-day break) to
+    Dressing and Charbonneau's 0.47 at 0.5–10 days: 0.465 → 0.460 [0.37–0.57]. The cold chains
+    place 8.2 members, 5.9 of them inside 200 days (Ballard's N ≤ 8) and 3.8 of 1–20 M⊕.
+    - **Tension, for the orchestrator:** small planets per single early M dwarf (or one wider
+      than 200 au) inside 200 days fall 3.584 → 2.574 [2.9–4.4]. That is now a pinned finding
+      (2.53–2.61), not a check. With every other law as `calib5` left it, it was 2.24. A
+      narrower between-system width about the early M dwarfs (σ_b 0.33) reached 2.905, but no
+      ruling grants that dial, and it would leave ruling 85.1's 0.54 dex; it was built,
+      measured and withdrawn.
+    - Every primary 2.760 → 1.985 [1.8–3.2]; Hsu et al.'s 0.5–4 R⊕ at 0.5–256 days 4.67 →
+      2.97, a note, now under their 4.2–8.4.
+    - Ruling 94.6's check, hot chain planets rescaled to the spacing floor [< 0.10], was set for
+      chains of five or more. With one or two planets at the half-normal 0.3, it is 0.0008 →
+      0.247, as about an FGK star (0.245), so it is now a pinned finding (0.24–0.28).
+    - `HotVariant::eccentricity_for`'s law for n ≥ 3 is kept but unreached. The unit test
+      `hot_variants_have_one_or_two_planets_at_the_half_normal_law` replaces the count test.
+  - _102.5, Pascucci's slope._ `pascucci_statistics`: K and G primaries (0.7–1.0 M☉), planets
+    inside 100 days of 1–6 R⊕ by Chen and Kipping's radius. dN ÷ d log q over (2.8–8) × 10⁻⁵ is
+    −0.36 against −2.9 ± 0.4, and 0.067 of the (0.5–8) × 10⁻⁵ window's planets lie above
+    6 × 10⁻⁵ against about 0.02. Within 0.02 dex under 0.1 M_J: FGK 0.63%, early M 0.04%, late M
+    0.01% (noted, not asserted; the ruling accepts the cap).
+    - **Fired, and the move is not kept; for the orchestrator.** Built on the centre (the
+      characteristic mass's law tapered as the members' was, the members truncated at a giant's
+      mass), the slope becomes −1.2 to −1.3 and the share above 6 × 10⁻⁵ 0.035. T10.b held.
+    - But P14.T7's median falls 7.7 → 6.28 M⊕ [6.9–8.5], and its outer-heavier share rises
+      0.746 → 0.78 [0.55–0.75].
+    - Centring the tapered law on Wu's median restores the median, since the law loses its upper
+      tail. Then no split of σ_b, σ_w and the step near 0.54 dex holds T7(b)'s three windows
+      together: the log-radius correlation [0.60–0.70], outer heavier and outer larger
+      [0.633–0.675].
+    - The best split (step 0.165, σ_b 0.52, σ_w 0.16) passed T10.b whole and outer heavier at
+      0.750, but outer larger fell to 0.626.
+    - So the taper stays on the members, and the slope is pinned as a finding (−0.42 to −0.33).
+  - _102.6, fired, not kept; for the orchestrator._ Kaminski's 3–10 M⊕ bin fell 0.065 → 0.060,
+    under 0.03–0.3's lower half. Built (the ceiling 20 M⊕ × max(M★, 0.35 M☉)), it rose to 0.145,
+    still in the lower half. It also took Kaminski's 0.5–3 M⊕ to 0.42 [0.5–1.4] and the late
+    M share above 1.5 R⊕ to 0.18 [0.02–0.12], so it was withdrawn.
+  - _Every other T10.b figure, before → after:_
+    - FGK: small planets 0.649 → 0.649; hot Jupiters 0.71%; Cumming's giants 9.98%; η⊕ 0.393;
+      log radii 0.660 → 0.660, above 1 R⊕ 0.614 → 0.615; outer larger 0.651 → 0.649; pairs at
+      10 R_H or more 0.993.
+    - Late M: Ribas 0.502 → 0.449 [0.35–0.85] and 1.067 → 1.059 [0.35–1.1]; Sabotta's figures
+      0.490 and 1.019 → 0.439 and 1.021; Kaminski's 0.5–3 M⊕ 0.632 → 0.542 [0.5–1.4].
+    - Hardegree-Ullman et al. 1.059 → 0.751 [0.70–1.89], multiples 0.319 → 0.200 [0.11–0.89].
+    - Hosts of 0.1–0.5 M☉: multiples 0.676 → 0.593, giants 1.79%. The 0.65–0.75 M☉ blend
+      1.186 → 1.150 (pinned 1.14–1.21). \[Fe/H\] −0.8 0.447; −2 0.006; giants' slope 2.025;
+      close binaries 0.126 → 0.125.
+    - Anchors unmoved; single Suns' log radii 0.654 → 0.658.
+  - _Other tests._ The Ment share counts planets of 0.5 R⊕ or more, their survey's reach.
+    `compact_groups_about_suns_have_wu_s_median_mass` keeps its halving at 0.5 M☉.
+    `members_step_outward_about_the_characteristic_mass` reads `outward_step`.
+  - _Goldens, at 11, joining the version-12 batch:_
+    - `planetary/architecture`: the early-M hot count's lines are gone; the hot share at 0.32
+      and 0.48 M☉ and the first-period factor at every host mass are new.
+    - `planetary/classes`: the 0.4 M☉ host's hot chains of one or two, its chains' masses by the
+      step, and first periods.
+    - `planetary/masses`: the 0.3 M☉ disc's warm-giant companions and substellar-template group,
+      by the step.
+    - Seven T32 systems:
+      - the M dwarf (0.138 M☉): the first period and step. Its planets are Rocky, Rocky, Rocky,
+        SubNeptune, SubNeptune, IceGiant (were Rocky, Rocky, then three SubNeptunes and the IceGiant): c and d
+        now rocky, e and f formed beyond its snow line;
+      - filler A (0.335 M☉) and the halo star (0.400 M☉): the hot variant, the step and the
+        first period;
+      - filler B (0.677 M☉): the blend's share;
+      - the triple (its 0.397 and 0.614 M☉ stars) and the close binary (its 0.411 M☉ star, whose
+        zone reserves fewer slots, moving the circumbinary planets' draws);
+      - the wide binary: B (0.687 M☉) is in the blend, and two rocky planets' core mass fractions
+        move in the last bit.
+    - The hot Jupiter, the Solar-like system, the eccentric giant, the subgiant, the red giant,
+      the fallback black hole and filler C do not move.
+    - `pinned_ids_satisfy_their_own_predicates` holds. The slow search's result is in this
+      lane's report. The descriptions in `GOLDEN_SYSTEMS` are left to the bump.

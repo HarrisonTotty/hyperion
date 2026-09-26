@@ -15,6 +15,7 @@
 //!   (P14.T12.a).
 //! - [`habitable_zone`](mod@habitable_zone): Kopparapu et al.'s habitable zone of a host or of a
 //!   multiple system (P14.T12.b).
+//! - [`m_dwarfs`]: the rocky branch of M dwarfs' inner planets (ruling 102.1).
 //! - [`limits`]: Roche limits, Hill radii, the stability limit of satellites and the heaviest moon
 //!   a close-in planet can keep (P14.T15).
 //!
@@ -33,7 +34,10 @@
 //!    rocky planets' ([`rocky_core_mass_fraction`], ruling 53) and its radius Zeng et al.'s at it.
 //!    Above that curve the rank places the body within Chen and Kipping's scatter at its mass, and
 //!    that radius is solved into a composition on the side of the disc's snow line where it
-//!    formed, at the flux of its host's zero-age luminosity.
+//!    formed, at the flux of its host's zero-age luminosity. About a host under 0.6 M☉ (blended
+//!    away by 0.70 M☉) a body formed inside the snow line is rocky unless it draws an envelope,
+//!    with a probability rising with its mass ([`m_dwarfs`], ruling 102.1); its rank then splits
+//!    the window at that probability instead of at the rock curve's own rank.
 //! 2. **Irradiation** (T12): the flux from its hosts at the time and the equilibrium temperature,
 //!    with a Bond albedo of 0.3 until T13's atmospheres close the loop (T13 will iterate here).
 //! 3. **The radius at the time** (T11): an envelope's radius at the body's age and present flux
@@ -59,6 +63,7 @@ pub mod envelope;
 pub mod habitable_zone;
 pub mod irradiation;
 pub mod limits;
+pub mod m_dwarfs;
 pub mod radius;
 pub mod rocky;
 
@@ -99,7 +104,7 @@ use crate::time::UniverseTime;
 use crate::units::consts::GM_EARTH;
 use crate::units::{
     EarthFluxes, EarthMasses, EarthRadii, Gigayears, JupiterMasses, Kelvin, Kilograms,
-    KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, Watts, Years,
+    KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, SolarMasses, Watts, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -863,7 +868,12 @@ fn formation(
         primordial.semi_major_axis(),
         primordial.eccentricity().value(),
     );
+    let host = disc.host_mass();
     match radius_window(mass, formed, formation_flux) {
+        Ok(window) if formed == SnowLineSide::Inside && m_dwarfs::rocky_host_share(host) > 0.0 => {
+            let (rank, solved) = rocky_branch(placed.radius_rank, &window, host, formation_flux)?;
+            Ok((formed, rank, Some(solved)))
+        }
         Ok(window) => {
             let rank = radius_rank_in_window(placed.radius_rank, &window);
             let solved = match rocky_core_mass_fraction(rank, &window) {
@@ -880,6 +890,81 @@ fn formation(
         Err(SolveCompositionError::GiantPlanet { .. }) => Ok((formed, placed.radius_rank, None)),
         Err(other) => Err(other.into()),
     }
+}
+
+/// The formation solve of a body formed inside the snow line about a host of `host` that takes the
+/// rocky branch (ruling 102.1; [`m_dwarfs`]): its confined rank and composition from its drawn
+/// rank `drawn`, in `window` at the flux `flux`.
+///
+/// Of the window, Chen and Kipping's distribution leaves a share e₀ above the rock curve. The body
+/// is enveloped with probability e = [`m_dwarfs::envelope_share`] of it instead: a drawn rank u
+/// under 1 − e is rocky at s = u ÷ (1 − e) of the rocky spread ([`rocky_core_mass_fraction`]'s
+/// share), and one above it takes Chen and Kipping's radius at (u − (1 − e)) ÷ e of their
+/// distribution above the rock curve, solved into its envelope. At a share of 0 this is the
+/// ordinary split, e = e₀; the confined rank returned is the one Chen and Kipping's distribution
+/// gives the same radius outcome, as [`radius_rank_in_window`]'s is.
+fn rocky_branch(
+    drawn: UnitUniform,
+    window: &RadiusWindow,
+    host: SolarMasses,
+    flux: EarthFluxes,
+) -> Result<(UnitUniform, SolvedComposition), DeriveBodyError> {
+    let mass = window.mass();
+    let least = chen_kipping_rank(mass, window.least());
+    let top = chen_kipping_rank(mass, window.dry_top());
+    let greatest = chen_kipping_rank(mass, window.greatest());
+    let span = greatest - least;
+    let own = if span > 0.0 {
+        ((greatest - top) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let enveloped = m_dwarfs::envelope_share(mass, host, own);
+    let rocky = 1.0 - enveloped;
+    let u = drawn.value();
+    let rank = |r: f64| {
+        UnitUniform::new(r.clamp(f64::MIN_POSITIVE, 1.0 - f64::EPSILON / 2.0))
+            .expect("a finite rank clamped into (0, 1) is a rank")
+    };
+    if u <= rocky {
+        let share = (u / rocky).clamp(0.0, 1.0);
+        let cmf =
+            rocky::core_mass_fraction_at_least(1.0 - share, window.dry_top_core_mass_fraction());
+        Ok((
+            rank(least + share * (top - least)),
+            dry_composition(mass, cmf),
+        ))
+    } else {
+        let above = rank(top + (u - rocky) / enveloped * (greatest - top));
+        let solved = composition(
+            mass,
+            radius_chen_kipping(mass, above),
+            SnowLineSide::Inside,
+            flux,
+        )?;
+        Ok((above, solved))
+    }
+}
+
+/// The composition a body is given at formation (P14.T11, ruling 102.1): the part of
+/// [`derive_body`] that its mass, primordial orbit, formation distance and rank fix in `disc`,
+/// whatever the time. `None` from 0.414 Jupiter masses, a giant's, which has no solve.
+///
+/// Its [`radius`](SolvedComposition::radius) is the body's at [`COMPOSITION_REFERENCE_AGE`] and
+/// the flux of its host's zero-age luminosity on its primordial orbit, the radius a survey of
+/// systems some Gyr old compares with.
+///
+/// [`COMPOSITION_REFERENCE_AGE`]: crate::planetary::params::COMPOSITION_REFERENCE_AGE
+///
+/// # Errors
+///
+/// As [`derive_body`]'s for what is fixed at formation: [`DeriveBodyError::Composition`] for a
+/// mass the solve refuses.
+pub fn formation_composition(
+    placed: &PlacedBody,
+    disc: &DiscProfile,
+) -> Result<Option<SolvedComposition>, DeriveBodyError> {
+    formation(placed, disc).map(|(_, _, solved)| solved)
 }
 
 /// A body's radius, mass fractions and core at the time (T11), and its giant's radius if it is
@@ -967,6 +1052,28 @@ pub(crate) mod solar {
     /// composition, the median draws and a lifetime of 3 Myr.
     pub(crate) fn solar_disc() -> DiscProfile {
         let (mass, composition) = (SolarMasses::new(1.0), Composition::SOLAR);
+        let coeffs = ZCoeffs::new(composition.z_fit());
+        let host = DiscHost::new(
+            mass,
+            composition.fe_h(),
+            zams::luminosity(mass, &coeffs),
+            zams::radius(mass, &coeffs),
+        )
+        .unwrap();
+        *disc::derive(
+            &host,
+            Megayears::new(3.0),
+            &DiscDraws::MEDIAN,
+            Truncation::NONE,
+        )
+        .profile()
+        .unwrap()
+    }
+
+    /// The zero-age disc of a host of `mass` M☉ at solar composition, with the median draws and a
+    /// lifetime of 3 Myr.
+    pub(crate) fn disc_of(mass: f64) -> DiscProfile {
+        let (mass, composition) = (SolarMasses::new(mass), Composition::SOLAR);
         let coeffs = ZCoeffs::new(composition.z_fit());
         let host = DiscHost::new(
             mass,
@@ -1744,5 +1851,98 @@ mod tests {
             pin(&mut w, name, &body);
         }
         golden!("planetary/derive_body", w.as_str());
+    }
+
+    /// Ruling 102.1: about an M dwarf a body formed inside the snow line is enveloped at the
+    /// branch's probability, its radius increasing in its rank and continuous across the split;
+    /// across the host blend the share moves from it to Chen and Kipping's own; and about hosts
+    /// from 0.70 M☉ the solve is the ordinary one, bit for bit.
+    #[test]
+    fn m_dwarfs_inner_planets_are_rocky_unless_they_draw_an_envelope() {
+        let a_au = 0.03;
+        for earths in [0.8, 2.0, 4.0, 6.0, 10.0] {
+            let mass = EarthMasses::new(earths);
+            let solve = |host: f64, u: f64| {
+                let disc = disc_of(host);
+                let body = placed(earths * EARTH_MASS_KG, a_au, 0.0, u);
+                formation_composition(&body, &disc).unwrap().unwrap()
+            };
+            let shares = [0.3, 0.62, 0.66, 0.72].map(|host| {
+                let n = 4_000_u32;
+                let mut last = 0.0;
+                let mut enveloped = 0_u32;
+                for k in 0..n {
+                    let u = (f64::from(k) + 0.5) / f64::from(n);
+                    let solved = solve(host, u);
+                    let r = solved.radius().value();
+                    assert!(
+                        r >= last - 1e-9,
+                        "{earths} M_earth at {u}: {r} after {last}"
+                    );
+                    last = r;
+                    enveloped += u32::from(solved.envelope_fraction() > 0.0);
+                }
+                f64::from(enveloped) / f64::from(n)
+            });
+            let disc = disc_of(0.3);
+            let flux = luminosity_flux(
+                disc.host_luminosity(),
+                orbit(a_au, 0.0).semi_major_axis(),
+                0.0,
+            );
+            let window = radius_window(mass, SnowLineSide::Inside, flux).unwrap();
+            let rank = |r: EarthRadii| chen_kipping_rank(mass, r);
+            let own = (rank(window.greatest()) - rank(window.rock()))
+                / (rank(window.greatest()) - rank(window.least()));
+            let expected = m_dwarfs::envelope_share(mass, SolarMasses::new(0.3), own);
+            assert!(
+                (shares[0] - expected).abs() < 1e-3,
+                "{earths}: {shares:?} against {expected}"
+            );
+            // Continuous across the split between the rocky and the enveloped ranks.
+            if expected > 0.0 && expected < 1.0 {
+                let split = 1.0 - expected;
+                let (below, above) = (solve(0.3, split - 1e-9), solve(0.3, split + 1e-9));
+                let jump = above.radius().value() - below.radius().value();
+                assert!(jump.abs() < 1e-3, "{earths}: {jump} at {split}");
+                assert!(
+                    below.envelope_fraction() <= 0.0,
+                    "{earths}: rocky below the split"
+                );
+            }
+            assert!(
+                shares.windows(2).all(|w| w[0] <= w[1] + 1e-3),
+                "{earths}: {shares:?}"
+            );
+            // From 0.70 M☉ the ordinary solve, bit for bit.
+            let disc = disc_of(0.72);
+            for u in [0.1, 0.5, 0.9] {
+                let body = placed(earths * EARTH_MASS_KG, a_au, 0.0, u);
+                let (_, rank, solved) = formation(&body, &disc).unwrap();
+                let window = radius_window(
+                    mass,
+                    SnowLineSide::Inside,
+                    luminosity_flux(disc.host_luminosity(), body.orbit().semi_major_axis(), 0.0),
+                )
+                .unwrap();
+                let confined = radius_rank_in_window(body.radius_rank(), &window);
+                assert_same_bits(rank.value(), confined.value());
+                let expected = match rocky_core_mass_fraction(confined, &window) {
+                    Some(cmf) => dry_composition(mass, cmf),
+                    None => composition(
+                        mass,
+                        radius_chen_kipping(mass, confined),
+                        SnowLineSide::Inside,
+                        luminosity_flux(
+                            disc.host_luminosity(),
+                            body.orbit().semi_major_axis(),
+                            0.0,
+                        ),
+                    )
+                    .unwrap(),
+                };
+                assert_eq!(solved.unwrap(), expected);
+            }
+        }
     }
 }

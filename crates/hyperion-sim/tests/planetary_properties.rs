@@ -12,6 +12,7 @@
 //! `planet.radius` is P14.T30's, and above 0.3 Jupiter masses plan 13's cooling fit with its
 //! inflation and internal heat (P14.T11.d).
 
+#[expect(dead_code, reason = "the property tests read no host's disc")]
 mod planetary_support;
 
 use hyperion_sim::Seed;

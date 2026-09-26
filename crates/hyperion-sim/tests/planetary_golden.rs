@@ -316,7 +316,6 @@ fn write_template_group(
     if let Some(hot) = group.hot_variant() {
         w.f64(&format!("{name} hot probability"), hot.probability());
         write_count(w, &format!("{name} hot"), hot.count());
-        write_count(w, &format!("{name} hot early M"), hot.early_m_dwarf_count());
         for m in [0.1, 0.32, 0.48, 0.65, 1.0] {
             let host = SolarMasses::new(m);
             w.f64(

@@ -23,7 +23,8 @@
 //!   drift-fed group about a star, truncated at its host-scaled [`mass_floor`] and tapered as
 //!   q^−2.9 above its ceiling to a giant's mass, [`taper_limit`], ruling 94.4): s more per step outward,
 //!   centred on the group so that `m_c` stays its typical mass whatever its count, s = 0.21 dex for
-//!   a drift-fed group ([`OUTWARD_STEP_DEX`]) and 0 for a rocky one ([`ROCKY_OUTWARD_STEP_DEX`]).
+//!   a drift-fed group ([`OUTWARD_STEP_DEX`]; 0.15 about an M dwarf, [`M_DWARF_OUTWARD_STEP_DEX`],
+//!   ruling 102.2) and 0 for a rocky one ([`ROCKY_OUTWARD_STEP_DEX`]).
 //!   The member's own variate εᵢ is taken at its rank Φ(εᵢ) in the truncated law
 //!   ([`StandardNormal::truncated`]), so the same words draw it and no mass sits at a bound it did
 //!   not draw (ruling 73.2).
@@ -144,6 +145,17 @@
 //! planet became the heavier in 0.752 of P14.T7.b's sample, over its 0.55–0.75; `σ_b` and `σ_w`
 //! were re-split, 0.515 and 0.165 to 0.513 and 0.17, the same 0.54 dex, which gives 0.746.
 //!
+//! Ruling 102.5 moves the taper to the between-system centre if Pascucci et al.'s slope for K and
+//! G hosts comes out shallower than −2.1; it is −0.36 on P14.T10.b's placed sample. Built on the
+//! centre (the characteristic mass's law tapered as the member's was, the members truncated at a
+//! giant's mass), it gives −1.2 to −1.3, but it takes the upper tail from the between-system
+//! scatter that carries Weiss et al.'s correlation: P14.T7.a's median falls to 6.3 M⊕ (6.9–8.5),
+//! and P14.T7.b's outer planet is the heavier in 0.78 of pairs (0.55–0.75). Centring the tapered
+//! law on the median restores the first, and then no split of `σ_b`, `σ_w` and the step near
+//! 0.54 dex holds (b)'s correlation of log radii (0.60–0.70), outer-heavier share and
+//! outer-larger share (0.633–0.675) together. So the taper stays on the members, and the
+//! tension is plan 14's ruling 102 note's.
+//!
 //! # The solid budget (ruling 38, point 4; ruling 60)
 //!
 //! P14.T7.b capped each mass at 10 times the local isolation mass ([`DiscProfile::isolation_mass`],
@@ -224,6 +236,7 @@ use crate::planetary::architecture::template::{
 use crate::planetary::architecture::{
     ClassConstraints, DiscCapacity, HostMultiplicity, SUBSTELLAR_LIMIT, ZoneLimit,
 };
+use crate::planetary::derive::m_dwarfs::rocky_host_share;
 use crate::planetary::disc::{Disc, DiscProfile};
 use crate::planetary::index::{BodyIndex, BodySlot, BodySub};
 use crate::planetary::params::SPACING_GIANT_MASS;
@@ -331,6 +344,25 @@ pub const fn within_scatter(group: &PlanetGroup) -> f64 {
 /// ruling 94.4's taper 0.651, inside the ±2.1% of their 504 pairs (ruling 87.4). It is
 /// centred on the group's middle member.
 pub const OUTWARD_STEP_DEX: f64 = 0.21;
+
+/// How much heavier each member of a drift-fed group's law is than the one inside it about an M
+/// dwarf, in dex: 0.15 (ruling 102.2), to which [`OUTWARD_STEP_DEX`] is blended about hosts
+/// under 0.6 M☉ and from which it is gone by 0.70 M☉ ([`outward_step`]).
+///
+/// Ruling 102.2 retunes the M dwarfs' mass law if Ment and Charbonneau's (2023, AJ 165, 265, §4.4
+/// and Table 6) small-radius bound still fails after the rocky branch (ruling 102.1): about
+/// primaries of 0.1–0.3 M☉, planets at 0.5–7 days of 0.5–0.9 R⊕ at most 0.8 times those of
+/// 0.9–1.4 R⊕, their model 5's flat-in-radius shape. With 0.21 it was 0.82: a chain of ten,
+/// centred on its middle member, puts its innermost members, the ones at 1–7 days, 0.5–1 dex
+/// under its characteristic mass (`research/latem2/NOTES.md` §1). At 0.15 it is 0.64, and
+/// Dressing and Charbonneau's (2015) early M dwarfs through Ment and Charbonneau's Table 9 keep
+/// their 0.19–0.39 planets per star under 1.5 R⊕ at 0.5–7 days (0.38; 0.55 at 0.21). A smaller
+/// step puts more of the late M dwarfs' innermost planets above 1.5 R⊕, over Ment and
+/// Charbonneau's 0.12 of them (0.124 at 0.13, 0.117 at 0.15, 0.108 at 0.17), and a larger one
+/// more of the early M dwarfs' under 1.5 R⊕ (0.40 at 0.17). Weiss et al.'s (2018) FGK pairs, which the
+/// 0.21 was fitted to, are unchanged. A calibration, fitted on P14.T10.b's placed sample with the
+/// rocky branch.
+pub const M_DWARF_OUTWARD_STEP_DEX: f64 = 0.15;
 
 /// How much heavier each member of a rocky group is than the one inside it, in dex: 0 (ruling 60).
 ///
@@ -600,15 +632,22 @@ fn steps_from_middle(position: usize, count: usize) -> f64 {
     (f64::from(position) * 2.0 + 1.0 - f64::from(count)) / 2.0
 }
 
-/// How much heavier each member of `group` is than the one inside it, in dex:
-/// [`OUTWARD_STEP_DEX`] for a drift-fed group, [`ROCKY_OUTWARD_STEP_DEX`] for any other.
+/// How much heavier each member of `group` is than the one inside it about the host of `disc`,
+/// in dex: [`OUTWARD_STEP_DEX`] for a drift-fed group, blended to [`M_DWARF_OUTWARD_STEP_DEX`]
+/// about a star under 0.6 M☉ by [`rocky_host_share`] (ruling 102.2), and
+/// [`ROCKY_OUTWARD_STEP_DEX`] for any other.
+///
+/// [`rocky_host_share`]: crate::planetary::derive::m_dwarfs::rocky_host_share
 #[must_use]
-pub const fn outward_step(group: &PlanetGroup) -> f64 {
-    if is_drift_fed(group.role()) {
-        OUTWARD_STEP_DEX
-    } else {
-        ROCKY_OUTWARD_STEP_DEX
+pub fn outward_step(group: &PlanetGroup, disc: &DiscProfile) -> f64 {
+    if !is_drift_fed(group.role()) {
+        return ROCKY_OUTWARD_STEP_DEX;
     }
+    if disc.host_mass() < SUBSTELLAR_LIMIT {
+        return OUTWARD_STEP_DEX;
+    }
+    let share = rocky_host_share(disc.host_mass());
+    OUTWARD_STEP_DEX + (M_DWARF_OUTWARD_STEP_DEX - OUTWARD_STEP_DEX) * share
 }
 
 /// How steeply the occurrence of a drift-fed group's members falls above its ceiling: dN ÷
@@ -1033,7 +1072,7 @@ pub fn group_masses_from(
             None => (Vec::new(), None),
             Some(first) => {
                 let characteristic = characteristic_mass(group, disc, first.group);
-                let (step, sigma) = (outward_step(group), within_scatter(group));
+                let (step, sigma) = (outward_step(group, disc), within_scatter(group));
                 let limits = (
                     mass_floor(group, disc),
                     mass_ceiling(group, disc),
@@ -1884,16 +1923,24 @@ mod tests {
         assert_same_bits(steps_from_middle(0, 4), -1.5);
         assert_same_bits(steps_from_middle(3, 4), 1.5);
         assert_same_bits(steps_from_middle(2, 5), 0.0);
-        // With no scatter each chain member's law is 0.21 dex heavier than the one inside it, and
+        // With no scatter each chain member's law is its step heavier than the one inside it
+        // (0.21 dex, and ruling 102.2's about an M dwarf), and
         // the middle one's is centred on the characteristic mass. The inner two laws lie far
         // inside the range, and each sits within 2% of its centre; the outermost's centre lies
         // 0.2 dex under the ceiling of 20 M⊕ × M★ ÷ M☉ at every host mass (ruling 85.2), so it is
         // drawn below its centre, inside the range (ruling 73.2). A rocky group's members are all
         // alike, at its truncated law's median.
         let draws = [MassDraws::MEDIAN; 3];
-        let step = math::exp10(OUTWARD_STEP_DEX);
         for host in [0.3, 1.0] {
             let disc = median_disc(&zams_host(host, 0.0), 2.0);
+            // About an M dwarf the step is ruling 102.2's.
+            let expected = if host < 0.6 {
+                M_DWARF_OUTWARD_STEP_DEX
+            } else {
+                OUTWARD_STEP_DEX
+            };
+            assert_same_bits(outward_step(chain(), &disc), expected);
+            let step = math::exp10(expected);
             let group = group_masses_from(chain(), &disc, &draws);
             let m_c = group.characteristic().unwrap().value();
             let masses = group.masses();

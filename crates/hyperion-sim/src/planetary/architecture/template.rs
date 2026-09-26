@@ -486,7 +486,6 @@ impl Origin {
 pub struct HotVariant {
     probability: f64,
     count: CountLaw,
-    early_m_dwarf_count: CountLaw,
     eccentricity: EccentricityLaw,
 }
 
@@ -508,18 +507,11 @@ impl HotVariant {
         self.probability + (EARLY_M_DWARF_HOT_VARIANT_PROBABILITY - self.probability) * blend
     }
 
-    /// The variant's count about most hosts.
+    /// The variant's count, one or two planets about every host (ruling 102.4, which withdraws
+    /// ruling 87.2's cold chain's count about the early M dwarfs).
     #[must_use]
     pub const fn count(&self) -> CountLaw {
         self.count
-    }
-
-    /// The variant's count about an early M dwarf ([`EARLY_M_DWARF_HOT_VARIANT_COUNT`]; ruling
-    /// 87.2), to which [`count`](Self::count) is blended by
-    /// [`early_m_dwarf_share`](super::early_m_dwarf_share) in P14.T8's draw.
-    #[must_use]
-    pub const fn early_m_dwarf_count(&self) -> CountLaw {
-        self.early_m_dwarf_count
     }
 
     /// The variant's eccentricities for one or two planets.
@@ -538,9 +530,11 @@ impl HotVariant {
     /// half-normal law's median over its scale: 0.11 at n = 3, 0.046 at n = 5 and 0.027 at n = 7.
     /// Van Eylen et al.'s (2019) half-normal 0.32 for singles is a law of one or two planets, and a
     /// chain of five to seven at that scale is not dynamically possible: about the early M dwarfs,
-    /// whose hot variant takes the cold chain's count (ruling 87.2), 55% of its planets were
+    /// whose hot variant took the cold chain's count under ruling 87.2, 55% of its planets were
     /// scaled down to the spacing floor. `count` is the variant's drawn count, its reserved
-    /// members, as He et al.'s n is a system's intrinsic multiplicity; no word is added.
+    /// members, as He et al.'s n is a system's intrinsic multiplicity; no word is added. Since
+    /// ruling 102.4 every hot variant has one or two planets, so the narrower law applies only to
+    /// a variant whose count law reaches three.
     ///
     /// [`eccentricity`]: Self::eccentricity
     ///
@@ -789,54 +783,51 @@ pub const CHAIN_COUNT: CountLaw = CountLaw::ZeroTruncatedPoisson {
     max: 10,
 };
 
-/// The share of an early M dwarf's chains that take the hot variant: 0.55
-/// (ruling 85.4), Ballard and Johnson's (2016, §3.3) 55 (+23 −12)% of M-dwarf systems single or
-/// mutually inclined, where [`HOT_VARIANT`]'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
-pub const EARLY_M_DWARF_HOT_VARIANT_PROBABILITY: f64 = 0.55;
+/// The share of an early M dwarf's chains that take the hot variant: 0.43 (ruling 102.4; 0.55
+/// under ruling 85.4), where [`HOT_VARIANT`]'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
+///
+/// Ballard and Johnson (2016, ApJ 816, 66, Table 1) fit 0.55 (+0.23 −0.12) of M-dwarf systems to
+/// their mode of single or inclined systems, so the cold chains take at most 0.57. Ruling 102.4
+/// meets ruling 87.2's 2.9–4.4 small planets per single star inside 200 days through the cold
+/// chains, now that the hot variant holds one or two planets, so the cold chains take their upper
+/// bound, 0.57. On P14.T10.b's placed sample that still leaves 2.57 (2.24 at 0.55), which is
+/// reported as ruling 102.4's tension, not tuned by other dials. The transiting early M systems
+/// show one planet in 0.72 of cases, inside Ballard and Johnson's 71 of 106 (0.58–0.76).
+pub const EARLY_M_DWARF_HOT_VARIANT_PROBABILITY: f64 = 0.43;
 
-/// What a chain's first period law's break is multiplied by about an M dwarf: 0.38
-/// (ruling 85.4, re-fitted after ruling 87.2), raised to
+/// What a chain's first period law's break is multiplied by about an M dwarf: 0.50
+/// (ruling 85.4, re-fitted after rulings 87.2 and 102), raised to
 /// [`first_period_share`](super::first_period_share), which holds it at every star up to
 /// 0.6 M☉ (ruling 94.1) and blends it away by 0.70 M☉.
 ///
 /// Dressing and Charbonneau (2015, ApJ 807, 45, Table 5) find 0.47 of the 2.47 planets of
 /// 1–4 R⊕ per M dwarf inside 200 days at 0.5–10 days, 19%, where Mulders et al.'s (2018) FGK
-/// break at 12 days put 13% of this model's there. The factor, which moves the break to 4.6 days,
-/// is fitted to their 0.47 on P14.T10.b's placed sample (0.460; 0.465 after ruling 94): 0.45 was, until the hot
-/// variant's count (ruling 87.2) put longer chains, whose inner members are lighter, about these
-/// hosts, and gave 0.389 then. Mulders, Pascucci and Apai (2015, ApJ 798, 112) find the break at
+/// break at 12 days put 13% of this model's there. The factor, which moves the break to 6 days, is
+/// fitted to their 0.47 on P14.T10.b's placed sample, inside its window of 0.37–0.57: 0.45 under
+/// ruling 85.4, 0.38 once ruling 87.2's hot variant put longer chains with lighter inner members
+/// about these hosts, and 0.50 since ruling 102 (0.46 at 0.5–10 days), whose shallower step
+/// about the M dwarfs puts more of their innermost planets above 1 M⊕ (0.50 at 0.45). The late M
+/// dwarfs take the same factor (ruling 94.1), and it also sets Kaminski et al.'s (2025) and
+/// Hardegree-Ullman et al.'s (2019) close-in rates, each near the lower end of its window here. Mulders, Pascucci and Apai (2015, ApJ 798, 112) find the break at
 /// one period for F to M hosts binned by type, so this is a calibration to the M dwarfs' own
 /// distribution, not a law in host mass.
-pub const EARLY_M_DWARF_FIRST_PERIOD_SCALE: f64 = 0.38;
+pub const EARLY_M_DWARF_FIRST_PERIOD_SCALE: f64 = 0.50;
 
-/// The dynamically hot variant: 40% of systems, 1–2 planets, half-normal eccentricities.
+/// The dynamically hot variant: 40% of systems (43% about the early M dwarfs,
+/// [`EARLY_M_DWARF_HOT_VARIANT_PROBABILITY`]), 1–2 planets, half-normal eccentricities.
+///
+/// About every host, the early M dwarfs included, the variant is intrinsically few-planet
+/// (ruling 102.4, withdrawing ruling 87.2's cold chain's count there). Sagear and Ballard (2023,
+/// PNAS 120, e2217398120, Fig. 5) model the M dwarfs' dichotomy as dynamically warm systems of
+/// single planets beside flat multis, and Ballard and Johnson's (2016, ApJ 816, 66, §2) 106
+/// hosts show one transiting planet in 71, 0.670 ± 0.046, which a mixture of cold chains and
+/// systems of one or two planets reproduces and one of cold and inclined chains of five does not
+/// (`research/latem2/NOTES.md` §2; P14.T10.b).
 const HOT_VARIANT: HotVariant = HotVariant {
     probability: 0.4,
     count: CountLaw::Uniform { min: 1, max: 2 },
-    early_m_dwarf_count: EARLY_M_DWARF_HOT_VARIANT_COUNT,
     eccentricity: HOT,
 };
-
-/// The count of an early M dwarf's hot variant (ruling 87.2): the cold chain's own,
-/// [`CHAIN_COUNT`], so that about these hosts the dichotomy is one of mutual inclination and
-/// eccentricity, not of how many planets a system holds.
-///
-/// Ballard and Johnson (2016, ApJ 816, 66, §3.3, eq. 5) model the excess of singly transiting M
-/// dwarfs as a mode that "produces only singly transiting planets", and say that "it's not
-/// possible to know, from counting statistics alone, whether these singly transiting systems
-/// occurs because less planets exist around the star, or because they are very highly
-/// inclined": their "1–2 planets" (and the 2.8 per host that counts the mode as one) are a
-/// transiting multiplicity, a lower bound on the intrinsic count. Hsu, Ford and Terrien (2020,
-/// MNRAS 498, 2249, §5) find the Kepler M dwarfs consistent with every early M dwarf hosting
-/// 4.2–8.4 planets of 0.5–4 R⊕ at 0.5–256 days, and Dressing and Charbonneau's (2015, ApJ 807,
-/// 45) 2.47 per target, with Moe and Kratter's (2021, MNRAS 507, 3593, §4 and Fig. 6) close
-/// binaries' suppression taken out, is 3.6 ± 0.4 per single star. About the other hosts the
-/// variant keeps its ordinary one or two, and the draw blends the two laws by
-/// [`early_m_dwarf_share`](super::early_m_dwarf_share) (P14.T8). On P14.T10.b's placed sample
-/// the early M dwarfs have 3.58 small planets per single star (or one wider than 200 au)
-/// inside 200 days, 2.76 per primary, and 4.67 planets of 0.5–4 R⊕ at 0.5–256 days per primary
-/// (after ruling 94's taper; 3.67, 2.83 and 4.8 before).
-pub const EARLY_M_DWARF_HOT_VARIANT_COUNT: CountLaw = CHAIN_COUNT;
 
 /// The most rocky planets one group places: 10, as many as a chain's cap (Mulders et al. 2018).
 pub const ROCKY_MAX_COUNT: u8 = 10;
@@ -1212,10 +1203,8 @@ mod tests {
             }
             if let Some(hot) = group.hot_variant() {
                 assert!(hot.probability() > 0.0 && hot.probability() < 1.0, "{at}");
-                for count in [hot.count(), hot.early_m_dwarf_count()] {
-                    let (least, most) = count.range();
-                    assert!(least >= 1 && least <= most, "{at}: hot count");
-                }
+                let (least, most) = hot.count().range();
+                assert!(least >= 1 && least <= most, "{at}: hot count");
             }
         }
         // A group that follows another has one to follow.
@@ -1363,14 +1352,12 @@ mod tests {
         }
     }
 
-    /// About an early M dwarf the hot variant takes the cold chain's count (ruling 87.2), and
-    /// about other hosts its one or two.
+    /// The hot variant has one or two planets about every host, the early M dwarfs included
+    /// (ruling 102.4).
     #[test]
-    fn the_hot_variant_s_count_is_the_chain_s_about_an_early_m_dwarf() {
+    fn the_hot_variant_has_one_or_two_planets_about_every_host() {
         let hot = CHAIN.hot_variant().expect("a chain has a hot variant");
         assert_eq!(hot.count(), CountLaw::Uniform { min: 1, max: 2 });
-        assert_eq!(hot.early_m_dwarf_count(), CHAIN_COUNT);
-        assert_eq!(EARLY_M_DWARF_HOT_VARIANT_COUNT, CHAIN_COUNT);
     }
 
     #[test]

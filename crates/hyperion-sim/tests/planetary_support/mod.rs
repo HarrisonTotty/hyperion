@@ -16,6 +16,7 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::planetary::architecture::{CLOSE_BINARY_CUTOFF_AU, class_weights, draw_class};
+use hyperion_sim::planetary::disc::Disc;
 use hyperion_sim::planetary::placement::classes::orbits::{HostPlane, SystemPlane};
 use hyperion_sim::planetary::placement::{
     HostPlacement, OrbitHost, OrbitZone, PlacementHost, ZoneDiscInputs, ZoneHierarchy, ZoneStar,
@@ -60,9 +61,10 @@ pub fn record(galaxy: &Galaxy, index: u32, mass: f64, age: Years) -> SystemRecor
     )
 }
 
-/// One orbit host of a sampled system: its zone and planets.
+/// One orbit host of a sampled system: its zone, disc and planets.
 pub struct Host {
     pub zone: OrbitZone,
+    pub disc: Disc,
     pub placement: HostPlacement,
 }
 
@@ -158,7 +160,11 @@ pub fn generate(
             );
             let placement = place(seed, id, &host, zone.truncation(), &disc, class, slot);
             slot = placement.next_slot();
-            Host { zone, placement }
+            Host {
+                zone,
+                disc,
+                placement,
+            }
         })
         .collect();
     System {

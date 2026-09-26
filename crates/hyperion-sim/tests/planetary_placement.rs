@@ -10,7 +10,9 @@
 //!
 //! The statistics are asserted on the planets' masses where the survey counts radii, 1–20 M⊕ for
 //! 1–4 R⊕, as P14.T10.b allows until the derivation is assembled: the radius rank is drawn on
-//! `planet.radius`, which P14.T30 registers (ruling 53).
+//! `planet.radius`, which P14.T30 registers (ruling 53). Ruling 102's checks of the M dwarfs'
+//! radii take the derivation's radius at formation instead ([`derived`]), at a rank drawn here, so
+//! that its rocky branch (ruling 102.1) is what they test.
 
 mod planetary_support;
 
@@ -18,8 +20,8 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
-use hyperion_sim::planetary::derive::habitable_zone;
 use hyperion_sim::planetary::derive::radius::radius_chen_kipping;
+use hyperion_sim::planetary::derive::{PlacedBody, formation_composition, habitable_zone};
 use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::params::{HILL_STABLE_GAP, SPACING_GIANT_MASS};
 use hyperion_sim::planetary::placement::classes::orbits::HostPlane;
@@ -384,20 +386,37 @@ fn rank(lcg: &mut Lcg) -> UnitUniform {
     UnitUniform::new(lcg.next_f64().clamp(1e-12, 1.0 - 1e-12)).expect("inside (0, 1)")
 }
 
-/// Planets per star of 1–4 R⊕ inside `days`, by Chen and Kipping's radius at a drawn rank.
+/// Planets per star of 1–4 R⊕ inside `days`, by the derivation's radius at a drawn rank.
 fn small_by_radius(systems: &[System], days: f64, lcg: &mut Lcg) -> f64 {
     let n: usize = systems
         .iter()
         .map(|s| {
             primary_planets(s)
-                .filter(|(_, p)| {
-                    let r = radius_chen_kipping(p.mass(), rank(lcg)).value();
+                .filter(|(h, p)| {
+                    let r = derived(h, p, lcg).0;
                     (1.0..=4.0).contains(&r) && period_days(p) < days
                 })
                 .count()
         })
         .sum();
     ratio(n, systems.len())
+}
+
+/// A planet's radius at formation as the derivation gives it (P14.T11; ruling 102.1's rocky
+/// branch about M dwarfs), at a drawn rank, R⊕, and its envelope fraction; a giant's is Chen and
+/// Kipping's at the rank, with no envelope counted.
+fn derived(host: &Host, p: &PlacedPlanet, lcg: &mut Lcg) -> (f64, f64) {
+    let rank = rank(lcg);
+    let disc = host
+        .disc
+        .profile()
+        .expect("a disc that placed planets exists");
+    let placed = PlacedBody::new(p.mass(), *p.orbit(), p.formation_distance(), rank)
+        .expect("a placed planet is a body");
+    match formation_composition(&placed, disc).expect("a placed planet derives") {
+        Some(solved) => (solved.radius().value(), solved.envelope_fraction()),
+        None => (radius_chen_kipping(p.mass(), rank).value(), 0.0),
+    }
 }
 
 /// Weiss and Marcy's (2014) mass of a planet of radius `r` R⊕, in M⊕, as Weiss et al. (2018, AJ
@@ -541,6 +560,8 @@ fn eta_earth(systems: &[System]) -> f64 {
 /// within 0.02 dex under it, and at a giant's mass.
 fn ceiling_note(systems: &[System], label: &str, report: &mut Report) {
     let (mut n, mut above, mut crowded, mut giant) = (0_usize, 0_usize, 0_usize, 0_usize);
+    let mut capped = 0_usize;
+    let cap = math::log10(EarthMasses::from(SPACING_GIANT_MASS).value());
     for s in systems {
         for (h, p) in primary_planets(s) {
             if !matches!(p.role(), GroupRole::Chain | GroupRole::Companions) {
@@ -550,6 +571,7 @@ fn ceiling_note(systems: &[System], label: &str, report: &mut Report) {
             n += 1;
             above += usize::from(over > 0.0);
             crowded += usize::from((-0.02..=0.0).contains(&over));
+            capped += usize::from((-0.02..0.0).contains(&(math::log10(p.mass().value()) - cap)));
             // Hosts above about 1.6 M☉ (a circumbinary pair's total) keep the truncated law.
             giant += usize::from(is_giant(p) && h.zone.host_mass().value() < 1.59);
         }
@@ -561,6 +583,68 @@ fn ceiling_note(systems: &[System], label: &str, report: &mut Report) {
         ratio(crowded, n),
         ratio(giant, n)
     ));
+    // Ruling 102.5 accepts the taper's end at 0.1 Jupiter masses; what lies just under it.
+    report.note(format!(
+        "  {label}'s drift-fed planets within 0.02 dex under 0.1 M_J {:.4}",
+        ratio(capped, n)
+    ));
+}
+
+/// Ruling 102.5: Pascucci et al.'s (2018, ApJ 856, L28, §2 and Table 1) mass-ratio function over
+/// the K and G primaries (0.7–1.0 M☉) of the FGK sample: planets inside 100 days of 1–6 R⊕ by
+/// Chen and Kipping's radius at a drawn rank, as they convert Kepler's radii, and their
+/// dN ÷ d log q slope over q = (2.8–8) × 10⁻⁵, least squares on six bins weighted by their
+/// counts, against −2.9 ± 0.4; and the share above q = 6 × 10⁻⁵ within their window of
+/// (0.5–8) × 10⁻⁵, against about 2% for their fit.
+fn pascucci_statistics(fgk: &[System], report: &mut Report, ranks: &mut Lcg) -> f64 {
+    let (lo, hi) = (math::log10(2.8e-5), math::log10(8e-5));
+    let mut bins = [0_usize; 6];
+    let (mut window, mut above) = (0_usize, 0_usize);
+    for s in fgk
+        .iter()
+        .filter(|s| (0.7..1.0).contains(&s.star_mass(0).value()))
+    {
+        for (h, p) in primary_planets(s) {
+            let r = radius_chen_kipping(p.mass(), rank(ranks)).value();
+            if period_days(p) >= 100.0 || !(1.0..=6.0).contains(&r) {
+                continue;
+            }
+            let q = p.mass().value() * EARTH_MASS_KG / (h.zone.host_mass().value() * SOLAR_MASS_KG);
+            if (0.5e-5..8e-5).contains(&q) {
+                window += 1;
+                above += usize::from(q > 6e-5);
+            }
+            let x = (math::log10(q) - lo) / (hi - lo) * 6.0;
+            if (0.0..6.0).contains(&x) {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "x lies in [0, 6)"
+                )]
+                let bin = x as usize;
+                bins[bin] += 1;
+            }
+        }
+    }
+    let width = (hi - lo) / 6.0;
+    let points: Vec<(f64, f64, f64)> = bins
+        .iter()
+        .enumerate()
+        .filter(|&(_, &n)| n > 0)
+        .map(|(i, &n)| {
+            let centre = lo + width * (f64::from(u8::try_from(i).expect("six bins")) + 0.5);
+            let count = f64::from(u32::try_from(n).expect("a sample's count"));
+            (centre, math::log10(count / width), count)
+        })
+        .collect();
+    let slope = weighted_slope(&points);
+    report.note(format!(
+        "  K and G primaries' planets inside 100 days of 1-6 R_earth: dN/dlog q slope over \
+         (2.8-8)e-5 {slope:.3} (Pascucci et al. 2018: -2.9 +- 0.4; bins {bins:?}); above 6e-5 \
+         within (0.5-8)e-5 {:.4} of {window} (their fit: about 0.02)",
+        ratio(above, window)
+    ));
+    slope
 }
 
 /// P14.T10.b's FGK statistics and ruling 55.1's, on 60,000 FGK primaries of drawn \[Fe/H\].
@@ -590,6 +674,20 @@ fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<
         "eta-Earth (Bryson et al. 2021)",
         eta_earth(&fgk),
         (0.37, 0.60),
+    );
+    report.note(format!(
+        "  FGK primaries' hot chain planets scaled down to the spacing floor {:.4}",
+        hot_chain_rescaled(&fgk)
+    ));
+    let slope = pascucci_statistics(&fgk, report, &mut Lcg::new(0x00ad_1ad0));
+    // Ruling 102.5: shallower than -2.1, so the taper was to move to the between-system centre;
+    // built there it gave -1.2 to -1.3 but broke P14.T7's own windows (see plan 14's ruling 102
+    // note), so the members keep it and the slope is pinned as a finding.
+    report.finding(
+        "K and G hosts' dN/dlog q slope above the break (Pascucci et al. 2018)",
+        slope,
+        (-3.3, -2.5),
+        (-0.42, -0.33),
     );
     let mut pairs = chain_pairs(&fgk, ranks);
     report.check(
@@ -678,7 +776,17 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
         (0.37, 0.57),
     );
 
-    hot_chain_statistics(&m, report);
+    // Ruling 94.6's check was set for hot chains of five or more; with ruling 102.4's one or two
+    // planets at the half-normal 0.3, the pair's outer planet is rescaled as often as about an FGK
+    // star (reported beside it there), so it is pinned as a finding.
+    report.finding(
+        "early M dwarfs' hot chain planets scaled down to the spacing floor (ruling 94.6)",
+        hot_chain_rescaled(&m),
+        (0.0, 0.10),
+        (0.24, 0.28),
+    );
+    transit_multiplicity(&m, report, &mut Lcg::new(0x00ad_1ad1));
+    early_m_radii(&m, report, &mut Lcg::new(0x00ad_1ad2));
     ceiling_note(&m, "early M primaries", report);
 
     // Ruling 87.2: single stars and binaries wider than 200 au, against 2.47 ÷ 0.68.
@@ -686,10 +794,13 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
     let (alone, close): (Vec<System>, Vec<System>) = m
         .into_iter()
         .partition(|s| nearest_companion_au(s).is_none_or(|a| a > 200.0));
-    report.check(
+    // Ruling 102.4: met through the cold chains, at most 57% of systems with at most eight
+    // planets, or the tension is reported. Their share at its bound, the test is 2.57: a finding.
+    report.finding(
         "small planets per single M dwarf or one wider than 200 au inside 200 days (ruling 87.2)",
         per_star(&alone, |_, p| small(p) && period_days(p) < 200.0),
         (2.9, 4.4),
+        (2.53, 2.61),
     );
     report.note(format!(
         "  {} of {total} primaries single or wider than 200 au",
@@ -701,8 +812,8 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
         .chain(&close)
         .map(|s| {
             primary_planets(s)
-                .filter(|(_, p)| {
-                    let r = radius_chen_kipping(p.mass(), rank(ranks)).value();
+                .filter(|(h, p)| {
+                    let r = derived(h, p, ranks).0;
                     (0.5..=4.0).contains(&r) && (0.5..256.0).contains(&period_days(p))
                 })
                 .count()
@@ -864,59 +975,112 @@ fn kaminski_and_ment_statistics(
     );
 
     // Ruling 94.3: Ment and Charbonneau (2023, Tables 5-7), every primary of 0.1-0.3 M☉ in their
-    // volume-complete sample, by Chen and Kipping's radius at a drawn rank.
+    // volume-complete sample, by the derivation's radius at a drawn rank (ruling 102.1).
     let ment: Vec<&System> = late
         .iter()
         .filter(|s| (0.1..0.3).contains(&s.star_mass(0).value()))
         .collect();
-    let (mut terrestrial, mut sub_neptunes, mut small, mut earths, mut close) =
-        (0_usize, 0, 0, 0, 0);
+    let mut n = MentCounts::default();
     for s in &ment {
-        for (_, p) in primary_planets(s) {
-            let (r, days) = (
-                radius_chen_kipping(p.mass(), rank(ranks)).value(),
-                period_days(p),
-            );
-            if (0.5..=2.0).contains(&r) && (1.0..7.0).contains(&days) {
-                terrestrial += 1;
-            }
-            if (0.5..7.0).contains(&days) {
-                close += 1;
-                sub_neptunes += usize::from(r > 1.5);
-                small += usize::from((0.5..0.9).contains(&r));
-                earths += usize::from((1.0..1.5).contains(&r));
-            }
+        for (h, p) in primary_planets(s) {
+            let ((r, envelope), days) = (derived(h, p, ranks), period_days(p));
+            n.count(r, envelope, days, p);
         }
     }
     report.check(
         "0.5-2 R_earth planets at 1-7 days about 0.1-0.3 M_sun primaries (Ment and Charbonneau \
          2023)",
-        ratio(terrestrial, ment.len()),
+        ratio(n.terrestrial, ment.len()),
         (0.35, 1.0),
     );
-    // Their terrestrials outnumber their sub-Neptunes 14 to 1, and the sub-Neptunes' rate is
-    // ≤ 0.07 per star (Table 7).
-    report.finding(
+    // Ruling 102.1's late-M anchor: their terrestrials outnumber their sub-Neptunes 14 to 1
+    // (§5.1), 0.02-0.12 of the planets, and model 5 allows at most 0.16 per star at 1.4 R⊕ or
+    // more (90%).
+    report.check(
         "share of the planets at 0.5-7 days above 1.5 R_earth about 0.1-0.3 M_sun primaries \
-         (Ment and Charbonneau 2023)",
-        ratio(sub_neptunes, close),
-        (0.0, 1.0 / 15.0),
-        (0.18, 0.21),
+         (Ment and Charbonneau 2023, 14 to 1)",
+        ratio(n.sub_neptunes, n.close),
+        (0.02, 0.12),
     );
-    report.finding(
-        "planets above 1.5 R_earth at 0.5-7 days per 0.1-0.3 M_sun primary (Ment and \
-         Charbonneau 2023)",
-        ratio(sub_neptunes, ment.len()),
-        (0.0, 0.07),
-        (0.12, 0.14),
+    report.check(
+        "planets of 1.4 R_earth or more at 0.5-7 days per 0.1-0.3 M_sun primary (Ment and \
+         Charbonneau 2023, model 5)",
+        ratio(n.over_1_4, ment.len()),
+        (0.0, 0.16),
     );
-    report.finding(
-        "planets of 0.5-0.9 R_earth against 1-1.5 R_earth at 0.5-7 days (Ment and Charbonneau \
-         2023)",
-        ratio(small, earths),
-        (0.13, 0.56),
-        (1.2, 1.4),
+    report.note(format!(
+        "  per star above 1.5 R_earth {:.4} (their model 8's 1 sigma limit 0.073, median 0.043); \
+         of them enveloped {:.4}, dry {:.4}, formed beyond the snow line {:.4}",
+        ratio(n.sub_neptunes, ment.len()),
+        ratio(n.enveloped, n.sub_neptunes),
+        ratio(n.dry, n.sub_neptunes),
+        ratio(n.icy, n.sub_neptunes),
+    ));
+    // Ruling 102.2: the small-radius ratio, reported against models 3 and 6, and asserted only
+    // under model 5's flat-in-radius bound.
+    report.note(format!(
+        "  0.5-1 against 1-1.5 R_earth {:.4} (model 3: 0.30); 0.5-0.9 against 0.9-1.4 R_earth \
+         {:.4} (model 6: 0.22)",
+        ratio(n.half_to_one, n.one_to_one_half),
+        ratio(n.small, n.earths),
+    ));
+    report.check(
+        "planets of 0.5-0.9 R_earth against 0.9-1.4 R_earth at 0.5-7 days (Ment and Charbonneau \
+         2023, model 5's flat bound)",
+        ratio(n.small, n.earths),
+        (0.0, 0.8),
     );
+}
+
+/// Ment and Charbonneau's (2023) bins, counted over a sample's planets.
+#[derive(Default)]
+struct MentCounts {
+    /// 0.5–2 R⊕ at 1–7 days.
+    terrestrial: usize,
+    /// Every planet of 0.5 R⊕ or more at 0.5–7 days.
+    close: usize,
+    /// Above 1.5 R⊕ at 0.5–7 days, and of them the enveloped, the dry and those formed beyond
+    /// the snow line.
+    sub_neptunes: usize,
+    enveloped: usize,
+    dry: usize,
+    icy: usize,
+    /// 1.4 R⊕ or more at 0.5–7 days.
+    over_1_4: usize,
+    /// 0.5–0.9 and 0.9–1.4 R⊕ (model 6's bins), 0.5–1 and 1–1.5 R⊕ (model 3's), at 0.5–7 days.
+    small: usize,
+    earths: usize,
+    half_to_one: usize,
+    one_to_one_half: usize,
+}
+
+impl MentCounts {
+    fn count(&mut self, r: f64, envelope: f64, days: f64, p: &PlacedPlanet) {
+        if (0.5..=2.0).contains(&r) && (1.0..7.0).contains(&days) {
+            self.terrestrial += 1;
+        }
+        // Ment and Charbonneau's rocky planets and sub-Neptunes, of 0.5 R⊕ and more, their
+        // survey's reach.
+        if !(0.5..7.0).contains(&days) || r < 0.5 {
+            return;
+        }
+        self.close += 1;
+        if r > 1.5 {
+            self.sub_neptunes += 1;
+            if p.formed_beyond_snow_line() {
+                self.icy += 1;
+            } else if envelope > 0.0 {
+                self.enveloped += 1;
+            } else {
+                self.dry += 1;
+            }
+        }
+        self.over_1_4 += usize::from(r >= 1.4);
+        self.small += usize::from((0.5..0.9).contains(&r));
+        self.earths += usize::from((0.9..1.4).contains(&r));
+        self.half_to_one += usize::from((0.5..1.0).contains(&r));
+        self.one_to_one_half += usize::from((1.0..1.5).contains(&r));
+    }
 }
 
 /// P14.T10.b's hosts of 0.1–0.5 M☉, and ruling 48 (b)'s mid-to-late M dwarfs.
@@ -973,6 +1137,36 @@ fn nearest_companion_au(system: &System) -> Option<f64> {
 
 /// What the early M dwarfs' planets inside 200 days are made of, printed for review.
 fn early_m_dwarf_diagnosis(systems: &[System], report: &mut Report) {
+    let (mut chains, mut placed, mut inside, mut small_inside, mut full) = (0_usize, 0, 0, 0, 0);
+    for s in systems {
+        for h in s.hosts.iter().filter(|h| orbits_primary(h)) {
+            let members: Vec<&PlacedPlanet> = h
+                .placement
+                .planets()
+                .iter()
+                .filter(|p| p.role() == GroupRole::Chain && !p.hot())
+                .collect();
+            if members.is_empty() {
+                continue;
+            }
+            chains += 1;
+            placed += members.len();
+            full += usize::from(members.len() >= 10);
+            inside += members.iter().filter(|p| period_days(p) < 200.0).count();
+            small_inside += members
+                .iter()
+                .filter(|p| period_days(p) < 200.0 && small(p))
+                .count();
+        }
+    }
+    report.note(format!(
+        "  cold chains: {chains}, members placed {:.3}, inside 200 days {:.3}, small inside 200 \
+         days {:.3}, ten placed {:.4}",
+        ratio(placed, chains),
+        ratio(inside, chains),
+        ratio(small_inside, chains),
+        ratio(full, chains)
+    ));
     let inside = |p: &PlacedPlanet| small(p) && period_days(p) < 200.0;
     let by = |f: &dyn Fn(&PlacedPlanet) -> bool| per_star(systems, |_, p| inside(p) && f(p));
     let hosts = |f: &dyn Fn(&Host) -> bool| {
@@ -1005,20 +1199,22 @@ fn early_m_dwarf_diagnosis(systems: &[System], report: &mut Report) {
     ));
 }
 
-/// Ruling 94.6's hot chains about the early M dwarfs' primaries: how many have their
-/// eccentricities scaled down to the spacing floor, and how often a transiting system shows one
-/// planet.
-fn hot_chain_statistics(systems: &[System], report: &mut Report) {
+/// The share of the hot chains' planets about `systems`' primaries whose eccentricities are
+/// scaled down to the spacing floor (ruling 94.6).
+fn hot_chain_rescaled(systems: &[System]) -> f64 {
     let hot_chain = |_: &Host, p: &PlacedPlanet| hot_chain_planet(p);
-    report.check(
-        "early M dwarfs' hot chain planets scaled down to the spacing floor (ruling 94.6)",
-        per_star(systems, |h, p| hot_chain(h, p) && p.rescaled()) / per_star(systems, hot_chain),
-        (0.0, 0.10),
-    );
-    // Sixteen lines of sight per system, isotropic; a planet transits where the line of sight
-    // lies within R★ ÷ a of its orbit's plane.
+    per_star(systems, |h, p| hot_chain(h, p) && p.rescaled()) / per_star(systems, hot_chain)
+}
+
+/// Ruling 102.3: how many planets a transiting early M dwarf's system shows, against Ballard and
+/// Johnson's (2016, §2) 106 hosts. Planets of at least 1 R⊕ (the derivation's radius) inside
+/// 200 days about the primary alone, sixteen isotropic lines of sight per system; a planet
+/// transits where the line of sight lies within R★ ÷ a of its orbit's plane (b < 1, as their
+/// model counts it).
+fn transit_multiplicity(systems: &[System], report: &mut Report, ranks: &mut Lcg) {
     let mut sight = Lcg::new(0x7a45_17ed);
-    let (mut hot, mut hot_single, mut any, mut any_single) = (0_usize, 0_usize, 0_usize, 0_usize);
+    let (mut any, mut single, mut double) = (0_usize, 0_usize, 0_usize);
+    let (mut hot, mut hot_single) = (0_usize, 0_usize);
     for s in systems {
         let coeffs = ZCoeffs::new(s.composition.z_fit());
         let radius = zams::radius(s.star_mass(0), &coeffs).value() * SOLAR_RADIUS_M;
@@ -1026,8 +1222,9 @@ fn hot_chain_statistics(systems: &[System], report: &mut Report) {
             .hosts
             .iter()
             .filter(|h| h.zone.members().eq([0]))
-            .flat_map(|h| h.placement.planets())
-            .map(|p| {
+            .flat_map(|h| h.placement.planets().iter().map(move |p| (h, p)))
+            .filter(|&(h, p)| period_days(p) <= 200.0 && derived(h, p, ranks).0 >= 1.0)
+            .map(|(_, p)| {
                 let orbit = p.orbit();
                 let (i, node) = (orbit.inclination().value(), orbit.ascending_node().value());
                 let normal = [
@@ -1059,7 +1256,8 @@ fn hot_chain_statistics(systems: &[System], report: &mut Report) {
                 .count();
             if transiting > 0 {
                 any += 1;
-                any_single += usize::from(transiting == 1);
+                single += usize::from(transiting == 1);
+                double += usize::from(transiting == 2);
                 if has_hot {
                     hot += 1;
                     hot_single += usize::from(transiting == 1);
@@ -1067,12 +1265,52 @@ fn hot_chain_statistics(systems: &[System], report: &mut Report) {
             }
         }
     }
+    report.check(
+        "transiting early M systems showing one planet of 1 R_earth or more inside 200 days \
+         (Ballard and Johnson 2016, 71 of 106)",
+        ratio(single, any),
+        (0.58, 0.76),
+    );
     report.note(format!(
-        "  transiting systems showing one planet: with a hot chain {:.4} ({hot} lines of sight), \
-         every system {:.4} ({any}); Ballard and Johnson 2016: 55% in the singles' mode",
+        "  showing two: {:.4} (Ballard and Johnson: 17 of 106, 0.16, window 0.09-0.23); three or \
+         more {:.4} (0.17); with a hot chain one {:.4} ({hot} of {any} lines of sight)",
+        ratio(double, any),
+        ratio(any - single - double, any),
         ratio(hot_single, hot),
-        ratio(any_single, any)
     ));
+}
+
+/// Ruling 102.1's early-M anchor: Dressing and Charbonneau's (2015) early M dwarfs through Ment
+/// and Charbonneau's (2023) Table 9, every primary of 0.4–0.6 M☉, planets at 0.5–7 days by the
+/// derivation's radius: 0.18 ± 0.04 per star of 1.5–4 R⊕ and 0.29 ± 0.05 of 0.5–1.5 R⊕ (±2σ).
+fn early_m_radii(systems: &[System], report: &mut Report, ranks: &mut Lcg) {
+    let early: Vec<&System> = systems
+        .iter()
+        .filter(|s| (0.4..0.6).contains(&s.star_mass(0).value()))
+        .collect();
+    let (mut above, mut below) = (0_usize, 0_usize);
+    for s in &early {
+        for (h, p) in primary_planets(s) {
+            if !(0.5..7.0).contains(&period_days(p)) {
+                continue;
+            }
+            let r = derived(h, p, ranks).0;
+            above += usize::from(r > 1.5 && r <= 4.0);
+            below += usize::from((0.5..=1.5).contains(&r));
+        }
+    }
+    report.check(
+        "1.5-4 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary (Dressing and Charbonneau \
+         2015 via Ment and Charbonneau 2023, Table 9)",
+        ratio(above, early.len()),
+        (0.10, 0.26),
+    );
+    report.check(
+        "0.5-1.5 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary (Dressing and \
+         Charbonneau 2015 via Ment and Charbonneau 2023, Table 9)",
+        ratio(below, early.len()),
+        (0.19, 0.39),
+    );
 }
 
 /// Whether `p` is a hot chain's planet.
@@ -1267,11 +1505,6 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   is asserted and the linear's reported, with and without the pairs holding a planet above
 ///   16 R⊕. Their SNR swap test needs each star's photometric noise, which the placed sample does
 ///   not carry, so it is not applied;
-/// - (87.2) small planets per early M dwarf that is single or whose nearest companion is over
-///   200 au away, inside 200 days, against 3.6 (Dressing and Charbonneau's 2.47 per Kepler target
-///   ÷ 0.68, the share of Moe and Kratter's (2021, MNRAS 507, 3593, §4 and Fig. 6) magnitude-limited
-///   M dwarfs whose companions leave their planets), window 2.9–4.4; beyond 200 au Moe and Kratter
-///   suppress no planet;
 /// - (P14.T10.b, ruling 85.4) Dressing and Charbonneau's (2015, Table 5) 0.47 small planets per
 ///   early M dwarf at 0.5–10 days, window 0.37–0.57: their rows' errors in quadrature give about
 ///   +0.065 −0.05, and the window takes ±0.10, about two of them, on the mass proxy;
@@ -1280,8 +1513,9 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   radius by Weiss and Marcy's (2014) relation (their eqs. 6–9; [`weiss_marcy_mass`]);
 /// - (P14.T9.c) hosts in binaries inside 47 au have planets 0.25–0.5 as often as single stars of
 ///   the same mass (Kraus et al. 2016, AJ 152, 8: `S_bin` = 0.34 (+0.14 −0.15));
-/// - (48 b) mid-to-late M dwarfs, as above: 1.06 per star and 32% compact multiples, inside
-///   Hardegree-Ullman et al.'s intervals since ruling 94's closer first period and held median;
+/// - (48 b) mid-to-late M dwarfs, as above: 0.75 per star and 20% compact multiples, inside
+///   Hardegree-Ullman et al.'s intervals since ruling 94's closer first period and held median
+///   (1.06 and 32% before ruling 102's farther first period);
 /// - (94.2) single late M dwarfs (or wider than 200 au) of 0.14–0.337 M☉, whose median is Ribas
 ///   et al.'s (2023, A&A 670, A139, §5) 0.24 M☉ for their hosts under 0.337 M☉: planets of
 ///   1–10 M⊕ in m sin i (i seen along galactic north, isotropic as every host's plane is), 0.56
@@ -1293,9 +1527,21 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   3–10 M⊕, window 0.03–0.3, which tests the taper above the chains' old ceiling;
 /// - (94.3) Ment and Charbonneau (2023, AJ 165, 265, Tables 5–7), every primary of 0.1–0.3 M☉
 ///   of their volume-complete sample: 0.61 (+0.24 −0.19) planets of 0.5–2 R⊕ at 0.4–7 days, less
-///   their 0.4–1 day bin about 0.57, window 0.35–1.0, by Chen and Kipping's radius;
-/// - (94.6) under 10% of the early M dwarfs' hot chain planets have their eccentricities scaled
-///   down to the spacing floor;
+///   their 0.4–1 day bin about 0.57, window 0.35–1.0, by the derivation's radius (ruling 102.1's
+///   rocky branch; [`derived`]);
+/// - (102.1) the rocky branch's two anchors, by the derivation's radius at 0.5–7 days: about
+///   every primary of 0.1–0.3 M☉, Ment and Charbonneau's rocky planets outnumber the rest 14 to 1
+///   (§5.1), so 0.02–0.12 of the planets lie above 1.5 R⊕, and their model 5 allows at most 0.16
+///   per star at 1.4 R⊕ or more (90%); about every primary of 0.4–0.6 M☉, Dressing and
+///   Charbonneau's (2015) rates through Ment and Charbonneau's Table 9, 0.18 ± 0.04 per star of
+///   1.5–4 R⊕ and 0.29 ± 0.05 of 0.5–1.5 R⊕, windows 0.10–0.26 and 0.19–0.39 (±2σ);
+/// - (102.2) planets of 0.5–0.9 R⊕ at most 0.8 times those of 0.9–1.4 R⊕ at 0.5–7 days about the
+///   same late M primaries, Ment and Charbonneau's model 5, flat in radius; models 3 (0.30, of
+///   0.5–1 against 1–1.5 R⊕) and 6 (0.22) are reported beside it;
+/// - (102.3) transiting early M systems (primaries of 0.35–0.6 M☉, planets of at least 1 R⊕
+///   inside 200 days, b < 1 over sixteen isotropic lines of sight each) showing one planet in
+///   0.58–0.76 of cases: Ballard and Johnson's (2016, §2) 71 of 106 hosts, 0.670 ± 0.046, with
+///   their 17 doubles (0.16) reported beside it;
 /// - (87.4) the outer planet of a pair is the larger in Weiss et al.'s 65.4% with the ±2.1%
 ///   sampling spread of their 504 pairs (a re-run of their cuts gives 64.5%), 0.633–0.675: a
 ///   finding at 0.640 until ruling 94.4's taper let the outer members of chains centred near the
@@ -1309,13 +1555,23 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 /// is a finding a ruling records rather than tunes, and is reported with its dial:
 ///
 /// - (87.3) small planets per star inside 200 days about primaries of 0.65–0.75 M☉, which ruling
-///   85.4's blend reaches, are 1.19, between the FGK stars' 0.76 and the early M dwarfs' 2.76;
-/// - (94.3) about 0.1–0.3 M☉ primaries, 0.20 of the planets at 0.5–7 days lie above 1.5 R⊕,
-///   against Ment and Charbonneau's 1 in 15 (terrestrials outnumber sub-Neptunes 14 to 1), and
-///   0.13 per star against their ≤ 0.07; planets of 0.5–0.9 R⊕ are 1.26 times those of
-///   1–1.5 R⊕ against
-///   their 0.29 (0.13–0.56, a "tentative downturn"): the chains' 0.54 dex width about a median
-///   of 2.7 M⊕ puts too many planets in both tails;
+///   85.4's blend reaches, are 1.15, between the FGK stars' 0.76 and the early M dwarfs' 1.99;
+/// - (87.2, 102.4) small planets per early M dwarf that is single or whose nearest companion is
+///   over 200 au away, inside 200 days, are 2.57 against 3.6 (Dressing and Charbonneau's 2.47 per
+///   Kepler target ÷ 0.68, the share of Moe and Kratter's (2021, MNRAS 507, 3593, §4 and Fig. 6)
+///   magnitude-limited M dwarfs whose companions leave their planets), window 2.9–4.4; beyond
+///   200 au Moe and Kratter suppress no planet. Ruling 102.4 returns the hot variant to one or two
+///   planets and meets the window through the cold chains, at most 57% of systems of at most
+///   eight planets: at that bound the cold chains hold 5.9 planets inside 200 days, 3.8 of them
+///   of 1–20 M⊕, and the tension is reported, not tuned;
+/// - (94.6, 102.4) 0.24 of the early M dwarfs' hot chain planets have their eccentricities scaled
+///   down to the spacing floor, against ruling 94.6's under 10%, which was set for hot chains of
+///   five or more: with one or two planets at the half-normal 0.3 the pair's outer planet is
+///   scaled as often as an FGK star's (0.25);
+/// - (102.5) Pascucci et al.'s (2018, Table 1) mass-ratio slope above the break for K and G hosts,
+///   −2.9 ± 0.4, is −0.36 here (dN ÷ d log q over (2.8–8) × 10⁻⁵; [`pascucci_statistics`]), and
+///   0.067 of their window's planets lie above q = 6 × 10⁻⁵ against about 0.02: the taper stays on
+///   the members (plan 14's ruling 102 note);
 /// - small planets at \[Fe/H\] = −0.8 are 0.45 of solar (0.46 before ruling 68.2, 0.42 before
 ///   ruling 73): the compact classes' share there is about 0.72 of solar, as
 ///   `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars with Kepler-like
