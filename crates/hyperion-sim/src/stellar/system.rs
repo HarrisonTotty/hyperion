@@ -27,16 +27,21 @@ use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::BodyId;
 use crate::math;
-use crate::rng::{ObjectKey, Stream, tags};
+use crate::rng::{Mark, ObjectKey, Stream, tags};
 use crate::stellar::classify::{ClassExtras, Classification, LuminosityClass, classify};
-use crate::stellar::draws::{StandardNormal, StarDraws};
+use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
     MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy,
 };
 use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
 use crate::stellar::remnant::collapse::RemnantDraws;
-use crate::stellar::remnant::{CompactRemnant, Death, DeathKind, NatalKick, StandardKickLaw};
+use crate::stellar::remnant::{
+    BlackHole, CompactRemnant, Death, DeathKind, NatalKick, NeutronStar, PulsarState, RemnantKind,
+    StandardKickLaw,
+};
+use crate::stellar::rotation::{self, Activity, Magnetism, Rotation};
 use crate::stellar::sse::{self, Track, TrackOptions};
+use crate::stellar::variability::{Variability, VariabilityInputs, variability};
 use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
@@ -437,6 +442,87 @@ impl StarModel {
         self.remnant.and_then(|stage| stage.natal_kick)
     }
 
+    /// The neutron star the star leaves, with its birth spin and field (P06.T21), or `None` if it
+    /// leaves none by the end of the clock window.
+    #[must_use]
+    pub fn neutron_star(&self) -> Option<NeutronStar> {
+        self.remnant
+            .filter(|stage| stage.remnant.kind() == RemnantKind::NeutronStar)
+            .map(|_| NeutronStar::from_draws(&self.draws))
+    }
+
+    /// The black hole the star leaves, with its spin (P06.T22), or `None` if it leaves none by the
+    /// end of the clock window.
+    #[must_use]
+    pub fn black_hole(&self) -> Option<BlackHole> {
+        self.remnant
+            .filter(|stage| stage.remnant.kind() == RemnantKind::BlackHole)
+            .map(|stage| BlackHole::from_draws(stage.remnant.mass(), &self.draws))
+    }
+
+    /// The time since the star died, at `t`: `None` while it lives, for an object below 0.1 M☉,
+    /// and for a star that dies after the clock window.
+    #[must_use]
+    pub fn remnant_age_at(&self, t: UniverseTime) -> Option<Years> {
+        let stage = self.remnant?;
+        let since = self.age_at(t).value() - stage.death.age().value();
+        (since >= 0.0).then(|| Years::new(since))
+    }
+
+    /// The pulsar the star's neutron star is at `t` (P06.T21.b–c), or `None` if it is not a
+    /// neutron star then.
+    #[must_use]
+    pub fn pulsar_at(&self, t: UniverseTime) -> Option<PulsarState> {
+        let age = self.remnant_age_at(t)?;
+        self.neutron_star().map(|ns| ns.state_at(age))
+    }
+
+    /// The pulse phase of the star's neutron star at `t`, cycles in [0, 1) (P06.T21.d), or `None`
+    /// if it is not a neutron star then.
+    #[must_use]
+    pub fn pulsar_phase_at(&self, t: UniverseTime) -> Option<f64> {
+        self.remnant_age_at(t)?;
+        let stage = self.remnant?;
+        let age_at_epoch = Years::new(self.age_at_epoch.value() - stage.death.age().value());
+        let clock = self.neutron_star()?.pulse_clock(age_at_epoch)?;
+        Some(clock.phase_at(t))
+    }
+
+    /// The star's rotation at `t` (P06.T25), or `None` if it has not formed then or its phase is
+    /// not one [`rotation::rotation`] models. An evolved star reads its state at the end of its
+    /// main sequence from its track.
+    #[must_use]
+    pub fn rotation_at(&self, t: UniverseTime) -> Option<Rotation> {
+        let state = self.state_at(t)?;
+        self.rotation_of(&state)
+    }
+
+    /// The rotation of the star in `state`, one of its own states.
+    #[must_use]
+    fn rotation_of(&self, state: &StarState) -> Option<Rotation> {
+        let terminal = match &self.evolution {
+            Evolution::Track(track) if !matches!(state.phase(), Phase::MainSequence) => track
+                .main_sequence_end()
+                .filter(|end| *end <= state.age())
+                .map(|end| track.state_at(end)),
+            Evolution::Track(_) | Evolution::Cooling => None,
+        };
+        rotation::rotation(state, &self.composition, &self.draws, terminal.as_ref())
+    }
+
+    /// What [`classify`] reads of the star's history in `state`, its state at `t`: a neutron
+    /// star's class from its pulsar state (P06.T21.c).
+    #[must_use]
+    pub(crate) fn class_extras_at(&self, state: &StarState, t: UniverseTime) -> ClassExtras {
+        if state.phase() == Phase::NeutronStar {
+            self.pulsar_at(t).map_or(ClassExtras::NONE, |pulsar| {
+                ClassExtras::neutron_star(pulsar.class())
+            })
+        } else {
+            ClassExtras::NONE
+        }
+    }
+
     /// The bytes the model owns on the heap, beyond `size_of::<StarModel>()`: its boxed track and
     /// what the track owns, and nothing below 0.1 M☉ (for [`SystemStars::heap_bytes`]).
     #[must_use]
@@ -526,9 +612,10 @@ pub enum ClockDeath {
 /// state, what kind of object it is, its class and absolute magnitudes, its remnant once it is
 /// dead, and its death if that falls inside the clock window.
 ///
-/// Variability (P06.T26), rotation and magnetism (T25), a planetary nebula (T16), the active
-/// events (T28) and plan 11's binary class (P11.T5) are added by their tasks; this generator
-/// version computes none of them.
+/// A remnant's detail (a neutron star's pulsar state, P06.T21; a black hole's spin, T22) and a
+/// living star's rotation, magnetism and activity (T25) and its variability (T26.a–c) are here.
+/// A planetary nebula (T16), the active events (T28) and plan 11's binary class (P11.T5) are
+/// added by their tasks.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarSummary {
     body: BodyId,
@@ -538,7 +625,22 @@ pub struct StarSummary {
     absolute_magnitude_v: Option<Magnitudes>,
     colour_b_v: Option<Magnitudes>,
     remnant: Option<CompactRemnant>,
+    remnant_detail: Option<RemnantDetail>,
+    rotation: Option<Rotation>,
+    magnetism: Option<Magnetism>,
+    activity: Option<Activity>,
+    variability: Option<Variability>,
     death_in_window: Option<(UniverseTime, DeathKind)>,
+}
+
+/// What a remnant's summary says beyond its kind and mass: a neutron star's pulsar state
+/// (P06.T21) or a black hole's spin (P06.T22). A white dwarf's type is its classification.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RemnantDetail {
+    /// A neutron star as a pulsar at the summary's time.
+    NeutronStar(PulsarState),
+    /// A black hole.
+    BlackHole(BlackHole),
 }
 
 impl StarSummary {
@@ -586,6 +688,37 @@ impl StarSummary {
     #[must_use]
     pub const fn remnant(&self) -> Option<CompactRemnant> {
         self.remnant
+    }
+
+    /// A neutron star's pulsar state or a black hole's spin, once the star has left one.
+    #[must_use]
+    pub const fn remnant_detail(&self) -> Option<RemnantDetail> {
+        self.remnant_detail
+    }
+
+    /// The star's rotation (P06.T25), where it is modelled: every living star from the protostar
+    /// to the asymptotic giant branch. A neutron star's spin is its pulsar's.
+    #[must_use]
+    pub const fn rotation(&self) -> Option<Rotation> {
+        self.rotation
+    }
+
+    /// The star's surface field (P06.T25): a fossil field, or a cool dwarf's dynamo field.
+    #[must_use]
+    pub const fn magnetism(&self) -> Option<Magnetism> {
+        self.magnetism
+    }
+
+    /// A cool dwarf's magnetic activity (P06.T25), from its Rossby number.
+    #[must_use]
+    pub const fn activity(&self) -> Option<Activity> {
+        self.activity
+    }
+
+    /// How the star's light varies (P06.T26.a–c), or `None` if it does not.
+    #[must_use]
+    pub const fn variability(&self) -> Option<Variability> {
+        self.variability
     }
 
     /// The star's death, its clock time and kind, if it falls inside the clock window [−H, +H]
@@ -658,18 +791,20 @@ pub struct StellarBrief {
 }
 
 impl StellarBrief {
-    /// The brief of a primary in `state`, of `composition` and `draws`, in a system of
-    /// `star_count` stars: its class, its kind, log L and `T_eff`. [`SystemStars::brief_at`] and
-    /// the range brief ([`crate::stellar::brief`]) both make it here, so that a brief is the same
-    /// function of the state whichever built it.
+    /// The brief of a primary in `state`, of `composition` and `draws`, with the `extras` its
+    /// history gives (a neutron star's class), in a system of `star_count` stars: its class, its
+    /// kind, log L and `T_eff`. [`SystemStars::brief_at`] and the range brief
+    /// ([`crate::stellar::brief`]) both make it here, so that a brief is the same function of the
+    /// state whichever built it.
     #[must_use]
     pub(crate) fn of(
         state: &StarState,
         composition: &Composition,
         draws: &StarDraws,
+        extras: ClassExtras,
         star_count: u8,
     ) -> Self {
-        let class = classify(state, composition, draws, &ClassExtras::NONE);
+        let class = classify(state, composition, draws, &extras);
         let luminosity = state.luminosity().value();
         Self {
             kind: object_kind(state, &class, composition),
@@ -987,6 +1122,7 @@ impl SystemStars {
             &state,
             primary.composition(),
             primary.draws(),
+            primary.class_extras_at(&state, t),
             self.star_count(),
         ))
     }
@@ -1038,6 +1174,18 @@ pub(crate) fn primary_eta(galaxy: &Galaxy, record: &SystemRecord) -> StandardNor
     StarDraws::eta_for_attempt(galaxy.seed(), BodyId::new(record.id(), 0), 0)
 }
 
+/// The primary's rotation rank and fossil-field mark alone: [`primary_draws`]'s, bit for bit, for
+/// the range brief of a main-sequence primary, whose peculiar class reads them (P06.T25).
+///
+/// **The same seam as [`primary_draws`].**
+#[must_use]
+pub(crate) fn primary_rotation_draws(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+) -> (UnitUniform, Mark) {
+    StarDraws::rotation_for_attempt(galaxy.seed(), BodyId::new(record.id(), 0), 0)
+}
+
 /// The clock time of `death` for a star whose age at the epoch is `age_at_epoch`.
 #[must_use]
 fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
@@ -1054,7 +1202,14 @@ fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
 #[must_use]
 fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarSummary> {
     let state = star.state_at(t)?;
-    let classification = classify(&state, star.composition(), star.draws(), &ClassExtras::NONE);
+    let classification = classify(
+        &state,
+        star.composition(),
+        star.draws(),
+        &star.class_extras_at(&state, t),
+    );
+    let spin = star.rotation_of(&state);
+    let activity = rotation::activity(&state, spin.as_ref());
     let remnant = if state.phase().is_remnant() {
         star.remnant()
     } else {
@@ -1078,6 +1233,24 @@ fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarS
         absolute_magnitude_v: absolute_magnitude_v(&state),
         colour_b_v: colour_b_v(state.effective_temperature()),
         remnant,
+        remnant_detail: if state.phase() == Phase::NeutronStar {
+            star.pulsar_at(t).map(RemnantDetail::NeutronStar)
+        } else if state.phase() == Phase::BlackHole {
+            star.black_hole().map(RemnantDetail::BlackHole)
+        } else {
+            None
+        },
+        rotation: spin,
+        magnetism: rotation::magnetism(&state, star.draws(), spin.as_ref()),
+        activity,
+        variability: variability(&VariabilityInputs {
+            state: &state,
+            initial_mass: star.initial_mass(),
+            composition: star.composition(),
+            classification: &classification,
+            rotation: spin.as_ref(),
+            activity: activity.as_ref(),
+        }),
         death_in_window,
         state,
     })
@@ -1546,6 +1719,113 @@ mod tests {
         };
         assert_eq!(kind_of(&cool(0.05), &solar), ObjectKind::Substellar);
         assert_eq!(kind_of(&cool(0.09), &solar), ObjectKind::Dwarf);
+    }
+
+    /// A system ID for tests that need a body and no record.
+    fn test_system() -> crate::id::SystemId {
+        let cell = crate::coords::GenCell::new(crate::coords::CellSize::Ly8, [1, 2, 3]).unwrap();
+        crate::id::SystemId::from_parts(Layer::A, cell, 1).unwrap()
+    }
+
+    /// A neutron star dead at the epoch reads as its pulsar (P06.T21): the summary's detail is the
+    /// model's pulsar state, its class is the pulsar's, the brief agrees, and its pulse phase is
+    /// defined; a star that is still living has none of these.
+    #[test]
+    fn a_neutron_star_reads_as_its_pulsar() {
+        let ns = StarModel::new(
+            SolarMasses::new(15.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(2.0e7),
+        )
+        .unwrap();
+        let t = UniverseTime::EPOCH;
+        let summary = star_summary(&ns, BodyId::new(test_system(), 0), t).unwrap();
+        assert_eq!(summary.state().phase(), Phase::NeutronStar);
+        let pulsar = ns.pulsar_at(t).unwrap();
+        assert_eq!(
+            summary.remnant_detail(),
+            Some(RemnantDetail::NeutronStar(pulsar))
+        );
+        let since = ns.remnant_age_at(t).unwrap();
+        assert_eq!(pulsar, ns.neutron_star().unwrap().state_at(since));
+        assert_eq!(
+            summary.classification().spectral_type(),
+            crate::stellar::classify::SpectralType::NeutronStar(pulsar.class())
+        );
+        let brief = StellarBrief::of(
+            summary.state(),
+            ns.composition(),
+            ns.draws(),
+            ns.class_extras_at(summary.state(), t),
+            1,
+        );
+        assert_eq!(brief.class(), summary.classification());
+        assert!((0.0..1.0).contains(&ns.pulsar_phase_at(t).unwrap()));
+        assert_eq!(summary.rotation(), None);
+        let living = model(0);
+        assert_eq!(living.pulsar_at(t), None);
+        assert_eq!(living.pulsar_phase_at(t), None);
+    }
+
+    /// A black hole's detail is its spin from `star.bh.spin` (P06.T22), constant in time.
+    #[test]
+    fn a_black_hole_carries_its_spin() {
+        let bh = StarModel::new(
+            SolarMasses::new(40.0),
+            Composition::SOLAR,
+            StarDraws::from_parts(StarDrawsParts {
+                bh_spin: StandardNormal::new(-1.5).unwrap(),
+                ..StarDrawsParts::MEDIAN
+            }),
+            Years::new(2.0e7),
+        )
+        .unwrap();
+        let body = BodyId::new(test_system(), 0);
+        let now = star_summary(&bh, body, UniverseTime::EPOCH).unwrap();
+        let later = star_summary(&bh, body, years(900)).unwrap();
+        assert_eq!(now.state().phase(), Phase::BlackHole);
+        let Some(RemnantDetail::BlackHole(hole)) = now.remnant_detail() else {
+            panic!("{:?}", now.remnant_detail());
+        };
+        assert!((hole.spin() - 0.15).abs() < 1e-15);
+        assert_eq!(hole.mass(), now.remnant().unwrap().mass());
+        assert_eq!(later.remnant_detail(), now.remnant_detail());
+        assert_eq!(later.state().luminosity(), SolarLuminosities::ZERO);
+    }
+
+    /// A star's rotation is continuous across the end of its main sequence (P06.T25): the evolved
+    /// star keeps the angular momentum the main-sequence law gives it at the end, above and below
+    /// the Kraft break.
+    #[test]
+    fn rotation_is_continuous_across_the_end_of_the_main_sequence() {
+        for m in [1.0, 2.5] {
+            let full = Track::full(
+                SolarMasses::new(m),
+                &Composition::SOLAR,
+                &StarDraws::median(),
+            );
+            let end = full.main_sequence_end().unwrap().value();
+            let spin = |age: f64| {
+                StarModel::new(
+                    SolarMasses::new(m),
+                    Composition::SOLAR,
+                    StarDraws::median(),
+                    Years::new(age),
+                )
+                .unwrap()
+                .rotation_at(UniverseTime::EPOCH)
+                .unwrap()
+            };
+            let (before, after) = (spin(end - 1.0), spin(end + 1.0));
+            let ratio = after.period().value() / before.period().value();
+            assert!(
+                (ratio - 1.0).abs() < 1e-3,
+                "{m} M☉: {before:?} then {after:?}"
+            );
+            let giant = spin(end * 1.1);
+            assert!(giant.period() > after.period(), "{m} M☉: {giant:?}");
+        }
     }
 
     /// The brief is the summary's primary, in brief, and a black hole is a black hole.

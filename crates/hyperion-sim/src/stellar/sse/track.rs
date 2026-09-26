@@ -467,6 +467,20 @@ impl Track {
         Years::new(self.built_until)
     }
 
+    /// The age at which the main sequence ends, if the track has been built past it: the start
+    /// of the first segment after the last main-sequence one (the rotation of an evolved star
+    /// reads the star there, P06.T25).
+    #[must_use]
+    pub(crate) fn main_sequence_end(&self) -> Option<Years> {
+        let last = self
+            .segments
+            .iter()
+            .rposition(|segment| matches!(segment.model, Model::MainSequence { .. }))?;
+        self.segments
+            .get(last + 1)
+            .map(|next| Years::new(next.start))
+    }
+
     /// The initial mass the track was built for, M☉ (clamped into the covered range).
     #[must_use]
     pub const fn initial_mass(&self) -> SolarMasses {

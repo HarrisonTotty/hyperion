@@ -4,26 +4,32 @@
 //!
 //! The answer follows the three states of `hyperion_protocol`'s stellar module (ruling 54 of
 //! 2026-09-22): a field this generator version does not compute is absent, one computed that the
-//! object lacks is `null`, and the rest carry their values. So rotation, activity, variability, a
-//! planetary nebula and the active events are absent for every star (plan 06's T16 and T25–T28),
-//! as are a pulsar's detail (T21) and a black hole's spin (T22). A remnant's natal kick is
-//! P06.T19's ([`StarModel::natal_kick`]), `null` where the model holds none.
+//! object lacks is `null`, and the rest carry their values. A pulsar's detail (plan 06's T21), a
+//! black hole's spin (T22), rotation and activity (T25) and variability (T26.a–c) are sent where the
+//! sim computes them; a planetary nebula and the active events are absent for every star (T16,
+//! T28).
+//! A remnant's natal kick is P06.T19's ([`StarModel::natal_kick`]), `null` where the model holds
+//! none.
 
 use hyperion_protocol::{
     ErrorCode, HierarchyDto, HierarchyNodeDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto,
-    OrbitDto, PhaseDto, RemnantDto, RequestError, StarSummaryDto, StellarBriefDto,
-    SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
+    OrbitDto, PhaseDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto, StellarBriefDto,
+    SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest, VariabilityDto,
+    VariableKindDto,
 };
 use hyperion_sim::id::SystemId;
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
-use hyperion_sim::stellar::remnant::{CompactRemnant, KickMode, NatalKick, RemnantKind};
-use hyperion_sim::stellar::system::{
-    StarModel, StarSummary, StellarBrief, SystemExistence, SystemStars,
+use hyperion_sim::stellar::remnant::{
+    CompactRemnant, KickMode, NatalKick, PulsarState, RemnantKind,
 };
+use hyperion_sim::stellar::system::{
+    RemnantDetail, StarModel, StarSummary, StellarBrief, SystemExistence, SystemStars,
+};
+use hyperion_sim::stellar::variability::{Variability, VariableKind};
 use hyperion_sim::stellar::{ObjectKind, Phase, StarState};
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::{Dex, KilometresPerSecond, Magnitudes, Megayears, Years};
+use hyperion_sim::units::{Days, Dex, KilometresPerSecond, Magnitudes, Megayears, Years};
 
 use super::query_time;
 
@@ -137,11 +143,13 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
         mass_loss_rate_msun_per_yr: state.mass_loss_rate().value(),
         remnant: star
             .remnant()
-            .map(|remnant| remnant_dto(model, state, remnant)),
+            .map(|remnant| remnant_dto(model, state, remnant, star.remnant_detail())),
         death_time: star.death_in_window().map(|(when, _)| wire_time(when)),
-        rotation_period_d: Modelled::NotModelled,
-        activity_log_lx_lbol: Modelled::NotModelled,
-        variability: Modelled::NotModelled,
+        rotation_period_d: rotation_period(star),
+        activity_log_lx_lbol: activity(star),
+        variability: star
+            .variability()
+            .map_or(Modelled::Null, |v| Modelled::Value(variability_dto(&v))),
         planetary_nebula: Modelled::NotModelled,
         active_events: None,
     }
@@ -173,7 +181,12 @@ pub(crate) fn brief_dto(brief: &StellarBrief) -> StellarBriefDto {
 ///
 /// A white dwarf's cooling age is the time since the star died, its age now less its age at death.
 #[must_use]
-fn remnant_dto(model: &StarModel, state: &StarState, remnant: CompactRemnant) -> RemnantDto {
+fn remnant_dto(
+    model: &StarModel,
+    state: &StarState,
+    remnant: CompactRemnant,
+    detail: Option<RemnantDetail>,
+) -> RemnantDto {
     let natal_kick = model.natal_kick().map(natal_kick);
     match remnant.kind() {
         RemnantKind::WhiteDwarf => {
@@ -189,14 +202,99 @@ fn remnant_dto(model: &StarModel, state: &StarState, remnant: CompactRemnant) ->
             }
         }
         RemnantKind::NeutronStar => RemnantDto::NeutronStar {
-            pulsar: None,
+            pulsar: match detail {
+                Some(RemnantDetail::NeutronStar(pulsar)) => Some(pulsar_dto(&pulsar)),
+                Some(RemnantDetail::BlackHole(_)) | None => None,
+            },
             natal_kick,
         },
         RemnantKind::BlackHole => RemnantDto::BlackHole {
-            dimensionless_spin: None,
+            dimensionless_spin: match detail {
+                Some(RemnantDetail::BlackHole(hole)) => Some(hole.spin()),
+                Some(RemnantDetail::NeutronStar(_)) | None => None,
+            },
             natal_kick,
         },
         RemnantKind::None => RemnantDto::NoRemnant,
+    }
+}
+
+/// A pulsar as the wire carries it (plan 06, P06.T21).
+#[must_use]
+fn pulsar_dto(pulsar: &PulsarState) -> PulsarDto {
+    PulsarDto {
+        spin_period_s: pulsar.period().value(),
+        period_derivative_s_per_s: pulsar.period_derivative(),
+        magnetic_field_g: pulsar.field().value(),
+        alive: pulsar.is_radio_alive(),
+        magnetar: pulsar.is_magnetar(),
+    }
+}
+
+/// A star's rotation period on the wire (plan 06, P06.T25): a living star's where the sim models
+/// it, a neutron star's spin, `null` for a black hole or nothing, and absent where the sim does
+/// not model it (a white dwarf's, a stripped helium star's, a post-AGB star's, a brown dwarf's).
+#[must_use]
+fn rotation_period(star: &StarSummary) -> Modelled<f64> {
+    if let Some(spin) = star.rotation() {
+        return Modelled::Value(spin.period().value());
+    }
+    if let Some(RemnantDetail::NeutronStar(pulsar)) = star.remnant_detail() {
+        Modelled::Value(Days::from(pulsar.period()).value())
+    } else if matches!(star.state().phase(), Phase::BlackHole | Phase::NoRemnant) {
+        Modelled::Null
+    } else {
+        Modelled::NotModelled
+    }
+}
+
+/// A star's activity on the wire (plan 06, P06.T25): log₁₀ L(X) ÷ L(bol) of a cool dwarf; `null`
+/// for a star without a convective dynamo (a hot main-sequence star, a remnant); absent for one
+/// whose dynamo the sim does not model (an evolved star, a brown dwarf).
+#[must_use]
+fn activity(star: &StarSummary) -> Modelled<f64> {
+    if let Some(activity) = star.activity() {
+        return Modelled::Value(activity.log_lx_lbol());
+    }
+    let phase = star.state().phase();
+    let hot_dwarf =
+        matches!(phase, Phase::MainSequence | Phase::PreMainSequence) && star.rotation().is_some();
+    if phase.is_remnant() || hot_dwarf {
+        Modelled::Null
+    } else {
+        Modelled::NotModelled
+    }
+}
+
+/// How a star varies, as the wire carries it (plan 06, P06.T26.a–c).
+#[must_use]
+fn variability_dto(v: &Variability) -> VariabilityDto {
+    VariabilityDto {
+        kind: match v.kind() {
+            VariableKind::DeltaScuti => VariableKindDto::DeltaScuti,
+            VariableKind::RrLyrae => VariableKindDto::RrLyrae,
+            VariableKind::ClassicalCepheid => VariableKindDto::ClassicalCepheid,
+            VariableKind::BlHerculis => VariableKindDto::BlHerculis,
+            VariableKind::WVirginis => VariableKindDto::WVirginis,
+            VariableKind::RvTauri => VariableKindDto::RvTauri,
+            VariableKind::Mira => VariableKindDto::Mira,
+            VariableKind::SemiregularA => VariableKindDto::SemiregularA,
+            VariableKind::SemiregularB => VariableKindDto::SemiregularB,
+            VariableKind::SemiregularC => VariableKindDto::SemiregularC,
+            VariableKind::SlowIrregular => VariableKindDto::SlowIrregular,
+            VariableKind::BetaCephei => VariableKindDto::BetaCephei,
+            VariableKind::SlowlyPulsatingB => VariableKindDto::SlowlyPulsatingB,
+            VariableKind::GammaDoradus => VariableKindDto::GammaDoradus,
+            VariableKind::ZzCeti => VariableKindDto::ZzCeti,
+            VariableKind::V777Herculis => VariableKindDto::V777Herculis,
+            VariableKind::GwVirginis => VariableKindDto::GwVirginis,
+            VariableKind::AlphaCygni => VariableKindDto::AlphaCygni,
+            VariableKind::SDoradus => VariableKindDto::SDoradus,
+            VariableKind::ByDraconis => VariableKindDto::ByDraconis,
+            VariableKind::Alpha2CanumVenaticorum => VariableKindDto::Alpha2CanumVenaticorum,
+        },
+        period_d: v.period().value(),
+        amplitude_mag: v.amplitude().value(),
     }
 }
 
@@ -448,13 +546,33 @@ mod tests {
         assert!(matches!(
             hole.remnant,
             Some(RemnantDto::BlackHole {
-                dimensionless_spin: None,
+                dimensionless_spin: Some(spin),
                 natal_kick: Some(NatalKickDto {
                     mode: KickModeDto::Ordinary | KickModeDto::FallbackNone,
                     ..
                 })
-            })
+            }) if (0.0..0.998).contains(&spin)
         ));
+        assert_eq!(hole.rotation_period_d, Modelled::Null);
+        assert_eq!(hole.activity_log_lx_lbol, Modelled::Null);
+        // A neutron star carries its pulsar and its spin as its rotation (P06.T21).
+        let neutron = [9.0, 11.0, 13.0, 15.0, 18.0]
+            .into_iter()
+            .map(|m| answer(&system(m, 2.0e8), 0).stars[0].clone())
+            .find(|star| star.kind == ObjectKindDto::NeutronStar)
+            .expect("one of five stars of 9-18 M_sun leaves a neutron star");
+        let Some(RemnantDto::NeutronStar {
+            pulsar: Some(pulsar),
+            ..
+        }) = neutron.remnant
+        else {
+            panic!("{:?}", neutron.remnant);
+        };
+        assert!(pulsar.spin_period_s > 0.0 && pulsar.period_derivative_s_per_s > 0.0);
+        let Modelled::Value(period_d) = neutron.rotation_period_d else {
+            panic!("{:?}", neutron.rotation_period_d);
+        };
+        assert!((period_d * 86_400.0 / pulsar.spin_period_s - 1.0).abs() < 1e-12);
     }
 
     /// An object on the cooling fits reads as its hydrogen burning makes it: a star above the
@@ -476,20 +594,28 @@ mod tests {
     }
 
     /// What this generator version does not compute is absent from the wire, not `null`; what it
-    /// computes and the star lacks is `null`.
+    /// computes and the star lacks is `null`; a Sun-like star's rotation and activity are values
+    /// (P06.T25).
     #[test]
     fn what_is_not_computed_is_absent_and_what_is_lacking_is_null() {
         let living = answer(&system(1.0, 4.6e9), 0);
         let wire = serde_json::to_value(&living.stars[0]).expect("a summary serialises");
         let fields = wire.as_object().expect("a star is an object");
-        for absent in [
-            "rotation_period_d",
-            "activity_log_lx_lbol",
-            "variability",
-            "planetary_nebula",
-            "active_events",
-        ] {
+        assert_eq!(fields.get("variability"), Some(&serde_json::Value::Null));
+        for absent in ["planetary_nebula", "active_events"] {
             assert!(!fields.contains_key(absent), "{absent} is sent: {wire}");
+        }
+        for value in ["rotation_period_d", "activity_log_lx_lbol"] {
+            assert!(
+                fields.get(value).is_some_and(serde_json::Value::is_number),
+                "{value}: {wire}"
+            );
+        }
+        let brown = serde_json::to_value(&answer(&system(0.05, 5.0e9), 0).stars[0])
+            .expect("a summary serialises");
+        let fields = brown.as_object().expect("a star is an object");
+        for absent in ["rotation_period_d", "activity_log_lx_lbol"] {
+            assert!(!fields.contains_key(absent), "{absent} is sent: {brown}");
         }
         for null in ["remnant", "death_time"] {
             assert_eq!(fields.get(null), Some(&serde_json::Value::Null), "{null}");

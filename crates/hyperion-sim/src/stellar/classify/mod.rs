@@ -16,9 +16,11 @@
 //!
 //! [`classify`] joins them into a [`Classification`], whose `Display` is the class as an
 //! astronomer writes it: `G2V`, `M5III`, `K1.5IV`, `B8Ia`, `sdM3`, `T6`, `DA4.2`, `NS`. The classes
-//! beyond the MK grid (Wolf-Rayet types, luminous blue variables, carbon and S stars, T Tauri and
-//! Herbig stars, Be, Ap and Am stars: P06.T24 and P06.T25) arrive through [`ClassExtras`], which
-//! is empty in this generator version.
+//! beyond the MK grid are [`PeculiarClass`]es: P06.T25's Be, Ap, Bp and Am stars follow from the
+//! star's rotation and magnetism draws ([`rotation`](crate::stellar::rotation)), and P06.T24's
+//! (Wolf-Rayet types, luminous blue variables, carbon and S stars, T Tauri and Herbig stars) are
+//! still to come. What only a star's history knows, a neutron star's pulsar class, arrives through
+//! [`ClassExtras`].
 
 mod luminosity;
 pub(crate) mod pm13;
@@ -29,6 +31,7 @@ use core::fmt;
 
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::wd_spectral::{WhiteDwarfType, white_dwarf_type};
+use crate::stellar::rotation;
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::Kelvin;
 
@@ -238,10 +241,9 @@ impl fmt::Display for SpectralCode {
 
 /// What kind of neutron star an object is, which is how a neutron star is classified.
 ///
-/// Every neutron star is [`NeutronStar`](Self::NeutronStar) in this generator version: telling a
-/// radio pulsar and a magnetar from the rest needs the spin-down of P06.T21, which is deferred
-/// (ruling 33's vertical slice). T21 decides the other two from its `PulsarState` and passes them
-/// in through [`ClassExtras`].
+/// P06.T21 decides it from the pulsar's state at the star's age
+/// ([`PulsarState::class`](crate::stellar::remnant::PulsarState::class)) and passes it in through
+/// [`ClassExtras`]; without it a neutron star is [`NeutronStar`](Self::NeutronStar).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NeutronStarClass {
     /// A neutron star seen as neither a pulsar nor a magnetar: `NS`.
@@ -279,29 +281,76 @@ pub enum SpectralType {
     NoRemnant,
 }
 
-/// A class beyond the MK grid, which P06.T24 derives from the state and track (Wolf-Rayet types,
-/// hot subdwarfs, luminous blue variables, carbon and S stars, T Tauri and Herbig Ae/Be stars) and
-/// P06.T25 from rotation and magnetism (Be, Ap and Am stars).
+/// A class beyond the MK grid: P06.T25's, from rotation and magnetism (the Be, Ap, Bp and Am
+/// stars), and later P06.T24's from the state and track (Wolf-Rayet types, hot subdwarfs, luminous
+/// blue variables, carbon and S stars, T Tauri and Herbig Ae/Be stars).
 ///
-/// It has no variants in this generator version (ruling 33): T24 and T25 add them, with a version
-/// bump, and each must then be written by [`Classification`]'s `Display`, which the exhaustive
-/// match there enforces.
+/// Each is written after the luminosity class with the MK suffix of its kind: `e` for emission,
+/// `p` for peculiar abundances, `m` for metallic lines (`B3Ve`, `A0Vp`, `B8Vp`, `A2Vm`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum PeculiarClass {}
+pub enum PeculiarClass {
+    /// A Be star: a B-type main-sequence star spinning above 0.7 of its critical speed, whose
+    /// decretion disc shows emission (P06.T25).
+    Be,
+    /// An Ap star: an A- or late F-type main-sequence star of 7,000–10,000 K with a fossil field
+    /// and the chemical spots it holds (P06.T25).
+    Ap,
+    /// A Bp star: the B-type counterpart of an Ap star, to 20,000 K (P06.T25).
+    Bp,
+    /// An Am star: a slowly rotating non-magnetic A star of 7,000–10,000 K, under 120 km/s, whose
+    /// quiet envelope lets metals settle and rise (P06.T25).
+    Am,
+}
 
-/// What [`classify`] reads beyond the state, the composition and the draws: the peculiar classes
-/// of P06.T24 and P06.T25, and the pulsar state of P06.T21 that tells `PSR` and `MAG` from `NS`.
+impl PeculiarClass {
+    /// The class's name as astronomers say it: `Be`, `Ap`, `Bp`, `Am`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Be => "Be",
+            Self::Ap => "Ap",
+            Self::Bp => "Bp",
+            Self::Am => "Am",
+        }
+    }
+
+    /// The MK suffix the class is written with: `e`, `p` or `m`.
+    #[must_use]
+    pub const fn suffix(self) -> &'static str {
+        match self {
+            Self::Be => "e",
+            Self::Ap | Self::Bp => "p",
+            Self::Am => "m",
+        }
+    }
+}
+
+/// What [`classify`] reads beyond the state, the composition and the draws: what only the star's
+/// history knows, which is the pulsar state of P06.T21 that tells `PSR` and `MAG` from `NS` (the
+/// neutron star's age since its birth), and later the peculiar classes of P06.T24 that read the
+/// track.
 ///
-/// Empty in this generator version (ruling 33's vertical slice): [`ClassExtras::NONE`] is the only
-/// value, and the classification is the MK class alone. The tasks that fill it add fields here,
-/// and the caller that builds a star's model (P06.T29) fills them from the track.
+/// The peculiar classes of P06.T25 (Be, Ap, Bp, Am) need no extra: they are a function of the
+/// state and the star's rotation and magnetism draws ([`rotation`](crate::stellar::rotation)).
+/// The caller that holds a star's model (P06.T29) fills the rest.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub struct ClassExtras {}
+pub struct ClassExtras {
+    neutron_star: Option<NeutronStarClass>,
+}
 
 impl ClassExtras {
-    /// No extras: the classification from the state, composition and draws alone.
-    pub const NONE: Self = Self {};
+    /// No extras: the classification from the state, composition and draws alone, in which a
+    /// neutron star is `NS`.
+    pub const NONE: Self = Self { neutron_star: None };
+
+    /// The extras of a neutron star of `class`, from its pulsar state (P06.T21.c).
+    #[must_use]
+    pub const fn neutron_star(class: NeutronStarClass) -> Self {
+        Self {
+            neutron_star: Some(class),
+        }
+    }
 }
 
 /// An object's classification: its spectral type, its luminosity class where it has one, and any
@@ -357,7 +406,7 @@ impl Classification {
         self.luminosity
     }
 
-    /// The peculiar class of P06.T24 and T25; always `None` in this generator version.
+    /// The peculiar class of P06.T25 (and later T24), if the object has one.
     #[must_use]
     pub const fn peculiar_class(&self) -> Option<PeculiarClass> {
         self.peculiar
@@ -401,7 +450,7 @@ impl fmt::Display for Classification {
             SpectralType::NoRemnant => f.write_str("NONE")?,
         }
         if let Some(peculiar) = self.peculiar {
-            match peculiar {}
+            f.write_str(peculiar.suffix())?;
         }
         Ok(())
     }
@@ -442,10 +491,10 @@ pub fn subtype_from_teff(teff: Kelvin) -> Option<SpectralCode> {
 ///   Shara (2007, ApJ 669, 1235). L, T and Y dwarfs have no luminosity class.
 /// - A white dwarf is typed by [`white_dwarf_type`] from its temperature and its three
 ///   `star.wd.*` marks (P06.T20.b).
-/// - A neutron star is `NS`, a black hole `BH` and a star that left nothing `NONE`.
-///
-/// `extras` carries the classes beyond the MK grid (P06.T24, T25) and the pulsar state (P06.T21);
-/// it is empty in this generator version, and the classification is then the MK class alone.
+/// - A main-sequence star may take a peculiar class from its rotation and magnetism draws
+///   (P06.T25): `p` for a fossil field (Ap, Bp), `e` for a Be star, `m` for an Am star.
+/// - A neutron star is `NS`, or the `PSR` or `MAG` its `extras` give (P06.T21); a black hole is
+///   `BH` and a star that left nothing `NONE`.
 ///
 /// Total over every state [`StarState::new`] accepts: it never panics, and nothing here takes the
 /// logarithm of a luminosity that may be zero (ruling 40: a black hole's is).
@@ -456,8 +505,7 @@ pub fn classify(
     draws: &StarDraws,
     extras: &ClassExtras,
 ) -> Classification {
-    // The seam of P06.T21, T24 and T25: nothing to read yet.
-    let ClassExtras {} = *extras;
+    let ClassExtras { neutron_star } = *extras;
     match state.phase() {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             Classification::bare(SpectralType::WhiteDwarf(white_dwarf_type(
@@ -465,9 +513,9 @@ pub fn classify(
                 draws,
             )))
         }
-        Phase::NeutronStar => {
-            Classification::bare(SpectralType::NeutronStar(NeutronStarClass::NeutronStar))
-        }
+        Phase::NeutronStar => Classification::bare(SpectralType::NeutronStar(
+            neutron_star.unwrap_or(NeutronStarClass::NeutronStar),
+        )),
         Phase::BlackHole => Classification::bare(SpectralType::BlackHole),
         Phase::NoRemnant => Classification::bare(SpectralType::NoRemnant),
         Phase::Protostar
@@ -484,8 +532,54 @@ pub fn classify(
         | Phase::PostAgb
         | Phase::Substellar => {
             let (code, class) = luminosity::classify_living(state, composition);
-            Classification::sequence(code, Some(class))
+            let mut classification = Classification::sequence(code, Some(class));
+            if state.phase() == Phase::MainSequence {
+                classification.peculiar =
+                    rotation_class(state, composition, draws, code.to_half_subtype().letter());
+            }
+            classification
         }
+    }
+}
+
+/// The peculiar class a main-sequence star in `state` of spectral `letter` takes from its rotation
+/// and magnetism (P06.T25): Ap or Bp for a fossil field at 7,000–20,000 K (Bp for B and O types),
+/// else Be for a B type above 0.7 of its critical speed, else Am for an A star of 7,000–10,000 K
+/// turning under 120 km/s.
+#[must_use]
+fn rotation_class(
+    state: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    letter: SpectralLetter,
+) -> Option<PeculiarClass> {
+    let teff = state.effective_temperature();
+    let within = |(low, high): (Kelvin, Kelvin)| teff >= low && teff <= high;
+    if rotation::fossil_field(state, draws).is_some() {
+        return within(rotation::AP_TEMPERATURES).then_some(match letter {
+            SpectralLetter::O | SpectralLetter::B => PeculiarClass::Bp,
+            SpectralLetter::A
+            | SpectralLetter::F
+            | SpectralLetter::G
+            | SpectralLetter::K
+            | SpectralLetter::M
+            | SpectralLetter::L
+            | SpectralLetter::T
+            | SpectralLetter::Y => PeculiarClass::Ap,
+        });
+    }
+    let is_b = letter == SpectralLetter::B;
+    if !is_b && !within(rotation::AM_TEMPERATURES) {
+        return None;
+    }
+    let spin = rotation::rotation(state, composition, draws, None)?;
+    if is_b && spin.critical_fraction() > rotation::BE_CRITICAL_FRACTION {
+        Some(PeculiarClass::Be)
+    } else if within(rotation::AM_TEMPERATURES) && spin.equatorial_speed() < rotation::AM_MAX_SPEED
+    {
+        Some(PeculiarClass::Am)
+    } else {
+        None
     }
 }
 
@@ -813,6 +907,104 @@ pub(crate) mod tests {
         assert!(class_at(&turn_off, -2.0).to_string().ends_with("IV"));
     }
 
+    /// P06.T25's peculiar classes: a fast B star is Be, a fossil-field A or B star Ap or Bp, and a
+    /// slow non-magnetic A star Am; each round-trips through the test parser, and a giant takes
+    /// none.
+    #[test]
+    fn rotation_and_magnetism_give_be_ap_bp_and_am_stars() {
+        let draws = |rank: f64, magnetic: bool| {
+            StarDraws::from_parts(StarDrawsParts {
+                rotation: crate::stellar::draws::UnitUniform::new(rank).unwrap(),
+                magnetism: Mark::from_word(if magnetic { 0 } else { u64::MAX }),
+                ..StarDrawsParts::MEDIAN
+            })
+        };
+        let written = |state: &StarState, rank: f64, magnetic: bool| {
+            let class = classify(
+                state,
+                &Composition::SOLAR,
+                &draws(rank, magnetic),
+                &ClassExtras::NONE,
+            );
+            let text = class.to_string();
+            assert_eq!(parse(&text).map(|c| c.to_string()), Some(text.clone()));
+            (text, class.peculiar_class())
+        };
+        let b_star = star_g(Phase::MainSequence, 5.0, 4.1, 16_000.0);
+        let (text, peculiar) = written(&b_star, 0.995, false);
+        assert_eq!(peculiar, Some(PeculiarClass::Be), "{text}");
+        assert!(text.starts_with('B') && text.ends_with("Ve"), "{text}");
+        assert_eq!(written(&b_star, 0.3, false).1, None);
+        let (text, peculiar) = written(&b_star, 0.995, true);
+        assert_eq!(peculiar, Some(PeculiarClass::Bp), "{text}");
+        assert!(text.ends_with("Vp"), "{text}");
+        let a_star = star_g(Phase::MainSequence, 2.2, 4.2, 9_000.0);
+        let (text, peculiar) = written(&a_star, 0.5, true);
+        assert_eq!(peculiar, Some(PeculiarClass::Ap), "{text}");
+        let (text, peculiar) = written(&a_star, 0.01, false);
+        assert_eq!(peculiar, Some(PeculiarClass::Am), "{text}");
+        assert!(text.starts_with('A') && text.ends_with("Vm"), "{text}");
+        assert_eq!(written(&a_star, 0.9, false).1, None);
+        let giant = star_g(Phase::CoreHeliumBurning, 2.2, 3.0, 9_000.0);
+        assert_eq!(written(&giant, 0.01, true).1, None);
+    }
+
+    /// The plan's test (P06.T25): Ap and Bp stars are 5–10% of A and B main-sequence stars, over
+    /// a Salpeter IMF of 1.4–20 M☉ on rough main-sequence relations (L ∝ M^3.5, R = 1.2 M^0.6) and
+    /// random rotation ranks and fossil marks, classified in full.
+    #[test]
+    fn ap_and_bp_stars_are_five_to_ten_percent_of_a_and_b_stars() {
+        let mut lcg = Lcg::new(0x0a9b_9000_0000_0025);
+        let (mut peculiar, mut a_and_b) = (0_u32, 0_u32);
+        for _ in 0..40_000 {
+            let u = lcg.next_f64();
+            let (lo, hi) = (math::powf(1.4, -1.35), math::powf(20.0, -1.35));
+            let m = math::powf(lo + u * (hi - lo), -1.0 / 1.35);
+            let (l, r) = (math::powf(m, 3.5), 1.2 * math::powf(m, 0.6));
+            let dwarf = state(Phase::MainSequence, m, l, r);
+            let rank = (lcg.next_f64() + f64::EPSILON) / (1.0 + 2.0 * f64::EPSILON);
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                rotation: crate::stellar::draws::UnitUniform::new(rank).unwrap(),
+                magnetism: Mark::from_word(lcg.next_u64()),
+                ..StarDrawsParts::MEDIAN
+            });
+            let class = classify(&dwarf, &Composition::SOLAR, &draws, &ClassExtras::NONE);
+            let SpectralType::Sequence(code) = class.spectral_type() else {
+                panic!("{class:?}");
+            };
+            if matches!(
+                code.to_half_subtype().letter(),
+                SpectralLetter::A | SpectralLetter::B
+            ) {
+                a_and_b += 1;
+                peculiar += u32::from(matches!(
+                    class.peculiar_class(),
+                    Some(PeculiarClass::Ap | PeculiarClass::Bp)
+                ));
+            }
+        }
+        let share = f64::from(peculiar) / f64::from(a_and_b);
+        assert!((0.05..=0.10).contains(&share), "{share} of {a_and_b}");
+    }
+
+    /// A neutron star is `PSR` or `MAG` when its extras say so, and `NS` without them.
+    #[test]
+    fn a_neutron_stars_class_comes_from_its_extras() {
+        let ns = state(Phase::NeutronStar, 1.4, 0.0, 1.75e-5);
+        let with = |extras: ClassExtras| {
+            classify(&ns, &Composition::SOLAR, &StarDraws::median(), &extras).to_string()
+        };
+        assert_eq!(with(ClassExtras::NONE), "NS");
+        assert_eq!(
+            with(ClassExtras::neutron_star(NeutronStarClass::Pulsar)),
+            "PSR"
+        );
+        assert_eq!(
+            with(ClassExtras::neutron_star(NeutronStarClass::Magnetar)),
+            "MAG"
+        );
+    }
+
     /// The same inputs give the same classification, bit for bit.
     #[test]
     fn classification_is_a_pure_function() {
@@ -831,6 +1023,27 @@ pub(crate) mod tests {
     /// The test parser: a classification from its written form, with the subtype at the half
     /// step it is written with. `None` where the string is not one `Display` writes.
     pub(crate) fn parse(text: &str) -> Option<Classification> {
+        if let Some(found) = parse_plain(text) {
+            return Some(found);
+        }
+        // A peculiar class's suffix after a sequence class: e, p (Ap, or Bp for O and B) or m.
+        let (plain, suffix) = text.split_at(text.len().checked_sub(1)?);
+        let mut class = parse_plain(plain)?;
+        let SpectralType::Sequence(code) = class.spectral_type() else {
+            return None;
+        };
+        let letter = code.to_half_subtype().letter();
+        class.peculiar = Some(match suffix {
+            "e" => PeculiarClass::Be,
+            "m" => PeculiarClass::Am,
+            "p" if matches!(letter, SpectralLetter::O | SpectralLetter::B) => PeculiarClass::Bp,
+            "p" => PeculiarClass::Ap,
+            _ => return None,
+        });
+        Some(class)
+    }
+
+    fn parse_plain(text: &str) -> Option<Classification> {
         match text {
             "NS" => {
                 return Some(Classification::bare(SpectralType::NeutronStar(

@@ -223,7 +223,7 @@
         ],
         "stellar": {
           "kind": "dwarf",
-          "class": "B7V",
+          "class": "B7Ve",
           "log_luminosity_lsun": 2.3915565,
           "teff_k": 14077.215,
           "star_count": 2
@@ -799,7 +799,7 @@
         ],
         "stellar": {
           "kind": "dwarf",
-          "class": "B7.5V",
+          "class": "B7.5Ve",
           "log_luminosity_lsun": 2.2931314,
           "teff_k": 13403.657,
           "star_count": 1

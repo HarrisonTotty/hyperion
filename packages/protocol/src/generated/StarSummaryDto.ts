@@ -82,17 +82,20 @@ remnant: RemnantDto | null,
  */
 death_time: UniverseTime | null, 
 /**
- * Its rotation period, days; `null` for an object without one. Absent until plan 06's T25.
+ * Its rotation period, days (a neutron star's spin period included); `null` for an object
+ * without one; absent where plan 06's T25 does not model it (a white dwarf, a stripped helium
+ * star, a post-AGB star, a brown dwarf).
  */
 rotation_period_d?: number | null, 
 /**
- * Its magnetic activity as log₁₀ of the ratio of its X-ray to its bolometric luminosity, −3
- * when saturated (Wright et al. 2011); `null` for an object without a convective dynamo.
- * Absent until plan 06's T25.
+ * Its magnetic activity as log₁₀ of the ratio of its X-ray to its bolometric luminosity,
+ * −3.13 when saturated (Wright et al. 2011); `null` for an object without a convective
+ * dynamo (a hot main-sequence star, a remnant); absent where plan 06's T25 does not model it
+ * (an evolved star, a brown dwarf).
  */
 activity_log_lx_lbol?: number | null, 
 /**
- * How its light varies; `null` for a star that does not vary. Absent until plan 06's T26.
+ * How its light varies (plan 06's T26.a–c); `null` for a star that does not vary.
  */
 variability?: VariabilityDto | null, 
 /**

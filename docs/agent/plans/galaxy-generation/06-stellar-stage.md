@@ -3528,3 +3528,80 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     is hidden, not cleared. `OrbitLegend.tsx` takes the shared legend parts with no change in
     behaviour.
   - The by-eye checks of "Verification" are not yet made.
+- **Deviations in T21, as built (round 9, `rem06`).** `stellar::remnant::neutron_star` holds
+  `NeutronStar` (`new`, `from_draws`, `state_at`, `field_at`, `pulse_clock`), `PulsarState`,
+  `PulsarBeam::sweeps` and `PulseClock::phase_at`; `StarModel` gains `neutron_star`, `pulsar_at`,
+  `remnant_age_at` and `pulsar_phase_at`, and the summary's `RemnantDetail::NeutronStar`. The plan's
+  figures are built as stated and marked provisional.
+  - k = 8π²R⁶ ÷ (3c³I) with R from `neutron_star_radius` (12.2 km, ruling 27): 3.2 × 10⁻³⁹ s G⁻².
+  - The glitch window is set on the unglitched characteristic age, which has closed forms on both
+    branches of the field. The field-decay luminosity is −R³BḂ ÷ 3 (Colpi et al. 2000). If all
+    eight birth-period tries fail, the period is 300 ms.
+  - The pulse clock is referred to the epoch, or to the birth of a star born after it. The phase
+    is the cubic series by definition: inside the window its rate stays within 10⁻⁴ of 1 ÷ P, but
+    its integral departs from the closed form's by ν⃛Δt⁴ ÷ 24, millions of cycles at 1,000 years for
+    a young pulsar, so it is a consistent clock rather than the spin-down's own phase.
+  - The wind-nebula test takes the median duration over stars born with one (most never have one).
+    The magnetar count reads "two core collapses a century" as 2 a century × the 0.62 neutron-star
+    share of T31 (266); with every collapse a neutron star it is 430.
+  - _Finding, for a ruling:_ Popov et al.'s (2010) birth field is the polar one and k is the
+    equatorial convention (B = 3.2 × 10¹⁹ √(PṖ) at 10 km), so braking is about thirteen times
+    Popov's model at 12.2 km (four from the field's definition, 3.3 from R⁶). Design note 13's re-check (a steady birth rate over 100 Myr) gives living pulsars a median
+    P of 2.0 s against the catalogue's 0.6 s, with Ṗ right (10⁻¹⁴·⁶). The decay law's 10⁴ yr is
+    Beniamini et al. 2019's τ with Colpi et al. 2000's α = 1 form (whose own τ is 10³ yr), and the
+    glitch window of 10³–10⁵ yr is not Fuentes et al. 2017's (1% for all but Crab-like pulsars).
+- **Deviations in T22, as built.** `stellar::remnant::BlackHole` (`new`, `from_draws`, `spin`,
+  `schwarzschild_radius`, `isco_radius` after Bardeen, Press and Teukolsky 1972), read through
+  `StarModel::black_hole` and the summary's `RemnantDetail::BlackHole`. A draw beyond
+  9.98σ takes the largest spin below 0.998. The half-normal's σ of 0.1 has a median of 0.067, about
+  seven times Fuller and Ma's 10⁻²; recorded as provisional. The wire carries the spin only.
+- **Deviations in T25, as built.** `stellar::rotation::{rotation, fossil_field, magnetism, activity,
+Rotation, Magnetism, Activity, ActivityLevel, SpinAxis}`; `StarModel::rotation_at`; Be, Ap, Bp
+  and Am are `PeculiarClass`es that `classify` decides from the draws (MK suffixes `e`, `p`, `m`),
+  so the range brief's fast path reads the rotation and magnetism draws (`rotation_for_attempt`).
+  Class strings move where a star is one (`B7V` to `B7Ve` in the server's range-brief golden,
+  re-blessed at 11 with the round's other moves, for the bump to 12).
+  - The braking law is Mamajek and Hillenbrand's own, P = 0.407 (B−V − 0.495)^0.325 t^0.566: with
+    the plan's t^½ their coefficient gives the Sun 15 d and fails the 22–30 d test. It is the clock
+    of P² = P₀² + P_g², the Skumanich solution, with the torque saturated below Ro = 0.13 (Wright's
+    τ) at every mass, where the spin-down is exponential: that is the "saturation for fully
+    convective stars". The colour is the zero-age main sequence's, so the clock never runs back.
+    Birth periods: log-normal, median 4 d, 0.35 dex, half as long below 0.25 M☉ (after Herbst et
+    al. 2007).
+  - The saturated level is Wright et al.'s −3.13, not the rounded 10⁻³. The activity bands below
+    saturation are a decade of L(X) ÷ L(bol) each (the Sun is `Low`).
+  - Above 1.3 M☉ the rank maps onto v ÷ v(crit), v(crit) = √(2GM ÷ 3R): a fast normal whose centre
+    is fitted to Zorec and Royer 2012 and Huang et al. 2010, and a slow mode for 2–3.2 M☉ and every
+    fossil-field star. Protostars have no rotation (their mass crosses the Kraft break).
+  - Added: evolved stars keep their angular momentum from the end of the main sequence (P ∝ R²,
+    `Track::main_sequence_end`), and cool dwarfs a dynamo field (Reiners et al. 2022, continuous at
+    Ro = 0.13).
+  - _Findings, for a ruling:_ the fossil-field share is a flat 8%, where Sikora et al. (2019) find
+    0.3% below 1.8 M☉ rising to 11% at 3.4–3.8 M☉; strengths are log-normal about 2.6 kG, 0.4 dex,
+    300 G–30 kG. The Be threshold of 0.7 is Rivinius et al.'s ~0.75 of the orbital speed rounded.
+- **Deviations in T26, as built.** T26.a–c only: `stellar::variability::{variability,
+VariabilityInputs, Variability, VariableKind}` and the summary's variability. T26.d
+  (`light_factor_at`) waits on T27.c's monotone phase in a `StarModel`. Each kind's region comes
+  from its own source: Cepheids a linear fit to Anderson et al. 2016's table A.1, RR Lyrae Marconi
+  et al. 2015's edges, δ Scuti Murphy et al. 2019's (held to log g ≥ 3.5); β Cep, SPB and γ Dor
+  from Pamyatnykh 1999 and Kaye et al. 1999; the white-dwarf strips from Althaus et al. 2010. Q is
+  0.033 (δ Sct, β Cep), 0.036 (RR Lyr), 0.039 (Cepheids, about 30% short at 30 d, where
+  Anderson et al.'s Q is 0.052) and 0.6 d for g-modes (the lane's).
+  - A star is one kind, the first region in `variability`'s order that holds it: white dwarfs and
+    GW Vir, S Doradus, α² CVn (before the pulsators, as a fossil field suppresses them), the strip,
+    β Cep, SPB, γ Dor, α Cyg, long-period variables, BY Dra. So there are no δ Sct–γ Dor hybrids.
+  - The strip's kinds use one low-mass limit, 2 M☉ initial, at every Z; stars of 2–3 M☉ in core
+    helium burning have no strip kind. Type II Cepheids use the Cepheids' strip.
+  - T26.b: a thermally pulsing AGB star is a Mira from a fundamental period of 100 d, otherwise
+    SRa; a first-giant-branch star from 630 L☉ is SRb; a red supergiant is SRc once burning helium
+    and Lc before; all below 4,500 K, with fixed amplitudes per kind (4.0, 1.5, 0.8, 1.0 and 1.0
+    mag), not the plan's luminosity and amplitude threshold, for which no source was found.
+  - T26.c: the S Doradus cycle is 10 yr × R ÷ 100 R☉, held to 3–40 yr, at 1.5 mag; white-dwarf
+    amplitudes reach 0.3 mag; BY Dra stars are saturated (0.2 mag) or highly active (0.05) K and M
+    dwarfs; α² CVn stars vary by 0.05 mag (all the lane's, provisional). The LBV criterion is a
+    copy of T24.a's, which its `PhasePredicate::Lbv` is to replace.
+  - _Findings, for a ruling:_ the LPV relation the plan credits to Ostlie and Cox (1986) is
+    Vassiliadis and Wood's (1993) equation 4 (built, cited to them); Bono et al. (2000) put the amplitude's
+    peak near the blue edge, not mid-strip (built mid-strip); at solar Z the backbone's 5 M☉ blue
+    loop reaches only 4,660 K, short of the strip (6,170 K), so the 5 M☉ test is at [Fe/H] = −0.5
+    and loops reach the strip from 6 M☉ at solar Z.

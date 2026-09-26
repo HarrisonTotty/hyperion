@@ -13,8 +13,10 @@ use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::multiplicity::{
     MultiplicityContext, MultiplicityModel, RedrawAttempt, StarSlot, draw_hierarchy,
 };
+use hyperion_sim::stellar::rotation::Magnetism;
 use hyperion_sim::stellar::system::{
-    ClockDeath, StarModel, StarSummary, SystemExistence, SystemStars, draw_metallicity,
+    ClockDeath, RemnantDetail, StarModel, StarSummary, SystemExistence, SystemStars,
+    draw_metallicity,
 };
 use hyperion_sim::time::{ClockWindow, Span, UniverseTime};
 use hyperion_sim::units::{SolarMasses, Years};
@@ -92,6 +94,50 @@ fn write_star(w: &mut GoldenWriter, lead: &str, star: &StarSummary) {
     match star.death_in_window() {
         Some((t, kind)) => w.line(&format!("{lead}dies in the window at {t} by {kind:?}")),
         None => w.line(&format!("{lead}no death in the window")),
+    }
+    // P06.T21–T22: a neutron star's pulsar state, a black hole's spin.
+    match star.remnant_detail() {
+        Some(RemnantDetail::NeutronStar(pulsar)) => {
+            w.line(&format!("{lead}pulsar {:?}", pulsar.class()));
+            w.f64(&format!("{lead}pulsar P"), pulsar.period().value());
+            w.f64(&format!("{lead}pulsar Pdot"), pulsar.period_derivative());
+            w.f64(&format!("{lead}pulsar B"), pulsar.field().value());
+        }
+        Some(RemnantDetail::BlackHole(hole)) => {
+            w.f64(&format!("{lead}black hole spin"), hole.spin());
+        }
+        None => {}
+    }
+    // P06.T25: rotation, magnetism and activity.
+    match star.rotation() {
+        Some(spin) => {
+            w.f64(&format!("{lead}rotation P"), spin.period().value());
+            w.f64(&format!("{lead}v_eq"), spin.equatorial_speed().value());
+        }
+        None => w.line(&format!("{lead}rotation none")),
+    }
+    match star.magnetism() {
+        Some(Magnetism::Fossil { field }) => w.f64(&format!("{lead}fossil field"), field.value()),
+        Some(Magnetism::Dynamo { field }) => w.f64(&format!("{lead}dynamo field"), field.value()),
+        None => w.line(&format!("{lead}no field")),
+    }
+    match star.activity() {
+        Some(activity) => w.f64(
+            &format!("{lead}log Lx/Lbol {:?}", activity.level()),
+            activity.log_lx_lbol(),
+        ),
+        None => w.line(&format!("{lead}no activity")),
+    }
+    // P06.T26.a–c: variability.
+    match star.variability() {
+        Some(v) => {
+            w.f64(&format!("{lead}{:?} P", v.kind()), v.period().value());
+            w.f64(
+                &format!("{lead}{:?} amplitude", v.kind()),
+                v.amplitude().value(),
+            );
+        }
+        None => w.line(&format!("{lead}not variable")),
     }
 }
 

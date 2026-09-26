@@ -400,6 +400,25 @@ impl StarDraws {
         StandardNormal::draw(&mut stream)
     }
 
+    /// The rotation rank and fossil-field mark alone of `star` at `attempt`:
+    /// [`StarDraws::for_attempt`]'s [`rotation`](StarDraws::rotation) and
+    /// [`magnetism`](StarDraws::magnetism), bit for bit, from their two streams, for the range
+    /// brief of a main-sequence star, whose peculiar class reads them (P06.T25).
+    #[must_use]
+    pub(crate) fn rotation_for_attempt(
+        seed: Seed,
+        star: BodyId,
+        attempt: u32,
+    ) -> (UnitUniform, Mark) {
+        let key = ObjectKey::from(star);
+        let start = u64::from(attempt) * ATTEMPT_WORDS;
+        let mut rotation = Stream::open(seed, tags::STAR_ROTATION, key);
+        rotation.seek(start);
+        let mut magnetism = Stream::open(seed, tags::STAR_MAGNETISM, key);
+        magnetism.seek(start);
+        (UnitUniform::draw(&mut rotation), magnetism.mark())
+    }
+
     /// Draws from explicit variates, for quadratures and tests that need no ID.
     #[must_use]
     pub const fn from_parts(parts: StarDrawsParts) -> Self {
@@ -600,6 +619,23 @@ mod tests {
                         StarDraws::eta_for_attempt(seed, star, attempt).value(),
                         StarDraws::for_attempt(seed, star, attempt).eta().value(),
                     );
+                }
+            }
+        }
+    }
+
+    /// The rotation rank and fossil mark alone are the full draws', bit for bit (the range brief's
+    /// main-sequence fast path, P06.T25).
+    #[test]
+    fn the_rotation_draws_alone_are_the_full_draws() {
+        for seed in [Seed::new(0x5eed), Seed::new(0x0065_7461)] {
+            for star in bodies() {
+                for attempt in [0, 1, 7] {
+                    let (rotation, magnetism) =
+                        StarDraws::rotation_for_attempt(seed, star, attempt);
+                    let full = StarDraws::for_attempt(seed, star, attempt);
+                    assert_same_bits(rotation.value(), full.rotation().value());
+                    assert_eq!(magnetism, full.magnetism());
                 }
             }
         }

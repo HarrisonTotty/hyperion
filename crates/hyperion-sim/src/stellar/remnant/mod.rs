@@ -15,10 +15,16 @@ pub mod wd_spectral;
 mod death;
 pub use death::{Death, DeathKind, ProgenitorAtDeath, Stripping, SupernovaType};
 
-// HPT's cooling of white dwarfs and neutron stars, which the track's remnant stage needs before
-// P06.T20 and T21 (ruling 33).
-pub(crate) mod neutron_star;
+// HPT's cooling of white dwarfs, which the track's remnant stage needs (ruling 33).
 pub(crate) mod white_dwarf;
+
+// Neutron stars as pulsars and magnetars (P06.T21), with HPT's photon cooling the track reads.
+pub mod neutron_star;
+pub use neutron_star::{NeutronStar, PulsarBeam, PulsarState, PulseClock};
+
+// Black holes' spin and radii (P06.T22).
+pub mod black_hole;
+pub use black_hole::BlackHole;
 
 // The Montreal cooling of white dwarfs under the default recipe (P06.T20.a, ruling 57.2).
 pub(crate) mod cooling;

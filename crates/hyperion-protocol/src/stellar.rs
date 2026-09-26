@@ -11,9 +11,9 @@
 //! A star's optional fields take one of three states on the wire, and the server is the authority
 //! on which:
 //!
-//! - **Absent**: this generator version does not compute the quantity at all (rotation, activity,
-//!   variability, pulsar and black-hole detail, natal kicks, planetary nebulae and active events,
-//!   until plan 06's T16, T19 and T21–T28 land). The client shows the style guide's "Missing"
+//! - **Absent**: this generator version does not compute the quantity at all (planetary nebulae
+//!   and active events until plan 06's T16 and T28 land; rotation and activity for the objects
+//!   plan 06's T25 does not model). The client shows the style guide's "Missing"
 //!   state, the em dash, and never takes it for "none" (ruling 34 of 2026-09-22, for a single value
 //!   the generator does not compute). Such a field is `#[serde(default)]`, skipped when `None`, and
 //!   optional in TypeScript, so that it can be filled later without changing any wire form.
@@ -231,17 +231,20 @@ pub struct StarSummaryDto {
     /// The clock time of its death when that falls within the clock window, 1,000 years either
     /// side of the epoch, before or after `time`; `null` when it does not.
     pub death_time: Option<UniverseTime>,
-    /// Its rotation period, days; `null` for an object without one. Absent until plan 06's T25.
+    /// Its rotation period, days (a neutron star's spin period included); `null` for an object
+    /// without one; absent where plan 06's T25 does not model it (a white dwarf, a stripped helium
+    /// star, a post-AGB star, a brown dwarf).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<f64>>", optional)]
     pub rotation_period_d: Modelled<f64>,
-    /// Its magnetic activity as log₁₀ of the ratio of its X-ray to its bolometric luminosity, −3
-    /// when saturated (Wright et al. 2011); `null` for an object without a convective dynamo.
-    /// Absent until plan 06's T25.
+    /// Its magnetic activity as log₁₀ of the ratio of its X-ray to its bolometric luminosity,
+    /// −3.13 when saturated (Wright et al. 2011); `null` for an object without a convective
+    /// dynamo (a hot main-sequence star, a remnant); absent where plan 06's T25 does not model it
+    /// (an evolved star, a brown dwarf).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<f64>>", optional)]
     pub activity_log_lx_lbol: Modelled<f64>,
-    /// How its light varies; `null` for a star that does not vary. Absent until plan 06's T26.
+    /// How its light varies (plan 06's T26.a–c); `null` for a star that does not vary.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<VariabilityDto>>", optional)]
     pub variability: Modelled<VariabilityDto>,
@@ -272,7 +275,7 @@ pub enum RemnantDto {
     },
     /// A neutron star.
     NeutronStar {
-        /// Its spin and field as a pulsar. Absent until plan 06's T21.
+        /// Its spin and field as a pulsar (plan 06's T21).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         pulsar: Option<PulsarDto>,
@@ -283,7 +286,7 @@ pub enum RemnantDto {
     },
     /// A black hole.
     BlackHole {
-        /// Its dimensionless spin c J ÷ (G M²), in `[0, 1)`. Absent until plan 06's T22.
+        /// Its dimensionless spin c J ÷ (G M²), in `[0, 0.998)` (plan 06's T22).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         dimensionless_spin: Option<f64>,

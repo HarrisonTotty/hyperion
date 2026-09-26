@@ -15,7 +15,7 @@ cooling_age_myr: number,
  */
 natal_kick?: NatalKickDto, } | { "type": "neutron_star", 
 /**
- * Its spin and field as a pulsar. Absent until plan 06's T21.
+ * Its spin and field as a pulsar (plan 06's T21).
  */
 pulsar?: PulsarDto, 
 /**
@@ -23,7 +23,7 @@ pulsar?: PulsarDto,
  */
 natal_kick?: NatalKickDto, } | { "type": "black_hole", 
 /**
- * Its dimensionless spin c J ÷ (G M²), in `[0, 1)`. Absent until plan 06's T22.
+ * Its dimensionless spin c J ÷ (G M²), in `[0, 0.998)` (plan 06's T22).
  */
 dimensionless_spin?: number, 
 /**

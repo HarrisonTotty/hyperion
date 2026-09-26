@@ -11,9 +11,9 @@ use std::sync::OnceLock;
 
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, HierarchyNodeDto, ObjectKindDto, OrbitDto, PhaseDto, RemnantDto, RequestBody,
-    RequestError, ResponseBody, ServerMessage, StarSummaryDto, SystemExistenceDto, SystemIdHex,
-    SystemSummaryDto, SystemSummaryRequest, UniverseIdHex, UniverseTime,
+    ErrorCode, HierarchyNodeDto, Modelled, ObjectKindDto, OrbitDto, PhaseDto, RemnantDto,
+    RequestBody, RequestError, ResponseBody, ServerMessage, StarSummaryDto, SystemExistenceDto,
+    SystemIdHex, SystemSummaryDto, SystemSummaryRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count, resolve};
@@ -21,7 +21,7 @@ use hyperion_sim::id::SystemId;
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::multiplicity::HierarchyNode;
 use hyperion_sim::stellar::remnant::RemnantKind;
-use hyperion_sim::stellar::system::{SystemExistence, SystemStars};
+use hyperion_sim::stellar::system::{RemnantDetail, SystemExistence, SystemStars};
 use hyperion_sim::units::consts::GM_SUN;
 use hyperion_sim::units::{Megayears, Years};
 use hyperion_sim::{Seed, time};
@@ -269,6 +269,66 @@ fn assert_star_is_the_sims(
         wire.death_time.map(sim_time),
         sim.death_in_window().map(|(when, _)| when)
     );
+    assert_details_are_the_sims(wire, sim);
+}
+
+/// Holds a star's variability, rotation and activity on the wire to the sim's (P06.T25–T26).
+fn assert_details_are_the_sims(
+    wire: &StarSummaryDto,
+    sim: &hyperion_sim::stellar::system::StarSummary,
+) {
+    // P06.T21–T22: a neutron star's pulsar and a black hole's spin.
+    match &wire.remnant {
+        Some(RemnantDto::NeutronStar { pulsar, .. }) => {
+            let Some(RemnantDetail::NeutronStar(sim_pulsar)) = sim.remnant_detail() else {
+                panic!("a neutron star's summary carries its pulsar");
+            };
+            let pulsar = pulsar.expect("the wire carries the pulsar (P06.T21)");
+            assert_bits("P", pulsar.spin_period_s, sim_pulsar.period().value());
+            assert_bits(
+                "Pdot",
+                pulsar.period_derivative_s_per_s,
+                sim_pulsar.period_derivative(),
+            );
+            assert_bits("B", pulsar.magnetic_field_g, sim_pulsar.field().value());
+            assert_eq!(pulsar.alive, sim_pulsar.is_radio_alive());
+            assert_eq!(pulsar.magnetar, sim_pulsar.is_magnetar());
+        }
+        Some(RemnantDto::BlackHole {
+            dimensionless_spin, ..
+        }) => {
+            let Some(RemnantDetail::BlackHole(hole)) = sim.remnant_detail() else {
+                panic!("a black hole's summary carries its spin");
+            };
+            assert_bits(
+                "spin",
+                dimensionless_spin.expect("the wire carries the spin (P06.T22)"),
+                hole.spin(),
+            );
+        }
+        Some(RemnantDto::WhiteDwarf { .. } | RemnantDto::NoRemnant) | None => {}
+    }
+    // P06.T26.a–c: variability, a value or `null`, never absent.
+    match (&wire.variability, sim.variability()) {
+        (Modelled::Value(wire), Some(sim)) => {
+            assert_bits("variable period", wire.period_d, sim.period().value());
+            assert_bits("amplitude", wire.amplitude_mag, sim.amplitude().value());
+        }
+        (Modelled::Null, None) => {}
+        (wire, sim) => panic!("the wire's variability {wire:?} is not the sim's {sim:?}"),
+    }
+    // P06.T25: a living star's rotation and a cool dwarf's activity are the sim's.
+    if let Some(spin) = sim.rotation() {
+        let Modelled::Value(period) = wire.rotation_period_d else {
+            panic!("{:?} for {spin:?}", wire.rotation_period_d);
+        };
+        assert_bits("rotation", period, spin.period().value());
+    }
+    match (&wire.activity_log_lx_lbol, sim.activity()) {
+        (Modelled::Value(wire), Some(sim)) => assert_bits("activity", *wire, sim.log_lx_lbol()),
+        (Modelled::Null | Modelled::NotModelled, None) => {}
+        (wire, sim) => panic!("the wire's activity {wire:?} is not the sim's {sim:?}"),
+    }
 }
 
 /// Holds a whole summary on the wire to the sim's summary of the same system at the same time.
@@ -346,8 +406,6 @@ async fn a_pinned_systems_summary_is_the_sims_companions_included() {
             assert_summary_is_the_sims(&answer, &stars);
             // Nothing this generator version does not compute is sent as a value.
             for star in &answer.stars {
-                assert!(star.rotation_period_d.is_not_modelled());
-                assert!(star.variability.is_not_modelled());
                 assert!(star.active_events.is_none());
             }
         }

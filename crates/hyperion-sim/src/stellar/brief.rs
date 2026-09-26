@@ -29,12 +29,15 @@
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::SystemRecord;
+use crate::rng::Mark;
 use crate::stellar::Composition;
-use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
+use crate::stellar::classify::ClassExtras;
+use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
 use crate::stellar::multiplicity::{MultiplicityContext, draw_star_count};
 use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 use crate::stellar::system::{
     GRID_ATTEMPT, StarModel, StellarBrief, draw_metallicity, primary_draws, primary_eta,
+    primary_rotation_draws,
 };
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::Years;
@@ -90,8 +93,10 @@ enum Primary {
     MainSequence {
         track: Box<Track>,
         composition: Composition,
-        /// The primary's η, the one draw its main sequence and its class read.
+        /// The primary's η, the one draw its main sequence reads.
         eta: StandardNormal,
+        /// Its rotation rank and fossil-field mark, which its peculiar class reads (P06.T25).
+        rotation: (UnitUniform, Mark),
         age_at_epoch: Years,
     },
     /// [`BriefRoute::Exact`].
@@ -113,13 +118,14 @@ impl BriefModel {
         // The main sequence reads η alone of the primary's draws: its one stream, not all of
         // them (a quarter of a main-sequence row's instructions, P06.T38.e's measurement).
         let eta = primary_eta(galaxy, record);
+        let rotation = primary_rotation_draws(galaxy, record);
         let on_main_sequence = (MIN_INITIAL_MASS..=MAX_INITIAL_MASS)
             .contains(&m0)
             .then(|| {
                 Track::knot_free_main_sequence(
                     m0,
                     &composition,
-                    &eta_draws(eta),
+                    &eta_draws(eta, rotation),
                     TrackOptions::default(),
                 )
             })
@@ -132,6 +138,7 @@ impl BriefModel {
                 track: Box::new(track),
                 composition,
                 eta,
+                rotation,
                 age_at_epoch,
             },
             None => Primary::Exact(Box::new(
@@ -173,16 +180,29 @@ impl BriefModel {
                 track,
                 composition,
                 eta,
+                rotation,
                 age_at_epoch,
             } => {
                 let age = age_at(*age_at_epoch, t);
                 (age > 0.0).then(|| {
                     let state = track.state_at(Years::new(age));
-                    StellarBrief::of(&state, composition, &eta_draws(*eta), self.star_count)
+                    StellarBrief::of(
+                        &state,
+                        composition,
+                        &eta_draws(*eta, *rotation),
+                        ClassExtras::NONE,
+                        self.star_count,
+                    )
                 })
             }
             Primary::Exact(model) => model.state_at(t).map(|state| {
-                StellarBrief::of(&state, model.composition(), model.draws(), self.star_count)
+                StellarBrief::of(
+                    &state,
+                    model.composition(),
+                    model.draws(),
+                    model.class_extras_at(&state, t),
+                    self.star_count,
+                )
             }),
         }
     }
@@ -214,17 +234,21 @@ pub fn range_brief(
     BriefModel::new(galaxy, record).brief_at(t)
 }
 
-/// Draws of η `eta` and every other draw at its median: what a main-sequence primary's track and
-/// class read of the primary's own draws, which are η alone. A main sequence's builder reads η
-/// (and holds the remnant draws, which it reads only at a death); [`classify`] reads a draw only
-/// for a white dwarf. So on the main sequence these give the state and brief of
-/// [`StarDraws::for_star`]'s draws bit for bit, which the tests check route by route.
+/// Draws of η `eta`, the rotation rank and fossil mark `rotation`, and every other draw at its
+/// median: what a main-sequence primary's track and class read of the primary's own draws. A main
+/// sequence's builder reads η (and holds the remnant draws, which it reads only at a death);
+/// [`classify`] reads the rotation and magnetism draws for a main-sequence star's peculiar class
+/// (P06.T25) and the white dwarf marks for a white dwarf. So on the main sequence these give the
+/// state and brief of [`StarDraws::for_star`]'s draws bit for bit, which the tests check route by
+/// route.
 ///
 /// [`classify`]: crate::stellar::classify::classify
 #[must_use]
-fn eta_draws(eta: StandardNormal) -> StarDraws {
+fn eta_draws(eta: StandardNormal, (rotation, magnetism): (UnitUniform, Mark)) -> StarDraws {
     StarDraws::from_parts(StarDrawsParts {
         eta,
+        rotation,
+        magnetism,
         ..StarDrawsParts::MEDIAN
     })
 }
