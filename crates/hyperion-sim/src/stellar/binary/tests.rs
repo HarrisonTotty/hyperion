@@ -513,6 +513,18 @@ fn check_invariants(input: &BinaryInput, until: Years) {
             }
         }
     }
+    // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
+    for segment in timeline.segments() {
+        if segment.kind() == SegmentKind::Contact {
+            let state = timeline.state_at(segment.start());
+            let [a, b] = state.stars().map(|s| s.mass().value());
+            assert!(
+                a.min(b) >= common_envelope::CONTACT_MIN_Q * a.max(b),
+                "a contact pair of {a} and {b} M☉: {}",
+                what()
+            );
+        }
+    }
     let mut last = (f64::INFINITY, 0.0);
     for k in 0..=600_u32 {
         let age = until.value() * f64::from(k) / 600.0;
@@ -681,4 +693,253 @@ fn a_tenth_of_a_day_double_white_dwarf_merges_at_peters_time() {
         .pooled_ia()
         .expect("a merger of two white dwarfs is pooled");
     assert_eq!(pooled.channel(), IaPoolChannel::Merger);
+}
+
+/// A 64-bit FNV-1a hash that text and bits are written into, for the pinned timelines.
+struct Fnv(u64);
+
+impl Fnv {
+    const fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    fn f64(&mut self, x: f64) {
+        self.bytes(&hyperion_testkit::float::bits(x).to_le_bytes());
+    }
+}
+
+impl core::fmt::Write for Fnv {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.bytes(s.as_bytes());
+        Ok(())
+    }
+}
+
+/// The digest of everything a timeline holds, bit for bit: every segment's kind, bounds, members
+/// (each distinct track in full, by its `Debug`, which prints every `f64` exactly), paths and
+/// orbit; the supernovae and the pooled Type Ia candidate; and the pair's state at 257 even ages
+/// and at every segment's start and middle, which is what a caller reads.
+fn digest(timeline: &BinaryTimeline) -> u64 {
+    use core::fmt::Write as _;
+
+    use super::star::Member;
+
+    let mut h = Fnv::new();
+    let mut tracks: Vec<*const crate::stellar::sse::Track> = Vec::new();
+    let mut track = |h: &mut Fnv, t: &std::sync::Arc<crate::stellar::sse::Track>| {
+        let ptr = std::sync::Arc::as_ptr(t);
+        if let Some(k) = tracks.iter().position(|&p| p == ptr) {
+            write!(h, "track #{k}").expect("a hash");
+        } else {
+            write!(h, "track #{} {t:?}", tracks.len()).expect("a hash");
+            tracks.push(ptr);
+        }
+    };
+    write!(
+        h,
+        "{:?} {:?} {} {:?}",
+        timeline.pooled_ia(),
+        timeline.supernovae(),
+        timeline.hit_segment_cap(),
+        timeline.recoil()
+    )
+    .expect("a hash");
+    h.f64(timeline.until().value());
+    for segment in timeline.segments() {
+        write!(h, "{:?}", segment.kind()).expect("a hash");
+        h.f64(segment.start().value());
+        h.f64(segment.end().value());
+        for member in segment.members() {
+            match member {
+                Member::Track { track: t, offset } => {
+                    write!(h, "Track").expect("a hash");
+                    h.f64(*offset);
+                    track(&mut h, t);
+                }
+                Member::Shaped {
+                    track: t,
+                    offset,
+                    mass,
+                } => {
+                    write!(h, "Shaped {mass:?}").expect("a hash");
+                    h.f64(*offset);
+                    track(&mut h, t);
+                }
+                other => write!(h, "{other:?}").expect("a hash"),
+            }
+        }
+        let (orbit, rates) = segment.paths();
+        write!(h, "{orbit:?} {rates:?}").expect("a hash");
+    }
+    let until = timeline.until().value();
+    let mut ages: Vec<f64> = (0..=256_u32)
+        .map(|k| until * f64::from(k) / 256.0)
+        .collect();
+    for segment in timeline.segments() {
+        let (start, end) = (segment.start().value(), segment.end().value());
+        ages.push(start);
+        ages.push(start + 0.5 * (end - start));
+    }
+    for age in ages {
+        write!(h, "{:?}", timeline.state_at(Years::new(age))).expect("a hash");
+    }
+    h.0
+}
+
+/// The `i`th pair of the pinned sample: log-uniform in primary mass (0.8–40 M☉) and period
+/// (0.3–10⁴ d), uniform in mass ratio (0.05–1, the companion no lighter than 0.06 M☉) and, above
+/// 5 d, in eccentricity (0–0.7); one of three metallicities; each star's own draws, as plan 06
+/// makes them; and every seventh pair with BSE's `α_CE` of 3.
+fn pinned_pair(mix: &mut Mix, i: u32) -> BinaryInput {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+
+    let m1 = crate::math::exp(crate::math::ln(0.8) + mix.next() * crate::math::ln(40.0 / 0.8));
+    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.06);
+    let period = crate::math::exp(crate::math::ln(0.3) + mix.next() * crate::math::ln(1.0e4 / 0.3));
+    let e = if period > 5.0 { 0.7 * mix.next() } else { 0.0 };
+    let z = [0.02, 0.004, 0.0005][usize::try_from(i % 3).expect("a small index")];
+    let base = pair(m1, m2, period, e, z);
+    let x = i32::try_from(i).expect("a small index") - 500;
+    let cell = GenCell::new(CellSize::Ly8, [x, 7, 0]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eed), BodyId::new(system, k)));
+    let input = BinaryInput::new(
+        base.masses()[0],
+        base.masses()[1],
+        *base.composition(),
+        *base.orbit(),
+        draws,
+        base.age_at_epoch(),
+    )
+    .expect("a pair");
+    if i % 7 == 3 {
+        input.with_params(BinaryParams::GENERATOR.with_alpha_ce(3.0))
+    } else {
+        input
+    }
+}
+
+/// The engine's output is pinned bit for bit over 10³ pairs (written before the engine was sped
+/// up, and kept so that no optimisation moves a result): each line is one pair's [`digest`].
+#[test]
+fn a_thousand_timelines_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let until = Years::new(1.2e10);
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    let mut mix = Mix(0x0b1e_0001);
+    for i in 0..1_000_u32 {
+        let input = pinned_pair(&mut mix, i);
+        let timeline = evolve(&input, until);
+        let [m1, m2] = input.masses().map(SolarMasses::value);
+        w.u64_hex(
+            &format!(
+                "{i:04} {m1:.3}+{m2:.3} M☉ P {:.2} d, {} segments",
+                input.orbit().period().value() / 86_400.0,
+                timeline.segments().len()
+            ),
+            digest(&timeline),
+        );
+    }
+    golden!("stellar/binary_timelines", w.as_str());
+}
+
+/// Ruling 108.1: a W Ursae Majoris pair, 1.0 and 0.5 M☉ at 0.35 d, reaches contact by slow transfer and
+/// stays in contact for at least 10⁸ yr, as observed contact binaries do, rather than for a
+/// thermal timescale.
+#[test]
+fn a_w_ursae_majoris_pair_stays_in_contact() {
+    let timeline = evolve(&pair(1.0, 0.5, 0.35, 0.0, 0.02), Years::new(1.2e10));
+    let contact = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() == SegmentKind::Contact)
+        .unwrap_or_else(|| panic!("the pair comes into contact: {}", describe(&timeline)));
+    let lasts = contact.end().value() - contact.start().value();
+    assert!(lasts >= 1.0e8, "{lasts} yr: {}", describe(&timeline));
+}
+
+/// Ruling 108.1: a contact pair whose mass ratio is below Rasio's (1995) 0.09 is tidally unstable
+/// and coalesces at once, while one just above it stays in contact.
+#[test]
+fn a_contact_pair_below_the_tidal_limit_coalesces_at_once() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let kind_after_contact = |m2: f64| {
+        let input = pair(1.2, m2, 0.4, 0.0, 0.02);
+        let star = |m: f64| Member::MainSequence {
+            helium: false,
+            mass: Path::starting(0.0, m),
+            tau: Path::starting(0.0, 0.3),
+        };
+        let k = input.orbit();
+        let a = k.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M;
+        let orbit = LiveOrbit::new(0.0, a, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+        let mut engine = Engine::new(
+            Arc::new(Context::of(&input)),
+            1.0e9,
+            [star(1.2), star(m2)],
+            orbit,
+            None,
+        );
+        engine.contact(0, 0.0);
+        engine.kind
+    };
+    assert_eq!(kind_after_contact(0.105), SegmentKind::Merged);
+    assert_eq!(kind_after_contact(0.115), SegmentKind::Contact);
+}
+
+/// Ruling 108.2: with `α_CE` = 1 and λ = 0.5, the common envelopes of first-giant-branch
+/// progenitors of 1.0–1.5 M☉ with 0.3 M☉ companions leave white dwarf and main-sequence pairs in
+/// the post-common-envelope binaries' observed range of periods, 1.9 h to 4.3 d (Nebot
+/// Gómez-Morán et al. 2011, A&A 536, A43): none shorter, and none longer but at most two from the
+/// widest orbits, which meet the giant at the tip of its branch.
+#[test]
+fn post_common_envelope_pairs_land_in_the_observed_periods() {
+    let mut periods = Vec::new();
+    for m1 in [1.0, 1.1, 1.2, 1.3, 1.4, 1.5] {
+        for initial in [70.0, 100.0, 300.0, 450.0] {
+            let timeline = evolve(&pair(m1, 0.3, initial, 0.0, 0.02), Years::new(1.3e10));
+            let stages = starts(&timeline);
+            let Some(ce) = find(&stages, 0, |k, _| *k == SegmentKind::CommonEnvelope) else {
+                continue;
+            };
+            let Some(after) = stages.get(ce + 1) else {
+                continue;
+            };
+            let [dwarf, companion] = after.1.stars().map(|s| s.phase());
+            if after.0 == SegmentKind::Detached
+                && dwarf == Phase::HeliumWhiteDwarf
+                && companion == Phase::MainSequence
+            {
+                periods.push((m1, initial, days(&after.1)));
+            }
+        }
+    }
+    assert!(periods.len() >= 20, "{periods:?}");
+    let (shortest, longest) = (1.9 / 24.0, 4.3);
+    assert!(periods.iter().all(|p| p.2 >= shortest), "{periods:?}");
+    // The allowance, recorded in plan 11's Risks: the widest orbits, which reach the giant at the
+    // tip of its branch where its envelope is least bound, may land above 4.3 d (7.5 d from
+    // 1.0 M☉ at 450 d as built), and no more than two of them.
+    let above: Vec<_> = periods.iter().filter(|p| p.2 > longest).collect();
+    assert!(
+        above.len() <= 2 && above.iter().all(|p| p.1 >= 450.0),
+        "{periods:?}"
+    );
 }

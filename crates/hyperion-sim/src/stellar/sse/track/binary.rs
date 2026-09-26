@@ -204,7 +204,99 @@ impl Track {
         } else {
             segment.evaluate_at(&phys, age, coord, mass)
         };
-        let mut state = self.star_state(&evaluated, age);
+        self.structure_of(segment, &evaluated, age, coord, mass)
+    }
+
+    /// The star's structure at `age` at its own track's mass there, or `None` where the track has
+    /// no mass left: bit for bit [`Track::structure_at`] at the mass of [`Track::state_at`], the
+    /// structure of a star the binary has not touched.
+    ///
+    /// It evaluates the closed forms once where the two calls would evaluate them twice at the
+    /// same mass. That is most of a detached step's cost: `benches/binary.rs` measured the two
+    /// evaluations of a star on its own track as its largest item before this.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::state_at`].
+    #[must_use]
+    pub(crate) fn own_structure_at(&self, age: f64) -> Option<Structure> {
+        let age = self.checked_age(Years::new(age));
+        let segment = self.segment_at(age);
+        let (coord, own_mass) = segment.coordinate_and_mass(age);
+        let phys = self.physics();
+        // The state `state_at` gives, whose mass `structure_at` would be called with.
+        let own = segment.evaluate_at(&phys, age, coord, own_mass);
+        let mass = own.mass;
+        if !positive(mass) {
+            return None;
+        }
+        // `structure_at` evaluates at `own_mass` for a remnant and at `mass` otherwise, which
+        // `evaluate_at` holds to the same floor: where the two floored masses are the same bits
+        // its evaluation is `own` itself (`total_cmp` is equal exactly where the bits are).
+        let floored = |m: f64| m.max(super::build::MIN_EVALUATED_MASS);
+        let same = floored(mass).total_cmp(&floored(own_mass)).is_eq();
+        let evaluated = if segment.model.is_remnant_model() || same {
+            own
+        } else {
+            segment.evaluate_at(&phys, age, coord, mass)
+        };
+        Some(self.structure_of(segment, &evaluated, age, coord, mass))
+    }
+
+    /// The star's mass at `age`, M☉: [`Track::state_at`]'s, bit for bit, without the wind that
+    /// the state adds and the mass does not read. The binary engine reads it at every step of a
+    /// star on its own track.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::state_at`].
+    #[must_use]
+    pub(crate) fn mass_at(&self, age: f64) -> f64 {
+        let age = self.checked_age(Years::new(age));
+        self.segment_at(age).evaluate(&self.physics(), age).mass
+    }
+
+    /// The radius, R☉, of [`Track::structure_at`]'s star at `age` and `mass`, bit for bit,
+    /// without the wind, core and envelope that the structure adds and the radius does not read.
+    ///
+    /// A step of stable transfer searches for its rate by bisection, and each trial reads only the
+    /// donor's radius at the step's end: this is that read, which `benches/binary.rs` measured at
+    /// most of the engine's time as a full structure (2026-09-25).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::structure_at`].
+    #[must_use]
+    pub(crate) fn radius_at(&self, age: f64, mass: f64) -> f64 {
+        debug_assert!(
+            mass.is_finite() && mass > 0.0,
+            "a star has a positive mass: {mass}"
+        );
+        let age = self.checked_age(Years::new(age));
+        let segment = self.segment_at(age);
+        let (coord, own_mass) = segment.coordinate_and_mass(age);
+        let phys = self.physics();
+        let evaluated = if segment.model.is_remnant_model() {
+            segment.evaluate_at(&phys, age, coord, own_mass)
+        } else {
+            segment.evaluate_at(&phys, age, coord, mass)
+        };
+        // `structure_of` keeps the evaluated radius, whatever it does to the mass and the wind.
+        evaluated.point.point.radius.value()
+    }
+
+    /// The structure of `segment`'s state `evaluated` at `age` and coordinate `coord` for a star
+    /// the binary gives `mass` ([`Track::structure_at`]).
+    #[must_use]
+    fn structure_of(
+        &self,
+        segment: &super::Segment,
+        evaluated: &super::Evaluated,
+        age: f64,
+        coord: f64,
+        mass: f64,
+    ) -> Structure {
+        let mut state = self.star_state(evaluated, age);
         if !segment.model.is_remnant_model() && state.mass().value() > mass {
             // The closed forms hold the mass above the core; a star the binary has stripped to
             // below it is all core, at the binary's mass.
@@ -572,6 +664,12 @@ pub(crate) fn new_star_mass(
             let core = |m: f64| (1.0 - y) * hei(m) + y * bagb(m);
             let (lo, hi) = (core(m_min) - mc, core(m_max) - mc);
             if lo > 0.0 || hi < 0.0 || lo.is_nan() || hi.is_nan() || m_max <= m_min {
+                // A core at or above the giant branch's base at `M_FGB` is handed back here by the
+                // giant branch with nothing burnt: no star of either kind has it, and without this
+                // the two would pass it to each other until the stack overflowed.
+                if y <= 0.0 && mc >= gb::mc_bgb(SolarMasses::new(m_fgb), c).value() {
+                    return None;
+                }
                 return new_star_mass(NewStar::GiantBranch, SolarMasses::new(mc), c)
                     .filter(|_| mc < hei(m_hef));
             }
@@ -659,6 +757,42 @@ fn bisect_increasing(lo: f64, hi: f64, target: f64, f: impl Fn(f64) -> f64) -> f
     lo + 0.5 * (hi - lo)
 }
 
+/// The radius, R☉, of [`main_sequence_structure`]'s star of mass `m` at fractional age `tau`, bit
+/// for bit, without its wind and envelope, which a step of stable transfer's search for its rate
+/// does not read (see [`Track::radius_at`]).
+///
+/// # Panics
+///
+/// In debug builds, as [`main_sequence_structure`].
+#[must_use]
+pub(crate) fn main_sequence_radius(c: &ZCoeffs, helium: bool, m: f64, tau: f64) -> f64 {
+    debug_assert!(
+        m > 0.0 && (0.0..=1.0 + 1e-9).contains(&tau),
+        "{m} M☉ at τ = {tau}"
+    );
+    let (_, point, _) = main_sequence_point(c, helium, SolarMasses::new(m), tau.clamp(0.0, 1.0));
+    point.radius.value()
+}
+
+/// The phase, point and lifetime of a main-sequence (or, with `helium`, helium main-sequence)
+/// star of mass `mass` at fractional age `tau` in [0, 1], whose initial mass is its current one.
+#[must_use]
+fn main_sequence_point(
+    c: &ZCoeffs,
+    helium: bool,
+    mass: SolarMasses,
+    tau: f64,
+) -> (Phase, super::super::PhasePoint, Megayears) {
+    if helium {
+        let (point, t_ms) = helium::main_sequence_at_fraction(mass, tau);
+        (Phase::HeliumMainSequence, point, t_ms)
+    } else {
+        let ms = MainSequence::new(mass, c);
+        let point = ms.at(ms.t_ms() * tau);
+        (Phase::MainSequence, point, ms.t_ms())
+    }
+}
+
 /// The structure of a main-sequence star (or, with `helium`, a helium main-sequence star) of
 /// mass `m` at fractional age `tau` and `age`, whose initial mass is its current one (HPT section
 /// 7.1), of composition `comp` whose coefficients are `c`, with the wind of its `draws`: the state
@@ -686,14 +820,7 @@ pub(crate) fn main_sequence_structure(
     );
     let tau = tau.clamp(0.0, 1.0);
     let mass = SolarMasses::new(m);
-    let (phase, point, t_ms) = if helium {
-        let (point, t_ms) = helium::main_sequence_at_fraction(mass, tau);
-        (Phase::HeliumMainSequence, point, t_ms)
-    } else {
-        let ms = MainSequence::new(mass, c);
-        let point = ms.at(ms.t_ms() * tau);
-        (Phase::MainSequence, point, ms.t_ms())
-    };
+    let (phase, point, t_ms) = main_sequence_point(c, helium, mass, tau);
     // The state's age is the effective age of HPT section 7.1, τ t_MS at the current mass.
     let _ = age;
     let parts = StarStateParts {
@@ -944,6 +1071,21 @@ mod tests {
         let heavy = Track::helium_star_full(SolarMasses::new(8.0), &solar(), &draws);
         let death = heavy.death().expect("a full track reaches its death");
         assert!(death.kind().is_sudden(), "{death:?}");
+    }
+
+    /// A merger's core too heavy for the base of the giant branch at `M_FGB` and for core helium
+    /// burning with nothing burnt places no star, rather than being handed between the two kinds
+    /// until the stack overflows (found by the pinned binary sample: a 13.7 + 3.7 M☉ pair).
+    #[test]
+    fn a_core_past_both_placements_places_no_star() {
+        let c = ZCoeffs::new(solar().z_fit());
+        let top = gb::mc_bgb(c.m_fgb(), &c).value();
+        for mc in [top, 1.5 * top, 3.224] {
+            let mc = SolarMasses::new(mc.max(top));
+            let giant = new_star_mass(NewStar::GiantBranch, mc, &c);
+            let helium = new_star_mass(NewStar::CoreHeliumBurning { burnt: 0.0 }, mc, &c);
+            assert_eq!(giant, helium, "{mc:?}");
+        }
     }
 
     /// A helium star too light to burn helium is a helium white dwarf from the start.

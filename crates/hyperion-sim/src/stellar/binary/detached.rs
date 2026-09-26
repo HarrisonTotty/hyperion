@@ -214,6 +214,9 @@ impl Engine {
     /// Integrates until an event, recording each step.
     fn integrate(&mut self) -> Stop {
         let mut steps = 0_u32;
+        // The last step's end and its structures, which are the next step's start's where the
+        // two snapshots give the members the same age, masses and τ.
+        let mut carried: Option<(Snapshot, [Option<Structure>; 2])> = None;
         loop {
             if self.age >= self.until {
                 return Stop::Until;
@@ -224,12 +227,12 @@ impl Engine {
                 return Stop::Until;
             }
             let start = self.snapshot();
-            let Some(structures) = self.structures(&start) else {
+            let Some(structures) = self.structures_reusing(&start, carried.as_ref()) else {
                 return Stop::Coalescence;
             };
             let rates = self.rates(&start, &structures);
             let (dt, stop) = self.step_limit(&start, &structures, &rates);
-            let Some(next) = self.step(&start, dt) else {
+            let Some(next) = self.step_from(&start, &structures, &rates, dt) else {
                 return Stop::Coalescence;
             };
             let Some(next_structures) = self.structures(&next) else {
@@ -237,7 +240,7 @@ impl Engine {
             };
             if let Some(event) = self.contact_check(&next, &next_structures) {
                 let (at, event) = match event {
-                    Stop::Roche(_) => self.onset(&start, dt),
+                    Stop::Roche(_) => self.onset(&start, &structures, &rates, dt),
                     other => (next, other),
                 };
                 self.accept(&at);
@@ -257,17 +260,42 @@ impl Engine {
                     return Stop::Stripped(i);
                 }
             }
+            carried = Some((next, next_structures));
         }
     }
 
     /// The members' structures at `s`, or `None` if the orbit has no room left.
     #[must_use]
     fn structures(&self, s: &Snapshot) -> Option<[Option<Structure>; 2]> {
+        self.structures_reusing(s, None)
+    }
+
+    /// [`Engine::structures`] at `s`, taking each member's from `prior` (a snapshot and the
+    /// structures there) where `prior` asked for it at the same age, mass and τ, bit for bit.
+    ///
+    /// A member's structure is a pure function of those three while its form stands, so this
+    /// changes nothing but the cost: a detached step's end is the next step's start, and its
+    /// structures are half of what a step evaluates (`benches/binary.rs`, 2026-09-25).
+    #[must_use]
+    fn structures_reusing(
+        &self,
+        s: &Snapshot,
+        prior: Option<&(Snapshot, [Option<Structure>; 2])>,
+    ) -> Option<[Option<Structure>; 2]> {
         if self.orbit.is_some() && !positive(s.j) {
             return None;
         }
-        Some(core::array::from_fn(|i| {
-            self.structure(i, s.age, s.masses[i].max(1e-9), s.taus[i])
+        let asked = |s: &Snapshot, i: usize| [s.age, s.masses[i].max(1e-9), s.taus[i]];
+        // `total_cmp` is equal exactly where the bits are: the same arguments, not near ones.
+        let same = |p: &Snapshot, i: usize| {
+            asked(p, i)
+                .iter()
+                .zip(asked(s, i))
+                .all(|(a, b)| a.total_cmp(&b).is_eq())
+        };
+        Some(core::array::from_fn(|i| match prior {
+            Some((p, structures)) if same(p, i) => structures[i],
+            _ => self.structure(i, s.age, s.masses[i].max(1e-9), s.taus[i]),
         }))
     }
 
@@ -294,12 +322,18 @@ impl Engine {
     /// The snapshot at the onset of Roche-lobe overflow inside the step of `dt` from `start`, by
     /// bisection of the step (BSE section 2.8), and the donor.
     #[must_use]
-    fn onset(&self, start: &Snapshot, dt: f64) -> (Snapshot, Stop) {
+    fn onset(
+        &self,
+        start: &Snapshot,
+        structures: &[Option<Structure>; 2],
+        rates: &Rates,
+        dt: f64,
+    ) -> (Snapshot, Stop) {
         let (mut lo, mut hi) = (0.0, dt);
         let mut found = None;
         for _ in 0..ONSET_BISECTIONS {
             let mid = lo + 0.5 * (hi - lo);
-            let hit = self.step(start, mid).and_then(|s| {
+            let hit = self.step_from(start, structures, rates, mid).and_then(|s| {
                 let structures = self.structures(&s)?;
                 self.contact_check(&s, &structures).map(|stop| (s, stop))
             });
@@ -313,7 +347,7 @@ impl Engine {
         }
         found
             .or_else(|| {
-                let s = self.step(start, dt)?;
+                let s = self.step_from(start, structures, rates, dt)?;
                 let structures = self.structures(&s)?;
                 self.contact_check(&s, &structures).map(|stop| (s, stop))
             })
@@ -334,14 +368,29 @@ impl Engine {
     }
 
     /// One midpoint step of `dt` from `s`, or `None` if the orbit loses all its angular momentum.
+    #[cfg(test)]
     #[must_use]
     pub(super) fn step(&self, s: &Snapshot, dt: f64) -> Option<Snapshot> {
         let structures = self.structures(s)?;
         let first = self.rates(s, &structures);
-        let half = self.apply(s, &structures, &first, 0.5 * dt)?;
+        self.step_from(s, &structures, &first, dt)
+    }
+
+    /// One midpoint step of `dt` from `s`, whose members' `structures` and `first` rates
+    /// ([`Engine::rates`]) the caller has evaluated, or `None` if the orbit loses all its angular
+    /// momentum.
+    #[must_use]
+    fn step_from(
+        &self,
+        s: &Snapshot,
+        structures: &[Option<Structure>; 2],
+        first: &Rates,
+        dt: f64,
+    ) -> Option<Snapshot> {
+        let half = self.apply(s, structures, first, 0.5 * dt)?;
         let half_structures = self.structures(&half)?;
         let second = self.rates(&half, &half_structures);
-        self.apply(s, &structures, &second, dt)
+        self.apply(s, structures, &second, dt)
     }
 
     /// `s` advanced by `dt` at `rates`, the spins read against the structures `structures` of `s`.
@@ -517,7 +566,10 @@ impl Engine {
                 continue;
             }
             let r_i = st[i].state.radius().value();
-            let v_wind2 = 2.0 * params.wind_speed_factor * G * m[i] / r_i.max(1e-6);
+            let beta = params
+                .wind_speed_factor
+                .of(Kind::of(st[i].state.phase(), m[i]), m[i]);
+            let v_wind2 = 2.0 * beta * G * m[i] / r_i.max(1e-6);
             let ratio = {
                 let x = 1.0 + v_orb2 / v_wind2;
                 x * x.sqrt()
@@ -557,12 +609,13 @@ impl Engine {
         }
         // Tides (BSE section 2.3).
         if params.tides {
+            let lobes = [roche_lobe(m[0], m[1], a), roche_lobe(m[1], m[0], a)];
             let donor_like = {
-                let fill = |i: usize| st[i].state.radius().value() / roche_lobe(m[i], m[1 - i], a);
+                let fill = |i: usize| st[i].state.radius().value() / lobes[i];
                 usize::from(fill(0) < fill(1))
             };
             for i in 0..2 {
-                let lobe = roche_lobe(m[i], m[1 - i], a);
+                let lobe = lobes[i];
                 let kind = Kind::of(st[i].state.phase(), m[i]);
                 let acts = if kind.is_remnant() {
                     i == donor_like && kind.is_white_dwarf()

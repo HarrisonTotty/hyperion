@@ -145,6 +145,10 @@ impl Side {
     }
 }
 
+/// The mass ratio, lighter over heavier, below which a contact pair is tidally unstable and
+/// coalesces (Rasio 1995, ApJ 444, L41: q ≈ 0.09; ruling 108.1).
+pub(super) const CONTACT_MIN_Q: f64 = 0.09;
+
 impl Engine {
     /// A common envelope around member `d`, a giant-like donor, and its companion (BSE section
     /// 2.7.1).
@@ -521,28 +525,79 @@ impl Engine {
         }
     }
 
-    /// The accretor fills its lobe too during transfer: contact (BSE section 2.6.6).
-    /// Two main-sequence stars stay in contact for the thermal timescale of the lighter before
-    /// they coalesce (HYPERION's choice: BSE merges them at once, which leaves no contact pairs to
-    /// be seen); any other pair goes on as a collision.
-    pub(super) fn contact(&mut self) {
+    /// The accretor fills its lobe too during transfer from member `d` at `rate`, M☉ yr⁻¹, over
+    /// the last step: contact (BSE section 2.6.6), which BSE ends in coalescence at once.
+    ///
+    /// Two main-sequence stars stay in contact, as observed contact binaries do (ruling 108.1 of
+    /// 2026-09-22, from Rasio 1995 and Kobulnicky et al. 2022):
+    ///
+    /// - reached by transfer at the donor's thermal rate M ÷ `τ_KH` (BSE equation 60) or faster,
+    ///   the pair coalesces on the thermal timescale of the lighter star;
+    /// - reached by slow transfer, at the nuclear rate or under the loss of angular momentum, it
+    ///   stays in contact until either star leaves the main sequence (and then coalesces) or the
+    ///   pair's age is reached;
+    /// - a pair whose mass ratio is below Rasio's (1995) 0.09 is tidally unstable and coalesces
+    ///   at once.
+    ///
+    /// The stars keep their masses in contact ([`Engine::contact_phase`]), so the mass ratio does
+    /// not fall there. Any other pair goes on as a collision.
+    pub(super) fn contact(&mut self, d: usize, rate: f64) {
         let kinds: [Option<(Kind, Structure)>; 2] = core::array::from_fn(|i| {
             let (m, tau) = self.current(i);
             self.structure(i, self.age, m, tau)
                 .map(|s| (Kind::of(s.state.phase(), m), s))
         });
-        match kinds {
-            [Some((k0, s0)), Some((k1, s1))] if k0.is_main_sequence() && k1.is_main_sequence() => {
-                let lifetime = kelvin_helmholtz(&s0, k0).min(kelvin_helmholtz(&s1, k1));
-                self.kind = SegmentKind::Contact;
-                self.contact_until = (self.age + lifetime).min(self.until);
+        let [Some((k0, s0)), Some((k1, s1))] = kinds else {
+            self.collide();
+            return;
+        };
+        if !(k0.is_main_sequence() && k1.is_main_sequence()) {
+            self.collide();
+            return;
+        }
+        let m = [self.current(0).0, self.current(1).0];
+        let light = usize::from(m[1] < m[0]);
+        if m[light] < CONTACT_MIN_Q * m[1 - light] {
+            self.mix();
+            return;
+        }
+        let (sd, kd) = if d == 0 { (&s0, k0) } else { (&s1, k1) };
+        let (s_light, k_light) = if light == 0 { (&s0, k0) } else { (&s1, k1) };
+        let fast = positive(rate) && rate * kelvin_helmholtz(sd, kd) >= m[d];
+        let lifetime = if fast {
+            kelvin_helmholtz(s_light, k_light)
+        } else {
+            self.main_sequence_left(0).min(self.main_sequence_left(1))
+        };
+        self.kind = SegmentKind::Contact;
+        // Past the pair's age where the contact outlasts it: `contact_phase` then leaves it in
+        // contact rather than coalescing at the horizon.
+        self.contact_until = self.age + lifetime.max(0.0);
+    }
+
+    /// How long member `i`, a main-sequence star, has left on its main sequence at its mass now,
+    /// years.
+    #[must_use]
+    fn main_sequence_left(&self, i: usize) -> f64 {
+        let (m, tau) = self.current(i);
+        match &self.members[i] {
+            Member::MainSequence { helium, .. } => {
+                (1.0 - tau).max(0.0) * sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, m)
             }
-            _ => self.collide(),
+            Member::Track { track, offset } | Member::Shaped { track, offset, .. } => {
+                let (_, end, track_age) = super::evolve::phase_ahead(track, *offset, self.age);
+                (end - track_age).max(0.0)
+            }
+            Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => f64::INFINITY,
         }
     }
 
-    /// Runs a contact pair to its coalescence (see [`Engine::contact`]): the stars keep their
-    /// masses and the orbit its separation, and a carried main sequence ages.
+    /// Runs a contact pair to its coalescence, or to the pair's age where the contact outlasts it
+    /// (see [`Engine::contact`]): the stars keep their masses and the orbit its separation, and a
+    /// carried main sequence ages.
     pub(super) fn contact_phase(&mut self) {
         let end = self.contact_until.min(self.until);
         let steps = 16_u32;

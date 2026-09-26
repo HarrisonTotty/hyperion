@@ -157,6 +157,13 @@ impl Segment {
         &self.members
     }
 
+    /// The orbit's and the transfer rate's paths, for the crate's tests.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn paths(&self) -> (Option<&OrbitPath>, Option<&Path>) {
+        (self.orbit.as_ref(), self.rates.as_ref())
+    }
+
     /// The bytes the segment owns on the heap.
     #[must_use]
     fn heap_bytes(&self) -> usize {

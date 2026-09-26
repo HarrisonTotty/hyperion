@@ -44,8 +44,8 @@ pub(crate) use track::fate_of;
 pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 pub(crate) use track::{
     CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
-    giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_structure,
-    new_star_mass,
+    giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
+    main_sequence_structure, new_star_mass,
 };
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.

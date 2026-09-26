@@ -1708,3 +1708,52 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     `can_interact`'s threshold, with a bump, but "Generator version" lists no bump for T4, and T4
     is built unwired. The seam stays in `multiplicity/hierarchy.rs`. The task that replaces it
     (T6 or T11, where the engine is wired) should be named, with its bump.
+- **The engine's speed, as optimised** (round 9, `binspeed`; P11.T4.f's bench). Nothing moved:
+  a new golden, `stellar/binary_timelines`, pins the full timeline of 10³ pairs (every segment,
+  member, path and distinct track, and 257 states each) and was blessed before the first change;
+  the optimised engine matched it bit for bit. It was blessed again after ruling 108 below, which
+  moves results by design (499 of the 10³ digests), so it now pins the engine after that ruling.
+  The profile (`pprof` sampling `benches/binary.rs`'s sample) had stable transfer at 51% of the
+  time, 44% in the bisection for its rate, where each of about 38 trials a step built the donor's
+  whole structure; Roche lobes 13%; track builds 16%; and a detached step evaluating each star's
+  structure four times, twice over for a star on its own track. Now a trial reads only the
+  donor's radius (`Track::radius_at`, `main_sequence_radius`) and shares everything that does not
+  depend on the amount tried; a star on its own track is evaluated once (`own_structure_at`,
+  `mass_at`); a detached step's end structures are the next step's start's; a transfer step
+  reuses its structures for the stability test. Over the bench's 182 pairs, run interleaved with
+  the engine as it was under the heavy-test lock (4.2 GHz, load 2.3, `exp` 7.8–8.3 ns), the median
+  fell from 6.7 ms (8.1–8.5 × 10⁵ calls of `exp`) to 4.3 ms (5.5 × 10⁵) and the 99th percentile
+  from 22 ms (2.7–2.8 × 10⁶) to 15 ms (2.0 × 10⁶). After ruling 108 below it is 4.5 ms (5.7 ×
+  10⁵) and 15 ms, about 22 times the plan's 200 µs. Track builds alone (the two stars' tracks, and a massive primary's full
+  one) cost about 1 ms per pair, and each stellar evaluation is a few µs of `powf`, so the target
+  cannot be met bit for bit. P11.T11 can save the builds by handing the engine the tracks its
+  `StarModel`s already hold, which moves nothing. Faster than that needs a result-moving change
+  (a secant root for the transfer rate, coarser transfer or detached steps); those are the
+  owner's call. Found on the way: `new_star_mass` recursed without end for a merger's core at or
+  above the giant branch's base at `M_FGB` (a 13.7 + 3.7 M☉ pair); it now places no star there.
+- **Ruling 108 as built** (round 9, `binspeed`; points 1–4, point 5 is P11.T11's). It supersedes
+  the _Contact_ and _Parameters_ points of "Deviations in P11.T4, as built" above. Contact
+  (`Engine::contact`): a main-sequence pair reached by transfer at the donor's thermal rate
+  M ÷ `τ_KH` or faster coalesces on the lighter star's thermal timescale (the old `min` took the
+  heavier's); reached more slowly it stays in contact until either star leaves the main
+  sequence, then coalesces, or until the pair's age; below q = 0.09 (Rasio 1995) it coalesces at
+  once. The masses are held in contact, so q does not fall there. The thermal-rate threshold is
+  the lane's reading of "fast (thermal) transfer": a geometric-mean threshold between the thermal
+  and nuclear rates called the ruling's own 1.0 + 0.5 M☉, 0.35 d pair fast (its rate over the
+  last step was 3.5 × 10⁻⁹ M☉ yr⁻¹, a seventh of its thermal rate), and it stays in contact to the
+  horizon under the rule built. `α_CE` = 1 with λ = 0.5 is settled (Claeys et al. 2014), with
+  BSE's code default (α 3 with `celamf`'s structure λ) and the later refinement (that λ with α =
+  0.25, Zorotovic et al. 2010) recorded in `params.rs`. `β_W` is `WindSpeedFactor::StarTrack`,
+  the ruling's continuous form: COSMIC's code adds its rises to the floor, reaching 7.5 and 7.125
+  at 120 M☉ and stepping to 7 above. The code's critical ratios differ in two places the engine
+  does not follow: it uses Hjellming and Webbink's (1987) q_c = 0.362 + 1 ÷ (3 (1 − Mc ÷ M)) for
+  giants (types 3, 5 and 6) where the engine uses BSE equation 57, and Claeys et al. (2014, their
+  table 2, after de Mink et al. 2007) put the contact-driven threshold of a main-sequence pair at
+  q = 1.6, against the engine's 3 (which `evolv2.f` confirms, with equation 42's square root).
+  _The post-common-envelope test_ (108.2) runs 1.0–1.5 M☉ first-giant-branch progenitors with
+  0.3 M☉ companions from 70, 100, 300 and 450 d: of the 23 helium white dwarf and main-sequence
+  pairs, none lies under 1.9 h (the shortest is 2.7 h) and 21 lie under Nebot Gómez-Morán et
+  al.'s (2011) 4.3 d. The two above come from 450 d, where the giant is met at the tip of its
+  branch: 7.5 d from 1.0 M☉ and 4.35 d from 1.1 M☉. The test allows at most two, both from the
+  widest orbit. A finding for research: with `α_CE` λ = 0.5 the widest first-giant-branch
+  progenitors land above the observed range.

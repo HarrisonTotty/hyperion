@@ -364,15 +364,7 @@ impl Member {
         tau: f64,
     ) -> Option<Structure> {
         match self {
-            Self::Track { track, offset } => {
-                let track_age = (age - offset).max(0.0);
-                let own = track.state_at(Years::new(track_age)).mass().value();
-                if own > 0.0 {
-                    Some(track.structure_at(track_age, own))
-                } else {
-                    None
-                }
-            }
+            Self::Track { track, offset } => track.own_structure_at((age - offset).max(0.0)),
             Self::Shaped { track, offset, .. } => {
                 Some(track.structure_at((age - offset).max(0.0), mass.max(1e-6)))
             }
@@ -417,14 +409,40 @@ impl Member {
         }
     }
 
+    /// The radius, R☉, of the member's structure at `age` with `mass` and `tau`
+    /// ([`Member::evaluate`]), bit for bit, or `None` for nothing: for a star the binary reshapes
+    /// or carries on the main sequence, without the wind and envelope the radius does not read.
+    #[must_use]
+    pub(crate) fn radius(
+        &self,
+        ctx: &Context,
+        slot: usize,
+        age: f64,
+        mass: f64,
+        tau: f64,
+    ) -> Option<f64> {
+        match self {
+            Self::Shaped { track, offset, .. } => {
+                Some(track.radius_at((age - offset).max(0.0), mass.max(1e-6)))
+            }
+            Self::MainSequence { helium, .. } => {
+                Some(sse::main_sequence_radius(ctx.coeffs(), *helium, mass, tau))
+            }
+            Self::Track { .. }
+            | Self::Cooling { .. }
+            | Self::Frozen { .. }
+            | Self::Remnant { .. }
+            | Self::Gone => self
+                .evaluate(ctx, slot, age, mass, tau)
+                .map(|s| s.state.radius().value()),
+        }
+    }
+
     /// The member's mass at `age`, M☉.
     #[must_use]
     pub(crate) fn mass_at(&self, age: f64) -> f64 {
         match self {
-            Self::Track { track, offset } => track
-                .state_at(Years::new((age - offset).max(0.0)))
-                .mass()
-                .value(),
+            Self::Track { track, offset } => track.mass_at((age - offset).max(0.0)),
             Self::Shaped { mass, .. }
             | Self::MainSequence { mass, .. }
             | Self::Cooling { mass, .. }

@@ -38,7 +38,9 @@
 //!   detonation leaves the dwarf accreting, and a dwarf at the Chandrasekhar mass collapses to a
 //!   neutron star, as an oxygen–neon dwarf does by accretion-induced collapse (section 2.6.5).
 //! - **Contact.** An accretor that fills its own lobe brings the pair into contact (section
-//!   2.6.6), which ends in coalescence, or a common envelope where either star is giant-like.
+//!   2.6.6). Two main-sequence stars stay in contact (ruling 108.1; see `Engine::contact`), and
+//!   any other pair collides: a common envelope where either star is giant-like, a coalescence
+//!   otherwise.
 
 use std::sync::Arc;
 
@@ -112,6 +114,27 @@ struct Accretion {
     from_accretor: bool,
     /// Whether the accretor swells into a giant.
     swells: bool,
+}
+
+/// What the trials of one step of stable transfer share ([`Engine::trial_base`]).
+#[derive(Debug, Clone, Copy)]
+struct TrialBase {
+    /// The orbit's angular frequency, rad yr⁻¹.
+    omega: f64,
+    /// The donor's and the accretor's winds, M☉ yr⁻¹.
+    wind: [f64; 2],
+    /// The specific angular momentum of the mass lost from the system, R☉² yr⁻¹.
+    specific: f64,
+    /// The orbit's losses over the step to the winds, gravitational waves and magnetic braking,
+    /// in that order, where each is on.
+    sinks: [Option<f64>; 3],
+    /// The donor's Roche lobe at the step's start, R☉.
+    lobe_d: f64,
+    /// √(G `M_a` r) at the radius the stream lands on, the accreted mass's specific angular
+    /// momentum.
+    disc_speed: f64,
+    /// The accretor's spin at break-up, if it has one.
+    break_up: Option<f64>,
 }
 
 impl Engine {
@@ -222,6 +245,20 @@ impl Engine {
         ) else {
             return Stability::Merge;
         };
+        self.stability_of(d, md, ma, &sd, &sa)
+    }
+
+    /// [`Engine::stability`] with the donor `d`'s and the accretor's masses now, `md` and `ma`,
+    /// and their structures now, `sd` and `sa`, which the caller has evaluated.
+    #[must_use]
+    fn stability_of(
+        &self,
+        d: usize,
+        md: f64,
+        ma: f64,
+        sd: &Structure,
+        sa: &Structure,
+    ) -> Stability {
         let kd = Kind::of(sd.state.phase(), md);
         let ka = Kind::of(sa.state.phase(), ma);
         let q = md / ma;
@@ -293,7 +330,9 @@ impl Engine {
                 self.collide();
                 return;
             };
-            match self.stability(d) {
+            // The structures just evaluated are the ones `stability` would evaluate again: the
+            // snapshot is the pair now.
+            match self.stability_of(d, s.masses[d], s.masses[a_idx], &sd, &sa) {
                 Stability::Stable => {}
                 Stability::CommonEnvelope => {
                     self.close_segment();
@@ -311,8 +350,10 @@ impl Engine {
             let lobe_a = roche_lobe(s.masses[a_idx], s.masses[d], a);
             let rd = sd.state.radius().value();
             if sa.state.radius().value() >= lobe_a {
+                // The last step's rate, before closing the segment takes the path of rates.
+                let rate = self.rates.as_ref().map_or(0.0, Path::last);
                 self.close_segment();
-                self.contact();
+                self.contact(d, rate);
                 return;
             }
             let kd = Kind::of(sd.state.phase(), s.masses[d]);
@@ -469,23 +510,27 @@ impl Engine {
         };
         let x_max = (cap * dt).min(envelope * (1.0 - 1e-9));
         let law = overflow_rate_scale(kd, md, sd.state.radius().value());
-        let trial = |x: f64| self.transfer_trial(s, d, dt, x, sd, sa, kd, ka);
-        let fill = |x: f64| trial(x).map(|(_, f, _)| f);
-        let unfed = fill(0.0)?;
+        let base = self.trial_base(s, d, dt, sd, sa, kd);
+        let trial = |x: f64| self.transfer_trial(s, d, dt, x, &base, sa, kd, ka);
+        // Each trial is a pure function of x, so the ends' trials serve as the step itself where
+        // the rate is found at an end.
+        let zero = trial(0.0)?;
+        let unfed = zero.1;
         // BSE's equation 58 taken implicitly, at the step's end: the rate x ÷ dt that
         // F(M) [ln(R ÷ R_L)]³ gives the overfill it leaves. It rises with x on the left and falls
         // on the right, so one root lies in [0, x_max] when the donor overfills unfed.
-        let excess = |x: f64| {
-            fill(x).map(|f| {
-                let over = f.max(0.0);
-                x / dt - law * over * over * over
-            })
+        let excess_at = |x: f64, fill: f64| {
+            let over = fill.max(0.0);
+            x / dt - law * over * over * over
         };
-        let x = if unfed <= 0.0 {
-            0.0
+        let excess = |x: f64| trial(x).map(|(_, f, _)| excess_at(x, f));
+        let (next, x, accretion) = if unfed <= 0.0 {
+            (zero.0, 0.0, zero.2)
         } else {
-            match excess(x_max) {
-                Some(g) if g <= 0.0 => x_max,
+            match trial(x_max) {
+                Some((next, f, accretion)) if excess_at(x_max, f) <= 0.0 => {
+                    (next, x_max, accretion)
+                }
                 _ => {
                     let (mut lo, mut hi) = (0.0, x_max);
                     for _ in 0..TRANSFER_BISECTIONS {
@@ -495,23 +540,76 @@ impl Engine {
                             _ => hi = mid,
                         }
                     }
-                    lo + 0.5 * (hi - lo)
+                    let x = lo + 0.5 * (hi - lo);
+                    let (next, _, accretion) = trial(x)?;
+                    (next, x, accretion)
                 }
             }
         };
-        let (next, _, accretion) = trial(x)?;
         Some((next, x / dt, accretion, unfed))
     }
 
+    /// What every trial of a step of `dt` of transfer from member `d` from `s` shares, with the
+    /// members' structures `sd` and `sa` there: all of [`Engine::transfer_trial`] that does not
+    /// read the amount tried, evaluated once for the step's bisection rather than once a trial.
+    #[must_use]
+    fn trial_base(
+        &self,
+        s: &Snapshot,
+        d: usize,
+        dt: f64,
+        sd: &Structure,
+        sa: &Structure,
+        kd: Kind,
+    ) -> TrialBase {
+        let params = self.ctx.params();
+        let a_idx = 1 - d;
+        let (md, ma) = (s.masses[d], s.masses[a_idx]);
+        let total = md + ma;
+        let a = semi_major_axis(s.j, s.masses, 0.0);
+        let omega = (G * total / (a * a * a)).sqrt();
+        let wind = [
+            sd.state.mass_loss_rate().value().max(0.0),
+            sa.state.mass_loss_rate().value().max(0.0),
+        ];
+        // The orbit's angular momentum (see the module documentation).
+        let specific = ma / total * (ma / total) * a * a * omega;
+        let sinks = [
+            params.wind_angular_momentum.then(|| {
+                (wind[0] * ma * ma + wind[1] * md * md) * a * a * omega / (total * total) * dt
+            }),
+            params
+                .gravitational_radiation
+                .then(|| s.j * gravitational_wave_rate(md, ma, a) * dt),
+            (params.magnetic_braking && md > 0.35 && !kd.is_remnant()).then(|| {
+                let v = sd.state.radius().value().min(roche_lobe(md, ma, a)) * omega;
+                5.83e-16 * sd.envelope.mass / md * v * v * v * dt
+            }),
+        ];
+        let lobe_d = roche_lobe(md, ma, a);
+        let accretor_radius = Self::accretion_radius(a, md, ma, sa);
+        // The accretor spins up to break-up at most, and the excess goes back to the orbit (the
+        // published code's RLOF step).
+        let inertia = moment_of_inertia(sa);
+        let r_a = sa.state.radius().value();
+        let break_up =
+            (inertia > 0.0 && r_a > 0.0).then(|| inertia * (G * ma / (r_a * r_a * r_a)).sqrt());
+        TrialBase {
+            omega,
+            wind,
+            specific,
+            sinks,
+            lobe_d,
+            disc_speed: (G * ma * accretor_radius).sqrt(),
+            break_up,
+        }
+    }
+
     /// The pair after `dt` of transferring `x` from member `d`, the donor's log overfill of its
-    /// lobe then, and the accretion.
+    /// lobe then, and the accretion, with the step's `base` ([`Engine::trial_base`]).
     #[expect(
         clippy::too_many_arguments,
-        reason = "a step's state, its length, the trial and the two stars"
-    )]
-    #[expect(
-        clippy::many_single_char_names,
-        reason = "the names are BSE's own symbols"
+        reason = "a step's state, its length, the trial, what the trials share and the two stars"
     )]
     #[must_use]
     fn transfer_trial(
@@ -520,56 +618,33 @@ impl Engine {
         d: usize,
         dt: f64,
         x: f64,
-        sd: &Structure,
+        base: &TrialBase,
         sa: &Structure,
         kd: Kind,
         ka: Kind,
     ) -> Option<(Snapshot, f64, Accretion)> {
-        let params = self.ctx.params();
         let a_idx = 1 - d;
         let (md, ma) = (s.masses[d], s.masses[a_idx]);
-        let total = md + ma;
-        let a = semi_major_axis(s.j, s.masses, 0.0);
-        let omega = (G * total / (a * a * a)).sqrt();
         let rate = x / dt;
         let accretion = self.accretion(kd, ka, rate, ma, sa);
         let gained = accretion.share * x;
         let lost = x - gained;
-        let wind = [
-            sd.state.mass_loss_rate().value().max(0.0),
-            sa.state.mass_loss_rate().value().max(0.0),
-        ];
+        let wind = base.wind;
         let md2 = (md - x - wind[0] * dt).max(1e-9);
         let ma2 = (ma + gained - wind[1] * dt).max(1e-9);
-        // The orbit's angular momentum (see the module documentation).
-        let specific = ma / total * (ma / total) * a * a * omega;
-        let mut j = s.j - lost * specific;
-        if params.wind_angular_momentum {
-            j -= (wind[0] * ma * ma + wind[1] * md * md) * a * a * omega / (total * total) * dt;
+        let mut j = s.j - lost * base.specific;
+        for sink in base.sinks.into_iter().flatten() {
+            j -= sink;
         }
-        if params.gravitational_radiation {
-            j -= s.j * gravitational_wave_rate(md, ma, a) * dt;
-        }
-        if params.magnetic_braking && md > 0.35 && !kd.is_remnant() {
-            let v = sd.state.radius().value().min(roche_lobe(md, ma, a)) * omega;
-            j -= 5.83e-16 * sd.envelope.mass / md * v * v * v * dt;
-        }
-        let lobe_d = roche_lobe(md, ma, a);
-        j += x * lobe_d * lobe_d * omega;
-        let accretor_radius = Self::accretion_radius(a, md, ma, sa);
-        let disc = gained * (G * ma * accretor_radius).sqrt();
+        j += x * base.lobe_d * base.lobe_d * base.omega;
+        let disc = gained * base.disc_speed;
         j -= disc;
-        // The accretor spins up to break-up at most, and the excess goes back to the orbit (the
-        // published code's RLOF step).
-        let inertia = moment_of_inertia(sa);
-        let r_a = sa.state.radius().value();
         let mut accretor_spin = s.spins[a_idx] + disc;
-        if inertia > 0.0 && r_a > 0.0 {
-            let break_up = inertia * (G * ma / (r_a * r_a * r_a)).sqrt();
-            if accretor_spin > break_up {
-                j += accretor_spin - break_up;
-                accretor_spin = break_up;
-            }
+        if let Some(break_up) = base.break_up
+            && accretor_spin > break_up
+        {
+            j += accretor_spin - break_up;
+            accretor_spin = break_up;
         }
         if !positive(j) {
             return None;
@@ -591,13 +666,11 @@ impl Engine {
             taus,
         };
         let a2 = semi_major_axis(j, masses, 0.0);
-        let donor = self.structure(d, next.age, md2, taus[d])?;
+        // Only the donor's radius: a full structure here was most of the engine's time
+        // (`benches/binary.rs`, 2026-09-25), since the rate's bisection asks for one per trial.
+        let radius = self.members[d].radius(&self.ctx, d, next.age, md2, taus[d])?;
         let lobe = roche_lobe(md2, ma2, a2);
-        Some((
-            next,
-            crate::math::ln(donor.state.radius().value() / lobe),
-            accretion,
-        ))
+        Some((next, crate::math::ln(radius / lobe), accretion))
     }
 
     /// The accretion of a transfer at `rate` from a donor of type `kd` onto an accretor of type

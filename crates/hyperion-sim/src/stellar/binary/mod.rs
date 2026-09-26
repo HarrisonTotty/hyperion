@@ -36,7 +36,7 @@ mod tests;
 
 pub use crate::stellar::multiplicity::{DRAWS_PER_ATTEMPT, MAX_REDRAWS, RedrawAttempt};
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
-pub use params::BinaryParams;
+pub use params::{BinaryParams, WindSpeedFactor};
 pub use timeline::{
     BinaryInput, BinaryState, BinaryTimeline, BuildBinaryInputError, Component, IaPoolChannel,
     PooledIaEvent, Segment, SegmentKind, SupernovaRecord,
