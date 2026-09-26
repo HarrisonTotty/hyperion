@@ -265,8 +265,16 @@ impl<'a> Builder<'a> {
     /// or to the remnant.
     #[must_use]
     pub(crate) fn run(&self, m0: f64, age_max: Option<f64>) -> Outcome {
+        self.run_from(Entry::MainSequence { mass: m0 }, age_max)
+    }
+
+    /// The track of a star that enters its life at `entry`, at age zero: [`Builder::run`] from the
+    /// zero-age main sequence, and plan 11's naked helium stars from a helium-star entry (ruling 34
+    /// of 2026-09-22, `track/binary.rs`).
+    #[must_use]
+    pub(super) fn run_from(&self, entry: Entry, age_max: Option<f64>) -> Outcome {
         let mut segments: Vec<Segment> = Vec::new();
-        let mut entry = Entry::MainSequence { mass: m0 };
+        let mut entry = entry;
         let mut start = 0.0;
         let mut previous: Option<[f64; 3]> = None;
         let mut max_before = [0.0_f64; 2];

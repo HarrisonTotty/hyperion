@@ -10,12 +10,14 @@
 //! ([`nebula`]) and single-star events in time ([`events`]). [`system`] assembles a system's stars
 //! from its record, [`fates`] hands lifetimes and remnant masses to the galaxy's mean-mass
 //! quadrature, and [`draws`] holds every random draw a star makes, each on a stream of its own.
-//! [`multiplicity`] holds the model a system's companions are drawn from (plan 11).
+//! [`multiplicity`] holds the model a system's companions are drawn from, and [`binary`] the engine
+//! that evolves a close pair (plan 11).
 //!
 //! Everything here works in solar units and Julian years through the
 //! [`units`](crate::units) newtypes. Nothing in this module reads plan 03's placement except
 //! [`system`].
 
+pub mod binary;
 pub mod brief;
 pub mod classify;
 pub mod composition;

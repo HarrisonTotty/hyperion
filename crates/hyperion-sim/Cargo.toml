@@ -51,5 +51,9 @@ harness = false
 name = "gas"
 harness = false
 
+[[bench]]
+name = "binary"
+harness = false
+
 [lints]
 workspace = true

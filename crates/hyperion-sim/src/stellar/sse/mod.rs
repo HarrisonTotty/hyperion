@@ -40,7 +40,13 @@ mod evolve;
 mod track;
 pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
 pub(crate) use track::fate_of;
+// Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
+pub(crate) use track::{
+    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
+    giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_structure,
+    new_star_mass,
+};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
 #[cfg_attr(

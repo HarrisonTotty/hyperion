@@ -777,6 +777,9 @@ interacting binary; this plan's target is a median under 200 µs, so that a syst
 brainstorm's millisecond. Acceptance: `cargo test -p hyperion-sim binary::` passes after each
 subtask, and `just bench` reports the figure after T4.f.
 
+_As built (round 9, `bin11`): T4.a–f, unwired; nothing generated moves. See Risks, "Deviations in
+P11.T4, as built"._
+
 ### P11.T5 Classes from state
 
 Build `BinaryClass`, `classify`: Algol and contact pairs; blue straggler (a main-sequence star above
@@ -1655,3 +1658,53 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     and `draw_hierarchy` is unchanged. P11.T4's binary engine must keep the two equal.
   - P11.T13's `StellarBriefDto.star_count: u8` landed early, with P06.T34, and required rather than
     optional, since no brief had been sent before.
+- **Deviations in P11.T4, as built** (round 9, `bin11`; T4.a–f, T5 not started). The engine is
+  `stellar/binary/{mod,params,star,timeline,detached,rlof,common_envelope,supernova,evolve}.rs`
+  with its tests in `tests.rs`, and ruling 34.1's helium star is `Track::helium_star`,
+  `helium_star_full` and `helium_star_from` in a new `sse/track/binary.rs` over P06.T9's entry
+  (`Builder::run_from`), with a `mod` line and crate-private re-exports in `sse/track.rs` and
+  `sse/mod.rs`. `HeliumStar` stays crate-private. Nothing in `generate` calls the engine.
+  - _The primary's fixed death_ (T4.e, design note 16) applies from `stripped_mark_min_mass`,
+    m_cc(Z) − 1 M☉ (ruling 93.3), not 8 M☉. `BinaryInput` does not carry the death age: the
+    engine reads it from plan 06's full track with the primary's own draws (`evolve.rs`), so the
+    two cannot disagree.
+  - _`BinaryInput`_ also carries `age_at_epoch`, which places the stars on their orbit at a
+    supernova (BSE appendix A1), and a `BinaryParams` (BSE table 3). It is built through `new`,
+    which returns a `Result` (`BuildBinaryInputError`).
+  - _No draws on `binary.ce` or `binary.kick`._ The kick direction comes from each star's plan 06
+    `StarDraws`, so the primary's kick stays plan 06's. The common-envelope code has no
+    probabilistic branch. Neither tag is registered yet; both stay reserved.
+  - _The secular rates are stepped, not closed forms_ (T4.b). Winds, tides, magnetic braking and
+    gravitational radiation are integrated by midpoint steps under BSE section 2.8's limits (BSE
+    steps by Euler's rule). Each step is a knot, and `state_at` joins the knots linearly, so
+    circularisation and Peters's decay are on nodes. The 0.1-d double white dwarf merges within
+    1% of `peters_merger_time` (about 0.4% as measured). Stable transfer is taken implicitly,
+    with the rate found by bisection on the step's end overfill.
+  - _A star on its own track accretes no wind._ Only a star the binary has touched carries a mass
+    path.
+  - _Contact._ Two main-sequence stars in contact stay so for the lighter star's thermal
+    timescale before they coalesce, where BSE merges them at once. This is HYPERION's choice, so
+    that contact pairs exist to be classified.
+  - _Figures from the published code where the paper gives none_: a critical q of 3 for a type-1
+    main-sequence donor and a core-helium-burning donor (the code's 2001 revision); the square
+    root in Zahn's damping (BSE equation 42 as printed lost it); Peters's coefficient from G and
+    c rather than BSE's rounded 8.315 × 10⁻¹⁰.
+  - _Parameters._ `α_CE` = 1, λ = 0.5 (design note 14, provisional; BSE's table 3 and Model A
+    take 3). BSE's own examples run with `with_alpha_ce(3.0)`. `β_W` = 0.5 is table 3's default;
+    the published code's input file takes 1/8.
+  - _Tests._ Five of the six reference binaries are their own tests. The blue straggler is
+    checked inside BSE section 3.1's Algol. The 10³-pair invariant suite is `#[ignore]` and runs
+    under `just test-slow`, and the default suite runs 60 pairs.
+  - _Bench, and a finding: the target is missed by about 37 times._ `benches/binary.rs` times BSE's
+    Algol and cataclysmic variable (`binary/binary_evolve/*`, 36 and 26 ms) and a fixed sample of
+    182 pairs that pass `can_interact` (`binary/distribution`), each normalised by `math::exp`.
+    On 2026-09-25, under the heavy-test lock at 4.1 GHz and a load average of 2.6, the median was
+    7.4 ms (7.4 × 10⁵ calls of `exp`) and the 99th percentile 27 ms (2.7 × 10⁶), against the
+    plan's median under 200 µs. The cost is not profiled yet. The likely cause is the midpoint
+    steps under BSE section 2.8's limits, each of which evaluates both stars' structures. Plan 11 can't reach the brainstorm's millisecond
+    per system until the engine is sped up. Options include coarser step limits, caching each
+    segment's structures, or running the engine only for the systems a view asks for.
+  - _Open, for the owner._ T2.c says T4.a replaces `PROVISIONAL_INTERACTING_PERIASTRON` with
+    `can_interact`'s threshold, with a bump, but "Generator version" lists no bump for T4, and T4
+    is built unwired. The seam stays in `multiplicity/hierarchy.rs`. The task that replaces it
+    (T6 or T11, where the engine is wired) should be named, with its bump.
