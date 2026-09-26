@@ -33,22 +33,23 @@ fn milky_way() -> (Galaxy, HaloKinematics) {
     (galaxy, halo)
 }
 
-/// The mixture's `σ_r` in Bond et al.'s volume, km/s: the measured 165.4 ± 5, provisional (ruling
-/// 105.5; Bond et al.'s is 135–155).
-const MIXTURE_SIGMA_R: (f64, f64) = (160.4, 170.4);
+/// The mixture's `σ_r` in Bond et al.'s volume, km/s, against the measured spread (ruling 111.2):
+/// Bond et al.'s 141 ± 5 and Smith et al.'s 143 ± 2 at the bottom, Bird et al. 2021's 179 and the
+/// Sausage's 175 ± 26 at the top.
+const MIXTURE_SIGMA_R: (f64, f64) = (140.0, 180.0);
 
 /// A kiloparsec in light-years.
 const KPC: f64 = 3_261.563_777_167_433_6;
 
-/// P08.T3 with ruling 105.5: at Milky Way values the mixture, weighted by each component's density
-/// over Bond et al.'s volume, 1 < |Z| < 5 kpc and 3 < R < 13 kpc, has a radial dispersion of
-/// 135–155 km/s and an anisotropy of 0.5–0.7 (Bond et al. 2010, ApJ 716, 1: (141, 75, 85) ± 5
-/// km/s, β = 0.68).
+/// P08.T3 with rulings 105.5 and 111.2: at Milky Way values the mixture, weighted by each
+/// component's density over Bond et al.'s volume, 1 < |Z| < 5 kpc and 3 < R < 13 kpc, has a radial
+/// dispersion of 140–180 km/s and an anisotropy of 0.5–0.7.
 ///
-/// Ruling 105.5: if `σ_r` still lands above the window it is held at the measured value, marked
-/// provisional, as a finding (the Sausage alone measures 175 ± 26, Belokurov et al. 2020), not a
-/// wider window. It does: 165.4 km/s with the monopole, β 0.672, so [`MIXTURE_SIGMA_R`] holds the
-/// measured value to ±5 km/s.
+/// The fixture reads 165.4 km/s with the monopole, β 0.672, and ruling 111.2 accepts it, no longer
+/// provisional: the window spans the measurements of the inner halo rather than Bond et al.'s alone
+/// (Bond et al. 2010, ApJ 716, 1: (141, 75, 85) ± 5 km/s, β = 0.68; Smith et al. 2009, MNRAS 399,
+/// 1223: 143 ± 2; Bird et al. 2021, ApJ 919, 66, Fig. 5: 140–179 by [Fe/H]; Belokurov et al.
+/// 2020, MNRAS 494, 3880, Table 1: the Sausage's 175 ± 26). It was 135–155 until ruling 111.
 #[test]
 fn the_mixture_at_milky_way_values() {
     let (galaxy, halo) = milky_way();

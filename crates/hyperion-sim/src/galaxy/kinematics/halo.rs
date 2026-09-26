@@ -17,9 +17,11 @@
 //! the in-situ component 0.3 and prograde at 0.11 `v_c`, the Splash's 25 km/s (Belokurov et al.
 //! 2020, MNRAS 494, 3880, Table 1; ruling 105.5, where Design note 9 had 0.35); the globular-born
 //! debris 0.5 and none; each lesser progenitor β uniform on 0.3–0.7 and a rotation uniform on ±0.25 `v_c`, drawn
-//! on `halo.kinematics` keyed by its item number. The mixture is tested against an anisotropy near
-//! 0.6 and a radial dispersion near 141 km/s in Bond et al.'s volume, 1 < |Z| < 5 kpc and 3 < R <
-//! 13 kpc (2010, ApJ 716, 1: (141, 75, 85) ± 5 km/s, β = 0.68).
+//! on `halo.kinematics` keyed by its item number. The mixture is tested against an anisotropy of
+//! 0.5–0.7 and a radial dispersion of 140–180 km/s in Bond et al.'s volume, 1 < |Z| < 5 kpc and
+//! 3 < R < 13 kpc (ruling 111.2: Bond et al. 2010, ApJ 716, 1: (141, 75, 85) ± 5 km/s, β = 0.68;
+//! Bird et al. 2021's 140–179 by [Fe/H]; the Sausage's 175 ± 26, Belokurov et al. 2020); the
+//! fixture reads 165.4.
 //!
 //! Speeds are km/s, lengths light-years, in the local spherical axes (r outward, θ from +z, φ
 //! spinward).

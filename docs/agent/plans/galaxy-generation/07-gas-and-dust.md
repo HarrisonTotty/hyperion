@@ -1986,3 +1986,11 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   mass beyond pressure balance; σ_ln 1.0–1.4 gives 0.23–0.38 hot. The brainstorm's sentence would
   read "σ of about 1–1.4 at the lattice scale; the clouds and hot voids inside a lattice cell are
   the phases' sub-grid split". Not edited here.
+- **The warm ionised filling, reworded (ruling 111.3, lane `win111`, 2026-09-26; nothing
+  moves).** It supersedes the "peaks low" reading above. At 0.92 kpc (3,000 ly) the model's
+  0.206 meets the measured filling at that height: Gaensler et al.'s (2008) eq. 20, f = 0.04
+  e^(|z| ÷ 700 pc), gives 0.15 there, and Berkhuijsen, Mitra and Müller (2006, AN 327, 82) 0.20. The departure is the
+  shape, not the level: the plane's 0.135 is 3.4 times Gaensler's 0.04, because the brainstorm's
+  n̄_w of 0.030 cm⁻³ is twice their 0.014, and the peak sits at 0.9 kpc rather than their 1.4–2
+  (§4.5: 0.30 at 1.4 kpc). Not tuned. T12's test text (`tests/gas_statistics.rs`) says so; its
+  windows are unchanged.

@@ -165,15 +165,17 @@ fn the_nuclear_disc_rotates_and_cools_outward() {
     assert_within("σ_z ÷ σ_R at 200 pc", vertical / radial, 0.3, 0.6);
 }
 
-/// P08.T4.d with ruling 105.1: the black hole's σ, M–σ's own `σ_e` (the line-of-sight `V² + σ²`
+/// P08.T4.d with rulings 105.1 and 111.1: the black hole's σ, M–σ's own `σ_e` (the line-of-sight `V² + σ²`
 /// along the major axis inside the effective radius, a third face-on and two thirds edge-on),
 /// from the black-hole-free mass model: the reduced solution and the final table agree to 3%, σ
-/// lies in the plan's accepted 100–120 km/s, and the black hole before scatter within a factor of
-/// three of 4.3 × 10⁶ M☉.
+/// lies in 100–120 km/s, and the black hole before scatter within a factor of three of 4.3 × 10⁶
+/// M☉.
 ///
-/// The fixture reads 117.7 km/s, above the brainstorm's 105–115 but inside its acceptance, a
-/// finding of ruling 105.1 (McConnell and Ma 2013 list the Milky Way at 103 ± 20 km/s). The
-/// reduced solution's cost, which the plan puts under 100 ms, is printed.
+/// The fixture reads 117.7 km/s, which ruling 111.1 accepts: it is 0.6–0.7σ from the Milky Way's
+/// 103 ± 20 km/s (McConnell and Ma 2013, ApJ 764, 184, Table A1) and 105 ± 20 (Gültekin et al.
+/// 2009, ApJ 698, 198; Kormendy and Ho 2013, ARA&A 51, 511), so the window is 100–120, not the
+/// brainstorm's 105–115. The reduced solution's cost, which the plan puts under 100 ms, is
+/// printed.
 #[test]
 fn the_bulge_dispersion_that_m_sigma_reads() {
     let galaxy = galaxy();

@@ -688,8 +688,11 @@ fn warm_ionised_profile(gas: &GasField, lcg: &mut Lcg, cache: &mut NoiseCache) -
 /// - at 26,000 ly from the plane to 10,000 ly up, in steps of 500 ly, over 10⁴ points each: the
 ///   warm ionised share peaks at 0.15–0.40 at 1,600–6,500 ly (0.5–2 kpc) and is below the peak at
 ///   10,000 ly, Gaensler et al.'s "maximum of ∼ 30% at a height of ≈1–1.5 kpc, before then
-///   declining". The research predicts 0.18 near 1 kpc, some 1.7 times under Gaensler's peak: a
-///   finding for the owner, not tuned.
+///   declining". The model reads 0.206 at 3,000 ly (0.92 kpc), which meets the measured filling at
+///   that height, Gaensler et al.'s eq. 20, 0.04 e^(|z| ÷ 700 pc), giving 0.15, and Berkhuijsen et
+///   al.'s (2006, AN 327, 82) 0.20 (ruling 111.3). The departure is the shape, a finding not tuned: the plane's
+///   0.135 is 3.4 times Gaensler's 0.04, since the brainstorm's warm layer of 0.030 cm⁻³ is twice
+///   their 0.014, and the peak sits at 0.9 kpc rather than their 1.4–2 (§4.5: 0.30 at 1.4 kpc).
 #[test]
 #[ignore = "slow: 5 × 10⁵ states of the fixture's gas"]
 fn the_phases_fill_the_plane_as_the_brainstorm_says() {

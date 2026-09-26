@@ -453,10 +453,10 @@ fn the_model_holds_the_parameters_masses() {
 /// The fixture's scatter is the Milky Way's own offset from the relation, −0.3876 dex, set so that
 /// plan 08's `σ_e` of 117.7 km/s (P08.T4.d with ruling 105.1) gives 4.30 × 10⁶ M☉ (plan 02, Risks,
 /// R13 and R22). Plan 02's spherical estimator read 109.5 km/s, for an offset of −0.210 dex; plan
-/// 08's first, face-on reading 97.2 km/s, for +0.081. Ruling 105.1 puts the offset inside the
-/// relation's 0.38 dex scatter; at 117.7 km/s, above the brainstorm's 105–115 though inside its
-/// acceptance of 100–120, it lies 0.008 dex beyond, a finding of ruling 105.1, so the bracket is
-/// 0.40 dex.
+/// 08's first, face-on reading 97.2 km/s, for +0.081. Ruling 111.1 checks the offset against plan
+/// 02's ±0.40 dex, not the relation's 0.38 dex scatter, which it passes by 0.008 at 117.7 km/s: the
+/// Galaxy is a pseudobulge, and pseudobulges lie below the relation (Kormendy and Ho 2013, ARA&A
+/// 51, 511, §6; their eq. 7 puts it 0.63 dex below even at 105 km/s).
 ///
 /// The black hole itself is held to Sgr A*'s (4.297 ± 0.012) × 10⁶ M☉ (GRAVITY Collaboration
 /// 2022, A&A 657, L12) to 1%: the offset is a measured fact about the Milky Way only through the

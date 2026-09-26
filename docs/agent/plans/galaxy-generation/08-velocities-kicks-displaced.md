@@ -1061,3 +1061,16 @@ f A_arm I₁(k) ÷ I₀(k)` exactly, so both density-weighted shifts are under 1
   its reconstructed corner, which rounds its factors in another order; its probes still hold the
   bound against the envelope exactly. The output these move belongs to the version-12 batch
   (ruling 105), re-blessed at 11 in the lane.
+- **Ruling 111 as built (lane `win111`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+  It amends T3's, T4.d's and Verification's windows above. (1) T4.d's `σ_e` of 117.7 km/s is
+  accepted, 0.6–0.7σ from the Milky Way's 103 ± 20 (McConnell and Ma 2013, Table A1) and 105 ± 20
+  (Gültekin et al. 2009; Kormendy and Ho 2013): the window is **100–120 km/s**, no longer "105–115,
+  accepting 100–120" (`tests/galaxy_kinematics_spheroid.rs`). The fixture's M–σ offset of −0.3876
+  dex is held to plan 02's ±0.40, not to the relation's 0.38 dex scatter, since the Galaxy is a
+  pseudobulge and pseudobulges lie below the relation (Kormendy and Ho 2013 §6; their eq. 7 puts it
+  0.63 dex under even at 105 km/s); `tests/galaxy_potential.rs` and `params/milky_way.rs` say so.
+  (2) T3's halo mixture in Bond et al.'s volume, σ_r 165.4 km/s, is accepted and **no longer
+  provisional**: the window is **140–180 km/s** in place of 135–155 (Bond et al.'s 141 ± 5 and
+  Smith et al. 2009's 143 ± 2 at the bottom; Bird et al. 2021's 179 and the Sausage's 175 ± 26,
+  Belokurov et al. 2020, at the top). `MIXTURE_SIGMA_R` is that window, not the measured value's
+  ±5 (`tests/galaxy_kinematics_halo.rs`, `kinematics/halo.rs`'s module text).

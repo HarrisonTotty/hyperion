@@ -40,7 +40,8 @@
 //! - **Contact.** An accretor that fills its own lobe brings the pair into contact (section
 //!   2.6.6). Two main-sequence stars stay in contact (ruling 108.1; see `Engine::contact`), and
 //!   any other pair collides: a common envelope where either star is giant-like, a coalescence
-//!   otherwise.
+//!   otherwise. A rapid contact whose accretor overfills its lobe by no more than 10% is
+//!   temporary, and the transfer goes on (ruling 114.2; `Engine::contact_relaxes`).
 
 use std::sync::Arc;
 
@@ -152,6 +153,19 @@ impl Engine {
         self.carry(d);
         self.carry(a_idx);
         self.synchronise(d);
+        let main_sequence = match &self.members[d] {
+            Member::MainSequence { helium, .. } => {
+                sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, self.current(d).0)
+            }
+            Member::Track { .. }
+            | Member::Shaped { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => 0.0,
+        };
+        self.overflow_onset = (self.age, main_sequence);
+        self.first_contact = None;
         match self.stability(d) {
             Stability::Stable => {
                 self.kind = SegmentKind::StableTransfer {
@@ -352,9 +366,9 @@ impl Engine {
             if sa.state.radius().value() >= lobe_a {
                 // The last step's rate, before closing the segment takes the path of rates.
                 let rate = self.rates.as_ref().map_or(0.0, Path::last);
-                self.close_segment();
-                self.contact(d, rate);
-                return;
+                if self.accretor_contact(d, rate) {
+                    return;
+                }
             }
             let kd = Kind::of(sd.state.phase(), s.masses[d]);
             if !kd.is_giant_like() && rd > OVERFILL_MERGER * lobe_d {

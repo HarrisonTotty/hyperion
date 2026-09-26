@@ -377,6 +377,13 @@ pub(super) struct Engine {
     pub(super) dt_hint: f64,
     /// When a contact pair coalesces.
     pub(super) contact_until: f64,
+    /// When the last Roche-lobe overflow began, years, and the donor's main-sequence lifetime
+    /// then, years (0 for any other donor, and before the first onset): Nelson and Eggleton's
+    /// `t_RLOF` and `t_MS` (ruling 114.2).
+    pub(super) overflow_onset: (f64, f64),
+    /// When the accretor first filled its lobe in the current transfer, years (Nelson and
+    /// Eggleton's `t_contact`; ruling 114.2).
+    pub(super) first_contact: Option<f64>,
 }
 
 impl Engine {
@@ -408,6 +415,8 @@ impl Engine {
             capped: false,
             dt_hint: 0.0,
             contact_until: 0.0,
+            overflow_onset: (0.0, 0.0),
+            first_contact: None,
         };
         for i in 0..2 {
             let (mass, tau) = engine.current(i);

@@ -149,6 +149,35 @@ impl Side {
 /// coalesces (Rasio 1995, ApJ 444, L41: q ≈ 0.09; ruling 108.1).
 pub(super) const CONTACT_MIN_Q: f64 = 0.09;
 
+/// The donor's rate, in units of its thermal rate M ÷ `τ_KH`, above which a contact is dynamic
+/// (Nelson and Eggleton 2001, ApJ 552, 664, eq. 8: case AD; ruling 114.1).
+const DYNAMIC_CONTACT_RATE: f64 = 10.0;
+
+/// The share of the donor's main-sequence lifetime within which a contact reached at the thermal
+/// rate is rapid, `t_contact − t_RLOF < 0.1 t_MS` (Nelson and Eggleton 2001, Table 1: case AR;
+/// rulings 111.5 and 114.2).
+const RAPID_CONTACT_SHARE: f64 = 0.1;
+
+/// The accretor's overfill of its Roche lobe, as a fraction of the lobe's radius, up to which a
+/// rapid contact is temporary (ruling 114.2, after de Mink, Pols and Hilditch 2007, A&A 467, 1181,
+/// §3.2 and Fig. 2).
+pub(super) const TEMPORARY_CONTACT_OVERFILL: f64 = 0.10;
+
+/// Nelson and Eggleton's (2001) case of a main-sequence contact (see [`Engine::contact`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ContactRegime {
+    /// The mass ratio is below Rasio's (1995) 0.09.
+    TidallyUnstable,
+    /// Case AD: more than ten times the donor's thermal rate.
+    Dynamic,
+    /// Case AR: the donor's thermal rate or faster, soon after the onset; a deep contact then
+    /// coalesces on the lighter star's thermal timescale, years.
+    Rapid { light_thermal: f64 },
+    /// Nuclear-rate transfer, the loss of angular momentum, or a late contact: the W Ursae Majoris
+    /// channel (ruling 108.1).
+    Slow,
+}
+
 impl Engine {
     /// A common envelope around member `d`, a giant-like donor, and its companion (BSE section
     /// 2.7.1).
@@ -528,51 +557,124 @@ impl Engine {
     /// The accretor fills its lobe too during transfer from member `d` at `rate`, M☉ yr⁻¹, over
     /// the last step: contact (BSE section 2.6.6), which BSE ends in coalescence at once.
     ///
-    /// Two main-sequence stars stay in contact, as observed contact binaries do (ruling 108.1 of
-    /// 2026-09-22, from Rasio 1995 and Kobulnicky et al. 2022):
+    /// Two main-sequence stars stay in contact, as observed contact binaries do (rulings 108.1,
+    /// 111.5 and 114 of 2026-09-22, from Rasio 1995, Nelson and Eggleton 2001 and de Mink, Pols
+    /// and Hilditch 2007), by Nelson and Eggleton's (2001, ApJ 552, 664, Table 1 and eq. 8) cases:
     ///
-    /// - reached by transfer at the donor's thermal rate M ÷ `τ_KH` (BSE equation 60) or faster,
-    ///   the pair coalesces on the thermal timescale of the lighter star;
-    /// - reached by slow transfer, at the nuclear rate or under the loss of angular momentum, it
-    ///   stays in contact until either star leaves the main sequence (and then coalesces) or the
-    ///   pair's age is reached;
+    /// - dynamic (AD), at more than ten times the donor's thermal rate M ÷ `τ_KH` (BSE equation
+    ///   61), the pair merges dynamically ([`Engine::merge_dynamically`]);
+    /// - rapid (AR), at the donor's thermal rate or faster and within a tenth of the donor's
+    ///   main-sequence lifetime of the onset of transfer, a contact deeper than
+    ///   [`TEMPORARY_CONTACT_OVERFILL`] coalesces on the thermal timescale of the lighter star (a
+    ///   shallower one is temporary and never reaches here: [`Engine::contact_relaxes`]);
+    /// - slow, at the nuclear rate or under the loss of angular momentum, or later than that tenth,
+    ///   it stays in contact until either star leaves the main sequence (and then coalesces) or
+    ///   the pair's age is reached;
     /// - a pair whose mass ratio is below Rasio's (1995) 0.09 is tidally unstable and coalesces
     ///   at once.
     ///
     /// The stars keep their masses in contact ([`Engine::contact_phase`]), so the mass ratio does
     /// not fall there. Any other pair goes on as a collision.
     pub(super) fn contact(&mut self, d: usize, rate: f64) {
+        let Some(regime) = self.contact_regime(d, rate) else {
+            self.collide();
+            return;
+        };
+        let lifetime = match regime {
+            ContactRegime::TidallyUnstable => {
+                self.mix();
+                return;
+            }
+            ContactRegime::Dynamic => {
+                self.merge_dynamically(d);
+                return;
+            }
+            ContactRegime::Rapid { light_thermal } => light_thermal,
+            ContactRegime::Slow => self.main_sequence_left(0).min(self.main_sequence_left(1)),
+        };
+        self.kind = SegmentKind::Contact;
+        // Past the pair's age where the contact outlasts it: `contact_phase` then leaves it in
+        // contact rather than coalescing at the horizon.
+        self.contact_until = self.age + lifetime.max(0.0);
+    }
+
+    /// Acts on the accretor filling its lobe during transfer from member `d` at `rate`, M☉ yr⁻¹:
+    /// whether it ended the transfer. The first such step of the transfer is the contact's time
+    /// ([`Engine::first_contact`]); a temporary contact ([`Engine::contact_relaxes`]) leaves the
+    /// pair in semi-detached transfer, and any other closes the segment for [`Engine::contact`].
+    pub(super) fn accretor_contact(&mut self, d: usize, rate: f64) -> bool {
+        self.first_contact.get_or_insert(self.age);
+        if self.contact_relaxes(d, rate) {
+            return false;
+        }
+        self.close_segment();
+        self.contact(d, rate);
+        true
+    }
+
+    /// Whether the accretor's filling of its lobe during transfer from member `d` at `rate`,
+    /// M☉ yr⁻¹, is temporary (ruling 114.2): a rapid (AR) contact of two main-sequence stars in
+    /// which the accretor overfills its lobe by no more than [`TEMPORARY_CONTACT_OVERFILL`]. The
+    /// accretor regains its thermal equilibrium and shrinks back inside its lobe (de Mink, Pols
+    /// and Hilditch 2007, A&A 467, 1181, §3.2), so the pair goes on in semi-detached transfer and
+    /// is not marked in contact. A departure from BSE, which merges every contact.
+    #[must_use]
+    pub(super) fn contact_relaxes(&self, d: usize, rate: f64) -> bool {
+        if !matches!(
+            self.contact_regime(d, rate),
+            Some(ContactRegime::Rapid { .. })
+        ) {
+            return false;
+        }
+        let a_idx = 1 - d;
+        let (ma, ta) = self.current(a_idx);
+        let (md, _) = self.current(d);
+        let a = self.orbit.as_ref().map_or(0.0, |o| o.a);
+        self.structure(a_idx, self.age, ma, ta).is_some_and(|s| {
+            s.state.radius().value() <= (1.0 + TEMPORARY_CONTACT_OVERFILL) * roche_lobe(ma, md, a)
+        })
+    }
+
+    /// Nelson and Eggleton's (2001) case of a contact reached during transfer from member `d` at
+    /// `rate`, M☉ yr⁻¹ (see [`Engine::contact`]), or `None` unless both stars are on the main
+    /// sequence. The contact's time is the first at which the accretor filled its lobe in this
+    /// transfer, [`Engine::first_contact`], or now.
+    #[must_use]
+    fn contact_regime(&self, d: usize, rate: f64) -> Option<ContactRegime> {
         let kinds: [Option<(Kind, Structure)>; 2] = core::array::from_fn(|i| {
             let (m, tau) = self.current(i);
             self.structure(i, self.age, m, tau)
                 .map(|s| (Kind::of(s.state.phase(), m), s))
         });
         let [Some((k0, s0)), Some((k1, s1))] = kinds else {
-            self.collide();
-            return;
+            return None;
         };
         if !(k0.is_main_sequence() && k1.is_main_sequence()) {
-            self.collide();
-            return;
+            return None;
         }
         let m = [self.current(0).0, self.current(1).0];
         let light = usize::from(m[1] < m[0]);
         if m[light] < CONTACT_MIN_Q * m[1 - light] {
-            self.mix();
-            return;
+            return Some(ContactRegime::TidallyUnstable);
         }
         let (sd, kd) = if d == 0 { (&s0, k0) } else { (&s1, k1) };
         let (s_light, k_light) = if light == 0 { (&s0, k0) } else { (&s1, k1) };
-        let fast = positive(rate) && rate * kelvin_helmholtz(sd, kd) >= m[d];
-        let lifetime = if fast {
-            kelvin_helmholtz(s_light, k_light)
+        let thermal_rate = m[d] / kelvin_helmholtz(sd, kd);
+        if !positive(rate) || rate < thermal_rate {
+            return Some(ContactRegime::Slow);
+        }
+        if rate > DYNAMIC_CONTACT_RATE * thermal_rate {
+            return Some(ContactRegime::Dynamic);
+        }
+        let (onset, main_sequence) = self.overflow_onset;
+        let at = self.first_contact.unwrap_or(self.age);
+        if at - onset < RAPID_CONTACT_SHARE * main_sequence {
+            Some(ContactRegime::Rapid {
+                light_thermal: kelvin_helmholtz(s_light, k_light),
+            })
         } else {
-            self.main_sequence_left(0).min(self.main_sequence_left(1))
-        };
-        self.kind = SegmentKind::Contact;
-        // Past the pair's age where the contact outlasts it: `contact_phase` then leaves it in
-        // contact rather than coalescing at the horizon.
-        self.contact_until = self.age + lifetime.max(0.0);
+            Some(ContactRegime::Slow)
+        }
     }
 
     /// How long member `i`, a main-sequence star, has left on its main sequence at its mass now,

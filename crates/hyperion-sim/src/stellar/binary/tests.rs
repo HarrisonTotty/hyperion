@@ -904,11 +904,13 @@ fn a_contact_pair_below_the_tidal_limit_coalesces_at_once() {
     assert_eq!(kind_after_contact(0.115), SegmentKind::Contact);
 }
 
-/// Ruling 108.2: with `α_CE` = 1 and λ = 0.5, the common envelopes of first-giant-branch
+/// Rulings 108.2 and 111.4: with `α_CE` = 1 and λ = 0.5, the common envelopes of first-giant-branch
 /// progenitors of 1.0–1.5 M☉ with 0.3 M☉ companions leave white dwarf and main-sequence pairs in
-/// the post-common-envelope binaries' observed range of periods, 1.9 h to 4.3 d (Nebot
-/// Gómez-Morán et al. 2011, A&A 536, A43): none shorter, and none longer but at most two from the
-/// widest orbits, which meet the giant at the tip of its branch.
+/// the post-common-envelope binaries' observed range of periods, 1.9 h (Nebot Gómez-Morán et al.
+/// 2011, A&A 536, A43) to 4.36 d, the longest of Zorotovic et al.'s sample, SDSS J1434+5335 at
+/// 4.357 d (2010, A&A 520, A86, Table A.1): none shorter, and none longer but at most one from the
+/// widest orbit, which meets the giant at the tip of its branch. As built the longest in range is
+/// 4.35 d.
 #[test]
 fn post_common_envelope_pairs_land_in_the_observed_periods() {
     let mut periods = Vec::new();
@@ -932,14 +934,154 @@ fn post_common_envelope_pairs_land_in_the_observed_periods() {
         }
     }
     assert!(periods.len() >= 20, "{periods:?}");
-    let (shortest, longest) = (1.9 / 24.0, 4.3);
+    let (shortest, longest) = (1.9 / 24.0, 4.36);
     assert!(periods.iter().all(|p| p.2 >= shortest), "{periods:?}");
-    // The allowance, recorded in plan 11's Risks: the widest orbits, which reach the giant at the
-    // tip of its branch where its envelope is least bound, may land above 4.3 d (7.5 d from
-    // 1.0 M☉ at 450 d as built), and no more than two of them.
+    // The allowance, α = 1's known excess (ruling 111.4; Zorotovic et al. 2010 find α 0.2–0.3),
+    // recorded in plan 11's Risks: the widest orbit, which reaches the giant at the tip of its
+    // branch where its envelope is least bound, may land above 4.36 d (7.5 d from 1.0 M☉ at 450 d
+    // as built), and no more than one pair.
     let above: Vec<_> = periods.iter().filter(|p| p.2 > longest).collect();
     assert!(
-        above.len() <= 2 && above.iter().all(|p| p.1 >= 450.0),
+        above.len() <= 1 && above.iter().all(|p| p.1 >= 450.0),
         "{periods:?}"
     );
+}
+
+/// An engine holding a 1.5 M☉ main-sequence donor and a 1.2 M☉ main-sequence accretor in
+/// transfer, on a circular orbit sized so that the accretor overfills its Roche lobe by
+/// `overfill` of its radius, with the transfer begun at age 0 and the accretor first touching its
+/// lobe at `touched`, years: for ruling 114's cases.
+fn contact_engine(overfill: f64, touched: f64) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit, roche_lobe};
+    use super::star::{Member, Path};
+    use super::timeline::{Component, Context};
+
+    let (m_donor, m_accretor) = (1.5, 1.2);
+    let input = pair(m_donor, m_accretor, 1.0, 0.0, 0.02);
+    let star = |m: f64, tau: f64| Member::MainSequence {
+        helium: false,
+        mass: Path::starting(0.0, m),
+        tau: Path::starting(0.0, tau),
+    };
+    let k = input.orbit();
+    let ctx = Arc::new(Context::of(&input));
+    let at_unit = LiveOrbit::new(0.0, 1.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(
+        Arc::clone(&ctx),
+        1.0e10,
+        [star(m_donor, 0.5), star(m_accretor, 0.3)],
+        at_unit,
+        None,
+    );
+    let radius = engine
+        .structure(1, 0.0, m_accretor, 0.3)
+        .expect("a main-sequence accretor")
+        .state
+        .radius()
+        .value();
+    // The lobe is linear in the separation.
+    let a = radius / ((1.0 + overfill) * roche_lobe(m_accretor, m_donor, 1.0));
+    engine.orbit = Some(LiveOrbit::new(
+        0.0,
+        a,
+        0.0,
+        *k.orientation(),
+        k.mean_anomaly_at_epoch(),
+    ));
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::of_index(0),
+    };
+    let lifetime = crate::stellar::sse::main_sequence_lifetime(ctx.coeffs(), false, m_donor);
+    engine.overflow_onset = (0.0, lifetime);
+    engine.first_contact = Some(touched);
+    engine
+}
+
+/// The donor's thermal rate M ÷ `τ_KH` in [`contact_engine`]'s pair, M☉ yr⁻¹, and the lighter
+/// star's thermal timescale, years.
+fn contact_rates(engine: &super::evolve::Engine) -> (f64, f64) {
+    use super::rlof::kelvin_helmholtz;
+    use super::star::Kind;
+
+    let thermal = |i: usize| {
+        let (m, tau) = engine.current(i);
+        let s = engine.structure(i, engine.age, m, tau).expect("a star");
+        kelvin_helmholtz(&s, Kind::of(s.state.phase(), m))
+    };
+    (engine.current(0).0 / thermal(0), thermal(1))
+}
+
+/// Ruling 114.2: a rapid (AR) contact, reached at twice the donor's thermal rate soon after the
+/// onset, whose accretor overfills its lobe by 5% is temporary: the pair goes on in semi-detached
+/// transfer and is not marked in contact. At 9% it is still temporary; the same pair touching its
+/// lobe too late for case AR (a fifth of the donor's main sequence after the onset) is not.
+#[test]
+fn a_shallow_rapid_contact_returns_to_semi_detached_transfer() {
+    for overfill in [0.05, 0.09] {
+        let mut engine = contact_engine(overfill, 1.0e5);
+        let (thermal_rate, _) = contact_rates(&engine);
+        assert!(engine.contact_relaxes(0, 2.0 * thermal_rate), "{overfill}");
+        // What `transfer_phase` does on the step: the transfer goes on.
+        assert!(
+            !engine.accretor_contact(0, 2.0 * thermal_rate),
+            "{overfill}"
+        );
+        assert!(matches!(engine.kind, SegmentKind::StableTransfer { .. }));
+        assert!(engine.segments.is_empty(), "{:?}", engine.segments);
+        assert_eq!(engine.first_contact, Some(1.0e5));
+    }
+    // The first contact of a transfer is its time.
+    let mut first = contact_engine(0.05, 0.0);
+    first.first_contact = None;
+    let (thermal_rate, _) = contact_rates(&first);
+    assert!(!first.accretor_contact(0, 2.0 * thermal_rate));
+    assert_eq!(first.first_contact, Some(first.age));
+    let engine = contact_engine(0.05, 0.0);
+    let (thermal_rate, _) = contact_rates(&engine);
+    // Slow transfer is the W Ursae Majoris channel, never temporary.
+    assert!(!engine.contact_relaxes(0, 0.5 * thermal_rate));
+    let (_, lifetime) = engine.overflow_onset;
+    let late = contact_engine(0.05, 0.2 * lifetime);
+    assert!(!late.contact_relaxes(0, 2.0 * thermal_rate));
+    let mut late = late;
+    late.contact(0, 2.0 * thermal_rate);
+    assert_eq!(late.kind, SegmentKind::Contact);
+    assert!(
+        late.contact_until - late.age > 1.0e8,
+        "{}",
+        late.contact_until
+    );
+}
+
+/// Ruling 114.2: a rapid (AR) contact whose accretor overfills its lobe by 20% ends the transfer
+/// and merges on the lighter star's thermal timescale; ruling 114.1: one at twenty times the
+/// donor's thermal rate (case AD) merges dynamically at once.
+#[test]
+fn a_deep_rapid_contact_merges() {
+    let mut engine = contact_engine(0.20, 1.0e5);
+    let (thermal_rate, light_thermal) = contact_rates(&engine);
+    assert!(!engine.contact_relaxes(0, 2.0 * thermal_rate));
+    assert!(engine.accretor_contact(0, 2.0 * thermal_rate));
+    assert!(
+        matches!(
+            engine.segments.last().map(Segment::kind),
+            Some(SegmentKind::StableTransfer { .. })
+        ),
+        "{:?}",
+        engine.segments
+    );
+    assert_eq!(engine.kind, SegmentKind::Contact);
+    let lasts = engine.contact_until - engine.age;
+    assert!(
+        (lasts - light_thermal).abs() <= 1e-9 * light_thermal,
+        "{lasts} yr against {light_thermal}"
+    );
+    engine.contact_phase();
+    assert_eq!(engine.kind, SegmentKind::Merged);
+    let mut dynamic = contact_engine(0.05, 1.0e5);
+    assert!(!dynamic.contact_relaxes(0, 20.0 * thermal_rate));
+    dynamic.contact(0, 20.0 * thermal_rate);
+    assert_eq!(dynamic.kind, SegmentKind::Merged);
 }

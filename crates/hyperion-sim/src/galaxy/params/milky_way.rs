@@ -164,7 +164,10 @@ pub(super) fn inputs() -> Inputs {
         // before P02.T11's tuning, −0.514 and −0.512 at P02.T11's 123.9 and 123.8, −0.210 at plan
         // 02's spherical 109.5 after the thin discs' hole (P02.T12.d), +0.081 at plan 08's first,
         // face-on reading of 97.2, and this. McConnell and Ma list the Milky Way at 103 ± 20 km/s,
-        // 0.06–0.08 dex below the relation.
+        // 0.06–0.08 dex below the relation. Ruling 111.1 accepts both: 117.7 km/s is 0.6σ from
+        // the Milky Way's 103–105 ± 20, and the offset is held to plan 02's ±0.40 dex, not to the
+        // scatter, since the Galaxy is a pseudobulge and pseudobulges lie below the relation
+        // (Kormendy and Ho 2013, ARA&A 51, 511, §6).
         bh_scatter: -0.3876,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,

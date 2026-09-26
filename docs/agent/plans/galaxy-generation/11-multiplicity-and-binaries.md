@@ -1757,3 +1757,35 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   branch: 7.5 d from 1.0 M☉ and 4.35 d from 1.1 M☉. The test allows at most two, both from the
   widest orbit. A finding for research: with `α_CE` λ = 0.5 the widest first-giant-branch
   progenitors land above the observed range.
+- **Ruling 111 as built** (lane `win111`, 2026-09-26, at `GENERATOR_VERSION` 12). _The
+  post-common-envelope test_ (point 4) takes its top edge at **4.36 d**, SDSS J1434+5335's 4.357 d
+  (Zorotovic et al. 2010, Table A.1), in place of Nebot Gómez-Morán et al.'s 4.3 d, and allows **at
+  most one** pair above it, from the widest orbit, in place of two: 4.35 d from 1.1 M☉ at 450 d now
+  lies inside, and 7.5 d from 1.0 M☉ at 450 d is the recorded exception, α = 1's known excess
+  (Zorotovic et al. fit α 0.2–0.3). _Speed_ (point 6): the bit-exact floor of 4.5 ms is accepted;
+  **P11.T11 passes the tracks in** (the `StarModel`s' own, saving about 1 ms a pair, moving
+  nothing), and a result-moving solver change is allowed later if final masses and periods move by
+  under 1%, with its own bump.
+- **Ruling 114 as built** (lane `win111`, 2026-09-26; settles ruling 111.5). It supersedes the
+  fast/slow rule of "Ruling 108 as built" above for main-sequence contact during transfer, by
+  Nelson and Eggleton's (2001) cases. `Engine::contact` classifies (`ContactRegime`): **AD**, a
+  donor rate above 10 M ÷ `τ_KH` (their eq. 8), calls `merge_dynamically` at once, as a q above
+  q_crit does in `stability_of`; **AR**, at the thermal rate or faster **and** with
+  `t_contact − t_RLOF < 0.1 t_MS`, coalesces on the lighter star's `τ_KH`; anything else is
+  **slow**, the W Ursae Majoris channel of ruling 108.1, unchanged; below q = 0.09 it coalesces at
+  once. A shallow AR contact, the accretor over its lobe by at most 10%
+  (`TEMPORARY_CONTACT_OVERFILL`; de Mink, Pols and Hilditch 2007, §3.2), is temporary:
+  `Engine::accretor_contact`, through `Engine::contact_relaxes`, lets `transfer_phase` go on in
+  semi-detached transfer, unmarked, and each later step re-tests it, so it merges if the overfill
+  passes 10% and turns slow if the rate drops. `t_RLOF` is the age at `roche_onset` and `t_MS` the donor's main-sequence lifetime at its
+  mass there (`Engine::overflow_onset`, 0 for a donor off the main sequence); `t_contact` is the
+  first step of the transfer at which the accretor filled its lobe (`Engine::first_contact`). The
+  lane's readings: "t_MS" as the donor's, at its mass at the onset; AD as `merge_dynamically`
+  rather than the thermal-timescale coalescence; a relaxed contact whose rate later falls under
+  the thermal rate becomes a slow contact, on which the ruling is silent. Tests:
+  `a_shallow_rapid_contact_returns_to_semi_detached_transfer` (5% and 9% overfill relax; slow and
+  late contacts do not) and `a_deep_rapid_contact_merges` (20% lasts the lighter star's `τ_KH`,
+  then merges; 20 times the thermal rate merges at once). `stellar/binary_timelines` did not move:
+  no outcome among its 10³ pairs changes. A departure from BSE, which merges every contact.
+  Rucinski's (2002) contact-binary share (1/1000–1/250 of main-sequence stars with M_V > +1.5) is
+  P11.T11's check.
