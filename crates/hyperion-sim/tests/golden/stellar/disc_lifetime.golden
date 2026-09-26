@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 m 0.08 rank 0.000000001 = 0x3fd3333333333333  # 0.3
 m 0.08 rank 0.1 = 0x3fd5b3929dd64aad  # 0.3390852490785317
 m 0.08 rank 0.5 = 0x4001d8a27452c307  # 2.230778607154551

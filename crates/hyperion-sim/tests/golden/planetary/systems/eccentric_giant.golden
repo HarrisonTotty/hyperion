@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 eccentric_giant 0x4200acaa0000000a: OldThinDisc, 1 stars
 fe_h = 0x3fb3d2e626b5a5da  # 0.07743681378419556
 age_at_epoch_yr = 0x41c1c1464f80acf2  # 595758239.0052779

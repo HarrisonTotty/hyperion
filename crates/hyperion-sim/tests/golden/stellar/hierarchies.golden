@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 sun.C.id = 0x42002cb200000000
 sun.C.primary_mass_msun = 0x3ff2616a8eb0b4f1  # 1.1487832616651839
 sun.C.free.0.stars = 1, dropped 0

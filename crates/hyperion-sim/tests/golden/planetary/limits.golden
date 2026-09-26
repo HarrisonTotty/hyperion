@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 roche_fluid_saturn = 0x41a1d6104c78077e  # 149620774.23443216
 roche_rigid_saturn = 0x41924cc1671cfd52  # 76755033.77831009
 hill_earth_pericentre = 0x41d5ed9420acf8d0  # 1471565954.7026863

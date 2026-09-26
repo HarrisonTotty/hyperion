@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 sun: G2V
 sun.code = 0x4044fd2248f5725e  # 41.977608795020146
 sun.bc_v = 0xbfb5b0f36a3e2309  # -0.08473130554024179

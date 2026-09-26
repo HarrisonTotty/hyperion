@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 # milky_way
 milky_way.sub_disc[0].height = 0x407a8c30e949738a  # 424.76194122974323
 milky_way.sub_disc[0].unscaled = 0x407a9c84c08eecb8  # 425.7824102004047

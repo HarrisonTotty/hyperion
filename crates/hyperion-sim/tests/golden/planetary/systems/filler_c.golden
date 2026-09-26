@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 filler_c 0x42002cb200000000: OldThinDisc, 1 stars
 fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
 age_at_epoch_yr = 0x41c52bef99fe56f5  # 710401843.9870287

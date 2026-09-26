@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 # seed 0x0312b00000000000, milky_way_like, no sources, no current frame
 ship[00].x_ly = 0x40344b14637cdfc6  # 20.293279855715603
 ship[00].y_ly = 0x40d96147ad4f8b09  # 25989.119953046586

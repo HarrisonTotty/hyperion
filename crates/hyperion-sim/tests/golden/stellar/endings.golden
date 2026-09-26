@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 Z = 0.02, median, 1 M_sun: EnvelopeLoss, WhiteDwarf
   death = 0x4207368d5a6489ab  # 12462435148.56722
   remnant mass = 0x3fe0a1033e2eaa1b  # 0.5196548666475026

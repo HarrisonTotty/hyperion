@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 # formation draws and ages, planets of 1 M_earth and 1 M_jup, disc of 2.2 Myr
 draws[1].giant = 0x3fddf07080fe817a  # 0.4678002605160355
 draws[1].magma_ocean = 0x3fdcfd4f48ae6e32  # 0.4529607972887987

@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 # sun_20ly: R = 20 ly at (0, 26000, 0) ly, t = T+0.000000000 s, floor LayerA
 sun_20ly.complete_down_to = A
 sun_20ly.stopped_by = MassFloor

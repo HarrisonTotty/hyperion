@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 wide_binary 0x41ffecae00000004: OldThinDisc, 2 stars
 fe_h = 0x3f9de96f45403037  # 0.029210795022706484
 age_at_epoch_yr = 0x41e142390cb3dec8  # 2316421221.620945

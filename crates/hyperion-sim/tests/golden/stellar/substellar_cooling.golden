@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 fe_h=-2.3.hydrogen_burning_limit = 0x3fb5308292a8903c  # 0.08277145462540231
 fe_h=-2.3.m=0.01.t=0e0.log_l = 0xc0076e361802ca7c  # -2.9288141132213337
 fe_h=-2.3.m=0.01.t=0e0.r = 0x3fd00a9a9302791e  # 0.25064720493709725

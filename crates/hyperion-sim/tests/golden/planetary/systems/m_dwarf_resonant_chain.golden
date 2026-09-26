@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 m_dwarf_resonant_chain 0x01fffb2c20000000: OldThinDisc, 1 stars
 fe_h = 0x3fa3f513ec72ac74  # 0.038979170430445104
 age_at_epoch_yr = 0x41edfe4ac9a515bf  # 4025636429.1589046

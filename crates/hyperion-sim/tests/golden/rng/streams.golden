@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 
 seed 0000000000000000 tag selftest.stream key Galaxy word 0x0000000000000000 sub 0
 word[0] = 0x634d7bd19c9089af

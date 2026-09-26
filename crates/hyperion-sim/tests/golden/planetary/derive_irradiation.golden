@@ -1,4 +1,4 @@
-# generator_version = 11
+# generator_version = 12
 flux_earth = 0x3ff0009204bfdfd0  # 1.0001392541434946
 t_eq_earth = 0x406fe46f6dc8920e  # 255.13860215352946
 flux_venus = 0x3ffe94ca3dbc3987  # 1.9113256846936524
