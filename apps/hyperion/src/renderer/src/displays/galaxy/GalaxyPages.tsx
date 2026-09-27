@@ -18,7 +18,8 @@ const PAGE_TITLE: Readonly<Record<GalaxyPage, string>> = {
   parameters: "PARAMETERS",
   map: "GALAXY MAP",
   chart: "LOCAL CHART",
-  // `HR` is the astronomers' own name for the diagram; the page's graph carries the full title.
+  // `HR` is the astronomers' own name for the diagram, and the graph's title is the same, one name
+  // for the page; only the canvas's accessible name spells it out (ruling 115.4).
   hr: "HR DIAGRAM",
 };
 

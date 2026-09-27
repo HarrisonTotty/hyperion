@@ -1482,6 +1482,10 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     model's PMF sums are 4,898 : 2,629 : 1,180 : 587 : 311 : 395, and the difference is the dropped
     companions. Layer E (8–150 M☉) has 8% sextuples (227 of 2,805). That follows from the capped geometric
     count with a mean near 2.2 for O stars, a property of the model, not of this wiring.
+    _Superseded (noted round 9b, `ui13`):_ since rulings 74 and 81 a primary has at most three
+    companions (`MAX_COMPANIONS = 3`), so no system has more than four stars. The counts above
+    predate that cap. `stellar_system.rs`'s `star_counts_run_from_one_to_four_even_in_layer_e`
+    pins the range, and `StellarBriefDto.star_count`'s doc (1 to 4) cites the cap.
   - _A pinned triple_ (superseded: since rulings 74 and 81 `…0009` draws as a binary, and the
     server's test pins `0x4200_2cb2_0000_000d`, three main-sequence dwarfs; the paragraph below
     is the answer as it was), `42002cb200000009` of seed `0x4d2` at the epoch, answered as follows. An
@@ -1641,6 +1645,16 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   - The round's brief placed the star list "in the `SYSTEM` display". This task puts it in the
     `GALAXY` readout, and the `SYSTEM` display's body list already lists the hosts (P14.T43.a), so
     it was built here.
+  - _Built (round 9b, `ui13`, ruling 115.5):_ the system list's `STARS` column, which supersedes the
+    first half of "Not built" above. It shows the star count, primary included, as one
+    right-aligned digit after `CLASS`, or the em dash where the row has no brief. The row's
+    accessible name gains `1 star` / `3 stars`, and `DRIVE RANGE` reads `IN` / `OUT` under its
+    header. _Deviation:_ that column is 6.5ch, not the ruling's 4ch, because its header word
+    `RANGE` is 57 px against 36 px. At list widths up to 30 rem (the `SYSTEMS` column at 1280 × 720)
+    the designation takes its own line across each 2 rem row, and the other five columns share the
+    second line, set in 1 rem. At 1280 the designation was otherwise cut to `9G…`; this follows the
+    UX reviewer's should-fix, ruled by the orchestrator. The binary class in words still waits for
+    the wire, and the by-eye check against a known triple is still to be made.
 - **Ruling 93.3, as built (round 9, `kick` follow-up).** The primary mass from which the
   companion-stripped mark is read is `stripped_mark_min_mass(&Composition)`, m_cc(Z) − 1 M☉ at
   the system's drawn metallicity (7.20 M☉ at Z = 0.02, never below 5.72), in place of 8 M☉, so

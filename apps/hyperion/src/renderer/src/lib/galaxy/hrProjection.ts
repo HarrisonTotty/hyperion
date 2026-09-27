@@ -118,19 +118,22 @@ export interface HrCounts {
   /** Of those plotted, the ones beyond an axis and pegged at its edge. */
   readonly offScale: number;
   /**
-   * Neutron stars and black holes, which have no photosphere to place on the diagram: counted,
-   * not plotted.
+   * Neutron stars, counted and not plotted: a cooling neutron star has a photosphere, but at about
+   * 1E6 K it would sit beyond the temperature axis and say nothing of its evolution (ruling 115.3).
    */
-  readonly noPhotosphere: number;
+  readonly neutronStar: number;
+  /** Black holes, which have no luminosity to plot: counted, not plotted. */
+  readonly blackHole: number;
   /** Stars that left no remnant: listed, not drawn. */
   readonly noRemnant: number;
   /** Systems not yet formed at the chart's time, which have no primary. */
   readonly notYetFormed: number;
   /**
-   * Primaries of a kind that has a photosphere whose temperature or luminosity is missing or not
-   * a finite, positive value: an answer the server should not give, counted rather than hidden.
+   * Primaries of a plotted kind whose temperature or luminosity is missing or not a finite,
+   * positive value: an answer the server should not give, which failed the diagram's checks, so
+   * counted as `DATA INVALID` rather than hidden (ruling 115.3).
    */
-  readonly noData: number;
+  readonly dataInvalid: number;
 }
 
 /** A chart's systems placed on the diagram. */
@@ -166,11 +169,11 @@ export function hrYPx(logLuminosityLsun: number, area: PlotAreaPx): number {
  * @remarks
  * Exhaustive over the wire's kinds, with no default, so that a new kind is a type error here until
  * it is placed. A white dwarf has a photosphere and is plotted; a neutron star's surface emits,
- * but at 1E-5 L☉ and 1E6 K it would sit off both scales and says nothing of its evolution, so it
- * is counted with the black holes.
+ * but at about 1E6 K it would sit beyond the temperature axis and says nothing of its evolution,
+ * so it is counted, as a black hole is, each under its own name.
  */
-function placing(kind: ObjectKindDto): "plot" | "noPhotosphere" | "noRemnant" {
-  let place: "plot" | "noPhotosphere" | "noRemnant";
+function placing(kind: ObjectKindDto): "plot" | "neutronStar" | "blackHole" | "noRemnant" {
+  let place: "plot" | "neutronStar" | "blackHole" | "noRemnant";
   switch (kind) {
     case "protostar":
     case "pre_main_sequence":
@@ -185,8 +188,10 @@ function placing(kind: ObjectKindDto): "plot" | "noPhotosphere" | "noRemnant" {
       place = "plot";
       break;
     case "neutron_star":
+      place = "neutronStar";
+      break;
     case "black_hole":
-      place = "noPhotosphere";
+      place = "blackHole";
       break;
     case "no_remnant":
       place = "noRemnant";
@@ -212,10 +217,11 @@ export function projectHr(
 ): HrProjection {
   const points: HrPoint[] = [];
   let offScale = 0;
-  let noPhotosphere = 0;
+  let neutronStar = 0;
+  let blackHole = 0;
   let noRemnant = 0;
   let notYetFormed = 0;
-  let noData = 0;
+  let dataInvalid = 0;
   for (const system of systems) {
     const star = system.star;
     if (star === null) {
@@ -224,8 +230,12 @@ export function projectHr(
     }
     const place = placing(star.kind);
     const shape = starSymbol(star.kind);
-    if (place === "noPhotosphere") {
-      noPhotosphere += 1;
+    if (place === "neutronStar") {
+      neutronStar += 1;
+      continue;
+    }
+    if (place === "blackHole") {
+      blackHole += 1;
       continue;
     }
     if (place === "noRemnant" || shape === null) {
@@ -240,7 +250,7 @@ export function projectHr(
       !Number.isFinite(teffK) ||
       !Number.isFinite(logL)
     ) {
-      noData += 1;
+      dataInvalid += 1;
       continue;
     }
     let teffPeg: TeffPeg | null = null;
@@ -276,10 +286,11 @@ export function projectHr(
     counts: {
       plotted: points.length,
       offScale,
-      noPhotosphere,
+      neutronStar,
+      blackHole,
       noRemnant,
       notYetFormed,
-      noData,
+      dataInvalid,
     },
   };
 }
@@ -306,9 +317,13 @@ const PEG_WIDTH_PX = 1.5;
 const RETICLE_MARGIN_REM = 0.5;
 /** Length of a class boundary's tick down from the top axis, in `rem`. */
 const CLASS_TICK_REM = 0.25;
-/** How far past its symbol's rim the off-scale arrowhead's tip stands, and its arms' length. */
+/**
+ * How far past its symbol's rim the off-scale arrowhead's tip stands, and its arms' length: arms of
+ * 0.375 rem at 45° make the chevron about 0.53 rem across, as wide as the smallest symbol (size
+ * class 0), beside which it must read (ruling 115.2).
+ */
 const PEG_GAP_REM = 0.375;
-const PEG_ARM_REM = 0.25;
+const PEG_ARM_REM = 0.375;
 
 function outerRadiusPx(point: HrPoint, remPx: number): number {
   return (SIZE_CLASS_REM[point.sizeClass] * remPx) / 2;
@@ -333,7 +348,8 @@ function pegOp(point: HrPoint, remPx: number): TicksOp | null {
     return null;
   }
   const reachPx = outerRadiusPx(point, remPx) + PEG_GAP_REM * remPx;
-  const armPx = PEG_ARM_REM * remPx;
+  // Each arm's run along and across the direction, at 45°, so that the arm is PEG_ARM_REM long.
+  const armPx = PEG_ARM_REM * remPx * Math.SQRT1_2;
   const segments: Array<TicksOp["segments"][number]> = [];
   for (const { xPx: dx, yPx: dy } of directions) {
     const tip = { xPx: point.xPx + dx * reachPx, yPx: point.yPx + dy * reachPx };

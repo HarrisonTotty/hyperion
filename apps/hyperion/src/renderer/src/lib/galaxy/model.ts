@@ -66,7 +66,10 @@ export interface StarBrief {
   readonly logLuminosityLsun: number | null;
   /** Its effective temperature; `null` where the luminosity is. */
   readonly teffK: number | null;
-  /** How many stars the system has, the primary included: 1 to 4. */
+  /**
+   * How many stars the system has, the primary included: 1 to 4, since a primary has at most three
+   * companions (plan 11, rulings 74 and 81), so one digit holds it.
+   */
   readonly starCount: number;
 }
 

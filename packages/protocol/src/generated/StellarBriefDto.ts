@@ -26,6 +26,7 @@ log_luminosity_lsun: number | null,
  */
 teff_k: number | null, 
 /**
- * How many stars the system has, the primary included: 1 to 4 (plan 11, P11.T13).
+ * How many stars the system has, the primary included: 1 to 4, since a primary has at most
+ * three companions, direct or in subsystems (plan 11, P11.T13; rulings 74 and 81).
  */
 star_count: number, };

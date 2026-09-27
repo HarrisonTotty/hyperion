@@ -252,8 +252,8 @@ describe("SystemView with the slice's bodies", () => {
     expect(reading("ZONE")).toBe("H7K 4C0RFZ D-7 /0");
     expect(reading("ARCH")).toBe("SOLAR-LIKE");
     expect(reading("SNOW LINE")).toBe("2.26 AU");
-    expect(reading("HABITABLE ZONE")).toBe("0.989 AU – 1.69 AU");
-    expect(reading("OPTIMISTIC")).toBe("0.749 AU – 1.77 AU");
+    expect(reading("HABITABLE ZONE")).toBe("0.989 – 1.69 AU");
+    expect(reading("OPTIMISTIC")).toBe("0.749 – 1.77 AU");
     expect(terms("STABLE ZONE")).toHaveLength(0);
   });
 
@@ -273,7 +273,7 @@ describe("SystemView with the slice's bodies", () => {
     expect(label("OPTIMISTIC")).not.toBeInTheDocument();
     expect(label("HABITABLE ZONE")).toBeInTheDocument();
     // The readout reads the zone whatever the map draws.
-    expect(reading("OPTIMISTIC")).toBe("0.749 AU – 1.77 AU");
+    expect(reading("OPTIMISTIC")).toBe("0.749 – 1.77 AU");
 
     await user.click(toggle);
 

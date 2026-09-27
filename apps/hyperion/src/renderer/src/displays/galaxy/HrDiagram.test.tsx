@@ -19,10 +19,10 @@ import { HrDiagram } from "./HrDiagram";
 const WIDTH_PX = 400;
 const HEIGHT_PX = 300;
 
-/** The plot inside that stage: 3.5 rem in from the left, 1.5 rem from the other edges. */
-const AREA = { leftPx: 56, topPx: 24, widthPx: 320, heightPx: 252 };
+/** The plot inside that stage: 4 rem in from the left, 1.5 rem from the other edges. */
+const AREA = { leftPx: 64, topPx: 24, widthPx: 312, heightPx: 252 };
 
-/** The Sun, a white dwarf, a neutron star and a star that left no remnant. */
+/** The Sun, a white dwarf, a neutron star, a star that left no remnant and a black hole. */
 const SYSTEMS: ReadonlyArray<ChartSystem> = toChartResult(
   aSystemsInRange({
     systems: [
@@ -30,6 +30,7 @@ const SYSTEMS: ReadonlyArray<ChartSystem> = toChartResult(
       { relLy: [2, 0, 0], layer: "c", stellar: aStellarBrief("c", "white_dwarf") },
       { relLy: [3, 0, 0], layer: "e", stellar: aStellarBrief("e", "neutron_star") },
       { relLy: [4, 0, 0], layer: "e", stellar: aStellarBrief("e", "no_remnant") },
+      { relLy: [5, 0, 0], layer: "e", stellar: aStellarBrief("e", "black_hole") },
     ],
   }),
 ).systems;
@@ -113,7 +114,10 @@ describe("HrDiagram", () => {
   it("titles the graph and labels each axis with its unit", () => {
     renderDiagram();
 
-    expect(screen.getByText("HERTZSPRUNG-RUSSELL DIAGRAM")).toBeInTheDocument();
+    // One name for the page: the tab's, with the canvas's accessible name spelled out (ruling 115.4).
+    expect(screen.getByText("HR DIAGRAM")).toBeInTheDocument();
+    expect(screen.queryByText("HERTZSPRUNG-RUSSELL DIAGRAM")).not.toBeInTheDocument();
+    expect(canvas()).toHaveAccessibleName("Hertzsprung-Russell diagram");
     expect(screen.getByText(/^LUMINOSITY/u)).toContainElement(
       screen.getByRole("img", { name: "solar luminosities" }),
     );
@@ -121,10 +125,17 @@ describe("HrDiagram", () => {
     expect(screen.getByText(/^LUMINOSITY/u)).toHaveTextContent(/, LOG SCALE$/u);
   });
 
-  it("writes the major ticks' values and the spectral letters", () => {
+  it("writes each axis's ticks in one form, and labels the spectral letters' scale", () => {
     renderDiagram();
 
-    expect(values(".hr-diagram__label--x")).toEqual(["1E5", "30,000", "1E4", "3000", "1E3"]);
+    // Every temperature can be set plainly; the faintest luminosity cannot (ruling 115.1).
+    expect(values(".hr-diagram__label--x")).toEqual([
+      "100,000",
+      "30,000",
+      "10,000",
+      "3000",
+      "1000",
+    ]);
     expect(values(".hr-diagram__label--y")).toEqual([
       "1E-6",
       "1E-4",
@@ -137,16 +148,42 @@ describe("HrDiagram", () => {
     for (const letter of ["O", "B", "A", "F", "G", "K", "M", "L", "T"]) {
       expect(screen.getByText(letter, { selector: ".hr-diagram__label--class" })).toBeVisible();
     }
+    expect(values(".hr-diagram__label--class-axis")).toEqual(["CLASS"]);
   });
 
-  it("counts what it plots and what it cannot", () => {
+  it("counts what it plots, then what it does not under NOT PLOTTED, by kind or state", () => {
     renderDiagram();
 
     expect(count("PLOTTED")).toBe("2");
     expect(count("OFF SCALE")).toBe("0");
-    expect(count("NO PHOTOSPHERE")).toBe("1");
+    const notPlotted = screen.getByRole("heading", { name: "NOT PLOTTED" }).nextElementSibling;
+    expect(notPlotted?.tagName).toBe("DL");
+    expect([...(notPlotted?.querySelectorAll("dt") ?? [])].map((dt) => dt.textContent)).toEqual([
+      "NEUTRON STAR",
+      "BLACK HOLE",
+      "NO REMNANT",
+      "NOT YET FORMED",
+    ]);
+    expect(count("NEUTRON STAR")).toBe("1");
+    expect(count("BLACK HOLE")).toBe("1");
     expect(count("NO REMNANT")).toBe("1");
     expect(count("NOT YET FORMED")).toBe("0");
+    // Words ruling 115.3 retired: a neutron star has a photosphere, and "no data" reads as none.
+    expect(screen.queryByText("NO PHOTOSPHERE")).not.toBeInTheDocument();
+    expect(screen.queryByText("NO DATA")).not.toBeInTheDocument();
+    expect(screen.queryByText("DATA INVALID")).not.toBeInTheDocument();
+  });
+
+  it("counts a plotted kind whose values fail its checks as DATA INVALID", () => {
+    const broken: StellarBriefDto = { ...aStellarBrief("c", "dwarf"), teff_k: null };
+    const systems = toChartResult(
+      aSystemsInRange({ systems: [{ relLy: [1, 0, 0], layer: "c", stellar: broken }] }),
+    ).systems;
+
+    renderDiagram({ systems });
+
+    expect(count("DATA INVALID")).toBe("1");
+    expect(count("PLOTTED")).toBe("0");
   });
 
   it("counts a point beyond an axis as off scale", () => {
@@ -185,6 +222,9 @@ describe("HrDiagram", () => {
 
     const legend = screen.getByRole("group", { name: "Hertzsprung-Russell diagram legend" });
     expect(within(legend).getByText("SYMBOLS NOT TO SCALE")).toBeInTheDocument();
+    // The arrowhead's entry is the state's own name, as the caption's count is (ruling 115.2).
+    expect(within(legend).getByText("OFF SCALE")).toBeInTheDocument();
+    expect(within(legend).queryByText(/PEGGED/u)).not.toBeInTheDocument();
     for (const name of ["Circle", "Ringed circle", "Diamond"]) {
       expect(within(legend).getByRole("img", { name })).toBeInTheDocument();
     }
@@ -204,7 +244,8 @@ describe("HrDiagram", () => {
     for (const label of [
       "PLOTTED",
       "OFF SCALE",
-      "NO PHOTOSPHERE",
+      "NEUTRON STAR",
+      "BLACK HOLE",
       "NO REMNANT",
       "NOT YET FORMED",
     ]) {

@@ -23,12 +23,12 @@ const ROW_REM = 2;
 const OVERSCAN_ROWS = 8;
 
 /**
- * Whether a system lies within the drive range, in words as the column shows them: `IN RANGE` as
- * the readout has it, or `OUT`, since the list's 5 rem column cannot hold the readout's
- * `OUT OF RANGE` (the orchestrator's ruling 15).
+ * Whether a system lies within the drive range, in words as the column shows them: `IN` or `OUT`,
+ * under the `DRIVE RANGE` header that already names the setting, so that the column's 4ch leave
+ * room for `STARS` (the orchestrator's rulings 15 and 115.5).
  */
 function rangeWords(inRange: boolean): string {
-  return inRange ? "IN RANGE" : "OUT";
+  return inRange ? "IN" : "OUT";
 }
 
 /**
@@ -38,6 +38,18 @@ function rangeWords(inRange: boolean): string {
  */
 function rangeName(inRange: boolean): string {
   return inRange ? "IN RANGE" : "OUT OF RANGE";
+}
+
+/**
+ * How many stars a row's system has, for its accessible name: `1 star`, `3 stars`; `null` for a
+ * system not yet formed, which has no brief to count.
+ */
+function starCountName(system: ChartSystem): string | null {
+  if (system.star === null) {
+    return null;
+  }
+  const count = system.star.starCount;
+  return `${String(count)} ${count === 1 ? "star" : "stars"}`;
 }
 
 /**
@@ -76,7 +88,9 @@ interface SystemListProps {
  * holds the primary's spectral class as an astronomer writes it (`G2V`, `DA4.2`, `NS`), and the
  * row's accessible name its kind in words as well, so that a symbol's shape is never the only signal
  * of what a star is (plan 06, design note 17); a system not yet formed at the chart's time has no
- * class, an em dash, and is named `NOT YET FORMED`.
+ * class, an em dash, and is named `NOT YET FORMED`. The `STARS` column counts the system's stars,
+ * the primary included, one digit right-aligned, and the em dash where the row has no brief; the
+ * row's name says `1 star` or `3 stars` (plan 11, P11.T14; the orchestrator's ruling 115.5).
  */
 export function SystemList({
   systems,
@@ -194,6 +208,7 @@ export function SystemList({
       <div className="system-list__head">
         <span>DESIG</span>
         <span>CLASS</span>
+        <span>STARS</span>
         <span>DIST ly</span>
         <span>
           INIT MASS <SolarMassUnit />
@@ -248,7 +263,16 @@ export function SystemList({
                 aria-selected={system.id === selectedId}
                 aria-posinset={index + 1}
                 aria-setsize={total}
-                aria-label={`${system.designation}, ${starName(system)}, ${distance} ly, ${mass} solar masses, ${rangeName(inRange)}`}
+                aria-label={[
+                  system.designation,
+                  starName(system),
+                  starCountName(system),
+                  `${distance} ly`,
+                  `${mass} solar masses`,
+                  rangeName(inRange),
+                ]
+                  .filter((part) => part !== null)
+                  .join(", ")}
                 className={
                   inRange ? "system-list__row system-list__row--in-range" : "system-list__row"
                 }
@@ -260,6 +284,11 @@ export function SystemList({
                   <span className="system-list__class readout__missing">—</span>
                 ) : (
                   <span className="system-list__class">{system.star.spectralClass}</span>
+                )}
+                {system.star === null ? (
+                  <span className="system-list__number readout__missing">—</span>
+                ) : (
+                  <span className="system-list__number">{system.star.starCount}</span>
                 )}
                 <span className="system-list__number">{distance}</span>
                 <span className="system-list__number">{mass}</span>

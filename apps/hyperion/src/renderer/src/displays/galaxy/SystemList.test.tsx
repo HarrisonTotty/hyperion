@@ -145,7 +145,9 @@ describe("SystemList", () => {
     renderList(manySystems(60), { driveRangeLy: 10 });
 
     const options = screen.getAllByRole("option");
-    expect(options[0]).toHaveTextContent("IN RANGE");
+    // `IN` / `OUT` under the `DRIVE RANGE` header, which names the setting (ruling 115.5).
+    expect(within(options[0] ?? list()).getByText("IN", { exact: true })).toBeInTheDocument();
+    expect(options[0]).not.toHaveTextContent("IN RANGE");
     expect(options[0]).toHaveClass("system-list__row--in-range");
     // The twenty-first system is 21 ly out, beyond the drive range.
     expect(options[20]).toHaveTextContent("OUT");
@@ -191,7 +193,7 @@ describe("SystemList", () => {
 
     expect(
       screen.getByRole("option", {
-        name: "H7K 4C0RFZ A-1, DWARF M3V, 1.00 ly, 0.29 solar masses, IN RANGE",
+        name: "H7K 4C0RFZ A-1, DWARF M3V, 1 star, 1.00 ly, 0.29 solar masses, IN RANGE",
       }),
     ).toBeInTheDocument();
   });
@@ -243,8 +245,39 @@ describe("SystemList", () => {
 
     renderList(systems);
 
-    const row = screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, NOT YET FORMED, /u });
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    // No brief, so no class and no count: each the em dash, and the name counts no stars.
+    const row = screen.getByRole("option", {
+      name: /^H7K 4C0RFZ A-1, NOT YET FORMED, 1\.00 ly, /u,
+    });
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("counts each system's stars after its class, the primary included", () => {
+    stubViewport();
+    const systems = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [
+          { relLy: [1, 0, 0], layer: "a", stellar: aStellarBrief("a", "dwarf") },
+          {
+            relLy: [2, 0, 0],
+            layer: "d",
+            stellar: { ...aStellarBrief("d", "dwarf"), star_count: 3 },
+          },
+        ],
+      }),
+    ).systems;
+
+    renderList(systems);
+
+    expect(screen.getByText("STARS")).toBeInTheDocument();
+    const single = screen.getByRole("option", { name: /, DWARF M3V, 1 star, /u });
+    const triple = screen.getByRole("option", { name: /, DWARF B8V, 3 stars, /u });
+    // One digit, right-aligned, in the column after CLASS.
+    const count = within(triple).getByText("3", { exact: true });
+    expect(count).toHaveClass("system-list__number");
+    expect(count.previousElementSibling).toHaveTextContent("B8V");
+    expect(within(single).getByText("1", { exact: true })).toHaveClass("system-list__number");
   });
 
   it("shows a system where the chart time's answer puts it", () => {

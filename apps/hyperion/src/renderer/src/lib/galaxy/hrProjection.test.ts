@@ -1,6 +1,7 @@
 import type { MassLayer, ObjectKindDto, StellarBriefDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
+import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
 import {
   HR_SPECTRAL_BANDS,
@@ -106,7 +107,7 @@ describe("projectHr", () => {
     expect(projection.counts.plotted).toBe(3);
   });
 
-  it("counts neutron stars and black holes without plotting them", () => {
+  it("counts neutron stars and black holes apart, without plotting them", () => {
     const projection = projectHr(
       systemsOf([
         { stellar: aStellarBrief("e", "neutron_star") },
@@ -118,7 +119,7 @@ describe("projectHr", () => {
     );
 
     expect(projection.points.map((point) => point.shape)).toEqual(["diamond"]);
-    expect(projection.counts.noPhotosphere).toBe(2);
+    expect([projection.counts.neutronStar, projection.counts.blackHole]).toEqual([1, 1]);
   });
 
   it("counts a star that left no remnant and a system not yet formed apart", () => {
@@ -132,14 +133,15 @@ describe("projectHr", () => {
     expect(projection.counts).toEqual({
       plotted: 0,
       offScale: 0,
-      noPhotosphere: 0,
+      neutronStar: 0,
+      blackHole: 0,
       noRemnant: 1,
       notYetFormed: 1,
-      noData: 0,
+      dataInvalid: 0,
     });
   });
 
-  it("counts a star whose temperature or luminosity is missing rather than hide it", () => {
+  it("counts a star whose temperature or luminosity is missing as invalid rather than hide it", () => {
     const projection = projectHr(
       systemsOf([{ stellar: brief("dwarf", null, 0) }, { stellar: brief("giant", 0, 1) }]),
       AREA,
@@ -147,7 +149,7 @@ describe("projectHr", () => {
     );
 
     expect(projection.points).toHaveLength(0);
-    expect(projection.counts.noData).toBe(2);
+    expect(projection.counts.dataInvalid).toBe(2);
   });
 
   it("plots nothing and counts nothing for no systems", () => {
@@ -184,6 +186,29 @@ describe("hrDrawList", () => {
       (op) => op.kind === "ticks" && op.segments.every((segment) => segment.from.xPx < 50),
     );
     expect(marks).toHaveLength(1);
+  });
+
+  it("draws the off-scale arrowhead as wide as the smallest symbol", () => {
+    const list = hrDrawList(projectHr(SYSTEMS, AREA, 50), AREA, null, REM_PX);
+
+    const mark = list.ops.find(
+      (op) => op.kind === "ticks" && op.segments.every((segment) => segment.from.xPx < 50),
+    );
+    expect(mark?.kind).toBe("ticks");
+    const segments = mark?.kind === "ticks" ? mark.segments : [];
+    // Two arms of 0.375 rem at 45° either side of the leftward direction (ruling 115.2): the
+    // chevron spans 0.53 rem across, against size class 0's 0.5 rem.
+    const across = segments.map((segment) => segment.to.yPx - segment.from.yPx);
+    const acrossPx = Math.max(...across) - Math.min(...across);
+    expect(acrossPx / REM_PX).toBeCloseTo(0.75 * Math.SQRT1_2, 6);
+    expect(acrossPx / REM_PX).toBeGreaterThanOrEqual(SIZE_CLASS_REM[0]);
+    for (const segment of segments) {
+      const lengthPx = Math.hypot(
+        segment.to.xPx - segment.from.xPx,
+        segment.to.yPx - segment.from.yPx,
+      );
+      expect(lengthPx / REM_PX).toBeCloseTo(0.375, 6);
+    }
   });
 
   it("brackets the selected point with the chart's reticle, drawn last", () => {

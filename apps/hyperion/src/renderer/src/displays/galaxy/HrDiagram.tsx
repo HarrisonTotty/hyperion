@@ -25,23 +25,30 @@ import { shownCountText, type StarFilter } from "./chartModel";
 import { StarShapeLegend } from "./StarShapeLegend";
 
 /**
- * Room kept round the plot inside the canvas, in `rem`: on the left for the luminosity values, on
- * the right for half the last temperature value, above for the class letters, below for the
- * temperature values.
+ * Room kept round the plot inside the canvas, in `rem`: on the left for the luminosity values and
+ * the class letters' `CLASS` label, on the right for half the last temperature value, above for the
+ * class letters, below for the temperature values.
  */
-const MARGIN_LEFT_REM = 3.5;
+const MARGIN_LEFT_REM = 4;
 const MARGIN_RIGHT_REM = 1.5;
 const MARGIN_TOP_REM = 1.5;
 const MARGIN_BOTTOM_REM = 1.5;
 
 /**
- * A tick's value as its label writes it: an exact power of ten in E notation, as the guide writes
- * a legend tick (`1E-4`, `1E5`), and any other value as a plain number (`30,000`, `3000`), so that
- * both logarithmic axes read alike (the owner's draft, r9 D2.4).
+ * A temperature tick's value as its label writes it: a plain number, `100,000` to `1000`, since
+ * every one of them can be set plainly and the ticks of one axis share one form (ruling 115.1).
  */
-function tickText(value: number): string {
-  const decade = Math.log10(value);
-  return Number.isInteger(decade) ? formatSci(value, "tick") : formatNumber(value, 0);
+function teffTickText(teffK: number): string {
+  return formatNumber(teffK, 0);
+}
+
+/**
+ * A luminosity tick's value as its label writes it: E notation for every tick, exact powers of ten
+ * as `1E-6` to `1E6`, `1E0` included, since the faintest cannot be set plainly and one axis's ticks
+ * share one form (ruling 115.1).
+ */
+function luminosityTickText(logL: number): string {
+  return formatSci(10 ** logL, "tick");
 }
 
 /** The rectangle the axes enclose in a canvas of this size, or `null` when there is no room. */
@@ -58,6 +65,43 @@ function plotArea(widthPx: number, heightPx: number, remPx: number): PlotAreaPx 
 /** A `transform` that moves a label from the stage's top left to a point given in pixels. */
 function at(xPx: number, yPx: number, remPx: number): string {
   return `translate(${xPx / remPx}rem, ${yPx / remPx}rem)`;
+}
+
+/** One count of the caption: its label and its value as written. */
+interface CountRow {
+  readonly label: string;
+  readonly text: string;
+}
+
+/** Props of {@link Counts}. */
+interface CountsProps {
+  readonly rows: ReadonlyArray<CountRow>;
+  readonly stale: boolean;
+  /** Whether the counts stand under a heading, which they are set in from. */
+  readonly underHeading?: boolean;
+}
+
+/** A line of the caption's counts, each a label and its value. */
+function Counts({ rows, stale, underHeading = false }: CountsProps) {
+  return (
+    <dl
+      // Counts under a heading are set in from it, as its own (ruling 115.3).
+      className={
+        underHeading ? "hr-diagram__counts hr-diagram__counts--under" : "hr-diagram__counts"
+      }
+    >
+      {rows.map(({ label, text }) => (
+        <div className="hr-diagram__count" key={label}>
+          <dt>{label}</dt>
+          <dd>
+            {text}
+            {/* Every count is read from the answer, so every one is stale with it. */}
+            {stale ? <StaleMark /> : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 /** Props of {@link HrDiagram}. */
@@ -86,13 +130,16 @@ export interface HrDiagramProps {
  * `hrDrawList`, with log T_eff on a reversed x axis from 200,000 to 1,000 K and log L ÷ L☉ on the y
  * axis from −6 to 6.5, both on log scales, which each axis's label says (`LOG SCALE`). As the guide requires of a
  * graph, the title stands above it, each axis has its label and unit, and the major ticks their
- * values; the spectral letters run along the top axis. All of that is DOM text, since the canvas
+ * values; the spectral letters run along the top axis under their scale's label, `CLASS`. All of that is DOM text, since the canvas
  * carries none (plan 05, D15). The grid is thin `--line`, the symbols the chart's, at the chart's
  * size classes (`SYMBOLS NOT TO SCALE`), in `--text`, and in `--accent` within the drive range, as
  * on the chart; the selection carries the chart's bracket reticle. A point beyond an axis is pegged
- * at its edge with the off-scale mark, and counted; neutron stars and black holes, which have no
- * photosphere to plot, are counted and not plotted, as are stars that left no remnant and systems
- * not yet formed. Under a `STARS` filter the caption says what the filter hides.
+ * at its edge with the off-scale mark, and counted; under a `NOT PLOTTED` heading the caption
+ * counts the neutron stars, too hot for the temperature axis, the black holes, which have no
+ * light, the stars that left no remnant, the systems not yet formed, and any point whose values
+ * failed the checks (ruling 115.3). Under a `STARS` filter the caption says what the filter
+ * hides. The title is the page's name, `HR DIAGRAM`, and the canvas's accessible name spells it
+ * out (ruling 115.4).
  *
  * A click selects the point within 1 rem, which selects the system everywhere. The canvas is an
  * image with an accessible name and is not focusable: keyboard access is through the shared list in
@@ -168,23 +215,30 @@ export function HrDiagram({
 
   const { counts } = projection;
   const accessibleName = "Hertzsprung-Russell diagram";
-  // What the filter hides, then what is plotted and what cannot be; a count of values the server
-  // should not send appears only when there are any.
-  const countRows: ReadonlyArray<{ readonly label: string; readonly text: string }> = [
+  // What the filter hides, then what is plotted, the pegged among them (ruling 115.3).
+  const plottedRows: ReadonlyArray<CountRow> = [
     ...(starFilter === "all"
       ? []
       : [{ label: "SYSTEMS", text: shownCountText(systems.length, total, starFilter) }]),
     { label: "PLOTTED", text: formatNumber(counts.plotted, 0) },
     { label: "OFF SCALE", text: formatNumber(counts.offScale, 0) },
-    { label: "NO PHOTOSPHERE", text: formatNumber(counts.noPhotosphere, 0) },
+  ];
+  // What is not plotted, by kind or state; a count of values that failed the diagram's checks
+  // appears only when there are any (ruling 115.3).
+  const notPlottedRows: ReadonlyArray<CountRow> = [
+    { label: "NEUTRON STAR", text: formatNumber(counts.neutronStar, 0) },
+    { label: "BLACK HOLE", text: formatNumber(counts.blackHole, 0) },
     { label: "NO REMNANT", text: formatNumber(counts.noRemnant, 0) },
     { label: "NOT YET FORMED", text: formatNumber(counts.notYetFormed, 0) },
-    ...(counts.noData === 0 ? [] : [{ label: "NO DATA", text: formatNumber(counts.noData, 0) }]),
+    ...(counts.dataInvalid === 0
+      ? []
+      : [{ label: "DATA INVALID", text: formatNumber(counts.dataInvalid, 0) }]),
   ];
 
   return (
     <figure className={stale ? "hr-diagram hr-diagram--stale" : "hr-diagram"}>
-      <figcaption className="hr-diagram__title">HERTZSPRUNG-RUSSELL DIAGRAM</figcaption>
+      {/* The page's one name, as its tab has it; the canvas's accessible name spells it out. */}
+      <figcaption className="hr-diagram__title">HR DIAGRAM</figcaption>
       <p className="hr-diagram__axis-label">
         LUMINOSITY <SolarUnit quantity="luminosity" />, LOG SCALE
       </p>
@@ -206,6 +260,13 @@ export function HrDiagram({
         />
         {area === null ? null : (
           <div className="hr-diagram__labels" aria-hidden="true">
+            {/* The second scale along the top axis is labelled as an axis is (ruling 115.1). */}
+            <span
+              className="hr-diagram__label hr-diagram__label--class-axis"
+              style={{ transform: at(area.leftPx, area.topPx, remPx) }}
+            >
+              CLASS
+            </span>
             {hrSpectralLetters(area).map(({ letter, xPx }) => (
               <span
                 key={letter}
@@ -221,7 +282,7 @@ export function HrDiagram({
                 className="hr-diagram__label hr-diagram__label--x"
                 style={{ transform: at(hrXPx(teffK, area), area.topPx + area.heightPx, remPx) }}
               >
-                {tickText(teffK)}
+                {teffTickText(teffK)}
               </span>
             ))}
             {HR_LOG_L_TICKS.map((logL) => (
@@ -230,7 +291,7 @@ export function HrDiagram({
                 className="hr-diagram__label hr-diagram__label--y"
                 style={{ transform: at(area.leftPx, hrYPx(logL, area), remPx) }}
               >
-                {tickText(10 ** logL)}
+                {luminosityTickText(logL)}
               </span>
             ))}
           </div>
@@ -239,18 +300,9 @@ export function HrDiagram({
       <p className="hr-diagram__axis-label hr-diagram__axis-label--x">
         EFFECTIVE TEMPERATURE K, LOG SCALE
       </p>
-      <dl className="hr-diagram__counts">
-        {countRows.map(({ label, text }) => (
-          <div className="hr-diagram__count" key={label}>
-            <dt>{label}</dt>
-            <dd>
-              {text}
-              {/* Every count is read from the answer, so every one is stale with it. */}
-              {stale ? <StaleMark /> : null}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <Counts rows={plottedRows} stale={stale} />
+      <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>
+      <Counts rows={notPlottedRows} stale={stale} underHeading />
       {/* A group, as the chart's legend is: no HTML element names a legend of a picture. */}
       {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role */}
       <div className="symbol-legend" role="group" aria-label="Hertzsprung-Russell diagram legend">
@@ -273,9 +325,10 @@ export function HrDiagram({
             aria-hidden="true"
             focusable="false"
           >
-            <path d="M3 2L7 5L3 8" />
+            {/* The drawn mark's arms, 0.375 rem at 45° in this 1 rem box (ruling 115.2). */}
+            <path d="M3.85 2.35L6.5 5L3.85 7.65" />
           </svg>
-          PEGGED OFF SCALE
+          OFF SCALE
         </p>
       </div>
     </figure>

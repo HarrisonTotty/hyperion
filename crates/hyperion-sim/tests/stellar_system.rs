@@ -11,7 +11,8 @@ use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::stellar::Phase;
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::multiplicity::{
-    MultiplicityContext, MultiplicityModel, RedrawAttempt, StarSlot, draw_hierarchy,
+    MAX_COMPANIONS, MultiplicityContext, MultiplicityModel, RedrawAttempt, StarSlot,
+    draw_hierarchy, draw_star_count,
 };
 use hyperion_sim::stellar::rotation::Magnetism;
 use hyperion_sim::stellar::system::{
@@ -333,6 +334,37 @@ fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
         }
     }
     assert!(companions > 0, "sixty systems and not one companion");
+}
+
+/// The star count the wire documents as 1 to 4 (`StellarBriefDto::star_count`) is the sampler's
+/// range: 1 to 1 + [`MAX_COMPANIONS`], three companions at most (rulings 74 and 81). Checked where
+/// the capped count's mean is highest, over layer E's O and B primaries, which also reach the cap,
+/// so that the documented upper end is a count the sampler draws, not only a bound.
+#[test]
+fn star_counts_run_from_one_to_four_even_in_layer_e() {
+    const RECORDS: usize = 400;
+    let galaxy = milky_way();
+    let most = u8::try_from(1 + MAX_COMPANIONS).expect("a small cap");
+    assert_eq!(most, 4, "the wire's doc says 1 to 4");
+    let mut by_count = [0_usize; 5];
+    for record in records_of(&galaxy, Layer::E, RECORDS) {
+        let count = draw_star_count(
+            &galaxy,
+            &record,
+            MultiplicityContext::Free,
+            RedrawAttempt::FIRST,
+        );
+        assert!(
+            (1..=most).contains(&count),
+            "{:?}: {count} stars",
+            record.id()
+        );
+        by_count[usize::from(count)] += 1;
+    }
+    assert!(
+        by_count[4] > 0,
+        "no quadruple in {RECORDS} layer-E systems: {by_count:?}"
+    );
 }
 
 /// Up to three records from each of `cells` random generation cells within 4,000 ly of the solar

@@ -227,9 +227,10 @@ describe("LocalChartPanel", () => {
     await renderChart();
 
     expect(options().map((option) => option.textContent)).toEqual([
-      "H7K 4C0RFZ C-1G2V0.001.63IN RANGE",
-      "H7K 4C0RFZ A-2M3V10.000.29IN RANGE",
-      "H7K 4C0RFZ E-3B0V60.0079.0OUT",
+      // Designation, class, star count, distance, mass and range (ruling 115.5).
+      "H7K 4C0RFZ C-1G2V10.001.63IN",
+      "H7K 4C0RFZ A-2M3V110.000.29IN",
+      "H7K 4C0RFZ E-3B0V260.0079.0OUT",
     ]);
   });
 
@@ -487,8 +488,8 @@ describe("LocalChartPanel", () => {
 
     expect(within(chartPage()).getByRole("radio", { name: "LIVING" })).toBeChecked();
     expect(options().map((option) => option.getAttribute("aria-label"))).toEqual([
-      "H7K 4C0RFZ C-1, DWARF G2V, 1.00 ly, 1.63 solar masses, IN RANGE",
-      "H7K 4C0RFZ A-3, DWARF M3V, 3.00 ly, 0.29 solar masses, IN RANGE",
+      "H7K 4C0RFZ C-1, DWARF G2V, 1 star, 1.00 ly, 1.63 solar masses, IN RANGE",
+      "H7K 4C0RFZ A-3, DWARF M3V, 1 star, 3.00 ly, 0.29 solar masses, IN RANGE",
     ]);
     expect(
       within(chartPage()).getByText("SYSTEMS", { selector: "dt" }).nextElementSibling,

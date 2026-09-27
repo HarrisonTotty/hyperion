@@ -38,6 +38,7 @@ import type {
   SystemBody,
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
+import { BodyIdRow } from "./BodyIdRow";
 import { ReadoutRow, shown as value } from "./ReadoutRow";
 
 /** Kilometres in a metre. */
@@ -302,7 +303,7 @@ export function BodyRecordReadings({
   return (
     <>
       <ReadoutRow label="DESIG" shown={value(body.designation)} wide />
-      <ReadoutRow label="ID" shown={value(formatBodyIdHex(body.id))} wide />
+      <BodyIdRow text={formatBodyIdHex(body.id)} />
       {sectionRows("NAME", body.label, (label) => (
         <ReadoutRow label="NAME" shown={value(label)} wide />
       ))}

@@ -51,7 +51,8 @@ export function BodyReadout({ selected }: BodyReadoutProps) {
   if (selected === null) {
     readings = <ReadoutRow label="DESIG" shown={MISSING} wide />;
   } else if (selected.kind === "host") {
-    readings = <HostReadings host={selected.host} zones={selected.zones} />;
+    // Keyed by the host, as a body's readings are, so that no zone row keeps another host's unit.
+    readings = <HostReadings key={selected.host.id} host={selected.host} zones={selected.zones} />;
   } else {
     readings = (
       <BodyRecordReadings

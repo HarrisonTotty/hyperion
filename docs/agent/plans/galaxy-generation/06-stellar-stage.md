@@ -3667,6 +3667,18 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     is hidden, not cleared. `OrbitLegend.tsx` takes the shared legend parts with no change in
     behaviour.
   - The by-eye checks of "Verification" are not yet made.
+  - _Settled (round 9b, `ui13`, ruling 115):_ the "Pending the owner, with P06.T35.a" list above is
+    resolved, and P06.T35.a closes with the guide's `docs(ux)` edits. The reversed-axis scatter,
+    `L☉`, the five shapes, "listed and not drawn" and the arrowhead are confirmed, and the guide's
+    graph bullet and "Data states" Off scale row now say so. Words changed: the title is
+    `HR DIAGRAM` (the canvas's accessible name keeps "Hertzsprung-Russell diagram"),
+    `PEGGED OFF SCALE` became `OFF SCALE`, `NO PHOTOSPHERE` became separate `NEUTRON STAR` and
+    `BLACK HOLE` counts under a `NOT PLOTTED` heading, and `NO DATA` became `DATA INVALID`. The
+    temperature ticks read plainly (`100,000` to `1000`) and a `CLASS` label names the letter row,
+    so the left margin grew from 3.5 to 4 rem. The arrowhead's arms are 0.375 rem long at 45°
+    (the built "0.25 rem" was each arm's run, 0.35 rem long). `HR`, `CLASS`, `NS`, `BH`, the caption
+    words, `LIST ONLY`, `RINGED CIRCLE SIZE AT LEAST` and `NO CHART` are on the nomenclature list;
+    **K** stands. The by-eye checks are still to be made.
 - **Deviations in T21, as built (round 9, `rem06`).** `stellar::remnant::neutron_star` holds
   `NeutronStar` (`new`, `from_draws`, `state_at`, `field_at`, `pulse_clock`), `PulsarState`,
   `PulsarBeam::sweeps` and `PulseClock::phase_at`; `StarModel` gains `neutron_star`, `pulsar_at`,

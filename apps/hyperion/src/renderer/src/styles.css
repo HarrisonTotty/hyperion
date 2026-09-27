@@ -1437,6 +1437,16 @@ body {
   color: var(--text);
 }
 
+/*
+ * The class letters' scale label: right-aligned against the left axis, level with the letters, and
+ * in their label's colour, since it names a scale as an axis label does (ruling 115.1).
+ */
+.hr-diagram__label--class-axis {
+  translate: calc(-100% - 0.25rem) -110%;
+  font-family: var(--font-sans);
+  letter-spacing: 0.15em;
+}
+
 /* Centred under the bottom axis. */
 .hr-diagram__label--x {
   translate: -50% 0.125rem;
@@ -1463,6 +1473,20 @@ body {
 .hr-diagram__count dt {
   color: var(--text-muted);
   letter-spacing: 0.15em;
+}
+
+.hr-diagram__counts--under {
+  padding-left: 1rem;
+}
+
+/* `NOT PLOTTED`, a heading over the counts it names, set as the readout's `STAR A` is. */
+.hr-diagram__counts-heading {
+  flex: none;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
 }
 
 .hr-diagram__count dd {
@@ -1756,19 +1780,55 @@ body {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
+  container-type: inline-size;
 }
 
 /*
- * Columns shared by the head and every row: designation, spectral class, distance, mass, and range
- * in words. The class is sized for the longest the server writes, seven characters (`B9.5Iab`,
- * `esdM9.5`), in the monospaced figures, with room for their being wider than the row's own `ch`.
+ * Columns shared by the head and every row: designation, spectral class, star count, distance,
+ * mass, and range in words. The class is sized for the longest the server writes, seven characters
+ * (`B9.5Iab`, `esdM9.5`), in the monospaced figures, with room for their being wider than the row's
+ * own `ch`. The count takes its header's width with its letter spacing. The range, `IN` or `OUT`
+ * under a header that names the setting, wraps that header onto two lines as `INIT MASS` does and
+ * is as wide as its longer word, `RANGE`, with its letter spacing: ruling 115.5's 4ch holds `OUT`
+ * but not the header's words, which ran past the panel's edge at both sizes. A fixed width, since
+ * the head and each row are grids of their own and must share their columns.
  */
 .system-list__head,
 .system-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8ch 6ch 6ch 5rem;
+  grid-template-columns: minmax(0, 1fr) 8ch 6ch 6ch 6ch 6.5ch;
   align-items: center;
   gap: 0 0.375rem;
+}
+
+/*
+ * In a narrow list, as the SYSTEMS column is at 1280 x 720, six columns leave the designation too
+ * little room to read, so it takes a line of its own across the row and the other five share the
+ * second line under it, each row still 2 rem tall (the UX reviewer's should-fix, ruled by the
+ * orchestrator: the designation wraps onto its own line rather than being cut to `9G…`).
+ */
+@container (max-width: 30rem) {
+  .system-list__head,
+  .system-list__row {
+    grid-template-columns: minmax(0, 1fr) 6ch 6ch 6ch 6.5ch;
+  }
+
+  .system-list__row {
+    grid-template-rows: 1rem 1rem;
+    align-content: center;
+    line-height: 1rem;
+  }
+
+  .system-list__head > :first-child,
+  .system-list__designation {
+    grid-column: 1 / -1;
+  }
+
+  /* The second line set in under the designation, so that each two-line row reads as one. */
+  .system-list__head > :nth-child(2),
+  .system-list__row > :nth-child(2) {
+    padding-left: 1rem;
+  }
 }
 
 .system-list__head {
