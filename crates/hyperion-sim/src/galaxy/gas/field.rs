@@ -316,6 +316,51 @@ impl GasField {
         HydrogenPerCm3::new(neutral * lanes + molecular)
     }
 
+    /// The gas plan 09's clouds follow at `p`: `neutral_share` of the mean neutral layer, lanes on,
+    /// plus `molecular_multiple` times the molecular disc, cm⁻³ (plan 09, Design note 19). No noise
+    /// and no corona.
+    #[must_use]
+    pub fn mean_cloud_gas(
+        &self,
+        p: &GalacticPosition,
+        neutral_share: f64,
+        molecular_multiple: f64,
+    ) -> HydrogenPerCm3 {
+        let layers = self.layers(&Site::of(p));
+        HydrogenPerCm3::new(neutral_share * layers.neutral + molecular_multiple * layers.molecular)
+    }
+
+    /// An upper bound on [`mean_cloud_gas`](Self::mean_cloud_gas) at every point of `cell`, by
+    /// [`neutral_bound`](Self::neutral_bound)'s rule term by term, each term weighted as the gas
+    /// is. Both weights must be finite and not negative.
+    #[must_use]
+    pub fn cloud_gas_bound(
+        &self,
+        cell: &CellBox,
+        neutral_share: f64,
+        molecular_multiple: f64,
+    ) -> HydrogenPerCm3 {
+        debug_assert!(neutral_share >= 0.0 && molecular_multiple >= 0.0);
+        let corner = cell.nearest_corner();
+        let z = corner.z.abs();
+        let radii = cell.r_cyl_range();
+        let (r_lo, r_hi) = (
+            radii.lo * (1.0 - ROUNDING_SLACK),
+            radii.hi * (1.0 + ROUNDING_SLACK),
+        );
+        let peak = self.smooth.neutral_peak_radius();
+        let r_neutral = peak.clamp(r_lo, r_hi);
+        // Each weight multiplies a density that is itself not below the computed one, and the
+        // margin covers the weight's own rounding.
+        let margin = 1.0 + 2.0 * BOUND_MARGIN;
+        let neutral = self.smooth.density(GasLayer::Neutral, r_neutral, z) * margin;
+        let lanes = self.lanes.sup(cell);
+        let molecular = self.smooth.density(GasLayer::Molecular, r_lo, z) * margin;
+        HydrogenPerCm3::new(
+            (neutral_share * (neutral * lanes) + molecular_multiple * molecular) * margin,
+        )
+    }
+
     /// The bytes the field owns on the heap: none, since every part of it is inline.
     #[must_use]
     #[expect(

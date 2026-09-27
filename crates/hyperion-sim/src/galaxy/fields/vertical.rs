@@ -352,6 +352,28 @@ impl VerticalProfile {
         })
     }
 
+    /// The greatest `exp(rate × z − E(z))` for `z` in `[lo, hi]`, ly with `0 ≤ lo ≤ hi`: how far
+    /// the profile rises above an exponential proposal `exp(−rate × z)` over a range of heights
+    /// (plan 09, Design note 21, which proposes disc features in height).
+    ///
+    /// A cored profile is flat at the plane, so the ratio first rises with height and its greatest
+    /// value is not at the lowest height. It is found exactly, as the table computes `E`: the
+    /// exponent is linear between knots and beyond the last, so `rate × z − E(z)` is too, and its
+    /// maximum over the range lies at an end or a knot inside it. Rounding of the terms is the
+    /// caller's to cover with a margin.
+    #[must_use]
+    pub fn max_ratio_to_exponential(&self, lo: f64, hi: f64, rate: f64) -> f64 {
+        let log_ratio = |z: f64| rate * z - self.exponent(z);
+        let mut best = log_ratio(lo).max(log_ratio(hi));
+        for k in 0..=SEGMENTS {
+            let z = knot(k);
+            if z > lo && z < hi {
+                best = best.max(log_ratio(z));
+            }
+        }
+        math::exp(best)
+    }
+
     /// The effective height `Σ ÷ 2ρ₀ = ∫₀^∞ n ÷ n(0) dz`: for the discs, the drawn height.
     #[must_use]
     pub fn effective_height(&self) -> LightYears {

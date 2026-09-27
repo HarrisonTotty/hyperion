@@ -79,9 +79,10 @@ dispatch. This plan adds what gives them meaning:
   `STELLAR_MERGER = 2`, `NEUTRON_STAR_MERGER = 3`, `XRAY_BINARY = 5`, `ACCRETING_WHITE_DWARF = 6`
   (its fast hosts) and `ACCRETING_WHITE_DWARF_SLOW = 8`; `TIDAL_DISRUPTION_VICTIM = 7`, which exists
   only on the centre's feature-level list and never under the `111` prefix. This registry
-  (`galaxy/catalogue_classes/mod.rs`) is the one place a value is allocated: values 0–8 are taken, 9
-  upward are free, and a test asserts that no two names share a value. `ClassId::cell_log2_ly()`
-  gives the class's catalogue cell size, which `resolve` checks with plan 01's
+  (`galaxy/catalogue_classes/registry.rs`, re-exported by its `mod.rs`) is the one place a value is
+  allocated: values 0–8 are taken, 9 upward are free, and a test asserts that no two names share a
+  value. `ClassId::cell_log2_ly() -> Option<u32>` gives the class's catalogue cell size (`None` for
+  `TIDAL_DISRUPTION_VICTIM`, which is never placed), which `resolve` checks with plan 01's
   `CatalogueSystemId::is_aligned_to`.
 - `catalogue_classes::CatalogueCellKey` (class, cell at the class's cell size).
 - Event tags in plan 01's `event_tags!` registry, inside the block 0x0200–0x02FF that plan 06 sets
@@ -95,30 +96,39 @@ dispatch. This plan adds what gives them meaning:
 
 ### Catalogue, shares and kinds
 
-- `features::shares::FeatureShares`, held by `Galaxy` and reached by plan 02's fields through new
-  variants of its `FeatureShare` enum: `phi(population, band) -> f64`,
-  `phi_young(age: Years) -> f64`, `field_factor(population, band) -> f64`,
-  `set_halo_discrete(phi: f64)` for plan 10. `phi` and `field_factor` take plan 02's `MassBand` and
+- `features::shares::FeatureShares`, held by `Galaxy` (`Galaxy::feature_shares()`) and reached by
+  plan 02's fields through new variants of its `FeatureShare` enum, which plan 02 put in
+  `galaxy::ages` (consumed by `AgeDistribution::young_disc`): `phi(population, band) -> f64`,
+  `phi_young(age: Years) -> f64`, `phi_sub_disc(SubDisc) -> f64`,
+  `field_factor(population, band) -> f64`, `set_halo_discrete(phi: f64)` for plan 10. `phi` and `field_factor` take plan 02's `MassBand` and
   are defined for every value it will ever have: for a band below the five stellar ones (plan 13
   adds the brown-dwarf and rogue-planet bands) they return band A's value, through one private
   `stellar_band_or_a` mapping, so plan 13 changes nothing here. Plan 11's P11.T7 adds one more
   setter to this type, `set_class_shares(&ClassShareTable)`, folded into `field_factor` beside the
   Type Ia ancient share; it is plan 11's code in this plan's file `galaxy/features/shares.rs`.
   `features::shares::NurseryRates`.
-- `features::catalogue::{FeatureProcess, FeatureKind, FeatureRecord, FeatureCatalogue}` with
+- `features::{FeatureProcess, FeatureKind}` (in `features::ids`, re-exported) and
+  `features::catalogue::{FeatureRecord, FeatureMarks, FeatureCatalogue, FeatureCellContents,
+FeatureCellCache, NoFeatureCache}` with
   `FeatureCatalogue::cell(&Galaxy, FeatureCell) -> FeatureCellContents`,
   `resolve(&Galaxy, FeatureId) -> Option<FeatureRecord>`,
-  `near(&Galaxy, centre, radius, &dyn FeatureCellCache) -> impl Iterator<Item = FeatureRecord>`,
-  `walk_process(&Galaxy, FeatureProcess) -> impl Iterator<Item = FeatureRecord>` (plan 10 walks the
-  globulars with it), `MAX_FEATURE_REACH: LightYears = 4,096`.
-- `features::kinds::globular::GlobularMarks`, `features::kinds::open_cluster::OpenClusterMarks`,
+  `near(&Galaxy, &GalacticPosition, LightYears, &dyn FeatureCellCache) -> impl Iterator<Item =
+FeatureRecord>`, `walk_process(&Galaxy, FeatureProcess) -> impl Iterator<Item = FeatureRecord>`
+  (plan 10 walks the globulars with it), `density`, `expected_candidates`, `counts`,
+  `MAX_FEATURE_REACH: LightYears = 4,096`. `FeatureCellCache::contents(&self, &Galaxy, FeatureCell)
+-> Arc<FeatureCellContents>` takes `&self` and keys by galaxy (ruling 25).
+  `FeatureRecord::kind_at(t) -> Option<FeatureKind>` and `reach()`;
+  `catalogue::bulk_velocity(&Galaxy, &FeatureRecord) -> Option<GalacticVelocity>`.
+- `features::kinds::open_cluster::OpenClusterMarks`,
   `features::kinds::nursery::{NurseryMarks, NurseryStage, Superbubble}`,
-  `features::kinds::cloud::CloudMarks`.
+  `features::kinds::cloud::CloudMarks`; `features::kinds::globular::GlobularMarks` arrives with
+  P09.T12, which first draws globulars.
 - `features::emission::EmissionClass`, with variants `HiiRegion`, `ReflectionNebula`, `DarkCloud`,
-  `RemnantShell` and `PulsarWindNebula`.
-- `features::gas_overlay::FeatureGas`, an implementation of plan 07's `GasModifierSource` that turns
-  superbubbles into `GasModifier::Hole` and clouds and star-forming regions into
-  `GasModifier::Cloud`.
+  `RemnantShell` and `PulsarWindNebula`, and `EmissionClass::of(&Galaxy, &FeatureRecord, t)` (the
+  galaxy for its mass function).
+- `features::gas_overlay::FeatureGas::new(&Galaxy, &dyn FeatureCellCache, t)`, an implementation of
+  plan 07's `GasModifierSource` that turns superbubbles into `GasModifier::Hole` and clouds and
+  star-forming regions into `GasModifier::Cloud`.
 
 ### Interiors, nested grids and members
 
@@ -207,8 +217,8 @@ dispatch. This plan adds what gives them meaning:
 Names are those of the owning plans' "Provides" as they stood when this plan was written; where they
 change, the owning plan wins and only call sites here change.
 
-- **Plan 01:** `math`, `rng::{Seed, Stream, DomainTag, ObjectKey, tags}` with
-  `Stream::open(Seed, DomainTag, ObjectKey)`, the `domain_tags!` registry in `rng/tags.rs` and the
+- **Plan 01:** `math`, `rng::{Seed, Stream, DomainTag, TagScope, ObjectKey, tags}` with
+  `Stream::open(Seed, DomainTag, ObjectKey)` (the tag by value), the `domain_tags!` registry in `rng/tags.rs` and the
   samplers, integer-threshold decisions (`Mark`, `Threshold`, `Mark::pick_weighted`), two-step event
   keys (`EventKey`), `units`,
   `time::{UniverseTime, Span, CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon}`, `coords`,
@@ -219,13 +229,17 @@ change, the owning plan wins and only call sites here change.
   architecture of P01.T12, on which this plan's goldens also run. Plan 01's decode already rejects
   inner nested cells, centre levels 12–15 and a feature-level slot with level or cell bits set, so
   this plan never generates such an ID and tests that it does not.
-- **Plan 02:** `Galaxy`, `params::GalaxyParams` (dark halo, `AccretionHistory` with the last major
+- **Plan 02:** `Galaxy` (`Galaxy::from_params` returns a `Result`; the fixture is
+  `GalaxyParams::milky_way_like()`), `params::GalaxyParams` (dark halo, `AccretionHistory` with the last major
   merger, the progenitors and the globular count, the black hole's mass, `NuclearClusterParams`),
   `imf::{MassFunction, BandShares}`, the mean mass per system (`Galaxy::mean_system_mass`) and the
-  mass formed per system (`Galaxy::mean_formed_mass`), `potential::PotentialTables` (v_c, Ω, κ, Φ,
-  escape speed, tidal radius), the nuclear cluster's `BrokenPowerLaw`, `fields` (population
-  densities, sub-discs, age distributions, metallicity, formation rates) with the `FeatureShare`
-  hook held at φ = 0, `bounds`, `ShareMatrix`, `map`.
+  mass formed per system (`Galaxy::mean_formed_mass`), `potential::PotentialTables` (`v_circ`,
+  `omega`, `kappa`, `potential(r, z) -> Option`, `escape_speed(r, z) -> Option`,
+  `tidal_radius(m, &PointLy) -> Metres`), the nuclear cluster's `BrokenPowerLaw`, `fields` (population
+  densities, sub-discs, age distributions, metallicity) with the `FeatureShare` hook of
+  `galaxy::ages` held at φ = 0, `bounds`, `ShareMatrix`, `map`. There is no formation-rate
+  function: a population's rate is its count times its age distribution's density times the mass
+  formed per system, as `NurseryRates` computes it.
 - **Plan 03:** `placement::{SystemRecord, resolve, ResolveSystemError}` with
   `SystemRecord::from_parts` for non-grid sources, `placement::SystemOrigin` (`#[non_exhaustive]`,
   extended here) and `KindNotGenerated`, which this plan's dispatch replaces for the `0`,
@@ -233,28 +247,46 @@ change, the owning plan wins and only call sites here change.
   `query::{RangeQuery, RangeResult, SystemHit, Census}`, `QuerySphere`, `LayerCounts`, the merge
   hook `SystemSource` (`expected_in_sphere`, `systems_in_sphere`, `suppresses`; it takes `&self`, so
   a source holds a reference to the caller's caches and the caches use interior mutability), the
-  drift hook `epoch_velocity` and `position_at`, the padding rule (`PAD_SPEED`, `pad_for`).
+  drift hook `epoch_velocity` and `position_at`, the padding rule (`PAD_SPEED`, `pad_for`). The
+  record keeps its 80-byte cap (ruling 20): `SystemOrigin::FeatureMember`'s payload packs into at
+  most 7 bytes at 4-byte alignment, a `u32` index into the catalogue plus up to three bytes of role
+  or member data, since a `FeatureRef` is 16 bytes in memory; only a payload that cannot pack
+  raises the cap to 88, with plan 04's cache figures re-measured. `range_query` already sums
+  sources' counts in value order and asserts their IDs disjoint (ruling 23). Plan 08's
+  `kinematics::draw` reads `let SystemOrigin::Grid(component) = record.origin()` irrefutably;
+  the first task that adds a variant must make that a match.
 - **Plan 04:** request IDs, the universe registry, the CPU pool, byte-bounded LRU caches, the
   TypeScript request layer. **Plan 05:** the general spatial view, the galaxy map, the `GALAXY`
   display's selectors and readout, the UX guide.
 - **Plan 06:** stellar evaluation as a continuous function of age plus time;
   `lifetime(m0, &Composition, &StarDraws)`; `turn_off_mass(age, &Composition)`;
   `StarDraws::for_attempt(seed, star, attempt)` for conditional redraws;
-  `Composition::from_fe_h(fe_h, helium_excess)`; the remnant outcome with `SupernovaType` and
-  `ProgenitorAtDeath`; `stellar::remnant::KickLaw` and `StandardKickLaw`; neutron-star spin-down;
+  `Composition::from_fe_h(fe_h, helium_excess)`; the remnant outcome, built as `Death` (with
+  `DeathKind`, `SupernovaType` and `ProgenitorAtDeath`) and `CompactRemnant`;
+  `stellar::remnant::KickLaw` and `StandardKickLaw`; neutron-star spin-down, built as
+  `NeutronStar::state_at` and `PulsarState`; the tracks cover 0.1–100 M☉;
   the event constructions `PoissonBins` and `MonotonePhase`.
 - **Plan 07:** `GasField::state(position, SmoothingScale, &mut NoiseCache) -> GasState` (density,
-  pressure, temperature, sound speed), the corona's pressure floor, `GasField::neutral_bound`,
-  `GasModifier`, `GasModifierSource` and the `NoModifiers` source this plan replaces.
+  pressure, temperature, and the sound speed split into `thermal_sound_speed` and
+  `isothermal_sound_speed`, the shell window's per ruling 98; the parcel's four phases of ruling
+  103), the corona's pressure floor (`GasField::params().pressure_floor()`),
+  `GasField::neutral_bound`, `GasModifier`, `GasModifierSource::modifiers_near_segment(a, b, out)`
+  and the `NoModifiers` source this plan replaces. Plan 07's integrators take the modifiers as a
+  `&[GasModifier]`, which the caller fills from a source; the server calls none of them yet.
 - **Plan 08:** velocity laws of each population and halo component behind `epoch_velocity`
-  (`KinematicTables::ellipsoid`); `kick_bins::speed_bin_shares` (the kick distribution by remnant
+  (`KinematicTables::ellipsoid`; `draw_velocity` and `epoch_velocity` take a `SystemRecord`, so a
+  feature draws its bulk motion through the crate-private `kinematics::draw_on`, which P09.T4.a
+  added); `kick_bins::speed_bin_shares` (the kick distribution by remnant
   kind and mode); `displaced::{explosion_site, ExplosionSite}` and the stub
   `recent_death_claims(galaxy, &site, &record) -> bool`, whose body this plan supplies, with
   `SHELL_WINDOW_CAP` (4 Myr there), which this plan takes over; `displaced::ClassTable` with the
   split between budget-fed `class_weight` and field-fed `stay_share`; the zero-weight hypervelocity
   class (`DisplacedKind::HypervelocitySurvivor`); `runaway::RunawayModel`;
   `SystemRecord::{placement_class, formation_site, kick_constraint, mark_attempt}`;
-  `pad_speed(Layer)` with `UNBOUND_PAD_SPEED`.
+  `pad_speed(Layer)` with `UNBOUND_PAD_SPEED`. At `d2787a2` only P08.T1–T7 are built: `kick_bins`,
+  `site`, `class_table` and `runaway` are stubs, and `recent_death_claims`, `SHELL_WINDOW_CAP` and
+  the record's `placement_class`, `formation_site`, `kick_constraint` and `mark_attempt` do not
+  exist (the `PlacementClass` type does).
 - **Plan 15:** `tables::cluster_dynamics` (`BH_LOSS_BETA`, `BH_LOSS_PSI_SLOPE`,
   `BH_RELAXATION_PREFACTOR`, `EQUIPARTITION_EXPONENT`, `PULSARS_AT_47_TUC_GAMMA`,
   `PULSAR_GAMMA_EXPONENT`, `PULSAR_CORE_COLLAPSE_CAP`), `tables::type_ia_delay` (`DELAY_EDGES`,
@@ -264,7 +296,7 @@ change, the owning plan wins and only call sites here change.
   `Composition`'s helium excess. Plan 15 moves this plan's scratch constants into its tables
   unchanged first (P15.T8, T9.a, T10.a), so no task here blocks on a fit; if this plan runs before
   those tasks, it commits the constants under the same names in the same modules, marked
-  provisional.
+  provisional. At `d2787a2` none of these tables exists.
 
 ## Design notes
 
@@ -372,7 +404,10 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
     smooth molecular disc's, with w not a free constant: `FeatureShares` solves it at build, in
     closed form from the two components' masses, so that the expected mass of clouds drawn from the
     molecular term is nine times `MolecularDisc`'s mass. P09.T4.c tests the clouds' mass inside
-    1,000 ly of the centre.
+    1,000 ly of the centre. As built, the process follows `ε n_n + 9 n_mol`: a share ε = 0.15 of the
+    smooth neutral layer (provisional; about 10⁹ M☉ of clouds at Milky Way values, the molecular
+    mass Miville-Deschênes et al. 2017 find in their clouds) plus nine times the molecular disc, so
+    `w = 9 ÷ ε`.
 20. **A member is a `SystemRecord` with extras.** Plan 03's merge hook returns `SystemHit`s over
     `SystemRecord`s, and a record stores a `placement::SystemOrigin` (plan 03, design note 18), not
     a mandatory component. `MemberRecord` therefore wraps a record built with
@@ -392,9 +427,16 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
     exponential g(z) of scale H, the largest scale height among the process's components, truncated
     to the cell, and its x and y uniformly. It is accepted with probability density ÷ (B × g(z)),
     where B bounds density ÷ g over the cell: the envelope's nearest-corner value in x and y times
-    the ratio at the height nearest the plane, which is where the ratio peaks because no component
-    is taller than H. That is thinning with a non-uniform proposal, exact by the same theorem, and
-    it cuts candidates about tenfold. Globulars keep the uniform proposal.
+    the ratio's greatest value over the cell's heights. For the clouds, which follow the gas, that
+    is the ratio at the height nearest the plane, because every gas layer is exponential in height
+    (ruling 2 of 2026-09-22) and none is taller than H. The stellar discs are cored in height (the
+    density rulings of 2026-09-21), so the ratio first rises with height and the greatest value
+    lies above the plane; it is taken exactly from the vertical profile's table, whose exponent is
+    linear between knots (`VerticalProfile::max_ratio_to_exponential`). That is thinning with a
+    non-uniform proposal, exact by the same theorem. As built, x and y are proposed from 256
+    columns of 256 ly, each with its own bound, and the molecular disc's clouds exponentially in
+    |x| and |y| as well (P09.T3, as built, in Risks): a whole cell's bound alone wasted nine
+    candidates in ten on the young disc's sharp arms. Globulars keep the uniform proposal.
 22. **One constant cap and the per-galaxy caps.** `SHELL_WINDOW_CAP` is a constant of the generator
     version, because plan 08's `explosion_site` prefilters with it before any galaxy is consulted.
     `WindowCaps::from_galaxy` gives the tighter per-environment suprema that the catalogue's
@@ -441,7 +483,7 @@ constant array; `CatalogueCellKey`. It also reconciles this plan's "Consumes" wi
 actually built, before other work starts. Files: `galaxy/features/{mod,ids}.rs`,
 `galaxy/catalogue_classes/{mod,registry}.rs`. Tests: unique designations over a sampled feature
 cell; registry golden. Acceptance:
-`cargo test -p hyperion-sim features::ids catalogue_classes::registry` passes.
+`cargo test -p hyperion-sim -- features::ids catalogue_classes::registry` passes.
 
 #### P09.T2 Feature rates and the φ table
 
@@ -461,7 +503,9 @@ cell; registry golden. Acceptance:
   multiplies each population's density by `field_factor`, plan 08's `stay_share` takes the same
   factor while its budget-fed class weights do not, the young field's age distribution carries (1 −
   φ(a)) and is renormalised, and the share matrix takes the per-band factor. `map` keeps the budget.
-  Bump `GENERATOR_VERSION`, regenerate goldens. Files: `galaxy/fields/*`, `galaxy/placement.rs`,
+  Bump `GENERATOR_VERSION`, regenerate goldens. Files: `galaxy/ages.rs` (`FeatureShare`'s new
+  variant and `AgeDistribution::young_disc`), `galaxy/fields/*`, `galaxy/params/derive.rs` (the
+  other caller of `young_disc`), `galaxy/placement/*`, plan 08's `displaced/class_table.rs`,
   goldens. Tests: the young field's age histogram against (1 − φ) × budget by chi-square; the map
   unchanged bit for bit. Acceptance: `just ci` green with regenerated goldens, and the diff of
   goldens reviewed to touch only counts, never the layout of an unaffected cell's survivors
@@ -528,7 +572,8 @@ Parallel with each other after P09.T3.b.
 it and yields a `GasModifier::Hole` for each superbubble (radius and interior density from P09.T4.b)
 and a `GasModifier::Cloud` for each cloud and embedded region (Plummer core radius, central density,
 dust per hydrogen). Plan 07 integrates them; the server passes `FeatureGas` where it passed
-`NoModifiers`. The shell window of phase 4 does not use modifiers: it reads the smooth field only.
+`NoModifiers` (at `d2787a2` it has no such call site: plan 07's sight lines are not served, so the
+server's part waits for the first handler that serves them). The shell window of phase 4 does not use modifiers: it reads the smooth field only.
 Files: `features/gas_overlay.rs`, the server's call sites. Tests: a ray through a cloud's centre
 gains the analytic column of a Plummer profile; a point in a bubble reads the interior density; far
 from any feature plan 07's results are unchanged bit for bit.
@@ -1283,3 +1328,94 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   all of it the low mode's. The window is 15–25%, the same as ruling 96.3's at 20 km/s, which this
   plan's T9.b still gave as 8–12% and now gives as 15–25% too. The 18–26% at 100 km/s is not
   re-checked here. Nothing is built yet; no output moves.
+- **Re-validated at `d2787a2` (lane `feat09a`, 2026-09-26, `GENERATOR_VERSION` 12).** Consumes
+  reconciled with plans 01–08 and 15 as built: `TagScope` and the tag by value in `Stream::open`;
+  plan 02's `FeatureShare` lives in `galaxy::ages` and has no formation-rate function; the
+  potential's method names; plan 06's remnant outcome as `Death` and `CompactRemnant`, spin-down as
+  `NeutronStar::state_at`, tracks to 100 M☉; plan 07's split sound speeds, pressure floor through
+  `params()` and modifier slices; plan 08 built only to P08.T7; none of plan 15's tables. Rulings
+  folded into the text: 2 (Design note 21's bound for the cored stellar discs), 20 (the record's
+  cap and the member payload, in Consumes), 23 and 25 (built; the feature cache keys by galaxy), 98
+  (already in P09.T15.a), 103 (the four phases, in Consumes). Ruling 106.4's retention window for
+  P09.T9.b arrives with the orchestrator's `r9-amr` patch and is not edited here. T1's acceptance
+  command is fixed; T2.c's files are the real ones; T5's server call site does not exist yet.
+  **Pending re-validation:** P09.T9.b waits on P08.T8.b (`kick_bins::speed_bin_shares`); P09.T2.c
+  on P08.T12's `stay_share`; P09.T15.b, T17 and T33–T36 on P08.T9, T12 and T13 (`ClassTable`,
+  `explosion_site`, `SHELL_WINDOW_CAP`, `recent_death_claims`); P09.T10's member velocities on a
+  record-free draw such as `kinematics::draw_on`; P09.T24 on research finding R2 (the M–σ offset).
+  Phases 2–8 otherwise consume only what phase 1 now provides.
+- **Ruling 2's gas decision is provisional** (copied here at re-validation, as the ruling asks). The
+  gas stays exponential in height, so the clouds' proposal bound is the ratio at the height nearest
+  the plane. If a later ruling cores the gas as the stellar discs are, the clouds take the stellar
+  discs' route (the greatest ratio over the profile's table) and nothing else here changes.
+- **T1–T6, as built (lane `feat09a`, 2026-09-26, at `GENERATOR_VERSION` 12).** No output moved:
+  nothing reads φ until T2.c. New goldens `catalogue_classes/registry.golden` and
+  `galaxy/features/cells.golden`; `rng/tags.golden` gains the fourteen `feature.*` tags. Names that
+  differ from the sketches: `ClassId::cell_log2_ly()` returns `Option<u32>`; `NurseryRates` is
+  built `from_fields`, since `Galaxy::from_params` builds `FeatureShares` (Design note 15; some
+  milliseconds per galaxy); `FeatureShares` adds `phi_sub_disc`, `nurseries()`,
+  `clusters_alive_per_system`, `supernova_clock()` and `cloud_weights()`; `EmissionClass::of` and
+  `FeatureGas::new` take the galaxy; `FeatureCellCache::contents` returns an `Arc`. Helpers added
+  outside `features/`: `VerticalProfile::max_ratio_to_exponential`, `GasField::mean_cloud_gas`
+  and `GasField::cloud_gas_bound`, and `kinematics::draw_on`, the velocity draw on a caller's
+  stream, which `draw` now calls (bit-identical). Deviations:
+  - _Proposals._ Design note 21's single cell bound wasted nine nursery candidates in ten on the
+    young disc's sharp arms, and put the fullest Milky Way cell near 46,000 candidates with the
+    molecular disc's clouds bounded at the centre's corner. As built the disc processes and the
+    neutral clouds propose x and y from 256 columns of 256 ly, each with its own bound, and the
+    molecular clouds exponentially in |x| and |y| with scale √2 L (`R ≥ (|x| + |y|) ÷ √2`), their
+    count drawn after the neutral part's on the same cell stream. Waste is now 1.4–1.6 per
+    accepted feature and the fullest fixture cell expects about 2,700 candidates; the heaviest
+    galaxy the builder allows and 200 seeds stay under 16,384 with eight standard deviations.
+  - _Conditional draws._ Rather than rejecting a candidate whose age or life has ended, an old
+    cluster draws its age given that it is alive, and a nursery its age, mass, bound mark,
+    embedded duration and dissolution age given that it is alive at the epoch, by rejection on
+    their own streams (at most 256 attempts; a candidate that exhausts them, with probability
+    under 10⁻¹⁴, is rejected). The processes' densities are the living features'.
+  - _T2.a._ Lamers et al. 2005's 1.3 Gyr is their _total_ disruption time of a 10⁴ M☉ cluster
+    (their eq. 11 and abstract), so `dissolution_time` is the age at which a cluster is gone.
+    `present_mass` is `m₀ μ_ev(t) (1 − t ÷ t_dis)^(1 ÷ γ)`, the product of L05's stellar-evolution
+    fit (Table 1's solar row, bridged linearly to 0 below 10 Myr) and the disruption term, not
+    eq. 6's difference of powers, so that the life is `t_dis` exactly. φ counts the disruption
+    term alone, since a dead star is still a system of its budget.
+  - _T2.b._ φ adds the embedded share `e(a)` and the association floor's share to Design note
+    2's form (both 1 at the plan's figures). G is uniform on 30–100 Myr and not tuned (finding
+    below). Globulars' φ is 0 until P09.T12 draws them. φ is uniform across bands with
+    `TODO(P09.T9)`.
+  - _T4.a._ The present-mass test is the initial mass's conditional distribution given the age,
+    uniform after the closed-form transform; the present mass is a monotone function of it at a
+    given age, so the two tests are the same test. Young bound clusters carry the same half-mass
+    radius and concentration marks, and stop expanding when they emerge: their size is then four
+    half-mass radii within 10–100 ly (the one jump in a nursery's size, where its gas disperses).
+  - _T4.b._ The bubble's power is the supernovae's alone, `N_SN × 10⁵¹ erg ÷ (t_last − t_first)`
+    (Mac Low and McCray 1988's approximation); the winds the plan names are left out, provisional.
+    An embedded region's gas is `M_* (1 − ε) ÷ ε` with ε uniform on 0.1–0.3 (Lada and Lada 2003),
+    falling linearly to none when it emerges; its size is `max(D₀, v × age)` within 10–300 ly, D₀
+    the clump's diameter at the clouds' surface density. Members' ages from −H belong to phase 5.
+  - _T4.c._ Clouds: `M^−1.7` over 10⁴–10^6.5 M☉, Σ = 170 M☉ pc⁻² (Solomon et al. 1987), a Plummer
+    ball whose half-mass radius is `√(M ÷ π Σ)`, ε = 0.15 of the neutral layer (Design note 19).
+  - _T5._ `FeatureGas` puts a segment's ends in a canonical order, so its list is a function of
+    the unordered pair; a feature is listed when the segment passes within its reach (ten core
+    radii for a cloud). Features sit at their epoch positions.
+  - _Plan 10_ must reach `set_halo_discrete` through a `FeatureShares` it builds or owns, since
+    `Galaxy` lends its own immutably.
+- **Findings of T2–T4 against the plan's figures (for the owner, after research).** Each was built
+  as the plan says and the test holds the measured value, marked provisional:
+  - _Cluster lives (T2.a)._ The plan's mean life "near 295 Myr", "a third under 100 Myr" and
+    "about 10⁵ alive" hold only if 1.3 Gyr is L05's instantaneous `t_dis` and the life `t_dis ÷ γ`.
+    With 1.3 Gyr as L05's total disruption time the mean life over `M⁻²` on 10²–10⁵ M☉ is 183
+    Myr; at the fixture's 345 bound clusters born per Myr (in 240–360) about 6.6 × 10⁴ are alive,
+    about half under 100 Myr and 8% over 1 Gyr (a tenth, as planned). Source: L05 eq. 11, t₄ =
+    1.3 ± 0.5 Gyr, "the disruption time of a 10⁴ M☉ cluster in the solar neighbourhood".
+  - _Four in five (T2.b)._ With `f_n` = 0.9 capping φ and associations living 30–100 Myr, the share
+    of core collapses (8–100 M☉, solar lifetimes of plan 06) inside features is 0.876; no G on
+    30–100 Myr reaches 0.8 (its floor is about 0.83). The brainstorm says "inside associations".
+  - _Clouds (T4.c)._ A constant Σ over a factor of 316 in mass gives diameters of 28–500 ly
+    (median 46) against the plan's 50–300; with 10⁴ M☉ clouds the central densities are 110–1,900
+    cm⁻³, in the plan's 10²–10⁶. About 9,800 clouds at Milky Way values ("thousands"). The
+    fixture's molecular disc has 14% of its mass beyond 1,000 ly, so T4.c's "nine times inside
+    1,000 ly" is read against the disc's mass inside the sphere.
+  - _Bubbles (T4.b)._ The central 80% of radii lie in 100–1,000 ly, but in the thin outer gas the
+    blow-out cap binds at 2.5 × the fixture's 700 ly neutral height, 1,750 ly.
+  - _R5 (warm ionised filling)._ T5 adds hot holes and neutral clouds, no ionised gas, so the
+    features leave `gas14`'s 0.21 against Gaensler's ~0.3 where it was.

@@ -564,6 +564,57 @@ domain_tags! {
     /// A lesser halo progenitor's kinematics (P08.T3): its anisotropy β, uniform on 0.3–0.7, word
     /// 0; its net rotation, uniform on ±0.25 `v_c`, word 1.
     HALO_KINEMATICS: Galaxy = "halo.kinematics";
+
+    // Plan 09: large features (phase 1, P09.T3–T4). A feature cell's candidate count is drawn on
+    // one `Cell` tag per feature process, opened with `ObjectKey::cell(word)`, the word being the
+    // `FeatureRef::object_word` of the cell's candidate 0 (Design note 23), so that processes
+    // sharing a cell share no stream. A candidate's draws are `Feature` tags opened with
+    // `ObjectKey::feature(FeatureRef::object_word())`.
+
+    /// A feature cell's globular candidate count: one Poisson draw (P09.T3.b).
+    FEATURE_CELL_GLOBULAR: Cell = "feature.cell.globular";
+
+    /// A feature cell's candidate count of the old open clusters of the first sub-disc, 0.1–1
+    /// Gyr: one Poisson draw (P09.T3.b).
+    FEATURE_CELL_OPEN_CLUSTER_1: Cell = "feature.cell.open_cluster_1";
+
+    /// As `feature.cell.open_cluster_1`, for the second sub-disc, 1–2 Gyr.
+    FEATURE_CELL_OPEN_CLUSTER_2: Cell = "feature.cell.open_cluster_2";
+
+    /// As `feature.cell.open_cluster_1`, for the third sub-disc, 2–4 Gyr.
+    FEATURE_CELL_OPEN_CLUSTER_3: Cell = "feature.cell.open_cluster_3";
+
+    /// As `feature.cell.open_cluster_1`, for the fourth sub-disc, 4–7 Gyr.
+    FEATURE_CELL_OPEN_CLUSTER_4: Cell = "feature.cell.open_cluster_4";
+
+    /// As `feature.cell.open_cluster_1`, for the fifth sub-disc, 7–10 Gyr.
+    FEATURE_CELL_OPEN_CLUSTER_5: Cell = "feature.cell.open_cluster_5";
+
+    /// A feature cell's nursery candidate count: one Poisson draw (P09.T3.b).
+    FEATURE_CELL_NURSERY: Cell = "feature.cell.nursery";
+
+    /// A feature cell's cloud candidate count: one Poisson draw (P09.T3.b).
+    FEATURE_CELL_CLOUD: Cell = "feature.cell.cloud";
+
+    /// A feature candidate's position: three words, x, y and z (P09.T3.b).
+    FEATURE_POSITION: Feature = "feature.position";
+
+    /// A feature candidate's acceptance: one mark (P09.T3.b).
+    FEATURE_ACCEPT: Feature = "feature.accept";
+
+    /// An old open cluster's marks: its age and the age's acceptance mark, its initial mass, its
+    /// half-mass radius, concentration and metallicity (P09.T4.a).
+    FEATURE_OPEN_CLUSTER: Feature = "feature.open_cluster";
+
+    /// A nursery's marks: its age, mass, bound mark, embedded duration, dissolution age,
+    /// expansion speed, age spread, efficiency, metallicity and bubble interior (P09.T4.b).
+    FEATURE_NURSERY: Feature = "feature.nursery";
+
+    /// A cloud's marks: its mass (P09.T4.c).
+    FEATURE_CLOUD: Feature = "feature.cloud";
+
+    /// A cluster's bulk velocity: the population's velocity law at its position (P09.T4.a).
+    FEATURE_VELOCITY: Feature = "feature.velocity";
 }
 
 #[cfg(test)]
@@ -751,6 +802,37 @@ mod tests {
         assert_eq!(SYSTEM_VELOCITY.scope(), crate::rng::TagScope::System);
         assert_eq!(HALO_KINEMATICS.name(), "halo.kinematics");
         assert_eq!(HALO_KINEMATICS.scope(), crate::rng::TagScope::Galaxy);
-        assert_eq!(ALL.last(), Some(&HALO_KINEMATICS));
+        assert!(ALL.contains(&HALO_KINEMATICS));
+    }
+
+    #[test]
+    fn plan_09_registers_its_tags_with_their_scopes() {
+        let cell = [
+            FEATURE_CELL_GLOBULAR,
+            FEATURE_CELL_OPEN_CLUSTER_1,
+            FEATURE_CELL_OPEN_CLUSTER_2,
+            FEATURE_CELL_OPEN_CLUSTER_3,
+            FEATURE_CELL_OPEN_CLUSTER_4,
+            FEATURE_CELL_OPEN_CLUSTER_5,
+            FEATURE_CELL_NURSERY,
+            FEATURE_CELL_CLOUD,
+        ];
+        for tag in cell {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Cell, "{}", tag.name());
+            assert!(tag.name().starts_with("feature."));
+            assert!(ALL.contains(&tag));
+        }
+        let feature = [
+            FEATURE_POSITION,
+            FEATURE_ACCEPT,
+            FEATURE_OPEN_CLUSTER,
+            FEATURE_NURSERY,
+            FEATURE_CLOUD,
+            FEATURE_VELOCITY,
+        ];
+        for tag in feature {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Feature, "{}", tag.name());
+            assert!(ALL.contains(&tag));
+        }
     }
 }

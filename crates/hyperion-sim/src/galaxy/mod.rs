@@ -20,9 +20,11 @@
 
 pub mod ages;
 pub mod bounds;
+pub mod catalogue_classes;
 pub mod consts;
 pub mod displaced;
 pub mod fates;
+pub mod features;
 pub mod fields;
 pub mod frame;
 pub mod gas;
@@ -40,6 +42,7 @@ pub mod special;
 use std::error::Error;
 use std::fmt;
 
+use self::features::shares::FeatureShares;
 use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
@@ -192,6 +195,7 @@ pub struct Galaxy {
     gas: GasField,
     shares: ShareMatrix,
     kinematics: Option<Box<KinematicTables>>,
+    feature_shares: FeatureShares,
 }
 
 impl Galaxy {
@@ -244,6 +248,8 @@ impl Galaxy {
         let fields = Fields::new(&params, &model);
         let gas = GasField::new(seed, &params, &fields).map_err(BuildGalaxyError::Gas)?;
         let shares = ShareMatrix::uniform(&BandShares::of(mass_function.as_dyn()));
+        let feature_shares =
+            FeatureShares::new(&fields, mass_function.as_dyn(), params.mean_formed_mass());
         Ok(Self {
             seed,
             params,
@@ -254,6 +260,7 @@ impl Galaxy {
             gas,
             shares,
             kinematics: None,
+            feature_shares,
         })
     }
 
@@ -294,6 +301,14 @@ impl Galaxy {
     #[must_use]
     pub fn kinematics(&self) -> Option<&KinematicTables> {
         self.kinematics.as_deref()
+    }
+
+    /// The feature catalogue's rates and the share φ of each population in features (plan 09,
+    /// P09.T2.b), built with the galaxy (plan 09, Design note 15). Nothing reads φ into the fields
+    /// until P09.T2.c.
+    #[must_use]
+    pub fn feature_shares(&self) -> &FeatureShares {
+        &self.feature_shares
     }
 
     /// The seed: for a galaxy built from one, the seed its parameters were drawn from, and for

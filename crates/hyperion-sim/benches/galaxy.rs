@@ -11,6 +11,9 @@
 //! - `render_rows` over a whole map on one thread (P02.T10.c): a 512 × 512 face-on map in 1 s and a
 //!   512 × 256 edge-on map in 5 s. Plan 04's pool splits a map into bands of rows over eight
 //!   workers, where its own targets are 1 s and 3 s (P04.T11).
+//! - `FeatureCatalogue::cell` of an inner-disc feature cell, 10 ms, and the walk of every
+//!   globular, 0.3 s (plan 09, P09.T3.c). Until phase 3 supplies their density the globular walk
+//!   visits 32,768 empty cells.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -181,5 +184,29 @@ fn map(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(galaxy, potential, params, fields, bounds, handle, map);
+/// The feature catalogue of the Milky Way fixture: the densest inner-disc cell and the globular
+/// walk (plan 09, P09.T3.c).
+fn features(c: &mut Criterion) {
+    use hyperion_sim::galaxy::features::FeatureProcess;
+    use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+    use hyperion_sim::id::FeatureCell;
+    let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
+    let inner = FeatureCell::new([-2, 0, -1]).expect("a feature cell of the root cube");
+    let mut group = c.benchmark_group("features");
+    group.sample_size(20);
+    group.bench_function("FeatureCatalogue::cell (inner disc)", |b| {
+        b.iter(|| FeatureCatalogue::cell(black_box(&galaxy), black_box(inner)));
+    });
+    group.bench_function("FeatureCatalogue::walk_process (globulars)", |b| {
+        b.iter(|| {
+            FeatureCatalogue::walk_process(black_box(&galaxy), FeatureProcess::Globular).count()
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(
+    galaxy, potential, params, fields, bounds, handle, map, features
+);
 criterion_main!(galaxy);

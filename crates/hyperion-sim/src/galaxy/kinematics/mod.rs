@@ -26,6 +26,7 @@ mod draw;
 pub mod halo;
 pub mod spheroid;
 
+pub(crate) use draw::draw_on;
 pub use draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, draw, draw_velocity};
 
 use self::discs::{ArmStreaming, DiscKinematics, DiscLaw, RadialRatio};

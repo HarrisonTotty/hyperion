@@ -1,7 +1,8 @@
 //! The velocity draw and the escape cut (plan 08, P08.T5 and Design notes 6 and 7).
 
 use super::{EllipsoidAxes, VelocityEllipsoid};
-use crate::coords::GalacticVelocity;
+use crate::coords::{GalacticPosition, GalacticVelocity};
+use crate::galaxy::fields::ComponentId;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::query::PAD_SPEED;
 use crate::galaxy::{Galaxy, PointLy};
@@ -100,13 +101,35 @@ pub fn draw_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity
 /// As [`draw_velocity`].
 #[must_use]
 pub fn draw(galaxy: &Galaxy, record: &SystemRecord) -> VelocityDraw {
+    let SystemOrigin::Grid(component) = record.origin();
+    let mut stream = Stream::open(
+        galaxy.seed(),
+        tags::SYSTEM_VELOCITY,
+        ObjectKey::from(record.id()),
+    );
+    draw_on(galaxy, component, record.epoch_position(), &mut stream)
+}
+
+/// A velocity from `component`'s law at `position`, drawn on `stream` from its word 0 with
+/// [`draw`]'s attempts and cut: plan 09's features take their bulk motion from the law of the
+/// population they follow (P09.T4.a) on a stream of their own.
+///
+/// # Panics
+///
+/// As [`draw_velocity`].
+#[must_use]
+pub(crate) fn draw_on(
+    galaxy: &Galaxy,
+    component: ComponentId,
+    position: &GalacticPosition,
+    stream: &mut Stream,
+) -> VelocityDraw {
     let tables = galaxy
         .kinematics()
         .expect("velocities need the kinematic tables, which Galaxy::with_full_potential builds");
-    let SystemOrigin::Grid(component) = record.origin();
-    let p = PointLy::from(record.epoch_position());
+    let p = PointLy::from(position);
     let ellipsoid = tables.ellipsoid(component, &p);
-    let basis = basis(record, &p, ellipsoid.axes());
+    let basis = basis(position, &p, ellipsoid.axes());
     let r_cyl = math::hypot(p.x, p.y);
     let escape = galaxy
         .potential()
@@ -117,15 +140,10 @@ pub fn draw(galaxy: &Galaxy, record: &SystemRecord) -> VelocityDraw {
     } else {
         escape.min(PAD_SPEED.value())
     };
-    let mut stream = Stream::open(
-        galaxy.seed(),
-        tags::SYSTEM_VELOCITY,
-        ObjectKey::from(record.id()),
-    );
     let mut last = [0.0; 3];
     for k in 0..ESCAPE_CUT_ATTEMPTS {
         stream.seek(WORDS_PER_ATTEMPT * u64::from(k));
-        let v = attempt(&mut stream, &ellipsoid, &basis);
+        let v = attempt(stream, &ellipsoid, &basis);
         let speed = norm(v);
         if speed < cut {
             return VelocityDraw {
@@ -165,8 +183,8 @@ fn attempt(stream: &mut Stream, ellipsoid: &VelocityEllipsoid, basis: &[[f64; 3]
 
 /// The ellipsoid's three unit vectors in galactic components: rimward, spinward and north for
 /// cylindrical axes; outward, +θ and spinward for spherical ones.
-fn basis(record: &SystemRecord, p: &PointLy, axes: EllipsoidAxes) -> [[f64; 3]; 3] {
-    let (rimward, spinward) = match record.epoch_position().directions() {
+fn basis(position: &GalacticPosition, p: &PointLy, axes: EllipsoidAxes) -> [[f64; 3]; 3] {
+    let (rimward, spinward) = match position.directions() {
         Some(d) => (d.rimward().components(), d.spinward().components()),
         None => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
     };
