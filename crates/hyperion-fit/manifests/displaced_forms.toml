@@ -1,0 +1,25 @@
+# The displaced form table's production orbit run (plan 15, P15.T6.b): plan 15's 1.2 × 10⁷
+# disc-born orbits (56 classes of 214,286) and 1.6 × 10⁶ per old population (eight classes of
+# 200,000), and 20,000 orbits for each barred source's unkicked control, at the Milky Way
+# fixture. Hours of computing: run it niced with `hyperion-fit orbits --threads N`, never in CI.
+task = "displaced_forms"
+
+[params]
+seed = 0x0615_6b00_0000_0000
+galaxy_seed = 0x0615_6b00_0000_0001
+disc_orbits_per_class = 214_286
+old_orbits_per_class = 200_000
+control_orbits = 20_000
+# 1 ÷ 200 of the circular period at the pericentre, never below 1,000 years.
+step_fraction = 0.005
+min_step_years = 1_000.0
+# An orbit whose Jacobi integral drifts by more than 10⁻³ is integrated again at half the step, up
+# to three times: T6.a's 10⁻⁴ with six halvings, which the test orbits meet, would quadruple the
+# run (the barred inner orbits refine most); the histograms need positions, not energies to 10⁻⁴.
+drift_tolerance = 1e-3
+max_halvings = 3
+# Dehnen's (2000) quadrupole at a twentieth of v_c² at the bar's half-length.
+bar_strength = 0.05
+# The fixture's own corotation ratio.
+corotation_ratio = 0.0
+chunk = 256

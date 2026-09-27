@@ -3,6 +3,7 @@
 //! [`FitTask`](crate::task::FitTask), which [`registry`](crate::task::registry) lists.
 
 pub mod chabrier;
+pub mod displaced_forms;
 pub mod giant_cooling;
 pub mod kick_rank;
 pub mod mge;

@@ -753,6 +753,74 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
 No scratch stand-in exists for this table. It is the long pole of M3 and starts as soon as plan 02's
 potential is numerically stable, in parallel with M2.
 
+**T6.a–b as built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no table yet).**
+
+- **Files and names.** `src/tasks/displaced_forms/{mod,orbits,births,histogram}.rs` (the task is
+  named for its table, `displaced_forms`), `manifests/displaced_forms.toml` and
+  `displaced_forms.smoke.toml`. The task is not in the registry: a `FitTask` returns a table, which
+  T6.c–f fit. Until then `hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out
+DIR]` runs the orbits and writes `displaced_orbits.txt` (text, integer counts and shortest
+  round-trip floats) to `data/cache/displaced/` or `--out`, printing its SHA-256 for
+  `tables.lock`.
+- **The force (ruling 101.4).** Plan 02's potential gained `PotentialTables::force` (the exact
+  gradient of the (R, |z|) grid's bicubic Hermite interpolant, so the field is conservative) and the
+  direct `MassModel::force`, returning `CylindricalForce { radial, vertical }`. The integrator
+  steps with the tables' force, not bilinear force interpolation, which is not a gradient.
+- **T6.a, the bar and the splitting.** The bar is Dehnen's (2000) quadrupole in Monari et al.'s
+  (2016) three-dimensional form, `A U(r ÷ R_b)(x′² − y′²) ÷ r²`, `A = bar_strength × v_c(R_b)²`,
+  `R_b` the fixture's half-length, `Ω_p` the sim's pattern speed (or the manifest's
+  `corotation_ratio`). Inside `R_b`, Dehnen's `s³ − 2` is direction-dependent at the centre (a force
+  growing as `1 ÷ r`, which threw test orbits by 20% in the Jacobi integral), so `U(s) = 5s³ − 6s²`,
+  the cubic meeting `−s⁻³` with value and slope at `s = 1`: HYPERION's regularisation, a finding for
+  the owner only if T6.d's shares depend on it. The rotating frame's step is `K(h ÷ 2) R(h) D(h)
+K(h ÷ 2)`: the kinetic and rotation terms commute, so their joint flow (drift, then rotation by
+  `−Ω_p h`) is exact, and the Strang splitting is symplectic with one force a step. Each orbit's
+  fixed step is 1 ÷ 200 of the circular period at its pericentre (from its energy and angular
+  momentum in the plane's potential), at least `min_step_years`: "the local circular period" read
+  as the orbit's, since a step that followed the radius would not be symplectic.
+- **T6.a's acceptance.** The test orbits run from 200 ly to 40,000 ly, every fourth in the
+  nuclear disc, bulge and bar. Without the bar the energy holds to 4.7 × 10⁻⁵ over 10 Gyr for all
+  1,000 (slow; 20 in the fast suite). With the bar (strength 0.05) the fixed step of the first pass
+  holds 982 of 1,000, but one inner orbit torqued onto the black hole lost 79% of its Jacobi
+  integral: so each orbit is integrated through `integrate_checked`, again from its start at half
+  the step while its Jacobi integral has drifted by more than `drift_tolerance` (10⁻⁴), up to
+  `max_halvings` (6) times. 18 of 1,000 needed it and the worst kept is 8.7 × 10⁻⁵. Circular orbits
+  at 3,000–50,000 ly stay circular to 10⁻³ over 10 Gyr; one and four threads give the same bits.
+- **T6.b's births** follow the text, with one change: the halo, bulge and bar draw their velocities
+  from plan 08's velocity ellipsoid of the component they were born in, not an isotropic Jeans
+  dispersion, since plan 08's laws exist (so T6.e's "plan 08's births" is this run). Old sources
+  are born by exact rejection on logarithmic cells of the cube's octant (each envelope never rises
+  with |x|, |y|, |z|); the thin source in the thin birth layer (holed thin radial profile, the young
+  disc's vertical profile), its time since death from the thin history restricted to the age bin;
+  the old sources' from their populations' histories. Kicks are log-uniform within each speed bin
+  (0.02–6 over the eight). An unkicked control per barred source serves T6.d. An orbit is bound if
+  its epoch energy cannot reach the sim's escape boundary, twice `r₂₀₀` (ruling 91).
+- **T6.b's histograms**: per class, the bound and the unbound inside the cube on 48 × 40 log cells
+  in R (16 ly to 2¹⁸) and |z| (1 ly to 2¹⁶), counts inside and outside, the bound members'
+  velocity moments in `v_c` (`v_φ` spinward) and outbound count, a 24 × 24 × 20 bar-frame histogram
+  for the barred sources, and the steps taken. The smoke run twice, and on one and three threads,
+  gives the same bytes. The smoke manifest holds 1–3 orbits a class on coarse steps, not the
+  plan's 1% (about 40 minutes on three threads), so that the fast suite can run it three times;
+  the 1% run is the production manifest with its counts divided by 100.
+- **T6.e's baseline.** With plan 08's velocity laws already in T6.b's births, T6.e's check that the
+  table "changes by under 1 point with plan 08's births" needs the other run: a tenth-size run
+  with isotropic Jeans births for the halo, bulge and bar, which T6.e adds.
+- **The production run is not run: about 100 hours on three threads.** A reduced run of 50 orbits
+  per class (4,950 orbits, the production manifest with the counts cut) took 98 s on three threads
+  (niced, under the heavy-test lock, 2.8–3.3 GHz, load 5–10): 5.6 × 10⁸ steps, 526 ns a step and
+  thread. Scaled by class to the manifest's counts the run is 2.1 × 10¹² steps, about 103 hours:
+  the nuclear disc 71.5% (a few × 10⁵ steps an orbit, its periods being a few Myr over 10 Gyr, and
+  its barred orbits refining most), the bulge 12.0%, the bar 6.3%, the halo 4.2%, the thick disc
+  4.1%, the thin disc 1.9%. The production manifest keeps a Jacobi drift of 10⁻³ and three
+  halvings: T6.a's 10⁻⁴ and six halvings put a 200-per-class run at 5.2 × 10⁹ steps against 1.2 ×
+  10⁹ without refinement. Command: `nice -n 19 cargo run --profile slow-test -p hyperion-fit --
+orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt`, whose
+  SHA-256 it prints for `tables.lock`). Each class's record counts its orbits integrated again at
+  a smaller step, those kept still over the tolerance after the last halving, and the worst drift
+  kept, so that T6.c–e can judge the histograms by them (**for T6.c**: the nuclear disc's classes
+  refine most); whether 10⁻³ is acceptable for production is the owner's call. A lever, for the owner: the nuclear disc's classes at a
+  tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours.
+
 ### P15.T7 Helium correction
 
 **Source.** The brainstorm names none beyond "fitted offline". The fit needs published

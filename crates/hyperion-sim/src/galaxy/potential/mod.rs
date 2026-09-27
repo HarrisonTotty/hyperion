@@ -13,6 +13,7 @@
 //! Working units (plan 02, Design note 1): light-years, solar masses, (km/s)² for potentials,
 //! (km/s)² per light-year for forces.
 
+mod force;
 pub mod mge;
 mod model;
 pub mod nfw;
@@ -23,6 +24,7 @@ mod tables;
 use std::error::Error;
 use std::fmt;
 
+pub use force::CylindricalForce;
 pub use model::MassModel;
 pub(crate) use model::bulge_spheroid;
 pub use tables::PotentialTables;

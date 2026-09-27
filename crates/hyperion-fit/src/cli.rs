@@ -6,6 +6,8 @@
 //!                         [--data DIR] [--manifest PATH]
 //! hyperion-fit check [--rerun-fast]      # staleness
 //! hyperion-fit fingerprint <task>        # prints the sim probe values a task depends on
+//! hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out DIR]
+//!                                        # the displaced form table's orbit run (P15.T6.b)
 //! ```
 //!
 //! `run` writes into the sim's `tables/` unless `--out` says otherwise, and then needs `--since`
@@ -81,6 +83,21 @@ pub enum Command {
     Fingerprint {
         /// The task.
         task: String,
+    },
+    /// Run the displaced form table's orbits (plan 15, P15.T6.b) and write their histograms.
+    Orbits {
+        /// Run the smoke manifest, a few orbits per class.
+        #[arg(long)]
+        smoke: bool,
+        /// Run this manifest instead of `manifests/displaced_forms.toml`.
+        #[arg(long, conflicts_with = "smoke")]
+        manifest: Option<PathBuf>,
+        /// Threads for the run; the output is the same for any number.
+        #[arg(long)]
+        threads: Option<NonZeroUsize>,
+        /// The directory to write `displaced_orbits.txt` into; `data/cache/displaced/` by default.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -173,6 +190,19 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
                 Err(RunFitError::Check(report))
             }
         }
+        Command::Orbits {
+            smoke,
+            manifest,
+            threads,
+            out: out_dir,
+        } => orbits(
+            workspace,
+            *smoke,
+            manifest.as_deref(),
+            threads_or_all(*threads),
+            out_dir.as_deref(),
+            out,
+        ),
         Command::Fingerprint { task } => {
             let task = find(task)?;
             let fingerprint = task.fingerprint();
@@ -185,6 +215,49 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
             Ok(())
         }
     }
+}
+
+/// `orbits`: runs the displaced form table's orbits and writes their histograms, printing the
+/// file's SHA-256 (plan 15, P15.T6.b).
+fn orbits(
+    workspace: &Workspace,
+    smoke: bool,
+    manifest: Option<&std::path::Path>,
+    threads: NonZeroUsize,
+    out_dir: Option<&std::path::Path>,
+    out: &mut dyn Write,
+) -> Result<(), RunFitError> {
+    use crate::tasks::displaced_forms;
+    let path = match manifest {
+        Some(path) => path.to_path_buf(),
+        None if smoke => workspace.manifests_dir.join("displaced_forms.smoke.toml"),
+        None => workspace.manifests_dir.join("displaced_forms.toml"),
+    };
+    let loaded = Manifest::load(&path).map_err(RunFitError::Manifest)?;
+    let params = displaced_forms::RunParams::from_manifest(&loaded)
+        .map_err(|e| RunFitError::Task(task::RunTaskError::Param(e)))?;
+    let records = displaced_forms::run(&params, threads).map_err(|e| {
+        RunFitError::Task(task::RunTaskError::Input {
+            task: displaced_forms::TASK,
+            source: Box::new(e),
+        })
+    })?;
+    let text = displaced_forms::render(&loaded, &records);
+    let dir = out_dir.map_or_else(
+        || workspace.data_dir.join("cache").join("displaced"),
+        std::path::Path::to_path_buf,
+    );
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join("displaced_orbits.txt");
+    std::fs::write(&file, &text)?;
+    writeln!(
+        out,
+        "wrote {} ({} classes), sha256 {}",
+        file.display(),
+        records.len(),
+        displaced_forms::sha256_hex(text.as_bytes())
+    )?;
+    Ok(())
 }
 
 /// `list`: every task's name, class, table and state.

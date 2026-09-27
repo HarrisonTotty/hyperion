@@ -154,8 +154,9 @@ pub mod marks { pub struct ConditionalMarks; pub struct DisplacedMarks; /* initi
 pub mod runaway { pub struct RunawayModel; /* shares, speeds and ejection ages; constants */ }
 pub mod binarity { pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64; } // the seam:
                   // plan 11's built stellar::multiplicity::stripped_share behind it (T8.a)
-pub mod kick_bins { pub fn speed_bin_shares(law: &impl KickLaw, m: SolarMasses, z: MetalFraction,
-                    scales: &GalaxyScales) -> KickBinShares; }   // by remnant kind and mode
+pub mod kick_bins { pub fn speed_bin_shares(law: &StandardKickLaw, m: SolarMasses,
+                    comp: &Composition, scales: &GalaxyScales, source: BirthSource)
+                    -> KickBinShares; }   // by remnant kind and mode (as built, P08.T8.b)
 pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<ExplosionSite>;
 pub struct ExplosionSite { /* position: GalacticPosition, death: UniverseTime */ }
 ```
@@ -661,6 +662,43 @@ stripped_share`, the provisional constant it named before plan 11 existed. It is
 
 **Files.** `galaxy/displaced/{binarity,kick_bins}.rs`. **Acceptance.** Tests pass.
 
+**As built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+
+- **T8.a.** `binarity::stripped_share(m, &Composition)` is plan 11's `stripped_share` with
+  `MultiplicityModel::default_v1()` and `binarity::interacting_periastron`, which returns plan 11's
+  `PROVISIONAL_INTERACTING_PERIASTRON` (10 au) until P11.T1.d supplies P11.T4.a's threshold there.
+  The test holds it bit for bit against plan 11's function at 33 masses of layer E's band and three
+  metallicities. No `ClassTable` exists yet (T9), so "used by `ClassTable`" waits for T9;
+  `KickBinShares::stripped_share` records the share the quadrature used, and a test holds it to the
+  seam's.
+- **T8.b.** `kick_bins::speed_bin_shares(law: &StandardKickLaw, m, comp: &Composition, scales,
+source: BirthSource)`, and `speed_bin_shares_against(law, m, comp, v_ref)`. The law is the
+  concrete `StandardKickLaw`, not `&impl KickLaw`: the exact branch weights read its parameters and
+  rank table. The composition is a `Composition`, which the track takes; `source` chooses `v_c` or
+  the nuclear disc's own. `KickBinShares` holds `[kind][mode][bin]` for the white dwarf, neutron
+  star and black hole (8–8.3 M☉ stars below `m_cc` leave white dwarfs) and the modes `Ordinary`,
+  `Low`, `FallbackNone` and `WhiteDwarf`, and `no_remnant()`. `SPEED_EDGES`, `AGE_EDGES`,
+  `SpeedBin::of` and `SpeedBin::all` are in `displaced/mod.rs`.
+- **Two quadrature deviations from Design note 18, both for T8.b's own 3σ test.** A midpoint rule
+  on a step function errs by up to half a cell at each edge, 1 ÷ 128 for 64 nodes, where the test's
+  σ is about 3 × 10⁻⁴. So the score factor ξ is integrated exactly: the law's speed is monotone in
+  the score `c ξ`, each edge is one score threshold (bisected once on the law's rank table and speed
+  map) and each branch's share is the truncated normal's tail. And the remnant mass normal takes
+  1,024 quantile midpoints, not 16: with 16 the lightest partial-fallback black holes, whose scores
+  are the largest, put a 16 M☉ star's bin 5 at 2.1 × 10⁻⁴ against 10⁶ direct draws' 3.0 × 10⁻⁴
+  (σ 1.5 × 10⁻⁵).
+- **Results.** Sums hold to 10⁻¹² at 33 masses and two metallicities; every bin of every kind at
+  8.5, 11, 16, 24 and 38 M☉ lies within 3σ of 10⁶ direct draws of the law on the built tracks
+  (`Track::fate_with`, `with_stripped_mark`, `natal_kick`). **Finding:** over layer E's band at the
+  fixture (`v_c` 224 km/s, solar metallicity) the neutron stars' bins are 0.331, 0.044, 0.116,
+  0.152, 0.120, 0.090, 0.070, 0.079 against the research's 0.20, 0.10, 0.155, 0.18, 0.125, 0.08,
+  0.07, 0.08: the first three miss the ±0.03 window. Plan 11's stripped share at 10 au (about half
+  of massive primaries) sends more cores under 3 M☉ to the low mode; at plan 06's provisional 0.25
+  the bins are 0.184, 0.059, 0.155, 0.195, 0.149, 0.106, 0.072, 0.081 (bins 1 and 5 still miss).
+  The test holds the measured values to 0.005, the plan's figures beside them, and bins 3–7 to the
+  plan's window. The black holes' first bin is 0.785 (0.78–0.88).
+- **Ruling 93.2** is recorded above; the kick loop that honours it is P08.T12.c's.
+
 ### P08.T9 The class table
 
 - **P08.T9.a Remnants of the thin-disc source.** For each thin component and mass node: P(alive)
@@ -719,6 +757,36 @@ and non-negative. Build time under 150 ms (bench, a finding).
 **Files.** `galaxy/displaced/forms.rs`, `tests/galaxy_displaced_forms.rs`. **Acceptance.** Tests
 pass.
 
+**As built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+
+- **Names.** `FlaredLayerParams` and `CoredPowerLawParams` are one row of plan 15's table each
+  (P15.T6's `FlaredLayer` and `CoredPowerLaw`: its emitted table will hold numbers, and these are
+  the types its rows become). The densities in light-years are `forms::{FlaredLayer,
+CoredPowerLaw, BallisticLayer, OwnFormMixture, FlareFactor}`, as Provides has them, with
+  `DiscBornForm` (one disc-born class: `Ballistic` or `Fitted { layer, arm, spheroid }`),
+  `keeps_arm`, `blurred_arm`, `young_disc(&Fields)`, `cube_integral` and `BuildFormError`.
+- **The cube's normalisation is reduced to (R, z).** Every form is axisymmetric, so the octant's
+  integral is exactly one over R and z with the arc length of the circle of radius R inside the
+  square (`π R ÷ 2` in a quadrant to L, `R (π ÷ 2 − 2 arccos(L ÷ R))` to `√2 L`, the corner
+  annulus run in the arc's angle). The 24 doubling panels of 8 nodes stand in R and z; the third
+  axis goes, at a two-hundredth of the cost. It is exact to 10⁻¹² for a uniform density and a radial
+  ramp and to 10⁻⁹ for a Gaussian.
+- **The ballistic form is the whole class** in the two youngest age bins (P15.T6: `layer` is
+  ignored, and the spheroid is not used either); its height is Design note 21's and its vertical
+  profile the young disc's own, stretched at the same column. **The arm factor multiplies the layer
+  only**, not the spheroid, in the fitted bins that keep it.
+- **The table is test-only** (`tests/displaced_support/mod.rs`, from the brainstorm's figures, as
+  Risks allows): 56 disc-born rows, eight speed bins for each old source, and the brainstorm's
+  own-form shares at a corotation ratio of 1.2 with placeholders at 1.0 and 1.4. T10.c's test of
+  the brainstorm's figures is therefore of the interpolation, until P15.T6.d's shares exist.
+- **Results.** Columns match `exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to 10⁻⁶ in every row at four radii;
+  three spheroids' normalisations agree with a 10⁷-point importance-sampled Monte Carlo to 0.5%;
+  the ballistic form at `⟨uτ⟩` of 0 and 10⁻⁹ equals the young disc's normalised density to 10⁻⁶,
+  arm included; the arm is present exactly for τ < 1 and `⟨uτ⟩ ≤ 0.4`, and leaves the in-plane
+  integral unchanged to 10⁻⁴ for a ballistic and a fitted class. The 200-seed sweep of all 96
+  forms is slow (`every_form_normalises_for_200_seeds`: 200 mass models, fields and 96 cube
+  integrals each); the fast suite builds them at the fixture.
+
 ### P08.T11 Bounds for flared classes
 
 **Build.** `forms::FlareFactor` implementing plan 02's `UnimodalFactor`: for z₁ the cell's least |z|
@@ -740,6 +808,31 @@ ascent from 27 starts, over 20 seeds: no violation beyond 10⁻¹² relative. Th
 arm-ridge hunt, which is extended to the blurred arms of the young classes.
 
 **Acceptance.** Tests pass under `just test-slow`.
+
+**As built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+
+- **What is built.** `forms::FlareFactor` implements plan 02's `UnimodalFactor` over the cell's
+  radii, as specified. `displaced::bound::{layer_bound, spheroid_bound, arm_bound, ballistic_bound,
+form_bound}` bound one class's normalised form over a cell: the layer's radial envelope at the
+  nearest corner times the flare factor's supremum (times plan 02's `SharpArm::sup` at the blurred
+  width for a class that keeps the arm), plus the spheroid's nearest-corner value; the ballistic
+  layer takes the young disc's own envelope bound (its hole's factor at the farthest radius) at the
+  stretched height. Every bound carries `BOUND_SLACK` (1 + 4 × plan 02's `BOUND_MARGIN`), since the
+  forms' radius is `hypot(x, y)` and the cells' `√(x² + y²)`.
+- **Deferred to P08.T12**, which builds `DisplacedFields`: `DisplacedFields::bound` (the class's
+  weight and in-cube share times `form_bound`) and the `debug_assert!` in candidate evaluation,
+  since no displaced class is evaluated in placement before T12.
+- **Both tests read the test-only table** (T10's `tests/displaced_support`), so the tightness is
+  measured on made-up forms; they are to be rerun on P15.T6's table. `flare_bound_is_tight_and_safe`:
+  no violation in 10⁵ pairs of 512 points; the bound is 1.008 times the sampled maximum on
+  average (plan: at most 1.6).
+- **The hunt is narrower than the plan's.** Every inner cell of layers D and E on a stride of three,
+  with 56 classes, 27 starts and 20 seeds, is about 10⁴ times the work of a slow test. It walks
+  the cells on that stride in R and z along four azimuths (0°, 45°, 90°, 135°, which cross the arms
+  at every phase the pitch gives), every disc-born class (flared, ballistic and blurred-arm), 27
+  coordinate-ascent starts per cell and 20 seeds, every 384 ly (a stride of three layer-E cells)
+  in both layers: no violation; the worst density is 0.999 999 999 991 of its bound (the nearest
+  corner, where the bound is attained). It takes 755 s in the slow-test profile under load 11–16.
 
 ### P08.T12 Displaced classes in placement
 
@@ -1074,3 +1167,9 @@ f A_arm I₁(k) ÷ I₀(k)` exactly, so both density-weighted shifts are under 1
   Smith et al. 2009's 143 ± 2 at the bottom; Bird et al. 2021's 179 and the Sausage's 175 ± 26,
   Belokurov et al. 2020, at the top). `MIXTURE_SIGMA_R` is that window, not the measured value's
   ±5 (`tests/galaxy_kinematics_halo.rs`, `kinematics/halo.rs`'s module text).
+- **Findings of T8, T10 and T11 (lane `disp08`, 2026-09-26), for the owner after research.** T8.b's
+  band-averaged neutron-star bins miss the research's first three (0.331, 0.044, 0.116 against
+  0.20, 0.10, 0.155) with plan 11's stripped share behind the seam (0.46–0.51 across layer E at 10
+  au); at plan 06's provisional 0.25 bins 1 and 5 still miss (0.059, 0.106). Held as measured and
+  provisional in the test. T10 and T11 are tested on a table assembled from the brainstorm's
+  figures, and are to be rerun when P15.T6.c–e's table lands (P08.T9 or T12's lane).

@@ -2265,3 +2265,12 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     of −0.06 to −0.07 and a median of −0.05 to −0.06 in \[Fe/H\] (−0.02 to −0.04 and −0.01 to −0.02
     in \[M/H\]); the ±0.04 is this plan's tolerance, not a measured error, and the survey is a
     magnitude-limited sample of F and G dwarfs.
+- **The off-plane force (ruling 101.4, lane `disp08`, 2026-09-26; no output moves).**
+  `PotentialTables::force(R, z)` returns `CylindricalForce { radial: ∂Φ ÷ ∂R, vertical: ∂Φ ÷ ∂z }`
+  in (km/s)² per light-year, the exact derivative of the (R, |z|) grid's bicubic Hermite
+  interpolant plus the spherical components in closed form: the gradient of what `potential`
+  returns, to 10⁻⁶ of the force by central differences, and the mass model's to 0.5%. It is the
+  crate-private `forces` of plan 08's kinematics made public and divided by R. `MassModel::force`
+  sums every component directly (the Gaussians' `R ∂Φ ÷ ∂R` from their quadratures), the reference,
+  at about a millisecond a point. Plan 15's P15.T6.a integrates orbits with the first
+  (`potential/force.rs`).

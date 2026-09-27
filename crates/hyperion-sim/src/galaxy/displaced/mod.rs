@@ -10,10 +10,11 @@
 //! machinery ([`runaway`]), and a displaced candidate can back out the site of its supernova for
 //! plan 09's shared test ([`site`], P08.T13).
 //!
-//! What exists so far is P08.T1's layout: the class indices and kinds below, and the galaxy's
-//! scales ([`scales`]). The class table, the forms, their bounds, the marks, the runaway model,
-//! the binarity seam and the kick bins are built by the tasks named in each module, and nothing
-//! reads a displaced class until P08.T12 switches them on with its version bump.
+//! What exists so far: P08.T1's layout (the class indices and kinds below, and the galaxy's scales,
+//! [`scales`]), the binarity seam and the kick bins (P08.T8), the forms (P08.T10) and their bounds
+//! (P08.T11). The class table, the marks and the runaway model are built by the tasks named in
+//! their modules, and nothing generated reads a displaced class until P08.T12 switches them on
+//! with its version bump.
 //!
 //! Speeds are in units of the galaxy's circular speed `v_c` and times in units of `R_d ÷ v_c`
 //! ([`GalaxyScales`]), as plan 15's form table has them.
@@ -55,7 +56,37 @@ impl SpeedBin {
     pub fn index(self) -> usize {
         usize::from(self.0)
     }
+
+    /// The bin holding the speed `u`, in units of the circular speed ([`SPEED_EDGES`]); a speed
+    /// below zero or not a number falls in the first.
+    #[must_use]
+    pub fn of(u: f64) -> Self {
+        let mut bin = 0;
+        for &edge in &SPEED_EDGES {
+            if u >= edge {
+                bin += 1;
+            }
+        }
+        Self(bin)
+    }
+
+    /// Every bin, from the slowest.
+    pub fn all() -> impl Iterator<Item = Self> {
+        const _: () = assert!(SPEED_BINS == 8);
+        [0, 1, 2, 3, 4, 5, 6, 7].into_iter().map(Self)
+    }
 }
+
+/// The speed bins' inner edges, in units of the circular speed `v_c` (the nuclear disc's own for
+/// its classes): the kick's speed `u` falls in bin `k` when `SPEED_EDGES[k − 1] ≤ u <
+/// SPEED_EDGES[k]` (brainstorm, "Displaced objects: kicks and runaways"; plan 15's P15.T6 format,
+/// whose `tables::displaced_forms` repeats them).
+pub const SPEED_EDGES: [f64; SPEED_BINS - 1] = [0.25, 0.5, 0.85, 1.3, 1.75, 2.2, 2.8];
+
+/// The age bins' inner edges, in units of `R_d ÷ v_c` ([`GalaxyScales::tau_unit`]), with the same
+/// convention as [`SPEED_EDGES`] (brainstorm, "Displaced objects: kicks and runaways"; plan 15's
+/// P15.T6 format).
+pub const AGE_EDGES: [f64; AGE_BINS - 1] = [0.1, 0.3, 1.0, 2.0, 4.0, 8.0];
 
 /// An age bin of the class table, 0 to [`AGE_BINS`] − 1: the time since death in units of `R_d ÷
 /// v_c`.
@@ -157,5 +188,19 @@ mod tests {
         assert_eq!(AgeBin::new(6).map(AgeBin::index), Some(6));
         assert_eq!(AgeBin::new(7), None);
         assert_eq!(DisplacedClassId::new(99).index(), 99);
+    }
+
+    #[test]
+    fn a_speed_falls_in_the_bin_its_edges_bound() {
+        assert_eq!(SpeedBin::of(0.0).index(), 0);
+        assert_eq!(SpeedBin::of(0.249_999).index(), 0);
+        assert_eq!(SpeedBin::of(0.25).index(), 1);
+        assert_eq!(SpeedBin::of(1.0).index(), 3);
+        assert_eq!(SpeedBin::of(2.8).index(), 7);
+        assert_eq!(SpeedBin::of(40.0).index(), 7);
+        assert_eq!(SpeedBin::of(f64::NAN).index(), 0);
+        assert_eq!(SpeedBin::all().count(), SPEED_BINS);
+        assert!(SPEED_EDGES.windows(2).all(|w| w[0] < w[1]));
+        assert!(AGE_EDGES.windows(2).all(|w| w[0] < w[1]));
     }
 }
