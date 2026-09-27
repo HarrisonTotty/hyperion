@@ -754,12 +754,10 @@ mod tests {
         );
     }
 
-    /// Ruling 120.2: the low-mode share of neutron stars over layer E's band lies in 1/6–1/4 (the
-    /// brainstorm; Igoshev et al. 2021, 0.2 ± 0.1).
-    ///
-    /// **Provisional, a finding (2026-09-27):** with the seam's stripped share of 0.485 (P11.T4.a's
-    /// threshold; ruling 120.1's 0.25–0.33 unmet) it is 0.300, held here, above the window. At a
-    /// stripped share of 0.25 and of 0.33 it is 0.177 and 0.231, inside it, which the test asserts.
+    /// Ruling 120.2 with ruling 123.4: the low-mode share of neutron stars over layer E's band lies
+    /// in 1/6–1/4 (the brainstorm; Igoshev et al. 2021, 0.2 ± 0.1) with the seam's stripped
+    /// share, and it rises with that share (the window's two ends at a stripped share of 0.25 and
+    /// 0.33 lie inside it too).
     #[test]
     fn the_low_mode_share_of_neutron_stars() {
         let (_, w) = band_average(RemnantKind::NeutronStar, None);
@@ -768,14 +766,11 @@ mod tests {
         eprintln!(
             "low-mode share {w:.4}; at a stripped share of 0.25 {at_quarter:.4}, 0.33 {at_third:.4}"
         );
-        assert!((w - MEASURED_LOW_MODE_SHARE).abs() < 0.005, "{w}");
-        for share in [at_quarter, at_third] {
+        for share in [w, at_quarter, at_third] {
             assert!((1.0 / 6.0..=0.25).contains(&share), "{share}");
         }
+        assert!(at_quarter < at_third);
     }
-
-    /// The low-mode share [`the_low_mode_share_of_neutron_stars`] measures with the seam's share.
-    const MEASURED_LOW_MODE_SHARE: f64 = 0.300;
 
     #[test]
     fn the_maxwell_cdf_is_continuous_and_complete() {

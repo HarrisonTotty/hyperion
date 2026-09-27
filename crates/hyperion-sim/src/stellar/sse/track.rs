@@ -238,6 +238,39 @@ pub struct Track {
     built_until: f64,
 }
 
+/// A stage of a star's life that a mass-transfer case is named for (Kippenhahn and Weigert
+/// 1967): Case A from the main sequence, Case B from the Hertzsprung gap to the end of core
+/// helium burning, Case C after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Stage {
+    /// Core hydrogen burning.
+    MainSequence,
+    /// The Hertzsprung gap.
+    HertzsprungGap,
+    /// Up to the end of core helium burning: the giant branch, the flash, core helium burning and
+    /// a naked helium star's main sequence.
+    CoreHeliumBurning,
+}
+
+impl Stage {
+    /// The stage of a segment's model; `None` past core helium burning (the asymptotic giant
+    /// branch, helium shell burning, a remnant).
+    fn of(model: &Model) -> Option<Self> {
+        match model {
+            Model::MainSequence { .. } => Some(Self::MainSequence),
+            Model::HertzsprungGap { .. } => Some(Self::HertzsprungGap),
+            Model::FirstGiantBranch { .. }
+            | Model::FlashBridge { .. }
+            | Model::CoreHeliumBurning { .. }
+            | Model::HeliumMainSequence { .. } => Some(Self::CoreHeliumBurning),
+            Model::EarlyAgb { .. }
+            | Model::ThermallyPulsingAgb { .. }
+            | Model::HeliumShellBurning { .. }
+            | Model::Remnant { .. } => None,
+        }
+    }
+}
+
 /// How the star ends: its death and the remnant it leaves.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Fate {
@@ -478,6 +511,17 @@ impl Track {
             .rposition(|segment| matches!(segment.model, Model::MainSequence { .. }))?;
         self.segments
             .get(last + 1)
+            .map(|next| Years::new(next.start))
+    }
+
+    /// The age at which the star leaves `stage`, if the track has been built past it: the start of
+    /// the first segment beyond the stage, or its death if it dies in it (plan 08's stripping band,
+    /// ruling 123.2). Core helium burning includes a naked helium star's main sequence.
+    #[must_use]
+    pub(crate) fn stage_end(&self, stage: Stage) -> Option<Years> {
+        self.segments
+            .iter()
+            .find(|segment| Stage::of(&segment.model).is_none_or(|s| s > stage))
             .map(|next| Years::new(next.start))
     }
 

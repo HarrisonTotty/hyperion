@@ -27,6 +27,7 @@ mod detached;
 mod evolve;
 mod params;
 mod rlof;
+pub(crate) use rlof::{CODE_Q, GAP_Q};
 mod star;
 mod supernova;
 mod timeline;

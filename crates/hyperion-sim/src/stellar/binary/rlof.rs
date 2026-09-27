@@ -61,15 +61,17 @@ use super::timeline::{Component, IaPoolChannel, PooledIaEvent, SegmentKind};
 
 /// The critical mass ratio of a low-mass main-sequence donor (BSE section 2.6.4).
 const LOW_MASS_MAIN_SEQUENCE_Q: f64 = 0.695;
-/// Of a Hertzsprung-gap donor (BSE section 2.6.3).
-const GAP_Q: f64 = 4.0;
+/// Of a Hertzsprung-gap donor (BSE section 2.6.3). Plan 08's stripping band reads it (ruling
+/// 123.2).
+pub(crate) const GAP_Q: f64 = 4.0;
 /// Of a helium giant (BSE section 2.6.1).
 const HELIUM_GIANT_Q: f64 = 0.784;
 /// Of a white dwarf (BSE section 2.6.5).
 const WHITE_DWARF_Q: f64 = 0.628;
 /// Of a main-sequence donor of type 1 onto a main-sequence star and of a core-helium-burning donor
-/// (the published code's revision of March 2001; the paper gives none).
-const CODE_Q: f64 = 3.0;
+/// (the published code's revision of March 2001; the paper gives none). Plan 08's stripping band
+/// reads it (ruling 123.2).
+pub(crate) const CODE_Q: f64 = 3.0;
 
 /// Below this rate of hydrogen onto a white dwarf, novae (BSE section 2.6.6), M☉ yr⁻¹.
 const NOVA_RATE: f64 = 1.03e-7;

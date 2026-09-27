@@ -1188,3 +1188,20 @@ f A_arm I₁(k) ÷ I₀(k)` exactly, so both density-weighted shifts are under 1
   widest 0.024 in bin 2); the black holes' first bin is 0.785. `w` itself is 0.300 against 1/6–1/4, a
   finding that follows from (1): at a stripped share of 0.25 and 0.33 it is 0.177 and 0.231, which
   the test asserts inside the window, holding the measured 0.300 as provisional.
+- **Ruling 123, as built (lane `disp08`, 2026-09-27, at `GENERATOR_VERSION` 13; no output moves).**
+  The seam's share is stripping, not interaction: `binarity::stripped_share` is `S(a_B) −
+S(a_merge)`, two calls of plan 11's quadrature, with `a_B` the primary's largest radius to the end
+  of core helium burning over Eggleton's lobe fraction and `a_merge` its reach to the end of the
+  Hertzsprung gap below q = 1/4 (`1 ÷ GAP_Q`), to the end of the main sequence below 1/3 (`1 ÷
+CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q, CODE_Q}`, now
+  crate-visible). `binarity::stripping_band(m1, q, comp)` returns `StrippingBand { merge, strip }`,
+  `binarity::interacting_share` is the old `can_interact` share, and `Track::stage_end(Stage)` is
+  the crate-private phase-end accessor (core helium burning includes a naked helium star's main
+  sequence). Measured: stripped share **0.287** over neutron-star progenitors (window 0.25–0.33),
+  0.295 over layer E (P11.T1.d's 0.20–0.33), 0.24 at 8 M☉ and 0.35 at 16.6 M☉; stripped ÷
+  interacting **0.619** over neutron-star progenitors (0.5–0.75); the low-mode share `w` **0.181**
+  (1/6–1/4). T8.b's targets from that `w` are 0.189, 0.073, 0.173, 0.203, 0.138, 0.087, 0.068, 0.068
+  against the neutron stars' 0.188, 0.059, 0.155, 0.193, 0.147, 0.105, 0.072, 0.081 (widest 0.019);
+  the black holes' first bin is 0.783. The provisional holds at 0.485 and 0.300 are removed: each
+  test asserts its window. **P11.T1.d and T2.c draw a marked innermost orbit from the stripping
+  band and an unmarked one from its complement** (ruling 123.5).

@@ -1814,3 +1814,13 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   counts every interacting pair and Sana et al. (2012) find 20–30% of O stars merge rather than
   being stripped. T1.d's acceptance window (0.20–0.33) will miss by the same amount unless mergers
   are taken out of the share.
+- **Ruling 123 behind plan 08's seam (lane `disp08`, 2026-09-27; no output moves).** Stripped is not
+  interacting: `galaxy::displaced::binarity::stripped_share` is this plan's `stripped_share` at the
+  stripping band's outer edge less at its inner one, `S(a_B) − S(a_merge)` (Case A or B before
+  helium exhaustion, mergers out, by the engine's `GAP_Q` and `CODE_Q`), and
+  `binarity::stripping_band(m1, q, comp)` returns the band. It is 0.287 over neutron-star
+  progenitors, 0.295 over layer E (T1.d's 0.20–0.33 holds) and 0.619 of the interacting share.
+  **Design note 1 as amended by ruling 123.5: T1.d and T2.c draw a marked innermost orbit from the
+  stripping band and an unmarked one from its complement** (the merger band, Case C and wide pairs),
+  instead of the interacting range; when the engine is wired (T6 or T11) about 10³ marked systems
+  are checked to be stripped, not merged, before the primary's death, and the merger band to merge.
