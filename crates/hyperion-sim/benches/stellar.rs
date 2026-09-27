@@ -31,7 +31,8 @@ use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::math;
 use hyperion_sim::stellar::brief::{BriefModel, range_brief};
 use hyperion_sim::stellar::classify::{ClassExtras, classify};
-use hyperion_sim::stellar::draws::StarDraws;
+use hyperion_sim::stellar::draws::{StandardNormal, StarDraws};
+use hyperion_sim::stellar::fates::FittedFates;
 use hyperion_sim::stellar::multiplicity::{
     MultiplicityContext, RedrawAttempt, draw_hierarchy, draw_star_count,
 };
@@ -358,6 +359,18 @@ fn routed(c: &mut Criterion) {
             )
         });
     });
+    let fates = FittedFates::generator();
+    for m in [1.0, 4.0, 20.0] {
+        group.bench_function(format!("FittedFates::lifetime_fitted ({m} Msun)"), |b| {
+            b.iter(|| {
+                fates.lifetime_fitted(
+                    black_box(SolarMasses::new(m)),
+                    &Composition::SOLAR,
+                    StandardNormal::ZERO,
+                )
+            });
+        });
+    }
     group.bench_function("main_sequence_state (0.4 Msun at 5 Gyr)", |b| {
         b.iter(|| {
             main_sequence_state(

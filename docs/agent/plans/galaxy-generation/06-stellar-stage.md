@@ -294,23 +294,26 @@ delegates to plan 02's `ProvisionalFates` until plan 11.
 pub fn main_sequence_state(m0: SolarMasses, comp: &Composition, draws: &StarDraws, age: Years)
     -> Option<StarState>;              // None unless on a knot-free main sequence at `age`
 // stellar::fates: one node of the fate table, one Track::full (T38.c), and its reader (T38.d)
-pub struct FateNode { /* t_death, route and SN byte, remnant mass or M_CO, cooling origin,
-    M_He, M_env */ }
-impl FateNode { pub fn of(m0: SolarMasses, comp: &Composition, eta: f64) -> Self; }
-pub struct FittedFates;                // over tables::stellar_fates; ruling 77.3's lifetime table
-impl FittedFates {
-    pub fn lifetime_fitted(&self, m0: SolarMasses, comp: &Composition, eta: f64) -> Option<Years>;
-    pub fn lifetime_bracket(&self, m0: SolarMasses, comp: &Composition, eta: f64)
-        -> Option<(Years, Years)>;     // certified: contains Track::lifetime
-    pub fn fate_fitted(&self, m0: SolarMasses, comp: &Composition, eta: f64)
+pub struct FateNode { route: FateRoute, log_death_age, a, b }  // a, b: a white dwarf's mass
+                                       // and cooling origin, or an iron core's M_CO and M_He
+impl FateNode { pub fn of(m0: SolarMasses, comp: &Composition, eta: StandardNormal) -> Self; }
+pub struct FittedFates<'t> { fe_h, panels: [FatePanel<'t>; 3], splits: [f64; 2] }
+                                       // over tables::stellar_fates_{low,mid,high} (generator())
+impl FittedFates<'_> {           // every η a StandardNormal draw
+    pub fn lifetime_fitted(&self, m0: SolarMasses, comp: &Composition, eta) -> Option<Years>;
+    pub fn lifetime_bracket(&self, m0: SolarMasses, comp: &Composition, eta)
+                -> Option<(Years, Years)>;     // validated, not proved (P06.T38.d's tests)
+    pub fn fate_fitted(&self, m0: SolarMasses, comp: &Composition, eta)
         -> Option<FittedFate>;         // route, remnant inputs, error bounds
 }
 // stellar::brief: per-row routing for a range query (T38.e)
 pub struct BriefModel;                 // epoch state, time-independent, cacheable
 impl BriefModel {
-    pub fn new(galaxy: &Galaxy, record: &SystemRecord) -> Self;   // gains the fates with T38.d
+    pub fn new(galaxy: &Galaxy, record: &SystemRecord) -> Self;   // the generator's table
+    pub fn with_fates(galaxy: &Galaxy, record: &SystemRecord, fates: &FittedFates) -> Self;
     pub fn brief_at(&self, t: UniverseTime) -> Option<StellarBrief>;
-    pub fn route(&self) -> BriefRoute;  // MainSequence | Exact (later: the table's)
+    pub fn stated_error_at(&self, t: UniverseTime) -> Option<StatedError>; // table rows only
+    pub fn route(&self) -> BriefRoute;  // Table | MainSequence | Exact
     pub fn star_count(&self) -> u8;
     pub fn heap_bytes(&self) -> usize;
 }
@@ -533,12 +536,14 @@ generation?)` with its exhaustive `ErrorCode` switch `settledState` in `lib/useS
     The brainstorm gives widths only; see Risks.
 13. **Neutron-star birth laws.** The brainstorm says birth spin and field "are drawn" and gives no
     distribution. The field is one log-normal with decay, so magnetars are the high tail of the
-    birth field and fall out of the draw, as the brainstorm's row asks, and are not a separate roll:
-    log₁₀ B₀ normal about 13.25 with σ 0.6 and the decaying-field population synthesis of Popov et
-    al. (2010, MNRAS 401, 2675); birth periods normal about 300 ms with σ 150 ms (Faucher-Giguère
-    and Kaspi 2006, ApJ 643, 332). The two come from different syntheses, so P06.T21.a re-checks
-    that the pair still reproduces the observed period and period-derivative plane and records what
-    it settles on. Flagged under Risks.
+    birth field and fall out of the draw, as the brainstorm's row asks, and are not a separate roll.
+    Both come from the decaying-field population synthesis of Popov et al. (2010, MNRAS 401, 2675),
+    in the timing convention B = 3.2 × 10¹⁹ G √(P Ṗ) (ruling 110.1): log₁₀ B₀ at the equator
+    normal about 12.95 with σ 0.6 (their polar 13.25 less log 2), and birth periods normal about
+    250 ms with σ 100 ms. P06.T21.a re-checks that the pair reproduces the observed period and
+    period-derivative plane, weighting the living pulsars by beaming × radio luminosity
+    (Faucher-Giguère and Kaspi 2006, ApJ 643, 332): median P 0.4–0.9 s and median log Ṗ −15.2 to
+    −14.2 (ATNF v2.6.1: 0.63 s, −14.66).
 14. **An event may change what a console reads, never what the track is.** `summary_at` applies the
     transient factor of active events (an FU Orionis outburst's luminosity, a glitch's recovering
     frequency step) on top of the track's state. Mean effects are already in the closed forms: the
@@ -1158,18 +1163,20 @@ nothing of plans 02 or 03.
 
 #### P06.T21 Neutron stars
 
-- **P06.T21.a Birth draws.** Spin period normal about 300 ms with σ 150 ms, redrawn until above 10
-  ms (`star.ns.spin`); log₁₀ of the dipole field in gauss normal about 13.25 with σ 0.6
-  (`star.ns.field`); magnetic inclination and spin axis isotropic (`star.ns.geometry`). Sources to
-  re-check: Faucher-Giguère and Kaspi (2006) for the period, Popov et al. (2010) for the field with
-  decay.
+- **P06.T21.a Birth draws.** Spin period normal about 250 ms with σ 100 ms, redrawn until above 10
+  ms (`star.ns.spin`); log₁₀ of the equatorial dipole field in gauss normal about 12.95 with σ 0.6
+  (`star.ns.field`); magnetic inclination and spin axis isotropic (`star.ns.geometry`). Both from
+  Popov et al. (2010), their polar field less log 2 (ruling 110.1).
 - **P06.T21.b Spin-down in closed form.** Field decay B(t) = B₀ ÷ (1 + t ÷ τ_d) with τ_d = 10⁴ yr ×
-  (10¹⁵ G ÷ B₀), to a floor of 10¹² G or B₀ if lower. Magnetic dipole braking P Ṗ = k B², k from R =
-  11.5 km and I = 10⁴⁵ g cm², gives P(t)² = P₀² + 2k ∫B² dt, and the integral of this decay law is
-  elementary. Mean glitch activity is included as a factor (1 − 0.01) on ν̇ for pulsars with
-  characteristic ages of 10³–10⁵ years (Fuentes et al. 2017; re-check), so glitches leave no mark
-  that needs replaying. `PulsarState` at any age: period, period derivative, field, characteristic
-  age, spin-down luminosity and whether the pulsar is alive.
+  (10¹⁵ G ÷ B₀), to a floor of 10¹² G or B₀ if lower (Colpi, Geppert and Page 2000, ApJ 529, L29,
+  eq. 3 with α = 1, normalised to Beniamini et al. 2019's τ_B = 10⁴ yr; ruling 110.4). Magnetic
+  dipole braking P Ṗ = k B², k in the timing convention (R = 10 km, I = 10⁴⁵ g cm², so k = 9.77 ×
+  10⁻⁴⁰ s G⁻²; ruling 110.1, which keeps 12.2 km for the decay luminosity), gives P(t)² = P₀² +
+  2k ∫B² dt, and the integral of this decay law is elementary. Mean glitch activity is included as
+  a factor (1 − 0.01) on ν̇ while |ν̇| < 10⁻¹⁰·⁵ Hz s⁻¹, for pulsars and magnetars alike (Fuentes
+  et al. 2017, A&A 608, A131, §5; ruling 110.3), so glitches leave no mark that needs replaying.
+  `PulsarState` at any age: period, period derivative, field, characteristic age, spin-down
+  luminosity and whether the pulsar is alive.
 - **P06.T21.c Death line, magnetars, beaming.** Alive as a radio pulsar while B ÷ P² > 0.17 × 10¹² G
   s⁻² (Bhattacharya et al. 1992). Magnetar while B > 4.4 × 10¹³ G and the decay luminosity exceeds
   the spin-down luminosity. Beam half-angle ρ = 5.4° × (P ÷ s)^(−½) (or the Tauris and Manchester
@@ -1185,10 +1192,11 @@ nothing of plans 02 or 03.
 - **Files:** `stellar/remnant/neutron_star.rs`.
 - **Tests:** P is continuous and non-decreasing in age; with constant field the closed form equals
   √(P₀² + 2kB²t); a 10¹²·⁵ G pulsar born at 300 ms dies after 10⁷–10⁸ years; the share of neutron
-  stars born above 4.4 × 10¹³ G is 15–40% (the draw of T21.a gives 26%; Beniamini et al. 2019
-  estimate about 0.4 with wide errors; re-check), none of them counts as a magnetar by T21.c's
-  second condition before spin-down has slowed it, and the expected number of active magnetars at
-  two core collapses a century is 20–300; the beaming fraction at 1 s is 10–20% over random
+  stars born above 4.4 × 10¹³ G is 8–40% (the draw of T21.a's tail holds 12.4%, 12.2% measured; Popov et al. 2010 "about
+  10%"; ruling 110.1), none of them counts as a magnetar by T21.c's second condition before
+  spin-down has slowed it, and the expected number of active magnetars at two core collapses a
+  century is 20–300 (about 90; ruling 110.2); design note 13's weighted medians lie in their
+  windows; the beaming fraction at 1 s is 10–20% over random
   directions; the pulsar wind nebula flag lasts 10³–10⁵·⁵ years across the birth distribution.
 - **Accept:** tests pass.
 
@@ -1277,10 +1285,14 @@ massive and stripped stars, T24.b the rest.
     distribution for the mass (bimodal for late B and A stars; Zorec and Royer 2012; record), as a
     fraction of critical velocity from the state's mass and radius, conserved through the main
     sequence. Below 1.3 M☉ it maps onto the initial period spread, which converges by Skumanich
-    braking, P_rot ∝ t^½ with a colour-dependent coefficient (Mamajek and Hillenbrand 2008; record),
+    braking, Skumanich-like, P_rot ∝ t^0.566, MH08's fitted exponent, with their colour-dependent
+    coefficient (Mamajek and Hillenbrand 2008, Table 10, whole; ruling 110.6),
     with saturation for fully convective stars. Both are closed forms in age.
-  - `u_mag` (`star.magnetism`): a fossil field in 7–10% of main-sequence stars above 1.5 M☉, with a
-    log-normal strength; these are forced to the slow rotation mode.
+  - `u_mag` (`star.magnetism`): a fossil field in main-sequence stars from 1.4 M☉, with an
+    incidence rising with mass: 0.5% at 1.4–1.8 M☉, linear to 11% at 3.6 M☉, flat to 5 M☉, then
+    down to 7% at 15 M☉ and above (Sikora et al. 2019, MNRAS 483, 2300, §6; Grunhut et al. 2017,
+    MNRAS 465, 2432; ruling 110.5), with a log-normal strength; these are forced to the slow
+    rotation mode.
   - Derived: `Be` for B-type main-sequence stars above 0.7 of critical; `Ap`/`Bp` for fossil-field
     stars of 7,000–20,000 K; `Am` for non-magnetic A stars (7,000–10,000 K) under 120 km/s (as a
     single-star stand-in for tidal braking; plan 11 adds the binaries); `ActivityLevel` from the
@@ -1288,7 +1300,8 @@ massive and stripped stars, T24.b the rest.
     10⁻³ below Ro = 0.13, falling as Ro^(−2.7) above. The flare rate of T28.a reads the activity.
 - **Files:** `stellar/rotation.rs`.
 - **Tests:** the Sun's age and mass give a 22–30 day period and a low activity level for the median
-  draw; Be stars are 10–25% of B-type main-sequence stars; Ap and Bp 5–10% of A and B stars;
+  draw; Be stars are 10–25% of B-type main-sequence stars; Ap and Bp 1–3% of main-sequence stars
+  of 1.4–5 M☉ (Sikora et al.'s 52 of 3,254; ruling 110.5);
   rotation period continuous and rising with age for cool dwarfs.
 - **Accept:** tests pass.
 
@@ -1299,8 +1312,10 @@ massive and stripped stars, T24.b the rest.
   gap, 1.5–2.5 M☉), RR Lyrae (low-mass core helium burning), classical Cepheid (core helium burning
   blue loop or gap crossing, 3–20 M☉), type II Cepheid (post-horizontal-branch and AGB low-mass
   stars: BL Her, W Vir, RV Tau by period). Period from mean density, P = Q × (ρ̄ ÷ ρ̄☉)^(−½), with Q
-  by kind (0.033–0.04 d), amplitude largest mid-strip and zero at the edges, so variability switches
-  on and off continuously as a star crosses.
+  by kind (0.033–0.04 d), amplitude zero at the edges, so variability switches on and off
+  continuously as a star crosses. A classical Cepheid's amplitude peaks 300 K inside the blue edge
+  and falls linearly to the red (Bono, Castellani and Marconi 2000, ApJ 529, 293, §4; ruling 110.7);
+  the other kinds' peak mid-strip.
 - **P06.T26.b Long-period variables.** AGB and tip giants: Mira above a luminosity and amplitude
   threshold, semiregular (SRa, SRb) below, irregular for supergiants (SRc, Lc). Period from Ostlie
   and Cox (1986): log P = −2.07 + 1.94 log R − 0.9 log M (days, solar units).
@@ -1550,10 +1565,12 @@ and in L and T_eff within the table's stated error (ruling 89.2 as amended by ru
 Main-sequence primaries (about 90% of rows) take a state-only fast path; living evolved stars and
 stars near death take the exact integrator; dead stars take a **fate table over (m₀, Z, η)**, since
 a remnant's state is a closed form of four numbers
-(`Model::Remnant { phase, mass, birth, origin }`). The table is ruling 77.3's fitted lifetime table: one artefact, one `Track::full` per node,
-giving the death age and the fate. It is over mass, Z and η, never age, so it keeps the brainstorm's
-"no tables binned by age". No existing output moves and no bump is needed; a moved golden is a
-finding. The design study is `_orchestration/research/briefs/ADVICE.md`.
+(`Model::Remnant { phase, mass, birth, origin }`). The table is ruling 77.3's fitted lifetime
+table: one artefact, one `Track::full` per node, giving the death age and the fate. It is over
+mass, Z and η, never age, so it keeps the brainstorm's "no tables binned by age". No existing
+output moves and no bump is needed; a moved golden is a finding, but for this task's own briefs
+goldens, whose table-routed rows move within their stated error (ruling 90.4). The design study is
+`_orchestration/research/briefs/ADVICE.md`.
 
 - **P06.T38.a Measure first.** A stop point: report before building b–e. Say so if the draws, the
   hierarchy or the classification cost more than about 5 µs a row, since then the fast path alone
@@ -1663,8 +1680,8 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
       refusals outside 0.1–100 M☉ and at negative or non-finite ages; no golden moved. Cost: 2.9 µs
       for a 0.4 M☉ dwarf (bench, `math::exp` 7.2–7.9 ns), about 27,000 instructions against `to_age`'s
       6.8 µs.
-- **P06.T38.c The node evaluator and the table task.** **Held (ruling 90)** until the research on
-  the white dwarfs' metallicity structure (T38.a) and the ruling on the table's form.
+- **P06.T38.c The node evaluator and the table task.** Held by ruling 90, unblocked by ruling 99
+  once ruling 92's giant radii smoothed the white dwarfs' metallicity structure.
   - **Build:** in the sim, a public node evaluator (one `Track::full`, the six columns), since
     `fate_of` and the remnant segment are crate-private and `hyperion-fit` calls only public API
     (plan 15, design note 1). In `hyperion-fit`, `tasks/stellar_fates.rs`: the grid T38.a fixed,
@@ -1681,8 +1698,61 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
   - **Tests:** a byte-for-byte reproduction of the table (slow); a fingerprint test in `just test`,
     12 fixed nodes across every route rebuilt with `FateNode::of` and compared bit for bit with the
     table, so that a stellar change moving a node fails ordinary CI (plan 15, design note 7).
-  - _Accept:_ `just ci` and `just test-slow stellar_fates` green.
-- **P06.T38.d `FittedFates`, the reader.** **Held (ruling 90)** with T38.c.
+    - _Accept:_ `just ci` and `just test-slow stellar_fates` green (as built:
+      `just test-slow the_committed_panels_are_reproduced`, and `just fit-check`).
+  - _As built (round 9, `briefs`; ruling 99), on fit15's registry (plan 15, P15.T1–T2)._
+    - **The re-survey** on the merged tree (21,550 tracks at five \[Fe/H\] and five η, and 40
+      \[Fe/H\] at the median η) found the white dwarfs' mass error in \[Fe/H\] at 0.25 dex down to
+      a median of 4.9 × 10⁻⁵ (1.1% over 10⁻³) and the iron cores' M_CO to 7.4 × 10⁻⁶ (10.5% over
+      10⁻³), as ruling 99.3 said. Cubic in η over five nodes left the white dwarfs' mass at 8.2%
+      over 10⁻³; the iron cores do not depend on η (10⁻¹⁵).
+    - **The grid was chosen on real rows, not the survey alone.** A scratch harness built
+      candidate tables in memory and routed the dead rows of the 50 ly solar-circle query, a
+      200 ly thick-disc query and a 50 ly bulge query through them. The \[Fe/H\] spacing decides
+      the white dwarfs' mass error and so how often the guard fails: 11 nodes gave 24 ms per
+      1,600 solar-circle rows, 21 gave 18.7, and HPT's seven calibration metallicities as nodes
+      with 0.125 dex between them 16.9. The mass step (0.005 against 0.01 dex) and the η nodes
+      (four, five or seven) moved it by under 1 ms; a safety factor of 2 gave 19.5 ms but a
+      class mismatch in the bulge, so it stays 3.
+    - **Three panels, three tasks, three files** (`stellar_fates_low`, `_mid` and `_high`), since
+      the toolchain writes one file per task and the repository takes no file over 500 kB:
+      low 0.74–2.63 M☉ (56 masses, 285 kB), mid 2.34–9.12 M☉ (60 masses, 304 kB), both at
+      Δlog m₀ = 0.01 and η = −3, −1, 1 and 3; high 5.75–100 M☉ at Δlog m₀ = 0.02 and η = 0 alone
+      (63 masses, 111 kB). All share 24 \[Fe/H\] nodes. That is 12,648 nodes; with the
+      validation's four points a cell, 49,816 full tracks, 17 s on four threads. The reader switches
+      panel at 2.5 and 8 M☉, and each panel's nodes run past its splits. The tasks are `Fast`.
+    - **Columns:** the route (He, CO or ONe white dwarf, electron capture, iron core, no remnant),
+      log₁₀ death age, and two values: a white dwarf's mass and cooling origin, or an iron core's
+      progenitor M_CO and M_He. The iron core's remnant is drawn afterwards from the star's own
+      draws by Mandel and Müller's `core_collapse`, as the track does. Values are stored to eight
+      significant digits, and without digit separators so that the files fit
+      (`#[expect(clippy::unreadable_literal)]`). The large arrays are `pub static`, since Clippy
+      refuses so large a `const`, and \[Fe/H\]'s array expects `approx_constant`, since log₁₀(0.01
+      ÷ 0.02) is −log₁₀ 2.
+      - **Validation:** each cell of mass and metallicity is checked at four points, a quarter and
+        three quarters across it in mass and in \[Fe/H\], paired four ways, at the middle of each η
+        cell (the high panel: at η ±2.4, 0 and 1.2, and it answers for no |η| over 2.4). A bound is
+        three times the worst error, at least 10⁻⁴, rounded up to two digits. A cell fails where a point takes
+        another route, no stencil avoids a change of route, or a bound exceeds 0.02 (0.2 for iron
+        cores, whose guard reads only the remnant's kind). Unusable cells: 35% of the low panel's
+        (the He/CO line and m_hef), 9.6% of the mid's, 6.5% of the high's. Usable bounds (median,
+        99th percentile): death age 1.1 × 10⁻⁴ and 3.1–16 × 10⁻³; white dwarf mass 1.1 × 10⁻³ and
+        1.1 × 10⁻² (low), 5.8 × 10⁻⁴ and 8.2 × 10⁻³ (mid).
+    - **Tests:** `the_committed_panels_are_reproduced` (slow, byte for byte through
+      `pipeline::rerender`) and a small fit equal on one and four threads, in `hyperion-fit`;
+      `just fit-check` holds the three to their inputs hash, body hash and fingerprint (two
+      probe stars a panel); the sim's `the_committed_nodes_are_the_tracks` rebuilds twelve nodes
+      (four a panel) with `FateNode::of` and compares them with the table to its stored digits,
+      in `just test`, which is the plan's twelve nodes to the stored precision rather than bit for
+      bit.
+      - _Deviations:_ no `render.rs`, `Command::RunStellarFates` or `DEFAULT_STELLAR_FATES_OUT`, which
+        plan 15's registry replaced; three tasks and files, not one, from one
+        `StellarFatesTask { panel }` in three statics; `FateNode::of` takes η as a `StandardNormal`;
+        four columns, not six, since an iron core's remnant is redrawn from M_CO and M_He and needs
+        no supernova byte or envelope; the node check compares to the stored eight digits, not bit
+        for bit; the header reads 11, since the bump to 12 has not come, and the bump must re-emit
+        the three with `--since 12` (or refit them if a track moves).
+- **P06.T38.d `FittedFates`, the reader.** Built with T38.c.
   - **Build:** interpolation in fixed-order arithmetic through `math`; `None` outside the domain
     (m₀ below 0.7 or above 100 M☉, η beyond ±3σ, a non-zero `helium_excess`, an unsmooth cell).
   - **Provides:** `FittedFates::{lifetime_fitted, lifetime_bracket, fate_fitted}` and
@@ -1693,6 +1763,26 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
     subsample in `just test`, 10⁵ slow): the bracket contains the exact lifetime every time, and
     the columns are within the stated tolerances.
   - _Accept:_ `cargo test -p hyperion-sim -- stellar::fates` and its slow test green.
+  - _As built (round 9, `briefs`)._ `FittedFates { fe_h, panels: [FatePanel; 3], splits }`, with
+    `generator()` over the three files, and `fate_fitted`, `lifetime_fitted`, `lifetime_bracket`
+    and `fate_unbounded` (what `hyperion-fit` validates by). The interpolant is Lagrange in each
+    axis: cubic, or quadratic or linear where no cubic stencil keeps to one route. It answers
+    `None` outside 0.74–100 M☉, outside the η nodes, for a helium excess, where no stencil keeps to
+    one route, and in an unusable cell. A stripped star is not the table's inside
+    `STRIPPED_WINDOW` (5.5–11 M☉), where the mark can move its fate (ruling 93); a test checks
+    that outside it the mark moves none. `FittedFate::remnant` gives the remnant of the star's own
+    remnant draws with the columns shifted by their bounds, the guard's corners. - **Tests:** `the_table_is_within_its_bounds`: over 400 random stars in `just test` the route
+    is always the track's, every star lies within three times its bounds, and at most one in
+    fifty past a bound itself; the slow test holds 10⁴ stars to the same and one in a hundred (as run: 7,638 answered, 13, or
+    0.17%, past a bound, none past three times it or by another route).
+    _Deviation:_ 400 and 10⁴ stars, not 10⁴ and 10⁵, since each is a full track; and the
+    bracket is not held "every time" at its own width: the bounds are validated, not proved
+    (before the floor of 10⁻⁴, the four-point validation and the high panel's |η| ≤ 2.4, iron
+    cores were found three to eleven times past theirs, and a 99 M☉ star's death age six), so
+    the range brief takes a star as dead only past three times the death age's bound, and at
+    least 3 × 10⁻³ of its life (`DEAD_MARGIN_FLOOR`), the margin the tests hold always.
+    - `lifetime_fitted` costs about 1 µs; plan 08 and P06.T30.b may read it. The Verification's
+      lifetime line names it.
 - **P06.T38.e The brief router.** _Ruling 90:_ built before T38.c–d with **dead stars on the exact
   path** until the table exists, and with the hierarchy's count-only path **required**, as a new
   plan 11 function beside `draw_hierarchy`, which stays unchanged.
@@ -1746,6 +1836,54 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
     each, so 20,000 of them are 7.7 s on one thread and about 1.1 s over the pool's seven workers.
     **The 15 ms budget is missed by the dead rows alone,** as ruling 90 expected; T38.c–d are
     what meets it.
+  - _The table route, as built (ruling 99)._ `BriefRoute::Table`: a star the table finds dead
+    through the whole window (its age at −H past the death age plus its bound) takes its
+    remnant's closed form at the table's fate (`Track::remnant_only`, whose state is the full
+    track's bit for bit at the same remnant). It is asked before the main sequence, whose build
+    for a dead massive star would be wasted. The guard:
+    - a white dwarf's class is a function of its temperature and draws alone: the temperature's
+      range over the box and the window, to first order (three partial differences at −H, the
+      cooling to +H at the centre), must keep the class the same at both ends and the centre;
+    - an iron core's remnant kind must be the same at the four corners of its two cores;
+      - a neutron star's class (`NS`, `PSR` or `MAG` since P06.T21.c) must be the same at both ends
+        of the window for the death age at its centre and three bounds either side, since the
+        pulsar's age since formation decides it; electron capture takes that check alone, and no
+        remnant none.
+        On the rebase onto d2787a2 (version 12) the remnant routes pass a neutron star's pulsar class
+        to `classify` (`remnant_extras`, as `StarModel::class_extras_at` does), and the main sequence's
+        rotation draws are read after the dead star's early return. The three tables' bodies are
+        unchanged at version 12.
+        A star that fails, or whose mark matters, takes `remnant_of`, a build to the death that keeps
+        no other segment and no samples (`Keep::Remnant`, new), whose remnant is the full track's bit
+        for bit (tested), and only a star alive at −H after all its `StarModel`.
+        `BriefModel::stated_error_at` gives the table's brief its stated error: the range of log L and
+        `T_eff` over the corners of the box at three times the bounds (`STATED_FACTOR`), widened by
+        at least 10⁻⁴ dex and 10⁻⁴ relative. Every table-routed row of the tests lies inside it (31,536
+        in the slow test); at the bounds' own width 0.5% did not. A star is taken as dead past three times the death age's
+        bound. `BriefModel::with_fates` takes another table, for studying one on real rows.
+        _Also:_ the builder now finds the lightest helium star only when a helium main sequence is
+        entered, not in `Builder::new`, which cut the T38.b fast path by a twentieth; no output moves.
+        T38.b's note that `track/build.rs` is unchanged no longer holds.
+      - **Cost** (instruction counts; `math::exp` = 73; at an idle 7.9 ns): per 1,600 solar-circle
+        rows **16.6 ms** (96,000 instructions a row), of which the twelve exact dead rows are 51%,
+        the main sequence 34%, the table's 65 rows 11%. The wall time was 18.9 ms for the 969 rows
+        at load 6 and 4.2 GHz. Warm: 0.6 µs a row, 1 ms per 1,600. A table row costs 116,000
+        instructions for a white dwarf and 326,000 for a neutron star, most of it plan 11's
+        hierarchy of a massive star. The thick disc's 200 ly query: 29 ms per 1,600 (its white
+        dwarfs meet more unusable cells); the bulge's all-dead rows: 148 ms per 1,600, 82% of them
+        table-routed (1.8 s at the cap of 20,000 on one thread, about 0.3 s on the pool).
+      - **Fallback share** of the dead rows: solar circle 16% (6 guard, 4 unusable cells or no
+        stencil, 1 near death, 1 neutron star at the NS/BH line); thick disc 28%; bulge 18%
+        (stripped marks 5%, white-dwarf guard 10%). **The 15 ms target is missed by 11%** at the
+        solar circle: the white dwarfs' mass error, about 10⁻³ against a temperature index rounded to 0.1,
+        trips the guard for one white dwarf in nine, and each costs a full track to its death.
+      - **Accuracy:** no class or kind mismatch over the 1,175 table-routed rows of the three
+        queries, nor over the slow test's 31,536, every one inside its stated error.
+        The golden `stellar/briefs.golden` moved on the five systems that are now table-routed
+        (ruling 90.4): log L by up to 4 × 10⁻⁴ dex and `T_eff` by up to 0.02%, every class and kind
+        unchanged. `systems_in_range_briefs.golden` moved on 27 dead rows: log L by up to 2.5 ×
+        10⁻⁴ dex (median 2 × 10⁻⁵) and `T_eff` by up to 3.6 × 10⁻⁴ (median 2.5 × 10⁻⁵), kinds and
+        classes unchanged.
   - _Re-measured after the rebase onto 6ac4458_ (kick's P06.T19 and zsmooth's ruling 92).
     Instructions per solar-circle row: main sequence 38,700 (unchanged), living 44,600, dead 4.25 M
     (×1.33 over 3.19 M). **1,600 cold rows: about 65 ms idle**, 90% of it the dead rows; warm
@@ -1918,8 +2056,9 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
   layer D or E in about 5 µs (plan 08's 5 ms query budget counts on it: its design note 28 and
   P08.T16), met not by `stellar::lifetime`, which keeps bit-equality with `Track::lifetime` at
   0.5–0.75 ms, but by a **fitted lifetime table** (`hyperion-fit`, in log M, Z and the draws that
-  matter, with a stated tolerance against `Track::lifetime`), built with its first bulk consumer,
-  P06.T30 or plan 08's placement (ruling 77.3); `generate` for a main-sequence dwarf under 10 µs,
+  matter, with a stated tolerance against `Track::lifetime`), ruling 77.3's table, built by
+  P06.T38.c–d as the fate table (`FittedFates::lifetime_fitted`, about 1 µs, with each cell's
+  validated bound; met); `generate` for a main-sequence dwarf under 10 µs,
   for a giant under 60 µs, for a remnant (full track) under 150 µs, so that a triple of evolved stars under plan 11 still leaves plan 14
   half the millisecond for the bodies; `brief_at` on a built model under 2 µs; briefs for a cold 50
   ly query of 1,600 systems adding under 15 ms to plan 03's 5 ms; ten Poisson bins under 2 µs; one
@@ -3605,3 +3744,29 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     peak near the blue edge, not mid-strip (built mid-strip); at solar Z the backbone's 5 M☉ blue
     loop reaches only 4,660 K, short of the strip (6,170 K), so the 5 M☉ test is at [Fe/H] = −0.5
     and loops reach the strip from 6 M☉ at solar Z.
+- **Ruling 110, as built (round 9, `rem07`).** Points 1, 3, 5 and 7 move output, in one batch.
+  - _T21 (points 1–4)._ `neutron_star::TIMING_RADIUS` (10 km) sets k = 9.77 × 10⁻⁴⁰ s G⁻², which
+    withdraws ruling 27's consequence for k (the radius bullet above); the decay luminosity keeps
+    `neutron_star_radius`'s 12.2 km. The field is the equatorial one
+    (`birth_field`, `PulsarState::field`, the wire's `magnetic_field_g`), log B ~ N(12.95, 0.6),
+    and P₀ ~ N(0.25, 0.10) s. `GLITCH_AGES` is gone: `GLITCH_NU_DOT_LIMIT` (10⁻¹⁰·⁵ Hz s⁻¹) sets
+    one onset per star, where the unglitched |ν̇| = k B² ÷ P³ reaches it (closed form on the
+    floor, bisection in B ÷ B₀ to the last bit while the field decays; zero for the many stars
+    born below it, which then glitch from birth, so the constant-field test reads √(P₀² + 2 × 0.99
+    kB²t)). Measured: 12.2% born above 4.4 × 10¹³ G (window 8–40%), 84 active magnetars (20–300),
+    and design note 13's re-check weighted by the beam's swept sky fraction × P^−1.5 Ṗ^0.5: median P
+    0.646 s (0.4–0.9) and log Ṗ −14.84 (−15.2 to −14.2), with 40% of stars alive at a uniform age
+    to 100 Myr.
+  - _T25 (points 5–6)._ `rotation::FOSSIL_FIELD_INCIDENCE` and `fossil_field_incidence` replace
+    `FOSSIL_FIELD_SHARE`; `FOSSIL_FIELD_MIN_MASS` is 1.4 M☉. The incidence reads the main-sequence
+    star's mass, not its initial mass, which no caller of `fossil_field` holds; they differ by the
+    main sequence's winds. Ap and Bp (every fossil-field star, weighted by Salpeter × t_MS ∝
+    M^−4.85 over 1.4–5 M☉) are 1.6% (window 1–3%; Sikora's 1.6%). The fossil-field stars stand in
+    for the class, whose 7,000–20,000 K cuts only the coolest 1.4–1.5 M☉ stars, at 0.5% incidence. MH08's law is no longer
+    provisional.
+  - _T26 (points 7–8)._ The Cepheid profile is linear from the blue edge to its peak 300 K inside
+    it, then linear to the red edge, in kelvin; where the strip is under 600 K wide (log L below
+    about 2.25) the peak sits mid-strip (the lane's choice). Type II Cepheids, which share the
+    strip, keep 4x(1 − x): Bono et al.'s models are classical Cepheids'. The 5 M☉ test stays at
+    [Fe/H] = −0.5; the backbone's short solar loop is recorded against P06.T14–T16 (Anderson et
+    al. 2016, Table A.1: 5 M☉ at Z = 0.014 enters the strip at P 2.95–4.81 d).

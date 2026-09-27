@@ -1737,12 +1737,19 @@ mod tests {
             .zip(&plain.systems)
             .zip(result.systems())
         {
-            // The brief is the full system's, and the rest of the row is plan 04's.
-            let expected = SystemStars::generate(milky_way(), hit.record())
+            // The brief is the sim's range brief, of the full system's kind and class, and the
+            // rest of the row is plan 04's.
+            let expected =
+                range_brief(milky_way(), hit.record(), query.time()).map(|b| brief_dto(&b));
+            let full = SystemStars::generate(milky_way(), hit.record())
                 .brief_at(query.time())
                 .map(|b| brief_dto(&b));
             assert!(expected.is_some(), "every system here has formed");
             assert_eq!(row.stellar, expected);
+            assert_eq!(
+                expected.map(|b| (b.kind, b.class, b.star_count)),
+                full.map(|b| (b.kind, b.class, b.star_count))
+            );
             assert_eq!(
                 hyperion_protocol::SystemRecord {
                     stellar: None,

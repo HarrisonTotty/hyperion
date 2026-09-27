@@ -591,7 +591,8 @@ except that P09.T9.d needs P09.T9.c.
   distribution below the effective birth escape speed (design note 8), by a fixed quadrature over
   plan 06's `KickLaw` through plan 08's `kick_bins::speed_bin_shares`: ordinary mode on the star's
   own speed, low mode on the pair's velocity. White dwarfs' 1 km/s kick applies to open clusters.
-  Tests: 18–26% at 100 km/s, 13–19% at 50, 8–12% at 20, under 1% for a 10⁴ M☉ open cluster; a few
+  Tests: 18–26% at 100 km/s, 15–25% at 50 and at 20 (rulings 96.3 and 106.4: the law as built
+  gives 19.6% at 50, both being the low mode's share), under 1% for a 10⁴ M☉ open cluster; a few
   thousand neutron stars in the 47 Tucanae model, about a hundred in M4, none expected in Palomar 5.
 - **P09.T9.c Black holes.** Retained at birth from the kick law with complete fallback unkicked
   (about four fifths). Mass fraction today f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ t ÷ t★) − 1] ÷ ψ₁, floored
@@ -1276,3 +1277,9 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   the effect is confined to the inner 1.5 ly over the clock window.
 - **Scratch constants** (black-hole loss, equipartition, pulsar counts, Type Ia samplers, helium)
   ship as defaults and change with plan 15's tables, each a version bump.
+- **Retention at 50 km/s (ruling 106.4, plan text only).** P09.T9.b's window at 50 km/s was
+  13–19%, but plan 06's kick law as built (ruling 96: Disberg and Mandel's log-normal truncated at
+  1,000 km/s, with a low mode of σ 5 km/s and a share of about 19%) retains 19.6% there, nearly
+  all of it the low mode's. The window is 15–25%, the same as ruling 96.3's at 20 km/s, which this
+  plan's T9.b still gave as 8–12% and now gives as 15–25% too. The 18–26% at 100 km/s is not
+  re-checked here. Nothing is built yet; no output moves.

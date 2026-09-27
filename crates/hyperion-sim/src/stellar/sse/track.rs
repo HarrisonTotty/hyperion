@@ -665,7 +665,7 @@ pub(crate) fn fate_of(
 /// [`stripped_share`](crate::stellar::remnant::KickLawParams::stripped_share) (plan 06, design
 /// note 11): the one question the track asks of it, for the electron-capture window.
 #[must_use]
-fn is_companion_stripped(draws: &StarDraws) -> bool {
+pub(crate) fn is_companion_stripped(draws: &StarDraws) -> bool {
     crate::stellar::remnant::KickLawParams::default().is_stripped(draws.stripped())
 }
 
@@ -739,6 +739,150 @@ impl Track {
             built_until: end,
         })
     }
+}
+
+/// A remnant as a track's last segment holds it: its phase and mass, the age at which it formed
+/// (years since the onset of collapse), and a white dwarf's cooling origin (zero for every other
+/// remnant). What the fate table records of a dead star, and all its state depends on (plan 06,
+/// P06.T38.c).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RemnantModel {
+    pub(crate) phase: Phase,
+    pub(crate) mass: SolarMasses,
+    pub(crate) birth: f64,
+    pub(crate) origin: Megayears,
+}
+
+impl Track {
+    /// The remnant of a track built to its death, as its last segment holds it, or `None` if the
+    /// build has not reached the death.
+    #[must_use]
+    pub(crate) fn remnant_model(&self) -> Option<RemnantModel> {
+        match self.segments.last()?.model {
+            Model::Remnant {
+                phase,
+                mass,
+                birth,
+                origin,
+            } => Some(RemnantModel {
+                phase,
+                mass,
+                birth,
+                origin,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The fate the build reached, with what an iron core's collapse was built from.
+    #[must_use]
+    pub(crate) const fn fate_record(&self) -> Option<Fate> {
+        self.fate
+    }
+
+    /// The track of a remnant alone: `remnant` for a star of `comp` whose Reimers η draw is
+    /// `eta`, under `options`, from its formation on (plan 06, P06.T38.e).
+    ///
+    /// Its one segment is the remnant segment a full track ends with, so its
+    /// [`Track::state_at`] at an age after the formation is the full track's, bit for bit, when
+    /// `remnant` is that track's [`Track::remnant_model`]. It holds nothing before the formation
+    /// and no maxima, so only the state after it may be asked of it.
+    #[must_use]
+    pub(crate) fn remnant_only(
+        comp: &Composition,
+        eta: f64,
+        options: TrackOptions,
+        remnant: RemnantModel,
+    ) -> Self {
+        Self {
+            coeffs: ZCoeffs::new(comp.z_fit()),
+            composition: *comp,
+            options,
+            initial_mass: remnant.mass,
+            eta: reimers_eta(eta),
+            segments: vec![remnant_segment(remnant)],
+            fate: None,
+            built_until: f64::INFINITY,
+        }
+    }
+
+    /// The state at `age` of `remnant`, of this track's composition, η and options: what a
+    /// remnant-only track of `remnant` gives, without building one (the guard's corners of
+    /// P06.T38.e).
+    #[must_use]
+    pub(crate) fn remnant_state_at(&self, remnant: RemnantModel, age: Years) -> StarState {
+        let segment = remnant_segment(remnant);
+        let age = age.value().max(0.0);
+        let evaluated = segment.evaluate(&self.physics(), age);
+        self.star_state(&evaluated, age)
+    }
+}
+
+/// The segment of `remnant` from its formation on, as a full track's last segment is laid out.
+#[must_use]
+fn remnant_segment(remnant: RemnantModel) -> Segment {
+    Segment {
+        model: Model::Remnant {
+            phase: remnant.phase,
+            mass: remnant.mass,
+            birth: remnant.birth,
+            origin: remnant.origin,
+        },
+        start: remnant.birth,
+        end: f64::INFINITY,
+        coordinate: Coordinate::Linear {
+            nominal_end: f64::INFINITY,
+        },
+        mass: remnant.mass.value(),
+        knots: Vec::new(),
+        junction: Junction::STEP,
+        samples: Vec::new(),
+        max_before: [0.0; 2],
+    }
+}
+
+/// The remnant of a star of initial mass `m0`, `comp` and `draws` under `options`, with its
+/// fate: [`Track::full`]'s [`Track::remnant_model`] and fate, bit for bit, from a build that
+/// keeps no other segment and takes no samples for the maxima (plan 06, P06.T38.e).
+#[must_use]
+pub(crate) fn remnant_of(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+) -> (RemnantModel, Fate) {
+    let coeffs = ZCoeffs::new(comp.z_fit());
+    let m0 = checked_initial_mass(m0);
+    let eta = reimers_eta(draws.eta().value());
+    let outcome = Builder::new(
+        &coeffs,
+        comp,
+        options,
+        eta,
+        RemnantDraws::of(draws),
+        Resolution::GENERATOR,
+        build::Keep::Remnant,
+    )
+    .stripped_by_companion(is_companion_stripped(draws))
+    .run(m0.value(), None);
+    let fate = outcome
+        .fate
+        .expect("a build with no age to stop at runs to the star's death");
+    let remnant = match outcome.segments.last().map(|s| &s.model) {
+        Some(&Model::Remnant {
+            phase,
+            mass,
+            birth,
+            origin,
+        }) => RemnantModel {
+            phase,
+            mass,
+            birth,
+            origin,
+        },
+        _ => unreachable!("a remnant build ends with the remnant's segment"),
+    };
+    (remnant, fate)
 }
 
 /// The initial mass `m0` within the range the formulae cover.

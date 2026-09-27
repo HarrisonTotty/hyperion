@@ -9,7 +9,7 @@ use hyperion_sim::id::Layer;
 use hyperion_sim::stellar::ObjectKind;
 use hyperion_sim::stellar::brief::{BriefModel, BriefRoute};
 use hyperion_sim::stellar::system::{StellarBrief, SystemStars};
-use hyperion_sim::time::UniverseTime;
+use hyperion_sim::time::{ClockWindow, UniverseTime};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
@@ -128,7 +128,17 @@ fn briefs_are_pinned() {
         w.line(&format!("route {:?}", model.route()));
         for y in [-500, 0, 500] {
             let brief = model.brief_at(years(y));
-            assert_eq!(brief, stars.brief_at(years(y)), "{label} at {y} yr");
+            let exact = stars.brief_at(years(y));
+            if model.route() == BriefRoute::Table {
+                let (a, b) = (brief.expect("dead"), exact.expect("dead"));
+                assert_eq!(
+                    (a.kind(), a.class().to_string()),
+                    (b.kind(), b.class().to_string()),
+                    "{label}"
+                );
+            } else {
+                assert_eq!(brief, exact, "{label} at {y} yr");
+            }
             match brief {
                 Some(brief) => {
                     w.line(&format!("t = {y} yr:"));
@@ -164,29 +174,58 @@ fn sample_records(galaxy: &Galaxy, seed: u64, n: usize) -> Vec<SystemRecord> {
     records
 }
 
-/// Every brief of `n` random systems at three times is the full system's, bit for bit, and the
-/// main-sequence route is taken for some and the exact route for others.
-fn check_briefs(seed: u64, n: usize) {
+/// Over `n` random systems at three times: the exact routes' briefs are the full system's bit
+/// for bit; the table's have its kind and class exactly, and a luminosity and temperature inside
+/// their stated error (ruling 90.4). Every route is taken. Returns the table rows.
+fn check_briefs(seed: u64, n: usize) -> usize {
     let galaxy = milky_way();
-    let mut routes = [0_usize; 2];
+    let mut routes = [0_usize; 3];
+    let mut table_rows = 0;
     let mut rng = Lcg::new(seed ^ 0x7469_6d65);
     for record in sample_records(&galaxy, seed, n) {
         let model = BriefModel::new(&galaxy, &record);
         let stars = SystemStars::generate(&galaxy, &record);
-        routes[usize::from(model.route() == BriefRoute::Exact)] += 1;
+        routes[match model.route() {
+            BriefRoute::MainSequence => 0,
+            BriefRoute::Table => 1,
+            BriefRoute::Exact => 2,
+        }] += 1;
         let y = i64::try_from(rng.next_u64() % 2_001).expect("small") - 1_000;
         for t in [years(y), UniverseTime::EPOCH, years(-200_000)] {
-            let (a, b) = (model.brief_at(t), stars.brief_at(t));
-            assert_eq!(a, b, "{record:?} at {t}");
-            if let (Some(a), Some(b)) = (a, b) {
+            let (fitted, exact) = (model.brief_at(t), stars.brief_at(t));
+            if model.route() == BriefRoute::Table {
+                if t < ClockWindow::START {
+                    continue;
+                }
+                let (fitted, exact) = (fitted.expect("dead, so formed"), exact.expect("formed"));
+                assert_eq!(
+                    (fitted.kind(), fitted.class().to_string()),
+                    (exact.kind(), exact.class().to_string()),
+                    "{record:?} at {t}"
+                );
+                table_rows += 1;
+                if let Some(stated) = model.stated_error_at(t) {
+                    let log_l = exact.log_luminosity().expect("lit").value();
+                    let teff = exact.effective_temperature().value();
+                    let (lo, hi) = stated.log_luminosity;
+                    let (cold, hot) = stated.effective_temperature;
+                    assert!(
+                        (lo..=hi).contains(&log_l) && (cold..=hot).contains(&teff),
+                        "{record:?} at {t}: log L {log_l}, T_eff {teff} outside {stated:?}"
+                    );
+                }
+                continue;
+            }
+            assert_eq!(fitted, exact, "{record:?} at {t}");
+            if let (Some(fitted), Some(exact)) = (fitted, exact) {
                 assert_eq!(
                     (
-                        bits(a.effective_temperature().value()),
-                        a.log_luminosity().map(|l| bits(l.value()))
+                        bits(fitted.effective_temperature().value()),
+                        fitted.log_luminosity().map(|l| bits(l.value()))
                     ),
                     (
-                        bits(b.effective_temperature().value()),
-                        b.log_luminosity().map(|l| bits(l.value()))
+                        bits(exact.effective_temperature().value()),
+                        exact.log_luminosity().map(|l| bits(l.value()))
                     ),
                     "{record:?} at {t}"
                 );
@@ -194,6 +233,7 @@ fn check_briefs(seed: u64, n: usize) {
         }
     }
     assert!(routes.iter().all(|&r| r > 0), "{routes:?}");
+    table_rows
 }
 
 #[test]
@@ -204,5 +244,6 @@ fn briefs_are_the_full_systems_over_random_systems() {
 #[test]
 #[ignore = "slow: 3 × 10⁴ random systems, each generated in full"]
 fn briefs_are_the_full_systems_over_thirty_thousand_systems() {
-    check_briefs(0x6272_6567, 30_000);
+    let rows = check_briefs(0x6272_6567, 30_000);
+    println!("{rows} table-routed rows, every one inside its stated error");
 }

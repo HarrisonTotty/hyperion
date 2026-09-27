@@ -7,8 +7,8 @@
 //! - **The instability strip** (P06.T26.a): δ Scuti stars, RR Lyrae stars, classical and type II
 //!   Cepheids, each between a blue and a red edge that are straight lines in (log T(eff), log L),
 //!   from the source of its kind, and named by phase and initial mass. The period is the mean
-//!   density's, P = Q (ρ̄ ÷ ρ̄☉)^−½ with Q by kind, and the amplitude is largest mid-strip and zero
-//!   at both edges.
+//!   density's, P = Q (ρ̄ ÷ ρ̄☉)^−½ with Q by kind, and the amplitude is zero at both edges: a
+//!   classical Cepheid's peaks 300 K inside the blue edge (Bono et al. 2000), the others' mid-strip.
 //! - **Long-period variables** (P06.T26.b): Miras on the thermally pulsing asymptotic giant branch,
 //!   semiregulars below, and the slow semiregular and irregular red supergiants, with the
 //!   period–mass–radius relation of Vassiliadis and Wood (1993).
@@ -135,12 +135,20 @@ struct Strip {
 }
 
 impl Strip {
+    /// log T(eff) of the blue and red edges at log L `log_l`.
+    #[must_use]
+    fn edges(&self, log_l: f64) -> (f64, f64) {
+        (
+            math::mul_add(self.blue.1, log_l, self.blue.0),
+            math::mul_add(self.red.1, log_l, self.red.0),
+        )
+    }
+
     /// Where log T(eff) `log_t` lies across the strip at log L `log_l`: 0 at the blue edge, 1 at the
     /// red, outside (0, 1) outside the strip; `None` where the edges meet or cross.
     #[must_use]
     fn position(&self, log_l: f64, log_t: f64) -> Option<f64> {
-        let blue = math::mul_add(self.blue.1, log_l, self.blue.0);
-        let red = math::mul_add(self.red.1, log_l, self.red.0);
+        let (blue, red) = self.edges(log_l);
         (blue > red).then(|| (blue - log_t) / (blue - red))
     }
 }
@@ -201,13 +209,17 @@ const Q_RR_LYRAE: f64 = 0.036;
 /// (provisional; the constant Q gives the sample the observed period–luminosity slope).
 const Q_CEPHEID: f64 = 0.039;
 
+/// How far inside the blue edge a classical Cepheid's amplitude peaks, K: 300, "a few hundred
+/// kelvin" (Bono, Castellani and Marconi 2000, ApJ 529, 293, section 4; ruling 110.7).
+const CEPHEID_PEAK_INSIDE_BLUE: f64 = 300.0;
+
 /// The period dividing the BL Herculis from the W Virginis stars, d: 4, and W Virginis from RV
 /// Tauri, 20 (Soszyński et al. 2008, Acta Astron. 58, 293, section 3).
 const TYPE_II_PERIODS: (f64, f64) = (4.0, 20.0);
 
-/// The largest full amplitudes in V mid-strip, mag, within the ranges the General Catalogue of
-/// Variable Stars gives each type (Samus et al. 2017): δ Scuti 0.003–0.9, RR Lyrae 0.5–2,
-/// Cepheids several hundredths to 2. The lane's choices.
+/// The largest full amplitudes in V, at the profile's peak, mag, within the ranges the General
+/// Catalogue of Variable Stars gives each type (Samus et al. 2017): δ Scuti 0.003–0.9, RR Lyrae
+/// 0.5–2, Cepheids several hundredths to 2. The lane's choices.
 const STRIP_AMPLITUDES: [(VariableKind, f64); 6] = [
     (VariableKind::DeltaScuti, 0.3),
     (VariableKind::RrLyrae, 1.0),
@@ -388,11 +400,30 @@ fn density_period(state: &StarState, q: f64) -> f64 {
 }
 
 /// The amplitude profile across a region at `x` (0 and 1 at its edges): 4x(1 − x), largest
-/// mid-region and zero at both edges (plan 06, P06.T26.a; Bono et al. 2000 find the peak nearer
-/// the blue edge, which is recorded as a finding).
+/// mid-region and zero at both edges (plan 06, P06.T26.a), for every region but the classical
+/// Cepheids' ([`cepheid_profile`]).
 #[must_use]
 fn profile(x: f64) -> f64 {
     4.0 * x * (1.0 - x)
+}
+
+/// A classical Cepheid's amplitude profile at effective temperature `teff` K between the blue
+/// edge `blue` K and the red edge `red` K (ruling 110.7, after Bono, Castellani and Marconi 2000,
+/// section 4): zero at both edges, rising linearly to its peak 300 K inside the blue edge and
+/// falling linearly from there to the red edge. Where the strip is narrower than 600 K (below
+/// log L ≈ 2.25, its faint end), the peak sits mid-strip instead, the lane's choice, so that the
+/// peak stays inside the strip.
+#[must_use]
+fn cepheid_profile(teff: f64, (blue, red): (f64, f64)) -> f64 {
+    let (inside, width) = (blue - teff, blue - red);
+    let peak = CEPHEID_PEAK_INSIDE_BLUE.min(0.5 * width);
+    if inside <= 0.0 || inside >= width {
+        0.0
+    } else if inside <= peak {
+        inside / peak
+    } else {
+        (width - inside) / (width - peak)
+    }
 }
 
 /// Where `value` lies across (`low`, `high`), 0 to 1, if strictly inside.
@@ -537,10 +568,19 @@ fn instability_strip(inputs: &VariabilityInputs<'_>) -> Option<Variability> {
     } else {
         kind
     };
+    let shape = if kind == VariableKind::ClassicalCepheid {
+        let (blue, red) = strip.edges(log_l);
+        cepheid_profile(
+            state.effective_temperature().value(),
+            (math::exp10(blue), math::exp10(red)),
+        )
+    } else {
+        profile(x)
+    };
     Some(variable(
         kind,
         days,
-        amplitude_of(&STRIP_AMPLITUDES, kind) * profile(x),
+        amplitude_of(&STRIP_AMPLITUDES, kind) * shape,
     ))
 }
 
@@ -731,9 +771,11 @@ mod tests {
     /// the track's core helium burning that pulsates in the strip is a classical Cepheid with such
     /// a period, and the loop does enter the strip.
     ///
-    /// The star is at [Fe/H] = −0.5, the Magellanic Clouds' Cepheids': at solar metallicity the
-    /// backbone's 5 M☉ loop reaches only 4,660 K, short of the strip's blue edge at 6,170 K, and
-    /// needs 6 M☉ to reach it (a finding of P06.T26, recorded against the backbone).
+    /// The star is at [Fe/H] = −0.5, the Magellanic Clouds' Cepheids' (ruling 110.8): at solar
+    /// metallicity the backbone's 5 M☉ loop reaches only 4,660 K, short of the strip's blue edge at
+    /// 6,170 K, and needs 6 M☉ to reach it, where Anderson et al.'s (2016, A&A 591, A8, table A.1)
+    /// 5 M☉ model at Z = 0.014 enters the strip at periods of 2.95–4.81 d. The short loop is the
+    /// backbone's, recorded against P06.T14–T16.
     #[test]
     fn a_five_solar_mass_blue_loop_star_is_a_three_to_ten_day_cepheid() {
         let lmc = Composition::from_fe_h(
@@ -898,11 +940,41 @@ mod tests {
         assert_eq!(at(red - 1e-6), None);
         let inside = at(blue - 1e-6).unwrap();
         assert!(inside.amplitude().value() < 1e-3, "{inside:?}");
-        let middle = at(f64::midpoint(blue, red)).unwrap();
+        let near_red = at(red + 1e-6).unwrap();
+        assert!(near_red.amplitude().value() < 1e-3, "{near_red:?}");
+    }
+
+    /// Ruling 110.7: a classical Cepheid's amplitude peaks 300 K inside the blue edge, rising
+    /// linearly to it and falling linearly to the red edge (Bono et al. 2000, section 4).
+    #[test]
+    fn a_cepheids_amplitude_peaks_three_hundred_kelvin_inside_the_blue_edge() {
+        let log_l: f64 = 3.2;
+        let (blue, red) = CEPHEID_STRIP.edges(log_l);
+        let (t_blue, t_red) = (math::exp10(blue), math::exp10(red));
+        assert!(t_blue - t_red > 600.0, "{t_blue} to {t_red} K");
+        let at = |teff: f64| {
+            vary(
+                &star(Phase::CoreHeliumBurning, 5.0, math::exp10(log_l), teff),
+                5.0,
+                &Composition::SOLAR,
+            )
+            .map_or(0.0, |v| v.amplitude().value())
+        };
+        let peak = t_blue - 300.0;
+        assert!((at(peak) - 1.0).abs() < 1e-6, "{}", at(peak));
         assert!(
-            (middle.amplitude().value() - 1.0).abs() < 1e-9,
-            "{middle:?}"
+            (at(t_blue - 150.0) - 0.5).abs() < 1e-3,
+            "{}",
+            at(t_blue - 150.0)
         );
+        let halfway = f64::midpoint(peak, t_red);
+        assert!((at(halfway) - 0.5).abs() < 1e-3, "{}", at(halfway));
+        for step in 1..40 {
+            let teff = t_red + (t_blue - t_red) * f64::from(step) / 40.0;
+            assert!(at(teff) <= at(peak) + 1e-9, "{teff} K");
+        }
+        // A narrow strip peaks mid-strip.
+        assert!((cepheid_profile(6_200.0, (6_400.0, 6_000.0)) - 1.0).abs() < 1e-12);
     }
 
     /// Type II Cepheids take their class from their period.

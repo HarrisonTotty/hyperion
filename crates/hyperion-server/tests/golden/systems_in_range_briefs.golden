@@ -1,4 +1,4 @@
-# generator_version = 12
+# generator_version = 13
 {
   "type": "response",
   "id": 2,
@@ -96,8 +96,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DZ9.5",
-          "log_luminosity_lsun": -4.212127,
-          "teff_k": 5311.253,
+          "log_luminosity_lsun": -4.212149,
+          "teff_k": 5311.3354,
           "star_count": 1
         }
       },
@@ -128,8 +128,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA8.8",
-          "log_luminosity_lsun": -3.9593084,
-          "teff_k": 5746.53,
+          "log_luminosity_lsun": -3.9593134,
+          "teff_k": 5746.429,
           "star_count": 1
         }
       },
@@ -160,8 +160,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC7.6",
-          "log_luminosity_lsun": -4.1457047,
-          "teff_k": 6668.106,
+          "log_luminosity_lsun": -4.1457124,
+          "teff_k": 6668.0635,
           "star_count": 3
         }
       },
@@ -192,8 +192,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC10.3",
-          "log_luminosity_lsun": -4.236672,
-          "teff_k": 4904.352,
+          "log_luminosity_lsun": -4.2366714,
+          "teff_k": 4904.3335,
           "star_count": 1
         }
       },
@@ -223,7 +223,7 @@
         ],
         "stellar": {
           "kind": "dwarf",
-          "class": "B7Ve",
+          "class": "B7Vp",
           "log_luminosity_lsun": 2.3915565,
           "teff_k": 14077.215,
           "star_count": 2
@@ -256,8 +256,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC10.2",
-          "log_luminosity_lsun": -4.2195616,
-          "teff_k": 4936.711,
+          "log_luminosity_lsun": -4.2195673,
+          "teff_k": 4936.833,
           "star_count": 2
         }
       },
@@ -288,8 +288,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC9.2",
-          "log_luminosity_lsun": -3.9670415,
-          "teff_k": 5456.8135,
+          "log_luminosity_lsun": -3.96704,
+          "teff_k": 5456.8345,
           "star_count": 3
         }
       },
@@ -320,8 +320,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DB2.4",
-          "log_luminosity_lsun": -2.0772123,
-          "teff_k": 20920.936,
+          "log_luminosity_lsun": -2.0772738,
+          "teff_k": 20920.615,
           "star_count": 2
         }
       },
@@ -416,8 +416,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA8.6",
-          "log_luminosity_lsun": -3.990709,
-          "teff_k": 5850.681,
+          "log_luminosity_lsun": -3.9907098,
+          "teff_k": 5850.656,
           "star_count": 3
         }
       },
@@ -448,8 +448,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC9.4",
-          "log_luminosity_lsun": -4.144867,
-          "teff_k": 5380.768,
+          "log_luminosity_lsun": -4.1449265,
+          "teff_k": 5380.9478,
           "star_count": 2
         }
       },
@@ -480,8 +480,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DAZ9.4",
-          "log_luminosity_lsun": -4.100154,
-          "teff_k": 5358.4434,
+          "log_luminosity_lsun": -4.100357,
+          "teff_k": 5360.3677,
           "star_count": 1
         }
       },
@@ -512,8 +512,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA7.6",
-          "log_luminosity_lsun": -3.6931586,
-          "teff_k": 6657.9033,
+          "log_luminosity_lsun": -3.6931179,
+          "teff_k": 6658.229,
           "star_count": 1
         }
       },
@@ -545,7 +545,7 @@
           "kind": "neutron_star",
           "class": "NS",
           "log_luminosity_lsun": -9.653903,
-          "teff_k": 5319.6323,
+          "teff_k": 5319.633,
           "star_count": 4
         }
       },
@@ -608,8 +608,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DBZ3.5",
-          "log_luminosity_lsun": -2.35392,
-          "teff_k": 14284.456,
+          "log_luminosity_lsun": -2.353883,
+          "teff_k": 14285.283,
           "star_count": 3
         }
       },
@@ -672,8 +672,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DAZ7.5",
-          "log_luminosity_lsun": -3.6447382,
-          "teff_k": 6715.5884,
+          "log_luminosity_lsun": -3.6448007,
+          "teff_k": 6715.161,
           "star_count": 1
         }
       },
@@ -704,8 +704,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC9.9",
-          "log_luminosity_lsun": -4.07777,
-          "teff_k": 5082.426,
+          "log_luminosity_lsun": -4.077759,
+          "teff_k": 5083.162,
           "star_count": 1
         }
       },
@@ -736,8 +736,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DQZ5.7",
-          "log_luminosity_lsun": -3.8494701,
-          "teff_k": 8864.939,
+          "log_luminosity_lsun": -3.8497167,
+          "teff_k": 8864.361,
           "star_count": 4
         }
       },
@@ -799,7 +799,7 @@
         ],
         "stellar": {
           "kind": "dwarf",
-          "class": "B7.5Ve",
+          "class": "B7.5Vp",
           "log_luminosity_lsun": 2.2931314,
           "teff_k": 13403.657,
           "star_count": 1
@@ -832,8 +832,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA7.0",
-          "log_luminosity_lsun": -3.6347115,
-          "teff_k": 7222.525,
+          "log_luminosity_lsun": -3.634707,
+          "teff_k": 7222.5747,
           "star_count": 4
         }
       },
@@ -864,8 +864,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC7.0",
-          "log_luminosity_lsun": -3.5664923,
-          "teff_k": 7248.013,
+          "log_luminosity_lsun": -3.5666025,
+          "teff_k": 7247.1562,
           "star_count": 1
         }
       },
@@ -896,8 +896,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA3.8",
-          "log_luminosity_lsun": -2.6152802,
-          "teff_k": 13254.013,
+          "log_luminosity_lsun": -2.6153514,
+          "teff_k": 13252.59,
           "star_count": 2
         }
       },
@@ -928,8 +928,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA5.9",
-          "log_luminosity_lsun": -3.2251296,
-          "teff_k": 8490.985,
+          "log_luminosity_lsun": -3.22515,
+          "teff_k": 8490.75,
           "star_count": 1
         }
       },
@@ -960,8 +960,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA8.9",
-          "log_luminosity_lsun": -4.0814047,
-          "teff_k": 5646.7876,
+          "log_luminosity_lsun": -4.0815024,
+          "teff_k": 5647.497,
           "star_count": 4
         }
       },
@@ -992,8 +992,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC10.4",
-          "log_luminosity_lsun": -4.25068,
-          "teff_k": 4837.207,
+          "log_luminosity_lsun": -4.2506757,
+          "teff_k": 4837.111,
           "star_count": 2
         }
       },
@@ -1088,8 +1088,8 @@
         "stellar": {
           "kind": "neutron_star",
           "class": "NS",
-          "log_luminosity_lsun": -9.568011,
-          "teff_k": 5589.263,
+          "log_luminosity_lsun": -9.56801,
+          "teff_k": 5589.266,
           "star_count": 2
         }
       },
@@ -1120,8 +1120,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC7.8",
-          "log_luminosity_lsun": -3.8667626,
-          "teff_k": 6464.14,
+          "log_luminosity_lsun": -3.8667655,
+          "teff_k": 6464.09,
           "star_count": 2
         }
       },
@@ -1184,8 +1184,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC9.4",
-          "log_luminosity_lsun": -4.1355224,
-          "teff_k": 5378.7017,
+          "log_luminosity_lsun": -4.13534,
+          "teff_k": 5378.126,
           "star_count": 1
         }
       },
@@ -1248,8 +1248,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DA9.2",
-          "log_luminosity_lsun": -3.963064,
-          "teff_k": 5460.78,
+          "log_luminosity_lsun": -3.9629974,
+          "teff_k": 5461.684,
           "star_count": 1
         }
       },
@@ -1312,8 +1312,8 @@
         "stellar": {
           "kind": "white_dwarf",
           "class": "DC11.1",
-          "log_luminosity_lsun": -4.336079,
-          "teff_k": 4550.7954,
+          "log_luminosity_lsun": -4.336804,
+          "teff_k": 4529.2397,
           "star_count": 3
         }
       }

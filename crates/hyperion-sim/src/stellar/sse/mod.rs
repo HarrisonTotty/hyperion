@@ -39,7 +39,7 @@ mod helium;
 mod evolve;
 mod track;
 pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
-pub(crate) use track::fate_of;
+pub(crate) use track::{RemnantModel, fate_of, is_companion_stripped, remnant_of};
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 pub(crate) use track::{

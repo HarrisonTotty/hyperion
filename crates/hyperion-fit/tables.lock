@@ -49,6 +49,42 @@ provisional = true
 acceptance = "`MGE_EXP` within 1.289% of e^(−s) over s = 0.05–10; `MGE_BAR` within 2.88% of its central value over u = 0–2 and its mass within 0.212%"
 
 [[table]]
+name = "stellar_fates_high"
+path = "stellar_fates_high.rs"
+task = "stellar_fates_high"
+revision = 0
+inputs_sha256 = "10cf9145981fc758305d0fa9f8818a6653453a02235ac63a72e4e4e41597cf00"
+body_sha256 = "67b534297b79cede6e7aea832817b89044d8208d2a3031ad3b8e312e2654e812"
+fingerprint = [6.9915346541522245, 5.001514944854197, 6.661566081782426, 18.714094561857273]
+since_generator_version = 11
+provisional = false
+acceptance = "7216 full tracks; 92 of 1426 cells (6.5%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 4.1e-3, a 6.6e-4 and 1.1e-1, b 1.1e-4 and 4.1e-2"
+
+[[table]]
+name = "stellar_fates_low"
+path = "stellar_fates_low.rs"
+task = "stellar_fates_low"
+revision = 0
+inputs_sha256 = "8de9c5415278a4fc37a7e824a33eeb187366b694f456a92580ba233cc9f670c8"
+body_sha256 = "589b9aee42276e1500937f8a328b44e965090688f6ac4e3d142dd7db688db6f7"
+fingerprint = [10.021248908515998, 0.5462673765733742, 9.49122617306905, 0.5723440316308829]
+since_generator_version = 11
+provisional = false
+acceptance = "20556 full tracks; 438 of 1265 cells (34.6%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.6e-2, a 1.1e-3 and 1.1e-2, b 3.6e-3 and 2.0e-2"
+
+[[table]]
+name = "stellar_fates_mid"
+path = "stellar_fates_mid.rs"
+task = "stellar_fates_mid"
+revision = 0
+inputs_sha256 = "7fae6837340abec7d1d9f8ee4da1178166bc97b301c5f0365f7c26362ab1b80c"
+body_sha256 = "5e41d083b3df5e019dccb751ec58b14dcde562e4fd61aa1452a0564ba55b1014"
+fingerprint = [8.289012276741994, 0.92378534364464, 7.750259353025986, 1.2805536783233358]
+since_generator_version = 11
+provisional = false
+acceptance = "22044 full tracks; 130 of 1357 cells (9.6%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 3.1e-3, a 5.8e-4 and 8.2e-3, b 6.7e-4 and 1.6e-2"
+
+[[table]]
 name = "wd_cooling"
 path = "wd_cooling.rs"
 task = "wd_cooling"

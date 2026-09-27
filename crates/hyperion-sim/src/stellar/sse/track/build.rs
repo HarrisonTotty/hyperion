@@ -125,6 +125,9 @@ pub(crate) enum Keep {
     Track,
     /// Nothing but the fate: no samples, no segments kept.
     Lifetime,
+    /// The fate and the remnant's segment, with no other segment and no samples: what the range
+    /// brief of a dead star reads (P06.T38.e).
+    Remnant,
 }
 
 /// A built track's parts.
@@ -210,9 +213,6 @@ pub(crate) struct Builder<'a> {
     pub(super) companion_stripped: bool,
     pub(super) resolution: Resolution,
     keep: Keep,
-    /// The core at helium ignition of an `M_HeF` star, the lightest helium star that burns helium
-    /// (see [`Builder::helium_main_sequence`]).
-    pub(super) lightest_helium_star: f64,
 }
 
 impl<'a> Builder<'a> {
@@ -228,8 +228,6 @@ impl<'a> Builder<'a> {
         resolution: Resolution,
         keep: Keep,
     ) -> Self {
-        let m_hef = coeffs.m_hef();
-        let lightest = GiantBranch::new(m_hef, coeffs).core_mass(gb::l_hei(m_hef, coeffs));
         Self {
             phys: Physics {
                 coeffs,
@@ -243,7 +241,6 @@ impl<'a> Builder<'a> {
             companion_stripped: false,
             resolution,
             keep,
-            lightest_helium_star: lightest.value(),
         }
     }
 
@@ -259,6 +256,19 @@ impl<'a> Builder<'a> {
             companion_stripped: stripped,
             ..self
         }
+    }
+
+    /// The core at helium ignition of an `M_HeF` star, the lightest helium star that burns helium
+    /// (see [`Builder::helium_main_sequence`]). Found where it is asked, once a helium main
+    /// sequence is entered, rather than for every build: a main sequence alone never needs it
+    /// (P06.T38.b's fast path, which it cost a sixth of).
+    #[must_use]
+    pub(super) fn lightest_helium_star(&self) -> f64 {
+        let coeffs = self.phys.coeffs;
+        let m_hef = coeffs.m_hef();
+        GiantBranch::new(m_hef, coeffs)
+            .core_mass(gb::l_hei(m_hef, coeffs))
+            .value()
     }
 
     /// The track of a star of initial mass `m0` (M☉), built to the segment that holds `age_max`,
@@ -280,7 +290,7 @@ impl<'a> Builder<'a> {
         let mut max_before = [0.0_f64; 2];
         loop {
             if let Entry::Dead(fate) = entry {
-                if self.keep == Keep::Track {
+                if self.keep != Keep::Lifetime {
                     segments.push(self.remnant_segment(fate, max_before, previous));
                 }
                 return Outcome {

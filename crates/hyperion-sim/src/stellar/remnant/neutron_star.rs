@@ -6,8 +6,14 @@
 //! floor of 10¹² G (or B₀ if that is lower), and magnetic-dipole braking P Ṗ = k B² then gives
 //! P(t)² = P₀² + 2k ∫B² dt, whose integral under this decay law is elementary (P06.T21.b). So the
 //! state at any age is a closed form, continuous in age, and nothing needs replaying: mean glitch
-//! activity enters as a 1% reduction of the spin-down while the characteristic age lies within
-//! 10³–10⁵ years (Fuentes et al. 2017), found in closed form too.
+//! activity enters as a 1% reduction of the spin-down once |ν̇| has fallen below 10⁻¹⁰·⁵ Hz s⁻¹
+//! (Fuentes et al. 2017), an age found once per star.
+//!
+//! The field and k follow the timing convention, B = 3.2 × 10¹⁹ G √(P Ṗ) (R = 10 km, I = 10⁴⁵
+//! g cm²), in which the death line, the quantum-critical threshold and every population synthesis
+//! state their fields (ruling 110): B is the equatorial surface field, drawn as Popov et al.'s
+//! (2010) polar birth field less log 2. The field's decay luminosity keeps the recipe's 12.2 km
+//! radius (ruling 27).
 //!
 //! What the pulsar is at an age ([`PulsarState`]) decides its class: a magnetar while its field is
 //! above the quantum critical field and its field's decay outshines its spin-down, a radio pulsar
@@ -35,26 +41,30 @@ use crate::time::{Span, UniverseTime};
 use crate::units::consts::{RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{Gauss, Metres, Radians, Seconds, SolarLuminosities, SolarMasses, Watts, Years};
 
-/// The mean of the birth spin period, s: 300 ms (Faucher-Giguère and Kaspi 2006, ApJ 643, 332,
-/// their optimal model; plan 06, design note 13).
-pub const BIRTH_PERIOD_MEAN: Seconds = Seconds::new(0.300);
+/// The mean of the birth spin period, s: 250 ms, Popov et al.'s (2010, MNRAS 401, 2675) P₀ of
+/// 0.25 ± 0.10 s, drawn with the field it was fitted with (ruling 110.1).
+pub const BIRTH_PERIOD_MEAN: Seconds = Seconds::new(0.250);
 
-/// The standard deviation of the birth spin period, s: 150 ms (Faucher-Giguère and Kaspi 2006).
-pub const BIRTH_PERIOD_SIGMA: Seconds = Seconds::new(0.150);
+/// The standard deviation of the birth spin period, s: 100 ms (Popov et al. 2010; ruling 110.1).
+pub const BIRTH_PERIOD_SIGMA: Seconds = Seconds::new(0.100);
 
 /// The shortest birth period, s: a draw at or below 10 ms is redrawn (P06.T21.a).
 pub const BIRTH_PERIOD_MIN: Seconds = Seconds::new(0.010);
 
-/// The mean of log₁₀ of the birth dipole field in gauss: 13.25 (Popov et al. 2010, MNRAS 401,
-/// 2675, their population synthesis with field decay; plan 06, design note 13).
-pub const LOG_BIRTH_FIELD_MEAN: f64 = 13.25;
+/// The mean of log₁₀ of the birth dipole field at the equator in gauss: 12.95, Popov et al.'s
+/// (2010, MNRAS 401, 2675, their population synthesis with field decay) 13.25 at the magnetic
+/// pole less log₁₀ 2, since the equatorial field is half the polar (ruling 110.1; Faucher-Giguère
+/// and Kaspi 2006, ApJ 643, 332, draw the equatorial field, 12.65 ± 0.55, without decay).
+pub const LOG_BIRTH_FIELD_MEAN: f64 = 12.95;
 
 /// The standard deviation of log₁₀ of the birth field: 0.6 dex (Popov et al. 2010).
 pub const LOG_BIRTH_FIELD_SIGMA: f64 = 0.6;
 
 /// The field's decay time at a birth field of 10¹⁵ G, years; it scales as 1 ÷ B₀, so that B₀ τ
-/// is 10¹⁹ G yr for every star (P06.T21.b, the Hall-drift scaling of the decaying-field
-/// syntheses, provisional).
+/// is 10¹⁹ G yr for every star (P06.T21.b; ruling 110.4). The law is Colpi, Geppert and Page's
+/// (2000, ApJ 529, L29) equation 3 with α = 1, normalised to Beniamini et al.'s (2019, MNRAS 487,
+/// 1426) τ(B) = 10⁴ yr: Colpi et al.'s own 10³ yr leaves about 4 active magnetars against some 30
+/// known.
 pub const DECAY_TIME_AT_1E15_G: Years = Years::new(1.0e4);
 
 /// The field the decay stops at, G: 10¹², or the birth field if that is lower (P06.T21.b).
@@ -63,14 +73,20 @@ pub const FIELD_FLOOR: Gauss = Gauss::new(1.0e12);
 /// The moment of inertia, g cm²: 10⁴⁵, the canonical value of the pulsar literature (P06.T21.b).
 pub const MOMENT_OF_INERTIA_G_CM2: f64 = 1.0e45;
 
-/// The share of the spin-down that glitches give back, 1% (Fuentes et al. 2017, A&A 608, A131,
-/// the activity of most glitching pulsars; provisional), applied while the characteristic age
-/// lies within [`GLITCH_AGES`].
+/// The radius of the braking constant, m: 10 km, the timing convention's, in which
+/// B = 3.2 × 10¹⁹ G √(P Ṗ) and every field of the pulsar literature is stated (ruling 110.1,
+/// which withdraws ruling 27's consequence for k; the field's decay luminosity keeps 12.2 km).
+pub const TIMING_RADIUS: Metres = Metres::new(1.0e4);
+
+/// The share of the spin-down that glitches give back, 1%: the glitch activity of 0.010 ± 0.001
+/// that Fuentes et al. (2017, A&A 608, A131, section 5) find for every pulsar and magnetar except
+/// the youngest, applied once |ν̇| is below [`GLITCH_NU_DOT_LIMIT`] (ruling 110.3).
 pub const GLITCH_REVERSAL: f64 = 0.01;
 
-/// The characteristic ages, years, over which mean glitch activity slows the spin-down: 10³–10⁵
-/// (Fuentes et al. 2017; P06.T21.b).
-pub const GLITCH_AGES: (Years, Years) = (Years::new(1.0e3), Years::new(1.0e5));
+/// The spin-down rate |ν̇| below which mean glitch activity slows the spin-down, Hz s⁻¹:
+/// 10⁻¹⁰·⁵ (Fuentes et al. 2017, section 5: the pulsars above it, the Crab among them, glitch
+/// less). |ν̇| only falls with age, so each star crosses it once (ruling 110.3).
+pub const GLITCH_NU_DOT_LIMIT: f64 = 3.162_277_660_168_379_5e-11;
 
 /// The death line, G s⁻²: a pulsar shines in the radio while B ÷ P² exceeds 0.17 × 10¹² G s⁻²
 /// (Bhattacharya, Wijers, Hartman and Verbunt 1992, A&A 254, 198; P06.T21.c).
@@ -99,7 +115,7 @@ const WATTS_PER_ERG_S: f64 = 1.0e-7;
 ///
 /// # Examples
 ///
-/// A pulsar born at 300 ms with a field of 10¹²·⁵ G spins down to its death line after 10–20
+/// A pulsar born at 300 ms with a field of 10¹²·⁵ G spins down to its death line after 10–100
 /// million years:
 ///
 /// ```
@@ -134,17 +150,18 @@ pub struct NeutronStar {
     decay_time: f64,
     /// The age at which the decay reaches the floor, s; zero where B₀ is at or below it.
     floor_age: f64,
-    /// k = 8π² R⁶ ÷ (3 c³ I), s G⁻²: P Ṗ = k B².
+    /// k = 8π² R⁶ ÷ (3 c³ I) at the timing radius, s G⁻²: P Ṗ = k B².
     braking: f64,
-    /// The ages, s, between which glitches slow the spin-down (from the unglitched
-    /// characteristic age reaching [`GLITCH_AGES`]).
-    glitch_window: (f64, f64),
+    /// The age, s, from which glitches slow the spin-down: where the unglitched |ν̇| reaches
+    /// [`GLITCH_NU_DOT_LIMIT`], zero for a star born below it.
+    glitch_onset: f64,
 }
 
 impl NeutronStar {
     /// The neutron star of birth period `birth_period`, birth field `birth_field`, `spin_axis`,
     /// magnetic `inclination` from the spin axis (0–π/2) and pulse phase `phase_rank` at its
-    /// clock's reference (cycles, 0 to 1), with the default recipe's 12.2 km radius (ruling 27).
+    /// clock's reference (cycles, 0 to 1): braked at the timing convention's 10 km, its field's
+    /// decay shining at the default recipe's 12.2 km (rulings 27 and 110).
     ///
     /// # Panics
     ///
@@ -171,7 +188,7 @@ impl NeutronStar {
             (0.0..=FRAC_PI_2).contains(&alpha) && (0.0..1.0).contains(&phase_rank),
             "inclination {alpha} rad, phase {phase_rank}"
         );
-        let braking = 8.0 * PI * PI * math::powi(radius_cm(), 6)
+        let braking = 8.0 * PI * PI * math::powi(TIMING_RADIUS.value() * 100.0, 6)
             / (3.0 * math::powi(SPEED_OF_LIGHT_CM_S, 3) * MOMENT_OF_INERTIA_G_CM2);
         let floor = b0.min(FIELD_FLOOR.value());
         let decay_time = DECAY_TIME_AT_1E15_G.value() * SECONDS_PER_JULIAN_YEAR * 1.0e15 / b0;
@@ -186,18 +203,16 @@ impl NeutronStar {
             decay_time,
             floor_age,
             braking,
-            glitch_window: (0.0, 0.0),
+            glitch_onset: 0.0,
         };
-        star.glitch_window = (
-            star.unglitched_age_at_characteristic(GLITCH_AGES.0),
-            star.unglitched_age_at_characteristic(GLITCH_AGES.1),
-        );
+        star.glitch_onset = star.unglitched_age_at_nu_dot(GLITCH_NU_DOT_LIMIT);
         star
     }
 
-    /// The neutron star a star's draws make (P06.T21.a): its birth period the first of 300 + 150 z
-    /// ms over the `star.ns.spin` tries that exceeds 10 ms (300 ms, the mean, if all eight fail,
-    /// about once in 4 × 10¹² stars), its field 10^(13.25 + 0.6 z) G from `star.ns.field`, its spin
+    /// The neutron star a star's draws make (P06.T21.a, ruling 110.1): its birth period the first
+    /// of 250 + 100 z ms over the `star.ns.spin` tries that exceeds 10 ms (250 ms, the mean, if all
+    /// eight fail, about once in 5 × 10¹⁶ stars), its equatorial field 10^(12.95 + 0.6 z) G from
+    /// `star.ns.field`, its spin
     /// axis isotropic and its magnetic inclination isotropic about it (cos α uniform) from
     /// `star.ns.geometry`, and its pulse phase from `star.ns.phase`.
     #[must_use]
@@ -234,7 +249,7 @@ impl NeutronStar {
         Seconds::new(self.birth_period)
     }
 
-    /// The birth dipole field B₀ at the magnetic pole's surface.
+    /// The birth dipole field B₀ at the equator's surface, as the timing convention states it.
     #[must_use]
     pub const fn birth_field(&self) -> Gauss {
         Gauss::new(self.birth_field)
@@ -253,8 +268,8 @@ impl NeutronStar {
     }
 
     /// The braking constant k of P Ṗ = k B², s G⁻²: 8π² R⁶ ÷ (3 c³ I), the orthogonal vacuum
-    /// dipole's, 3.2 × 10⁻³⁹ at R = 12.2 km and I = 10⁴⁵ g cm² (the classic 3.2 × 10¹⁹ G of
-    /// B = 3.2 × 10¹⁹ √(P Ṗ) is the same law at 10 km).
+    /// dipole's at the timing convention's R = 10 km and I = 10⁴⁵ g cm², 9.77 × 10⁻⁴⁰, so that
+    /// B = 3.2 × 10¹⁹ G √(P Ṗ) (ruling 110.1).
     #[must_use]
     pub const fn braking_constant(&self) -> f64 {
         self.braking
@@ -362,61 +377,65 @@ impl NeutronStar {
         }
     }
 
-    /// P² at `t` seconds after birth, s²: P₀² + 2k (∫B² − ε ∫ over the glitch window of B²).
+    /// P² at `t` seconds after birth, s²: P₀² + 2k (∫B² − ε ∫ of B² since the glitch onset).
     #[must_use]
     fn period_squared(&self, t: f64) -> f64 {
-        let (start, end) = self.glitch_window;
-        let glitched = self.field_integral(t.clamp(start, end)) - self.field_integral(start);
+        let start = self.glitch_onset;
+        let glitched = self.field_integral(t.max(start)) - self.field_integral(start);
         self.birth_period * self.birth_period
             + 2.0 * self.braking * math::mul_add(GLITCH_REVERSAL, -glitched, self.field_integral(t))
     }
 
-    /// The factor on the spin-down at `t` seconds: 1 − ε inside the glitch window, 1 outside.
+    /// The factor on the spin-down at `t` seconds: 1 − ε from the glitch onset, 1 before it.
     #[must_use]
     fn glitch_factor(&self, t: f64) -> f64 {
-        let (start, end) = self.glitch_window;
-        if (start..end).contains(&t) {
+        if t >= self.glitch_onset {
             1.0 - GLITCH_REVERSAL
         } else {
             1.0
         }
     }
 
-    /// The age, s, at which the characteristic age P ÷ 2Ṗ of the unglitched spin-down reaches
-    /// `target`, or zero if it starts above it.
+    /// The age, s, at which the unglitched spin-down rate |ν̇| = k B² ÷ P³ falls to `limit`
+    /// Hz s⁻¹, or zero if it starts at or below it.
     ///
-    /// The characteristic age rises strictly with age, and has closed forms on both branches of
-    /// the field: while the field decays, with x = t ÷ τ and A = P₀² ÷ (2k B₀²), it is
-    /// A (1 + x)² + τ x (1 + x), a quadratic in x; on the floor it rises one second per second.
+    /// |ν̇| falls strictly with age. On the floor it has a closed form, P = (k B² ÷ |ν̇|)^⅓. While
+    /// the field decays, with u = B ÷ B₀ = τ ÷ (τ + t), P² = P₀² + 2k B₀² τ (1 − u), and
+    /// k B₀² u² − limit × P³ rises strictly with u, so its root is found by bisection in u, to
+    /// the last bit: about 60 halvings of an interval inside (0, 1], stopped when the midpoint
+    /// meets an end (the cap of 1,100 is more than any interval of doubles needs).
     #[must_use]
-    fn unglitched_age_at_characteristic(&self, target: Years) -> f64 {
-        let target = target.value() * SECONDS_PER_JULIAN_YEAR;
-        let b0 = self.birth_field;
-        let a = self.birth_period * self.birth_period / (2.0 * self.braking * b0 * b0);
-        if target <= a {
+    fn unglitched_age_at_nu_dot(&self, limit: f64) -> f64 {
+        let k = self.braking;
+        let (p0, b0, tau) = (self.birth_period, self.birth_field, self.decay_time);
+        let rate = |field: f64, p2: f64| k * field * field / (p2 * p2.sqrt());
+        if rate(b0, p0 * p0) <= limit {
             return 0.0;
         }
-        let tau = self.decay_time;
-        if self.floor_age > 0.0 {
-            // (A + τ) x² + (2A + τ) x − (T − A) = 0, in the form that loses no digits.
-            let (b, excess) = (2.0 * a + tau, target - a);
-            let x = 2.0 * excess / (b + (b * b + 4.0 * (a + tau) * excess).sqrt());
-            let t = x * tau;
-            if t <= self.floor_age {
-                return t;
+        let at_floor = p0 * p0 + 2.0 * k * self.field_integral(self.floor_age);
+        if self.floor_age > 0.0 && rate(self.floor, at_floor) <= limit {
+            let excess = |u: f64| {
+                let p2 = math::mul_add(2.0 * k * b0 * b0 * tau, 1.0 - u, p0 * p0);
+                k * b0 * b0 * u * u - limit * p2 * p2.sqrt()
+            };
+            // The root lies in (u at the floor, 1]: excess is ≤ 0 at the floor and > 0 at birth.
+            let (mut low, mut high) = (self.floor / b0, 1.0);
+            for _ in 0..1_100 {
+                let mid = f64::midpoint(low, high);
+                if mid <= low || mid >= high {
+                    break;
+                }
+                if excess(mid) > 0.0 {
+                    high = mid;
+                } else {
+                    low = mid;
+                }
             }
+            return (tau * (1.0 / high - 1.0)).min(self.floor_age);
         }
-        let at_floor = self.unglitched_characteristic_age(self.floor_age);
-        self.floor_age + (target - at_floor).max(0.0)
-    }
-
-    /// The unglitched characteristic age at `t` seconds after birth, s.
-    #[must_use]
-    fn unglitched_characteristic_age(&self, t: f64) -> f64 {
-        let field = self.field(t);
-        let p2 =
-            self.birth_period * self.birth_period + 2.0 * self.braking * self.field_integral(t);
-        p2 / (2.0 * self.braking * field * field)
+        let floor = self.floor;
+        let target = math::cbrt(k * floor * floor / limit);
+        self.floor_age + ((target * target - at_floor) / (2.0 * k * floor * floor)).max(0.0)
     }
 
     /// The luminosity of the field's decay at `t` seconds, where the field is `field`, erg/s:
@@ -461,7 +480,7 @@ impl PulsarState {
         self.period_derivative
     }
 
-    /// The dipole field at the magnetic pole's surface, G.
+    /// The dipole field at the equator's surface, G, as the timing convention states it.
     #[must_use]
     pub const fn field(&self) -> Gauss {
         self.field
@@ -744,12 +763,12 @@ mod tests {
             .collect()
     }
 
-    /// The median draws: 300 ms, 10^13.25 G, inclination 60°.
+    /// The median draws: 250 ms, 10^12.95 G, inclination 60°.
     #[test]
     fn the_median_star_is_born_at_the_means() {
         let ns = NeutronStar::from_draws(&StarDraws::median());
-        assert!((ns.birth_period().value() - 0.3).abs() < 1e-15);
-        assert!((math::log10(ns.birth_field().value()) - 13.25).abs() < 1e-12);
+        assert!((ns.birth_period().value() - 0.25).abs() < 1e-15);
+        assert!((math::log10(ns.birth_field().value()) - 12.95).abs() < 1e-12);
         assert!((ns.inclination().value() - PI / 3.0).abs() < 1e-12);
     }
 
@@ -765,18 +784,26 @@ mod tests {
             ..StarDrawsParts::MEDIAN
         }));
         assert!((ns.birth_period().value() - 0.15).abs() < 1e-15);
+        ns_spin[1] = z(-2.4);
+        ns_spin[2] = z(-2.0);
+        let ns = NeutronStar::from_draws(&StarDraws::from_parts(StarDrawsParts {
+            ns_spin,
+            ..StarDrawsParts::MEDIAN
+        }));
+        assert!((ns.birth_period().value() - 0.05).abs() < 1e-15);
     }
 
-    /// The braking constant is the orthogonal vacuum dipole's at 12.2 km: 3.2 × 10⁻³⁹ s G⁻², the
-    /// classic 1 ÷ (3.2 × 10¹⁹)² scaled by (1.22)⁶.
+    /// The braking constant is the timing convention's (ruling 110.1): 9.77 × 10⁻⁴⁰ s G⁻², the
+    /// 1 ÷ (3.2 × 10¹⁹)² of B = 3.2 × 10¹⁹ G √(P Ṗ), and the decay luminosity keeps 12.2 km.
     #[test]
-    fn the_braking_constant_is_the_vacuum_dipoles_at_twelve_kilometres() {
+    fn the_braking_constant_is_the_timing_conventions() {
         let k = star(0.3, 12.0).braking_constant();
-        let classic = 1.0 / (3.2e19 * 3.2e19) * math::powi(1.22, 6);
+        let classic = 1.0 / (3.2e19 * 3.2e19);
         assert!(
-            (k / classic - 1.0).abs() < 0.01,
+            (k / classic - 1.0).abs() < 0.001,
             "{k:e} against {classic:e}"
         );
+        assert!((radius_cm() / 1.22e6 - 1.0).abs() < 1e-12);
     }
 
     /// The plan's test: P is continuous and non-decreasing in age, across the floor and the glitch
@@ -792,8 +819,8 @@ mod tests {
                 assert!(p >= last, "{ns:?} at {age:?}: {p} after {last}");
                 last = p;
             }
-            // Continuity at the two edges of the glitch window and at the floor.
-            for edge in [ns.glitch_window.0, ns.glitch_window.1, ns.floor_age] {
+            // Continuity at the glitch onset and at the floor.
+            for edge in [ns.glitch_onset, ns.floor_age] {
                 let at = |t: f64| ns.period_squared(t).sqrt();
                 let (before, after) = (at(edge * (1.0 - 1e-12)), at(edge * (1.0 + 1e-12)));
                 assert!((after - before).abs() <= 1e-9 * before, "{ns:?} at {edge}");
@@ -802,12 +829,12 @@ mod tests {
     }
 
     /// The plan's test: with a constant field (a birth field under the floor) the closed form is
-    /// √(P₀² + 2kB²t).
+    /// √(P₀² + 2kB²t), with the glitches' 0.99 on k for a star born below the |ν̇| limit.
     #[test]
     fn with_a_constant_field_the_period_is_the_square_root_law() {
         let ns = star(0.3, 11.0);
-        let k = ns.braking_constant();
-        assert_eq!(ns.glitch_window, (0.0, 0.0), "τ_c starts above 10⁵ yr");
+        let k = ns.braking_constant() * (1.0 - GLITCH_REVERSAL);
+        assert!(ns.glitch_onset <= 0.0, "|ν̇| starts below 10⁻¹⁰·⁵ Hz s⁻¹");
         for years in [1.0e3, 1.0e5, 1.0e7, 1.0e9] {
             let t = years * SECONDS_PER_JULIAN_YEAR;
             let expected = (0.09 + 2.0 * k * 1e22 * t).sqrt();
@@ -847,35 +874,50 @@ mod tests {
         assert!((weak.field_at(Years::new(1.0e9)).value() / math::exp10(11.5) - 1.0).abs() < 1e-12);
     }
 
-    /// Glitches take 1% off the spin-down while the characteristic age is 10³–10⁵ years.
-    #[test]
-    fn glitches_slow_the_spin_down_by_a_percent_in_the_window() {
-        let ns = star(0.02, 12.5);
-        let (start, end) = ns.glitch_window;
-        assert!(start > 0.0 && end > start, "{:?}", ns.glitch_window);
-        let tau_c = |t: f64| ns.unglitched_characteristic_age(t) / SECONDS_PER_JULIAN_YEAR;
-        assert!((tau_c(start) / 1e3 - 1.0).abs() < 1e-9, "{}", tau_c(start));
-        assert!((tau_c(end) / 1e5 - 1.0).abs() < 1e-9, "{}", tau_c(end));
-        let mid = f64::midpoint(start, end);
-        let inside = ns.state_at(Years::new(mid / SECONDS_PER_JULIAN_YEAR));
-        let p = inside.period().value();
-        let unglitched = ns.braking * ns.field(mid) * ns.field(mid) / p;
-        assert!((inside.period_derivative() / unglitched - 0.99).abs() < 1e-12);
+    /// |ν̇| of the unglitched spin-down at `t` seconds, Hz s⁻¹.
+    fn unglitched_nu_dot(ns: &NeutronStar, t: f64) -> f64 {
+        let p2 = ns.birth_period * ns.birth_period + 2.0 * ns.braking * ns.field_integral(t);
+        ns.braking * ns.field(t) * ns.field(t) / (p2 * p2.sqrt())
     }
 
-    /// The characteristic age's closed form on the floor branch: a weak-field star's window.
+    /// Ruling 110.3: glitches take 1% off the spin-down from where |ν̇| falls below 10⁻¹⁰·⁵ Hz
+    /// s⁻¹, found on the decaying branch (a young Crab-like pulsar) and on the floor.
     #[test]
-    fn the_glitch_window_is_found_on_the_floor_too() {
-        let ns = star(0.005, 11.8);
-        let tau_c = |t: f64| ns.unglitched_characteristic_age(t) / SECONDS_PER_JULIAN_YEAR;
-        let (start, end) = ns.glitch_window;
-        assert!((tau_c(start) / 1e3 - 1.0).abs() < 1e-9);
-        assert!((tau_c(end) / 1e5 - 1.0).abs() < 1e-9);
+    fn glitches_slow_the_spin_down_by_a_percent_below_the_nu_dot_limit() {
+        // A 20 ms, 10¹²·⁸ G star crosses while its field decays, a few thousand years on; a 2 ms
+        // star born under the floor field, whose field never decays, crosses on the floor.
+        for (p0, log_b0, on_floor) in [(0.02, 12.8, false), (0.002, 11.8, true)] {
+            let ns = star(p0, log_b0);
+            let onset = ns.glitch_onset;
+            assert!(onset > 0.0, "{p0} s, 10^{log_b0} G");
+            assert_eq!(
+                onset >= ns.floor_age,
+                on_floor,
+                "{onset} against {}",
+                ns.floor_age
+            );
+            let rate = unglitched_nu_dot(&ns, onset);
+            assert!(
+                (rate / GLITCH_NU_DOT_LIMIT - 1.0).abs() < 1e-9,
+                "{rate:e} at {onset} s"
+            );
+            let years = |t: f64| Years::new(t / SECONDS_PER_JULIAN_YEAR);
+            for (t, factor) in [(0.5 * onset, 1.0), (2.0 * onset, 1.0 - GLITCH_REVERSAL)] {
+                let state = ns.state_at(years(t));
+                let p = state.period().value();
+                let unglitched = ns.braking * ns.field(t) * ns.field(t) / p;
+                assert!((state.period_derivative() / unglitched - factor).abs() < 1e-12);
+            }
+        }
+        // A typical star is born below the limit and glitches from birth.
+        assert!(star(0.25, 12.95).glitch_onset <= 0.0);
     }
 
-    /// The plan's tests on the birth field and magnetars: 15–40% of neutron stars are born above
-    /// 4.4 × 10¹³ G, none of them is a magnetar at birth (its spin-down outshines its field's
-    /// decay), and at two core collapses a century the Galaxy holds 20–300 active magnetars.
+    /// The plan's tests on the birth field and magnetars, with ruling 110's windows: 8–40% of
+    /// neutron stars are born above 4.4 × 10¹³ G (the equatorial draw's tail holds 12.4%, the
+    /// sample 12.2%; Popov et al. 2010 "about 10%"), none of them is a magnetar at birth (its
+    /// spin-down outshines its field's decay), and at two core collapses a century the Galaxy
+    /// holds 20–300 active magnetars (about 90 expected, ruling 110.2; the sample gives 84).
     #[test]
     fn magnetars_are_the_high_tail_of_the_birth_field() {
         let stars = population(20_000, 11);
@@ -885,7 +927,7 @@ mod tests {
             .iter()
             .filter(|ns| ns.birth_field() > QUANTUM_CRITICAL_FIELD)
             .count();
-        assert!((0.15..=0.40).contains(&share(strong)), "{}", share(strong));
+        assert!((0.08..=0.40).contains(&share(strong)), "{}", share(strong));
         assert!(
             stars
                 .iter()
@@ -915,14 +957,39 @@ mod tests {
         );
     }
 
-    /// Design note 13's re-check: born at a steady rate over 100 Myr, where the living radio
-    /// pulsars sit in the P–Ṗ plane. The ATNF catalogue's non-recycled pulsars have a median
-    /// period of about 0.6 s and a median Ṗ of about 10⁻¹⁴·⁷ (Manchester et al. 2005, AJ 129,
-    /// 1993). The plan's pair gives a median of 2.0 s and 10⁻¹⁴·⁶: the derivative agrees and the
-    /// period is three times long, a finding reported for a ruling (Popov et al.'s field is taken
-    /// at the pole and the braking constant is the equatorial one at 12.2 km, so the braking is
-    /// about thirteen times Popov et al.'s model: four from the field's definition and 3.3 from
-    /// R⁶ against their 10 km). The period band is held at 0.2–3 s until the ruling.
+    /// The share of the sky that `beam` sweeps, from its inclination and half-angle: the union of
+    /// the two bands of ζ within ρ of α and of π − α, each (cos ζ₁ − cos ζ₂) ÷ 2 of the sphere.
+    fn sky_fraction(beam: &PulsarBeam) -> f64 {
+        let (alpha, rho) = (beam.inclination, beam.half_angle);
+        let band = |low: f64, high: f64| (math::cos(low.max(0.0)) - math::cos(high.min(PI))) / 2.0;
+        if alpha + rho >= PI - alpha - rho {
+            band(alpha - rho, PI - alpha + rho)
+        } else {
+            band(alpha - rho, alpha + rho) + band(PI - alpha - rho, PI - alpha + rho)
+        }
+    }
+
+    /// The median of `values` weighted by `weights`: the first value, in ascending order, at which
+    /// the running weight reaches half the total.
+    fn weighted_median(mut pairs: Vec<(f64, f64)>) -> f64 {
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let total: f64 = pairs.iter().map(|p| p.1).sum();
+        let mut running = 0.0;
+        for (value, weight) in &pairs {
+            running += weight;
+            if running >= 0.5 * total {
+                return *value;
+            }
+        }
+        f64::NAN
+    }
+
+    /// Design note 13's re-check, with ruling 110.1's windows: born at a steady rate over 100 Myr,
+    /// the living radio pulsars weighted by what a survey sees of them, the share of the sky
+    /// their beam sweeps times their radio luminosity L ∝ P^−1.5 Ṗ^0.5 (Faucher-Giguère and
+    /// Kaspi 2006, equation 16), have a median P of 0.4–0.9 s and a median log Ṗ of −15.2 to
+    /// −14.2. The ATNF catalogue (v2.6.1, the 2,270 pulsars with P above 30 ms and Ṗ above
+    /// 10⁻¹⁷) has 0.63 s and −14.66 (Manchester et al. 2005, AJ 129, 1993).
     #[test]
     fn living_pulsars_sit_where_observed_ones_do() {
         let stars = population(20_000, 13);
@@ -932,21 +999,34 @@ mod tests {
             let age = Years::new(1.0e8 * open_unit(&mut rng));
             let pulsar = ns.state_at(age);
             if pulsar.is_radio_alive() && !pulsar.is_magnetar() {
-                periods.push(pulsar.period().value());
-                derivatives.push(math::log10(pulsar.period_derivative()));
+                let (p, pdot) = (pulsar.period().value(), pulsar.period_derivative());
+                let weight = sky_fraction(&pulsar.beam()) * math::powf(p, -1.5) * pdot.sqrt();
+                periods.push((p, weight));
+                derivatives.push((math::log10(pdot), weight));
             }
         }
-        periods.sort_by(f64::total_cmp);
-        derivatives.sort_by(f64::total_cmp);
-        let (p, pdot) = (
-            periods[periods.len() / 2],
-            derivatives[derivatives.len() / 2],
-        );
         let alive = f64::from(u32::try_from(periods.len()).unwrap()) / 20_000.0;
+        let (p, pdot) = (weighted_median(periods), weighted_median(derivatives));
         assert!(
-            (0.2..=3.0).contains(&p) && (-15.2..=-14.2).contains(&pdot),
+            (0.4..=0.9).contains(&p) && (-15.2..=-14.2).contains(&pdot),
             "median P {p} s, median log Pdot {pdot}, {alive} of stars alive"
         );
+    }
+
+    /// The beam's sky fraction of `sky_fraction` agrees with the sampled sweep at 1 s.
+    #[test]
+    fn the_sky_fraction_is_the_sampled_sweep() {
+        let mut rng = Lcg::new(31);
+        let (mut exact, n) = (0.0, 20_000);
+        for _ in 0..n {
+            exact += sky_fraction(&PulsarBeam {
+                spin_axis: UnitVector::NORTH,
+                inclination: math::acos(open_unit(&mut rng)),
+                half_angle: beam_half_angle(1.0),
+            });
+        }
+        let mean = exact / f64::from(n);
+        assert!((0.14..=0.16).contains(&mean), "{mean}");
     }
 
     /// The plan's test: over random inclinations and viewing directions, a 1 s pulsar is seen

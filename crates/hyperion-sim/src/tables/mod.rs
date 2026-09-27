@@ -18,6 +18,9 @@ pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod kick_rank;
 pub mod mge;
+pub mod stellar_fates_high;
+pub mod stellar_fates_low;
+pub mod stellar_fates_mid;
 pub mod wd_cooling;
 
 /// What the fitting toolchain records of one fitted table.
@@ -60,6 +63,24 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 1,
         since_generator_version: 11,
         provisional: true,
+    },
+    TableInfo {
+        name: "stellar_fates_high",
+        revision: 0,
+        since_generator_version: 11,
+        provisional: false,
+    },
+    TableInfo {
+        name: "stellar_fates_low",
+        revision: 0,
+        since_generator_version: 11,
+        provisional: false,
+    },
+    TableInfo {
+        name: "stellar_fates_mid",
+        revision: 0,
+        since_generator_version: 11,
+        provisional: false,
     },
     TableInfo {
         name: "wd_cooling",

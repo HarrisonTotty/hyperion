@@ -622,7 +622,7 @@ impl Builder<'_> {
         tau0: f64,
         previous: Option<[f64; 3]>,
     ) -> Step {
-        let lightest = self.lightest_helium_star;
+        let lightest = self.lightest_helium_star();
         if mass < lightest {
             return self.helium_white_dwarf(start, mass, None);
         }

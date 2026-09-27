@@ -791,14 +791,16 @@ averaged slope between 20,000 and 60,000 ly is −2.1 to −3.0 (inner); nothing
 **P02.T7.e Metallicity and assembly.** `FehDistribution { mean, sigma }`. Thin discs: mean = 0.0 +
 gradient × (R − 3.8 lengths), solar at the Milky Way's R₀ ÷ R_d (ruling 21 of 2026-09-22; R24),
 flat in age (until P02.T12.c it fell about 0.1 dex per Gyr beyond 8 Gyr; Bergemann
-et al. 2014; Casagrande et al. 2011), clamped, sigma 0.20; thick −0.55 at its mean age of 11 Gyr,
-falling 0.1 dex per Gyr of age (ruling 7, built by ruling 42.5; P02.T12.c), 0.25; bulge 0.0, 0.40; bar 0.0, 0.30; nuclear disc +0.1, 0.30; halo per component (in situ −0.6,
+et al. 2014; Casagrande et al. 2011), clamped, sigma 0.20; thick −0.5 at its mean age of 11 Gyr,
+falling 0.2 dex per Gyr of age, 0.20 at every age (ruling 106.3; until then −0.55, 0.1 dex per Gyr
+and 0.25, from ruling 7, built by ruling 42.5 in P02.T12.c); bulge 0.0, 0.40; bar 0.0, 0.30; nuclear disc +0.1, 0.30; halo per component (in situ −0.6,
 dominant −1.2, lesser drawn −2.0 to −1.0, debris −1.5; sigma 0.3). All marked for re-checking
 against Bland-Hawthorn and Gerhard 2016. `Fields::new(&GalaxyParams, &MassModel)` assembles the
 components in the fixed order young, sub-discs 1–5, thick, bulge, bar, nuclear disc, halo components
 (D18), and `densities`, `population_density`, `layer_density`. Tests: the gradient at 26,000 ly is
-the drawn one; the thin discs' age–metallicity relation is flat and the thick disc's 0.1 dex per
-Gyr poorer with age (P02.T12.c);
+the drawn one; the thin discs' age–metallicity relation is flat and the thick disc's 0.2 dex per
+Gyr poorer with age (P02.T12.c, ruling 106.3), its whole distribution centred at −0.5 with a spread
+of about 0.23 dex;
 component count at most `MAX_COMPONENTS`; Σ population counts = N; golden densities at 20 pinned
 points for three seeds; the nuclear disc's central density for the fixture is 12–19 per ly³.
 
@@ -2242,3 +2244,24 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
   research had already set to 0.71–0.97; the code keeps 0.71). The model's median sitting about
   0.17 under SPARC's, where SPARC's sample in this mass range is bulge-heavy, is recorded for the
   owner's item 6, not tuned.
+- **Ruling 106.3, built (`amr`, round 9; the batch after the bump to 12).** The thick disc's
+  age–metallicity relation (P02.T7.e, revising T12.c and ruling 76.7) is −0.5 at 11 Gyr, falling
+  0.2 dex per Gyr, with 0.20 dex of scatter at every age (it was −0.55, 0.1 and 0.25); the thin
+  discs are unchanged. Sources, in `fields/metallicity.rs`'s doc comment: Haywood et al. 2013 (about
+  0.15), Bensby et al. 2014 (at least 0.2), Xiang and Rix 2022 (about 0.25, and under 0.22 dex at a
+  given age), Kordopatis et al. 2011 (a mean of −0.45). New unit test: the population's
+  distribution, the field mixed over the uniform 10–12 Gyr, is centred at −0.5 with a spread of
+  0.2309 dex (√(0.20² + 0.4²/12)), its 0.1% point at −1.200 and its 99.9% point at +0.200, and
+  1.5% above solar. Kordopatis et al.'s metal-poor tail to −1.8 is not reached by a normal at every
+  age; recorded, not modelled. Output moves in the thick disc only: four goldens, re-blessed at 11
+  in the lane and re-blessed by the orchestrator at the version it lands under (ruling 106.5 puts
+  it in the batch after the bump to 12)
+  (`stellar/system_metallicity`, `stellar/summaries`, `stellar/briefs`, the server's
+  `systems_in_range_briefs`), every moved record of age 10–12 Gyr and the thick disc's.
+  - _A finding, re-pinned._ `the_sun_is_solar_and_the_local_mean_is_near_the_surveys`: the local
+    mean over every age at R₀ rises from −0.0200 to **−0.0185**, 0.0015 dex above the bracket's
+    −0.02 (the Geneva–Copenhagen survey's −0.06 ± 0.04, Casagrande et al. 2011, Table 1). The
+    upper edge is pinned at −0.015 until the orchestrator rules. The survey's Table 1 gives a mean
+    of −0.06 to −0.07 and a median of −0.05 to −0.06 in \[Fe/H\] (−0.02 to −0.04 and −0.01 to −0.02
+    in \[M/H\]); the ±0.04 is this plan's tolerance, not a measured error, and the survey is a
+    magnitude-limited sample of F and G dwarfs.

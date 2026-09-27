@@ -21,8 +21,11 @@
 //! - After the main sequence a star keeps the specific angular momentum it ended it with, so that
 //!   its period grows as its radius squared (the lane's addition to the plan).
 //! - A protostar, still gaining mass, has no rotation here.
-//! - `u_mag` (`star.magnetism`) gives a fossil field to a share of main-sequence stars above
-//!   1.5 M☉, with a log-normal strength (Sikora et al. 2019, MNRAS 483, 3127); these are forced into
+//! - `u_mag` (`star.magnetism`) gives a fossil field to a share of main-sequence stars from
+//!   1.4 M☉ that rises with mass ([`fossil_field_incidence`]; Sikora et al. 2019a, paper I,
+//!   MNRAS 483, 2300; Grunhut et al. 2017), with a log-normal strength (Sikora et al. 2019b,
+//!   paper II, MNRAS 483, 3127);
+//!   these are forced into
 //!   the slow mode, as the Ap and Bp stars are. Stars below 1.3 M☉ carry a dynamo field and an
 //!   X-ray activity from their Rossby number (Reiners et al. 2022, A&A 662, A41; Wright et al.
 //!   2011).
@@ -30,8 +33,8 @@
 //! The spin axis is `star.spin_axis`, isotropic. The flare rate of P06.T28.a reads the activity.
 //!
 //! Every figure the plan gives is built as it gives it, and the ones the plan leaves to this task
-//! are recorded with their sources on their constants; the lane's research found several of
-//! them discrepant, and those are marked provisional pending a ruling (see the report of P06.T25).
+//! are recorded with their sources on their constants; those still marked provisional are the
+//! lane's own estimates. Ruling 110 settled the fossil-field incidence and the braking law.
 
 use crate::coords::UnitVector;
 use crate::math;
@@ -51,14 +54,22 @@ use crate::units::{
 /// convection zone becomes thin (plan 06, P06.T25).
 pub const KRAFT_BREAK_MASS: SolarMasses = SolarMasses::new(1.3);
 
-/// The mass above which a main-sequence star may carry a fossil field, M☉ (plan 06, P06.T25).
-pub const FOSSIL_FIELD_MIN_MASS: SolarMasses = SolarMasses::new(1.5);
+/// The mass from which a main-sequence star may carry a fossil field, M☉: 1.4, the lower end of
+/// Sikora et al.'s (2019, MNRAS 483, 2300) volume-limited sample (ruling 110.5).
+pub const FOSSIL_FIELD_MIN_MASS: SolarMasses = SolarMasses::new(1.4);
 
-/// The share of main-sequence stars above [`FOSSIL_FIELD_MIN_MASS`] with a fossil field: 8%,
-/// within the plan's 7–10% (the Magnetism in Massive Stars survey's 7 ± 1% of OB stars, Wade et al. 2014, IAUS 302,
-/// 265). Provisional: Sikora et al. (2019, MNRAS 483, 2300, section 6.2) find the share rising
-/// from 0.3% below 1.8 M☉ to 11% at 3.4–3.8 M☉.
-pub const FOSSIL_FIELD_SHARE: f64 = 0.08;
+/// The fossil-field incidence of main-sequence stars against mass, (M☉, share), linear in mass
+/// between the nodes and held beyond the last (ruling 110.5): 0.5% at 1.4–1.8 M☉, rising to 11%
+/// at 3.6 M☉ and flat to 5 M☉ (Sikora et al. 2019, MNRAS 483, 2300, section 6: 0.3% below
+/// 1.8 M☉, about 11% at 3.4–3.8 M☉), then falling to the O and early-B stars' 7% at 15 M☉
+/// (Grunhut et al. 2017, MNRAS 465, 2432, 7 ± 3%).
+pub const FOSSIL_FIELD_INCIDENCE: [(f64, f64); 5] = [
+    (1.4, 0.005),
+    (1.8, 0.005),
+    (3.6, 0.11),
+    (5.0, 0.11),
+    (15.0, 0.07),
+];
 
 /// The median dipole strength of a fossil field, G: 2.6 kG, the mean log B(d) = 3.4 of the
 /// volume-limited Ap and Bp sample of Sikora et al. (2019, MNRAS 483, 3127, section 5.1).
@@ -104,8 +115,8 @@ pub const ACTIVITY_SLOPE: f64 = -2.70;
 
 /// Mamajek and Hillenbrand's (2008, table 10) gyrochronology law, P = a [(B − V)₀ − c]^b t^n with
 /// t in Myr and P in days: a = 0.407, b = 0.325, c = 0.495, n = 0.566, calibrated for 0.5 <
-/// (B − V)₀ < 0.9 and forced through the Sun's 26.09 d. Plan 06 asks for Skumanich's t^½; the
-/// source's own exponent is used (provisional).
+/// (B − V)₀ < 0.9 and forced through the Sun's 26.09 d. The law is kept whole, with its fitted
+/// exponent (Skumanich-like; ruling 110.6): their coefficients with t^½ would give the Sun 15 d.
 const GYRO: (f64, f64, f64, f64) = (0.407, 0.325, 0.495, 0.566);
 
 /// The median birth period of a star of 0.4–1.3 M☉, days: 4, between the peaks near 2 and 8 days
@@ -370,15 +381,47 @@ pub fn rotation(
     })
 }
 
+/// The share of main-sequence stars of `mass` with a fossil field ([`FOSSIL_FIELD_INCIDENCE`]):
+/// zero below 1.4 M☉.
+///
+/// The mass is the main-sequence star's own, standing in for the initial mass the ruling names:
+/// the two differ by the main sequence's winds, under 1% below 15 M☉ where the incidence varies.
+#[must_use]
+pub fn fossil_field_incidence(mass: SolarMasses) -> f64 {
+    let m = mass.value();
+    if mass < FOSSIL_FIELD_MIN_MASS {
+        return 0.0;
+    }
+    FOSSIL_FIELD_INCIDENCE
+        .windows(2)
+        .find(|pair| m <= pair[1].0)
+        .map_or(
+            FOSSIL_FIELD_INCIDENCE[FOSSIL_FIELD_INCIDENCE.len() - 1].1,
+            |pair| {
+                let ((m0, f0), (m1, f1)) = (pair[0], pair[1]);
+                f0 + (f1 - f0) * (m - m0) / (m1 - m0)
+            },
+        )
+}
+
+/// The mark threshold below which a star of `mass` has a fossil field, if it may have one.
+#[must_use]
+fn fossil_threshold(mass: SolarMasses) -> Option<Threshold> {
+    let share = fossil_field_incidence(mass);
+    (share > 0.0).then(|| Threshold::from_probability(share))
+}
+
 /// The fossil field of a main-sequence star in `state` with `draws`, if it has one: a share
-/// [`FOSSIL_FIELD_SHARE`] of main-sequence stars above 1.5 M☉, by the `star.magnetism` mark, with
-/// a log-normal strength about 2.6 kG from the mark's rank within the share, held to 300 G–30 kG.
+/// [`fossil_field_incidence`] of main-sequence stars of its mass, by the `star.magnetism` mark,
+/// with a log-normal strength about 2.6 kG from the mark's rank within the share, held to
+/// 300 G–30 kG.
 #[must_use]
 pub fn fossil_field(state: &StarState, draws: &StarDraws) -> Option<Gauss> {
-    let eligible =
-        matches!(state.phase(), Phase::MainSequence) && state.mass() >= FOSSIL_FIELD_MIN_MASS;
-    let threshold = Threshold::from_probability(FOSSIL_FIELD_SHARE);
-    if !eligible || !draws.magnetism().is_below(threshold) {
+    if !matches!(state.phase(), Phase::MainSequence) {
+        return None;
+    }
+    let threshold = fossil_threshold(state.mass())?;
+    if !draws.magnetism().is_below(threshold) {
         return None;
     }
     #[expect(
@@ -473,10 +516,8 @@ fn main_sequence_period(state: &StarState, composition: &Composition, draws: &St
     if state.mass() >= KRAFT_BREAK_MASS {
         // Whether the star has a fossil field from its mass and mark alone, so that an evolved
         // star read at the start of its Hertzsprung gap keeps the slow mode it had.
-        let magnetic = state.mass() >= FOSSIL_FIELD_MIN_MASS
-            && draws
-                .magnetism()
-                .is_below(Threshold::from_probability(FOSSIL_FIELD_SHARE));
+        let magnetic =
+            fossil_threshold(state.mass()).is_some_and(|t| draws.magnetism().is_below(t));
         let fraction = critical_fraction_of(mass, draws.rotation().value(), magnetic);
         let speed = fraction * critical_speed(mass, radius);
         2.0 * core::f64::consts::PI * radius * SOLAR_RADIUS_M / speed / SECONDS_PER_DAY
@@ -742,7 +783,7 @@ mod tests {
 
     /// Fossil fields: the share and the strengths, and magnetic stars rotate slowly.
     #[test]
-    fn fossil_fields_are_a_few_percent_and_slow_their_stars() {
+    fn fossil_fields_follow_their_incidence_and_slow_their_stars() {
         let mut rng = Lcg::new(23);
         let (mut fossil, mut n) = (0_u32, 0_u32);
         for _ in 0..40_000 {
@@ -757,8 +798,62 @@ mod tests {
             }
         }
         let share = f64::from(fossil) / f64::from(n);
-        assert!((share - FOSSIL_FIELD_SHARE).abs() < 0.005, "{share}");
-        assert_eq!(fossil_field(&b_star(1.4), &StarDraws::median()), None);
+        let expected = fossil_field_incidence(SolarMasses::new(3.0));
+        assert!(
+            (share - expected).abs() < 0.005,
+            "{share} against {expected}"
+        );
+        assert_eq!(
+            fossil_field(
+                &b_star(1.39),
+                &StarDraws::from_parts(StarDrawsParts {
+                    magnetism: crate::rng::Mark::from_word(0),
+                    ..StarDrawsParts::MEDIAN
+                })
+            ),
+            None
+        );
+    }
+
+    /// Ruling 110.5's incidence at its nodes, and continuous between them.
+    #[test]
+    fn the_fossil_incidence_rises_with_mass_and_falls_above_five() {
+        let at = |m: f64| fossil_field_incidence(SolarMasses::new(m));
+        for (m, share) in [
+            (1.39, 0.0),
+            (1.4, 0.005),
+            (1.8, 0.005),
+            (3.6, 0.11),
+            (5.0, 0.11),
+            (15.0, 0.07),
+            (60.0, 0.07),
+        ] {
+            assert!((at(m) - share).abs() < 1e-12, "{m} M☉: {}", at(m));
+        }
+        assert!((at(2.7) - 0.0575).abs() < 1e-12);
+        assert!((at(10.0) - 0.09).abs() < 1e-12);
+    }
+
+    /// Ruling 110.5's test: Ap and Bp stars (the fossil-field stars stand in for them: the class's
+    /// 7,000–20,000 K cuts only the coolest 1.4–1.5 M☉ stars, at 0.5% incidence) are 1–3% of the
+    /// main-sequence stars of 1.4–5 M☉ in a volume-limited sample, as Sikora et al.'s (2019, paper
+    /// I, MNRAS 483, 2300) 52 of 3,254 within 100 pc are (1.6%). The sample's masses follow
+    /// Salpeter's slope times the main-sequence lifetime, ∝ M^−2.35 × M^−2.5, since every such
+    /// star is younger than the disc.
+    #[test]
+    fn ap_and_bp_stars_are_one_to_three_percent_of_the_main_sequence_from_1_4_to_5() {
+        let mut rng = Lcg::new(41);
+        let (mut fossil, n) = (0_u32, 200_000_u32);
+        let slope = -3.85;
+        let (low, high) = (math::powf(1.4, slope), math::powf(5.0, slope));
+        for _ in 0..n {
+            let u = rng.next_f64();
+            let mass = math::powf(low + u * (high - low), 1.0 / slope);
+            let draws = random_draws(&mut rng);
+            fossil += u32::from(fossil_field(&b_star(mass), &draws).is_some());
+        }
+        let share = f64::from(fossil) / f64::from(n);
+        assert!((0.01..=0.03).contains(&share), "{share}");
     }
 
     /// Above the Kraft break the fraction of critical speed is fixed through the main sequence, so

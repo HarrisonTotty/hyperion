@@ -26,6 +26,7 @@ use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, RangeResult, range_quer
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::stellar::ObjectKind;
+use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses};
@@ -1016,8 +1017,8 @@ fn wire_kind(kind: ObjectKind) -> ObjectKindDto {
     }
 }
 
-/// Every row of `answer` carries its system's brief at `time`, the full system's as the sim
-/// generates it, and the rows are otherwise those of `bare`, the same query without briefs.
+/// Every row of `answer` carries its system's brief at `time`, the sim's range brief, with the
+/// full system's kind and class, and the rows are otherwise those of `bare`, the same query without briefs.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the wire's f32s are the sim's f64s rounded, which is what is checked"
@@ -1039,9 +1040,24 @@ fn assert_briefs_are_the_sims(
         );
         let id = SystemId::from_raw(row.id.to_u64()).expect("a system ID");
         let record = resolve(galaxy, id).expect("a system of the galaxy");
-        let expected = SystemStars::generate(galaxy, &record)
+        // The row's brief is the sim's range brief, whose route is exact but for a dead star the
+        // fate table answers; that one has the full system's kind and class (ruling 90.4).
+        let expected = BriefModel::new(galaxy, &record)
             .brief_at(time)
             .expect("every system returned has formed");
+        let full = SystemStars::generate(galaxy, &record)
+            .brief_at(time)
+            .expect("every system returned has formed");
+        assert_eq!(
+            (
+                expected.kind(),
+                expected.class().to_string(),
+                expected.star_count()
+            ),
+            (full.kind(), full.class().to_string(), full.star_count()),
+            "{}",
+            row.designation
+        );
         let brief = row.stellar.as_ref().expect("a brief on every row");
         let lit = expected.log_luminosity();
         assert_eq!(

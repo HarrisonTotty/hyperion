@@ -7,8 +7,8 @@
 //! "nearly flat" for 0–8 Gyr and the decline among the older, α-enhanced stars of the thick disc
 //! (Bergemann et al. 2014, A&A 565, A89; ruling 7 of 2026-09-22, built by ruling 42.5 in plan 02's
 //! P02.T12.c). So the thin discs' mean at a given radius is flat at every age, with a scatter of
-//! 0.20 dex, and the thick disc's falls about 0.1 dex per Gyr. The system stage (plan 06) draws a
-//! system's \[Fe/H\] from the distribution returned here; nothing is drawn in this module.
+//! 0.20 dex, and the thick disc's falls 0.2 dex per Gyr (ruling 106.3). The system stage (plan 06)
+//! draws a system's \[Fe/H\] from the distribution returned here; nothing is drawn in this module.
 //!
 //! The means and scatters, the thin discs' from the rulings and the rest plan 02's (P02.T7.e),
 //! provisional and marked there for re-checking against Bland-Hawthorn and Gerhard (2016, ARA&A
@@ -26,11 +26,20 @@
 //!   length, the Milky Way's R₀ ÷ `R_d` = 3.8 ([`SOLAR_RADIUS_LENGTHS`]), because discs' gradients
 //!   are self-similar in those units, so every drawn disc is solar at its own solar circle. On the
 //!   fixture's 7,000 ly disc that is 26,600 ly. The clamp is plan 02's;
-//! - thick disc: −0.55 at its mean age of 11 Gyr, falling 0.1 dex per Gyr of age, sigma 0.25, so
-//!   its whole population keeps its mean of −0.55. The slope is the brainstorm's decline beyond
-//!   8 Gyr (Fields, "Metallicity", citing Bergemann et al. 2014), which ruling 42.5 moved from the
-//!   thin discs to the thick disc; the −0.55 is plan 02's, and no paper checked gives it at 11 Gyr.
-//!   Bensby et al. (2014) imply about 0.2 dex per Gyr, which is left to the owner (ruling 76.7); bulge 0.0, 0.40; long bar 0.0, 0.30; nuclear disc +0.1, 0.30;
+//! - thick disc: −0.5 at its mean age of 11 Gyr, falling 0.2 dex per Gyr of age, sigma 0.20 at
+//!   every age (ruling 106.3, revising ruling 76.7's 0.1 dex per Gyr, −0.55 and 0.25). The slope is
+//!   the sources' middle: Haywood et al. (2013, A&A 560, A109, §4) give about 0.15 dex per Gyr for
+//!   the thick-disc phase, Bensby, Feltzing and Oey (2014, A&A 562, A71, Conclusion 2) at least 0.2
+//!   ("from ∼10 Gyr below \[Fe/H\] < −0.4 to around 8 Gyr at \[Fe/H\] ≈ 0"), and Xiang and Rix
+//!   (2022, Nature 603, 599) about 0.25 (1.5 dex over 13 to 7 Gyr ago). Haywood's and Xiang and Rix's
+//!   relations, made linear, both give −0.5 at 11 Gyr, and Kordopatis et al. (2011, A&A 535, A107,
+//!   Conclusions) measure the thick disc's mean at −0.45, "a canonical thick disc metallicity of
+//!   −0.5 dex" (§7). The scatter at fixed age is under Xiang and Rix's upper limit of 0.22 dex, and
+//!   Haywood calls the relation "tight". Over the uniform 10–12 Gyr the population keeps its mean of
+//!   −0.5, and its whole spread is √(0.20² + 0.4²/12) = 0.23 dex: a distribution centred at −0.5
+//!   whose tails reach about −1.2 (its 0.1% point) and solar (1.5% lie above), as Kordopatis et al.'s does, although
+//!   their metal-poor tail runs on to −1.8, which a normal at every age does not reach;
+//!   bulge 0.0, 0.40; long bar 0.0, 0.30; nuclear disc +0.1, 0.30;
 //! - halo components their own means (in situ −0.6, dominant merger −1.2, lesser progenitors drawn
 //!   in −2.0 to −1.0, globular-born debris −1.5), sigma 0.3.
 
@@ -39,9 +48,11 @@ use crate::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, YEARS_PER_GIGAYEAR};
 use crate::units::{Dex, DexPerKiloparsec, LightYears, Years};
 
 /// The thick disc's age–metallicity slope, dex per Gyr: its older stars are poorer. The figure is
-/// the brainstorm's decline beyond 8 Gyr (module documentation; ruling 76.7). Until version 12 it acted on the thin
-/// discs beyond 8 Gyr (ruling 42.5 of 2026-09-22).
-pub const THICK_DISC_AGE_SLOPE_DEX_PER_GYR: f64 = -0.1;
+/// ruling 106.3's, between Haywood et al.'s (2013) 0.15, Bensby et al.'s (2014) at least 0.2 and
+/// Xiang and Rix's (2022) about 0.25 (module documentation). It was 0.1, the brainstorm's decline
+/// beyond 8 Gyr (ruling 76.7), until the batch after version 12, and until version 12 it acted on
+/// the thin discs beyond 8 Gyr (ruling 42.5 of 2026-09-22).
+pub const THICK_DISC_AGE_SLOPE_DEX_PER_GYR: f64 = -0.2;
 
 /// The age at which the thick disc's mean is [`THICK_DISC`]'s: the middle of its uniform 10–12 Gyr
 /// ([`THICK_DISC_AGES`](crate::galaxy::ages::THICK_DISC_AGES)), so that the slope moves no mean of
@@ -56,8 +67,11 @@ pub const THIN_DISC_MEAN_RANGE: (f64, f64) = (-1.0, 0.5);
 /// every age (Casagrande et al. 2011, Table 1: σ 0.22, FWHM/2 0.19).
 pub const THIN_DISC_SIGMA: Dex = Dex::new(0.20);
 
-/// The thick disc's \[Fe/H\] at [`THICK_DISC_MEAN_AGE`], and so over its whole population.
-pub const THICK_DISC: FehDistribution = FehDistribution::new(Dex::new(-0.55), Dex::new(0.25));
+/// The thick disc's \[Fe/H\] at [`THICK_DISC_MEAN_AGE`], and so the mean over its whole
+/// population: −0.5 (Haywood et al. 2013 and Xiang and Rix 2022, made linear; Kordopatis et al.
+/// 2011's −0.45), with a scatter at every age of 0.20 dex, under Xiang and Rix's upper limit of
+/// 0.22 (ruling 106.3).
+pub const THICK_DISC: FehDistribution = FehDistribution::new(Dex::new(-0.5), Dex::new(0.20));
 
 /// The bulge's \[Fe/H\].
 pub const BULGE: FehDistribution = FehDistribution::new(Dex::new(0.0), Dex::new(0.40));
@@ -174,22 +188,95 @@ mod tests {
         assert!((disc.at(200_000.0, Years::new(1e10)).mean().value() + 1.0).abs() < 1e-15);
     }
 
-    /// The thick disc is −0.55 at its mean age and 0.1 dex poorer per Gyr older, everywhere; over
-    /// its uniform 10–12 Gyr its mean stays −0.55.
+    /// The thick disc is −0.5 at its mean age and 0.2 dex poorer per Gyr older, everywhere, with a
+    /// scatter of 0.20 dex at every age (ruling 106.3); over its uniform 10–12 Gyr its mean stays
+    /// −0.5.
     #[test]
     fn the_thick_disc_falls_with_age_about_its_mean() {
         let thick = Metallicity::ThickDisc;
         let gyr = |t: f64| Years::new(t * YEARS_PER_GIGAYEAR);
         let at = |r: f64, t: f64| thick.at(r, gyr(t)).mean().value();
-        assert!((at(26_000.0, 11.0) + 0.55).abs() < 1e-15);
-        assert!((at(0.0, 10.0) + 0.45).abs() < 1e-12);
-        assert!((at(60_000.0, 12.0) + 0.65).abs() < 1e-12);
-        assert!((thick.at(1.0, gyr(10.5)).sigma().value() - 0.25).abs() < 1e-15);
+        assert!((at(26_000.0, 11.0) + 0.5).abs() < 1e-15);
+        assert!((at(0.0, 10.0) + 0.3).abs() < 1e-12);
+        assert!((at(60_000.0, 12.0) + 0.7).abs() < 1e-12);
+        // Bensby et al. (2014, Conclusion 2): at least 0.4 dex over 2 Gyr, from about 10 to 8 Gyr.
+        assert!(at(8_000.0, 10.0) - at(8_000.0, 12.0) >= 0.4 - 1e-12);
+        for t in [10.0, 10.5, 11.0, 12.0] {
+            let sigma = thick.at(1.0, gyr(t)).sigma().value();
+            assert!((sigma - 0.20).abs() < 1e-15, "{t} Gyr");
+            // Xiang and Rix (2022): under 0.22 dex at a given age.
+            assert!(sigma < 0.22);
+        }
         let [lo, hi] = crate::galaxy::ages::THICK_DISC_AGES.map(|t| t.value() / YEARS_PER_GIGAYEAR);
         assert!(
             (f64::midpoint(lo, hi) - THICK_DISC_MEAN_AGE.value() / YEARS_PER_GIGAYEAR).abs()
                 < 1e-12
         );
+    }
+
+    /// The thick disc's whole metallicity distribution, the field's normal at each age mixed over
+    /// its uniform 10–12 Gyr by the midpoint rule, against the sources (research notes to ruling
+    /// 106): centred at −0.5 (Kordopatis et al. 2011's mean −0.45, "canonical" −0.5), a spread of
+    /// about 0.23 dex (√(0.20² + 0.4²/12)), its 0.1% point near −1.2 and its metal-rich tail
+    /// reaching solar with a small share (Kordopatis et al.: "up to solar and super-solar values").
+    #[test]
+    fn the_thick_discs_distribution_is_centred_at_minus_half_with_tails_to_minus_1_2_and_solar() {
+        let thick = Metallicity::ThickDisc;
+        let [lo, hi] = crate::galaxy::ages::THICK_DISC_AGES.map(Years::value);
+        let n = 4_000_u32;
+        let fields: Vec<FehDistribution> = (0..n)
+            .map(|i| {
+                let age = lo + (hi - lo) * (f64::from(i) + 0.5) / f64::from(n);
+                thick.at(26_000.0, Years::new(age))
+            })
+            .collect();
+        let count = f64::from(n);
+        let mean = fields.iter().map(|f| f.mean().value()).sum::<f64>() / count;
+        let variance = fields
+            .iter()
+            .map(|f| {
+                let d = f.mean().value() - mean;
+                f.sigma().value() * f.sigma().value() + d * d
+            })
+            .sum::<f64>()
+            / count;
+        let spread = variance.sqrt();
+        let cdf = |x: f64| {
+            fields
+                .iter()
+                .map(|f| {
+                    let z = (x - f.mean().value()) / f.sigma().value();
+                    0.5 * crate::math::erfc(-z / core::f64::consts::SQRT_2)
+                })
+                .sum::<f64>()
+                / count
+        };
+        let quantile = |p: f64| {
+            let (mut a, mut b) = (-3.0_f64, 2.0_f64);
+            for _ in 0..60 {
+                let m = f64::midpoint(a, b);
+                if cdf(m) < p {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            f64::midpoint(a, b)
+        };
+        let (poor, rich) = (quantile(0.001), quantile(0.999));
+        let above_solar = 1.0 - cdf(0.0);
+        assert!((mean + 0.5).abs() < 1e-9, "mean {mean}");
+        let expected = (0.20_f64 * 0.20 + 0.4 * 0.4 / 12.0).sqrt();
+        assert!((spread - expected).abs() < 1e-6, "spread {spread}");
+        assert!((0.225..=0.235).contains(&spread), "spread {spread}");
+        assert!((poor + 1.2).abs() < 0.05, "0.1% point {poor}");
+        assert!((rich - 0.2).abs() < 0.05, "99.9% point {rich}");
+        assert!(
+            (0.005..=0.05).contains(&above_solar),
+            "above solar {above_solar}"
+        );
+        let within = cdf(0.0) - cdf(-1.2);
+        assert!(within > 0.98, "{within} between −1.2 and solar");
     }
 
     #[test]
