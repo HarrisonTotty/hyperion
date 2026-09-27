@@ -9,12 +9,17 @@
 //! constant.
 //!
 //! Masses here are bare `f64`s in solar masses, on the stellar range
-//! [`MASS_LIMIT_LO`]–[`MASS_LIMIT_HI`], 0.08–150 M☉.
+//! [`MASS_LIMIT_LO`]–[`MASS_LIMIT_HI`], 0.08–150 M☉. Below it each function has a substellar
+//! branch ([`MassFunction::substellar_quantile_in`]), whose shape alone gives the brown dwarfs'
+//! masses (plan 13, P13.T1). The two substellar bands, [`MassBand::BrownDwarf`] and
+//! [`MassBand::RoguePlanet`], are counted per system by plan 13's abundances, not by the stellar
+//! normalisation.
 
 use std::error::Error;
 use std::fmt;
 
 use super::quad::bisect;
+use super::substellar::{BROWN_DWARF_MIN_MSUN, ROGUE_PLANET_MAX_MSUN, ROGUE_PLANET_MIN_MSUN};
 use crate::id::Layer;
 use crate::math;
 use crate::rng::Stream;
@@ -50,8 +55,14 @@ const EXPONENT_ONE_TOLERANCE: f64 = 1e-8;
 /// | D    | D     | 64 ly  | 2.5–8 M☉             |
 /// | E    | E     | 128 ly | 8–150 M☉             |
 ///
-/// The substellar layers have no band here: they are not part of the stellar normalisation, and
-/// [`MassBand::try_from`] rejects them.
+/// Plan 13 adds the two substellar layers' bands, which are not part of the stellar
+/// normalisation: [`BandShares`] and [`MassFunction::sample_in_band`] refuse them, and the share
+/// matrix holds objects per system for them ([`ShareMatrix`](super::shares::ShareMatrix)).
+///
+/// | Band        | Layer | Cell | Mass                   |
+/// | ----------- | ----- | ---- | ---------------------- |
+/// | BrownDwarf  | F     | 16 ly | 13 `M_Jup`–0.08 M☉      |
+/// | RoguePlanet | G     | 4 ly  | ⅓ M⊕–13 `M_Jup`         |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MassBand {
     /// 0.08–0.5 M☉, layer A.
@@ -64,13 +75,21 @@ pub enum MassBand {
     D,
     /// 8–150 M☉, layer E.
     E,
+    /// Free-floating brown dwarfs, 13 `M_Jup`–0.08 M☉, layer F (plan 13).
+    BrownDwarf,
+    /// Rogue planets, ⅓ M⊕–13 `M_Jup`, layer G (plan 13).
+    RoguePlanet,
 }
 
 impl MassBand {
-    /// Every band, from the lightest.
+    /// Every stellar band, from the lightest: the five of the stellar normalisation.
     pub const ALL: [Self; 5] = [Self::A, Self::B, Self::C, Self::D, Self::E];
 
-    /// The band's place in [`MassBand::ALL`] and in [`MASS_BAND_EDGES`], 0–4.
+    /// The two substellar bands, heavier first, in the order the range query walks their layers.
+    pub const SUBSTELLAR: [Self; 2] = [Self::BrownDwarf, Self::RoguePlanet];
+
+    /// The band's index: its place in [`MassBand::ALL`] and in [`MASS_BAND_EDGES`], 0–4, for the
+    /// stellar bands, and 5 and 6, its layer's value, for the substellar ones.
     #[must_use]
     pub const fn index(self) -> usize {
         match self {
@@ -79,19 +98,39 @@ impl MassBand {
             Self::C => 2,
             Self::D => 3,
             Self::E => 4,
+            Self::BrownDwarf => 5,
+            Self::RoguePlanet => 6,
         }
     }
 
-    /// The band's lower edge, M☉.
+    /// Whether the band is one of the five of the stellar mass function.
     #[must_use]
-    pub const fn lo(self) -> f64 {
-        MASS_BAND_EDGES[self.index()]
+    pub const fn is_stellar(self) -> bool {
+        match self {
+            Self::A | Self::B | Self::C | Self::D | Self::E => true,
+            Self::BrownDwarf | Self::RoguePlanet => false,
+        }
     }
 
-    /// The band's upper edge, M☉.
+    /// The band's lower edge, M☉: 0.0124 for the brown dwarfs and 1.0 × 10⁻⁶ for the rogue
+    /// planets.
+    #[must_use]
+    pub const fn lo(self) -> f64 {
+        match self {
+            Self::A | Self::B | Self::C | Self::D | Self::E => MASS_BAND_EDGES[self.index()],
+            Self::BrownDwarf => BROWN_DWARF_MIN_MSUN,
+            Self::RoguePlanet => ROGUE_PLANET_MIN_MSUN,
+        }
+    }
+
+    /// The band's upper edge, M☉: each substellar band's is the lower edge of the band above.
     #[must_use]
     pub const fn hi(self) -> f64 {
-        MASS_BAND_EDGES[self.index() + 1]
+        match self {
+            Self::A | Self::B | Self::C | Self::D | Self::E => MASS_BAND_EDGES[self.index() + 1],
+            Self::BrownDwarf => MASS_LIMIT_LO,
+            Self::RoguePlanet => ROGUE_PLANET_MAX_MSUN,
+        }
     }
 
     /// The layer that owns this band.
@@ -103,6 +142,22 @@ impl MassBand {
             Self::C => Layer::C,
             Self::D => Layer::D,
             Self::E => Layer::E,
+            Self::BrownDwarf => Layer::BrownDwarf,
+            Self::RoguePlanet => Layer::RoguePlanet,
+        }
+    }
+
+    /// The band a layer owns: every layer owns one, the substellar layers theirs since plan 13.
+    #[must_use]
+    pub const fn of_layer(layer: Layer) -> Self {
+        match layer {
+            Layer::A => Self::A,
+            Layer::B => Self::B,
+            Layer::C => Self::C,
+            Layer::D => Self::D,
+            Layer::E => Self::E,
+            Layer::BrownDwarf => Self::BrownDwarf,
+            Layer::RoguePlanet => Self::RoguePlanet,
         }
     }
 }
@@ -113,52 +168,11 @@ impl From<MassBand> for Layer {
     }
 }
 
-impl TryFrom<Layer> for MassBand {
-    type Error = ConvertLayerError;
-
-    /// The band of a stellar layer.
-    ///
-    /// # Errors
-    ///
-    /// [`ConvertLayerError`] for the brown-dwarf and rogue-planet layers, which own no band of
-    /// the stellar mass function.
-    fn try_from(layer: Layer) -> Result<Self, Self::Error> {
-        match layer {
-            Layer::A => Ok(Self::A),
-            Layer::B => Ok(Self::B),
-            Layer::C => Ok(Self::C),
-            Layer::D => Ok(Self::D),
-            Layer::E => Ok(Self::E),
-            Layer::BrownDwarf | Layer::RoguePlanet => Err(ConvertLayerError { layer }),
-        }
+impl From<Layer> for MassBand {
+    fn from(layer: Layer) -> Self {
+        Self::of_layer(layer)
     }
 }
-
-/// A layer that owns no stellar mass band was converted to a [`MassBand`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ConvertLayerError {
-    layer: Layer,
-}
-
-impl ConvertLayerError {
-    /// The layer that has no band.
-    #[must_use]
-    pub const fn layer(self) -> Layer {
-        self.layer
-    }
-}
-
-impl fmt::Display for ConvertLayerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "layer {} owns no band of the stellar mass function",
-            self.layer.letter()
-        )
-    }
-}
-
-impl Error for ConvertLayerError {}
 
 /// An initial mass function on the stellar range, 0.08–150 M☉.
 ///
@@ -182,8 +196,25 @@ pub trait MassFunction: fmt::Debug + Send + Sync {
         &[]
     }
 
+    /// `∫ ξ dm` of the function's substellar branch over `[lo, hi]` intersected with
+    /// [`SUBSTELLAR_BRANCH_LO`]–0.08 M☉; 0 if they do not overlap.
+    ///
+    /// The branch is a separate method, and no stellar method reads it, so adding it changed no
+    /// stellar output (plan 13, P13.T1). Only its shape is used: its normalisation is arbitrary,
+    /// and the brown dwarfs' count is plan 13's abundance.
+    fn substellar_integral(&self, lo: f64, hi: f64) -> f64;
+
+    /// The inverse of the substellar branch restricted to `[lo, hi]` (intersected with the
+    /// branch's range), as [`quantile_in`](Self::quantile_in) is of the stellar range.
+    fn substellar_quantile_in(&self, lo: f64, hi: f64, u: f64) -> f64;
+
     /// A primary mass drawn from the function restricted to `band`: one uniform from `stream`,
     /// then [`quantile_in`](Self::quantile_in). One word.
+    ///
+    /// # Panics
+    ///
+    /// For a substellar band, which the stellar function does not cover: plan 13 draws those
+    /// masses from their own laws.
     ///
     /// # Examples
     ///
@@ -198,8 +229,32 @@ pub trait MassFunction: fmt::Debug + Send + Sync {
     /// assert_eq!(stream.position(), 1);
     /// ```
     fn sample_in_band(&self, band: MassBand, stream: &mut Stream) -> f64 {
+        assert!(
+            band.is_stellar(),
+            "the stellar mass function has no {band:?} band: plan 13 draws substellar masses"
+        );
         self.quantile_in(band.lo(), band.hi(), stream.uniform())
     }
+}
+
+/// The lower end of every mass function's substellar branch, M☉: 0.01, the lower end of Kroupa's
+/// (2001, MNRAS 322, 231, eq. 2) α₀ segment. It lies below the brown dwarfs' 0.0124 M☉, so their
+/// band is inside the branch.
+pub const SUBSTELLAR_BRANCH_LO: f64 = 0.01;
+
+/// `∫` of a substellar branch's piece over `[lo, hi]` intersected with the piece's range.
+fn branch_integral(piece: &Piece, lo: f64, hi: f64) -> f64 {
+    overlap(piece, lo, hi).map_or(0.0, |(a, b)| piece.integral(a, b))
+}
+
+/// The restricted inverse of a substellar branch's piece.
+fn branch_quantile(piece: &Piece, lo: f64, hi: f64, u: f64) -> f64 {
+    let lo = lo.max(piece.lo());
+    let hi = hi.min(piece.hi());
+    if lo >= hi {
+        return lo;
+    }
+    piece.invert(lo, hi, u.clamp(0.0, 1.0)).clamp(lo, hi)
 }
 
 /// One closed-form piece of a mass function on `[lo, hi]`.
@@ -414,6 +469,18 @@ impl Kroupa {
     /// The exponent above the break.
     pub const HIGH_EXPONENT: f64 = 2.3;
 
+    /// The exponent of the substellar branch, 0.01–0.08 M☉: α₀ = 0.3 (Kroupa 2001, eq. 2).
+    pub const SUBSTELLAR_EXPONENT: f64 = 0.3;
+
+    /// The substellar branch, ξ ∝ m^−0.3 on 0.01–0.08 M☉, with an arbitrary coefficient: only its
+    /// shape is used (plan 13, Design note 6).
+    const SUBSTELLAR: Piece = Piece::Power {
+        lo: SUBSTELLAR_BRANCH_LO,
+        hi: MASS_LIMIT_LO,
+        coefficient: 1.0,
+        exponent: Self::SUBSTELLAR_EXPONENT,
+    };
+
     const PIECES: [Piece; 2] = [
         Piece::Power {
             lo: MASS_LIMIT_LO,
@@ -446,6 +513,14 @@ impl MassFunction for Kroupa {
 
     fn breaks(&self) -> &[f64] {
         &[Self::BREAK]
+    }
+
+    fn substellar_integral(&self, lo: f64, hi: f64) -> f64 {
+        branch_integral(&Self::SUBSTELLAR, lo, hi)
+    }
+
+    fn substellar_quantile_in(&self, lo: f64, hi: f64, u: f64) -> f64 {
+        branch_quantile(&Self::SUBSTELLAR, lo, hi, u)
     }
 }
 
@@ -587,6 +662,37 @@ impl MassFunction for Chabrier {
     fn breaks(&self) -> &[f64] {
         &[Self::BREAK]
     }
+
+    fn substellar_integral(&self, lo: f64, hi: f64) -> f64 {
+        branch_integral(&self.substellar_branch(), lo, hi)
+    }
+
+    fn substellar_quantile_in(&self, lo: f64, hi: f64, u: f64) -> f64 {
+        branch_quantile(&self.substellar_branch(), lo, hi, u)
+    }
+}
+
+impl Chabrier {
+    /// The substellar branch: the log-normal continued below 0.08 M☉ to 0.01 M☉, as Chabrier's
+    /// (2003) system function runs into the brown dwarfs. Only its shape is used (plan 13, Design
+    /// note 6), and the high-mass scale does not touch it.
+    fn substellar_branch(&self) -> Piece {
+        match self.pieces[0] {
+            Piece::LogNormal {
+                centre,
+                width,
+                coefficient,
+                ..
+            } => Piece::LogNormal {
+                lo: SUBSTELLAR_BRANCH_LO,
+                hi: MASS_LIMIT_LO,
+                coefficient,
+                centre,
+                width,
+            },
+            Piece::Power { .. } => unreachable!("Chabrier's first piece is its log-normal"),
+        }
+    }
 }
 
 /// Which mass function a galaxy uses: part of its generator version.
@@ -639,8 +745,17 @@ impl BandShares {
     }
 
     /// The share of systems whose primary lies in `band`.
+    ///
+    /// # Panics
+    ///
+    /// For a substellar band, which is not part of the stellar normalisation: plan 13 counts those
+    /// objects per system ([`SubstellarAbundance`](super::substellar::SubstellarAbundance)).
     #[must_use]
     pub fn share(&self, band: MassBand) -> f64 {
+        assert!(
+            band.is_stellar(),
+            "{band:?} is not a band of the stellar normalisation"
+        );
         self.0[band.index()]
     }
 
@@ -859,22 +974,62 @@ mod tests {
     }
 
     #[test]
-    fn stellar_layers_convert_to_bands_and_back() {
-        for band in MassBand::ALL {
-            assert_eq!(MassBand::try_from(band.layer()), Ok(band));
+    fn every_layer_converts_to_its_band_and_back() {
+        for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
+            assert_eq!(MassBand::from(band.layer()), band);
             assert_eq!(Layer::from(band), band.layer());
+            assert_eq!(band.index(), usize::from(band.layer().value()));
             assert!(band.lo() < band.hi());
         }
-        for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
-            let error = MassBand::try_from(layer).unwrap_err();
-            assert_eq!(error.layer(), layer);
-        }
-        assert_eq!(
-            MassBand::try_from(Layer::RoguePlanet)
-                .unwrap_err()
-                .to_string(),
-            "layer G owns no band of the stellar mass function"
+        assert!(MassBand::ALL.iter().all(|band| band.is_stellar()));
+        assert!(MassBand::SUBSTELLAR.iter().all(|band| !band.is_stellar()));
+        // The substellar bands meet each other and the stellar range with no gap.
+        assert_same_bits(MassBand::BrownDwarf.hi(), MassBand::A.lo());
+        assert_same_bits(MassBand::RoguePlanet.hi(), MassBand::BrownDwarf.lo());
+    }
+
+    #[test]
+    #[should_panic(expected = "the stellar mass function has no BrownDwarf band")]
+    fn a_stellar_draw_refuses_a_substellar_band() {
+        let mut stream = Stream::open(Seed::new(1), tags::SELFTEST_STREAM, ObjectKey::galaxy());
+        let _ = Kroupa.sample_in_band(MassBand::BrownDwarf, &mut stream);
+    }
+
+    #[test]
+    #[should_panic(expected = "RoguePlanet is not a band of the stellar normalisation")]
+    fn band_shares_refuse_a_substellar_band() {
+        let _ = BandShares::of(&Kroupa).share(MassBand::RoguePlanet);
+    }
+
+    /// The substellar branches: Kroupa's is m^−0.3 and Chabrier's the log-normal continued, both
+    /// on 0.01–0.08 M☉, and their inverses invert them.
+    #[test]
+    fn the_substellar_branches_have_their_sources_shapes() {
+        let kroupa =
+            Kroupa.substellar_integral(0.02, 0.04) / Kroupa.substellar_integral(0.04, 0.08);
+        // ∫ m^−0.3 from 0.02 to 0.04 over 0.04 to 0.08 is 2^−0.7.
+        assert!((kroupa - math::powf(2.0, -0.7)).abs() < 1e-12, "{kroupa}");
+        let chabrier = Chabrier::provisional();
+        let published = Chabrier::new(1.0).unwrap();
+        assert_same_bits(
+            chabrier.substellar_integral(0.02, 0.05),
+            published.substellar_integral(0.02, 0.05),
         );
+        // The log-normal falls towards lower masses below its 0.22 M☉ peak, per unit log mass.
+        let per_dex = |lo: f64| chabrier.substellar_integral(lo, 2.0 * lo);
+        assert!(per_dex(0.02) < per_dex(0.04));
+        for f in [&Kroupa as &dyn MassFunction, &chabrier] {
+            assert_same_bits(f.substellar_integral(0.08, 0.1), 0.0);
+            assert_same_bits(f.substellar_integral(0.001, 0.005), 0.0);
+            let (lo, hi) = (MassBand::BrownDwarf.lo(), MassBand::BrownDwarf.hi());
+            let total = f.substellar_integral(lo, hi);
+            for i in 0..100 {
+                let u = (f64::from(i) + 0.5) / 100.0;
+                let m = f.substellar_quantile_in(lo, hi, u);
+                assert!((lo..=hi).contains(&m));
+                assert!((f.substellar_integral(lo, m) / total - u).abs() < 1e-12);
+            }
+        }
     }
 
     #[test]

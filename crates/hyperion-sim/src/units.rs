@@ -435,6 +435,12 @@ unit!(
     PerCubicLightYear
 );
 unit!(
+    /// A number density per cubic astronomical unit, for bodies as sparse as interstellar comets
+    /// and asteroids (plan 13, P13.T6). One per cubic light-year is 3.95 × 10⁻¹⁵ per cubic au
+    /// ([`consts::METRES_PER_AU`], [`consts::METRES_PER_LIGHT_YEAR`]).
+    PerCubicAu
+);
+unit!(
     /// A surface density per square light-year.
     PerSquareLightYear
 );

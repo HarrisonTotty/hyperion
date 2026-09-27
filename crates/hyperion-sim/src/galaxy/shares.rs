@@ -7,6 +7,10 @@
 //! is the same in the first milestone: the band shares of the mass function. The seven
 //! populations are the first columns, in [`POPULATIONS`] order; the columns after them are
 //! reserved for displaced classes, which plan 08 adds (layer E alone gains about a hundred).
+//!
+//! Plan 13 adds a row for each substellar band after the five stellar rows. Those rows hold objects
+//! per system of the column, not shares: a layer's density is `Σ row × density` either way, so the
+//! thinning needs nothing else (plan 13, Design notes 2 and 3).
 
 use super::fields::Component;
 use super::imf::{BandShares, MassBand};
@@ -19,7 +23,9 @@ pub const POPULATION_COLUMNS: usize = POPULATIONS.len();
 /// the population's systems whose primary's initial mass lies in the band.
 ///
 /// Stored as band × column, one row per band: the seven populations first, then any displaced
-/// classes (none before plan 08).
+/// classes (none before plan 08). The five stellar rows come first, in [`MassBand::ALL`] order, and
+/// the two substellar rows after them ([`MassBand::SUBSTELLAR`]), whose entries are objects per
+/// system and not shares.
 ///
 /// # Examples
 ///
@@ -40,7 +46,7 @@ pub const POPULATION_COLUMNS: usize = POPULATIONS.len();
 pub struct ShareMatrix {
     /// Columns per row, at least [`POPULATION_COLUMNS`].
     columns: usize,
-    /// Row-major, one row per band in [`MassBand::ALL`] order: `shares[band × columns + column]`.
+    /// Row-major, one row per band in [`MassBand::index`] order: `shares[band × columns + column]`.
     shares: Box<[f64]>,
 }
 
@@ -49,7 +55,8 @@ impl ShareMatrix {
     /// first milestone.
     ///
     /// The matrix holds the seven population columns and no displaced classes yet. Each column
-    /// sums to 1 over the bands, to rounding.
+    /// sums to 1 over the stellar bands, to rounding. The substellar rows are zero until
+    /// [`with_substellar`](Self::with_substellar) fills them.
     #[must_use]
     pub fn uniform(bands: &BandShares) -> Self {
         let columns = POPULATION_COLUMNS;
@@ -57,12 +64,34 @@ impl ShareMatrix {
             columns,
             shares: MassBand::ALL
                 .iter()
-                .flat_map(|&band| std::iter::repeat_n(bands.share(band), columns))
+                .map(|&band| bands.share(band))
+                .chain(MassBand::SUBSTELLAR.map(|_| 0.0))
+                .flat_map(|share| std::iter::repeat_n(share, columns))
                 .collect(),
         }
     }
 
-    /// The share of `population`'s systems in `band`.
+    /// The same matrix with every population's entry of the two substellar rows set to the
+    /// galaxy's objects per system (plan 13, Design note 3: one abundance for every population).
+    /// The stellar rows are untouched, bit for bit.
+    #[must_use]
+    pub fn with_substellar(
+        mut self,
+        brown_dwarfs_per_system: f64,
+        rogue_planets_per_system: f64,
+    ) -> Self {
+        for (band, per_system) in MassBand::SUBSTELLAR
+            .into_iter()
+            .zip([brown_dwarfs_per_system, rogue_planets_per_system])
+        {
+            let start = band.index() * self.columns;
+            self.shares[start..start + POPULATION_COLUMNS].fill(per_system);
+        }
+        self
+    }
+
+    /// The share of `population`'s systems in `band`, or, for a substellar band, the population's
+    /// objects of that kind per system.
     #[must_use]
     pub fn share(&self, band: MassBand, population: Population) -> f64 {
         // One index and one bounds check: placement reads this once per component per call.
@@ -122,7 +151,29 @@ mod tests {
                 for band in MassBand::ALL {
                     assert!((shares.share(band, population) - bands.share(band)).abs() < 1e-15);
                 }
+                for band in MassBand::SUBSTELLAR {
+                    assert_same_bits(shares.share(band, population), 0.0);
+                }
             }
+        }
+    }
+
+    /// Plan 13's rows hold objects per system in every population, and filling them leaves the five
+    /// stellar rows bit for bit as they were (P13.T2).
+    #[test]
+    fn the_substellar_rows_hold_objects_per_system_and_move_no_stellar_share() {
+        let bands = BandShares::of(&Chabrier::provisional());
+        let before = ShareMatrix::uniform(&bands);
+        let after = before.clone().with_substellar(0.25, 29.5);
+        for population in POPULATIONS {
+            for band in MassBand::ALL {
+                assert_same_bits(
+                    after.share(band, population),
+                    before.share(band, population),
+                );
+            }
+            assert_same_bits(after.share(MassBand::BrownDwarf, population), 0.25);
+            assert_same_bits(after.share(MassBand::RoguePlanet, population), 29.5);
         }
     }
 
@@ -139,7 +190,9 @@ mod tests {
         }
         assert_eq!(
             shares.heap_bytes(),
-            MassBand::ALL.len() * POPULATION_COLUMNS * size_of::<f64>()
+            (MassBand::ALL.len() + MassBand::SUBSTELLAR.len())
+                * POPULATION_COLUMNS
+                * size_of::<f64>()
         );
     }
 }

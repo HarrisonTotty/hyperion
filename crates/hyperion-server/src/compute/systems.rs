@@ -23,7 +23,7 @@
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemRecord, resolve};
+use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, SystemRecord, resolve};
 use hyperion_sim::id::SystemId;
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
@@ -69,7 +69,9 @@ impl SharedSystemCache {
     ///
     /// # Errors
     ///
-    /// The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
+    /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
+    /// - [`ResolveSystemError::LayerNotGenerated`] for a free-floating brown dwarf or rogue planet,
+    ///   which plan 13 places but the stellar stage does not model yet (P13.T5.a, plan 14).
     ///
     /// # Panics
     ///
@@ -92,6 +94,9 @@ impl SharedSystemCache {
             return Ok(stars);
         }
         let record = resolve(galaxy, id)?;
+        if record.kind() != SystemKind::Stellar {
+            return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
+        }
         let stars = Arc::new(SystemStars::generate(galaxy, &record));
         // A system larger than the whole budget is handed back and still answered from; nothing
         // else needs doing with it.
@@ -247,6 +252,33 @@ mod tests {
             cache.get_or_generate(key(), galaxy(), beyond),
             Err(ResolveSystemError::NoSuchSystem)
         );
+        assert_eq!(cache.counters().entries(), 0);
+    }
+
+    /// A brown dwarf or rogue planet resolves since plan 13 places them, but the stellar stage has
+    /// no model for it yet, so the cache refuses it rather than build stars for it.
+    #[test]
+    fn a_free_floating_object_is_refused_and_not_stored() {
+        use hyperion_sim::coords::GalacticPosition;
+        let cache = SharedSystemCache::new(64 << 20);
+        for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
+            let mut records = Vec::new();
+            // Cells along the solar circle until one holds an object.
+            let found = (0..64)
+                .find_map(|i| {
+                    let at =
+                        GalacticPosition::from_light_years([16.0 * f64::from(i), 26_000.0, 0.0])
+                            .expect("in the cube");
+                    let key = CellKey::containing(layer, &at).expect("in the cube");
+                    generate_cell(galaxy(), key, &mut records);
+                    records.first().copied()
+                })
+                .expect("the solar circle holds free-floating objects");
+            assert_eq!(
+                cache.get_or_generate(key(), galaxy(), found.id()),
+                Err(ResolveSystemError::LayerNotGenerated(layer))
+            );
+        }
         assert_eq!(cache.counters().entries(), 0);
     }
 

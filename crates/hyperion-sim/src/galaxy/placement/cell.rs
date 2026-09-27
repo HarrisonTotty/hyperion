@@ -1,6 +1,6 @@
-//! Generation cells of the stellar layers: their keys, their geometry and their candidates' IDs.
+//! Generation cells of every layer, stellar and substellar: their keys, their geometry and their
+//! candidates' IDs.
 
-use super::layers::layer_spec;
 use super::{BuildCellKeyError, ResolveSystemError};
 use crate::coords::{GalacticPosition, GenCell};
 use crate::galaxy::Galaxy;
@@ -11,12 +11,14 @@ use crate::galaxy::imf::MassBand;
 use crate::id::{BuildSystemIdError, Layer, SystemId, SystemIdKind};
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 
-/// A generation cell of one stellar layer: plan 01's [`GenCell`] plus the layer that owns it.
+/// A generation cell of one layer: plan 01's [`GenCell`] plus the layer that owns it.
 ///
 /// A cell size alone does not name a layer, since the brown dwarfs reuse layer B's 16 ly, so the
-/// key carries both. It is valid by construction: the layer is one of the five stellar layers, the
-/// cell has that layer's size ([`Layer::cell_size`]) and lies inside the root cube, so every index
-/// below [`index_capacity`](Self::index_capacity) is a candidate with an ID.
+/// key carries both. It is valid by construction: the cell has its layer's size
+/// ([`Layer::cell_size`]) and lies inside the root cube, so every index below
+/// [`index_capacity`](Self::index_capacity) is a candidate with an ID. Every layer has cells since
+/// plan 13 placed the brown dwarfs (16 ly) and the rogue planets (4 ly, whose IDs carry the extra
+/// cell bits in plan 01's spare bits).
 ///
 /// Keys order by layer, then by cell.
 ///
@@ -47,15 +49,11 @@ impl CellKey {
     ///
     /// # Errors
     ///
-    /// - [`BuildCellKeyError::NotStellarLayer`] for the brown-dwarf and rogue-planet layers.
     /// - [`BuildCellKeyError::CoordinateOutOfRange`] if the cell's light-years do not fit in `i32`
     ///   ([`GenCell::new`]).
     /// - [`BuildCellKeyError::OutsideRootCube`] unless `−65,536 ≤ origin` and
     ///   `origin + size ≤ 65,536` ly on every axis ([`GenCell::in_root_cube`]).
     pub fn new(layer: Layer, cell: [i32; 3]) -> Result<Self, BuildCellKeyError> {
-        if layer_spec(layer).is_none() {
-            return Err(BuildCellKeyError::NotStellarLayer(layer));
-        }
         let cell = GenCell::new(layer.cell_size(), cell)
             .map_err(BuildCellKeyError::CoordinateOutOfRange)?;
         Self::inside_root_cube(layer, cell)
@@ -67,15 +65,11 @@ impl CellKey {
     ///
     /// # Errors
     ///
-    /// - [`BuildCellKeyError::NotStellarLayer`] for the brown-dwarf and rogue-planet layers.
-    /// - [`BuildCellKeyError::OutsideRootCube`] if the position lies outside the root cube.
+    /// [`BuildCellKeyError::OutsideRootCube`] if the position lies outside the root cube.
     pub fn containing(
         layer: Layer,
         position: &GalacticPosition,
     ) -> Result<Self, BuildCellKeyError> {
-        if layer_spec(layer).is_none() {
-            return Err(BuildCellKeyError::NotStellarLayer(layer));
-        }
         Self::inside_root_cube(
             layer,
             GenCell::of_ly_cell(position.cell(), layer.cell_size()),
@@ -86,21 +80,14 @@ impl CellKey {
     ///
     /// # Errors
     ///
-    /// - [`ResolveSystemError::LayerNotGenerated`] for a brown-dwarf or rogue-planet ID.
-    /// - [`ResolveSystemError::KindNotGenerated`] for any ID under the reserved layer value.
+    /// [`ResolveSystemError::KindNotGenerated`] for any ID under the reserved layer value.
     pub fn of(id: SystemId) -> Result<Self, ResolveSystemError> {
         match id.kind() {
-            SystemIdKind::Grid(grid) => {
-                let layer = grid.layer();
-                if layer_spec(layer).is_none() {
-                    return Err(ResolveSystemError::LayerNotGenerated(layer));
-                }
-                // A grid ID's cell has its layer's size and lies inside the root cube.
-                Ok(Self {
-                    layer,
-                    cell: grid.cell(),
-                })
-            }
+            // A grid ID's cell has its layer's size and lies inside the root cube.
+            SystemIdKind::Grid(grid) => Ok(Self {
+                layer: grid.layer(),
+                cell: grid.cell(),
+            }),
             SystemIdKind::FeatureMember(_)
             | SystemIdKind::Centre(_)
             | SystemIdKind::Stream(_)
@@ -110,8 +97,8 @@ impl CellKey {
         }
     }
 
-    /// A key for a stellar layer's cell of the layer's size, once the cell is known to lie in the
-    /// root cube.
+    /// A key for a layer's cell of the layer's size, once the cell is known to lie in the root
+    /// cube.
     fn inside_root_cube(layer: Layer, cell: GenCell) -> Result<Self, BuildCellKeyError> {
         if cell.in_root_cube() {
             Ok(Self { layer, cell })
@@ -139,7 +126,8 @@ impl CellKey {
         self.cell.origin().to_array()
     }
 
-    /// The edge, light-years: 8 for layer A to 128 for layer E.
+    /// The edge, light-years: 8 for layer A to 128 for layer E, 16 for the brown dwarfs and 4 for
+    /// the rogue planets.
     #[must_use]
     pub const fn size_ly(&self) -> u32 {
         self.layer.cell_size_ly()
@@ -211,14 +199,10 @@ impl CellKey {
             .raw()
     }
 
-    /// The mass band of the cell's layer.
-    ///
-    /// # Panics
-    ///
-    /// Never: a key's layer is one of the five stellar layers, each of which owns a band.
+    /// The mass band of the cell's layer: every layer owns one.
     #[must_use]
     pub(super) fn band(&self) -> MassBand {
-        MassBand::try_from(self.layer()).expect("a cell key's layer is a stellar layer")
+        MassBand::from(self.layer())
     }
 }
 
@@ -509,23 +493,37 @@ mod tests {
         assert!(CellKey::containing(Layer::E, &at_far_face).is_ok());
     }
 
+    /// The substellar layers have keys since plan 13 (P13.T3.a–b): built, found from a position
+    /// and read back from an ID, at the origin and at both faces of the root cube. The IDs under
+    /// the reserved layer value still have none.
     #[test]
-    fn substellar_layers_and_reserved_ids_have_no_key() {
+    fn substellar_layers_have_keys_and_reserved_ids_have_none() {
         for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
-            assert_eq!(
-                CellKey::new(layer, [0, 0, 0]),
-                Err(BuildCellKeyError::NotStellarLayer(layer))
-            );
+            let size = i32::try_from(layer.cell_size_ly()).unwrap();
+            let edge = 65_536 / size;
+            let key = CellKey::new(layer, [0, 0, 0]).unwrap();
             assert_eq!(
                 CellKey::containing(layer, &position([0, 0, 0], 0.5)),
-                Err(BuildCellKeyError::NotStellarLayer(layer))
+                Ok(key)
             );
-            let cell = GenCell::new(layer.cell_size(), [0, 0, 0]).unwrap();
-            let id = SystemId::from_parts(layer, cell, 0).unwrap();
-            assert_eq!(
-                CellKey::of(id),
-                Err(ResolveSystemError::LayerNotGenerated(layer))
-            );
+            for cell in [
+                [0, 0, 0],
+                [-edge, edge - 1, -1],
+                [edge - 1, -edge, edge - 1],
+            ] {
+                let key = CellKey::new(layer, cell).unwrap();
+                assert_eq!(key.size_ly(), layer.cell_size_ly());
+                for index in [0, 1, key.index_capacity() - 1] {
+                    let id = key.candidate_id(index).unwrap();
+                    assert_eq!(CellKey::of(id), Ok(key), "{layer:?} {cell:?} {index}");
+                    // Every ID round-trips through plan 01's canonical decode.
+                    assert_eq!(SystemId::from_raw(id.raw()), Ok(id));
+                }
+            }
+            assert!(matches!(
+                CellKey::new(layer, [edge, 0, 0]),
+                Err(BuildCellKeyError::OutsideRootCube(_))
+            ));
         }
         let black_hole = SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE);
         assert_eq!(black_hole.raw(), 0xf000_0007_0000_0000);
@@ -539,9 +537,13 @@ mod tests {
     fn capacity_is_two_to_the_sixteen_for_a_and_two_to_the_twenty_eight_for_e() {
         let a = CellKey::new(Layer::A, [0, 0, 0]).unwrap();
         let e = CellKey::new(Layer::E, [0, 0, 0]).unwrap();
+        let brown_dwarfs = CellKey::new(Layer::BrownDwarf, [0, 0, 0]).unwrap();
+        let rogue_planets = CellKey::new(Layer::RoguePlanet, [0, 0, 0]).unwrap();
         assert_eq!(a.index_capacity(), 65_536);
         assert_eq!(e.index_capacity(), 1 << 28);
-        for key in [a, e] {
+        assert_eq!(brown_dwarfs.index_capacity(), 1 << 19);
+        assert_eq!(rogue_planets.index_capacity(), 65_536);
+        for key in [a, e, brown_dwarfs, rogue_planets] {
             assert!(key.candidate_id(key.index_capacity() - 1).is_some());
             assert_eq!(key.candidate_id(key.index_capacity()), None);
             assert_eq!(key.candidate_id(u32::MAX), None);
@@ -556,6 +558,8 @@ mod tests {
             (Layer::C, 32, 32_768.0),
             (Layer::D, 64, 262_144.0),
             (Layer::E, 128, 2_097_152.0),
+            (Layer::BrownDwarf, 16, 4_096.0),
+            (Layer::RoguePlanet, 4, 64.0),
         ] {
             let key = CellKey::new(layer, [3, -2, 1]).unwrap();
             assert_eq!(key.layer(), layer);

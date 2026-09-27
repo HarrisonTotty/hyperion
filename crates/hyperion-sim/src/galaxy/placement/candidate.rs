@@ -15,7 +15,7 @@
 //! anything a caller has cached: a candidate is a pure function of the galaxy, its cell and its
 //! index.
 
-use super::record::SystemRecord;
+use super::record::{SystemKind, SystemRecord};
 use super::{CellKey, layer_bound};
 use crate::coords::GalacticPosition;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
@@ -116,7 +116,9 @@ fn evaluate_with_hook(
         return CandidateOutcome::Thinned;
     };
     let record = SystemRecord::of_candidate(galaxy, key, id, position, component);
-    if claims(galaxy, &record) {
+    // Catalogue classes claim stellar hosts only: the hook is not called for the substellar
+    // layers (plan 13, P13.T3.c).
+    if record.kind() == SystemKind::Stellar && claims(galaxy, &record) {
         CandidateOutcome::ClaimedByCatalogue
     } else {
         CandidateOutcome::Accepted(record)

@@ -12,6 +12,7 @@ use hyperion_sim::galaxy::kinematics::KinematicTables;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::{POPULATION_COLUMNS, ShareMatrix};
+use hyperion_sim::galaxy::substellar::{SubstellarAbundance, SubstellarParams};
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy};
 use hyperion_sim::units::LightYears;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
@@ -118,7 +119,17 @@ fn a_galaxy_handle_holds_the_parts_built_one_by_one() {
         );
         assert!(!galaxy.potential().has_grid());
         assert_same("fields", galaxy.fields(), &Fields::new(&params, &model));
-        assert_same("shares", galaxy.shares(), &ShareMatrix::uniform(&bands));
+        // Plan 13's two substellar rows hold the galaxy's own abundances per system.
+        let substellar = SubstellarAbundance::for_galaxy(&galaxy, &SubstellarParams::default());
+        assert_eq!(galaxy.substellar(), &substellar, "{kind:?}");
+        assert_same(
+            "shares",
+            galaxy.shares(),
+            &ShareMatrix::uniform(&bands).with_substellar(
+                substellar.brown_dwarfs_per_system(),
+                substellar.rogue_planets_per_system(),
+            ),
+        );
         assert_eq!(
             text(&galaxy.mass_function()),
             text(&kind.to_mass_function()),

@@ -3,10 +3,10 @@
 //!
 //! The brainstorm's "Identifiers": "A well-formed ID does not always name a system." An ID is a
 //! candidate's address — layer, cell and candidate index — and a candidate is only a system if the
-//! thinning accepted it, so three of the four checks here can fail for an ID that decodes
-//! perfectly: its layer may not be one this generator version places, its index may be at or above
-//! its cell's candidate count, and its candidate may have been thinned or claimed by a catalogue
-//! class.
+//! thinning accepted it, so the checks here can fail for an ID that decodes perfectly: its kind may
+//! not be one this generator version places, its index may be at or above its cell's candidate
+//! count, and its candidate may have been thinned or claimed by a catalogue class. Every layer is
+//! placed since plan 13 added the brown dwarfs and the rogue planets (P13.T3.c).
 //!
 //! Resolving costs one bound, one Poisson draw and one candidate, whatever the layer and however
 //! full the cell: no cell is generated, and nothing is cached, so the answer cannot depend on what
@@ -28,8 +28,6 @@ use crate::id::{SystemId, SystemIdKind};
 ///
 /// # Errors
 ///
-/// - [`ResolveSystemError::LayerNotGenerated`] for a brown-dwarf or rogue-planet ID, until plan 13
-///   places them.
 /// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — a feature
 ///   member, the galactic centre, a stream, a dwarf core, pinned content or a catalogue system —
 ///   until plans 09 and 10 generate them.
@@ -64,8 +62,8 @@ use crate::id::{SystemId, SystemIdKind};
 /// ```
 pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSystemError> {
     match id.kind() {
-        // `CellKey::of` refuses the substellar layers; a grid ID's cell fields span the root cube,
-        // so there is nothing more to check about the cell.
+        // A grid ID's cell fields span the root cube, so there is nothing more to check about the
+        // cell; every layer, the substellar two included, is placed.
         SystemIdKind::Grid(grid) => resolve_candidate(galaxy, CellKey::of(id)?, grid.index()),
         SystemIdKind::FeatureMember(_)
         | SystemIdKind::Centre(_)
@@ -219,16 +217,20 @@ mod tests {
         panic!("only {thinned} thinned candidates in 64 layer-E cells at the Sun-like point");
     }
 
+    /// Since plan 13 (P13.T3.c) every layer resolves: a substellar ID names an object or no such
+    /// system, never an ungenerated layer. The reserved kinds are still refused.
     #[test]
-    fn resolve_refuses_the_layers_and_kinds_this_version_does_not_place() {
+    fn resolve_places_every_layer_and_refuses_the_kinds_this_version_does_not_place() {
         let galaxy = galaxy();
-        for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
-            let cell = crate::coords::GenCell::new(layer.cell_size(), [0, 1_625, 0]).unwrap();
-            let id = SystemId::from_parts(layer, cell, 0).unwrap();
-            assert_eq!(
-                resolve(&galaxy, id),
-                Err(ResolveSystemError::LayerNotGenerated(layer))
-            );
+        for (layer, y) in [(Layer::BrownDwarf, 1_625), (Layer::RoguePlanet, 6_500)] {
+            let key = CellKey::new(layer, [0, y, 0]).unwrap();
+            for index in 0..=candidate_count(&galaxy, key) {
+                let id = key.candidate_id(index).unwrap();
+                match resolve(&galaxy, id) {
+                    Ok(record) => assert_eq!(record.layer(), layer),
+                    Err(e) => assert_eq!(e, ResolveSystemError::NoSuchSystem),
+                }
+            }
         }
         let black_hole = SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE);
         assert_eq!(black_hole.raw(), 0xf000_0007_0000_0000);

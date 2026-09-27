@@ -136,7 +136,7 @@ mod tests {
     fn cells(stellar: [u64; 5]) -> impl Fn(Layer) -> u64 {
         move |layer| {
             assert!(
-                layer_spec(layer).is_some(),
+                layer_spec(layer).is_some_and(|spec| spec.band().is_stellar()),
                 "no substellar layer is walked in M1"
             );
             stellar[usize::from(layer.value())]

@@ -147,3 +147,5 @@ feature.open_cluster (Feature) = 0x8c6af33118b15278
 feature.nursery (Feature) = 0x034e8c116c8a5907
 feature.cloud (Feature) = 0x3a6c74aac0bd2b8a
 feature.velocity (Feature) = 0x40b38dbd17d52dde
+substellar.mass (System) = 0x0eabe4f9e7bb6704
+interstellar.small_bodies (Cell) = 0x2f280f1063586168

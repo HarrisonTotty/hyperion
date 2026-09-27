@@ -38,6 +38,7 @@ pub mod quad;
 pub mod query;
 pub mod shares;
 pub mod special;
+pub mod substellar;
 
 use std::error::Error;
 use std::fmt;
@@ -51,6 +52,7 @@ use self::kinematics::KinematicTables;
 use self::params::GalaxyParams;
 use self::potential::{MassModel, PotentialTables};
 use self::shares::ShareMatrix;
+use self::substellar::{SubstellarAbundance, SubstellarParams};
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::units::SolarMasses;
@@ -196,6 +198,7 @@ pub struct Galaxy {
     shares: ShareMatrix,
     kinematics: Option<Box<KinematicTables>>,
     feature_shares: FeatureShares,
+    substellar: SubstellarAbundance,
 }
 
 impl Galaxy {
@@ -247,7 +250,15 @@ impl Galaxy {
         let potential = PotentialTables::in_plane(&model);
         let fields = Fields::new(&params, &model);
         let gas = GasField::new(seed, &params, &fields).map_err(BuildGalaxyError::Gas)?;
-        let shares = ShareMatrix::uniform(&BandShares::of(mass_function.as_dyn()));
+        let substellar = SubstellarAbundance::from_fields(
+            &fields,
+            params.mean_stars_per_system(),
+            SubstellarParams::generator_default(),
+        );
+        let shares = substellar_shares(
+            ShareMatrix::uniform(&BandShares::of(mass_function.as_dyn())),
+            &substellar,
+        );
         let feature_shares =
             FeatureShares::new(&fields, mass_function.as_dyn(), params.mean_formed_mass());
         Ok(Self {
@@ -261,7 +272,23 @@ impl Galaxy {
             shares,
             kinematics: None,
             feature_shares,
+            substellar,
         })
+    }
+
+    /// The same galaxy with other substellar parameters, for tests and tuning: its abundances and
+    /// the share matrix's two substellar rows are derived again, and nothing stellar changes (plan
+    /// 13, P13.T2).
+    #[must_use]
+    pub fn with_substellar_params(self, p: SubstellarParams) -> Self {
+        let substellar =
+            SubstellarAbundance::from_fields(&self.fields, self.mean_stars_per_system(), p);
+        let shares = substellar_shares(self.shares, &substellar);
+        Self {
+            shares,
+            substellar,
+            ..self
+        }
     }
 
     /// This galaxy with the potential's (R, |z|) grid added, and the kinematic tables that read
@@ -309,6 +336,22 @@ impl Galaxy {
     #[must_use]
     pub fn feature_shares(&self) -> &FeatureShares {
         &self.feature_shares
+    }
+
+    /// The free-floating brown dwarfs and rogue planets per system, with the rogue planets' cap
+    /// (plan 13, P13.T2), built with the galaxy. The share matrix's substellar rows hold these
+    /// figures.
+    #[must_use]
+    pub fn substellar(&self) -> &SubstellarAbundance {
+        &self.substellar
+    }
+
+    /// The mean number of stars per system, 1.33–1.45
+    /// ([`GalaxyParams::mean_stars_per_system`]): what turns plan 13's abundances per star into
+    /// objects per system.
+    #[must_use]
+    pub fn mean_stars_per_system(&self) -> f64 {
+        self.params.mean_stars_per_system()
     }
 
     /// The seed: for a galaxy built from one, the seed its parameters were drawn from, and for
@@ -412,6 +455,14 @@ impl Galaxy {
                 .as_ref()
                 .map_or(0, |k| size_of::<KinematicTables>() + k.heap_bytes())
     }
+}
+
+/// `shares` with its substellar rows set to `abundance`'s objects per system.
+fn substellar_shares(shares: ShareMatrix, abundance: &SubstellarAbundance) -> ShareMatrix {
+    shares.with_substellar(
+        abundance.brown_dwarfs_per_system(),
+        abundance.rogue_planets_per_system(),
+    )
 }
 
 /// A [`Galaxy`] could not be built from its parameters.

@@ -1,5 +1,5 @@
-//! The index-headroom check: no cell of any stellar layer may draw more candidates than its
-//! layer's index field can number (plan 03, Design note 6).
+//! The index-headroom check: no cell of any layer may draw more candidates than its layer's index
+//! field can number (plan 03, Design note 6), the substellar layers included since plan 13.
 //!
 //! A cell's candidate count is a Poisson draw ([`candidate_count`](super::candidate_count)), so
 //! nothing but a bound on its mean keeps it inside the layer's index capacity. A count above the
@@ -16,9 +16,13 @@
 //! which is the octant's too (plan 02, P02.T12.b). It is not the
 //! sum of the components' density peaks, because plan 02's bound multiplies each envelope by an arm
 //! factor's bound over the cell.
+//!
+//! The rogue planets' 16-bit index is the tightest of all: plan 13 caps their abundance per galaxy
+//! at the largest mean this check allows ([`largest_headroom_mean`]) over the same octant, so the
+//! check passes for them by construction (plan 13, Design note 8).
 
 use super::cell::CellKey;
-use super::layers::STELLAR_LAYERS;
+use super::layers::{STELLAR_LAYERS, SUBSTELLAR_LAYERS};
 use super::{ExceedIndexCapacityError, LayerSpec};
 use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::Galaxy;
@@ -40,9 +44,10 @@ const HEADROOM_SIGMAS: f64 = 8.0;
 ///
 /// # Errors
 ///
-/// [`ExceedIndexCapacityError::LayerTooDense`] naming the first layer, coarsest to finest, whose
-/// largest possible candidate count plus eight standard deviations reaches its index capacity. A
-/// bound that is not finite fails the same way.
+/// [`ExceedIndexCapacityError::LayerTooDense`] naming the first layer, the stellar layers coarsest
+/// to finest and then the brown dwarfs and the rogue planets, whose largest possible candidate
+/// count plus eight standard deviations reaches its index capacity. A bound that is not finite
+/// fails the same way.
 ///
 /// # Examples
 ///
@@ -58,7 +63,7 @@ const HEADROOM_SIGMAS: f64 = 8.0;
 /// ```
 pub fn check_index_headroom(galaxy: &Galaxy) -> Result<(), ExceedIndexCapacityError> {
     let octant = root_octant();
-    for spec in STELLAR_LAYERS {
+    for spec in STELLAR_LAYERS.into_iter().chain(SUBSTELLAR_LAYERS) {
         let largest_mean = largest_cell_mean(galaxy, spec, &octant);
         let capacity = capacity_of(spec);
         if !fits_capacity(largest_mean, capacity) {
@@ -80,7 +85,7 @@ pub fn check_index_headroom(galaxy: &Galaxy) -> Result<(), ExceedIndexCapacityEr
 /// Never: the edge is a power of two, the box is the octant `[0, 65_536]³` of the root cube, and it
 /// touches the axis planes without crossing one.
 #[must_use]
-fn root_octant() -> CellBox {
+pub(crate) fn root_octant() -> CellBox {
     CellBox::new([0, 0, 0], ROOT_HALF_WIDTH_LY.unsigned_abs())
         .expect("a root octant is a power-of-two box inside the cube that straddles no plane")
 }
@@ -105,11 +110,22 @@ fn capacity_of(spec: LayerSpec) -> u32 {
 ///
 /// # Panics
 ///
-/// Never: a row of the layer table names a stellar layer, and cell `(0, 0, 0)` lies in the root
-/// cube at every size.
+/// Never: cell `(0, 0, 0)` lies in the root cube at every size.
 #[must_use]
 fn cell_of(spec: LayerSpec) -> CellKey {
-    CellKey::new(spec.layer(), [0, 0, 0]).expect("cell (0, 0, 0) of a stellar layer is a key")
+    CellKey::new(spec.layer(), [0, 0, 0]).expect("cell (0, 0, 0) of every layer is a key")
+}
+
+/// The largest mean that keeps eight standard deviations of headroom below `capacity`: the root of
+/// `m + 8√m = capacity`, `(√(16 + capacity) − 4)²`, about 63,520 for a 16-bit index.
+///
+/// Plan 13 caps the rogue planets' abundance with it (its Design note 8). A mean at or a hair
+/// below it passes [`fits_capacity`], which a test checks.
+#[must_use]
+pub(crate) fn largest_headroom_mean(capacity: u32) -> f64 {
+    let half_sigmas = 0.5 * HEADROOM_SIGMAS;
+    let root = (half_sigmas * half_sigmas + f64::from(capacity)).sqrt() - half_sigmas;
+    root * root
 }
 
 /// Whether a layer whose densest cell expects `largest_mean` candidates keeps eight standard
@@ -266,6 +282,34 @@ mod tests {
         assert_eq!(layer, Layer::A, "{error}");
         assert_eq!(capacity, 65_536);
         assert!(largest_mean > 0.0, "{error}");
+    }
+
+    #[test]
+    fn the_largest_headroom_mean_is_where_the_headroom_runs_out() {
+        for capacity in [65_536_u32, 1 << 19, 1 << 28] {
+            let m = largest_headroom_mean(capacity);
+            assert!(fits_capacity(m * (1.0 - 1e-9), capacity), "{capacity}");
+            assert!(!fits_capacity(m * (1.0 + 1e-9), capacity), "{capacity}");
+        }
+        assert!((63_519.0..63_520.0).contains(&largest_headroom_mean(65_536)));
+    }
+
+    /// The substellar layers are checked too, and at the default abundances the fullest cell of
+    /// each keeps a wide margin: some 20,000 of the brown dwarfs' 2¹⁹ and about half the rogue
+    /// planets' 2¹⁶ (plan 13, Design note 8).
+    #[test]
+    fn the_substellar_layers_keep_their_headroom() {
+        let galaxy = milky_way();
+        let octant = root_octant();
+        for spec in SUBSTELLAR_LAYERS {
+            let mean = largest_cell_mean(&galaxy, spec, &octant);
+            let capacity = f64::from(capacity_of(spec));
+            assert!(
+                mean > 0.0 && mean < 0.7 * capacity,
+                "layer {} expects {mean} candidates of {capacity}",
+                spec.layer().letter()
+            );
+        }
     }
 
     #[test]

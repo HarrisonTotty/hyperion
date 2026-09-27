@@ -23,6 +23,7 @@ use crate::galaxy::ages::{
 use crate::galaxy::consts::{G, LIGHT_YEARS_PER_MEGAPARSEC};
 use crate::galaxy::fates::{
     ProvisionalFates, mean_formed_mass, mean_present_mass, mean_present_mass_of_mixture,
+    mean_stars_per_system,
 };
 use crate::galaxy::potential::sigma;
 use crate::galaxy::{POPULATIONS, Population};
@@ -418,6 +419,7 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         masses: budget.masses,
         system_count: budget.system_count,
         mean_formed_mass: mean_formed_mass(mass_function.as_ref(), &ProvisionalFates),
+        mean_stars_per_system: mean_stars_per_system(mass_function.as_ref(), &ProvisionalFates),
         thin_disc: DiscParams {
             length: LightYears::new(thin_length),
             height: LightYears::new(i.thin_mean_height),

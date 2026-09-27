@@ -145,7 +145,7 @@ impl QuerySphere {
 
 /// Every cell of `layer` whose closed box meets the padded sphere, inside the root cube, in
 /// ascending order of x, then y, then z (the order of [`CellKey`]). Nothing for the substellar
-/// layers, which plan 13 places.
+/// layers until plan 13's P13.T4 lets a query ask for them (P13.T3 places them).
 pub fn cells_in_sphere(
     layer: Layer,
     sphere: &QuerySphere,
@@ -213,7 +213,9 @@ impl Walk {
     /// misses the root cube's cells altogether.
     #[must_use]
     fn new(layer: Layer, sphere: &QuerySphere) -> Option<Self> {
-        let spec = layer_spec(layer)?;
+        // Plan 13 places the substellar layers, but the query walks them only from its P13.T4,
+        // which adds the request that asks for them.
+        let spec = layer_spec(layer).filter(|spec| spec.band().is_stellar())?;
         let cell_ly = i64::from(spec.cell_ly());
         let padded = sphere.padded_radius.value();
         // Whole light-years that cover the padded radius; the clamp keeps any finite radius in

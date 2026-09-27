@@ -1,12 +1,13 @@
-//! The layer table: which cell size and which band of primary initial mass each stellar layer owns.
+//! The layer table: which cell size and which band of primary initial mass each stellar layer owns,
+//! and the two substellar layers' rows (plan 13, P13.T3).
 
 use crate::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO, MassBand};
 use crate::id::Layer;
 use crate::units::SolarMasses;
 
-/// One row of the layer table: a stellar layer, its generation cell edge and its mass band.
+/// One row of the layer table: a layer, its generation cell edge and its mass band.
 ///
-/// The rows are [`STELLAR_LAYERS`]; nothing else builds one. The cell edge is the layer's
+/// The rows are [`STELLAR_LAYERS`] and [`SUBSTELLAR_LAYERS`]; nothing else builds one. The cell edge is the layer's
 /// [`Layer::cell_size_ly`] and the band plan 02's [`MassBand`], so the table restates no figure
 /// (brainstorm, "Sizing the layers").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,13 +35,14 @@ impl LayerSpec {
         self.layer
     }
 
-    /// The generation cell's edge, light-years: 8 for layer A to 128 for layer E.
+    /// The generation cell's edge, light-years: 8 for layer A to 128 for layer E, 16 for the brown
+    /// dwarfs and 4 for the rogue planets.
     #[must_use]
     pub const fn cell_ly(&self) -> u32 {
         self.cell_ly
     }
 
-    /// The band of primary initial mass the layer owns.
+    /// The band of primary initial mass the layer owns, or of object mass for a substellar layer.
     #[must_use]
     pub const fn band(&self) -> MassBand {
         self.band
@@ -58,7 +60,7 @@ impl LayerSpec {
 /// | B     | 16 ly  | 0.5–0.75 M☉          |
 /// | A     | 8 ly   | 0.08–0.5 M☉          |
 ///
-/// The substellar layers are not here: plan 13 places them.
+/// The substellar layers are [`SUBSTELLAR_LAYERS`].
 pub const STELLAR_LAYERS: [LayerSpec; 5] = [
     LayerSpec::of(MassBand::E),
     LayerSpec::of(MassBand::D),
@@ -67,13 +69,37 @@ pub const STELLAR_LAYERS: [LayerSpec; 5] = [
     LayerSpec::of(MassBand::A),
 ];
 
-/// [`STELLAR_LAYERS`] at a fixed address, so that [`layer_spec`] can lend a row for `'static`.
-static STELLAR_LAYER_TABLE: [LayerSpec; 5] = STELLAR_LAYERS;
+/// The two substellar layers, in the order the range query walks them after layer A (plan 13,
+/// P13.T3; brainstorm, "The range query").
+///
+/// | Layer | Cell  | Mass            |
+/// | ----- | ----- | --------------- |
+/// | F     | 16 ly | 13 `M_Jup`–0.08 M☉ |
+/// | G     | 4 ly  | ⅓ M⊕–13 `M_Jup`   |
+///
+/// They are placed as the stars are, by the same thinning, populations and ages, with their own
+/// mass draws (plan 13, Design note 1).
+pub const SUBSTELLAR_LAYERS: [LayerSpec; 2] = [
+    LayerSpec::of(MassBand::BrownDwarf),
+    LayerSpec::of(MassBand::RoguePlanet),
+];
 
-/// The row of a stellar layer, or `None` for the brown-dwarf and rogue-planet layers.
+/// Every row, stellar then substellar, at a fixed address, so that [`layer_spec`] can lend a row
+/// for `'static`.
+static LAYER_TABLE: [LayerSpec; 7] = [
+    STELLAR_LAYERS[0],
+    STELLAR_LAYERS[1],
+    STELLAR_LAYERS[2],
+    STELLAR_LAYERS[3],
+    STELLAR_LAYERS[4],
+    SUBSTELLAR_LAYERS[0],
+    SUBSTELLAR_LAYERS[1],
+];
+
+/// The row of a layer: every layer has one since plan 13 placed the substellar layers.
 #[must_use]
 pub fn layer_spec(layer: Layer) -> Option<&'static LayerSpec> {
-    STELLAR_LAYER_TABLE.iter().find(|spec| spec.layer == layer)
+    LAYER_TABLE.iter().find(|spec| spec.layer == layer)
 }
 
 /// The stellar layer whose band holds a primary initial mass, or `None` outside 0.08–150 M☉.
@@ -131,19 +157,32 @@ mod tests {
             assert_eq!(spec.layer(), layer);
             assert_eq!(spec.cell_ly(), cell_ly, "{layer:?}");
             assert_eq!(spec.cell_ly(), layer.cell_size_ly(), "{layer:?}");
-            assert_eq!(spec.band(), MassBand::try_from(layer).unwrap());
+            assert_eq!(spec.band(), MassBand::from(layer));
             assert_same_bits(spec.band().lo(), lo);
             assert_same_bits(spec.band().hi(), hi);
         }
     }
 
     #[test]
-    fn layer_spec_finds_each_stellar_layer_and_no_substellar_one() {
-        for spec in &STELLAR_LAYERS {
+    fn layer_spec_finds_every_layer() {
+        for spec in STELLAR_LAYERS.iter().chain(&SUBSTELLAR_LAYERS) {
             assert_eq!(layer_spec(spec.layer()), Some(spec));
         }
-        assert_eq!(layer_spec(Layer::BrownDwarf), None);
-        assert_eq!(layer_spec(Layer::RoguePlanet), None);
+        for layer in Layer::ALL {
+            assert!(layer_spec(layer).is_some(), "{layer:?}");
+        }
+    }
+
+    #[test]
+    fn the_substellar_rows_have_the_brainstorms_cells_and_bands() {
+        let expected = [(Layer::BrownDwarf, 16), (Layer::RoguePlanet, 4)];
+        for (spec, (layer, cell_ly)) in SUBSTELLAR_LAYERS.iter().zip(expected) {
+            assert_eq!(spec.layer(), layer);
+            assert_eq!(spec.cell_ly(), cell_ly);
+            assert_eq!(spec.band(), MassBand::from(layer));
+        }
+        assert!((0.0124..0.0125).contains(&SUBSTELLAR_LAYERS[0].band().lo()));
+        assert_same_bits(SUBSTELLAR_LAYERS[0].band().hi(), 0.08);
     }
 
     #[test]

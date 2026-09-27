@@ -615,6 +615,19 @@ domain_tags! {
 
     /// A cluster's bulk velocity: the population's velocity law at its position (P09.T4.a).
     FEATURE_VELOCITY: Feature = "feature.velocity";
+
+    // Plan 13: brown dwarfs and rogue planets (P13.T1, T6). Appended after plan 09, because the
+    // macro's order fixes `ALL`. The substellar layers' position, acceptance and age draws reuse
+    // plan 03's candidate tags, which are keyed by the ID and so by its layer (Design note 11).
+
+    /// A brown dwarf's or rogue planet's mass: one uniform through the layer's own mass function,
+    /// opened with `ObjectKey::from(SystemId)` (P13.T1, Design note 11).
+    SUBSTELLAR_MASS: System = "substellar.mass";
+
+    /// Reserved and unused: interstellar comets and asteroids made real around a ship, keyed by a
+    /// cell's word. Only their mean density exists (P13.T6,
+    /// [`interstellar_small_body_density`](crate::galaxy::substellar::interstellar_small_body_density)).
+    INTERSTELLAR_SMALL_BODIES: Cell = "interstellar.small_bodies";
 }
 
 #[cfg(test)]

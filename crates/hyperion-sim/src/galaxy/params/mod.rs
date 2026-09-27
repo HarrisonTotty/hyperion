@@ -447,6 +447,7 @@ pub struct GalaxyParams {
     masses: [SolarMasses; 7],
     system_count: f64,
     mean_formed_mass: SolarMasses,
+    mean_stars_per_system: f64,
     thin_disc: DiscParams,
     young_disc: DiscParams,
     thick_disc: DiscParams,
@@ -566,6 +567,15 @@ impl GalaxyParams {
     #[must_use]
     pub fn mean_formed_mass(&self) -> SolarMasses {
         self.mean_formed_mass
+    }
+
+    /// The mean number of stars per system, 1.33–1.45: 1 plus the mass-function average of the
+    /// fates' companions ([`fates::mean_stars_per_system`](super::fates::mean_stars_per_system)),
+    /// over the same fates as [`mean_formed_mass`](Self::mean_formed_mass). Plan 13 turns its
+    /// abundances per star into objects per system with it (its Design note 2).
+    #[must_use]
+    pub fn mean_stars_per_system(&self) -> f64 {
+        self.mean_stars_per_system
     }
 
     /// The old thin disc: its scale length and its effective height, 850–1,150 ly, the sub-discs'

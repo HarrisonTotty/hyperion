@@ -13,13 +13,20 @@
 //! candidate was picked for. An age is signed and runs down to −H where its population still forms
 //! stars, so "no system yet" is a question asked with a time ([`SystemRecord::existence_at`];
 //! brainstorm, "Events in time": "Star formation continues").
+//!
+//! A free-floating brown dwarf or rogue planet is a system with no star (brainstorm, "Planetary
+//! systems"), so its record is a [`SystemRecord`] too, and everything keyed by a system ID works for
+//! it unchanged (plan 13, Design note 10). Its [`SystemKind`] follows from its layer and is never
+//! stored, and its mass mark is the object's mass, drawn on `substellar.mass` (Design note 11).
 
 use super::CellKey;
 use crate::coords::GalacticPosition;
 use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
+use crate::galaxy::substellar::draw_brown_dwarf_mass;
 use crate::galaxy::{Galaxy, Population};
 use crate::id::{Layer, SystemId};
+use crate::planetary::HostKind;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::time::UniverseTime;
 use crate::units::{SolarMasses, Years};
@@ -79,6 +86,48 @@ pub struct SystemRecord {
 pub enum SystemOrigin {
     /// Placed by the layer's grid, in the density component the thinning picked.
     Grid(ComponentId),
+}
+
+/// What a system is, as its layer says (plan 13, Design note 10): a star system, a free-floating
+/// brown dwarf or a rogue planet.
+///
+/// It is derived from the layer and never stored. A free-floating object is a system whose body
+/// `0x0000` is the object itself: plan 14 numbers its moons from slot `0x01` (`0x0100`, `0x0200`
+/// and so on) and its rings `0x0080`–`0x008F`, and plan 13 generates no body index but `0x0000`.
+/// Plan 14's [`HostKind`] has the same three values and converts from this.
+///
+/// (The name `ObjectKind` is plan 06's, for what a star is now.)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SystemKind {
+    /// A star and its companions, if any: every record of layers A to E.
+    #[default]
+    Stellar,
+    /// A free-floating brown dwarf, 13 `M_Jup`–0.08 M☉: a record of layer F.
+    BrownDwarf,
+    /// A free-floating planet, ⅓ M⊕–13 `M_Jup`: a record of layer G.
+    RoguePlanet,
+}
+
+impl SystemKind {
+    /// The kind of the systems `layer` places.
+    #[must_use]
+    pub const fn of_layer(layer: Layer) -> Self {
+        match layer {
+            Layer::A | Layer::B | Layer::C | Layer::D | Layer::E => Self::Stellar,
+            Layer::BrownDwarf => Self::BrownDwarf,
+            Layer::RoguePlanet => Self::RoguePlanet,
+        }
+    }
+}
+
+impl From<SystemKind> for HostKind {
+    fn from(kind: SystemKind) -> Self {
+        match kind {
+            SystemKind::Stellar => Self::Stellar,
+            SystemKind::BrownDwarf => Self::BrownDwarf,
+            SystemKind::RoguePlanet => Self::RoguePlanet,
+        }
+    }
 }
 
 /// Whether a system exists at a time (plan 03, Design note 7).
@@ -152,6 +201,13 @@ impl SystemRecord {
         }
     }
 
+    /// What the system is: a star system, a free-floating brown dwarf or a rogue planet, from its
+    /// [`layer`](Self::layer) (plan 13, Design note 10).
+    #[must_use]
+    pub fn kind(&self) -> SystemKind {
+        SystemKind::of_layer(self.layer())
+    }
+
     /// Where the system is at the epoch, in the galactic frame.
     #[must_use]
     pub fn epoch_position(&self) -> &GalacticPosition {
@@ -187,7 +243,8 @@ impl SystemRecord {
     }
 
     /// The initial mass of the primary star, M☉: inside the band of the system's layer, and never
-    /// above the upper mass limit of 150 M☉.
+    /// above the upper mass limit of 150 M☉. For a free-floating brown dwarf or rogue planet it is
+    /// the object's mass, inside its layer's band (plan 13).
     ///
     /// It is the mass the star formed with, not the mass it has now: a layer-E system whose primary
     /// has died is a neutron star or a black hole (brainstorm, "Sizing the layers"). The stellar
@@ -230,7 +287,11 @@ impl SystemRecord {
         epoch_position: GalacticPosition,
         component: ComponentId,
     ) -> Self {
-        let primary_initial_mass = primary_initial_mass(galaxy, id, key.band());
+        let primary_initial_mass = match SystemKind::of_layer(key.layer()) {
+            SystemKind::Stellar => primary_initial_mass(galaxy, id, key.band()),
+            SystemKind::BrownDwarf => brown_dwarf_mass(galaxy, id),
+            SystemKind::RoguePlanet => rogue_planet_mass(galaxy, id),
+        };
         let component_laws = galaxy.fields().component(component);
         let age_at_epoch = age_at_epoch(galaxy, id, component_laws);
         Self {
@@ -255,6 +316,23 @@ fn primary_initial_mass(galaxy: &Galaxy, id: SystemId, band: MassBand) -> SolarM
         ObjectKey::from(id),
     );
     SolarMasses::new(galaxy.mass_function().sample_in_band(band, &mut stream))
+}
+
+/// A free-floating brown dwarf's mass: one word on `substellar.mass`, keyed by the candidate's ID,
+/// through the substellar branch of the galaxy's mass function (plan 13, Design notes 6 and 11).
+#[must_use]
+fn brown_dwarf_mass(galaxy: &Galaxy, id: SystemId) -> SolarMasses {
+    let mut stream = Stream::open(galaxy.seed(), tags::SUBSTELLAR_MASS, ObjectKey::from(id));
+    draw_brown_dwarf_mass(galaxy.mass_function(), &mut stream)
+}
+
+/// A rogue planet's mass: one word on `substellar.mass`, keyed by the candidate's ID, through the
+/// galaxy's copy of Sumi et al.'s (2023) law (plan 13, Design notes 7 and 11), which is
+/// [`draw_rogue_planet_mass`](crate::galaxy::substellar::draw_rogue_planet_mass)'s bit for bit.
+#[must_use]
+fn rogue_planet_mass(galaxy: &Galaxy, id: SystemId) -> SolarMasses {
+    let mut stream = Stream::open(galaxy.seed(), tags::SUBSTELLAR_MASS, ObjectKey::from(id));
+    SolarMasses::new(stream.power_law(galaxy.substellar().rogue_mass_law()))
 }
 
 /// The system's age at the epoch: one word on `system.age`, keyed by the candidate's ID, through

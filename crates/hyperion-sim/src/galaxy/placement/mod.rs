@@ -1,4 +1,5 @@
-//! Placement: every field star system of the galaxy, by exact thinning on five grids (plan 03).
+//! Placement: every field star system of the galaxy, by exact thinning on five grids (plan 03), and
+//! the free-floating brown dwarfs and rogue planets on two more (plan 13).
 //!
 //! The brainstorm's "Placing star systems" and "Exact placement by thinning": five independent
 //! grids, layers A to E with cells of 8 to 128 ly, each owning a band of primary initial mass
@@ -13,8 +14,12 @@
 //! depends on another, on the order cells are generated in, or on what a caller has cached.
 //! Caches belong to the caller (brainstorm, "Runtime and code shape").
 //!
-//! The substellar layers, brown dwarfs and rogue planets, are plan 13's; their IDs are well formed
-//! but not placed here.
+//! The substellar layers, brown dwarfs in 16 ly cells and rogue planets in 4 ly cells
+//! ([`SUBSTELLAR_LAYERS`]), are placed by the same code (plan 13, Design note 1): the same
+//! candidate count, position, thinning, population pick and age, with the mass drawn from the
+//! layer's own law on a stream of its own. Their records are [`SystemRecord`]s whose
+//! [`kind`](SystemRecord::kind) is not [`SystemKind::Stellar`]. The catalogue-class hook is not
+//! called for them.
 
 mod cache;
 mod candidate;
@@ -33,8 +38,11 @@ pub use candidate::{CandidateOutcome, evaluate_candidate};
 pub use cell::{CellKey, candidate_count};
 pub use generate::{cell_heap_bytes, generate_cell};
 pub use headroom::check_index_headroom;
-pub use layers::{LayerSpec, STELLAR_LAYERS, layer_for_initial_mass, layer_spec};
-pub use record::{Existence, SystemOrigin, SystemRecord};
+pub(crate) use headroom::{largest_headroom_mean, root_octant};
+pub use layers::{
+    LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
+};
+pub use record::{Existence, SystemKind, SystemOrigin, SystemRecord};
 pub use resolve::resolve;
 
 use candidate::evaluate_candidate_from_bound;
@@ -46,8 +54,6 @@ use crate::id::Layer;
 /// A [`CellKey`] could not be built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildCellKeyError {
-    /// The layer is not one of the five stellar layers; the substellar layers are plan 13's.
-    NotStellarLayer(Layer),
     /// The cell's light-years do not fit in `i32` on some axis.
     CoordinateOutOfRange(BuildGenCellError),
     /// The cell, or the position it was asked for, lies outside the root cube.
@@ -57,9 +63,6 @@ pub enum BuildCellKeyError {
 impl fmt::Display for BuildCellKeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotStellarLayer(layer) => {
-                write!(f, "layer {} is not a stellar layer", layer.letter())
-            }
             Self::CoordinateOutOfRange(e) => write!(f, "the cell is out of range: {e}"),
             Self::OutsideRootCube(cell) => {
                 let [x, y, z] = cell.to_array();
@@ -77,7 +80,7 @@ impl Error for BuildCellKeyError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::CoordinateOutOfRange(e) => Some(e),
-            Self::NotStellarLayer(_) | Self::OutsideRootCube(_) => None,
+            Self::OutsideRootCube(_) => None,
         }
     }
 }
@@ -92,8 +95,10 @@ pub enum ResolveSystemError {
     /// The ID names no system: its index is not below the cell's candidate count, its candidate
     /// was thinned, or a catalogue class claimed it.
     NoSuchSystem,
-    /// The ID is of a layer this generator version does not place: the brown dwarfs and the rogue
-    /// planets, until plan 13.
+    /// The ID is of a layer whose objects the stage asked has no model for yet. [`resolve`] no
+    /// longer returns it, since plan 13 places the brown dwarfs and the rogue planets (P13.T3.c);
+    /// the stellar stage's callers return it for a substellar record until P13.T5.a routes brown
+    /// dwarfs through that stage and plan 14 takes the rogue planets.
     LayerNotGenerated(Layer),
     /// The ID is under the reserved layer value (a feature member, the galactic centre, a stream,
     /// a dwarf core, pinned content or a catalogue system), which this generator version does not
@@ -106,7 +111,11 @@ impl fmt::Display for ResolveSystemError {
         match self {
             Self::NoSuchSystem => f.write_str("no such system"),
             Self::LayerNotGenerated(layer) => {
-                write!(f, "layer {} is not generated yet", layer.letter())
+                write!(
+                    f,
+                    "objects of layer {} are not modelled yet",
+                    layer.letter()
+                )
             }
             Self::KindNotGenerated => f.write_str("systems of this kind are not generated yet"),
         }
@@ -165,7 +174,6 @@ mod tests {
         let cell = GenCell::new(CellSize::Ly8, [9_000, 0, 0]).unwrap();
         let gen_cell_error = GenCell::new(CellSize::Ly8, [i32::MAX, 0, 0]).unwrap_err();
         let messages = [
-            BuildCellKeyError::NotStellarLayer(Layer::BrownDwarf).to_string(),
             BuildCellKeyError::CoordinateOutOfRange(gen_cell_error).to_string(),
             BuildCellKeyError::OutsideRootCube(cell).to_string(),
             ResolveSystemError::NoSuchSystem.to_string(),
@@ -204,10 +212,7 @@ mod tests {
                 .and_then(|source| source.downcast_ref::<BuildGenCellError>()),
             Some(&gen_cell_error)
         );
-        assert!(
-            BuildCellKeyError::NotStellarLayer(Layer::A)
-                .source()
-                .is_none()
-        );
+        let cell = GenCell::new(CellSize::Ly8, [9_000, 0, 0]).unwrap();
+        assert!(BuildCellKeyError::OutsideRootCube(cell).source().is_none());
     }
 }

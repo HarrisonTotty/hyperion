@@ -392,11 +392,12 @@ pub fn nursery_alive_probability(age: Years) -> f64 {
     BOUND_FRACTION * surviving_number_fraction(age) + (1.0 - BOUND_FRACTION) * unbound
 }
 
-/// Every band maps to itself: the five stellar bands are all there is until plan 13 adds the
-/// substellar ones, which then map to band A here.
+/// Every stellar band maps to itself, and plan 13's substellar bands to band A, the stars these
+/// objects most resemble in number and origin (plan 13, Design note 4).
 const fn stellar_band_or_a(band: MassBand) -> MassBand {
     match band {
         MassBand::A | MassBand::B | MassBand::C | MassBand::D | MassBand::E => band,
+        MassBand::BrownDwarf | MassBand::RoguePlanet => MassBand::A,
     }
 }
 
@@ -475,7 +476,8 @@ mod tests {
         let shares = galaxy.feature_shares();
         for population in crate::galaxy::POPULATIONS {
             let a = shares.phi(population, MassBand::A);
-            for band in MassBand::ALL {
+            // Plan 13's substellar bands answer as band A (its Design note 4).
+            for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
                 assert!((shares.phi(population, band) - a).abs() < 1e-15);
                 let f = shares.field_factor(population, band);
                 assert!((f + shares.phi(population, band) - 1.0).abs() < 1e-15);

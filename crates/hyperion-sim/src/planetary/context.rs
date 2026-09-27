@@ -44,7 +44,7 @@ use super::params::SATELLITE_STABILITY_FRACTION;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::imf::MASS_LIMIT_LO;
-use crate::galaxy::placement::{Existence, ResolveSystemError, SystemRecord, resolve};
+use crate::galaxy::placement::{Existence, ResolveSystemError, SystemKind, SystemRecord, resolve};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::SystemId;
 use crate::math;
@@ -284,12 +284,15 @@ impl SystemContext {
     /// # Errors
     ///
     /// Whatever [`resolve`] refuses: [`ResolveSystemError::NoSuchSystem`] for an ID that names no
-    /// system, [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) for a brown-dwarf or
-    /// rogue-planet ID until plan 13 places them, and
-    /// [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for the kinds plans 09 and 10
-    /// add.
+    /// system and [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for the kinds plans
+    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets, which the stellar stage
+    /// does not model yet (P13.T5.a), so their IDs return
+    /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here.
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         let record = resolve(galaxy, id)?;
+        if record.kind() != SystemKind::Stellar {
+            return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
+        }
         Ok(Self::from_record(galaxy, &record))
     }
 
