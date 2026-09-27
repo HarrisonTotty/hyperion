@@ -243,6 +243,78 @@ impl ClassHistogram {
     }
 }
 
+/// A record written by [`ClassHistogram::write`] could not be read back.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("a class record cannot be read: {0}")]
+pub struct ReadRecordError(pub String);
+
+impl ClassHistogram {
+    /// Reads back one record [`write`](Self::write) wrote, from the next lines of `lines`, with
+    /// the bar-frame histogram if `barred`: its class name and the record, bit for bit.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadRecordError`] if a line is missing, out of order or malformed.
+    pub fn read<'a>(
+        lines: &mut impl Iterator<Item = &'a str>,
+        barred: bool,
+    ) -> Result<(String, Self), ReadRecordError> {
+        let bad = |what: &str| ReadRecordError(what.to_owned());
+        let head = lines.next().ok_or_else(|| bad("no class line"))?;
+        let tokens: Vec<&str> = head.split_whitespace().collect();
+        if tokens.first() != Some(&"class") || tokens.len() != 26 {
+            return Err(bad(head));
+        }
+        let int = |key: &str, at: usize| -> Result<u64, ReadRecordError> {
+            if tokens[at] != key {
+                return Err(bad(key));
+            }
+            tokens[at + 1].parse().map_err(|_| bad(key))
+        };
+        let float =
+            |text: &str| -> Result<f64, ReadRecordError> { text.parse().map_err(|_| bad(text)) };
+        let mut record = Self::new(barred);
+        record.orbits = int("orbits", 2)?;
+        record.steps = int("steps", 4)?;
+        record.refined = int("refined", 6)?;
+        record.over_tolerance = int("over_tolerance", 8)?;
+        if tokens[10] != "worst_drift" {
+            return Err(bad("worst_drift"));
+        }
+        record.worst_drift = float(tokens[11])?;
+        record.in_cube_bound = int("in_cube_bound", 12)?;
+        record.in_cube_unbound = int("in_cube_unbound", 14)?;
+        record.outside = int("outside", 16)?;
+        record.outbound = int("outbound", 18)?;
+        if tokens[20] != "moments" {
+            return Err(bad("moments"));
+        }
+        for (m, text) in record.moments.iter_mut().zip(&tokens[21..]) {
+            *m = float(text)?;
+        }
+        let mut counts = |key: &str, into: &mut Vec<u64>| -> Result<(), ReadRecordError> {
+            let line = lines.next().ok_or_else(|| bad(key))?;
+            let mut words = line.split_whitespace();
+            if words.next() != Some(key) {
+                return Err(bad(key));
+            }
+            let values: Result<Vec<u64>, _> = words.map(str::parse).collect();
+            let values = values.map_err(|_| bad(key))?;
+            if values.len() != into.len() {
+                return Err(bad(key));
+            }
+            *into = values;
+            Ok(())
+        };
+        counts("bound", &mut record.bound)?;
+        counts("unbound", &mut record.unbound)?;
+        if let Some(bar) = &mut record.bar_frame {
+            counts("bar_frame", bar)?;
+        }
+        Ok((tokens[1].to_owned(), record))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +369,9 @@ mod tests {
         assert_eq!(b.bar_frame.as_ref().unwrap().iter().sum::<u64>(), 2);
         let mut text = String::new();
         b.write("toy", &mut text);
+        let (name, back) = ClassHistogram::read(&mut text.lines(), true).unwrap();
+        assert_eq!(name, "toy");
+        assert_eq!(back, b);
         assert!(text.starts_with("class toy orbits 6 "));
         assert_eq!(text.lines().count(), 4);
     }

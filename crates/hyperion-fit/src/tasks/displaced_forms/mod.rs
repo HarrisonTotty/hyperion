@@ -22,9 +22,11 @@
 //! An orbit is bound if its energy at the epoch, bar included, cannot carry it to the sim's
 //! escape boundary, twice the dark halo's `r₂₀₀` (ruling 91).
 //!
-//! The manifests are `manifests/displaced_forms.toml` (the production run, about 1.4 × 10⁷
-//! orbits: plan 15's 1.2 × 10⁷ disc-born and 1.6 × 10⁶ per old population) and
-//! `displaced_forms.smoke.toml`.
+//! The manifests are `manifests/displaced_forms.toml` (the production run, about 1.9 × 10⁷
+//! orbits: plan 15's 1.2 × 10⁷ disc-born, 1.6 × 10⁶ for each old population but the nuclear disc,
+//! and 10⁵ a class for the nuclear disc, ruling 120.3) and `displaced_forms.smoke.toml`. A run is
+//! cut into parts that are written as they finish and read back on a later run, so it resumes
+//! where it stopped with the same bytes (ruling 120.4; [`run`], [`Resume`]).
 
 pub mod births;
 pub mod histogram;
@@ -32,6 +34,7 @@ pub mod orbits;
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
+use std::path::Path;
 
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
@@ -200,12 +203,17 @@ pub struct RunParams {
     pub galaxy_seed: u64,
     /// Orbits per thin-disc class.
     pub disc_orbits: u64,
-    /// Orbits per old-source class.
+    /// Orbits per old-source class but the nuclear disc's.
     pub old_orbits: u64,
+    /// Orbits per nuclear-disc class (ruling 120.3: 10⁵).
+    pub nuclear_orbits: u64,
     /// Orbits per control.
     pub control_orbits: u64,
     /// The step, as a fraction of the circular period at the pericentre: 1 ÷ 200.
     pub step_fraction: f64,
+    /// The nuclear disc's step fraction (ruling 120.3: 1 ÷ 100 only if the reduced run shows at
+    /// most 10% more refinement).
+    pub nuclear_step_fraction: f64,
     /// The least step, years.
     pub min_step_years: f64,
     /// The Jacobi integral's largest relative drift an orbit may keep: 10⁻⁴.
@@ -218,6 +226,8 @@ pub struct RunParams {
     pub corotation_ratio: f64,
     /// Orbits per chunk of the parallel run.
     pub chunk: u64,
+    /// Orbits per part, the unit a run writes to its state directory and resumes from.
+    pub part_orbits: u64,
 }
 
 impl RunParams {
@@ -232,8 +242,10 @@ impl RunParams {
             galaxy_seed: manifest.u64("galaxy_seed")?,
             disc_orbits: manifest.u64("disc_orbits_per_class")?,
             old_orbits: manifest.u64("old_orbits_per_class")?,
+            nuclear_orbits: manifest.u64("nuclear_orbits_per_class")?,
             control_orbits: manifest.u64("control_orbits")?,
             step_fraction: manifest.f64("step_fraction")?,
+            nuclear_step_fraction: manifest.f64("nuclear_step_fraction")?,
             min_step_years: manifest.f64("min_step_years")?,
             drift_tolerance: manifest.f64("drift_tolerance")?,
             max_halvings: u32::try_from(manifest.u64("max_halvings")?)
@@ -241,6 +253,7 @@ impl RunParams {
             bar_strength: manifest.f64("bar_strength")?,
             corotation_ratio: manifest.f64("corotation_ratio")?,
             chunk: manifest.u64("chunk")?.max(1),
+            part_orbits: manifest.u64("part_orbits")?.max(1),
         })
     }
 
@@ -250,7 +263,19 @@ impl RunParams {
         match (class.source, class.speed) {
             (_, None) => self.control_orbits,
             (Source::Thin, Some(_)) => self.disc_orbits,
+            (Source::NuclearDisc, Some(_)) => self.nuclear_orbits,
             (_, Some(_)) => self.old_orbits,
+        }
+    }
+
+    /// The step fraction of `source`'s orbits.
+    #[must_use]
+    pub fn step_fraction_of(&self, source: Source) -> f64 {
+        match source {
+            Source::NuclearDisc => self.nuclear_step_fraction,
+            Source::Thin | Source::Thick | Source::Halo | Source::Bulge | Source::LongBar => {
+                self.step_fraction
+            }
         }
     }
 }
@@ -267,6 +292,23 @@ pub enum RunOrbitsError {
     /// The thread pool could not be built.
     #[error(transparent)]
     Threads(#[from] BuildThreadPoolError),
+    /// A part in the state directory could not be read or written.
+    #[error("part {part} in the state directory")]
+    Part {
+        /// The part's number.
+        part: u64,
+        /// Why.
+        #[source]
+        source: std::io::Error,
+    },
+    /// A part in the state directory is another run's, or malformed.
+    #[error("part {part} in the state directory is not this run's: {reason}")]
+    ForeignPart {
+        /// The part's number.
+        part: u64,
+        /// Why.
+        reason: String,
+    },
 }
 
 /// What every orbit reads: the galaxy, its scales, the two potentials and the samplers.
@@ -403,7 +445,11 @@ impl Setup {
         } else {
             &self.plain
         };
-        let step = potential.step_for(&start, params.step_fraction, params.min_step_years);
+        let step = potential.step_for(
+            &start,
+            params.step_fraction_of(class.source),
+            params.min_step_years,
+        );
         let (end, integration) = if tau > 0.0 {
             let checked = potential.integrate_checked(
                 start,
@@ -473,60 +519,210 @@ fn kick(class: &OrbitClass, v_ref: f64, draws: &mut Draws) -> [f64; 3] {
     }
 }
 
+/// Where a run keeps its parts, and how many it may compute before it stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resume<'a> {
+    /// The state directory: one file a part, `part-NNNNNN.txt`, written whole (to a temporary
+    /// name, then renamed) once the part is done.
+    pub dir: &'a Path,
+    /// The most parts to compute in this invocation; `None` for all.
+    pub max_parts: Option<u64>,
+}
+
+/// The run's orbits laid out by class: every class's first orbit number and the total.
+struct Layout {
+    classes: Vec<OrbitClass>,
+    starts: Vec<u64>,
+    total: u64,
+}
+
+impl Layout {
+    fn new(params: &RunParams) -> Self {
+        let classes = classes();
+        let mut starts = Vec::with_capacity(classes.len() + 1);
+        let mut total = 0_u64;
+        for class in &classes {
+            starts.push(total);
+            total += params.orbits_of(class);
+        }
+        starts.push(total);
+        Self {
+            classes,
+            starts,
+            total,
+        }
+    }
+
+    fn parts(&self, params: &RunParams) -> u64 {
+        self.total.div_ceil(params.part_orbits)
+    }
+}
+
+/// One part's records: the classes it touched, in order.
+type Part = Vec<(usize, ClassHistogram)>;
+
+/// Computes part `part` of the run: its orbits cut into the manifest's chunks, reduced in order.
+fn compute_part(
+    setup: &Setup,
+    params: &RunParams,
+    layout: &Layout,
+    part: u64,
+    threads: NonZeroUsize,
+) -> Result<Part, RunOrbitsError> {
+    let lo = part * params.part_orbits;
+    let hi = (lo + params.part_orbits).min(layout.total);
+    let mut records: Part = Vec::new();
+    map_reduce_chunks(
+        hi - lo,
+        params.chunk,
+        threads,
+        |range| {
+            let mut partial: Part = Vec::new();
+            for offset in range {
+                let i = lo + offset;
+                let class = layout.starts.partition_point(|&s| s <= i) - 1;
+                if partial.last().is_none_or(|(c, _)| *c != class) {
+                    let barred = layout.classes[class].source.is_barred();
+                    partial.push((class, ClassHistogram::new(barred)));
+                }
+                let (_, record) = partial.last_mut().expect("pushed above");
+                let orbit = i - layout.starts[class];
+                setup.orbit(params, class, &layout.classes[class], orbit, record);
+            }
+            partial
+        },
+        |partial| {
+            for (class, record) in partial {
+                match records.last_mut() {
+                    Some((c, r)) if *c == class => r.merge(&record),
+                    _ => records.push((class, record)),
+                }
+            }
+        },
+    )?;
+    Ok(records)
+}
+
+/// The header line of part `part` of the run of `manifest_hash`.
+fn part_header(manifest_hash: &str, part: u64, parts: u64) -> String {
+    format!("# {TASK} part {part} of {parts} manifest-sha256 {manifest_hash}")
+}
+
+/// Writes `records` as part `part` into `dir`, whole: to a temporary name, then renamed.
+fn write_part(dir: &Path, header: &str, part: u64, records: &Part) -> Result<(), RunOrbitsError> {
+    let mut text = String::new();
+    text.push_str(header);
+    text.push('\n');
+    for (class, record) in records {
+        record.write(&class.to_string(), &mut text);
+    }
+    let io = |source| RunOrbitsError::Part { part, source };
+    std::fs::create_dir_all(dir).map_err(io)?;
+    let path = dir.join(format!("part-{part:06}.txt"));
+    let temporary = dir.join(format!("part-{part:06}.txt.partial"));
+    std::fs::write(&temporary, text).map_err(io)?;
+    std::fs::rename(&temporary, &path).map_err(io)
+}
+
+/// Reads part `part` from `dir`, if it is there; an error if it is another run's.
+fn read_part(
+    dir: &Path,
+    header: &str,
+    part: u64,
+    layout: &Layout,
+) -> Result<Option<Part>, RunOrbitsError> {
+    let path = dir.join(format!("part-{part:06}.txt"));
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(RunOrbitsError::Part { part, source }),
+    };
+    let foreign = |reason: String| RunOrbitsError::ForeignPart { part, reason };
+    let mut lines = text.lines().peekable();
+    if lines.next() != Some(header) {
+        return Err(foreign(
+            "its header names another manifest or layout".to_owned(),
+        ));
+    }
+    let mut records = Vec::new();
+    while lines.peek().is_some() {
+        let class_of = |line: &str| -> Option<usize> {
+            let index: usize = line.split_whitespace().nth(1)?.parse().ok()?;
+            (index < layout.classes.len()).then_some(index)
+        };
+        let class = lines
+            .peek()
+            .and_then(|line| class_of(line))
+            .ok_or_else(|| foreign("a class line is malformed".to_owned()))?;
+        let barred = layout.classes[class].source.is_barred();
+        let (_, record) =
+            ClassHistogram::read(&mut lines, barred).map_err(|e| foreign(e.to_string()))?;
+        records.push((class, record));
+    }
+    Ok(Some(records))
+}
+
 /// Runs the orbits of `params` on `threads` threads: one record per class of [`classes`], in
 /// order.
 ///
+/// The orbits are cut into parts of the manifest's `part_orbits`, each computed in the manifest's
+/// chunks and merged into the totals in part order, so the output depends on neither the thread
+/// count nor where a run was stopped and resumed. With `resume`, each part is written to its
+/// state directory when done and read back instead of computed on a later run; the run returns
+/// `None` if it stopped at `max_parts` with parts still to do.
+///
 /// # Errors
 ///
-/// [`RunOrbitsError`] if the fixture or the thread pool cannot be built.
+/// [`RunOrbitsError`] if the fixture or the thread pool cannot be built, or a part cannot be
+/// written or is another run's.
 ///
 /// # Panics
 ///
 /// Never: every orbit's number lies in one class's range by construction.
 pub fn run(
     params: &RunParams,
+    manifest_hash: &str,
     threads: NonZeroUsize,
-) -> Result<Vec<ClassHistogram>, RunOrbitsError> {
+    resume: Option<Resume<'_>>,
+) -> Result<Option<Vec<ClassHistogram>>, RunOrbitsError> {
     let setup = Setup::new(params)?;
-    let classes = classes();
-    let counts: Vec<u64> = classes.iter().map(|c| params.orbits_of(c)).collect();
-    let mut starts = Vec::with_capacity(counts.len() + 1);
-    let mut total = 0_u64;
-    for &n in &counts {
-        starts.push(total);
-        total += n;
-    }
-    starts.push(total);
-    let mut records: Vec<ClassHistogram> = classes
+    let layout = Layout::new(params);
+    let parts = layout.parts(params);
+    let mut records: Vec<ClassHistogram> = layout
+        .classes
         .iter()
         .map(|c| ClassHistogram::new(c.source.is_barred()))
         .collect();
-    map_reduce_chunks(
-        total,
-        params.chunk,
-        threads,
-        |range| {
-            let mut partial: Vec<(usize, ClassHistogram)> = Vec::new();
-            for i in range {
-                let class = starts.partition_point(|&s| s <= i) - 1;
-                if partial.last().is_none_or(|(c, _)| *c != class) {
-                    partial.push((
-                        class,
-                        ClassHistogram::new(classes[class].source.is_barred()),
-                    ));
-                }
-                let (_, record) = partial.last_mut().expect("pushed above");
-                setup.orbit(params, class, &classes[class], i - starts[class], record);
+    let mut computed = 0_u64;
+    let mut complete = true;
+    for part in 0..parts {
+        let header = part_header(manifest_hash, part, parts);
+        let loaded = match resume {
+            Some(r) => read_part(r.dir, &header, part, &layout)?,
+            None => None,
+        };
+        let part_records = if let Some(records) = loaded {
+            records
+        } else {
+            if resume
+                .and_then(|r| r.max_parts)
+                .is_some_and(|m| computed >= m)
+            {
+                complete = false;
+                continue;
             }
-            partial
-        },
-        |partial| {
-            for (class, record) in partial {
-                records[class].merge(&record);
+            let records = compute_part(&setup, params, &layout, part, threads)?;
+            if let Some(r) = resume {
+                write_part(r.dir, &header, part, &records)?;
             }
-        },
-    )?;
-    Ok(records)
+            computed += 1;
+            records
+        };
+        for (class, record) in part_records {
+            records[class].merge(&record);
+        }
+    }
+    Ok(complete.then_some(records))
 }
 
 /// The run's records as text: a header naming the task, the manifest's bytes' SHA-256 and the
@@ -549,6 +745,12 @@ pub fn render(manifest: &Manifest, records: &[ClassHistogram]) -> String {
         record.write(&class.name(), &mut out);
     }
     out
+}
+
+/// The SHA-256 of `manifest`'s bytes in lowercase hexadecimal: what a run's parts are keyed by.
+#[must_use]
+pub fn manifest_hash(manifest: &Manifest) -> String {
+    sha256_hex(manifest.bytes())
 }
 
 /// The SHA-256 of `bytes` in lowercase hexadecimal.
@@ -595,9 +797,15 @@ mod tests {
         let manifest = smoke();
         assert_eq!(manifest.task(), TASK);
         let params = RunParams::from_manifest(&manifest).unwrap();
-        let one = render(&manifest, &run(&params, NonZeroUsize::MIN).unwrap());
-        let again = render(&manifest, &run(&params, NonZeroUsize::MIN).unwrap());
-        let records = run(&params, NonZeroUsize::new(3).unwrap()).unwrap();
+        let hash = manifest_hash(&manifest);
+        let go = |threads: usize| {
+            run(&params, &hash, NonZeroUsize::new(threads).unwrap(), None)
+                .unwrap()
+                .expect("a run without a limit completes")
+        };
+        let one = render(&manifest, &go(1));
+        let again = render(&manifest, &go(1));
+        let records = go(3);
         let three = render(&manifest, &records);
         assert_eq!(sha256_hex(one.as_bytes()), sha256_hex(again.as_bytes()));
         assert_eq!(one, three);
@@ -609,6 +817,43 @@ mod tests {
             );
             assert!(record.over_tolerance <= record.refined, "{}", class.name());
         }
+        // Ruling 120.4: stopped after one part, then after two more, then finished, the run gives
+        // the uninterrupted run's bytes; a part of another manifest is refused.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp/displaced_forms_resume_test");
+        let _ = std::fs::remove_dir_all(&dir); // A leftover of an earlier run, if any.
+        let threads = NonZeroUsize::new(2).unwrap();
+        let limited = |max_parts| {
+            run(
+                &params,
+                &hash,
+                threads,
+                Some(Resume {
+                    dir: &dir,
+                    max_parts,
+                }),
+            )
+            .unwrap()
+        };
+        assert!(Layout::new(&params).parts(&params) > 3);
+        assert!(limited(Some(1)).is_none());
+        assert!(limited(Some(2)).is_none());
+        let resumed = limited(None).expect("the last invocation finishes");
+        assert_eq!(render(&manifest, &resumed), one);
+        let other = run(
+            &params,
+            "another",
+            threads,
+            Some(Resume {
+                dir: &dir,
+                max_parts: None,
+            }),
+        );
+        assert!(matches!(
+            other,
+            Err(RunOrbitsError::ForeignPart { part: 0, .. })
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
         // The slowest thin class stays bound and in the cube, and turns with the disc.
         let slow = &records[0];
         assert_eq!(slow.in_cube_bound, slow.orbits);

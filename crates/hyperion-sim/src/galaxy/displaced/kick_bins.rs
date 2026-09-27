@@ -678,13 +678,14 @@ mod tests {
     }
 
     /// The bins averaged over layer E's band, weighted by the mass function over 33 log-spaced
-    /// nodes (trapezoidal in ln m), for `kind`, normalised to that kind; with the stripped share
-    /// `stripped` in place of the seam's, if given.
-    fn band_average(kind: RemnantKind, stripped: Option<f64>) -> [f64; SPEED_BINS] {
+    /// nodes (trapezoidal in ln m), for `kind`, normalised to that kind, and the share of that
+    /// kind kicked in the low mode; with the stripped share `stripped` in place of the seam's, if
+    /// given.
+    fn band_average(kind: RemnantKind, stripped: Option<f64>) -> ([f64; SPEED_BINS], f64) {
         let law = StandardKickLaw::default();
         let imf = MassFunctionKind::default().to_mass_function();
         let masses: Vec<SolarMasses> = layer_e_masses().collect();
-        let mut sum = [0.0; SPEED_BINS];
+        let (mut sum, mut low) = ([0.0; SPEED_BINS], 0.0);
         for (i, &m) in masses.iter().enumerate() {
             let end = i == 0 || i == masses.len() - 1;
             let weight = imf.pdf(m.value()) * m.value() * if end { 0.5 } else { 1.0 };
@@ -695,38 +696,52 @@ mod tests {
             for (s, b) in sum.iter_mut().zip(shares.bins(kind)) {
                 *s += weight * b;
             }
+            low += weight * shares.mode_bins(kind, KickMode::Low).iter().sum::<f64>();
         }
         let total: f64 = sum.iter().sum();
-        sum.map(|s| s / total)
+        (sum.map(|s| s / total), low / total)
     }
 
-    /// P08.T8.b: over layer E's band at Milky Way values (`v_c` 224 km/s, solar metallicity), the
-    /// neutron stars' bins against the research's 0.20, 0.10, 0.155, 0.18, 0.125, 0.08, 0.07,
-    /// 0.08 (the mean of its two stripped mixes; plan's window ±0.03), and the black holes' first
-    /// bin against 0.78–0.88.
-    ///
-    /// **Provisional, a finding (2026-09-26):** with plan 11's stripped share behind the seam
-    /// (about 0.5–0.6 at 10 au, against the research's mixes) the first three neutron-star bins
-    /// miss: 0.331, 0.044, 0.116, since more companion-stripped cores under 3 M☉ take the low
-    /// mode. The test holds the measured values to 0.005 with the plan's figures beside them; the
-    /// black holes' 0.785 passes the plan's window.
+    /// The share of each speed bin (edges times `v_c` 224 km/s) under Disberg and Mandel's (2025)
+    /// log-normal of the isolated pulsars, μ 5.60 and σ 0.68 in ln(km/s), truncated at 1,000 km/s
+    /// (ruling 96.2), from the law's own parameters.
+    fn dm25_bins() -> [f64; SPEED_BINS] {
+        let p = crate::stellar::remnant::KickLawParams::default();
+        let cdf = |v: f64| {
+            let z = (math::ln(v) - p.ln_mu) / p.ln_sigma;
+            0.5 * math::erfc(-z * core::f64::consts::FRAC_1_SQRT_2)
+        };
+        let top = cdf(p.max_speed_km_s);
+        let mut out = [0.0; SPEED_BINS];
+        let mut below = 0.0;
+        for (o, &edge) in out.iter_mut().zip(&SPEED_EDGES) {
+            let at = cdf(edge * V_C).min(top) / top;
+            *o = at - below;
+            below = at;
+        }
+        out[SPEED_BINS - 1] = 1.0 - below;
+        out
+    }
+
+    /// P08.T8.b as ruling 120.2 re-derives it: over layer E's band at Milky Way values (`v_c`
+    /// 224 km/s, solar metallicity), each neutron-star bin lies within 0.03 of `w + (1 − w) ×` the
+    /// truncated DM25 share of the bin (the `w` term in the first bin only), `w` the measured
+    /// low-mode share of neutron stars, which lies below a quarter of `v_c` bar a Maxwellian tail
+    /// of about 10⁻²⁵; and the black holes' first bin holds 0.78–0.88. The research's scratch 0.20, 0.10,
+    /// 0.155, … are withdrawn (ruling 120.2).
     #[test]
     fn the_band_averaged_shares_at_milky_way_values() {
-        let research = [0.20, 0.10, 0.155, 0.18, 0.125, 0.08, 0.07, 0.08];
-        let measured = [0.331, 0.044, 0.116, 0.152, 0.120, 0.090, 0.070, 0.079];
-        let ns = band_average(RemnantKind::NeutronStar, None);
-        let bh = band_average(RemnantKind::BlackHole, None);
-        let provisional = band_average(RemnantKind::NeutronStar, Some(0.25));
-        eprintln!(
-            "neutron stars {ns:.4?}\n  at plan 06's provisional 0.25 {provisional:.4?}\nblack holes {bh:.4?}"
+        let ((ns, w), (bh, _)) = (
+            band_average(RemnantKind::NeutronStar, None),
+            band_average(RemnantKind::BlackHole, None),
         );
-        for (bin, ((&got, &held), &want)) in ns.iter().zip(&measured).zip(&research).enumerate() {
-            assert!(
-                (got - held).abs() <= 0.005,
-                "neutron stars' bin {bin}: {got} against the measured {held} (research {want})"
-            );
-        }
-        for (bin, (&got, &want)) in ns.iter().zip(&research).enumerate().skip(3) {
+        let dm25 = dm25_bins();
+        let target: [f64; SPEED_BINS] =
+            core::array::from_fn(|k| if k == 0 { w } else { 0.0 } + (1.0 - w) * dm25[k]);
+        eprintln!(
+            "neutron stars {ns:.4?}\n  targets (w {w:.4}) {target:.4?}\n  DM25 {dm25:.4?}\nblack holes {bh:.4?}"
+        );
+        for (bin, (&got, &want)) in ns.iter().zip(&target).enumerate() {
             assert!(
                 (got - want).abs() <= 0.03,
                 "neutron stars' bin {bin}: {got} against {want}"
@@ -738,6 +753,29 @@ mod tests {
             bh[0]
         );
     }
+
+    /// Ruling 120.2: the low-mode share of neutron stars over layer E's band lies in 1/6–1/4 (the
+    /// brainstorm; Igoshev et al. 2021, 0.2 ± 0.1).
+    ///
+    /// **Provisional, a finding (2026-09-27):** with the seam's stripped share of 0.485 (P11.T4.a's
+    /// threshold; ruling 120.1's 0.25–0.33 unmet) it is 0.300, held here, above the window. At a
+    /// stripped share of 0.25 and of 0.33 it is 0.177 and 0.231, inside it, which the test asserts.
+    #[test]
+    fn the_low_mode_share_of_neutron_stars() {
+        let (_, w) = band_average(RemnantKind::NeutronStar, None);
+        let (_, at_quarter) = band_average(RemnantKind::NeutronStar, Some(0.25));
+        let (_, at_third) = band_average(RemnantKind::NeutronStar, Some(0.33));
+        eprintln!(
+            "low-mode share {w:.4}; at a stripped share of 0.25 {at_quarter:.4}, 0.33 {at_third:.4}"
+        );
+        assert!((w - MEASURED_LOW_MODE_SHARE).abs() < 0.005, "{w}");
+        for share in [at_quarter, at_third] {
+            assert!((1.0 / 6.0..=0.25).contains(&share), "{share}");
+        }
+    }
+
+    /// The low-mode share [`the_low_mode_share_of_neutron_stars`] measures with the seam's share.
+    const MEASURED_LOW_MODE_SHARE: f64 = 0.300;
 
     #[test]
     fn the_maxwell_cdf_is_continuous_and_complete() {

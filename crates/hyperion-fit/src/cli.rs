@@ -6,8 +6,9 @@
 //!                         [--data DIR] [--manifest PATH]
 //! hyperion-fit check [--rerun-fast]      # staleness
 //! hyperion-fit fingerprint <task>        # prints the sim probe values a task depends on
-//! hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out DIR]
-//!                                        # the displaced form table's orbit run (P15.T6.b)
+//! hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out DIR] [--max-parts N]
+//!                                        # the displaced form table's orbit run (P15.T6.b),
+//!                                        # resumable from DIR/parts (ruling 120.4)
 //! ```
 //!
 //! `run` writes into the sim's `tables/` unless `--out` says otherwise, and then needs `--since`
@@ -96,8 +97,12 @@ pub enum Command {
         #[arg(long)]
         threads: Option<NonZeroUsize>,
         /// The directory to write `displaced_orbits.txt` into; `data/cache/displaced/` by default.
+        /// Finished parts are kept in its `parts/`, and a later invocation resumes from them.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Compute at most this many parts, then stop; run again to resume (ruling 120.4).
+        #[arg(long)]
+        max_parts: Option<u64>,
     },
 }
 
@@ -195,12 +200,16 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
             manifest,
             threads,
             out: out_dir,
+            max_parts,
         } => orbits(
             workspace,
-            *smoke,
-            manifest.as_deref(),
-            threads_or_all(*threads),
-            out_dir.as_deref(),
+            OrbitsRun {
+                smoke: *smoke,
+                manifest: manifest.as_deref(),
+                threads: threads_or_all(*threads),
+                out_dir: out_dir.as_deref(),
+                max_parts: *max_parts,
+            },
             out,
         ),
         Command::Fingerprint { task } => {
@@ -217,36 +226,58 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
     }
 }
 
-/// `orbits`: runs the displaced form table's orbits and writes their histograms, printing the
-/// file's SHA-256 (plan 15, P15.T6.b).
+/// What `orbits` was asked to run.
+#[derive(Clone, Copy)]
+struct OrbitsRun<'a> {
+    smoke: bool,
+    manifest: Option<&'a std::path::Path>,
+    threads: NonZeroUsize,
+    out_dir: Option<&'a std::path::Path>,
+    max_parts: Option<u64>,
+}
+
+/// `orbits`: runs the displaced form table's orbits in resumable parts and, once every part is
+/// done, writes their histograms, printing the file's SHA-256 (plan 15, P15.T6.b; ruling 120.4).
 fn orbits(
     workspace: &Workspace,
-    smoke: bool,
-    manifest: Option<&std::path::Path>,
-    threads: NonZeroUsize,
-    out_dir: Option<&std::path::Path>,
+    run: OrbitsRun<'_>,
     out: &mut dyn Write,
 ) -> Result<(), RunFitError> {
     use crate::tasks::displaced_forms;
-    let path = match manifest {
+    let path = match run.manifest {
         Some(path) => path.to_path_buf(),
-        None if smoke => workspace.manifests_dir.join("displaced_forms.smoke.toml"),
+        None if run.smoke => workspace.manifests_dir.join("displaced_forms.smoke.toml"),
         None => workspace.manifests_dir.join("displaced_forms.toml"),
     };
     let loaded = Manifest::load(&path).map_err(RunFitError::Manifest)?;
     let params = displaced_forms::RunParams::from_manifest(&loaded)
         .map_err(|e| RunFitError::Task(task::RunTaskError::Param(e)))?;
-    let records = displaced_forms::run(&params, threads).map_err(|e| {
+    let dir = run.out_dir.map_or_else(
+        || workspace.data_dir.join("cache").join("displaced"),
+        std::path::Path::to_path_buf,
+    );
+    let parts = dir.join("parts");
+    let resume = displaced_forms::Resume {
+        dir: &parts,
+        max_parts: run.max_parts,
+    };
+    let hash = displaced_forms::manifest_hash(&loaded);
+    let records = displaced_forms::run(&params, &hash, run.threads, Some(resume)).map_err(|e| {
         RunFitError::Task(task::RunTaskError::Input {
             task: displaced_forms::TASK,
             source: Box::new(e),
         })
     })?;
+    let Some(records) = records else {
+        writeln!(
+            out,
+            "stopped after {} parts; run again to resume from {}",
+            run.max_parts.unwrap_or(0),
+            parts.display()
+        )?;
+        return Ok(());
+    };
     let text = displaced_forms::render(&loaded, &records);
-    let dir = out_dir.map_or_else(
-        || workspace.data_dir.join("cache").join("displaced"),
-        std::path::Path::to_path_buf,
-    );
     std::fs::create_dir_all(&dir)?;
     let file = dir.join("displaced_orbits.txt");
     std::fs::write(&file, &text)?;

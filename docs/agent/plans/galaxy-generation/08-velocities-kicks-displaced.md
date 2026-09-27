@@ -1173,3 +1173,18 @@ f A_arm I₁(k) ÷ I₀(k)` exactly, so both density-weighted shifts are under 1
   au); at plan 06's provisional 0.25 bins 1 and 5 still miss (0.059, 0.106). Held as measured and
   provisional in the test. T10 and T11 are tested on a table assembled from the brainstorm's
   figures, and are to be rerun when P15.T6.c–e's table lands (P08.T9 or T12's lane).
+- **Ruling 120, as built (lane `disp08`, 2026-09-27, at `GENERATOR_VERSION` 13; no output moves).**
+  (1) The seam's threshold is P11.T4.a's `can_interact` read as a periastron:
+  `binarity::interacting_periastron(m1, q, comp)` is `max_i R_max,i ÷ f(m_i ÷ m_j)`, each star's
+  largest radius up to the primary's death over Eggleton's lobe fraction; a test holds `can_interact`
+  true at 0.999 of it and false at 1.001 for three pairs. It is 5.2 au at 8 M☉ (q 0.5), 15.9 at 16.6,
+  20.3 at 34.6, 29.3 at 72 and 40.8 at 150 M☉, and the seam's share averaged over layer E is
+  **0.485** (0.40 at 8 M☉, 0.52–0.56 above 16 M☉), against ruling 120.1's 0.25–0.33 — a finding:
+  plan 11's share counts every pair that interacts, and Sana et al.'s 71% that interact include the
+  20–30% that merge. Held as provisional in `the_band_averaged_stripped_share`. (2) T8.b's windows
+  are `w + (1 − w) ×` the truncated DM25 bin share (the `w` term in the first bin): with the measured
+  `w` of 0.300 the targets are 0.308, 0.063, 0.148, 0.173, 0.118, 0.075, 0.058, 0.058 and the
+  neutron stars' bins 0.306, 0.047, 0.124, 0.158, 0.123, 0.092, 0.070, 0.079, all within 0.03 (the
+  widest 0.024 in bin 2); the black holes' first bin is 0.785. `w` itself is 0.300 against 1/6–1/4, a
+  finding that follows from (1): at a stripped share of 0.25 and 0.33 it is 0.177 and 0.231, which
+  the test asserts inside the window, holding the measured 0.300 as provisional.

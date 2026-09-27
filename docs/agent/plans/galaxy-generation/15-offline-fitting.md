@@ -821,6 +821,32 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   refine most); whether 10⁻³ is acceptable for production is the owner's call. A lever, for the owner: the nuclear disc's classes at a
   tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours.
 
+**Ruling 120.3–4 as built (lane `disp08`, 2026-09-27; the production run not started).**
+
+- **The manifest.** The nuclear disc takes `nuclear_orbits_per_class` = 10⁵ (other sources keep
+  their counts), drift tolerance 10⁻³ with three halvings, and each class's record counts the
+  orbits refined and those still over the tolerance, with the worst drift. `nuclear_step_fraction`
+  stays 1 ÷ 200: a reduced run of 150 orbits in each of the nuclear disc's eight classes refined
+  15.2% of them at 1 ÷ 200 and 22.3% at 1 ÷ 100 (47% more, against the ruling's 10%; read as
+  7.1 points it would pass), and kept 13 against 24 over the tolerance, for 0.65 of the steps.
+- **Resumable parts.** The run is cut into parts of `part_orbits` (4,096; 4,703 parts), each
+  computed in the manifest's chunks and written whole (to `part-NNNNNN.txt.partial`, then renamed)
+  under the output directory's `parts/`, headed by the part's number and the manifest's SHA-256; a
+  later invocation reads the finished parts back (exact: counts, and floats in shortest round-trip
+  form) and computes the rest, and the totals are merged in part order, so the bytes do not depend
+  on restarts, threads or `--max-parts`. A part of another manifest is refused. The smoke test
+  stops after one part, then after two more, then finishes, and compares bytes with the
+  uninterrupted run.
+- **Estimate: about 61 hours on three threads.** The nuclear disc's 8 × 10⁵ orbits take 8.4 × 10⁵
+  steps each (the reduced run: 1.0 × 10⁹ steps for 1,200 orbits in 171 s, about 510 ns a step and
+  thread, niced, load 6–11): 32 hours. The other sources' 6.1 × 10¹¹ steps at 526 ns: 29 hours. At 1
+  ÷ 100 the nuclear disc would take 21 hours, 50 in all. Command, run under nice from the
+  repository root and restartable at any point:
+  `nice -n 19 cargo run --profile slow-test -p hyperion-fit -- orbits --threads 3`; add
+  `--max-parts N` to stop after N parts, and run the same command again to resume. It writes
+  `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt` and prints its SHA-256 for
+  `tables.lock`.
+
 ### P15.T7 Helium correction
 
 **Source.** The brainstorm names none beyond "fitted offline". The fit needs published

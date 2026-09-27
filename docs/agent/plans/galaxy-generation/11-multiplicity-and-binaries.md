@@ -1803,3 +1803,14 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   no outcome among its 10³ pairs changes. A departure from BSE, which merges every contact.
   Rucinski's (2002) contact-binary share (1/1000–1/250 of main-sequence stars with M_V > +1.5) is
   P11.T11's check.
+- **P11.T4.a's threshold behind plan 08's seam (ruling 120.1; lane `disp08`, 2026-09-27; no output
+  moves).** `galaxy::displaced::binarity::interacting_periastron(m1, q, comp)` is `can_interact`'s
+  boundary as a periastron, `max_i R_max,i ÷ f(m_i ÷ m_j)` (each star's `Track::max_radius_until`
+  the primary's death at the median draws, Eggleton's lobe fraction `f`), and
+  `binarity::stripped_share` passes it to this plan's `stripped_share`, building the primary's track
+  once. Plan 11's hierarchy still reads `PROVISIONAL_INTERACTING_PERIASTRON`: moving it is T1.d's
+  and T2.c's, with their bump. **Finding:** averaged over layer E the share is 0.485 (10 au gave
+  0.46–0.51), against ruling 120.1's 0.25–0.33 over neutron-star progenitors, since the pre-test
+  counts every interacting pair and Sana et al. (2012) find 20–30% of O stars merge rather than
+  being stripped. T1.d's acceptance window (0.20–0.33) will miss by the same amount unless mergers
+  are taken out of the share.
