@@ -1,11 +1,8 @@
 //! Plan 09, phase 1: the feature catalogue's rates, marks and gas, through the public API (P09.T2,
 //! T3, T4 and T5).
 //!
-//! Figures that the plan quotes and the model as built does not meet are pinned at the measured
-//! value with a window, marked provisional, and named in the plan's Risks as findings: the
-//! clusters' mean life and their share under 100 Myr (Lamers et al. 2005's 1.3 Gyr is the *total*
-//! disruption time), the share of core collapses inside features (0.88 against four in five) and
-//! the clouds' size range.
+//! The windows on the clusters' lives, the core collapses inside features, the clouds' sizes, the
+//! superbubbles' radii and the central molecular zone are ruling 118's of 2026-09-22.
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
@@ -15,7 +12,9 @@ use hyperion_sim::galaxy::features::catalogue::{
     FeatureCatalogue, FeatureMarks, FeatureRecord, NoFeatureCache,
 };
 use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
-use hyperion_sim::galaxy::features::kinds::nursery::{BOUND_FRACTION, NurseryStage, Superbubble};
+use hyperion_sim::galaxy::features::kinds::nursery::{
+    BLOW_OUT_HEIGHTS, BOUND_FRACTION, NurseryStage, Superbubble,
+};
 use hyperion_sim::galaxy::features::kinds::open_cluster::{
     NurseryMassFunction, dissolution_time, least_surviving_mass,
 };
@@ -96,20 +95,20 @@ fn bound_clusters_are_born_at_the_plan_s_rate_and_their_census_is_near_its_figur
     );
     let (young, old, over_gyr) = open_clusters_alive(&galaxy);
     let alive = young + old;
-    // "About 10⁵ alive": 6.6 × 10⁴ as built (provisional, a finding: the clusters' mean life).
-    assert!((5e4..1.5e5).contains(&alive), "{alive} alive");
-    // "A tenth over 1 Gyr": about 0.08.
-    let tenth = over_gyr / alive;
-    assert!((0.05..0.15).contains(&tenth), "{tenth} over 1 Gyr");
-    // "A third under 100 Myr": about half as built (provisional, a finding).
-    let third = young / alive;
-    assert!((0.4..0.6).contains(&third), "{third} under 100 Myr");
+    // Ruling 118.1: about 6 × 10⁴ alive, about half under 100 Myr, a few per cent over 1 Gyr.
+    assert!((5e4..=8e4).contains(&alive), "{alive} alive");
+    let old_share = over_gyr / alive;
+    assert!((0.04..=0.12).contains(&old_share), "{old_share} over 1 Gyr");
+    let young_share = young / alive;
+    assert!(
+        (0.45..=0.60).contains(&young_share),
+        "{young_share} under 100 Myr"
+    );
 }
 
 #[test]
 fn the_clusters_mean_life_is_the_dissolution_time_over_the_mass_function() {
-    // The plan's "mean life near 295 Myr" is t_dis ÷ γ; with Lamers et al.'s 1.3 Gyr as the total
-    // disruption time the mean is 183 Myr (provisional, a finding).
+    // Lamers et al. 2005's 1.3 Gyr is the total disruption time (ruling 118.1): 165–205 Myr.
     let law = NurseryMassFunction::STANDARD;
     let (lo, hi) = (math::ln(law.lo().value()), math::ln(law.hi().value()));
     let steps = 100_000;
@@ -121,10 +120,10 @@ fn the_clusters_mean_life_is_the_dissolution_time_over_the_mass_function() {
         life += weight * dissolution_time(SolarMasses::new(m)).value();
     }
     let mean = life / number / 1e6;
-    assert!((175.0..190.0).contains(&mean), "{mean} Myr");
+    assert!((165.0..=205.0).contains(&mean), "{mean} Myr");
 }
 
-// --- P09.T2.b: φ and the four in five ---
+// --- P09.T2.b: φ and the core collapses inside features ---
 
 #[test]
 fn most_core_collapses_happen_inside_features() {
@@ -142,9 +141,8 @@ fn most_core_collapses_happen_inside_features() {
         inside += weight * phi_young(t);
     }
     let share = inside / total;
-    // The brainstorm's four in five; 0.88 as built, since φ is at most f_n = 0.9 and associations
-    // outlive the core collapses (provisional, a finding).
-    assert!((0.85..0.9).contains(&share), "{share}");
+    // 80–90% (ruling 118.2; Higdon and Lingenfelter 2005: 80% by time, 90% by space).
+    assert!((0.80..=0.90).contains(&share), "{share}");
 }
 
 // --- P09.T4: the marks of each kind, over the disc ---
@@ -216,16 +214,20 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
             radii.push(bubble.radius().value());
         }
     }
-    radii.sort_by(f64::total_cmp);
-    let quantile = |q: u32| radii[(radii.len() - 1) * usize::try_from(q).unwrap() / 10];
-    // Bubble radii of 100–1,000 ly: the central 80%.
+    // Ruling 118.4: 80% of radii in 100–1,000 ly, every one at or below the blow-out cap and
+    // 3,300 ly (McClure-Griffiths et al. 2002: 40 pc to 1 kpc).
     assert!(radii.len() > 1_000, "{}", radii.len());
-    assert!(
-        quantile(1) >= 100.0 && quantile(9) <= 1_000.0,
-        "{} {}",
-        quantile(1),
-        quantile(9)
-    );
+    let cap = BLOW_OUT_HEIGHTS * gas.params().neutral_height().value();
+    for &r in &radii {
+        assert!(r <= cap && r <= 3_300.0, "{r} ly against a cap of {cap}");
+    }
+    let inside = radii
+        .iter()
+        .filter(|&&r| (100.0..=1_000.0).contains(&r))
+        .count();
+    let share =
+        f64::from(u32::try_from(inside).unwrap()) / f64::from(u32::try_from(radii.len()).unwrap());
+    assert!(share >= 0.8, "{share} of radii in 100–1,000 ly");
     // About ten thousand star-forming regions, tens of thousands of associations.
     let [embedded, bound, associations] = stages;
     assert!((5_000..20_000).contains(&embedded), "{embedded} embedded");
@@ -237,7 +239,7 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
 }
 
 #[test]
-fn clouds_number_in_the_thousands_with_the_sizes_of_their_surface_density() {
+fn clouds_number_in_the_thousands_with_the_sizes_of_their_mass_radius_relation() {
     let galaxy = milky_way();
     let mut sizes = Vec::new();
     for feature in disc_features(&galaxy) {
@@ -254,10 +256,9 @@ fn clouds_number_in_the_thousands_with_the_sizes_of_their_surface_density() {
     );
     sizes.sort_by(f64::total_cmp);
     let median = sizes[sizes.len() / 2];
-    // 50–300 ly in the plan; the constant surface density gives 28–500 ly, median about 46
-    // (provisional, a finding).
-    assert!((35.0..60.0).contains(&median), "{median}");
-    assert!(sizes[0] >= 25.0 && sizes[sizes.len() - 1] <= 550.0);
+    // Ruling 118.3: Roman-Duval et al. 2010's M = 228 R^2.36, 25–400 ly across, median 40–60.
+    assert!((40.0..=60.0).contains(&median), "{median}");
+    assert!(sizes[0] >= 25.0 && sizes[sizes.len() - 1] <= 400.0);
 }
 
 /// The expected cloud mass inside 1,000 ly of the centre, M☉, from the cloud gas with the given
@@ -302,11 +303,14 @@ fn the_central_molecular_zone_holds_nine_times_its_smooth_disc_in_clouds() {
     let disc = cloud_mass_near_centre(&galaxy, 0.0, 1.0);
     let whole = galaxy.gas().params().molecular_disc().mass().value();
     assert!(disc < whole && disc > 0.8 * whole, "{disc} of {whole}");
-    let clouds = cloud_mass_near_centre(&galaxy, share, multiple);
+    // Ruling 118.5: the molecular term's clouds alone hold nine times the disc's mass inside the
+    // sphere (Design note 19's ratio holds point by point); the total takes every cloud.
+    let molecular = cloud_mass_near_centre(&galaxy, 0.0, multiple);
     assert!(
-        (clouds / (9.0 * disc) - 1.0).abs() < 0.1,
-        "{clouds} against 9 × {disc}"
+        (molecular / (9.0 * disc) - 1.0).abs() < 1e-6,
+        "{molecular} against 9 × {disc}"
     );
+    let clouds = cloud_mass_near_centre(&galaxy, share, multiple);
     let total = clouds + disc;
     assert!((2e7..5e7).contains(&total), "{total} M☉ in the zone");
     // With the molecular weight forced to 1 the zone would hold under a tenth of that.
@@ -628,9 +632,9 @@ fn the_catalogue_s_counts_match_their_expectations_at_milky_way_values() {
         );
     }
     let open: u64 = counted[1..6].iter().sum::<u64>() + stages[1];
-    // "About 10⁵" open clusters: 6–7 × 10⁴ as built (provisional, the mean-life finding); about
-    // 10⁴ star-forming regions; associations within 10⁴–1.5 × 10⁵; clouds in the thousands.
-    assert!((50_000..150_000).contains(&open), "{open} open clusters");
+    // About 6 × 10⁴ open clusters (ruling 118.1); about 10⁴ star-forming regions; associations
+    // within 10⁴–1.5 × 10⁵; clouds in the thousands.
+    assert!((50_000..=80_000).contains(&open), "{open} open clusters");
     assert!(
         (5_000..20_000).contains(&stages[0]),
         "{} star-forming regions",

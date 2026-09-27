@@ -319,8 +319,9 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
 2. **φ(age) is derived, not drawn.** φ(a) = f_n × [Γ_b m_b(a) + (1 − Γ_b)(1 − G(a))], where f_n ≈
    0.9 is the share of star formation in nurseries, Γ_b the bound fraction, m_b(a) the mean
    surviving mass fraction of bound clusters from Lamers's closed form, and G the distribution of
-   association dissolution ages. G is tuned so that four in five core collapses fall inside
-   features, which a test pins.
+   association dissolution ages. G is uniform on 30–100 Myr, so that 80–90% of core collapses fall
+   inside features (ruling 118.2; Higdon and Lingenfelter 2005: 80% by time, 90% by space), which a
+   test pins.
 3. **Old open clusters follow the sub-discs.** Bound clusters older than 100 Myr are a process per
    sub-disc of the old thin disc, with a constant φ for each sub-disc. The age dependence inside a
    sub-disc is below anything a test could see.
@@ -492,8 +493,11 @@ cell; registry golden. Acceptance:
   `open_cluster::dissolution_time(m0) = 1.3 Gyr × (m0 ÷ 10⁴ M☉)^0.62` and `present_mass(m0, age)`
   from Lamers et al. (2005), and `surviving_mass_fraction(age)` = m_b(a) by a fixed quadrature over
   the mass function. Files: `features/shares.rs`, `features/kinds/open_cluster.rs`. Tests: 240–360
-  bound clusters born per Myr and about 10⁵ alive at Milky Way parameters, a third under 100 Myr, a
-  tenth over 1 Gyr, mean life near 295 Myr.
+  bound clusters born per Myr and about 6 × 10⁴ alive at Milky Way parameters (5–8 × 10⁴), about
+  half under 100 Myr (0.45–0.60), a few per cent over 1 Gyr (0.04–0.12), mean life 165–205 Myr
+  (ruling 118.1: Lamers et al. 2005's 1.3 Gyr is the total disruption time; the earlier 295 Myr
+  was 1.3 Gyr ÷ 0.62, and "about 10⁵ … a third" followed from it; Cantat-Gaudin et al. 2020's local
+  catalogue has a median age of 132 Myr and 40% under 100 Myr).
 - **P09.T2.b `FeatureShares`.** φ for the young disc as a function of age (design note 2), one
   constant per old sub-disc, the globulars' φ for bulge, thick disc and halo from the expected
   number × mean mass of the evolved Schechter function, per band where the class tables of phase 2
@@ -551,15 +555,21 @@ Parallel with each other after P09.T3.b.
   bound mark, dissolution age, expansion speed 1–5 km/s, age spread up to 3 Myr, gas mass while
   embedded), `NurseryStage::at(age + t)`, size = expansion speed × age capped at 300 ly.
   `Superbubble`: radius 0.76 × (L_w t³ ÷ ρ)^⅕ (Weaver et al. 1977) with the wind and supernova power
-  from the expected count of O and B stars and the smoothed gas density at the site, capped at
-  blow-out (2.5 gas scale heights at that radius), interior density log-normal about 0.005 cm⁻³ at
-  10⁶·² K. Members of an embedded region draw ages from −H. Tests: sizes 10–300 ly, bubble radii
-  100–1,000 ly, stage transitions continuous in time.
+  from the expected count of stars of 8 M☉ or more (winds 10⁵⁰ erg per star over the nursery's
+  first 4 Myr, Krause et al. 2013 citing Voss et al. 2009; supernovae 10⁵¹ erg each, ruling
+  118.4) and the smoothed gas density at the site, capped at blow-out (2.5 gas scale heights at
+  that radius; the cap's source is still owed), interior density log-normal about 0.005 cm⁻³ at
+  10⁶·² K. Members of an embedded region draw ages from −H. Tests: sizes 10–300 ly; 80% of bubble
+  radii in 100–1,000 ly and every one at or below both the blow-out cap and 3,300 ly
+  (McClure-Griffiths et al. 2002: 40 pc to 1 kpc); stage transitions continuous in time.
 - **P09.T4.c Molecular clouds and dark nebulae.** `CloudMarks` per design note 19, a Plummer-like
   gas profile, mean density 10²–10⁶ cm⁻³ towards the core, dust by the local dust-to-gas ratio. The
-  process's density carries the molecular weight w of design note 19. Tests: sizes 50–300 ly, count
-  in the thousands; the expected mass of clouds inside 1,000 ly of the centre is nine times plan
-  07's `MolecularDisc` mass to 10%, and at Milky Way parameters clouds plus smooth disc there hold
+  process's density carries the molecular weight w of design note 19; radii follow Roman-Duval et
+  al. 2010's `M = 228 R^2.36` (ruling 118.3). Tests: sizes 30–400 ly (as built 25–400 across,
+  median 40–60), count in the thousands; the expected mass of the molecular term's clouds inside
+  1,000 ly of the centre is nine times plan 07's `MolecularDisc` mass inside the same sphere
+  (ruling 118.5: design note 19's ratio holds point by point), and at Milky Way parameters clouds
+  plus smooth disc there hold
   2–5 × 10⁷ M☉; over 200 seeds the realised cloud mass there is Poisson-consistent with the
   expectation; with w forced to 1 in a test build the same region holds under a tenth of that (the
   defect this guards against).
@@ -1125,7 +1135,7 @@ a grid star, dies in place and has a shell when evaluated then.
   feature's band-E count, its age distribution and the bubble's cap; the window is the hot branch in
   the feature's own superbubble (`ShellEnvironment::Bubble`), ended at the wall; the band-E cells of
   P09.T21 resolve a claimed candidate to "no such system" by the same `claims`, with the bubble
-  passed down from the parent feature. Tests: four in five (0.7–0.9) core collapses of a sampled
+  passed down from the parent feature. Tests: 80–90% (ruling 118.2; 0.7–0.9 sampled) of core collapses of a sampled
   galaxy are in features, which hold about a quarter (0.15–0.35) of distinct shells; a chart finds
   every shell of an association from the catalogue without touching its nested grid (asserted with a
   counting cache); complementarity between a feature's band-E cells and its list over 10⁴ sampled
@@ -1270,7 +1280,7 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   adopts it and P09.T35 shrinks to the feature side.
 - **Association lifetimes.** The features table says associations are "under about 30 Myr", the φ
   rule says φ falls to the bound fraction "by 30–100 Myr". Resolved as dissolution ages on 30–100
-  Myr, which is what four in five core collapses inside features requires; "under 30 Myr" is read as
+  Myr, which puts 80–90% of core collapses inside features (ruling 118.2); "under 30 Myr" is read as
   the age at which an association still has O stars. The association count then tends to the top of
   "tens of thousands". The two sentences of the brainstorm do not agree as written (an association
   "under about 30 Myr" cannot hold the stars that keep φ above the bound fraction until 100 Myr, nor
@@ -1387,35 +1397,40 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
     given age, so the two tests are the same test. Young bound clusters carry the same half-mass
     radius and concentration marks, and stop expanding when they emerge: their size is then four
     half-mass radii within 10–100 ly (the one jump in a nursery's size, where its gas disperses).
-  - _T4.b._ The bubble's power is the supernovae's alone, `N_SN × 10⁵¹ erg ÷ (t_last − t_first)`
-    (Mac Low and McCray 1988's approximation); the winds the plan names are left out, provisional.
+  - _T4.b._ The bubble's power is the supernovae's, `N_SN × 10⁵¹ erg` spread over `t_first` to
+    `t_last` (Mac Low and McCray 1988's approximation), and, since ruling 118.4, the winds', 10⁵⁰
+    erg per star of 8 M☉ or more over the first 4 Myr (Krause et al. 2013). With a varying power the
+    radius reads Weaver's form through the injected energy, `0.76 (E(t) t² ÷ ρ)^⅕` with `t` the
+    nursery's age (ours; it is Weaver's exactly while one constant power acts), so a nursery has a
+    bubble from birth.
     An embedded region's gas is `M_* (1 − ε) ÷ ε` with ε uniform on 0.1–0.3 (Lada and Lada 2003),
     falling linearly to none when it emerges; its size is `max(D₀, v × age)` within 10–300 ly, D₀
-    the clump's diameter at the clouds' surface density. Members' ages from −H belong to phase 5.
-  - _T4.c._ Clouds: `M^−1.7` over 10⁴–10^6.5 M☉, Σ = 170 M☉ pc⁻² (Solomon et al. 1987), a Plummer
-    ball whose half-mass radius is `√(M ÷ π Σ)`, ε = 0.15 of the neutral layer (Design note 19).
+    the clump's diameter by the clouds' mass–radius relation. Members' ages from −H belong to phase 5.
+  - _T4.c._ Clouds: `M^−1.7` over 10⁴–10^6.5 M☉, a Plummer ball whose half-mass radius is
+    Roman-Duval et al. 2010's equivalent radius, `R = (M ÷ 228)^(1 ÷ 2.36)` pc (ruling 118.3;
+    first built with Σ = 170 M☉ pc⁻²), ε = 0.15 of the neutral layer (Design note 19).
   - _T5._ `FeatureGas` puts a segment's ends in a canonical order, so its list is a function of
     the unordered pair; a feature is listed when the segment passes within its reach (ten core
     radii for a cloud). Features sit at their epoch positions.
   - _Plan 10_ must reach `set_halo_discrete` through a `FeatureShares` it builds or owns, since
     `Galaxy` lends its own immutably.
-- **Findings of T2–T4 against the plan's figures (for the owner, after research).** Each was built
-  as the plan says and the test holds the measured value, marked provisional:
-  - _Cluster lives (T2.a)._ The plan's mean life "near 295 Myr", "a third under 100 Myr" and
-    "about 10⁵ alive" hold only if 1.3 Gyr is L05's instantaneous `t_dis` and the life `t_dis ÷ γ`.
-    With 1.3 Gyr as L05's total disruption time the mean life over `M⁻²` on 10²–10⁵ M☉ is 183
-    Myr; at the fixture's 345 bound clusters born per Myr (in 240–360) about 6.6 × 10⁴ are alive,
-    about half under 100 Myr and 8% over 1 Gyr (a tenth, as planned). Source: L05 eq. 11, t₄ =
-    1.3 ± 0.5 Gyr, "the disruption time of a 10⁴ M☉ cluster in the solar neighbourhood".
-  - _Four in five (T2.b)._ With `f_n` = 0.9 capping φ and associations living 30–100 Myr, the share
-    of core collapses (8–100 M☉, solar lifetimes of plan 06) inside features is 0.876; no G on
-    30–100 Myr reaches 0.8 (its floor is about 0.83). The brainstorm says "inside associations".
-  - _Clouds (T4.c)._ A constant Σ over a factor of 316 in mass gives diameters of 28–500 ly
-    (median 46) against the plan's 50–300; with 10⁴ M☉ clouds the central densities are 110–1,900
-    cm⁻³, in the plan's 10²–10⁶. About 9,800 clouds at Milky Way values ("thousands"). The
-    fixture's molecular disc has 14% of its mass beyond 1,000 ly, so T4.c's "nine times inside
-    1,000 ly" is read against the disc's mass inside the sphere.
-  - _Bubbles (T4.b)._ The central 80% of radii lie in 100–1,000 ly, but in the thin outer gas the
-    blow-out cap binds at 2.5 × the fixture's 700 ly neutral height, 1,750 ly.
+- **Findings of T2–T4, ruled (ruling 118, built by `feat09a` at `GENERATOR_VERSION` 13).** Only
+  phase 1's own goldens could move (none did: the clouds' radii and the bubbles' power are not
+  pinned). Measured at Milky Way values:
+  - _Cluster lives (T2.a)._ 1.3 Gyr is L05's total disruption time: mean life 183 Myr over `M⁻²` on
+    10²–10⁵ M☉, about 6.6 × 10⁴ bound clusters alive at 345 born per Myr, about half under 100 Myr
+    and 8% over 1 Gyr, inside ruling 118.1's windows.
+  - _Core collapses inside features (T2.b)._ 0.876 (8–100 M☉, plan 06's solar lifetimes), in the
+    80–90% of ruling 118.2.
+  - _Clouds (T4.c)._ Roman-Duval et al. 2010's `M = 228 R^2.36` gives diameters of 32–370 ly
+    (median about 49), in ruling 118.3's 25–400 and 40–60. Miville-Deschênes et al. 2017's CO
+    clouds, which include faint envelopes, are larger and thinner (median R 25 pc, Σ 16.5 M☉ pc⁻²,
+    their Table 2); the dense clouds are chosen because the plan's clouds are where stars form and
+    what dims a line of sight. About 9,800 clouds ("thousands"). The fixture's molecular disc has
+    14% of its mass beyond 1,000 ly, so T4.c compares the molecular term's clouds inside the sphere
+    with the disc's mass inside it (ruling 118.5); the ratio is 9 to 10⁻⁶.
+  - _Bubbles (T4.b)._ With winds, a bubble exists from birth. At least 80% of radii lie in 100–1,000
+    ly, and every radius is at or below the blow-out cap (2.5 × the fixture's 700 ly neutral
+    height, 1,750 ly) and 3,300 ly. The cap's source is still owed.
   - _R5 (warm ionised filling)._ T5 adds hot holes and neutral clouds, no ionised gas, so the
     features leave `gas14`'s 0.21 against Gaensler's ~0.3 where it was.

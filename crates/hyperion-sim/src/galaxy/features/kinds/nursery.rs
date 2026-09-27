@@ -20,9 +20,9 @@
 //!   Lada 2003, ARA&A 41, 57, §5: "10–30%"), which sets the gas it holds at birth, `M_* (1 − ε) ÷
 //!   ε`. The gas falls linearly to none over the embedded duration (ours), so that nothing jumps
 //!   when the region emerges.
-//! - **The size** is `max(D₀, v × age)`, held to 10–300 ly, where `D₀ = 2 √((M_* + M_gas) ÷ π Σ)`
-//!   is the birth clump's diameter at the clouds' surface density Σ
-//!   ([`CLOUD_SURFACE_DENSITY`](super::cloud::CLOUD_SURFACE_DENSITY)). The 10 ly floor and the
+//! - **The size** is `max(D₀, v × age)`, held to 10–300 ly, where `D₀` is the diameter of the
+//!   birth clump of mass `M_* ÷ ε` by the clouds' mass–radius relation
+//!   ([`cloud_radius`](super::cloud::cloud_radius)). The 10 ly floor and the
 //!   300 ly cap are the brainstorm's range for star-forming regions and associations ("Large
 //!   features"); the floor is provisional, since a small clump is smaller. A bound cluster stops
 //!   expanding when it emerges: its size is then four half-mass radii, 10–100 ly, and its
@@ -30,14 +30,25 @@
 //!
 //! # The superbubble (Weaver et al. 1977; Mac Low and McCray 1988)
 //!
-//! A nursery's core collapses blow a bubble of radius `R = 0.76 (L t³ ÷ ρ)^⅕` (Weaver, McCray,
+//! A nursery's massive stars blow a bubble of radius `R = 0.76 (L t³ ÷ ρ)^⅕` (Weaver, McCray,
 //! Castor, Shapiro and Moore 1977, ApJ 218, 377, the radiative shell of their eq. 51; Mac Low and
-//! McCray 1988, ApJ 324, 776, eq. 3, write it `267 pc (L₃₈ ÷ n₀)^⅕ t₇^⅗`). Its power is the
-//! supernovae's alone, `L = N_SN × 10⁴⁴ J ÷ (t_last − t_first)`, Mac Low and McCray's
-//! approximation, with `N_SN` the nursery's expected stars above 8 M☉ and `t_first`, `t_last` the
-//! lifetimes of 100 and 8 M☉ stars at solar metallicity; winds, which the plan also names, are left
-//! out (provisional). `t` runs from the first core collapse, the bubble exists until the last, and
-//! only a nursery that expects at least one core collapse blows one. `ρ = 1.4 m_H n` with `n` the
+//! McCray 1988, ApJ 324, 776, eq. 3, write it `267 pc (L₃₈ ÷ n₀)^⅕ t₇^⅗`). The power has two parts
+//! (ruling 118.4):
+//!
+//! - **Winds:** 10⁵⁰ erg per star of 8 M☉ or more, spread evenly over the nursery's first 4 Myr
+//!   (Krause, Fierlinger, Diehl et al. 2013, A&A 550, A49, §1, from Voss et al. 2009's population
+//!   synthesis: "averaged over all massive stars (8 M☉ < M < 120 M☉), the energy input due to
+//!   winds is of the order of 10⁵⁰ erg/star").
+//! - **Supernovae:** `N_SN × 10⁵¹ erg` spread evenly from `t_first` to `t_last`, Mac Low and
+//!   McCray's approximation, with `t_first` and `t_last` the lifetimes of 100 and 8 M☉ stars at
+//!   solar metallicity.
+//!
+//! `N_SN` is the nursery's expected stars above 8 M☉. With the power no longer constant, the
+//! bubble reads Weaver's form through its injected energy, `R = 0.76 (E(t) t² ÷ ρ)^⅕` with `t` the
+//! nursery's age and `E(t)` the energy put in by then (ours: it is Weaver's exactly while one
+//! constant power acts, as the winds' alone do for 4 Myr). So an association younger than its first
+//! supernova has a bubble. The bubble exists from birth until the last core collapse, and only a
+//! nursery that expects at least one massive star blows one. `ρ = 1.4 m_H n` with `n` the
 //! smooth gas at the site. The radius is capped at blow-out, 2.5 neutral scale heights, and the
 //! interior is log-normal about 0.005 cm⁻³ with 0.3 dex (the scatter is ours) at 10^6.2 K.
 
@@ -48,9 +59,8 @@ use crate::units::{
     Dex, HydrogenPerCm3, Kelvin, KilometresPerSecond, LightYears, SolarMasses, Years,
 };
 
-use super::cloud::CLOUD_SURFACE_DENSITY;
+use super::cloud::cloud_radius;
 use super::open_cluster::{NURSERY_MASS_MIN, dissolution_time, present_mass};
-use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::gas::MASS_PER_HYDROGEN_FACTOR;
 
 /// `f_n`: the share of the young disc's star formation that happens in nurseries (Design note 2).
@@ -90,6 +100,12 @@ pub const BOUND_SIZE_RANGE_LY: (f64, f64) = (10.0, 100.0);
 /// The explosion energy of one supernova in the bubble's power: 10⁴⁴ J (10⁵¹ erg; Mac Low and
 /// McCray 1988).
 pub const SUPERNOVA_ENERGY_J: f64 = 1e44;
+
+/// The wind energy of one star of 8 M☉ or more: 10⁴³ J (10⁵⁰ erg; Krause et al. 2013).
+pub const WIND_ENERGY_J: f64 = 1e43;
+
+/// The winds' energy is put in over this much of a nursery's life, Myr (Krause et al. 2013).
+pub const WIND_DURATION_MYR: f64 = 4.0;
 
 /// Weaver et al.'s coefficient of the radiative bubble, 0.76.
 pub const BUBBLE_COEFFICIENT: f64 = 0.76;
@@ -258,10 +274,8 @@ impl NurseryMarks {
             );
         }
         let (floor, cap) = SIZE_RANGE_LY;
-        let clump = self.mass.value() / self.efficiency;
-        let sigma_per_ly2 =
-            CLOUD_SURFACE_DENSITY / (LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC);
-        let birth = 2.0 * (clump / (core::f64::consts::PI * sigma_per_ly2)).sqrt();
+        let clump = SolarMasses::new(self.mass.value() / self.efficiency);
+        let birth = 2.0 * cloud_radius(clump).value();
         let expansion = self.expansion_speed.value()
             * crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S
             * age.value().max(0.0);
@@ -380,13 +394,17 @@ impl Superbubble {
         let count = marks.mass.value() * clock.per_solar_mass;
         let (first, last) = (clock.first.value(), clock.last.value());
         let a = age.value();
-        if count < 1.0 || a <= first || a >= last || ambient.value() <= 0.0 {
+        if count < 1.0 || a <= 0.0 || a >= last || ambient.value() <= 0.0 {
             return None;
         }
-        let power = count * SUPERNOVA_ENERGY_J / ((last - first) * SECONDS_PER_JULIAN_YEAR);
+        let wind_span = WIND_DURATION_MYR * YEARS_PER_MEGAYEAR;
+        let winds = count * WIND_ENERGY_J * (a / wind_span).min(1.0);
+        let supernovae =
+            count * SUPERNOVA_ENERGY_J * ((a - first) / (last - first)).clamp(0.0, 1.0);
+        let energy = winds + supernovae;
         let density = MASS_PER_HYDROGEN_FACTOR * HYDROGEN_MASS_KG * ambient.value() * 1e6;
-        let t = (a - first) * SECONDS_PER_JULIAN_YEAR;
-        let radius_m = BUBBLE_COEFFICIENT * math::powf(power * t * t * t / density, 0.2);
+        let t = a * SECONDS_PER_JULIAN_YEAR;
+        let radius_m = BUBBLE_COEFFICIENT * math::powf(energy * t * t / density, 0.2);
         let radius =
             (radius_m / METRES_PER_LIGHT_YEAR).min(BLOW_OUT_HEIGHTS * neutral_height.value());
         (radius > 0.0).then_some(Self {
@@ -417,6 +435,7 @@ impl Superbubble {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 
     fn myr(value: f64) -> Years {
         Years::new(value * YEARS_PER_MEGAYEAR)
@@ -484,16 +503,24 @@ mod tests {
         let nursery = marks(1e4, false);
         let height = LightYears::new(400.0);
         let n = HydrogenPerCm3::new(1.0);
-        assert!(Superbubble::of(&nursery, myr(2.0), n, height, &clock).is_none());
+        // Before the first supernova the winds alone blow a bubble; for their 4 Myr the power is
+        // constant, so the radius is Mac Low and McCray's 267 pc (L₃₈ ÷ n)^⅕ t₇^⅗, which rounds
+        // Weaver's coefficient and the mass per hydrogen to 2%.
+        let early = Superbubble::of(&nursery, myr(2.0), n, height, &clock).unwrap();
+        let l38 = 100.0 * 1e50 / ((4.0 * 3.155_76e13) * 1e38);
+        let mm88 = 267.0 * LIGHT_YEARS_PER_PARSEC * math::powf(l38, 0.2) * math::powf(0.2, 0.6);
+        assert!(
+            (early.radius().value() / mm88 - 1.0).abs() < 0.03,
+            "{early:?} vs {mm88}"
+        );
         let r5 = Superbubble::of(&nursery, myr(5.0), n, height, &clock).unwrap();
         let r10 = Superbubble::of(&nursery, myr(10.0), n, height, &clock).unwrap();
-        // Mac Low and McCray's form: 267 pc (L₃₈ ÷ n)^⅕ t₇^⅗ with t from the first collapse.
-        let l38 = 100.0 * 1e51 / ((37.0 * 3.155_76e13) * 1e38);
-        let mm88 = 267.0 * LIGHT_YEARS_PER_PARSEC * math::powf(l38, 0.2) * math::powf(0.7, 0.6);
-        assert!(
-            (r10.radius().value() / mm88 - 1.0).abs() < 0.05,
-            "{r10:?} vs {mm88}"
-        );
+        // Later, E(t) holds the winds' 10⁵¹ erg and 7 ÷ 37 of the supernovae's 10⁵³.
+        let energy = 100.0 * 1e43 + 100.0 * 1e44 * 7.0 / 37.0;
+        let rho = 1.4 * HYDROGEN_MASS_KG * 1e6;
+        let t = 1e7 * SECONDS_PER_JULIAN_YEAR;
+        let expected = 0.76 * math::powf(energy * t * t / rho, 0.2) / METRES_PER_LIGHT_YEAR;
+        assert!((r10.radius().value() / expected - 1.0).abs() < 1e-12);
         assert!(r10.radius().value() > r5.radius().value());
         let capped = Superbubble::of(
             &nursery,

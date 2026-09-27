@@ -1,15 +1,18 @@
 //! Molecular clouds and dark nebulae: gas and dust, no members (plan 09, P09.T4.c; Design note
 //! 19).
 //!
-//! The brainstorm gives clouds a count ("thousands") and a size (50–300 ly) and nothing else, so
-//! the statistics here are parameters of the generator version:
+//! The brainstorm gives clouds a count ("thousands") and a size and nothing else, so the
+//! statistics here are parameters of the generator version:
 //!
 //! - **Mass function** `dN ÷ dM ∝ M^−1.7` over 10⁴–10^6.5 M☉ (Design note 19; Miville-Deschênes,
 //!   Murray and Lee 2017, ApJ 834, 57, measure a slope near −1.6 to −1.7 for the Galaxy's 8,107
 //!   clouds). Its mean is 1.1 × 10⁵ M☉.
-//! - **Radius from a constant surface density**, `M = π R² Σ` with Σ = 170 M☉ pc⁻² (Solomon,
-//!   Rivolo, Barrett and Yahil 1987, ApJ 319, 730, the normalisation of Larson's third law; other
-//!   surveys give 40–150, so it is provisional). `R` is the cloud's half-mass radius.
+//! - **Radius from the mass–radius relation** `M = 228 R^2.36` (M☉ and pc; Roman-Duval, Jackson,
+//!   Heyer, Rathborne and Simon 2010, ApJ 723, 492, eq. 13, fitted to 580 Galactic Ring Survey
+//!   clouds; ruling 118.3), with `R` their equivalent radius, taken here as the cloud's half-mass
+//!   radius. Diameters run 32–370 ly over the mass range, median about 49 ly. Miville-Deschênes,
+//!   Murray and Lee 2017's faint CO envelopes are larger (median R 25 pc, Σ 16.5 M☉ pc⁻²); plan
+//!   09's Risks record that the dense clouds are chosen.
 //! - **Profile**, a Plummer ball `n_c (1 + r² ÷ a²)^(−5/2)` with `a = R ÷ 1.305`, whose half-mass
 //!   radius is `R`, and `n_c = 3M ÷ (4π a³)` in hydrogen at 1.4 `m_H` per hydrogen: the form plan 07
 //!   integrates in closed form ([`GasModifier::Cloud`](crate::galaxy::gas::modifiers::GasModifier)).
@@ -36,8 +39,22 @@ pub const CLOUD_MASS_MIN: SolarMasses = SolarMasses::new(1e4);
 /// The greatest cloud mass, 10^6.5 M☉.
 pub const CLOUD_MASS_MAX: SolarMasses = SolarMasses::new(3_162_277.660_168_379_5);
 
-/// The clouds' surface density Σ, M☉ per square parsec (Solomon et al. 1987; provisional).
-pub const CLOUD_SURFACE_DENSITY: f64 = 170.0;
+/// The coefficient of Roman-Duval et al. 2010's `M = 228 R^2.36`, M☉ at R = 1 pc.
+pub const MASS_RADIUS_COEFFICIENT: f64 = 228.0;
+
+/// The exponent of Roman-Duval et al. 2010's mass–radius relation, 2.36.
+pub const MASS_RADIUS_EXPONENT: f64 = 2.36;
+
+/// The radius, light-years, of a molecular clump of `mass` by Roman-Duval et al. 2010's
+/// `M = 228 R^2.36`: `R = (M ÷ 228)^(1 ÷ 2.36)` pc.
+#[must_use]
+pub fn cloud_radius(mass: SolarMasses) -> LightYears {
+    let parsecs = math::powf(
+        mass.value() / MASS_RADIUS_COEFFICIENT,
+        1.0 / MASS_RADIUS_EXPONENT,
+    );
+    LightYears::new(parsecs * LIGHT_YEARS_PER_PARSEC)
+}
 
 /// A Plummer ball's half-mass radius over its core radius, `1 ÷ √(2^(2/3) − 1)`.
 pub const PLUMMER_HALF_MASS_RATIO: f64 = 1.304_766_372_624_786;
@@ -89,11 +106,10 @@ impl CloudMarks {
         self.mass
     }
 
-    /// Its half-mass radius, `√(M ÷ π Σ)`.
+    /// Its half-mass radius, [`cloud_radius`] of its mass.
     #[must_use]
     pub fn radius(&self) -> LightYears {
-        let parsecs = (self.mass.value() / (core::f64::consts::PI * CLOUD_SURFACE_DENSITY)).sqrt();
-        LightYears::new(parsecs * LIGHT_YEARS_PER_PARSEC)
+        cloud_radius(self.mass)
     }
 
     /// Its size: the diameter `2R`.
@@ -158,14 +174,14 @@ mod tests {
     fn sizes_and_densities_span_the_plan_ranges() {
         let light = CloudMarks::new(CLOUD_MASS_MIN, 1.0);
         let heavy = CloudMarks::new(CLOUD_MASS_MAX, 1.0);
-        // Diameters of 28–500 ly; central densities of about 100–2,000 cm⁻³.
+        // Diameters of 32–370 ly (ruling 118.3's 25–400); central densities in 10²–10⁶ cm⁻³.
         assert!(
-            (25.0..32.0).contains(&light.size().value()),
+            (30.0..35.0).contains(&light.size().value()),
             "{:?}",
             light.size()
         );
         assert!(
-            (450.0..550.0).contains(&heavy.size().value()),
+            (350.0..400.0).contains(&heavy.size().value()),
             "{:?}",
             heavy.size()
         );
