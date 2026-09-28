@@ -14,6 +14,7 @@
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
 pub mod chabrier;
+pub mod displaced_forms;
 pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod kick_rank;
@@ -44,6 +45,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "chabrier",
         revision: 0,
         since_generator_version: 11,
+        provisional: true,
+    },
+    TableInfo {
+        name: "displaced_forms",
+        revision: 0,
+        since_generator_version: 13,
         provisional: true,
     },
     TableInfo {

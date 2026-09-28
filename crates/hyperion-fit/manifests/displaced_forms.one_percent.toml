@@ -1,18 +1,12 @@
-# The displaced form table's fit (plan 15, P15.T6.c–f): the forms, own-form shares, kinematics and
-# in-cube shares of every displaced class, fitted to an orbit run's histograms, and the
-# hypervelocity row. A committed table is always made from this file.
-#
-# **Provisional**: it fits P15.T6.b's smoke histograms (`displaced_orbits.smoke.toml`, a few orbits
-# a class, dataset `displaced_smoke`), so the table's shape and every downstream consumer can be
-# built before the production run lands. When it lands, `histograms` becomes "production",
-# `orbit_manifest` "displaced_orbits.toml" and `datasets` ["displaced"] (see the task's module
-# documentation, "Rerunning on the production histograms").
+# The displaced form table's fit (plan 15, P15.T6.c–f) on the 1% orbit run: `displaced_forms.toml`'s
+# settings on dataset `displaced_one_percent`, run with `--manifest` and `--out` to judge the
+# fits on real statistics before the production histograms land. Never committed as the table.
 task = "displaced_forms"
-datasets = ["displaced_smoke"]
+datasets = ["displaced_one_percent"]
 
 [params]
-histograms = "smoke"
-orbit_manifest = "displaced_orbits.smoke.toml"
+histograms = "one_percent"
+orbit_manifest = "displaced_orbits.one_percent.toml"
 # Gauss–Legendre nodes per cell and axis of the histograms' cells.
 cell_nodes = 3
 # Nelder–Mead: evaluations of a class's first fit (and of every old fit), of a regularised refit,

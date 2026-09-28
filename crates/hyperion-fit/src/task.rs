@@ -96,8 +96,9 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 8] = [
+pub static REGISTRY: [&dyn FitTask; 9] = [
     &tasks::chabrier::ChabrierTask,
+    &tasks::displaced_forms::DisplacedFormsTask,
     &tasks::giant_cooling::GiantCoolingTask,
     &tasks::kick_rank::KickRankTask,
     &tasks::mge::MgeTask,
@@ -177,6 +178,7 @@ mod tests {
             names,
             [
                 "chabrier",
+                "displaced_forms",
                 "giant_cooling",
                 "kick_rank",
                 "mge",

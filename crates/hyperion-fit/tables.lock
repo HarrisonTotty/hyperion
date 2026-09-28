@@ -13,6 +13,18 @@ provisional = true
 acceptance = "none yet: a scratch value, fitted by P15.T4.b"
 
 [[table]]
+name = "displaced_forms"
+path = "displaced_forms.rs"
+task = "displaced_forms"
+revision = 0
+inputs_sha256 = "856b393da3c4d11cca032d3a0c0aa470fb2a3a37b4523223d5ed6d7c5c224d72"
+body_sha256 = "75a650923e0dd471ae333c7cac0da8169fe413d577f1ed9d56471d3ff4de9db8"
+fingerprint = [7000.0, 224.01758300127108, 2.574031665087729, 126.45429928945967, 1.24]
+since_generator_version = 13
+provisional = true
+acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9742 (unregularised 0.9715, λ 0.01); 51 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 65 second-difference sign changes along the rows; worst misplaced share thick disc 0.983, halo 0.983, bulge 0.999, bar 0.997, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 0.00, 0.00, 1.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 0.00, 0.00; bar elongation over the control -1.12, 0.55, 0.89, -3.44, -, -, -, - and length within 0.94 of it; slowest thin class's mean rotation 0.921 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 223 pc; hypervelocity row misplaced 0.053, 17365 inside the cube (10.7 Myr each). Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+
+[[table]]
 name = "giant_cooling"
 path = "giant_cooling.rs"
 task = "giant_cooling"

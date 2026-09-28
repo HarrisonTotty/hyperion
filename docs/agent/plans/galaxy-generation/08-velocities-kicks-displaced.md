@@ -747,6 +747,49 @@ and non-negative. Build time under 150 ms (bench, a finding).
 
 **Acceptance.** Tests pass. No generated output changes yet.
 
+**As built (lane `disp08b`, 2026-09-27, at `GENERATOR_VERSION` 13; no output moves).**
+
+- **API.** `class_table::{ClassTable, FormTable, FormRows, BuildFormTableError, ClassEntry,
+ClassKey, OldSource}`. `FormTable::new(FormRows)` validates the rows once (a share outside 0–1,
+  or bound and unbound in-cube shares summing past 1); `FormTable::committed()` reads P15.T6's
+  `tables::displaced_forms` through it; `ClassTable::build(&Galaxy, &FormTable) -> Self` (the
+  galaxy with its full potential) is then infallible. `ClassKey::{Thin { speed, age }, Old {
+source, speed }, Hypervelocity}` with `id()`. Getters: `stay_share`, `alive_share`,
+  `class_weight`, `class_count`, `source_budget`, `gone_share`, `unbound_in_cube_share`,
+  `in_cube_share`, `retained_share`, `stripped_share_used`, `reference_lifetime`, `marks`,
+  `stay_marks` and `closure`. Signatures that differ from Provides: `stripped_share_used(source,
+m)` (each source has its own reference composition), `marks(band, id)` (per band, D and E) and
+  `stay_marks(c) -> &StayMarks` (with `StayCategory::{Alive, Retained(SpeedBin)}`).
+  **`unbound_share` is not built**: the table gives only the unbound still inside the cube
+  (`unbound_in_cube_share`), and P08.T14.4's 13–14% of all neutron stars needs the kick law against
+  the escape speed at the birth sites, which T14 owns. `marks::{MassNodes, ConditionalMarks,
+StayMarks, LifetimeBracket}`, `ConditionalMarks::component_at(kind, m, mark)` picking by
+  `Mark::pick_weighted`; `runaway::{RunawayModel, Ejected}` with unit-typed constants.
+  "Identical in `--release`": the golden matches in the dev and slow-test profiles.
+- **Deviations.** `Galaxy::class_table()` is not wired in (P08.T12 does it with its bump).
+  Weights and marks are kept per band, D and E. Runaways and walkaways are further kinds of the
+  thin and nuclear discs' classes of their speed and age bin, not classes of their own; the
+  hypervelocity class is class 96 at zero weight. A source's reference metallicity is the
+  count-weighted mean [Fe/H] of its components at their mean ages, at 3 `R_d` in the plane for
+  the discs and halo and at the centre for bulge, bar and nuclear disc. The 33 mass nodes take
+  Simpson's rule in ln m; `⟨uτ⟩` is the bin's log-mean u (0.02 and 6 at the open ends) times its
+  mean time since death. In layer D only the thin and nuclear discs split (their living stars lose
+  the runaways and walkaways); its dead stay in the field as white dwarfs. Bulge and bar share one
+  kick quadrature (same composition and `v_c`). "The young disc feeds only age bins below 9 time
+  units" was written for an 11 Myr unit; at the fixture's 9.4 Myr the young disc reaches 10.67
+  units, so the test holds it to its own age range. The 200-seed sweep is 20 seeds, slow.
+- **Golden** `tests/golden/galaxy_class_table.golden` is blessed on the **provisional** table
+  (P15.T6's smoke fit) and is re-blessed when the production table lands.
+- **Findings (measured values held, the plan's figure in the test's comment).** Build time 42–45
+  s in the dev profile against 150 ms, nearly all `kick_bins::speed_bin_shares` (about 166 ms a
+  mass node, from its 1,024 remnant-mass nodes); lifetimes cost about 0.8 ms each. T9.c's
+  runaway layer after 10 Myr is 1,815 ly tall from the ballistic form at the runaways' `⟨u⟩` of
+  0.217 `v_c` (48.6 km/s), against 600–800 ly (the brainstorm's 700 is nearer mean `|v_z|` × t).
+  Runaways are 0.1014 of living O stars (0.10–0.25, at the edge) and 0.0283 of layer D's B stars
+  (0.02–0.05). On the brainstorm's test-only table the thin disc's neutron stars are 0.186
+  retained and 0.798 inside the cube, its black holes 0.747 retained and 0.994 inside, 0.130
+  gone; the provisional table's figures are smoke noise.
+
 ### P08.T10 Forms and normalisation
 
 - **P08.T10.a `FlaredLayer` and `CoredPowerLaw`** as densities in light-years from the table's

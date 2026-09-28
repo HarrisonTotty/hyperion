@@ -676,6 +676,101 @@ impl DiscBornForm {
 /// shares (P15.T6's `COROTATION_RATIO_NODES`).
 pub const COROTATION_RATIO_NODES: [f64; 3] = [1.0, 1.2, 1.4];
 
+/// The escape ratios, `v_esc ÷ v_c` at 3 `R_d` in the plane, at which plan 15 gives the in-cube
+/// shares (P15.T6's `ESCAPE_RATIO_NODES`).
+pub const ESCAPE_RATIO_NODES: [f64; 3] = [2.1, 2.5, 2.9];
+
+/// The value at `x` of the piecewise-linear function taking `values` at `nodes`, clamped at the
+/// ends: how every node array of plan 15's table is read (P15.T6's format).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::displaced::forms::{ESCAPE_RATIO_NODES, at_nodes};
+///
+/// let in_cube = [0.60, 0.70, 0.76];
+/// assert!((at_nodes(&ESCAPE_RATIO_NODES, &in_cube, 2.3) - 0.65).abs() < 1e-12);
+/// assert!((at_nodes(&ESCAPE_RATIO_NODES, &in_cube, 3.5) - 0.76).abs() < 1e-15);
+/// ```
+#[must_use]
+pub fn at_nodes(nodes: &[f64; 3], values: &[f64; 3], x: f64) -> f64 {
+    if x <= nodes[0] {
+        return values[0];
+    }
+    for i in 0..nodes.len() - 1 {
+        if x <= nodes[i + 1] {
+            let t = (x - nodes[i]) / (nodes[i + 1] - nodes[i]);
+            return values[i] + t * (values[i + 1] - values[i]);
+        }
+    }
+    values[nodes.len() - 1]
+}
+
+/// One class's velocities in plan 15's table, in units of its speed scale (`v_c`, or the nuclear
+/// disc's own circular speed for its classes): P15.T6's `ClassKinematics`.
+///
+/// The mean rotation is spinward-positive and taken over the class's bound members inside the
+/// cube, as are the three dispersions in local cylindrical axes; `outbound` is the share of them
+/// moving away from the plane, `z v_z > 0`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClassKinematics {
+    /// The mean azimuthal velocity, spinward, `v_c`.
+    pub mean_phi: f64,
+    /// The radial dispersion, `v_c`.
+    pub sigma_r: f64,
+    /// The azimuthal dispersion, `v_c`.
+    pub sigma_phi: f64,
+    /// The vertical dispersion, `v_c`.
+    pub sigma_z: f64,
+    /// The share moving away from the plane, 0–1.
+    pub outbound: f64,
+}
+
+/// One disc-born class's row of plan 15's table: P15.T6's `DiscBornForm` (the name is taken here
+/// by the density, [`DiscBornForm`]).
+///
+/// `layer.weight + spheroid.weight = 1`. The form describes the class's bound members inside the
+/// cube; `in_cube` is their share of the class's objects and `unbound_in_cube` the share unbound
+/// but still inside, both at [`ESCAPE_RATIO_NODES`]. `misplaced` is the fit's total-variation
+/// distance from the orbits' histogram. For the two ballistic age bins plan 08 ignores `layer`
+/// (Design note 21) and reads the rest.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DiscBornRow {
+    /// The flared layer.
+    pub layer: FlaredLayerParams,
+    /// The flattened cored power law.
+    pub spheroid: CoredPowerLawParams,
+    /// The bound share inside the cube, by escape ratio.
+    pub in_cube: [f64; 3],
+    /// The unbound share still inside the cube, by escape ratio.
+    pub unbound_in_cube: [f64; 3],
+    /// The bound members' velocities.
+    pub kinematics: ClassKinematics,
+    /// The fit's misplaced share, 0–1.
+    pub misplaced: f64,
+}
+
+/// One old source's class in plan 15's table (thick disc, halo, bulge, bar and nuclear disc, one
+/// per speed bin): P15.T6's `OldBornForm`, with the unbound share the disc-born rows carry.
+///
+/// `own_share` is the share keeping the population's own form, at [`COROTATION_RATIO_NODES`]
+/// (zero for the thick disc and halo); the spheroid takes the rest (Design note 13).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OldBornRow {
+    /// The own-form share, by corotation ratio.
+    pub own_share: [f64; 3],
+    /// The spheroid, its weight 1.
+    pub spheroid: CoredPowerLawParams,
+    /// The bound share inside the cube, by escape ratio.
+    pub in_cube: [f64; 3],
+    /// The unbound share still inside the cube, by escape ratio.
+    pub unbound_in_cube: [f64; 3],
+    /// The bound members' velocities.
+    pub kinematics: ClassKinematics,
+    /// The fit's misplaced share, 0–1.
+    pub misplaced: f64,
+}
+
 /// A barred or nuclear class's mixture of its own form, the field component's shape, and a
 /// spheroid, by the bar's corotation ratio (plan 08, Design note 13; brainstorm, "Displaced
 /// objects: kicks and runaways").
@@ -799,6 +894,57 @@ impl UnimodalFactor for FlareFactor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plan 15's table repeats the bins' edges and the node arrays this module and `displaced`
+    /// define, and every row of it is a form that builds: shares in 0–1, the layer and spheroid
+    /// weights summing to 1.
+    #[test]
+    fn the_form_table_repeats_the_edges_and_its_rows_are_forms() {
+        use crate::tables::displaced_forms as table;
+        let same = |a: &[f64], b: &[f64]| {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-15)
+        };
+        assert!(same(&table::SPEED_EDGES, &super::super::SPEED_EDGES));
+        assert!(same(&table::AGE_EDGES, &super::super::AGE_EDGES));
+        assert!(same(&table::ESCAPE_RATIO_NODES, &ESCAPE_RATIO_NODES));
+        assert!(same(
+            &table::COROTATION_RATIO_NODES,
+            &COROTATION_RATIO_NODES
+        ));
+        let fraction = |x: f64| (0.0..=1.0).contains(&x);
+        for row in table::DISC_BORN.iter().flatten() {
+            assert!((row.layer.weight + row.spheroid.weight - 1.0).abs() < 1e-12);
+            assert!(
+                row.in_cube
+                    .iter()
+                    .chain(&row.unbound_in_cube)
+                    .all(|&s| fraction(s))
+            );
+            assert!(fraction(row.misplaced));
+        }
+        for row in [
+            &table::THICK_DISC_BORN,
+            &table::HALO_BORN,
+            &table::BULGE_BORN,
+            &table::BAR_BORN,
+            &table::NUCLEAR_DISC_BORN,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(row.own_share.iter().all(|&s| fraction(s)));
+            assert!(
+                row.in_cube
+                    .iter()
+                    .chain(&row.unbound_in_cube)
+                    .all(|&s| fraction(s))
+            );
+            assert!((row.spheroid.weight - 1.0).abs() < 1e-15);
+        }
+        const {
+            assert!(table::HYPERVELOCITY.a > 0.0 && table::HYPERVELOCITY.gamma > 0.0);
+        }
+    }
 
     #[test]
     fn the_panels_double_up_to_the_end() {

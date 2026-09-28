@@ -313,6 +313,19 @@ impl ThinHistory {
             .fold(0.0, f64::max)
     }
 
+    /// The thin stars born between `lo_years` and `hi_years` ago, counted over the components: the
+    /// weight of that span of the history, up to one constant.
+    #[must_use]
+    pub fn weight(&self, fields: &Fields, lo_years: f64, hi_years: f64) -> f64 {
+        self.components
+            .iter()
+            .map(|&(count, id)| {
+                let ages = fields.component(id).ages();
+                count * (ages.cdf(Years::new(hi_years)) - ages.cdf(Years::new(lo_years))).max(0.0)
+            })
+            .sum()
+    }
+
     /// An age between `lo` and `hi` years (both at least 0), drawn from the history restricted to
     /// it.
     ///
@@ -390,6 +403,22 @@ pub fn ellipsoid_velocity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_historys_weights_add_over_spans() {
+        use hyperion_sim::galaxy::params::GalaxyParams;
+        use hyperion_sim::galaxy::potential::MassModel;
+        let params = GalaxyParams::milky_way_like();
+        let fields = Fields::new(&params, &MassModel::new(&params));
+        let history = ThinHistory::new(&fields);
+        let oldest = history.oldest(&fields);
+        let whole = history.weight(&fields, 0.0, oldest);
+        let parts = history.weight(&fields, 0.0, 1e8) + history.weight(&fields, 1e8, oldest);
+        assert!(
+            whole > 0.0 && (parts / whole - 1.0).abs() < 1e-12,
+            "{parts} {whole}"
+        );
+    }
 
     #[test]
     fn draws_are_uniform_and_keyed() {

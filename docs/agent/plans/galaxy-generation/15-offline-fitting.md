@@ -847,6 +847,86 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt` and prints its SHA-256 for
   `tables.lock`.
 
+**T6.c–f as built (lane `disp08b`, 2026-09-27, at `GENERATOR_VERSION` 13; the table is
+provisional, fitted to the smoke histograms; no output moves).**
+
+- **The task.** `tasks::displaced_forms::DisplacedFormsTask` (slow, registered), modules
+  `displaced_forms/{table,fit_disc,fit_old,kinematics,hypervelocity,cells,nelder_mead}.rs`; the
+  plan's `orbits`, `births` and `histogram` are T6.a–b's. The orbit run's manifests are renamed,
+  bytes unchanged (so the production run's parts and header hash still match):
+  `manifests/displaced_orbits.toml`, `displaced_orbits.smoke.toml`, and a new
+  `displaced_orbits.one_percent.toml` (the production counts over 100). `displaced_forms.toml` and
+  `displaced_forms.smoke.toml` are now the **fit's** manifests: one dataset, an orbit run's
+  histograms, declared `fetched` with a `PROVENANCE.toml` (`data/displaced_smoke/` now; the
+  production run's `data/displaced/` when it lands, whose default directory is the orbits
+  command's own `crates/hyperion-fit/data/cache/displaced/`), and `orbit_manifest`, whose SHA-256 the histograms'
+  header must carry. `histograms = "smoke" | "one_percent" | "production"` decides `@provisional`.
+  The Nelder–Mead, the cell quadrature and the misplaced share live in the task's modules, not in
+  the plan's `hyperion_fit::{optimise, stats}` (nothing else uses them yet).
+- **Table shape.** As the format above, with names from the sim: rows are
+  `forms::{FlaredLayerParams, CoredPowerLawParams, ClassKinematics, DiscBornRow, OldBornRow}`
+  (`DiscBornForm` is taken by P08.T10's density), and `forms::ESCAPE_RATIO_NODES` and `at_nodes`
+  are the node arrays' reading. **`OldBornRow` gains `unbound_in_cube`**, which Design note 23 of
+  plan 08 needs for every source. A sim test holds the table's edges and nodes to the module's.
+- **T6.c.** Each class's bound in-cube (R, |z|) histogram is fitted (the fastest speed bin's
+  with every speed bin's unbound-in-cube members of its age bin added, where plan 08 puts them; so
+  too the thick disc's and halo's fastest; the barred sources' bar-frame histograms record only
+  the bound, so theirs are fitted without) by the total-variation
+  distance to the forms' cell integrals over the cube (Gauss–Legendre in ln of each cell's
+  coordinate, the corner annulus beyond L in the arc's angle; cells tile the cube to 10⁻⁶). The
+  boxes are the plan's, with `h_r` in [0.05, 50] and `h_0` in [10⁻⁴, 20] `R_d` added; the
+  parameters move as `lo + (hi − lo)(1 + sin t) ÷ 2` (log scale where positive) so an edge is
+  reachable and detectable; a spheroid under 0.05 is dropped and the layer refitted alone; the
+  row penalty is λ Σ (ln θ − ln θ′)² in Gauss–Seidel sweeps, the largest λ of the manifest's
+  ladder (10⁻⁴–10⁻¹) whose weighted mean rises ≤ 0.3 points. **Weights** of the weighted mean are
+  the neutron stars' band-averaged speed-bin shares (P08.T8.b as built, in the manifest) × the
+  thin history's share of each age bin × the class's in-cube share. **The noise floor** is the
+  expected misplaced share of Poisson counts from the fitted model (`E|X − λ|` exactly), since
+  the summed histograms have no half-samples; the table's notes list misplaced ÷ floor per class.
+  The smoothness check is reported as a count of second-difference sign changes.
+- **T6.d.** Thick disc and halo: one spheroid a speed bin, boxes a [0.005, 20] `R_d`, q [0.02,
+  1], γ [0.5, 10] (the nuclear disc's core is a few hundredths of `R_d`). Bulge, bar, nuclear
+  disc: `s ×` the field population's own density (plan 08 places the retained share with it)
+  plus a spheroid, on the 24 × 24 × 20 bar-frame histogram (the bar lies along x in the fields
+  and in the orbits' frame at the epoch). Elongation is `1 − √(⟨y²⟩ ÷ ⟨x²⟩)` within two bar
+  half-lengths, over the control's. **One run, one corotation ratio (the fixture's 1.24) and one
+  bar mass: the measured share fills all three nodes**; the runs at 1.0 and 1.4 and a second bar
+  mass need the orbit command to run the barred sources alone, which it cannot yet.
+- **T6.e.** Kinematics and in-cube shares straight from each record; **one halo mass, so the
+  measured value fills all three escape-ratio nodes.** Not built: the four universality
+  potentials, the isotropic-Jeans baseline, the other halo masses; the kick-law reweighting of
+  "13–14% unbound" cannot be read from the histograms, which count the unbound only inside the
+  cube (so plan 08's class table offers only `unbound_in_cube_share`; the total is P08.T14.4's, from the kick law against the escape speed), and "phase mixing by τ 8–30" needs the
+  last age bin split at 30. These are for the production follow-up.
+- **T6.f.** The sources are every field component weighted by its mean `t^−1.1` from 40 Myr over
+  its age distribution (Maoz and Graur 2017), a reading of "the old populations' density" that
+  gives each population its ancient events; the azimuthal kernel is closed (`2π ÷ √(A² − B²)`),
+  softened at 1% of the source's distance. Rate 0.54 per century (Li et al. 2011), channel 0.3,
+  2,200 km/s: **17,365 inside the cube, 10.7 Myr each; misplaced 5.3%** (acceptance 10⁴–10⁵ and
+  under 10%).
+- **The 1% run as a check** (`displaced_orbits.one_percent.toml`, 192,608 orbits, 1.8 CPU-hours;
+  fitted with `displaced_forms.one_percent.toml` to a scratch file, never committed). At this size
+  every fit sits at its noise floor (misplaced ÷ floor 1.0–1.7), so the figures are preliminary
+  **findings for the production run to confirm, not rulings**: disc-born weighted mean misplaced
+  0.202 (floor-limited, against ≤ 0.07; λ 10⁻³); 6 classes over 10⁻⁴ of the weight with a
+  parameter on a box edge; worst old-source misplaced thick 0.84, halo 0.81, bulge 0.89, bar 0.93,
+  nuclear 0.61 (bar-frame cells of 2,000 orbits); **own-form shares at the fixture's ratio 1.24:
+  bar 0.15, 0.11, 0.04, 0.00 against the brainstorm's 0.95, 0.61, 0.20, 0.05; bulge 0.30, 0.34,
+  0.05, 0.00 against 0.91, 0.76, 0.55, 0.25; nuclear disc 0.62, 1.00, 0.00 against 0.88, 0.67,
+  0.43** (outside ±0.08 in every bin but noise-limited: the fit trades a noisy own form for a smooth
+  spheroid at no cost in misplaced share); bar elongation over the control 0.75, 0.59, 0.61, 0.26
+  over the first four bins (plan 0.99, 0.79, 0.5, 0.25 within 0.05), 0.16, −0.00, −0.04, 1.28
+  beyond (plan < 0.05), length within 0.68 of the control's (plan 10%); the slowest thin class's
+  mean rotation 0.947 `v_c` (plan above 0.95), the fastest's −0.599 (below zero, as planned); **the
+  neutron stars' half-density height at 26,000 ly 155 pc against 110–130**.
+- **Cost.** The provisional fit is 3.6 CPU-minutes (2.6–5.3 minutes wall on three threads under
+  load 13–18); the 1% fit 7.4 CPU-minutes; the production fit costs the same per evaluation, so
+  about as long.
+- **Rerunning on the production histograms:** the steps are in `table.rs`'s module documentation
+  (copy the file, add `data/displaced/PROVENANCE.toml`, point the manifest's three lines at
+  production, `just fit displaced_forms`, rerun plan 08's form, bound and class-table tests and
+  re-bless the class table's golden).
+
 ### P15.T7 Helium correction
 
 **Source.** The brainstorm names none beyond "fitted offline". The fit needs published

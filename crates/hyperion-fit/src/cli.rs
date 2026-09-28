@@ -90,7 +90,7 @@ pub enum Command {
         /// Run the smoke manifest, a few orbits per class.
         #[arg(long)]
         smoke: bool,
-        /// Run this manifest instead of `manifests/displaced_forms.toml`.
+        /// Run this manifest instead of `manifests/displaced_orbits.toml`.
         #[arg(long, conflicts_with = "smoke")]
         manifest: Option<PathBuf>,
         /// Threads for the run; the output is the same for any number.
@@ -246,8 +246,8 @@ fn orbits(
     use crate::tasks::displaced_forms;
     let path = match run.manifest {
         Some(path) => path.to_path_buf(),
-        None if run.smoke => workspace.manifests_dir.join("displaced_forms.smoke.toml"),
-        None => workspace.manifests_dir.join("displaced_forms.toml"),
+        None if run.smoke => workspace.manifests_dir.join("displaced_orbits.smoke.toml"),
+        None => workspace.manifests_dir.join("displaced_orbits.toml"),
     };
     let loaded = Manifest::load(&path).map_err(RunFitError::Manifest)?;
     let params = displaced_forms::RunParams::from_manifest(&loaded)

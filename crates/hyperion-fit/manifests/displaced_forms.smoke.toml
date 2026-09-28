@@ -1,20 +1,33 @@
-# The displaced form table's smoke run: a few orbits per class on coarse steps, for the crate's
-# tests (reproducibility and thread independence, not accuracy).
+# The displaced form table's smoke fit (plan 15, P15.T6.c–f): `displaced_forms.toml` on coarse
+# quadrature and short searches, over P15.T6.b's smoke histograms, for the crate's tests (the whole
+# pipeline end to end and thread independence, not accuracy).
 task = "displaced_forms"
+datasets = ["displaced_smoke"]
 
 [params]
-seed = 0x0615_6b00_0000_0000
-galaxy_seed = 0x0615_6b00_0000_0001
-disc_orbits_per_class = 3
-old_orbits_per_class = 1
-nuclear_orbits_per_class = 1
-control_orbits = 1
-step_fraction = 0.02
-nuclear_step_fraction = 0.02
-min_step_years = 100_000.0
-drift_tolerance = 1e-2
-max_halvings = 1
-bar_strength = 0.05
-corotation_ratio = 0.0
-chunk = 16
-part_orbits = 64
+histograms = "smoke"
+orbit_manifest = "displaced_orbits.smoke.toml"
+# Gauss–Legendre nodes per cell and axis of the histograms' cells.
+cell_nodes = 2
+# Nelder–Mead: evaluations of a class's first fit (and of every old fit), of a regularised refit,
+# and the simplex's tolerance in misplaced share.
+evaluations = 80
+refit_evaluations = 30
+tolerance = 1e-7
+# P15.T6.c: a spheroid under 5% of the weight is dropped; the age bins of a speed row are tied by
+# the largest penalty of the ladder that raises the weighted mean misplaced share by 0.3 points at
+# most, in Gauss–Seidel sweeps along the row.
+drop_weight = 0.05
+lambdas = [1e-2]
+rise_limit = 0.003
+sweeps = 1
+# The neutron stars' band-averaged speed-bin shares at the fixture (P08.T8.b as built under ruling
+# 123), which weight the classes' misplaced shares and heights.
+speed_weights = [0.188, 0.059, 0.155, 0.193, 0.147, 0.105, 0.072, 0.081]
+# P15.T6.f: the Galaxy's Type Ia rate, 0.54 per century (Li et al. 2011, MNRAS 412, 1473), the
+# surviving-donor channel's 30% and its 1,900–2,500 km/s (Shen et al. 2018, ApJ 865, 15).
+ia_rate_per_year = 0.0054
+hypervelocity_channel_share = 0.3
+hypervelocity_speed_km_s = 2_200.0
+hypervelocity_panel_nodes = 4
+hypervelocity_directions = 16

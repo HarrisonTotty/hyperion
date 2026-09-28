@@ -22,15 +22,24 @@
 //! An orbit is bound if its energy at the epoch, bar included, cannot carry it to the sim's
 //! escape boundary, twice the dark halo's `r₂₀₀` (ruling 91).
 //!
-//! The manifests are `manifests/displaced_forms.toml` (the production run, about 1.9 × 10⁷
+//! The orbit manifests are `manifests/displaced_orbits.toml` (the production run, about 1.9 × 10⁷
 //! orbits: plan 15's 1.2 × 10⁷ disc-born, 1.6 × 10⁶ for each old population but the nuclear disc,
-//! and 10⁵ a class for the nuclear disc, ruling 120.3) and `displaced_forms.smoke.toml`. A run is
+//! and 10⁵ a class for the nuclear disc, ruling 120.3), `displaced_orbits.smoke.toml` and `displaced_orbits.one_percent.toml` (the production counts over 100). A run is
 //! cut into parts that are written as they finish and read back on a later run, so it resumes
 //! where it stopped with the same bytes (ruling 120.4; [`run`], [`Resume`]).
 
 pub mod births;
+pub mod cells;
+pub mod fit_disc;
+pub mod fit_old;
 pub mod histogram;
+pub mod hypervelocity;
+pub mod kinematics;
+pub mod nelder_mead;
 pub mod orbits;
+pub mod table;
+
+pub use table::DisplacedFormsTask;
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -775,7 +784,7 @@ mod tests {
 
     fn smoke() -> Manifest {
         let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("manifests/displaced_forms.smoke.toml");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("manifests/displaced_orbits.smoke.toml");
         Manifest::load(&path).unwrap()
     }
 

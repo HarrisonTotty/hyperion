@@ -29,6 +29,33 @@ pub const Z_CELLS: usize = 40;
 /// Cells in |x|, |y| and |z| of the bar-frame histogram.
 pub const BAR_CELLS: [usize; 3] = [24, 24, 20];
 
+/// A logarithmic axis: its first log edge (ly) and the doublings its cells after the first span.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LogAxis {
+    /// The first cell's upper edge, ly; the first cell reaches down to 0.
+    pub first_ly: f64,
+    /// The doublings the other cells span together.
+    pub octaves: f64,
+}
+
+/// The R axis: 16 ly, then 14 octaves.
+pub const R_AXIS: LogAxis = LogAxis {
+    first_ly: 16.0,
+    octaves: 14.0,
+};
+
+/// The |z| axis: 1 ly, then 16 octaves.
+pub const Z_AXIS: LogAxis = LogAxis {
+    first_ly: 1.0,
+    octaves: 16.0,
+};
+
+/// The bar frame's |x| and |y| axes: 16 ly, then 12 octaves; its |z| is [`Z_AXIS`].
+pub const BAR_XY_AXIS: LogAxis = LogAxis {
+    first_ly: 16.0,
+    octaves: 12.0,
+};
+
 /// The cell of `v` on a logarithmic axis whose first log edge is `first` (ly), which spans
 /// `octaves` doublings over `cells − 1` cells after a first cell from 0 to `first`.
 fn log_cell(v: f64, first: f64, octaves: f64, cells: usize) -> usize {
@@ -51,21 +78,31 @@ fn log_cell(v: f64, first: f64, octaves: f64, cells: usize) -> usize {
 /// The R cell of `r` (ly): 0 below 16 ly, then 47 cells over 14 octaves to 2¹⁸ ly.
 #[must_use]
 pub fn r_cell(r: f64) -> usize {
-    log_cell(r, 16.0, 14.0, R_CELLS)
+    log_cell(r, R_AXIS.first_ly, R_AXIS.octaves, R_CELLS)
 }
 
 /// The |z| cell of `z` (ly): 0 below 1 ly, then 39 cells over 16 octaves to 2¹⁶ ly.
 #[must_use]
 pub fn z_cell(z: f64) -> usize {
-    log_cell(z.abs(), 1.0, 16.0, Z_CELLS)
+    log_cell(z.abs(), Z_AXIS.first_ly, Z_AXIS.octaves, Z_CELLS)
 }
 
 /// The bar-frame cell of `x` (ly): |x| and |y| from 16 ly over 12 octaves, |z| from 1 ly over 16.
 #[must_use]
 pub fn bar_cell(x: [f64; 3]) -> usize {
-    let i = log_cell(x[0].abs(), 16.0, 12.0, BAR_CELLS[0]);
-    let j = log_cell(x[1].abs(), 16.0, 12.0, BAR_CELLS[1]);
-    let k = log_cell(x[2].abs(), 1.0, 16.0, BAR_CELLS[2]);
+    let i = log_cell(
+        x[0].abs(),
+        BAR_XY_AXIS.first_ly,
+        BAR_XY_AXIS.octaves,
+        BAR_CELLS[0],
+    );
+    let j = log_cell(
+        x[1].abs(),
+        BAR_XY_AXIS.first_ly,
+        BAR_XY_AXIS.octaves,
+        BAR_CELLS[1],
+    );
+    let k = log_cell(x[2].abs(), Z_AXIS.first_ly, Z_AXIS.octaves, BAR_CELLS[2]);
     (i * BAR_CELLS[1] + j) * BAR_CELLS[2] + k
 }
 
