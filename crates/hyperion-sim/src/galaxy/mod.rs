@@ -37,6 +37,7 @@ pub mod potential;
 pub mod quad;
 pub mod query;
 pub mod shares;
+pub mod snr;
 pub mod special;
 pub mod substellar;
 

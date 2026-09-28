@@ -155,3 +155,6 @@ feature.cluster (Feature) = 0xd684edeb09700249
 member.mass (System) = 0xe01f9fe0e63925db
 member.velocity (System) = 0x5f881cf332ad74f0
 member.abundance (System) = 0xfb2ee836e8fb35de
+class.type_ia.progenitor (System) = 0x651ef7bbcda045d3
+class.type_ia.leftover (System) = 0xf8b5e3a0a6ab2be7
+class.ev.supernova (Event) = 0x571ac8f49bff0f27

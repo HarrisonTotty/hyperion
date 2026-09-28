@@ -2,10 +2,14 @@
 //! the `111` prefix (brainstorm, "Events in time"; plan 09, phase 7).
 //!
 //! This module holds, so far, what phase 1 builds (P09.T1): the class registry
-//! ([`registry`], re-exported here) and the key of a catalogue-class cell ([`CatalogueCellKey`]).
-//! The class grid, the processes and the carve-out follow in P09.T32–T35.
+//! ([`registry`], re-exported here) and the key of a catalogue-class cell ([`CatalogueCellKey`]);
+//! and what phase 4 builds (P09.T18–T19): the Type Ia's delay-time distribution, progenitors and
+//! leftovers ([`type_ia`]) and a supernova entry's state and light curve ([`supernova`]). The
+//! class grid, the processes and the carve-out follow in P09.T32–T35.
 
 pub mod registry;
+pub mod supernova;
+pub mod type_ia;
 
 use std::error::Error;
 use std::fmt;

@@ -659,6 +659,21 @@ domain_tags! {
 
     /// A second-population member's enrichment and a spread cluster's iron offset (P09.T9.h).
     MEMBER_ABUNDANCE: System = "member.abundance";
+
+    // Plan 09, phase 4 (P09.T18–T19), appended after phases 2 and 3: a Type Ia entry's draws are
+    // `System` tags opened with `ObjectKey::from(SystemId)` of its catalogue system ID (Design
+    // note 23); the explosion's event tag is backed by an `Event` tag.
+
+    /// A Type Ia progenitor's delay-first draw: its component, its age, its channel, its masses
+    /// and its time of explosion (P09.T18.b, `IaProgenitor::draw`).
+    CLASS_TYPE_IA_PROGENITOR: System = "class.type_ia.progenitor";
+
+    /// What a Type Ia leaves: the surviving donor's population and speed, two words (P09.T18.c,
+    /// `IaLeftover::draw`).
+    CLASS_TYPE_IA_LEFTOVER: System = "class.type_ia.leftover";
+
+    /// The one-shot explosion of a supernova catalogue entry, behind event tag 0x0202 (P09.T19.a).
+    CLASS_EV_SUPERNOVA: Event = "class.ev.supernova";
 }
 
 #[cfg(test)]
@@ -889,6 +904,15 @@ mod tests {
         }
         for tag in feature {
             assert_eq!(tag.scope(), crate::rng::TagScope::Feature, "{}", tag.name());
+            assert!(ALL.contains(&tag));
+        }
+        for (tag, scope) in [
+            (CLASS_TYPE_IA_PROGENITOR, crate::rng::TagScope::System),
+            (CLASS_TYPE_IA_LEFTOVER, crate::rng::TagScope::System),
+            (CLASS_EV_SUPERNOVA, crate::rng::TagScope::Event),
+        ] {
+            assert_eq!(tag.scope(), scope, "{}", tag.name());
+            assert!(tag.name().starts_with("class."));
             assert!(ALL.contains(&tag));
         }
     }

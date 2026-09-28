@@ -21,7 +21,8 @@
 //! | `0x0400`–`0x04FF` | Bodies (plan 14)                           |
 //!
 //! `0x0002`–`0x00FF` and everything from `0x0500` stay unallocated. Within a block numbers are
-//! explicit, ascending in order of registration and never reused. Each tag's events are built by
+//! explicit, fixed by the owning plan and never reused; a plan may register them out of order
+//! (plan 09 registers `0x0202` before its reserved `0x0200` and `0x0201`). Each tag's events are built by
 //! one of `events`' two constructions only, Poisson bins or a monotone phase, never both, because
 //! the two give the event key's slots different meanings.
 
@@ -129,6 +130,12 @@ event_tags! {
     /// The cycle-keyed irregularity of pulsating variables, S Doradus cycles included (monotone
     /// phase).
     0x0109 => STAR_VARIABILITY_CYCLE = tags::STAR_VAR_CYCLE;
+
+    // Plan 09: features, the galactic centre and the catalogue classes, block 0x0200–0x02FF.
+    // 0x0200 (`CENTRE_FLARE`) and 0x0201 (`TIDAL_DISRUPTION`) are reserved for P09.T30.
+    /// The explosion of a supernova catalogue entry: bin 0, number 0, on the entry's member 0
+    /// (P09.T19.a).
+    0x0202 => SUPERNOVA = tags::CLASS_EV_SUPERNOVA;
 }
 
 #[cfg(test)]

@@ -1544,3 +1544,141 @@ millisecond_pulsars`; a deviation in T9.e): the encounter-rate law alone gives m
   - _Still provisional_ (ruling 126.9): the 0.7826 factor, neutron stars of 1.35 M☉, Kalirai 2008,
     the depletion read at `t_rh × 12 Gyr ÷ age`, `u ~ N(0.72, 0.37)`, the 15 M☉ mean black hole,
     the X-ray binary and blue-straggler laws.
+
+- **Phase 4 bar T17 as built (lane `feat09c`, 2026-09-28, at `GENERATOR_VERSION` 14): T15.a–b,
+  T16.a–b, T18.a–c, T19.a–b.** Pure functions; nothing any consumer reads moves. A new golden,
+  `catalogue_classes/supernova.golden`, pins the window table, shell states, the fixture's caps,
+  Type Ia rate and ancient shares, twelve progenitors and leftovers on their own tags and
+  light-curve points; the only moved golden is `rng/tags.golden`, which gains `class.type_ia.progenitor`, `class.type_ia.leftover`
+  (scope `System`) and `class.ev.supernova` (scope `Event`, behind event tag `0x0202 SUPERNOVA`,
+  registered in `event_tags!`). Files: `galaxy/snr/{mod,window,caps,shell,remnant,testing}.rs`
+  (a directory for the plan's `galaxy/snr.rs`), `galaxy/catalogue_classes/{type_ia,supernova}.rs`.
+  Names and shapes that differ from the sketches:
+  - _T15.a._ `SiteGas::{at, of, uniform, hot_interior}`; `SiteGas::at` reads `GasField::state` at
+    `SiteGas::SMOOTHING` (250 ly) and takes the drawn phase's `local_density()` and
+    `isothermal_sound_speed()` (plan 07's Risks left the choice to this plan; research NOTES §1.4's
+    recommendation, CMB88's `n₀` being the local ambient). `shell_window(site, ExplosionEnergy,
+Dex)`; `ExplosionEnergy` is in units of 10⁵¹ erg, a log-normal of 0.2 dex truncated at ±2σ
+    (0.40–2.51, ours; `ExplosionEnergy::from_uniform` is the one law, which T17's `DeathMarks::of`
+    feeds one uniform of `snr.energy`). The metallicity is `[M/H]` held to −1…+0.5 (ours), read as
+    CMB88's ζ, which is the swept-up gas's: T17 should pass the site gas's metallicity
+    (`GasField::dust_per_hydrogen`'s `[M/H]`), not the star's, a finding for T17. `ShellWindow`
+    carries what T16 needs (`pds_time`, `pds_speed`, `merge_speed`, density, energy, ζ) and
+    `ended_at(Years)`.
+  - _The hot branch._ Built as `W = t_PDS (v_PDS ÷ β c_net)^(5⁄3)`, taken when `v_PDS ≤ β c_net`:
+    the Sedov–Taylor blast reaching `β c_net` before `t_PDS`, continuous with the radiative branch
+    by construction (CMB88's `v_PDS` is the Sedov speed at `t_PDS`). In Tang and Wang's (2005, eq. 3) terms it is `t_c (c_s ÷ β c_net)^(5⁄3)`, 0.48 `t_c` in hot gas, not the plan's 0.41 `t_c`,
+    which is continuous with nothing (finding below). At 10⁻³ cm⁻³ and 3,800 K cm⁻³ it gives
+    2.27 × 10⁵ yr against the plan's 2.0 (+13%, inside the test's 25%).
+  - _T15.b._ `WindowCaps::{from_galaxy, from_gas_params, at_floor, cap, cut}`: the field's and
+    the Type Ia's caps are one scan at the floor (4,096 points in `log n` over 10⁻⁸–10⁸ cm⁻³ and
+    80 golden-section steps, raised by 10⁻⁶) at the greatest energy and least metallicity, since
+    the window never rises with `C₀` and no site's `C₀² = s P ÷ ρ` is below the floor's; the
+    bubble's is the interior's least density, the Box–Muller cut at 8.58σ. `cut` is the debug
+    assertion. `SHELL_WINDOW_CAP` (4 Myr) is defined here: plan 08's `displaced` has none at
+    `782c708` (P08.T13 is `disp08d`'s), so it is not moved but created where Design note 22 puts
+    it; plan 08's prefilter should import it from `snr`.
+  - _T16.a._ `shell_state_at(&ShellWindow, Years) -> Option<ShellState>` (`None` before T and from
+    the window's end), `ShellPhase`, `ShellEmission`, `ShellWindow::ended_at_wall(LightYears)`.
+    Truelove and McKee's uniform-ejecta (`n = 0`) forms with `R*_ST` taken from their first form
+    at 0.495 so the join is exact; CMB88's offset power law with the offset `c` set so the speed is
+    continuous too (their eq. 3.30's rule, ¼ for a Sedov blast); a momentum-conserving
+    continuation from CMB88's `t_MCS` (their eq. 4.2 with Spitzer conduction). The ejecta mass is
+    a constant 3 M☉ (`EJECTA_MASS`, ours); it moves only the first centuries and `t_MCS`.
+  - _T16.b._ `remnant_offset(KilometresPerSecond, Years) -> LightYears`, `has_bow_shock(offset,
+&ShellState)` at `BOW_SHOCK_SHARE` 0.68, `PulsarWindNebula::of(&PulsarState)` above
+    `NEBULA_THRESHOLD` = 10³⁵ erg/s (ours): plan 06's own flag, `has_wind_nebula` at 10³⁶, ends a
+    nebula after a median of 2.2 × 10³ yr, outside the plan's 10⁴–10⁵ (finding below).
+  - _T18.a._ `DelayTimeDistribution::{amplitude_per_year_per_solar_mass,
+rate_per_year_per_solar_mass, cumulative_per_solar_mass, share_below, from_galaxy,
+rate_per_year, population_rate_per_year, ancient_share, drawable_rate_per_year, draw_floor,
+lifetime_of, mass_with_lifetime}` and `type_ia::ancient_share(&Galaxy, Population)` (the galaxy added to
+    the sketch). The Hubble time of Maoz and Graur's integral is 13.7 Gyr. A component's rate is
+    `count_with_unborn × mean_formed_mass × E[ψ(age)]`, the expectation a 64-panel quadrature in
+    the age distribution's rank. The ancient share counts every channel (every exploded system
+    leaves its cell) per layer-D system of the population.
+  - _T18.b._ `IaProgenitor::draw(&DelayTimeDistribution, &mut Stream, Population, after, until)
+-> Option<IaProgenitor>`: the distribution and the explosion interval `(after, until]` added
+    (T17's `SupernovaInterval` is not built). Fixed word offsets: the component mark, 4,096
+    two-word proposals of the age (from the component's ages above the draw floor, accepted on
+    `ψ ÷ ψ(floor)`), then channel, primary, secondary and the time of explosion in whole seconds.
+    Delays, lifetimes and the inspiral are `Span`s, so the secondary's lifetime plus the inspiral
+    is the delay exactly. Lifetimes are plan 06's track at solar composition and median draws,
+    tabulated at 48 masses over 0.8–8 M☉ (scratch). The draw floor is τ(8 M☉) = 42.6 Myr plus
+    the interval's 4.26 Myr before the epoch (finding below); `drawable_rate_per_year` is the intensity a
+    class thins against. Masses (scratch): primary `m^−2.35` over the layer-D masses that fit; a
+    double white dwarf's secondary uniform from max(0.1 m₁, M(delay)) to m₁; a living donor
+    uniform on ½–1 of min(3 M☉, M(delay)); white dwarfs by Kalirai et al. 2008.
+  - _T18.c._ `IaChannel { Merger, DoubleDetonation, HydrogenDonor, Iax }` (with
+    `is_double_degenerate` and `leaves_a_survivor`) and `CHANNEL_SHARES` 0.56, 0.30, 0.04, 0.10:
+    the merger's 0.56 against the plan's "both destroyed 50%", because the four keep their sum
+    (ruling 128.1) and "under 5%" and "about 10%" leave 0.56; independent of the delay (scratch); `IaLeftover { Nothing, SurvivingDonor, HydrogenDonor, PartlyBurntDwarf }`,
+    `IaLeftover::draw(channel, stream)` (two words; the donor's split reads plan 08's
+    `SURVIVOR_POPULATIONS`, ruling 128.1), `offset_at(age)`.
+  - _Cut-off._ The ancient share and the draw floor are taken before −(`SHELL_WINDOW_CAP` + L +
+    H), the constant, not the Type Ia cap, so neither depends on a site; the explosions between
+    the two fall to the grid's redraw rule (P09.T35).
+  - _Test brackets beside the plan's words._ The bubble cap is tested only as under the field's
+    (its 1.35 Myr is a finding); T16.b's offsets hold the median to 100–400 ly and the share
+    outside the shell to 0.3–0.7 for "near 200" and "about half"; T16.a's 21 cm flag is set in the
+    radiative phases only, so a shell that ends on the hot branch never shows it ("the 21 cm shell
+    to the end" read as from cooling to the end).
+  - _T19.a._ `SupernovaKind`, `SupernovaEntry::{new, with_remnant, with_leftover,
+with_progenitor, state_at, explosion_event}`, `SupernovaState::{Progenitor, Supernova,
+BareRemnant}`, `RemnantState`. `Progenitor` carries the time left and a double white dwarf's
+    period, not plan 06's star: the caller evaluates the star at the same time. `supernova.rs` is also where T17 puts `DeathMarks`,
+    `SupernovaInterval` and `claims`.
+  - _T19.b._ `LightCurve::{of, at, luminosity, neutrino_luminosity}`: templates as sums of smooth
+    terms (breakout, a logistic plateau, Nadyozhin's ⁵⁶Ni/⁵⁶Co heating with a diffusion rise and
+    γ-ray escape), so there is no join. A Type Ia peaks at 1.07 × 10⁴³ erg/s on day 15; the
+    neutrino burst is its own function.
+- **Findings of phase 4, for a ruling (lane `feat09c`).** Measured at Milky Way values unless
+  said:
+  - _Which gas the window reads (T15.a; plan 07's Risks, ruling 103)._ As built, the drawn
+    phase's `local_density()` and `isothermal_sound_speed()` (research NOTES §1.4); the
+    alternative is `√(P ÷ ρ̄)` of the parcel's mean. The caps do not depend on it.
+  - _ζ for T17._ CMB88's ζ is the metallicity of the swept-up gas, so T17 should pass the site
+    gas's `[M/H]`, against T17's text, "the metallicity from the system's `Composition`". The
+    window moves by at most 15% between −1 and 0 dex.
+  - _The hot branch (T15.a)._ Built as the pure Sedov blast's time to `β c_net`, 0.48 `t_c` in hot
+    gas, continuous with the radiative branch. Tang and Wang's own fit to their simulations (eq.
+    2, `V_s = c_s (t_c ÷ t + 1)^(3⁄5)`; they say eq. 1, Sedov, "is not valid even before t = t_c")
+    reaches `β c_net` at 0.93 `t_c`, about twice as late: 4.29 × 10⁵ yr at 10⁻³ cm⁻³ and 3,800 K
+    cm⁻³ against the built 2.27 and the plan's 2.0. The plan's 0.41 `t_c` derives from nothing
+    found (Tang and Wang's Mach 2 is 0.46 `t_c`, Sedov's 0.32; the plan's 2.0 × 10⁵ yr is 0.43)
+    and is discontinuous with the radiative branch. Adopting eq. 2 needs a rule for the branch
+    switch; it would lengthen hot-gas windows and the bubble cap (science check,
+    `research/snr-verify/`).
+  - _The Iax share (T18.c)._ The brainstorm's "about 10% (Foley et al. 2013)" is below the paper it
+    cites: Foley et al. 2013, §7, give 31 (+17/−13) Iax per 100 Type Ia, about 24% of thermonuclear
+    events; 10 per 100 is Foley et al. 2009's and 5.7 Li et al. 2011's. Built at 0.10.
+  - _Citations corrected in the code._ The 0.677 bow-shock fraction is van der Swaluw, Downes and
+    Keegan 2004 (A&A 420, 937), not the brainstorm's van der Swaluw et al. 2003; ⁵⁶Co's positron
+    share is Nadyozhin 1994's 3.2%.
+  - _Caps (T15.b)._ The field's cap is 3.26 Myr for the fixture, 3.13–3.63 Myr over 200 seeds'
+    floors, 3.63 at the lowest floor (300 K cm⁻³): inside 2–4 Myr and under `SHELL_WINDOW_CAP`.
+    The 10⁶-site hunt's longest window was 3.40 Myr (0.98 of its cap). The bubble's cap is 1.35
+    Myr against the plan's "about 0.5 Myr": T4.b's interior log-normal (0.3 dex) is untruncated,
+    and the window rises as `n^(−1⁄3)` towards the sampler's 8.6σ tail, 1.3 × 10⁻⁵ cm⁻³ (at the
+    median interior, 0.005 cm⁻³, a shell lasts 1.37 × 10⁵ yr).
+  - _Radii (T16.a)._ At the end of each window at 3,800 K cm⁻³: 565, 464, 311, 173, 78, 34, 15 and
+    6 ly from 10⁻³ to 10⁴ cm⁻³. The densest is under the plan's 10–800 ly; the test holds 10–800
+    to 10³ cm⁻³ and 3–10 ly at 10⁴.
+  - _Offsets (T16.b)._ Median 234 ly and 0.56 outside the shell for field sites (young disc plane,
+    ages uniform in the window, the ordinary kick mode at uniform ranks): "near 200", "about half".
+  - _Nebulae (T16.b)._ Under plan 06's spin-down, a nebula at 10³⁶ erg/s lasts a median 2.2 × 10³
+    yr among the half of pulsars born with one; 10³⁵ gives 1.45 × 10⁴ yr (77% born with one) and
+    0.5% of 10⁵–10⁶ yr pulsars keep one. Plan 06's `has_wind_nebula` and this plan's nebula now
+    use different thresholds.
+  - _Rates (T18.a)._ 0.425 Type Ia a century at the fixture (0.40 ± 15%); 0.25–0.87 over 24
+    seeds against the plan's 0.4–1 (the test holds 0.2–1).
+  - _Ancient share (T18.a)._ 4.1–4.6% of each old population's layer D (young disc 0.3%) against
+    the plan's 2–4% and the brainstorm's "about 3%": 1.3 × 10⁻³ per M☉ × 0.957 M☉ per system ÷
+    layer D's 2.6% of systems. Counting only the "both destroyed" channel gives 2.3–2.6%; all but
+    Iax 3.7–4.1%. The test holds 3.5–5%.
+  - _The shortest delay (T18.b)._ Plan 06's 8 M☉ track lives 42.6 Myr at solar composition, above
+    Maoz and Graur's 40 Myr, so no layer-D primary fits a delay of 40–42.6 Myr. The draw starts
+    at 42.6 Myr plus the interval; it loses 18% of the young disc's Type Ia and 4% of the nuclear
+    disc's, about 2.5% of the galaxy's, which `drawable_rate_per_year` states.
+  - _Periods (T18.b)._ A thousand years before a merger the period is a median 89.6 s, 5–95%
+    77.9–118.4 s: the plan's 80–100 s holds at the median (the test), heavy pairs run to 120.
