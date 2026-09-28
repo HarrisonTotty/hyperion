@@ -1978,6 +1978,16 @@ body {
   color: var(--text-muted);
 }
 
+/* The last column needs no gap after it: its room goes to the longest binary class (ruling 130.5). */
+.star-list__table :is(th, td):last-child {
+  padding-right: 0;
+}
+
+/* A hyphenated word is never split across lines (ruling 130.5). */
+.star-list__whole {
+  white-space: nowrap;
+}
+
 /* A section of the list that the server does not compute yet, said once. */
 .star-list__note {
   margin: 0.75rem 0 0;

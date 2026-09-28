@@ -1929,3 +1929,28 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   word; `BE` and `TYPE IA` could keep the astronomers' case; `HOT SUBDWARF` is both a kind and a
   class; the longest word, `LOW-MASS X-RAY BINARY · TRANSIENT`, wraps at 1280 and is not yet seen
   on screen, since no class reaches the wire before T11.
+- **Rulings 129 and 130 as built** (round 9b, `bin5a` follow-up, 2026-09-28; unwired, nothing
+  generated moves). 129.4 (the engine's double-neutron-star losses) is another lane's.
+  - _129.1:_ `TypeIaProgenitor` (double-degenerate) now also asks for a total above M_Ch or a
+    heavier carbon–oxygen or oxygen–neon dwarf of at least `MIN_DETONATABLE_MASS` = 0.85 M☉ (Shen
+    et al. 2018); any other bound pair of white dwarfs is `DoubleWhiteDwarf`. The engine's pool
+    is unchanged. Tout et al.'s Algol leaves 0.49 + 0.66 M☉ and is now a double white dwarf; its
+    test checks the masses and that the merger is still pooled, and a marks test holds the rule's
+    four cases.
+  - _129.2:_ Be/X asks for a Be star of at least 8 M☉ on an orbit of at most `BEX_MAX_PERIOD` =
+    1,000 d (provisional); a pair that fails falls through to the wind rules.
+  - _129.3:_ `XrbKind::Symbiotic`, a neutron star or black hole fed by a giant lighter than 8 M☉
+    at `SYMBIOTIC_XRB_MIN_LUMINOSITY` = 10³² erg s⁻¹ or more (Yungelson et al. 2019), carved as an
+    X-ray binary; `Symbiotic` is white dwarfs only. `BinaryClass::ALL` has 20 values, and
+    `XrayBinaryKindDto` gains `symbiotic`.
+  - _129.5:_ the re-citations (Lutovinov et al. 2013 section 4.1; Mikołajewska 2011 section 4),
+    and `nova_ignition_mass` holds the rate to the fit's 10⁻¹¹–10⁻⁷.
+  - _The marks round-trip test_ now takes a phase only where its class holds at the marked age: a
+    wind-fed class that crosses its luminosity line later in the horizon cannot come from marks
+    that hold the state then.
+  - _Ruling 130 in the client._ `lib/galaxy/binaryClass.ts`'s `binaryClassRows` gives one row to
+    an innermost pair whose two stars share a class (`A–B`) and one to a star that carries a class
+    alone (`A`), in star order, under the key column `STARS`. The words are 130.3–4's and 130.x's.
+    Hyphenated words are nowrap spans, and the star list's last column has no trailing padding.
+    The guide gains 130's typography bullet, the `BINARY CLASS` row and the amended `STARS` and
+    `TRANSIENT` rows. `CV` was not needed (see the width check in the round's report).

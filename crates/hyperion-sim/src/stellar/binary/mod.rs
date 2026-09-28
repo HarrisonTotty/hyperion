@@ -40,9 +40,10 @@ mod tests;
 
 pub use crate::stellar::multiplicity::{DRAWS_PER_ATTEMPT, MAX_REDRAWS, RedrawAttempt};
 pub use classify::{
-    AGE_OF_UNIVERSE, BinaryClass, CarvedClass, ClassContext, CvKind, HMXB_MIN_DONOR_MASS,
-    HOT_SUBDWARF_MASSES, HmxbKind, MAGNETIC_CV_SHARE, SYMBIOTIC_MIN_LUMINOSITY, XRB_MIN_LUMINOSITY,
-    XrbKind, carved_class, classify,
+    AGE_OF_UNIVERSE, BEX_MAX_PERIOD, BinaryClass, CarvedClass, ClassContext, CvKind,
+    HMXB_MIN_DONOR_MASS, HOT_SUBDWARF_MASSES, HmxbKind, MAGNETIC_CV_SHARE, MIN_DETONATABLE_MASS,
+    SYMBIOTIC_MIN_LUMINOSITY, SYMBIOTIC_XRB_MIN_LUMINOSITY, XRB_MIN_LUMINOSITY, XrbKind,
+    carved_class, classify,
 };
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};

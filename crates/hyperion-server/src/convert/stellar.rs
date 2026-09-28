@@ -190,6 +190,7 @@ fn binary_class_dto(class: BinaryClass) -> Modelled<BinaryClassDto> {
             kind: match kind {
                 XrbKind::Persistent => XrayBinaryKindDto::Persistent,
                 XrbKind::Transient => XrayBinaryKindDto::Transient,
+                XrbKind::Symbiotic => XrayBinaryKindDto::Symbiotic,
             },
         },
         BinaryClass::HighMassXrayBinary(kind) => BinaryClassDto::HighMassXrayBinary {

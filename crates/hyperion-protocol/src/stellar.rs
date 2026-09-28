@@ -284,7 +284,7 @@ pub enum BinaryClassDto {
     HotSubdwarf,
     /// An R Coronae Borealis star: the hydrogen-deficient giant a white-dwarf merger makes.
     RCoronaeBorealis,
-    /// A symbiotic star: a white dwarf or neutron star fed by a giant.
+    /// A symbiotic star: a white dwarf fed by a giant.
     Symbiotic,
     /// A cataclysmic variable: a white dwarf fed by a Roche-lobe-filling companion.
     CataclysmicVariable {
@@ -293,7 +293,7 @@ pub enum BinaryClassDto {
     },
     /// A low-mass X-ray binary: a neutron star or black hole fed by a low-mass companion.
     LowMassXrayBinary {
-        /// Persistent or transient.
+        /// Persistent, transient or symbiotic.
         kind: XrayBinaryKindDto,
     },
     /// A high-mass X-ray binary: a neutron star or black hole fed by a massive companion.
@@ -305,12 +305,13 @@ pub enum BinaryClassDto {
     MillisecondPulsar,
     /// Two neutron stars bound to each other.
     DoubleNeutronStar,
-    /// Two bound white dwarfs that are not a Type Ia progenitor: both of helium, or too wide to
-    /// merge within the age of the universe.
+    /// Two bound white dwarfs that are not a Type Ia progenitor: both of helium, too light to
+    /// detonate, or too wide to merge within the age of the universe.
     DoubleWhiteDwarf,
     /// A candidate progenitor of a Type Ia supernova: two white dwarfs, not both of helium, that
-    /// merge within the age of the universe, or a carbon–oxygen white dwarf growing by steady
-    /// hydrogen burning.
+    /// merge within the age of the universe, above the Chandrasekhar mass together or with the
+    /// heavier a carbon–oxygen or oxygen–neon dwarf of at least 0.85 M☉; or a carbon–oxygen white
+    /// dwarf growing by steady hydrogen burning.
     TypeIaProgenitor,
 }
 
@@ -330,15 +331,18 @@ pub enum CataclysmicKindDto {
     AmCvn,
 }
 
-/// Whether a low-mass X-ray binary's disc is persistent or transient (plan 11, P11.T5).
+/// The kinds of low-mass X-ray binary (plan 11, P11.T5; ruling 129.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum XrayBinaryKindDto {
-    /// Fed above the irradiated disc's instability line: always bright.
+    /// Fed through the inner Lagrangian point above the irradiated disc's instability line:
+    /// always bright.
     Persistent,
-    /// Fed below it: outbursts between long quiescence.
+    /// Fed below it: outbursts between long quiescence, an X-ray nova.
     Transient,
+    /// A symbiotic X-ray binary: fed by a low-mass giant's wind.
+    Symbiotic,
 }
 
 /// The kinds of high-mass X-ray binary (plan 11, P11.T5).
@@ -1319,6 +1323,7 @@ pub(crate) mod tests {
         assert_wire_strings(&[
             (XrayBinaryKindDto::Persistent, "persistent"),
             (XrayBinaryKindDto::Transient, "transient"),
+            (XrayBinaryKindDto::Symbiotic, "symbiotic"),
         ]);
         assert_wire_strings(&[
             (HighMassXrayBinaryKindDto::BeX, "be_x"),

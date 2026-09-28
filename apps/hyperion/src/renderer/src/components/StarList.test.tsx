@@ -81,7 +81,7 @@ describe("StarList", () => {
     expect(screen.queryByRole("table", { name: "BINARY CLASSES" })).not.toBeInTheDocument();
   });
 
-  it("names each star's binary class in words under its letter", () => {
+  it("names an innermost pair's shared class once, under the pair", () => {
     const cataclysmic = aSystemSummary({
       stars: [
         aWhiteDwarf({
@@ -96,11 +96,59 @@ describe("StarList", () => {
     render(<StarList model={modelOf(cataclysmic)} stale={false} />);
 
     const classes = screen.getByRole("table", { name: "BINARY CLASSES" });
-    expect(rowsOf(classes)).toEqual([
-      ["A", "DWARF NOVA"],
-      ["B", "DWARF NOVA"],
-    ]);
+    expect(within(classes).getByRole("columnheader", { name: "STARS" })).toBeInTheDocument();
+    expect(rowsOf(classes)).toEqual([["A–B", "DWARF NOVA"]]);
     expect(screen.queryByText("BINARY CLASSES: NOT YET MODELLED")).not.toBeInTheDocument();
+  });
+
+  it("reads a hot subdwarf against its pair, whose STATE says which star it is", () => {
+    const subdwarf = aSystemSummary({
+      stars: [
+        aSunlikeStar({ binary_class: { type: "hot_subdwarf" } }),
+        aSunlikeStar({
+          body_index: 1,
+          kind: "hot_subdwarf",
+          binary_class: { type: "hot_subdwarf" },
+        }),
+      ],
+    });
+    render(<StarList model={modelOf(subdwarf)} stale={false} />);
+
+    expect(rowsOf(screen.getByRole("table", { name: "BINARY CLASSES" }))).toEqual([
+      ["A–B", "HOT SUBDWARF"],
+    ]);
+  });
+
+  it("reads a merger's product under its own letter", () => {
+    const single = aSingleStarSummary();
+    const stars = single.stars.map((star) => ({
+      ...star,
+      binary_class: { type: "r_coronae_borealis" as const },
+    }));
+    render(<StarList model={modelOf({ ...single, stars })} stale={false} />);
+
+    expect(rowsOf(screen.getByRole("table", { name: "BINARY CLASSES" }))).toEqual([
+      ["A", "R CORONAE BOREALIS STAR"],
+    ]);
+  });
+
+  it("keeps a hyphenated word whole, so the class wraps only at its spaces", () => {
+    const xray = aSystemSummary({
+      stars: [
+        aBlackHole({ binary_class: { type: "low_mass_xray_binary", kind: "persistent" } }),
+        aSunlikeStar({
+          body_index: 1,
+          binary_class: { type: "low_mass_xray_binary", kind: "persistent" },
+        }),
+      ],
+    });
+    render(<StarList model={modelOf(xray)} stale={false} />);
+
+    // Each hyphenated word is one element of its own, which the stylesheet keeps from breaking.
+    const cell = within(screen.getByRole("table", { name: "BINARY CLASSES" })).getByRole("cell");
+    expect(cell).toHaveTextContent("LOW-MASS X-RAY BINARY");
+    expect(within(cell).getByText("LOW-MASS")).toBeInTheDocument();
+    expect(within(cell).getByText("X-RAY")).toBeInTheDocument();
   });
 
   it("reads NONE when the server classed no star in a binary class", () => {
@@ -121,7 +169,7 @@ describe("StarList", () => {
     render(<StarList model={modelOf(mixed)} stale={false} />);
 
     expect(rowsOf(screen.getByRole("table", { name: "BINARY CLASSES" }))).toEqual([
-      ["A", "BE X-RAY BINARY"],
+      ["A", "Be X-RAY BINARY"],
       ["B", "—"],
     ]);
   });

@@ -1,7 +1,9 @@
-import { binaryClassLabel } from "../lib/galaxy/binaryClass";
+import { Fragment } from "react";
+
+import { binaryClassLabel, binaryClassRows } from "../lib/galaxy/binaryClass";
 import { formatMassMsun, formatOrbit } from "../lib/format";
 import type { SystemModel } from "../lib/system/model";
-import { type StarListStar, starListRows } from "../lib/system/starList";
+import { starListRows } from "../lib/system/starList";
 import { objectKindLabel } from "../lib/system/words";
 import { SolarMassUnit } from "./SolarMassUnit";
 import { StaleMark } from "./StaleMark";
@@ -24,12 +26,13 @@ export interface StarListProps {
  * no remnant has no mass to read, and its mass is the em dash. Each orbit is named by the letters it
  * joins, `A–B` or `AB–C`, the outermost first, and reads its period, its semi-major axis and its
  * eccentricity, each as every orbit on the ship is read (`formatOrbit`). A single star's list has
- * one row and no orbit table. A third table names the class of the interacting binary each star
- * belongs to in words (`DWARF NOVA`), under the star's letter, and reads `NONE` when no star is in
- * one; while the server computes no class (until plan 11's P11.T11) the list says so once,
+ * one row and no orbit table. A third table names the class of each interacting binary in words
+ * (`DWARF NOVA`), under the stars that carry it (`A–B` for an innermost pair, `A` for a star that
+ * carries a class alone, ruling 130.1), and reads `NONE` when no star is in one; while the
+ * server computes no class (until plan 11's P11.T11) the list says so once,
  * `BINARY CLASSES: NOT YET MODELLED`, rather than a column of em dashes, so that the tables keep
- * the readout's width. Numbers are right-aligned in their columns. A stale answer is muted, and each table's
- * title trails the guide's `S`.
+ * the readout's width. Numbers are right-aligned in their columns. A stale answer is muted, and
+ * each table's title trails the guide's `S`.
  */
 export function StarList({ model, stale }: StarListProps) {
   const { stars, orbits } = starListRows(model);
@@ -101,55 +104,74 @@ export function StarList({ model, stale }: StarListProps) {
           </tbody>
         </table>
       )}
-      <BinaryClasses stars={stars} stale={stale} />
+      <BinaryClasses model={model} stale={stale} />
     </div>
   );
 }
 
+/** Props of {@link Words}. */
+interface WordsProps {
+  /** The label, in words separated by single spaces. */
+  readonly text: string;
+}
+
 /**
- * The binary classes of a system's stars: each star in a class under its letter, `NONE` when no
- * star is in one, and the section's `NOT YET MODELLED` while the server computes none.
+ * A label that may wrap at its spaces but never after a hyphen: each hyphenated word is kept whole
+ * (the orchestrator's ruling 130.5; B612 has no non-breaking hyphen).
  */
+function Words({ text }: WordsProps) {
+  // No class's label repeats a word (binaryClass.test.ts holds them to it), so each word keys itself.
+  return text.split(" ").map((word, index) => (
+    <Fragment key={word}>
+      {index > 0 ? " " : null}
+      {word.includes("-") ? <span className="star-list__whole">{word}</span> : word}
+    </Fragment>
+  ));
+}
+
+/** Props of {@link BinaryClasses}. */
 interface BinaryClassesProps {
-  readonly stars: ReadonlyArray<StarListStar>;
+  /** The system, as `system_summary` answered for it. */
+  readonly model: SystemModel;
   /** Whether the answer is a stale snapshot. */
   readonly stale: boolean;
 }
 
-function BinaryClasses({ stars, stale }: BinaryClassesProps) {
-  if (stars.every(({ host }) => host.binaryClass.kind === "not_modelled")) {
+/**
+ * The binary classes of a system: one row to an innermost pair that shares its class (`A–B`) or to
+ * a star that carries one alone (`A`), `NONE` when no star is in one, and the section's
+ * `NOT YET MODELLED` while the server computes none (the orchestrator's rulings 130.1 and 130.6).
+ */
+function BinaryClasses({ model, stale }: BinaryClassesProps) {
+  const table = binaryClassRows(model);
+  if (table.kind === "not_modelled") {
     return (
       <p className="star-list__note">
         BINARY CLASSES: NOT YET MODELLED{stale ? <StaleMark /> : null}
       </p>
     );
   }
-  const classed = stars.flatMap(({ letter, host }) =>
-    host.binaryClass.kind === "none"
-      ? []
-      : [{ letter, id: host.id, binaryClass: host.binaryClass }],
-  );
   return (
     <table className="star-list__table">
       <caption className="star-list__caption">BINARY CLASSES{stale ? <StaleMark /> : null}</caption>
       <thead>
         <tr>
-          <th scope="col">STAR</th>
+          <th scope="col">STARS</th>
           <th scope="col">BINARY CLASS</th>
         </tr>
       </thead>
       <tbody>
-        {classed.length === 0 ? (
+        {table.rows.length === 0 ? (
           <tr>
             <td colSpan={2}>NONE</td>
           </tr>
         ) : (
-          classed.map(({ letter, id, binaryClass }) => (
+          table.rows.map(({ id, stars, binaryClass }) => (
             <tr key={id}>
-              <th scope="row">{letter}</th>
+              <th scope="row">{stars}</th>
               <td>
                 {binaryClass.kind === "value" ? (
-                  binaryClassLabel(binaryClass.value)
+                  <Words text={binaryClassLabel(binaryClass.value)} />
                 ) : (
                   <span className="readout__missing">—</span>
                 )}

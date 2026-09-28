@@ -12,7 +12,7 @@ export type BinaryClassDto = { "type": "algol" } | { "type": "contact" } | { "ty
  */
 kind: CataclysmicKindDto, } | { "type": "low_mass_xray_binary", 
 /**
- * Persistent or transient.
+ * Persistent, transient or symbiotic.
  */
 kind: XrayBinaryKindDto, } | { "type": "high_mass_xray_binary", 
 /**

@@ -10,8 +10,8 @@
 //!
 //! 1. **Contact**: both stars fill their lobes.
 //! 2. **Roche-lobe overflow**, by what the accretor is:
-//!    - a white dwarf fed helium is an AM Canum Venaticorum star; fed by a giant, a symbiotic star; a
-//!      carbon–oxygen dwarf fed hydrogen at the steady-burning rate or faster, a Type Ia
+//!    - a white dwarf fed helium is an AM Canum Venaticorum star; fed by a giant, a symbiotic star;
+//!      a carbon–oxygen dwarf fed hydrogen at the steady-burning rate or faster, a Type Ia
 //!      progenitor (the single-degenerate channel); otherwise a cataclysmic variable, magnetic by
 //!      the white dwarf's own draw ([`MAGNETIC_CV_SHARE`]), a nova-like above the disc-instability
 //!      line and a dwarf nova below it ([`cv_critical_rate`]);
@@ -19,20 +19,22 @@
 //!      [`HMXB_MIN_DONOR_MASS`] or more, and a low-mass one below, persistent above the
 //!      irradiated disc's instability line and transient below it ([`xrb_critical_rate`]);
 //!    - a main-sequence star fed by a lighter subgiant or giant is an Algol.
-//! 3. **A bound pair**: two neutron stars are a double neutron star; two white dwarfs are a Type
-//!    Ia progenitor if at least one is not a helium dwarf and they merge within
-//!    [`AGE_OF_UNIVERSE`] (the double-degenerate channel, sub-Chandrasekhar pairs included as the
-//!    brainstorm's pool includes them), and a double white dwarf otherwise; a
-//!    neutron star or black hole beside a Be star (plan 06's) is a Be/X-ray binary; one fed by the
-//!    wind of a star of [`HMXB_MIN_DONOR_MASS`] or more above [`XRB_MIN_LUMINOSITY`] is a
-//!    supergiant X-ray binary; a white dwarf, or a neutron star beside a lighter giant,
-//!    fed by a giant's wind above [`SYMBIOTIC_MIN_LUMINOSITY`] is a symbiotic star, however wide
-//!    the orbit (design note 7).
+//! 3. **A bound pair**: two neutron stars are a double neutron star; two white dwarfs that merge
+//!    within [`AGE_OF_UNIVERSE`], not both of helium, are a Type Ia progenitor if their total
+//!    exceeds the Chandrasekhar mass or the heavier is a carbon–oxygen or oxygen–neon dwarf of
+//!    [`MIN_DETONATABLE_MASS`] or more (the double-degenerate channel, ruling 129.1), and a double
+//!    white dwarf otherwise; a neutron star or black hole beside a Be star (plan 06's) of
+//!    [`HMXB_MIN_DONOR_MASS`] or more on an orbit of [`BEX_MAX_PERIOD`] or less is a Be/X-ray
+//!    binary; one fed by the wind of a star of [`HMXB_MIN_DONOR_MASS`] or more above
+//!    [`XRB_MIN_LUMINOSITY`] is a supergiant X-ray binary, and one fed by a lighter giant's wind
+//!    above [`SYMBIOTIC_XRB_MIN_LUMINOSITY`] a symbiotic X-ray binary, a low-mass kind (ruling
+//!    129.3); a white dwarf fed by a giant's wind above [`SYMBIOTIC_MIN_LUMINOSITY`] is a symbiotic
+//!    star, however wide the orbit (design note 7).
 //! 4. **One star** of the pair: a recycled radio pulsar faster than 30 ms is a millisecond pulsar
 //!    (`recycling.rs`); the helium giant under the Chandrasekhar mass that a helium and a
-//!    carbon–oxygen (or oxygen–neon) white dwarf merge into is an R Coronae Borealis star; a helium main-sequence star of about half a solar mass is a
-//!    hot subdwarf; a main-sequence star above its population's turn-off mass at the pair's age is
-//!    a blue straggler.
+//!    carbon–oxygen (or oxygen–neon) white dwarf merge into is an R Coronae Borealis star; a helium
+//!    main-sequence star of about half a solar mass is a hot subdwarf; a main-sequence star above
+//!    its population's turn-off mass at the pair's age is a blue straggler.
 //!
 //! [`carved_class`] is the one deterministic test that the grid and the catalogue both apply
 //! (design notes 8 and 10): a stellar or neutron-star merger at an age inside the source horizon,
@@ -57,7 +59,9 @@ use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::{
     GM_SUN, SECONDS_PER_JULIAN_YEAR, SOLAR_LUMINOSITY_W, SOLAR_MASS_KG, SOLAR_RADIUS_M,
 };
-use crate::units::{Metres, SolarLuminosities, SolarMasses, SolarMassesPerYear, Watts, Years};
+use crate::units::{
+    Days, Metres, SolarLuminosities, SolarMasses, SolarMassesPerYear, Watts, Years,
+};
 
 use super::params::BinaryParams;
 use super::recycling::{PulsarAt, is_millisecond_pulsar, pulsar_at};
@@ -78,13 +82,17 @@ pub enum CvKind {
     AmCvn,
 }
 
-/// Whether an X-ray binary's disc is persistent or transient.
+/// The kinds of low-mass X-ray binary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum XrbKind {
-    /// Fed above the irradiated disc's instability line.
+    /// Fed through the inner Lagrangian point above the irradiated disc's instability line.
     Persistent,
     /// Fed below it: outbursts between long quiescence.
     Transient,
+    /// A symbiotic X-ray binary: a neutron star or black hole fed by a low-mass giant's wind,
+    /// which Avakyan et al. (2023, A&A 675, A199, section 3) count as a subclass of the low-mass
+    /// X-ray binaries (ruling 129.3).
+    Symbiotic,
 }
 
 /// The kinds of high-mass X-ray binary, as P11.T8.b's catalogue splits them.
@@ -113,7 +121,7 @@ pub enum BinaryClass {
     HotSubdwarf,
     /// The hydrogen-deficient giant a white-dwarf merger makes.
     RCoronaeBorealis,
-    /// A white dwarf or neutron star fed by a giant.
+    /// A white dwarf fed by a giant.
     Symbiotic,
     /// A white dwarf fed by a Roche-lobe-filling star.
     CataclysmicVariable(CvKind),
@@ -128,13 +136,14 @@ pub enum BinaryClass {
     /// Two bound white dwarfs that are not a Type Ia progenitor.
     DoubleWhiteDwarf,
     /// A candidate Type Ia progenitor: two white dwarfs, not both of helium, that merge within the
-    /// age of the universe, or a carbon–oxygen white dwarf growing by steady hydrogen burning.
+    /// age of the universe and are heavy enough to detonate, or a carbon–oxygen white dwarf
+    /// growing by steady hydrogen burning.
     TypeIaProgenitor,
 }
 
 impl BinaryClass {
     /// Every class and kind, [`BinaryClass::None`] first.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::None,
         Self::Algol,
         Self::Contact,
@@ -148,6 +157,7 @@ impl BinaryClass {
         Self::CataclysmicVariable(CvKind::AmCvn),
         Self::LowMassXrayBinary(XrbKind::Persistent),
         Self::LowMassXrayBinary(XrbKind::Transient),
+        Self::LowMassXrayBinary(XrbKind::Symbiotic),
         Self::HighMassXrayBinary(HmxbKind::BeX),
         Self::HighMassXrayBinary(HmxbKind::Supergiant),
         Self::MillisecondPulsar,
@@ -190,21 +200,40 @@ pub enum CarvedClass {
 pub const MAGNETIC_CV_SHARE: f64 = 15.0 / 42.0;
 
 /// The least donor mass of a high-mass X-ray binary, M☉: 8, Fortin et al.'s (2023, A&A 671, A149,
-/// section 1) "M ≥ 8 M☉". Plan 11 has two X-ray classes, so the intermediate-mass systems (Her X-1's
-/// 2 M☉ donor) are low-mass ones, as Avakyan et al.'s (2023, A&A 675, A199, section 2) catalogue
-/// counts them.
+/// section 1) "M ≥ 8 M☉". Plan 11 has two X-ray classes, so the intermediate-mass systems (Her
+/// X-1's 2 M☉ donor) are low-mass ones, as Avakyan et al.'s (2023, A&A 675, A199, section 2)
+/// catalogue counts them.
 pub const HMXB_MIN_DONOR_MASS: SolarMasses = SolarMasses::new(8.0);
 
-/// The least accretion luminosity at which a wind-fed neutron star or black hole is an X-ray
-/// binary, W: 10³⁵ erg s⁻¹ (provisional). No class definition cuts on luminosity; this is near the
-/// completeness of the INTEGRAL survey (2 × 10³⁵ erg s⁻¹ to 13 kpc; Lutovinov et al. 2013, MNRAS
-/// 431, 327, section 5), and it applies to wind-fed systems alone: a pair in Roche-lobe overflow
-/// onto a compact star is an X-ray binary in quiescence too.
+/// The least accretion luminosity at which a neutron star or black hole fed by the wind of a
+/// star of [`HMXB_MIN_DONOR_MASS`] or more is a supergiant X-ray binary, W: 10³⁵ erg s⁻¹, the
+/// floor of the supergiant systems' luminosities, (0.7–1) × 10³⁵ erg s⁻¹ (Lutovinov et al. 2013,
+/// MNRAS 431, 327, section 4.1; ruling 129.5). It applies to wind-fed systems alone: a pair in
+/// Roche-lobe overflow onto a compact star is an X-ray binary in quiescence too.
 pub const XRB_MIN_LUMINOSITY: Watts = Watts::new(1.0e28);
 
-/// The least accretion luminosity at which a white dwarf or neutron star fed by a giant's wind is
-/// a symbiotic star: 10 L☉, the faint end of accretion-powered hot components, 10–1,000 L☉
-/// (Mikołajewska 2011, arXiv:1011.5657; provisional). Steady hydrogen burning would add to it only
+/// The least accretion luminosity at which a neutron star or black hole fed by the wind of a giant
+/// lighter than [`HMXB_MIN_DONOR_MASS`] is a symbiotic X-ray binary, W: 10³² erg s⁻¹, the faint end
+/// of the known systems (Yungelson et al. 2019, A&A 632, A3, table 1 and section 4.1; ruling
+/// 129.3).
+pub const SYMBIOTIC_XRB_MIN_LUMINOSITY: Watts = Watts::new(1.0e25);
+
+/// The longest orbital period of a Be/X-ray binary, days: 1,000 (provisional; ruling 129.2). The
+/// confirmed systems lie at 12.7–330 d with O8–B2 companions (Reig 2011, Ap&SS 332, 1, table 1);
+/// PSR B1259−63, beyond 1,000 d, is not one. No eccentricity condition applies (KS 1947+300's is
+/// 0.03).
+pub const BEX_MAX_PERIOD: Days = Days::new(1_000.0);
+
+/// The least mass at which the heavier of two merging carbon–oxygen or oxygen–neon white dwarfs
+/// makes the pair a Type Ia progenitor below the Chandrasekhar mass, M☉: 0.85, "the minimum
+/// detonatable WD mass may be ≃ 0.85 M⊙" (Shen et al. 2018, ApJ 865, 15, abstract and section
+/// 4.1; ruling 129.1). P11.T6's pool still holds every white-dwarf merger, since the Type Ia
+/// share η ≈ 1/6 is of all of them (Maoz, Hallakoun and Badenes 2018).
+pub const MIN_DETONATABLE_MASS: SolarMasses = SolarMasses::new(0.85);
+
+/// The least accretion luminosity at which a white dwarf fed by a giant's wind is a symbiotic
+/// star: 10 L☉, the faint end of the accretion-powered high states, "10–1000 L⊙" (Mikołajewska
+/// 2011, arXiv:1011.5657, section 4; ruling 129.5). Steady hydrogen burning would add to it only
 /// above [`STEADY_BURNING_RATE`], where accretion onto any white dwarf already gives more than a
 /// hundred L☉, so accretion alone is compared.
 pub const SYMBIOTIC_MIN_LUMINOSITY: SolarLuminosities = SolarLuminosities::new(10.0);
@@ -219,10 +248,8 @@ pub const HOT_SUBDWARF_MASSES: (SolarMasses, SolarMasses) =
 
 /// The age of the universe, years: 13.787 Gyr (Planck Collaboration 2020, A&A 641, A6, table 2),
 /// within which two white dwarfs must merge to be a Type Ia progenitor, "within a Hubble time" as
-/// Napiwotzki et al. (2020, A&A 638, A131, section 1) put it. Their survey also asks for a total
-/// above the Chandrasekhar mass; this plan's pool includes the sub-Chandrasekhar pairs, as the
-/// brainstorm's Type Ia pool does and the engine pools them, and leaves out two helium dwarfs,
-/// whose merger makes a hot subdwarf.
+/// Napiwotzki et al. (2020, A&A 638, A131, sections 1 and 5) put it; the pair must also exceed
+/// the Chandrasekhar mass or hold a dwarf of [`MIN_DETONATABLE_MASS`].
 pub const AGE_OF_UNIVERSE: Years = crate::planetary::context::UNIVERSE_AGE;
 
 /// The rate of hydrogen onto a white dwarf from which it burns steadily and grows, M☉ yr⁻¹:
@@ -270,20 +297,21 @@ pub(crate) fn xrb_critical_rate(mass: SolarMasses, r_out: Metres) -> SolarMasses
     SolarMassesPerYear::new(g_s / GRAMS_PER_SECOND_PER_MSUN_PER_YEAR)
 }
 
-/// The envelope mass at which hydrogen accreted at `rate` onto a white dwarf of `mass` ignites in
-/// a nova, M☉: log₁₀ `M_ign` = −3.728 − 0.2934 (log₁₀ Ṁ + 9) + 1.920 log₁₀(1.44 − M), a least-squares
+/// The envelope mass at which hydrogen accreted at `rate` onto a white dwarf of `mass` ignites in a
+/// nova, M☉: log₁₀ `M_ign` = −3.728 − 0.2934 (log₁₀ Ṁ + 9) + 1.920 log₁₀(1.44 − M), a least-squares
 /// fit to Yaron et al.'s (2005, ApJ 623, 398) table 2 at a core of 10⁷ K, 0.65–1.40 M☉ and
-/// 10⁻¹¹–10⁻⁷ M☉ yr⁻¹ (20 models; 0.13 dex rms, 0.25 dex at worst), made by the research behind
-/// P11.T5, since no published closed form covers that range. The cold core is Townsley and
-/// Bildsten's (2004, ApJ 600, 390) equilibrium, 5.5 × 10⁶ K. Its recurrence times run 1.2–2.3 times
-/// Wolf et al.'s (2013, table 2).
+/// 10⁻¹¹–10⁻⁷ M☉ yr⁻¹ (20 models; 0.125 dex rms, 0.251 dex at worst, confirmed by ruling 129.5),
+/// made by the research behind P11.T5, since no published closed form covers that range. The cold
+/// core is Townsley and Bildsten's (2004, ApJ 600, 390) equilibrium, 5.5 × 10⁶ K. Its recurrence
+/// times run 1.2–2.3 times Wolf et al.'s (2013, table 2).
 ///
-/// The mass is held to 0.6–1.40 M☉ and the rate to 10⁻¹²–10⁻⁷, so that a helium dwarf takes the
-/// lightest carbon–oxygen dwarf's ignition mass (provisional; P11.T8.a re-checks it).
+/// The mass is held to 0.6–1.40 M☉, so that a helium dwarf takes the lightest carbon–oxygen
+/// dwarf's ignition mass, and the rate to the fit's own 10⁻¹¹–10⁻⁷: extrapolated to 10⁻¹² it runs
+/// 0.26–0.50 dex above Yaron et al.'s rows there (ruling 129.5; P11.T8.a re-checks it).
 #[must_use]
 pub(crate) fn nova_ignition_mass(mass: SolarMasses, rate: SolarMassesPerYear) -> SolarMasses {
     let m = mass.value().clamp(0.6, 1.40);
-    let log_rate = math::log10(rate.value().max(1.0e-12)).min(-7.0);
+    let log_rate = math::log10(rate.value().max(1.0e-11)).min(-7.0);
     let log_mass = -3.728 - 0.2934 * (log_rate + 9.0) + 1.920 * math::log10(1.44 - m);
     SolarMasses::new(math::exp10(log_mass))
 }
@@ -586,7 +614,12 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
     if is_white_dwarf(p0) && is_white_dwarf(p1) {
         let a = orbit.semi_major_axis();
         let carbon = p0 != Phase::HeliumWhiteDwarf || p1 != Phase::HeliumWhiteDwarf;
+        let heavier = if s0.mass() >= s1.mass() { s0 } else { s1 };
+        let detonatable = s0.mass().value() + s1.mass().value() > CHANDRASEKHAR_MASS.value()
+            || (heavier.phase() != Phase::HeliumWhiteDwarf
+                && heavier.mass() >= MIN_DETONATABLE_MASS);
         let progenitor = carbon
+            && detonatable
             && s0.mass().value() > 0.0
             && s1.mass().value() > 0.0
             && a.value() > 0.0
@@ -605,7 +638,12 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
         {
             continue;
         }
-        if is_neutron_star_or_black_hole(cp) && is_be_star(donor, ctx.composition, ctx.draws[d]) {
+        let period = Days::from(orbit.period());
+        if is_neutron_star_or_black_hole(cp)
+            && donor.mass() >= HMXB_MIN_DONOR_MASS
+            && period <= BEX_MAX_PERIOD
+            && is_be_star(donor, ctx.composition, ctx.draws[d])
+        {
             return Some(Classified::plain(BinaryClass::HighMassXrayBinary(
                 HmxbKind::BeX,
             )));
@@ -623,9 +661,17 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
             }
             continue;
         }
-        if (is_white_dwarf(cp) || cp == Phase::NeutronStar)
-            && is_giant(donor.phase())
-            && luminosity >= SYMBIOTIC_MIN_LUMINOSITY.value() * SOLAR_LUMINOSITY_W
+        if !is_giant(donor.phase()) {
+            continue;
+        }
+        if is_neutron_star_or_black_hole(cp) && luminosity >= SYMBIOTIC_XRB_MIN_LUMINOSITY.value() {
+            return Some(Classified::fed(
+                BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic),
+                c,
+                rate,
+            ));
+        }
+        if is_white_dwarf(cp) && luminosity >= SYMBIOTIC_MIN_LUMINOSITY.value() * SOLAR_LUMINOSITY_W
         {
             return Some(Classified::fed(BinaryClass::Symbiotic, c, rate));
         }
@@ -924,6 +970,7 @@ mod tests {
     use crate::galaxy::imf::{Chabrier, MassFunction};
     use crate::id::{BodyId, Layer, SystemId};
     use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+    use crate::stellar::StarState;
     use crate::stellar::binary::tests::{describe, pair, period_days};
     use crate::stellar::binary::{
         BinaryInput, BinaryMarks, BinaryParams, MarkedMerger, MarkedPhase, can_interact, evolve,
@@ -1113,11 +1160,11 @@ mod tests {
         assert_eq!(carved_class(&t, Years::new(merger + h + l + 1.0)), None);
     }
 
-    /// P11.T5: the Type Ia candidate (BSE section 3.4, Tout et al.'s Algol) is a Type Ia progenitor
-    /// once its two carbon–oxygen dwarfs are formed, and its merger is not a carved class: the
-    /// pooled Type Ia candidates are P11.T6's.
+    /// P11.T5 and ruling 129.1: Tout et al.'s Algol (BSE section 3.4) leaves two carbon–oxygen
+    /// dwarfs of 0.49 and 0.66 M☉, 1.15 M☉ together, too light to detonate: a double white dwarf,
+    /// whose merger P11.T6's pool still holds, and which is not a carved class.
     #[test]
-    fn the_type_ia_candidate_is_a_progenitor() {
+    fn the_type_ia_candidate_is_a_double_white_dwarf_too_light_to_detonate() {
         let t = type_ia_candidate();
         let dwarfs = segment(&t, |_, s| {
             s.stars()
@@ -1126,13 +1173,145 @@ mod tests {
                 && s.orbit().is_some()
         })
         .unwrap_or_else(|| panic!("no double white dwarf\n{}", describe(&t)));
-        assert_eq!(t.class_at(mid(&t, dwarfs)), BinaryClass::TypeIaProgenitor);
+        let state = t.state_at(mid(&t, dwarfs));
+        let [m0, m1] = state.stars().map(|s| s.mass().value());
+        assert!(
+            m0 + m1 < CHANDRASEKHAR_MASS.value() && m0.max(m1) < MIN_DETONATABLE_MASS.value(),
+            "{m0} + {m1} M☉"
+        );
+        assert_eq!(t.class_at(mid(&t, dwarfs)), BinaryClass::DoubleWhiteDwarf);
+        assert!(t.pooled_ia().is_some(), "the merger is still pooled");
         let merger = t.merger_age().expect("the dwarfs merge");
         assert_eq!(carved_class(&t, merger), None);
         // Before, its donor was left a hot subdwarf by the first transfer.
         let subdwarf = segment(&t, |_, s| s.stars()[0].phase() == Phase::HeliumMainSequence)
             .expect("a stripped helium star");
         assert_eq!(t.class_at(mid(&t, subdwarf)), BinaryClass::HotSubdwarf);
+    }
+
+    /// A state held as marked: `stars` detached on a circular orbit of `period_days`, with `draws`.
+    fn detached(stars: [StarState; 2], period_days: f64, draws: [StarDraws; 2]) -> BinaryTimeline {
+        let total = stars[0].mass().value() + stars[1].mass().value();
+        let orbit = KeplerElements::from_period(
+            Seconds::new(period_days * 86_400.0),
+            GravitationalParameter::from_solar_masses(SolarMasses::new(total)),
+            Eccentricity::CIRCULAR,
+            Orientation::new(Radians::new(0.3), Radians::new(0.0), Radians::new(0.0))
+                .expect("an orientation"),
+            Radians::new(0.0),
+        )
+        .expect("an orbit");
+        let now = Years::new(1.0e8);
+        let marks = BinaryMarks::phase(
+            Composition::SOLAR,
+            draws,
+            now,
+            MarkedPhase {
+                kind: SegmentKind::Detached,
+                start: Years::new(0.0),
+                end: Years::new(2.0e8),
+                stars,
+                orbit,
+                transfer_rate: None,
+            },
+        )
+        .expect("valid marks");
+        BinaryTimeline::from_marks(marks)
+    }
+
+    /// A star of `phase`, `mass`, `luminosity` and `radius`, losing `wind` M☉ yr⁻¹.
+    fn star(phase: Phase, mass: f64, luminosity: f64, radius: f64, wind: f64) -> StarState {
+        StarState::new(crate::stellar::StarStateParts {
+            phase,
+            age: Years::new(1.0e8),
+            mass: SolarMasses::new(mass),
+            core_mass: SolarMasses::new(if phase.is_remnant() { mass } else { 0.0 }),
+            luminosity: crate::units::SolarLuminosities::new(luminosity),
+            radius: crate::units::SolarRadii::new(radius),
+            mass_loss_rate: SolarMassesPerYear::new(wind),
+            phase_fraction: 0.5,
+        })
+    }
+
+    /// Ruling 129.1: a close pair of white dwarfs is a Type Ia progenitor above the Chandrasekhar
+    /// mass, or with a carbon–oxygen dwarf of 0.85 M☉ or more, and a double white dwarf otherwise.
+    #[test]
+    fn a_double_white_dwarf_is_a_progenitor_only_if_it_can_detonate() {
+        let co = Phase::CarbonOxygenWhiteDwarf;
+        let he = Phase::HeliumWhiteDwarf;
+        let class = |a: (Phase, f64), b: (Phase, f64)| {
+            let stars = [
+                star(a.0, a.1, 1e-3, 0.01, 0.0),
+                star(b.0, b.1, 1e-3, 0.012, 0.0),
+            ];
+            detached(stars, 0.1, [StarDraws::median(), StarDraws::median()])
+                .class_at(Years::new(1.0e8))
+        };
+        assert_eq!(class((co, 0.9), (co, 0.5)), BinaryClass::TypeIaProgenitor);
+        assert_eq!(class((co, 0.8), (co, 0.7)), BinaryClass::TypeIaProgenitor);
+        assert_eq!(class((co, 0.66), (co, 0.49)), BinaryClass::DoubleWhiteDwarf);
+        assert_eq!(class((co, 0.7), (he, 0.4)), BinaryClass::DoubleWhiteDwarf);
+        assert_eq!(class((he, 0.45), (he, 0.45)), BinaryClass::DoubleWhiteDwarf);
+    }
+
+    /// Ruling 129.2: a neutron star beside a Be star is a Be/X-ray binary only for a Be star of
+    /// 8 M☉ or more on an orbit of 1,000 d or less.
+    #[test]
+    fn a_be_x_ray_binary_needs_a_massive_be_star_on_a_short_orbit() {
+        let neutron_star = star(Phase::NeutronStar, 1.4, 1e-4, 1.7e-5, 0.0);
+        let b_star = |mass: f64, luminosity: f64, radius: f64| {
+            star(Phase::MainSequence, mass, luminosity, radius, 0.0)
+        };
+        let fast = (1..100)
+            .map(|k| {
+                StarDraws::from_parts(crate::stellar::draws::StarDrawsParts {
+                    rotation: crate::stellar::draws::UnitUniform::new(f64::from(k) / 100.0)
+                        .expect("a rank"),
+                    ..*StarDraws::median().parts()
+                })
+            })
+            .find(|d| {
+                is_be_star(&b_star(12.0, 1.0e4, 5.0), &Composition::SOLAR, d)
+                    && is_be_star(&b_star(6.0, 1.0e3, 3.2), &Composition::SOLAR, d)
+            })
+            .expect("some rotation rank makes both a 12 and a 6 M☉ B star a Be star");
+        let class = |donor: StarState, period: f64| {
+            detached(
+                [neutron_star, donor],
+                period,
+                [StarDraws::median(), fast.clone()],
+            )
+            .class_at(Years::new(1.0e8))
+        };
+        let be_x = BinaryClass::HighMassXrayBinary(HmxbKind::BeX);
+        assert_eq!(class(b_star(12.0, 1.0e4, 5.0), 100.0), be_x);
+        assert_ne!(class(b_star(12.0, 1.0e4, 5.0), 2_000.0), be_x);
+        assert_ne!(class(b_star(6.0, 1.0e3, 3.2), 100.0), be_x);
+    }
+
+    /// Ruling 129.3: a neutron star fed by a low-mass giant's wind is a symbiotic X-ray binary, a
+    /// low-mass X-ray binary, carved as one.
+    #[test]
+    fn a_neutron_star_fed_by_a_giants_wind_is_a_symbiotic_x_ray_binary() {
+        let giant = star(Phase::FirstGiantBranch, 1.5, 500.0, 50.0, 1.0e-8);
+        let draws = [StarDraws::median(), StarDraws::median()];
+        let neutron_star = star(Phase::NeutronStar, 1.4, 1e-4, 1.7e-5, 0.0);
+        let t = detached([neutron_star, giant], 1_000.0, draws.clone());
+        let now = Years::new(1.0e8);
+        assert_eq!(
+            t.class_at(now),
+            BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic)
+        );
+        assert_eq!(carved_class(&t, now), Some(CarvedClass::XrayBinary));
+        // A wind a millionth as strong feeds it under 10³² erg/s: no X-ray binary.
+        let faint = star(Phase::FirstGiantBranch, 1.5, 500.0, 50.0, 1.0e-14);
+        let t_faint = detached([neutron_star, faint], 1_000.0, draws.clone());
+        assert!(!t_faint.class_at(now).is_xray_binary());
+        // A white dwarf in its place is never an X-ray binary; it is a symbiotic star only above
+        // 10 L☉ of accretion, which a_wide_white_dwarf_beside_a_giant_is_symbiotic reaches.
+        let white_dwarf = star(Phase::CarbonOxygenWhiteDwarf, 0.8, 1e-2, 0.01, 0.0);
+        let t = detached([white_dwarf, giant], 1_000.0, draws);
+        assert!(!t.class_at(now).is_xray_binary());
     }
 
     /// Design note 7: a pair too wide to interact is classified from its state, and a white dwarf
@@ -1146,8 +1325,10 @@ mod tests {
                 continue;
             }
             let t = evolve(&input, until);
-            let found = (0..=4_000).find_map(|k| {
-                let age = Years::new(3.0e8 + 7.0e8 * f64::from(k) / 4_000.0);
+            // Every 10⁴ years: the companion's superwind, where the white dwarf takes enough of its
+            // wind, lasts about 10⁵ years at the end of its thermally pulsing AGB.
+            let found = (0..=70_000).find_map(|k| {
+                let age = Years::new(3.0e8 + 7.0e8 * f64::from(k) / 70_000.0);
                 (t.class_at(age) == BinaryClass::Symbiotic).then_some(age)
             });
             let Some(age) = found else {
@@ -1282,6 +1463,17 @@ mod tests {
         if !merger && !phase_covers_horizon(t, now) {
             return false;
         }
+        // Marks hold the state at `now`, so they carry a phase's class only where it holds then: a
+        // wind-fed class that crosses its luminosity line later in the horizon is not one.
+        let found = classified(&t.state_at(now), &t.class_context(now));
+        let holds_now = match class {
+            CarvedClass::XrayBinary => found.class.is_xray_binary(),
+            CarvedClass::AccretingWdFast | CarvedClass::AccretingWdSlow => found.feeding.is_some(),
+            CarvedClass::StellarMerger | CarvedClass::NeutronStarMerger => true,
+        };
+        if !holds_now {
+            return false;
+        }
         let Some(marks) = marks_at(t, now) else {
             return false;
         };
@@ -1369,6 +1561,12 @@ mod tests {
         // The fit at 1 M☉ and 10⁻⁹ M☉/yr: M_ign = 10^(−3.728 + 1.920 log 0.44) = 3.9 × 10⁻⁵ M☉.
         let m = nova_ignition_mass(SolarMasses::new(1.0), SolarMassesPerYear::new(1.0e-9));
         assert!((m.value() / 3.87e-5 - 1.0).abs() < 0.01, "{m:?}");
+        // Ruling 129.5: the rate is held to the fit's floor of 10⁻¹¹ M☉/yr, not extrapolated.
+        let at = |rate: f64| {
+            nova_ignition_mass(SolarMasses::new(1.0), SolarMassesPerYear::new(rate)).value()
+        };
+        assert!((at(1.0e-12) / at(1.0e-11) - 1.0).abs() < 1e-12);
+        assert!(at(1.0e-11) > at(3.0e-11));
     }
 
     /// A pair drawn from the multiplicity model's priors: the primary from Chabrier's system
