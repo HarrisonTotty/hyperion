@@ -17,9 +17,11 @@ resources, what a landing party finds — is still owed a document of its own.
 
 ## Goal and scope
 
-Given the galaxy the [galaxy brainstorm](galaxy-generation.md) generates, draw it from the pilot's
-seat: a perspective view that is true to scale from a hull plate a metre away to a star system tens
-of astronomical units across, and eventually a planet flown from orbit to a landing without a seam
+Given the galaxy the [galaxy brainstorm](galaxy-generation.md) generates, draw it through a
+free-flying camera, as a wireframe or a photorealistic image
+([Render styles and multiple views](#render-styles-and-multiple-views)): a perspective view true to
+scale from a hull plate a metre away to a star system tens of astronomical units across, and
+eventually a planet flown from orbit to a landing without a seam
 or a loading screen. The rendering must be defensible in the same way the simulation is: what is drawn is
 what the numbers say, and where the picture is an approximation, the display says so.
 
@@ -28,7 +30,9 @@ In scope:
 - The rendering technology: what runs inside the Electron client, and what would replace it.
 - The real-scale foundations: floating origin from the galaxy's frames, the depth buffer, and
   luminance in physical units.
-- `VIEW` as a wireframe first, then as a lit, textured scene.
+- `VIEW` in two styles, both kept: a wireframe first, then a lit, photorealistic scene, from a free
+  camera, for a bridge's main screen and stations and for the single-player cockpit, with several
+  views at once and still images on request.
 - Planet rendering: geometry and level of detail, the surface height function and how client and
   server agree on it, materials and scatter, atmospheres, clouds, oceans and rings.
 - The sky: stars at their true magnitudes, the local star as a disc, the galaxy from inside it.
@@ -44,7 +48,7 @@ Out of scope, each owed its own document or already settled elsewhere:
   interact with. This document generates a _surface_; it does not populate it.
 - Ship and station models as art: the hull definitions are data the flight model already needs, and
   what they look like is a later question. Wireframes come from the same definitions.
-- Interiors. The view is from a seat, through a window.
+- Interiors. The cameras look out through a window or fly outside the hull, never into its rooms.
 - LLM-generated description text, which never reaches the renderer.
 
 ## The scales the view spans
@@ -65,8 +69,8 @@ Two things follow. First, the expensive cases are the near ones, and they are th
 in them; everything beyond a million kilometres or so is cheap because it is points and small discs
 — though a gas giant, at 7 × 10⁷ m in radius, still fills the window from 10⁸ m. Second, the dynamic
 range in _position_ is about 10¹⁵ between a centimetre of hull and an outer planet, and in
-_luminance_ about 10¹² between a dim star and the disc of the star itself, with a sunlit surface, at
-about 10⁴ cd/m², in between. Neither fits in a 32-bit float, and both have standard answers. They
+_luminance_ about 10¹¹ between the faintest star drawn, at magnitude 6.5, and the disc of a Sun-like
+star at 1 au, with a sunlit surface, at about 10⁴ cd/m², in between. Neither fits in a 32-bit float, and both have standard answers. They
 are in [Real-scale foundations](#real-scale-foundations).
 
 ## Constraints that decide the design
@@ -110,9 +114,10 @@ instructive because they are forced by scale.
 | Reference                 | Take                                                                                                                                                                                                          | Leave                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No Man's Sky              | The feel of the descent, and the proof that one continuous motion from space to the ground is the thing worth building. Fine detail synthesised from a coarse authoritative field.                            | Its planets are small — on the order of a kilometre in radius, not thousands — which is exactly why it has no precision problem. HYPERION cannot take that shortcut.                                                                                                                                                                            |
+| Artemis                   | The owner's reference for the wireframe style: a bridge console's vector drawing of hulls, bodies, orbits and symbology, read at a glance.                                                                    | Everything beneath what its consoles show. Only their look is the reference; nothing of how it draws them is assumed.                                                                                                                                                                                                                           |
 | Elite Dangerous           | Real-scale bodies flown to the surface, with terrain generated from seeds rather than stored. Proof that the realism ruling is technically feasible.                                                          | Its planets are airless or thin-atmosphere by design, which sidesteps the hardest rendering problem. HYPERION's planetary stage will produce thick atmospheres.                                                                                                                                                                                 |
 | Outerra                   | The depth-buffer work: the clearest published account of what precision each scheme actually gives, with measured costs. Camera-relative rendering.                                                           | Its fragment-written logarithmic depth, whose early-Z cost its own measurements show; reversed-Z makes it unnecessary. And its terrain is Earth's, from elevation datasets, where ours must come from the seed.                                                                                                                                 |
-| SpaceEngine               | One hierarchy from galaxy to moon with seamless scale changes, and procedural height cached into per-patch GPU textures rather than re-evaluated every frame.                                                 | A free camera that goes anywhere. HYPERION looks through a window from a seat.                                                                                                                                                                                                                                                                  |
+| SpaceEngine               | One hierarchy from galaxy to moon with seamless scale changes, and procedural height cached into per-patch GPU textures rather than re-evaluated every frame. The free camera, bounded here by Knowledge.     | A camera that sees whatever the generator can make. HYPERION's sees only what the ship knows, within the current system.                                                                                                                                                                                                                        |
 | Cesium                    | The best public write-up of planetary precision: per-patch `f64` origins, and the honest finding that one logarithmic frustum still fights at extreme range. A globe renderer held to surveying standards.    | Its problem is one known Earth with measured tiles streamed from a server. Ours is 10¹¹ unvisited worlds computed on arrival. And its two-float encoding, which emulates the `f64` difference on the GPU: per-patch origins differenced on the CPU make it unnecessary, and one rule for where differencing happens is easier to test than two. |
 | Star Citizen              | That the industry answer to jitter at kilometre scale was to widen world coordinates to 64 bits, which corroborates that 32-bit world space is not merely inconvenient but unusable.                          | Widening everything is not available to a web renderer: a GPU vertex buffer has no `f64`. We narrow late instead.                                                                                                                                                                                                                               |
 | Kerbal Space Program      | A quadtree on a cube sphere with a stack of height modifiers, and a floating origin that rebases discretely rather than every frame.                                                                          | Scaled-down planets and a rescaled solar system.                                                                                                                                                                                                                                                                                                |
@@ -172,7 +177,8 @@ hundred lines of our own code — a differencing step, a per-patch origin, a rot
 the depth policy and the exposure model.
 
 Babylon.js's own feature shows why. It works in one 64-bit world frame, whose spacing at galactic
-distances is about 130 km, with no hierarchy of frames and no rebasing, so it cannot replace the
+distances is tens of kilometres — 33 km at the Sun's 26,000 ly from the centre, 130 km at
+100,000 ly — with no hierarchy of frames and no rebasing, so it cannot replace the
 simulation's frames. With the camera already at the origin it would do nothing useful, and because it
 rewrites uniforms by name across every shader, it could silently rewrite our own. **Lean:** it stays
 off, and the adapter supplies camera-relative transforms itself.
@@ -235,8 +241,8 @@ but Chromium's blocklist entry carries no such condition. Everything else — in
 including this machine's Gen9.5 UHD 620 — is behind a flag with no announced date. The switch set
 reported to work with Mesa's ANV driver is
 `--enable-unsafe-webgpu --use-angle=vulkan --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`,
-where `DefaultANGLEVulkan` is the one that avoids a hang in swap-chain acquisition on ANV. Electron
-sets these from the main process.
+where `DefaultANGLEVulkan` is the one that avoids a hang in swap-chain acquisition on ANV.
+Electron's main process will set these; none is set today.
 
 Three consequences, which should be written down rather than discovered:
 
@@ -297,11 +303,11 @@ building on the real foundations rather than on a toy camera.
 The galaxy brainstorm's [Coordinates](galaxy-generation.md#coordinates) gave the simulation three
 nested frames, and they are exactly what a large-world renderer needs:
 
-| Frame    | Representation                                      | Resolution                  |
-| -------- | --------------------------------------------------- | --------------------------- |
-| Galactic | Integer 1 ly cell (`i32` per axis) + `f64` m offset | about 2 m anywhere          |
-| System   | `f64` m from the system barycentre                  | about 1 mm at 50 au         |
-| Body     | `f64` m from the body's centre                      | sub-micrometre in low orbit |
+| Frame    | Representation                                      | Resolution              |
+| -------- | --------------------------------------------------- | ----------------------- |
+| Galactic | Integer 1 ly cell (`i32` per axis) + `f64` m offset | about 2 m anywhere      |
+| System   | `f64` m from the system barycentre                  | about 1 mm at 50 au     |
+| Body     | `f64` m from the body's centre                      | nanometres in low orbit |
 
 The renderer adds one rule to them: **nothing reaches the GPU in world coordinates.** Every position
 is differenced against the camera's position in `f64`, in whichever frame the camera is in, and only
@@ -324,13 +330,15 @@ rendering relative to eye. Two details are where implementations go wrong:
   The precision tracks the level, which is what makes it enough at every scale.
 - **The view matrix must not contain the translation.** Rotation-only view matrices, with
   translation folded into the per-object offset, keep the large numbers out of the matrix product
-  entirely. Composed with a translation of 10¹¹ m in `f32`, every transformed vertex lands on the
+  entirely. Composed with a translation of 1 au in `f32`, every transformed vertex lands on the
   16 km spacing of an `f32` at that magnitude.
 
-Because the simulation already hands out positions as frame-plus-offset, and already changes frames
-with hysteresis at defined boundaries, the renderer inherits a floating origin rather than inventing
-one. What it must add is a rule for what happens at a frame change: the camera's frame changes under
-it, every cached patch origin is now expressed against a different centre, and a naive
+Because the simulation already hands out positions as frame-plus-offset, and already changes a
+ship's system frame with hysteresis at defined boundaries, the renderer inherits a floating origin
+rather than inventing one. Only system-frame selection is built, though: nothing yet selects a body
+frame, so the frame-change event below needs body-frame selection, which is still to be built.
+What the renderer must add is a rule for what happens at a frame change: the camera's frame changes
+under it, every cached patch origin is now expressed against a different centre, and a naive
 implementation will visibly jump. **Lean:** frame changes are a renderer event, the scene's `f64`
 origins are rebased in one operation, and a test asserts that a body's projected position is
 continuous across the boundary to within a pixel, in the same way the flight model's test asserts
@@ -356,8 +364,10 @@ Intel GPU can least afford.
 
 ### Luminance in physical units, and an exposure model
 
-A space scene has no ambient light and a dynamic range no display can show: the Sun's disc is of
-order 10⁹ cd/m² and a dim star's contribution is of order 10⁻³ cd/m². A renderer that works in
+A space scene has no ambient light and a dynamic range no display can show: the Sun's disc is about
+2 × 10⁹ cd/m², and a magnitude-6.5 star whose light falls in one pixel is about 2 × 10⁻² cd/m²
+(magnitude 0 is 2.54 × 10⁻⁶ lx; a pixel is 3 × 10⁻⁷ sr at 1080p across a 60° field, and a quarter
+of that at 4K, so point sources brighten with resolution while discs and surfaces do not). A renderer that works in
 arbitrary units will either blow out the sunlit side of every planet or lose the star field
 entirely, and the usual game trick of authoring light values by eye is not available, because the
 simulation knows each star's luminosity and every body's albedo and will happily state them on a
@@ -395,19 +405,133 @@ there is terrain, an atmosphere and a cloud layer in front of it.
 So the order is: foundations and wireframe first, proven at real scale, and only then anything lit.
 This is also the order the single-player brainstorm's plan of attack implies, and it is the reason its
 step 2 is "the rendering engine, and `VIEW` as a wireframe at real scale" rather than a lit scene.
+The order is not a succession, though: the wireframe stays as a mode when the lit scene arrives, as
+[Render styles and multiple views](#render-styles-and-multiple-views) sets out.
 
 One addition to what it draws, which follows from having a photometric pipeline from the start: the
-wireframe should already be **exposed**, not drawn at arbitrary brightness. Stars plotted at their
-true apparent magnitudes through a real exposure model, even on a wireframe, immediately tell you
-whether the photometry is right — and a star field with the local star's disc in frame is the
-cheapest possible test of a 10¹² dynamic range. The field alone spans only some five orders of
-magnitude between its brightest and faintest stars; it is the disc that takes it to twelve.
+wireframe's stars should already be **exposed**, not drawn at arbitrary brightness. Stars plotted at
+their true apparent magnitudes through a real exposure model, even on a wireframe, immediately tell
+you whether the photometry is right — and a star field with the local star's disc in frame is the
+cheapest possible test of a 10¹¹ dynamic range. Near the Sun the field alone spans some eight
+magnitudes, about three orders of magnitude from Sirius to magnitude 6.5, and it is the disc that
+takes it to eleven. In the nuclear disc a neighbour 0.1 ly away shines at magnitude −8 or brighter,
+stretching the field to six orders or more, and a giant that close to ten.
+
+## Render styles and multiple views
+
+The owner has ruled, on 2026-09-28, what this effort ends in: a **free-flying camera** that switches
+between a **wireframe** style, like a console in Artemis: Spaceship Bridge Simulator, with vector
+hulls, graticule bodies, orbits and symbology, and a **photorealistic** one, fully rendered like No
+Man's Sky. Consoles need both. So the view is one renderer with two styles, serving two deployments
+of equal standing. The section sits here because everything after it — terrain, sky, budget — is
+chosen per camera and per style, and the reader should know that before the planets.
+
+### Two styles of one renderer
+
+**Lean:** wireframe and photorealistic are two _render styles_ of one renderer, over one scene
+description, one camera model and the same [real-scale foundations](#real-scale-foundations):
+camera-relative differencing, reversed-Z and frame rebasing. A style chooses which passes run and
+how marks are stroked; it owns no scene, camera or projection. A view therefore switches style
+without rebuilding its scene, and a body projects to the same pixel in both. The style is chosen
+per client and per display. The wireframe is kept as a permanent mode, no longer only the first
+milestone, though it remains the precision rig of
+[the view before the planets](#the-view-before-the-planets).
+
+The wireframe style draws bodies as graticule spheres true to scale; terrain, where surveyed, as
+contour or grid lines from the same height function and coarse field the lit style displaces its
+patches with, so the two cannot disagree about the ground; orbits; craft as hulls from the hull
+definitions; stars as points by magnitude; and the guide's symbology. Its stars are exposed, by
+true magnitude through the exposure model, because that is the cheap photometry test. Its lines are
+not: there is no photometric image beneath them, so their colours, widths and contrast obey the UX
+guide, as [What the guide must gain](#what-the-guide-must-gain) sets out. The two can be blended,
+the wireframe's symbology, orbits and hull outlines over the realistic image, under the rules that
+already govern symbology over the image: graticules and contours there are cased like any mark.
+
+### Two deployments, one scene
+
+The deployments differ in composition — which clients, which views, who commands the camera — and
+not in the renderer.
+
+- **Bridge crew.** One dedicated machine is the ship's window: the **main screen**, a client role
+  of its own, full-screen with no console chrome, only the view's labels and symbology, driven to a
+  television or projector, photorealistic, and usually on the best GPU in the room. The stations
+  run on their own machines, and the helm, for one, draws a wireframe of the same external view.
+  What the main screen shows is commanded from a station.
+- **Single-player**, as in Elite Dangerous or No Man's Sky, on one machine that may be the UHD 620
+  or a discrete GPU, with the server local. The photorealistic view is the primary, full-window
+  cockpit view, and the wireframe style appears in the same client as cockpit instruments, such as
+  a helm or navigation display beside or over the view. The player commands the camera locally.
+
+**Lean:** every client draws from the same server scene, so the main screen and the helm's
+wireframe agree on the bodies, their positions, the frame and the survey coverage, since Knowledge
+belongs to the ship and not to a client. Their times stay aligned because each renders the scene at
+the simulation time the server states for it, advancing from the latest stated time at the
+server's rate rather than by its own clock, so two clients differ only by the delivery of the
+latest push. One scene in two styles is what guarantees the agreement.
+
+On a bridge the discrete-GPU target applies to the main-screen machine, at a television's or
+projector's resolution that may be 4K. The budget is stated at 1080p, and 4K costs about four times
+that in fill-bound passes, so the main screen may render below native and upscale. Point sources
+brighten per pixel with resolution, as
+[the luminance section](#luminance-in-physical-units-and-an-exposure-model) notes, so the star
+sprites take the pixel's true solid angle. Station machines may be UHD 620-class laptops, where the
+wireframe is the natural style and must run comfortably at 60 fps.
+
+### The free camera
+
+**Lean:** the camera is not bound to the pilot's seat. It has its own `f64` position in the
+simulation's frames, as frame plus offset, and its own frame selection with hysteresis, independent
+of the ship's. That includes body-frame selection, which
+[is not built](#the-floating-origin-is-already-in-the-simulation). Level-of-detail selection, patch
+streaming and the sky bake follow the camera, not the ship. The patches under every grounded body in
+view are still drawn at the finest level, wherever the camera is.
+
+Its reach is anywhere in the current system and the scene the server sends, and it cannot see what
+the ship does not know. The renderer stays a [display sink](#runtime-and-code-shape), so moving the
+camera is not a sensor: unsurveyed ground stays undrawn, and labelled, wherever it flies; a craft
+that is not a contact is not in the scene; and a body is shown at the retarded time the ship sees
+it at, not the camera's. Knowledge is not bypassed by moving the camera.
+
+It has three modes, as presets: **seat**, the pilot's eye point, fixed to the hull and looking
+forward, aft or at a target; **chase**, or external, held at an offset in the ship's frame; and
+**free**, detached. A move between presets is non-physical motion, eased under the guide's motion
+rule and a cut under `prefers-reduced-motion`. The camera state is the same in both deployments;
+only who sets it differs. On a bridge the main-screen machine may have no input device, so, as on
+any bridge simulator, a station commands it. **Lean:** the main screen's camera selection is ship
+state, held by the server, set by a command and visible to every station; it joins the protocol
+work as a command and a field on the scene topic, not designed here. In single-player the player
+sets the camera locally, and the pose of any view local to one client stays in that client.
+
+### Several views in one client
+
+Single-player runs several views in one client as a matter of course: the cockpit view and its
+wireframe instruments. Each view is a camera, a style and a target. **Lean:** they share one
+`GPUDevice` and one resource cache. WebGPU lets one device drive several canvases, each through its
+own `GPUCanvasContext` configured against it, so pipelines, the sky's cubemap and the atmosphere's
+tables are built once. Streamed patches and height textures are cached by patch rather than by
+view, so views whose cameras are near each other share them and views far apart select disjoint
+sets. A device belongs to one page, so a view in a second window, which the single-player
+brainstorm's several windows allow, has its own device and cache, like another client on the same
+GPU.
+
+Each view has its own budget. A secondary view renders at lower resolution or a lower rate, and on
+the UHD 620's low setting one view is photorealistic and the rest wireframe, all within the 33 ms
+frame, while the local server shares the CPU as [the budget](#performance-budget) says. Wireframe
+views are cheap, because they need no atmosphere, clouds or tone mapping.
+
+### Still images
+
+**Lean:** a console can request a single realistic image — a survey photograph of a body, say —
+rendered once through the same pipeline, into an offscreen target, at a quality the live view cannot
+afford: more samples, a higher resolution and the passes the low setting cuts, over seconds rather
+than a frame. It is data, so it is labelled with its time, its camera — frame, position, field of
+view and exposure — and its setting, and it shows only what the ship knew at that time.
 
 ## Planets
 
 ### What the generator already owes us
 
-Plan 14 is not yet built, but it is specified, and the surface generator should be written against
+Plan 14 is partly built, the rest specified, and the surface generator should be written against
 what it promises rather than inventing its own global statistics. From its `BodyRecord` and hooks:
 radius and mass, hence surface gravity; bulk composition as iron, rock, water and envelope fractions;
 atmospheric composition as ordered gas fractions with a surface pressure; equilibrium and surface
@@ -419,12 +543,21 @@ classes of world) and cloud fraction; relief scaled as 20 km × (g⊕ ÷ g) × a
 lithosphere factor; heat flow, and from it a tectonic regime and a volcanism level; surface age, and
 from it a crater density by the Neukum–Ivanov–Hartmann chronology, scaled by the system's belt masses
 and zeroed for small craters under a thick atmosphere; rings and belts as bodies in their own right.
+Of these, the radius, mass, gravity, bulk fractions, equilibrium temperature, the Bond albedo's
+iteration (P14.T12 and T13) and the rings and belts are built, and the atmosphere and the Bond
+albedo are derived but carried by no field yet: the albedo has none in the bulk section, and the
+record's surface section is still an empty type; rotation and the `BodyFixedFrame`
+(T14), the surface seed (T23) and the surface conditions and global figures (T24) are still to
+come. Two more of its outputs a renderer can use directly: the atmosphere derivation's
+`SurfaceState` and `SurfaceMaterial`, which say whether a world is a gas envelope, a magma ocean,
+bare rock or ice, and T31's body events, also still to come, such as eruptions and global dust
+storms, as visible phenomena.
 
 And, crucially, a **`surface_seed`**, specified as a block output of the universe seed and the body's
-ID alone, depending on nothing else, so that no later change to any other derivation can alter a
-world's seed. That protects the random draws behind a map, not the map itself: the map also realises
-plan 14's global figures, so a later change to how relief or ocean fraction is derived changes the map
-too, and is a generator-version change like any other.
+ID alone, on its own `body.surface` stream, depending on nothing else, so that no later change to
+any other derivation can alter a world's seed. That protects the random draws behind a map, not the
+map itself: the map also realises plan 14's global figures, so a later change to how relief or ocean
+fraction is derived changes the map too, and is a generator-version change like any other.
 
 The surface generator is therefore a _consumer_, and its contract is narrow: given the surface seed
 and those global figures, produce a height and a material at any point on the sphere, plus the coarse
@@ -632,6 +765,16 @@ Per height query, on both sides, with no iteration and no global state:
 That last step is not a performance trick. It is what makes collision agree with the picture, and it
 has its own section below.
 
+The query defines the height; it is not how a patch is made. Evaluated point by point, the channel
+network alone is far too slow for a descent (see [the budget](#performance-budget)), so a patch
+builds each channel level and crater octave once for the cells that reach it, caches them by integer
+cell for its children and neighbours, and evaluates each vertex against only its own cell's lists.
+Contributions combine by minimum or maximum, or are summed in a fixed order of level and then
+canonical cell, never in rasterisation order, so the result matches the single-point query bit for
+bit. The band limit makes coarse patches cheap but not the finest, which still need every level; it
+also needs each channel level's incision to have zero mean over its parent cell, not just over the
+coarse cell.
+
 ### The line between truth and decoration
 
 GPU decoration is how a planet gets pebbles without the server knowing about pebbles, and the line has
@@ -696,19 +839,21 @@ its own, and they are the ones that bite across architectures:
 - **Transcendental functions.** `sin`, `cos`, `exp` and friends are not bit-identical across libm
   implementations and targets. The repository already knows this: `libm` is pinned to `=0.2.16` with a
   comment that a bump is a generator-version change, and Clippy's `disallowed-methods` routes
-  every transcendental function through `hyperion_sim::math`, in the sim's own `clippy.toml` and,
-  since 22 September 2026, in a workspace-root one that binds the server, protocol and testkit
-  crates. Terrain must live inside that discipline, and the surface crate needs a `clippy.toml` of
-  its own modelled on the sim's rather than inheriting the root file, because the root file
-  deliberately omits the sim's ban on float-bit conversions. That ban exists to stop floats being
-  hashed, which is exactly the mistake a noise function is tempted to make.
+  every transcendental function through `hyperion_sim::math`, in the sim's own `clippy.toml`, in
+  the fitting crate's (`crates/hyperion-fit/clippy.toml`), which repeats the sim's bans, and, since
+  22 September 2026, in a workspace-root one that binds the server, protocol and testkit crates.
+  Clippy takes the nearest file and does not merge them, so each crate's file is self-contained.
+  Terrain must live inside that discipline, and the surface crate needs a self-contained
+  `clippy.toml` of its own modelled on the sim's rather than falling back to the root file, because
+  the root file deliberately omits the sim's ban on float-bit conversions. That ban exists to stop
+  floats being hashed, which is exactly the mistake a noise function is tempted to make.
 - **Fused multiply-add, where the code asks for it.** rustc never fuses a multiply and an add on its
   own, so there is no contraction to turn off; the hazards are the explicit forms. `f64::mul_add`
   is a call to a software `fma` on wasm32 and a single instruction with the `fma` target feature,
   and it is already banned. The `algebraic_*` float methods, stable since Rust 1.98, license the
   compiler to fuse and reassociate, so they fuse under `+fma` and not on wasm; no `clippy.toml`
-  bans them yet, and all three should. Core WebAssembly has no FMA at all; relaxed SIMD's
-  `relaxed_madd` is the exception.
+  bans them yet, and all three — the root's, the sim's and the fitting crate's — should. Core
+  WebAssembly has no FMA at all; relaxed SIMD's `relaxed_madd` is the exception.
 - **Summation order** in octave accumulation, which must be fixed and never reassociated.
 - **Relaxed SIMD is banned outright, and mechanically.** Its whole premise is that an instruction
   may return different results on different hardware. A `compile_error!` under
@@ -718,10 +863,11 @@ its own, and they are the ones that bite across architectures:
   either may be returned, and a flipped zero sign propagates through `1/x`, `atan2` and `copysign`.
   Both targets return the second operand today, but that is how the code compiles, not a guarantee,
   so the height path uses a `min` and `max` of its own that fix the sign.
-- **A NaN's sign is nondeterministic on every target.** The sim already refuses NaN in golden files
-  and bans reading float bits, but the sign still leaks through `total_cmp`, which the rules
-  recommend, through `is_sign_*`, and through `copysign`. Heights are asserted finite before they
-  are sorted, compared or emitted.
+- **A NaN's sign is nondeterministic on every target.** The testkit's golden writer already refuses
+  NaN (`crates/hyperion-testkit/src/golden.rs`), and the sim's and the fitting crate's `clippy.toml`
+  ban reading float bits, but the sign still leaks through `total_cmp`, which
+  `.claude/rules/rust-dev.md` recommends for ordering, through `is_sign_*`, and through
+  `copysign`. Heights are asserted finite before they are sorted, compared or emitted.
 - **Flush-to-zero from outside.** Neither target flushes subnormals to zero under Rust, but a C
   library built with `-ffast-math` turns flushing on for the whole process when it loads. That
   matters once the server embeds an LLM runtime: such a runtime stays out of the server process, or
@@ -863,11 +1009,11 @@ elevation and optical depth rather than something to simulate. Björn Jónsson's
 profiles — backscattered, forward-scattered, unlit side and transparency — are ready-made data for the
 annulus.
 
-Where the annulus gives way follows from the pixel. At 1080p and a 60° field of view a pixel is
-about 1.07 mrad, so a body of size _D_ fills one at about 935 × _D_: 9.4 km for a 10 m particle, and a
-10 m-thick layer seen edge-on reaches a pixel at the same range. **Lean:** the ring is an
-optical-depth slab while the camera is further from the ring plane than the largest particle's
-one-pixel range, about 10 km for Saturn-like rings. Below that, only bodies larger than a pixel are
+Where the annulus gives way follows from the pixel. At 1080p and a 60° horizontal field of view,
+the convention throughout this document, a pixel is about 0.55 mrad, so a body of size _D_ fills one
+at about 1,830 × _D_: 18 km for a 10 m particle, and a 10 m-thick layer seen edge-on reaches a pixel
+at the same range. **Lean:** the ring is an optical-depth slab while the camera is further from the
+ring plane than the largest particle's one-pixel range, about 20 km for Saturn-like rings. Below that, only bodies larger than a pixel are
 instanced, from the top size decade, and their share of the optical depth is removed from the slab,
 so that total extinction is conserved. Within a few layer thicknesses the view becomes a local
 particle field inside volumetric extinction, where sideways visibility is only some ten metres.
@@ -885,13 +1031,19 @@ them, absent where it does not — and never the surface seed. The fine synthesi
 a **detail seed** instead: a one-way derivation from the surface seed, from which the coarse field
 cannot be regenerated, so the client can only elaborate what the ship already established.
 
+Plan 14 as specified contradicts this. Its records put the hooks, the seed among them, in the
+`Full` detail level, and its wire task sends `BodyDetailDto` with every section, hooks included, so
+a `body_detail` request at `Full` would hand the client the surface seed. **Lean:** the surface
+seed is server-only. Plan 14's `BodyHooksDto` drops `surface_seed`, or withholds it from every
+client, and the client receives only the detail seed, with the surveyed coarse cells.
+
 What remains is honest labelling, and it is a rendering requirement rather than a fiction one. The
 amplified terrain is not an approximation: the server collides with the same function, so it is the
-ground itself, and the view band-limits it to what can be resolved from where the ship is, which is
-what an eye at the window would see. What the display must label is what is _not_ the ground: GPU
-decoration, a setting that draws the surface coarser than the ship's position warrants, which is the
-degraded-rendering state proposed under [What the guide must gain](#what-the-guide-must-gain), and
-the edge of what has been surveyed. A console readout that quotes the ground — an elevation or a
+ground itself, and the view band-limits it to what can be resolved from where the camera is, which
+is what an eye there would see. What the display must label is what is _not_ the ground: GPU
+decoration, a setting that draws the surface coarser than the camera's position warrants, which is
+the degraded-rendering state proposed under [What the guide must gain](#what-the-guide-must-gain),
+and the edge of what has been surveyed. A console readout that quotes the ground — an elevation or a
 slope at a distant landing site — is a different matter, because it states a measurement: it quotes
 the coarse survey, under the guide's estimated state, until the ship's sensors have seen the point,
 in the same way an unscanned contact's mass carries its `~`.
@@ -909,25 +1061,63 @@ the same way the star chart carries its census line.
 
 Most space games paint a sky box. HYPERION should not, and for once the realistic answer is also the
 one this project is built for: the galaxy model already knows where every star is, and plan 06's
-stellar stage knows what each one is. Plan 06's task T33 puts a stellar brief — kind, class,
-luminosity and effective temperature — on each row of the range query when the request asks for it,
-which is what a star field needs. The harder problem is selection. The range query is
-**volume-limited** — a radius, a mass-layer floor and a `limit` — while a sky is **flux-limited**: a
-K giant 3,000 ly away can outshine a red dwarf at 10. Range queries cannot serve it. To naked-eye
-magnitude 6.5 the brightest stars of the heavier mass layers — supergiants, O stars, and giants from
-the 0.75–2.5 M☉ layer — are visible thousands of light-years away, and the spheres that reach them
-hold some 3.6 × 10⁷ systems: far past the server's cap of 20,000 expected systems per query, and a
-few minutes of one core per arrival merely to place them. The sky therefore needs a request of its
-own ([open question 13](#open-questions)). With it, the sky is **generated from the same model the
-charts read**, which means the view out of the window and the `GALAXY` display cannot disagree, and a
-star the player jumps to is the star they were looking at.
+stellar stage knows what each one is. Plan 06's stellar brief is built: P06.T33 put
+`include_stellar` and a `StellarBriefDto` — kind, class, `log_luminosity_lsun`, `teff_k` and
+`star_count`, the luminosity and temperature null for a black hole or nothing — on each row of the
+range query, and P06.T34 fills it on the server in chunks of 1,024 rows. That is what a star field
+needs. The harder problem is selection. The range query is **volume-limited** — a centre, a time, a
+radius, a mass-layer floor and a `limit` — while a sky is **flux-limited**: a K giant 3,000 ly away
+can outshine a red dwarf at 10. Range queries cannot serve it, and the server bounds them twice
+over, by the systems returned and by `MAX_QUERY_CELLS`, 262,144 cells visited a query. The five
+stellar layers own bands of primary initial mass — A 0.08–0.5 M☉, B 0.5–0.75, C 0.75–2.5, D 2.5–8
+and E 8–150 — and the two substellar layers, brown dwarfs and rogue planets, never reach the sky. To
+naked-eye magnitude 6.5 the brightest stars of the heavier layers — supergiants and O stars from E,
+and giants from C and D — are visible thousands of light-years away. Near the Sun the spheres that
+reach them, at the caps of [open question 13](#open-questions), hold some 3 × 10⁷ systems — 5.8 ×
+10⁶ in C, 7.4 × 10⁶ in D and 1.3 × 10⁷ in E — and at the brightness rule's own radii some 2.5 ×
+10⁸. At the Galactic Centre the same caps take in most of the bulge and the nuclear disc, about 2 ×
+10⁹ systems in layers C to E. Either is far past the server's cap of 20,000 expected systems per
+query, and minutes of one core per arrival merely to place them near the Sun, hours at the centre.
+That and the section's other counts are orders of magnitude, the Milky Way fixture's at generator
+version 14, and move when P06.T30's stellar fates replace the provisional ones. The sky therefore
+needs a request of its own. With it, the sky is **generated from the same model the charts read**,
+which means the view out of the window and the `GALAXY` display cannot disagree, and a star the
+player jumps to is the star they were looking at.
+
+The figures familiar from Earth hold only near the Sun. Deeper in, the sky is fuller and brighter,
+and its brighter background lowers the naked-eye limit (Crumey 2014):
+
+| Where                       | Stars to V 6.5 | Background μ_V, mag/arcsec² | Naked-eye limit, V |
+| --------------------------- | -------------- | --------------------------- | ------------------ |
+| Near the Sun                | 8,874          | About 22                    | About 6.6          |
+| Inner disc, 4 kpc out       | 2–3.5 × 10⁴    | About 21                    | About 6.2          |
+| Bulge, 1.5 kpc from centre  | About 4 × 10⁴  | About 21                    | About 6.0          |
+| Bulge centre                | About 3 × 10⁵  | About 19                    | About 5.0          |
+| Nuclear disc                | 0.5–2 × 10⁶    | 19–20                       | About 5.2          |
+| A globular core like 47 Tuc | About 4 × 10⁵  | About 17                    | About 3            |
+
+Even at the lower limit some 4 × 10⁴ stars remain visible at the bulge centre and 2–5 × 10⁵ in the
+nuclear disc, which no fixed magnitude and no single budget sized for the Sun's sky can carry.
 
 The practical form:
 
 - **Apparent magnitude sets the flux**, from the star's luminosity, its distance, and the extinction
-  along the line of sight from plan 07's dust field, and flux converts to the absolute luminance
-  units the rest of the pipeline uses. Nothing is authored by eye. The sky's limit is magnitude 6.5,
-  which gives about 9,100 stars across the whole sky and some 450 in a 60° view at 1080p.
+  along the line of sight from plan 07's built sightline integral through the dust field
+  (`crates/hyperion-sim/src/galaxy/gas/extinction.rs`), which gives A_V and each band from U to K
+  and has a budgeted quality for many rays; the sky request is its first use on the wire. Flux
+  converts to the absolute luminance units the rest of the pipeline uses. Nothing is authored by
+  eye. The stellar brief describes the primary alone, by its bolometric luminosity and effective
+  temperature, so a V magnitude needs a bolometric correction from the temperature, and the
+  companions' light must come from `system_summary`, whose stars carry `absolute_v_mag`, or from the
+  sky request itself. A primary that is now a white dwarf beside a bright companion, as in Sirius
+  and Procyon, reads as faint from the brief alone, and white dwarfs have no absolute V magnitude in
+  the photometry table at all. **The sky has two limits together** ([open
+  question 13](#open-questions)): a physical one, V_lim, the naked-eye limit for the local sky
+  background, which is the band's unresolved surface brightness; and a count budget, N_max, which
+  sends the brightest N_max stars by flux. Stars between N_max and V_lim join the band's unresolved
+  light at the census, so nothing is counted twice. Near the Sun V_lim is about 6.5, which gives
+  8,874 Hipparcos stars (8,404 in the Bright Star Catalogue); a 16:9 view of 60° × 34° is 0.587 sr,
+  4.7% of the sky, so it holds about 420 on average and about twice that along the plane.
 - **Colour from the effective temperature**, by evaluating the Planck function, integrating against the
   CIE colour matching functions and converting to the display primaries, desaturating towards the white
   point when a colour falls outside the gamut. Precomputed as a one-dimensional table against
@@ -940,39 +1130,44 @@ The practical form:
   a pixel — and at 60° across 1080p that needs faces of about 2,900 texels, some 200 to 400 MB for
   the six in a floating-point format, and more if the view zooms. So the bake takes the faint,
   unresolved majority at a resolution the memory affords, where a faint star spread over a texel
-  reads as the sky's grain, and the roughly 1,600 stars brighter than magnitude 5 are drawn every
-  frame as sprites whose point-spread function is integrated over the pixel, which keeps their
-  antialiasing at any field of view. Light fainter than the limit belongs to the galactic band and
-  to a statistical layer of unresolved stars, labelled as such. A deep exposure that wants fainter
+  reads as the sky's grain; the bake is linear in star count, and even the nuclear disc's 10⁶ or so
+  splats are cheap. The brightest stars, up to a sprite budget — near the Sun the roughly 1,600
+  brighter than magnitude 5 — and the parallax sprites below are drawn every frame as sprites whose
+  point-spread function is integrated over the pixel, which keeps their antialiasing at any field of
+  view. Light fainter than V_lim or beyond the count budget belongs to the galactic band and to a
+  statistical layer of unresolved stars, labelled as such. A deep exposure that wants fainter
   individual stars asks for a narrow cone rather than the whole sky: a 1° field is 2 × 10⁻⁵ of it.
 - **Baked once per arrival, with parallax left to the sprites.** A star at distance _d_ shifts by
   206,265 × (baseline ÷ _d_) arcseconds, against roughly 110 arcseconds per pixel at 1080p across a
   60° field of view. In the solar neighbourhood, with the nearest star over a parsec away, a journey
-  of a few astronomical units moves the sky by a few arcseconds, a few hundredths of a pixel. But the
-  galaxy brainstorm places some fifteen million pairs of systems within 0.1 ly of each other, over
-  half of them in the nuclear disc, and a star 0.1 ly away shifts by about 33 arcseconds per
-  astronomical unit: crossing 30 au moves it nine pixels. **Lean:** a star that would shift by more
-  than a tenth of a pixel across the system is drawn as a sprite at its true position every frame
-  rather than baked, and everything else is baked once per arrival. The threshold is a number, and
-  saying so with it is better than hoping nobody asks. How many sprites it makes depends on where
-  the ship is. For a 30 au journey it takes every star within about 9 ly, which near the Sun, at
-  about 0.002 systems per cubic light-year, is a handful. In the nuclear disc, at some 16, it is
-  about 50,000 systems, of which roughly a third are bright enough to be in the sky at all, and in
-  the nuclear cluster nearly every star. There the bake is instead redone as
-  the ship moves, whenever the nearest baked star's accumulated shift reaches the threshold, and the
-  budget's star-field figure is the solar neighbourhood's.
+  of a few astronomical units moves the sky by a few arcseconds, a few hundredths of a pixel. But
+  the galaxy model places some twenty million pairs of star systems within 0.1 ly of each other,
+  most of them in the nuclear disc (the galaxy brainstorm still says fifteen million), and a star
+  0.1 ly away shifts by about 33 arcseconds per astronomical unit: crossing 30 au moves it nine
+  pixels. **Lean:** a star that would shift by more than a tenth of a pixel across the system is
+  drawn as a sprite at its true position every frame rather than baked, and everything else is baked
+  once per arrival. The threshold is a number, and saying so with it is better than hoping nobody
+  asks. How many sprites it makes depends on where the ship is. For a 30 au journey it takes every
+  star within about 9 ly, which near the Sun, at about 0.002 systems per cubic light-year, is a
+  handful. In the nuclear disc, at some 16, it is about 50,000 systems, of which about a quarter are
+  bright enough to be in the sky at all, and in the nuclear cluster nearly every star. There the
+  bake is instead redone as the ship moves, whenever the nearest baked star's accumulated shift
+  reaches the threshold, and the budget's star-field figure is the solar neighbourhood's.
 - **The galactic band from the galaxy's own model.** The Milky Way seen from inside is the light of
   the stars too faint or too many to draw individually, integrated along each line of sight outward
   from the ship and dimmed by the dust in front of it. That is related to what the `GALAXY` map
   shows but is not the same integral: the map's column density counts systems per square light-year
   along parallel lines through the whole galaxy, where the band needs luminosity along rays from a
   point, with extinction. It comes from the same density, stellar and dust fields, so it cannot
-  disagree with the charts, and it must take exactly the light the selection leaves out — stars
-  below the limit, and those beyond each layer's capped radius — or the stars near the ship are
-  counted twice. Drawing the band from the model means a ship in the outer disc sees a thin bright
-  line in one direction and a sparse sky in the other, _because the model says so_, and dust lanes
-  appear when the dust field does. No other game can do this, because no other game generates the
-  galaxy it is standing in.
+  disagree with the charts, but it needs a quadrature the simulation does not have yet: each
+  population's mean light per system, the counterpart of the mean present-day mass per system that
+  `mean_present_mass` in `crates/hyperion-sim/src/galaxy/fates.rs` integrates. It must take exactly
+  the light the selection leaves out — stars fainter than V_lim or past the count budget, and those
+  beyond each layer's cap — or the stars near the ship are counted twice. Its surface brightness is
+  also the background that sets V_lim. Drawing the band from the model means a ship in the outer
+  disc sees a thin bright line in one direction and a sparse sky in the other, _because the model
+  says so_, and dust lanes appear when the dust field does. No other game can do this, because no
+  other game generates the galaxy it is standing in.
 
 ### The local star as a disc
 
@@ -991,7 +1186,8 @@ points. A ship crossing a moon's shadow should see a partial eclipse because the
 
 ### Exposure and tone mapping
 
-The pipeline works in absolute luminance, so something must map 10⁻³ to 10⁹ cd/m² onto a display. The
+The pipeline works in absolute luminance, so something must map about 10⁻² to 10¹⁰ cd/m² onto a
+display: from a magnitude-6.5 star in one pixel to the disc of a star hotter than the Sun. The
 photographic model is the one to use, because it is the one that makes the camera's behaviour explicable
 to the player:
 
@@ -1044,19 +1240,19 @@ features exist at all on the low setting. **Lean:** the low setting's target is 
 first real measurement has something to contradict, and the plan that implements this should replace
 them with measured figures and keep them under version control.
 
-| Pass                          | Discrete target, 1080p, 16.7 ms budget                                       | UHD 620 low setting, 720p, 33 ms budget                                                 |
-| ----------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Terrain geometry and patches  | 3–5 ms                                                                       | 8–14 ms, a shallower quadtree away from the ship; full depth kept under grounded bodies |
-| Atmosphere, per frame         | 0.5–1 ms: sky-view and aerial-perspective tables, and a ray march from orbit | 2–4 ms, smaller tables, aerial perspective on terrain only                              |
-| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere or the sun changes                         | About 1 ms, on the same occasions                                                       |
-| Volumetric clouds             | 1.5–3 ms at quarter resolution                                               | **Cut.** Replaced by a two-dimensional layer at about 1 ms                              |
-| Ocean                         | 1–2 ms, Gerstner                                                             | 2–3 ms, fewer wave components, glint retained                                           |
-| Shadows                       | 1.5–3 ms, cascaded, with cloud shadows                                       | 2–4 ms, one cascade or a horizon map for terrain self-shadowing                         |
-| Star field and galactic band  | Under 0.2 ms, a cubemap and bright-star sprites                              | Under 0.5 ms                                                                            |
-| Exposure histogram            | 0.3–0.5 ms                                                                   | About 1 ms, over a quarter-resolution input                                             |
-| Bloom and tone mapping        | Under 1 ms                                                                   | 2–3 ms, fewer bloom levels                                                              |
-| Scatter instances             | 1–2 ms                                                                       | Off, or a token density under 1 ms; the first thing after clouds to go                  |
-| Rings, when in view           | 0.5–1 ms                                                                     | Under 0.5 ms, a textured annulus                                                        |
+| Pass                          | Discrete target, 1080p, 16.7 ms budget                                       | UHD 620 low setting, 720p, 33 ms budget                                                   |
+| ----------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Terrain geometry and patches  | 3–5 ms                                                                       | 8–14 ms, a shallower quadtree away from the camera; full depth kept under grounded bodies |
+| Atmosphere, per frame         | 0.5–1 ms: sky-view and aerial-perspective tables, and a ray march from orbit | 2–4 ms, smaller tables, aerial perspective on terrain only                                |
+| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere or the sun changes                         | About 1 ms, on the same occasions                                                         |
+| Volumetric clouds             | 1.5–3 ms at quarter resolution                                               | **Cut.** Replaced by a two-dimensional layer at about 1 ms                                |
+| Ocean                         | 1–2 ms, Gerstner                                                             | 2–3 ms, fewer wave components, glint retained                                             |
+| Shadows                       | 1.5–3 ms, cascaded, with cloud shadows                                       | 2–4 ms, one cascade or a horizon map for terrain self-shadowing                           |
+| Star field and galactic band  | Under 0.2 ms near the Sun, a cubemap and sprites to the sprite budget        | Under 0.5 ms                                                                              |
+| Exposure histogram            | 0.3–0.5 ms                                                                   | About 1 ms, over a quarter-resolution input                                               |
+| Bloom and tone mapping        | Under 1 ms                                                                   | 2–3 ms, fewer bloom levels                                                                |
+| Scatter instances             | 1–2 ms                                                                       | Off, or a token density under 1 ms; the first thing after clouds to go                    |
+| Rings, when in view           | 0.5–1 ms                                                                     | Under 0.5 ms, a textured annulus                                                          |
 
 The discrete column's lower ends sum to about 9 ms and its upper ends to about 18 ms, which is over
 budget. That is recorded rather than tuned away: the frame fits only if the passes do not all land at
@@ -1070,21 +1266,35 @@ share the same GPU for their own canvases and for compositing, which on the UHD 
 the descent's heaviest cost is on the CPU: every patch's heights come from the height function in
 WebAssembly workers, a descent streams patches faster than any other situation, and in
 single-player the same processor also runs the server. That cost has no row because it is not a
-frame cost, but it is what [the descent test](#testing) watches for as the moment streaming cannot
-keep up, and the spike measures it.
+frame cost, but it has a budget of its own. Patch demand follows the ground's angular rate, about
+200 · _v_ ÷ _h_ patches a second while the quadtree is still refining: some 4 in low orbit, 10 to
+20 in a powered descent and 100 to 300 on a low fast pass, until the finest level's 32 m patches
+cap it below about 160 m. The UHD 620 machine has about two worker cores once the server and the
+renderer have theirs, so a 66 × 66 patch, with its margin for normals, must bake in about 40 ms:
+about 10 µs a point for the whole height function. These are estimates like the table's, and
+[the descent test](#testing) states the measured figure as patches a second sustained against that
+demand.
+
+The table is also for one photorealistic view at 1080p. On a bridge that is the main screen's
+machine, and at 4K its fill-bound passes cost about four times as much, so it may render below
+native and upscale; a station's wireframe must hold 60 fps on the UHD 620. In single-player the
+cockpit view shares the frame with its wireframe instruments, each with a budget of its own, and on
+the UHD 620's low setting one view is photorealistic and the rest wireframe, all within 33 ms
+([Two deployments, one scene](#two-deployments-one-scene) and
+[Several views in one client](#several-views-in-one-client)).
 
 The ladder, stated as policy rather than as a list of numbers:
 
-| Feature        | High                                                                      | Low                                                                                     |
-| -------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Clouds         | Raymarched volume with temporal reprojection                              | Two-dimensional layer, correct albedo and optical depth                                 |
-| Terrain detail | Full quadtree depth, GPU decoration                                       | Shallower quadtree away from the ship, decoration off; full depth under grounded bodies |
-| Ocean          | Gerstner waves, shoreline foam, sun glint; spectral waves later           | Fewer Gerstner components, sun glint retained                                           |
-| Shadows        | Cascaded, with cloud shadows on terrain                                   | One cascade or a horizon map: terrain self-shadowing only                               |
-| Atmosphere     | Full tables, aerial perspective on everything                             | Smaller tables, aerial perspective on terrain only                                      |
-| Scatter        | Instanced, filtered by biome and slope                                    | Off, or a token density                                                                 |
-| Rings          | Transmittance with a two-part phase, both shadows, and particles close to | A textured annulus with the planet's shadow                                             |
-| Resolution     | 1080p native                                                              | 720p, presented upscaled                                                                |
+| Feature        | High                                                                      | Low                                                                                       |
+| -------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Clouds         | Raymarched volume with temporal reprojection                              | Two-dimensional layer, correct albedo and optical depth                                   |
+| Terrain detail | Full quadtree depth, GPU decoration                                       | Shallower quadtree away from the camera, decoration off; full depth under grounded bodies |
+| Ocean          | Gerstner waves, shoreline foam, sun glint; spectral waves later           | Fewer Gerstner components, sun glint retained                                             |
+| Shadows        | Cascaded, with cloud shadows on terrain                                   | One cascade or a horizon map: terrain self-shadowing only                                 |
+| Atmosphere     | Full tables, aerial perspective on everything                             | Smaller tables, aerial perspective on terrain only                                        |
+| Scatter        | Instanced, filtered by biome and slope                                    | Off, or a token density                                                                   |
+| Rings          | Transmittance with a two-part phase, both shadows, and particles close to | A textured annulus with the planet's shadow                                               |
+| Resolution     | 1080p native                                                              | 720p, presented upscaled                                                                  |
 
 Three rules keep this honest. The renderer **states its setting on the display**, under the
 degraded-rendering data state, so a player is never misled about whether they are seeing the real
@@ -1117,14 +1327,16 @@ bright planet is a safety defect in the fiction and a usability defect outside i
 The fix is one this project already uses. The galaxy map's cursor is 1.5 px of `--accent` cased in
 3.5 px of `--surface-0`, because `--accent` falls to 1.3:1 over the top of the density ramp. (An
 optical head-up display cannot do this: its combiner only adds light, so it manages contrast with
-brightness instead, and it is the wrong precedent for a view drawn on a screen.) **Lean:** every
-symbology mark is stroked twice — a wider `--surface-0` stroke beneath a thin coloured stroke — so
-that each mark carries its own dark surface with it and the guide's pairing holds against any
-background. That is an outline, not a glow or a drop shadow, and the distinction needs to be in the
-guide so the two are not confused. Text over the image needs the same protection and cannot get it
-from a canvas stroke: a DOM readout positioned over the canvas sits on a `--surface-0` plate of its
-own, which is chrome and obeys the guide. The alternative, dimming the image under the symbology, is
-rejected: it falsifies the image, and the honest-data principle forbids it.
+brightness instead, and it is the wrong precedent for a view drawn on a screen.) The guide already
+states the rule for a mark over a raster: a `1px` `--surface-0` casing on each side, which is a
+solid outline, "never a blur or a glow", and the cursor is that rule applied. **Lean:** the view
+extends the casing rule to every symbology mark over the image, each stroked twice — its casing, at
+the guide's widths, beneath the thin coloured stroke — so that each mark carries its own dark
+surface with it and the guide's pairing holds against any background. Text over the image needs
+the same protection and cannot get it from a canvas stroke: a DOM readout positioned over the
+canvas sits on a `--surface-0` plate of its own, which is chrome and obeys the guide. The
+alternative, dimming the image under the symbology, is rejected: it falsifies the image, and the
+honest-data principle forbids it.
 
 A second consequence is subtler. A real image contains real colours, so a rusty planet fills the
 window with something close to `--status-warning` and a chlorophyll-green one with
@@ -1140,13 +1352,18 @@ Collected here so a plan can make the edits in one pass:
    **not a spatial display**. The conventions that
    [three-dimensional spatial displays](../../frontend/ux-guidelines.md#graphs-schematics-and-spatial-displays)
    carry do not apply to it as a set, because a perspective image breaks nearly all of them: it is
-   not orthographic and has no single scale, its camera rolls with the ship, it has no reference
-   plane or stalks, and physics dims and shrinks what is far away, where the guide says nothing is
-   dimmed by depth. What it keeps is stated instead: the contact symbol set with shape for type, the
-   bracket reticle for the selection and `--target` for a commanded destination, predicted paths
-   dashed, the frame name and the time always shown, and the canvas paired with a DOM list. This was
-   already leaned in the single-player brainstorm's open question 11; this document supplies the
-   wording it needs.
+   not orthographic and has no single scale, its camera rolls with the ship or flies free, it has no
+   reference plane or stalks, and physics dims and shrinks what is far away, where the guide says
+   nothing is dimmed by depth. What it keeps is stated instead: the contact symbol set with shape
+   for type, the bracket reticle for the selection and `--target` for a commanded destination,
+   predicted paths dashed, the frame name, the time, the style and the camera mode always shown, and
+   the canvas paired with a DOM list. This was already leaned in the single-player brainstorm's open
+   question 11; this document supplies the wording it needs. The class covers both
+   [render styles](#two-styles-of-one-renderer). The wireframe style has no photometric image, so
+   item 2's exception does not reach it, and its marks, graticules and contours included, follow
+   the guide's ordinary rules for colour, stroke and contrast. It is still a view and not a spatial
+   display, because its perspective breaks the same conventions: no single scale, no orthographic
+   axes, and size falling with distance.
 2. **The rendered image is data.** The ban on gradients, glows, blurs and transparency governs
    console chrome, and a photometric image is not chrome. This is a new exception, not an instance of
    the raster-field one: that exception is single-hue and forbids "smoothing or interpolation that
@@ -1154,9 +1371,9 @@ Collected here so a plan can make the edits in one pass:
    by construction. The exception therefore comes with its own honesty rule: what the simulation did
    not compute is labelled, so the view states when decoration is on, beside its survey coverage and
    its quality setting. Symbology over it is unaffected.
-3. **Outlines for symbology, and only for symbology.** The two-stroke rule above, stated as the way
-   contrast is met over an image, with a note that it is not the banned glow, and the `--surface-0`
-   plate for DOM text over the image.
+3. **Outlines for symbology, and only for symbology.** The raster rule's casing extended to every
+   mark over the image, stated as the way contrast is met there, with its existing note that a
+   casing is never a blur or a glow; and the `--surface-0` plate for DOM text over the image.
 4. **Glare as a physical effect.** Bloom and veiling glare around a real light source are camera
    optics and are allowed on the image. They are never applied to symbology or chrome, which keeps
    them clear of the guide's ban on neon glow.
@@ -1165,29 +1382,40 @@ Collected here so a plan can make the edits in one pass:
    degrees** and its reference frame, and every target carries a range readout. That substitution
    should be written down rather than left as an omission.
 6. **Exposure is an instrument.** The camera's exposure is shown as a value with its unit and its
-   automation level (`AUTO` or `MAN`), under the guide's existing rule that automation always shows
-   who is in control.
+   automation level (`AUTO`, `MAN` or `INHIBITED`), under the guide's existing rule that automation
+   always shows who is in control.
 7. **Degraded rendering is a data state.** If the renderer is not drawing the surface at the detail
-   the ship's position warrants — because the hardware cannot, or because terrain has not streamed in
-   yet — the display says so. This is the honest-data principle applied to pixels: an approximated
-   surface must not present itself as a surveyed one. It is also the hook by which the low settings
-   of [the performance budget](#performance-budget) stay honest.
+   the camera's position warrants — because the hardware cannot, or because terrain has not
+   streamed in yet — the display says so. This is the honest-data principle applied to pixels: an
+   approximated surface must not present itself as a surveyed one. It is also the hook by which the
+   low settings of [the performance budget](#performance-budget) stay honest. The guide has no such
+   state today, and its name must not be confused with the Caution alert, whose meaning is "Degraded
+   or out of limits".
 8. **Motion, for a display that never stops.** The view redraws continuously. The guide already lets
-   gauges and plots move at frame rate, but it has no display whose whole picture moves by itself,
-   and it requires three-dimensional displays to redraw on demand only. Under
+   gauges and plots move at frame rate, but it has no display whose whole picture moves by itself.
+   Its nearest precedent is the orbit map, which redraws at frame rate while the operator runs its
+   time and stops when the time is held; the view moves whenever the ship does, with no operator
+   control to stop it. Under
    `prefers-reduced-motion` the world cannot be frozen, but every _non-physical_ motion must stop:
    camera easing, preset transitions, idle drift, and any animation not caused by the simulation.
-   Readouts stay at the guide's 4 Hz.
+   Camera flight is the same case: a free camera moves as the operator flies it, but its easing and
+   its moves between presets are non-physical, and under the setting they become cuts. Readouts
+   stay at the guide's 4 Hz.
 
 ### Accessibility, which a canvas threatens
 
 The guide's existing answer applies unchanged and is worth restating because it is easy to lose in a
-3D display: the canvas is focusable, carries an accessible name, and is **paired with a DOM list** of
-what is in view — contacts, bodies and the selected target — from which selection works by keyboard.
-Readouts go in `output` elements in B612 Mono, on their `--surface-0` plates, positioned over the
-canvas rather than drawn into it. The star chart already works this way, and the view inherits the
-pattern rather than inventing one. Every camera control is reachable from the keyboard, and none
-depends on hover or a right click.
+3D display: every view's canvas, in either style and however many are open, is focusable, carries
+an accessible name, and is **paired with a DOM list** of what is in that view — contacts, bodies and
+the selected target — from which selection works by keyboard.
+The star chart already works this way: its canvas is focusable and named and paired with its
+systems list, and the view inherits that pattern rather than inventing one. What the view adds is
+where its readouts sit. The chart's readings are B612 Mono text in the DOM around its canvas; the
+view's go in `output` elements in B612 Mono, on their `--surface-0` plates, positioned over the
+canvas rather than drawn into it. Every camera control, flying the free camera included, is
+reachable from the keyboard, and none depends on hover or a right click. A main screen with no
+input device keeps its DOM list, for screen readers and for the guide; its selection is made at
+the station that commands it.
 
 ## Runtime and code shape
 
@@ -1197,28 +1425,35 @@ What exists today, checked against the tree rather than assumed:
   plus an `f64` metre offset), `SystemPosition`, `BodyPosition` and a `Frame` enum of
   `Galactic | System(SystemId) | Body(BodyId)`. `GalacticPosition::displacement_to` subtracts integer
   cells before offsets and is precisely the floating-origin primitive the renderer needs; the client
-  already has the same operation as `galacticDeltaLy` in `packages/protocol/src/position.ts`. Frame
-  selection with hysteresis is implemented in `hyperion_sim::galaxy::frame`.
+  already has the same cells-first differencing, in light-years, as `galacticDeltaLy` in
+  `packages/protocol/src/position.ts`. System-frame selection with hysteresis is implemented in
+  `hyperion_sim::galaxy::frame`; nothing selects `Frame::Body` yet.
 - **The spatial view is orthographic and pure.** `apps/hyperion/src/renderer/src/spatial/` holds a
   declarative scene (`marks.ts`), a pure orthographic projection (`camera.ts`), a pure draw list with
   its own painter's-algorithm ordering (`drawList.ts`), pure picking (`pick.ts`) and one
   canvas-bound painter (`paint.ts`). Its `Camera` carries a single `pxPerUnit`, because the guide
   requires one scale for the whole picture. There is no perspective projection, no field of view and
   no view matrix anywhere in the client.
-- **Nothing planetary exists.** `hyperion-sim` has no `planetary` module, no body record, no orbit
-  propagator and no `surface_seed`; plan 14 specifies all of them and has not started. Plan 12's
-  retarded-time and Knowledge machinery is likewise unbuilt.
+- **Bodies exist; surfaces do not.** Plan 14 is in progress: `hyperion-sim` has its `planetary`
+  and `orbit` modules, body records with identity, mass, orbit and bulk properties, and the server
+  answers `system_bodies` and `body_detail`, with `body_events` refused until P14.T31. The
+  record's surface section — atmosphere, surface conditions, rotation and global figures — has no
+  contents yet, and the hooks section is `not_modelled` everywhere: `surface_seed` has its wire
+  form in `crates/hyperion-protocol/src/planetary/record.rs` but is not computed. Nothing of
+  terrain exists at all: no surface crate, no coarse field and no height function. Plan 12's retarded-time and
+  Knowledge machinery is unbuilt.
 - **The client loads no WebAssembly at all**, and the sim's second-architecture check runs on
-  `wasm32-wasip1` under wasmtime, by hand, outside `just ci`. The browser target,
-  `wasm32-unknown-unknown`, is in no check.
+  `wasm32-wasip1` under wasmtime, by hand through `just test-wasm`, for the sim and the testkit
+  only, outside `just ci`. The browser target, `wasm32-unknown-unknown`, is in no check.
 
-That last point sharpens a sentence in the single-player brainstorm. It says "`hyperion-sim` already
-compiles to WebAssembly, and CI checks it bit for bit there", and rightly makes the shared terrain
-conditional on the browser target joining those checks. What it overstates is the check itself: the
-WASI run is a manual gate outside `just ci`, not CI. So there are two gaps rather than one — the
+That last point corrects a sentence the single-player brainstorm once carried, that CI checked
+`hyperion-sim` bit for bit under WebAssembly; it now says what is checked, and keeps the shared
+terrain conditional on the browser target joining those checks. The check was overstated because
+the WASI run is a manual gate outside `just ci`, not CI. So there are two gaps rather than one — the
 browser target is in no check, and the check that exists is not automatic — and both are
 load-bearing for the whole shared-terrain argument. They should be closed before any terrain code is
-written, the descent spike's included, rather than after.
+written, the descent spike's included, rather than after. A third is smaller: the sim's golden tests
+say that CI checks the same file on 64-bit Arm and on wasm32, but no recipe runs them on Arm at all.
 
 **Lean, for the shape:**
 
@@ -1228,53 +1463,84 @@ written, the descent spike's included, rather than after.
   holds the height function alone. It cannot depend on `hyperion-sim`: the flight model is sim code,
   and collision needs heights, so the sim depends on the surface crate and a dependency back would be
   a cycle. The sim's `math`, `rng` and `units` modules therefore move into a crate beneath both, which
-  each depends on, and their discipline — the `libm` pin, the Clippy bans — moves with them. The
+  each depends on, and their discipline — the `libm` pin, the Clippy bans — moves with them. That
+  move is larger than it sounds: `rng` imports from `crate::id`, so part of `id` goes with it, and
+  `rng/tags.rs` registers every stage's domain tags, the planetary ones included, so the registry
+  splits; `hyperion-fit` also uses `hyperion_sim::math`, and every ban's path changes in all three
+  `clippy.toml` files. The
   coarse pass, which only the server runs, lives in the sim beside plan 14's planetary stage and hands
   its field to the surface crate as data.
 - **Both wasm targets join the checks, automatically.** `wasm32-unknown-unknown` is exercised with
   `wasm-bindgen-test` in its Node mode, with Electron's own binary standing in for Node through
   `ELECTRON_RUN_AS_NODE=1`, so that the check runs on the V8 the client ships — 15.2 in Electron 44,
-  where the system's Node carries 12.4 and its Chromium 15.3. The golden height files are asserted
-  equal across native, wasip1 and the browser target. The fast goldens under both wasm targets join
-  `just ci`, which fails with a pointer to the recipe that installs the tools when one is missing,
-  and never skips; the slow wasip1 suite joins `just ci-slow`. There is no hosted CI, so a job
-  beside `just ci` would be a gate nobody runs ([open question 12](#open-questions)). The existing
-  pin of `libm` to `=0.2.16`, already documented as a generator-version change if bumped, is what
-  makes that plausible; the same discipline extends to the surface crate.
+  where the system's Node carries V8 12.4 and its Chromium 153 carries V8 15.3. The golden height
+  files are asserted equal across native, wasip1 and the browser target. The fast goldens under
+  both wasm targets join `just ci`, which fails with a pointer to the recipe that installs the tools
+  when one is missing, and never skips; the slow wasip1 suite joins `just ci-slow`. There is no
+  hosted CI, so a job beside `just ci` would be a gate nobody runs
+  ([open question 12](#open-questions)). The existing pin of `libm` to `=0.2.16`, already
+  documented as a generator-version change if bumped, is what makes that plausible; the same
+  discipline extends to the surface crate.
 - **Fixed-width SIMD is allowed; relaxed SIMD is banned.** WebAssembly's relaxed SIMD proposal
   permits two implementations to return different results for the same instruction, which is
   precisely what the determinism rules forbid. Fixed-width 128-bit SIMD is IEEE-exact and may be
-  used, provided the code does not let the compiler reassociate a sum; the rule belongs in
-  `.claude/rules/rust-dev.md` next to the existing numeric rules, and the `compile_error!` of
-  [Determinism hazards](#determinism-hazards-specific-to-terrain) enforces it.
+  used, provided the code does not let the compiler reassociate a sum. The rule is new text for
+  `.claude/rules/rust-dev.md`, whose numeric-safety section covers only overflow, `as` and float
+  comparison, together with the rest of
+  [Determinism hazards](#determinism-hazards-specific-to-terrain), and that section's
+  `compile_error!` enforces it.
 - **The renderer sits in the app, beside `spatial/`, not inside it.** A new `view/` directory holds
-  the engine wrapper, the scene builder and the shaders. What the two share — `vec3`, `frame` and the
-  direction conventions — moves to a common place rather than being duplicated or bent. The
+  the engine wrapper, the scene builder, the cameras, and both render styles with their shaders.
+  What the two share — `vec3`, `frame` and the direction conventions — moves to a common place
+  rather than being duplicated or bent. The
   orthographic `Camera` is not generalised into a perspective one: they are different display classes
   and merging them would produce a type that means neither.
 - **The engine is loaded lazily.** Consoles that do not draw a scene must not pay for the engine's
   bundle, which a dynamic import and a manual chunk achieve.
-- **The scene arrives as a subscription.** The view needs the bodies and craft near the ship, which
-  the current protocol cannot express: it has six request kinds and no push. Plan 04 already
-  reserved the mechanism — a request whose response carries a `subscription: u32`, pushes as
-  `notification`, and binary frames for bulk payloads — so the view is the feature that finally
-  builds it. Bodies are on rails, so they travel as orbital elements, on arrival and when Knowledge
-  changes, and only craft are pushed at the 64 Hz tick rate. Stars are not in it: the sky arrives
-  once per arrival, by a request of its own. **Lean:** JSON for the scene, as the single-player
-  brainstorm concluded: at some 250 to 300 bytes a body and 400 a craft, that is about 0.25 MB/s,
-  against some 2 MB/s if everything were pushed every tick.
+- **The scene arrives as a subscription.** The view needs the bodies and craft near the camera and
+  the ship, bounded by what the ship knows, which the current protocol cannot express: it has ten
+  request kinds and no push, since `ServerMessage` has no notification. Plan 04 reserved the
+  mechanism — a request whose response carries a `subscription: u32`, pushes as `notification`, and
+  binary frames for bulk payloads — and assigned `subscribe` and `unsubscribe` to plan 12, which
+  designs them as `SubscribeRequest { universe, topic }` with a `SubscriptionTopic` and
+  `ServerMessage::Notification`. P12.T9 builds them, with `SubscriptionTopic::Alerts`, likely before
+  the view, and it is the precedent the scene follows. The scene is therefore a new topic under plan
+  12's `subscribe`, and the view either waits on plan 12's envelope work or builds it. Bodies are on
+  rails, so they travel as orbital elements, reusing the protocol's `BodyOrbitDto` of parent, orbit
+  and `valid_until` and its `DetailLevelDto` (until Knowledge exists the server grants whatever
+  level is asked and says which). A body's elements are sent on arrival and again when Knowledge
+  changes or its `valid_until` passes, and only craft are pushed at the 64 Hz tick rate. The main
+  screen's commanded camera selection travels in it too, as a field, beside the command that sets
+  it. Stars are not in it: the sky arrives once per arrival, by a request of its own. **Lean:** JSON
+  for the scene, as the single-player brainstorm concluded: at some 250 to 300 bytes a body and 400
+  a craft, that is about 0.25 MB/s, against some 2 MB/s if everything were pushed every tick.
 - **Bulk payloads travel as binary frames.** The coarse field, 2 to 15 MB a planet, goes in
-  surveyed-region chunks of at most 1 MB, the first use of plan 04's reservation. Sent as base64 in
-  JSON, the way the density map travels today, a 15 MB field would become a 20 MB frame: over the
-  server's 16 MiB outbound budget, past its 10 s write timeout on a slow link, and holding every scene
-  push behind it. The sky's list of about 9,000 stars, some 2 MB as JSON, can stay JSON. Plan 04
-  requires new kinds to enter its table of reserved kinds first, so the scene topic, the sky request
-  and the coarse-field chunk go there before any is built.
+  surveyed-region chunks of at most 1 MB, the first use of plan 04's reservation. The server refuses
+  inbound binary frames today (`crates/hyperion-server/src/ws.rs`) and has no outbound binary
+  framing, so the coarse field is the first to need it. Sent as base64 in JSON, the way the density
+  map travels today, a 15 MB field would become a 20 MB frame. The server's 16 MiB outbound budget
+  does not refuse such a frame but sends it once the queue is empty
+  (`crates/hyperion-server/src/limits.rs`), so it would wait for the queue to drain and then hold
+  every scene push behind it, and it would need some 16 Mbit/s to beat the 10 s write timeout that
+  closes the connection. The sky's list costs about 220 B a star as JSON: some 2 MB near the Sun,
+  but 22 MB for 10⁵ stars, so past one frame it travels as a binary frame of about 24 bytes a star
+  rather than as JSON parts in plan 04's reserved `response_part`. Plan 04 requires a new kind to
+  enter its table of reserved kinds first, so the sky request, and any coarse-field request that
+  asks for chunks, go there before either is built, each declaring its size class as
+  `crates/hyperion-server/src/requests/mod.rs` requires of every kind — the sky's as large. The
+  scene is a topic, not a kind, and the chunks are binary frames, not a kind. Adding a kind or an
+  optional field leaves `PROTOCOL_VERSION` at 2 (`crates/hyperion-protocol/src/lib.rs`); whether the
+  first `notification` message and the first binary frames bump it is to be decided.
 - **Workers hand heights to the render thread.** A `GPUDevice` cannot be shared between threads, so
   height workers transfer their results to the thread that owns the device, or the whole renderer
-  runs in a worker on an `OffscreenCanvas`. Each worker runs its own WebAssembly instance, which
+  runs in a worker on an `OffscreenCanvas`; every view's canvas is configured on that one thread.
+  Each worker runs its own WebAssembly instance, which
   avoids `SharedArrayBuffer` and the cross-origin isolation it needs — isolation that pages loaded
-  with `loadFile`, as the client's are, cannot declare.
+  with `loadFile`, as the client's are in production, cannot declare; a custom scheme served
+  through `protocol.handle` could send the headers, if isolation is ever wanted. The renderer's
+  Content Security Policy (`apps/hyperion/src/renderer/index.html`) changes before the first
+  height worker: its `script-src 'self'` blocks WebAssembly compilation without
+  `'wasm-unsafe-eval'`, and workers built from blobs would need a `worker-src` of their own.
 
 The renderer is a **display sink**: it is handed a scene and draws it, and it holds no truth the
 server has not sent. This is not an aesthetic preference. It is what keeps the Knowledge overlay
@@ -1291,6 +1557,9 @@ one is testable anyway, because most of it is arithmetic.
 - **Projection and camera.** The perspective projection, the camera-relative differencing, the
   rotation-only view matrix and the frame-change rebasing are pure functions over `f64` and `f32`.
   The existing `spatial/` code is the precedent and the standard to match.
+- **Style switching.** Switching a view between the wireframe and the photorealistic style leaves
+  its camera and projection identical: a body's projected position is the same in both. And the
+  frame-change continuity test holds for a free camera, whose frame changes apart from the ship's.
 - **Level-of-detail selection.** Which patches a given camera position and field of view select, and
   that the set is a function of position alone — not of history, not of arrival order. A wrong answer
   here is a visible pop, and it is entirely testable on the CPU.
@@ -1304,10 +1573,13 @@ one is testable anyway, because most of it is arithmetic.
   triple, each against hand-computed values with a cited reference.
 - **The height function's determinism**, which is the important one: golden height files asserted
   equal on native, `wasm32-wasip1` and `wasm32-unknown-unknown`, under the
-  [determinism rules](../../../.claude/rules/rust-dev.md) the sim already follows, in `just ci`
-  as [open question 12](#open-questions) settles. The golden loader reads files with `std::fs`,
-  which `wasm32-unknown-unknown` does not have, so it gains an arm that embeds them with
-  `include_str!`, and the golden tests carry the `wasm_bindgen_test` attribute on that target.
+  [determinism discipline](../../../.claude/skills/sim-determinism/SKILL.md) the sim already
+  follows, in `just ci` as [open question 12](#open-questions) settles. The testkit's golden
+  loader reads and blesses files with `std::fs`, at paths built from `CARGO_MANIFEST_DIR`, and
+  `wasm32-unknown-unknown` has no file system, so it gains an arm that embeds them with
+  `include_str!`. That arm needs literal paths and cannot bless, so goldens are blessed natively
+  and only compared there, and the golden tests carry the `wasm_bindgen_test` attribute on that
+  target.
 - **Collision agrees with what is drawn.** The collision query and the finest level's mesh must
   return the same height, and each coarser level must stay inside the stated bound for its level.
   This is the test that makes "the same terrain on both sides" a checkable claim instead of an
@@ -1346,11 +1618,25 @@ Settled with the project owner on 2026-09-22:
   habitats, life, resources, what a landing party finds — remains for a later planets document. This
   partly answers the single-player brainstorm's open question 7.
 
-Inherited from the earlier brainstorms and unchanged:
+Settled with the project owner on 2026-09-28:
+
+- **A free camera in two styles.** The outcome of this rendering effort is a free-flying camera that
+  switches between a wireframe style, like an Artemis console's vector hulls, graticule bodies,
+  orbits and symbology, and a photorealistic one, fully rendered like No Man's Sky. Consoles need
+  both. [Render styles and multiple views](#render-styles-and-multiple-views) works it through.
+- **Two deployments of equal standing**, given as owner context. A bridge crew: one dedicated
+  machine is the ship's window, the main screen, on a television or projector, photorealistic and
+  usually on the room's best GPU, with its camera commanded from a station, while station machines
+  draw a wireframe of the same view. And single-player, as in Elite Dangerous or No Man's Sky: one
+  machine, the photorealistic cockpit view full-window, wireframe instruments beside or over it, and
+  the camera set by the player.
+
+Inherited from the earlier brainstorms, and unchanged except where noted:
 
 - **The realism ruling applies**: where a choice is open, the most realistic answer wins unless it is
   technically infeasible.
 - **The view starts as a wireframe**, and full 3D planets follow, as in No Man's Sky but at real scale.
+  The 2026-09-28 ruling keeps that order and keeps the wireframe as a style beside them.
 - **Travel within a system is open**, the whole of a system's space including its star.
 
 Recommended here, as technical choices rather than rulings:
@@ -1359,6 +1645,11 @@ Recommended here, as technical choices rather than rulings:
   engine-agnostic, which is what makes the choice reversible, with its large-world feature off.
 - Reversed-Z with a floating-point depth buffer and an infinite far plane; no logarithmic depth.
 - Camera-relative rendering with per-patch `f64` origins, from the frames the simulation already defines.
+- Wireframe and photorealistic as two styles of one renderer, chosen per client and display, over
+  one server scene at its stated time; a main-screen client role whose camera selection is ship
+  state set by a station's command; a free camera with its own frame selection, reaching the
+  current system and bounded by what the ship knows; and several views in one client on one
+  `GPUDevice`, each with its own budget, one photorealistic at a time on the low setting.
 - Absolute photometric units throughout, with a photographic exposure model and AgX tone mapping.
 - A cube-sphere quadtree with fixed-grid patches and vertex morphing.
 - Hillaire 2020 atmospheres from a list of physically parameterised terms, with thick atmospheres
@@ -1367,7 +1658,8 @@ Recommended here, as technical choices rather than rulings:
   client as binary frames, with all fine detail synthesised locally; Knowledge gates its coverage but
   never its accuracy. Erosion runs in the coarse pass, and a collision band limit of 1 m covers
   terrain and scatter alike.
-- A sky request of its own, magnitude-limited at 6.5, fed by plan 06's stellar brief.
+- A sky request of its own, limited by the naked-eye magnitude for the local sky background, about
+  6.5 near the Sun, and by a count budget, fed by plan 06's stellar brief.
 - A new `hyperion-surface` crate, with the sim's `math`, `rng` and `units` moved into a crate beneath
   it and the sim, and both wasm targets brought into `just ci` under Electron's own V8, before any
   terrain code.
@@ -1413,8 +1705,12 @@ numbers cited elsewhere stay put.
    coarse pass, Tzathas et al.'s analytical solution produces the coarse elevation, flow directions,
    drainage area and steepness index. Below a coarse cell, a Dendry-style network anchored to those
    flow directions supplies the channels, with stream-power profiles. The network's geometry is a
-   heuristic and labelled so; its per-point cost, about 150 µs in the unoptimised reference code, is
-   to be measured.
+   heuristic and labelled so. The reference code's 150 µs a point (10 s for a 512² grid on four
+   cores) comes from rebuilding about 150 cells for every point, and ported naively to our some 15
+   levels in WebAssembly it would cost 300 to 500 µs. The budget is about 10 µs for the whole height
+   function, so the network is built per patch and cached by integer cell, as
+   [The per-query evaluation](#the-per-query-evaluation) sets out, and the spike measures it against
+   an expected 1 to 3 µs a point.
 6. **The collision wavelength.** **Lean:** a fixed band limit of 1 m, the scale of a landing-gear
    footpad, changed only with the generator version and stated in the surface crate's documentation
    because both sides depend on it. Collision reads the finest level, which is drawn around every
@@ -1459,41 +1755,78 @@ numbers cited elsewhere stay put.
     the slow wasip1 suite in `just ci-slow`; all of it before any terrain code, the descent spike's
     included. What needs a short trial is whether the runner accepts Electron in Node's place, and
     what the extra runs add to `just ci`'s time.
-13. **How the sky is selected.** **Lean:** plan 06's stellar brief (P06.T33) supplies luminosity and
-    effective temperature, and the sky is a request kind of its own rather than a set of range
-    queries. Its census counts stars brighter than magnitude 6.5, not systems. Each mass layer's
-    radius comes from the brightest absolute magnitude it reaches in any phase of its life, dimmed by
-    the least extinction in any direction and capped — about 2,000 ly for the 0.75–2.5 M☉ layer,
-    4,300 for 2.5–8 and 10,000 for 8–150 — and beyond the caps the light belongs to the band. The two
-    lightest layers never evolve and need only tens of light-years. Candidates are skipped by mass
-    and age, which are drawn on their own streams, before any density is evaluated, and each cell's
-    bright subset is cached, so that a jump of up to 1,000 ly reuses most of the cells. That still
-    leaves some millions of cell bounds, about 5 s of the server's pool per arrival. The magnitude
-    bounds need checking by the science checker, and the saving needs a benchmark.
+13. **How the sky is selected.** **Lean:** plan 06's stellar brief, built in P06.T33 and T34,
+    supplies luminosity and effective temperature, and the sky is a request kind of its own rather
+    than a set of range queries, which `MAX_QUERY_CELLS` would cut short in any case. Its census
+    counts stars brighter than V_lim, not systems, and keeps the brightest N_max. The galaxy
+    brainstorm's layering ([Placing star systems](galaxy-generation.md#placing-star-systems)) is
+    necessary but not sufficient: one radius for every layer is still volume-limited. Each mass
+    layer's radius is bounded by the brightest absolute magnitude it reaches in any phase of its
+    life, dimmed by the least extinction in any direction. That rule gives about 2,100–2,700 ly for
+    layer C, about 11,000 for D and tens of thousands for E, where a 120 M☉ star reaches M_V ≈ −10.7
+    and 90,000 ly, and the dwarfs' bolometric corrections
+    (`crates/hyperion-sim/src/stellar/photometry.rs`) make late M giants up to 1.7 mag too bright,
+    inflating the AGB peaks. The rule is the ceiling; the caps are derived, not chosen. Each is the
+    smallest radius beyond which the layer's expected number of stars brighter than V_lim falls
+    below one, computed at the census from its M_V distribution per system (the quadrature the band
+    needs), the density field and the extinction along some 48 rays. Near the Sun that gives about
+    2,000 ly for C, 4,300 for D and 10,000 for E: C's brightest AGB stars, at M_V ≈ −2.5, reach
+    about 1,500 ly at the plane's mean extinction of about 0.55 mag per 1,000 ly; D's bright giants
+    and Cepheids, at about −4.5, reach about 2,600 ly in the plane, and 4,300 misses under 1%; E's
+    supergiants, at −8 to −9.5, reach 6,000–14,000 ly through low-extinction windows, and 10,000
+    misses only a handful. In the nuclear disc dust holds even E to about 1,000 ly, so the caps
+    shrink to a few hundred to about 1,000 ly and the census's cost with them; above the disc they
+    grow towards the rule's bounds, since the disc's supergiants 10,000–30,000 ly away are then
+    naked-eye stars. Layers A and B never leave the main sequence; their only bright phase is the
+    first million years before it, which reaches about 250 ly, and such stars are in practice
+    embedded in their birth clouds, so their radius is a few hundred light-years, not tens. The sky
+    also needs what the grid does not place — feature members such as the Pleiades, the Hyades,
+    globular clusters and the nuclear cluster, the catalogue classes and the streams — which reach
+    the range query through its `SystemSource` hook, still empty until plans 09 and 10. Candidates
+    are skipped by mass, which is one uniform word on `system.primary_mass` through a monotone
+    quantile, so a threshold on the raw word costs little, and by age, tested under every population
+    component the cell can hold, since the age word is independent of the component picked, before
+    the density is evaluated. Consider, as a generator-version change, generating a cell's mass
+    words in sorted order, so that the census skips light candidates without opening their streams.
+    Each cell's bright subset is cached, so that a jump of up to 1,000 ly reuses most of the cells;
+    systems move, and a cell is chosen by its systems' epoch positions and tested at the time asked,
+    so the cache keeps the range query's padding rule. The cell bounds stay about 4 million
+    anywhere, in cells of 32, 64 and 128 ly, some 3 s at 0.7 µs each, but the candidate streams
+    opened for the mass skip scale with the systems enclosed: some 6 × 10⁷ near the Sun, 5–10
+    CPU-seconds on first arrival, and some 5 × 10⁹ in the inner bulge, 400–800 CPU-seconds under
+    fixed caps. The pool (`crates/hyperion-server/src/compute/pool.rs`) has two priorities,
+    interactive jobs that fail fast with `queue_full` and bulk jobs that wait, so the census runs at
+    bulk priority or in chunks as the brief fill is, and never holds the charts' queries behind it.
+    The cost needs a benchmark.
 
 ## Suggested order of attack
 
 Not a plan, only the dependency order a plan would follow. Steps 1 to 3 are the ones that retire risk;
-everything after them is additive. Steps 5 to 9 also wait on plan 14, which has not started: they need
-its radii, albedos, rotation, compositions and global figures. Steps 1 and 3 do not, because they run
-on scenes built by hand — the precision scenes of [Testing](#testing) and a hand-parameterised test
-planet — and the wireframe draws generated bodies once plan 14 supplies them. Until plan 12's
+everything after them is additive. Steps 5 to 9 also wait on plan 14, which is in progress: its
+radii, masses, bulk compositions, equilibrium temperatures and orbits are served already, and the
+atmospheres and Bond albedos are derived but not yet carried, while rotation, the global figures and
+the hooks that carry the surface seed are not built at all. Steps 1 and 3 do not, because they run on scenes built by hand — the
+precision scenes of [Testing](#testing) and a hand-parameterised test planet — and the wireframe
+draws generated bodies once plan 14 supplies them. Until plan 12's
 retarded-time machinery exists, the scene the server sends is the present state, which within a
 system differs from the retarded one by seconds to hours of light-time. Each feature's low setting is
 built in that feature's own step rather than at the end, as the budget's third rule requires, and
 the first one brings the degraded-rendering data state with it.
 
 1. **Foundations and the wireframe.** The engine adapter, camera-relative differencing, reversed-Z,
-   frame-change rebasing, the photometric pipeline with exposure and tone mapping, and `VIEW` as a
-   wireframe at real scale with stars at their true magnitudes. Those magnitudes need plan 06's
-   stellar brief on the range rows (P06.T33), so this step waits on plan 06's protocol work, whose
-   stellar system module is still a stub; until step 4 the stars are the range query's
-   volume-limited set, and the view says so. The scene subscription in the protocol.
+   frame-change rebasing, the photometric pipeline with exposure and tone mapping, and `VIEW`'s
+   wireframe style, the permanent mode, at real scale with stars at their true magnitudes, seen
+   from the free camera and its seat, chase and free presets, with the camera's own frame
+   selection, body frames included. Those magnitudes come from plan
+   06's stellar brief on the range rows, which is built, so this step waits on nothing of plan 06;
+   until step 4 the stars are the range query's volume-limited set with their briefs, and the view
+   says so. The scene subscription in the protocol.
    The guide edits go to the owner here, since the wireframe already needs the view as a display
    class, the exposure instrument and the motion rule. This is the precision test rig, and the point
    at which the depth and precision tests exist.
 2. **The wasm targets in the determinism checks.** `wasm32-unknown-unknown` under `wasm-bindgen-test`,
-   both wasm runs made automatic, and the client loading its first WebAssembly. Nothing terrain-shaped
+   both wasm runs made automatic, and the client loading its first WebAssembly, which its Content
+   Security Policy must first allow. Nothing terrain-shaped
    is built yet, but this is the check the shared terrain rests on, so it comes before the first line
    of terrain code, spike code included.
 3. **The descent spike, which is the gate.** An Earth-sized test planet with Earth's reference
@@ -1509,24 +1842,30 @@ the first one brings the degraded-rendering data state with it.
    failure there is already an answer. The single-player brainstorm's statement of the spike carries
    the same criterion. It decides whether the browser carries the planets, and it should happen
    before anything depends on the answer.
-4. **The sky.** The sky request with its magnitude-limited census, faint stars baked and bright or
-   near ones drawn as sprites, the galactic band from the model, the local star as a limb-darkened
-   disc, blackbody colour. Cheap, highly visible, and it exercises the photometry.
+4. **The sky.** The sky request with its census limited by the local naked-eye magnitude and a
+   count budget and its caps derived there, faint stars baked and bright or near ones drawn as
+   sprites, the galactic band from the model, the local star as a limb-darkened disc, blackbody
+   colour. Cheap, highly visible, and it exercises the photometry.
 5. **Lit bodies at real scale**, from plan 14's radii, albedos and rotation, with correct phase and the
-   terminator. Still no surfaces.
+   terminator. Still no surfaces. This is the first photorealistic style, so the style switch, a
+   second view and the per-view budget arrive here.
 6. **Atmospheres**, parameterised from plan 14's composition, pressure, temperature and gravity, with
    aerial perspective on terrain, and the thick ones checked against a path tracer.
 7. **The surface generator.** The shared `math`, `rng` and `units` moved into the crate beneath the
    sim, the `hyperion-surface` crate with its own `clippy.toml`, the coarse global pass in the sim on
    the server, its binary wire chunks with Knowledge's coverage gating and coverage record, and
-   golden height files
-   added to step 2's parity checks across native and both wasm targets. Nothing is drawn from it yet.
+   golden height files added to step 2's parity checks across native and both wasm targets. Plan
+   14's `BodyHooksDto` stops sending the surface seed to clients in the same step, so that only the
+   detail seed and the surveyed cells reach them. Nothing is drawn from it yet.
 8. **Terrain.** The quadtree, patch streaming, height textures, morphing, materials, the survey
    coverage readout — and the test that collision agrees with the picture.
 9. **The rest of the surface**, in rough order of value: GPU decoration with its label on the view,
    scatter, clouds, ocean and glint, rings.
 10. **The measurements.** The budget's estimates replaced by figures measured on both GPUs and kept
     under version control, and the ladder's settings adjusted to what they show.
+
+The end state is the owner's goal: a free camera that switches any view between the wireframe and
+the photorealistic style, anywhere the ship's knowledge reaches, with still images on request.
 
 ## Sources
 
@@ -1565,7 +1904,8 @@ that reads as more certain than the research was.
   Whether the two options may be combined is **unverified**.
 - PlayCanvas 2.22.3 of 21 September 2026. <https://github.com/playcanvas/engine/releases>
 - WebGPU implementation status: Linux default enablement for Intel Gen12+ from Chrome 144 and NVIDIA
-  under Wayland from Chrome 147, everything else behind a flag.
+  from Chrome 147, everything else behind a flag. It places NVIDIA's enablement under Wayland, a
+  condition Chromium's blocklist entry, below, does not carry.
   <https://github.com/gpuweb/gpuweb/wiki/Implementation-Status>
 - Chromium's `software_rendering_list.json`, entry 186, blocking WebGPU's Vulkan-through-GL-interop
   display path on Linux except for Intel Gen12+ with Mesa 22.0 or newer and NVIDIA 535.183.01 or
@@ -1653,7 +1993,9 @@ that reads as more certain than the research was.
 - Gaillard, Benes, Guérin, Galin and Peytavie 2019, _Dendry: A Procedural Model for Dendritic
   Patterns_, I3D (doi:10.1145/3306131.3317020; **the paper returned 403**), read through its
   reference code, which seeds each cell from integer coordinates but draws with `mt19937_64` and
-  standard-library distributions. <https://github.com/mgaillard/Noise>
+  standard-library distributions, and rebuilds the network's neighbourhood for every point
+  (`NoiseLib/include/noise.h`); its README gives about 10 s for a 512² grid on four cores.
+  <https://github.com/mgaillard/Noise>
 - NASA TN D-6850, _Apollo Experience Report: Lunar Module Landing Gear Subsystem_, 1972: a footpad
   about 0.9 m across, and 0.6 m of relief tolerated within the footprint.
   <https://ntrs.nasa.gov/citations/19720018253>
@@ -1769,3 +2111,16 @@ that reads as more certain than the research was.
   **the primary source was not read**.
 - Walker, _Colour Rendering of Spectra_, for blackbody to RGB through Planck's law, the CIE matching
   functions and gamut clamping. <https://www.fourmilab.ch/documents/specrend/>
+- The illuminance of a magnitude-0 star, 2.54 × 10⁻⁶ lx, from Cox 2000, _Allen's Astrophysical
+  Quantities_, §15, **not seen quoted verbatim**; cross-checked by the Sun's V = −26.76 (Willmer
+  2018, ApJS 236, 47), which it turns into the measured 1.28 × 10⁵ lx above the atmosphere.
+
+**The star field**
+
+- The Hipparcos Catalogue, ESA 1997, VizieR I/239: 8,874 stars to V 6.5 and 1,608 brighter than
+  V 5. The Yale Bright Star Catalogue, 5th revised edition, VizieR V/50: 8,404 to V 6.5.
+- Crumey 2014, _Human contrast threshold and astronomical visibility_, MNRAS 442, 2600, for the
+  naked-eye limit against a sky background. The closed form used for it here, NELM ≈ 7.93 −
+  5 log₁₀(10^(4.316 − μ/5) + 1), with μ the background in V mag/arcsec², is of **untraced origin**.
+- Chabrier 2003, PASP 115, 763, for the initial mass function behind the layers' shares.
+- Renzini and Buzzoni 1986, the fuel-consumption theorem, for the numbers of evolved stars.

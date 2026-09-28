@@ -4,7 +4,9 @@ Brainstorm for HYPERION's first playable experience: one player flying one small
 generated galaxy, in the manner of Elite Dangerous, before the multi-position bridge exists. This is
 a design exploration, not a plan. Decisions are marked **Lean** where there is a recommendation,
 and the open ones are collected under [Open questions](#open-questions). What has been settled is
-under [Decisions](#decisions), from two rounds with the project owner.
+under [Decisions](#decisions), from two rounds with the project owner and the later rulings on the
+view that [the rendering brainstorm](rendering-and-planets.md) records. That document is newer, and
+on rendering, the view, the camera, the sky and the WebAssembly checks it is authoritative.
 
 It builds on [the galaxy generation brainstorm](galaxy-generation.md) and assumes all of its plans
 are built. Every system, star, body and event is a pure function of seed, ID and time. The range
@@ -35,9 +37,10 @@ In scope:
 - Sensors and exploration, over the Knowledge overlay.
 - The hazards the galaxy already generates: starlight and heat, flares, dust and gas at speed,
   tides, collisions.
-- The cockpit: the single-seat console, its displays, controls and input devices, and a wireframe
-  view of the surroundings.
-- The choice of a 3D rendering engine.
+- The cockpit: the single-seat console, its displays, controls and input devices, and the view of
+  the surroundings, wireframe first and photorealistic after it, both kept.
+- The choice of a 3D rendering engine, since taken further by
+  [the rendering brainstorm](rendering-and-planets.md#the-engine).
 
 Out of scope, each with hooks defined here:
 
@@ -147,8 +150,10 @@ per craft.
 The galaxy is deterministic by construction. Play need not be, but it should be. **Lean:** the
 flight and systems models are pure functions in `hyperion-sim`, from state, inputs and a step to
 the next state, computed through its `math` module. A session then replays bit for bit from its
-start state and a log of its inputs. That gives replays, golden tests of the flight model on the
-three architectures CI already checks, and a path to client-side prediction later. Randomness in
+start state and a log of its inputs. That gives replays, golden tests of the flight model on each
+architecture the determinism checks run, and a path to client-side prediction later. Today those
+are native and `wasm32-wasip1`, the second by hand through `just test-wasm`, outside `just ci`
+([Runtime and code shape](rendering-and-planets.md#runtime-and-code-shape)). Randomness in
 play, such as failures, draws from a session seed through the same `Stream` machinery, under
 domain tags of its own.
 
@@ -555,8 +560,11 @@ level of detail. This phase adds sensor models and the exploration loop on top.
   derived from its ID.
 - **Mapping** from orbit needs the orbital-scale map generator. The galaxy brainstorm includes
   orbital-scale maps in its scope, but plan 14 builds only their inputs, the surface seed and global
-  figures, and leaves the generator to a later consumer. It is the first layer of the planets to
-  come, so it belongs to their brainstorm; see [Planets](#planets).
+  figures, and leaves the generator to a later consumer. The rendering brainstorm's
+  [coarse field](rendering-and-planets.md#who-computes-the-coarse-field-and-why-it-is-the-server)
+  is that generator: computed on the server, and sent region by region as the ship surveys from
+  orbit, so orbital mapping is the survey that fills it. What a map shows beyond the surface itself
+  belongs to the planets brainstorm still to come; see [Planets](#planets).
 
 ## The cockpit
 
@@ -583,28 +591,42 @@ target.
 
 The owner has ruled that the view starts as a basic wireframe of the surroundings, and that a 3D
 game rendering engine is needed for what follows (see
-[The rendering engine](#the-rendering-engine)). A wireframe also suits the UX guide, whose spatial
-displays are thin vector lines on `--surface-0`. **Lean**, for what `VIEW` draws:
+[The rendering engine](#the-rendering-engine)). A later ruling, on 2026-09-28, keeps the wireframe
+for good: it is one of two render styles, beside a photorealistic one that is the single-player
+primary view, full-window, with wireframe instrument views in the same client, all from a
+free-flying camera; see
+[Render styles and multiple views](rendering-and-planets.md#render-styles-and-multiple-views). The
+wireframe remains the first milestone, and it suits the UX guide, whose spatial displays are thin
+vector lines on `--surface-0`. **Lean**, for what `VIEW` draws in the wireframe style:
 
-- **From the pilot's seat.** A perspective camera fixed to the ship's axes, with look-around and a
-  choice of field of view. The reference frame is named on the display.
+- **From the pilot's seat, by default.** The seat is the camera's default preset, fixed to the hull
+  and looking forward, aft or at a target, with look-around and a choice of field of view. Chase
+  and free presets move it off the hull, and in single-player the player sets it locally; see
+  [The free camera](rendering-and-planets.md#the-free-camera). The reference frame is named on the
+  display.
 - **Bodies true to scale**, as spheres drawn by a graticule of latitude and longitude that turns
   with the body's rotation, so that rotation and approach can be seen. Rings as their ellipses, the
   star as a sphere at its radius, and other craft, such as the home base, as wireframe hulls from
   their definitions.
 - **Orbits of bodies**, on request, as the `NAV` display draws them.
-- **Stars** as points, from the range query, brighter by apparent magnitude down to a limit.
+- **Stars** as points, brighter by apparent magnitude, from a sky request of their own, limited by
+  the naked-eye magnitude for the local sky background, about 6.5 near the Sun, and by a count
+  budget; see [The sky](rendering-and-planets.md#the-sky). Until it exists, the range query's rows
+  with their stellar briefs stand in, and the view says so.
 - **Symbology in the guide's grammar**: a flight path marker for the velocity against the chosen
   reference, target brackets with range and closure rate, and the destination reticle in
   `--target`.
-- **What the ship knows.** The server sends the scene: the bodies, craft and stars near enough to
-  draw, with positions at the retarded time, as sensors see them. Within a system the light-time is
+- **What the ship knows.** The server sends the scene: the bodies and craft near enough to draw,
+  with positions at the retarded time, as sensors see them. Within a system the light-time is
   seconds to hours and the difference is small, but the rule is the same one, and the client never
-  holds truth that the ship has not seen.
+  holds truth that the ship has not seen. Until plan 12's retarded-time machinery exists, the
+  server sends present state, as the rendering brainstorm's
+  [order of attack](rendering-and-planets.md#suggested-order-of-attack) says.
 
 The guide's rules for spatial displays were written for charts: orthographic projection, and
 redrawing only on demand. A view is neither, so the guide gains a class of display of its own,
-perspective and redrawn every frame, always labelled as a view.
+perspective and redrawn every frame, always labelled as a view. Its wording, which covers both
+styles, is in [What the guide must gain](rendering-and-planets.md#what-the-guide-must-gain).
 
 ### Controls and input
 
@@ -629,7 +651,9 @@ guide.
 ## The rendering engine
 
 The wireframe needs very little. The engine is chosen for what comes after it: a textured view of
-real-scale systems, and then planets that can be flown down to, as in No Man's Sky. What it must do:
+real-scale systems, and then planets that can be flown down to, as in No Man's Sky.
+[The engine](rendering-and-planets.md#the-engine) in the rendering brainstorm re-examines this
+section against what the engines shipped, and governs where the two differ. What it must do:
 
 - **Real scale.** A GPU works in 32-bit floats, which cannot hold a system, let alone a galaxy. The
   view is drawn relative to the camera: positions are differenced in 64 bits, in the frames the
@@ -641,12 +665,17 @@ real-scale systems, and then planets that can be flown down to, as in No Man's S
   descends, atmospheric scattering, clouds, oceans and instanced vegetation. GPU compute is close to
   essential.
 - **The same terrain on both sides.** Anything the ship can collide with must be identical in the
-  client and the server. `hyperion-sim` already compiles to WebAssembly, and CI checks it bit for
-  bit there. So the terrain generator can be sim code that the server runs natively and the client
-  runs in workers, if the browser target joins those checks. Detail finer than collision needs can
-  be generated on the GPU, where it need not match. The client then holds the body's surface seed,
-  the top level of its record, which reveals the whole surface at once. The planets brainstorm must
-  square that with the rule that the client holds only what the ship has seen.
+  client and the server. `hyperion-sim` already compiles to WebAssembly, and a manual gate,
+  `just test-wasm`, checks the sim and the testkit bit for bit on `wasm32-wasip1`, outside
+  `just ci`. The browser target, `wasm32-unknown-unknown`, is in no check, and there is no hosted
+  CI. So the terrain generator can be sim code that the server runs natively and the client runs
+  in workers, if the browser target joins the checks; the rendering brainstorm's lean brings both
+  wasm targets into `just ci` before any terrain code
+  ([Runtime and code shape](rendering-and-planets.md#runtime-and-code-shape)). Detail finer than
+  collision needs can be generated on the GPU, where it need not match. A surface seed in the
+  client would reveal the whole surface at once, so the client never receives it: it gets the
+  surveyed regions of a coarse field the server computes, and a one-way detail seed; see
+  [Knowledge, and the surface seed](rendering-and-planets.md#knowledge-and-the-surface-seed).
 - **Fit with the consoles.** Text that must be read stays in the DOM, set in B612, where the UX
   guide's tooling checks it. A canvas is paired with a DOM list of its marks. Displays open in
   windows of their own.
@@ -656,31 +685,43 @@ real-scale systems, and then planets that can be flown down to, as in No Man's S
 
 The options:
 
-| Option                          | Runs                                   | For                                                                                                                                                                                                                                  | Against                                                                                                                                                          |
-| ------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Babylon.js 9                    | In the Electron renderer, as a display | TypeScript-first. WebGPU and compute shaders; its WebGL2 fallback goes unused, since WebGPU is required. Large-world rendering with a floating origin, new in 9.0. A stated commitment to backward compatibility. A complete engine. | Heavier than three.js, with a smaller community. Browser limits (below).                                                                                         |
-| three.js                        | In the Electron renderer, as a display | The largest ecosystem and the most examples of procedural planets. React bindings (react-three-fiber). WebGPU renderer with a reversed depth buffer.                                                                                 | Breaking changes in most releases. The floating origin is ours to write, though our frames make that small. Browser limits.                                      |
-| Bevy                            | Native, as a separate display process  | Rust, sharing the sim without WebAssembly. Native Vulkan, multithreaded. `big_space` gives nested integer grids with a floating origin, which map onto the galaxy's frames. Built-in atmosphere.                                     | A second UI technology, with text outside the DOM and the guide's tooling. Breaking releases before 1.0. A second binary, and input split between two processes. |
-| Godot 4, double-precision build | Native, as a separate display process  | A mature engine and editor, 64-bit positions when built for them, Rust through GDExtension.                                                                                                                                          | The same split as Bevy, plus a custom engine build.                                                                                                              |
-| Unreal, Unity                   | Native, replacing or beside the client | Top-end rendering.                                                                                                                                                                                                                   | Heavy, closed or licensed, and built to own the whole application, which the consoles already are.                                                               |
+| Option                          | Runs                                   | For                                                                                                                                                                                              | Against                                                                                                                                                          |
+| ------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Babylon.js 9                    | In the Electron renderer, as a display | TypeScript-first. WebGPU and compute shaders; its WebGL2 fallback goes unused, since WebGPU is required. Reversed-Z. A stated commitment to backward compatibility. A complete engine.           | Heavier than three.js, with a smaller community. Browser limits (below).                                                                                         |
+| three.js                        | In the Electron renderer, as a display | The largest ecosystem and the most examples of procedural planets. React bindings (react-three-fiber). WebGPU renderer with a reversed depth buffer.                                             | Breaking changes in most releases. Silent visual changes among them. Browser limits.                                                                             |
+| Bevy                            | Native, as a separate display process  | Rust, sharing the sim without WebAssembly. Native Vulkan, multithreaded. `big_space` gives nested integer grids with a floating origin, which map onto the galaxy's frames. Built-in atmosphere. | A second UI technology, with text outside the DOM and the guide's tooling. Breaking releases before 1.0. A second binary, and input split between two processes. |
+| Godot 4, double-precision build | Native, as a separate display process  | A mature engine and editor, 64-bit positions when built for them, Rust through GDExtension.                                                                                                      | The same split as Bevy, plus a custom engine build.                                                                                                              |
+| Unreal, Unity                   | Native, replacing or beside the client | Top-end rendering.                                                                                                                                                                               | Heavy, closed or licensed, and built to own the whole application, which the consoles already are.                                                               |
 
 The browser limit that matters is WebGPU on Linux. Chromium enables it by default there only for
-Intel Gen12 and later (from Chrome 144) and NVIDIA under Wayland (from 147). Other GPUs need
-command-line switches. Electron can set them from its main process, at the cost of bypassing
-Chromium's GPU blocklist. WebGL2 works everywhere but has no compute shaders. A native engine talks
-to Vulkan directly and has no such gate.
+Intel Gen12 and later (from Chrome 144) and NVIDIA with a recent driver (from 147). The
+implementation-status wiki says NVIDIA's enablement is under Wayland, but Chromium's blocklist entry
+carries no such condition. Other GPUs, the development machine's Gen9.5 UHD 620 among them, need
+command-line switches, which Electron can set from its main process at the cost of bypassing
+Chromium's GPU blocklist. The owner has since ruled that WebGPU is required, with the switches
+forced and no WebGL2 fallback, and that every feature has a low setting playable on the UHD 620,
+which is the floor; see the rendering brainstorm's
+[Intel problem](rendering-and-planets.md#the-graphics-api-and-the-intel-problem). A native
+engine talks to Vulkan directly and has no such gate.
 
 **Lean: Babylon.js, in the renderer, as one more display.** It keeps one client, one UI technology
-and the UX guide's tooling, and its large-world rendering and backward compatibility answer the
-first and last requirements directly. The wireframe `VIEW` is built on it from the start, so that
-precision, depth and window handling are proven at real scale before anything depends on them.
-Before the planets phase, a spike settles whether the browser can carry them: an Earth-sized planet
-from orbit to a metre above the ground, terrain from the sim in WebAssembly workers, at 60 frames a
-second at 1080p on a discrete GPU, and at 30 at 720p on the low setting on the owner's Linux
-machine, whose integrated GPU is the performance floor; see
-[Performance budget](rendering-and-planets.md#performance-budget). If it cannot, the fallback is
-Bevy as a native display host. The protocol is already the boundary, so the host is just another
-client of the session, which also suits the bridge's main screen on a machine of its own.
+and the UX guide's tooling, and its written backward-compatibility rule answers the last
+requirement. Its large-world rendering does not answer the first: it is experimental, works in one
+64-bit frame with no rebasing, and stays off. The floating origin is ours, from the simulation's
+frames, behind an adapter that keeps the engine at arm's length, as the rendering brainstorm
+[sets out](rendering-and-planets.md#the-decision-does-not-rest-on-the-engines-large-world-feature).
+The wireframe `VIEW` is built on it from the start, so that precision, depth and window handling
+are proven at real scale before anything depends on them. Before the planets phase, and after both
+wasm targets join the checks, a spike settles whether the browser can carry them: an Earth-sized
+planet with Earth's reference atmosphere, from orbit to a metre above the ground, terrain from sim
+code in WebAssembly workers and the atmosphere drawn every frame, at 60 frames a second at 1080p on
+a discrete GPU of the RTX 4060 class, and at 30 at 720p on the UHD 620's low setting; see
+[Performance budget](rendering-and-planets.md#performance-budget). If it fails on the discrete
+reference machine for reasons in the browser stack, the fallback is a native renderer, Bevy
+leading; a failure on the UHD 620 alone redesigns the low setting. The protocol is already the
+boundary, so a native host is just another client of the session, though the split client has
+costs of its own; see
+[If the browser cannot carry it](rendering-and-planets.md#if-the-browser-cannot-carry-it).
 
 ## Starting, failing and purpose
 
@@ -727,12 +768,14 @@ This phase must leave room for:
 - the galaxy's surface seed and global figures as the planet generator's inputs.
 
 **Lean:** one brainstorm for planets, covering maps from orbit and surfaces together, written
-before that phase.
+before that phase. [The rendering brainstorm](rendering-and-planets.md#planets) now covers planet
+rendering and the surface generator's architecture; planet content is still owed.
 
 ## Server and protocol
 
 - Session messages: create, open, list and save sessions; set the time rate; subscribe to
-  telemetry at chosen rates; subscribe to the view's scene; a control input stream; commands with
+  telemetry at chosen rates; subscribe to the view's scene, and request the sky apart from it; a
+  control input stream; commands with
   closed-loop results; alerts through the galaxy phase's notification path.
 - **Lean:** JSON first, as now. Binary telemetry only if measurement shows JSON is the bottleneck.
 - The server enforces the separation of truth and Knowledge even for one player, so the bridge needs
@@ -747,8 +790,8 @@ before that phase.
   vₑ ln(m₀ ÷ m₁). Torque-free rotation of a rigid body is unstable about the intermediate axis and
   stable about the others, with angular momentum conserved. Position and velocity are continuous
   across every change of frame. A coast agrees at 1× and 100,000× within a stated tolerance.
-- **Determinism.** A session replays bit for bit from its start state and input log on all three
-  architectures.
+- **Determinism.** A session replays bit for bit from its start state and input log on every
+  architecture the determinism checks run.
 - **The first drive.** Every arrival state is what was asked for: a circular orbit at the chosen
   altitude, or rest relative to the target at the chosen offset. Arrivals inside a body or below
   its atmosphere or photosphere are refused, and range is enforced.
@@ -782,7 +825,26 @@ Settled on the same day, in the second round:
 - **The first drive's range is large, for testing.** 1,000 ly is this document's choice.
 - **The view starts as a basic wireframe** of the surroundings, and a 3D game rendering engine is to
   be chosen for what follows. See [The view outside](#the-view-outside) and
-  [The rendering engine](#the-rendering-engine).
+  [The rendering engine](#the-rendering-engine). The 2026-09-28 ruling below keeps the wireframe.
+
+Settled on 2026-09-22, and recorded in
+[the rendering brainstorm's Decisions](rendering-and-planets.md#decisions):
+
+- **WebGPU only.** Electron's main process forces the switches, and no WebGL2 fallback is kept.
+- **The performance floor.** A modern discrete GPU is the design target at 1080p60, and every
+  feature has a documented low setting that stays playable on the development machine's UHD 620.
+
+Settled on 2026-09-28, and worked through in
+[Render styles and multiple views](rendering-and-planets.md#render-styles-and-multiple-views):
+
+- **A free camera in two styles.** The view is a free-flying camera that switches between a
+  wireframe style, like an Artemis console, and a photorealistic one, like No Man's Sky. Both are
+  kept permanently.
+- **Two deployments of equal standing.** A bridge crew, with a photorealistic main-screen machine
+  and station machines drawing wireframes, where a station commands the main screen's camera as
+  ship state. And single-player, as in Elite Dangerous or No Man's Sky: a full-window
+  photorealistic cockpit view with wireframe instrument views in the same client, and the camera
+  set locally, with seat, chase and free presets. The seat is the default.
 
 ## Open questions
 
@@ -797,13 +859,18 @@ Settled on the same day, in the second round:
 5. **Failure.** Restart from a save, or permanent loss.
 6. **Refuelling.** **Lean:** skimming gas giants first; ice at a rendezvous later.
 7. **The planets brainstorm.** When it is written. **Lean:** before the planets phase, with maps
-   from orbit and surfaces in one document.
+   from orbit and surfaces in one document. **Partly answered:**
+   [the rendering brainstorm](rendering-and-planets.md) covers rendering and the surface
+   architecture; planet content, from biomes as habitats to what a landing party finds, is still
+   owed.
 8. **Structure-borne sound.** **Lean:** allowed for real events, with an edit to the UX guide.
 9. **Naming discoveries.** Whether the player can give proper names, as an overlay on catalogue
    designations.
 10. **Pausing.** **Lean:** allowed in single-player, as a rate of zero under a banner.
 11. **Views in the UX guide.** **Lean:** a class of display of its own, perspective and redrawn
-    every frame, always labelled as a view, with symbology in the guide's grammar.
+    every frame, always labelled as a view, with symbology in the guide's grammar. **Worded** in
+    [What the guide must gain](rendering-and-planets.md#what-the-guide-must-gain), which covers
+    both styles.
 
 The engine, the integrators, the tick rate and the wire format are technical choices, made above as
 leans and open to review rather than waiting on a ruling.
@@ -814,7 +881,9 @@ Not a plan, only the dependency order a plan would follow:
 
 1. Sessions, the loop at 64 Hz, persistence, and the local server started by the client, with a
    craft as a point mass on a trivial display. A thin vertical slice.
-2. The rendering engine, and `VIEW` as a wireframe at real scale.
+2. The rendering engine, and `VIEW` as a wireframe at real scale. What follows it, up to the
+   photorealistic style, is the rendering brainstorm's
+   [order of attack](rendering-and-planets.md#suggested-order-of-attack).
 3. The first jump drive and the `JUMP` display, arriving at rest, so that testing can reach
    anywhere.
 4. Gravity and propagation among the planetary stage's bodies, frames, time compression, arrival in
