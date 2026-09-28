@@ -15,7 +15,7 @@
 //!   (`tables/stellar_fates_mid.rs`), from a little below it to a little above [`SPLIT_MASS`],
 //!   evenly in log₁₀ m₀ at four η nodes: their white dwarfs' masses move by up to 13% over ±3σ of
 //!   η (P06.T38.a's re-survey);
-//! - **high** (`tables/stellar_fates_high.rs`), from a little below [`SPLIT_MASS`] to 100 M☉, at one
+//! - **high** (`tables/stellar_fates_high.rs`), from a little below [`SPLIT_MASS`] to 150 M☉ (P06.T14), at one
 //!   η node: its fates do not depend on η (the survey's cubic in η reproduces them to 10⁻¹⁵), which
 //!   its validation, at η of ±2.4, checks.
 //!

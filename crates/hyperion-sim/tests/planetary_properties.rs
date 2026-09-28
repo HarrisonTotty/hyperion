@@ -1,192 +1,142 @@
 //! Plan 14's property tests of derivation on placed planets (P14.T16.b): no planet hotter than its
-//! star, and a body's radius, temperature and envelope continuous in time across ±H.
+//! star, and a body's radius, temperatures and envelope continuous in time across ±H.
 //!
-//! The hosts are `planetary_support`'s, made as P14.T30.a will make them (`SystemContext` is not
-//! built). Plan 06's `StarModel` (P06.T29.a) has not merged here, so each star's state comes from
-//! HPT's formulae, plan 06's track integrator, at the ages sampled, and a star under 0.1 M☉ from
-//! the substellar cooling fit (`sse::evolve`). The derivation's assembly (P14.T16.a's
-//! `derive_body`) is not in this tree either, so each body is derived here from the same pieces,
-//! in its order: the flux of the stars its zone orbits (P14.T12.a, companions outside the zone
-//! left out), the Bond albedo of 0.3 that holds until P14.T13, the composition solved at the
-//! flux of the host's zero-age luminosity (P14.T11.c; ruling 53) at a rank drawn here, since
-//! `planet.radius` is P14.T30's, and above 0.3 Jupiter masses plan 13's cooling fit with its
-//! inflation and internal heat (P14.T11.d).
+//! The hosts are `planetary_support`'s, made as P14.T30.a makes them. Each star is plan 06's
+//! `StarModel` at the system's age, and each body goes through P14.T16.a's `derive_body` as the
+//! generator derives it: about the stars its zone orbits (companions outside the zone left out),
+//! each with its X-ray and ultraviolet history (P14.T1.a) and its largest past luminosity, with
+//! its radius rank and volatile ranks drawn here from a fixed generator.
 
-#[expect(dead_code, reason = "the property tests read no host's disc")]
+#[expect(dead_code, reason = "the property tests read only part of the support")]
 mod planetary_support;
 
-use hyperion_sim::Seed;
 use hyperion_sim::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
-use hyperion_sim::planetary::derive::irradiation::with_internal_heat;
-use hyperion_sim::planetary::derive::radius::radius_giant;
-use hyperion_sim::planetary::derive::{
-    BondAlbedo, HostLight, Illumination, composition, equilibrium_temperature, radius_chen_kipping,
-};
+use hyperion_sim::planetary::context::XuvHistory;
+use hyperion_sim::planetary::derive::atmosphere::{Retention, SurfaceState, VolatileDraws};
+use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
 use hyperion_sim::planetary::placement::PlacedPlanet;
 use hyperion_sim::stellar::draws::{StarDraws, UnitUniform};
 use hyperion_sim::stellar::multiplicity::MultiplicityContext;
-use hyperion_sim::stellar::sse::{MIN_INITIAL_MASS, Track, ZCoeffs, evolve, zams};
-use hyperion_sim::stellar::substellar::giant_cooling;
-use hyperion_sim::stellar::system::draw_metallicity;
+use hyperion_sim::stellar::sse::{MIN_INITIAL_MASS, ZCoeffs, zams};
+use hyperion_sim::stellar::substellar;
+use hyperion_sim::stellar::system::{StarModel, draw_metallicity};
 use hyperion_sim::stellar::{Phase, StarState};
-use hyperion_sim::time::CLOCK_WINDOW_H;
-use hyperion_sim::units::{
-    EarthFluxes, EarthMasses, EarthRadii, JupiterMasses, Kelvin, Metres, SolarLuminosities, Watts,
-    Years,
-};
+use hyperion_sim::time::{CLOCK_WINDOW_H, UniverseTime};
+use hyperion_sim::units::{EarthMasses, EarthRadii, Kelvin, Kilograms, Years};
+use hyperion_sim::{Seed, math};
 use hyperion_testkit::lcg::Lcg;
 use planetary_support::{Host, System, galaxy, generate, record};
 
 const SEED: Seed = Seed::new(0x5eed_0000_0014_0016);
 
-/// The half-width of the clock window, H, in years: 1,000.
-fn window() -> f64 {
-    CLOCK_WINDOW_H.as_julian_years_f64()
+/// The half-width of the clock window, H, in whole years: 1,000.
+fn window() -> i64 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "H is a whole thousand years, exact in both types"
+    )]
+    let years = CLOCK_WINDOW_H.as_julian_years_f64() as i64;
+    years
 }
 
-/// One star's state at any age: its track, or for a star under 0.1 M☉ its cooling fit.
-struct Star {
-    mass: hyperion_sim::units::SolarMasses,
-    composition: hyperion_sim::stellar::Composition,
-    draws: StarDraws,
-    track: Option<Box<Track>>,
+/// The instant `years` whole years from the epoch.
+fn at(years: i64) -> UniverseTime {
+    UniverseTime::from_julian_years(years).expect("inside the clock window")
 }
 
-impl Star {
-    fn state_at(&self, age: Years) -> StarState {
-        match &self.track {
-            Some(track) => track.state_at(age),
-            None => evolve(self.mass, &self.composition, &self.draws, age),
-        }
-    }
-}
-
-/// Every star of `system`, built to its age plus H.
-fn stars(system: &System, seed: Seed) -> Vec<Star> {
-    let until = Years::new(system.age.value() + window() + 1.0);
+/// Every star of `system` as plan 06's model at its age, and its X-ray and ultraviolet history
+/// from its zero-age luminosity, as `SystemContext::xuv_histories` gives it.
+fn stars(system: &System, seed: Seed) -> Vec<(StarModel, XuvHistory)> {
+    let coeffs = ZCoeffs::new(system.composition.z_fit());
     system
         .hierarchy
         .stars()
         .iter()
         .map(|slot| {
-            let draws = StarDraws::for_star(seed, slot.body());
             let mass = slot.initial_mass();
-            let track = (mass >= MIN_INITIAL_MASS)
-                .then(|| Box::new(Track::to_age(mass, &system.composition, &draws, until)));
-            Star {
-                mass,
-                composition: system.composition,
-                draws,
-                track,
-            }
+            let draws = StarDraws::for_star(seed, slot.body());
+            let model = StarModel::new(mass, system.composition, draws, system.age)
+                .expect("a sampled star's mass and age are in range");
+            let zams_luminosity = if mass >= MIN_INITIAL_MASS {
+                zams::luminosity(mass, &coeffs)
+            } else {
+                substellar::cooling(mass, Years::new(5e9), &system.composition)
+                    .expect("a star below 0.1 M_sun lies inside the cooling fits")
+                    .luminosity()
+            };
+            (model, XuvHistory::new(mass, zams_luminosity))
         })
         .collect()
 }
 
-/// A body as derived at one time: its temperature, radius and envelope fraction.
+/// A body as derived at one time: its temperatures, radius, envelope fraction and surface state.
 #[derive(Debug, Clone, Copy)]
 struct Derived {
-    temperature: Kelvin,
+    equilibrium: Kelvin,
+    surface: Kelvin,
     radius: EarthRadii,
     envelope: f64,
+    state: SurfaceState,
+    retention: Retention,
 }
 
-/// The formation of a small body: its composition solved at the flux of its host's zero-age
-/// luminosity at its primordial orbit, at a drawn rank (ruling 53).
-struct Formed {
-    radius: EarthRadii,
-    envelope: f64,
-}
-
-fn formed(system: &System, host: &Host, p: &PlacedPlanet, rank: UnitUniform) -> Formed {
-    let coeffs = ZCoeffs::new(system.composition.z_fit());
-    let luminosity: f64 = host
-        .zone
-        .members()
-        .map(|m| zams::luminosity(system.star_mass(m), &coeffs).value())
-        .sum();
-    let orbit = p.orbit();
-    // The flux reads the luminosity alone; a solar surface stands in for the host's.
-    let light = HostLight::new(
-        SolarLuminosities::new(luminosity),
-        Kelvin::new(5_772.0),
-        hyperion_sim::units::SolarRadii::new(1.0),
-    )
-    .expect("a zero-age luminosity is positive");
-    let flux = Illumination::new(light, orbit.semi_major_axis(), orbit.eccentricity().value())
-        .expect("a Kepler orbit's axis is positive")
-        .flux();
-    let drawn = radius_chen_kipping(p.mass(), rank);
-    match composition(p.mass(), drawn, p.formed(), flux) {
-        Ok(solved) => Formed {
-            radius: solved.radius(),
-            envelope: solved.envelope_fraction(),
-        },
-        // From 0.414 Jupiter masses the giants' own path gives the radius.
-        Err(_) => Formed {
-            radius: drawn,
-            envelope: 1.0,
-        },
-    }
-}
-
-/// The body `p` of `host` at `age`, given its formation and the zone's stars' states then; and
-/// the hottest of those stars' effective temperatures. `None` about a dark host.
+/// The body `p` of `host`, with radius rank `rank` and volatile ranks `volatiles`, at `t`, about
+/// its zone's stars in `stars`, whose states then are `states`; and the hottest of those stars'
+/// effective temperatures. `None` about a black hole, or before the body forms.
 fn derive_at(
     system: &System,
     host: &Host,
     p: &PlacedPlanet,
-    formed: &Formed,
-    states: &[StarState],
-    age: Years,
+    (rank, volatiles): (UnitUniform, VolatileDraws),
+    stars: &[(StarModel, XuvHistory)],
+    states: &[Option<StarState>],
+    t: UniverseTime,
 ) -> Option<(Derived, Kelvin)> {
-    let orbit = p.orbit();
-    let mut flux = EarthFluxes::ZERO;
+    let mut lights = Vec::new();
     let mut hottest = Kelvin::ZERO;
     for m in host.zone.members() {
-        let state = states[usize::from(m)];
+        let state = states[usize::from(m)]?;
         if state.phase() == Phase::BlackHole {
             return None;
         }
-        let light = HostLight::new(
-            state.luminosity(),
-            state.effective_temperature(),
-            state.radius(),
-        )
-        .expect("a star's state is finite and not negative");
-        flux = flux
-            + Illumination::new(light, orbit.semi_major_axis(), orbit.eccentricity().value())
-                .expect("a Kepler orbit's axis is positive")
-                .flux();
+        let (model, xuv) = &stars[usize::from(m)];
+        lights.push(
+            HostLight::new(
+                state.luminosity(),
+                state.effective_temperature(),
+                state.radius(),
+            )
+            .expect("a star's state is finite and not negative")
+            .with_history(*xuv, model.max_luminosity_until(t)),
+        );
         if state.effective_temperature() > hottest {
             hottest = state.effective_temperature();
         }
     }
-    let irradiated = equilibrium_temperature(flux, BondAlbedo::BEFORE_ATMOSPHERES);
-    let jupiters = p.mass().value() / EARTH_MASSES_PER_JUPITER_MASS;
-    let derived = if (0.3..=13.0).contains(&jupiters) {
-        let interior = giant_cooling(JupiterMasses::new(jupiters), age, &system.composition)
-            .expect("a giant of 0.3-13 Jupiter masses at a positive age is inside the fit");
-        let giant = radius_giant(p.mass(), &interior, flux).expect("a giant's mass and flux");
-        let radius = if jupiters >= 0.414 {
-            giant.radius()
-        } else {
-            giant.blended(formed.radius)
-        };
-        let heat = Watts::from(giant.internal_luminosity());
+    let hosts = BodyHosts::new(
+        Kilograms::from(host.zone.host_mass()),
+        system.composition,
+        &lights,
+        &[],
+    )
+    .expect("a zone's mass is positive and it orbits a star");
+    let placed = PlacedBody::new(p.mass(), *p.orbit(), p.formation_distance(), rank)
+        .expect("a placed planet's mass and formation distance are positive")
+        .with_volatiles(volatiles);
+    let disc = host.disc.profile()?;
+    let body = derive_body(&placed, &hosts, disc, system.age, t).ok()?;
+    let air = body.atmosphere();
+    Some((
         Derived {
-            temperature: with_internal_heat(irradiated, heat, Metres::from(radius)),
-            radius,
-            envelope: formed.envelope,
-        }
-    } else {
-        Derived {
-            temperature: irradiated,
-            radius: formed.radius,
-            envelope: formed.envelope,
-        }
-    };
-    Some((derived, hottest))
+            equilibrium: body.equilibrium_temperature(),
+            surface: air.surface_temperature(),
+            radius: body.radius(),
+            envelope: body.fractions().envelope(),
+            state: air.state(),
+            retention: air.retention(),
+        },
+        hottest,
+    ))
 }
 
 /// `n` systems of the galaxy's mass function over 0.08–3 M☉, their [Fe/H] drawn, at `age`.
@@ -204,43 +154,64 @@ fn systems(galaxy: &hyperion_sim::galaxy::Galaxy, first: u32, n: u32, age: Years
         .collect()
 }
 
-/// A rank for a body's radius, drawn here: `planet.radius` is P14.T30's (ruling 53).
-fn radius_rank(lcg: &mut Lcg) -> UnitUniform {
+/// The stars' states and the bodies' derivations at one step of the continuity test.
+type Step = (Vec<Option<StarState>>, Vec<Option<Derived>>);
+
+/// A rank drawn from `lcg`.
+fn rank(lcg: &mut Lcg) -> UnitUniform {
     UnitUniform::new(lcg.next_f64().clamp(1e-12, 1.0 - 1e-12)).expect("inside (0, 1)")
 }
 
+/// A body's radius rank and volatile ranks, drawn here: `planet.radius` and `planet.volatiles`
+/// are the generator's.
+fn ranks(lcg: &mut Lcg) -> (UnitUniform, VolatileDraws) {
+    let radius = rank(lcg);
+    let volatiles = VolatileDraws {
+        water: rank(lcg),
+        carbon: rank(lcg),
+        nitrogen: rank(lcg),
+    };
+    (radius, volatiles)
+}
+
 /// P14.T16.b: no planet hotter than its star. For every sampled body and time in ±H about ages of
-/// 0.1, 1, 5 and 12 Gyr, its temperature, internal heat included, lies below the hottest
-/// effective temperature of the stars it orbits at the same age; hosts that are black holes are
-/// left out.
+/// 0.1, 1, 5 and 12 Gyr, its surface temperature and its equilibrium temperature, internal heat
+/// included, lie below the hottest effective temperature of the stars it orbits at the same time;
+/// hosts that are black holes are left out.
 #[test]
 fn no_planet_hotter_than_its_star() {
     let galaxy = galaxy(SEED);
-    let mut ranks = Lcg::new(0x0016_b0d1);
-    let (mut bodies, mut giants) = (0_u32, 0_u32);
+    let mut lcg = Lcg::new(0x0016_b0d1);
+    let (mut bodies, mut giants, mut airless, mut aired) = (0_u32, 0_u32, 0_u32, 0_u32);
     for (k, age) in [1e8, 1e9, 5e9, 1.2e10].into_iter().enumerate() {
         let first = 100_000 * u32::try_from(k).expect("four ages");
         for system in systems(&galaxy, first, 600, Years::new(age)) {
             let stars = stars(&system, galaxy.seed());
             for host in &system.hosts {
                 for p in host.placement.planets() {
-                    let formation = formed(&system, host, p, radius_rank(&mut ranks));
-                    for t in [-window(), 0.0, window()] {
-                        let at = Years::new(age + t);
-                        let states: Vec<StarState> = stars.iter().map(|s| s.state_at(at)).collect();
+                    let drawn = ranks(&mut lcg);
+                    for t in [-window(), 0, window()] {
+                        let t = at(t);
+                        let states: Vec<Option<StarState>> =
+                            stars.iter().map(|(s, _)| s.state_at(t)).collect();
                         let Some((body, hottest)) =
-                            derive_at(&system, host, p, &formation, &states, at)
+                            derive_at(&system, host, p, drawn, &stars, &states, t)
                         else {
                             continue;
                         };
-                        assert!(
-                            body.temperature < hottest,
-                            "{:?} {:?}: {:?} against {:?}",
-                            system.id,
-                            p.index(),
-                            body.temperature,
-                            hottest
-                        );
+                        for temperature in [body.equilibrium, body.surface] {
+                            assert!(
+                                temperature < hottest,
+                                "{:?} {:?}: {body:?} against {hottest:?}",
+                                system.id,
+                                p.index(),
+                            );
+                        }
+                        if body.state == SurfaceState::Airless {
+                            airless += 1;
+                        } else {
+                            aired += 1;
+                        }
                     }
                     bodies += 1;
                     if p.mass() >= EarthMasses::new(0.3 * EARTH_MASSES_PER_JUPITER_MASS) {
@@ -251,18 +222,19 @@ fn no_planet_hotter_than_its_star() {
         }
     }
     assert!(
-        bodies > 2_000 && giants > 100,
-        "{bodies} bodies, {giants} giants"
+        bodies > 2_000 && giants > 100 && airless > 100 && aired > 100,
+        "{bodies} bodies, {giants} giants, {airless} airless, {aired} with air"
     );
 }
 
-/// P14.T16.b: a body's radius, temperature and envelope fraction are continuous in time across
+/// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time across
 /// ±H: at steps of a year, no relative jump reaches 10⁻³ except where a star it orbits changes
-/// phase in that step.
+/// phase in that step, or the body's surface state or the gases it retains change (a recorded
+/// state change).
 #[test]
 fn radius_temperature_and_envelope_are_continuous_in_time() {
     let galaxy = galaxy(SEED);
-    let mut ranks = Lcg::new(0x0016_b0d2);
+    let mut lcg = Lcg::new(0x0016_b0d2);
     let mut steps = 0_u64;
     for (k, age) in [1e9, 5e9].into_iter().enumerate() {
         let first = 500_000 + 100_000 * u32::try_from(k).expect("two ages");
@@ -273,33 +245,36 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
                 if planets.is_empty() {
                     continue;
                 }
-                let formations: Vec<Formed> = planets
-                    .iter()
-                    .map(|p| formed(&system, host, p, radius_rank(&mut ranks)))
-                    .collect();
-                let mut previous: Option<(Vec<StarState>, Vec<Option<Derived>>)> = None;
-                for step in 0..=2_000_u32 {
-                    let at = Years::new(age - window() + f64::from(step));
-                    let states: Vec<StarState> = stars.iter().map(|s| s.state_at(at)).collect();
+                let drawn: Vec<_> = planets.iter().map(|_| ranks(&mut lcg)).collect();
+                let mut previous: Option<Step> = None;
+                for step in -window()..=window() {
+                    let t = at(step);
+                    let states: Vec<Option<StarState>> =
+                        stars.iter().map(|(s, _)| s.state_at(t)).collect();
                     let now: Vec<Option<Derived>> = planets
                         .iter()
-                        .zip(&formations)
-                        .map(|(p, f)| derive_at(&system, host, p, f, &states, at).map(|d| d.0))
+                        .zip(&drawn)
+                        .map(|(p, &d)| {
+                            derive_at(&system, host, p, d, &stars, &states, t).map(|d| d.0)
+                        })
                         .collect();
                     if let Some((before_states, before)) = &previous {
                         let changed = host.zone.members().any(|m| {
-                            before_states[usize::from(m)].phase() != states[usize::from(m)].phase()
+                            let phase =
+                                |s: &[Option<StarState>]| s[usize::from(m)].map(|s| s.phase());
+                            phase(before_states) != phase(&states)
                         });
                         for (b, n) in before.iter().zip(&now) {
                             let (Some(b), Some(n)) = (b, n) else {
                                 continue;
                             };
                             steps += 1;
-                            if changed {
+                            if changed || b.state != n.state || b.retention != n.retention {
                                 continue;
                             }
                             let jump = |x: f64, y: f64| ((y - x) / x).abs();
-                            assert!(jump(b.temperature.value(), n.temperature.value()) < 1e-3);
+                            assert!(jump(b.equilibrium.value(), n.equilibrium.value()) < 1e-3);
+                            assert!(jump(b.surface.value(), n.surface.value()) < 1e-3);
                             assert!(jump(b.radius.value(), n.radius.value()) < 1e-3);
                             assert!((n.envelope - b.envelope).abs() < 1e-3 * b.envelope.max(1e-3));
                         }
@@ -310,6 +285,184 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
         }
     }
     assert!(steps > 50_000, "{steps}");
+}
+
+/// The ages the small planets of [`small_planets`] are derived at.
+#[derive(Debug, Clone, Copy)]
+enum SampleAge {
+    /// Each system's own age, log-uniform over 1–10 Gyr.
+    Own,
+    /// A tenth of it, log-uniform over 0.1–1 Gyr: the same planets, younger.
+    Tenth,
+    /// One age for every system.
+    Fixed(Years),
+}
+
+/// The small planets (1–4 R⊕) inside 100 days of the FGK single stars (0.6–1.4 M☉) of `n` sampled
+/// systems of ages log-uniform over 1–10 Gyr, each derived at the age `age` says: its radius, R⊕,
+/// and whether it holds an envelope then.
+fn small_planets(n: u32, age: SampleAge) -> Vec<(f64, bool)> {
+    let galaxy = galaxy(Seed::new(0x5eed_0000_0014_016c));
+    let mut lcg = Lcg::new(0x0016_c0de);
+    let mut planets = Vec::new();
+    for i in 0..n {
+        let mass = 0.6 + 0.8 * lcg.next_f64();
+        let own = Years::new(1e9 * math::exp10(lcg.next_f64()));
+        let r = record(&galaxy, 900_000 + i, mass, own);
+        let fe_h = draw_metallicity(&galaxy, &r).fe_h();
+        let mut system = generate(&galaxy, &r, fe_h, MultiplicityContext::Free);
+        if system.hierarchy.star_count() != 1 {
+            continue;
+        }
+        system.age = match age {
+            SampleAge::Own => own,
+            SampleAge::Tenth => Years::new(own.value() / 10.0),
+            SampleAge::Fixed(years) => years,
+        };
+        let stars = stars(&system, galaxy.seed());
+        let t = at(0);
+        let states: Vec<Option<StarState>> = stars.iter().map(|(s, _)| s.state_at(t)).collect();
+        for host in &system.hosts {
+            for p in host.placement.planets() {
+                let drawn = ranks(&mut lcg);
+                let days = p.orbit().period().value() / 86_400.0;
+                if days >= 100.0 {
+                    continue;
+                }
+                let Some((body, _)) = derive_at(&system, host, p, drawn, &stars, &states, t) else {
+                    continue;
+                };
+                let radius = body.radius.value();
+                if (1.0..4.0).contains(&radius) {
+                    planets.push((radius, body.envelope > 0.0));
+                }
+            }
+        }
+    }
+    planets
+}
+
+/// The histogram of `planets`' radii in bins of 0.05 dex from 1 R⊕ (Fulton et al. 2017, AJ 154,
+/// 109, bin in the logarithm too).
+fn bins(planets: &[(f64, bool)]) -> [u32; 12] {
+    let mut bins = [0_u32; 12];
+    for &(radius, _) in planets {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a bin of a logarithm in [0, 0.6), 0-11"
+        )]
+        let bin = (math::log10(radius) / 0.05) as usize;
+        bins[bin.min(11)] += 1;
+    }
+    bins
+}
+
+/// The ratio of super-Earths (1–1.8 R⊕) to sub-Neptunes (1.8–3.5 R⊕) among `planets`.
+fn super_earths_per_sub_neptune(planets: &[(f64, bool)]) -> f64 {
+    let count = |range: core::ops::Range<f64>| {
+        f64::from(
+            u32::try_from(planets.iter().filter(|(r, _)| range.contains(r)).count())
+                .expect("a sample fits a u32"),
+        )
+    };
+    count(1.0..1.8) / count(1.8..3.5)
+}
+
+/// The median radius of the planets of `planets` that hold an envelope, R⊕.
+fn enveloped_median(planets: &[(f64, bool)]) -> f64 {
+    let mut radii: Vec<f64> = planets
+        .iter()
+        .filter(|(_, e)| *e)
+        .map(|(r, _)| *r)
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    radii[radii.len() / 2]
+}
+
+/// The radius histogram's depth at its valley: the least bin between 1.5 and 2.0 R⊕ (0.176–0.301
+/// dex, bins 3–5) against the peaks either side, the largest bin below 1.5 R⊕ and the largest from
+/// 2.0 R⊕ up; `(valley, lower peak, upper peak)`.
+fn valley_depth(bins: &[u32; 12]) -> (u32, u32, u32) {
+    let valley = bins[3..=5].iter().copied().min().unwrap_or(0);
+    let lower = bins[..=3].iter().copied().max().unwrap_or(0);
+    let upper = bins[6..].iter().copied().max().unwrap_or(0);
+    (valley, lower, upper)
+}
+
+/// P14.T16.c: the radius valley emerges. Small planets inside 100 days of FGK hosts of 1–10 Gyr,
+/// read after escape at the system's age (ruling 119.2), have a bimodal radius distribution with
+/// its minimum between 1.5 and 2.0 R⊕ at under two thirds of either peak (Fulton et al. 2017),
+/// from escape alone. The envelopes start from ruling 119.1's formation law.
+///
+/// Ruling 122.1 withdraws the plan's 10 Myr check: under the law's 1% floor 10 Myr already parts
+/// bare cores from puffed envelopes, so the young gap is deeper and at 2.0–2.2 R⊕, which is pinned
+/// as a finding (the young minimum above 2.0 R⊕, the old one inside it). Two age checks replace
+/// it: the super-Earth : sub-Neptune ratio (1–1.8 : 1.8–3.5 R⊕) is larger at 1–10 Gyr than at
+/// 0.1–1 Gyr (reported against Berger et al. 2020's 0.61 ± 0.09 → 1.00 ± 0.10 and Rogers and
+/// Owen 2021's 0.77 → 0.95), and enveloped planets' median radius is larger at 10 Myr than at
+/// 1–10 Gyr (Fernandes et al. 2025). The first does not hold and is pinned as a finding: the
+/// valley's drift over gigayears (David et al. 2021) needs a loss channel on that timescale,
+/// which the model has not.
+#[test]
+#[ignore = "slow: derives the small planets of 40,000 sampled systems three times"]
+fn radius_valley_emerges() {
+    let n = 40_000;
+    let old_planets = small_planets(n, SampleAge::Own);
+    let middle_planets = small_planets(n, SampleAge::Tenth);
+    let young_planets = small_planets(n, SampleAge::Fixed(Years::new(1e7)));
+    let (old, young) = (bins(&old_planets), bins(&young_planets));
+    let (ratio_old, ratio_middle) = (
+        super_earths_per_sub_neptune(&old_planets),
+        super_earths_per_sub_neptune(&middle_planets),
+    );
+    let (median_old, median_young) = (
+        enveloped_median(&old_planets),
+        enveloped_median(&young_planets),
+    );
+    eprintln!("1-10 Gyr: {old:?}\n10 Myr:   {young:?}");
+    eprintln!(
+        "super-Earths per sub-Neptune: {ratio_middle:.3} at 0.1-1 Gyr, {ratio_old:.3} at 1-10 Gyr \
+         (Berger et al. 2020: 0.61 +- 0.09 to 1.00 +- 0.10; Rogers and Owen 2021: 0.77 to 0.95)"
+    );
+    eprintln!(
+        "enveloped planets' median radius: {median_young:.3} R_earth at 10 Myr, {median_old:.3} at \
+         1-10 Gyr"
+    );
+    assert!(old.iter().sum::<u32>() > 2_000, "{old:?}");
+    let (valley, lower, upper) = valley_depth(&old);
+    assert!(
+        3 * valley < 2 * lower && 3 * valley < 2 * upper,
+        "no valley at 1.5-2.0 R_earth: {old:?}"
+    );
+    // A finding (`atmo14`, round 9, for the orchestrator): the ratio does not rise with age, as
+    // Berger et al.'s does. Escape here is done within the saturation time, so between 0.1-1 and
+    // 1-10 Gyr only the envelopes' contraction moves radii, and it moves sub-Neptunes into the
+    // 1.8-3.5 R_earth bin; the valley's gigayear drift needs a loss channel the model has not
+    // (ruling 122.1). Pinned as built: the old ratio within 0.9-1.0 of the younger one.
+    let drift = ratio_old / ratio_middle;
+    assert!(
+        (0.9..1.0).contains(&drift),
+        "{ratio_middle} then {ratio_old}"
+    );
+    assert!(
+        median_young > median_old,
+        "{median_young} then {median_old}"
+    );
+    // The pinned finding: the young gap lies above 2.0 R_earth, the old one inside it.
+    let deepest = |bins: &[u32; 12]| {
+        (3..9)
+            .min_by_key(|&i| bins[i])
+            .expect("a non-empty range of bins")
+    };
+    assert!(
+        deepest(&young) >= 6,
+        "the young gap below 2.0 R_earth: {young:?}"
+    );
+    assert!(
+        deepest(&old) < 6,
+        "the old gap not moved inside 2.0 R_earth: {old:?}"
+    );
 }
 
 // --- P14.T22.b: moons and rings of whole generated systems (ruling 83.8) ---

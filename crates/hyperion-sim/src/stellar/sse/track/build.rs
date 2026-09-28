@@ -14,6 +14,7 @@
 //! segment depends only on those before it, so [`Track::to_age`](super::Track::to_age)'s segments
 //! are bit for bit [`Track::full`](super::Track::full)'s.
 
+use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::{Composition, StarState};
@@ -24,7 +25,9 @@ use super::super::agb::ThermallyPulsingAgb;
 use super::super::coeffs::ZCoeffs;
 use super::super::gb::{self, GiantBranch};
 use super::super::helium::HeliumStar;
+use super::super::ms::MainSequence;
 use super::super::wind::{self, ReimersEta};
+use super::excess::{HeliumHook, HeliumTable};
 use super::model::{Model, Physics, Span};
 use super::{Coordinate, Evaluated, Fate, Junction, Knot, Sample, Segment, TrackOptions};
 
@@ -142,8 +145,23 @@ pub(crate) struct Outcome {
 /// The phase a star enters next, with what it enters it with.
 #[derive(Debug)]
 pub(super) enum Entry {
+    /// The onset of collapse of a star of final mass `mass` (P06.T15.a).
+    Protostar {
+        mass: f64,
+    },
+    /// The contraction from the end of accretion to the arrival on the main sequence at `arrival`
+    /// years (P06.T15.b).
+    PreMainSequence {
+        mass: f64,
+        arrival: f64,
+    },
+    /// The main sequence from fractional age `tau0`: zero but for a star that is on it when its
+    /// accretion ends.
     MainSequence {
         mass: f64,
+        tau0: f64,
+        /// The segment, if the contraction built it already to meet its slopes.
+        built: Option<Box<FractionBuilt>>,
     },
     HertzsprungGap {
         m0: f64,
@@ -184,6 +202,9 @@ pub(super) enum Entry {
         clock0: Megayears,
         mass: f64,
     },
+    /// The post-AGB crossing of a star that has lost its envelope on the AGB, towards the white
+    /// dwarf of `fate` (P06.T16.a).
+    PostAgb(Fate),
     Dead(Fate),
 }
 
@@ -212,7 +233,7 @@ pub(crate) struct Builder<'a> {
     /// it widens the electron-capture window ([`Builder::stripped_by_companion`]).
     pub(super) companion_stripped: bool,
     pub(super) resolution: Resolution,
-    keep: Keep,
+    pub(super) keep: Keep,
 }
 
 impl<'a> Builder<'a> {
@@ -233,6 +254,8 @@ impl<'a> Builder<'a> {
                 coeffs,
                 z: composition.z_fit(),
                 remnant: options.remnant(),
+                bridges: options.bridges(),
+                helium: HeliumHook::of(composition, &HeliumTable::COMMITTED),
             },
             composition,
             options,
@@ -242,6 +265,14 @@ impl<'a> Builder<'a> {
             resolution,
             keep,
         }
+    }
+
+    /// This builder with the helium-excess correction `helium` in place of the committed table's
+    /// (P06.T17).
+    #[must_use]
+    pub(crate) fn with_helium(mut self, helium: Option<HeliumHook>) -> Self {
+        self.phys.helium = helium;
+        self
     }
 
     /// This builder for a star whose provisional companion-stripped mark is `stripped` (plan 06,
@@ -275,7 +306,7 @@ impl<'a> Builder<'a> {
     /// or to the remnant.
     #[must_use]
     pub(crate) fn run(&self, m0: f64, age_max: Option<f64>) -> Outcome {
-        self.run_from(Entry::MainSequence { mass: m0 }, age_max)
+        self.run_from(Entry::Protostar { mass: m0 }, age_max)
     }
 
     /// The track of a star that enters its life at `entry`, at age zero: [`Builder::run`] from the
@@ -288,10 +319,12 @@ impl<'a> Builder<'a> {
         let mut start = 0.0;
         let mut previous: Option<[f64; 3]> = None;
         let mut max_before = [0.0_f64; 2];
+        let mut bridged = false;
         loop {
             if let Entry::Dead(fate) = entry {
                 if self.keep != Keep::Lifetime {
-                    segments.push(self.remnant_segment(fate, max_before, previous));
+                    let knee = previous.filter(|_| bridged).map(|[log_l, ..]| log_l);
+                    segments.push(self.remnant_segment(fate, max_before, previous, knee));
                 }
                 return Outcome {
                     segments,
@@ -299,13 +332,17 @@ impl<'a> Builder<'a> {
                     built_until: f64::INFINITY,
                 };
             }
+            bridged = matches!(entry, Entry::PostAgb(_));
             let step = self.phase(entry, start, previous);
             if let Some(mut segment) = step.segment
                 && self.keep == Keep::Track
             {
-                self.sample(&mut segment, max_before);
-                if let Some(last) = segment.samples.last() {
-                    max_before = [last.max_radius, last.max_luminosity];
+                // The maxima count from the main sequence: see `Track::max_radius_until`.
+                if !segment.model.is_before_main_sequence() {
+                    self.sample(&mut segment, max_before);
+                    if let Some(last) = segment.samples.last() {
+                        max_before = [last.max_radius, last.max_luminosity];
+                    }
                 }
                 segments.push(segment);
             }
@@ -325,7 +362,13 @@ impl<'a> Builder<'a> {
     /// Builds the phase `entry` from age `start`, continuing from `previous`.
     fn phase(&self, entry: Entry, start: f64, previous: Option<[f64; 3]>) -> Step {
         match entry {
-            Entry::MainSequence { mass } => self.main_sequence(start, mass, previous),
+            Entry::Protostar { mass } => self.protostar(mass),
+            Entry::PreMainSequence { mass, arrival } => {
+                self.pre_main_sequence(start, mass, arrival)
+            }
+            Entry::MainSequence { mass, tau0, built } => {
+                self.main_sequence(start, mass, tau0, built)
+            }
             Entry::HertzsprungGap { m0, mass } => self.hertzsprung_gap(start, m0, mass, previous),
             Entry::FirstGiantBranch { m0, mass } => self.giant_branch(start, m0, mass, previous),
             Entry::Flash { mass } => self.flash(start, mass, previous),
@@ -345,6 +388,7 @@ impl<'a> Builder<'a> {
             Entry::HeliumShellBurning { star, clock0, mass } => {
                 self.helium_shell_burning(start, &star, clock0, mass, previous)
             }
+            Entry::PostAgb(fate) => self.post_agb(start, fate, previous),
             Entry::Dead(fate) => Step {
                 segment: None,
                 next: Entry::Dead(fate),
@@ -847,16 +891,33 @@ impl<'a> Builder<'a> {
         fate: Fate,
         max_before: [f64; 2],
         last: Option<[f64; 3]>,
+        knee: Option<f64>,
     ) -> Segment {
         let age = fate.death.age().value();
-        let origin = WhiteDwarfCore::of(fate.phase).map_or(Megayears::ZERO, |core| {
-            white_dwarf::cooling_origin(
-                self.options.remnant(),
-                core,
-                fate.remnant.mass(),
-                last.map(|[log_l, ..]| SolarLuminosities::new(crate::math::exp10(log_l))),
-                self.phys.z,
-            )
+        // A white dwarf off the post-AGB bridge fades on MB16's shape to 10 L☉ first, and its
+        // cooling law is matched there (ruling 127.1); every other remnant at its star's last
+        // luminosity (ruling 46.2).
+        let core = WhiteDwarfCore::of(fate.phase);
+        let knee = knee.filter(|_| {
+            core.is_some() && self.options.remnant() == RemnantRecipe::MandelMuller2020
+        });
+        let origin = core.map_or(Megayears::ZERO, |core| {
+            if knee.is_some() {
+                super::post_agb::bridged_origin(
+                    self.options.remnant(),
+                    core,
+                    fate.remnant.mass(),
+                    self.phys.z,
+                )
+            } else {
+                white_dwarf::cooling_origin(
+                    self.options.remnant(),
+                    core,
+                    fate.remnant.mass(),
+                    last.map(|[log_l, ..]| SolarLuminosities::new(crate::math::exp10(log_l))),
+                    self.phys.z,
+                )
+            }
         });
         let mut segment = Segment {
             model: Model::Remnant {
@@ -864,6 +925,7 @@ impl<'a> Builder<'a> {
                 mass: fate.remnant.mass(),
                 birth: age,
                 origin,
+                knee,
             },
             start: age,
             end: f64::INFINITY,
@@ -908,6 +970,25 @@ impl<'a> Builder<'a> {
                 })
                 .collect()
         };
+        if let Coordinate::Fraction { tau0 } = segment.coordinate
+            && matches!(segment.model, Model::MainSequence { .. })
+        {
+            // The hook's dip can fall between samples, or knots, and hide the peak before it:
+            // sample around it too, at its fractional ages at the entry mass, mapped to ages as
+            // if τ ran linearly (exactly so without knots).
+            let hook = MainSequence::new(SolarMasses::new(segment.mass), self.phys.coeffs)
+                .hook_fractions();
+            points.extend(
+                hook.into_iter()
+                    .filter(|&tau| tau > tau0 && tau < 1.0)
+                    .map(|tau| {
+                        let age = lerp(start, end, (tau - tau0) / (1.0 - tau0));
+                        let p = segment.evaluate(&self.phys, age).point.point;
+                        (age, p.radius.value(), p.luminosity.value())
+                    }),
+            );
+            points.sort_by(|x, y| x.0.total_cmp(&y.0));
+        }
         let last = segment.evaluate(&self.phys, end).point.point;
         points.push((end, last.radius.value(), last.luminosity.value()));
         // A local maximum shows either as a sample above both its neighbours, or as a rise into a
@@ -925,8 +1006,24 @@ impl<'a> Builder<'a> {
         }
         for pair in points.windows(2) {
             let [(a, ra, la), (b, rb, lb)] = [pair[0], pair[1]];
-            let ordered = b > a;
-            if !ordered || (ra > rb && la > lb) {
+            if b <= a {
+                continue;
+            }
+            // A rise out of a sample into an interval that ends lower: the peak lies between
+            // (the main sequence's hook can hide one so between samples).
+            if ra > rb || la > lb {
+                let after = segment
+                    .evaluate(&self.phys, a + SLOPE_PROBE * (b - a))
+                    .point
+                    .point;
+                if ra > rb && after.radius.value() > ra {
+                    peaks.push(self.peak(segment, a, b, |p| p.radius.value()));
+                }
+                if la > lb && after.luminosity.value() > la {
+                    peaks.push(self.peak(segment, a, b, |p| p.luminosity.value()));
+                }
+            }
+            if ra > rb && la > lb {
                 continue;
             }
             let before = segment
@@ -996,6 +1093,7 @@ impl<'a> Builder<'a> {
 }
 
 /// A phase built on the fractional age of its main sequence.
+#[derive(Debug)]
 pub(super) struct FractionBuilt {
     pub(super) segment: Segment,
     pub(super) end_mass: f64,

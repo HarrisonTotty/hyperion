@@ -26,8 +26,9 @@
 //! - **Binary evolution.** A real system's stars are [`SystemStars`]' primary and companions, with
 //!   the hierarchy plan 11's draw gives a grid system (P11.T2.c), but each evolves as a single star
 //!   until plan 11's P11.T4–T11, so the zones are the zones at birth.
-//! - **\[α/Fe\]** is absent, `None`, not zero: P14.T1.a's closed form of \[Fe/H\] and population
-//!   lands with its consumers (P14.T13.b and phase E).
+//! - **\[α/Fe\]** is P14.T1.a's closed form of \[Fe/H\] and population ([`alpha_fe`](fn@alpha_fe)),
+//!   the two sequences' means, since plan 06 draws none of its own. A star's X-ray and
+//!   ultraviolet history is P14.T1.a's closed form too ([`XuvHistory`]).
 //! - **The sphere of influence** is the galactic tidal radius alone,
 //!   [`PotentialTables::tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of
 //!   the system's mass at its epoch position. Plan 09's rule, the smaller of that and a feature's,
@@ -45,7 +46,7 @@ use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::imf::MASS_LIMIT_LO;
 use crate::galaxy::placement::{Existence, ResolveSystemError, SystemKind, SystemRecord, resolve};
-use crate::galaxy::{Galaxy, PointLy};
+use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::SystemId;
 use crate::math;
 use crate::orbit::{BuildOrbitError, Eccentricity, OpenOrbit};
@@ -58,9 +59,10 @@ use crate::stellar::sse::{self, ZCoeffs, zams};
 use crate::stellar::system::{MAX_STAR_MASS, StarModel, SystemStars};
 use crate::stellar::{Composition, substellar};
 use crate::time::{CLOCK_WINDOW_H, UniverseTime};
-use crate::units::consts::{GM_SUN, METRES_PER_KILOPARSEC};
+use crate::units::consts::{GM_SUN, METRES_PER_KILOPARSEC, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{
-    Days, Dex, HeliumExcess, KilometresPerSecond, Metres, PerCubicLightYear, SolarMasses, Years,
+    Days, Dex, HeliumExcess, JoulesPerSquareMetre, KilometresPerSecond, Metres, PerCubicLightYear,
+    SolarLuminosities, SolarMasses, Watts, Years,
 };
 
 /// The age of the universe, 13.787 Gyr: the oldest age at the epoch a context takes.
@@ -119,6 +121,276 @@ pub fn solar_neighbourhood_tidal_radius(m: SolarMasses) -> Metres {
     let b = OORT_B_KM_S_KPC * per_second;
     let denominator = 4.0 * a * (a - b);
     Metres::new(math::cbrt(GM_SUN * m.value() / denominator))
+}
+
+/// The \[α/Fe\] of the α-rich plateau, dex: the level of the thick disc and the halo below the
+/// knee where type Ia supernovae begin to add iron (Bensby, Feltzing and Oey 2014, A&A 562, A71,
+/// Sect. 6 and Figs. 15–16, whose thick-disc stars sit at +0.3 below \[Fe/H\] ≈ −0.5; Hayden et
+/// al. 2015, ApJ 808, 132, Fig. 4, the high-α sequence at +0.25–0.3 in their \[α/M\]).
+pub const ALPHA_PLATEAU: Dex = Dex::new(0.30);
+
+/// The \[Fe/H\] of the α-rich sequence's knee, dex: −0.5, below which it holds the plateau
+/// (Bensby et al. 2014, Sect. 6; the high-α sequence's knee, Hayden et al. 2015).
+pub const ALPHA_KNEE: Dex = Dex::new(-0.5);
+
+/// The slope of the α-rich sequence above its knee, dex of \[α/Fe\] per dex of \[Fe/H\]: −0.36,
+/// from the plateau at the knee to +0.12 at \[Fe/H\] = 0, where the thick disc's metal-rich stars
+/// lie (Bensby et al. 2014, Fig. 15; Hayden et al. 2015, Fig. 4). The lane's straight-line reading
+/// of both figures (provisional).
+pub const ALPHA_RICH_SLOPE: f64 = -0.36;
+
+/// The slope of the α-poor (thin-disc) sequence, dex of \[α/Fe\] per dex of \[Fe/H\]: −0.13,
+/// through solar at \[Fe/H\] = 0, from about +0.1 at −0.7 to −0.05 at +0.4 (Bensby et al. 2014,
+/// Fig. 15 and Sect. 8, item 3, the α-poor sequence's reach to −0.7; Hayden et al. 2015, Fig. 4,
+/// the low-α sequence). The lane's straight-line reading
+/// (provisional).
+pub const ALPHA_POOR_SLOPE: f64 = -0.13;
+
+/// The least \[α/Fe\] of either sequence, dex: −0.05, which the thin disc's most metal-rich stars
+/// reach and do not go below (Bensby et al. 2014, Fig. 15).
+pub const ALPHA_FLOOR: Dex = Dex::new(-0.05);
+
+/// The \[α/Fe\] of a system of iron abundance `fe_h` in `population`, dex, as a closed form of the
+/// two sequences of the disc (P14.T1.a).
+///
+/// The Galaxy's stars lie on two sequences in \[α/Fe\] against \[Fe/H\] (Bensby et al. 2014;
+/// Hayden et al. 2015):
+///
+/// - **α-rich**, the thick disc's: the [`ALPHA_PLATEAU`] of +0.30 up to the [`ALPHA_KNEE`] at
+///   −0.5, then falling by [`ALPHA_RICH_SLOPE`] as type Ia supernovae add iron. The thick disc,
+///   the halo, the bulge, the bar and the nuclear disc take it: the bulge's stars follow the
+///   thick disc's trend (Bensby et al. 2017, A&A 605, A89), and the halo's in-situ stars share the
+///   plateau (Nissen and Schuster 2010, A&A 511, L10, whose accreted low-α halo stars are not
+///   told apart here).
+/// - **α-poor**, the thin disc's: through solar at \[Fe/H\] = 0 with [`ALPHA_POOR_SLOPE`], for the
+///   young and old thin disc.
+///
+/// Both are held to [`ALPHA_FLOOR`] below and the plateau above, and the α-rich sequence never
+/// falls below the α-poor one, so that the two meet at high metallicity as they are observed to.
+/// The form is continuous and non-increasing in \[Fe/H\], and draws nothing: plan 06 has no
+/// \[α/Fe\] of its own (plan 14's Risks), so no star and no golden moves by it.
+///
+/// # Examples
+///
+/// The Sun is on the thin disc at solar \[α/Fe\]; a thick-disc star of the same iron is α-rich, and
+/// a metal-poor one sits on the plateau:
+///
+/// ```
+/// use hyperion_sim::galaxy::Population;
+/// use hyperion_sim::planetary::context::{ALPHA_PLATEAU, alpha_fe};
+/// use hyperion_sim::units::Dex;
+///
+/// assert!(alpha_fe(Dex::ZERO, Population::OldThinDisc).value().abs() < 1e-12);
+/// assert!(alpha_fe(Dex::ZERO, Population::ThickDisc).value() > 0.1);
+/// assert_eq!(alpha_fe(Dex::new(-1.2), Population::Halo), ALPHA_PLATEAU);
+/// ```
+#[must_use]
+pub fn alpha_fe(fe_h: Dex, population: Population) -> Dex {
+    let (floor, plateau) = (ALPHA_FLOOR.value(), ALPHA_PLATEAU.value());
+    let poor = (ALPHA_POOR_SLOPE * fe_h.value()).clamp(floor, plateau);
+    let value = match population {
+        Population::YoungThinDisc | Population::OldThinDisc => poor,
+        Population::ThickDisc
+        | Population::Bulge
+        | Population::LongBar
+        | Population::NuclearDisc
+        | Population::Halo => {
+            let rich = if fe_h.value() <= ALPHA_KNEE.value() {
+                plateau
+            } else {
+                plateau + ALPHA_RICH_SLOPE * (fe_h.value() - ALPHA_KNEE.value())
+            };
+            rich.clamp(floor, plateau).max(poor)
+        }
+    };
+    Dex::new(value)
+}
+
+/// The share of a cool star's bolometric luminosity that it emits in X-rays and the extreme
+/// ultraviolet while its activity is saturated: 10^−3.5, as plan 14 gives it (P14.T13.b; Ribas et
+/// al. 2005, ApJ 622, 680). Provisional: Owen and Wu (2017, ApJ 847, 29, §3.2, eq. 22) take
+/// L(HE) ≈ 10^−3.5 L☉ (M★ ÷ M☉), a share of the mass rather than of the luminosity, which gives a
+/// 0.3 M☉ M dwarf some 30 times this; Jackson et al. (2012) support a share of the bolometric
+/// luminosity, 10^−3.1 to 10^−4.3, for X-rays alone.
+pub const XUV_SATURATED_SHARE: f64 = 3.162_277_660_168_379_5e-4;
+
+/// The index of the X-ray and ultraviolet decline after saturation: L ∝ t^−1.5 (plan 14,
+/// P14.T13.b; Ribas et al. 2005, whose fit over 1–1,200 Å is t^−1.23, steeper in X-rays alone;
+/// Owen and Wu 2017 take 1.5).
+pub const XUV_DECAY_INDEX: f64 = 1.5;
+
+/// How long a Sun-like or hotter star's activity stays saturated: 100 Myr (plan 14, P14.T13.b;
+/// Owen and Wu 2017; Jackson, Davis and Wheatley 2012, MNRAS 422, 2024, whose saturation times run
+/// about 10^8 yr for G stars).
+pub const XUV_SATURATION_FGK: Years = Years::new(1.0e8);
+
+/// How long a late M dwarf's activity stays saturated, up to [`XUV_SATURATION_BLENDS`]'s 0.30 M☉:
+/// 1 Gyr (ruling 122.2, provisional; Johnstone et al. 2021, A&A 649, A96, §3 and Fig. 10, whose
+/// late M dwarfs "remain saturated for billions of years").
+pub const XUV_SATURATION_M: Years = Years::new(1.0e9);
+
+/// How long an early M dwarf's activity stays saturated, over 0.35–0.60 M☉: 250 Myr (ruling
+/// 122.2; Loyd et al. 2021, AJ 162, 59, §6.5, M0–M2.5 stars at 0.3–0.6 M☉ held at "a constant
+/// level for 240 ± 30 Myr"; Shkolnik and Barman 2014 and Peacock et al. 2020, "a few hundred
+/// million years"). Jackson et al.'s (2012) K5–M0 bin, 10^8.21 yr, falls inside the upper blend.
+pub const XUV_SATURATION_EARLY_M: Years = Years::new(2.5e8);
+
+/// The masses across which the saturation time is blended, M☉, log-linearly in time against mass:
+/// from [`XUV_SATURATION_M`] to [`XUV_SATURATION_EARLY_M`] over 0.30–0.35 M☉, and from it to
+/// [`XUV_SATURATION_FGK`] over 0.60–0.70 M☉ (ruling 122.2).
+pub const XUV_SATURATION_BLENDS: [(SolarMasses, SolarMasses); 2] = [
+    (SolarMasses::new(0.30), SolarMasses::new(0.35)),
+    (SolarMasses::new(0.60), SolarMasses::new(0.70)),
+];
+
+/// A star's X-ray and extreme-ultraviolet history as a closed form of its mass and age (P14.T1.a):
+/// saturated at [`XUV_SATURATED_SHARE`] of its zero-age luminosity for its saturation time, then
+/// falling as (t ÷ `t_sat`)^−1.5 (Ribas et al. 2005; Owen and Wu 2017).
+///
+/// The saturation time is the spectral type's ([`XUV_SATURATION_FGK`], [`XUV_SATURATION_EARLY_M`],
+/// [`XUV_SATURATION_M`]),
+/// which plan 14 names as the fallback. Plan 06's present [`ActivityLevel`] is not read: the
+/// history must be the same whenever it is asked, and the energy it has delivered must never fall
+/// as the star ages (design note 9), whereas a saturation time set from the level at the time
+/// would move whenever the level does. The level's own measure, L(X) ÷ L(bol) from the Rossby
+/// number, is plan 06's present-day figure; this is the planet's integrated one.
+///
+/// [`ActivityLevel`]: crate::stellar::rotation::ActivityLevel
+///
+/// # Examples
+///
+/// The Sun has delivered about 2.7 times as much X-ray and ultraviolet energy by now as in its
+/// first 100 Myr, and its output now is some 300 times fainter than then:
+///
+/// ```
+/// use hyperion_sim::planetary::context::XuvHistory;
+/// use hyperion_sim::units::{Metres, SolarLuminosities, SolarMasses, Years};
+/// use hyperion_sim::units::consts::METRES_PER_AU;
+///
+/// let sun = XuvHistory::new(SolarMasses::new(1.0), SolarLuminosities::new(0.7));
+/// let au = Metres::new(METRES_PER_AU);
+/// let early = sun.fluence(Years::new(1e8), au, 0.0).value();
+/// let now = sun.fluence(Years::new(4.57e9), au, 0.0).value();
+/// assert!((now / early - 2.70).abs() < 0.01);
+/// let fade = sun.luminosity(Years::new(1e8)).value() / sun.luminosity(Years::new(4.57e9)).value();
+/// assert!((fade - 309.0).abs() < 1.0);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct XuvHistory {
+    saturated: Watts,
+    saturation_time: Years,
+}
+
+impl XuvHistory {
+    /// The history of a star of initial mass `initial_mass` and zero-age luminosity
+    /// `zams_luminosity`. A mass or luminosity that is not positive and finite (a dark host) gives
+    /// a history of no light.
+    #[must_use]
+    pub fn new(initial_mass: SolarMasses, zams_luminosity: SolarLuminosities) -> Self {
+        let l = zams_luminosity.value();
+        let saturated = if l.is_finite() && l > 0.0 {
+            Watts::from(zams_luminosity).value() * XUV_SATURATED_SHARE
+        } else {
+            0.0
+        };
+        Self {
+            saturated: Watts::new(saturated),
+            saturation_time: saturation_time(initial_mass),
+        }
+    }
+
+    /// A history that has delivered nothing and never will: a dark host's, or one whose history
+    /// a caller does not give.
+    pub const DARK: Self = Self {
+        saturated: Watts::ZERO,
+        saturation_time: XUV_SATURATION_FGK,
+    };
+
+    /// The X-ray and ultraviolet luminosity while saturated.
+    #[must_use]
+    pub const fn saturated_luminosity(&self) -> Watts {
+        self.saturated
+    }
+
+    /// How long the star stays saturated.
+    #[must_use]
+    pub const fn saturation_time(&self) -> Years {
+        self.saturation_time
+    }
+
+    /// The X-ray and ultraviolet luminosity at `age`: the saturated level until the saturation
+    /// time, then falling as (t ÷ `t_sat`)^−1.5; zero before birth.
+    #[must_use]
+    pub fn luminosity(&self, age: Years) -> Watts {
+        let (t, t_sat) = (age.value(), self.saturation_time.value());
+        if t.is_nan() || t <= 0.0 {
+            return Watts::ZERO;
+        }
+        if t <= t_sat {
+            self.saturated
+        } else {
+            Watts::new(self.saturated.value() * math::powf(t / t_sat, -XUV_DECAY_INDEX))
+        }
+    }
+
+    /// The X-ray and ultraviolet energy the star has emitted by `age`, as a duration at the
+    /// saturated level, seconds: t while saturated, and `t_sat` (3 − 2 √(`t_sat` ÷ t)) after, the
+    /// integral of the t^−1.5 decline, which tends to 3 `t_sat`.
+    #[must_use]
+    fn saturated_seconds(&self, age: Years) -> f64 {
+        let (t, t_sat) = (age.value(), self.saturation_time.value());
+        let years = if t.is_nan() || t <= 0.0 {
+            0.0
+        } else if t <= t_sat {
+            t
+        } else {
+            t_sat * (3.0 - 2.0 * (t_sat / t).sqrt())
+        };
+        years * SECONDS_PER_JULIAN_YEAR
+    }
+
+    /// The X-ray and ultraviolet energy per unit area that a body on an orbit of semi-major axis
+    /// `semi_major_axis` and eccentricity `eccentricity` about the star has received by `age`: the
+    /// emitted energy over 4π a² √(1 − e²), the orbit average of 1 ÷ 4πr² (as
+    /// [`Illumination::flux`](crate::planetary::derive::Illumination::flux) averages the light).
+    ///
+    /// Continuous and non-decreasing in `age`; zero for an axis that is not positive and finite or
+    /// an eccentricity outside [0, 1).
+    #[must_use]
+    pub fn fluence(
+        &self,
+        age: Years,
+        semi_major_axis: Metres,
+        eccentricity: f64,
+    ) -> JoulesPerSquareMetre {
+        let a = semi_major_axis.value();
+        if !(a.is_finite() && a > 0.0 && (0.0..1.0).contains(&eccentricity)) {
+            return JoulesPerSquareMetre::ZERO;
+        }
+        let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
+        JoulesPerSquareMetre::new(self.saturated.value() * self.saturated_seconds(age) / area)
+    }
+}
+
+/// The saturation time of a star of initial mass `mass` (ruling 122.2): [`XUV_SATURATION_M`] up
+/// to 0.30 M☉, [`XUV_SATURATION_EARLY_M`] over 0.35–0.60 M☉, [`XUV_SATURATION_FGK`] from 0.70 M☉,
+/// and across each of [`XUV_SATURATION_BLENDS`] log-linear in time against mass.
+#[must_use]
+fn saturation_time(mass: SolarMasses) -> Years {
+    let m = mass.value();
+    if m.is_nan() {
+        return XUV_SATURATION_FGK;
+    }
+    let blend = |(low, high): (SolarMasses, SolarMasses), from: Years, to: Years| {
+        let share = ((m - low.value()) / (high.value() - low.value())).clamp(0.0, 1.0);
+        Years::new(from.value() * math::powf(to.value() / from.value(), share))
+    };
+    let [late, early] = XUV_SATURATION_BLENDS;
+    if m < early.0.value() {
+        blend(late, XUV_SATURATION_M, XUV_SATURATION_EARLY_M)
+    } else {
+        blend(early, XUV_SATURATION_EARLY_M, XUV_SATURATION_FGK)
+    }
 }
 
 /// What a system's host is (plan 14's Provides): a star, with or without companions, or one of
@@ -258,8 +530,8 @@ impl Error for BuildEncounterEnvironmentError {}
 /// assert_eq!(context.stars().len(), usize::from(context.hierarchy().star_count()));
 /// // Nothing is generated beyond 0.49 of the sphere of influence (design note 14).
 /// assert!(context.strip_radius() < context.tidal_radius());
-/// // [α/Fe] is not modelled yet, which is not the same as solar.
-/// assert_eq!(context.alpha_fe(), None);
+/// // [α/Fe] is the closed form of its [Fe/H] and population (P14.T1.a).
+/// assert!(context.alpha_fe().is_some());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -310,8 +582,9 @@ impl SystemContext {
     ///   [`tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of the
     ///   hierarchy's [`system_mass`](SystemHierarchy::system_mass) at the record's epoch position,
     ///   zero for a system at the galactic centre itself.
-    /// - The age at the epoch is the record's, [\[α/Fe\]](Self::alpha_fe) and the encounter
-    ///   environment are `None`, and the host is [`HostKind::Stellar`].
+    /// - The age at the epoch is the record's, [\[α/Fe\]](Self::alpha_fe) the closed form of the
+    ///   composition's \[Fe/H\] and the record's population, the encounter environment `None`, and
+    ///   the host [`HostKind::Stellar`].
     ///
     /// # Panics
     ///
@@ -344,7 +617,10 @@ impl SystemContext {
             // evolved twice.
             stars: stars.stars().to_vec(),
             hierarchy,
-            alpha_fe: None,
+            alpha_fe: Some(alpha_fe(
+                stars.primary().composition().fe_h(),
+                record.population(),
+            )),
             age_at_epoch: record.age_at_epoch(),
             tidal_radius,
             encounter_environment: None,
@@ -452,14 +728,45 @@ impl SystemContext {
         self.composition.fe_h()
     }
 
-    /// The system's \[α/Fe\], dex: `None`, because this generator version does not model it.
+    /// The system's \[α/Fe\], dex: P14.T1.a's closed form of its \[Fe/H\] and population
+    /// ([`alpha_fe`](fn@alpha_fe)), for every stellar host.
     ///
-    /// `None` is "not modelled", never "solar" (ruling 33). P14.T1.a's closed form of \[Fe/H\] and
-    /// population (the thin-disc and thick-disc sequences) lands with its consumers, P14.T13.b and
-    /// phase E.
+    /// `None` is kept for a host with no stellar abundances of its own, "not modelled" and never
+    /// "solar" (ruling 33); no context this module builds has one. A real system reads its
+    /// record's population, a synthetic host its builder's
+    /// ([`SystemContextBuilder::population`], the old thin disc by default).
     #[must_use]
     pub const fn alpha_fe(&self) -> Option<Dex> {
         self.alpha_fe
+    }
+
+    /// The X-ray and ultraviolet history of component `star` (a body index of the stellar level,
+    /// as [`zone_stars`](Self::zone_stars) numbers them): [`XuvHistory::new`] of its initial mass
+    /// and the zero-age luminosity its disc reads, so that a brown-dwarf companion or a star under
+    /// 0.1 M☉ takes its cooling fit's (P14.T1.a).
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system.
+    #[must_use]
+    pub fn xuv_history(&self, star: usize) -> XuvHistory {
+        self.xuv_histories()[star]
+    }
+
+    /// The X-ray and ultraviolet history of every component, in body order: [`xuv_history`]
+    /// of each.
+    ///
+    /// [`xuv_history`]: Self::xuv_history
+    #[must_use]
+    pub fn xuv_histories(&self) -> Vec<XuvHistory> {
+        self.hierarchy
+            .stars()
+            .iter()
+            .zip(self.zone_stars())
+            .map(|(slot, zone_star)| {
+                XuvHistory::new(slot.initial_mass(), zone_star.zams_luminosity)
+            })
+            .collect()
     }
 
     /// The system's age at the epoch, Julian years: negative for a system that forms during play.
@@ -561,8 +868,9 @@ enum SyntheticStars {
 /// The ID, the stars and the age are required. The rest default: \[Fe/H\] 0 with no helium
 /// excess, the median star's draws ([`SyntheticDraws::Median`]), the sphere of influence of a field
 /// system at the Sun's galactocentric radius ([`solar_neighbourhood_tidal_radius`] of the system's
-/// mass), and no encounter environment. [\[α/Fe\]](SystemContext::alpha_fe) is `None` and the host
-/// [`HostKind::Stellar`], as for a real system.
+/// mass), no encounter environment, and the old thin disc's population, from which with the
+/// \[Fe/H\] the [\[α/Fe\]](SystemContext::alpha_fe) follows. The host is [`HostKind::Stellar`],
+/// as for a real system.
 ///
 /// A binary's orbit lies in the reference plane with the companion at periapsis at the epoch. Its
 /// companion is a star from [`MIN_COMPANION_MASS`] (0.08 M☉) and a brown dwarf below it, down to
@@ -620,9 +928,19 @@ pub struct SystemContextBuilder {
     draws: SyntheticDraws,
     tidal_radius: Option<Metres>,
     encounter_environment: Option<EncounterEnvironment>,
+    population: Option<Population>,
 }
 
 impl SystemContextBuilder {
+    /// The stellar population the host belongs to, which with its \[Fe/H\] sets its
+    /// [\[α/Fe\]](SystemContext::alpha_fe) (P14.T1.a): the old thin disc if not given, as the
+    /// Sun's.
+    #[must_use]
+    pub const fn population(mut self, population: Population) -> Self {
+        self.population = Some(population);
+        self
+    }
+
     /// The host's ID, which keys the planetary stage's streams: give each synthetic sample its
     /// own.
     #[must_use]
@@ -772,7 +1090,10 @@ impl SystemContextBuilder {
             stars: models,
             hierarchy,
             composition,
-            alpha_fe: None,
+            alpha_fe: Some(alpha_fe(
+                self.fe_h,
+                self.population.unwrap_or(Population::OldThinDisc),
+            )),
             age_at_epoch: age,
             tidal_radius,
             encounter_environment: self.encounter_environment,
@@ -1118,7 +1439,10 @@ mod tests {
                 context.fe_h().value(),
                 draw_metallicity(&galaxy, &record).fe_h().value(),
             );
-            assert_eq!(context.alpha_fe(), None);
+            assert_eq!(
+                context.alpha_fe(),
+                Some(alpha_fe(context.fe_h(), record.population()))
+            );
             assert_same_bits(
                 context.age_at_epoch().value(),
                 record.age_at_epoch().value(),
@@ -1378,7 +1702,7 @@ mod tests {
         assert_eq!(a.id(), id(3));
         assert_eq!(a.stars(), std::slice::from_ref(&model));
         assert_eq!(a.composition(), &composition);
-        assert_eq!(a.alpha_fe(), None);
+        assert_eq!(a.alpha_fe(), Some(alpha_fe(fe_h, Population::OldThinDisc)));
         assert_eq!(a.host_kind(), HostKind::Stellar);
         assert_eq!(
             a.hierarchy(),
@@ -1656,5 +1980,144 @@ mod tests {
         });
         assert!(orbit.source().is_some());
         assert!(BuildSystemContextError::MissingAge.source().is_none());
+    }
+
+    #[test]
+    fn alpha_fe_follows_the_two_sequences_continuously() {
+        let rich = [
+            Population::ThickDisc,
+            Population::Bulge,
+            Population::LongBar,
+            Population::NuclearDisc,
+            Population::Halo,
+        ];
+        let poor = [Population::YoungThinDisc, Population::OldThinDisc];
+        let mut previous: Option<(f64, f64)> = None;
+        for step in 0..=3_000 {
+            let fe_h = Dex::new(-2.5 + f64::from(step) * 1e-3);
+            let thin = alpha_fe(fe_h, Population::OldThinDisc).value();
+            let thick = alpha_fe(fe_h, Population::ThickDisc).value();
+            for p in poor {
+                assert_same_bits(alpha_fe(fe_h, p).value(), thin);
+            }
+            for p in rich {
+                assert_same_bits(alpha_fe(fe_h, p).value(), thick);
+            }
+            assert!(thick >= thin, "the α-rich sequence lies above at {fe_h:?}");
+            assert!((ALPHA_FLOOR.value()..=ALPHA_PLATEAU.value()).contains(&thin));
+            assert!((ALPHA_FLOOR.value()..=ALPHA_PLATEAU.value()).contains(&thick));
+            if let Some((t0, k0)) = previous {
+                // Non-increasing and continuous: a step of 0.001 dex moves neither by more than
+                // its slope allows.
+                assert!(thin <= t0 && t0 - thin < 1e-3 * 0.2);
+                assert!(thick <= k0 && k0 - thick < 1e-3 * 0.4);
+            }
+            previous = Some((thin, thick));
+        }
+        // The anchors of the sources: the thick disc's plateau, its metal-rich end and the Sun.
+        assert_same_bits(
+            alpha_fe(Dex::new(-1.0), Population::ThickDisc).value(),
+            0.30,
+        );
+        assert!((alpha_fe(Dex::ZERO, Population::ThickDisc).value() - 0.12).abs() < 1e-12);
+        assert!(alpha_fe(Dex::ZERO, Population::OldThinDisc).value().abs() < 1e-12);
+        assert!((alpha_fe(Dex::new(-0.7), Population::OldThinDisc).value() - 0.091).abs() < 1e-12);
+        assert_same_bits(
+            alpha_fe(Dex::new(0.6), Population::OldThinDisc).value(),
+            -0.05,
+        );
+    }
+
+    #[test]
+    fn a_real_system_s_alpha_fe_reads_its_population() {
+        let galaxy = galaxy();
+        for record in records(&galaxy).iter().take(40) {
+            let context = SystemContext::from_record(&galaxy, record);
+            assert_eq!(
+                context.alpha_fe(),
+                Some(alpha_fe(context.fe_h(), record.population()))
+            );
+        }
+        let thick = sun(9)
+            .fe_h(Dex::new(-0.8))
+            .population(Population::ThickDisc)
+            .build()
+            .unwrap();
+        assert_eq!(thick.alpha_fe(), Some(ALPHA_PLATEAU));
+    }
+
+    #[test]
+    fn the_xuv_history_saturates_then_fades_and_its_fluence_never_falls() {
+        let sun = XuvHistory::new(SolarMasses::new(1.0), SolarLuminosities::new(0.7));
+        assert_same_bits(sun.saturation_time().value(), XUV_SATURATION_FGK.value());
+        let saturated = 0.7 * crate::units::consts::SOLAR_LUMINOSITY_W * XUV_SATURATED_SHARE;
+        assert!((sun.saturated_luminosity().value() / saturated - 1.0).abs() < 1e-12);
+        assert_eq!(sun.luminosity(Years::new(-1.0)), Watts::ZERO);
+        assert_same_bits(sun.luminosity(Years::new(5e7)).value(), saturated);
+        let au = Metres::new(crate::units::consts::METRES_PER_AU);
+        let mut previous = 0.0;
+        let mut age = 1e5;
+        while age < 1.3e10 {
+            let now = sun.fluence(Years::new(age), au, 0.0167).value();
+            assert!(now >= previous, "the fluence falls at {age}");
+            // Continuous: a step of a thousandth of the age adds at most that share of it.
+            let next = sun.fluence(Years::new(age * 1.001), au, 0.0167).value();
+            assert!(next - now <= 1.001e-3 * now);
+            previous = now;
+            age *= 1.01;
+        }
+        // It tends to three saturation times of saturated output.
+        let limit = sun.fluence(Years::new(1e15), au, 0.0).value();
+        let bound = saturated * 3.0 * 1e8 * SECONDS_PER_JULIAN_YEAR
+            / (4.0 * core::f64::consts::PI * au.value() * au.value());
+        assert!(limit < bound && limit > 0.999 * bound);
+        // M dwarfs stay saturated ten times as long, K dwarfs as long as the Sun, and the blend
+        // is continuous.
+        let m = |mass: f64| {
+            XuvHistory::new(SolarMasses::new(mass), SolarLuminosities::new(0.01))
+                .saturation_time()
+                .value()
+        };
+        assert_same_bits(m(0.2), XUV_SATURATION_M.value());
+        assert_same_bits(m(0.30), XUV_SATURATION_M.value());
+        assert_same_bits(m(0.35), XUV_SATURATION_EARLY_M.value());
+        assert_same_bits(m(0.5), XUV_SATURATION_EARLY_M.value());
+        assert_same_bits(m(0.6), XUV_SATURATION_EARLY_M.value());
+        assert_same_bits(m(0.7), XUV_SATURATION_FGK.value());
+        assert!((m(0.65) - (2.5e8_f64 * 1e8).sqrt()).abs() < 1.0);
+        for edge in [0.30, 0.35, 0.60, 0.70] {
+            assert!((m(edge + 1e-9) / m(edge) - 1.0).abs() < 1e-6, "at {edge}");
+        }
+        // A dark host delivers nothing.
+        let dark = XuvHistory::new(SolarMasses::new(10.0), SolarLuminosities::ZERO);
+        assert_eq!(
+            dark.fluence(Years::new(1e9), au, 0.0),
+            JoulesPerSquareMetre::ZERO
+        );
+        assert_eq!(
+            XuvHistory::DARK.fluence(Years::new(1e9), au, 0.0),
+            JoulesPerSquareMetre::ZERO
+        );
+    }
+
+    #[test]
+    fn every_component_has_its_history() {
+        let binary = binary(1.0, 0.3, 10.0, 0.1).build().unwrap();
+        let histories = binary.xuv_histories();
+        assert_eq!(histories.len(), 2);
+        assert_eq!(histories[1], binary.xuv_history(1));
+        assert_same_bits(
+            histories[1].saturation_time().value(),
+            XUV_SATURATION_M.value(),
+        );
+        assert_same_bits(
+            histories[0].saturation_time().value(),
+            XUV_SATURATION_FGK.value(),
+        );
+        let zams = binary.zone_stars();
+        assert_eq!(
+            histories[0],
+            XuvHistory::new(SolarMasses::new(1.0), zams[0].zams_luminosity)
+        );
     }
 }

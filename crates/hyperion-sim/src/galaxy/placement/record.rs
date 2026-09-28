@@ -21,11 +21,12 @@
 
 use super::CellKey;
 use crate::coords::GalacticPosition;
+use crate::galaxy::features::ids::PackedFeature;
 use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::substellar::draw_brown_dwarf_mass;
 use crate::galaxy::{Galaxy, Population};
-use crate::id::{Layer, SystemId};
+use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::planetary::HostKind;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::time::UniverseTime;
@@ -86,6 +87,15 @@ pub struct SystemRecord {
 pub enum SystemOrigin {
     /// Placed by the layer's grid, in the density component the thinning picked.
     Grid(ComponentId),
+    /// A member of a catalogue feature (plan 09, P09.T10): its feature, packed into 29 bits so
+    /// that the record keeps its 80-byte cap (ruling 20 of 2026-09-22), and the redraw attempt its
+    /// primary's draws are read at, which a remnant class's conditional draw chose.
+    FeatureMember {
+        /// The feature, packed.
+        feature: PackedFeature,
+        /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
+        attempt: u16,
+    },
 }
 
 /// What a system is, as its layer says (plan 13, Design note 10): a star system, a free-floating
@@ -167,6 +177,11 @@ impl SystemRecord {
                 id.layer().is_some(),
                 "a record of grid origin needs a grid ID, got {id:?}"
             ),
+            SystemOrigin::FeatureMember { feature, .. } => assert!(
+                matches!(id.kind(), SystemIdKind::FeatureMember(member)
+                    if PackedFeature::from(member.feature()) == feature),
+                "a feature member's record needs its feature's member ID, got {id:?}"
+            ),
         }
         Self {
             id,
@@ -188,9 +203,13 @@ impl SystemRecord {
     /// [`layer_for_initial_mass`](super::layer_for_initial_mass) of its primary's mass: plan 02's
     /// mass function draws from the closed band, so a primary can sit on its band's upper edge.
     ///
+    /// A feature member's is its slot's band, or for a member at feature level the band of its
+    /// primary's initial mass.
+    ///
     /// # Panics
     ///
-    /// Never: a grid origin is built with a grid ID, which names a layer.
+    /// Never: a grid origin is built with a grid ID, which names a layer, and a member's primary
+    /// is of 0.08–150 M☉, which a band holds.
     #[must_use]
     pub fn layer(&self) -> Layer {
         match self.origin {
@@ -198,6 +217,18 @@ impl SystemRecord {
                 .id
                 .layer()
                 .expect("a record of grid origin was built with a grid ID"),
+            SystemOrigin::FeatureMember { .. } => {
+                let SystemIdKind::FeatureMember(member) = self.id.kind() else {
+                    unreachable!("a feature member's record is built with a member ID")
+                };
+                match member.slot() {
+                    MemberSlot::InCell { band, .. } => band,
+                    MemberSlot::FeatureLevel { .. } => {
+                        super::layer_for_initial_mass(self.primary_initial_mass)
+                            .expect("a member's primary is of 0.08-150 M_sun")
+                    }
+                }
+            }
         }
     }
 
@@ -230,6 +261,7 @@ impl SystemRecord {
     pub fn component(&self) -> Option<ComponentId> {
         match self.origin {
             SystemOrigin::Grid(component) => Some(component),
+            SystemOrigin::FeatureMember { .. } => None,
         }
     }
 
@@ -425,7 +457,8 @@ mod tests {
         // Plan 03, P03.T5.a: at most 80 bytes, with room for the origin to grow.
         let bytes = size_of::<SystemRecord>();
         assert!(bytes <= 80, "a record is {bytes} bytes");
-        assert_eq!(size_of::<SystemOrigin>(), 1);
+        // Plan 09's feature member packs into a `u32` and a `u16` (ruling 20): eight bytes.
+        assert_eq!(size_of::<SystemOrigin>(), 8);
         assert_eq!(size_of::<RecordWith<SystemOrigin>>(), bytes);
         // Room for an origin of eight bytes at four-byte alignment, such as a tag and a `u32`. An
         // eight-byte-aligned payload rounds the enum up to sixteen and the record to 88 bytes, and

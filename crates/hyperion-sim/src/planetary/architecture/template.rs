@@ -9,7 +9,7 @@
 //! | Class | Groups, inside out |
 //! | ----- | ------------------ |
 //! | `Barren` | none |
-//! | `TerrestrialOnly` | rocky of 0.05–2 M⊕ from 0.2–0.5 au × √L to the snow line, as many as the spacing fits (at most 10); ice-rich 0–3 of 0.02–5 M⊕ from 1–2 snow-line radii |
+//! | `TerrestrialOnly` | rocky 2–6 (typically 3–4) of 0.05–2 M⊕ from 0.5–0.8 au × √L outward, about 40 mutual Hill radii apart, inside the snow line; ice-rich 0–3 of 0.02–5 M⊕ from 1–2 snow-line radii |
 //! | `CompactMulti` | a chain of 1–20 M⊕, first period by Mulders et al. (1–50 days), count zero-truncated Poisson (mean 3.5 at 1 M☉, 6.1 at and below 0.48 M☉, at most 10); hot variant in 40%: 1–2 planets (about early M dwarfs 55%, with the cold chain's count) |
 //! | `CompactWithColdGiant` | the chain; giants 1–2 of 0.3–10 M♃ at 1–3 snow-line radii, Kipping's Betas by period |
 //! | `SolarLike` | rocky as `TerrestrialOnly`'s, up to the giants' chaotic zones; giants 1–3 at 1–2 snow-line radii, low e; ice giants 0–2 of 10–30 M⊕ beyond them; both belts |
@@ -66,16 +66,22 @@
 //!   are closely flanked by small companions".
 //! - **Small planets.** Rocky 0.05–2 M⊕, chains 1–20 M⊕, substellar chains 0.01–2 M⊕ and the
 //!   hot variant's 1–2 planets are plan 14's; their masses are P14.T7's correlated law
-//!   ([`MassLaw::Correlated`]), held to the range. A rocky group fills its reach ([`CountLaw::Fill`],
-//!   ruling 60): P14.T8.b places "rocky planets from about 0.3 au × √L to the snow line", and
-//!   plan 14's count of 2–6, drawn uniformly, left them short of it, the habitable zone included,
-//!   at P14.T6.b's terrestrial spacing of about 30 mutual Hill radii (the outermost rocky planet at
-//!   0.66 of the zone's inner edge in the median system, η⊕ 0.09 against Bryson et al.'s (2021, AJ
-//!   161, 36, Table 3) 0.37–0.60). Filled to the snow line, most groups have 5–10 planets, 38% of
-//!   `TerrestrialOnly`'s about Sun-like stars reaching the cap of 10, the chain's (Mulders et al.
-//!   2018 fix 10 planets per system), and η⊕ is 0.38 (P14.T10.b). The Solar System, with giants,
-//!   is a `SolarLike` system, whose rocky group stops at its giants' chaotic zones: its four
-//!   rocky planets end at 1.52 au, inside its snow line. The ice-rich bodies' 0.02–5 M⊕, the survivor's
+//!   ([`MassLaw::Correlated`]), held to the range. A rocky group holds 2–6 planets, typically 3–4
+//!   ([`ROCKY_COUNT`], ruling 106.2), as late accretion leaves them: Raymond et al.'s (2009,
+//!   Icarus 203, 644, Table 2) forty runs, 3.4 on average, and Kokubo and Genda's (2010, ApJ
+//!   714, L21, Table 1) 3.6 ± 0.8, not the embryos of 10–12 mutual Hill radii that ruling 60's
+//!   fill to the snow line had packed there (5–10 planets, 38% at a cap of 10). They are spaced
+//!   as final planets are, about 40 mutual Hill radii apart (P14.T6.b's terrestrial spacing), and
+//!   their masses follow their disc's solids (P14.T7.a), so that mass and spacing stay coupled as
+//!   Kokubo, Kominami and Ida (2006, ApJ 642, 1131, conclusion 1) find them: a richer disc grows
+//!   heavier planets, which lie farther apart in au at the same spacing in Hill radii, and not
+//!   more of them. Nothing observes a terrestrial group out to the snow line, and the group does
+//!   not fill it: its walk ends at its count. Its first planet lies at 0.5–0.8 au × √L (ruling
+//!   116.1), where plan 14 had about 0.3: Raymond et al.'s (2009, §3) embryo disc runs "from 0.5
+//!   to 4.5 AU", and Kokubo, Kominami and Ida's (2006, §3) final innermost planets lie near
+//!   0.4 au with the largest at 0.75 ± 0.20 au. The Solar System, with giants, is a `SolarLike`
+//!   system, whose four rocky planets, 26, 40 and 63 mutual Hill radii apart, end at 1.52 au,
+//!   inside its snow line and its giants' chaotic zones. The ice-rich bodies' 0.02–5 M⊕, the survivor's
 //!   0.05–10 M⊕ and the ice giants' 10–30 M⊕ (Uranus 14.5, Neptune 17.1; below the spacing's
 //!   giant mass of 0.1 M♃) are this module's, where plan 14 gave none.
 //! - **Spacing and eccentricity.** The families of P14.T6.b ([`SpacingFamily`]) and the
@@ -86,7 +92,7 @@
 use super::ArchitectureClass;
 use crate::math;
 use crate::units::consts::{EARTH_MASS_KG, JUPITER_MASS_KG};
-use crate::units::{Days, EarthMasses, SolarMasses};
+use crate::units::{Days, Dex, EarthMasses, SolarMasses};
 
 /// One Jupiter mass in Earth masses, 317.8, from the two constants' shared G.
 pub const EARTH_MASSES_PER_JUPITER_MASS: f64 = JUPITER_MASS_KG / EARTH_MASS_KG;
@@ -136,12 +142,13 @@ pub enum CountLaw {
         /// The greatest count.
         max: u8,
     },
-    /// As many bodies as the group's spacing fits between its first body and the end of its
-    /// reach, at most `max`: no draw, the count being where the walk outward stops (P14.T8.b's
-    /// rocky planets "from about 0.3 au × √L to the snow line"; ruling 60).
-    Fill {
-        /// The greatest count.
-        max: u8,
+    /// A count of `min + k` with probability `weights[k]` ÷ Σ `weights`: an empirical law, the
+    /// tally of a set of simulations (the rocky groups' 2–6 of Raymond et al. 2009; ruling 106.2).
+    Tallied {
+        /// The least count, which `weights[0]` weighs.
+        min: u8,
+        /// The weight of each count from `min` upwards, none negative, their sum positive.
+        weights: &'static [f64],
     },
 }
 
@@ -151,7 +158,8 @@ impl CountLaw {
     pub const fn range(&self) -> (u8, u8) {
         match *self {
             Self::Uniform { min, max } => (min, max),
-            Self::ZeroTruncatedPoisson { max, .. } | Self::Fill { max } => (1, max),
+            Self::ZeroTruncatedPoisson { max, .. } => (1, max),
+            Self::Tallied { min, weights } => (min, tallied_max(min, weights)),
         }
     }
 
@@ -159,18 +167,24 @@ impl CountLaw {
     #[must_use]
     pub fn poisson_rate(&self, host_mass: SolarMasses) -> Option<f64> {
         match *self {
-            Self::Uniform { .. } | Self::Fill { .. } => None,
+            Self::Uniform { .. } | Self::Tallied { .. } => None,
             Self::ZeroTruncatedPoisson { .. } => Some(self.rate_at(host_mass)),
         }
     }
 
-    /// The mean count for a host of `host_mass`, with the cap applied; for a [`Fill`](Self::Fill)
-    /// law, which draws nothing, its cap.
+    /// The mean count for a host of `host_mass`, with the cap applied.
     #[must_use]
     pub fn mean(&self, host_mass: SolarMasses) -> f64 {
         match *self {
             Self::Uniform { min, max } => f64::midpoint(f64::from(min), f64::from(max)),
-            Self::Fill { max } => f64::from(max),
+            Self::Tallied { min, weights } => {
+                let total: f64 = weights.iter().sum();
+                (0_u8..)
+                    .zip(weights)
+                    .map(|(k, w)| f64::from(min + k) * w)
+                    .sum::<f64>()
+                    / total
+            }
             Self::ZeroTruncatedPoisson { max, .. } => {
                 let lambda = self.rate_at(host_mass);
                 let zero = crate::math::exp(-lambda);
@@ -191,8 +205,7 @@ impl CountLaw {
 }
 
 impl CountLaw {
-    /// P(N ≤ `k`) for a host of `host_mass`, with the cap applied; for a [`Fill`](Self::Fill) law
-    /// 1 at its cap and 0 below it.
+    /// P(N ≤ `k`) for a host of `host_mass`, with the cap applied.
     #[must_use]
     pub fn cumulative(&self, k: u8, host_mass: SolarMasses) -> f64 {
         match *self {
@@ -205,12 +218,15 @@ impl CountLaw {
                     f64::from(k - min + 1) / (f64::from(max - min) + 1.0)
                 }
             }
-            Self::Fill { max } => {
-                if k >= max {
-                    1.0
-                } else {
-                    0.0
+            Self::Tallied { min, weights } => {
+                if k < min {
+                    return 0.0;
                 }
+                if k >= tallied_max(min, weights) {
+                    return 1.0;
+                }
+                let total: f64 = weights.iter().sum();
+                weights[..=usize::from(k - min)].iter().sum::<f64>() / total
             }
             Self::ZeroTruncatedPoisson { max, .. } => {
                 if k == 0 {
@@ -234,7 +250,7 @@ impl CountLaw {
     /// A Poisson law's λ about `host_mass`, or 0 for any other.
     fn rate_at(&self, host_mass: SolarMasses) -> f64 {
         match *self {
-            Self::Uniform { .. } | Self::Fill { .. } => 0.0,
+            Self::Uniform { .. } | Self::Tallied { .. } => 0.0,
             Self::ZeroTruncatedPoisson {
                 rate,
                 mass_exponent,
@@ -248,6 +264,18 @@ impl CountLaw {
             }
         }
     }
+}
+
+/// The greatest count of a [`CountLaw::Tallied`] law: `min` plus one less than its weights.
+#[must_use]
+const fn tallied_max(min: u8, weights: &[f64]) -> u8 {
+    let mut max = min;
+    let mut k = 1;
+    while k < weights.len() {
+        max += 1;
+        k += 1;
+    }
+    max
 }
 
 /// λ = `rate` × (max(M, `floor`) ÷ M☉)^`exponent`.
@@ -768,6 +796,29 @@ const FIRST_PERIOD: PeriodLaw = PeriodLaw::BrokenPowerLaw {
     max: Days::new(50.0),
 };
 
+/// How a chain's first period's break moves with its host's metallicity: the break is
+/// 12 days × 10^(−k \[Fe/H\]) with k = [`CHAIN_BREAK_METALLICITY_EXPONENT`], before the M
+/// dwarfs' factor (ruling 117.2), and the law stays truncated to 1–50 days.
+///
+/// Mulders et al. (2016, AJ 152, 187, §3.2 and §4) find 29.6 ± 2.0% of the Kepler planets inside
+/// 10 days about super-solar hosts against 11.9 ± 1.4% about sub-solar ones, the occurrence at
+/// 10–200 days flat in metallicity, and the inner edge about metal-rich stars at about half the
+/// period; Petigura et al. (2018, AJ 155, 89, Table 7) fit β = +0.6 ± 0.2 for hot (1–10 days)
+/// super-Earths and −0.3 ± 0.2 for warm ones. The hot variant's weight stays flat: it is a
+/// dynamical class, not a period class. k = 0.4 is fitted inside ruling 117.2's 0.2–1.0, with
+/// ruling 121.3's drift-fed budget, to P14.T10.b's windows at \[Fe/H\] −0.8 (ruling 121.1: all
+/// small planets 0.35–0.75 of solar, hot 0.20–0.40, warm 0.55–1.0 and at least 1.5 times hot): hot
+/// 0.30 and warm 0.73, 2.43 times hot, the literature's about 2.4 (0.38 and 1.92 at k = 0.3, 0.27
+/// and 2.71 at 0.45).
+pub const CHAIN_BREAK_METALLICITY_EXPONENT: f64 = 0.4;
+
+/// A chain's first period's break factor about a host of `fe_h`: 10^(−k \[Fe/H\]), k being
+/// [`CHAIN_BREAK_METALLICITY_EXPONENT`] (ruling 117.2).
+#[must_use]
+pub fn chain_break_metallicity_factor(fe_h: Dex) -> f64 {
+    math::powf(10.0, -CHAIN_BREAK_METALLICITY_EXPONENT * fe_h.value())
+}
+
 /// A chain's count: mean 3.5 at 1 M☉ and 6.1 at and below 0.48 M☉, at most 10, and about the
 /// early M dwarfs of 0.35–0.6 M☉ a rate 2.3 times as high (ruling 85.4).
 ///
@@ -829,29 +880,36 @@ const HOT_VARIANT: HotVariant = HotVariant {
     eccentricity: HOT,
 };
 
-/// The most rocky planets one group places: 10, as many as a chain's cap (Mulders et al. 2018).
-pub const ROCKY_MAX_COUNT: u8 = 10;
+/// How many rocky planets one group places: 2–6, as the forty simulations of Raymond et al. (2009,
+/// Icarus 203, 644, Table 2) leave them, six with two, seventeen with three, fourteen with four, two
+/// with five and one with six (a mean of 3.4, 78% with three or four), their planets of at least one
+/// embryo inside 2 au (ruling 106.2). Kokubo and Genda (2010, ApJ 714, L21, Table 1) grow
+/// 3.6 ± 0.8 with realistic accretion, and Raymond, Quinn and Lunine (2006, Icarus 183, 265,
+/// abstract) "2-4 terrestrial planets" in each run.
+pub const ROCKY_COUNT: CountLaw = CountLaw::Tallied {
+    min: 2,
+    weights: &[6.0, 17.0, 14.0, 2.0, 1.0],
+};
 
 /// The least mass of a rocky planet: 0.05 M⊕ (plan 14), which a drift-fed group's floor, scaled
 /// with its host's mass, never goes under (ruling 66).
 pub const ROCKY_MASS_FLOOR: EarthMasses = earth(0.05);
 
-/// The rocky planets of `TerrestrialOnly` and `SolarLike`: as many as P14.T6.b's terrestrial
-/// spacing fits from their first body to the snow line, at most [`ROCKY_MAX_COUNT`].
+/// The rocky planets of `TerrestrialOnly` and `SolarLike`: [`ROCKY_COUNT`]'s 2–6, spaced as final
+/// planets are (P14.T6.b's terrestrial spacing, ruling 106.2), as many as fit before the snow line,
+/// the first at 0.5–0.8 au × √L (ruling 116.1).
 const ROCKY: PlanetGroup = PlanetGroup {
     role: GroupRole::Rocky,
     presence: 1.0,
-    count: CountLaw::Fill {
-        max: ROCKY_MAX_COUNT,
-    },
+    count: ROCKY_COUNT,
     masses: MassRange {
         min: ROCKY_MASS_FLOOR,
         max: earth(2.0),
         law: MassLaw::Correlated,
     },
     location: Location::ScaledAu {
-        inner: 0.2,
-        outer: 0.5,
+        inner: 0.5,
+        outer: 0.8,
     },
     reach: Reach::InsideSnowLine,
     spacing: SpacingFamily::Terrestrial,
@@ -1330,6 +1388,7 @@ mod tests {
     fn a_count_law_s_cumulative_distribution_gives_its_mean() {
         for law in [
             CHAIN_COUNT,
+            ROCKY_COUNT,
             CountLaw::Uniform { min: 1, max: 2 },
             CountLaw::Uniform { min: 0, max: 3 },
         ] {
@@ -1350,6 +1409,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Ruling 117.2: a chain's break moves as 10^(−k \[Fe/H\]) with k inside 0.2–1.0, and is
+    /// exactly 1 at solar metallicity.
+    #[test]
+    fn a_chain_s_break_moves_out_about_metal_poor_hosts() {
+        assert!((0.2..=1.0).contains(&CHAIN_BREAK_METALLICITY_EXPONENT));
+        hyperion_testkit::float::assert_same_bits(
+            chain_break_metallicity_factor(Dex::new(0.0)),
+            1.0,
+        );
+        let poor = chain_break_metallicity_factor(Dex::new(-0.8));
+        let expected = math::powf(10.0, 0.8 * CHAIN_BREAK_METALLICITY_EXPONENT);
+        assert!((poor - expected).abs() < 1e-12, "{poor}");
+        assert!(chain_break_metallicity_factor(Dex::new(0.3)) < 1.0);
+    }
+
+    /// Rocky groups hold 2–6 planets, typically 3–4, Raymond et al.'s (2009) mean of 3.4
+    /// (ruling 106.2).
+    #[test]
+    fn rocky_groups_hold_two_to_six_planets_typically_three_or_four() {
+        let sun = SolarMasses::new(1.0);
+        assert_eq!(ROCKY_COUNT.range(), (2, 6));
+        assert!((ROCKY_COUNT.mean(sun) - 3.375).abs() < 1e-12);
+        let typical = ROCKY_COUNT.cumulative(4, sun) - ROCKY_COUNT.cumulative(2, sun);
+        assert!((typical - 0.775).abs() < 1e-12, "{typical}");
+        assert_eq!(ROCKY.count(), ROCKY_COUNT);
     }
 
     /// The hot variant has one or two planets about every host, the early M dwarfs included

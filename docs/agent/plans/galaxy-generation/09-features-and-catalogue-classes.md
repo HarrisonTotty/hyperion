@@ -132,7 +132,8 @@ FeatureRecord>`, `walk_process(&Galaxy, FeatureProcess) -> impl Iterator<Item = 
 
 ### Interiors, nested grids and members
 
-- `features::cluster::ClusterModel` (`from_record`), with `escape_speed_central()`,
+- `features::cluster::ClusterModel` (`from_record`, and `new(&Galaxy, &ClusterParameters)` for a
+  cluster from its parameters), with `escape_speed_central()`,
   `escape_speed_birth()`, `relaxation_time()`, `sigma(r)`, `tidal_radius()`, `is_core_collapsed()`,
   `black_hole_count()`, `encounter_rate()`.
 - `features::interior::{MemberClass, ClassKind, ClassProfile, MemberClassTable}` with
@@ -149,7 +150,8 @@ FeatureRecord>`, `walk_process(&Galaxy, FeatureProcess) -> impl Iterator<Item = 
 - `features::members::{MemberRecord, resolve_member, FeatureLevelList, FeatureMemberSource}`.
   `FeatureMemberSource` implements plan 03's `SystemSource`. A `MemberRecord` holds a plan 03
   `SystemRecord` (design note 20), the member's class, its `Composition` and its `MemberAbundances`.
-  `features::members::sphere_of_influence(galaxy, &MemberRecord) -> Metres` is the smaller-radius
+  `features::members::sphere_of_influence(galaxy, &FeatureRecord, &ClusterModel, &MemberRecord) ->
+Metres` (as built: the member needs its cluster's model) is the smaller-radius
   rule that plan 14 reads.
 - Variants of plan 03's `placement::SystemOrigin` (on every `SystemRecord` since M1, where its only
   variant is `Grid(ComponentId)`): this plan adds `FeatureMember(FeatureId)`, `CentreMember` and
@@ -287,8 +289,8 @@ change, the owning plan wins and only call sites here change.
   `site`, `class_table` and `runaway` are stubs, and `recent_death_claims`, `SHELL_WINDOW_CAP` and
   the record's `placement_class`, `formation_site`, `kick_constraint` and `mark_attempt` do not
   exist (the `PlacementClass` type does).
-- **Plan 15:** `tables::cluster_dynamics` (`BH_LOSS_BETA`, `BH_LOSS_PSI_SLOPE`,
-  `BH_RELAXATION_PREFACTOR`, `EQUIPARTITION_EXPONENT`, `PULSARS_AT_47_TUC_GAMMA`,
+- **Plan 15:** `tables::cluster_dynamics` (`BH_LOSS_BETA`, `BH_LOSS_PSI_SLOPE`, `BH_CLOCK_FACTOR`
+  (ruling 126.4), `BH_RELAXATION_PREFACTOR`, `EQUIPARTITION_EXPONENT`, `PULSARS_AT_47_TUC_GAMMA`,
   `PULSAR_GAMMA_EXPONENT`, `PULSAR_CORE_COLLAPSE_CAP`), `tables::type_ia_delay` (`DELAY_EDGES`,
   `YIELD_PER_SOLAR_MASS`, `CHANNEL_SHARE`, the two mass CDFs, `LAYER_SHARE`,
   `ANCIENT_LOSS_PER_SOLAR_MASS`; the explosion mark is plan 11's `tables::binary::IA_YIELD`),
@@ -547,7 +549,8 @@ Parallel with each other after P09.T3.b.
 
 - **P09.T4.a Open clusters.** Age (young: from the nursery; old: ∝ formation history × survival
   within the sub-disc), initial mass conditional on being alive at that age, present mass, half-
-  mass radius (log-normal about 6–10 ly, generator-version parameter), concentration, metallicity
+  mass radius (11.08 ly × (M ÷ 10⁴ M☉)^0.242 with 0.25 dex, Brown and Gnedin 2021's LEGUS fit × 4/3;
+  ruling 126.6), concentration, metallicity
   from the population's law at the position and age, bulk velocity from the population's velocity
   law on the feature's stream. Tests: present-mass function against the closed form; every cluster's
   age below its dissolution time.
@@ -612,7 +615,8 @@ and the encounter rate Γ ∝ ρ_c^1.5 r_c². The prefactor 0.138 is
 `tables::cluster_dynamics::BH_RELAXATION_PREFACTOR`. The nested grid's width needs the class table
 and is chosen in P09.T21. Files: `features/cluster.rs`. Tests: the named clusters of
 `features::testing` give 47.4, 62.2, 18.8, 48.9 and 2.1 km/s to 5%; open clusters of 10², 10³ and
-10⁴ M☉ give about 1.1, 2.4 and 6.1 km/s.
+10⁴ M☉ at P09.T4.a's median radius have central escape speeds of 0.92, 2.2 and 5.3 km/s to 10%
+(ruling 126.6).
 
 #### P09.T8 The class device
 
@@ -640,29 +644,34 @@ except that P09.T9.d needs P09.T9.c.
   present slope is −0.46 − 0.79 × (log₁₀ t_rh[yr] − 9) plus a per-cluster normal scatter of 0.54,
   clamped at the canonical −1.5 so that no cluster gains dwarfs; bands A and B are scaled by the
   ratio of the depleted to the canonical integral. White dwarfs are classes of bands C and D by
-  final mass. Removes the `TODO` in `FeatureShares`. Test: at 47 Tucanae's slope band A holds a
-  third (±0.05) of the canonical count.
+  final mass. Removes the `TODO` in `FeatureShares`. Test: at 47 Tucanae's slope (−0.65) band A,
+  0.08–0.5 M☉, holds 0.386 ± 0.01 of the canonical count (ruling 126.8: "a third" was the factor
+  below 0.2 M☉).
 - **P09.T9.b Neutron-star and white-dwarf retention.** Retained fraction = the kick law's
   distribution below the effective birth escape speed (design note 8), by a fixed quadrature over
   plan 06's `KickLaw` through plan 08's `kick_bins::speed_bin_shares`: ordinary mode on the star's
-  own speed, low mode on the pair's velocity. White dwarfs' 1 km/s kick applies to open clusters.
-  Tests: 18–26% at 100 km/s, 15–25% at 50 and at 20 (rulings 96.3 and 106.4: the law as built
-  gives 19.6% at 50, both being the low mode's share), under 1% for a 10⁴ M☉ open cluster; a few
-  thousand neutron stars in the 47 Tucanae model, about a hundred in M4, none expected in Palomar 5.
+  own speed, low mode on the pair's systemic speed, a Maxwellian of σ = 12 km/s (a Be/X-ray
+  binary's, van den Heuvel et al. 2000; ruling 126.3). White dwarfs' 1 km/s kick applies to open
+  clusters. Tests (ruling 126.3, amending 96.3 and 106.4 for clusters): 18–26% at 100 km/s, 15–25%
+  at 50, 5–17% at 20, under 1% for a 10⁴ M☉ open cluster; 1,000–5,000 neutron stars in 47 Tucanae,
+  100–350 in M4, under one expected in Palomar 5; no cluster's pulsars outnumber its neutron stars.
 - **P09.T9.c Black holes.** Retained at birth from the kick law with complete fallback unkicked
-  (about four fifths). Mass fraction today f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ t ÷ t★) − 1] ÷ ψ₁, floored
-  at zero, with f₀ = 0.06 × retention (Breen and Heggie 2013; Antonini and Gieles 2020). It is the
-  solution, at constant mass and radius, of df ÷ dt = −β (1 + ψ₁ f) ÷ t★: black-hole mass is lost at
+  (about four fifths). Mass fraction today f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ k t ÷ t★) − 1] ÷ ψ₁, floored
+  at zero, with the clock factor k = `BH_CLOCK_FACTOR` = 2.5 for the cluster's denser past (ruling
+  126.4; scratch, fitted by P15.T8.a with the rest), f₀ = 0.06 × retention (Breen and Heggie 2013;
+  Antonini and Gieles 2020). It is the solution, at constant mass and radius, of df ÷ dt = −β (1 + ψ₁ f) ÷ t★: black-hole mass is lost at
   β cluster masses per relaxation time, and the relaxation time shortens by 1 + ψ₁ f while black
   holes remain. β = 2.8 × 10⁻³ and ψ₁ = 147 are `BH_LOSS_BETA` and `BH_LOSS_PSI_SLOPE` of
   `tables::cluster_dynamics`, read from there and never written as literals, and with
   `BH_RELAXATION_PREFACTOR` in t★ they are the three constants plan 15's P15.T8.a fits against the
   CMC catalogue (Kremer and others 2020); these are the scratch values until then. The decay rate β
   ψ₁ = 0.41 is derived, not a constant of its own, and with f₀ near 0.05 the black holes are gone
-  after about five relaxation times, inside the brainstorm's four to six. Black holes are a compact
+  after about five relaxation times, inside the brainstorm's four to six (on the clock k t ÷ t★, so
+  1.6–2.4 of today's t★ at k = 2.5; ruling 126.4). Black holes are a compact
   Plummer class of scale 0.1–0.3 r_h, and the drawn core radius is correlated with f. Tests: none in
-  dynamically old models, tens to a few hundred in a typical massive one, thousands in ω Centauri's;
-  f reaches zero between four and six t★ for retention between 0.6 and 1.
+  dynamically old models, 20–400 in 47 Tucanae, 3,000–20,000 in ω Centauri, 10⁴–10⁵ over
+  `milky_way_globulars` (ruling 126.4); f reaches zero between four and six t★ for retention between
+  0.6 and 1.
 - **P09.T9.d Core collapse.** f = 0 and age above 14 t★ sets `is_core_collapsed`, and every class
   takes a cusp of slope drawn on −1.6 to −2. Test: about a fifth (0.12–0.28) of
   `milky_way_globulars` over the line (Trager et al. 1995).
@@ -671,8 +680,11 @@ except that P09.T9.d needs P09.T9.c.
   clusters; plan 11 replaces the numbers, not the device). Millisecond pulsars, X-ray binaries and
   blue stragglers are marks inside the neutron-star and binary classes with expected counts from Γ:
   40 × (Γ ÷ Γ_47Tuc)^0.7 pulsars, capped for core-collapsed clusters, with the three numbers read
-  from `PULSARS_AT_47_TUC_GAMMA`, `PULSAR_GAMMA_EXPONENT` and `PULSAR_CORE_COLLAPSE_CAP`. Test:
-  about 4,000 (2,000–8,000) pulsars over `milky_way_globulars`.
+  from `PULSARS_AT_47_TUC_GAMMA`, `PULSAR_GAMMA_EXPONENT` and `PULSAR_CORE_COLLAPSE_CAP`. As built,
+  the class table caps a cluster's pulsars at its expected neutron stars, the class they are marks
+  in (`MemberClassTable::millisecond_pulsars`; `ClusterModel::millisecond_pulsars` stays the
+  uncapped law), so no cluster's pulsars outnumber its neutron stars (ruling 126.3). Test: about
+  4,000 (2,000–8,000) pulsars over `milky_way_globulars`, and the cap binding in at most 8 of them.
 - **P09.T9.f Runaway factor.** A young cluster's living band-E count × (1 − f_ej(M)), with f_ej 15%
   rising to 38% at 10^3.5 M☉ (Oh et al. 2015), and a few per cent in band D. The ejected are plan
   08's runaways, already fed by the budget. Test: table-driven.
@@ -698,15 +710,18 @@ class's sub-range (depleted slope where it applies), and for remnant classes a r
 member's own streams, attempt after attempt, until remnant kind and kick satisfy the class (a
 retained neutron star has a kick below the effective escape speed). The loop is bounded at 4,096
 attempts with a debug assertion; its expected length is 1 ÷ retention. Age and metallicity are the
-feature's (with the age spread for nurseries). Velocity = bulk + isotropic normal of σ(r) ÷ √q, cut
-at the local escape speed. Sphere of influence: the smaller of the galactic tidal radius and the
+feature's (with the age spread for nurseries). Velocity = bulk + isotropic normal of σ(r) g(m) ÷
+g(m_TO), Bianchini et al. 2016's partial equipartition with g = e^(−m ÷ 2m_eq) up to m_eq = 1.5 M☉ and
+e^(−½)(m ÷ m_eq)^(−½) above (ruling 126.7; the profiles keep η = 1 for P15.T8.b), cut at the local
+escape speed. Sphere of influence: the smaller of the galactic tidal radius and the
 same formula about the feature's centre, with the floor in a harmonic core (`sphere_of_influence`).
 Plan 06's `SystemStars::generate(galaxy, record)` draws metallicity from the record's component,
 which a member must not do, so this task adds
-`SystemStars::generate_with(galaxy, record, &Composition)` beside it in `stellar/system.rs`, with
+`SystemStars::generate_with(galaxy, record, &Composition, MultiplicityContext)` (as built: a binary
+class forces a companion) beside it in `stellar/system.rs`, with
 `generate` delegating to it, no output change. Files: `features/members.rs`, `stellar/system.rs`.
 Tests: order independence; a retained neutron star's kick is always below the escape speed; velocity
-dispersion by class against σ(r) ÷ √q.
+dispersion by class against σ(r) g(m) ÷ g(m_TO); band A's factor is 1.18.
 
 #### P09.T11 Interior checks
 
@@ -721,10 +736,13 @@ speed of 50 km/s"), and total black holes over the system of order 10⁴–10⁵
 - **P09.T12.a Number, origin and place.** Expected number = dark halo mass ÷ 6.5 × 10⁹ M☉ with 0.2
   dex scatter (Burkert and Forbes 2020), read from plan 02's `AccretionHistory`, which draws it. An
   origin mark: 40% in situ, the rest among the accreted progenitors in proportion to mass, sharing
-  the progenitor's halo component (Massari et al. 2019). Density a cored r^−3.5 with a core near
-  3,900 ly so that the median radius is 5 kpc, flattened to 0.5 and inside 26,000 ly for the
-  metal-rich in-situ clusters, cut at 65,000 ly. Replaces the stub of P09.T3.a. Tests: 80–800 over
-  seeds, about 160 at Milky Way parameters, 85% of the untruncated law inside the cube.
+  the progenitor's halo component (Massari et al. 2019). Density a cored r^−3.5 with a core of
+  6,800 ly, flattened to 0.5 and inside 26,000 ly for the metal-rich in-situ clusters, cut at 65,000
+  ly, normalised at its cut (ruling 126.5): the metal-poor part places 0.82 of its share inside
+  65,000 ly (Harris 2010: 87 of 106 inside 20 kpc), the metal-rich part is normalised to its
+  truncated law. Replaces the stub of P09.T3.a. Tests: 80–800 over seeds, about 160 (the untruncated
+  count) at Milky Way parameters, 0.874 of the count placed, inside-cut medians of 5.0–5.6 kpc
+  (metal-poor) and 2.8–3.3 kpc (metal-rich).
 - **P09.T12.b Mass, size, metallicity and age.** Mass from (M + Δ)⁻² e^(−(M + Δ) ÷ M_c) with Δ = 2.0
   × 10⁵ and M_c = 1.07 × 10⁶ M☉ over 10³–10⁷ M☉, by inverse transform of a tabulated cumulative
   function, the same at every radius. Half-mass radius 2.6 pc × (R ÷ kpc)^0.41 with 0.21 dex of
@@ -737,18 +755,22 @@ speed of 50 km/s"), and total black holes over the system of order 10⁴–10⁵
 
 Peri- and apocentre and eccentricity per design note 11. Dissolution time from Baumgardt and Makino
 (2003) as a function of initial mass, apocentre and eccentricity. Initial mass by solving M = 0.70
-M₀ (1 − t ÷ t_dis(M₀)) with 40 bisection steps. Birth half-mass radius from the expansion of Gieles,
-Heggie and Zhao (2011). Outputs feed `ClusterModel` (birth escape speed, mass-loss rate for tails,
+M₀ (1 − t ÷ t_dis(M₀)) with 40 bisection steps, `R_G` in kiloparsecs as BM03's eq. 10 reads (ruling
+126.1). Birth half-mass radius today's (ruling 126.2: Gieles, Heggie and Zhao's 2011 expansion
+erases the birth radius and cannot be inverted once a cluster evaporates), so the birth escape speed
+is today's × √(M₀ ÷ M). Outputs feed `ClusterModel` (birth escape speed, mass-loss rate for tails,
 the first population's share). Destroyed clusters are not generated here: a test asserts that no
-code path creates a globular with zero present mass. Tests: initial masses of `milky_way_globulars`
-within 0.1 dex of the Baumgardt–Hilker catalogue's where tabulated; median birth escape speed about
-twice today's.
+code path creates a globular with zero present mass. Tests: BM03's Table 1 (71,236 M☉ at 8.5 kpc:
+23,769 Myr ±2%, 11,675 Myr ±3% at ε = 0.5); the initial masses of `milky_way_globulars` at a median offset within ±0.25
+dex of the Baumgardt–Hilker catalogue's and at least 70% within 0.25 dex (the catalogue integrates
+orbits with dynamical friction); median birth escape speed 1.5–2.3 times today's (ruling 126.1–2).
 
 #### P09.T14 Milky Way checks: the globular system
 
 Slow test at Milky Way parameters over 50 seeds: mass function (turnover near 2 × 10⁵ M☉, the same
 inside and outside 5 kpc), sizes against radius, median eccentricity 0.5–0.75 and median pericentre
-1–2.5 kpc, central escape speeds with a median near 20 km/s and none above 100.
+1–2.5 kpc, central escape speeds with a median of 17–22 km/s, under 1% above 100 and a 99th
+percentile under 100 (ruling 126.8: a continuous law expects about 0.5 per galaxy above 100).
 
 ### Phase 4: supernova remnants and the clocked test
 
@@ -1337,7 +1359,9 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   1,000 km/s, with a low mode of σ 5 km/s and a share of about 19%) retains 19.6% there, nearly
   all of it the low mode's. The window is 15–25%, the same as ruling 96.3's at 20 km/s, which this
   plan's T9.b still gave as 8–12% and now gives as 15–25% too. The 18–26% at 100 km/s is not
-  re-checked here. Nothing is built yet; no output moves.
+  re-checked here. Nothing is built yet; no output moves. _Superseded for cluster retention by
+  ruling 126.3:_ a low-mode neutron star is judged on its pair's systemic speed (σ 12 km/s), so the
+  window at 20 km/s is 5–17%; 15–25% stays a test of the kick law alone.
 - **Re-validated at `d2787a2` (lane `feat09a`, 2026-09-26, `GENERATOR_VERSION` 12).** Consumes
   reconciled with plans 01–08 and 15 as built: `TagScope` and the tag by value in `Stream::open`;
   plan 02's `FeatureShare` lives in `galaxy::ages` and has no formation-rate function; the
@@ -1434,3 +1458,87 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
     height, 1,750 ly) and 3,300 ly. The cap's source is still owed.
   - _R5 (warm ionised filling)._ T5 adds hot holes and neutral clouds, no ionised gas, so the
     features leave `gas14`'s 0.21 against Gaensler's ~0.3 where it was.
+- **Phases 2 and 3 as built (lane `feat09b`, 2026-09-27, at `GENERATOR_VERSION` 13): T7, T8.a–b,
+  T9.a–h, T10, T11, T12.a–b, T13, T14.** Nothing any consumer reads moves: the catalogue is
+  unwired until T2.c. Its own golden, `galaxy/features/cells.golden`, is re-blessed at 13: the
+  globulars now take the first indices of every cell, so every other feature is renumbered and,
+  its streams keyed by its ID, redrawn. `rng/tags.golden` gains five tags (`feature.globular`,
+  `feature.cluster`, `member.mass`, `member.velocity`, `member.abundance`).
+  Names and shapes that differ from the sketches:
+  - `tables::cluster_dynamics` is hand-entered with the scratch values (2.8 × 10⁻³, 147, 0.138; η
+    = 1; 40, 0.7, cap 40) and no fit header, for P15.T8 to take over. The Baumgardt–Hilker copy is
+    `features::testing::{milky_way_globulars, named_cluster, catalogue_parameters}` (165 clusters
+    with orbits, fetched 2026-09-27, behind the crate's `testing` feature).
+  - `SystemOrigin::FeatureMember { feature: PackedFeature, attempt: u16 }`: the feature packs into
+    29 bits (ruling 20), and the attempt is the primary's redraw a remnant class chose, which
+    `stellar::system`'s primary draws now read (a grid record's is 0, bit for bit).
+    `SystemRecord::layer` reads a member's slot band. `kinematics::draw` panics for a member,
+    whose velocity is its cluster's.
+  - `ClusterModel::new` takes `ClusterParameters`; the model holds T9.b–e's closed forms
+    (`retention`, `black_hole_fraction`, `black_hole_count`, `is_core_collapsed`, `cusp_slope`,
+    `millisecond_pulsars`, `xray_binaries`, `blue_stragglers`). Its own marks are
+    `ClusterMarks` on `feature.cluster`. An open cluster's core is `r_t ÷ 10^c` held below `r_h ÷
+10^0.1`; young bound nurseries now carry T4.a's radius and concentration marks.
+  - `features::interior::{MemberClass, ClassKind, Generation, Multiplicity, ClassProfile,
+ProfileShape, MemberClassTable, TailClass, LocalCell, MemberAbundances}` and the modules
+    `counts` (T9's closed forms), `retention` (T9.b's quadrature), `abundances` (T9.h).
+    `MemberClassTable::new(galaxy, model, reach, tail_axis)`; `bound(band, corner_radius)` is the
+    profiled classes' and `cell_bound(band, &LocalCell)` adds the tail's (Design note 10), since the
+    tail needs the cell's geometry, and `pick(band, p, mark, bound)` takes the caller's bound for the
+    same reason; `density` and `mean_member_mass` take a local `PointLy` and return `f64` (per
+    cubic light-year, M☉). Binaries are a `Multiplicity` of the living and neutron-star classes,
+    not a kind. `members::draw_member(galaxy, feature, model, class, position, id, bulk) ->
+Option<MemberRecord>`: the caller holds the model and the bulk velocity; `None` only after 4,096
+    attempts, with a debug assertion.
+  - `kinds::globular::{GlobularMarks, GlobularOrigin, GlobularSystem, GlobularMassFunction,
+GlobularHistory, history, history_on_orbit, orbit, dissolution_time}`; `FeatureShares` holds
+    the `GlobularSystem` and its φ (`phi_globular`, band-weighted, which removes T2.b's `TODO`).
+    Recent progenitors' globulars are left to plan 10's streams and dwarf cores.
+  - Choices of ours, each provisional: the effective escape factor 0.7826 (the Plummer mean of
+    `(1 + x²)^(−3/4)`, cubed-root); a mean retained black
+    hole of 15 M☉; a system's binary mass 1.5 times its primary's; neutron stars of 1.35 M☉;
+    Kalirai et al. 2008's initial–final relation for the white dwarfs' profiles; the depleted slope
+    read at `t_rh × 12 Gyr ÷ age`, so young clusters are not depleted; the black holes' scale
+    `(0.1 + 0.2 f ÷ 0.06) r_h`, which the profiles' core takes while it is the larger; tails
+    drifting at the central dispersion and reaching four tidal radii until P09.T21's grid; the runaway share falling back to 15% at 10^4.5 M☉; carbon, aluminium and
+    magnesium spans and a 0.1 dex iron spread; X-ray binaries (5 at 47 Tucanae's Γ, `Γ^0.74`) and
+    blue stragglers (`M_core^0.38`); a globular's `log₁₀(r_h ÷ r_c)` normal about 0.72 ± 0.37 (the
+    catalogue's); the in-situ metal-rich globulars in the bulge's figure by its scale lengths.
+- **Findings of phases 2 and 3, ruled (ruling 126, built by `feat09b` on 21a82d0 and rebased onto
+  9148413, at `GENERATOR_VERSION` 13).** The code was fixed where the ruling found a bug (T13's kiloparsec) or
+  a wrong model (T9.b's pair speed, T10's equipartition), and the tests follow the ruling's
+  windows. Measured on 9148413:
+  - _T13:_ BM03's Table 1 to ±2% and ±3%; the initial masses' median offset −0.168 dex, 82% within
+    0.25 dex; the median birth escape speed 1.77 times today's.
+  - _T9.b:_ retention 22.9% at 100 km/s, 19.7% at 50, 11.0% at 20, 0.29% at 4.7; 1,647 neutron
+    stars in 47 Tucanae, 220 in M4, 0 in Palomar 5.
+  - _T9.c–e:_ 142 black holes in 47 Tucanae, 8,314 in ω Centauri, 12,616 over the catalogue;
+    core-collapsed 0.218; 4,930 pulsars, the cap binding in 5 clusters.
+  - _T12.a:_ inside-cut medians 5.14 kpc (metal-poor) and 2.97 kpc (metal-rich), over 32 galaxies.
+  - _T7:_ central escape speeds of 0.906, 2.07 and 4.80 km/s at 10², 10³ and 10⁴ M☉ (−1.6%, −6.0%
+    and −9.4% of the targets).
+  - _T14:_ median escape speed 18.0 km/s, 0.36% above 100 km/s, p99 82.3, fastest 164; median
+    eccentricity 0.67, pericentre 1.30 kpc, turnover 10^5.1 and 10^5.3 M☉.
+
+  Recorded as risks:
+  - _The black holes' clock_ (`BH_CLOCK_FACTOR` = 2.5) is a knife edge: the closed form's hard
+    floor at f = 0 drops 47 Tucanae from about 400 at 2.0 to about 170 at 2.5 and to none at 3.0.
+    The closed form cannot give the small non-zero fractions Dickson et al. 2023 measure, nor
+    Palomar 5's 20% (Gieles et al. 2021), which lie outside the model. The ruling's two optional
+    items were not built: the mean black hole from plan 06's remnants at the cluster's metallicity
+    (Dickson et al. 2023: 6.7 M☉ at 47 Tucanae, 13–16 M☉ when metal-poor) and `r_h × max(1, M ÷
+10⁶ M☉)^0.24` for the heaviest globulars.
+  - _Pulsars are capped at the neutron stars they are marks in_ (`MemberClassTable::
+millisecond_pulsars`; a deviation in T9.e): the encounter-rate law alone gives more pulsars
+    than neutron stars in 5 of the catalogue's 165 clusters, each with well under one of either.
+  - _A retained neutron star's pair_ can be unbound by its companion's own supernova, ejecting the
+    neutron star later (Pfahl et al. 2002's "several times smaller"): not modelled.
+  - _Open clusters' radii_: Hunt and Reffert 2024 find them only lightly correlated with mass,
+    against Brown and Gnedin 2021's M^0.242 that T4.a now reads.
+  - _T13's inversion_ stays about 0.15 dex from the catalogue's initial masses, which come from
+    backward orbit integration with dynamical friction.
+  - _The globular law_ is `r^−3.5` where Harris 2010 measures it (3–40 kpc) and steepens beyond;
+    the normalisation at the cut stands for that.
+  - _Still provisional_ (ruling 126.9): the 0.7826 factor, neutron stars of 1.35 M☉, Kalirai 2008,
+    the depletion read at `t_rh × 12 Gyr ÷ age`, `u ~ N(0.72, 0.37)`, the 15 M☉ mean black hole,
+    the X-ray binary and blue-straggler laws.

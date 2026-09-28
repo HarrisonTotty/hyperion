@@ -20,6 +20,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::math;
+use crate::planetary::context::XuvHistory;
 use crate::units::consts::STEFAN_BOLTZMANN;
 use crate::units::{
     AstronomicalUnits, EarthFluxes, Kelvin, Metres, SolarLuminosities, SolarRadii, Watts,
@@ -27,12 +28,20 @@ use crate::units::{
 };
 
 /// A host's light as the derivation reads it: its luminosity, effective temperature and radius
-/// at one time (ruling 34).
+/// at one time (ruling 34), and what its past gave (P14.T13).
+///
+/// The past is two things the atmospheres read ([`with_history`](Self::with_history)): the host's
+/// X-ray and ultraviolet history (P14.T1.a's [`XuvHistory`]), which drives the escape of
+/// envelopes and heats exobases, and the largest luminosity it has had, by which a survivor of the
+/// giant branch is judged (design note 11's scorching). A host built without them has delivered
+/// no X-rays and has never been brighter than it is.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct HostLight {
     luminosity: SolarLuminosities,
     effective_temperature: Kelvin,
     radius: SolarRadii,
+    xuv: XuvHistory,
+    peak_luminosity: SolarLuminosities,
 }
 
 impl HostLight {
@@ -69,7 +78,26 @@ impl HostLight {
             luminosity,
             effective_temperature,
             radius,
+            xuv: XuvHistory::DARK,
+            peak_luminosity: luminosity,
         })
+    }
+
+    /// The same host with its past: its X-ray and ultraviolet history `xuv`, and `peak`, the
+    /// largest luminosity it has had up to the time (plan 06's `max_luminosity_until`), held to at
+    /// least its luminosity now. A peak that is not finite is ignored.
+    #[must_use]
+    pub fn with_history(self, xuv: XuvHistory, peak: SolarLuminosities) -> Self {
+        let peak = if peak.value().is_finite() {
+            peak.value().max(self.luminosity.value())
+        } else {
+            self.luminosity.value()
+        };
+        Self {
+            xuv,
+            peak_luminosity: SolarLuminosities::new(peak),
+            ..self
+        }
     }
 
     /// The host's bolometric luminosity.
@@ -88,6 +116,20 @@ impl HostLight {
     #[must_use]
     pub const fn radius(&self) -> SolarRadii {
         self.radius
+    }
+
+    /// The host's X-ray and ultraviolet history: [`XuvHistory::DARK`] unless
+    /// [`with_history`](Self::with_history) gave one.
+    #[must_use]
+    pub const fn xuv(&self) -> &XuvHistory {
+        &self.xuv
+    }
+
+    /// The largest luminosity the host has had up to the time: its luminosity now unless
+    /// [`with_history`](Self::with_history) gave a larger one.
+    #[must_use]
+    pub const fn peak_luminosity(&self) -> SolarLuminosities {
+        self.peak_luminosity
     }
 }
 

@@ -71,7 +71,11 @@ impl SubstellarParams {
     ///   every five or six stars").
     /// - 21 rogue planets per star from ⅓ M⊕ to 13 `M_Jup`, with a slope of 0.96 in
     ///   dN ÷ dlog₁₀ M: Sumi et al. (2023, AJ 166, 108), 21 (+23, −13) per star and
-    ///   α₄ = 0.96 (+0.47, −0.27), from the MOA-II survey towards the bulge.
+    ///   α₄ = 0.96 (+0.47, −0.27), from the MOA-II survey towards the bulge. Sumi's 21 counts
+    ///   from 0.33 M⊕ (two thirds of it below 1 M⊕; about 7 per star from 1 M⊕ up), per star
+    ///   including brown dwarfs, so per hydrogen-burning star it is about 26–27. His 53 per M☉
+    ///   gives 21.3 per star at the model's 0.55–0.59 M☉ per system, so the default matches like
+    ///   for like (ruling 125).
     #[must_use]
     pub const fn generator_default() -> Self {
         Self {

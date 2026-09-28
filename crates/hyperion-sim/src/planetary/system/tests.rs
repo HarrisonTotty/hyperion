@@ -814,11 +814,13 @@ fn no_overlapping_orbits_in_generated_systems() {
     );
 }
 
-/// How many real systems of primaries over 8 M☉ the supernova overlap test samples: 360. Since
+/// How many real systems of primaries over 8 M☉ the supernova overlap test samples: 600. Since
 /// plan 11's ruling 81 nearly every massive primary has close direct companions (Moe and Di
 /// Stefano's Table 13; 18 of 120 sampled are single), which leave its planets little room: 120
-/// systems held 33 surviving pairs about exploded hosts, where the test asks for more than 60.
-const MASSIVE_SAMPLE: usize = 360;
+/// systems held 33 surviving pairs about exploded hosts, where the test asks for more than 60;
+/// since ruling 106.2's rocky groups of 2–6, 360 held 57, and since ruling 116.1's farther first
+/// rocky planet 480 held 60.
+const MASSIVE_SAMPLE: usize = 600;
 
 /// Ruling 71.3: the overlap property on post-supernova survivors. A sudden death gives each
 /// survivor its own eccentricity, and the scattering step (P14.T28.c) must leave no two orbits of

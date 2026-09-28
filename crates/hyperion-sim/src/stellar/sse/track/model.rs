@@ -8,6 +8,7 @@
 //! the mass it was entered with and is built once.
 
 use crate::stellar::Phase;
+use crate::stellar::premain::{Contraction, Protostar};
 use crate::stellar::remnant::structure::{
     black_hole_radius, neutron_star_radius, white_dwarf_radius,
 };
@@ -25,6 +26,9 @@ use super::super::helium::{self, HeliumStar};
 use super::super::hg::HertzsprungGap;
 use super::super::ms::MainSequence;
 use super::super::wind;
+use super::Bridges;
+use super::excess::HeliumHook;
+use super::post_agb::PostAgb;
 
 /// The share of the early AGB over which its core's remnant passes from the end of the helium
 /// main sequence to the helium giants' relation (see [`Model::point`]).
@@ -39,6 +43,12 @@ pub(crate) struct Physics<'a> {
     pub(crate) z: MetalFraction,
     /// The remnants' structure.
     pub(crate) remnant: RemnantRecipe,
+    /// Whether the end of the AGB is bridged ([`Bridges::Physical`]): the thermally pulsing AGB
+    /// then keeps its giant's luminosity and radius to the loss of its envelope, and the post-AGB
+    /// bridge crosses to the white dwarf (P06.T16.a).
+    pub(crate) bridges: Bridges,
+    /// The helium-excess correction, for a star with ΔY > 0 (P06.T17).
+    pub(crate) helium: Option<HeliumHook>,
 }
 
 /// A phase's clock across a segment: the phase's own time at the segment's coordinate x, from
@@ -47,19 +57,38 @@ pub(crate) struct Physics<'a> {
 pub(crate) struct Span {
     pub(crate) start: Megayears,
     pub(crate) end: Megayears,
+    /// The factor by which the phase's time runs slower than its clock: 1, but for the helium
+    /// excess's correction of the Hertzsprung gap and the first giant branch (P06.T17).
+    pub(crate) stretch: f64,
 }
 
 impl Span {
+    /// The span from `start` to `end` of the phase's clock, run at the clock's own pace.
+    #[must_use]
+    pub(super) const fn new(start: Megayears, end: Megayears) -> Self {
+        Self {
+            start,
+            end,
+            stretch: 1.0,
+        }
+    }
+
+    /// This span with its time stretched by `stretch` (see [`Span::stretch`]).
+    #[must_use]
+    pub(super) const fn stretched(self, stretch: f64) -> Self {
+        Self { stretch, ..self }
+    }
+
     /// The clock at x, exact at both ends: (1 − x) start + x end.
     #[must_use]
     pub(super) fn at(self, x: f64) -> Megayears {
         Megayears::new((1.0 - x) * self.start.value() + x * self.end.value())
     }
 
-    /// The span's length, years.
+    /// The span's length, years: its clock's, times the stretch.
     #[must_use]
     pub(super) fn years(self) -> f64 {
-        (self.end.value() - self.start.value()) * 1e6
+        (self.end.value() - self.start.value()) * 1e6 * self.stretch
     }
 }
 
@@ -88,6 +117,11 @@ impl HeliumCore {
 /// The closed forms of one segment.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Model {
+    /// The protostar, from the onset of collapse to the end of accretion (P06.T15.a).
+    Protostar(Protostar),
+    /// The contraction from the end of accretion to the zero-age main sequence (P06.T15.b), boxed:
+    /// its closed forms are larger than most phases'.
+    PreMainSequence(Box<Contraction>),
     /// The main sequence, whose initial mass is the current one: the formulae at the current mass,
     /// held in `fixed` when the segment's mass does not change.
     MainSequence {
@@ -136,6 +170,9 @@ pub(crate) enum Model {
     HeliumMainSequence { fixed: Option<HeliumStar> },
     /// A naked helium star after its main sequence: the helium Hertzsprung gap and giant branch.
     HeliumShellBurning { star: HeliumStar, span: Span },
+    /// The post-AGB crossing from the loss of the envelope at `start` (years since the onset of
+    /// collapse) to the white dwarf's knee (P06.T16.a).
+    PostAgb { bridge: PostAgb, start: f64 },
     /// A remnant, from its formation at `birth` (years since the onset of collapse); a white
     /// dwarf's cooling law starts at `origin` of its own clock (`white_dwarf::cooling_origin`,
     /// zero for every other remnant).
@@ -144,6 +181,8 @@ pub(crate) enum Model {
         mass: SolarMasses,
         birth: f64,
         origin: Megayears,
+        /// log₁₀ L at the post-AGB knee of a white dwarf that crossed the bridge (ruling 127.1).
+        knee: Option<f64>,
     },
 }
 
@@ -174,6 +213,15 @@ impl Model {
     pub(super) fn point(&self, phys: &Physics<'_>, coord: f64, mt: SolarMasses, age: f64) -> Point {
         let c = phys.coeffs;
         match self {
+            Self::Protostar(protostar) => Point {
+                phase: Phase::Protostar,
+                point: protostar.at(age),
+            },
+            Self::PreMainSequence(contraction) => Point {
+                phase: Phase::PreMainSequence,
+                point: contraction.at(age),
+            },
+            Self::PostAgb { bridge, start } => post_agb(bridge, age - start, mt),
             Self::MainSequence { fixed: Some(ms) } => Point {
                 phase: Phase::MainSequence,
                 point: ms.at(ms.t_ms() * coord),
@@ -202,7 +250,7 @@ impl Model {
             }
             Self::CoreHeliumBurning { phase, span } => Point {
                 phase: Phase::CoreHeliumBurning,
-                point: core_helium_burning(phase, *span, coord, mt, c),
+                point: horizontal_branch(core_helium_burning(phase, *span, coord, mt, c), mt, phys),
             },
             Self::EarlyAgb {
                 phase,
@@ -214,6 +262,13 @@ impl Model {
             },
             Self::ThermallyPulsingAgb { phase, span } => {
                 let point = phase.at_mass(span.at(coord), mt, c);
+                if phys.bridges == Bridges::Physical {
+                    // The post-AGB bridge takes the star to the white dwarf (P06.T16.a).
+                    return Point {
+                        phase: Phase::ThermallyPulsingAgb,
+                        point,
+                    };
+                }
                 let mu = wind::small_envelope_mu(mt, point.core_mass, point.luminosity);
                 Point {
                     phase: Phase::ThermallyPulsingAgb,
@@ -250,21 +305,32 @@ impl Model {
                 mass,
                 birth,
                 origin,
+                knee,
             } => Point {
                 phase: *phase,
-                point: remnant(*phase, *mass, age - birth, *origin, phys),
+                point: remnant(*phase, *mass, age - birth, *origin, *knee, phys),
             },
         }
     }
 }
 
 impl Model {
+    /// Whether the model is one of the stages before the main sequence (P06.T15), which the
+    /// track's maxima leave out.
+    #[must_use]
+    pub(super) const fn is_before_main_sequence(&self) -> bool {
+        matches!(self, Self::Protostar(_) | Self::PreMainSequence(_))
+    }
+
     /// The bytes the model owns on the heap, beyond `size_of::<Model>()`.
     #[must_use]
     pub(super) fn heap_bytes(&self) -> usize {
         match self {
             Self::CoreHeliumBurning { .. } => size_of::<CoreHeliumBurning>(),
-            Self::MainSequence { .. }
+            Self::PreMainSequence(_) => size_of::<Contraction>(),
+            Self::Protostar(_)
+            | Self::PostAgb { .. }
+            | Self::MainSequence { .. }
             | Self::HertzsprungGap { .. }
             | Self::FirstGiantBranch { .. }
             | Self::FlashBridge { .. }
@@ -295,7 +361,10 @@ impl Model {
                     phase: Phase::MainSequence,
                     point: ms.at(ms.t_ms() * coord),
                 };
-                (point, Some(ms.t_ms()))
+                let t_ms = phys.helium.map_or(ms.t_ms(), |hook| {
+                    Megayears::new(ms.t_ms().value() * hook.timescale_factor(mt.value()))
+                });
+                (point, Some(t_ms))
             }
             Self::HeliumMainSequence { fixed: None } => {
                 let (point, t_ms) = helium::main_sequence_at_fraction(mt, coord);
@@ -305,7 +374,10 @@ impl Model {
                 };
                 (point, Some(t_ms))
             }
-            Self::MainSequence { fixed: Some(_) }
+            Self::Protostar(_)
+            | Self::PreMainSequence(_)
+            | Self::PostAgb { .. }
+            | Self::MainSequence { fixed: Some(_) }
             | Self::HeliumMainSequence { fixed: Some(_) }
             | Self::HertzsprungGap { .. }
             | Self::FirstGiantBranch { .. }
@@ -317,6 +389,28 @@ impl Model {
             | Self::Remnant { .. } => (self.point(phys, coord, mt, age), None),
         }
     }
+}
+
+/// The post-AGB crossing's state `years` after it began, with `core` (P06.T16.a).
+#[must_use]
+fn post_agb(bridge: &PostAgb, years: f64, core: SolarMasses) -> Point {
+    let [log_l, log_r] = bridge.at(years);
+    Point {
+        phase: Phase::PostAgb,
+        point: PhasePoint {
+            luminosity: SolarLuminosities::new(crate::math::exp10(log_l)),
+            radius: crate::units::SolarRadii::new(crate::math::exp10(log_r)),
+            core_mass: core,
+        },
+    }
+}
+
+/// A horizontal-branch `point` at current mass `mt`, with the helium excess's shift where the
+/// star has one (P06.T17).
+#[must_use]
+fn horizontal_branch(point: PhasePoint, mt: SolarMasses, phys: &Physics<'_>) -> PhasePoint {
+    phys.helium
+        .map_or(point, |hook| hook.horizontal_branch(point, mt))
 }
 
 /// Core helium burning at the fraction `coord` of its `span` for current mass `mt`, perturbed
@@ -440,12 +534,18 @@ fn perturb_to_white_dwarf(
 /// 90 under `Hurley2000`; P06.T20.a), a neutron star by equation 93, and a black hole is dark
 /// (HPT's 10⁻¹⁰ L☉ of equation 96 guards a division, not a physical luminosity; P06.T22). The
 /// radii are those of the track's remnant recipe (P06.T11). `NoRemnant` has neither.
+///
+/// A white dwarf that crossed the post-AGB bridge (`knee`, its log₁₀ L at the knee) fades on
+/// Miller Bertolami's shape to 10 L☉ first, over `post_agb::fade_years`, and only then follows its
+/// cooling law, whose `origin` puts 10 L☉ at the fade's end (ruling 127.1); its radius is inflated
+/// as it leaves the knee (ruling 124.2, `post_agb::inflated_radius`).
 #[must_use]
 fn remnant(
     phase: Phase,
     mass: SolarMasses,
     years_since_birth: f64,
     origin: Megayears,
+    knee: Option<f64>,
     phys: &Physics<'_>,
 ) -> PhasePoint {
     let age = Years::new(years_since_birth.max(0.0));
@@ -453,10 +553,22 @@ fn remnant(
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             let core =
                 WhiteDwarfCore::of(phase).expect("a white dwarf phase has a white dwarf core");
-            (
-                white_dwarf::luminosity(phys.remnant, core, mass, age, origin, phys.z),
-                white_dwarf_radius(phys.remnant, mass),
-            )
+            let fading = knee
+                .and_then(|log_l| super::post_agb::fade_log_l(log_l, mass.value(), age.value()));
+            let luminosity = fading.map_or_else(
+                || white_dwarf::luminosity(phys.remnant, core, mass, age, origin, phys.z),
+                |log_l| SolarLuminosities::new(crate::math::exp10(log_l)),
+            );
+            let cold = white_dwarf_radius(phys.remnant, mass);
+            let radius = knee.map_or(cold, |log_l| {
+                crate::units::SolarRadii::new(super::post_agb::inflated_radius(
+                    cold.value(),
+                    mass.value(),
+                    luminosity.value(),
+                    crate::math::exp10(log_l),
+                ))
+            });
+            (luminosity, radius)
         }
         Phase::NeutronStar => (
             neutron_star::hpt_luminosity(mass, age),

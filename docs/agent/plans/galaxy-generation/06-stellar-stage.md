@@ -612,7 +612,7 @@ in parallel; T11, T10.a and T10.b need only T1.a and can run beside any of these
 of them and T2; then T12.b and T12.c. T12.a is an offline run of the published SSE code with no
 code dependency. Phases C, D and E can run in parallel with each other once T10 is done, except
 where a task names another: T16 needs T20.a, the cooling law it hands over to; T18 needs T8's
-`m_c_bagb`; T19.a's law needs T18 and T1.b; T24.a needs T9 and T10; T24.b needs T28.f; T26.c–d need
+`m_c_bagb`; T19.a's law needs T18 and T1.b; T39 needs T14; T24.a needs T9, T10 and T39; T24.b needs T28.f; T26.c–d need
 T27.c. T29.a, the `StarModel`, needs T10 and phase D; T26.d and every T28 kind take one, so they
 wait for it. Within phase F, T28 needs T27 and T29.a; T28.a needs T25; T28.e needs T24.a; T28.g
 needs the rest of T28. T29.b needs plan 03, T3 and B–F. T30 needs T10, T18 and P02.T9, not plan 03.
@@ -961,11 +961,32 @@ nothing of plans 02 or 03.
   is exactly 1 at 100 M☉. The task picks one published grid of very massive star models that reaches
   150 M☉ at two metallicities or more (candidates: Yusof et al. 2013; Köhler et al. 2015), fits the
   three quadratics to it, and records grid, fit and residuals in the doc comment. The Eddington
-  factor is checked to stay below 1 over the whole range.
-- **Files:** `stellar/sse/vms.rs`.
+  factor Γ_e at X = 0 (the least opacity a photosphere can have) is checked to stay below 0.75 on
+  the main sequence at every metallicity (ruling 124.1); after the main sequence its excursions are
+  flagged and pinned, and P06.T39's wind removes them.
+- **Files:** `stellar/sse/vms.rs`; the tracks' tests in `stellar/sse/track/stages_tests.rs`.
 - **Tests:** continuity at 100 M☉ to 10⁻¹²; L, R and lifetime at 120 and 150 M☉ within 10% of the
   chosen grid; lifetime stays above 2 Myr; count check in T31 (about a thousand alive at once).
 - **Accept:** tests pass.
+- _As built (round 9, `track06`)._ `stellar/sse/vms.rs`: `luminosity_factor`, `radius_factor` and
+  `lifetime_factor`, each 1 + a x + b x² in x = log₁₀(m ÷ 100 M☉), exactly 1 at and below
+  100 M☉. The grid is Yusof et al.'s (2013, MNRAS 433, 1114) non-rotating Geneva models, Tables 2
+  (ZAMS log L, log T_eff) and 3 (τ_H), at 120 and 150 M☉ and Z = 0.014 and 0.006; it has no
+  100 M☉ model, so each quadratic's two coefficients are least squares over the four points. Fits
+  (a, b): L (0.0583, −0.901), worst residual 0.15%; R (−2.23, 8.97), 5.6% (the grid's own spread
+  in Z); lifetime (−2.896, 8.99), 3.0%, held so that the lifetime still falls with mass to 150 M☉
+  (the unconstrained fit dips to 0.765 at 138 M☉). The luminosity and radius factors enter
+  `zams::luminosity` and `zams::radius` and so correct the zero-age main sequence alone (the
+  terminal-age values are HPT's, so the correction fades along the main sequence and the
+  Hertzsprung gap starts where HPT's does); the lifetime factor enters HPT's `t_BGB`, and with it
+  `t_hook`, `t_MS` and the gap. `MAX_INITIAL_MASS` is 150 M☉, so `StarModel`, the binary engine,
+  the kick law's reference population and `FateNode::of` no longer evolve 100–150 M☉ stars as
+  100 M☉ ones, and the fate table's high panel has 72 masses to log₁₀ m₀ = 2.18. _Findings_ (see
+  Risks): the grid differs from HPT by 8–16% in radius and 19–22% in lifetime already at 120 M☉,
+  so the corrections act mostly between 100 and 120 M☉; the tracks' own main sequences, whose
+  winds lengthen the effective-age clock, last 1–16% longer than τ_H (3.09 against 2.67 Myr at 120 M☉ and Z = 0.014); the Eddington factor passes 1 on
+  the late main sequence at Z ≤ 0.001 above about 130 M☉, and after the main sequence at every
+  metallicity. The count check waits for T31.
 
 #### P06.T15 Protostars and the pre-main sequence
 
@@ -977,7 +998,7 @@ nothing of plans 02 or 03.
   choice).
 - **P06.T15.b Contraction.** `t_zams(m, Z)`: the arrival time, a fit in log m to Baraffe et al.
   (2015) below 1.4 M☉ and to a Kelvin–Helmholtz time from the ZAMS values above (about 40 Myr at 1
-  M☉, several hundred Myr at 0.2, under t_p above about 8 M☉, in which case the star is on the main
+  M☉, several hundred Myr at 0.2, under t_p above about 6–7 M☉ (ruling 124.6), in which case the star is on the main
   sequence when accretion ends). Between t_p and `t_zams`: Hayashi contraction at nearly fixed
   temperature with R ∝ t^(−⅓), then for m > 0.5 M☉ a Henyey segment of rising temperature, blended
   so that L, R and their first derivatives meet the ZAMS values at `t_zams`. `Track` gains the two
@@ -1002,25 +1023,164 @@ nothing of plans 02 or 03.
   0.5 M☉ are pre-main-sequence, as the brainstorm states; stars of negative age are rejected by the
   type (`SystemExistence::NotYetBorn` is decided in T29).
 - **Accept:** tests pass; the continuity sweep of T10.d now starts at age zero.
+- _As built (round 9, `track06`; T15.a and T15.b)._ `stellar::premain` gains `PROTOSTAR_DURATION`
+  (t_p = 0.5 Myr), `protostar_mass`, `ProtostarClass::{Class0, ClassI}`, `protostar_class` and
+  `t_zams(m, &Composition)`, and the crate-private closed forms `Protostar` and `Contraction`
+  that the track's two new leading segments evaluate (`Model::Protostar`,
+  `Model::PreMainSequence`). Dunham et al. (2014) confirm 0.15–0.16 Myr for Class 0 and about
+  0.5 Myr for Class 0+I.
+  - _Arrival._ t_zams = g(m) G m² ÷ (R L) at HPT's zero-age main sequence of the star's Z, with
+    log₁₀ g a cubic in log₁₀ m fitted to Baraffe et al.'s (2015) arrivals (log R within 0.01 dex
+    of its minimum; 554 Myr at 0.1 M☉, 230 at 0.2, 140 at 0.5, 38.4 at 1, 17.4 at 1.4; residuals
+    0.017 dex rms, 0.037 at most) and held at its 1.4 M☉ value above: the Kelvin–Helmholtz time,
+    scaled. Against MIST it gives 15.2 against 13.9 Myr at 1.5 M☉, 0.81 against 1.0 at 5 and
+    0.21 against 0.19 at 10; a 1 M☉ star at Z = 0.002 arrives at 19.6 Myr against MIST's 21.1 at
+    [Fe/H] = −1. The arrival falls below t_p near 6 M☉, not 8.
+  - _Birthline._ Palla and Stahler (1999) would not download; the table is Baraffe et al.'s 0.5 Myr
+    radii and temperatures at 0.1–1.4 M☉ (the age at which their tracks start and accretion ends),
+    Palla and Stahler's (1993, Table 1) birthline at 2–5 M☉ (with its deuterium swelling near
+    4 M☉), and HPT's zero-age main sequence at 8 M☉, where Palla and Stahler (1990) say it meets
+    the birthline; linear in log m between, held beyond.
+  - _Protostar._ Its photosphere is the birthline's at its current mass, shifted by the accreted
+    share w = m ÷ m_f times the contraction's own −⅓ log₁₀(t ÷ t_p) in log R, so that at t_p it
+    meets the contraction in value and in slope; L adds G m ṁ ÷ R. The luminosity's slope at t_p
+    does not match (the accretion stops there), which the test leaves out; R's does. The mass is
+    held above 10⁻³ M☉ at the onset. A star that arrives before t_p accretes onto its main
+    sequence: the protostar's photosphere ends at the main sequence's state at t_p, which starts
+    from τ₀ = (t_p − t_zams) ÷ t_MS (held to 0.5), and it has no contraction segment.
+  - _Contraction._ Hayashi at the birthline's temperature with R = R_birthline (t ÷ t_p)^−⅓
+    (Baraffe et al.'s 1 M☉ star: 0.593 from 1 to 5 Myr, the law 0.585), then from the Henyey onset,
+    at a share 0.687 − 0.7 log₁₀ m (held to 0.3–0.9) of the span in ln t (fitted to where
+    Baraffe et al.'s tracks start to heat), a cubic Hermite blend in ln t of log L and log R to
+    the main sequence's first state and slopes, which the contraction reads from the main
+    sequence's segment, built first and handed on. A 1 M☉ star at 2 Myr has 1.27 L☉ and 4,397 K.
+    **Deviation:** stars below 0.5 M☉ get the blend too, over the last 10% of the span in ln t,
+    since their slopes must meet the main sequence's as well; the plan gives the Henyey segment to
+    stars above 0.5 M☉ only. A star of negative age has no protostar class and no mass
+    (`protostar_class` is `None`, `protostar_mass` zero), as `StarModel` has no state then.
+  - _Seams._ HPT's clock starts at the main sequence's start: `turn_off_mass` inverts arrival +
+    t_MS; `main_sequence_state` and `Track::knot_free_main_sequence` start at the arrival
+    (`Track::built_from`), and the brief's main-sequence route needs the window's start past it;
+    builds that keep no track skip both stages. Under `Bridges::Instant` (P06.T12.b's SSE
+    comparison) there is neither stage: the track starts on the zero-age main sequence at age
+    zero. **Deviation:** `max_radius_until` and `max_luminosity_until` count from the arrival
+    (before it they are the present values): a contracting star's radius would otherwise engulf
+    every ultra-short-period planet of plan 14 and fill plan 11's close companions' lobes, where
+    binary codes start at the zero-age main sequence. For the same reason plan 11's engine
+    (`stellar/binary/evolve.rs`, `arrival`) starts stepping where both stars have arrived, the
+    pair detached before.
 
 #### P06.T16 The post-AGB bridge and planetary nebulae
 
-- **P06.T16.a Bridge** (design note 8): a `PostAgb` segment after envelope loss from either AGB
-  phase: constant L, T_eff rising from the AGB value to the knee temperature of the white dwarf of
-  that mass over the crossing time `t_cross(m_core)`, then the hand-over to T20's cooling law with
-  matching L. Removes the declared discontinuity left by T10.d.
+- **P06.T16.a Bridge** (design note 8; ruling 124.2–3): a `PostAgb` segment after envelope loss
+  from either AGB phase: log L falling linearly in time from the AGB's by 0.2939 − 0.8304 log₁₀ M_f
+  dex, T_eff rising from the AGB value through 25,000 K to the knee, whose radius is ρ R_WD(0 K)
+  with log₁₀ ρ = 0.1863 − 1.8306 log₁₀ M_f (both held at their 0.83 M☉ values above it), over the
+  crossing time `t_cross(m_core)` (log₁₀ t = 2.0690 − 1.4443 log₁₀(M − 0.517), at most 10⁵ years),
+  then the white dwarf's fade on Miller Bertolami's median shape to 10 L☉ over t₁ (log₁₀ t₁ =
+  4.6189 − 3.9917 log₁₀ M_f, years; ruling 127.1), and the hand-over to T20's cooling law matched
+  at 10 L☉, the white dwarf's radius R_WD[1 + (ρ − 1)(L ÷ L_knee)^0.4]. Removes the declared discontinuity left by T10.d. (The first form, constant
+  L to the cold white dwarf's radius, is withdrawn by ruling 124.2: it knees 0.4 dex hot.)
 - **P06.T16.b Nebula.** `nebula::planetary_nebula(&Track, age) -> Option<PlanetaryNebula>`: present
   when the death was `EnvelopeLoss` from the AGB, the central star is above 25,000 K, and the time
-  since ejection is under the visibility time, R ÷ v with R_max = 0.8 pc and v drawn once in 20–40
-  km/s (about 20,000–40,000 years, the brainstorm's "some 20,000"). Gives radius, expansion speed,
+  since ejection is under the visibility time, R_max ÷ 1.3 v with R_max = 0.9 pc and v drawn once in
+  20–40 km/s, the edge moving at 1.3 v (ruling 124.5: 16,900–33,900 years, the brainstorm's "some
+  20,000"). Gives radius, expansion speed,
   age, ionised mass (a fixed fraction of the envelope lost in the last superwind knots) and an
   excitation class from the central star's temperature.
 - **Files:** `stellar/sse/track.rs`, `stellar/nebula.rs`.
-- **Tests:** continuity through the bridge; nebula radius never above 2.7 ly; stars with cores below
-  about 0.53 M☉ show no nebula; the expected number alive in a Milky Way galaxy (death rate of 0.8–8
-  M☉ stars × mean visible time, from T31's sampler) is 5,000–50,000, against the 20,000 or so
-  estimated for the Milky Way.
+- **Tests:** continuity through the bridge; the knee's T_max within 0.1 dex of Miller Bertolami's
+  (2016) 24 sequences and R ÷ R_WD at log L = 2 within 25% of theirs; no white dwarf of M_f ≤
+  0.85 M☉ above 10^5.65 K; the fade from the knee to log L = 2 in 0.3–30 kyr for 0.58–0.83 M☉
+  (ruling 127.1), the time to log L = 1 within 0.2 dex of each of Miller Bertolami's sequences,
+  and L and R continuous at t₁;
+  nebula radius never above 0.9 pc (2.94 ly); stars with cores below about 0.53 M☉ (0.527–0.534)
+  show no nebula; at today's star formation the Galaxy's count is at least 3,500 (ruling 127.2:
+  0.296 deaths a year × 0.70 × 19.6 kyr), 0.65–0.75 of the AGB deaths show a nebula, and each
+  nebula's mean visible time is 16–26 kyr (ruling 124.4); the Galaxy's own count, 5,000–50,000 (expected
+  20,000–40,000), waits for T31's sampler.
 - **Accept:** tests pass.
+- _As built (round 9, `track06`; T16.a)._ `stellar/sse/track/post_agb.rs`, `Model::PostAgb`,
+  `Entry::PostAgb`. Under `Bridges::Physical` the thermally pulsing AGB keeps its giant's L and R
+  to the loss of its envelope, without HPT §6.3's perturbation towards the white dwarf (which faded
+  the star to about 20 L☉ over its last 10⁴–10⁵ years), and every white dwarf the AGB leaves
+  (envelope loss, and the oxygen–neon cap) crosses first: L held at the AGB's last, log T_eff
+  linear in time from the AGB's to 25,000 K at `ionising_years` and on to the knee at
+  `crossing_years`, both power laws in the core mass fitted to Miller Bertolami's (2016) Table 3
+  and CDS tracks at Z = 0.02 and 0.01 (log₁₀ t = 1.716 − 9.466 log₁₀ M, rms 0.28 dex, and 1.834 −
+  7.867 log₁₀ M, rms 0.30, held to 95% of the crossing): 15 kyr at 0.55 M☉, 1.5 kyr at 0.7. The
+  knee is where the star has the white dwarf's radius, so L and R are both continuous and the
+  cooling law is matched to the crossing's L (ruling 46.2). The death, and the remnant's birth,
+  are at the knee, so every AGB white dwarf dies 10²–10⁵ years later; `lifetime_of` and
+  `remnant_of` reach the same death and the same last luminosity without the segment. Under
+  `Bridges::Instant` the perturbation and the direct hand-over stand. _Findings:_ the knee is
+  0.3–0.4 dex hotter than Miller Bertolami's highest temperatures, because the zero-temperature
+  radius is 2–4 times smaller than a hot core's, and the fade after it runs on the Montreal law's
+  extrapolation above its brightest node (a 1.27 M☉ oxygen–neon dwarf is 1.3 MK a century after);
+  and without the perturbation the AGB's last winds act at the giant's radius, so white dwarfs are
+  lighter, by 0.002–0.014 M☉ (0.5197 to 0.5121 M☉ at 1 M☉ and Z = 0.02, 0.5557 to 0.5418 at
+  Z = 0.004), still within design note 9's Cummings et al. check.
+- _As built (round 9, `track06`; T16.b)._ `stellar::nebula::{planetary_nebula, PlanetaryNebula,
+MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; the track keeps the
+  star's `nebula` rank. The shell is the mass lost over the thermally pulsing AGB's last 16 of 31
+  knot intervals (about 0.04 M☉ at 1 M☉, 0.25 at 2, 1 at 7), 30% of it ionised (Frew and Parker
+  2010 give 0.005–3 M☉); the excitation class, 0–12, inverts Reid and Parker's (2010, eq. 5)
+  log T_eff = 4.439 + 0.1174 E − 0.00172 E². _Deviations:_ the plan's "cores below about 0.53 M☉
+  show no nebula" does not hold with Miller Bertolami's crossing: cores below 0.446–0.487 M☉ (for
+  the slowest and fastest shells) show none, and his own 0.528 M☉ sequence at Z = 0.02 reaches
+  25,000 K 13.6 kyr after the AGB (a finding, Risks); the Milky Way count uses a constant star
+  formation of 1.65 M☉ a year and Kroupa's function in place of T31's sampler, not built, and
+  counts deaths of 0.9–8 M☉ stars (a 0.8 M☉ star of solar metallicity does not die within the
+  Galaxy's age), not 0.8–8: a mean visible time of 21,000 years (Jacob et al.'s
+  2013 21,000 ± 5,000) and 6,200 nebulae, inside the plan's 5,000–50,000 but a third of the
+  estimated 20,000, which the constant star formation's undercount of old stars may explain.
+  Not wired: `SystemStars` and the server's `planetary_nebula` stay `NotModelled`
+  (`srv/convert/stellar.rs` is not this lane's).
+- _As built after ruling 127 (round 9, `track06`), superseding the bullets above and below where
+  they differ._ `post_agb::{fade_years, fade_log_l, bridged_origin}`: a white dwarf off the bridge
+  fades on MB16's median shape from its knee to 10 L☉ over t₁, and its Montreal law starts at its
+  10 L☉ point at t₁ (`bridged_origin`, `cooling_origin` at 10 L☉ less t₁). The remnant record
+  carries the knee's log L (`RemnantModel::knee`, `Model::Remnant { knee }`), which the radius's
+  inflation reads, so the "negative origin" test of the bullet below is gone. The fate table gains
+  two routes, `BridgedCarbonOxygenWhiteDwarf` and `BridgedOxygenNeonWhiteDwarf` (codes 6 and 7),
+  whose `b` is the knee's log L; the origin is rebuilt from the mass. `fates::MIN_ORIGIN_MYR` is
+  removed: only bridged dwarfs had negative origins, and they no longer store one, so unbridged
+  dwarfs are held at zero as before P06.T16. `lifetime_of` and `remnant_of` reach the same knee
+  and origin. The fade from the knee to log L = 2 takes 10^−1.53 t₁, 2.6–10.8 kyr at 0.83–0.58 M☉, inside ruling 127.1's
+  0.3–30 kyr. **Not carried:** plan 11's engine, when a companion feeds a bridged white dwarf
+  (`remnant_clock`), runs it on the Montreal law from the 10 L☉ origin, without the fade.
+- _As built after ruling 124 (round 9, `track06`), superseding the two bullets above where they
+  differ._
+  - _The knee (124.2)._ `post_agb::{knee_fade_dex, knee_inflation, inflated_radius}`: the crossing
+    fades in log L linearly in time by Δ, heats through 25,000 K to the knee at ρ R_WD, and the
+    white dwarf's radius is R_WD[1 + (ρ − 1)(L ÷ L_knee)^0.4] (`model.rs`,
+    `young_white_dwarf_radius`), L_knee the cooling law's luminosity at its origin. A white dwarf is
+    taken to have left a knee when its origin is negative under the default recipe (the law was
+    matched above its brightest node), which the fate table's remnant also carries, so the table
+    route needs no new column; helium dwarfs and `Hurley2000` keep the cold radius. Tests: the
+    knee's T_max within 0.1 dex at all 24 of MB16's sequences, R ÷ R_WD at log L = 2 within 25%, no
+    dwarf of ≤ 0.85 M☉ above 10^5.65 K. **A finding against the ruling's fade test:** the fade
+    from the knee to log L = 2 takes 46–102 kyr for 0.58–0.80 M☉ dwarfs, against its 0.3–10 kyr
+    (MB16 0.85–6.9): above 10^2.5 L☉ the Montreal law runs on its log–log extrapolation towards its
+    −0.1 Myr pole. The test pins 10–200 kyr.
+  - _The crossing (124.3)._ `crossing_years` and `ionising_years` are offset power laws, log₁₀ t =
+    a + b log₁₀(M − M₀) in years: (0.517, 2.0690, −1.4443), held at 10⁵ years, and (0.519,
+    2.1550, −1.1362), held at 95% of the crossing. The cut-off is 0.527–0.534 M☉; HYPERION's
+    1 M☉ solar star (a 0.512 M☉ core) shows no nebula.
+  - _The nebula (124.5)._ `MAX_RADIUS` is 0.9 pc (2.94 ly) and `EDGE_SPEED_FACTOR` 1.3: the edge
+    moves at 1.3 v, so a nebula is visible for 16.9–33.9 kyr.
+  - _The count (124.4)._ The constant-rate count is a floor with a mean visible time of 16–26 kyr:
+    measured 19,600 years, but **4,050 nebulae, under the ruling's floor of 5,000** (a finding): 72
+    of the 240 stars, those of about 0.9–1.1 M☉ with the lighter cores rulings 92 and 99 accepted,
+    are lazy under 124.3. The test asserts 3,500 until that is ruled.
+  - _The Eddington factor (124.1)._ `very_massive_main_sequences_stay_below_the_eddington_limit`
+    reads Γ_e at X = 0 (below 0.75), and `post_main_sequence_eddington_excursions_are_pinned` pins
+    the maxima (within 20%) and times above 1 (within a factor of two) of the research's six tracks,
+    for P06.T39 to remove.
+  - _The blend below 0.5 M☉ (124.7)._ `the_blend_below_half_a_solar_mass_stays_near_the_hayashi_temperature`:
+    within 200 K and 7% of the birthline temperature at Z = 0.02, and of the range between the
+    birthline's and the zero-age main sequence's at lower Z (whose zero-age main sequence is up to
+    300 K hotter).
 
 #### P06.T17 The helium-excess hook
 
@@ -1040,6 +1200,16 @@ nothing of plans 02 or 03.
   test-only non-identity table changes lifetime and horizontal-branch temperature in the stated
   directions.
 - **Accept:** tests pass; plan 15 can replace the table file alone.
+- _As built (round 9, `track06`)._ `tables/helium.rs` (`LOG_Z_NODES` at [Fe/H] −2.2, −1.6, −1.0,
+  −0.5; `LIFETIME_SLOPE`, `HB_TEMPERATURE_SHIFT`, all zero), committed by hand and marked
+  provisional, not in `MANIFEST` or the lock (P15.T7 registers it). `stellar/sse/track/excess.rs`:
+  `HeliumTable`, and `HeliumHook::of` built only for ΔY > 0. The main sequence's lifetime (in
+  both its duration and the rebuilt effective-age rate, bit for bit) and the Hertzsprung gap's and
+  first giant branch's spans (`Span::stretched`) take exp(s ΔY), s at the mass the phase's
+  formulae read; core helium burning's log T_eff takes the shift at constant L; `turn_off_mass`
+  reads the factor too. Tests: at ΔY = 0 a track is bit-identical whatever the table, and the
+  committed table is the identity at ΔY = 0.1 too; a test table (s = −4, shift 0.5) shortens a
+  0.8 M☉ star's life at [Fe/H] = −1.5 by a third and heats its horizontal branch.
 
 ### Phase D: remnants and kicks
 
@@ -1143,6 +1313,9 @@ nothing of plans 02 or 03.
   equation 90. T_eff from L and the radius of T11. The cooling age counts from the end of the
   post-AGB bridge, whose end luminosity the law is matched to; T16.a, which hands over to this law
   and so lands after it, moves the origin there from T10.d's direct hand-over at envelope loss.
+  Since ruling 127.1 a white dwarf off the bridge follows Miller Bertolami's fade to 10 L☉ first,
+  and this law is matched there (Bédard et al. 2020 warn that cooling ages under 10⁵ years depend
+  on their initial models); the law itself is unchanged.
   Check against the 0.6 M☉ CO thick-hydrogen sequence of Bédard et al. (2020), at models held out
   of the fit: T_eff within 10% from 0.01 to 10 Gyr; and continuity in mass across the fitted range.
 - **P06.T20.b Spectral type** by fixed draws against thresholds that move with temperature, the
@@ -1241,6 +1414,25 @@ nothing of plans 02 or 03.
   every state from a 10⁵-star sample classifies without panic and round-trips through `Display` and
   a test parser.
 - **Accept:** tests pass.
+
+#### P06.T39 Winds near the Eddington limit (ruling 124.1)
+
+Runs before P06.T24.a, whose WNh class it feeds.
+
+- **Build:** a wind term that grows with the electron-scattering Eddington factor Γ_e (at the
+  star's surface hydrogen, X = 0 as the bound): continuous with the recipe's rate at Γ_e = 0.7, and
+  above it log Ṁ steepening as 3.99 log Γ_e + 0.78 log L (Vink et al. 2011, as Gräfener et al.
+  2011, A&A 535, A56, eq. 7, quote it). It strips the stripping instant's last envelope (Γ_e(X = 0) of 1.03–1.19 for 11–46 kyr today) in decades and the metal-poor 150 M☉ red supergiants'
+  (log L 6.9–7.7, up to 8.0 for 37–88 kyr) in a few thousand years, handing over to the helium-star
+  laws, which is Yusof et al.'s (2013) endpoint. T24.a reads Γ_e for its WNh stars, not the surface
+  composition (Gräfener et al. 2011: "the Wolf-Rayet stage should be identified by large Eddington
+  parameters").
+- **Files:** `stellar/sse/wind.rs`, `stellar/sse/track*`.
+- **Tests:** no living state spends over 10³ years at Γ_e(X = 0) > 1, over 100–150 M☉ at five
+  metallicities and 80 M☉ at Z = 10⁻⁴; continuity of the rate at Γ_e = 0.7; the pinned excursions
+  of `post_main_sequence_eddington_excursions_are_pinned` replaced by this test.
+- **Accept:** tests pass. **Moves output** (the post-main-sequence evolution of stars above about
+  80 M☉, low-Z remnants, the fate table's high panel and the kick rank table): its own bump.
 
 #### P06.T24 Classes beyond the MK grid
 
@@ -1536,7 +1728,9 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
   - Galaxy-wide expected counts from population budgets × sampled fractions: protostars 0.6–4 × 10⁶;
     stars above 100 M☉ 300–3,000; Wolf-Rayet stars 500–8,000; LBVs 100–2,000 (from which T28.e's
     provisional rate is retuned to 15–60 giant eruptions in ±H); classical Cepheids 5,000–50,000;
-    planetary nebulae (T16); living radio pulsars 10⁵–10⁶, of which beamed at a given place 10–20%;
+    planetary nebulae (T16) 5,000–50,000 (expected 20,000–40,000), compared by birth rate (ruling
+    124.4): AGB white-dwarf births 1.2–3.0 a year (Moe and De Marco 2006: 2.4 ± 0.5) and a nebula
+    share of those births of 0.6–0.95 (0.73 ± 0.10); living radio pulsars 10⁵–10⁶, of which beamed at a given place 10–20%;
     core collapses per century 1–8 across seeds and about 2 at Milky Way values.
 - **Files:** `stellar/testing.rs`, `crates/hyperion-sim/tests/stellar_statistics.rs`.
 - **Accept:** `just test-slow` passes; a band that fails is a finding to resolve in the model or to
@@ -3787,3 +3981,75 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     strip, keep 4x(1 − x): Bono et al.'s models are classical Cepheids'. The 5 M☉ test stays at
     [Fe/H] = −0.5; the backbone's short solar loop is recorded against P06.T14–T16 (Anderson et
     al. 2016, Table A.1: 5 M☉ at Z = 0.014 enters the strip at P 2.95–4.81 d).
+- **P06.T14–T17, as built (round 9, `track06`): findings for the orchestrator and research.**
+  - _Very massive stars._ Yusof et al.'s (2013) grid is 8–16% smaller in radius and 19–22% shorter
+    in τ_H than HPT's formulae already at 120 M☉, so the quadratics pinned to 1 at 100 M☉ do their
+    correcting between 100 and 120 M☉ (slopes −2.2 and −2.9 per dex there). The tracks' own main
+    sequences last 1–16% longer than τ_H, their winds lowering the mass the effective-age clock
+    reads. The electron-scattering Eddington factor at the initial X passes 1 on the late main
+    sequence at Z ≤ 0.001 above about 130 M☉ (1.14 at 150 M☉ and Z = 10⁻⁴) and after the main
+    sequence at every metallicity and mass from 80 M☉ (HPT's core helium burning and early AGB:
+    1.0–2.1 at 80 M☉, up to 11 at 150 M☉ and Z = 0.001). The plan's "stays below 1 over the whole range"
+    holds only on the main sequence from Z = 0.006. _Ruled (124.1):_ the check reads X = 0 (below
+    0.75 on every main sequence, at most 0.65); the post-main-sequence excursions at X = 0 are
+    pinned for P06.T39 (`post_main_sequence_eddington_excursions_are_pinned`, maxima within 20%,
+    times above 1 within a factor of two): 6.73 and 88 kyr at 150 M☉ and Z = 10⁻⁴; 8.04 and
+    50 kyr at 150 M☉ and Z = 0.001; 1.03 and 11 kyr at 120 M☉ and Z = 0.006; 1.19 and 46 kyr at
+    80 M☉ and Z = 10⁻⁴; 0.89 and 0.60, never above 1, at 150 M☉ and Z = 0.014 and 80 M☉ and
+    Z = 0.03.
+  - _The blend below 0.5 M☉ (124.7)._ At Z below 0.02 the zero-age main sequence is up to 300 K
+    hotter than the solar birthline, so the test's 200 K window there spans the birthline's and
+    the zero-age main sequence's temperatures; at Z = 0.02 it holds to the birthline's.
+  - _The knee's fade (124.2, 127.1)._ Ruled: the fade follows MB16 to 10 L☉; the window is
+    0.3–30 kyr.
+  - _The arrival._ Scaled Kelvin–Helmholtz times run 70–80% of MIST's arrivals at 2–5 M☉; MIST
+    counts from a larger starting radius than t_p's birthline. The arrival falls below t_p near
+    6 M☉, not the plan's 8. _Ruled (124.6):_ the plan now says 6–7 M☉.
+  - _The post-AGB knee._ At the zero-temperature white dwarf's radius it is 0.3–0.4 dex hotter than
+    Miller Bertolami's (2016) highest temperatures, and the fade after it runs on the Montreal
+    law's extrapolation above 10^2.5 L☉. A hot-core radius for the bridge's end and the first
+    10⁴–10⁵ years of cooling would fix both; the cooling law would need its own young models.
+    _Ruled (124.2) and built:_ the knee follows MB16. _Ruled (127.1) and built:_ the fade after it
+    is MB16's to 10 L☉ and the Montreal law's after, matched there; P06.T20.a is untouched.
+  - _Lighter white dwarfs._ Leaving HPT's perturbation off the bridged AGB makes the last winds act
+    at the giant's radius: white dwarfs lose 0.002–0.014 M☉ (1 M☉ at Z = 0.02: 0.5197 to 0.5121
+    M☉). Cummings et al.'s (2018) check in `sse_reference` still passes.
+  - _Lazy cores._ With Miller Bertolami's crossing times as power laws in the core mass, cores
+    below 0.446–0.487 M☉ (slowest and fastest shells) show no nebula, not "below about 0.53": his
+    own 0.528 M☉ sequence at Z = 0.02 reaches 25,000 K 13.6 kyr after the AGB and would show one,
+    while his 0.532 M☉ sequence at Z = 0.01 takes 67 kyr. Frew and Parker (2010) give 0.55 M☉ as
+    the observed lower limit. A steeper law at the low end, or a metallicity term, is the choice.
+    _Ruled (124.3) and built:_ an offset power law; the cut-off is 0.527–0.534 M☉.
+  - _The Galaxy's nebulae._ 6,200 from a constant 1.65 M☉ a year, against some 20,000 estimated
+    (Zijlstra and Pottasch 1991; Jacoby et al. 2010 ~25,000; Moe and De Marco 2006 46,000 ±
+    13,000): the mean visible time is right (21,000 years), so the death rate is the question,
+    which T31's sampler over the real star-formation history should answer. _Ruled (124.4):_ T31
+    compares by birth rate. After 124.3–124.5 the constant-rate floor measures 4,050. _Ruled
+    (127.2):_ the floor is 3,500 (0.296 deaths a year × 0.70 × 19.6 kyr), and the test holds the
+    nebula share of AGB deaths at 0.65–0.75. **T31's warning:** if its nebula share of births falls
+    under 0.6, the light low-end cores of rulings 92 and 99 are examined first, and the window is
+    not widened.
+  - _Output moves broadly_ (bump 14): every star's clock by its arrival (38 Myr at 1 M☉, 230 at
+    0.2), stars of 100–150 M☉, every AGB white dwarf's death (10²–10⁵ years later) and mass, the
+    fate tables (re-emitted; the exact-path shares fall to 14.5%, 6.1% and 3.2% from 34.6%, 9.6%
+    and 6.5%) and the kick law's provisional rank table (its fingerprint's 10 M☉ core moved, since
+    heavy stars now start their main sequence at t_p with τ₀ > 0; re-run).
+  - _The fate table's white dwarfs._ The bridge hands a white dwarf over at thousands of L☉, above
+    the Montreal law's brightest node, so its cooling origin is negative (about −0.0996 Myr);
+    `FittedFate::remnant` held origins at zero, which made table-routed young dwarfs 0.1 Myr older
+    in the law's clock and put 0.004–0.008 dex of L outside the guard's box
+    (`briefs_are_the_full_systems_over_thirty_thousand_systems`). It now holds them just after the
+    law's −0.1 Myr pole (`fates::MIN_ORIGIN_MYR`); the worst row over 26,000 then sits at 0.98 of
+    its box. Plan 11's engine rebuilt main-sequence tracks to a reach that assumed the main
+    sequence starts at zero; it now adds `sse::main_sequence_start`.
+  - _P14.T32's pins._ The search re-pins the subgiant (`0x42006cba00000000`: the old pin's gap
+    crossing moved past the epoch) and now finds a T Tauri star (`0x41feec7600000003`, 1.61 M☉,
+    1.73 Myr, 2.8 L☉ and 4,652 K), pinned as the fifteenth; the tripwire is gone. Both
+    descriptions are left for the bump. The T Tauri system already holds a 232 M⊕ planet at
+    0.17 au at 1.7 Myr, a question for plan 14.
+  - _The nebula's size against the brainstorm._ The brainstorm's nebulae are "under a light-year
+    or two across"; the plan's R_max = 0.8 pc let one reach 2.61 ly in radius, 5.2 across. _Ruled
+    (124.5):_ a median diameter against a maximum radius; R_max is 0.9 pc and the brainstorm's
+    sentence says both (2026-09-27).
+  - _Left for later._ The planetary nebula is not on the wire (`srv/convert/stellar.rs` keeps
+    `NotModelled`); ruling 110.8's short solar blue loop is not touched by T14–T16.

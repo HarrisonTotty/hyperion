@@ -20,8 +20,11 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
+use hyperion_sim::planetary::context::XuvHistory;
 use hyperion_sim::planetary::derive::radius::radius_chen_kipping;
-use hyperion_sim::planetary::derive::{PlacedBody, formation_composition, habitable_zone};
+use hyperion_sim::planetary::derive::{
+    BodyHosts, HostLight, PlacedBody, derive_body, formation_composition, habitable_zone,
+};
 use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::params::{HILL_STABLE_GAP, SPACING_GIANT_MASS};
 use hyperion_sim::planetary::placement::classes::orbits::HostPlane;
@@ -29,12 +32,12 @@ use hyperion_sim::planetary::placement::classes::tides::{
     GIANT_TIDAL_Q_PRIME, ROCKY_TIDAL_Q_PRIME, circularisation_time, circularise,
 };
 use hyperion_sim::planetary::placement::{PlacedPlanet, PlacementHost, mutual_hill_radius, place};
-use hyperion_sim::stellar::Composition;
-use hyperion_sim::stellar::draws::UnitUniform;
+use hyperion_sim::stellar::draws::{StarDraws, UnitUniform};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, MultiplicityContext};
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
 use hyperion_sim::stellar::system::draw_metallicity;
-use hyperion_sim::time::CLOCK_WINDOW_H;
+use hyperion_sim::stellar::{Composition, evolve};
+use hyperion_sim::time::{CLOCK_WINDOW_H, UniverseTime};
 use hyperion_sim::units::consts::{
     EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, SOLAR_EFFECTIVE_TEMPERATURE_K, SOLAR_MASS_KG,
     SOLAR_RADIUS_M,
@@ -355,6 +358,26 @@ impl Report {
         }
     }
 
+    /// A re-measurement (ruling 106.2): `value` is printed against its source's `window`, inside or
+    /// not, and held to its as-built `pin`, so that a change shows.
+    fn measured(&mut self, name: &str, value: f64, window: (f64, f64), pin: (f64, f64)) {
+        let inside = if (window.0..=window.1).contains(&value) {
+            "inside"
+        } else {
+            "outside"
+        };
+        self.lines.push(format!(
+            "MEASURED {name}: {value:.4}, source [{}, {}] ({inside}), as built [{}, {}]",
+            window.0, window.1, pin.0, pin.1
+        ));
+        if !(pin.0..=pin.1).contains(&value) {
+            self.failures.push(format!(
+                "{name} = {value} moved from its as-built [{}, {}]",
+                pin.0, pin.1
+            ));
+        }
+    }
+
     /// A figure reported with no window.
     fn note(&mut self, line: String) {
         self.lines.push(line);
@@ -393,7 +416,7 @@ fn small_by_radius(systems: &[System], days: f64, lcg: &mut Lcg) -> f64 {
         .map(|s| {
             primary_planets(s)
                 .filter(|(h, p)| {
-                    let r = derived(h, p, lcg).0;
+                    let r = derived(s, h, p, lcg).0;
                     (1.0..=4.0).contains(&r) && period_days(p) < days
                 })
                 .count()
@@ -402,10 +425,15 @@ fn small_by_radius(systems: &[System], days: f64, lcg: &mut Lcg) -> f64 {
     ratio(n, systems.len())
 }
 
-/// A planet's radius at formation as the derivation gives it (P14.T11; ruling 102.1's rocky
-/// branch about M dwarfs), at a drawn rank, R⊕, and its envelope fraction; a giant's is Chen and
-/// Kipping's at the rank, with no envelope counted.
-fn derived(host: &Host, p: &PlacedPlanet, lcg: &mut Lcg) -> (f64, f64) {
+/// A planet's radius as an observer sees it, after escape at its system's age (ruling 119.2), as
+/// the derivation gives it (P14.T11, T13.b; ruling 102.1's rocky branch about M dwarfs), at a
+/// drawn rank, R⊕, and its envelope fraction then; a giant's is Chen and Kipping's at the rank,
+/// with no envelope counted.
+///
+/// The host shines as its zero-age self, with the X-ray history of its initial mass (P14.T1.a):
+/// a primary's flux on the main sequence changes the radius by little, and the escape reads the
+/// history alone.
+fn derived(system: &System, host: &Host, p: &PlacedPlanet, lcg: &mut Lcg) -> (f64, f64) {
     let rank = rank(lcg);
     let disc = host
         .disc
@@ -413,10 +441,35 @@ fn derived(host: &Host, p: &PlacedPlanet, lcg: &mut Lcg) -> (f64, f64) {
         .expect("a disc that placed planets exists");
     let placed = PlacedBody::new(p.mass(), *p.orbit(), p.formation_distance(), rank)
         .expect("a placed planet is a body");
-    match formation_composition(&placed, disc).expect("a placed planet derives") {
-        Some(solved) => (solved.radius().value(), solved.envelope_fraction()),
-        None => (radius_chen_kipping(p.mass(), rank).value(), 0.0),
+    if formation_composition(&placed, disc)
+        .expect("a placed planet derives")
+        .is_none()
+    {
+        return (radius_chen_kipping(p.mass(), rank).value(), 0.0);
     }
+    let mass = disc.host_mass();
+    let coeffs = ZCoeffs::new(system.composition.z_fit());
+    let light = HostLight::new(
+        disc.host_luminosity(),
+        zams_temperature(mass, &system.composition),
+        zams::radius(mass, &coeffs),
+    )
+    .expect("a zero-age star shines")
+    .with_history(
+        XuvHistory::new(mass, disc.host_luminosity()),
+        disc.host_luminosity(),
+    );
+    let lights = [light];
+    let hosts = BodyHosts::new(
+        hyperion_sim::units::Kilograms::from(mass),
+        system.composition,
+        &lights,
+        &[],
+    )
+    .expect("a star's mass is positive");
+    let body = derive_body(&placed, &hosts, disc, system.age, UniverseTime::EPOCH)
+        .expect("a placed planet of a born system derives");
+    (body.radius().value(), body.fractions().envelope())
 }
 
 /// Weiss and Marcy's (2014) mass of a planet of radius `r` R⊕, in M⊕, as Weiss et al. (2018, AJ
@@ -522,9 +575,10 @@ fn linear_radius_notes(all: &[(f64, f64)], above: &[(f64, f64)], report: &mut Re
 }
 
 /// η⊕ of `systems`' primaries of 4,800–6,300 K at the zero-age main sequence: planets of 0.5–1.5
-/// R⊕, by the median radius 0.08–2.9 M⊕, in the conservative habitable zone of the primary's
-/// zero-age luminosity and temperature (P14.T12.b).
-fn eta_earth(systems: &[System]) -> f64 {
+/// R⊕, by the median radius 0.08–2.9 M⊕, in the conservative habitable zone (P14.T12.b) of the
+/// primary's luminosity and temperature at its present age (`present`, ruling 116.2, as Bryson et
+/// al.'s field stars are seen) or at the zero-age main sequence.
+fn eta_earth(systems: &[System], seed: Seed, present: bool) -> f64 {
     let hosts: Vec<&System> = systems
         .iter()
         .filter(|s| {
@@ -535,11 +589,17 @@ fn eta_earth(systems: &[System]) -> f64 {
         .iter()
         .map(|s| {
             let mass = s.star_mass(0);
-            let coeffs = ZCoeffs::new(s.composition.z_fit());
-            let zone = habitable_zone(
-                zams::luminosity(mass, &coeffs),
-                zams_temperature(mass, &s.composition),
-            );
+            let zone = if present {
+                let draws = StarDraws::for_star(seed, s.hierarchy.stars()[0].body());
+                let state = evolve(mass, &s.composition, &draws, s.age);
+                habitable_zone(state.luminosity(), state.effective_temperature())
+            } else {
+                let coeffs = ZCoeffs::new(s.composition.z_fit());
+                habitable_zone(
+                    zams::luminosity(mass, &coeffs),
+                    zams_temperature(mass, &s.composition),
+                )
+            };
             let (inner, outer) = zone.conservative();
             s.hosts
                 .iter()
@@ -647,6 +707,113 @@ fn pascucci_statistics(fgk: &[System], report: &mut Report, ranks: &mut Lcg) -> 
     slope
 }
 
+/// He, Ford and Ragozzine's (2019, MNRAS 490, 4575, abstract) clusters: of `systems`' primaries,
+/// each group's planets above 0.5 R⊕ (by the median radius 0.08 M⊕, as [`eta_earth`] reads it)
+/// and below a giant's mass (their planets are of 0.5–10 R⊕) at 3–300 days, counted where it has
+/// one. They find "a median of three planets per cluster"
+/// (ruling 106.2). Also reports the rocky groups' placed counts and spacings.
+fn cluster_statistics(systems: &[System], report: &mut Report) {
+    let mut clusters: Vec<u32> = Vec::new();
+    let mut rocky_counts = [0_u32; 11];
+    let mut rocky_spacings: Vec<f64> = Vec::new();
+    for system in systems {
+        for host in system.hosts.iter().filter(|h| orbits_primary(h)) {
+            let planets = sorted(host);
+            let mut groups: Vec<u8> = planets.iter().map(PlacedPlanet::group).collect();
+            groups.sort_unstable();
+            groups.dedup();
+            for g in groups {
+                let members: Vec<&PlacedPlanet> =
+                    planets.iter().filter(|p| p.group() == g).collect();
+                let n = members
+                    .iter()
+                    .filter(|p| {
+                        p.mass().value() >= 0.08
+                            && !is_giant(p)
+                            && (3.0..=300.0).contains(&period_days(p))
+                    })
+                    .count();
+                if n > 0 {
+                    clusters.push(u32::try_from(n).expect("a group's count fits a u32"));
+                }
+                if members[0].role() == GroupRole::Rocky {
+                    rocky_counts[members.len().min(10)] += 1;
+                    let m_host = host.zone.host_mass();
+                    for pair in members.windows(2) {
+                        let (a1, a2) = (
+                            pair[0].orbit().semi_major_axis(),
+                            pair[1].orbit().semi_major_axis(),
+                        );
+                        rocky_spacings.push(
+                            (a2 - a1)
+                                / mutual_hill_radius(
+                                    pair[0].mass(),
+                                    pair[1].mass(),
+                                    m_host,
+                                    a1,
+                                    a2,
+                                ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    clusters.sort_unstable();
+    let median = f64::from(clusters[clusters.len() / 2]);
+    let mean = f64::from(clusters.iter().sum::<u32>())
+        / f64::from(u32::try_from(clusters.len()).expect("fits"));
+    report.measured(
+        "planets per cluster, median (He, Ford and Ragozzine 2019)",
+        median,
+        (3.0, 3.0),
+        (2.0, 2.0),
+    );
+    report.note(format!(
+        "  {} clusters, mean {mean:.3}; rocky groups placed with 1-10 planets: {:?}",
+        clusters.len(),
+        &rocky_counts[1..]
+    ));
+    rocky_spacings.sort_by(f64::total_cmp);
+    let at = |q: usize| rocky_spacings[rocky_spacings.len() * q / 100];
+    report.note(format!(
+        "  rocky pairs' spacing from their own masses: median {:.2}, 5-95% {:.2}-{:.2} mutual Hill radii (Raymond et al. 2006: 26-59, median 40) over {} pairs",
+        at(50),
+        at(5),
+        at(95),
+        rocky_spacings.len()
+    ));
+}
+
+/// Ruling 116.2–3's η⊕, and its figures beside it.
+fn eta_statistics(fgk: &[System], seed: Seed, report: &mut Report) {
+    // Ruling 116.2-3: at the host's present age, a check at 0.16 or more (Bryson et al.'s 68%
+    // floor, 0.37 - 0.21), their 0.37-0.60 printed as the target.
+    let eta = eta_earth(fgk, seed, true);
+    report.check(
+        "eta-Earth at the present age, conservative zone (Bryson et al. 2021, 68% floor)",
+        eta,
+        (0.16, 1.0),
+    );
+    let target = |x: f64| {
+        if (0.37..=0.60).contains(&x) {
+            "inside"
+        } else {
+            "outside"
+        }
+    };
+    report.note(format!(
+        "  target 0.37-0.60 (conservative): {}; optimistic 0.58-0.88: {}; at the zero-age main sequence {:.4}",
+        target(eta),
+        if (0.58..=0.88).contains(&eta) {
+            "inside"
+        } else {
+            "outside"
+        },
+        eta_earth(fgk, seed, false)
+    ));
+}
+
 /// P14.T10.b's FGK statistics and ruling 55.1's, on 60,000 FGK primaries of drawn \[Fe/H\].
 fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<System> {
     // FGK stars at the Sun-like point, their [Fe/H] drawn.
@@ -670,11 +837,8 @@ fn fgk_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> Vec<
         cumming,
         (0.07, 0.14),
     );
-    report.check(
-        "eta-Earth (Bryson et al. 2021)",
-        eta_earth(&fgk),
-        (0.37, 0.60),
-    );
+    eta_statistics(&fgk, galaxy.seed(), report);
+    cluster_statistics(&fgk, report);
     report.note(format!(
         "  FGK primaries' hot chain planets scaled down to the spacing floor {:.4}",
         hot_chain_rescaled(&fgk)
@@ -800,7 +964,7 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
         "small planets per single M dwarf or one wider than 200 au inside 200 days (ruling 87.2)",
         per_star(&alone, |_, p| small(p) && period_days(p) < 200.0),
         (2.9, 4.4),
-        (2.53, 2.61),
+        (2.57, 2.65),
     );
     report.note(format!(
         "  {} of {total} primaries single or wider than 200 au",
@@ -813,7 +977,7 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
         .map(|s| {
             primary_planets(s)
                 .filter(|(h, p)| {
-                    let r = derived(h, p, ranks).0;
+                    let r = derived(s, h, p, ranks).0;
                     (0.5..=4.0).contains(&r) && (0.5..256.0).contains(&period_days(p))
                 })
                 .count()
@@ -983,7 +1147,7 @@ fn kaminski_and_ment_statistics(
     let mut n = MentCounts::default();
     for s in &ment {
         for (h, p) in primary_planets(s) {
-            let ((r, envelope), days) = (derived(h, p, ranks), period_days(p));
+            let ((r, envelope), days) = (derived(s, h, p, ranks), period_days(p));
             n.count(r, envelope, days, p);
         }
     }
@@ -1223,7 +1387,7 @@ fn transit_multiplicity(systems: &[System], report: &mut Report, ranks: &mut Lcg
             .iter()
             .filter(|h| h.zone.members().eq([0]))
             .flat_map(|h| h.placement.planets().iter().map(move |p| (h, p)))
-            .filter(|&(h, p)| period_days(p) <= 200.0 && derived(h, p, ranks).0 >= 1.0)
+            .filter(|&(h, p)| period_days(p) <= 200.0 && derived(s, h, p, ranks).0 >= 1.0)
             .map(|(_, p)| {
                 let orbit = p.orbit();
                 let (i, node) = (orbit.inclination().value(), orbit.ascending_node().value());
@@ -1288,28 +1452,49 @@ fn early_m_radii(systems: &[System], report: &mut Report, ranks: &mut Lcg) {
         .iter()
         .filter(|s| (0.4..0.6).contains(&s.star_mass(0).value()))
         .collect();
+    // Ruling 122.3: each counted radius is scattered by 10^(0.06 g), g a standard normal from the
+    // test's generator, as Dressing and Charbonneau's maps smooth each candidate's radius
+    // posterior (their Table 9 errors are 12-17%); the intrinsic counts are reported beside.
     let (mut above, mut below) = (0_usize, 0_usize);
+    let (mut intrinsic_above, mut intrinsic_below) = (0_usize, 0_usize);
     for s in &early {
         for (h, p) in primary_planets(s) {
             if !(0.5..7.0).contains(&period_days(p)) {
                 continue;
             }
-            let r = derived(h, p, ranks).0;
-            above += usize::from(r > 1.5 && r <= 4.0);
-            below += usize::from((0.5..=1.5).contains(&r));
+            let r = derived(s, h, p, ranks).0;
+            let g = math::normal_quantile(ranks.next_f64().clamp(1e-12, 1.0 - 1e-12));
+            let seen = r * math::exp10(0.06 * g);
+            above += usize::from(seen > 1.5 && seen <= 4.0);
+            below += usize::from((0.5..=1.5).contains(&seen));
+            intrinsic_above += usize::from(r > 1.5 && r <= 4.0);
+            intrinsic_below += usize::from((0.5..=1.5).contains(&r));
         }
     }
+    report.note(format!(
+        "  intrinsic (no radius scatter): {:.4} above 1.5 R_earth, {:.4} below; rocky : \
+         sub-Neptune {:.2} as seen, {:.2} intrinsic (Dressing and Charbonneau 1.6 : 1; Cloutier \
+         and Menou 2020, 1.08 +- 0.23)",
+        ratio(intrinsic_above, early.len()),
+        ratio(intrinsic_below, early.len()),
+        ratio(below, above),
+        ratio(intrinsic_below, intrinsic_above),
+    ));
     report.check(
-        "1.5-4 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary (Dressing and Charbonneau \
-         2015 via Ment and Charbonneau 2023, Table 9)",
+        "1.5-4 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary, radii scattered by 0.06 \
+         dex (Dressing and Charbonneau 2015 via Ment and Charbonneau 2023, Table 9)",
         ratio(above, early.len()),
         (0.10, 0.26),
     );
-    report.check(
-        "0.5-1.5 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary (Dressing and \
-         Charbonneau 2015 via Ment and Charbonneau 2023, Table 9)",
+    // A finding (`atmo14`, round 9, ruling 122.5): 0.400 against 0.19-0.39 at ruling 122.2's
+    // 250 Myr, and still 0.397 at the dial's 200 Myr end; no window is widened, and ruling 112.2's
+    // early-M mass trial is the next dial. Pinned as built.
+    report.finding(
+        "0.5-1.5 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary, radii scattered by 0.06 \
+         dex (Dressing and Charbonneau 2015 via Ment and Charbonneau 2023, Table 9)",
         ratio(below, early.len()),
         (0.19, 0.39),
+        (0.39, 0.41),
     );
 }
 
@@ -1333,29 +1518,69 @@ fn blend_statistics(galaxy: &Galaxy, fgk: &[System], early_m: f64, report: &mut 
         "small planets per star of 0.65-0.75 M_sun inside 200 days (ruling 87.3)",
         blend,
         (fgk.min(early_m), fgk.max(early_m)),
-        (1.14, 1.21),
+        (1.07, 1.13),
     );
 }
 
-/// P14.T10.b's metallicity statistics: small planets flat to −0.8 and thinned at −2, and the giants' slope.
+/// P14.T10.b's metallicity statistics: small planets at −0.8 against solar (ruling 106.1), hot
+/// ones apart, thinned at −2, and the giants' slope.
 fn metallicity_statistics(galaxy: &Galaxy, report: &mut Report) {
-    // Metallicity: small planets flat to -0.8 and thinned at -2; giants' slope.
     let at = |first: u32, x: f64| {
-        let systems = sample(galaxy, first, 20_000, uniform(0.7, 1.3), move |_, _, _| {
+        sample(galaxy, first, 20_000, uniform(0.7, 1.3), move |_, _, _| {
             Dex::new(x)
-        });
-        per_star(&systems, |_, p| small(p) && period_days(p) < 100.0)
+        })
     };
     let (solar, poor, halo) = (at(6_000_000, 0.0), at(6_100_000, -0.8), at(6_200_000, -2.0));
-    report.finding(
-        "small planets at -0.8 against solar",
-        poor / solar,
-        (0.8, 1.2),
-        (0.41, 0.51),
+    let within = |systems: &[System], lo: f64, hi: f64| {
+        per_star(systems, |_, p| {
+            small(p) && (lo..hi).contains(&period_days(p))
+        })
+    };
+    let close = |systems: &[System]| within(systems, 0.0, 100.0);
+    report.check(
+        "small planets at -0.8 against solar (ruling 106.1)",
+        close(&poor) / close(&solar),
+        (0.35, 0.75),
     );
+    let (hot, warm) = (
+        within(&poor, 0.0, 10.0) / within(&solar, 0.0, 10.0),
+        within(&poor, 10.0, 100.0) / within(&solar, 10.0, 100.0),
+    );
+    // Ruling 117.3: hot planets fall, warm ones stay near flat.
+    report.check(
+        "hot (under 10 days) small planets at -0.8 against solar (ruling 117.3)",
+        hot,
+        (0.20, 0.40),
+    );
+    // Ruling 121.1: warm at 0.55-1.0, 0.60-0.80 printed as the target, and at least 1.5 times hot.
+    report.check(
+        "warm (10-100 days) small planets at -0.8 against solar (ruling 121.1)",
+        warm,
+        (0.55, 1.0),
+    );
+    report.note(format!(
+        "  warm target 0.60-0.80: {}",
+        if (0.60..=0.80).contains(&warm) {
+            "inside"
+        } else {
+            "outside"
+        }
+    ));
+    report.check(
+        "warm against hot at -0.8, each against solar (ruling 121.1; the literature about 2.4)",
+        warm / hot,
+        (1.5, 100.0),
+    );
+    report.note(format!(
+        "  warm (10-100 days) at -0.8 against solar {warm:.4}; per star at 0 and -0.8: hot {:.4} and {:.4}, warm {:.4} and {:.4}",
+        within(&solar, 0.0, 10.0),
+        within(&poor, 0.0, 10.0),
+        within(&solar, 10.0, 100.0),
+        within(&poor, 10.0, 100.0)
+    ));
     report.check(
         "small planets at -2 against solar",
-        halo / solar,
+        close(&halo) / close(&solar),
         (0.0, 0.25),
     );
     let bins: Vec<(f64, f64, f64)> = (0..8)
@@ -1406,7 +1631,7 @@ fn close_binary_statistics(fgk: &[System], report: &mut Report) {
         "close-binary hosts' planets against single stars' (Kraus et al. 2016)",
         suppression,
         (0.25, 0.5),
-        (0.12, 0.17),
+        (0.09, 0.12),
     );
 }
 
@@ -1485,8 +1710,22 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   and Johnson 2016, ApJ 816, 66, §3.3: 45 (+12 −23)% of M dwarfs host a coplanar multiple of
 ///   about five planets), and under 5% with a giant of 0.3–10 Jupiter masses inside 2,000 days
 ///   (Cumming et al. 2008, §3.4: 1.0%, under 5.4% at 2σ; Johnson et al. 2010: 3.3% inside 2.5 au).
-/// - Small planets per star at \[Fe/H\] = −0.8 within 20% of solar, and under a quarter of solar at
-///   −2 (the brainstorm, after Buchhave et al. 2012, Nature 486, 375, and Petigura et al. 2018).
+/// - (106.1) small planets per star at \[Fe/H\] = −0.8 at 0.35–0.75 of solar, about 0.55 at best
+///   (the brainstorm's 2026-09-25 item 8, after Zhu 2019, ApJ 873, 8, Zink et al. 2023, AJ,
+///   Petigura et al. 2018, AJ 155, 89, and Bashi and Zucker 2022, MNRAS), with hot ones (under 10
+///   days) at 0.20–0.40 of solar (ruling 117.3; Petigura et al.'s β = +0.6 ± 0.2 gives about 0.33;
+///   Boley et al. 2024, arXiv:2407.13821), warm ones (10–100 days) at 0.55–1.0, 0.60–0.80
+///   printed as the target, and at least 1.5 times the hot ratio (ruling 121.1: Petigura et al.'s
+///   Table 7 with warm super-Earths flat gives 0.61, Zink et al.'s 10–40 day λs 0.72, Mulders et
+///   al. 2016, AJ 152, 187, find 10–200 days flat; warm against hot about 2.4), and under a
+///   quarter of solar at −2, an unmeasured extrapolation that under 0.25 is consistent with
+///   (Zhu's slope gives 0.16). As built: 0.647 in all, hot 0.299 and warm 0.726, 2.43 times the
+///   hot. The chains' first-period break moves out about metal-poor hosts as 10^(−0.4 \[Fe/H\])
+///   (ruling 117.2), and a drift-fed budget falls as 10^(0.35 \[Fe/H\]) below solar where the
+///   disc's solids fall as 10^\[Fe/H\] (ruling 121.3), so that metal-poor chains no longer keep
+///   their hot planets and lose their warm ones to the innermost-first truncation.
+///   `CompactWithColdGiant`'s weight falls with its giants (Zhu 2019's rise; Bryan and Lee 2024,
+///   ApJ Letters), and rocky planets, whose masses follow their discs, fall under 1 M⊕.
 ///
 /// And the checks rulings 48, 52 and 55 name, with P14.T9.c's that waited for this placer:
 ///
@@ -1494,8 +1733,6 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   2019, AJ 158, 75, Tables 1 and 3): 1.19 (+0.70 −0.49) planets of 0.5–2.5 R⊕ per star inside
 ///   0.5–10 days (by the median radius here, 0.08–6.8 M⊕), and compact multiples, two or more
 ///   inside 10 days, around 0.44 (+0.45 −0.33) of them;
-/// - (48 f) η⊕, 0.37 (+0.48 −0.21) to 0.60 (+0.90 −0.36) per star in the conservative habitable
-///   zone of GK dwarfs (Bryson et al. 2021, AJ 161, 36, Table 3; [`eta_earth`]);
 /// - (55.1, 85.1) adjacent planets of compact chains, compared like with like with Weiss et al.'s
 ///   (2018, AJ 155, 48, §3) pairs: all pairs' log radii correlated at r = 0.65, window 0.60–0.70
 ///   (two standard errors of their 504 pairs), and pairs of planets both above 1 R⊕ at r = 0.53,
@@ -1550,12 +1787,25 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 /// # Findings, pinned as built
 ///
 /// After ruling 60's calibration (P14.T7's masses and budget, P14.T8's chains and rocky groups,
-/// P14.T4.b's compact exponent), η⊕ and both of Weiss et al.'s pair statistics meet their sources.
+/// P14.T4.b's compact exponent), both of Weiss et al.'s pair statistics meet their sources.
 /// Each of these still misses its source by more than any change inside the sources reaches, or
 /// is a finding a ruling records rather than tunes, and is reported with its dial:
 ///
+/// - (106.2, 116, 117.1) η⊕ at the host's present age is 0.173, a check at 0.16 or more, Bryson et
+///   al.'s (2021, AJ 161, 36, Table 3) 68% floor, 0.37 − 0.21 (ruling 116.3), against their
+///   0.37 (+0.48 −0.21) to 0.60 (+0.90 −0.36), printed as the target, and 0.58–0.88 in the
+///   optimistic zone ([`eta_earth`]; 0.233 at the zero-age main sequence). Only `TerrestrialOnly`
+///   and `SolarLike` carry a rocky group, and compact systems gain no rocky tier (ruling 117.1):
+///   compact multis truncate at about 100–300 days (Millholland, He and Zink 2022, AJ 164, 72),
+///   terrestrial and super-Earth systems form by two pathways set by the pebble flux (Lambrechts
+///   et al. 2019, A&A 627, A83), and about 80% of systems hold one cluster within 3–300 days (He,
+///   Ford and Ragozzine 2019), so η⊕ stays below Bryson et al.'s extrapolation of the inner
+///   occurrence. Clusters, a group's planets of 0.08 M⊕ to a giant's mass at 3–300 days, have a
+///   median of 2 (mean 2.06) against He, Ford and Ragozzine's (2019, MNRAS 490, 4575) three
+///   ([`cluster_statistics`]; ruling 116.5), since groups straddle the 300-day cut;
 /// - (87.3) small planets per star inside 200 days about primaries of 0.65–0.75 M☉, which ruling
-///   85.4's blend reaches, are 1.15, between the FGK stars' 0.76 and the early M dwarfs' 1.99;
+///   85.4's blend reaches, are 1.09 (1.15 before ruling 106.2's rocky groups), between the FGK
+///   stars' 0.66 and the early M dwarfs' 2.02;
 /// - (87.2, 102.4) small planets per early M dwarf that is single or whose nearest companion is
 ///   over 200 au away, inside 200 days, are 2.57 against 3.6 (Dressing and Charbonneau's 2.47 per
 ///   Kepler target ÷ 0.68, the share of Moe and Kratter's (2021, MNRAS 507, 3593, §4 and Fig. 6)
@@ -1572,12 +1822,6 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   −2.9 ± 0.4, is −0.36 here (dN ÷ d log q over (2.8–8) × 10⁻⁵; [`pascucci_statistics`]), and
 ///   0.067 of their window's planets lie above q = 6 × 10⁻⁵ against about 0.02: the taper stays on
 ///   the members (plan 14's ruling 102 note);
-/// - small planets at \[Fe/H\] = −0.8 are 0.45 of solar (0.46 before ruling 68.2, 0.42 before
-///   ruling 73): the compact classes' share there is about 0.72 of solar, as
-///   `CompactWithColdGiant`'s weight falls with its giants (the fraction of stars with Kepler-like
-///   planets rises by 1.4 between −0.2 and +0.2 in Zhu 2019, which the table follows), metal-poor
-///   discs hold fewer planets under the solid budget, and rocky planets, whose masses follow their
-///   discs, fall under 1 M⊕;
 /// - close-binary hosts have planets 0.13 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
 ///   0.34 compounds with their truncated discs, whose budgets now build no chain at all where they
 ///   cannot build its first planet (ruling 66), under Kraus et al.'s 1σ (0.19–0.48);

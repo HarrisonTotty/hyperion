@@ -14,9 +14,11 @@
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
 pub mod chabrier;
+pub mod cluster_dynamics;
 pub mod displaced_forms;
 pub mod gauss_legendre;
 pub mod giant_cooling;
+pub mod helium;
 pub mod kick_rank;
 pub mod mge;
 pub mod stellar_fates_high;
@@ -62,7 +64,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "kick_rank",
         revision: 0,
-        since_generator_version: 11,
+        since_generator_version: 13,
         provisional: true,
     },
     TableInfo {
@@ -74,19 +76,19 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stellar_fates_high",
         revision: 0,
-        since_generator_version: 11,
+        since_generator_version: 13,
         provisional: false,
     },
     TableInfo {
         name: "stellar_fates_low",
         revision: 0,
-        since_generator_version: 11,
+        since_generator_version: 13,
         provisional: false,
     },
     TableInfo {
         name: "stellar_fates_mid",
         revision: 0,
-        since_generator_version: 11,
+        since_generator_version: 13,
         provisional: false,
     },
     TableInfo {

@@ -16,8 +16,7 @@
 //! mark (design note 11) and every kick draw, and measures the six figures of T19.d that pin the
 //! law against its sources. It is pure, and plan 15's P15.T5.b calls it too.
 //!
-//! Tracks stop at 100 M☉ until P06.T14, so a star of 100–150 M☉ is evolved as one of 100 M☉, as
-//! [`StarModel`](crate::stellar::system::StarModel) does.
+//! Tracks cover the population's whole 8–150 M☉ since P06.T14.
 
 use core::ops::Range;
 
@@ -188,8 +187,7 @@ impl ReferencePopulation {
         }
     }
 
-    /// The death and remnant of `star` on the generator's track, built in full (at 100 M☉ above
-    /// it, until P06.T14).
+    /// The death and remnant of `star` on the generator's track, built in full.
     #[must_use]
     pub fn fate(&self, star: &ReferenceStar) -> (Death, CompactRemnant) {
         let m0 = if star.initial_mass > MAX_INITIAL_MASS {

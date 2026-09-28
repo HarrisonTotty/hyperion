@@ -1,12 +1,12 @@
-# generator_version = 13
+# generator_version = 14
 hot_jupiter 0x41feacda00000001: OldThinDisc, 1 stars
 fe_h = 0x3fdad8a554260c57  # 0.4194730111850666
 age_at_epoch_yr = 0x4201429832d47f5e  # 9266464346.562191
 star 0: Some(MainSequence) at the epoch
 initial_mass_msun = 0x3ff05b84880d170f  # 1.0223431887147318
 mass_msun = 0x3ff05b84880d170f  # 1.0223431887147318
-luminosity_lsun = 0x3ff86e6d5c435039  # 1.5269597629567342
-teff_k = 0x40b663b4419a9120  # 5731.704126034194
+luminosity_lsun = 0x3ff852ca2c9341c8  # 1.520212339517558
+teff_k = 0x40b6661e6d595cec  # 5734.118856034456
 host Star(0): drawn HotJupiter, placed HotJupiter
 
 epoch: 24 bodies at UniverseTime { seconds: 0, nanos: 0 }
@@ -26,22 +26,22 @@ valid_until: None
 x_m = 0xc1f28d6d435174be  # -4980134965.0910015
 y_m = 0x41e1a59bb6b40246  # 2368527797.6252775
 z_m = 0x41eb93bee7bd4937  # 3701339965.9151874
-radius_rearth = 0x402bb9fb8c3449d4  # 13.863247281439648
-density_kg_m3 = 0x40976342919f9b61  # 1496.8150086344324
-gravity_m_s2 = 0x40427ae9daa59713  # 36.96026166043716
+radius_rearth = 0x402bb60051958f2f  # 13.855471181399109
+density_kg_m3 = 0x40976d58ac0b27d3  # 1499.3365937941605
+gravity_m_s2 = 0x40428039a94f170c  # 37.00175968515222
 class: GasGiant
 iron = 0x3f944b74e9a3a71c  # 0.019819094429215686
 rock = 0x3fa513482db3cb13  # 0.041162734583755654
 water = 0x3fb23aacfd836970  # 0.0712078207901976
 envelope = 0x3febc51a362738e8  # 0.8678103501968311
-t_eq_k = 0x4095273cd4bbf739  # 1353.8094052667277
+t_eq_k = 0x4094d4b3ccd4e569  # 1333.1755860581418
 moons: []
 rings: [0180]
 population: NotApplicable
 surface: NotApplicable
 hooks: NotModelled
 body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
-mass_mearth = 0x3cd298367fec3686  # 1.0322066312460844e-15
+mass_mearth = 0x3cd299daaaf1ad95  # 1.032562527429631e-15
 orbit: NotApplicable
 x_m = 0xc1f28d6d435174be  # -4980134965.0910015
 y_m = 0x41e1a59bb6b40246  # 2368527797.6252775
@@ -50,8 +50,8 @@ bulk: NotApplicable
 moons: NotApplicable
 rings: NotApplicable
 ring: Dusty of Rock
-inner_m = 0x41972603a9a6d09c  # 97091818.41290516
-outer_m = 0x41a25a282d83a572  # 153949206.75712162
+inner_m = 0x419722b142a99098  # 97037392.66559064
+outer_m = 0x41a25998f4625adf  # 153930874.19209954
 optical_depth = 0x3ec7106aca46481d  # 2.7494584903887035e-6
 surface: NotApplicable
 hooks: NotApplicable
@@ -77,7 +77,7 @@ iron = 0x3f9994c9e308e009  # 0.024981646043869463
 rock = 0x3faa90aa4461d4f5  # 0.05188495716803657
 water = 0x3fb6fa44d2c60c84  # 0.08975629945602931
 envelope = 0x3feaab067248da20  # 0.8333770973320647
-t_eq_k = 0x405a3fd143d316f0  # 104.99714751829356
+t_eq_k = 0x405a22e7d1d5e21a  # 104.54539914977104
 moons: [0201, 0202, 0203, 0204, 0205, 0206, 0207, 0208]
 rings: [0280, 0281]
 population: NotApplicable
@@ -105,7 +105,7 @@ iron = 0x3fe65e74fdac6583  # 0.6990303949889242
 rock = 0x3fd3431604a734fa  # 0.30096960501107584
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x405323144d13a2a4  # 76.5481140796424
+t_eq_k = 0x40544c85a68e7197  # 81.19565738592642
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -133,7 +133,7 @@ iron = 0x3f9c36d9fdb29072  # 0.027552991971461833
 rock = 0x3fef1e4930126b7c  # 0.9724470080285381
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053199fa654f8ba  # 76.40036924646384
+t_eq_k = 0x40544272bfaea107  # 81.03825370839705
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -161,7 +161,7 @@ iron = 0x3fd26cb4977a6d22  # 0.28788485329433133
 rock = 0x3fe6c9a5b442c96f  # 0.7121151467056687
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x405315db39279b93  # 76.34150532596531
+t_eq_k = 0x40543e6f411e2b1a  # 80.97554042764787
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -189,7 +189,7 @@ iron = 0x3fc54c9fdb9cbf8b  # 0.16640089247948384
 rock = 0x3fd61e573cac9f87  # 0.3456018536112357
 water = 0x3fdf3b58d58500b5  # 0.48799725390928056
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053147a8266c136  # 76.31997737917558
+t_eq_k = 0x405185729dfac954  # 70.08512067309249
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -217,7 +217,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053135f8e6b8665  # 76.30270729542242
+t_eq_k = 0x4052b46d705ea2e6  # 74.81917962304905
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -245,7 +245,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053136299da32ec  # 76.30289312656868
+t_eq_k = 0x4052b470700a3b68  # 74.8193626499102
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -273,7 +273,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053135f881cb35f  # 76.30270579150009
+t_eq_k = 0x4052b46d6a282e34  # 74.81917814182162
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -301,7 +301,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x405313624cd2f821  # 76.30287476160494
+t_eq_k = 0x4052b470242c9364  # 74.81934456208324
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -351,7 +351,7 @@ scattered_inner_m = 0x42880f68e7f6a2ef  # 3306807951060.3667
 scattered_outer_m = 0x42be19f9aa745bea  # 33096911713371.914
 size_slope = 0x40058ac0bb1b6d33  # 2.6927504174942896
 largest_diameter_m = 0x41513079b91ad325  # 4506086.892262255
-fractional_luminosity = 0x3ec53c1e8c5bc0fc  # 2.531390324793488e-6
+fractional_luminosity = 0x3ec5482b85cce874  # 2.5370018605060946e-6
 members: [e101, e102, e103, e104, e105, e106, e107, e108]
 surface: NotApplicable
 hooks: NotApplicable
@@ -377,7 +377,7 @@ iron = 0x3fceeaba3089529c  # 0.24153830881063676
 rock = 0x3fe00d91e7f8886e  # 0.501656487529784
 water = 0x3fd06f7f17ca45d6  # 0.25680520365957926
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40409c329d4e51ff  # 33.22029463123544
+t_eq_k = 0x404049860f53e0b9  # 32.57440368266675
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -405,7 +405,7 @@ iron = 0x3fc83af3e162ae61  # 0.18929909234190048
 rock = 0x3fd929871b48f02a  # 0.39315965332548564
 water = 0x3fdab8fef405b8a6  # 0.4175412543326139
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403cdf8cc6109fe1  # 28.873241786059115
+t_eq_k = 0x403c4fd6a7823611  # 28.31186911515221
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -433,7 +433,7 @@ iron = 0x3fc8b04d31c1998a  # 0.1928802960348544
 rock = 0x3fd9a363db0df810  # 0.4005975379185438
 water = 0x3fda04758c113b2c  # 0.40652216604660185
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4041923737c185c5  # 35.142310113423754
+t_eq_k = 0x40413ac22712f207  # 34.45905006814069
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -461,7 +461,7 @@ iron = 0x3fd982f9ed98907a  # 0.3986191578171724
 rock = 0x3fe33e830933b7c3  # 0.6013808421828276
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403355f4e4c81857  # 19.335768030978524
+t_eq_k = 0x40348269fbea10ee  # 20.50942968811517
 moons: [e184]
 rings: NotModelled
 population: NotApplicable
@@ -489,7 +489,7 @@ iron = 0x3fd7f9c0e3bc79db  # 0.3746187423693336
 rock = 0x3fe4031f8e21c312  # 0.6253812576306663
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4048ebf8964798de  # 49.84352377410845
+t_eq_k = 0x404a6f3a96cf270c  # 52.868975497387595
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -517,7 +517,7 @@ iron = 0x3fd3f11994f763ed  # 0.3115905718564694
 rock = 0x3fe4b5732e635ded  # 0.6471496492403596
 water = 0x3fa52000720f01d6  # 0.04125977890317116
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4039a7c5f6f15104  # 25.655364450373796
+t_eq_k = 0x403b366e3711d29b  # 27.212619249202003
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -545,7 +545,7 @@ iron = 0x3fcce043d71cc4c2  # 0.22559402469190643
 rock = 0x3fddfc953800562c  # 0.4685414358985749
 water = 0x3fd39348dc714774  # 0.30586453940951874
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403cf916353b3785  # 28.97299511619305
+t_eq_k = 0x403c68e0fbc385c3  # 28.40968297503947
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -573,7 +573,7 @@ iron = 0x3fd9b8ff235ba65c  # 0.4019162984173812
 rock = 0x3fe323806e522cd2  # 0.5980837015826188
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4035977962c2aedb  # 21.591695950059925
+t_eq_k = 0x4036e6fc7cedcf5a  # 22.90229016118915
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -601,7 +601,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3ff0000000000000  # 1.0
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403355f4e4c81857  # 19.335768030978524
+t_eq_k = 0x4032f5b75e677a20  # 18.959829235327675
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -618,7 +618,7 @@ halo about Star(0)
 inner_m = 0x42f1220f18ab86c3  # 301407677364332.2
 outer_m = 0x434ac537968c0291  # 1.507038386821661e16
 comets = 0x427cac2ae5af324d  # 1970361228019.1438
-comet_rate_per_s = 0x3eb2c4e41cdf7eac  # 1.1187258794827905e-6
+comet_rate_per_s = 0x3eb2ba4363941b0a  # 1.1162513955957024e-6
 surface: NotApplicable
 hooks: NotApplicable
 
@@ -639,22 +639,22 @@ valid_until: None
 x_m = 0x41e519d83adbe83c  # 2832122326.872099
 y_m = 0x41e05ac38c68ef34  # 2195070051.2791996
 z_m = 0xc1f4d51b49a460a2  # -5592167578.273592
-radius_rearth = 0x402bb9fb92dcde58  # 13.863247479878893
-density_kg_m3 = 0x4097634280c6162a  # 1496.81494435797
-gravity_m_s2 = 0x40427ae9d1c5553c  # 36.960260602334955
+radius_rearth = 0x402bb600583467da  # 13.855471378705193
+density_kg_m3 = 0x40976d589b40a175  # 1499.3365297411485
+gravity_m_s2 = 0x40428039a0780091  # 37.00175863131984
 class: GasGiant
 iron = 0x3f944b74e9a3a71c  # 0.019819094429215686
 rock = 0x3fa513482db3cb13  # 0.041162734583755654
 water = 0x3fb23aacfd836970  # 0.0712078207901976
 envelope = 0x3febc51a362738e8  # 0.8678103501968311
-t_eq_k = 0x4095273cdedf2ea6  # 1353.8094439384672
+t_eq_k = 0x4094d4b3d6c6f131  # 1333.175623997184
 moons: []
 rings: [0180]
 population: NotApplicable
 surface: NotApplicable
 hooks: NotModelled
 body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
-mass_mearth = 0x3cd298367fec3686  # 1.0322066312460844e-15
+mass_mearth = 0x3cd299daaaf1ad95  # 1.032562527429631e-15
 orbit: NotApplicable
 x_m = 0x41e519d83adbe83c  # 2832122326.872099
 y_m = 0x41e05ac38c68ef34  # 2195070051.2791996
@@ -663,8 +663,8 @@ bulk: NotApplicable
 moons: NotApplicable
 rings: NotApplicable
 ring: Dusty of Rock
-inner_m = 0x41972603a9a6d09c  # 97091818.41290516
-outer_m = 0x41a25a282d83a572  # 153949206.75712162
+inner_m = 0x419722b142a99098  # 97037392.66559064
+outer_m = 0x41a25998f4625adf  # 153930874.19209954
 optical_depth = 0x3ec7106aca46481d  # 2.7494584903887035e-6
 surface: NotApplicable
 hooks: NotApplicable
@@ -690,7 +690,7 @@ iron = 0x3f9994c9e308e009  # 0.024981646043869463
 rock = 0x3faa90aa4461d4f5  # 0.05188495716803657
 water = 0x3fb6fa44d2c60c84  # 0.08975629945602931
 envelope = 0x3feaab067248da20  # 0.8333770973320647
-t_eq_k = 0x405a3fd13cf71a99  # 104.99714588290443
+t_eq_k = 0x405a22e7caa7ffcd  # 104.5453974381082
 moons: [0201, 0202, 0203, 0204, 0205, 0206, 0207, 0208]
 rings: [0280, 0281]
 population: NotApplicable
@@ -718,7 +718,7 @@ iron = 0x3fe65e74fdac6583  # 0.6990303949889242
 rock = 0x3fd3431604a734fa  # 0.30096960501107584
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053231455e3685f  # 76.54811618049415
+t_eq_k = 0x40544c85afdbab32  # 81.19565960361504
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -746,7 +746,7 @@ iron = 0x3f9c36d9fdb29072  # 0.027552991971461833
 rock = 0x3fef1e4930126b7c  # 0.9724470080285381
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053199faf4771e7  # 76.40037137963337
+t_eq_k = 0x40544272c920c1c7  # 81.03825596045418
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -774,7 +774,7 @@ iron = 0x3fd26cb4977a6d22  # 0.28788485329433133
 rock = 0x3fe6c9a5b442c96f  # 0.7121151467056687
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x405315db4227f842  # 76.34150747206971
+t_eq_k = 0x40543e6f4a9f111e  # 80.97554269346116
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -802,7 +802,7 @@ iron = 0x3fc54c9fdb9cbf8b  # 0.16640089247948384
 rock = 0x3fd61e573cac9f87  # 0.3456018536112357
 water = 0x3fdf3b58d58500b5  # 0.48799725390928056
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053147a8b6c348e  # 76.31997953001903
+t_eq_k = 0x40518572a639c3ff  # 70.08512263909505
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -830,7 +830,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053135f97750fa6  # 76.30270945007086
+t_eq_k = 0x4052b46d7930bc4a  # 74.8191817260678
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -858,7 +858,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40531362a2e3b0ea  # 76.30289528117615
+t_eq_k = 0x4052b47078dc49ba  # 74.81936475288867
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -886,7 +886,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053135f91263cb7  # 76.30270794614886
+t_eq_k = 0x4052b46d72fa47af  # 74.8191802448407
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -914,7 +914,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4053136255dc773c  # 76.30287691621646
+t_eq_k = 0x4052b4702cfea2ce  # 74.8193466650657
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -964,7 +964,7 @@ scattered_inner_m = 0x42880f68e7f6a2ef  # 3306807951060.3667
 scattered_outer_m = 0x42be19f9aa745bea  # 33096911713371.914
 size_slope = 0x40058ac0bb1b6d33  # 2.6927504174942896
 largest_diameter_m = 0x41513079b91ad325  # 4506086.892262255
-fractional_luminosity = 0x3ec53c1e526d95e0  # 2.5313899131736275e-6
+fractional_luminosity = 0x3ec5482b4bd5a827  # 2.5370014486341365e-6
 members: [e101, e102, e103, e104, e105, e106, e107, e108]
 surface: NotApplicable
 hooks: NotApplicable
@@ -990,7 +990,7 @@ iron = 0x3fceeaba3089529c  # 0.24153830881063676
 rock = 0x3fe00d91e7f8886e  # 0.501656487529784
 water = 0x3fd06f7f17ca45d6  # 0.25680520365957926
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40409c32a52cd5b0  # 33.22029556931682
+t_eq_k = 0x4040498617021ed6  # 32.57440459826982
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1018,7 +1018,7 @@ iron = 0x3fc83af3e162ae61  # 0.18929909234190048
 rock = 0x3fd929871b48f02a  # 0.39315965332548564
 water = 0x3fdab8fef405b8a6  # 0.4175412543326139
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403cdf8cd3be6ef5  # 28.873242601387535
+t_eq_k = 0x403c4fd6b4dc1c1a  # 28.311869910943734
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1046,7 +1046,7 @@ iron = 0x3fc8b04d31c1998a  # 0.1928802960348544
 rock = 0x3fd9a363db0df810  # 0.4005975379185438
 water = 0x3fda04758c113b2c  # 0.40652216604660185
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x404192374014970c  # 35.142311105779385
+t_eq_k = 0x40413ac22f32f2c3  # 34.459051036717504
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1074,7 +1074,7 @@ iron = 0x3fd982f9ed98907a  # 0.3986191578171724
 rock = 0x3fe33e830933b7c3  # 0.6013808421828276
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403355f4edf12dbc  # 19.335768576985842
+t_eq_k = 0x4034826a0596078d  # 20.509430264595313
 moons: [e184]
 rings: NotModelled
 population: NotApplicable
@@ -1102,7 +1102,7 @@ iron = 0x3fd7f9c0e3bc79db  # 0.3746187423693336
 rock = 0x3fe4031f8e21c312  # 0.6253812576306663
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4048ebf8a216297c  # 49.843525181599915
+t_eq_k = 0x404a6f3aa346685d  # 52.86897698343157
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1130,7 +1130,7 @@ iron = 0x3fd3f11994f763ed  # 0.3115905718564694
 rock = 0x3fe4b5732e635ded  # 0.6471496492403596
 water = 0x3fa52000720f01d6  # 0.04125977890317116
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4039a7c60318dab3  # 25.65536517483515
+t_eq_k = 0x403b366e43e7042d  # 27.21262001409575
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1158,7 +1158,7 @@ iron = 0x3fcce043d71cc4c2  # 0.22559402469190643
 rock = 0x3fddfc953800562c  # 0.4685414358985749
 water = 0x3fd39348dc714774  # 0.30586453940951874
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403cf91642f51fc3  # 28.972995934338325
+t_eq_k = 0x403c68e109293abe  # 28.409683773580348
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1186,7 +1186,7 @@ iron = 0x3fd9b8ff235ba65c  # 0.4019162984173812
 rock = 0x3fe323806e522cd2  # 0.5980837015826188
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403597796cfd5ed2  # 21.59169655977059
+t_eq_k = 0x4036e6fc87baa5a3  # 22.90229080492794
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1214,7 +1214,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3ff0000000000000  # 1.0
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403355f4edf12dbc  # 19.335768576985842
+t_eq_k = 0x4032f5b767585e24  # 18.959829768251566
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
@@ -1231,6 +1231,6 @@ halo about Star(0)
 inner_m = 0x42f1220f18ab86c3  # 301407677364332.2
 outer_m = 0x434ac537968c0291  # 1.507038386821661e16
 comets = 0x427cac2ae5af324d  # 1970361228019.1438
-comet_rate_per_s = 0x3eb2c4e42ea835bf  # 1.118725942664405e-6
+comet_rate_per_s = 0x3eb2ba43753dd05d  # 1.1162514583470107e-6
 surface: NotApplicable
 hooks: NotApplicable

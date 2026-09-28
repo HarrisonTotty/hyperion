@@ -28,10 +28,15 @@
 //! come; it may read [`FittedFates`] at η's median.
 
 use crate::math;
+use crate::stellar::composition::Z_SOLAR;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use crate::stellar::remnant::RemnantKind;
+use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::{RemnantDraws, core_collapse, electron_capture_remnant};
-use crate::stellar::sse::{MAX_INITIAL_MASS, RemnantModel, Track, is_companion_stripped};
+use crate::stellar::remnant::white_dwarf::WhiteDwarfCore;
+use crate::stellar::sse::{
+    MAX_INITIAL_MASS, RemnantModel, Track, bridged_origin, is_companion_stripped,
+};
 use crate::stellar::{Composition, Phase};
 use crate::tables::{
     stellar_fates_high as high, stellar_fates_low as low, stellar_fates_mid as mid,
@@ -55,10 +60,16 @@ pub enum FateRoute {
     IronCore,
     /// Nothing is left (a thermonuclear disruption).
     NoRemnant,
+    /// The envelope is lost on the AGB and the star crosses the post-AGB bridge to a
+    /// carbon–oxygen white dwarf, which fades on Miller Bertolami's shape before its cooling law
+    /// takes over (ruling 127.1).
+    BridgedCarbonOxygenWhiteDwarf,
+    /// As [`FateRoute::BridgedCarbonOxygenWhiteDwarf`], to an oxygen–neon white dwarf.
+    BridgedOxygenNeonWhiteDwarf,
 }
 
 impl FateRoute {
-    /// The route's code in the table: 0 to 5, in declaration order.
+    /// The route's code in the table: 0 to 7, in declaration order.
     #[must_use]
     pub const fn code(self) -> f64 {
         match self {
@@ -68,6 +79,8 @@ impl FateRoute {
             Self::ElectronCapture => 3.0,
             Self::IronCore => 4.0,
             Self::NoRemnant => 5.0,
+            Self::BridgedCarbonOxygenWhiteDwarf => 6.0,
+            Self::BridgedOxygenNeonWhiteDwarf => 7.0,
         }
     }
 
@@ -81,6 +94,8 @@ impl FateRoute {
             Self::ElectronCapture,
             Self::IronCore,
             Self::NoRemnant,
+            Self::BridgedCarbonOxygenWhiteDwarf,
+            Self::BridgedOxygenNeonWhiteDwarf,
         ]
         .into_iter()
         .find(|route| route.code().total_cmp(&code).is_eq())
@@ -91,8 +106,12 @@ impl FateRoute {
     pub const fn white_dwarf_phase(self) -> Option<Phase> {
         match self {
             Self::HeliumWhiteDwarf => Some(Phase::HeliumWhiteDwarf),
-            Self::CarbonOxygenWhiteDwarf => Some(Phase::CarbonOxygenWhiteDwarf),
-            Self::OxygenNeonWhiteDwarf => Some(Phase::OxygenNeonWhiteDwarf),
+            Self::CarbonOxygenWhiteDwarf | Self::BridgedCarbonOxygenWhiteDwarf => {
+                Some(Phase::CarbonOxygenWhiteDwarf)
+            }
+            Self::OxygenNeonWhiteDwarf | Self::BridgedOxygenNeonWhiteDwarf => {
+                Some(Phase::OxygenNeonWhiteDwarf)
+            }
             Self::ElectronCapture | Self::IronCore | Self::NoRemnant => None,
         }
     }
@@ -106,6 +125,7 @@ impl FateRoute {
 /// | Route | `a` | `b` |
 /// | --- | --- | --- |
 /// | a white dwarf | its mass, M☉ | its cooling origin, Myr |
+/// | a white dwarf off the post-AGB bridge | its mass, M☉ | log₁₀ L at its knee, L☉ |
 /// | an iron core | the progenitor's carbon–oxygen core, M☉ | its helium core, M☉ |
 /// | electron capture, no remnant | 0 | 0 |
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -124,11 +144,11 @@ impl FateNode {
     /// The fate of a star of initial mass `m0`, composition `comp` and Reimers η draw `eta`: one
     /// [`Track::full`] at the median draws but η, read at its death.
     ///
-    /// `m0` above 100 M☉ is evolved as 100 M☉, as `StarModel` does until P06.T14.
+    /// `m0` above 150 M☉, the tracks' top since P06.T14, is evolved as 150 M☉, as `StarModel` does.
     ///
     /// # Panics
     ///
-    /// In debug builds, if `m0` is outside the track's 0.1–100 M☉ after that clamp.
+    /// In debug builds, if `m0` is outside the track's 0.1–150 M☉ after that clamp.
     #[must_use]
     pub fn of(m0: SolarMasses, comp: &Composition, eta: StandardNormal) -> Self {
         let m0 = if m0 > MAX_INITIAL_MASS {
@@ -153,23 +173,33 @@ impl FateNode {
                 b: progenitor.helium_core_mass().value(),
             };
         }
-        let (route, a, b) = match remnant.phase {
-            Phase::HeliumWhiteDwarf => (
+        let (route, a, b) = match (remnant.phase, remnant.knee) {
+            (Phase::CarbonOxygenWhiteDwarf, Some(knee)) => (
+                FateRoute::BridgedCarbonOxygenWhiteDwarf,
+                remnant.mass.value(),
+                knee,
+            ),
+            (Phase::OxygenNeonWhiteDwarf, Some(knee)) => (
+                FateRoute::BridgedOxygenNeonWhiteDwarf,
+                remnant.mass.value(),
+                knee,
+            ),
+            (Phase::HeliumWhiteDwarf, _) => (
                 FateRoute::HeliumWhiteDwarf,
                 remnant.mass.value(),
                 remnant.origin.value(),
             ),
-            Phase::CarbonOxygenWhiteDwarf => (
+            (Phase::CarbonOxygenWhiteDwarf, None) => (
                 FateRoute::CarbonOxygenWhiteDwarf,
                 remnant.mass.value(),
                 remnant.origin.value(),
             ),
-            Phase::OxygenNeonWhiteDwarf => (
+            (Phase::OxygenNeonWhiteDwarf, None) => (
                 FateRoute::OxygenNeonWhiteDwarf,
                 remnant.mass.value(),
                 remnant.origin.value(),
             ),
-            Phase::NeutronStar => (FateRoute::ElectronCapture, 0.0, 0.0),
+            (Phase::NeutronStar, _) => (FateRoute::ElectronCapture, 0.0, 0.0),
             _ => (FateRoute::NoRemnant, 0.0, 0.0),
         };
         Self {
@@ -272,11 +302,26 @@ impl FittedFate {
         let a = self.a + shift.1 * self.bounds.1 * self.a.abs().max(VALUE_FLOORS[0]);
         let b = self.b + shift.2 * self.bounds.2 * self.b.abs().max(VALUE_FLOORS[1]);
         if let Some(phase) = self.route.white_dwarf_phase() {
+            let bridged = matches!(
+                self.route,
+                FateRoute::BridgedCarbonOxygenWhiteDwarf | FateRoute::BridgedOxygenNeonWhiteDwarf
+            );
+            let mass = SolarMasses::new(a);
+            // A bridged dwarf's origin puts 10 L☉ at its fade's end (ruling 127.1); the Montreal
+            // law does not read the metallicity, which is only passed for the call's shape.
+            let (origin, knee) = if bridged {
+                let core = WhiteDwarfCore::of(phase).expect("a white dwarf phase has a core");
+                let origin = bridged_origin(RemnantRecipe::MandelMuller2020, core, mass, Z_SOLAR);
+                (origin, Some(b))
+            } else {
+                (Megayears::new(b.max(0.0)), None)
+            };
             return RemnantModel {
                 phase,
-                mass: SolarMasses::new(a),
+                mass,
                 birth,
-                origin: Megayears::new(b.max(0.0)),
+                origin,
+                knee,
             };
         }
         let remnant = match self.route {
@@ -293,7 +338,9 @@ impl FittedFate {
             FateRoute::NoRemnant
             | FateRoute::HeliumWhiteDwarf
             | FateRoute::CarbonOxygenWhiteDwarf
-            | FateRoute::OxygenNeonWhiteDwarf => {
+            | FateRoute::OxygenNeonWhiteDwarf
+            | FateRoute::BridgedCarbonOxygenWhiteDwarf
+            | FateRoute::BridgedOxygenNeonWhiteDwarf => {
                 crate::stellar::remnant::CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO)
             }
         };
@@ -307,6 +354,7 @@ impl FittedFate {
             mass: remnant.mass(),
             birth,
             origin: Megayears::ZERO,
+            knee: None,
         }
     }
 }
@@ -452,8 +500,8 @@ const ORDERS: [usize; 3] = [4, 3, 2];
 
 impl<'t> FittedFates<'t> {
     /// The fate of a star of initial mass `m0`, composition `comp` and Reimers η `eta`, unstripped,
-    /// with its bounds, or `None` where the table does not answer: outside 0.741–100 M☉ (above
-    /// 100 M☉ it reads 100, as the tracks do), outside its η nodes, for a composition with a helium
+    /// with its bounds, or `None` where the table does not answer: outside 0.741–150 M☉ (above
+    /// 150 M☉ it reads 150, as the tracks do), outside its η nodes, for a composition with a helium
     /// excess, across a change of route, or in a cell whose validation failed.
     #[must_use]
     pub fn fate_fitted(
@@ -637,11 +685,11 @@ mod tests {
 
     #[test]
     fn route_codes_round_trip() {
-        for code in 0..6 {
+        for code in 0..8 {
             let c = f64::from(code);
             assert_eq!(FateRoute::from_code(c).map(FateRoute::code), Some(c));
         }
-        assert_eq!(FateRoute::from_code(6.0), None);
+        assert_eq!(FateRoute::from_code(8.0), None);
         assert_eq!(FateRoute::from_code(0.5), None);
     }
 
@@ -702,6 +750,40 @@ mod tests {
     /// four of each panel, across the routes, rebuilt by [`FateNode::of`] and compared with
     /// the table to its stored digits. A change to the tracks that moves a node fails here, in
     /// ordinary CI, and not only in the table's slow reproduction.
+    /// A white dwarf off the post-AGB bridge is tabulated by its knee (ruling 127.1): the node's
+    /// `b` is its knee's log₁₀ L, and the remnant the table rebuilds from it fades as the track's
+    /// does, to 10⁻⁴ dex through the fade and after the cooling law takes over.
+    #[test]
+    fn a_table_routed_bridged_white_dwarf_fades_as_its_track() {
+        let (m0, comp, eta) = (
+            SolarMasses::new(4.264),
+            Composition::SOLAR,
+            StandardNormal::new(0.34).expect("finite"),
+        );
+        let node = FateNode::of(m0, &comp, eta);
+        assert_eq!(node.route, FateRoute::BridgedCarbonOxygenWhiteDwarf);
+        assert!((3.0..5.0).contains(&node.b), "{node:?}");
+        let fate = FittedFate {
+            route: node.route,
+            death_age: Years::new(math::exp10(node.log_death_age)),
+            a: node.a,
+            b: node.b,
+            bounds: (0.0, 0.0, 0.0),
+        };
+        let remnant = fate.remnant(RemnantDraws::of(&node_draws(eta)), (0.0, 0.0, 0.0));
+        let track = Track::full(m0, &comp, &node_draws(eta));
+        let death = track.lifetime().expect("dies").value();
+        for dt in [1.0, 100.0, 1e4, 1e5, 1e6, 1e8] {
+            let age = Years::new(death + dt);
+            let exact = track.state_at(age).luminosity().value();
+            let table = track.remnant_state_at(remnant, age).luminosity().value();
+            assert!(
+                math::log10(table / exact).abs() < 1e-4,
+                "+{dt}: {table} against {exact}"
+            );
+        }
+    }
+
     #[test]
     fn the_committed_nodes_are_the_tracks() {
         // Per panel, four nodes as (\[Fe/H\] node, η node, mass node).

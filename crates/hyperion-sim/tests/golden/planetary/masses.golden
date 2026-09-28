@@ -1,4 +1,4 @@
-# generator_version = 13
+# generator_version = 14
 reference solid mass = 0x404019999999999a  # 32.2
 
 draws seed 0123456789abcdef system 0228c38627ff0007 slot 1
@@ -404,10 +404,12 @@ CompactMulti group 0 ×1 characteristic = 0x401afc17801f0f87  # 6.74618339719371
 CompactMulti group 0 ×1 cap Truncated
 CompactMulti group 0 ×4 characteristic = 0x401afc17801f0f87  # 6.74618339719371
 CompactMulti group 0 ×4 cap Truncated
+CompactMulti group 0 ×4 [0] = 0x4017206f083cc433  # 5.781673554142844
 CompactWithColdGiant group 0 ×1 characteristic = 0x401afc17801f0f87  # 6.74618339719371
 CompactWithColdGiant group 0 ×1 cap Truncated
 CompactWithColdGiant group 0 ×4 characteristic = 0x401afc17801f0f87  # 6.74618339719371
 CompactWithColdGiant group 0 ×4 cap Truncated
+CompactWithColdGiant group 0 ×4 [0] = 0x4017206f083cc433  # 5.781673554142844
 CompactWithColdGiant group 1 ×1 cap GasMass
 CompactWithColdGiant group 1 ×1 [0] = 0x406517feca745e07  # 168.74985239723193
 CompactWithColdGiant group 1 ×4 cap GasMass
@@ -460,10 +462,12 @@ WarmGiant group 0 ×4 [1] = 0x404d027d4e89a265  # 58.0194490596812
 WarmGiant group 0 ×4 [2] = 0x403dd1c6a5606f22  # 29.81943734745358
 WarmGiant group 0 ×4 [3] = 0x405131c3c6707780  # 68.77757416709028
 WarmGiant group 1 ×1 characteristic = 0x400f52285ba44f22  # 3.9151160392301714
-WarmGiant group 1 ×1 cap Truncated
+WarmGiant group 1 ×1 cap AsDrawn
+WarmGiant group 1 ×1 [0] = 0x40100bb7d800d748  # 4.0114434957993765
 WarmGiant group 1 ×4 characteristic = 0x400f52285ba44f22  # 3.9151160392301714
 WarmGiant group 1 ×4 cap Truncated
 WarmGiant group 1 ×4 [0] = 0x40031da7e4ae0035  # 2.389480387268146
+WarmGiant group 1 ×4 [1] = 0x400337870f912f3f  # 2.4021130767995653
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap GasMass
@@ -512,16 +516,20 @@ CompactMulti group 0 ×1 characteristic = 0x40334659edcd0b18  # 19.2748097062677
 CompactMulti group 0 ×1 cap AsDrawn
 CompactMulti group 0 ×1 [0] = 0x40370ee08fa1d140  # 23.05811402989025
 CompactMulti group 0 ×4 characteristic = 0x40334659edcd0b18  # 19.274809706267746
-CompactMulti group 0 ×4 cap Truncated
+CompactMulti group 0 ×4 cap AsDrawn
 CompactMulti group 0 ×4 [0] = 0x402ad4e80f5d174a  # 13.415832977403301
 CompactMulti group 0 ×4 [1] = 0x4026d9c49864b702  # 11.425328028005882
+CompactMulti group 0 ×4 [2] = 0x4030042ca22578b5  # 16.01630605139572
+CompactMulti group 0 ×4 [3] = 0x40338d92a4b462fe  # 19.553018850364417
 CompactWithColdGiant group 0 ×1 characteristic = 0x40334659edcd0b18  # 19.274809706267746
 CompactWithColdGiant group 0 ×1 cap AsDrawn
 CompactWithColdGiant group 0 ×1 [0] = 0x40370ee08fa1d140  # 23.05811402989025
 CompactWithColdGiant group 0 ×4 characteristic = 0x40334659edcd0b18  # 19.274809706267746
-CompactWithColdGiant group 0 ×4 cap Truncated
+CompactWithColdGiant group 0 ×4 cap AsDrawn
 CompactWithColdGiant group 0 ×4 [0] = 0x402ad4e80f5d174a  # 13.415832977403301
 CompactWithColdGiant group 0 ×4 [1] = 0x4026d9c49864b702  # 11.425328028005882
+CompactWithColdGiant group 0 ×4 [2] = 0x4030042ca22578b5  # 16.01630605139572
+CompactWithColdGiant group 0 ×4 [3] = 0x40338d92a4b462fe  # 19.553018850364417
 CompactWithColdGiant group 1 ×1 cap AsDrawn
 CompactWithColdGiant group 1 ×1 [0] = 0x4082387c3391bd1d  # 583.0606452356184
 CompactWithColdGiant group 1 ×4 cap AsDrawn
@@ -577,10 +585,11 @@ WarmGiant group 1 ×1 characteristic = 0x40265f416607a63d  # 11.186045826371918
 WarmGiant group 1 ×1 cap AsDrawn
 WarmGiant group 1 ×1 [0] = 0x4026e0a91c34ace8  # 11.438790208273033
 WarmGiant group 1 ×4 characteristic = 0x40265f416607a63d  # 11.186045826371918
-WarmGiant group 1 ×4 cap Truncated
+WarmGiant group 1 ×4 cap AsDrawn
 WarmGiant group 1 ×4 [0] = 0x401632756e8a54c6  # 5.549276091759742
 WarmGiant group 1 ×4 [1] = 0x40199ddcbf93816b  # 6.404162400606178
 WarmGiant group 1 ×4 [2] = 0x4032407686357fc8  # 18.251808536588015
+WarmGiant group 1 ×4 [3] = 0x4029fac4884b941c  # 12.989780673242471
 HotJupiter group 0 ×1 cap AsDrawn
 HotJupiter group 0 ×1 [0] = 0x405a4a410809f131  # 105.16021920176424
 HotJupiter group 0 ×4 cap AsDrawn

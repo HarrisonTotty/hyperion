@@ -158,9 +158,31 @@ pub fn evolve(input: &BinaryInput, until_age: Years) -> BinaryTimeline {
         );
         return BinaryTimeline::new(vec![segment], None, Vec::new(), until, ctx, false);
     }
-    let mut engine = Engine::new(ctx, until, members, orbit, pin.map(|p| p.pin));
+    let start = arrival(&members, until);
+    let mut engine = Engine::new(ctx, start, until, members, orbit, pin.map(|p| p.pin));
     engine.run();
     engine.finish()
+}
+
+/// Where the engine starts stepping for a pair of `members` run to `until`: where both stars have
+/// arrived on the main sequence (P06.T15.b), as the binary codes it follows start at the zero-age
+/// main sequence (Hurley, Tout and Pols 2002). Before, each is its own protostar or contraction,
+/// detached, in the timeline's first segment.
+#[must_use]
+pub(super) fn arrival(members: &[Member; 2], until: f64) -> f64 {
+    members
+        .iter()
+        .filter_map(|member| match member {
+            Member::Track { track, .. } => track.main_sequence_start(),
+            Member::Shaped { .. }
+            | Member::MainSequence { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => None,
+        })
+        .fold(0.0_f64, f64::max)
+        .min(until)
 }
 
 /// Each star on its own single-star form from zero age: its track built to `until` (the
@@ -189,7 +211,7 @@ fn own_members(input: &BinaryInput, until: f64, primary: Option<Arc<Track>>) -> 
     })
 }
 
-/// The initial mass a track is built for: the star's own, held to the formulae's 100 M☉ as plan
+/// The initial mass a track is built for: the star's own, held to the formulae's 150 M☉ as plan
 /// 06's `StarModel` holds it.
 #[must_use]
 pub(super) fn track_mass(m: SolarMasses) -> SolarMasses {
@@ -387,10 +409,12 @@ pub(super) struct Engine {
 }
 
 impl Engine {
-    /// An engine for a pair of `members` on `orbit`, from zero age.
+    /// An engine for a pair of `members` on `orbit`, stepping from `start` (years; zero age, or
+    /// where both stars have arrived on the main sequence), its first segment from zero age.
     #[must_use]
     pub(super) fn new(
         ctx: Arc<Context>,
+        start: f64,
         until: f64,
         members: [Member; 2],
         orbit: LiveOrbit,
@@ -399,7 +423,7 @@ impl Engine {
         let mut engine = Self {
             ctx,
             until,
-            age: 0.0,
+            age: start,
             members,
             spins: [0.0; 2],
             orbit: Some(orbit),
@@ -420,7 +444,7 @@ impl Engine {
         };
         for i in 0..2 {
             let (mass, tau) = engine.current(i);
-            if let Some(s) = engine.structure(i, 0.0, mass, tau) {
+            if let Some(s) = engine.structure(i, start, mass, tau) {
                 let r = s.state.radius().value();
                 engine.spins[i] = super::star::moment_of_inertia(&s) * zams_spin(mass, r);
             }

@@ -664,6 +664,23 @@ Order and parallelism:
     `planetary/mod.rs` record each consumed item's real path as the task that uses it lands. The
     [α/Fe] and the X-ray and ultraviolet history wait with their consumers (T13.b and phase E), and
     plan 09's accessors are stood in for by T1.d's interim rule.
+  - _As built (`atmo14`, round 9):_ the [α/Fe] and the X-ray and ultraviolet history land with
+    T13. `context::alpha_fe(fe_h, population)` is the two sequences' closed form (Bensby et al.
+    2014, Sect. 6 and Figs. 15–16; Hayden et al. 2015): the α-rich plateau of +0.30 to a knee at
+    [Fe/H] = −0.5, then −0.36 per dex, for the thick disc, halo, bulge, bar and nuclear disc; the
+    α-poor −0.13 × [Fe/H] for the thin disc; both held to −0.05–0.30 and the rich one never below
+    the poor. `SystemContext::alpha_fe()` is `Some` for every context (a record's population, the
+    builder's `population`, old thin disc by default), and nothing reads it yet, so no golden
+    moves by it. `context::XuvHistory::new(initial_mass, zams_luminosity)` saturates at 10^−3.5 of
+    the zero-age luminosity for its saturation time (ruling 122.2: 1 Gyr up to 0.30 M☉, 250 Myr
+    over 0.35–0.60 M☉, 100 Myr from 0.70 M☉, log-blended between), then falls as
+    t^−1.5; `fluence(age, a, e)` is its closed-form time integral over 4π a² √(1 − e²), continuous
+    and non-decreasing; `SystemContext::xuv_history(star)` and `xuv_histories()` give every
+    component's from the zero-age luminosity its disc reads. **Deviation:** plan 06's
+    `ActivityLevel` is not read. A saturation time set from the level at the time would move
+    whenever the level does, so the energy delivered could fall as the star ages (design note 9);
+    the spectral type's saturation time, the plan's fallback, is used for every star, and the
+    activity enters T13.b as that fluence. `units` gains `Pascals` and `JoulesPerSquareMetre`.
 - **P14.T1.b Module tree and errors.** Create
   `planetary/{mod, error, index, context, params, system, record}.rs` with `//!` docs. Error enums:
   `EncodeBodyIndexError`, `DecodeBodyIndexError`,
@@ -865,6 +882,14 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
 - _As built (ruling 102):_ the hot variant has one or two planets about every host again
   (`EARLY_M_DWARF_HOT_VARIANT_COUNT` and the blended count are gone), the early M dwarfs' hot share
   is 0.43 and their first-period factor 0.50; see "Risks and open points", the `calib6` bullet.
+- _As built (ruling 106.2):_ the rocky group's count is `ROCKY_COUNT`, a `CountLaw::Tallied` of
+  2–6 in Raymond et al.'s (2009, Table 2) shares 6 : 17 : 14 : 2 : 1 (mean 3.375), drawn on the
+  group's count rank; `CountLaw::Fill` and the cap of 10 are gone. See "Risks and open points",
+  the `calib7` bullet.
+- _As built (rulings 116.1, 117.2 and 121.4):_ the rocky group's first planet is drawn at
+  0.5–0.8 au × √L (was 0.2–0.5); the chains' first-period break is 12 days × 10^(−0.4 \[Fe/H\])
+  (`CHAIN_BREAK_METALLICITY_EXPONENT`, `chain_break_metallicity_factor`), before the M dwarfs'
+  factor, still truncated to 1–50 days; the hot variant's weight stays flat.
 
 ### Phase B: placement
 
@@ -890,6 +915,9 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     mass below 10, which is the brainstorm's floor, and a median in 14–20, which is its centre; two
     runs of the redraw loop agree.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement::spacing`.
+  - _As built (ruling 106.2):_ the terrestrial groups' mean is normal about 40 with σ = 8, held
+    to 26–59 (was 30, held to 14–46), the spacing of final planets (Raymond et al. 2006);
+    `terrestrial_pairs_lie_twenty_six_to_fifty_nine_apart_about_forty` tests it.
 
 #### P14.T7 Masses and the peas-in-a-pod correlation
 
@@ -941,6 +969,10 @@ M^−0.31 over 0.3–10 M_J (Cumming et al. 2008) and the hot-Jupiter period log
     (`median_host_mass`, `MEDIAN_HOST_MASS_FLOOR`); `σ_b` 0.513 and `σ_w` 0.17. Test (b): log
     radii 0.636, log masses 0.859, outer heavier 0.746, larger 0.642. See "Risks and open points",
     the `calib5` bullet.
+  - _As built (ruling 121.3):_ below solar metallicity `drift_budget` also carries
+    10^((γ − 1) clamp(\[Fe/H\], −1, 0)), γ = 0.35 (`DRIFT_BUDGET_METALLICITY_SLOPE`, read
+    through `DiscProfile::metal_scale`), exactly 1 at and above solar; rocky and giant budgets
+    are unchanged. See "Risks and open points", the `calib7` bullet.
   - _As built (ruling 102):_ about stars under 0.6 M☉ (blended away by 0.70 M☉) the drift-fed
     step is 0.15 dex (`M_DWARF_OUTWARD_STEP_DEX`, `outward_step(group, disc)`). The taper stays
     on the members: moved to the centre it broke test (a) and (b). See "Risks and open points",
@@ -996,6 +1028,9 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
     it. See "Risks and open points", the `calib5` bullet.
   - _As built (ruling 102.4):_ with one or two planets a hot variant always takes the half-normal
     0.3; `hot_variants_have_one_or_two_planets_at_the_half_normal_law` replaces the count test.
+  - _As built (ruling 106.2):_ the rocky walk ends at `ROCKY_COUNT`'s draw (`draw_count` on the
+    count rank), the snow line or a giant's chaotic zone, and does not fill the zone to the snow
+    line. See "Risks and open points", the `calib7` bullet.
 
 #### P14.T9 Stable zones in multiple systems
 
@@ -1062,6 +1097,12 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
     flat-radius bound and Ballard and Johnson's transiting singles are asserted, the hot chains'
     rescaled share and Pascucci et al.'s slope are pinned findings. See "Risks and open points",
     the `calib6` bullet.
+  - _As built (rulings 106, 116, 117 and 121):_ small planets at \[Fe/H\] −0.8 are checked at
+    0.35–0.75 of solar (was within 20%), hot ones under 10 days at 0.20–0.40, warm ones at
+    10–100 days at 0.55–1.0 (0.60–0.80 printed as the target) and at least 1.5 times hot; η⊕ is taken at the host's present age
+    and checked at 0.16 or more, 0.37–0.60 printed as the target; He, Ford and Ragozzine's
+    cluster median is re-measured, printed and pinned (`Report::measured`). See "Risks and open
+    points", the `calib7` bullet.
 
 ### Phase C: derivation
 
@@ -1167,6 +1208,53 @@ Solar System values without a generator.
     envelope fraction is monotone and continuous in time. (c) Surface temperatures of Venus 735 K,
     Earth 288 K, Mars 215 K, Titan 94 K within 8%; no surface is hotter than the hottest host.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
+  - _As built (`atmo14`, round 9):_ `derive/atmosphere.rs` (tests in `derive/atmosphere/tests.rs`).
+    - _T13.a._ `VolatileDraws { water, carbon, nitrogen }` are words 0–2 of `planet.volatiles`
+      (`Body`, appended to `tags.rs` after plan 08's entries, so `tags.golden` gains its line);
+      `volatile_inventory` takes Earth's per unit mass (water 2.3 × 10⁻⁴, carbon as CO₂
+      6.1 × 10⁻⁵, N₂ 6.5 × 10⁻⁷) times 10^(0.5 dex × z) each, 100 times the carbon and nitrogen
+      beyond the snow line (Titan's nitrogen), the bulk ice as water there, and radiogenic argon per
+      unit of rock grown with ⁴⁰K's decay. **Ruling 119.1:** a core formed inside the snow line
+      that takes an envelope (above 1.5 M⊕) is born with `composition::formation_envelope`,
+      3% × (M ÷ 5 M⊕)^0.6 × 10^(0.5 z) of its mass, z its quantile among the enveloped outcomes,
+      floored at 1% and held to the largest envelope the mass allows, on an Earth-like core
+      (`formed_with_envelope`); from 10 to 20 M⊕ it hands over, linearly in log mass, to Chen and
+      Kipping's radius solved as before (the lane's, since the law is the sub-Neptune cores'), and
+      bare bodies and bodies formed beyond the snow line keep Chen and Kipping's. Ruling 102.1's
+      probability of an envelope is unchanged. Read at formation (ruling 119.2), the medians at 2,
+      5 and 10 M⊕ are 1.73%, 3.00% and 4.55% (the law's), scatters 0.37, 0.49 and 0.50 dex, the
+      2 M⊕ one cut by the floor; asserted within 10% and 0.3–0.7 dex below 10 M⊕.
+      _Ruling 122.7:_ the citation is Rogers and Owen 2021's model I (μ_X = 0.040, σ_X = 0.51,
+      mass-independent); Owen and Wu's eq. 24 is their core-mass law, and the 0.6 index is
+      P14.T13.a's own, provisional. _Ruling 122.6:_ the 10–20 M⊕ handover is accepted; the
+      median and 90th-percentile envelope at 5, 10, 14, 20 and 30 M⊕ are 3.0/13.1%, 4.6/19.9%,
+      7.2/25.1%, 15.2/38.3% and 26.9/58.7%, the median asserted to rise; the radius at a fixed
+      rank may fall across the band where the law's tail exceeds Chen and Kipping's, a recorded
+      departure from design note 8's monotonicity.
+    - _T13.b._ `jeans_parameter`, `Retention` at λ ≥ 25, and `exobase_temperature` = 5 × `T_eq` at
+      the hosts' largest past luminosity × max(1, Φ ÷ Φ⊕)^½, Φ the X-ray and ultraviolet fluence
+      and Φ⊕ Earth's at 4.57 Gyr. Jeans escape judges the secondary inventory only; the hydrogen
+      envelope is judged by `energy_limited_loss` (ε 0.1, Owen and Wu's eq. 19 with Erkaev et al.'s
+      Roche-lobe factor) at the radius at 100 Myr and the zero-age flux, so the loss is monotone in
+      time and a stripped body keeps its core. The multiple of 5 is fixed by Ganymede (λ ≈ 23,
+      lost) and Titan (λ ≈ 31, kept); its window is 4.6–5.5. **Deviations:** the activity enters
+      as that fluence (P14.T1.a's note); bodies from 0.3 M_J lose no envelope (a giant's loss is
+      under a per cent of it); the Roche-lobe factor is the lane's addition to Owen and Wu's form.
+    - _T13.c._ `atmosphere(&AtmosphereInputs) -> Atmosphere`. **Deviations, the lane's
+      additions:** carbonate storage, condensation caps and nitrogen's collision-induced term,
+      each described here and in Risks. The climate (from `Insolation`, the
+      runaway limit at the worst flux and the maximum-greenhouse limit now, Kopparapu's fluxes
+      summed over the hosts) stores all but 6 × 10⁻⁶ of a temperate world's carbon in rock, loses a
+      runaway world's water and leaves a snowball's carbon airborne; each gas is held at its
+      Clausius–Clapeyron saturation pressure; the surface temperature is the lowest fixed point of
+      the grey greenhouse, 32 steps up from `T_eq`, saturated at the hottest host. τ = 18.5 √p(CO₂)
+      - 2.89 √p(H₂O) + 1.55 (75.6 K ÷ `T_eq`)² √p(N₂), bar, fitted on Venus, Earth and Titan; Mars
+        is the prediction (214 K). Below 100 Pa a body is airless; over 1,394 K, or before P14.T28.a's
+        `molten_until`, a magma ocean. Albedos by state: gas envelope 0.34, magma 0.10, airless rock
+        0.11 and ice 0.35, runaway 0.76, temperate 0.306, snowball 0.50. The Solar System table gives
+        Venus 735 K at 58 bar, Earth 288 K at 0.78 bar with 42 Pa of CO₂, Mars 214 K at 0.11 bar
+        (nitrogen: its real 6 mbar of CO₂ is non-thermal loss this model has not), Titan 94 K at
+        1.4 bar, and airless Mercury, Moon, Ganymede and Ceres.
 
 #### P14.T14 Rotation and tides
 
@@ -1218,6 +1306,20 @@ constant.
   - _Slice:_ `derive_body` runs T11, T12 and T15 only, in the order it will keep; T13 and T14 are
     deferred, so the Bond albedo is fixed at 0.3, the value T12.a names before T13 closes the loop,
     and the surface section is tagged `NotModelled` (T34).
+  - _As built (`atmo14`, round 9):_ `derive_body` now runs T11, T12, T13 and T15 in the order of
+    its module docs: formation; the sky (flux now, flux at the peak luminosities, fluence);
+    energy-limited escape and the radius at the time on what is left; three passes of T12 and T13
+    (`ATMOSPHERE_PASSES`), the albedo of one pass's surface state feeding the next from 0.3; T15
+    on the present mass. `HostLight::with_history(xuv, peak)` carries each host's past (the
+    generator's `Epoch::light` gives `SystemContext::xuv_history` and
+    `StarModel::max_luminosity_until`; a bare `HostLight` has none), and
+    `PlacedBody::with_volatiles` and `with_magma_ocean_until` the body's own (the generator's are
+    `VolatileDraws::for_body` and the formation's `molten_until`). `DerivedBody` gains
+    `atmosphere()`, `surface_temperature()`, `irradiation_temperature()` (no internal heat, the
+    split ruling 112.7 names), `xuv_fluence()`, `initial_envelope_fraction()` and
+    `envelope_lost()`; `mass()` is the mass at the time. The record's surface section stays
+    `NotModelled`: it also holds T14's rotation and T24's conditions, and the wire's surface
+    types are T35's.
 - **P14.T16.b Properties** (needs T8), in `crates/hyperion-sim/tests/planetary_properties.rs`. **No
   planet hotter than its star**: for every sampled body and time in ±H, surface and effective
   temperatures are below the hottest host's effective temperature; hosts that are black holes are
@@ -1231,6 +1333,21 @@ constant.
   the dials are the scatter of T11.a and the escape efficiency of T13.b, inside their sources'
   ranges; a gap is never imposed (D8).
   - _Accept:_ `just test-slow` runs `radius_valley_emerges` and it passes.
+  - _As built (`atmo14`, round 9), T16.b and T16.c:_ T16.b's two tests now derive every body
+    through `derive_body` about `StarModel` hosts with their histories and drawn volatile ranks,
+    and assert the surface temperature too; a change of surface state or of retained gases is a
+    recorded state change. **T16.c, after rulings 119 and 122:** read after escape at each system's
+    age, the valley forms: 1–10 Gyr, bins of 0.05 dex from 1 R⊕, `[2453, 2444, 1639, 1166, 733,
+724, 1289, 1769, 1622, 1501, 1233, 1077]`, its least bin 724 at 1.78–2.0 R⊕, 0.41 of the upper
+    peak, under the plan's two thirds, which `radius_valley_emerges` asserts. Ruling 122.1
+    withdraws the 10 Myr check (`[2408, 1945, 1015, 719, 452, 255, 114, 1727, 1912, …]`, a deeper
+    young gap at 2.0–2.2 R⊕, pinned as a finding: the young minimum above 2.0 R⊕, the old one
+    inside it). Of its two age checks, enveloped planets' median radius holds (2.909 R⊕ at 10 Myr,
+    2.692 at 1–10 Gyr); the super-Earth : sub-Neptune ratio does not rise, 1.114 at 0.1–1 Gyr and
+    1.072 at 1–10 Gyr against Berger et al.'s 0.61 → 1.00 and Rogers and Owen's 0.77 → 0.95, a
+    finding pinned at 0.9–1.0 of the younger ratio: escape is done within the saturation time and
+    the envelopes' later contraction moves sub-Neptunes down, not across the valley, so the drift
+    over gigayears (David et al. 2021) needs a loss channel the model has not.
 
 ### Phase D: small bodies
 
@@ -4944,3 +5061,147 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
       the fallback black hole and filler C do not move.
     - `pinned_ids_satisfy_their_own_predicates` holds. The slow search's result is in this
       lane's report. The descriptions in `GOLDEN_SYSTEMS` are left to the bump.
+- **Rulings 106.1–2, 116, 117 and 121, small planets at low metallicity and rocky groups of final
+  planets, as built (`calib7`, round 9).** Research under
+  `_orchestration/research/brainstorm-edits/{smallz,spacing}/`. The rulings amend P14.T5, T6.b,
+  T8.b and T10.b. Before (version 12) → after, on T10.b's placed sample; windows in brackets. No
+  window was widened; ruling 48 f's η⊕ window 0.37–0.60 is replaced by ruling 116.3's 0.16 or
+  more.
+  - _106.2, the rocky groups._ `ROCKY_COUNT` (`CountLaw::Tallied`, which replaces
+    `CountLaw::Fill`) draws 2–6 planets in Raymond et al.'s (2009, Table 2) shares
+    6 : 17 : 14 : 2 : 1, a mean of 3.375, on the group's count rank; the walk ends at the count,
+    the snow line or a giant's chaotic zone. The terrestrial spacing's mean is normal about 40,
+    σ = 8, held to 26–59 (was 30, 14–46). The ice-rich bodies and the survivor share that
+    spacing kind, so theirs moves too: they are final bodies, and a separate kind would add a law
+    no source gives. The spacing test holds the 5th percentile at 24, not 26, since each pair
+    scatters N(0, 3) about a mean held at 26 or more. Rocky masses keep P14.T7.a's disc-scaled
+    law (0.5 M⊕ in the median solar disc), with no outward step: Kokubo, Kominami and Ida (2006)
+    find masses rising with the disc's solids and the count falling only slowly, so mass and
+    spacing stay coupled through the Hill radius. About FGK primaries the groups place 1–6
+    planets as 349, 3314, 8277, 4275, 474 and 103 groups, their pairs 26.5–53.4 mutual Hill radii
+    apart (5–95%), median 39.5.
+  - _116.1, the first rocky planet_ is drawn at 0.5–0.8 au × √L (was 0.2–0.5; Raymond et al.
+    2009's embryo disc from 0.5 au, Kokubo et al. 2006's largest planet at 0.75 ± 0.20 au).
+  - _116.2–3 and 117.1, η⊕:_ taken at the host's present age (was the zero-age main sequence),
+    the same stars and cuts. 0.393 (filled to the snow line) → 0.078 (106.2 alone) → **0.173**
+    [≥ 0.16, Bryson et al.'s 68% floor], 0.37–0.60 printed as the target; 0.233 at the zero-age
+    main sequence. Only `TerrestrialOnly` and `SolarLike` carry a rocky group, and compact systems
+    gain none (Millholland, He and Zink 2022; Lambrechts et al. 2019; He et al. 2019).
+  - _116.5, clusters_ (a group's planets of 0.08 M⊕ to a giant's mass at 3–300 days): median
+    **2** (mean 2.06; 2.40 before 116.1) against He, Ford and Ragozzine's three, printed and
+    pinned (2–2).
+  - _117.2 and 121.4, the chains' inner edge._ The first period's break is 12 days ×
+    10^(−k \[Fe/H\]), before the M dwarfs' factor, truncated to 1–50 days, with **k = 0.4**
+    (`CHAIN_BREAK_METALLICITY_EXPONENT`), re-fitted with γ; solar hosts are unchanged bit for bit.
+  - _121.3, the drift-fed budget's metallicity._ `drift_budget` gains
+    10^((γ − 1) clamp(\[Fe/H\], −1, 0)) with **γ = 0.35** (`DRIFT_BUDGET_METALLICITY_SLOPE`;
+    Zink et al. 2023 §6.3, Zhu 2019), read through the new `DiscProfile::metal_scale`; exactly 1
+    at and above solar, rocky and giant budgets unchanged. It stops the innermost-first
+    truncation from keeping metal-poor chains' hot planets and dropping their warm ones.
+  - _106.1, 117.3 and 121.1, metallicity at −0.8 against solar_ (γ, k):
+
+    | Figure        | Window                      | 106.2 only | 117 (–, 0.3) | 121 (0.35, 0.3) | (0.35, 0.45) | (0.4, 0.45) | **built (0.35, 0.4)** |
+    | ------------- | --------------------------- | ---------- | ------------ | --------------- | ------------ | ----------- | --------------------- |
+    | all small     | 0.35–0.75                   | 0.460      | 0.490        | 0.660           | 0.641        | 0.632       | **0.647**             |
+    | hot < 10 d    | 0.20–0.40                   | 0.596      | 0.296        | 0.378           | 0.268        | 0.262       | **0.299**             |
+    | warm 10–100 d | 0.55–1.0 (target 0.60–0.80) | 0.433      | 0.534        | 0.725           | 0.727        | 0.716       | **0.726**             |
+    | warm ÷ hot    | ≥ 1.5 (about 2.4)           | 0.73       | 1.81         | 1.92            | 2.71         | 2.73        | **2.43**              |
+
+    At −2: 0.025 [≤ 0.25] (0.007 before ruling 121). The warm pin (0.51–0.56) is gone. The thick
+    disc's extra deficit (Zink et al. 2023 §6.3, ruling 121.6) is a finding, not modelled.
+
+  - _Every other T10.b figure, before (version 12) → after:_ FGK small planets 0.649 → 0.583
+    [0.5–1.2], as the rocky groups shrink and move out; hot Jupiters 0.71%; Cumming's giants
+    9.99%; η⊕ 0.173 [≥ 0.16]; log radii 0.660 → 0.655, above 1 R⊕ 0.615 → 0.606; outer larger
+    0.649 → 0.645; Pascucci's slope −0.358 → −0.357 (pinned −0.42 to −0.33). M dwarfs, whose
+    \[Fe/H\] is drawn, move by γ and k: every primary 1.985 → 2.017 [1.8–3.2], at 0.5–10 days
+    0.460 → 0.466 [0.37–0.57]; Ribas 0.449 → 0.458 [0.35–0.85] and 1.059 → 1.080 [0.35–1.1];
+    Kaminski's 0.5–3 M⊕ 0.542 → 0.559; the masses tests' metal-poor budgets now read
+    `drift_budget` (the `group_masses_from` example forms four inner planets at −1, was two); Ment's 0.5–2 R⊕ 0.479 → 0.484; the late M share above
+    1.5 R⊕ 0.117 → 0.117 [0.02–0.12]; Hardegree-Ullman 0.751 → 0.756 and 0.200 → 0.203.
+    Re-pinned findings: single early M dwarfs (ruling 87.2) 2.574 → 2.612 (2.53–2.61 → 2.57–2.65);
+    the 0.65–0.75 M☉ blend (ruling 87.3) 1.150 → 1.093 (1.14–1.21 → 1.07–1.13), between FGK 0.66
+    and early M 2.02; close-binary hosts against single stars (Kraus et al.) 0.125 → 0.107
+    (0.12–0.17 → 0.09–0.12), since the first rocky planet at 0.5–0.8 au × √L lies beyond many
+    truncated discs.
+  - _Other tests._ `no_orbits_cross_about_hosts_that_lost_mass_at_once` samples 600 massive
+    primaries (360 held 57 post-supernova pairs, then 480 held 60, against its more than 60).
+    `the_solar_like_golden_is_labelled_by_its_layout` expects five planets, `A b` to `A f`, and
+    `A d II`.
+  - _Goldens, at 12, joining the version-14 batch (rulings 106.5, 116.6, 117.4 and 121.7):_
+    - `planetary/architecture`: the two rocky groups' count lines, 1–10 → 2–6, and their
+      locations, 0.2–0.5 → 0.5–0.8 au × √L.
+    - `planetary/classes`: every rocky group's count, positions and masses, chains about hosts of
+      non-solar \[Fe/H\], and the draws keyed by the slots after them.
+    - `planetary/spacing`: the terrestrial means, by the new law.
+    - `planetary/masses`: the drift-fed groups of its sub-solar discs, by ruling 121.3's budget.
+    - Eleven T32 systems. By their rocky groups: the Solar-like system (64 bodies → 5 planets, two
+      rocky, then its giants `A d` and `A e` and an ice giant), the wide binary, filler C and the
+      fallback black hole (ten planets, three unbound by the supernova → four, all bound). By the
+      chains' break and budget (\[Fe/H\] ≠ 0): the M dwarf, fillers A and B, the halo star, the triple, the
+      subgiant and the red giant.
+    - The hot Jupiter, the eccentric giant and the close binary do not move.
+    - `pinned_ids_satisfy_their_own_predicates` holds, and the slow search reproduces every
+      pinned ID. The descriptions in `GOLDEN_SYSTEMS` are left to the bump.
+- **P14.T1.a's [α/Fe] and X-ray history, T13 and T16.a–c, as built (`atmo14`, round 9), for the
+  orchestrator.** The task entries carry the as-built notes; these are the findings and the
+  choices that need a ruling.
+  - _The radius valley (T16.c), ruled (ruling 119)._ Before the ruling no valley formed (least
+    bin 0.94 of the sub-Neptune peak; efficiencies 0.2 and 0.3 left it above 0.9), because Chen and
+    Kipping's relation, fitted to evolved planets, set the envelopes at formation. Ruling 119.1's
+    formation law replaces it inside the snow line, and the valley forms at 0.40 of the upper peak
+    (T16.c's note). Open: the 10 Myr sample has a deeper gap still, at 2.0–2.2 R⊕, made by the
+    law's 1% floor, against ruling 119.2's check of none below two thirds.
+  - _The M dwarfs' windows after ruling 122, read after escape (for the orchestrator)._
+    Ruling 122.2's saturation times (1 Gyr to 0.30 M☉, 250 Myr over 0.35–0.60, 100 Myr from 0.70,
+    log-blended) and 122.3's radius scatter of 10^(0.06 g):
+
+    | Check                                          | Window    | As built | Intrinsic |
+    | ---------------------------------------------- | --------- | -------- | --------- |
+    | 102.1 early M: 1.5–4 R⊕ at 0.5–7 d per star    | 0.10–0.26 | 0.116    | 0.102     |
+    | 102.1 early M: 0.5–1.5 R⊕ at 0.5–7 d per star  | 0.19–0.39 | 0.400    | 0.416     |
+    | early M rocky : sub-Neptune (1.6; 1.08 ± 0.23) | reported  | 3.45     | 4.07      |
+    | 102.1 late M: share above 1.5 R⊕ at 0.5–7 d    | 0.02–0.12 | 0.117    | —         |
+    | 102.1 late M: ≥ 1.4 R⊕ at 0.5–7 d per star     | 0–0.16    | 0.095    | —         |
+    | late M: 0.5–2 R⊕ at 1–7 d per star             | 0.35–1    | 0.484    | —         |
+    | 102.3 early M transiting singles               | 0.58–0.76 | 0.716    | —         |
+    | 112.1 K and G slope above the break (pinned)   | −3.3–−2.5 | −0.357   | —         |
+
+    The early M dwarfs' small-planet count misses by 0.010; the dial of ruling 122.2 at its 200 Myr
+    end gives 0.397, still out, so the saturation time stays at 250 Myr and the check is pinned as a
+    finding at 0.39–0.41 (no window widened). The rocky : sub-Neptune ratio is two to three times
+    the surveys'. Ruling 112.2's early-M mass trial (`pfix14`) is the next dial. Ruling 121.5's
+    checks run in the same statistics test and pass. The envelope probability keeps its cap and
+    slope (ruling 122.4); `derive/m_dwarfs.rs` is untouched, and `tests/planetary_placement.rs`
+    (`calib7`'s) carries the after-escape `derived` and the scatter.
+
+  - _The saturated X-ray share, ruled (ruling 119.3)._ 10^−3.5 of the zero-age bolometric
+    luminosity stays (Wright et al. 2011's R_X, independent of type); Owen and Wu's mass scaling
+    is not used. Ruling 122.2 then settled the saturation times (Loyd et al. 2021's 240 ± 30 Myr for
+    M0–M2.5 stars; Johnstone et al. 2021 for the late M dwarfs' 1 Gyr, still provisional).
+  - _The saturation time and plan 06's activity._ The spectral type's time (ruling 122.2's table)
+    is used for every star, and `ActivityLevel` is not read, since a
+    time set from the level at the time is not monotone in time (design note 9). A saturation time
+    from the star's own rotation rank, fixed at birth, would be monotone and keep each star's
+    scatter; that is a choice for the owner.
+  - _Choices the plan leaves open, each provisional._ The exobase multiple of 5 (window 4.6–5.5
+    between Ganymede and Titan; Jeans escape stands in for sputtering, which is why it exceeds a
+    real exobase's 2–4), raised by the square root of the X-ray fluence above Earth's; carbon
+    stored in rock on temperate worlds with water, 6 × 10⁻⁶ airborne; condensation at
+    Clausius–Clapeyron saturation pressures; nitrogen's collision-induced term, (75.6 K ÷ `T_eq`)²,
+    beside the plan's k √p; energy-limited escape skips bodies from 0.3 M_J; the airless line at
+    100 Pa; the albedos by state. The plan's k √p cannot hold Venus's 92 bar and Mars's 6 mbar of
+    CO₂ together (their exponent is 0.72); Mars passes here because its carbon is stored and its
+    0.11 bar is nitrogen. A Mars of 6 mbar needs non-thermal loss (Zahnle and Catling's 2017 cosmic
+    shoreline), which this model has not; its 0.11 bar is accepted and pinned (ruling 119.4).
+  - _Downstream._ The record's surface section stays `NotModelled` until T14,
+    T24 and T35 give it the atmosphere, rotation and conditions. The fast property tests of T16.b
+    run 47 s together in a dev build.
+- **Young hosts after P06.T15 (ruling 124.7, `track06`, round 9).** Plan 06's tracks now open with
+  the protostar and the pre-main-sequence contraction, and `max_radius_until` and
+  `max_luminosity_until` count from the arrival on the main sequence: before it they are the
+  present values. The condition this places on plan 14: **no planet is placed inside a young
+  host's present radius (or its Roche limit) while the host is before the main sequence.** The
+  engulfment test reads the present radius then, which the maxima's definition gives. P14.T32's
+  T Tauri system (`0x41feec7600000003`, 1.61 M☉ at 1.73 Myr) holds a 232 M⊕ planet at 0.17 au,
+  plausible for a young hot Jupiter (Donati et al. 2016's V830 Tau b at 0.057 au, 2 Myr).

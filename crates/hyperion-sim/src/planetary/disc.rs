@@ -537,6 +537,12 @@ pub struct DiscProfile {
 }
 
 impl DiscProfile {
+    /// The disc's metal scale, 10^\[Fe/H\] of its host, which multiplies both solid shares.
+    #[must_use]
+    pub const fn metal_scale(&self) -> f64 {
+        self.metal_scale
+    }
+
     /// The host's mass.
     #[must_use]
     pub const fn host_mass(&self) -> SolarMasses {

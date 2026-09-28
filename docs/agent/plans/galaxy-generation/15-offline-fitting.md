@@ -602,8 +602,10 @@ fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_B
   keep passing, and the default lies inside it and not within a tenth of its width from an edge.
 - **P15.T5.c Fate of merged binaries in clusters (M4).** With plan 09's cluster retention and plan
   11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 15–25% at 50
-  and at 20 (ruling 106.4, after ruling 96.3), and under 1% in the most massive open clusters, under plan 11 (the merged object
-  stays a member and is judged on the pair's velocity) and under the alternative. **Acceptance:**
+  and 5–17% at 20 (ruling 126.3, amending 106.4 and 96.3 for clusters: the low mode is judged on
+  its pair's systemic speed, σ 12 km/s), and under 1% in the most massive open clusters, under plan
+  11 (the merged object stays a member and is judged on the pair's velocity) and under the
+  alternative. **Acceptance:**
   the default passes all four bands; if only the alternative does, the finding goes to plan 11.
 
 **Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `manifests/kick_*.toml` with
@@ -957,17 +959,19 @@ the version when it lands, although no grid star changes, because members with a
 ### P15.T8 Cluster dynamics constants
 
 **Consumer.** Plan 09 (M3). **Format** (`tables::cluster_dynamics`): `BH_LOSS_BETA`,
-`BH_LOSS_PSI_SLOPE`, `BH_RELAXATION_PREFACTOR`; `EQUIPARTITION_EXPONENT`; `PULSARS_AT_47_TUC_GAMMA`,
+`BH_LOSS_PSI_SLOPE`, `BH_CLOCK_FACTOR` (ruling 126.4: 2.5, on age ÷ t★ in the black-hole law
+only), `BH_RELAXATION_PREFACTOR`; `EQUIPARTITION_EXPONENT`; `PULSARS_AT_47_TUC_GAMMA`,
 `PULSAR_GAMMA_EXPONENT`, `PULSAR_CORE_COLLAPSE_CAP`. T8.a first moves plan 09's scratch constants
-here unchanged (2.8 × 10⁻³, 147, 0.138; full equipartition; 40, 0.7, and a cap equal to the count at
-47 Tucanae's Γ), whatever plan 09 has called them.
+here unchanged (2.8 × 10⁻³, 147, 2.5, 0.138; full equipartition; 40, 0.7, and a cap equal to the
+count at 47 Tucanae's Γ), whatever plan 09 has called them.
 
 - **P15.T8.a Black-hole loss against the CMC Cluster Catalog** (Kremer et al. 2020). Dataset:
   _fetched_; a reduction script extracts, per model and snapshot, mass, half-mass radius, number and
   mass of black holes and age. Fit the closed form of Breen and Heggie (2013) as parametrised by
   Antonini and Gieles (2020), f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ t ÷ t★) − 1] ÷ ψ₁ floored at zero, with
   t★ = c √(M r_h³ ÷ G) ÷ (⟨m⟩ ln Λ), for β (`BH_LOSS_BETA`), ψ₁ (`BH_LOSS_PSI_SLOPE`) and c
-  (`BH_RELAXATION_PREFACTOR`), exactly the three constants plan 09's P09.T9.c reads; the decay rate
+  (`BH_RELAXATION_PREFACTOR`), with the clock factor `BH_CLOCK_FACTOR` on t ÷ t★ (ruling 126.4), the
+  four constants plan 09's P09.T9.c reads; the decay rate
   β ψ₁ (0.41 at the scratch values) is derived and is not emitted. **Acceptance:** rms error in
   log₁₀ of the retained black-hole number under 0.3 dex over models that retain any at 12 Gyr; at
   least 85% of models predicted empty are empty; applied to the Baumgardt–Hilker catalogue at 12

@@ -540,6 +540,18 @@ unit!(
     /// (plan 14). Earth's is 9.8 m s⁻².
     MetresPerSecondSquared
 );
+unit!(
+    /// A pressure in pascals, the SI unit used inside the sim, such as a planet's surface pressure
+    /// or a gas's partial pressure (plan 14, P14.T13). Earth's mean sea-level pressure is
+    /// 101,325 Pa, one bar 10⁵ Pa.
+    Pascals
+);
+unit!(
+    /// A fluence, the energy arriving per unit area over a span of time, in joules per square
+    /// metre, such as the X-ray and ultraviolet energy a planet has received from its hosts (plan
+    /// 14, P14.T13.b).
+    JoulesPerSquareMetre
+);
 
 #[cfg(test)]
 mod tests {

@@ -1,4 +1,4 @@
-# generator_version = 13
+# generator_version = 14
 selftest.stream (SelfTest) = 0xe8e7b5915e249927
 event.selftest (Event) = 0x9442133d71ca154d
 galaxy.params.stellar_mass (Galaxy) = 0x7d41a975d717b0a1
@@ -149,3 +149,9 @@ feature.cloud (Feature) = 0x3a6c74aac0bd2b8a
 feature.velocity (Feature) = 0x40b38dbd17d52dde
 substellar.mass (System) = 0x0eabe4f9e7bb6704
 interstellar.small_bodies (Cell) = 0x2f280f1063586168
+planet.volatiles (Body) = 0xf7fbec488e7a57f4
+feature.globular (Feature) = 0x29b617f02cbe1265
+feature.cluster (Feature) = 0xd684edeb09700249
+member.mass (System) = 0xe01f9fe0e63925db
+member.velocity (System) = 0x5f881cf332ad74f0
+member.abundance (System) = 0xfb2ee836e8fb35de

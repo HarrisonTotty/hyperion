@@ -46,8 +46,17 @@
 //! section 6.3 (the core's appearance at the start of the Hertzsprung gap of massive stars, the
 //! core's fall at the second dredge-up, and an early-AGB star losing its envelope while its
 //! remnant is still passing from the helium main sequence to the helium giants), the step in log L
-//! and log R is carried as an offset that decays to zero over the first 2% of the new phase. Until
-//! P06.T16's post-AGB bridge the end of the AGB hands over to the white dwarf directly. HPT's
+//! and log R is carried as an offset that decays to zero over the first 2% of the new phase.
+//!
+//! The stages before the main sequence (P06.T15, `stellar::premain`) end exactly where the next
+//! begins: the protostar at its contraction's first state, or at its main sequence for a star
+//! that arrives before its accretion ends; the contraction at the main sequence's first state,
+//! with its slopes.
+//!
+//! Under [`Bridges::Physical`] the end of the AGB crosses to the white dwarf on the post-AGB
+//! bridge (P06.T16.a, `post_agb.rs`), continuous in L and R, and the white dwarf's cooling law is
+//! matched to the bridge's end. Under [`Bridges::Instant`], as before P06.T16, the AGB hands over
+//! to the white dwarf directly. HPT's
 //! perturbation makes that continuous for carbon–oxygen white dwarfs and leaves a step for
 //! oxygen–neon ones, whose cooling law reads a heavier nucleus, and a helium star below 0.689 M☉
 //! steps where it becomes a white dwarf, since the dwarf keeps the helium the star did not burn
@@ -72,11 +81,13 @@
 
 mod binary;
 mod build;
+mod excess;
 mod interp;
 mod model;
 mod phases;
+mod post_agb;
 
-use crate::stellar::draws::StarDraws;
+use crate::stellar::draws::{StarDraws, UnitUniform};
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
@@ -95,16 +106,20 @@ pub(crate) use binary::{
 };
 use build::Builder;
 pub(crate) use build::Resolution;
+pub(crate) use excess::{HeliumHook, HeliumTable};
 use interp::Interval;
 use model::{Model, Physics};
+pub(crate) use post_agb::bridged_origin;
+#[cfg(test)]
+pub(crate) use post_agb::ionising_years as post_agb_ionising_years;
 
 /// The lowest initial mass a [`Track`] covers, M☉: HPT's formulae start at 0.1 M☉. Below it an
 /// object is substellar, and [`evolve`](super::evolve) hands it to P06.T13's cooling fits.
 pub const MIN_INITIAL_MASS: SolarMasses = SolarMasses::new(0.1);
 
 /// The highest initial mass a [`Track`] covers, M☉: HPT's formulae end at 100 M☉, and P06.T14
-/// extends them to 150.
-pub const MAX_INITIAL_MASS: SolarMasses = SolarMasses::new(100.0);
+/// extends them to 150 (`vms`).
+pub const MAX_INITIAL_MASS: SolarMasses = SolarMasses::new(150.0);
 
 /// Reimers' η for a star whose draw is the standard normal `z`: 0.5 + 0.07 z, held non-negative
 /// (plan 06, design note 7).
@@ -121,11 +136,15 @@ pub(crate) fn reimers_eta(z: f64) -> ReimersEta {
 /// Whether the helium flash is bridged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum Bridges {
-    /// The generator's tracks: the flash takes 10⁴ years (plan 06, design note 3).
+    /// The generator's tracks: the flash takes 10⁴ years (plan 06, design note 3), the track opens
+    /// with the protostar and the contraction (P06.T15), and the AGB crosses to its white dwarf on
+    /// the post-AGB bridge (P06.T16.a).
     #[default]
     Physical,
-    /// The flash is instantaneous, as in HPT and the published SSE code; for validation against
-    /// SSE (P06.T12.b). A track built so has a step at the flash.
+    /// The flash is instantaneous and the track starts on the zero-age main sequence at age zero,
+    /// with no protostar or contraction (P06.T15) and no post-AGB crossing (P06.T16), as in HPT and
+    /// the published SSE code; for validation against SSE (P06.T12.b). A track built so has a step
+    /// at the flash and at the white dwarf's hand-over.
     Instant,
 }
 
@@ -204,8 +223,9 @@ impl TrackOptions {
 /// One star's evolution: its phases as segments on a grid fixed by `(m0, Composition, StarDraws)`
 /// alone (plan 06, design note 1), built lazily up to an age or in full (design note 2).
 ///
-/// The age is counted from the onset of collapse (design note 4); until P06.T15 adds the
-/// pre-main sequence that is the zero-age main sequence.
+/// The age is counted from the onset of collapse (design note 4): the track opens with the
+/// protostar and the contraction to the zero-age main sequence (P06.T15, `stellar::premain`), and
+/// HPT's clock starts at the arrival on it, `t_zams`.
 ///
 /// # Examples
 ///
@@ -236,6 +256,10 @@ pub struct Track {
     segments: Vec<Segment>,
     fate: Option<Fate>,
     built_until: f64,
+    /// The helium-excess correction the track was built with, for a star with ΔY > 0 (P06.T17).
+    helium: Option<HeliumHook>,
+    /// The planetary nebula's expansion-speed rank, [`StarDraws::nebula`] (P06.T16.b).
+    nebula: UnitUniform,
 }
 
 /// A stage of a star's life that a mass-transfer case is named for (Kippenhahn and Weigert
@@ -257,7 +281,11 @@ impl Stage {
     /// branch, helium shell burning, a remnant).
     fn of(model: &Model) -> Option<Self> {
         match model {
-            Model::MainSequence { .. } => Some(Self::MainSequence),
+            // The protostar and the contraction come before the main sequence (P06.T15), which
+            // no stage ends before.
+            Model::Protostar(_) | Model::PreMainSequence(_) | Model::MainSequence { .. } => {
+                Some(Self::MainSequence)
+            }
             Model::HertzsprungGap { .. } => Some(Self::HertzsprungGap),
             Model::FirstGiantBranch { .. }
             | Model::FlashBridge { .. }
@@ -266,6 +294,7 @@ impl Stage {
             Model::EarlyAgb { .. }
             | Model::ThermallyPulsingAgb { .. }
             | Model::HeliumShellBurning { .. }
+            | Model::PostAgb { .. }
             | Model::Remnant { .. } => None,
         }
     }
@@ -297,7 +326,7 @@ impl Track {
     /// that age, which are bit for bit the same segments as those of [`Track::full`] (design note
     /// 2), under the generator's options.
     ///
-    /// `m0` is the initial mass, 0.1–100 M☉ ([`MIN_INITIAL_MASS`] to [`MAX_INITIAL_MASS`]);
+    /// `m0` is the initial mass, 0.1–150 M☉ ([`MIN_INITIAL_MASS`] to [`MAX_INITIAL_MASS`]);
     /// outside that range the formulae are evaluated at its nearer end.
     ///
     /// # Panics
@@ -372,6 +401,29 @@ impl Track {
         resolution: Resolution,
         age_max: Option<f64>,
     ) -> Self {
+        Self::build_with_helium(
+            m0,
+            comp,
+            draws,
+            options,
+            resolution,
+            age_max,
+            HeliumHook::of(comp, &HeliumTable::COMMITTED),
+        )
+    }
+
+    /// [`Track::build`] with the helium-excess correction `helium` in place of the committed
+    /// table's (P06.T17's tests build tracks from a table that is not the identity).
+    #[must_use]
+    pub(crate) fn build_with_helium(
+        m0: SolarMasses,
+        comp: &Composition,
+        draws: &StarDraws,
+        options: TrackOptions,
+        resolution: Resolution,
+        age_max: Option<f64>,
+        helium: Option<HeliumHook>,
+    ) -> Self {
         let coeffs = ZCoeffs::new(comp.z_fit());
         let m0 = checked_initial_mass(m0);
         let eta = reimers_eta(draws.eta().value());
@@ -384,6 +436,7 @@ impl Track {
             resolution,
             build::Keep::Track,
         )
+        .with_helium(helium)
         .stripped_by_companion(is_companion_stripped(draws))
         .run(m0.value(), age_max);
         Self {
@@ -395,6 +448,8 @@ impl Track {
             segments: outcome.segments,
             fate: outcome.fate,
             built_until: outcome.built_until,
+            helium,
+            nebula: draws.nebula(),
         }
     }
 
@@ -467,12 +522,17 @@ impl Track {
         })
     }
 
-    /// The largest radius the star has had up to `age`: non-decreasing in age and never below
-    /// [`StarState::radius`] at `age` (plans 11 and 14).
+    /// The largest radius the star has had up to `age` since its arrival on the main sequence:
+    /// non-decreasing in age from the arrival and never below [`StarState::radius`] at `age`
+    /// (plans 11 and 14).
     ///
     /// It is the largest of the radii at the segments' boundaries, at their knots (or at 17
     /// points of a segment without knots), at every local maximum between those points, located
-    /// by a golden-section search at build time, and at `age` itself.
+    /// by a golden-section search at build time, and at `age` itself. The protostar and the
+    /// contraction (P06.T15) are left out, and before the arrival it is the radius at `age`: the
+    /// radius a young star shrinks from does not engulf the planets its disc forms, nor fill a
+    /// companion's Roche lobe in the binary codes plan 11 follows, which start at the zero-age
+    /// main sequence (Hurley, Tout and Pols 2002).
     ///
     /// # Panics
     ///
@@ -482,8 +542,8 @@ impl Track {
         SolarRadii::new(self.max_until(age, Sampled::Radius))
     }
 
-    /// The largest luminosity the star has had up to `age`, in the same way as
-    /// [`Track::max_radius_until`] (plan 14).
+    /// The largest luminosity the star has had up to `age` since its arrival on the main sequence,
+    /// in the same way as [`Track::max_radius_until`] (plan 14).
     ///
     /// # Panics
     ///
@@ -491,6 +551,14 @@ impl Track {
     #[must_use]
     pub fn max_luminosity_until(&self, age: Years) -> SolarLuminosities {
         SolarLuminosities::new(self.max_until(age, Sampled::Luminosity))
+    }
+
+    /// The age from which the track holds the star: zero for every track but the one-segment
+    /// tracks of the crate's fast paths (a knot-free main sequence from its arrival, a remnant
+    /// from its formation).
+    #[must_use]
+    pub(crate) fn built_from(&self) -> Years {
+        Years::new(self.segments.first().map_or(0.0, |segment| segment.start))
     }
 
     /// The age up to which the track is built: its death's for a track built by
@@ -523,6 +591,16 @@ impl Track {
             .iter()
             .find(|segment| Stage::of(&segment.model).is_none_or(|s| s > stage))
             .map(|next| Years::new(next.start))
+    }
+
+    /// The age at which the star arrives on its main sequence, if the track has one: `t_zams`, or
+    /// the end of accretion for a star that arrives before it (P06.T15.b).
+    #[must_use]
+    pub(crate) fn main_sequence_start(&self) -> Option<f64> {
+        self.segments
+            .iter()
+            .find(|segment| matches!(segment.model, Model::MainSequence { .. }))
+            .map(|segment| segment.start)
     }
 
     /// The initial mass the track was built for, M☉ (clamped into the covered range).
@@ -577,7 +655,7 @@ impl Track {
     }
 
     /// The ages at which the track's state may step, with what steps there: every sudden death,
-    /// the white dwarf's hand-over (until P06.T16), the helium flash when it is not bridged, and a
+    /// the white dwarf's hand-over (under [`Bridges::Instant`]), the helium flash when it is not bridged, and a
     /// helium main-sequence star too light to burn helium becoming a helium white dwarf. For the
     /// continuity tests.
     #[cfg(test)]
@@ -595,6 +673,43 @@ impl Track {
         steps
     }
 
+    /// The age at which the star lost its envelope on the AGB and began its post-AGB crossing, if
+    /// the track is built past it and has one (P06.T16): the planetary nebula's ejection.
+    #[must_use]
+    pub(crate) fn post_agb_start(&self) -> Option<Years> {
+        self.segments
+            .iter()
+            .find_map(|segment| match segment.model {
+                Model::PostAgb { start, .. } => Some(Years::new(start)),
+                _ => None,
+            })
+    }
+
+    /// The mass the star lost over the last `intervals` knot intervals of its thermally pulsing
+    /// AGB, M☉, if the track has that phase with knots: the superwind's last shell (P06.T16.b).
+    #[must_use]
+    pub(crate) fn late_superwind_mass(&self, intervals: usize) -> Option<SolarMasses> {
+        let segment = self
+            .segments
+            .iter()
+            .rev()
+            .find(|segment| matches!(segment.model, Model::ThermallyPulsingAgb { .. }))?;
+        let knots: Vec<&Knot> = segment
+            .knots
+            .iter()
+            .filter(|knot| knot.age <= segment.end)
+            .collect();
+        let first = knots.len().checked_sub(intervals + 1)?;
+        let end_mass = segment.coordinate_and_mass(segment.end).1;
+        Some(SolarMasses::new((knots[first].mass - end_mass).max(0.0)))
+    }
+
+    /// The planetary nebula's expansion-speed rank, [`StarDraws::nebula`] (P06.T16.b).
+    #[must_use]
+    pub(crate) const fn nebula_rank(&self) -> UnitUniform {
+        self.nebula
+    }
+
     /// The segments, for the crate's tests.
     #[cfg(test)]
     pub(crate) fn segments(&self) -> &[Segment] {
@@ -608,6 +723,8 @@ impl Track {
             coeffs: &self.coeffs,
             z: self.composition.z_fit(),
             remnant: self.options.remnant,
+            bridges: self.options.bridges,
+            helium: self.helium,
         }
     }
 
@@ -619,8 +736,11 @@ impl Track {
             age.is_finite() && age >= 0.0,
             "an age is finite and non-negative: {age}"
         );
+        // A caller that steps to the build's end may pass it by the rounding of its sum of steps
+        // (plan 11's engine, which since P06.T15 starts at the arrival, not at zero); the clamp
+        // below takes it back.
         debug_assert!(
-            age <= self.built_until,
+            age <= self.built_until * (1.0 + 1e-12),
             "the track is built to {} years, not {age}",
             self.built_until
         );
@@ -731,7 +851,7 @@ pub(crate) fn main_sequence_state_of(
         return None;
     }
     let track = Track::knot_free_main_sequence(m0, comp, draws, options)?;
-    (a < track.built_until).then(|| track.state_at(age))
+    (track.built_from().value() <= a && a < track.built_until).then(|| track.state_at(age))
 }
 
 impl Track {
@@ -739,11 +859,11 @@ impl Track {
     /// end of its main sequence and no further, with no samples for the maxima, if its main
     /// sequence has no knots; `None` if it has (plan 06, P06.T38.b).
     ///
-    /// Its one segment is [`Builder::run`]'s first, from the same builder, entered at age zero with
-    /// no junction, under the builder's own knot rule ([`build::NEGLIGIBLE_LOSS`]). Without knots
-    /// the segment's state is a closed form of the age, so the track's [`Track::state_at`] is the
-    /// full track's, bit for bit, at every age before [`Track::built_until`], the main sequence's
-    /// end. Its maxima are not built: [`Track::max_radius_until`] and
+    /// Its one segment is [`Builder::run`]'s main sequence, from the same builder, entered at the
+    /// arrival on the main sequence (P06.T15.b) with no junction, under the builder's own knot rule
+    /// ([`build::NEGLIGIBLE_LOSS`]). Without knots the segment's state is a closed form of the age,
+    /// so the track's [`Track::state_at`] is the full track's, bit for bit, at every age from
+    /// [`Track::built_from`], the arrival, to [`Track::built_until`], the main sequence's end. Its maxima are not built: [`Track::max_radius_until`] and
     /// [`Track::max_luminosity_until`] are not to be asked of it, which is why it stays in the
     /// crate.
     #[must_use]
@@ -766,7 +886,7 @@ impl Track {
             build::Keep::Track,
         )
         .stripped_by_companion(is_companion_stripped(draws))
-        .main_sequence_segment(0.0, m0.value(), None)
+        .zero_age_main_sequence_segment(m0.value())
         .segment;
         if !segment.knots.is_empty() {
             return None;
@@ -781,6 +901,8 @@ impl Track {
             segments: vec![segment],
             fate: None,
             built_until: end,
+            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            nebula: draws.nebula(),
         })
     }
 }
@@ -795,6 +917,10 @@ pub(crate) struct RemnantModel {
     pub(crate) mass: SolarMasses,
     pub(crate) birth: f64,
     pub(crate) origin: Megayears,
+    /// log₁₀ L (L☉) at the post-AGB knee for a white dwarf that crossed the bridge, which fades
+    /// on Miller Bertolami's shape before its cooling law takes over (ruling 127.1); `None`
+    /// otherwise.
+    pub(crate) knee: Option<f64>,
 }
 
 impl Track {
@@ -808,11 +934,13 @@ impl Track {
                 mass,
                 birth,
                 origin,
+                knee,
             } => Some(RemnantModel {
                 phase,
                 mass,
                 birth,
                 origin,
+                knee,
             }),
             _ => None,
         }
@@ -847,6 +975,8 @@ impl Track {
             segments: vec![remnant_segment(remnant)],
             fate: None,
             built_until: f64::INFINITY,
+            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            nebula: UnitUniform::HALF,
         }
     }
 
@@ -871,6 +1001,7 @@ fn remnant_segment(remnant: RemnantModel) -> Segment {
             mass: remnant.mass,
             birth: remnant.birth,
             origin: remnant.origin,
+            knee: remnant.knee,
         },
         start: remnant.birth,
         end: f64::INFINITY,
@@ -918,11 +1049,13 @@ pub(crate) fn remnant_of(
             mass,
             birth,
             origin,
+            knee,
         }) => RemnantModel {
             phase,
             mass,
             birth,
             origin,
+            knee,
         },
         _ => unreachable!("a remnant build ends with the remnant's segment"),
     };
@@ -935,7 +1068,7 @@ fn checked_initial_mass(m0: SolarMasses) -> SolarMasses {
     let m = m0.value();
     debug_assert!(
         m >= MIN_INITIAL_MASS.value() && m <= MAX_INITIAL_MASS.value(),
-        "a track covers 0.1–100 M☉, not {m}"
+        "a track covers 0.1–150 M☉, not {m}"
     );
     SolarMasses::new(if m > MIN_INITIAL_MASS.value() {
         m.min(MAX_INITIAL_MASS.value())
@@ -1147,6 +1280,9 @@ impl Segment {
     /// segment's constant mass and linear coordinate where it has none.
     #[must_use]
     pub(crate) fn coordinate_and_mass(&self, age: f64) -> (f64, f64) {
+        if let Model::Protostar(protostar) = &self.model {
+            return (self.linear_coordinate(age), protostar.mass(age));
+        }
         if self.knots.len() < 2 {
             return (self.linear_coordinate(age), self.mass);
         }
@@ -1263,5 +1399,7 @@ impl Segment {
     }
 }
 
+#[cfg(test)]
+mod stages_tests;
 #[cfg(test)]
 mod tests;

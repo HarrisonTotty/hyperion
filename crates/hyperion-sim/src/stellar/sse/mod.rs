@@ -1,6 +1,7 @@
 //! The backbone: the analytic stellar evolution formulae of Hurley, Pols and Tout (2000, MNRAS 315,
 //! 543; "HPT"), for every phase from the zero-age main sequence to the remnant, at any mass from 0.1
-//! to 100 M☉ and metal fraction from 0.0001 to 0.03.
+//! to 100 M☉, extended to 150 M☉ by P06.T14's corrections (`vms`), and metal fraction from
+//! 0.0001 to 0.03.
 //!
 //! The formulae are transcribed from the paper; the published SSE code is used only to produce
 //! reference output for the comparison tests and to settle where the printed form and the code
@@ -30,6 +31,9 @@ mod reference;
 mod wind;
 pub mod zams;
 
+// Very massive stars, 100–150 M☉ (P06.T14).
+mod vms;
+
 // Core helium burning, the asymptotic giant branch and naked helium stars (P06.T7–T9).
 mod agb;
 mod cheb;
@@ -39,7 +43,11 @@ mod helium;
 mod evolve;
 mod track;
 pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
-pub(crate) use track::{RemnantModel, Stage, fate_of, is_companion_stripped, remnant_of};
+#[cfg(test)]
+pub(crate) use track::post_agb_ionising_years;
+pub(crate) use track::{
+    RemnantModel, Stage, bridged_origin, fate_of, is_companion_stripped, remnant_of,
+};
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 pub(crate) use track::{
@@ -55,6 +63,27 @@ pub(crate) use track::{
 )]
 pub(crate) use agb::interpulse_period;
 pub(crate) use gb::mc_bagb as m_c_bagb;
+
+/// The arrival on the zero-age main sequence of a star of `m` and `composition`, years since the
+/// onset of collapse (P06.T15.b): `premain::arrival_years` at the star's zero-age main sequence.
+#[must_use]
+pub(crate) fn arrival_time(m: SolarMasses, composition: &crate::stellar::Composition) -> f64 {
+    let c = ZCoeffs::new(composition.z_fit());
+    let zams = ms::MainSequence::new(m, &c).at(crate::units::Megayears::ZERO);
+    crate::stellar::premain::arrival_years(m.value(), zams.luminosity.value(), zams.radius.value())
+}
+
+/// The age at which a star of `m` and `composition` starts its main sequence on the generator's
+/// track, years since the onset of collapse: its arrival (P06.T15.b), or the end of accretion for
+/// a star that arrives before it. Plan 11's engine adds it to the reach of a track it rebuilds
+/// from a main-sequence state.
+#[must_use]
+pub(crate) fn main_sequence_start(
+    m: SolarMasses,
+    composition: &crate::stellar::Composition,
+) -> f64 {
+    arrival_time(m, composition).max(crate::stellar::premain::PROTOSTAR_YEARS)
+}
 
 pub use coeffs::ZCoeffs;
 pub use wind::WindRecipe;

@@ -1275,9 +1275,7 @@ mod tests {
     /// m^−2.3 (Kroupa 2001 above 0.5 M☉) from `seed`, with their own Reimers η and remnant draws
     /// and every other draw at its median, each built to its death under the generator's options.
     ///
-    /// The track covers 0.1–100 M☉ until P06.T14, so a star above 100 M☉ is built at 100, as
-    /// `Track` itself clamps; at Z = 0.02 every star above about 60 M☉ ends on the same Wolf–Rayet
-    /// plateau of carbon–oxygen core, so the clamp moves none of these shares' categories.
+    /// The track covers 0.1–150 M☉ since P06.T14, the population's whole range.
     fn kroupa_population(seed: u64, n: u32) -> Population {
         use crate::rng::PowerLaw;
         use crate::stellar::sse::{MAX_INITIAL_MASS, Track};

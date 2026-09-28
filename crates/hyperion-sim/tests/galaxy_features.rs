@@ -622,7 +622,11 @@ fn the_catalogue_s_counts_match_their_expectations_at_milky_way_values() {
         }
     }
     let expected = expected_features(&galaxy);
-    for process in FeatureProcess::ALL {
+    // The globulars, which the disc cells hold only some of, have their own test (P09.T12.a).
+    for process in FeatureProcess::ALL
+        .into_iter()
+        .filter(|&p| p != FeatureProcess::Globular)
+    {
         let i = process.index();
         hyperion_testkit::stats::assert_poisson_count(
             &format!("{process}"),
@@ -759,10 +763,30 @@ fn field_and_features_add_up_to_every_budget() {
                 Population::OldThinDisc => components.iter().map(|c| old_members(&galaxy, c)).sum(),
                 _ => 0.0,
             };
+            // The globulars' members: their expected mass over the population's mean system mass,
+            // by band as their class tables deplete it (P09.T9.a, T12).
+            let (bulge, thick, halo) = shares.globulars().population_masses();
+            let globular_mass = match population {
+                Population::Bulge => bulge,
+                Population::ThickDisc => thick,
+                Population::Halo => halo,
+                _ => 0.0,
+            };
+            let globular_members = globular_mass / galaxy.mean_system_mass(population).value();
+            let weights = shares.globular_band_weights();
+            let conserved: f64 = MassBand::ALL
+                .iter()
+                .map(|&b| band_shares.share(b) * weights[b.index()])
+                .sum();
+            assert!(
+                (conserved - 1.0).abs() < 1e-12,
+                "the band weights conserve members"
+            );
             for band in MassBand::ALL {
                 let share = band_shares.share(band);
                 let field = budget * share * shares.field_factor(population, band);
-                let total = field + members * share;
+                let total =
+                    field + members * share + globular_members * share * weights[band.index()];
                 let relative = total / (budget * share) - 1.0;
                 assert!(
                     relative.abs() < 1e-6,

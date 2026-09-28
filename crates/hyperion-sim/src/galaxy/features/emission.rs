@@ -69,7 +69,7 @@ impl EmissionClass {
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord, t: Years) -> Option<Self> {
         match feature.marks() {
             FeatureMarks::Cloud(_) => Some(Self::DarkCloud),
-            FeatureMarks::OpenCluster(_) => None,
+            FeatureMarks::OpenCluster(_) | FeatureMarks::Globular(_) => None,
             FeatureMarks::Nursery(marks) => nursery_class(galaxy, marks, marks.age_at_epoch() + t),
         }
     }

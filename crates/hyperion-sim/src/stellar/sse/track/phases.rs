@@ -2,6 +2,7 @@
 //! with the rules of section 7.1 for the initial mass), and how each ends.
 
 use crate::stellar::Phase;
+use crate::stellar::premain::{self, Contraction, PROTOSTAR_YEARS, Protostar};
 use crate::stellar::remnant::collapse::{
     COMPANION_STRIPPED_WINDOW, CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB,
     OXYGEN_NEON_CAPTURE_MASS, RemnantDraws, SINGLE_STAR_WINDOW, core_collapse,
@@ -16,6 +17,8 @@ use crate::stellar::remnant::{
 };
 use crate::units::{Megayears, SolarMasses, Years};
 
+use super::super::PhasePoint;
+
 use super::super::agb::{self, CoreEnd, EarlyAgb, EarlyAgbEnd, ThermallyPulsingAgb};
 use super::super::cheb::CoreHeliumBurning;
 use super::super::gb::FirstGiantBranch;
@@ -24,15 +27,155 @@ use super::super::hg::HertzsprungGap;
 use super::super::m_c_bagb;
 use super::super::ms::{self, MainSequence};
 use super::build::{
-    Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, FractionBuilt, Step, segment_coordinate,
+    Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, FractionBuilt, Keep, Step,
+    segment_coordinate,
 };
 use super::model::{HeliumCore, Model, Span};
+use super::post_agb::{self, PostAgb};
 use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment};
 
 impl Builder<'_> {
-    /// The main sequence of a star of `mass`, whose initial mass follows the current one.
-    pub(super) fn main_sequence(&self, start: f64, mass: f64, previous: Option<[f64; 3]>) -> Step {
-        let built = self.main_sequence_segment(start, mass, previous);
+    // ---------------------------------------------------------------------------------------------
+    // Before the main sequence (P06.T15).
+
+    /// The main sequence's lifetime at `m` M☉, Myr: HPT's `t_MS`, times the helium excess's
+    /// correction (P06.T17).
+    #[must_use]
+    pub(super) fn ms_lifetime_myr(&self, m: f64) -> f64 {
+        let t = ms::t_ms(SolarMasses::new(m), self.phys.coeffs).value();
+        self.phys
+            .helium
+            .map_or(t, |hook| t * hook.timescale_factor(m))
+    }
+
+    /// The factor by which the helium excess stretches the Hertzsprung gap and the first giant
+    /// branch of a star whose formulae read `m0` M☉ (P06.T17): one without it.
+    #[must_use]
+    fn giant_stretch(&self, m0: f64) -> f64 {
+        self.phys
+            .helium
+            .map_or(1.0, |hook| hook.timescale_factor(m0))
+    }
+
+    /// Where a star of `m0` M☉ starts its main sequence: the age (years since the onset of
+    /// collapse), the fractional age τ it starts from, and its arrival on the zero-age main
+    /// sequence, `t_zams` (P06.T15.b). A star that arrives after its accretion ends at `t_p` starts
+    /// at the arrival from τ = 0; one that arrives before is on its main sequence when accretion
+    /// ends, and starts at `t_p` from the τ it has reached.
+    ///
+    /// Under [`Bridges::Instant`], as in HPT and the published SSE code, the main sequence starts
+    /// at age zero: the track has neither stage before it (P06.T12.b compares so).
+    #[must_use]
+    pub(super) fn main_sequence_start(&self, m0: f64) -> (f64, f64, f64) {
+        if self.options.bridges() == Bridges::Instant {
+            return (0.0, 0.0, 0.0);
+        }
+        let zams = MainSequence::new(SolarMasses::new(m0), self.phys.coeffs).at(Megayears::ZERO);
+        let arrival = premain::arrival_years(m0, zams.luminosity.value(), zams.radius.value());
+        if arrival > PROTOSTAR_YEARS {
+            (arrival, 0.0, arrival)
+        } else {
+            let tau0 = (PROTOSTAR_YEARS - arrival) / (self.ms_lifetime_myr(m0) * 1e6);
+            (PROTOSTAR_YEARS, tau0.min(MAX_ACCRETING_TAU), arrival)
+        }
+    }
+
+    /// The protostar of final mass `mass`, from the onset of collapse to the end of accretion
+    /// (P06.T15.a), handing over to its contraction or, if it has already arrived, to its main
+    /// sequence. A build that keeps no track skips the stages before the main sequence, which
+    /// nothing after them reads.
+    pub(super) fn protostar(&self, mass: f64) -> Step {
+        let (start, tau0, arrival) = self.main_sequence_start(mass);
+        if self.keep != Keep::Track || self.options.bridges() == Bridges::Instant {
+            return Step {
+                segment: None,
+                next: Entry::MainSequence {
+                    mass,
+                    tau0,
+                    built: None,
+                },
+                end: start,
+                end_state: None,
+            };
+        }
+        let accreting_onto_main_sequence = arrival <= PROTOSTAR_YEARS;
+        let next_state = accreting_onto_main_sequence.then(|| {
+            let ms = MainSequence::new(SolarMasses::new(mass), self.phys.coeffs);
+            let p = ms.at(Megayears::new(ms.t_ms().value() * tau0));
+            log_r_and_t(p)
+        });
+        let next = if accreting_onto_main_sequence {
+            Entry::MainSequence {
+                mass,
+                tau0,
+                built: None,
+            }
+        } else {
+            Entry::PreMainSequence { mass, arrival }
+        };
+        Step {
+            segment: Some(premain_segment(
+                Model::Protostar(Protostar::new(mass, next_state)),
+                0.0,
+                PROTOSTAR_YEARS,
+                mass,
+            )),
+            next,
+            end: PROTOSTAR_YEARS,
+            end_state: None,
+        }
+    }
+
+    /// The contraction of a star of `mass` from the end of accretion at `start` to its arrival on
+    /// the main sequence at `arrival` years (P06.T15.b), whose first state and its rates in age
+    /// (with the wind's, where the main sequence loses mass) the contraction's blend meets. The main
+    /// sequence's segment is built here for them, and handed on.
+    pub(super) fn pre_main_sequence(&self, start: f64, mass: f64, arrival: f64) -> Step {
+        const STEP: f64 = 1e-6;
+        let built = self.main_sequence_segment(arrival, mass, 0.0);
+        let segment = &built.segment;
+        let at = |age: f64| {
+            let p = segment.evaluate(&self.phys, age).point.point;
+            [
+                crate::math::log10(p.luminosity.value()),
+                crate::math::log10(p.radius.value()),
+            ]
+        };
+        let years = STEP * (segment.end - segment.start);
+        let (zams, later) = (at(arrival), at(arrival + years));
+        let rates = [(later[0] - zams[0]) / years, (later[1] - zams[1]) / years];
+        let contraction =
+            Contraction::new(mass, Protostar::birthline_start(mass), arrival, zams, rates);
+        Step {
+            segment: Some(premain_segment(
+                Model::PreMainSequence(Box::new(contraction)),
+                start,
+                arrival,
+                mass,
+            )),
+            next: Entry::MainSequence {
+                mass,
+                tau0: 0.0,
+                built: Some(Box::new(built)),
+            },
+            end: arrival,
+            end_state: None,
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The main sequence and after.
+
+    /// The main sequence of a star of `mass` from fractional age `tau0` at `start`, whose initial
+    /// mass follows the current one.
+    pub(super) fn main_sequence(
+        &self,
+        start: f64,
+        mass: f64,
+        tau0: f64,
+        built: Option<Box<FractionBuilt>>,
+    ) -> Step {
+        let built = built.map_or_else(|| self.main_sequence_segment(start, mass, tau0), |b| *b);
         let (end, end_mass) = (built.segment.end, built.end_mass);
         self.finish(
             Some(built.segment),
@@ -41,32 +184,46 @@ impl Builder<'_> {
                 m0: end_mass,
                 mass: end_mass,
             },
-            previous,
+            None,
         )
+    }
+
+    /// The main sequence's segment of a star of `m0` M☉, from its start
+    /// ([`Builder::main_sequence_start`]): what the state-only fast path reads (P06.T38.b).
+    pub(super) fn zero_age_main_sequence_segment(&self, m0: f64) -> FractionBuilt {
+        let (start, tau0, _) = self.main_sequence_start(m0);
+        self.main_sequence_segment(start, m0, tau0)
     }
 
     /// The main sequence's segment alone, as [`Builder::main_sequence`] builds it: what the
     /// state-only fast path reads (P06.T38.b), which skips the next phase's entry state.
-    pub(super) fn main_sequence_segment(
-        &self,
-        start: f64,
-        mass: f64,
-        previous: Option<[f64; 3]>,
-    ) -> FractionBuilt {
+    ///
+    /// Its junction has no offsets: the contraction ends at the main sequence's first state, and
+    /// a protostar that accretes onto its main sequence ends at the state it starts in. It is
+    /// continuous for the continuity tests unless it opens the track.
+    pub(super) fn main_sequence_segment(&self, start: f64, mass: f64, tau0: f64) -> FractionBuilt {
         let c = self.phys.coeffs;
-        let duration = |m: f64| ms::t_ms(SolarMasses::new(m), c).value() * 1e6;
-        self.fraction_segment(
+        let duration = |m: f64| self.ms_lifetime_myr(m) * 1e6;
+        let mut built = self.fraction_segment(
             Model::MainSequence { fixed: None },
             start,
             mass,
-            0.0,
-            previous,
+            tau0,
+            None,
             duration,
             |_| f64::INFINITY,
             |m| Model::MainSequence {
                 fixed: Some(MainSequence::new(SolarMasses::new(m), c)),
             },
-        )
+        );
+        if start > 0.0 {
+            built.segment.junction = Junction {
+                log_l: 0.0,
+                log_r: 0.0,
+                continuous: true,
+            };
+        }
+        built
     }
 
     /// The Hertzsprung gap of a star of initial mass `m0` and mass `mass`.
@@ -80,10 +237,7 @@ impl Builder<'_> {
         let c = self.phys.coeffs;
         let initial = SolarMasses::new(m0);
         let gap = HertzsprungGap::new(initial, c);
-        let span = Span {
-            start: gap.t_start(),
-            end: gap.t_end(),
-        };
+        let span = Span::new(gap.t_start(), gap.t_end()).stretched(self.giant_stretch(m0));
         let core = HeliumCore::of(initial, c);
         let core_mass = {
             let gap = gap.clone();
@@ -134,10 +288,7 @@ impl Builder<'_> {
         let c = self.phys.coeffs;
         let initial = SolarMasses::new(m0);
         let branch = FirstGiantBranch::new(initial, c);
-        let span = Span {
-            start: branch.t_start(),
-            end: branch.t_hei(),
-        };
+        let span = Span::new(branch.t_start(), branch.t_hei()).stretched(self.giant_stretch(m0));
         let core = HeliumCore::of(initial, c);
         let core_mass = {
             let branch = branch.clone();
@@ -237,10 +388,7 @@ impl Builder<'_> {
             }
         };
         let phase = CoreHeliumBurning::new(SolarMasses::new(mass), self.phys.coeffs);
-        let span = Span {
-            start: phase.t_start(),
-            end: phase.t_end(),
-        };
+        let span = Span::new(phase.t_start(), phase.t_end());
         let horizontal = self.state_of(
             &Model::CoreHeliumBurning {
                 phase: Box::new(phase),
@@ -285,10 +433,7 @@ impl Builder<'_> {
         previous: Option<[f64; 3]>,
     ) -> Step {
         let phase = CoreHeliumBurning::new(SolarMasses::new(m0), self.phys.coeffs);
-        let span = Span {
-            start: phase.t_start(),
-            end: phase.t_end(),
-        };
+        let span = Span::new(phase.t_start(), phase.t_end());
         let core_mass = {
             let phase = phase.clone();
             move |age: f64| {
@@ -344,12 +489,12 @@ impl Builder<'_> {
         let cap = self.oxygen_neon_cap(m0, mc_bagb).filter(|&cap| {
             phase.end() == EarlyAgbEnd::ThermalPulses && cap < phase.mc_du().value()
         });
-        let span = Span {
-            start: phase.t_start(),
-            end: cap.map_or(phase.t_end(), |cap| {
+        let span = Span::new(
+            phase.t_start(),
+            cap.map_or(phase.t_end(), |cap| {
                 phase.time_of_co_core_mass(SolarMasses::new(cap))
             }),
-        };
+        );
         if span.years() <= 0.0 {
             // The carbon–oxygen core is at `Mc,SN` already (HPT equation 75, 40–80 M☉).
             return self.early_agb_end(&phase, start, m0, mass, None, previous);
@@ -399,7 +544,7 @@ impl Builder<'_> {
                         Stripping::None,
                     ),
                 );
-                self.finish(built.segment, built.end, Entry::Dead(white_dwarf), previous)
+                self.agb_end(built.segment, built.end, white_dwarf, previous)
             }
             Ending::Nominal => self.early_agb_end(
                 &phase,
@@ -487,13 +632,13 @@ impl Builder<'_> {
         let cap = self
             .oxygen_neon_cap(m0, mc_bagb)
             .filter(|&cap| phase.end() == CoreEnd::Supernova && cap > mc_du);
-        let span = Span {
-            start: phase.t_start(),
-            end: cap.map_or(phase.t_end(), |cap| {
+        let span = Span::new(
+            phase.t_start(),
+            cap.map_or(phase.t_end(), |cap| {
                 let t = phase.time_of_core_mass(SolarMasses::new(cap));
                 if t < phase.t_end() { t } else { phase.t_end() }
             }),
-        };
+        );
         if span.years() <= 0.0 || mass <= mc_du {
             return self.pulsing_agb_end(start, m0, mc_bagb, mc_du, mass, None, previous);
         }
@@ -542,7 +687,7 @@ impl Builder<'_> {
                         Stripping::None,
                     ),
                 );
-                self.finish(built.segment, end, Entry::Dead(white_dwarf), previous)
+                self.agb_end(built.segment, end, white_dwarf, previous)
             }
             (Ending::Nominal, CoreEnd::Supernova) => self.pulsing_agb_end(
                 end,
@@ -566,7 +711,7 @@ impl Builder<'_> {
                         Stripping::None,
                     ),
                 );
-                self.finish(built.segment, end, Entry::Dead(white_dwarf), previous)
+                self.agb_end(built.segment, end, white_dwarf, previous)
             }
         }
     }
@@ -606,7 +751,7 @@ impl Builder<'_> {
         } else {
             self.oxygen_neon_core(age, m0, mc, progenitor)
         };
-        self.finish(segment, age, Entry::Dead(fate), previous)
+        self.agb_end(segment, age, fate, previous)
     }
 
     /// A naked helium star of `mass` on its main sequence from fractional age `tau0`, whose
@@ -684,10 +829,7 @@ impl Builder<'_> {
         mass: f64,
         previous: Option<[f64; 3]>,
     ) -> Step {
-        let span = Span {
-            start: clock0,
-            end: star.t_end(),
-        };
+        let span = Span::new(clock0, star.t_end());
         if span.years() <= 0.0 {
             let mc = star.core_limit(SolarMasses::new(mass)).value();
             return self.helium_star_end(start, star, mc.min(mass), mass, None, previous);
@@ -778,6 +920,76 @@ impl Builder<'_> {
             no_remnant(age, DeathKind::ThermonuclearDisruption, progenitor)
         };
         self.finish(segment, age, Entry::Dead(fate), previous)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The end of the AGB (P06.T16.a).
+
+    /// The step that ends the AGB at `end` with `segment` and `fate`: into the post-AGB bridge if
+    /// the star leaves a white dwarf and the track's bridges are [`Bridges::Physical`], or
+    /// straight to its death otherwise.
+    fn agb_end(
+        &self,
+        segment: Option<Segment>,
+        end: f64,
+        fate: Fate,
+        previous: Option<[f64; 3]>,
+    ) -> Step {
+        let bridged = self.options.bridges() == Bridges::Physical
+            && fate.remnant.kind() == RemnantKind::WhiteDwarf;
+        let next = if bridged {
+            Entry::PostAgb(fate)
+        } else {
+            Entry::Dead(fate)
+        };
+        self.finish(segment, end, next, previous)
+    }
+
+    /// The post-AGB crossing from `start`, where the AGB ended in `previous` (log₁₀ L, log₁₀ R and
+    /// the core), to the white dwarf of `fate`, which dies at the crossing's end (P06.T16.a).
+    ///
+    /// Every build reaches the same death at the same age and hands the remnant the same last
+    /// state, the crossing's luminosity at the knee, whether or not it keeps the segment.
+    pub(super) fn post_agb(&self, start: f64, fate: Fate, previous: Option<[f64; 3]>) -> Step {
+        let core = fate.remnant.mass().value();
+        let end = start + post_agb::crossing_years(core);
+        let fate = Fate {
+            death: Death::new(Years::new(end), fate.death.kind(), fate.death.progenitor()),
+            ..fate
+        };
+        let Some([log_l, log_r, _]) = previous else {
+            return Step {
+                segment: None,
+                next: Entry::Dead(fate),
+                end,
+                end_state: None,
+            };
+        };
+        let bridge = PostAgb::new(log_l, log_r, core, self.options.remnant());
+        let segment = (self.keep == Keep::Track).then(|| Segment {
+            model: Model::PostAgb { bridge, start },
+            start,
+            end,
+            coordinate: Coordinate::Linear { nominal_end: end },
+            mass: core,
+            knots: Vec::new(),
+            junction: Junction {
+                log_l: 0.0,
+                log_r: 0.0,
+                continuous: true,
+            },
+            samples: Vec::new(),
+            max_before: [0.0; 2],
+        });
+        Step {
+            segment,
+            next: Entry::Dead(fate),
+            end,
+            end_state: {
+                let [luminosity, radius] = bridge.knee();
+                Some([luminosity, radius, core])
+            },
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1040,5 +1252,41 @@ pub(super) fn iron_core_fate(
         remnant,
         phase: collapse_phase(remnant.kind()),
         iron_core: Some(IronCore { supernova, co_core }),
+    }
+}
+
+/// The largest fractional age τ a star may have reached on its main sequence when its accretion
+/// ends: a guard, since only the heaviest stars reach a few tenths.
+const MAX_ACCRETING_TAU: f64 = 0.5;
+
+/// log₁₀ R (R☉) and log₁₀ `T_eff` (K) of `point`.
+#[must_use]
+fn log_r_and_t(point: PhasePoint) -> [f64; 2] {
+    let (l, r) = (point.luminosity.value(), point.radius.value());
+    let log_r = crate::math::log10(r);
+    let log_t = crate::math::log10(
+        crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K * l.sqrt().sqrt() / r.sqrt(),
+    );
+    [log_r, log_t]
+}
+
+/// A segment before the main sequence, of `model` from `start` to `end` with final mass `mass`:
+/// no knots and no junction, the first of its track or entered at its predecessor's last state.
+#[must_use]
+fn premain_segment(model: Model, start: f64, end: f64, mass: f64) -> Segment {
+    Segment {
+        model,
+        start,
+        end,
+        coordinate: Coordinate::Linear { nominal_end: end },
+        mass,
+        knots: Vec::new(),
+        junction: Junction {
+            log_l: 0.0,
+            log_r: 0.0,
+            continuous: start > 0.0,
+        },
+        samples: Vec::new(),
+        max_before: [0.0; 2],
     }
 }

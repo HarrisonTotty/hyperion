@@ -38,7 +38,9 @@ use super::super::ms::{self, MainSequence};
 use super::super::wind;
 use super::build::{Builder, Entry, Keep, Resolution};
 use super::model::{HeliumCore, Model};
-use super::{Coordinate, MAX_INITIAL_MASS, Track, TrackOptions, reimers_eta};
+use super::{
+    Coordinate, HeliumHook, HeliumTable, MAX_INITIAL_MASS, Track, TrackOptions, reimers_eta,
+};
 
 /// k′₂ of BSE equation 35 (HPT equation 109): the envelope's share of I ÷ (M R²).
 pub(crate) const ENVELOPE_GYRATION: f64 = 0.1;
@@ -175,6 +177,8 @@ impl Track {
             segments: outcome.segments,
             fate: outcome.fate,
             built_until: outcome.built_until,
+            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            nebula: draws.nebula(),
         }
     }
 
@@ -384,9 +388,19 @@ impl Track {
             )))
         };
         match &segment.model {
-            Model::MainSequence { .. }
+            Model::Protostar(_)
+            | Model::PreMainSequence(_)
+            | Model::MainSequence { .. }
             | Model::HeliumMainSequence { .. }
             | Model::Remnant { .. } => Remains::Nothing,
+            // The crossing is the white dwarf's already, with its envelope gone.
+            Model::PostAgb { .. } => Remains::WhiteDwarf {
+                phase: self
+                    .fate
+                    .map_or(Phase::CarbonOxygenWhiteDwarf, |fate| fate.phase),
+                mass: SolarMasses::new(mc),
+                last_luminosity: luminosity,
+            },
             Model::HertzsprungGap { core, .. } | Model::FirstGiantBranch { core, .. } => match core
             {
                 HeliumCore::Degenerate => Remains::WhiteDwarf {
@@ -514,7 +528,10 @@ impl Model {
     fn helium_core(&self) -> Option<HeliumCore> {
         match self {
             Self::HertzsprungGap { core, .. } | Self::FirstGiantBranch { core, .. } => Some(*core),
-            Self::MainSequence { .. }
+            Self::Protostar(_)
+            | Self::PreMainSequence(_)
+            | Self::PostAgb { .. }
+            | Self::MainSequence { .. }
             | Self::FlashBridge { .. }
             | Self::CoreHeliumBurning { .. }
             | Self::EarlyAgb { .. }
@@ -924,7 +941,10 @@ fn core_radius(model: &Model, state: &StarState, coord: f64, c: &ZCoeffs) -> Sol
         }
     };
     let radius = match model {
-        Model::MainSequence { .. } | Model::HeliumMainSequence { .. } => 0.0,
+        Model::Protostar(_)
+        | Model::PreMainSequence(_)
+        | Model::MainSequence { .. }
+        | Model::HeliumMainSequence { .. } => 0.0,
         Model::HertzsprungGap { core, .. } | Model::FirstGiantBranch { core, .. } => match core {
             HeliumCore::NonDegenerate => helium_zams_radius(mc),
             HeliumCore::Degenerate => degenerate(mc),
@@ -935,7 +955,9 @@ fn core_radius(model: &Model, state: &StarState, coord: f64, c: &ZCoeffs) -> Sol
                 helium::main_sequence_point(SolarMasses::new(mc.max(1e-3)), coord.clamp(0.0, 1.0));
             if mc > 0.0 { r.value() } else { 0.0 }
         }
-        Model::ThermallyPulsingAgb { .. } | Model::HeliumShellBurning { .. } => degenerate(mc),
+        Model::ThermallyPulsingAgb { .. }
+        | Model::HeliumShellBurning { .. }
+        | Model::PostAgb { .. } => degenerate(mc),
         Model::Remnant { .. } => state.radius().value(),
     };
     let _ = c;
@@ -967,6 +989,8 @@ fn convective_envelope(
     );
     let outside = (r - rc.value()).max(0.0);
     match model {
+        // A protostar and a star on its Hayashi track are convective throughout.
+        Model::Protostar(_) | Model::PreMainSequence(_) => ConvectiveEnvelope { mass: m, depth: r },
         Model::MainSequence { .. } => main_sequence_envelope(m, coord.clamp(0.0, 1.0), r, c),
         Model::HertzsprungGap { .. } => {
             let tau = coord.clamp(0.0, 1.0);
@@ -984,10 +1008,12 @@ fn convective_envelope(
             mass: (m - mc).max(0.0),
             depth: outside,
         },
-        Model::HeliumMainSequence { .. } | Model::Remnant { .. } => ConvectiveEnvelope {
-            mass: 0.0,
-            depth: 0.0,
-        },
+        Model::HeliumMainSequence { .. } | Model::PostAgb { .. } | Model::Remnant { .. } => {
+            ConvectiveEnvelope {
+                mass: 0.0,
+                depth: 0.0,
+            }
+        }
     }
 }
 
@@ -1016,7 +1042,9 @@ fn main_sequence_envelope(m: f64, tau: f64, r: f64, c: &ZCoeffs) -> ConvectiveEn
 #[must_use]
 fn burnt_fraction(model: &Model, coord: f64) -> f64 {
     match model {
-        Model::MainSequence { .. }
+        Model::Protostar(_)
+        | Model::PreMainSequence(_)
+        | Model::MainSequence { .. }
         | Model::HertzsprungGap { .. }
         | Model::FirstGiantBranch { .. }
         | Model::FlashBridge { .. } => 0.0,
@@ -1024,6 +1052,7 @@ fn burnt_fraction(model: &Model, coord: f64) -> f64 {
         Model::EarlyAgb { .. }
         | Model::ThermallyPulsingAgb { .. }
         | Model::HeliumShellBurning { .. }
+        | Model::PostAgb { .. }
         | Model::Remnant { .. } => 1.0,
     }
 }

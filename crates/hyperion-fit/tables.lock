@@ -42,9 +42,9 @@ path = "kick_rank.rs"
 task = "kick_rank"
 revision = 0
 inputs_sha256 = "fa8f39b842a7e1923a9f272d9d935285e2c52f2959fec5b98179bd5edcc44541"
-body_sha256 = "c2c3b8823bd0912d93f7feaaf9322b89de69177a846d0b3622d9fa49854d68f7"
-fingerprint = [1.37, 1.37, 1.8421637164291416, 1.2000058311463526, 2.4084669107893766, 1.6042334553946882, 3.325212015735506, 1.4325212016188156, 5.001514944854197, 6.806572198789263, 6.741676439979783, 8.869634622099678, 7.999273581353981, 10.444950159496061, 11.634476448342019, 15.292022176446476, 0.45]
-since_generator_version = 11
+body_sha256 = "0e9c24a7934ea71594f748d129231ff380bf0c74f277e35b5c0209290be22cf2"
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.931168472446736, 15.696775699185423, 0.45]
+since_generator_version = 13
 provisional = true
 acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5993 and standard deviation 0.6758, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00000"
 
@@ -65,12 +65,12 @@ name = "stellar_fates_high"
 path = "stellar_fates_high.rs"
 task = "stellar_fates_high"
 revision = 0
-inputs_sha256 = "10cf9145981fc758305d0fa9f8818a6653453a02235ac63a72e4e4e41597cf00"
-body_sha256 = "67b534297b79cede6e7aea832817b89044d8208d2a3031ad3b8e312e2654e812"
-fingerprint = [6.9915346541522245, 5.001514944854197, 6.661566081782426, 18.714094561857273]
-since_generator_version = 11
+inputs_sha256 = "ab3cd3282dbb1d3cafa85ebb8470c9790bd70e78c1a05feb65903bce1bcf0eea"
+body_sha256 = "c6b889a605b3731e7393988229a65fc8acfd12bba03f734b8fdb037993f3b0ef"
+fingerprint = [6.9943222296256256, 5.0077445862515795, 6.6652970242215455, 18.733439476181278]
+since_generator_version = 13
 provisional = false
-acceptance = "7216 full tracks; 92 of 1426 cells (6.5%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 4.1e-3, a 6.6e-4 and 1.1e-1, b 1.1e-4 and 4.1e-2"
+acceptance = "8260 full tracks; 103 of 1633 cells (6.3%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 7.3e-3, a 8.4e-4 and 1.1e-1, b 1.5e-4 and 4.1e-2"
 
 [[table]]
 name = "stellar_fates_low"
@@ -78,11 +78,11 @@ path = "stellar_fates_low.rs"
 task = "stellar_fates_low"
 revision = 0
 inputs_sha256 = "8de9c5415278a4fc37a7e824a33eeb187366b694f456a92580ba233cc9f670c8"
-body_sha256 = "589b9aee42276e1500937f8a328b44e965090688f6ac4e3d142dd7db688db6f7"
-fingerprint = [10.021248908515998, 0.5462673765733742, 9.49122617306905, 0.5723440316308829]
-since_generator_version = 11
+body_sha256 = "894cc6f8bcbbebd503a82dd15cf6fceb13db71af90cb34a165c4692fb6a352c4"
+fingerprint = [10.02221019989694, 0.539051252455084, 9.49334256406364, 0.5659998033018855]
+since_generator_version = 13
 provisional = false
-acceptance = "20556 full tracks; 438 of 1265 cells (34.6%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.6e-2, a 1.1e-3 and 1.1e-2, b 3.6e-3 and 2.0e-2"
+acceptance = "20556 full tracks; 179 of 1265 cells (14.2%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.4e-2, a 5.9e-4 and 6.9e-3, b 3.1e-4 and 1.2e-2"
 
 [[table]]
 name = "stellar_fates_mid"
@@ -90,11 +90,11 @@ path = "stellar_fates_mid.rs"
 task = "stellar_fates_mid"
 revision = 0
 inputs_sha256 = "7fae6837340abec7d1d9f8ee4da1178166bc97b301c5f0365f7c26362ab1b80c"
-body_sha256 = "5e41d083b3df5e019dccb751ec58b14dcde562e4fd61aa1452a0564ba55b1014"
-fingerprint = [8.289012276741994, 0.92378534364464, 7.750259353025986, 1.2805536783233358]
-since_generator_version = 11
+body_sha256 = "b0a62653fab8dfbc31c877cb4a7afde678bf79ee87eccddc22008ae7595eb874"
+fingerprint = [8.291646730066546, 0.9157120936615865, 7.752857241525693, 1.2735669878372944]
+since_generator_version = 13
 provisional = false
-acceptance = "22044 full tracks; 130 of 1357 cells (9.6%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 3.1e-3, a 5.8e-4 and 8.2e-3, b 6.7e-4 and 1.6e-2"
+acceptance = "22044 full tracks; 135 of 1357 cells (9.9%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.1e-3, a 2.4e-4 and 8.2e-3, b 5.1e-4 and 1.3e-2"
 
 [[table]]
 name = "wd_cooling"

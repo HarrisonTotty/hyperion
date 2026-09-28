@@ -390,8 +390,9 @@ the old thin disc with its weak arms. A cluster's present mass follows from Lame
 feature carries what a console will want from it: a profile, an extent, gas and dust content where
 it has any (a nebula adds to the [dust field](#between-the-stars) along a line of sight), and an
 emission class (H II region, reflection nebula, dark cloud, remnant shell, pulsar wind nebula).
-Planetary nebulae are not features. They are under a light-year or two across and last some 20,000
-years, so one is derived from its central star by the stellar stage and found the way stars are.
+Planetary nebulae are not features. They are typically a light-year or two across (a median radius
+of 0.2–0.3 pc), visible out to about six (a radius of 0.9 pc), and last some 20,000 years, so one is
+derived from its central star by the stellar stage and found the way stars are.
 
 A first idea was to generate these in the coarse cells and have them add a bump to the density
 field. That does not survive contact with the rest of the design. A globular cluster is wider than a
@@ -433,7 +434,7 @@ fits one device: a feature's members are split by class, as a layer's are split 
   binary stages draw conditionally on it.
 - **Who stays** is decided by kick against escape speed, in closed form from the feature's own
   potential, not by the velocity spread that serves the grid. For an old cluster it is the escape
-  speed at birth, about twice today's for a globular that has since lost half its mass and expanded.
+  speed at birth, about twice today's for a globular that has since lost half its mass.
   A fit to all 157 clusters of the Baumgardt–Hilker catalogue gives the central value to 2.5%: √(GM
   ÷ r_h) × 10^(0.1055 + 0.2550u − 0.0769u²), with u = log₁₀(r_h ÷ r_c). The median is 20 km/s and
   the largest 88. An open cluster's is 1–6 km/s.
@@ -442,10 +443,10 @@ fits one device: a feature's members are split by class, as a layer's are split 
   its neutron stars, against the 10–20% its pulsars demand (Pfahl et al. 2002; Ivanova et al. 2008).
   Two things close the gap: the birth escape speed, and the low mode, whose neutron stars stay bound
   to a companion and are judged on the pair's velocity. Together they retain 18–26% at 100 km/s,
-  about a fifth at 50, 15–25% at 20 and under 1% in the most massive open clusters. Retention at 20
-  km/s cannot fall below the low mode's share, since its σ of 5 km/s keeps every one of its neutron
-  stars there. A cluster like 47 Tucanae holds a few thousand neutron stars, M4 about a hundred,
-  Palomar 5 none. They are also the ones in binaries, ready to be recycled.
+  about a fifth at 50, about a tenth at 20 km/s, since the pair keeps the systemic speed of a
+  Be/X-ray binary, about 15 km/s, and under 1% in the most massive open clusters. A cluster like 47
+  Tucanae holds a few thousand neutron stars, M4 one to three hundred, Palomar 5 none. They are
+  also the ones in binaries, ready to be recycled.
 - **Black holes.** Those that collapse directly are born without a kick and are kept even by an open
   cluster, so about four fifths are retained at birth. They then sink to the core and eject one
   another. The loss is a closed form in the cluster's relaxation time (Breen and Heggie 2013, as
@@ -460,8 +461,8 @@ fits one device: a feature's members are split by class, as a layer's are split 
   large core.
 - **Depletion of dwarfs.** A cluster evaporates from the bottom of the mass function. The slope for
   0.2–0.8 M☉ is −0.46 − 0.79 × (log₁₀ of the relaxation time in years − 9), with 0.54 of scatter
-  drawn per cluster, against a canonical −1.5. At 47 Tucanae's slope band A holds a third of what
-  the mass function would give it.
+  drawn per cluster, against a canonical −1.5. At 47 Tucanae's slope band A (0.08–0.5 M☉) holds
+  about two fifths of what the mass function would give it, and a third below 0.2 M☉.
 - **Core collapse.** A cluster with no black holes left and an age above about 14 relaxation times
   is core-collapsed and takes a cusp of slope −1.6 to −2 in place of a core. That puts a fifth of
   the real catalogue over the line, as observed (Trager et al. 1995).
@@ -482,7 +483,9 @@ fits one device: a feature's members are split by class, as a layer's are split 
   aluminium up and magnesium down in massive metal-poor clusters, iron unchanged except in about a
   sixth of clusters, and helium up by as much as 0.18 in the most massive. The second population is
   more concentrated and has fewer binaries, so escapers, tails and streams favour the first.
-- **Velocities.** The cluster's bulk motion plus an internal dispersion σ(r) ÷ √q.
+- **Velocities.** The cluster's bulk motion plus an internal dispersion in partial equipartition,
+  σ(r) g(m) ÷ g(m_TO), with g = e^(−m ÷ 2m_eq) up to m_eq = 1.5 M☉ and falling as m^(−½) above
+  (Bianchini et al. 2016).
 
 Escapers need no population of their own, and that is exact and not an economy. The halo's, bulge's
 and thick disc's shares are measured totals that already include cluster debris, and escapers start
@@ -501,12 +504,14 @@ the observed one is universal, and a quarter of the observed mass. So:
   their mass (Massari et al. 2019).
 - **Mass**: an evolved Schechter function, (M + Δ)⁻² e^(−(M + Δ) ÷ M_c) with Δ = 2.0 × 10⁵ and M_c =
   1.07 × 10⁶ M☉, fitted to the catalogue. It is the same at every radius.
-- **Place and size**: a cored r^−3.5 with a median radius of 5 kpc; a half-mass radius of 2.6 pc ×
+- **Place and size**: a cored r^−3.5 with a median radius of 5 kpc, normalised so that 86% lie
+  inside 20 kpc (Harris 2010); a half-mass radius of 2.6 pc ×
   (R ÷ kpc)^0.41 with 0.21 dex of scatter.
 - **Metallicity and age**: 30% metal-rich, near [Fe/H] = −0.55, in situ, flattened and rotating; 70%
   metal-poor, near −1.55. In-situ clusters are about 12.8 Gyr old, accreted ones 10.5–13.
 - **History**: the initial mass by inverting M = 0.70 M₀ (1 − t ÷ t_dis) with Baumgardt and Makino's
-  (2003) dissolution time, and the expansion from Gieles, Heggie and Zhao (2011).
+  (2003) dissolution time; clusters are born at about today's half-mass radius, since the
+  expansion erases the birth radius.
 - **Destroyed clusters** exist only as orphan streams and as the globular-born mark on field stars.
 
 #### Supernova remnants: one route, not two
@@ -967,15 +972,17 @@ from its own streams.
 - **Rogue planets** get the last layer, from a third of an Earth mass up to 13 Jupiter masses. How
   many exist is the least certain number in this document, so it follows the best measurement and
   not convenience: about 21 per star, with an uncertainty of a factor of two either way, on a mass
-  function falling nearly as 1 ÷ mass (Sumi et al. 2023), which also keeps Jupiters under one for
+  function falling nearly as 1 ÷ mass (Sumi et al. 2023, whose 21 counts from a third of an Earth
+  mass, per star including brown dwarfs), which also keeps Jupiters under one for
   every four stars (Mróz et al. 2017). Nearly all of them are smaller than Neptune. That is about 30
   per system at the model's 1.4 stars per system, and they follow the stars, since the measurement
-  is made towards the bulge. In 8 ly cells the galactic centre would then hold about 490 per cubic
-  light-year, and up to 700 for the densest seed, against an index limit of 128. So the layer uses 4
+  is made towards the bulge. In 8 ly cells the galactic centre would then hold about 580 per cubic
+  light-year for Milky Way values, and up to about 1,600 in 2,000 seeds, against an index limit of 128. So the layer uses 4
   ly cells and the ID's spare bits (see [Identifiers](#identifiers)): about six to a cell at the
   reference density, and a limit of 1,024 per cubic light-year. The abundance stays a parameter of
-  the generator version, capped by that limit at about 44 per star for Milky Way values and 31 for
-  the densest seed, and the range query never walks this layer unless asked. (An earlier draft wrote
+  the generator version, saturating at that limit in the densest central cells, which the Milky
+  Way's does not reach, and in about one galaxy in 130 whose nuclear disc is compact, and the range
+  query never walks this layer unless asked. (An earlier draft wrote
   26 per system, five to a cell and caps of 38 and 27. It used Kroupa's denser system counts and
   rounded the stars per system down to 1.24. The default's lower system density and the computed
   ratio cancel at the centre.)
@@ -2075,6 +2082,9 @@ line:
     at 20 km/s, and about half of the black holes under 12 M☉ are unkicked** (ruling 96). Reason:
     the low mode's σ of 5 km/s keeps all of its stars under 20 km/s, and Nagarajan and El-Badry
     (2025) count 5 of 11 unkicked. See [Displaced objects](#displaced-objects-kicks-and-runaways).
+    _For a cluster, superseded by ruling 126.3 (2026-09-27):_ the 15–25% is the kick law's alone;
+    a retained low-mode neutron star is judged on its pair's systemic speed, so a cluster keeps
+    about a tenth at 20 km/s.
 13. **Extinction at 2.2 µm (K) is about a tenth of visual** (ruling 98.3). Reason: Gordon et al.
     (2023), used from 1.1 µm, gives 0.1016, and Decleir et al. (2022) measure 0.102 ± 0.010.
 14. **The gas noise's σ_ln is 1.0–1.4, and each parcel's gas is four phases in pressure balance**
@@ -2130,6 +2140,50 @@ line:
    temperature; tides stop at the forced eccentricity; irregular moons survive by orbit from their
    capture at the formation distance, so hot giants hold none; members of icy belts are icy; and a
    halo is re-cut after mass loss. See [Planetary systems](#planetary-systems).
+
+**2026-09-27: the orchestrator's ruling 124.** Ruling 124 of the same file was made on research
+that read Frew, Parker and Bojičić (2016), Moe and De Marco (2006) and Jacob, Schönberner and
+Steffen (2013), and changes one sentence here:
+
+1. **A planetary nebula is a light-year or two across typically and about six at most** (ruling
+   124.5). Reason: "under a light-year or two across" was the catalogue's median diameter (a
+   median radius of 0.19 pc over Frew et al.'s 1,129 nebulae, 0.26 pc within 2 kpc), while the
+   counts of the Galaxy's nebulae are complete to a radius of 0.9 pc, which the stellar stage now
+   takes as the radius at which a nebula has dispersed. See [Large features](#large-features).
+
+**2026-09-27: the orchestrator's ruling 125.** Ruling 125 of the same file was made on research
+that read Sumi et al. (2023), Mróz et al. (2017), Gould et al. (2022), Yee and Kenyon (2025) and
+Johnson et al. (2020), and on a probe of the model over 2,000 seeds. The text has been brought into
+line:
+
+1. **Rogue planets stay at 21 per star, counted from a third of an Earth mass, per star including
+   brown dwarfs.** Two thirds of them lie below an Earth mass, and per hydrogen-burning star the
+   figure is about 26–27. Sumi's 53 per solar mass gives 21.3 per star at the model's system mass,
+   so the default matches like for like.
+2. **The rogue planets saturate at the index limit in the densest central cells, not across the
+   galaxy.** A cell's density is the smaller of its rogue planets and the limit of 1,024 per cubic
+   light-year (992.5 under the headroom rule), so no galaxy's abundance is lowered. The Milky Way's
+   centre holds about 580 per cubic light-year and does not reach it; about one galaxy in 130, whose
+   nuclear disc is compact, loses at most 10⁻⁴ of its rogue planets. See [Between the
+   stars](#between-the-stars).
+
+**2026-09-27: the orchestrator's ruling 126.** Ruling 126 of the same file was made on research
+that read the sources' own text (Baumgardt and Makino 2003; van den Heuvel et al. 2000; Bianchini
+et al. 2016; Harris 2010), on the cluster interiors and the globular system as built, and changes
+what this document says. The text has been brought into line:
+
+1. **A retained low-mode neutron star is judged on its pair's systemic speed**, a Be/X-ray
+   binary's, about 15 km/s (van den Heuvel et al. 2000), so a cluster keeps about a tenth of its
+   neutron stars at 20 km/s and M4 one to three hundred. See [What is inside a cluster
+   today](#what-is-inside-a-cluster-today).
+2. **A globular is born at about today's half-mass radius**, since the expansion of Gieles, Heggie
+   and Zhao (2011) erases the birth radius and cannot be inverted once a cluster evaporates.
+3. **The globulars' cored r^−3.5 is normalised so that 86% lie inside 20 kpc** (Harris 2010), which
+   an untruncated law with a median of 5 kpc cannot do.
+4. **Members' velocities are in partial equipartition** (Bianchini et al. 2016), not σ(r) ÷ √q.
+5. **Consequences in the text** (ruling 126.2 and 126.8): the birth escape speed no longer cites an
+   expansion; band A at 47 Tucanae's slope holds 0.386 of the canonical count ("a third" was the
+   factor below 0.2 M☉); and decision 12's 15–25% at 20 km/s is the kick law's, not a cluster's.
 
 ## Open questions
 

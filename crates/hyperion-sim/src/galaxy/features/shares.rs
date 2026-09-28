@@ -33,27 +33,39 @@
 //!
 //! # Globulars and the halo's discrete share (Design note 4)
 //!
-//! Globulars count against the bulge, the thick disc and the halo. Phase 3 (P09.T12) supplies
-//! their density, so until then their φ is 0 and their process places nothing. The halo's
-//! discrete share of streams and dwarf cores is plan 10's, through
-//! [`set_halo_discrete`](FeatureShares::set_halo_discrete).
+//! Globulars count against the bulge, the thick disc and the halo ([`GlobularSystem`], P09.T12):
+//! a population's φ is its globulars' expected mass, the untruncated law's number times the mass
+//! function's mean, over its systems times their mean mass. The halo's discrete share of streams
+//! and dwarf cores is plan 10's, through [`set_halo_discrete`](FeatureShares::set_halo_discrete),
+//! and adds to its globulars'.
 //!
 //! # Bands
 //!
-//! φ is uniform across the mass bands until the class tables of phase 2 deplete some
-//! (TODO(P09.T9): per-band φ from the class counts). A band below the five stellar ones, which
-//! plan 13 adds, takes band A's value through one private mapping, so plan 13 changes nothing here.
+//! The clusters' class tables deplete the lowest bands (P09.T9.a), so the globulars' φ is not the
+//! same in every band: band b takes `φ × s_b ÷ S_b`, `S_b` the field's band share and `s_b` the
+//! members', the field's depleted at the slope of a representative globular (the mass function's
+//! mean mass at the half-mass radius of 5 kpc, 12 Gyr old; ours) and renormalised. The open
+//! clusters and nurseries are young enough that their tables deplete nothing, and keep one φ in
+//! every band. A band below the five stellar ones, which plan 13 adds, takes band A's value
+//! through one private mapping, so plan 13 changes nothing here.
 
 use crate::galaxy::Population;
 use crate::galaxy::ages::{SubDisc, YOUNG_AGE_LIMIT};
+use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::consts::YEARS_PER_MEGAYEAR;
 use crate::galaxy::fields::Fields;
-use crate::galaxy::imf::{MassBand, MassFunction};
+use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
+use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::quad::gl_panels;
+use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::sse::lifetime;
-use crate::units::{SolarMasses, Years};
+use crate::units::{LightYears, SolarMasses, Years};
+
+use super::cluster::relaxation_time;
+use super::interior::counts::{CANONICAL_SLOPE, band_depletion};
+use super::kinds::globular::{GlobularSystem, HALF_MASS_RADIUS_LAW};
 
 use super::kinds::cloud::{CLOUD_NEUTRAL_SHARE, MOLECULAR_CLOUD_MULTIPLE, mean_cloud_mass};
 use super::kinds::nursery::{
@@ -202,13 +214,19 @@ pub struct FeatureShares {
     halo_discrete: f64,
     clock: SupernovaClock,
     cloud_per_mass: f64,
+    globulars: GlobularSystem,
+    /// The globulars' φ of the bulge, the thick disc and the halo.
+    globular_phi: [f64; 3],
+    /// The globulars' band weights `s_b ÷ S_b`.
+    globular_band_weights: [f64; 5],
 }
 
 impl FeatureShares {
-    /// The shares of the galaxy whose fields are `fields`, whose mass function is `mass_function`
-    /// and which forms `mean_formed_mass` per system.
+    /// The shares of the galaxy of `params` whose fields are `fields`, whose mass function is
+    /// `mass_function` and which forms `mean_formed_mass` per system.
     #[must_use]
     pub fn new(
+        params: &GalaxyParams,
         fields: &Fields,
         mass_function: &dyn MassFunction,
         mean_formed_mass: SolarMasses,
@@ -263,6 +281,27 @@ impl FeatureShares {
             lifetime(CORE_COLLAPSE_MIN_MASS, &Composition::SOLAR, &draws),
             per_system_cc,
         );
+        let globulars = GlobularSystem::new(params);
+        let (bulge, thick, halo) = globulars.population_masses();
+        let population_mass = |population: Population| {
+            let count: f64 = fields
+                .components()
+                .iter()
+                .filter(|c| c.population() == population)
+                .map(crate::galaxy::fields::Component::count)
+                .sum();
+            count * params.mean_system_mass(population).value()
+        };
+        let share = |mass: f64, population: Population| {
+            let budget = population_mass(population);
+            if budget > 0.0 { mass / budget } else { 0.0 }
+        };
+        let globular_phi = [
+            share(bulge, Population::Bulge),
+            share(thick, Population::ThickDisc),
+            share(halo, Population::Halo),
+        ];
+        let globular_band_weights = globular_band_weights(&globulars, mass_function);
         Self {
             nurseries,
             young_mean_phi,
@@ -275,7 +314,39 @@ impl FeatureShares {
             halo_discrete: 0.0,
             clock,
             cloud_per_mass: 1.0 / mean_cloud_mass().value(),
+            globulars,
+            globular_phi,
+            globular_band_weights,
         }
+    }
+
+    /// The globulars' band weights `s_b ÷ S_b` (module documentation, "Bands").
+    #[must_use]
+    pub const fn globular_band_weights(&self) -> [f64; 5] {
+        self.globular_band_weights
+    }
+
+    /// The globular system: its count, density and mass function (P09.T12).
+    #[must_use]
+    pub const fn globulars(&self) -> &GlobularSystem {
+        &self.globulars
+    }
+
+    /// The globulars' φ of `population` in `band`: the bulge's, the thick disc's and the halo's,
+    /// weighted by band (module documentation); 0 for the rest.
+    #[must_use]
+    pub fn phi_globular(&self, population: Population, band: MassBand) -> f64 {
+        let weight = self.globular_band_weights[stellar_band_or_a(band).index()];
+        let phi = match population {
+            Population::Bulge => self.globular_phi[0],
+            Population::ThickDisc => self.globular_phi[1],
+            Population::Halo => self.globular_phi[2],
+            Population::YoungThinDisc
+            | Population::OldThinDisc
+            | Population::LongBar
+            | Population::NuclearDisc => 0.0,
+        };
+        phi * weight
     }
 
     /// The young disc's nursery rates.
@@ -302,8 +373,7 @@ impl FeatureShares {
     /// discrete share too.
     #[must_use]
     pub fn phi(&self, population: Population, band: MassBand) -> f64 {
-        let _band = stellar_band_or_a(band);
-        match population {
+        let own = match population {
             Population::YoungThinDisc => self.young_mean_phi,
             Population::OldThinDisc => self.old_mean_phi,
             Population::Halo => self.halo_discrete,
@@ -311,7 +381,8 @@ impl FeatureShares {
             | Population::Bulge
             | Population::LongBar
             | Population::NuclearDisc => 0.0,
-        }
+        };
+        own + self.phi_globular(population, band)
     }
 
     /// `1 − φ`: what `population`'s field density keeps of its budget in `band`.
@@ -390,6 +461,28 @@ pub fn nursery_alive_probability(age: Years) -> f64 {
     let floor = NurseryMassFunction::STANDARD.number_above(ASSOCIATION_MASS_FLOOR);
     let unbound = e + (1.0 - e) * floor * (1.0 - dissolved_share(age));
     BOUND_FRACTION * surviving_number_fraction(age) + (1.0 - BOUND_FRACTION) * unbound
+}
+
+/// The globulars' band weights `s_b ÷ S_b` (module documentation).
+fn globular_band_weights(globulars: &GlobularSystem, mass_function: &dyn MassFunction) -> [f64; 5] {
+    let mass = SolarMasses::new(globulars.mean_mass());
+    let r_h = LightYears::new(
+        HALF_MASS_RADIUS_LAW.0 * math::powf(5.0, HALF_MASS_RADIUS_LAW.1) * LIGHT_YEARS_PER_PARSEC,
+    );
+    let t = relaxation_time(mass, r_h).value();
+    let alpha = (-0.46 - 0.79 * (math::log10(t) - 9.0)).max(CANONICAL_SLOPE);
+    let ratios = band_depletion(mass_function, alpha);
+    let field: [f64; 5] =
+        std::array::from_fn(|b| mass_function.integral(MASS_BAND_EDGES[b], MASS_BAND_EDGES[b + 1]));
+    let total: f64 = field.iter().sum();
+    let members: f64 = field.iter().zip(&ratios).map(|(f, r)| f * r).sum();
+    std::array::from_fn(|b| {
+        if members > 0.0 {
+            ratios[b] * total / members
+        } else {
+            1.0
+        }
+    })
 }
 
 /// Every stellar band maps to itself, and plan 13's substellar bands to band A, the stars these
@@ -471,24 +564,35 @@ mod tests {
     }
 
     #[test]
-    fn every_band_gets_the_same_share_until_phase_two() {
+    fn only_the_globulars_share_depends_on_the_band() {
         let galaxy = milky_way();
         let shares = galaxy.feature_shares();
         for population in crate::galaxy::POPULATIONS {
-            let a = shares.phi(population, MassBand::A);
+            let own =
+                shares.phi(population, MassBand::A) - shares.phi_globular(population, MassBand::A);
             // Plan 13's substellar bands answer as band A (its Design note 4).
             for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
-                assert!((shares.phi(population, band) - a).abs() < 1e-15);
+                let phi = shares.phi(population, band);
+                assert!((phi - shares.phi_globular(population, band) - own).abs() < 1e-15);
                 let f = shares.field_factor(population, band);
-                assert!((f + shares.phi(population, band) - 1.0).abs() < 1e-15);
+                assert!((f + phi - 1.0).abs() < 1e-15);
             }
         }
+        // The globulars' depleted lowest bands hold less than their field's share, the rest
+        // more; the weights conserve members over the field's band shares.
+        let w = shares.globular_band_weights();
+        assert!(w[0] < 1.0 && w[4] > 1.0, "{w:?}");
+        let halo = shares.phi_globular(Population::Halo, MassBand::C);
+        assert!((1e-3..0.2).contains(&halo), "{halo}");
     }
 
     #[test]
     fn the_halo_takes_plan_ten_s_discrete_share() {
         let mut shares = milky_way().feature_shares().clone();
         shares.set_halo_discrete(0.05);
-        assert!((shares.field_factor(Population::Halo, MassBand::A) - 0.95).abs() < 1e-15);
+        let globulars = shares.phi_globular(Population::Halo, MassBand::A);
+        assert!(
+            (shares.field_factor(Population::Halo, MassBand::A) - (0.95 - globulars)).abs() < 1e-15
+        );
     }
 }

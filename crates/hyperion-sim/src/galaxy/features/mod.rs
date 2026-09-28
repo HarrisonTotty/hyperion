@@ -12,10 +12,17 @@
 //! Phase 1 places no member: members, nested grids and the class tables are phases 2 and 5.
 
 pub mod catalogue;
+#[cfg(test)]
+mod checks;
+pub mod cluster;
 pub mod emission;
 pub mod gas_overlay;
 pub mod ids;
+pub mod interior;
 pub mod kinds;
+pub mod members;
 pub mod shares;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use ids::{FeatureDesignation, FeatureId, FeatureKind, FeatureProcess};

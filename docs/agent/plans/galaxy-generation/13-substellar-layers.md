@@ -42,7 +42,8 @@ chart can show both kinds with their own symbols, selector steps, legend entries
 In scope:
 
 - Generator-version parameters for the two abundances and the two mass functions.
-- The per-galaxy cap on the rogue planets' abundance, from the index limit and the galaxy's own peak
+- The rogue planets' saturation at the index limit in the densest cells (ruling 125; this was a
+  per-galaxy cap on the abundance), from the index limit and the galaxy's own peak
   density.
 - Two rows of the share matrix, placement of both layers, `resolve`, designations.
 - The range query's substellar request and two extra mass-floor steps, the walk order, the census
@@ -97,7 +98,7 @@ pub struct SubstellarAbundance { /* per-system figures for one galaxy */ }
 impl SubstellarAbundance {
     pub fn for_galaxy(galaxy: &Galaxy, p: &SubstellarParams) -> SubstellarAbundance;
     pub fn brown_dwarfs_per_system(&self) -> f64;
-    pub fn rogue_planets_per_system(&self) -> f64;     // after the cap
+    pub fn rogue_planets_per_system(&self) -> f64;     // always the parameter's (ruling 125)
     pub fn rogue_planet_cap_per_system(&self) -> f64;
     pub fn is_capped(&self) -> bool;
 }
@@ -234,10 +235,12 @@ signature is given, and where it is not, the task that builds it is named.
    states both abundances per star, and placement works in systems. The conversion is the galaxy's
    own mean number of stars per system, 1 plus the mass-function average of plan 02's
    `mean_companions`, which plan 02's tests put at 1.33–1.45. Since its 2026-09-21 revision the
-   brainstorm uses that ratio too: about 30 per system, six to a cell, and caps of 44 and 31 per
-   star against 1,024 ÷ 16.3 and 1,024 ÷ 23.5 per system under the default mass function (38 and 27
-   against 18.7 and 27 under Kroupa's). So rogue planets come to 28–30 per system and five and a
-   half to six to a cell at the reference density. See Risks.
+   brainstorm uses that ratio too: about 30 per system and six to a cell. The peak system density
+   is 19.5 per ly³ at Milky Way values (22.4 under Kroupa's); 15.8 median, 23.5 at the 90th
+   percentile, up to 53 in 2,000 seeds. That gives a saturation threshold of 36 per star for Milky
+   Way values (32 under Kroupa's) and 44 for the median seed; the default saturates the centre in
+   about 1 galaxy in 130 (ruling 125). So rogue planets come to 28–30 per system and five and a half
+   to six to a cell at the reference density. See Risks.
 
 3. **One abundance for every population.** "The same populations and ages as the stars" is read as:
    each population's column of the two new rows holds the same number. The matrix allows a later
@@ -272,19 +275,24 @@ signature is given, and where it is not, the task that builds it is named.
    derived. Above 0.3 M_Jup the law gives 0.09 per star, inside the limit of one per four stars
    (Mróz et al. 2017), and 97.7% of the objects are below Neptune's 17 M⊕.
 
-8. **The cap uses plan 03's headroom rule.** A 4 ly cell holds 64 ly³ and its index 65,536
+8. **The saturation uses plan 03's headroom rule (ruling 125; this was a cap).** A 4 ly cell holds 64 ly³ and its index 65,536
    candidates. Plan 03's Design note 6 already requires, for every layer, that the largest possible
    bound × volume plus eight standard deviations stay under the index capacity, with the largest
    bound taken as the sum of every component's global peak, so no search is needed. For this layer
    that is a largest Poisson mean λ with λ + 8√λ ≤ 65,536, about 63,500, or 992 per cubic light-year
    in place of the brainstorm's nominal 1,024. A rogue-planet cell's bound is the abundance per
-   system times the bound on the total system density, so the cap per system is 992 ÷ the sum of the
-   components' peak densities (about 16 per ly³ at Milky Way values under the default mass function,
-   up to about 24; 18.7 and 27 under Kroupa's). The effective abundance is the smaller of the
-   parameter and the cap, and `check_index_headroom` then passes by construction. At the default 21
-   per star the cap binds for no seed in plan 02's ranges, and a test asserts that, because it is
-   what plan 02's coupled size draws were introduced to guarantee. The brown-dwarf layer needs no
-   cap: its fullest 16 ly cell expects about 20,000 candidates against 2¹⁹.
+   system times the bound on the total system density. So a rogue-planet cell's density is
+   min(a × ρ, C) and its bound min(a × B, C), with C = 992.5 per ly³ (the 64-bit ID layout's limit
+   at any cell size, under the headroom rule), and `pick_component` scales the weights by C ÷ Σw
+   only where Σw > C. Unsaturated cells stay bit-identical, and `check_index_headroom` passes by
+   construction for every galaxy and every abundance. The abundance is always the parameter's. The
+   saturation threshold per system, the abundance at which the densest cell reaches C, is 992.5 ÷
+   the sum of the components' peak densities (19.5 per ly³ at Milky Way values, 22.4 under
+   Kroupa's; 15.8 median and up to 53 in 2,000 seeds). The default 21 per star saturates the centre
+   in about one galaxy in 130, whose nuclear disc is compact; the worst of 2,000 seeds loses 9 ×
+   10⁻⁵ of its rogue planets inside a 71 ly sphere's volume. P13.T4's census counts the saturated
+   density. The brown-dwarf layer needs no saturation: its fullest 16 ly cell expects at most about
+   56,000 candidates against 2¹⁹, and reaches its headroom only at about 490 systems per ly³.
 
 9. **Asking and the floor.** The brainstorm says the layers are walked "only when the caller asks"
    and that the mass floor "gains two steps". Plan 03 already carries both: the builder's
@@ -374,7 +382,7 @@ normalisation and lower mass against Sumi et al. (2023), the Jupiter limit again
   M⊕ is above 0.95; plan 02's `imf` goldens are unchanged.
 - Acceptance: `cargo test -p hyperion-sim substellar` passes.
 
-### P13.T2 Abundance, the per-galaxy cap and the share matrix
+### P13.T2 Abundance, the saturation threshold and the share matrix
 
 Build `substellar::abundance` by Design notes 2, 3 and 8. Add `Galaxy::mean_stars_per_system()`,
 which `Galaxy` lacks: computed once, when the galaxy is built, with plan 02's existing quadrature
@@ -392,15 +400,16 @@ bands when it lands). `Galaxy` builds and holds a `SubstellarAbundance` and feed
 - Files: `crates/hyperion-sim/src/galaxy/substellar/abundance.rs`, plan 02's `imf`, `shares` and
   `Galaxy`, plan 03's `placement` (headroom check only).
 - Tests:
-  - Milky Way fixture: brown dwarfs per system 0.23–0.27; rogue planets per system 27–31; the cap
-    per star within 10% of 43 (992 ÷ 16.3 ÷ 1.42; 38 under Kroupa's); `is_capped()` false;
-    `check_index_headroom` passes.
-  - With `with_rogue_planets_per_star(60.0)` on the Milky Way fixture the effective figure equals
-    the cap, the cap × the summed peak densities × 64 is at most the headroom mean, and
-    `check_index_headroom` still passes.
-  - Over 2,000 seeds (slow): the default abundance is never capped; the smallest cap per star found
-    is recorded and lies within 20% of the brainstorm's 31; the brown-dwarf layer's fullest 16 ly
-    cell has a mean under 10% of its 2¹⁹ index.
+  - Milky Way fixture (ruling 125): brown dwarfs per system 0.23–0.27; rogue planets per system
+    27–31; the saturation threshold 35.9 per star ±3% (31.8 ±3% under Kroupa's);
+    `is_saturated()` false; `check_index_headroom` passes.
+  - With `with_rogue_planets_per_star(60.0)` on the Milky Way fixture the central cell saturates
+    and its mean is at most `largest_headroom_mean`, a solar-circle cell is bit-identical to the
+    unsaturated one, `rogue_planets_per_system` is 60 × 1.4178, and the headroom passes.
+  - Over 2,000 seeds (slow): the default saturates 10–20 seeds; the smallest threshold is 12–14.5
+    per star and the median 40–48; the worst seed loses under 10⁻³ of its rogue planets; the
+    brown-dwarf layer's fullest 16 ly cell expects under 65,536 candidates, ⅛ of 2¹⁹. (The "within
+    20% of the brainstorm's 31" test is withdrawn.)
   - For the five stellar bands `ShareMatrix::share` is bit-identical to before.
 - Acceptance: the tests pass; every stellar golden file is unchanged.
 
@@ -679,9 +688,14 @@ Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion
   Kroupa's systems. The local census's 0.0019 systems and 0.0025 stars and white dwarfs per cubic
   light-year imply 1.30, and plan 11's companions may bring the model's ratio down towards that.
 - **The measured abundance is uncertain by a factor of two either way.** At the upper end (42 per
-  star) the cap binds for most seeds near the centre, which silently lowers the abundance of the
-  whole galaxy, not only of the centre, because the share-matrix entry is one number per population.
-  The parameters panel shows when that happens.
+  star) the centres of most seeds saturate, which removes rogue planets only in their densest
+  central cells (ruling 125). The parameters panel shows when that happens.
+- **What Sumi's 21 counts (ruling 125).** Sumi et al.'s f = 21 (+23, −13) covers 0.33–6,660 M⊕:
+  two thirds of it lie below 1 M⊕, and objects of an Earth mass and above number about 7 per star.
+  Its "star" includes brown dwarfs, so per hydrogen-burning star it is about 26–27 (Yee and Kenyon's
+  ×1.3). His 53 per M☉ times the model's 0.55–0.59 M☉ per system gives 30 per system, or 21.3 per
+  star, so the default matches like for like; Gould et al. (2022) give 13–42, and Mróz et al.'s
+  < 0.25 Jupiters per star holds at 0.089.
 - **Features hold no substellar objects** (Design note 4). A globular cluster or the nuclear cluster
   therefore shows no brown dwarfs on a chart. Plan 09's member ID has spare mass-band values that
   could carry them; that is a later revision with a version bump.
@@ -696,14 +710,14 @@ Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion
   for giant planets, and what this plan says of them is recalled, not re-read: P13.T5.b re-checks
   it. If the curves must be fitted, T5.b is a `hyperion-fit` task of about a day and T5.c the
   function. Plan 14 depends on the function's name, range and `CoolingState`, not on its internals.
-- **The cap against the index limit.** The brainstorm states the limit as 1,024 per cubic
-  light-year, the bare capacity of the index. Under plan 03's headroom rule the usable figure is 992
-  (Design note 8), which lowers the caps by 3% and is inside the rounding of "about 44" and "31".
+- **The saturation against the index limit.** The brainstorm states the limit as 1,024 per cubic
+  light-year, the bare capacity of the index. Under plan 03's headroom rule the usable figure is
+  992.5 (Design note 8).
 - **Updated for the 2026-09-21 density rulings.** The default mass function is now Chabrier's system
-  function, with 0.87 times Kroupa's systems, so the peak system densities behind the cap fall to
-  about 16 and 24 per cubic light-year. The caps rise to about 43 per star for the Milky Way fixture
-  and 30–31 for the densest seed (Design notes 2 and 8, P13.T2's tests). The over-cap test now asks
-  for 60 per star, because 42 no longer exceeds the Milky Way cap.
+  function, with 0.87 times Kroupa's systems. _Superseded by ruling 125:_ the peak system density
+  is 19.5 per ly³ at Milky Way values (22.4 under Kroupa's), 15.8 for the median seed and up to 53,
+  so the saturation threshold is 36 per star for Milky Way values (32 under Kroupa's) and 44 for the
+  median seed (Design notes 2 and 8, P13.T2's tests). The over-threshold test asks for 60 per star.
 - **Two knobs for one request.** Plan 03 carries both a `SubstellarRequest` and room in `MassFloor`.
   Design note 9 ties them; dropping `SubstellarRequest` in favour of the floor alone would be
   simpler and is a change to plan 03's signature that its author chose to avoid.
@@ -837,19 +851,15 @@ Result<CoolingState, EvaluateGiantCoolingError>`, as P06.T13 returned a `Result`
     same `ProvisionalFates` as `mean_formed_mass`. `Galaxy::mean_stars_per_system()` reads it, so
     `fates` changes one place. The value is 1.418 under the default mass function and 1.396 under
     Kroupa's. It is not written to `galaxy_params.golden`.
-  - _The cap._ The cap is `largest_headroom_mean(2¹⁶) × (1 − 10⁻⁹) ÷ (64 × Σ component bounds over
-the root octant)`. That is exactly the bound `check_index_headroom` takes, so the check passes
-    by construction. The 10⁻⁹ covers the difference in folding order. `Galaxy::with_substellar_params`
-    rebuilds the abundance and the two rows, for tests. **Finding:** the octant bound on the total
-    density is 19.5 per ly³ (22.4 under Kroupa's), not Design note 8's 16.3 (18.7) "sum of peaks".
-    So the Milky Way cap is **35.9 per star (31.8 under Kroupa's), not 43 (38)**. That is 17% below
-    the plan's figure, outside T2's 10% window. The test's window is widened, provisionally, to
-    0.75–1.1 of the plan's figure. The default 21 per star is still far from the cap. Over 2,000 seeds
-    (slow): **15 seeds are capped at the default 21 per star**, the smallest cap is **13.1 per
-    star** (seed `0x1302_0000_0000_078d`, n = 1933) against the brainstorm's 31, and the fullest brown-dwarf
-    cell expects 56,369 candidates, 10.8% of 2¹⁹ against T2's 10%. The test's windows are set,
-    provisionally, to those figures (at most 20 seeds capped, a cap above 12, under 12%). This is
-    for the orchestrator to rule on, after research.
+  - _The cap, superseded by ruling 125 (the follow-up in this lane)._ The galaxy-wide cap is gone:
+    a rogue-planet cell's bound is min(a × B, C) in `placement/cell.rs::layer_bound` and
+    `headroom.rs`, and `candidate.rs::pick_component` scales the weights by C ÷ Σw only where
+    Σw > C, with C = `placement::rogue_planet_saturation_density()`, 992.5 per ly³ (the headroom's
+    largest mean × (1 − 10⁻⁹) ÷ 64). `SubstellarAbundance::rogue_planets_per_system` is always the
+    parameter × stars per system. `rogue_planet_cap_per_system`/`_per_star` keep their names and are
+    now the saturation threshold, C over the octant bound on the total system density, and
+    `is_capped` is `is_saturated`. P13.T4's census must count the saturated density. The measured
+    windows are under P13.T2's tests; the figures behind them are ruling 125's.
   - _Placement._ `SUBSTELLAR_LAYERS` holds F (16 ly) and G (4 ly), and `layer_spec` answers for
     all seven layers. `CellKey::{new, containing, of}` accept every layer, and
     `BuildCellKeyError::NotStellarLayer` is removed. `ResolveSystemError::LayerNotGenerated` stays:

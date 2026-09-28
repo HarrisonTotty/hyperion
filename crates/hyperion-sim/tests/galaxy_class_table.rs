@@ -34,6 +34,7 @@ use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::rng::{ObjectKey, Stream, tags};
 use hyperion_sim::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use hyperion_sim::stellar::remnant::RemnantKind;
+use hyperion_sim::stellar::sse::MAX_INITIAL_MASS;
 use hyperion_sim::stellar::{Composition, lifetime};
 use hyperion_sim::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses, Years};
 use hyperion_testkit::golden;
@@ -632,7 +633,12 @@ fn bracket_holds(n: u32) {
             stripped: stream.mark(),
             ..StarDrawsParts::MEDIAN
         });
-        let t = lifetime(SolarMasses::new(m.min(100.0)), &comp, &draws).value();
+        let t = lifetime(
+            SolarMasses::new(m.min(MAX_INITIAL_MASS.value())),
+            &comp,
+            &draws,
+        )
+        .value();
         let (lo, hi) = bracket.bracket(SolarMasses::new(m)).unwrap();
         assert!(
             lo.value() <= t && t <= hi.value(),

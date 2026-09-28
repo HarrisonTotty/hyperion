@@ -291,7 +291,8 @@ From plan 02, `hyperion_sim::galaxy`:
   the reserved columns.
 - `imf::{MassFunction, MassBand, BandShares, MASS_BAND_EDGES}`: the five band edges (0.08, 0.5,
   0.75, 2.5, 8, 150 M☉) as the single source of truth, `MassBand::{lo, hi}`,
-  `MassBand::try_from(Layer)` (error `ConvertLayerError` for a substellar layer),
+  `From<Layer> for MassBand` (every layer has a band since plan 13, which replaced `try_from` and
+  `ConvertLayerError`; `MassBand::is_stellar` tells the five stellar bands apart),
   `From<MassBand> for Layer`, and `MassFunction::sample_in_band(band, &mut Stream) -> f64`, one
   word, in M☉ as a bare `f64`.
 - `potential::PotentialTables::tidal_radius(SolarMasses, &PointLy) -> Metres`.

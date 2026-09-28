@@ -712,15 +712,16 @@ fn filler(c: &Candidate<'_>) -> bool {
         && !present(c).is_empty()
 }
 
-/// Fourteen of the fifteen of P14.T32's twenty-four that the slice can make (its _Slice:_ line),
-/// in the order the plan lists them; the fifteenth, the T Tauri star, is [`T_TAURI`]. Each was
-/// checked by eye from its golden, and its comment says what it holds at the epoch.
-const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
+/// The fifteen of P14.T32's twenty-four that the slice can make (its _Slice:_ line), in the order
+/// the plan lists them, and the T Tauri star last, pinned once P06.T15 gave the tracks a
+/// pre-main sequence. Each was checked by eye from its golden, and its comment says what it holds
+/// at the epoch.
+const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
     GoldenSystem {
         // A 0.138 M☉ M dwarf of 3,020 K, [Fe/H] +0.04, `CompactMulti`: three rocky planets of
-        // 1.2–2.1 M⊕ and sub-Neptunes of 3.9 and 2.7 M⊕ at 0.057–0.29 au, and an ice giant of
-        // 10.4 M⊕ at 0.47 au with seven moons and two rings. An icy belt at 0.62–0.75 au and a
-        // cometary halo.
+        // 1.2–2.1 M⊕ and sub-Neptunes of 3.9 and 2.7 M⊕ at 0.056–0.29 au, and an ice giant of
+        // 10.4 M⊕ at 0.46 au with seven moons and two rings. An icy belt at 0.61–0.74 au with
+        // eight dwarf planets and a cometary halo.
         name: "m_dwarf_resonant_chain",
         layer: Layer::A,
         budget: 200_000,
@@ -739,10 +740,11 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x41fe_acda_0000_0001,
     },
     GoldenSystem {
-        // A 0.975 M☉ G dwarf of 5,460 K, [Fe/H] +0.25, `SolarLike`: five rocky planets of
-        // 0.74–2.0 M⊕ at 0.16–0.99 au, giants of 5.5, 0.34 and 0.80 Jupiter masses at 2.9, 10.6
-        // and 21.5 au, and ice giants of 13.5 and 16.9 M⊕ at 35 and 51 au, each giant with seven
-        // moons and a dust ring. A 1.3 M⊕ Kuiper belt at 67–81 au and a cometary halo.
+        // A 0.975 M☉ G dwarf of 5,450 K, [Fe/H] +0.25, `SolarLike`: rocky planets of 1.6 and
+        // 1.2 M⊕ at 0.39 and 0.76 au, a giant of 5.3 Jupiter masses at 2.9 au with six moons and a
+        // dust ring, an ice giant of 23 M⊕ at 17.2 au with five moons and a dust ring, and an icy
+        // planet of 11.5 M⊕ at 33 au. An asteroid belt at 1.1–1.8 au, a 3.8 M⊕ Kuiper belt at
+        // 43–52 au and a cometary halo.
         name: "solar_like",
         layer: Layer::C,
         budget: 200_000,
@@ -760,10 +762,11 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4200_acaa_0000_000a,
     },
     GoldenSystem {
-        // A 0.400 M☉ M dwarf of the halo, 3,850 K, [Fe/H] −0.77, 11.7 Gyr old, `CompactMulti`: one
-        // rocky planet of 1.58 M⊕ at 0.040 au, circularised, and an icy belt at 0.07–28 au with
-        // two dwarf planets; no halo. Re-pinned by ruling 73 (`calib3`): the first halo star with
-        // a planet is this one, before `01fdbb3660000000`.
+        // A 0.400 M☉ M dwarf of the halo, 3,850 K, [Fe/H] −0.77, 11.7 Gyr old, `CompactMulti`:
+        // rocky planets of 1.58, 1.09 and 3.5 M⊕ at 0.061, 0.081 and 0.11 au, the innermost
+        // circularised, and a rocky belt at 0.14–0.18 au, scattered to 28 au, with no dwarf
+        // planets; no halo. Re-pinned by ruling 73 (`calib3`): the first halo star with a planet
+        // is this one, before `01fdbb3660000000`.
         name: "halo_star",
         layer: Layer::A,
         budget: 200_000,
@@ -771,11 +774,12 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x0202_5b2b_e000_0001,
     },
     GoldenSystem {
-        // A 0.927 + 0.411 M☉ pair of main-sequence stars 1.97 au apart (e 0.28), [Fe/H] +0.44: the
-        // circumbinary zone is `CompactWithColdGiant`, with giants of 5.5 and 0.62 Jupiter masses
-        // at 6.5 and 30.3 au (e 0.55) about the pair; neither star has planets of its own (B's
-        // `CompactMulti` places none), each has a rocky belt inside 0.45 au, and the pair a Kuiper
-        // belt at 51–132 au and a cometary halo.
+        // A 0.927 + 0.411 M☉ pair of main-sequence stars of 5,190 and 3,620 K 1.97 au apart
+        // (e 0.28), [Fe/H] +0.44: the circumbinary zone is `CompactWithColdGiant`, with giants of
+        // 5.5 and 0.62 Jupiter masses at 6.5 and 30.3 au (e 0.55) about the pair, with five and
+        // six moons and a dust ring each; neither star has planets of its own (A is `Barren`, and
+        // B's `CompactMulti` places none), each has a rocky belt inside 0.45 au, and the pair a
+        // 22 M⊕ Kuiper belt at 51–132 au and a cometary halo.
         name: "close_binary",
         layer: Layer::C,
         budget: 200_000,
@@ -783,10 +787,11 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x41ff_ecae_0000_0001,
     },
     GoldenSystem {
-        // A 0.905 + 0.687 M☉ pair of K dwarfs 86 au apart (e 0.69), [Fe/H] +0.03: A has one ice
-        // giant of 11.0 M⊕ at 0.126 au (`CompactMulti`) with four moons and two rings, B nine
-        // rocky planets of 0.05–0.15 M⊕ at 0.13–0.83 au and an icy one of 1.7 M⊕ at 1.16 au
-        // (`TerrestrialOnly`). Each star has a belt beyond its planets; no halo.
+        // A 0.905 + 0.687 M☉ pair of K dwarfs of 5,220 and 4,210 K 86 au apart (e 0.69), [Fe/H]
+        // +0.03: A has one ice giant of 11.0 M⊕ at 0.124 au (`CompactMulti`) with four captured
+        // moons and two rings, B three rocky planets of 0.054–0.064 M⊕ at 0.24–0.41 au and an icy
+        // one of 0.88 M⊕ at 1.16 au (`TerrestrialOnly`), with three asteroid belts in their gaps.
+        // Each star has a Kuiper belt beyond its planets; no halo.
         name: "wide_binary",
         layer: Layer::C,
         budget: 200_000,
@@ -794,10 +799,12 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x41ff_ecae_0000_0004,
     },
     GoldenSystem {
-        // A 0.870 M☉ K dwarf with a 0.397 + 0.614 M☉ pair of dwarfs 57 au apart (e 0.74), 758 au
-        // out, [Fe/H] +0.24: every star `CompactMulti`, with two sub-Neptunes of 4.8 and 6.6 M⊕
-        // inside 0.15 au about A, seven rocky planets of 0.41–2.1 M⊕ inside 0.17 au about B, and
-        // ten of 0.63–4.5 M⊕ at 0.034–0.85 au about C. A belt beyond each star's planets; no halo.
+        // A 0.870 M☉ K dwarf of 5,100 K with a 0.397 + 0.614 M☉ pair of M dwarfs 57 au apart
+        // (e 0.74), 758 au out (e 0.29), [Fe/H] +0.24: every star `CompactMulti`, with two
+        // sub-Neptunes of 4.6 and 6.5 M⊕ inside 0.13 au about A, seven rocky planets of
+        // 0.41–2.1 M⊕ inside 0.15 au about B, and ten of 0.63–4.5 M⊕ at 0.031–0.76 au about C,
+        // two of them sub-Neptunes and one with a moon. A belt beyond each star's planets; no
+        // halo.
         name: "hierarchical_triple",
         layer: Layer::C,
         budget: 200_000,
@@ -805,20 +812,21 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4200_2cb2_0000_0003,
     },
     GoldenSystem {
-        // A 1.02 M☉ star crossing the Hertzsprung gap at 2.6 L☉ and 5,270 K, [Fe/H] −0.06,
-        // 10.0 Gyr old, drawn `CompactWithColdGiant`, placed `CompactMulti` (its core does not
-        // grow in time): an ice giant of 22.5 M⊕ at 0.050 au, circularised, with a dust ring, and
-        // a 9.4 M⊕ icy belt at 0.14–89 au.
+        // A 1.21 M☉ star crossing the Hertzsprung gap at 3.8 L☉ and 5,020 K, [Fe/H] 0.00,
+        // 5.8 Gyr old, `TerrestrialOnly`: four rocky planets of 0.58–1.24 M⊕ at 0.78–2.07 au and
+        // an icy one of 0.045 M⊕ at 3.96 au, none with moons. An asteroid belt at 2.2–3.6 au and
+        // a Kuiper belt at 5.2–6.3 au; no halo. Re-pinned by the search in round 9 (`track06`):
+        // P06.T15.b's arrival delays the previous pin's gap crossing past the epoch.
         name: "subgiant",
         layer: Layer::C,
         budget: 200_000,
         predicate: subgiant,
-        id: 0x41ff_2cc2_0000_0007,
+        id: 0x4200_6cba_0000_0000,
     },
     GoldenSystem {
-        // A 1.06 M☉ star on the first giant branch at 38 L☉ and 4,510 K, [Fe/H] +0.03,
-        // `CompactWithColdGiant`: its chain planets of 2.2 and 3.2 M⊕ engulfed 75 and 37 Myr
-        // before the epoch, and giants of 0.81 and 0.99 Jupiter masses at 4.6 and 10.9 au (e 0.38)
+        // A 1.06 M☉ star on the first giant branch at 25 L☉ and 4,610 K, [Fe/H] +0.03, 9.9 Gyr
+        // old, `CompactWithColdGiant`: its chain planets of 2.2 and 3.2 M⊕ engulfed 44 and 5 Myr
+        // before the epoch, and giants of 0.81 and 0.99 Jupiter masses at 4.6 and 10.8 au (e 0.38)
         // still present, with six and five moons and a dust ring each. An asteroid belt at
         // 1.8–2.9 au, a Kuiper belt at 16.8–17.2 au and a cometary halo.
         name: "red_giant",
@@ -828,11 +836,11 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x4202_6cc2_0000_0003,
     },
     GoldenSystem {
-        // A 9.94 M☉ black hole of a 32.4 M☉ star that died by direct collapse, [Fe/H] −0.10: seven
-        // rocky survivors of 1.3–1.9 M⊕ at 114–912 au, their orbits widened by the progenitor's
-        // mass loss, three planets it unbound, and a rocky belt of 10.6 M⊕ at 1,200–1,450 au.
-        // Re-pinned after plan 11's ruling 81: the first pin, 0x8200_b2e0_0000_000d, no longer
-        // satisfies the predicate.
+        // A 9.95 M☉ black hole of a 32.4 M☉ star that died by direct collapse, [Fe/H] −0.10,
+        // 9.4 Gyr old: four rocky survivors of 1.3–1.8 M⊕ at 636–1,103 au, their orbits widened
+        // by the progenitor's mass loss, two with moons, rocky belts in their gaps at 696–722 and
+        // 984–1,054 au, and a rocky belt of 3.9 M⊕ at 1,446–1,676 au. Re-pinned after plan 11's
+        // ruling 81: the first pin, 0x8200_b2e0_0000_000d, no longer satisfies the predicate.
         name: "fallback_black_hole",
         layer: Layer::E,
         budget: 200_000,
@@ -841,7 +849,8 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
     },
     GoldenSystem {
         // A 0.335 M☉ M dwarf of 3,600 K, [Fe/H] 0.00, `CompactMulti`: one rocky planet of 0.80 M⊕
-        // at 0.042 au, circularised, with one moon, and a rocky belt at 0.058–0.070 au.
+        // at 0.042 au, circularised, its giant-impact moon unbound, and a rocky belt at
+        // 0.058–0.070 au with two dwarf planets; no halo.
         name: "filler_a",
         layer: Layer::A,
         budget: 200_000,
@@ -850,7 +859,7 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
     },
     GoldenSystem {
         // A 0.677 M☉ K dwarf of 4,100 K, [Fe/H] +0.17, `CompactWithColdGiant`: two rocky planets
-        // of 0.92 and 0.69 M⊕ at 0.033 and 0.041 au, circularised, and giants of 1.8 and
+        // of 0.92 and 0.69 M⊕ at 0.030 and 0.038 au, circularised, and giants of 1.8 and
         // 5.3 Jupiter masses at 1.8 and 14.3 au, each with seven moons and a dust ring. An
         // asteroid belt at 0.73–1.16 au, a Kuiper belt at 19.7–22.7 au and a cometary halo.
         name: "filler_b",
@@ -860,28 +869,29 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 14] = [
         id: 0x2200_1659_8000_0000,
     },
     GoldenSystem {
-        // A 1.14 M☉ F dwarf of 5,980 K, [Fe/H] +0.04, `TerrestrialOnly`: nine planets of
-        // 0.15–2.1 M⊕ at 0.43–6.8 au, two of them sub-Neptunes and the outermost icy, and a Kuiper
-        // belt at 8.9–10.8 au.
+        // A 1.14 M☉ F dwarf of 5,980 K, [Fe/H] +0.04, `TerrestrialOnly`: five planets of
+        // 0.04–1.5 M⊕ at 0.78–6.2 au, the innermost a sub-Neptune and the fourth icy, two with
+        // moons. Asteroid belts in their gaps at 0.83–1.12 and 1.6–3.1 au and a Kuiper belt at
+        // 8.1–9.8 au; no halo.
         name: "filler_c",
         layer: Layer::C,
         budget: 200_000,
         predicate: filler,
         id: 0x4200_2cb2_0000_0000,
     },
+    GoldenSystem {
+        // A 1.61 M☉ pre-main-sequence star of the young thin disc at 2.8 L☉ and 4,650 K, [Fe/H]
+        // +0.51, 1.7 Myr old, `WarmGiant`: one giant of 0.73 Jupiter masses at 0.175 au
+        // (21 days, e 0.43) with three captured moons and a dust ring. Its Kuiper belt has yet to
+        // form; no halo. Pinned by the search in round 9 (`track06`), once P06.T15 gave the
+        // tracks a pre-main sequence.
+        name: "t_tauri",
+        layer: Layer::C,
+        budget: 200_000,
+        predicate: t_tauri_star,
+        id: 0x41fe_ec76_0000_0003,
+    },
 ];
-
-/// The T Tauri star with its disc, the fifteenth of the slice, which no search finds: plan 06's
-/// `StarModel` starts every star at the zero-age main sequence, so no star of this generator
-/// version is in [`Phase::PreMainSequence`] (P14.T32.a's _Slice:_ line allows a description the
-/// grid cannot fill to wait).
-const T_TAURI: GoldenSystem = GoldenSystem {
-    name: "t_tauri",
-    layer: Layer::C,
-    budget: 200_000,
-    predicate: t_tauri_star,
-    id: 0,
-};
 
 /// The context and planets of a pinned ID.
 fn pinned(galaxy: &Galaxy, id: u64) -> (SystemRecord, SystemContext, PlanetarySystem) {
@@ -909,7 +919,7 @@ fn pinned_ids_satisfy_their_own_predicates() {
     }
 }
 
-/// P14.T32.a: the search, run again, finds the pinned IDs, and still finds no T Tauri star.
+/// P14.T32.a: the search, run again, finds the pinned IDs.
 #[test]
 #[ignore = "slow: searches for the golden systems"]
 fn the_search_reproduces_the_pinned_ids() {
@@ -926,11 +936,6 @@ fn the_search_reproduces_the_pinned_ids() {
         })
         .collect();
     assert!(moved.is_empty(), "{moved:#?}");
-    let t_tauri = find_system(&galaxy, T_TAURI.layer, T_TAURI.predicate, T_TAURI.budget);
-    assert_eq!(
-        t_tauri, None,
-        "a T Tauri star is found: pin it, with its golden"
-    );
 }
 
 /// A section's state, where it has no value to write.
@@ -1136,8 +1141,9 @@ fn golden_systems_are_pinned() {
     }
 }
 
-/// P14.T30.c on the Solar-like golden: its ten planets are lettered `A b` to `A k` from the inside
-/// out, its giants' moons take Roman numerals (`A g II`), and its one belt is `BELT 1`.
+/// P14.T30.c on the Solar-like golden: its five planets are lettered `A b` to `A f` from the inside
+/// out, its giants' moons take Roman numerals (`A d II`), and its first belt is `BELT 1`. Its
+/// rocky group has held two planets since rulings 106.2 and 116.1 (ten planets before).
 #[test]
 fn the_solar_like_golden_is_labelled_by_its_layout() {
     let galaxy = fixture();
@@ -1169,9 +1175,9 @@ fn the_solar_like_golden_is_labelled_by_its_layout() {
         )
     });
     let letters: Vec<String> = planets.iter().map(|planet| text(planet.index())).collect();
-    let expected: Vec<String> = "bcdefghijk".chars().map(|c| format!("A {c}")).collect();
+    let expected: Vec<String> = "bcdef".chars().map(|c| format!("A {c}")).collect();
     assert_eq!(letters, expected);
     let all: Vec<&str> = labels.iter().map(|(_, label)| label.as_str()).collect();
-    assert!(all.contains(&"A g II"), "{all:?}");
+    assert!(all.contains(&"A d II"), "{all:?}");
     assert!(all.contains(&"BELT 1"), "{all:?}");
 }

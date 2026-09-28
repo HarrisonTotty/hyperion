@@ -100,6 +100,52 @@ impl From<FeatureRef> for FeatureId {
     }
 }
 
+/// A feature packed into 29 bits, as a record's [`SystemOrigin::FeatureMember`] carries it: the
+/// cell's three stored 5-bit coordinates and the 14-bit index (ruling 20 of 2026-09-22: a member's
+/// payload packs into a `u32`).
+///
+/// [`SystemOrigin::FeatureMember`]: crate::galaxy::placement::SystemOrigin::FeatureMember
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackedFeature(u32);
+
+impl PackedFeature {
+    /// The feature it packs.
+    ///
+    /// # Panics
+    ///
+    /// Never: it is only ever built from a feature.
+    #[must_use]
+    pub fn feature(self) -> FeatureId {
+        let c = |shift: u32| i32::try_from((self.0 >> shift) & 31).expect("five bits") - 16;
+        let cell = FeatureCell::new([c(24), c(19), c(14)])
+            .expect("a packed cell's coordinates are a feature cell's");
+        let index = u16::try_from(self.0 & 0x3FFF).expect("fourteen bits");
+        FeatureId::of(cell, index).expect("a packed index is below 2^14")
+    }
+
+    /// The packed word.
+    #[must_use]
+    pub const fn word(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<FeatureId> for PackedFeature {
+    fn from(feature: FeatureId) -> Self {
+        let stored = feature
+            .cell()
+            .to_array()
+            .map(|c| u32::try_from(c + 16).expect("a feature cell coordinate is in -16..=15"));
+        Self((stored[0] << 24) | (stored[1] << 19) | (stored[2] << 14) | u32::from(feature.index()))
+    }
+}
+
+impl From<FeatureRef> for PackedFeature {
+    fn from(feature: FeatureRef) -> Self {
+        Self::from(FeatureId::new(feature))
+    }
+}
+
 /// A feature's designation, `<sector> F<index>`: plan 01's feature-member designation without its
 /// slot, so the two can never disagree. Like plan 01's, the format is not part of the generator
 /// version.
@@ -294,6 +340,18 @@ mod tests {
             FeatureId::of(FeatureCell::new([0, 0, 0]).unwrap(), 16_384),
             None
         );
+    }
+
+    #[test]
+    fn a_packed_feature_unpacks_to_itself() {
+        for cell in [[-16, -16, -16], [15, 15, 15], [0, 6, -1]] {
+            for index in [0, 1, 8_191, 16_383] {
+                let id = FeatureId::of(FeatureCell::new(cell).unwrap(), index).unwrap();
+                let packed = PackedFeature::from(id);
+                assert_eq!(packed.feature(), id);
+                assert!(packed.word() < 1 << 29);
+            }
+        }
     }
 
     #[test]

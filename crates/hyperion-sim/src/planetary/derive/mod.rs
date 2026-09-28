@@ -16,6 +16,8 @@
 //! - [`habitable_zone`](mod@habitable_zone): Kopparapu et al.'s habitable zone of a host or of a
 //!   multiple system (P14.T12.b).
 //! - [`m_dwarfs`]: the rocky branch of M dwarfs' inner planets (ruling 102.1).
+//! - [`atmosphere`]: the volatile inventory, thermal and energy-limited escape, and the greenhouse
+//!   and surface state (P14.T13).
 //! - [`limits`]: Roche limits, Hill radii, the stability limit of satellites and the heaviest moon
 //!   a close-in planet can keep (P14.T15).
 //!
@@ -38,12 +40,18 @@
 //!    away by 0.70 M☉) a body formed inside the snow line is rocky unless it draws an envelope,
 //!    with a probability rising with its mass ([`m_dwarfs`], ruling 102.1); its rank then splits
 //!    the window at that probability instead of at the rock curve's own rank.
-//! 2. **Irradiation** (T12): the flux from its hosts at the time and the equilibrium temperature,
-//!    with a Bond albedo of 0.3 until T13's atmospheres close the loop (T13 will iterate here).
-//! 3. **The radius at the time** (T11): an envelope's radius at the body's age and present flux
-//!    (T13.b's escape will strip it here), and from it density, surface gravity and class.
-//! 4. Rotation and tides (T14) will follow here.
-//! 5. **Limits** (T15): the Hill radius, the stability limits of satellites and the heaviest moon
+//! 2. **Irradiation** (T12): the flux from its hosts at the time, the flux at their largest past
+//!    luminosities (design note 11), and the X-ray and ultraviolet energy they have delivered,
+//!    from each host's [`HostLight::with_history`].
+//! 3. **Escape and the radius at the time** (T13.b, T11): energy-limited escape strips an
+//!    envelope by the energy delivered, and the radius is the envelope's at the body's age and
+//!    present flux on what is left, or its core's once none is; from it density, surface gravity
+//!    and class.
+//! 4. **The atmosphere** (T12 and T13, three passes, [`ATMOSPHERE_PASSES`]): the equilibrium
+//!    temperature at an albedo, from 0.3 on the first pass, gives the atmosphere its escape leaves
+//!    and its greenhouse holds, whose surface state sets the albedo of the next pass.
+//! 5. Rotation and tides (T14) will follow here.
+//! 6. **Limits** (T15): the Hill radius, the stability limits of satellites and the heaviest moon
 //!    that survives to the time.
 //!
 //! Giants from 0.3 Jupiter masses take their radius from plan 13's `giant_cooling` at the body's
@@ -58,6 +66,7 @@
 //! `JupiterRadii`, `WattsPerSquareMetre`, `EarthFluxes` and `MetresPerSecondSquared`, and
 //! `units::consts` the Earth and Jupiter radii, σ and the solar constant.
 
+pub mod atmosphere;
 pub mod composition;
 pub mod envelope;
 pub mod habitable_zone;
@@ -70,6 +79,7 @@ pub mod rocky;
 use std::error::Error;
 use std::fmt;
 
+pub use atmosphere::{Atmosphere, SurfaceState, jeans_parameter};
 pub use composition::{
     GiantComposition, MassFractions, RadiusWindow, SnowLineSide, SolvedComposition, composition,
     giant_composition, giant_heavy_elements, radius_window,
@@ -88,8 +98,15 @@ pub use radius::{
 };
 
 use crate::orbit::KeplerElements;
-use crate::planetary::derive::composition::{SolveCompositionError, dry_composition};
+use crate::planetary::derive::atmosphere::{
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, SurfaceMaterial, VolatileDraws,
+    atmosphere, energy_limited_loss, volatile_inventory,
+};
+use crate::planetary::derive::composition::{
+    SolveCompositionError, dry_composition, formed_with_envelope,
+};
 use crate::planetary::derive::envelope::radius_with_envelope;
+use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
 use crate::planetary::disc::DiscProfile;
@@ -103,8 +120,9 @@ use crate::stellar::substellar::{EvaluateGiantCoolingError, giant_cooling};
 use crate::time::UniverseTime;
 use crate::units::consts::GM_EARTH;
 use crate::units::{
-    EarthFluxes, EarthMasses, EarthRadii, Gigayears, JupiterMasses, Kelvin, Kilograms,
-    KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, SolarMasses, Watts, Years,
+    EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
+    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, SolarMasses, Watts,
+    Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -124,6 +142,8 @@ pub struct PlacedBody {
     orbit_now: KeplerElements,
     formation_distance: Metres,
     radius_rank: UnitUniform,
+    volatiles: VolatileDraws,
+    molten_until: Option<Years>,
 }
 
 impl PlacedBody {
@@ -156,7 +176,42 @@ impl PlacedBody {
             orbit_now: orbit,
             formation_distance,
             radius_rank,
+            volatiles: VolatileDraws::MEDIAN,
+            molten_until: None,
         })
+    }
+
+    /// The same body with the ranks of its volatile inventory, `volatiles` (P14.T13.a): the
+    /// generator's are drawn on `planet.volatiles`
+    /// ([`VolatileDraws::for_body`](atmosphere::VolatileDraws::for_body)); a body built without
+    /// them has Earth's inventory per unit mass ([`VolatileDraws::MEDIAN`]).
+    #[must_use]
+    pub const fn with_volatiles(self, volatiles: VolatileDraws) -> Self {
+        Self { volatiles, ..self }
+    }
+
+    /// The same body with a young magma ocean until its system is `until` old (design note 12;
+    /// P14.T28.a's `molten_until`): before then its surface is
+    /// [`SurfaceState::MagmaOcean`](atmosphere::SurfaceState::MagmaOcean). A body built without
+    /// one has a solid crust from its birth.
+    #[must_use]
+    pub const fn with_magma_ocean_until(self, until: Years) -> Self {
+        Self {
+            molten_until: Some(until),
+            ..self
+        }
+    }
+
+    /// The ranks of the body's volatile inventory.
+    #[must_use]
+    pub const fn volatiles(&self) -> &VolatileDraws {
+        &self.volatiles
+    }
+
+    /// The system age until which the body's surface is a young magma ocean, if it has one.
+    #[must_use]
+    pub const fn molten_until(&self) -> Option<Years> {
+        self.molten_until
     }
 
     /// The same body on `orbit_now` at the time derived: the fate transform's elements (P14.T28),
@@ -386,8 +441,13 @@ pub struct DerivedBody {
     fractions: MassFractions,
     core: CoreComposition,
     flux: EarthFluxes,
+    xuv_fluence: JoulesPerSquareMetre,
+    initial_envelope_fraction: f64,
+    envelope_lost: EarthMasses,
     albedo: BondAlbedo,
+    irradiation_temperature: Kelvin,
     equilibrium_temperature: Kelvin,
+    atmosphere: Atmosphere,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -400,7 +460,8 @@ pub struct DerivedBody {
 }
 
 impl DerivedBody {
-    /// The body's mass.
+    /// The body's mass at the time: its placed mass less the envelope escape has taken
+    /// ([`envelope_lost`](Self::envelope_lost)).
     #[must_use]
     pub const fn mass(&self) -> EarthMasses {
         self.mass
@@ -460,11 +521,54 @@ impl DerivedBody {
         self.flux
     }
 
-    /// The Bond albedo the equilibrium temperature was taken at: 0.3 until P14.T13
-    /// ([`BondAlbedo::BEFORE_ATMOSPHERES`]).
+    /// The X-ray and ultraviolet energy per unit area the body has received by the time, from
+    /// every host with a history (P14.T1.a's [`XuvHistory`](crate::planetary::context::XuvHistory)):
+    /// the stars it orbits on its primordial orbit, where it spent its hosts' saturated youth, and
+    /// its companions on theirs.
+    #[must_use]
+    pub const fn xuv_fluence(&self) -> JoulesPerSquareMetre {
+        self.xuv_fluence
+    }
+
+    /// The hydrogen and helium envelope's share of the body's mass at formation (P14.T11.c, the
+    /// inventory of P14.T13.a), before escape: zero for a body without one, and a giant's own
+    /// from 0.3 Jupiter masses, which escape does not touch.
+    #[must_use]
+    pub const fn initial_envelope_fraction(&self) -> f64 {
+        self.initial_envelope_fraction
+    }
+
+    /// The envelope mass lost to energy-limited escape by the time (P14.T13.b), which the
+    /// body's [`mass`](Self::mass) no longer holds.
+    #[must_use]
+    pub const fn envelope_lost(&self) -> EarthMasses {
+        self.envelope_lost
+    }
+
+    /// The Bond albedo the equilibrium temperature was taken at: the one the body's surface state
+    /// gives, after the fixed three passes of P14.T12 and T13 ([`ATMOSPHERE_PASSES`]).
     #[must_use]
     pub const fn albedo(&self) -> BondAlbedo {
         self.albedo
+    }
+
+    /// The equilibrium temperature from the hosts' light alone, at [`albedo`](Self::albedo), with
+    /// no internal heat: what the atmosphere reads (ruling 112.7's irradiation temperature).
+    #[must_use]
+    pub const fn irradiation_temperature(&self) -> Kelvin {
+        self.irradiation_temperature
+    }
+
+    /// The body's atmosphere and surface at the time (P14.T13).
+    #[must_use]
+    pub const fn atmosphere(&self) -> &Atmosphere {
+        &self.atmosphere
+    }
+
+    /// The mean surface temperature: the atmosphere's (P14.T13.c).
+    #[must_use]
+    pub const fn surface_temperature(&self) -> Kelvin {
+        self.atmosphere.surface_temperature()
     }
 
     /// The equilibrium temperature at the time, with the body's internal luminosity added for a
@@ -770,48 +874,68 @@ pub fn derive_body(
     if age_now.value().is_nan() || age_now.value() <= 0.0 {
         return Err(DeriveBodyError::NotYetFormed { age: age_now });
     }
-    let mass = placed.mass;
     let (formed, radius_rank, solved) = formation(placed, disc)?;
 
-    // T12, at the time.
+    // T12, at the time: the light now, the worst it has been, and the X-rays so far.
     let a = placed.orbit_now.semi_major_axis();
     let e = placed.orbit_now.eccentricity().value();
-    let light = |host: &HostLight| {
-        Illumination::new(*host, a, e)
-            .expect("a Kepler orbit's axis is positive and its eccentricity in [0, 1)")
-    };
-    let own = hosts
-        .orbited
-        .iter()
-        .fold(EarthFluxes::ZERO, |sum, host| sum + light(host).flux());
-    let flux = hosts
-        .companions
-        .iter()
-        .fold(own, |sum, companion| sum + companion.flux());
-    let albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-    let irradiated = equilibrium_temperature(flux, albedo);
+    let sky = Sky::of(placed, hosts, age_now);
 
-    // T11, the radius at the time, and what follows from it.
+    // T13.b, energy-limited escape, and T11, the radius at the time.
+    let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
+    let mass = escape.mass;
     let (radius, fractions, core, giant) = at_the_time(
         mass,
         formed,
         solved.as_ref(),
-        flux,
+        escape.stripped(),
+        sky.flux,
         age_now,
         hosts.composition(),
     )?;
     let r = Metres::from(radius).value();
-    let (internal_luminosity, t_eq) = match &giant {
-        Some(giant) => {
-            let internal = Watts::from(giant.internal_luminosity());
-            (
-                internal,
-                with_internal_heat(irradiated, internal, Metres::new(r)),
-            )
-        }
-        None => (Watts::ZERO, irradiated),
-    };
+    let internal_luminosity = giant.as_ref().map_or(Watts::ZERO, |giant| {
+        Watts::from(giant.internal_luminosity())
+    });
     let mass_kg = Kilograms::from(mass);
+
+    // T12 and T13, three passes (T13.c): the albedo of one pass's surface state sets the
+    // equilibrium temperature the next pass reads.
+    let inventory = volatile_inventory(mass, &fractions, formed, &placed.volatiles, age_now);
+    let crust = match placed.molten_until {
+        Some(until) if age_now < until => Crust::Molten,
+        Some(_) | None => Crust::Solid,
+    };
+    let pass = |albedo: BondAlbedo| {
+        let irradiated = equilibrium_temperature(sky.flux, albedo);
+        let heated = if internal_luminosity > Watts::ZERO {
+            with_internal_heat(irradiated, internal_luminosity, Metres::new(r))
+        } else {
+            irradiated
+        };
+        let air = atmosphere(&AtmosphereInputs {
+            mass: mass_kg,
+            radius: Metres::new(r),
+            material: SurfaceMaterial::of(&fractions),
+            envelope_fraction: fractions.envelope(),
+            inventory,
+            equilibrium: irradiated,
+            worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
+            heated,
+            xuv_fluence: sky.xuv_fluence,
+            insolation: sky.insolation,
+            crust,
+            hottest_host: sky.hottest,
+        });
+        (irradiated, heated, air)
+    };
+    let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
+    let (mut irradiated, mut t_eq, mut air) = pass(albedo);
+    for _ in 1..ATMOSPHERE_PASSES {
+        albedo = air.albedo();
+        (irradiated, t_eq, air) = pass(albedo);
+    }
+
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
     let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
     let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
@@ -834,9 +958,14 @@ pub fn derive_body(
         composition: solved,
         fractions,
         core,
-        flux,
+        flux: sky.flux,
+        xuv_fluence: sky.xuv_fluence,
+        initial_envelope_fraction: escape.initial,
+        envelope_lost: escape.lost,
         albedo,
+        irradiation_temperature: irradiated,
         equilibrium_temperature: t_eq,
+        atmosphere: air,
         internal_luminosity,
         radius,
         density,
@@ -847,6 +976,167 @@ pub fn derive_body(
         retrograde_limit,
         maximum_moon_mass: EarthMasses::from(moon),
     })
+}
+
+/// How many times [`derive_body`] passes between the equilibrium temperature (P14.T12) and the
+/// atmosphere (P14.T13), each taking the albedo the last one's surface state gave: a fixed three
+/// (P14.T13.c), from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`].
+pub const ATMOSPHERE_PASSES: u32 = 3;
+
+/// What a body's hosts give it at a time, as its atmosphere reads it.
+#[derive(Debug, Clone, Copy)]
+struct Sky {
+    /// The flux now, averaged over the orbit.
+    flux: EarthFluxes,
+    /// The flux at every host's largest past luminosity (design note 11).
+    peak_flux: EarthFluxes,
+    /// The X-ray and ultraviolet energy per unit area received so far.
+    xuv_fluence: JoulesPerSquareMetre,
+    /// Where the body lies against the hosts' habitable zone.
+    insolation: Insolation,
+    /// The hottest effective temperature among the luminous hosts; zero if none shines.
+    hottest: Kelvin,
+}
+
+impl Sky {
+    /// The sky of `placed` about `hosts` when its system is `age` old: each orbited host seen along
+    /// the body's orbit now (and along its primordial orbit for the X-rays of its youth), each
+    /// companion along its own.
+    ///
+    /// The zone is judged as Kopparapu et al.'s limits are in a multiple system (P14.T12.b): the
+    /// body is inside the runaway limit when Σ Fᵢ ÷ `S_eff,i` reaches 1 at the hosts' largest past
+    /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now.
+    fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years) -> Self {
+        let (a, e) = (
+            placed.orbit_now.semi_major_axis(),
+            placed.orbit_now.eccentricity().value(),
+        );
+        let (a0, e0) = (
+            placed.orbit.semi_major_axis(),
+            placed.orbit.eccentricity().value(),
+        );
+        let mut sky = Self {
+            flux: EarthFluxes::ZERO,
+            peak_flux: EarthFluxes::ZERO,
+            xuv_fluence: JoulesPerSquareMetre::ZERO,
+            insolation: Insolation::Habitable,
+            hottest: Kelvin::ZERO,
+        };
+        let (mut runaway, mut maximum) = (0.0, 0.0);
+        let mut add = |host: &HostLight, (a, e): (Metres, f64), (xuv_a, xuv_e): (Metres, f64)| {
+            let flux = luminosity_flux(host.luminosity(), a, e);
+            let peak = luminosity_flux(host.peak_luminosity(), a, e);
+            let fluence = host.xuv().fluence(age, xuv_a, xuv_e);
+            sky.flux = sky.flux + flux;
+            sky.peak_flux = sky.peak_flux + peak;
+            sky.xuv_fluence = JoulesPerSquareMetre::new(sky.xuv_fluence.value() + fluence.value());
+            if host.luminosity().value() > 0.0 {
+                let t_eff = host.effective_temperature();
+                runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
+                maximum += flux.value() / HabitableLimit::MaximumGreenhouse.flux(t_eff).value();
+                if t_eff > sky.hottest {
+                    sky.hottest = t_eff;
+                }
+            }
+        };
+        for host in hosts.orbited {
+            add(host, (a, e), (a0, e0));
+        }
+        for companion in hosts.companions {
+            let orbit = (companion.semi_major_axis(), companion.eccentricity());
+            add(companion.host(), orbit, orbit);
+        }
+        sky.insolation = if runaway >= 1.0 {
+            Insolation::InsideRunaway
+        } else if maximum < 1.0 {
+            Insolation::BeyondMaximumGreenhouse
+        } else {
+            Insolation::Habitable
+        };
+        sky
+    }
+}
+
+/// What energy-limited escape leaves of a body's envelope (P14.T13.b).
+#[derive(Debug, Clone, Copy)]
+struct Escape {
+    /// The body's mass at the time.
+    mass: EarthMasses,
+    /// Its envelope's share of that mass.
+    envelope: f64,
+    /// Its envelope's share of its mass at formation.
+    initial: f64,
+    /// The envelope mass lost.
+    lost: EarthMasses,
+}
+
+impl Escape {
+    /// The envelope's share of the body's mass at the time, if escape has taken any of it; `None`
+    /// for a body it has not touched, which keeps its solved fractions bit for bit.
+    fn stripped(&self) -> Option<f64> {
+        (self.lost > EarthMasses::ZERO).then_some(self.envelope)
+    }
+}
+
+/// The envelope that energy-limited escape leaves `placed`, whose formation solve is `solved`, in
+/// `disc` about `hosts`, after the X-ray and ultraviolet fluence `fluence` (P14.T13.b).
+///
+/// The loss is [`energy_limited_loss`] at the body's radius at [`ENVELOPE_LOSS_RADIUS_AGE`] and
+/// the flux of its host's zero-age luminosity on its primordial orbit, the young, puffed radius
+/// over which a saturated host's X-rays do their work, with the Roche-lobe factor of its Hill
+/// radius there; so the loss is a closed form that only grows with time, and the envelope
+/// fraction is monotone and continuous in time. The envelope is floored at none, and a stripped
+/// body keeps its core ([`at_the_time`] then takes Zeng et al.'s radius of it, design note 8).
+/// Giants from 0.3 Jupiter masses keep their envelopes: their loss is a fraction of a per cent.
+fn envelope_escape(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    solved: Option<&SolvedComposition>,
+    fluence: JoulesPerSquareMetre,
+) -> Escape {
+    let mass = placed.mass;
+    let untouched = |initial: f64| Escape {
+        mass,
+        envelope: initial,
+        initial,
+        lost: EarthMasses::ZERO,
+    };
+    let Some(s) = solved else {
+        return untouched(1.0);
+    };
+    let initial = s.envelope_fraction();
+    if giant_share(mass) > 0.0 || initial <= 0.0 || fluence.value() <= 0.0 {
+        return untouched(initial);
+    }
+    let primordial = &placed.orbit;
+    let (a0, e0) = (
+        primordial.semi_major_axis(),
+        primordial.eccentricity().value(),
+    );
+    let young = radius_with_envelope(
+        mass,
+        s.core(),
+        initial,
+        luminosity_flux(disc.host_luminosity(), a0, e0),
+        Gigayears::from(ENVELOPE_LOSS_RADIUS_AGE),
+    );
+    let mass_kg = Kilograms::from(mass);
+    let hill = hill_radius(a0, 0.0, mass_kg, hosts.primary_mass);
+    let envelope = initial * mass_kg.value();
+    let lost = energy_limited_loss(mass_kg, Metres::from(young), fluence, hill)
+        .value()
+        .min(envelope);
+    if lost <= 0.0 {
+        return untouched(initial);
+    }
+    let now = mass_kg.value() - lost;
+    Escape {
+        mass: EarthMasses::from(Kilograms::new(now)),
+        envelope: ((envelope - lost) / now).max(0.0),
+        initial,
+        lost: EarthMasses::from(Kilograms::new(lost)),
+    }
 }
 
 /// What [`derive_body`] fixes at formation (T11): the side of the disc's snow line the body formed
@@ -878,6 +1168,21 @@ fn formation(
             let rank = radius_rank_in_window(placed.radius_rank, &window);
             let solved = match rocky_core_mass_fraction(rank, &window) {
                 Some(cmf) => dry_composition(mass, cmf),
+                None if takes_formation_envelope(mass, formed) => {
+                    let top = chen_kipping_rank(mass, window.dry_top());
+                    let greatest = chen_kipping_rank(mass, window.greatest());
+                    let share = if greatest > top {
+                        (rank.value() - top) / (greatest - top)
+                    } else {
+                        0.5
+                    };
+                    formed_with_envelope(
+                        mass,
+                        share,
+                        radius_chen_kipping(mass, rank),
+                        formation_flux,
+                    )
+                }
                 None => composition(
                     mass,
                     radius_chen_kipping(mass, rank),
@@ -935,15 +1240,26 @@ fn rocky_branch(
             dry_composition(mass, cmf),
         ))
     } else {
-        let above = rank(top + (u - rocky) / enveloped * (greatest - top));
-        let solved = composition(
-            mass,
-            radius_chen_kipping(mass, above),
-            SnowLineSide::Inside,
-            flux,
-        )?;
+        let share = (u - rocky) / enveloped;
+        let above = rank(top + share * (greatest - top));
+        let drawn = radius_chen_kipping(mass, above);
+        let solved = if takes_formation_envelope(mass, SnowLineSide::Inside) {
+            formed_with_envelope(mass, share, drawn, flux)
+        } else {
+            composition(mass, drawn, SnowLineSide::Inside, flux)?
+        };
         Ok((above, solved))
     }
+}
+
+/// Whether a body of mass `mass` formed on `formed`'s side of the snow line that lies above its
+/// rocky outcomes takes its envelope from the formation law (ruling 119.1,
+/// [`composition::formation_envelope`]): one formed inside the snow line heavy enough to hold an
+/// envelope ([`ENVELOPE_CORE_FLOOR`](crate::planetary::params::ENVELOPE_CORE_FLOOR)). Bodies formed
+/// beyond it keep Chen and Kipping's radius, read as water or an envelope.
+#[must_use]
+fn takes_formation_envelope(mass: EarthMasses, formed: SnowLineSide) -> bool {
+    formed == SnowLineSide::Inside && mass > crate::planetary::params::ENVELOPE_CORE_FLOOR
 }
 
 /// The composition a body is given at formation (P14.T11, ruling 102.1): the part of
@@ -968,13 +1284,16 @@ pub fn formation_composition(
 }
 
 /// A body's radius, mass fractions and core at the time (T11), and its giant's radius if it is
-/// one (T11.d): an envelope's radius at the body's age `age` and present flux `flux`; a giant's
-/// from plan 13's cooling at that age in a system of composition `composition`, inflated for its
-/// flux and blended into the envelope model's below 0.414 Jupiter masses.
+/// one (T11.d): an envelope's radius at the body's age `age` and present flux `flux`, with the
+/// share `stripped` of its present mass `mass` that escape has left it (T13.b), or its solved
+/// envelope if escape took none (`None`); a giant's from
+/// plan 13's cooling at that age in a system of composition `composition`, inflated for its flux
+/// and blended into the envelope model's below 0.414 Jupiter masses.
 fn at_the_time(
     mass: EarthMasses,
     formed: SnowLineSide,
     solved: Option<&SolvedComposition>,
+    stripped: Option<f64>,
     flux: EarthFluxes,
     age: Years,
     composition: &Composition,
@@ -987,28 +1306,26 @@ fn at_the_time(
     ),
     DeriveBodyError,
 > {
-    let envelope_radius = |s: &SolvedComposition| {
+    let envelope_radius = |s: &SolvedComposition, fraction: f64| {
         if s.envelope_fraction() > 0.0 {
-            radius_with_envelope(
-                mass,
-                s.core(),
-                s.envelope_fraction(),
-                flux,
-                Gigayears::from(age),
-            )
+            radius_with_envelope(mass, s.core(), fraction, flux, Gigayears::from(age))
         } else {
             s.radius()
         }
     };
     if let Some(s) = solved.filter(|_| giant_share(mass) <= 0.0) {
-        return Ok((envelope_radius(s), s.fractions(), s.core(), None));
+        let (envelope, fractions) = match stripped {
+            Some(envelope) => (envelope, MassFractions::of(s.core(), envelope)),
+            None => (s.envelope_fraction(), s.fractions()),
+        };
+        return Ok((envelope_radius(s, envelope), fractions, s.core(), None));
     }
     let interior = giant_cooling(JupiterMasses::from(mass), age, composition)?;
     let giant = radius_giant(mass, &interior, flux)?;
     let heavy = giant_composition(mass, formed)?;
     Ok(match solved {
         Some(s) => (
-            giant.blended(envelope_radius(s)),
+            giant.blended(envelope_radius(s, s.envelope_fraction())),
             heavy.blended(s.fractions()),
             s.core(),
             Some(giant),
@@ -1099,6 +1416,17 @@ pub(crate) mod solar {
             SolarRadii::new(1.0),
         )
         .unwrap()
+    }
+
+    /// The present Sun with its past: the X-ray and ultraviolet history of 1 M☉ from its zero-age
+    /// luminosity (P14.T1.a), never brighter than now, as the atmospheres' tests read it.
+    pub(crate) fn historic_sun() -> HostLight {
+        let coeffs = ZCoeffs::new(Composition::SOLAR.z_fit());
+        let zams = zams::luminosity(SolarMasses::new(1.0), &coeffs);
+        sun().with_history(
+            crate::planetary::context::XuvHistory::new(SolarMasses::new(1.0), zams),
+            SolarLuminosities::new(1.0),
+        )
     }
 
     pub(crate) fn orbit(a_au: f64, e: f64) -> KeplerElements {
@@ -1215,10 +1543,14 @@ mod tests {
     use super::*;
     use crate::GENERATOR_VERSION;
     use crate::planetary::derive::composition::RadiusAdjustment;
-    use crate::units::AstronomicalUnits;
     use crate::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M, METRES_PER_AU, SOLAR_MASS_KG};
+    use crate::units::{AstronomicalUnits, Pascals};
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one walk of the Solar System table through every task T16.a assembles"
+    )]
     fn the_solar_system_through_derive_body_reproduces_t11_to_t15() {
         let bodies = solar_system();
         // T11: radii, core mass fractions (as in `composition`'s tests) and envelopes.
@@ -1271,8 +1603,9 @@ mod tests {
             (heavy * jupiter.mass().value() - 57.9).abs() < 0.1,
             "{heavy}"
         );
-        // T12: the flux and equilibrium temperature are T12's at an albedo of 0.3; a giant adds
-        // its internal luminosity, and Jupiter's makes it warmer than sunlight alone would.
+        // T12: the flux and equilibrium temperature are T12's at the albedo of the body's surface
+        // state (T13.c); a giant adds its internal luminosity, and Jupiter's makes it warmer than
+        // sunlight alone would.
         for (name, _, _, a, e) in PLANETS {
             let Some((_, body)) = bodies.iter().find(|(n, _)| *n == name) else {
                 continue;
@@ -1280,7 +1613,15 @@ mod tests {
             let light = Illumination::new(sun(), Metres::new(a * METRES_PER_AU), e).unwrap();
             let flux = total_flux(&[light]);
             assert_same_bits(body.flux().value(), flux.value());
-            let t = equilibrium_temperature(flux, BondAlbedo::BEFORE_ATMOSPHERES);
+            assert_same_bits(
+                body.albedo().value(),
+                body.atmosphere()
+                    .state()
+                    .albedo(atmosphere::SurfaceMaterial::of(&body.fractions()))
+                    .value(),
+            );
+            let t = equilibrium_temperature(flux, body.albedo());
+            assert_same_bits(body.irradiation_temperature().value(), t.value());
             if name == "Jupiter" {
                 let radius = Metres::from(body.radius());
                 let warmed = with_internal_heat(t, body.internal_luminosity(), radius);
@@ -1498,7 +1839,8 @@ mod tests {
     #[test]
     fn two_equal_orbited_hosts_make_a_body_two_to_the_quarter_hotter() {
         let disc = solar_disc();
-        let body = placed(EARTH_MASS_KG, 2.0, 0.0, 0.5);
+        // A small airless body, whose albedo does not change between the two.
+        let body = placed(0.01 * EARTH_MASS_KG, 0.3, 0.0, 0.5);
         let temperature = |lights: &[HostLight]| {
             let hosts = BodyHosts::new(
                 Kilograms::new(SOLAR_MASS_KG),
@@ -1507,10 +1849,13 @@ mod tests {
                 &[],
             )
             .unwrap();
-            derive_body(&body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH)
-                .unwrap()
-                .equilibrium_temperature()
-                .value()
+            let derived =
+                derive_body(&body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap();
+            assert_eq!(
+                derived.atmosphere().state(),
+                atmosphere::SurfaceState::Airless
+            );
+            derived.equilibrium_temperature().value()
         };
         let ratio = temperature(&[sun(), sun()]) / temperature(&[sun()]);
         assert!(
@@ -1771,6 +2116,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one golden pins every field of every body it derives"
+    )]
     fn derive_body_is_pinned() {
         let mut w = GoldenWriter::new();
         w.header(GENERATOR_VERSION.get());
@@ -1804,6 +2153,20 @@ mod tests {
                 &format!("{name}_maximum_moon_mass"),
                 d.maximum_moon_mass().value(),
             );
+            // P14.T13: the albedo the passes settle on, and the atmosphere.
+            let air = d.atmosphere();
+            w.f64(&format!("{name}_albedo"), d.albedo().value());
+            w.line(&format!("{name}_surface_state = {:?}", air.state()));
+            w.f64(
+                &format!("{name}_surface_temperature"),
+                air.surface_temperature().value(),
+            );
+            w.f64(
+                &format!("{name}_surface_pressure"),
+                air.surface_pressure().map_or(-1.0, Pascals::value),
+            );
+            w.f64(&format!("{name}_xuv_fluence"), d.xuv_fluence().value());
+            w.f64(&format!("{name}_envelope_lost"), d.envelope_lost().value());
         };
         for (name, body) in solar_system() {
             pin(&mut w, &name.to_lowercase(), &body);
@@ -1819,6 +2182,24 @@ mod tests {
             let body = derive(&placed(m * EARTH_MASS_KG, a_au, e, rank), &disc).unwrap();
             pin(&mut w, name, &body);
         }
+        // P14.T13.b: the hot sub-Neptune again about a Sun with its X-ray history, which strips it.
+        let lights = [historic_sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        let stripped = derive_body(
+            &placed(5.0 * EARTH_MASS_KG, 0.05, 0.01, 0.5),
+            &hosts,
+            &disc,
+            SOLAR_AGE,
+            UniverseTime::EPOCH,
+        )
+        .unwrap();
+        pin(&mut w, "stripped_sub_neptune", &stripped);
         let snow = AstronomicalUnits::from(disc.snow_line()).value();
         w.f64("solar_snow_line_au", snow);
         // Ruling 58: beyond the snow line, a body among the rocky outcomes, held to Earth's core
@@ -1899,12 +2280,15 @@ mod tests {
                 (shares[0] - expected).abs() < 1e-3,
                 "{earths}: {shares:?} against {expected}"
             );
-            // Continuous across the split between the rocky and the enveloped ranks.
+            // Across the split between the rocky and the enveloped ranks the envelope starts at
+            // the formation law's floor (ruling 119.1), not at none.
             if expected > 0.0 && expected < 1.0 {
                 let split = 1.0 - expected;
                 let (below, above) = (solve(0.3, split - 1e-9), solve(0.3, split + 1e-9));
-                let jump = above.radius().value() - below.radius().value();
-                assert!(jump.abs() < 1e-3, "{earths}: {jump} at {split}");
+                assert!(
+                    above.envelope_fraction() >= composition::FORMATION_ENVELOPE_FLOOR - 1e-12,
+                    "{earths}: {above:?} above the split"
+                );
                 assert!(
                     below.envelope_fraction() <= 0.0,
                     "{earths}: rocky below the split"
@@ -1927,17 +2311,25 @@ mod tests {
                 .unwrap();
                 let confined = radius_rank_in_window(body.radius_rank(), &window);
                 assert_same_bits(rank.value(), confined.value());
+                let flux =
+                    luminosity_flux(disc.host_luminosity(), body.orbit().semi_major_axis(), 0.0);
                 let expected = match rocky_core_mass_fraction(confined, &window) {
                     Some(cmf) => dry_composition(mass, cmf),
+                    None if earths > 1.5 => {
+                        let top = chen_kipping_rank(mass, window.dry_top());
+                        let greatest = chen_kipping_rank(mass, window.greatest());
+                        formed_with_envelope(
+                            mass,
+                            (confined.value() - top) / (greatest - top),
+                            radius_chen_kipping(mass, confined),
+                            flux,
+                        )
+                    }
                     None => composition(
                         mass,
                         radius_chen_kipping(mass, confined),
                         SnowLineSide::Inside,
-                        luminosity_flux(
-                            disc.host_luminosity(),
-                            body.orbit().semi_major_axis(),
-                            0.0,
-                        ),
+                        flux,
                     )
                     .unwrap(),
                 };

@@ -128,17 +128,26 @@
 //!   M♃ (P ÷ yr)^⅓ inside 3 years) is met either way, since about a tenth of the giants fall in
 //!   that window.
 //! - s(\[Fe/H\]) = 1 ÷ (1 + 10^(−2 (\[Fe/H\] + 1.5))), the small planets' metallicity scaling: flat
-//!   through the discs, 0.96 of solar at −0.8, and a tenth of it at −2, as the brainstorm asks
-//!   ("Small rocky planets depend on it only weakly ... they should thin out only at the very low
-//!   metallicities of the halo"). The flat part is Buchhave et al. (2012, Nature 486, 375,
-//!   abstract) and Petigura et al. (2018, AJ 155, 89, abstract: 20 warm super-Earths per 100 stars
-//!   "regardless of metallicity" over −0.4 to +0.4). It is flat only below 1.7 R⊕: Petigura et
-//!   al.'s warm sub-Neptunes (1.7–4.0 R⊕) double over the same range, and Buchhave et al. (2014,
-//!   Nature 509, 593, abstract) find three metallicity regimes, divided at 1.7 and 3.9 R⊕. The
-//!   class frequency stays flat. P14.T7 no longer carries that trend in the masses: Zhu (2019,
-//!   ApJ 873, 8, §2) finds the hosts of 1–2 and 2–4 R⊕ planets of "statistically the same"
-//!   metallicity (ruling 60). The knee at −1.5 is plan 14's, from the brainstorm's
-//!   halo; no survey measures it.
+//!   through the discs, 0.96 of solar at −0.8, and a tenth of it at −2. The class weight is flat,
+//!   but the small planets it places are not: the brainstorm (2026-09-25, item 8; ruling 106.1)
+//!   has "about half the solar number at \[Fe/H\] −0.8", 0.35–0.75 of it, after Zhu (2019, ApJ
+//!   873, 8, abstract: the share of Sun-like stars with Kepler planets rises from about 25% at −0.2
+//!   to 36% at +0.2), Bashi and Zucker (2022, MNRAS, Table 4: about 0.6 of the thin disc's in the
+//!   thick disc) and Petigura et al. (2018, AJ 155, 89, abstract: 20 warm super-Earths per 100
+//!   stars "nearly constant" over −0.4 to +0.4, the close-in ones 2–3 times as common about
+//!   super-solar hosts). P14.T10.b measures 0.65 of solar placed at −0.8: `CompactWithColdGiant`'s
+//!   weight falls with its giants, which is Zhu's rise (Bryan and Lee 2024, ApJ Letters, find its share
+//!   of metal-poor compact hosts; ruling 121.2), a metal-poor chain's budget falls as
+//!   10^(0.35 \[Fe/H\]) (ruling 121.3), rocky masses follow their discs' solids, and the chains'
+//!   first period moves out (ruling 117.2), so hot planets fall to 0.30 of solar there and warm
+//!   ones to 0.73. A falling s would count that fall
+//!   twice. Buchhave et al. (2012, Nature 486, 375, abstract) and Buchhave et al. (2014, Nature
+//!   509, 593, abstract) find three metallicity regimes of hosts, divided at 1.7 and 3.9 R⊕. P14.T7
+//!   carries no metallicity trend in the masses of chains: Zhu (2019, §2) finds the hosts of 1–2
+//!   and 2–4 R⊕ planets of "statistically the same"
+//!   metallicity (ruling 60). The knee at −1.5 is plan 14's: below −1 nothing is measured (the
+//!   brainstorm), and under a quarter of solar at −2 is consistent with Zhu's slope (ruling
+//!   106.1).
 //! - The halo: what s and z take from the other classes goes to `Barren`, so that thinning the
 //!   small planets in the halo does not raise every other class's share by normalisation.
 //! - `SubstellarCompact`: for a host under 0.08 M☉, the lower limit of the stellar mass function
@@ -168,7 +177,7 @@
 //! | Johnson et al. (2010, PASP 122, 905) | f(M★, \[Fe/H\]) = 0.07 ± 0.01 (M★ ÷ M☉)^(1.0 ± 0.3) 10^((1.2 ± 0.2) \[Fe/H\]), for K > 20 m s⁻¹ and a < 2.5 au, over 0.2–1.9 M☉ (eq. 8, Table 1) | Yes, full text | g(M) = M ÷ M☉ to 1.9 M☉. Their metallicity exponent is 1.2, and 1.7 ± 0.3 on Fischer and Valenti's stars alone (§6.1); the brainstorm keeps 2 |
 //! | Reffert et al. (2015, A&A 574, A116) | A Gaussian in mass with µ = 1.9 (+0.1 −0.5) M☉ and σ = 0.5 (+0.5 −0.2) M☉, half its peak at 1.2 and 2.6 M☉; no planet above 2.7 M☉, under 1.6% for 2.7–5 M☉ (abstract, eq. 3, §5) | Yes, full text | g falls with σ = 0.5 M☉ above 1.9 M☉ (plan 14 had 0.8) |
 //! | Fischer and Valenti (2005, ApJ 622, 1102) | Giant occurrence rises as "the square of the number of metal atoms"; under 3% for −0.5 < \[Fe/H\] < 0.0 and 25% above +0.3, for K > 30 m s⁻¹ and P < 4 yr (abstract) | Abstract only: the paper has no preprint and the publisher's full text was not reachable, so the fitted interval of ±0.5 is plan 14's reading, consistent with the abstract's bins | z = 10^(2 \[Fe/H\]) on −0.5 to +0.5 exactly |
-//! | Buchhave et al. (2012, Nature 486, 375) | "planets with radii less than four Earth radii form around host stars with a wide range of metallicities (but on average a metallicity close to that of the Sun), whereas large planets preferentially form around stars with higher metallicities" (abstract) | Abstract only (no preprint); Buchhave et al. (2014, Nature 509, 593, full text) and Petigura et al. (2018, full text) agree | s is flat to within 4% down to −0.8 |
+//! | Buchhave et al. (2012, Nature 486, 375) | "planets with radii less than four Earth radii form around host stars with a wide range of metallicities (but on average a metallicity close to that of the Sun), whereas large planets preferentially form around stars with higher metallicities" (abstract) | Abstract only (no preprint); Buchhave et al. (2014, Nature 509, 593, full text) and Petigura et al. (2018, full text) agree | s is flat to within 4% down to −0.8; the planets placed fall to 0.65 of solar there (P14.T10.b, rulings 106.1, 117 and 121) |
 //!
 //! The table gives a host's frequencies where its disc can form giants. With plan 14's disc
 //! (P14.T3's draws) that is 83.4% of solar-mass, solar-metallicity hosts, 67% at 0.5 M☉, 50% at
@@ -1409,7 +1418,9 @@ mod tests {
     }
 
     /// P14.T4.c: the small-planet classes' weights at \[Fe/H\] = −0.8 are within 5% of solar and
-    /// under a quarter of it at −2.
+    /// under a quarter of it at −2. The planets they place fall to 0.35–0.75 of solar at −0.8
+    /// through the giants' classes, the discs and the chains' first period, which P14.T10.b tests
+    /// (rulings 106.1 and 117).
     #[test]
     fn small_planets_thin_only_in_the_halo() {
         let small = |m: f64, x: f64| {

@@ -470,7 +470,7 @@ pub(crate) fn age_between(ages: &AgeDistribution, a: Years, b: Years, u: f64) ->
 /// star's draws; a mass between nodes takes the heavier node's least and the lighter node's
 /// greatest, since lifetime falls with mass, and the tenth's widening covers the draws and the
 /// metallicities between samples (P08.T9.d's test holds it over 10⁵ random stars). Masses above
-/// 100 M☉ take the tracks' 100 M☉, as `StarModel` does.
+/// [`MAX_INITIAL_MASS`] take the tracks' heaviest, as `StarModel` does.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LifetimeBracket {
     masses: [[f64; MARK_MASS_NODES]; 2],

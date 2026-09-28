@@ -23,7 +23,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::galaxy::fields::Component;
-use crate::galaxy::placement::{Existence, SystemRecord};
+use crate::galaxy::placement::{Existence, SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::BodyId;
 use crate::math;
@@ -193,8 +193,8 @@ impl Error for BuildStarModelError {}
 /// ([`Stripping::Companion`](crate::stellar::remnant::Stripping::Companion)) where it is set; the
 /// track itself is the single star's (plan 06, design note 11).
 ///
-/// Until P06.T14 the formulae stop at 100 M☉ (`sse::MAX_INITIAL_MASS`), so a star of 100–150 M☉
-/// is evolved as one of 100 M☉ and keeps its own initial mass.
+/// The formulae cover 0.1–150 M☉ (`sse::MAX_INITIAL_MASS`, P06.T14), the whole range of the
+/// initial mass.
 ///
 /// # Examples
 ///
@@ -533,8 +533,8 @@ impl StarModel {
         }
     }
 
-    /// The initial mass the track is built for: the star's own, held to the formulae's 100 M☉
-    /// until P06.T14.
+    /// The initial mass the track is built for: the star's own, held to the formulae's 150 M☉
+    /// (P06.T14).
     #[must_use]
     fn track_mass(&self) -> SolarMasses {
         if self.initial_mass > sse::MAX_INITIAL_MASS {
@@ -1005,7 +1005,26 @@ impl SystemStars {
     /// As [`draw_metallicity`] does, for a record of another galaxy.
     #[must_use]
     pub fn generate_in(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> Self {
-        let composition = draw_metallicity(galaxy, record);
+        Self::generate_with(galaxy, record, &draw_metallicity(galaxy, record), ctx)
+    }
+
+    /// The stars of `record` with the composition `composition`, under the multiplicity context
+    /// `ctx`: [`generate_in`](Self::generate_in) without its metallicity draw, which reads the
+    /// record's density component. A feature member has none and brings its cluster's
+    /// composition instead (plan 09, P09.T10); its primary is read at the attempt its origin
+    /// carries. For a grid record with its own drawn composition it is `generate_in`, bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// If the record's primary is not of 0.08–150 M☉ or its age is not finite.
+    #[must_use]
+    pub fn generate_with(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        composition: &Composition,
+        ctx: MultiplicityContext,
+    ) -> Self {
+        let composition = *composition;
         let hierarchy = draw_hierarchy(galaxy, record, ctx, GRID_ATTEMPT);
         let age = record.age_at_epoch();
         let mut stars = Vec::with_capacity(hierarchy.stars().len());
@@ -1161,7 +1180,20 @@ impl SystemStars {
 /// `for_attempt` of the record's `mark_attempt()`, which does not exist before then.
 #[must_use]
 pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws {
-    StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0))
+    match record_attempt(record) {
+        0 => StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0)),
+        attempt => StarDraws::for_attempt(galaxy.seed(), BodyId::new(record.id(), 0), attempt),
+    }
+}
+
+/// The attempt a record's primary is read at: 0 for a grid record, and for a feature member the
+/// attempt its class's conditional draw chose (plan 09, P09.T10), which its origin carries.
+#[must_use]
+fn record_attempt(record: &SystemRecord) -> u32 {
+    match record.origin() {
+        SystemOrigin::Grid(_) => 0,
+        SystemOrigin::FeatureMember { attempt, .. } => u32::from(attempt),
+    }
 }
 
 /// The primary's η alone: [`primary_draws`]'s [`eta`](StarDraws::eta), bit for bit, from its one
@@ -1171,7 +1203,11 @@ pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws
 /// `mark_attempt()` together.
 #[must_use]
 pub(crate) fn primary_eta(galaxy: &Galaxy, record: &SystemRecord) -> StandardNormal {
-    StarDraws::eta_for_attempt(galaxy.seed(), BodyId::new(record.id(), 0), 0)
+    StarDraws::eta_for_attempt(
+        galaxy.seed(),
+        BodyId::new(record.id(), 0),
+        record_attempt(record),
+    )
 }
 
 /// The primary's rotation rank and fossil-field mark alone: [`primary_draws`]'s, bit for bit, for
@@ -1183,7 +1219,11 @@ pub(crate) fn primary_rotation_draws(
     galaxy: &Galaxy,
     record: &SystemRecord,
 ) -> (UnitUniform, Mark) {
-    StarDraws::rotation_for_attempt(galaxy.seed(), BodyId::new(record.id(), 0), 0)
+    StarDraws::rotation_for_attempt(
+        galaxy.seed(),
+        BodyId::new(record.id(), 0),
+        record_attempt(record),
+    )
 }
 
 /// The clock time of `death` for a star whose age at the epoch is `age_at_epoch`.
@@ -1264,7 +1304,7 @@ mod tests {
     use crate::coords::GalacticPosition;
     use crate::galaxy::Population;
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::placement::{CellKey, SystemOrigin};
+    use crate::galaxy::placement::CellKey;
     use crate::id::Layer;
     use crate::rng::Seed;
     use crate::units::SolarMasses;
@@ -1579,9 +1619,9 @@ mod tests {
         );
     }
 
-    /// Until P06.T14 a star above 100 M☉ is evolved as one of 100 M☉, and keeps its own mass.
+    /// Since P06.T14 a star above 100 M☉ is evolved at its own mass, no longer as one of 100 M☉.
     #[test]
-    fn a_star_above_a_hundred_solar_masses_is_evolved_at_a_hundred() {
+    fn a_star_above_a_hundred_solar_masses_is_evolved_at_its_own_mass() {
         let (heavy, limit) = (
             StarModel::new(
                 SolarMasses::new(130.0),
@@ -1599,9 +1639,9 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(heavy.initial_mass(), SolarMasses::new(130.0));
-        assert_eq!(
-            heavy.state_at(UniverseTime::EPOCH),
-            limit.state_at(UniverseTime::EPOCH)
+        assert!(
+            heavy.state_at(UniverseTime::EPOCH).map(|s| s.luminosity())
+                > limit.state_at(UniverseTime::EPOCH).map(|s| s.luminosity())
         );
     }
 

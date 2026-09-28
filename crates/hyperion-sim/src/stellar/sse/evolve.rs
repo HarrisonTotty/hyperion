@@ -8,18 +8,21 @@
 use crate::galaxy::quad::bisect;
 use crate::math;
 use crate::stellar::draws::StarDraws;
+use crate::stellar::premain;
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
 use crate::units::{SolarMasses, Years};
 
 use super::coeffs::ZCoeffs;
 use super::ms;
-use super::track::{self, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
+use super::track::{
+    self, HeliumHook, HeliumTable, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions,
+};
 
 /// The state at `age` (years since the onset of collapse) of a star of initial mass `m0`,
 /// `composition` and `draws`: the track built to that age and read there.
 ///
-/// `m0` is 0.01–100 M☉. From 0.1 M☉ up the state is the track's. Below it the object is read
+/// `m0` is 0.01–150 M☉. From 0.1 M☉ up the state is the track's. Below it the object is read
 /// from P06.T13's cooling fits, [`substellar::cooling`], and never leaves that phase within any
 /// age the fields draw (ruling 33 of 2026-09-22).
 ///
@@ -35,12 +38,12 @@ use super::track::{self, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions
 /// use hyperion_sim::stellar::{Composition, Phase, evolve};
 /// use hyperion_sim::units::{SolarMasses, Years};
 ///
-/// // A 2 M☉ star of solar composition is a giant at 1.2 Gyr, off the main sequence at 1.16.
+/// // A 2 M☉ star of solar composition is a giant at 1.3 Gyr, off the main sequence at 1.17.
 /// let giant = evolve(
 ///     SolarMasses::new(2.0),
 ///     &Composition::SOLAR,
 ///     &StarDraws::median(),
-///     Years::new(1.2e9),
+///     Years::new(1.3e9),
 /// );
 /// assert_eq!(giant.phase(), Phase::CoreHeliumBurning);
 /// ```
@@ -67,7 +70,7 @@ pub fn evolve(
 ///
 /// # Panics
 ///
-/// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–100 M☉.
+/// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–150 M☉.
 #[must_use]
 pub fn lifetime(m0: SolarMasses, composition: &Composition, draws: &StarDraws) -> Years {
     track::lifetime_of(m0, composition, draws, TrackOptions::default())
@@ -81,8 +84,9 @@ pub fn lifetime(m0: SolarMasses, composition: &Composition, draws: &StarDraws) -
 /// phase (the track builder's own rule, at the largest of its rates at the start, the middle and the
 /// end). That holds for nearly every star below a few solar masses, so a range query's brief can
 /// read most rows here and build a track only for the rest (ruling 89). `None` means only "ask the
-/// track": the star is lighter than 0.1 M☉ or heavier than 100 M☉, its main sequence has knots,
-/// `age` is at or past the main sequence's end, or `age` is negative or not finite.
+/// track": the star is lighter than 0.1 M☉ or heavier than 150 M☉, its main sequence has knots,
+/// `age` is before its arrival on the main sequence (P06.T15.b) or at or past the main sequence's
+/// end, or `age` is negative or not finite.
 ///
 /// # Examples
 ///
@@ -115,11 +119,11 @@ pub fn main_sequence_state(
 }
 
 /// The initial mass whose main sequence ends at `age` for a star of `composition`: the inverse in
-/// mass of `t_zams` + `t_MS` (HPT equation 5), found by 64 bisections in log mass (plan 02's
-/// [`bisect`]). `t_zams`, the arrival on the zero-age main sequence, is zero until P06.T15.b.
+/// mass of `t_zams` + `t_MS` (P06.T15.b's arrival and HPT equation 5), found by 64 bisections in
+/// log mass (plan 02's [`bisect`]).
 ///
-/// Held to 0.1–100 M☉: an age beyond the main sequence of a 0.1 M☉ star gives 0.1, and one before
-/// that of a 100 M☉ star gives 100.
+/// Held to 0.1–150 M☉: an age beyond the main sequence of a 0.1 M☉ star gives 0.1, and one before
+/// that of a 150 M☉ star gives 150.
 ///
 /// # Examples
 ///
@@ -140,7 +144,7 @@ pub fn turn_off_mass(age: Years, composition: &Composition) -> SolarMasses {
         math::log10(MIN_INITIAL_MASS.value()),
         math::log10(MAX_INITIAL_MASS.value()),
     );
-    let excess = |log_m: f64| ms::t_ms(SolarMasses::new(math::exp10(log_m)), &c).value() - age_myr;
+    let excess = |log_m: f64| main_sequence_end_myr(math::exp10(log_m), composition, &c) - age_myr;
     if excess(lo) <= 0.0 {
         return MIN_INITIAL_MASS;
     }
@@ -148,6 +152,21 @@ pub fn turn_off_mass(age: Years, composition: &Composition) -> SolarMasses {
         return MAX_INITIAL_MASS;
     }
     SolarMasses::new(math::exp10(bisect(excess, lo, hi, 64)))
+}
+
+/// The age at which the main sequence of a star of `m` M☉ ends at constant mass, Myr since the
+/// onset of collapse: its arrival (P06.T15.b) plus HPT's `t_MS`, with the helium excess's
+/// correction (P06.T17).
+#[must_use]
+fn main_sequence_end_myr(m: f64, composition: &Composition, c: &ZCoeffs) -> f64 {
+    let mass = SolarMasses::new(m);
+    let ms = ms::MainSequence::new(mass, c);
+    let zams = ms.at(crate::units::Megayears::ZERO);
+    let arrival = premain::arrival_years(m, zams.luminosity.value(), zams.radius.value());
+    let t_ms = ms.t_ms().value();
+    let lifetime = HeliumHook::of(composition, &HeliumTable::COMMITTED)
+        .map_or(t_ms, |hook| t_ms * hook.timescale_factor(m));
+    arrival * 1e-6 + lifetime
 }
 
 #[cfg(test)]
@@ -217,7 +236,7 @@ mod tests {
     fn the_turn_off_mass_inverts_the_main_sequence_lifetime() {
         let c = ZCoeffs::new(Composition::SOLAR.z_fit());
         for m in [0.3, 0.8, 1.0, 2.0, 7.0, 40.0] {
-            let t = ms::t_ms(SolarMasses::new(m), &c).value() * 1e6;
+            let t = main_sequence_end_myr(m, &Composition::SOLAR, &c) * 1e6;
             let back = turn_off_mass(Years::new(t), &Composition::SOLAR).value();
             assert!((back / m - 1.0).abs() < 1e-12, "{m}: {back}");
         }

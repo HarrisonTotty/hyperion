@@ -37,8 +37,10 @@ pub use cache::{CellCache, NoCache};
 pub use candidate::{CandidateOutcome, evaluate_candidate};
 pub use cell::{CellKey, candidate_count};
 pub use generate::{cell_heap_bytes, generate_cell};
-pub use headroom::check_index_headroom;
-pub(crate) use headroom::{largest_headroom_mean, root_octant};
+#[cfg(test)]
+pub(crate) use headroom::largest_headroom_mean;
+pub use headroom::{check_index_headroom, rogue_planet_saturation_density};
+pub(crate) use headroom::{root_octant, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };

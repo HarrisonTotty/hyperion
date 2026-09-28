@@ -257,9 +257,13 @@ impl BriefModel {
                 )
             })
             .flatten()
-            // The main sequence must hold every age of the window: the age at its end, as
-            // `StarModel` builds its track to.
-            .filter(|track| age_at(age_at_epoch, ClockWindow::END) < track.built_until().value());
+            // The main sequence must hold every age of the window: from the arrival on it
+            // (P06.T15.b) at the window's start to the age at its end, as `StarModel` builds its
+            // track to.
+            .filter(|track| {
+                track.built_from().value() <= first
+                    && age_at(age_at_epoch, ClockWindow::END) < track.built_until().value()
+            });
         let primary = if let Some(track) = on_main_sequence {
             Primary::MainSequence {
                 track: Box::new(track),
@@ -459,7 +463,9 @@ fn corners(route: FateRoute) -> &'static [(f64, f64, f64)] {
     match route {
         FateRoute::HeliumWhiteDwarf
         | FateRoute::CarbonOxygenWhiteDwarf
-        | FateRoute::OxygenNeonWhiteDwarf => &WHITE_DWARF_CORNERS,
+        | FateRoute::OxygenNeonWhiteDwarf
+        | FateRoute::BridgedCarbonOxygenWhiteDwarf
+        | FateRoute::BridgedOxygenNeonWhiteDwarf => &WHITE_DWARF_CORNERS,
         FateRoute::IronCore => &IRON_CORE_CORNERS,
         FateRoute::ElectronCapture | FateRoute::NoRemnant => &WHITE_DWARF_CORNERS[..1],
     }
@@ -609,7 +615,9 @@ fn table_primary(
     let passes = match fate.route {
         FateRoute::HeliumWhiteDwarf
         | FateRoute::CarbonOxygenWhiteDwarf
-        | FateRoute::OxygenNeonWhiteDwarf => {
+        | FateRoute::OxygenNeonWhiteDwarf
+        | FateRoute::BridgedCarbonOxygenWhiteDwarf
+        | FateRoute::BridgedOxygenNeonWhiteDwarf => {
             let (first, last) = (
                 Years::new(age_at(age_at_epoch, ClockWindow::START)),
                 Years::new(age_at(age_at_epoch, ClockWindow::END)),
@@ -766,13 +774,10 @@ mod tests {
             assert!(born.is_some(), "{mass} M☉ once born");
             assert_eq!(born, stars.brief_at(years(500)));
         }
+        // A star born within the window is a protostar at its start, on the exact path (P06.T15).
         assert_eq!(
             routes,
-            [
-                BriefRoute::MainSequence,
-                BriefRoute::Exact,
-                BriefRoute::Exact
-            ]
+            [BriefRoute::Exact, BriefRoute::Exact, BriefRoute::Exact]
         );
     }
 

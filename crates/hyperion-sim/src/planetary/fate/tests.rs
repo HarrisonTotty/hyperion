@@ -224,8 +224,9 @@ fn elements_are_continuous_in_time_except_at_a_supernova() {
 
 #[test]
 fn a_supernova_steps_the_orbit() {
-    // 20 M☉ collapses to a black hole of 6.81 M☉ from 8.30 M☉: a circular orbit keeps its radius
-    // as its new pericentre and takes e = ΔM ÷ M_after = 0.219.
+    // 20 M☉ collapses to a black hole from its stripped star: a circular orbit keeps its radius
+    // as its new pericentre and takes e = ΔM ÷ M_after = 0.214 (0.219 before its main sequence
+    // started at the end of accretion, P06.T15.b).
     let host = star(20.0, 3e7);
     let death = death_of(&host).expect("dead by the epoch");
     assert!(death.sudden);
@@ -242,7 +243,7 @@ fn a_supernova_steps_the_orbit() {
         later.orbit().expect("bound"),
     );
     let e = (death.before - death.after).value() / death.after.value();
-    assert!((e - 0.219).abs() < 0.001, "{e}");
+    assert!((e - 0.214).abs() < 0.001, "{e}");
     assert!((b.eccentricity().value() - e).abs() < 1e-6);
     assert_same_bits(a.eccentricity().value(), 0.0);
     assert!((b.periapsis() / a.semi_major_axis() - 1.0).abs() < 1e-6);
@@ -350,7 +351,9 @@ fn a_planet_engulfed_at_the_red_giant_tip_stays_destroyed_though_the_winds_widen
     };
     assert_eq!(cause, DestructionCause::Engulfed);
     let age = sun.age_at(at).value();
-    assert!((12.2e9..12.33e9).contains(&age), "engulfed at {age:e} yr");
+    // The red-giant tip, 38 Myr later than on HPT's clock for the arrival on the main sequence
+    // (P06.T15.b).
+    assert!((12.24e9..12.37e9).contains(&age), "engulfed at {age:e} yr");
     let segment = fate.segments[0];
     let end = fate.at(after(at, -1));
     let reach = engulfment_reach(earth_mass());

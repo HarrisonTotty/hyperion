@@ -512,8 +512,8 @@ fn a_system_not_yet_born_has_no_stars() {
     assert_eq!(stars.brief_at(UniverseTime::EPOCH), None);
     let after = stars.summary_at(years(400));
     assert_eq!(after.existence(), SystemExistence::Exists);
-    // Until P06.T15 the track starts on the zero-age main sequence.
-    assert_eq!(after.stars()[0].state().phase(), Phase::MainSequence);
+    // A star 100 years after the onset of its collapse is a protostar (P06.T15.a).
+    assert_eq!(after.stars()[0].state().phase(), Phase::Protostar);
 }
 
 /// The brainstorm's property test over `n` random systems and times: no star in a living phase is

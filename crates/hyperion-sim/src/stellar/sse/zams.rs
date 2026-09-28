@@ -12,6 +12,7 @@
 use crate::units::{SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::coeffs::ZCoeffs;
+use super::vms;
 
 /// Powers of M that the two fits use, built by repeated multiplication in a fixed order.
 struct Powers {
@@ -57,10 +58,11 @@ impl Powers {
     }
 }
 
-/// The zero-age main-sequence luminosity of a star of mass `m` (0.1–100 M☉; the fit extends
+/// The zero-age main-sequence luminosity of a star of mass `m` (0.1–150 M☉; the fit extends
 /// smoothly beyond).
 ///
-/// Tout et al. (1996) equation 1: L = (α M^5.5 + β M^11) ÷ (γ + M³ + δ M⁵ + ε M⁷ + ζ M⁸ + η M^9.5).
+/// Tout et al. (1996) equation 1: L = (α M^5.5 + β M^11) ÷ (γ + M³ + δ M⁵ + ε M⁷ + ζ M⁸ + η M^9.5),
+/// times P06.T14's correction above 100 M☉, the top of the fit (`vms::luminosity_factor`).
 ///
 /// # Examples
 ///
@@ -80,13 +82,14 @@ pub fn luminosity(m: SolarMasses, coeffs: &ZCoeffs) -> SolarLuminosities {
     let numerator = alpha * p.m5 * p.root + beta * p.m11;
     let denominator =
         gamma + p.m3 + delta * p.m5 + epsilon * p.m7 + zeta * p.m8 + eta * p.m9 * p.root;
-    SolarLuminosities::new(numerator / denominator)
+    SolarLuminosities::new(numerator / denominator * vms::luminosity_factor(m.value()))
 }
 
-/// The zero-age main-sequence radius of a star of mass `m` (0.1–100 M☉).
+/// The zero-age main-sequence radius of a star of mass `m` (0.1–150 M☉).
 ///
 /// Tout et al. (1996) equation 2: R = (θ M^2.5 + ι M^6.5 + κ M^11 + λ M^19 + µ M^19.5) ÷
-/// (ν + ξ M² + ο M^8.5 + M^18.5 + π M^19.5).
+/// (ν + ξ M² + ο M^8.5 + M^18.5 + π M^19.5), times P06.T14's correction above 100 M☉
+/// (`vms::radius_factor`).
 #[must_use]
 pub fn radius(m: SolarMasses, coeffs: &ZCoeffs) -> SolarRadii {
     let [theta, iota, kappa, lambda, mu, nu, xi, omicron, pi] = *coeffs.zams_r();
@@ -98,7 +101,7 @@ pub fn radius(m: SolarMasses, coeffs: &ZCoeffs) -> SolarRadii {
         + mu * p.m19 * p.root;
     let denominator =
         nu + xi * p.m2 + omicron * p.m8 * p.root + p.m18 * p.root + pi * p.m19 * p.root;
-    SolarRadii::new(numerator / denominator)
+    SolarRadii::new(numerator / denominator * vms::radius_factor(m.value()))
 }
 
 #[cfg(test)]

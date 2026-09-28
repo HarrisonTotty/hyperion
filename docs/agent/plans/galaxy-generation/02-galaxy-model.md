@@ -269,7 +269,8 @@ From plan 01 (determinism foundation), by the names of its Provides, which is au
   units. If a newtype is missing, the task that first needs it adds it to `units` in the same style.
 - `hyperion_sim::time::CLOCK_WINDOW_H`.
 - `hyperion_sim::coords::GalacticPosition` (cell plus offset) for `PointLy::from`.
-- `hyperion_sim::id::Layer` for `MassBand::try_from`.
+- `hyperion_sim::id::Layer` for `From<Layer> for MassBand` (`MassBand::of_layer`; plan 13 replaced
+  `try_from` when every layer gained a band).
 - `GENERATOR_VERSION`; from the dev-only crate `hyperion-testkit`, `golden!` with `GoldenWriter`,
   `order::assert_order_independent` and `stats` (`chi_square_gof`, `ks_one_sample`,
   `assert_p_value`, `assert_poisson_count`, `ALPHA`); the slow-test marking `#[ignore = "slow: …"]`,

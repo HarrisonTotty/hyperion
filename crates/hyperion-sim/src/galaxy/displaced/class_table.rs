@@ -624,7 +624,8 @@ fn reference_site(source: BirthSource, scales: &GalaxyScales) -> PointLy {
     }
 }
 
-/// A lifetime at the median star's draws, masses above the tracks' 100 M☉ taken at it.
+/// A lifetime at the median star's draws, masses above the tracks' heaviest ([`MAX_INITIAL_MASS`])
+/// taken at it.
 fn reference_lifetime_of(m: f64, comp: &Composition) -> f64 {
     let m = SolarMasses::new(m.min(MAX_INITIAL_MASS.value()));
     lifetime(m, comp, &StarDraws::median()).value()

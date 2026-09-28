@@ -16,9 +16,10 @@
 //! index.
 
 use super::record::{SystemKind, SystemRecord};
-use super::{CellKey, layer_bound};
+use super::{CellKey, layer_bound, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
+use crate::galaxy::imf::MassBand;
 #[cfg(doc)]
 use crate::galaxy::shares::ShareMatrix;
 use crate::galaxy::{Galaxy, PointLy};
@@ -222,7 +223,21 @@ fn pick_component(
     for (slot, (component, density)) in weights.iter_mut().zip(components.iter().zip(densities)) {
         *slot = shares.component_share(band, component) * density;
     }
-    let weights = &weights[..components.len()];
+    let weights = &mut weights[..components.len()];
+    // The rogue planets saturate at the index limit (ruling 125): where the weights sum past it,
+    // each is scaled so that they sum to it, which keeps the component odds. Below it nothing is
+    // touched, so every unsaturated cell is bit for bit what it was.
+    if band == MassBand::RoguePlanet {
+        let total = weighted_density(weights);
+        let limit = rogue_planet_saturation_density();
+        if total > limit {
+            let scale = limit / total;
+            for weight in weights.iter_mut() {
+                *weight *= scale;
+            }
+        }
+    }
+    let weights = &*weights;
     let padded_bound = bound * (1.0 + BOUND_PADDING);
     debug_assert!(
         weighted_density(weights) <= padded_bound,

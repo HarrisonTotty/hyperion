@@ -20,8 +20,8 @@
 //!    out (design note 3), before anything is placed, so that their masses (P14.T7) and every other
 //!    draw keyed by slot are fixed by the counts alone. A member that cannot be placed, or that its
 //!    budget did not form (P14.T7's truncation), leaves its slot unused. A rocky group's count is
-//!    [`CountLaw::Fill`]'s cap: it reserves that many and places as many as its walk reaches
-//!    towards the snow line (ruling 60).
+//!    drawn from its tally of 2–6 ([`CountLaw::Tallied`], ruling 106.2), and it places as many as
+//!    its walk reaches before the snow line.
 //! 3. **Positions** (P14.T8.a–c). A group whose template gives its first body a location (a period
 //!    law, au × √L or snow-line radii) draws it inside the range its bounds allow, the law's shape
 //!    kept (a range wholly inside the inner bound is held at it); a group placed "outward" or
@@ -102,7 +102,8 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements};
 use crate::planetary::architecture::template::{
     ClassTemplate, CountLaw, EARLY_M_DWARF_FIRST_PERIOD_SCALE, EccentricityLaw, GroupRole,
-    Location, Origin, PeriodLaw, PlanetGroup, Reach, SpacingFamily, template,
+    Location, Origin, PeriodLaw, PlanetGroup, Reach, SpacingFamily, chain_break_metallicity_factor,
+    template,
 };
 use crate::planetary::architecture::{ArchitectureClass, ZoneLimit, first_period_share};
 use crate::planetary::derive::composition::SnowLineSide;
@@ -501,7 +502,7 @@ pub struct GroupDraws {
     pub presence: Mark,
     /// Its count, by integer thresholds for a uniform law. Word 9 + 8g.
     pub count: Mark,
-    /// The same word as a rank, for a Poisson law.
+    /// The same word as a rank, for a Poisson or a tallied law.
     pub count_rank: UnitUniform,
     /// The rank of its first body's location in its law. Word 10 + 8g.
     pub location: UnitUniform,
@@ -746,12 +747,18 @@ const fn spacing_kind(family: SpacingFamily) -> SpacingKind {
     }
 }
 
-/// The count of a law at its draws, for a host of `mass`: for a [`CountLaw::Fill`] law its cap,
-/// every one of which is reserved and as many placed as the walk outward reaches.
+/// The count of a law at its draws, for a host of `mass`. A tallied law takes the first count
+/// whose cumulative share reaches the group's count rank, as a Poisson law does.
 #[must_use]
 fn draw_count(law: CountLaw, mass: SolarMasses, draws: &GroupDraws) -> u8 {
     match law {
-        CountLaw::Fill { max } => max,
+        CountLaw::Tallied { min, .. } => {
+            let (_, max) = law.range();
+            let target = draws.count_rank.value();
+            (min..max)
+                .find(|&k| law.cumulative(k, mass) >= target)
+                .unwrap_or(max)
+        }
         CountLaw::Uniform { min, max } => {
             let span = u128::from(max - min) + 1;
             let step = (u128::from(draws.count.get()) * span) >> 53;
@@ -1080,10 +1087,12 @@ impl<'a> Placer<'a> {
                     return None;
                 }
                 let (a, b) = (min.max_of(p_lo), max.min_of(p_hi));
-                // Rulings 85.4 and 94.1: an M dwarf's chain starts closer in.
+                // Ruling 117.2: a metal-poor host's chain starts farther out; rulings 85.4 and
+                // 94.1: an M dwarf's closer in.
                 let law = if group.role() == GroupRole::Chain {
                     let blend = first_period_share(self.host_mass());
-                    law.with_break_scaled(math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, blend))
+                    law.with_break_scaled(chain_break_metallicity_factor(self.host.zams().fe_h()))
+                        .with_break_scaled(math::powf(EARLY_M_DWARF_FIRST_PERIOD_SCALE, blend))
                 } else {
                     law
                 };
@@ -2260,6 +2269,19 @@ mod tests {
             (mean - chain.mean(SolarMasses::new(1.0))).abs() < 0.05,
             "{mean}"
         );
+        // Ruling 106.2's rocky tally, 2–6 with shares 6, 17, 14, 2 and 1 in 40.
+        let rocky = crate::planetary::architecture::template::ROCKY_COUNT;
+        let mut tally = [0_u32; 7];
+        for i in 0..n {
+            let draws = HostDraws::for_host(SEED, system(i), 0).groups[0];
+            tally[usize::from(draw_count(rocky, SolarMasses::new(1.0), &draws))] += 1;
+        }
+        assert_eq!(tally[..2], [0, 0]);
+        for (count, share) in tally[2..].iter().zip([6.0, 17.0, 14.0, 2.0, 1.0]) {
+            let expected = f64::from(n) * share / 40.0;
+            let sd = (expected * (1.0 - share / 40.0)).sqrt();
+            assert!((f64::from(*count) - expected).abs() < 4.0 * sd, "{tally:?}");
+        }
     }
 
     #[test]

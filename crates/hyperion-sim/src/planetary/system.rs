@@ -93,7 +93,8 @@ use crate::planetary::architecture::{
 use crate::planetary::belts::{
     Belt, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
-use crate::planetary::context::SystemContext;
+use crate::planetary::context::{SystemContext, XuvHistory};
+use crate::planetary::derive::atmosphere::VolatileDraws;
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
     PlanetClass, derive_body, habitable_zone_of, radius_chen_kipping,
@@ -261,7 +262,27 @@ enum Part {
 struct PlanetPart {
     placed: PlacedPlanet,
     radius_rank: UnitUniform,
+    volatiles: VolatileDraws,
     fate: FateBody,
+}
+
+impl PlanetPart {
+    /// The planet as [`derive_body`] reads it, of mass `mass` on its primordial orbit: its radius
+    /// rank, its volatile inventory's ranks (P14.T13.a) and the end of its young magma ocean
+    /// (design note 12, P14.T28.a's `molten_until`).
+    #[must_use]
+    fn placed_body(&self, mass: EarthMasses) -> PlacedBody {
+        let molten_until = Years::from(self.fate.formation().molten_until());
+        PlacedBody::new(
+            mass,
+            *self.placed.orbit(),
+            self.placed.formation_distance(),
+            self.radius_rank,
+        )
+        .expect("a placed planet's mass and formation distance are positive")
+        .with_volatiles(self.volatiles)
+        .with_magma_ocean_until(molten_until)
+    }
 }
 
 /// A moon's primordial state: the moon, its parent as the moon generators read it, and its orbit
@@ -312,6 +333,7 @@ impl Body {
             part: Part::Planet(PlanetPart {
                 placed,
                 radius_rank: radius_rank(seed, id),
+                volatiles: VolatileDraws::for_body(seed, id),
                 fate,
             }),
         }
@@ -818,16 +840,7 @@ fn parent_at_epoch(
     body: &Body,
 ) -> Option<(MoonParent, Option<RingParent>)> {
     let (placed, kind) = match &body.part {
-        Part::Planet(planet) => (
-            PlacedBody::new(
-                planet.placed.mass(),
-                *planet.placed.orbit(),
-                planet.placed.formation_distance(),
-                planet.radius_rank,
-            )
-            .expect("a placed planet's mass and formation distance are positive"),
-            ParentKind::Planet,
-        ),
+        Part::Planet(planet) => (planet.placed_body(planet.placed.mass()), ParentKind::Planet),
         Part::Member(member) => (member.member.placed_body(), ParentKind::DwarfPlanet),
         Part::Moon(_) | Part::Ring(_) => return None,
     };
@@ -1549,13 +1562,7 @@ impl PlanetarySystem {
     #[must_use]
     fn placed_now(body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
         let placed = match &body.part {
-            Part::Planet(planet) => PlacedBody::new(
-                mass,
-                *planet.placed.orbit(),
-                planet.placed.formation_distance(),
-                planet.radius_rank,
-            )
-            .expect("a placed planet's mass and formation distance are positive"),
+            Part::Planet(planet) => planet.placed_body(mass),
             Part::Member(member) => member.member.placed_body(),
             Part::Moon(_) | Part::Ring(_) => unreachable!("a satellite is derived by its own rule"),
         };
@@ -2088,6 +2095,7 @@ struct Epoch<'c> {
     t: UniverseTime,
     under: Vec<u32>,
     states: Vec<Option<StarState>>,
+    xuv: Vec<XuvHistory>,
 }
 
 impl<'c> Epoch<'c> {
@@ -2114,6 +2122,7 @@ impl<'c> Epoch<'c> {
             t,
             under: members_under(ctx.hierarchy()),
             states: ctx.stars().iter().map(|star| star.state_at(t)).collect(),
+            xuv: ctx.xuv_histories(),
         }
     }
 
@@ -2128,17 +2137,21 @@ impl<'c> Epoch<'c> {
     }
 
     /// The light of component `star` at the time, or `None` before it forms (ruling 34: a host's
-    /// L, `T_eff` and R from its state).
+    /// L, `T_eff` and R from its state), with its past: its X-ray and ultraviolet history
+    /// (P14.T1.a) and the largest luminosity it has had (design note 11), which the atmospheres
+    /// read (P14.T13).
     #[must_use]
     fn light(&self, star: usize) -> Option<HostLight> {
         let state = self.states[star]?;
+        let peak = self.ctx.stars()[star].max_luminosity_until(self.t);
         Some(
             HostLight::new(
                 state.luminosity(),
                 state.effective_temperature(),
                 state.radius(),
             )
-            .expect("a star's state is finite and not negative, with a surface if it shines"),
+            .expect("a star's state is finite and not negative, with a surface if it shines")
+            .with_history(self.xuv[star], peak),
         )
     }
 

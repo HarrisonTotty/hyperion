@@ -965,7 +965,15 @@ mod tests {
             *k.orientation(),
             k.mean_anomaly_at_epoch(),
         );
-        let mut engine = Engine::new(Arc::new(Context::of(&input)), until, members, orbit, None);
+        let start = super::super::evolve::arrival(&members, until);
+        let mut engine = Engine::new(
+            Arc::new(Context::of(&input)),
+            start,
+            until,
+            members,
+            orbit,
+            None,
+        );
         let total = |s: &Snapshot| s.j + s.spins[0] + s.spins[1];
         let first = engine.snapshot();
         let initial = total(&first);

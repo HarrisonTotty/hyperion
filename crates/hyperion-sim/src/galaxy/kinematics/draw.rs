@@ -3,7 +3,7 @@
 use super::{EllipsoidAxes, VelocityEllipsoid};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::fields::ComponentId;
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::PAD_SPEED;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
@@ -60,7 +60,8 @@ impl VelocityDraw {
 /// # Panics
 ///
 /// If `galaxy` holds no kinematic tables: it must be built with
-/// [`Galaxy::with_full_potential`].
+/// [`Galaxy::with_full_potential`]. And if `record` is not a grid record: a feature member's
+/// velocity is its cluster's (plan 09's `members::draw_member`).
 ///
 /// # Examples
 ///
@@ -101,7 +102,10 @@ pub fn draw_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity
 /// As [`draw_velocity`].
 #[must_use]
 pub fn draw(galaxy: &Galaxy, record: &SystemRecord) -> VelocityDraw {
-    let SystemOrigin::Grid(component) = record.origin();
+    let component = record.component().expect(
+        "plan 08's velocity laws are a grid record's; a feature member moves with its cluster \
+         (plan 09, P09.T10)",
+    );
     let mut stream = Stream::open(
         galaxy.seed(),
         tags::SYSTEM_VELOCITY,

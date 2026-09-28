@@ -1,4 +1,4 @@
-# generator_version = 13
+# generator_version = 14
 
 probabilities m 0.05 fe_h -2.5
 barren = 0x3fefaef0404e69ea  # 0.9901047950727933
@@ -429,11 +429,11 @@ class = compact_multi
 
 terrestrial_only group 0: Rocky
 terrestrial_only group 0 presence = 0x3ff0000000000000  # 1.0
-terrestrial_only group 0 count 1-10
+terrestrial_only group 0 count 2-6
 terrestrial_only group 0 mass min = 0x3fa999999999999a  # 0.05
 terrestrial_only group 0 mass max = 0x4000000000000000  # 2.0
-terrestrial_only group 0 scaled au inner = 0x3fc999999999999a  # 0.2
-terrestrial_only group 0 scaled au outer = 0x3fe0000000000000  # 0.5
+terrestrial_only group 0 scaled au inner = 0x3fe0000000000000  # 0.5
+terrestrial_only group 0 scaled au outer = 0x3fe999999999999a  # 0.8
 terrestrial_only group 0 e rayleigh = 0x3fa999999999999a  # 0.05
 terrestrial_only group 0 reach InsideSnowLine spacing Terrestrial origin InSitu
 
@@ -544,11 +544,11 @@ compact_with_cold_giant group 1 reach Open spacing Giants origin InSitu
 
 solar_like group 0: Rocky
 solar_like group 0 presence = 0x3ff0000000000000  # 1.0
-solar_like group 0 count 1-10
+solar_like group 0 count 2-6
 solar_like group 0 mass min = 0x3fa999999999999a  # 0.05
 solar_like group 0 mass max = 0x4000000000000000  # 2.0
-solar_like group 0 scaled au inner = 0x3fc999999999999a  # 0.2
-solar_like group 0 scaled au outer = 0x3fe0000000000000  # 0.5
+solar_like group 0 scaled au inner = 0x3fe0000000000000  # 0.5
+solar_like group 0 scaled au outer = 0x3fe999999999999a  # 0.8
 solar_like group 0 e rayleigh = 0x3fa999999999999a  # 0.05
 solar_like group 0 reach InsideSnowLine spacing Terrestrial origin InSitu
 

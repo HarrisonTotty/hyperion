@@ -628,6 +628,37 @@ domain_tags! {
     /// cell's word. Only their mean density exists (P13.T6,
     /// [`interstellar_small_body_density`](crate::galaxy::substellar::interstellar_small_body_density)).
     INTERSTELLAR_SMALL_BODIES: Cell = "interstellar.small_bodies";
+
+    // Plan 14, phase C: atmospheres (P14.T13), under the name and scope the "Plan 14" heading
+    // reserves. Appended here, after plan 13's entries, because the macro's order fixes `ALL`.
+
+    /// A planet's volatile inventory (P14.T13.a): the ranks of its water, carbon and nitrogen as
+    /// log-normal multiples of Earth's per unit mass, words 0–2, one uniform each; words 3–7 are
+    /// reserved (`planetary::derive::atmosphere::VolatileDraws`).
+    PLANET_VOLATILES: Body = "planet.volatiles";
+
+    // Plan 09, phases 2 and 3 (P09.T7–T13), appended after plan 14's atmospheres: a globular's
+    // marks and every cluster's own marks are `Feature` tags opened like phase 1's; a member's
+    // draws are `System` tags opened with `ObjectKey::from(SystemId)` of its member ID (Design
+    // note 23).
+
+    /// A globular's marks: part, origin, mass, half-mass radius, core, metallicity and age
+    /// (P09.T12.b).
+    FEATURE_GLOBULAR: Feature = "feature.globular";
+
+    /// A cluster's own marks: the depleted slope's scatter, the cusp's slope and the iron-spread
+    /// mark (P09.T9.a, T9.d and T9.h).
+    FEATURE_CLUSTER: Feature = "feature.cluster";
+
+    /// A member's primary's initial mass, and a remnant class's redraws: one uniform per attempt
+    /// (P09.T10).
+    MEMBER_MASS: System = "member.mass";
+
+    /// A member's internal velocity: three normals (P09.T10). Named in plan 09's Provides.
+    MEMBER_VELOCITY: System = "member.velocity";
+
+    /// A second-population member's enrichment and a spread cluster's iron offset (P09.T9.h).
+    MEMBER_ABUNDANCE: System = "member.abundance";
 }
 
 #[cfg(test)]
@@ -781,6 +812,13 @@ mod tests {
     }
 
     #[test]
+    fn plan_14_registers_the_volatiles_tag_with_body_scope() {
+        assert_eq!(PLANET_VOLATILES.name(), "planet.volatiles");
+        assert_eq!(PLANET_VOLATILES.scope(), crate::rng::TagScope::Body);
+        assert!(ALL.contains(&PLANET_VOLATILES));
+    }
+
+    #[test]
     fn plan_01_registers_its_two_tags() {
         assert_eq!(SELFTEST_STREAM.name(), "selftest.stream");
         assert_eq!(SELFTEST_STREAM.scope(), crate::rng::TagScope::SelfTest);
@@ -842,7 +880,13 @@ mod tests {
             FEATURE_NURSERY,
             FEATURE_CLOUD,
             FEATURE_VELOCITY,
+            FEATURE_GLOBULAR,
+            FEATURE_CLUSTER,
         ];
+        for tag in [MEMBER_MASS, MEMBER_VELOCITY, MEMBER_ABUNDANCE] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(ALL.contains(&tag));
+        }
         for tag in feature {
             assert_eq!(tag.scope(), crate::rng::TagScope::Feature, "{}", tag.name());
             assert!(ALL.contains(&tag));

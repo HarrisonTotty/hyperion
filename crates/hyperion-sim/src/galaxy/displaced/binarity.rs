@@ -47,8 +47,8 @@ use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, SolarMasses, Years};
 
 /// A star's largest radius up to `until` (or its whole life), in solar radii, from its track at
-/// the median draws; zero below the tracks' lightest mass. Tracks stop at 100 M☉ until P06.T14,
-/// so a heavier star is taken as one of 100 M☉.
+/// the median draws; zero below the tracks' lightest mass. Tracks stop at [`MAX_INITIAL_MASS`]
+/// (150 M☉ since P06.T14), so a heavier star is taken as one of that mass.
 fn largest_radius(m: SolarMasses, comp: &Composition, until: Option<Years>) -> (f64, Years) {
     if m < MIN_INITIAL_MASS {
         return (0.0, Years::ZERO);

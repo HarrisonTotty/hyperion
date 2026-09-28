@@ -103,7 +103,7 @@ pub struct MassFractions {
 impl MassFractions {
     /// The fractions of a body whose envelope is `envelope` of its mass on a core of `core`.
     #[must_use]
-    fn of(core: CoreComposition, envelope: f64) -> Self {
+    pub(crate) fn of(core: CoreComposition, envelope: f64) -> Self {
         let solid = 1.0 - envelope;
         Self {
             iron: core.iron_fraction() * solid,
@@ -599,6 +599,100 @@ fn enveloped(
         fractions: MassFractions::of(core, envelope),
         core,
         radius,
+        adjustment,
+    }
+}
+
+/// The median envelope of a 5 M⊕ core formed inside the snow line, as a share of the body's mass:
+/// 3% (ruling 119.1, its citation corrected by ruling 122.7: Rogers and Owen 2021, MNRAS 503, 1526,
+/// §3.1, model I, whose starting envelopes are log-normal about `μ_X` = 0.040 (+0.015 −0.016) with
+/// `σ_X` = 0.51 (+0.20 −0.12) dex, independent of mass; Owen and Wu's 2017 eq. 24 is their core-mass
+/// law, and their envelopes are log-flat over 1–30%, §3.3).
+pub const FORMATION_ENVELOPE_AT_FIVE: f64 = 0.03;
+
+/// How the formation envelope grows with the core's mass: X₀ ∝ M^0.6, P14.T13.a's own index
+/// (provisional, ruling 122.7; Rogers and Owen's model I has none).
+pub const FORMATION_ENVELOPE_INDEX: f64 = 0.6;
+
+/// The log-normal scatter of the formation envelope about its median, dex: 0.5 (ruling 119.1;
+/// P14.T13.a's check, and Rogers and Owen 2021's model I `σ_X` of 0.51).
+pub const FORMATION_ENVELOPE_SCATTER_DEX: f64 = 0.5;
+
+/// The least formation envelope a core that takes one is born with: 1% of its mass (ruling 119.1;
+/// Owen and Wu 2017's least starting envelope, below which thin starting envelopes end in the gap, their Fig. 3).
+pub const FORMATION_ENVELOPE_FLOOR: f64 = 0.01;
+
+/// The masses over which the formation law hands over to Chen and Kipping's radii, M⊕, in the
+/// logarithm: 10–20 M⊕, the top of Lopez and Fortney's (2014) tables and of the cores Owen and
+/// Wu's law describes; above it an enveloped body inside the snow line is a Neptune or a Saturn,
+/// whose envelope Chen and Kipping's radius measures (the lane's, accepted by ruling 122.6: the
+/// law's median, 4.5% at 10 M⊕, meets Chen and Kipping's there, and core accretion steepens above
+/// it, Rogers and Owen 2021, eq. 19; where the law's 0.5 dex tail exceeds Chen and Kipping's at
+/// high ranks the radius at a fixed rank may fall across the band, a recorded departure from
+/// design note 8's monotonicity in the rank).
+pub const FORMATION_ENVELOPE_HANDOVER: (EarthMasses, EarthMasses) =
+    (EarthMasses::new(10.0), EarthMasses::new(20.0));
+
+/// The formation envelope of a core of mass `mass` at quantile `share` (0–1) of its enveloped
+/// outcomes (ruling 119.1): X₀ = [`FORMATION_ENVELOPE_AT_FIVE`] × (M ÷ 5 M⊕)^0.6 × 10^(0.5 z),
+/// z the standard normal quantile of `share`, floored at [`FORMATION_ENVELOPE_FLOOR`]. The mass
+/// is the body's, which is its core's to a few per cent.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::derive::composition::formation_envelope;
+/// use hyperion_sim::units::EarthMasses;
+///
+/// assert!((formation_envelope(EarthMasses::new(5.0), 0.5) - 0.03).abs() < 1e-12);
+/// assert!((formation_envelope(EarthMasses::new(5.0), 1e-6) - 0.01).abs() < 1e-12);
+/// ```
+#[must_use]
+pub fn formation_envelope(mass: EarthMasses, share: f64) -> f64 {
+    let p = share.clamp(f64::MIN_POSITIVE, 1.0 - f64::EPSILON / 2.0);
+    let z = math::normal_quantile(p);
+    let median =
+        FORMATION_ENVELOPE_AT_FIVE * math::powf(mass.value() / 5.0, FORMATION_ENVELOPE_INDEX);
+    (median * math::exp10(FORMATION_ENVELOPE_SCATTER_DEX * z)).max(FORMATION_ENVELOPE_FLOOR)
+}
+
+/// The composition at formation of a body of mass `mass`, formed inside the snow line, that takes
+/// an envelope at quantile `share` of its enveloped outcomes, whose Chen and Kipping radius at the
+/// same quantile is `chen_kipping`, at flux `flux` (ruling 119.1).
+///
+/// Below [`FORMATION_ENVELOPE_HANDOVER`] the envelope is [`formation_envelope`]'s, on an
+/// Earth-like core (ruling 47.4), held to the largest the mass allows; above it, Chen and
+/// Kipping's radius solved as [`composition`] solves it; between, the two envelope fractions are
+/// blended linearly in the logarithm of the mass, at the same quantile.
+#[must_use]
+pub(crate) fn formed_with_envelope(
+    mass: EarthMasses,
+    share: f64,
+    chen_kipping: EarthRadii,
+    flux: EarthFluxes,
+) -> SolvedComposition {
+    let core = CoreComposition::EARTH_LIKE;
+    let (low, high) = (
+        FORMATION_ENVELOPE_HANDOVER.0.value(),
+        FORMATION_ENVELOPE_HANDOVER.1.value(),
+    );
+    let w = (math::ln(mass.value() / low) / math::ln(high / low)).clamp(0.0, 1.0);
+    let measured = enveloped(mass, chen_kipping, core, flux);
+    if w >= 1.0 {
+        return measured;
+    }
+    let (most, _) = largest_envelope(mass, core, flux);
+    let law = formation_envelope(mass, share);
+    let fraction = ((1.0 - w) * law + w * measured.envelope_fraction()).min(most);
+    let (fraction, adjustment) = if fraction >= most {
+        (most, RadiusAdjustment::ClampedToEnvelopeLimit)
+    } else {
+        (fraction, RadiusAdjustment::Unchanged)
+    };
+    SolvedComposition {
+        fractions: MassFractions::of(core, fraction),
+        core,
+        radius: radius_with_envelope(mass, core, fraction, flux, COMPOSITION_REFERENCE_AGE),
         adjustment,
     }
 }

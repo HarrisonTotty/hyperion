@@ -331,7 +331,17 @@ impl Engine {
                 continue;
             }
             let (helium, m) = (*helium, mass.last());
-            let reach = sse::main_sequence_lifetime(self.ctx.coeffs(), helium, m)
+            // A hydrogen star's track starts its main sequence at its arrival (P06.T15.b).
+            let start = if helium {
+                0.0
+            } else {
+                sse::main_sequence_start(
+                    super::evolve::track_mass(SolarMasses::new(m)),
+                    self.ctx.composition(),
+                )
+            };
+            let reach = start
+                + sse::main_sequence_lifetime(self.ctx.coeffs(), helium, m)
                 + (self.until - self.age).max(0.0);
             let (track, phase) = if helium {
                 (

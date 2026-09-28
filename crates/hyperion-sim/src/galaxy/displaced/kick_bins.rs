@@ -31,8 +31,8 @@
 //!   quantile midpoints; a midpoint rule on a step function errs by up to half a cell at each
 //!   edge, 1 ÷ 128, far outside the 3σ of P08.T8.b's 10⁶-draw check.
 //!
-//! Tracks stop at 100 M☉ until P06.T14 ([`MAX_INITIAL_MASS`]), so a star above it is taken as one
-//! of 100 M☉, as `StarModel` does.
+//! Tracks stop at [`MAX_INITIAL_MASS`] (150 M☉ since P06.T14), so a star above it is taken as one
+//! of that mass, as `StarModel` does.
 
 use super::{BirthSource, GalaxyScales, SPEED_BINS, SPEED_EDGES, SpeedBin, binarity};
 use crate::math;

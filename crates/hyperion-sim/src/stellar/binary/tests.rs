@@ -492,8 +492,10 @@ fn check_invariants(input: &BinaryInput, until: Years) {
                         false,
                         x.mass().value(),
                     );
+                    // The main sequence starts at the arrival on it (P06.T15.b).
+                    let arrival = crate::stellar::sse::arrival_time(x.mass(), input.composition());
                     assert!(
-                        x.age().value() <= lifetime * (1.0 + 1e-6),
+                        x.age().value() <= (lifetime + arrival) * (1.0 + 1e-6),
                         "a main-sequence star of {:?} at {:?} past its {lifetime} yr at {t} in [{start}, {end}] ({}, {}): {}",
                         x.mass(),
                         x.age(),
@@ -528,6 +530,10 @@ fn check_invariants(input: &BinaryInput, until: Years) {
     let mut last = (f64::INFINITY, 0.0);
     for k in 0..=600_u32 {
         let age = until.value() * f64::from(k) / 600.0;
+        // The protostars accrete until t_p (P06.T15.a); the pair's mass only falls after.
+        if age < crate::stellar::premain::PROTOSTAR_YEARS {
+            continue;
+        }
         let total = timeline.state_at(Years::new(age)).total_mass().value();
         assert!(
             total <= last.0 + 1e-6,
@@ -675,6 +681,7 @@ fn a_tenth_of_a_day_double_white_dwarf_merges_at_peters_time() {
     );
     let mut engine = Engine::new(
         Arc::new(Context::of(&input)),
+        0.0,
         until,
         [dwarf(), dwarf()],
         orbit,
@@ -892,6 +899,7 @@ fn a_contact_pair_below_the_tidal_limit_coalesces_at_once() {
         let orbit = LiveOrbit::new(0.0, a, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
         let mut engine = Engine::new(
             Arc::new(Context::of(&input)),
+            0.0,
             1.0e9,
             [star(1.2), star(m2)],
             orbit,
@@ -970,6 +978,7 @@ fn contact_engine(overfill: f64, touched: f64) -> super::evolve::Engine {
     let at_unit = LiveOrbit::new(0.0, 1.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
     let mut engine = Engine::new(
         Arc::clone(&ctx),
+        0.0,
         1.0e10,
         [star(m_donor, 0.5), star(m_accretor, 0.3)],
         at_unit,

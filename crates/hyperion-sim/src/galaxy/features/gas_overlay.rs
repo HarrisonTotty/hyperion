@@ -71,7 +71,7 @@ impl<'a> FeatureGas<'a> {
                 },
             ),
             FeatureMarks::Nursery(marks) => self.nursery_modifiers(feature, marks, out),
-            FeatureMarks::OpenCluster(_) => {}
+            FeatureMarks::OpenCluster(_) | FeatureMarks::Globular(_) => {}
         }
     }
 

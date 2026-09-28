@@ -17,9 +17,10 @@
 //! sum of the components' density peaks, because plan 02's bound multiplies each envelope by an arm
 //! factor's bound over the cell.
 //!
-//! The rogue planets' 16-bit index is the tightest of all: plan 13 caps their abundance per galaxy
-//! at the largest mean this check allows ([`largest_headroom_mean`]) over the same octant, so the
-//! check passes for them by construction (plan 13, Design note 8).
+//! The rogue planets' 16-bit index is the tightest of all. By ruling 125 their density and bound
+//! saturate at [`rogue_planet_saturation_density`], the largest mean this check allows over a 4 ly
+//! cell's volume, so the check passes for them by construction, for every galaxy and every
+//! abundance (plan 13, Design note 8).
 
 use super::cell::CellKey;
 use super::layers::{STELLAR_LAYERS, SUBSTELLAR_LAYERS};
@@ -29,6 +30,8 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::bounds::CellBox;
 #[cfg(doc)]
 use crate::galaxy::fields::Fields;
+use crate::galaxy::imf::MassBand;
+use crate::id::Layer;
 
 /// How many standard deviations of a cell's Poisson draw must fit between the largest mean and the
 /// index capacity: eight, about one chance in 10¹⁵ of a draw above the capacity per cell (plan 03,
@@ -97,7 +100,43 @@ fn largest_cell_mean(galaxy: &Galaxy, spec: LayerSpec, octant: &CellBox) -> f64 
     let bound = galaxy
         .fields()
         .layer_bound(galaxy.shares(), spec.band(), octant);
-    bound * cell_of(spec).volume_ly3()
+    saturated(spec.band(), bound) * cell_of(spec).volume_ly3()
+}
+
+/// The rogue planets' saturation density, per cubic light-year: 992.5, the largest mean a 4 ly
+/// cell's 16-bit index keeps plan 03's headroom for, `largest_headroom_mean(2¹⁶) × (1 − 10⁻⁹) ÷
+/// 64` (ruling 125).
+///
+/// The 64-bit ID layout gives the rogue planets 2⁶¹ ÷ 2⁵¹ = 1,024 IDs per cubic light-year at any
+/// cell size, so no layout gains more. A rogue-planet cell's density is min(a × ρ, C) and its bound
+/// min(a × B, C). The 10⁻⁹ keeps a bound of exactly C inside the check, whose sum of products can
+/// differ from C in its last bits.
+///
+/// P13.T4's census counts the saturated density, as the thinning does.
+#[must_use]
+pub fn rogue_planet_saturation_density() -> f64 {
+    let capacity = 1_u32 << Layer::RoguePlanet.index_bits();
+    let edge = f64::from(Layer::RoguePlanet.cell_size_ly());
+    largest_headroom_mean(capacity) * (1.0 - 1e-9) / (edge * edge * edge)
+}
+
+/// A layer's density or bound, per cubic light-year, after the rogue planets' saturation: `value`
+/// itself for every other band, and bit for bit below the saturation density (ruling 125).
+#[must_use]
+pub(crate) fn saturated(band: MassBand, value: f64) -> f64 {
+    match band {
+        MassBand::RoguePlanet => {
+            // `min` would turn a NaN bound into a full cell; keep the candidate count's panic.
+            debug_assert!(!value.is_nan(), "a rogue-planet density or bound is NaN");
+            value.min(rogue_planet_saturation_density())
+        }
+        MassBand::A
+        | MassBand::B
+        | MassBand::C
+        | MassBand::D
+        | MassBand::E
+        | MassBand::BrownDwarf => value,
+    }
 }
 
 /// The layer's index capacity.

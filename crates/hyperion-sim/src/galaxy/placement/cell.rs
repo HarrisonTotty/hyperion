@@ -214,11 +214,19 @@ impl CellKey {
 /// generated output"), so placement re-derives no part of it. Every candidate of the cell is thinned
 /// against the same value, and [`candidate_count`] draws its Poisson mean from it, so a cell
 /// evaluates it once.
+///
+/// For the rogue planets the bound is then saturated, min(a × B, C) with C
+/// [`rogue_planet_saturation_density`](super::rogue_planet_saturation_density), which changes no
+/// bit of any cell below C (ruling 125).
 #[must_use]
 pub(super) fn layer_bound(galaxy: &Galaxy, key: CellKey) -> f64 {
-    galaxy
-        .fields()
-        .layer_bound(galaxy.shares(), key.band(), &key.cell_box())
+    let band = key.band();
+    super::saturated(
+        band,
+        galaxy
+            .fields()
+            .layer_bound(galaxy.shares(), band, &key.cell_box()),
+    )
 }
 
 /// How many candidates the cell draws: a Poisson number with mean bound × volume, on the cell's own
@@ -711,5 +719,52 @@ mod tests {
             );
             assert_eq!(clamp_to_capacity(u64::MAX, capacity), capacity);
         }
+    }
+
+    // --- The rogue planets' saturation (ruling 125) ---
+
+    /// At 60 rogue planets per star the Milky Way fixture's central cells saturate: their bound is
+    /// the saturation density, every candidate there is kept, and the mean is within the headroom.
+    /// A solar-circle cell's bound is plan 02's own, bit for bit.
+    #[test]
+    fn rogue_planet_cells_saturate_at_the_centre_and_nowhere_else() {
+        use crate::galaxy::placement::{
+            generate_cell, largest_headroom_mean, rogue_planet_saturation_density,
+        };
+        use crate::galaxy::substellar::SubstellarParams;
+        let crowded = SubstellarParams::generator_default().with_rogue_planets_per_star(60.0);
+        let galaxy = galaxy().with_substellar_params(crowded);
+        let limit = rogue_planet_saturation_density();
+        assert!((992.0..993.0).contains(&limit), "{limit}");
+        let centre = CellKey::new(Layer::RoguePlanet, [0, 0, 0]).unwrap();
+        let raw =
+            galaxy
+                .fields()
+                .layer_bound(galaxy.shares(), MassBand::RoguePlanet, &centre.cell_box());
+        assert!(raw > limit, "{raw}");
+        assert_same_bits(layer_bound(&galaxy, centre), limit);
+        assert!(limit * centre.volume_ly3() <= largest_headroom_mean(65_536));
+        let mut cell = Vec::new();
+        generate_cell(&galaxy, centre, &mut cell);
+        let count = candidate_count(&galaxy, centre);
+        assert_eq!(
+            u32::try_from(cell.len()).unwrap(),
+            count,
+            "a saturated cell keeps all"
+        );
+        // Resolving one ID of a saturated cell rescales as generating the whole cell does.
+        for record in cell.iter().step_by(97) {
+            assert_eq!(
+                crate::galaxy::placement::resolve(&galaxy, record.id()),
+                Ok(*record)
+            );
+        }
+        let sun = CellKey::containing(Layer::RoguePlanet, &sunlike()).unwrap();
+        assert_same_bits(
+            layer_bound(&galaxy, sun),
+            galaxy
+                .fields()
+                .layer_bound(galaxy.shares(), MassBand::RoguePlanet, &sun.cell_box()),
+        );
     }
 }

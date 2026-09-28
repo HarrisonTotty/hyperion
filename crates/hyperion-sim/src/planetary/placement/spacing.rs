@@ -11,8 +11,9 @@
 //! # The spacing draw (P14.T6.b)
 //!
 //! Each orbit host draws a mean spacing μ for each kind of neighbours ([`SpacingKind`],
-//! [`SpacingDraws`]): normal about 17 with σ = 2.5, held to 13–24, for small planets; about 30 with
-//! σ = 8 for the terrestrial groups of the `SolarLike` and `TerrestrialOnly` classes; and about 9
+//! [`SpacingDraws`]): normal about 17 with σ = 2.5, held to 13–24, for small planets; about 40 with
+//! σ = 8, held to 26–59, for the terrestrial groups of the `SolarLike` and `TerrestrialOnly`
+//! classes, spaced as final planets are (ruling 106.2); and about 9
 //! with σ = 2 for giant pairs. Each pair then draws Δ = μ + N(0, 3) ([`draw_pair_spacing`]). A
 //! draw under the pair's floor is rejected and redrawn on the next draw number, at most
 //! [`MAX_SPACING_REDRAWS`] (16) times, after which the floor itself is used, so the loop is bounded
@@ -316,10 +317,14 @@ impl SpacingKind {
     ///   that does not transit. Pu and Wu (2015, ApJ 807, 44, abstract) find the pairs of systems
     ///   with four or more transiting planets "tightly clustered around 12 mutual Hill radii" once
     ///   transit geometry and sensitivity are accounted for.
-    /// - Terrestrial groups: normal about 30 with σ = 8, plan 14's figure, held to 14–46, two
-    ///   standard deviations, so that the mean clears the small planets' highest floor of 12.
-    ///   Computed from JPL's masses, the Solar System's Venus and Earth are 26.3 apart and Earth
-    ///   and Mars 40.1.
+    /// - Terrestrial groups: normal about 40 with σ = 8, held to 26–59 (ruling 106.2), the spacing
+    ///   of final terrestrial planets after late accretion, not of the embryos before it (10–12;
+    ///   Walsh and Levison 2019). Raymond, Quinn and Lunine's (2006, Icarus 183, 265, Table 2)
+    ///   planets lie 25.6–58.9 mutual Hill radii apart, median 39.6, computed from their masses and
+    ///   orbits, and the Solar System's Mercury and Venus 63.4, Venus and Earth 26.3 and Earth and
+    ///   Mars 40.1 (from JPL's masses). The hold is the span of Raymond et al.'s pairs; plan 14 had
+    ///   30 with σ = 8, held to 14–46. The same law spaces the ice-rich bodies and the survivor,
+    ///   whose groups are final bodies too.
     /// - Giant pairs: normal about 9 with σ = 2, plan 14's figure, held to 7–13: the giants' floor
     ///   of 7 below and two standard deviations above. Jupiter and Saturn are 7.9 apart, Saturn
     ///   and Uranus 14.0.
@@ -336,10 +341,10 @@ impl SpacingKind {
                 max: 24.0,
             },
             Self::TerrestrialGroup => MeanSpacingLaw {
-                centre: 30.0,
+                centre: 40.0,
                 sigma: 8.0,
-                min: 14.0,
-                max: 46.0,
+                min: 26.0,
+                max: 59.0,
             },
             Self::GiantPair => MeanSpacingLaw {
                 centre: 9.0,
@@ -804,6 +809,27 @@ mod tests {
         assert!((14.0..=20.0).contains(&median), "median {median}");
     }
 
+    /// Ruling 106.2: terrestrial pairs lie as final planets do, Raymond et al.'s (2006) 26–59
+    /// mutual Hill radii about a median of about 40. The 5th percentile is held at 24, not 26:
+    /// each pair scatters N(0, 3) about its host's mean, which is held at 26 or more.
+    #[test]
+    fn terrestrial_pairs_lie_twenty_six_to_fifty_nine_apart_about_forty() {
+        let floor = spacing_floor(EarthMasses::new(0.5), EarthMasses::new(0.5), 0.0, 0.0);
+        let mut spacings = Vec::with_capacity(10_000);
+        for index in 0..2_000 {
+            let id = system(index);
+            let mean =
+                SpacingDraws::for_host(SEED, id, 0).mean_spacing(SpacingKind::TerrestrialGroup);
+            for slot in 2..=6 {
+                spacings.push(draw_pair_spacing(SEED, id, planet(slot), mean, floor).spacing());
+            }
+        }
+        spacings.sort_by(f64::total_cmp);
+        let at = |q: usize| spacings[spacings.len() * q / 100];
+        assert!((38.0..=42.0).contains(&at(50)), "median {}", at(50));
+        assert!(at(5) >= 24.0 && at(95) <= 59.0, "{} to {}", at(5), at(95));
+    }
+
     #[test]
     fn a_pair_s_spacing_is_its_host_s_normal_truncated_at_the_floor() {
         // About a mean of 13 against the eccentric floor of 12, 37% of first draws are rejected;
@@ -934,7 +960,7 @@ mod tests {
         );
         assert_same_bits(
             SpacingDraws::MEDIAN.mean_spacing(SpacingKind::TerrestrialGroup),
-            30.0,
+            40.0,
         );
         assert_same_bits(
             SpacingDraws::MEDIAN.mean_spacing(SpacingKind::GiantPair),

@@ -247,14 +247,30 @@ pub struct OpenClusterMarks {
     fe_h: Dex,
 }
 
-/// The median half-mass radius of an open cluster, 7.75 ly, the geometric middle of the plan's
-/// 6–10 ly (P09.T4.a), with a log-normal scatter of [`HALF_MASS_RADIUS_SIGMA_LN`]. Provisional:
-/// a parameter of the generator version, to be fitted against a cluster catalogue.
-pub const HALF_MASS_RADIUS_MEDIAN: LightYears = LightYears::new(7.75);
+/// The median half-mass radius of a 10⁴ M☉ open cluster, 11.08 ly: Brown and Gnedin's (2021,
+/// MNRAS 508, 5935, Table 2) full LEGUS fit of the projected radius, 2.548 pc × (M ÷ 10⁴ M☉)^0.242,
+/// times 4/3, the half-mass radius over the projected half-light radius (Spitzer 1987, *Dynamical
+/// Evolution of Globular Clusters*, §1.2; 1.305 for a Plummer sphere) (ruling 126.6). The fit is
+/// to the masses of clusters younger than about 1 Gyr as seen today, over about 10^2.6–10^5.4 M☉;
+/// we read it at the initial mass, and below 10^2.6 M☉ it is extrapolated.
+pub const HALF_MASS_RADIUS_AT_1E4: LightYears = LightYears::new(11.08);
 
-/// The log-normal scatter of the half-mass radius, `ln(10 ÷ 6) ÷ 2` = 0.255, so that 6–10 ly is
-/// its central 68%. Provisional, as [`HALF_MASS_RADIUS_MEDIAN`].
-pub const HALF_MASS_RADIUS_SIGMA_LN: f64 = 0.255;
+/// The half-mass radius's slope with mass, 0.242 (Brown and Gnedin 2021).
+pub const HALF_MASS_RADIUS_SLOPE: f64 = 0.242;
+
+/// The half-mass radius's log-normal scatter, dex: Brown and Gnedin 2021's, Table 2 (ruling 126.6).
+pub const HALF_MASS_RADIUS_SIGMA_DEX: f64 = 0.25;
+
+/// An open cluster's half-mass radius at initial mass `m0` and standard normal `n`:
+/// `11.08 ly × (m0 ÷ 10⁴ M☉)^0.242 × 10^(0.25 n)` (P09.T4.a; ruling 126.6).
+#[must_use]
+pub fn half_mass_radius(m0: SolarMasses, n: f64) -> LightYears {
+    LightYears::new(
+        HALF_MASS_RADIUS_AT_1E4.value()
+            * math::powf(m0.value() / 1e4, HALF_MASS_RADIUS_SLOPE)
+            * math::exp10(HALF_MASS_RADIUS_SIGMA_DEX * n),
+    )
+}
 
 /// The King concentration `c = log₁₀(r_t ÷ r_c)` of an open cluster is drawn uniform on this
 /// range. Provisional: our round figures for the range open clusters show (Piskunov et al. 2008,

@@ -809,7 +809,9 @@ impl Engine {
         }
         let mass = track_mass(SolarMasses::new(m));
         let lifetime = sse::main_sequence_lifetime(self.ctx.coeffs(), false, mass.value());
-        let reach = tau * lifetime + (self.until - self.age).max(0.0);
+        let reach = sse::main_sequence_start(mass, self.ctx.composition())
+            + tau * lifetime
+            + (self.until - self.age).max(0.0);
         let track = Track::to_age(
             mass,
             self.ctx.composition(),

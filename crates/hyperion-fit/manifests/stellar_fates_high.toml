@@ -1,5 +1,5 @@
 # The fate table's high panel (plan 06, P06.T38.c; rulings 89, 90 and 99): full
-# tracks from 5.75 to 100 M☉ at the median η, over the fitted metallicities with
+# tracks from 5.75 to 151 M☉ at the median η, over the fitted metallicities with
 # HPT's calibration metallicities among the nodes, validated at two points a cell.
 task = "stellar_fates_high"
 
@@ -7,7 +7,7 @@ task = "stellar_fates_high"
 fe_h_max_step = 0.125
 log_mass_start = 0.76
 log_mass_step = 0.02
-masses = 63
+masses = 72
 etas = [0.0]
 safety = 3.0
 max_bound = 0.02

@@ -32,7 +32,9 @@ const C2: f64 = 9.301_992;
 const C3: f64 = 4.637_345;
 
 /// The time from the zero-age main sequence to the base of the giant branch (HPT equation 4):
-/// (a1 + a2 M⁴ + a3 M^5.5 + M⁷) ÷ (a4 M² + a5 M⁷), Myr.
+/// (a1 + a2 M⁴ + a3 M^5.5 + M⁷) ÷ (a4 M² + a5 M⁷), Myr, times P06.T14's lifetime correction
+/// above 100 M☉ (`vms::lifetime_factor`), which so carries to `t_hook`, `t_MS` and the
+/// Hertzsprung gap.
 ///
 /// For stars above `M_FGB` it is the time to helium ignition, the end of the Hertzsprung gap.
 #[must_use]
@@ -47,6 +49,7 @@ fn t_bgb_myr(m: f64, c: &ZCoeffs) -> f64 {
     let m4 = m2 * m2;
     let m7 = m4 * m2 * m;
     (c.a(1) + c.a(2) * m4 + c.a(3) * m4 * m * m.sqrt() + m7) / (c.a(4) * m2 + c.a(5) * m7)
+        * super::vms::lifetime_factor(m)
 }
 
 /// The fraction µ of `t_bgb` at which the hook ends (HPT equation 7):
@@ -388,6 +391,15 @@ impl MainSequence {
     #[must_use]
     pub(crate) const fn t_ms(&self) -> Megayears {
         Megayears::new(self.t_ms)
+    }
+
+    /// The fractional ages τ around the hook (HPT equations 12 and 14), where the luminosity and
+    /// radius turn over before and after its dip: from `t_hook` back over eight of its widths
+    /// ε `t_hook`, for the track's samples of its maxima.
+    #[must_use]
+    pub(crate) fn hook_fractions(&self) -> [f64; 8] {
+        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0]
+            .map(|k| (1.0 - k * HOOK_EPSILON) * self.t_hook / self.t_ms)
     }
 
     /// Luminosity and radius at `t` from the zero-age main sequence, 0 ≤ t ≤ `t_ms` (HPT

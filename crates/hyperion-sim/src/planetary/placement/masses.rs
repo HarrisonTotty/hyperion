@@ -280,9 +280,11 @@ pub const COMPACT_CHARACTERISTIC_MASS: EarthMasses = EarthMasses::new(7.7);
 /// between 0.5 and 1.5 au, the largest 1.18 M⊕ and the second 0.72 M⊕, a mean of 0.64 M⊕. It sets
 /// how many rocky planets reach Earth's mass (ruling 48, point f). It is not what carried η⊕'s
 /// miss (ruling 60): η⊕ counts 0.5–1.5 R⊕, 0.08–2.9 M⊕, and Kokubo and Genda's mean of 0.64 M⊕
-/// raises it by 0.005; the rocky groups' reach was the carrier (P14.T5, [`CountLaw::Fill`]).
+/// raises it by 0.005; the rocky groups' reach was the carrier (P14.T5, ruling 60's fill to the
+/// snow line, which ruling 106.2 replaced with [`ROCKY_COUNT`]'s 2–6 final planets). With 3.4
+/// planets on average, the Solar System's count, 0.5 M⊕ each is still its figure.
 ///
-/// [`CountLaw::Fill`]: crate::planetary::architecture::template::CountLaw::Fill
+/// [`ROCKY_COUNT`]: crate::planetary::architecture::template::ROCKY_COUNT
 pub const ROCKY_CHARACTERISTIC_MASS: EarthMasses = EarthMasses::new(0.5);
 
 /// The solid mass of the median solar disc, the disc of a 1 M☉ star of \[Fe/H\] = 0 at plan 06's
@@ -369,11 +371,11 @@ pub const M_DWARF_OUTWARD_STEP_DEX: f64 = 0.15;
 /// Weiss et al.'s (2018) step is a property of Kepler's compact multis. An in-situ terrestrial
 /// group has none: the Solar System's are Mercury 0.055, Venus 0.815, Earth 1 and Mars 0.107 M⊕,
 /// and Kokubo and Genda (2010, ApJ 714, L21, §3.2 and Table 1) grow the largest planet near the
-/// middle of their protoplanets' region. Since a rocky group reserves [`ROCKY_MAX_COUNT`]
-/// members and places as many as reach its snow line, a step centred on the reserved count would
-/// also lighten every group that stops early.
+/// middle of their protoplanets' region. A rocky group reserves its drawn count
+/// ([`ROCKY_COUNT`], ruling 106.2) and places as many as its walk reaches, so a step centred on the
+/// reserved count would also lighten every group that stops early.
 ///
-/// [`ROCKY_MAX_COUNT`]: crate::planetary::architecture::template::ROCKY_MAX_COUNT
+/// [`ROCKY_COUNT`]: crate::planetary::architecture::template::ROCKY_COUNT
 pub const ROCKY_OUTWARD_STEP_DEX: f64 = 0.0;
 
 /// How many times the disc's whole solid mass one group's members may hold: 3 (ruling 38, point
@@ -868,9 +870,29 @@ pub const DRIFT_BUDGET_HOST_RANGE: (SolarMasses, SolarMasses) =
 /// 0.42, 0.73, 0.91 and 1.08 M☉: −0.6705, unweighted.
 pub const DRIFT_BUDGET_EXPONENT: f64 = -0.67;
 
+/// The metallicity slope γ of a drift-fed group's budget below solar metallicity: 0.35 (ruling
+/// 121.3, fitted inside its 0.25–0.5).
+///
+/// The close-in planets' inventory falls with iron more slowly than the dust does: Zink et al.
+/// (2023, AJ, arXiv:2305.13389, §6.3) fit 10^(λ \[Fe/H\]) at 1–40 days with λ = 0.24 ± 0.06 for
+/// super-Earths and 0.34 ± 0.05 for sub-Neptunes, and Zhu (2019, ApJ 873, 8, §4) finds the share
+/// of Sun-like stars with Kepler planets rising by 1.44 over 0.4 dex, about 0.40. The budget, 3×
+/// the disc's solids, scales as 10^\[Fe/H\], so [`drift_budget`] multiplies it by
+/// 10^((γ − 1) clamp(\[Fe/H\], −1, 0)), extending ruling 85.3's reading of Mulders et al.'s
+/// inventory from the star's mass to its iron. Without it the innermost-first truncation left
+/// metal-poor chains their hot planets and took their warm ones, the reverse of Mulders et al.
+/// (2016, AJ 152, 187, §3.2 and §4: 10–200 days flat in metallicity) and Petigura et al. (2018, AJ
+/// 155, 89, Table 7: warm super-Earths flat). Held at −1, below which nothing measures it; 1 at
+/// and above solar, so no solar-metallicity anchor moves. On P14.T10.b's sample at \[Fe/H\] −0.8
+/// (with k = 0.4) it takes warm planets from 0.53 of solar to 0.73 and all small planets from 0.49
+/// to 0.65; γ = 0.4 gives 0.72 and 0.63 (at k = 0.45).
+pub const DRIFT_BUDGET_METALLICITY_SLOPE: f64 = 0.35;
+
 /// The most that one drift-fed group's members may hold of `disc`'s solids: [`solid_budget`]
 /// times (M★ ÷ M☉)^[`DRIFT_BUDGET_EXPONENT`] (rulings 73.1 and 85.3), M★ being the disc's host
-/// mass (a pair's total, for a circumbinary disc) held to [`DRIFT_BUDGET_HOST_RANGE`].
+/// mass (a pair's total, for a circumbinary disc) held to [`DRIFT_BUDGET_HOST_RANGE`], and below
+/// solar metallicity times 10^((γ − 1) clamp(\[Fe/H\], −1, 0)), γ being
+/// [`DRIFT_BUDGET_METALLICITY_SLOPE`] (ruling 121.3), exactly 1 at and above solar.
 ///
 /// Mulders, Pascucci and Apai (2015, ApJ 814, 130, §3.3 and Table 2) find the heavy-element mass
 /// in Kepler's planets inside 150 days, where the survey is complete for every spectral type,
@@ -909,7 +931,13 @@ pub const DRIFT_BUDGET_EXPONENT: f64 = -0.67;
 pub fn drift_budget(disc: &DiscProfile) -> EarthMasses {
     let (low, high) = DRIFT_BUDGET_HOST_RANGE;
     let m = disc.host_mass().value().clamp(low.value(), high.value());
-    solid_budget(disc) * math::powf(m, DRIFT_BUDGET_EXPONENT)
+    let budget = solid_budget(disc) * math::powf(m, DRIFT_BUDGET_EXPONENT);
+    let metals = disc.metal_scale();
+    if metals >= 1.0 {
+        budget
+    } else {
+        budget * math::powf(metals.max(0.1), DRIFT_BUDGET_METALLICITY_SLOPE - 1.0)
+    }
 }
 
 /// The most that `group`'s members together may hold of `disc` ([`group_masses_from`]): the gas
@@ -1022,15 +1050,16 @@ fn formed_within(masses: &[EarthMasses], limit: EarthMasses) -> usize {
 /// Every variate at its median shows the law's shape: a chain of five about a Sun centred on its
 /// characteristic mass, each planet's law 0.21 dex heavier than the one inside it, and the
 /// outermost, whose law is centred above the range's 20 M⊕, drawn inside it at its law's
-/// truncated median; and in a disc with a tenth of the metals, the same chain's two inner planets,
-/// all that its budget can build.
+/// truncated median; and in a disc with a tenth of the metals, the same chain's four inner planets,
+/// all that its budget can build: a drift-fed budget falls as 10^(0.35 \[Fe/H\]) below solar
+/// (ruling 121.3), not with the disc's solids.
 ///
 /// ```
 /// use hyperion_sim::planetary::architecture::ArchitectureClass;
 /// use hyperion_sim::planetary::architecture::template::template;
 /// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
 /// use hyperion_sim::planetary::placement::masses::{
-///     GroupCap, MassDraws, group_masses_from, solid_budget,
+///     GroupCap, MassDraws, drift_budget, group_masses_from,
 /// };
 /// use hyperion_sim::units::{Dex, Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 ///
@@ -1056,8 +1085,8 @@ fn formed_within(masses: &[EarthMasses], limit: EarthMasses) -> usize {
 /// let poor = disc_at(-1.0)?;
 /// let held = group_masses_from(chain, &poor, &draws);
 /// assert_eq!(held.cap(), GroupCap::Truncated);
-/// assert_eq!(held.masses(), &m[..2]);
-/// assert!(held.total() <= solid_budget(&poor));
+/// assert_eq!(held.masses(), &m[..4]);
+/// assert!(held.total() <= drift_budget(&poor));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
@@ -1507,6 +1536,34 @@ mod tests {
         }
     }
 
+    /// Ruling 121.3: below solar metallicity a drift-fed budget falls as 10^(γ \[Fe/H\]), held at
+    /// −1, and at and above solar it is ruling 85.3's; rocky budgets follow the disc.
+    #[test]
+    fn a_drift_fed_budget_falls_with_iron_at_its_own_slope() {
+        let host = zams_host(1.0, 0.0);
+        let at = |fe_h: f64| median_disc_with(&host, fe_h, 0.0);
+        let ratio = |fe_h: f64| {
+            let disc = at(fe_h);
+            drift_budget(&disc) / solid_budget(&disc)
+        };
+        for fe_h in [0.0, 0.2, 0.5] {
+            assert_same_bits(ratio(fe_h), 1.0);
+        }
+        let gamma = DRIFT_BUDGET_METALLICITY_SLOPE;
+        assert!((0.25..=0.5).contains(&gamma));
+        for fe_h in [-0.3, -0.8, -1.0] {
+            let expected = math::powf(10.0, (gamma - 1.0) * fe_h);
+            assert!((ratio(fe_h) / expected - 1.0).abs() < 1e-9, "{fe_h}");
+        }
+        assert!((ratio(-2.0) / ratio(-1.0) - 1.0).abs() < 1e-12);
+        // Against solar, the budget falls as 10^(γ [Fe/H]).
+        let fall = drift_budget(&at(-0.8)) / drift_budget(&at(0.0));
+        assert!(
+            (fall / math::powf(10.0, -0.8 * gamma) - 1.0).abs() < 1e-6,
+            "{fall}"
+        );
+    }
+
     #[test]
     fn draws_are_words_eight_s_onwards_of_the_system_stream() {
         let id = system(5);
@@ -1752,9 +1809,11 @@ mod tests {
             let masses = group_masses(SEED, system(9), group, &poor, &slots(1, 10));
             let limit = group_budget(group, &poor);
             if is_drift_fed(group.role()) && !group.places_giants() {
-                // Held at Mulders et al.'s lowest bin, 0.42 M☉ (ruling 85.3).
-                let factor = math::powf(0.42, DRIFT_BUDGET_EXPONENT);
-                assert!((limit / solid_budget(&poor) - factor).abs() < 1e-12);
+                // Held at Mulders et al.'s lowest bin, 0.42 M☉ (ruling 85.3), and at [Fe/H] −0.5
+                // 10^(−0.5 (γ − 1)) (ruling 121.3).
+                let factor = math::powf(0.42, DRIFT_BUDGET_EXPONENT)
+                    * math::powf(10.0, -0.5 * (DRIFT_BUDGET_METALLICITY_SLOPE - 1.0));
+                assert!((limit / solid_budget(&poor) / factor - 1.0).abs() < 1e-9);
             }
             assert!(masses.total().value() <= limit.value() * (1.0 + 1e-12));
             assert!(masses.masses().iter().all(|m| m.value() > 0.0));
@@ -1791,14 +1850,14 @@ mod tests {
         for (a, b) in some.masses().iter().zip(whole.masses()) {
             assert_same_bits(a.value(), b.value());
         }
-        assert!(some.total() <= solid_budget(&poor(-1.0)));
+        assert!(some.total() <= drift_budget(&poor(-1.0)));
         let next = some.total() + whole.masses()[formed];
-        assert!(next > solid_budget(&poor(-1.0)));
+        assert!(next > drift_budget(&poor(-1.0)));
         // One still poorer forms none: its budget is under even the innermost member.
         let none = group_masses_from(chain(), &poor(-3.0), &draws);
         assert_eq!(none.cap(), GroupCap::Truncated);
         assert!(none.masses().is_empty());
-        assert!(solid_budget(&poor(-3.0)) < whole.masses()[0]);
+        assert!(drift_budget(&poor(-3.0)) < whole.masses()[0]);
         // An ice giant group, drawn from its law, is scaled down whole.
         let ice = &template(ArchitectureClass::SolarLike).groups()[2];
         let scaled = group_masses_from(ice, &poor(-3.0), &draws[..2]);

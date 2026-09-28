@@ -28,15 +28,15 @@ fn draws(z: f64) -> StarDraws {
     })
 }
 
-/// A random star: initial mass log-uniform in 0.1–100 M☉, Z log-uniform in 10⁻⁴–0.03, and η from
+/// A random star: initial mass log-uniform in 0.1–150 M☉, Z log-uniform in 10⁻⁴–0.03, and η from
 /// a standard normal, as design note 7 draws it.
 fn random_star(rng: &mut Lcg) -> (SolarMasses, Composition, StarDraws) {
-    let log_m = -1.0 + 3.0 * rng.next_f64();
+    let log_m = -1.0 + (math::log10(150.0) + 1.0) * rng.next_f64();
     let log_z = -4.0 + (math::log10(0.03) + 4.0) * rng.next_f64();
     // Box–Muller from two uniforms of (0, 1].
     let (u1, u2) = (1.0 - rng.next_f64(), rng.next_f64());
     let z = (-2.0 * math::ln(u1)).sqrt() * math::cos(core::f64::consts::TAU * u2);
-    let m = math::exp10(log_m).clamp(0.1, 100.0);
+    let m = math::exp10(log_m).clamp(0.1, 150.0);
     (
         SolarMasses::new(m),
         composition(math::exp10(log_z).clamp(1e-4, 0.03)),
@@ -149,18 +149,26 @@ fn the_same_star_gives_the_same_track() {
     assert_eq!(Track::full(m, &comp, &d), Track::full(m, &comp, &d));
 }
 
-/// Mass never increases (there is no protostar until P06.T15), over random tracks under both
-/// recipes.
+/// Mass never increases after the protostar phase (P06.T10.c, T15.a), over random tracks under
+/// both recipes; the protostar's only grows.
 #[test]
-fn mass_never_increases() {
+fn mass_never_increases_after_the_protostar_phase() {
     let mut rng = Lcg::new(0x6d61_7373);
     for _ in 0..60 {
         let (m, comp, d) = random_star(&mut rng);
         for options in [TrackOptions::default(), TrackOptions::hurley2000()] {
             let track = Track::full_with(m, &comp, &d, options);
-            let mut last = f64::INFINITY;
+            let (mut last, mut accreted) = (f64::INFINITY, 0.0_f64);
             for a in ages_of(&track, 800) {
                 let mass = track.state_at(Years::new(a)).mass().value();
+                // Under `Bridges::Instant` there is no protostar (P06.T12.b's SSE form).
+                if a < crate::stellar::premain::PROTOSTAR_YEARS
+                    && options.bridges() == Bridges::Physical
+                {
+                    assert!(mass >= accreted, "{m:?}: a protostar loses mass at {a}");
+                    accreted = mass;
+                    continue;
+                }
                 assert!(
                     mass <= last,
                     "{m:?}, {comp:?}: mass rises at {a}: {mass} > {last}"
@@ -209,7 +217,8 @@ fn no_state_of_a_track_is_non_finite() {
     }
 }
 
-/// The largest radius and luminosity so far never fall and never lie below the present ones.
+/// The largest radius and luminosity so far never lie below the present ones, and from the arrival
+/// on the main sequence, where they start counting, never fall.
 #[test]
 fn the_largest_radius_and_luminosity_so_far_never_fall() {
     let mut rng = Lcg::new(0x6d61_7869);
@@ -223,6 +232,9 @@ fn the_largest_radius_and_luminosity_so_far_never_fall() {
             }
         }
         ages.sort_by(f64::total_cmp);
+        let arrival = track
+            .main_sequence_start()
+            .expect("a star's track has a main sequence");
         let mut last = [0.0_f64; 2];
         for a in ages {
             let now = track.state_at(Years::new(a));
@@ -232,6 +244,13 @@ fn the_largest_radius_and_luminosity_so_far_never_fall() {
                 r >= now.radius().value() && l >= now.luminosity().value(),
                 "{m:?} at {a}"
             );
+            if a < arrival {
+                assert!(
+                    r <= now.radius().value() && l <= now.luminosity().value(),
+                    "{m:?} at {a}: before the arrival the maxima are the present values"
+                );
+                continue;
+            }
             assert!(
                 r >= last[0] * (1.0 - 1e-12) && l >= last[1] * (1.0 - 1e-12),
                 "{m:?}, {comp:?}: a maximum falls at {a}: {r} after {}, {l} after {}",
@@ -330,11 +349,13 @@ fn light_helium_star_hand_over(options: TrackOptions) -> ([f64; 3], StarState) {
         }
     };
     let last = last.expect("the helium star's last segment was evaluated");
-    let segment = builder.remnant_segment(fate, [0.0; 2], Some(last));
+    let segment = builder.remnant_segment(fate, [0.0; 2], Some(last), None);
     let physics = Physics {
         coeffs: &coeffs,
         z: comp.z_fit(),
         remnant: options.remnant(),
+        bridges: options.bridges(),
+        helium: None,
     };
     let birth = fate.death.age().value();
     let state = StarState::new(segment.evaluate(&physics, birth).parts(birth));
@@ -356,6 +377,9 @@ fn a_light_helium_stars_white_dwarf_steps_in_luminosity_only_under_hurley2000() 
     assert!(step.abs() < 1e-9, "the matched step is {step} dex");
     assert_eq!(modern.phase(), Phase::CarbonOxygenWhiteDwarf);
 }
+
+/// Where a bridged white dwarf's fade hands over to the cooling law, L☉ (ruling 127.1).
+const FADE_END: f64 = super::post_agb::FADE_END_LUMINOSITY;
 
 /// Under the generator's recipe a white dwarf takes over at the luminosity its star ended with,
 /// whether it leaves the AGB as carbon–oxygen or oxygen–neon or a giant's degenerate core as
@@ -393,7 +417,9 @@ fn a_white_dwarf_takes_over_at_its_stars_luminosity_and_then_fades() {
             // No step: over a stride that is a small share of the age, a small change. The
             // largest, 25% at 5 Gyr, is the 7 M☉ oxygen–neon dwarf's Debye plunge, which the
             // Montreal cooling has from 10⁻⁵ to 10⁻⁷ L☉ in 0.6 Gyr (P06.T20.a, ruling 57.2).
-            if i > 1 {
+            // Above 10 L☉ a dwarf fresh from the post-AGB knee fades on Miller Bertolami's shape,
+            // within centuries to millennia (ruling 127.1); the stride check is the cooling law's.
+            if i > 1 && l < FADE_END {
                 assert!(
                     ln / l > 0.7,
                     "{m} M☉ at Z = {z}, step {i}: L from {l} to {ln}"
@@ -908,8 +934,9 @@ fn reimers_eta_follows_design_note_7() {
     assert!(reimers_eta(-8.5).value() >= 0.0);
 }
 
-/// A remnant's state: a white dwarf fades by HPT's cooling law at the radius of its mass, a
-/// neutron star has P06.T11's radius, and a black hole is dark.
+/// A remnant's state: a white dwarf fades by its cooling law and shrinks to the radius of its mass
+/// as its post-AGB inflation fades (ruling 124.2), a neutron star has P06.T11's radius, and a black
+/// hole is dark.
 #[test]
 fn remnants_fade_or_stay_dark() {
     let comp = composition(0.02);
@@ -920,7 +947,12 @@ fn remnants_fade_or_stay_dark() {
         wd.state_at(Years::new(death + 1e9)),
     );
     assert!(old.luminosity() < young.luminosity());
-    assert!((old.radius().value() - young.radius().value()).abs() < 1e-15);
+    assert!(old.radius() <= young.radius());
+    let cold = crate::stellar::remnant::structure::white_dwarf_radius(
+        RemnantRecipe::MandelMuller2020,
+        old.mass(),
+    );
+    assert!(old.radius() >= cold && old.radius().value() < 1.05 * cold.value());
     let bh = Track::full_with(
         SolarMasses::new(40.0),
         &comp,
@@ -972,6 +1004,8 @@ fn a_rebuilt_main_sequence_carries_its_lifetime_bit_for_bit() {
             coeffs: &coeffs,
             z: comp.z_fit(),
             remnant: RemnantRecipe::default(),
+            bridges: Bridges::Physical,
+            helium: None,
         };
         for i in 0..60 {
             let mt = SolarMasses::new(math::exp10(-0.7 + 2.7 * f64::from(i) / 59.0));
@@ -1049,29 +1083,47 @@ fn the_main_sequence_fast_path_is_the_tracks_over_a_hundred_thousand_stars() {
 
 fn check_main_sequence_fast_path(seed: u64, n: u32) {
     let mut rng = Lcg::new(seed);
-    let (mut answered, mut with_knots, mut past_end, mut at_zero) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let (mut answered, mut with_knots, mut past_end, mut at_zero, mut before) =
+        (0_u32, 0_u32, 0_u32, 0_u32, 0_u32);
     for i in 0..n {
         let (m, comp, d) = random_star(&mut rng);
         let t_ms = super::super::ms::t_ms(m, &ZCoeffs::new(comp.z_fit())).value() * 1e6;
-        // Mostly on the main sequence, some past it, one in forty at age zero and one in forty at
-        // the main sequence's end, where the next segment starts.
+        let start =
+            super::super::arrival_time(m, &comp).max(crate::stellar::premain::PROTOSTAR_YEARS);
+        // Mostly on the main sequence, some past it, one in forty at its start (the arrival, or
+        // the end of accretion), one in forty at its end, where the next segment starts, and one
+        // in forty before it.
         let pick = rng.next_f64();
-        let age = if i % 40 == 0 {
-            0.0
-        } else {
-            t_ms * math::exp10(-4.0 * pick) * if pick < 0.2 { 1.3 } else { 1.0 }
+        let age = match i % 40 {
+            0 => start,
+            2 => 0.5 * start,
+            _ => start + t_ms * math::exp10(-4.0 * pick) * if pick < 0.2 { 1.3 } else { 1.0 },
+        };
+        let main_sequence = |track: &Track| {
+            track
+                .segments()
+                .iter()
+                .find(|s| matches!(s.model, model::Model::MainSequence { .. }))
+                .cloned()
         };
         let track = Track::to_age(m, &comp, &d, Years::new(age));
-        let first = &track.segments()[0];
-        let age = if i % 40 == 1 { first.end } else { age };
+        let age = if i % 40 == 1 {
+            main_sequence(&track).map_or(age, |s| s.end)
+        } else {
+            age
+        };
         let track = if i % 40 == 1 {
             Track::to_age(m, &comp, &d, Years::new(age))
         } else {
             track
         };
-        let first = &track.segments()[0];
         let fast = main_sequence_state_of(m, &comp, &d, TrackOptions::default(), Years::new(age));
         let what = format!("{m:?}, {comp:?}, {:?}, age {age} of t_ms {t_ms}", d.eta());
+        let Some(first) = main_sequence(&track).filter(|s| s.start <= age) else {
+            before += 1;
+            assert!(fast.is_none(), "before the main sequence: {what}");
+            continue;
+        };
         if !first.knots.is_empty() {
             with_knots += 1;
             assert!(fast.is_none(), "a main sequence with knots: {what}");
@@ -1080,7 +1132,7 @@ fn check_main_sequence_fast_path(seed: u64, n: u32) {
             assert!(fast.is_none(), "past the main sequence: {what}");
         } else {
             answered += 1;
-            at_zero += u32::from(age <= 0.0);
+            at_zero += u32::from(age <= first.start);
             let fast = fast.unwrap_or_else(|| panic!("a knot-free main sequence: {what}"));
             assert_eq!(fast.phase(), Phase::MainSequence, "{what}");
             let exact = track.state_at(Years::new(age));
@@ -1089,8 +1141,9 @@ fn check_main_sequence_fast_path(seed: u64, n: u32) {
     }
     // Every branch is exercised; about half the log-uniform masses have winds enough for knots.
     assert!(
-        answered > n / 4 && with_knots > 0 && past_end > n / 80 && at_zero > 0,
-        "{answered} answered ({at_zero} at age zero), {with_knots} with knots, {past_end} past the end"
+        answered > n / 4 && with_knots > 0 && past_end > n / 80 && at_zero > 0 && before > 0,
+        "{answered} answered ({at_zero} at the start), {with_knots} with knots, {past_end} past the \
+         end, {before} before the start"
     );
 }
 
@@ -1100,7 +1153,7 @@ fn the_main_sequence_fast_path_refuses_outside_its_range() {
     let (comp, d) = (Composition::SOLAR, StarDraws::median());
     for (m, age) in [
         (0.09, 1e9),
-        (100.5, 1e5),
+        (150.5, 1e6),
         (1.0, -1.0),
         (1.0, f64::NAN),
         (1.0, 2e10),

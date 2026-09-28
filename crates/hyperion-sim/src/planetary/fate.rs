@@ -497,7 +497,7 @@ struct Segment {
 ///     Metres, Radians, SolarMasses, Years,
 /// };
 ///
-/// // The Sun 13.5 Gyr after its birth, a white dwarf since 12.46 Gyr.
+/// // The Sun 13.5 Gyr after the onset of its collapse, a white dwarf since 12.50 Gyr.
 /// let sun = StarModel::new(
 ///     SolarMasses::new(1.0),
 ///     Composition::SOLAR,
@@ -528,14 +528,14 @@ struct Segment {
 /// };
 /// assert_eq!(cause, DestructionCause::Engulfed);
 /// let age = 13.5e9 + at.since_epoch().as_julian_years_f64();
-/// assert!((12.2e9..12.33e9).contains(&age), "engulfed at {age:e} yr");
+/// assert!((12.24e9..12.37e9).contains(&age), "engulfed at {age:e} yr");
 /// assert_eq!(fate.at(UniverseTime::EPOCH).state(), BodyState::Destroyed { cause, at });
 ///
 /// let earth = at_1_au(1.0, 5_513.0)?;
 /// let now = BodyFate::resolve(&earth, &host).at(UniverseTime::EPOCH);
 /// let orbit = now.orbit().ok_or("the Earth survives")?;
 /// let au = orbit.semi_major_axis().value() / 1.495_978_707e11;
-/// assert!((au - 1.924).abs() < 1e-3, "at {au} au");
+/// assert!((au - 1.953).abs() < 1e-3, "at {au} au");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]

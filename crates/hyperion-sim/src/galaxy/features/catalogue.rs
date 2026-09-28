@@ -88,14 +88,18 @@ use crate::units::{Dex, HydrogenPerCm3, KilometresPerSecond, LightYears, SolarMa
 
 use super::ids::{FeatureId, FeatureKind, FeatureProcess};
 use super::kinds::cloud::{CLOUD_MASS_MAX, CLOUD_MASS_MIN, CLOUD_MASS_SLOPE, CloudMarks};
+use super::kinds::globular::{
+    ACCRETED_AGES, CORE_LAW, GlobularMarks, HALF_MASS_RADIUS_LAW, IN_SITU_AGE, METALLICITY_LAWS,
+    origin_component,
+};
 use super::kinds::nursery::{
     AGE_SPREAD_MAX_MYR, BLOW_OUT_HEIGHTS, BOUND_FRACTION, BUBBLE_INTERIOR_MEDIAN,
     BUBBLE_INTERIOR_SIGMA_DEX, DISSOLUTION_AGE_MYR, EFFICIENCY_RANGE, EMBEDDED_DURATION_MYR,
     EXPANSION_SPEED_KM_S, NurseryMarks, NurseryStage, SIZE_RANGE_LY,
 };
 use super::kinds::open_cluster::{
-    CONCENTRATION_RANGE, HALF_MASS_RADIUS_MEDIAN, HALF_MASS_RADIUS_SIGMA_LN, NurseryMassFunction,
-    OpenClusterMarks, least_surviving_mass, surviving_number_fraction,
+    CONCENTRATION_RANGE, HALF_MASS_RADIUS_AT_1E4, NurseryMassFunction, OpenClusterMarks,
+    half_mass_radius, least_surviving_mass, surviving_number_fraction,
 };
 #[cfg(doc)]
 use super::shares::{FeatureShares, NurseryRates};
@@ -125,6 +129,8 @@ const CLOUD_REACH_CORES: f64 = 10.0;
 /// A feature's marks, by the process that drew it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FeatureMarks {
+    /// A globular cluster's (P09.T12).
+    Globular(GlobularMarks),
     /// An old open cluster's.
     OpenCluster(OpenClusterMarks),
     /// A nursery's, which is a star-forming region, a young cluster or an association by time.
@@ -188,6 +194,7 @@ impl FeatureRecord {
     #[must_use]
     pub const fn age_at_epoch(&self) -> Option<Years> {
         match &self.marks {
+            FeatureMarks::Globular(marks) => Some(marks.age()),
             FeatureMarks::OpenCluster(marks) => Some(marks.age_at_epoch()),
             FeatureMarks::Nursery(marks) => Some(marks.age_at_epoch()),
             FeatureMarks::Cloud(_) => None,
@@ -198,6 +205,7 @@ impl FeatureRecord {
     #[must_use]
     pub fn kind_at(&self, t: Years) -> Option<FeatureKind> {
         match &self.marks {
+            FeatureMarks::Globular(_) => Some(FeatureKind::Globular),
             FeatureMarks::OpenCluster(marks) => (marks.age_at_epoch().value() + t.value()
                 < marks.dissolution_time().value())
             .then_some(FeatureKind::OpenCluster),
@@ -422,7 +430,7 @@ impl FeatureCatalogue {
     pub fn density(galaxy: &Galaxy, process: FeatureProcess, p: &GalacticPosition) -> f64 {
         let point = PointLy::from(p);
         match process {
-            FeatureProcess::Globular => 0.0,
+            FeatureProcess::Globular => galaxy.feature_shares().globulars().density(&point),
             FeatureProcess::OldOpenCluster(_) | FeatureProcess::Nursery => {
                 let factor = disc_factor(galaxy, process);
                 disc_components(galaxy, process)
@@ -710,7 +718,19 @@ fn proposal(galaxy: &Galaxy, process: FeatureProcess, cell: FeatureCell) -> Prop
     let z_near = z_near(cell);
     let [ox, oy, oz] = cell.origin().to_array();
     match process {
-        FeatureProcess::Globular => Proposal::NONE,
+        FeatureProcess::Globular => {
+            // The globulars' law never rises with |x|, |y| or |z| and its cuts are indicators that
+            // do not either, so the cell's nearest corner bounds it (module documentation).
+            let cube = CellBox::new(cell.origin().to_array(), FeatureCell::EDGE_LY)
+                .expect("a feature cell is a cell box of the root cube");
+            let bound = galaxy
+                .feature_shares()
+                .globulars()
+                .density(&cube.nearest_corner())
+                * (1.0 + BOUND_MARGIN);
+            let axes = [Axis::new(ox, 0.0), Axis::new(oy, 0.0), Axis::new(oz, 0.0)];
+            Proposal::one(Term::new(bound, axes, Part::All))
+        }
         FeatureProcess::OldOpenCluster(_) | FeatureProcess::Nursery => {
             let factor = disc_factor(galaxy, process);
             let height = disc_components(galaxy, process)
@@ -1040,7 +1060,7 @@ fn evaluate(
     }
     let point = PointLy::from(&position);
     match process {
-        FeatureProcess::Globular => None,
+        FeatureProcess::Globular => Some(globular(galaxy, id, position, &point)),
         FeatureProcess::OldOpenCluster(sub_disc) => {
             old_cluster(galaxy, sub_disc, id, position, &point)
         }
@@ -1119,10 +1139,7 @@ fn old_cluster(
     stream.seek(1 + CLUSTER_ATTEMPT_WORDS * CONDITIONAL_ATTEMPTS);
     let mass =
         NurseryMassFunction::STANDARD.quantile_above(least_surviving_mass(age), stream.uniform());
-    let radius = LightYears::new(
-        HALF_MASS_RADIUS_MEDIAN.value()
-            * math::exp(HALF_MASS_RADIUS_SIGMA_LN * stream.standard_normal()),
-    );
+    let radius = half_mass_radius(mass, stream.standard_normal());
     let concentration = stream.uniform_in(CONCENTRATION_RANGE.0, CONCENTRATION_RANGE.1);
     let metallicity = component.metallicity(point, age);
     let marks = OpenClusterMarks::new(
@@ -1187,7 +1204,7 @@ fn nursery(
             efficiency: EFFICIENCY_RANGE.0,
             fe_h: Dex::new(0.0),
             bubble_interior: BUBBLE_INTERIOR_MEDIAN,
-            half_mass_radius: HALF_MASS_RADIUS_MEDIAN,
+            half_mass_radius: HALF_MASS_RADIUS_AT_1E4,
             concentration: CONCENTRATION_RANGE.0,
         };
         (marks.stage_at(Years::ZERO) != NurseryStage::Dissolved).then_some(marks)
@@ -1205,10 +1222,7 @@ fn nursery(
         BUBBLE_INTERIOR_MEDIAN.value()
             * math::exp10(BUBBLE_INTERIOR_SIGMA_DEX * stream.standard_normal()),
     );
-    let radius = LightYears::new(
-        HALF_MASS_RADIUS_MEDIAN.value()
-            * math::exp(HALF_MASS_RADIUS_SIGMA_LN * stream.standard_normal()),
-    );
+    let radius = half_mass_radius(life.mass, stream.standard_normal());
     let concentration = stream.uniform_in(CONCENTRATION_RANGE.0, CONCENTRATION_RANGE.1);
     let marks = NurseryMarks {
         expansion_speed: speed,
@@ -1232,6 +1246,68 @@ fn nursery(
         marks: FeatureMarks::Nursery(marks),
         reach: LightYears::new(reach),
     })
+}
+
+/// A globular's reach, in tidal radii: its tails' extent until P09.T21's grid (ours).
+const GLOBULAR_REACH_TIDAL_RADII: f64 = 4.0;
+
+/// A globular's marks (P09.T12.b; [`globular`](super::kinds::globular)'s documentation).
+///
+/// Words of `feature.globular`: 0 the part (metal-rich or metal-poor) by the parts' odds at the
+/// position, 1 the origin within the part, 2 the mass, 3–4 the half-mass radius's normal, 5–6 the
+/// core's normal, 7–8 the metallicity's normal, 9 an accreted cluster's age.
+fn globular(
+    galaxy: &Galaxy,
+    id: FeatureId,
+    position: GalacticPosition,
+    point: &PointLy,
+) -> FeatureRecord {
+    let system = galaxy.feature_shares().globulars();
+    let mut stream = feature_stream(galaxy, tags::FEATURE_GLOBULAR, id);
+    let (part, within) = (stream.mark(), stream.mark());
+    let origin = system.origin(point, part, within);
+    let mass = system.mass_function().quantile(stream.uniform());
+    let r_kpc = (point.x * point.x + point.y * point.y + point.z * point.z).sqrt()
+        / crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
+    let (r0, slope, scatter) = HALF_MASS_RADIUS_LAW;
+    let r_h =
+        r0 * math::powf(r_kpc.max(0.05), slope) * math::exp10(scatter * stream.standard_normal());
+    let (u_mean, u_sigma, (u_lo, u_hi)) = CORE_LAW;
+    let u = (u_mean + u_sigma * stream.standard_normal()).clamp(u_lo, u_hi);
+    let ((rich_mean, rich_sigma), (poor_mean, poor_sigma)) = METALLICITY_LAWS;
+    let (mean, sigma) = if origin.is_metal_rich() {
+        (rich_mean, rich_sigma)
+    } else {
+        (poor_mean, poor_sigma)
+    };
+    let fe_h = Dex::new(mean + sigma * stream.standard_normal());
+    let accreted_age = stream.uniform_in(ACCRETED_AGES.0, ACCRETED_AGES.1);
+    let age = Years::new(if origin.is_in_situ() {
+        IN_SITU_AGE
+    } else {
+        accreted_age
+    });
+    let marks = GlobularMarks {
+        origin,
+        mass,
+        half_mass_radius: LightYears::new(r_h * crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC),
+        log_half_mass_over_core: u,
+        fe_h,
+        age,
+    };
+    let tidal = galaxy.potential().tidal_radius(mass, point).value() / METRES_PER_LIGHT_YEAR;
+    FeatureRecord {
+        id,
+        process: FeatureProcess::Globular,
+        position,
+        component: origin_component(galaxy, origin),
+        marks: FeatureMarks::Globular(marks),
+        reach: LightYears::new(
+            (GLOBULAR_REACH_TIDAL_RADII * tidal)
+                .max(marks.half_mass_radius().value())
+                .min(MAX_FEATURE_REACH.value()),
+        ),
+    }
 }
 
 /// A cloud's marks (P09.T4.c).
@@ -1528,6 +1604,12 @@ mod tests {
                         m.is_bound()
                     ),
                     FeatureMarks::Cloud(m) => format!("mass {:e}", m.mass().value()),
+                    FeatureMarks::Globular(m) => format!(
+                        "mass {:e} r_h {:e} {:?}",
+                        m.mass().value(),
+                        m.half_mass_radius().value(),
+                        m.origin()
+                    ),
                 };
                 writer.line(&format!(
                     "{} {} ({x:?}, {y:?}, {z:?}) {marks}",
