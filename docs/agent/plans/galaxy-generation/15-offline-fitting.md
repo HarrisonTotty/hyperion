@@ -745,9 +745,12 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
   complete by τ of 8–30 (the last age bin's form at τ of 8–30 and beyond 30 agree within the noise
   floor).
 - **P15.T6.f Hypervelocity row.** The density of unbound survivors on straight lines: the old
-  populations' density convolved with 1 ÷ (4π r² v), fitted by one `CoredPowerLaw`. **Acceptance:**
-  misplaced share under 10%; at Milky Way rates and the brainstorm's 30% channel share the number
-  inside the cube is some tens of thousands (10⁴–10⁵).
+  populations' density convolved with 1 ÷ (4π r² v), fitted by one `CoredPowerLaw`; its shape does
+  not depend on v, so it serves both survivor populations of ruling 128.1 (0.26 at 1,000–1,500
+  km/s, 0.04 at 2,000–2,500). **Acceptance:** misplaced share under 10%; at Milky Way rates the
+  number inside the cube is 10⁴–10⁵, of them 1,500–3,500 fast and 1.5–4.5 × 10⁴ slow; the
+  rate-weighted share of slow launches below 1.5 times the local escape speed, where the straight
+  line is poor, is reported as a finding.
 
 **Files.** `src/tasks/displaced/{mod,orbits,births,histogram,fit_disc,fit_old,kinematics}.rs`,
 `manifests/displaced.toml`, `manifests/displaced.smoke.toml`, `tables/displaced_forms.rs`.
@@ -904,8 +907,14 @@ provisional, fitted to the smoke histograms; no output moves).**
   its age distribution (Maoz and Graur 2017), a reading of "the old populations' density" that
   gives each population its ancient events; the azimuthal kernel is closed (`2π ÷ √(A² − B²)`),
   softened at 1% of the source's distance. Rate 0.54 per century (Li et al. 2011), channel 0.3,
-  2,200 km/s: **17,365 inside the cube, 10.7 Myr each; misplaced 5.3%** (acceptance 10⁴–10⁵ and
-  under 10%).
+  2,200 km/s: 17,365 inside the cube, 10.7 Myr each; misplaced 5.3% (acceptance 10⁴–10⁵ and
+  under 10%). **Under ruling 128.1** (lane `disp08b`, 2026-09-28): the two populations and the
+  rate are the sim's `class_table::{SURVIVOR_POPULATIONS, MILKY_WAY_IA_RATE_PER_YEAR}`, held by
+  the fingerprint, not manifest parameters; the table gains `HYPERVELOCITY_MEAN_EXIT_LY`, the
+  rate-weighted mean path to the cube's face (**78,662 ly**), from which the class table computes
+  each population's count. **29,123 inside: 26,849 slow (1.5–4.5 × 10⁴) and 2,273 fast
+  (1,500–3,500)**; misplaced still 5.3%; **0.017** of slow launches leave below 1.5 times the
+  local escape speed (the full potential's), a finding: straight lines serve all but a fiftieth.
 - **The 1% run as a check** (`displaced_orbits.one_percent.toml`, 192,608 orbits, 1.8 CPU-hours;
   fitted with `displaced_forms.one_percent.toml` to a scratch file, never committed). At this size
   every fit sits at its noise floor (misplaced ÷ floor 1.0–1.7), so the figures are preliminary

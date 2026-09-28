@@ -1,7 +1,10 @@
 //! The hypervelocity row: ancient Type Ia survivors on straight lines (plan 15, P15.T6.f).
 //!
-//! A surviving donor leaves its supernova at 1,900–2,500 km/s (Shen et al. 2018, ApJ 865, 15),
-//! far above any escape speed, and crosses the cube in about 10⁷ years on a straight line. In a
+//! A surviving donor leaves its supernova by the D6 mechanism (Shen et al. 2018, ApJ 865, 15):
+//! slow ones from low-mass donors at 1,000–1,500 km/s, a quarter of the Type Ia rate, and fast
+//! ones at 2,000–2,500 km/s, a few per cent (El-Badry et al. 2023, Open Journal of Astrophysics 6, §8.2; ruling 128.1),
+//! the sim's `class_table::SURVIVOR_POPULATIONS`. Both are far above most escape speeds and
+//! cross the cube in 10–20 Myr on straight lines. In a
 //! steady state, objects launched isotropically at speed v from a source of rate density q(x′)
 //! have the density `n(x) = ∫ q(x′) ÷ (4π |x − x′|² v) d³x′`, the sources convolved with
 //! `1 ÷ (4π r² v)`. Only sources inside the cube are taken: survivors launched from beyond it can
@@ -17,16 +20,20 @@
 //! logarithmic singularity meets a node; the sources are axisymmetrised over four azimuths.
 //!
 //! The form is then one `CoredPowerLaw`, fitted to `n`'s cell integrals by the misplaced share as
-//! the other forms are. The number inside the cube is the rate times the channel's share times
-//! the mean time a survivor spends inside, the rate-weighted mean over the sources of the
-//! distance to the cube's face along an isotropic direction over v.
+//! the other forms are; on straight lines in a steady state the shape does not depend on v, so
+//! one form serves both populations. The number inside the cube is, for each population, the Type
+//! Ia rate times its share times the mean path to the cube's face (the rate-weighted mean over the
+//! sources along isotropic directions) over its `1 ÷ ⟨1 ÷ v⟩`. Where a slow survivor launches
+//! below 1.5 times the local escape speed the straight line is poor; that share is reported.
 
 use std::f64::consts::PI;
 use std::num::NonZeroUsize;
 
 use hyperion_sim::coords::ROOT_HALF_WIDTH_LY;
 use hyperion_sim::galaxy::PointLy;
-use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
+use hyperion_sim::galaxy::displaced::class_table::{
+    MILKY_WAY_IA_RATE_PER_YEAR, SURVIVOR_POPULATIONS, survivors_inside,
+};
 use hyperion_sim::galaxy::displaced::forms::CoredPowerLawParams;
 use hyperion_sim::galaxy::fields::{Fields, MAX_COMPONENTS};
 use hyperion_sim::math;
@@ -54,12 +61,6 @@ const AZIMUTHS: [f64; 4] = [0.0, 0.25 * PI, 0.5 * PI, 0.75 * PI];
 /// The hypervelocity row's inputs, from the manifest.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HypervelocitySettings {
-    /// The Galaxy's Type Ia rate, per year.
-    pub ia_rate_per_year: f64,
-    /// The share of events that leave a hypervelocity donor: 0.3.
-    pub channel_share: f64,
-    /// The donors' speed, km/s.
-    pub speed_km_s: f64,
     /// Gauss–Legendre nodes per doubling panel of the source grid.
     pub panel_nodes: usize,
     /// Isotropic directions of the residence time's average.
@@ -79,10 +80,13 @@ pub struct HypervelocityFit {
     pub misplaced: f64,
     /// Parameters on a box edge.
     pub at_edge: usize,
-    /// The survivors inside the cube at any time.
-    pub inside: f64,
-    /// Their mean time inside, years.
-    pub residence_years: f64,
+    /// The rate-weighted mean path from launch to the cube's face, ly.
+    pub mean_exit_ly: f64,
+    /// The survivors inside the cube at any time, slow and fast ([`SURVIVOR_POPULATIONS`]).
+    pub inside: [f64; 2],
+    /// The rate-weighted share of the slow population's launches below 1.5 times the local
+    /// escape speed, where a straight line is a poor path (ruling 128.1's finding).
+    pub slow_near_escape: f64,
 }
 
 /// Each component's Type Ia rate per system, up to one constant: the mean of `t^−1.1` over its
@@ -240,8 +244,22 @@ fn mean_exit_distance(sources: &[SourceNode], count: usize) -> f64 {
     if weight > 0.0 { distance / weight } else { 0.0 }
 }
 
+/// The rate-weighted share of the slow survivors' launches, uniform in speed over their band, that
+/// leave slower than 1.5 times the escape speed at the source (`escape` km/s at `(R, |z|)` ly).
+fn slow_near_escape(sources: &[SourceNode], escape: impl Fn(f64, f64) -> f64) -> f64 {
+    let slow = SURVIVOR_POPULATIONS[0];
+    let (mut weight, mut near) = (0.0, 0.0);
+    for &(radius, height, rate) in sources {
+        let limit = 1.5 * escape(radius, height);
+        let share = ((limit - slow.min_km_s) / (slow.max_km_s - slow.min_km_s)).clamp(0.0, 1.0);
+        weight += rate;
+        near += rate * share;
+    }
+    if weight > 0.0 { near / weight } else { 0.0 }
+}
+
 /// Fits the hypervelocity row in the galaxy of `fields`, lengths in `R_d` of `r_d` ly, on the
-/// cells `cells`, on `threads` threads.
+/// cells `cells`, on `threads` threads; `escape` gives the escape speed, km/s, at `(R, |z|)` ly.
 ///
 /// # Errors
 ///
@@ -255,6 +273,7 @@ pub fn fit_hypervelocity(
     r_d: f64,
     cells: &RzCells,
     settings: HypervelocitySettings,
+    escape: impl Fn(f64, f64) -> f64,
     threads: NonZeroUsize,
 ) -> Result<HypervelocityFit, BuildThreadPoolError> {
     let sources = source_nodes(fields, settings.panel_nodes);
@@ -293,8 +312,7 @@ pub fn fit_hypervelocity(
     );
     let fitted = &found.values;
     spheroid_shares(cells, fitted[0], fitted[1], fitted[2], &mut model);
-    let speed = settings.speed_km_s * LIGHT_YEARS_PER_YEAR_PER_KM_S;
-    let residence_years = mean_exit_distance(&sources, settings.directions) / speed;
+    let mean_exit_ly = mean_exit_distance(&sources, settings.directions);
     Ok(HypervelocityFit {
         form: CoredPowerLawParams {
             weight: 1.0,
@@ -306,8 +324,9 @@ pub fn fit_hypervelocity(
         at_edge: (0..3)
             .filter(|&i| SPHEROID_BOXES[i].at_edge(fitted[i], EDGE_FRACTION))
             .count(),
-        inside: settings.ia_rate_per_year * settings.channel_share * residence_years,
-        residence_years,
+        mean_exit_ly,
+        inside: survivors_inside(MILKY_WAY_IA_RATE_PER_YEAR, mean_exit_ly),
+        slow_near_escape: slow_near_escape(&sources, escape),
     })
 }
 

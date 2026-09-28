@@ -516,6 +516,17 @@ impl LifetimeBracket {
         Self { masses, bounds }
     }
 
+    /// The process's one bracket, computed lazily on first read from constants alone: the same
+    /// bits as [`new`](Self::new) whoever reads it first, since it depends on no galaxy, draws
+    /// nothing and never reads itself (the sim-determinism skill's lazy-value exception; the test
+    /// `the_shared_bracket_is_new_bit_for_bit` pins it). It saves the 858 lifetimes, about 0.7 s,
+    /// each build would otherwise repeat (ruling 128.5).
+    #[must_use]
+    pub fn shared() -> &'static Self {
+        static SHARED: std::sync::OnceLock<LifetimeBracket> = std::sync::OnceLock::new();
+        SHARED.get_or_init(Self::new)
+    }
+
     /// The bracket on the lifetime of a star of initial mass `m`, or `None` outside bands D and E
     /// (2.5–150 M☉).
     #[must_use]
@@ -538,6 +549,14 @@ impl LifetimeBracket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shared_bracket_is_new_bit_for_bit() {
+        assert_eq!(
+            format!("{:?}", LifetimeBracket::shared()),
+            format!("{:?}", LifetimeBracket::new())
+        );
+    }
     use crate::Seed;
     use crate::galaxy::Galaxy;
     use crate::galaxy::imf::MassFunctionKind;

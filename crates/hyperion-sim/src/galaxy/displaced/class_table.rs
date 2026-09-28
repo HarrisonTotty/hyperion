@@ -52,7 +52,8 @@ use super::marks::{
     ConditionalMarks, MARK_MASS_NODES, MassNodes, StayCategory, StayMarks, age_bin_years,
 };
 use super::runaway::{
-    ENCOUNTER_MAX_AGE, Ejected, RELEASE_Q_RANGE, RELEASING_MIN_MASS, RunawayModel, gl16,
+    ENCOUNTER_MAX_AGE, Ejected, RELEASE_Q_RANGE, RELEASING_MIN_MASS, RunawayModel,
+    WALKAWAY_CALIBRATION_MASS, WALKAWAY_PRESENT_SHARE, gl16,
 };
 use super::{
     AGE_BINS, AgeBin, BirthSource, DisplacedClassId, DisplacedKind, GalaxyScales, SPEED_BINS,
@@ -139,6 +140,75 @@ pub fn hypervelocity_class() -> DisplacedClassId {
     ClassKey::Hypervelocity.id()
 }
 
+/// One population of Type Ia surviving donors: its share of the Type Ia rate and its launch
+/// speeds, uniform between the two, km/s (ruling 128.1; El-Badry et al. 2023, Open Journal of Astrophysics 6, §8.2, for the
+/// split; Shen et al. 2018, ApJ 865, 15, §2.4, for the D6 mechanism and speeds).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurvivorPopulation {
+    /// The share of Type Ia supernovae that leave such a donor.
+    pub share: f64,
+    /// The least launch speed, km/s.
+    pub min_km_s: f64,
+    /// The greatest, km/s.
+    pub max_km_s: f64,
+}
+
+impl SurvivorPopulation {
+    /// `1 ÷ ⟨1 ÷ v⟩` over the band, km/s: the speed a steady state's count scales as the inverse
+    /// of, `(b − a) ÷ ln(b ÷ a)`.
+    #[must_use]
+    pub fn effective_speed_km_s(&self) -> f64 {
+        (self.max_km_s - self.min_km_s) / math::ln(self.max_km_s / self.min_km_s)
+    }
+
+    /// The speed of a survivor inside the cube at rank `u` in [0, 1], km/s: density ∝ 1 ÷ v over
+    /// the band, since a slower survivor stays longer, `a (b ÷ a)^u`.
+    #[must_use]
+    pub fn speed_at(&self, u: f64) -> f64 {
+        self.min_km_s * math::exp(u * math::ln(self.max_km_s / self.min_km_s))
+    }
+}
+
+/// The surviving donors: slow, from low-mass donors, a quarter of the Type Ia rate at 1,000–1,500
+/// km/s, and fast, a few per cent at 2,000–2,500 km/s (ruling 128.1). The channel's 0.30 is the
+/// brainstorm's, next to "both destroyed, about half".
+pub const SURVIVOR_POPULATIONS: [SurvivorPopulation; 2] = [
+    SurvivorPopulation {
+        share: 0.26,
+        min_km_s: 1_000.0,
+        max_km_s: 1_500.0,
+    },
+    SurvivorPopulation {
+        share: 0.04,
+        min_km_s: 2_000.0,
+        max_km_s: 2_500.0,
+    },
+];
+
+/// The Milky Way's Type Ia rate, per year: 0.54 ± 0.12 per century (Li et al. 2011, MNRAS 412,
+/// 1473, Table 11). Plan 09's P09.T34 replaces it with the galaxy's own when it gives the class
+/// weight.
+pub const MILKY_WAY_IA_RATE_PER_YEAR: f64 = 0.0054;
+
+/// The odds of each of [`SURVIVOR_POPULATIONS`] among the survivors inside the cube: `shareᵢ ÷
+/// v_eff,ᵢ`, normalised (the speed mark's first draw, ruling 128.1).
+#[must_use]
+pub fn survivor_odds() -> [f64; 2] {
+    let raw = SURVIVOR_POPULATIONS.map(|p| p.share / p.effective_speed_km_s());
+    let total = raw[0] + raw[1];
+    raw.map(|r| r / total)
+}
+
+/// The survivors of each population inside the cube at any time at the Type Ia rate
+/// `rate_per_year`, whose mean path to the cube's face is `mean_exit_ly`: `rate × shareᵢ ×
+/// residenceᵢ`, residence the path over `v_eff,ᵢ` (ruling 128.1).
+#[must_use]
+pub fn survivors_inside(rate_per_year: f64, mean_exit_ly: f64) -> [f64; 2] {
+    use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S as C;
+    SURVIVOR_POPULATIONS
+        .map(|p| rate_per_year * p.share * mean_exit_ly / (p.effective_speed_km_s() * C))
+}
+
 /// The rows of a form table, before [`FormTable::new`] checks them: `tables::displaced_forms` in
 /// one value, so that a test can pass another.
 #[derive(Debug, Clone, PartialEq)]
@@ -157,6 +227,9 @@ pub struct FormRows {
     pub nuclear_disc: [OldBornRow; SPEED_BINS],
     /// The hypervelocity survivors' form.
     pub hypervelocity: CoredPowerLawParams,
+    /// The survivors' mean distance from launch to the cube's face, ly: their residence times
+    /// their speed (plan 15, P15.T6.f).
+    pub hypervelocity_mean_exit_ly: f64,
 }
 
 /// Plan 15's form table as the class table reads it, its shares checked once
@@ -201,6 +274,7 @@ impl FormTable {
             bar: t::BAR_BORN,
             nuclear_disc: t::NUCLEAR_DISC_BORN,
             hypervelocity: t::HYPERVELOCITY,
+            hypervelocity_mean_exit_ly: t::HYPERVELOCITY_MEAN_EXIT_LY,
         })
         .expect("the committed form table's shares are fractions")
     }
@@ -585,6 +659,7 @@ struct SourceEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassTable {
     scales: GalaxyScales,
+    model: RunawayModel,
     nodes: [MassNodes; 2],
     sources: Vec<SourceEntry>,
     components: Vec<ComponentEntry>,
@@ -690,6 +765,95 @@ fn ejected_in(component: &Component, life: f64, ejection: &[(f64, f64)], lo: f64
         .sum()
 }
 
+/// Which of a runaway's ejections a present-day share counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EjectionChannel {
+    /// A close encounter in the young cluster, at 0–3 Myr.
+    Encounter,
+    /// The companion's supernova.
+    Supernova,
+    /// Either.
+    Both,
+}
+
+/// The present-day share of `kind` among the thin disc's living stars of `band` whose initial
+/// mass lies in `(lo, hi]` M☉, counting only ejections through `channel`, for the walkaway scale
+/// `walkaway_scale`: the lifetime share times the share of the living already past their ejection
+/// age, weighted by component budget and node weight.
+fn present_share(
+    galaxy: &Galaxy,
+    members: &[Vec<ComponentId>],
+    sources: &[SourceEntry],
+    nodes: &[MassNodes; 2],
+    query: PresentQuery,
+    walkaway_scale: f64,
+) -> f64 {
+    let model = RunawayModel::new(walkaway_scale);
+    let s = source_index(BirthSource::ThinDisc);
+    let src = &sources[s];
+    let fields = galaxy.fields();
+    let (mut ejected, mut living) = (0.0, 0.0);
+    for &id in &members[s] {
+        let component = fields.component(id);
+        let budget = budget_of(galaxy, component)[query.band];
+        for (i, &m) in nodes[query.band].masses().iter().enumerate() {
+            if m <= query.mass.0 || m > query.mass.1 {
+                continue;
+            }
+            let life = src.lifetimes[query.band][i];
+            let weight = budget * nodes[query.band].weights()[i];
+            living += weight * born_below(component, life);
+            let share = match query.kind {
+                Ejected::Runaway => model.runaway_share(SolarMasses::new(m)),
+                Ejected::Walkaway => model.walkaway_share(SolarMasses::new(m)),
+            };
+            let ejection = ejection_ages(
+                model,
+                query.kind,
+                m,
+                &src.lifetimes[1],
+                nodes[1].masses(),
+                query.channel,
+            );
+            ejected += weight * share * ejected_in(component, life, &ejection, 0.0, f64::INFINITY);
+        }
+    }
+    if living > 0.0 { ejected / living } else { 0.0 }
+}
+
+/// What [`present_share`] measures.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PresentQuery {
+    /// 0 for layer D, 1 for E.
+    band: usize,
+    /// The initial masses `(lo, hi]`, M☉.
+    mass: (f64, f64),
+    kind: Ejected,
+    channel: EjectionChannel,
+}
+
+/// W, the walkaways' lifetime scale, solved so that the thin disc's living stars above 15 M☉ are
+/// [`WALKAWAY_PRESENT_SHARE`] walkaways today (ruling 128.3): the present share is linear in W.
+fn solve_walkaway_scale(
+    galaxy: &Galaxy,
+    members: &[Vec<ComponentId>],
+    sources: &[SourceEntry],
+    nodes: &[MassNodes; 2],
+) -> f64 {
+    let query = PresentQuery {
+        band: 1,
+        mass: (WALKAWAY_CALIBRATION_MASS.value(), f64::INFINITY),
+        kind: Ejected::Walkaway,
+        channel: EjectionChannel::Both,
+    };
+    let at_one = present_share(galaxy, members, sources, nodes, query, 1.0);
+    if at_one > 0.0 {
+        WALKAWAY_PRESENT_SHARE / at_one
+    } else {
+        0.0
+    }
+}
+
 /// One mass node of one field component in one band: what the quadrature reads there.
 struct Node<'a> {
     component: &'a Component,
@@ -781,7 +945,14 @@ impl Accumulator<'_> {
             if share <= 0.0 {
                 continue;
             }
-            let ejection = ejection_ages(self.model, kind, at.m, lifetimes_e, masses_e);
+            let ejection = ejection_ages(
+                self.model,
+                kind,
+                at.m,
+                lifetimes_e,
+                masses_e,
+                EjectionChannel::Both,
+            );
             let speeds = self.model.speed_bins(kind, at.v_ref);
             let marked = match kind {
                 Ejected::Runaway => DisplacedKind::Runaway,
@@ -1004,10 +1175,11 @@ impl ClassTable {
         let fields = galaxy.fields();
         let members = members_of(galaxy);
         let (mut sources, kicks, kick_of) = source_entries(galaxy, &members, &scales, &nodes);
+        let model = RunawayModel::new(solve_walkaway_scale(galaxy, &members, &sources, &nodes));
         let mut acc = Accumulator {
             forms,
             scales: &scales,
-            model: RunawayModel,
+            model,
             classes: empty_classes(&members, &nodes),
             stay: [0.0; 2],
             alive: [0.0; 2],
@@ -1090,11 +1262,63 @@ impl ClassTable {
         classes.iter_mut().for_each(ClassEntry::finish);
         Self {
             scales,
+            model,
             nodes,
             sources,
             components,
             classes,
         }
+    }
+
+    /// The hypervelocity class's count inside the cube once it is given weight, at the Milky Way's
+    /// Type Ia rate, by survivor population ([`survivors_inside`]); the class itself stays at zero
+    /// weight until P09.T34 (Design note 25).
+    #[must_use]
+    pub fn hypervelocity_count(&self, forms: &FormTable) -> [f64; 2] {
+        survivors_inside(
+            MILKY_WAY_IA_RATE_PER_YEAR,
+            forms.rows().hypervelocity_mean_exit_ly,
+        )
+    }
+
+    /// The runaway model the table was built with, its walkaway scale W solved for the galaxy
+    /// (ruling 128.3).
+    #[must_use]
+    pub fn runaway_model(&self) -> RunawayModel {
+        self.model
+    }
+
+    /// The present-day share of `kind` among the thin disc's living stars of `band` (D or E) of
+    /// initial mass in `(lo, hi]` M☉, counting only `channel`'s ejections: the figure P08.T9.c's
+    /// windows are stated in (ruling 128.2–3).
+    ///
+    /// # Panics
+    ///
+    /// If `band` is not D or E.
+    #[must_use]
+    pub fn present_ejected_share(
+        &self,
+        galaxy: &Galaxy,
+        band: MassBand,
+        mass: (SolarMasses, SolarMasses),
+        kind: Ejected,
+        channel: EjectionChannel,
+    ) -> f64 {
+        let members = members_of(galaxy);
+        let query = PresentQuery {
+            band: band_slot(band).expect("ejections are counted in layers D and E"),
+            mass: (mass.0.value(), mass.1.value()),
+            kind,
+            channel,
+        };
+        present_share(
+            galaxy,
+            &members,
+            &self.sources,
+            &self.nodes,
+            query,
+            self.model.walkaway_scale(),
+        )
     }
 
     /// The galaxy's scales the table was built at.
@@ -1337,15 +1561,22 @@ fn age_bin(i: usize) -> AgeBin {
 /// The ages at which a star of mass `m` (M☉) of `kind` is ejected, with their weights summing to
 /// 1: the encounters' uniform 0–3 Myr and the supernova release at the lifetime of a companion of
 /// max(8 M☉, m ÷ q), q uniform on 0.3–1, each by a 16-node rule. The companion's lifetime is
-/// interpolated in log mass on band E's `lifetimes` at `masses`.
+/// interpolated in log mass on band E's `lifetimes` at `masses`. Only `channel`'s ejections are
+/// kept, so the weights then sum to that channel's share.
 fn ejection_ages(
     model: RunawayModel,
     kind: Ejected,
     m: f64,
     lifetimes: &[f64; MARK_MASS_NODES],
     masses: &[f64; MARK_MASS_NODES],
+    channel: EjectionChannel,
 ) -> Vec<(f64, f64)> {
     let (encounter, supernova) = model.channels(kind);
+    let (encounter, supernova) = match channel {
+        EjectionChannel::Both => (encounter, supernova),
+        EjectionChannel::Encounter => (encounter, 0.0),
+        EjectionChannel::Supernova => (0.0, supernova),
+    };
     let mut out = Vec::with_capacity(32);
     if encounter > 0.0 {
         out.extend(

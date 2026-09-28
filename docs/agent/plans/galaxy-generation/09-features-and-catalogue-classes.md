@@ -864,7 +864,9 @@ property test that `claims` is a pure function of its arguments; boundary cases 
   t_insp = delay − lifetimes. `IaProgenitor::period_at(t)`. Tests: lifetimes plus inspiral equal the
   delay to a second; the orbital period a thousand years before a merger is 80–100 s.
 - **P09.T18.c What a Type Ia leaves.** `IaLeftover` by channel, as defaults of the generator
-  version: both destroyed 50%; a surviving donor at 1,900–2,500 km/s 30% (Shen et al. 2018); a
+  version: both destroyed 50%; a surviving donor 30%, split as plan 08's hypervelocity class is
+  (ruling 128.1): 26% at 1,000–1,500 km/s and 4% at 2,000–2,500 km/s, uniform in each (El-Badry et
+  al. 2023 §8.2; the D6 mechanism of Shen et al. 2018); a
   hydrogen donor at 100–250 km/s under 5%; Iax with a partly burnt white dwarf 10% (Foley et al.
   2013). A recent survivor is member 1 of the entry at speed × age. Tests: channel frequencies.
 

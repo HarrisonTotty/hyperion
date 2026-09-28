@@ -582,8 +582,8 @@ position and on its own independent draws, and the parts are independent Poisson
   of layer D has exploded long ago and left nothing, and the grid's binaries, run forward, redraw on
   the same stream if they come out exploded.
 - **What a Type Ia leaves.** By channel, as defaults of the generator version, since the science is
-  unsettled: both white dwarfs destroyed, about half; a surviving donor flung out at 1,900–2,500
-  km/s, about 30% (Shen et al. 2018); a hydrogen donor, puffed up and moving at 100–250 km/s, under
+  unsettled: both white dwarfs destroyed, about half; a surviving donor flung out at 1,000–1,500
+  km/s, about a quarter, and at 1,900–2,500 km/s a few per cent (El-Badry et al. 2023); a hydrogen donor, puffed up and moving at 100–250 km/s, under
   5%; and the weak Iax events, about 10%, which leave a partly burnt white dwarf (Foley et al.
   2013). A recent survivor is a second member of the entry, at speed × age from the centre. Ancient
   hypervelocity survivors are unbound and cross the cube in about 10⁷ years, so some tens of
@@ -1633,15 +1633,16 @@ this scheme:
   so a fast pulsar high above the disc is also moving away from it.
 
 Runaway stars come from the same machinery. When a supernova unbinds a binary the companion leaves
-at its orbital speed, and young clusters eject stars by close encounters. Between a tenth and a
-quarter of O stars and a few per cent of B stars are runaways, at 30–100 km/s or more (Hoogerwerf et
+at its orbital speed, and young clusters eject stars by close encounters. Between a fifth and a
+third of O stars and a few per cent of B stars are runaways, at 30–100 km/s or more (Hoogerwerf et
 al. 2001). They take the same forms as the remnants at u of 0.13–0.5, in layers D and E, with τ
 counted from ejection and capped by the star's remaining life, so they are never phase mixed: after
 10 Myr, a layer about 700 ly tall with arms blurred by a thousand light-years or more. A runaway is
 single by construction, and the neutron star that ejected it is elsewhere and independent, which is
 true to life: their common origin can only be found by tracing both velocities back. Most companions
-released by a supernova are not runaways but walkaways, under 30 km/s (Renzo et al. 2019), and those
-above 2.5 M☉ join the same population with a lower speed. A released companion above 8 M☉ dies in
+released by a supernova are not runaways but walkaways, under 30 km/s: about a tenth of massive
+stars (Renzo et al. 2019), fewer among the intermediate-mass ones. Those above 2.5 M☉ join the same
+population with a lower speed. A released companion above 8 M☉ dies in
 its turn, away from its birthplace, so the runaway population has deaths of its own in the
 catalogue. Low-mass companions released the same way are left out. They are under 1% of the dwarfs
 and nothing distinguishes them but a slightly high velocity.
@@ -2184,6 +2185,24 @@ what this document says. The text has been brought into line:
 5. **Consequences in the text** (ruling 126.2 and 126.8): the birth escape speed no longer cites an
    expansion; band A at 47 Tucanae's slope holds 0.386 of the canonical count ("a third" was the
    factor below 0.2 M☉); and decision 12's 15–25% at 20 km/s is the kick law's, not a cluster's.
+
+**2026-09-28: the orchestrator's ruling 128.** Ruling 128 of the same file was made on research
+that read the sources' own text (`research/r-disp08b/NOTES.md`), and changes what this document
+says. The text has been brought into line:
+
+1. **Type Ia surviving donors come in two speeds**: about a quarter of Type Ia supernovae leave one
+   at 1,000–1,500 km/s and a few per cent at 1,900–2,500 km/s, the channel's 30% kept (ruling
+   128.1). Reason: Shen et al. (2018) give the mechanism and the speeds but no share; El-Badry et
+   al. (2023, §8.2) find the slow, low-mass-donor population consistent with nearly every Type Ia
+   and the fast one with 3–5%. See [Supernova remnants](#supernova-remnants-one-route-not-two).
+2. **A fifth to a third of O stars are runaways**, not a tenth to a quarter (ruling 128.2). Reason:
+   the cited fractions are present-day ones (Hoogerwerf et al. 2001: 10–30%; Carretero-Castrillo et
+   al. 2023: 25–30% in Gaia DR3), and dynamical ejection dominates (Renzo et al. 2019's
+   supernova-released runaways are 0.5%). See [Displaced
+   objects](#displaced-objects-kicks-and-runaways).
+3. **Walkaways are about a tenth of massive stars, fewer among the intermediate-mass ones** (ruling
+   128.3). Reason: Renzo et al.'s 10% is a present-day share of stars above 15 M☉, the only masses
+   they model; below 8 M☉ the released secondaries fall with the primaries' mass function.
 
 ## Open questions
 

@@ -433,18 +433,32 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
     neutron stars and 99% of black holes inside the cube, and a few hundred thousand unbound still
     inside, since at 500 km/s a remnant leaves within about 50 Myr.
 24. **Runaways and walkaways** are a closed-form model whose constants belong to the generator
-    version: runaway share 0.03 below 8 M☉, rising linearly in log mass from 0.05 at 8 to 0.20 at 20
-    M☉ and flat above (Hoogerwerf et al. 2001); walkaway share 0.10 above 2.5 M☉ (Renzo et al.
-    2019); runaway speed 30 km/s plus an exponential of mean 20, cut at half the circular speed;
-    walkaway speed Rayleigh with a mode of 10 km/s, cut at 30; ejection at an age uniform on 0–3 Myr
-    for half the runaways (encounters) and, for the rest and all walkaways, at the lifetime of a
+    version (as amended by ruling 128.2–3). The shares are **lifetime** shares, the probability of
+    ever being ejected; a star counts as displaced once its ejection age has passed, so present-day
+    fractions come out lower. Runaway share 0.03 below 8 M☉, rising linearly in log mass from 0.05
+    at 8 to 0.30 at 20 M☉ and flat above, set so that living O stars are about a fifth runaways
+    today (Hoogerwerf et al. 2001: 10–30%; Carretero-Castrillo et al. 2023: 25–30%); walkaway share
+    `W × r(m)` above 2.5 M☉, `r(m) = min(1, ((m ÷ 8)^2.3 − 0.1^2.3) ÷ (1 − 0.1^2.3))` (released
+    secondaries of core-collapse primaries under a 2.3 slope, q uniform on 0.1–1), W solved per
+    galaxy so that living stars above 15 M☉ are 0.10 walkaways today (Renzo et al. 2019, measured
+    only there); runaway speed 30 km/s plus an exponential of mean 20, cut at half the circular
+    speed; walkaway speed Rayleigh of σ 10 km/s, cut at 30, whose mean, median and 90th percentile
+    (12.5, 11.7, 21.5 km/s) match Renzo's 12.4, 10.4 and about 20; ejection at an age uniform on
+    0–3 Myr for nine runaways in ten (encounters; Renzo's binary-supernova channel alone gives 0.5
+    (+1.0, −0.4)% runaways above 15 M☉) and, for the rest and all walkaways, at the lifetime of a
     primary of mass max(8 M☉, m ÷ q) with q uniform on 0.3–1 (supernova release). Sources are the
     thin disc and the nuclear disc's young part. A runaway that has died feeds the remnant classes
     by its kick alone, since 30–100 km/s is small against the kick and the offset is inside the
     forms' error. Plan 09 applies the cluster-side factor; plan 11 must reproduce these shares.
 25. **The hypervelocity class is registered with zero weight** in layer D, with plan 15's
-    `HYPERVELOCITY` form and straight-line motion at 1,900–2,500 km/s, so that turning it on in plan
-    09 or 11 adds no class and no tag.
+    `HYPERVELOCITY` form and straight-line motion, so that turning it on in plan 09 or 11 adds no
+    class and no tag. The survivors come in two populations (ruling 128.1; El-Badry et al. 2023
+    §8.2 for the split, Shen et al. 2018 for the D6 mechanism): 0.26 of Type Ia supernovae at
+    1,000–1,500 km/s and 0.04 at 2,000–2,500 km/s, uniform in each, the channel's 0.30 kept. The
+    class weight, once given, is the Type Ia rate (0.54 per century, Li et al. 2011) × Σ shareᵢ ×
+    residenceᵢ, the residence the table's `HYPERVELOCITY_MEAN_EXIT_LY` over `1 ÷ ⟨1 ÷ v⟩ᵢ`; the
+    speed mark picks a population with odds shareᵢ ÷ v_eff,ᵢ and draws the speed in its band with
+    density ∝ 1 ÷ v. Design note 27's 3,000 km/s padding stands.
 26. **Normalisation over the cube.** Each form component (layer, spheroid, own form) is normalised
     to unit integral over the root cube by a fixed quadrature once per galaxy (one octant, 24
     logarithmic panels per axis of 8 Gauss–Legendre nodes), and the table's `in_cube` share scales
@@ -723,10 +737,14 @@ source: BirthSource)`, and `speed_bin_shares_against(law, m, comp, v_ref)`. The 
   galaxy's corotation ratio, and `in_cube` at its escape ratio.
 - **P08.T9.c Runaways and walkaways.** `RunawayModel` per Design note 24; weights per (source, speed
   bin, age bin) for layers D and E, with time since ejection capped by remaining life, and the
-  matching reduction of `stay_share` for the living. Tests: at Milky Way values 10–25% of living O
-  stars (above 16 M☉) and 2–5% of living B stars of layer D are runaways; no runaway class has an
-  age bin beyond the star's possible life (layer E: τ under 4); after 10 Myr the implied layer is
-  600–800 ly tall (from the form, not the table of weights).
+  matching reduction of `stay_share` for the living. Tests (ruling 128.2–4), at Milky Way values,
+  present-day fractions of the living: runaways 0.15–0.30 of O stars (above 16 M☉), 0.05–0.12 of
+  early B stars (8–16 M☉, Hoogerwerf's B stars) and 0.02–0.05 of layer D, and those released by a
+  supernova 0.001–0.015 of O stars; walkaways 0.10 ± 0.005 of stars above 15 M☉ with W in
+  0.25–0.45 (the ratio of walkaways to supernova-released runaways is reported); no runaway class
+  has an age bin beyond the star's possible life (layer E: τ under 4); the runaways' **mean |z|
+  10 Myr after ejection is 600–800 ly**, a quadrature of Design note 24's law, isotropic, in the
+  galaxy's own vertical force at `sunlike_point`, reading no form.
 - **P08.T9.d Conditional mark tables.** Per class: kind odds, the mass density on the 33 nodes, per
   node the component shares, and the origin-bin odds of the fastest classes. Per field component,
   `stay_marks` for layer E (Design note 17): the odds of alive and of retained by speed bin, and
@@ -789,6 +807,44 @@ StayMarks, LifetimeBracket}`, `ConditionalMarks::component_at(kind, m, mark)` pi
   (0.02–0.05). On the brainstorm's test-only table the thin disc's neutron stars are 0.186
   retained and 0.798 inside the cube, its black holes 0.747 retained and 0.994 inside, 0.130
   gone; the provisional table's figures are smoke noise.
+- **Ruling 128, as built (lane `disp08b`, 2026-09-28, at `GENERATOR_VERSION` 13; no output
+  moves; the class table's golden re-blessed at 14 after the rebase onto P06.T14's 100–150 M☉
+  tracks, the provisional form table unchanged).** Figures at 13, then at 14 where they moved: O
+  stars 0.2146 → 0.2150, supernova-released 0.0073 → 0.0076, W 0.3506 → 0.3403, walkaways at 8–15
+  M☉ 0.162 → 0.158 and in layer D 0.038 → 0.037; every window still holds.
+  - _Runaways_: `ENCOUNTER_SHARE` 0.9, `RUNAWAY_SHARE_HIGH` 0.30. Present-day, at the fixture:
+    O stars above 16 M☉ **0.2146** (0.15–0.30), of them released by supernovae **0.0073**
+    (0.001–0.015); early B stars of 8–16 M☉ **0.1072** (0.05–0.12); layer D **0.0296** (0.02–0.05).
+    `ClassTable::present_ejected_share(galaxy, band, mass, kind, EjectionChannel)` measures them.
+  - _Walkaways_: `W × walkaway_ramp(m)`, W solved in the build (`solve_walkaway_scale`, the present
+    share being linear in W): **W 0.3506** (0.25–0.45), living stars above 15 M☉ **0.1000**
+    walkaways, 8–15 M☉ 0.162, layer D 0.038; 25.9 walkaways per supernova-released runaway above
+    8 M☉ (reported; Renzo's 13, variations 7–59). `RunawayModel` now carries W
+    (`RunawayModel::new`, `ClassTable::runaway_model`).
+  - _Height_: `RunawayModel::mean_height_after(v_ref, after, k_z)`, a quadrature (32 speeds × 16
+    directions, leapfrog in 2,000 steps) launched from the midplane; in `MassModel::vertical_force`
+    at 26,000 ly, tabulated every 20 ly: **761 ly** at 10 Myr (600–800; ballistic 811). The
+    1,700–1,950 ly hold on the ballistic `height()` is gone.
+  - _Survivors_ (Design note 25): `class_table::{SurvivorPopulation, SURVIVOR_POPULATIONS,
+MILKY_WAY_IA_RATE_PER_YEAR, survivor_odds, survivors_inside}` and
+    `ClassTable::hypervelocity_count(&FormTable)`, reading the form table's new
+    `HYPERVELOCITY_MEAN_EXIT_LY` through `FormRows::hypervelocity_mean_exit_ly`. The class keeps
+    zero weight. Measured in the next bullet's P15.T6.f note.
+  - _Build time_ (bench `benches/class_table.rs`, release, load 10–18): `ClassTable::build` 43 s
+    (29–60); per band-E node `speed_bin_shares` 0.21 s at 8.2 M☉, 0.32 at 15, 0.11 at 40, of which
+    `binarity::stripped_share` (plan 11's `multiplicity_share` twice) is 0.21, 0.28 and 0.11 s,
+    while a full track is 1–2 ms and `lifetime` 0.6–1.6 ms; `LifetimeBracket::new` 0.83 s. **The
+    seam's quadrature is over 95% of the build**: about 5 compositions × 33 nodes of it. After
+    the wins, at load 6–8: `ClassTable::build` 27 s (21–33), `speed_bin_shares` 0.14, 0.13 and
+    0.18 s at 8.2, 15 and 40 M☉; the gap from the first run is the load, since the wins remove about
+    two 1–2 ms tracks a node, some 0.3 s a build. The ruling's exact wins are taken and change no bit (tests
+    `the_shared_track_gives_the_direct_shares_bit_for_bit`, `the_shared_bracket_is_new_bit_for_bit`):
+    the unmarked fate is read off the seam's own track, the marked branch reuses it for an iron
+    core's star, and `LifetimeBracket::shared()` computes the bracket once a process. They save a
+    few milliseconds a node; the build stays far over P08.T16's 1 s, **a finding**. The lever is
+    the seam, not the kick law: `stripped_share` is galaxy-independent per composition, so a
+    tabulated seam (or a faster plan-11 quadrature) would take the build near a second; ruling
+    128.5's offline `tables::kick_bins` would carry the seam's share in it.
 
 ### P08.T10 Forms and normalisation
 
@@ -994,8 +1050,10 @@ All at `GalaxyParams::milky_way_like()`, fixed seeds, under `just test-slow`:
    to 7 R_d (the flare).
 6. Budgets by sampling: in a wedge of the galaxy, counted layer-E systems by placement class match
    budget × (stay, class weights) by Poisson interval.
-7. Runaway shares as under T9.c, by sampling living stars; runaways 10 Myr after ejection form a
-   layer 600–800 ly tall whose arm blur is at least 1,000 ly.
+7. Runaway shares as under T9.c, by sampling living stars; the sampled runaways of the age bin
+   holding 10 Myr have a mean |z| near R☉ within 20% of T9.c's quadrature over that class's own
+   time distribution, on the production table (ruling 128.4), and a class with τ below 1 keeps an
+   arm blur of at least 1,000 ly.
 
 **Files.** `tests/galaxy_milky_way_kinematics.rs`, `tests/galaxy_milky_way_displaced.rs`.
 **Acceptance.** All pass, or a miss is recorded as a finding against the table (plan 15) or the

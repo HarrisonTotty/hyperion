@@ -15,28 +15,29 @@ use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::displaced::binarity;
 use hyperion_sim::galaxy::displaced::class_table::{
-    BuildFormTableError, CLASS_COUNT, ClassKey, ClassTable, FormRows, FormTable, OldSource,
-    SOURCES, hypervelocity_class, source_of,
+    BuildFormTableError, CLASS_COUNT, ClassKey, ClassTable, EjectionChannel, FormRows, FormTable,
+    OldSource, SOURCES, SURVIVOR_POPULATIONS, hypervelocity_class, source_of, survivor_odds,
 };
 use hyperion_sim::galaxy::displaced::forms::{
-    BallisticLayer, ClassKinematics, CoredPowerLawParams, DiscBornRow, OldBornRow, young_disc,
+    ClassKinematics, CoredPowerLawParams, DiscBornRow, OldBornRow,
 };
 use hyperion_sim::galaxy::displaced::marks::{
     LifetimeBracket, MARK_KINDS, MARK_MASS_NODES, StayCategory, age_bin_years, time_since_death,
 };
-use hyperion_sim::galaxy::displaced::runaway::{Ejected, RunawayModel};
+use hyperion_sim::galaxy::displaced::runaway::Ejected;
 use hyperion_sim::galaxy::displaced::{
     AGE_BINS, AGE_EDGES, AgeBin, BirthSource, DisplacedKind, SPEED_BINS, SpeedBin,
 };
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::potential::MassModel;
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::rng::{ObjectKey, Stream, tags};
 use hyperion_sim::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use hyperion_sim::stellar::remnant::RemnantKind;
 use hyperion_sim::stellar::sse::MAX_INITIAL_MASS;
 use hyperion_sim::stellar::{Composition, lifetime};
-use hyperion_sim::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses, Years};
+use hyperion_sim::units::{Dex, HeliumExcess, LightYears, SolarMasses, Years};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
@@ -103,6 +104,7 @@ fn test_rows() -> FormRows {
             q: 1.0,
             gamma: 3.0,
         },
+        hypervelocity_mean_exit_ly: 80_000.0,
     }
 }
 
@@ -313,17 +315,62 @@ fn runaway_fraction(table: &ClassTable, galaxy: &Galaxy, band: MassBand, min_mas
     runaway / living
 }
 
-/// P08.T9.c: at Milky Way values 10–25% of living O stars (above 16 M☉) and 2–5% of living B stars
-/// of layer D are runaways; no runaway class has an age bin beyond the star's possible life; after
-/// 10 Myr the runaways' layer, from the ballistic form, is 600–800 ly tall.
+/// P08.T9.c under ruling 128.2–4, at Milky Way values: present-day runaways are 0.15–0.30 of
+/// living O stars (above 16 M☉), 0.05–0.12 of early B stars (8–16 M☉) and 0.02–0.05 of layer D,
+/// and those released by a supernova 0.001–0.015 of O stars; walkaways are 0.10 ± 0.005 of stars
+/// above 15 M☉ with W in 0.25–0.45; no runaway class has an age bin beyond the star's possible
+/// life; and the runaways' mean |z| 10 Myr after ejection, in the galaxy's vertical force at
+/// `sunlike_point`, is 600–800 ly.
 #[test]
 fn runaways_at_milky_way_values() {
     let (galaxy, table) = shared();
     let o_stars = runaway_fraction(table, galaxy, MassBand::E, 16.0);
-    let b_stars = runaway_fraction(table, galaxy, MassBand::D, 0.0);
-    println!("runaways: {o_stars:.4} of living O stars, {b_stars:.4} of layer D's B stars");
-    assert!((0.10..0.25).contains(&o_stars), "O stars {o_stars}");
-    assert!((0.02..0.05).contains(&b_stars), "B stars {b_stars}");
+    let layer_d = runaway_fraction(table, galaxy, MassBand::D, 0.0);
+    let present = |band, lo: f64, hi: f64, kind, channel| {
+        table.present_ejected_share(
+            galaxy,
+            band,
+            (SolarMasses::new(lo), SolarMasses::new(hi)),
+            kind,
+            channel,
+        )
+    };
+    let both = EjectionChannel::Both;
+    let early_b = present(MassBand::E, 8.0, 16.0, Ejected::Runaway, both);
+    let o_direct = present(MassBand::E, 16.0, f64::INFINITY, Ejected::Runaway, both);
+    let o_supernova = present(
+        MassBand::E,
+        16.0,
+        f64::INFINITY,
+        Ejected::Runaway,
+        EjectionChannel::Supernova,
+    );
+    let walk_massive = present(MassBand::E, 15.0, f64::INFINITY, Ejected::Walkaway, both);
+    let walk_mid = present(MassBand::E, 8.0, 15.0, Ejected::Walkaway, both);
+    let walk_d = present(MassBand::D, 0.0, 8.0, Ejected::Walkaway, both);
+    let released = present(
+        MassBand::E,
+        8.0,
+        f64::INFINITY,
+        Ejected::Runaway,
+        EjectionChannel::Supernova,
+    );
+    let walk_e = present(MassBand::E, 8.0, f64::INFINITY, Ejected::Walkaway, both);
+    let w = table.runaway_model().walkaway_scale();
+    println!(
+        "runaways: {o_stars:.4} of living O stars ({o_direct:.4} directly; {o_supernova:.4} \
+         released by supernovae), {early_b:.4} of early B stars, {layer_d:.4} of layer D; \
+         walkaways: W {w:.4}, {walk_massive:.4} above 15 M☉, {walk_mid:.4} at 8–15 M☉, \
+         {walk_d:.4} in layer D, {:.1} per supernova-released runaway above 8 M☉",
+        walk_e / released
+    );
+    assert!((o_stars - o_direct).abs() < 1e-6, "{o_stars} {o_direct}");
+    assert!((0.15..0.30).contains(&o_stars), "O stars {o_stars}");
+    assert!((0.05..0.12).contains(&early_b), "early B stars {early_b}");
+    assert!((0.02..0.05).contains(&layer_d), "layer D {layer_d}");
+    assert!((0.001..0.015).contains(&o_supernova), "{o_supernova}");
+    assert!((walk_massive - 0.10).abs() < 0.005, "{walk_massive}");
+    assert!((0.25..0.45).contains(&w), "W {w}");
     // No runaway of layer E in an age bin that begins after an 8 M☉ star's life.
     let tau = table.scales().tau_unit().value();
     let longest = table
@@ -342,33 +389,62 @@ fn runaways_at_milky_way_values() {
             }
         }
     }
-    println!("layer E's longest life {:.2} time units", longest / tau);
-    // The runaways' mean speed, and their layer 10 Myr after ejection.
-    let model = RunawayModel;
-    let v_c = table.scales().v_c().value();
-    let v_c = KilometresPerSecond::new(v_c);
-    let bins = model.speed_bins(Ejected::Runaway, v_c);
-    let mean_u: f64 = bins
-        .iter()
-        .enumerate()
-        .map(|(s, p)| p * model.mean_speed_in_bin(Ejected::Runaway, bin(s), v_c))
-        .sum();
-    let ut = mean_u * 1e7 / tau;
-    let (young, arm) = young_disc(galaxy.fields());
-    let layer = BallisticLayer::new(young, &arm, age(3), ut, table.scales()).unwrap();
-    println!(
-        "runaways' mean u {mean_u:.3}; layer after 10 Myr {:.0} ly tall",
-        layer.height()
-    );
-    // Finding: the ballistic form's height, √(h_young² + (1.1 ⟨u⟩τ R_d)²), is 1,815 ly for the
-    // runaways' ⟨u⟩ of 0.217 v_c (48.6 km/s) after 10 Myr, against the plan's 600–800 ly and the
-    // brainstorm's "about 700 ly", which is near the mean |v_z| (half the speed) times the time.
-    // Held at the measured value.
-    assert!(
-        (1_700.0..1_950.0).contains(&layer.height()),
-        "{}",
-        layer.height()
-    );
+    // The layer's mean |z| 10 Myr after ejection, in the vertical force at the Sun-like radius
+    // (tabulated every 20 ly to 8,000 ly from the mass model, a millisecond a point).
+    let model = MassModel::new(galaxy.params());
+    let step = 20.0;
+    let k_z: Vec<f64> = (0..=400)
+        .map(|i| {
+            model.vertical_force(
+                LightYears::new(26_000.0),
+                LightYears::new(step * f64::from(i)),
+            )
+        })
+        .collect();
+    let force = |z: f64| {
+        let x = (z / step).min(399.999);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a non-negative index below 400"
+        )]
+        let i = x.floor() as usize;
+        let f = x - x.floor();
+        k_z[i] + f * (k_z[i + 1] - k_z[i])
+    };
+    let v_c = table.scales().v_c();
+    let height = table
+        .runaway_model()
+        .mean_height_after(v_c, Years::new(1e7), force);
+    let ballistic = table
+        .runaway_model()
+        .mean_height_after(v_c, Years::new(1e7), |_| 0.0);
+    println!("runaways' mean |z| after 10 Myr {height:.0} ly (ballistic {ballistic:.0} ly)");
+    assert!((600.0..800.0).contains(&height), "{height}");
+}
+
+/// P15.T6.f under ruling 128.1: the survivors inside the cube, at the Milky Way's Type Ia rate and
+/// the committed table's mean path, number 10⁴–10⁵, of them 1,500–3,500 fast and 1.5–4.5 × 10⁴
+/// slow; the speed mark's odds are `shareᵢ ÷ v_eff,ᵢ` (about 0.92 slow); the class keeps zero weight.
+#[test]
+fn hypervelocity_survivors_at_milky_way_values() {
+    let (_, table) = shared();
+    let [slow, fast] = table.hypervelocity_count(&FormTable::committed());
+    println!("hypervelocity survivors inside the cube: {slow:.0} slow, {fast:.0} fast");
+    assert!((1e4..1e5).contains(&(slow + fast)), "{}", slow + fast);
+    assert!((1_500.0..3_500.0).contains(&fast), "{fast}");
+    assert!((1.5e4..4.5e4).contains(&slow), "{slow}");
+    let odds = survivor_odds();
+    assert!((odds[0] + odds[1] - 1.0).abs() < 1e-15);
+    assert!((odds[0] - 0.922).abs() < 0.002, "{odds:?}");
+    let total: f64 = SURVIVOR_POPULATIONS.iter().map(|p| p.share).sum();
+    assert!((total - 0.30).abs() < 1e-15);
+    let slow_pop = SURVIVOR_POPULATIONS[0];
+    assert!((slow_pop.speed_at(0.0) - 1_000.0).abs() < 1e-9);
+    assert!((slow_pop.speed_at(1.0) - 1_500.0).abs() < 1e-9);
+    for band in [MassBand::D, MassBand::E] {
+        assert!(table.class_weight(band, hypervelocity_class()).abs() < 1e-300);
+    }
 }
 
 /// The chi-square p-value of `n` members of `band` class `id` of `kind`, sampled as P08.T12.c
@@ -613,7 +689,7 @@ fn category(k: usize) -> StayCategory {
 /// P08.T9.d: the lifetime bracket contains `lifetime` for random masses, metallicities and draws:
 /// 2,000 here, 10⁵ under the slow suite.
 fn bracket_holds(n: u32) {
-    let bracket = LifetimeBracket::new();
+    let bracket = LifetimeBracket::shared();
     let mut stream = Stream::open(
         Seed::new(0x0811),
         tags::SELFTEST_STREAM,
@@ -861,7 +937,7 @@ fn the_milky_way_class_table_golden() {
             w.f64(&format!("stay.{}.{k}", population.name()), *odds);
         }
     }
-    let bracket = LifetimeBracket::new();
+    let bracket = LifetimeBracket::shared();
     for m in [3.0, 7.5, 9.0, 20.0, 120.0] {
         let (lo, hi) = bracket.bracket(SolarMasses::new(m)).unwrap();
         w.f64(&format!("bracket.{m}.lo_yr"), lo.value());

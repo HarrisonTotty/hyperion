@@ -55,5 +55,9 @@ harness = false
 name = "binary"
 harness = false
 
+[[bench]]
+name = "class_table"
+harness = false
+
 [lints]
 workspace = true

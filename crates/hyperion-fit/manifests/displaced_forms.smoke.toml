@@ -24,10 +24,8 @@ sweeps = 1
 # The neutron stars' band-averaged speed-bin shares at the fixture (P08.T8.b as built under ruling
 # 123), which weight the classes' misplaced shares and heights.
 speed_weights = [0.188, 0.059, 0.155, 0.193, 0.147, 0.105, 0.072, 0.081]
-# P15.T6.f: the Galaxy's Type Ia rate, 0.54 per century (Li et al. 2011, MNRAS 412, 1473), the
-# surviving-donor channel's 30% and its 1,900–2,500 km/s (Shen et al. 2018, ApJ 865, 15).
-ia_rate_per_year = 0.0054
-hypervelocity_channel_share = 0.3
-hypervelocity_speed_km_s = 2_200.0
+# P15.T6.f: the survivors' two populations and the Type Ia rate are the sim's
+# (`class_table::SURVIVOR_POPULATIONS`, `MILKY_WAY_IA_RATE_PER_YEAR`; ruling 128.1), held by the
+# fingerprint; these set the quadrature.
 hypervelocity_panel_nodes = 4
 hypervelocity_directions = 16

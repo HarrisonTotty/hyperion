@@ -128,7 +128,12 @@ fn stage_radii(m1: SolarMasses, comp: &Composition) -> [f64; 3] {
     } else {
         m1
     };
-    let track = Track::full(m0, comp, &StarDraws::median());
+    stage_radii_of(&Track::full(m0, comp, &StarDraws::median()))
+}
+
+/// [`stage_radii`] read from the primary's full track at the median draws (or at draws the track
+/// cannot tell from them).
+fn stage_radii_of(track: &Track) -> [f64; 3] {
     let death = track.lifetime().unwrap_or_else(|| track.built_until());
     [
         Stage::MainSequence,
@@ -210,7 +215,17 @@ pub fn stripping_band(m1: SolarMasses, q: f64, comp: &Composition) -> StrippingB
 /// ```
 #[must_use]
 pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
-    let radii = stage_radii(m, comp);
+    stripped_share_of(m, comp, stage_radii(m, comp))
+}
+
+/// [`stripped_share`] on the primary's full track `track`, already built at the median draws
+/// (P08.T9's build shares it with the kick bins' fate, ruling 128.5): the same bits.
+pub(crate) fn stripped_share_on(m: SolarMasses, comp: &Composition, track: &Track) -> f64 {
+    stripped_share_of(m, comp, stage_radii_of(track))
+}
+
+/// `S(a_B) − S(a_merge)` for a primary of `radii` ([`stage_radii`]).
+fn stripped_share_of(m: SolarMasses, comp: &Composition, radii: [f64; 3]) -> f64 {
     let model = MultiplicityModel::default_v1();
     let within = |edge: fn(&StrippingBand) -> Metres| {
         multiplicity_share(

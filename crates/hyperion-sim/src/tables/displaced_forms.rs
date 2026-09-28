@@ -2,16 +2,17 @@
 //! P15.T6), which `galaxy::displaced` reads.
 //!
 //! @provisional by hyperion-fit 0.1.0, task `displaced_forms` revision 0 (P15.T6.c–f on P15.T6.b's smoke histograms). Do not edit.
-//! inputs-sha256: 856b393da3c4d11cca032d3a0c0aa470fb2a3a37b4523223d5ed6d7c5c224d72
+//! inputs-sha256: 8ed17819a6cff83afc4197d13ea84655a33c9bf3753c1ba730e3d93de21bd885
 //! manifest: crates/hyperion-fit/manifests/displaced_forms.toml
 //! data: `displaced_smoke@d6e074cb2641`
-//! sim-fingerprint: 97832200560500db4949ab7e6eef65616e54fa4f843068614e070b9f508d1bb2
+//! sim-fingerprint: 88ceb5d035d354f1a6f3f9d41a125f91dc4af4c7ec5aa3de30f9d974551036eb
 //! since-generator-version: 13
 //! source: orbits integrated in the model's own potential with a rotating Dehnen (2000)
 //!   quadrupole bar (P15.T6.a–b); the brainstorm's form families and own-form shares; Maoz and
 //!   Graur (2017, ApJ 848, 25) for the Type Ia delays; Shen et al. (2018, ApJ 865, 15) for the
-//!   survivors' speeds and the channel's 30%; Li et al. (2011, MNRAS 412, 1473) for the Galaxy's
-//!   Type Ia rate
+//!   survivors' D6 mechanism and El-Badry et al. (2023, Open Journal of Astrophysics 6, §8.2) for
+//!   their slow and fast populations (ruling 128.1); Li et al. (2011, MNRAS 412, 1473) for the
+//!   Galaxy's Type Ia rate
 //! acceptance: on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced
 //!   share 0.9742 (unregularised 0.9715, λ 0.01); 51 of 56 classes with a parameter on a box
 //!   edge, 19 of them over 10⁻⁴ of the weight; 65 second-difference sign changes along the rows;
@@ -20,11 +21,12 @@
 //!   bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 0.00, 0.00; bar elongation over the
 //!   control -1.12, 0.55, 0.89, -3.44, -, -, -, - and length within 0.94 of it; slowest thin
 //!   class's mean rotation 0.921 `v_c`, fastest's -; the neutron stars' half-density height at
-//!   26,000 ly 223 pc; hypervelocity row misplaced 0.053, 17365 inside the cube (10.7 Myr each).
-//!   Not yet run: the universality potentials, plan 08's births' baseline and the other halo
-//!   masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound,
-//!   in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age
-//!   bin)
+//!   26,000 ly 223 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849
+//!   slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local
+//!   escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the
+//!   other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the
+//!   unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one
+//!   last age bin)
 //!
 //! Lengths are in the thin disc's scale length `R_d`, speeds in the circular speed `v_c` at 3
 //! `R_d` (the nuclear disc's own at 1.5 of its scale lengths for its classes), times in `R_d ÷
@@ -236,3 +238,7 @@ pub const NUCLEAR_DISC_BORN: [OldBornRow; 8] = [
 /// The ancient Type Ia survivors on straight lines (P15.T6.f), weight 1.
 #[rustfmt::skip]
 pub const HYPERVELOCITY: CoredPowerLawParams = CoredPowerLawParams { weight: 1.0, a: 0.928_118_236_925_053_7, q: 0.824_559_799_799_176_7, gamma: 2.077_159_420_889_243_4 };
+
+/// The survivors' rate-weighted mean path from launch to the cube's face, ly, along
+/// isotropic directions: a population's residence is it over its `1 ÷ ⟨1 ÷ v⟩` (P15.T6.f).
+pub const HYPERVELOCITY_MEAN_EXIT_LY: f64 = 78_661.765_821_026_81;

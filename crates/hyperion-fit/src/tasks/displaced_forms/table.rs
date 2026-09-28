@@ -40,6 +40,9 @@ use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+use hyperion_sim::galaxy::displaced::class_table::{
+    MILKY_WAY_IA_RATE_PER_YEAR, SURVIVOR_POPULATIONS,
+};
 use hyperion_sim::galaxy::displaced::forms::{
     COROTATION_RATIO_NODES, ClassKinematics, CoredPowerLawParams, ESCAPE_RATIO_NODES,
     FlaredLayerParams,
@@ -49,6 +52,7 @@ use hyperion_sim::galaxy::fields::Fields;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::math;
+use hyperion_sim::units::LightYears;
 
 use super::births::ThinHistory;
 use super::cells::{BarCells, RzCells};
@@ -74,7 +78,7 @@ pub const ORBITS_FILE: &str = "displaced_orbits.txt";
 pub const SUNLIKE_RADIUS_LY: f64 = 26_000.0;
 
 /// The items the table declares, in order.
-pub const ITEMS: [&str; 11] = [
+pub const ITEMS: [&str; 12] = [
     "SPEED_EDGES",
     "AGE_EDGES",
     "ESCAPE_RATIO_NODES",
@@ -86,6 +90,7 @@ pub const ITEMS: [&str; 11] = [
     "BAR_BORN",
     "NUCLEAR_DISC_BORN",
     "HYPERVELOCITY",
+    "HYPERVELOCITY_MEAN_EXIT_LY",
 ];
 
 /// The table's task.
@@ -287,9 +292,6 @@ impl FitParams {
                 tolerance,
             },
             hypervelocity: HypervelocitySettings {
-                ia_rate_per_year: manifest.f64("ia_rate_per_year")?,
-                channel_share: manifest.f64("hypervelocity_channel_share")?,
-                speed_km_s: manifest.f64("hypervelocity_speed_km_s")?,
                 panel_nodes: order(manifest, "hypervelocity_panel_nodes", &[4, 8])?,
                 directions: count(manifest, "hypervelocity_directions")?,
                 evaluations: count(manifest, "evaluations")?,
@@ -456,7 +458,13 @@ pub fn fit_all(
             fit_spheroids(&cells, &kicked, params.old, threads)?
         };
     }
-    let hypervelocity = fit_hypervelocity(&fields, r_d, &cells, params.hypervelocity, threads)?;
+    let full = PotentialTables::full(&MassModel::new(&galaxy_params));
+    let escape = |r: f64, z: f64| {
+        full.escape_speed(LightYears::new(r), LightYears::new(z))
+            .map_or(0.0, hyperion_sim::units::KilometresPerSecond::value)
+    };
+    let hypervelocity =
+        fit_hypervelocity(&fields, r_d, &cells, params.hypervelocity, escape, threads)?;
     let half_height_ly = half_height(&cells, &disc, SUNLIKE_RADIUS_LY / r_d) * r_d;
     Ok(FormFits {
         histograms: params.histograms,
@@ -651,6 +659,14 @@ pub fn render(fits: &FormFits) -> RustTable {
          pub const HYPERVELOCITY: CoredPowerLawParams = {};\n",
         spheroid_text(&fits.hypervelocity.form)
     )));
+    items.push(TableItem::Scalar {
+        name: "HYPERVELOCITY_MEAN_EXIT_LY".to_owned(),
+        doc: doc(&[
+            "The survivors' rate-weighted mean path from launch to the cube's face, ly, along",
+            "isotropic directions: a population's residence is it over its `1 ÷ ⟨1 ÷ v⟩` (P15.T6.f).",
+        ]),
+        value: fits.hypervelocity.mean_exit_ly,
+    });
     RustTable {
         summary: vec![
             "The displaced classes' dimensionless forms, in-cube shares and kinematics (plan 15,"
@@ -752,7 +768,8 @@ pub fn acceptance(fits: &FormFits) -> String {
          shares at the fixture's corotation ratio {:.2}, bar {}, bulge {}, nuclear disc {}; bar \
          elongation over the control {} and length within {:.2} of it; slowest thin class's \
          mean rotation {} `v_c`, fastest's {}; the neutron stars' half-density height at \
-         26,000 ly {pc:.0} pc; hypervelocity row misplaced {:.3}, {:.0} inside the cube ({:.1} Myr each). \
+         26,000 ly {pc:.0} pc; hypervelocity row misplaced {:.3}, {:.0} survivors inside the cube ({:.0} slow, {:.0} \
+         fast; mean path {:.0} ly), {:.3} of slow launches below 1.5 times the local escape speed. \
          Not yet run: the universality potentials, plan 08's births' baseline and the other halo \
          masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, \
          in-cube and phase-mixing checks (the histograms hold no total unbound count and one \
@@ -777,8 +794,11 @@ pub fn acceptance(fits: &FormFits) -> String {
         thin(0),
         thin(SPEED_BINS - 1),
         fits.hypervelocity.misplaced,
-        fits.hypervelocity.inside,
-        fits.hypervelocity.residence_years / 1e6,
+        fits.hypervelocity.inside[0] + fits.hypervelocity.inside[1],
+        fits.hypervelocity.inside[0],
+        fits.hypervelocity.inside[1],
+        fits.hypervelocity.mean_exit_ly,
+        fits.hypervelocity.slow_near_escape,
     )
 }
 
@@ -786,7 +806,8 @@ pub fn acceptance(fits: &FormFits) -> String {
 pub const SOURCE: &str = "orbits integrated in the model's own potential with a rotating \
     Dehnen (2000) quadrupole bar (P15.T6.a–b); the brainstorm's form families and own-form \
     shares; Maoz and Graur (2017, ApJ 848, 25) for the Type Ia delays; Shen et al. (2018, ApJ \
-    865, 15) for the survivors' speeds and the channel's 30%; Li et al. (2011, MNRAS 412, 1473) \
+    865, 15) for the survivors' D6 mechanism and El-Badry et al. (2023, Open Journal of Astrophysics 6, §8.2) for their \
+    slow and fast populations (ruling 128.1); Li et al. (2011, MNRAS 412, 1473) \
     for the Galaxy's Type Ia rate";
 
 impl FitTask for DisplacedFormsTask {
@@ -812,22 +833,46 @@ impl FitTask for DisplacedFormsTask {
 
     fn fingerprint(&self) -> SimFingerprint {
         let (_, scales, _) = fixture();
-        SimFingerprint::new(vec![
-            ("GalaxyScales::r_d (ly)".to_owned(), scales.r_d().value()),
-            ("GalaxyScales::v_c (km/s)".to_owned(), scales.v_c().value()),
-            (
-                "GalaxyScales::escape_ratio".to_owned(),
-                scales.escape_ratio(),
-            ),
-            (
-                "GalaxyScales::nuclear_v_c (km/s)".to_owned(),
-                scales.nuclear_v_c().value(),
-            ),
-            (
-                "GalaxyScales::corotation_ratio".to_owned(),
-                scales.corotation_ratio(),
-            ),
-        ])
+        SimFingerprint::new(
+            vec![
+                ("GalaxyScales::r_d (ly)".to_owned(), scales.r_d().value()),
+                ("GalaxyScales::v_c (km/s)".to_owned(), scales.v_c().value()),
+                (
+                    "GalaxyScales::escape_ratio".to_owned(),
+                    scales.escape_ratio(),
+                ),
+                (
+                    "GalaxyScales::nuclear_v_c (km/s)".to_owned(),
+                    scales.nuclear_v_c().value(),
+                ),
+                (
+                    "GalaxyScales::corotation_ratio".to_owned(),
+                    scales.corotation_ratio(),
+                ),
+                (
+                    "class_table::MILKY_WAY_IA_RATE_PER_YEAR".to_owned(),
+                    MILKY_WAY_IA_RATE_PER_YEAR,
+                ),
+            ]
+            .into_iter()
+            .chain(SURVIVOR_POPULATIONS.iter().enumerate().flat_map(|(i, p)| {
+                [
+                    (
+                        format!("class_table::SURVIVOR_POPULATIONS[{i}].share"),
+                        p.share,
+                    ),
+                    (
+                        format!("class_table::SURVIVOR_POPULATIONS[{i}].min_km_s"),
+                        p.min_km_s,
+                    ),
+                    (
+                        format!("class_table::SURVIVOR_POPULATIONS[{i}].max_km_s"),
+                        p.max_km_s,
+                    ),
+                ]
+            }))
+            .collect(),
+        )
     }
 
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {

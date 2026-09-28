@@ -47,7 +47,7 @@ use crate::stellar::remnant::{
     CollapseChannel, CompactRemnant, Death, DeathKind, KickMode, RemnantKind, StandardKickLaw,
     Stripping, ordinary_score,
 };
-use crate::stellar::sse::{MAX_INITIAL_MASS, TrackOptions, fate_of};
+use crate::stellar::sse::{Fate, MAX_INITIAL_MASS, Track, TrackOptions, fate_of};
 use crate::units::{KilometresPerSecond, SolarMasses};
 
 /// The midpoints of the remnant mass normal's quantiles each discrete remnant branch takes: Design
@@ -226,17 +226,54 @@ pub fn speed_bin_shares_against(
         m.value() > 0.0 && m.value().is_finite(),
         "an initial mass is positive and finite: {m:?}"
     );
-    shares_with(law, m, comp, v_ref, binarity::stripped_share(m, comp))
+    let m0 = if m > MAX_INITIAL_MASS {
+        MAX_INITIAL_MASS
+    } else {
+        m
+    };
+    // One track serves the seam's radii and the unmarked fate (ruling 128.5): the median draws
+    // and the unmarked ones differ only in the stripped mark, which neither sets.
+    let track = Track::full(m0, comp, &marked_draws(UNMARKED));
+    let stripped = binarity::stripped_share_on(m, comp, &track);
+    shares_on(law, m, comp, v_ref, stripped, Tracks::Shared(&track))
+}
+
+/// The mark of a star its companion did not strip: the largest word lies above every share below 1.
+const UNMARKED: Mark = Mark::from_word(u64::MAX);
+
+/// Where the quadrature's fates come from.
+#[derive(Clone, Copy)]
+enum Tracks<'a> {
+    /// The unmarked fate from this full track, and the marked one the same wherever the mark
+    /// cannot change the track: an iron core's star lies above both electron-capture windows, and
+    /// the mark changes nothing else (plan 06, design note 11; rulings 45.2 and 93.1).
+    Shared(&'a Track),
+    /// A fresh build for each branch, as the direct law does: the tests' reference.
+    #[cfg(test)]
+    Separate,
 }
 
 /// [`speed_bin_shares_against`] with the companion-stripped share `stripped` in place of the
-/// seam's.
+/// seam's, every fate built afresh: the tests' reference.
+#[cfg(test)]
 fn shares_with(
     law: &StandardKickLaw,
     m: SolarMasses,
     comp: &Composition,
     v_ref: KilometresPerSecond,
     stripped: f64,
+) -> KickBinShares {
+    shares_on(law, m, comp, v_ref, stripped, Tracks::Separate)
+}
+
+/// [`shares_with`], its fates from `tracks`.
+fn shares_on(
+    law: &StandardKickLaw,
+    m: SolarMasses,
+    comp: &Composition,
+    v_ref: KilometresPerSecond,
+    stripped: f64,
+    tracks: Tracks<'_>,
 ) -> KickBinShares {
     assert!(v_ref.value() > 0.0, "a speed scale is positive: {v_ref:?}");
     let thresholds = KINDS.map(|kind| {
@@ -258,13 +295,25 @@ fn shares_with(
     } else {
         m
     };
-    for (weight, mark) in [
-        (1.0 - stripped, Mark::from_word(u64::MAX)),
-        (stripped, Mark::from_word(0)),
-    ] {
+    let mut unmarked_fate = None;
+    for (weight, mark) in [(1.0 - stripped, UNMARKED), (stripped, Mark::from_word(0))] {
         if weight > 0.0 {
             let draws = marked_draws(mark);
-            let fate = fate_of(m0, comp, &draws, TrackOptions::default());
+            let shared = match tracks {
+                Tracks::Shared(track) => Some(track),
+                #[cfg(test)]
+                Tracks::Separate => None,
+            };
+            let fate = match (shared, unmarked_fate) {
+                (Some(_), Some(f)) if mark != UNMARKED && is_iron_core(&f) => f,
+                (Some(track), None) if mark == UNMARKED => track
+                    .fate_with(RemnantDraws::of(&draws))
+                    .expect("a full track reaches the death"),
+                (Some(_) | None, _) => fate_of(m0, comp, &draws, TrackOptions::default()),
+            };
+            if mark == UNMARKED {
+                unmarked_fate = Some(fate);
+            }
             let iron_core = fate.iron_core.map(|core| core.supernova);
             for (w, death, remnant) in remnant_branches(fate.death, fate.remnant, iron_core) {
                 acc.add(weight * w, law.with_stripped_mark(death, &draws), remnant);
@@ -276,6 +325,11 @@ fn shares_with(
         no_remnant: acc.no_remnant,
         stripped_share: stripped,
     }
+}
+
+/// Whether `fate` is an iron core's collapse.
+fn is_iron_core(fate: &Fate) -> bool {
+    fate.iron_core.is_some()
 }
 
 /// The median draws with the companion-stripped mark `mark`: the word 0 lies below every
@@ -519,6 +573,32 @@ mod tests {
     fn layer_e_masses() -> impl Iterator<Item = SolarMasses> {
         (0..33)
             .map(|i| SolarMasses::new(8.0 * math::exp(f64::from(i) / 32.0 * math::ln(150.0 / 8.0))))
+    }
+
+    /// Ruling 128.5: sharing the primary's track with the seam, and the unmarked fate with the
+    /// marked branch above the electron-capture windows, gives the direct law's bits at 33 masses
+    /// across layer E's band and two metallicities, the windows' masses included.
+    #[test]
+    fn the_shared_track_gives_the_direct_shares_bit_for_bit() {
+        let law = StandardKickLaw::default();
+        let v_c = KilometresPerSecond::new(V_C);
+        assert!(
+            !crate::stellar::remnant::KickLawParams::default()
+                .is_stripped(StarDraws::median().stripped())
+        );
+        for comp in [
+            Composition::SOLAR,
+            Composition::from_fe_h(
+                crate::units::Dex::new(-1.5),
+                crate::units::HeliumExcess::ZERO,
+            ),
+        ] {
+            for m in layer_e_masses().chain([7.9, 8.1, 8.25, 8.4].map(SolarMasses::new)) {
+                let fast = speed_bin_shares_against(&law, m, &comp, v_c);
+                let direct = shares_with(&law, m, &comp, v_c, binarity::stripped_share(m, &comp));
+                assert_eq!(format!("{fast:?}"), format!("{direct:?}"), "{m:?}");
+            }
+        }
     }
 
     /// P08.T8.b: the shares sum to 1 to 10⁻¹² at 33 masses across layer E's band, at solar and
