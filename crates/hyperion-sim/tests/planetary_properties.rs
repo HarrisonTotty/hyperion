@@ -569,7 +569,8 @@ mod satellites {
         let plan = plan(&galaxy, count);
         // The cells are shared out among threads, each counting its own; the checks are per
         // system and the counts are summed, so the result is the same on any number of threads.
-        let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+        // At most four, the slots `.config/nextest.toml` gives the slow run.
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(4));
         let (galaxy, plan) = (&galaxy, &plan);
         std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)

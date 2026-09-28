@@ -2,8 +2,8 @@
 //! Milky Way fixture and the drawn galaxies), run by `just test-slow`.
 //!
 //! Each takes thousands of galaxies, lines of sight or millions of draws — a galaxy's parameters
-//! cost some 17 ms even optimised, for plan 02's σ estimator — so they are marked slow and run
-//! under the slow-test profile only; the fast suite runs the same checks on fewer seeds, in
+//! cost some 2 ms, and a whole galaxy, with its potential and fields, over 100 ms — so they are
+//! marked slow and run under the slow-test profile only; the fast suite runs the same checks on fewer seeds, in
 //! `galaxy::gas`'s own unit tests and in `tests/gas.rs`. P07.T12's golden file and its order
 //! independence are the two fast tests here.
 //!
@@ -85,7 +85,7 @@ fn corona_far_above(params: &GasParams, r: f64) -> (f64, f64) {
 /// The distribution of the share is printed, since the lightest galaxies set its floor: their warm
 /// layer weighs what a Milky Way's does, some 10⁹ M☉, against a gas disc of a few 10⁹.
 #[test]
-#[ignore = "slow: 2,000 galaxies' parameters, about 15 s optimised"]
+#[ignore = "slow: 2,000 galaxies' parameters, about 5 s"]
 fn the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies() {
     let reference = GasParams::REFERENCE_RADIUS.value();
     let mut shares = Vec::with_capacity(2_000);

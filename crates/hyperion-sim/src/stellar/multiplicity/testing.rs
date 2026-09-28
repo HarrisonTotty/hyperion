@@ -2,30 +2,24 @@
 
 use hyperion_testkit::lcg::Lcg;
 
-use crate::Seed;
+use super::period_fit;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO};
-use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{CellKey, SystemOrigin, SystemRecord};
-use crate::id::{Layer, SystemId};
-use crate::units::{SolarMasses, Years};
-
-/// The seed of the galaxy every test here draws in.
-const SEED: u64 = 0x0b11_0002_0000_5eed;
+use crate::galaxy::placement::SystemRecord;
+use crate::id::SystemId;
 
 /// The sample size of the property tests (P11.T2 and T3.b): 10⁴ hierarchies.
 pub(crate) const SAMPLE: u32 = 10_000;
 
-/// The Milky Way fixture.
+/// The Milky Way fixture, the period correction's fit's galaxy.
 pub(crate) fn galaxy() -> Galaxy {
-    Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
-        .expect("the Milky Way fixture's gas is mostly neutral")
+    period_fit::galaxy()
 }
 
 /// The Sun-like point: in the plane, 26,000 ly out on the +y axis, clear of the bar.
 pub(crate) fn sunlike() -> GalacticPosition {
-    GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("inside the root cube")
+    period_fit::position()
 }
 
 /// A point 6,000 ly from the centre in the plane, where the Galactic tide is much stronger than at
@@ -36,14 +30,7 @@ pub(super) fn inner_disc() -> GalacticPosition {
 
 /// `n` distinct candidate IDs of layer C, running through consecutive cells along +x.
 fn ids(n: u32) -> impl Iterator<Item = SystemId> {
-    let first = CellKey::new(Layer::C, [0, 812, 0]).expect("a cell near the solar circle");
-    let capacity = first.index_capacity();
-    (0..n).map(move |i| {
-        let along = i32::try_from(i / capacity).expect("a few cells");
-        let key = CellKey::new(Layer::C, [along, 812, 0]).expect("a cell near the first");
-        key.candidate_id(i % capacity)
-            .expect("inside the index field")
-    })
+    (0..n).map(period_fit::candidate)
 }
 
 /// A grid record of `id` at `at` whose primary formed with `mass` M☉, a Gyr ago.
@@ -53,18 +40,7 @@ pub(super) fn record(
     at: &GalacticPosition,
     mass: f64,
 ) -> SystemRecord {
-    let component = galaxy
-        .fields()
-        .component_id(0)
-        .expect("the fixture has components");
-    SystemRecord::from_parts(
-        id,
-        *at,
-        SystemOrigin::Grid(component),
-        galaxy.fields().component(component).population(),
-        SolarMasses::new(mass),
-        Years::new(1e9),
-    )
+    period_fit::grid_record(galaxy, id, at, mass)
 }
 
 /// `n` records at `at` whose primaries are drawn from the galaxy's mass function over the whole

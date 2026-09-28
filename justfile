@@ -74,13 +74,18 @@ test:
 # Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
 # (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
 # Nextest runs no doctests, but no doctest is slow. `.config/nextest.toml` holds the `slow` profile.
-# Then the fitted tables' check reruns every fast fit and compares bytes (plan 15, P15.T2).
+# Then the fitted tables' check reruns every fast fit and compares bytes (plan 15, P15.T2). It uses
+# every core too, so it runs in the same hold of the lock, from the binary built beforehand, and is
+# timed.
 [positional-arguments]
 test-slow *args:
     cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only --no-run
     cargo build -q -p hyperion-fit
-    just _locked cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@"
-    cargo run -q -p hyperion-fit -- check --rerun-fast
+    just _locked bash -c '{{ slow_then_check }}' test-slow "$@"
+
+# The body of `test-slow`'s locked step: the slow tests with the recipe's arguments, then the timed
+# check.
+slow_then_check := 'cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@" && start=$SECONDS && cargo run -q -p hyperion-fit -- check --rerun-fast && echo "hyperion-fit check --rerun-fast: $((SECONDS - start)) s" >&2'
 
 # Run the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
 test-wasm:

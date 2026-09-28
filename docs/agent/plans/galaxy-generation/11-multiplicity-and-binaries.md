@@ -1663,6 +1663,25 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   was fitted with the 8 M☉ floor at rows of 3.5, 7, 12 and 28 M☉; at solar metallicity the 7 M☉
   row stays below the new 7.20 M☉ floor, so the table is not refitted now, and it is refitted
   when P11.T1.d replaces the seam.
+- **The period correction's fit, as built (slow-test audit, 2026-09-27; no output moves).** The
+  ignored test `fit_the_direct_period_correction`, which fitted the table and asserted nothing, is
+  gone from the slow suite. The fit is `hyperion-fit`'s `period_correction` task
+  (`tasks/period_correction.rs`, Slow, with `manifests/period_correction.toml` and a smoke
+  manifest): the same twelve iterations over the same 20,000 systems a row, drawn in chunks on any
+  number of threads with integer bin counts, so it gives the old test's table bit for bit. Its
+  sample and measurements are the sim's new public `stellar::multiplicity::period_fit` module,
+  which the hierarchy tests' samples now share. The task is not in the registry yet, since
+  registering commits its table: rerun at version 13 it reproduces the 3.5, 12 and 28 M☉ rows bit
+  for bit but moves the 7 M☉ row (its factors from 0.655, 0.903, 1.125, 1.265, 1.243, 1.092, 0.880
+  and 0.655 to 0.648, 0.881, 1.116, 1.228, 1.274, 1.103, 0.906 and 0.663), which moves the
+  generator's output. The ruling 93.3 note's reading, that the 7 M☉ row stays below the floor, does
+  not hold at the fixture's Sun-like point. The refit, in the version 14 batch, registers
+  the task, writes `tables/period_correction.rs` and has `direct.rs` read it.
+  - _Its replacement_ is the slow test `period_fit::the_period_correction_gives_its_bin_shares`
+    (about 10 s): the committed table's bin shares over the fit's own sample, each within the
+    plan's 0.2% of Moe and Di Stefano's. The 3.5, 12 and 28 M☉ rows miss by 0.15%, 0.06% and
+    0.11%; the 7 M☉ row misses by 1.51% and is held to an interim 0.2–2% (accepted by the
+    coordinator) until the refit in the version 14 batch, which must narrow it to 0.2%.
 - **Two pieces of plan 11 landed with plan 06's range briefs (round 9, `briefs`; ruling 90).**
   - `multiplicity::draw_star_count(galaxy, record, ctx, attempt) -> u8` joins the Provides. It equals
     `draw_hierarchy(..).star_count()` for every record, context and attempt (tested over 4,500

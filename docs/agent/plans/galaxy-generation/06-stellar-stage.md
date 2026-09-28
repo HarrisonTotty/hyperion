@@ -1752,6 +1752,11 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
         no supernova byte or envelope; the node check compares to the stored eight digits, not bit
         for bit; the header reads 11, since the bump to 12 has not come, and the bump must re-emit
         the three with `--since 12` (or refit them if a track moves).
+      - _As built (slow-test audit, 2026-09-27):_ `the_committed_panels_are_reproduced` is
+        deleted. It repeated `hyperion-fit check --rerun-fast`, which reruns every fast task,
+        these three panels included, and compares the bytes; `just test-slow` runs that check,
+        now under the heavy-test lock. The byte-for-byte reproduction this task asks for is that
+        check's.
 - **P06.T38.d `FittedFates`, the reader.** Built with T38.c.
   - **Build:** interpolation in fixed-order arithmetic through `math`; `None` outside the domain
     (m₀ below 0.7 or above 100 M☉, η beyond ±3σ, a non-zero `helium_excess`, an unsmooth cell).

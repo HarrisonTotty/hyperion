@@ -1327,9 +1327,9 @@ fn subsystem_weight(draft: &Draft, parent: usize) -> f64 {
     }
 }
 
-/// For the tests: the direct companions a record's draw places, the tries it draws and the
-/// companions it drops, under `correction`, or `None` for a primary the spine construction draws.
-#[cfg(test)]
+/// For the period correction's fit ([`period_fit`](super::period_fit)): the direct companions a
+/// record's draw places, the tries it draws and the companions it drops, under `correction`, or
+/// `None` for a primary the spine construction draws.
 #[must_use]
 pub(super) fn direct_tries(
     galaxy: &Galaxy,
@@ -1831,11 +1831,10 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::order::assert_order_independent;
 
-    use super::super::direct::DirectPeriods;
+    use super::super::period_fit::direct_log_periods;
     use super::super::testing::{
         SAMPLE, galaxy, imf_records, inner_disc, log_uniform_records, records_of_mass, sunlike,
     };
-    use super::direct_tries;
     use super::*;
     use crate::galaxy::imf::MassBand;
 
@@ -2557,92 +2556,6 @@ mod tests {
         // rather than to the constant, so that a change to the constant fails here.
         assert!((share - 0.25).abs() < 3.29 * sigma, "{share}");
         assert!(lost < 4, "{lost} stripped primaries have no companion");
-    }
-
-    /// The periods of the companions of `h` that orbit its primary directly, as x = log₁₀(P ÷ 1 d).
-    fn direct_log_periods(h: &SystemHierarchy) -> Vec<f64> {
-        h.pairs()
-            .filter(|(pair, _)| {
-                let HierarchyNode::Pair { inner, .. } = *h.node(*pair) else {
-                    unreachable!("pairs are pairs")
-                };
-                h.first_star(inner) == StarIndex::PRIMARY
-            })
-            .map(|(_, orbit)| math::log10(Days::from(orbit.period()).value()))
-            .collect()
-    }
-
-    /// The share of `periods` in each of the correction's eight bins, 0.2–1, 1–2, …, 7–8.
-    fn bin_shares(periods: &[f64]) -> [f64; 8] {
-        let mut counts = [0.0; 8];
-        for &x in periods {
-            let bin = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
-                .iter()
-                .filter(|&&edge| x >= edge)
-                .count();
-            counts[bin] += 1.0;
-        }
-        let total: f64 = counts.iter().sum();
-        counts.map(|c| c / total)
-    }
-
-    /// The target shares of the eight bins at `m`: Moe and Di Stefano's law, uncorrected.
-    fn target_shares(m: f64) -> [f64; 8] {
-        let law = DirectPeriods::new(SolarMasses::new(m), &[[1.0; 8]; 4]);
-        let edges = [0.2, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        std::array::from_fn(|i| law.share(edges[i], edges[i + 1]))
-    }
-
-    /// Fits [`PERIOD_CORRECTION`] (ruling 81.3) and prints it: at each row's mass, 20,000 systems
-    /// at the Sun-like point are drawn with the table so far, and each bin's factor is multiplied
-    /// by the target share over the share of the direct companions that survive rejection, twelve
-    /// times from a table of ones.
-    #[test]
-    #[ignore = "slow: the fit of the direct companions' period correction, about 10⁶ hierarchies"]
-    fn fit_the_direct_period_correction() {
-        let galaxy = galaxy();
-        let mut table = [[1.0; 8]; 4];
-        for iteration in 0..12 {
-            for (row, &m) in super::super::direct::CORRECTION_MASSES.iter().enumerate() {
-                let target = target_shares(m);
-                let mut periods = Vec::new();
-                for record in records_of_mass(&galaxy, 2 * SAMPLE, &sunlike(), m) {
-                    let h = draw_hierarchy_with(
-                        &galaxy,
-                        &record,
-                        MultiplicityContext::Free,
-                        RedrawAttempt::FIRST,
-                        &table,
-                    );
-                    periods.extend(direct_log_periods(&h));
-                }
-                let (mut placed, mut tries, mut lost) = (0_usize, 0_u64, 0_u32);
-                for record in records_of_mass(&galaxy, 2 * SAMPLE, &sunlike(), m) {
-                    if let Some((n, t, d)) = direct_tries(&galaxy, &record, &table) {
-                        (placed, tries, lost) = (placed + n, tries + t, lost + u32::from(d));
-                    }
-                }
-                #[expect(clippy::cast_precision_loss, reason = "counts of a few 10⁴")]
-                let rejected = 1.0 - (placed as f64) / (tries as f64);
-                println!(
-                    "iteration {iteration}, {m} M☉: {:.2}% of tries rejected, {lost} of {} \
-                     direct companions dropped",
-                    100.0 * rejected,
-                    placed + lost as usize
-                );
-                let measured = bin_shares(&periods);
-                for bin in 0..8 {
-                    if measured[bin] > 0.0 {
-                        table[row][bin] *= target[bin] / measured[bin];
-                    }
-                }
-                let worst = (0..8)
-                    .map(|b| (measured[b] / target[b] - 1.0).abs())
-                    .fold(0.0, f64::max);
-                println!("iteration {iteration}, {m} M☉: worst relative miss {worst:.4}");
-            }
-        }
-        println!("PERIOD_CORRECTION = {table:?}");
     }
 
     /// The shapes the draw makes for Sun-like primaries: which member of a triple holds the inner

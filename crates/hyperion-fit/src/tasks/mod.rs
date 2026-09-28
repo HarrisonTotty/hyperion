@@ -7,5 +7,6 @@ pub mod displaced_forms;
 pub mod giant_cooling;
 pub mod kick_rank;
 pub mod mge;
+pub mod period_correction;
 pub mod stellar_fates;
 pub mod wd_cooling;

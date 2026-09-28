@@ -41,6 +41,7 @@ mod validate;
 
 use std::error::Error;
 use std::fmt;
+use std::sync::OnceLock;
 
 pub use accretion::{AccretionHistory, Orbit, Progenitor, ProgenitorKind};
 pub use halo::{HaloBreak, HaloComponentKind, HaloComponentParams, HaloParams};
@@ -359,31 +360,97 @@ impl DarkHaloParams {
 /// gives the bulge's dispersion ([`potential::sigma`](super::potential::sigma)), and McConnell
 /// and Ma's (2013) relation with the drawn scatter gives the mass, which the final model then
 /// holds.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BlackHoleParams {
-    scatter: Dex,
-    bulge_dispersion: KilometresPerSecond,
-    mass: SolarMasses,
+///
+/// The second phase is solved on first use: the dispersion is a Jeans solution of some hundred
+/// milliseconds, and most readers of a galaxy's parameters never read it. The first call of
+/// [`bulge_dispersion`](Self::bulge_dispersion) or [`mass`](Self::mass) (or of `Debug`) solves it
+/// from the parameters alone and keeps it, so every reader sees the same bits whichever reads first.
+/// [`scatter`](Self::scatter) is drawn and costs nothing.
+#[derive(Clone, Copy)]
+pub struct BlackHoleParams<'a> {
+    params: &'a GalaxyParams,
 }
 
-impl BlackHoleParams {
+impl BlackHoleParams<'_> {
     /// The black hole's offset from the M–σ relation, normal with 0.38 dex of scatter.
     #[must_use]
     pub fn scatter(&self) -> Dex {
-        self.scatter
+        self.params.black_hole.scatter
     }
 
     /// The bulge's projected velocity dispersion inside its effective radius, which the M–σ
     /// relation reads ([`bulge_dispersion`](super::potential::sigma::bulge_dispersion)).
     #[must_use]
     pub fn bulge_dispersion(&self) -> KilometresPerSecond {
-        self.bulge_dispersion
+        self.solved().bulge_dispersion
     }
 
     /// The black hole's mass: `10^(8.32 + 5.64 log₁₀(σ ÷ 200 km/s) + scatter)` M☉.
     #[must_use]
     pub fn mass(&self) -> SolarMasses {
-        self.mass
+        self.solved().mass
+    }
+
+    /// The second phase, solved once.
+    fn solved(self) -> SolvedBlackHole {
+        *self
+            .params
+            .black_hole
+            .solved
+            .get_or_init(|| derive::solve_black_hole(self.params))
+    }
+}
+
+/// The three values, as the parameters' own `Debug` has always shown them.
+impl fmt::Debug for BlackHoleParams<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlackHoleParams")
+            .field("scatter", &self.scatter())
+            .field("bulge_dispersion", &self.bulge_dispersion())
+            .field("mass", &self.mass())
+            .finish()
+    }
+}
+
+/// Equal when the three values are.
+impl PartialEq for BlackHoleParams<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.scatter() == other.scatter()
+            && self.bulge_dispersion() == other.bulge_dispersion()
+            && self.mass() == other.mass()
+    }
+}
+
+/// The black hole's second phase (see [`BlackHoleParams`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SolvedBlackHole {
+    bulge_dispersion: KilometresPerSecond,
+    mass: SolarMasses,
+}
+
+/// The black hole as the parameters hold it: the drawn scatter, and the second phase once solved.
+#[derive(Debug, Clone)]
+struct BlackHoleCell {
+    scatter: Dex,
+    solved: OnceLock<SolvedBlackHole>,
+}
+
+impl BlackHoleCell {
+    /// A black hole of `scatter` whose second phase is not yet solved.
+    fn new(scatter: Dex) -> Self {
+        Self {
+            scatter,
+            solved: OnceLock::new(),
+        }
+    }
+}
+
+/// Equal when the scatters are. The second phase is a pure function of the other parameters,
+/// which [`GalaxyParams`]'s equality compares, so it is left out: comparing it would make two equal
+/// parameters unequal because only one of them had been read.
+impl PartialEq for BlackHoleCell {
+    fn eq(&self, other: &Self) -> bool {
+        self.scatter == other.scatter
     }
 }
 
@@ -436,7 +503,7 @@ impl Error for BuildGalaxyParamsError {}
 /// ([`milky_way_like`](Self::milky_way_like)), or set values by hand with
 /// [`GalaxyParamsBuilder`]. It is immutable, and a pure function of its inputs and the generator
 /// version.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct GalaxyParams {
     mass_function: MassFunctionKind,
     stellar_mass: SolarMasses,
@@ -458,10 +525,70 @@ pub struct GalaxyParams {
     arms: ArmParams,
     gas_disc: GasDiscParams,
     dark_halo: DarkHaloParams,
-    black_hole: BlackHoleParams,
+    black_hole: BlackHoleCell,
     metallicity_gradient: DexPerKiloparsec,
     halo: HaloParams,
     accretion: AccretionHistory,
+}
+
+/// Every field, as a derived `Debug` shows it, with the black hole's three values: formatting
+/// solves its second phase if nothing has yet.
+impl fmt::Debug for GalaxyParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Destructured, so that a new field fails to compile until it is shown here.
+        let Self {
+            mass_function,
+            stellar_mass,
+            sfh_timescale,
+            bar_of_bulge,
+            shares,
+            mean_masses,
+            masses,
+            system_count,
+            mean_formed_mass,
+            mean_stars_per_system,
+            thin_disc,
+            young_disc,
+            thick_disc,
+            bulge,
+            bar,
+            nuclear_disc,
+            nuclear_cluster,
+            arms,
+            gas_disc,
+            dark_halo,
+            black_hole: _,
+            metallicity_gradient,
+            halo,
+            accretion,
+        } = self;
+        f.debug_struct("GalaxyParams")
+            .field("mass_function", mass_function)
+            .field("stellar_mass", stellar_mass)
+            .field("sfh_timescale", sfh_timescale)
+            .field("bar_of_bulge", bar_of_bulge)
+            .field("shares", shares)
+            .field("mean_masses", mean_masses)
+            .field("masses", masses)
+            .field("system_count", system_count)
+            .field("mean_formed_mass", mean_formed_mass)
+            .field("mean_stars_per_system", mean_stars_per_system)
+            .field("thin_disc", thin_disc)
+            .field("young_disc", young_disc)
+            .field("thick_disc", thick_disc)
+            .field("bulge", bulge)
+            .field("bar", bar)
+            .field("nuclear_disc", nuclear_disc)
+            .field("nuclear_cluster", nuclear_cluster)
+            .field("arms", arms)
+            .field("gas_disc", gas_disc)
+            .field("dark_halo", dark_halo)
+            .field("black_hole", &self.black_hole())
+            .field("metallicity_gradient", metallicity_gradient)
+            .field("halo", halo)
+            .field("accretion", accretion)
+            .finish()
+    }
 }
 
 impl GalaxyParams {
@@ -639,10 +766,10 @@ impl GalaxyParams {
         &self.dark_halo
     }
 
-    /// The central black hole.
+    /// The central black hole: its scatter at once, its dispersion and mass solved on first use.
     #[must_use]
-    pub fn black_hole(&self) -> &BlackHoleParams {
-        &self.black_hole
+    pub fn black_hole(&self) -> BlackHoleParams<'_> {
+        BlackHoleParams { params: self }
     }
 
     /// The discs' radial \[Fe/H\] gradient, −0.07 to −0.04 dex per kpc (the brainstorm's "about

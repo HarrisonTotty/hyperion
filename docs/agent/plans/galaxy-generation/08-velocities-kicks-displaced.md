@@ -567,6 +567,15 @@ speed ÷ 2. **Acceptance.** Tests pass.
   plan 02's seed-sweep tests still pass; they are slow tests already (P02.T11), and the fast suite's
   32-seed versions stay within a few seconds. Bench: under 100 ms per parameter set (a finding if
   not; the lever is a coarser grid, which belongs to the version).
+  - _As built (slow-test audit, 2026-09-27; no output moves):_ the second phase is solved on first
+    use, not in the build. `GalaxyParams` holds the drawn scatter and a `OnceLock` of σ and the
+    mass; `black_hole()` returns a `BlackHoleParams<'_>` view whose `scatter()` is free and whose
+    `bulge_dispersion()` and `mass()` solve it from the parameters alone (which never read the
+    black hole) and keep it. `MassModel::new`, and so every `Galaxy`, reads the mass, so a built
+    galaxy pays as before; the parameter sweeps that never read σ (`every_getter`, the neutral-disc
+    sweep, the gas tests) no longer pay about 100–150 ms a seed. Equality compares the scatter
+    alone, since the rest is a function of the other fields, and `Debug` solves and prints the
+    three values as before.
 
 **Files.** `galaxy/kinematics/spheroid.rs`, `galaxy/potential/sigma.rs`, `galaxy/mod.rs`,
 `tests/galaxy_kinematics_spheroid.rs`, regenerated goldens for T4.d. **Acceptance.** Tests pass;
@@ -833,6 +842,19 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
   coordinate-ascent starts per cell and 20 seeds, every 384 ly (a stride of three layer-E cells)
   in both layers: no violation; the worst density is 0.999 999 999 991 of its bound (the nearest
   corner, where the bound is attained). It takes 755 s in the slow-test profile under load 11–16.
+- **As built (slow-test audit, 2026-09-27; no output moves).** The hunt is four slow tests of five
+  seeds each, `hunt_flared_violations_in_the_inner_galaxy_seeds_0_to_4` to `_15_to_19`, so that
+  nextest runs them side by side (threads would not run under `wasm32-wasip1`). A class without an
+  arm is exactly axisymmetric: its density reads x and y only through libm's `hypot`, which drops
+  both signs and orders its arguments, and its bound only through the cell's `√(x² + y²)` range and
+  least |z|, so a negation or swap of x and y moves neither by a bit. At 90° and 135° such a class
+  is therefore hunted only in a cell that no symmetry of the square maps onto a cell hunted at 0°
+  or 45°; for the others the shard checks that the bound and the densities at the 27 starts equal
+  the image's, bit for bit, and a fast test (`the_armless_classes_are_exactly_symmetric_about_the_axis`)
+  checks the symmetry at 200 random cells of the fixture. The classes with an arm keep all four
+  azimuths. What the shortcut gives up is the second coordinate ascent of the same function, run
+  with the axes in another order; the cells, classes, starts, seeds and the 10⁻¹² window are
+  unchanged.
 
 ### P08.T12 Displaced classes in placement
 

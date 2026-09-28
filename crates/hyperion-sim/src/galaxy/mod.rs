@@ -157,9 +157,10 @@ impl Population {
 /// pure functions of the seed (or of the parameters, for a fixture) and the generator version. The
 /// fates behind the mean masses are held as their result, [`GalaxyParams::mean_system_mass`].
 ///
-/// A galaxy is immutable, holds no interior mutability and is `Send + Sync`, so one build can be
-/// shared between threads behind an `Arc`, as the server's galaxy cache holds it (plan 04). The
-/// sim caches nothing itself. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
+/// A galaxy is immutable and `Send + Sync`, so one build can be shared between threads behind an
+/// `Arc`, as the server's galaxy cache holds it (plan 04). Its only interior mutability is the
+/// parameters' black hole ([`GalaxyParams::black_hole`]), solved once from the parameters when first
+/// read, which the mass model does while the galaxy is built; the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
 /// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
 /// the heap (plan 07). [`heap_bytes`](Self::heap_bytes) states what one costs to keep, about

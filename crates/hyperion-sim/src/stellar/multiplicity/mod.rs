@@ -27,6 +27,7 @@ mod direct;
 mod dist;
 mod hierarchy;
 mod model;
+pub mod period_fit;
 mod positions;
 mod quadrature;
 mod stability;

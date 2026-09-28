@@ -85,7 +85,8 @@ pub const EFFECTIVE_RADIUS_IN_SCALES: f64 = 2.026_996_389_655_237_4;
 /// estimate).
 ///
 /// It is [`bulge_projected_sigma`] of [`MassModel::without_centre`]: some 117 evaluations of the
-/// model's forces, about a hundred milliseconds of the parameters' build.
+/// model's forces, about a hundred milliseconds. The parameters solve it when their black hole's
+/// dispersion or mass is first read, not when they are built.
 #[must_use]
 pub fn bulge_dispersion(params: &GalaxyParams) -> KilometresPerSecond {
     bulge_projected_sigma(&MassModel::without_centre(params), params)

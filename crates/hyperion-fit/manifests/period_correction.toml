@@ -1,0 +1,8 @@
+# The direct companions' period correction (plan 11, ruling 81.3): twelve iterations over 20,000
+# systems at each row's mass, the fit the sim's committed table was made by. Not yet registered:
+# the task joins the registry with the refit that moves the table (tasks/period_correction.rs).
+task = "period_correction"
+
+[params]
+iterations = 12
+sample = 20_000

@@ -1,0 +1,6 @@
+# The period correction's smoke run: two iterations over 300 systems a row, a few seconds.
+task = "period_correction"
+
+[params]
+iterations = 2
+sample = 300

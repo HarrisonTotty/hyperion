@@ -730,6 +730,16 @@ hole's mass through a two-phase build: `MassModel` without it, σ, M–σ with t
 the final model. Tests: the fixture's σ is 95–125 km/s and its black hole, without scatter, within a
 factor of 2.5 of 4.3 × 10⁶ M☉; over 10³ seeds 90% of σ lie in 90–135 km/s.
 
+_As built (slow-test audit, 2026-09-27; no output moves):_ the second phase is solved when first
+read rather than in the build, because plan 08's Jeans σ_e (P08.T4.d) costs 100–150 ms a parameter
+set and most sweeps never read it. `GalaxyParams` holds the scatter and a `OnceLock` of σ and the
+mass, and `black_hole()` returns a `BlackHoleParams<'_>` view that solves it on `bulge_dispersion()`
+or `mass()`. This is the sim's one value filled on first use, under the sim-determinism skill's documented
+exception for lazily computed values (added by the coordinator's ruling of 2026-09-27): it is a pure function of immutable fields, whose solve
+reads neither σ nor the mass (so it cannot re-enter), and every reader gets the same bits whichever
+reads first. The goldens pin it (`bh.sigma` and `bh.mass`), and every `Galaxy` solves it in
+`MassModel::new`. Equality compares the scatter only; `Debug` solves and prints as before.
+
 Files: `galaxy/potential/{mod,mge,nfw,spherical,model,tables,sigma}.rs`, `src/tables/mge.rs`,
 `crates/hyperion-fit/{Cargo.toml,src/main.rs,src/lib.rs,src/tasks/mge.rs,tests/mge.rs}`,
 `tests/galaxy_potential.rs`, `tests/golden/galaxy_potential.golden`.
@@ -1503,7 +1513,8 @@ component order and the map's quadrature scheme belong to the version as well.
     capacity, without the allocator's overhead, so a clone can report a little less. The test
     prints the figures and asserts 512 KiB–4 MiB, under 5% apart, and a handle under 16 KiB.
   - _Tests._ `Send + Sync + RefUnwindSafe` rules out `Cell`, `RefCell` and `OnceCell`; a lock,
-    `OnceLock` or atomic would pass, and the sim holds none. Parts and handles are compared by their
+    `OnceLock` or atomic would pass, and the sim holds none. (_As built, slow-test audit,
+    2026-09-27:_ it now holds one, the parameters' black hole; see P02.T6.e.) Parts and handles are compared by their
     `Debug` text, which tells every two floats apart, and order independence by its fingerprint. A
     slow test covers `with_full_potential`: it adds only the grid, bit for bit
     `PotentialTables::full`, and a second call builds nothing.

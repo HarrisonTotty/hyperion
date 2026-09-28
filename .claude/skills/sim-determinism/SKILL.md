@@ -45,6 +45,21 @@ pure functions of seed, key and inputs.
 
 - **Banned**: state that depends on call history, such as memo tables filled on first use,
   counters, or lazily initialised globals. Caches that do this belong to the caller (the server).
+- **Allowed, as a documented exception**: a value computed lazily, on first read, inside the value
+  that owns it, when all of these hold:
+  - it is a pure, deterministic function of state that is already fixed, and that state never
+    changes afterwards;
+  - it draws on no RNG stream, and its computation never reads the lazy value itself (so it
+    cannot re-enter);
+  - it gives the same bits whenever it is computed, and whichever caller reads it first;
+  - `PartialEq` and `Debug` are unaffected: equality ignores whether it has been computed yet, and
+    `Debug` prints what it always printed;
+  - its documentation says it is lazy, and a golden or a bit-exact test pins the value.
+
+  The example is `galaxy::params::BlackHoleParams`: `GalaxyParams` holds the black hole's σ_e and
+  mass in a `OnceLock`, solved from the immutable parameters when first read (plan 02, P02.T6.e as
+  built). A `OnceLock` keeps the owner `Send + Sync` and works on `wasm32-wasip1`; `Cell`,
+  `RefCell` and `OnceCell` do not.
 - **Allowed**: immutable values precomputed in a constructor from its inputs alone, such as
   quadrature nodes or tables. If a precomputed path stands in for a direct computation, add a test
   that the two agree bit for bit, so that a later edit can't split them.

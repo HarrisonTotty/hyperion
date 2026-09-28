@@ -200,14 +200,16 @@ pub(super) const CORRECTION_LOG_PERIODS: [f64; 8] = [0.6, 1.5, 2.5, 3.5, 4.5, 5.
 /// Rejection of unstable sets thins sets with close periods, and so the periods that survive
 /// are not the law drawn. The factors are solved so that they are: an iteration of
 /// `c ← c × target ÷ measured` over the eight bins, with the survivors of rejection measured in
-/// sets drawn by the hierarchy draw itself at each row's mass (the test
-/// `fit_the_direct_period_correction`, ignored and slow, prints the table). Not tuned by hand.
+/// sets drawn by the hierarchy draw itself at each row's mass (`hyperion-fit`'s
+/// `period_correction` task, on [`period_fit`](super::period_fit)'s sample). Not tuned by hand.
 ///
 /// The fit is at the Sun-like point, with each newest companion redrawn up to 42 times (ruling 81
 /// as amended), and above 8 M☉ it absorbs the provisional stripped mark (P11.T2.c's seam, 0.25
 /// with a 10 au periastron), which holds a quarter of those systems' innermost orbits inside
 /// 10 au; when P11.T1.d replaces the seam the table is refitted. After twelve iterations every
-/// bin's share after rejection is within 0.2% of its target. The targets are the bin shares of
+/// bin's share after rejection was within 0.2% of its target. At version 13 the 7 M☉ row is stale
+/// (a bin misses by 1.5%, and a rerun of the fit moves the row), and waits for that refit, which
+/// moves the generator's output. The targets are the bin shares of
 /// Moe and Di Stefano's own eqs. 20–23 law, normalised; the absolute frequencies per decade then
 /// follow from the count law.
 pub(super) const PERIOD_CORRECTION: [[f64; 8]; 4] = [
@@ -325,8 +327,8 @@ impl DirectPeriods {
         DIRECT_LOG_PERIOD_RANGE.1
     }
 
-    /// The share of the law in `[lo, hi]` of x.
-    #[cfg(test)]
+    /// The share of the law in `[lo, hi]` of x: the targets of the correction's fit
+    /// ([`period_fit::target_shares`](super::period_fit::target_shares)).
     #[must_use]
     pub(super) fn share(&self, lo: f64, hi: f64) -> f64 {
         let cdf = |x: f64| {

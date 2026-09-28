@@ -4,8 +4,9 @@
 //! mass of a system in each (P02.T4), the system count and the populations' masses (Design note
 //! 3), the sizes coupled to those masses (Design note 16), then the gas disc, the nuclear cluster,
 //! the dark halo, the halo's components and the accretion history, and last the black hole's
-//! mass from the bulge's dispersion in the mass model of everything else (P02.T6.e). Every sum
-//! runs in population order, which is part of the generator version.
+//! mass from the bulge's dispersion in the mass model of everything else (P02.T6.e), which is
+//! solved when first read ([`solve_black_hole`]). Every sum runs in population order, which is
+//! part of the generator version.
 
 use super::accretion::{AccretionHistory, Progenitor, ProgenitorKind};
 use super::draws;
@@ -13,8 +14,9 @@ use super::halo::{HaloBreak, HaloComponentKind, HaloComponentParams, HaloParams}
 use super::inputs::{HaloComponentInput, Inputs, Size};
 use super::validate::{SizeRange, validate};
 use super::{
-    ArmParams, BarParams, BlackHoleParams, BuildGalaxyParamsError, BulgeParams, DarkHaloParams,
+    ArmParams, BarParams, BlackHoleCell, BuildGalaxyParamsError, BulgeParams, DarkHaloParams,
     DiscParams, GalaxyParams, GasDiscParams, NuclearClusterParams, NuclearDiscParams,
+    SolvedBlackHole,
 };
 use crate::galaxy::ages::{
     AgeDistribution, BULGE_AGES, FeatureShare, LONG_BAR_AGES, THICK_DISC_AGES, THIN_DISC_HISTORY,
@@ -28,9 +30,7 @@ use crate::galaxy::fates::{
 use crate::galaxy::potential::sigma;
 use crate::galaxy::{POPULATIONS, Population};
 use crate::math;
-use crate::units::{
-    Degrees, Dex, DexPerKiloparsec, KilometresPerSecond, LightYears, Radians, SolarMasses, Years,
-};
+use crate::units::{Degrees, Dex, DexPerKiloparsec, LightYears, Radians, SolarMasses, Years};
 
 /// A size law of Design note 16: the Milky Way value at the Milky Way mass, and the clamp, all
 /// from P02.T5.b.
@@ -409,7 +409,7 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         dark_halo.m200.value(),
     );
     let mass_function = i.mass_function.to_mass_function();
-    let mut params = GalaxyParams {
+    Ok(GalaxyParams {
         mass_function: i.mass_function,
         stellar_mass: SolarMasses::new(i.stellar_mass),
         sfh_timescale: Years::new(i.sfh_timescale),
@@ -467,32 +467,25 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
             length: LightYears::new(i.gas_length_ratio * thin_length),
         },
         dark_halo,
-        // Filled in by the second phase below.
-        black_hole: BlackHoleParams {
-            scatter: Dex::new(i.bh_scatter),
-            bulge_dispersion: KilometresPerSecond::ZERO,
-            mass: SolarMasses::ZERO,
-        },
+        // Its second phase is solved on first use (`solve_black_hole`).
+        black_hole: BlackHoleCell::new(Dex::new(i.bh_scatter)),
         metallicity_gradient: DexPerKiloparsec::new(i.metallicity_gradient),
         halo: HaloParams {
             components: halo_components,
             discrete_share: i.halo_discrete_share,
         },
         accretion,
-    };
-    params.black_hole = black_hole(&params);
-    Ok(params)
+    })
 }
 
 /// The second phase of the build (plan 02, P02.T6.e): the bulge's dispersion in the mass model of
 /// `params` without the black hole and the nuclear cluster, then the black hole's mass from it
-/// with the drawn scatter.
-fn black_hole(params: &GalaxyParams) -> BlackHoleParams {
-    let scatter = params.black_hole.scatter;
+/// with the drawn scatter. [`BlackHoleParams`](super::BlackHoleParams) calls it on first use; it
+/// reads neither the black hole's dispersion nor its mass, so it cannot call itself.
+pub(super) fn solve_black_hole(params: &GalaxyParams) -> SolvedBlackHole {
     let dispersion = sigma::bulge_dispersion(params);
-    BlackHoleParams {
-        scatter,
+    SolvedBlackHole {
         bulge_dispersion: dispersion,
-        mass: sigma::black_hole_mass(dispersion, scatter),
+        mass: sigma::black_hole_mass(dispersion, params.black_hole().scatter()),
     }
 }
