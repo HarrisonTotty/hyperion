@@ -1978,6 +1978,12 @@ body {
   color: var(--text-muted);
 }
 
+/* A section of the list that the server does not compute yet, said once. */
+.star-list__note {
+  margin: 0.75rem 0 0;
+  letter-spacing: 0.15em;
+}
+
 /* Everything known about the selected system, two labelled values to a line. */
 .system-readout__values {
   grid-template-columns: repeat(2, max-content minmax(0, 1fr));

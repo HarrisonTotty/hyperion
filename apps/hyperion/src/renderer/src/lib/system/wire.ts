@@ -183,6 +183,7 @@ function toHost(system: SystemIdHex, designation: string, star: StarSummaryDto):
         durationS: event.duration_s,
       })),
     ),
+    binaryClass: modelled(star.binary_class, (binaryClass) => binaryClass),
   };
 }
 

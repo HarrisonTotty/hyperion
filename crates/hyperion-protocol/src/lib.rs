@@ -45,9 +45,10 @@ pub use primitives::{
     SystemIdHex, UniverseIdHex, UniverseTime,
 };
 pub use stellar::{
-    KickModeDto, NatalKickDto, ObjectKindDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto,
-    StarEventDto, StarEventKindDto, StarSummaryDto, StellarBriefDto, SystemExistenceDto,
-    SystemSummaryDto, SystemSummaryRequest, VariabilityDto, VariableKindDto,
+    BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,
+    ObjectKindDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, StarEventDto,
+    StarEventKindDto, StarSummaryDto, StellarBriefDto, SystemExistenceDto, SystemSummaryDto,
+    SystemSummaryRequest, VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,

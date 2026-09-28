@@ -30,6 +30,7 @@ const SUN: HostBody = {
   variability: { kind: "not_modelled" },
   planetaryNebula: { kind: "not_modelled" },
   activeEvents: { kind: "not_modelled" },
+  binaryClass: { kind: "not_modelled" },
 };
 
 /** Kopparapu et al.'s limits about the Sun, in AU, each limit given. */

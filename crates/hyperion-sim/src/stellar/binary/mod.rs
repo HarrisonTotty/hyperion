@@ -22,10 +22,13 @@
 //! (design note 14). Nothing generated calls the engine yet: plan 11's P11.T6–T11 wire it into the
 //! system stage.
 
+mod classify;
 mod common_envelope;
 mod detached;
 mod evolve;
+mod marks;
 mod params;
+mod recycling;
 mod rlof;
 pub(crate) use rlof::{CODE_Q, GAP_Q};
 mod star;
@@ -36,8 +39,15 @@ mod timeline;
 mod tests;
 
 pub use crate::stellar::multiplicity::{DRAWS_PER_ATTEMPT, MAX_REDRAWS, RedrawAttempt};
+pub use classify::{
+    AGE_OF_UNIVERSE, BinaryClass, CarvedClass, ClassContext, CvKind, HMXB_MIN_DONOR_MASS,
+    HOT_SUBDWARF_MASSES, HmxbKind, MAGNETIC_CV_SHARE, SYMBIOTIC_MIN_LUMINOSITY, XRB_MIN_LUMINOSITY,
+    XrbKind, carved_class, classify,
+};
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
+pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};
+pub use recycling::{MILLISECOND_PULSAR_MAX_PERIOD, PulsarAt, is_millisecond_pulsar};
 pub use timeline::{
     BinaryInput, BinaryState, BinaryTimeline, BuildBinaryInputError, Component, IaPoolChannel,
     PooledIaEvent, Segment, SegmentKind, SupernovaRecord,

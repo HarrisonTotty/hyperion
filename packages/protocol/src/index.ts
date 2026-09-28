@@ -2,6 +2,10 @@
 // (run `just gen-protocol`). Re-export each new message type here.
 import type { ArchitectureClassDto } from "./generated/ArchitectureClassDto";
 import type { BeltKindDto } from "./generated/BeltKindDto";
+import type { BinaryClassDto } from "./generated/BinaryClassDto";
+import type { CataclysmicKindDto } from "./generated/CataclysmicKindDto";
+import type { HighMassXrayBinaryKindDto } from "./generated/HighMassXrayBinaryKindDto";
+import type { XrayBinaryKindDto } from "./generated/XrayBinaryKindDto";
 import type { BeltComponentDto } from "./generated/BeltComponentDto";
 import type { BeltCompositionDto } from "./generated/BeltCompositionDto";
 import type { BeltDto } from "./generated/BeltDto";
@@ -110,6 +114,7 @@ export type {
   RingMaterialDto,
   ArchitectureClassDto,
   BeltKindDto,
+  BinaryClassDto,
   BodyDetailDto,
   BodyDetailRequest,
   BodyEventDto,
@@ -124,6 +129,7 @@ export type {
   BodySummaryDto,
   BodySurfaceDto,
   BulkPropertiesDto,
+  CataclysmicKindDto,
   Census,
   ClientMessage,
   CreateUniverseRequest,
@@ -137,6 +143,7 @@ export type {
   GalaxyParametersRequest,
   HabitableZoneDto,
   HierarchyDto,
+  HighMassXrayBinaryKindDto,
   HierarchyNodeDto,
   KickModeDto,
   LayerCensus,
@@ -191,6 +198,7 @@ export type {
   UniverseTime,
   VariabilityDto,
   VariableKindDto,
+  XrayBinaryKindDto,
   ZoneDto,
 };
 

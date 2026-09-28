@@ -1843,3 +1843,89 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   stripping band and an unmarked one from its complement** (the merger band, Case C and wide pairs),
   instead of the interacting range; when the engine is wired (T6 or T11) about 10³ marked systems
   are checked to be stripped, not merged, before the primary's death, and the merger band to merge.
+- **Deviations in P11.T5, as built** (round 9b, `bin5a`, 2026-09-27; unwired, nothing generated
+  moves, no tag added). The code is `stellar/binary/{classify,recycling}.rs` and a new `marks.rs`
+  for `from_marks`; `rlof::NOVA_RATE` becomes `pub(crate)` (the steady-burning line, shared), and
+  `timeline.rs` gains `Context::from_parts` (which `Context::of` now calls) and
+  `BinaryTimeline::context`. Every figure was re-checked by a research agent against its source.
+  - _`classify(state, &ClassContext)`._ A class also reads the pair's composition (the turn-off),
+    the stars' draws (a white dwarf's magnetism mark, a Be star's rotation), `BinaryParams` (the
+    wind's speed and focusing), each neutron star's recycled pulsar and, after a merger, the phases
+    it merged from. `BinaryTimeline::class_context(age)` builds the context and `class_at(age)`
+    classifies. The rules are tried in a fixed order (contact; Roche-lobe overflow by accretor; a
+    bound pair; one star), and the first match wins, so a hot subdwarf beside a blue straggler is
+    a hot subdwarf, and a neutron star beside a supergiant is an X-ray binary, not symbiotic.
+  - _Kinds._ `CvKind {DwarfNova, NovaLike, Magnetic, AmCvn}`, `XrbKind {Persistent, Transient}`
+    for low-mass X-ray binaries only, and `HmxbKind {BeX, Supergiant}`, P11.T8.b's split: transfer
+    from a donor of 8 M☉ or more (Fortin et al. 2023; intermediate-mass donors are low-mass, as
+    Avakyan et al. 2023 count them) runs on the thermal timescale, far above the irradiated line,
+    so a transient kind would be empty. `BinaryClass::ALL` lists the 19 values.
+  - _Lines and figures._ Dwarf nova against nova-like by Lasota, Dubus and Kruk's (2008) eq. A.1
+    and persistent against transient by their eq. A.2 (C = 10⁻³, α = 0.1), at Paczyński's (1977)
+    disc radius 0.60 a ÷ (1 + q), or 0.9 of the accretor's lobe for a donor at least as heavy. A
+    test holds both lines to Coriat, Fender and Dubus's (2012) power laws in period within 35%.
+    Magnetic CVs: 15 of 42 (Pala et al. 2020) by the white dwarf's own `star.magnetism` mark,
+    since plan 06 draws no white-dwarf field; a fossil-field progenitor's dwarf is always
+    magnetic. Hot subdwarfs 0.32–0.8 M☉ (Han et al. 2002; Heber 2016). Symbiotics include a giant
+    filling its lobe onto a white dwarf. R Coronae Borealis stars are the helium giants under
+    M_Ch that a helium and a carbon–oxygen or oxygen–neon white dwarf merge into. Plan 06's Be
+    star excludes a fossil field, as its `rotation_class` does.
+  - _Recycling_ (`recycling.rs`): B = B₀ ÷ (1 + ΔM ÷ 10⁻⁴ M☉), floored at 10⁸ G (Shibazaki et al.
+    1989 through Kiel et al. 2008, eq. 9, the primary not re-read; Zhang and Kojima 2006); the
+    period is Tauris, Langer and Kramer's (2012) eq. 14 inverted in ΔM, held above their eq. 7's
+    equilibrium period at the episode's mean rate and never slower than before. The recycled
+    star is plan 06's `NeutronStar::new` again from the end of accretion, so it spins down on
+    P06.T21's closed forms; a millisecond pulsar is under 30 ms (Lorimer 2008) and above the
+    death line.
+  - _Type Ia progenitor._ Double-degenerate: two white dwarfs, not both of helium, that merge
+    within the age of the universe by Peters's formula, sub-Chandrasekhar pairs included as the
+    brainstorm's pool and the engine include them. Single-degenerate: a carbon–oxygen dwarf fed
+    hydrogen at 1.03 × 10⁻⁷ M☉ yr⁻¹ or more. `DoubleWhiteDwarf` is every other bound pair of
+    white dwarfs.
+  - _`carved_class`_ reads "any age of the horizon" at each segment's first age there, its
+    midpoint there, the epoch's age and the horizon's end. The accreting white dwarfs split by
+    P_rec at the epoch's age, or at the first accreting age; P_rec uses `nova_ignition_mass`, the
+    research's least-squares fit to Yaron et al.'s (2005) table 2 at a 10⁷ K core (0.13 dex rms),
+    since no published closed form covers 0.6–1.4 M☉ and 10⁻¹¹–10⁻⁷ M☉ yr⁻¹; P11.T8.a still
+    re-checks it. A merger ends the stars' state as a pair; a star destroyed by its own explosion
+    (also a `Merged` segment in the engine) is no merger.
+  - _`from_marks`_ takes `BinaryMarks::{phase, merger}` (`MarkedPhase`, `MarkedMerger`), each star
+    held at its marked state (`Member::Frozen`) on the marked orbit, so `state_at` the marked age
+    is the marked state exactly. Until P15.T10.b the history before the phase holds the same
+    stars, so the round-trip test takes phases that span the horizon, and mergers.
+  - _Provisional, for review:_ `XRB_MIN_LUMINOSITY` 10³⁵ erg s⁻¹, for wind-fed systems only (no
+    class definition cuts on luminosity; Lutovinov et al. 2013's survey completeness);
+    `SYMBIOTIC_MIN_LUMINOSITY` 10 L☉ (Mikołajewska 2011); `DISC_RADIUS_SHARE` 0.9 (a research
+    choice); the nova fit.
+  - _The slow test_ (`tests/binary_classes.rs`) draws 360,000 prior pairs stratified by layer
+    (200,000 / 100,000 / 20,000 / 10,000 / 30,000, [Fe/H] −1.5 to +0.4), not 10⁶ in the mass
+    function's proportions. An interacting layer-E pair costs about 28 ms in the slow-test profile
+    under load and a 10⁶ mixed sample about 20 CPU-minutes; the rarest class, the double neutron
+    star, comes about twice per 12,000 layer-E pairs, which a mixed 10⁶ holds only 3,000 of. It
+    runs on every core, about three minutes. **A finding for research:** 1,560 of 12,000 layer-E
+    pairs had two supernovae, 422 stayed bound through both and 585 left two neutron stars, but
+    only 2 were bound double neutron stars.
+  - **For the orchestrator:** (1) the Type Ia double-degenerate reading, sub-Chandrasekhar
+    included (the brainstorm's pool) against the surveys' total above M_Ch (Napiwotzki et al.
+    2020); (2) Be/X needs no orbit or accretion condition, so a Be star with a neutron star at any
+    separation is carved as an X-ray binary; (3) a neutron star fed by a low-mass giant's wind is
+    `Symbiotic`, not carved, where Avakyan et al. (2023) list such systems (GX 1+4) as X-ray
+    binaries.
+- **P11.T13's `binary_class`, as built** (round 9b, `bin5a`). `StarSummaryDto.binary_class` is a
+  `Modelled<BinaryClassDto>`, optional under P06.T33's convention, tagged by `type` with a `kind`
+  for cataclysmic variables (`CataclysmicKindDto`) and X-ray binaries (`XrayBinaryKindDto`,
+  `HighMassXrayBinaryKindDto`); `BinaryClass::None` is `null`. The server sends it absent until
+  P11.T11 evolves each pair; `convert/stellar.rs`'s `binary_class_dto` is `expect(dead_code)`
+  outside tests until T11 calls it.
+- **P11.T14's class words, as built** (round 9b, `bin5a`). A `BINARY CLASSES` table (`STAR`,
+  `BINARY CLASS`) follows `ORBITS` and reads `NONE` when no star is in a class; while the server
+  computes none the list says `BINARY CLASSES: NOT YET MODELLED` once, the guide's section state.
+  A `BINARY` column in `STARS` was built first and overflowed the readout at 1280 (377 px in 351).
+  The words are `lib/galaxy/binaryClass.ts`'s. Checked by eye on seed `4d2` at (0, 26,000, 0) ly
+  against the triple `GPF 005JFZ A-3` (M1.5 V, M4 V, M2 V; `AB–C` 24.3 yr at 7.51 AU and `A–B`
+  82.5 d at 0.286 AU, both Kepler-consistent), 1920 and 1280, no sideways scroll. **For the
+  owner:** `BINARY CLASSES`, `BINARY CLASS` and the class words join the draft nomenclature;
+  `TRANSIENT` already names a detected event, so the X-ray binary's `· TRANSIENT` may want another
+  word; `BE` and `TYPE IA` could keep the astronomers' case; `HOT SUBDWARF` is both a kind and a
+  class; the longest word, `LOW-MASS X-RAY BINARY · TRANSIENT`, wraps at 1280 and is not yet seen
+  on screen, since no class reaches the wire before T11.

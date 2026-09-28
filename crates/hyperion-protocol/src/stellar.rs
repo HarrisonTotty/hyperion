@@ -258,6 +258,99 @@ pub struct StarSummaryDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub active_events: Option<Vec<StarEventDto>>,
+    /// The class of the interacting binary it belongs to at the summary's time, which both stars
+    /// of the pair carry, and a merger's product alone (plan 11, P11.T5); `null` for a star in no
+    /// such class. Absent until plan 11's P11.T11 runs the binary engine for each system's pairs.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<BinaryClassDto>>", optional)]
+    pub binary_class: Modelled<BinaryClassDto>,
+}
+
+/// The class of an interacting binary, or of a star made by one (plan 11, P11.T5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum BinaryClassDto {
+    /// An Algol: a lighter, cooler subgiant or giant filling its Roche lobe onto a main-sequence
+    /// star, after the mass ratio has reversed.
+    Algol,
+    /// A contact binary: both stars fill their Roche lobes (a W Ursae Majoris star).
+    Contact,
+    /// A blue straggler: a main-sequence star above its population's turn-off mass at its age,
+    /// made by a merger or by accretion.
+    BlueStraggler,
+    /// A hot subdwarf: a helium-burning core of about half a solar mass, stripped by a companion
+    /// or made by a merger.
+    HotSubdwarf,
+    /// An R Coronae Borealis star: the hydrogen-deficient giant a white-dwarf merger makes.
+    RCoronaeBorealis,
+    /// A symbiotic star: a white dwarf or neutron star fed by a giant.
+    Symbiotic,
+    /// A cataclysmic variable: a white dwarf fed by a Roche-lobe-filling companion.
+    CataclysmicVariable {
+        /// Which kind.
+        kind: CataclysmicKindDto,
+    },
+    /// A low-mass X-ray binary: a neutron star or black hole fed by a low-mass companion.
+    LowMassXrayBinary {
+        /// Persistent or transient.
+        kind: XrayBinaryKindDto,
+    },
+    /// A high-mass X-ray binary: a neutron star or black hole fed by a massive companion.
+    HighMassXrayBinary {
+        /// Be/X or supergiant.
+        kind: HighMassXrayBinaryKindDto,
+    },
+    /// A millisecond pulsar: a neutron star spun up by accretion, now a radio pulsar.
+    MillisecondPulsar,
+    /// Two neutron stars bound to each other.
+    DoubleNeutronStar,
+    /// Two bound white dwarfs that are not a Type Ia progenitor: both of helium, or too wide to
+    /// merge within the age of the universe.
+    DoubleWhiteDwarf,
+    /// A candidate progenitor of a Type Ia supernova: two white dwarfs, not both of helium, that
+    /// merge within the age of the universe, or a carbon–oxygen white dwarf growing by steady
+    /// hydrogen burning.
+    TypeIaProgenitor,
+}
+
+/// The kinds of cataclysmic variable (plan 11, P11.T5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CataclysmicKindDto {
+    /// A dwarf nova: its disc is below the disc-instability line and erupts.
+    DwarfNova,
+    /// A nova-like: its disc is fed above the line and stays hot.
+    NovaLike,
+    /// A magnetic cataclysmic variable: the white dwarf's field channels the flow (a polar or an
+    /// intermediate polar).
+    Magnetic,
+    /// An AM Canum Venaticorum star: a white dwarf fed helium by a helium-rich donor.
+    AmCvn,
+}
+
+/// Whether a low-mass X-ray binary's disc is persistent or transient (plan 11, P11.T5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum XrayBinaryKindDto {
+    /// Fed above the irradiated disc's instability line: always bright.
+    Persistent,
+    /// Fed below it: outbursts between long quiescence.
+    Transient,
+}
+
+/// The kinds of high-mass X-ray binary (plan 11, P11.T5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HighMassXrayBinaryKindDto {
+    /// A Be/X-ray binary: the companion is a Be star.
+    BeX,
+    /// A supergiant X-ray binary: fed by a massive star's wind or Roche-lobe overflow, and
+    /// persistent.
+    Supergiant,
 }
 
 /// What a dead star left, by kind, with what is known of it.
@@ -512,6 +605,7 @@ pub(crate) mod tests {
             variability: Modelled::NotModelled,
             planetary_nebula: Modelled::NotModelled,
             active_events: None,
+            binary_class: Modelled::NotModelled,
         }
     }
 
@@ -562,6 +656,7 @@ pub(crate) mod tests {
             variability: Modelled::NotModelled,
             planetary_nebula: Modelled::NotModelled,
             active_events: None,
+            binary_class: Modelled::NotModelled,
         }
     }
 
@@ -780,6 +875,7 @@ pub(crate) mod tests {
             "variability",
             "planetary_nebula",
             "active_events",
+            "binary_class",
         ] {
             assert_eq!(wire.get(absent), None, "{absent} is on the wire");
         }
@@ -1127,6 +1223,106 @@ pub(crate) mod tests {
             (StarEventKindDto::FuOrionisOutburst, "fu_orionis_outburst"),
             (StarEventKindDto::GiantEruption, "giant_eruption"),
             (StarEventKindDto::ThermalPulse, "thermal_pulse"),
+        ]);
+    }
+
+    #[test]
+    fn a_star_in_a_binary_class_carries_it() {
+        // What plan 11's P11.T11 sends once the engine runs: a class for a star in one, null for
+        // a star in none.
+        let dwarf_nova = StarSummaryDto {
+            binary_class: Modelled::Value(BinaryClassDto::CataclysmicVariable {
+                kind: CataclysmicKindDto::DwarfNova,
+            }),
+            ..sunlike()
+        };
+        let mut wire = sunlike_json();
+        wire["binary_class"] = json!({ "type": "cataclysmic_variable", "kind": "dwarf_nova" });
+        assert_wire_form(&dwarf_nova, wire);
+        let none = StarSummaryDto {
+            binary_class: Modelled::Null,
+            ..sunlike()
+        };
+        let mut wire = sunlike_json();
+        wire["binary_class"] = Value::Null;
+        assert_wire_form(&none, wire);
+        let absent: StarSummaryDto = serde_json::from_value(sunlike_json()).unwrap();
+        assert_eq!(absent.binary_class, Modelled::NotModelled);
+    }
+
+    #[test]
+    fn binary_class_wire_forms() {
+        let cases = [
+            (BinaryClassDto::Algol, json!({ "type": "algol" })),
+            (BinaryClassDto::Contact, json!({ "type": "contact" })),
+            (
+                BinaryClassDto::BlueStraggler,
+                json!({ "type": "blue_straggler" }),
+            ),
+            (
+                BinaryClassDto::HotSubdwarf,
+                json!({ "type": "hot_subdwarf" }),
+            ),
+            (
+                BinaryClassDto::RCoronaeBorealis,
+                json!({ "type": "r_coronae_borealis" }),
+            ),
+            (BinaryClassDto::Symbiotic, json!({ "type": "symbiotic" })),
+            (
+                BinaryClassDto::CataclysmicVariable {
+                    kind: CataclysmicKindDto::AmCvn,
+                },
+                json!({ "type": "cataclysmic_variable", "kind": "am_cvn" }),
+            ),
+            (
+                BinaryClassDto::LowMassXrayBinary {
+                    kind: XrayBinaryKindDto::Transient,
+                },
+                json!({ "type": "low_mass_xray_binary", "kind": "transient" }),
+            ),
+            (
+                BinaryClassDto::HighMassXrayBinary {
+                    kind: HighMassXrayBinaryKindDto::BeX,
+                },
+                json!({ "type": "high_mass_xray_binary", "kind": "be_x" }),
+            ),
+            (
+                BinaryClassDto::MillisecondPulsar,
+                json!({ "type": "millisecond_pulsar" }),
+            ),
+            (
+                BinaryClassDto::DoubleNeutronStar,
+                json!({ "type": "double_neutron_star" }),
+            ),
+            (
+                BinaryClassDto::DoubleWhiteDwarf,
+                json!({ "type": "double_white_dwarf" }),
+            ),
+            (
+                BinaryClassDto::TypeIaProgenitor,
+                json!({ "type": "type_ia_progenitor" }),
+            ),
+        ];
+        for (class, wire) in cases {
+            assert_wire_form(&class, wire);
+        }
+    }
+
+    #[test]
+    fn binary_class_kind_strings() {
+        assert_wire_strings(&[
+            (CataclysmicKindDto::DwarfNova, "dwarf_nova"),
+            (CataclysmicKindDto::NovaLike, "nova_like"),
+            (CataclysmicKindDto::Magnetic, "magnetic"),
+            (CataclysmicKindDto::AmCvn, "am_cvn"),
+        ]);
+        assert_wire_strings(&[
+            (XrayBinaryKindDto::Persistent, "persistent"),
+            (XrayBinaryKindDto::Transient, "transient"),
+        ]);
+        assert_wire_strings(&[
+            (HighMassXrayBinaryKindDto::BeX, "be_x"),
+            (HighMassXrayBinaryKindDto::Supergiant, "supergiant"),
         ]);
     }
 }

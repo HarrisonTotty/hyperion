@@ -11,6 +11,7 @@ import {
   aSunlikeStar,
   aSystemSummary,
   aTripleSummary,
+  aWhiteDwarf,
 } from "../test/systemFixtures";
 import { StarList } from "./StarList";
 
@@ -70,6 +71,58 @@ describe("StarList", () => {
     expect(rowsOf(screen.getByRole("table", { name: "ORBITS" }))[0]?.slice(1, 3)).toEqual([
       "1.01E5 yr",
       "10,000 AU",
+    ]);
+  });
+
+  it("says once that binary classes are not yet modelled while the server computes none", () => {
+    render(<StarList model={modelOf(aTripleSummary())} stale={false} />);
+
+    expect(screen.getByText("BINARY CLASSES: NOT YET MODELLED")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "BINARY CLASSES" })).not.toBeInTheDocument();
+  });
+
+  it("names each star's binary class in words under its letter", () => {
+    const cataclysmic = aSystemSummary({
+      stars: [
+        aWhiteDwarf({
+          binary_class: { type: "cataclysmic_variable", kind: "dwarf_nova" },
+        }),
+        aSunlikeStar({
+          body_index: 1,
+          binary_class: { type: "cataclysmic_variable", kind: "dwarf_nova" },
+        }),
+      ],
+    });
+    render(<StarList model={modelOf(cataclysmic)} stale={false} />);
+
+    const classes = screen.getByRole("table", { name: "BINARY CLASSES" });
+    expect(rowsOf(classes)).toEqual([
+      ["A", "DWARF NOVA"],
+      ["B", "DWARF NOVA"],
+    ]);
+    expect(screen.queryByText("BINARY CLASSES: NOT YET MODELLED")).not.toBeInTheDocument();
+  });
+
+  it("reads NONE when the server classed no star in a binary class", () => {
+    const single = aSingleStarSummary();
+    const stars = single.stars.map((star) => ({ ...star, binary_class: null }));
+    render(<StarList model={modelOf({ ...single, stars })} stale={false} />);
+
+    expect(rowsOf(screen.getByRole("table", { name: "BINARY CLASSES" }))).toEqual([["NONE"]]);
+  });
+
+  it("reads the em dash for a star whose class is not computed beside one whose class is", () => {
+    const mixed = aSystemSummary({
+      stars: [
+        aWhiteDwarf({ binary_class: { type: "high_mass_xray_binary", kind: "be_x" } }),
+        aSunlikeStar({ body_index: 1 }),
+      ],
+    });
+    render(<StarList model={modelOf(mixed)} stale={false} />);
+
+    expect(rowsOf(screen.getByRole("table", { name: "BINARY CLASSES" }))).toEqual([
+      ["A", "BE X-RAY BINARY"],
+      ["B", "—"],
     ]);
   });
 });

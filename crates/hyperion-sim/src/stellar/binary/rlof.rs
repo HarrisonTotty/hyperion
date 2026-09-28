@@ -74,7 +74,7 @@ const WHITE_DWARF_Q: f64 = 0.628;
 pub(crate) const CODE_Q: f64 = 3.0;
 
 /// Below this rate of hydrogen onto a white dwarf, novae (BSE section 2.6.6), M☉ yr⁻¹.
-const NOVA_RATE: f64 = 1.03e-7;
+pub(crate) const NOVA_RATE: f64 = 1.03e-7;
 /// From this rate a white dwarf fed hydrogen swells into a giant (BSE section 2.6.6), M☉ yr⁻¹.
 const GIANT_RATE: f64 = 2.71e-7;
 /// A helium white dwarf fed helium ignites at this mass (BSE section 2.6.6), M☉.

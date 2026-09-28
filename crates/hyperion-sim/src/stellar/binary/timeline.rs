@@ -362,15 +362,32 @@ impl Context {
     /// The context of `input`.
     #[must_use]
     pub(crate) fn of(input: &BinaryInput) -> Self {
-        let coeffs = ZCoeffs::new(input.composition.z_fit());
+        Self::from_parts(
+            input.composition,
+            input.draws.clone(),
+            input.params,
+            input.age_at_epoch,
+        )
+    }
+
+    /// The context of a pair of `composition`, `draws` and `params` whose system is
+    /// `age_at_epoch` old at the epoch, without an input: a timeline built from marks (P11.T5).
+    #[must_use]
+    pub(crate) fn from_parts(
+        composition: Composition,
+        draws: [StarDraws; 2],
+        params: BinaryParams,
+        age_at_epoch: Years,
+    ) -> Self {
+        let coeffs = ZCoeffs::new(composition.z_fit());
         Self {
-            composition: input.composition,
+            composition,
             lightest_helium_star: sse::lightest_helium_star(&coeffs),
-            giant_exponent: sse::giant_radius_exponent(&input.composition),
+            giant_exponent: sse::giant_radius_exponent(&composition),
             coeffs,
-            draws: input.draws.clone(),
-            params: input.params,
-            age_at_epoch: input.age_at_epoch,
+            draws,
+            params,
+            age_at_epoch,
         }
     }
 
@@ -677,6 +694,13 @@ impl BinaryTimeline {
                 .iter()
                 .fold(SystemVelocity::ZERO, |sum, s| sum + s.velocities[0]),
         )
+    }
+
+    /// What every segment shares: the pair's composition, draws and parameters (P11.T5's classes
+    /// read them).
+    #[must_use]
+    pub(crate) fn context(&self) -> &Context {
+        &self.context
     }
 
     /// The age the binary was run to.

@@ -13,6 +13,7 @@
 import type {
   ArchitectureClassDto,
   BeltCompositionDto,
+  BinaryClassDto,
   BeltKindDto,
   BeltSiteDto,
   BodyIdHex,
@@ -144,6 +145,8 @@ export interface HostBody {
   readonly planetaryNebula: Modelled<PlanetaryNebula>;
   /** Its events in progress, by onset; none is an empty list. */
   readonly activeEvents: Pending<ReadonlyArray<StarEvent>>;
+  /** The class of the interacting binary it belongs to (plan 11, P11.T5); none for no class. */
+  readonly binaryClass: Modelled<BinaryClassDto>;
 }
 
 /**

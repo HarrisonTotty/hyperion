@@ -12,13 +12,15 @@
 //! none.
 
 use hyperion_protocol::{
-    ErrorCode, HierarchyDto, HierarchyNodeDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto,
-    OrbitDto, PhaseDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto, StellarBriefDto,
+    BinaryClassDto, CataclysmicKindDto, ErrorCode, HierarchyDto, HierarchyNodeDto,
+    HighMassXrayBinaryKindDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto, OrbitDto,
+    PhaseDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto, StellarBriefDto,
     SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest, VariabilityDto,
-    VariableKindDto,
+    VariableKindDto, XrayBinaryKindDto,
 };
 use hyperion_sim::id::SystemId;
 use hyperion_sim::orbit::KeplerElements;
+use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use hyperion_sim::stellar::remnant::{
     CompactRemnant, KickMode, NatalKick, PulsarState, RemnantKind,
@@ -152,7 +154,55 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
             .map_or(Modelled::Null, |v| Modelled::Value(variability_dto(&v))),
         planetary_nebula: Modelled::NotModelled,
         active_events: None,
+        // Plan 11's P11.T11 runs the binary engine for each pair and gives each star its pair's
+        // class (`binary_class_dto`); until then no class is computed.
+        binary_class: Modelled::NotModelled,
     }
+}
+
+/// A binary class as the wire carries it (plan 11, P11.T5 and T13): `null` for a star in none.
+#[must_use]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P11.T11 calls it once each pair's timeline is evolved; the wire tests call it now"
+    )
+)]
+fn binary_class_dto(class: BinaryClass) -> Modelled<BinaryClassDto> {
+    Modelled::Value(match class {
+        BinaryClass::None => return Modelled::Null,
+        BinaryClass::Algol => BinaryClassDto::Algol,
+        BinaryClass::Contact => BinaryClassDto::Contact,
+        BinaryClass::BlueStraggler => BinaryClassDto::BlueStraggler,
+        BinaryClass::HotSubdwarf => BinaryClassDto::HotSubdwarf,
+        BinaryClass::RCoronaeBorealis => BinaryClassDto::RCoronaeBorealis,
+        BinaryClass::Symbiotic => BinaryClassDto::Symbiotic,
+        BinaryClass::CataclysmicVariable(kind) => BinaryClassDto::CataclysmicVariable {
+            kind: match kind {
+                CvKind::DwarfNova => CataclysmicKindDto::DwarfNova,
+                CvKind::NovaLike => CataclysmicKindDto::NovaLike,
+                CvKind::Magnetic => CataclysmicKindDto::Magnetic,
+                CvKind::AmCvn => CataclysmicKindDto::AmCvn,
+            },
+        },
+        BinaryClass::LowMassXrayBinary(kind) => BinaryClassDto::LowMassXrayBinary {
+            kind: match kind {
+                XrbKind::Persistent => XrayBinaryKindDto::Persistent,
+                XrbKind::Transient => XrayBinaryKindDto::Transient,
+            },
+        },
+        BinaryClass::HighMassXrayBinary(kind) => BinaryClassDto::HighMassXrayBinary {
+            kind: match kind {
+                HmxbKind::BeX => HighMassXrayBinaryKindDto::BeX,
+                HmxbKind::Supergiant => HighMassXrayBinaryKindDto::Supergiant,
+            },
+        },
+        BinaryClass::MillisecondPulsar => BinaryClassDto::MillisecondPulsar,
+        BinaryClass::DoubleNeutronStar => BinaryClassDto::DoubleNeutronStar,
+        BinaryClass::DoubleWhiteDwarf => BinaryClassDto::DoubleWhiteDwarf,
+        BinaryClass::TypeIaProgenitor => BinaryClassDto::TypeIaProgenitor,
+    })
 }
 
 /// A range row's brief of its system's primary, as the wire carries it (plan 06, P06.T34).
@@ -602,7 +652,7 @@ mod tests {
         let wire = serde_json::to_value(&living.stars[0]).expect("a summary serialises");
         let fields = wire.as_object().expect("a star is an object");
         assert_eq!(fields.get("variability"), Some(&serde_json::Value::Null));
-        for absent in ["planetary_nebula", "active_events"] {
+        for absent in ["planetary_nebula", "active_events", "binary_class"] {
             assert!(!fields.contains_key(absent), "{absent} is sent: {wire}");
         }
         for value in ["rotation_period_d", "activity_log_lx_lbol"] {
@@ -677,5 +727,31 @@ mod tests {
             }
         }
         assert_eq!(orbits, usize::from(multiple.star_count()) - 1);
+    }
+
+    /// Every binary class reaches the wire as its own value, and no class as `null` (P11.T13).
+    #[test]
+    fn every_binary_class_has_its_wire_value() {
+        let mut seen = Vec::new();
+        for class in BinaryClass::ALL {
+            let dto = binary_class_dto(class);
+            if class == BinaryClass::None {
+                assert_eq!(dto, Modelled::Null);
+                continue;
+            }
+            let Modelled::Value(value) = dto else {
+                panic!("{class:?} is not sent: {dto:?}");
+            };
+            assert!(!seen.contains(&value), "{class:?} shares its wire value");
+            seen.push(value);
+        }
+        assert_eq!(seen.len(), BinaryClass::ALL.len() - 1);
+        assert_eq!(
+            serde_json::to_value(binary_class_dto(BinaryClass::HighMassXrayBinary(
+                HmxbKind::BeX
+            )))
+            .expect("a class serialises"),
+            serde_json::json!({ "type": "high_mass_xray_binary", "kind": "be_x" })
+        );
     }
 }
