@@ -845,6 +845,46 @@ MILKY_WAY_IA_RATE_PER_YEAR, survivor_odds, survivors_inside}` and
     the seam, not the kick law: `stripped_share` is galaxy-independent per composition, so a
     tabulated seam (or a faster plan-11 quadrature) would take the build near a second; ruling
     128.5's offline `tables::kick_bins` would carry the seam's share in it.
+- **The class table's build time, as built (lane `perf08`, 2026-09-29, at `GENERATOR_VERSION` 15;
+  gates P08.T12; no output moves, no bump, the class-table golden unchanged).** Version 15's
+  offline `StrippingTable` (P11.T1.d's seam tabulated in `hyperion-fit`) had already taken the
+  seam's quadrature out: `stripped_share` is some 200 ns a node, and the build was **0.71–1.20 s**
+  (load 6 and 20) against 27–45 s at version 14. What remained was the kick law's quadrature
+  (165 `speed_bin_shares`, 3–10 ms each) and about 230 lifetimes of 0.9 ms. The lane took only
+  exact wins, each a pure function computed once instead of many times, so every bit stays:
+  - _Per speed scale_ (`kick_bins::KickThresholds`): the score thresholds, 21 bisections of the
+    law's rank table, depend on the law and `v_ref` alone. `KickSet` finds them once for its 33
+    nodes (`speed_bin_shares_at`); `speed_bin_shares_against` and `shares_on` build them per call
+    as before.
+  - _Per process_: the 1,024 normal quantiles of the remnant-mass nodes (`mass_node_normals`, a
+    `OnceLock`, as `LifetimeBracket::shared` is).
+  - _Per call_: the score factor's tail at its floor (`ScoreTail`), which `xi_above` evaluated
+    beside every one of its seven tails a branch.
+  - _Per fate_: the marked pass of an iron core's star reuses the unmarked fate already, so it now
+    reuses that pass's branches and each branch's seven tails as well (the mark changes the
+    progenitor's stripping, which neither reads), and `with_stripped_mark`'s reading of the seam's
+    share is taken once per death kind, not once per branch.
+  - _Lifetimes_: a band-E node's reference lifetime is its kick track's `Track::lifetime` wherever
+    the median draws' stripped mark is clear (`median_is_stripped`), since the two draws differ
+    only in that mark and the track reads it only as `is_companion_stripped`; and a band-D source
+    reuses the lifetimes of an ejecting source of the same composition. Inside the stripped window,
+    where the median mark can be set, the lifetime is found afresh.
+  - Measured with the two builds' benches interleaved at load 6 (`benches/class_table.rs`):
+    `ClassTable::build` **713 and 891 ms before, 382 and 485 ms after** (−46%);
+    `speed_bin_shares` at 15 M☉ 6.6–7.6 ms → 2.6–2.8, at 40 M☉ 4.6–5.5 → 1.8–2.3, at 8.2 M☉
+    unchanged at 2.3–3.0 (no iron core, so two tracks and one branch each). What remains is mostly
+    the 165 unmarked tracks (1–1.5 ms each) and layer D's lifetimes, which no exact reuse removes.
+    Ruling 128.5's offline `tables::kick_bins` is not needed for P08.T16's 1 s: the build is under
+    half of it, which leaves the normalisations their share.
+  - Bit for bit: `the_shared_track_gives_the_direct_shares_bit_for_bit` (the memoised pass against
+    fresh builds of every branch), `the_kick_tracks_give_the_reference_lifetimes` (new, 33 nodes at
+    two metallicities), the class-table golden unchanged, and a comparison of the `Debug` of three
+    seeds' tables and 360 kick-share sets (five metallicities, three speed scales, 24 masses from 2
+    to 150 M☉) before and after.
+  - _Finding_: `Galaxy::from_params(..).with_full_potential()` took 5.8–8.6 s at the fixture in
+    this lane's timings (load 9–20), against the "about 2 s" its documentation gives for the grid
+    (plan 02, R15), and over ten times the class table. It is not the class table's to fix, but
+    P08.T16's `kinematic_tables_build` should say whether it counts it.
 
 ### P08.T10 Forms and normalisation
 

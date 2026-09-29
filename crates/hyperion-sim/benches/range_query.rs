@@ -73,10 +73,27 @@
 //!   default census limit of 4,096 the census admits *no* layer, generates nothing, and the query
 //!   costs only its 500 ly quadrature: 22.8 ms measured at load 20, all of it `expected_counts`. The
 //!   bench therefore sets the limit to 65,536 (`LONG_RANGE_LIMIT`), which admits E and D and measures
-//!   the long walk the plan asks for: 41,925 systems over 3,008 cells. That the default limit stops a
+//!   the long walk the plan asks for: 41,925 systems over 3,008 cells then, 37,675 at generator
+//!   version 15 (see "The long-range pin" below). That the default limit stops a
 //!   500 ly disc query before layer E is a finding about the census rule at long range, not a change
 //!   to it — Design note 9's limit is on expected counts, and a 500 ly sphere in the disc is simply
 //!   past it.
+//!
+//! # The long-range pin
+//!
+//! The walk's size is pinned, so that its figure says what work it covers. Nothing runs the bench in
+//! CI, so the pin went stale unnoticed; perf08 re-measured it on 2026-09-29 at generator version
+//! 15: **37,675 systems (29,424 in layer D, 8,251 in E) over the same 3,008 cells**, against
+//! expected counts of 29,545 and 8,170, in 205–222 ms at a load of 16. Two changes to the fixture
+//! moved it, and no change to the walk:
+//!
+//! - P02.T11's retune of `milky_way_like()` (2026-09-23: a thin-disc scale length of 7,000 ly for
+//!   8,480, thicker discs) lowered the density at the Sun-like point by about a quarter. The pin of
+//!   41,925, taken on the fixture before it, fell to the 30,606 that `sub13b` found at version 14,
+//!   as plan 03's own Sun-area goldens fell with it (`query/range.golden`'s 20 ly sphere, 93
+//!   systems to 71).
+//! - Version 15's refit of Chabrier's high-mass scale, 0.68 to 0.92 (P15.T4.b, ruling 138), raised
+//!   bands D and E's share of systems by 30%, 0.0335 to 0.0437, and the walk's count by 23%.
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::num::NonZeroU32;
@@ -181,8 +198,8 @@ fn local(c: &mut Criterion) {
 /// The census limit this bench raises the default 4,096 to, so that the long-range query walks its
 /// two layers instead of being stopped before layer E.
 ///
-/// At 500 ly from the Sun-like point the fixture expects 9,094 systems in layer E and 32,886 in
-/// layer D, so the default limit admits nothing at all and the query generates no cell (see the
+/// At 500 ly from the Sun-like point the fixture expects 8,170 systems in layer E and 29,545 in
+/// layer D (generator version 15), so the default limit admits nothing at all and the query generates no cell (see the
 /// module docs). This is the smallest power of two that admits both.
 const LONG_RANGE_LIMIT: NonZeroU32 = NonZeroU32::new(1 << 16).expect("65,536 is not zero");
 
@@ -198,7 +215,7 @@ fn long_range(c: &mut Criterion) {
     // covers.
     let walked = range_query(&galaxy, &mut NoCache::new(), &[], &query);
     assert_eq!(walked.census().complete_down_to(), Some(Layer::D));
-    assert_eq!(walked.systems().len(), 41_925);
+    assert_eq!(walked.systems().len(), 37_675);
     assert_eq!(walked.stats().cells_visited(), 3_008);
     let mut group = c.benchmark_group("query");
     group.sample_size(20);

@@ -1015,3 +1015,51 @@ Result<CoolingState, EvaluateGiantCoolingError>`, as P06.T13 returned a `Result`
     stalks fill the sphere. At 1280 × 720 the seven floors stand beside `QUERY RADIUS` only with
     their edges set without letter spacing (`ALL` keeps it) and the controls' gap at 1rem; the
     chart's view keeps the 86 px it had, which was already small.
+- **P13.T9's benchmark misses, engineered (lane `perf08`, 2026-09-29, at `GENERATOR_VERSION` 15;
+  no output moves, no bump, every golden unchanged).** Figures are in `benches/substellar.rs`'s
+  module docs, the builds before and after run alternately at a load of 6.
+  - _Most of `sub13b`'s misses were the load._ At 6 rather than 20, before any change, the brown
+    dwarfs added 3.2–4.6 ms to the 50 ly query (not 19.9), the central rogue-planet cell took 32–39
+    ms (not 48.9) and the 0.5 ly central query 8.25 s (not 22.6), of which the stellar layers'
+    central cells were 7.0 s.
+  - _Profiled._ A whole cell is generated candidate by candidate, and a candidate costs its 16
+    components' densities (1.1–1.5 µs), four streams, the age and the mass. A brown dwarf's and a
+    layer-A, B or C primary's mass inverted Chabrier's log-normal by a 64-step bisection of the
+    error function, 65 evaluations and 3.1 µs, the largest single cost of those candidates (plan
+    03's T11 note found the same draw "as dear as a density evaluation" and left it, since
+    changing it would move every mass). The central query draws 5.6 million candidates, 5.1 million
+    of them the stellar layers' (layer E's eight central cells alone 2.9 million), whether or not
+    the substellar layers are asked for.
+  - _The remedy chosen: restructure the costly draw, exactly._ `imf::invert_erf` decides the
+    bisection's comparisons whose sign is certain (from a normal-quantile estimate of the root, a
+    measured residual and a bound on the error function's rounding, with wide margins), evaluates
+    only the dozen near the root, and stops once a halving leaves the bracket as it was. Its
+    result is the bisection's bit for bit (`the_log_normal_inversion_is_the_bisection_bit_for_bit`:
+    140,000 inversions over the generator's fixed brackets, and 99,300 over 1,986 brackets drawn
+    as runtime callers build them, such as a cluster's members below its turn-off mass; an
+    estimate of the root outside the bracket's reach decides nothing). `pieces_quantile`
+    integrates each overlap once rather than twice, summed in the same order. Brown dwarfs' cells
+    are 30% cheaper (`brown_cells_50ly_reference` 3.2–4.6 → 2.4–2.9 ms), the 50 ly stellar query
+    15–25% (12.3–15.2 → 10.7–12.9 ms), the central substellar cells about 15% (811–843 → 678–828
+    ms). A layer-A draw is 2.5 → 1.6 µs, E's 0.66 → 0.46 µs.
+  - _Not a cache._ The server already keeps whole cells, bounded in bytes; a second cache inside
+    the sim would be hidden state for no gain on a warm query and none on a cold one. It is a
+    finding for plans 03 and 04 that the 0.5 ly central query's cells, 3.56 million records of 80
+    bytes (272 MiB, the stellar layers' 239 MiB), exceed the server's default 256 MiB cell cache, so
+    a least-recently-used walk of them misses on every cell and a player hovering at the centre
+    can regenerate about 7 s of cells a query.
+  - _Not the plan's remedy._ Testing a candidate's distance from the padded sphere before its
+    density would take the uncached central query from seconds to perhaps a quarter of one (by
+    estimate: 5.6 million position draws of some 40 ns), but it helps no caller that caches whole
+    cells, which the server does, and it changes `QueryStats::systems_examined`, which plan 03's
+    `query/range.golden` pins: output would move.
+  - _The benches' caller model_ stays the plan's (cold, uncached). Two benches are added that
+    measure what a request adds on a caching caller, alone rather than as the difference of two
+    noisy queries: `substellar_cells_at_origin` (the eight central cells of layers F and G) and
+    `brown_cells_50ly_reference` (the 248 layer-F cells of the 50 ly query).
+  - _The misses stand, as findings._ The central rogue-planet cell is 35,312 candidates, so its
+    densities alone take the 20 ms (the target assumed plan 03's estimate of about 0.6 µs a
+    candidate); the 150 ms central query is the stellar layers' seven seconds plus the substellar
+    cells' 0.7; the 248 brown-dwarf cells' bounds alone (2.3 µs each) are half the 1 ms. Only a
+    cheaper density model or a query that does not generate whole cells would meet them, and both
+    move output or the pinned statistics.

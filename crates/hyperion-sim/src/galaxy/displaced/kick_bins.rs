@@ -34,6 +34,8 @@
 //! Tracks stop at [`MAX_INITIAL_MASS`] (150 M☉ since P06.T14), so a star above it is taken as one
 //! of that mass, as `StarModel` does.
 
+use std::sync::OnceLock;
+
 use super::{BirthSource, GalaxyScales, SPEED_BINS, SPEED_EDGES, SpeedBin, binarity};
 use crate::math;
 use crate::rng::Mark;
@@ -48,7 +50,7 @@ use crate::stellar::remnant::{
     Stripping, ordinary_score,
 };
 use crate::stellar::sse::{Fate, MAX_INITIAL_MASS, Track, TrackOptions, fate_of};
-use crate::units::{KilometresPerSecond, SolarMasses};
+use crate::units::{KilometresPerSecond, SolarMasses, Years};
 
 /// The midpoints of the remnant mass normal's quantiles each discrete remnant branch takes: Design
 /// note 18's 16 miss the kicks of the lightest black holes, whose scores are the largest, by
@@ -226,6 +228,43 @@ pub fn speed_bin_shares_against(
         m.value() > 0.0 && m.value().is_finite(),
         "an initial mass is positive and finite: {m:?}"
     );
+    speed_bin_shares_at(law, m, comp, &KickThresholds::new(law, v_ref))
+}
+
+/// [`speed_bin_shares_against`] with the score thresholds of its speed scale already found: the
+/// class table's form, which sums 33 masses at each scale (perf08).
+///
+/// # Panics
+///
+/// If `m` is not positive and finite.
+#[must_use]
+pub(crate) fn speed_bin_shares_at(
+    law: &StandardKickLaw,
+    m: SolarMasses,
+    comp: &Composition,
+    thresholds: &KickThresholds,
+) -> KickBinShares {
+    speed_bin_shares_and_lifetime(law, m, comp, thresholds).0
+}
+
+/// [`speed_bin_shares_at`] and the lifetime of the unmarked track it built: the star of mass `m`
+/// (taken at [`MAX_INITIAL_MASS`] above it) at the median draws with the stripped mark clear
+/// ([`Track::lifetime`]), which the class table reads for its node lifetimes (perf08).
+///
+/// # Panics
+///
+/// If `m` is not positive and finite.
+#[must_use]
+pub(crate) fn speed_bin_shares_and_lifetime(
+    law: &StandardKickLaw,
+    m: SolarMasses,
+    comp: &Composition,
+    thresholds: &KickThresholds,
+) -> (KickBinShares, Option<Years>) {
+    assert!(
+        m.value() > 0.0 && m.value().is_finite(),
+        "an initial mass is positive and finite: {m:?}"
+    );
     let m0 = if m > MAX_INITIAL_MASS {
         MAX_INITIAL_MASS
     } else {
@@ -235,7 +274,42 @@ pub fn speed_bin_shares_against(
     // and the unmarked ones differ only in the stripped mark, which neither sets.
     let track = Track::full(m0, comp, &marked_draws(UNMARKED));
     let stripped = binarity::stripped_share_on(m, comp, &track);
-    shares_on(law, m, comp, v_ref, stripped, Tracks::Shared(&track))
+    let shares = shares_on_at(law, m, comp, thresholds, stripped, Tracks::Shared(&track));
+    (shares, track.lifetime())
+}
+
+/// The ordinary mode's score threshold at each speed edge, by remnant kind, for one kick law and
+/// one speed scale ([`score_threshold`]): the same at every mass, and some 1,300 evaluations of
+/// the law's rank table, so a caller summing many masses at one scale finds them once (perf08).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct KickThresholds {
+    /// The speed scale, km/s.
+    v_ref: f64,
+    /// `[kind][edge]`, in the order of [`KINDS`] and [`SPEED_EDGES`].
+    scores: [[f64; SPEED_BINS - 1]; KINDS.len()],
+}
+
+impl KickThresholds {
+    /// The thresholds of `law` with speeds taken against `v_ref`.
+    ///
+    /// # Panics
+    ///
+    /// If `v_ref` is not positive.
+    #[must_use]
+    pub(crate) fn new(law: &StandardKickLaw, v_ref: KilometresPerSecond) -> Self {
+        assert!(v_ref.value() > 0.0, "a speed scale is positive: {v_ref:?}");
+        let scores = KINDS.map(|kind| {
+            let factor = match kind {
+                RemnantKind::BlackHole => law.params().bh_factor,
+                RemnantKind::WhiteDwarf | RemnantKind::NeutronStar | RemnantKind::None => 1.0,
+            };
+            SPEED_EDGES.map(|edge| score_threshold(law, factor, edge * v_ref.value()))
+        });
+        Self {
+            v_ref: v_ref.value(),
+            scores,
+        }
+    }
 }
 
 /// What a cluster's retention reads of one progenitor's remnant of one kind (plan 09, P09.T9.b;
@@ -343,18 +417,24 @@ fn shares_on(
     stripped: f64,
     tracks: Tracks<'_>,
 ) -> KickBinShares {
-    assert!(v_ref.value() > 0.0, "a speed scale is positive: {v_ref:?}");
-    let thresholds = KINDS.map(|kind| {
-        let factor = match kind {
-            RemnantKind::BlackHole => law.params().bh_factor,
-            RemnantKind::WhiteDwarf | RemnantKind::NeutronStar | RemnantKind::None => 1.0,
-        };
-        SPEED_EDGES.map(|edge| score_threshold(law, factor, edge * v_ref.value()))
-    });
+    let thresholds = KickThresholds::new(law, v_ref);
+    shares_on_at(law, m, comp, &thresholds, stripped, tracks)
+}
+
+/// [`shares_on`] with the thresholds of its speed scale already found.
+fn shares_on_at(
+    law: &StandardKickLaw,
+    m: SolarMasses,
+    comp: &Composition,
+    thresholds: &KickThresholds,
+    stripped: f64,
+    tracks: Tracks<'_>,
+) -> KickBinShares {
     let mut acc = Accumulator {
-        v_ref: v_ref.value(),
+        v_ref: thresholds.v_ref,
         law,
-        thresholds,
+        thresholds: thresholds.scores,
+        tail: ScoreTail::new(law.params().score_scatter),
         shares: [[[0.0; SPEED_BINS]; MODES.len()]; KINDS.len()],
         no_remnant: 0.0,
     };
@@ -364,6 +444,10 @@ fn shares_on(
         m
     };
     let mut unmarked_fate = None;
+    // The unmarked pass's branches and each branch's ordinary tails, which the marked pass of an
+    // iron core's star, on the same fate, reads again: its branches are the same, and the mark
+    // changes the progenitor's stripping, which the tails do not read (perf08).
+    let mut unmarked_branches: Option<(Vec<Branch>, Vec<Option<Tails>>)> = None;
     for (weight, mark) in [(1.0 - stripped, UNMARKED), (stripped, Mark::from_word(0))] {
         if weight > 0.0 {
             let draws = marked_draws(mark);
@@ -372,8 +456,12 @@ fn shares_on(
                 #[cfg(test)]
                 Tracks::Separate => None,
             };
+            let reused = matches!(
+                (shared, unmarked_fate),
+                (Some(_), Some(f)) if mark != UNMARKED && is_iron_core(&f)
+            );
             let fate = match (shared, unmarked_fate) {
-                (Some(_), Some(f)) if mark != UNMARKED && is_iron_core(&f) => f,
+                (Some(_), Some(f)) if reused => f,
                 (Some(track), None) if mark == UNMARKED => track
                     .fate_with(RemnantDraws::of(&draws))
                     .expect("a full track reaches the death"),
@@ -382,13 +470,33 @@ fn shares_on(
             if mark == UNMARKED {
                 unmarked_fate = Some(fate);
             }
-            let iron_core = fate.iron_core.map(|core| core.supernova);
-            for (w, death, remnant) in remnant_branches(fate.death, fate.remnant, iron_core) {
-                acc.add(
-                    weight * w,
-                    law.with_stripped_mark(death, &draws, m0, comp),
-                    remnant,
-                );
+            let (branches, mut tails) = match unmarked_branches.take() {
+                Some(first) if reused => first,
+                _ => {
+                    let iron_core = fate.iron_core.map(|core| core.supernova);
+                    let branches = remnant_branches(fate.death, fate.remnant, iron_core);
+                    let tails = vec![None; branches.len()];
+                    (branches, tails)
+                }
+            };
+            // The branches of one fate share its death's age and progenitor and differ only in
+            // the death's kind, of which there are at most three, so the stripped mark (a reading
+            // of the seam's share, some 200 ns) is applied once a kind, not once a branch (perf08).
+            let mut marked: Vec<(DeathKind, Death)> = Vec::with_capacity(3);
+            for (&(w, death, remnant), tail) in branches.iter().zip(tails.iter_mut()) {
+                let death = if let Some(&(_, done)) =
+                    marked.iter().find(|(kind, _)| *kind == death.kind())
+                {
+                    done
+                } else {
+                    let done = law.with_stripped_mark(death, &draws, m0, comp);
+                    marked.push((death.kind(), done));
+                    done
+                };
+                acc.add(weight * w, death, remnant, tail);
+            }
+            if mark == UNMARKED {
+                unmarked_branches = Some((branches, tails));
             }
         }
     }
@@ -421,7 +529,7 @@ fn remnant_branches(
     death: Death,
     remnant: CompactRemnant,
     iron_core: Option<crate::stellar::remnant::SupernovaType>,
-) -> Vec<(f64, Death, CompactRemnant)> {
+) -> Vec<Branch> {
     let Some(supernova) = iron_core else {
         return vec![(1.0, death, remnant)];
     };
@@ -462,9 +570,7 @@ fn remnant_branches(
     );
     let mut out = Vec::with_capacity(2 * MASS_NODES + 1);
     let node_weight = 1.0 / f64::from(u16::try_from(MASS_NODES).expect("1,024 nodes"));
-    for j in 0..MASS_NODES {
-        let u = (f64::from(u16::try_from(j).expect("1,024 nodes")) + 0.5) * node_weight;
-        let z = StandardNormal::new(math::normal_quantile(u)).expect("an inner quantile is finite");
+    for &z in mass_node_normals() {
         if p_hole < 1.0 {
             let w = (1.0 - p_hole) * node_weight;
             out.push(branch(w, RemnantDraws::from_parts(above, above, z)));
@@ -481,19 +587,42 @@ fn remnant_branches(
     out
 }
 
+/// One branch of a fate: its probability, death and remnant.
+type Branch = (f64, Death, CompactRemnant);
+
+/// The ordinary mode's share of ξ beyond each edge's score threshold, for one branch.
+type Tails = [f64; SPEED_BINS - 1];
+
+/// The standard normal's quantiles at the midpoints of [`MASS_NODES`] equal cells, `(j + ½) ÷
+/// 1,024`, which every iron core's branches take: the same for every star and galaxy, so found once
+/// a process rather than 2,048 times a star (perf08; the class table asks 165 stars a build).
+fn mass_node_normals() -> &'static [StandardNormal; MASS_NODES] {
+    static NODES: OnceLock<[StandardNormal; MASS_NODES]> = OnceLock::new();
+    NODES.get_or_init(|| {
+        let node_weight = 1.0 / f64::from(u16::try_from(MASS_NODES).expect("1,024 nodes"));
+        core::array::from_fn(|j| {
+            let u = (f64::from(u16::try_from(j).expect("1,024 nodes")) + 0.5) * node_weight;
+            StandardNormal::new(math::normal_quantile(u)).expect("an inner quantile is finite")
+        })
+    })
+}
+
 /// The shares being summed.
 struct Accumulator<'a> {
     v_ref: f64,
     law: &'a StandardKickLaw,
     /// Per kind, the ordinary score at each speed edge ([`score_threshold`]).
     thresholds: [[f64; SPEED_BINS - 1]; KINDS.len()],
+    /// The score factor's truncated tail.
+    tail: ScoreTail,
     shares: [[[f64; SPEED_BINS]; MODES.len()]; KINDS.len()],
     no_remnant: f64,
 }
 
 impl Accumulator<'_> {
-    /// Adds the kicks of a remnant of `death` with probability `w`.
-    fn add(&mut self, w: f64, death: Death, remnant: CompactRemnant) {
+    /// Adds the kicks of a remnant of `death` with probability `w`, its ordinary tails read from
+    /// `tails` if found before and kept there if not.
+    fn add(&mut self, w: f64, death: Death, remnant: CompactRemnant, tails: &mut Option<Tails>) {
         let (Some(channel), Some(kind)) = (
             CollapseChannel::of(death.kind()),
             kind_index(remnant.kind()),
@@ -523,7 +652,8 @@ impl Accumulator<'_> {
                     self.maxwellian(w * low, kind, KickMode::Low, params.low_sigma_km_s);
                 }
                 if low < 1.0 {
-                    self.ordinary(w * (1.0 - low), kind, &death, remnant);
+                    let above = *tails.get_or_insert_with(|| self.tails(kind, &death, remnant));
+                    self.ordinary(w * (1.0 - low), kind, above);
                 }
             }
         }
@@ -543,10 +673,10 @@ impl Accumulator<'_> {
         bins[SPEED_BINS - 1] += w * (1.0 - below);
     }
 
-    /// Adds the ordinary mode's kicks of `remnant` with probability `w`, over the score factor ξ
-    /// (module documentation): the share of ξ beyond each edge's score threshold, exactly.
-    fn ordinary(&mut self, w: f64, kind: usize, death: &Death, remnant: CompactRemnant) {
-        let scatter = self.law.params().score_scatter;
+    /// The ordinary mode's share of ξ beyond each edge's score threshold for `remnant` of kind
+    /// number `kind` after `death` (module documentation), exactly.
+    fn tails(&self, kind: usize, death: &Death, remnant: CompactRemnant) -> Tails {
+        let tail = self.tail;
         let progenitor = death.progenitor();
         // The score is c ξ, with c = (M_CO − M_rem) ÷ M_rem, Mandel and Müller's (2020) eq. 2.
         let c = ordinary_score(progenitor.co_core_mass(), remnant.mass(), 1.0);
@@ -558,13 +688,19 @@ impl Accumulator<'_> {
             } else if x_e == f64::INFINITY {
                 0.0
             } else if c > 0.0 {
-                xi_above(x_e / c, scatter)
+                tail.xi_above(x_e / c)
             } else if c < 0.0 {
-                1.0 - xi_above(x_e / c, scatter)
+                1.0 - tail.xi_above(x_e / c)
             } else {
                 f64::from(u8::from(0.0 >= x_e))
             };
         }
+        above
+    }
+
+    /// Adds the ordinary mode's kicks of kind number `kind` with probability `w`, binned by its
+    /// [`tails`](Self::tails) `above`.
+    fn ordinary(&mut self, w: f64, kind: usize, above: Tails) {
         let bins = &mut self.shares[kind][mode_index(KickMode::Ordinary)];
         let mut previous = 1.0;
         for (bin, &now) in bins.iter_mut().zip(&above) {
@@ -575,13 +711,40 @@ impl Accumulator<'_> {
     }
 }
 
-/// `P(ξ ≥ t)` for the score factor ξ = 1 + s z, z a standard normal truncated below at −1 ÷ s
-/// (the law's redraw until positive, [`KickLawParams::score_factor`](crate::stellar::remnant::KickLawParams::score_factor)).
-fn xi_above(t: f64, scatter: f64) -> f64 {
-    let floor = -1.0 / scatter;
-    let tail = |z: f64| 0.5 * math::erfc(z * core::f64::consts::FRAC_1_SQRT_2);
-    let z = ((t - 1.0) / scatter).max(floor);
-    (tail(z) / tail(floor)).clamp(0.0, 1.0)
+/// The score factor ξ = 1 + s z, z a standard normal truncated below at −1 ÷ s (the law's redraw
+/// until positive, [`KickLawParams::score_factor`](crate::stellar::remnant::KickLawParams::score_factor)),
+/// with the tail at its floor found once: the quadrature asks [`xi_above`](Self::xi_above) seven
+/// times a branch, over some 4,000 branches a star (perf08).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ScoreTail {
+    /// s.
+    scatter: f64,
+    /// −1 ÷ s.
+    floor: f64,
+    /// The normal's upper tail at the floor.
+    at_floor: f64,
+}
+
+impl ScoreTail {
+    fn new(scatter: f64) -> Self {
+        let floor = -1.0 / scatter;
+        Self {
+            scatter,
+            floor,
+            at_floor: normal_upper_tail(floor),
+        }
+    }
+
+    /// `P(ξ ≥ t)`.
+    fn xi_above(self, t: f64) -> f64 {
+        let z = ((t - 1.0) / self.scatter).max(self.floor);
+        (normal_upper_tail(z) / self.at_floor).clamp(0.0, 1.0)
+    }
+}
+
+/// The standard normal's upper tail at `z`.
+fn normal_upper_tail(z: f64) -> f64 {
+    0.5 * math::erfc(z * core::f64::consts::FRAC_1_SQRT_2)
 }
 
 /// The least ordinary score at which the law's speed, times `factor`, reaches `speed` km/s:

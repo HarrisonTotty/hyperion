@@ -8,6 +8,21 @@
 //!   `binarity::stripped_share` alone, a full track, and `stellar::lifetime`.
 //! - `LifetimeBracket::new`, 858 lifetimes, galaxy-independent; `LifetimeBracket::shared` keeps one
 //!   a process.
+//!
+//! Measured on 2026-09-29 by `perf08` at generator version 15, the builds before and after its
+//! exact wins run alternately at a load average of 6 (plan 08's P08.T9 as-built note has the wins):
+//!
+//! | Bench | Before | After | Target |
+//! | ----- | ------ | ----- | ------ |
+//! | `ClassTable::build` | 713, 891 ms | 382, 485 ms | 150 ms (P08.T9): missed; under P08.T16's 1 s |
+//! | `speed_bin_shares/8.2` | 2.3–2.5 ms | 2.5–3.0 ms | — |
+//! | `speed_bin_shares/15` | 6.6–7.6 ms | 2.6–2.8 ms | — |
+//! | `speed_bin_shares/40` | 4.6–5.5 ms | 1.8–2.3 ms | — |
+//!
+//! At version 14 the build took 27–45 s, over 95% of it the seam's quadrature, which version 15's
+//! offline `StrippingTable` removed: 1.20 s at a load of 20 before these wins, and 0.79 s at the
+//! same load with the thresholds, tails, node quantiles and stripped marks found once but the
+//! passes and lifetimes not yet shared.
 
 use std::hint::black_box;
 use std::time::Duration;

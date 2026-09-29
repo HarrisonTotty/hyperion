@@ -18,7 +18,6 @@
 use std::error::Error;
 use std::fmt;
 
-use super::quad::bisect;
 use super::substellar::{BROWN_DWARF_MIN_MSUN, ROGUE_PLANET_MAX_MSUN, ROGUE_PLANET_MIN_MSUN};
 use crate::id::Layer;
 use crate::math;
@@ -40,6 +39,10 @@ pub const MASS_LIMIT_HI: f64 = MASS_BAND_EDGES[5];
 /// Iterations of the bisection that inverts the log-normal branch: enough to narrow the bracket
 /// in log₁₀ m, at most three decades wide, to its last bit.
 const LOG_NORMAL_BISECTIONS: u32 = 64;
+
+/// The most pieces a mass function here has: [`Kroupa`]'s two power laws, [`Chabrier`]'s
+/// log-normal and power law.
+const MAX_PIECES: usize = 2;
 
 /// Within this distance of 1 a power-law exponent takes the logarithmic form, as the samplers of
 /// [`rng`](crate::rng) do.
@@ -367,17 +370,96 @@ impl Piece {
                 let erf_a = math::erf((math::log10(a) - centre) / scale);
                 let erf_b = math::erf((math::log10(b) - centre) / scale);
                 let target = erf_a + fraction * (erf_b - erf_a);
-                let log_m = bisect(
-                    |x| math::erf((x - centre) / scale) - target,
-                    math::log10(a),
-                    math::log10(b),
-                    LOG_NORMAL_BISECTIONS,
-                );
+                let log_m = invert_erf(centre, scale, target, math::log10(a), math::log10(b));
                 math::exp10(log_m)
             }
         };
         x.clamp(a, b)
     }
+}
+
+/// [`bisect`](super::quad::bisect) of `f(x) = erf((x − centre) ÷ scale) − target` on `[lo, hi]` over
+/// [`LOG_NORMAL_BISECTIONS`] halvings, bit for bit, from about a fifth of its evaluations (perf08).
+///
+/// Placement inverts the log-normal for every primary of layers A to C and every brown dwarf, and
+/// the bisection's 65 error functions were the largest part of such a candidate's cost. Its result
+/// is fixed by the sign of `f` at each midpoint, so any midpoint whose sign is certain need not be
+/// evaluated:
+///
+/// - A computed `f(x)` has the sign of `ê − target`, where `ê` is the computed error function:
+///   the subtraction is correctly rounded. `ê` lies within `E` of the exact `erf(z(x))`, `E`
+///   covering the error function's own rounding and the rounding of `z = (x − centre) ÷ scale`,
+///   with a wide margin.
+/// - The exact `erf(z(x)) − target` rises with `x` at a slope of at least `s`, the smaller of
+///   `erf′(z) ÷ scale` at the bracket's ends (`erf′` is largest at 0 and falls on either side).
+/// - So with `r` an estimate of the root, found from the normal quantile, and `|f(r)|` measured,
+///   every root of the exact function lies within `(|f(r)| + E) ÷ s` of `r`, and the computed
+///   sign is certain wherever the exact `f` is further than `E` from 0: below `r − d` it is
+///   negative and above `r + d` it is not, for `d = 2 (|f(r)| + 2E) ÷ s`.
+///
+/// Midpoints inside `[r − d, r + d]`, about twelve of them from `d` of some 10⁻¹³ down to the last
+/// bit, are evaluated, as are all of them when the estimate is poor or not a number. The loop also
+/// stops once a halving leaves the bracket as it was, since every later one would repeat it.
+/// `the_log_normal_inversion_is_the_bisection_bit_for_bit` holds it to the bisection bit for bit.
+fn invert_erf(centre: f64, scale: f64, target: f64, lo: f64, hi: f64) -> f64 {
+    let f = |x: f64| math::erf((x - centre) / scale) - target;
+    let (mut lo, mut hi) = (lo, hi);
+    // The bisection's orientation, as `bisect` takes it; the certain signs below assume the
+    // lower end is negative, which it is for every target above the error function there.
+    let lo_negative = f(lo) < 0.0;
+    let (certain_below, certain_above) = if lo_negative {
+        certain_signs(centre, scale, target, lo, hi)
+    } else {
+        (f64::NAN, f64::NAN)
+    };
+    for _ in 0..LOG_NORMAL_BISECTIONS {
+        let mid = lo + 0.5 * (hi - lo);
+        let negative = if mid < certain_below {
+            true
+        } else if mid > certain_above {
+            false
+        } else {
+            f(mid) < 0.0
+        };
+        let (next_lo, next_hi) = if negative == lo_negative {
+            (mid, hi)
+        } else {
+            (lo, mid)
+        };
+        if next_lo.total_cmp(&lo).is_eq() && next_hi.total_cmp(&hi).is_eq() {
+            break;
+        }
+        (lo, hi) = (next_lo, next_hi);
+    }
+    lo + 0.5 * (hi - lo)
+}
+
+/// For [`invert_erf`]: the points below which `erf((x − centre) ÷ scale) − target` is certainly
+/// computed negative and above which it is certainly not, over `[lo, hi]`; NaNs, which decide
+/// nothing, when no estimate of the root is to be had.
+fn certain_signs(centre: f64, scale: f64, target: f64, lo: f64, hi: f64) -> (f64, f64) {
+    let p = f64::midpoint(1.0, target);
+    if !(p > 0.0 && p < 1.0) {
+        return (f64::NAN, f64::NAN);
+    }
+    // erf(z) = target where Φ(z √2) = (1 + target) ÷ 2.
+    let root = centre + scale * math::normal_quantile(p) * core::f64::consts::FRAC_1_SQRT_2;
+    // The slope bound holds over the bracket, so an estimate far outside it (which the normal
+    // quantile's accuracy rules out, but nothing here should rest on) decides nothing.
+    let width = hi - lo;
+    if !(root >= lo - width && root <= hi + width) {
+        return (f64::NAN, f64::NAN);
+    }
+    let (z_lo, z_hi) = ((lo - centre) / scale, (hi - centre) / scale);
+    let z_most = z_lo.abs().max(z_hi.abs());
+    // The error function's rounding and that of z, each within a few ulps, taken sixteen times
+    // over: 16 × 2⁻⁵² (1 + |z|) against a function of size at most 1 with slope at most 1.13.
+    let error = 16.0 * f64::EPSILON * (1.0 + z_most);
+    // erf′(z) = 2 ÷ √π e^(−z²), halved against the rounding of its exponential.
+    let slope = 0.5 * core::f64::consts::FRAC_2_SQRT_PI * math::exp(-z_most * z_most) / scale;
+    let at_root = (math::erf((root - centre) / scale) - target).abs();
+    let reach = 2.0 * (at_root + 2.0 * error) / slope;
+    (root - reach, root + reach)
 }
 
 /// ξ at `m` for a list of contiguous pieces covering 0.08–150 M☉; 0 outside.
@@ -415,14 +497,30 @@ fn pieces_quantile(pieces: &[Piece], lo: f64, hi: f64, u: f64) -> f64 {
         return lo;
     }
     let u = u.clamp(0.0, 1.0);
-    let mut remaining = u * pieces_integral(pieces, lo, hi);
-    // Placement draws a mass for every system, so this allocates nothing. The pieces are
-    // contiguous and cover the stellar range, so the overlap that reaches `hi` is the last one.
-    for (piece, (a, b)) in pieces
+    // Placement draws a mass for every system, so this allocates nothing. Each overlap's integral
+    // is taken once and summed as `pieces_integral` sums it, in order from 0, which is its total
+    // bit for bit without integrating twice (perf08: a third of a power-law draw's cost).
+    assert!(
+        pieces.len() <= MAX_PIECES,
+        "a mass function of {} pieces",
+        pieces.len()
+    );
+    let mut overlaps = [None; MAX_PIECES];
+    for (slot, found) in overlaps.iter_mut().zip(
+        pieces
+            .iter()
+            .filter_map(|p| overlap(p, lo, hi).map(|(a, b)| (p, a, b, p.integral(a, b)))),
+    ) {
+        *slot = Some(found);
+    }
+    let total = overlaps
         .iter()
-        .filter_map(|p| overlap(p, lo, hi).map(|range| (p, range)))
-    {
-        let mass = piece.integral(a, b);
+        .flatten()
+        .fold(0.0, |sum, &(_, _, _, mass)| sum + mass);
+    let mut remaining = u * total;
+    // The pieces are contiguous and cover the stellar range, so the overlap that reaches `hi` is
+    // the last one.
+    for &(piece, a, b, mass) in overlaps.iter().flatten() {
         if remaining <= mass || b >= hi {
             let fraction = if mass > 0.0 {
                 (remaining / mass).clamp(0.0, 1.0)
@@ -1000,6 +1098,73 @@ mod tests {
             assert!(((quadrature - closed) / closed).abs() < 1e-12, "{name}");
             assert_same_bits(f.integral(0.01, 0.05), 0.0);
             assert_same_bits(f.integral(0.3, 0.2), 0.0);
+        }
+    }
+
+    /// perf08: the log-normal's inversion ends where the plain bisection of the error function
+    /// ends, bit for bit: over the fixed brackets the generator inverts (bands A to C, the brown
+    /// dwarfs and the whole substellar branch, one spanning the stellar log-normal and one far into
+    /// its tail) at 20,000 fractions each, the ends and the smallest and largest steps included,
+    /// and over some 2,000 brackets drawn inside 0.01–1 M☉ as runtime callers build them (a
+    /// cluster's members up to its turn-off mass, `Truncated`'s top), narrow ones and ones ending
+    /// near 1 M☉ among them, at 50 fractions each.
+    #[test]
+    fn the_log_normal_inversion_is_the_bisection_bit_for_bit() {
+        let scale = Chabrier::WIDTH_DEX * core::f64::consts::SQRT_2;
+        let centre = math::log10(Chabrier::CENTRE);
+        let n = 20_000_u32;
+        let fixed_fractions: Vec<f64> = (0..=n)
+            .map(|i| f64::from(i) / f64::from(n))
+            .chain([
+                f64::EPSILON / 4.0,
+                f64::EPSILON,
+                1.0 - f64::EPSILON / 2.0,
+                1e-300,
+            ])
+            .collect();
+        let mut cases: Vec<((f64, f64), Vec<f64>)> = [
+            (MASS_LIMIT_LO, 0.5),
+            (0.5, 0.75),
+            (0.75, Chabrier::BREAK),
+            (BROWN_DWARF_MIN_MSUN, MASS_LIMIT_LO),
+            (SUBSTELLAR_BRANCH_LO, MASS_LIMIT_LO),
+            (MASS_LIMIT_LO, Chabrier::BREAK),
+            (Chabrier::BREAK, MASS_LIMIT_HI),
+        ]
+        .into_iter()
+        .map(|bracket| (bracket, fixed_fractions.clone()))
+        .collect();
+        let mut lcg = hyperion_testkit::lcg::Lcg::new(0x9e80_0008);
+        for k in 0..2_000 {
+            let lo = SUBSTELLAR_BRANCH_LO * math::powf(100.0, lcg.next_f64());
+            let hi = match k % 4 {
+                // Narrow: a part in 10³–10⁹ of the lower end.
+                0 => lo * (1.0 + math::powf(10.0, -3.0 - 6.0 * lcg.next_f64())),
+                // Ending near 1 M☉, as an old cluster's turn-off mass does.
+                1 => Chabrier::BREAK * (1.0 - 0.3 * lcg.next_f64()),
+                _ => lo + (Chabrier::BREAK - lo) * lcg.next_f64(),
+            };
+            if lo < hi {
+                let fractions = (0..50).map(|_| lcg.next_f64()).collect();
+                cases.push(((lo, hi), fractions));
+            }
+        }
+        assert!(cases.len() > 1_500, "{} brackets", cases.len());
+        for ((a, b), fractions) in cases {
+            let erf_a = math::erf((math::log10(a) - centre) / scale);
+            let erf_b = math::erf((math::log10(b) - centre) / scale);
+            for fraction in fractions {
+                let target = erf_a + fraction * (erf_b - erf_a);
+                let (lo, hi) = (math::log10(a), math::log10(b));
+                let direct = crate::galaxy::quad::bisect(
+                    |x| math::erf((x - centre) / scale) - target,
+                    lo,
+                    hi,
+                    LOG_NORMAL_BISECTIONS,
+                );
+                let fast = invert_erf(centre, scale, target, lo, hi);
+                assert_same_bits(fast, direct);
+            }
         }
     }
 

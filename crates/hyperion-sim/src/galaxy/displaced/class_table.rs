@@ -47,7 +47,7 @@ use super::forms::{
     COROTATION_RATIO_NODES, CoredPowerLawParams, DiscBornRow, ESCAPE_RATIO_NODES, OldBornRow,
     at_nodes,
 };
-use super::kick_bins::{KINDS, KickBinShares, speed_bin_shares};
+use super::kick_bins::{KINDS, KickBinShares, KickThresholds, speed_bin_shares_and_lifetime};
 use super::marks::{
     ConditionalMarks, MARK_MASS_NODES, MassNodes, StayCategory, StayMarks, age_bin_years,
 };
@@ -65,7 +65,7 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::{RemnantKind, StandardKickLaw};
-use crate::stellar::sse::MAX_INITIAL_MASS;
+use crate::stellar::sse::{MAX_INITIAL_MASS, is_companion_stripped};
 use crate::stellar::{Composition, lifetime};
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses, Years};
 
@@ -1084,8 +1084,8 @@ fn source_entries(
 ) -> (Vec<SourceEntry>, Vec<Vec<KickBinShares>>, Vec<usize>) {
     let fields = galaxy.fields();
     let law = StandardKickLaw::default();
-    let mut sources = Vec::with_capacity(SOURCES.len());
-    let mut kicks: Vec<(f64, f64, Vec<KickBinShares>)> = Vec::with_capacity(SOURCES.len());
+    let mut sources: Vec<SourceEntry> = Vec::with_capacity(SOURCES.len());
+    let mut kicks: Vec<KickSet> = Vec::with_capacity(SOURCES.len());
     let mut kick_of = Vec::with_capacity(SOURCES.len());
     for (s, &source) in SOURCES.iter().enumerate() {
         let site = reference_site(source, scales);
@@ -1101,43 +1101,121 @@ fn source_entries(
         }
         let fe_h = if count > 0.0 { iron / count } else { 0.0 };
         let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
-        let lifetimes = [0, 1].map(|b| {
-            if b == 1 || ejects(source) {
-                nodes[b]
-                    .masses()
-                    .map(|m| reference_lifetime_of(m, &composition))
-            } else {
-                [0.0; MARK_MASS_NODES]
-            }
-        });
         let v_ref = source_speed(source, scales);
-        let known = kicks
-            .iter()
-            .position(|(fe, v, _)| fe.total_cmp(&fe_h).is_eq() && v.total_cmp(&v_ref).is_eq());
+        let known = kicks.iter().position(|set| {
+            set.fe_h.total_cmp(&fe_h).is_eq() && set.v_ref.total_cmp(&v_ref).is_eq()
+        });
         let index = known.unwrap_or_else(|| {
-            let k = nodes[1]
-                .masses()
-                .iter()
-                .map(|&m| speed_bin_shares(&law, SolarMasses::new(m), &composition, scales, source))
-                .collect();
-            kicks.push((fe_h, v_ref, k));
+            kicks.push(KickSet::new(
+                &law,
+                fe_h,
+                v_ref,
+                &composition,
+                nodes[1].masses(),
+            ));
             kicks.len() - 1
         });
+        // Layer D's node lifetimes depend on the composition alone, as E's do, which the kicks'
+        // tracks give: an ejecting source of a composition already met reads them (perf08).
+        let lifetimes_d = if ejects(source) {
+            sources
+                .iter()
+                .zip(SOURCES)
+                .find(|(entry, other)| {
+                    ejects(*other) && entry.composition.fe_h().value().total_cmp(&fe_h).is_eq()
+                })
+                .map_or_else(
+                    || {
+                        nodes[0]
+                            .masses()
+                            .map(|m| reference_lifetime_of(m, &composition))
+                    },
+                    |(entry, _)| entry.lifetimes[0],
+                )
+        } else {
+            [0.0; MARK_MASS_NODES]
+        };
         kick_of.push(index);
         sources.push(SourceEntry {
             composition,
             budget,
             gone: [0.0; 2],
             remnants: [[0.0; 4]; 3],
-            lifetimes,
-            stripped: core::array::from_fn(|i| kicks[index].2[i].stripped_share()),
+            lifetimes: [lifetimes_d, kicks[index].lifetimes_e],
+            stripped: core::array::from_fn(|i| kicks[index].shares[i].stripped_share()),
         });
     }
     (
         sources,
-        kicks.into_iter().map(|(_, _, k)| k).collect(),
+        kicks.into_iter().map(|set| set.shares).collect(),
         kick_of,
     )
+}
+
+/// The kick shares of one composition and speed scale at band E's nodes, and the nodes' reference
+/// lifetimes, which the quadrature's own tracks give (perf08).
+struct KickSet {
+    /// \[Fe/H\], dex.
+    fe_h: f64,
+    /// The speed scale, km/s.
+    v_ref: f64,
+    shares: Vec<KickBinShares>,
+    /// [`reference_lifetime_of`] at each node, years.
+    lifetimes_e: [f64; MARK_MASS_NODES],
+}
+
+impl KickSet {
+    /// The kicks and lifetimes at `masses` (M☉) of a star of `composition`, \[Fe/H\] `fe_h`,
+    /// against `v_ref` km/s.
+    ///
+    /// The score thresholds depend on the speed scale alone, so they are found once for every
+    /// node. A node's lifetime is its kick track's, bit for bit, wherever the median draws
+    /// [`reference_lifetime_of`] takes and the kick's unmarked ones build the same track: they
+    /// differ only in the companion-stripped mark, which the track reads only as
+    /// `is_companion_stripped`, never set for the unmarked draws. Where it is set for the median
+    /// ones, inside the stripped window, the lifetime is found afresh. That saves a lifetime of
+    /// about a millisecond a node (test `the_kick_tracks_give_the_reference_lifetimes`).
+    fn new(
+        law: &StandardKickLaw,
+        fe_h: f64,
+        v_ref: f64,
+        composition: &Composition,
+        masses: &[f64; MARK_MASS_NODES],
+    ) -> Self {
+        let thresholds = KickThresholds::new(law, KilometresPerSecond::new(v_ref));
+        let mut lifetimes_e = [0.0; MARK_MASS_NODES];
+        let shares = masses
+            .iter()
+            .zip(&mut lifetimes_e)
+            .map(|(&m, life)| {
+                let (shares, track_life) = speed_bin_shares_and_lifetime(
+                    law,
+                    SolarMasses::new(m),
+                    composition,
+                    &thresholds,
+                );
+                *life = match track_life {
+                    Some(t) if !median_is_stripped(m, composition) => t.value(),
+                    Some(_) | None => reference_lifetime_of(m, composition),
+                };
+                shares
+            })
+            .collect();
+        Self {
+            fe_h,
+            v_ref,
+            shares,
+            lifetimes_e,
+        }
+    }
+}
+
+/// Whether the track of [`reference_lifetime_of`] at mass `m` (M☉) and `comp` is built with its
+/// companion-stripped mark set: the median draws' mark against the seam's share, inside the
+/// stripped window only.
+fn median_is_stripped(m: f64, comp: &Composition) -> bool {
+    let m = SolarMasses::new(m.min(MAX_INITIAL_MASS.value()));
+    is_companion_stripped(m, comp, &StarDraws::median())
 }
 
 /// Every class, empty, its marks over `nodes` and its source's components.
@@ -1595,4 +1673,29 @@ fn ejection_ages(
         }));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+    use crate::galaxy::imf::MassFunctionKind;
+
+    /// perf08: `KickSet`'s node lifetimes, read off the kick tracks wherever the median draws'
+    /// stripped mark is clear, are [`reference_lifetime_of`]'s bit for bit at layer E's 33 nodes,
+    /// at solar and halo metallicity.
+    #[test]
+    fn the_kick_tracks_give_the_reference_lifetimes() {
+        let mf = MassFunctionKind::default().to_mass_function();
+        let nodes = MassNodes::of(MassBand::E, mf.as_ref());
+        let law = StandardKickLaw::default();
+        for fe_h in [0.0, -1.5] {
+            let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+            let set = KickSet::new(&law, fe_h, 224.0, &comp, nodes.masses());
+            for (&m, &life) in nodes.masses().iter().zip(&set.lifetimes_e) {
+                assert_same_bits(life, reference_lifetime_of(m, &comp));
+            }
+        }
+    }
 }

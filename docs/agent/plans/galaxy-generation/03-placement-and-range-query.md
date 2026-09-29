@@ -1089,3 +1089,17 @@ Reserved so that later plans move no star they need not:
   its `MemberRecord` carries. Nothing calls it for a member yet. Plan 12 moves every record through
   `observe::Drift::of_record`, which resolves the member; whoever next wires members into the drift
   hook (plan 08's P08.T12.d or plan 09's P09.T28.b) should make the hook dispatch on the origin.
+- **T11's long-range pin re-measured (lane `perf08`, 2026-09-29, at `GENERATOR_VERSION` 15).**
+  `benches/range_query.rs`'s `long_range` asserted 41,925 systems and stopped before measuring,
+  since nothing in CI runs the benches. At version 15 the query walks **37,675 systems (29,424 in
+  layer D, 8,251 in E) over the same 3,008 cells**, against expected counts of 29,545 and 8,170
+  (the pin's comment said 32,886 and 9,094), in 205–222 ms at a load of 16; the pin and the
+  comment are updated, and 65,536 is still the smallest power of two that admits both layers. The walk did not change; the fixture
+  did, twice:
+  - P02.T11's retune of `milky_way_like()` (2026-09-23, `633dcec`: thin-disc scale length 7,000 ly
+    for 8,480, thicker discs) lowered the density at the Sun-like point by about a quarter. The pin
+    had been taken on the fixture before it, and fell to the 30,606 `sub13b` found at version 14,
+    as this plan's Sun-area goldens did (`query/range.golden`'s 20 ly sphere, 93 systems to 71 and
+    796 examined to 571).
+  - Version 15's Chabrier high-mass scale, 0.68 to 0.92 (P15.T4.b, ruling 138), raised bands D and
+    E's share of systems by 30% (0.0335 to 0.0437) and the walk by 23%.
