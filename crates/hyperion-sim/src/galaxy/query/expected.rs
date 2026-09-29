@@ -4,6 +4,11 @@
 //! Each component's density is integrated over the sphere once, and a layer's count is then
 //! `Σ share × Iᶜ` over the components in their fixed order, the sum
 //! [`Fields::layer_density`](crate::galaxy::fields::Fields::layer_density) and plan 02's bound take.
+//! The brown dwarfs are counted the same way. The rogue planets are not, because their density
+//! saturates at the index limit (ruling 125): min(a × ρ, C) is not linear in the components, so at
+//! each node their weighted density is formed in component order, as the thinning forms it, then
+//! saturated, and that is integrated. Where no node saturates, this is `Σ share × Iᶜ` up to the
+//! order of the sums.
 //! The sphere is the query's unpadded one and the epoch is the only time asked about, because the
 //! process is stationary: padding for motion moves systems between neighbouring cells, not into or
 //! out of a sphere's worth of expectation.
@@ -35,11 +40,13 @@
 //! galaxy went on. That errs high, which can only drop a layer from a census early — the direction
 //! the brainstorm accepts for the features' share.
 
-use super::LayerCounts;
+use super::{LayerCounts, SubstellarRequest};
 use crate::coords::GalacticPosition;
 use crate::galaxy::fields::MAX_COMPONENTS;
-use crate::galaxy::placement::STELLAR_LAYERS;
+use crate::galaxy::imf::MassBand;
+use crate::galaxy::placement::{STELLAR_LAYERS, rogue_planet_saturation_density};
 use crate::galaxy::{Galaxy, PointLy};
+use crate::id::Layer;
 use crate::math;
 use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS, GL8_NODES, GL8_WEIGHTS};
 use crate::units::LightYears;
@@ -61,8 +68,10 @@ const MAX_AZIMUTHS: usize = GL8_NODES.len() * 2;
 /// The expected number of systems of each layer inside the sphere of `radius` about `centre`, at the
 /// epoch.
 ///
-/// The two substellar entries of the result are zero: plan 13 places those layers (plan 03, Design
-/// note 17).
+/// The substellar entries are filled only for the layers `substellar` asks for, and are exactly zero
+/// otherwise, so a query that asks for none has the census it had before plan 13 (plan 03, Design
+/// note 17). The rogue planets' entry counts their saturated density (ruling 125; see the module
+/// docs).
 ///
 /// # Panics
 ///
@@ -75,7 +84,7 @@ const MAX_AZIMUTHS: usize = GL8_NODES.len() * 2;
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::coords::GalacticPosition;
 /// use hyperion_sim::galaxy::Galaxy;
-/// use hyperion_sim::galaxy::query::expected_counts;
+/// use hyperion_sim::galaxy::query::{SubstellarRequest, expected_counts};
 /// use hyperion_sim::id::Layer;
 /// use hyperion_sim::units::LightYears;
 ///
@@ -83,40 +92,74 @@ const MAX_AZIMUTHS: usize = GL8_NODES.len() * 2;
 /// // A 50 ly sphere at the Sun's distance from the centre holds a few thousand systems, most of
 /// // them M dwarfs.
 /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
-/// let counts = expected_counts(&galaxy, &sun, LightYears::new(50.0));
+/// let counts = expected_counts(&galaxy, &sun, LightYears::new(50.0), SubstellarRequest::None);
 /// let total: f64 = counts.to_array().iter().sum();
 /// assert!((500.0..8_000.0).contains(&total));
 /// assert!(counts.get(Layer::A) > 0.5 * total);
 /// // Layer E, above 8 M☉, is a fraction of a per cent, and no substellar layer is counted.
 /// assert!(counts.get(Layer::E) < 0.02 * total);
 /// assert_eq!(counts.get(Layer::BrownDwarf), 0.0);
+///
+/// // Asked for, the brown dwarfs come to about one for every five or six stars.
+/// let with = expected_counts(&galaxy, &sun, LightYears::new(50.0), SubstellarRequest::BrownDwarfs);
+/// let ratio = with.get(Layer::BrownDwarf) / total;
+/// assert!((0.15..0.35).contains(&ratio));
+/// assert_eq!(with.get(Layer::RoguePlanet), 0.0);
 /// ```
 #[must_use]
 pub fn expected_counts(
     galaxy: &Galaxy,
     centre: &GalacticPosition,
     radius: LightYears,
+    substellar: SubstellarRequest,
 ) -> LayerCounts {
     let fields = galaxy.fields();
     let components = fields.components();
+    let shares = galaxy.shares();
+    let rogue = substellar.admits(Layer::RoguePlanet);
+    // The rogue planets' shares per component, in component order, and their saturation density.
+    let mut rogue_shares = [0.0; MAX_COMPONENTS];
+    if rogue {
+        for (share, component) in rogue_shares.iter_mut().zip(components) {
+            *share = shares.component_share(MassBand::RoguePlanet, component);
+        }
+    }
+    let saturation = rogue_planet_saturation_density();
     let mut integrals = [0.0; MAX_COMPONENTS];
     let mut densities = [0.0; MAX_COMPONENTS];
+    let mut rogue_integral = 0.0;
     for_each_node(&PointLy::from(centre), radius.value(), |point, weight| {
         fields.densities(point, &mut densities);
         for (integral, density) in integrals.iter_mut().zip(densities) {
             *integral += weight * density;
         }
+        if rogue {
+            // `share × density` added from 0 in component order, as the thinning adds them.
+            let density = rogue_shares
+                .iter()
+                .zip(densities)
+                .take(components.len())
+                .fold(0.0, |sum, (share, density)| sum + share * density);
+            rogue_integral += weight * density.min(saturation);
+        }
     });
-    let shares = galaxy.shares();
     let mut counts = LayerCounts::ZERO;
-    for spec in STELLAR_LAYERS {
-        let count = components
+    let linear = |band: MassBand| {
+        components
             .iter()
             .zip(integrals)
             .fold(0.0, |sum, (component, integral)| {
-                sum + shares.component_share(spec.band(), component) * integral
-            });
-        counts.set(spec.layer(), count);
+                sum + shares.component_share(band, component) * integral
+            })
+    };
+    for spec in STELLAR_LAYERS {
+        counts.set(spec.layer(), linear(spec.band()));
+    }
+    if substellar.admits(Layer::BrownDwarf) {
+        counts.set(Layer::BrownDwarf, linear(MassBand::BrownDwarf));
+    }
+    if rogue {
+        counts.set(Layer::RoguePlanet, rogue_integral);
     }
     counts
 }
@@ -233,7 +276,6 @@ mod tests {
 
     use super::*;
     use crate::galaxy::params::GalaxyParams;
-    use crate::id::Layer;
     use crate::rng::Seed;
 
     /// The seed of the galaxy these tests count over.
@@ -356,8 +398,8 @@ mod tests {
         let galaxy = galaxy();
         for radius in [10.0, 50.0, 500.0] {
             let radius = LightYears::new(radius);
-            let first = expected_counts(&galaxy, &sunlike(), radius);
-            let second = expected_counts(&galaxy, &sunlike(), radius);
+            let first = expected_counts(&galaxy, &sunlike(), radius, EVERY);
+            let second = expected_counts(&galaxy, &sunlike(), radius, EVERY);
             for (a, b) in first.to_array().into_iter().zip(second.to_array()) {
                 assert_same_bits(a, b);
             }
@@ -368,9 +410,9 @@ mod tests {
     fn expected_counts_fall_as_the_centre_rises_out_of_the_plane() {
         let galaxy = galaxy();
         let radius = LightYears::new(50.0);
-        let in_plane = expected_counts(&galaxy, &sunlike(), radius).get(Layer::A);
+        let in_plane = expected_counts(&galaxy, &sunlike(), radius, NONE).get(Layer::A);
         let above = GalacticPosition::from_light_years([0.0, 26_000.0, 2_000.0]).unwrap();
-        let high = expected_counts(&galaxy, &above, radius).get(Layer::A);
+        let high = expected_counts(&galaxy, &above, radius, NONE).get(Layer::A);
         assert!(
             high > 0.0 && high < 0.5 * in_plane,
             "{high} above the plane against {in_plane} in it"
@@ -378,13 +420,72 @@ mod tests {
     }
 
     #[test]
-    fn expected_counts_leave_the_substellar_layers_at_zero() {
+    fn expected_counts_leave_the_substellar_layers_at_zero_unless_asked() {
         let galaxy = galaxy();
-        let counts = expected_counts(&galaxy, &sunlike(), LightYears::new(100.0));
+        let radius = LightYears::new(100.0);
+        let counts = expected_counts(&galaxy, &sunlike(), radius, NONE);
         assert_same_bits(counts.get(Layer::BrownDwarf), 0.0);
         assert_same_bits(counts.get(Layer::RoguePlanet), 0.0);
         for spec in STELLAR_LAYERS {
             assert!(counts.get(spec.layer()) > 0.0, "{:?}", spec.layer());
         }
+        let brown = expected_counts(&galaxy, &sunlike(), radius, SubstellarRequest::BrownDwarfs);
+        assert!(brown.get(Layer::BrownDwarf) > 0.0);
+        assert_same_bits(brown.get(Layer::RoguePlanet), 0.0);
+        let every = expected_counts(&galaxy, &sunlike(), radius, EVERY);
+        assert!(every.get(Layer::RoguePlanet) > 0.0);
+        // Asking for a substellar layer moves no other layer's count by a bit.
+        for layer in Layer::ALL {
+            if layer.value() < 5 {
+                assert_same_bits(every.get(layer), counts.get(layer));
+            }
+            if layer != Layer::RoguePlanet {
+                assert_same_bits(every.get(layer), brown.get(layer));
+            }
+        }
     }
+
+    /// The per-node sum of the rogue planets is the linear `Σ share × Iᶜ` where nothing saturates,
+    /// up to the order of the sums; at the Sun no node comes near the saturation density.
+    #[test]
+    fn expected_rogue_planets_are_linear_where_nothing_saturates() {
+        let galaxy = galaxy();
+        let counts = expected_counts(&galaxy, &sunlike(), LightYears::new(50.0), EVERY);
+        let rogue = counts.get(Layer::RoguePlanet);
+        let fields = galaxy.fields();
+        let shares = galaxy.shares();
+        let mut integrals = [0.0; MAX_COMPONENTS];
+        let mut densities = [0.0; MAX_COMPONENTS];
+        for_each_node(&PointLy::from(&sunlike()), 50.0, |point, weight| {
+            fields.densities(point, &mut densities);
+            for (integral, density) in integrals.iter_mut().zip(densities) {
+                *integral += weight * density;
+            }
+        });
+        let linear: f64 = fields
+            .components()
+            .iter()
+            .zip(integrals)
+            .map(|(c, i)| shares.component_share(MassBand::RoguePlanet, c) * i)
+            .sum();
+        assert!(
+            (rogue / linear - 1.0).abs() < 1e-12,
+            "{rogue} against {linear}"
+        );
+        // And the saturated density never exceeds C anywhere: the count is at most C × volume.
+        let at_centre = expected_counts(
+            &galaxy,
+            &GalacticPosition::ORIGIN,
+            LightYears::new(0.5),
+            EVERY,
+        );
+        let volume = 4.0 / 3.0 * core::f64::consts::PI * 0.125;
+        assert!(
+            at_centre.get(Layer::RoguePlanet)
+                <= rogue_planet_saturation_density() * volume * (1.0 + 1e-12)
+        );
+    }
+
+    const NONE: SubstellarRequest = SubstellarRequest::None;
+    const EVERY: SubstellarRequest = SubstellarRequest::BrownDwarfsAndRoguePlanets;
 }

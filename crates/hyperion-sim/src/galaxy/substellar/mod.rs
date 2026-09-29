@@ -11,6 +11,25 @@
 //! the density of interstellar comets and asteroids. Placement and resolution are plan 03's
 //! [`placement`](crate::galaxy::placement), which places the two layers as it places the stars
 //! (Design note 1).
+//!
+//! # What each object carries (P13.T5)
+//!
+//! Both are [`SystemRecord`](crate::galaxy::placement::SystemRecord)s, with an ID, a position, a
+//! population, an age and a mass, and body `0x0000` of each is the object itself
+//! ([`SystemKind`](crate::galaxy::placement::SystemKind)).
+//!
+//! - A **brown dwarf** takes plan 06's stellar stage as a single star:
+//!   [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) draws its
+//!   metallicity, evaluates P06.T13's cooling fits at its age plus the clock time and classifies
+//!   it, with no companion (plan 13's Risks: every object here is single). Deuterium burning, which
+//!   keeps objects above 13 Jupiter masses brighter for their first 10–100 Myr, is not modelled:
+//!   Burrows et al. (2001, §II) describe it in words and model curves, not in closed form (plan 13,
+//!   P13.T5.a).
+//! - A **rogue planet** has its record and its metallicity
+//!   ([`draw_metallicity`](crate::stellar::system::draw_metallicity)) and nothing derived. Its bulk
+//!   properties, atmosphere and moons are plan 14's, which derives it as body `0x0000` with
+//!   [`giant_cooling`](crate::stellar::substellar::giant_cooling) for a giant, and the consoles say
+//!   `BULK PROPERTIES: NOT YET MODELLED` until then (Design note 12).
 
 mod abundance;
 mod mass;

@@ -52,7 +52,7 @@ use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::planetary::derive::{
     DerivedBody, OrbitSense, PlanetClass, hill_radius, roche_limit_fluid, satellite_stability_limit,
 };
-use crate::rng::Stream;
+use crate::rng::{Stream, Threshold};
 use crate::stellar::draws::UnitUniform;
 use crate::units::{
     EarthMasses, GravitationalParameter, Kilograms, KilogramsPerCubicMetre, Metres, Radians,
@@ -113,6 +113,7 @@ pub struct MoonParent {
     density: KilogramsPerCubicMetre,
     class: PlanetClass,
     orbit: KeplerElements,
+    formation_distance: Metres,
     host_mass: Kilograms,
     maximum_moon_mass: EarthMasses,
 }
@@ -150,9 +151,46 @@ impl MoonParent {
             density,
             class: parts.class,
             orbit: parts.orbit,
+            formation_distance: parts.orbit.semi_major_axis(),
             host_mass: parts.host_mass,
             maximum_moon_mass: parts.maximum_moon_mass,
         })
+    }
+
+    /// The same parent, formed at `formation_distance` from its host rather than on its orbit: a
+    /// giant that migrated in (P14.T8's formation distance). Its irregular moons are captured
+    /// there, into its Hill sphere of then, and keep what fits after (ruling 112.4). A distance
+    /// that is not positive and finite leaves the parent formed on its orbit.
+    #[must_use]
+    pub fn with_formation_distance(self, formation_distance: Metres) -> Self {
+        let d = formation_distance.value();
+        if d.is_finite() && d > 0.0 {
+            Self {
+                formation_distance,
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+
+    /// Where the parent formed: its orbit's semi-major axis unless
+    /// [`with_formation_distance`](Self::with_formation_distance) said otherwise.
+    #[must_use]
+    pub const fn formation_distance(&self) -> Metres {
+        self.formation_distance
+    }
+
+    /// The parent's circular Hill radius where it formed, `a_f` (m ÷ 3M)^⅓: the sphere its
+    /// irregular moons were captured into (ruling 112.4).
+    #[must_use]
+    pub fn formation_hill_radius(&self) -> Metres {
+        hill_radius(
+            self.formation_distance,
+            0.0,
+            Kilograms::from(self.mass),
+            self.host_mass,
+        )
     }
 
     /// The parent `derived`, P14.T16.a's derivation of the body `id` at the epoch, a `kind`, on
@@ -317,6 +355,14 @@ impl Error for BuildMoonParentError {}
 #[must_use]
 pub(crate) fn draw_rank(stream: &mut Stream) -> UnitUniform {
     UnitUniform::new(stream.uniform_open()).expect("an open uniform lies strictly between 0 and 1")
+}
+
+/// Whether the next word of `stream` decides for probability `p`: its mark lies below `p`'s
+/// [`Threshold`], plan 01's integer-threshold decision (ruling 112.3). One word, as
+/// [`draw_rank`] takes.
+#[must_use]
+pub(crate) fn decide(stream: &mut Stream, p: f64) -> bool {
+    stream.decide(Threshold::from_probability(p))
 }
 
 /// A value log-uniform between `lo` and `hi` (both positive) at rank `rank`.

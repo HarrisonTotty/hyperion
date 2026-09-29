@@ -18,8 +18,9 @@
 //!   ([`CometaryHalo::comet_rate`]): the halo supplies every long-period comet, new and returning,
 //!   three times those on their first passage ([`CometaryHalo::new_comet_rate`]; ruling 84.5).
 //!   Nothing here makes an event.
-//! - **Evolved hosts.** A host that loses mass loses part of its halo (design note 11):
-//!   [`CometaryHalo::at`].
+//! - **Evolved hosts.** A host that loses mass loses part of its halo (design note 11), and the
+//!   halo is cut again at the system's present bounds, its present strip radius and a third of
+//!   its companion's present pericentre (ruling 112.6): [`CometaryHalo::at`], [`HaloBounds`].
 //!
 //! # Sources, re-checked
 //!
@@ -57,7 +58,10 @@
 //!   1987; [`surviving_fraction`]). A Sun-like star's thermally pulsing AGB, 0.5 M☉ over about
 //!   1 Myr, has Ψ ≈ 3 at 10⁵ au, where it loses Veras et al.'s "up to 20%", and Ψ ≈ 0.1 at 10⁴
 //!   au, inside which nothing is lost. The survivors' orbits widen by M₀ ÷ M, as the planets' do,
-//!   and the halo is cut again at the strip radius. A supernova is the limit of an infinite rate.
+//!   and the halo is cut again at the system's present bounds (ruling 112.6): 0.49 of its present
+//!   sphere of influence, which shrinks as (M ÷ M₀)^⅓ with the system's mass, and a third of its
+//!   wide companion's present pericentre, which a slow loss widens by the pair's M₀ ÷ M
+//!   ([`HaloBounds`]). A supernova is the limit of an infinite rate.
 //!
 //! # Index and draws
 //!
@@ -213,13 +217,68 @@ impl HaloHost {
     }
 }
 
+/// The bounds a system's halo is cut to at a time (P14.T21.d; ruling 112.6): its strip radius,
+/// 0.49 of its sphere of influence, and the pericentre of its nearest wide companion, a third of
+/// which the halo does not pass ([`COMPANION_SHARE`]).
+///
+/// At formation they are the [`HaloHost`]'s. After the system's stars have lost mass, the caller
+/// gives the present ones: the sphere of influence of the present mass, and the companion's
+/// orbit widened by its pair's mass loss.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HaloBounds {
+    strip_radius: Metres,
+    companion: Option<Metres>,
+}
+
+impl HaloBounds {
+    /// Bounds of strip radius `strip_radius`, with the nearest wide companion's pericentre at
+    /// `companion`, if there is one.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, unless the strip radius is positive and the companion's distance not
+    /// negative.
+    #[must_use]
+    pub fn new(strip_radius: Metres, companion: Option<Metres>) -> Self {
+        debug_assert!(strip_radius.value() > 0.0);
+        debug_assert!(companion.is_none_or(|d| d.value() >= 0.0));
+        Self {
+            strip_radius,
+            companion,
+        }
+    }
+
+    /// The strip radius.
+    #[must_use]
+    pub const fn strip_radius(&self) -> Metres {
+        self.strip_radius
+    }
+
+    /// The nearest wide companion's pericentre, if there is one.
+    #[must_use]
+    pub const fn companion(&self) -> Option<Metres> {
+        self.companion
+    }
+
+    /// The farthest a halo reaches inside these bounds: the strip radius, or a third of the
+    /// companion's pericentre where that is nearer.
+    #[must_use]
+    pub fn outer_limit(&self) -> Metres {
+        Metres::new(
+            self.strip_radius.value().min(
+                self.companion
+                    .map_or(f64::INFINITY, |d| d.value() * COMPANION_SHARE),
+            ),
+        )
+    }
+}
+
 /// A system's cometary halo (P14.T21.d): a statistical population in belt slot `0xEF`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CometaryHalo {
     host_mass: SolarMasses,
     inner_edge: Metres,
     outer_edge: Metres,
-    strip_radius: Metres,
     comets: f64,
 }
 
@@ -247,7 +306,7 @@ impl CometaryHalo {
         self.inner_edge
     }
 
-    /// Its outer radius, from the host, as formed: never beyond the strip radius.
+    /// Its outer radius, from the host, as formed: never beyond its [`HaloHost`]'s bounds.
     #[must_use]
     pub const fn outer_edge(&self) -> Metres {
         self.outer_edge
@@ -299,10 +358,11 @@ impl CometaryHalo {
 
     /// The halo about its host once the host's mass is `mass_now`, having lost it at a rate of
     /// `mass_loss_rate` in its fastest phase (the mean rate over a thermally pulsing AGB, the
-    /// mass it shed there over its duration; infinite for a supernova): what survives (design
-    /// note 11, [`surviving_fraction`]), with its radii widened by the mass lost and cut again at
-    /// the strip radius; `None` once nothing of it is left. A host that has lost no mass keeps the
-    /// halo as formed.
+    /// mass it shed there over its duration; infinite for a supernova), in a system whose bounds
+    /// are then `bounds`: what survives (design note 11, [`surviving_fraction`]), with its radii
+    /// widened by the mass lost and cut again at the present bounds (ruling 112.6); `None` once
+    /// nothing of it is left. A host that has lost no mass, in bounds that have not shrunk, keeps
+    /// the halo as formed.
     ///
     /// # Examples
     ///
@@ -312,7 +372,7 @@ impl CometaryHalo {
     /// ```
     /// use hyperion_sim::Seed;
     /// use hyperion_sim::id::SystemId;
-    /// use hyperion_sim::planetary::halo::{HaloHost, Scatterer, halo};
+    /// use hyperion_sim::planetary::halo::{HaloBounds, HaloHost, Scatterer, halo};
     /// use hyperion_sim::units::{AstronomicalUnits, EarthMasses, Metres, SolarMasses, SolarMassesPerYear};
     ///
     /// let strip = Metres::from(AstronomicalUnits::new(1.39e5));
@@ -320,15 +380,23 @@ impl CometaryHalo {
     /// let system = SystemId::from_raw(0x0200_0800_2000_0000)?;
     /// let halo = halo(Seed::new(7), system, &sun, Scatterer::Present).expect("a halo");
     /// let white_dwarf = SolarMasses::new(0.54);
-    /// let agb = halo.at(white_dwarf, SolarMassesPerYear::new(5e-7)).expect("a halo is left");
+    /// // The sphere of influence shrinks as the cube root of the mass.
+    /// let now = HaloBounds::new(strip * hyperion_sim::math::cbrt(0.54), None);
+    /// let agb = halo.at(white_dwarf, SolarMassesPerYear::new(5e-7), now).expect("a halo is left");
     /// assert!(agb.comets() / halo.comets() > 0.95);
     /// assert!(agb.inner_edge() > halo.inner_edge());
-    /// let sudden = halo.at(white_dwarf, SolarMassesPerYear::new(f64::INFINITY)).expect("some left");
+    /// assert!(agb.outer_edge() <= now.strip_radius());
+    /// let sudden = halo.at(white_dwarf, SolarMassesPerYear::new(f64::INFINITY), now).expect("some left");
     /// assert!((0.75..0.85).contains(&(sudden.comets() / halo.comets())));
     /// # Ok::<(), hyperion_sim::id::DecodeSystemIdError>(())
     /// ```
     #[must_use]
-    pub fn at(&self, mass_now: SolarMasses, mass_loss_rate: SolarMassesPerYear) -> Option<HaloAt> {
+    pub fn at(
+        &self,
+        mass_now: SolarMasses,
+        mass_loss_rate: SolarMassesPerYear,
+        bounds: HaloBounds,
+    ) -> Option<HaloAt> {
         let ratio = (mass_now.value() / self.host_mass.value()).min(1.0);
         if ratio <= 0.0 {
             return None;
@@ -344,7 +412,8 @@ impl CometaryHalo {
             return None;
         }
         let inner = self.inner_edge / ratio;
-        let outer = Metres::new((self.outer_edge.value() / ratio).min(self.strip_radius.value()));
+        let outer =
+            Metres::new((self.outer_edge.value() / ratio).min(bounds.outer_limit().value()));
         (outer > inner).then_some(HaloAt {
             inner_edge: inner,
             outer_edge: outer,
@@ -548,12 +617,8 @@ pub fn halo(
     }
     let scale = math::cbrt(host.mass.value()) * METRES_PER_AU;
     let inner = HALO_INNER_RADIUS_AU * scale;
-    let outer = (HALO_OUTER_RADIUS_AU * scale)
-        .min(host.strip_radius.value())
-        .min(
-            host.companion
-                .map_or(f64::INFINITY, |d| d.value() * COMPANION_SHARE),
-        );
+    let formed = HaloBounds::new(host.strip_radius, host.companion);
+    let outer = (HALO_OUTER_RADIUS_AU * scale).min(formed.outer_limit().value());
     if outer <= inner {
         return None;
     }
@@ -564,7 +629,6 @@ pub fn halo(
         host_mass: host.mass,
         inner_edge: Metres::new(inner),
         outer_edge: Metres::new(outer),
-        strip_radius: host.strip_radius,
         comets,
     })
 }
@@ -627,8 +691,14 @@ mod tests {
             assert!(halo.inner_edge() < halo.outer_edge());
             for kept in [0.9, 0.5, 0.2] {
                 let sudden = SolarMassesPerYear::new(f64::INFINITY);
-                if let Some(later) = halo.at(SolarMasses::new(mass * kept), sudden) {
-                    assert!(later.outer_edge() <= strip);
+                // The bounds as a slow loss leaves them: the sphere of influence by the cube
+                // root of the mass kept, the companion's pericentre by its inverse.
+                let now = HaloBounds::new(strip * math::cbrt(kept), companion.map(|d| d / kept));
+                if let Some(later) = halo.at(SolarMasses::new(mass * kept), sudden, now) {
+                    assert!(later.outer_edge() <= now.strip_radius());
+                    if let Some(d) = now.companion() {
+                        assert!(later.outer_edge().value() <= d.value() / 3.0 * (1.0 + 1e-12));
+                    }
                     assert!(later.inner_edge() < later.outer_edge());
                     assert!(later.comets() < halo.comets());
                 }
@@ -745,7 +815,6 @@ mod tests {
             host_mass: SolarMasses::new(1.0),
             inner_edge: au(2_000.0),
             outer_edge: au(100_000.0),
-            strip_radius: au(1.39e5),
             comets: 7.5e11,
         };
         let year = crate::units::consts::SECONDS_PER_JULIAN_YEAR;
@@ -758,6 +827,7 @@ mod tests {
             .at(
                 SolarMasses::new(0.54),
                 SolarMassesPerYear::new(f64::INFINITY),
+                HaloBounds::new(au(1.39e5), None),
             )
             .unwrap();
         assert!(
@@ -793,6 +863,34 @@ mod tests {
         // Ψ at 10⁵ au for the AGB: 5 × 10⁻⁷ × 10^7.5 ÷ 2π = 2.5, near Veras et al.'s 3.0.
         let psi = 5e-7 * math::powf(1e5, 1.5) / (2.0 * PI);
         assert!((psi - 2.5).abs() < 0.1);
+    }
+
+    /// Ruling 112.6: after mass loss the halo is cut again at the present bounds, not the formed
+    /// ones: a Sun whose halo reached 10⁵ au, become a 0.54 M☉ white dwarf, reaches no further
+    /// than its shrunken strip radius, and a companion that has come nearer cuts it at a third of
+    /// its present pericentre. Before the fix only the formed strip radius cut it.
+    #[test]
+    fn the_halo_is_cut_again_at_the_present_bounds() {
+        let formed = halo(SEED, system(9), &sun(1.39e5), Scatterer::Present).unwrap();
+        let white_dwarf = SolarMasses::new(0.54);
+        let agb = SolarMassesPerYear::new(5e-7);
+        let unbounded = HaloBounds::new(au(1e9), None);
+        let wide = formed.at(white_dwarf, agb, unbounded).unwrap();
+        // Widened by M₀ ÷ M: 10⁵ au ÷ 0.54.
+        assert!((wide.outer_edge() / formed.outer_edge() - 1.0 / 0.54).abs() < 1e-12);
+        let strip = au(1.39e5 * math::cbrt(0.54));
+        let cut = formed
+            .at(white_dwarf, agb, HaloBounds::new(strip, None))
+            .unwrap();
+        assert_eq!(cut.outer_edge(), strip);
+        let companion = au(150_000.0);
+        let near = formed
+            .at(white_dwarf, agb, HaloBounds::new(strip, Some(companion)))
+            .unwrap();
+        assert!((near.outer_edge().value() - companion.value() / 3.0).abs() < 1.0);
+        // A companion at 3 × the widened inner edge leaves nothing.
+        let close = HaloBounds::new(strip, Some(wide.inner_edge() * 3.0));
+        assert!(formed.at(white_dwarf, agb, close).is_none());
     }
 
     /// Design note 4: the count's rank is word 0 of the system's `cometary.population` stream.

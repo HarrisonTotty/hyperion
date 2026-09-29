@@ -24,10 +24,13 @@
 //! box and goes to the exact track wherever they could differ (ruling 89.2 as amended by ruling
 //! 90.4).
 //!
-//! P06.T30's `TrackFates`, the galaxy's mean-mass quadrature at one metallicity, is still to
-//! come; it may read [`FittedFates`] at η's median.
+//! [`TrackFates`] (P06.T30.b), the galaxy's mean-mass quadrature's lifetimes and remnants at one
+//! metallicity, reads [`FittedFates`] at η's median where it answers.
 
+use crate::galaxy::fates::{ProvisionalFates, StellarFates};
+use crate::galaxy::imf::MASS_BAND_EDGES;
 use crate::math;
+use crate::rng::Mark;
 use crate::stellar::composition::Z_SOLAR;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use crate::stellar::remnant::RemnantKind;
@@ -41,7 +44,7 @@ use crate::stellar::{Composition, Phase};
 use crate::tables::{
     stellar_fates_high as high, stellar_fates_low as low, stellar_fates_mid as mid,
 };
-use crate::units::{Megayears, SolarMasses, Years};
+use crate::units::{Dex, HeliumExcess, Megayears, SolarMasses, Years};
 
 /// How a star dies, as the fate table records it: the route its death takes, before the remnant
 /// draws decide an iron core's remnant.
@@ -217,12 +220,14 @@ impl FateNode {
     }
 }
 
-/// The draws of a node: η, and every other draw at its median, which leaves the
-/// companion-stripped mark unset.
+/// The draws of a node: η, the companion-stripped mark
+/// [`NEVER_STRIPPED`](crate::galaxy::displaced::binarity::NEVER_STRIPPED), since the table holds
+/// unstripped stars, and every other draw at its median.
 #[must_use]
 pub fn node_draws(eta: StandardNormal) -> StarDraws {
     StarDraws::from_parts(StarDrawsParts {
         eta,
+        stripped: crate::galaxy::displaced::binarity::NEVER_STRIPPED,
         ..StarDrawsParts::MEDIAN
     })
 }
@@ -658,11 +663,251 @@ fn index(k: usize) -> f64 {
 }
 
 /// Whether the companion-stripped mark of `draws` can move the fate of a star of initial mass
-/// `m0`: it is set, and `m0` lies in [`STRIPPED_WINDOW`]. Such a star is not the table's.
+/// `m0` and composition `comp`: it is set, and `m0` lies in [`STRIPPED_WINDOW`]. Such a star is
+/// not the table's.
 #[must_use]
-pub fn stripped_mark_matters(m0: SolarMasses, draws: &StarDraws) -> bool {
-    let m = m0.value();
-    (STRIPPED_WINDOW.0..=STRIPPED_WINDOW.1).contains(&m) && is_companion_stripped(draws)
+pub fn stripped_mark_matters(m0: SolarMasses, comp: &Composition, draws: &StarDraws) -> bool {
+    is_companion_stripped(m0, comp, draws)
+}
+
+/// The number of masses of a [`TrackFates`] table: 96, log-spaced over the stellar range, 0.08–150
+/// M☉, with the mass bands' edges among them (plan 06, P06.T30.b).
+pub const TRACK_FATES_MASSES: usize = 96;
+
+/// The intervals of the [`TrackFates`] grid in each mass band, A to E: the 95 intervals shared out
+/// in proportion to each band's width in ln m (1.833, 0.405, 1.204, 1.163 and 2.931 of 7.536),
+/// rounded, so that every band edge is a node and the spacing is near 0.079 in ln m everywhere.
+const TRACK_FATES_INTERVALS: [usize; 5] = [23, 5, 15, 15, 37];
+
+const _: () = assert!(
+    TRACK_FATES_INTERVALS[0]
+        + TRACK_FATES_INTERVALS[1]
+        + TRACK_FATES_INTERVALS[2]
+        + TRACK_FATES_INTERVALS[3]
+        + TRACK_FATES_INTERVALS[4]
+        + 1
+        == TRACK_FATES_MASSES,
+    "the bands' intervals make the grid"
+);
+
+/// The nodes of the remnant draws' quadrature in each of the type and fallback marks: 8, at the
+/// midpoints of eight equal shares of the marks, (2k + 1) ÷ 16 of 2⁵³ (plan 06, P06.T30.b; design
+/// note 2 of T2 builds them as marks).
+pub const REMNANT_QUADRATURE_NODES: u32 = 8;
+
+/// The masses of the [`TrackFates`] grid, M☉, ascending: [`TRACK_FATES_MASSES`] of them, log-spaced
+/// within each mass band ([`MASS_BAND_EDGES`](crate::galaxy::imf::MASS_BAND_EDGES)), the edges
+/// exact.
+///
+/// # Panics
+///
+/// Never: each band's interval count is a few dozen.
+#[must_use]
+pub fn track_fates_grid() -> Vec<f64> {
+    let edges = MASS_BAND_EDGES;
+    let mut grid = Vec::with_capacity(TRACK_FATES_MASSES);
+    grid.push(edges[0]);
+    for (band, &intervals) in TRACK_FATES_INTERVALS.iter().enumerate() {
+        let (lo, hi) = (math::ln(edges[band]), math::ln(edges[band + 1]));
+        let n = f64::from(u32::try_from(intervals).expect("a few dozen intervals"));
+        for i in 1..intervals {
+            let t = f64::from(u32::try_from(i).expect("a few dozen intervals")) / n;
+            grid.push(math::exp(lo + (hi - lo) * t));
+        }
+        grid.push(edges[band + 1]);
+    }
+    grid
+}
+
+/// The mean remnant mass, M☉, of an iron core of carbon–oxygen core `co` and helium core `helium`,
+/// over the remnant type and fallback marks by [`REMNANT_QUADRATURE_NODES`] midpoint nodes in each,
+/// the mass's normal at its median (plan 06, P06.T30.b).
+#[must_use]
+fn mean_iron_core_remnant(co: f64, helium: f64) -> f64 {
+    let helium = helium.max(0.0);
+    let co = co.clamp(0.0, helium);
+    let n = REMNANT_QUADRATURE_NODES;
+    let mark = |k: u32| {
+        // (2k + 1) ÷ 2n of 2⁵³ marks, as a word's top 53 bits.
+        let share = (2 * u64::from(k) + 1) << (53 - 1 - n.trailing_zeros());
+        Mark::from_word(share << 11)
+    };
+    let mut sum = 0.0;
+    for t in 0..n {
+        for f in 0..n {
+            let draws = RemnantDraws::from_parts(mark(t), mark(f), StandardNormal::ZERO);
+            sum += core_collapse(SolarMasses::new(co), SolarMasses::new(helium), draws)
+                .remnant()
+                .mass()
+                .value();
+        }
+    }
+    sum / f64::from(n * n)
+}
+
+/// The lifetime, years, the mean remnant mass, M☉, and the remnant's mass if it is a white dwarf
+/// (0 for a neutron star, a black hole or nothing), M☉, of an unstripped star of initial mass `m0` and
+/// composition `comp` at the median draws: the fate table's ([`FittedFates::fate_fitted`]) where
+/// it answers, else one [`FateNode::of`], a full track. Below the tracks' lightest mass the star is
+/// taken at [`MIN_INITIAL_MASS`](crate::stellar::sse::MIN_INITIAL_MASS), whose lifetime is far
+/// longer than the universe's age.
+#[must_use]
+fn node_fate(m0: f64, comp: &Composition) -> (f64, f64, f64) {
+    let m0 = SolarMasses::new(m0.max(crate::stellar::sse::MIN_INITIAL_MASS.value()));
+    let eta = StandardNormal::ZERO;
+    let (route, death_age, a, b) =
+        if let Some(fate) = FittedFates::generator().fate_fitted(m0, comp, eta) {
+            (fate.route, fate.death_age.value(), fate.a, fate.b)
+        } else {
+            let node = FateNode::of(m0, comp, eta);
+            (node.route, math::exp10(node.log_death_age), node.a, node.b)
+        };
+    let (remnant, white_dwarf) = match route {
+        FateRoute::HeliumWhiteDwarf
+        | FateRoute::CarbonOxygenWhiteDwarf
+        | FateRoute::OxygenNeonWhiteDwarf
+        | FateRoute::BridgedCarbonOxygenWhiteDwarf
+        | FateRoute::BridgedOxygenNeonWhiteDwarf => (a, a),
+        FateRoute::ElectronCapture => (electron_capture_remnant().mass().value(), 0.0),
+        FateRoute::IronCore => (mean_iron_core_remnant(a, b), 0.0),
+        FateRoute::NoRemnant => (0.0, 0.0),
+    };
+    (death_age, remnant, white_dwarf)
+}
+
+/// Real lifetimes and remnant masses at one metallicity, for the galaxy's mean mass per system
+/// (plan 06, P06.T30.b): plan 02's [`StellarFates`](crate::galaxy::fates::StellarFates) from the
+/// generator's own tracks.
+///
+/// A star of initial mass m lives to its track's death at the median draws, and leaves the mean of
+/// its remnant over the remnant type and fallback marks ([`REMNANT_QUADRATURE_NODES`] nodes each,
+/// the other draws at their medians). Both are tabulated once at the [`TRACK_FATES_MASSES`]
+/// masses of [`track_fates_grid`] and interpolated linearly in ln m, the lifetime's logarithm and
+/// the remnant's mass. The lifetime is held non-increasing in mass (each node at most the one
+/// below it), as the quadrature asks. The nodes are the fate table's at η's median where it
+/// answers ([`FittedFates::fate_fitted`], within its validated error of the track) and a full track
+/// ([`FateNode::of`]) where it does not, below 0.741 M☉ and in its unusable cells.
+///
+/// Every interior node is a kink of the interpolant, so [`breaks`](StellarFates::breaks) lists
+/// them all, and plan 02's quadrature takes each as a panel edge. Companions are
+/// [`ProvisionalFates`](crate::galaxy::fates::ProvisionalFates)'; P11.T1.d's
+/// [`MultiplicityFates`](crate::stellar::multiplicity::MultiplicityFates) wraps this with plan 11's.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::fates::StellarFates;
+/// use hyperion_sim::stellar::fates::TrackFates;
+/// use hyperion_sim::units::Dex;
+///
+/// let solar = TrackFates::at(Dex::new(0.0));
+/// // The Sun lives about 10 Gyr on its tracks and leaves a white dwarf of about 0.5 M☉.
+/// let t = solar.lifetime(1.0).value() / 1e9;
+/// assert!((8.0..13.0).contains(&t), "{t} Gyr");
+/// assert!((0.45..0.65).contains(&solar.remnant_mass(1.0)));
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackFates {
+    fe_h: Dex,
+    /// ln m of each node.
+    ln_masses: Vec<f64>,
+    /// log₁₀ of each node's lifetime, years, non-increasing.
+    log_lifetimes: Vec<f64>,
+    /// Each node's mean remnant mass, M☉.
+    remnants: Vec<f64>,
+    /// Each node's remnant mass if it is a white dwarf, else 0, M☉.
+    white_dwarfs: Vec<f64>,
+    /// The interior nodes' masses, M☉.
+    breaks: Vec<f64>,
+}
+
+impl TrackFates {
+    /// The table at \[Fe/H\] `fe_h`, with no helium excess: [`TRACK_FATES_MASSES`] fates, some
+    /// tens of milliseconds where the fate table does not answer.
+    #[must_use]
+    pub fn at(fe_h: Dex) -> Self {
+        let comp = Composition::from_fe_h(fe_h, HeliumExcess::ZERO);
+        let grid = track_fates_grid();
+        let mut log_lifetimes = Vec::with_capacity(grid.len());
+        let mut remnants = Vec::with_capacity(grid.len());
+        let mut white_dwarfs = Vec::with_capacity(grid.len());
+        let mut longest = f64::INFINITY;
+        for &m in &grid {
+            let (lifetime, remnant, white_dwarf) = node_fate(m, &comp);
+            longest = longest.min(math::log10(lifetime));
+            log_lifetimes.push(longest);
+            remnants.push(remnant);
+            white_dwarfs.push(white_dwarf);
+        }
+        // The interpolant's kinks, and the provisional companions' bin edges.
+        let mut breaks: Vec<f64> = grid[1..grid.len() - 1]
+            .iter()
+            .chain(ProvisionalFates.breaks())
+            .copied()
+            .collect();
+        breaks.sort_by(f64::total_cmp);
+        breaks.dedup();
+        Self {
+            fe_h,
+            ln_masses: grid.iter().map(|&m| math::ln(m)).collect(),
+            log_lifetimes,
+            remnants,
+            white_dwarfs,
+            breaks,
+        }
+    }
+
+    /// The table's \[Fe/H\].
+    #[must_use]
+    pub fn fe_h(&self) -> Dex {
+        self.fe_h
+    }
+
+    /// The mass, M☉, of the remnant a star of `m` M☉ leaves if it is a white dwarf, and 0 for a
+    /// neutron star, a black hole or nothing: what a census of stars and white dwarfs holds of it
+    /// once it dies (ruling 138.4), interpolated as [`remnant_mass`](StellarFates::remnant_mass) is.
+    #[must_use]
+    pub fn white_dwarf_mass(&self, m: f64) -> f64 {
+        self.interpolate(&self.white_dwarfs, m)
+    }
+
+    /// The segment holding `m` M☉ (clamped to the grid) and the weight of its upper node.
+    #[must_use]
+    fn segment(&self, m: f64) -> (usize, f64) {
+        let last = self.ln_masses.len() - 1;
+        let x = math::ln(m).clamp(self.ln_masses[0], self.ln_masses[last]);
+        let upper = self
+            .ln_masses
+            .partition_point(|&node| node <= x)
+            .clamp(1, last);
+        let (lo, hi) = (self.ln_masses[upper - 1], self.ln_masses[upper]);
+        (upper - 1, (x - lo) / (hi - lo))
+    }
+
+    /// `values` interpolated at `m` M☉.
+    #[must_use]
+    fn interpolate(&self, values: &[f64], m: f64) -> f64 {
+        let (i, t) = self.segment(m);
+        values[i] + t * (values[i + 1] - values[i])
+    }
+}
+
+impl StellarFates for TrackFates {
+    fn lifetime(&self, m: f64) -> Years {
+        Years::new(math::exp10(self.interpolate(&self.log_lifetimes, m)))
+    }
+
+    fn remnant_mass(&self, m: f64) -> f64 {
+        self.interpolate(&self.remnants, m)
+    }
+
+    fn mean_companions(&self, m: f64) -> f64 {
+        ProvisionalFates.mean_companions(m)
+    }
+
+    fn breaks(&self) -> &[f64] {
+        &self.breaks
+    }
 }
 
 #[cfg(test)]
@@ -683,6 +928,74 @@ mod tests {
         )
     }
 
+    /// P06.T30.b: the grid has 96 masses, log-spaced within each band with the bands' edges
+    /// among them.
+    #[test]
+    fn the_track_fates_grid_holds_the_band_edges() {
+        let grid = track_fates_grid();
+        assert_eq!(grid.len(), TRACK_FATES_MASSES);
+        for edge in MASS_BAND_EDGES {
+            assert!(grid.iter().any(|&m| m.total_cmp(&edge).is_eq()), "{edge}");
+        }
+        for pair in grid.windows(2) {
+            let step = math::ln(pair[1] / pair[0]);
+            assert!((0.07..0.09).contains(&step), "{step} at {pair:?}");
+        }
+    }
+
+    /// P06.T30.b: at masses between the nodes the table is within a few per cent of full tracks,
+    /// its lifetime never rises with mass, and its remnants are those the tracks leave.
+    #[test]
+    fn track_fates_follow_the_tracks() {
+        use crate::stellar::sse::Track;
+        for fe_h in [0.0, -1.2] {
+            let fates = TrackFates::at(Dex::new(fe_h));
+            let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+            for m in [0.9, 1.3, 2.2, 4.0, 6.5] {
+                let track = Track::full(SolarMasses::new(m), &comp, &StarDraws::median());
+                let t = track.lifetime().unwrap().value();
+                let ours = fates.lifetime(m).value();
+                assert!(
+                    (ours / t - 1.0).abs() < 0.03,
+                    "[Fe/H] {fe_h}, {m} M☉: {ours} against {t}"
+                );
+                let remnant = track.remnant().unwrap().mass().value();
+                let mine = fates.remnant_mass(m);
+                assert!(
+                    (mine - remnant).abs() < 0.03,
+                    "{m} M☉: {mine} against {remnant}"
+                );
+            }
+            let mut previous = f64::INFINITY;
+            for k in 0..=2_000 {
+                let m = 0.08 * math::exp(f64::from(k) / 2_000.0 * math::ln(150.0 / 0.08));
+                let t = fates.lifetime(m).value();
+                assert!(t <= previous, "the lifetime rises at {m} M☉");
+                previous = t;
+                assert!((0.0..=60.0).contains(&fates.remnant_mass(m)), "{m}");
+            }
+            assert!(fates.breaks().windows(2).all(|p| p[0] < p[1]));
+        }
+    }
+
+    /// The remnant quadrature's marks are the midpoints of eight shares, and a core that always
+    /// leaves one kind of remnant gives that remnant's mass.
+    #[test]
+    fn the_remnant_quadrature_integrates_the_marks() {
+        let low = mean_iron_core_remnant(1.0, 3.0);
+        let expected = core_collapse(
+            SolarMasses::new(1.0),
+            SolarMasses::new(3.0),
+            RemnantDraws::from_parts(Mark::from_word(0), Mark::from_word(0), StandardNormal::ZERO),
+        )
+        .remnant()
+        .mass()
+        .value();
+        assert!((low - expected).abs() < 1e-12, "{low} against {expected}");
+        let heavy = mean_iron_core_remnant(20.0, 30.0);
+        assert!(heavy > 10.0, "{heavy}");
+    }
+
     #[test]
     fn route_codes_round_trip() {
         for code in 0..8 {
@@ -696,7 +1009,12 @@ mod tests {
     /// A node's draws leave the stripped mark unset, so a node is an unstripped star's fate.
     #[test]
     fn a_nodes_draws_are_unstripped() {
-        assert!(!is_companion_stripped(&node_draws(StandardNormal::ZERO)));
+        let at = SolarMasses::new(8.0);
+        assert!(!is_companion_stripped(
+            at,
+            &Composition::SOLAR,
+            &node_draws(StandardNormal::ZERO)
+        ));
     }
 
     /// The mark moves no fate outside [`STRIPPED_WINDOW`], so a stripped star there is the
@@ -729,7 +1047,12 @@ mod tests {
                 eta,
                 ..stripped_parts.clone()
             });
-            assert!(is_companion_stripped(&stripped));
+            assert!(crate::galaxy::displaced::binarity::is_stripped(
+                stripped.stripped(),
+                m,
+                &comp
+            ));
+            assert!(!is_companion_stripped(m, &comp, &stripped));
             let a = Track::full(m, &comp, &stripped);
             let b = Track::full(m, &comp, &node_draws(eta));
             assert_eq!(a.fate_record(), b.fate_record(), "{m:?} {comp:?}");

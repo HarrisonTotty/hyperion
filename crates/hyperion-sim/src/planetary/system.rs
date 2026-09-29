@@ -82,6 +82,8 @@
 //! words 1–7 are reserved ([`RADIUS_WORDS`]). A planet and a moon read it; a belt member reads its
 //! rank on `belt.member`. Every other draw is its stage's.
 
+use core::f64::consts::TAU;
+
 use crate::Seed;
 use crate::coords::SystemPosition;
 use crate::id::{BodyId, SystemId};
@@ -91,7 +93,7 @@ use crate::planetary::architecture::{
     ArchitectureClass, ClassConstraints, ZoneLimit, class_weights, draw_class,
 };
 use crate::planetary::belts::{
-    Belt, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
+    Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::VolatileDraws;
@@ -102,24 +104,31 @@ use crate::planetary::derive::{
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::error::ResolveBodyError;
 use crate::planetary::fate::{BodyFate, BodyState, FateBody, FateHost, ScatterDraws};
-use crate::planetary::halo::{CometaryHalo, HaloHost, Scatterer, halo};
-use crate::planetary::hosts::evolved::Circularisation;
+use crate::planetary::halo::{
+    ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
+};
+use crate::planetary::hosts::evolved::{Circularisation, EccentricityFloor};
 use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
+use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::regular::{
     MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonNursery, MoonSky, derive_moon,
 };
-use crate::planetary::moons::{BeltAdjacency, MoonParent, NearestBelt, ParentKind};
-use crate::planetary::params::SPACING_GIANT_MASS;
+use crate::planetary::moons::{
+    BeltAdjacency, MoonParent, MoonParentParts, NearestBelt, ParentKind,
+};
+use crate::planetary::params::{GIANT_LOVE_NUMBER, ROCKY_LOVE_NUMBER, SPACING_GIANT_MASS};
 use crate::planetary::placement::classes::orbits::{HostPlane, SystemPlane, host_plane};
+use crate::planetary::placement::classes::secular::{
+    SecularPlanet, resonant_forced, surviving_mode,
+};
 use crate::planetary::placement::classes::tides::{
     GIANT_TIDAL_Q_PRIME, ROCKY_TIDAL_Q_PRIME, circularisation_time,
 };
 use crate::planetary::placement::zones::CLOSE_BINARY_SEMI_MAJOR_AXIS;
 use crate::planetary::placement::{
-    Neighbour, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs, core_fallback,
-    place,
+    Neighbour, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs, place,
 };
 use crate::planetary::record::{
     BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord,
@@ -133,7 +142,7 @@ use crate::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use crate::stellar::system::StarModel;
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, Span, UniverseTime};
-use crate::units::consts::{GM_EARTH, SECONDS_PER_JULIAN_YEAR};
+use crate::units::consts::{GM_EARTH, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{
     EarthMasses, EarthRadii, GravitationalParameter, Kilograms, KilogramsPerCubicMetre, Megayears,
     Metres, MetresPerSecondSquared, Radians, SolarLuminosities, SolarMasses, SolarMassesPerYear,
@@ -224,7 +233,8 @@ impl PlanetaryHost {
     }
 
     /// Its class as placed: the drawn one, or its giant-free sibling where the disc grows no
-    /// giant's core in time (D5's second fallback), or `Barren` without a disc.
+    /// giant's core in time (D5's second fallback), or `Barren` without a disc or where nothing
+    /// was placed (ruling 112.8).
     #[must_use]
     pub const fn class(&self) -> ArchitectureClass {
         self.class
@@ -304,13 +314,15 @@ struct MemberPart {
 
 impl Body {
     /// The planet `placed` of the host `zone` of `system`, in the universe of `seed`, whose disc
-    /// lives `disc_lifetime`: its radius rank, its formation and its circularisation.
+    /// lives `disc_lifetime`, circularising as `circularisation` says: its radius rank, its
+    /// formation and its circularisation.
     #[must_use]
     fn planet(
         seed: Seed,
         system: SystemId,
         zone: &OrbitZone,
         placed: PlacedPlanet,
+        circularisation: Circularisation,
         disc_lifetime: Megayears,
     ) -> Self {
         let id = placed.index().body_id(system);
@@ -325,7 +337,7 @@ impl Body {
             sphere_density(mass, radius),
         )
         .expect("a placed planet's mass and its density are positive")
-        .with_circularisation(circularisation(&placed, zone.host_mass(), radius))
+        .with_circularisation(circularisation)
         .with_scatter_draws(ScatterDraws::Stream { seed, body: id });
         Self {
             index: placed.index(),
@@ -556,26 +568,156 @@ fn primordial_radius(mass: EarthMasses) -> Metres {
     Metres::from(radius_chen_kipping(mass, UnitUniform::HALF))
 }
 
-/// The circularisation of `planet`, of radius `radius`, about a host of initial mass `host`:
-/// P14.T8.e's damping time at its primordial orbit, with a giant's modified tidal quality factor
-/// from [`SPACING_GIANT_MASS`] (design note 7's giant) and a rocky planet's below (ruling 62.5).
+/// The bulk of `body` if it is an icy belt's member, derived as `derived` (ruling 112.8): ruling
+/// 83.7's rock-and-ice model, which the icy moons take, in place of Chen and Kipping's radius
+/// lottery, whose small bodies are rock and iron wherever they formed. Its ice fraction is
+/// [`ICY_MOON_ICE_FRACTION`]'s 0.35–0.50 at its radius rank and its radius [`moon_radius`]'s; its
+/// temperatures are the derivation's. `None` for anything else, a rocky belt's members included,
+/// which stay dry.
 #[must_use]
-fn circularisation(planet: &PlacedPlanet, host: SolarMasses, radius: Metres) -> Circularisation {
-    let q_prime = if planet.mass() >= EarthMasses::from(SPACING_GIANT_MASS) {
-        GIANT_TIDAL_Q_PRIME
-    } else {
-        ROCKY_TIDAL_Q_PRIME
+fn icy_member_bulk(body: &Body, derived: &DerivedBody) -> Option<BulkProperties> {
+    let Part::Member(member) = &body.part else {
+        return None;
     };
-    let orbit = planet.orbit();
-    let tau = circularisation_time(
-        planet.mass(),
-        radius,
-        host,
-        orbit.semi_major_axis(),
-        orbit.period(),
-        q_prime,
-    );
-    Circularisation::new(tau).expect("a damping time of positive quantities is positive")
+    if member.member.composition() != BeltComposition::Icy {
+        return None;
+    }
+    let (lo, hi) = ICY_MOON_ICE_FRACTION;
+    let ice = lo + member.member.radius_rank().value() * (hi - lo);
+    let mass = derived.mass();
+    let radius = moon_radius(mass, ice);
+    let fractions = MassFractions::solid(0.0, 1.0 - ice, ice);
+    let r = radius.value();
+    let volume = 4.0 / 3.0 * core::f64::consts::PI * r * r * r;
+    Some(BulkProperties::new(
+        EarthRadii::from(radius),
+        KilogramsPerCubicMetre::new(Kilograms::from(mass).value() / volume),
+        MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r)),
+        PlanetClass::of(mass, &fractions),
+        fractions,
+        derived.equilibrium_temperature(),
+    ))
+}
+
+/// The circularisations of a host's planets `planets`, in slot order, about a host of initial
+/// mass `host` in a system aged `age` at the epoch (P14.T8.e; ruling 133.1).
+///
+/// Each planet damps on P14.T8.e's time at its primordial orbit, with Chen and Kipping's median
+/// radius and a giant's modified tidal quality factor from [`SPACING_GIANT_MASS`] (design note 7's
+/// giant) and a rocky planet's below (ruling 62.5). It stops at its floor:
+///
+/// - **Secular:** of every sibling k, the pair's surviving mode ([`surviving_mode`], the planet's
+///   Love number `k₂` from the same giant boundary) gives ρ; the dominant neighbour is the one of
+///   the largest ρ `e_k`, `e_k` its primordial eccentricity decayed by its own tides to the epoch,
+///   which only primordial values fix, so the choice does not depend on order. The floor is
+///   ρ `e_k0` at formation and decays with the mode at γ = 1/`τ_k` + Σ `s_j`/`τ_j` over the planets
+///   k anchors, whose drain k's own eccentricity also takes.
+/// - **Resonant:** a pair the placer snapped to a first-order commensurability holds its
+///   near-resonant forced eccentricities ([`resonant_forced`]) for good, the inner planet taken as
+///   the nearest inside the outer one.
+#[must_use]
+pub(crate) fn host_circularisations(
+    planets: &[PlacedPlanet],
+    host: SolarMasses,
+    age: Years,
+) -> Vec<Circularisation> {
+    let giant = |p: &PlacedPlanet| p.mass() >= EarthMasses::from(SPACING_GIANT_MASS);
+    let taus: Vec<Years> = planets
+        .iter()
+        .map(|p| {
+            let q_prime = if giant(p) {
+                GIANT_TIDAL_Q_PRIME
+            } else {
+                ROCKY_TIDAL_Q_PRIME
+            };
+            let orbit = p.orbit();
+            circularisation_time(
+                p.mass(),
+                primordial_radius(p.mass()),
+                host,
+                orbit.semi_major_axis(),
+                orbit.period(),
+                q_prime,
+            )
+        })
+        .collect();
+    let secular: Vec<SecularPlanet> = planets
+        .iter()
+        .map(|p| {
+            let love = if giant(p) {
+                GIANT_LOVE_NUMBER
+            } else {
+                ROCKY_LOVE_NUMBER
+            };
+            SecularPlanet::new(
+                p.mass(),
+                p.orbit().semi_major_axis(),
+                primordial_radius(p.mass()),
+                love,
+            )
+        })
+        .collect();
+    let e0 = |k: usize| planets[k].orbit().eccentricity().value();
+    let at_epoch = age.value().max(0.0);
+    // Each planet's dominant neighbour: (its position, ρ, the planet's share of the mode).
+    let dominant: Vec<Option<(usize, f64, f64)>> = (0..planets.len())
+        .map(|j| {
+            let mut best: Option<(usize, f64, f64, f64)> = None;
+            for k in (0..planets.len()).filter(|&k| k != j) {
+                let Some(mode) = surviving_mode(host, &secular[j], &secular[k]) else {
+                    continue;
+                };
+                let now = mode.ratio() * e0(k) * math::exp(-at_epoch / taus[k].value());
+                if best.is_none_or(|(.., held)| now > held) {
+                    best = Some((k, mode.ratio(), mode.share(), now));
+                }
+            }
+            best.map(|(k, ratio, share, _)| (k, ratio, share))
+        })
+        .collect();
+    let mut drains = vec![0.0; planets.len()];
+    for (j, found) in dominant.iter().enumerate() {
+        if let Some((k, _, share)) = *found {
+            drains[k] += share / taus[j].value();
+        }
+    }
+    let mut resonant = vec![0.0_f64; planets.len()];
+    let mut order: Vec<usize> = (0..planets.len()).collect();
+    order.sort_by(|&x, &y| {
+        planets[x]
+            .orbit()
+            .semi_major_axis()
+            .value()
+            .total_cmp(&planets[y].orbit().semi_major_axis().value())
+    });
+    for pair in order.windows(2) {
+        let (i, o) = (pair[0], pair[1]);
+        let Some(resonance) = planets[o].resonance() else {
+            continue;
+        };
+        let body = |k: usize| (planets[k].mass(), planets[k].orbit().semi_major_axis());
+        if let Some((inner, outer)) = resonant_forced(
+            host,
+            body(i),
+            body(o),
+            resonance.commensurability(),
+            resonance.offset(),
+        ) {
+            resonant[i] = resonant[i].max(inner);
+            resonant[o] = resonant[o].max(outer);
+        }
+    }
+    (0..planets.len())
+        .map(|j| {
+            let (secular_floor, decay) = dominant[j].map_or((0.0, 0.0), |(k, ratio, _)| {
+                (ratio * e0(k), 1.0 / taus[k].value() + drains[k])
+            });
+            Circularisation::new(taus[j])
+                .expect("a damping time of positive quantities is positive")
+                .with_floor(EccentricityFloor::new(secular_floor, decay, resonant[j]))
+                .with_drain(drains[j])
+        })
+        .collect()
 }
 
 /// A system's planetary bodies as they were born, per orbit host (plan 14's `PlanetarySystem`,
@@ -634,6 +776,9 @@ pub struct PlanetarySystem {
 struct SystemHalo {
     halo: CometaryHalo,
     host: OrbitHost,
+    /// The nearest wide companion's orbit, as its pair was born: the pair's components, a bit per
+    /// body index, and the orbit's pericentre (ruling 112.6).
+    companion: Option<(u32, KeplerElements)>,
 }
 
 /// The system of `ctx` in the universe of `seed`, whole (P14.T30.a): its planets
@@ -777,23 +922,21 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         let drawn = draw_class(seed, id, zone.host_number(), &weights, &constraints);
         let plane = plane_of(hierarchy, &under, zone);
         let class = if slot > LAST_PLANET_SLOT {
-            // Every primordial slot is taken: the host keeps its disc and class and places
-            // nothing, rather than spilling into the second-generation block.
-            if disc.profile().is_some() {
-                core_fallback(drawn, &disc, reach).0
-            } else {
-                ArchitectureClass::Barren
-            }
+            // Every primordial slot is taken: the host keeps its disc and places nothing, rather
+            // than spilling into the second-generation block, and its placed class says so
+            // (ruling 112.8).
+            ArchitectureClass::Barren
         } else {
             let host = PlacementHost::new(zone.host_number(), *inputs.host(), plane);
             let placement = place(seed, id, &host, limits, &disc, drawn, slot);
             slot = placement.next_slot();
-            bodies.extend(
-                placement
-                    .planets()
-                    .iter()
-                    .map(|&planet| Body::planet(seed, id, zone, planet, inputs.lifetime())),
-            );
+            let circularisations =
+                host_circularisations(placement.planets(), zone.host_mass(), ctx.age_at_epoch());
+            bodies.extend(placement.planets().iter().zip(circularisations).map(
+                |(&planet, circularisation)| {
+                    Body::planet(seed, id, zone, planet, circularisation, inputs.lifetime())
+                },
+            ));
             placement.class()
         };
         hosts.push(PlanetaryHost {
@@ -859,14 +1002,33 @@ fn parent_at_epoch(
     let hosts = BodyHosts::new(host_mass, *ctx.composition(), &orbited, &companions).ok()?;
     let derived = derive_body(&placed, &hosts, profile, ctx.age_at_epoch(), t).ok()?;
     let id = body.index.body_id(ctx.id());
-    let parent = MoonParent::from_derived(id, kind, &derived, *placed.orbit(), host_mass).ok()?;
+    let parent = match icy_member_bulk(body, &derived) {
+        // Ruling 112.8: an icy belt's member is its moons' parent as rock and ice.
+        Some(bulk) => MoonParent::new(MoonParentParts {
+            id,
+            kind,
+            mass: derived.mass(),
+            radius: Metres::from(bulk.radius()),
+            class: bulk.class(),
+            orbit: *placed.orbit(),
+            host_mass,
+            maximum_moon_mass: derived.maximum_moon_mass(),
+        }),
+        None => MoonParent::from_derived(id, kind, &derived, *placed.orbit(), host_mass),
+    }
+    .ok()?
+    // Ruling 112.4: a migrated giant captured its irregulars where it formed.
+    .with_formation_distance(placed.formation_distance());
     let rings = match kind {
         ParentKind::Planet => RingParent::new(
             body.index,
             derived.class(),
             Kilograms::from(derived.mass()),
             Metres::from(derived.radius()),
-            derived.equilibrium_temperature(),
+            derived
+                .effective_temperature()
+                .unwrap_or_else(|| derived.equilibrium_temperature()),
+            derived.flux(),
         )
         .ok(),
         ParentKind::DwarfPlanet => None,
@@ -931,17 +1093,101 @@ fn system_halo(
             below & members == members && below != members
         })
         .min_by_key(|(node, _)| under[usize::from(node.get())].count_ones())
-        .map(|(_, orbit)| orbit.periapsis());
+        .map(|(node, orbit)| (under[usize::from(node.get())], *orbit));
     let halo_host = HaloHost::new(
         zone.host_mass(),
         host.disc.solid_mass(),
         ctx.strip_radius(),
-        companion,
+        companion.map(|(_, orbit)| orbit.periapsis()),
     );
     halo(seed, system.system, &halo_host, scatterer).map(|halo| SystemHalo {
         halo,
         host: zone.host(),
+        companion,
     })
+}
+
+/// The bounds of `halo`, the halo of the system of `ctx`, at `t` (rulings 112.6 and 133.4): 0.49
+/// of the sphere of influence of the system's present mass, the tidal radius scaling as the cube
+/// root of the mass, and the nearest wide companion's present pericentre. A star with no state at
+/// `t` counts at its initial mass.
+///
+/// The companion's pericentre is q₀ (M₀/M)^(1−w) of its pair's masses, w = clamp(log(Ψ/0.1) ÷
+/// log 30, 0, 1) the regime weight ruling 84.4 gives the halo (ours), Ψ Veras et al.'s (2011,
+/// eq. 15) index of the pair's own orbit at its stars' fastest mass-loss rate: exact when the loss
+/// is adiabatic (the orbit widens by M₀/M, their eq. 18) and the lower bound when it is impulsive
+/// (the pericentre never shrinks, their eq. 21). A supernova in the pair unbinds it when the mass
+/// left, M/M₀, falls below r ÷ 2a at the explosion (their eq. 39), r from the orbit's phase then;
+/// the pair then cuts nothing. The orbit is the hierarchy's primordial one, and kicks are plan
+/// 11's.
+#[must_use]
+fn present_halo_bounds(ctx: &SystemContext, halo: &SystemHalo, t: UniverseTime) -> HaloBounds {
+    let stars = ctx.stars();
+    let members = |bits: u32| {
+        stars
+            .iter()
+            .zip(0_u32..32)
+            .filter(move |&(_, i)| bits & (1 << i) != 0)
+            .map(|(star, _)| star)
+    };
+    let mass_of = |bits: u32| {
+        members(bits).fold((0.0, 0.0), |(initial, now), star| {
+            let m0 = star.initial_mass().value();
+            let m = star.state_at(t).map_or(m0, |state| state.mass().value());
+            (initial + m0, now + m)
+        })
+    };
+    let (initial, now) = mass_of(u32::MAX);
+    let strip = if initial > 0.0 && now > 0.0 && now < initial {
+        ctx.strip_radius() * math::cbrt(now / initial)
+    } else {
+        ctx.strip_radius()
+    };
+    let companion = halo.companion.and_then(|(pair, orbit)| {
+        let (initial, now) = mass_of(pair);
+        let pericentre = orbit.periapsis();
+        if !(now > 0.0 && now < initial) {
+            return Some(pericentre);
+        }
+        let kept = now / initial;
+        let a = orbit.semi_major_axis();
+        let explosions: Vec<UniverseTime> = members(pair)
+            .filter_map(|star| {
+                let death = star.death()?;
+                let age_now = star.age_at(t).value();
+                (death.kind().is_sudden() && death.age().value() <= age_now)
+                    .then(|| time_at_age(death.age(), star.age_at_epoch()))
+                    .flatten()
+            })
+            .collect();
+        if !explosions.is_empty() {
+            let unbound = explosions.iter().any(|&at| {
+                let r = orbit.relative_state_at(at).0.length();
+                kept < r.value() / (2.0 * a.value())
+            });
+            return (!unbound).then_some(pericentre);
+        }
+        let rate = members(pair)
+            .map(|star| fastest_mass_loss_rate(star, t).value())
+            .fold(0.0, f64::max);
+        let a_au = a.value() / METRES_PER_AU;
+        let psi = rate * math::powf(a_au, 1.5) * math::powf(initial, -1.5) / TAU;
+        Some(present_pericentre(pericentre, kept, psi))
+    });
+    HaloBounds::new(strip, companion)
+}
+
+/// A companion's pericentre `pericentre` after its pair kept `kept` of its mass at Veras et al.'s
+/// index `psi` (ruling 133.4): q₀ (M₀/M)^(1−w), w = clamp(log(Ψ/0.1) ÷ log 30, 0, 1).
+#[must_use]
+fn present_pericentre(pericentre: Metres, kept: f64, psi: f64) -> Metres {
+    let w = if psi > 0.0 {
+        (math::ln(psi / ADIABATIC_INDEX_LIMIT) / math::ln(RUNAWAY_INDEX / ADIABATIC_INDEX_LIMIT))
+            .clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    pericentre * math::powf(1.0 / kept, 1.0 - w)
 }
 
 /// `limits` held inside `strip` as well: its outer limit, or `strip` where that is nearer or
@@ -1539,10 +1785,12 @@ impl PlanetarySystem {
                 now.derived = Some(derived);
                 now.sky = sky;
                 now.nursery = self.nursery(epoch.ctx, body);
-                builder
-                    .derived(&derived)
-                    .orbit(Section::Ok(section))
-                    .position(position)
+                let builder = builder.derived(&derived);
+                let builder = match icy_member_bulk(body, &derived) {
+                    Some(bulk) => builder.bulk(Section::Ok(bulk)),
+                    None => builder,
+                };
+                builder.orbit(Section::Ok(section)).position(position)
             }
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
                 builder
@@ -1834,7 +2082,11 @@ impl PlanetarySystem {
                 let luminosity = states
                     .iter()
                     .fold(0.0, |sum, state| sum + state.luminosity().value());
-                match halo.halo.at(mass_now, SolarMassesPerYear::new(rate)) {
+                let bounds = present_halo_bounds(ctx, halo, epoch.t);
+                match halo
+                    .halo
+                    .at(mass_now, SolarMassesPerYear::new(rate), bounds)
+                {
                     Some(left) => (
                         BodyState::Present,
                         Some(HaloRecord::new(

@@ -25,7 +25,7 @@ import type {
 import type { MarkStatus, SizeClass, SymbolShape } from "../../spatial/marks";
 import { pick } from "../../spatial/pick";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "../../spatial/symbols";
-import type { ChartSystem } from "./model";
+import { type ChartSystem, isFormedPlanet } from "./model";
 import { starSizeClass, starSymbol } from "./starSymbols";
 import { layerIndex } from "./wire";
 
@@ -129,6 +129,11 @@ export interface HrCounts {
   /** Systems not yet formed at the chart's time, which have no primary. */
   readonly notYetFormed: number;
   /**
+   * Free-floating planets, which have no stellar state to plot (plan 13, P13.T5.d): counted, not
+   * plotted. One not yet formed counts as not yet formed.
+   */
+  readonly planet: number;
+  /**
    * Primaries of a plotted kind whose temperature or luminosity is missing or not a finite,
    * positive value: an answer the server should not give, which failed the diagram's checks, so
    * counted as `DATA INVALID` rather than hidden (ruling 115.3).
@@ -221,9 +226,14 @@ export function projectHr(
   let blackHole = 0;
   let noRemnant = 0;
   let notYetFormed = 0;
+  let planet = 0;
   let dataInvalid = 0;
   for (const system of systems) {
     const star = system.star;
+    if (isFormedPlanet(system)) {
+      planet += 1;
+      continue;
+    }
     if (star === null) {
       notYetFormed += 1;
       continue;
@@ -290,6 +300,7 @@ export function projectHr(
       blackHole,
       noRemnant,
       notYetFormed,
+      planet,
       dataInvalid,
     },
   };

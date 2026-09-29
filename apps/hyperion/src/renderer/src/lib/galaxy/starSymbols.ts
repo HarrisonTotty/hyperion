@@ -9,11 +9,15 @@
  * a neutron star; the square a black hole. A star that left no remnant has nothing to draw, and is
  * listed and not drawn. The list and the readout beside every view name the kind in words, so shape
  * is never the only signal.
+ *
+ * Plan 13 adds the free-floating objects (its design note 15): a brown dwarf keeps the circle, as
+ * the faint end of the same sequence, and a free-floating planet takes the inverted triangle, a
+ * planet's symbol, both at layer A's size class, since no class below A is drawn.
  */
 import type { ObjectKindDto } from "@hyperion/protocol";
 
 import type { SizeClass, SymbolShape } from "../../spatial/marks";
-import type { LayerIndex } from "./model";
+import type { ChartKind, LayerIndex } from "./model";
 
 /**
  * The smallest size class a ringed circle is drawn at: 2, where its ring, the gap inside it and its
@@ -76,4 +80,33 @@ export function starSizeClass(shape: SymbolShape, layer: LayerIndex): SizeClass 
   return shape === "ringed-circle" && layer < RINGED_CIRCLE_MIN_SIZE_CLASS
     ? RINGED_CIRCLE_MIN_SIZE_CLASS
     : layer;
+}
+
+/** The symbol of a planet, bound or free-floating: the inverted triangle (plan 13, design note 15). */
+export const PLANET_SYMBOL: SymbolShape = "triangle-down";
+
+/**
+ * The symbol a chart's object is drawn with, or `null` for one with nothing to draw: its primary's
+ * for a star system or a brown dwarf ({@link starSymbol}), `null` without a brief (not yet formed),
+ * and {@link PLANET_SYMBOL} for a free-floating planet, which has no brief and is drawn once it has
+ * formed.
+ *
+ * @param formed - Whether the object exists at the chart's time: its age then is positive.
+ */
+export function chartSymbol(
+  kind: ChartKind,
+  star: ObjectKindDto | null,
+  formed: boolean,
+): SymbolShape | null {
+  let shape: SymbolShape | null;
+  switch (kind) {
+    case "stellar":
+    case "brown_dwarf":
+      shape = star === null ? null : starSymbol(star);
+      break;
+    case "rogue_planet":
+      shape = formed ? PLANET_SYMBOL : null;
+      break;
+  }
+  return shape;
 }

@@ -564,6 +564,61 @@ et al. 2010).
 - P15.T4.b replaces the run with the bisection, bumps the revision, and drops `scratch_scale` from
   the manifest.
 
+**As built, P15.T4.b (round 9b, lane `fates`, with P11.T1.d; ruling 138).**
+
+- Task `chabrier` revision 1 (fast): the multinomial maximum-likelihood s on the 20 pc census's
+  primary counts, 1,491 / 288 / 400 / 64 in bands A–D of 2,243 (our tally of Kirkpatrick et al.
+  2024, Table 4, in the manifest), the model's band shares renormalised over 0.08–8 M☉; a fixed
+  72-step golden-section search of 0.3–1.6 and 60 bisections for each 1σ end. **s = 0.9201** (1σ
+  0.8507–0.9927; 0.8957 and 0.9352 under Cummings's and El-Badry's IFMRs). The scratch 0.68 is
+  retired and the table is no longer provisional.
+- The checks, over systems whose primary lies below 8 M☉ (`imf::Truncated`, `fates::CensusFates`
+  and `GalaxyParams::census_system_masses_under`, new), all pass: band shares 67.7 / 12.0 / 16.8 /
+  3.45%, misses −0.73, +1.19, +1.15, −1.53 Poisson errors, χ² 5.62 on 2 dof (≤ 9.21, each ≤ 2);
+  all stars below 0.5 M☉ 69.84% (67.8–71.0%); the local mid-plane mean in stars and white dwarfs
+  0.5517 M☉ (0.54–0.60). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars
+  and black holes 0.0530 M☉; the primaries' mean present mass 0.4027 M☉ against the census's
+  0.437. The first attempt's bisection on the all-stars share (s = 0.9015, failing two unlike
+  comparisons) is superseded.
+- **For the owner (ruling 138.6):** Chabrier's (2005) system function (m_c 0.25 M☉, x 1.35) fits
+  the census's primaries better, χ² 4.4 as published and 1.7 at s = 0.88; it is not adopted,
+  because it also moves plan 13's substellar branch.
+- **Consequences, as built.** The all-inclusive windows are re-derived at the fitted s: the Milky
+  Way fixture's mean 0.59–0.61 M☉ (0.5985 galaxy-wide, `derive::tests`; `tests/galaxy_params.rs`)
+  and 0.60–0.62 locally (0.6115, `tests/galaxy_fields.rs`, which also asserts the census-like
+  0.5517 in 0.54–0.60); the seeds' old populations 0.57–0.62 and young disc 0.85–0.90
+  (`tests/common`, 0.581–0.611 and 0.873 over 3,000 seeds). The system count is 8.55 × 10¹⁰ for
+  the fixture. P02.T11's benchmark is unchanged at the new N: 0.00201 systems per ly³ in the plane
+  and 0.00198 at the Sun's height (0.0018–0.0021), 0.0426 M☉ pc⁻³ (0.0415 ± 0.004). Ruling 137.7's
+  nuclear-disc bracket, re-derived: Kroupa's 13.5–22.5 × 0.816 = **11.0–18.4 per ly³**, measured
+  17.93. The fixture's black-hole offset is set again to −0.3800 dex (σ_e about 117.3 km/s) to keep
+  Sgr A*'s mass. `ProvisionalFates`' tests and the brainstorm's band-share table rows keep the
+  scratch 0.68 explicitly (`Chabrier::new(0.68)`), since those figures are the stand-in's; the
+  table's default row awaits the owner's edit (fitted A–E 67.1 / 11.9 / 16.6 / 3.4 / 0.95%).
+- **Findings held provisionally (ruling 138's consequences, windows stated at 0.68):** bound
+  clusters born 373 per Myr (240–360), 158,664 associations (10,000–150,000), one ionising star
+  per 270 M☉ formed (400–600), M4's 396 neutron stars (100–350, also ruling 137's w), the rogue
+  planets' saturation threshold 37.49 per star (35.9 ± 3%), the barred orbits' Jacobi drift
+  1.09 × 10⁻⁴ (10⁻⁴), the old thin disc's dead primaries under the default 10.7% (the T30 window
+  is Kroupa's and holds). The spine construction's stars per system under the default is 1.457,
+  above 1.45; T1.d's bracket holds on the drawn companions (1.437).
+
+**Round 9b, lane `fates` (with P06.T30 and P11.T1.d), for the tables it touches.** `stripping`
+(slow, revision 0; `tables::stripping`, plan 11's stripping table) and `period_correction` (slow;
+`tables::period_correction`, plan 11's refit) join the registry. `kick_rank` gains two fingerprint
+probes, a 7.7 M☉ star with its stripped mark set, since the reference population's tracks now read
+plan 11's share; its rerun kept the body. The mean masses move the fixture's potential (v_c
+224.018 to 223.961 km/s), so `displaced_smoke` was regenerated (`hyperion-fit orbits --smoke`,
+PROVENANCE sha256 updated) and `displaced_forms` refitted: mean misplaced share 0.9700 (from
+0.9742), the neutron stars' half-density height 173 pc (from 223, against 110–130), bar
+elongation 0.34 (from −1.12). The new and refitted tables say `since 14`; the orchestrator's bump
+to 15 restamps them.
+
+**Ruling 137.6.** The neutron stars' half-density height, 173 pc against P15.T6.e's 110–130, is
+a smoke-fit finding held for ruling 120.3's orbit production run, not a consequence of the
+stripped share (more low-mode stars lower it). The window's source is owed, and it must be stated
+at a low-mode share w (the fixture's is now 0.2675).
+
 ### P15.T5 Kick-law rank table and its four defaults
 
 **Source.** The measured log-normal of young isolated pulsars (Disberg and Mandel 2025), the
@@ -1180,3 +1235,8 @@ plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator 
 - **Build cost.** The crate adds `rayon`, `clap` and the rest to every `cargo clippy --workspace`.
   If CI time suffers, exclude the crate from the workspace's default members and lint it in the
   `just fit-check` step.
+- **For the owner: Chabrier's 2005 system function (ruling 138.6).** P15.T4.b fits the 2003 system
+  function's branch above 1 M☉ (s = 0.920). Chabrier's (2005) revision, m_c 0.25 M☉ and x 1.35,
+  fits the 20 pc census's primary counts better: χ² 4.4 as published and 1.7 at s = 0.88, against
+  5.6 for the fitted 2003 form. It is noted and not adopted, because it also moves plan 13's
+  substellar branch; adopting it is a change to plan 02's mass function and a version bump.

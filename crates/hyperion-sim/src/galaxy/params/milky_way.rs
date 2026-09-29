@@ -167,8 +167,9 @@ pub(super) fn inputs() -> Inputs {
         // 0.06–0.08 dex below the relation. Ruling 111.1 accepts both: 117.7 km/s is 0.6σ from
         // the Milky Way's 103–105 ± 20, and the offset is held to plan 02's ±0.40 dex, not to the
         // scatter, since the Galaxy is a pseudobulge and pseudobulges lie below the relation
-        // (Kormendy and Ho 2013, ARA&A 51, 511, §6).
-        bh_scatter: -0.3876,
+        // (Kormendy and Ho 2013, ARA&A 51, 511, §6). Ruling 138's fitted Chabrier scale (P15.T4.b)
+        // moved σ_e to about 117.3 km/s, and the offset is set again to −0.3800 (−0.3876 before).
+        bh_scatter: -0.3800,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges but for

@@ -128,7 +128,11 @@ fn derive_at(
     let air = body.atmosphere();
     Some((
         Derived {
-            equilibrium: body.equilibrium_temperature(),
+            // What the body radiates at: a giant's effective temperature, its internal heat
+            // included (ruling 112.7), and any other body's equilibrium one.
+            equilibrium: body
+                .effective_temperature()
+                .unwrap_or_else(|| body.equilibrium_temperature()),
             surface: air.surface_temperature(),
             radius: body.radius(),
             envelope: body.fractions().envelope(),
@@ -175,14 +179,17 @@ fn ranks(lcg: &mut Lcg) -> (UnitUniform, VolatileDraws) {
 }
 
 /// P14.T16.b: no planet hotter than its star. For every sampled body and time in ±H about ages of
-/// 0.1, 1, 5 and 12 Gyr, its surface temperature and its equilibrium temperature, internal heat
-/// included, lie below the hottest effective temperature of the stars it orbits at the same time;
-/// hosts that are black holes are left out.
+/// 0.1, 1, 5 and 12 Gyr, its equilibrium temperature, a giant's effective temperature (internal
+/// heat included), lies below the hottest effective temperature of the stars it orbits at the same
+/// time, and its surface temperature at most at it, where `atmosphere` saturates it (ruling
+/// 133.5; the saturated share is printed as a finding and held to at most 10⁻³); hosts that are
+/// black holes are left out.
 #[test]
 fn no_planet_hotter_than_its_star() {
     let galaxy = galaxy(SEED);
     let mut lcg = Lcg::new(0x0016_b0d1);
     let (mut bodies, mut giants, mut airless, mut aired) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let (mut samples, mut saturated) = (0_u32, 0_u32);
     for (k, age) in [1e8, 1e9, 5e9, 1.2e10].into_iter().enumerate() {
         let first = 100_000 * u32::try_from(k).expect("four ages");
         for system in systems(&galaxy, first, 600, Years::new(age)) {
@@ -199,14 +206,19 @@ fn no_planet_hotter_than_its_star() {
                         else {
                             continue;
                         };
+                        // The surface saturates at the hottest host's effective temperature
+                        // (`atmosphere`'s cap), so it may reach it but never pass it.
+                        assert!(body.equilibrium < hottest, "{body:?} against {hottest:?}");
                         for temperature in [body.equilibrium, body.surface] {
                             assert!(
-                                temperature < hottest,
+                                temperature <= hottest,
                                 "{:?} {:?}: {body:?} against {hottest:?}",
                                 system.id,
                                 p.index(),
                             );
                         }
+                        samples += 1;
+                        saturated += u32::from(body.surface >= hottest);
                         if body.state == SurfaceState::Airless {
                             airless += 1;
                         } else {
@@ -225,6 +237,14 @@ fn no_planet_hotter_than_its_star() {
         bodies > 2_000 && giants > 100 && airless > 100 && aired > 100,
         "{bodies} bodies, {giants} giants, {airless} airless, {aired} with air"
     );
+    // Ruling 133.5: the host's temperature bounds the grey greenhouse, and a surface held at it
+    // is the model saturating, not a climate (the missing physics is volatiles dissolving into a
+    // melt, a later P14.T13 task). A finding, held to at most 10⁻³ of the samples.
+    let share = f64::from(saturated) / f64::from(samples);
+    eprintln!(
+        "FINDING surfaces saturated at their host's temperature: {saturated} of {samples} ({share:.2e})"
+    );
+    assert!(share <= 1e-3, "{saturated} of {samples} surfaces saturated");
 }
 
 /// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time across
@@ -298,10 +318,19 @@ enum SampleAge {
     Fixed(Years),
 }
 
-/// The small planets (1–4 R⊕) inside 100 days of the FGK single stars (0.6–1.4 M☉) of `n` sampled
-/// systems of ages log-uniform over 1–10 Gyr, each derived at the age `age` says: its radius, R⊕,
-/// and whether it holds an envelope then.
-fn small_planets(n: u32, age: SampleAge) -> Vec<(f64, bool)> {
+/// A planet of [`small_planets`]: which one it is (the sampled system, its host and its place
+/// there, the same at every [`SampleAge`]), its radius, R⊕, and whether it holds an envelope.
+#[derive(Debug, Clone, Copy)]
+struct SmallPlanet {
+    key: (u32, usize, usize),
+    radius: f64,
+    enveloped: bool,
+}
+
+/// The small planets (1–6 R⊕, ruling 131.2) inside 100 days of the FGK single stars (0.6–1.4 M☉)
+/// of `n` sampled systems of ages log-uniform over 1–10 Gyr, each derived at the age `age` says.
+/// The same planet has the same key at every age, so two samples pair.
+fn small_planets(n: u32, age: SampleAge) -> Vec<SmallPlanet> {
     let galaxy = galaxy(Seed::new(0x5eed_0000_0014_016c));
     let mut lcg = Lcg::new(0x0016_c0de);
     let mut planets = Vec::new();
@@ -322,8 +351,8 @@ fn small_planets(n: u32, age: SampleAge) -> Vec<(f64, bool)> {
         let stars = stars(&system, galaxy.seed());
         let t = at(0);
         let states: Vec<Option<StarState>> = stars.iter().map(|(s, _)| s.state_at(t)).collect();
-        for host in &system.hosts {
-            for p in host.placement.planets() {
+        for (h, host) in system.hosts.iter().enumerate() {
+            for (k, p) in host.placement.planets().iter().enumerate() {
                 let drawn = ranks(&mut lcg);
                 let days = p.orbit().period().value() / 86_400.0;
                 if days >= 100.0 {
@@ -333,13 +362,68 @@ fn small_planets(n: u32, age: SampleAge) -> Vec<(f64, bool)> {
                     continue;
                 };
                 let radius = body.radius.value();
-                if (1.0..4.0).contains(&radius) {
-                    planets.push((radius, body.envelope > 0.0));
+                if (1.0..6.0).contains(&radius) {
+                    planets.push(SmallPlanet {
+                        key: (i, h, k),
+                        radius,
+                        enveloped: body.envelope > 0.0,
+                    });
                 }
             }
         }
     }
     planets
+}
+
+/// The planets of `planets` of 1–4 R⊕, as radius and envelope, which the histogram, the valley
+/// and Berger et al.'s ratio read (ruling 131.2: `bins` folds every larger one into its last bin).
+fn up_to_four(planets: &[SmallPlanet]) -> Vec<(f64, bool)> {
+    planets
+        .iter()
+        .filter(|p| p.radius < 4.0)
+        .map(|p| (p.radius, p.enveloped))
+        .collect()
+}
+
+/// Rogers and Owen's (2021) ratio of planets up to 1.8 R⊕ to those of 1.8–6 R⊕ among `planets`
+/// (ruling 131.2), which contraction alone can only raise.
+fn rogers_owen_ratio(planets: &[SmallPlanet]) -> f64 {
+    let below = planets.iter().filter(|p| p.radius < 1.8).count();
+    let above = planets.len() - below;
+    f64::from(u32::try_from(below).expect("a sample fits a u32"))
+        / f64::from(u32::try_from(above).expect("a sample fits a u32"))
+}
+
+/// Ruling 131.2's diagnostics of the same planets at a tenth of their age (`middle`) and at their
+/// age (`old`), and of `young` at 10 Myr: the share of the pairs enveloped then and bare now, the
+/// pairs that cross 3.5 R⊕ downward, and the bare share of 1–1.8 R⊕ planets at 10 Myr.
+fn age_diagnostics(middle: &[SmallPlanet], old: &[SmallPlanet], young: &[SmallPlanet]) {
+    let then: std::collections::BTreeMap<_, _> = middle.iter().map(|p| (p.key, *p)).collect();
+    let pairs: Vec<(SmallPlanet, SmallPlanet)> = old
+        .iter()
+        .filter_map(|now| then.get(&now.key).map(|before| (*before, *now)))
+        .collect();
+    let count = |n: usize| f64::from(u32::try_from(n).expect("a sample fits a u32"));
+    let stripped = pairs
+        .iter()
+        .filter(|(before, now)| before.enveloped && !now.enveloped)
+        .count();
+    let crossing = pairs
+        .iter()
+        .filter(|(before, now)| before.radius >= 3.5 && now.radius < 3.5)
+        .count();
+    let small_young: Vec<&SmallPlanet> = young.iter().filter(|p| p.radius < 1.8).collect();
+    let bare_young = small_young.iter().filter(|p| !p.enveloped).count();
+    eprintln!(
+        "paired planets (1-6 R_earth at both ages): {}; enveloped at a tenth of their age and bare \
+         at it: {stripped} ({:.4}); crossing 3.5 R_earth downward: {crossing} ({:.4}); bare share \
+         of 1-1.8 R_earth at 10 Myr: {bare_young} of {} ({:.4})",
+        pairs.len(),
+        count(stripped) / count(pairs.len()),
+        count(crossing) / count(pairs.len()),
+        small_young.len(),
+        count(bare_young) / count(small_young.len()),
+    );
 }
 
 /// The histogram of `planets`' radii in bins of 0.05 dex from 1 R⊕ (Fulton et al. 2017, AJ 154,
@@ -403,14 +487,22 @@ fn valley_depth(bins: &[u32; 12]) -> (u32, u32, u32) {
 /// Owen 2021's 0.77 → 0.95), and enveloped planets' median radius is larger at 10 Myr than at
 /// 1–10 Gyr (Fernandes et al. 2025). The first does not hold and is pinned as a finding: the
 /// valley's drift over gigayears (David et al. 2021) needs a loss channel on that timescale,
-/// which the model has not.
+/// which the model has not (ruling 131.1 keeps the pin, the old ratio at 0.9–1.0 of the young).
+/// Ruling 131.2 adds the like-for-like check: the sample reaches 6 R⊕, and Rogers and Owen's
+/// split, up to 1.8 : 1.8–6 R⊕, is larger at 1–10 Gyr than at 0.1–1 Gyr; the histogram, the
+/// valley and Berger's ratio still read the planets of 1–4 R⊕.
 #[test]
 #[ignore = "slow: derives the small planets of 40,000 sampled systems three times"]
 fn radius_valley_emerges() {
     let n = 40_000;
-    let old_planets = small_planets(n, SampleAge::Own);
-    let middle_planets = small_planets(n, SampleAge::Tenth);
-    let young_planets = small_planets(n, SampleAge::Fixed(Years::new(1e7)));
+    let (old_sample, middle_sample, young_sample) = (
+        small_planets(n, SampleAge::Own),
+        small_planets(n, SampleAge::Tenth),
+        small_planets(n, SampleAge::Fixed(Years::new(1e7))),
+    );
+    let old_planets = up_to_four(&old_sample);
+    let middle_planets = up_to_four(&middle_sample);
+    let young_planets = up_to_four(&young_sample);
     let (old, young) = (bins(&old_planets), bins(&young_planets));
     let (ratio_old, ratio_middle) = (
         super_earths_per_sub_neptune(&old_planets),
@@ -448,6 +540,24 @@ fn radius_valley_emerges() {
     assert!(
         median_young > median_old,
         "{median_young} then {median_old}"
+    );
+    // Ruling 131.2: like for like, Rogers and Owen's split (up to 1.8 : 1.8-6 R_earth), which
+    // contraction can only raise, is larger at 1-10 Gyr than at 0.1-1 Gyr (their 0.77 to 0.95,
+    // x1.23). A failure would be the photoevaporation tail's, a bug: no window is widened.
+    let (split_old, split_middle) = (
+        rogers_owen_ratio(&old_sample),
+        rogers_owen_ratio(&middle_sample),
+    );
+    eprintln!(
+        "up to 1.8 : 1.8-6 R_earth: {split_middle:.3} at 0.1-1 Gyr, {split_old:.3} at 1-10 Gyr, \
+         x{:.3} (Rogers and Owen 2021: x1.23); Berger's split x{drift:.3} (Berger x1.64, Sandoval \
+         x1.24, Rogers and Owen x1.23)",
+        split_old / split_middle
+    );
+    age_diagnostics(&middle_sample, &old_sample, &young_sample);
+    assert!(
+        split_old > split_middle,
+        "Rogers and Owen's split fell with age: {split_middle} then {split_old}"
     );
     // The pinned finding: the young gap lies above 2.0 R_earth, the old one inside it.
     let deepest = |bins: &[u32; 12]| {
@@ -579,6 +689,16 @@ mod satellites {
         }
     }
 
+    /// What of `moon`'s orbit `orbit` its stability limit holds: a capture's semi-major axis, the
+    /// variable Domingos et al.'s limit is fitted on (ruling 133.2), and another moon's apocentre,
+    /// as it is placed.
+    fn limit_reach(moon: &Satellite, orbit: &KeplerElements) -> Metres {
+        match moon.moon() {
+            SatelliteMoon::Captured(_) => orbit.semi_major_axis(),
+            SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => orbit.apoapsis(),
+        }
+    }
+
     /// Asserts P14.T22.b's properties for one planet's satellites `found` in `system` at `t`.
     fn check(
         ctx: &SystemContext,
@@ -615,8 +735,9 @@ mod satellites {
                 apo < parent.hill_radius_at_pericentre(),
                 "{id:?} beyond the Hill radius"
             );
+            let reach = limit_reach(moon, &orbit);
             assert!(
-                apo < parent.stability_limit(e, sense(moon)),
+                reach < parent.stability_limit(e, sense(moon)),
                 "{id:?} beyond its limit"
             );
             assert!(
@@ -760,7 +881,7 @@ mod satellites {
     }
 
     /// The Solar-like golden system of `planetary_golden` (P14.T32), in its own universe.
-    const SOLAR_LIKE: u64 = 0x4200_aca2_0000_0003;
+    const SOLAR_LIKE: u64 = 0x4200_6cba_0000_0009;
 
     /// P14.T22's statistics for the report, printed, not asserted beyond their presence: moons
     /// per giant, the share of cold and hot giants with a massive ring (0.15 and 0.03, P14.T20),

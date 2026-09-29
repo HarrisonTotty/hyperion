@@ -9,6 +9,7 @@ mod common;
 
 use common::{assert_relative, assert_within};
 use hyperion_sim::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, LIGHT_YEARS_PER_PARSEC};
+use hyperion_sim::galaxy::fates::Counted;
 use hyperion_sim::galaxy::fields::arms::Arm;
 use hyperion_sim::galaxy::fields::disc::{
     ExponentialDisc, RadialProfile, THIN_DISC_HOLE_LENGTHS, hole_mass_fraction,
@@ -522,15 +523,18 @@ fn the_fixture_s_discs_far_from_the_plane_are_the_milky_way_s() {
 ///   (tallied from Kirkpatrick et al. 2024, ApJS 271, 55, Table 4: 2,240 systems in 33,510 pc³)
 ///   and the benchmark's 0.0018–0.0021 (brainstorm, Decisions, "2026-09-21: local density
 ///   rulings", 3);
-/// - their ratio, the local mean present-day mass per system, against the census's 0.55–0.59
-///   (tallied from the same table; McKee et al. 2015's inferred white dwarfs give the top).
+/// - their ratio, the local mean present-day mass per system with every remnant, 0.60–0.62 M☉ at
+///   plan 15's fitted scale (0.6115 measured); and, like for like with the census, the same mean
+///   in stars and white dwarfs over systems whose primary lies below 8 M☉, in 0.54–0.60 M☉
+///   (ruling 138.4: the census's 0.548 less 1σ, to McKee et al. 2015's inferred white dwarfs plus
+///   the census's missing M-dwarf companions).
 ///
 /// The fixture gives 0.061 M☉ pc⁻³ and 0.00297 per ly³, 1.47 and 1.54 times the measurements.
 /// Both scale with the stars' surface density at R₀, which is 39 M☉ pc⁻² in the fixture and needs
 /// to be 25–27 for these two alone (26–30 from the census density and the effective height;
 /// McKee et al.'s 33.4 ± 3); plan 02's P02.T11 tunes it and asserts both there. What does not
-/// scale with it is asserted here: the local mean mass per system, 0.579 M☉, which is the default
-/// mass function's.
+/// scale with it is asserted here: the local mean masses per system, which are the default mass
+/// function's.
 #[test]
 fn the_fixture_against_the_solar_neighbourhood() {
     let (params, fields) = fixture();
@@ -554,7 +558,21 @@ fn the_fixture_against_the_solar_neighbourhood() {
          systems {number:.5} per ly³ in the plane and {at_sun:.5} at the Sun's height \
          (census 0.00193, benchmark 0.0018–0.0021), {mean_mass:.3} M☉ per system"
     );
-    assert_within("local mean mass per system", mean_mass, 0.55, 0.59);
+    assert_within("local mean mass per system", mean_mass, 0.60, 0.62);
+    let f = params.mass_function().to_mass_function();
+    let census_masses =
+        params.census_system_masses_under(f.as_ref(), Counted::StarsAndWhiteDwarfs, 8.0);
+    let census: Vec<f64> = fields
+        .components()
+        .iter()
+        .map(|c| census_masses[c.population().index()].value())
+        .collect();
+    let census_mean = azimuthal_mean(R0, 0.0, |p| {
+        fields.densities(p, &mut out);
+        out.iter().zip(&census).fold(0.0, |s, (n, m)| s + n * m)
+    }) / number;
+    eprintln!("in stars and white dwarfs below 8 M☉: {census_mean:.4} M☉ per system");
+    assert_within("census-like local mean mass", census_mean, 0.54, 0.60);
     assert!(
         at_sun < number,
         "the Sun's height lies above the plane's density"
@@ -1137,15 +1155,17 @@ fn densities_agree(fields: &Fields) {
     }
 }
 
-/// The nuclear disc's central density for the fixture is 12–19 per ly³ (P02.T7.e; the
-/// brainstorm's "about 16 systems per cubic light-year at its centre"): plan 02's 14–22 under
-/// Kroupa's function, scaled by the nuclear disc's mean mass per system under Kroupa's over the
-/// default's, 0.866. Its effective height is the drawn one, so coring it moves nothing here.
+/// The nuclear disc's central density for the fixture is 11.0–18.4 per ly³ (P02.T7.e; the
+/// brainstorm's "about 16 systems per cubic light-year at its centre"; ruling 137.7, re-checked at
+/// ruling 138's system count): plan 02's 14–22 under Kroupa's function, with its integers'
+/// rounding carried (13.5–22.5), scaled by the nuclear disc's mean mass per system under Kroupa's
+/// over the default's, 0.816 with plan 06's tracks, plan 11's companions and plan 15's fitted
+/// Chabrier scale (0.871 at the scratch 0.68). Its effective height is the drawn one, so coring it moves nothing here.
 #[test]
 fn the_nuclear_disc_is_dense_at_the_centre() {
     let (_, fields) = fixture();
     let centre = component(&fields, Population::NuclearDisc).density(&PointLy::default());
-    assert_within("nuclear disc centre", centre, 12.0, 19.0);
+    assert_within("nuclear disc centre", centre, 11.0, 18.4);
     let mut out = [0.0; MAX_COMPONENTS];
     let total = fields.densities(&PointLy::default(), &mut out);
     eprintln!("fixture: nuclear disc {centre:.2}, total {total:.2} per ly³ at the centre");

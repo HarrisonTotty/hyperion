@@ -1,3 +1,4 @@
+import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
 import { StarList } from "../../components/StarList";
@@ -5,14 +6,15 @@ import {
   formatAge,
   formatBearingDeg,
   formatLengthLy,
+  type FormattedSubstellarMass,
   formatListPosition,
-  formatMassMsun,
   formatNumber,
   formatSigned,
+  formatSubstellarMass,
   formatUniverseTimeYr,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
-import type { ChartSystem } from "../../lib/galaxy/model";
+import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
 import { populationLabel } from "../../lib/galaxy/wire";
 import { useItemsInView } from "../../lib/itemsInView";
 import type { SystemModel } from "../../lib/system/model";
@@ -33,6 +35,11 @@ function rangeWords(system: ChartSystem | null, driveRangeLy: number): string | 
     return null;
   }
   return system.distanceLy <= driveRangeLy ? "IN RANGE" : "OUT OF RANGE";
+}
+
+/** The drawn unit of a mass as its kind is read in: `M☉`, or `M⊕` for a planet. */
+function massUnit(mass: FormattedSubstellarMass) {
+  return mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />;
 }
 
 /** Decimals of a speed in km/s, as the guide writes one (`12.4 km/s`). */
@@ -90,7 +97,13 @@ export interface SystemReadoutProps {
  * metallicity, `[Fe/H]` in `dex`, follows its population, each the em dash until then, so that no
  * row moves as the answer comes; then, under `STAR A`, the primary as
  * {@link PrimaryReadings} reads it, and the star list of every star and orbit ({@link StarList}).
- * A system not yet formed at the chart's time reads `NOT YET FORMED` for its stars. Where the
+ * A system not yet formed at the chart's time reads `NOT YET FORMED` for its stars.
+ *
+ * A free-floating brown dwarf reads as a system of one star: its masses in M☉ to three decimals
+ * (`0.052`), and, once `system_summary` answers, its kind, class and temperature under `STAR A`. A
+ * free-floating planet asks nothing of the server: its mass is in Earth masses, its `KIND` is
+ * `PLANET`, its metallicity the em dash, since no answer carries it yet, and `BULK` reads
+ * `NOT YET MODELLED`, or `STATE` `NOT YET FORMED` before it forms (ruling 134.2) (plan 13, design notes 12 and 14; P13.T8.d). Where the
  * request stands, pending, refused, timed out or cut off, is said beside the readout and not in it,
  * since its `RETRY` is a control (rulings 13 and 14); until the answer the rows it fills are
  * absent, never zero. An answer kept for a time the chart has left, or after a newer request
@@ -123,6 +136,20 @@ export function SystemReadout({
   const atTime = `AT ${TIME_SYSTEM_LABEL} ${formatUniverseTimeYr(timeYr)} yr`;
   const formed = stars !== null && stars.formed ? stars : null;
   const primary = formed?.hosts[0] ?? null;
+  const initialMass =
+    system === null ? null : formatSubstellarMass(system.initialMassMsun, system.layer);
+  const mass =
+    system === null || primary === null || primary.kind === "no_remnant"
+      ? null
+      : formatSubstellarMass(primary.massMsun, system.layer);
+  // A free-floating planet's bulk properties are plan 14's (plan 13, design note 12).
+  // `BULK` for a formed planet, `STATE` for one not yet formed (the orchestrator's ruling 134.2).
+  let planetRow: { readonly label: string; readonly value: string } | null = null;
+  if (system !== null && system.kind === "rogue_planet") {
+    planetRow = isFormedPlanet(system)
+      ? { label: "BULK", value: "NOT YET MODELLED" }
+      : { label: "STATE", value: "NOT YET FORMED" };
+  }
   const selectedKey = system?.id ?? "none";
   const { ref, range } = useItemsInView(
     "dt, .star-list__table",
@@ -182,18 +209,14 @@ export function SystemReadout({
             />
             <Reading
               label="INIT MASS"
-              value={system === null ? null : formatMassMsun(system.initialMassMsun)}
-              unit={<SolarMassUnit />}
+              value={initialMass?.value ?? null}
+              unit={initialMass === null ? <SolarMassUnit /> : massUnit(initialMass)}
             />
             {/* Always there, the em dash until the stars' answer, so that no row moves when it comes. */}
             <Reading
               label="MASS"
-              value={
-                primary === null || primary.kind === "no_remnant"
-                  ? null
-                  : formatMassMsun(primary.massMsun)
-              }
-              unit={<SolarMassUnit />}
+              value={mass?.value ?? null}
+              unit={mass === null ? <SolarMassUnit /> : massUnit(mass)}
               stale={starsStale}
             />
             <Reading label="AGE" value={age?.value ?? null} unit={age?.unit} beside={atTime} />
@@ -211,6 +234,15 @@ export function SystemReadout({
             />
             {stars === null || formed !== null ? null : (
               <Reading label="STARS" value="NOT YET FORMED" wide stale={starsStale} />
+            )}
+            {/*
+             * A free-floating planet has no stars and no summary: its kind in words, and its bulk
+             * properties are plan 14's, so the readout says they are not modelled rather than leave
+             * the space to read as none (plan 13, design note 12).
+             */}
+            {planetRow === null ? null : <Reading label="KIND" value="PLANET" wide />}
+            {planetRow === null ? null : (
+              <Reading label={planetRow.label} value={planetRow.value} wide />
             )}
           </dl>
           {/* `VEL` and its components, in km/s beside the offsets' ly, in a list of their own. */}

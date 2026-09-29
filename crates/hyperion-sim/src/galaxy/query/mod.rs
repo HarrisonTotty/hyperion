@@ -1,10 +1,11 @@
 //! The range query: which systems lie within R light-years of a point at time t (plan 03).
 //!
 //! The brainstorm's "The range query". The query walks the stellar layers from the coarsest to the
-//! finest, visiting only the cells that meet the sphere, and returns a complete census or nothing
-//! per layer: whether a layer fits under the caller's limit is decided before anything is
-//! generated, from its expected count over the sphere, so the answer never depends on what a
-//! caller happens to have cached. Cells are chosen by epoch position, so the sphere is padded by
+//! finest, then the brown dwarfs and the rogue planets when the caller asks for them
+//! ([`SubstellarRequest`], plan 13), visiting only the cells that meet the sphere, and returns a
+//! complete census or nothing per layer: whether a layer fits under the caller's limit is decided
+//! before anything is generated, from its expected count over the sphere, so the answer never
+//! depends on what a caller happens to have cached. Cells are chosen by epoch position, so the sphere is padded by
 //! the largest speed times |t|; distances are then tested at t and systems not yet born are
 //! dropped. Sources other than the grid (features, the global list, catalogue classes, pinned
 //! content) are merged through a hook that later plans fill.
@@ -38,7 +39,7 @@ pub use source::SystemSource;
 pub use walk::{BuildQuerySphereError, QuerySphere, cells_in_sphere, count_cells_in_sphere};
 
 use crate::galaxy::Galaxy;
-use crate::galaxy::placement::{CellCache, STELLAR_LAYERS, SystemRecord};
+use crate::galaxy::placement::{CellCache, SystemRecord};
 use crate::id::Layer;
 use crate::time::UniverseTime;
 use crate::units::LightYears;
@@ -105,7 +106,7 @@ pub fn range_query<C: CellCache>(
     query: &RangeQuery,
 ) -> RangeResult {
     let widest = widest_sphere(query);
-    let grid = expected_counts(galaxy, query.centre(), query.radius());
+    let grid = expected_counts(galaxy, query.centre(), query.radius(), query.substellar());
     let per_source: Vec<LayerCounts> = sources
         .iter()
         .map(|source| source.expected_in_sphere(galaxy, &widest))
@@ -121,9 +122,9 @@ pub fn range_query<C: CellCache>(
         ..QueryStats::default()
     };
     let mut systems = Vec::with_capacity(reserve_for(&census));
-    // Coarsest first, as the brainstorm's walk goes; the result's order is the sort's, not this.
-    for spec in STELLAR_LAYERS {
-        let layer = spec.layer();
+    // Coarsest first and the substellar layers last, as the brainstorm's walk goes; the result's
+    // order is the sort's, not this.
+    for layer in result::WALK_ORDER {
         if !layers.contains(layer) {
             continue;
         }
@@ -299,8 +300,13 @@ pub enum BuildRangeQueryError {
     /// The time lies outside the [`ClockWindow`](crate::time::ClockWindow), ±1,000 Julian years
     /// about the epoch, where present positions are guaranteed.
     TimeOutsideClockWindow(UniverseTime),
-    /// Substellar layers were asked for; plan 13 places them.
-    SubstellarLayersUnavailable,
+    /// The mass floor lies below layer A, at a substellar layer the query's
+    /// [`SubstellarRequest`] does not ask for (plan 13, Design note 9).
+    SubstellarNotRequested,
+    /// Substellar layers were asked for with a mass floor that would cut them off: a stellar floor
+    /// above layer A, or the brown dwarfs' step with the rogue planets asked for (plan 13, Design
+    /// note 9).
+    SubstellarBelowFloor,
 }
 
 impl fmt::Display for BuildRangeQueryError {
@@ -317,8 +323,11 @@ impl fmt::Display for BuildRangeQueryError {
             Self::TimeOutsideClockWindow(t) => {
                 write!(f, "the query time {t} lies outside the clock window")
             }
-            Self::SubstellarLayersUnavailable => {
-                f.write_str("substellar layers are not generated yet")
+            Self::SubstellarNotRequested => {
+                f.write_str("the mass floor reaches a substellar layer that was not requested")
+            }
+            Self::SubstellarBelowFloor => {
+                f.write_str("the requested substellar layers lie below the mass floor")
             }
         }
     }
@@ -414,36 +423,53 @@ mod tests {
         ]
     }
 
-    /// Three sources whose plain fold depends on their order, 0.1, 0.2 and 0.3 in layers E and C,
-    /// give a bit-identical census in every order (ruling 23 of 2026-09-22).
+    /// Three sources whose plain fold depends on their order, in layers E and C, give a
+    /// bit-identical census in every order (ruling 23 of 2026-09-22). The sources' E counts are the
+    /// first of a few fixed triples whose plain fold onto the grid's count does depend on the order,
+    /// so that the test can tell the two sums apart whatever the grid's count is.
     #[test]
     fn the_census_does_not_depend_on_the_order_of_the_sources() {
         let galaxy = galaxy();
         let query = small_query();
-        let counts = [0.1, 0.2, 0.3].map(|n| {
-            let mut counts = LayerCounts::ZERO;
-            counts.set(Layer::E, n);
-            counts.set(Layer::C, 10.0 * n);
-            counts
-        });
-        let sources = counts.map(Counted);
-        let grid = expected_counts(&galaxy, query.centre(), query.radius());
-
-        // The plain fold in list order, which the sum replaced, does depend on the order: at least
-        // two orders give the census different bits, so the test can tell the two sums apart.
-        let folded: Vec<f64> = permutations(counts)
-            .iter()
-            .map(|order| {
-                let plain = order
-                    .iter()
-                    .fold(LayerCounts::ZERO, |sum, counts| sum + *counts);
-                (grid + plain).get(Layer::E)
-            })
-            .collect();
-        assert!(
-            folded.iter().any(|sum| sum.total_cmp(&folded[0]).is_ne()),
-            "the plain fold gave one census in every order, so this test proves nothing"
+        let grid = expected_counts(
+            &galaxy,
+            query.centre(),
+            query.radius(),
+            SubstellarRequest::None,
         );
+        let counts_of = |values: [f64; 3]| {
+            values.map(|n| {
+                let mut counts = LayerCounts::ZERO;
+                counts.set(Layer::E, n);
+                counts.set(Layer::C, 10.0 * n);
+                counts
+            })
+        };
+        // The plain fold in list order, which the sum replaced, does depend on the order for the
+        // triple chosen: at least two orders give the census different bits.
+        let order_dependent = |values: [f64; 3]| {
+            let folded: Vec<f64> = permutations(counts_of(values))
+                .iter()
+                .map(|order| {
+                    let plain = order
+                        .iter()
+                        .fold(LayerCounts::ZERO, |sum, counts| sum + *counts);
+                    (grid + plain).get(Layer::E)
+                })
+                .collect();
+            folded.iter().any(|sum| sum.total_cmp(&folded[0]).is_ne())
+        };
+        let values = [
+            [0.1, 0.2, 0.3],
+            [0.1, 0.2, 0.7],
+            [0.3, 0.6, 0.7],
+            [1e-3, 2e-3, 3e-3],
+            [0.01, 0.02, 0.07],
+        ]
+        .into_iter()
+        .find(|&v| order_dependent(v))
+        .expect("a plain fold of one of the triples depends on the order, so the test proves it");
+        let sources = counts_of(values).map(Counted);
 
         let reference = range_query(
             &galaxy,
@@ -469,7 +495,7 @@ mod tests {
         // And the sum is the grid's plus the sources' in value order.
         assert_same_bits(
             reference.census().expected().get(Layer::E),
-            grid.get(Layer::E) + ((0.1 + 0.2) + 0.3),
+            grid.get(Layer::E) + ((values[0] + values[1]) + values[2]),
         );
     }
 
@@ -528,7 +554,8 @@ mod tests {
             BuildRangeQueryError::RadiusBeyondRootCube,
             BuildRangeQueryError::CentreOutsideRootCube,
             BuildRangeQueryError::TimeOutsideClockWindow(t),
-            BuildRangeQueryError::SubstellarLayersUnavailable,
+            BuildRangeQueryError::SubstellarNotRequested,
+            BuildRangeQueryError::SubstellarBelowFloor,
         ] {
             let message = error.to_string();
             let first = message.chars().next().unwrap();

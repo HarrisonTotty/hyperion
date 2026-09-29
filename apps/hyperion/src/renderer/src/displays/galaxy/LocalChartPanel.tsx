@@ -159,7 +159,14 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         stale={stale}
         onRetry={chart.retry}
       />
-      <SymbolLegend bands={bands} />
+      <SymbolLegend
+        bands={bands}
+        // Only when the brown dwarfs are drawn: a layer left out takes nothing's size.
+        brownDwarfFloorMsun={
+          result?.layers.find((line) => line.layer === "brown_dwarf" && line.status === "included")
+            ?.mass_min_msun ?? null
+        }
+      />
     </div>
   );
 }

@@ -2,8 +2,8 @@
 # merge, so this repeats what it needs of `hyperion-sim`'s: a fitted table must come out the same
 # on every platform, so every transcendental goes through `hyperion_sim::math` here too.
 
-# Journal names in citations, as the sim's `clippy.toml` has them.
-doc-valid-idents = ["ApJ", "ApJS", ".."]
+# Journal names and authors in citations, as the sim's `clippy.toml` has them.
+doc-valid-idents = ["McKee", "ApJ", "ApJS", ".."]
 
 # Every transcendental function goes through `hyperion_sim::math`, which wraps the exactly pinned
 # `libm`. The platform's own versions differ between operating systems and CPU architectures, and

@@ -190,9 +190,15 @@ pub struct BulkPropertiesDto {
     pub class: PlanetClassDto,
     /// The mass fractions.
     pub mass_fractions: MassFractionsDto,
-    /// The equilibrium temperature at the record's time, in kelvin, not negative: at a Bond albedo
-    /// of 0.3 in this generator version, with a giant's internal heat included.
+    /// The equilibrium temperature at the record's time, in kelvin, not negative: from its hosts'
+    /// light alone, at the Bond albedo its surface state gives, with no internal heat (ruling
+    /// 112.7).
     pub equilibrium_temperature_k: f64,
+    /// The effective temperature at the record's time, in kelvin, positive, of a body with a
+    /// luminosity of its own, a giant's: its internal heat added to its equilibrium temperature,
+    /// T⁴ = `T_eq`⁴ + `L_int` ÷ (4πR²σ) (ruling 112.7). `null` for a body with none, whose
+    /// effective temperature is its equilibrium one.
+    pub effective_temperature_k: Option<f64>,
 }
 
 /// A body's surface section: atmosphere, surface conditions, rotation and global figures (design
@@ -402,6 +408,7 @@ pub(crate) mod tests {
                 envelope: 0.0,
             },
             equilibrium_temperature_k: 254.6,
+            effective_temperature_k: None,
         }
     }
 
@@ -413,6 +420,7 @@ pub(crate) mod tests {
             "class": "rocky",
             "mass_fractions": { "iron": 0.323, "rock": 0.677, "water": 0.0, "envelope": 0.0 },
             "equilibrium_temperature_k": 254.6,
+            "effective_temperature_k": null,
         })
     }
 
@@ -574,6 +582,7 @@ pub(crate) mod tests {
             "radius_m",
             "density_kg_m3",
             "equilibrium_temperature_k",
+            "effective_temperature_k",
             "mass_fractions",
             "class",
             "surface_seed",
@@ -809,6 +818,22 @@ pub(crate) mod tests {
     #[test]
     fn bulk_properties_wire_form() {
         assert_wire_form(&earth_bulk(), earth_bulk_json());
+    }
+
+    /// Ruling 112.7: a giant carries its effective temperature beside its equilibrium one.
+    #[test]
+    fn a_giant_s_bulk_carries_its_effective_temperature() {
+        let jupiter = BulkPropertiesDto {
+            class: PlanetClassDto::GasGiant,
+            equilibrium_temperature_k: 109.9,
+            effective_temperature_k: Some(124.4),
+            ..earth_bulk()
+        };
+        let mut expected = earth_bulk_json();
+        expected["class"] = json!("gas_giant");
+        expected["equilibrium_temperature_k"] = json!(109.9);
+        expected["effective_temperature_k"] = json!(124.4);
+        assert_wire_form(&jupiter, expected);
     }
 
     #[test]

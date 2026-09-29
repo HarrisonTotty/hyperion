@@ -6,11 +6,12 @@
 //! supersonic against the hot interior, and drives a bow shock, once it has travelled 0.677 of the
 //! shell's Sedov–Taylor radius (van der Swaluw, Downes and Keegan 2004, A&A 420, 937, §2 and Fig.
 //! 4), which it keeps as it crosses the shell and after. The fraction is derived for a
-//! Sedov–Taylor interior and is extrapolated here to the snowplough phases. A pulsar powers a wind nebula while its spin-down luminosity
-//! stays above [`NEBULA_THRESHOLD`], 10³⁵ erg/s, which plan 06's birth spins and fields keep for a
-//! median of about 1.5 × 10⁴ years (plan 09, P09.T16.b: "10⁴–10⁵ yr"). Plan 06's own flag,
-//! [`PulsarState::has_wind_nebula`] at 10³⁶ erg/s, would end a nebula after a median of about
-//! 2 × 10³ years; see the plan's Risks.
+//! Sedov–Taylor interior and is extrapolated here to the snowplough phases. A pulsar powers a
+//! wind nebula while its spin-down luminosity stays above plan 06's [`WIND_NEBULA_THRESHOLD`],
+//! 10³⁵ erg/s (ruling 136.4), which its birth spins and fields keep for a median of about 1.5 ×
+//! 10⁴ years (plan 09, P09.T16.b: "10⁴–10⁵ yr").
+//!
+//! [`WIND_NEBULA_THRESHOLD`]: crate::stellar::remnant::neutron_star::WIND_NEBULA_THRESHOLD
 
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
 use crate::galaxy::snr::shell::ShellState;
@@ -47,13 +48,6 @@ pub fn has_bow_shock(offset: LightYears, shell: &ShellState) -> bool {
     offset.value() >= BOW_SHOCK_SHARE * shell.radius().value()
 }
 
-/// The spin-down luminosity above which a pulsar powers a wind nebula: 10³⁵ erg/s (ours,
-/// provisional, a parameter of the generator version). It is set so that the nebula lasts the
-/// plan's 10⁴–10⁵ years under plan 06's spin-down. Of the 40 X-ray nebulae in Kargaltsev and
-/// Pavlov (2008, AIP Conf. Proc. 983, 171, Table 1), 34 have Ė ≥ 10³⁵ erg/s; the faintest is at
-/// 1.2 × 10³³.
-pub const NEBULA_THRESHOLD: Watts = Watts::new(1e28);
-
 /// A pulsar's wind nebula: the bubble of relativistic particles its spin-down powers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PulsarWindNebula {
@@ -61,12 +55,14 @@ pub struct PulsarWindNebula {
 }
 
 impl PulsarWindNebula {
-    /// The nebula of the pulsar in `state`, while its spin-down luminosity is above
-    /// [`NEBULA_THRESHOLD`]; `None` after.
+    /// The nebula of the pulsar in `state`, while it has one ([`PulsarState::has_wind_nebula`],
+    /// above plan 06's `WIND_NEBULA_THRESHOLD`);
+    /// `None` after.
     #[must_use]
     pub fn of(state: &PulsarState) -> Option<Self> {
-        let power = state.spin_down_luminosity();
-        (power > NEBULA_THRESHOLD).then_some(Self { power })
+        state.has_wind_nebula().then(|| Self {
+            power: state.spin_down_luminosity(),
+        })
     }
 
     /// The spin-down luminosity that powers it.

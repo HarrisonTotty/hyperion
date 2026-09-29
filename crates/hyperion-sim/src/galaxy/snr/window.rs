@@ -17,16 +17,23 @@
 //!   ζ^(3⁄14) E₅₁^(1⁄14)` (eq. 3.33b).
 //! - **Hot.** When the blast has already slowed to `β c_net` before `t_PDS`, as it does in hot,
 //!   thin gas, the shell merges while still adiabatic (CMB88 §IV, eq. 4.8, "the SNR will merge
-//!   before entering the PDS stage"; Tang and Wang 2005, ApJ 628, 205, whose blast in hot gas
-//!   tends to the sound speed). CMB88's `v_PDS` is the Sedov–Taylor speed at `t_PDS` (`v_PDS =
-//!   v_s(t_PDS) = 2 R_PDS ÷ 5 t_PDS`, p. 264), and the Sedov speed falls as `t^(−3⁄5)`, so the blast
-//!   reaches `β c_net` at `W = t_PDS (v_PDS ÷ β c_net)^(5⁄3)`. That is Tang and Wang's
-//!   characteristic time `t_c` (their eq. 3) times `(c_s ÷ β c_net)^(5⁄3)`, 0.48 `t_c` in hot gas
-//!   where the turbulence is negligible, and it equals the radiative branch's `t_PDS` where the two
-//!   meet, so the window is continuous in every argument. This branch is the pure Sedov blast, not
-//!   Tang and Wang's own fit to their simulations (their eq. 2, `V_s = c_s (t_c ÷ t + 1)^(3⁄5)`),
-//!   which slows more gently and reaches `β c_net` at 0.93 `t_c`, about twice as late; which of the
-//!   two, and the plan's 0.41 `t_c`, await a ruling (the plan's Risks).
+//!   before entering the PDS stage").
+//!
+//! The adiabatic blast follows Tang and Wang (2005, ApJ 628, 205), whose fit to their simulations
+//! of blasts in hot gas, eq. 2, `V_s = c_s (t_c ÷ t + 1)^(3⁄5)`, is `V_s^(5⁄3) = V_Sed^(5⁄3) +
+//! c_s^(5⁄3)`: the Sedov speed with the ambient's adiabatic sound speed `c_s = √(5⁄3) C₀` added in
+//! the 5⁄3 power (they add that the Sedov solution "is not valid even before `t = t_c`"). It is set on
+//! CMB88's own Sedov clock, `V_Sed(t_PDS) = v_PDS` (CMB88, p. 264: `v_PDS = v_s(t_PDS) = 2 R_PDS ÷ 5
+//! t_PDS`), so that `t_c = t_PDS (v_PDS ÷ c_s)^(5⁄3)` (ruling 136.1). With `v* = (v_PDS^(5⁄3) +
+//! c_s^(5⁄3))^(3⁄5)`, the blast's speed at `t_PDS`:
+//!
+//! - radiative if `v* > β c_net`, with `v*` in place of `v_PDS` in the radiative form above;
+//! - hot otherwise, `W = t_PDS v_PDS^(5⁄3) ÷ ((β c_net)^(5⁄3) − c_s^(5⁄3))`, which is Tang and
+//!   Wang's `t_c ÷ ((β c_net ÷ c_s)^(5⁄3) − 1)`, 0.931 `t_c` in hot gas where the turbulence is
+//!   negligible.
+//!
+//! Both give `t_PDS` where they meet, so the window is continuous in every argument, and since `β
+//! c_net ≥ 2 C₀ = 1.549 c_s` it is always finite.
 //!
 //! The window never rises with the ambient's sound speed, so over a pressure field it is largest
 //! at the lowest pressure, the floor, which is what [`WindowCaps`](super::WindowCaps) scans.
@@ -63,6 +70,9 @@ const PDS_TIME_YR: f64 = 1.33e4;
 
 /// CMB88's `v_PDS` at the same point, m/s: 413 km/s (eq. 3.33b).
 const PDS_SPEED_M_S: f64 = 413e3;
+
+/// `√(5⁄3)`: the adiabatic sound speed over the isothermal, for a monatomic gas.
+const ADIABATIC_FACTOR: f64 = 1.290_994_448_735_805_6;
 
 /// The explosion's energy is always positive and finite; this rejects the rest.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -145,11 +155,7 @@ impl ExplosionEnergy {
     /// the system's `snr.energy` stream. A `u` outside [0, 1] is held to it.
     #[must_use]
     pub fn from_uniform(u: f64) -> Self {
-        let u = if u.is_nan() { 0.5 } else { u.clamp(0.0, 1.0) };
-        let lo = standard_normal_cdf(-Self::TRUNCATION);
-        let hi = standard_normal_cdf(Self::TRUNCATION);
-        let p = lo + u * (hi - lo);
-        let z = math::normal_quantile(p).clamp(-Self::TRUNCATION, Self::TRUNCATION);
+        let z = truncated_standard_normal(u, Self::TRUNCATION);
         Self(math::exp10(Self::SIGMA_DEX * z).clamp(Self::MIN.0, Self::MAX.0))
     }
 
@@ -160,9 +166,24 @@ impl ExplosionEnergy {
     }
 }
 
-/// `Φ(x)`, the standard normal's distribution function.
-fn standard_normal_cdf(x: f64) -> f64 {
+/// `Φ(x)`, the standard normal's distribution function, through [`math::erfc`]: the rank of a
+/// standard normal, which [`truncated_standard_normal`] maps into a truncated normal.
+#[must_use]
+pub fn standard_normal_cdf(x: f64) -> f64 {
     0.5 * math::erfc(-x * core::f64::consts::FRAC_1_SQRT_2)
+}
+
+/// The standard normal truncated at `±limit` at rank `u` in [0, 1]: the quantile at `Φ(−limit) +
+/// u (Φ(limit) − Φ(−limit))`, held to `±limit`. A NaN rank reads as ½. It is the law of
+/// [`ExplosionEnergy`] (`limit` 2) and of a superbubble's interior density (P09.T4.b, ruling
+/// 136.3), which passes its drawn normal's rank [`standard_normal_cdf`].
+#[must_use]
+pub fn truncated_standard_normal(u: f64, limit: f64) -> f64 {
+    let u = if u.is_nan() { 0.5 } else { u.clamp(0.0, 1.0) };
+    let lo = standard_normal_cdf(-limit);
+    let hi = standard_normal_cdf(limit);
+    let p = lo + u * (hi - lo);
+    math::normal_quantile(p).clamp(-limit, limit)
 }
 
 /// The gas a [`SiteGas`] was asked to hold is not a gas.
@@ -315,6 +336,7 @@ pub struct ShellWindow {
     merge_speed: MetresPerSecond,
     pds_time: Years,
     pds_speed: MetresPerSecond,
+    sound_speed: MetresPerSecond,
 }
 
 impl ShellWindow {
@@ -367,7 +389,25 @@ impl ShellWindow {
         self.pds_time
     }
 
-    /// CMB88's `v_PDS`: the shock speed at `t_PDS`.
+    /// The ambient's adiabatic sound speed `c_s = √(5⁄3) C₀`, Tang and Wang's (2005) `c_s`.
+    #[must_use]
+    pub const fn sound_speed(&self) -> MetresPerSecond {
+        self.sound_speed
+    }
+
+    /// Tang and Wang's characteristic time on CMB88's Sedov clock, `t_c = t_PDS (v_PDS ÷
+    /// c_s)^(5⁄3)`: infinite in gas with no sound speed.
+    #[must_use]
+    pub fn characteristic_time(&self) -> Years {
+        let cs = self.sound_speed.value();
+        if cs > 0.0 {
+            Years::new(self.pds_time.value() * math::powf(self.pds_speed.value() / cs, 5.0 / 3.0))
+        } else {
+            Years::new(f64::INFINITY)
+        }
+    }
+
+    /// CMB88's `v_PDS`: the Sedov speed at `t_PDS`.
     #[must_use]
     pub const fn pds_speed(&self) -> MetresPerSecond {
         self.pds_speed
@@ -439,6 +479,7 @@ pub fn shell_window(site: &SiteGas, energy: ExplosionEnergy, metallicity: Dex) -
             merge_speed: MetresPerSecond::new(merge),
             pds_time: Years::ZERO,
             pds_speed: MetresPerSecond::ZERO,
+            sound_speed: MetresPerSecond::new(c0),
         };
     }
     let t_pds = PDS_TIME_YR
@@ -449,14 +490,21 @@ pub fn shell_window(site: &SiteGas, energy: ExplosionEnergy, metallicity: Dex) -
         * math::powf(n, 1.0 / 7.0)
         * math::powf(zeta, 3.0 / 14.0)
         * math::powf(e, 1.0 / 14.0);
-    let x = v_pds / merge;
-    let (w, branch) = if x > 1.0 {
+    let cs = ADIABATIC_FACTOR * c0;
+    let (cs53, vp53, merge53) = (
+        math::powf(cs, 5.0 / 3.0),
+        math::powf(v_pds, 5.0 / 3.0),
+        math::powf(merge, 5.0 / 3.0),
+    );
+    let v_star = math::powf(vp53 + cs53, 0.6);
+    let (w, branch) = if v_star > merge {
+        let x = v_star / merge;
         (
             t_pds * (0.75 * math::powf(x, 10.0 / 7.0) + 0.25),
             WindowBranch::Radiative,
         )
     } else {
-        (t_pds * math::powf(x, 5.0 / 3.0), WindowBranch::Hot)
+        (t_pds * vp53 / (merge53 - cs53), WindowBranch::Hot)
     };
     ShellWindow {
         duration: Years::new(w),
@@ -468,6 +516,7 @@ pub fn shell_window(site: &SiteGas, energy: ExplosionEnergy, metallicity: Dex) -
         merge_speed: MetresPerSecond::new(merge),
         pds_time: Years::new(t_pds),
         pds_speed: MetresPerSecond::new(v_pds),
+        sound_speed: MetresPerSecond::new(cs),
     }
 }
 
@@ -521,12 +570,12 @@ mod tests {
         assert_eq!(ExplosionEnergy::from_foes(1.0), Ok(ExplosionEnergy::MEDIAN));
     }
 
-    /// P09.T15.a: at P ÷ k = 3,800 K cm⁻³ the window table reproduces, to 25%, the radiative
-    /// branch's 4.8, 8.4, 8.4, 4.4, 1.9, 0.82 and 0.35 × 10⁵ yr at 10⁻² to 10⁴ cm⁻³ (ruling 98),
-    /// and the hot branch's 2.0 × 10⁵ yr at 10⁻³ (Tang and Wang 2005's, not re-derived).
+    /// P09.T15.a: at P ÷ k = 3,800 K cm⁻³ the window table reproduces, to 25%, ruling 136.1's
+    /// 4.4, 5.3, 8.5, 8.4, 4.4, 1.9, 0.82 and 0.35 × 10⁵ yr from 10⁻³ to 10⁴ cm⁻³, with the switch
+    /// to the hot branch at 1.5 × 10⁻³ cm⁻³.
     #[test]
     fn the_window_table_matches_the_plan() {
-        let expected = [2.0, 4.8, 8.4, 8.4, 4.4, 1.9, 0.82, 0.35];
+        let expected = [4.4, 5.3, 8.5, 8.4, 4.4, 1.9, 0.82, 0.35];
         let table = window_table(KelvinPerCm3::new(3_800.0));
         assert_eq!(table.len(), expected.len());
         for ((n, window), want) in table.iter().zip(expected) {
@@ -536,7 +585,7 @@ mod tests {
                 "n = {} cm⁻³: {got:.3} × 10⁵ yr against {want}",
                 n.value()
             );
-            let branch = if n.value() < 5e-3 {
+            let branch = if n.value() < 1.5e-3 {
                 WindowBranch::Hot
             } else {
                 WindowBranch::Radiative
@@ -571,6 +620,17 @@ mod tests {
             last = Some(now);
         }
         assert_eq!(switched, 1);
+        // In hot gas, where the turbulence is negligible, the hot branch is 0.93 t_c:
+        // 1 ÷ ((2 ÷ √(5⁄3))^(5⁄3) − 1) = 0.931.
+        let hot = shell_window(&site(1e-6, 3_800.0), ExplosionEnergy::MEDIAN, Dex::new(0.0));
+        assert_eq!(hot.branch(), WindowBranch::Hot);
+        let ratio = hot.duration().value() / hot.characteristic_time().value();
+        let expected = 1.0 / (math::powf(2.0 / ADIABATIC_FACTOR, 5.0 / 3.0) - 1.0);
+        assert!(
+            (ratio / expected - 1.0).abs() < 1e-3,
+            "{ratio} against {expected}"
+        );
+        assert!((expected - 0.931).abs() < 1e-3, "{expected}");
     }
 
     /// W → 0 at both ends of density at a fixed pressure.
@@ -616,8 +676,8 @@ mod tests {
     }
 
     /// P09.T15.a: at the model's own pressure in the plane, the Milky Way fixture's at 26,000 ly,
-    /// the longest windows are 0.5–1 Myr and fall at 0.1–0.5 cm⁻³; at the fixture's floor the
-    /// largest is 2–2.4 Myr (ruling 98: 2.06–2.39 over plan 07's floors).
+    /// the longest windows are 0.5–1 Myr and fall at 0.1–0.5 cm⁻³; at a floor of 300–450 K cm⁻³
+    /// the largest at 10⁵¹ erg is 2.07–2.40 Myr (ruling 136.1's rule; ruling 98 had 2.06–2.39).
     #[test]
     fn the_longest_windows_fall_in_warm_gas() {
         let fixture = GasParams::milky_way_like();
@@ -635,7 +695,7 @@ mod tests {
             let largest = (0..=4_000)
                 .map(|k| window_yr(math::exp10(-3.0 + f64::from(k) / 1_000.0), floor))
                 .fold(0.0, f64::max);
-            assert!((2.0e6..=2.4e6).contains(&largest), "{largest} at {floor}");
+            assert!((2.0e6..=2.45e6).contains(&largest), "{largest} at {floor}");
         }
     }
 

@@ -2,8 +2,7 @@
 //! P03.T9.d; Design notes 8–10).
 
 use super::request::RangeQuery;
-use super::result::{Census, CensusStop, LayerCounts};
-use crate::galaxy::placement::STELLAR_LAYERS;
+use super::result::{Census, CensusStop, LayerCounts, WALK_ORDER};
 use crate::id::Layer;
 
 /// The census of a query: how far down the layers its result is complete, and why it stops there.
@@ -12,7 +11,8 @@ use crate::id::Layer;
 /// sources' together, summed layer by layer in value order, each layer's contributions sorted with
 /// [`f64::total_cmp`] and added from the smallest, so that it does not depend on the order the
 /// sources are listed in ([`range_query`](super::range_query); ruling 23 of 2026-09-22); the two
-/// are added layer by layer once. The layers are then tried from E to A. Each adds its
+/// are added layer by layer once. The layers are then tried from E to A, and on to the brown dwarfs
+/// and the rogue planets when the query's floor reaches them (plan 13, Design note 9). Each adds its
 /// expected count to a running total that starts at 0 and runs in that order (Design note 8; the
 /// order is part of the output, as plan 02's D18 fixes the order of its component sums), and its
 /// cells in the padded sphere, from `cells_in_layer`, to a running count of cells. The walk stops
@@ -37,7 +37,7 @@ use crate::id::Layer;
 /// [`Census::layers`].
 ///
 /// [`Census::expected`] is `grid + sources` for every layer, walked or not. The substellar
-/// entries pass through: they are zero in every M1 query (Design note 17).
+/// entries pass through: they are zero unless the query asks for their layers (Design note 17).
 ///
 /// # Examples
 ///
@@ -74,8 +74,7 @@ pub fn decide_census(
     let mut cells = 0_u64;
     let mut complete_down_to = None;
     let mut stopped_by = CensusStop::MassFloor;
-    for spec in &STELLAR_LAYERS {
-        let layer = spec.layer();
+    for layer in WALK_ORDER {
         let next_total = total + expected.get(layer);
         if next_total > limit {
             stopped_by = CensusStop::Limit;
@@ -105,7 +104,7 @@ mod tests {
     use super::*;
     use crate::coords::{GalacticPosition, LyCell};
     use crate::galaxy::placement::layer_spec;
-    use crate::galaxy::query::request::MassFloor;
+    use crate::galaxy::query::request::{MassFloor, SubstellarRequest};
     use crate::galaxy::query::result::LayerSet;
     use crate::units::LightYears;
 
@@ -132,15 +131,80 @@ mod tests {
         query(4_096, 1 << 20, floor)
     }
 
-    /// Cells per layer for A to E.
+    /// Cells per layer for A to E; a substellar layer must not be reached.
     fn cells(stellar: [u64; 5]) -> impl Fn(Layer) -> u64 {
         move |layer| {
             assert!(
                 layer_spec(layer).is_some_and(|spec| spec.band().is_stellar()),
-                "no substellar layer is walked in M1"
+                "no substellar layer is walked without the request"
             );
             stellar[usize::from(layer.value())]
         }
+    }
+
+    /// A 50 ly query asking for `request` with the default floor, and the given limit.
+    fn substellar_query(limit: u32, request: SubstellarRequest) -> RangeQuery {
+        let centre = GalacticPosition::new(LyCell::new([0, 26_000, 0]), [0.0; 3]).unwrap();
+        RangeQuery::builder(centre, LightYears::new(50.0))
+            .limit(NonZeroU32::new(limit).unwrap())
+            .substellar(request)
+            .build()
+            .unwrap()
+    }
+
+    /// Counts for every layer, A to E then the brown dwarfs and the rogue planets.
+    const WITH_SUBSTELLAR: [f64; 7] = [1_100.0, 190.0, 240.0, 40.0, 12.0, 400.0, 45_000.0];
+
+    #[test]
+    fn the_substellar_layers_follow_layer_a_when_asked() {
+        let every = |_: Layer| 10;
+        let census = decide_census(
+            &substellar_query(4_096, SubstellarRequest::BrownDwarfs),
+            &LayerCounts::from_array(WITH_SUBSTELLAR),
+            &LayerCounts::ZERO,
+            every,
+        );
+        assert_eq!(census.complete_down_to(), Some(Layer::BrownDwarf));
+        assert_eq!(census.stopped_by(), CensusStop::MassFloor);
+        assert!(!census.layers().contains(Layer::RoguePlanet));
+        // With the rogue planets asked for, their 45,000 break a limit of 4,096 and are dropped
+        // whole; the census names the brown dwarfs' step.
+        let census = decide_census(
+            &substellar_query(4_096, SubstellarRequest::BrownDwarfsAndRoguePlanets),
+            &LayerCounts::from_array(WITH_SUBSTELLAR),
+            &LayerCounts::ZERO,
+            every,
+        );
+        assert_eq!(census.complete_down_to(), Some(Layer::BrownDwarf));
+        assert_eq!(census.stopped_by(), CensusStop::Limit);
+        // A limit that holds them admits every layer.
+        let census = decide_census(
+            &substellar_query(50_000, SubstellarRequest::BrownDwarfsAndRoguePlanets),
+            &LayerCounts::from_array(WITH_SUBSTELLAR),
+            &LayerCounts::ZERO,
+            every,
+        );
+        assert_eq!(census.complete_down_to(), Some(Layer::RoguePlanet));
+        assert_eq!(census.stopped_by(), CensusStop::MassFloor);
+        assert_eq!(census.layers().iter().count(), 7);
+    }
+
+    #[test]
+    fn the_substellar_cells_count_against_the_budget() {
+        let census = decide_census(
+            &substellar_query(50_000, SubstellarRequest::BrownDwarfsAndRoguePlanets),
+            &LayerCounts::from_array(WITH_SUBSTELLAR),
+            &LayerCounts::ZERO,
+            |layer| {
+                if layer == Layer::RoguePlanet {
+                    1 << 20
+                } else {
+                    1_000
+                }
+            },
+        );
+        assert_eq!(census.complete_down_to(), Some(Layer::BrownDwarf));
+        assert_eq!(census.stopped_by(), CensusStop::CellBudget);
     }
 
     const FEW_CELLS: [u64; 5] = [1_400, 240, 50, 14, 5];

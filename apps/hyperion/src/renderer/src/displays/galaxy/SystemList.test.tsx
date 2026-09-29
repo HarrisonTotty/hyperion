@@ -315,3 +315,41 @@ describe("SystemList", () => {
     expect(firstOption()).not.toHaveTextContent("12.00");
   });
 });
+
+describe("SystemList's free-floating objects (plan 13, P13.T8.d)", () => {
+  function substellarRows(): ReadonlyArray<ChartSystem> {
+    return toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 10,
+        minLayer: "rogue_planet",
+        systems: [
+          { relLy: [1, 0, 0], layer: "brown_dwarf" },
+          { relLy: [2, 0, 0], layer: "rogue_planet" },
+        ],
+      }),
+    ).systems;
+  }
+
+  it("names a brown dwarf in words, with its class and its mass in M☉ to three decimals", () => {
+    stubViewport();
+    renderList(substellarRows());
+
+    const row = screen.getByRole("option", {
+      name: "H7K 4C0RFZ F-1, BROWN DWARF T5, 1 star, 1.00 ly, 0.046 solar masses, IN RANGE",
+    });
+    expect(row).toHaveTextContent("T5");
+  });
+
+  it("names a free-floating planet PLANET, with no stars and its mass in Earth masses", () => {
+    stubViewport();
+    renderList(substellarRows());
+
+    const row = screen.getByRole("option", {
+      name: /^H7K 4C0RFZ G-2, PLANET, 2.00 ly, [0-9.,]+ Earth masses, IN RANGE$/u,
+    });
+    expect(within(row).getByText("PLANET")).toBeInTheDocument();
+    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(within(row).getByRole("img", { name: "Earth masses" })).toBeInTheDocument();
+  });
+});

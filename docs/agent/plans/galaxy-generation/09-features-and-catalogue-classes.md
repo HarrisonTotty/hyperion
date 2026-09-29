@@ -1789,3 +1789,63 @@ classes)` for the centre (P09.T27) and the tests. A class's count sits at word `
     capping a tail at `r_t + v_drift × age` and its total at the mass lost less the remnants and
     runaways already counted (Küpper et al. 2010, MNRAS 401, 105, not re-checked), and notes that
     a nursery's loss by gas expulsion leaves at about 1 km/s in every direction, not as a tail.
+
+- **P09.T9.b's retention after P11.T1.d (round 9b, `fates`; a finding for the orchestrator).**
+  Plan 06's companion-stripped mark is now read against plan 11's stripped share re-derived from
+  ruling 81's direct construction (0.433 over neutron-star progenitors, against ruling 123.3's
+  0.25–0.33), so more neutron stars take the low kick mode: retention is 31.4% at 100 km/s and
+  28.6% at 50 km/s, above ruling 126.3's 18–26% and 15–25% (20 km/s and the open cluster still
+  pass). `neutron_stars_are_retained_as_the_brainstorm_says` holds the two measured values
+  provisionally, and the doctest reads "a fifth to a third", until plan 11's finding is ruled on.
+- **Ruling 137.3, as applied (round 9b, `fates`; tests only).** Ruling 126.3's retention windows
+  were stated at w = 0.181 and now shift with the measured w by (w − 0.181)(P_low(< v) −
+  P_DM25(< v)). At w = 0.2675 they are 26–34% at 100 km/s, 24–34% at 50 and 10–22% at 20, and
+  under 1% in the open cluster: measured 31.4%, 28.6%, 16.2% and 0.43%, all asserted, the
+  provisional holds removed. The doctest's "a fifth to a third" stays.
+
+- **Ruling 136 as built (lane `feat09c`, 2026-09-28, at `GENERATOR_VERSION` 14, in the version-15
+  batch).** It answers the findings above; where an entry above says otherwise, this one stands.
+  - _T15.a (136.1)._ The hot branch is Tang and Wang's eq. 2 on CMB88's Sedov clock: `c_s =
+√(5⁄3) C₀`, `v* = (v_PDS^(5⁄3) + c_s^(5⁄3))^(3⁄5)`, radiative if `v* > β c_net` with `v*` in the
+    radiative form, otherwise `W = t_PDS v_PDS^(5⁄3) ÷ ((β c_net)^(5⁄3) − c_s^(5⁄3))`, 0.931 `t_c` in
+    hot gas. The plan's 0.41 `t_c` is dropped. `ShellWindow` gains `sound_speed()` (`c_s`) and
+    `characteristic_time()` (`t_c`); `snr::{standard_normal_cdf, truncated_standard_normal}` are
+    `ExplosionEnergy`'s law, now shared. The window table at 3,800 K cm⁻³ is 4.37, 5.28, 8.45, 8.41,
+    4.35, 1.91, 0.82 and 0.35 × 10⁵ yr, tested against ruling 136.1's figures to 25%, the switch at
+    1.5 × 10⁻³ cm⁻³. The largest window at 10⁵¹ erg is 2.40 Myr at a floor of 300 K cm⁻³ and 2.07 at
+    450 (the test's 2.0–2.45).
+  - _T16.a (136.2)._ The non-radiative phase adds Tang and Wang's excess over Sedov to Truelove and
+    McKee's, `₂F₁(−3⁄5, 2⁄5; 7⁄5; −x)` by Pfaff's transform and 64 terms; `2.5 ₂F₁(1) = 2.8901`
+    (tested against their 2.89). Radii at the end of each window: 843, 493, 313, 173, 78, 34, 15
+    and 6 ly from 10⁻³ to 10⁴ cm⁻³ (tests: 3–1,000 ly, 800–900 at 10⁻³, 3–10 at 10⁴). A shell in
+    the median interior lasts 2.65 × 10⁵ yr without a wall. Over 6,979 of the fixture's bubbles
+    within 12,000 ly of the Sun-like point, each shell at a point uniform in its bubble, the median
+    shell ends at 9.1 × 10³ yr, 95% of them at the wall (test: median under 3 × 10⁵ yr).
+  - _T15.b and T4.b (136.3)._ A nursery's interior density is `truncated_standard_normal(Φ(z), 2)`
+    of its drawn normal `z` on the same words (`BUBBLE_INTERIOR_TRUNCATION` = 2), 1.26 × 10⁻³ to
+    0.020 cm⁻³. This moves every nursery's `bubble_interior`, which no golden pins; it joins the
+    version-15 batch. Caps: bubble 0.570 Myr (test 0.5–0.65), field 3.295 Myr for the fixture,
+    3.67 at 300 K cm⁻³ and 3.15 at 450 (test 3.15–3.67).
+  - _T16.b and P06.T21.e (136.4)._ `stellar::remnant::neutron_star::WIND_NEBULA_THRESHOLD` is 10²⁸
+    W (10³⁵ erg/s) and `PulsarWindNebula::of` reads `has_wind_nebula`; `snr::NEBULA_THRESHOLD` is
+    gone. Median nebula 1.45 × 10⁴ yr; plan 06's 10³–10^5.5 yr test passes.
+  - _T18.a (136.5–7)._ The seed window is 0.2–1 Type Ia a century (measured 0.25–0.87 over 24
+    seeds; the fixture 0.427). The ancient share is 4.1–4.6% of the old populations' layer D and
+    0.26% of the young disc's, "no longer a layer-D system" whatever the channel (test 3.5–5%).
+    `MIN_DELAY` is plan 06's τ(8 M☉) at solar composition and median draws, 42.55 Myr (asserted to
+    0.1%); `A` = 2.162 × 10⁻¹³; 18.6% of delays under 0.1 Gyr, 61.7% under 1 Gyr.
+    `draw_floor` and `drawable_rate_per_year` are removed: the draw proposes the delay itself
+    above `MIN_DELAY` (the formation history read at the delay) and sets the age at the epoch to
+    the delay less the explosion's clock time, so nothing is lost to the draw.
+  - _T18.b (136.8)._ The period a thousand years before a merger: median 89.6 s, 5–95% 77.9–118.9
+    s (tests: median 80–100, 5–95% inside 70–130).
+  - _T18.c (136.9)._ `CHANNEL_SHARES` = 0.53, 0.30, 0.04, 0.13 (Iax from Srivastav et al. 2022).
+  - _For T17 (136.9–10)._ Pass the site gas's `[M/H]` to `shell_window`, not the star's: CMB88's
+    ζ is the cooling gas's. Iax energies (0.05 × 10⁵¹ erg for SN 2020kyg) lie below
+    `ExplosionEnergy`'s 0.40–2.51 and need their own law. `EJECTA_MASS`'s 3 M☉ is CMB88's own
+    simulation value. The window reads the drawn phase's density and sound speed (confirmed:
+    Kim and Ostriker 2015 find a blast follows the uniform solution in the volume-filling phase).
+  - _Goldens._ `catalogue_classes/supernova.golden` re-blessed at 14: the window table, shell
+    radii and speeds (136.1–2), the caps (136.1, 136.3), the Type Ia rate and ancient shares
+    (136.7's `MIN_DELAY`) and the twelve progenitors (the delay-first draw, `MIN_DELAY`, 136.9's
+    shares) moved; the light curves did not.

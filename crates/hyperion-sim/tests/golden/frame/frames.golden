@@ -1,4 +1,4 @@
-# generator_version = 14
+# generator_version = 15
 # seed 0x0312b00000000000, milky_way_like, no sources, no current frame
 ship[00].x_ly = 0x40344b14637cdfc6  # 20.293279855715603
 ship[00].y_ly = 0x40d96147ad4f8b09  # 25989.119953046586
@@ -108,13 +108,13 @@ ship[20].frame_at_end = 0x01d05b2edff50000 (EPF 855VFN A-0)
 ship[21].x_ly = 0x40bca20000000001  # 7330.000000000001
 ship[21].y_ly = 0x40d96cd99999999a  # 26035.4
 ship[21].z_ly = 0xc053f99999999999  # -79.89999999999999
-ship[21].frame_at_epoch = none
-ship[21].frame_at_end = none
+ship[21].frame_at_epoch = 0x42392cb5ff40000a (HPF 341D3X C-10)
+ship[21].frame_at_end = 0x42392cb5ff40000a (HPF 341D3X C-10)
 ship[22].x_ly = 0x40b7840000000001  # 6020.000000000001
 ship[22].y_ly = 0x40d9507333333333  # 25921.8
 ship[22].z_ly = 0xc045ccccccccccce  # -43.60000000000001
-ship[22].frame_at_epoch = 0x822fb29ff0000015 (HPF 0F0A0Z E-21)
-ship[22].frame_at_end = 0x822fb29ff0000015 (HPF 0F0A0Z E-21)
+ship[22].frame_at_epoch = 0x622f5957fe00000f (HPF 0Y0N1Z D-15)
+ship[22].frame_at_end = 0x622f5957fe00000f (HPF 0Y0N1Z D-15)
 ship[23].x_ly = 0xc0af180000000000  # -3980.0
 ship[23].y_ly = 0x40d962d333333333  # 25995.3
 ship[23].z_ly = 0x400b33333333333a  # 3.400000000000003

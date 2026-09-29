@@ -445,8 +445,8 @@ pub struct DerivedBody {
     initial_envelope_fraction: f64,
     envelope_lost: EarthMasses,
     albedo: BondAlbedo,
-    irradiation_temperature: Kelvin,
     equilibrium_temperature: Kelvin,
+    effective_temperature: Option<Kelvin>,
     atmosphere: Atmosphere,
     internal_luminosity: Watts,
     radius: EarthRadii,
@@ -552,13 +552,6 @@ impl DerivedBody {
         self.albedo
     }
 
-    /// The equilibrium temperature from the hosts' light alone, at [`albedo`](Self::albedo), with
-    /// no internal heat: what the atmosphere reads (ruling 112.7's irradiation temperature).
-    #[must_use]
-    pub const fn irradiation_temperature(&self) -> Kelvin {
-        self.irradiation_temperature
-    }
-
     /// The body's atmosphere and surface at the time (P14.T13).
     #[must_use]
     pub const fn atmosphere(&self) -> &Atmosphere {
@@ -571,11 +564,21 @@ impl DerivedBody {
         self.atmosphere.surface_temperature()
     }
 
-    /// The equilibrium temperature at the time, with the body's internal luminosity added for a
-    /// giant, T⁴ = `T_eq`⁴ + `L_int` ÷ (4πR²σ) (P14.T12.a, [`with_internal_heat`]).
+    /// The equilibrium temperature at the time: from the hosts' light alone, at
+    /// [`albedo`](Self::albedo), with no internal heat (P14.T12.a; ruling 112.7). It is what the
+    /// atmosphere reads.
     #[must_use]
     pub const fn equilibrium_temperature(&self) -> Kelvin {
         self.equilibrium_temperature
+    }
+
+    /// The effective temperature at the time of a body with a luminosity of its own, a giant's:
+    /// T⁴ = `T_eq`⁴ + `L_int` ÷ (4πR²σ) ([`with_internal_heat`]; ruling 112.7), what it radiates
+    /// and what its cloud tops are taken to be at. `None` for a body with no internal luminosity,
+    /// whose effective temperature is its equilibrium one.
+    #[must_use]
+    pub const fn effective_temperature(&self) -> Option<Kelvin> {
+        self.effective_temperature
     }
 
     /// The radius at the time: the solved radius for a body without an envelope, for one with an
@@ -930,10 +933,10 @@ pub fn derive_body(
         (irradiated, heated, air)
     };
     let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-    let (mut irradiated, mut t_eq, mut air) = pass(albedo);
+    let (mut irradiated, mut heated, mut air) = pass(albedo);
     for _ in 1..ATMOSPHERE_PASSES {
         albedo = air.albedo();
-        (irradiated, t_eq, air) = pass(albedo);
+        (irradiated, heated, air) = pass(albedo);
     }
 
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
@@ -963,8 +966,8 @@ pub fn derive_body(
         initial_envelope_fraction: escape.initial,
         envelope_lost: escape.lost,
         albedo,
-        irradiation_temperature: irradiated,
-        equilibrium_temperature: t_eq,
+        equilibrium_temperature: irradiated,
+        effective_temperature: (internal_luminosity > Watts::ZERO).then_some(heated),
         atmosphere: air,
         internal_luminosity,
         radius,
@@ -1621,15 +1624,20 @@ mod tests {
                     .value(),
             );
             let t = equilibrium_temperature(flux, body.albedo());
-            assert_same_bits(body.irradiation_temperature().value(), t.value());
+            // Ruling 112.7: the equilibrium temperature is the light's alone, and a giant's
+            // internal heat goes into its effective temperature.
+            assert_same_bits(body.equilibrium_temperature().value(), t.value());
             if name == "Jupiter" {
                 let radius = Metres::from(body.radius());
                 let warmed = with_internal_heat(t, body.internal_luminosity(), radius);
-                assert_same_bits(body.equilibrium_temperature().value(), warmed.value());
-                assert!(body.equilibrium_temperature() > t, "{name}");
+                let effective = body
+                    .effective_temperature()
+                    .expect("a giant radiates its own");
+                assert_same_bits(effective.value(), warmed.value());
+                assert!(effective > t, "{name}");
             } else {
                 assert_same_bits(body.internal_luminosity().value(), 0.0);
-                assert_same_bits(body.equilibrium_temperature().value(), t.value());
+                assert_eq!(body.effective_temperature(), None, "{name}");
             }
         }
         let earth = found(&bodies, "Earth");
@@ -2139,6 +2147,9 @@ mod tests {
             w.f64(&format!("{name}_envelope"), f.envelope());
             w.f64(&format!("{name}_flux"), d.flux().value());
             w.f64(&format!("{name}_t_eq"), d.equilibrium_temperature().value());
+            if let Some(t_eff) = d.effective_temperature() {
+                w.f64(&format!("{name}_t_eff"), t_eff.value());
+            }
             w.f64(
                 &format!("{name}_internal_luminosity"),
                 d.internal_luminosity().value(),

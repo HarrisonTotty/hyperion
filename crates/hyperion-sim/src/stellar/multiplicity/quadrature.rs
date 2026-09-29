@@ -2,11 +2,18 @@
 //! mass, the companions' mass per system, and the share of massive primaries a companion strips.
 //!
 //! Each is a fixed-node Gauss–Legendre quadrature with no randomness, over stellar companions
-//! only: brown-dwarf companions are left out of all three (Design note 15). Plan 02's
-//! `fates::stars_below`, plan 08's `displaced::binarity::stripped_share` and plan 15's P15.T4.b
-//! call them once P11.T1.d wires them in; until then nothing calls them, so no output depends on
-//! them. The panel scheme and node counts are part of the generator version from then on.
+//! only: brown-dwarf companions are left out of all three (Design note 15). The T1.c forms
+//! integrate the spine construction's laws; the `_as_drawn` forms (P11.T1.d) integrate the
+//! companions the hierarchy draw gives, with ruling 81's direct construction above 1.5 M☉. Plan
+//! 08's `displaced::binarity` reads [`band_share_as_drawn`] (through its offline table), plan 02's
+//! `fates::stars_below` agrees with [`all_stars_fraction_below_as_drawn`] under
+//! [`MultiplicityFates`](super::MultiplicityFates), and plan 15's P15.T4.b fits against it. The
+//! panel scheme and node counts are part of the generator version.
 
+use super::direct::{
+    DIRECT_MIN_MASS_RATIO, DirectPeriods, UNCORRECTED, direct_count_pmf, direct_mass_ratio_law,
+    direct_weight,
+};
 use super::dist::{
     CIRCULARISATION_PERIOD, ECCENTRICITY_ENVELOPE_PERIOD, ECCENTRICITY_EXPONENT_KINKS,
     MIN_COMPANION_MASS, MOE_DI_STEFANO_MASS_KINKS, MOE_DI_STEFANO_MIN_MASS, PeriodDistribution,
@@ -175,26 +182,41 @@ fn interacting_share(
     if x_hi <= x_lo || ratio <= 0.0 {
         return 0.0;
     }
-    let x_0 = math::log10(ECCENTRICITY_ENVELOPE_PERIOD.value());
     let x_circ = math::log10(CIRCULARISATION_PERIOD.value());
-    let x_inside = x_0 + 1.5 * math::log10(ratio);
-    let interacts = |x: f64| {
-        let y = math::exp10((2.0 / 3.0) * (x - x_0));
-        if y <= ratio {
-            1.0
-        } else if x < x_circ || ratio <= 1.0 {
-            0.0
-        } else {
-            let power = 1.0 + eccentricity_exponent(m1, x);
-            1.0 - math::powf((y - ratio) / (y - 1.0), power)
-        }
-    };
+    let x_inside = inside_log_period(ratio);
+    let interacts = |x: f64| interaction_probability(m1, x, ratio);
     let mut edges = vec![x_inside, x_circ];
     edges.extend_from_slice(&ECCENTRICITY_EXPONENT_KINKS);
     edges.extend_from_slice(kinks);
     integrate_log_period(periods, x_lo, x_hi, &edges, MAX_PANEL_LOG_PERIOD, |x| {
         periods.pdf(x) * weight(x) * interacts(x)
     })
+}
+
+/// x = log₁₀(P ÷ 1 d) at which an orbit's semi-major axis is `ratio` times `a₀`, the separation of
+/// a circular orbit of [`ECCENTRICITY_ENVELOPE_PERIOD`] about the same masses: inside it every
+/// orbit's periastron lies within `ratio a₀`.
+#[must_use]
+fn inside_log_period(ratio: f64) -> f64 {
+    math::log10(ECCENTRICITY_ENVELOPE_PERIOD.value()) + 1.5 * math::log10(ratio)
+}
+
+/// The probability that a companion of a primary of `m1` on an orbit of x = log₁₀(P ÷ 1 d) has its
+/// periastron inside `ratio a₀` (see [`interacting_share`]), under the eccentricity law of
+/// [`eccentricity_distribution`](MultiplicityModel::eccentricity_distribution).
+#[must_use]
+fn interaction_probability(m1: SolarMasses, x: f64, ratio: f64) -> f64 {
+    let x_0 = math::log10(ECCENTRICITY_ENVELOPE_PERIOD.value());
+    let x_circ = math::log10(CIRCULARISATION_PERIOD.value());
+    let y = math::exp10((2.0 / 3.0) * (x - x_0));
+    if y <= ratio {
+        1.0
+    } else if x < x_circ || ratio <= 1.0 {
+        0.0
+    } else {
+        let power = 1.0 + eccentricity_exponent(m1, x);
+        1.0 - math::powf((y - ratio) / (y - 1.0), power)
+    }
 }
 
 /// `∫ g(q) dq` over the mass ratios `[lo, 1]`, by 16-point Gauss–Legendre in ln q on panels
@@ -228,13 +250,14 @@ fn over_mass_ratios(lo: f64, mut g: impl FnMut(f64) -> f64) -> f64 {
 }
 
 /// The share of primaries of initial mass `m1` and composition `comp` whose innermost companion's
-/// periastron is close enough to interact before the primary's core collapse: the provisional
-/// companion-stripped share that plan 06's mark and plan 08's class table read (Design note 1).
+/// periastron is close enough to interact before the primary's core collapse, under the spine
+/// construction's laws (P11.T1.c). The seam that plan 06's mark and plan 08's class table read
+/// integrates the drawn companions instead ([`band_share_as_drawn`], P11.T1.d), which this is the
+/// part of below 3 M☉.
 ///
 /// `interacting_periastron(m1, q, comp)` is the largest periastron at which a pair of that
-/// primary, mass ratio and composition interacts before the primary's core collapse: P11.T4.a's
-/// `can_interact` threshold, which P11.T1.d supplies; until it exists a caller passes its own (the
-/// tests pass periastra under 10 au). The share is the primary's
+/// primary, mass ratio and composition interacts before the primary's core collapse (the tests
+/// pass periastra under 10 au). The share is the primary's
 /// [`multiple_fraction`](MultiplicityModel::multiple_fraction) times the probability that its
 /// innermost orbit, drawn from the model's period, mass-ratio and eccentricity laws as the
 /// hierarchy draws it (Design notes 1 and 4), has a periastron under the threshold. Integrated
@@ -295,6 +318,223 @@ pub fn stripped_share(
     model.multiple_fraction(m1) * inner
 }
 
+/// The mass ratios, besides 0.1 and 1, at which `direct_band_share`'s integrand may jump or
+/// kink in q: the binary engine's onset ratios, where a stripping band's merger edge moves
+/// (`1 ÷ GAP_Q` and `1 ÷ CODE_Q`, 1/4 and 1/3), and the mass-ratio law's breaks (0.3 and the
+/// twins' 0.95).
+const DIRECT_RATIO_EDGES: [f64; 4] = [0.25, 0.3, 1.0 / 3.0, TWIN_MIN_MASS_RATIO];
+
+/// The share of primaries of `m1` whose innermost direct companion's periastron lies in the band
+/// `(inner, outer]` that `band(m1, q, comp)` gives for its mass ratio q, under ruling 81's direct
+/// construction (P11.T1.d).
+///
+/// The count is [`direct_count_pmf`]'s and each of the n companions is drawn independently from
+/// Moe and Di Stefano's period law as they give it, which the fitted correction makes the drawn
+/// companions follow after rejection, and their mass-ratio and eccentricity laws at that period.
+/// The innermost of n is the one of shortest period, so its density is `n f(x) (1 − F(x))^(n−1)`:
+/// the share is `∫ Σₙ pₙ n f(x) (1 − F(x))^(n−1) ∫ g(q | x) P(periastron in band | x, q) dq dx`,
+/// by 8-point Gauss–Legendre in q on panels between 0.1, 1 and [`DIRECT_RATIO_EDGES`], and for
+/// each ratio by 4-point Gauss–Legendre on the period law's own pieces ([`DirectPeriods::pieces`],
+/// split at the laws' kinks), the piece where every orbit starts to lie inside an edge split
+/// there. Stability rejection is not modelled.
+#[must_use]
+fn direct_band_share(
+    m1: SolarMasses,
+    comp: &Composition,
+    band: &impl Fn(SolarMasses, f64, &Composition) -> (Metres, Metres),
+) -> f64 {
+    use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
+    let pmf = direct_count_pmf(m1);
+    let periods = DirectPeriods::new(m1, &UNCORRECTED);
+    let envelope = Seconds::from(ECCENTRICITY_ENVELOPE_PERIOD);
+    let mut cuts: Vec<f64> = MultiplicityModel::mass_ratio_period_kinks(m1).to_vec();
+    cuts.extend_from_slice(&ECCENTRICITY_EXPONENT_KINKS);
+    cuts.push(math::log10(CIRCULARISATION_PERIOD.value()));
+    let pieces = periods.pieces(&cuts);
+    // Each piece's nodes with the innermost companion's weight and its mass-ratio law.
+    let innermost = |cdf: f64| {
+        let survive = 1.0 - cdf;
+        pmf[1] + survive * (2.0 * pmf[2] + 3.0 * pmf[3] * survive)
+    };
+    let prepared = |nodes: [super::direct::PeriodNode; 4]| {
+        nodes.map(|node| {
+            (
+                node.x,
+                node.weight * innermost(node.cdf),
+                direct_mass_ratio_law(m1, node.x),
+            )
+        })
+    };
+    let base: Vec<[(f64, f64, super::MassRatioDistribution); 4]> = pieces
+        .iter()
+        .map(|piece| prepared(piece.nodes(piece.lo, piece.hi)))
+        .collect();
+    let mut edges = vec![DIRECT_MIN_MASS_RATIO, 1.0];
+    edges.extend(DIRECT_RATIO_EDGES);
+    edges.sort_by(f64::total_cmp);
+    let mut sum = 0.0;
+    for pair in edges.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let half = 0.5 * (b - a);
+        let mid = a + half;
+        for (&t, &w) in GL8_NODES.iter().zip(&GL8_WEIGHTS) {
+            let q = mid + half * t;
+            let a_0 = semi_major_axis(m1 * (1.0 + q), envelope);
+            let (inner, outer) = band(m1, q, comp);
+            let ratios = [inner / a_0, outer / a_0];
+            if ratios[1] <= ratios[0] || ratios[1] <= 0.0 {
+                continue;
+            }
+            let splits = ratios.map(|r| (r > 0.0).then(|| inside_log_period(r)));
+            let within = |x: f64| {
+                let p = |r: f64| {
+                    if r > 0.0 {
+                        interaction_probability(m1, x, r)
+                    } else {
+                        0.0
+                    }
+                };
+                p(ratios[1]) - p(ratios[0])
+            };
+            let mut inner_sum = 0.0;
+            for (piece, nodes) in pieces.iter().zip(&base) {
+                let mut cut: Vec<f64> = splits
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .filter(|&x| x > piece.lo && x < piece.hi)
+                    .collect();
+                if cut.is_empty() {
+                    for (x, weight, law) in nodes {
+                        inner_sum += weight * law.pdf(q) * within(*x);
+                    }
+                } else {
+                    cut.push(piece.lo);
+                    cut.push(piece.hi);
+                    cut.sort_by(f64::total_cmp);
+                    for part in cut.windows(2) {
+                        for (x, weight, law) in prepared(piece.nodes(part[0], part[1])) {
+                            inner_sum += weight * law.pdf(q) * within(x);
+                        }
+                    }
+                }
+            }
+            sum += w * half * inner_sum;
+        }
+    }
+    sum
+}
+
+/// The share of primaries of initial mass `m1` whose innermost companion's periastron lies in the
+/// band `(inner, outer]` that `band(m1, q, comp)` gives for its mass ratio q, as the hierarchy draw
+/// builds the primary's companions (P11.T1.d): [`stripped_share`] at the band's two edges up to
+/// 1.5 M☉, the direct construction's (`direct_band_share`) from 3 M☉, and between them the two
+/// blended by the share of systems the draw builds directly. Plan 08's seam reads it for the
+/// stripping band ([`binarity`](crate::galaxy::displaced::binarity)).
+///
+/// # Panics
+///
+/// If `m1` is not positive and finite.
+#[must_use]
+pub fn band_share_as_drawn(
+    model: &MultiplicityModel,
+    m1: SolarMasses,
+    comp: &Composition,
+    band: impl Fn(SolarMasses, f64, &Composition) -> (Metres, Metres),
+) -> f64 {
+    let w = direct_weight(m1);
+    let spine = || {
+        let outer = stripped_share(model, m1, comp, |m, q, c| band(m, q, c).1);
+        let inner = stripped_share(model, m1, comp, |m, q, c| band(m, q, c).0);
+        outer - inner
+    };
+    if w <= 0.0 {
+        return spine();
+    }
+    let direct = direct_band_share(m1, comp, &band);
+    if w >= 1.0 {
+        return direct;
+    }
+    (1.0 - w) * spine() + w * direct
+}
+
+/// [`stripped_share`] as the hierarchy draw builds the primary's companions (P11.T1.d): the spine
+/// construction's share up to 1.5 M☉, the direct construction's (`direct_band_share`) from
+/// 3 M☉, and between them the two blended by the share of systems the draw builds directly:
+/// [`band_share_as_drawn`] from no periastron to the threshold.
+///
+/// # Panics
+///
+/// If `m1` is not positive and finite.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::stellar::Composition;
+/// use hyperion_sim::stellar::multiplicity::{MultiplicityModel, stripped_share_as_drawn};
+/// use hyperion_sim::units::{AstronomicalUnits, Metres, SolarMasses};
+///
+/// let model = MultiplicityModel::default_v1();
+/// let ten_au =
+///     |_: SolarMasses, _: f64, _: &Composition| Metres::from(AstronomicalUnits::new(10.0));
+/// let m1 = SolarMasses::new(20.0);
+/// let share = stripped_share_as_drawn(&model, m1, &Composition::SOLAR, ten_au);
+/// assert!(share > 0.0 && share < model.drawn_multiple_fraction(m1));
+/// ```
+#[must_use]
+pub fn stripped_share_as_drawn(
+    model: &MultiplicityModel,
+    m1: SolarMasses,
+    comp: &Composition,
+    interacting_periastron: impl Fn(SolarMasses, f64, &Composition) -> Metres,
+) -> f64 {
+    band_share_as_drawn(model, m1, comp, |m, q, c| {
+        (Metres::ZERO, interacting_periastron(m, q, c))
+    })
+}
+
+/// [`all_stars_fraction_below`] as the hierarchy draw builds companions (P11.T1.d): each primary's
+/// companions are [`drawn_companion_frequency`](MultiplicityModel::drawn_companion_frequency) in
+/// number, their mass ratios distributed as
+/// [`drawn_companion_mass_ratio_cdf`](MultiplicityModel::drawn_companion_mass_ratio_cdf), ruling
+/// 81's direct construction above 1.5 M☉. This is the quadrature plan 02's `stars_below` agrees
+/// with under [`MultiplicityFates`](super::MultiplicityFates), and the one plan 15's P15.T4.b fits
+/// Chabrier's scale by.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::imf::Chabrier;
+/// use hyperion_sim::stellar::multiplicity::{
+///     MultiplicityModel, all_stars_fraction_below_as_drawn,
+/// };
+/// use hyperion_sim::units::SolarMasses;
+///
+/// let model = MultiplicityModel::default_v1();
+/// let below = all_stars_fraction_below_as_drawn(&Chabrier::default(), &model, SolarMasses::new(0.5));
+/// assert!((0.6..0.8).contains(&below));
+/// ```
+#[must_use]
+pub fn all_stars_fraction_below_as_drawn(
+    mf: &dyn MassFunction,
+    model: &MultiplicityModel,
+    m: SolarMasses,
+) -> f64 {
+    let cut = m.value();
+    let mut kinks = vec![cut, cut / TWIN_MIN_MASS_RATIO, cut / DIRECT_MIN_MASS_RATIO];
+    kinks.extend(model.drawn_kinks());
+    let below = integrate_primaries(mf, model, &kinks, |m1| {
+        let primary = if m1.value() < cut { 1.0 } else { 0.0 };
+        let companions = model.drawn_companion_frequency(m1)
+            * model.drawn_companion_mass_ratio_cdf(m1, cut / m1.value());
+        primary + companions
+    });
+    let all = integrate_primaries(mf, model, &kinks, |m1| {
+        1.0 + model.drawn_companion_frequency(m1)
+    });
+    below / all
+}
+
 /// The companions' lowest mass: brown dwarfs are never counted here.
 const _: () = assert!(MIN_COMPANION_MASS.value() >= MASS_LIMIT_LO);
 
@@ -335,7 +575,7 @@ mod tests {
         let default = all_stars_fraction_below(&Chabrier::provisional(), &model, half);
         println!(
             "all stars below 0.5 M☉: Kroupa {kroupa:.4}, Chabrier as published {published:.4}, \
-             default (scale 0.68) {default:.4}; census 0.69"
+             default (the fitted scale) {default:.4}; census 0.69"
         );
         assert!(
             published < default && default < kroupa,
@@ -359,8 +599,10 @@ mod tests {
         assert!((all - 1.0).abs() < 1e-12, "{all}");
     }
 
-    /// Stars per system lie in P11.T1.d's bracket, 1.33–1.45, under the default and Kroupa's
-    /// mass functions; Chabrier's as published is printed (1.463, ruling 74).
+    /// Stars per system under the spine construction's counts lie in P11.T1.d's bracket,
+    /// 1.33–1.45, under Kroupa's function; Chabrier's as published (1.463, ruling 74) and the
+    /// default at its fitted scale (1.457, ruling 138) are printed, since T1.d's bracket is on the
+    /// drawn companions and asserted there.
     /// The companions' initial mass per system is printed beside plan 02's stand-in's (the formed
     /// mass less the primaries') for T1.d, which wires the model in. The census counts 0.32–0.38
     /// stellar companions per system (plan 11, Risks), a present-day count.
@@ -391,7 +633,10 @@ mod tests {
             // Chabrier's function as published, with its heavier high-mass branch, has 1.463
             // since Moe and Di Stefano's massive anchors (ruling 74), just above the bracket that
             // T1.d sets for the default: a finding recorded in plan 11's Risks.
-            if name != "Chabrier as published" {
+            // The default at plan 15's fitted scale (ruling 138) has 1.457 under the spine
+            // construction's counts, just above the bracket too; T1.d's bracket is asserted on the
+            // drawn companions (`derive::tests`, 1.437).
+            if name == "Kroupa" {
                 assert!((1.33..=1.45).contains(&(1.0 + count)), "{count}");
             }
             assert!(mass > 0.0 && mass < primaries, "{mass} against {primaries}");

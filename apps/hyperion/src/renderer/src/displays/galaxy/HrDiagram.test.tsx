@@ -172,6 +172,25 @@ describe("HrDiagram", () => {
     expect(screen.queryByText("NO PHOTOSPHERE")).not.toBeInTheDocument();
     expect(screen.queryByText("NO DATA")).not.toBeInTheDocument();
     expect(screen.queryByText("DATA INVALID")).not.toBeInTheDocument();
+    // No free-floating planet, so no count of them (plan 13, P13.T8.d).
+    expect(screen.queryByText("PLANET", { selector: "dt" })).not.toBeInTheDocument();
+  });
+
+  it("counts free-floating planets under NOT PLOTTED once there are some", () => {
+    const planets = toChartResult(
+      aSystemsInRange({
+        minLayer: "rogue_planet",
+        systems: [
+          { relLy: [1, 0, 0], layer: "c" },
+          { relLy: [2, 0, 0], layer: "rogue_planet" },
+          { relLy: [3, 0, 0], layer: "rogue_planet" },
+        ],
+      }),
+    ).systems;
+    renderDiagram({ systems: planets });
+
+    expect(count("PLOTTED")).toBe("1");
+    expect(count("PLANET")).toBe("2");
   });
 
   it("counts a plotted kind whose values fail its checks as DATA INVALID", () => {

@@ -271,9 +271,11 @@ The seed chooses the galaxy's gross properties from the observed ranges for larg
 - **Stellar mass**, 3–10 × 10¹⁰ M☉, log-uniform. The number of systems is derived from it, not
   drawn: mass divided by the mean present-day mass of a system, which is a once-per-galaxy
   quadrature over the mass function, multiplicity, the age distributions, stellar lifetimes and
-  remnant masses. It comes to about 0.55–0.59 M☉ under the default, Chabrier's system function (0.48
-  under Kroupa's), living stars, remnants and companions together, and varies by only 3% between the
-  old populations. So a galaxy holds 0.5–1.8 × 10¹¹ systems, and one of the Milky Way's mass about
+  remnant masses. In stars and white dwarfs, as the solar neighbourhood's census counts it, it comes
+  to about 0.55–0.59 M☉ under the default, Chabrier's system function (0.48 under Kroupa's), living
+  stars, white dwarfs and companions together; neutron stars and black holes, which no census
+  holds, add a few hundredths to the mean the system count divides by. It varies by only 3% between
+  the old populations. So a galaxy holds 0.5–1.8 × 10¹¹ systems, and one of the Milky Way's mass about
   10¹¹.
 - **Shares and sizes** of the [populations](#populations): disc scale length (the Milky Way's is
   2.15–2.6 kpc: 2.15 ± 0.14 mass-weighted from Bovy and Rix 2013, 2.6 ± 0.5 from Bland-Hawthorn and
@@ -367,7 +369,7 @@ Milky Way figures:
 | OB association               | tens of thousands                                              | up to 300 ly: expansion speed × age   | Unbound and under about 30 Myr                                          | Young disc, so the arms                                                                                                      |
 | Star-forming region          | about 10⁴                                                      | 10–300 ly                             | An embedded cluster still forming, protostars, gas                      | Young disc                                                                                                                   |
 | Molecular cloud, dark nebula | thousands                                                      | 50–300 ly                             | None: gas and dust only                                                 | Dust field                                                                                                                   |
-| Supernova remnant            | about 10⁴, a thousand or two of them bright                    | 10–800 ly                             | It is a system: the star that died                                      | Four in five core collapses are inside associations, which hold a quarter of the shells; Type Ia shells follow the old stars |
+| Supernova remnant            | about 10⁴, a thousand or two of them bright                    | 5–900 ly                              | It is a system: the star that died                                      | Four in five core collapses are inside associations, which hold a quarter of the shells; Type Ia shells follow the old stars |
 | Stellar stream               | 150–1,500                                                      | 30,000–10⁶ ly long, 100–6,000 ly wide | 10³–10⁸ systems lost by a cluster or dwarf                              | The orbits of dissolving globulars and accreted dwarfs                                                                       |
 | Dwarf galaxy core            | 0–3                                                            | up to 20,000 ly                       | 10³–10⁸ systems, not coeval                                             | Accretion history                                                                                                            |
 | Galactic centre              | 1                                                              | about 100 ly                          | Central black hole, 4–5 × 10⁷ more                                      | Fixed at the origin                                                                                                          |
@@ -544,10 +546,11 @@ position and on its own independent draws, and the parts are independent Poisson
   recently dead members are a class of its band E, listed at feature level so that charts find them
   from the feature catalogue alone. The feature carries the bubble, a Weaver-type radius from its
   count of O and B stars and its age, capped at blow-out, which is a hole in the gas field. A shell
-  inside it expands into thin hot gas and is large, faint and gone in about 10⁵ years, often by
-  reaching the bubble's wall. The remaining core collapses, from runaways and dissolved
-  associations, are catalogue systems in field gas. Globular clusters have no shells. The galactic
-  centre owns a handful from its young few per cent, as the real one owns Sgr A East and a magnetar.
+  inside it expands into thin hot gas and is large, faint and gone within a few hundred thousand
+  years, often by reaching the bubble's wall. The remaining core collapses, from runaways and
+  dissolved associations, are catalogue systems in field gas. Globular clusters have no shells. The
+  galactic centre owns a handful from its young few per cent, as the real one owns Sgr A East and a
+  magnetar.
 - **The count is a result.** Across our ranges there are 3,000 to 30,000 distinct shells, about
   7,000 at the Milky Way's rates of about two core collapses and half a Type Ia per century (Li et
   al. 2011). Of those a thousand or two are still hot and bright in radio and X-rays, which is what
@@ -561,45 +564,43 @@ position and on its own independent draws, and the parts are independent Poisson
   momentum-conserving snowplough). The remnant sits at kick × age from the centre, typically 200 ly
   and up to a few thousand in field gas, so about half of field remnants have left their shell and
   trail a bow shock (van der Swaluw et al. 2003). A pulsar wind nebula lasts as long as spin-down
-  says, 10⁴–10⁵ years, so most old shells have none.
+  keeps it above about 10³⁵ erg/s, 10⁴–10⁵ years, so most old shells have none.
 - **Type Ia shells** are a class of layer D, exactly as recent core collapse is a class of layer E.
   Their rate is observed, not computed: the delay-time distribution, 1.3 × 10⁻³ events per solar
   mass formed, falling as t^−1.1 from 40 Myr (Maoz and Graur 2017), applied to each population's own
-  history. That gives 0.4–1 a century, a fifth of all supernovae, but a third or more of the shells,
-  because they explode in thin gas, often high above the disc, where a shell lasts longer. The
-  binary formulae do not set the rate, which they are known to underpredict several times over
-  (Claeys et al. 2014). They supply a pool of candidate events, mergers of white dwarfs and
-  accreting white dwarfs that reach ignition, sub-Chandrasekhar ones included, and an independent
-  explosion mark thins the pool to the observed rate. The observed merger rate is five to seven
-  times the Ia rate (Maoz, Hallakoun and Badenes 2018), so about one pooled event in six explodes,
-  and the rest stay what the formulae made them: massive white dwarfs, R Coronae Borealis stars, hot
-  subdwarfs.
+  history. That gives about 0.4 a century at the Milky Way's parameters (Li et al. 2011 measure 0.54
+  ± 0.12) and 0.2–1 across the galaxies we allow, a fifth of all supernovae, but a third or more of
+  the shells, because they explode in thin gas, often high above the disc, where a shell lasts
+  longer. The binary formulae do not set the rate, which they are known to underpredict several
+  times over (Claeys et al. 2014). They supply a pool of candidate events, mergers of white dwarfs
+  and accreting white dwarfs that reach ignition, sub-Chandrasekhar ones included, and an
+  independent explosion mark thins the pool to the observed rate. The observed merger rate is five
+  to seven times the Ia rate (Maoz, Hallakoun and Badenes 2018), so about one pooled event in six
+  explodes, and the rest stay what the formulae made them: massive white dwarfs, R Coronae Borealis
+  stars, hot subdwarfs.
 - **A Type Ia entry draws its delay first**, then the binary that has that delay: population, age,
   time of explosion, channel, the two masses, and for a merger the separation after the common
   envelope, solved from Peters's (1964) inspiral time so that lifetimes and inspiral add up to the
   delay. Every shell has a complete history from single-star lifetimes and one formula. Primaries
-  are all of layer D: nothing under about 2.5 M☉ makes a heavy enough white dwarf in time. About 3%
-  of layer D has exploded long ago and left nothing, and the grid's binaries, run forward, redraw on
-  the same stream if they come out exploded.
+  are all of layer D: nothing under about 2.5 M☉ makes a heavy enough white dwarf in time. About
+  4–5% of the old populations' layer D has exploded long ago, and the grid's binaries, run forward,
+  redraw on the same stream if they come out exploded.
 - **What a Type Ia leaves.** By channel, as defaults of the generator version, since the science is
   unsettled: both white dwarfs destroyed, about half; a surviving donor flung out at 1,000–1,500
-  km/s, about a quarter, and at 1,900–2,500 km/s a few per cent (El-Badry et al. 2023); a hydrogen donor, puffed up and moving at 100–250 km/s, under
-  5%; and the weak Iax events, about 10%, which leave a partly burnt white dwarf (Foley et al.
-  2013). A recent survivor is a second member of the entry, at speed × age from the centre. Ancient
-  hypervelocity survivors are unbound and cross the cube in about 10⁷ years, so some tens of
-  thousands are inside at any time, as one more [displaced](#displaced-objects-kicks-and-runaways)
-  class on straight lines.
-
-#### Dense features: clusters and the galactic centre
-
-The nuclear cluster and the cores of globular clusters are too dense for the grid. The fine layer's
-index overflows at about 180 systems per cubic light-year, and long before that a cell-wide bound
-makes the candidate counts absurd. The field itself stays finite at the centre, at about 0.26 per
-cubic light-year for the bulge and about 16 for the nuclear disc of [Populations](#populations), so
-it needs no cap and still knows nothing about the features. What was left unsolved was how the range
-query finds the members near a ship without generating a million of them. **Lean:** each feature
-with members carries a small nested grid of its own, in its own frame:
-
+  km/s, about a quarter, and at 1,900–2,500 km/s a few per cent (El-Badry et al. 2023); a hydrogen
+  donor, puffed up and moving at 100–250 km/s, under 5%; and the weak Iax events, about one in eight
+  (Srivastav et al. 2022), which leave a partly burnt white dwarf (Foley et al. 2013). A recent
+  survivor is a second member of the entry, at speed × age from the centre. Ancient hypervelocity
+  survivors are unbound and cross the cube in about 10⁷ years, so some tens of thousands are inside
+  at any time, as one more [displaced](#displaced-objects-kicks-and-runaways) class on straight
+  lines. #### Dense features: clusters and the galactic centre The nuclear cluster and the cores of
+  globular clusters are too dense for the grid. The fine layer's index overflows at about 180
+  systems per cubic light-year, and long before that a cell-wide bound makes the candidate counts
+  absurd. The field itself stays finite at the centre, at about 0.26 per cubic light-year for the
+  bulge and about 16 for the nuclear disc of [Populations](#populations), so it needs no cap and
+  still knows nothing about the features. What was left unsolved was how the range query finds the
+  members near a ship without generating a million of them. **Lean:** each feature with members
+  carries a small nested grid of its own, in its own frame:
 - Level j is a block of 16 × 16 × 16 cells of width w × 2ʲ centred on the feature. Its inner 8 × 8 ×
   8 cells are exactly the volume of level j − 1, which owns them, so each level is a shell around
   the last. Eight levels span a factor of 128 in cell size: with w = 0.5 ly, half-light-year cells
@@ -1154,11 +1155,11 @@ between −(W + L + H) and +H, where W is its shell's window. Membership does no
 of the query, so there is one ID on both sides of the explosion. What the entry is depends on the
 time it is evaluated at, which for a sensor is the retarded time:
 
-| Evaluated    | The entry is                                                                                                                                    |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Before T     | The living progenitor. For a Type Ia by merger, two white dwarfs spiralling together, 80–100 s apart in period a thousand years before the end. |
-| From T       | A supernova of that age: neutrino burst, shock breakout, a light curve by type, then the shell at its radius and the remnant at kick × age.     |
-| Beyond T + W | The shell has merged with the gas. The entry remains as the bare remnant.                                                                       |
+| Evaluated    | The entry is                                                                                                                                                                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before T     | The living progenitor. For a Type Ia by merger, two white dwarfs spiralling together, about 90 s apart (80–120 s for most pairs) in period a thousand years before the end. |
+| From T       | A supernova of that age: neutrino burst, shock breakout, a light curve by type, then the shell at its radius and the remnant at kick × age.                                 |
+| Beyond T + W | The shell has merged with the gas. The entry remains as the bare remnant.                                                                                                   |
 
 The thinning cap grows by L + 2H, and the entry's lifetime is held to 4,096 ly ÷ its fastest
 member's speed, so that lookups stay within a known number of rings of cells. Beyond the clock
@@ -1413,9 +1414,11 @@ count. As published, Chabrier's function makes systems too heavy, 0.66 M☉ each
 the census's 0.55–0.59, because the provisional companion model gives 0.42–0.44 stellar companions
 per system where the census counts 0.32–0.38, weighing 0.11–0.14 M☉ in all. Scaled by 0.68, it gives
 0.59. **Lean** (ruled on 2026-09-21; see [Decisions](#decisions)): Chabrier's system function as the
-default, with its branch above 1 M☉ scaled by a constant fitted offline, provisionally 0.68. With
-the binary stage's companions, the fit must reproduce the census's primary band shares, 69% of all
-stars below 0.5 M☉, and a local mean mass of 0.55–0.59 M☉ per system. Kroupa's stays supported. The
+default, with its branch above 1 M☉ scaled by a constant fitted offline to the census's primaries
+(0.92 since ruling 138; provisionally 0.68 before it). With the binary stage's companions, the fit
+must reproduce the census's primary band shares, 69% of all stars below 0.5 M☉, and a local mean
+mass of 0.55–0.59 M☉ per system in stars and white dwarfs, each over systems whose primary lies
+below 8 M☉, as the census's do. Kroupa's stays supported. The
 worked figures elsewhere in this document are for the default unless they name Kroupa's. Figures
 first worked under Kroupa's have been scaled to the default's system count, about 0.87 times
 Kroupa's. Under the default the coarse layers C–E are 10–30% fuller than under Kroupa's (half as
@@ -1452,7 +1455,7 @@ Four honest caveats:
   population, about half a per cent of the disc, is that young. So layer E is almost entirely
   remnants, with well under one living O or B star per cell among some forty-five systems, and the
   arms will not stand out in it until the stellar stage can tell the living from the dead.
-- Layer D loses 2–4% of its systems to ancient Type Ia supernovae that left nothing behind, and
+- Layer D loses 4–5% of its systems to ancient Type Ia supernovae that left nothing behind, and
   every layer's share in the field is its budget less what sits in features and catalogue classes.
 - Brown dwarfs are not in these five layers. They number perhaps one for every four or five stars,
   companions included, and would mostly be noise at this stage. The free-floating ones arrive later
@@ -2204,6 +2207,41 @@ says. The text has been brought into line:
    128.3). Reason: Renzo et al.'s 10% is a present-day share of stars above 15 M☉, the only masses
    they model; below 8 M☉ the released secondaries fall with the primaries' mass function.
 
+**2026-09-28: the orchestrator's ruling 138.** Ruling 138 of the same file was made on research
+that re-tallied Kirkpatrick et al.'s (2024) Table 4, which prints none of the census's figures, and
+changes what this document says. The text has been brought into line:
+
+1. **The census's 0.55–0.59 M☉ per system is a mean in stars and white dwarfs.** The census holds
+   no neutron star or black hole, so the model is compared with it over systems whose primary lies
+   below 8 M☉, and neutron stars and black holes add a few hundredths to the mean the system count
+   divides by (0.053 M☉ at the Sun). See [Galaxy parameters](#galaxy-parameters).
+2. **Chabrier's high-mass scale is fitted to the census's primaries**, 1,491, 288, 400 and 64 in
+   bands A–D, by likelihood over 0.08–8 M☉: 0.92, where the provisional 0.68 lay 3.7σ away.
+
+**2026-09-28: the orchestrator's ruling 136.** Ruling 136 of the same file was made on research
+that read the sources' own text (`research/r-feat09c/NOTES.md`), and changes what this document
+says. The text has been brought into line:
+
+1. **Supernova remnants are 5–900 ly across the window table**, and a shell in a superbubble is gone
+   within a few hundred thousand years (ruling 136.1–3). Reason: in hot gas the blast slows towards
+   the ambient's sound speed, as Tang and Wang (2005, eq. 2) find, not to nothing as Sedov's does,
+   so hot-gas shells last about twice as long; at 10⁴ cm⁻³ Kim and Ostriker's (2015) final momentum
+   stops a shell at about 5 ly. See [Supernova remnants](#supernova-remnants-one-route-not-two).
+2. **A pulsar wind nebula lasts while spin-down stays above about 10³⁵ erg/s** (ruling 136.4).
+   Reason: Gaensler and Slane's (2006) 4 × 10³⁶ erg/s is the line for prominent nebulae; Kargaltsev
+   and Pavlov's (2008) Chandra nebulae reach 10³⁵·⁴ erg/s at 10⁴–10⁵ years.
+3. **About 0.4 Type Ia a century at the Milky Way's parameters, 0.2–1 across our galaxies**
+   (ruling 136.5). Reason: the rate follows each galaxy's formed mass, which the parameters draw
+   over 3–10 × 10¹⁰ M☉; Li et al. (2011) measure 0.54 ± 0.12 for the Milky Way.
+4. **About 4–5% of the old populations' layer D has exploded long ago** (ruling 136.6). Reason:
+   1.3 × 10⁻³ Type Ia per solar mass formed, against layer D's 2.6% of systems; every channel
+   counts, since the primary is gone whatever is left.
+5. **The weak Iax events are about one in eight Type Ia** (ruling 136.9). Reason: Srivastav et al.
+   (2022) find 15 (+17/−9) per 100 in a volume-limited sample; Foley et al.'s (2013) 31 (+17/−13)
+   agrees within errors, and the earlier "about 10%" was Foley et al. 2009's.
+6. **A merging pair is about 90 s apart in period a thousand years before the end, 80–120 s for
+   most** (ruling 136.8). Reason: heavier pairs are slower at a fixed time to merge.
+
 ## Open questions
 
 Three rounds of questions were answered on 2026-09-20 and are now under [Decisions](#decisions). The
@@ -2253,7 +2291,7 @@ belongs to the generator version and has a named source to fit against:
 - The helium correction to lifetimes and the horizontal branch.
 - The scaling of Chabrier's high-mass branch, now the default's, fitted together with the binary
   stage's companions to the census: its primary band shares, 69% of all stars below 0.5 M☉, and a
-  local mean mass of 0.55–0.59 M☉ per system (Kirkpatrick et al. 2024).
+  local mean mass of 0.55–0.59 M☉ per system in stars and white dwarfs (Kirkpatrick et al. 2024).
 - The kick law's rank table, from the generator's own tracks, and its four defaults: the low mode's
   ramp between core masses of 2 and 3 M☉, the black holes' factor of 0.75, the widths of the
   electron-capture windows, and the fate of merged binaries in clusters. Each is pinned by a test
@@ -2398,7 +2436,8 @@ Figures above are rounded and should be re-checked against these when they becom
 - Claeys et al. 2014, A&A 563; Maoz, Hallakoun and Badenes 2018, MNRAS 476; Peters 1964, Phys.
   Rev. 136.
 - Shen et al. 2018, _Three hypervelocity white dwarfs in Gaia DR2_, ApJ 865; El-Badry et al. 2023,
-  OJAp 6; Foley et al. 2013, ApJ 767.
+  OJAp 6; Foley et al. 2013, ApJ 767; Srivastav et al. 2022, MNRAS, doi 10.1093/mnras/stac177
+  (the Iax share).
 - Zapartas et al. 2017, A&A 601 (late core collapse in binaries); Renzo et al. 2019, A&A 624
   (walkaways).
 - Baumgardt and Hilker 2018, _A catalogue of masses, structural parameters and velocity dispersion

@@ -11,13 +11,9 @@
 //! the same for every chunking and thread count, and the same as the sim's former ignored test
 //! `fit_the_direct_period_correction` bit for bit. It is slow: some 2 × 10⁶ hierarchies.
 //!
-//! **Not yet registered.** The committed table is still the sim's own constant
-//! (`period_fit::COMMITTED`), and its 7 M☉ row is stale at version 13: this fit moves it, and so
-//! the generator's output. [`PeriodCorrectionTask`] joins the registry in the commit that runs it
-//! into `tables/period_correction.rs` with a generator-version bump (plan 11, P11.T1.d's refit),
-//! and the sim then reads the table from there. The sim's slow test
-//! `the_period_correction_gives_its_bin_shares` holds the committed table to its shares
-//! meanwhile.
+//! Registered with P11.T1.d's refit (plan 11): the committed table is `tables/period_correction.rs`,
+//! which the sim's `stellar::multiplicity` draws with (`period_fit::COMMITTED`), and the sim's
+//! slow test `the_period_correction_gives_its_bin_shares` holds it to its shares.
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -211,7 +207,8 @@ and Di Stefano's eqs. 20–23 law, normalised over log₁₀(P ÷ 1 d) = 0.2–8
         }
         out.push_str("    ],\n");
     }
-    out.push_str("];");
+    // The closing newline keeps the file as `cargo fmt` leaves it.
+    out.push_str("];\n");
     RustTable {
         summary: vec![
             "The direct companions' period correction (plan 11, ruling 81.3): the factors under"
@@ -223,7 +220,7 @@ and Di Stefano's eqs. 20–23 law, normalised over log₁₀(P ÷ 1 d) = 0.2–8
     }
 }
 
-/// The task: slow, and not yet in the registry (see the module's documentation).
+/// The task: slow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct PeriodCorrectionTask;
 

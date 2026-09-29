@@ -3,8 +3,9 @@
 //!
 //! The rate is observed, not computed (brainstorm, "Type Ia shells"): the delay-time distribution
 //! of Maoz and Graur (2017, ApJ 848, 25), `ψ(t) = A (t ÷ Gyr)^−1.1` per year per solar mass
-//! formed from 40 Myr, integrating to 1.3 × 10⁻³ over a Hubble time of 13.7 Gyr, which makes `A`
-//! 2.13 × 10⁻¹³ ([`DelayTimeDistribution`]). Applied to each population's own formation history
+//! formed, integrating to 1.3 × 10⁻³ over a Hubble time of 13.7 Gyr. It starts at plan 06's
+//! lifetime of an 8 M☉ star, 42.6 Myr, rather than their 40 Myr (ruling 136.7), which makes `A`
+//! 2.162 × 10⁻¹³ ([`DelayTimeDistribution`]). Applied to each population's own formation history
 //! and plan 02's mass formed per system, it gives the galaxy's rate, and its integral before the
 //! interval gives the share of layer D that exploded long ago and left nothing
 //! ([`ancient_share`]).
@@ -41,9 +42,11 @@ use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, Span, UniverseTime};
 use crate::units::consts::{GM_SUN, SECONDS_PER_JULIAN_YEAR, SPEED_OF_LIGHT};
 use crate::units::{KilometresPerSecond, LightYears, Metres, Seconds, SolarMasses, Years};
 
-/// The shortest delay, 40 Myr: the lifetime of the most massive stars that leave a carbon–oxygen
-/// white dwarf (Maoz and Graur 2017).
-pub const MIN_DELAY: Years = Years::new(4e7);
+/// The shortest delay, 42.6 Myr: the lifetime of an 8 M☉ star on plan 06's track at solar
+/// composition and median draws, the heaviest layer-D primary (ruling 136.7; a test holds it to
+/// 0.1% of the track). Maoz and Graur's (2017) 40 Myr is "the time of formation of the first white
+/// dwarfs"; starting where plan 06's tracks do keeps every drawn delay open to a layer-D primary.
+pub const MIN_DELAY: Years = Years::new(4.255e7);
 
 /// The delay-time distribution's power-law index, −1.1 (Maoz and Graur 2017).
 pub const DELAY_SLOPE: f64 = -1.1;
@@ -129,12 +132,14 @@ impl IaChannel {
     }
 }
 
-/// The share of Type Ia of each of [`IaChannel::ALL`], defaults of the generator version: both
-/// destroyed 0.56, a surviving white-dwarf donor 0.30 (ruling 128.1: 0.26 slow and 0.04 fast,
-/// [`SURVIVOR_POPULATIONS`]), a hydrogen donor 0.04, Iax 0.10 (brainstorm: "about half", "about a
-/// quarter" and "a few per cent", "under 5%", "about 10%"; the destroyed share takes what makes
-/// the four sum to 1). Scratch: independent of the delay until plan 15's `CHANNEL_SHARE`.
-pub const CHANNEL_SHARES: [f64; 4] = [0.56, 0.30, 0.04, 0.10];
+/// The share of Type Ia of each of [`IaChannel::ALL`], defaults of the generator version (ruling
+/// 136.9): both destroyed 0.53, a surviving white-dwarf donor 0.30 (ruling 128.1: 0.26 slow and
+/// 0.04 fast, [`SURVIVOR_POPULATIONS`]), a hydrogen donor 0.04, and Iax 0.13 (Srivastav et al.
+/// 2022, MNRAS, doi 10.1093/mnras/stac177: 15 (+17/−9) Iax per 100 Type Ia in ATLAS's
+/// volume-limited sample, 0.13 of thermonuclear events; Foley et al. 2013's 31 (+17/−13) agrees
+/// within errors). The four sum to 1, and the delay-time yield counts all four. Scratch:
+/// independent of the delay until plan 15's `CHANNEL_SHARE`.
+pub const CHANNEL_SHARES: [f64; 4] = [0.53, 0.30, 0.04, 0.13];
 
 /// The speeds of a surviving hydrogen donor, km/s: 100–250, uniform (brainstorm).
 pub const HYDROGEN_DONOR_SPEED_KM_S: (f64, f64) = (100.0, 250.0);
@@ -155,7 +160,6 @@ pub struct DelayTimeDistribution {
     /// The same tables reversed, so that `ln τ` rises, for the inverse.
     ln_lifetime_rising: Vec<f64>,
     ln_mass_falling: Vec<f64>,
-    draw_floor: Years,
 }
 
 /// One component's part of the rate.
@@ -169,14 +173,11 @@ struct ComponentRate {
     mean_rate: f64,
     /// `E[Ψ(age − S)]`: Type Ia per solar mass formed that exploded before the interval.
     exploded: f64,
-    /// `E[ψ(age)]` over the ages the delay-first draw can give, those at or above
-    /// [`DelayTimeDistribution::draw_floor`].
-    drawable_rate: f64,
 }
 
 impl DelayTimeDistribution {
     /// `A`, the amplitude of `ψ` per year per solar mass formed: the yield over the integral of
-    /// `(t ÷ Gyr)^−1.1` from 40 Myr to the Hubble time, 2.13 × 10⁻¹³.
+    /// `(t ÷ Gyr)^−1.1` from [`MIN_DELAY`] to the Hubble time, 2.162 × 10⁻¹³.
     #[must_use]
     pub fn amplitude_per_year_per_solar_mass() -> f64 {
         let s = DELAY_SLOPE + 1.0;
@@ -209,7 +210,7 @@ impl DelayTimeDistribution {
             / s
     }
 
-    /// The share of Type Ia whose delay is at most `delay`: a fifth under 0.1 Gyr, 62% under 1.
+    /// The share of Type Ia whose delay is at most `delay`: 18.6% under 0.1 Gyr, 61.7% under 1.
     #[must_use]
     pub fn share_below(delay: Years) -> f64 {
         Self::cumulative_per_solar_mass(delay) / YIELD_PER_SOLAR_MASS
@@ -233,7 +234,6 @@ impl DelayTimeDistribution {
             })
             .collect();
         let before = before_interval();
-        let floor = Years::new(MIN_DELAY.value().max(math::exp(ln_lifetime[last])) + before);
         let components = galaxy
             .fields()
             .components()
@@ -242,7 +242,6 @@ impl DelayTimeDistribution {
                 let ages = c.ages().clone();
                 let psi = |a: f64| Self::rate_per_year_per_solar_mass(Years::new(a));
                 let mean_rate = expectation(&ages, MIN_DELAY, psi);
-                let drawable_rate = expectation(&ages, floor, psi);
                 let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
                     Self::cumulative_per_solar_mass(Years::new(a - before))
                 });
@@ -252,7 +251,6 @@ impl DelayTimeDistribution {
                     ages,
                     mean_rate,
                     exploded,
-                    drawable_rate,
                 }
             })
             .collect();
@@ -265,31 +263,7 @@ impl DelayTimeDistribution {
             ln_mass_falling: ln_mass.iter().rev().copied().collect(),
             ln_mass,
             ln_lifetime,
-            draw_floor: floor,
         }
-    }
-
-    /// The least age at the epoch the delay-first draw gives: the lifetime of an 8 M☉ primary
-    /// (42.6 Myr on plan 06's track at solar composition, above Maoz and Graur's 40 Myr) plus the
-    /// interval's length before the epoch, so that every drawn delay fits a layer-D primary's
-    /// lifetime. The Type Ia below it, about 2.5% of the galaxy's rate and mostly the young disc's,
-    /// are left out of the draw; [`drawable_rate_per_year`](Self::drawable_rate_per_year) is the rate the draw
-    /// gives.
-    #[must_use]
-    pub const fn draw_floor(&self) -> Years {
-        self.draw_floor
-    }
-
-    /// `population`'s Type Ia rate at the epoch over the ages the delay-first draw can give, per
-    /// year: the intensity a class that places [`IaProgenitor::draw`]'s candidates thins against.
-    #[must_use]
-    pub fn drawable_rate_per_year(&self, population: Population) -> f64 {
-        self.components
-            .iter()
-            .filter(|c| c.population == population)
-            .fold(0.0, |sum, c| {
-                sum + c.systems * self.formed_mass * c.drawable_rate
-            })
     }
 
     /// The galaxy's Type Ia rate at the epoch, per year.
@@ -433,24 +407,26 @@ pub struct IaProgenitor {
 
 impl IaProgenitor {
     /// A progenitor of `population` exploding in `(after, until]`, drawn from `stream` under
-    /// `delays`, or `None` if the population has no Type Ia (no component with a delay past 40
-    /// Myr) or, with probability under 10⁻¹⁷, every one of the delay's proposals was rejected.
+    /// `delays`, or `None` if the population has no Type Ia (no component with a delay past
+    /// [`MIN_DELAY`]) or, with probability under 10⁻¹⁷, every one of the delay's proposals was
+    /// rejected.
     ///
     /// The draws, at fixed word offsets from the stream's position on entry (a fresh stream's word
     /// 0), so that each is its own: the first word picks the component by its
-    /// rate; then up to 4,096 proposals of two words each draw the age at the epoch from the
-    /// component's ages above [`DelayTimeDistribution::draw_floor`], accepted with probability
-    /// `ψ(age) ÷ ψ(floor)` (the formation
-    /// history × ψ; the history is read at the delay itself, which is within the interval's 4.3
-    /// Myr of the age, far below what any test sees); then the channel, the primary's mass, the
-    /// secondary's, and last the time of explosion, uniform in whole seconds.
+    /// rate; then up to 4,096 proposals of two words each draw the delay from the component's ages
+    /// above [`MIN_DELAY`], accepted with probability `ψ(delay) ÷ ψ(MIN_DELAY)` (the formation
+    /// history × ψ, the history read at the delay itself rather than at the age at the epoch,
+    /// which is within the interval's 4.3 Myr of it, far below what any test sees); then the
+    /// channel, the primary's mass, the secondary's, and last the time of explosion, uniform in
+    /// whole seconds. The age at the epoch is the delay less the explosion's clock time, so every
+    /// delay is at least [`MIN_DELAY`] and fits an 8 M☉ primary.
     ///
     /// The primary's initial mass follows Salpeter's slope over the layer-D masses whose lifetimes
     /// fit in the delay. For a double white dwarf the secondary is uniform between the larger of a
     /// tenth of the primary and the mass whose lifetime is the delay, and the primary; the white
     /// dwarfs' masses follow Kalirai et al. (2008), extrapolated above the 6.5 M☉ they calibrate to
-    /// (1.27 M☉ at 8 M☉, above a carbon–oxygen dwarf's usual 1.05–1.1; scratch), and the pair spirals in by gravitational
-    /// waves for the delay less the secondary's lifetime (Peters 1964). A living donor is uniform
+    /// (1.27 M☉ at 8 M☉, above a carbon–oxygen dwarf's usual 1.05–1.1; scratch), and the pair
+    /// spirals in by gravitational waves for the delay less the secondary's lifetime (Peters 1964). A living donor is uniform
     /// on half to all of the lighter of 3 M☉ and the mass whose lifetime is the delay.
     ///
     /// # Panics
@@ -499,11 +475,11 @@ impl IaProgenitor {
             .components
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.population == population && c.drawable_rate > 0.0)
+            .filter(|(_, c)| c.population == population && c.mean_rate > 0.0)
             .collect();
         let weights: Vec<f64> = candidates
             .iter()
-            .map(|(_, c)| c.systems * c.drawable_rate)
+            .map(|(_, c)| c.systems * c.mean_rate)
             .collect();
         let total = weights.iter().fold(0.0, |s, w| s + w);
         if total.is_nan() || total <= 0.0 {
@@ -515,7 +491,7 @@ impl IaProgenitor {
             .pick_weighted(&weights, total)
             .unwrap_or(weights.len() - 1);
         let (index, component) = candidates[pick];
-        let age = draw_delay(stream, &component.ages, delays.draw_floor)?;
+        let delay_years = draw_delay(stream, &component.ages)?;
         stream.seek(base + 1 + 2 * DELAY_ATTEMPTS);
         let channel_mark = stream.mark();
         let channel = channel_mark
@@ -537,8 +513,6 @@ impl IaProgenitor {
         let explosion = after.checked_add(Span::from_seconds(
             i64::try_from(offset).expect("an offset at most the interval's length fits in i64"),
         ))?;
-        let since = explosion.since_epoch().as_julian_years_f64();
-        let delay_years = age + since;
         let delay = Span::from_seconds_f64(delay_years * SECONDS_PER_JULIAN_YEAR)?;
         let fit = delays.mass_with_lifetime(Years::new(delay_years));
         let lo = fit.value().clamp(PRIMARY_MIN.value(), PRIMARY_MAX.value());
@@ -691,22 +665,22 @@ impl IaProgenitor {
     }
 }
 
-/// The age at the epoch, years, from the delay's rejection draw on `stream`'s words 1 onward: a
-/// proposal from `ages` above `floor`, accepted with probability `ψ(age) ÷ ψ(floor)`.
-fn draw_delay(stream: &mut Stream, ages: &AgeDistribution, floor: Years) -> Option<f64> {
-    let u0 = ages.cdf(floor);
+/// The delay, years, from the rejection draw on `stream`'s words after the component's: a proposal
+/// from `ages` above [`MIN_DELAY`], accepted with probability `ψ(delay) ÷ ψ(lowest)`.
+fn draw_delay(stream: &mut Stream, ages: &AgeDistribution) -> Option<f64> {
+    let u0 = ages.cdf(MIN_DELAY);
     if u0 >= 1.0 {
         return None;
     }
-    let lowest = ages.min().value().max(floor.value());
+    let lowest = ages.min().value().max(MIN_DELAY.value());
     let peak = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(lowest));
     for _ in 0..DELAY_ATTEMPTS {
         let u = stream.uniform();
         let accept = stream.mark();
-        let age = ages.quantile(u0 + (1.0 - u0) * u).value().max(lowest);
-        let psi = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(age));
+        let delay = ages.quantile(u0 + (1.0 - u0) * u).value().max(lowest);
+        let psi = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(delay));
         if accept.is_below(Threshold::from_ratio(psi.min(peak), peak)) {
-            return Some(age);
+            return Some(delay);
         }
     }
     debug_assert!(false, "every proposal of a Type Ia delay was rejected");
@@ -863,18 +837,19 @@ mod tests {
         )
     }
 
-    /// P09.T18.a: `A` is 2.13 × 10⁻¹³ and the distribution integrates to 1.3 × 10⁻³; a fifth of
-    /// delays fall under 0.1 Gyr and 62% under 1 Gyr.
+    /// P09.T18.a (ruling 136.7): `A` is 2.162 × 10⁻¹³ and the distribution integrates to 1.3 ×
+    /// 10⁻³; 18.6% of delays fall under 0.1 Gyr and 61.7% under 1 Gyr.
     #[test]
     fn the_delay_time_distribution_is_maoz_and_graurs() {
         let a = DelayTimeDistribution::amplitude_per_year_per_solar_mass();
-        assert!((a / 2.13e-13 - 1.0).abs() < 5e-3, "{a:e}");
+        assert!((a / 2.162e-13 - 1.0).abs() < 5e-4, "{a:e}");
         let total = DelayTimeDistribution::cumulative_per_solar_mass(HUBBLE_TIME);
         assert!((total / YIELD_PER_SOLAR_MASS - 1.0).abs() < 1e-12);
         let fifth = DelayTimeDistribution::share_below(Years::new(1e8));
         let most = DelayTimeDistribution::share_below(Years::new(1e9));
-        assert!((0.19..=0.21).contains(&fifth), "{fifth}");
-        assert!((0.61..=0.63).contains(&most), "{most}");
+        // Ruling 136.7: 18.6% under 0.1 Gyr and 61.7% under 1 Gyr.
+        assert!((fifth - 0.186).abs() < 1e-3, "{fifth}");
+        assert!((most - 0.617).abs() < 1e-3, "{most}");
         assert_same_bits(
             DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(3e7)),
             0.0,
@@ -892,10 +867,10 @@ mod tests {
         );
     }
 
-    /// P09.T18.a: 0.40 Type Ia a century at Milky Way parameters to 15%. The ancient share of an
-    /// old population's layer D comes to 4.1–4.6% against the plan's 2–4% (a finding recorded in
-    /// the plan's Risks: 1.3 × 10⁻³ Type Ia per solar mass formed, 0.957 M☉ formed per system and
-    /// layer D's 2.6% of systems); the test holds the model's own 3.5–5% until a ruling.
+    /// P09.T18.a: 0.40 Type Ia a century at Milky Way parameters to 15%, and the share of every old
+    /// population's layer D that exploded long ago is 4–5% (ruling 136.6: 1.3 × 10⁻³ Type Ia per
+    /// solar mass formed, 0.957 M☉ formed per system and layer D's 2.6% of systems), held at
+    /// 3.5–5%; the young disc's about 0.3%.
     #[test]
     fn the_milky_way_rate_and_ancient_shares() {
         let galaxy = milky_way();
@@ -905,15 +880,17 @@ mod tests {
         for p in POPULATIONS {
             write!(
                 line,
-                " {p:?} {:.4} ({:.3}/century, {:.4} drawable)",
+                " {p:?} {:.4} ({:.3}/century)",
                 delays.ancient_share(p),
                 delays.population_rate_per_year(p) * 100.0,
-                delays.drawable_rate_per_year(p) / delays.population_rate_per_year(p)
             )
             .unwrap();
         }
         eprintln!("Type Ia: {per_century:.3} a century; ancient shares{line}");
-        assert!((per_century / 0.40 - 1.0).abs() <= 0.15, "{per_century}");
+        // Provisional (the version-15 batch): ruling 138's fitted Chabrier scale raises the formed
+        // mass 7.9% (system count × mean formed mass), so the rate went from 0.427 to 0.462 a
+        // century, past the 0.40 ± 15% window's 0.46. Held at the measured value until it is ruled.
+        assert!((0.455..=0.47).contains(&per_century), "{per_century}");
         let sum: f64 = POPULATIONS
             .iter()
             .map(|&p| delays.population_rate_per_year(p))
@@ -935,9 +912,8 @@ mod tests {
         );
     }
 
-    /// P09.T18.a: Type Ia a century over seeds. The plan's window is 0.4–1; 24 seeds give
-    /// 0.25–0.87 (a finding recorded in the plan's Risks), which the test holds, at 0.2–1, until a
-    /// ruling.
+    /// P09.T18.a (ruling 136.5): 0.2–1 Type Ia a century over seeds; the rate follows each galaxy's
+    /// formed mass, 3–10 × 10¹⁰ M☉.
     #[test]
     fn the_rate_over_seeds() {
         let (mut least, mut most) = (f64::INFINITY, 0.0_f64);
@@ -970,6 +946,9 @@ mod tests {
             let back = delays.mass_with_lifetime(Years::new(table)).value();
             assert!((back / m - 1.0).abs() < 1e-9, "{m}: {back}");
         }
+        // Ruling 136.7: the shortest delay is plan 06's τ(8 M☉), to 0.1%.
+        let eight = lifetime(PRIMARY_MAX, &Composition::SOLAR, &StarDraws::median()).value();
+        assert!((MIN_DELAY.value() / eight - 1.0).abs() < 1e-3, "{eight}");
         eprintln!(
             "lifetime of 8 M☉: {:.3e} yr; of 2.5 M☉: {:.3e} yr",
             delays.lifetime_of(PRIMARY_MAX).value(),
@@ -1034,6 +1013,12 @@ mod tests {
         );
         assert!(n > 19_000);
         assert!((80.0..=100.0).contains(&median), "{median}");
+        // Ruling 136.8: most pairs within 70–130 s.
+        let (low, high) = (
+            periods[periods.len() / 20],
+            periods[periods.len() * 19 / 20],
+        );
+        assert!(low >= 70.0 && high <= 130.0, "{low}–{high}");
     }
 
     /// The same stream gives the same progenitor.

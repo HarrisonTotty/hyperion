@@ -6,7 +6,10 @@
 //!   the orbital energy of the cores, G `M_c1` M′_c2 ÷ 2a (equations 70–72), at efficiency `α_CE`; a
 //!   main-sequence or degenerate companion counts whole as its core. If neither core then fills its
 //!   Roche lobe, the envelope is gone and the cores remain on a circular orbit, co-rotating; the
-//!   giants' cores are what their tracks leave when the envelope goes (`Track::remains_at`).
+//!   giants' cores are what their tracks leave when the envelope goes (`Track::remains_at`). A
+//!   helium giant's carbon–oxygen core at or above the Chandrasekhar mass is no white dwarf: it
+//!   collapses at once, companion-stripped (ruling 129.4c), the ultra-stripped supernova of Tauris,
+//!   Langer and Podsiadlowski (2015); so does one a Roche lobe strips to its core.
 //!   Otherwise the cores coalesce where the first filled its lobe, and the product keeps the
 //!   envelope left unbound: the mass `M_f` of equation 77 (with R ∝ M^−x, equations 74–76), by
 //!   Newton's rule as BSE solves it.
@@ -204,6 +207,12 @@ impl Engine {
         if s2.kind.is_giant_like() {
             binding += s2.mass * s2.envelope / (lambda * s2.radius);
         }
+        // Nothing to eject from a held bare core (ruling 129.4c): no stripping changes it, so it
+        // would touch its companion again at once, envelope after envelope. It merges instead.
+        if !positive(binding) && matches!(self.members[d], Member::Frozen { .. }) {
+            self.coalesce(None);
+            return;
+        }
         let orbit_i = s1.core * s2.core / (2.0 * a_i);
         let orbit_f = orbit_i + binding / params.alpha_ce;
         let a_f = s1.core * s2.core / (2.0 * orbit_f);
@@ -234,12 +243,14 @@ impl Engine {
     fn survive_envelope(&mut self, d: usize, s2: &Side, a_f: f64) {
         let o = 1 - d;
         self.stripped[d] = true;
-        let donor = self.stripped_member(d);
+        let (donor, donor_collapses) = self.stripped_member(d);
         self.set_member(d, donor);
+        let mut other_collapses = false;
         if s2.kind.is_giant_like() {
             self.stripped[o] = true;
-            let other = self.stripped_member(o);
+            let (other, collapses) = self.stripped_member(o);
             self.set_member(o, other);
+            other_collapses = collapses;
         }
         let age = self.age;
         if let Some(orbit) = &mut self.orbit {
@@ -249,20 +260,32 @@ impl Engine {
         for i in 0..2 {
             self.corotate(i);
         }
+        // A bare core at or above the Chandrasekhar mass collapses on the orbit the envelope
+        // left (ruling 129.4c).
+        for (i, collapses) in [(d, donor_collapses), (o, other_collapses)] {
+            if collapses && !self.members[i].is_gone() {
+                self.die(i);
+            }
+        }
     }
 
     /// Member `i` as its track leaves it when a common envelope or its Roche lobe removes its
     /// envelope now: a naked helium star on its own track, a white dwarf the binary carries, or
-    /// the member as it was if it has no envelope to lose.
+    /// the member as it was if it has no envelope to lose; with whether the member collapses now
+    /// ([`Engine::die`], once the caller has set the orbit).
+    ///
+    /// A bare core at or above the Chandrasekhar mass collapses now (ruling 129.4c), on the track
+    /// its stripping starts, which dies at once. A pinned primary whose collapse is still to come
+    /// is held at the bare core's state instead (plan 11, design note 16).
     #[must_use]
-    pub(super) fn stripped_member(&self, i: usize) -> Member {
+    pub(super) fn stripped_member(&self, i: usize) -> (Member, bool) {
         let age = self.age;
         let Some((track, offset)) = self.members[i].track() else {
-            return self.members[i].clone();
+            return (self.members[i].clone(), false);
         };
         let track_age = (age - offset).max(0.0);
         let (mass, _) = self.current(i);
-        match track.remains_at(
+        let member = match track.remains_at(
             track_age,
             mass,
             self.ctx.draws(i),
@@ -280,6 +303,30 @@ impl Engine {
                 track: Arc::new(*star),
                 offset: age,
             },
+            Remains::Collapse { core, .. }
+                if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > age) =>
+            {
+                let state = crate::stellar::StarState::new(crate::stellar::StarStateParts {
+                    phase: core.phase(),
+                    age: core.age(),
+                    mass: core.mass(),
+                    core_mass: core.core_mass(),
+                    luminosity: core.luminosity(),
+                    radius: core.radius(),
+                    mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
+                    phase_fraction: core.phase_fraction(),
+                });
+                return (Member::Frozen { state }, false);
+            }
+            Remains::Collapse { track, .. } => {
+                return (
+                    Member::Track {
+                        track: Arc::new(*track),
+                        offset: age,
+                    },
+                    true,
+                );
+            }
             Remains::WhiteDwarf {
                 phase,
                 mass,
@@ -290,7 +337,8 @@ impl Engine {
                 origin: cooling_origin(&self.ctx, phase, mass.value(), Some(last_luminosity)),
                 mass: Path::starting(age, mass.value()),
             },
-        }
+        };
+        (member, false)
     }
 
     /// Member `i` stripped of its envelope now by its Roche lobe (the end of transfer from a
@@ -298,9 +346,12 @@ impl Engine {
     pub(super) fn strip(&mut self, i: usize) {
         self.close_segment();
         self.stripped[i] = true;
-        let member = self.stripped_member(i);
+        let (member, collapses) = self.stripped_member(i);
         self.set_member(i, member);
         self.kind = self.quiet_kind();
+        if collapses {
+            self.die(i);
+        }
     }
 
     /// Sets member `i` to co-rotate with the orbit, if there is one.

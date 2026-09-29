@@ -2286,3 +2286,17 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
   sums every component directly (the Gaussians' `R ∂Φ ÷ ∂R` from their quadratures), the reference,
   at about a millisecond a point. Plan 15's P15.T6.a integrates orbits with the first
   (`potential/force.rs`).
+- **The nuclear disc's centre after P06.T30 and P11.T1.d (round 9b, `fates`; a finding).** With
+  plan 06's tracks and plan 11's companions the nuclear disc's mean mass per system is 0.548 M☉,
+  so the fixture's centre rises to 19.23 per ly³, above the 12–19 of the table above (the Kroupa
+  scaling becomes 0.871, which gives 12.2–19.2 from 14–22, and Kroupa's function puts the fixture
+  at 22.07). _Ruled (137.7):_ the bracket is Kroupa's 14–22 with the integers' rounding carried,
+  13.5–22.5, times the fixture's mean-mass ratio 0.871: 11.8–19.6 per ly³, which the test asserts;
+  the held 19.3 is gone.
+- **Ruling 138 at the fixture (round 9b, `fates`).** Plan 15's fitted Chabrier scale (0.920,
+  retiring the scratch 0.68 of D5) raises the all-inclusive mean mass per system to 0.5985 M☉ and
+  lowers the fixture's system count to 8.55 × 10¹⁰; the census's 0.55–0.59 is read as the mean in
+  stars and white dwarfs (0.5517 locally). P02.T11's density benchmark still holds (0.00198
+  systems per ly³ at the Sun's height; 0.0426 M☉ pc⁻³). The nuclear-disc bracket becomes
+  11.0–18.4 per ly³ (13.5–22.5 × 0.816; measured 17.93), and the black hole's offset is set again
+  to −0.3800 dex so that it stays Sgr A*'s 4.30 × 10⁶ M☉ at σ_e ≈ 117.3 km/s.

@@ -23,7 +23,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::galaxy::fields::Component;
-use crate::galaxy::placement::{Existence, SystemOrigin, SystemRecord};
+use crate::galaxy::placement::{Existence, SystemKind, SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::BodyId;
 use crate::math;
@@ -251,13 +251,18 @@ struct RemnantStage {
 }
 
 impl RemnantStage {
-    /// The stage of a star that died `death` leaving `remnant`, with its `draws`: the death with
-    /// the provisional companion-stripped mark applied, and the kick of the generator's law
-    /// (P06.T19), which read `star.stripped` and `star.kick.*`.
+    /// The stage of a star of initial mass `m0` and composition `comp` that died `death` leaving
+    /// `remnant`, with its `draws`: the death with the companion-stripped mark applied, and the
+    /// kick of the generator's law (P06.T19), which read `star.stripped` and `star.kick.*`.
     #[must_use]
-    fn new(death: Death, remnant: CompactRemnant, draws: &StarDraws) -> Self {
+    fn new(
+        death: Death,
+        remnant: CompactRemnant,
+        draws: &StarDraws,
+        (m0, comp): (SolarMasses, &Composition),
+    ) -> Self {
         let law = StandardKickLaw::default();
-        let death = law.with_stripped_mark(death, draws);
+        let death = law.with_stripped_mark(death, draws, m0, comp);
         Self {
             death,
             remnant,
@@ -272,7 +277,12 @@ impl RemnantStage {
 #[must_use]
 fn remnant_stage(track: &Track, draws: &StarDraws) -> Option<RemnantStage> {
     let fate = track.fate_with(RemnantDraws::of(draws))?;
-    Some(RemnantStage::new(fate.death, fate.remnant, draws))
+    Some(RemnantStage::new(
+        fate.death,
+        fate.remnant,
+        draws,
+        (track.initial_mass(), track.composition()),
+    ))
 }
 
 impl StarModel {
@@ -564,7 +574,12 @@ impl StarModel {
                     &self.draws,
                     TrackOptions::default(),
                 );
-                RemnantStage::new(fate.death, fate.remnant, &self.draws)
+                RemnantStage::new(
+                    fate.death,
+                    fate.remnant,
+                    &self.draws,
+                    (self.track_mass(), &self.composition),
+                )
             })),
         }
     }
@@ -980,14 +995,21 @@ pub struct SystemStars {
 
 impl SystemStars {
     /// The stars of the grid system `record` in `galaxy`, with the model's own multiplicity:
-    /// [`SystemStars::generate_in`] with [`MultiplicityContext::Free`].
+    /// [`SystemStars::generate_in`] with [`grid_multiplicity`]'s context, which is
+    /// [`MultiplicityContext::Free`] for a star and `ForcedSingle` for a free-floating brown dwarf.
+    ///
+    /// A brown dwarf (plan 13, P13.T5.a) takes the stellar stage as a star does: its metallicity
+    /// draw, P06.T13's cooling fits at its age plus the clock time ([`substellar::cooling`]), and
+    /// its classification, with no companion.
     ///
     /// # Panics
     ///
-    /// As [`draw_metallicity`] does, for a record of another galaxy.
+    /// - As [`draw_metallicity`] does, for a record of another galaxy.
+    /// - For a rogue planet, whose mass is below the fits' 0.01 M☉: its state is plan 14's (plan
+    ///   13, P13.T5.d), and it has no stars.
     #[must_use]
     pub fn generate(galaxy: &Galaxy, record: &SystemRecord) -> Self {
-        Self::generate_in(galaxy, record, MultiplicityContext::Free)
+        Self::generate_in(galaxy, record, grid_multiplicity(record))
     }
 
     /// The stars of the system `record` in `galaxy` under the multiplicity context `ctx` (plan 11,
@@ -1016,7 +1038,8 @@ impl SystemStars {
     ///
     /// # Panics
     ///
-    /// If the record's primary is not of 0.08–150 M☉ or its age is not finite.
+    /// If the record's primary is not of 0.01–150 M☉ (a star, or a brown dwarf from 0.0124 M☉) or
+    /// its age is not finite.
     #[must_use]
     pub fn generate_with(
         galaxy: &Galaxy,
@@ -1035,7 +1058,7 @@ impl SystemStars {
                 primary_draws(galaxy, record),
                 age,
             )
-            .expect("a grid record's primary is of 0.08-150 M_sun with a finite age"),
+            .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
         );
         stars.extend(hierarchy.stars().iter().skip(1).map(|slot| {
             let draws =
@@ -1171,6 +1194,20 @@ impl SystemStars {
     #[must_use]
     pub fn lbv_window(&self) -> Option<(UniverseTime, UniverseTime)> {
         None
+    }
+}
+
+/// The multiplicity context of the grid record `record`: [`MultiplicityContext::Free`] for a
+/// star, and `ForcedSingle` for a free-floating brown dwarf or rogue planet, which are single
+/// (plan 13's Risks: "Brown dwarfs are single"; plan 11's multiplicity is not applied to them).
+///
+/// Public as a seam: a caller that draws a grid record's hierarchy itself, as plan 14's hosts of
+/// P14.T27 will for a brown dwarf, takes the same context [`SystemStars::generate`] does.
+#[must_use]
+pub fn grid_multiplicity(record: &SystemRecord) -> MultiplicityContext {
+    match record.kind() {
+        SystemKind::Stellar => MultiplicityContext::Free,
+        SystemKind::BrownDwarf | SystemKind::RoguePlanet => MultiplicityContext::ForcedSingle,
     }
 }
 
@@ -1496,7 +1533,17 @@ mod tests {
             let life = full.lifetime().unwrap();
             let lifetime = star.lifetime().unwrap();
             hyperion_testkit::float::assert_same_bits(lifetime.value(), life.value());
-            assert_eq!(star.death(), full.death(), "{m} M☉");
+            // The model's death carries the companion-stripped mark (P11.T1.d); the track's is
+            // the single star's.
+            let marked = full.death().map(|d| {
+                StandardKickLaw::default().with_stripped_mark(
+                    d,
+                    &star_draws(i),
+                    full.initial_mass(),
+                    full.composition(),
+                )
+            });
+            assert_eq!(star.death(), marked, "{m} M☉");
             assert_eq!(star.remnant(), full.remnant(), "{m} M☉");
             let dead = age > life.value();
             assert_eq!(star.remnant.is_some(), dead || age + 1_000.0 > life.value());
@@ -1658,7 +1705,15 @@ mod tests {
         let own = star.remnant.expect("dead at 50 Myr");
         let law = StandardKickLaw::default();
         let death = track.death().expect("dead at 50 Myr");
-        assert_eq!(own.death, law.with_stripped_mark(death, star.draws()));
+        assert_eq!(
+            own.death,
+            law.with_stripped_mark(
+                death,
+                star.draws(),
+                track.initial_mass(),
+                track.composition()
+            )
+        );
         assert_eq!(own.death.kind(), death.kind());
         assert_same_bits(own.death.age().value(), death.age().value());
         assert_eq!(Some(own.remnant), track.remnant());

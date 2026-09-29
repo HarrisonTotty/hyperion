@@ -37,11 +37,13 @@ const SECONDS_PER_JULIAN_YEAR: i64 = 31_557_600;
 /// Pinned systems of layer C at the solar circle, 26,000 ly out on the +y axis: a single star with
 /// a rocky planet and a gas giant; a K1 V and M1 V pair with eight planets about three zones, one
 /// a gas giant; and a triple whose primary is a white dwarf, fifteen planets about five zones, one
-/// of them engulfed before the epoch.
+/// of them engulfed before the epoch. The triple was `0x4200_2cb2_0000_0005` until P15.T4.b's
+/// fitted Chabrier scale (ruling 138), and is re-picked by search among the white-dwarf triples with a planet
+/// engulfed 250 years before the epoch in the cells along +x: the one of fifteen bodies.
 const PINNED: [u64; 3] = [
     0x4200_2cb2_0000_0003,
     0x4200_2cb2_0000_0000,
-    0x4200_2cb2_0000_0005,
+    0x4200_acb2_0000_000d,
 ];
 
 /// A pinned single star with no planets.
@@ -327,6 +329,11 @@ fn assert_bulk_is_the_sims(
             ] {
                 assert_eq!(wire.to_bits(), sim.to_bits(), "{what}: bulk");
             }
+            assert_eq!(
+                wire.effective_temperature_k.map(f64::to_bits),
+                sim.effective_temperature().map(|t| t.value().to_bits()),
+                "{what}: effective temperature"
+            );
             assert_eq!(
                 serde_json::to_value(wire.class).unwrap(),
                 snake_case(&format!("{:?}", sim.class())),
@@ -1103,6 +1110,7 @@ async fn mass_and_orbit_gives_no_bulk_section() {
         "radius_m",
         "density_kg_m3",
         "equilibrium_temperature_k",
+        "effective_temperature_k",
         "mass_fractions",
     ] {
         assert!(

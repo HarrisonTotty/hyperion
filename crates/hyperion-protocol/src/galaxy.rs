@@ -228,12 +228,19 @@ pub struct DensityMap {
     pub data_base64: String,
 }
 
-/// A mass layer of the placement grid: a band of primary initial mass with its own cell size.
+/// A mass layer of the placement grid: a band of primary initial mass with its own cell size, or
+/// one of the two substellar layers.
 ///
 /// The bands, from the brainstorm's "Sizing the layers", are A 0.08–0.5 M☉ (8 ly cells), B
 /// 0.5–0.75 M☉ (16 ly), C 0.75–2.5 M☉ (32 ly), D 2.5–8 M☉ (64 ly) and E 8–150 M☉ (128 ly). The
 /// census carries the exact edges with each answer. The bands are of initial mass, so a coarse
 /// layer's system may by now be a remnant.
+///
+/// Plan 13 adds the free-floating objects, lighter than layer A: `brown_dwarf`, 13 Jupiter masses
+/// to 0.08 M☉ (0.0124–0.08 M☉, 16 ly cells), and `rogue_planet`, a third of an Earth mass to 13
+/// Jupiter masses (1.0 × 10⁻⁶–0.0124 M☉, 4 ly cells). Their bands are of the object's own mass. As
+/// a request's `min_layer`, either one asks for the substellar layers down to it (plan 13, design
+/// note 9); nothing else does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -248,6 +255,10 @@ pub enum MassLayer {
     D,
     /// 8–150 M☉.
     E,
+    /// Free-floating brown dwarfs, 0.0124–0.08 M☉ (plan 13).
+    BrownDwarf,
+    /// Rogue planets, 1.0 × 10⁻⁶–0.0124 M☉ (plan 13).
+    RoguePlanet,
 }
 
 /// The stellar population a system was placed from.
@@ -284,7 +295,9 @@ pub struct SystemsInRangeRequest {
     pub radius_ly: f64,
     /// The instant at which positions are tested and ages given, within 1,000 years of the epoch.
     pub time: UniverseTime,
-    /// The lightest layer wanted: `a` asks for every layer, `c` for layers C, D and E only.
+    /// The lightest layer wanted: `a` asks for every stellar layer, `c` for layers C, D and E only,
+    /// `brown_dwarf` for the stars and the free-floating brown dwarfs, and `rogue_planet` for the
+    /// rogue planets too (plan 13).
     pub min_layer: MassLayer,
     /// The most systems the census may expect to return, from 1 to 20,000.
     pub limit: u32,
@@ -327,10 +340,12 @@ pub struct SystemsInRange {
 pub struct Census {
     /// The request's limit on the expected number of systems.
     pub limit: u32,
-    /// The lower mass edge, in M☉ of primary initial mass, above which the result is complete; the
-    /// lower edge of the lightest included layer. `null` when no layer fits.
+    /// The lower mass edge, in M☉ of primary initial mass (of object mass for a substellar layer),
+    /// above which the result is complete; the lower edge of the lightest included layer. `null`
+    /// when no layer fits.
     pub complete_above_msun: Option<f64>,
-    /// All five layers, A to E.
+    /// All five stellar layers, A to E, then the substellar layers the request's `min_layer` asked
+    /// for: `brown_dwarf`, and `rogue_planet` after it.
     pub layers: Vec<LayerCensus>,
 }
 
@@ -340,9 +355,10 @@ pub struct Census {
 pub struct LayerCensus {
     /// The layer.
     pub layer: MassLayer,
-    /// The lower edge of the layer's band of primary initial mass, in M☉.
+    /// The lower edge of the layer's band of primary initial mass (of object mass for a
+    /// substellar layer), in M☉.
     pub mass_min_msun: f64,
-    /// The upper edge of the layer's band of primary initial mass, in M☉.
+    /// The upper edge of the layer's band, in M☉.
     pub mass_max_msun: f64,
     /// The expected number of the layer's systems in the sphere.
     pub expected: f64,
@@ -367,7 +383,8 @@ pub enum LayerStatus {
     OverCellBudget,
 }
 
-/// One star system found by a range query, as it is at the query's time.
+/// One system found by a range query, as it is at the query's time: a star system, or a
+/// free-floating brown dwarf or rogue planet, which `layer` tells apart (plan 13).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SystemRecord {
@@ -379,7 +396,7 @@ pub struct SystemRecord {
     pub position: GalacticPosition,
     /// The layer it was placed in.
     pub layer: MassLayer,
-    /// The initial mass of its primary star, in M☉.
+    /// The initial mass of its primary star, or a free-floating object's mass, in M☉.
     pub initial_mass_msun: f64,
     /// Its age at the query's time, in megayears.
     pub age_myr: f64,
@@ -393,7 +410,8 @@ pub struct SystemRecord {
     /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
     ///
     /// Absent otherwise: the key is left out rather than written `null`, so that a row without a
-    /// brief is exactly plan 04's.
+    /// brief is exactly plan 04's. A brown dwarf's brief is its own; a rogue planet has none, and
+    /// its row never carries the key (plan 13, P13.T7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stellar: Option<StellarBriefDto>,
@@ -953,7 +971,259 @@ mod tests {
             (MassLayer::C, "c"),
             (MassLayer::D, "d"),
             (MassLayer::E, "e"),
+            (MassLayer::BrownDwarf, "brown_dwarf"),
+            (MassLayer::RoguePlanet, "rogue_planet"),
         ]);
+    }
+
+    /// Plan 13, P13.T7: a request whose `min_layer` is a substellar layer is otherwise plan 04's.
+    #[test]
+    fn systems_in_range_request_wire_form_with_each_substellar_min_layer() {
+        for (layer, text) in [
+            (MassLayer::BrownDwarf, "brown_dwarf"),
+            (MassLayer::RoguePlanet, "rogue_planet"),
+        ] {
+            assert_wire_form(
+                &RequestBody::SystemsInRange(SystemsInRangeRequest {
+                    universe: universe(),
+                    centre: chart_centre(),
+                    radius_ly: 10.0,
+                    time: epoch_plus_a_century(),
+                    min_layer: layer,
+                    limit: 5_000,
+                    include_stellar: true,
+                }),
+                json!({
+                    "kind": "systems_in_range",
+                    "universe": "0123456789abcdef",
+                    "centre": {
+                        "cell_ly": [26_000, 0, -1],
+                        "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                    },
+                    "radius_ly": 10.0,
+                    "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                    "min_layer": text,
+                    "limit": 5_000,
+                    "include_stellar": true,
+                }),
+            );
+        }
+    }
+
+    /// A star, a brown dwarf with its brief and a rogue planet with none, as plan 13's range
+    /// answer holds them.
+    fn one_of_each_kind() -> Vec<SystemRecord> {
+        use crate::stellar::ObjectKindDto;
+
+        let star = SystemRecord {
+            stellar: Some(StellarBriefDto {
+                kind: ObjectKindDto::Dwarf,
+                class: "M4V".to_owned(),
+                log_luminosity_lsun: Some(-2.5),
+                teff_k: Some(3_200.0),
+                star_count: 1,
+            }),
+            ..two_rows().remove(1)
+        };
+        let brown_dwarf = SystemRecord {
+            id: SystemIdHex::from_u64(0xa1ff_3657_7ff8_0001),
+            designation: "Vorth AB-C f3-1".to_owned(),
+            position: GalacticPosition {
+                cell_ly: [26_003, 1, -4],
+                offset_m: [2.5e15, 1.0e15, 0.0],
+            },
+            layer: MassLayer::BrownDwarf,
+            initial_mass_msun: 0.052,
+            age_myr: 4_600.0,
+            population: Population::OldThinDisc,
+            velocity_km_s: [10.0, 225.5, -3.25],
+            stellar: Some(StellarBriefDto {
+                kind: ObjectKindDto::Substellar,
+                class: "T4".to_owned(),
+                log_luminosity_lsun: Some(-5.25),
+                teff_k: Some(1_100.0),
+                star_count: 1,
+            }),
+        };
+        let rogue_planet = SystemRecord {
+            id: SystemIdHex::from_u64(0xc1ff_3657_7ff8_0005),
+            designation: "Vorth AB-C g1-5".to_owned(),
+            position: GalacticPosition {
+                cell_ly: [25_999, 2, 1],
+                offset_m: [0.0, 5.0e15, 7.5e15],
+            },
+            layer: MassLayer::RoguePlanet,
+            initial_mass_msun: 3.0e-6,
+            age_myr: 8_125.0,
+            population: Population::ThickDisc,
+            velocity_km_s: [-40.0, 190.0, 22.5],
+            stellar: None,
+        };
+        vec![star, brown_dwarf, rogue_planet]
+    }
+
+    /// [`one_of_each_kind`]'s rows as the wire carries them.
+    fn one_of_each_kind_json() -> serde_json::Value {
+        json!([
+                    {
+                        "id": "6000000000000001",
+                        "designation": "Vorth AB-C b17-2",
+                        "position": { "cell_ly": [25_990, 20, 0], "offset_m": [0.0, 2.0e15, 3.0e15] },
+                        "layer": "b",
+                        "initial_mass_msun": 0.625,
+                        "age_myr": 45.0,
+                        "population": "young_thin_disc",
+                        "velocity_km_s": [3.5, -228.0, -0.75],
+                        "stellar": {
+                            "kind": "dwarf",
+                            "class": "M4V",
+                            "log_luminosity_lsun": -2.5,
+                            "teff_k": 3_200.0,
+                            "star_count": 1,
+                        },
+                    },
+                    {
+                        "id": "a1ff36577ff80001",
+                        "designation": "Vorth AB-C f3-1",
+                        "position": { "cell_ly": [26_003, 1, -4], "offset_m": [2.5e15, 1.0e15, 0.0] },
+                        "layer": "brown_dwarf",
+                        "initial_mass_msun": 0.052,
+                        "age_myr": 4_600.0,
+                        "population": "old_thin_disc",
+                        "velocity_km_s": [10.0, 225.5, -3.25],
+                        "stellar": {
+                            "kind": "substellar",
+                            "class": "T4",
+                            "log_luminosity_lsun": -5.25,
+                            "teff_k": 1_100.0,
+                            "star_count": 1,
+                        },
+                    },
+                    {
+                        "id": "c1ff36577ff80005",
+                        "designation": "Vorth AB-C g1-5",
+                        "position": { "cell_ly": [25_999, 2, 1], "offset_m": [0.0, 5.0e15, 7.5e15] },
+                        "layer": "rogue_planet",
+                        "initial_mass_msun": 3.0e-6,
+                        "age_myr": 8_125.0,
+                        "population": "thick_disc",
+                        "velocity_km_s": [-40.0, 190.0, 22.5],
+                    },
+        ])
+    }
+
+    /// Plan 13, P13.T7: a result holding one of each kind. The brown dwarf carries its brief, the
+    /// rogue planet no `stellar` key at all, and the census has the two substellar lines after E.
+    #[test]
+    fn systems_in_range_response_wire_form_with_one_of_each_kind() {
+        // Every layer included, each with its band, expected and returned counts.
+        let edges = [
+            (MassLayer::A, "a", [0.08, 0.5], 9.5, 10),
+            (MassLayer::B, "b", [0.5, 0.75], 1.25, 1),
+            (MassLayer::C, "c", [0.75, 2.5], 1.0, 0),
+            (MassLayer::D, "d", [2.5, 8.0], 0.125, 0),
+            (MassLayer::E, "e", [8.0, 150.0], 0.0, 0),
+            (MassLayer::BrownDwarf, "brown_dwarf", [0.0124, 0.08], 3.0, 1),
+            (
+                MassLayer::RoguePlanet,
+                "rogue_planet",
+                [1.0e-6, 0.0124],
+                350.0,
+                1,
+            ),
+        ];
+        assert_wire_form(
+            &ResponseBody::SystemsInRange(SystemsInRange {
+                universe: universe(),
+                centre: chart_centre(),
+                radius_ly: 10.0,
+                time: epoch_plus_a_century(),
+                census: Census {
+                    limit: 5_000,
+                    complete_above_msun: Some(1.0e-6),
+                    layers: edges
+                        .iter()
+                        .map(|&(layer, _, band, expected, returned)| {
+                            census_line(layer, band, expected, returned, LayerStatus::Included)
+                        })
+                        .collect(),
+                },
+                systems: one_of_each_kind(),
+            }),
+            json!({
+                "kind": "systems_in_range",
+                "universe": "0123456789abcdef",
+                "centre": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "radius_ly": 10.0,
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "census": {
+                    "limit": 5_000,
+                    "complete_above_msun": 1.0e-6,
+                    "layers": edges
+                        .iter()
+                        .map(|&(_, name, band, expected, returned)| {
+                            census_line_json(name, band, expected, returned, "included")
+                        })
+                        .collect::<Vec<_>>(),
+                },
+                "systems": one_of_each_kind_json(),
+            }),
+        );
+    }
+
+    /// Plan 13, P13.T7: the `substellar` group of the galaxy's parameters, three derived numbers
+    /// with no unit and a yes-or-no text.
+    #[test]
+    fn galaxy_parameters_substellar_group_wire_form() {
+        let number = |key: &str, value: f64| Parameter {
+            key: key.to_owned(),
+            origin: ParameterOrigin::Derived,
+            value: ParameterValue::Number {
+                value,
+                unit: Unit::None,
+            },
+        };
+        let group = ParameterGroup {
+            key: "substellar".to_owned(),
+            parameters: vec![
+                number("substellar.brown_dwarfs_per_system", 0.25),
+                number("substellar.rogue_planets_per_system", 29.75),
+                number("substellar.rogue_planet_cap_per_system", 50.875),
+                Parameter {
+                    key: "substellar.rogue_planets_capped".to_owned(),
+                    origin: ParameterOrigin::Derived,
+                    value: ParameterValue::Text {
+                        value: "no".to_owned(),
+                    },
+                },
+            ],
+        };
+        let number_json = |key: &str, value: f64| {
+            json!({
+                "key": key,
+                "origin": "derived",
+                "value": { "type": "number", "value": value, "unit": "none" },
+            })
+        };
+        assert_eq!(
+            serde_json::to_value(&group).unwrap(),
+            json!({
+                "key": "substellar",
+                "parameters": [
+                    number_json("substellar.brown_dwarfs_per_system", 0.25),
+                    number_json("substellar.rogue_planets_per_system", 29.75),
+                    number_json("substellar.rogue_planet_cap_per_system", 50.875),
+                    {
+                        "key": "substellar.rogue_planets_capped",
+                        "origin": "derived",
+                        "value": { "type": "text", "value": "no" },
+                    },
+                ],
+            })
+        );
     }
 
     #[test]

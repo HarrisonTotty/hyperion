@@ -5,13 +5,14 @@
  * @remarks
  * Each function returns the value without its unit, except where it chooses one, when it returns
  * the unit beside the value or with it ({@link formatScaleLength}, {@link formatAge},
- * {@link formatPeriod}, {@link formatBodyDistance}, {@link formatPressure}), or where the unit is
+ * {@link formatSubstellarMass}, {@link formatPeriod}, {@link formatBodyDistance},
+ * {@link formatPressure}), or where the unit is
  * written against the digits (the degree sign, the `yr` inside {@link formatUniverseTimeDhms}). A
  * missing value is the caller's em dash: every formatter here requires a finite number and throws
  * on anything else, since a `NaN` reaching the screen is a bug upstream.
  */
 
-import { SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
+import { type MassLayer, SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
 
 /** Name of the universe time system, shown before every universe time (`UT +12.50 yr`). */
 export const TIME_SYSTEM_LABEL = "UT";
@@ -266,6 +267,61 @@ export function formatMassMearth(massMearth: number): string {
     return oneDecimal;
   }
   return formatNumber(massMearth, 0);
+}
+
+/**
+ * Earth masses in a solar mass: the quotient of the Sun's and the Earth's nominal GM, 1.327 124 4 ×
+ * 10²⁰ and 3.986 004 × 10¹⁴ m³ s⁻², as `units::consts` in `hyperion-sim` takes them (IAU 2015
+ * Resolution B3), 332,946.05.
+ */
+export const MEARTH_PER_MSUN = 1.327_124_4e20 / 3.986_004e14;
+
+/**
+ * Jupiter masses in a solar mass, by the nominal GM of the Sun and of Jupiter, 1.266 865 3 ×
+ * 10¹⁷ m³ s⁻² (IAU 2015 Resolution B3), as `units::consts` takes it: 1,047.57.
+ */
+export const MJUP_PER_MSUN = 1.327_124_4e20 / 1.266_865_3e17;
+
+/** Decimals a brown dwarf's mass in M☉ keeps: three, so that 13 Jupiter masses read `0.012`. */
+const BROWN_DWARF_MASS_DECIMALS = 3;
+
+/** A mass formatted for its kind of object: its digits, and which of the two units they are in. */
+export interface FormattedSubstellarMass {
+  readonly value: string;
+  /** `msun` for a star or a brown dwarf, `mearth` for a free-floating planet. */
+  readonly unit: "msun" | "mearth";
+}
+
+/**
+ * Formats the mass of an object of `layer`, given in M☉ as the wire sends every mass, in the unit
+ * its kind is read in (plan 13, design note 14): a star's as {@link formatMassMsun} writes it, a
+ * brown dwarf's in M☉ with three decimals (`0.052`, the unit of the stellar sequence it continues),
+ * and a free-floating planet's in M⊕ as {@link formatMassMearth} writes it (`0.33`, `17.1`,
+ * `4132`).
+ *
+ * @remarks
+ * The unit is returned, not drawn: the caller sets `SolarMassUnit` or `EarthMassUnit` beside the
+ * value.
+ */
+export function formatSubstellarMass(massMsun: number, layer: MassLayer): FormattedSubstellarMass {
+  requireFinite(massMsun, "mass");
+  let formatted: FormattedSubstellarMass;
+  switch (layer) {
+    case "a":
+    case "b":
+    case "c":
+    case "d":
+    case "e":
+      formatted = { value: formatMassMsun(massMsun), unit: "msun" };
+      break;
+    case "brown_dwarf":
+      formatted = { value: formatNumber(massMsun, BROWN_DWARF_MASS_DECIMALS), unit: "msun" };
+      break;
+    case "rogue_planet":
+      formatted = { value: formatMassMearth(massMsun * MEARTH_PER_MSUN), unit: "mearth" };
+      break;
+  }
+  return formatted;
 }
 
 /**

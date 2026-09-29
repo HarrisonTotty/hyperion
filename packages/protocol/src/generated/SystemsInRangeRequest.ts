@@ -26,7 +26,9 @@ radius_ly: number,
  */
 time: UniverseTime, 
 /**
- * The lightest layer wanted: `a` asks for every layer, `c` for layers C, D and E only.
+ * The lightest layer wanted: `a` asks for every stellar layer, `c` for layers C, D and E only,
+ * `brown_dwarf` for the stars and the free-floating brown dwarfs, and `rogue_planet` for the
+ * rogue planets too (plan 13).
  */
 min_layer: MassLayer, 
 /**

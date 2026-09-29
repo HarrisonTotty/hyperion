@@ -15,7 +15,7 @@ use super::dist::{
     MassRatioDistribution, TWIN_REFERENCE_MASS_RATIO, excess_twin_fraction, gamma_large,
     gamma_small,
 };
-use super::model::{blend, capped_geometric_ratio, lerp};
+use super::model::{MultiplicityModel, blend, capped_geometric_ratio, lerp};
 use crate::math;
 use crate::units::SolarMasses;
 
@@ -76,6 +76,15 @@ fn direct_statistics(m1: SolarMasses) -> (f64, f64) {
 #[must_use]
 pub(super) fn direct_multiple_fraction(m1: SolarMasses) -> f64 {
     1.0 - direct_statistics(m1).0
+}
+
+/// The mean number of direct companions of a primary of `m1`, Moe and Di Stefano's (2017,
+/// Table 13) `f_mult;q>0.1` interpolated in [`DIRECT_ANCHORS`]: the mean of [`direct_count_pmf`],
+/// and the count the direct construction draws before rejection drops any (P11.T1.d's
+/// quadratures read it, ruling 81.2).
+#[must_use]
+pub(super) fn direct_companion_frequency(m1: SolarMasses) -> f64 {
+    direct_statistics(m1).1
 }
 
 /// The distribution of the number of direct companions of a primary of `m1`, 0 to 3: Moe and
@@ -167,6 +176,34 @@ pub(super) fn direct_mass_ratio_law(m1: SolarMasses, log_period: f64) -> MassRat
     smooth_counted_law(m1, log_period).with_twins(excess_twin_fraction(m1, log_period))
 }
 
+/// The probability that a direct companion of a primary of `m1` has a mass ratio of at most each
+/// of `qs`: [`direct_mass_ratio_law`] marginalised over the uncorrected period law
+/// ([`UNCORRECTED`]), which the drawn companions' periods follow (P11.T1.d, ruling 81.2).
+#[must_use]
+pub(super) fn direct_companion_mass_ratio_cdfs(m1: SolarMasses, qs: &[f64]) -> Vec<f64> {
+    let periods = DirectPeriods::new(m1, &UNCORRECTED);
+    let cuts = MultiplicityModel::mass_ratio_period_kinks(m1);
+    let mut sums = vec![0.0; qs.len()];
+    for node in periods.nodes(&cuts) {
+        let law = direct_mass_ratio_law(m1, node.x);
+        for (sum, &q) in sums.iter_mut().zip(qs) {
+            *sum += node.weight * law.cdf(q);
+        }
+    }
+    qs.iter()
+        .zip(sums)
+        .map(|(&q, sum)| {
+            if q >= 1.0 {
+                1.0
+            } else if q < DIRECT_MIN_MASS_RATIO {
+                0.0
+            } else {
+                sum.clamp(0.0, 1.0)
+            }
+        })
+        .collect()
+}
+
 /// Moe and Di Stefano's frequency of companions of q > 0.1 per decade of period,
 /// `f_logP;q>0.1(M₁, P)`: `f_logP;q>0.3` ([`frequency_above_three_tenths`]) times the ratio of
 /// companions above q = 0.1 to those above 0.3 under their mass-ratio law, `1 + (1 − F_twin) R`,
@@ -212,48 +249,8 @@ pub(super) const CORRECTION_LOG_PERIODS: [f64; 8] = [0.6, 1.5, 2.5, 3.5, 4.5, 5.
 /// moves the generator's output. The targets are the bin shares of
 /// Moe and Di Stefano's own eqs. 20–23 law, normalised; the absolute frequencies per decade then
 /// follow from the count law.
-pub(super) const PERIOD_CORRECTION: [[f64; 8]; 4] = [
-    [
-        0.780_872_618_560_769_2,
-        0.966_048_399_154_477_8,
-        1.013_897_455_043_749_2,
-        1.090_300_449_722_920_3,
-        1.170_775_225_837_900_3,
-        1.030_600_264_255_199_2,
-        1.003_434_895_938_529_3,
-        0.834_563_137_282_256,
-    ],
-    [
-        0.655_298_097_743_451_2,
-        0.902_803_932_230_942_2,
-        1.125_156_762_493_910_7,
-        1.265_000_273_191_130_3,
-        1.243_411_936_695_628_9,
-        1.091_519_968_340_668_7,
-        0.879_625_811_518_900_3,
-        0.654_765_857_772_372_7,
-    ],
-    [
-        0.591_462_501_890_336_8,
-        0.856_576_371_499_201_2,
-        1.130_812_678_850_639_4,
-        1.190_129_829_779_486_2,
-        1.415_713_172_418_716_2,
-        1.220_910_780_413_867_2,
-        0.890_155_151_078_511_2,
-        0.649_055_812_364_610_1,
-    ],
-    [
-        0.601_567_784_755_253_2,
-        0.963_733_140_156_550_3,
-        1.261_017_909_312_618_4,
-        1.379_533_010_205_946,
-        1.447_795_519_134_836,
-        1.103_477_631_644_218_7,
-        0.761_294_776_937_575_1,
-        0.543_431_748_170_855_4,
-    ],
-];
+pub(super) const PERIOD_CORRECTION: [[f64; 8]; 4] =
+    crate::tables::period_correction::PERIOD_CORRECTION;
 
 /// A correction table's factor at `m1` and x = `log_period`.
 #[must_use]
@@ -278,6 +275,59 @@ pub(super) struct DirectPeriods {
     knots: [(f64, f64); PERIOD_KNOTS],
     total: f64,
 }
+
+/// A node of [`DirectPeriods::nodes`]: a period, its weight and the law's CDF there.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PeriodNode {
+    /// x = log₁₀(P ÷ 1 d).
+    pub(super) x: f64,
+    /// The quadrature weight times the law's normalised density.
+    pub(super) weight: f64,
+    /// The probability that a period drawn from the law lies below `x`.
+    pub(super) cdf: f64,
+}
+
+/// A piece of [`DirectPeriods`] on which its density is linear: `[lo, hi]` inside the interval of
+/// knots that starts at `knot`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PeriodPiece {
+    /// The piece's ends, x = log₁₀(P ÷ 1 d).
+    pub(super) lo: f64,
+    pub(super) hi: f64,
+    /// The first knot of its interval, (x, density).
+    knot: (f64, f64),
+    /// The density's slope on the interval.
+    slope: f64,
+    /// The law's unnormalised area below the knot.
+    below: f64,
+    /// The law's whole unnormalised area.
+    total: f64,
+}
+
+impl PeriodPiece {
+    /// The 4-point Gauss–Legendre nodes of `[a, b]`, a part of the piece.
+    #[must_use]
+    pub(super) fn nodes(&self, a: f64, b: f64) -> [PeriodNode; 4] {
+        use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS};
+        let (x0, f0) = self.knot;
+        let half = 0.5 * (b - a);
+        let mid = a + half;
+        std::array::from_fn(|k| {
+            let x = mid + half * GL4_NODES[k];
+            let density = f0 + self.slope * (x - x0);
+            PeriodNode {
+                x,
+                weight: GL4_WEIGHTS[k] * half * density / self.total,
+                cdf: (self.below + f0.midpoint(density) * (x - x0)) / self.total,
+            }
+        })
+    }
+}
+
+/// The correction table of ones: Moe and Di Stefano's law as they give it, which the fitted
+/// correction makes the drawn companions' periods follow after rejection (ruling 81.3), and so the
+/// law P11.T1.d's quadratures integrate.
+pub(super) const UNCORRECTED: [[f64; 8]; 4] = [[1.0; 8]; 4];
 
 impl DirectPeriods {
     /// The law for a primary of `m1` under the correction `table`.
@@ -327,23 +377,67 @@ impl DirectPeriods {
         DIRECT_LOG_PERIOD_RANGE.1
     }
 
+    /// The probability that a period drawn from the law lies below x = `x`.
+    #[must_use]
+    pub(super) fn cdf(&self, x: f64) -> f64 {
+        let mut below = 0.0;
+        for pair in self.knots.windows(2) {
+            let ((x0, f0), (x1, f1)) = (pair[0], pair[1]);
+            if x <= x1 {
+                let f = f0 + (f1 - f0) * (x - x0).max(0.0) / (x1 - x0);
+                return (below + f0.midpoint(f) * (x - x0).max(0.0)) / self.total;
+            }
+            below += f0.midpoint(f1) * (x1 - x0);
+        }
+        1.0
+    }
+
+    /// The pieces of a quadrature over the law: the intervals between knots, each split at every
+    /// one of `cuts` inside it, on each of which the law's density is linear.
+    #[must_use]
+    pub(super) fn pieces(&self, cuts: &[f64]) -> Vec<PeriodPiece> {
+        let mut pieces = Vec::with_capacity(PERIOD_KNOTS + cuts.len());
+        let mut inside: Vec<f64> = Vec::with_capacity(cuts.len() + 2);
+        let mut below = 0.0;
+        for pair in self.knots.windows(2) {
+            let ((x0, f0), (x1, f1)) = (pair[0], pair[1]);
+            inside.clear();
+            inside.push(x0);
+            inside.extend(cuts.iter().copied().filter(|&c| c > x0 && c < x1));
+            inside.push(x1);
+            inside.sort_by(f64::total_cmp);
+            for piece in inside.windows(2) {
+                pieces.push(PeriodPiece {
+                    lo: piece[0],
+                    hi: piece[1],
+                    knot: (x0, f0),
+                    slope: (f1 - f0) / (x1 - x0),
+                    below,
+                    total: self.total,
+                });
+            }
+            below += f0.midpoint(f1) * (x1 - x0);
+        }
+        pieces
+    }
+
+    /// The nodes of a quadrature over the law: 4-point Gauss–Legendre on each of its
+    /// [`pieces`](Self::pieces) at `cuts`, so that `Σ w g(x)` is the mean of `g` over the law
+    /// (exact for `g` of degree up to 6 on each piece), each with the law's cumulative probability
+    /// at its period.
+    #[must_use]
+    pub(super) fn nodes(&self, cuts: &[f64]) -> Vec<PeriodNode> {
+        self.pieces(cuts)
+            .iter()
+            .flat_map(|piece| piece.nodes(piece.lo, piece.hi))
+            .collect()
+    }
+
     /// The share of the law in `[lo, hi]` of x: the targets of the correction's fit
     /// ([`period_fit::target_shares`](super::period_fit::target_shares)).
     #[must_use]
     pub(super) fn share(&self, lo: f64, hi: f64) -> f64 {
-        let cdf = |x: f64| {
-            let mut below = 0.0;
-            for pair in self.knots.windows(2) {
-                let ((x0, f0), (x1, f1)) = (pair[0], pair[1]);
-                if x <= x1 {
-                    let f = f0 + (f1 - f0) * (x - x0).max(0.0) / (x1 - x0);
-                    return (below + f0.midpoint(f) * (x - x0).max(0.0)) / self.total;
-                }
-                below += f0.midpoint(f1) * (x1 - x0);
-            }
-            1.0
-        };
-        cdf(hi) - cdf(lo)
+        self.cdf(hi) - self.cdf(lo)
     }
 }
 

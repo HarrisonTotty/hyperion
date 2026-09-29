@@ -902,11 +902,11 @@ mod tests {
     /// [`LEAST_FAILING_THIN_SCATTER`] above its mass's length, 4.7 times its 0.05 dex σ, while every
     /// uniform draw above sits at its end; with no scatter the same corner keeps 0.32 of its gas
     /// neutral, and over 2,000 drawn galaxies the least is 0.529 (`tests/gas_statistics.rs`).
-    const LEAST_DRAWN_CORNER_SHARE: f64 = -0.0586;
+    const LEAST_DRAWN_CORNER_SHARE: f64 = -0.0631;
 
     /// The least thin-disc length scatter, dex, at which a drawn galaxy at the corner of
     /// [`LEAST_DRAWN_CORNER_SHARE`] would leave its neutral layer nothing without the clamp.
-    const LEAST_FAILING_THIN_SCATTER: f64 = 0.236;
+    const LEAST_FAILING_THIN_SCATTER: f64 = 0.235;
 
     /// The least gas mass over the corners of plan 02's ranges, M☉, to two figures: some 420 times
     /// the 6 × 10⁶ M☉ below which the molecular disc's largest draw would weigh half of it, the one

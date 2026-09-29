@@ -137,6 +137,7 @@ describe("projectHr", () => {
       blackHole: 0,
       noRemnant: 1,
       notYetFormed: 1,
+      planet: 0,
       dataInvalid: 0,
     });
   });
@@ -263,5 +264,25 @@ describe("hrSpectralLetters", () => {
 
     expect(g?.xPx).toBeGreaterThan(hrXPx(5_930, AREA));
     expect(g?.xPx).toBeLessThan(hrXPx(5_270, AREA));
+  });
+});
+
+describe("projectHr's free-floating planets (plan 13, P13.T8.d)", () => {
+  it("counts a free-floating planet apart and plots it nowhere", () => {
+    const [planet] = toChartResult(
+      aSystemsInRange({
+        minLayer: "rogue_planet",
+        systems: [{ relLy: [1, 0, 0], layer: "rogue_planet" }],
+      }),
+    ).systems;
+    if (planet === undefined) {
+      throw new Error("the fixture built no planet");
+    }
+    const unborn = { ...planet, ageMyr: -0.5 };
+    const projection = projectHr([planet, unborn], AREA, 50);
+
+    expect(projection.points).toHaveLength(0);
+    expect(projection.counts.planet).toBe(1);
+    expect(projection.counts.notYetFormed).toBe(1);
   });
 });

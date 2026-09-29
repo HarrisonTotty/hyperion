@@ -13,6 +13,7 @@ use hyperion_protocol::{
     SystemsInRange, SystemsInRangeRequest,
 };
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::placement::SystemKind;
 use hyperion_sim::galaxy::query::{RangeQuery, RangeResult, SystemHit, range_query};
 use hyperion_sim::time::UniverseTime;
 
@@ -223,6 +224,9 @@ async fn run<T: Send + 'static>(
 }
 
 /// The wire briefs of `hits` at `time`, in order, from `cache`'s models of the galaxy `key` names.
+///
+/// A rogue planet has no brief, since it has no stellar state (plan 13, P13.T5.d), so its row
+/// carries no `stellar` key; a brown dwarf's is its own, from the stellar stage.
 fn briefs_of(
     cache: &SharedBriefCache,
     key: GalaxyKey,
@@ -231,11 +235,12 @@ fn briefs_of(
     time: UniverseTime,
 ) -> Vec<Option<StellarBriefDto>> {
     hits.iter()
-        .map(|hit| {
-            cache
+        .map(|hit| match hit.record().kind() {
+            SystemKind::RoguePlanet => None,
+            SystemKind::Stellar | SystemKind::BrownDwarf => cache
                 .get_or_build(key, galaxy, hit.record())
                 .brief_at(time)
-                .map(|brief| brief_dto(&brief))
+                .map(|brief| brief_dto(&brief)),
         })
         .collect()
 }

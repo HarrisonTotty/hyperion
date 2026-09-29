@@ -144,8 +144,8 @@ impl QuerySphere {
 }
 
 /// Every cell of `layer` whose closed box meets the padded sphere, inside the root cube, in
-/// ascending order of x, then y, then z (the order of [`CellKey`]). Nothing for the substellar
-/// layers until plan 13's P13.T4 lets a query ask for them (P13.T3 places them).
+/// ascending order of x, then y, then z (the order of [`CellKey`]), for the substellar layers as for
+/// the stellar ones (plan 13, P13.T4).
 pub fn cells_in_sphere(
     layer: Layer,
     sphere: &QuerySphere,
@@ -197,7 +197,7 @@ struct Axis {
     last: i64,
 }
 
-/// A walk of one stellar layer over one padded sphere.
+/// A walk of one layer over one padded sphere.
 #[derive(Debug, Clone, Copy)]
 struct Walk {
     layer: Layer,
@@ -209,13 +209,11 @@ struct Walk {
 }
 
 impl Walk {
-    /// The walk of `layer` over `sphere`, or `None` for a substellar layer or a sphere that
-    /// misses the root cube's cells altogether.
+    /// The walk of `layer` over `sphere`, or `None` for a sphere that misses the root cube's cells
+    /// altogether.
     #[must_use]
     fn new(layer: Layer, sphere: &QuerySphere) -> Option<Self> {
-        // Plan 13 places the substellar layers, but the query walks them only from its P13.T4,
-        // which adds the request that asks for them.
-        let spec = layer_spec(layer).filter(|spec| spec.band().is_stellar())?;
+        let spec = layer_spec(layer)?;
         let cell_ly = i64::from(spec.cell_ly());
         let padded = sphere.padded_radius.value();
         // Whole light-years that cover the padded radius; the clamp keeps any finite radius in
@@ -321,8 +319,7 @@ impl Walk {
     #[must_use]
     fn key(self, cell: [i64; 3]) -> CellKey {
         let cell = cell.map(|c| i32::try_from(c).expect("a cell of the root cube fits in i32"));
-        CellKey::new(self.layer, cell)
-            .expect("a walk's cells are of a stellar layer and in the cube")
+        CellKey::new(self.layer, cell).expect("a walk's cells are in the cube")
     }
 }
 
@@ -344,10 +341,14 @@ mod tests {
 
     use super::*;
     use crate::coords::LyCell;
-    use crate::galaxy::placement::{LayerSpec, STELLAR_LAYERS};
+    use crate::galaxy::placement::{LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS};
 
     fn stellar_layers() -> impl Iterator<Item = Layer> {
         STELLAR_LAYERS.iter().map(LayerSpec::layer)
+    }
+
+    fn every_layer() -> impl Iterator<Item = Layer> {
+        stellar_layers().chain(SUBSTELLAR_LAYERS.iter().map(LayerSpec::layer))
     }
 
     /// A position at whole light-years `cell` plus the fractions `fraction` of a light-year.
@@ -437,7 +438,7 @@ mod tests {
         // a cell only touches it: those cells are kept, on the low side as on the high.
         for centre in centres {
             for radius in [0.3, 3.7, 8.0, 12.0, 24.0, 32.0, 50.0, 64.0, 131.5] {
-                for layer in stellar_layers() {
+                for layer in every_layer() {
                     assert_walk_is_brute_force(layer, &sphere(centre, radius));
                 }
             }
@@ -537,11 +538,22 @@ mod tests {
     }
 
     #[test]
-    fn the_substellar_layers_are_not_walked() {
-        let sphere = sphere(at([0, 26_000, 0], [0.5; 3]), 20.0);
+    fn the_substellar_layers_are_walked_on_their_own_grids() {
+        // Steiner's formula for a 20 ly ball swept by a cube of edge a, (a³ + 6a²R + 3πaR² +
+        // 4πR³ ÷ 3) ÷ a³, gives 31.4 cells of 16 ly and 790 of 4 ly.
+        let ball = sphere(at([0, 26_000, 0], [0.5; 3]), 20.0);
+        let brown = count_cells_in_sphere(Layer::BrownDwarf, &ball);
+        let rogue = count_cells_in_sphere(Layer::RoguePlanet, &ball);
+        assert!((27..=36).contains(&brown), "{brown} brown-dwarf cells");
+        assert!((690..=890).contains(&rogue), "{rogue} rogue-planet cells");
+        // Across the cube's faces and the axis planes, as the stellar layers are.
         for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
-            assert_eq!(cells_in_sphere(layer, &sphere).count(), 0);
-            assert_eq!(count_cells_in_sphere(layer, &sphere), 0);
+            assert_walk_is_brute_force(layer, &ball);
+            assert_walk_is_brute_force(
+                layer,
+                &sphere(at([65_530, -65_530, 65_500], [0.5; 3]), 12.0),
+            );
+            assert_walk_is_brute_force(layer, &sphere(at([0, -1, 0], [0.3, 0.8, 0.1]), 9.0));
         }
     }
 

@@ -344,6 +344,56 @@ mod tests {
         );
     }
 
+    /// Plan 13, P13.T7: a rogue-planet cell at the galactic centre holds tens of thousands of
+    /// records (17,442 in this seed, 1.4 MB), and the cache charges it by its bytes. Under a
+    /// budget it fits, it evicts what was there before and is then a hit; under one it does not
+    /// fit, it is lent and refused. The bytes held never pass the budget.
+    #[test]
+    fn a_central_rogue_planet_cell_is_charged_by_its_bytes() {
+        let centre = CellKey::new(Layer::RoguePlanet, [0, 0, 0]).expect("the centre's cell");
+        let central = uncached(&[centre]);
+        let records = central[&centre].len();
+        assert!(
+            records > 10_000,
+            "{records} rogue planets in the central cell"
+        );
+        let bytes = records * size_of::<SystemRecord>();
+        assert!(bytes > 1 << 20, "{bytes} bytes");
+
+        // Room for the central cell and less than the disc cells lent before it.
+        let budget = bytes + (64 << 10);
+        let cache = SharedCellCache::new(budget);
+        let mut handle = cache.handle(key());
+        let disc = disc_cells();
+        let _ = lend(&mut handle, &disc);
+        let before = cache.counters();
+        assert!(
+            before.bytes() > 64 << 10 && before.bytes() <= budget,
+            "{before:?}"
+        );
+        assert_eq!(lend(&mut handle, &[centre]), central);
+        let after = cache.counters();
+        assert!(after.bytes() <= budget, "{after:?}");
+        assert!(
+            after.bytes() >= bytes,
+            "the central cell is held: {after:?}"
+        );
+        assert!(after.evictions() > before.evictions(), "{after:?}");
+        assert_eq!(lend(&mut handle, &[centre]), central);
+        assert_eq!(
+            cache.counters().hits(),
+            after.hits() + 1,
+            "the second lend is a hit"
+        );
+
+        let small = SharedCellCache::new(1 << 20);
+        let mut handle = small.handle(key());
+        assert_eq!(lend(&mut handle, &[centre]), central);
+        let counters = small.counters();
+        assert!(counters.bytes() <= 1 << 20, "{counters:?}");
+        assert_eq!(counters.refused(), 1, "{counters:?}");
+    }
+
     #[test]
     fn queries_at_two_times_share_the_cells_between_them() {
         let epoch = walk(

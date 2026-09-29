@@ -278,7 +278,8 @@ fn pinned_death(input: &BinaryInput) -> Option<PinnedTrack> {
         return None;
     }
     let law = StandardKickLaw::default();
-    let death = law.with_stripped_mark(fate.death, draws);
+    let death =
+        law.with_stripped_mark(fate.death, draws, track.initial_mass(), track.composition());
     let kick = law.natal_kick(&death, &fate.remnant, draws);
     Some(PinnedTrack {
         track,

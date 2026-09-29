@@ -44,8 +44,10 @@ const PINNED: [u64; 4] = [
 
 /// A pinned triple of three living main-sequence stars (P11.T13's integration test). Until
 /// ruling 74's placement weights it was `0x4200_2cb2_0000_0009`, an F3 IV subgiant with a K7.5 V
-/// and an F8.5 V companion, which now draws as a binary.
-const TRIPLE: u64 = 0x4200_2cb2_0000_000d;
+/// and an F8.5 V companion, which now draws as a binary; until P15.T4.b's fitted Chabrier scale
+/// (ruling 138), `0x4200_2cb2_0000_000d`, whose primary is now a giant. Re-picked by search: the
+/// first triple of three dwarfs in the cells along +x from the solar-circle cell.
+const TRIPLE: u64 = 0x4200_6cb2_0000_000e;
 
 /// The galaxy the server builds for [`SEED`], to hold its answers to.
 fn galaxy() -> &'static Galaxy {

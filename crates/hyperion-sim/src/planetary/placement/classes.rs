@@ -91,6 +91,7 @@
 //! is on [`tags::PLANET_ORBIT`] and its host's plane on [`tags::PLANET_PLANE`] ([`orbits`]).
 
 pub mod orbits;
+pub mod secular;
 pub mod tides;
 
 use core::f64::consts::{SQRT_2, TAU};
@@ -470,7 +471,8 @@ impl HostPlacement {
     }
 
     /// The class placed: the drawn one, or its giant-free sibling where the disc grows no giant's
-    /// core in time (D5's second fallback), or `Barren` without a disc.
+    /// core in time (D5's second fallback), or `Barren` without a disc or where no planet was
+    /// placed (ruling 112.8).
     #[must_use]
     pub const fn class(&self) -> ArchitectureClass {
         self.class
@@ -631,7 +633,8 @@ pub fn core_fallback(
 /// hierarchy order (design note 3); a second-generation host (P14.T28.e) starts at `0xC0`. No
 /// planet is placed past its block's last slot, 191 or `0xCF`.
 ///
-/// A host without a disc places nothing and is `Barren`.
+/// A host without a disc places nothing and is `Barren`, as is a host whose class placed no
+/// planet (ruling 112.8).
 ///
 /// # Panics
 ///
@@ -704,9 +707,17 @@ pub fn place(
     let next_slot = placer.reserve(first_slot);
     placer.walk();
     let planets = placer.finish();
+    // Ruling 112.8: the class placed reports what was placed. A class whose groups place nothing,
+    // as a companion-truncated disc too poor for one member above its floor leaves them, is
+    // `Barren`.
+    let reported = if planets.is_empty() {
+        ArchitectureClass::Barren
+    } else {
+        kept
+    };
     HostPlacement {
         drawn: class,
-        class: kept,
+        class: reported,
         core,
         planets,
         next_slot,

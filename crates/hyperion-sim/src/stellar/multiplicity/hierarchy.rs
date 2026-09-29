@@ -16,6 +16,7 @@ use super::dist::{MIN_COMPANION_MASS, PeriodDistribution};
 use super::model::{MAX_COMPANIONS, MultiplicityModel};
 use super::stability::{Innermost, Limits, MAX_ECCENTRICITY, NECESSARY_AXIS_RATIO};
 use crate::Seed;
+use crate::galaxy::displaced::binarity;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, SystemId};
@@ -27,7 +28,7 @@ use crate::stellar::draws::{ATTEMPT_WORDS, StarDraws};
 use crate::stellar::remnant::collapse::ElectronCaptureWindows;
 use crate::stellar::sse::ZCoeffs;
 use crate::stellar::system::draw_metallicity;
-use crate::units::consts::{GM_SUN, METRES_PER_AU};
+use crate::units::consts::GM_SUN;
 use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, SolarMasses};
 
 /// The number of redraw attempts of a system's binaries: attempts 0 to 7 (plan 11, Design note
@@ -123,21 +124,6 @@ pub fn stripped_mark_min_mass(composition: &Composition) -> SolarMasses {
 /// 6.72 M☉ near Z = 3 × 10⁻⁴, less 1 M☉ and a margin), below which no primary's mark is read and
 /// no root is found.
 const STRIPPED_MARK_FLOOR: SolarMasses = SolarMasses::new(5.7);
-
-/// The provisional share of primaries of [`stripped_mark_min_mass`] and up whose envelope a
-/// companion strips: 0.25, plan 06's provisional `KickLawParams::stripped_share` (its design note
-/// 11), the probability the mark `star.stripped` is read against.
-///
-/// **Provisional** (P11.T2.c's first seam): P11.T1.d replaces it with
-/// [`stripped_share`](super::stripped_share) at the system's composition, with a version bump.
-pub const PROVISIONAL_STRIPPED_SHARE: f64 = 0.25;
-
-/// The provisional interacting range: an innermost orbit interacts when its periastron is under
-/// 10 au, P11.T1.c's test stand-in promoted and named.
-///
-/// **Provisional** (P11.T2.c's third seam): P11.T4.a replaces it with `can_interact`'s threshold,
-/// the Roche-filling separation of each star's largest radius, with a version bump.
-pub const PROVISIONAL_INTERACTING_PERIASTRON: Metres = Metres::new(10.0 * METRES_PER_AU);
 
 /// One attempt of a conditional redraw of a system's binaries, 0 to [`MAX_REDRAWS`] − 1 (plan
 /// 11, Design note 9): which block of [`DRAWS_PER_ATTEMPT`] words of each stream it reads.
@@ -487,13 +473,17 @@ impl SystemHierarchy {
 ///
 /// For a primary of [`stripped_mark_min_mass`] or more (except under
 /// [`ForcedSingle`](MultiplicityContext::ForcedSingle)), plan 06's companion-stripped mark,
-/// [`StarDraws::stripped`] of the primary at attempt 0, is read against
-/// [`PROVISIONAL_STRIPPED_SHARE`] first (Design note 1). When it is set the system is multiple and
-/// the primary's own orbit has its periastron inside [`PROVISIONAL_INTERACTING_PERIASTRON`]; when
-/// it is not, the system is multiple with probability `(MF − s) ÷ (1 − s)` and that orbit's
-/// periastron lies outside. Both are exact conditional draws, the orbit's by rejection among its
-/// tries, and they keep the share of stripped primaries at the mark's. The mark is read at
-/// attempt 0 until plan 08's `SystemRecord::mark_attempt` exists (P11.T2.c's second seam).
+/// [`StarDraws::stripped`] of the primary at attempt 0, is read first against the primary's
+/// stripped share s, plan 08's seam
+/// ([`binarity::stripped_share`](crate::galaxy::displaced::binarity::stripped_share); P11.T1.d,
+/// Design note 1). When it is set the system is multiple and the primary's own orbit has its
+/// periastron in the primary's stripping band for the orbit's mass ratio
+/// ([`binarity::stripping_band`](crate::galaxy::displaced::binarity::stripping_band)); when it is
+/// not, the system is multiple with probability `(MF − s) ÷ (1 − s)` and that orbit's periastron
+/// lies outside the band, in the merger band, beyond it (Case C) or wide (ruling 123.5). Both are
+/// conditional draws, the orbit's by rejection among its tries, and they keep the share of
+/// stripped primaries at the mark's. The mark is read at attempt 0 until plan 08's
+/// `SystemRecord::mark_attempt` exists (P11.T2.c's second seam).
 ///
 /// P11.T2.c wires it into the system stage:
 /// [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) calls
@@ -767,7 +757,7 @@ pub fn draw_star_count(
     draw_hierarchy(galaxy, record, ctx, attempt).star_count()
 }
 
-/// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1).
+/// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5).
 #[must_use]
 fn innermost(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> Innermost {
     match ctx {
@@ -775,15 +765,23 @@ fn innermost(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -
         MultiplicityContext::Free | MultiplicityContext::ForcedMultiple { .. } => {}
     }
     let m1 = record.primary_initial_mass();
-    if m1 < STRIPPED_MARK_FLOOR || m1 < stripped_mark_min_mass(&draw_metallicity(galaxy, record)) {
+    if m1 < STRIPPED_MARK_FLOOR {
+        return Innermost::Free;
+    }
+    let comp = draw_metallicity(galaxy, record);
+    if m1 < stripped_mark_min_mass(&comp) {
         return Innermost::Free;
     }
     let primary = BodyId::new(record.id(), 0);
     let mark = StarDraws::for_star(galaxy.seed(), primary).stripped();
-    if mark.is_below(Threshold::from_probability(PROVISIONAL_STRIPPED_SHARE)) {
-        Innermost::Interacting(PROVISIONAL_INTERACTING_PERIASTRON)
+    // One reading of the seam for the share and the radii: `binarity::is_stripped`'s comparison
+    // on the share it would read.
+    let node = binarity::stripping_node(m1, &comp);
+    let (radii, share) = (node.radii(), node.share());
+    if mark != binarity::NEVER_STRIPPED && binarity::is_stripped_at(mark, share) {
+        Innermost::Stripped(radii)
     } else {
-        Innermost::Wide(PROVISIONAL_INTERACTING_PERIASTRON)
+        Innermost::Unstripped { radii, share }
     }
 }
 
@@ -869,12 +867,11 @@ fn companion_count(
     let multiple = match (ctx, innermost) {
         (MultiplicityContext::ForcedSingle, _) => false,
         (MultiplicityContext::ForcedMultiple { .. }, _)
-        | (MultiplicityContext::Free, Innermost::Interacting(_)) => true,
+        | (MultiplicityContext::Free, Innermost::Stripped(_)) => true,
         (MultiplicityContext::Free, Innermost::Free) => streams
             .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
             .is_below(Threshold::from_probability(multiple_share.clamp(0.0, 1.0))),
-        (MultiplicityContext::Free, Innermost::Wide(_)) => {
-            let s = PROVISIONAL_STRIPPED_SHARE;
+        (MultiplicityContext::Free, Innermost::Unstripped { share: s, .. }) => {
             let p = ((multiple_share - s) / (1.0 - s)).clamp(0.0, 1.0);
             streams
                 .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
@@ -1151,19 +1148,12 @@ impl Draw<'_> {
     /// system holds fewer than four stars.
     #[must_use]
     fn direct(&self, m0: SolarMasses, ctx: MultiplicityContext) -> SystemHierarchy {
-        // An unset stripped mark is not held against the direct companions: under Table 13
-        // nearly every O star has a close companion, which P11.T2.c's provisional share of 0.25
-        // contradicts, and holding every companion of three quarters of the primaries above
-        // 8 M☉ outside 10 au rejects most sets whole. A set mark still asks for an interacting
-        // innermost orbit. P11.T1.d's stripped share, computed from this model, closes the gap.
-        // The count still reads the mark as the spine construction does, (MF − s) ÷ (1 − s) for an
+        // The stripped share is this construction's own (P11.T1.d), so a set mark holds the
+        // innermost orbit in the stripping band and an unset one outside it (ruling 123.5), and
+        // the count reads the mark as the spine construction does, (MF − s) ÷ (1 − s) for an
         // unset one, so that the multiple share stays Table 13's.
         let n = self.companion_count(&direct_count_pmf(m0), ctx);
-        let direct = Draw {
-            limits: self.limits.without_wide_innermost(),
-            ..*self
-        };
-        direct.direct_under_limits(m0, n)
+        self.direct_under_limits(m0, n)
     }
 
     /// [`Draw::direct`] for `n` direct companions under this draw's own limits.
@@ -1354,10 +1344,6 @@ pub(super) fn direct_tries(
         return None;
     }
     let n = draw.companion_count(&direct_count_pmf(m0), ctx);
-    let draw = Draw {
-        limits: draw.limits.without_wide_innermost(),
-        ..draw
-    };
     let (set, dropped, tries) = draw.direct_set(m0, n, &DirectPeriods::new(m0, correction));
     Some((set.len(), tries, dropped))
 }
@@ -1837,6 +1823,7 @@ mod tests {
     };
     use super::*;
     use crate::galaxy::imf::MassBand;
+    use crate::units::consts::METRES_PER_AU;
 
     fn free(galaxy: &Galaxy, record: &SystemRecord) -> SystemHierarchy {
         draw_hierarchy(
@@ -2233,19 +2220,24 @@ mod tests {
     /// Ruling 81: from 3 M☉ up the direct companions number Moe and Di Stefano's Table 13 counts.
     /// At each row mass the share of systems with n direct companions, those dropped included,
     /// is the count distribution's within 3.29 standard errors (α = 10⁻³), and no system holds
-    /// more than four stars.
+    /// more than four stars. Under 1% of direct companions are dropped per mass bin (ruling 81.8
+    /// as ruling 137.4 reads it, per companion); the systems that lose one are reported and held
+    /// under 2%.
     #[test]
     fn direct_companions_of_massive_primaries_follow_table_13() {
         let galaxy = galaxy();
         for mass in [3.5, 12.0, 28.0] {
             let pmf = direct_count_pmf(SolarMasses::new(mass));
             let (mut counts, mut with_drops) = ([0_u32; 4], 0_u32);
+            let (mut kept, mut lost) = (0_u32, 0_u32);
             for record in records_of_mass(&galaxy, SAMPLE, &sunlike(), mass) {
                 let h = free(&galaxy, &record);
                 assert!(h.star_count() <= 4, "{} stars", h.star_count());
                 let direct = u8::try_from(direct_log_periods(&h).len()).expect("few");
                 counts[usize::from(direct)] += 1;
                 with_drops += u32::from(h.dropped_companions() > 0);
+                kept += u32::from(direct);
+                lost += u32::from(h.dropped_companions());
             }
             let total = f64::from(SAMPLE);
             // A system that lost a companion may sit one count low; it widens the bracket.
@@ -2262,8 +2254,16 @@ mod tests {
                     "{n} at {mass} M☉"
                 );
             }
+            let lost_share = f64::from(lost) / f64::from(kept + lost);
+            println!(
+                "{mass} M☉: {lost_share:.4} of direct companions dropped, {dropped:.4} of systems lost one"
+            );
             assert!(
-                dropped < 0.01,
+                lost_share < 0.01,
+                "{lost_share} of direct companions dropped at {mass} M☉"
+            );
+            assert!(
+                dropped < 0.02,
                 "{dropped} of systems lost a companion at {mass} M☉"
             );
         }
@@ -2521,41 +2521,69 @@ mod tests {
         assert!(f64::from(dropped) < 0.05 * f64::from(kept + dropped));
     }
 
-    /// Design note 1 on the provisional seams: a massive primary's stripped mark decides its own
-    /// orbit, set for a quarter of them.
+    /// Design note 1 as ruling 123.5 amends it (P11.T1.d): a massive primary's stripped mark,
+    /// read against its stripped share, decides its own orbit, in its stripping band when set and
+    /// outside it when not, and the marked share is the mean share.
     #[test]
     fn a_massive_primarys_stripped_mark_decides_its_orbit() {
+        use crate::galaxy::displaced::binarity::{is_stripped, stripped_share, stripping_band};
         let galaxy = galaxy();
-        let records = log_uniform_records(&galaxy, 4_000, &sunlike(), (8.0, 120.0), 14);
-        let (mut stripped, mut lost, mut close_unstripped) = (0_u32, 0_u32, 0_u32);
+        let n = 4_000_u32;
+        let records = log_uniform_records(&galaxy, n, &sunlike(), (8.0, 120.0), 14);
+        let (mut stripped, mut lost) = (0_u32, 0_u32);
+        let (mut expected, mut variance) = (0.0, 0.0);
         for record in &records {
             let h = free(&galaxy, record);
+            let m1 = record.primary_initial_mass();
+            let comp = draw_metallicity(&galaxy, record);
+            let share = stripped_share(m1, &comp);
+            expected += share;
+            variance += share * (1.0 - share);
             let mark = StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0)).stripped();
-            let orbit = super::super::stability::primary_orbit(&h);
-            if mark.is_below(Threshold::from_probability(PROVISIONAL_STRIPPED_SHARE)) {
+            let in_band = super::super::stability::primary_orbit(&h).map(|o| {
+                let HierarchyNode::Pair { outer, .. } = pairs_of_primary(&h) else {
+                    unreachable!("a primary with an orbit is in a pair")
+                };
+                let q = h.node_mass(outer) / m1;
+                stripping_band(m1, q, &comp).contains(o.periapsis())
+            });
+            if is_stripped(mark, m1, &comp) {
                 stripped += 1;
-                if let Some(o) = orbit {
-                    assert!(o.periapsis() < PROVISIONAL_INTERACTING_PERIASTRON);
+                if let Some(inside) = in_band {
+                    assert!(inside, "a marked primary's orbit is in its band");
                 } else {
                     assert!(h.dropped_companions() > 0);
                     lost += 1;
                 }
-            } else if orbit.is_some_and(|o| o.periapsis() < PROVISIONAL_INTERACTING_PERIASTRON) {
-                // Every primary here is drawn by the direct construction, which does not hold an
-                // unset mark's orbit outside the threshold (ruling 81; P11.T1.d closes it).
-                close_unstripped += 1;
+            } else {
+                assert_ne!(
+                    in_band,
+                    Some(true),
+                    "an unmarked primary's orbit is outside its band"
+                );
             }
         }
-        let share = f64::from(stripped) / 4_000.0;
-        let sigma = (0.25 * 0.75 / 4_000.0_f64).sqrt();
+        let sigma = variance.sqrt();
         println!(
-            "{stripped} of 4000 massive primaries stripped ({share:.4}); {lost} lost their \
-             companion; {close_unstripped} unstripped ones have an orbit inside the threshold"
+            "{stripped} of {n} massive primaries stripped, {expected:.1} expected; {lost} lost \
+             their companion"
         );
-        // Plan 06's design note 11 sets the provisional share at a quarter; held to that figure
-        // rather than to the constant, so that a change to the constant fails here.
-        assert!((share - 0.25).abs() < 3.29 * sigma, "{share}");
+        assert!(
+            (f64::from(stripped) - expected).abs() < 3.29 * sigma,
+            "{stripped}"
+        );
         assert!(lost < 4, "{lost} stripped primaries have no companion");
+    }
+
+    /// The pair whose inner member is the primary.
+    fn pairs_of_primary(h: &SystemHierarchy) -> HierarchyNode {
+        let mut node = h.root();
+        let mut found = *h.node(node);
+        while let HierarchyNode::Pair { inner, .. } = h.node(node) {
+            found = *h.node(node);
+            node = *inner;
+        }
+        found
     }
 
     /// The shapes the draw makes for Sun-like primaries: which member of a triple holds the inner

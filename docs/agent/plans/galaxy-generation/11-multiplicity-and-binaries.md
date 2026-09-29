@@ -516,8 +516,8 @@ given; where it is not, the task that builds it is named.
     the engine and `brute_force_class_members`, neither of which reads the tables; then T15 swaps
     the fitted file in, with a bump. Nothing in this plan waits on plan 15.
 14. **Defaults of the generator version** set here: common-envelope efficiency α = 1 with the
-    binding parameter of Hurley, Tout and Pols; their critical mass ratios; their accretion
-    efficiency. `CLUSTER_MERGED_BINARY_FATE` is the fourth of the kick law's defaults that the
+    binding parameter of Hurley, Tout and Pols; their critical mass ratios; accretion
+    Eddington-limited for white dwarfs, neutron stars and black holes (ruling 132.1). `CLUSTER_MERGED_BINARY_FATE` is the fourth of the kick law's defaults that the
     brainstorm's "Open questions" lists, and P15.T5.c reviews it; its value is that a merged pair
     stays a member and is judged on the pair's velocity.
 15. **Brown-dwarf companions.** The brainstorm counts brown dwarfs at "one for every four or five
@@ -1681,7 +1681,8 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     (about 10 s): the committed table's bin shares over the fit's own sample, each within the
     plan's 0.2% of Moe and Di Stefano's. The 3.5, 12 and 28 M☉ rows miss by 0.15%, 0.06% and
     0.11%; the 7 M☉ row misses by 1.51% and is held to an interim 0.2–2% (accepted by the
-    coordinator) until the refit in the version 14 batch, which must narrow it to 0.2%.
+    coordinator) until the refit in the version 14 batch, which must narrow it to 0.2%. _Done in
+    P11.T1.d_ (see its entry below).
 - **Two pieces of plan 11 landed with plan 06's range briefs (round 9, `briefs`; ruling 90).**
   - `multiplicity::draw_star_count(galaxy, record, ctx, attempt) -> u8` joins the Provides. It equals
     `draw_hierarchy(..).star_count()` for every record, context and attempt (tested over 4,500
@@ -1954,3 +1955,167 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     Hyphenated words are nowrap spans, and the star list's last column has no trailing padding.
     The guide gains 130's typography bullet, the `BINARY CLASS` row and the amended `STARS` and
     `TRANSIENT` rows. `CV` was not needed (see the width check in the round's report).
+- **Deviations in P11.T1.d, as built (round 9b, `fates`, with P06.T30 and the period refit;
+  version left at 14 for the orchestrator's batch of 15).**
+  - _Edit 1._ `StellarFates::companion_mass_ratio_cdf(m1, q)` defaults to the uniform stand-in.
+    Plan 02's quadratures now take a companion's part of any quantity as `∫ g dH` over
+    `galaxy::fates::CompanionMasses`, `H(c)` the companions per system below mass c on 240 even
+    intervals of ln c, each interval's mean of g from the primaries' running integral. `H` reads
+    no age, so `derive.rs` builds it once for all seven populations through the new `_with`
+    functions (`mean_present_mass_with`, `mean_formed_mass_with`, `mean_stars_per_system_with`).
+    The brute-force test still agrees to 10⁻⁴.
+  - _Edit 2._ `stellar::multiplicity::MultiplicityFates` (new `fates.rs`) wraps `TrackFates` with
+    `MultiplicityModel::drawn_companion_frequency` and `CompanionLaw`, a table of
+    `drawn_companion_mass_ratio_cdfs` at the `TrackFates` grid's masses, split at 0.8 M☉ where
+    the law changes (below it the columns are the companion's place in its own range of ln q,
+    above it ln q every 1/16 with 0.1, 0.3 and 0.95 among them), within 1.6 × 10⁻³ of the model.
+    **Ruling 81's queued item is done here:** the `drawn_*` laws re-derive the quadratures from
+    the direct construction above 1.5 M☉, blended in ln M₁ to 3 M☉ as the draw blends: Table 13's
+    `f_mult` and Moe and Di Stefano's mass-ratio law over their uncorrected period law, which the
+    fitted correction makes the drawn periods follow. The direct companions' subsystems are not
+    counted (no closed form gives the survivors of the stability test).
+  - _Edit 3._ `stars_below` under `fates_for` equals the new
+    `all_stars_fraction_below_as_drawn` to 2.4 × 10⁻⁵ (test tolerance 5 × 10⁻⁴). The T1.c spine
+    forms (`all_stars_fraction_below`, `stripped_share`) stay for T1.c's sampler tests.
+  - _Edit 4 and ruling 123.5._ `binarity::stripped_share` is `band_share_as_drawn` over the
+    stripping band (`direct_band_share` from 3 M☉: the innermost of n independent direct
+    companions, density `n f (1 − F)^(n−1)`), and plan 06's mark is read against it everywhere
+    through `binarity::is_stripped(mark, m, comp)`: the track, only inside `STRIPPED_WINDOW`
+    (`is_companion_stripped(m0, comp, draws)`), the kick law (`with_stripped_mark` gains `m0` and
+    `comp`) and the hierarchy. The exact share costs 12 ms a star, so `hyperion-fit`'s new
+    `stripping` task tabulates it with the three stage radii (`tables::stripping`, 34 masses over
+    5.5–150 M☉ by 11 [Fe/H] over the fitted Z; `StrippingTable`), and `stripped_share`,
+    `stripping_band` and `StageRadii::of` read the table inside its domain. At the cells' centres
+    the share is within 6 × 10⁻⁴ in the median and 0.073 at worst, across a blue-to-red change of
+    the giant branch. `binarity::NEVER_STRIPPED` (the largest mark) keeps the radii's own tracks
+    and the fate table's nodes unstripped without asking for the share. The hierarchy's
+    `Innermost` is `Stripped(StageRadii)` or `Unstripped { radii, share }`: a marked innermost
+    orbit's periastron lies in `(a_merge, a_B]` for its mass ratio, an unmarked one's outside, for
+    the direct construction too (`without_wide_innermost` is gone). `PROVISIONAL_STRIPPED_SHARE`
+    and `PROVISIONAL_INTERACTING_PERIASTRON` are removed; `KickLawParams::stripped_share` stays for
+    the tests' quadratures only. Over 4,000 massive primaries, 1,952 are marked against 1,966
+    expected, none loses its companion.
+  - _The period correction._ `hyperion-fit`'s `period_correction` task is registered and writes
+    `tables::period_correction`, which `direct.rs` and `period_fit::COMMITTED` read. Refit under
+    the band: worst bin misses 0.12%, 0.07%, 0.08% and 0.10% at 3.5, 7, 12 and 28 M☉ (the 3.5 M☉
+    row, below the mark, is bit-identical); tries rejected 28.9%, 53.7%, 70.9% and 72.8%; direct
+    companions dropped 0.04%, 0.22%, 0.40% and 0.57%. The slow test's 7 M☉ interim band is back
+    to 0.2%.
+  - **Findings for the orchestrator.** (1) The stripped share re-derived from the direct
+    construction is 0.455 over layer E and 0.433 over neutron-star progenitors, against
+    0.20–0.33 and 0.25–0.33 (stripped ÷ interacting 0.700, inside 0.5–0.75); 0.35 at 8 M☉, 0.42
+    at 12, 0.53 at 16.6, 0.50 at 150. Table 13 gives B stars nearly the O stars' close
+    companions, and every q ≥ 1/3 pair inside `a_B` counts as stripped. The test holds the
+    measured shares provisionally. (2) Consequences of (1), each test holding its measured value
+    provisionally: the low-mode share `w` 0.2675 against 1/6–1/4 and the thin disc's retained
+    neutron stars 0.271 against 1/6–1/4 (plan 08); cluster retention 0.314 at 100 km/s and 0.286
+    at 50 km/s against 18–26% and 15–25% (plan 09's T9.b, ruling 126.3; the doctest reads a fifth
+    to a third); under ruling 123.5's band 1.14% of 28 M☉ systems lose a companion (0.57% of
+    companions), so the Table 13 test's per-system limit is 1.5% above 20 M☉ and 1% below. (3)
+    The fixture's nuclear-disc centre is 19.23 per ly³ against plan 02's 12–19 (held at 19.3):
+    the real fates lower its mean mass per system to 0.548 M☉.
+  - _Types._ `MultiplicityFates` is concrete over `TrackFates`, not the sketch's
+    `MultiplicityFates<F>`: one set of fates is ever wrapped. `StellarFates` also gains a provided
+    batch method, `companion_mass_ratio_cdfs(m1, qs, out)`, value for value the single one, which
+    `CompanionLaw` overrides with a sweep of its columns (the companions' integral asks for 241
+    ratios at some 1,700 primaries; 124 ms a build before it, 27 ms after).
+- **Ruling 137, as applied (round 9b, `fates`; tests and windows only, no golden moves).** The
+  stripped share is per primary, and finding (1) above is answered: the lane's 0.433 stands.
+  `the_band_averaged_stripped_share` asserts 0.33–0.47 over neutron-star progenitors (measured
+  0.4329) and 0.35–0.52 over layer E (0.4550), stripped ÷ interacting 0.5–0.75 (0.7001); the
+  provisional holds are gone. **Future check (P11.T6/T11, not built):** once the engine adds the
+  companions' remnants, the share per exploding star lies in 0.28–0.40 (about 0.32–0.35 expected;
+  Sana et al.'s 37% of hydrogen-poor core collapses). Ruling 81.8's 1% is per direct companion:
+  the Table 13 test asserts under 1% of companions dropped per bin (0.07%, 0.42% and 0.56% at 3.5,
+  12 and 28 M☉) and reports the systems losing one, held under 2% (0.06%, 0.64%, 1.14%); the
+  per-system 1.5% above 20 M☉ is gone. The downstream windows of finding (2) follow in plans 08
+  and 09, and the nuclear disc's of (3) in plan 02 (11.8–19.6 per ly³, measured 19.23).
+- **Ruling 138's consequence for T1.d's figures (round 9b, `fates`).** At the fitted Chabrier scale
+  (0.920) the drawn companions give 1.437 stars per system (T1.d's 1.33–1.45 holds); the spine
+  construction's count gives 1.457 under the default, which `stars_per_system_lie_in_the_fates_bracket`
+  now prints (it asserts Kroupa's 1.406). All stars below 0.5 M☉ over primaries below 8 M☉:
+  69.84% (the census check of P15.T4.b, 67.8–71.0%).
+- **Ruling 129.4 as built** (round 9b, `bin4f`, 2026-09-28; unwired, nothing generated moves; the
+  `stellar/binary_timelines` golden moves, re-blessed at version 14 for the version 15 batch).
+  - _129.4a, the pinned hold._ `Engine::die` holds a pinned primary whose own track dies first at
+    its last living state with the mass it has then (a star on its own track takes its track's
+    living mass; the track's mass at the death is its remnant's, which the hold took before), and
+    leaves the orbit as it is. Two more faults of the same kind were found and fixed: a detached
+    step that lands on a star's own death took the remnant's mass at the step's end, so the orbit
+    kept its angular momentum through the mass the death then took again (every companion death
+    and white dwarf's birth on its own track); and a dead track re-set at an offset an ulp short of
+    its death still gave the living mass at the death's instant, so the next step did the same
+    (`die` now places the track at its death or past it, through `offset_for`). The invariant
+    suite gains the ruling's test: no detached segment widens its orbit past M_start ÷ M_end,
+    within `WIDENING_TOLERANCE` = 0.5. Tides that hand an accretor's spin to the orbit widen by up
+    to 23% more over the 10³ pairs (a carbon–oxygen dwarf beside a spun-up main-sequence accretor),
+    so the ruling's bare ratio cannot hold; before the fix the suite had segments at ×2–25. A
+    regression test runs two of those pairs.
+  - _129.4b:_ a helium Hertzsprung-gap or giant donor onto a neutron star or black hole is stable
+    at any ratio (Tauris et al. 2015, section 6; Vigna-Gómez et al. 2018, section 2.2.5). A lobe
+    inside the donor's core is still a common envelope, as for every donor. BSE's 0.784 stays for
+    the other accretors.
+  - _129.4c:_ `Track::remains_at` gives `Remains::Collapse` for a helium giant whose carbon–oxygen
+    core is at or above M_Ch: a helium-star track entered where the star is at the core's mass,
+    which dies at once with plan 06's remnant, and the core's state. The engine explodes it at
+    once, companion-stripped (after a common envelope, on the orbit it left; after a Roche lobe
+    strips it); a pinned primary whose collapse is still to come is held at the core's state.
+    Below M_Ch the white dwarf stays, unclamped. A held core has no envelope, so a common
+    envelope it meets again (touching its companion) merges the pair (`common_envelope`), where
+    it would otherwise repeat to the segment cap (pair 0911 of the pinned thousand did; a test
+    holds it).
+  - _The golden_ (ruling 129.4 alone). `stellar/binary_timelines` moves in 278 of its 1,000 digests (24 of them with a
+    new segment count). Run with one fix at a time on the old engine, 259 move by 129.4a alone
+    (185 with primaries of 8 M☉ or more, 19 below 2 M☉, the white dwarfs born on their own
+    tracks), 15 by 129.4b and 17 by 129.4c, 11 of those by both: 280 in all, of which the 278
+    are a subset (two came back to the old digests when the death's track age was taken from the
+    track itself, an ulp's difference). A
+    pre-existing cap stays: pair 0077 (2.23 + 1.16 M☉ at 0.56 d) fills its 64 segments with
+    zero-length stable-transfer segments at 1,052.655 Myr, which is not this ruling's.
+  - _129.4d:_ `tests/binary_classes.rs` gives a primary of `stripped_mark_min_mass` or more its
+    mark exactly where the periastron is in `binarity::stripping_band`, taking the primary's
+    draws at the first attempt (`StarDraws::for_attempt`) whose mark agrees.
+  - _129.4e, as first built:_ 5 bound double neutron stars in the 12,000 layer-E prior pairs,
+    against 6–120, with 132 more whose first neutron star accreted about 1 M☉ in the now stable
+    Case BB transfer and became a black hole before the second supernova (the engine before these
+    fixes left 1, the census as it was none). Ruling 132 answered it.
+- **Ruling 132 as built** (round 9b, `bin4f`, 2026-09-28; unwired, nothing generated moves;
+  `stellar/binary_timelines` moves again, re-blessed at version 14 for the version 15 batch).
+  - _132.1:_ `BinaryParams::GENERATOR.eddington_limit` is on. `rlof::eddington_rate` takes X from
+    the transferred matter (0 for a helium or carbon surface, about 2.9 × 10⁻⁸ M☉ yr⁻¹ onto a
+    neutron star in Case BB). The limit also holds a degenerate accretor's wind accretion
+    (`detached.rs`), since it is the accretor's: it moves 88 of the golden's digests, and
+    nothing measurable in the recycling census below. The X-ray kinds still read the donor's rate. **For P11.T9:** its X-ray
+    luminosity must use the accreted rate, never above L_Edd.
+  - _132.2:_ the census window is 6–144, and 50–90% of them at e < 0.3. It measures 112 bound
+    double neutron stars, 71 (63%) at e < 0.3, none lost to a neutron star grown into a black
+    hole. **Finding for P11.T12:** 25 of them merge within the age of the universe (Peters). Scaled
+    by VG18's yield (24.04 per Myr from 0.24% of ≥ 8 M☉ binaries, 73% merging), that is about 29
+    per Myr in the Galaxy, against Pol et al. (2019)'s 42 (+30 −14). The test fails only above
+    twice Pol's upper limit (144 per Myr).
+  - _132.3:_ a carried main sequence whose end, (1 − τ) times its lifetime, falls within 10⁻⁹ of
+    the age is handed on at τ = 1 exactly (`Engine::main_sequence_tau`, in both the detached and
+    the transfer steps). Pair 0077 now ends in 17 segments, its rejuvenated accretor leaving the
+    main sequence at 1,052.655 Myr (a test). The invariant suite forbids a segment of no length
+    that repeats the kind before it, except a common envelope: two at one instant are two
+    envelopes (a giant's hydrogen, then the helium giant it leaves filling the lobe the first
+    left; a 5.26 + 5.23 M☉ pair at 902 d does it). A repeated envelope reaches the cap, which the
+    suite asserts no pair does.
+  - _Recycling_ (a new slow test over layer D and the census's layer-E pairs, read where the
+    companion first is a remnant): the median period of pulsars beside a carbon–oxygen or
+    oxygen–neon white dwarf or a neutron star is asserted in TLK12's 10–50 ms. **Finding for
+    P11.T12**, quartiles (25 / 50 / 75%):
+    - beside a CO/ONe white dwarf (241): field 9.1 × 10⁸ / 5.7 × 10⁹ / 1.0 × 10¹⁰ G, period
+      5.0 / 24.7 / 66 ms;
+    - beside a neutron star (178): field 1.1 / 2.1 / 4.7 × 10¹⁰ G, period 34 / 65 / 126 ms;
+    - beside a helium white dwarf (39): field 8.3 × 10⁸ / 1.6 × 10⁹ / 2.3 × 10⁹ G, period
+      3.6 / 7.1 / 14 ms.
+
+    The periods are mildly recycled as TLK12 has it. The fields beside heavy companions lie below
+    the ruling's computed 3 × 10¹⁰–10¹² G, by about 5 times for the white dwarfs (about 0.1 M☉
+    accreted under m_B = 10⁻⁴ M☉, against TLK12's "a few 10⁻² M☉"). P11.T12's field check takes it.
+
+  - _The golden, both rulings._ Against HEAD, 401 of the 1,000 digests move and no pair reaches
+    the cap (0077 and 0911 did). Over ruling 129.4's golden, 132.3's end of the main sequence
+    alone moves 248 (every carried main sequence that ends is handed on at τ = 1 exactly), the
+    limit on transfer 83 more, and on wind accretion 88.

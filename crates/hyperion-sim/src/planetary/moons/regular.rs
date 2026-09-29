@@ -59,7 +59,7 @@ use crate::planetary::derive::{
     Illumination, MassFractions, PlacedBody, PlanetClass, derive_body,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
-use crate::planetary::moons::{MoonParent, draw_rank, log_uniform, moon_orbit, rayleigh};
+use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh};
 use crate::planetary::params::{ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q};
 use crate::planetary::placement::spacing::{
     MAX_SPACING_REDRAWS, Neighbour, PAIR_SPACING_SIGMA, mutual_hill_factor, next_semi_major_axis,
@@ -523,6 +523,14 @@ fn orbit_rank(stream: &Stream, ordinal: u8, offset: u64) -> UnitUniform {
     draw_rank(&mut at)
 }
 
+/// The decision for probability `p` of the word at `offset` of moon `ordinal`'s block of
+/// `stream`, a [`tags::MOON_ORBIT`] stream ([`decide`]).
+fn orbit_decides(stream: &Stream, ordinal: u8, offset: u64, p: f64) -> bool {
+    let mut at = stream.clone();
+    at.seek(orbit_block(ordinal) + offset);
+    decide(&mut at, p)
+}
+
 /// The first word of moon `ordinal`'s block of [`tags::MOON_ORBIT`].
 fn orbit_block(ordinal: u8) -> u64 {
     ORBIT_WORDS_START + ORBIT_WORDS_PER_MOON * (u64::from(ordinal) - 1)
@@ -534,7 +542,8 @@ fn moon_draws(stream: &Stream, ordinal: u8) -> MoonDraws {
     let angle = |offset| Radians::new(core::f64::consts::TAU * rank(offset).value());
     MoonDraws {
         eccentricity: rayleigh(FREE_ECCENTRICITY_SIGMA, rank(FREE_ECCENTRICITY_WORD)),
-        resonant_with_inner: ordinal > 1 && rank(RESONANCE_WORD).value() < RESONANCE_PROBABILITY,
+        resonant_with_inner: ordinal > 1
+            && orbit_decides(stream, ordinal, RESONANCE_WORD, RESONANCE_PROBABILITY),
         inclination: Radians::new(rayleigh(
             Radians::from(INCLINATION_SIGMA).value(),
             rank(INCLINATION_WORD),
@@ -575,7 +584,7 @@ fn moon_masses(
     let key = ObjectKey::from(parent.id());
     let mut count = Stream::open(seed, tags::MOON_COUNT, key);
     count.seek(4);
-    let titan = n > 1 && draw_rank(&mut count).value() < TITAN_PROBABILITY;
+    let titan = n > 1 && decide(&mut count, TITAN_PROBABILITY);
     let dominant = if titan {
         let (lo, hi) = TITAN_SHARE;
         lo + draw_rank(&mut count).value() * (hi - lo)

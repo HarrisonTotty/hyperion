@@ -34,6 +34,18 @@ function faultOf(response = sliceBodies()): string {
   return result.kind === "fault" ? result.fault : "no fault";
 }
 
+/** The slice's answer with its giant's effective temperature set to `effectiveK`. */
+function withEffective(effectiveK: number) {
+  return sliceBodiesWith((body) =>
+    body.bulk.state === "ok" && body.bulk.value.effective_temperature_k !== null
+      ? {
+          ...body,
+          bulk: { state: "ok", value: { ...body.bulk.value, effective_temperature_k: effectiveK } },
+        }
+      : body,
+  );
+}
+
 describe("toBodiesRequest and toBodyDetailRequest", () => {
   it("ask for every level of detail at the time given", () => {
     const time = { seconds: 12, nanos: 5 };
@@ -185,6 +197,22 @@ describe("toSystemBodiesModel", () => {
     );
 
     expect(faultOf(response)).toBe("orbit unusable");
+  });
+
+  it("reads a giant's effective temperature beside its equilibrium one", () => {
+    const jupiter = bodiesOf().bodies.bodies[1];
+
+    expect(jupiter?.bulk).toMatchObject({
+      state: "ok",
+      value: { equilibriumTemperatureK: 111.6, effectiveTemperatureK: 128.9 },
+    });
+  });
+
+  it("refuses an effective temperature of 0 K or below the equilibrium one", () => {
+    // Internal heat only adds to what the light gives: T_eff^4 = T_eq^4 + L_int / (4 pi R^2 sigma).
+    expect(faultOf(withEffective(0))).toBe("bulk values unusable");
+    expect(faultOf(withEffective(100))).toBe("bulk values unusable");
+    expect(faultOf(withEffective(111.6))).toBe("no fault");
   });
 
   it("refuses a body of another system", () => {

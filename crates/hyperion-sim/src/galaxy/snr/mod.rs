@@ -29,9 +29,7 @@ pub mod testing;
 pub mod window;
 
 pub use caps::{SHELL_WINDOW_CAP, ShellEnvironment, WindowCaps};
-pub use remnant::{
-    BOW_SHOCK_SHARE, NEBULA_THRESHOLD, PulsarWindNebula, has_bow_shock, remnant_offset,
-};
+pub use remnant::{BOW_SHOCK_SHARE, PulsarWindNebula, has_bow_shock, remnant_offset};
 pub use shell::{EJECTA_MASS, ShellEmission, ShellPhase, ShellState, shell_state_at};
 pub use window::{
     BuildExplosionEnergyError, BuildSiteGasError, ExplosionEnergy, MERGE_FACTOR, ShellWindow,

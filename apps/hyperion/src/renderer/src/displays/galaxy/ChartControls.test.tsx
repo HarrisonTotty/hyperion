@@ -84,22 +84,38 @@ describe("ChartControls", () => {
     expect(radius()).toHaveValue("50");
   });
 
-  it("names the mass floors by the census's bands, the lightest also ALL", () => {
+  it("names the mass floors by the census's bands below the two substellar floors, the lightest ALL", () => {
     renderControls();
 
     const group = screen.getByRole("group", { name: "MIN MASS solar masses" });
+    // The planets' floor draws its own `M⊕`: the letter is text, the sign an SVG.
     expect(
       within(group)
         .getAllByRole("radio")
         .map((option) => option.closest("label")?.textContent),
-    ).toEqual(["ALL 0.08", "0.5", "0.75", "2.5", "8"]);
+    ).toEqual(["ALL 0.33 M", "0.012", "0.08", "0.5", "0.75", "2.5", "8"]);
+    // 0.08 no longer reads ALL; the lowest step does, and says its unit (plan 13, P13.T8.c).
+    expect(screen.getByRole("radio", { name: "ALL 0.33 Earth masses" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "0.08" })).toBeInTheDocument();
   });
 
-  it("names the mass floors by their layers until the first census arrives", () => {
+  it("names the stellar floors by their layers until the first census arrives", () => {
     renderControls({ bands: null });
 
-    expect(screen.getByRole("radio", { name: "ALL A" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "A" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "E" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "0.012" })).toBeInTheDocument();
+  });
+
+  it("reports each substellar layer when its floor is chosen, from the keyboard too", async () => {
+    const user = userEvent.setup();
+    const { onMinLayer } = renderControls();
+
+    await user.click(screen.getByRole("radio", { name: "0.012" }));
+    expect(onMinLayer).toHaveBeenLastCalledWith("brown_dwarf");
+    // Arrow keys move within the radio group, as they do between the stellar floors.
+    await user.keyboard("{ArrowUp}");
+    expect(onMinLayer).toHaveBeenLastCalledWith("rogue_planet");
   });
 
   it("reports layer C when the floor 0.75 is chosen", async () => {

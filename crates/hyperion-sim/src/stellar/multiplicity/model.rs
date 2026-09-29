@@ -312,6 +312,101 @@ impl MultiplicityModel {
     }
 }
 
+impl MultiplicityModel {
+    /// The mean number of stellar companions the hierarchy draw gives a primary of `m1` before
+    /// stability drops any, for the quadratures (P11.T1.d, re-derived from ruling 81's direct
+    /// construction): [`companion_frequency`](Self::companion_frequency), the spine
+    /// construction's, up to 1.5 M☉; Moe and Di Stefano's (2017, Table 13) direct companions
+    /// `f_mult;q>0.1` from 3 M☉; blended between in ln M₁ by the share of systems the draw builds
+    /// directly, as the draw blends them.
+    ///
+    /// The direct construction's subsystems are not counted: each direct companion may gain one
+    /// of its own at its mass's rate times Tokovinin's ε, kept only if the whole hierarchy stays
+    /// stable, and no closed form counts the survivors. They are a few per cent of the stars of
+    /// systems above 1.5 M☉, which are a few per cent of all systems.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::stellar::multiplicity::MultiplicityModel;
+    /// use hyperion_sim::units::SolarMasses;
+    ///
+    /// let model = MultiplicityModel::default_v1();
+    /// // Below the blend, the spine construction's count; an O star has Table 13's 2.1.
+    /// let sun = SolarMasses::new(1.0);
+    /// assert_eq!(model.drawn_companion_frequency(sun), model.companion_frequency(sun));
+    /// assert!((model.drawn_companion_frequency(SolarMasses::new(28.0)) - 2.1).abs() < 1e-12);
+    /// ```
+    #[must_use]
+    pub fn drawn_companion_frequency(&self, m1: SolarMasses) -> f64 {
+        let w = super::direct::direct_weight(m1);
+        if w <= 0.0 {
+            return self.companion_frequency(m1);
+        }
+        lerp(
+            self.companion_frequency(m1),
+            super::direct::direct_companion_frequency(m1),
+            w,
+        )
+    }
+
+    /// The probability that a companion the hierarchy draw gives a primary of `m1` has a mass
+    /// ratio of at most each of `qs`, over every period: the spine construction's law
+    /// ([`companion_mass_ratio_cdf`](Self::companion_mass_ratio_cdf)) and the direct
+    /// construction's (Moe and Di Stefano's law on q = 0.1–1 over their period law), mixed in
+    /// proportion to the companions each contributes to
+    /// [`drawn_companion_frequency`](Self::drawn_companion_frequency).
+    ///
+    /// # Panics
+    ///
+    /// If `m1` is not positive and finite.
+    #[must_use]
+    pub fn drawn_companion_mass_ratio_cdfs(&self, m1: SolarMasses, qs: &[f64]) -> Vec<f64> {
+        let w = super::direct::direct_weight(m1);
+        if w <= 0.0 {
+            return self.companion_mass_ratio_cdfs(m1, qs);
+        }
+        let direct = super::direct::direct_companion_mass_ratio_cdfs(m1, qs);
+        if w >= 1.0 {
+            return direct;
+        }
+        let spine = self.companion_mass_ratio_cdfs(m1, qs);
+        let from_spine = (1.0 - w) * self.companion_frequency(m1);
+        let from_direct = w * super::direct::direct_companion_frequency(m1);
+        let total = from_spine + from_direct;
+        spine
+            .iter()
+            .zip(&direct)
+            .map(|(s, d)| (from_spine * s + from_direct * d) / total)
+            .collect()
+    }
+
+    /// [`drawn_companion_mass_ratio_cdfs`](Self::drawn_companion_mass_ratio_cdfs) at one ratio.
+    ///
+    /// # Panics
+    ///
+    /// If `m1` is not positive and finite.
+    #[must_use]
+    pub fn drawn_companion_mass_ratio_cdf(&self, m1: SolarMasses, q: f64) -> f64 {
+        self.drawn_companion_mass_ratio_cdfs(m1, &[q])[0]
+    }
+
+    /// The masses, M☉, where the drawn companions' count or mass-ratio law has a kink: the
+    /// anchors of both constructions and the blend's ends.
+    #[must_use]
+    pub fn drawn_kinks(&self) -> Vec<f64> {
+        let (lo, hi) = super::direct::DIRECT_BLEND_MASSES;
+        let mut masses = self.anchor_masses();
+        masses.extend(super::direct::DIRECT_ANCHORS.iter().map(|a| a.0));
+        masses.extend(super::direct::CORRECTION_MASSES);
+        masses.extend([lo, hi, super::dist::MOE_DI_STEFANO_MIN_MASS]);
+        masses.extend(super::dist::MOE_DI_STEFANO_MASS_KINKS);
+        masses.sort_by(f64::total_cmp);
+        masses.dedup();
+        masses
+    }
+}
+
 impl Default for MultiplicityModel {
     fn default() -> Self {
         Self::default_v1()

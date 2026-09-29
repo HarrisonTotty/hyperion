@@ -772,11 +772,10 @@ fn remnant_shares_at_milky_way_values() {
     }
     let ns = table.retained_share(BirthSource::ThinDisc, RemnantKind::NeutronStar);
     let bh = table.retained_share(BirthSource::ThinDisc, RemnantKind::BlackHole);
-    // A sixth to a quarter (brainstorm, "Displaced objects: kicks and runaways").
-    assert!(
-        (1.0 / 6.0..0.25).contains(&ns),
-        "retained neutron stars {ns}"
-    );
+    // 0.18–0.30 per primary-born neutron star (ruling 137.3): the brainstorm's a sixth to a
+    // quarter ("Displaced objects: kicks and runaways") translated to primaries while the table
+    // holds no companion's remnant, and re-asserted on the whole population at P11.T6/T11.
+    assert!((0.18..=0.30).contains(&ns), "retained neutron stars {ns}");
     assert!(bh > 0.7, "retained black holes {bh}");
     // Mean uτ rises with speed along a row, in the ballistic bins.
     let ut = |s: usize| table.classes()[thin(s, 1).index()].mean_ut();

@@ -42,7 +42,7 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::{OrbitSense, PlanetClass};
 use crate::planetary::fate::BodyState;
-use crate::planetary::moons::{MoonParent, ParentKind, draw_rank, log_uniform, moon_orbit};
+use crate::planetary::moons::{MoonParent, ParentKind, decide, draw_rank, log_uniform, moon_orbit};
 use crate::planetary::params::{ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
@@ -313,7 +313,7 @@ pub fn giant_impact_moon(seed: Seed, parent: &MoonParent) -> Option<ImpactMoon> 
         return None;
     }
     let mut stream = Stream::open(seed, tags::MOON_IMPACT, ObjectKey::from(parent.id()));
-    if draw_rank(&mut stream).value() >= IMPACT_PROBABILITY {
+    if !decide(&mut stream, IMPACT_PROBABILITY) {
         return None;
     }
     let ratio_rank = draw_rank(&mut stream);
@@ -321,7 +321,7 @@ pub fn giant_impact_moon(seed: Seed, parent: &MoonParent) -> Option<ImpactMoon> 
     let distance_rank = draw_rank(&mut stream);
     let (lo, hi) = match parent.kind() {
         ParentKind::Planet => PLANET_MASS_RATIO,
-        ParentKind::DwarfPlanet if draw_rank(&mut stream).value() < DWARF_INTACT_SHARE => {
+        ParentKind::DwarfPlanet if decide(&mut stream, DWARF_INTACT_SHARE) => {
             DWARF_INTACT_MASS_RATIO
         }
         ParentKind::DwarfPlanet => DWARF_DISC_MASS_RATIO,

@@ -24,12 +24,14 @@ use crate::galaxy::ages::{
 };
 use crate::galaxy::consts::{G, LIGHT_YEARS_PER_MEGAPARSEC};
 use crate::galaxy::fates::{
-    ProvisionalFates, mean_formed_mass, mean_present_mass, mean_present_mass_of_mixture,
-    mean_stars_per_system,
+    CensusFates, CompanionMasses, Counted, StellarFates, fates_for, mean_formed_mass_with,
+    mean_present_mass_with, mean_stars_per_system_with,
 };
+use crate::galaxy::imf::{MassFunction, Truncated};
 use crate::galaxy::potential::sigma;
 use crate::galaxy::{POPULATIONS, Population};
 use crate::math;
+use crate::stellar::multiplicity::MultiplicityFates;
 use crate::units::{Degrees, Dex, DexPerKiloparsec, LightYears, Radians, SolarMasses, Years};
 
 /// A size law of Design note 16: the Milky Way value at the Milky Way mass, and the clamp, all
@@ -237,15 +239,34 @@ fn halo_components(i: &Inputs) -> Vec<HaloComponentParams> {
     components
 }
 
-/// The mean present-day mass of a system of each population, in [`POPULATIONS`] order.
-fn mean_masses(i: &Inputs, halo: &[HaloComponentParams]) -> [SolarMasses; 7] {
-    let f = i.mass_function.to_mass_function();
-    let fates = ProvisionalFates;
-    let tau = Years::new(i.sfh_timescale);
+/// The mean present-day mass of a system of each population, in [`POPULATIONS`] order, for
+/// primaries drawn from `f`, the thin disc's history of timescale `tau` and the halo's components
+/// `halo`: each population's own fates ([`fates_for`], plan 06's P06.T30.a), over one integral of
+/// the companions, `companions`, which every population's fates share (P11.T1.d).
+fn mean_masses(
+    f: &dyn MassFunction,
+    tau: Years,
+    halo: &[HaloComponentParams],
+    companions: &CompanionMasses,
+) -> [SolarMasses; 7] {
+    mean_masses_with::<_, MultiplicityFates>(f, tau, halo, companions, fates_for)
+}
+
+/// [`mean_masses`] with each population's fates `fates(population)`, whose companions
+/// `companions` integrates.
+fn mean_masses_with<F: std::borrow::Borrow<G>, G: StellarFates + ?Sized>(
+    f: &dyn MassFunction,
+    tau: Years,
+    halo: &[HaloComponentParams],
+    companions: &CompanionMasses,
+    fates: impl Fn(Population) -> F,
+) -> [SolarMasses; 7] {
     let uniform = |[lo, hi]: [Years; 2]| {
         AgeDistribution::uniform(lo, hi).expect("the populations' age ranges are ordered")
     };
     POPULATIONS.map(|p| {
+        let owned = fates(p);
+        let fates: &G = owned.borrow();
         let ages = match p {
             Population::YoungThinDisc => AgeDistribution::young_disc(tau, FeatureShare::None),
             Population::OldThinDisc => {
@@ -258,12 +279,45 @@ fn mean_masses(i: &Inputs, halo: &[HaloComponentParams]) -> [SolarMasses; 7] {
             Population::Halo => {
                 let parts: Vec<(f64, &AgeDistribution)> =
                     halo.iter().map(|c| (c.share, &c.ages)).collect();
-                return mean_present_mass_of_mixture(f.as_ref(), &fates, &parts);
+                return mean_present_mass_with(f, fates, companions, &parts);
             }
         }
         .expect("the timescale was checked to be positive");
-        mean_present_mass(f.as_ref(), &fates, &ages)
+        mean_present_mass_with(f, fates, companions, &[(1.0, &ages)])
     })
+}
+
+/// [`GalaxyParams::census_system_masses_under`]: `params`' populations' mean masses with
+/// primaries drawn from `f`, as `counted` counts them, over systems whose primary lies below
+/// `primary_below` M☉ (all of them for 150).
+pub(super) fn census_masses_under(
+    params: &GalaxyParams,
+    f: &dyn MassFunction,
+    counted: Counted,
+    primary_below: f64,
+) -> [SolarMasses; 7] {
+    let truncated = Truncated::new(f, primary_below);
+    let census = |p: Population| CensusFates::new(fates_for(p), counted);
+    let companions = CompanionMasses::new(&truncated, &census(Population::OldThinDisc));
+    mean_masses_with::<_, CensusFates<'_>>(
+        &truncated,
+        params.sfh_timescale(),
+        params.halo().components(),
+        &companions,
+        census,
+    )
+}
+
+/// [`GalaxyParams::mean_system_masses_under`]: `params`' populations' mean masses with primaries
+/// drawn from `f`.
+pub(super) fn mean_masses_under(params: &GalaxyParams, f: &dyn MassFunction) -> [SolarMasses; 7] {
+    let companions = CompanionMasses::new(f, fates_for(Population::OldThinDisc));
+    mean_masses(
+        f,
+        params.sfh_timescale(),
+        params.halo().components(),
+        &companions,
+    )
 }
 
 /// The NFW halo from the stellar mass, f★ and the concentration's scatter.
@@ -309,9 +363,14 @@ struct Budget {
 impl Budget {
     /// Shares from the inputs, mean masses by quadrature, then `N = M★ ÷ Σ share × mean` and
     /// each population's mass `N × share × mean` (plan 02, Design note 3).
-    fn new(i: &Inputs, halo: &[HaloComponentParams]) -> Self {
+    fn new(
+        i: &Inputs,
+        f: &dyn MassFunction,
+        halo: &[HaloComponentParams],
+        companions: &CompanionMasses,
+    ) -> Self {
         let shares = population_shares(i);
-        let mean_masses = mean_masses(i, halo);
+        let mean_masses = mean_masses(f, Years::new(i.sfh_timescale), halo, companions);
         let per_system = POPULATIONS.iter().fold(0.0, |sum, p| {
             sum + shares[p.index()] * mean_masses[p.index()].value()
         });
@@ -394,7 +453,11 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         ],
     )?;
     let halo_components = halo_components(i);
-    let budget = Budget::new(i, &halo_components);
+    let mass_function = i.mass_function.to_mass_function();
+    // Every population's fates have the same companions, so one integral of them serves all.
+    let fates = fates_for(Population::OldThinDisc);
+    let companions = CompanionMasses::new(mass_function.as_ref(), fates);
+    let budget = Budget::new(i, mass_function.as_ref(), &halo_components, &companions);
     let thin_mass = budget.thin_mass();
     let thin_length = THIN_LENGTH.size(i.thin_length, thin_mass);
     let bulge_a = BULGE_LENGTH.size(i.bulge_length, budget.mass(Population::Bulge));
@@ -408,7 +471,6 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         budget.mass(Population::Halo),
         dark_halo.m200.value(),
     );
-    let mass_function = i.mass_function.to_mass_function();
     Ok(GalaxyParams {
         mass_function: i.mass_function,
         stellar_mass: SolarMasses::new(i.stellar_mass),
@@ -418,8 +480,12 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         mean_masses: budget.mean_masses,
         masses: budget.masses,
         system_count: budget.system_count,
-        mean_formed_mass: mean_formed_mass(mass_function.as_ref(), &ProvisionalFates),
-        mean_stars_per_system: mean_stars_per_system(mass_function.as_ref(), &ProvisionalFates),
+        mean_formed_mass: mean_formed_mass_with(mass_function.as_ref(), fates, &companions),
+        mean_stars_per_system: mean_stars_per_system_with(
+            mass_function.as_ref(),
+            fates,
+            &companions,
+        ),
         thin_disc: DiscParams {
             length: LightYears::new(thin_length),
             height: LightYears::new(i.thin_mean_height),
@@ -487,5 +553,175 @@ pub(super) fn solve_black_hole(params: &GalaxyParams) -> SolvedBlackHole {
     SolvedBlackHole {
         bulge_dispersion: dispersion,
         mass: sigma::black_hole_mass(dispersion, params.black_hole().scatter()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::galaxy::fates::{StellarFates, mean_present_mass};
+    use crate::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO, MassFunction, MassFunctionKind};
+    use crate::galaxy::params::milky_way;
+
+    /// The Milky Way fixture under `kind`.
+    fn fixture(kind: MassFunctionKind) -> GalaxyParams {
+        let mut inputs = milky_way::inputs();
+        inputs.mass_function = kind;
+        build(&inputs).expect("the fixture's values lie inside their ranges")
+    }
+
+    /// The share of primaries of `ages` whose star has died under `fates`, weighted by `f`:
+    /// `∫ ξ (1 − F(t(m))) dm ÷ ∫ ξ dm`, by 20,000 midpoints in ln m.
+    fn dead_share(imf: &dyn MassFunction, fates: &dyn StellarFates, ages: &AgeDistribution) -> f64 {
+        let (lo, hi) = (math::ln(MASS_LIMIT_LO), math::ln(MASS_LIMIT_HI));
+        let steps = 20_000_u32;
+        let (mut dead, mut all) = (0.0, 0.0);
+        for k in 0..steps {
+            let m = math::exp(lo + (hi - lo) * (f64::from(k) + 0.5) / f64::from(steps));
+            let w = imf.pdf(m) * m;
+            dead += w * (1.0 - ages.born_cdf(fates.lifetime(m)));
+            all += w;
+        }
+        dead / all
+    }
+
+    /// P06.T30.b and P11.T1.d at Milky Way parameters: the mean present-day mass per system, every
+    /// remnant included, is 0.59–0.61 M☉ under the default, Chabrier's system function at plan
+    /// 15's fitted scale (0.5985 measured; ruling 138.6 moves the census's 0.55–0.59 to the mean
+    /// in stars and white dwarfs over primaries below 8 M☉, which the old thin disc's meets here
+    /// and plan 15's fit checks locally), and 0.48 ± 0.02 under Kroupa's (T30.b's bracket, inside
+    /// T1.d's ± 0.03); every
+    /// old population lies within 5% of the others (T30.b) and within 3% of their midpoint
+    /// (T1.d); the young disc's is 30–50% above the old thin disc's; the system count scaled to
+    /// 5 × 10¹⁰ M☉ is near 0.9 × 10¹¹ (10¹¹ under Kroupa's).
+    #[test]
+    fn the_milky_way_mean_mass_per_system_matches_the_research() {
+        for (kind, window, count) in [
+            (MassFunctionKind::Chabrier, 0.59..=0.61, 0.9e11),
+            (MassFunctionKind::Kroupa, 0.46..=0.50, 1.0e11),
+        ] {
+            let params = fixture(kind);
+            let mean = params.stellar_mass().value() / params.system_count();
+            let per = |p: Population| params.mean_system_mass(p).value();
+            let scaled = params.system_count() * 5e10 / params.stellar_mass().value();
+            println!(
+                "{kind:?}: {mean:.4} M☉ per system, {scaled:.3e} systems for 5 × 10¹⁰ M☉, {:.4} \
+                 stars per system; {:?}",
+                params.mean_stars_per_system(),
+                POPULATIONS.map(|p| (p, (per(p) * 1e4).round() / 1e4))
+            );
+            assert!(window.contains(&mean), "{kind:?}: {mean}");
+            assert!((scaled / count - 1.0).abs() < 0.1, "{kind:?}: {scaled}");
+            let old = [
+                Population::OldThinDisc,
+                Population::ThickDisc,
+                Population::Bulge,
+                Population::LongBar,
+                Population::NuclearDisc,
+                Population::Halo,
+            ]
+            .map(per);
+            let lightest = old.iter().copied().fold(f64::INFINITY, f64::min);
+            let heaviest = old.iter().copied().fold(0.0, f64::max);
+            assert!(heaviest / lightest - 1.0 < 0.05, "{kind:?}: {old:?}");
+            let midpoint = f64::midpoint(lightest, heaviest);
+            assert!(heaviest / midpoint - 1.0 <= 0.03, "{kind:?}: {old:?}");
+            let young = per(Population::YoungThinDisc) / per(Population::OldThinDisc);
+            assert!(
+                (1.3..=1.5).contains(&young),
+                "{kind:?}: young ÷ old {young}"
+            );
+            let stars = params.mean_stars_per_system();
+            assert!((1.33..=1.45).contains(&stars), "{kind:?}: {stars}");
+            if kind == MassFunctionKind::Chabrier {
+                let f = kind.to_mass_function();
+                let census = params.census_system_masses_under(
+                    f.as_ref(),
+                    Counted::StarsAndWhiteDwarfs,
+                    8.0,
+                )[Population::OldThinDisc.index()]
+                .value();
+                println!("the old thin disc in stars and white dwarfs below 8 M☉: {census:.4} M☉");
+                assert!((0.54..=0.60).contains(&census), "{census}");
+            }
+        }
+    }
+
+    /// P06.T30.b: the share of dead primaries is 8 ± 2% in the old thin disc, 11 ± 2% in the thick
+    /// disc and 13 ± 3% in the halo, the research figures behind the brainstorm's 0.48, which is
+    /// Kroupa's function's mean, so under Kroupa's and each population's fates. The default's,
+    /// with its heavier branch above 1 M☉ (ruling 138), are printed.
+    #[test]
+    fn the_dead_primaries_match_the_research() {
+        let inputs = milky_way::inputs();
+        let f = MassFunctionKind::Kroupa.to_mass_function();
+        let default = inputs.mass_function.to_mass_function();
+        let tau = Years::new(inputs.sfh_timescale);
+        let halo = halo_components(&inputs);
+        let old_thin =
+            AgeDistribution::exponential_history(tau, YOUNG_AGE_LIMIT, THIN_DISC_HISTORY).unwrap();
+        let thick = AgeDistribution::uniform(THICK_DISC_AGES[0], THICK_DISC_AGES[1]).unwrap();
+        let dominant = halo
+            .iter()
+            .find(|c| c.kind == HaloComponentKind::DominantMerger)
+            .unwrap();
+        let shares = [
+            (Population::OldThinDisc, &old_thin, 0.08, 0.02),
+            (Population::ThickDisc, &thick, 0.11, 0.02),
+            (Population::Halo, &dominant.ages, 0.13, 0.03),
+        ];
+        for (p, ages, centre, width) in shares {
+            let dead = dead_share(f.as_ref(), fates_for(p), ages);
+            let under_default = dead_share(default.as_ref(), fates_for(p), ages);
+            println!(
+                "{p:?}: {:.2}% of primaries dead under Kroupa's, {:.2}% under the default",
+                100.0 * dead,
+                100.0 * under_default
+            );
+            assert!((dead - centre).abs() <= width, "{p:?}: {dead}");
+        }
+        // The halo's reference metallicity is its dominant component's.
+        assert!(
+            (dominant.feh_mean.value() - crate::galaxy::fates::HALO_REFERENCE_FE_H.value()).abs()
+                < 1e-15
+        );
+    }
+
+    /// P06.T30.a: every population's mean mass is `mean_present_mass` under its own fates.
+    #[test]
+    fn each_population_reads_its_own_fates() {
+        let inputs = milky_way::inputs();
+        let f = inputs.mass_function.to_mass_function();
+        let params = build(&inputs).unwrap();
+        let ages = AgeDistribution::uniform(THICK_DISC_AGES[0], THICK_DISC_AGES[1]).unwrap();
+        let own = mean_present_mass(f.as_ref(), fates_for(Population::ThickDisc), &ages);
+        let relative = own.value() / params.mean_system_mass(Population::ThickDisc).value() - 1.0;
+        assert!(relative.abs() < 1e-12, "{relative}");
+        // Through the shared companions, bit for bit.
+        let shared = CompanionMasses::new(f.as_ref(), fates_for(Population::OldThinDisc));
+        let parts = [(1.0, &ages)];
+        let with = mean_present_mass_with(
+            f.as_ref(),
+            fates_for(Population::ThickDisc),
+            &shared,
+            &parts,
+        );
+        hyperion_testkit::float::assert_same_bits(
+            with.value(),
+            params.mean_system_mass(Population::ThickDisc).value(),
+        );
+        // `mean_system_masses_under` the galaxy's own mass function is the build's, bit for bit.
+        let under = params.mean_system_masses_under(f.as_ref());
+        for p in POPULATIONS {
+            hyperion_testkit::float::assert_same_bits(
+                under[p.index()].value(),
+                params.mean_system_mass(p).value(),
+            );
+        }
+        let solar = mean_present_mass(f.as_ref(), fates_for(Population::OldThinDisc), &ages);
+        assert!(
+            (solar.value() - own.value()).abs() > 1e-6,
+            "the fates differ"
+        );
     }
 }

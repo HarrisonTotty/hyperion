@@ -73,6 +73,10 @@ const ORBIT_STEP: f64 = 0.02;
 /// The largest share of a spin that magnetic braking may take in one step (the published code).
 const BRAKING_STEP: f64 = 0.03;
 
+/// The share of the age within which a predicted end of a carried main sequence counts as reached
+/// (ruling 132.3).
+const MAIN_SEQUENCE_END_REACHED: f64 = 1e-9;
+
 /// Bisections for the onset of Roche-lobe overflow inside a step (BSE section 2.8 interpolates
 /// to 1 ≤ R ÷ `R_L` ≤ 1.002).
 const ONSET_BISECTIONS: u32 = 30;
@@ -445,7 +449,19 @@ impl Engine {
         let mut taus = s.taus;
         for i in 0..2 {
             match &self.members[i] {
-                Member::Track { .. } | Member::Frozen { .. } | Member::Gone => {
+                Member::Track { track, offset } => {
+                    // A track that dies inside the step holds its last living mass to the step's
+                    // end, the death: what the death sheds leaves at the death (`Engine::die`),
+                    // not as a wind the orbit's angular momentum is kept through (ruling 129.4a).
+                    let lifetime = track.lifetime().map(Years::value);
+                    masses[i] = match lifetime {
+                        Some(t) if t + offset > s.age && t + offset <= age => {
+                            track.mass_at(last_living(t))
+                        }
+                        _ => self.members[i].mass_at(age),
+                    };
+                }
+                Member::Frozen { .. } | Member::Gone => {
                     masses[i] = self.members[i].mass_at(age);
                 }
                 Member::Shaped { .. } | Member::Cooling { .. } | Member::Remnant { .. } => {
@@ -453,7 +469,12 @@ impl Engine {
                 }
                 Member::MainSequence { .. } => {
                     masses[i] = (s.masses[i] + rates.mass[i] * dt).max(1e-9);
-                    taus[i] = (s.taus[i] + rates.tau[i] * dt).min(1.0);
+                    taus[i] = self.main_sequence_tau(
+                        i,
+                        (s.taus[i] + rates.tau[i] * dt).min(1.0),
+                        masses[i],
+                        age,
+                    );
                 }
             }
         }
@@ -468,6 +489,25 @@ impl Engine {
             masses,
             taus,
         })
+    }
+
+    /// τ of member `i`'s carried main sequence at `age`, of mass `mass` there, with its end held
+    /// as reached: τ = 1 exactly where what is left of it, (1 − τ) times the lifetime at `mass`,
+    /// falls within 10⁻⁹ of the age. A step that lands on the end, predicted at the step's start,
+    /// leaves a rejuvenated accretor a little short of it, and the next prediction a little later;
+    /// the steps close in on it without end but for this (ruling 132.3, pair 0077).
+    #[must_use]
+    pub(super) fn main_sequence_tau(&self, i: usize, tau: f64, mass: f64, age: f64) -> f64 {
+        let Member::MainSequence { helium, .. } = &self.members[i] else {
+            return tau;
+        };
+        let lifetime =
+            crate::stellar::sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, mass);
+        if (1.0 - tau).max(0.0) * lifetime <= MAIN_SEQUENCE_END_REACHED * age.abs() {
+            1.0
+        } else {
+            tau
+        }
     }
 
     /// The rates at `s` with the members' `structures` there.
@@ -578,6 +618,15 @@ impl Engine {
             let rate =
                 params.bondi_hoyle * focus * focus / (2.0 * a * a) / ratio / sqrt_one_e2 * wind[i];
             accreted[jdx] = rate.min(params.max_wind_accretion * wind[i]);
+            // A degenerate accretor takes a wind no faster than its Eddington rate either (ruling
+            // 132.1: the limit is the accretor's, whatever feeds it).
+            let ka = Kind::of(st[jdx].state.phase(), m[jdx]);
+            if params.eddington_limit && ka.is_remnant() && ka != Kind::Massless {
+                let surface = Kind::of(st[i].state.phase(), m[i]).surface();
+                let limit =
+                    super::rlof::eddington_rate(&self.ctx, surface, st[jdx].state.radius().value());
+                accreted[jdx] = accreted[jdx].min(limit);
+            }
             r.mass[jdx] += accreted[jdx];
             // The accreted wind brings its donor's specific spin (the published code's `djtx`).
             if params.wind_angular_momentum {
@@ -785,6 +834,13 @@ const fn phase_step(kind: Kind) -> f64 {
         | Kind::BlackHole
         | Kind::Massless => 1.0,
     }
+}
+
+/// A track age just before a track's death at track age `death`, years: the star's last living
+/// instant, at which its state is still the living star's.
+#[must_use]
+pub(super) fn last_living(death: f64) -> f64 {
+    (death * (1.0 - 1e-12)).max(0.0)
 }
 
 /// The orbital angular momentum of masses `m0` and `m1` on an orbit of `a` (R☉) and `e`,

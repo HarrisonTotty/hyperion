@@ -22,8 +22,9 @@ use std::num::NonZeroUsize;
 
 use hyperion_sim::Seed;
 use hyperion_sim::math;
+use hyperion_sim::rng::Mark;
 use hyperion_sim::stellar::Composition;
-use hyperion_sim::stellar::draws::StarDraws;
+use hyperion_sim::stellar::draws::{StarDraws, StarDrawsParts};
 use hyperion_sim::stellar::remnant::reference::{
     KROUPA_HIGH_MASS_SLOPE, MASS_RANGE, QUANTILES, ReferencePopulation, quantiles_of,
     score_quantiles,
@@ -318,7 +319,8 @@ impl FitTask for KickRankTask {
     }
 
     /// Core and remnant masses at eight initial masses on the generator's tracks (Design note
-    /// 7), with the median draws at Z = 0.02, and the score's scatter.
+    /// 7), with the median draws at Z = 0.02, the score's scatter, and the fate of a 7.7 M☉ star
+    /// whose companion-stripped mark is set, which reads plan 11's stripped share.
     fn fingerprint(&self) -> SimFingerprint {
         let mut probes = Vec::with_capacity(2 * FINGERPRINT_MASSES.len() + 1);
         for m0 in FINGERPRINT_MASSES {
@@ -337,6 +339,21 @@ impl FitTask for KickRankTask {
         probes.push((
             "KickLawParams::default().score_scatter".to_owned(),
             KickLawParams::default().score_scatter,
+        ));
+        // A marked star inside the companion-stripped window, whose electron-capture window reads
+        // plan 11's stripped share (P11.T1.d): the reference population's stars carry their marks.
+        let marked = StarDraws::from_parts(StarDrawsParts {
+            stripped: Mark::from_word(0),
+            ..StarDrawsParts::MEDIAN
+        });
+        let track = Track::full(SolarMasses::new(7.7), &Composition::SOLAR, &marked);
+        probes.push((
+            "remnant_mass(7.7 M☉, stripped mark set)".to_owned(),
+            track.remnant().map_or(0.0, |r| r.mass().value()),
+        ));
+        probes.push((
+            "death_age(7.7 M☉, stripped mark set)".to_owned(),
+            track.death().map_or(0.0, |d| d.age().value()),
         ));
         SimFingerprint::new(probes)
     }

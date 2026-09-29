@@ -21,7 +21,7 @@
 //! seen as neither (P06.T21.c). Its beam ([`PulsarBeam`]) says from which directions it is seen
 //! to pulse, and its [`PulseClock`] gives the pulse phase at any clock time within the clock
 //! window to better than 10⁻³ cycles (P06.T21.d). A wind nebula is flagged while the spin-down
-//! luminosity exceeds 10³⁶ erg/s (P06.T21.e); plan 09 draws the nebula.
+//! luminosity exceeds 10³⁵ erg/s (P06.T21.e, ruling 136.4); plan 09 draws the nebula.
 //!
 //! Every figure is plan 06's (design note 13 and P06.T21) and is marked provisional where the
 //! lane's research has not confirmed it against its source; the doc comment of each constant says
@@ -101,9 +101,14 @@ pub const QUANTUM_CRITICAL_FIELD: Gauss = Gauss::new(4.4e13);
 /// about 15% at 1 s over random inclinations and viewing directions.
 pub const BEAM_HALF_ANGLE_AT_1_S: f64 = 5.4;
 
-/// The spin-down luminosity above which a pulsar powers a wind nebula, W: 10³⁶ erg/s (P06.T21.e,
-/// as the brainstorm's shell section expects; provisional).
-pub const WIND_NEBULA_THRESHOLD: Watts = Watts::new(1.0e29);
+/// The spin-down luminosity above which a pulsar powers a wind nebula, W: 10³⁵ erg/s (P06.T21.e as
+/// ruling 136.4 amends it; the one threshold, which plan 09's `snr::PulsarWindNebula` reads).
+///
+/// Gaensler and Slane's (2006, ARA&A 44, 17, §2.1) ≳ 4 × 10³⁶ erg/s is the line for *prominent*
+/// nebulae; Kargaltsev and Pavlov's (2008, AIP Conf. Proc. 983, 171, Tables 1–4) Chandra nebulae
+/// reach 10³⁵·⁴ erg/s at 10⁴–10⁵ yr, and 34 of their 40 have Ė ≥ 10³⁵ erg/s. Under this plan's
+/// spin-down a nebula then lasts a median of about 1.5 × 10⁴ yr.
+pub const WIND_NEBULA_THRESHOLD: Watts = Watts::new(1.0e28);
 
 /// The speed of light, cm/s.
 const SPEED_OF_LIGHT_CM_S: f64 = 2.997_924_58e10;
@@ -527,7 +532,8 @@ impl PulsarState {
             && self.field_decay_luminosity > self.spin_down_luminosity
     }
 
-    /// Whether it powers a wind nebula: a spin-down luminosity above 10³⁶ erg/s (P06.T21.e).
+    /// Whether it powers a wind nebula: a spin-down luminosity above [`WIND_NEBULA_THRESHOLD`],
+    /// 10³⁵ erg/s (P06.T21.e, ruling 136.4).
     #[must_use]
     pub fn has_wind_nebula(&self) -> bool {
         self.spin_down_luminosity > WIND_NEBULA_THRESHOLD

@@ -25,6 +25,7 @@
 
 mod direct;
 mod dist;
+mod fates;
 mod hierarchy;
 mod model;
 pub mod period_fit;
@@ -39,17 +40,20 @@ pub use dist::{
     LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS, MassRatioDistribution,
     PeriodDistribution,
 };
+pub use fates::{COMPANION_LAW_LN_RATIO_STEP, CompanionLaw, MultiplicityFates};
 #[cfg(test)]
 pub(crate) use hierarchy::hand_built;
 pub use hierarchy::{
     DRAWS_PER_ATTEMPT, HierarchyNode, MAX_REDRAWS, MAX_STABILITY_REDRAWS, MultiplicityContext,
-    NodeIndex, PROVISIONAL_INTERACTING_PERIASTRON, PROVISIONAL_STRIPPED_SHARE, RedrawAttempt,
-    STAR_BODY_INDEX_END, SlotKind, StarIndex, StarSlot, SystemHierarchy, draw_hierarchy,
-    draw_star_count, stripped_mark_min_mass,
+    NodeIndex, RedrawAttempt, STAR_BODY_INDEX_END, SlotKind, StarIndex, StarSlot, SystemHierarchy,
+    draw_hierarchy, draw_star_count, stripped_mark_min_mass,
 };
 pub use model::{MAX_COMPANIONS, MultiplicityModel};
 pub use positions::star_positions_at;
-pub use quadrature::{all_stars_fraction_below, mean_companion_mass_per_system, stripped_share};
+pub use quadrature::{
+    all_stars_fraction_below, all_stars_fraction_below_as_drawn, band_share_as_drawn,
+    mean_companion_mass_per_system, stripped_share, stripped_share_as_drawn,
+};
 pub use stability::{
     MARDLING_AARSETH_C, TIDAL_CUT_SHARE, mardling_aarseth_limit, mutual_inclination,
 };

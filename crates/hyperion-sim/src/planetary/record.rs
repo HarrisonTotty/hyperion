@@ -435,6 +435,7 @@ pub struct BulkProperties {
     class: PlanetClass,
     fractions: MassFractions,
     equilibrium_temperature: Kelvin,
+    effective_temperature: Option<Kelvin>,
 }
 
 impl From<&DerivedBody> for BulkProperties {
@@ -446,6 +447,7 @@ impl From<&DerivedBody> for BulkProperties {
             class: derived.class(),
             fractions: derived.fractions(),
             equilibrium_temperature: derived.equilibrium_temperature(),
+            effective_temperature: derived.effective_temperature(),
         }
     }
 }
@@ -453,7 +455,8 @@ impl From<&DerivedBody> for BulkProperties {
 impl BulkProperties {
     /// The bulk of a body derived apart from [`derive_body`](crate::planetary::derive::derive_body)'s
     /// radius and composition, a moon's (P14.T17.b, ruling 83.7): its radius, density, surface
-    /// gravity, class, mass fractions and equilibrium temperature at the record's time.
+    /// gravity, class, mass fractions and equilibrium temperature at the record's time, with no
+    /// effective temperature of its own ([`with_effective_temperature`](Self::with_effective_temperature)).
     #[must_use]
     pub const fn new(
         radius: EarthRadii,
@@ -470,6 +473,17 @@ impl BulkProperties {
             class,
             fractions,
             equilibrium_temperature,
+            effective_temperature: None,
+        }
+    }
+
+    /// The same bulk, radiating at the effective temperature `effective_temperature`: a body with
+    /// a luminosity of its own (ruling 112.7).
+    #[must_use]
+    pub const fn with_effective_temperature(self, effective_temperature: Kelvin) -> Self {
+        Self {
+            effective_temperature: Some(effective_temperature),
+            ..self
         }
     }
 
@@ -503,10 +517,19 @@ impl BulkProperties {
         self.fractions
     }
 
-    /// The equilibrium temperature at the record's time.
+    /// The equilibrium temperature at the record's time: from its hosts' light alone (ruling
+    /// 112.7).
     #[must_use]
     pub const fn equilibrium_temperature(&self) -> Kelvin {
         self.equilibrium_temperature
+    }
+
+    /// The effective temperature at the record's time of a body with a luminosity of its own, a
+    /// giant's, its internal heat added to its equilibrium temperature (ruling 112.7); `None`
+    /// otherwise.
+    #[must_use]
+    pub const fn effective_temperature(&self) -> Option<Kelvin> {
+        self.effective_temperature
     }
 }
 

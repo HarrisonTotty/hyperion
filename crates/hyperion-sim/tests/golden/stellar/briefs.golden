@@ -1,4 +1,4 @@
-# generator_version = 14
+# generator_version = 15
 
 A system = 0x02001b2ca0000000
 initial mass = 0x3fcd810f5d2bb81f  # 0.23050109910349278
@@ -69,41 +69,41 @@ t = 500 yr:
   Teff = 0x40aff35c69e8ca4a  # 4089.680495524114
 
 C system = 0x42002cb200000000
-initial mass = 0x3ff175419450ac7c  # 1.0911269944724884
+initial mass = 0x3ff2a1c9609bdd8c  # 1.1644986890586067
 age at epoch = 0x4201885ff630275c  # 9412804294.019218
 route Table
 t = -500 yr:
-  WhiteDwarf DA5.7 in 2 stars
-  log L = 0xc007a60c449cd2fe  # -2.956078086887259
-  Teff = 0x40c1494ffb62e86f  # 8850.624859202855
+  WhiteDwarf DA9.2 in 2 stars
+  log L = 0xc00e7ed457dbde96  # -3.811928450009712
+  Teff = 0x40b55528ade3eb00  # 5461.158903355477
 t = 0 yr:
-  WhiteDwarf DA5.7 in 2 stars
-  log L = 0xc007a60c858abe87  # -2.956078570648802
-  Teff = 0x40c1494fab9c1e1d  # 8850.622424616531
+  WhiteDwarf DA9.2 in 2 stars
+  log L = 0xc00e7ed469be259a  # -3.8119285832551215
+  Teff = 0x40b55528929480da  # 5461.158486634691
 t = 500 yr:
-  WhiteDwarf DA5.7 in 2 stars
-  log L = 0xc007a60cc678a71f  # -2.956079054410011
-  Teff = 0x40c1494f5bd558d5  # 8850.619990032554
+  WhiteDwarf DA9.2 in 2 stars
+  log L = 0xc00e7ed47ba06c5b  # -3.811928716500501
+  Teff = 0x40b555287745173c  # 5461.158069914029
 
 C system = 0x42002cb200000001
-initial mass = 0x3ff575a4666e3cfd  # 1.3412212372966785
+initial mass = 0x3ff6a89dbae25bbf  # 1.4161660480656193
 age at epoch = 0x41f768b3af8cea16  # 6283803384.80715
-route Exact
+route Table
 t = -500 yr:
-  WhiteDwarf DA8.5 in 1 stars
-  log L = 0xc00dac7c43e0ad67  # -3.7092213919583403
-  Teff = 0x40b706df4be5d202  # 5894.87225185754
+  WhiteDwarf DA9.2 in 1 stars
+  log L = 0xc00ec8b6ffedb3e1  # -3.8480052942672818
+  Teff = 0x40b561e21850d522  # 5473.883183528933
 t = 0 yr:
-  WhiteDwarf DA8.5 in 1 stars
-  log L = 0xc00dac7c57e99790  # -3.709221541229404
-  Teff = 0x40b706df2ad957fb  # 5894.871747573833
+  WhiteDwarf DA9.2 in 1 stars
+  log L = 0xc00ec8b708733ae2  # -3.848005357758084
+  Teff = 0x40b561e20b4087a0  # 5473.882984192955
 t = 500 yr:
-  WhiteDwarf DA8.5 in 1 stars
-  log L = 0xc00dac7c6bf2816a  # -3.7092216905004323
-  Teff = 0x40b706df09ccdea4  # 5894.871243290287
+  WhiteDwarf DA9.2 in 1 stars
+  log L = 0xc00ec8b710f8c1cc  # -3.8480054212488763
+  Teff = 0x40b561e1fe303a4c  # 5473.882784857018
 
 D system = 0x6200596800000000
-initial mass = 0x400acc5fc7cd7fcb  # 3.3497920617664696
+initial mass = 0x400acc5fc7cd7fca  # 3.349792061766469
 age at epoch = 0x420641949da89869  # 11948692405.074419
 route Table
 t = -500 yr:
@@ -120,21 +120,21 @@ t = 500 yr:
   Teff = 0x40abf81820d7592a  # 3580.0471255585044
 
 D system = 0x6200596800000001
-initial mass = 0x401a58fe5cae9615  # 6.586907814174556
+initial mass = 0x401a58fe5cae9618  # 6.586907814174559
 age at epoch = 0x41f71c969325d12f  # 6203992370.36357
 route Exact
 t = -500 yr:
   WhiteDwarf DC13.5 in 1 stars
-  log L = 0xc015272f4ac58477  # -5.288266342454441
-  Teff = 0x40ad2ea21d2d4fa5  # 3735.3166288528178
+  log L = 0xc015272f4ac5c500  # -5.2882663424691145
+  Teff = 0x40ad2ea21d2c59e9  # 3735.3166288242105
 t = 0 yr:
   WhiteDwarf DC13.5 in 1 stars
-  log L = 0xc015272f7210300a  # -5.288266927946106
-  Teff = 0x40ad2ea1782f34c4  # 3735.3153700591956
+  log L = 0xc015272f72107073  # -5.288266927960751
+  Teff = 0x40ad2ea1782e3f8e  # 3735.3153700306493
 t = 500 yr:
   WhiteDwarf DC13.5 in 1 stars
-  log L = 0xc015272f995adb3b  # -5.288267513437684
-  Teff = 0x40ad2ea0d3311f21  # 3735.3141112661838
+  log L = 0xc015272f995b1bc4  # -5.288267513452357
+  Teff = 0x40ad2ea0d3302965  # 3735.3141112375765
 
 E system = 0x8200b2e000000000
 initial mass = 0x404a49cdf88e95c6  # 52.57659823381577
@@ -187,19 +187,19 @@ t = 500 yr:
   log L = 0xc008bd34c5f39d27  # -3.092385813233381
   Teff = 0x40a55c96995752c3  # 2734.2941386498
 
-C giant system = 0x42006cb200000003
-initial mass = 0x3ff145a80f6bb1bb  # 1.0795059778566685
-age at epoch = 0x4202649deb110c61  # 9874685282.131044
-route Exact
+C giant system = 0x4200acb200000008
+initial mass = 0x3ff51e14b68dc1bf  # 1.3198439723019957
+age at epoch = 0x41eb63037b26de93  # 3675790297.2146697
+route MainSequence
 t = -500 yr:
-  Subgiant K0.5IV in 1 stars
-  log L = 0x3fe09470c6279c34  # 0.5181201811036602
-  Teff = 0x40b2be4db4d434fe  # 4798.303540480554
+  Subgiant F8.5IV in 1 stars
+  log L = 0x3fe61007d6851f66  # 0.6894568624347641
+  Teff = 0x40b79f8f57897751  # 6047.559929458265
 t = 0 yr:
-  Subgiant K0.5IV in 1 stars
-  log L = 0x3fe09471b391569d  # 0.5181206233198342
-  Teff = 0x40b2be4daeafb102  # 4798.303446751323
+  Subgiant F8.5IV in 1 stars
+  log L = 0x3fe61007e30698ba  # 0.6894568857285528
+  Teff = 0x40b79f8f499bd3a1  # 6047.559716929595
 t = 500 yr:
-  Subgiant K0.5IV in 1 stars
-  log L = 0x3fe09472a0fb1e1b  # 0.51812106553638
-  Teff = 0x40b2be4da88b2c75  # 4798.303353021959
+  Subgiant F8.5IV in 1 stars
+  log L = 0x3fe61007ef8811fb  # 0.6894569090223394
+  Teff = 0x40b79f8f3bae2ffa  # 6047.559504400933

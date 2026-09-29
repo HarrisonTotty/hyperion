@@ -984,6 +984,52 @@ pub(super) fn integrate_log_period(
     sum
 }
 
+/// The nodes and weights of [`integrate_log_period`]'s rule over the same panels: `Σ w f(x)` over
+/// them is its integral of `f`, summed in the same order, so that several integrands can share one
+/// pass over the periods.
+#[must_use]
+pub(super) fn log_period_nodes(
+    periods: &PeriodDistribution,
+    lo: f64,
+    hi: f64,
+    kinks: &[f64],
+    max_panel: f64,
+) -> Vec<(f64, f64)> {
+    use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
+    let mut nodes = Vec::new();
+    if hi <= lo {
+        return nodes;
+    }
+    let mut edges: Vec<f64> = periods
+        .component_limits()
+        .into_iter()
+        .chain(kinks.iter().copied())
+        .filter(|&x| x > lo && x < hi)
+        .collect();
+    edges.push(lo);
+    edges.push(hi);
+    edges.sort_by(f64::total_cmp);
+    edges.dedup();
+    for pair in edges.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        let mut pieces = 1_u32;
+        while (end - start) / f64::from(pieces) > max_panel {
+            pieces += 1;
+        }
+        let step = (end - start) / f64::from(pieces);
+        for i in 0..pieces {
+            let a = start + step * f64::from(i);
+            let b = if i + 1 == pieces { end } else { a + step };
+            let half = 0.5 * (b - a);
+            let mid = a + half;
+            for (&x, &w) in GL16_NODES.iter().zip(&GL16_WEIGHTS) {
+                nodes.push((mid + half * x, w * half));
+            }
+        }
+    }
+    nodes
+}
+
 /// `∫ qᵏ dq` over `[a, b]`, for `0 < a ≤ b`: `b^(k+1) (1 − (a ÷ b)^(k+1)) ÷ (k + 1)`, or
 /// `ln(b ÷ a)` at k = −1.
 #[must_use]
@@ -1588,6 +1634,47 @@ impl MultiplicityModel {
         self.over_periods(m1, |law| law.cdf(q)).clamp(0.0, 1.0)
     }
 
+    /// [`companion_mass_ratio_cdf`](Self::companion_mass_ratio_cdf) at each of `qs`, in one pass
+    /// over the periods (the same rule, so each value is that function's to rounding).
+    ///
+    /// # Panics
+    ///
+    /// If `m1` is not positive and finite.
+    #[must_use]
+    pub(super) fn companion_mass_ratio_cdfs(&self, m1: SolarMasses, qs: &[f64]) -> Vec<f64> {
+        let lowest = MIN_COMPANION_MASS / m1;
+        let finish = |q: f64, value: f64| {
+            if q >= 1.0 {
+                1.0
+            } else if q < lowest {
+                0.0
+            } else {
+                value.clamp(0.0, 1.0)
+            }
+        };
+        if m1.value() < MOE_DI_STEFANO_MIN_MASS {
+            let law = self.mass_ratio_at(m1, 0.0);
+            return qs.iter().map(|&q| finish(q, law.cdf(q))).collect();
+        }
+        let periods = self.period_distribution(m1);
+        let (lo, hi) = periods.support();
+        let kinks = Self::mass_ratio_period_kinks(m1);
+        let mut sums = vec![0.0; qs.len()];
+        let mut total = 0.0;
+        for (x, w) in log_period_nodes(&periods, lo, hi, &kinks, 1.0) {
+            let weight = w * periods.pdf(x);
+            let law = self.mass_ratio_at(m1, x);
+            total += weight;
+            for (sum, &q) in sums.iter_mut().zip(qs) {
+                *sum += weight * law.cdf(q);
+            }
+        }
+        qs.iter()
+            .zip(sums)
+            .map(|(&q, sum)| finish(q, sum / total))
+            .collect()
+    }
+
     /// The mean mass ratio of a companion of a primary of initial mass `m1`, over every period.
     ///
     /// # Panics
@@ -1654,6 +1741,24 @@ mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
     use super::*;
+
+    /// The batch of mass-ratio distributions is the single ones, to rounding.
+    #[test]
+    fn the_batch_cdfs_are_the_single_ones() {
+        let model = MultiplicityModel::default_v1();
+        let qs = [0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.94, 0.96, 0.999];
+        for m in [0.3, 0.9, 2.0, 12.0] {
+            let m1 = SolarMasses::new(m);
+            let batch = model.companion_mass_ratio_cdfs(m1, &qs);
+            for (&q, &b) in qs.iter().zip(&batch) {
+                let single = model.companion_mass_ratio_cdf(m1, q);
+                assert!(
+                    (b - single).abs() < 1e-12,
+                    "{m} M☉ at {q}: {b} against {single}"
+                );
+            }
+        }
+    }
     use crate::Seed;
     use crate::galaxy::quad::gl32;
     use crate::rng::{ObjectKey, tags};

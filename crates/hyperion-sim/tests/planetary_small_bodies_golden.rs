@@ -11,7 +11,7 @@ use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::belts::{BeltHost, FIRST_BELT_SLOT, host_belts};
 use hyperion_sim::planetary::derive::PlanetClass;
 use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
-use hyperion_sim::planetary::halo::{HaloHost, Scatterer, halo, surviving_share};
+use hyperion_sim::planetary::halo::{HaloBounds, HaloHost, Scatterer, halo, surviving_share};
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{Neighbour, OrbitHost};
 use hyperion_sim::planetary::rings::{RingMoon, RingParent, generate_rings};
@@ -19,7 +19,7 @@ use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
 use hyperion_sim::units::{
-    AstronomicalUnits, EarthMasses, Kelvin, Kilograms, Megayears, Metres, Radians,
+    AstronomicalUnits, EarthFluxes, EarthMasses, Kelvin, Kilograms, Megayears, Metres, Radians,
     SolarLuminosities, SolarMasses, SolarMassesPerYear, Years,
 };
 use hyperion_sim::{GENERATOR_VERSION, Seed};
@@ -125,11 +125,13 @@ fn rings(w: &mut GoldenWriter) {
         RingMoon::new(Metres::new(185_539e3), Kilograms::new(3.75e19)),
         RingMoon::new(Metres::new(238_042e3), Kilograms::new(1.08e20)),
     ];
-    for (slot, class, mass, radius, t) in [
-        (5, PlanetClass::GasGiant, 1.898e27, 69_911e3, 110.0),
-        (6, PlanetClass::GasGiant, 5.683e26, 58_232e3, 95.0),
-        (7, PlanetClass::IceGiant, 8.681e25, 25_362e3, 59.0),
-        (1, PlanetClass::GasGiant, 1.898e27, 90_000e3, 1_400.0),
+    // Effective temperatures and fluxes: Jupiter, Saturn and Uranus where they are, and a hot
+    // Jupiter at 1,400 K.
+    for (slot, class, mass, radius, t, flux) in [
+        (5, PlanetClass::GasGiant, 1.898e27, 69_911e3, 125.0, 0.037),
+        (6, PlanetClass::GasGiant, 5.683e26, 58_232e3, 95.0, 0.011),
+        (7, PlanetClass::IceGiant, 8.681e25, 25_362e3, 59.0, 0.002_7),
+        (1, PlanetClass::GasGiant, 1.898e27, 90_000e3, 1_400.0, 640.0),
     ] {
         for n in 0..24_u64 {
             let id = SystemId::from_raw(0x0200_0800_2000_0000 + (n << 8)).unwrap();
@@ -140,6 +142,7 @@ fn rings(w: &mut GoldenWriter) {
                 Kilograms::new(mass),
                 Metres::new(radius),
                 Kelvin::new(t),
+                EarthFluxes::new(flux),
             )
             .unwrap();
             for ring in generate_rings(SEED, id, &parent, &moons) {
@@ -186,9 +189,15 @@ fn halos(w: &mut GoldenWriter) {
             "  comets per s",
             halo.comet_rate(SolarLuminosities::new(1.0)).value(),
         );
+        // The Sun as a 0.54 M☉ white dwarf, its sphere of influence shrunk with its mass.
+        let bounds = HaloBounds::new(au(1.39e5 * hyperion_sim::math::cbrt(0.54)), None);
         for rate in [5e-7, f64::INFINITY] {
             let later = halo
-                .at(SolarMasses::new(0.54), SolarMassesPerYear::new(rate))
+                .at(
+                    SolarMasses::new(0.54),
+                    SolarMassesPerYear::new(rate),
+                    bounds,
+                )
                 .unwrap();
             w.f64(&format!("  comets at 0.54 after {rate:e}"), later.comets());
             w.f64(

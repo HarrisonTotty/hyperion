@@ -18,7 +18,7 @@ use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
-use hyperion_sim::galaxy::query::expected_counts;
+use hyperion_sim::galaxy::query::{SubstellarRequest, expected_counts};
 use hyperion_sim::units::LightYears;
 
 /// The seed of the galaxy these counts are taken in.
@@ -44,7 +44,7 @@ fn assert_layers_agree(
     tolerance: f64,
 ) {
     let radius = LightYears::new(radius_ly);
-    let counts = expected_counts(galaxy, centre, radius);
+    let counts = expected_counts(galaxy, centre, radius, SubstellarRequest::None);
     for band in MassBand::ALL {
         let reference = reference_sphere_integral(galaxy, band, centre, radius, steps);
         let taken = counts.get(band.layer());
@@ -108,8 +108,18 @@ fn expected_counts_agree_with_the_reference_everywhere_over_every_radius() {
 fn expected_counts_grow_with_the_volume_in_a_smooth_place() {
     let galaxy = galaxy();
     let sun = sunlike_point(&galaxy);
-    let small = expected_counts(&galaxy, &sun, LightYears::new(10.0));
-    let large = expected_counts(&galaxy, &sun, LightYears::new(20.0));
+    let small = expected_counts(
+        &galaxy,
+        &sun,
+        LightYears::new(10.0),
+        SubstellarRequest::None,
+    );
+    let large = expected_counts(
+        &galaxy,
+        &sun,
+        LightYears::new(20.0),
+        SubstellarRequest::None,
+    );
     for band in MassBand::ALL {
         let ratio = large.get(band.layer()) / small.get(band.layer());
         assert!(

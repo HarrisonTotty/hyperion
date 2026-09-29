@@ -13,11 +13,13 @@ export type Census = {
  */
 limit: number, 
 /**
- * The lower mass edge, in M☉ of primary initial mass, above which the result is complete; the
- * lower edge of the lightest included layer. `null` when no layer fits.
+ * The lower mass edge, in M☉ of primary initial mass (of object mass for a substellar layer),
+ * above which the result is complete; the lower edge of the lightest included layer. `null`
+ * when no layer fits.
  */
 complete_above_msun: number | null, 
 /**
- * All five layers, A to E.
+ * All five stellar layers, A to E, then the substellar layers the request's `min_layer` asked
+ * for: `brown_dwarf`, and `rogue_planet` after it.
  */
 layers: Array<LayerCensus>, };

@@ -28,11 +28,14 @@ fn root_diagonal_squared_ly2() -> f64 {
     3.0 * edge * edge
 }
 
-/// The finest stellar layer a query may walk: a floor on primary initial mass.
+/// The finest layer a query may walk: a floor on primary initial mass, or on object mass below the
+/// stars.
 ///
 /// A long-range query needs a floor ("navigation beacons only", brainstorm, "The range query"),
-/// since a 500 ly sphere meets a million layer-A cells. The steps run from the coarsest; plan 13
-/// adds two below [`MassFloor::LayerA`] for the substellar layers.
+/// since a 500 ly sphere meets a million layer-A cells. The steps run from the coarsest, so a finer
+/// floor compares greater. The two steps below [`MassFloor::LayerA`] are the substellar layers'
+/// (plan 13, Design note 9): the brainstorm's "the mass floor gains two steps". A query may take
+/// one only with the matching [`SubstellarRequest`], which [`RangeQueryBuilder::build`] checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum MassFloor {
     /// Layer E only: primaries of 8 M☉ and up.
@@ -46,6 +49,11 @@ pub enum MassFloor {
     /// Every stellar layer, down to 0.08 M☉: the default.
     #[default]
     LayerA,
+    /// The stars and the free-floating brown dwarfs, down to 13 Jupiter masses (0.0124 M☉).
+    BrownDwarfs,
+    /// The stars, the brown dwarfs and the rogue planets, down to a third of an Earth mass
+    /// (1.0 × 10⁻⁶ M☉).
+    RoguePlanets,
 }
 
 impl MassFloor {
@@ -58,6 +66,8 @@ impl MassFloor {
             Self::LayerC => Layer::C,
             Self::LayerB => Layer::B,
             Self::LayerA => Layer::A,
+            Self::BrownDwarfs => Layer::BrownDwarf,
+            Self::RoguePlanets => Layer::RoguePlanet,
         }
     }
 }
@@ -65,9 +75,11 @@ impl MassFloor {
 /// Which substellar layers a query asks for, after layer A (brainstorm, "The range query": they
 /// come after layer A in the walk and only when the caller asks for them).
 ///
-/// The enum exists so that plan 13 changes no signature; until then
-/// [`RangeQueryBuilder::build`] rejects anything but [`SubstellarRequest::None`] (plan 03,
-/// Design note 17).
+/// The request and the [`MassFloor`] are tied so that they cannot disagree (plan 13, Design note
+/// 9): a request lowers a floor of [`MassFloor::LayerA`] to its own step
+/// ([`floor`](Self::floor)), a floor below layer A needs the request that asks for its layer, and
+/// a request with a floor that would cut its layers off is refused. [`RangeQueryBuilder::build`]
+/// applies the three rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum SubstellarRequest {
     /// Stellar layers only: the default.
@@ -77,6 +89,30 @@ pub enum SubstellarRequest {
     BrownDwarfs,
     /// The free-floating brown dwarfs and the rogue planets too.
     BrownDwarfsAndRoguePlanets,
+}
+
+impl SubstellarRequest {
+    /// The floor step that walks exactly the layers asked for: [`MassFloor::LayerA`] for none,
+    /// then one step per substellar layer.
+    #[must_use]
+    pub const fn floor(self) -> MassFloor {
+        match self {
+            Self::None => MassFloor::LayerA,
+            Self::BrownDwarfs => MassFloor::BrownDwarfs,
+            Self::BrownDwarfsAndRoguePlanets => MassFloor::RoguePlanets,
+        }
+    }
+
+    /// Whether the request asks for `layer`'s objects: every stellar layer always, and a
+    /// substellar layer when the request names it.
+    #[must_use]
+    pub const fn admits(self, layer: Layer) -> bool {
+        match layer {
+            Layer::A | Layer::B | Layer::C | Layer::D | Layer::E => true,
+            Layer::BrownDwarf => !matches!(self, Self::None),
+            Layer::RoguePlanet => matches!(self, Self::BrownDwarfsAndRoguePlanets),
+        }
+    }
 }
 
 /// "Which systems lie within R light-years of this point at time t?", with the limits its census
@@ -165,13 +201,14 @@ impl RangeQuery {
         self.limit
     }
 
-    /// The finest layer the census may admit.
+    /// The finest layer the census may admit: the builder's floor, or the request's own step when
+    /// the builder's was [`MassFloor::LayerA`] and substellar layers were asked for.
     #[must_use]
     pub const fn mass_floor(&self) -> MassFloor {
         self.mass_floor
     }
 
-    /// The substellar layers asked for; [`SubstellarRequest::None`] until plan 13.
+    /// The substellar layers asked for.
     #[must_use]
     pub const fn substellar(&self) -> SubstellarRequest {
         self.substellar
@@ -209,7 +246,8 @@ impl RangeQueryBuilder {
         self
     }
 
-    /// The finest layer the census may admit.
+    /// The finest layer the census may admit. A step below [`MassFloor::LayerA`] needs the
+    /// matching [`substellar`](Self::substellar) request.
     ///
     /// Default: [`MassFloor::LayerA`].
     pub const fn mass_floor(mut self, floor: MassFloor) -> Self {
@@ -217,10 +255,10 @@ impl RangeQueryBuilder {
         self
     }
 
-    /// The substellar layers to add after layer A.
+    /// The substellar layers to add after layer A. With the default floor, the request lowers it
+    /// to its own step ([`SubstellarRequest::floor`]).
     ///
-    /// Default: [`SubstellarRequest::None`], the only value [`build`](Self::build) accepts until
-    /// plan 13.
+    /// Default: [`SubstellarRequest::None`].
     pub const fn substellar(mut self, request: SubstellarRequest) -> Self {
         self.query.substellar = request;
         self
@@ -247,10 +285,17 @@ impl RangeQueryBuilder {
     /// - [`BuildRangeQueryError::CentreOutsideRootCube`] unless the centre lies in the root cube.
     /// - [`BuildRangeQueryError::TimeOutsideClockWindow`] unless `|t| ≤ H` (plan 03, Design
     ///   note 12).
-    /// - [`BuildRangeQueryError::SubstellarLayersUnavailable`] for any substellar request but
-    ///   [`SubstellarRequest::None`] (Design note 17).
+    /// - [`BuildRangeQueryError::SubstellarNotRequested`] for a floor below
+    ///   [`MassFloor::LayerA`] whose layers the substellar request does not ask for (plan 13,
+    ///   Design note 9).
+    /// - [`BuildRangeQueryError::SubstellarBelowFloor`] for a substellar request with a floor that
+    ///   would cut its layers off: above layer A, or the brown dwarfs' step with the rogue planets
+    ///   asked for.
+    ///
+    /// With a floor of [`MassFloor::LayerA`] and substellar layers asked for, the built query's
+    /// floor is the request's step.
     pub fn build(self) -> Result<RangeQuery, BuildRangeQueryError> {
-        let query = self.query;
+        let mut query = self.query;
         let radius = query.radius.value();
         if !radius.is_finite() {
             return Err(BuildRangeQueryError::RadiusNotFinite);
@@ -267,12 +312,35 @@ impl RangeQueryBuilder {
         if !ClockWindow::contains(query.time) {
             return Err(BuildRangeQueryError::TimeOutsideClockWindow(query.time));
         }
-        match query.substellar {
-            SubstellarRequest::None => Ok(query),
-            SubstellarRequest::BrownDwarfs | SubstellarRequest::BrownDwarfsAndRoguePlanets => {
-                Err(BuildRangeQueryError::SubstellarLayersUnavailable)
+        query.mass_floor = tie_floor(query.mass_floor, query.substellar)?;
+        Ok(query)
+    }
+}
+
+/// The floor a query walks to, from the builder's floor and substellar request (plan 13, Design
+/// note 9): the request's own step in place of [`MassFloor::LayerA`], the floor itself when it is
+/// that step or a stellar floor with nothing asked for, and an error when the two disagree.
+fn tie_floor(
+    floor: MassFloor,
+    request: SubstellarRequest,
+) -> Result<MassFloor, BuildRangeQueryError> {
+    let asked = request.floor();
+    match floor {
+        MassFloor::LayerE | MassFloor::LayerD | MassFloor::LayerC | MassFloor::LayerB => {
+            if request == SubstellarRequest::None {
+                Ok(floor)
+            } else {
+                Err(BuildRangeQueryError::SubstellarBelowFloor)
             }
         }
+        MassFloor::LayerA => Ok(asked),
+        MassFloor::BrownDwarfs | MassFloor::RoguePlanets => match floor.cmp(&asked) {
+            std::cmp::Ordering::Equal => Ok(floor),
+            // The floor reaches a layer nobody asked for.
+            std::cmp::Ordering::Greater => Err(BuildRangeQueryError::SubstellarNotRequested),
+            // The request reaches below the floor.
+            std::cmp::Ordering::Less => Err(BuildRangeQueryError::SubstellarBelowFloor),
+        },
     }
 }
 
@@ -430,18 +498,68 @@ mod tests {
         );
     }
 
+    /// Every floor against every request (plan 13, Design note 9): the request lowers layer A's
+    /// floor to its step, the matching step stands, and every other pairing is refused with the
+    /// variant that names the disagreement.
     #[test]
-    fn substellar_requests_are_refused_until_plan_13() {
+    fn the_floor_and_the_substellar_request_are_tied() {
+        use BuildRangeQueryError::{SubstellarBelowFloor, SubstellarNotRequested};
+        use MassFloor::{BrownDwarfs, LayerA, LayerB, LayerC, LayerD, LayerE, RoguePlanets};
+        use SubstellarRequest::{BrownDwarfsAndRoguePlanets as Both, None as Nothing};
+        let bd = SubstellarRequest::BrownDwarfs;
+        let cases = [
+            (LayerE, Nothing, Ok(LayerE)),
+            (LayerB, Nothing, Ok(LayerB)),
+            (LayerA, Nothing, Ok(LayerA)),
+            (BrownDwarfs, Nothing, Err(SubstellarNotRequested)),
+            (RoguePlanets, Nothing, Err(SubstellarNotRequested)),
+            (LayerA, bd, Ok(BrownDwarfs)),
+            (BrownDwarfs, bd, Ok(BrownDwarfs)),
+            (RoguePlanets, bd, Err(SubstellarNotRequested)),
+            (LayerA, Both, Ok(RoguePlanets)),
+            (RoguePlanets, Both, Ok(RoguePlanets)),
+            (BrownDwarfs, Both, Err(SubstellarBelowFloor)),
+            (LayerE, bd, Err(SubstellarBelowFloor)),
+            (LayerD, Both, Err(SubstellarBelowFloor)),
+            (LayerC, bd, Err(SubstellarBelowFloor)),
+            (LayerB, Both, Err(SubstellarBelowFloor)),
+        ];
+        for (floor, request, expected) in cases {
+            let built = RangeQuery::builder(sunlike(), LightYears::new(50.0))
+                .mass_floor(floor)
+                .substellar(request)
+                .build();
+            assert_eq!(
+                built.as_ref().map(RangeQuery::mass_floor).map_err(|e| *e),
+                expected,
+                "{floor:?} with {request:?}"
+            );
+            if let Ok(query) = built {
+                assert_eq!(query.substellar(), request);
+            }
+        }
+    }
+
+    #[test]
+    fn a_request_admits_the_stars_and_the_layers_it_names() {
         for request in [
+            SubstellarRequest::None,
             SubstellarRequest::BrownDwarfs,
             SubstellarRequest::BrownDwarfsAndRoguePlanets,
         ] {
+            for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+                assert!(request.admits(layer), "{request:?} {layer:?}");
+            }
             assert_eq!(
-                RangeQuery::builder(sunlike(), LightYears::new(50.0))
-                    .substellar(request)
-                    .build(),
-                Err(BuildRangeQueryError::SubstellarLayersUnavailable)
+                request.admits(Layer::BrownDwarf),
+                request != SubstellarRequest::None
             );
+            assert_eq!(
+                request.admits(Layer::RoguePlanet),
+                request == SubstellarRequest::BrownDwarfsAndRoguePlanets
+            );
+            // The request's step walks exactly the layers it admits.
+            assert!(request.admits(request.floor().layer()));
         }
     }
 
@@ -453,11 +571,23 @@ mod tests {
                 MassFloor::LayerD,
                 MassFloor::LayerC,
                 MassFloor::LayerB,
-                MassFloor::LayerA
+                MassFloor::LayerA,
+                MassFloor::BrownDwarfs,
+                MassFloor::RoguePlanets
             ]
             .map(MassFloor::layer),
-            [Layer::E, Layer::D, Layer::C, Layer::B, Layer::A]
+            [
+                Layer::E,
+                Layer::D,
+                Layer::C,
+                Layer::B,
+                Layer::A,
+                Layer::BrownDwarf,
+                Layer::RoguePlanet
+            ]
         );
         assert!(MassFloor::LayerE < MassFloor::LayerA);
+        assert!(MassFloor::LayerA < MassFloor::BrownDwarfs);
+        assert!(MassFloor::BrownDwarfs < MassFloor::RoguePlanets);
     }
 }

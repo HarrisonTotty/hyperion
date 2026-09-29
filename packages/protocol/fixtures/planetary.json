@@ -156,7 +156,8 @@
                 "water": 0.0,
                 "envelope": 0.0
               },
-              "equilibrium_temperature_k": 254.6
+              "equilibrium_temperature_k": 254.6,
+              "effective_temperature_k": null
             }
           }
         },
@@ -222,7 +223,8 @@
                 "water": 0.072,
                 "envelope": 0.818
               },
-              "equilibrium_temperature_k": 128.9
+              "equilibrium_temperature_k": 111.6,
+              "effective_temperature_k": 128.9
             }
           }
         }
@@ -376,7 +378,8 @@
                 "water": 0.0,
                 "envelope": 0.0
               },
-              "equilibrium_temperature_k": 254.6
+              "equilibrium_temperature_k": 254.6,
+              "effective_temperature_k": null
             }
           }
         },
@@ -444,7 +447,8 @@
                 "water": 0.0,
                 "envelope": 0.0
               },
-              "equilibrium_temperature_k": 270.4
+              "equilibrium_temperature_k": 270.4,
+              "effective_temperature_k": null
             }
           }
         },
@@ -552,7 +556,8 @@
                 "water": 0.0,
                 "envelope": 0.0
               },
-              "equilibrium_temperature_k": 254.6
+              "equilibrium_temperature_k": 254.6,
+              "effective_temperature_k": null
             }
           }
         },
@@ -645,7 +650,8 @@
                 "water": 0.0,
                 "envelope": 0.0
               },
-              "equilibrium_temperature_k": 254.6
+              "equilibrium_temperature_k": 254.6,
+              "effective_temperature_k": null
             }
           }
         },
@@ -781,7 +787,8 @@
                 "water": 0.25,
                 "envelope": 0.0
               },
-              "equilibrium_temperature_k": 163.0
+              "equilibrium_temperature_k": 163.0,
+              "effective_temperature_k": null
             }
           }
         },
@@ -997,7 +1004,8 @@
               "water": 0.0,
               "envelope": 0.0
             },
-            "equilibrium_temperature_k": 254.6
+            "equilibrium_temperature_k": 254.6,
+            "effective_temperature_k": null
           }
         },
         "surface": {

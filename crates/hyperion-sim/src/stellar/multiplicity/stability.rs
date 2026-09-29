@@ -12,6 +12,7 @@ use std::f64::consts::PI;
 
 use super::hierarchy::{HierarchyNode, NodeIndex, StarIndex, SystemHierarchy};
 use crate::galaxy::PointLy;
+use crate::galaxy::displaced::binarity::StageRadii;
 use crate::galaxy::potential::PotentialTables;
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, OpenOrbit, Orientation};
@@ -183,17 +184,24 @@ pub(super) fn critical_periapsis(h: &SystemHierarchy, pair: NodeIndex) -> Option
 }
 
 /// What the primary's own orbit, the pair whose inner member is the primary, must satisfy: the
-/// condition the primary's companion-stripped mark puts on it (plan 11, Design note 1).
+/// condition the primary's companion-stripped mark puts on it (plan 11, Design note 1, as ruling
+/// 123.5 amends it).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Innermost {
     /// Nothing: the primary is too light for the mark, or the context ignores it.
     Free,
-    /// The mark is set: the primary has a companion, and its orbit's periastron is below the
-    /// interacting periastron given.
-    Interacting(Metres),
-    /// The mark is not set: the primary is single, or its orbit's periastron is at or beyond the
-    /// interacting periastron given.
-    Wide(Metres),
+    /// The mark is set: the primary has a companion, and its orbit's periastron lies in the
+    /// stripping band these radii give the orbit's mass ratio.
+    Stripped(StageRadii),
+    /// The mark is not set: the primary is single, or its orbit's periastron lies outside the
+    /// stripping band these radii give (the merger band, Case C and wide pairs); `share` is the
+    /// stripped share the mark was read against.
+    Unstripped {
+        /// The primary's stage radii.
+        radii: StageRadii,
+        /// Its stripped share.
+        share: f64,
+    },
 }
 
 /// Everything a hierarchy must satisfy besides stability: the tidal cut at its place, a context's
@@ -227,18 +235,6 @@ impl<'g> Limits<'g> {
     #[must_use]
     pub(super) fn innermost(&self) -> Innermost {
         self.innermost
-    }
-
-    /// These limits with an unset stripped mark no longer holding the primary's orbit outside
-    /// its threshold: the direct construction's (ruling 81), for which see
-    /// [`Draw::direct`](super::hierarchy).
-    #[must_use]
-    pub(super) fn without_wide_innermost(self) -> Self {
-        let innermost = match self.innermost {
-            Innermost::Wide(_) => Innermost::Free,
-            other => other,
-        };
-        Self { innermost, ..self }
     }
 
     /// The tidal cut of a system of total initial mass `mass`: [`TIDAL_CUT_SHARE`] of its tidal
@@ -280,32 +276,33 @@ impl<'g> Limits<'g> {
     /// Whether the primary's orbit satisfies [`Innermost`].
     #[must_use]
     fn innermost_fits(&self, h: &SystemHierarchy) -> bool {
-        let primary_orbit = primary_orbit(h);
-        match self.innermost {
+        let in_band = |radii: &StageRadii| {
+            primary_pair(h).is_some_and(|(orbit, companion)| {
+                let q = companion / h.star(StarIndex::PRIMARY).initial_mass();
+                radii.band(q).contains(orbit.periapsis())
+            })
+        };
+        match &self.innermost {
             Innermost::Free => true,
-            Innermost::Interacting(threshold) => {
-                primary_orbit.is_some_and(|orbit| orbit.periapsis() < threshold)
-            }
-            Innermost::Wide(threshold) => {
-                primary_orbit.is_none_or(|orbit| orbit.periapsis() >= threshold)
-            }
+            Innermost::Stripped(radii) => in_band(radii),
+            Innermost::Unstripped { radii, .. } => !in_band(radii),
         }
     }
 }
 
-/// The orbit of the pair whose inner member is the primary, star 0, or `None` for a single star.
-///
-/// The primary is the first star of the hierarchy's depth-first order, so the pair is the last
-/// one met going from the root through inner members.
+/// The primary's own orbit and the initial mass of the member it orbits with (a star or a pair),
+/// or `None` for a single star.
 #[must_use]
-pub(super) fn primary_orbit(h: &SystemHierarchy) -> Option<&KeplerElements> {
+fn primary_pair(h: &SystemHierarchy) -> Option<(&KeplerElements, SolarMasses)> {
     let mut node = h.root();
-    let mut orbit = None;
+    let mut found = None;
     while let HierarchyNode::Pair {
-        inner, orbit: o, ..
+        inner,
+        outer,
+        orbit,
     } = h.node(node)
     {
-        orbit = Some(o);
+        found = Some((orbit, h.node_mass(*outer)));
         node = *inner;
     }
     debug_assert_eq!(
@@ -313,7 +310,17 @@ pub(super) fn primary_orbit(h: &SystemHierarchy) -> Option<&KeplerElements> {
         &HierarchyNode::Star(StarIndex::PRIMARY),
         "the first star in depth-first order is the primary"
     );
-    orbit
+    found
+}
+
+/// The orbit of the pair whose inner member is the primary, star 0, or `None` for a single star.
+///
+/// The primary is the first star of the hierarchy's depth-first order, so the pair is the last
+/// one met going from the root through inner members.
+#[cfg(test)]
+#[must_use]
+pub(super) fn primary_orbit(h: &SystemHierarchy) -> Option<&KeplerElements> {
+    primary_pair(h).map(|(orbit, _)| orbit)
 }
 
 #[cfg(test)]

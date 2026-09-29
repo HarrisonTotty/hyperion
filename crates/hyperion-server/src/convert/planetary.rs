@@ -36,7 +36,7 @@ use hyperion_sim::planetary::{
     BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
 };
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::{Kilograms, Metres};
+use hyperion_sim::units::{Kelvin, Kilograms, Metres};
 
 use super::query_time;
 use super::stellar::{orbit_dto, unknown_system, wire_time};
@@ -598,6 +598,7 @@ fn bulk(bulk: &BulkProperties) -> BulkPropertiesDto {
             envelope: fractions.envelope(),
         },
         equilibrium_temperature_k: bulk.equilibrium_temperature().value(),
+        effective_temperature_k: bulk.effective_temperature().map(Kelvin::value),
     }
 }
 

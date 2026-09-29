@@ -8,7 +8,15 @@ import {
   UNIVERSE_ID,
 } from "../../test/galaxyFixtures";
 import { CHART_SYSTEM_LIMIT } from "./model";
-import { layerIndex, populationLabel, toChartResult, toRangeRequest } from "./wire";
+import {
+  chartKindOf,
+  layerIndex,
+  layerLetter,
+  layerRank,
+  populationLabel,
+  toChartResult,
+  toRangeRequest,
+} from "./wire";
 
 describe("toChartResult", () => {
   it("sorts systems nearest first and gives each its distance and offset", () => {
@@ -73,7 +81,7 @@ describe("toChartResult", () => {
       aSystemsInRange({ minLayer: "b", systems: [{ relLy: [1, 0, 0], layer: "b" }] }),
     );
 
-    expect(result.census).toEqual({ kind: "complete", aboveMsun: 0.5 });
+    expect(result.census).toEqual({ kind: "complete", aboveMsun: 0.5, layer: "b" });
     expect(result.layers.map((layer) => layer.status)).toEqual([
       "below_mass_floor",
       "included",
@@ -178,5 +186,63 @@ describe("populationLabel", () => {
 describe("layerIndex", () => {
   it("counts the layers from the lightest", () => {
     expect((["a", "b", "c", "d", "e"] as const).map(layerIndex)).toEqual([0, 1, 2, 3, 4]);
+  });
+});
+
+describe("the substellar layers (plan 13, P13.T7)", () => {
+  it("draws both at layer A's size class and ranks them below it", () => {
+    expect((["rogue_planet", "brown_dwarf"] as const).map(layerIndex)).toEqual([0, 0]);
+    expect(
+      (["rogue_planet", "brown_dwarf", "a", "b", "c", "d", "e"] as const).map(layerRank),
+    ).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("names them F and G, the letters their designations carry", () => {
+    expect((["a", "e", "brown_dwarf", "rogue_planet"] as const).map(layerLetter)).toEqual([
+      "A",
+      "E",
+      "F",
+      "G",
+    ]);
+  });
+
+  it("gives each system its kind from its layer, and a free-floating planet no brief", () => {
+    const result = toChartResult(
+      aSystemsInRange({
+        minLayer: "rogue_planet",
+        systems: [
+          { relLy: [1, 0, 0], layer: "c" },
+          { relLy: [2, 0, 0], layer: "brown_dwarf" },
+          { relLy: [3, 0, 0], layer: "rogue_planet" },
+        ],
+      }),
+    );
+    expect(
+      result.systems.map((system) => [system.kind, system.star?.spectralClass ?? null]),
+    ).toEqual([
+      ["stellar", "G2V"],
+      ["brown_dwarf", "T5"],
+      ["rogue_planet", null],
+    ]);
+    expect((["a", "brown_dwarf", "rogue_planet"] as const).map(chartKindOf)).toEqual([
+      "stellar",
+      "brown_dwarf",
+      "rogue_planet",
+    ]);
+  });
+
+  it("names the census's lightest included layer, a substellar one where it reaches there", () => {
+    const planets = toChartResult(aSystemsInRange({ minLayer: "rogue_planet" }));
+    expect(planets.census).toMatchObject({ kind: "complete", layer: "rogue_planet" });
+    const dropped = toChartResult(
+      aSystemsInRange({ minLayer: "rogue_planet", overLimit: ["rogue_planet"] }),
+    );
+    expect(dropped.census).toMatchObject({ kind: "complete", layer: "brown_dwarf" });
+  });
+
+  it("asks for a substellar floor by its min_layer alone", () => {
+    expect(toRangeRequest(UNIVERSE_ID, [26_000, 0, 0], 10, 0, "rogue_planet").min_layer).toBe(
+      "rogue_planet",
+    );
   });
 });

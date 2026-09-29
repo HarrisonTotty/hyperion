@@ -259,7 +259,10 @@ export interface BulkProperties {
   readonly surfaceGravityMS2: number;
   readonly planetClass: PlanetClassDto;
   readonly massFractions: MassFractions;
+  /** From its hosts' light alone, K (ruling 112.7). */
   readonly equilibriumTemperatureK: number;
+  /** A giant's, its internal heat included, K; `null` for a body with no luminosity of its own. */
+  readonly effectiveTemperatureK: number | null;
 }
 
 /** A gap a moon's resonance clears in a massive ring. */

@@ -22,13 +22,17 @@ use hyperion_protocol::{
 use hyperion_server::limits::MAX_QUERY_CELLS;
 use hyperion_sim::coords::LyCell;
 use hyperion_sim::galaxy::placement::{NoCache, resolve};
-use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, RangeResult, range_query};
+use hyperion_sim::galaxy::query::{
+    MassFloor, RangeQuery, RangeResult, SubstellarRequest, range_query,
+};
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::stellar::ObjectKind;
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
-use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+use hyperion_sim::units::consts::{
+    EARTH_MASS_KG, JUPITER_MASS_KG, METRES_PER_LIGHT_YEAR, SOLAR_MASS_KG,
+};
 use hyperion_sim::units::{LightYears, SolarMasses};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::golden;
@@ -165,12 +169,18 @@ fn sim_answer(galaxy: &Galaxy, query: &Query) -> (RangeQuery, RangeResult) {
         query.centre.offset_m,
     )
     .expect("the test's centres are canonical");
-    let floor = match query.min_layer {
-        MassLayer::A => MassFloor::LayerA,
-        MassLayer::B => MassFloor::LayerB,
-        MassLayer::C => MassFloor::LayerC,
-        MassLayer::D => MassFloor::LayerD,
-        MassLayer::E => MassFloor::LayerE,
+    let none = SubstellarRequest::None;
+    let (floor, substellar) = match query.min_layer {
+        MassLayer::A => (MassFloor::LayerA, none),
+        MassLayer::B => (MassFloor::LayerB, none),
+        MassLayer::C => (MassFloor::LayerC, none),
+        MassLayer::D => (MassFloor::LayerD, none),
+        MassLayer::E => (MassFloor::LayerE, none),
+        MassLayer::BrownDwarf => (MassFloor::BrownDwarfs, SubstellarRequest::BrownDwarfs),
+        MassLayer::RoguePlanet => (
+            MassFloor::RoguePlanets,
+            SubstellarRequest::BrownDwarfsAndRoguePlanets,
+        ),
     };
     let sim_query = RangeQuery::builder(centre, LightYears::new(query.radius_ly))
         .time(
@@ -179,6 +189,7 @@ fn sim_answer(galaxy: &Galaxy, query: &Query) -> (RangeQuery, RangeResult) {
         )
         .limit(NonZeroU32::new(query.limit).expect("the test's limits are above zero"))
         .mass_floor(floor)
+        .substellar(substellar)
         .cell_budget(MAX_QUERY_CELLS)
         .build()
         .expect("the test's queries are valid");
@@ -186,16 +197,23 @@ fn sim_answer(galaxy: &Galaxy, query: &Query) -> (RangeQuery, RangeResult) {
     (sim_query, result)
 }
 
-/// The wire's layer for each stellar layer, and the band plan 02 gives it in M☉ of initial mass,
-/// written out here rather than read from the server or the sim's layer table.
+/// The wire's layer for each layer, and the band plan 02 gives it in M☉ of initial mass (plan 13
+/// its object mass: 13 Jupiter masses and a third of an Earth mass), written out here rather than
+/// read from the server or the sim's layer table.
 fn wire_layer_and_band(layer: Layer) -> (MassLayer, f64, f64) {
+    let thirteen_jupiters = 13.0 * JUPITER_MASS_KG / SOLAR_MASS_KG;
     match layer {
         Layer::A => (MassLayer::A, 0.08, 0.5),
         Layer::B => (MassLayer::B, 0.5, 0.75),
         Layer::C => (MassLayer::C, 0.75, 2.5),
         Layer::D => (MassLayer::D, 2.5, 8.0),
         Layer::E => (MassLayer::E, 8.0, 150.0),
-        Layer::BrownDwarf | Layer::RoguePlanet => panic!("the first milestone places no {layer:?}"),
+        Layer::BrownDwarf => (MassLayer::BrownDwarf, thirteen_jupiters, 0.08),
+        Layer::RoguePlanet => (
+            MassLayer::RoguePlanet,
+            (1.0 / 3.0) * EARTH_MASS_KG / SOLAR_MASS_KG,
+            thirteen_jupiters,
+        ),
     }
 }
 
@@ -269,11 +287,18 @@ fn assert_answer_is_the_sims(
         answer.census.complete_above_msun,
         census.complete_above().map(SolarMasses::value)
     );
-    let layers = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E];
+    // A to E, then the substellar layers the request asked for.
+    let layers: Vec<Layer> = Layer::ALL
+        .into_iter()
+        .filter(|&layer| sim_query.substellar().admits(layer))
+        .collect();
     assert_eq!(answer.census.layers.len(), layers.len());
-    for (line, layer) in answer.census.layers.iter().zip(layers) {
+    for (line, &layer) in answer.census.layers.iter().zip(&layers) {
         let (wire, lo, hi) = wire_layer_and_band(layer);
-        assert_eq!(line.layer, wire, "the census lists A to E in order");
+        assert_eq!(
+            line.layer, wire,
+            "the census lists A to E in order, then F and G"
+        );
         assert!(
             close(line.mass_min_msun, lo) && close(line.mass_max_msun, hi),
             "{line:?}"
@@ -664,6 +689,53 @@ async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so() {
             assert_eq!(line.returned, 0, "{line:?}");
         }
     }
+    let (sim_query, result) = sim_answer(galaxy(), &query);
+    assert_answer_is_the_sims(&answer, &sim_query, &result);
+
+    client.close().await;
+    server.stop().await;
+}
+
+/// Plan 13, P13.T7: the default request returns no free-floating object, and a lowered
+/// `min_layer` returns them: the brown dwarfs with their briefs, the rogue planets with none, and
+/// the census's substellar lines, all as the sim answers the same terms.
+#[tokio::test]
+async fn a_lowered_min_layer_returns_the_free_floating_objects() {
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let mut query = Query::sunlike();
+    query.radius_ly = 10.0;
+    query.include_stellar = true;
+    let stars = ask(&mut client, &universe.id, &query).await.unwrap();
+    assert_eq!(stars.census.layers.len(), 5);
+    assert!(
+        stars.systems.iter().all(|record| {
+            !matches!(record.layer, MassLayer::BrownDwarf | MassLayer::RoguePlanet)
+        })
+    );
+
+    query.min_layer = MassLayer::RoguePlanet;
+    let answer = ask(&mut client, &universe.id, &query).await.unwrap();
+    for layer in [MassLayer::BrownDwarf, MassLayer::RoguePlanet] {
+        assert_eq!(status(&answer.census, layer), LayerStatus::Included);
+    }
+    let of = |layer| {
+        answer
+            .systems
+            .iter()
+            .filter(move |record| record.layer == layer)
+    };
+    assert!(of(MassLayer::RoguePlanet).count() > 100);
+    assert!(of(MassLayer::RoguePlanet).all(|record| record.stellar.is_none()));
+    assert!(of(MassLayer::BrownDwarf).all(|record| record.stellar.is_some()));
+    // The stars are the default request's, row for row.
+    let stellar: Vec<&SystemRecord> = answer
+        .systems
+        .iter()
+        .filter(|record| !matches!(record.layer, MassLayer::BrownDwarf | MassLayer::RoguePlanet))
+        .collect();
+    assert_eq!(stellar, stars.systems.iter().collect::<Vec<_>>());
     let (sim_query, result) = sim_answer(galaxy(), &query);
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 

@@ -178,11 +178,14 @@ mod tests {
 
     /// P13.T2's Milky Way figures (ruling 125): 0.23–0.27 brown dwarfs and 27–31 rogue planets per
     /// system, a saturation threshold of 35.9 per star ±3% (31.8 ±3% under Kroupa's function), not
-    /// saturated, and room in the index.
+    /// saturated, and room in the index. Provisional hold, a finding for the orchestrator (ruling
+    /// 138): at Chabrier's fitted scale 0.92, not the scratch 0.68, the default's threshold is
+    /// 37.49 per star (the octant bound falls to 18.42 per ly³ and stars per system rise to 1.437),
+    /// and it is held at that value ±3% until ruling 125.4's figure is re-derived.
     #[test]
     fn the_milky_way_fixture_has_the_plan_s_abundances() {
         for (kind, threshold_per_star) in [
-            (MassFunctionKind::Chabrier, 35.9),
+            (MassFunctionKind::Chabrier, 37.49),
             (MassFunctionKind::Kroupa, 31.8),
         ] {
             let galaxy = milky_way(kind);

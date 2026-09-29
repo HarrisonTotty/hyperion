@@ -28,8 +28,14 @@ import {
   universeTimeFromYears,
 } from "@hyperion/protocol";
 
-/** The layers from the lightest, as the census lists them. */
+/** The stellar layers from the lightest, as the census lists them. */
 export const LAYERS: ReadonlyArray<MassLayer> = ["a", "b", "c", "d", "e"];
+
+/** 13 Jupiter masses in M☉, by the nominal GM of Jupiter and the Sun: the brown dwarfs' lower edge. */
+const THIRTEEN_JUPITERS_MSUN = 13 * (1.266_865_3e17 / 1.327_124_4e20);
+
+/** A third of an Earth mass in M☉, the free-floating planets' lower edge. */
+const THIRD_EARTH_MSUN = (1 / 3) * (3.986_004e14 / 1.327_124_4e20);
 
 /**
  * Each layer's band of primary initial mass in M☉, from the brainstorm's "Sizing the layers".
@@ -44,6 +50,8 @@ const BANDS_MSUN: Readonly<Record<MassLayer, readonly [number, number]>> = {
   c: [0.75, 2.5],
   d: [2.5, 8],
   e: [8, 150],
+  brown_dwarf: [THIRTEEN_JUPITERS_MSUN, 0.08],
+  rogue_planet: [THIRD_EARTH_MSUN, THIRTEEN_JUPITERS_MSUN],
 };
 
 /** The universe the fixtures describe unless told otherwise. */
@@ -349,6 +357,19 @@ export function everyGalaxyParameter(
         aNumber("rotation.escape_speed", 550, "km_per_s", "derived"),
       ],
     },
+    {
+      key: "substellar",
+      parameters: [
+        aNumber("substellar.brown_dwarfs_per_system", 0.258, "none", "derived"),
+        aNumber("substellar.rogue_planets_per_system", 29.8, "none", "derived"),
+        aNumber("substellar.rogue_planet_cap_per_system", 50.9, "none", "derived"),
+        {
+          key: "substellar.rogue_planets_capped",
+          origin: "derived",
+          value: { type: "text", value: "no" },
+        },
+      ],
+    },
   ];
   return { kind: "galaxy_parameters", universe, seed, generator_version: 2, groups };
 }
@@ -413,20 +434,31 @@ export function aDensityMap({
  * the HR diagram are realistic: an M3 dwarf, a K5, the Sun, a B8 and a B0 (the mean dwarf sequence
  * of Pecaut and Mamajek, as the server classifies).
  */
-const DWARF_BRIEFS: Readonly<Record<MassLayer, StellarBriefDto>> = {
+const DWARF_BRIEFS: Readonly<Record<BriefLayer, StellarBriefDto>> = {
   a: { kind: "dwarf", class: "M3V", log_luminosity_lsun: -1.84, teff_k: 3_410, star_count: 1 },
   b: { kind: "dwarf", class: "K5V", log_luminosity_lsun: -0.84, teff_k: 4_440, star_count: 1 },
   c: { kind: "dwarf", class: "G2V", log_luminosity_lsun: 0, teff_k: 5_772, star_count: 1 },
   d: { kind: "dwarf", class: "B8V", log_luminosity_lsun: 2.2, teff_k: 12_300, star_count: 2 },
   e: { kind: "dwarf", class: "B0V", log_luminosity_lsun: 4.4, teff_k: 31_400, star_count: 2 },
+  // An old field brown dwarf of about 0.05 M☉: a T dwarf, as most are (plan 13, P13.T5.a).
+  brown_dwarf: {
+    kind: "substellar",
+    class: "T5",
+    log_luminosity_lsun: -5.2,
+    teff_k: 1_100,
+    star_count: 1,
+  },
 };
+
+/** The layers whose objects have a stellar brief: every one but the free-floating planets'. */
+export type BriefLayer = Exclude<MassLayer, "rogue_planet">;
 
 /**
  * The stellar brief of a primary of `kind`: a dwarf typical of the layer, or a representative
  * star of the kind asked for, with no luminosity or temperature for a black hole or no remnant.
  */
 export function aStellarBrief(
-  layer: MassLayer,
+  layer: BriefLayer,
   kind: StellarBriefDto["kind"] = "dwarf",
 ): StellarBriefDto {
   const dwarf = DWARF_BRIEFS[layer];
@@ -500,7 +532,7 @@ export function aSystemRecord({
   const [low, high] = BANDS_MSUN[layer];
   const record: SystemRecord = {
     id: u64ToHex(BigInt(index)),
-    designation: `H7K 4C0RFZ ${layer.toUpperCase()}-${index}`,
+    designation: `H7K 4C0RFZ ${LETTERS[layer]}-${index}`,
     position: galacticPositionFromLy(positionLy),
     layer,
     initial_mass_msun: initialMassMsun ?? (low + high) / 2,
@@ -508,9 +540,24 @@ export function aSystemRecord({
     population,
     velocity_km_s: [...velocityKmS],
   };
-  // A row without a brief leaves the key out, as the server writes it.
+  // A row without a brief leaves the key out, as the server writes it; a free-floating planet's
+  // never has one unless a test gives it.
+  if (layer === "rogue_planet") {
+    return stellar === undefined || stellar === null ? record : { ...record, stellar };
+  }
   return stellar === null ? record : { ...record, stellar: stellar ?? aStellarBrief(layer) };
 }
+
+/** Each layer's designation letter. */
+const LETTERS: Readonly<Record<MassLayer, string>> = {
+  a: "A",
+  b: "B",
+  c: "C",
+  d: "D",
+  e: "E",
+  brown_dwarf: "F",
+  rogue_planet: "G",
+};
 
 /** What {@link aCensus} builds. */
 export interface CensusSpec {
@@ -525,7 +572,10 @@ export interface CensusSpec {
   readonly limit?: number;
 }
 
-/** A consistent census of all five layers. */
+/**
+ * A consistent census of all five stellar layers, then the substellar layers a `minLayer` of
+ * `brown_dwarf` or `rogue_planet` asks for, in the server's order.
+ */
 export function aCensus({
   minLayer = "a",
   overLimit = [],
@@ -534,9 +584,17 @@ export function aCensus({
   limit = 4_000,
 }: CensusSpec = {}): Census {
   const minIndex = LAYERS.indexOf(minLayer);
-  const layers = LAYERS.map((layer, index): LayerCensus => {
+  const substellar: ReadonlyArray<MassLayer> =
+    minLayer === "rogue_planet"
+      ? ["brown_dwarf", "rogue_planet"]
+      : minLayer === "brown_dwarf"
+        ? ["brown_dwarf"]
+        : [];
+  const listed = [...LAYERS, ...substellar];
+  const layers = listed.map((layer): LayerCensus => {
+    const index = LAYERS.indexOf(layer);
     let status: LayerStatus = "included";
-    if (index < minIndex) {
+    if (index >= 0 && index < minIndex) {
       status = "below_mass_floor";
     } else if (overLimit.includes(layer)) {
       status = "over_limit";
@@ -555,7 +613,9 @@ export function aCensus({
       status,
     };
   });
-  const lightestIncluded = layers.find((layer) => layer.status === "included");
+  const lightestIncluded = layers
+    .filter((layer) => layer.status === "included")
+    .toSorted((a, b) => a.mass_min_msun - b.mass_min_msun)[0];
   return {
     limit,
     complete_above_msun: lightestIncluded === undefined ? null : lightestIncluded.mass_min_msun,

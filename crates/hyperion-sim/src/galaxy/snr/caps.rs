@@ -14,12 +14,13 @@
 //! below the floor, and a compressed phase only raises it), so over every gas state a site can
 //! have the window is largest at the floor. The field's and the Type Ia's suprema are therefore a
 //! scan over density at the floor, at the greatest energy and the least metallicity the window
-//! reads. A bubble's interior has a fixed temperature and a log-normal density, whose least value
-//! the normal sampler's cut-off at 8.57 standard deviations fixes.
+//! reads. A bubble's interior has a fixed temperature and a log-normal density truncated at two
+//! standard deviations (ruling 136.3), whose least value, 1.26 × 10⁻³ cm⁻³, gives the cap.
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::kinds::nursery::{
-    BUBBLE_INTERIOR_MEDIAN, BUBBLE_INTERIOR_SIGMA_DEX, BUBBLE_TEMPERATURE,
+    BUBBLE_INTERIOR_MEDIAN, BUBBLE_INTERIOR_SIGMA_DEX, BUBBLE_INTERIOR_TRUNCATION,
+    BUBBLE_TEMPERATURE,
 };
 use crate::galaxy::gas::params::GasParams;
 use crate::galaxy::snr::window::{
@@ -63,11 +64,6 @@ const SCAN_STEPS: u32 = 4_096;
 
 /// Golden-section steps that refine the scan's best point.
 const REFINE_STEPS: u32 = 80;
-
-/// The largest standard normal the generator's Box–Muller sampler can return, `√(106 ln 2)` =
-/// 8.5716 (`rng::sample::normal`), rounded up: the least bubble interior is its median ×
-/// `10^(−0.3 × 8.58)`.
-const NORMAL_SAMPLER_LIMIT: f64 = 8.58;
 
 /// The suprema of the shell window over one galaxy's gas, one per [`ShellEnvironment`].
 ///
@@ -225,9 +221,9 @@ fn floor_supremum(floor: KelvinPerCm3) -> Years {
 /// hot branch).
 fn bubble_supremum() -> Years {
     let least = BUBBLE_INTERIOR_MEDIAN.value()
-        * math::exp10(-BUBBLE_INTERIOR_SIGMA_DEX * NORMAL_SAMPLER_LIMIT);
+        * math::exp10(-BUBBLE_INTERIOR_SIGMA_DEX * BUBBLE_INTERIOR_TRUNCATION);
     let steps = 1_024_u32;
-    let span = 2.0 * BUBBLE_INTERIOR_SIGMA_DEX * NORMAL_SAMPLER_LIMIT;
+    let span = 2.0 * BUBBLE_INTERIOR_SIGMA_DEX * BUBBLE_INTERIOR_TRUNCATION;
     let longest = (0..=steps)
         .map(|k| {
             let n = least * math::exp10(span * f64::from(k) / f64::from(steps));
@@ -270,6 +266,10 @@ mod tests {
             caps.cap(ShellEnvironment::Field)
         );
         assert!(bubble < field, "{bubble}");
+        // Ruling 136.3: about 0.6 Myr, at the truncated interior's least density.
+        assert!((0.5e6..=0.65e6).contains(&bubble), "{bubble}");
+        // Ruling 136.1: 3.15–3.67 Myr over the floor's range.
+        assert!((3.15e6..=3.67e6).contains(&field), "{field}");
         // No density near the peak beats the cap.
         let floor = GasParams::milky_way_like().pressure_floor();
         for k in 0..=10_000 {
@@ -355,7 +355,7 @@ mod tests {
         let bubble = caps.cap(ShellEnvironment::Bubble).value();
         let mut bubble_longest = 0.0_f64;
         for _ in 0..1_000_000 {
-            let z = (lcg.next_f64() * 2.0 - 1.0) * NORMAL_SAMPLER_LIMIT;
+            let z = (lcg.next_f64() * 2.0 - 1.0) * BUBBLE_INTERIOR_TRUNCATION;
             let n = BUBBLE_INTERIOR_MEDIAN.value() * math::exp10(BUBBLE_INTERIOR_SIGMA_DEX * z);
             let site = SiteGas::hot_interior(HydrogenPerCm3::new(n), BUBBLE_TEMPERATURE).unwrap();
             let energy = ExplosionEnergy::from_uniform(lcg.next_f64());

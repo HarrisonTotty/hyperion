@@ -49,8 +49,10 @@ use std::fmt;
 
 use super::{CompactRemnant, Death, DeathKind, ProgenitorAtDeath, RemnantKind, Stripping};
 use crate::coords::UnitVector;
+use crate::galaxy::displaced::binarity;
 use crate::math;
 use crate::rng::{Mark, Threshold};
+use crate::stellar::Composition;
 use crate::stellar::draws::{REDRAW_TRIES, StandardNormal, StarDraws};
 use crate::tables::kick_rank;
 use crate::units::{KilometresPerSecond, MetresPerSecond, SolarMasses};
@@ -196,8 +198,11 @@ pub struct KickLawParams {
     /// The ordinary mode's truncation, km/s: 1,000, where Disberg and Mandel's (2025, eq. 5)
     /// fit is renormalised (ruling 96.2).
     pub max_speed_km_s: f64,
-    /// The provisional share of progenitors a companion strips (plan 06, design note 11): 0.25,
-    /// which plan 11 replaces.
+    /// The provisional share of progenitors a companion strips (plan 06, design note 11): 0.25.
+    /// Plan 11 replaced it in the generator (P11.T1.d): the law reads the mark against
+    /// [`binarity::stripped_share`](crate::galaxy::displaced::binarity::stripped_share) at the
+    /// progenitor, and only [`is_stripped`](Self::is_stripped) and the tests' quadratures read
+    /// this.
     pub stripped_share: f64,
 }
 
@@ -549,10 +554,12 @@ impl StandardKickLaw {
 }
 
 impl StandardKickLaw {
-    /// A single star's death with the provisional companion-stripped mark of plan 06's design note
-    /// 11 applied: a collapse (an iron core's, complete fallback's or electron capture's) whose
-    /// progenitor's `star.stripped` mark [`is_stripped`](KickLawParams::is_stripped) is
-    /// [`Stripping::Companion`]; every other death as it was.
+    /// A single star's death with the companion-stripped mark of plan 06's design note 11 applied:
+    /// a collapse (an iron core's, complete fallback's or electron capture's) of a star of initial
+    /// mass `m0` and composition `comp` whose `star.stripped` mark is set against plan 11's
+    /// stripped share at the star ([`binarity::is_stripped`], P11.T1.d) is
+    /// [`Stripping::Companion`]; every other death as it was. [`KickLawParams::stripped_share`] is
+    /// no longer read here: it stays for the tests' quadratures.
     ///
     /// Besides the kick, only the track reads the mark: a marked star's electron-capture window is
     /// the companion-stripped one, 1 M☉ wide, and its envelope is still a single star's, as design
@@ -560,7 +567,13 @@ impl StandardKickLaw {
     /// mark is drawn from, `m_cc(Z)` − 1 M☉ (ruling 45.2), since the widest electron-capture window
     /// begins there and iron cores at `m_cc`.
     #[must_use]
-    pub fn with_stripped_mark(&self, death: Death, draws: &StarDraws) -> Death {
+    pub fn with_stripped_mark(
+        &self,
+        death: Death,
+        draws: &StarDraws,
+        m0: SolarMasses,
+        comp: &Composition,
+    ) -> Death {
         let collapse = matches!(
             CollapseChannel::of(death.kind()),
             Some(
@@ -569,7 +582,7 @@ impl StandardKickLaw {
                     | CollapseChannel::CompleteFallback
             )
         );
-        if !collapse || !self.params.is_stripped(draws.stripped()) {
+        if !collapse || !binarity::is_stripped(draws.stripped(), m0, comp) {
             return death;
         }
         let p = death.progenitor();

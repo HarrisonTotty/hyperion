@@ -4,44 +4,53 @@
 //! system: a once-per-galaxy quadrature over the mass function, multiplicity, the age
 //! distribution, stellar lifetimes and remnant masses (brainstorm, "Galaxy parameters"). Lifetimes
 //! and remnant masses belong to the stellar stage (plan 06) and multiplicity to plan 11, so the
-//! quadrature reads them through [`StellarFates`], and the first milestone uses
-//! [`ProvisionalFates`] (plan 02, Design note 4). Replacing the fates changes the system count,
-//! which scales every density: it moves every star and bumps the generator version.
+//! quadrature reads them through [`StellarFates`]. The first milestone used [`ProvisionalFates`]
+//! (plan 02, Design note 4); the generator now reads [`fates_for`]: plan 06's lifetimes and
+//! remnants from its own tracks at each population's [`reference_fe_h`] (P06.T30) with plan 11's
+//! companions (P11.T1.d). Replacing the fates changes the system count, which scales every
+//! density: it moves every star and bumps the generator version.
 //!
 //! # Companions
 //!
 //! [`StellarFates::mean_companions`] counts the *stellar* companions of a primary, as the surveys
 //! behind Duchêne and Kraus's (2013) companion frequencies do: their M-dwarf figure counts few
-//! brown dwarfs (3 of 23 companions in the volume-limited sample). A companion's mass ratio is
-//! uniform between 0.1 and 1, and a companion below the hydrogen-burning limit is neither drawn
-//! nor counted, so its mass is uniform on `[max(0.1 m, 0.08 M☉), m]` for a primary of mass `m`.
-//! Each companion has the system's age and evolves like a primary of its own mass. This is the
-//! reading under which the model gives the brainstorm's figures for all stars below 0.5 M☉, 76.4%
-//! under Kroupa's function for primaries, 66.9% under Chabrier's system function as published and
-//! 70.9% under the default, Chabrier's with its branch above 1 M☉ scaled by 0.68, with 1.40–1.44
-//! stars per system. The other reading, a ratio uniform on 0.1–1 with the companions that fall
-//! below 0.08 M☉ dropped, gives 74.5% and 65% under the first two and 1.29 stars per system under
-//! Kroupa's, outside the brainstorm's figures and its 1.33–1.45.
+//! brown dwarfs (3 of 23 companions in the volume-limited sample), and
+//! [`StellarFates::companion_mass_ratio_cdf`] distributes their mass ratios; a companion below
+//! the hydrogen-burning limit is neither drawn nor counted. Each companion has the system's age
+//! and evolves like a primary of its own mass. Under the stand-in the ratio is uniform between 0.1
+//! and 1, so a companion's mass is uniform on `[max(0.1 m, 0.08 M☉), m]` for a primary of mass
+//! `m`. This is the reading under which the stand-in gives the brainstorm's figures for all stars
+//! below 0.5 M☉, 76.4% under Kroupa's function for primaries, 66.9% under Chabrier's system
+//! function as published and 70.9% under the default, Chabrier's with its branch above 1 M☉ scaled
+//! by 0.68, with 1.40–1.44 stars per system. The other reading, a ratio uniform on 0.1–1 with the
+//! companions that fall below 0.08 M☉ dropped, gives 74.5% and 65% under the first two and 1.29
+//! stars per system under Kroupa's, outside the brainstorm's figures and its 1.33–1.45.
 //!
 //! # Quadrature
 //!
-//! Every function here is the same nested quadrature in ln m over the stellar range: 16-point
+//! Every function here is the same quadrature in ln m over the stellar range: 16-point
 //! Gauss–Legendre panels no wider than [`MAX_PANEL_LN_MASS`] in ln m, with edges at every break
-//! of the mass function and the fates, at 0.8 M☉ where the companion range stops being cut by
-//! the hydrogen-burning limit, and at each mass whose lifetime equals an edge of the age
-//! distribution, so that no panel straddles a kink. For each primary node, the companions' mean
-//! is the integral over the companion range of the polynomials through the same nodes' values
-//! ([`Gl16Panel`]), so each node's quantity is evaluated once. The normalisation is the mass
-//! function's closed-form integral. The panel scheme is part of the generator version.
+//! of the mass function and the fates, at 0.8 M☉ where the stand-in's companion range stops being
+//! cut by the hydrogen-burning limit, and at each mass whose lifetime equals an edge of the age
+//! distribution, so that no panel straddles a kink. The companions' part is `∫ g dH` over
+//! [`CompanionMasses`], the companions per system below each mass (P11.T1.d): over each interval
+//! of its grid the mean of the quantity comes from its running integral through the primaries'
+//! nodes ([`Gl16Panel`]), so each node's quantity is evaluated once. The normalisation is the mass
+//! function's closed-form integral. The panel scheme and the grid are part of the generator
+//! version.
 
 use std::fmt;
+use std::sync::OnceLock;
 
+use super::Population;
 use super::ages::AgeDistribution;
 use super::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO, MassFunction};
-use super::quad::{Gl16Panel, bisect};
+use super::quad::{Gl16Panel, bisect, gl16};
 use crate::math;
-use crate::tables::gauss_legendre::GL16_WEIGHTS;
-use crate::units::{SolarMasses, Years};
+use crate::stellar::fates::TrackFates;
+use crate::stellar::multiplicity::MultiplicityFates;
+use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
+use crate::units::{Dex, SolarMasses, Years};
 
 /// The widest panel of the outer quadrature, in ln m.
 pub const MAX_PANEL_LN_MASS: f64 = 0.5;
@@ -72,7 +81,35 @@ pub trait StellarFates: fmt::Debug + Send + Sync {
     /// documentation for how a companion's mass is distributed).
     fn mean_companions(&self, m: f64) -> f64;
 
-    /// Masses, M☉, where any of the three functions has a kink or a jump, ascending, for the
+    /// The probability that a stellar companion of a primary of mass `m1` has a mass ratio of at
+    /// most `q` (P11.T1.d).
+    ///
+    /// By default the ratio is uniform on `[max(0.1, 0.08 M☉ ÷ m1), 1]`, plan 02's stand-in (see
+    /// the module documentation): a companion's mass uniform on `[max(0.1 m1, 0.08 M☉), m1]`.
+    /// Plan 11's [`MultiplicityFates`](crate::stellar::multiplicity::MultiplicityFates) gives the
+    /// distribution the hierarchy draw has. It is 0 below the lightest companion and 1 from q = 1.
+    fn companion_mass_ratio_cdf(&self, m1: f64, q: f64) -> f64 {
+        if q >= 1.0 {
+            return 1.0;
+        }
+        let lo = MIN_MASS_RATIO.max(MASS_LIMIT_LO / m1);
+        if lo >= 1.0 {
+            return 0.0;
+        }
+        ((q - lo) / (1.0 - lo)).clamp(0.0, 1.0)
+    }
+
+    /// [`companion_mass_ratio_cdf`](Self::companion_mass_ratio_cdf) at each of the ascending
+    /// ratios `qs`, into `out`, value for value: a table may sweep its columns once instead of
+    /// searching them for each ratio (the companions' integral asks for 241 ratios at each of
+    /// some 1,700 primaries).
+    fn companion_mass_ratio_cdfs(&self, m1: f64, qs: &[f64], out: &mut [f64]) {
+        for (value, &q) in out.iter_mut().zip(qs) {
+            *value = self.companion_mass_ratio_cdf(m1, q);
+        }
+    }
+
+    /// Masses, M☉, where any of the five functions has a kink or a jump, ascending, for the
     /// quadrature's panel edges. None by default.
     fn breaks(&self) -> &[f64] {
         &[]
@@ -214,7 +251,8 @@ impl StellarFates for ProvisionalFates {
     }
 }
 
-/// The range of a primary's companion masses, `[max(0.1 m, 0.08), m]`.
+/// The range of a primary's companion masses under the uniform stand-in, `[max(0.1 m, 0.08), m]`.
+#[cfg(test)]
 fn companion_range(m: f64) -> (f64, f64) {
     ((MIN_MASS_RATIO * m).max(MASS_LIMIT_LO), m)
 }
@@ -291,19 +329,195 @@ impl Running {
     }
 }
 
-/// The mean per system of a quantity `g` summed over a system's stars: for each primary, `g` of
-/// the primary plus the mean number of companions times the mean of `g` over the companion range,
-/// weighted by the mass function and divided by its integral.
+/// The intervals of [`CompanionMasses`]' grid, even in ln c over the stellar range: 240, a step of
+/// 0.031 in ln c.
+pub const COMPANION_MASS_INTERVALS: u32 = 240;
+
+/// The mass ratios at which a companion's distribution may kink: the stand-in's lower edge, 0.1,
+/// and plan 11's laws' breaks, 0.3 and the twins' 0.95.
+const COMPANION_RATIO_KINKS: [f64; 3] = [MIN_MASS_RATIO, 0.3, 0.95];
+
+/// The companions of a system by their initial mass: for companion masses `c` on an even grid in
+/// ln c over the stellar range, `H(c) = ∫ ξ(m₁) n(m₁) F(c ÷ m₁ | m₁) dm₁`, the number of stellar
+/// companions per unit of the mass function's integral whose initial mass is below `c`, with `ξ`
+/// the mass function, `n` [`StellarFates::mean_companions`] and `F`
+/// [`StellarFates::companion_mass_ratio_cdf`] (P11.T1.d).
 ///
-/// The quadrature is 16-point Gauss–Legendre in ln m on the panels of [`ln_mass_panels`], and `g`
-/// is evaluated once at each node. The companions' mean of `g` over `[lo, hi]` is
-/// `(G(hi) − G(lo)) ÷ (hi − lo)`, with `G` the running integral of the same values ([`Running`]),
-/// so the inner integrals cost no evaluation of `g`. (Taking each inner integral by a fresh
-/// 16-point rule, as a first version did, evaluated `g` 33 times per node and took 0.6 ms per
-/// population in a release build, most of a galaxy's parameters.)
+/// The quadratures of this module take a companion's part of a quantity `g` as `∫ g dH`, summed
+/// over the grid's intervals as the mean of `g` over each (from its running integral) times the
+/// companions in it. It depends on the mass function and the companions alone, never on an age,
+/// so one serves every population whose fates have the same companions (see
+/// [`fates_for`]). `F` is taken relative to its value at the lightest companion, 0.08 M☉ ÷ m₁, so
+/// that every primary has [`StellarFates::mean_companions`] companions in all.
+///
+/// Each `H(c)` is 16-point Gauss–Legendre in ln m₁ on the module's panels, each panel split where
+/// `c ÷ m₁` crosses 1 or one of the companion laws' breaks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompanionMasses {
+    /// ln c at each node of the grid.
+    ln_masses: Vec<f64>,
+    /// `H` at each node.
+    below: Vec<f64>,
+}
+
+impl CompanionMasses {
+    /// The companions of primaries drawn from `f` with the companions of `fates`.
+    #[must_use]
+    pub fn new(f: &(impl MassFunction + ?Sized), fates: &(impl StellarFates + ?Sized)) -> Self {
+        let edges = panel_edges(f.breaks().iter().chain(fates.breaks()));
+        let panels = ln_mass_panels(&edges);
+        let (ln_lo, ln_hi) = (math::ln(MASS_LIMIT_LO), math::ln(MASS_LIMIT_HI));
+        let steps = f64::from(COMPANION_MASS_INTERVALS);
+        let ln_masses: Vec<f64> = (0..=COMPANION_MASS_INTERVALS)
+            .map(|k| {
+                if k == COMPANION_MASS_INTERVALS {
+                    ln_hi
+                } else {
+                    ln_lo + (ln_hi - ln_lo) * f64::from(k) / steps
+                }
+            })
+            .collect();
+        let masses: Vec<f64> = ln_masses.iter().map(|&u| math::exp(u)).collect();
+        let n = masses.len();
+        // For each companion mass, the panels in which `c ÷ m₁` is 1 or a break of the laws:
+        // those are integrated afresh, split there, and the rest from their nodes.
+        let kinks = |ln_c: f64| {
+            let mut at = vec![ln_c];
+            at.extend(COMPANION_RATIO_KINKS.iter().map(|&q| ln_c - math::ln(q)));
+            at
+        };
+        let mut split = vec![false; panels.len() * n];
+        for (k, &ln_c) in ln_masses.iter().enumerate() {
+            for u in kinks(ln_c) {
+                for (p, &(lo, hi)) in panels.iter().enumerate() {
+                    if u > lo && u < hi {
+                        split[p * n + k] = true;
+                    }
+                }
+            }
+        }
+        let mut below = vec![0.0; n];
+        let (mut ratios, mut cdfs) = (vec![0.0; n], vec![0.0; n]);
+        for (p, &(lo, hi)) in panels.iter().enumerate() {
+            let half = 0.5 * (hi - lo);
+            let mid = lo + half;
+            for (&x, &weight) in GL16_NODES.iter().zip(&GL16_WEIGHTS) {
+                let m1 = math::exp(mid + half * x);
+                let w = weight * half * f.pdf(m1) * fates.mean_companions(m1) * m1;
+                // Companions of at least the primary's mass are all below them: only the lighter
+                // ones need the distribution.
+                let lighter = masses.partition_point(|&c| c < m1);
+                for (q, &c) in ratios.iter_mut().zip(&masses).take(lighter) {
+                    *q = c / m1;
+                }
+                fates.companion_mass_ratio_cdfs(m1, &ratios[..lighter], &mut cdfs[..lighter]);
+                let floor = companion_floor(fates, m1);
+                for k in 0..n {
+                    if !split[p * n + k] {
+                        let share = if k < lighter {
+                            share_from(ratios[k], cdfs[k], floor)
+                        } else {
+                            1.0
+                        };
+                        below[k] += w * share;
+                    }
+                }
+            }
+        }
+        let integrand = |u: f64, c: f64| {
+            let m1 = math::exp(u);
+            f.pdf(m1) * fates.mean_companions(m1) * companion_share_below(fates, m1, c) * m1
+        };
+        for (k, (&ln_c, &c)) in ln_masses.iter().zip(&masses).enumerate() {
+            let at = kinks(ln_c);
+            for (p, &(lo, hi)) in panels.iter().enumerate() {
+                if !split[p * n + k] {
+                    continue;
+                }
+                let mut cuts: Vec<f64> = at.iter().copied().filter(|&u| u > lo && u < hi).collect();
+                cuts.push(lo);
+                cuts.push(hi);
+                cuts.sort_by(f64::total_cmp);
+                for piece in cuts.windows(2) {
+                    below[k] += gl16(|u| integrand(u, c), piece[0], piece[1]);
+                }
+            }
+        }
+        Self { ln_masses, below }
+    }
+
+    /// `∫ g dH` for the `g` whose running integral is `running`.
+    #[must_use]
+    fn integral(&self, running: &Running) -> f64 {
+        let mut sum = 0.0;
+        let mut previous = (
+            self.ln_masses[0],
+            running.at(self.ln_masses[0]),
+            self.below[0],
+        );
+        for (&u, &h) in self.ln_masses.iter().zip(&self.below).skip(1) {
+            let g = running.at(u);
+            let (u0, g0, h0) = previous;
+            let width = math::exp(u) - math::exp(u0);
+            if width > 0.0 {
+                sum += (g - g0) / width * (h - h0);
+            }
+            previous = (u, g, h);
+        }
+        sum
+    }
+}
+
+/// The share of a primary of `m1`'s stellar companions whose mass is below `c`: its mass-ratio
+/// distribution at `c ÷ m1`, taken relative to its value at the lightest companion.
+#[must_use]
+fn companion_share_below(fates: &(impl StellarFates + ?Sized), m1: f64, c: f64) -> f64 {
+    let q = c / m1;
+    let cdf = if q >= 1.0 {
+        1.0
+    } else {
+        fates.companion_mass_ratio_cdf(m1, q)
+    };
+    share_from(q, cdf, companion_floor(fates, m1))
+}
+
+/// A primary of `m1`'s mass-ratio distribution at its lightest companion, 0.08 M☉ ÷ `m1`, or
+/// `None` for a primary no companion is lighter than.
+#[must_use]
+fn companion_floor(fates: &(impl StellarFates + ?Sized), m1: f64) -> Option<f64> {
+    let lowest = MASS_LIMIT_LO / m1;
+    (lowest < 1.0).then(|| fates.companion_mass_ratio_cdf(m1, lowest))
+}
+
+/// The share of companions below the mass ratio `q`, from the distribution `cdf` there and its
+/// value `floor` at the lightest companion ([`companion_floor`]).
+#[must_use]
+fn share_from(q: f64, cdf: f64, floor: Option<f64>) -> f64 {
+    if q >= 1.0 {
+        return 1.0;
+    }
+    let Some(floor) = floor else {
+        return 0.0;
+    };
+    let span = 1.0 - floor;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    ((cdf - floor) / span).clamp(0.0, 1.0)
+}
+
+/// The mean per system of a quantity `g` summed over a system's stars: for each primary, `g` of
+/// the primary, weighted by the mass function, plus `∫ g dH` over its companions
+/// ([`CompanionMasses`]), divided by the mass function's integral.
+///
+/// The primaries' quadrature is 16-point Gauss–Legendre in ln m on the panels of
+/// [`ln_mass_panels`], with `g` evaluated once at each node; the companions' mean of `g` over each
+/// interval of the companions' grid is `(G(b) − G(a)) ÷ (b − a)`, with `G` the running integral of
+/// the same values ([`Running`]), so the companions cost no evaluation of `g`.
 fn per_system_mean(
     mass_function: &(impl MassFunction + ?Sized),
     fates: &(impl StellarFates + ?Sized),
+    companions: &CompanionMasses,
     mut quantity: impl FnMut(f64) -> f64,
     extra_breaks: &[f64],
 ) -> f64 {
@@ -315,51 +529,37 @@ fn per_system_mean(
             .chain(extra_breaks),
     );
     let panels = ln_mass_panels(&edges);
-    // Each node's ln m, m and g, panel by panel; then the running integral from them.
-    let nodes: Vec<([f64; 16], [f64; 16], [f64; 16])> = panels
-        .iter()
-        .map(|&(lo, hi)| {
-            let ln_masses = Gl16Panel::nodes(lo, hi);
-            let masses = ln_masses.map(math::exp);
-            (ln_masses, masses, masses.map(&mut quantity))
-        })
-        .collect();
     let mut running = Running {
         starts: Vec::with_capacity(panels.len()),
         panels: Vec::with_capacity(panels.len()),
         sums: Vec::with_capacity(panels.len()),
     };
     let mut integral = 0.0;
-    for (&(lo, hi), (_, masses, own)) in panels.iter().zip(&nodes) {
+    let mut primaries = 0.0;
+    for &(lo, hi) in &panels {
+        let ln_masses = Gl16Panel::nodes(lo, hi);
+        let masses = ln_masses.map(math::exp);
+        let own = masses.map(&mut quantity);
         let mut integrand = [0.0; 16];
-        for ((value, &m), &g) in integrand.iter_mut().zip(masses).zip(own) {
+        let mut panel_sum = 0.0;
+        for (((value, &w), &m), &g) in integrand
+            .iter_mut()
+            .zip(&GL16_WEIGHTS)
+            .zip(&masses)
+            .zip(&own)
+        {
             *value = g * m;
+            panel_sum += w * mass_function.pdf(m) * g * m;
         }
+        primaries += panel_sum * 0.5 * (hi - lo);
         let panel = Gl16Panel::new(lo, hi, &integrand);
         running.starts.push(lo);
         running.sums.push(integral);
         integral += panel.integral();
         running.panels.push(panel);
     }
-    let ln_lowest = math::ln(MASS_LIMIT_LO);
-    let ln_ratio = math::ln(MIN_MASS_RATIO);
-    let mut sum = 0.0;
-    for (&(lo, hi), (ln_masses, masses, own)) in panels.iter().zip(&nodes) {
-        let mut panel_sum = 0.0;
-        for (((&w, &u), &m), &g) in GL16_WEIGHTS.iter().zip(ln_masses).zip(masses).zip(own) {
-            let (c_lo, c_hi) = companion_range(m);
-            let companions = if c_hi > c_lo {
-                // ln c_lo = max(ln m + ln 0.1, ln 0.08), as `companion_range` has it.
-                let u_lo = (u + ln_ratio).max(ln_lowest);
-                (running.at(u) - running.at(u_lo)) / (c_hi - c_lo)
-            } else {
-                g
-            };
-            panel_sum += w * mass_function.pdf(m) * (g + fates.mean_companions(m) * companions) * m;
-        }
-        sum += panel_sum * 0.5 * (hi - lo);
-    }
-    sum / mass_function.integral(MASS_LIMIT_LO, MASS_LIMIT_HI)
+    (primaries + companions.integral(&running))
+        / mass_function.integral(MASS_LIMIT_LO, MASS_LIMIT_HI)
 }
 
 /// The mean present-day mass of a system whose age distribution is `ages`: living stars at their
@@ -368,9 +568,7 @@ fn per_system_mean(
 /// For a star of mass m the expected present mass over the ages is `m F + m_rem (1 − F)`, with `F`
 /// the fraction of born systems younger than the star's lifetime ([`AgeDistribution::born_cdf`]);
 /// the unborn systems of a still-forming population are left out, since its density is
-/// normalised to its born systems. Under the default, Chabrier's system function with its
-/// provisional scale, a 10 Gyr declining history comes to 0.57–0.58 M☉ per system, inside the
-/// brainstorm's 0.55–0.59, and under Kroupa's function to about 0.5, its 0.48 ± 0.03.
+/// normalised to its born systems.
 ///
 /// # Panics
 ///
@@ -417,6 +615,23 @@ pub fn mean_present_mass_of_mixture(
     fates: &(impl StellarFates + ?Sized),
     parts: &[(f64, &AgeDistribution)],
 ) -> SolarMasses {
+    mean_present_mass_with(f, fates, &CompanionMasses::new(f, fates), parts)
+}
+
+/// [`mean_present_mass_of_mixture`] with the companions already integrated: `companions` must be
+/// [`CompanionMasses::new`] of `f` and fates whose companions are `fates`' (the population's
+/// fates of [`fates_for`] all have the same).
+///
+/// # Panics
+///
+/// If no system of the mixture is born, or if `parts` is empty.
+#[must_use]
+pub fn mean_present_mass_with(
+    f: &(impl MassFunction + ?Sized),
+    fates: &(impl StellarFates + ?Sized),
+    companions: &CompanionMasses,
+    parts: &[(f64, &AgeDistribution)],
+) -> SolarMasses {
     assert!(!parts.is_empty(), "a mixture of no age distributions");
     let unborn: Vec<f64> = parts.iter().map(|(_, a)| a.cdf(Years::ZERO)).collect();
     let born = parts
@@ -448,22 +663,32 @@ pub fn mean_present_mass_of_mixture(
         let remnant = fates.remnant_mass(m);
         remnant + (m - remnant) * alive_fraction(fates.lifetime(m))
     };
-    SolarMasses::new(per_system_mean(f, fates, present, &kinks))
+    SolarMasses::new(per_system_mean(f, fates, companions, present, &kinks))
 }
 
 /// The initial mass of the primary and its companions, per system: the mass formed per system,
 /// with nothing dead.
 ///
-/// It reads only the mass function and [`StellarFates::mean_companions`], never a lifetime, so it
-/// is one number per galaxy. Rates quoted per solar mass formed (plan 09's Type Ia delay times,
-/// plan 11's class shares) use it. It equals [`mean_present_mass`] for systems too young for any
-/// star to have died, and exceeds it otherwise.
+/// It reads only the mass function and the companions, never a lifetime, so it is one number per
+/// galaxy. Rates quoted per solar mass formed (plan 09's Type Ia delay times, plan 11's class
+/// shares) use it. It equals [`mean_present_mass`] for systems too young for any star to have
+/// died, and exceeds it otherwise.
 #[must_use]
 pub fn mean_formed_mass(
     f: &(impl MassFunction + ?Sized),
     fates: &(impl StellarFates + ?Sized),
 ) -> SolarMasses {
-    SolarMasses::new(per_system_mean(f, fates, |m| m, &[]))
+    mean_formed_mass_with(f, fates, &CompanionMasses::new(f, fates))
+}
+
+/// [`mean_formed_mass`] with the companions already integrated (see [`mean_present_mass_with`]).
+#[must_use]
+pub fn mean_formed_mass_with(
+    f: &(impl MassFunction + ?Sized),
+    fates: &(impl StellarFates + ?Sized),
+    companions: &CompanionMasses,
+) -> SolarMasses {
+    SolarMasses::new(per_system_mean(f, fates, companions, |m| m, &[]))
 }
 
 /// The mean number of stars per system: 1 plus the mean number of stellar companions.
@@ -472,7 +697,18 @@ pub fn mean_stars_per_system(
     f: &(impl MassFunction + ?Sized),
     fates: &(impl StellarFates + ?Sized),
 ) -> f64 {
-    per_system_mean(f, fates, |_| 1.0, &[])
+    mean_stars_per_system_with(f, fates, &CompanionMasses::new(f, fates))
+}
+
+/// [`mean_stars_per_system`] with the companions already integrated (see
+/// [`mean_present_mass_with`]).
+#[must_use]
+pub fn mean_stars_per_system_with(
+    f: &(impl MassFunction + ?Sized),
+    fates: &(impl StellarFates + ?Sized),
+    companions: &CompanionMasses,
+) -> f64 {
+    per_system_mean(f, fates, companions, |_| 1.0, &[])
 }
 
 /// The fraction of all stars, companions included, whose initial mass lies below `m` M☉.
@@ -482,22 +718,153 @@ pub fn mean_stars_per_system(
 /// (Kirkpatrick et al. 2024, ApJS 271, 55, Table 18: 69.2% of those of 0.08 M☉ or more). With the
 /// provisional companions, Kroupa's function for primaries gives 76.4% and fails; Chabrier's system
 /// function gives 66.9% as published and 70.9% with its branch above 1 M☉ scaled by 0.68, so the
-/// two bracket the census.
+/// two bracket the census. Under [`fates_for`]'s companions it equals plan 11's
+/// [`all_stars_fraction_below_as_drawn`](crate::stellar::multiplicity::all_stars_fraction_below_as_drawn)
+/// (P11.T1.d).
 #[must_use]
 pub fn stars_below(
     f: &(impl MassFunction + ?Sized),
     fates: &(impl StellarFates + ?Sized),
     m: f64,
 ) -> f64 {
-    // The primary's indicator jumps at `m`, and the share of the companion range below `m` has a
-    // kink where the range's lower end reaches `m`, at a primary of 10 m.
+    let companions = CompanionMasses::new(f, fates);
+    // The primary's indicator jumps at `m`.
     let below = per_system_mean(
         f,
         fates,
+        &companions,
         |x| if x < m { 1.0 } else { 0.0 },
-        &[m, m / MIN_MASS_RATIO],
+        &[m],
     );
-    below / mean_stars_per_system(f, fates)
+    below / mean_stars_per_system_with(f, fates, &companions)
+}
+
+/// The \[Fe/H\] at which a population's lifetimes and remnant masses are taken for its mean mass per
+/// system (plan 06, P06.T30.a): a constant of plan 02's metallicity field (P02.T7.e) for each
+/// population, read at no position and before the system count exists, so that nothing is
+/// circular.
+///
+/// The thin discs, young and old, are solar: their mean at the reference radius, where the
+/// gradient's term is zero. The thick disc takes its mean over its whole population, −0.5
+/// ([`THICK_DISC`](super::fields::metallicity::THICK_DISC), ruling 106.3); the bulge, the long bar
+/// and the nuclear disc their fixed means, 0.0, 0.0 and +0.1; the halo its dominant component's,
+/// the last major merger's −1.2 ([`HALO_REFERENCE_FE_H`]). Four metallicities in all.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::Population;
+/// use hyperion_sim::galaxy::fates::reference_fe_h;
+///
+/// assert!(reference_fe_h(Population::OldThinDisc).value().abs() < 1e-12);
+/// assert!(reference_fe_h(Population::Halo).value() < reference_fe_h(Population::ThickDisc).value());
+/// ```
+#[must_use]
+pub fn reference_fe_h(population: Population) -> Dex {
+    use super::fields::metallicity::{BULGE, LONG_BAR, NUCLEAR_DISC, THICK_DISC};
+    match population {
+        Population::YoungThinDisc | Population::OldThinDisc => Dex::new(0.0),
+        Population::ThickDisc => THICK_DISC.mean(),
+        Population::Bulge => BULGE.mean(),
+        Population::LongBar => LONG_BAR.mean(),
+        Population::NuclearDisc => NUCLEAR_DISC.mean(),
+        Population::Halo => HALO_REFERENCE_FE_H,
+    }
+}
+
+/// The halo's reference \[Fe/H\], −1.2: the mean of its dominant component, the last major merger
+/// (plan 02, P02.T7.e), which a test holds equal to the derived parameters'.
+pub const HALO_REFERENCE_FE_H: Dex = Dex::new(-1.2);
+
+/// The distinct reference metallicities of [`reference_fe_h`], in the order [`fates_for`] holds
+/// their fates.
+const REFERENCE_FE_H: [f64; 4] = [0.0, -0.5, 0.1, -1.2];
+
+/// The index in [`REFERENCE_FE_H`] of `population`'s reference metallicity.
+#[must_use]
+const fn reference_index(population: Population) -> usize {
+    match population {
+        Population::YoungThinDisc
+        | Population::OldThinDisc
+        | Population::Bulge
+        | Population::LongBar => 0,
+        Population::ThickDisc => 1,
+        Population::NuclearDisc => 2,
+        Population::Halo => 3,
+    }
+}
+
+/// The fates of the systems of `population` for the mean mass per system (plan 06, P06.T30; plan
+/// 11, P11.T1.d): plan 06's [`TrackFates`](crate::stellar::fates::TrackFates) at the population's
+/// [`reference_fe_h`], with plan 11's companions
+/// ([`MultiplicityFates`](crate::stellar::multiplicity::MultiplicityFates)).
+///
+/// The tables depend on the generator version alone, not on the seed or any parameter, so the
+/// four are built once, on first use, and shared by every galaxy (some tens of milliseconds of
+/// tracks where the fate table does not answer). Their companions are the same. A test holds each
+/// equal to a fresh build.
+#[must_use]
+pub fn fates_for(population: Population) -> &'static MultiplicityFates {
+    static FATES: OnceLock<[MultiplicityFates; 4]> = OnceLock::new();
+    let all = FATES.get_or_init(|| {
+        REFERENCE_FE_H.map(|fe_h| MultiplicityFates::new(TrackFates::at(Dex::new(fe_h))))
+    });
+    &all[reference_index(population)]
+}
+
+/// What a census counts of a system (P15.T4.b; ruling 138.4): the 20 pc census of Kirkpatrick et
+/// al. (2024) holds stars and white dwarfs, and no neutron star or black hole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Counted {
+    /// Every star of the system, companions included, with white dwarfs and no other remnant.
+    StarsAndWhiteDwarfs,
+    /// The primary alone, as a star or a white dwarf.
+    Primary,
+}
+
+/// `fates` as a census counts them ([`Counted`]): the same lifetimes, a remnant counted only if it
+/// is a white dwarf ([`TrackFates::white_dwarf_mass`]), and the companions, or none.
+#[derive(Debug, Clone, Copy)]
+pub struct CensusFates<'f> {
+    fates: &'f MultiplicityFates,
+    counted: Counted,
+}
+
+impl<'f> CensusFates<'f> {
+    /// `fates` as `counted`.
+    #[must_use]
+    pub const fn new(fates: &'f MultiplicityFates, counted: Counted) -> Self {
+        Self { fates, counted }
+    }
+}
+
+impl StellarFates for CensusFates<'_> {
+    fn lifetime(&self, m: f64) -> Years {
+        self.fates.lifetime(m)
+    }
+
+    fn remnant_mass(&self, m: f64) -> f64 {
+        self.fates.track().white_dwarf_mass(m)
+    }
+
+    fn mean_companions(&self, m: f64) -> f64 {
+        match self.counted {
+            Counted::StarsAndWhiteDwarfs => self.fates.mean_companions(m),
+            Counted::Primary => 0.0,
+        }
+    }
+
+    fn companion_mass_ratio_cdf(&self, m1: f64, q: f64) -> f64 {
+        self.fates.companion_mass_ratio_cdf(m1, q)
+    }
+
+    fn companion_mass_ratio_cdfs(&self, m1: f64, qs: &[f64], out: &mut [f64]) {
+        self.fates.companion_mass_ratio_cdfs(m1, qs, out);
+    }
+
+    fn breaks(&self) -> &[f64] {
+        self.fates.breaks()
+    }
 }
 
 #[cfg(test)]
@@ -511,6 +878,12 @@ mod tests {
     };
     use crate::galaxy::consts::YEARS_PER_GIGAYEAR;
     use crate::galaxy::imf::{Chabrier, Kroupa};
+
+    /// Plan 02's scratch scale, 0.68, which ruling 138 retired: the stand-in's own tests
+    /// (`ProvisionalFates`) keep the figures the brainstorm gives for it.
+    fn scratch() -> Chabrier {
+        Chabrier::new(0.68).unwrap()
+    }
 
     fn gyr(x: f64) -> Years {
         Years::new(x * YEARS_PER_GIGAYEAR)
@@ -550,7 +923,7 @@ mod tests {
     #[test]
     fn a_declining_history_matches_the_brainstorm() {
         for tau in [5.0, 7.0, 9.0] {
-            let default = present(&Chabrier::provisional(), &history(tau));
+            let default = present(&scratch(), &history(tau));
             assert!(
                 (0.55..=0.59).contains(&default),
                 "Chabrier, τ = {tau}: {default}"
@@ -568,7 +941,7 @@ mod tests {
     /// outright.
     #[test]
     fn old_populations_agree_within_three_per_cent() {
-        for f in [&Chabrier::provisional() as &dyn MassFunction, &Kroupa] {
+        for f in [&scratch() as &dyn MassFunction, &Kroupa] {
             old_populations_agree_under(f);
         }
     }
@@ -599,7 +972,7 @@ mod tests {
     /// disc of the same history, under either function.
     #[test]
     fn the_young_disc_is_heavier_by_a_third_or_more() {
-        for f in [&Chabrier::provisional() as &dyn MassFunction, &Kroupa] {
+        for f in [&scratch() as &dyn MassFunction, &Kroupa] {
             for tau in [5.0, 7.0, 9.0] {
                 let ratio = present(f, &young(tau)) / present(f, &old_thin(tau));
                 assert!((1.35..=1.45).contains(&ratio), "{f:?}, τ = {tau}: {ratio}");
@@ -609,7 +982,7 @@ mod tests {
 
     #[test]
     fn stars_per_system_lie_in_the_observed_range() {
-        for f in [&Kroupa as &dyn MassFunction, &Chabrier::provisional()] {
+        for f in [&Kroupa as &dyn MassFunction, &scratch()] {
             let stars = mean_stars_per_system(f, &ProvisionalFates);
             assert!((1.33..=1.45).contains(&stars), "{f:?}: {stars}");
         }
@@ -627,7 +1000,7 @@ mod tests {
         const CENSUS_ALL_STARS: f64 = 0.69;
         let printed = |share: f64, percent: f64| (100.0 * share - percent).abs() <= 0.05;
         let published = Chabrier::new(1.0).unwrap();
-        let scaled = Chabrier::provisional();
+        let scaled = scratch();
         let below = |f: &dyn MassFunction| stars_below(f, &ProvisionalFates, 0.5);
         let (low, high) = (below(&published), below(&scaled));
         assert!(
@@ -650,7 +1023,7 @@ mod tests {
     #[test]
     fn formed_mass_equals_present_mass_when_nothing_has_died() {
         let newborn = AgeDistribution::uniform(Years::ZERO, Years::new(1.0)).unwrap();
-        for f in [&Kroupa as &dyn MassFunction, &Chabrier::provisional()] {
+        for f in [&Kroupa as &dyn MassFunction, &scratch()] {
             let formed = mean_formed_mass(f, &ProvisionalFates).value();
             let present = present(f, &newborn);
             assert!(
@@ -662,7 +1035,7 @@ mod tests {
 
     #[test]
     fn formed_mass_exceeds_present_mass_for_every_population() {
-        for f in [&Chabrier::provisional() as &dyn MassFunction, &Kroupa] {
+        for f in [&scratch() as &dyn MassFunction, &Kroupa] {
             let formed = mean_formed_mass(f, &ProvisionalFates).value();
             let mut all = vec![("young", young(7.0)), ("old thin", old_thin(7.0))];
             all.extend(old_populations());
@@ -723,6 +1096,107 @@ mod tests {
         );
         let average = f64::midpoint(present(&Kroupa, &early), present(&Kroupa, &late));
         assert!(((both.value() - average) / average).abs() < 1e-6);
+    }
+
+    /// P06.T30.a: the reference metallicities are plan 02's constants, four in all, and each
+    /// population's fates are the table at its own.
+    #[test]
+    fn each_population_has_its_reference_metallicity() {
+        use crate::galaxy::POPULATIONS;
+        let expected = [0.0, 0.0, -0.5, 0.0, 0.0, 0.1, -1.2];
+        for (p, want) in POPULATIONS.iter().zip(expected) {
+            assert_same_bits(reference_fe_h(*p).value(), want);
+            assert_same_bits(fates_for(*p).track().fe_h().value(), want);
+        }
+        for p in POPULATIONS {
+            assert_same_bits(
+                REFERENCE_FE_H[reference_index(p)],
+                reference_fe_h(p).value(),
+            );
+        }
+        let mut distinct: Vec<f64> = POPULATIONS
+            .iter()
+            .map(|&p| reference_fe_h(p).value())
+            .collect();
+        distinct.sort_by(f64::total_cmp);
+        distinct.dedup();
+        assert_eq!(distinct.len(), REFERENCE_FE_H.len());
+        // Metal-poor stars live shorter lives at the same mass.
+        let (disc, halo) = (
+            fates_for(Population::OldThinDisc),
+            fates_for(Population::Halo),
+        );
+        assert!(halo.lifetime(1.0) < disc.lifetime(1.0));
+    }
+
+    /// P11.T1.d, edit 3: under the populations' fates, plan 02's all-stars share is plan 11's
+    /// quadrature of the drawn companions, to a few 10⁻⁴, below several masses and under both
+    /// mass functions; and every population's fates have the same companions, so that one
+    /// integral of them serves all.
+    #[test]
+    fn stars_below_agrees_with_plan_elevens_quadrature() {
+        use crate::galaxy::POPULATIONS;
+        use crate::stellar::multiplicity::{MultiplicityModel, all_stars_fraction_below_as_drawn};
+        let model = MultiplicityModel::default_v1();
+        let fates = fates_for(Population::OldThinDisc);
+        for f in [&scratch() as &dyn MassFunction, &Kroupa] {
+            for m in [0.2, 0.5, 1.0, 3.0, 20.0] {
+                let ours = stars_below(f, fates, m);
+                let theirs = all_stars_fraction_below_as_drawn(f, &model, SolarMasses::new(m));
+                println!("{f:?} below {m} M☉: {ours:.6} against {theirs:.6}");
+                assert!(
+                    (ours - theirs).abs() < 5e-4,
+                    "{f:?} at {m}: {ours} against {theirs}"
+                );
+            }
+        }
+        for p in POPULATIONS {
+            let other = fates_for(p);
+            for m in [0.1, 0.9, 2.0, 9.0, 60.0] {
+                assert_same_bits(other.mean_companions(m), fates.mean_companions(m));
+                for q in [0.05, 0.3, 0.97] {
+                    assert_same_bits(
+                        other.companion_mass_ratio_cdf(m, q),
+                        fates.companion_mass_ratio_cdf(m, q),
+                    );
+                }
+            }
+        }
+    }
+
+    /// The shared fates are pure functions of constants: each equals a fresh build at its
+    /// population's reference metallicity, and every population's companions integrate to the
+    /// same `CompanionMasses`, bit for bit, which `derive.rs` builds once for all seven.
+    #[test]
+    fn the_shared_fates_are_fresh_builds() {
+        use crate::galaxy::POPULATIONS;
+        let f = scratch();
+        let shared = CompanionMasses::new(&f, fates_for(Population::OldThinDisc));
+        for p in POPULATIONS {
+            let fresh = MultiplicityFates::new(TrackFates::at(reference_fe_h(p)));
+            assert_eq!(fates_for(p), &fresh, "{p:?}");
+            assert_eq!(CompanionMasses::new(&f, fates_for(p)), shared, "{p:?}");
+        }
+    }
+
+    /// The uniform stand-in's distribution is plan 02's companion range.
+    #[test]
+    fn the_default_mass_ratio_is_uniform_on_the_companion_range() {
+        let fates = ProvisionalFates;
+        for m in [0.08, 0.3, 0.8, 2.0, 50.0] {
+            let (lo, hi) = companion_range(m);
+            for c in [0.08, 0.1, f64::midpoint(lo, hi), m, 2.0 * m] {
+                let expected = if hi > lo {
+                    ((c - lo) / (hi - lo)).clamp(0.0, 1.0)
+                } else if c >= m {
+                    1.0
+                } else {
+                    0.0
+                };
+                let got = fates.companion_mass_ratio_cdf(m, c / m);
+                assert!((got - expected).abs() < 1e-12, "{m} M☉ at {c}: {got}");
+            }
+        }
     }
 
     /// The lifetime is Raiteri, Villata and Navarro's (1996) fit at Z = 0.02, computed here from

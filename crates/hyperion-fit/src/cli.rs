@@ -485,9 +485,12 @@ mod tests {
     fn a_fingerprint_is_printed_probe_by_probe() {
         let mut out = Vec::new();
         run(&parse(&["fingerprint", "chabrier"]).unwrap(), &mut out).unwrap();
-        assert_eq!(
-            String::from_utf8(out).unwrap(),
-            "chabrier: none (the task uses only `math`)\n"
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 4, "{text}");
+        assert!(
+            lines[0].starts_with("primary_shares(0.5)[A] = 0."),
+            "{text}"
         );
         let mut out = Vec::new();
         run(&parse(&["fingerprint", "mge"]).unwrap(), &mut out).unwrap();

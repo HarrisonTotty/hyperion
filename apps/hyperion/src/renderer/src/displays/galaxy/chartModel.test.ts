@@ -1,10 +1,16 @@
-import type { MassLayer, ObjectKindDto } from "@hyperion/protocol";
+import type { ObjectKindDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../spatial/frame";
 import { vec3 } from "../../spatial/vec3";
-import { aCensus, aStellarBrief, aSystemsInRange, LAYERS } from "../../test/galaxyFixtures";
+import {
+  aCensus,
+  aStellarBrief,
+  aSystemsInRange,
+  type BriefLayer,
+  LAYERS,
+} from "../../test/galaxyFixtures";
 import {
   censusHint,
   censusLine,
@@ -21,6 +27,7 @@ import {
   shownCountText,
   STAR_FILTERS,
   starFilterLabel,
+  SUBSTELLAR_FLOORS,
   toScene,
 } from "./chartModel";
 
@@ -175,11 +182,22 @@ describe("inRangeCount", () => {
 
 describe("censusLine", () => {
   it("names the mass a complete census is complete above", () => {
-    expect(censusLine({ kind: "complete", aboveMsun: 0.5 })).toEqual({
+    expect(censusLine({ kind: "complete", aboveMsun: 0.5, layer: "b" })).toEqual({
       kind: "complete",
       text: "COMPLETE ABOVE",
       aboveMsun: 0.5,
+      above: { value: "0.50", unit: "msun" },
     });
+  });
+
+  it("names a substellar floor in its own unit", () => {
+    const [rogue, brown] = SUBSTELLAR_FLOORS;
+    expect(
+      censusLine({ kind: "complete", aboveMsun: brown?.minMsun ?? 0, layer: "brown_dwarf" }),
+    ).toMatchObject({ above: { value: "0.012", unit: "msun" } });
+    expect(
+      censusLine({ kind: "complete", aboveMsun: rogue?.minMsun ?? 0, layer: "rogue_planet" }),
+    ).toMatchObject({ above: { value: "0.33", unit: "mearth" } });
   });
 
   it("says what to do when nothing fits", () => {
@@ -311,7 +329,7 @@ describe("queryRadiusForDriveRange", () => {
 /** A chart of one system per kind given, 1 ly apart along x, each in the layer given. */
 function chartOfKinds(
   kinds: ReadonlyArray<ObjectKindDto | null>,
-  layer: MassLayer = "c",
+  layer: BriefLayer = "c",
 ): ReturnType<typeof toChartResult> {
   return toChartResult(
     aSystemsInRange({
@@ -472,5 +490,86 @@ describe("shownCountText", () => {
 
   it("gives the total alone under ALL", () => {
     expect(shownCountText(1630, 1630, "all")).toBe("1630");
+  });
+});
+
+describe("the substellar layers (plan 13, P13.T8.c)", () => {
+  const substellar = (): ReturnType<typeof toChartResult> =>
+    toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 10,
+        minLayer: "rogue_planet",
+        systems: [
+          { relLy: [1, 0, 0], layer: "a" },
+          { relLy: [2, 0, 0], layer: "brown_dwarf" },
+          { relLy: [3, 0, 0], layer: "rogue_planet" },
+        ],
+      }),
+    );
+
+  it("draws a brown dwarf as a circle and a free-floating planet as an inverted triangle, both at layer A's size", () => {
+    const scene = toScene(substellar(), {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+    expect(scene.points.map((point) => [point.shape, point.sizeClass])).toEqual([
+      ["circle", 0],
+      ["circle", 0],
+      ["triangle-down", 0],
+    ]);
+  });
+
+  it("does not draw a free-floating planet not yet formed", () => {
+    const result = substellar();
+    const [star, brown, planet] = result.systems;
+    if (star === undefined || brown === undefined || planet === undefined) {
+      throw new Error("the fixture built three objects");
+    }
+    const unborn = { ...result, systems: [star, brown, { ...planet, ageMyr: -0.001 }] };
+    const scene = toScene(unborn, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+    expect(scene.points.map((point) => point.shape)).toEqual(["circle", "circle"]);
+  });
+
+  it("shows a brown dwarf under LIVING and a free-floating planet only under ALL", () => {
+    const [star, brown, planet] = substellar().systems;
+    expect([star, brown, planet].map((system) => system?.kind)).toEqual([
+      "stellar",
+      "brown_dwarf",
+      "rogue_planet",
+    ]);
+    for (const filter of STAR_FILTERS) {
+      expect(planet !== undefined && passesStarFilter(planet, filter)).toBe(filter === "all");
+      expect(brown !== undefined && passesStarFilter(brown, filter)).toBe(filter !== "remnants");
+    }
+  });
+
+  it("keeps the five stellar bands as the size scale whatever substellar lines the census has", () => {
+    const bands = layerBands(substellar().layers);
+    expect(bands?.map((band) => band.layer)).toEqual(LAYERS);
+    expect(chartDataFault(substellar())).toBeNull();
+  });
+
+  it("refuses a census listing the planets without the brown dwarfs, or a layer twice", () => {
+    const layers = aCensus({ minLayer: "rogue_planet" }).layers;
+    const noBrown = layers.filter((line) => line.layer !== "brown_dwarf");
+    const twice = [...layers, ...layers.filter((line) => line.layer === "rogue_planet")];
+    expect(layerBands(noBrown)).toBeNull();
+    expect(layerBands(twice)).toBeNull();
+  });
+
+  it("offers the two substellar floors lightest first at a third of an Earth mass and 13 Jupiter masses", () => {
+    expect(SUBSTELLAR_FLOORS.map((floor) => floor.layer)).toEqual(["rogue_planet", "brown_dwarf"]);
+    const [rogue, brown] = SUBSTELLAR_FLOORS;
+    // 1/3 M⊕ is 1.001E-6 M☉ and 13 M_Jup 0.01241 M☉.
+    expect(rogue?.minMsun).toBeCloseTo(1.001_2e-6, 9);
+    expect(brown?.minMsun).toBeCloseTo(0.012_41, 5);
   });
 });

@@ -123,8 +123,8 @@ describe("CensusReadout", () => {
 
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(5);
-    expect(rowText(rows, 0)).toEqual(["A", "0.08-0.5", "1.00E4", "0", "BELOW MIN MASS"]);
-    expect(rowText(rows, 2)).toEqual(["C", "0.75-2.5", "1.4", "1", "INCLUDED"]);
+    expect(rowText(rows, 0)).toEqual(["A", "0.08 – 0.5", "1.00E4", "0", "BELOW MIN MASS"]);
+    expect(rowText(rows, 2)).toEqual(["C", "0.75 – 2.5", "1.4", "1", "INCLUDED"]);
   });
 
   it("names a layer over the census limit in words", async () => {
@@ -135,7 +135,7 @@ describe("CensusReadout", () => {
 
     expect(rowText(within(screen.getByRole("table")).getAllByRole("row").slice(1), 0)).toEqual([
       "A",
-      "0.08-0.5",
+      "0.08 – 0.5",
       "1.00E4",
       "0",
       "OVER LIMIT",
@@ -150,7 +150,7 @@ describe("CensusReadout", () => {
 
     expect(rowText(within(screen.getByRole("table")).getAllByRole("row").slice(1), 4)).toEqual([
       "E",
-      "8-150",
+      "8 – 150",
       "1.00E4",
       "0",
       "OVER CELL BUDGET",
@@ -344,7 +344,7 @@ describe("CensusReadout", () => {
     // An included layer expects a little more than it returned; a dropped one 2.5 times the limit,
     // 10,000, which no longer fits a 9ch field and reads 1.00E4 above.
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
-    expect(rowText(rows, 2)).toEqual(["C", "0.75-2.5", "1.4", "1", "INCLUDED"]);
+    expect(rowText(rows, 2)).toEqual(["C", "0.75 – 2.5", "1.4", "1", "INCLUDED"]);
   });
 
   it("marks the answer stale once the link no longer backs it", () => {
@@ -359,5 +359,39 @@ describe("CensusReadout", () => {
 
     expect(screen.queryByText(/COMPLETE ABOVE/u)).not.toBeInTheDocument();
     expect(screen.queryByText("SYSTEMS")).not.toBeInTheDocument();
+  });
+});
+
+describe("CensusReadout's substellar layers (plan 13, P13.T8.c)", () => {
+  it("says the census is complete above 0.012 M☉ with the brown dwarfs", () => {
+    renderReadout(aChart({ minLayer: "brown_dwarf" }));
+
+    expect(summary()).toHaveTextContent("COMPLETE ABOVE 0.012");
+    expect(within(summary()).getByRole("img", { name: "solar masses" })).toBeInTheDocument();
+  });
+
+  it("says the census is complete above 0.33 M⊕ with the free-floating planets", () => {
+    renderReadout(aChart({ minLayer: "rogue_planet" }));
+
+    expect(summary()).toHaveTextContent("COMPLETE ABOVE 0.33");
+    expect(within(summary()).getByRole("img", { name: "Earth masses" })).toBeInTheDocument();
+  });
+
+  it("names the planets dropped over the limit, and the census stands at the brown dwarfs", async () => {
+    const user = userEvent.setup();
+    renderReadout(aChart({ minLayer: "rogue_planet", overLimit: ["rogue_planet"] }));
+
+    expect(summary()).toHaveTextContent("COMPLETE ABOVE 0.012");
+    await user.click(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    // Lightest first: G, the planets, in Earth masses, then F, the brown dwarfs, then A to E.
+    expect(rows).toHaveLength(7);
+    expect(rowText(rows, 0)).toEqual(["G", "0.33 – 4132 M", "1.00E4", "0", "OVER LIMIT"]);
+    expect(rowText(rows, 1)).toEqual(["F", "0.012 – 0.08", "0.4", "0", "INCLUDED"]);
+    expect(rowText(rows, 2)[0]).toBe("A");
+    const [planets] = rows;
+    expect(
+      planets && within(planets).getByRole("img", { name: "Earth masses" }),
+    ).toBeInTheDocument();
   });
 });

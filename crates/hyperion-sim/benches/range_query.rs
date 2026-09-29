@@ -88,7 +88,9 @@ use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord, generate_cell};
-use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, expected_counts, range_query};
+use hyperion_sim::galaxy::query::{
+    MassFloor, RangeQuery, SubstellarRequest, expected_counts, range_query,
+};
 use hyperion_sim::id::Layer;
 use hyperion_sim::units::LightYears;
 
@@ -138,7 +140,14 @@ fn expected(c: &mut Criterion) {
     for radius in [50.0, 5_000.0] {
         let radius = LightYears::new(radius);
         group.bench_function(format!("expected_counts ({} ly)", radius.value()), |b| {
-            b.iter(|| expected_counts(black_box(&galaxy), black_box(&sun), black_box(radius)));
+            b.iter(|| {
+                expected_counts(
+                    black_box(&galaxy),
+                    black_box(&sun),
+                    black_box(radius),
+                    SubstellarRequest::None,
+                )
+            });
         });
     }
     group.finish();

@@ -2,7 +2,7 @@ import type { ObjectKindDto } from "@hyperion/protocol";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { starSymbol } from "../../lib/galaxy/starSymbols";
+import { PLANET_SYMBOL, starSymbol } from "../../lib/galaxy/starSymbols";
 import { aCensus } from "../../test/galaxyFixtures";
 import { layerBands } from "./chartModel";
 import { SymbolLegend } from "./SymbolLegend";
@@ -44,12 +44,27 @@ describe("SymbolLegend", () => {
     expect(meaningOf("Diamond")).toBe("WHITE DWARF");
     expect(meaningOf("Triangle")).toBe("NEUTRON STAR");
     expect(meaningOf("Square")).toBe("BLACK HOLE");
+    // A free-floating planet's (plan 13, P13.T8.d).
+    expect(meaningOf("Inverted triangle")).toBe("PLANET");
+  });
+
+  it("starts the size scale from the brown dwarfs' floor when the query includes them", () => {
+    const bands = layerBands(aCensus({ minLayer: "brown_dwarf" }).layers);
+    const { rerender } = render(<SymbolLegend bands={bands} />);
+    expect(within(legend()).getByText(/INIT MASS/u).textContent).toBe("INIT MASS M 0.08150");
+
+    rerender(<SymbolLegend bands={bands} brownDwarfFloorMsun={13 / 1_047.57} />);
+    expect(within(legend()).getByText(/INIT MASS/u).textContent).toBe("INIT MASS M 0.012150");
   });
 
   it("names every shape a star is drawn with, and no other", () => {
     render(<SymbolLegend bands={null} />);
 
-    const drawn = new Set(EVERY_KIND.map(starSymbol).filter((shape) => shape !== null));
+    // The star shapes and the free-floating planet's.
+    const drawn = new Set([
+      ...EVERY_KIND.map(starSymbol).filter((shape) => shape !== null),
+      PLANET_SYMBOL,
+    ]);
     const named = within(legend())
       .getAllByRole("img")
       .map((symbol) => symbol.getAttribute("aria-label"));

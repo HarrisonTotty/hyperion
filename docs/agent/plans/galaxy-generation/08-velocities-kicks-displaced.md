@@ -1328,3 +1328,22 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   the black holes' first bin is 0.783. The provisional holds at 0.485 and 0.300 are removed: each
   test asserts its window. **P11.T1.d and T2.c draw a marked innermost orbit from the stripping
   band and an unmarked one from its complement** (ruling 123.5).
+- **The seam after P11.T1.d (round 9b, `fates`; version left at 14 for the batch of 15).**
+  `binarity::stripped_share` is now plan 11's quadrature of the companions the hierarchy draw
+  gives (`band_share_as_drawn`, ruling 81's direct construction from 3 M☉), read from the offline
+  `tables::stripping` inside 5.5–150 M☉ (`StrippingTable`; `exact_stripped_share` is the
+  quadrature itself), and `stripping_band` from the same table's radii (`StageRadii`). Plan 06's
+  mark reads it through `binarity::is_stripped`, and `StandardKickLaw::with_stripped_mark` takes
+  the progenitor's initial mass and composition. **Finding (with plan 11's):** the share is 0.455
+  over layer E and 0.433 over neutron-star progenitors, above ruling 123.3's windows; stripped ÷
+  interacting is 0.700. Downstream, the low-mode share `w` is 0.2675 (window 1/6–1/4) and the thin
+  disc's retained neutron stars 0.271 (window 1/6–1/4); both tests hold the measured values
+  provisionally until the finding is ruled on. The T8.b bins' targets follow `w` as ruling 120.2
+  says.
+- **Ruling 137, as applied (round 9b, `fates`; tests only).** The seam's share is per primary and
+  stands (0.433 over neutron-star progenitors, window 0.33–0.47; 0.455 over layer E, 0.35–0.52).
+  The windows on neutron stars are per primary-born neutron star while the class table holds no
+  companion's remnant: `w` and the thin disc's retained share assert 0.18–0.30 (measured 0.2675
+  and 0.271), the provisional holds removed. **The brainstorm's 1/6–1/4 is re-asserted on the
+  whole population once P11.T6/T11 count the companions' remnants.** T8.b's bins follow the
+  measured `w`, as ruling 120.2 says.

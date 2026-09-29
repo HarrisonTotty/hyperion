@@ -268,7 +268,7 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
             air.surface_pressure().map(Pascals::value),
             air.partial_pressures().of(Gas::CarbonDioxide).value(),
             air.partial_pressures().of(Gas::Nitrogen).value(),
-            body.irradiation_temperature().value(),
+            body.equilibrium_temperature().value(),
             air.exobase_temperature().value(),
         );
     }
@@ -347,7 +347,7 @@ fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
     let moon = found(&table, "Moon");
     assert_same_bits(
         moon.surface_temperature().value(),
-        moon.irradiation_temperature().value(),
+        moon.equilibrium_temperature().value(),
     );
 }
 
@@ -362,7 +362,7 @@ fn the_greenhouse_settles_on_its_fixed_point() {
             continue;
         }
         let t = air.surface_temperature();
-        let again = grey_surface_temperature(body.irradiation_temperature(), air.optical_depth());
+        let again = grey_surface_temperature(body.equilibrium_temperature(), air.optical_depth());
         assert!(
             ((again.value() - t.value()) / t.value()).abs() < 1e-9,
             "{name}: {t:?} against {again:?}"
@@ -523,10 +523,13 @@ fn a_young_crust_is_a_magma_ocean_and_a_giant_is_an_envelope() {
     assert_eq!(air.surface_pressure(), None);
     assert_same_bits(jupiter.albedo().value(), 0.34);
     // Jupiter's 110 K at its albedo, and its surface the temperature it radiates at.
-    assert!((jupiter.irradiation_temperature().value() - 110.0).abs() < 2.0);
+    assert!((jupiter.equilibrium_temperature().value() - 110.0).abs() < 2.0);
     assert_same_bits(
         air.surface_temperature().value(),
-        jupiter.equilibrium_temperature().value(),
+        jupiter
+            .effective_temperature()
+            .expect("a giant radiates its own")
+            .value(),
     );
 }
 

@@ -82,7 +82,9 @@
 //!
 //! - Deuterium burning, which holds objects above 13 Jupiter masses brighter for a few to a
 //!   hundred Myr (Burrows et al. 2001, §II): the fit is up to 0.6 dex faint there against ATMO
-//!   2020 (0.53 dex at 0.015 M☉ and 30 Myr, 0.58 at 0.013 M☉ and 0.1 Gyr). Plan 13 may add it (its P13.T5.a).
+//!   2020 (0.53 dex at 0.015 M☉ and 30 Myr, 0.58 at 0.013 M☉ and 0.1 Gyr). Plan 13's P13.T5.a
+//!   found no closed form for it in the source, which describes it in words and model curves, and
+//!   leaves it unmodelled.
 //! - The pre-main sequence above 0.1 M☉: until P06.T15.b gives the backbone a contraction phase,
 //!   the fit's contraction at 0.1 M☉ meets the backbone's zero-age main sequence only once it has
 //!   finished: 0.42 dex brighter at 0.1 Gyr (as BHAC15's 0.1 M☉ star is, 0.41 dex above the

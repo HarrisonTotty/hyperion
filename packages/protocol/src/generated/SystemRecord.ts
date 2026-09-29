@@ -6,7 +6,8 @@ import type { StellarBriefDto } from "./StellarBriefDto";
 import type { SystemIdHex } from "./SystemIdHex";
 
 /**
- * One star system found by a range query, as it is at the query's time.
+ * One system found by a range query, as it is at the query's time: a star system, or a
+ * free-floating brown dwarf or rogue planet, which `layer` tells apart (plan 13).
  */
 export type SystemRecord = { 
 /**
@@ -26,7 +27,7 @@ position: GalacticPosition,
  */
 layer: MassLayer, 
 /**
- * The initial mass of its primary star, in M☉.
+ * The initial mass of its primary star, or a free-floating object's mass, in M☉.
  */
 initial_mass_msun: number, 
 /**
@@ -48,6 +49,7 @@ velocity_km_s: [number, number, number],
  * What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
  *
  * Absent otherwise: the key is left out rather than written `null`, so that a row without a
- * brief is exactly plan 04's.
+ * brief is exactly plan 04's. A brown dwarf's brief is its own; a rogue planet has none, and
+ * its row never carries the key (plan 13, P13.T7).
  */
 stellar?: StellarBriefDto, };

@@ -352,7 +352,8 @@ impl Track {
     ///   (`HeliumStar::from_early_agb`).
     /// - A thermally pulsing AGB star and a helium giant leave the white dwarf of their core:
     ///   carbon–oxygen, or oxygen–neon from a core at the base of the AGB (or a helium star) of
-    ///   1.6 M☉ (HPT sections 6.1 and 6.2.1).
+    ///   1.6 M☉ (HPT sections 6.1 and 6.2.1). A helium giant's core at or above the Chandrasekhar
+    ///   mass is no white dwarf: it collapses at once ([`Remains::Collapse`], ruling 129.4c).
     /// - A main-sequence star, a helium main-sequence star and a remnant have no envelope to lose.
     #[must_use]
     pub(crate) fn remains_at(
@@ -441,15 +442,51 @@ impl Track {
                     last_luminosity: luminosity,
                 }
             }
+            // No white dwarf is born at or above the Chandrasekhar mass (ruling 129.4c): the bare
+            // core collapses at once, companion-stripped, on a helium-star track of its own
+            // entered where this one is, whose death and remnant are plan 06's.
+            Model::HeliumShellBurning { star, span } if mc >= CHANDRASEKHAR_MSUN => {
+                let entry = Entry::HeliumShellBurning {
+                    star: Box::new(star.clone()),
+                    clock0: span.at(coord),
+                    mass: mc,
+                };
+                self.collapse(entry, age, mc, draws, age_max)
+            }
             Model::HeliumShellBurning { star, .. } => Remains::WhiteDwarf {
                 phase: if star.mass() >= OXYGEN_NEON_MC_BAGB {
                     Phase::OxygenNeonWhiteDwarf
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 },
-                mass: SolarMasses::new(mc.min(CHANDRASEKHAR_MSUN)),
+                mass: SolarMasses::new(mc),
                 last_luminosity: luminosity,
             },
+        }
+    }
+
+    /// The bare core of `mc` M☉ that [`Track::remains_at`] leaves at `age` when it is no white
+    /// dwarf (ruling 129.4c): the helium-star track of `entry`, which dies at its start with plan
+    /// 06's remnant, and the core's state at `age`, its last living one.
+    #[must_use]
+    fn collapse(
+        &self,
+        entry: Entry,
+        age: f64,
+        mc: f64,
+        draws: &StarDraws,
+        age_max: Option<f64>,
+    ) -> Remains {
+        let track = Self::build_from_entry(
+            entry,
+            SolarMasses::new(mc),
+            &self.composition,
+            draws,
+            age_max,
+        );
+        Remains::Collapse {
+            track: Box::new(track),
+            core: self.structure_at(age, mc).state,
         }
     }
 
@@ -582,8 +619,15 @@ pub(crate) enum Remains {
     Nothing,
     /// A naked helium star, whose track starts at the stripping.
     HeliumStar(Box<Track>),
-    /// A white dwarf of `phase` and `mass`, from a star of `last_luminosity` then, which its
-    /// cooling law is matched to (`white_dwarf::cooling_origin`).
+    /// A bare carbon–oxygen core at or above the Chandrasekhar mass, which is no white dwarf
+    /// (ruling 129.4c): the core collapses now, companion-stripped, as Tauris, Langer and
+    /// Podsiadlowski's (2015) ultra-stripped supernova. `track` is its helium-star track from the
+    /// stripping, which dies at its start with plan 06's remnant; `core` is the core's state at
+    /// the stripping, its last living one.
+    Collapse { track: Box<Track>, core: StarState },
+    /// A white dwarf of `phase` and `mass` below the Chandrasekhar mass, from a star of
+    /// `last_luminosity` then, which its cooling law is matched to
+    /// (`white_dwarf::cooling_origin`).
     WhiteDwarf {
         phase: Phase,
         mass: SolarMasses,
@@ -1193,6 +1237,51 @@ mod tests {
                 assert!(tau > 0.0 && tau < 1.0, "{tau}");
             }
             other => panic!("expected a helium star, got {other:?}"),
+        }
+    }
+
+    /// Ruling 129.4c: a helium giant stripped with a carbon–oxygen core at or above the
+    /// Chandrasekhar mass leaves no white dwarf but a core that collapses at once, the
+    /// ultra-stripped supernova; one below it still leaves its white dwarf.
+    #[test]
+    fn a_stripped_helium_giant_above_the_chandrasekhar_mass_collapses() {
+        let draws = StarDraws::median();
+        for (m, collapses) in [(4.0, true), (6.0, true), (1.5, false)] {
+            let star = Track::helium_star_full(SolarMasses::new(m), &solar(), &draws);
+            let death = star.death().expect("a full track reaches its death").age();
+            // Late in the shell burning, where the heavy stars' cores are past M_Ch.
+            let age = 0.999 * death.value();
+            let state = star.state_at(Years::new(age));
+            assert!(
+                matches!(
+                    state.phase(),
+                    Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+                ),
+                "{m}: {state:?}"
+            );
+            let core = state.core_mass();
+            assert_eq!(
+                core.value() >= CHANDRASEKHAR_MSUN,
+                collapses,
+                "{m}: core {core:?}"
+            );
+            match star.remains_at(age, state.mass().value(), &draws, None) {
+                Remains::Collapse { track, core: bare } => {
+                    assert!(collapses, "{m}");
+                    let death = track.death().expect("the bare core's track ends");
+                    assert!(death.kind().is_sudden(), "{m}: {death:?}");
+                    assert!(death.age().value() <= 1e-6, "{m}: {death:?}");
+                    let remnant = track.remnant().expect("a collapse leaves a remnant");
+                    assert!(remnant.mass() <= core, "{m}: {remnant:?}");
+                    assert!(bare.phase().is_living(), "{m}: {bare:?}");
+                    assert!((bare.mass().value() - core.value()).abs() < 1e-9, "{m}");
+                }
+                Remains::WhiteDwarf { mass, .. } => {
+                    assert!(!collapses, "{m}: a white dwarf of {mass:?}");
+                    assert!(mass.value() < CHANDRASEKHAR_MSUN, "{m}: {mass:?}");
+                }
+                other => panic!("{m}: expected a collapse or a white dwarf, got {other:?}"),
+            }
         }
     }
 

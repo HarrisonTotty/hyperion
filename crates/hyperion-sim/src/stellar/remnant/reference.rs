@@ -205,8 +205,9 @@ impl ReferencePopulation {
     }
 
     /// The ordinary score of sample star `i`, or `None` unless it is a member: an iron core's
-    /// collapse to a neutron star. Its progenitor is single or wind-stripped, since the track
-    /// never strips by a companion and the stripped mark is not read here.
+    /// collapse to a neutron star. Its envelope is a single star's or wind-stripped: the track
+    /// reads the companion-stripped mark only for the width of its electron-capture window, against
+    /// plan 11's stripped share (P11.T1.d), and the score does not read it.
     #[must_use]
     pub fn score(&self, seed: Seed, i: u64) -> Option<f64> {
         let star = self.star(seed, i);
@@ -363,7 +364,8 @@ pub fn sampled_kick(law: &StandardKickLaw, seed: Seed, i: u64) -> SampledKick {
     let pop = ReferencePopulation::new(law.params().score_scatter);
     let star = pop.star(seed, i);
     let (death, remnant) = pop.fate(&star);
-    let death = law.with_stripped_mark(death, star.draws());
+    let death =
+        law.with_stripped_mark(death, star.draws(), star.initial_mass(), &pop.composition());
     let kick = law.natal_kick(&death, &remnant, star.draws());
     SampledKick {
         star,

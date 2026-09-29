@@ -34,8 +34,13 @@ pub struct BinaryParams {
     /// 0.001.
     pub nova_retention: f64,
     /// Whether accretion onto a white dwarf, neutron star or black hole is held to the Eddington
-    /// rate (BSE equations 67 and 68): off, BSE's table 3 default (its section 4.3.3 finds the
-    /// limit leaves too few persistent low-mass X-ray binaries).
+    /// rate (BSE equations 67 and 68, with X the accreted matter's hydrogen fraction): on, as
+    /// COMPAS has it for every degenerate accretor (Vigna-Gómez et al. 2018, section 2.2.5;
+    /// ruling 132.1), the rest leaving by isotropic re-emission. BSE's table 3 takes it off, since
+    /// its section 4.3.3 finds the limit leaves too few persistent low-mass X-ray binaries; that is
+    /// a count, and HYPERION's counts are observed (plan 11, design note 11). Tauris, Langer and
+    /// Podsiadlowski (2015, section 5) find a Case BB neutron star "typically accretes ∼ 10⁻³ M⊙"
+    /// under it, where without it the star grows into a black hole.
     pub eddington_limit: bool,
     /// Whether tides act (BSE section 2.3): on.
     pub tides: bool,
@@ -60,7 +65,7 @@ impl BinaryParams {
         bondi_hoyle: 1.5,
         max_wind_accretion: 0.8,
         nova_retention: 0.001,
-        eddington_limit: false,
+        eddington_limit: true,
         tides: true,
         gravitational_radiation: true,
         magnetic_braking: true,

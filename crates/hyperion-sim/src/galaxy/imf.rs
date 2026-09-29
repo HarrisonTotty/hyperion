@@ -561,10 +561,12 @@ impl Error for BuildChabrierError {}
 /// makes systems too heavy, 0.66 M☉ each at the Sun against the census's 0.55–0.59, and puts 67%
 /// of all stars below 0.5 M☉. So its branch above 1 M☉ is multiplied by
 /// [`high_mass_scale`](Self::high_mass_scale), a constant fitted offline together with the binary
-/// stage's companions (plan 15). Until that fit lands the scale is the provisional
-/// [`PROVISIONAL_HIGH_MASS_SCALE`](Self::PROVISIONAL_HIGH_MASS_SCALE), 0.68 (plan 02, Design note
-/// 5), which gives 71% of all stars below 0.5 M☉: the two bracket the census. A scale of 1 is
-/// Chabrier's function as published.
+/// stage's companions (plan 15). The scale is P15.T4.b's fit,
+/// [`PROVISIONAL_HIGH_MASS_SCALE`](Self::PROVISIONAL_HIGH_MASS_SCALE), 0.920: the maximum-likelihood
+/// scale of the 20 pc census's primaries over 0.08–8 M☉ (ruling 138), which retired plan 02's
+/// scratch 0.68 (Design note 5); at it 69.8% of all stars in systems with a primary below 8 M☉ lie
+/// below 0.5 M☉ (`tables::chabrier`'s acceptance line has the checks). A scale of 1 is Chabrier's
+/// function as published.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Chabrier {
     high_mass_scale: f64,
@@ -584,9 +586,10 @@ impl Chabrier {
     /// The power law's exponent per unit mass above [`BREAK`](Self::BREAK).
     pub const HIGH_EXPONENT: f64 = 2.3;
 
-    /// The provisional scale of the branch above 1 M☉, 0.68, until plan 15's P15.T4.b fits it:
-    /// [`tables::chabrier::HIGH_MASS_BRANCH_SCALE`](crate::tables::chabrier::HIGH_MASS_BRANCH_SCALE),
-    /// where P15.T4.a moved it unchanged.
+    /// The scale of the branch above 1 M☉: plan 15's P15.T4.b fit to the 20 pc census's primaries
+    /// (ruling 138), [`tables::chabrier::HIGH_MASS_BRANCH_SCALE`](crate::tables::chabrier::HIGH_MASS_BRANCH_SCALE).
+    /// The name is P15.T4.a's, from when it held plan 02's scratch 0.68, which ruling 138 retired;
+    /// plans 02 and 11 name it.
     pub const PROVISIONAL_HIGH_MASS_SCALE: f64 = crate::tables::chabrier::HIGH_MASS_BRANCH_SCALE;
 
     /// Chabrier's function with its branch above 1 M☉ multiplied by `high_mass_scale`.
@@ -602,7 +605,8 @@ impl Chabrier {
         }
     }
 
-    /// Chabrier's function with the provisional high-mass scale, 0.68.
+    /// Chabrier's function with the fitted high-mass scale
+    /// ([`PROVISIONAL_HIGH_MASS_SCALE`](Self::PROVISIONAL_HIGH_MASS_SCALE)): the default.
     #[must_use]
     pub fn provisional() -> Self {
         Self::with_scale(Self::PROVISIONAL_HIGH_MASS_SCALE)
@@ -766,6 +770,73 @@ impl BandShares {
     }
 }
 
+/// A mass function with its primaries cut above `top` M☉: `f`'s density up to `top` and none above
+/// (P15.T4.b; ruling 138.4). The 20 pc census holds no neutron-star or black-hole system, so its
+/// figures are compared with the model's systems whose primary lies below 8 M☉.
+///
+/// Its stellar range stays 0.08–150 M☉, so quadratures over it read zero above `top`, which is a
+/// break. The substellar branch is `f`'s.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::imf::{Chabrier, MassFunction, Truncated};
+///
+/// let f = Chabrier::default();
+/// let below = Truncated::new(&f, 8.0);
+/// assert_eq!(below.pdf(20.0), 0.0);
+/// assert!((below.integral(0.08, 150.0) - f.integral(0.08, 8.0)).abs() < 1e-15);
+/// ```
+#[derive(Debug, Clone)]
+pub struct Truncated<'f> {
+    f: &'f dyn MassFunction,
+    top: f64,
+    breaks: Vec<f64>,
+}
+
+impl<'f> Truncated<'f> {
+    /// `f` with no primary above `top` M☉.
+    #[must_use]
+    pub fn new(f: &'f dyn MassFunction, top: f64) -> Self {
+        let mut breaks: Vec<f64> = f.breaks().iter().copied().filter(|&m| m < top).collect();
+        if top > MASS_LIMIT_LO && top < MASS_LIMIT_HI {
+            breaks.push(top);
+        }
+        Self { f, top, breaks }
+    }
+}
+
+impl MassFunction for Truncated<'_> {
+    fn pdf(&self, m: f64) -> f64 {
+        if m > self.top { 0.0 } else { self.f.pdf(m) }
+    }
+
+    fn integral(&self, lo: f64, hi: f64) -> f64 {
+        let hi = hi.min(self.top);
+        if hi <= lo {
+            0.0
+        } else {
+            self.f.integral(lo, hi)
+        }
+    }
+
+    fn quantile_in(&self, lo: f64, hi: f64, u: f64) -> f64 {
+        self.f.quantile_in(lo, hi.min(self.top), u)
+    }
+
+    fn breaks(&self) -> &[f64] {
+        &self.breaks
+    }
+
+    fn substellar_integral(&self, lo: f64, hi: f64) -> f64 {
+        self.f.substellar_integral(lo, hi)
+    }
+
+    fn substellar_quantile_in(&self, lo: f64, hi: f64, u: f64) -> f64 {
+        self.f.substellar_quantile_in(lo, hi, u)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
@@ -779,7 +850,7 @@ mod tests {
         [
             ("kroupa", Box::new(Kroupa)),
             ("chabrier", Box::new(Chabrier::new(1.0).unwrap())),
-            ("chabrier 0.68", Box::new(Chabrier::provisional())),
+            ("chabrier 0.68", Box::new(Chabrier::new(0.68).unwrap())),
         ]
     }
 
@@ -815,8 +886,12 @@ mod tests {
         ] {
             assert_rounds_to("chabrier", 100.0 * chabrier.share(band), printed, decimals);
         }
-        // The default: Chabrier's with its branch above 1 M☉ scaled by the provisional 0.68.
-        let default = BandShares::of(MassFunctionKind::default().to_mass_function().as_ref());
+        // The brainstorm's scaled row: Chabrier's with its branch above 1 M☉ scaled by plan 02's
+        // scratch 0.68, which ruling 138 retired; the row awaits the owner's edit to the fitted
+        // default's figures, printed here.
+        let fitted = BandShares::of(MassFunctionKind::default().to_mass_function().as_ref());
+        println!("the fitted default's shares: {:?}", fitted.as_array());
+        let default = BandShares::of(&Chabrier::new(0.68).unwrap());
         for (band, printed, decimals) in [
             (MassBand::A, 70.0, 0),
             (MassBand::B, 12.0, 0),
@@ -867,7 +942,8 @@ mod tests {
                 decimals,
             );
         }
-        let default = BandShares::of(&Chabrier::provisional());
+        // The brainstorm's scaled row, at plan 02's scratch 0.68 (see the table's test above).
+        let default = BandShares::of(&Chabrier::new(0.68).unwrap());
         for (band, printed, decimals) in [
             (MassBand::A, 1.1, 1),
             (MassBand::B, 1.5, 1),
@@ -907,7 +983,8 @@ mod tests {
         assert!((0.086 * at_break_per_log / 4.43e-2 - 1.0).abs() < 3e-3);
         assert!(relative_jump(&unscaled, Chabrier::BREAK).abs() < 1e-12);
         let scaled = Chabrier::provisional();
-        assert!((relative_jump(&scaled, Chabrier::BREAK) - (0.68 - 1.0)).abs() < 1e-12);
+        let step = Chabrier::PROVISIONAL_HIGH_MASS_SCALE - 1.0;
+        assert!((relative_jump(&scaled, Chabrier::BREAK) - step).abs() < 1e-12);
         assert_same_bits(Kroupa.pdf(0.079), 0.0);
         assert_same_bits(Kroupa.pdf(150.1), 0.0);
         assert!(Kroupa.pdf(150.0) > 0.0);
@@ -1040,7 +1117,10 @@ mod tests {
                 Err(BuildChabrierError::ScaleNotPositive)
             );
         }
-        assert_same_bits(Chabrier::default().high_mass_scale(), 0.68);
+        assert_same_bits(
+            Chabrier::default().high_mass_scale(),
+            crate::tables::chabrier::HIGH_MASS_BRANCH_SCALE,
+        );
     }
 
     #[test]

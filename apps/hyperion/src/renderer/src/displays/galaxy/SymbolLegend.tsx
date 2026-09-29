@@ -1,3 +1,4 @@
+import { formatSubstellarMass } from "../../lib/format";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { RINGED_CIRCLE_MIN_SIZE_CLASS } from "../../lib/galaxy/starSymbols";
 import { LegendReticle } from "../../spatial/LegendReticle";
@@ -9,6 +10,11 @@ import { StarShapeLegend } from "./StarShapeLegend";
 interface SymbolLegendProps {
   /** The mass bands of the last census; `null` before the first answer. */
   readonly bands: ReadonlyArray<LayerBand> | null;
+  /**
+   * The lower edge of the brown dwarfs' band in M☉ when the last query included them, whose
+   * objects take the smallest size; `null` when it did not. None when absent.
+   */
+  readonly brownDwarfFloorMsun?: number | null;
 }
 
 /**
@@ -27,9 +33,14 @@ interface SymbolLegendProps {
  * answer the legend shows only what shape, fill and colour mean. The five shapes are the star
  * symbol set (plan 06, design note 17), each named for assistive technology; a ringed circle is
  * never drawn smaller than the band of size class 2 (ruling 35.4), which the legend says, so that a
- * light giant's size is not read as its mass.
+ * light giant's size is not read as its mass. The inverted triangle is a free-floating planet, and
+ * the circle's kinds include the brown dwarf (plan 13, P13.T8.d); both are drawn at the lightest
+ * band's size, since no size class below layer A is drawn (design note 15). So when the query
+ * includes the brown dwarfs the size scale starts from their floor, `INIT MASS M☉ 0.012`, and the
+ * smallest circle no longer claims 0.08 M☉ (the orchestrator's ruling 134.7); a planet's size is
+ * the guide's to explain, and the size row, drawn in circles, claims nothing of triangles.
  */
-export function SymbolLegend({ bands }: SymbolLegendProps) {
+export function SymbolLegend({ bands, brownDwarfFloorMsun = null }: SymbolLegendProps) {
   const lightest = bands?.[0];
   const heaviest = bands?.at(-1);
   const floorBand = bands?.find((band) => band.index === RINGED_CIRCLE_MIN_SIZE_CLASS);
@@ -39,10 +50,13 @@ export function SymbolLegend({ bands }: SymbolLegendProps) {
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
     <div className="symbol-legend" role="group" aria-label="Chart legend">
       <p className="symbol-legend__item">SYMBOLS NOT TO SCALE</p>
-      <StarShapeLegend compactRemnants />
+      <StarShapeLegend compactRemnants planets />
       {lightest === undefined || heaviest === undefined ? null : (
         <p className="symbol-legend__item">
-          INIT MASS <SolarMassUnit /> {formatBandMsun(lightest.minMsun)}
+          INIT MASS <SolarMassUnit />{" "}
+          {brownDwarfFloorMsun === null
+            ? formatBandMsun(lightest.minMsun)
+            : formatSubstellarMass(brownDwarfFloorMsun, "brown_dwarf").value}
           {bands?.map((band) => (
             <LegendSymbol
               key={band.layer}

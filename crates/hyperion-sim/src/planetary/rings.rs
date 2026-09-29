@@ -7,10 +7,11 @@
 //!   a tenuous sheet of silicate dust, of normal optical depth under 10⁻³, as every giant of the
 //!   Solar System has ([`DUSTY_OPTICAL_DEPTH`]).
 //! - **A massive ring**, with probability [`MASSIVE_ICY_RING_PROBABILITY`] (0.15) on a giant whose
-//!   cloud tops are colder than [`ICY_RING_TEMPERATURE`] (170 K), of porous water ice, and with
-//!   probability [`MASSIVE_ROCKY_RING_PROBABILITY`] (0.03) on a hotter one, of rock. Both
+//!   ring particles are colder than [`ICY_RING_TEMPERATURE`] (115 K), of porous water ice, and
+//!   with probability [`MASSIVE_ROCKY_RING_PROBABILITY`] (0.03) on a hotter one, of rock. Both
 //!   probabilities are parameters of the generator version, because ring lifetimes are disputed
-//!   ([`params`](crate::planetary::params)).
+//!   ([`params`](crate::planetary::params)). A particle's temperature is its own, in its host's
+//!   light and its planet's glow ([`RingParent::particle_temperature`], ruling 112.7).
 //!
 //! A massive ring runs from [`RING_INNER_EDGE_RADII`] (1.1) planetary radii to a drawn fraction,
 //! 0.6–1.0 ([`RING_OUTER_EDGE_ROCHE_FRACTION`]), of the planet's fluid Roche limit for its
@@ -69,18 +70,36 @@ use crate::planetary::index::{BodyIndex, BodySub};
 use crate::planetary::params::{MASSIVE_ICY_RING_PROBABILITY, MASSIVE_ROCKY_RING_PROBABILITY};
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::UnitUniform;
-use crate::units::{Kelvin, Kilograms, KilogramsPerCubicMetre, Metres};
+use crate::units::consts::STEFAN_BOLTZMANN;
+use crate::units::{
+    EarthFluxes, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, WattsPerSquareMetre,
+};
 
 /// Words of the [`tags::RING_SYSTEM`] stream that a planet reads or reserves: words 0–4 its
 /// draws, 5–7 reserved.
 pub const RING_WORDS: u64 = 8;
 
-/// The cloud-top temperature below which a giant's massive ring is of ice: 170 K (P14.T20).
+/// The ring particle's temperature below which a giant's massive ring is of ice: 115 K (ruling
+/// 112.7, the adviser's proposal, in place of plan 14's 170 K at the cloud tops).
 ///
-/// Plan 14's figure, the temperature at which water ice condenses from a protoplanetary disc's
-/// gas (the snow line's; Hayashi 1981, and the circumplanetary ice line that P14.T17.b uses). A
-/// giant colder than this keeps an icy ring against sublimation; a hotter one can hold only rock.
-pub const ICY_RING_TEMPERATURE: Kelvin = Kelvin::new(170.0);
+/// It is where a massive ring's ice lasts about as long as a system (ruling 133.6). An optically
+/// thick ring's particles are "coupled to each other by frequent collisions" (Schlichting and
+/// Chang 2011, arXiv:1104.3863, §2), so what sets its life is its surface density, not one
+/// grain's: Σ ≈ 400 g cm⁻² (Robbins et al. 2010, as they cite it) sublimating freely from both
+/// faces by the Hertz–Knudsen rate lasts about 1.3 × 10⁹ years at 115 K and 5.3 × 10⁹ at 112 K,
+/// and recondensation, since a molecule leaves at about 370 m/s and stays in orbit, lengthens
+/// that. A lone 1 m grain lasts about 6 × 10⁸ years at 115 K, 30 years at 170 K
+/// (`research/r-pfix14/NOTES.md`, §6; the vapour pressure from memory, checked through the triple
+/// point, 611.657 Pa). Age moves the cutoff about 5 K a decade (115.6 K for a 1 Gyr ring, 110.7 K
+/// for 10 Gyr), inside that uncertainty, so it is fixed, with no age or size term. Particles
+/// inside the ice line are rock (Schlichting and Chang 2011), which a hotter giant's massive ring
+/// is.
+pub const ICY_RING_TEMPERATURE: Kelvin = Kelvin::new(115.0);
+
+/// Where a ring particle's temperature is taken, in its planet's radii: 1.5, a massive ring's
+/// middle (Saturn's B ring spans 1.53–1.95 Saturn radii), where the planet's dilution factor W is
+/// 0.127 (ruling 112.7's 0.13).
+pub const RING_TEMPERATURE_RADII: f64 = 1.5;
 
 /// A ring's inner edge, in its planet's radii: 1.1 (P14.T20).
 ///
@@ -185,38 +204,40 @@ pub enum RingKind {
     Massive,
 }
 
-/// A giant as its rings read it (P14.T20): its index, class, mass, radius and cloud-top
-/// temperature, all plain values.
+/// A giant as its rings read it (P14.T20): its index, class, mass, radius, effective temperature
+/// and the flux of its hosts' light, all plain values.
 ///
-/// P14.T22.a builds it from the planet's derivation (P14.T16.a's `DerivedBody`: its class,
-/// radius and equilibrium temperature with internal heat, which stands for the temperature at its
-/// cloud tops).
+/// P14.T22.a builds it from the planet's derivation (P14.T16.a's `DerivedBody`: its class, radius,
+/// effective temperature with internal heat, and flux).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RingParent {
     index: BodyIndex,
     class: PlanetClass,
     mass: Kilograms,
     radius: Metres,
-    cloud_top_temperature: Kelvin,
+    effective_temperature: Kelvin,
+    flux: EarthFluxes,
 }
 
 impl RingParent {
     /// The planet at `index` (a planet's sub-index 0, or a free-floating object's `0x0000`) of
-    /// class `class`, mass `mass`, radius `radius` and cloud-top temperature
-    /// `cloud_top_temperature`.
+    /// class `class`, mass `mass`, radius `radius` and effective temperature
+    /// `effective_temperature`, in its hosts' light of flux `flux` (none for a free-floating
+    /// object).
     ///
     /// # Errors
     ///
     /// - [`BuildRingParentError::NotAPlanet`] for an index that is not a planet's own
     ///   ([`BodySub::Primary`]).
     /// - [`BuildRingParentError::NotPositive`] for a mass, radius or temperature that is not
-    ///   positive and finite.
+    ///   positive and finite, or a flux that is negative or not finite.
     pub fn new(
         index: BodyIndex,
         class: PlanetClass,
         mass: Kilograms,
         radius: Metres,
-        cloud_top_temperature: Kelvin,
+        effective_temperature: Kelvin,
+        flux: EarthFluxes,
     ) -> Result<Self, BuildRingParentError> {
         if index.sub() != BodySub::Primary {
             return Err(BuildRingParentError::NotAPlanet(index));
@@ -224,7 +245,9 @@ impl RingParent {
         let positive = |x: f64| x.is_finite() && x > 0.0;
         if !(positive(mass.value())
             && positive(radius.value())
-            && positive(cloud_top_temperature.value()))
+            && positive(effective_temperature.value())
+            && flux.value().is_finite()
+            && flux.value() >= 0.0)
         {
             return Err(BuildRingParentError::NotPositive);
         }
@@ -233,7 +256,8 @@ impl RingParent {
             class,
             mass,
             radius,
-            cloud_top_temperature,
+            effective_temperature,
+            flux,
         })
     }
 
@@ -252,11 +276,55 @@ impl RingParent {
         }
     }
 
-    /// The material a massive ring of this planet is made of: porous ice below
-    /// [`ICY_RING_TEMPERATURE`], rock above it.
+    /// The temperature of a ring particle at [`RING_TEMPERATURE_RADII`] (1.5) planetary radii, in
+    /// its hosts' light and its planet's thermal glow (ruling 112.7): T⁴ = `T_bb`⁴ + W `T_eff`⁴.
+    ///
+    /// `T_bb` is a black, fast-rotating sphere's in the hosts' flux, (S ÷ 4σ)^¼, 278.3 K at 1 au (S = 1361 W m⁻², IAU 2015 B3)
+    /// from the Sun; `T_eff` the planet's effective temperature; and W = ½ (1 − √(1 − (R ÷ r)²))
+    /// the planet's dilution factor at r, the share of the sky's light its disc gives (0.127 at
+    /// 1.5 radii). Sunlight the planet reflects is left out.
+    ///
+    /// # Examples
+    ///
+    /// Saturn's ring particles, at 9.54 au from the Sun and with Saturn's 95 K, are at about
+    /// 93 K, and its massive ring is of ice:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::derive::PlanetClass;
+    /// use hyperion_sim::planetary::rings::RingParent;
+    /// use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
+    /// use hyperion_sim::units::{EarthFluxes, Kelvin, Kilograms, Metres};
+    ///
+    /// let index = BodyIndex::new(BodySlot::Planet(6), BodySub::Primary)?;
+    /// let flux = EarthFluxes::new(1.0 / (9.54 * 9.54));
+    /// let saturn = RingParent::new(
+    ///     index,
+    ///     PlanetClass::GasGiant,
+    ///     Kilograms::new(5.683e26),
+    ///     Metres::new(58_232e3),
+    ///     Kelvin::new(95.0),
+    ///     flux,
+    /// )?;
+    /// assert!((saturn.particle_temperature().value() - 93.3).abs() < 1.0);
+    /// assert_eq!(saturn.massive_material(), hyperion_sim::planetary::rings::RingMaterial::PorousIce);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn particle_temperature(&self) -> Kelvin {
+        let s = WattsPerSquareMetre::from(self.flux).value();
+        let black = s / (4.0 * STEFAN_BOLTZMANN);
+        let x = 1.0 / RING_TEMPERATURE_RADII;
+        let dilution = 0.5 * (1.0 - (1.0 - x * x).sqrt());
+        let glow = dilution * math::powi(self.effective_temperature.value(), 4);
+        Kelvin::new((black + glow).sqrt().sqrt())
+    }
+
+    /// The material a massive ring of this planet is made of: porous ice where its particles are
+    /// colder than [`ICY_RING_TEMPERATURE`] ([`particle_temperature`](Self::particle_temperature)),
+    /// rock otherwise.
     #[must_use]
     pub fn massive_material(&self) -> RingMaterial {
-        if self.cloud_top_temperature < ICY_RING_TEMPERATURE {
+        if self.particle_temperature() < ICY_RING_TEMPERATURE {
             RingMaterial::PorousIce
         } else {
             RingMaterial::Rock
@@ -517,7 +585,7 @@ fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
 /// use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
 /// use hyperion_sim::rng::Mark;
 /// use hyperion_sim::stellar::draws::UnitUniform;
-/// use hyperion_sim::units::{Kelvin, Kilograms, Metres};
+/// use hyperion_sim::units::{EarthFluxes, Kelvin, Kilograms, Metres};
 ///
 /// let index = BodyIndex::new(BodySlot::Planet(6), BodySub::Primary)?;
 /// let saturn = RingParent::new(
@@ -526,6 +594,7 @@ fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
 ///     Kilograms::new(5.683e26),
 ///     Metres::new(58_232e3),
 ///     Kelvin::new(95.0),
+///     EarthFluxes::new(0.011),
 /// )?;
 /// let mimas = RingMoon::new(Metres::new(185_539e3), Kilograms::new(3.75e19));
 /// let draws = RingDraws {
@@ -657,7 +726,15 @@ mod tests {
 
     const SEED: Seed = Seed::new(0x0005_a7e2);
 
-    fn planet(slot: u8, class: PlanetClass, mass: f64, radius_km: f64, t: f64) -> RingParent {
+    /// A giant of effective temperature `t` K in a flux of `flux` Earth's.
+    fn planet(
+        slot: u8,
+        class: PlanetClass,
+        mass: f64,
+        radius_km: f64,
+        t: f64,
+        flux: f64,
+    ) -> RingParent {
         let index = BodyIndex::new(BodySlot::Planet(slot), BodySub::Primary).unwrap();
         RingParent::new(
             index,
@@ -665,12 +742,20 @@ mod tests {
             Kilograms::new(mass),
             Metres::new(radius_km * 1e3),
             Kelvin::new(t),
+            EarthFluxes::new(flux),
         )
         .unwrap()
     }
 
     fn saturn() -> RingParent {
-        planet(6, PlanetClass::GasGiant, 5.683e26, 58_232.0, 95.0)
+        planet(
+            6,
+            PlanetClass::GasGiant,
+            5.683e26,
+            58_232.0,
+            95.0,
+            1.0 / (9.54 * 9.54),
+        )
     }
 
     fn system(n: u64) -> SystemId {
@@ -715,6 +800,7 @@ mod tests {
                     Kilograms::new(mass),
                     Metres::new(radius),
                     Kelvin::new(t),
+                    EarthFluxes::new(math::powi(t / 278.3, 4)),
                 )
                 .unwrap();
                 let moons = (0..2)
@@ -738,7 +824,7 @@ mod tests {
             PlanetClass::Icy,
             PlanetClass::SubNeptune,
         ] {
-            let body = planet(3, class, 5.97e24, 6_371.0, 255.0);
+            let body = planet(3, class, 5.97e24, 6_371.0, 255.0, 1.0);
             assert!(rings(&body, &[], &draws_with(true)).is_empty());
             assert!(generate_rings(SEED, system(1), &body, &[]).is_empty());
         }
@@ -799,13 +885,23 @@ mod tests {
     #[test]
     fn about_fifteen_percent_of_cold_giants_have_massive_rings() {
         let n = 4_000_u64;
-        for (t, material, p) in [
-            (95.0, RingMaterial::PorousIce, MASSIVE_ICY_RING_PROBABILITY),
-            (900.0, RingMaterial::Rock, MASSIVE_ROCKY_RING_PROBABILITY),
+        for (t, flux, material, p) in [
+            (
+                95.0,
+                0.011,
+                RingMaterial::PorousIce,
+                MASSIVE_ICY_RING_PROBABILITY,
+            ),
+            (
+                900.0,
+                100.0,
+                RingMaterial::Rock,
+                MASSIVE_ROCKY_RING_PROBABILITY,
+            ),
         ] {
             let count = (0..n)
                 .filter(|&i| {
-                    let giant = planet(5, PlanetClass::GasGiant, 1.898e27, 69_911.0, t);
+                    let giant = planet(5, PlanetClass::GasGiant, 1.898e27, 69_911.0, t, flux);
                     generate_rings(SEED, system(i), &giant, &[])
                         .iter()
                         .any(|r| r.kind() == RingKind::Massive && r.material() == material)
@@ -863,15 +959,35 @@ mod tests {
         assert!(RingMaterial::PorousIce.moonlet_mass() > light.mass());
     }
 
-    /// P14.T20: a giant's massive ring is of ice below 170 K at its cloud tops and of rock above.
+    /// Ruling 112.7: a giant's massive ring is of ice where its particles are below 115 K and of
+    /// rock above, the particles' temperature from the light and the planet's glow.
     #[test]
-    fn a_massive_ring_is_icy_when_cold_and_rocky_when_hot() {
-        let cold = planet(5, PlanetClass::GasGiant, 1.898e27, 69_911.0, 169.0);
-        let hot = planet(5, PlanetClass::GasGiant, 1.898e27, 69_911.0, 170.0);
+    fn a_massive_ring_is_icy_when_its_particles_are_cold_and_rocky_when_hot() {
+        let jupiter =
+            |t: f64, flux: f64| planet(5, PlanetClass::GasGiant, 1.898e27, 69_911.0, t, flux);
+        // A black sphere at 1 au is at (S ÷ 4σ)^¼; the planet's glow is scaled out by a 1 K planet.
+        let at_one_au = jupiter(1.0, 1.0).particle_temperature().value();
+        assert!((at_one_au - 278.3).abs() < 0.5, "{at_one_au}");
+        let lit = |t: f64| jupiter(1.0, math::powi(t / at_one_au, 4));
+        let (cold, hot) = (lit(114.0), lit(116.0));
+        assert!((cold.particle_temperature().value() - 114.0).abs() < 1e-6);
         assert_eq!(cold.massive_material(), RingMaterial::PorousIce);
         assert_eq!(hot.massive_material(), RingMaterial::Rock);
         let rocky = rings(&hot, &[], &draws_with(true));
         assert_eq!(rocky.last().unwrap().material(), RingMaterial::Rock);
+        // The glow alone: a 1,000 K giant far from any light warms its particles to W^¼ of it.
+        let glowing = jupiter(1_000.0, 0.0).particle_temperature().value();
+        let w = 0.5 * (1.0 - (1.0 - 1.0 / 2.25_f64).sqrt());
+        assert!(
+            (glowing - 1_000.0 * w.sqrt().sqrt()).abs() < 1e-9,
+            "{glowing}"
+        );
+        assert!((0.126..0.128).contains(&w));
+        // Saturn's are icy, and a Jupiter at 5.2 au, at 125 K, holds rock (Schlichting and Chang
+        // 2011: rings inside the ice line are rocky).
+        assert_eq!(saturn().massive_material(), RingMaterial::PorousIce);
+        let real = jupiter(125.0, 1.0 / (5.2 * 5.2));
+        assert!(real.particle_temperature() > ICY_RING_TEMPERATURE);
     }
 
     /// Design note 4: a planet's ring draws are words 0–4 of its own `ring.system` stream, and
@@ -902,6 +1018,7 @@ mod tests {
                 Kilograms::new(mass),
                 Metres::new(7e7),
                 Kelvin::new(100.0),
+                EarthFluxes::new(0.01),
             )
         };
         assert_eq!(

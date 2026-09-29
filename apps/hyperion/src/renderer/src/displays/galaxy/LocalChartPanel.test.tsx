@@ -228,9 +228,9 @@ describe("LocalChartPanel", () => {
 
     expect(options().map((option) => option.textContent)).toEqual([
       // Designation, class, star count, distance, mass and range (ruling 115.5).
-      "H7K 4C0RFZ C-1G2V10.001.63IN",
-      "H7K 4C0RFZ A-2M3V110.000.29IN",
-      "H7K 4C0RFZ E-3B0V260.0079.0OUT",
+      "H7K 4C0RFZ C-1G2V10.001.63 MIN",
+      "H7K 4C0RFZ A-2M3V110.000.29 MIN",
+      "H7K 4C0RFZ E-3B0V260.0079.0 MOUT",
     ]);
   });
 

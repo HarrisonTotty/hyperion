@@ -234,20 +234,22 @@ fn the_milky_way_fixture_has_the_plan_values() {
     );
     assert_relative("f★", p.dark_halo().f_star(), 0.28, 0.0);
     // The Milky Way's own offset from M–σ, which makes its black hole Sgr A*'s mass.
-    assert_same_bits(p.black_hole().scatter().value(), -0.3876);
+    assert_same_bits(p.black_hole().scatter().value(), -0.3800);
     // The Milky Way's system count, "about 10¹¹", and its mean present-day mass per system, "about
     // 0.55–0.59 M☉ under the default, Chabrier's system function" (brainstorm, "Galaxy
     // parameters").
     assert_eq!(p.mass_function(), MassFunctionKind::default());
     // "About 10¹¹" at 6.0 × 10¹⁰ M☉; P02.T12.d lightened the fixture to 5.12 × 10¹⁰ M☉, inside
     // Bland-Hawthorn and Gerhard's (2016, §6.4) 5 ± 1 × 10¹⁰, which at the brainstorm's 0.55–0.59
-    // M☉ a system is 0.85–1.1 × 10¹¹.
+    // M☉ a system is 0.85–1.1 × 10¹¹. Ruling 138 reads that 0.55–0.59 as the mean in stars and
+    // white dwarfs; with every remnant, at plan 15's fitted scale, the mean is 0.59–0.61 (0.5985)
+    // and the count 8.55 × 10¹⁰.
     assert_within("system count", p.system_count(), 0.85e11, 1.3e11);
     assert_within(
         "mean mass per system",
         p.stellar_mass().value() / p.system_count(),
-        0.55,
         0.59,
+        0.61,
     );
     // Its nuclear disc holds about 10⁹ M☉ (Launhardt et al. 2002; Sormani et al. 2022), and its
     // nuclear cluster 2.5 × 10⁷ M☉ (Schödel et al. 2014).

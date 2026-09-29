@@ -42,7 +42,7 @@ use crate::stellar::Composition;
 use crate::stellar::classify::ClassExtras;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
 use crate::stellar::fates::{FateRoute, FittedFate, FittedFates, stripped_mark_matters};
-use crate::stellar::multiplicity::{MultiplicityContext, draw_star_count};
+use crate::stellar::multiplicity::draw_star_count;
 use crate::stellar::remnant::NeutronStar;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::wd_spectral::white_dwarf_type;
@@ -50,8 +50,8 @@ use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
 use crate::stellar::system::{
-    GRID_ATTEMPT, StarModel, StellarBrief, draw_metallicity, primary_draws, primary_eta,
-    primary_rotation_draws,
+    GRID_ATTEMPT, StarModel, StellarBrief, draw_metallicity, grid_multiplicity, primary_draws,
+    primary_eta, primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, UniverseTime};
@@ -200,12 +200,15 @@ const WHITE_DWARF_CORNERS: [(f64, f64, f64); 9] = [
 const IRON_CORE_CORNERS: [(f64, f64, f64); 9] = WHITE_DWARF_CORNERS;
 
 impl BriefModel {
-    /// The brief model of the grid system `record` in `galaxy`.
+    /// The brief model of the grid system `record` in `galaxy`: a star system's, or a free-floating
+    /// brown dwarf's, a system of one (plan 13, P13.T5.a).
     ///
     /// # Panics
     ///
-    /// As [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) does, for a
-    /// record of another galaxy.
+    /// As [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) does: for a
+    /// record of another galaxy, and for a rogue planet, whose mass is below the stellar stage's
+    /// and which has no brief (plan 13, P13.T5.d); a caller checks
+    /// [`SystemRecord::kind`](crate::galaxy::placement::SystemRecord::kind) first.
     #[must_use]
     pub fn new(galaxy: &Galaxy, record: &SystemRecord) -> Self {
         Self::with_fates(galaxy, record, &FittedFates::generator())
@@ -216,11 +219,11 @@ impl BriefModel {
     ///
     /// # Panics
     ///
-    /// As [`BriefModel::new`].
+    /// As [`BriefModel::new`]: for a record of another galaxy, and for a rogue planet.
     #[must_use]
     pub fn with_fates(galaxy: &Galaxy, record: &SystemRecord, fates: &FittedFates<'_>) -> Self {
         let composition = draw_metallicity(galaxy, record);
-        let star_count = draw_star_count(galaxy, record, MultiplicityContext::Free, GRID_ATTEMPT);
+        let star_count = draw_star_count(galaxy, record, grid_multiplicity(record), GRID_ATTEMPT);
         let m0 = record.primary_initial_mass();
         let age_at_epoch = record.age_at_epoch();
         // The main sequence reads η alone of the primary's draws: its one stream, not all of
@@ -509,7 +512,7 @@ fn exact(
 ) -> Primary {
     Primary::Exact(Box::new(
         StarModel::new(m0, composition, draws, age_at_epoch)
-            .expect("a grid record's primary is of 0.08-150 M_sun with a finite age"),
+            .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
     ))
 }
 
@@ -601,7 +604,7 @@ fn table_primary(
     age_at_epoch: Years,
     m0: SolarMasses,
 ) -> Option<Primary> {
-    if stripped_mark_matters(m0, draws) {
+    if stripped_mark_matters(m0, &composition, draws) {
         return None;
     }
     let remnant_draws = RemnantDraws::of(draws);

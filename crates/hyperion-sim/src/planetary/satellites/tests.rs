@@ -15,6 +15,37 @@ fn two_calls_agree_bit_for_bit() {
     }
 }
 
+/// Ruling 112.5: a moon's radius rank is keyed by its candidate (its kind and number within the
+/// kind), not by the dense sub-index, so that a moon pruned before it moves nothing of it; and no
+/// two moons of a parent share a key.
+#[test]
+fn a_moon_draws_by_its_candidate_not_its_sub_index() {
+    let (mut moons, mut shifted) = (0, 0);
+    for (_, system) in whole() {
+        for found in system.satellites() {
+            let parent = found.parent_index();
+            let mut keys = Vec::new();
+            for moon in found.moons() {
+                let key = candidate_key(parent, moon.moon()).unwrap_or(moon.index());
+                let expected =
+                    crate::planetary::system::radius_rank(SEED, key.body_id(system.system()));
+                assert_eq!(moon.radius_rank(), expected, "{:?}", moon.index());
+                shifted += usize::from(key != moon.index());
+                keys.push(key);
+                moons += 1;
+            }
+            let before = keys.len();
+            keys.sort_unstable();
+            keys.dedup();
+            assert_eq!(keys.len(), before, "keys shared about {parent:?}");
+        }
+    }
+    assert!(
+        moons > 100 && shifted > 20,
+        "{moons} moons, {shifted} keyed apart from their index"
+    );
+}
+
 #[test]
 fn sub_indices_are_unique_decode_and_belong_to_their_parent() {
     let (mut moons, mut rings) = (0, 0);

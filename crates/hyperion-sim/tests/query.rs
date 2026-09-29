@@ -129,7 +129,7 @@ fn with_no_source_the_query_is_the_grid_alone() {
     // The census admits every layer down to A, and its counts are the grid's alone.
     assert_eq!(result.census().complete_down_to(), Some(Layer::A));
     assert_eq!(result.census().stopped_by(), CensusStop::MassFloor);
-    let grid = expected_counts(&galaxy, query.centre(), query.radius());
+    let grid = expected_counts(&galaxy, query.centre(), query.radius(), query.substellar());
     for layer in Layer::ALL {
         let (taken, expected) = (result.census().expected().get(layer), grid.get(layer));
         assert!(
@@ -458,7 +458,7 @@ fn outer_bulge() -> GalacticPosition {
 /// The census of `query` decided from its own expected counts, without generating anything: what the
 /// query decides before it walks a cell.
 fn census_of(galaxy: &Galaxy, query: &RangeQuery) -> Census {
-    let grid = expected_counts(galaxy, query.centre(), query.radius());
+    let grid = expected_counts(galaxy, query.centre(), query.radius(), query.substellar());
     decide_census(query, &grid, &LayerCounts::ZERO, |layer| {
         let pad = pad_for(query.time(), pad_speed(layer));
         let sphere = QuerySphere::new(*query.centre(), query.radius(), query.time(), pad)

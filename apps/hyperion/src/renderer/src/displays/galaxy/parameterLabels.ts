@@ -41,6 +41,9 @@ export const GROUP_LABELS: Readonly<Record<string, string>> = {
   arms: "SPIRAL ARMS",
   history: "HISTORY",
   rotation: "ROTATION",
+  // Plan 13, P13.T7: the free-floating objects per stellar system, since the chart counts them as
+  // systems; the one heading over three words, as the orchestrator's ruling 134.3 names it.
+  substellar: "FREE-FLOATING OBJECTS PER STAR SYSTEM",
 };
 
 /** The populations, in the wire's order, whose share, mass and mean system mass are sent. */
@@ -139,6 +142,14 @@ export const PARAMETER_LABELS: Readonly<Record<string, string>> = {
   "rotation.radius": "RADIUS",
   "rotation.circular_speed": "CIRCULAR SPEED",
   "rotation.escape_speed": "ESCAPE SPEED",
+
+  // Under `FREE-FLOATING OBJECTS PER STAR SYSTEM`. The rogue planets' cap is the abundance at which
+  // the densest cell reaches the ID's index limit, and `capped` says the centre saturates (rulings
+  // 125 and 134.3).
+  "substellar.brown_dwarfs_per_system": "BROWN DWARFS",
+  "substellar.rogue_planets_per_system": "PLANETS",
+  "substellar.rogue_planet_cap_per_system": "SATURATION THRESHOLD",
+  "substellar.rogue_planets_capped": "CENTRE SATURATED",
 };
 
 /** The label of a key in `labels`, or the key itself in upper case when the glossary lacks it. */

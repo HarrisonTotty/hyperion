@@ -63,5 +63,9 @@ harness = false
 name = "feature_members"
 harness = false
 
+[[bench]]
+name = "substellar"
+harness = false
+
 [lints]
 workspace = true

@@ -335,7 +335,7 @@ signature is given, and where it is not, the task that builds it is named.
 14. **Units on the consoles.** Every planetary mass is shown in M⊕, here and in plan 14 (its D19):
     the guide asks for one unit per quantity everywhere on the ship, and a second planetary unit
     would need a Jupiter sign that B612 lacks as it lacks `☉`. So a rogue planet's mass is in M⊕ (up
-    to `4131 M⊕`, the guide grouping digits only from five), and a brown dwarf's is in M☉
+    to `4132 M⊕`, the guide grouping digits only from five), and a brown dwarf's is in M☉
     (`0.052 M☉`), the unit of the stellar sequence it continues. No Jupiter-mass unit enters the
     guide. The two new floor steps read `0.012 M☉` and `0.33 M⊕`.
 
@@ -589,8 +589,8 @@ five stellar steps until T8.c.
   `lib/format.ts`, `formatMassMearth` (two decimals below 10, one below 100, whole numbers above,
   grouped in threes from five digits as plan 05's `formatNumber` does) and
   `formatSubstellarMass(massMsun, layer)`. The character `⊕` is never typed into a string that
-  reaches the screen. Tests: the unit's accessible name; `0.33`, `17.1` and `4131` from the
-  formatter (not `4,131`, which the guide's grouping rule forbids); a brown dwarf formats in M☉ and
+  reaches the screen. Tests: the unit's accessible name; `0.33`, `17.1` and `4132` from the
+  formatter (not `4,132`, which the guide's grouping rule forbids); a brown dwarf formats in M☉ and
   a rogue planet in M⊕. Acceptance: `pnpm test` and `pnpm lint` green. _Slice:_ `EarthGlyph`,
   `EarthMassUnit` and `formatMassMearth` are built ahead of the rest (the `ui` lane, from round 7),
   to the owner's draft of T8.a. `formatSubstellarMass` waits for T7, because the substellar values
@@ -740,7 +740,7 @@ Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion
   - T7 must settle `layerIndex`'s exhaustive `switch` and the fixtures' `Record<MassLayer, …>`
     itself, since `just ci` type-checks the client after `just gen-protocol`.
   - New tags go at the end of `domain_tags!`.
-  - The heaviest rogue planet reads `4131 M⊕`, not `4,131 M⊕` (Design note 14, T8.b, and plan 14's
+  - The heaviest rogue planet reads `4132 M⊕`, not `4,132 M⊕` (Design note 14, T8.b, and plan 14's
     D19), because the guide groups digits only from five, as plan 05's `formatNumber` does.
 
   Pending re-validation, because what they read is not built:
@@ -890,3 +890,122 @@ Result<CoolingState, EvaluateGiantCoolingError>`, as P06.T13 returned a `Result`
     `MassBand::try_from`/`ConvertLayerError`, which are for their owners to update.
   - _Unborn objects are a slow test._ It is rogue planets only: H is 1,000 years, so about one young-disc
     object in 10⁵ is unborn, and only the rogue planets are numerous enough.
+- **P13.T4, T5.a, T5.d, T7, T8.b–d and T9, as built (round 9, `sub13b`).**
+  - _The request and the floor (T4)._ `SubstellarRequest` gains `floor()` (its own step) and
+    `admits(layer)`. `build` lowers a floor of `LayerA` to the request's step, and refuses the
+    rest with `SubstellarNotRequested` (a floor below A that the request does not reach) or
+    `SubstellarBelowFloor` (a request with a stellar floor above A, or with the brown dwarfs' step
+    while the rogue planets are asked for). `SubstellarLayersUnavailable` is gone. The walk and the
+    census both run `result::WALK_ORDER`, and `Walk::new` takes every layer.
+  - _`expected_counts` takes the request_ as a fourth argument, the smallest change that lets it
+    fill the substellar entries "only when the layers are requested"; the stellar entries are bit
+    for bit what they were. The rogue planets' entry integrates the saturated density node by node,
+    min(Σ share × ρ, C) in component order as the thinning adds it (ruling 125), since the min is
+    not linear in the components; the brown dwarfs' is Σ share × I as the stars'.
+  - _Where the density is 0.003 per ly³._ The fixture's Sun-like point holds 0.0019 (the local
+    census's figure), so T4's 50 ly and 10 ly windows are taken at the point on the +y axis where
+    the system density is 0.003, found by bisection (`tests/query_substellar.rs`, and the bench).
+    The centre case runs at (2, 2, 2) ly, one cell of each layer, by default and at the origin
+    itself, eight cells, as a slow test, in the fixture at 60 rogue planets per star, whose centre
+    saturates: the census counts C × V to 10⁻⁹. At ±1,000 yr the full potential moves only objects
+    within the pad of the sphere's edge.
+  - _T5.a._ `stellar::system::grid_multiplicity(record)` (new, public) gives a free-floating object
+    `ForcedSingle`, and `SystemStars::generate` and `BriefModel` take it, so a brown dwarf is a
+    system of one through the metallicity draw, P06.T13's `cooling` and `classify`. The server's
+    system cache now generates brown dwarfs and still refuses rogue planets
+    (`LayerNotGenerated`); `SystemContext::for_system` refuses both until P14.T27. Deuterium burning
+    is not modelled: Burrows et al. (2001, §II) give it in words and model curves, not in closed
+    form. The class golden is `stellar/brown_dwarf_classes`: old thin disc about the Sun, 10,994
+    objects, M 3.2%, L 23.8%, T 63.6%, Y 9.4%; halo 8,000 ly up, 479 objects, L 2.3%, T 62.6%,
+    Y 35.1%; checked by eye, old brown dwarfs are mostly T and Y.
+  - _T5.a's "none earlier than M6", as ruling 135 restates it._ Of 11,528 layer-F objects about the
+    Sun, 8 are M5.5 on the dwarf scale, all 5–80 Myr old and 0.064–0.080 M☉, at 2,890–2,940 K on
+    ruling 42.1's Hayashi temperature (M6V is 2,810 K; M5.5 is written from 2,994 K down, M6 from
+    2,869 K). They are right (ruling 135.1): the plan's M6 was the young scale's. The test,
+    `every_layer_f_object_is_m5_5_or_later_and_m6_or_later_from_0_2_gyr`, asserts (a) M5.5 or later
+    for every layer-F object, (b) M6 or later for every one older than 0.2 Gyr, keeps the ≥ 10⁴
+    classed and reaches-Y checks, and prints the kinds (1,886 `Dwarf`, 9,642 `Substellar`) without
+    asserting a share. `the_fit_stays_below_m5_5_and_below_m6_from_0_2_gyr` checks the fit itself
+    over 0.0124–0.08 M☉, 1 Myr–13 Gyr and Z from 10⁻⁴ to 0.03: at most 2,962 K (0.08 M☉, 1 Myr,
+    Z 0.03), and 2,759 K from 0.2 Gyr. Nothing failed for metal-poor stars.
+  - _Layer F holds stars (ruling 135.3)._ The layer is the mass band [13 `M_Jup`, 0.08 M☉) of Design
+    note 5 and does not follow the hydrogen-burning limit, which ruling 42.3 moves from 0.065 to
+    0.083 M☉ with metallicity (the literature's 0.070–0.075 at solar; Chabrier and Baraffe 2000,
+    Saumon and Marley 2008). Its objects above their limit are typed `Dwarf`, stars: 16% of the
+    layer about the Sun (11–15% by Chabrier and Kroupa's function). The mass range and the one per
+    5.5 stars are unchanged.
+  - _Continuity in mass across 0.08 M☉_ is tested 10⁻⁶ of the mass apart, over some 1,150 ages and
+    compositions of placed brown dwarfs: near the hydrogen-burning limit L runs as steeply as
+    m^7.6 (a 0.0795 M☉ object at 9.5 Gyr is 5.5% fainter than one of 0.0801), so a wider gap
+    measures the slope, not a step.
+  - _T5.d._ The "summary" of the test is the range row: a rogue planet's `SystemRecord` has no
+    `stellar` key, pinned in the protocol's wire test, the server's conversion and the WebSocket
+    test. Its metallicity is drawn but no answer carries it: `system_summary` has no form for a
+    system without stars (`SystemSummaryDto` holds a `HierarchyDto`), so the readout shows the em
+    dash. An open point for plan 14's T27.b or a protocol task.
+  - _T7._ `min_layer` of `brown_dwarf` or `rogue_planet` maps to the matching floor and request.
+    The census lists the substellar lines only for the layers asked for, so a default answer is
+    byte for byte plan 04's. The parameters' group is `substellar` with keys `substellar.*`, all
+    `derived`, the flag a text `yes`/`no`. The cache test's central rogue-planet cell of seed
+    0x4d2 holds 17,442 records (1.4 MB), not the plan's 35,000: that galaxy's centre is less dense
+    than the fixture's.
+  - _T8.b–d._ `formatSubstellarMass(massMsun, layer)` returns `{ value, unit: "msun" | "mearth" }`:
+    a brown dwarf in M☉ to three decimals (`0.052`), a rogue planet through `formatMassMearth`, a
+    star through `formatMassMsun`. 13 Jupiter masses read `4132 M⊕` (13 × 317.83 = 4131.8; ruling
+    134.8, which corrects the plan's `4131` above and plan 14's). The `MIN MASS` group holds the rogue planets' `ALL 0.33 M⊕` and the
+    brown dwarfs' `0.012` below `0.08`; the two edges are client constants (`SUBSTELLAR_FLOORS`),
+    since a census carries a substellar band only when its layer was asked for. `layerBands` stays
+    the five stellar bands (the size scale), and checks the substellar lines. The census table runs
+    lightest first, the substellar layers named by their designation letters `G` and `F`. A rogue
+    planet is `PLANET` in the list's `CLASS` column, the readout's `KIND` and the HR diagram's count
+    (which draws none), and passes only `ALL` of `STARS`; a brown dwarf passes `LIVING`. By ruling
+    134, which amends Design note 12's `BULK PROPERTIES: NOT YET MODELLED`, the readout's row is
+    `BULK` `NOT YET MODELLED`, and a planet not yet formed reads `STATE` `NOT YET FORMED` with no
+    `BULK` row; `OPEN SYSTEM` is held back with `BODIES NOT YET MODELLED` for either kind until
+    P14.T27, wrapping under the button at 1280, where the readout's scroll region gives up the one
+    line it needs (its minimum 4 rem, from 6); the parameters' heading is
+    `FREE-FLOATING OBJECTS PER STAR SYSTEM` over `BROWN DWARFS`, `PLANETS`, `SATURATION THRESHOLD`
+    and `CENTRE SATURATED`.
+    The legend adds the inverted triangle, `PLANET`, and its size scale starts from the brown
+    dwarfs' `0.012` when the query includes them (ruling 134.7). The list's mass column widens to
+    8.5ch to hold `4132 M⊕` on one line. The words are those of ruling 134, and its guide edits
+    E1–E6 are applied.
+  - _T9._ The ratios are over a 384 ly cube, three layer-E cells, not the plan's 400 ly, so that
+    every layer's cells tile the same volume: 102,421 systems (145,214 stars), 0.1822 brown dwarfs
+    per star (1 ÷ 5.5 = 0.1818), 20.95 rogue planets per star, 0.090 above 0.3 M_Jup per star.
+    Plan 11's brown-dwarf companions come to 0 per star, since P11.T2.d, which draws them, is not
+    built. Over ten random volumes every layer's summed count lies in the Poisson interval of the
+    census's expectation (layer F 68,546 against 68,208; G 36,734 against 36,452).
+  - _Benchmarks (T9, T4), findings._ Figures are in `benches/substellar.rs`'s module docs, taken at
+    a load average of 13–22 with other lanes building: the central rogue-planet cell 48.9 ms
+    (target 20), the 0.5 ly central query with the rogue planets 22.6 s (target 150 ms; the same
+    query of the stars alone 9.0 s, since every layer's central cells are generated whole), 10 ly
+    with the rogue planets +2.0 ms over the stars (target 5, met), 50 ly with the brown dwarfs
+    +19.9 ms (target 1). The plan's remedy for the first two is not applied: it helps only a caller
+    that does not cache whole cells, and the server does. Plan 03's query benches at the default
+    request: `expected_counts` 0.86 ms (50 ly) and 66 ms (5,000 ly), `range_50ly_cold` 16.4 ms,
+    `range_50ly_warm` 1.88 ms, at load 10–22; its `range_500ly_floor_d` stops on a stale pin of its
+    own (30,606 systems against the 41,925 it asserts), which predates this lane, whose default
+    queries are bit for bit unchanged.
+  - _Output that moves (for the version-15 batch)._ Before this lane `SystemStars::generate` and
+    `BriefModel` already ran on a brown-dwarf record under `Free` multiplicity, giving some
+    companions; they are now single. Nothing served or pinned read them (the server refused them),
+    so no golden moves, but the batch names it. The goldens are the new `stellar/brown_dwarf_classes`
+    and the server's `galaxy_parameters`, which gains the `substellar` group; every default range
+    query is bit for bit what it was.
+  - _Acceptance commands._ `cargo test -p hyperion-sim substellar` matches test names, not files, so
+    T5's tests run as `cargo test -p hyperion-sim --test substellar_state` (and T4's as
+    `--test query_substellar`, T9's slow ones as `--test substellar_statistics -- --ignored`). An
+    Earth mass at 26,000 ly has a tidal radius of 0.064 ly: `tidal_radius` takes substellar masses
+    unchanged.
+  - _Client types (T7, T8)._ New: `ChartSystem.kind` (`ChartKind`), `isFormedPlanet`,
+    `ChartCensus.layer` (the unit of `COMPLETE ABOVE`), `HrCounts.planet`, `chartSymbol` and
+    `PLANET_SYMBOL`, `chartKindOf`, `layerRank`, `layerLetter`, `MEARTH_PER_MSUN` and
+    `MJUP_PER_MSUN` (IAU 2015 B3). The panel sends no `system_summary` for a rogue planet. Bands are
+    spans with the spaced en dash (`0.33 – 4132 M⊕`, `0.012 – 0.08`), and every mass cell of the
+    list draws its own unit.
+  - _By eye (T8.d)._ At 10 ly about (−26,000, 0, 60) ly in seed 0x4d2 at the lowest floor the chart
+    holds 21 stars, 3 brown dwarfs (5.2 expected) and 591 rogue planets. It reads, but the planets'
+    stalks fill the sphere. At 1280 × 720 the seven floors stand beside `QUERY RADIUS` only with
+    their edges set without letter spacing (`ALL` keeps it) and the controls' gap at 1rem; the
+    chart's view keeps the 86 px it had, which was already small.

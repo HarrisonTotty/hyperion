@@ -17,9 +17,23 @@
 //! 0.1–0.45 Hill radii ([`ORBIT_HILL_RADII`]), eccentricity uniform in 0.1–0.6
 //! ([`ECCENTRICITY`]), retrograde with probability 0.8 ([`RETROGRADE_PROBABILITY`]), and an
 //! inclination isotropic outside the Kozai gap of 60–120° ([`KOZAI_GAP`]). The axis is then held
-//! so that the apocentre lies inside the stability limit of P14.T15 for the body's sense and
-//! eccentricity, and its pericentre outside the parent's fluid Roche limit; a body for which no
-//! axis of 0.1 Hill radii or more fits is not kept.
+//! so that it lies inside the stability limit of P14.T15 for the body's sense and eccentricity,
+//! and its pericentre outside the parent's radius and fluid Roche limit; a body for which no axis
+//! of 0.1 Hill radii or more fits is not kept. Domingos, Winter and Yokoyama's (2006, MNRAS 373,
+//! 1227, §2) limit is a critical semi-major axis, fitted on the satellite's initial axis and
+//! eccentricity, so the axis is tested against it: the fit's `e_sat` term already holds the
+//! eccentricity, and an apocentre test would count it twice (ruling 133.2). Their grid stops at
+//! `e_sat` = 0.5, so captures of 0.5–0.6 extrapolate its `e_sat` term, recorded.
+//!
+//! **Irregulars survive by orbit** (ruling 112.4). They are captured early, into the Hill sphere
+//! the giant had where it formed, and none is captured after it migrates (Jewitt and Haghighipour
+//! 2007: irregulars are "confined to the central 50% of their planets Hill spheres"; Spalding,
+//! Batygin and Adams 2016: a Jupiter now at 1 AU "could lose moons if it formed beyond 5AU"). So
+//! the capture orbits are drawn in Hill radii of the formation distance, and the count keeps the
+//! share of that distribution that still fits the present limits ([`surviving_capture_share`]),
+//! against the share that fitted where the giant formed, so that a giant that never moved keeps
+//! ruling 83.4's count, which is the survivors'. A hot giant, whose present Hill sphere is a few
+//! of its radii, keeps none.
 //!
 //! # An ice giant's large capture
 //!
@@ -52,7 +66,7 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::{OrbitSense, PlanetClass};
 use crate::planetary::moons::regular::RegularMoons;
-use crate::planetary::moons::{MoonParent, draw_rank, log_uniform, moon_orbit};
+use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit};
 use crate::planetary::params::HILL_STABLE_GAP;
 use crate::planetary::placement::spacing::mutual_hill_radius;
 use crate::rng::{ObjectKey, Stream, tags};
@@ -312,8 +326,11 @@ impl CapturedMoon {
         self.kind
     }
 
-    /// Its place among its parent's captured bodies, from 1 in order of drawing (a large capture
-    /// is 1), by which it draws.
+    /// Its candidate number within its kind, from 1, by which it draws: a large capture is 1, and
+    /// a giant's irregular or a rocky planet's small capture is the number k of the block it drew
+    /// from (words 32 + 16 (k − 1) onwards), kept or not the candidates before it were (ruling
+    /// 112.5). With its [`kind`](Self::kind) it is the capture's identity, which its satellite's
+    /// own draws are keyed by.
     #[must_use]
     pub const fn ordinal(&self) -> u8 {
         self.ordinal
@@ -449,7 +466,7 @@ impl Captures {
 /// for moon in caught.moons() {
 ///     let e = moon.orbit().eccentricity().value();
 ///     let limit = neptune.stability_limit(e, moon.sense());
-///     assert!(moon.orbit().apoapsis() < limit);
+///     assert!(moon.orbit().semi_major_axis() < limit);
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -474,27 +491,155 @@ fn rank_at(stream: &Stream, word: u64) -> UnitUniform {
     draw_rank(&mut at)
 }
 
+/// The decision for probability `p` of the word at `word` of `stream` ([`decide`]).
+#[must_use]
+fn decides_at(stream: &Stream, word: u64, p: f64) -> bool {
+    let mut at = stream.clone();
+    at.seek(word);
+    decide(&mut at, p)
+}
+
 /// The first word of captured body `ordinal`'s block.
 #[must_use]
 fn body_block(ordinal: u8) -> u64 {
     BODY_WORDS_START + BODY_WORDS * (u64::from(ordinal) - 1)
 }
 
+/// The points of the midpoint rule over the capture eccentricities in
+/// [`surviving_capture_share`]: 64, a fixed count.
+const SHARE_POINTS: u32 = 64;
+
+/// The share of the capture distribution drawn about `parent` in Hill radii `hill` (semi-major
+/// axis uniform over [`ORBIT_HILL_RADII`] of it, eccentricity uniform over [`ECCENTRICITY`],
+/// retrograde with [`RETROGRADE_PROBABILITY`]) whose orbits fit the parent's present limits: the
+/// semi-major axis inside its stability limit for the orbit's sense and eccentricity (ruling
+/// 133.2), the pericentre outside its radius and its fluid Roche limit for [`CAPTURED_DENSITY`]
+/// (ruling 112.4).
+///
+/// The axis's share is exact at each eccentricity, and the mean over eccentricities a midpoint
+/// rule of [`SHARE_POINTS`] points.
+///
+/// # Examples
+///
+/// About 95% of the distribution fits Jupiter where it is (ruling 133.2's 0.949), and none of it
+/// fits a
+/// Jupiter that formed at 5.2 au and now orbits at 0.05 au:
+///
+/// ```
+/// use hyperion_sim::coords::{CellSize, GenCell};
+/// use hyperion_sim::id::{Layer, SystemId};
+/// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+/// use hyperion_sim::planetary::derive::PlanetClass;
+/// use hyperion_sim::planetary::moons::irregular::surviving_capture_share;
+/// use hyperion_sim::planetary::moons::{MoonParent, MoonParentParts, ParentKind};
+/// use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
+/// use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+/// use hyperion_sim::units::{EarthMasses, GravitationalParameter, Kilograms, Metres, Radians, SolarMasses};
+///
+/// let system = SystemId::from_parts(Layer::A, GenCell::new(CellSize::Ly8, [1, 2, 0])?, 3)?;
+/// let id = BodyIndex::new(BodySlot::Planet(5), BodySub::Primary)?.body_id(system);
+/// let jupiter_at = |au: f64| -> Result<MoonParent, Box<dyn std::error::Error>> {
+///     let orbit = KeplerElements::from_semi_major_axis(
+///         Metres::new(au * METRES_PER_AU),
+///         GravitationalParameter::from_solar_masses(SolarMasses::new(1.0)),
+///         Eccentricity::new(0.048)?,
+///         Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?,
+///         Radians::ZERO,
+///     )?;
+///     Ok(MoonParent::new(MoonParentParts {
+///         id,
+///         kind: ParentKind::Planet,
+///         mass: EarthMasses::new(317.8),
+///         radius: Metres::new(6.9911e7),
+///         class: PlanetClass::GasGiant,
+///         orbit,
+///         host_mass: Kilograms::new(SOLAR_MASS_KG),
+///         maximum_moon_mass: EarthMasses::new(1.0),
+///     })?)
+/// };
+/// let home = jupiter_at(5.2)?;
+/// let share = surviving_capture_share(&home, home.formation_hill_radius());
+/// assert!((0.94..0.96).contains(&share), "{share}");
+/// let hot = jupiter_at(0.05)?.with_formation_distance(Metres::new(5.2 * METRES_PER_AU));
+/// assert!(surviving_capture_share(&hot, hot.formation_hill_radius()) < f64::EPSILON);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn surviving_capture_share(parent: &MoonParent, hill: Metres) -> f64 {
+    capture_share(parent, hill, 1.0)
+}
+
+/// [`surviving_capture_share`] with the stability limits scaled by `limit_scale`: they are
+/// proportional to the Hill radius, so a scale of `R_H,f` ÷ `R_H` gives the limits where the parent
+/// formed, on an orbit of the same eccentricity.
+#[must_use]
+fn capture_share(parent: &MoonParent, hill: Metres, limit_scale: f64) -> f64 {
+    let (lo_share, hi_share) = ORBIT_HILL_RADII;
+    let (e_lo, e_hi) = ECCENTRICITY;
+    let (from, to) = (lo_share * hill.value(), hi_share * hill.value());
+    let span = to - from;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    let floor = parent
+        .radius()
+        .value()
+        .max(parent.roche_limit_fluid(CAPTURED_DENSITY).value());
+    let n = f64::from(SHARE_POINTS);
+    let fits = |sense: OrbitSense| {
+        (0..SHARE_POINTS)
+            .map(|k| {
+                let e = e_lo + (e_hi - e_lo) * (f64::from(k) + 0.5) / n;
+                let lo = from.max(floor / (1.0 - e));
+                let limit = parent.stability_limit(e, sense).value() * limit_scale;
+                let hi = to.min(limit);
+                ((hi - lo) / span).clamp(0.0, 1.0)
+            })
+            .sum::<f64>()
+            / n
+    };
+    RETROGRADE_PROBABILITY * fits(OrbitSense::Retrograde)
+        + (1.0 - RETROGRADE_PROBABILITY) * fits(OrbitSense::Prograde)
+}
+
+/// The share of a giant's captured population that survives its migration (ruling 112.4): the
+/// capture distribution in Hill radii of its formation distance, [`surviving_capture_share`] of
+/// the present limits over that of the limits it had where it formed. Exactly 1 for a giant that
+/// formed on its orbit, and 0 where nothing fits now.
+#[must_use]
+fn migration_share(parent: &MoonParent) -> f64 {
+    if parent.formation_distance().value() <= parent.orbit().semi_major_axis().value() {
+        return 1.0;
+    }
+    let (formed, present) = (parent.formation_hill_radius(), parent.hill_radius());
+    let now = capture_share(parent, formed, 1.0);
+    if now <= 0.0 {
+        return 0.0;
+    }
+    let then = capture_share(parent, formed, formed.value() / present.value());
+    if then > 0.0 {
+        (now / then).min(1.0)
+    } else {
+        0.0
+    }
+}
+
 /// A giant's population, its largest members and an ice giant's large capture.
 fn giant_captures(stream: &Stream, parent: &MoonParent) -> Captures {
     let mut moons = Vec::new();
     let large = (parent.class() == PlanetClass::IceGiant
-        && rank_at(stream, 8).value() < LARGE_CAPTURE_PROBABILITY)
-        .then(|| large_capture(stream, parent));
-    let mut ordinal: u8 = 0;
+        && decides_at(stream, 8, LARGE_CAPTURE_PROBABILITY))
+    .then(|| large_capture(stream, parent));
     if let Some(large) = large {
-        ordinal = 1;
         moons.push(large);
     }
     let mut count = stream.clone();
     count.seek(0);
     let z = count.standard_normal();
-    let n = (POPULATION_MEDIAN * math::exp10(POPULATION_SIGMA_DEX * z)).round();
+    // Ruling 112.4: the drawn count is the survivors' of a giant that formed where it is, and a
+    // migrated giant keeps the share of it that still fits.
+    let n = (POPULATION_MEDIAN * math::exp10(POPULATION_SIGMA_DEX * z) * migration_share(parent))
+        .round();
     let (lo, hi) = LARGEST_DIAMETER;
     let largest = Metres::new(log_uniform(lo.value(), hi.value(), rank_at(stream, 2)));
     let population = IrregularPopulation::new(whole_count(n), largest);
@@ -514,8 +659,7 @@ fn giant_captures(stream: &Stream, parent: &MoonParent) -> Captures {
             break;
         }
         if let Some(moon) = captured_body(stream, parent, block, CaptureKind::Irregular, radius) {
-            ordinal += 1;
-            moons.push(CapturedMoon { ordinal, ..moon });
+            moons.push(CapturedMoon { ordinal: k, ..moon });
         }
     }
     let population = Some(population);
@@ -554,22 +698,17 @@ fn large_capture(stream: &Stream, parent: &MoonParent) -> CapturedMoon {
 
 /// A rocky planet's one or two small captures.
 fn rocky_captures(stream: &Stream, parent: &MoonParent) -> Captures {
-    if rank_at(stream, 8).value() >= ROCKY_CAPTURE_PROBABILITY {
+    if !decides_at(stream, 8, ROCKY_CAPTURE_PROBABILITY) {
         return Captures::NONE;
     }
-    let count: u8 = if rank_at(stream, 9).value() < 0.5 {
-        1
-    } else {
-        2
-    };
+    let count: u8 = if decides_at(stream, 9, 0.5) { 1 } else { 2 };
     let mut moons = Vec::new();
     for k in 1..=count {
         let block = body_block(k);
         let (lo, hi) = ROCKY_CAPTURE_RADIUS;
         let radius = Metres::new(log_uniform(lo.value(), hi.value(), rank_at(stream, block)));
         if let Some(moon) = captured_body(stream, parent, block, CaptureKind::Small, radius) {
-            let ordinal = u8::try_from(moons.len() + 1).expect("at most two small captures");
-            moons.push(CapturedMoon { ordinal, ..moon });
+            moons.push(CapturedMoon { ordinal: k, ..moon });
         }
     }
     Captures {
@@ -600,9 +739,11 @@ fn inclination(sense: OrbitSense, rank: UnitUniform) -> Radians {
     Radians::new(math::acos(cos_i.clamp(-1.0, 1.0)))
 }
 
-/// A captured body of `kind` and `radius` on a capture orbit drawn from its block at `block`, or
-/// `None` if no axis of 0.1 Hill radii or more keeps its apocentre inside the stability limit and
-/// its pericentre outside the parent's fluid Roche limit for [`CAPTURED_DENSITY`].
+/// A captured body of `kind` and `radius` on a capture orbit drawn from its block at `block`, in
+/// Hill radii of the parent's formation distance (ruling 112.4), or `None` if no axis of 0.1 of
+/// them or more keeps it inside the present stability limit (its semi-major axis, ruling 133.2)
+/// and its pericentre outside
+/// the parent's radius and fluid Roche limit for [`CAPTURED_DENSITY`].
 fn captured_body(
     stream: &Stream,
     parent: &MoonParent,
@@ -611,18 +752,22 @@ fn captured_body(
     radius: Metres,
 ) -> Option<CapturedMoon> {
     let rank = |offset: u64| rank_at(stream, block + offset);
-    let sense = if rank(1).value() < RETROGRADE_PROBABILITY {
+    let sense = if decides_at(stream, block + 1, RETROGRADE_PROBABILITY) {
         OrbitSense::Retrograde
     } else {
         OrbitSense::Prograde
     };
     let inclination = inclination(sense, rank(2));
-    let hill = parent.hill_radius().value();
+    // Captured where the parent formed (ruling 112.4), and held to the present limits.
+    let hill = parent.formation_hill_radius().value();
     let e = ECCENTRICITY.0 + rank(4).value() * (ECCENTRICITY.1 - ECCENTRICITY.0);
     let limit = parent.stability_limit(e, sense).value();
-    let roche = parent.roche_limit_fluid(CAPTURED_DENSITY).value();
-    let lo = (ORBIT_HILL_RADII.0 * hill).max(roche / (1.0 - e) * (1.0 + 1e-9));
-    let hi = (ORBIT_HILL_RADII.1 * hill).min(limit / (1.0 + e) * (1.0 - 1e-9));
+    let floor = parent
+        .radius()
+        .value()
+        .max(parent.roche_limit_fluid(CAPTURED_DENSITY).value());
+    let lo = (ORBIT_HILL_RADII.0 * hill).max(floor / (1.0 - e) * (1.0 + 1e-9));
+    let hi = (ORBIT_HILL_RADII.1 * hill).min(limit * (1.0 - 1e-9));
     if hi <= lo {
         return None;
     }
@@ -710,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn every_capture_lies_inside_its_stability_limit_at_pericentre_and_apocentre() {
+    fn every_capture_lies_inside_its_stability_limit_and_its_hill_sphere() {
         let mut parents = giants(400);
         parents.extend(rocky(2_000));
         let mut checked = 0;
@@ -718,8 +863,8 @@ mod tests {
             for moon in caught.moons() {
                 let e = moon.orbit().eccentricity().value();
                 let limit = parent.stability_limit(e, moon.sense());
-                assert!(moon.orbit().apoapsis() < limit, "{moon:?}");
-                assert!(moon.orbit().periapsis() < limit);
+                // Ruling 133.2: Domingos et al.'s limit is on the semi-major axis.
+                assert!(moon.orbit().semi_major_axis() < limit, "{moon:?}");
                 assert!(moon.orbit().periapsis() > parent.radius());
                 assert!(moon.orbit().periapsis() > parent.roche_limit_fluid(CAPTURED_DENSITY));
                 let apocentre_bound = parent.hill_radius_at_pericentre();
@@ -951,5 +1096,61 @@ mod tests {
             );
         }
         assert!(NearestBelt::new(EarthMasses::new(-1.0), BeltAdjacency::Neighbouring).is_none());
+    }
+
+    /// Ruling 112.4: irregulars survive by orbit. A giant that formed where it is keeps ruling
+    /// 83.4's count bit for bit; one that migrated in keeps the share of its capture distribution,
+    /// drawn in its Hill radii of then, that fits now, and every body it keeps fits; a hot giant
+    /// keeps none. Before the fix a hot Jupiter kept its ~90.
+    #[test]
+    fn irregulars_survive_by_orbit() {
+        let au = |x: f64| Metres::new(x * crate::units::consts::METRES_PER_AU);
+        let at = |i: u32, a: f64| {
+            parent(
+                planet_id(i, 3),
+                ParentKind::Planet,
+                317.8,
+                69_911.0,
+                PlanetClass::GasGiant,
+                a,
+                0.02,
+            )
+        };
+        let (mut home_total, mut warm_total) = (0_u64, 0_u64);
+        for i in 0..300 {
+            let seed = Seed::new(23);
+            let home = at(i, 5.2);
+            let formed_here = home.with_formation_distance(au(5.2));
+            assert_same_bits(migration_share(&formed_here), 1.0);
+            assert_eq!(
+                captures(seed, &home, None),
+                captures(seed, &formed_here, None)
+            );
+            let hot = at(i, 0.05).with_formation_distance(au(5.2));
+            let caught = captures(seed, &hot, None);
+            assert_eq!(caught.population().map(IrregularPopulation::count), Some(0));
+            assert!(caught.moons().is_empty(), "{:?}", caught.moons());
+            let warm = at(i, 3.0).with_formation_distance(au(5.2));
+            let share = migration_share(&warm);
+            assert!(share > 0.0 && share < 1.0, "{share}");
+            let kept = captures(seed, &warm, None);
+            for moon in kept.moons() {
+                let e = moon.orbit().eccentricity().value();
+                assert!(moon.orbit().semi_major_axis() < warm.stability_limit(e, moon.sense()));
+                assert!(moon.orbit().periapsis() > warm.roche_limit_fluid(CAPTURED_DENSITY));
+            }
+            home_total += captures(seed, &home, None)
+                .population()
+                .map_or(0, IrregularPopulation::count);
+            warm_total += kept.population().map_or(0, IrregularPopulation::count);
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "counts of a few tens of thousands"
+        )]
+        let kept = warm_total as f64 / home_total as f64;
+        // research/r-pfix14's share.py: 0.503 at 0.5 of the formation distance and 0.661 at 0.6,
+        // on the semi-major axis (ruling 133.2); 3 ÷ 5.2 = 0.577 lies between.
+        assert!((0.55..0.70).contains(&kept), "{warm_total} of {home_total}");
     }
 }

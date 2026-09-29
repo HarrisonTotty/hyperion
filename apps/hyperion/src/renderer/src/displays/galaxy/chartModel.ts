@@ -9,10 +9,15 @@
  */
 import type { LayerCensus, LayerStatus, MassLayer, ObjectKindDto } from "@hyperion/protocol";
 
-import { formatNumber } from "../../lib/format";
+import {
+  formatNumber,
+  formatSubstellarMass,
+  MEARTH_PER_MSUN,
+  MJUP_PER_MSUN,
+} from "../../lib/format";
 import type { ChartCensus, ChartResult, ChartSystem, LayerIndex } from "../../lib/galaxy/model";
-import { starSizeClass, starSymbol } from "../../lib/galaxy/starSymbols";
-import { layerIndex } from "../../lib/galaxy/wire";
+import { chartSymbol, starSizeClass } from "../../lib/galaxy/starSymbols";
+import { layerIndex, layerRank } from "../../lib/galaxy/wire";
 import type { LocalFrame } from "../../spatial/frame";
 import type { PlaneRing, PointMark, SpatialScene, SphereMark } from "../../spatial/marks";
 import { ceil125, gridSpacing, RADIUS_STEPS_LY } from "../../spatial/scale";
@@ -165,7 +170,9 @@ function filterOf(kind: ObjectKindDto): "living" | "remnants" | null {
  *
  * @remarks
  * A system not yet formed at the chart's time has no primary, and a star that left no remnant has
- * nothing left, so only `ALL` shows either.
+ * nothing left, so only `ALL` shows either. A free-floating brown dwarf is living, as its brief
+ * says; a free-floating planet is no star, living or dead, and only `ALL` shows it (plan 13,
+ * P13.T8.d).
  */
 export function passesStarFilter(system: ChartSystem, filter: StarFilter): boolean {
   if (filter === "all") {
@@ -227,10 +234,11 @@ function planeLabel(driveRangeLy: number): string {
 
 /**
  * A system's mark, or `null` for one with nothing to draw: a star that left no remnant, or a system
- * not yet formed, which are listed and not drawn (plan 06, design note 17).
+ * not yet formed, which are listed and not drawn (plan 06, design note 17). A free-floating planet
+ * is an inverted triangle at layer A's size (plan 13, design note 15).
  */
 function toMark(system: ChartSystem, driveRangeLy: number, index: LayerIndex): PointMark | null {
-  const shape = system.star === null ? null : starSymbol(system.star.kind);
+  const shape = chartSymbol(system.kind, system.star?.kind ?? null, system.ageMyr > 0);
   if (shape === null) {
     return null;
   }
@@ -314,21 +322,34 @@ export function inRangeCount(systems: ReadonlyArray<ChartSystem>, driveRangeLy: 
 
 /** The census line under a chart: what the result is complete above, or that nothing fits. */
 export type CensusLine =
-  | { readonly kind: "complete"; readonly text: string; readonly aboveMsun: number }
+  | {
+      readonly kind: "complete";
+      readonly text: string;
+      readonly aboveMsun: number;
+      /** The edge as it is written, in the unit of the lightest layer included. */
+      readonly above: ReturnType<typeof formatSubstellarMass>;
+    }
   | { readonly kind: "nothing_fits"; readonly text: string };
 
 /**
  * The words for a chart's census.
  *
  * @remarks
- * `COMPLETE ABOVE` is followed by the mass and its drawn unit, so the caller sets them. Nothing
- * fitting the census limit is an answer, not an error, and says what the operator can do.
+ * `COMPLETE ABOVE` is followed by the mass and its drawn unit, so the caller sets them: in M☉ down
+ * to the brown dwarfs (`0.012`), in M⊕ for the free-floating planets (`0.33`; plan 13, design note
+ * 14), as {@link formatSubstellarMass} gives them. Nothing fitting the census limit is an answer,
+ * not an error, and says what the operator can do.
  */
 export function censusLine(census: ChartCensus): CensusLine {
   let line: CensusLine;
   switch (census.kind) {
     case "complete":
-      line = { kind: "complete", text: "COMPLETE ABOVE", aboveMsun: census.aboveMsun };
+      line = {
+        kind: "complete",
+        text: "COMPLETE ABOVE",
+        aboveMsun: census.aboveMsun,
+        above: formatSubstellarMass(census.aboveMsun, census.layer),
+      };
       break;
     case "nothing_fits":
       line = { kind: "nothing_fits", text: "NOTHING FITS: reduce radius" };
@@ -378,30 +399,83 @@ export interface LayerBand {
   readonly maxMsun: number;
 }
 
-/** How many mass layers a census lists: plan 04's five, `a` to `e`. */
-const LAYER_COUNT = 5;
+/** How many stellar layers a census lists: plan 04's five, `a` to `e`. */
+const STELLAR_LAYER_COUNT = 5;
+
+/** Whether a layer is one of the two substellar ones plan 13 adds. */
+function isSubstellar(layer: MassLayer): boolean {
+  return layer === "brown_dwarf" || layer === "rogue_planet";
+}
 
 /**
- * The five mass bands of a chart's census, lightest first, or `null` when the census does not list
- * all five layers once each.
+ * Whether a census lists the substellar layers as a query can ask for them: none, the brown dwarfs,
+ * or the brown dwarfs and the free-floating planets, each once (plan 13, P13.T7).
+ */
+function substellarLinesUsable(layers: ReadonlyArray<LayerCensus>): boolean {
+  const brown = layers.filter((line) => line.layer === "brown_dwarf").length;
+  const rogue = layers.filter((line) => line.layer === "rogue_planet").length;
+  return brown <= 1 && rogue <= 1 && (rogue === 0 || brown === 1);
+}
+
+/**
+ * The five stellar mass bands of a chart's census, lightest first, or `null` when the census does
+ * not list all five stellar layers once each, or lists the substellar ones in a way no query asks
+ * for.
  *
  * @remarks
  * The edges come from the census the server sent with the answer, so the client holds no copy of
  * the band table. A census that does not list every layer is an unusable answer, not a bug in the
- * client, so it is reported rather than thrown: see {@link chartDataFault}.
+ * client, so it is reported rather than thrown: see {@link chartDataFault}. The substellar lines,
+ * which a query lowered to them adds after E, are not size bands: their objects are drawn at layer
+ * A's size (plan 13, design note 15), and their floors are {@link SUBSTELLAR_FLOORS}.
  */
 export function layerBands(layers: ReadonlyArray<LayerCensus>): ReadonlyArray<LayerBand> | null {
-  const bands = layers.map((layer): LayerBand => ({
-    layer: layer.layer,
-    index: layerIndex(layer.layer),
-    minMsun: layer.mass_min_msun,
-    maxMsun: layer.mass_max_msun,
-  }));
+  if (!substellarLinesUsable(layers)) {
+    return null;
+  }
+  const bands = layers
+    .filter((layer) => !isSubstellar(layer.layer))
+    .map((layer): LayerBand => ({
+      layer: layer.layer,
+      index: layerIndex(layer.layer),
+      minMsun: layer.mass_min_msun,
+      maxMsun: layer.mass_max_msun,
+    }));
   const seen = new Set(bands.map((band) => band.index));
-  if (bands.length !== LAYER_COUNT || seen.size !== LAYER_COUNT) {
+  if (bands.length !== STELLAR_LAYER_COUNT || seen.size !== STELLAR_LAYER_COUNT) {
     return null;
   }
   return bands.toSorted((a, b) => a.index - b.index);
+}
+
+/** A mass floor below layer A: a substellar layer and the lower edge of its band. */
+export interface SubstellarFloor {
+  readonly layer: "brown_dwarf" | "rogue_planet";
+  /** The lower edge of the layer's band of object mass, in M☉. */
+  readonly minMsun: number;
+}
+
+/**
+ * The two mass floors below layer A, lightest first: the free-floating planets from a third of an
+ * Earth mass, and the brown dwarfs from 13 Jupiter masses (plan 13, P13.T8.c).
+ *
+ * @remarks
+ * Restated from plan 13's band limits in `galaxy::substellar` (`ROGUE_PLANET_MIN`,
+ * `BROWN_DWARF_MIN`), which own them, in M☉ by the nominal GM of the Earth, Jupiter and the Sun, as
+ * the sim converts them. A census carries a substellar layer's band only when the query asked for
+ * it, so the selector could not otherwise offer the floor that asks. They read `0.33 M⊕` and
+ * `0.012 M☉` ({@link formatSubstellarMass}).
+ */
+export const SUBSTELLAR_FLOORS: ReadonlyArray<SubstellarFloor> = [
+  { layer: "rogue_planet", minMsun: 1 / 3 / MEARTH_PER_MSUN },
+  { layer: "brown_dwarf", minMsun: 13 / MJUP_PER_MSUN },
+];
+
+/** The census lines of a chart, lightest layer first, as the census table lists them. */
+export function censusLinesLightestFirst(
+  layers: ReadonlyArray<LayerCensus>,
+): ReadonlyArray<LayerCensus> {
+  return layers.toSorted((a, b) => layerRank(a.layer) - layerRank(b.layer));
 }
 
 /**
@@ -418,5 +492,10 @@ export function chartDataFault(result: ChartResult): string | null {
   if (!(result.radiusLy > 0) || !Number.isFinite(result.radiusLy)) {
     return "query radius unusable";
   }
-  return layerBands(result.layers) === null ? "census incomplete" : null;
+  if (layerBands(result.layers) === null) {
+    return "census incomplete";
+  }
+  // A census complete above an edge names a layer it included, whose unit the edge is read in.
+  const included = result.layers.some((line) => line.status === "included");
+  return result.census.kind === "complete" && !included ? "census incomplete" : null;
 }

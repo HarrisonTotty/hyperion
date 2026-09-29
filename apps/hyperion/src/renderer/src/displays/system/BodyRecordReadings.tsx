@@ -235,6 +235,12 @@ function bulkRows(bulk: BulkProperties): ReactNode {
         label="T EQ"
         shown={value(formatTemperatureK(bulk.equilibriumTemperatureK), "K")}
       />
+      {bulk.effectiveTemperatureK === null ? null : (
+        <ReadoutRow
+          label="T EFF"
+          shown={value(formatTemperatureK(bulk.effectiveTemperatureK), "K")}
+        />
+      )}
       <ReadoutRow label="IRON" shown={value(percent(fractions.iron), "%")} />
       <ReadoutRow label="ROCK" shown={value(percent(fractions.rock), "%")} />
       <ReadoutRow label="WATER" shown={value(percent(fractions.water), "%")} />

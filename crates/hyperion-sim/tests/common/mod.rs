@@ -4,9 +4,12 @@
 //! The ranges are written out here from plan 02's table, independently of the sim's own
 //! constants, so that a wrong constant in the sim fails a test instead of moving the bracket.
 //!
-//! It also holds the search for plan 14's golden systems (P14.T32.a, [`find_system`]).
+//! It also holds the search for plan 14's golden systems (P14.T32.a, [`find_system`]) and the
+//! helpers plan 13's substellar tests share ([`reference_density_point`], [`WarmCellCache`],
+//! [`objects_in_block`], [`usize_as_f64`]).
 
 use std::cell::OnceCell;
+use std::collections::BTreeMap;
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
@@ -370,11 +373,13 @@ pub fn assert_derived_consistent(p: &GalaxyParams) {
     for pop in POPULATIONS {
         let mean = p.mean_system_mass(pop).value();
         assert!(mean < formed, "{pop:?}: {mean} ≥ {formed}");
-        // Under the default the old populations hold 0.544–0.576 M☉ per system over 10⁴ seeds,
-        // around the brainstorm's 0.55–0.59, and the young disc 35–45% more than the old thin disc;
-        // under Kroupa's function 0.47–0.51, around its 0.48.
+        // Under the default the old populations hold 0.581–0.611 M☉ per system over 3,000 seeds,
+        // every remnant included (plan 06's tracks, plan 11's companions and plan 15's fitted
+        // scale: P06.T30, P11.T1.d and ruling 138, whose census mean of 0.55–0.59 counts stars
+        // and white dwarfs only), and the young disc 0.873; under Kroupa's function 0.474–0.495,
+        // around its 0.48, and 0.671.
         let (young, old) = match p.mass_function() {
-            MassFunctionKind::Chabrier => ((0.77, 0.83), (0.54, 0.58)),
+            MassFunctionKind::Chabrier => ((0.85, 0.90), (0.57, 0.62)),
             MassFunctionKind::Kroupa => ((0.65, 0.75), (0.45, 0.52)),
         };
         match pop {
@@ -798,4 +803,91 @@ pub fn find_system(
         }
     }
     unreachable!("the walk ends at its budget")
+}
+
+// --- The substellar layers (plan 13) ---
+
+/// The point in the plane on the +y axis where the system density is the brainstorm's reference
+/// 0.003 per ly³, found by bisection in galactocentric radius between 16,000 and 26,000 ly (plan
+/// 13's windows are stated there; the Milky Way fixture's Sun-like point has about 0.0019, the local
+/// census's figure). `benches/substellar.rs` restates it, since a bench cannot see this module.
+#[must_use]
+pub fn reference_density_point(galaxy: &Galaxy) -> GalacticPosition {
+    let density = |y: f64| {
+        let mut per_component = [0.0; MAX_COMPONENTS];
+        galaxy
+            .fields()
+            .densities(&PointLy::new(0.0, y, 0.0), &mut per_component)
+    };
+    let (mut inner, mut outer) = (16_000.0, 26_000.0);
+    assert!(density(inner) > 0.003 && density(outer) < 0.003);
+    for _ in 0..40 {
+        let mid = f64::midpoint(inner, outer);
+        if density(mid) > 0.003 {
+            inner = mid;
+        } else {
+            outer = mid;
+        }
+    }
+    GalacticPosition::from_light_years([0.0, inner.round(), 0.0]).expect("in the root cube")
+}
+
+/// A cell cache that keeps every cell it is asked for: a second query over the same ground is all
+/// hits.
+#[derive(Debug, Default)]
+pub struct WarmCellCache {
+    store: BTreeMap<CellKey, Vec<SystemRecord>>,
+}
+
+impl CellCache for WarmCellCache {
+    fn with_cell<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> R {
+        let systems = self.store.entry(key).or_insert_with(|| {
+            let mut systems = Vec::new();
+            generate_cell(galaxy, key, &mut systems);
+            systems
+        });
+        f(systems)
+    }
+}
+
+/// Every object of `layer` in the cube of `cells` cells a side whose low corner is the cell
+/// holding `corner_ly`, in cell order.
+#[must_use]
+pub fn objects_in_block(
+    galaxy: &Galaxy,
+    layer: Layer,
+    corner_ly: [f64; 3],
+    cells: i32,
+) -> Vec<SystemRecord> {
+    let origin = CellKey::containing(
+        layer,
+        &GalacticPosition::from_light_years(corner_ly).expect("in the root cube"),
+    )
+    .expect("a cell of the root cube")
+    .gen_cell()
+    .to_array();
+    let mut all = Vec::new();
+    let mut cell = Vec::new();
+    for dx in 0..cells {
+        for dy in 0..cells {
+            for dz in 0..cells {
+                let key = CellKey::new(layer, [origin[0] + dx, origin[1] + dy, origin[2] + dz])
+                    .expect("inside the root cube");
+                generate_cell(galaxy, key, &mut cell);
+                all.extend_from_slice(&cell);
+            }
+        }
+    }
+    all
+}
+
+/// A count of objects as an `f64`, exactly: every count a test reaches is below 2³².
+#[must_use]
+pub fn usize_as_f64(n: usize) -> f64 {
+    f64::from(u32::try_from(n).expect("a test count fits in 32 bits"))
 }

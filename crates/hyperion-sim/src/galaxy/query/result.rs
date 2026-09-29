@@ -12,9 +12,9 @@ use crate::units::{LightYears, SolarMasses};
 /// and the two substellar ones.
 ///
 /// Every entry is a finite, non-negative number of systems, which [`from_array`](Self::from_array)
-/// and [`set`](Self::set) enforce. Every count M1 produces leaves the two substellar entries
-/// exactly zero, so that plan 13 fills two entries that were always zero and changes neither this
-/// type nor any census taken before it (plan 03, Design note 17); the census rule's tests pin it.
+/// and [`set`](Self::set) enforce. The two substellar entries are exactly zero unless a query asks
+/// for their layers, so that plan 13 fills two entries that were always zero and changes neither
+/// this type nor any census taken without them (plan 03, Design note 17).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct LayerCounts([f64; 7]);
 
@@ -134,7 +134,7 @@ pub enum CensusStop {
 
 /// The order a query walks the layers in: E to A ([`STELLAR_LAYERS`]), then the brown dwarfs and the
 /// rogue planets, which come after layer A and only when asked for (brainstorm, "The range query").
-const WALK_ORDER: [Layer; 7] = [
+pub(super) const WALK_ORDER: [Layer; 7] = [
     STELLAR_LAYERS[0].layer(),
     STELLAR_LAYERS[1].layer(),
     STELLAR_LAYERS[2].layer(),
@@ -193,7 +193,9 @@ impl Census {
     /// The primary initial mass above which the result is complete, or `None` when nothing fits.
     ///
     /// It is the lower edge of [`complete_down_to`](Self::complete_down_to)'s band, such as
-    /// 0.5 M☉ for layer B.
+    /// 0.5 M☉ for layer B. For a substellar layer it is the object's mass: 13 Jupiter masses
+    /// (0.0124 M☉) for the brown dwarfs and a third of an Earth mass (1.0 × 10⁻⁶ M☉) for the rogue
+    /// planets.
     #[must_use]
     pub fn complete_above(&self) -> Option<SolarMasses> {
         self.complete_down_to
@@ -390,6 +392,9 @@ mod tests {
         assert_same_bits(above(Layer::C), 0.75);
         assert_same_bits(above(Layer::D), 2.5);
         assert_same_bits(above(Layer::E), 8.0);
+        // 13 Jupiter masses and a third of an Earth mass, in M☉.
+        assert!((0.012_40..0.012_42).contains(&above(Layer::BrownDwarf)));
+        assert!((1.000e-6..1.002e-6).contains(&above(Layer::RoguePlanet)));
         assert_eq!(census(None).complete_above(), None);
     }
 

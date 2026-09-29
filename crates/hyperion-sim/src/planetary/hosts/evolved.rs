@@ -64,17 +64,96 @@ impl fmt::Display for BuildCircularisationError {
 impl Error for BuildCircularisationError {}
 
 /// How a body's eccentricity decays under the tides its host raises on it (P14.T8.e): not at all,
-/// or with an e-folding time `τ_c`.
+/// or with an e-folding time `τ_c` towards the floor its neighbours hold it at.
 ///
 /// T8.e defines `τ_c` from the constant-Q form of Goldreich and Soter (1966), with Q′ = 10⁶ for
 /// giants and 10² for rocky bodies; the fate transform takes the time as a plain value and
-/// applies the decay first.
+/// applies the decay first. The damping stops at an [`EccentricityFloor`] (ruling 133.1), zero
+/// unless given, and a planet that anchors others' floors loses eccentricity through them at a
+/// drain rate, which keeps its axis ([`tides::circularise_to`]).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Circularisation(Option<Years>);
+pub struct Circularisation {
+    timescale: Option<Years>,
+    floor: EccentricityFloor,
+    drain: f64,
+}
+
+/// The eccentricity a tidally damped planet is held at (ruling 133.1): the larger of its
+/// surviving secular mode's, which decays with the mode, and a near-resonant pair's, which does
+/// not ([`secular`](crate::planetary::placement::classes::secular)).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct EccentricityFloor {
+    secular: f64,
+    secular_decay: f64,
+    resonant: f64,
+}
+
+impl EccentricityFloor {
+    /// No floor.
+    pub const NONE: Self = Self {
+        secular: 0.0,
+        secular_decay: 0.0,
+        resonant: 0.0,
+    };
+
+    /// A floor of `secular` at formation, decaying at `secular_decay` per year with its mode,
+    /// and of `resonant` held for good. Values that are negative or not numbers are taken as 0,
+    /// and eccentricities are held to 0.99.
+    #[must_use]
+    pub fn new(secular: f64, secular_decay: f64, resonant: f64) -> Self {
+        let eccentricity = |e: f64| {
+            if e.is_finite() {
+                e.clamp(0.0, 0.99)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            secular: eccentricity(secular),
+            secular_decay: if secular_decay.is_finite() {
+                secular_decay.max(0.0)
+            } else {
+                0.0
+            },
+            resonant: eccentricity(resonant),
+        }
+    }
+
+    /// The secular mode's forced eccentricity at formation.
+    #[must_use]
+    pub const fn secular(&self) -> f64 {
+        self.secular
+    }
+
+    /// The rate at which the secular mode decays, per year: 1/`τ_k` + Σ `s_j`/`τ_j` of its
+    /// neighbour (ruling 133.1).
+    #[must_use]
+    pub const fn secular_decay(&self) -> f64 {
+        self.secular_decay
+    }
+
+    /// The near-resonant forced eccentricity, which does not decay.
+    #[must_use]
+    pub const fn resonant(&self) -> f64 {
+        self.resonant
+    }
+
+    /// The floor at `elapsed` years after formation: the larger of the decayed secular term and
+    /// the resonant one.
+    #[must_use]
+    pub fn at(&self, elapsed: f64) -> f64 {
+        let secular = self.secular * math::exp(-self.secular_decay * elapsed.max(0.0));
+        secular.max(self.resonant)
+    }
+}
 
 impl Circularisation {
     /// No circularisation: the eccentricity keeps its primordial value.
-    pub const NONE: Self = Self(None);
+    pub const NONE: Self = Self {
+        timescale: None,
+        floor: EccentricityFloor::NONE,
+        drain: 0.0,
+    };
 
     /// Circularisation with e-folding time `timescale`, which may be infinite (none, in effect).
     ///
@@ -83,16 +162,50 @@ impl Circularisation {
     /// [`BuildCircularisationError::TimescaleNotPositive`] unless `timescale` is positive.
     pub fn new(timescale: Years) -> Result<Self, BuildCircularisationError> {
         if timescale.value() > 0.0 {
-            Ok(Self(Some(timescale)))
+            Ok(Self {
+                timescale: Some(timescale),
+                ..Self::NONE
+            })
         } else {
             Err(BuildCircularisationError::TimescaleNotPositive(timescale))
         }
     }
 
+    /// The same damping, stopping at `floor` rather than at zero (ruling 133.1).
+    #[must_use]
+    pub const fn with_floor(self, floor: EccentricityFloor) -> Self {
+        Self { floor, ..self }
+    }
+
+    /// The same damping, with the eccentricity also drained at `drain` per year by the planets
+    /// whose floor this one anchors (ruling 133.1). A rate that is negative or not a number is
+    /// taken as 0.
+    #[must_use]
+    pub fn with_drain(self, drain: f64) -> Self {
+        let drain = if drain.is_finite() {
+            drain.max(0.0)
+        } else {
+            0.0
+        };
+        Self { drain, ..self }
+    }
+
     /// The e-folding time of the eccentricity, if there is one.
     #[must_use]
     pub const fn timescale(&self) -> Option<Years> {
-        self.0
+        self.timescale
+    }
+
+    /// The floor the damping stops at.
+    #[must_use]
+    pub const fn floor(&self) -> &EccentricityFloor {
+        &self.floor
+    }
+
+    /// The drain rate, per year.
+    #[must_use]
+    pub const fn drain(&self) -> f64 {
+        self.drain
     }
 }
 
@@ -130,9 +243,9 @@ pub fn engulfment_reach(mass: EarthMasses) -> f64 {
         .sqrt()
 }
 
-/// `orbit` circularised to the host age `host_age` (P14.T8.e): e = e₀ exp(−age ÷ `τ_c`) and
-/// a = a₀ (1 − e₀²) ÷ (1 − e²), with the orientation, the mean anomaly at the epoch and the
-/// gravitational parameter kept, and the period from the new axis.
+/// `orbit` circularised to the host age `host_age` (P14.T8.e): [`tides::circularise_to`] with the
+/// circularisation's floor and drain (ruling 133.1), with the orientation, the mean anomaly at the
+/// epoch and the gravitational parameter kept, and the period from the new axis.
 ///
 /// `orbit` is returned unchanged, bit for bit, when it is circular or does not circularise. The
 /// age is held at zero and above, since tides act only on a body that exists.
@@ -182,7 +295,15 @@ fn damped(
         return None;
     }
     let elapsed = Years::new(host_age.value().max(0.0));
-    let (a, e) = tides::circularise(orbit.semi_major_axis(), e0, timescale, elapsed);
+    let floor = circularisation.floor;
+    let (a, e) = tides::circularise_to(
+        orbit.semi_major_axis(),
+        e0,
+        |t| floor.at(t),
+        circularisation.drain,
+        timescale,
+        elapsed,
+    );
     Some((e, a))
 }
 

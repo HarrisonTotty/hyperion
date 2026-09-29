@@ -102,9 +102,9 @@ pub fn maxwell_cdf(v: f64, sigma: f64) -> f64 {
 ///
 /// let imf = MassFunctionKind::default().to_mass_function();
 /// let law = StandardKickLaw::default();
-/// // A massive globular keeps about a fifth of its neutron stars and more of its black holes.
+/// // A massive globular keeps a fifth to a third of its neutron stars and more of its black holes.
 /// let kept = retention(&law, imf.as_ref(), &Composition::SOLAR, KilometresPerSecond::new(100.0));
-/// assert!((0.18..0.26).contains(&kept.neutron_stars));
+/// assert!((0.18..0.34).contains(&kept.neutron_stars));
 /// assert!(kept.black_holes > kept.neutron_stars);
 /// ```
 #[must_use]
@@ -208,17 +208,19 @@ mod tests {
         assert!((maxwell_cdf(1.538_172, 1.0) - 0.5).abs() < 1e-5);
     }
 
-    /// P09.T9.b's windows, ruling 126.3: 18–26% at an effective 100 km/s, 15–25% at 50, 5–17% at
-    /// 20, and under 1% for a 10⁴ M☉ open cluster (tested at an effective 4.7 km/s, above its 5.3
-    /// × 0.78 ≈ 4.1, so the test is the stricter).
+    /// P09.T9.b's windows, ruling 126.3 as ruling 137.3 shifts them to the measured low-mode
+    /// share w = 0.2675 (126.3's were stated at w = 0.181, each moved by (w − 0.181)(`P_low(< v)` −
+    /// `P_DM25(< v)`)): 26–34% at an effective 100 km/s, 24–34% at 50, 10–22% at 20, and under 1%
+    /// for a 10⁴ M☉ open cluster (tested at an effective 4.7 km/s, above its 5.3 × 0.78 ≈ 4.1, so
+    /// the test is the stricter).
     #[test]
     fn neutron_stars_are_retained_as_the_brainstorm_says() {
         let at = |v: f64| kept(v).neutron_stars;
         let (r100, r50, r20, open) = (at(100.0), at(50.0), at(20.0), at(4.7));
         eprintln!("retention {r100} {r50} {r20} open {open}");
-        assert!((0.18..=0.26).contains(&r100), "{r100} at 100 km/s");
-        assert!((0.15..=0.25).contains(&r50), "{r50} at 50 km/s");
-        assert!((0.05..=0.17).contains(&r20), "{r20} at 20 km/s");
+        assert!((0.26..=0.34).contains(&r100), "{r100} at 100 km/s");
+        assert!((0.24..=0.34).contains(&r50), "{r50} at 50 km/s");
+        assert!((0.10..=0.22).contains(&r20), "{r20} at 20 km/s");
         assert!(open < 0.01, "{open} at 4.7 km/s");
         assert!(r100 >= r50 && r50 >= r20 && r20 >= open);
     }

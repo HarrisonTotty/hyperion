@@ -676,6 +676,30 @@ impl GalaxyParams {
         self.mean_masses[population.index()]
     }
 
+    /// The mean present-day mass of a system of each population, in
+    /// [`POPULATIONS`](super::POPULATIONS) order, with primaries drawn from `f` in place of the
+    /// galaxy's own mass function, and the same ages and fates: what plan 15's P15.T4.b fits
+    /// Chabrier's scale against, for mass functions the build cannot name.
+    #[must_use]
+    pub fn mean_system_masses_under(&self, f: &dyn super::imf::MassFunction) -> [SolarMasses; 7] {
+        derive::mean_masses_under(self, f)
+    }
+
+    /// The mean present-day mass of a system of each population, as a census counts it
+    /// (`counted`: every star and white dwarf, or the primary alone; no neutron star or black
+    /// hole), over the systems whose primary lies below `primary_below` M☉, with primaries drawn
+    /// from `f`: plan 15's P15.T4.b checks against the 20 pc census with it (ruling 138.4), which
+    /// holds no system with a primary of 8 M☉ or more.
+    #[must_use]
+    pub fn census_system_masses_under(
+        &self,
+        f: &dyn super::imf::MassFunction,
+        counted: super::fates::Counted,
+        primary_below: f64,
+    ) -> [SolarMasses; 7] {
+        derive::census_masses_under(self, f, counted, primary_below)
+    }
+
     /// The population's stellar mass: `N × share × mean mass`. The masses sum to the stellar mass.
     #[must_use]
     pub fn population_mass(&self, population: Population) -> SolarMasses {

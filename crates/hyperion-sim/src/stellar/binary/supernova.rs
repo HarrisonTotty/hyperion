@@ -5,8 +5,11 @@
 //!   single-star death is a collapse collapses at plan 06's death age with plan 06's remnant and
 //!   kick. The engine takes the age as a fixed boundary. If the binary would end the star sooner
 //!   (a stripped helium star that dies first, say), the star is held at its last living state until
-//!   then; if the pair has merged, the product collapses; if nothing living is left, there is no
-//!   collapse.
+//!   then, with the mass it had, and the orbit is left as it was (ruling 129.4a); if the pair has
+//!   merged, the product collapses; if nothing living is left, there is no collapse.
+//! - **Any other death** sheds its mass at the death, through appendix A1 or the white dwarf's
+//!   quiet loss, and never before it: the step that lands on it keeps the dying star's living mass
+//!   (ruling 129.4a).
 //! - **A companion's death** is its own track's, evaluated freely (design note 16): the remnant its
 //!   remnant draws decide, and the kick of plan 06's law (P06.T19) with the collapse channel of its
 //!   death and the progenitor marked [`Stripping::Companion`] if the binary took its envelope, so
@@ -36,6 +39,7 @@ use crate::time::{Span, UniverseTime};
 use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
+use super::detached::last_living;
 use super::evolve::{Engine, LiveOrbit};
 use super::star::{Member, Path, positive};
 use super::timeline::{Component, SegmentKind, SupernovaRecord};
@@ -53,16 +57,26 @@ impl Engine {
         let (Some(death), Some(remnant)) = (track.death(), track.remnant()) else {
             return;
         };
-        // A pinned primary does not die before plan 06's age: it is held at its last state.
+        // A pinned primary does not die before plan 06's age: it is held at its last living
+        // state, with the mass it has then, and the orbit is left as it is (ruling 129.4a). A
+        // star on its own track has its track's mass there (the track's mass at the death itself
+        // is its remnant's); one the binary carries, the binary's.
         if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > self.age) {
-            let before = (self.age - offset) * (1.0 - 1e-12);
-            let state = track.state_at(Years::new(before.max(0.0)));
-            let (mass, _) = self.current(0);
+            let state = track.state_at(Years::new(last_living(self.age - offset)));
+            let mass = match &self.members[0] {
+                Member::Shaped { mass, .. } => mass.last(),
+                Member::Track { .. }
+                | Member::MainSequence { .. }
+                | Member::Cooling { .. }
+                | Member::Frozen { .. }
+                | Member::Remnant { .. }
+                | Member::Gone => state.mass().value(),
+            };
             let held = crate::stellar::StarState::new(crate::stellar::StarStateParts {
                 phase: state.phase(),
                 age: state.age(),
-                mass: SolarMasses::new(mass.max(state.core_mass().value())),
-                core_mass: state.core_mass(),
+                mass: SolarMasses::new(mass),
+                core_mass: SolarMasses::new(state.core_mass().value().min(mass)),
                 luminosity: state.luminosity(),
                 radius: state.radius(),
                 mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
@@ -82,6 +96,15 @@ impl Engine {
                 let p = death.progenitor();
                 p.helium_core_mass().value() + p.envelope_mass().value()
             }
+        };
+        // From now the member is what its death leaves, at the engine's age itself: the offset
+        // puts the track's age there at its death or past it, never an ulp short, where the
+        // track would still give the living star's mass and the next step would keep the orbit's
+        // angular momentum through the mass the death has already taken (ruling 129.4a).
+        let offset = if self.age - offset >= death.age().value() {
+            offset
+        } else {
+            super::evolve::offset_for(self.age, death.age().value())
         };
         self.set_member(
             i,

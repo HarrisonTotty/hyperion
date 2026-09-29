@@ -235,6 +235,7 @@ use crate::planetary::architecture::template::{
 };
 use crate::planetary::architecture::{
     ClassConstraints, DiscCapacity, HostMultiplicity, SUBSTELLAR_LIMIT, ZoneLimit,
+    early_m_dwarf_share,
 };
 use crate::planetary::derive::m_dwarfs::rocky_host_share;
 use crate::planetary::disc::{Disc, DiscProfile};
@@ -531,7 +532,8 @@ pub const fn is_drift_fed(role: GroupRole) -> bool {
 /// - A drift-fed group ([`is_drift_fed`]): [`reference_mass`] × (M★ ÷ M☉) × 10^(`σ_b` z), with
 ///   [`BETWEEN_SYSTEM_SCATTER_DEX`], M★ being the disc's host mass (a pair's total, for a
 ///   circumbinary disc), held at [`MEDIAN_HOST_MASS_FLOOR`] for a star below it
-///   ([`median_host_mass`]). Neither the disc's solids nor its metallicity enter. It is not held to
+///   ([`median_host_mass`]), and raised about an early M dwarf by
+///   [`EARLY_M_DWARF_MASS_STEP_DEX`] (ruling 112.2). Neither the disc's solids nor its metallicity enter. It is not held to
 ///   the group's range, which holds the members instead (ruling 73.2): it may lie beyond it.
 /// - Any other: [`reference_mass`] × (`M_s` ÷ [`REFERENCE_SOLID_MASS`]), `M_s` being the disc's
 ///   whole solid mass between its edges, as P14.T7.a wrote it, with no added scatter, held to the
@@ -546,7 +548,8 @@ pub fn characteristic_mass(
 ) -> EarthMasses {
     if is_drift_fed(group.role()) {
         let median = reference_mass(group) * median_host_mass(disc.host_mass()).value();
-        median * math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * between.value())
+        let early_m = EARLY_M_DWARF_MASS_STEP_DEX * early_m_dwarf_share(disc.host_mass());
+        median * math::exp10(BETWEEN_SYSTEM_SCATTER_DEX * between.value() + early_m)
     } else {
         held_between(
             reference_mass(group) * (disc.solid_mass() / REFERENCE_SOLID_MASS),
@@ -555,6 +558,19 @@ pub fn characteristic_mass(
         )
     }
 }
+
+/// The step in log₁₀ of a drift-fed group's characteristic mass about an early M dwarf, dex:
+/// +0.15 over 0.35–0.6 M☉, blended away by 0.30 and 0.70 M☉ ([`early_m_dwarf_share`]). A
+/// calibration: ruling 112.2's one trial, capped at +0.15, the dial ruling 122.5 names for ruling
+/// 102.1's early-M window, read after escape with every window held.
+///
+/// Over 0.4–0.6 M☉ primaries, at 0, +0.05, +0.10 and +0.15 dex (P14.T10.b's sample): 0.5–1.5 R⊕
+/// at 0.5–7 days per star 0.400, 0.384, 0.365, 0.348 (window 0.19–0.39); 1.5–4 R⊕ 0.116, 0.124,
+/// 0.133, 0.140 (0.10–0.26); the rocky : sub-Neptune ratio as seen 3.45, 3.09, 2.75, 2.49
+/// (Dressing and Charbonneau 1.6); small planets per single early M dwarf 2.61, 2.65, 2.68, 2.71
+/// (2.9–4.4, still short, so pinned); every early-M primary 2.02, 2.05, 2.07, 2.09 (1.8–3.2).
+/// The cap is taken: every window holds and each figure moves towards its survey.
+pub const EARLY_M_DWARF_MASS_STEP_DEX: f64 = 0.15;
 
 /// The least host mass a drift-fed group's median follows: 0.35 M☉ (ruling 94.5), below which a
 /// star's chains keep the median of a 0.35 M☉ host, 2.7 M⊕.
@@ -1682,8 +1698,18 @@ mod tests {
         // [Fe/H] = log₁₀ 2 doubles every disc's solids, and the gas does not change.
         let doubled = median_of(1.0, core::f64::consts::LOG10_2);
         assert_same_bits(doubled, solar);
+        // Linear in the host's mass, and an early M dwarf's raised by ruling 112.2's step.
+        let late_k = median_of(0.8, 0.0);
+        assert!(
+            (late_k / solar - 0.8).abs() < 1e-12,
+            "{late_k} against {solar}"
+        );
         let half = median_of(0.5, 0.0);
-        assert!((half / solar - 0.5).abs() < 1e-12, "{half} against {solar}");
+        let step = math::exp10(EARLY_M_DWARF_MASS_STEP_DEX);
+        assert!(
+            (half / solar - 0.5 * step).abs() < 1e-12,
+            "{half} against {solar}"
+        );
         // A rocky group is proportional to its disc's solid mass.
         let rocky = &template(ArchitectureClass::TerrestrialOnly).groups()[0];
         let one = characteristic_mass(

@@ -571,7 +571,7 @@ readout comes from the server, and the display re-requests the system when its t
 than a year or past a body's `valid_until`. The TypeScript solver need not match `libm` bit for bit.
 
 **D19. Units on the display follow plan 13.** Every planetary mass, from a moon to a 13 M_Jup giant
-(`4131 M⊕`), is in M⊕ with plan 13's formatter and drawn glyph, because the guide wants one unit
+(`4132 M⊕`), is in M⊕ with plan 13's formatter and drawn glyph, because the guide wants one unit
 per quantity everywhere on the ship; a brown dwarf's is in M☉, as on the chart. There is no
 Jupiter-mass unit. Radii are in km, which needs no new unit.
 
@@ -5205,3 +5205,76 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   engulfment test reads the present radius then, which the maxima's definition gives. P14.T32's
   T Tauri system (`0x41feec7600000003`, 1.61 M☉ at 1.73 Myr) holds a 232 M⊕ planet at 0.17 au,
   plausible for a young hot Jupiter (Donati et al. 2016's V830 Tau b at 0.057 au, 2 Myr).
+- **Rulings 112 (B1–B5, C1, C3–C6, D, and 112.2) and 131.2, as built (`pfix14`, round 9).** Research
+  under `_orchestration/research/r9b-planetary/`. Output moves at version 14, unbumped, for the
+  version-15 batch.
+  - _Engineering._ Moons' decisions are `Threshold` decisions on the same words (112.3; the
+    `planetary/moons` golden's values are unchanged, its capture labels renumbered by 112.5). A
+    moon's radius rank is keyed by its candidate (a regular moon k at sub-index k, the giant-impact
+    moon at `0x10`, a Triton-like capture at `0x20`, irregular k at `0x20 + k`, small capture k at
+    `0x30 + k`), display IDs staying dense, and a capture's ordinal is its candidate number (112.5).
+    A Kuiper-like belt whose resonant band the disc does not hold takes the outer-disc rule, the
+    outer third beyond every chaotic zone, sited `OuterDisc` (112.6: the eccentric giant's belt, 1.89–18.9 au → 12.6–18.9 au, and the
+    close binary's, 51.2–132 au → 90.0–132 au; `descs`' halo-star and subgiant cases had moved by
+    version 14). Members take the scattered part at a fixed 0.35
+    (`SCATTERED_MEMBER_SHARE`; JPL SBDB, H < 5.5 beyond the 2:1 at 47.7 au: 3 of the 8 largest,
+    0.375; 8 of 20, 0.40; 98 of 231, 0.42). The halo is re-cut after mass loss at the present
+    bounds, `HaloBounds` (the strip radius by (M ÷ M₀)^⅓, the companion's pericentre by its pair's
+    M₀ ÷ M, amended by ruling 133.4 below). Damping stops at a floor (112.8, rebuilt by ruling
+    133.1 below); the client's four-decimal `ECC` already floors the display.
+  - _Physics._ Irregular counts keep the share of the capture distribution, drawn in Hill radii of
+    the formation distance, that fits now, over the share that fitted where the giant formed, so a
+    giant that never moved keeps ruling 83.4's count bit for bit and a hot giant keeps none (112.4).
+    `DerivedBody::equilibrium_temperature` is irradiation only and `effective_temperature` a
+    giant's with its internal heat; the wire gains `effective_temperature_k` and the client a
+    `T EFF` row for giants (112.7). A massive ring is icy where its particles, T⁴ = `T_bb`⁴ + W
+    `T_eff`⁴ at 1.5 planetary radii, are below 115 K. A host that places nothing is `Barren`
+    (112.8): `close_binary`'s star B, whose disc its companion cuts to 0.085–0.27 au with 0.043 M⊕
+    of solids, drew a two-planet hot chain that `group_masses` could not fill. Icy belts' members
+    take ruling 83.7's rock-and-ice model (ice 0.35–0.50 at their radius rank, `moon_radius`), as
+    record and as their moons' parent (D).
+  - _112.2's trial_ (`EARLY_M_DWARF_MASS_STEP_DEX`, the drift-fed characteristic mass about
+    0.35–0.6 M☉, blended by `early_m_dwarf_share`), read after escape, at 0 / +0.05 / +0.10 /
+    +0.15 dex: 0.5–1.5 R⊕ at 0.5–7 d per star 0.400 / 0.384 / 0.365 / 0.348 [0.19–0.39]; 1.5–4 R⊕
+    0.116 / 0.124 / 0.133 / 0.140 [0.10–0.26]; rocky : sub-Neptune as seen 3.45 / 3.09 / 2.75 /
+    2.49 [1.6]; per single early M 2.61 / 2.65 / 2.68 / 2.71 [2.9–4.4]. Built at +0.15: every
+    window holds, 102.1's early-M window is met and leaves its pin, the singles are re-pinned
+    2.67–2.75 and the early M hot chains' rescaled share 0.20–0.24 (0.222).
+  - _131.2_ (`radius_valley_emerges`, the sample to 6 R⊕): up to 1.8 : 1.8–6 R⊕ 0.716 at 0.1–1 Gyr,
+    0.734 at 1–10 Gyr (×1.026 against Rogers and Owen's ×1.23), so the check holds; Berger's split
+    ×0.958 (pinned 0.9–1.0). Of 19,457 paired planets 2.1% are enveloped at a tenth of their age
+    and bare at it, and 5.8% cross 3.5 R⊕ downward; 99.8% of the 1–1.8 R⊕ planets are bare at
+    10 Myr.
+  - _Ruling 133, on the findings above (`pfix14`, research in `_orchestration/research/r-pfix14/`)._
+    - **133.1, the floor** (`placement/classes/secular.rs`). (5⁄4) α is withdrawn. Laplace
+      coefficients come from their hypergeometric series (to 10⁻¹⁷, at most 2,000 terms; within
+      10⁻¹² of quadrature at α 0.3–0.95). Each pair is Wu and Goldreich's eq. 8, general relativity
+      on both diagonals and the damped planet's tidal bulge (Love number 0.4 for a giant from
+      0.1 M_J, 0.3 below, Chen and Kipping's median radius) on its own. The floor is the mode with
+      the smaller share of its deficit in the damped planet, from the sibling of the largest ρ `e_k`
+      (`e_k` decayed by k's own tides to the system's age at the epoch, so only primordial values
+      choose it). The mode decays at 1/`τ_k` + Σ `s_j`/`τ_j`, and the neighbour's eccentricity
+      takes the drain with its axis kept. A pair the placer snapped to 2:1, 3:2 or 4:3 holds LXW's
+      near-resonant term, which does not decay (5:3 takes the secular floor alone). The floor is
+      the larger, held to [0, e₀]. Tested: Mardling's eq. 36 at small α (within 5%), HD 83443's
+      e₁/e₂ in 0.08–0.25 (R_J, k₂ 0.5), a hot Jupiter's share under 10⁻⁴ and its ratio under 0.01,
+      an equal α 0.75 pair's share 0.3–0.6, a TRAPPIST-1-like chain's resonant terms in
+      10⁻³–10⁻².
+    - **133.2.** An irregular's semi-major axis, not its apocentre, is held inside Domingos et al.'s
+      limit (Jupiter's fitting share 0.949); the pericentre still clears the radius and the Roche
+      limit. The captures' e of 0.5–0.6 extrapolate the fit's e_sat term (its grid stops at 0.5).
+    - **133.3.** The count's normalisation stands.
+    - **133.4.** The companion's present pericentre is q₀ (M₀/M)^(1−w), w from Veras's Ψ of the
+      pair's own orbit (the weight ruling 84.4's, ours). A supernova in the pair unbinds it when
+      M/M₀ < r ÷ 2a at the explosion, and it then cuts nothing. Plan 11's engine replaces this
+      when it is wired.
+    - **133.5.** `no_planet_hotter_than_its_star` accepts a surface at its host's temperature, the
+      grey greenhouse's bound, and prints the saturated share as a finding, held to 10⁻³.
+    - **133.6.** 115 K stands. Its doc is restated on a ring's surface density (Σ ≈ 400 g cm⁻² lasts
+      about 1.3 Gyr at 115 K; a lone 1 m grain 6 × 10⁸ yr).
+- **Future work, P14.T13 (ruling 133.5): volatiles dissolving into a magma ocean.** On a surface
+  above the solidus, water and some carbon dioxide partition into the melt before the greenhouse
+  is iterated (Boer et al. 2025 §3: 240 bar over a solid interior, 84 bar at full melt; Nicholls
+  et al. 2024). It needs a sourced solubility law (Lebrun et al. 2013 or Bower et al. 2019, not
+  read). Until then `atmosphere()` gives a `Crust::Molten` world its whole inventory in the air, and
+  its surface can saturate at its host's temperature.

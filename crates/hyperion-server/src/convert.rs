@@ -29,9 +29,10 @@ use hyperion_sim::galaxy::params::{
 use hyperion_sim::galaxy::placement::layer_spec;
 use hyperion_sim::galaxy::potential::PotentialTables;
 use hyperion_sim::galaxy::query::{
-    BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult, SystemHit,
-    epoch_velocity,
+    BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult,
+    SubstellarRequest, SystemHit, epoch_velocity,
 };
+use hyperion_sim::galaxy::substellar::SubstellarAbundance;
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
 use hyperion_sim::id::Layer;
 use hyperion_sim::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
@@ -245,10 +246,12 @@ impl TryFrom<&SystemsInRangeRequest> for RangeRequest {
         let centre = query_centre(&request.centre)?;
         let radius = query_radius(request.radius_ly)?;
         let limit = query_limit(request.limit)?;
+        let (floor, substellar) = mass_floor(request.min_layer);
         let query = RangeQuery::builder(centre, radius)
             .time(time)
             .limit(limit)
-            .mass_floor(mass_floor(request.min_layer))
+            .mass_floor(floor)
+            .substellar(substellar)
             .cell_budget(MAX_QUERY_CELLS)
             .build()
             .map_err(refused_query)?;
@@ -320,15 +323,22 @@ fn query_limit(limit: u32) -> Result<NonZeroU32, ConvertRequestError> {
     Ok(limit)
 }
 
-/// The sim's mass floor for the lightest layer the client asked for.
+/// The sim's mass floor for the lightest layer the client asked for, and the substellar layers
+/// that asks for: a client that sends `brown_dwarf` or `rogue_planet` has asked for them, and no
+/// other value does (plan 13, design note 9), so the two can never disagree.
 #[must_use]
-fn mass_floor(layer: MassLayer) -> MassFloor {
+fn mass_floor(layer: MassLayer) -> (MassFloor, SubstellarRequest) {
     match layer {
-        MassLayer::A => MassFloor::LayerA,
-        MassLayer::B => MassFloor::LayerB,
-        MassLayer::C => MassFloor::LayerC,
-        MassLayer::D => MassFloor::LayerD,
-        MassLayer::E => MassFloor::LayerE,
+        MassLayer::A => (MassFloor::LayerA, SubstellarRequest::None),
+        MassLayer::B => (MassFloor::LayerB, SubstellarRequest::None),
+        MassLayer::C => (MassFloor::LayerC, SubstellarRequest::None),
+        MassLayer::D => (MassFloor::LayerD, SubstellarRequest::None),
+        MassLayer::E => (MassFloor::LayerE, SubstellarRequest::None),
+        MassLayer::BrownDwarf => (MassFloor::BrownDwarfs, SubstellarRequest::BrownDwarfs),
+        MassLayer::RoguePlanet => (
+            MassFloor::RoguePlanets,
+            SubstellarRequest::BrownDwarfsAndRoguePlanets,
+        ),
     }
 }
 
@@ -345,7 +355,8 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
         | BuildRangeQueryError::RadiusBeyondRootCube => "radius_ly",
         BuildRangeQueryError::CentreOutsideRootCube => "centre",
         BuildRangeQueryError::TimeOutsideClockWindow(_) => "time",
-        BuildRangeQueryError::SubstellarLayersUnavailable => "min_layer",
+        BuildRangeQueryError::SubstellarNotRequested
+        | BuildRangeQueryError::SubstellarBelowFloor => "min_layer",
     };
     ConvertRequestError::new(field, error)
 }
@@ -423,8 +434,12 @@ fn system_record(
     }
 }
 
-/// The census as the wire carries it: all five layers, A to E, each with its band, its expected
-/// count, what it returned and why it is in or out (design note 13).
+/// The census as the wire carries it: all five stellar layers, A to E, then the substellar layers
+/// the request asked for (plan 13), each with its band, its expected count, what it returned and
+/// why it is in or out (design note 13).
+///
+/// A request that asks for no substellar layer has plan 04's five lines, so its answer is the same
+/// bytes as before plan 13.
 #[must_use]
 fn census(query: &RangeQuery, result: &RangeResult) -> hyperion_protocol::Census {
     let census = result.census();
@@ -435,22 +450,32 @@ fn census(query: &RangeQuery, result: &RangeResult) -> hyperion_protocol::Census
         let count = &mut returned[usize::from(hit.record().layer().value())];
         *count = count.saturating_add(1);
     }
-    let layers = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
-        .into_iter()
-        .map(|layer| {
-            let band = layer_spec(layer)
-                .expect("every stellar layer has a row in plan 03's layer table")
-                .band();
-            LayerCensus {
-                layer: mass_layer(layer),
-                mass_min_msun: band.lo(),
-                mass_max_msun: band.hi(),
-                expected: census.expected().get(layer),
-                returned: returned[usize::from(layer.value())],
-                status: layer_status(layer, census, query.mass_floor()),
-            }
-        })
-        .collect();
+    let requested = query.substellar();
+    let layers = [
+        Layer::A,
+        Layer::B,
+        Layer::C,
+        Layer::D,
+        Layer::E,
+        Layer::BrownDwarf,
+        Layer::RoguePlanet,
+    ]
+    .into_iter()
+    .filter(|&layer| requested.admits(layer))
+    .map(|layer| {
+        let band = layer_spec(layer)
+            .expect("every layer has a row in plan 03's layer table")
+            .band();
+        LayerCensus {
+            layer: mass_layer(layer),
+            mass_min_msun: band.lo(),
+            mass_max_msun: band.hi(),
+            expected: census.expected().get(layer),
+            returned: returned[usize::from(layer.value())],
+            status: layer_status(layer, census, query.mass_floor()),
+        }
+    })
+    .collect();
     hyperion_protocol::Census {
         limit: query.limit().get(),
         complete_above_msun: census.complete_above().map(SolarMasses::value),
@@ -493,8 +518,8 @@ fn below_mass_floor(layer: Layer, floor: MassFloor) -> bool {
         Layer::C => MassFloor::LayerC,
         Layer::D => MassFloor::LayerD,
         Layer::E => MassFloor::LayerE,
-        // No floor names a substellar layer until plan 13, and the census lists none of them.
-        Layer::BrownDwarf | Layer::RoguePlanet => return false,
+        Layer::BrownDwarf => MassFloor::BrownDwarfs,
+        Layer::RoguePlanet => MassFloor::RoguePlanets,
     };
     admits > floor
 }
@@ -509,13 +534,7 @@ fn galactic_position(position: &GalacticPosition) -> hyperion_protocol::Galactic
     }
 }
 
-/// The wire's layer for a stellar layer.
-///
-/// # Panics
-///
-/// For the brown-dwarf and rogue-planet layers, which the first milestone never places:
-/// `RangeQueryBuilder::build` refuses a substellar request, and the wire has no value for them
-/// until plan 13 sends one.
+/// The wire's layer.
 #[must_use]
 fn mass_layer(layer: Layer) -> MassLayer {
     match layer {
@@ -524,9 +543,8 @@ fn mass_layer(layer: Layer) -> MassLayer {
         Layer::C => MassLayer::C,
         Layer::D => MassLayer::D,
         Layer::E => MassLayer::E,
-        Layer::BrownDwarf | Layer::RoguePlanet => {
-            panic!("the substellar layer {layer:?} has no wire form until plan 13 places it")
-        }
+        Layer::BrownDwarf => MassLayer::BrownDwarf,
+        Layer::RoguePlanet => MassLayer::RoguePlanet,
     }
 }
 
@@ -633,7 +651,7 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
 ///
 /// Raised by whoever adds a parameter, which is what makes them decide whether it is sent.
 #[cfg(test)]
-const PARAMETERS_ACCOUNTED_FOR: usize = 95;
+const PARAMETERS_ACCOUNTED_FOR: usize = 99;
 
 /// The galaxy's parameters as the wire carries them: grouped, keyed, and in display units.
 ///
@@ -667,6 +685,7 @@ pub(crate) fn galaxy_parameters(universe: &Universe, galaxy: &Galaxy) -> GalaxyP
         group("arms", arms(params.arms())),
         group("history", history(params)),
         group("rotation", rotation(galaxy.potential())),
+        group("substellar", substellar(galaxy.substellar())),
     ];
     GalaxyParameters {
         universe: universe.id().into(),
@@ -982,6 +1001,45 @@ fn fixed(key: &str, unit: Unit, value: f64) -> Parameter {
     number(key, ParameterOrigin::Fixed, unit, value)
 }
 
+/// The `substellar` group (plan 13, P13.T7): the free-floating objects per system, and whether the
+/// rogue planets saturate at the index limit in the galaxy's densest cells (ruling 125).
+///
+/// `rogue_planet_cap_per_system` keeps its name and is the saturation threshold, the abundance per
+/// system at which the densest cell reaches the limit; `rogue_planets_capped` means "the centre
+/// saturates" (ruling 125.3). All four are derived from the galaxy.
+#[must_use]
+fn substellar(abundance: &SubstellarAbundance) -> Vec<Parameter> {
+    vec![
+        derived(
+            "substellar.brown_dwarfs_per_system",
+            Unit::None,
+            abundance.brown_dwarfs_per_system(),
+        ),
+        derived(
+            "substellar.rogue_planets_per_system",
+            Unit::None,
+            abundance.rogue_planets_per_system(),
+        ),
+        derived(
+            "substellar.rogue_planet_cap_per_system",
+            Unit::None,
+            abundance.rogue_planet_cap_per_system(),
+        ),
+        Parameter {
+            key: "substellar.rogue_planets_capped".to_owned(),
+            origin: ParameterOrigin::Derived,
+            value: ParameterValue::Text {
+                value: if abundance.is_saturated() {
+                    "yes"
+                } else {
+                    "no"
+                }
+                .to_owned(),
+            },
+        },
+    ]
+}
+
 /// A parameter whose value is a name, which the generator version fixes.
 #[must_use]
 fn text(key: &str, value: &str) -> Parameter {
@@ -1085,7 +1143,7 @@ mod tests {
 
     use hyperion_protocol::UniverseStatus;
     use hyperion_sim::Seed;
-    use hyperion_sim::galaxy::placement::NoCache;
+    use hyperion_sim::galaxy::placement::{NoCache, SystemKind};
     use hyperion_sim::galaxy::query::range_query;
     use hyperion_sim::stellar::brief::range_brief;
     use hyperion_sim::stellar::system::SystemStars;
@@ -1345,7 +1403,7 @@ mod tests {
     /// independently of the builder. The parameters panel shows groups and keys in this order, so
     /// the order is part of the contract with plan 05's glossary (ruling 11 of 2026-09-22), and a
     /// golden blessed from the builder would not catch a key moved within its group.
-    const PLAN_TABLE: [(&str, &[&str]); 12] = [
+    const PLAN_TABLE: [(&str, &[&str]); 13] = [
         ("identity", &["seed", "generator_version", "mass_function"]),
         (
             "mass",
@@ -1476,7 +1534,76 @@ mod tests {
                 "rotation.escape_speed",
             ],
         ),
+        // Plan 13, P13.T7.
+        (
+            "substellar",
+            &[
+                "substellar.brown_dwarfs_per_system",
+                "substellar.rogue_planets_per_system",
+                "substellar.rogue_planet_cap_per_system",
+                "substellar.rogue_planets_capped",
+            ],
+        ),
     ];
+
+    /// Plan 13, P13.T7: the substellar group reads the galaxy's own abundances, as numbers with no
+    /// unit, and says whether its densest cells saturate.
+    #[test]
+    fn the_substellar_group_is_the_galaxys_abundance() {
+        let response = fixture();
+        let abundance = milky_way().substellar();
+        let group = response
+            .groups
+            .iter()
+            .find(|group| group.key == "substellar")
+            .expect("the substellar group is sent");
+        let value = |key: &str| {
+            &group
+                .parameters
+                .iter()
+                .find(|p| p.key == key)
+                .unwrap_or_else(|| panic!("{key} is sent"))
+                .value
+        };
+        for (key, expected) in [
+            (
+                "substellar.brown_dwarfs_per_system",
+                abundance.brown_dwarfs_per_system(),
+            ),
+            (
+                "substellar.rogue_planets_per_system",
+                abundance.rogue_planets_per_system(),
+            ),
+            (
+                "substellar.rogue_planet_cap_per_system",
+                abundance.rogue_planet_cap_per_system(),
+            ),
+        ] {
+            let ParameterValue::Number { value, unit } = value(key) else {
+                panic!("{key} is a number");
+            };
+            assert_same_bits(*value, expected);
+            assert_eq!(*unit, Unit::None, "{key}");
+        }
+        assert!((0.2..0.3).contains(&abundance.brown_dwarfs_per_system()));
+        assert_eq!(
+            value("substellar.rogue_planets_capped"),
+            &ParameterValue::Text {
+                value: if abundance.is_saturated() {
+                    "yes"
+                } else {
+                    "no"
+                }
+                .to_owned()
+            }
+        );
+        assert!(
+            group
+                .parameters
+                .iter()
+                .all(|p| p.origin == ParameterOrigin::Derived)
+        );
+    }
 
     #[test]
     fn the_groups_are_the_plans_table_in_its_order() {
@@ -1711,7 +1838,10 @@ mod tests {
                 .systems()
                 .iter()
                 .map(|hit| {
-                    range_brief(milky_way(), hit.record(), query.time()).map(|b| brief_dto(&b))
+                    (hit.record().kind() != SystemKind::RoguePlanet)
+                        .then(|| range_brief(milky_way(), hit.record(), query.time()))
+                        .flatten()
+                        .map(|b| brief_dto(&b))
                 })
                 .collect()
         });
@@ -1853,15 +1983,31 @@ mod tests {
     }
 
     #[test]
-    fn every_min_layer_becomes_its_mass_floor() {
-        for (layer, floor) in [
-            (MassLayer::A, MassFloor::LayerA),
-            (MassLayer::B, MassFloor::LayerB),
-            (MassLayer::C, MassFloor::LayerC),
-            (MassLayer::D, MassFloor::LayerD),
-            (MassLayer::E, MassFloor::LayerE),
+    fn every_min_layer_becomes_its_mass_floor_and_request() {
+        let none = SubstellarRequest::None;
+        for (layer, floor, request) in [
+            (MassLayer::A, MassFloor::LayerA, none),
+            (MassLayer::B, MassFloor::LayerB, none),
+            (MassLayer::C, MassFloor::LayerC, none),
+            (MassLayer::D, MassFloor::LayerD, none),
+            (MassLayer::E, MassFloor::LayerE, none),
+            (
+                MassLayer::BrownDwarf,
+                MassFloor::BrownDwarfs,
+                SubstellarRequest::BrownDwarfs,
+            ),
+            (
+                MassLayer::RoguePlanet,
+                MassFloor::RoguePlanets,
+                SubstellarRequest::BrownDwarfsAndRoguePlanets,
+            ),
         ] {
-            assert_eq!(mass_floor(layer), floor, "{layer:?}");
+            assert_eq!(mass_floor(layer), (floor, request), "{layer:?}");
+            // And the sim takes every pair: the wire cannot send one that disagrees.
+            let query = RangeRequest::try_from(&sunlike(10.0, 4_000, layer))
+                .expect("every min_layer is a query")
+                .into_query();
+            assert_eq!((query.mass_floor(), query.substellar()), (floor, request));
         }
     }
 
@@ -1887,10 +2033,18 @@ mod tests {
                 );
             }
         }
-        // A substellar layer is in no census this milestone builds, and no floor names one yet.
-        for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
-            assert!(!below_mass_floor(layer, MassFloor::LayerA), "{layer:?}");
+        // The substellar layers lie below every stellar floor, and each below the floor above it.
+        for floor in floors {
+            assert!(below_mass_floor(Layer::BrownDwarf, floor), "{floor:?}");
+            assert!(below_mass_floor(Layer::RoguePlanet, floor), "{floor:?}");
         }
+        assert!(!below_mass_floor(Layer::BrownDwarf, MassFloor::BrownDwarfs));
+        assert!(below_mass_floor(Layer::RoguePlanet, MassFloor::BrownDwarfs));
+        assert!(!below_mass_floor(
+            Layer::RoguePlanet,
+            MassFloor::RoguePlanets
+        ));
+        assert!(!below_mass_floor(Layer::A, MassFloor::RoguePlanets));
     }
 
     #[test]
@@ -2036,9 +2190,82 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "has no wire form until plan 13")]
-    fn a_substellar_layer_has_no_wire_layer_yet() {
-        let _ = mass_layer(Layer::BrownDwarf);
+    fn every_layer_has_its_wire_layer() {
+        assert_eq!(
+            Layer::ALL.map(mass_layer),
+            [
+                MassLayer::A,
+                MassLayer::B,
+                MassLayer::C,
+                MassLayer::D,
+                MassLayer::E,
+                MassLayer::BrownDwarf,
+                MassLayer::RoguePlanet,
+            ]
+        );
+    }
+
+    /// Plan 13, P13.T7: at 10 ly with `rogue_planet` the answer holds stars, brown dwarfs and rogue
+    /// planets; the census has seven lines, the two substellar ones with their bands in M☉; the
+    /// brown dwarfs carry their briefs and the rogue planets none.
+    #[test]
+    fn a_substellar_request_returns_each_kind_and_its_census_lines() {
+        let mut request = sunlike(10.0, MAX_CENSUS_LIMIT, MassLayer::RoguePlanet);
+        request.include_stellar = true;
+        let answer = answer(&request);
+        let lines: Vec<(MassLayer, LayerStatus)> = answer
+            .census
+            .layers
+            .iter()
+            .map(|line| (line.layer, line.status))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                MassLayer::A,
+                MassLayer::B,
+                MassLayer::C,
+                MassLayer::D,
+                MassLayer::E,
+                MassLayer::BrownDwarf,
+                MassLayer::RoguePlanet,
+            ]
+            .map(|layer| (layer, LayerStatus::Included))
+        );
+        let brown = &answer.census.layers[5];
+        assert!((0.012_40..0.012_42).contains(&brown.mass_min_msun));
+        assert_same_bits(brown.mass_max_msun, 0.08);
+        let rogue = &answer.census.layers[6];
+        assert!((1.000e-6..1.002e-6).contains(&rogue.mass_min_msun));
+        assert_same_bits(rogue.mass_max_msun, brown.mass_min_msun);
+        assert_eq!(answer.census.complete_above_msun, Some(rogue.mass_min_msun));
+        let of = |layer| answer.systems.iter().filter(move |row| row.layer == layer);
+        assert!(of(MassLayer::RoguePlanet).count() > 100);
+        assert!(of(MassLayer::RoguePlanet).all(|row| row.stellar.is_none()));
+        assert!(of(MassLayer::RoguePlanet).all(|row| {
+            let json = serde_json::to_value(row).unwrap();
+            json.get("stellar").is_none() && row.initial_mass_msun < 0.0125
+        }));
+        assert!(
+            of(MassLayer::BrownDwarf)
+                .all(|row| row.stellar.as_ref().is_some_and(|b| { b.star_count == 1 }))
+        );
+        let returned: u32 = answer.census.layers.iter().map(|line| line.returned).sum();
+        assert_eq!(usize::try_from(returned).unwrap(), answer.systems.len());
+    }
+
+    /// With `brown_dwarf` the census stops at the brown dwarfs' line and no rogue planet comes back.
+    #[test]
+    fn a_brown_dwarf_request_has_six_census_lines() {
+        let answer = answer(&sunlike(20.0, MAX_CENSUS_LIMIT, MassLayer::BrownDwarf));
+        assert_eq!(answer.census.layers.len(), 6);
+        assert_eq!(answer.census.layers[5].layer, MassLayer::BrownDwarf);
+        assert!(
+            answer
+                .systems
+                .iter()
+                .all(|row| row.layer != MassLayer::RoguePlanet)
+        );
     }
 
     #[test]
@@ -2053,10 +2280,8 @@ mod tests {
                 BuildRangeQueryError::TimeOutsideClockWindow(UniverseTime::EPOCH),
                 "time",
             ),
-            (
-                BuildRangeQueryError::SubstellarLayersUnavailable,
-                "min_layer",
-            ),
+            (BuildRangeQueryError::SubstellarNotRequested, "min_layer"),
+            (BuildRangeQueryError::SubstellarBelowFloor, "min_layer"),
         ] {
             let converted = RequestError::from(refused_query(error));
             assert_eq!(converted.code, ErrorCode::BadRequest);

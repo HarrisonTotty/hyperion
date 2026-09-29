@@ -53,8 +53,9 @@ pub const CORRECTION_MASSES: [f64; 4] = direct::CORRECTION_MASSES;
 /// The edges of the table's period bins, as x = log₁₀(P ÷ 1 d): 0.2–1, 1–2, …, 7–8.
 pub const BIN_EDGES: [f64; 9] = [0.2, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
 
-/// The table the generator draws with.
-pub const COMMITTED: CorrectionTable = direct::PERIOD_CORRECTION;
+/// The table the generator draws with: `hyperion-fit`'s `period_correction` task's,
+/// [`tables::period_correction`](crate::tables::period_correction).
+pub const COMMITTED: CorrectionTable = crate::tables::period_correction::PERIOD_CORRECTION;
 
 /// The seed of the fit's galaxy, the Milky Way fixture.
 pub const GALAXY_SEED: u64 = 0x0b11_0002_0000_5eed;
@@ -203,20 +204,14 @@ mod tests {
     /// The fit's check of the table as committed (ruling 81.3): at each row's mass, the periods of
     /// the direct companions of the fit's own sample of 20,000 systems fill the eight bins in Moe
     /// and Di Stefano's shares, each to 0.2% of its share, the plan's figure after twelve
-    /// iterations. `hyperion-fit`'s `period_correction` task is the fit; this is the table's
-    /// staleness guard, at a twenty-fourth of the fit's cost.
-    ///
-    /// The 7 M☉ row is stale: a rerun of the fit at version 13 moves it (its first bin from 0.655
-    /// to 0.648, its fifth from 1.243 to 1.274), and the committed row misses by 1.5%, where the
-    /// other three rows miss by 0.06–0.15%. Refitting moves the generator's output, so it waits for
-    /// the version 14 bump. Until then the row is held to an interim 0.2–2% band, which the
-    /// coordinator accepted: it fails once the row is refit, and the refit **must** then narrow the
-    /// 7 M☉ row to the other rows' 0.2% (drop `STALE_MASS` and its band).
+    /// iterations. `hyperion-fit`'s `period_correction` task is the fit and writes
+    /// `tables/period_correction.rs`; this is the table's staleness guard, at a twenty-fourth of
+    /// the fit's cost. P11.T1.d's refit narrowed the 7 M☉ row's interim 0.2–2% back to the
+    /// others' 0.2%.
     #[test]
     #[ignore = "slow: the direct companions of 80,000 hierarchies, about 10 s"]
     fn the_period_correction_gives_its_bin_shares() {
         const SAMPLE: u32 = 20_000;
-        const STALE_MASS: f64 = 7.0;
         let galaxy = galaxy();
         let mut failures = Vec::new();
         for m in CORRECTION_MASSES {
@@ -235,8 +230,7 @@ mod tests {
                  {measured:.4?} against {target:.4?}",
                 counts.iter().sum::<u64>()
             );
-            let stale = (m - STALE_MASS).abs() < 1e-9;
-            let window = if stale { 0.002..=0.02 } else { 0.0..=0.002 };
+            let window = 0.0..=0.002;
             if !window.contains(&worst) {
                 failures.push(format!("{m} M☉ misses by {worst:.4}, outside {window:?}"));
             }

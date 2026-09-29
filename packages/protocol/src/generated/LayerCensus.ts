@@ -11,11 +11,12 @@ export type LayerCensus = {
  */
 layer: MassLayer, 
 /**
- * The lower edge of the layer's band of primary initial mass, in M☉.
+ * The lower edge of the layer's band of primary initial mass (of object mass for a
+ * substellar layer), in M☉.
  */
 mass_min_msun: number, 
 /**
- * The upper edge of the layer's band of primary initial mass, in M☉.
+ * The upper edge of the layer's band, in M☉.
  */
 mass_max_msun: number, 
 /**

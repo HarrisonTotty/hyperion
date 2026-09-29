@@ -1,116 +1,116 @@
-# generator_version = 14
-window n=1e-3 = 0x410bb4362bb8b320  # 226950.77134838048
-window n=1e-3 radius at 0.01 = 0x404c0939eee86655  # 56.0720804819836
-window n=1e-3 speed at 0.01 = 0x40b8b4585b4df624  # 6324.345143196671
-window n=1e-3 radius at 0.3 = 0x4075a4d129cad403  # 346.3010652468658
-window n=1e-3 speed at 0.3 = 0x408399e2e3aac518  # 627.2357858029745
-window n=1e-3 radius at 0.99 = 0x4081956ebdca4509  # 562.6790729334181
-window n=1e-3 speed at 0.99 = 0x4072ed852affe059  # 302.84501171066
-window n=1e-2 = 0x411d66294acb7ab4  # 481674.32304183696
-window n=1e-2 radius at 0.01 = 0x4051adb94ee23d6c  # 70.71443531125777
-window n=1e-2 speed at 0.01 = 0x40a0cb1e6b217d67  # 2149.5594110932902
-window n=1e-2 radius at 0.3 = 0x40729d870bbf9677  # 297.8454701885125
-window n=1e-2 speed at 0.3 = 0x406f15788044575f  # 248.67095959995183
-window n=1e-2 radius at 0.99 = 0x407ce7799ea53345  # 462.46719231158596
-window n=1e-2 speed at 0.99 = 0x40582e94a057f380  # 96.72782143200857
-window n=1e-1 = 0x41299130a997b4a9  # 837784.3312355477
-window n=1e-1 radius at 0.01 = 0x404d8f8b92d419f4  # 59.12144694668305
-window n=1e-1 speed at 0.01 = 0x408bc982adcaaf9e  # 889.1888080439419
-window n=1e-1 radius at 0.3 = 0x406aca519f9ed92f  # 214.3224638082988
-window n=1e-1 speed at 0.3 = 0x40543186fd44643f  # 80.77386409453264
-window n=1e-1 radius at 0.99 = 0x4073600d39bf6c17  # 310.0032289006644
-window n=1e-1 speed at 0.99 = 0x404111b1713fd6a5  # 34.13822761170494
-window n=1e0 = 0x4129a551819f05a5  # 840360.753166367
-window n=1e0 radius at 0.01 = 0x4042e0638453694b  # 37.75303701470201
-window n=1e0 speed at 0.01 = 0x408138537cd052ec  # 551.0407654071146
-window n=1e0 radius at 0.3 = 0x405dfd0ae49f4f0c  # 119.9537898593664
-window n=1e0 speed at 0.3 = 0x4045b1ce9bc31d13  # 43.38911768939047
-window n=1e0 radius at 0.99 = 0x406583cba0567d44  # 172.11860672848172
-window n=1e0 speed at 0.99 = 0x4032af3c67c5ef8f  # 18.684515462707676
-window n=1e1 = 0x411a900010d6d829  # 435200.01644456625
-window n=1e1 radius at 0.01 = 0x403247b65e149ed6  # 18.280126457247057
-window n=1e1 speed at 0.01 = 0x407e4514f3a7c269  # 484.3176151803114
-window n=1e1 radius at 0.3 = 0x404b4214db85d76b  # 54.516261520721706
-window n=1e1 speed at 0.3 = 0x4042ea708330f1b1  # 37.83155860795831
-window n=1e1 radius at 0.99 = 0x405387880837f61c  # 78.11767774071672
-window n=1e1 speed at 0.99 = 0x403057d29770d70a  # 16.343057122277095
-window n=1e2 = 0x41074a880be4ac2f  # 190801.0058072521
-window n=1e2 radius at 0.01 = 0x402039463a09d87d  # 8.111863912298071
-window n=1e2 speed at 0.01 = 0x407bd4c994d7a00c  # 445.29921421269023
-window n=1e2 radius at 0.3 = 0x403785e3b7d984e3  # 23.52300595341229
-window n=1e2 speed at 0.3 = 0x40429148056781ce  # 37.135010409870674
-window n=1e2 radius at 0.99 = 0x4040d8129131ac0f  # 33.68806662488361
-window n=1e2 speed at 0.99 = 0x40301016e7177626  # 16.06284946749488
-window n=1e3 = 0x40f4073d80d8883e  # 82035.8439565012
-window n=1e3 radius at 0.01 = 0x400c36a47c82df9c  # 3.5266809203566947
-window n=1e3 speed at 0.01 = 0x407ab6cca4f052fd  # 427.4249619853652
-window n=1e3 radius at 0.3 = 0x40242551ce3b6faa  # 10.072889752154726
-window n=1e3 speed at 0.3 = 0x404276c5d28470b0  # 36.9279120585137
-window n=1e3 radius at 0.99 = 0x402cd797714d8300  # 14.4210772902602
-window n=1e3 speed at 0.99 = 0x402ff873a46dbc98  # 15.985257280726998
-window n=1e4 = 0x40e130da764914fc  # 35206.826939145074
-window n=1e4 radius at 0.01 = 0x3ff84b802d9794c2  # 1.5184327870313585
-window n=1e4 speed at 0.01 = 0x4079ff6e38a17fbb  # 415.9644094761422
-window n=1e4 radius at 0.3 = 0x401131eb80194f8e  # 4.298749925179335
-window n=1e4 speed at 0.3 = 0x404257f4d6f5c175  # 36.687159414289376
-window n=1e4 radius at 0.99 = 0x4018454da76319b2  # 6.067679038451773
-window n=1e4 speed at 0.99 = 0x402c37a5393a9de1  # 14.108682430653916
-cap Field = 0x414ad3875e2e89c4  # 3516174.7357952315
-cap TypeIa = 0x414ad3875e2e89c4  # 3516174.7357952315
-cap Bubble = 0x41348ca27e266a8c  # 1346722.4927736847
-type ia rate per year = 0x3f716a50a1233706  # 0.0042517804706230285
-ancient share YoungThinDisc = 0x3f67c4dcfe1a9fb6  # 0.0029014889012905732
-ancient share OldThinDisc = 0x3fa506fe2899d5e7  # 0.04106897588364316
-ancient share ThickDisc = 0x3fa790a0901b67ed  # 0.04602529296035116
-ancient share Bulge = 0x3fa73f1e56d773dd  # 0.04540343103483455
-ancient share LongBar = 0x3fa684f1a06c40d6  # 0.04398303111349981
-ancient share NuclearDisc = 0x3fa678ec5a70795d  # 0.04389132122035975
-ancient share Halo = 0x3fa7b518a71a0728  # 0.04630353011908844
-progenitor 0: YoungThinDisc Iax explodes T-66797589785418.000000000 s delay 2671420861096260 s component 0 lifetimes 2631072036918187 None leftover PartlyBurntDwarf
-progenitor 0 primary = 0x401782e1daf14004  # 5.877814694380508
+# generator_version = 15
+window n=1e-3 = 0x411ab045b66fb180  # 437265.42816045135
+window n=1e-3 radius at 0.01 = 0x4057632de823cd70  # 93.54967692848527
+window n=1e-3 speed at 0.01 = 0x40b138d1352a33c7  # 4408.817217481271
+window n=1e-3 radius at 0.3 = 0x407d9aef49f10058  # 473.68342012540006
+window n=1e-3 speed at 0.3 = 0x407e5cd0596a54a8  # 485.80086652312684
+window n=1e-3 radius at 0.99 = 0x408a338e62183401  # 838.4445230379935
+window n=1e-3 speed at 0.99 = 0x4072d0c700745d2a  # 301.0485844178644
+window n=1e-2 = 0x412019315ca5c640  # 527512.6809522584
+window n=1e-2 radius at 0.01 = 0x40527c3e55202947  # 73.94130447521921
+window n=1e-2 speed at 0.01 = 0x409f80c08c7c6284  # 2016.1880359110955
+window n=1e-2 radius at 0.3 = 0x4073a81852b3a490  # 314.5059382455156
+window n=1e-2 speed at 0.3 = 0x406f411868b40b3b  # 250.0342296139223
+window n=1e-2 radius at 0.99 = 0x407ebc1ce1477a66  # 491.75705078049793
+window n=1e-2 speed at 0.99 = 0x4057964aeedf47bc  # 94.34832355313023
+window n=1e-1 = 0x4129cb38471591c4  # 845212.1388364364
+window n=1e-1 radius at 0.01 = 0x404dae0bd244e70f  # 59.35973575939544
+window n=1e-1 speed at 0.01 = 0x408ba96d68fe58f8  # 885.1784229155446
+window n=1e-1 radius at 0.3 = 0x406af1ab706f172b  # 215.5521776361214
+window n=1e-1 speed at 0.3 = 0x40542295d618d3d7  # 80.54039528297959
+window n=1e-1 radius at 0.99 = 0x40737cbc04e20395  # 311.795903094165
+window n=1e-1 speed at 0.99 = 0x4041049b798569b8  # 34.03599471105866
+window n=1e0 = 0x4129aa506d921bf5  # 841000.2140053498
+window n=1e0 radius at 0.01 = 0x4042e25d4c474e53  # 37.76847222787605
+window n=1e0 speed at 0.01 = 0x408137bd538033f3  # 550.9674444213728
+window n=1e0 radius at 0.3 = 0x405e00d54e1d2892  # 120.01301911208637
+window n=1e0 speed at 0.3 = 0x4045b05921b5d612  # 43.377720083033765
+window n=1e0 radius at 0.99 = 0x406586851accd5bd  # 172.20374813086337
+window n=1e0 speed at 0.99 = 0x4032adf82da16643  # 18.679568149475255
+window n=1e1 = 0x411a9070a9849730  # 435228.1655448554
+window n=1e1 radius at 0.01 = 0x403247e67d79471a  # 18.280860750302146
+window n=1e1 speed at 0.01 = 0x407e44f0649e8300  # 484.3086897079338
+window n=1e1 radius at 0.3 = 0x404b425fc9ecc83b  # 54.518548241249356
+window n=1e1 speed at 0.3 = 0x4042ea54871b31c5  # 37.830704582479974
+window n=1e1 radius at 0.99 = 0x405387bdc29f13b3  # 78.12095704588755
+window n=1e1 speed at 0.99 = 0x403057ba5461fb04  # 16.342686914368656
+window n=1e2 = 0x41074a906dc67781  # 190802.05360120165
+window n=1e2 radius at 0.01 = 0x40203949f1cc2499  # 8.111892276925845
+window n=1e2 speed at 0.01 = 0x407bd4c64f5b1870  # 445.298415523378
+window n=1e2 radius at 0.3 = 0x403785e932f5f84d  # 23.523089585353137
+window n=1e2 speed at 0.3 = 0x40429145ac0ddad3  # 37.13493872334006
+window n=1e2 radius at 0.99 = 0x4040d8167e41d7bf  # 33.68818643774966
+window n=1e2 speed at 0.99 = 0x40301014de192844  # 16.062818413869778
+window n=1e3 = 0x40f4073e1d762ae3  # 82035.88219277146
+window n=1e3 radius at 0.01 = 0x400c36a50a851c80  # 3.5266819784042696
+window n=1e3 speed at 0.01 = 0x407ab6cc5bbf68a1  # 427.4248921849158
+window n=1e3 radius at 0.3 = 0x4024255233e7ffd0  # 10.072892782278274
+window n=1e3 speed at 0.3 = 0x404276c59f58a533  # 36.92790595844635
+window n=1e3 radius at 0.99 = 0x402cd79802e00fa7  # 14.421081628657545
+window n=1e3 speed at 0.99 = 0x402ff8734bcdb044  # 15.98525463949057
+window n=1e4 = 0x40e130da81b16204  # 35206.82833165306
+window n=1e4 radius at 0.01 = 0x3ff84b8037fffdb2  # 1.5184328258036257
+window n=1e4 speed at 0.01 = 0x4079ff6e324c96ca  # 415.96440343778215
+window n=1e4 radius at 0.3 = 0x401131eb876c5eff  # 4.29875003432221
+window n=1e4 speed at 0.3 = 0x404257f4d298b77f  # 36.6871588941276
+window n=1e4 radius at 0.99 = 0x4018454db13e2d01  # 6.067679185314092
+window n=1e4 speed at 0.99 = 0x402c37a530730734  # 14.108682169000168
+cap Field = 0x414b17ecdcc43b03  # 3551193.72473848
+cap TypeIa = 0x414b17ecdcc43b03  # 3551193.72473848
+cap Bubble = 0x412166ee85fdb5b2  # 570231.2617012768
+type ia rate per year = 0x3f72eabc11a00412  # 0.004618391651093583
+ancient share YoungThinDisc = 0x3f628f9836b5ebe5  # 0.00226573685875796
+ancient share OldThinDisc = 0x3fa2732171214e45  # 0.03603462701780961
+ancient share ThickDisc = 0x3fa4b670da3c7275  # 0.04045441307082324
+ancient share Bulge = 0x3fa46dc1703755a9  # 0.03989986891580639
+ancient share LongBar = 0x3fa3c7bc1757ea12  # 0.03863323006585885
+ancient share NuclearDisc = 0x3fa3bd30cb8aa1e1  # 0.03855278477323388
+ancient share Halo = 0x3fa4d6f64ad4fb76  # 0.04070253051258181
+progenitor 0: YoungThinDisc Iax explodes T-66797589785418.000000000 s delay 2704865986194598 s component 0 lifetimes 2663455038085678 None leftover PartlyBurntDwarf
+progenitor 0 primary = 0x40176318a9b1fcba  # 5.846773768890836
 progenitor 0 secondary = 0x3ffb93c160eaa3cd  # 1.7235730920603942
-progenitor 1: OldThinDisc DoubleDetonation explodes T-133790945517588.000000000 s delay 3126233648576888 s component 1 lifetimes 1704012581206991 Some(2587559606652689) leftover SurvivingDonor { speed: KilometresPerSecond(1221.7813950786153) }
-progenitor 1 primary = 0x401ca2657e6e5d8a  # 7.15859029339425
-progenitor 1 secondary = 0x4017ae7c698ee0f2  # 5.920396470399497
-progenitor 1 separation = 0x41beddeecd6a8644  # 517861069.41611123
-progenitor 2: ThickDisc Merger explodes T-76272915955926.000000000 s delay 338593772288808768 s component 6 lifetimes 20606939742892628 Some(26764596351101424) leftover Nothing
+progenitor 1: OldThinDisc DoubleDetonation explodes T-133790945517588.000000000 s delay 3260024594094476 s component 1 lifetimes 1726299145043031 Some(2671627988364252) leftover SurvivingDonor { speed: KilometresPerSecond(1221.7813950786153) }
+progenitor 1 primary = 0x401c7588e4663a97  # 7.11478001474338
+progenitor 1 secondary = 0x40175b2956fcdb07  # 5.839024886305885
+progenitor 1 separation = 0x41bf685a2f857795  # 526932527.5213559
+progenitor 2: ThickDisc Merger explodes T-76272915955926.000000000 s delay 338670045204764672 s component 6 lifetimes 20606939742892628 Some(26764885673534264) leftover Nothing
 progenitor 2 primary = 0x40058947e4d192b6  # 2.6920316578346855
-progenitor 2 secondary = 0x4003a1624d6b7ae8  # 2.4538007782388043
-progenitor 2 separation = 0x41da20b8d5ba13ab  # 1753408342.9074504
-progenitor 3: Bulge HydrogenDonor explodes T-72983938233399.000000000 s delay 320826989939728640 s component 7 lifetimes 1775935548993064 None leftover HydrogenDonor { speed: KilometresPerSecond(181.9067591092323) }
+progenitor 2 secondary = 0x4003a15d563efd18  # 2.453791307255994
+progenitor 2 separation = 0x41da212023bebde5  # 1753514126.9803402
+progenitor 3: Bulge Iax explodes T-72983938233399.000000000 s delay 320899973877962048 s component 7 lifetimes 1775935548993064 None leftover PartlyBurntDwarf
 progenitor 3 primary = 0x401c149dcc110a44  # 7.020133198299451
-progenitor 3 secondary = 0x3fee3b43eeb0ec2a  # 0.9447345411239259
-progenitor 4: LongBar Merger explodes T-45009071088941.000000000 s delay 269848225067684192 s component 8 lifetimes 3269849701132208 Some(13859250008533938) leftover Nothing
+progenitor 3 secondary = 0x3fee3ac6311799f6  # 0.9446745833236594
+progenitor 4: LongBar Merger explodes T-45009071088941.000000000 s delay 269893234138773120 s component 8 lifetimes 3269849701132208 Some(13859608196188138) leftover Nothing
 progenitor 4 primary = 0x40156df3a5ff8e25  # 5.357374757502417
-progenitor 4 secondary = 0x4008c45b694e8ebb  # 3.095877478322874
-progenitor 4 separation = 0x41dd8d5415429feb  # 1983205461.0410106
-progenitor 5: NuclearDisc Merger explodes T-72371513811695.000000000 s delay 4862915473500340 s component 9 lifetimes 4401032797036586 Some(4737208967054424) leftover Nothing
-progenitor 5 primary = 0x4012faf47da00ff0  # 4.745073283094811
-progenitor 5 secondary = 0x40126ee30449d138  # 4.608287875180672
-progenitor 5 separation = 0x41b271fade313f47  # 309459678.1923718
-progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358415962192459136 s component 11 lifetimes 3081053548977730 Some(12840232908921692) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
+progenitor 4 secondary = 0x4008c44c9699a598  # 3.095849205554895
+progenitor 4 separation = 0x41dd8da59e2bae5b  # 1983288952.6825168
+progenitor 5: NuclearDisc Merger explodes T-72371513811695.000000000 s delay 4801536152009899 s component 9 lifetimes 4349097975370106 Some(4678177409728929) leftover Nothing
+progenitor 5 primary = 0x4013121c78eccd32  # 4.767686738446445
+progenitor 5 secondary = 0x401286386a8f0d23  # 4.631074585896644
+progenitor 5 separation = 0x41b2656c838c52c8  # 308636803.54813814
+progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358440524624456384 s component 11 lifetimes 3081053548977730 Some(12840348295212050) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
 progenitor 6 primary = 0x4015f917b473f570  # 5.493254489495811
-progenitor 6 secondary = 0x400972228946ebec  # 3.1807299351471467
-progenitor 6 separation = 0x41e017f37b500583  # 2160040922.500673
-progenitor 7: YoungThinDisc DoubleDetonation explodes T-9860607974324.000000000 s delay 2640648651519045 s component 0 lifetimes 2628579386269977 Some(2635840015643289) leftover SurvivingDonor { speed: KilometresPerSecond(1280.7002871299778) }
-progenitor 7 primary = 0x4017855a27587428  # 5.880226721547878
-progenitor 7 secondary = 0x40177e2ac5faee94  # 5.873210042420073
-progenitor 7 separation = 0x41a20e4694ed8977  # 151462730.4639394
-progenitor 8: OldThinDisc Iax explodes T-88798210384591.000000000 s delay 7879493467089062 s component 1 lifetimes 1686003276942738 None leftover PartlyBurntDwarf
-progenitor 8 primary = 0x401cc748c34d4ec4  # 7.194613505929457
+progenitor 6 secondary = 0x4009721d3520b592  # 3.180719771443088
+progenitor 6 separation = 0x41e018059252caa7  # 2160077970.587238
+progenitor 7: YoungThinDisc DoubleDetonation explodes T-9860607974324.000000000 s delay 2610142086417050 s component 0 lifetimes 2598368617974501 Some(2605451423538379) leftover SurvivingDonor { speed: KilometresPerSecond(1280.7002871299778) }
+progenitor 7 primary = 0x4017a38e83d63f9d  # 5.909723339034739
+progenitor 7 secondary = 0x40179c6e2b2fed2f  # 5.9027640102388395
+progenitor 7 separation = 0x41a1fc5fbcad003f  # 150876126.3378925
+progenitor 8: OldThinDisc Iax explodes T-88798210384591.000000000 s delay 7968291677473653 s component 1 lifetimes 1689113242058485 None leftover PartlyBurntDwarf
+progenitor 8 primary = 0x401cc0df74204432  # 7.188352407903084
 progenitor 8 secondary = 0x4004de2a63c1b5fb  # 2.6084792893877853
-progenitor 9: ThickDisc DoubleDetonation explodes T-16567164538357.000000000 s delay 316700289950862464 s component 6 lifetimes 5452942520149978 Some(31744922345455644) leftover SurvivingDonor { speed: KilometresPerSecond(1301.7451879581693) }
+progenitor 9: ThickDisc DoubleDetonation explodes T-16567164538357.000000000 s delay 316716857115400832 s component 6 lifetimes 5452942520149978 Some(31745294241227240) leftover SurvivingDonor { speed: KilometresPerSecond(1301.7451879581693) }
 progenitor 9 primary = 0x40117247a71f738a  # 4.361601458830487
-progenitor 9 secondary = 0x4002785bb31227d7  # 2.308768652907911
-progenitor 9 separation = 0x41dbb8828935e9e3  # 1860307492.8424003
-progenitor 10: Bulge Merger explodes T-78791901634881.000000000 s delay 331727018808837632 s component 7 lifetimes 10423552499749600 Some(17891680630274816) leftover Nothing
+progenitor 9 secondary = 0x40027856a384c644  # 2.308759000291305
+progenitor 9 separation = 0x41dbb89b4af27ac0  # 1860332843.788742
+progenitor 10: Bulge Merger explodes T-78791901634881.000000000 s delay 331805810710472512 s component 7 lifetimes 10423552499749600 Some(17891994419797378) leftover Nothing
 progenitor 10 primary = 0x400b69960d75e764  # 3.426555733833924
-progenitor 10 secondary = 0x4006a281fc7669eb  # 2.8293494914662367
-progenitor 10 separation = 0x41dbe67309c2f9e6  # 1872350247.0465026
-progenitor 11: LongBar Merger explodes T-31819319152072.000000000 s delay 313250866772435456 s component 8 lifetimes 4605313815317540 Some(77100822743568832) leftover Nothing
+progenitor 10 secondary = 0x4006a278d4bd449c  # 2.829332029367448
+progenitor 10 separation = 0x41dbe6e381029189  # 1872465412.0401328
+progenitor 11: LongBar Merger explodes T-31819319152072.000000000 s delay 313282686091587456 s component 8 lifetimes 4605313815317540 Some(77104486511543072) leftover Nothing
 progenitor 11 primary = 0x4012a397efcb333e  # 4.659759279992441
-progenitor 11 secondary = 0x3ff9f6df4fc9bace  # 1.6227715603560458
-progenitor 11 separation = 0x41d9b38bc0a65fa4  # 1724788482.5995874
+progenitor 11 secondary = 0x3ff9f6c48a787c1d  # 1.6227460297593617
+progenitor 11 separation = 0x41d9b3bb1b830841  # 1724836974.0473788
 CoreCollapse(IIP) at 0.01 d = 0x47c86bb4f8dd9188  # 6.492143642717258e37
 CoreCollapse(IIP) at 10 d = 0x4733aac2733b0684  # 1.021170558704438e35
 CoreCollapse(IIP) at 50 d = 0x4735ffd47f1b5661  # 1.1422708418626074e35

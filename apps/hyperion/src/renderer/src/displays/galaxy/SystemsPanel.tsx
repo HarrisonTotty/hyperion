@@ -33,10 +33,13 @@ interface SystemsPanelProps {
  * announced with every selection and a live region holds text only (the orchestrator's rulings 13
  * and 14). It opens the `SYSTEM` display on the selected system at the time of the chart on show
  * (plan 14, P14.T41.a). A display control, it only changes what the console shows, so it needs no
- * link; with nothing selected it is held back and says why.
+ * link; with nothing selected it is held back and says why, and with a free-floating brown dwarf or
+ * planet selected, whose bodies plan 14 has not yet modelled, it says `BODIES NOT YET MODELLED`
+ * (plan 13, P13.T8.d; ruling 134.5).
  *
  * Selecting a system asks the server for its stars at the chart's time (`system_summary`, plan 06,
- * P06.T36), through the `SYSTEM` display's own hook, whose channel lets the latest selection win and
+ * P06.T36; a brown dwarf is a system of one, and a free-floating planet, which has none, asks
+ * nothing), through the `SYSTEM` display's own hook, whose channel lets the latest selection win and
  * drops an answer to a superseded one. Where that request stands is said between the readout and
  * `OPEN SYSTEM`, outside the live region, with `RETRY` after a failure; an answer the client cannot
  * read says `SYSTEM DATA INVALID` there. The answer on show while the chart's time has moved on, or
@@ -49,13 +52,16 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const { result, fault, stale } = chart;
   const selected = chart.selected;
   const bands = chart.bands;
+  // A free-floating object has no system to open until plan 14 gives it bodies (P14.T27).
+  const freeFloating = selected !== null && selected.kind !== "stellar";
   const target =
-    open === null || result === null || selected === null || bands === null
+    open === null || result === null || selected === null || bands === null || freeFloating
       ? null
       : systemTargetFor(open.id, selected, result.timeYr, bands);
   const [generation, setGeneration] = useState(0);
+  // A free-floating planet has no stars to summarise (plan 13, P13.T5.d); a brown dwarf is one.
   const summaryTarget: SummaryTarget | null =
-    open === null || result === null || selected === null
+    open === null || result === null || selected === null || selected.kind === "rogue_planet"
       ? null
       : { universe: open.id, system: selected.id, designation: selected.designation };
   const chartTime = universeTimeFromYears(result?.timeYr ?? chart.timeYr);
@@ -134,7 +140,11 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         </button>
         {target === null ? (
           <span className="systems-panel__reason" id={reasonId}>
-            NO SYSTEM SELECTED
+            {/*
+             * A subject and a state (ruling 113.5): at 1280 x 720 it wraps whole onto its own line
+             * under the button, through the row's flex-wrap (the orchestrator's ruling 134.5).
+             */}
+            {freeFloating ? "BODIES NOT YET MODELLED" : "NO SYSTEM SELECTED"}
           </span>
         ) : null}
       </div>

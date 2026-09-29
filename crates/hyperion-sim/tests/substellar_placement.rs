@@ -657,8 +657,9 @@ fn two_runs_place_the_same_objects() {
     }
 }
 
-/// The planetary stage's entry refuses a free-floating object rather than build stars for it,
-/// until P13.T5.a routes brown dwarfs through the stellar stage.
+/// The planetary stage's entry refuses a free-floating object until plan 14's P14.T27 gives brown
+/// dwarfs and rogue planets their hosts; P13.T5.a routes brown dwarfs through the stellar stage,
+/// which the planetary context does not yet read for them.
 #[test]
 fn a_free_floating_object_has_no_stellar_context_yet() {
     use hyperion_sim::planetary::SystemContext;

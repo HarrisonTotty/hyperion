@@ -180,3 +180,62 @@ describe("SystemReadout", () => {
     expect(valueOf(readout, "SPINWARD", 1)).toBe("—");
   });
 });
+
+describe("SystemReadout's free-floating objects (plan 13, P13.T8.d)", () => {
+  function substellar(layer: "brown_dwarf" | "rogue_planet"): ChartSystem {
+    const [system] = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 10,
+        minLayer: "rogue_planet",
+        systems: [{ relLy: [1, 0, 0], layer }],
+      }),
+    ).systems;
+    if (system === undefined) {
+      throw new Error("the fixture built no object");
+    }
+    return system;
+  }
+
+  it("reads a brown dwarf's mass in M☉ to three decimals", () => {
+    const readout = renderReadout(substellar("brown_dwarf"));
+
+    expect(valueOf(readout, "INIT MASS")).toBe("0.046 M");
+    expect(within(readout).queryByText("BULK")).toBeNull();
+  });
+
+  it("reads a free-floating planet's mass in Earth masses, its kind, and that its bulk is not modelled", () => {
+    const readout = renderReadout(substellar("rogue_planet"));
+
+    expect(valueOf(readout, "INIT MASS")).toMatch(/^[0-9.,]+ M$/u);
+    expect(within(readout).getByRole("img", { name: "Earth masses" })).toBeInTheDocument();
+    expect(valueOf(readout, "KIND")).toBe("PLANET");
+    expect(valueOf(readout, "BULK")).toBe("NOT YET MODELLED");
+    expect(within(readout).queryByText("STATE")).toBeNull();
+    // No answer carries its metallicity yet: the em dash, never a zero.
+    expect(valueOf(readout, "[Fe/H]")).toBe("—");
+    expect(valueOf(readout, "AGE")).not.toBe("—");
+    expect(valueOf(readout, "POPULATION")).toBe("OLD THIN DISC");
+  });
+});
+
+describe("SystemReadout's unformed planet (ruling 134.2)", () => {
+  it("reads KIND PLANET and STATE NOT YET FORMED, with no BULK row", () => {
+    const [planet] = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 10,
+        minLayer: "rogue_planet",
+        systems: [{ relLy: [1, 0, 0], layer: "rogue_planet" }],
+      }),
+    ).systems;
+    if (planet === undefined) {
+      throw new Error("the fixture built no planet");
+    }
+    const readout = renderReadout({ ...planet, ageMyr: -0.002 });
+
+    expect(valueOf(readout, "KIND")).toBe("PLANET");
+    expect(valueOf(readout, "STATE")).toBe("NOT YET FORMED");
+    expect(within(readout).queryByText("BULK")).toBeNull();
+  });
+});

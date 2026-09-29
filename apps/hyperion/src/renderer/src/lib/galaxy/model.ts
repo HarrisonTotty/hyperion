@@ -47,8 +47,18 @@ export const CHART_SYSTEM_LIMIT = 4_000;
 /** A point in the `GALACTIC` frame as x, y and z in light-years. */
 export type CentreLy = readonly [xLy: number, yLy: number, zLy: number];
 
-/** A mass layer's place from the lightest, A, to the heaviest, E. */
+/**
+ * A mass layer's place from the lightest stellar layer, A, to the heaviest, E: also its symbols'
+ * size class. The two substellar layers take layer A's, 0, since no size class below A is drawn
+ * (plan 13, design note 15).
+ */
 export type LayerIndex = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * What a chart's object is, as its layer says (plan 13, design note 10): a star system, a
+ * free-floating brown dwarf, or a free-floating planet, which has no stellar state (P13.T5.d).
+ */
+export type ChartKind = "stellar" | "brown_dwarf" | "rogue_planet";
 
 /**
  * What a chart knows of a system's primary at the chart's time, from the range query's brief (plan
@@ -73,7 +83,10 @@ export interface StarBrief {
   readonly starCount: number;
 }
 
-/** One star system on a chart, as it is at the chart's time. */
+/**
+ * One system on a chart, as it is at the chart's time: a star system, or a free-floating brown
+ * dwarf or planet (plan 13), which is a system with no star.
+ */
 export interface ChartSystem {
   /** The ID as on the wire, lower case; only `formatHex64` upper-cases it for the screen. */
   readonly id: SystemIdHex;
@@ -85,13 +98,16 @@ export interface ChartSystem {
   /** Position in the `GALACTIC` frame, for the readout's cylindrical coordinates. */
   readonly positionLy: Vec3;
   readonly layer: MassLayer;
+  /** What it is, from its layer. */
+  readonly kind: ChartKind;
   readonly population: Population;
-  /** Initial mass of the primary star. */
+  /** Initial mass of the primary star, or a free-floating object's mass, in M☉. */
   readonly initialMassMsun: number;
+  /** Its age at the chart's time; zero or less for one not yet formed. */
   readonly ageMyr: number;
   /**
    * Its primary at the chart's time, or `null` for a system not yet formed then, whose row the
-   * server sends without a brief.
+   * server sends without a brief, and for a free-floating planet, which has none.
    */
   readonly star: StarBrief | null;
   /** Velocity at the epoch along the `GALACTIC` axes, in km/s (plan 08, P08.T7.a). */
@@ -99,14 +115,24 @@ export interface ChartSystem {
 }
 
 /**
+ * Whether a chart's object is a free-floating planet that exists at the chart's time: one that
+ * has formed, which alone is drawn, listed as `PLANET` and counted as one.
+ */
+export function isFormedPlanet(system: ChartSystem): boolean {
+  return system.kind === "rogue_planet" && system.ageMyr > 0;
+}
+
+/**
  * What a chart is complete for.
  *
  * @remarks
- * `complete` above the lower mass edge of the lightest layer returned; `nothing_fits` when no
- * layer fits the census limit, which is an answer with no systems, not an error.
+ * `complete` above the lower mass edge of the lightest layer returned, which is also named, since a
+ * free-floating planet's edge is written in Earth masses (plan 13, design note 14); `nothing_fits`
+ * when no layer fits the census limit, which is an answer with no systems, not an error.
  */
 export type ChartCensus =
-  { readonly kind: "complete"; readonly aboveMsun: number } | { readonly kind: "nothing_fits" };
+  | { readonly kind: "complete"; readonly aboveMsun: number; readonly layer: MassLayer }
+  | { readonly kind: "nothing_fits" };
 
 /** A range query's answer, ready to chart. */
 export interface ChartResult {
@@ -117,7 +143,10 @@ export interface ChartResult {
   /** The chart time, in years from the epoch. */
   readonly timeYr: number;
   readonly census: ChartCensus;
-  /** The census of all five layers, A to E, for the legend and the census table. */
+  /**
+   * The census of the five stellar layers, A to E, then the substellar layers the query asked for,
+   * for the legend and the census table.
+   */
   readonly layers: ReadonlyArray<LayerCensus>;
   /** Every system returned, nearest first, ties by ID. */
   readonly systems: ReadonlyArray<ChartSystem>;

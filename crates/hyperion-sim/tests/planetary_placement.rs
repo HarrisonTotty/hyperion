@@ -942,12 +942,13 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
 
     // Ruling 94.6's check was set for hot chains of five or more; with ruling 102.4's one or two
     // planets at the half-normal 0.3, the pair's outer planet is rescaled as often as about an FGK
-    // star (reported beside it there), so it is pinned as a finding.
+    // star (reported beside it there), so it is pinned as a finding. Re-pinned after ruling
+    // 112.2's +0.15 dex early-M mass (`pfix14`): 0.247 -> 0.222.
     report.finding(
         "early M dwarfs' hot chain planets scaled down to the spacing floor (ruling 94.6)",
         hot_chain_rescaled(&m),
         (0.0, 0.10),
-        (0.24, 0.28),
+        (0.20, 0.24),
     );
     transit_multiplicity(&m, report, &mut Lcg::new(0x00ad_1ad1));
     early_m_radii(&m, report, &mut Lcg::new(0x00ad_1ad2));
@@ -960,11 +961,13 @@ fn m_dwarf_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) -> 
         .partition(|s| nearest_companion_au(s).is_none_or(|a| a > 200.0));
     // Ruling 102.4: met through the cold chains, at most 57% of systems with at most eight
     // planets, or the tension is reported. Their share at its bound, the test is 2.57: a finding.
+    // Ruling 112.2's one trial, the early M dwarfs' characteristic mass at +0.15 dex (`pfix14`),
+    // raises it to 2.71, still short of 2.9, so it stays pinned (2.57-2.65 -> 2.67-2.75).
     report.finding(
         "small planets per single M dwarf or one wider than 200 au inside 200 days (ruling 87.2)",
         per_star(&alone, |_, p| small(p) && period_days(p) < 200.0),
         (2.9, 4.4),
-        (2.57, 2.65),
+        (2.67, 2.75),
     );
     report.note(format!(
         "  {} of {total} primaries single or wider than 200 au",
@@ -1486,15 +1489,13 @@ fn early_m_radii(systems: &[System], report: &mut Report, ranks: &mut Lcg) {
         ratio(above, early.len()),
         (0.10, 0.26),
     );
-    // A finding (`atmo14`, round 9, ruling 122.5): 0.400 against 0.19-0.39 at ruling 122.2's
-    // 250 Myr, and still 0.397 at the dial's 200 Myr end; no window is widened, and ruling 112.2's
-    // early-M mass trial is the next dial. Pinned as built.
-    report.finding(
+    // `atmo14` (round 9, ruling 122.5) left this at 0.400 against 0.19-0.39, pinned; ruling
+    // 112.2's early-M mass trial, the next dial, meets it at +0.15 dex (`pfix14`): 0.348.
+    report.check(
         "0.5-1.5 R_earth planets at 0.5-7 days per 0.4-0.6 M_sun primary, radii scattered by 0.06 \
          dex (Dressing and Charbonneau 2015 via Ment and Charbonneau 2023, Table 9)",
         ratio(below, early.len()),
         (0.19, 0.39),
-        (0.39, 0.41),
     );
 }
 

@@ -6,12 +6,14 @@
 //!   the rare eccentric case to "instant synchronization at the onset" (section 2.6).
 //! - **Stability** (section 2.6.1). Dynamical where the donor's mass ratio q = `M_d` ÷ `M_a` passes
 //!   its critical value by type: 0.695 for a low-mass main-sequence star (2.6.4), BSE equation 57
-//!   for a giant ((1.67 − x + 2 (Mc ÷ M)⁵) ÷ 2.13, x of HPT equation 47), 0.784 for a helium giant,
-//!   4 for a Hertzsprung-gap star (2.6.3) and 0.628 for a white dwarf (2.6.5). The paper gives no
-//!   value for a main-sequence star of type 1 or a core-helium-burning star; the published code's
-//!   revision of 2001 takes 3 for both, and so does this engine (a main-sequence pair over it comes
-//!   into contact, a core-helium-burning donor goes into a common envelope). A Roche lobe inside
-//!   the donor's core is a common envelope too, as in the code.
+//!   for a giant ((1.67 − x + 2 (Mc ÷ M)⁵) ÷ 2.13, x of HPT equation 47), 0.784 for a helium giant
+//!   (but stable at any ratio onto a neutron star or black hole, after Tauris et al. 2015, section
+//!   6, a departure from BSE: ruling 129.4b), 4 for a Hertzsprung-gap star (2.6.3) and 0.628 for a
+//!   white dwarf (2.6.5). The paper gives no value for a main-sequence star of type 1 or a
+//!   core-helium-burning star; the published code's revision of 2001 takes 3 for both, and so does
+//!   this engine (a main-sequence pair over it comes into contact, a core-helium-burning donor goes
+//!   into a common envelope). A Roche lobe inside the donor's core is a common envelope too, as in
+//!   the code.
 //! - **Stable transfer** (sections 2.6.2 and 2.6.3). BSE transfers mass at a rate that rises
 //!   steeply with the overfill, Ṁ = F(M) [ln(R ÷ `R_L`)]³ with F = 3 × 10⁻⁶ min(M, 5)² M☉ yr⁻¹
 //!   (equations 58 and 59, raised by 10³ ÷ R for a degenerate donor), held to the thermal rate
@@ -26,7 +28,8 @@
 //!   a white dwarf fed hydrogen keeps ε of it below 1.03 × 10⁻⁷ M☉ yr⁻¹ (novae, equation 66), all
 //!   of it up to 2.71 × 10⁻⁷, and above that swells into a giant; a helium star fed hydrogen
 //!   swells into a core-helium-burning or AGB star; degenerate accretors take what the Eddington
-//!   limit allows (equations 67 and 68), which is off by default. What is not accreted leaves with
+//!   limit allows (equations 67 and 68, X the accreted matter's hydrogen fraction), which is on by
+//!   default (ruling 132.1, where BSE's table 3 has it off). What is not accreted leaves with
 //!   the donor's specific orbital angular momentum, a (M₁ + M₂) = constant for it (section 2.6),
 //!   or with the accretor's for novae and super-Eddington loss, as the published code has it.
 //!   The donor's transferred spin returns to the orbit and the accretor's spin grows by the
@@ -64,7 +67,8 @@ const LOW_MASS_MAIN_SEQUENCE_Q: f64 = 0.695;
 /// Of a Hertzsprung-gap donor (BSE section 2.6.3). Plan 08's stripping band reads it (ruling
 /// 123.2).
 pub(crate) const GAP_Q: f64 = 4.0;
-/// Of a helium giant (BSE section 2.6.1).
+/// Of a helium Hertzsprung-gap star or giant onto any accretor but a neutron star or black hole
+/// (BSE section 2.6.1).
 const HELIUM_GIANT_Q: f64 = 0.784;
 /// Of a white dwarf (BSE section 2.6.5).
 const WHITE_DWARF_Q: f64 = 0.628;
@@ -291,6 +295,16 @@ impl Engine {
                 } else {
                     Stability::Stable
                 }
+            }
+            // Case BB onto a neutron star or black hole is stable at any ratio (ruling 129.4b):
+            // Tauris, Langer and Podsiadlowski (2015, section 6) find "the RLO is always
+            // dynamically stable such that these systems avoid evolving into yet another CE", and
+            // Vigna-Gómez et al. (2018, section 2.2.5) take it so. A departure from BSE, whose
+            // 0.784 stays for every other accretor.
+            Kind::HeliumGap | Kind::HeliumGiant
+                if matches!(ka, Kind::NeutronStar | Kind::BlackHole) && !inside_core =>
+            {
+                Stability::Stable
             }
             Kind::HeliumGap | Kind::HeliumGiant => {
                 if q > HELIUM_GIANT_Q || inside_core {
@@ -671,6 +685,11 @@ impl Engine {
         let mut taus = s.taus;
         taus[d] = self.aged_tau(d, s.taus[d], md2, dt);
         taus[a_idx] = self.rejuvenated_tau(a_idx, s.taus[a_idx], ma, ma2, dt);
+        // A main sequence whose end is reached to 10⁻⁹ of the age is handed on at τ = 1 (ruling
+        // 132.3).
+        for i in [d, a_idx] {
+            taus[i] = self.main_sequence_tau(i, taus[i], masses[i], s.age + dt);
+        }
         let mut spins = s.spins;
         spins[a_idx] = accretor_spin;
         let next = Snapshot {
@@ -702,8 +721,7 @@ impl Engine {
             if !params.eddington_limit || !positive(rate) {
                 return (share, false);
             }
-            let hydrogen = 0.76 - 3.0 * self.ctx.composition().z_fit().value();
-            let limit = 2.08e-3 / (1.0 + hydrogen) * sa.state.radius().value();
+            let limit = eddington_rate(&self.ctx, kd.surface(), sa.state.radius().value());
             let accreted = (share * rate).min(limit);
             (accreted / rate, accreted < share * rate)
         };
@@ -1074,6 +1092,19 @@ pub(super) fn kelvin_helmholtz(s: &Structure, kind: Kind) -> f64 {
         m
     };
     1e7 * m * share / (r * l)
+}
+
+/// The Eddington rate, M☉ yr⁻¹, of a degenerate accretor of radius `radius` (R☉) fed matter of
+/// `surface`: 2.08 × 10⁻³ (1 + X)⁻¹ R (BSE equation 67), where X is the accreted matter's hydrogen
+/// fraction (ruling 132.1): 0.76 − 3Z for hydrogen-rich matter, none for a helium or carbon
+/// surface, which is Case BB's (about 2.9 × 10⁻⁸ M☉ yr⁻¹ onto a neutron star).
+#[must_use]
+pub(super) fn eddington_rate(ctx: &super::timeline::Context, surface: Surface, radius: f64) -> f64 {
+    let hydrogen = match surface {
+        Surface::Hydrogen => 0.76 - 3.0 * ctx.composition().z_fit().value(),
+        Surface::Helium | Surface::Carbon => 0.0,
+    };
+    2.08e-3 / (1.0 + hydrogen) * radius
 }
 
 /// The dynamical timescale of a star of structure `s`, years (BSE equation 63):

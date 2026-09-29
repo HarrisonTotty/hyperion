@@ -230,6 +230,9 @@ export function HrDiagram({
     { label: "BLACK HOLE", text: formatNumber(counts.blackHole, 0) },
     { label: "NO REMNANT", text: formatNumber(counts.noRemnant, 0) },
     { label: "NOT YET FORMED", text: formatNumber(counts.notYetFormed, 0) },
+    // Free-floating planets have no stellar state to plot; the row appears only when a query
+    // lowered to them returned some (plan 13, P13.T8.d).
+    ...(counts.planet === 0 ? [] : [{ label: "PLANET", text: formatNumber(counts.planet, 0) }]),
     ...(counts.dataInvalid === 0
       ? []
       : [{ label: "DATA INVALID", text: formatNumber(counts.dataInvalid, 0) }]),

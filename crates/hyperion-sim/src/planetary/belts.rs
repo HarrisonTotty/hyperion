@@ -18,8 +18,9 @@
 //!   ([`DEPLETION_WITHOUT_GIANT`]).
 //! - **A Kuiper-like belt** (P14.T21.b). Beyond the outermost planet, between its 3:2 and 2:1
 //!   outer resonances, 1.31–1.59 of its semi-major axis ([`KUIPER_BAND_RESONANCES`]), with a
-//!   scattered component from there to the disc's outer edge; about a host with no planets, the
-//!   disc's outer third. Its mass is the solids of the belt proper, bright or faint (ruling 84.1,
+//!   scattered component from there to the disc's outer edge; about a host with no planets, or
+//!   where the disc holds none of that band, the disc's outer third beyond the planets' chaotic
+//!   zones, with no scattered component (ruling 112.6). Its mass is the solids of the belt proper, bright or faint (ruling 84.1,
 //!   below); the scattered component has none of its own and gives its members wider orbits.
 //!
 //! Every belt is cut to the disc's edges, which already carry the zone's limits and the strip
@@ -103,7 +104,8 @@
 //! start. Those over [`MEMBER_MIN_DIAMETER`] (400 km), at most [`MAX_MEMBERS`] (8), become bodies
 //! in the belt's slot with sub-indices 1 upward (design note 3), largest first, on orbits drawn
 //! inside the belt ([`BeltMember`]): the semi-major axis as the disc's solids lie, eccentricity Rayleigh with σ = 0.1 and inclination Rayleigh with
-//! σ = 8° to the host's plane, 0.3 and 20° in a scattered component, each eccentricity truncated
+//! σ = 8° to the host's plane, 0.3 and 20° in a scattered component, which holds a fixed share of
+//! the members ([`SCATTERED_MEMBER_SHARE`], ruling 112.6), each eccentricity truncated
 //! so that the orbit stays clear of the planets' chaotic zones and inside the disc, and so inside
 //! the strip radius (design note 14). A member is derived by P14.T16 as
 //! a dwarf planet ([`BeltMember::placed_body`]), and is eligible for P14.T18's giant-impact moon,
@@ -324,6 +326,17 @@ pub const SCATTERED_ECCENTRICITY_WIDTH: f64 = 0.3;
 /// scattered disc's inclinations reach 40° and more (Eris's is 44°).
 pub const SCATTERED_INCLINATION_WIDTH_DEG: f64 = 20.0;
 
+/// The share of a Kuiper-like belt's named members drawn onto its scattered component, where it
+/// has one: 0.35 (ruling 112.6; this model's figure, provisional).
+///
+/// Checked against JPL's Small-Body Database (queried 2026-09-28: the `TNO` class, H < 5.5, with
+/// the scattered part taken as this module's, beyond the 2:1 resonance at 47.7 au): 3 of the 8
+/// largest by H (Eris, Sedna, Gonggong), 0.375; 8 of the 20 largest, 0.40; 98 of 231 below
+/// H = 5.5, about 400 km across and over, 0.42. Surveys find the distant scattered bodies less
+/// easily, so the database's shares are if anything low; 0.35 lies at the low end of them, and is
+/// kept as ruled.
+pub const SCATTERED_MEMBER_SHARE: f64 = 0.35;
+
 /// The largest eccentricity a member is placed on: 0.99, as for planets, a guard that keeps every
 /// orbit bound.
 pub const MEMBER_ECCENTRICITY_CAP: f64 = 0.99;
@@ -346,7 +359,9 @@ pub enum BeltSite {
     Gap,
     /// Beyond the outermost planet, from its 3:2 to its 2:1 resonance and scattered beyond.
     BeyondPlanets,
-    /// The outer third of the disc of a host without planets.
+    /// The outer third of the disc, beyond every planet's chaotic zone: about a host without
+    /// planets, or one whose outermost planet's 3:2 to 2:1 band the disc does not reach (ruling
+    /// 112.6).
     OuterDisc,
 }
 
@@ -763,6 +778,7 @@ fn widths(part: BeltPart) -> (f64, f64) {
 pub struct BeltMember {
     index: BodyIndex,
     part: BeltPart,
+    composition: BeltComposition,
     diameter: Metres,
     mass: EarthMasses,
     orbit: KeplerElements,
@@ -780,6 +796,14 @@ impl BeltMember {
     #[must_use]
     pub const fn part(&self) -> BeltPart {
         self.part
+    }
+
+    /// Its belt's composition class, which it shares: an icy belt's members are rock and ice,
+    /// and a rocky belt's dry (ruling 112.8). P14.T30.b derives an icy member's bulk by ruling
+    /// 83.7's rock-and-ice model rather than [`placed_body`](Self::placed_body)'s.
+    #[must_use]
+    pub const fn composition(&self) -> BeltComposition {
+        self.composition
     }
 
     /// Its diameter by its belt's members' law ([`member_sizes`], ruling 100).
@@ -957,8 +981,8 @@ impl BeltDraws {
 /// A member's draws on [`tags::BELT_MEMBER`], keyed by its own ID: words 0–8 in field order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MemberDraws {
-    /// Which component it orbits in, by the shares of the disc's solids between their edges. Word
-    /// 0.
+    /// Which component it orbits in: the scattered one, where the belt has one, when it lies at
+    /// or above 1 − [`SCATTERED_MEMBER_SHARE`] (ruling 112.6). Word 0.
     pub part: UnitUniform,
     /// Its semi-major axis's rank in the component's solids. Word 1.
     pub semi_major_axis: UnitUniform,
@@ -1192,6 +1216,9 @@ struct Plan {
     site: BeltSite,
     main: (f64, f64),
     scattered: Option<(f64, f64)>,
+    /// A Kuiper-like belt's outer-disc rule, taken when the disc holds none of its main band
+    /// (ruling 112.6).
+    outer_disc: Option<(f64, f64)>,
     gaps: Vec<BeltGap>,
     depletion: Depletion,
 }
@@ -1314,6 +1341,7 @@ fn plans(host: &BeltHost<'_>, planets: &[Neighbour], zones: &[(f64, f64)]) -> Ve
                 site: BeltSite::InsideGiant,
                 main: (lo, hi),
                 scattered: None,
+                outer_disc: None,
                 gaps,
                 depletion: Depletion::Drawn(DEPLETION_WITH_GIANT),
             });
@@ -1330,22 +1358,27 @@ fn plans(host: &BeltHost<'_>, planets: &[Neighbour], zones: &[(f64, f64)]) -> Ve
                     site: BeltSite::Gap,
                     main: (zone[0].1, zone[1].0),
                     scattered: None,
+                    outer_disc: None,
                     gaps: Vec::new(),
                     depletion: Depletion::Drawn(DEPLETION_WITHOUT_GIANT),
                 });
             }
         }
     }
+    let outer_third = disc_in + 2.0 / 3.0 * (disc_out - disc_in);
     match (planets.last(), zones.last()) {
         (Some(outermost), Some(&(_, zone_out))) => {
             let a = outermost.semi_major_axis().value();
             let lo = (a * resonance_ratio(KUIPER_BAND_RESONANCES[0])).max(zone_out);
             let hi = a * resonance_ratio(KUIPER_BAND_RESONANCES[1]);
+            // The outer-disc rule's third, beyond every planet's chaotic zone.
+            let beyond_zones = zones.iter().map(|&(_, zh)| zh).fold(zone_out, f64::max);
             plans.push(Plan {
                 kind: BeltKind::Kuiper,
                 site: BeltSite::BeyondPlanets,
                 main: (lo, hi),
                 scattered: Some((hi.max(zone_out), disc_out)),
+                outer_disc: Some((outer_third.max(beyond_zones), disc_out)),
                 gaps: Vec::new(),
                 depletion: Depletion::Bimodal,
             });
@@ -1353,8 +1386,9 @@ fn plans(host: &BeltHost<'_>, planets: &[Neighbour], zones: &[(f64, f64)]) -> Ve
         _ => plans.push(Plan {
             kind: BeltKind::Kuiper,
             site: BeltSite::OuterDisc,
-            main: (disc_in + 2.0 / 3.0 * (disc_out - disc_in), disc_out),
+            main: (outer_third, disc_out),
             scattered: None,
+            outer_disc: None,
             gaps: Vec::new(),
             depletion: Depletion::Bimodal,
         }),
@@ -1401,23 +1435,24 @@ fn build(
         .and_then(|range| component(BeltPart::Scattered, range));
     // The scattered component has no mass of its own (ruling 84.1): its bodies are the belt's,
     // scattered out, and it gives the belt's members their wider orbits. A Kuiper-like belt whose
-    // resonant band the disc does not reach keeps its scattered part as its main one, with mass.
-    let (main, scattered) = match (main, scattered) {
-        (Some(main), scattered) => (
+    // resonant band the disc does not reach takes the outer-disc rule, the outer third of the
+    // disc beyond the planets, with no scattered part (ruling 112.6): promoting the scattered part
+    // made the whole outer disc a belt.
+    let (main, scattered, site) = match main {
+        Some(main) => (
             main,
             scattered.map(|s| BeltComponent {
                 initial_mass: EarthMasses::ZERO,
                 ..s
             }),
+            plan.site,
         ),
-        (None, Some(scattered)) => (
-            BeltComponent {
-                part: BeltPart::Main,
-                ..scattered
-            },
+        None => (
+            plan.outer_disc
+                .and_then(|range| component(BeltPart::Main, range))?,
             None,
+            BeltSite::OuterDisc,
         ),
-        (None, None) => return None,
     };
     let index = BodyIndex::new(BodySlot::Belt(slot), BodySub::Primary)
         .expect("a belt slot of 1–13 is in the layout");
@@ -1462,7 +1497,7 @@ fn build(
         host: host.host,
         host_mass: disc.host_mass(),
         kind: plan.kind,
-        site: plan.site,
+        site,
         main,
         scattered,
         gaps,
@@ -1477,7 +1512,9 @@ fn build(
 }
 
 /// The named members of `belt` (P14.T21.c): the bodies `sizes` gives it, largest first, each on
-/// an orbit inside the belt drawn from `draws`, the k-th member's draws at index k − 1.
+/// an orbit inside the belt drawn from `draws`, the k-th member's draws at index k − 1. Where the
+/// belt has a scattered component, a member orbits in it with probability
+/// [`SCATTERED_MEMBER_SHARE`] (ruling 112.6).
 fn members(
     host: &BeltHost<'_>,
     planets: &[Neighbour],
@@ -1487,8 +1524,9 @@ fn members(
     draws: &[MemberDraws; MEMBER_CANDIDATES],
 ) -> Vec<BeltMember> {
     let slot = belt.index.slot();
-    let total = belt.components().map(|c| c.solids.value()).sum::<f64>();
-    let main_share = belt.main.solids.value() / total;
+    // Ruling 112.6: a fixed share of the members is scattered, not the scattered part's share of
+    // the undepleted solids, which the long scattered part usually won.
+    let main_share = 1.0 - SCATTERED_MEMBER_SHARE;
     (1..=MAX_MEMBERS)
         .zip(sizes.members())
         .zip(draws)
@@ -1526,6 +1564,7 @@ fn members(
             BeltMember {
                 index,
                 part: component.part,
+                composition: belt.composition,
                 diameter: size.diameter(),
                 mass,
                 orbit,

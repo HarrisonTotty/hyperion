@@ -34,6 +34,17 @@ const STAR_SHAPES: ReadonlyArray<StarShapeEntry> = [
 /** The shapes of the compact remnants, which a picture that does not draw them leaves out. */
 const COMPACT_REMNANT_SHAPES: ReadonlySet<SymbolShape> = new Set(["triangle", "square"]);
 
+/**
+ * The inverted triangle, which the local chart draws for a free-floating planet (plan 13, design
+ * note 15): `PLANET`, the body kind's one name, since every planet a galaxy chart holds is
+ * free-floating.
+ */
+const PLANET_SHAPE: StarShapeEntry = {
+  shape: "triangle-down",
+  name: "Inverted triangle",
+  meaning: "PLANET",
+};
+
 /** Props of {@link StarShapeLegend}. */
 export interface StarShapeLegendProps {
   /**
@@ -41,6 +52,11 @@ export interface StarShapeLegendProps {
    * counts them instead, and its legend names only the shapes it draws.
    */
   readonly compactRemnants: boolean;
+  /**
+   * Whether the picture draws free-floating planets, as the chart does; the HR diagram counts them
+   * instead. None when absent.
+   */
+  readonly planets?: boolean;
 }
 
 /**
@@ -51,12 +67,14 @@ export interface StarShapeLegendProps {
  * Items of a legend group, not a group of their own, so that the local chart's legend and the HR
  * diagram's each hold them among their other entries. A system whose star left no remnant, or that
  * is not yet formed, has no symbol, which the last entry says, so that its absence from a picture
- * is not read as an empty sky.
+ * is not read as an empty sky. A picture that draws free-floating planets names the inverted
+ * triangle after the star shapes (plan 13, P13.T8.d).
  */
-export function StarShapeLegend({ compactRemnants }: StarShapeLegendProps) {
-  const shown = compactRemnants
+export function StarShapeLegend({ compactRemnants, planets = false }: StarShapeLegendProps) {
+  const stars = compactRemnants
     ? STAR_SHAPES
     : STAR_SHAPES.filter((entry) => !COMPACT_REMNANT_SHAPES.has(entry.shape));
+  const shown = planets ? [...stars, PLANET_SHAPE] : stars;
   return (
     <>
       {shown.map(({ shape, name, meaning }) => (

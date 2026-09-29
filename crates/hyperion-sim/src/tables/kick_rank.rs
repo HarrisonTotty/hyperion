@@ -6,7 +6,7 @@
 //! inputs-sha256: fa8f39b842a7e1923a9f272d9d935285e2c52f2959fec5b98179bd5edcc44541
 //! manifest: crates/hyperion-fit/manifests/kick_rank.toml
 //! data: none
-//! sim-fingerprint: db110d1d9358b3fd05a13328034d60a683974af8759ae2b019099a87757631bb
+//! sim-fingerprint: 86491748758107bf99c3526455a68b24c99de0ffb3f0b9bbdd4ac079f0d45394
 //! since-generator-version: 13
 //! source: Disberg and Mandel (2025, ApJ Letters 989, L8) for the log-normal of young isolated
 //!   pulsars; Mandel and Müller (2020, MNRAS 499, 3214) for the score; Disberg, Mandel and Hirai

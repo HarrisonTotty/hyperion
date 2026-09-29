@@ -13,6 +13,8 @@ import {
   formatListPosition,
   formatLuminosityLsun,
   formatMassMearth,
+  formatSubstellarMass,
+  MEARTH_PER_MSUN,
   formatMassMsun,
   formatNumber,
   formatOrbit,
@@ -575,5 +577,33 @@ describe("formatOrbit", () => {
     expect(() => formatOrbit(1, 1, 1)).toThrow(RangeError);
     expect(() => formatOrbit(1, 1, -0.1)).toThrow(RangeError);
     expect(() => formatOrbit(Number.NaN, 1, 0)).toThrow(RangeError);
+  });
+});
+
+/** A free-floating planet of `mearth` Earth masses, formatted from M☉ as the wire sends it. */
+function planet(mearth: number): ReturnType<typeof formatSubstellarMass> {
+  return formatSubstellarMass(mearth / MEARTH_PER_MSUN, "rogue_planet");
+}
+
+describe("formatSubstellarMass", () => {
+  it("writes a brown dwarf in M☉ to three decimals, the unit of the sequence it continues", () => {
+    expect(formatSubstellarMass(0.052, "brown_dwarf")).toEqual({ value: "0.052", unit: "msun" });
+    expect(formatSubstellarMass(0.012_41, "brown_dwarf")).toEqual({ value: "0.012", unit: "msun" });
+    expect(formatSubstellarMass(0.08, "brown_dwarf")).toEqual({ value: "0.080", unit: "msun" });
+  });
+
+  it("writes a free-floating planet in M⊕", () => {
+    expect(planet(1 / 3)).toEqual({ value: "0.33", unit: "mearth" });
+    expect(planet(17.1)).toEqual({ value: "17.1", unit: "mearth" });
+    expect(planet(4_131)).toEqual({ value: "4131", unit: "mearth" });
+  });
+
+  it("writes a star as every stellar mass is written", () => {
+    expect(formatSubstellarMass(0.25, "a")).toEqual({ value: "0.25", unit: "msun" });
+    expect(formatSubstellarMass(12.5, "e")).toEqual({ value: "12.5", unit: "msun" });
+  });
+
+  it("takes the Earth mass from the nominal GM of the Sun and the Earth", () => {
+    expect(MEARTH_PER_MSUN).toBeCloseTo(332_946.05, 1);
   });
 });

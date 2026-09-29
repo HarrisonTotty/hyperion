@@ -5,24 +5,25 @@
 name = "chabrier"
 path = "chabrier.rs"
 task = "chabrier"
-revision = 0
-inputs_sha256 = "749e2b53688e44fe5f7b8dda1bd0a497c5713835cb1a71b67fe92aae6bb758c8"
-body_sha256 = "dc2e308daa296c899b15ad91ebcd1604b8bfbe3921bbb391c72d111730350c55"
-since_generator_version = 11
-provisional = true
-acceptance = "none yet: a scratch value, fitted by P15.T4.b"
+revision = 1
+inputs_sha256 = "ba78b5c24c758488b801da0ac940b383e36caca25147dc04bc02b0cfc65bc030"
+body_sha256 = "48a15ea4f829ed94761d32db041f73dfb47a29d9170c727f01783552c70d5ed2"
+fingerprint = [0.7222612477767937, 0.1276205961457899, 0.1301055942610584, 0.020012561816357913]
+since_generator_version = 14
+provisional = false
+acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
 
 [[table]]
 name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"
 revision = 0
-inputs_sha256 = "8ed17819a6cff83afc4197d13ea84655a33c9bf3753c1ba730e3d93de21bd885"
-body_sha256 = "ae6455262197b680ce7d66082f4e6fa6eb093adb262157316efc9e972473f65a"
-fingerprint = [7000.0, 224.01758300127108, 2.574031665087729, 126.45429928945967, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
-since_generator_version = 13
+inputs_sha256 = "326fa9f63be5fdb518fac2d54910f805d39a42a6937824e07e363d3a6e7a76bb"
+body_sha256 = "785e919e4b1e1dfd761f2aab988866a374c3c43285f34773243e590661f7292b"
+fingerprint = [7000.0, 223.95985845020357, 2.574589608928813, 125.6529076974953, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
+since_generator_version = 15
 provisional = true
-acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9742 (unregularised 0.9715, λ 0.01); 51 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 65 second-difference sign changes along the rows; worst misplaced share thick disc 0.983, halo 0.983, bulge 0.999, bar 0.997, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 0.00, 0.00, 1.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 0.00, 0.00; bar elongation over the control -1.12, 0.55, 0.89, -3.44, -, -, -, - and length within 0.94 of it; slowest thin class's mean rotation 0.921 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 223 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9670 (unregularised 0.9641, λ 0.01); 51 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 65 second-difference sign changes along the rows; worst misplaced share thick disc 0.984, halo 0.989, bulge 0.998, bar 0.996, nuclear disc 0.998; own-form shares at the fixture's corotation ratio 1.24, bar 0.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 1.00, 0.00, nuclear disc 1.00, 0.00, 1.00, 0.00; bar elongation over the control 0.67, -2.00, 0.67, 0.67, -, -, -, - and length within 0.76 of it; slowest thin class's mean rotation 0.889 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 254 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
 
 [[table]]
 name = "giant_cooling"
@@ -43,7 +44,7 @@ task = "kick_rank"
 revision = 0
 inputs_sha256 = "fa8f39b842a7e1923a9f272d9d935285e2c52f2959fec5b98179bd5edcc44541"
 body_sha256 = "0e9c24a7934ea71594f748d129231ff380bf0c74f277e35b5c0209290be22cf2"
-fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.931168472446736, 15.696775699185423, 0.45]
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.931168472446736, 15.696775699185423, 0.45, 1.26, 46428852.83850509]
 since_generator_version = 13
 provisional = true
 acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5993 and standard deviation 0.6758, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00000"
@@ -59,6 +60,18 @@ fingerprint = [0.55]
 since_generator_version = 11
 provisional = true
 acceptance = "`MGE_EXP` within 1.289% of e^(−s) over s = 0.05–10; `MGE_BAR` within 2.88% of its central value over u = 0–2 and its mass within 0.212%"
+
+[[table]]
+name = "period_correction"
+path = "period_correction.rs"
+task = "period_correction"
+revision = 0
+inputs_sha256 = "1a89abede0e9e8f006b95278258df215e3beafd1a3519f32c49aa9b389734c44"
+body_sha256 = "34501bdadcf01da46f8c164943cdb3cf1af9b4318418d52fdc53b1fe8fced62b"
+fingerprint = [82.0, 316.94833949070386, 124.0, 492.44687660831846, 150.0, 594.6798667121063, 197.0, 744.236286347074]
+since_generator_version = 14
+provisional = false
+acceptance = "after 12 iterations over 20000 systems a row, the worst bin's relative miss of its share before the last update: 0.0012 at 3.5 M☉ (28.87% of tries rejected, 7 of 16683 direct companions dropped); 0.0007 at 7 M☉ (53.70% of tries rejected, 58 of 25887 direct companions dropped); 0.0008 at 12 M☉ (70.87% of tries rejected, 127 of 31813 direct companions dropped); 0.0010 at 28 M☉ (72.78% of tries rejected, 241 of 41918 direct companions dropped)"
 
 [[table]]
 name = "stellar_fates_high"
@@ -95,6 +108,18 @@ fingerprint = [8.291646730066546, 0.9157120936615865, 7.752857241525693, 1.27356
 since_generator_version = 13
 provisional = false
 acceptance = "22044 full tracks; 135 of 1357 cells (9.9%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.1e-3, a 2.4e-4 and 8.2e-3, b 5.1e-4 and 1.3e-2"
+
+[[table]]
+name = "stripping"
+path = "stripping.rs"
+task = "stripping"
+revision = 0
+inputs_sha256 = "865b5a384d01768752dcab8474e86208635c9decfce206c839ce5a8a455dac54"
+body_sha256 = "ed6c47a8c0eb4911c87f0c83fd285165fb3b59fdf7ba5bc55c53c4fb87a63e97"
+fingerprint = [0.3460343735586854, 0.5343901251039018, 0.4818157115990379, 1.183367218815104, 1.9333278054314231, 2.8904931250733537]
+since_generator_version = 14
+provisional = false
+acceptance = "at the centres of 330 cells, the share within 0.0729 of the exact (median 6.4e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (61 cells spread more)"
 
 [[table]]
 name = "wd_cooling"

@@ -4053,3 +4053,62 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     sentence says both (2026-09-27).
   - _Left for later._ The planetary nebula is not on the wire (`srv/convert/stellar.rs` keeps
     `NotModelled`); ruling 110.8's short solar blue loop is not touched by T14–T16.
+- **Deviations in T30, as built (round 9b, `fates`, with P11.T1.d; version left at 14 for the
+  orchestrator's batch of 15).**
+  - _T30.a._ `galaxy::fates::reference_fe_h(Population) -> Dex` reads plan 02's constants, so the
+    thick disc is −0.5 (`fields::metallicity::THICK_DISC`, ruling 106.3), not the plan's −0.55;
+    the halo's −1.2 is `fates::HALO_REFERENCE_FE_H`, which a test holds equal to the derived
+    dominant merger's. Four distinct values, as planned. `fates_for(Population)` returns
+    `&'static MultiplicityFates` (P11.T1.d's, which wraps T30.b's table): the ProvisionalFates
+    stage of T30.a was built and superseded in the same lane.
+  - _T30.b._ `stellar::fates::TrackFates::at(Dex)`: 96 masses (`TRACK_FATES_MASSES`,
+    `track_fates_grid`), 23, 5, 15, 15 and 37 intervals in bands A–E, log-spaced within each.
+    Each node is the fate table's at η's median where it answers (`FittedFates::fate_fitted`) and
+    one `FateNode::of` (a full track) where it does not (below 0.741 M☉ and in unusable cells);
+    below 0.1 M☉ the node is the 0.1 M☉ star. An iron core's remnant is the mean over 8 × 8
+    midpoint marks of the type and fallback draws (`REMNANT_QUADRATURE_NODES`), the mass normal at
+    its median. Interpolation is linear in ln m of log₁₀ t and of the remnant mass; the lifetime is
+    held non-increasing node by node. `breaks()` lists every interior node and the provisional
+    companions' bin edges. Living stars count at their initial mass: the trait has no living-mass
+    function and the main sequence's winds are negligible there.
+  - _Held once per process, not per `Galaxy`._ The table depends on the generator version alone
+    and is needed while `GalaxyParams` derives the mean masses, before any handle exists (plan 02's
+    note), so `fates_for` builds the four in a `OnceLock` on first use (about 0.15 s, most of it
+    the tracks below the fate table's range). `build`'s `mean_formed_mass` and
+    `mean_stars_per_system` read `fates_for(OldThinDisc)`, not `ProvisionalFates`, since after
+    P11.T1.d the companions are plan 11's.
+  - _Measured at Milky Way parameters_ (`derive::tests`): 0.5581 M☉ per system under the default
+    (Chabrier's at the scratch scale 0.68) and 0.4864 under Kroupa's; 8.96 × 10¹⁰ and
+    1.028 × 10¹¹ systems for 5 × 10¹⁰ M☉; old populations 0.545–0.566 (3.8% apart); young disc
+    1.36 times the old thin disc's; dead primaries 8.18% (old thin disc), 12.16% (thick disc) and
+    14.39% (the halo's dominant component); 1.421 and 1.393 stars per system.
+  - _Also as built._ The halo's dead share (14.39%) is measured over its dominant merger's ages
+    at the halo's reference [Fe/H], not over the halo's mixture. The nodes carry
+    `binarity::NEVER_STRIPPED` in place of `StarDraws::median()`'s mark, so that a node never
+    asks for the stripped share it feeds (plan 11's T1.d). A `GalaxyParams` build now takes
+    about 40 ms (1.3 ms before), most of it the companions' integral (P11.T1.d).
+  - _Consequence (the thin discs' tests, for the orchestrator):_ `tests/common` re-derives the
+    young disc's window from 10⁴ seeds (0.769 M☉ under the default, 0.671 under Kroupa's; old
+    populations 0.545–0.568 and 0.474–0.495), and `gas::params`' least drawn corner share becomes
+    −0.0631 with its failing thin-disc scatter 0.235 dex (plan 07's documented figures, re-pinned).
+- **Rulings 137 and 138, as applied to T30's tests (round 9b, `fates`).** At plan 15's fitted
+  Chabrier scale, 0.920 (ruling 138), the fixture's mean present-day mass per system with every
+  remnant is 0.5985 M☉ galaxy-wide and 0.6115 locally, of which neutron stars and black holes are
+  0.053; in stars and white dwarfs over primaries below 8 M☉ the local mean is 0.5517, inside the
+  census's 0.54–0.60. `derive::tests` asserts 0.59–0.61 for the default (Kroupa's 0.4864 in
+  0.48 ± 0.02 stands) and the old thin disc's census-like mean in 0.54–0.60; 8.35 × 10¹⁰ systems
+  for 5 × 10¹⁰ M☉. The dead-primary shares are the research figures behind Kroupa's 0.48, so the
+  test now reads Kroupa's function (8/11/13% windows) and prints the default's (10.7% in the old
+  thin disc).
+- **The spectral scale of young objects (ruling 135.2, from `sub13b`'s P13.T5.a).** The classifier
+  types every living object on the dwarf scale (Pecaut and Mamajek 2013, Mamajek's table
+  v2022.04.16; M6V 2,810 K, M5.5 written from 2,994 K down, M6 from 2,869 K). Young objects near the
+  hydrogen-burning limit, still contracting at ruling 42.1's Hayashi temperature, come out M5.5
+  from 5 to 80 Myr, which BHAC15 supports. A catalogue on Luhman et al.'s (2003) young scale, M6 at
+  2,990 K and warmer than the dwarf scale by about a subtype, would call them M6.5–M7; Herczeg and
+  Hillenbrand's (2014) newer young scale, M6 at 2,860 K, gives M5.5 too. The dwarf scale is kept.
+- **P06.T21.e's threshold (ruling 136.4, built by `feat09c`, 2026-09-28).** `WIND_NEBULA_THRESHOLD`
+  is 10³⁵ erg/s (10²⁸ W), not 10³⁶: Gaensler and Slane's 4 × 10³⁶ erg/s is the line for prominent
+  nebulae, and Kargaltsev and Pavlov's Chandra nebulae reach 10³⁵·⁴ erg/s at 10⁴–10⁵ yr. Plan 09's
+  `snr::PulsarWindNebula` reads the same flag. The median nebula lasts 1.45 × 10⁴ yr; T21.e's test
+  passes unchanged.

@@ -227,6 +227,9 @@ function toBulk(bulk: BulkPropertiesDto): BulkProperties {
       positive(bulk.density_kg_m3) &&
       positive(bulk.surface_gravity_m_s2) &&
       atLeastZero(bulk.equilibrium_temperature_k) &&
+      (bulk.effective_temperature_k === null ||
+        (positive(bulk.effective_temperature_k) &&
+          bulk.effective_temperature_k >= bulk.equilibrium_temperature_k)) &&
       shares.every((share) => atLeastZero(share) && share <= 1),
     "bulk values unusable",
   );
@@ -237,6 +240,7 @@ function toBulk(bulk: BulkPropertiesDto): BulkProperties {
     planetClass: bulk.class,
     massFractions: { ...fractions },
     equilibriumTemperatureK: bulk.equilibrium_temperature_k,
+    effectiveTemperatureK: bulk.effective_temperature_k,
   };
 }
 

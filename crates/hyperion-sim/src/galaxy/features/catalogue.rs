@@ -79,6 +79,7 @@ use crate::galaxy::gas::SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY;
 use crate::galaxy::gas::field::GasField;
 use crate::galaxy::gas::smooth::GasLayer;
 use crate::galaxy::kinematics::draw_on;
+use crate::galaxy::snr::window::{standard_normal_cdf, truncated_standard_normal};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{FeatureCell, FeatureRef};
 use crate::math;
@@ -94,8 +95,8 @@ use super::kinds::globular::{
 };
 use super::kinds::nursery::{
     AGE_SPREAD_MAX_MYR, BLOW_OUT_HEIGHTS, BOUND_FRACTION, BUBBLE_INTERIOR_MEDIAN,
-    BUBBLE_INTERIOR_SIGMA_DEX, DISSOLUTION_AGE_MYR, EFFICIENCY_RANGE, EMBEDDED_DURATION_MYR,
-    EXPANSION_SPEED_KM_S, NurseryMarks, NurseryStage, SIZE_RANGE_LY,
+    BUBBLE_INTERIOR_SIGMA_DEX, BUBBLE_INTERIOR_TRUNCATION, DISSOLUTION_AGE_MYR, EFFICIENCY_RANGE,
+    EMBEDDED_DURATION_MYR, EXPANSION_SPEED_KM_S, NurseryMarks, NurseryStage, SIZE_RANGE_LY,
 };
 use super::kinds::open_cluster::{
     CONCENTRATION_RANGE, HALF_MASS_RADIUS_AT_1E4, NurseryMassFunction, OpenClusterMarks,
@@ -1242,9 +1243,13 @@ fn nursery(
     let fe_h = Dex::new(
         metallicity.mean().value() + metallicity.sigma().value() * stream.standard_normal(),
     );
+    // The drawn normal's rank, mapped into the truncated law on the same words (ruling 136.3).
+    let interior_z = truncated_standard_normal(
+        standard_normal_cdf(stream.standard_normal()),
+        BUBBLE_INTERIOR_TRUNCATION,
+    );
     let interior = HydrogenPerCm3::new(
-        BUBBLE_INTERIOR_MEDIAN.value()
-            * math::exp10(BUBBLE_INTERIOR_SIGMA_DEX * stream.standard_normal()),
+        BUBBLE_INTERIOR_MEDIAN.value() * math::exp10(BUBBLE_INTERIOR_SIGMA_DEX * interior_z),
     );
     let radius = half_mass_radius(life.mass, stream.standard_normal());
     let concentration = stream.uniform_in(CONCENTRATION_RANGE.0, CONCENTRATION_RANGE.1);

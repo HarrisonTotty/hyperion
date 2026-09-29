@@ -111,6 +111,11 @@ describe("system_bodies", () => {
     expect([system.belts.state, system.halo.state]).toEqual(["not_modelled", "not_modelled"]);
     expect(system.bodies.map(indexOf)).toEqual([0x0300, 0x0500]);
     expect(system.bodies.map((body) => okValue(body.bulk).class)).toEqual(["rocky", "gas_giant"]);
+    // Ruling 112.7: only the giant radiates at an effective temperature of its own.
+    expect(system.bodies.map((body) => okValue(body.bulk).effective_temperature_k)).toEqual([
+      null,
+      128.9,
+    ]);
     for (const body of system.bodies) {
       expect(parseBodyId(body.id).system).toBe(system.hosts.system);
       expect([body.label.state, body.moons.state, body.rings.state]).toEqual([

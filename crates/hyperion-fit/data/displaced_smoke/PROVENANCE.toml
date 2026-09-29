@@ -7,10 +7,10 @@ dataset = "displaced_smoke"
 class = "fetched"
 citation = "hyperion-fit orbits (plan 15, P15.T6.a–b): orbits in the Milky Way fixture's own potential"
 url = "generated: hyperion-fit orbits --smoke"
-retrieved = "2026-09-27"
-release = "the smoke manifest displaced_orbits.smoke.toml, manifest-sha256 6a8b4fc39d9a0a5772d6dfedaf3d8ccffe25e1dcd919347a986e6a2aa7c82413, at GENERATOR_VERSION 13"
+retrieved = "2026-09-28"
+release = "the smoke manifest displaced_orbits.smoke.toml, manifest-sha256 6a8b4fc39d9a0a5772d6dfedaf3d8ccffe25e1dcd919347a986e6a2aa7c82413, at GENERATOR_VERSION 15, rerun in the potential of the version-15 batch (P06.T30 and P11.T1.d's mean masses, ruling 138's Chabrier scale)"
 licence = "HYPERION's own output"
 
 [[files]]
 name = "displaced_orbits.txt"
-sha256 = "6ebf8138bf52a9c551482fc4e413693f28ffac576845022bf73fcd8433868cb0"
+sha256 = "9d1c50ddfe3492bba5c8049d69e47c6940356d5d9307fe4f1ad29d869aba4b7d"

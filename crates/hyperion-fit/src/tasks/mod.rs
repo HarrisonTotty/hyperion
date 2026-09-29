@@ -9,4 +9,5 @@ pub mod kick_rank;
 pub mod mge;
 pub mod period_correction;
 pub mod stellar_fates;
+pub mod stripping;
 pub mod wd_cooling;

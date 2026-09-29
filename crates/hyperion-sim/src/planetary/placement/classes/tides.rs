@@ -12,7 +12,12 @@
 //!
 //! e(t) = e₀ exp(−t ÷ τ), a(t) = a₀ (1 − e₀²) ÷ (1 − e(t)²),
 //!
-//! with t the time since the planet formed, the host's age plus the clock time. The orbit's
+//! with t the time since the planet formed, the host's age plus the clock time. The damping
+//! stops at the forced eccentricity its neighbours hold (ruling 133.1, amending 112.8;
+//! [`secular`](super::secular)): e(t) = `e_f`(t) + (e₀ − `e_f`(0)) exp(−t ÷ τ), `e_f` the larger
+//! of the surviving secular mode's, which decays with the mode, and a near-resonant pair's, which
+//! does not ([`circularise_to`]). TRAPPIST-1's planets keep e cos ω and e sin ω of 0.002–0.008
+//! (Agol et al. 2021, Table 2), where the pure exponential gave eccentricities of 10⁻²²⁶. The orbit's
 //! semi-latus rectum a (1 − e²) is kept, so a(t) falls from a₀ towards a₀ (1 − e₀²), which lies
 //! between the primordial periapsis and semi-major axis: the pericentre rises and the apocentre
 //! falls, and a planet never leaves the interval its spacing was checked on (design note 9). The
@@ -96,7 +101,8 @@ pub fn circularisation_time(
 
 /// The semi-major axis and eccentricity of a primordial orbit of `a0` and `e0` after `elapsed`
 /// of damping with time `tau` (P14.T8.e): e₀ exp(−t ÷ τ) and a₀ (1 − e₀²) ÷ (1 − e²). A time
-/// before formation, or an infinite τ, leaves the orbit as it was.
+/// before formation, or an infinite τ, leaves the orbit as it was. It is [`circularise_to`] with
+/// no floor and no drain.
 ///
 /// # Panics
 ///
@@ -109,6 +115,55 @@ pub fn circularise(a0: Metres, e0: f64, tau: Years, elapsed: Years) -> (Metres, 
     }
     let e = e0 * math::exp(-elapsed.value() / tau.value());
     let a = a0 * ((1.0 - e0 * e0) / (1.0 - e * e));
+    (a, e)
+}
+
+/// [`circularise`] of a planet whose eccentricity is held at a floor (ruling 133.1): e(t) =
+/// `e_f`(t) + (e₀ − `e_f`(0)) exp(−(1/τ + D) t), with `e_f`(t) = min(`floor(t)`, e₀), and the axis
+/// from the tides' part alone, a = a₀ (1 − e₀²) ÷ (1 − `e_tide`²), `e_tide`(t) = `e_f`(t) +
+/// (e₀ − `e_f`(0)) exp(−t ÷ τ). `floor` gives the forced eccentricity at a time since formation,
+/// non-increasing; `drain` D, per year, is the rate at which the planets it anchors draw its
+/// eccentricity out through their own tides, which moves angular momentum and not energy, so it
+/// keeps the axis. An orbit at or below its floor keeps its eccentricity until the floor falls
+/// below it. A time before formation, or a τ that is not positive, leaves the orbit as it was.
+///
+/// # Panics
+///
+/// In debug builds, unless `a0` is positive and `e0` lies in `[0, 1)`.
+///
+/// # Examples
+///
+/// A hot planet damped for a hundred e-folding times keeps its forced eccentricity:
+///
+/// ```
+/// use hyperion_sim::planetary::placement::classes::tides::circularise_to;
+/// use hyperion_sim::units::{Metres, Years};
+///
+/// let floor = |_: f64| 0.004;
+/// let (_, e) = circularise_to(Metres::new(3e9), 0.1, floor, 0.0, Years::new(1e7), Years::new(1e9));
+/// assert!((e - 0.004).abs() < 1e-15);
+/// ```
+#[must_use]
+pub fn circularise_to(
+    a0: Metres,
+    e0: f64,
+    floor: impl Fn(f64) -> f64,
+    drain: f64,
+    tau: Years,
+    elapsed: Years,
+) -> (Metres, f64) {
+    debug_assert!(a0.value() > 0.0 && (0.0..1.0).contains(&e0));
+    let t = elapsed.value();
+    if t <= 0.0 || tau.value().is_nan() || tau.value() <= 0.0 {
+        return (a0, e0);
+    }
+    let held = |time: f64| floor(time).clamp(0.0, e0);
+    let (start, now) = (held(0.0), held(t));
+    let free = e0 - start;
+    let tides = math::exp(-t / tau.value());
+    let e = now + free * math::exp(-t / tau.value() - drain.max(0.0) * t);
+    let e_tide = now + free * tides;
+    let a = a0 * ((1.0 - e0 * e0) / (1.0 - e_tide * e_tide));
     (a, e)
 }
 
@@ -161,6 +216,47 @@ mod tests {
         // Before formation, nothing has happened.
         let (a, e) = circularise(a0, 0.3, Years::new(1e9), Years::new(-5.0));
         assert_eq!((a, e), (a0, 0.3));
+    }
+
+    /// Ruling 133.1: damping stops at the floor, follows a floor that decays, keeps the axis the
+    /// tides alone give when a drain is added, and never raises an eccentricity below the floor.
+    #[test]
+    fn damping_stops_at_the_floor() {
+        let a0 = Metres::new(0.02 * METRES_PER_AU);
+        let tau = Years::new(1e6);
+        let fixed = |_: f64| 0.004;
+        let mut previous = 0.2;
+        for t in [0.0, 1e5, 1e6, 1e7, 1e9, 1e12] {
+            let (a, e) = circularise_to(a0, 0.2, fixed, 0.0, tau, Years::new(t));
+            assert!(e >= 0.004 && e <= previous, "{t}: {e}");
+            let p0 = a0.value() * (1.0 - 0.04);
+            assert!((a.value() * (1.0 - e * e) - p0).abs() < 1e-9 * p0);
+            previous = e;
+        }
+        let (_, e) = circularise_to(a0, 0.2, fixed, 0.0, tau, Years::new(1e12));
+        assert!((e - 0.004).abs() < 1e-15, "{e}");
+        assert_eq!(
+            circularise_to(a0, 0.001, fixed, 0.0, tau, Years::new(1e9)),
+            (a0, 0.001)
+        );
+        // A floor that decays takes the eccentricity with it.
+        let decaying = |t: f64| 0.004 * math::exp(-t / 1e8);
+        let (_, late) = circularise_to(a0, 0.2, decaying, 0.0, tau, Years::new(1e9));
+        assert!(late < 1e-6, "{late}");
+        // A drain lowers e but keeps the axis the tides give.
+        let (a_plain, e_plain) = circularise_to(a0, 0.2, |_| 0.0, 0.0, tau, Years::new(5e5));
+        let (a_drained, e_drained) = circularise_to(a0, 0.2, |_| 0.0, 1e-6, tau, Years::new(5e5));
+        assert_eq!(a_plain, a_drained);
+        assert!(e_drained < e_plain);
+        // With no floor and no drain the damping is P14.T8.e's.
+        for t in [1e5, 1e8, 5e9] {
+            let (a, e) = circularise_to(a0, 0.3, |_| 0.0, 0.0, tau, Years::new(t));
+            let (a_old, e_old) = circularise(a0, 0.3, tau, Years::new(t));
+            assert!(
+                (e - e_old).abs() <= 1e-15 * e_old.max(1e-300)
+                    && (a - a_old).abs() < Metres::new(1e-3)
+            );
+        }
     }
 
     #[test]

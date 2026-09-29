@@ -21,9 +21,11 @@ pub mod giant_cooling;
 pub mod helium;
 pub mod kick_rank;
 pub mod mge;
+pub mod period_correction;
 pub mod stellar_fates_high;
 pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
+pub mod stripping;
 pub mod wd_cooling;
 
 /// What the fitting toolchain records of one fitted table.
@@ -45,14 +47,14 @@ pub struct TableInfo {
 pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "chabrier",
-        revision: 0,
-        since_generator_version: 11,
-        provisional: true,
+        revision: 1,
+        since_generator_version: 14,
+        provisional: false,
     },
     TableInfo {
         name: "displaced_forms",
         revision: 0,
-        since_generator_version: 13,
+        since_generator_version: 15,
         provisional: true,
     },
     TableInfo {
@@ -74,6 +76,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: true,
     },
     TableInfo {
+        name: "period_correction",
+        revision: 0,
+        since_generator_version: 14,
+        provisional: false,
+    },
+    TableInfo {
         name: "stellar_fates_high",
         revision: 0,
         since_generator_version: 13,
@@ -89,6 +97,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "stellar_fates_mid",
         revision: 0,
         since_generator_version: 13,
+        provisional: false,
+    },
+    TableInfo {
+        name: "stripping",
+        revision: 0,
+        since_generator_version: 14,
         provisional: false,
     },
     TableInfo {

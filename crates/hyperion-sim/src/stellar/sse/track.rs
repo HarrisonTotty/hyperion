@@ -437,7 +437,7 @@ impl Track {
             build::Keep::Track,
         )
         .with_helium(helium)
-        .stripped_by_companion(is_companion_stripped(draws))
+        .stripped_by_companion(is_companion_stripped(m0, comp, draws))
         .run(m0.value(), age_max);
         Self {
             coeffs,
@@ -818,19 +818,27 @@ pub(crate) fn fate_of(
         Resolution::GENERATOR,
         build::Keep::Lifetime,
     )
-    .stripped_by_companion(is_companion_stripped(draws))
+    .stripped_by_companion(is_companion_stripped(m0, comp, draws))
     .run(m0.value(), None);
     outcome
         .fate
         .expect("a build with no age to stop at runs to the star's death")
 }
 
-/// Whether the provisional companion-stripped mark of `draws` is set, against the kick law's
-/// [`stripped_share`](crate::stellar::remnant::KickLawParams::stripped_share) (plan 06, design
-/// note 11): the one question the track asks of it, for the electron-capture window.
+/// Whether the companion-stripped mark of `draws` is set for a star of initial mass `m0` and
+/// composition `comp`, as the track asks it for the electron-capture window: against plan 11's
+/// stripped share at the star ([`binarity::is_stripped`](crate::galaxy::displaced::binarity::is_stripped);
+/// P11.T1.d), and only inside [`STRIPPED_WINDOW`](crate::stellar::fates::STRIPPED_WINDOW), outside
+/// which the mark moves no fate, so that no other star pays for the share.
 #[must_use]
-pub(crate) fn is_companion_stripped(draws: &StarDraws) -> bool {
-    crate::stellar::remnant::KickLawParams::default().is_stripped(draws.stripped())
+pub(crate) fn is_companion_stripped(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+) -> bool {
+    let (lo, hi) = crate::stellar::fates::STRIPPED_WINDOW;
+    (lo..=hi).contains(&m0.value())
+        && crate::galaxy::displaced::binarity::is_stripped(draws.stripped(), m0, comp)
 }
 
 /// The state at `age` of a star of initial mass `m0`, `comp` and `draws` under `options`, if its
@@ -885,7 +893,7 @@ impl Track {
             Resolution::GENERATOR,
             build::Keep::Track,
         )
-        .stripped_by_companion(is_companion_stripped(draws))
+        .stripped_by_companion(is_companion_stripped(m0, comp, draws))
         .zero_age_main_sequence_segment(m0.value())
         .segment;
         if !segment.knots.is_empty() {
@@ -1038,7 +1046,7 @@ pub(crate) fn remnant_of(
         Resolution::GENERATOR,
         build::Keep::Remnant,
     )
-    .stripped_by_companion(is_companion_stripped(draws))
+    .stripped_by_companion(is_companion_stripped(m0, comp, draws))
     .run(m0.value(), None);
     let fate = outcome
         .fate

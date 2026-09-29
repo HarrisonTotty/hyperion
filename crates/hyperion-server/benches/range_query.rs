@@ -255,6 +255,8 @@ fn layer_letter(layer: MassLayer) -> char {
         MassLayer::C => 'C',
         MassLayer::D => 'D',
         MassLayer::E => 'E',
+        MassLayer::BrownDwarf => 'F',
+        MassLayer::RoguePlanet => 'G',
     }
 }
 

@@ -106,6 +106,11 @@ pub enum SystemOrigin {
 /// and so on) and its rings `0x0080`–`0x008F`, and plan 13 generates no body index but `0x0000`.
 /// Plan 14's [`HostKind`] has the same three values and converts from this.
 ///
+/// A brown dwarf has plan 06's stellar state
+/// ([`SystemStars::generate`](crate::stellar::system::SystemStars::generate), a single object);
+/// a rogue planet has its record and its metallicity and no derived state until plan 14 (plan 13,
+/// P13.T5.d).
+///
 /// (The name `ObjectKind` is plan 06's, for what a star is now.)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SystemKind {

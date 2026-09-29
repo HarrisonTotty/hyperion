@@ -342,6 +342,8 @@ describe("SystemView's body readout", () => {
     expect(reading("DENSITY")).toBe("5510 kg/m³");
     expect(reading("GRAVITY")).toBe("9.82 m/s²");
     expect(reading("T EQ")).toBe("255 K");
+    // Ruling 112.7: a body with no luminosity of its own has no effective temperature row.
+    expect(terms("T EFF")).toHaveLength(0);
     expect(reading("CLASS")).toBe("ROCKY");
     expect(reading("IRON")).toBe("32.3 %");
     expect(within(bodiesPanel()).queryByText("PENDING")).not.toBeInTheDocument();
@@ -382,6 +384,9 @@ describe("SystemView's body readout", () => {
 
     expect(reading("DESIG")).toBe("H7K 4C0RFZ D-7 /1280");
     expect(reading("CLASS")).toBe("GAS GIANT");
+    // Ruling 112.7: the light's equilibrium temperature, and the giant's own effective one.
+    expect(reading("T EQ")).toBe("112 K");
+    expect(reading("T EFF")).toBe("129 K");
     expect(terms("SURFACE")).toHaveLength(0);
     expect(reading("GENERATOR INPUTS")).toBe("NOT YET MODELLED");
     expect(reading("MASS")).toBe("318 M");

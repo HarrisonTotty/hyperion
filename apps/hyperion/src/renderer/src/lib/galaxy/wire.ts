@@ -25,6 +25,7 @@ import {
 import type { Vec3 } from "../../spatial/vec3";
 import {
   type CentreLy,
+  type ChartKind,
   CHART_SYSTEM_LIMIT,
   type ChartCensus,
   type ChartResult,
@@ -59,10 +60,12 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     distanceLy: Math.hypot(relLy.x, relLy.y, relLy.z),
     positionLy: toVec3(galacticDeltaLy(ORIGIN, record.position)),
     layer: record.layer,
+    kind: chartKindOf(record.layer),
     population: record.population,
     initialMassMsun: record.initial_mass_msun,
     ageMyr: record.age_myr,
-    // Every chart query asks for the briefs, so a row without one is a system not yet formed.
+    // Every chart query asks for the briefs, so a row without one is a system not yet formed, or
+    // a free-floating planet, which never has one.
     star: record.stellar === undefined ? null : toStarBrief(record.stellar),
     velocityKmS: toVec3(record.velocity_km_s),
   };
@@ -80,10 +83,19 @@ function byDistanceThenId(a: ChartSystem, b: ChartSystem): number {
   return a.id < b.id ? -1 : 1;
 }
 
-function toChartCensus(completeAboveMsun: number | null): ChartCensus {
-  return completeAboveMsun === null
-    ? { kind: "nothing_fits" }
-    : { kind: "complete", aboveMsun: completeAboveMsun };
+/**
+ * The census the chart reads: complete above the edge the server sent, named with the lightest
+ * layer it included, or nothing fitting.
+ */
+function toChartCensus(census: SystemsInRange["census"]): ChartCensus {
+  const aboveMsun = census.complete_above_msun;
+  if (aboveMsun === null) {
+    return { kind: "nothing_fits" };
+  }
+  const lightest = census.layers
+    .filter((line) => line.status === "included")
+    .toSorted((a, b) => layerRank(a.layer) - layerRank(b.layer))[0];
+  return { kind: "complete", aboveMsun, layer: lightest?.layer ?? "a" };
 }
 
 /**
@@ -99,7 +111,7 @@ export function toChartResult(response: SystemsInRange): ChartResult {
     centreLy: [x, y, z],
     radiusLy: response.radius_ly,
     timeYr: universeTimeToYears(response.time),
-    census: toChartCensus(response.census.complete_above_msun),
+    census: toChartCensus(response.census),
     layers: response.census.layers,
     systems: response.systems
       .map((record) => toChartSystem(response.centre, record))
@@ -170,10 +182,15 @@ export function populationLabel(population: Population): string {
   return label;
 }
 
-/** A mass layer's place from the lightest: A is 0 and E is 4. */
+/**
+ * A mass layer's size class, its place from the lightest stellar layer: A is 0 and E is 4, and the
+ * brown dwarfs and free-floating planets take layer A's 0 (plan 13, design note 15).
+ */
 export function layerIndex(layer: MassLayer): LayerIndex {
   let index: LayerIndex;
   switch (layer) {
+    case "rogue_planet":
+    case "brown_dwarf":
     case "a":
       index = 0;
       break;
@@ -191,4 +208,74 @@ export function layerIndex(layer: MassLayer): LayerIndex {
       break;
   }
   return index;
+}
+
+/**
+ * A mass layer's place from the lightest of all seven: the free-floating planets 0, the brown
+ * dwarfs 1, then A to E 2 to 6, the order the census reads from the lightest.
+ */
+export function layerRank(layer: MassLayer): number {
+  let rank: number;
+  switch (layer) {
+    case "rogue_planet":
+      rank = 0;
+      break;
+    case "brown_dwarf":
+      rank = 1;
+      break;
+    case "a":
+    case "b":
+    case "c":
+    case "d":
+    case "e":
+      rank = 2 + layerIndex(layer);
+      break;
+  }
+  return rank;
+}
+
+/** What a layer's objects are: star systems, free-floating brown dwarfs or free-floating planets. */
+export function chartKindOf(layer: MassLayer): ChartKind {
+  let kind: ChartKind;
+  switch (layer) {
+    case "a":
+    case "b":
+    case "c":
+    case "d":
+    case "e":
+      kind = "stellar";
+      break;
+    case "brown_dwarf":
+      kind = "brown_dwarf";
+      break;
+    case "rogue_planet":
+      kind = "rogue_planet";
+      break;
+  }
+  return kind;
+}
+
+/**
+ * The letter a layer is named by in the census: `A` to `E` for the stellar layers, and `F` and `G`
+ * for the brown dwarfs and the free-floating planets, the letters their designations carry (plan
+ * 01's layer letters).
+ */
+export function layerLetter(layer: MassLayer): string {
+  let letter: string;
+  switch (layer) {
+    case "a":
+    case "b":
+    case "c":
+    case "d":
+    case "e":
+      letter = layer.toUpperCase();
+      break;
+    case "brown_dwarf":
+      letter = "F";
+      break;
+    case "rogue_planet":
+      letter = "G";
+      break;
+  }
+  return letter;
 }

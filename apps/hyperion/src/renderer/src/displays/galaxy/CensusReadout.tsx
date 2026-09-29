@@ -1,18 +1,27 @@
 import type { LayerCensus, LayerStatus } from "@hyperion/protocol";
-import { useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { annunciation } from "../../components/RequestStatus";
+import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
-import { formatListPosition, formatMassMsun, formatNumber, formatSci } from "../../lib/format";
+import {
+  type FormattedSubstellarMass,
+  formatListPosition,
+  formatNumber,
+  formatSci,
+  formatSubstellarMass,
+} from "../../lib/format";
 import type { ChartResult, ChartSystem } from "../../lib/galaxy/model";
+import { layerLetter } from "../../lib/galaxy/wire";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import type { RequestState } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
 import {
   censusHint,
   censusLine,
+  censusLinesLightestFirst,
   formatBandMsun,
   inRangeCount,
   shownCountText,
@@ -57,11 +66,70 @@ function expectedCount(expected: number): string {
   return formatSci(expected);
 }
 
+/** Props of {@link MassWithUnit}. */
+interface MassWithUnitProps {
+  readonly mass: FormattedSubstellarMass;
+}
+
+/** A mass and its drawn unit, `M☉` or `M⊕` as the formatter chose. */
+function MassWithUnit({ mass }: MassWithUnitProps) {
+  return (
+    <>
+      {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
+    </>
+  );
+}
+
+/** The guide's join of a span's two ends: a spaced en dash, never a hyphen. */
+const SPAN = " – ";
+
+/** Props of {@link Band}. */
+interface BandProps {
+  readonly line: LayerCensus;
+}
+
+/**
+ * A layer's band as the table writes it, one span with one unit, the header's `M☉` but for the
+ * free-floating planets': the stellar layers' exact edges (`0.08 – 0.5`), the brown dwarfs' 13
+ * Jupiter masses to three decimals up to the stars' `0.08` (`0.012 – 0.08`), and the planets' in
+ * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14).
+ */
+function Band({ line }: BandProps) {
+  let band: ReactNode;
+  switch (line.layer) {
+    case "a":
+    case "b":
+    case "c":
+    case "d":
+    case "e":
+      band = `${formatBandMsun(line.mass_min_msun)}${SPAN}${formatBandMsun(line.mass_max_msun)}`;
+      break;
+    case "brown_dwarf":
+      // The upper edge is the stars' lower one, written as the stellar edges are.
+      band = `${formatSubstellarMass(line.mass_min_msun, line.layer).value}${SPAN}${formatBandMsun(line.mass_max_msun)}`;
+      break;
+    case "rogue_planet":
+      band = (
+        <>
+          {formatSubstellarMass(line.mass_min_msun, line.layer).value}
+          {SPAN}
+          {formatSubstellarMass(line.mass_max_msun, line.layer).value} <EarthMassUnit />
+        </>
+      );
+      break;
+  }
+  return band;
+}
+
 interface CensusTableProps {
   readonly layers: ReadonlyArray<LayerCensus>;
 }
 
-/** One row per mass layer: its band, what was expected in the sphere, and what came back. */
+/**
+ * One row per mass layer, lightest first: its band, what was expected in the sphere, and what came
+ * back. The substellar layers a query asked for come first, named by their designation letters, `G`
+ * for the free-floating planets and `F` for the brown dwarfs (plan 13, P13.T8.c).
+ */
 function CensusTable({ layers }: CensusTableProps) {
   return (
     <table className="census-table">
@@ -77,11 +145,11 @@ function CensusTable({ layers }: CensusTableProps) {
         </tr>
       </thead>
       <tbody>
-        {layers.map((layer) => (
+        {censusLinesLightestFirst(layers).map((layer) => (
           <tr key={layer.layer}>
-            <th scope="row">{layer.layer.toUpperCase()}</th>
+            <th scope="row">{layerLetter(layer.layer)}</th>
             <td className="census-table__band">
-              {formatBandMsun(layer.mass_min_msun)}-{formatBandMsun(layer.mass_max_msun)}
+              <Band line={layer} />
             </td>
             <td className="census-table__count">{expectedCount(layer.expected)}</td>
             <td className="census-table__count">{formatNumber(layer.returned, 0)}</td>
@@ -230,7 +298,7 @@ export function CensusReadout({
             >
               {line.kind === "complete" ? (
                 <>
-                  {line.text} {formatMassMsun(line.aboveMsun)} <SolarMassUnit />
+                  {line.text} <MassWithUnit mass={line.above} />
                 </>
               ) : (
                 line.text

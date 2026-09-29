@@ -390,3 +390,96 @@ describe("the GALAXY readout's stars", () => {
     expect(rows.map((row) => row.textContent)).toEqual(["ADA9.20.69WHITE DWARF", "BG2V1.00DWARF"]);
   });
 });
+
+/** Charts a brown dwarf and a free-floating planet with the lowest floor, the planet nearer. */
+async function renderFreeFloating() {
+  const user = userEvent.setup();
+  stubCanvas();
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    DOMRect.fromRect({ x: 0, y: 0, width: 800, height: 500 }),
+  );
+  render(<App />);
+  const socket = FakeWebSocket.latest();
+  act(() => {
+    socket.serverWelcomes();
+  });
+  await user.keyboard("{F2}");
+  await server(() => {
+    socket.serverAnswers("list_universes", () => aUniverseList([aUniverse()]));
+  });
+  await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+  await server(() => {
+    socket.serverAnswers("open_universe", () => anOpenedUniverse(aUniverse()));
+  });
+  await user.clear(screen.getByRole("textbox", { name: "X" }));
+  await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
+  await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
+  await server(() => {
+    socket.serverAnswers("systems_in_range", () =>
+      aSystemsInRange({
+        centreLy: [26_000, 0, 0],
+        timeYr: CHART_TIME_YR,
+        minLayer: "rogue_planet",
+        systems: [
+          { relLy: [0, 0, 1], layer: "rogue_planet" },
+          { relLy: [0, 0, 2], layer: "brown_dwarf" },
+        ],
+      }),
+    );
+  });
+  return { user, socket };
+}
+
+/** A free-floating brown dwarf of 0.05 M☉ as `system_summary` describes it: one T dwarf. */
+const BROWN_DWARF = aSunlikeStar({
+  kind: "substellar",
+  phase: "substellar",
+  class: "T5",
+  initial_mass_msun: 0.05,
+  mass_msun: 0.05,
+  luminosity_lsun: 6.3e-6,
+  radius_rsun: 0.095,
+  teff_k: 1_100,
+  absolute_v_mag: null,
+  colour_b_v_mag: null,
+  mass_loss_rate_msun_per_yr: 0,
+});
+
+describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () => {
+  it("asks nothing of a planet's stars, and holds OPEN SYSTEM back saying its bodies are not modelled", async () => {
+    const { user, socket } = await renderFreeFloating();
+
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ G-1, PLANET,/ }));
+
+    expect(socket.requestsOfKind("system_summary")).toHaveLength(0);
+    expect(valueOf("KIND")).toBe("PLANET");
+    expect(valueOf("BULK")).toBe("NOT YET MODELLED");
+    const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+  });
+
+  it("reads a brown dwarf's kind, class and temperature from its summary, as a system of one", async () => {
+    const { user, socket } = await renderFreeFloating();
+
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ F-2, BROWN DWARF/ }));
+    expect(socket.requestsOfKind("system_summary")).toHaveLength(1);
+    await server(() => {
+      socket.serverAnswers("system_summary", (body) =>
+        aSummaryResponse({
+          ...aSingleStarSummary(BROWN_DWARF),
+          universe: body.universe,
+          system: body.system,
+          time: body.time,
+        }),
+      );
+    });
+
+    expect(valueOf("KIND")).toBe("BROWN DWARF");
+    expect(valueOf("CLASS")).toBe("T5");
+    expect(valueOf("T EFF")).toMatch(/^1,?100 K$/u);
+    expect(valueOf("MASS")).toBe("0.050 M");
+    const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
+    expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+  });
+});

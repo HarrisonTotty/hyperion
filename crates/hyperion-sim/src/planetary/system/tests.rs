@@ -790,7 +790,16 @@ fn no_overlapping_orbits_in_generated_systems() {
                     // With the host's mass unchanged `now` is `hill`, and a pair placed at the
                     // limit sits on it to rounding: the same tolerance as the assertion below.
                     if gap < HILL_STABLE_GAP * now * (1.0 - 1e-12) {
-                        assert!(widening > 1.01, "only mass loss unsettles a placed pair");
+                        // Any loss of the host's mass does it: a pair placed at the limit falls
+                        // under it by (M₀ ÷ M)^⅓ − 1, 2 × 10⁻⁸ for a main-sequence star that has
+                        // lost 7 × 10⁻⁸ of its mass (a pair of 0x41ffecb1ffc00004 after ruling 138).
+                        assert!(
+                            widening > 1.0,
+                            "only mass loss unsettles a placed pair: {widening} at {t:?}, gap {gap} \
+                             against {} of {now}, {:?}",
+                            HILL_STABLE_GAP * now,
+                            system.system()
+                        );
                         unstable += 1;
                     }
                     assert!(
@@ -1105,15 +1114,53 @@ fn satellites_share_their_parent_s_state_across_the_window() {
 /// Sun is circular to 0.01 (P14.T8.e's finding).
 #[test]
 fn circularisation_is_t8e_s_and_hot_jupiters_circularise() {
-    for (_, system) in generated() {
+    let (mut held, mut floored) = (0, 0);
+    for (ctx, system) in generated() {
         for body in system.bodies() {
+            let Some(placed) = body.placed() else {
+                continue;
+            };
             let zone = system.zone(body.host()).unwrap();
-            let radius = primordial_radius(body.mass());
-            let expected = circularisation(body.placed().unwrap(), zone.host_mass(), radius);
+            let siblings: Vec<PlacedPlanet> = system
+                .bodies()
+                .iter()
+                .filter(|other| other.host() == body.host())
+                .filter_map(|other| other.placed().copied())
+                .collect();
+            let position = siblings
+                .iter()
+                .position(|other| other.index() == placed.index())
+                .unwrap();
+            let expected =
+                host_circularisations(&siblings, zone.host_mass(), ctx.age_at_epoch())[position];
             assert_eq!(body.circularisation(), Some(expected));
             assert_eq!(body.fate().unwrap().circularisation(), expected);
+            // Ruling 133.1: the damping stops at the floor, so no planet is damped below its floor
+            // at its age (or its own primordial eccentricity, where that is lower).
+            let age = ctx.age_at_epoch().value();
+            let e0 = placed.orbit().eccentricity().value();
+            let floor = expected.floor().at(age).min(e0);
+            if floor > 0.0 && expected.drain() <= 0.0 {
+                held += 1;
+                let record = system
+                    .body_at(ctx, body.index(), UniverseTime::EPOCH)
+                    .unwrap();
+                if let Some(orbit) = record.orbit().ok() {
+                    let e = orbit.elements().eccentricity().value();
+                    assert!(
+                        e >= floor * (1.0 - 1e-9),
+                        "{:?}: e {e} < {floor}",
+                        body.index()
+                    );
+                    floored += usize::from(e < floor * 1.01);
+                }
+            }
         }
     }
+    assert!(
+        held > 100 && floored > 0,
+        "{held} held, {floored} at their floor"
+    );
     let mut hot = 0;
     for i in 0..3_000 {
         let ctx = synthetic_star(
@@ -1293,4 +1340,46 @@ fn widening(ctx: &SystemContext, t: UniverseTime) -> f64 {
             star.initial_mass().value() / state.mass().value()
         })
         .max(1.0)
+}
+
+/// Ruling 112.8: a host's placed class reports what was placed, so a host that is not `Barren`
+/// holds at least one planet (`close_binary`'s star B was `CompactMulti` with none: its disc,
+/// cut by its companion to 0.085–0.27 au, held 0.043 M⊕ of solids, too little for one chain
+/// member).
+#[test]
+fn a_host_that_placed_nothing_is_barren() {
+    let (mut empty, mut hosts) = (0, 0);
+    for (_, system) in generated() {
+        for host in system.hosts() {
+            hosts += 1;
+            let planets = system
+                .bodies()
+                .iter()
+                .filter(|body| body.host() == host.host() && body.placed().is_some())
+                .count();
+            if planets == 0 {
+                empty += 1;
+                assert_eq!(host.class(), ArchitectureClass::Barren, "{:?}", host.host());
+            } else {
+                assert_ne!(host.class(), ArchitectureClass::Barren, "{:?}", host.host());
+            }
+        }
+    }
+    assert!(empty > 0 && hosts > empty, "{empty} empty of {hosts} hosts");
+}
+
+/// Ruling 133.4: a companion's pericentre widens by M₀/M when the loss is adiabatic, keeps q₀ when
+/// it is impulsive, and is weighted between.
+#[test]
+fn a_companion_widens_by_its_regime() {
+    let q0 = Metres::new(1e15);
+    let kept = 0.5;
+    let slow = present_pericentre(q0, kept, 1e-3);
+    assert!((slow / q0 - 2.0).abs() < 1e-12);
+    let fast = present_pericentre(q0, kept, 10.0);
+    assert!((fast / q0 - 1.0).abs() < 1e-12);
+    // Ψ = 0.1 × 30^½: halfway in the log, w = ½, so √2.
+    let middle = present_pericentre(q0, kept, 0.1 * 30.0_f64.sqrt());
+    assert!((middle / q0 - 2.0_f64.sqrt()).abs() < 1e-9);
+    assert!((present_pericentre(q0, kept, 0.0) / q0 - 2.0).abs() < 1e-12);
 }

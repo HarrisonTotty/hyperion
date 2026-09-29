@@ -9,9 +9,10 @@ import {
   useState,
 } from "react";
 
+import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
-import { formatLengthLy, formatListPosition, formatMassMsun } from "../../lib/format";
-import type { ChartSystem } from "../../lib/galaxy/model";
+import { formatLengthLy, formatListPosition, formatSubstellarMass } from "../../lib/format";
+import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
 import { objectKindLabel } from "../../lib/system/words";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
@@ -53,10 +54,19 @@ function starCountName(system: ChartSystem): string | null {
 }
 
 /**
- * What a row's primary is, for its accessible name: the kind in words and the class, or that the
- * system is not yet formed at the chart's time.
+ * The words the `CLASS` column holds for a free-floating planet, which has no spectral class: its
+ * kind, so that the list names it in words and shape is never the only signal (plan 13, P13.T8.d).
+ */
+const PLANET_WORDS = "PLANET";
+
+/**
+ * What a row's primary is, for its accessible name: the kind in words and the class, a
+ * free-floating planet's kind, or that the system is not yet formed at the chart's time.
  */
 function starName(system: ChartSystem): string {
+  if (isFormedPlanet(system)) {
+    return PLANET_WORDS;
+  }
   if (system.star === null) {
     return "NOT YET FORMED";
   }
@@ -91,6 +101,12 @@ interface SystemListProps {
  * class, an em dash, and is named `NOT YET FORMED`. The `STARS` column counts the system's stars,
  * the primary included, one digit right-aligned, and the em dash where the row has no brief; the
  * row's name says `1 star` or `3 stars` (plan 11, P11.T14; the orchestrator's ruling 115.5).
+ *
+ * A free-floating brown dwarf is a row like a star's, its class its own (`T4`), one star, and its
+ * mass in M☉ to three decimals (`0.052`). A free-floating planet has no class and no star: its
+ * `CLASS` says `PLANET` and its `STARS` the em dash, and its mass is in Earth masses (plan 13,
+ * design note 14; P13.T8.d). So every mass cell draws its own unit, `M☉` or `M⊕`, and the digits
+ * of both line up at the unit.
  */
 export function SystemList({
   systems,
@@ -210,9 +226,8 @@ export function SystemList({
         <span>CLASS</span>
         <span>STARS</span>
         <span>DIST ly</span>
-        <span>
-          INIT MASS <SolarMassUnit />
-        </span>
+        {/* The unit is in every cell, since a planet's is M⊕ and a star's M☉ (plan 13). */}
+        <span>INIT MASS</span>
         {/*
          * The setting's one name, as the readout's reading of the same words has it: `RANGE` alone
          * is kept for the chart's curve labels, where the chart is the context (the orchestrator's
@@ -252,7 +267,8 @@ export function SystemList({
             }
             const inRange = system.distanceLy <= driveRangeLy;
             const distance = formatLengthLy(system.distanceLy, distanceDecimals);
-            const mass = formatMassMsun(system.initialMassMsun);
+            const mass = formatSubstellarMass(system.initialMassMsun, system.layer);
+            const massName = mass.unit === "mearth" ? "Earth masses" : "solar masses";
             return (
               <div
                 key={system.id}
@@ -268,7 +284,7 @@ export function SystemList({
                   starName(system),
                   starCountName(system),
                   `${distance} ly`,
-                  `${mass} solar masses`,
+                  `${mass.value} ${massName}`,
                   rangeName(inRange),
                 ]
                   .filter((part) => part !== null)
@@ -280,7 +296,9 @@ export function SystemList({
                 data-index={index}
               >
                 <span className="system-list__designation">{system.designation}</span>
-                {system.star === null ? (
+                {isFormedPlanet(system) ? (
+                  <span className="system-list__class">{PLANET_WORDS}</span>
+                ) : system.star === null ? (
                   <span className="system-list__class readout__missing">—</span>
                 ) : (
                   <span className="system-list__class">{system.star.spectralClass}</span>
@@ -291,7 +309,9 @@ export function SystemList({
                   <span className="system-list__number">{system.star.starCount}</span>
                 )}
                 <span className="system-list__number">{distance}</span>
-                <span className="system-list__number">{mass}</span>
+                <span className="system-list__number">
+                  {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
+                </span>
                 <span className="system-list__range">{rangeWords(inRange)}</span>
               </div>
             );

@@ -34,8 +34,10 @@
 //! # Sub-indices
 //!
 //! A planet's moons take the sub-indices `0x01` upward in the order above (regular moons inside
-//! out, the giant-impact moon, then the captures kept in their ordinals), and its rings `0x80`
-//! upward, the dusty ring first ([`generate_rings`]). A belt's member (P14.T21.c) numbers its one
+//! out, the giant-impact moon, then the captures kept in their ordinals), densely, and its rings
+//! `0x80` upward, the dusty ring first ([`generate_rings`]). A moon's own draw, its radius rank,
+//! is keyed by its candidate's identity rather than its sub-index (ruling 112.5), so that pruning
+//! one moon moves no other's draw: `candidate_key` gives the layout. A belt's member (P14.T21.c) numbers its one
 //! possible moon, a giant-impact moon, `0x80` above its own sub-index in its belt's slot: member
 //! k's moon is `Member(0x80 + k)` (design note 3's row, ruling 95.1), whose
 //! [`BodyIndex::parent`] is member k.
@@ -123,7 +125,8 @@ impl Satellite {
     }
 
     /// Its radius rank, word 0 of its own `planet.radius` stream (design note 8), which a regular
-    /// moon's derivation reads (P14.T17.b).
+    /// moon's derivation reads (P14.T17.b): keyed by its candidate's identity, not its sub-index
+    /// (ruling 112.5; see the [module](self) documentation).
     #[must_use]
     pub const fn radius_rank(&self) -> UnitUniform {
         self.radius_rank
@@ -353,10 +356,13 @@ pub(crate) fn satellites_of(
         let Some(index) = moon_index(parent_index, n) else {
             break;
         };
+        // Ruling 112.5: the moon's own draw is keyed by what it is, not by where the moons kept
+        // before it leave it in the dense numbering, so that pruning one moon moves no other.
+        let key = candidate_key(parent_index, &moon).unwrap_or(index);
         moons.push(Satellite {
             index,
             moon,
-            radius_rank: crate::planetary::system::radius_rank(seed, index.body_id(system)),
+            radius_rank: crate::planetary::system::radius_rank(seed, key.body_id(system)),
         });
     }
 
@@ -406,6 +412,43 @@ fn clear_run(parent: &MoonParent, moons: &[RegularMoon]) -> u8 {
         last = outer.ordinal();
     }
     last
+}
+
+/// The sub-index a giant-impact moon's own draws are keyed by (see [`candidate_key`]).
+const IMPACT_CANDIDATE_SUB: u8 = 0x10;
+
+/// The sub-index a Triton-like capture's own draws are keyed by, and above which a giant's
+/// irregular k is keyed at `0x20 + k` (see [`candidate_key`]).
+const LARGE_CAPTURE_CANDIDATE_SUB: u8 = 0x20;
+
+/// The sub-index above which a rocky planet's small capture k is keyed at `0x30 + k` (see
+/// [`candidate_key`]).
+const SMALL_CAPTURE_CANDIDATE_SUB: u8 = 0x30;
+
+/// The index whose [`BodyId`](crate::id::BodyId) keys the own draws of `moon`, a moon of the body
+/// `parent`: its candidate's identity, its kind and its number within the kind, as a sub-index of
+/// the parent's slot (ruling 112.5), whichever sub-index the dense numbering gives it.
+///
+/// A regular moon k is keyed at sub-index k (1–6), the giant-impact moon at `0x10`, a Triton-like
+/// capture at `0x20`, a giant's irregular k at `0x20 + k` (k of 1–4) and a rocky planet's small
+/// capture k at `0x30 + k`. So a regular moon keeps the key it had while nothing before it is
+/// pruned, and no two moons of a planet share a key. A belt member's one possible moon is its
+/// only candidate and keeps its own index, as does anything past the layout (`None`).
+#[must_use]
+fn candidate_key(parent: BodyIndex, moon: &SatelliteMoon) -> Option<BodyIndex> {
+    if parent.sub() != BodySub::Primary {
+        return None;
+    }
+    let sub = match moon {
+        SatelliteMoon::Regular(moon) => moon.ordinal(),
+        SatelliteMoon::GiantImpact(_) => IMPACT_CANDIDATE_SUB,
+        SatelliteMoon::Captured(moon) => match moon.kind() {
+            CaptureKind::Large => LARGE_CAPTURE_CANDIDATE_SUB,
+            CaptureKind::Irregular => LARGE_CAPTURE_CANDIDATE_SUB.checked_add(moon.ordinal())?,
+            CaptureKind::Small => SMALL_CAPTURE_CANDIDATE_SUB.checked_add(moon.ordinal())?,
+        },
+    };
+    BodyIndex::new(parent.slot(), BodySub::Moon(sub)).ok()
 }
 
 /// The index of the `n`-th moon (from 1) of the body `parent`: sub-index n of a planet's slot, or

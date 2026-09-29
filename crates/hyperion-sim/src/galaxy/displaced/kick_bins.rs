@@ -316,7 +316,11 @@ fn shares_on(
             }
             let iron_core = fate.iron_core.map(|core| core.supernova);
             for (w, death, remnant) in remnant_branches(fate.death, fate.remnant, iron_core) {
-                acc.add(weight * w, law.with_stripped_mark(death, &draws), remnant);
+                acc.add(
+                    weight * w,
+                    law.with_stripped_mark(death, &draws, m0, comp),
+                    remnant,
+                );
             }
         }
     }
@@ -701,7 +705,13 @@ mod tests {
             let fate = self.tracks[branch]
                 .fate_with(RemnantDraws::of(&draws))
                 .expect("a full track reaches its death");
-            let death = law.with_stripped_mark(fate.death, &draws);
+            let track = &self.tracks[branch];
+            let death = law.with_stripped_mark(
+                fate.death,
+                &draws,
+                track.initial_mass(),
+                track.composition(),
+            );
             let kick = law.natal_kick(&death, &fate.remnant, &draws);
             let kind = kind_index(fate.remnant.kind());
             match kick {
@@ -834,10 +844,11 @@ mod tests {
         );
     }
 
-    /// Ruling 120.2 with ruling 123.4: the low-mode share of neutron stars over layer E's band lies
-    /// in 1/6–1/4 (the brainstorm; Igoshev et al. 2021, 0.2 ± 0.1) with the seam's stripped
-    /// share, and it rises with that share (the window's two ends at a stripped share of 0.25 and
-    /// 0.33 lie inside it too).
+    /// Ruling 120.2 with ruling 137.3: the low-mode share of primary-born neutron stars over
+    /// layer E's band lies in 0.18–0.30 with the seam's stripped share (the brainstorm's 1/6–1/4
+    /// per neutron star, Igoshev et al. 2021's 0.2 ± 0.1, translated to primaries while the class
+    /// table holds no companion's remnant; re-asserted on the whole population at P11.T6/T11), and
+    /// it rises with that share (printed at the shares 0.25 and 0.33).
     #[test]
     fn the_low_mode_share_of_neutron_stars() {
         let (_, w) = band_average(RemnantKind::NeutronStar, None);
@@ -846,10 +857,8 @@ mod tests {
         eprintln!(
             "low-mode share {w:.4}; at a stripped share of 0.25 {at_quarter:.4}, 0.33 {at_third:.4}"
         );
-        for share in [w, at_quarter, at_third] {
-            assert!((1.0 / 6.0..=0.25).contains(&share), "{share}");
-        }
-        assert!(at_quarter < at_third);
+        assert!(at_quarter < at_third && at_third < w);
+        assert!((0.18..=0.30).contains(&w), "{w}");
     }
 
     #[test]

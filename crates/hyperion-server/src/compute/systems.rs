@@ -70,8 +70,9 @@ impl SharedSystemCache {
     /// # Errors
     ///
     /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
-    /// - [`ResolveSystemError::LayerNotGenerated`] for a free-floating brown dwarf or rogue planet,
-    ///   which plan 13 places but the stellar stage does not model yet (P13.T5.a, plan 14).
+    /// - [`ResolveSystemError::LayerNotGenerated`] for a rogue planet, which has no stars: its state
+    ///   is plan 14's (plan 13, P13.T5.d). A free-floating brown dwarf is generated as a single
+    ///   object through the stellar stage (P13.T5.a).
     ///
     /// # Panics
     ///
@@ -94,7 +95,7 @@ impl SharedSystemCache {
             return Ok(stars);
         }
         let record = resolve(galaxy, id)?;
-        if record.kind() != SystemKind::Stellar {
+        if record.kind() == SystemKind::RoguePlanet {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }
         let stars = Arc::new(SystemStars::generate(galaxy, &record));
@@ -147,7 +148,9 @@ impl SharedBriefCache {
     ///
     /// # Panics
     ///
-    /// If `galaxy`'s seed is not the seed of `key`, as [`SharedSystemCache::get_or_generate`].
+    /// - If `galaxy`'s seed is not the seed of `key`, as [`SharedSystemCache::get_or_generate`].
+    /// - For a rogue planet, which has no stellar state, as [`BriefModel::new`]: the range
+    ///   handler asks for no brief of one.
     pub fn get_or_build(
         &self,
         key: GalaxyKey,
@@ -255,10 +258,11 @@ mod tests {
         assert_eq!(cache.counters().entries(), 0);
     }
 
-    /// A brown dwarf or rogue planet resolves since plan 13 places them, but the stellar stage has
-    /// no model for it yet, so the cache refuses it rather than build stars for it.
+    /// A free-floating brown dwarf takes the stellar stage as a single object and is stored (plan
+    /// 13, P13.T5.a); a rogue planet has no stars, so it is refused with `LayerNotGenerated` and
+    /// not stored.
     #[test]
-    fn a_free_floating_object_is_refused_and_not_stored() {
+    fn a_brown_dwarf_is_generated_and_a_rogue_planet_refused() {
         use hyperion_sim::coords::GalacticPosition;
         let cache = SharedSystemCache::new(64 << 20);
         for layer in [Layer::BrownDwarf, Layer::RoguePlanet] {
@@ -274,12 +278,17 @@ mod tests {
                     records.first().copied()
                 })
                 .expect("the solar circle holds free-floating objects");
-            assert_eq!(
-                cache.get_or_generate(key(), galaxy(), found.id()),
-                Err(ResolveSystemError::LayerNotGenerated(layer))
-            );
+            let answer = cache.get_or_generate(key(), galaxy(), found.id());
+            if layer == Layer::BrownDwarf {
+                let stars = answer.expect("a brown dwarf takes the stellar stage");
+                assert_eq!(stars.star_count(), 1);
+                assert_eq!(*stars.record(), found);
+            } else {
+                assert_eq!(answer, Err(ResolveSystemError::LayerNotGenerated(layer)));
+            }
         }
-        assert_eq!(cache.counters().entries(), 0);
+        // The brown dwarf is stored; the rogue planet is not.
+        assert_eq!(cache.counters().entries(), 1);
     }
 
     #[test]

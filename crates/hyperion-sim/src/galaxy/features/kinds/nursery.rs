@@ -50,7 +50,8 @@
 //! supernova has a bubble. The bubble exists from birth until the last core collapse, and only a
 //! nursery that expects at least one massive star blows one. `ρ = 1.4 m_H n` with `n` the
 //! smooth gas at the site. The radius is capped at blow-out, 2.5 neutral scale heights, and the
-//! interior is log-normal about 0.005 cm⁻³ with 0.3 dex (the scatter is ours) at 10^6.2 K.
+//! interior is log-normal about 0.005 cm⁻³ with 0.3 dex (the scatter is ours), truncated at two
+//! standard deviations (1.26 × 10⁻³ to 0.020 cm⁻³; ruling 136.3), at 10^6.2 K.
 
 use crate::galaxy::consts::YEARS_PER_MEGAYEAR;
 use crate::math;
@@ -118,6 +119,11 @@ pub const BUBBLE_INTERIOR_MEDIAN: HydrogenPerCm3 = HydrogenPerCm3::new(0.005);
 
 /// The log-normal scatter of a bubble's interior density, dex (ours, provisional).
 pub const BUBBLE_INTERIOR_SIGMA_DEX: f64 = 0.3;
+
+/// The truncation of a bubble's interior density, in standard deviations either side of the
+/// median: 2, the law of the explosion energy (ruling 136.3), so that the shell window's bubble
+/// cap is a property of the physics, not of the normal sampler's floating-point limit.
+pub const BUBBLE_INTERIOR_TRUNCATION: f64 = 2.0;
 
 /// A superbubble's interior temperature, 10^6.2 K (P09.T4.b).
 pub const BUBBLE_TEMPERATURE: Kelvin = Kelvin::new(1_584_893.192_461_114);

@@ -440,10 +440,73 @@ fn change(a: f64, b: f64) -> f64 {
     }
 }
 
+/// How far past `M_start` ÷ `M_end` a detached segment's orbit may widen (ruling 129.4a's test): the
+/// tides that hand a spun-up star's angular momentum to the orbit, and the wind a companion
+/// accretes, widen it by up to 23% more over the 10³ pairs below (a carbon–oxygen white dwarf
+/// beside a main-sequence accretor spun up by its transfer). The fault the test guards against
+/// widened orbits ×2–25.
+const WIDENING_TOLERANCE: f64 = 0.5;
+
+/// Ruling 129.4a's invariant on `timeline`: a detached segment has no supernova, transfer or
+/// common envelope inside it, and what it loses as wind widens the orbit by at most `M_start` ÷
+/// `M_end` (Jeans's mode, the widest a wind alone gives), with [`WIDENING_TOLERANCE`] for the spin
+/// tides hand back. `what` describes the pair for the failure message.
+fn check_detached_widening(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    for segment in timeline.segments() {
+        // The protostars accrete until t_p (P06.T15.a); the pair's mass only falls after.
+        let (start, end) = (
+            segment
+                .start()
+                .value()
+                .max(crate::stellar::premain::PROTOSTAR_YEARS),
+            segment.end().value(),
+        );
+        if segment.kind() != SegmentKind::Detached || !positive(end - start) {
+            continue;
+        }
+        // Just inside the segment: a supernova at either end is the neighbouring segment's.
+        let (a, b) = (
+            timeline.state_at(Years::new(start + 1e-9 * (end - start))),
+            timeline.state_at(Years::new(end - 1e-9 * (end - start))),
+        );
+        if let (Some(p), Some(q)) = (a.orbit(), b.orbit()) {
+            let widening = q.semi_major_axis().value() / p.semi_major_axis().value();
+            let loss = a.total_mass().value() / b.total_mass().value();
+            assert!(
+                widening <= loss * (1.0 + WIDENING_TOLERANCE),
+                "a detached segment [{start}, {end}] widens the orbit ×{widening} for a mass \
+                 loss of ×{loss}: {}",
+                what()
+            );
+        }
+    }
+}
+
+/// Ruling 132.3's invariant on `timeline`: no segment of no length repeats the kind (and donor)
+/// of the one before it, as a main sequence closed in on without end did. A common envelope has
+/// no length by construction, and two at one instant are two envelopes: a giant's hydrogen, then
+/// the helium giant it leaves, when that fills the lobe the first left (a 5.26 + 5.23 M☉ pair at
+/// 902 d of the 10³ below). One envelope met again and again reaches the segment cap, which
+/// [`check_invariants`] asserts no pair does. `what` describes the pair for the failure message.
+fn check_no_repeated_instants(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    for pair in timeline.segments().windows(2) {
+        let (before, after) = (&pair[0], &pair[1]);
+        let span = after.end().value() - after.start().value();
+        let repeats = after.kind() == before.kind() && after.kind() != SegmentKind::CommonEnvelope;
+        assert!(
+            !(repeats && span <= 1e-9 * after.start().value().max(1.0)),
+            "a {:?} segment of no length at {:?} repeats the one before it: {}",
+            after.kind(),
+            after.start(),
+            what()
+        );
+    }
+}
+
 /// Checks P11.T4's invariants on the timeline of `input`: inside every segment the state is
 /// continuous (no jump above 1% between samples 10⁻⁶ of the segment apart); no main-sequence star
 /// is older than its effective lifetime; the pair's total mass never rises; the timeline never
-/// reaches the cap on segments.
+/// reaches the cap on segments; no detached segment widens the orbit past its mass loss.
 #[expect(
     clippy::many_single_char_names,
     reason = "a sample's two states and their values"
@@ -515,6 +578,8 @@ fn check_invariants(input: &BinaryInput, until: Years) {
             }
         }
     }
+    check_detached_widening(&timeline, &what);
+    check_no_repeated_instants(&timeline, &what);
     // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
     for segment in timeline.segments() {
         if segment.kind() == SegmentKind::Contact {
@@ -552,6 +617,31 @@ fn check_invariants(input: &BinaryInput, until: Years) {
 fn close_pairs_keep_the_engines_invariants() {
     for input in sample_pairs(60, 0x5eed_0001) {
         check_invariants(&input, Years::new(1.2e10));
+    }
+}
+
+/// Ruling 129.4a: a star's death takes its mass at the death, not through the orbit's angular
+/// momentum in the step before it. Two pairs of the 10³ below whose detached segments widened
+/// ×24.6 and ×8.6 past their mass loss: a pinned primary stripped on its early AGB, whose helium
+/// giant dies before plan 06's age and was held at its remnant's mass, and a black hole's
+/// companion, a helium star whose collapse the orbit felt twice.
+#[test]
+fn a_death_does_not_widen_the_orbit_through_the_mass_it_takes() {
+    for (m1, m2, period, e) in [
+        (
+            10.365_251_834_098_531,
+            5.536_839_708_853_019,
+            2_974.736_093_124_113_7,
+            0.276_692_339_410_206_5,
+        ),
+        (
+            20.516_256_252_776_362,
+            17.721_739_714_111_806,
+            44.824_683_315_930_756,
+            0.059_032_969_727_265_655,
+        ),
+    ] {
+        check_invariants(&pair(m1, m2, period, e, 0.02), Years::new(1.2e10));
     }
 }
 
@@ -1093,4 +1183,116 @@ fn a_deep_rapid_contact_merges() {
     assert!(!dynamic.contact_relaxes(0, 20.0 * thermal_rate));
     dynamic.contact(0, 20.0 * thermal_rate);
     assert_eq!(dynamic.kind, SegmentKind::Merged);
+}
+
+/// Ruling 129.4b: transfer from a helium Hertzsprung-gap star onto a neutron star or black hole
+/// is stable at any mass ratio (Tauris et al. 2015, section 6), and onto any other accretor above
+/// BSE's 0.784 it is still a common envelope.
+#[test]
+fn case_bb_transfer_onto_a_compact_star_is_stable() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::rlof::Stability;
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+    use crate::stellar::sse::Track;
+
+    let input = pair(4.0, 1.4, 1.0, 0.0, 0.02);
+    let ctx = Arc::new(Context::of(&input));
+    let helium = Arc::new(Track::helium_star_full(
+        SolarMasses::new(4.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let gap = helium
+        .age_in_phase(Phase::HeliumHertzsprungGap, 0.5)
+        .expect("a 4 M☉ helium star crosses its gap");
+    let mass = helium.mass_at(gap);
+    let k = input.orbit();
+    let stability = |accretor: Member| {
+        let engine = Engine::new(
+            Arc::clone(&ctx),
+            gap,
+            1.0e10,
+            [
+                Member::Track {
+                    track: Arc::clone(&helium),
+                    offset: 0.0,
+                },
+                accretor,
+            ],
+            LiveOrbit::new(gap, 5.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch()),
+            None,
+        );
+        engine.stability(0)
+    };
+    for phase in [Phase::NeutronStar, Phase::BlackHole] {
+        let compact = Member::Remnant {
+            phase,
+            birth: 0.0,
+            origin: crate::units::Megayears::ZERO,
+            mass: Path::starting(0.0, 1.4),
+        };
+        assert_eq!(
+            stability(compact),
+            Stability::Stable,
+            "{mass} M☉ onto {phase:?}"
+        );
+    }
+    let dwarf = Member::Remnant {
+        phase: Phase::CarbonOxygenWhiteDwarf,
+        birth: 0.0,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(0.0, 1.0),
+    };
+    assert_eq!(
+        stability(dwarf),
+        Stability::CommonEnvelope,
+        "{mass} M☉ onto a white dwarf"
+    );
+}
+
+/// Ruling 129.4c: a pinned primary held at its bare core after a common envelope with a neutron
+/// star (pair 0911 of the pinned thousand: two 12.6 M☉ stars, whose double common envelope leaves
+/// two helium stars 2 R☉ apart) has no envelope left to eject when it touches its companion
+/// again, and merges with it rather than meeting it envelope after envelope to the cap.
+#[test]
+fn a_held_bare_core_that_touches_its_companion_merges() {
+    let mut mix = Mix(0x0b1e_0001);
+    let input = (0..=911_u32)
+        .map(|i| pinned_pair(&mut mix, i))
+        .last()
+        .expect("pair 0911");
+    let timeline = evolve(&input, Years::new(1.2e10));
+    assert!(!timeline.hit_segment_cap(), "{}", describe(&timeline));
+    assert!(timeline.merger_age().is_some(), "{}", describe(&timeline));
+}
+
+/// Ruling 132.3: pair 0077 of the pinned thousand (2.23 + 1.16 M☉ at 0.56 d) feeds its companion
+/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.655 Myr, once,
+/// where the steps used to close in on its receding end until the segment cap.
+#[test]
+fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
+    let mut mix = Mix(0x0b1e_0001);
+    let input = (0..=77_u32)
+        .map(|i| pinned_pair(&mut mix, i))
+        .last()
+        .expect("pair 0077");
+    let timeline = evolve(&input, Years::new(1.2e10));
+    assert!(!timeline.hit_segment_cap(), "{}", describe(&timeline));
+    let left = timeline
+        .segments()
+        .iter()
+        .map(|s| timeline.state_at(s.start()))
+        .find(|state| {
+            state.stars()[1].phase() != Phase::MainSequence && state.age().value() > 1.0e9
+        })
+        .map(|state| state.age().value())
+        .expect("the accretor leaves its main sequence");
+    assert!(
+        (left - 1.052_655e9).abs() <= 1.0e3,
+        "left at {left} yr: {}",
+        describe(&timeline)
+    );
 }

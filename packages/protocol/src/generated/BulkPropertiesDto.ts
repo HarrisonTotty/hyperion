@@ -29,7 +29,15 @@ class: PlanetClassDto,
  */
 mass_fractions: MassFractionsDto, 
 /**
- * The equilibrium temperature at the record's time, in kelvin, not negative: at a Bond albedo
- * of 0.3 in this generator version, with a giant's internal heat included.
+ * The equilibrium temperature at the record's time, in kelvin, not negative: from its hosts'
+ * light alone, at the Bond albedo its surface state gives, with no internal heat (ruling
+ * 112.7).
  */
-equilibrium_temperature_k: number, };
+equilibrium_temperature_k: number, 
+/**
+ * The effective temperature at the record's time, in kelvin, positive, of a body with a
+ * luminosity of its own, a giant's: its internal heat added to its equilibrium temperature,
+ * T⁴ = `T_eq`⁴ + `L_int` ÷ (4πR²σ) (ruling 112.7). `null` for a body with none, whose
+ * effective temperature is its equilibrium one.
+ */
+effective_temperature_k: number | null, };

@@ -1,8 +1,14 @@
 import type { MassLayer } from "@hyperion/protocol";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
+import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
-import { formatNumber, formatScaleLength, formatUniverseTimeYr } from "../../lib/format";
+import {
+  formatNumber,
+  formatScaleLength,
+  formatSubstellarMass,
+  formatUniverseTimeYr,
+} from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
 import { isTextEntry } from "../../lib/textEntry";
 import { RADIUS_STEPS_LY } from "../../spatial/scale";
@@ -14,6 +20,7 @@ import {
   STAR_FILTERS,
   type StarFilter,
   starFilterLabel,
+  SUBSTELLAR_FLOORS,
 } from "./chartModel";
 
 /**
@@ -192,18 +199,39 @@ interface ChartControlsProps {
   readonly heldBack: string | null;
 }
 
-/** The five layers, lightest first, for the mass floors before the first census arrives. */
+/** The five stellar layers, lightest first, for the mass floors before the first census arrives. */
 const LAYERS: ReadonlyArray<MassLayer> = ["a", "b", "c", "d", "e"];
 
-/** The floors a chart offers, from the census's bands or from the layer letters alone. */
-function floors(
-  bands: ReadonlyArray<LayerBand> | null,
-): ReadonlyArray<{ readonly layer: MassLayer; readonly text: string }> {
-  if (bands === null) {
-    return LAYERS.map((layer) => ({ layer, text: layer.toUpperCase() }));
-  }
-  return bands.map((band) => ({ layer: band.layer, text: formatBandMsun(band.minMsun) }));
+/** One step of the `MIN MASS` group: the layer it asks down to, and the edge it reads. */
+interface Floor {
+  readonly layer: MassLayer;
+  readonly text: string;
+  /** Whether the edge is in Earth masses, a free-floating planet's unit, and so draws its own. */
+  readonly earthMasses: boolean;
 }
+
+/**
+ * The floors a chart offers, lightest first: the free-floating planets' and the brown dwarfs' (plan
+ * 13, P13.T8.c), then the stellar layers', from the census's bands or from the layer letters alone.
+ */
+function floors(bands: ReadonlyArray<LayerBand> | null): ReadonlyArray<Floor> {
+  const substellar = SUBSTELLAR_FLOORS.map(({ layer, minMsun }): Floor => {
+    const edge = formatSubstellarMass(minMsun, layer);
+    return { layer, text: edge.value, earthMasses: edge.unit === "mearth" };
+  });
+  const stellar =
+    bands === null
+      ? LAYERS.map((layer): Floor => ({ layer, text: layer.toUpperCase(), earthMasses: false }))
+      : bands.map((band): Floor => ({
+          layer: band.layer,
+          text: formatBandMsun(band.minMsun),
+          earthMasses: false,
+        }));
+  return [...substellar, ...stellar];
+}
+
+/** The floor that asks for everything, and so reads `ALL`: the lightest, the free-floating planets. */
+const LOWEST_FLOOR: MassLayer = "rogue_planet";
 
 /**
  * What a chart is asked for: its query radius, its mass floor, the drive range it colours by, and
@@ -212,9 +240,13 @@ function floors(
  * @remarks
  * The radius steps 1-2-5 from 0.01 ly to 500 ly, the scale from the galactic centre out; until the
  * operator chooses one it follows the drive range, raised to the next step. The mass floor is a
- * radio group of the five layers' lower edges, which is also the declutter control; its unit is
- * drawn once on the group, since five options with their own `M☉` do not fit the chart's column.
- * The floors read as layer letters until the first census brings their bands. The drive range is an
+ * radio group of the layers' lower edges, which is also the declutter control: the five stellar
+ * layers' and, below `0.08`, the brown dwarfs' `0.012` and the free-floating planets' `0.33 M⊕`
+ * (plan 13, P13.T8.c), the lowest, which alone reads `ALL`. The group's unit, `M☉`, is drawn once
+ * on it, since seven options with their own do not fit the chart's column; the planets' step is in
+ * Earth masses (plan 13, design note 14) and draws its own `M⊕`. The stellar floors read as layer
+ * letters until the first census brings their bands. A substellar floor may be chosen at any
+ * radius: where its layer would pass the census limit, the census says what was dropped. The drive range is an
  * operator setting, not a reading (plan 05, design note D9), and says `SET` wherever it is written.
  * The time is universe time, labelled `UT`, within the clock window of ±1,000 years. Both numbers
  * are entered when their field is left or with `Enter`; one outside its range is refused in words
@@ -298,12 +330,17 @@ export function ChartControls({
           ))}
         </select>
       </div>
+      {/*
+       * The group's `M☉` is every step's unit but the planets', which draws its own `M⊕`: plan 13's
+       * design note 14 puts a planet's mass in Earth masses, and seven steps with a unit each do not
+       * fit the column beside QUERY RADIUS.
+       */}
       <fieldset className="form-choice chart-controls__floors">
         <legend>
           MIN MASS <SolarMassUnit />
         </legend>
         <div className="form-choice__options">
-          {floors(bands).map(({ layer, text }) => (
+          {floors(bands).map(({ layer, text, earthMasses }) => (
             <label className="form-choice__option" key={layer}>
               <input
                 type="radio"
@@ -318,7 +355,19 @@ export function ChartControls({
                   }
                 }}
               />
-              {layer === "a" ? `ALL ${text}` : text}
+              {layer === LOWEST_FLOOR ? (
+                <>
+                  <span className="chart-controls__all">ALL</span> {text}
+                </>
+              ) : (
+                text
+              )}
+              {earthMasses ? (
+                <>
+                  {" "}
+                  <EarthMassUnit />
+                </>
+              ) : null}
             </label>
           ))}
         </div>
