@@ -120,7 +120,7 @@ pub const INDEX_CAPACITY: u32 = 1 << 14;
 /// The relative margin every feature bound carries (module documentation).
 const BOUND_MARGIN: f64 = 1e-9;
 
-/// An open cluster's reach, in half-mass radii: about its tidal radius (ours).
+/// An open cluster's reach, in half-mass radii (ours), or its tidal radius where that is farther.
 const CLUSTER_REACH_RADII: f64 = 10.0;
 
 /// A cloud's reach, in core radii: its Plummer column there is 10⁻⁴ of the central one.
@@ -182,9 +182,10 @@ impl FeatureRecord {
         &self.marks
     }
 
-    /// The farthest it reaches from its centre at any time: ten half-mass radii for a cluster, the
-    /// greater of its largest size and its bubble's blow-out radius for a nursery, ten core radii
-    /// for a cloud. At most [`MAX_FEATURE_REACH`].
+    /// The farthest it reaches from its centre at any time: for an old open cluster ten half-mass
+    /// radii or its tidal radius, whichever is farther, for a globular four tidal radii, for a
+    /// nursery the greater of its largest size and its bubble's blow-out radius, ten core radii for
+    /// a cloud. At most [`MAX_FEATURE_REACH`]. Every member lies within it (P09.T21).
     #[must_use]
     pub const fn reach(&self) -> LightYears {
         self.reach
@@ -1156,9 +1157,32 @@ fn old_cluster(
         component: Some(component_id),
         marks: FeatureMarks::OpenCluster(marks),
         reach: LightYears::new(
-            (CLUSTER_REACH_RADII * radius.value()).min(MAX_FEATURE_REACH.value()),
+            (CLUSTER_REACH_RADII * radius.value())
+                .max(present_tidal_radius_ly(galaxy, &position, mass, age))
+                .min(MAX_FEATURE_REACH.value()),
         ),
     })
+}
+
+/// An open cluster's tidal radius today, ly: its present mass's at its centre, the radius its
+/// members' profiles end at ([`ClusterModel`](super::cluster::ClusterModel)'s, computed the same
+/// way), which its reach must hold for the members' lookup (P09.T23).
+#[must_use]
+fn present_tidal_radius_ly(
+    galaxy: &Galaxy,
+    position: &GalacticPosition,
+    initial_mass: SolarMasses,
+    age: Years,
+) -> f64 {
+    let mass = super::kinds::open_cluster::present_mass(initial_mass, age);
+    if mass.value() <= 0.0 {
+        return 0.0;
+    }
+    galaxy
+        .potential()
+        .tidal_radius(mass, &PointLy::from(position))
+        .value()
+        / METRES_PER_LIGHT_YEAR
 }
 
 /// A nursery's marks (P09.T4.b).
@@ -1619,6 +1643,23 @@ mod tests {
             }
         }
         golden!("galaxy/features/cells", writer.as_str());
+    }
+
+    #[test]
+    fn an_old_open_cluster_reaches_at_least_its_tidal_radius() {
+        use super::super::cluster::ClusterModel;
+        let galaxy = milky_way(0);
+        let mut checked = 0;
+        for f in FeatureCatalogue::cell(&galaxy, cell([0, 6, 0])).features() {
+            if !matches!(f.marks(), FeatureMarks::OpenCluster(_)) || checked >= 3 {
+                continue;
+            }
+            // A cluster model costs seconds, so three of them.
+            let model = ClusterModel::from_record(&galaxy, f).expect("an old cluster is alive");
+            assert!(f.reach().value() >= model.tidal_radius().value(), "{f:?}");
+            checked += 1;
+        }
+        assert_eq!(checked, 3);
     }
 
     #[test]

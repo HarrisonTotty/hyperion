@@ -52,6 +52,14 @@ use super::interior::counts::{depleted_slope, depletion};
 use super::interior::retention::PAIR_SYSTEMIC_SIGMA;
 use super::interior::{ClassKind, Generation, MemberAbundances, MemberClass, Multiplicity};
 
+pub mod level_list;
+pub mod placement;
+pub mod source;
+
+pub use level_list::{FeatureLevelList, ListClass, ListEntry, MemberZero};
+pub use placement::{FeatureInterior, resolve_member};
+pub use source::{FeatureInteriorCache, FeatureMemberSource, NoInteriorCache};
+
 /// The most attempts a member's conditional draw makes (P09.T10).
 pub const MAX_ATTEMPTS: u32 = 4_096;
 

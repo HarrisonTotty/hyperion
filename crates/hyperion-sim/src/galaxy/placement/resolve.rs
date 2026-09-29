@@ -17,6 +17,7 @@ use super::{
     CandidateOutcome, CellKey, ResolveSystemError, SystemRecord, evaluate_candidate_from_bound,
 };
 use crate::galaxy::Galaxy;
+use crate::galaxy::features::members::resolve_member;
 use crate::id::{SystemId, SystemIdKind};
 
 /// The system `id` names in `galaxy`.
@@ -28,12 +29,13 @@ use crate::id::{SystemId, SystemIdKind};
 ///
 /// # Errors
 ///
-/// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — a feature
-///   member, the galactic centre, a stream, a dwarf core, pinned content or a catalogue system —
-///   until plans 09 and 10 generate them.
+/// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — the
+///   galactic centre, a stream, a dwarf core, pinned content or a catalogue system — until plans
+///   09 and 10 generate them. A catalogue feature's member resolves through plan 09's
+///   [`resolve_member`] (P09.T21).
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
-///   class claimed it.
+///   class claimed it; for a feature member, if [`resolve_member`] finds none.
 ///
 /// # Examples
 ///
@@ -65,8 +67,9 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
         // A grid ID's cell fields span the root cube, so there is nothing more to check about the
         // cell; every layer, the substellar two included, is placed.
         SystemIdKind::Grid(grid) => resolve_candidate(galaxy, CellKey::of(id)?, grid.index()),
-        SystemIdKind::FeatureMember(_)
-        | SystemIdKind::Centre(_)
+        // A catalogue feature's member reruns its one candidate (plan 09, P09.T21).
+        SystemIdKind::FeatureMember(member) => resolve_member(galaxy, member).map(|m| *m.record()),
+        SystemIdKind::Centre(_)
         | SystemIdKind::Stream(_)
         | SystemIdKind::DwarfCore(_)
         | SystemIdKind::Pinned(_)

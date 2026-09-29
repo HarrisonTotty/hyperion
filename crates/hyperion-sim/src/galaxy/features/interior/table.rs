@@ -14,7 +14,10 @@
 //! A band's tail is a straight tube along the cluster's bulk velocity through its centre, from the
 //! tidal radius `r_t` out to the reach on both sides, Gaussian across with a width of one tidal
 //! radius: `n(s, d) = λ exp(−d² ÷ 2w²) ÷ (2π w²)` for `r_t ≤ |s| ≤ reach`, with λ the members per
-//! light-year of each side.
+//! light-year of each side. Its members also lie within the reach of the centre (P09.T21), so that
+//! a feature's reach holds all of its members: the density is zero beyond it, and the expected
+//! count, the tube's to the reach along the axis, errs high by the Gaussian's share outside the
+//! sphere, which the census allows.
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
@@ -24,9 +27,10 @@ use crate::rng::Mark;
 use crate::units::LightYears;
 
 use super::super::cluster::ClusterModel;
+use super::super::nested::{NestedCell, NestedGrid};
 use super::MemberClass;
 use super::counts::{ClassCounts, class_counts};
-use super::profile::ClassProfile;
+use super::profile::{CUSP_SOFTENING, ClassProfile, ProfileShape};
 
 /// A cubic cell in the cluster's frame: its least corner and edge, ly.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,15 +105,16 @@ impl TailClass {
         self.line_density() / (2.0 * core::f64::consts::PI * self.width * self.width)
     }
 
-    /// The tail's density at local `p`, per cubic light-year.
+    /// The tail's density at local `p`, per cubic light-year: zero beyond the reach of the centre.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
         let s = p.x * self.axis[0] + p.y * self.axis[1] + p.z * self.axis[2];
         let along = s.abs();
-        if along < self.inner || along > self.reach {
+        let r2 = p.x * p.x + p.y * p.y + p.z * p.z;
+        if along < self.inner || along > self.reach || r2 > self.reach * self.reach {
             return 0.0;
         }
-        let d2 = (p.x * p.x + p.y * p.y + p.z * p.z - s * s).max(0.0);
+        let d2 = (r2 - s * s).max(0.0);
         self.axis_density() * math::exp(-0.5 * d2 / (self.width * self.width))
     }
 
@@ -143,6 +148,7 @@ pub struct MemberClassTable {
     tails: [Option<TailClass>; 5],
     depleted_slope: f64,
     runaway_share: f64,
+    tidal: f64,
 }
 
 impl MemberClassTable {
@@ -203,6 +209,7 @@ impl MemberClassTable {
             tails,
             depleted_slope: counts.depleted_slope,
             runaway_share: counts.runaway_share,
+            tidal,
         }
     }
 
@@ -377,5 +384,434 @@ impl MemberClassTable {
     #[must_use]
     pub fn profile(&self, band: MassBand, i: usize) -> Option<&ClassProfile> {
         self.rows(band).get(i).map(|r| &r.profile)
+    }
+
+    /// How far the members reach from the centre: the tidal radius, where every profile ends, or
+    /// the tails' reach beyond it.
+    #[must_use]
+    pub fn extent(&self) -> LightYears {
+        LightYears::new(
+            self.tails
+                .iter()
+                .flatten()
+                .fold(self.tidal, |r, t| r.max(t.reach)),
+        )
+    }
+
+    /// The table with its tails cut at `reach` where they run farther: a tail's expected count is
+    /// its line density times its length, so it scales with the length kept, and a tail with no
+    /// length left is dropped (P09.T21: the tails run to the grid's reach).
+    #[must_use]
+    pub fn with_tails_to(mut self, reach: LightYears) -> Self {
+        let reach = reach.value();
+        for tail in &mut self.tails {
+            *tail = tail.and_then(|t| {
+                if reach >= t.reach {
+                    Some(t)
+                } else if reach > t.inner {
+                    Some(TailClass {
+                        expected: t.expected * (reach - t.inner) / (t.reach - t.inner),
+                        reach,
+                        ..t
+                    })
+                } else {
+                    None
+                }
+            });
+        }
+        self
+    }
+
+    /// The steepest cusp among `band`'s profiled classes, if any has one.
+    #[must_use]
+    fn cusp_slope(&self, band: MassBand) -> Option<f64> {
+        self.rows(band)
+            .iter()
+            .filter_map(|r| match r.profile.shape() {
+                ProfileShape::Cusp { slope } => Some(slope),
+                ProfileShape::Core { .. } | ProfileShape::Plummer { .. } => None,
+            })
+            .reduce(f64::max)
+    }
+
+    /// How `band`'s candidates are proposed in `cell` (P09.T21; [`CellProposal`]): radially under
+    /// a cusp's envelope in a cell with a corner at the centre when the band has a cusp, and
+    /// uniformly under [`cell_bound`](Self::cell_bound) everywhere else.
+    #[must_use]
+    pub fn proposal(&self, band: MassBand, cell: &LocalCell) -> CellProposal {
+        match self.cusp_slope(band) {
+            Some(slope) if cell.nearest_radius() <= 0.0 => {
+                debug_assert!(
+                    cell.min
+                        .iter()
+                        .all(|&m| m.total_cmp(&0.0).is_eq() || m.total_cmp(&-cell.edge).is_eq()),
+                    "a cusp's cell must have a corner at the centre: {cell:?}"
+                );
+                let far = (3.0 * cell.edge * cell.edge).sqrt();
+                let scale = far.max(CUSP_SOFTENING);
+                let (centre, radius) = cell.bounding_sphere();
+                let mut factor = 0.0;
+                for r in self.rows(band) {
+                    let d0 = r.profile.density_at_radius(0.0);
+                    let sup = match r.profile.shape() {
+                        ProfileShape::Cusp { slope: own } => {
+                            d0 * math::powf(CUSP_SOFTENING, own) * math::powf(scale, slope - own)
+                        }
+                        ProfileShape::Core { .. } | ProfileShape::Plummer { .. } => {
+                            d0 * math::powf(scale, slope)
+                        }
+                    };
+                    factor += r.expected * sup;
+                }
+                if let Some(tail) = self.tail(band) {
+                    factor += tail.bound(&centre, radius) * math::powf(scale, slope);
+                }
+                CellProposal::Cusp {
+                    factor: factor * (1.0 + CUSP_MARGIN),
+                    slope,
+                }
+            }
+            Some(_) | None => CellProposal::Uniform {
+                bound: self.cell_bound(band, cell),
+            },
+        }
+    }
+
+    /// The expected candidates of `band` in the owned `cell` of `grid` under its proposal
+    /// (P09.T21).
+    #[must_use]
+    pub fn cell_candidates(&self, band: MassBand, grid: &NestedGrid, cell: NestedCell) -> f64 {
+        let local = grid.local_cell(cell);
+        self.proposal(band, &local).expected(&local)
+    }
+
+    /// The most candidates any band expects in an owned cell of `grid` where the bound can peak
+    /// (P09.T21): on every level the cells beside the grid's three axes, where the profiles' bound
+    /// is greatest at each radius, and the cells within one cell of the tails' line, where theirs
+    /// is.
+    #[must_use]
+    pub fn peak_candidates(&self, grid: &NestedGrid) -> f64 {
+        let n = grid.cells_per_axis();
+        let beside = [n / 2 - 1, n / 2];
+        let mut cells = std::collections::BTreeSet::new();
+        for level in 0..grid.levels() {
+            for along in 0..n {
+                for a in beside {
+                    for b in beside {
+                        cells.extend(
+                            [[along, a, b], [a, along, b], [a, b, along]]
+                                .into_iter()
+                                .filter_map(|c| grid.cell(level, c)),
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(tail) = self.tails.iter().flatten().next() {
+            // Every cell within one cell of a point of the line, in steps of a quarter cell.
+            let axis = tail.axis;
+            for level in grid.all_levels() {
+                let edge = level.edge().value();
+                let half = level.half_width().value();
+                let steps = 8 * u32::from(n);
+                for i in 0..=steps {
+                    let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
+                    let point = axis.map(|a| along * a);
+                    let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
+                    for offset in [-1.0, 0.0, 1.0]
+                        .iter()
+                        .flat_map(|&dx| [-1.0, 0.0, 1.0].map(move |dy| (dx, dy)))
+                        .flat_map(|(dx, dy)| [-1.0, 0.0, 1.0].map(move |dz| [dx, dy, dz]))
+                    {
+                        let c = [0, 1, 2].map(|k| index[k] + offset[k]);
+                        if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
+                            #[expect(
+                                clippy::cast_possible_truncation,
+                                clippy::cast_sign_loss,
+                                reason = "whole numbers checked to lie in 0..n, n at most 64"
+                            )]
+                            let c = c.map(|v| v as u8);
+                            cells.extend(grid.cell(level.level(), c));
+                        }
+                    }
+                }
+            }
+        }
+        let mut peak = 0.0_f64;
+        for cell in cells {
+            for band in MassBand::ALL {
+                peak = peak.max(self.cell_candidates(band, grid, cell));
+            }
+        }
+        peak
+    }
+
+    /// The width of the cluster's nested grid of [`FEATURE_GRID_CELLS`] cells and
+    /// [`FEATURE_GRID_LEVELS`] levels (P09.T21): from the least power of two from 1 ⁄ 64 ly whose
+    /// grid reaches the tidal radius, where every profile ends, doubled while the doubled grid still
+    /// expects no more than [`CELL_CANDIDATE_TARGET`] candidates in any cell and band
+    /// ([`peak_candidates`](Self::peak_candidates)),
+    /// and until it reaches the tails' [`extent`](Self::extent). The tails are then cut at the
+    /// grid's reach ([`with_tails_to`](Self::with_tails_to)).
+    ///
+    /// # Panics
+    ///
+    /// Never: a table's extent is finite, so some power of two up to 2³⁰ ly reaches it.
+    #[must_use]
+    pub fn grid_width(&self) -> LightYears {
+        let reaches = |k: i32, r: f64| feature_grid(k).reach().value() >= r;
+        let mut k = GRID_WIDTH_MIN_LOG2;
+        while !reaches(k, self.tidal) {
+            k += 1;
+        }
+        let extent = self.extent().value();
+        while !reaches(k, extent)
+            && self.peak_candidates(&feature_grid(k + 1)) <= CELL_CANDIDATE_TARGET
+        {
+            k += 1;
+        }
+        feature_grid(k).width()
+    }
+
+    /// The cluster's nested grid: [`grid_width`](Self::grid_width), 16 cells and eight levels.
+    ///
+    /// # Panics
+    ///
+    /// Never: the width is a power of two within the grid's range.
+    #[must_use]
+    pub fn grid(&self) -> NestedGrid {
+        NestedGrid::new(self.grid_width(), FEATURE_GRID_CELLS, FEATURE_GRID_LEVELS)
+            .expect("a grid width is a power of two")
+    }
+}
+
+/// How a band's candidates are proposed in one nested cell (P09.T21).
+///
+/// Most cells take the nearest-corner bound and a uniform position. A core-collapsed cluster's
+/// cusp, softened only at [`CUSP_SOFTENING`] = 10⁻³ ly, makes that bound absurd in the cells with a
+/// corner at the centre: millions of candidates in a light-year cell against the 8,192 index. There
+/// the candidates are proposed radially instead, from the envelope `B h(r)`, `h(r) = max(ε, r)^−γ`
+/// with γ the band's steepest cusp, over the octant of the ball of radius `√3 e` that holds the
+/// cell, and a candidate outside the cell is dropped: thinning with a non-uniform proposal, exact
+/// by the same theorem (Design note 21 does the same for the catalogue's heights). `B` bounds every
+/// class's density over `h` in the cell.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CellProposal {
+    /// Uniform in the cell under a constant bound, per cubic light-year.
+    Uniform {
+        /// The bound, per cubic light-year.
+        bound: f64,
+    },
+    /// Radial under `factor × h(r)` in a cell with a corner at the centre.
+    Cusp {
+        /// `B`, per cubic light-year per unit of `h`.
+        factor: f64,
+        /// The envelope's slope γ.
+        slope: f64,
+    },
+}
+
+impl CellProposal {
+    /// The expected candidates in `cell`.
+    #[must_use]
+    pub fn expected(&self, cell: &LocalCell) -> f64 {
+        match *self {
+            Self::Uniform { bound } => bound * cell.edge * cell.edge * cell.edge,
+            Self::Cusp { factor, slope } => {
+                let far = (3.0 * cell.edge * cell.edge).sqrt();
+                factor * 0.5 * core::f64::consts::PI * envelope_mass(far, slope)
+            }
+        }
+    }
+
+    /// The candidate three uniforms `u` put in `cell` and the bound there, per cubic light-year, or
+    /// `None` for a radial candidate that falls outside the cell.
+    #[must_use]
+    pub fn place(&self, cell: &LocalCell, uniforms: [f64; 3]) -> Option<(PointLy, f64)> {
+        match *self {
+            Self::Uniform { bound } => {
+                let [x, y, z] = [0, 1, 2].map(|i| cell.min[i] + uniforms[i] * cell.edge);
+                Some((PointLy::new(x, y, z), bound))
+            }
+            Self::Cusp { factor, slope } => {
+                let far = (3.0 * cell.edge * cell.edge).sqrt();
+                let radius = envelope_radius(uniforms[0] * envelope_mass(far, slope), slope);
+                let cos_theta = uniforms[1];
+                let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+                let (sin_phi, cos_phi) = math::sin_cos(0.5 * core::f64::consts::PI * uniforms[2]);
+                let magnitude = [
+                    radius * sin_theta * cos_phi,
+                    radius * sin_theta * sin_phi,
+                    radius * cos_theta,
+                ];
+                let mut point = [0.0; 3];
+                for (axis, (&m, &lo)) in magnitude.iter().zip(&cell.min).enumerate() {
+                    if m >= cell.edge {
+                        return None;
+                    }
+                    point[axis] = if lo < 0.0 { -m } else { m };
+                }
+                let envelope = math::powf(radius.max(CUSP_SOFTENING), -slope);
+                Some((
+                    PointLy::new(point[0], point[1], point[2]),
+                    factor * envelope,
+                ))
+            }
+        }
+    }
+}
+
+/// The relative margin of a cusp's envelope over its classes' densities, for the rounding of the
+/// powers it is built from.
+const CUSP_MARGIN: f64 = 1e-9;
+
+/// `∫₀^r h(s) s² ds` for `h(s) = max(ε, s)^−γ`, γ < 3 (a cusp's slope is 1.6–2).
+#[must_use]
+fn envelope_mass(r: f64, slope: f64) -> f64 {
+    debug_assert!(slope < 3.0, "an envelope of slope {slope}");
+    let eps = CUSP_SOFTENING;
+    let inner = math::powf(eps, -slope) * r.min(eps) * r.min(eps) * r.min(eps) / 3.0;
+    if r <= eps {
+        return inner;
+    }
+    let k = 3.0 - slope;
+    inner + (math::powf(r, k) - math::powf(eps, k)) / k
+}
+
+/// The radius at which [`envelope_mass`] reaches `m`.
+#[must_use]
+fn envelope_radius(m: f64, slope: f64) -> f64 {
+    let eps = CUSP_SOFTENING;
+    let inner = envelope_mass(eps, slope);
+    if m <= inner {
+        return math::cbrt(3.0 * m * math::powf(eps, slope));
+    }
+    let k = 3.0 - slope;
+    math::powf((m - inner) * k + math::powf(eps, k), 1.0 / k)
+}
+
+/// The expected candidates a cell and band of a cluster's grid is sized to stay under: 2,000
+/// (brainstorm, "Dense features": "no cell expects more than a thousand or two members").
+pub const CELL_CANDIDATE_TARGET: f64 = 2_000.0;
+
+/// A catalogue feature's cells per axis in a nested level: 16 (brainstorm, "Dense features").
+pub const FEATURE_GRID_CELLS: u8 = 16;
+
+/// A catalogue feature's nested levels: eight (brainstorm, "Dense features").
+pub const FEATURE_GRID_LEVELS: u8 = 8;
+
+/// The least width a cluster's grid is tried at, as a power of two: 1 ⁄ 64 ly (P09.T21).
+pub const GRID_WIDTH_MIN_LOG2: i32 = -6;
+
+/// The catalogue features' grid of width `2^k` ly.
+#[must_use]
+fn feature_grid(k: i32) -> NestedGrid {
+    let mut w = 1.0;
+    for _ in 0..k.unsigned_abs() {
+        w *= if k >= 0 { 2.0 } else { 0.5 };
+    }
+    NestedGrid::new(LightYears::new(w), FEATURE_GRID_CELLS, FEATURE_GRID_LEVELS)
+        .expect("a width of 2^k ly from 2^-6 up is a power of two")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::galaxy::features::testing::{M4, catalogue_parameters, named_cluster};
+    use crate::galaxy::params::GalaxyParams;
+    use crate::rng::Seed;
+
+    #[test]
+    fn the_envelope_s_radius_inverts_its_mass_on_both_sides_of_the_softening() {
+        for slope in [1.6, 1.8, 2.0] {
+            for r in [1e-4, 5e-4, 1e-3, 2e-3, 0.1, 3.0] {
+                let back = envelope_radius(envelope_mass(r, slope), slope);
+                assert!((back / r - 1.0).abs() < 1e-12, "{slope} {r}: {back}");
+            }
+        }
+        // Inside ε the envelope is flat, so the mass is ε^−γ r³ ÷ 3.
+        let m = envelope_mass(5e-4, 2.0);
+        assert!((m / (1e6 * 1.25e-10 / 3.0) - 1.0).abs() < 1e-12, "{m}");
+    }
+
+    #[test]
+    fn a_cusp_cell_s_candidates_stay_under_its_envelope_and_inside_it() {
+        let cell = LocalCell {
+            min: [-0.25, 0.0, -0.25],
+            edge: 0.25,
+        };
+        let proposal = CellProposal::Cusp {
+            factor: 2.0,
+            slope: 1.8,
+        };
+        let mut kept = 0;
+        for i in 0..1_000_u32 {
+            let u = [0.37, 0.61, 0.83].map(|a| (a * f64::from(i + 1)).fract());
+            if let Some((p, bound)) = proposal.place(&cell, u) {
+                kept += 1;
+                assert!(p.x <= 0.0 && p.y >= 0.0 && p.z <= 0.0, "{p:?}");
+                assert!(p.x > -0.25 && p.y < 0.25 && p.z > -0.25, "{p:?}");
+                let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
+                let h = math::powf(r.max(CUSP_SOFTENING), -1.8);
+                assert!((bound / (2.0 * h) - 1.0).abs() < 1e-12);
+            }
+        }
+        // The cube is 6 ÷ (π 3^1.5) of the octant ball's volume, and more of the envelope's
+        // weight, which gathers at the centre.
+        assert!(kept > 380, "{kept} of 1,000 inside the cell");
+    }
+
+    fn table() -> (ClusterModel, MemberClassTable) {
+        let galaxy =
+            Galaxy::from_params(Seed::new(0x0921_0100), GalaxyParams::milky_way_like()).unwrap();
+        let model = ClusterModel::new(&galaxy, &catalogue_parameters(named_cluster(M4)));
+        let reach = LightYears::new(4.0 * model.tidal_radius().value());
+        let table = MemberClassTable::new(&galaxy, &model, reach, [1.0, 0.0, 0.0]);
+        (model, table)
+    }
+
+    #[test]
+    fn tails_cut_short_keep_their_line_density_and_the_grid_holds_the_cluster() {
+        let (model, table) = table();
+        let r_t = model.tidal_radius().value();
+        let band = MassBand::A;
+        let full = table.tail(band).expect("M4 has a tail").expected();
+        assert!((table.extent().value() / (4.0 * r_t) - 1.0).abs() < 1e-12);
+        let half = table.clone().with_tails_to(LightYears::new(2.5 * r_t));
+        let cut = half.tail(band).unwrap().expected();
+        // Three tidal radii of tube kept of the full four.
+        assert!((cut / full - 1.5 / 3.0).abs() < 1e-12, "{cut} of {full}");
+        assert!(
+            table
+                .clone()
+                .with_tails_to(LightYears::new(r_t))
+                .tail(band)
+                .is_none()
+        );
+        // A tail's member never lies beyond the reach of the centre.
+        let tail = half.tail(band).unwrap();
+        assert!(tail.density(&PointLy::new(2.4 * r_t, 0.9 * r_t, 0.0)) <= 0.0);
+        assert!(tail.density(&PointLy::new(2.0 * r_t, 0.5 * r_t, 0.0)) > 0.0);
+        // The grid reaches the tidal radius; it stopped doubling at the tails' extent or because
+        // the doubled grid would expect too many candidates somewhere; and it doubled past the
+        // tidal radius only while under the target.
+        let grid = table.grid();
+        let w = grid.width().value();
+        let at = |width: f64| {
+            NestedGrid::new(
+                LightYears::new(width),
+                FEATURE_GRID_CELLS,
+                FEATURE_GRID_LEVELS,
+            )
+            .unwrap()
+        };
+        assert!(grid.reach().value() >= r_t);
+        assert!(
+            grid.reach().value() >= table.extent().value()
+                || table.peak_candidates(&at(2.0 * w)) > CELL_CANDIDATE_TARGET
+        );
+        if at(0.5 * w).reach().value() >= r_t {
+            assert!(table.peak_candidates(&grid) <= CELL_CANDIDATE_TARGET);
+        }
     }
 }

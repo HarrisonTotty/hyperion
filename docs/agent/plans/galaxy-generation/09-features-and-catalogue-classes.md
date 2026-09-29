@@ -1682,3 +1682,110 @@ BareRemnant}`, `RemnantState`. `Progenitor` carries the time left and a double w
     disc's, about 2.5% of the galaxy's, which `drawable_rate_per_year` states.
   - _Periods (T18.b)._ A thousand years before a merger the period is a median 89.6 s, 5–95%
     77.9–118.4 s: the plan's 80–100 s holds at the median (the test), heavy pairs run to 120.
+
+- **Phase 5 as built (lane `feat09d`, 2026-09-28, at `GENERATOR_VERSION` 14): T20–T23.** No
+  existing output moves: nothing reads members yet; the change to phase 1's catalogue (an old open
+  cluster's reach, below) is pinned by no golden and changes no gas modifier, and the one to phase
+  2's tails (zero beyond the reach) reaches only members. New golden
+  `galaxy/features/members.golden`; `rng/tags.golden` gains five tags (`member.cell`,
+  `member.position`, `member.accept`, `member.list`, `member.list_position`). Names and shapes
+  that differ from the sketches:
+  - `features::nested::{NestedGrid, NestedCell, NestedLevel, BuildNestedGridError}`.
+    `NestedGrid::new` returns a `Result` (the width must be exactly a power of two, the cells a
+    multiple of four); `cells_touching(&PointLy, radius)` and `owner_of(&PointLy) -> Option` take
+    local light-years; `owns`, `cell`, `owned_cells`, `local_cell` (a phase-2 `LocalCell`),
+    `level`, `all_levels`, `reach`, `width_log2` besides.
+  - `MemberClassTable::{grid_width, grid, extent, with_tails_to, proposal, cell_candidates,
+peak_candidates}` and `interior::CellProposal`, with `FEATURE_GRID_CELLS`,
+    `FEATURE_GRID_LEVELS`, `GRID_WIDTH_MIN_LOG2`, `CELL_CANDIDATE_TARGET` (2,000).
+  - `members::placement::FeatureInterior` (a feature's record, `ClusterModel`, class table, grid
+    and bulk velocity: `of`, `member_id`, `candidate_count`, `candidate`, `members_in_cell`,
+    `expected_candidates`, `galactic`) and `resolve_member(galaxy, FeatureMemberId) ->
+Result<MemberRecord, ResolveSystemError>`; `placement::resolve` dispatches the `0` kind to it.
+  - `members::level_list::{FeatureLevelList, ListClass, ListEntry, registered_classes}`:
+    `FeatureLevelList::of(galaxy, feature)`, and `with_classes(galaxy, word, centre, MemberZero,
+classes)` for the centre (P09.T27) and the tests. A class's count sits at word `c × 2³²` of
+    `member.list` and member `k`'s position at `c × 2³² + 3k` of `member.list_position` (`c` its
+    `ClassId` value), so a class registered in front moves the indices after it and never another
+    class's members. `member(index)` is `None` until P09.T30.b, T36 and T43 register their draws.
+  - `members::source::{FeatureMemberSource, FeatureInteriorCache, NoInteriorCache}`:
+    `FeatureMemberSource::new(&dyn FeatureCellCache, &dyn FeatureInteriorCache)`. The interior
+    cache is an addition for P09.T40's `ClusterModelCache`, since an interior costs seconds
+    (findings). The census sums the cells touching the **unpadded** radius (plan 03's contract);
+    the hits walk the padded one. `resolve_member` takes no cache and rebuilds the interior.
+  - Members exist only in a galaxy with its kinematic tables (`Galaxy::with_full_potential`):
+    the bulk velocity sets the tails' axis and so which candidates are accepted, so a zero
+    stand-in would give one ID two members. Without them `FeatureInterior::of` is `None` and a
+    member ID resolves to "no such system".
+  - _Grid width (T21)._ A cell's expected count grows with w (the core's `ρ_c w³`), so "the
+    smallest w from 1 ⁄ 64 ly for which no cell expects more than 2,000" is always 1 ⁄ 64 ly, whose
+    16 ly reach misses the cluster. As built: the least power of two from 1 ⁄ 64 ly whose reach
+    holds the tidal radius, where every profile ends, doubled while the doubled grid keeps every
+    cell and band at 2,000 or under, until it holds the tails' extent; the tails are
+    then cut at the grid's reach, their count in proportion to the length kept (P09.T9.g's "to
+    the grid's reach"). The 2,000 is a target: a core too dense for the finest grid that reaches
+    its tidal radius keeps that grid (seed `0x0921_0000`'s globular at feature cell (−2, −4,
+    2), index 0, expects 4,191 in its fullest cell, under the index with eight standard
+    deviations to spare). On the fixture (31 globulars, 43 open clusters and nurseries) the
+    fullest cell and band expects at most 1,991 candidates (tails along x). The peak is searched on
+    the cells beside the three axes, where the profiles' bound peaks, and within one cell of the
+    tails' line (`peak_candidates`); a test asserts it equals the peak over every owned cell for
+    three clusters. A globular of 10⁶ systems with a 240 ly⁻³ core takes w = 2 ly
+    and peaks at 723 (band D, level 0; "near 600").
+  - _Cusps (T21)._ A collapsed cluster's cusp, softened only at 10⁻³ ly, puts the nearest-corner
+    bound of the eight cells at the centre at its peak: 5.8 × 10⁴ expected candidates in a 1 ⁄ 8
+    ly cell of the fixture's collapsed globulars and 3 × 10⁷ in a 1 ly cell, against the 8,192
+    index. There the candidates are proposed radially under `B max(ε, r)^−γ` over the octant ball
+    of radius `√3 e` and dropped outside the cell (`CellProposal::Cusp`): thinning with a
+    non-uniform proposal, exact by the same theorem as Design note 21's. The same three words of
+    `member.position` are read; the profile test passes on a collapsed globular.
+  - _Every member within the feature's reach (T23)._ `FeatureCatalogue::near` finds a feature by
+    its reach, so every member must lie inside it. Ten half-mass radii fell short of the tidal
+    radius for the densest old open clusters (r_t 90 against 22 ly, 114 against 80, 129 against
+    71): an old open cluster's reach is now the greater of the two, the tidal radius computed as
+    `ClusterModel` computes it (pinned by no golden). A tail's Gaussian spilled past its reach
+    across the axis: a tail's density is now zero beyond the reach of the centre (phase 2's
+    `TailClass::density`), and its expected count, the tube's to the reach along the axis, errs
+    high by the Gaussian's share outside the sphere. Where an old cluster's reach is its tidal
+    radius it has no tail at all (P09.T9.g's table keeps a tail only for a reach past r_t).
+  - _Tests (T21)._ "Near 600" is asserted as 300–1,200 (built: 723). "Flat or falling outward"
+    is asserted for bands D and E only, with 5% slack a level (finding below). The profile test
+    takes every class of bands A–C with 300 members or more in one open-core and one collapsed
+    globular. The headroom is asserted over every owned cell for three clusters (fast) and on the
+    axes, the fullest count plus eight standard deviations under 8,192, for every cluster of three
+    feature cells and fifty globulars (slow: 686 clusters, 23 minutes; 2 over the target, the
+    fullest 4,191). T23's 50 ly brute-force comparison in a globular is slow; a 12 ly one in an
+    open cluster is fast. Every cluster model costs seconds (below), so the tests share their
+    interiors.
+  - _Plan 10 (P10.T7.a)_ reads `grid_width` "with that floor" of 16–64 ly for dwarf cores; as
+    built the floor is the constant `GRID_WIDTH_MIN_LOG2` and the interior is tied to
+    `FeatureRecord` and `ClusterModel`, so P10.T7 needs a floor argument.
+- **Findings of phase 5 (for a ruling; nothing built on them).**
+  - _Cost of a cluster model._ `ClusterModel::from_record` takes 3.3–4.5 s per open cluster at the
+    dev profile's opt-level 2, nearly all of it T9.b's sixteen `speed_bin_shares_against` kick
+    quadratures; the class table takes 9–12 ms, the grid's width 2–4 ms, every expected count of
+    a grid 40–100 ms and every member 0.1–0.65 s. T23's 50 ly cold query in the core of a
+    1.4 × 10⁴ M☉ globular (target 20 ms) takes 12.7 s for its 7,846 members, 3.8 s of it the
+    census, which builds the interior once and the hits a second time; a query in the disc visits
+    every cluster whose reach touches it, a nursery's 1,750 ly included. A cached model (P09.T40) or a cheaper
+    retention quadrature is needed before the server merges this source.
+  - _Counts rising outward below the turn-off._ With η = 1 (Design note 9), a class of `q < 1`
+    falls as `r^(−3q)` outside its core, band A's (0.3 against 0.8 M☉) as `r^(−1.1)`, against the
+    brainstorm's "falls as r⁻³ or faster outside its core". The 10⁶-system globular's fullest cell
+    per level in band A is 7, 9, 38, 154, 499, 358, 4, 32 (levels 0–7); bands B and C rise too
+    (26 → 91 and 30 → 135 over levels 1–4). The index stays safe (the width rule sees it), but
+    the brainstorm's argument does not hold for the low-mass classes.
+    The science check (source not re-checked here): Heinke et al. 2005's `(1 + x²)^(−3q/2)` (their
+    eq. 2) is fitted near the core at q ≈ 1.6; in multi-mass King models (Gieles and Zocchi 2015,
+    MNRAS 454, 576, eqs. 20 and 29) a light class leaves the isothermal regime early and falls as
+    about `r^(−2.5)` (isotropic) to `r^(−3.5)` (Michie) outside `r_h`, so the `r^(−1.1)` is an
+    extrapolation of the fit. Suggested for the ruling: an outer exponent of at least 5 ⁄ 4 below
+    the turn-off, or larger cores for the light classes with an outer slope of at least 3.
+  - _Young clusters' tails (P09.T9.g)._ A nursery of 60 M☉ (241 M☉ at birth) expects 1.87 × 10⁴
+    members, nearly all in its tails out to its 1,750 ly reach (5,000 or so after the cut at its
+    grid's 512 ly): more members than it ever had, since the tail's line density is the
+    mass-loss rate over a drift at the central dispersion, a fraction of a km/s. At most
+    (241 − 60) ÷ 0.5 ≈ 360 stars can have left it, some 50 times fewer. The science check suggests
+    capping a tail at `r_t + v_drift × age` and its total at the mass lost less the remnants and
+    runaways already counted (Küpper et al. 2010, MNRAS 401, 105, not re-checked), and notes that
+    a nursery's loss by gas expulsion leaves at about 1 km/s in every direction, not as a tail.

@@ -26,3 +26,6 @@ pub mod shares;
 pub mod testing;
 
 pub use ids::{FeatureDesignation, FeatureId, FeatureKind, FeatureProcess};
+
+// Plan 09, phase 5: nested grids and members (P09.T20–T23).
+pub mod nested;

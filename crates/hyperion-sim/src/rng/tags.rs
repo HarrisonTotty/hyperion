@@ -674,6 +674,28 @@ domain_tags! {
 
     /// The one-shot explosion of a supernova catalogue entry, behind event tag 0x0202 (P09.T19.a).
     CLASS_EV_SUPERNOVA: Event = "class.ev.supernova";
+
+    // Plan 09, phase 5 (P09.T21–T22), appended after phase 4: a nested cell's count is a
+    // `Cell` tag opened with `ObjectKey::cell(word)`, the word the member ID of the cell's
+    // candidate 0 in its band (Design note 23); a candidate's draws are `System` tags keyed by its
+    // member ID; the feature-level list's draws are `Feature` tags keyed by the feature's word.
+
+    /// A nested cell's candidate count in one band: one Poisson draw (P09.T21).
+    MEMBER_CELL: Cell = "member.cell";
+
+    /// A nested candidate's position in its cell: three uniforms, x, y and z (P09.T21).
+    MEMBER_POSITION: System = "member.position";
+
+    /// A nested candidate's class pick, or its rejection: one mark (P09.T21).
+    MEMBER_ACCEPT: System = "member.accept";
+
+    /// A feature-level list's counts: one Poisson draw per class, each at its class's own word
+    /// offset (P09.T22).
+    MEMBER_LIST: Feature = "member.list";
+
+    /// A feature-level list member's position: three uniforms per member, at its class's and its
+    /// number's word offset (P09.T22).
+    MEMBER_LIST_POSITION: Feature = "member.list_position";
 }
 
 #[cfg(test)]

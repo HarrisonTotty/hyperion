@@ -17,7 +17,7 @@ pub mod table;
 
 pub use abundances::MemberAbundances;
 pub use profile::{ClassProfile, ProfileShape};
-pub use table::{LocalCell, MemberClassTable, TailClass};
+pub use table::{CellProposal, LocalCell, MemberClassTable, TailClass};
 
 use crate::galaxy::imf::MassBand;
 use crate::units::SolarMasses;
