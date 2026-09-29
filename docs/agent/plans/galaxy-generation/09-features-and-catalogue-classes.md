@@ -707,6 +707,9 @@ except that P09.T9.d needs P09.T9.c.
   drift speed. _Superseded by rulings 139.4 and 142.3:_ the tail runs as far as its oldest escaper
   has drifted, and each band's count is the interior's lost stars of that band (born less the
   K-scaled living classes, clamped at 0) times `w`, the window's share of all the mass lost.
+  _Amended by ruling 145:_ the births are `N₀ = (M − M_BH) ÷ min(s p_can, p_dep)` in the classes'
+  own currency with `K = min(s p_can ÷ p_dep, 1)`, and a globular's `w` is the time share
+  `min(τ, age) ÷ age` (0 if `Ṁ ≤ 0`).
 - **P09.T9.h Multiple populations.** For globulars born above 10⁵ M☉ an independent mark splits each
   class into first and second population; the first's share is 0.62 − 0.30 × (log₁₀ M₀ − 5) held to
   0.1–0.7. The second has a smaller core radius (scratch factor 0.7) and the lower binary fraction.
@@ -2103,13 +2106,23 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `resolve` and T29's source share; `as_global_entry()` once plan 10's list exists; T29's
     `CentreMemberSource` reads `CentrePlacement`; T30.b registers the victims on the centre's
     list; young-disc members of negative age are placed and must be dropped at the query.
-- **The tails' mass against L05 (ruling 142.3; a risk).** A tail's members are the interior's lost
-  stars times the window's share `w`, so their mass is `w` times the interior's lost living mass,
-  not L05's `M_esc`. L05's μ_ev is fitted to a Salpeter-like population, and the galaxy's Chabrier
-  puts more of its mass above a young turn-off, so L05 under-counts the evolutionary loss: the
-  research put the gap at about 33 M☉ of the 60 M☉ nursery's 147 (members carrying about 113 M☉).
-  As built the members carry 76.8 M☉, a gap of 70 M☉, since `N₀` is also smaller (below). A μ_ev
-  integrated over the galaxy's own function and tracks would close it; nothing is ruled.
+- **The tails' mass against L05 (ruling 142.3; closed by ruling 145).** A tail's members are the
+  interior's lost stars times the window's share `w`, so their mass is `w` times the interior's
+  lost living mass, not L05's `M_esc`. The gap (70 M☉ of the nursery's 146.6 as built by r142) was
+  the currency of `N₀`, not the physics: counted in the classes' own mass per system formed, with
+  the history's dynamical survival carried over (ruling 145.1), the interior's lost living mass is
+  L05's `M_esc` for a young cluster with no remnants kept, and the nursery's tail carries it within
+  3% (below, "Ruling 145 as built").
+- **`BOUND_SHARE` against the galaxy's own μ (ruling 145.5; queued, wired, its own bump).**
+  `kinds::globular`'s history `M = 0.70 M₀ (1 − t ÷ t_dis)` takes BM03's 0.70, a Kroupa function
+  to 15 M☉, while the galaxy's function and fates leave about 0.46 of the mass formed at 12 Gyr.
+  Generated globulars' birth masses are then about 1.5 times low, which feeds
+  `first_population_share`, the black holes and the retention. A history revision should derive the
+  share from the galaxy's function and fates; it moves wired output and needs a `GENERATOR_VERSION`
+  bump, so it is not in lane `r145`. Also noted, not ruled: the model reads every depleted slope as
+  loss from the canonical −1.5, while Baumgardt et al. 2019 read α ≈ −0.6 in dynamically unevolved
+  globulars as a bottom-light mass function, which makes a cluster like 47 Tucanae born heavier
+  than they say.
 - **Ruling 142 as built (lane `r142`, 2026-09-29, on 6cf4b5a at `GENERATOR_VERSION` 15).** No
   wired output moves: `galaxy/features/members.golden` is re-blessed at 15 (its open cluster's
   band-A cell was a tail cell and is now a living one), and no other golden moves.
@@ -2146,3 +2159,47 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     below 0.05 and 3% relative above it".
   - _Headroom._ Unchanged: 734 clusters, two over the 2,000 target, the fullest cell 4,237 (a
     core, not a tail); the widest profile core among them is 0.794 r_h.
+- **Ruling 145 as built (lane `r145`, 2026-09-29, on 92d663d at `GENERATOR_VERSION` 15).** No
+  wired output moves: `galaxy/features/members.golden` is re-blessed at 15, and its 12 changed
+  lines are the globular's cell expectations moving in the last bit (the kept classes still hold
+  the present mass; only `K N₀` rounds differently). No other golden moves.
+  - _Births (145.1)._ `class_counts` builds every class per system formed, then `p_dep` (their
+    present mass: living at the depleted slope with the binary mix and runaways, plus the retained
+    white dwarfs and neutron stars) and `p_can` (the same with the living stars canonical). The
+    new `dynamical_survival(model)` is `s`: L05's `disruption_survival(m₀, age)` for an open
+    cluster, `M ÷ (M + Ṁ age)` for a globular. `N₀ = (M − M_BH) ÷ min(s p_can, p_dep)`,
+    `K = min(s p_can ÷ p_dep, 1)`, and the classes are `K N₀` times their per-system counts.
+    `mean_formed_mass` no longer enters the interior; the classes keep the scratch binary mix.
+    Where `s p_can ≤ 0` (a dissolved cluster) `N₀` and `K` are 0. `ClassCounts` gains
+    `canonical_per_system`, `depleted_per_system`, `survival`, `scale` and `systems_formed`,
+    printed by the tail tests.
+  - _Tail share (145.2)._ For a globular `TailWindow::mass` is `Ṁ min(τ, age)` and `lost` is
+    `Ṁ age` (both 0 if `Ṁ ≤ 0`), so `share()` is the time share; the test asserts `w = τ ÷ age`
+    for the named globulars. Open clusters are unchanged.
+  - _Catalogue helper (145.3)._ `testing::CATALOGUE_EVOLUTION_SHARE` = 0.50:
+    `t_dis = age ÷ (1 − M ÷ (0.50 M₀))`, `Ṁ = 0.50 M₀ ÷ t_dis`, and no loss at or above 0.50 M₀.
+  - _Windows (145.4)._ Measured, all inside:
+    - nursery: p_can 0.6236, p_dep 0.4931 M☉, s 0.2912, K 0.368, N₀ 331.7; **265.4 members of
+      146.4 M☉ (mean 0.552 M☉)** against the window's 146.6 M☉, by band 196.0/28.3/35.0/6.1;
+      326.8 living born, 61.5 kept.
+    - 47 Tucanae: p_can 0.3562, p_dep 0.3001, s 0.982, **K = 1**, N₀ 2.83 × 10⁶; w 0.0033
+      (τ 3.95 × 10⁷ yr); **2,301 members of 523 M☉, mean 0.227 M☉**; lost by band 6.66 × 10⁵,
+      3.29 × 10⁴, 558, 0, 0.
+    - ω Centauri: K 0.992, s 0.992, 214 members of 65 M☉ (mean 0.306), w 0.0030: it has a tail.
+    - M4: K 0.261, s 0.177, 3,172 members of 936 M☉; Palomar 5: K 0.521, s 0.445, 377 members of
+      110 M☉.
+    - Catalogue: K ≤ 1 and tail + kept ≤ born in every band of all 165; 31 have K held at 1; the
+      8 tail-less are exactly those at or above 0.50 M₀ (AM 1, NGC 2419, Pal 4, Crater, NGC 5024,
+      NGC 5824, NGC 6715, Sagittarius II), the research's list; every one with Ṁ > 0 has a tail.
+  - _Finding (145.4, for a ruling): 47 Tucanae's band C loses 558 stars._ The ruling says bands
+    A–B only. Band C's living stars run from 0.75 M☉ to the 0.85 M☉ turn-off, and the slice under
+    0.8 M☉ is depleted, so at K = 1 it loses 558 of its 73,499 born: 0.08% of the lost, about two
+    tail members (the research's replica has 749, so the ruling's "A–B only" read the depletion
+    as ending at the band edge). The test pins band C at under 1% of its births and 0.2% of the
+    lost, and none above band C.
+  - _Tests (145.6)._ The catalogue test asserts "Ṁ > 0 ⇒ tail" and M ≥ 0.50 M₀ for every
+    tail-less globular (at most 8); the 142.3 pins (155 members, 23 tail-less, 47 Tucanae's empty
+    tail) are gone. The "L05 gap" Risk is closed; ruling 145.5 is queued in the Risks.
+  - _Headroom (145.6)._ Re-run: unchanged, 734 clusters, two over the 2,000 target, the fullest
+    cell 4,237 (a core, not a tail), the widest profile core 0.794 r_h. The remnants test at the
+    0.50 helper: 5,397 pulsars (3 capped), 12,631 black holes, 0.218 core-collapsed.

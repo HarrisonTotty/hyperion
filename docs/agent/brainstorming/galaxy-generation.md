@@ -483,10 +483,14 @@ fits one device: a feature's members are split by class, as a layer's are split 
   living band-E count carries that factor.
 - **Tails.** Every cluster, open or globular, carries its near debris as one more class: a straight
   tube along its orbit out to the reach of its grid, or as far as its oldest escapers have drifted
-  (Küpper, Macleod and Heggie 2008), holding its share of the stars it has lost. Those are the
-  stars its interior no longer has, band by band, so they are lighter than the stars that stay
-  and the lowest band is stripped hardest (Baumgardt and Makino 2003). Older debris is field, or a
-  [stream](#streams-and-accreted-structure).
+  (Küpper, Macleod and Heggie 2008), holding its share of the stars it has lost: for a globular,
+  the share of its life its oldest escapers have spent drifting. Those are the stars its interior
+  no longer has, band by band, so they are lighter than the stars that stay and the lowest band is
+  stripped hardest (Baumgardt and Makino 2003). The stars born are counted in the classes' own
+  terms, from the present stellar mass, what each system formed still holds and the share the
+  cluster's history kept, so no band keeps more stars than it was born with. Where the dwarfs are
+  depleted by more than the history lost, as in 47 Tucanae, the escapers all come from the two
+  lowest bands. Older debris is field, or a [stream](#streams-and-accreted-structure).
 - **Multiple populations.** Every globular born above about 10⁵ M☉ splits its members by an
   independent mark into a first and a second population (Milone and Marino 2022). The first's share
   is 0.62 − 0.30 × (log₁₀ M − 5), held between 0.1 and 0.7. A second-population member draws an
@@ -2330,6 +2334,34 @@ The text has been brought into line:
    stars that stay, with the lowest band stripped hardest (Baumgardt and Makino 2003). See [What is
    inside a cluster today](#what-is-inside-a-cluster-today).
 
+**2026-09-29: the orchestrator's ruling 145.** Ruling 145 of the same file was made on research
+that checked ruling 142 as built (`research/r-142b/NOTE.md`) and read Baumgardt, Hilker, Sollima
+and Bellini (2019). It changes what this document says about a cluster's tail. Only the unwired
+member layer moves. The text has been brought into line:
+
+1. **A cluster's stars born are counted in its classes' own terms** (ruling 145.1): the present
+   stellar mass over the smaller of two things per system formed, what the classes would hold at
+   the canonical slope times the history's dynamical survival, and what they hold depleted. The
+   scale on the classes is then at most 1. Reason: the galaxy's mean mass per system carries field
+   companions the classes do not, and each source of an initial mass assumes its own
+   stellar-evolution share (0.70, 0.50, L05's 0.66). Mixing them let 47 Tucanae and ω Centauri keep
+   more stars than they were born with. A young cluster's tail now carries what L05 says it lost,
+   so the earlier gap between the two was one of currency, not physics.
+2. **A globular's tail holds the share of its losses made in the time its oldest escapers have
+   drifted** (ruling 145.2), and none if it loses nothing. Reason: its mass loss is steady on its
+   history, so the time share is the mass share, and it needs no one else's stellar-evolution
+   share. Every globular that loses mass has a tail, ω Centauri's included (Ibata et al. 2019's
+   Fimbulthul, from memory). See [What is inside a cluster today](#what-is-inside-a-cluster-today).
+3. **A catalogued globular's initial mass is read with Baumgardt et al.'s own 0.50** (ruling
+   145.3), not the history's 0.70, since that is the stellar-evolution share their masses assume.
+   Read at 0.70, ω Centauri would have lost 29% of its mass dynamically, where they find about 1%.
+
+Two points stay open. The history's 0.70 is Baumgardt and Makino's (2003) for a mass function that
+stops at 15 M☉, while the galaxy's own function and fates leave about 0.46 at 12 Gyr. The generated
+globulars' initial masses are then about 1.5 times too low, and a revision is queued (ruling 145.5).
+The model also reads every depleted slope as dwarfs lost from the canonical −1.5, where Baumgardt et
+al. read the same slope in dynamically young globulars as a mass function born light at the bottom.
+
 ## Open questions
 
 Three rounds of questions were answered on 2026-09-20 and are now under [Decisions](#decisions). The
@@ -2543,6 +2575,10 @@ Figures above are rounded and should be re-checked against these when they becom
   _Galactic rotation in Gaia DR1_, MNRAS 468, L63 (the Oort constants; from memory, not re-read).
 - Lamers et al. 2005, _An analytical description of the disruption of star clusters in tidal
   fields_, A&A 441; Oh, Kroupa and Pflamm-Altenburg 2015, ApJ 805.
+- Baumgardt, Hilker, Sollima and Bellini 2019, _Mean proper motions, space orbits, and velocity
+  dispersion profiles of Galactic globular clusters derived from Gaia DR2_, MNRAS 482, 5138 (eq. 6,
+  the initial masses and their 0.50); Ibata et al. 2019, Nature Astronomy 3, 667 (ω Centauri's
+  Fimbulthul stream; from memory, not re-read).
 - Baumgardt and Makino 2003, MNRAS 340; Gieles, Heggie and Zhao 2011, MNRAS 413; Burkert and Forbes
   2020, AJ 159; Massari, Koppelman and Helmi 2019, A&A 630.
 - Milone and Marino 2022, _Multiple populations in star clusters_, Universe 8; Koch, Grebel and

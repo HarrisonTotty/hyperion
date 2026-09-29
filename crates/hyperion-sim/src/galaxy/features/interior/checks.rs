@@ -183,11 +183,53 @@ fn neutron_stars_black_holes_and_pulsars_of_the_named_clusters() {
     assert!((3_000.0..=20_000.0).contains(&omega), "ω Cen: {omega}");
 }
 
+/// Each band's living systems kept after the scale `K`.
+fn kept_by_band(counts: &super::counts::ClassCounts) -> [f64; 5] {
+    let mut kept = [0.0; 5];
+    for c in counts
+        .classes
+        .iter()
+        .filter(|c| c.class.kind == ClassKind::Living)
+    {
+        kept[c.class.band.index()] += c.expected;
+    }
+    kept
+}
+
+/// Ruling 145.4's invariants for any cluster: `K ≤ 1`, and no band's tail and kept stars
+/// outnumber its births.
+fn assert_births_bound(name: &str, counts: &super::counts::ClassCounts) {
+    assert!(counts.scale <= 1.0, "{name}: K {}", counts.scale);
+    let kept = kept_by_band(counts);
+    for band in MassBand::ALL {
+        let i = band.index();
+        let tail = counts.tails[i].map_or(0.0, |t| t.expected);
+        assert!(
+            tail + kept[i] <= counts.born[i] * (1.0 + 1e-12),
+            "{name} {band:?}: tail {tail} + kept {} of {} born",
+            kept[i],
+            counts.born[i]
+        );
+    }
+}
+
+/// The bookkeeping of ruling 145.1, for the reports.
+fn bookkeeping(counts: &super::counts::ClassCounts) -> String {
+    format!(
+        "p_can {:.4} M☉, p_dep {:.4} M☉, s {:.4}, K {:.4}, N₀ {:.4e}",
+        counts.canonical_per_system,
+        counts.depleted_per_system,
+        counts.survival,
+        counts.scale,
+        counts.systems_formed,
+    )
+}
+
 #[test]
 fn tails_hold_what_the_cluster_lost_and_no_second_population() {
     use super::counts::{class_counts, tail_window};
     let galaxy = galaxy();
-    for name in [TUC_47, M4, PAL_5] {
+    for name in [TUC_47, M4, PAL_5, OMEGA_CEN] {
         let model = model(&galaxy, name);
         let reach = LightYears::new(4.0 * model.tidal_radius().value());
         let counts = class_counts(&galaxy, &model, reach);
@@ -195,6 +237,12 @@ fn tails_hold_what_the_cluster_lost_and_no_second_population() {
         let window = tail_window(&galaxy, &model, reach);
         let w = window.share();
         assert!(w > 0.0 && w <= 1.0, "{name}: w {w}");
+        // Ruling 145.2: a globular's share is its tail's time over its age.
+        assert!(
+            (w - window.duration.value() / model.age().value()).abs() <= 1e-12 * w,
+            "{name}: w {w}, {window:?}"
+        );
+        assert_births_bound(name, &counts);
         let mut members = 0.0;
         let mut mass = 0.0;
         for band in MassBand::ALL {
@@ -209,7 +257,6 @@ fn tails_hold_what_the_cluster_lost_and_no_second_population() {
                     "{name} {band:?}: {} against {w} × {lost}",
                     tail.expected()
                 );
-                assert!(tail.expected() <= lost * (1.0 + 1e-12));
                 members += tail.expected();
                 mass += tail.expected() * tail.class().mean_mass.value();
             }
@@ -217,10 +264,12 @@ fn tails_hold_what_the_cluster_lost_and_no_second_population() {
                 assert_ne!(class.kind, ClassKind::Tail);
             }
         }
+        let mean = mass / members;
         eprintln!(
-            "{name}: v_drift {:.2} km/s, tail {:.0} ly for {:.2e} yr, w {w:.4} of {:.3e} M☉ lost \
-             (window {:.3e} M☉); {members:.0} members of {mass:.0} M☉; lost by band {:.0?}, born \
-             {:.0?}",
+            "{name}: {}; v_drift {:.2} km/s, tail {:.0} ly for {:.2e} yr, w {w:.4} of {:.3e} M☉ \
+             lost (window {:.3e} M☉); {members:.0} members of {mass:.0} M☉ (mean {mean:.3} M☉); \
+             lost by band {:.4?}, born {:.4?}",
+            bookkeeping(&counts),
             window.drift_speed,
             window.length.value(),
             window.duration.value(),
@@ -229,13 +278,30 @@ fn tails_hold_what_the_cluster_lost_and_no_second_population() {
             counts.lost,
             counts.born,
         );
-        // Provisional (a finding of ruling 142.3, for a ruling): 47 Tucanae's scale K lifts every
-        // band above its births (band A keeps 1.24 × 10⁶ of 1.06 × 10⁶), so the complement and
-        // its tail are empty. M4 and Palomar 5 have tails.
+        // Ruling 145.4: ω Centauri, M4 and Palomar 5 have tails.
+        assert!(members > 0.0, "{name}: {members}");
         if name == TUC_47 {
-            assert!(members.total_cmp(&0.0).is_eq(), "{name}: {members}");
-        } else {
-            assert!(members > 0.0, "{name}: {members}");
+            // Ruling 145.4: 47 Tucanae's depletion exceeds what its history lost, so K is held at
+            // 1 and the lost stars are bands A and B's: 1,500–8,000 members at 0.18–0.30 M☉.
+            // Provisional (a finding, for a ruling): band C's living stars run 0.75 M☉ to the
+            // turn-off and the slice under 0.8 M☉ is depleted, so it loses 558 of its 73,499 born
+            // (0.08% of the lost, about two tail members; the research's replica has 749). Pinned
+            // at under 1% of band C's births and 0.2% of the lost, and none above band C.
+            assert!(
+                (counts.scale - 1.0).abs() <= 1e-12,
+                "{name}: K {}",
+                counts.scale
+            );
+            let all: f64 = counts.lost.iter().sum();
+            assert!(
+                counts.lost[3..].iter().all(|&l| l.total_cmp(&0.0).is_eq())
+                    && counts.lost[2] <= 0.01 * counts.born[2]
+                    && counts.lost[2] <= 0.002 * all,
+                "{name}: lost by band {:?}",
+                counts.lost
+            );
+            assert!((1_500.0..=8_000.0).contains(&members), "{name}: {members}");
+            assert!((0.18..=0.30).contains(&mean), "{name}: {mean}");
         }
     }
     let model = model(&galaxy, TUC_47);
@@ -327,8 +393,8 @@ fn the_milky_way_s_globulars_have_their_observed_remnants() {
 /// a tail as long as its oldest escaper has drifted, `r_t + v_drift × age` (Bovy 2017's Oort
 /// constants give `−A ÷ B` ≈ 1.29 and `v_drift` 0.376 km/s), over which it lost 147 M☉ by L05. Its
 /// members are the stars the interior says it has lost, band by band: all of them, since `τ =
-/// age`, at a mean mass of 0.40–0.55 M☉ (the research's 0.47 and about 240 stars; built, 0.495
-/// and 155, which plan 09 records).
+/// age`. Counted in the classes' own currency (ruling 145.1), they are 240–290 stars carrying
+/// L05's 146.6 M☉ within 3%, at a mean of 0.50–0.60 M☉ (ruling 145.4).
 #[test]
 fn a_young_cluster_s_tail_holds_the_stars_it_has_lost() {
     use super::super::cluster::{ClusterKind, ClusterMarks, ClusterParameters};
@@ -384,9 +450,10 @@ fn a_young_cluster_s_tail_holds_the_stars_it_has_lost() {
         .sum();
     let born: f64 = counts.born.iter().sum();
     eprintln!(
-        "nursery: r_t {r_t:.1} ly, v_drift {:.3} km/s, tail {:.1} ly, window {:.1} M☉ of {:.1} \
+        "nursery: {}; r_t {r_t:.1} ly, v_drift {:.3} km/s, tail {:.1} ly, window {:.1} M☉ of {:.1} \
          lost, {members:.1} members of {tail_mass:.1} M☉ (mean {mean:.3} M☉); living born \
          {born:.1}, kept {kept:.1}; lost by band {:.1?}",
+        bookkeeping(&counts),
         window.drift_speed,
         window.length.value(),
         window.mass.value(),
@@ -402,11 +469,11 @@ fn a_young_cluster_s_tail_holds_the_stars_it_has_lost() {
     );
     // Ruling 142.3.
     assert!((140.0..=155.0).contains(&window.mass.value()), "{window:?}");
-    assert!((0.40..=0.55).contains(&mean), "{mean}");
-    // Provisional (a finding of ruling 142.3, for a ruling): the ruled 180–350 took about 300
-    // living stars born at a single-star mean of 0.77 M☉; `mean_formed_mass` (1.096 M☉, with the
-    // galaxy's companions) gives 217, of which 155 are lost. Pinned at the built 155.
-    assert!((150.0..=160.0).contains(&members), "{members}");
+    // Ruling 145.4 (superseding 142.3's 180–350 members at 0.40–0.55 M☉).
+    assert!((240.0..=290.0).contains(&members), "{members}");
+    assert!((tail_mass / 146.6 - 1.0).abs() <= 0.03, "{tail_mass}");
+    assert!((0.50..=0.60).contains(&mean), "{mean}");
+    assert_births_bound("nursery", &counts);
     let whole = (window.duration.value() / age.value() - 1.0).abs() < 1e-9;
     assert!(whole, "τ {:?} against {age:?}", window.duration);
     for band in MassBand::ALL {
@@ -428,13 +495,17 @@ fn a_young_cluster_s_tail_holds_the_stars_it_has_lost() {
 }
 
 /// Ruling 142.1's precondition: the slope theorem `s ≤ −2 y² ÷ (1 + y²)` holds for `r_c ≤ r_h`,
-/// and every catalogued globular's profile core sits inside its half-mass radius. It also counts
-/// the globulars whose interior keeps more living stars than were born (ruling 142.3's finding).
+/// and every catalogued globular's profile core sits inside its half-mass radius. It also holds
+/// ruling 145.4 over the catalogue: `K ≤ 1` and no band's tail and kept stars outnumber its
+/// births; every globular losing mass (`Ṁ > 0`) has a tail; at most 8 have none, each at or above
+/// `0.50 M₀`.
 #[test]
 fn every_catalogued_core_sits_inside_its_half_mass_radius() {
+    use super::super::testing::CATALOGUE_EVOLUTION_SHARE;
     let galaxy = galaxy();
     let mut widest = 0.0_f64;
-    let (mut n, mut over, mut tailless) = (0_u32, 0_u32, 0_u32);
+    let (mut n, mut floored) = (0_u32, 0_u32);
+    let mut tailless = Vec::new();
     for g in milky_way_globulars() {
         let model = ClusterModel::new(&galaxy, &catalogue_parameters(g));
         let ratio = model.profile_core_radius().value() / model.half_mass_radius().value();
@@ -442,26 +513,36 @@ fn every_catalogued_core_sits_inside_its_half_mass_radius() {
         widest = widest.max(ratio);
         let reach = LightYears::new(4.0 * model.tidal_radius().value());
         let counts = super::counts::class_counts(&galaxy, &model, reach);
-        let kept: f64 = counts
-            .classes
-            .iter()
-            .filter(|c| c.class.kind == ClassKind::Living)
-            .map(|c| c.expected)
-            .sum();
-        let born: f64 = counts.born.iter().sum();
+        assert_births_bound(g.name, &counts);
         n += 1;
-        if kept > born {
-            over += 1;
+        if counts.scale.total_cmp(&1.0).is_eq() {
+            floored += 1;
         }
-        if counts.tails.iter().flatten().next().is_none() {
-            tailless += 1;
+        let has_tail = counts.tails.iter().flatten().next().is_some();
+        // Ruling 145.6: losing mass means a tail.
+        if model.mass_loss_rate() > 0.0 {
+            assert!(
+                has_tail,
+                "{}: Ṁ {} and no tail",
+                g.name,
+                model.mass_loss_rate()
+            );
+        }
+        if !has_tail {
+            let bound =
+                model.mass().value() / (CATALOGUE_EVOLUTION_SHARE * model.initial_mass().value());
+            assert!(bound >= 1.0, "{}: no tail at M ÷ 0.50 M₀ = {bound}", g.name);
+            tailless.push(g.name);
         }
     }
     eprintln!(
-        "the widest core is {widest:.3} of its half-mass radius; {over} of {n} globulars keep more \
-         living stars than they were born with, {tailless} have no tail"
+        "the widest core is {widest:.3} of its half-mass radius; {floored} of {n} globulars have K \
+         held at 1, {} have no tail: {tailless:?}",
+        tailless.len()
     );
-    // Provisional (a finding of ruling 142.3, for a ruling): the complement is empty where the
-    // scale K lifts every band above its births, so 23 of the 165 have no tail.
-    assert!(tailless <= 23, "{tailless} globulars have no tail");
+    assert!(
+        tailless.len() <= 8,
+        "{} globulars have no tail",
+        tailless.len()
+    );
 }

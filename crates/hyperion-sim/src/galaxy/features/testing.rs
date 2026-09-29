@@ -294,13 +294,20 @@ const fn g(
 /// The age every catalogue cluster is taken at, years: the catalogue gives none.
 pub const CATALOGUE_AGE: f64 = 12e9;
 
+/// Baumgardt et al. 2019's share of a globular's initial mass left by stellar evolution (their
+/// eq. 6: "the factor 0.50 reflects the mass loss due to stellar evolution").
+pub const CATALOGUE_EVOLUTION_SHARE: f64 = 0.50;
+
 /// The [Fe/H] every catalogue cluster is taken at: the catalogue gives none (ours).
 pub const CATALOGUE_FE_H: f64 = -1.3;
 
 /// The cluster parameters of catalogue cluster `g`: its mass, radii and initial mass as printed, at
 /// [`CATALOGUE_AGE`] and [`CATALOGUE_FE_H`], placed at its galactocentric cylindrical radius and
-/// height on the +y axis, born with today's half-mass radius, and losing mass at `0.70 M₀ ÷
-/// t_dis`, the dissolution time that inverts plan 09's `M = 0.70 M₀ (1 − t ÷ t_dis)` (P09.T13).
+/// height on the +y axis, born with today's half-mass radius, and losing mass at `Ṁ = 0.50 M₀ ÷
+/// t_dis`, `t_dis = age ÷ (1 − M ÷ (0.50 M₀))` (ruling 145.3). The catalogue's initial masses are
+/// Baumgardt et al. 2019's (MNRAS 482, 5138, eq. 6), whose 0.50 is their share left by stellar
+/// evolution, so they are read with it rather than plan 09's BM03 0.70 (P09.T13); a cluster at or
+/// above `0.50 M₀` loses nothing.
 #[must_use]
 pub fn catalogue_parameters(
     g: &CatalogueGlobular,
@@ -313,7 +320,7 @@ pub fn catalogue_parameters(
     let [x, y, z] = g.position_kpc;
     let r_cyl = (x * x + y * y).sqrt() * LIGHT_YEARS_PER_KILOPARSEC;
     let initial = crate::math::exp10(g.log_initial_mass).max(g.mass);
-    let bound = g.mass / (0.70 * initial);
+    let bound = g.mass / (CATALOGUE_EVOLUTION_SHARE * initial);
     let t_dis = if bound < 1.0 {
         CATALOGUE_AGE / (1.0 - bound)
     } else {
@@ -333,7 +340,7 @@ pub fn catalogue_parameters(
         birth_half_mass_radius: r_h,
         core_radius: Some(LightYears::new(g.core_radius_pc * LIGHT_YEARS_PER_PARSEC)),
         concentration: 0.0,
-        mass_loss_rate: 0.70 * initial / t_dis,
+        mass_loss_rate: CATALOGUE_EVOLUTION_SHARE * initial / t_dis,
         age_spread: Years::ZERO,
         marks: ClusterMarks::MEDIAN,
     }

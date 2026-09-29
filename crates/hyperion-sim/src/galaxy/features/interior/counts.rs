@@ -1,10 +1,24 @@
 //! The expected count of every member class of a cluster, in closed form (plan 09, P09.T9).
 //!
-//! A cluster formed `N₀ = M₀ ÷ m̄_f` systems, `m̄_f` the galaxy's mass formed per system, their
-//! primaries on the galaxy's mass function. Each class's count is `N₀` times the share of
-//! primaries that end in it, and then every class but the black holes is scaled by one factor `K`
-//! so that the classes' mass is the cluster's present mass: evaporation takes stars of every
-//! class, and the depleted slope (below) says which it takes most of.
+//! A cluster's primaries are on the galaxy's mass function, and each class's count is the number
+//! of systems it formed, `N₀`, times the share of primaries that end in it. `N₀` is counted in the
+//! classes' own currency (ruling 145.1). Per system formed, the classes hold `p_dep(age)` today
+//! (the living stars at the depleted slope below, with the binary mix and the runaways, and the
+//! retained white dwarfs and neutron stars) and would hold `p_can(age)` at the canonical slope.
+//! The cluster's history says how much of what stellar evolution left it still holds, its
+//! dynamical survival `s`: L05's `disruption_survival(m₀, age)` for an open cluster (the `s` of
+//! `M = m₀ μ_ev s`), and `M ÷ (M + Ṁ age)` on a globular's linear BM03 history, whose evolved mass
+//! is `M + Ṁ t`. Then
+//!
+//! `N₀ = (M − M_BH) ÷ min(s p_can, p_dep)` and `K = min(s p_can ÷ p_dep, 1)`,
+//!
+//! and every class but the black holes is `K N₀` times its share per system, so the classes hold
+//! the present mass less the black holes'. Evaporation takes stars of every class, and the
+//! depleted slope says which it takes most of. Where the depletion alone removes more than the
+//! history lost (`s p_can > p_dep`), `K` is held at 1: no band keeps more stars than it was born
+//! with, and the escapers are all from the depleted bands A and B. Neither the galaxy's mean mass
+//! formed per system nor any other population's μ enters: the classes keep their own binary mix
+//! (below) until plan 11.
 //!
 //! - **Living stars (T9.a)** of band b have primaries in `[lo_b, min(hi_b, m_TO)]`. For 0.2–0.8 M☉
 //!   the present slope is `α = −0.46 − 0.79 (log₁₀ t_rh − 9) + 0.54 n` (the brainstorm, after
@@ -34,22 +48,21 @@
 //!   what the cluster lost in that time ([`tail_window`]). Escapers drift along the tail at Küpper,
 //!   Macleod and Heggie's (2008, MNRAS 387, 1248, eq. 5's secular term) mean speed `v_drift = 2Ω
 //!   |4Ω² ÷ κ² − 1| r_t`, so the tail runs `ℓ = min(reach, r_t + v_drift × age) − r_t` beyond the
-//!   tidal radius on each side and its stars left in the last `τ = ℓ ÷ v_drift`. An open cluster
-//!   lost `M_esc(age) − M_esc(age − τ)` in that time, `M_esc(t) = m₀ μ_ev(t) (1 − s(m₀, t))` (Lamers
-//!   et al. 2005 as built in `kinds::open_cluster`): stellar mass that left, not the gas stellar
-//!   evolution returned. A globular lost `Ṁ τ` on its BM03 history, held at or below `m₀ μ_ev(age)
-//!   − M`. That mass over all the stellar mass the cluster has lost, `M_esc(age)` for an open
-//!   cluster and `m₀ μ_ev(age) − M` for a globular, is the tail's share `w ≤ 1` of its escapers (1
-//!   at `τ = age`). Which stars and how many are the interior's own (ruling 142.3): band by band,
-//!   the living systems born (net of the runaways, with the binary mix) less the living classes
-//!   kept after the scale `K`, clamped at 0, so escapers are the lightest and band A is stripped
-//!   hardest (Baumgardt and Makino 2003). Each band's tail is `w` times its lost systems, at their
-//!   mean mass, spread uniformly over both sides. The tail's mass is then `w` times the interior's
-//!   lost living mass, not L05's: L05's `μ_ev` is a Salpeter-like population's, which puts less
-//!   mass above a young turn-off than the galaxy's function (plan 09's Risks). The tail is labelled
-//!   first population, though a globular's lost stars are counted over both. Stars lost by gas
-//!   expulsion, isotropically at about 1 km/s, are outside the model (Design note 1's single bound
-//!   mark).
+//!   tidal radius on each side and its stars left in the last `τ = ℓ ÷ v_drift`. The tail's share
+//!   `w ≤ 1` of every star the cluster has lost is a share of its history's time (ruling 145.2).
+//!   An open cluster lost `M_esc(age) − M_esc(age − τ)` of its `M_esc(age)`, `M_esc(t) = m₀ μ_ev(t)
+//!   (1 − s(m₀, t))` (Lamers et al. 2005 as built in `kinds::open_cluster`): stellar mass that
+//!   left, not the gas stellar evolution returned. A globular loses mass at a steady `Ṁ` on its
+//!   BM03 history, so `w = min(τ, age) ÷ age` if `Ṁ > 0` and 0 otherwise. Which stars and how many
+//!   are the interior's own (ruling 142.3): band by band, the living systems born (net of the
+//!   runaways, with the binary mix) less the living classes kept after the scale `K`, clamped at 0,
+//!   so escapers are the lightest and band A is stripped hardest (Baumgardt and Makino 2003). Each
+//!   band's tail is `w` times its lost systems, at their mean mass, spread uniformly over both
+//!   sides. In a cluster with no depleted band and no remnant kept, the interior's lost living
+//!   mass is `M (1 − s) ÷ s`, the history's own loss, which for an open cluster is L05's
+//!   `M_esc(age)`: a young cluster's tail with `τ = age` carries L05's mass. The tail is labelled first population, though a globular's lost stars are counted over both. Stars
+//!   lost by gas expulsion, isotropically at about 1 km/s, are outside the model (Design note 1's
+//!   single bound mark).
 //! - **Multiple populations (T9.h)**: a globular born above 10⁵ M☉ splits every class but the tail
 //!   into its first population's share and its second's, whose core is 0.7 times the cluster's.
 //!
@@ -128,16 +141,17 @@ pub struct TailWindow {
     pub length: LightYears,
     /// The time its oldest star has drifted, `τ = ℓ ÷ v_drift`.
     pub duration: Years,
-    /// The stellar mass the cluster lost in that time, M☉.
+    /// The stellar mass the cluster lost in that time, M☉: `M_esc(age) − M_esc(age − τ)` for an
+    /// open cluster, `Ṁ min(τ, age)` for a globular.
     pub mass: SolarMasses,
     /// All the stellar mass the cluster has lost since birth, M☉: `M_esc(age)` for an open
-    /// cluster, `m₀ μ_ev(age) − M` for a globular.
+    /// cluster, `Ṁ age` on a globular's linear history (0 if `Ṁ ≤ 0`).
     pub lost: SolarMasses,
 }
 
 impl TailWindow {
     /// The tail's share of every star the cluster has lost, `w = mass ÷ lost`, at most 1; 0 if it
-    /// has lost nothing.
+    /// has lost nothing. For a globular it is the time share `min(τ, age) ÷ age` (ruling 145.2).
     #[must_use]
     pub fn share(&self) -> f64 {
         if self.lost.value() > 0.0 {
@@ -179,8 +193,6 @@ pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> 
     };
     let tau = if drift > 0.0 { length / drift } else { 0.0 };
     let m0 = model.initial_mass();
-    let lost_stars =
-        (m0.value() * evolution_survival(Years::new(age)) - model.mass().value()).max(0.0);
     let (mass, lost) = match model.kind() {
         ClusterKind::Open => {
             let escaped = |t: f64| {
@@ -190,7 +202,15 @@ pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> 
             let lost = escaped(age).max(0.0);
             ((lost - escaped(age - tau)).max(0.0), lost)
         }
-        ClusterKind::Globular => ((model.mass_loss_rate() * tau).min(lost_stars), lost_stars),
+        // Ruling 145.2: a time share, which a steady `Ṁ` makes a mass share.
+        ClusterKind::Globular => {
+            let rate = model.mass_loss_rate();
+            if rate > 0.0 && age > 0.0 {
+                (rate * tau.min(age), rate * age)
+            } else {
+                (0.0, 0.0)
+            }
+        }
     };
     TailWindow {
         drift_speed: drift / LIGHT_YEARS_PER_YEAR_PER_KM_S,
@@ -216,6 +236,36 @@ pub struct ClassCounts {
     pub born: [f64; 5],
     /// Each band's living systems lost: born less the living classes kept, at least 0.
     pub lost: [f64; 5],
+    /// `p_can`: the classes' present mass per system formed at the canonical slope, M☉ (module
+    /// documentation; ruling 145.1).
+    pub canonical_per_system: f64,
+    /// `p_dep`: the classes' present mass per system formed at the depleted slope, M☉.
+    pub depleted_per_system: f64,
+    /// `s`: the history's dynamical survival, the share of the mass stellar evolution left that
+    /// the cluster still holds.
+    pub survival: f64,
+    /// `K = min(s p_can ÷ p_dep, 1)`: the scale on every class but the black holes.
+    pub scale: f64,
+    /// `N₀ = (M − M_BH) ÷ min(s p_can, p_dep)`: the systems the cluster formed.
+    pub systems_formed: f64,
+}
+
+/// The dynamical survival `s` of `model` (module documentation; ruling 145.1): L05's
+/// `disruption_survival(m₀, age)` for an open cluster, `M ÷ (M + Ṁ age)` for a globular.
+#[must_use]
+pub fn dynamical_survival(model: &ClusterModel) -> f64 {
+    let age = model.age().value().max(0.0);
+    match model.kind() {
+        ClusterKind::Open => super::super::kinds::open_cluster::disruption_survival(
+            model.initial_mass(),
+            Years::new(age),
+        ),
+        ClusterKind::Globular => {
+            let m = model.mass().value();
+            let evolved = m + model.mass_loss_rate().max(0.0) * age;
+            if evolved > 0.0 { m / evolved } else { 1.0 }
+        }
+    }
 }
 
 /// The depleted slope of a cluster (module documentation).
@@ -341,7 +391,6 @@ fn moments(f: &dyn MassFunction, lo: f64, hi: f64, w: impl Fn(f64) -> f64) -> (f
 )]
 pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> ClassCounts {
     let f = galaxy.mass_function();
-    let n0 = model.initial_mass().value() / galaxy.mean_formed_mass().value();
     let m_to = model.turn_off_mass().value();
     let alpha = depleted_slope(model);
     let young = model.age().value() < RUNAWAY_AGE_LIMIT;
@@ -376,7 +425,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
         (ClusterKind::Globular, Generation::Second) => BINARY_FRACTIONS.1,
     };
 
-    // Raw counts before the mass scaling: (class, count, shape).
+    // Counts per system formed, before `K N₀`: (class, count, shape).
     let mut raw: Vec<ClassCount> = Vec::new();
     let mut born = [0.0; 5];
     let mut born_mass = [0.0; 5];
@@ -415,9 +464,9 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
                 continue;
             }
             let b = binary_fraction(generation);
-            born[band.index()] += n0 * n_canon * share * runaway;
+            born[band.index()] += n_canon * share * runaway;
             born_mass[band.index()] +=
-                n0 * m_canon * share * runaway * (1.0 - b + b * BINARY_MASS_FACTOR);
+                m_canon * share * runaway * (1.0 - b + b * BINARY_MASS_FACTOR);
             if n_live > 0.0 {
                 let mean = m_live / n_live;
                 for (multiplicity, part, mass) in [
@@ -433,7 +482,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
                             initial_mass_range: (SolarMasses::new(lo), SolarMasses::new(live_hi)),
                             mean_mass: SolarMasses::new(mass),
                         },
-                        expected: n0 * n_live * share * part * runaway,
+                        expected: n_live * share * part * runaway,
                         shape: shape_for(mass, generation),
                     });
                 }
@@ -448,12 +497,12 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
                         initial_mass_range: (SolarMasses::new(wd_lo), SolarMasses::new(wd_hi)),
                         mean_mass: SolarMasses::new(wd_mass),
                     },
-                    expected: n0 * n_wd * share * retention.white_dwarfs,
+                    expected: n_wd * share * retention.white_dwarfs,
                     shape: shape_for(wd_mass, generation),
                 });
             }
             if band == MassBand::E {
-                let ns = n0 * ns_per_primary * retention.neutron_stars * share;
+                let ns = ns_per_primary * retention.neutron_stars * share;
                 for (multiplicity, part, mass) in [
                     (Multiplicity::Single, 1.0 - b, NEUTRON_STAR_MASS),
                     (
@@ -478,19 +527,31 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             }
         }
     }
-    // The scale K: every class but the black holes, to the present mass less the black holes'.
+    // Ruling 145.1: N₀ and K in the classes' own currency, every class but the black holes to the
+    // present mass less the black holes'.
     let bh_mass = model.black_hole_fraction() * model.mass().value();
-    let raw_mass: f64 = raw
+    let stellar = (model.mass().value() - bh_mass).max(0.0);
+    let mass_of = |c: &ClassCount| c.expected * c.class.mean_mass.value();
+    let p_dep: f64 = raw.iter().map(mass_of).sum();
+    let living: f64 = raw
         .iter()
-        .map(|c| c.expected * c.class.mean_mass.value())
+        .filter(|c| c.class.kind == ClassKind::Living)
+        .map(mass_of)
         .sum();
-    let k = if raw_mass > 0.0 {
-        ((model.mass().value() - bh_mass) / raw_mass).max(0.0)
+    let p_can = born_mass.iter().sum::<f64>() + (p_dep - living);
+    let survival = dynamical_survival(model);
+    let floor = (survival * p_can).min(p_dep);
+    let (n0, k) = if floor > 0.0 {
+        (stellar / floor, (survival * p_can / p_dep).min(1.0))
     } else {
-        0.0
+        (0.0, 0.0)
     };
     for c in &mut raw {
-        c.expected *= k;
+        c.expected *= k * n0;
+    }
+    for (n, m) in born.iter_mut().zip(&mut born_mass) {
+        *n *= n0;
+        *m *= n0;
     }
     if let (true, Some(scale)) = (bh_count > 0.0, model.black_hole_scale()) {
         let scale = scale.value();
@@ -568,6 +629,11 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
         runaway_share: ejected,
         born,
         lost,
+        canonical_per_system: p_can,
+        depleted_per_system: p_dep,
+        survival,
+        scale: k,
+        systems_formed: n0,
     }
 }
 
