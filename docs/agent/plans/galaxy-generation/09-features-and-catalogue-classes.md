@@ -951,6 +951,10 @@ bench: that query cold, target under 20 ms.
 
 ### Phase 6: the galactic centre
 
+_Status (lane `centre09a`, 2026-09-29): T24.a–c, T25, T26 and T27 are built; see Risks, "Phase 6,
+T24–T27 as built", and the provisional findings after it. `resolve` now answers a centre ID;
+nothing else reads the centre until T28.b._
+
 #### P09.T24 Profile and distribution function
 
 - **P09.T24.a Profile and potential.** `CentreProfile`: the broken power law with inner slope 1.3, a
@@ -1918,3 +1922,182 @@ fe_h_nodes, speed_nodes, table_row}`. `ClusterModel::new` reads the table; `rete
     the profiles and tails of 139.1 and 139.4; rebased onto b2ceb62's catalogue it holds 734, two
     over the 2,000 target, the fullest 4,237, under the 8,192 index with eight standard
     deviations to spare.
+- **Phase 6, T24–T27 as built (lane `centre09a`, 2026-09-29, on 6cf4b5a at `GENERATOR_VERSION`
+  15).** No existing output moves: only `resolve` reads the centre, for IDs it refused before
+  (`KindNotGenerated`), and `Galaxy` does not build the centre. New goldens
+  `galaxy/features/centre.golden` (profile, potential, the three distribution functions at six
+  energies, densities, acceptances, four drawn velocities with their marks, the class counts) and
+  `galaxy/features/centre_members.golden` (the hundred innermost members); `rng/tags.golden` gains
+  `centre.velocity`, `centre.marks`, `centre.age` and `centre.mass` (scope `System`). New bench
+  `benches/centre.rs`: the profile and the three inversions together 40–44 ms (target 50),
+  `CentreModel::new` 91 ms (Design note 15's 100), release on a shared machine; one `EnergyGrid`
+  serves the three inversions. Files: `galaxy/features/centre/{mod,profile,df,marks,classes,
+members,testing}.rs`; `placement/{record,resolve}.rs` (the `CentreMember` origin, the dispatch);
+  `features/members.rs` and `stellar/system.rs` (the new origin's attempt; `remnant_fits` and
+  `systemic_speed` now `pub(crate)`); `planetary/context.rs` and the server's
+  `compute/systems.rs` (a centre member has no system stage yet); `features/interior/retention.rs` (`monotone_cubic` now
+  `pub(crate)`). Names and shapes that differ from the sketches:
+  - `features::centre::{CentreModel, CentreProfile, TracerProfile, TracerShape, SlopeBreak,
+DistributionFunction, EnergyGrid, OrbitMarks, LossCone, CentreClasses, CentreClass,
+CentreClassKind, CentreTracer, BuildCentreError}`. `CentreModel::new(&Galaxy) -> Result` holds
+    the profile, the three tracers' profiles and distribution functions (`CentreModel::invert`,
+    in `CentreTracer::ALL`'s order), the loss cone, each tracer's mean acceptance and the classes;
+    `enclosed_mass`, `influence_radius` (bisection where the stars weigh the black hole's mass),
+    `loss_cone_radius`, `tracer_profile`, `distribution`, `acceptance`. `as_global_entry()` is not
+    built: plan 10's list type does not exist yet. `Galaxy::centre()` is not built either
+    (Design note 15): 91 ms in release is some seconds in the debug profile, for every galaxy
+    every test builds; `resolve` builds the model per call and T28.b decides.
+  - _T24.a._ `CentreProfile::{new(&NuclearClusterParams, black_hole), from_params, density,
+systems_per_cubic_ly, stellar_mass_within, enclosed_mass, psi, psi_slope, psi_curvature,
+escape_speed, influence_radius, reach}`, radii as `f64` light-years from the black hole and
+    `Ψ = −Φ` in (km/s)², zero at infinity, of the black hole plus the whole, uncut law (its total
+    is `NuclearClusterParams::mass`, as the potential tables hold it). A tracer's shape is `r^−γ₀
+Π (1 + (r ÷ r_k)^α)^(−Δ_k ÷ α)`, normalised to one; the stars' is 1.3 inside 10 ly, 3.5
+    outside, α = `BREAK_SHARPNESS` = 4. The enclosed mass and the potential's outer term are
+    tabulated at 32 knots a decade over 10⁻⁷–10⁶ ly by 16-node panels, their logarithms cubic
+    Hermite in `ln r` between knots through the exact derivatives (within 10⁻⁷ of a direct
+    quadrature; a panel from the knot below instead made the three inversions take a second),
+    with power-law tails in closed form: not in closed form by pieces, which a smooth break has
+    not. The cut at 128 ly is where members end (`REACH`); the potential and the inversion use
+    the uncut law, because a sharply cut density has no non-negative distribution function
+    either.
+  - _T24.b._ `DistributionFunction::invert(&TracerProfile, &CentreProfile)`, and `invert_on`
+    with a shared `EnergyGrid`: Eddington's second-derivative form at the energies of 256 radii
+    even in `ln r` from 10⁻³ to 10⁶ ly, integrated over radius in 16-node panels to 10⁷ ly with
+    `ln r = ln r_j + t²` on the singular panel and the boundary term at 10⁷ ly. `d²n ÷ dΨ²` is in
+    closed form from the shape's slope and curvature (`TracerShape::derivatives`). f is cut to
+    zero above `E₀ = Ψ(10⁻³ ly)`, which makes the brainstorm's r^−½ core (below). f not positive
+    at any node is `BuildCentreError::NegativeDistribution(r)`. The realised density `n_f` is
+    tabulated at the grid's radii and 64 inside the core, monotone cubic Hermite (Fritsch and
+    Butland) in `ln r` and `ln f`; `density`, `density_direct`, `fraction_within`, `dispersion`,
+    `speed_moment`, `mean_over_speeds`, `speed_cdf`, `value`, `cut_energy`.
+  - _T24.c._ `DistributionFunction::draw_velocity(&CentreProfile, [f64; 3], &mut Stream) ->
+Option<[f64; 3]>`: `1 − w` from `Beta(1, γ₀ − ½)` by inverse transform restricted to energies
+    under the cut, accepted on `√w f(E) ÷ (B E^{b−1})`: the plan's `Beta(3⁄2, γ − ½)` with its
+    `w^½` moved into the acceptance, exact by the thinning theorem and with no Beta variates.
+    `B` is the tabulated running maximum of `f E^{1−b}` times the most the interpolant can
+    exceed its nodes. Words on `centre.velocity`: the direction's two, then two per attempt, at
+    most 4,096 attempts (`None` after, with a debug assertion).
+  - _T25._ `marks::{loss_cone_radius, kepler_pericentre, LossCone, OrbitMarks, mean_acceptance}`.
+    `OrbitMarks::apply(&LossCone, position, velocity, &mut Stream) -> Option<velocity>` draws its
+    two marks on `centre.marks` first, then rejects inside the loss cone (the Kepler pericentre
+    about the black hole alone), then by `exp(−k sin² i)`, then reverses a retrograde survivor's
+    velocity on the second mark. `OrbitMarks::OLD_STARS` is k = 0.84 and a reversal share of 0.8
+    (provisional, below); `OrbitMarks::YOUNG_DISC` k = 16 and 1 (ours). `LossCone::share` is a
+    fixed quadrature, one 16-node panel a decade in radius and the distribution function's panels
+    in speed; `mean_acceptance` = the inclination's `∫₀¹ e^{−k(1−μ²)} dμ` × (1 − that share).
+  - _T26._ `CentreClasses::new(&CentreProfile, &dyn MassFunction)`: `classes`, `retention`,
+    `remnants_per_primary`, `primaries_formed`, `systems`, `mean_system_mass`, `count(kind)`,
+    `on_tracer(tracer)`. Classes by band × kind (`Living`, `WhiteDwarf`, `NeutronStar`,
+    `BlackHole`) × age component (`classes::age_components()`: Schödel et al. 2020's 80% at 10–13
+    Gyr, 15% at 2.5–3.5 Gyr and 5% since 300 Myr, its part under 10 Myr, from −H, on the young
+    disc; the spans are ours), four Gauss–Legendre ages each, scaled to the cluster's mass.
+    Turn-off and kick law at `CENTRE_FE_H` = +0.3 dex (ours; Z clamps at 0.03). Retention reads
+    ruling 139.5's `tables::cluster_retention` per progenitor node, the kept share at the local
+    `√(2Ψ)` averaged over the stars' profile inside the reach, the table's 500 km/s held above
+    it (0.349 against plan 08's quadrature's 0.359 for the neutron stars; a test holds the two to
+    0.02); the low mode on its pair's σ 12 km/s (ruling 126.3). Black holes on 7⁄4 inside 5 ly and
+    3.5 outside (`black_hole_shape`), 15 M☉ each; the young disc on r⁻² inside 1.5 ly and r⁻⁵
+    outside (`young_disc_shape`, ours), no inner hole. Neutron stars lie on the stars' profile,
+    not widened (below). Binaries are not classes here (plan 11).
+  - _T27._ `centre::members::{centre_grid, CentrePlacement, CentreProposal, CentreMemberRecord,
+resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELLS,LEVELS}`.
+    `CentrePlacement::new(&CentreModel)`: `proposal`, `expected_candidates`, `candidate_count`,
+    `member_id`, `candidate`, `members_in_cell`, `peak_candidates` (the cells beside the axes; a
+    test checks a whole level), `black_hole`. A band's density is `Σ N_c n_t(r) ÷ A_t` over its
+    classes; the bound is the nearest corner's, and the eight cells with a corner at the black
+    hole propose radially under `B r^−γ` with no softening (`n_f` rises as r^−½ to the centre),
+    γ the band's steepest tracer slope and `B` from each tracer's cusp continued inward, which
+    bounds its realised density. A candidate reads `member.position` and `member.accept` (as a
+    catalogue feature's), `member.cell` for the count, then `centre.velocity`, `centre.marks`,
+    `centre.age` (uniform in its component's span) and `centre.mass` (six words an attempt, as
+    `member.mass`; a living star below the turn-off at its age, a white dwarf above it, a remnant
+    redrawn until its kind fits and its kick is below the local `√(2Ψ)`). `SystemOrigin::CentreMember
+{ attempt: u16 }`; population `NuclearDisc` (Design note 20); a centre member's layer is its
+    slot's band, the black hole's layer E. The black hole is `CentrePlacement::black_hole()` at
+    the origin, at rest, its record's primary mass the black hole's. The centre's feature-level
+    list registers no class (T30.b's victims will). `SystemContext::for_system` and the server's system cache
+    (`compute/systems.rs`) answer a centre member `KindNotGenerated`: its stars would need the
+    centre's composition, and the black hole is no star, so the centre's system stage waits.
+  - _Measured at Milky Way values (default mass function unless said), at 15._ T24.a: 6,595
+    systems per cubic light-year at 3 ly (3,859 M☉ ly⁻³ over the nuclear disc's 0.585 M☉; 8,116
+    under Kroupa's), 4.23 × 10⁷ systems (3.26 × 10⁷ inside 128 ly), 1.6 inside 10⁻³ ly, 5.29 ×
+    10⁶ M☉ of stars inside 10 ly against the black hole's 4.30 × 10⁶, influence radius 8.60 ly,
+    escape speeds 1,122 km/s at 0.1 ly and 210 at 10 ly. T24.b: the integral of f returns the
+    profile to 6.6 × 10⁻⁵ from 10⁻³ to 128 ly; slope −0.509 over 10⁻⁵–10⁻⁴ ly; σ 512.4 km/s at 0.1
+    ly (the Kepler cusp's `√(GM ÷ 2.3r)` is 511.9), log slope −0.498 over 0.01–0.3 ly and −0.445
+    over 0.3–3 ly; a 0.03 ly core is refused; 64 drawn seeds invert. T24.c: Kolmogorov–Smirnov p
+    of 0.047–0.79 at 3 × 10⁻⁴, 0.01, 0.3, 3 and 60 ly. T25: loss-cone share 2.97 × 10⁻⁵, mean
+    acceptance 0.5903 (k = 0.84), isodensity axis ratio 0.720, slit rotation 39.2 km/s. T26:
+    neutron stars 0.349 retained, black holes 0.847; 1.37 × 10⁵ black holes, 2.37 × 10⁴ inside
+    the central parsec; 1.20 × 10⁵ neutron stars, 6.8 × 10⁶ white dwarfs, 5.82 × 10⁷ systems at a
+    mean 0.425 M☉; the young disc 9.7 × 10⁴ systems, 6.9 × 10⁴ M☉; 77% of the present mass is the
+    old component. T27: the fullest cell and band expects 3,108 candidates (band A, level 9, the
+    cell beside the x axis 16 ly out; 4,255 under Kroupa's), the innermost 885 (band A, most of
+    them the young disc's); over 16 drawn seeds the fullest is 818–7,790, all under 8,192; of the
+    hundred innermost members 86 are the young disc's.
+- **Findings of T24–T27 (provisional, for a ruling; nothing built on them moves output).**
+  - _Sharp breaks have no isotropic distribution function (T24.a–b)._ Where a density turns
+    shallower inward at a sharp break, `dn ÷ dΨ` drops there and Eddington's integral takes
+    `−J ÷ √(E − Ψ_b)`, minus infinity just above the break's energy. The 10 ly break as specified
+    gives f < 0 near 9.7 ly; so does a sharp turn to r^−½ at 10⁻³ ly, and so would any sharply
+    cut density (the 128 ly truncation). As built: the 10 ly break is smooth with α = 4 (ours;
+    positive up to about α = 25; it raises the density at 3 ly by 6% over the sharp law, and plan
+    02's potential tables keep their sharp law), and the r^−½ core is f's cut at `Ψ(10⁻³ ly)`,
+    which keeps the cusp exactly outside 10⁻³ ly and turns it to r^−½ inside. A smooth r^−½ core
+    in the profile would stay positive only with a sharpness of 1 or less, spread over more than a
+    decade. The brainstorm and T24's text should say which.
+  - _7,800 at 3 ly (T24.a)._ 6,595 at 15 (−15%; Kroupa's 8,116, −10%; 6,984 at 14). The
+    brainstorm's figure is the measured 1.5 × 10⁵ M☉ pc⁻³ (4,322 M☉ ly⁻³) over the mean system
+    mass; 2.5 × 10⁷ M☉ on this law gives 3,859. Held at ±25% of the brainstorm's figures,
+    provisional.
+  - _Systems inside the reach (T24.a, for T38)._ 22% of the law's mass lies beyond 128 ly, so
+    3.26 × 10⁷ systems are inside the grid against the cluster's 4.23 × 10⁷. The budget test
+    (Design note 5) must count only what the grid holds, or the reach or the normalisation
+    changes.
+  - _The centre's own mean system mass (T26–T27)._ The class device counts primaries at their
+    own present mass, with no companions (as the clusters' device does, plan 11 adding
+    binaries): 0.425 M☉ and 5.82 × 10⁷ systems, against the nuclear disc's 0.585 M☉ (plan 02's,
+    companions included) and 4.23 × 10⁷. Every T27 count is 1.38 times what the galaxy's mean
+    would give.
+  - _The fullest cell (T27)._ 3,108 against the brainstorm's "about 1,400": the brainstorm's
+    figure is under the spherical bound, and Design note 13 divides that by the marks' mean
+    acceptance, 0.59 (×1.69), and the class device's mean mass adds ×1.38 (above). The test holds
+    1,400 ÷ 0.59 to a factor of 1.5, provisional. Over 16 seeds the fullest is 7,790 for a cluster
+    of 6.3 × 10⁷ M☉ (the draw's +0.2 dex scatter at 2.3σ): under 8,192, but 8σ over it, which
+    the plan asks for. The test asserts under 8,192 and prints the margin. Remedies for the
+    ruling: count companions in the class device (×0.73); a flattened bound, the angular factor's
+    greatest value `e^(−k/2) I₀(k/2) ÷ A` = 1.16 in place of `1 ÷ A` = 1.69 (×0.69, at the cost of
+    a Bessel function Design note 13 avoids); or, as Design note 5 says, narrow the cluster's
+    mass range in plan 02.
+  - _The innermost cell (T27)._ 885 candidates against "about eighty"; the stars' share is some
+    14 (the cusp holds some five systems in the eight cells' octant ball). Nearly all are the
+    young disc's: an r⁻² cusp (ours) under k = 16, whose inclination mark accepts 3.2%. The
+    hundred innermost members are mostly the young disc's (86). The disc's shape and k are for a
+    ruling.
+  - _Axis ratio (T25)._ With k = 0.84 the pole's density over the equator's at one radius is
+    `e^(−k/2) ÷ I₀(k/2)` = 0.63, an isodensity axis ratio of 0.70 in the 1.3 cusp (the
+    brainstorm's derivation; the sample gives 0.720). The plan's "from a sample's second moments"
+    gives 0.91 at the same k, because the flattening is the same at every radius and not a
+    homoeoid's. The test uses the isodensity ratio.
+  - _Rotation (T25)._ The brainstorm gives no reversal share. 0.8 (ours) gives 39.2 km/s in a slit
+    of ±1.4 ly over 1–4 pc, against Feldmeier et al. 2014's "amplitude of ∼40 km/s" (§4.3; their
+    faint stars reach about 50). The slit's rotation is linear in the share, 24 km/s at 0.5.
+  - _Neutron-star retention (T26)._ 0.349 at 15 (0.288 at 14) against the brainstorm's "about a
+    fifth" (to a third, 0.13–0.27): plan 06's kick law keeps every low-mode pair at these escape
+    speeds. Held at 0.30–0.40, provisional, as ruling 106.4 found for the clusters.
+  - _"Widened" neutron stars (T26)._ Not built: Design note 14 has three inversions, and a
+    retained neutron star (1.35 M☉) outweighs the mean star, so segregation would narrow it while
+    kicks widen it. They lie on the stars' profile.
+  - _The young disc (T26)._ "A young few per cent on an inner disc" is read as Schödel et al.
+    2020's few per cent formed in the last few 100 Myr, whose part under 10 Myr is the disc:
+    0.17% of the mass formed, 6.9 × 10⁴ M☉, against Lu et al. 2013's 1.4–3.7 × 10⁴ M☉ (not
+    re-checked). Its shape, k = 16 and reversal share 1 are ours; it lies in the galactic plane
+    and turns prograde, while the Milky Way's clockwise disc is steeply inclined to it.
+  - _Retention above 500 km/s (T26)._ Ruling 139.5's table ends at 500 km/s; the centre's escape
+    speed passes it inside about 1 ly, and the table's value is held there (−0.01 on the neutron
+    stars' share). A table to 1,500 km/s would remove it.
+  - _For T28 and later:_ `Galaxy` building `CentreModel` (91 ms, Design note 15), or a cache that
+    `resolve` and T29's source share; `as_global_entry()` once plan 10's list exists; T29's
+    `CentreMemberSource` reads `CentrePlacement`; T30.b registers the victims on the centre's
+    list; young-disc members of negative age are placed and must be dropped at the query.

@@ -96,6 +96,12 @@ pub enum SystemOrigin {
         /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
         attempt: u16,
     },
+    /// A member of the galactic centre (plan 09, P09.T27), or its black hole, member zero: its ID
+    /// says where it sits, and the attempt is its primary's redraw, as a feature member's.
+    CentreMember {
+        /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
+        attempt: u16,
+    },
 }
 
 /// What a system is, as its layer says (plan 13, Design note 10): a star system, a free-floating
@@ -187,6 +193,10 @@ impl SystemRecord {
                     if PackedFeature::from(member.feature()) == feature),
                 "a feature member's record needs its feature's member ID, got {id:?}"
             ),
+            SystemOrigin::CentreMember { .. } => assert!(
+                matches!(id.kind(), SystemIdKind::Centre(_)),
+                "a centre member's record needs a centre member ID, got {id:?}"
+            ),
         }
         Self {
             id,
@@ -234,6 +244,18 @@ impl SystemRecord {
                     }
                 }
             }
+            // The centre's black hole, at feature level, counts in layer E (plan 09, P09.T27).
+            SystemOrigin::CentreMember { .. } => {
+                let SystemIdKind::Centre(member) = self.id.kind() else {
+                    unreachable!("a centre member's record is built with a centre member ID")
+                };
+                match member.slot() {
+                    MemberSlot::InCell { band, .. } => band,
+                    MemberSlot::FeatureLevel { .. } => {
+                        super::layer_for_initial_mass(self.primary_initial_mass).unwrap_or(Layer::E)
+                    }
+                }
+            }
         }
     }
 
@@ -266,7 +288,7 @@ impl SystemRecord {
     pub fn component(&self) -> Option<ComponentId> {
         match self.origin {
             SystemOrigin::Grid(component) => Some(component),
-            SystemOrigin::FeatureMember { .. } => None,
+            SystemOrigin::FeatureMember { .. } | SystemOrigin::CentreMember { .. } => None,
         }
     }
 

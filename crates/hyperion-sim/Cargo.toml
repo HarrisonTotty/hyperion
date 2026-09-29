@@ -67,5 +67,9 @@ harness = false
 name = "substellar"
 harness = false
 
+[[bench]]
+name = "centre"
+harness = false
+
 [lints]
 workspace = true

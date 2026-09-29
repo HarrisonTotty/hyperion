@@ -17,6 +17,7 @@ use super::{
     CandidateOutcome, CellKey, ResolveSystemError, SystemRecord, evaluate_candidate_from_bound,
 };
 use crate::galaxy::Galaxy;
+use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::id::{SystemId, SystemIdKind};
 
@@ -29,10 +30,11 @@ use crate::id::{SystemId, SystemIdKind};
 ///
 /// # Errors
 ///
-/// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — the
-///   galactic centre, a stream, a dwarf core, pinned content or a catalogue system — until plans
-///   09 and 10 generate them. A catalogue feature's member resolves through plan 09's
-///   [`resolve_member`] (P09.T21).
+/// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — a
+///   stream, a dwarf core, pinned content or a catalogue system — until plans 09 and 10 generate
+///   them. A catalogue feature's member resolves through plan 09's [`resolve_member`] (P09.T21),
+///   and the galactic centre's through [`resolve_centre_member`] (P09.T27), which builds the
+///   centre's model.
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
 ///   class claimed it; for a feature member, if [`resolve_member`] finds none.
@@ -71,8 +73,9 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
         SystemIdKind::FeatureMember(member) => {
             resolve_member(galaxy, &NoInteriorCache, member).map(|m| *m.record())
         }
-        SystemIdKind::Centre(_)
-        | SystemIdKind::Stream(_)
+        // The galactic centre's members and its black hole (plan 09, P09.T27).
+        SystemIdKind::Centre(member) => resolve_centre_member(galaxy, member).map(|m| *m.record()),
+        SystemIdKind::Stream(_)
         | SystemIdKind::DwarfCore(_)
         | SystemIdKind::Pinned(_)
         | SystemIdKind::Catalogue(_) => Err(ResolveSystemError::KindNotGenerated),
@@ -237,11 +240,11 @@ mod tests {
                 }
             }
         }
+        // The galactic centre's black hole resolves since P09.T27.
         let black_hole = SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE);
         assert_eq!(black_hole.raw(), 0xf000_0007_0000_0000);
-        assert_eq!(
-            resolve(&galaxy, black_hole),
-            Err(ResolveSystemError::KindNotGenerated)
-        );
+        let record = resolve(&galaxy, black_hole).unwrap();
+        assert_eq!(record.id(), black_hole);
+        assert_eq!(record.layer(), Layer::E);
     }
 }

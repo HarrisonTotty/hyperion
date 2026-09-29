@@ -1,0 +1,786 @@
+//! The isotropic distribution function of a tracer in the centre's potential, by Eddington
+//! inversion, and the density that is its integral (plan 09, P09.T24.b and T24.c).
+//!
+//! # The inversion
+//!
+//! For a tracer of density `n(r)` in the relative potential `Ψ(r)` of the black hole and the
+//! cluster ([`CentreProfile::psi`]), Eddington's formula (Binney and Tremaine 2008, eq. 4.46b) is
+//!
+//! `f(E) = (1 ÷ √8π²) [∫₀^E (d²n ÷ dΨ²) dΨ ÷ √(E − Ψ) + (dn ÷ dΨ)₀ ÷ √E]`.
+//!
+//! It is taken at the energies `E_j = Ψ(r_j)` of [`RADII`] = 256 radii even in `ln r` from
+//! [`CORE_RADIUS`] (10⁻³ ly) to 10⁶ ly. `d²n ÷ dΨ²` is in closed form from the shape's slope and
+//! curvature and the potential's first two derivatives, and the integral is taken over radius,
+//! `∫_{r_j}^∞ … |dΨ ÷ d ln r| d ln r ÷ √(E_j − Ψ)`, in 16-node Gauss–Legendre panels between the
+//! grid's radii out to 10⁷ ly. On the first panel, where `√(E_j − Ψ)` vanishes, `ln r = ln r_j +
+//! t²` removes the singularity (the substitution of eq. 4.46's derivation), and beyond 10⁷ ly the
+//! boundary term is taken there. f must be positive at every node: a profile that no isotropic
+//! cluster can have is a [`BuildCentreError::NegativeDistribution`], not a panic.
+//!
+//! # The cut and the density
+//!
+//! f is zero above `E₀ = Ψ(10⁻³ ly)` (the profile module's documentation): no orbit is bound more
+//! tightly than a circular one at the core radius. Outside that radius the cut changes nothing,
+//! and inside it the density falls as `Ψ^½ ∝ r^−½`. **The density used everywhere from here on is
+//! the integral of f**, `n_f(r) = 4π ∫₀^{min(Ψ, E₀)} f(E) √(2(Ψ − E)) dE`, tabulated at the grid's
+//! radii and 64 more inside the core, so positions and velocities agree by construction. Between
+//! nodes `ln f` and `ln n_f` are monotone cubic Hermite interpolants (Fritsch and Butland's
+//! slopes) in `ln E` and `ln r`.
+//!
+//! # The velocity sampler (P09.T24.c)
+//!
+//! At radius r the speed has the density `v² f(Ψ − v² ÷ 2)`. In `w = v² ÷ v_esc²` that is `w^½
+//! f(Ψ(1 − w))`, which about a point mass with a cusp of slope γ is exactly `Beta(3⁄2, γ − ½)`. The
+//! sampler proposes `1 − w` from `Beta(1, b)`, `b = γ₀ − ½`, by inverse transform restricted to the
+//! energies below `E₀`, and accepts on one mark against `√w f(E) ÷ (B E^{b−1})`, with `B` the
+//! greatest `f E^{1−b}` at the energies the radius reaches (tabulated, times the most the
+//! interpolant can exceed its nodes). That is the plan's Beta proposal with its `w^½` moved into
+//! the acceptance, which is exact by the same thinning theorem and needs no Beta variates. The
+//! direction is isotropic. Words: the direction's two, then two per attempt (the proposal's
+//! uniform and the mark), at most [`MAX_ATTEMPTS`] attempts.
+
+use crate::math;
+use crate::rng::{Stream, Threshold};
+use crate::stellar::draws::isotropic;
+use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
+
+use super::profile::{BuildCentreError, CORE_RADIUS, CentreProfile, TracerProfile};
+
+/// The radii of the energy grid, from the core radius to 10⁶ ly (P09.T24.b).
+pub const RADII: usize = 256;
+
+/// Radii of the density table inside the core radius, at the grid's spacing: to about 5.5 × 10⁻⁶
+/// ly.
+const INNER_RADII: usize = 64;
+
+/// The grid's outermost radius, ly, where f's table ends.
+const TABLE_OUTER: f64 = 1e6;
+
+/// Integration continues to about 10⁷ ly, this many panels past the table.
+const EXTRA_PANELS: usize = 29;
+
+/// The most attempts the velocity sampler makes before it gives up.
+pub const MAX_ATTEMPTS: u32 = 4_096;
+
+/// `1 ÷ (√8 π²)`.
+fn eddington_factor() -> f64 {
+    1.0 / (8.0_f64.sqrt() * core::f64::consts::PI * core::f64::consts::PI)
+}
+
+/// A monotone cubic Hermite interpolant through increasing `x` (Fritsch and Butland's slopes),
+/// linear beyond the ends.
+#[derive(Debug, Clone, PartialEq)]
+struct Hermite {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    d: Vec<f64>,
+}
+
+impl Hermite {
+    fn new(x: Vec<f64>, y: Vec<f64>) -> Self {
+        let n = x.len();
+        let secant: Vec<f64> = (0..n - 1)
+            .map(|k| (y[k + 1] - y[k]) / (x[k + 1] - x[k]))
+            .collect();
+        let mut d = vec![0.0; n];
+        d[0] = secant[0];
+        d[n - 1] = secant[n - 2];
+        for k in 1..n - 1 {
+            let (s0, s1) = (secant[k - 1], secant[k]);
+            if s0 * s1 > 0.0 {
+                let (h0, h1) = (x[k] - x[k - 1], x[k + 1] - x[k]);
+                d[k] = 3.0 * (h0 + h1) / ((2.0 * h1 + h0) / s0 + (h1 + 2.0 * h0) / s1);
+            }
+        }
+        Self { x, y, d }
+    }
+
+    /// The interval `k` with `x[k] ≤ t ≤ x[k + 1]`, clamped to the ends, by bisection.
+    fn interval(&self, t: f64) -> usize {
+        let (mut lo, mut hi) = (0, self.x.len() - 1);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if self.x[mid] <= t {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the Hermite basis in its usual symbols"
+    )]
+    fn eval(&self, t: f64) -> f64 {
+        let n = self.x.len();
+        if t <= self.x[0] {
+            return self.y[0] + self.d[0] * (t - self.x[0]);
+        }
+        if t >= self.x[n - 1] {
+            return self.y[n - 1] + self.d[n - 1] * (t - self.x[n - 1]);
+        }
+        let k = self.interval(t);
+        let h = self.x[k + 1] - self.x[k];
+        let s = (t - self.x[k]) / h;
+        let (s2, s3) = (s * s, s * s * s);
+        (2.0 * s3 - 3.0 * s2 + 1.0) * self.y[k]
+            + (s3 - 2.0 * s2 + s) * h * self.d[k]
+            + (-2.0 * s3 + 3.0 * s2) * self.y[k + 1]
+            + (s3 - s2) * h * self.d[k + 1]
+    }
+}
+
+/// One quadrature node of the energy grid: its radius, `Ψ`, `dΨ ÷ dr`, `d²Ψ ÷ dr²` and its
+/// weight for `d ln r` (or, on a singular panel, for `dt`, the substitution's `2t` included).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Node {
+    r: f64,
+    psi: f64,
+    slope: f64,
+    curvature: f64,
+    weight: f64,
+}
+
+impl Node {
+    fn at(profile: &CentreProfile, r: f64, weight: f64) -> Self {
+        Self {
+            r,
+            psi: profile.psi(r),
+            slope: profile.psi_slope(r),
+            curvature: profile.psi_curvature(r),
+            weight,
+        }
+    }
+
+    /// `d²n ÷ dΨ² × |dΨ ÷ d ln r|` for `tracer` here: the integrand of Eddington's formula over
+    /// `ln r`, from the shape's slope and curvature and the potential's two derivatives.
+    fn integrand(&self, tracer: &TracerProfile) -> f64 {
+        let r = self.r;
+        let (s, ls, curv) = tracer.shape().derivatives(r);
+        let n = s / tracer.shape_total();
+        let d1 = n * ls / r;
+        let d2 = n * (ls * ls - ls + curv) / (r * r);
+        let (p1, p2) = (self.slope, self.curvature);
+        let f2 = (d2 * p1 - d1 * p2) / (p1 * p1 * p1);
+        f2 * (-p1 * r)
+    }
+}
+
+/// The radii, energies and quadrature nodes of the inversion, which depend on the potential
+/// alone: the three tracers of Design note 14 share one (module documentation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyGrid {
+    radii: Vec<f64>,
+    psi: Vec<f64>,
+    step: f64,
+    /// The regular panels between consecutive radii.
+    regular: Vec<[Node; 16]>,
+    /// The singular first panel above each of the first [`RADII`] radii.
+    singular: Vec<[Node; 16]>,
+    /// The outermost radius, its `Ψ` and its `dΨ ÷ dr`, for the boundary term.
+    outer: (f64, f64, f64),
+}
+
+impl EnergyGrid {
+    /// The grid of `profile`'s potential.
+    #[must_use]
+    pub fn new(profile: &CentreProfile) -> Self {
+        let total = RADII + EXTRA_PANELS;
+        #[expect(clippy::cast_precision_loss, reason = "255 is exact")]
+        let step = math::ln(TABLE_OUTER / CORE_RADIUS.value()) / (RADII - 1) as f64;
+        let ln_r0 = math::ln(CORE_RADIUS.value());
+        #[expect(clippy::cast_precision_loss, reason = "indices below 400 are exact")]
+        let radii: Vec<f64> = (0..total)
+            .map(|j| math::exp(ln_r0 + step * j as f64))
+            .collect();
+        let psi: Vec<f64> = radii.iter().map(|&r| profile.psi(r)).collect();
+        let half = 0.5 * step;
+        let regular = (0..total - 1)
+            .map(|j| {
+                let mid = math::ln(radii[j]) + half;
+                std::array::from_fn(|n| {
+                    Node::at(
+                        profile,
+                        math::exp(mid + half * GL16_NODES[n]),
+                        GL16_WEIGHTS[n] * half,
+                    )
+                })
+            })
+            .collect();
+        // ln r = ln r_j + t², t on [0, √Δ].
+        let th = 0.5 * step.sqrt();
+        let singular = (0..RADII)
+            .map(|j| {
+                std::array::from_fn(|n| {
+                    let t = th + th * GL16_NODES[n];
+                    Node::at(
+                        profile,
+                        radii[j] * math::exp(t * t),
+                        GL16_WEIGHTS[n] * th * 2.0 * t,
+                    )
+                })
+            })
+            .collect();
+        let r_out = radii[total - 1];
+        Self {
+            outer: (r_out, psi[total - 1], profile.psi_slope(r_out)),
+            radii,
+            psi,
+            step,
+            regular,
+            singular,
+        }
+    }
+}
+
+/// The isotropic distribution function of one tracer in the centre's potential, with the density
+/// that is its integral (module documentation).
+///
+/// f is per cubic light-year per (km/s)³ for a tracer of total one: a member's phase-space
+/// density.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::features::centre::{CentreProfile, DistributionFunction};
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+///
+/// let profile = CentreProfile::from_params(&GalaxyParams::milky_way_like())?;
+/// let df = DistributionFunction::invert(profile.stars(), &profile)?;
+/// // Outside the core the density is the profile's.
+/// let (n, want) = (df.density(3.0), profile.stars().density(3.0));
+/// assert!((n / want - 1.0).abs() < 1e-3);
+/// // Near the black hole the stars move at some 500 km/s along each axis.
+/// let sigma = df.dispersion(&profile, 0.1);
+/// assert!((450.0..560.0).contains(&sigma), "{sigma}");
+/// # Ok::<(), hyperion_sim::galaxy::features::centre::BuildCentreError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct DistributionFunction {
+    /// `E_j`, falling with j, (km/s)².
+    energies: Vec<f64>,
+    /// `f_j`, positive.
+    values: Vec<f64>,
+    /// `ln f` against `ln E`, increasing in `ln E`.
+    log_f: Hermite,
+    /// Per energy panel `q` (between `E_{q+1}` and `E_q`), its 16 nodes' energies and weights for
+    /// `dE`, and f there.
+    panel_energy: Vec<[f64; 16]>,
+    panel_weight: Vec<[f64; 16]>,
+    panel_f: Vec<[f64; 16]>,
+    /// `ln n_f` against `ln r`.
+    log_density: Hermite,
+    /// The innermost tabulated radius and its density, for the `r^−½` below.
+    inner: (f64, f64),
+    /// The share of the realised density inside each tabulated radius.
+    cumulative: Hermite,
+    /// The sampler's exponent `b = γ₀ − ½` (1 for a tracer at or below ½).
+    beta: f64,
+    /// The running greatest `f E^{1−b}` from the lowest energy up, and the interpolant's slack.
+    bound: Vec<f64>,
+    slack: f64,
+}
+
+impl DistributionFunction {
+    /// The distribution function of `tracer` in `profile`'s potential (module documentation).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCentreError::NegativeDistribution`] with the radius whose energy it fails at, if f
+    /// is not positive at every node: no isotropic cluster has `tracer`'s profile.
+    pub fn invert(
+        tracer: &TracerProfile,
+        profile: &CentreProfile,
+    ) -> Result<Self, BuildCentreError> {
+        Self::invert_on(&EnergyGrid::new(profile), tracer, profile)
+    }
+
+    /// [`invert`](Self::invert) on a grid already built for `profile`'s potential.
+    ///
+    /// # Errors
+    ///
+    /// As [`invert`](Self::invert).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the inversion, the energy panels and the density table in the documented order"
+    )]
+    pub fn invert_on(
+        grid: &EnergyGrid,
+        tracer: &TracerProfile,
+        profile: &CentreProfile,
+    ) -> Result<Self, BuildCentreError> {
+        let (radii, psi, step) = (&grid.radii, &grid.psi, grid.step);
+        let ln_r0 = math::ln(CORE_RADIUS.value());
+        let regular: Vec<[(f64, f64); 16]> = grid
+            .regular
+            .iter()
+            .map(|panel| panel.map(|n| (n.psi, n.weight * n.integrand(tracer))))
+            .collect();
+        let (outer_r, outer_psi, outer_p1) = grid.outer;
+        let outer_slope = {
+            let n = tracer.density(outer_r);
+            let d1 = n * tracer.shape().log_slope(outer_r) / outer_r;
+            d1 / outer_p1
+        };
+        let mut values = Vec::with_capacity(RADII);
+        for j in 0..RADII {
+            let e = psi[j];
+            let mut sum = 0.0;
+            for node in &grid.singular[j] {
+                sum += node.weight * node.integrand(tracer) / (e - node.psi).sqrt();
+            }
+            for panel in &regular[j + 1..] {
+                for &(p, w) in panel {
+                    sum += w / (e - p).sqrt();
+                }
+            }
+            sum += outer_slope / (e - outer_psi).sqrt();
+            let f = eddington_factor() * sum;
+            if !(f > 0.0 && f.is_finite()) {
+                return Err(BuildCentreError::NegativeDistribution(radii[j]));
+            }
+            values.push(f);
+        }
+        let energies: Vec<f64> = psi[..RADII].to_vec();
+        let log_f = Hermite::new(
+            energies.iter().rev().map(|&e| math::ln(e)).collect(),
+            values.iter().rev().map(|&f| math::ln(f)).collect(),
+        );
+        let f_at = |e: f64| math::exp(log_f.eval(math::ln(e)));
+
+        // Energy panels q = 0..254, between E_{q+1} and E_q, 16 nodes in ln E each.
+        let mut panel_energy = Vec::with_capacity(RADII - 1);
+        let mut panel_weight = Vec::with_capacity(RADII - 1);
+        let mut panel_f = Vec::with_capacity(RADII - 1);
+        for q in 0..RADII - 1 {
+            let (a, b) = (math::ln(energies[q + 1]), math::ln(energies[q]));
+            let h = 0.5 * (b - a);
+            let es: [f64; 16] = std::array::from_fn(|n| math::exp(a + h + h * GL16_NODES[n]));
+            panel_weight.push(std::array::from_fn(|n| GL16_WEIGHTS[n] * h * es[n]));
+            panel_f.push(es.map(f_at));
+            panel_energy.push(es);
+        }
+
+        let beta = if tracer.shape().inner_slope() > 0.5 {
+            tracer.shape().inner_slope() - 0.5
+        } else {
+            1.0
+        };
+        let mut df = Self {
+            energies,
+            values,
+            log_f,
+            panel_energy,
+            panel_weight,
+            panel_f,
+            log_density: Hermite::new(vec![0.0, 1.0], vec![0.0, 0.0]),
+            inner: (1.0, 1.0),
+            cumulative: Hermite::new(vec![0.0, 1.0], vec![0.0, 0.0]),
+            beta,
+            bound: Vec::new(),
+            slack: 1.0,
+        };
+
+        // The density table, from 64 radii inside the core to the grid's last radius but one (at
+        // the last, the integral has no energies left).
+        #[expect(clippy::cast_precision_loss, reason = "indices below 400 are exact")]
+        let table_r: Vec<f64> = (0..INNER_RADII + RADII - 1)
+            .map(|i| math::exp(ln_r0 + step * (i as f64 - INNER_RADII as f64)))
+            .collect();
+        let table_n: Vec<f64> = table_r
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| {
+                let psi_r = if i >= INNER_RADII {
+                    df.energies[i - INNER_RADII]
+                } else {
+                    profile.psi(r)
+                };
+                df.speed_integral(psi_r, |_| 1.0)
+            })
+            .collect();
+        df.inner = (table_r[0], table_n[0]);
+        df.log_density = Hermite::new(
+            table_r.iter().map(|&r| math::ln(r)).collect(),
+            table_n.iter().map(|&n| math::ln(n)).collect(),
+        );
+        // The realised share inside each radius: the r^−½ core below the table, then panels.
+        let four_pi = 4.0 * core::f64::consts::PI;
+        let mut within = Vec::with_capacity(table_r.len());
+        within.push(four_pi * table_r[0] * table_r[0] * table_r[0] * table_n[0] / 2.5);
+        for i in 1..table_r.len() {
+            let (a, b) = (math::ln(table_r[i - 1]), math::ln(table_r[i]));
+            let h = 0.5 * (b - a);
+            let mut piece = 0.0;
+            for n in 0..16 {
+                let r = math::exp(a + h + h * GL16_NODES[n]);
+                piece += GL16_WEIGHTS[n] * h * four_pi * r * r * r * df.density(r);
+            }
+            within.push(within[i - 1] + piece);
+        }
+        df.cumulative = Hermite::new(table_r.iter().map(|&r| math::ln(r)).collect(), within);
+
+        // The sampler's bound.
+        let exponent = 1.0 - beta;
+        let mut bound = vec![0.0; RADII];
+        let mut best = 0.0_f64;
+        for j in (0..RADII).rev() {
+            best = best.max(df.values[j] * math::powf(df.energies[j], exponent));
+            bound[j] = best;
+        }
+        let widest = (0..RADII - 1)
+            .map(|q| math::ln(df.energies[q] / df.energies[q + 1]))
+            .fold(0.0_f64, f64::max);
+        df.bound = bound;
+        df.slack = math::exp(exponent.abs() * widest) * (1.0 + 1e-9);
+        Ok(df)
+    }
+
+    /// The energies of the grid, (km/s)², falling: `E_j = Ψ(r_j)`.
+    #[must_use]
+    pub fn energies(&self) -> &[f64] {
+        &self.energies
+    }
+
+    /// f at the grid's energies.
+    #[must_use]
+    pub fn values(&self) -> &[f64] {
+        &self.values
+    }
+
+    /// The cut `E₀ = Ψ(10⁻³ ly)`, the most bound energy with members, (km/s)².
+    #[must_use]
+    pub fn cut_energy(&self) -> f64 {
+        self.energies[0]
+    }
+
+    /// f at energy `e`, (km/s)²: zero above the cut and below the grid's least energy.
+    #[must_use]
+    pub fn value(&self, e: f64) -> f64 {
+        if e.is_nan() || e <= 0.0 || e > self.energies[0] || e < self.energies[RADII - 1] {
+            return 0.0;
+        }
+        math::exp(self.log_f.eval(math::ln(e)))
+    }
+
+    /// `4π ∫ v² f(Ψ − v² ÷ 2) g(v) dv` at relative potential `psi_r`: as an integral over energy,
+    /// `4π ∫₀^{min(Ψ, E₀)} f(E) v g(v) dE` with `v = √(2(Ψ − E))`.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "energy, speed and the panel's symbols as in the module documentation"
+    )]
+    fn speed_integral(&self, psi_r: f64, g: impl Fn(f64) -> f64) -> f64 {
+        let top = psi_r.min(self.energies[0]);
+        if top.is_nan() || top <= self.energies[RADII - 1] {
+            return 0.0;
+        }
+        // The panel p with E_{p+1} < top ≤ E_p.
+        let (mut lo, mut hi) = (0, RADII - 1);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if self.energies[mid] >= top {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let p = lo;
+        let mut sum = 0.0;
+        // The partial top panel, E = top − D t², t on [0, 1].
+        let d = top - self.energies[p + 1];
+        for n in 0..16 {
+            let t = 0.5 + 0.5 * GL16_NODES[n];
+            let e = top - d * t * t;
+            let v = (2.0 * (psi_r - e)).max(0.0).sqrt();
+            sum += GL16_WEIGHTS[n] * 0.5 * self.value(e) * v * g(v) * 2.0 * d * t;
+        }
+        for q in p + 1..RADII - 1 {
+            for n in 0..16 {
+                let v = (2.0 * (psi_r - self.panel_energy[q][n])).sqrt();
+                sum += self.panel_weight[q][n] * self.panel_f[q][n] * v * g(v);
+            }
+        }
+        4.0 * core::f64::consts::PI * sum
+    }
+
+    /// The realised density at `r` ly, the integral of f (per cubic light-year for a total of
+    /// one), from its table: `r^−½` inside the table's innermost radius.
+    #[must_use]
+    pub fn density(&self, r: f64) -> f64 {
+        let (r0, n0) = self.inner;
+        if r < r0 {
+            return n0 * (r0 / r).sqrt();
+        }
+        math::exp(self.log_density.eval(math::ln(r)))
+    }
+
+    /// The realised density at `r` ly, integrated afresh rather than read from its table.
+    #[must_use]
+    pub fn density_direct(&self, profile: &CentreProfile, r: f64) -> f64 {
+        self.speed_integral(profile.psi(r), |_| 1.0)
+    }
+
+    /// The share of the realised density inside `r` ly.
+    #[must_use]
+    pub fn fraction_within(&self, r: f64) -> f64 {
+        let (r0, n0) = self.inner;
+        if r <= 0.0 {
+            return 0.0;
+        }
+        if r < r0 {
+            return 4.0 * core::f64::consts::PI * r * r * r * n0 * (r0 / r).sqrt() / 2.5;
+        }
+        self.cumulative.eval(math::ln(r))
+    }
+
+    /// The one-dimensional velocity dispersion at `r` ly, km/s: `√(⟨v²⟩ ÷ 3)`.
+    #[must_use]
+    pub fn dispersion(&self, profile: &CentreProfile, r: f64) -> f64 {
+        let psi = profile.psi(r);
+        let n = self.speed_integral(psi, |_| 1.0);
+        let v2 = self.speed_integral(psi, |v| v * v);
+        (v2 / (3.0 * n)).sqrt()
+    }
+
+    /// `4π ∫ v² f g(v) dv` at `r` ly, per cubic light-year for a tracer of total one: the
+    /// density of the members there weighted by `g` of their speed.
+    #[must_use]
+    pub fn speed_moment(&self, profile: &CentreProfile, r: f64, g: impl Fn(f64) -> f64) -> f64 {
+        self.speed_integral(profile.psi(r), g)
+    }
+
+    /// `4π ∫ v² f g(v) dv ÷ n_f` at `r` ly: the mean of `g` over the speeds there.
+    #[must_use]
+    pub fn mean_over_speeds(&self, profile: &CentreProfile, r: f64, g: impl Fn(f64) -> f64) -> f64 {
+        let psi = profile.psi(r);
+        let n = self.speed_integral(psi, |_| 1.0);
+        if n > 0.0 {
+            self.speed_integral(psi, g) / n
+        } else {
+            0.0
+        }
+    }
+
+    /// The share of speeds at `r` ly below `v`: what the Kolmogorov–Smirnov tests compare with.
+    #[must_use]
+    pub fn speed_cdf(&self, profile: &CentreProfile, r: f64, v: f64) -> f64 {
+        self.mean_over_speeds(profile, r, |u| if u < v { 1.0 } else { 0.0 })
+    }
+
+    /// A velocity at `position` (ly from the black hole, galactic axes) from the next words of
+    /// `stream`, km/s (module documentation), or `None` if the position lies beyond the grid's
+    /// 10⁶ ly or if [`MAX_ATTEMPTS`] attempts all fail.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if the attempts all fail, which a bound that holds makes vanishingly
+    /// unlikely at any radius inside the reach.
+    ///
+    /// The speed never exceeds the escape speed `√(2Ψ)`.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the sampler's symbols as in the module documentation"
+    )]
+    pub fn draw_velocity(
+        &self,
+        profile: &CentreProfile,
+        position: [f64; 3],
+        stream: &mut Stream,
+    ) -> Option<[f64; 3]> {
+        let direction = isotropic(stream).components();
+        let r = (position[0] * position[0] + position[1] * position[1] + position[2] * position[2])
+            .sqrt();
+        let psi = profile.psi(r);
+        let top = psi.min(self.energies[0]);
+        if top.is_nan() || top <= self.energies[RADII - 1] {
+            return None;
+        }
+        // The bound at the energies up to `top`.
+        let (mut lo, mut hi) = (0, RADII - 1);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if self.energies[mid] >= top {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let bound = self.bound[lo] * self.slack;
+        // 1 − w on (0, top ÷ Ψ]: u^{1/b} × (top ÷ Ψ).
+        let span = top / psi;
+        let exponent = self.beta - 1.0;
+        for _ in 0..MAX_ATTEMPTS {
+            let u = stream.uniform_open();
+            let mark = stream.mark();
+            let one_less_w = math::powf(u, 1.0 / self.beta) * span;
+            let w = 1.0 - one_less_w;
+            let e = psi * one_less_w;
+            let value = w.max(0.0).sqrt() * self.value(e) / math::powf(e, exponent);
+            if mark.is_below(Threshold::from_ratio(value, bound)) {
+                let v = (2.0 * psi * w).sqrt();
+                return Some(direction.map(|c| c * v));
+            }
+        }
+        debug_assert!(false, "{MAX_ATTEMPTS} velocity attempts failed at {r} ly");
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Seed;
+    use crate::galaxy::features::centre::profile::{SlopeBreak, TracerShape};
+    use crate::galaxy::params::GalaxyParams;
+    use crate::rng::{ObjectKey, tags};
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
+
+    fn fixture() -> (CentreProfile, DistributionFunction) {
+        let profile = CentreProfile::from_params(&GalaxyParams::milky_way_like()).unwrap();
+        let df = DistributionFunction::invert(profile.stars(), &profile).unwrap();
+        (profile, df)
+    }
+
+    /// P09.T24.b: the integral of f returns the profile to 10⁻⁴ from the core radius to the reach.
+    #[test]
+    fn the_integral_of_f_returns_the_profile() {
+        let (profile, df) = fixture();
+        let mut worst = (0.0_f64, 0.0);
+        for i in 0..160 {
+            let r = CORE_RADIUS.value() * math::exp(f64::from(i) * 0.074);
+            if r > 128.0 {
+                break;
+            }
+            let want = profile.stars().density(r);
+            let direct = df.density_direct(&profile, r);
+            let table = df.density(r);
+            let err = (direct / want - 1.0).abs().max((table / want - 1.0).abs());
+            if err > worst.0 {
+                worst = (err, r);
+            }
+        }
+        eprintln!("worst relative error {:.3e} at {:.4} ly", worst.0, worst.1);
+        assert!(worst.0 < 1e-4, "{worst:?}");
+    }
+
+    /// Inside the core the density falls as r^−½, and fewer than three of the Milky Way's systems
+    /// lie there.
+    #[test]
+    fn the_core_falls_as_the_inverse_square_root() {
+        let (_, df) = fixture();
+        let (a, b) = (1e-5, 1e-4);
+        let slope = math::ln(df.density(b) / df.density(a)) / math::ln(b / a);
+        assert!((slope + 0.5).abs() < 0.03, "{slope}");
+        let systems = 2.5e7 / 0.56 * df.fraction_within(CORE_RADIUS.value());
+        assert!(systems < 3.0, "{systems}");
+        let (profile, _) = fixture();
+        let (got, want) = (
+            df.fraction_within(128.0),
+            profile.stars().fraction_within(128.0),
+        );
+        assert!((got / want - 1.0).abs() < 1e-4, "{got} {want}");
+    }
+
+    /// P09.T24.b: a profile with a 0.03 ly core has no isotropic distribution function.
+    #[test]
+    fn a_cored_profile_is_rejected() {
+        let profile = CentreProfile::from_params(&GalaxyParams::milky_way_like()).unwrap();
+        let cored = TracerProfile::new(
+            TracerShape::new(
+                0.0,
+                [
+                    SlopeBreak {
+                        radius: 0.03,
+                        sharpness: 2.0,
+                        rise: 1.3,
+                    },
+                    SlopeBreak {
+                        radius: 10.0,
+                        sharpness: 4.0,
+                        rise: 2.2,
+                    },
+                ],
+            )
+            .unwrap(),
+        );
+        match DistributionFunction::invert(&cored, &profile) {
+            Err(BuildCentreError::NegativeDistribution(r)) => {
+                eprintln!("negative at {r} ly");
+                assert!(r < 0.1, "{r}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// P09.T24.b: 500 km/s (±10%) at 0.1 ly, rising as r^−½ inside 3 ly (Kepler about the black
+    /// hole: `σ² = G M ÷ ((1 + γ) r)` for a cusp of slope γ).
+    #[test]
+    fn the_dispersion_is_keplerian_near_the_black_hole() {
+        let (profile, df) = fixture();
+        let at = |r: f64| df.dispersion(&profile, r);
+        let s01 = at(0.1);
+        let slope_in = math::ln(at(0.3) / at(0.01)) / math::ln(30.0);
+        let slope_out = math::ln(at(3.0) / at(0.3)) / math::ln(10.0);
+        let kepler = (crate::galaxy::consts::G * profile.black_hole().value() / (2.3 * 0.1)).sqrt();
+        eprintln!(
+            "σ(0.1 ly) {s01:.1} km/s (Kepler cusp {kepler:.1}); slopes {slope_in:.4} over \
+             0.01–0.3 ly, {slope_out:.4} over 0.3–3 ly; σ(1) {:.1}, σ(3) {:.1}, σ(10) {:.1}",
+            at(1.0),
+            at(3.0),
+            at(10.0)
+        );
+        assert!((450.0..=550.0).contains(&s01), "{s01}");
+        assert!((slope_in + 0.5).abs() < 0.03, "{slope_in}");
+        assert!((-0.5..-0.35).contains(&slope_out), "{slope_out}");
+    }
+
+    /// P09.T24.c: speeds at five radii against the numerical density in v (Kolmogorov–Smirnov),
+    /// none above escape.
+    #[test]
+    fn sampled_speeds_follow_the_distribution_function() {
+        let (profile, df) = fixture();
+        for (k, r) in [3e-4, 0.01, 0.3, 3.0, 60.0].into_iter().enumerate() {
+            let v_esc = profile.escape_speed(r).value();
+            let mut speeds = Vec::with_capacity(4_000);
+            for n in 0..4_000_u64 {
+                let key = ObjectKey::cell((u64::try_from(k).unwrap() << 32) | n);
+                let mut stream = Stream::open(Seed::new(0x0924), tags::SELFTEST_STREAM, key);
+                let v = df
+                    .draw_velocity(&profile, [0.0, r, 0.0], &mut stream)
+                    .unwrap();
+                let s = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                assert!(s <= v_esc * (1.0 + 1e-12), "{s} above {v_esc} at {r}");
+                speeds.push(s);
+            }
+            // The CDF on a table of 256 speeds, linear between.
+            let grid: Vec<(f64, f64)> = (0..=256)
+                .map(|i| {
+                    let v = v_esc * f64::from(i) / 256.0;
+                    (v, df.speed_cdf(&profile, r, v))
+                })
+                .collect();
+            let cdf = |v: f64| {
+                let i = grid
+                    .partition_point(|&(x, _)| x <= v)
+                    .clamp(1, grid.len() - 1);
+                let ((x0, c0), (x1, c1)) = (grid[i - 1], grid[i]);
+                (c0 + (c1 - c0) * (v - x0) / (x1 - x0)).clamp(0.0, 1.0)
+            };
+            let ks = ks_one_sample(&mut speeds, cdf);
+            eprintln!("r {r}: D {:.4}, p {:.3}", ks.statistic, ks.p_value);
+            assert_p_value("centre speeds", ks.p_value, ALPHA);
+        }
+    }
+
+    #[test]
+    fn the_same_stream_gives_the_same_velocity() {
+        let (profile, df) = fixture();
+        let draw = || {
+            let mut s = Stream::open(Seed::new(7), tags::SELFTEST_STREAM, ObjectKey::cell(3));
+            df.draw_velocity(&profile, [1.0, 0.5, -0.2], &mut s)
+        };
+        assert_eq!(draw(), draw());
+    }
+}

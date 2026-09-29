@@ -1229,7 +1229,9 @@ pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws
 fn record_attempt(record: &SystemRecord) -> u32 {
     match record.origin() {
         SystemOrigin::Grid(_) => 0,
-        SystemOrigin::FeatureMember { attempt, .. } => u32::from(attempt),
+        SystemOrigin::FeatureMember { attempt, .. } | SystemOrigin::CentreMember { attempt } => {
+            u32::from(attempt)
+        }
     }
 }
 

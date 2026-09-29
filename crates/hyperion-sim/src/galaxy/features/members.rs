@@ -111,7 +111,8 @@ impl MemberRecord {
     #[must_use]
     pub fn attempt(&self) -> u32 {
         match self.record.origin() {
-            SystemOrigin::FeatureMember { attempt, .. } => u32::from(attempt),
+            SystemOrigin::FeatureMember { attempt, .. }
+            | SystemOrigin::CentreMember { attempt } => u32::from(attempt),
             SystemOrigin::Grid(_) => 0,
         }
     }
@@ -246,7 +247,7 @@ pub fn draw_member(
 
 /// Whether the attempt's star of initial mass `mass` leaves a remnant of `kind` kicked below `v_eff`
 /// (km/s), a low-mode neutron star judged on its pair's `systemic` speed instead (km/s).
-fn remnant_fits(
+pub(crate) fn remnant_fits(
     kind: ClassKind,
     mass: f64,
     composition: &Composition,
@@ -286,7 +287,7 @@ pub(crate) const ATTEMPT_WORDS: u64 = 6;
 
 /// A pair's systemic speed on `stream` from its current word, km/s: an isotropic Maxwellian of σ
 /// [`PAIR_SYSTEMIC_SIGMA`].
-fn systemic_speed(stream: &mut Stream) -> f64 {
+pub(crate) fn systemic_speed(stream: &mut Stream) -> f64 {
     let (a, b) = stream.standard_normal_pair();
     let c = stream.standard_normal();
     PAIR_SYSTEMIC_SIGMA * (a * a + b * b + c * c).sqrt()

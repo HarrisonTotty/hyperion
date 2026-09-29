@@ -45,7 +45,9 @@ use super::params::SATELLITE_STABILITY_FRACTION;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::imf::MASS_LIMIT_LO;
-use crate::galaxy::placement::{Existence, ResolveSystemError, SystemKind, SystemRecord, resolve};
+use crate::galaxy::placement::{
+    Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
+};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::SystemId;
 use crate::math;
@@ -562,6 +564,12 @@ impl SystemContext {
     /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here.
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         let record = resolve(galaxy, id)?;
+        // The galactic centre's members resolve since plan 09's P09.T27, but their stars take
+        // the centre's own composition and its black hole is no star: their system stage is not
+        // generated yet.
+        if matches!(record.origin(), SystemOrigin::CentreMember { .. }) {
+            return Err(ResolveSystemError::KindNotGenerated);
+        }
         if record.kind() != SystemKind::Stellar {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }
@@ -1391,6 +1399,18 @@ mod tests {
     }
 
     // P14.T1.d: `for_system`.
+
+    /// The galactic centre's members resolve (P09.T27) but have no system stage yet.
+    #[test]
+    fn the_centre_s_black_hole_has_no_context_yet() {
+        let galaxy = galaxy();
+        let black_hole = SystemId::from(crate::id::CentreMemberId::CENTRAL_BLACK_HOLE);
+        assert!(resolve(&galaxy, black_hole).is_ok());
+        assert_eq!(
+            SystemContext::for_system(&galaxy, black_hole),
+            Err(ResolveSystemError::KindNotGenerated)
+        );
+    }
 
     #[test]
     fn an_id_that_names_no_system_has_no_context() {

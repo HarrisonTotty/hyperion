@@ -696,6 +696,25 @@ domain_tags! {
     /// A feature-level list member's position: three uniforms per member, at its class's and its
     /// number's word offset (P09.T22).
     MEMBER_LIST_POSITION: Feature = "member.list_position";
+
+    // Plan 09, phase 6 (P09.T24–T25), appended after phase 5: a centre member's draws are
+    // `System` tags keyed by its centre member ID (Design note 23), which P09.T27 opens.
+
+    /// A centre member's velocity from its tracer's distribution function: an isotropic
+    /// direction (two words), then two words per attempt, the proposal's uniform and the mark
+    /// (P09.T24.c, `DistributionFunction::draw_velocity`).
+    CENTRE_VELOCITY: System = "centre.velocity";
+
+    /// A centre member's orbit marks: the inclination's mark, then the retrograde reversal's, both
+    /// always drawn (P09.T25, `OrbitMarks::apply`).
+    CENTRE_MARKS: System = "centre.marks";
+
+    /// A centre member's age in its component's span: one uniform (P09.T27).
+    CENTRE_AGE: System = "centre.age";
+
+    /// A centre member's primary's initial mass, and a remnant class's redraws: six words per
+    /// attempt, the mass, a mark and a pair's systemic velocity, as `member.mass` (P09.T27).
+    CENTRE_MASS: System = "centre.mass";
 }
 
 #[cfg(test)]

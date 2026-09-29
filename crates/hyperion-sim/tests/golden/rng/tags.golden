@@ -163,3 +163,7 @@ member.position (System) = 0x5dc975ce0382fc44
 member.accept (System) = 0x8467a21edf4b61bb
 member.list (Feature) = 0x09b15eebce9d6c1f
 member.list_position (Feature) = 0x3ab5ed3af8f1eb63
+centre.velocity (System) = 0x2f8374172df7c78b
+centre.marks (System) = 0x9282bc78f59725be
+centre.age (System) = 0x4f9b5831e99ce8a3
+centre.mass (System) = 0xfc2192ac1f2d16d8

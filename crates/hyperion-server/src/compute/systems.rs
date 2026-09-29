@@ -23,7 +23,9 @@
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, SystemRecord, resolve};
+use hyperion_sim::galaxy::placement::{
+    ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
+};
 use hyperion_sim::id::SystemId;
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
@@ -70,6 +72,8 @@ impl SharedSystemCache {
     /// # Errors
     ///
     /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
+    /// - [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre, whose system
+    ///   stage is not generated yet (plan 09, P09.T27).
     /// - [`ResolveSystemError::LayerNotGenerated`] for a rogue planet, which has no stars: its state
     ///   is plan 14's (plan 13, P13.T5.d). A free-floating brown dwarf is generated as a single
     ///   object through the stellar stage (P13.T5.a).
@@ -95,6 +99,11 @@ impl SharedSystemCache {
             return Ok(stars);
         }
         let record = resolve(galaxy, id)?;
+        // The galactic centre's members resolve since plan 09's P09.T27, but their stars take the
+        // centre's composition and its black hole is no star: not generated here yet.
+        if matches!(record.origin(), SystemOrigin::CentreMember { .. }) {
+            return Err(ResolveSystemError::KindNotGenerated);
+        }
         if record.kind() == SystemKind::RoguePlanet {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }

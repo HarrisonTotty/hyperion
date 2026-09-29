@@ -12,6 +12,7 @@
 //! Phase 1 places no member: members, nested grids and the class tables are phases 2 and 5.
 
 pub mod catalogue;
+pub mod centre;
 #[cfg(test)]
 mod checks;
 pub mod cluster;

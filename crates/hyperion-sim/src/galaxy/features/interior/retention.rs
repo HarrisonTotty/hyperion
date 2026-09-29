@@ -270,7 +270,7 @@ pub const fn table_row(k: usize, f: usize, kind: usize) -> usize {
 
 /// The monotone cubic through `values` at the evenly spaced abscissae `0, 1, …` at `place`,
 /// clamped to the ends (Fritsch and Carlson 1980): harmonic-mean slopes, zero at a local extremum.
-fn monotone_cubic(values: &[f64; SPEED_NODES], place: f64) -> f64 {
+pub(crate) fn monotone_cubic(values: &[f64; SPEED_NODES], place: f64) -> f64 {
     let last = SPEED_NODES - 1;
     #[expect(clippy::cast_precision_loss, reason = "32 nodes")]
     let place = place.clamp(0.0, last as f64);
