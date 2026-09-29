@@ -21,6 +21,10 @@ const LN_LAST: f64 = 18.0 * core::f64::consts::LN_2;
 const FIRST: f64 = 0.0625;
 const LAST: f64 = 262_144.0;
 
+/// The (R, |z|) grid's outer edge on both axes, 2¹⁸ ly: beyond it the tables continue the
+/// Gaussian components from the edge (plan 10's orbit integrator continues them on its own).
+pub(crate) const GRID_EDGE_LY: f64 = LAST;
+
 /// The step between grid points in `ln R` (and `ln |z|`): 22 ln 2 ÷ 63.
 const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
 
@@ -461,6 +465,23 @@ impl PotentialTables {
     #[must_use]
     pub fn bar_pattern_speed(&self) -> PerYear {
         self.omega(self.bar_corotation)
+    }
+
+    /// The spherical components' potential and `v_c²`, both (km/s)², at spherical radius `r > 0`
+    /// (ly): the dark halo, the nuclear cluster and the black hole in closed form, which every
+    /// lookup adds to the Gaussians' part. Plan 10's orbit integrator reads them to continue the
+    /// galaxy beyond the grid as a conservative field of its own.
+    #[must_use]
+    pub(crate) fn spherical_at(&self, r: f64) -> [f64; 2] {
+        let radius = LightYears::new(r);
+        self.spherical()
+            .iter()
+            .fold([0.0, 0.0], |[potential, v_circ_sq], c| {
+                [
+                    potential + c.potential(radius),
+                    v_circ_sq + c.v_circ_sq(radius),
+                ]
+            })
     }
 
     /// `R ∂Φ ÷ ∂R`, (km/s)², and `K_z = ∂Φ ÷ ∂z`, (km/s)² per light-year, at `(R, z)` (ly),

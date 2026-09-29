@@ -95,28 +95,49 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   prefix, whose decode already rejects band 7 for a stream, sub-kind `11`, set padding bits and a
   dwarf core's inner cells, the golden harness and statistical helpers of `hyperion-testkit`,
   slow-test marking, `just bench`, and the second CI architecture of P01.T12 (`rust-aarch64`, or its
-  recorded fallback), which this plan's goldens run on without a job of their own.
+  recorded fallback), which this plan's goldens run on without a job of their own. _As found at
+  P10.T1 (2026-09-29):_ `.github/workflows/ci.yml`, with its `rust-aarch64` and `rust-wasm32` jobs,
+  was deleted in `751bad8` and no workflow exists; `just test-wasm` (`wasm32-wasip1` under
+  wasmtime, outside `just ci`) is what is left (see Risks).
 - **Plan 02:** `Galaxy`, `GalaxyParams` (`AccretionHistory`: the time of the last major merger, the
   recent progenitors, Poisson with mean 8, with masses, times and provisional orbits that this plan
   revalidates, the globular count; the halo's drawn discrete share of 2–15%, carried but not
   applied; the bar's corotation radius; the dark halo), `PotentialTables` from
   `Galaxy::with_full_potential` (`potential(r_cyl, z)` on the (R, z) grid, `v_circ`, `omega`,
   `bar_corotation`; plan 02 tabulates no gradient, so design note 3 derives one), the halo's marked
-  mixture and its budget, `imf`, `Galaxy::mean_system_mass`, the root cube.
-- **Plan 03:** the merge hook `SystemSource`, `SystemRecord::from_parts`, `placement::SystemOrigin`
+  mixture and its budget, `imf`, `Galaxy::mean_system_mass`, the root cube. _As built:_
+  `GalaxyParams::accretion()` → `AccretionHistory::{last_major_merger, progenitors, globular_count}`,
+  the recent progenitors being the `ProgenitorKind::Recent(j)` entries of `progenitors()`, each with
+  `mass`, `accreted` and a provisional `Orbit`; `GalaxyParams::halo().discrete_share()`;
+  `GalaxyParams::dark_halo()` and `MassModel::dark_halo()`; the halo's budget
+  `GalaxyParams::population_mass(Population::Halo)`; `Galaxy::mean_system_mass(population)`; the
+  root cube `coords::ROOT_HALF_WIDTH_LY`. **The tables now have a gradient:** plan 08 added
+  `PotentialTables::force(r_cyl, z) -> Option<CylindricalForce>`, the exact gradient of the bicubic
+  interpolant of `potential` with the spherical components in closed form (ruling 101.4), and
+  P10.T2 steps in it (design note 3, as built in Risks). P10.T2's far field reads the tables, not the stars' and gas's masses (Risks).
+- **Plan 03:** the merge hook `SystemSource` (`galaxy::query::SystemSource`: `expected_in_sphere`,
+  `systems_in_sphere`, `suppresses`), `SystemRecord::from_parts` (it matches on the origin
+  exhaustively, so `GlobalListMember` needs an arm there), `placement::SystemOrigin`
   (`#[non_exhaustive]`; this plan adds `GlobalListMember`, design note 13), the padding rule,
   `resolve`'s dispatch on `SystemIdKind`. `resolve(galaxy, id)` takes no context, and a stream
   member cannot be resolved without its tube table, nor a dwarf core's without the list's
   `DwarfCoreSpec`, so this plan adds `resolve_with(galaxy, id, &dyn TubeLookup)` beside it, and
-  `resolve` goes on answering plan 03's `KindNotGenerated` for both kinds.
+  `resolve` goes on answering plan 03's `KindNotGenerated` for both kinds. The padding rule is
+  `query::motion::pad_for(t, speed)`.
 - **Plan 04/05:** request layer, CPU pool, byte-bounded caches; the galaxy map, the chart, the
   readout.
 - **Plan 06:** stellar evaluation of members, lifetimes and the evolved mass function;
-  `math::normal_quantile` (P06.T1.b), which the truncated normal of P10.T8.b inverts with.
+  `math::normal_quantile` (P06.T1.b), which the truncated normal of P10.T8.b inverts with. _As
+  built:_ members' stars through `MemberRecord::stars`; lifetimes `galaxy::fates::StellarFates::
+lifetime` (only `ProvisionalFates` implements it); no item is named the evolved mass function,
+  the nearest being `galaxy::fates::{mean_present_mass, mean_present_mass_of_mixture, stars_below}`
+  (P10.T8.a to choose).
 - **Plan 08:** the halo components' velocity laws, from which orphan progenitors draw their orbits;
-  straight-line drift.
+  straight-line drift. _As built:_ `kinematics::halo::HaloKinematics` through
+  `KinematicTables::halo()`; `query::motion::{position_at, epoch_velocity}`.
 - **Plan 15:** `tables::streams::ORPHAN_STREAMS_PER_GLOBULAR`, provisional 1.5, which P15.T11.b
-  later fits with this plan's generator.
+  later fits with this plan's generator. _Not built at P10.T1:_ no `tables/streams.rs` exists, so
+  P10.T3.b, its first reader, needs it first.
 - **Plan 09:** `FeatureCatalogue::walk_process(FeatureProcess::Globular)`, `GlobularMarks` with the
   orbit and history of P09.T13, `ClusterModel` (present mass function, first-population share),
   `features::nested::NestedGrid`, `features::interior::{MemberClassTable, ClassProfile}`,
@@ -124,7 +145,16 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   `CentreModel::as_global_entry`, `CentreMemberSource`, `FeatureShares::set_halo_discrete`, the
   reserved variant name `placement::SystemOrigin::GlobalListMember`,
   `FeatureKind::{Stream, DwarfCore}`, the globulars' metallicity and age laws of P09.T12.b. The
-  sub-kind of a `10` ID is plan 01's `SystemIdKind`; plan 09 adds no type for it.
+  sub-kind of a `10` ID is plan 01's `SystemIdKind`; plan 09 adds no type for it. _As built at
+  P10.T1:_ `GlobularMarks` carries no orbit or history; P09.T13 is the free functions
+  `features::kinds::globular::{orbit, history, history_on_orbit}` and `GlobularHistory` (pericentre,
+  apocentre, eccentricity, dissolution time, initial mass, mass-loss rate); the present mass
+  function is `interior::counts::depleted_slope(&ClusterModel)` and the first population's share
+  `interior::abundances::first_population_share`; the globulars' laws are the constants
+  `METALLICITY_LAWS`, `IN_SITU_AGE`, `ACCRETED_AGES` of `features::kinds::globular`;
+  `FeatureShares::set_halo_discrete` exists but a built `Galaxy` has no way to call it (P10.T3.d
+  adds one); `CentreModel` and `resolve_centre_member` exist since P09.T24–T27 (`d5330c7`), but
+  `as_global_entry` and `CentreMemberSource` (P09.T28–T31) do not; `SystemOrigin::GlobalListMember` is still only reserved in a doc comment.
 
 ## Design notes
 
@@ -208,6 +238,8 @@ on domain tags under `stream.*` and `dwarf.*`, which each task adds to plan 01's
 
 ### P10.T1 Numbers, kinds and reconciliation
 
+_Built (lane `int10`, 2026-09-29, rebased onto `d5330c7` at `GENERATOR_VERSION` 15); see "T1 and T2 as built" in Risks._
+
 `StreamNumber` (under 2¹²) and `DwarfCoreNumber` (under 4) over plan 01's `StreamMemberId` and
 `DwarfCoreMemberId`; `GlobalEntryKind`; `StreamOrigin` (`LivingGlobular(FeatureId)`, `Orphan`,
 `Dwarf(progenitor index)`); `TubeLookup`; `resolve_with`, which forwards every other kind to
@@ -219,6 +251,9 @@ answers `KindNotGenerated` for a stream ID and a dwarf-core ID, and `resolve_wit
 `cargo test -p hyperion-sim global_list` passes.
 
 ### P10.T2 The orbit integrator
+
+_T2.a–c built (lane `int10`, 2026-09-29, rebased onto `d5330c7` at `GENERATOR_VERSION` 15); see "T1 and T2 as built" in
+Risks. The eccentric orbits' energy figure of T2.b is pinned provisionally._
 
 - **P10.T2.a Forces from the tables.** `Leapfrog::new` tabulates the gradient of Φ as design note 3
   describes, and returns `BuildLeapfrogError::NoVerticalGrid` for in-plane tables. Tests: against
@@ -435,6 +470,110 @@ dwarfs' stripping fraction, the shell-widening factor.
 
 ## Risks and open points
 
+- **Re-validated at `941d80b` for P10.T1 (lane `int10`, 2026-09-29, `GENERATOR_VERSION` 14).**
+  Consumes is reconciled with plans 01–09 and 15 as built, in place (the _As built_ and _As found_
+  notes there). Not built, and so not consumable yet: of plan 09's centre, `CentreModel::as_global_entry` and
+  `CentreMemberSource` (P09.T28–T31; P10.T4 and T9 wait for them), though `CentreModel` and
+  `resolve_centre_member` arrived with P09.T24–T27 at `d5330c7`; plan 15's
+  `tables::streams` (P10.T3.b's first reader must add the provisional table); a way for a built
+  `Galaxy` to call `FeatureShares::set_halo_discrete` (P10.T3.d adds it); `SystemOrigin::
+GlobalListMember` (P10.T7.b or T8.b adds it, with its arm in `SystemRecord::from_parts`); a
+  function named the evolved mass function (P10.T8.a picks among `galaxy::fates`); and the second
+  CI architecture (below).
+- **T1 and T2 as built (lane `int10`, 2026-09-29, rebased onto `d5330c7` at `GENERATOR_VERSION` 15).** No output moved:
+  nothing draws, and no domain tag is added. New golden `galaxy/global_list/orbit.golden`
+  (P10.T2.c). Its bits depend on the potential tables, so **any change to the mass model or its
+  tables moves it, and it is re-blessed then**: it was first blessed at 14 on `941d80b` and
+  re-blessed at 15 on `d5330c7`, where v15's new potential (`b2ceb62`) moved every value; the
+  figures below are v15's, within a few 10⁻⁴ of v14's, and the `ENERGY_DRIFT` pins still hold.
+  `resolve_with` forwards the centre's IDs, which plan 09 resolves since P09.T27 (`d5330c7`). T1's
+  acceptance command, `cargo test -p hyperion-sim global_list`, misses the two `resolve_with`
+  tests in `placement::resolve`; run `cargo test -p hyperion-sim --lib -- global_list placement::resolve` and `--test
+global_list_orbit`. **Slow tests:** every orbit test that builds the (R, z) grid for more than
+  the golden file and the determinism check, and `resolve_with`'s feature-member check (the
+  kinematic tables, and an interior rebuilt per resolve, seconds each), are `#[ignore = "slow:
+…"]` and run under `just test-slow`; a first version ran the feature-member check in `just ci`
+  and held the shared heavy-test lock for 90 minutes.
+  - _T1._ `global_list::{StreamNumber, DwarfCoreNumber}` (`new`, `get`, `LIMIT`, `TryFrom` the raw
+    integer, `From` the member ID) with `BuildEntryNumberError::{StreamNumberTooLarge,
+DwarfCoreNumberTooLarge}`; `GlobalEntryKind::{Centre, Stream(StreamNumber),
+DwarfCore(DwarfCoreNumber)}` with `feature_kind()`; `StreamOrigin::Dwarf(u32)` holds `j` of plan
+    02's `ProgenitorKind::Recent(j)`. `GlobalList` holds only its entries' kinds until P10.T4, and
+    its `Default` is the empty list; `tube::TubeTable` is declared with no constructor until P10.T6;
+    `TubeLookup` is in `tube.rs` and re-exported from `global_list`. `placement::resolve_with(galaxy,
+id, &dyn TubeLookup)` is in `placement/resolve.rs` (plan 03's `placement.rs` is a directory
+    now); it does not read the lookup yet. Its test samples grid IDs (systems, thinned and empty
+    indices), the centre's black hole and an in-cell centre ID, and an open cluster's members.
+  - _T2.a, design note 3 replaced._ Its premise, that plan 02 tabulates no gradient, no longer
+    holds: plan 08 added `PotentialTables::force`, the exact gradient of the bicubic interpolant of
+    `potential` (ruling 101.4), which is conservative where a bilinear table of central differences
+    would not be. So `Leapfrog` builds no grid of its own and steps in `force`, as plan 15's
+    displaced-form integrator does. **Beyond the grid** the tables' own continuation, `1 ÷ h` from the
+    clamped edge point, is not the gradient of their potential (up to 3 × 10⁻⁴ of the force outside
+    the grid's box), so the integrator continues the galaxy itself: the spherical components in
+    closed form (the NFW halo among them) and, **in place of the note's point mass of the stars
+    and gas from `GalaxyParams`**, the Gaussian components as a monopole plus the discs'
+    quadrupole, matched to the tables at 2¹⁸ ly in the plane and on the axis so that the potential
+    is continuous with the tables (a point mass from the parameters would not be),
+    blended into the tables by a smooth step between spherical radii of 2¹⁷·⁵ and 2¹⁸ ly with the
+    blend's exact gradient. Added to plan 02's `potential/tables.rs` for it, crate-visible only:
+    `PotentialTables::spherical_at` and `GRID_EDGE_LY`. The plan's Plummer and NFW profiles
+    "loaded into a table" cannot be, since tables are built from a `MassModel` only; the test
+    instead holds the force to `MassModel::force` to 10⁻³ over 1–300 kpc at nine latitudes (3.6 ×
+    10⁻⁴ at worst in a scratch sweep), and a second test holds it to the central differences of
+    the potential to 10⁻⁶ through the blend and beyond. The twenty vertical-force points sit at
+    latitudes of 10–70°: within about 2° of the plane the tables' `K_z` departs from the model's
+    by up to 1.9 × 10⁻³ of itself (a plan 02 figure, where `K_z` is small against the radial
+    force). Within 1 ⁄ 16 ly of the plane the tables' force reads their in-plane `v_c²` table,
+    which differs from the derivative of their in-plane potential by about 2 × 10⁻⁵ at 150,000 ly.
+  - _T2.b._ `orbit::Leapfrog<'a>` borrows the tables: `new(&PotentialTables, Seconds)`, `with_step`,
+    `time_step`, `state(GalacticDisplacement, GalacticVelocity)` (position about the galactic
+    centre, SI), `acceleration_m_s2` and `potential_j_kg` (taking a `GalacticDisplacement`) and
+    `energy_j_kg`, `step`, and `integrate(&mut
+OrbitState, steps: u32) -> OrbitSummary`, which leaves the state at the end. `OrbitState`
+    carries the acceleration at its position, so a step costs one force and `n` steps equal one
+    `integrate` of `n` bit for bit; `reversed()`, `radius()`, `acceleration_m_s2()`,
+    `angular_momentum_z_m2_s()`. Acceleration, specific energy and angular momentum are plain SI
+    `f64`s with the unit in the name, since the crate has no newtype for them. A negative
+    step integrates backwards. `OrbitSummary`'s pericentre, apocentre and radial period are
+    `Option`s (none before a turning point, or two), refined by the parabola through three samples;
+    the radial period is `2 (t_last − t_first) ÷ (n − 1)` over all turning points; `bounding_radii`
+    and `turning_points` added. `orbit::FixedStep::new(radial_period, span)` is Design note 4, with
+    `STEPS_PER_RADIAL_PERIOD` (256) and `MAX_STEP` (2 Myr); `BuildLeapfrogError::InvalidStep` added.
+    Measured on the Milky Way fixture over ten radial periods at that step: energy 8.8 × 10⁻⁵ for an
+    inclined orbit with Pal 5's pericentre (23,300–38,400 ly; Pal 5's own reaches 16–19 kpc),
+    9.0 × 10⁻⁶ for a GD-1-like one, **2.3 × 10⁻⁴ for one with radii near Sagittarius's
+    (41,200–203,100 ly, e 0.66, inclined 62°) and 2.1 × 10⁻³ for e 0.8 (30,100–263,800
+    ly)**, below; L_z to 5 × 10⁻¹⁴ at worst; time reversal over 5,000 steps within 10⁻⁹; a circular
+    orbit's radius keeps within 1.3–1.7 × 10⁻⁴ (the leapfrog's epicycle at 256 steps a period,
+    not growing over ten periods).
+  - _T2.c._ The golden pins three starts after 10⁴ steps of 0.5 Myr, the eccentric one crossing
+    the blend and the grid's edge. The source check reads `orbit.rs` and the force path
+    (`potential/{force,tables,nfw,spherical}.rs`) up to their test modules. **No second
+    architecture ran it:** the CI workflow is gone (below), and `just test-wasm` was not run,
+    since wasmtime is not installed on the lane's machine.
+- **Provisional: Design note 4's step does not hold eccentric orbits' energy to 10⁻⁴ (P10.T2.b).**
+  At 1 ⁄ 256 of the radial period, capped at 2 Myr, a pericentre passage of an orbit of e ≳ 0.6
+  spans only 10–20 steps (`r_p ÷ v_p` over the step): the orbit with Sagittarius's radii drifts by 2.3 × 10⁻⁴ and the e 0.8 one by
+  2.1 × 10⁻³, where the orbits of low eccentricity hold 10⁻⁴. Scratch runs at P ⁄ 1,024 gave 7 ×
+  10⁻⁵ and 4 × 10⁻⁴, at P ⁄ 2,048 1.7 × 10⁻⁵ and 1.3 × 10⁻⁴. Plan 15's integrator sets its step
+  from the circular period at pericentre (1 ⁄ 200) for this reason. Not ruled here: the step is a
+  parameter of the generator version and the energy figure the plan's. The test pins the two at
+  4 × 10⁻⁴ and 3.5 × 10⁻³ (`ENERGY_DRIFT` in `tests/global_list_orbit.rs`) until a ruling, which
+  also decides whether a finer step's cost fits P10.T6.c's 0.2 s.
+- **The second CI architecture is gone.** `.github/workflows/ci.yml`, with the `rust-aarch64` and
+  `rust-wasm32` jobs of P01.T12, was deleted in `751bad8` ("checkpoint"), and no workflow exists at
+  `941d80b`. P10.T2.c's "check that the job is still there" fails, and its acceptance, "both
+  architectures green on the same goldens", cannot be met until a job returns or `just test-wasm`
+  is run by hand. For the owner (P01.T12 is gated on them).
+- **`integrate` calls `math::atan2` once a step**, for Ω̄; `step` does not, so tracers that need
+  no summary should be stepped with `step`.
+- **The force costs about 640 ns** (a release build on the loaded lane machine; the tables'
+  bicubic lookup, two logarithms, the NFW halo's and the nuclear cluster's closed forms, the
+  latter with `powf`). About 2,000 tracers over a few thousand steps each is some seconds, against
+  P10.T6.c's 0.2 s for a tube: P10.T5 and T6 should measure first. A grid of the total potential
+  of the integrator's own, bicubic like the tables', would drop the closed forms from the inner
+  loop.
 - **Updated for the 2026-09-21 density rulings.** The halo's smooth components now have inner slopes
   of 2.2–2.8, and the dominant merger breaks at 16–28 kpc, steepening by 1.5–2.5 beyond. At 15–18
   kpc that halo is three to four times denser than the r^−3.5 halo the brainstorm's 25–45 was worked

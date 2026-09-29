@@ -45,7 +45,7 @@ pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };
 pub use record::{Existence, SystemKind, SystemOrigin, SystemRecord};
-pub use resolve::resolve;
+pub use resolve::{resolve, resolve_with};
 
 use candidate::evaluate_candidate_from_bound;
 use cell::layer_bound;

@@ -19,6 +19,7 @@ use super::{
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
+use crate::galaxy::global_list::TubeLookup;
 use crate::id::{SystemId, SystemIdKind};
 
 /// The system `id` names in `galaxy`.
@@ -32,9 +33,10 @@ use crate::id::{SystemId, SystemIdKind};
 ///
 /// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — a
 ///   stream, a dwarf core, pinned content or a catalogue system — until plans 09 and 10 generate
-///   them. A catalogue feature's member resolves through plan 09's [`resolve_member`] (P09.T21),
-///   and the galactic centre's through [`resolve_centre_member`] (P09.T27), which builds the
-///   centre's model.
+///   them. Streams and dwarf cores stay so here for good, since their members need the caller's
+///   tube tables: they resolve through [`resolve_with`]. A catalogue feature's member resolves
+///   through plan 09's [`resolve_member`] (P09.T21), and the galactic centre's through
+///   [`resolve_centre_member`] (P09.T27), which builds the centre's model.
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
 ///   class claimed it; for a feature member, if [`resolve_member`] finds none.
@@ -82,6 +84,67 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
     }
 }
 
+/// The system `id` names in `galaxy`, reading streams and dwarf cores through the caller's
+/// cache of the global list and its tube tables (plan 10, P10.T1).
+///
+/// [`resolve`] takes no context, and a stream's member cannot be resolved without its tube table,
+/// nor a dwarf core's without the list's specification of the core, so this is the resolver for a
+/// caller that holds the list. Every kind but those two is forwarded to [`resolve`] and answers
+/// exactly as it does.
+///
+/// # Errors
+///
+/// As [`resolve`]. A stream's or a dwarf core's member answers
+/// [`ResolveSystemError::KindNotGenerated`] until plan 10 places them (P10.T8.b and P10.T7.b).
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::global_list::{GlobalList, StreamNumber, TubeLookup, TubeTable};
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell, resolve, resolve_with};
+/// use hyperion_sim::id::Layer;
+///
+/// struct NoTubes(GlobalList);
+///
+/// impl TubeLookup for NoTubes {
+///     fn global_list(&self) -> &GlobalList {
+///         &self.0
+///     }
+///
+///     fn tube(&self, _: StreamNumber) -> Arc<TubeTable> {
+///         unreachable!("a grid ID reads no tube")
+///     }
+/// }
+///
+/// let galaxy = Galaxy::new(Seed::new(31));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// let id = cell[0].id();
+/// let lookup = NoTubes(GlobalList::default());
+/// assert_eq!(resolve_with(&galaxy, id, &lookup), resolve(&galaxy, id));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn resolve_with(
+    galaxy: &Galaxy,
+    id: SystemId,
+    _lookup: &dyn TubeLookup,
+) -> Result<SystemRecord, ResolveSystemError> {
+    match id.kind() {
+        SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) => {
+            Err(ResolveSystemError::KindNotGenerated)
+        }
+        SystemIdKind::Grid(_)
+        | SystemIdKind::FeatureMember(_)
+        | SystemIdKind::Centre(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => resolve(galaxy, id),
+    }
+}
+
 /// The record of candidate `index` of `key`, if the cell has that candidate and the thinning kept
 /// it.
 ///
@@ -113,7 +176,15 @@ mod tests {
     use crate::galaxy::placement::{
         STELLAR_LAYERS, candidate_count, evaluate_candidate, generate_cell,
     };
-    use crate::id::{CentreMemberId, Layer};
+    use std::sync::Arc;
+
+    use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureMarks};
+    use crate::galaxy::features::members::FeatureInterior;
+    use crate::galaxy::global_list::{GlobalList, StreamNumber, TubeTable};
+    use crate::galaxy::imf::MassBand;
+    use crate::id::{
+        CentreMemberId, DwarfCoreMemberId, FeatureCell, Layer, MemberSlot, StreamMemberId,
+    };
     use crate::rng::Seed;
 
     /// The seed of the galaxy these tests resolve IDs in.
@@ -246,5 +317,130 @@ mod tests {
         let record = resolve(&galaxy, black_hole).unwrap();
         assert_eq!(record.id(), black_hole);
         assert_eq!(record.layer(), Layer::E);
+    }
+
+    /// A lookup whose tube tables must not be read: no ID resolved so far needs one.
+    struct NoTubes(GlobalList);
+
+    impl TubeLookup for NoTubes {
+        fn global_list(&self) -> &GlobalList {
+            &self.0
+        }
+
+        fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+            panic!("stream {} was read before P10.T8.b", stream.get())
+        }
+    }
+
+    /// Plan 10, P10.T1: a stream's and a dwarf core's members are not resolved by either
+    /// resolver yet, and `resolve` never will resolve them.
+    #[test]
+    fn stream_and_dwarf_core_members_are_not_generated_yet() {
+        let galaxy = galaxy();
+        let lookup = NoTubes(GlobalList::default());
+        let stream = SystemId::from(StreamMemberId::new(3, Layer::D, 900, [31, 32], 0).unwrap());
+        let core = SystemId::from(
+            DwarfCoreMemberId::new(
+                1,
+                MemberSlot::InCell {
+                    band: Layer::C,
+                    level: 0,
+                    cell: [7, 8, 9],
+                    index: 2,
+                },
+            )
+            .unwrap(),
+        );
+        let listed = SystemId::from(
+            DwarfCoreMemberId::new(0, MemberSlot::FeatureLevel { index: 0 }).unwrap(),
+        );
+        for id in [stream, core, listed] {
+            assert_eq!(
+                resolve(&galaxy, id),
+                Err(ResolveSystemError::KindNotGenerated)
+            );
+            assert_eq!(
+                resolve_with(&galaxy, id, &lookup),
+                Err(ResolveSystemError::KindNotGenerated)
+            );
+        }
+    }
+
+    /// Plan 10, P10.T1: every kind but a stream's and a dwarf core's is forwarded, so
+    /// `resolve_with` answers as `resolve` does on grid IDs (systems, empty indices and thinned
+    /// candidates) and on the centre's black hole. Feature and centre members are the slow test
+    /// below.
+    #[test]
+    fn resolve_with_agrees_with_resolve_on_grid_and_centre_ids() {
+        let lookup = NoTubes(GlobalList::default());
+        let galaxy = galaxy();
+        let mut cell = Vec::new();
+        let mut grid = Vec::new();
+        for key in cells().into_iter().step_by(40) {
+            generate_cell(&galaxy, key, &mut cell);
+            grid.extend(cell.iter().map(SystemRecord::id));
+            let count = candidate_count(&galaxy, key);
+            grid.extend((0..count + 2).map(|i| key.candidate_id(i).unwrap()));
+        }
+        assert!(grid.len() > 100, "{} grid IDs", grid.len());
+        // An in-cell centre member builds the centre's model, so it is the slow test's.
+        let centre = SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE);
+        for id in grid.into_iter().chain([centre]) {
+            assert_eq!(
+                resolve_with(&galaxy, id, &lookup),
+                resolve(&galaxy, id),
+                "{id:?}"
+            );
+        }
+    }
+
+    /// Plan 10, P10.T1: `resolve_with` answers as `resolve` does on a feature's members, accepted
+    /// and past the cell's count, and on a member of the centre. Slow: feature members need the
+    /// kinematic tables, and each resolve rebuilds its feature's interior or the centre's model,
+    /// seconds apiece.
+    #[test]
+    #[ignore = "slow: builds the kinematic tables and resolves feature members, seconds each"]
+    fn resolve_with_agrees_with_resolve_on_feature_and_centre_members() {
+        let lookup = NoTubes(GlobalList::default());
+        let galaxy = galaxy().with_full_potential();
+        let interior = FeatureCatalogue::cell(&galaxy, FeatureCell::new([0, 6, 0]).unwrap())
+            .features()
+            .iter()
+            .filter(|f| matches!(f.marks(), FeatureMarks::OpenCluster(_)))
+            .find_map(|f| FeatureInterior::of(&galaxy, f))
+            .expect("the fixture has an open cluster there");
+        let mut out = Vec::new();
+        let (band, nested) = MassBand::ALL
+            .iter()
+            .flat_map(|&b| interior.grid().owned_cells().map(move |c| (b, c)))
+            .find(|&(b, c)| {
+                interior.members_in_cell(&galaxy, b, c, &mut out);
+                out.len() >= 2
+            })
+            .expect("some cell holds two members");
+        let count = interior.candidate_count(&galaxy, band, nested);
+        let mut ids: Vec<SystemId> = out.iter().take(2).map(|(m, _)| m.record().id()).collect();
+        ids.push(SystemId::from(interior.member_id(band, nested, count)));
+        // A centre member in a cell, which builds the centre's model (P09.T27).
+        ids.push(SystemId::from(
+            CentreMemberId::new(MemberSlot::InCell {
+                band: Layer::A,
+                level: 9,
+                cell: [2, 17, 18],
+                index: 12,
+            })
+            .unwrap(),
+        ));
+        for id in ids {
+            let direct = resolve(&galaxy, id);
+            assert_eq!(resolve_with(&galaxy, id, &lookup), direct, "{id:?}");
+        }
+        assert!(
+            resolve(
+                &galaxy,
+                SystemId::from(interior.member_id(band, nested, count))
+            )
+            .is_err()
+        );
     }
 }

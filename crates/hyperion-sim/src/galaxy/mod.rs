@@ -28,6 +28,7 @@ pub mod features;
 pub mod fields;
 pub mod frame;
 pub mod gas;
+pub mod global_list;
 pub mod imf;
 pub mod kinematics;
 pub mod map;
