@@ -477,7 +477,9 @@ fits one device: a feature's members are split by class, as a layer's are split 
   living band-E count carries that factor.
 - **Tails.** Every cluster, open or globular, carries its near debris as one more class: a straight
   tube along its orbit out to the reach of its grid, or as far as its oldest escapers have drifted
-  (Küpper, Macleod and Heggie 2008), holding the stars it has lost. Older debris is field, or a
+  (Küpper, Macleod and Heggie 2008), holding its share of the stars it has lost. Those are the
+  stars its interior no longer has, band by band, so they are lighter than the stars that stay
+  and the lowest band is stripped hardest (Baumgardt and Makino 2003). Older debris is field, or a
   [stream](#streams-and-accreted-structure).
 - **Multiple populations.** Every globular born above about 10⁵ M☉ splits its members by an
   independent mark into a first and a second population (Milone and Marino 2022). The first's share
@@ -2300,6 +2302,24 @@ high-mass scale 0.68. No generated output moves. The text has been brought into 
 3. **About 4% of the old populations' layer D has exploded long ago**, not 4–5%: 1.3 × 10⁻³ per
    solar mass formed over layer D's 3.4% of systems at the fitted scale.
 
+**2026-09-29: the orchestrator's ruling 142.** Ruling 142 of the same file was made on research
+that checked ruling 139 as built (`research/r-139b/NOTE.md`), and changes what this document says.
+The text has been brought into line:
+
+1. **A light member's slope outside the half-mass radius is −2 y² ÷ (1 + y²) or steeper**, y = r ÷
+   r_h, and reaches −2 only far out (ruling 142.1). Reason: that is exact for ruling 139's outer
+   factor while the core lies inside r_h, and light components of lowered isothermal models steepen
+   gradually rather than reaching their limit at 2 r_h (Gieles and Zocchi 2015). Ruling 139's "−2
+   or steeper from 2 r_h" was a wording slip.
+2. **A young cluster's tail near the Sun drifts at about 0.38 km/s**, some 87 ly at 69 Myr (ruling
+   142.2). Reason: the local rotation curve falls gently, with Oort constants giving −A ÷ B ≈ 1.29
+   (Bovy 2017), not the flat curve's 1.
+3. **A tail's stars are the ones its cluster has lost, band by band** (ruling 142.3): the stars
+   born less those the interior keeps, times the tail's share of all the loss. Reason: escapers
+   cannot outnumber the stars that were born, and mass segregation makes them lighter than the
+   stars that stay, with the lowest band stripped hardest (Baumgardt and Makino 2003). See [What is
+   inside a cluster today](#what-is-inside-a-cluster-today).
+
 ## Open questions
 
 Three rounds of questions were answered on 2026-09-20 and are now under [Decisions](#decisions). The
@@ -2509,7 +2529,8 @@ Figures above are rounded and should be re-checked against these when they becom
 - Gieles and Zocchi 2015, _A family of lowered isothermal models_, MNRAS 454, 576; Peuten et al.
   2017, MNRAS 470, 2736; Hénault-Brunet et al. 2019, MNRAS 491, 113 (multimass models and mass
   segregation).
-- Küpper, Macleod and Heggie 2008, _On the structure of tidal tails_, MNRAS 387, 1248.
+- Küpper, Macleod and Heggie 2008, _On the structure of tidal tails_, MNRAS 387, 1248; Bovy 2017,
+  _Galactic rotation in Gaia DR1_, MNRAS 468, L63 (the Oort constants; from memory, not re-read).
 - Lamers et al. 2005, _An analytical description of the disruption of star clusters in tidal
   fields_, A&A 441; Oh, Kroupa and Pflamm-Altenburg 2015, ApJ 805.
 - Baumgardt and Makino 2003, MNRAS 340; Gieles, Heggie and Zhao 2011, MNRAS 413; Burkert and Forbes

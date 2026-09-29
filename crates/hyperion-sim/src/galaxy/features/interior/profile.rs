@@ -381,28 +381,49 @@ mod tests {
         assert!((along / up - 1.0).abs() < 1e-12);
     }
 
-    /// Ruling 139.1: every cored class's slope is `−2 y² ÷ (1 + y²)` or steeper, `y = r ÷ r_h`,
-    /// from twice the half-mass radius to half the tidal radius, net of the taper: `−2` in the
-    /// limit. The ruling's "−2 or steeper" is that limit; at twice the half-mass radius the factor
-    /// it rules reaches 0.8 of it (a light class's slope there is about −1.8), which the plan
-    /// records.
+    /// The logarithmic slope of `shape` at `r`, by a central difference in `ln r`.
+    fn log_slope(shape: &ProfileShape, r: f64) -> f64 {
+        let h = 1e-4 * r;
+        (math::ln(shape.at(r + h)) - math::ln(shape.at(r - h)))
+            / (math::ln(r + h) - math::ln(r - h))
+    }
+
+    /// Rulings 139.1 and 142.1: every cored class's slope, net of the taper, is `−2 y² ÷ (1 + y²)`
+    /// or steeper, `y = r ÷ r_h`, at every radius while `r_c ≤ r_h`. With `z = r ÷ r_c` the slope
+    /// is `−3q′ z² ÷ (1 + z²) − (2 − 3q′) y² ÷ (1 + y²)` for `3q′ < 2`, and `z ≥ y` makes it a
+    /// theorem, an equality at `r_c = r_h`; `−2` holds only as `y → ∞` (139.1's "−2 or steeper
+    /// from 2 `r_h`" was a wording slip). A light class is about −1.8 at 2 `r_h`.
     #[test]
     fn light_classes_fall_at_least_as_r_to_the_minus_two_outside_the_half_mass_radius() {
-        let (r_c, r_h, r_t) = (1.5, 10.0, 200.0);
-        for q in [0.15, 0.3, 0.45, 0.6, 0.8, 1.0, 1.6] {
-            let shape = ProfileShape::cored(r_c, q, r_h);
-            let mut r = 2.0 * r_h;
-            while r <= 0.5 * r_t {
-                let h = 1e-4 * r;
-                let slope = (math::ln(shape.at(r + h)) - math::ln(shape.at(r - h)))
-                    / (math::ln(r + h) - math::ln(r - h));
-                let y2 = (r / r_h) * (r / r_h);
-                assert!(
-                    slope <= -2.0 * y2 / (1.0 + y2) + 1e-6,
-                    "q {q} at {r} ly: {slope}"
-                );
-                assert!(slope <= -1.6 + 1e-6, "q {q} at {r} ly: {slope}");
-                r *= 1.25;
+        let (r_h, r_t) = (10.0, 200.0);
+        for r_c in [1.5, r_h] {
+            assert!(
+                r_c <= r_h,
+                "the theorem needs r_c ≤ r_h: {r_c} against {r_h}"
+            );
+            for q in [0.15, 0.3, 0.45, 0.6, 0.8, 1.0, 1.6] {
+                let shape = ProfileShape::cored(r_c, q, r_h);
+                let ProfileShape::Core { outer, .. } = shape else {
+                    panic!("a cored shape")
+                };
+                let mut r = 0.05 * r_h;
+                while r <= 0.5 * r_t {
+                    let slope = log_slope(&shape, r);
+                    let y2 = (r / r_h) * (r / r_h);
+                    let bound = -2.0 * y2 / (1.0 + y2);
+                    assert!(slope <= bound + 1e-6, "r_c {r_c}, q {q} at {r} ly: {slope}");
+                    if r >= 2.0 * r_h {
+                        assert!(slope <= -1.6 + 1e-6, "r_c {r_c}, q {q} at {r} ly: {slope}");
+                    }
+                    // The tight case: a light class at r_c = r_h lies on the bound.
+                    if r_c >= r_h && outer > 0.0 {
+                        assert!(
+                            (slope - bound).abs() < 1e-6,
+                            "q {q} at {r} ly: {slope} against {bound}"
+                        );
+                    }
+                    r *= 1.25;
+                }
             }
         }
     }

@@ -704,7 +704,9 @@ except that P09.T9.d needs P09.T9.c.
   radius, line density = mass-loss rate ÷ drift speed along the tail, mass-loss rate from Lamers or
   from P09.T13. Bottom-heavy band shares (what the cluster lost) and first population only. Bound
   per design note 10. Tests: bound hunt; the tail's expected count equals the mass lost in reach ÷
-  drift speed.
+  drift speed. _Superseded by rulings 139.4 and 142.3:_ the tail runs as far as its oldest escaper
+  has drifted, and each band's count is the interior's lost stars of that band (born less the
+  K-scaled living classes, clamped at 0) times `w`, the window's share of all the mass lost.
 - **P09.T9.h Multiple populations.** For globulars born above 10⁵ M☉ an independent mark splits each
   class into first and second population; the first's share is 0.62 − 0.30 × (log₁₀ M₀ − 5) held to
   0.1–0.7. The second has a smaller core radius (scratch factor 0.7) and the lower binary fraction.
@@ -2101,3 +2103,46 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `resolve` and T29's source share; `as_global_entry()` once plan 10's list exists; T29's
     `CentreMemberSource` reads `CentrePlacement`; T30.b registers the victims on the centre's
     list; young-disc members of negative age are placed and must be dropped at the query.
+- **The tails' mass against L05 (ruling 142.3; a risk).** A tail's members are the interior's lost
+  stars times the window's share `w`, so their mass is `w` times the interior's lost living mass,
+  not L05's `M_esc`. L05's μ_ev is fitted to a Salpeter-like population, and the galaxy's Chabrier
+  puts more of its mass above a young turn-off, so L05 under-counts the evolutionary loss: the
+  research put the gap at about 33 M☉ of the 60 M☉ nursery's 147 (members carrying about 113 M☉).
+  As built the members carry 76.8 M☉, a gap of 70 M☉, since `N₀` is also smaller (below). A μ_ev
+  integrated over the galaxy's own function and tracks would close it; nothing is ruled.
+- **Ruling 142 as built (lane `r142`, 2026-09-29, on 6cf4b5a at `GENERATOR_VERSION` 15).** No
+  wired output moves: `galaxy/features/members.golden` is re-blessed at 15 (its open cluster's
+  band-A cell was a tail cell and is now a living one), and no other golden moves.
+  - _Slope (142.1)._ The profile test asserts `s ≤ −2 y² ÷ (1 + y²)` from 0.05 r_h to r_t ÷ 2 at
+    r_c = 1.5 ly and at the tight case r_c = r_h, where every light class lies on the bound within
+    10⁻⁶, and asserts r_c ≤ r_h first; the ≤ −1.6 from 2 r_h stays. The precondition is also
+    asserted over the 165 catalogued globulars (the widest profile core is 0.624 r_h) and over the
+    headroom test's clusters. T21's rise test adds the level from r_h to 2 r_h at ≤ 3.2: ×2.167,
+    ×1.604 and ×1.730 for bands A–C.
+  - _Length (142.2)._ The nursery's v_drift 0.380 km/s and ℓ 87.5 ly, asserted in 0.34–0.42 km/s
+    and 80–95 ly with ℓ = v_drift × age.
+  - _Count (142.3)._ `ClassCounts` gains `born` and `lost` (living systems per band, net of the
+    runaways, with the binary mix in their mass), `TailWindow` gains `lost` (`M_esc(age)`, or
+    `m₀ μ_ev(age) − M`) and `share()`. Each band's tail is `w × lost_b` at the lost stars' mean
+    mass; a band whose count or mass complement is not positive has no tail, and the fallback
+    for a cluster losing no dwarfs is gone. The runaways are not counted as lost (they are plan 08's).
+    Measured for the nursery: window 146.6 M☉, w = 1 (τ = age), **155 members of 76.8 M☉, mean
+    0.495 M☉** (75/10/11/2% over A–D: 121.0, 15.0, 16.4, 2.8); 216.6 living systems born, 61.5
+    kept. Each band's tail equals its lost stars, so tail plus kept is the 216.6 born.
+    M4: 2,055 members of 591 M☉ (w 0.0032); Palomar 5: 183 of 49 M☉ (w 0.0096).
+  - _Finding (142.3, for a ruling): the nursery's 155 members miss the ruled 180–350._ The
+    research's 310 born came from a single-star mean of 0.77 M☉; `N₀ = M₀ ÷ mean_formed_mass`
+    takes the galaxy's 1.096 M☉ with its companions, while the classes carry only the scratch
+    binary mix (30% at 1.5 times the primary), so `N₀` is about 30% low against the classes'
+    masses and the scale K rises to compensate. The test pins 150–160 provisionally.
+  - _Finding (142.3, for a ruling): 23 of the 165 globulars have no tail._ Where K lifts a band's
+    kept stars above its births, the clamp empties it, and in 26 globulars the living stars kept
+    outnumber those born. 47 Tucanae keeps 1.24 × 10⁶ band-A systems of 1.06 × 10⁶ born (K about 3
+    against band A's depletion ratio 0.39), and ω Centauri 1.48 times its births; both lose their
+    tails (47 Tucanae's was 5,311 members). The cause is the same `N₀` against the classes'
+    masses, with a globular's M ÷ M₀ near μ_ev (0.49 for 47 Tucanae) leaving no room for the
+    depletion. The tests pin 47 Tucanae's empty tail and at most 23 tail-less globulars.
+  - _Retention (142.4)._ `retention.rs`'s module documentation now reads "within 0.005 at or
+    below 0.05 and 3% relative above it".
+  - _Headroom._ Unchanged: 734 clusters, two over the 2,000 target, the fullest cell 4,237 (a
+    core, not a tail); the widest profile core among them is 0.794 r_h.

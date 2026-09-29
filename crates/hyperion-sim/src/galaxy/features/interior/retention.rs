@@ -42,8 +42,8 @@
 //! `log v` (Fritsch and Carlson 1980, SIAM J. Numer. Anal. 17, 238), the low mode's and the
 //! envelope loss's Maxwellians are closed forms, and the weights are the galaxy's own mass
 //! function, so Chabrier's and Kroupa's are both exact. [`retention`] stays as the reference: the
-//! two agree within 0.005 (the fit's acceptance). The table is for the default kick law only. Its
-//! run-time form is not the reference's term for term: the complete fallback and the envelope loss
+//! two agree within 0.005 at or below 0.05 and 3% relative above it (the fit's acceptance; ruling
+//! 142.4). The table is for the default kick law only. Its run-time form is not the reference's term for term: the complete fallback and the envelope loss
 //! are kept whole with their closed-form Maxwellian, where [`retention`] reads their first speed
 //! bin; the two are the same law, and an edit to either must keep the acceptance.
 

@@ -680,11 +680,21 @@ mod tests {
                 .step_by(2),
         );
         let (mut clusters, mut over_target, mut worst) = (0, 0, 0.0_f64);
+        let mut widest_core = 0.0_f64;
         for f in &features {
             let Some(interior) = FeatureInterior::of(galaxy, f) else {
                 continue;
             };
             clusters += 1;
+            // Ruling 142.1: the slope test's theorem holds for r_c ≤ r_h.
+            let model = interior.model();
+            let core = model.profile_core_radius().value() / model.half_mass_radius().value();
+            widest_core = widest_core.max(core);
+            assert!(
+                core <= 1.0,
+                "{:?}: r_c ÷ r_h = {core}",
+                interior.feature().id()
+            );
             let peak = interior.table().peak_candidates(interior.grid());
             worst = worst.max(peak);
             if peak > CELL_TARGET {
@@ -698,7 +708,10 @@ mod tests {
                 interior.feature().id()
             );
         }
-        println!("{clusters} clusters, {over_target} over the target, fullest {worst:.0}");
+        println!(
+            "{clusters} clusters, {over_target} over the target, fullest {worst:.0}, widest core \
+             {widest_core:.3} r_h"
+        );
         assert!(clusters > 50, "{clusters} clusters");
     }
 
@@ -801,8 +814,27 @@ mod tests {
             inside.len() >= 2,
             "levels {inside:?} between r_h and r_t ÷ 2"
         );
+        // Ruling 142.1: from r_h to 2 r_h the slope theorem allows 8 × 2 ÷ 5 = 3.2 a level.
+        let near: Vec<usize> = grid
+            .all_levels()
+            .filter(|l| l.level() > 0)
+            .filter(|l| (r_h..2.0 * r_h).contains(&(4.0 * l.edge().value())))
+            .map(|l| usize::from(l.level()))
+            .collect();
+        assert!(!near.is_empty(), "no level between r_h and 2 r_h");
         for band in [MassBand::A, MassBand::B, MassBand::C] {
             let levels = per_level(band);
+            for &level in &near {
+                let Some(&next) = levels.get(level + 1) else {
+                    continue;
+                };
+                let rise = next / levels[level];
+                println!("{band:?} level {level} (r_h to 2 r_h): ×{rise:.3}");
+                assert!(
+                    rise <= 3.2,
+                    "{band:?}: ×{rise} from level {level} ({levels:.1?})"
+                );
+            }
             for pair in inside.windows(2) {
                 let rise = levels[pair[1]] / levels[pair[0]];
                 println!("{band:?} levels {pair:?}: ×{rise:.3}");

@@ -38,10 +38,18 @@
 //!   lost `M_esc(age) − M_esc(age − τ)` in that time, `M_esc(t) = m₀ μ_ev(t) (1 − s(m₀, t))` (Lamers
 //!   et al. 2005 as built in `kinds::open_cluster`): stellar mass that left, not the gas stellar
 //!   evolution returned. A globular lost `Ṁ τ` on its BM03 history, held at or below `m₀ μ_ev(age)
-//!   − M`. The count is that mass over the lost stars' mean mass, with the band shares of what the
-//!   cluster lost (the canonical minus the depleted living stars), spread uniformly over both sides.
-//!   First population only. Stars lost by gas expulsion, isotropically at about 1 km/s, are outside
-//!   the model (Design note 1's single bound mark).
+//!   − M`. That mass over all the stellar mass the cluster has lost, `M_esc(age)` for an open
+//!   cluster and `m₀ μ_ev(age) − M` for a globular, is the tail's share `w ≤ 1` of its escapers (1
+//!   at `τ = age`). Which stars and how many are the interior's own (ruling 142.3): band by band,
+//!   the living systems born (net of the runaways, with the binary mix) less the living classes
+//!   kept after the scale `K`, clamped at 0, so escapers are the lightest and band A is stripped
+//!   hardest (Baumgardt and Makino 2003). Each band's tail is `w` times its lost systems, at their
+//!   mean mass, spread uniformly over both sides. The tail's mass is then `w` times the interior's
+//!   lost living mass, not L05's: L05's `μ_ev` is a Salpeter-like population's, which puts less
+//!   mass above a young turn-off than the galaxy's function (plan 09's Risks). The tail is labelled
+//!   first population, though a globular's lost stars are counted over both. Stars lost by gas
+//!   expulsion, isotropically at about 1 km/s, are outside the model (Design note 1's single bound
+//!   mark).
 //! - **Multiple populations (T9.h)**: a globular born above 10⁵ M☉ splits every class but the tail
 //!   into its first population's share and its second's, whose core is 0.7 times the cluster's.
 //!
@@ -120,8 +128,24 @@ pub struct TailWindow {
     pub length: LightYears,
     /// The time its oldest star has drifted, `τ = ℓ ÷ v_drift`.
     pub duration: Years,
-    /// The stellar mass the cluster lost in that time, M☉: what the tail holds.
+    /// The stellar mass the cluster lost in that time, M☉.
     pub mass: SolarMasses,
+    /// All the stellar mass the cluster has lost since birth, M☉: `M_esc(age)` for an open
+    /// cluster, `m₀ μ_ev(age) − M` for a globular.
+    pub lost: SolarMasses,
+}
+
+impl TailWindow {
+    /// The tail's share of every star the cluster has lost, `w = mass ÷ lost`, at most 1; 0 if it
+    /// has lost nothing.
+    #[must_use]
+    pub fn share(&self) -> f64 {
+        if self.lost.value() > 0.0 {
+            (self.mass.value() / self.lost.value()).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
 }
 
 /// The tail window of `model` in `galaxy`, its tail cut at `reach` from the centre (module
@@ -157,21 +181,23 @@ pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> 
     let m0 = model.initial_mass();
     let lost_stars =
         (m0.value() * evolution_survival(Years::new(age)) - model.mass().value()).max(0.0);
-    let mass = match model.kind() {
+    let (mass, lost) = match model.kind() {
         ClusterKind::Open => {
             let escaped = |t: f64| {
                 let t = Years::new(t.max(0.0));
                 m0.value() * evolution_survival(t) * (1.0 - disruption_survival(m0, t))
             };
-            (escaped(age) - escaped(age - tau)).max(0.0)
+            let lost = escaped(age).max(0.0);
+            ((lost - escaped(age - tau)).max(0.0), lost)
         }
-        ClusterKind::Globular => (model.mass_loss_rate() * tau).min(lost_stars),
+        ClusterKind::Globular => ((model.mass_loss_rate() * tau).min(lost_stars), lost_stars),
     };
     TailWindow {
         drift_speed: drift / LIGHT_YEARS_PER_YEAR_PER_KM_S,
         length: LightYears::new(length),
         duration: Years::new(tau),
         mass: SolarMasses::new(mass),
+        lost: SolarMasses::new(lost),
     }
 }
 
@@ -186,6 +212,10 @@ pub struct ClassCounts {
     pub depleted_slope: f64,
     /// The runaway share of band E, `f_ej`, for a young cluster; 0 otherwise.
     pub runaway_share: f64,
+    /// Each band's living systems born, net of the runaways (module documentation).
+    pub born: [f64; 5],
+    /// Each band's living systems lost: born less the living classes kept, at least 0.
+    pub lost: [f64; 5],
 }
 
 /// The depleted slope of a cluster (module documentation).
@@ -348,8 +378,8 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
 
     // Raw counts before the mass scaling: (class, count, shape).
     let mut raw: Vec<ClassCount> = Vec::new();
-    let mut lost = [0.0; 5];
-    let mut lost_mass = [0.0; 5];
+    let mut born = [0.0; 5];
+    let mut born_mass = [0.0; 5];
     for band in MassBand::ALL {
         let (lo, hi) = (
             MASS_BAND_EDGES[band.index()],
@@ -368,8 +398,6 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
         let live_hi = hi.min(m_to);
         let (n_live, m_live) = moments(f, lo, live_hi, |m| depletion(m, alpha));
         let (n_canon, m_canon) = moments(f, lo, live_hi, |_| 1.0);
-        lost[band.index()] = n0 * (n_canon - n_live).max(0.0);
-        lost_mass[band.index()] = n0 * (m_canon - m_live).max(0.0);
         let wd_lo = lo.max(m_to);
         let wd_hi = hi.min(WHITE_DWARF_PROGENITOR_MAX);
         let (n_wd, m_wd_initial) = moments(f, wd_lo, wd_hi, |_| 1.0);
@@ -387,6 +415,9 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
                 continue;
             }
             let b = binary_fraction(generation);
+            born[band.index()] += n0 * n_canon * share * runaway;
+            born_mass[band.index()] +=
+                n0 * m_canon * share * runaway * (1.0 - b + b * BINARY_MASS_FACTOR);
             if n_live > 0.0 {
                 let mean = m_live / n_live;
                 for (multiplicity, part, mass) in [
@@ -491,60 +522,42 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             ))
     });
 
-    // Tails: members lost within the reach, by what was lost.
+    // Tails: the interior's lost stars, band by band, times the window's share of them.
+    let mut kept = [0.0; 5];
+    let mut kept_mass = [0.0; 5];
+    for c in raw.iter().filter(|c| c.class.kind == ClassKind::Living) {
+        kept[c.class.band.index()] += c.expected;
+        kept_mass[c.class.band.index()] += c.expected * c.class.mean_mass.value();
+    }
+    let mut lost = [0.0; 5];
+    let mut lost_mass = [0.0; 5];
+    for i in 0..5 {
+        let (n, m) = (born[i] - kept[i], born_mass[i] - kept_mass[i]);
+        if n > 0.0 && m > 0.0 {
+            lost[i] = n;
+            lost_mass[i] = m;
+        }
+    }
     let mut tails = [None; 5];
     let window = tail_window(galaxy, model, reach);
-    if window.mass.value() > 0.0 && window.length.value() > 0.0 {
-        let lost_total: f64 = lost.iter().sum();
-        let (shares, masses): ([f64; 5], [f64; 5]) = if lost_total > 0.0 {
-            (
-                lost.map(|l| l / lost_total),
-                std::array::from_fn(|i| {
-                    if lost[i] > 0.0 {
-                        lost_mass[i] / lost[i]
-                    } else {
-                        0.0
-                    }
-                }),
-            )
-        } else {
-            // A cluster losing no dwarfs yet loses the living stars in their own proportions.
-            let mut s = [0.0; 5];
-            let mut m = [0.0; 5];
-            for c in raw.iter().filter(|c| c.class.kind == ClassKind::Living) {
-                s[c.class.band.index()] += c.expected;
-                m[c.class.band.index()] += c.expected * c.class.mean_mass.value();
-            }
-            let total: f64 = s.iter().sum();
-            let masses = std::array::from_fn(|i| if s[i] > 0.0 { m[i] / s[i] } else { 0.0 });
-            (s.map(|x| if total > 0.0 { x / total } else { 0.0 }), masses)
-        };
-        let mean_lost: f64 = shares.iter().zip(&masses).map(|(s, m)| s * m).sum();
-        if mean_lost > 0.0 {
-            let members = window.mass.value() / mean_lost;
-            for band in MassBand::ALL {
-                let share = shares[band.index()];
-                if share > 0.0 {
-                    let (lo, hi) = (
-                        MASS_BAND_EDGES[band.index()],
-                        MASS_BAND_EDGES[band.index() + 1],
-                    );
-                    tails[band.index()] = Some(TailCount {
-                        class: MemberClass {
-                            kind: ClassKind::Tail,
-                            band,
-                            generation: Generation::First,
-                            multiplicity: Multiplicity::Single,
-                            initial_mass_range: (
-                                SolarMasses::new(lo),
-                                SolarMasses::new(hi.min(m_to)),
-                            ),
-                            mean_mass: SolarMasses::new(masses[band.index()]),
-                        },
-                        expected: members * share,
-                        length: window.length,
-                    });
-                }
+    let w = window.share();
+    if w > 0.0 && window.length.value() > 0.0 {
+        for band in MassBand::ALL {
+            let i = band.index();
+            if lost[i] > 0.0 {
+                let (lo, hi) = (MASS_BAND_EDGES[i], MASS_BAND_EDGES[i + 1]);
+                tails[i] = Some(TailCount {
+                    class: MemberClass {
+                        kind: ClassKind::Tail,
+                        band,
+                        generation: Generation::First,
+                        multiplicity: Multiplicity::Single,
+                        initial_mass_range: (SolarMasses::new(lo), SolarMasses::new(hi.min(m_to))),
+                        mean_mass: SolarMasses::new(lost_mass[i] / lost[i]),
+                    },
+                    expected: lost[i] * w,
+                    length: window.length,
+                });
             }
         }
     }
@@ -553,6 +566,8 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
         tails,
         depleted_slope: alpha,
         runaway_share: ejected,
+        born,
+        lost,
     }
 }
 
