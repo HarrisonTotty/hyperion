@@ -164,15 +164,15 @@ fn neutron_stars_black_holes_and_pulsars_of_the_named_clusters() {
     eprintln!("{report}");
     let ns = |name: &str| table(&galaxy, &model(&galaxy, name)).expected_of(ClassKind::NeutronStar);
     let bh = |name: &str| model(&galaxy, name).black_hole_count();
-    // P09.T9.b (ruling 126.3): 47 Tucanae 1,000–5,000 neutron stars, M4 100–350, Palomar 5 under
-    // one expected.
+    // P09.T9.b (ruling 126.3): 47 Tucanae 1,000–5,000 neutron stars, Palomar 5 under one
+    // expected. M4 170–600 (ruling 140.5): 126.3's 100–350, stated at w 0.181 and the scratch
+    // Chabrier scale 0.68, × 1.46–1.54 for the retention at v_eff 50 km/s and w 0.2675 (as ruling
+    // 137.3) and × 1.13–1.18 for the progenitors per M☉ formed at the fitted 0.9201. Ye et al.
+    // 2019's CMC models give 150–225 at M4's mass, about half the measured 396: a tension on w
+    // per primary-born neutron star, re-checked at P11.T6/T11 with the companions' neutron stars.
     let (tuc, m4, pal) = (ns(TUC_47), ns(M4), ns(PAL_5));
     assert!((1_000.0..=5_000.0).contains(&tuc), "47 Tuc: {tuc}");
-    // Provisional hold, a finding for the orchestrator (rulings 137 and 138): M4's window was
-    // stated at the low-mode share 0.181 and plan 02's scratch Chabrier scale 0.68; at the
-    // measured w 0.2675 and the fitted scale 0.92 it keeps 396 expected neutron stars. The window
-    // stands here; the measured count is held until the shift is ruled on.
-    assert!((m4 / 396.0 - 1.0).abs() < 0.05, "M4: {m4}");
+    assert!((170.0..=600.0).contains(&m4), "M4: {m4}");
     assert!(pal < 1.0, "Palomar 5: {pal}");
     // P09.T9.c (ruling 126.4): none in the dynamically old M4, 20–400 in 47 Tucanae, 3,000–20,000
     // in ω Centauri.

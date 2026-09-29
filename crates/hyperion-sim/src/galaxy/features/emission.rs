@@ -166,10 +166,11 @@ mod tests {
         let young = expected_ionising_stars(&galaxy, &nursery(1e3), Years::new(1e6));
         let twice = expected_ionising_stars(&galaxy, &nursery(2e3), Years::new(1e6));
         assert!((twice / young - 2.0).abs() < 1e-12);
-        // About one star above 15 M☉ per 400–600 M☉ formed at plan 02's scratch scale 0.68.
-        // Provisional hold, a finding for the orchestrator (ruling 138): at the fitted 0.92 it is
-        // one per 270 M☉ (3.70 per 10³ M☉); the window stands here and the measured value is held.
-        assert!((young / 3.70 - 1.0).abs() < 0.05, "{young}");
+        // About one star above 15 M☉ (O9.5V and earlier: 15.5–16.5 M☉, Martins et al. 2005,
+        // Tables 1 and 4) per 270 M☉ formed, counting primaries per M☉ formed with companions;
+        // 210 under Kroupa's function counting every star, 330 under Salpeter's over 0.1–100 M☉.
+        // So 3.0–4.8 per 10³ M☉ (ruling 140.4).
+        assert!((3.0..=4.8).contains(&young), "{young}");
         let old = expected_ionising_stars(&galaxy, &nursery(1e3), Years::new(3e7));
         assert!(old.abs() < 1e-15, "{old}");
     }

@@ -1550,7 +1550,10 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     not the anchors. Mean e ÷ e_max is 0.55–0.60, against (1 + η) ÷ (2 + η), because stability
     rejects eccentric outer orbits.
   - _Consequences._ Chabrier's function as published gives 1.463 stars per system, just above
-    T1.d's 1.33–1.45; the default gives 1.436 and Kroupa 1.406. The barycentre test's 1 m is
+    T1.d's 1.33–1.45; the default gives 1.436 and Kroupa 1.406. At plan 15's fitted Chabrier
+    scale 0.92 (ruling 138) the default's spine construction gives 1.457, also just above the
+    bracket; `quadrature.rs` prints it and asserts only Kroupa's, and T1.d's bracket holds on the
+    drawn companions, 1.437 (ruling 140.8). The barycentre test's 1 m is
     exceeded at the positions' resolution (1.48 m with a star 1.5 × 10¹⁶ m out). The P11.T13
     triple is now `0x4200_2cb2_0000_000d`, because `…0009` draws as a binary.
 - **Ruling 79's placement weight was built and taken out again (ruling 81.1).** A factor
@@ -2035,6 +2038,19 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   construction's count gives 1.457 under the default, which `stars_per_system_lie_in_the_fates_bracket`
   now prints (it asserts Kroupa's 1.406). All stars below 0.5 M☉ over primaries below 8 M☉:
   69.84% (the census check of P15.T4.b, 67.8–71.0%).
+- **Findings held for P11.T6/T11 by rulings 140 and 141 (no output moves now).** The model counts
+  massive stars, core collapses and Type Ia progenitors on primaries only, per M☉ formed with the
+  companions' mass included. (1) Ruling 140.9: once massive companions are counted as O stars and
+  core collapses, massive stars per M☉ formed may rise ×1.3–1.5; re-check there the tracer-terms
+  star formation rate (then about 2.4–2.7 M☉ a year against Licquia and Newman's 1.65 ± 0.19 and
+  Chomiuk and Povich's 1.9 ± 0.4) and the core-collapse rate (about 2.5–2.8 a century against
+  Rozwadowska et al.'s 1.63 ± 0.46). (2) Ruling 140.5: M4's 396 neutron stars against Ye et al.
+  2019's 150–225, a tension on w per primary-born neutron star, re-checked with the companions'
+  neutron stars. (3) Ruling 141.7: the model has 0.76 times Kroupa's 2.5–8 M☉ primaries per M☉
+  formed (0.0312 against 0.0409). If the counted 2.5–8 M☉ stars, companions included, differ from
+  Kroupa's 0.0409 by more than 10%, the Type Ia delay-time distribution is normalised per
+  progenitor formed rather than per M☉ formed, which moves the Type Ia rate, the ancient share and
+  the Type Ia entry count.
 - **Ruling 129.4 as built** (round 9b, `bin4f`, 2026-09-28; unwired, nothing generated moves; the
   `stellar/binary_timelines` golden moves, re-blessed at version 14 for the version 15 batch).
   - _129.4a, the pinned hold._ `Engine::die` holds a pinned primary whose own track dies first at

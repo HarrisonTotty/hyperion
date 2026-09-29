@@ -310,12 +310,17 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
    first 3–5 Myr), then by an independent mark a bound open cluster (the bound fraction, 10–15%) or
    an unbound association that dissolves at an age drawn on 30–100 Myr. The kind is therefore a
    function of the evaluation time, as a star's state is. Reason: the three kinds' counts then agree
-   with each other and with φ(age) by construction: about 2,100 nurseries per Myr gives 10⁴
-   star-forming regions, 240–360 bound clusters per Myr and, with the association mass floor as a
-   parameter of the generator version, tens of thousands of associations. An association's size is
-   its expansion speed × age, 300 ly at 100 Myr and 3 km/s. The brainstorm lists the three as rows
-   of one table with counts of their own and says only that "the catalogue splits by marking"; one
-   process split by marks is that, and three independent processes could not keep their counts,
+   with each other and with φ(age) by construction: about 3,000 nurseries per Myr gives 10⁴
+   star-forming regions, 300–480 bound clusters per Myr and, with the association mass floor as a
+   parameter of the generator version, 1.2–2.1 × 10⁵ associations (ruling 140.2–140.3, amending
+   the earlier 2,100 nurseries, 240–360 clusters and "tens of thousands", derived at plan 02's
+   scratch Chabrier scale 0.68: the Galaxy's 1.46–2.3 M☉ a year, Kroupa-normalised from
+   massive-star tracers by Licquia and Newman 2015 and Chomiuk and Povich 2011, put in the default
+   mass function's own terms at the fitted 0.92, × 1.26–1.29, at the bound fraction 0.125; the
+   associations are that rate × (1 − Γ_b) × their mean stage of about 61 Myr). An association's
+   size is its expansion speed × age, 300 ly at 100 Myr and 3 km/s. The brainstorm lists the three
+   as rows of one table with counts of their own and says only that "the catalogue splits by
+   marking"; one process split by marks is that, and three independent processes could not keep their counts,
    φ(age) and the four-in-five rule consistent. The association's age limit is discussed under
    Risks.
 2. **φ(age) is derived, not drawn.** φ(a) = f_n × [Γ_b m_b(a) + (1 − Γ_b)(1 − G(a))], where f_n ≈
@@ -494,8 +499,8 @@ cell; registry golden. Acceptance:
   disc's formation rate, the mass function, the bound fraction, the embedded duration, G(a).
   `open_cluster::dissolution_time(m0) = 1.3 Gyr × (m0 ÷ 10⁴ M☉)^0.62` and `present_mass(m0, age)`
   from Lamers et al. (2005), and `surviving_mass_fraction(age)` = m_b(a) by a fixed quadrature over
-  the mass function. Files: `features/shares.rs`, `features/kinds/open_cluster.rs`. Tests: 240–360
-  bound clusters born per Myr and about 6 × 10⁴ alive at Milky Way parameters (5–8 × 10⁴), about
+  the mass function. Files: `features/shares.rs`, `features/kinds/open_cluster.rs`. Tests: 300–480
+  bound clusters born per Myr (ruling 140.2; 373 at version 15) and about 6 × 10⁴ alive at Milky Way parameters (5–8 × 10⁴), about
   half under 100 Myr (0.45–0.60), a few per cent over 1 Gyr (0.04–0.12), mean life 165–205 Myr
   (ruling 118.1: Lamers et al. 2005's 1.3 Gyr is the total disruption time; the earlier 295 Myr
   was 1.3 Gyr ÷ 0.62, and "about 10⁵ … a third" followed from it; Cantat-Gaudin et al. 2020's local
@@ -539,7 +544,8 @@ cell; registry golden. Acceptance:
   stay under 16,384 over 200 seeds and for the heaviest galaxy the parameter ranges allow; the
   candidate count is clamped to the index with a `debug_assert!`, as plan 03 does.
 - **P09.T3.c Counts and benchmark.** Slow test at Milky Way parameters: about 10⁵ open clusters, 10⁴
-  star-forming regions, associations within 10⁴–1.5 × 10⁵, clouds in the thousands, each within
+  star-forming regions, associations within 1.2–2.1 × 10⁵ (ruling 140.3; 158,664 at version 15),
+  clouds in the thousands, each within
   Poisson error of the process's own expected count. Criterion benches: one inner-disc cell (target
   under 10 ms), the full globular walk (target under 0.3 s).
 
@@ -577,7 +583,10 @@ Parallel with each other after P09.T3.b.
   expectation; with w forced to 1 in a test build the same region holds under a tenth of that (the
   defect this guards against).
 - **P09.T4.d Emission classes.** `EmissionClass::of(record, t)` per design note 17; dark cloud for
-  clouds; remnant shell and pulsar wind nebula come from phase 4. Tests: table-driven.
+  clouds; remnant shell and pulsar wind nebula come from phase 4. Tests: table-driven, and a
+  nursery's expected ionising stars at 1 Myr 3.0–4.8 per 10³ M☉ formed (ruling 140.4): about one
+  primary above 15 M☉ (O9.5V and earlier, Martins et al. 2005) per 270 M☉ formed with companions,
+  against 210 under Kroupa's function counting every star and 330 under Salpeter's.
 
 #### P09.T5 Features in the gas field
 
@@ -654,7 +663,9 @@ except that P09.T9.d needs P09.T9.c.
   binary's, van den Heuvel et al. 2000; ruling 126.3). White dwarfs' 1 km/s kick applies to open
   clusters. Tests (ruling 126.3, amending 96.3 and 106.4 for clusters): 18–26% at 100 km/s, 15–25%
   at 50, 5–17% at 20, under 1% for a 10⁴ M☉ open cluster; 1,000–5,000 neutron stars in 47 Tucanae,
-  100–350 in M4, under one expected in Palomar 5; no cluster's pulsars outnumber its neutron stars.
+  170–600 in M4 (ruling 140.5: 126.3's 100–350 at w 0.181 and the scratch scale 0.68, carried to
+  w 0.2675 and the fitted 0.9201; 396 at version 15, against Ye et al. 2019's 150–225, a tension
+  on w per primary re-checked at P11.T6/T11), under one expected in Palomar 5; no cluster's pulsars outnumber its neutron stars.
 - **P09.T9.c Black holes.** Retained at birth from the kick law with complete fallback unkicked
   (about four fifths). Mass fraction today f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ k t ÷ t★) − 1] ÷ ψ₁, floored
   at zero, with the clock factor k = `BH_CLOCK_FACTOR` = 2.5 for the cluster's denser past (ruling
@@ -854,8 +865,10 @@ property test that `claims` is a pure function of its arguments; boundary cases 
   applied to each population's formation history and the mass formed per system, plan 02's
   `Galaxy::mean_formed_mass`. `ancient_share(population)`: the share of layer D that exploded before
   the interval and left nothing, 2–4%, which `ShareMatrix` removes from layer D's field share
-  (version bump with P09.T35). Tests: 0.4–1 Type Ia a century over seeds, 0.40 at Milky Way
-  parameters to 15%; a fifth of delays under 0.1 Gyr and 62% under 1 Gyr.
+  (version bump with P09.T35). Tests: 0.4–1 Type Ia a century over seeds, about 0.46 at Milky
+  Way parameters, within 0.42–0.53 (ruling 141: the earlier 0.40 ± 15% was the model's own
+  estimate at the scratch Chabrier scale 0.68, and the fitted scale raised the formed mass 7.9%;
+  Li et al. 2011's 0.54 ± 0.12 gives the bottom); a fifth of delays under 0.1 Gyr and 62% under 1 Gyr.
 - **P09.T18.b The delay-first draw.** `IaProgenitor::draw(stream, population)`: age ∝ formation
   history × ψ, time of explosion within the interval, channel given the delay, the two masses given
   channel and delay (scratch closed forms until plan 15's samplers; the primary always at least 2.5
@@ -1306,7 +1319,9 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   rule says φ falls to the bound fraction "by 30–100 Myr". Resolved as dissolution ages on 30–100
   Myr, which puts 80–90% of core collapses inside features (ruling 118.2); "under 30 Myr" is read as
   the age at which an association still has O stars. The association count then tends to the top of
-  "tens of thousands". The two sentences of the brainstorm do not agree as written (an association
+  "tens of thousands", and at the fitted Chabrier scale passes it: 1.2–2.1 × 10⁵ above the 100 M☉
+  floor, some 10⁴ of them above 10³ M☉, the rich OB associations "tens of thousands" fits (ruling
+  140.3). The two sentences of the brainstorm do not agree as written (an association
   "under about 30 Myr" cannot hold the stars that keep φ above the bound fraction until 100 Myr, nor
   reach 300 ly at a few km/s), and the brainstorm should settle which it means. If it settles on 30
   Myr, only G(a) and the expansion speeds change, by a version bump.
@@ -1831,7 +1846,9 @@ classes)` for the centre (P09.T27) and the tests. A class's count sits at word `
     gone. Median nebula 1.45 × 10⁴ yr; plan 06's 10³–10^5.5 yr test passes.
   - _T18.a (136.5–7)._ The seed window is 0.2–1 Type Ia a century (measured 0.25–0.87 over 24
     seeds; the fixture 0.427). The ancient share is 4.1–4.6% of the old populations' layer D and
-    0.26% of the young disc's, "no longer a layer-D system" whatever the channel (test 3.5–5%).
+    0.26% of the young disc's, "no longer a layer-D system" whatever the channel (test 3.5–5%;
+    at version 15, 3.6–4.1% and test 3.3–4.5%, ruling 141.6: 1.3 × 10⁻³ × 1.096 M☉ per system ÷
+    layer D's 3.4%, 4.17% over a Hubble time; the fixture's rate 0.462, test 0.42–0.53).
     `MIN_DELAY` is plan 06's τ(8 M☉) at solar composition and median draws, 42.55 Myr (asserted to
     0.1%); `A` = 2.162 × 10⁻¹³; 18.6% of delays under 0.1 Gyr, 61.7% under 1 Gyr.
     `draw_floor` and `drawable_rate_per_year` are removed: the draw proposes the delay itself

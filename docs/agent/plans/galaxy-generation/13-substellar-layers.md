@@ -236,10 +236,11 @@ signature is given, and where it is not, the task that builds it is named.
    own mean number of stars per system, 1 plus the mass-function average of plan 02's
    `mean_companions`, which plan 02's tests put at 1.33–1.45. Since its 2026-09-21 revision the
    brainstorm uses that ratio too: about 30 per system and six to a cell. The peak system density
-   is 19.5 per ly³ at Milky Way values (22.4 under Kroupa's); 15.8 median, 23.5 at the 90th
-   percentile, up to 53 in 2,000 seeds. That gives a saturation threshold of 36 per star for Milky
-   Way values (32 under Kroupa's) and 44 for the median seed; the default saturates the centre in
-   about 1 galaxy in 130 (ruling 125). So rogue planets come to 28–30 per system and five and a half
+   is 18.4 per ly³ at Milky Way values (22.4 under Kroupa's), with 1.437 stars per system; about 15
+   median and up to about 51 in 2,000 seeds. That gives a saturation threshold of 37.5 per star for
+   Milky Way values (32 under Kroupa's) and 45 for the median seed; the default saturates the centre
+   in about 1 galaxy in 170 (ruling 125, re-derived at the fitted Chabrier scale by ruling 140.6:
+   the figures at the scratch 0.68 were 19.5 per ly³, 36 and 44 per star and 1 in 130). So rogue planets come to 28–30 per system and five and a half
    to six to a cell at the reference density. See Risks.
 
 3. **One abundance for every population.** "The same populations and ages as the stars" is read as:
@@ -287,12 +288,12 @@ signature is given, and where it is not, the task that builds it is named.
    only where Σw > C. Unsaturated cells stay bit-identical, and `check_index_headroom` passes by
    construction for every galaxy and every abundance. The abundance is always the parameter's. The
    saturation threshold per system, the abundance at which the densest cell reaches C, is 992.5 ÷
-   the sum of the components' peak densities (19.5 per ly³ at Milky Way values, 22.4 under
-   Kroupa's; 15.8 median and up to 53 in 2,000 seeds). The default 21 per star saturates the centre
-   in about one galaxy in 130, whose nuclear disc is compact; the worst of 2,000 seeds loses 9 ×
-   10⁻⁵ of its rogue planets inside a 71 ly sphere's volume. P13.T4's census counts the saturated
-   density. The brown-dwarf layer needs no saturation: its fullest 16 ly cell expects at most about
-   56,000 candidates against 2¹⁹, and reaches its headroom only at about 490 systems per ly³.
+   the sum of the components' peak densities (18.4 per ly³ at Milky Way values, 22.4 under
+   Kroupa's; about 15 median and up to about 51 in 2,000 seeds; ruling 140.6). The default 21 per
+   star saturates the centre in about one galaxy in 170 (12 of 2,000 seeds), whose nuclear disc is
+   compact; the worst of 2,000 seeds loses 7.3 × 10⁻⁵ of its rogue planets (9 × 10⁻⁵ at the scratch
+   Chabrier scale 0.68). P13.T4's census counts the saturated density. The brown-dwarf layer needs
+   no saturation: its fullest 16 ly cell expects at most about 55,000 candidates against 2¹⁹, and reaches its headroom only at about 490 systems per ly³.
 
 9. **Asking and the floor.** The brainstorm says the layers are walked "only when the caller asks"
    and that the mass floor "gains two steps". Plan 03 already carries both: the builder's
@@ -401,15 +402,19 @@ bands when it lands). `Galaxy` builds and holds a `SubstellarAbundance` and feed
   `Galaxy`, plan 03's `placement` (headroom check only).
 - Tests:
   - Milky Way fixture (ruling 125): brown dwarfs per system 0.23–0.27; rogue planets per system
-    27–31; the saturation threshold 35.9 per star ±3% (31.8 ±3% under Kroupa's);
+    27–31; the saturation threshold 37.5 per star ±3% (ruling 140.6: 992.5 ÷ (18.42 × 1.437);
+    31.8 ±3% under Kroupa's);
     `is_saturated()` false; `check_index_headroom` passes.
   - With `with_rogue_planets_per_star(60.0)` on the Milky Way fixture the central cell saturates
     and its mean is at most `largest_headroom_mean`, a solar-circle cell is bit-identical to the
-    unsaturated one, `rogue_planets_per_system` is 60 × 1.4178, and the headroom passes.
+    unsaturated one, `rogue_planets_per_system` is 60 × the measured stars per system (1.437 at
+    the fitted Chabrier scale), and the headroom passes.
   - Over 2,000 seeds (slow): the default saturates 10–20 seeds; the smallest threshold is 12–14.5
     per star and the median 40–48; the worst seed loses under 10⁻³ of its rogue planets; the
     brown-dwarf layer's fullest 16 ly cell expects under 65,536 candidates, ⅛ of 2¹⁹. (The "within
-    20% of the brainstorm's 31" test is withdrawn.)
+    20% of the brainstorm's 31" test is withdrawn.) Re-run at the fitted Chabrier scale (ruling
+    140.6): 12 seeds saturated, smallest 13.52, median 45.26, worst loss 7.3 × 10⁻⁵, fullest
+    brown-dwarf cell 54,688; the windows hold.
   - For the five stellar bands `ShareMatrix::share` is bit-identical to before.
 - Acceptance: the tests pass; every stellar golden file is unchanged.
 
@@ -717,7 +722,8 @@ Slow tests in `crates/hyperion-sim/tests/substellar_statistics.rs` and Criterion
   function, with 0.87 times Kroupa's systems. _Superseded by ruling 125:_ the peak system density
   is 19.5 per ly³ at Milky Way values (22.4 under Kroupa's), 15.8 for the median seed and up to 53,
   so the saturation threshold is 36 per star for Milky Way values (32 under Kroupa's) and 44 for the
-  median seed (Design notes 2 and 8, P13.T2's tests). The over-threshold test asks for 60 per star.
+  median seed (Design notes 2 and 8, P13.T2's tests). _Superseded by ruling 140.6 at the fitted
+  Chabrier scale:_ 18.4 per ly³, 37.5 per star and 45 for the median seed. The over-threshold test asks for 60 per star.
 - **Two knobs for one request.** Plan 03 carries both a `SubstellarRequest` and room in `MassFloor`.
   Design note 9 ties them; dropping `SubstellarRequest` in favour of the floor alone would be
   simpler and is a change to plan 03's signature that its author chose to avoid.

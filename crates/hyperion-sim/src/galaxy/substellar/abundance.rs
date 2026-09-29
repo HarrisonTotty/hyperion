@@ -19,10 +19,10 @@
 //! The *saturation threshold* is the abundance at which the galaxy's densest cell reaches C: C over
 //! the bound on the total system density over a root octant, the bound
 //! [`check_index_headroom`](crate::galaxy::placement::check_index_headroom) takes. Below it nothing
-//! saturates. For Milky Way values it is 35.9 per star (31.8 under Kroupa's function), and 44 for
-//! the median seed; the default 21 saturates the centre in about one galaxy in 130, whose nuclear
-//! disc is compact (ruling 125). The brown dwarfs need no saturation: their fullest 16 ly cell
-//! expects at most some 56,000 candidates against 2¹⁹.
+//! saturates. For Milky Way values it is 37.5 per star (31.8 under Kroupa's function), and 45 for
+//! the median seed; the default 21 saturates the centre in about one galaxy in 170, whose nuclear
+//! disc is compact (rulings 125 and 140.6). The brown dwarfs need no saturation: their fullest 16 ly
+//! cell expects at most some 55,000 candidates against 2¹⁹.
 
 use super::params::SubstellarParams;
 use crate::galaxy::Galaxy;
@@ -110,23 +110,23 @@ impl SubstellarAbundance {
     }
 
     /// The saturation threshold per system: the abundance at which the galaxy's densest
-    /// rogue-planet cell reaches [`rogue_planet_saturation_density`], about 51 for Milky Way
-    /// values (ruling 125; the name is the former cap's, kept for the parameters panel).
+    /// rogue-planet cell reaches [`rogue_planet_saturation_density`], about 54 for Milky Way
+    /// values (rulings 125 and 140.6; the name is the former cap's, kept for the parameters panel).
     #[must_use]
     pub const fn rogue_planet_cap_per_system(&self) -> f64 {
         self.rogue_planet_cap_per_system
     }
 
-    /// [`rogue_planet_cap_per_system`](Self::rogue_planet_cap_per_system) per star: 35.9 for Milky
-    /// Way values (31.8 under Kroupa's function), 44 for the median seed and 13.1 for the most
-    /// compact nuclear disc in 2,000 seeds (ruling 125).
+    /// [`rogue_planet_cap_per_system`](Self::rogue_planet_cap_per_system) per star: 37.5 for Milky
+    /// Way values (31.8 under Kroupa's function), 45 for the median seed and 13.5 for the most
+    /// compact nuclear disc in 2,000 seeds (rulings 125 and 140.6).
     #[must_use]
     pub fn rogue_planet_cap_per_star(&self) -> f64 {
         self.rogue_planet_cap_per_system / self.mean_stars_per_system
     }
 
     /// Whether the abundance exceeds the saturation threshold, so that the galaxy's densest
-    /// rogue-planet cells hold fewer than a × ρ: in about one galaxy in 130 at the default, and
+    /// rogue-planet cells hold fewer than a × ρ: in about one galaxy in 170 at the default, and
     /// never for Milky Way values. The parameters panel's `rogue_planets_capped` reads this.
     #[must_use]
     pub fn is_saturated(&self) -> bool {
@@ -177,15 +177,13 @@ mod tests {
     }
 
     /// P13.T2's Milky Way figures (ruling 125): 0.23–0.27 brown dwarfs and 27–31 rogue planets per
-    /// system, a saturation threshold of 35.9 per star ±3% (31.8 ±3% under Kroupa's function), not
-    /// saturated, and room in the index. Provisional hold, a finding for the orchestrator (ruling
-    /// 138): at Chabrier's fitted scale 0.92, not the scratch 0.68, the default's threshold is
-    /// 37.49 per star (the octant bound falls to 18.42 per ly³ and stars per system rise to 1.437),
-    /// and it is held at that value ±3% until ruling 125.4's figure is re-derived.
+    /// system, a saturation threshold of 37.5 per star ±3% (ruling 140.6: 992.5 ÷ (18.42 × 1.437),
+    /// the octant bound per ly³ times the stars per system at Chabrier's fitted scale 0.92; 31.8
+    /// ±3% under Kroupa's function), not saturated, and room in the index.
     #[test]
     fn the_milky_way_fixture_has_the_plan_s_abundances() {
         for (kind, threshold_per_star) in [
-            (MassFunctionKind::Chabrier, 37.49),
+            (MassFunctionKind::Chabrier, 37.5),
             (MassFunctionKind::Kroupa, 31.8),
         ] {
             let galaxy = milky_way(kind);
@@ -287,7 +285,9 @@ mod tests {
     /// Over 2,000 seeds (P13.T2, ruling 125): the default saturates the centre of 10–20 seeds, the
     /// smallest threshold is 12–14.5 per star and the median 40–48, the worst seed loses under 10⁻³
     /// of its rogue planets, and the brown dwarfs' fullest 16 ly cell expects under 65,536
-    /// candidates, an eighth of 2¹⁹.
+    /// candidates, an eighth of 2¹⁹. Re-run at the fitted Chabrier scale (ruling 140.6, whose
+    /// thresholds scale × 1.044): 12 seeds saturated, the smallest threshold 13.52 per star, the
+    /// median 45.26, the worst seed losing 7.3 × 10⁻⁵ and the fullest brown-dwarf cell 54,688.
     #[test]
     #[ignore = "slow: builds the fields of 2,000 galaxies"]
     fn the_default_saturates_few_galaxies_and_loses_almost_nothing() {

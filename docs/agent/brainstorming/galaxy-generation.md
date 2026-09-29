@@ -366,7 +366,7 @@ Milky Way figures:
 | ---------------------------- | -------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Globular cluster             | 80–800, with the dark halo's mass; the Milky Way has about 160 | up to 500 ly                          | 10⁴–10⁶ systems, coeval and old, split by class and dynamically evolved | 40% in situ (bulge and thick disc), the rest the accreted halo                                                               |
 | Open cluster                 | about 10⁵                                                      | 10–100 ly                             | 10²–10⁴ systems, coeval, a few Myr to several Gyr old                   | Young disc under 100 Myr, the old thin disc beyond                                                                           |
-| OB association               | tens of thousands                                              | up to 300 ly: expansion speed × age   | Unbound and under about 30 Myr                                          | Young disc, so the arms                                                                                                      |
+| OB association               | about 1.5 × 10⁵ above 100 M☉, some 10⁴ of them above 10³ M☉    | up to 300 ly: expansion speed × age   | Unbound and under about 30 Myr                                          | Young disc, so the arms                                                                                                      |
 | Star-forming region          | about 10⁴                                                      | 10–300 ly                             | An embedded cluster still forming, protostars, gas                      | Young disc                                                                                                                   |
 | Molecular cloud, dark nebula | thousands                                                      | 50–300 ly                             | None: gas and dust only                                                 | Dust field                                                                                                                   |
 | Supernova remnant            | about 10⁴, a thousand or two of them bright                    | 5–900 ly                              | It is a system: the star that died                                      | Four in five core collapses are inside associations, which hold a quarter of the shells; Type Ia shells follow the old stars |
@@ -385,9 +385,9 @@ bore them, falling to the bound fraction of about 0.1 by 30–100 Myr. It enters
 young field's age distribution.
 
 Open clusters are not all young. They dissolve in 1.3 Gyr × (M ÷ 10⁴ M☉)^0.62 (Lamers et al. 2005).
-With 240–360 born per million years on a mass function falling as M⁻², about 10⁵ are alive at once,
-but only a third of those are under 100 Myr old and a tenth are over a gigayear. So the catalogue
-splits by marking: young bound clusters and unbound associations on the arms, and older clusters on
+With 300–480 born per million years, the Galaxy's 1.65–1.9 M☉ a year (Kroupa-normalised) in the
+default's own mass, on a mass function falling as M⁻², about 10⁵ are alive at once, but only a third
+of those are under 100 Myr old and a tenth are over a gigayear. So the catalogue splits by marking: young bound clusters and unbound associations on the arms, and older clusters on
 the old thin disc with its weak arms. A cluster's present mass follows from Lamers's closed form. A
 feature carries what a console will want from it: a profile, an extent, gas and dust content where
 it has any (a nebula adds to the [dust field](#between-the-stars) along a line of sight), and an
@@ -447,7 +447,7 @@ fits one device: a feature's members are split by class, as a layer's are split 
   to a companion and are judged on the pair's velocity. Together they retain 18–26% at 100 km/s,
   about a fifth at 50, about a tenth at 20 km/s, since the pair keeps the systemic speed of a
   Be/X-ray binary, about 15 km/s, and under 1% in the most massive open clusters. A cluster like 47
-  Tucanae holds a few thousand neutron stars, M4 one to three hundred, Palomar 5 none. They are
+  Tucanae holds a few thousand neutron stars, M4 a few hundred, Palomar 5 none. They are
   also the ones in binaries, ready to be recycled.
 - **Black holes.** Those that collapse directly are born without a kick and are kept even by an open
   cluster, so about four fifths are retained at birth. They then sink to the core and eject one
@@ -568,8 +568,8 @@ position and on its own independent draws, and the parts are independent Poisson
 - **Type Ia shells** are a class of layer D, exactly as recent core collapse is a class of layer E.
   Their rate is observed, not computed: the delay-time distribution, 1.3 × 10⁻³ events per solar
   mass formed, falling as t^−1.1 from 40 Myr (Maoz and Graur 2017), applied to each population's own
-  history. That gives about 0.4 a century at the Milky Way's parameters (Li et al. 2011 measure 0.54
-  ± 0.12) and 0.2–1 across the galaxies we allow, a fifth of all supernovae, but a third or more of
+  history. That gives about 0.46 a century at the Milky Way's parameters (Li et al. 2011 measure
+  0.54 ± 0.12) and 0.2–1 across the galaxies we allow, a fifth of all supernovae, but a third or more of
   the shells, because they explode in thin gas, often high above the disc, where a shell lasts
   longer. The binary formulae do not set the rate, which they are known to underpredict several
   times over (Claeys et al. 2014). They supply a pool of candidate events, mergers of white dwarfs
@@ -583,7 +583,7 @@ position and on its own independent draws, and the parts are independent Poisson
   envelope, solved from Peters's (1964) inspiral time so that lifetimes and inspiral add up to the
   delay. Every shell has a complete history from single-star lifetimes and one formula. Primaries
   are all of layer D: nothing under about 2.5 M☉ makes a heavy enough white dwarf in time. About
-  4–5% of the old populations' layer D has exploded long ago, and the grid's binaries, run forward,
+  4% of the old populations' layer D has exploded long ago, and the grid's binaries, run forward,
   redraw on the same stream if they come out exploded.
 - **What a Type Ia leaves.** By channel, as defaults of the generator version, since the science is
   unsettled: both white dwarfs destroyed, about half; a surviving donor flung out at 1,000–1,500
@@ -977,12 +977,12 @@ from its own streams.
   mass, per star including brown dwarfs), which also keeps Jupiters under one for
   every four stars (Mróz et al. 2017). Nearly all of them are smaller than Neptune. That is about 30
   per system at the model's 1.4 stars per system, and they follow the stars, since the measurement
-  is made towards the bulge. In 8 ly cells the galactic centre would then hold about 580 per cubic
-  light-year for Milky Way values, and up to about 1,600 in 2,000 seeds, against an index limit of 128. So the layer uses 4
+  is made towards the bulge. In 8 ly cells the galactic centre would then hold about 550 per cubic
+  light-year for Milky Way values, and up to about 1,500 in 2,000 seeds, against an index limit of 128. So the layer uses 4
   ly cells and the ID's spare bits (see [Identifiers](#identifiers)): about six to a cell at the
   reference density, and a limit of 1,024 per cubic light-year. The abundance stays a parameter of
   the generator version, saturating at that limit in the densest central cells, which the Milky
-  Way's does not reach, and in about one galaxy in 130 whose nuclear disc is compact, and the range
+  Way's does not reach, and in about one galaxy in 170 whose nuclear disc is compact, and the range
   query never walks this layer unless asked. (An earlier draft wrote
   26 per system, five to a cell and caps of 38 and 27. It used Kroupa's denser system counts and
   rounded the stars per system down to 1.24. The default's lower system density and the computed
@@ -1387,15 +1387,15 @@ reference density of 0.003 systems per cubic light-year then gives the expected 
 reference is a round figure near the middle of our range, about 1.6 times the Milky Way's 0.0019,
 and the sums below that speak of "the reference density" use it too. The first pair of columns is
 for Kroupa's function, the second for Chabrier's system function as published, and the third for the
-default: Chabrier's with its branch above 1 M☉ scaled by the provisional 0.68 (below):
+default: Chabrier's with its branch above 1 M☉ scaled by the fitted 0.92 (below):
 
 | Layer | Cell   | Primary initial mass | Share (Kroupa) | Per cell | Share (Chabrier) | Per cell | Share (default) | Per cell |
 | ----- | ------ | -------------------- | -------------- | -------- | ---------------- | -------- | --------------- | -------- |
-| A     | 8 ly   | 0.08–0.5 M☉          | 76%            | 1.2      | 66%              | 1.0      | 70%             | 1.1      |
+| A     | 8 ly   | 0.08–0.5 M☉          | 76%            | 1.2      | 66%              | 1.0      | 67%             | 1.0      |
 | B     | 16 ly  | 0.5–0.75 M☉          | 9.8%           | 1.2      | 12%              | 1.4      | 12%             | 1.5      |
-| C     | 32 ly  | 0.75–2.5 M☉          | 11%            | 11       | 17%              | 17       | 15%             | 14       |
-| D     | 64 ly  | 2.5–8 M☉             | 2.3%           | 18       | 3.7%             | 29       | 2.6%            | 21       |
-| E     | 128 ly | 8–150 M☉             | 0.64%          | 40       | 1.0%             | 64       | 0.73%           | 46       |
+| C     | 32 ly  | 0.75–2.5 M☉          | 11%            | 11       | 17%              | 17       | 17%             | 16       |
+| D     | 64 ly  | 2.5–8 M☉             | 2.3%           | 18       | 3.7%             | 29       | 3.4%            | 27       |
+| E     | 128 ly | 8–150 M☉             | 0.64%          | 40       | 1.0%             | 64       | 0.95%           | 60       |
 
 Both are supported. The mass function sits behind one interface, the band shares are computed from
 it by integration and never written down as constants, and the five layers are comfortable under
@@ -1407,21 +1407,22 @@ census's shares of the next two bands, 13 and 18%, are Chabrier's too (12 and 17
 9.8 and 11%). Among all stars, companions
 and the progenitors of white dwarfs included, the census has 69% below 0.5 M☉. Kroupa's function
 used for primaries, with the model's companions, gives 76.4% and fails. Chabrier's used the same way
-gives 66.9% as published and 70.9% with its branch above 1 M☉ scaled by 0.68, so the two bracket the
-census. An earlier draft of this passage took Kroupa's side. It compared the model's 76.4% against
-"the observed single-star function, 75.9%", but that figure is Kroupa's function itself, not a
-count. As published, Chabrier's function makes systems too heavy, 0.66 M☉ each at the Sun against
+gives 66.9% as published and the default, with the binary stage's companions, 69.8% over primaries
+below 8 M☉. An earlier draft of this passage took Kroupa's side. It compared the model's 76.4%
+against "the observed single-star function, 75.9%", but that figure is Kroupa's function itself,
+not a count. As published, Chabrier's function makes systems too heavy, 0.66 M☉ each at the Sun against
 the census's 0.55–0.59, because the provisional companion model gives 0.42–0.44 stellar companions
-per system where the census counts 0.32–0.38, weighing 0.11–0.14 M☉ in all. Scaled by 0.68, it gives
-0.59. **Lean** (ruled on 2026-09-21; see [Decisions](#decisions)): Chabrier's system function as the
-default, with its branch above 1 M☉ scaled by a constant fitted offline to the census's primaries
-(0.92 since ruling 138; provisionally 0.68 before it). With the binary stage's companions, the fit
+per system where the census counts 0.32–0.38, weighing 0.11–0.14 M☉ in all. The default gives
+0.55 in stars and white dwarfs, 0.61 with neutron stars and black holes. **Lean** (ruled on
+2026-09-21; see [Decisions](#decisions)): Chabrier's system function as the default, with its
+branch above 1 M☉ scaled by a constant fitted offline to the census's primaries (0.92 since ruling
+138; provisionally 0.68 before it). With the binary stage's companions, the fit
 must reproduce the census's primary band shares, 69% of all stars below 0.5 M☉, and a local mean
 mass of 0.55–0.59 M☉ per system in stars and white dwarfs, each over systems whose primary lies
 below 8 M☉, as the census's do. Kroupa's stays supported. The
 worked figures elsewhere in this document are for the default unless they name Kroupa's. Figures
-first worked under Kroupa's have been scaled to the default's system count, about 0.87 times
-Kroupa's. Under the default the coarse layers C–E are 10–30% fuller than under Kroupa's (half as
+first worked under Kroupa's have been scaled to the default's system count, about 0.82 times
+Kroupa's. Under the default the coarse layers C–E are about a fifth fuller than under Kroupa's (half as
 full again as published), which changes none of the conclusions.
 
 This is a correction to the first sketch. Each step up multiplies cell volume by eight, but above
@@ -1455,7 +1456,7 @@ Four honest caveats:
   population, about half a per cent of the disc, is that young. So layer E is almost entirely
   remnants, with well under one living O or B star per cell among some forty-five systems, and the
   arms will not stand out in it until the stellar stage can tell the living from the dead.
-- Layer D loses 4–5% of its systems to ancient Type Ia supernovae that left nothing behind, and
+- Layer D loses about 4% of its systems to ancient Type Ia supernovae that left nothing behind, and
   every layer's share in the field is its budget less what sits in features and catalogue classes.
 - Brown dwarfs are not in these five layers. They number perhaps one for every four or five stars,
   companions included, and would mostly be noise at this stage. The free-floating ones arrive later
@@ -2230,17 +2231,55 @@ says. The text has been brought into line:
 2. **A pulsar wind nebula lasts while spin-down stays above about 10³⁵ erg/s** (ruling 136.4).
    Reason: Gaensler and Slane's (2006) 4 × 10³⁶ erg/s is the line for prominent nebulae; Kargaltsev
    and Pavlov's (2008) Chandra nebulae reach 10³⁵·⁴ erg/s at 10⁴–10⁵ years.
-3. **About 0.4 Type Ia a century at the Milky Way's parameters, 0.2–1 across our galaxies**
-   (ruling 136.5). Reason: the rate follows each galaxy's formed mass, which the parameters draw
-   over 3–10 × 10¹⁰ M☉; Li et al. (2011) measure 0.54 ± 0.12 for the Milky Way.
-4. **About 4–5% of the old populations' layer D has exploded long ago** (ruling 136.6). Reason:
-   1.3 × 10⁻³ Type Ia per solar mass formed, against layer D's 2.6% of systems; every channel
+3. **About 0.46 Type Ia a century at the Milky Way's parameters, 0.2–1 across our galaxies**
+   (ruling 136.5, with ruling 141). Reason: the rate follows each galaxy's formed mass, about 1.44
+   times the present stellar mass that the parameters draw over 3–10 × 10¹⁰ M☉; Li et al. (2011)
+   measure 0.54 ± 0.12 for the Milky Way.
+4. **About 4% of the old populations' layer D has exploded long ago** (ruling 136.6, with ruling
+   141). Reason: 1.3 × 10⁻³ Type Ia per solar mass formed, against layer D's 3.4% of systems; every channel
    counts, since the primary is gone whatever is left.
 5. **The weak Iax events are about one in eight Type Ia** (ruling 136.9). Reason: Srivastav et al.
    (2022) find 15 (+17/−9) per 100 in a volume-limited sample; Foley et al.'s (2013) 31 (+17/−13)
    agrees within errors, and the earlier "about 10%" was Foley et al. 2009's.
 6. **A merging pair is about 90 s apart in period a thousand years before the end, 80–120 s for
    most** (ruling 136.8). Reason: heavier pairs are slower at a fixed time to merge.
+
+**2026-09-28: the orchestrator's ruling 140.** Ruling 140 of the same file was made on research
+that read the sources' own text (`research/r-s092/NOTES.md`: Kroupa 2001, Licquia and Newman 2015,
+Chomiuk and Povich 2011, Martins et al. 2005, Rozwadowska et al. 2021), and re-derives the figures
+that were stated at the provisional high-mass scale 0.68 now that the fitted 0.92 holds. No
+generated output moves. The text has been brought into line:
+
+1. **Bound clusters are born at 300–480 per million years.** Reason: the observed Galactic rate,
+   1.65 ± 0.19 M☉ a year (Licquia and Newman) and 1.9 ± 0.4 (Chomiuk and Povich), is
+   Kroupa-normalised from massive-star tracers, and the default makes about a fifth fewer massive
+   primaries per solar mass formed than Kroupa's function makes stars, so the same rate is 1.26–1.29
+   times more mass in the default's own terms. See [Large features](#large-features).
+2. **About 1.5 × 10⁵ associations are alive above 100 M☉**, some 10⁴ of them above 10³ M☉: the
+   same rate over their 30–100 Myr lives.
+3. **M4 holds a few hundred neutron stars.** Reason: the brainstorm's retention and the fitted
+   scale carry the earlier one to three hundred to 170–600. Ye et al.'s (2019) cluster models give
+   150–225, a tension to be re-checked once the companions' neutron stars are counted. See [What is
+   inside a cluster today](#what-is-inside-a-cluster-today).
+4. **The default's band shares are 67% / 12% / 17% / 3.4% / 0.95%**, its local mean mass 0.55 M☉
+   in stars and white dwarfs (0.61 with neutron stars and black holes), its system count about 0.82
+   times Kroupa's, and the rogue planets at the Milky Way's centre about 550 per cubic light-year
+   in 8 ly cells. See [Sizing the layers](#sizing-the-layers).
+
+**2026-09-29: the orchestrator's ruling 141.** Ruling 141 of the same file was made on research
+that read Maoz and Graur (2017), Li et al. (2011) and Rozwadowska et al. (2021)
+(`research/r-ia15/NOTE.md`), and re-derives the Type Ia figures that were stated at the provisional
+high-mass scale 0.68. No generated output moves. The text has been brought into line:
+
+1. **About 0.46 Type Ia a century at the Milky Way's parameters.** Reason: the earlier 0.4 was the
+   model's own estimate at 0.68, not an observation; the rate is the formed mass times the
+   delay-time distribution, and the fitted scale raised the formed mass by 8%. It lies inside Li et
+   al.'s 0.54 ± 0.12, and its ratio to the core collapses, 0.23, is Li's for an Sbc galaxy. See
+   [Supernova remnants](#supernova-remnants-one-route-not-two).
+2. **The mass the rate follows is the formed mass, about 1.44 times the present stellar mass** that
+   the parameters draw over 3–10 × 10¹⁰ M☉; Decision 136.3 called that range the formed mass.
+3. **About 4% of the old populations' layer D has exploded long ago**, not 4–5%: 1.3 × 10⁻³ per
+   solar mass formed over layer D's 3.4% of systems at the fitted scale.
 
 ## Open questions
 
@@ -2486,6 +2525,12 @@ Figures above are rounded and should be re-checked against these when they becom
 - Kingman 1993, _Poisson Processes_, Oxford (the marking and displacement theorems).
 - Licquia and Newman 2015, _Improved estimates of the Milky Way's stellar mass and star formation
   rate_, ApJ 806.
+- Chomiuk and Povich 2011, _Toward a unification of star formation rate determinations in the Milky
+  Way and other galaxies_, AJ 142, 197.
+- Martins, Schaerer and Hillier 2005, _A new calibration of stellar parameters of Galactic O stars_,
+  A&A 436, 1049.
+- Rozwadowska, Vissani and Cappellaro 2021, _On the rate of core collapse supernovae in the Milky
+  Way_, New Astron. 83, 101498.
 - Schödel et al. 2014, _Surface brightness profile of the Milky Way's nuclear star cluster_,
   A&A 566.
 - Gallego-Cano et al. 2018, _The distribution of stars around the Milky Way's central black hole I_,

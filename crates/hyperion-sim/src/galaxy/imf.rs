@@ -886,18 +886,15 @@ mod tests {
         ] {
             assert_rounds_to("chabrier", 100.0 * chabrier.share(band), printed, decimals);
         }
-        // The brainstorm's scaled row: Chabrier's with its branch above 1 M☉ scaled by plan 02's
-        // scratch 0.68, which ruling 138 retired; the row awaits the owner's edit to the fitted
-        // default's figures, printed here.
-        let fitted = BandShares::of(MassFunctionKind::default().to_mass_function().as_ref());
-        println!("the fitted default's shares: {:?}", fitted.as_array());
-        let default = BandShares::of(&Chabrier::new(0.68).unwrap());
+        // The brainstorm's default row: Chabrier's with its branch above 1 M☉ scaled by the fitted
+        // 0.92 (ruling 138; the row's figures, ruling 140).
+        let default = BandShares::of(MassFunctionKind::default().to_mass_function().as_ref());
         for (band, printed, decimals) in [
-            (MassBand::A, 70.0, 0),
+            (MassBand::A, 67.0, 0),
             (MassBand::B, 12.0, 0),
-            (MassBand::C, 15.0, 0),
-            (MassBand::D, 2.6, 1),
-            (MassBand::E, 0.73, 2),
+            (MassBand::C, 17.0, 0),
+            (MassBand::D, 3.4, 1),
+            (MassBand::E, 0.95, 2),
         ] {
             assert_rounds_to("default", 100.0 * default.share(band), printed, decimals);
         }
@@ -942,14 +939,14 @@ mod tests {
                 decimals,
             );
         }
-        // The brainstorm's scaled row, at plan 02's scratch 0.68 (see the table's test above).
-        let default = BandShares::of(&Chabrier::new(0.68).unwrap());
+        // The brainstorm's default row, at the fitted 0.92 (see the table's test above).
+        let default = BandShares::of(MassFunctionKind::default().to_mass_function().as_ref());
         for (band, printed, decimals) in [
-            (MassBand::A, 1.1, 1),
+            (MassBand::A, 1.0, 1),
             (MassBand::B, 1.5, 1),
-            (MassBand::C, 14.0, 0),
-            (MassBand::D, 21.0, 0),
-            (MassBand::E, 46.0, 0),
+            (MassBand::C, 16.0, 0),
+            (MassBand::D, 27.0, 0),
+            (MassBand::E, 60.0, 0),
         ] {
             assert_rounds_to(
                 "default per cell",

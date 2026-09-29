@@ -89,11 +89,12 @@ fn bound_clusters_are_born_at_the_plan_s_rate_and_their_census_is_near_its_figur
     let galaxy = milky_way();
     let rates = galaxy.feature_shares().nurseries();
     let per_myr = rates.bound_births() / 100.0;
-    // Provisional hold, a finding for the orchestrator (ruling 138): with Chabrier's branch above
-    // 1 M☉ at the fitted 0.92, not the scratch 0.68, the rate is 373 per Myr, above 240–360. The
-    // window stands here; the measured rate is held until it is ruled on.
+    // Ruling 140.2: 300–480 per Myr, the Galaxy's 1.46–2.3 M☉ a year (Licquia and Newman 2015's
+    // 1.65 ± 0.19 and Chomiuk and Povich 2011's 1.9 ± 0.4, Kroupa-normalised from massive-star
+    // tracers) put in the default mass function's own terms (× 1.26–1.29 at the fitted scale
+    // 0.92) at Γ_b 0.125. The measured 373 is 2.29 M☉ a year formed, 1.8 in the tracers' terms.
     assert!(
-        (per_myr / 373.0 - 1.0).abs() < 0.05,
+        (300.0..=480.0).contains(&per_myr),
         "{per_myr} bound clusters per Myr"
     );
     let (young, old, over_gyr) = open_clusters_alive(&galaxy);
@@ -231,13 +232,12 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
     let share =
         f64::from(u32::try_from(inside).unwrap()) / f64::from(u32::try_from(radii.len()).unwrap());
     assert!(share >= 0.8, "{share} of radii in 100–1,000 ly");
-    // About ten thousand star-forming regions, tens of thousands of associations.
+    // About ten thousand star-forming regions, and 1.2–2.1 × 10⁵ associations (ruling 140.3: the
+    // birth rate of ruling 140.2 × (1 − Γ_b) × their mean stage of about 61 Myr).
     let [embedded, bound, associations] = stages;
     assert!((5_000..20_000).contains(&embedded), "{embedded} embedded");
-    // Provisional hold, a finding for the orchestrator (ruling 138): 158,664 associations at the
-    // fitted scale, above 150,000 at the scratch 0.68's; held until it is ruled on.
     assert!(
-        (10_000..170_000).contains(&associations),
+        (120_000..=210_000).contains(&associations),
         "{associations} associations"
     );
     assert!(bound > 5_000, "{bound} young bound clusters");
@@ -642,7 +642,7 @@ fn the_catalogue_s_counts_match_their_expectations_at_milky_way_values() {
     }
     let open: u64 = counted[1..6].iter().sum::<u64>() + stages[1];
     // About 6 × 10⁴ open clusters (ruling 118.1); about 10⁴ star-forming regions; associations
-    // within 10⁴–1.5 × 10⁵; clouds in the thousands.
+    // within 1.2–2.1 × 10⁵ (ruling 140.3); clouds in the thousands.
     assert!((50_000..=80_000).contains(&open), "{open} open clusters");
     assert!(
         (5_000..20_000).contains(&stages[0]),
@@ -650,7 +650,7 @@ fn the_catalogue_s_counts_match_their_expectations_at_milky_way_values() {
         stages[0]
     );
     assert!(
-        (10_000..150_000).contains(&stages[2]),
+        (120_000..=210_000).contains(&stages[2]),
         "{} associations",
         stages[2]
     );

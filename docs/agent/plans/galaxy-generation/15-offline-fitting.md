@@ -594,14 +594,24 @@ et al. 2010).
   17.93. The fixture's black-hole offset is set again to −0.3800 dex (σ_e about 117.3 km/s) to keep
   Sgr A*'s mass. `ProvisionalFates`' tests and the brainstorm's band-share table rows keep the
   scratch 0.68 explicitly (`Chabrier::new(0.68)`), since those figures are the stand-in's; the
-  table's default row awaits the owner's edit (fitted A–E 67.1 / 11.9 / 16.6 / 3.4 / 0.95%).
+  table's default row awaits the owner's edit (fitted A–E 67.1 / 11.9 / 16.7 / 3.4 / 0.95%; 16.68, so 16.7, ruling 140.10).
 - **Findings held provisionally (ruling 138's consequences, windows stated at 0.68):** bound
   clusters born 373 per Myr (240–360), 158,664 associations (10,000–150,000), one ionising star
   per 270 M☉ formed (400–600), M4's 396 neutron stars (100–350, also ruling 137's w), the rogue
   planets' saturation threshold 37.49 per star (35.9 ± 3%), the barred orbits' Jacobi drift
   1.09 × 10⁻⁴ (10⁻⁴), the old thin disc's dead primaries under the default 10.7% (the T30 window
   is Kroupa's and holds). The spine construction's stars per system under the default is 1.457,
-  above 1.45; T1.d's bracket holds on the drawn companions (1.437).
+  above 1.45; T1.d's bracket holds on the drawn companions (1.437). _Ruled (ruling 140, lane
+  `win140`; tests and text only, no output moves):_ every window but the Jacobi drift was derived
+  through 0.68, and each is re-derived at the fitted scale and asserted, the holds removed: bound
+  clusters 300–480 per Myr, associations 1.2–2.1 × 10⁵, ionising stars 3.0–4.8 per 10³ M☉ formed,
+  M4 170–600 neutron stars (Ye et al. 2019's 150–225 recorded as a tension for P11.T6/T11), the
+  rogue planets' threshold 37.5 per star ± 3% (the 2,000-seed windows hold, see plan 13's P13.T2),
+  and the brainstorm's default row 67 / 12 / 17 / 3.4 / 0.95%. The Jacobi drift was numerical:
+  T6.a's fast test now runs its 20 barred orbits through `integrate_checked(…, 1e-4, 6)` and
+  asserts 10⁻⁴ (ruling 140.7). The 1.457 joins plan 11's Risks (ruling 140.8). Ruling 141 does
+  the same for T18.a's Type Ia rate: 0.42–0.53 a century (0.462 measured) and the ancient shares
+  3.3–4.5%.
 
 **Round 9b, lane `fates` (with P06.T30 and P11.T1.d), for the tables it touches.** `stripping`
 (slow, revision 0; `tables::stripping`, plan 11's stripping table) and `period_correction` (slow;
@@ -844,7 +854,9 @@ K(h ÷ 2)`: the kinetic and rotation terms commute, so their joint flow (drift, 
   holds 982 of 1,000, but one inner orbit torqued onto the black hole lost 79% of its Jacobi
   integral: so each orbit is integrated through `integrate_checked`, again from its start at half
   the step while its Jacobi integral has drifted by more than `drift_tolerance` (10⁻⁴), up to
-  `max_halvings` (6) times. 18 of 1,000 needed it and the worst kept is 8.7 × 10⁻⁵. Circular orbits
+  `max_halvings` (6) times. 18 of 1,000 needed it and the worst kept is 8.7 × 10⁻⁵ (at version 15's
+  potential, ruling 140.7: 17 refined, the worst kept 9.93 × 10⁻⁵, the first pass's worst 0.377;
+  the fast suite's 20 barred orbits are checked the same way, not on the first pass). Circular orbits
   at 3,000–50,000 ly stay circular to 10⁻³ over 10 Gyr; one and four threads give the same bits.
 - **T6.b's births** follow the text, with one change: the halo, bulge and bar draw their velocities
   from plan 08's velocity ellipsoid of the component they were born in, not an isotropic Jeans

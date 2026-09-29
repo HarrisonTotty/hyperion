@@ -867,10 +867,13 @@ mod tests {
         );
     }
 
-    /// P09.T18.a: 0.40 Type Ia a century at Milky Way parameters to 15%, and the share of every old
-    /// population's layer D that exploded long ago is 4–5% (ruling 136.6: 1.3 × 10⁻³ Type Ia per
-    /// solar mass formed, 0.957 M☉ formed per system and layer D's 2.6% of systems), held at
-    /// 3.5–5%; the young disc's about 0.3%.
+    /// P09.T18.a: about 0.46 Type Ia a century at Milky Way parameters, within 0.42–0.53 (ruling
+    /// 141: 1.3 × 10⁻³ per M☉ formed, Maoz and Graur 2017, × the fixture's 7.35 × 10¹⁰ M☉ formed ×
+    /// the formation histories; Li et al. 2011's 0.54 ± 0.12 at the bottom, the measured 0.462 +
+    /// 15% at the top), and the share of every old population's layer D that exploded long ago is
+    /// about 4% (ruling 136.6, re-derived by ruling 141.6: 1.3 × 10⁻³ Type Ia per solar mass
+    /// formed, 1.096 M☉ formed per system and layer D's 3.4% of systems, 4.17% over a Hubble
+    /// time), held at 3.3–4.5%; the young disc's about 0.3%.
     #[test]
     fn the_milky_way_rate_and_ancient_shares() {
         let galaxy = milky_way();
@@ -887,10 +890,7 @@ mod tests {
             .unwrap();
         }
         eprintln!("Type Ia: {per_century:.3} a century; ancient shares{line}");
-        // Provisional (the version-15 batch): ruling 138's fitted Chabrier scale raises the formed
-        // mass 7.9% (system count × mean formed mass), so the rate went from 0.427 to 0.462 a
-        // century, past the 0.40 ± 15% window's 0.46. Held at the measured value until it is ruled.
-        assert!((0.455..=0.47).contains(&per_century), "{per_century}");
+        assert!((0.42..=0.53).contains(&per_century), "{per_century}");
         let sum: f64 = POPULATIONS
             .iter()
             .map(|&p| delays.population_rate_per_year(p))
@@ -903,7 +903,7 @@ mod tests {
             Population::Halo,
         ] {
             let share = delays.ancient_share(p);
-            assert!((0.035..=0.05).contains(&share), "{p:?}: {share}");
+            assert!((0.033..=0.045).contains(&share), "{p:?}: {share}");
         }
         assert!(delays.ancient_share(Population::YoungThinDisc) < 0.02);
         assert_same_bits(
@@ -913,7 +913,7 @@ mod tests {
     }
 
     /// P09.T18.a (ruling 136.5): 0.2–1 Type Ia a century over seeds; the rate follows each galaxy's
-    /// formed mass, 3–10 × 10¹⁰ M☉.
+    /// formed mass, about 1.44 times its present stellar mass of 3–10 × 10¹⁰ M☉ (ruling 141.2).
     #[test]
     fn the_rate_over_seeds() {
         let (mut least, mut most) = (f64::INFINITY, 0.0_f64);

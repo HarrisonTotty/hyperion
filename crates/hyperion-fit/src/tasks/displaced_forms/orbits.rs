@@ -469,18 +469,51 @@ mod tests {
         OrbitPotential::new(tables, Some(bar)).unwrap()
     }
 
-    /// P15.T6.a (fast sample): the energy, and the Jacobi integral with the bar, hold to 10⁻⁴
-    /// relative over 10 Gyr for 20 test orbits.
+    /// The relative Jacobi drift of the orbit from `start` over `years` at the first pass's step
+    /// and at each of `halvings` halvings of it, for a report when the checked integration keeps
+    /// more than its tolerance (ruling 140.7).
+    fn drift_per_halving(
+        pot: &OrbitPotential,
+        start: OrbitState,
+        years: f64,
+        halvings: u32,
+    ) -> Vec<f64> {
+        let e0 = pot.jacobi(&start);
+        let mut step = pot.step_for(&start, 1.0 / 200.0, 1_000.0);
+        let mut drifts = Vec::new();
+        for _ in 0..=halvings {
+            let end = pot.integrate(start, years, step);
+            drifts.push(((pot.jacobi(&end) - e0) / e0).abs());
+            step *= 0.5;
+        }
+        drifts
+    }
+
+    /// P15.T6.a (fast sample): the energy holds to 10⁻⁴ relative over 10 Gyr for 20 test orbits,
+    /// and the Jacobi integral with the bar does on the checked integration the run uses,
+    /// `integrate_checked(…, 1e-4, 6)` (ruling 140.7: the unchecked first pass fails some 1.8% of
+    /// orbits by design, 982 of 1,000 holding, so 20 of them would fail about 30% of the time).
+    /// An orbit that keeps more than 10⁻⁴ after six halvings is reported with its drift at each
+    /// halving: a drift that does not fall about fourfold per halving is a floor in the force
+    /// tables or at the bar's centre.
     #[test]
     fn energy_and_jacobi_hold_over_ten_gyr() {
         let plain = OrbitPotential::new(tables(), None).unwrap();
         let drift = worst_drift(&plain, 20, 1e10);
         assert!(drift < 1e-4, "energy drift {drift}");
-        let drift = worst_drift(&barred(tables()), 20, 1e10);
-        // Provisional hold, a finding for the orchestrator (ruling 138): in the fixture's potential
-        // after the fitted Chabrier scale, one orbit's Jacobi integral drifts by 1.09 × 10⁻⁴ with
-        // all six halvings used; the 10⁻⁴ stands here and 1.2 × 10⁻⁴ is held until it is ruled on.
-        assert!(drift < 1.2e-4, "Jacobi drift {drift}");
+        let barred = barred(tables());
+        for i in 0..20 {
+            let start = test_orbit(&barred, i);
+            let step = barred.step_for(&start, 1.0 / 200.0, 1_000.0);
+            let checked = barred.integrate_checked(start, 1e10, step, 1e-4, 6);
+            assert!(
+                checked.drift < 1e-4,
+                "orbit {i}: Jacobi drift {:e} kept after {} halvings; per halving {:?}",
+                checked.drift,
+                checked.halvings,
+                drift_per_halving(&barred, start, 1e10, 6)
+            );
+        }
     }
 
     /// **P15.T6.a's acceptance** (slow): 1,000 test orbits, with and without the bar.
