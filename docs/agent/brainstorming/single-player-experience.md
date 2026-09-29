@@ -88,7 +88,10 @@ station.
 - **Lean:** one client can open several windows, each hosting one display, so a player can put the
   view on one monitor and the navigation display on another, as home-cockpit builders do with
   multi-function displays. The same mechanism later puts a station, or the bridge's main screen, on
-  another machine.
+  another machine. The main screen's camera is then ship state, commanded by the stations granted
+  control of it, by default the Captain and Helm, with one station at a time flying the free
+  camera; see [Two deployments, one scene](rendering-and-planets.md#two-deployments-one-scene) and
+  [The free camera](rendering-and-planets.md#the-free-camera).
 
 ## Sessions and the loop
 
@@ -105,10 +108,10 @@ rewritten for several.
 A session's state is play state, not generated data: the craft, the clock, the Knowledge gathered
 and the deltas that play has made. The galaxy brainstorm's overlays already anticipate it.
 **Lean:** it is stored in the universe's directory under the names plan 04 reserved there:
-`session.json` for the clock and the craft, `knowledge/`, which plan 12 already writes, and
-`deltas/`. A universe therefore holds one session. A second playthrough of the same seed is a second
-universe, as plan 04 already provides, since a universe is a save with an ID of its own. The session
-is saved on a timer and on request.
+`session.json` for the clock and the craft, `knowledge/`, which plan 12's Knowledge store is to
+write, and `deltas/`. A universe therefore holds one session. A second playthrough of the same seed
+is a second universe, as plan 04 already provides, since a universe is a save with an ID of its
+own. The session is saved on a timer and on request.
 
 ### The clock
 
@@ -602,7 +605,11 @@ vector lines on `--surface-0`. **Lean**, for what `VIEW` draws in the wireframe 
 - **From the pilot's seat, by default.** The seat is the camera's default preset, fixed to the hull
   and looking forward, aft or at a target, with look-around and a choice of field of view. Chase
   and free presets move it off the hull, and in single-player the player sets it locally; see
-  [The free camera](rendering-and-planets.md#the-free-camera). The reference frame is named on the
+  [The free camera](rendering-and-planets.md#the-free-camera). A move between presets is a cut, as
+  is a slew to a target; an eased move of 0.4 s is a setting, off by default and never applied
+  under `prefers-reduced-motion`. The client integrates this local camera at display rate and
+  reports its pose to its scene subscription so that the server can bound the scene, but the pose
+  is never ship state and is not saved with the session. The reference frame is named on the
   display.
 - **Bodies true to scale**, as spheres drawn by a graticule of latitude and longitude that turns
   with the body's rotation, so that rotation and approach can be seen. Rings as their ellipses, the
@@ -610,16 +617,23 @@ vector lines on `--surface-0`. **Lean**, for what `VIEW` draws in the wireframe 
   their definitions.
 - **Orbits of bodies**, on request, as the `NAV` display draws them.
 - **Stars** as points, brighter by apparent magnitude, from a sky request of their own, limited by
-  the naked-eye magnitude for the local sky background, about 6.5 near the Sun, and by a count
-  budget; see [The sky](rendering-and-planets.md#the-sky). Until it exists, the range query's rows
-  with their stellar briefs stand in, and the view says so.
+  the naked-eye magnitude, set per direction from the local sky background, which near the Sun runs
+  from about 6.6 in the band to 7.4 at the galactic poles, and by a count budget. That is the eye's
+  limit, for the cockpit view that stands for the player's eyes; a camera view, such as a bridge's
+  main screen, cuts at its sensor's noise floor instead. See
+  [The sky](rendering-and-planets.md#the-sky). Until it exists, the range query's rows with their
+  stellar briefs stand in, and the view says so.
 - **Symbology in the guide's grammar**: a flight path marker for the velocity against the chosen
   reference, target brackets with range and closure rate, and the destination reticle in
   `--target`.
 - **What the ship knows.** The server sends the scene: the bodies and craft near enough to draw,
   with positions at the retarded time, as sensors see them. Within a system the light-time is
   seconds to hours and the difference is small, but the rule is the same one, and the client never
-  holds truth that the ship has not seen. Until plan 12's retarded-time machinery exists, the
+  holds truth that the ship has not seen. Plan 12's `hyperion_sim::observe` (P12.T0–T2 and T4)
+  already gives the retarded reading for systems on their drift, but nothing yet evaluates a body's
+  orbit at the retarded time, and the observed mode on the wire, the Knowledge store and the
+  subscriptions are unbuilt; see
+  [Runtime and code shape](rendering-and-planets.md#runtime-and-code-shape). Until they exist, the
   server sends present state, as the rendering brainstorm's
   [order of attack](rendering-and-planets.md#suggested-order-of-attack) says.
 
@@ -677,8 +691,12 @@ section against what the engines shipped, and governs where the two differ. What
   surveyed regions of a coarse field the server computes, and a one-way detail seed; see
   [Knowledge, and the surface seed](rendering-and-planets.md#knowledge-and-the-surface-seed).
 - **Fit with the consoles.** Text that must be read stays in the DOM, set in B612, where the UX
-  guide's tooling checks it. A canvas is paired with a DOM list of its marks. Displays open in
-  windows of their own.
+  guide's tooling checks it. A canvas is paired with a DOM list of its marks. The cockpit view and
+  its instruments are canvases of one document on one `GPUDevice`, one canvas context per view,
+  since a device cannot be shared across renderer processes and Babylon's own multi-canvas
+  `registerView` copies every view through one canvas; displays moved into windows of their own
+  open as same-origin children in the same process, which a prototype is to prove first. See
+  [Several views in one client](rendering-and-planets.md#several-views-in-one-client).
 - **Linux first.** The owner develops on it.
 - **Stability.** The project is long-lived, and an engine that breaks its API every release is a
   standing cost.
@@ -688,19 +706,22 @@ The options:
 | Option                          | Runs                                   | For                                                                                                                                                                                              | Against                                                                                                                                                          |
 | ------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Babylon.js 9                    | In the Electron renderer, as a display | TypeScript-first. WebGPU and compute shaders; its WebGL2 fallback goes unused, since WebGPU is required. Reversed-Z. A stated commitment to backward compatibility. A complete engine.           | Heavier than three.js, with a smaller community. Browser limits (below).                                                                                         |
-| three.js                        | In the Electron renderer, as a display | The largest ecosystem and the most examples of procedural planets. React bindings (react-three-fiber). WebGPU renderer with a reversed depth buffer.                                             | Breaking changes in most releases. Silent visual changes among them. Browser limits.                                                                             |
+| three.js                        | In the Electron renderer, as a display | The largest ecosystem and the most examples of procedural planets. React bindings (react-three-fiber). WebGPU renderer with a reversed depth buffer.                                             | Breaking changes in most releases. Visual changes with no way back among them. Browser limits.                                                                   |
 | Bevy                            | Native, as a separate display process  | Rust, sharing the sim without WebAssembly. Native Vulkan, multithreaded. `big_space` gives nested integer grids with a floating origin, which map onto the galaxy's frames. Built-in atmosphere. | A second UI technology, with text outside the DOM and the guide's tooling. Breaking releases before 1.0. A second binary, and input split between two processes. |
 | Godot 4, double-precision build | Native, as a separate display process  | A mature engine and editor, 64-bit positions when built for them, Rust through GDExtension.                                                                                                      | The same split as Bevy, plus a custom engine build.                                                                                                              |
 | Unreal, Unity                   | Native, replacing or beside the client | Top-end rendering.                                                                                                                                                                               | Heavy, closed or licensed, and built to own the whole application, which the consoles already are.                                                               |
 
-The browser limit that matters is WebGPU on Linux. Chromium enables it by default there only for
-Intel Gen12 and later (from Chrome 144) and NVIDIA with a recent driver (from 147). The
-implementation-status wiki says NVIDIA's enablement is under Wayland, but Chromium's blocklist entry
-carries no such condition. Other GPUs, the development machine's Gen9.5 UHD 620 among them, need
-command-line switches, which Electron can set from its main process at the cost of bypassing
-Chromium's GPU blocklist. The owner has since ruled that WebGPU is required, with the switches
-forced and no WebGL2 fallback, and that every feature has a low setting playable on the UHD 620,
-which is the floor; see the rendering brainstorm's
+The browser limit that matters is WebGPU on Linux. Chromium's default path for it there exists
+only under its Wayland backend, where it is enabled for Intel Gen12 and later (from Chrome 144) and
+NVIDIA with a recent driver (from 147). Under X11 no GPU gets a WebGPU adapter by default, and the
+development machine, which runs Xorg on a Gen9.5 UHD 620, got none. Command-line switches that
+Electron's main process sets before it is ready move Chromium's compositor onto Vulkan, which gives
+Dawn a hardware adapter; a probe found one on the UHD 620. The owner has since ruled that WebGPU is
+required, with the switches forced and no WebGL2 fallback, and that every feature has a low setting
+playable on the UHD 620, which is the floor. The switches are set on every Linux machine, so that
+the forced path is the only one and the tested one, and under a Wayland session the client runs
+through XWayland. `--enable-unsafe-webgpu` is not among them, because it would let a failed hardware
+path fall back silently to a software adapter. See the rendering brainstorm's
 [Intel problem](rendering-and-planets.md#the-graphics-api-and-the-intel-problem). A native
 engine talks to Vulkan directly and has no such gate.
 
@@ -830,7 +851,8 @@ Settled on the same day, in the second round:
 Settled on 2026-09-22, and recorded in
 [the rendering brainstorm's Decisions](rendering-and-planets.md#decisions):
 
-- **WebGPU only.** Electron's main process forces the switches, and no WebGL2 fallback is kept.
+- **WebGPU only.** Electron's main process forces the switches on every Linux machine, and no
+  WebGL2 fallback is kept.
 - **The performance floor.** A modern discrete GPU is the design target at 1080p60, and every
   feature has a documented low setting that stays playable on the development machine's UHD 620.
 
@@ -880,7 +902,9 @@ leans and open to review rather than waiting on a ruling.
 Not a plan, only the dependency order a plan would follow:
 
 1. Sessions, the loop at 64 Hz, persistence, and the local server started by the client, with a
-   craft as a point mass on a trivial display. A thin vertical slice.
+   craft as a point mass on a trivial display. A thin vertical slice. The bridge will later need a
+   client role in `Hello`, which carries none today, so that the server can tell a main screen from
+   a station.
 2. The rendering engine, and `VIEW` as a wireframe at real scale. What follows it, up to the
    photorealistic style, is the rendering brainstorm's
    [order of attack](rendering-and-planets.md#suggested-order-of-attack).

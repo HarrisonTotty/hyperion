@@ -150,6 +150,12 @@ representable values are about 65 km apart. Positions need nested frames:
 | System   | `f64` metres from the system barycentre                        | about 1 mm at 50 au              |
 | Body     | `f64` metres from the body's centre                            | sub-micrometre in low orbit      |
 
+All three frames lie along the galactic axes and do not rotate, so a body frame is inertial. What is
+fixed to a turning body's surface, such as terrain, is held as a body-fixed position type rather
+than a fourth frame, and rotated into the body frame when it is drawn or collided with; see the
+rendering brainstorm's
+[floating origin](rendering-and-planets.md#the-floating-origin-is-already-in-the-simulation).
+
 A ship is always in exactly one frame, and changes frame at defined boundaries (entering a system's
 sphere of influence, entering a body's). Newtypes keep the frames from being mixed, as `rust-dev.md`
 already requires for quantities.
@@ -596,14 +602,18 @@ position and on its own independent draws, and the parts are independent Poisson
   survivor is a second member of the entry, at speed × age from the centre. Ancient hypervelocity
   survivors are unbound and cross the cube in about 10⁷ years, so some tens of thousands are inside
   at any time, as one more [displaced](#displaced-objects-kicks-and-runaways) class on straight
-  lines. #### Dense features: clusters and the galactic centre The nuclear cluster and the cores of
-  globular clusters are too dense for the grid. The fine layer's index overflows at about 180
-  systems per cubic light-year, and long before that a cell-wide bound makes the candidate counts
-  absurd. The field itself stays finite at the centre, at about 0.26 per cubic light-year for the
-  bulge and about 16 for the nuclear disc of [Populations](#populations), so it needs no cap and
-  still knows nothing about the features. What was left unsolved was how the range query finds the
-  members near a ship without generating a million of them. **Lean:** each feature with members
-  carries a small nested grid of its own, in its own frame:
+  lines.
+
+#### Dense features: clusters and the galactic centre
+
+The nuclear cluster and the cores of globular clusters are too dense for the grid. The fine layer's
+index overflows at about 180 systems per cubic light-year, and long before that a cell-wide bound
+makes the candidate counts absurd. The field itself stays finite at the centre, at about 0.26 per
+cubic light-year for the bulge and about 16 for the nuclear disc of [Populations](#populations), so
+it needs no cap and still knows nothing about the features. What was left unsolved was how the range
+query finds the members near a ship without generating a million of them. **Lean:** each feature
+with members carries a small nested grid of its own, in its own frame:
+
 - Level j is a block of 16 × 16 × 16 cells of width w × 2ʲ centred on the feature. Its inner 8 × 8 ×
   8 cells are exactly the volume of level j − 1, which owns them, so each level is a shell around
   the last. Eight levels span a factor of 128 in cell size: with w = 0.5 ly, half-light-year cells
