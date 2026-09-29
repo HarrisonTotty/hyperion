@@ -49,7 +49,6 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
 use crate::rng::{Mark, Stream};
 use crate::stellar::Composition;
-use crate::stellar::remnant::StandardKickLaw;
 use crate::stellar::sse::turn_off_mass;
 use crate::tables::cluster_dynamics::{
     BH_CLOCK_FACTOR, BH_LOSS_BETA, BH_LOSS_PSI_SLOPE, BH_RELAXATION_PREFACTOR,
@@ -59,7 +58,7 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, LightYears, SolarMasses, Years};
 
 use super::catalogue::{FeatureMarks, FeatureRecord};
-use super::interior::retention::{EFFECTIVE_ESCAPE_FACTOR, Retention, retention};
+use super::interior::retention::{EFFECTIVE_ESCAPE_FACTOR, Retention, retention_tabulated};
 use super::kinds::globular::history;
 use super::kinds::open_cluster::DISRUPTION_GAMMA as DISRUPTION_GAMMA_FOR_RATE;
 use crate::rng::{ObjectKey, tags};
@@ -223,8 +222,8 @@ pub struct ClusterModel {
 impl ClusterModel {
     /// The model of the cluster `parameters` describe, in `galaxy` (module documentation).
     ///
-    /// It costs sixteen of plan 08's kick quadratures, for the retention, which is why the caller
-    /// caches it.
+    /// Its retention reads `tables::cluster_retention` (ruling 139.5), so it costs microseconds;
+    /// the caller still caches the interior built on it.
     ///
     /// # Panics
     ///
@@ -263,9 +262,9 @@ impl ClusterModel {
         let escape_birth = KilometresPerSecond::new(escape_central.value() * birth_ratio.sqrt());
         let central_density =
             central_density(p.mass.value(), core_radius.value(), tidal_radius.value());
-        let law = StandardKickLaw::default();
         let v_eff = KilometresPerSecond::new(escape_birth.value() * EFFECTIVE_ESCAPE_FACTOR);
-        let kept = retention(&law, galaxy.mass_function(), &composition, v_eff);
+        // The table, not the sixteen-track quadrature it was made from (ruling 139.5).
+        let kept = retention_tabulated(galaxy.mass_function(), &composition, v_eff);
         let f0 = BLACK_HOLE_BIRTH_FRACTION * kept.black_holes;
         let black_hole_fraction = black_hole_fraction(
             f0,

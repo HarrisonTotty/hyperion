@@ -14,10 +14,15 @@
 //!   velocity, the cluster's bulk motion plus its own (P09.T10), against the unpadded radius.
 //!   Members not yet born at that time (a young nursery's, drawn with ages from −H) are dropped.
 //!
+//! The census and the hits are two calls of the query, so a caller that passes a keeping
+//! [`FeatureInteriorCache`] ([`KeepInteriors`] for one query) builds each interior once; with
+//! [`NoInteriorCache`] every call builds its own.
+//!
 //! Sums run in a fixed order: features in the catalogue's cell and index order, then cells in the
 //! grid's level and cell order, so the census is a function of the galaxy and the sphere alone.
 
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
@@ -28,6 +33,8 @@ use crate::galaxy::query::{
 };
 use crate::time::UniverseTime;
 use crate::units::{LightYears, Seconds};
+
+use super::super::FeatureId;
 
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::local_offset;
@@ -50,6 +57,48 @@ pub struct NoInteriorCache;
 impl FeatureInteriorCache for NoInteriorCache {
     fn interior(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureInterior>> {
         FeatureInterior::of(galaxy, feature).map(Arc::new)
+    }
+}
+
+/// A cache that keeps every interior it builds for one galaxy, the one it is made for: what a
+/// single query passes so that its census and its hits build each interior once (ruling 139.6), and
+/// what a caller that resolves several members of one feature reuses. It grows without bound, so a
+/// long-lived caller uses plan 09's server cache (P09.T40) instead.
+///
+/// # Panics
+///
+/// If it is asked about another galaxy than its own: a bare galaxy and its
+/// [`with_full_potential`](Galaxy::with_full_potential) share a seed and differ in their members.
+#[derive(Debug)]
+pub struct KeepInteriors<'a> {
+    galaxy: &'a Galaxy,
+    kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
+}
+
+impl<'a> KeepInteriors<'a> {
+    /// An empty cache for `galaxy`.
+    #[must_use]
+    pub fn new(galaxy: &'a Galaxy) -> Self {
+        Self {
+            galaxy,
+            kept: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl FeatureInteriorCache for KeepInteriors<'_> {
+    fn interior(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureInterior>> {
+        assert!(
+            std::ptr::eq(galaxy, self.galaxy),
+            "an interior cache is for the galaxy it was made for"
+        );
+        let mut kept = self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        kept.entry(feature.id())
+            .or_insert_with(|| FeatureInterior::of(galaxy, feature).map(Arc::new))
+            .clone()
     }
 }
 
@@ -333,11 +382,11 @@ mod tests {
         let id = interior.feature().id();
         let [x, y, z] = interior.feature().position().to_light_years_f64();
         let centre = GalacticPosition::from_light_years([x + 1.5, y, z - 1.0]).unwrap();
-        // Each interior costs seconds; a keeping cache builds each once.
-        let keep = Keep::default();
+        // The query's own cache: its census and hits build each interior once.
+        let keep = KeepInteriors::new(galaxy);
         for years in [0, -600] {
             let sphere = sphere_at(centre, 12.0, years);
-            let source = FeatureMemberSource::new(&keep, &keep);
+            let source = FeatureMemberSource::new(&NoFeatureCache, &keep);
             let mut hits = Vec::new();
             source.systems_in_sphere(galaxy, &sphere, all_layers(), &mut hits);
             let mut found: Vec<SystemHit> =
@@ -409,7 +458,8 @@ mod tests {
         let cold = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache)
             .expected_in_sphere(galaxy, &sphere);
         let keep = Keep::default();
-        let warm = FeatureMemberSource::new(&keep, &keep);
+        let interiors = KeepInteriors::new(galaxy);
+        let warm = FeatureMemberSource::new(&keep, &interiors);
         // Warm the caches with another query first.
         let other = sphere_at(
             GalacticPosition::from_light_years([x + 40.0, y, z]).unwrap(),

@@ -3,8 +3,15 @@
 //! A class's density is a shape times the common taper `(1 − r² ÷ r_t²)²` inside the tidal radius
 //! `r_t`, and zero outside:
 //!
-//! - **Core:** `(1 + r² ÷ r_c²)^(−3q′ ÷ 2)`, with `q′ = q^η` for `q = m ÷ m_TO` below 1 and `q`
-//!   above (η = [`EQUIPARTITION_EXPONENT`]; Heinke et al. 2005, ApJ 625, 796's segregation by mass).
+//! - **Core:** `(1 + r² ÷ r_c²)^(−3q′ ÷ 2) × (1 + r² ÷ r_h²)^(−max(0, 1 − 3q′ ÷ 2))`, with
+//!   `q′ = q^η` for `q = m ÷ m_TO` below 1 and `q` above (η = [`EQUIPARTITION_EXPONENT`]; Heinke et
+//!   al. 2005, ApJ 625, 796's segregation by mass, their eq. 2 deprojected), and `r_h` the cluster's
+//!   half-mass radius. The second factor (ruling 139.1) keeps a light class (`3q′ < 2`) falling at
+//!   least as `r⁻²` outside `r_h`: in a multimass lowered-isothermal model every component tends to
+//!   the polytrope `r^−(g + 3/2)` in the Keplerian outskirts (Gieles and Zocchi 2015, MNRAS 454,
+//!   576, eqs. 20 and 29), and the common taper below is that polytrope at `g = ½`, so no class may
+//!   fall more slowly than `r⁻²`. Heinke's form alone gives band A `r^−1.1`, an extrapolation of a
+//!   fit made at `q ≈ 1.6`. A class with `3q′ ≥ 2` has no second factor and is unchanged.
 //! - **Cusp:** `(r² + ε²)^(−γ ÷ 2)` for a core-collapsed cluster, γ its drawn slope and ε = 10⁻³
 //!   ly, so that the cusp stays integrable and bounded.
 //! - **Plummer:** `(1 + r² ÷ a²)^(−5/2)`, the black holes' compact subsystem (P09.T9.c).
@@ -33,12 +40,17 @@ pub const CDF_KNOTS: usize = 256;
 /// The shape of a class's profile, before the taper.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProfileShape {
-    /// `(1 + r² ÷ r_c²)^(−exponent)`: a core of radius `core` (ly), exponent `3q′ ÷ 2`.
+    /// `(1 + r² ÷ r_c²)^(−exponent) × (1 + r² ÷ r_h²)^(−outer)`: a core of radius `core` (ly),
+    /// exponent `3q′ ÷ 2`, and the outer factor of a light class at the half-mass radius `halo`.
     Core {
         /// The core radius, ly.
         core: f64,
         /// The exponent, `3q′ ÷ 2`.
         exponent: f64,
+        /// The cluster's half-mass radius, ly, where the outer factor turns on.
+        halo: f64,
+        /// The outer factor's exponent, `max(0, 1 − 3q′ ÷ 2)`: 0 for every class with `3q′ ≥ 2`.
+        outer: f64,
     },
     /// `(r² + ε²)^(−slope ÷ 2)`: a core-collapsed cluster's cusp.
     Cusp {
@@ -53,17 +65,21 @@ pub enum ProfileShape {
 }
 
 impl ProfileShape {
-    /// The cored shape of a class of mass ratio `q = m ÷ m_TO` (module documentation).
+    /// The cored shape of a class of mass ratio `q = m ÷ m_TO` in a cluster of half-mass radius
+    /// `half_mass` (ly; module documentation).
     #[must_use]
-    pub fn cored(core: f64, q: f64) -> Self {
+    pub fn cored(core: f64, q: f64, half_mass: f64) -> Self {
         let q_prime = if q < 1.0 {
             math::powf(q, EQUIPARTITION_EXPONENT)
         } else {
             q
         };
+        let exponent = 1.5 * q_prime;
         Self::Core {
             core,
-            exponent: 1.5 * q_prime,
+            exponent,
+            halo: half_mass,
+            outer: (1.0 - exponent).max(0.0),
         }
     }
 
@@ -71,9 +87,20 @@ impl ProfileShape {
     #[must_use]
     fn at(&self, r: f64) -> f64 {
         match *self {
-            Self::Core { core, exponent } => {
+            Self::Core {
+                core,
+                exponent,
+                halo,
+                outer,
+            } => {
                 let x = r / core;
-                math::powf(1.0 + x * x, -exponent)
+                let inner = math::powf(1.0 + x * x, -exponent);
+                if outer > 0.0 {
+                    let y = r / halo;
+                    inner * math::powf(1.0 + y * y, -outer)
+                } else {
+                    inner
+                }
             }
             Self::Cusp { slope } => {
                 math::powf(r * r + CUSP_SOFTENING * CUSP_SOFTENING, -0.5 * slope)
@@ -261,9 +288,9 @@ mod tests {
 
     fn shapes() -> [ProfileShape; 5] {
         [
-            ProfileShape::cored(2.0, 1.0),
-            ProfileShape::cored(2.0, 0.2),
-            ProfileShape::cored(0.3, 3.0),
+            ProfileShape::cored(2.0, 1.0, 8.0),
+            ProfileShape::cored(2.0, 0.2, 8.0),
+            ProfileShape::cored(0.3, 3.0, 8.0),
             ProfileShape::Cusp { slope: 1.8 },
             ProfileShape::Plummer { scale: 1.5 },
         ]
@@ -348,9 +375,58 @@ mod tests {
 
     #[test]
     fn a_flattened_profile_is_thinner_in_z() {
-        let profile = ClassProfile::new(ProfileShape::cored(2.0, 1.0), 60.0, 0.5);
+        let profile = ClassProfile::new(ProfileShape::cored(2.0, 1.0, 8.0), 60.0, 0.5);
         let along = profile.density(&PointLy::new(4.0, 0.0, 0.0));
         let up = profile.density(&PointLy::new(0.0, 0.0, 2.0));
         assert!((along / up - 1.0).abs() < 1e-12);
+    }
+
+    /// Ruling 139.1: every cored class's slope is `−2 y² ÷ (1 + y²)` or steeper, `y = r ÷ r_h`,
+    /// from twice the half-mass radius to half the tidal radius, net of the taper: `−2` in the
+    /// limit. The ruling's "−2 or steeper" is that limit; at twice the half-mass radius the factor
+    /// it rules reaches 0.8 of it (a light class's slope there is about −1.8), which the plan
+    /// records.
+    #[test]
+    fn light_classes_fall_at_least_as_r_to_the_minus_two_outside_the_half_mass_radius() {
+        let (r_c, r_h, r_t) = (1.5, 10.0, 200.0);
+        for q in [0.15, 0.3, 0.45, 0.6, 0.8, 1.0, 1.6] {
+            let shape = ProfileShape::cored(r_c, q, r_h);
+            let mut r = 2.0 * r_h;
+            while r <= 0.5 * r_t {
+                let h = 1e-4 * r;
+                let slope = (math::ln(shape.at(r + h)) - math::ln(shape.at(r - h)))
+                    / (math::ln(r + h) - math::ln(r - h));
+                let y2 = (r / r_h) * (r / r_h);
+                assert!(
+                    slope <= -2.0 * y2 / (1.0 + y2) + 1e-6,
+                    "q {q} at {r} ly: {slope}"
+                );
+                assert!(slope <= -1.6 + 1e-6, "q {q} at {r} ly: {slope}");
+                r *= 1.25;
+            }
+        }
+    }
+
+    #[test]
+    fn classes_with_three_q_prime_of_two_or_more_are_heinke_s_form_bit_for_bit() {
+        for q in [0.7, 1.0, 2.0] {
+            let shape = ProfileShape::cored(1.5, q, 10.0);
+            let ProfileShape::Core {
+                exponent, outer, ..
+            } = shape
+            else {
+                panic!("a cored shape")
+            };
+            assert!(outer.total_cmp(&0.0).is_eq(), "{q}: {outer}");
+            for r in [0.0, 3.0, 40.0] {
+                let x = r / 1.5;
+                assert!(
+                    shape
+                        .at(r)
+                        .total_cmp(&math::powf(1.0 + x * x, -exponent))
+                        .is_eq()
+                );
+            }
+        }
     }
 }

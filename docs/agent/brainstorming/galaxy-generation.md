@@ -476,7 +476,8 @@ fits one device: a feature's members are split by class, as a layer's are split 
   up to 38% from clusters near 10^3.5 M☉, where ejection peaks (Oh et al. 2015). A young cluster's
   living band-E count carries that factor.
 - **Tails.** Every cluster, open or globular, carries its near debris as one more class: a straight
-  tube along its orbit out to the reach of its grid. Older debris is field, or a
+  tube along its orbit out to the reach of its grid, or as far as its oldest escapers have drifted
+  (Küpper, Macleod and Heggie 2008), holding the stars it has lost. Older debris is field, or a
   [stream](#streams-and-accreted-structure).
 - **Multiple populations.** Every globular born above about 10⁵ M☉ splits its members by an
   independent mark into a first and a second population (Milone and Marino 2022). The first's share
@@ -611,9 +612,10 @@ position and on its own independent draws, and the parts are independent Poisson
   fall with radius and have a finite core or an integrable cusp (Plummer or King, one per class; a
   cusp for core-collapsed clusters and the nuclear cluster). The feature's centre is a cell corner
   at every level, so the nearest-corner bound is exact.
-- A cluster's density falls as r⁻³ or faster outside its core while cell volume grows eightfold per
-  level, so the count per cell stays flat or falls going outward. A globular of 10⁶ systems with a
-  240 per cubic light-year core peaks at about 600 members in a cell.
+- The heavy classes fall as r⁻³ or faster outside the core. The light ones fall as r⁻² to r⁻²·⁵
+  (Gieles and Zocchi 2015), so their counts per cell rise gently outward until the tidal radius,
+  and the grid's width is chosen for the fullest cell wherever it lies. A globular of 10⁶ systems
+  with a 240 per cubic light-year core peaks at about 600 members in a cell.
 - The range query treats a feature as one more stack of layers: it visits the nested cells that
   touch the sphere, band by band. The expected count for the census decision is summed over those
   cells from their bounds. That errs high, which can only drop a layer early, and it is
@@ -2244,6 +2246,23 @@ says. The text has been brought into line:
 6. **A merging pair is about 90 s apart in period a thousand years before the end, 80–120 s for
    most** (ruling 136.8). Reason: heavier pairs are slower at a fixed time to merge.
 
+**2026-09-28: the orchestrator's ruling 139.** Ruling 139 of the same file was made on research
+that read the sources' own text (`research/r-feat09d/NOTES.md`), and changes what this document
+says. The text has been brought into line:
+
+1. **Light cluster members fall as r⁻² to r⁻²·⁵ outside the half-mass radius**, not r⁻³ or faster
+   (ruling 139.1 and 139.3). Reason: in a multimass lowered-isothermal model every component tends
+   to the same polytrope `r^−(g + 3/2)` in the Keplerian outskirts (Gieles and Zocchi 2015, eqs. 20
+   and 29), with g between 0.5 and 1 in real clusters (Hénault-Brunet et al. 2019 fit 0.57 at 47
+   Tucanae; Peuten et al. 2017 find about 0.73 late in N-body models). Their counts per cell rise
+   gently outward, and the grid's width, not the profile, keeps the index. See [Dense
+   features](#dense-features-clusters-and-the-galactic-centre).
+2. **A cluster's tail is as long as its oldest escapers have drifted** and holds the stars it has
+   lost in that time (ruling 139.4). Reason: escapers leave the Lagrange points slowly and drift at
+   Küpper, Macleod and Heggie's (2008) mean speed, `2Ω |4Ω² ÷ κ² − 1| r_t`, so a young cluster's
+   tail is tens of light-years long, not the grid's reach. See [What is inside a cluster
+   today](#what-is-inside-a-cluster-today).
+
 **2026-09-28: the orchestrator's ruling 140.** Ruling 140 of the same file was made on research
 that read the sources' own text (`research/r-s092/NOTES.md`: Kroupa 2001, Licquia and Newman 2015,
 Chomiuk and Povich 2011, Martins et al. 2005, Rozwadowska et al. 2021), and re-derives the figures
@@ -2487,6 +2506,10 @@ Figures above are rounded and should be re-checked against these when they becom
   247 (black holes in clusters).
 - Heinke et al. 2005, ApJ 625; Baumgardt and Sollima 2017, MNRAS 472; Trager, King and Djorgovski
   1995, AJ 109; Bahramian et al. 2013, ApJ 766.
+- Gieles and Zocchi 2015, _A family of lowered isothermal models_, MNRAS 454, 576; Peuten et al.
+  2017, MNRAS 470, 2736; Hénault-Brunet et al. 2019, MNRAS 491, 113 (multimass models and mass
+  segregation).
+- Küpper, Macleod and Heggie 2008, _On the structure of tidal tails_, MNRAS 387, 1248.
 - Lamers et al. 2005, _An analytical description of the disruption of star clusters in tidal
   fields_, A&A 441; Oh, Kroupa and Pflamm-Altenburg 2015, ApJ 805.
 - Baumgardt and Makino 2003, MNRAS 340; Gieles, Heggie and Zhao 2011, MNRAS 413; Burkert and Forbes

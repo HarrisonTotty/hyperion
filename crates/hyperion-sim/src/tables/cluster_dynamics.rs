@@ -13,8 +13,12 @@
 //!   cluster's denser past (ruling 126.4); it multiplies the clock of the black-hole law only.
 //! - [`BH_RELAXATION_PREFACTOR`]: the half-mass relaxation time `t★ = c √(M r_h³ ÷ G) ÷ (⟨m⟩ ln Λ)`
 //!   (Spitzer 1987's 0.138).
-//! - [`EQUIPARTITION_EXPONENT`]: η in `q′ = q^η` below the turn-off; 1 is full equipartition, the
-//!   brainstorm's (plan 09, Design note 9).
+//! - [`EQUIPARTITION_EXPONENT`]: η in `q′ = q^η` below the turn-off; 1 is δ = ½ mass segregation
+//!   (η = 2δ), the standard multimass King law (plan 09, Design note 9; ruling 139.2). It is not
+//!   velocity equipartition: δ = ½ models are not equipartitioned (Gieles and Zocchi 2015, MNRAS
+//!   454, 576, §3.2.1), so it agrees with the members' partial-equipartition velocities (ruling
+//!   126.7). Peuten et al. 2017 (MNRAS 470, 2736) find δ ≃ 0.5 in N-body models, Hénault-Brunet et
+//!   al. 2019 (MNRAS 491, 113) fit 0.44 at 47 Tucanae; P15.T8.b fits η in 0.8–1.0.
 //! - [`PULSARS_AT_47_TUC_GAMMA`], [`PULSAR_GAMMA_EXPONENT`], [`PULSAR_CORE_COLLAPSE_CAP`]: about 40
 //!   millisecond pulsars at 47 Tucanae's encounter rate, rising as Γ^0.7, capped for
 //!   core-collapsed clusters at the count at 47 Tucanae's Γ (the brainstorm, "What is inside a
@@ -34,7 +38,8 @@ pub const BH_CLOCK_FACTOR: f64 = 2.5;
 /// The prefactor of the half-mass relaxation time, 0.138 (Spitzer 1987, eq. 2-63).
 pub const BH_RELAXATION_PREFACTOR: f64 = 0.138;
 
-/// η of the class profiles' `q′ = q^η` below the turn-off: 1, full equipartition.
+/// η of the class profiles' `q′ = q^η` below the turn-off: 1, δ = ½ mass segregation (η = 2δ;
+/// ruling 139.2).
 pub const EQUIPARTITION_EXPONENT: f64 = 1.0;
 
 /// The millisecond pulsars a cluster of 47 Tucanae's encounter rate holds: 40.

@@ -1,9 +1,11 @@
 //! Benchmarks of plan 09's feature members in the range query (P09.T23). Targets are the plan's; a
 //! miss is a finding, not a CI failure: CI compiles these and never runs them.
 //!
-//! - A 50 ly query in a globular's core, cold (no feature cell and no interior cached): under
-//!   20 ms. The globular is the fixture's first that has not collapsed and expects 10⁴–6 × 10⁴
-//!   members.
+//! - A 50 ly query in a globular's core, warm (its interior cached, as P09.T40's model cache will
+//!   hold it): under 20 ms (ruling 139.6). The globular is the fixture's first that has not
+//!   collapsed and expects 10⁴–6 × 10⁴ members.
+//! - The same query cold, with an empty [`KeepInteriors`] for the query, so its census and hits
+//!   build the interior once: measured, not gated.
 //! - `FeatureInterior::of` for that globular: the cluster model, the class table and the grid's
 //!   width, which a server caches.
 
@@ -17,7 +19,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
 use hyperion_sim::galaxy::features::members::{
-    FeatureInterior, FeatureMemberSource, NoInteriorCache,
+    FeatureInterior, FeatureMemberSource, KeepInteriors,
 };
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
@@ -52,14 +54,20 @@ fn feature_members(c: &mut Criterion) {
     let mut group = c.benchmark_group("feature_members");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(20));
+    let query = |interiors: &KeepInteriors| {
+        let source = FeatureMemberSource::new(&NoFeatureCache, interiors);
+        let mut hits = Vec::new();
+        let expected = source.expected_in_sphere(&galaxy, black_box(&sphere));
+        source.systems_in_sphere(&galaxy, black_box(&sphere), layers, &mut hits);
+        (expected, hits.len())
+    };
     group.bench_function("globular_core_50ly_cold", |b| {
-        b.iter(|| {
-            let source = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
-            let mut hits = Vec::new();
-            let expected = source.expected_in_sphere(&galaxy, black_box(&sphere));
-            source.systems_in_sphere(&galaxy, black_box(&sphere), layers, &mut hits);
-            (expected, hits.len())
-        });
+        b.iter(|| query(&KeepInteriors::new(&galaxy)));
+    });
+    let warm = KeepInteriors::new(&galaxy);
+    let _ = query(&warm);
+    group.bench_function("globular_core_50ly_warm", |b| {
+        b.iter(|| query(&warm));
     });
     group.bench_function("FeatureInterior::of", |b| {
         b.iter(|| FeatureInterior::of(&galaxy, black_box(&feature)));

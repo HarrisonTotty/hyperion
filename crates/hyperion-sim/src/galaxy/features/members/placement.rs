@@ -38,6 +38,7 @@ use super::super::cluster::ClusterModel;
 use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
+use super::source::FeatureInteriorCache;
 use super::{MemberRecord, draw_member};
 
 /// A feature's interior: what placing its members needs, built once per feature and kept by the
@@ -265,7 +266,8 @@ fn count_from_mean(galaxy: &Galaxy, first: FeatureMemberId, mean: f64) -> u16 {
 }
 
 /// The member `id` names in `galaxy`, or [`ResolveSystemError::NoSuchSystem`] (module
-/// documentation). A feature-level member resolves through its list (P09.T22).
+/// documentation), its feature's interior from `interiors` (ruling 139.6: a caller resolving
+/// members of one feature keeps it). A feature-level member resolves through its list (P09.T22).
 ///
 /// # Errors
 ///
@@ -274,6 +276,7 @@ fn count_from_mean(galaxy: &Galaxy, first: FeatureMemberId, mean: f64) -> u16 {
 /// or the candidate was rejected.
 pub fn resolve_member(
     galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
     id: FeatureMemberId,
 ) -> Result<MemberRecord, ResolveSystemError> {
     let feature = FeatureCatalogue::resolve(galaxy, id.feature().into())
@@ -292,8 +295,9 @@ pub fn resolve_member(
             if !band.is_stellar() {
                 return Err(ResolveSystemError::NoSuchSystem);
             }
-            let interior =
-                FeatureInterior::of(galaxy, &feature).ok_or(ResolveSystemError::NoSuchSystem)?;
+            let interior = interiors
+                .interior(galaxy, &feature)
+                .ok_or(ResolveSystemError::NoSuchSystem)?;
             let cell = interior
                 .grid
                 .cell(level, cell)
@@ -324,6 +328,7 @@ mod tests {
     use crate::GENERATOR_VERSION;
     use crate::galaxy::features::FeatureProcess;
     use crate::galaxy::features::catalogue::FeatureMarks;
+    use crate::galaxy::features::members::NoInteriorCache;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::resolve;
     use crate::id::{FeatureCell, SystemIdKind};
@@ -468,9 +473,43 @@ mod tests {
             panic!("a member's ID is a feature member's")
         };
         assert_eq!(
-            resolve_member(&bare, id),
+            resolve_member(&bare, &NoInteriorCache, id),
             Err(ResolveSystemError::NoSuchSystem)
         );
+    }
+
+    /// Members of one feature resolved through one shared [`KeepInteriors`], in any order, are
+    /// the members resolved cold.
+    #[test]
+    fn resolving_through_a_kept_interior_does_not_depend_on_order() {
+        use crate::galaxy::features::members::KeepInteriors;
+        use hyperion_testkit::order::assert_order_independent;
+        let galaxy = galaxy();
+        let interior = open_cluster();
+        let mut ids = Vec::new();
+        for band in [MassBand::A, MassBand::B, MassBand::C] {
+            if let Some(cell) = populated(galaxy, interior, band) {
+                let mut out = Vec::new();
+                interior.members_in_cell(galaxy, band, cell, &mut out);
+                ids.extend(
+                    out.iter()
+                        .take(2)
+                        .filter_map(|(m, _)| match m.record().id().kind() {
+                            SystemIdKind::FeatureMember(id) => Some(id),
+                            _ => None,
+                        }),
+                );
+            }
+        }
+        assert!(ids.len() >= 4, "{ids:?}");
+        let kept = KeepInteriors::new(galaxy);
+        assert_order_independent(&ids, |&id| resolve_member(galaxy, &kept, id));
+        for &id in &ids {
+            assert_eq!(
+                resolve_member(galaxy, &kept, id),
+                resolve_member(galaxy, &NoInteriorCache, id)
+            );
+        }
     }
 
     #[test]
@@ -482,14 +521,18 @@ mod tests {
         let count = interior.candidate_count(galaxy, band, cell);
         let past = interior.member_id(band, cell, count);
         assert_eq!(
-            resolve_member(galaxy, past),
+            resolve_member(galaxy, &NoInteriorCache, past),
             Err(ResolveSystemError::NoSuchSystem)
         );
         let rejected = (0..count)
             .find(|&i| interior.candidate(galaxy, band, cell, i).is_none())
             .expect("the nearest-corner bound rejects some candidates");
         assert_eq!(
-            resolve_member(galaxy, interior.member_id(band, cell, rejected)),
+            resolve_member(
+                galaxy,
+                &NoInteriorCache,
+                interior.member_id(band, cell, rejected)
+            ),
             Err(ResolveSystemError::NoSuchSystem)
         );
     }
@@ -616,7 +659,7 @@ mod tests {
     }
 
     /// Every cluster of three feature cells and every other globular of the first hundred in the
-    /// walk (686 clusters): their fullest cell and band on the axes (where the bound peaks) against
+    /// walk (734 at version 15): their fullest cell and band on the axes (where the bound peaks) against
     /// the 8,192 index with eight standard deviations to spare; the plan's 2,000 is a target, and
     /// a dense core the finest grid that reaches its tidal radius cannot bring under it is counted.
     #[test]
@@ -690,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    fn a_globular_of_a_million_systems_peaks_near_600_a_cell_and_falls_outward() {
+    fn a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently() {
         let galaxy = galaxy();
         let (model, table) = synthetic_globular(galaxy, 1e6, 240.0);
         let n: f64 = MassBand::ALL.iter().map(|&b| table.expected(b)).sum();
@@ -727,11 +770,12 @@ mod tests {
             (300.0..1_200.0).contains(&peak),
             "the fullest cell expects {peak}"
         );
-        // Outside the core the counts per cell stay flat or fall level by level for the classes
-        // whose profile falls as r⁻³ or faster, q′ ≥ 1: bands D and E. Below the turn-off,
-        // Design note 9's `(1 + r² ÷ r_c²)^(−3q′ ÷ 2)` with η = 1 falls as r^(−3q), band A's as
-        // r^(−1.1), and its counts rise outward to the taper: a finding against the brainstorm's
-        // "falls as r⁻³ or faster outside its core", recorded in plan 09's Risks.
+        // Ruling 139.3: outside the core the heavy bands' counts per cell stay flat or fall level
+        // by level; the light bands', falling as r⁻² to r⁻²·⁵ (Design note 9, ruling 139.1), rise
+        // by at most 2^1.1 a level, a level's inner edge (four cells out) standing for its radius.
+        // The rise is asserted from twice the half-mass radius, the range of ruling 139.1's slope
+        // test: between r_h and 2 r_h the ruled outer factor has reached only 0.8 of r⁻², and band
+        // A rises ×2.164 (2^1.11) from the level at 16 ly to the next, which plan 09 records.
         for band in [MassBand::D, MassBand::E] {
             let levels = per_level(band);
             let top = levels
@@ -741,6 +785,32 @@ mod tests {
                 .map_or(0, |(i, _)| i);
             for pair in levels[top..].windows(2) {
                 assert!(pair[1] <= pair[0] * 1.05, "{band:?}: {levels:.1?}");
+            }
+        }
+        let (r_h, r_t) = (
+            model.half_mass_radius().value(),
+            model.tidal_radius().value(),
+        );
+        let inside: Vec<usize> = grid
+            .all_levels()
+            .filter(|l| l.level() > 0)
+            .filter(|l| (2.0 * r_h..=0.5 * r_t).contains(&(4.0 * l.edge().value())))
+            .map(|l| usize::from(l.level()))
+            .collect();
+        assert!(
+            inside.len() >= 2,
+            "levels {inside:?} between r_h and r_t ÷ 2"
+        );
+        for band in [MassBand::A, MassBand::B, MassBand::C] {
+            let levels = per_level(band);
+            for pair in inside.windows(2) {
+                let rise = levels[pair[1]] / levels[pair[0]];
+                println!("{band:?} levels {pair:?}: ×{rise:.3}");
+                assert!(
+                    rise <= math::exp2(1.1) * (1.0 + 1e-9),
+                    "{band:?}: ×{rise} from level {} ({levels:.1?})",
+                    pair[0]
+                );
             }
         }
     }

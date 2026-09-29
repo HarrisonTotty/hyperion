@@ -15,6 +15,7 @@
 
 pub mod chabrier;
 pub mod cluster_dynamics;
+pub mod cluster_retention;
 pub mod displaced_forms;
 pub mod gauss_legendre;
 pub mod giant_cooling;
@@ -49,6 +50,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "chabrier",
         revision: 1,
         since_generator_version: 14,
+        provisional: false,
+    },
+    TableInfo {
+        name: "cluster_retention",
+        revision: 0,
+        since_generator_version: 15,
         provisional: false,
     },
     TableInfo {

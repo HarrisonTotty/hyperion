@@ -95,6 +95,12 @@ impl TailClass {
         self.expected
     }
 
+    /// How far it reaches from the centre along its axis, ly.
+    #[must_use]
+    pub const fn reach(&self) -> f64 {
+        self.reach
+    }
+
     /// Members per light-year of each side.
     fn line_density(&self) -> f64 {
         self.expected / (2.0 * (self.reach - self.inner))
@@ -194,13 +200,13 @@ impl MemberClassTable {
             [1.0, 0.0, 0.0]
         };
         let tails = counts.tails.map(|t| {
-            t.filter(|t| t.expected > 0.0 && reach.value() > tidal)
+            t.filter(|t| t.expected > 0.0 && t.length.value() > 0.0)
                 .map(|t| TailClass {
                     class: t.class,
                     expected: t.expected,
                     axis,
                     inner: tidal,
-                    reach: reach.value(),
+                    reach: (tidal + t.length.value()).min(reach.value()),
                     width: tidal,
                 })
         });
@@ -775,12 +781,14 @@ mod tests {
         let (model, table) = table();
         let r_t = model.tidal_radius().value();
         let band = MassBand::A;
-        let full = table.tail(band).expect("M4 has a tail").expected();
-        assert!((table.extent().value() / (4.0 * r_t) - 1.0).abs() < 1e-12);
-        let half = table.clone().with_tails_to(LightYears::new(2.5 * r_t));
+        let tail = *table.tail(band).expect("M4 has a tail");
+        let (full, end) = (tail.expected(), tail.reach());
+        assert!((table.extent().value() / end.max(r_t) - 1.0).abs() < 1e-12);
+        let middle = f64::midpoint(r_t, end);
+        let half = table.clone().with_tails_to(LightYears::new(middle));
         let cut = half.tail(band).unwrap().expected();
-        // Three tidal radii of tube kept of the full four.
-        assert!((cut / full - 1.5 / 3.0).abs() < 1e-12, "{cut} of {full}");
+        // Half the tube kept.
+        assert!((cut / full - 0.5).abs() < 1e-12, "{cut} of {full}");
         assert!(
             table
                 .clone()
@@ -790,8 +798,15 @@ mod tests {
         );
         // A tail's member never lies beyond the reach of the centre.
         let tail = half.tail(band).unwrap();
-        assert!(tail.density(&PointLy::new(2.4 * r_t, 0.9 * r_t, 0.0)) <= 0.0);
-        assert!(tail.density(&PointLy::new(2.0 * r_t, 0.5 * r_t, 0.0)) > 0.0);
+        let s = 0.9 * middle;
+        assert!(
+            tail.density(&PointLy::new(
+                s,
+                (middle * middle - s * s).sqrt() * 1.01,
+                0.0
+            )) <= 0.0
+        );
+        assert!(tail.density(&PointLy::new(s, 0.1 * r_t, 0.0)) > 0.0);
         // The grid reaches the tidal radius; it stopped doubling at the tails' extent or because
         // the doubled grid would expect too many candidates somewhere; and it doubled past the
         // tidal radius only while under the target.

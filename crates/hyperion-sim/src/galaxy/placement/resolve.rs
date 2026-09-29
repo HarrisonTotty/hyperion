@@ -17,7 +17,7 @@ use super::{
     CandidateOutcome, CellKey, ResolveSystemError, SystemRecord, evaluate_candidate_from_bound,
 };
 use crate::galaxy::Galaxy;
-use crate::galaxy::features::members::resolve_member;
+use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::id::{SystemId, SystemIdKind};
 
 /// The system `id` names in `galaxy`.
@@ -68,7 +68,9 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
         // cell; every layer, the substellar two included, is placed.
         SystemIdKind::Grid(grid) => resolve_candidate(galaxy, CellKey::of(id)?, grid.index()),
         // A catalogue feature's member reruns its one candidate (plan 09, P09.T21).
-        SystemIdKind::FeatureMember(member) => resolve_member(galaxy, member).map(|m| *m.record()),
+        SystemIdKind::FeatureMember(member) => {
+            resolve_member(galaxy, &NoInteriorCache, member).map(|m| *m.record())
+        }
         SystemIdKind::Centre(_)
         | SystemIdKind::Stream(_)
         | SystemIdKind::DwarfCore(_)

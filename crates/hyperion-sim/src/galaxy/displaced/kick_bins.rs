@@ -238,6 +238,74 @@ pub fn speed_bin_shares_against(
     shares_on(law, m, comp, v_ref, stripped, Tracks::Shared(&track))
 }
 
+/// What a cluster's retention reads of one progenitor's remnant of one kind (plan 09, P09.T9.b;
+/// ruling 139.5): every share a probability over the star's fate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetentionShares {
+    /// The probability that the remnant is of the kind.
+    pub kind: f64,
+    /// Its complete fallback, kicked not at all.
+    pub fallback: f64,
+    /// Its low mode's share, which a cluster judges on the pair's systemic speed.
+    pub low: f64,
+    /// Its envelope-loss share, kicked by the white dwarfs' Maxwellian.
+    pub envelope: f64,
+    /// Its ordinary mode's share kicked below each of the speeds asked for.
+    pub ordinary_below: Vec<f64>,
+}
+
+/// The neutron stars' and the black holes' [`RetentionShares`] of a star of initial mass `m` and
+/// composition `comp` under `law`, the ordinary mode's at each of `speeds`: one track and
+/// companion-stripped share for every speed, the rest [`speed_bin_shares_against`]'s quadrature
+/// with the first bin edge at each speed, so the shares below a speed are the exact first bin's.
+///
+/// # Panics
+///
+/// If `m` is not positive and finite, or a speed is not positive.
+#[must_use]
+pub fn retention_shares(
+    law: &StandardKickLaw,
+    m: SolarMasses,
+    comp: &Composition,
+    speeds: &[KilometresPerSecond],
+) -> [RetentionShares; 2] {
+    assert!(
+        m.value() > 0.0 && m.value().is_finite(),
+        "an initial mass is positive and finite: {m:?}"
+    );
+    let m0 = if m > MAX_INITIAL_MASS {
+        MAX_INITIAL_MASS
+    } else {
+        m
+    };
+    let track = Track::full(m0, comp, &marked_draws(UNMARKED));
+    let stripped = binarity::stripped_share_on(m, comp, &track);
+    let at = |v: KilometresPerSecond| {
+        let v_ref = KilometresPerSecond::new(v.value() / SPEED_EDGES[0]);
+        shares_on(law, m, comp, v_ref, stripped, Tracks::Shared(&track))
+    };
+    let kinds = [RemnantKind::NeutronStar, RemnantKind::BlackHole];
+    let first = at(speeds
+        .first()
+        .copied()
+        .unwrap_or(KilometresPerSecond::new(1.0)));
+    let mut out = kinds.map(|kind| RetentionShares {
+        kind: first.kind_share(kind),
+        fallback: first.mode_bins(kind, KickMode::FallbackNone).iter().sum(),
+        low: first.mode_bins(kind, KickMode::Low).iter().sum(),
+        envelope: first.mode_bins(kind, KickMode::WhiteDwarf).iter().sum(),
+        ordinary_below: Vec::with_capacity(speeds.len()),
+    });
+    for (i, &v) in speeds.iter().enumerate() {
+        let shares = if i == 0 { first.clone() } else { at(v) };
+        for (o, kind) in out.iter_mut().zip(kinds) {
+            o.ordinary_below
+                .push(shares.mode_bins(kind, KickMode::Ordinary)[0]);
+        }
+    }
+    out
+}
+
 /// The mark of a star its companion did not strip: the largest word lies above every share below 1.
 const UNMARKED: Mark = Mark::from_word(u64::MAX);
 

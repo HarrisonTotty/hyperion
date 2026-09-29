@@ -14,6 +14,18 @@ provisional = false
 acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
 
 [[table]]
+name = "cluster_retention"
+path = "cluster_retention.rs"
+task = "cluster_retention"
+revision = 0
+inputs_sha256 = "b23c1c962b071a17cf39dd5aabc161d29b71e684795831b4b0f0d7d64f66f2d7"
+body_sha256 = "a15d66e63c285699fa8f7db29f7ce5ece0c9724d5950b08d27e8733731c9dfe9"
+fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02068010290444081, 0.3634885305986848, 0.6167941399325176, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.0016249031329971537, 0.010966672628571109, 0.07878816235167267, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.09798233061183895, 0.2681171358620811, 0.298925606888743, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+since_generator_version = 15
+provisional = false
+acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00002 absolute of the exact quadrature where it is 0.05 or less and 0.0195 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.01299"
+
+[[table]]
 name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"

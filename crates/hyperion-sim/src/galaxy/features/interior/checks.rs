@@ -185,12 +185,13 @@ fn neutron_stars_black_holes_and_pulsars_of_the_named_clusters() {
 
 #[test]
 fn tails_hold_what_the_cluster_lost_and_no_second_population() {
+    use super::super::kinds::open_cluster::evolution_survival;
+    use super::counts::tail_window;
     let galaxy = galaxy();
     let model = model(&galaxy, TUC_47);
-    let reach = 4.0 * model.tidal_radius().value();
+    let reach = LightYears::new(4.0 * model.tidal_radius().value());
     let table = table(&galaxy, &model);
-    let lost_in_reach = model.mass_loss_rate() * 2.0 * (reach - model.tidal_radius().value())
-        / (2.0 * model.sigma(LightYears::ZERO).value() * LIGHT_YEARS_PER_YEAR_PER_KM_S);
+    let window = tail_window(&galaxy, &model, reach);
     let mut members = 0.0;
     let mut mass = 0.0;
     for band in MassBand::ALL {
@@ -203,11 +204,22 @@ fn tails_hold_what_the_cluster_lost_and_no_second_population() {
             assert_ne!(class.kind, ClassKind::Tail);
         }
     }
-    // The tail's expected mass is the mass lost in the reach at the drift speed.
+    // Ruling 139.4: the count times the mean lost mass is the mass lost in τ, and no tail holds
+    // more than the stars the cluster has lost.
     assert!(members > 0.0);
     assert!(
-        (mass / lost_in_reach - 1.0).abs() < 1e-9,
-        "{mass} against {lost_in_reach}"
+        (mass / window.mass.value() - 1.0).abs() < 1e-9,
+        "{mass} against {}",
+        window.mass.value()
+    );
+    let lost =
+        model.initial_mass().value() * evolution_survival(model.age()) - model.mass().value();
+    assert!(mass <= lost * (1.0 + 1e-12), "{mass} against {lost}");
+    eprintln!(
+        "47 Tuc: v_drift {:.2} km/s, tail {:.0} ly for {:.2e} yr, {members:.0} members",
+        window.drift_speed,
+        window.length.value(),
+        window.duration.value()
     );
     // 47 Tucanae was born above 10⁵ M☉: its profiled classes have both populations.
     let second = table
@@ -290,4 +302,76 @@ fn the_milky_way_s_globulars_have_their_observed_remnants() {
         (1e4..=1e5).contains(&black_holes),
         "{black_holes} black holes"
     );
+}
+
+/// Ruling 139.4: a nursery of 241 M☉ at birth, 69 Myr old at the solar circle, has a tail as long
+/// as its oldest escaper has drifted, `r_t + v_drift × age`, holding the 147 M☉ of stars it has
+/// lost (the research's figure). The ruling's "about 70 ly" and "300–420 members" took a flat
+/// rotation curve and a mean lost mass of 0.35–0.5 M☉; the fixture's Ω and κ give `4Ω² ÷ κ² − 1`
+/// = 1.27 (87 ly), and the tail's bottom-heavy band shares as built a mean of 0.235 M☉ (623
+/// members), which plan 09 records.
+#[test]
+fn a_young_cluster_s_tail_holds_the_stars_it_has_lost() {
+    use super::super::cluster::{ClusterKind, ClusterMarks, ClusterParameters};
+    use super::super::kinds::open_cluster::present_mass;
+    use super::counts::tail_window;
+    use crate::galaxy::Population;
+    use crate::units::{Dex, SolarMasses, Years};
+    let galaxy = galaxy();
+    let (m0, age) = (SolarMasses::new(241.0), Years::new(69e6));
+    let mass = present_mass(m0, age);
+    assert!((55.0..65.0).contains(&mass.value()), "{mass:?}");
+    let model = ClusterModel::new(
+        &galaxy,
+        &ClusterParameters {
+            kind: ClusterKind::Open,
+            population: Population::YoungThinDisc,
+            component: None,
+            position: PointLy::new(0.0, 26_700.0, 0.0),
+            age,
+            fe_h: Dex::ZERO,
+            mass,
+            initial_mass: m0,
+            half_mass_radius: LightYears::new(4.75),
+            birth_half_mass_radius: LightYears::new(4.75),
+            core_radius: None,
+            concentration: 1.0,
+            mass_loss_rate: 1.6e-6,
+            age_spread: Years::ZERO,
+            marks: ClusterMarks::MEDIAN,
+        },
+    );
+    let reach = LightYears::new(1_750.0);
+    let window = tail_window(&galaxy, &model, reach);
+    let table = MemberClassTable::new(&galaxy, &model, reach, [1.0, 0.0, 0.0]);
+    let members: f64 = MassBand::ALL
+        .iter()
+        .filter_map(|&b| table.tail(b))
+        .map(TailClass::expected)
+        .sum();
+    let r_t = model.tidal_radius().value();
+    let v = window.drift_speed * LIGHT_YEARS_PER_YEAR_PER_KM_S;
+    eprintln!(
+        "nursery: r_t {r_t:.1} ly, v_drift {:.3} km/s, tail {:.1} ly, {:.1} M☉, {members:.0} members",
+        window.drift_speed,
+        window.length.value(),
+        window.mass.value()
+    );
+    assert!((140.0..155.0).contains(&window.mass.value()), "{window:?}");
+    assert!(
+        (window.length.value() / (v * age.value()) - 1.0).abs() < 1e-12,
+        "{window:?}"
+    );
+    let lost_mass: f64 = MassBand::ALL
+        .iter()
+        .filter_map(|&b| table.tail(b))
+        .map(|t| t.expected() * t.class().mean_mass.value())
+        .sum();
+    assert!((lost_mass / window.mass.value() - 1.0).abs() < 1e-9);
+    assert!((250.0..1_000.0).contains(&members), "{members}");
+    for band in MassBand::ALL {
+        if let Some(tail) = table.tail(band) {
+            assert!(tail.reach() <= r_t + v * age.value() * (1.0 + 1e-12));
+        }
+    }
 }

@@ -1038,7 +1038,7 @@ the version when it lands, although no grid star changes, because members with a
 `BH_LOSS_PSI_SLOPE`, `BH_CLOCK_FACTOR` (ruling 126.4: 2.5, on age ÷ t★ in the black-hole law
 only), `BH_RELAXATION_PREFACTOR`; `EQUIPARTITION_EXPONENT`; `PULSARS_AT_47_TUC_GAMMA`,
 `PULSAR_GAMMA_EXPONENT`, `PULSAR_CORE_COLLAPSE_CAP`. T8.a first moves plan 09's scratch constants
-here unchanged (2.8 × 10⁻³, 147, 2.5, 0.138; full equipartition; 40, 0.7, and a cap equal to the
+here unchanged (2.8 × 10⁻³, 147, 2.5, 0.138; η = 1, δ = ½ mass segregation; 40, 0.7, and a cap equal to the
 count at 47 Tucanae's Γ), whatever plan 09 has called them.
 
 - **P15.T8.a Black-hole loss against the CMC Cluster Catalog** (Kremer et al. 2020). Dataset:
@@ -1054,13 +1054,16 @@ count at 47 Tucanae's Γ), whatever plan 09 has called them.
   Gyr: none in dynamically old clusters, tens to a few hundred in a typical massive one, thousands
   in ω Centauri, and about a fifth of the catalogue (15–25%) beyond the core-collapse line of 14
   relaxation times with no black holes (Trager et al. 1995).
-- **P15.T8.b Partial-equipartition exponent against multimass King models.** The tool integrates the
+- **P15.T8.b Mass-segregation exponent against multimass King models.** The tool integrates the
   models itself (Poisson's equation with one lowered-Maxwellian component per mass class, in the
   manner of Gunn and Griffin 1979 and Da Costa and Freeman 1976; neither is in the brainstorm's
   list, so re-check) over concentrations 0.7–2.3 and the mass-function slopes of "What is inside a
   cluster today", and fits η in the class profile (1 + r² ÷ r_c²)^(−3 q^η ÷ 2) for q below 1, with η
-  = 1 above. **Acceptance:** half-mass radius of each class below the turn-off reproduced to 10%; η
-  between 0.3 and 1.
+  = 1 above. η = 2δ, δ the models' velocity-scale exponent (Gieles and Zocchi 2015, MNRAS 454,
+  576, eqs. 24–29), and η = 1 is δ = ½, not velocity equipartition (ruling 139.2). **Acceptance:**
+  half-mass radius of each class below the turn-off reproduced to 10%; η between 0.8 and 1.0
+  (ruling 139.2: Peuten et al. 2017 find δ ≃ 0.5 in N-body models, Hénault-Brunet et al. 2019 fit
+  0.44 at 47 Tucanae).
 - **P15.T8.c Pulsars against encounter rate.** Datasets: Bahramian et al. (2013) for Γ, the
   Baumgardt–Hilker tables for ρ_c and r_c, and a census of pulsars per cluster (the brainstorm cites
   none; the task records the one it uses). Poisson regression of count on Γ with a completeness term

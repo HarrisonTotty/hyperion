@@ -58,7 +58,7 @@ pub mod source;
 
 pub use level_list::{FeatureLevelList, ListClass, ListEntry, MemberZero};
 pub use placement::{FeatureInterior, resolve_member};
-pub use source::{FeatureInteriorCache, FeatureMemberSource, NoInteriorCache};
+pub use source::{FeatureInteriorCache, FeatureMemberSource, KeepInteriors, NoInteriorCache};
 
 /// The most attempts a member's conditional draw makes (P09.T10).
 pub const MAX_ATTEMPTS: u32 = 4_096;

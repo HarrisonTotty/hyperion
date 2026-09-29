@@ -1866,3 +1866,55 @@ classes)` for the centre (P09.T27) and the tests. A class's count sits at word `
     radii and speeds (136.1–2), the caps (136.1, 136.3), the Type Ia rate and ancient shares
     (136.7's `MIN_DELAY`) and the twelve progenitors (the delay-first draw, `MIN_DELAY`, 136.9's
     shares) moved; the light curves did not.
+- **Ruling 139 as built (lane `feat09d`, 2026-09-28, rebased onto b2ceb62 at `GENERATOR_VERSION`
+  15).** No committed output a consumer reads moves; `galaxy/features/members.golden` is re-blessed
+  at 15 (items 1, 4 and 5 move its members, tails and cells), `cells.golden` does not move, and
+  `galaxy/features/retention.golden` is new.
+  - _Design note 9 (139.1)._ `ProfileShape::Core` gains `halo` (the cluster's `r_h`) and `outer`
+    = `max(0, 1 − 3q′ ÷ 2)`; `ProfileShape::cored(core, q, half_mass)`. Classes with `3q′ ≥ 2`
+    skip the factor and are bit-identical. η's label is δ = ½ mass segregation (139.2); plan 15's
+    P15.T8.b window is 0.8–1.0.
+  - _Finding (139.1, 139.3)._ The ruled factor reaches only `y² ÷ (1 + y²)` of `r⁻²` at `y = r ÷
+r_h`: a light class's slope is about −1.8 at 2 r_h (0.8 of −2 plus the core term), and "−2 or
+    steeper between 2 r_h and r_t ÷ 2" holds only in the limit. The profile test asserts slope ≤
+    `−2 y² ÷ (1 + y²)` and ≤ −1.6 there. For the 10⁶-system globular band A's fullest cell per
+    level is 45, 45, 126, 273, 432, 147, 4, 34: the rise from the level at 16 ly (about r_h) to
+    the next is ×2.164, over the ruled 2^1.1 = 2.144, so T21's rise test runs from 2 r_h (×1.58,
+    ×1.30 and ×1.43 for bands A–C), the range of 139.1's slope test.
+  - _Tails (139.4)._ `interior::counts::{tail_window, TailWindow}` (drift speed, length ℓ, τ,
+    mass), `TailCount::length`, `TailClass::reach()`. v_drift reads `omega` and `kappa` at the
+    cluster's spherical radius, as `tidal_radius` does. μ_ev for a globular's cap is L05's solar
+    fit, the only one built. Measured: the 60 M☉ nursery (241 M☉, 69 Myr) at 26,700 ly holds
+    146.6 M☉ (the research's 147) over **87.5 ly as 623 members**, against the ruling's "about 70
+    ly" and "300–420": the fixture's Ω and κ give `4Ω² ÷ κ² − 1` = 1.27, not the flat curve's 1
+    (v_drift 0.38 km/s against 0.30), and the tail's bottom-heavy band shares as built (the
+    canonical less the depleted count) a mean lost mass of 0.235 M☉, not 0.35–0.5 (586 in band
+    A at 0.213 M☉, 37 in B). The test asserts the ruled formula (mass 140–155 M☉, length = v_drift
+    × age, count × mean = mass, 250–1,000 members). 47 Tucanae: v_drift 9.2 km/s, a 1,213 ly tail
+    of 3.9 × 10⁷ yr, 5,311 members. Gas expulsion's isotropic loss at about 1 km/s is outside the
+    model (Design note 1's single bound mark).
+  - _Retention table (139.5)._ `tables::cluster_retention::{SHARES, ORDINARY_BELOW}` (`static`,
+    352 rows: 16 masses × 11 [Fe/H] × 2 kinds) from the hyperion-fit task `cluster_retention`
+    (slow class, 67 s on three threads), with `kick_bins::{retention_shares, RetentionShares}` and
+    `interior::retention::{node_shares, retention_tabulated, retention_from_rows, mass_nodes,
+fe_h_nodes, speed_nodes, table_row}`. `ClusterModel::new` reads the table; `retention` stays
+    as the reference. Acceptance over 64 off-node points (Chabrier and Kroupa; refitted at 15): within 2 × 10⁻⁵
+    absolute where retention is 0.05 or less and 1.95% relative above it, both inside the
+    ruling's 0.005 and 3%; the largest absolute difference is 0.013, a black-hole retention of
+    0.667 at [Fe/H] +0.05 between the nodes at −0.07 and +0.18, a fate step the linear
+    interpolation smooths (ruling 137's trade). A cluster model now builds in 0.2 ms (from 3.3–4.5
+    s) and an interior in 14–17 ms.
+  - _T23 (139.6)._ `members::KeepInteriors::new(&Galaxy)`, a keeping cache bound to one galaxy
+    (it panics on another), so one query's census and hits build each interior once;
+    `resolve_member(galaxy, &dyn FeatureInteriorCache, id)`. The bench measures the 50 ly
+    globular-core query cold (a fresh `KeepInteriors`) and warm (kept). Measured (release, 8,168
+    hits): **cold 4.9 s, warm 4.8 s**, against the warm 20 ms target. The interior is no longer
+    the cost: the members are. Band C's 4,831 white dwarfs take 6.5 s of a whole-cluster pass
+    and band D's 982 take 1.6 s (1.35–1.6 ms each), against 10 µs a living star:
+    `draw_member` builds a `StarModel` per attempt to confirm a remnant class's kind. That
+    check, not the model, now bounds a query (for the owner; P09.T10's draw).
+  - _Headroom after 139._ The slow headroom test now runs in under a minute (from 23 minutes: the
+    model is 0.2 ms). At 941d80b it held 686 clusters, the fullest cell 3,475 (from 4,191) with
+    the profiles and tails of 139.1 and 139.4; rebased onto b2ceb62's catalogue it holds 734, two
+    over the 2,000 target, the fullest 4,237, under the 8,192 index with eight standard
+    deviations to spare.

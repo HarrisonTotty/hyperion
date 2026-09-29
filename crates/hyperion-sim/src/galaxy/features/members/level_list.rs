@@ -353,7 +353,11 @@ mod tests {
             let id = FeatureMemberId::new(f.id().feature_ref(), MemberSlot::FeatureLevel { index })
                 .unwrap();
             assert_eq!(
-                resolve_member(&galaxy, id),
+                resolve_member(
+                    &galaxy,
+                    &crate::galaxy::features::members::NoInteriorCache,
+                    id
+                ),
                 Err(ResolveSystemError::NoSuchSystem)
             );
         }

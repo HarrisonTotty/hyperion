@@ -30,10 +30,18 @@
 //!   and 3% of band D. The peak at 10^3.5 M☉ is Oh, Kroupa and Pflamm-Altenburg's (2015, ApJ 805,
 //!   92); the amplitudes are ours (provisional): their 15% and "up to 38%" are O-star shares over a
 //!   whole population of embedded clusters, varying with the models, not the ends of `f_ej(M)`.
-//! - **Tails (T9.g)**: per band, the members lost in the grid's reach, `Ṁ ÷ (2 ⟨m⟩ v_drift)` per
-//!   light-year on each side (half the loss leads, half trails), with the band shares of what the cluster lost (the canonical minus
-//!   the depleted living stars) and `v_drift` the central dispersion (ours). First population
-//!   only.
+//! - **Tails (T9.g; ruling 139.4)**: a tail is as long as its oldest escaper has drifted and holds
+//!   what the cluster lost in that time ([`tail_window`]). Escapers drift along the tail at Küpper,
+//!   Macleod and Heggie's (2008, MNRAS 387, 1248, eq. 5's secular term) mean speed `v_drift = 2Ω
+//!   |4Ω² ÷ κ² − 1| r_t`, so the tail runs `ℓ = min(reach, r_t + v_drift × age) − r_t` beyond the
+//!   tidal radius on each side and its stars left in the last `τ = ℓ ÷ v_drift`. An open cluster
+//!   lost `M_esc(age) − M_esc(age − τ)` in that time, `M_esc(t) = m₀ μ_ev(t) (1 − s(m₀, t))` (Lamers
+//!   et al. 2005 as built in `kinds::open_cluster`): stellar mass that left, not the gas stellar
+//!   evolution returned. A globular lost `Ṁ τ` on its BM03 history, held at or below `m₀ μ_ev(age)
+//!   − M`. The count is that mass over the lost stars' mean mass, with the band shares of what the
+//!   cluster lost (the canonical minus the depleted living stars), spread uniformly over both sides.
+//!   First population only. Stars lost by gas expulsion, isotropically at about 1 km/s, are outside
+//!   the model (Design note 1's single bound mark).
 //! - **Multiple populations (T9.h)**: a globular born above 10⁵ M☉ splits every class but the tail
 //!   into its first population's share and its second's, whose core is 0.7 times the cluster's.
 //!
@@ -43,7 +51,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::quad::gl_log_panels;
 use crate::math;
-use crate::units::{LightYears, SolarMasses};
+use crate::units::{LightYears, SolarMasses, Years};
 
 use super::super::cluster::{ClusterKind, ClusterModel};
 use super::abundances::first_population_share;
@@ -92,13 +100,79 @@ pub struct ClassCount {
     pub shape: ProfileShape,
 }
 
-/// One band's tail: its expected count over both sides.
+/// One band's tail: its expected count over both sides and its length.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TailCount {
     /// The tail's class.
     pub class: MemberClass,
-    /// Its expected count over both sides, from the tidal radius to the reach.
+    /// Its expected count over both sides.
     pub expected: f64,
+    /// How far it runs beyond the tidal radius on each side, `ℓ`.
+    pub length: LightYears,
+}
+
+/// A cluster's tail in time and space (module documentation; ruling 139.4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TailWindow {
+    /// The escapers' mean drift along the tail, km/s.
+    pub drift_speed: f64,
+    /// How far the tail runs beyond the tidal radius on each side, `ℓ`.
+    pub length: LightYears,
+    /// The time its oldest star has drifted, `τ = ℓ ÷ v_drift`.
+    pub duration: Years,
+    /// The stellar mass the cluster lost in that time, M☉: what the tail holds.
+    pub mass: SolarMasses,
+}
+
+/// The tail window of `model` in `galaxy`, its tail cut at `reach` from the centre (module
+/// documentation; ruling 139.4).
+#[must_use]
+pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> TailWindow {
+    use super::super::kinds::open_cluster::{disruption_survival, evolution_survival};
+    use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
+    let p = model.position();
+    let r = LightYears::new((p.x * p.x + p.y * p.y + p.z * p.z).sqrt());
+    let r_t = model.tidal_radius().value();
+    let age = model.age().value().max(0.0);
+    let (omega, kappa) = if r.value() > 0.0 {
+        (
+            galaxy.potential().omega(r).value(),
+            galaxy.potential().kappa(r).value(),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    // ly per year.
+    let drift = if kappa > 0.0 {
+        2.0 * omega * (4.0 * omega * omega / (kappa * kappa) - 1.0).abs() * r_t
+    } else {
+        0.0
+    };
+    let length = if drift > 0.0 {
+        ((reach.value().min(r_t + drift * age)) - r_t).max(0.0)
+    } else {
+        0.0
+    };
+    let tau = if drift > 0.0 { length / drift } else { 0.0 };
+    let m0 = model.initial_mass();
+    let lost_stars =
+        (m0.value() * evolution_survival(Years::new(age)) - model.mass().value()).max(0.0);
+    let mass = match model.kind() {
+        ClusterKind::Open => {
+            let escaped = |t: f64| {
+                let t = Years::new(t.max(0.0));
+                m0.value() * evolution_survival(t) * (1.0 - disruption_survival(m0, t))
+            };
+            (escaped(age) - escaped(age - tau)).max(0.0)
+        }
+        ClusterKind::Globular => (model.mass_loss_rate() * tau).min(lost_stars),
+    };
+    TailWindow {
+        drift_speed: drift / LIGHT_YEARS_PER_YEAR_PER_KM_S,
+        length: LightYears::new(length),
+        duration: Years::new(tau),
+        mass: SolarMasses::new(mass),
+    }
 }
 
 /// Every class of a cluster (module documentation).
@@ -263,7 +337,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
                 Generation::First => core,
                 Generation::Second => core * SECOND_POPULATION_CORE_FACTOR,
             };
-            ProfileShape::cored(c, mass / m_to)
+            ProfileShape::cored(c, mass / m_to, model.half_mass_radius().value())
         }
     };
     let binary_fraction = |generation: Generation| match (model.kind(), generation) {
@@ -419,9 +493,8 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
 
     // Tails: members lost within the reach, by what was lost.
     let mut tails = [None; 5];
-    let rate = model.mass_loss_rate();
-    let length = (reach.value() - model.tidal_radius().value()).max(0.0);
-    if rate > 0.0 && length > 0.0 {
+    let window = tail_window(galaxy, model, reach);
+    if window.mass.value() > 0.0 && window.length.value() > 0.0 {
         let lost_total: f64 = lost.iter().sum();
         let (shares, masses): ([f64; 5], [f64; 5]) = if lost_total > 0.0 {
             (
@@ -447,11 +520,8 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             (s.map(|x| if total > 0.0 { x / total } else { 0.0 }), masses)
         };
         let mean_lost: f64 = shares.iter().zip(&masses).map(|(s, m)| s * m).sum();
-        let v_drift = model.sigma(LightYears::ZERO).value();
-        if mean_lost > 0.0 && v_drift > 0.0 {
-            // Members per light-year of tail on each side: Ṁ ÷ (2 ⟨m⟩ v), with v in ly per year.
-            let v_ly_per_yr = v_drift * crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
-            let per_ly = rate / (2.0 * mean_lost * v_ly_per_yr);
+        if mean_lost > 0.0 {
+            let members = window.mass.value() / mean_lost;
             for band in MassBand::ALL {
                 let share = shares[band.index()];
                 if share > 0.0 {
@@ -471,7 +541,8 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
                             ),
                             mean_mass: SolarMasses::new(masses[band.index()]),
                         },
-                        expected: per_ly * 2.0 * length * share,
+                        expected: members * share,
+                        length: window.length,
                     });
                 }
             }
