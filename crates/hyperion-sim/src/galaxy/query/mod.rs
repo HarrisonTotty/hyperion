@@ -19,6 +19,7 @@ mod expected;
 mod motion;
 mod request;
 mod result;
+mod segment;
 mod source;
 mod walk;
 
@@ -35,6 +36,7 @@ pub use request::{
     SubstellarRequest,
 };
 pub use result::{Census, CensusStop, LayerCounts, LayerSet, QueryStats, RangeResult, SystemHit};
+pub use segment::cells_along_segment;
 pub use source::SystemSource;
 pub use walk::{BuildQuerySphereError, QuerySphere, cells_in_sphere, count_cells_in_sphere};
 

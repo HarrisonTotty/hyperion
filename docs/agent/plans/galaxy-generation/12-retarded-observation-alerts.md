@@ -686,3 +686,133 @@ under plan 04's convention: a defaulted `mode`, new request kinds, and the first
   wants soft and hard bands replaces the constant with a function of energy; nothing else changes.
 - **FU Orionis outbursts** are treated as local events. The research notes route them through
   star-forming-region features; if plan 09 lists them at feature level they join T5.d instead.
+- **T0, T1, T2 and T4 as built (lane `obs12a`, 2026-09-29, at `GENERATOR_VERSION` 14).** Done;
+  T3 is held until the v15 commit. No generated output moves and no golden changes: observation
+  and lensing only read. Names and shapes that differ from the sketches:
+  - _T0._ `tests/source_horizon.rs::source_horizon_sweep` (slow, 11 s) sweeps what exists: the
+    grid's seven layers (three systems of a solar-circle cell and of a bulge cell each), three
+    layer-E remnants, a catalogue feature's members in bands A, C and E, the supernova entry as a
+    value, and both event constructions over the horizon's first year. Nothing refuses or clamps
+    a time before −H, so no owning module was widened. The displaced remnants (P08.T12), the
+    centre's members (P09.T24–T28), the streams' and dwarf cores' members (plan 10) and the
+    catalogue classes' grids (P09.T32–T35) are not placed yet: **the task that places each adds
+    its row to the sweep.** Two things found on the way, neither a time limit: plan 03's
+    `query::position_at` panics for a feature member in a galaxy with kinematic tables
+    (`kinematics::draw` needs a density component), so observation moves every record through
+    `Drift::of_record`, which resolves a member's own velocity; and plan 06's range brief
+    (`BriefModel`, P06.T38.e) chooses its route for [−H, +H] only. It agreed with
+    `SystemStars::brief_at` at −(H + L) on every system of the sweep, but nothing guarantees it
+    there, so observed mode reads `SystemStars::brief_at` (T3 and T6 must too).
+  - _T1._ `units::Arcseconds` and `consts::RADIANS_PER_ARCSECOND`; `WattsPerSquareMetre` already
+    existed. `observe::{Observer, BuildObserverError, Trajectory, Motion, Drift, Retardation,
+retarded, retarded_exact_linear, light_time, CurvatureError, curvature_error,
+extrapolate_to_present}`. `Trajectory` gains `motion() -> Motion` (`Drift` by default,
+    `Followed` for an orbit followed in full, whose stated error is zero: the plan's "zero for a
+    Kepler member" until P09.T28 builds one) and `position_with_residual_at`. The trajectory of a
+    `SystemRecord` is `Drift::of_record(galaxy, record)`, with `Drift::of_member` and
+    `Drift::through(position, at, velocity)` besides. `Drift` carries v × Δt as an exact pair and
+    rounds the offset once, so its error does not grow with the span (plan 03's `position_at`
+    rounds the product first: a few metres inside ±H, tens of metres at light times of 10⁴
+    years); `Retardation` keeps what the apparent position's rounding dropped, so an
+    extrapolation lands on the line to one rounding. `Retardation::light_age()` is a `Span`, not
+    `Seconds`, and `observed()` and `motion()` are added. `curvature_error(galaxy, observer,
+r)`: the position is the observer's, and the angle is the length over the distance to the
+    apparent position; `CurvatureError` keeps the plan's name although it is a stated bound, not
+    an error type; R is the apparent position's **spherical** galactocentric radius with the
+    in-plane `v_c(R)`, so a halo star above the axis is not given zero (provisional). Design
+    note 1's residual: the bound (v ÷ c)² × light time is exact and a radial source reaches it,
+    ten days at 220 km/s from 50,000 ly, under seven months at 1,000 km/s within 50,000 ly, and
+    2.5 years at 1,000 km/s across the whole cube (the note's "under seven months" is at 50,000
+    ly). "`extrapolate_to_present` equals `position_at` to 1 m" is tested against the line
+    (`Drift::position_at`); plan 03's `position_at` lies within 5 m of it inside ±H. Acceptance:
+    `cargo test -p hyperion-sim observe::` (the curvature tests are in `observe::error`). Bench
+    `observe/retarded`: **1.12 µs** (2026-09-29, load average 12), against the plan's "tens of
+    nanoseconds": a finding. The cost is the exact-pair drift, whose fused multiply-adds are
+    `libm`'s software `fma` (six an evaluation, three evaluations a step); the intermediate
+    evaluation at t − s₀ only feeds a distance and could take plan 03's single rounding, which
+    would cut about a third. Left for P12.T3's `range_observed_50ly`, which measures what it
+    costs a query.
+  - _T1, provisional (finding)._ **Design note 3's cap of 2R is not a bound** (science check):
+    the line leaves while the orbit stays within R of the centre, so past an orbital phase of
+    about 2.5 radians over the light's age the gap grows as v s + 2R (at 10 ly after 10⁵ years
+    about 36 ly against the stated 20). It touches only sources within a few tens of light-years
+    of the centre outside the Kepler regime. Built as the note says;
+    min(½ a s², `v_c` s + 2R) would bound it, for the owner's ruling.
+  - _T1, provisional (finding)._ **The nuclear-disc curvature figure misses its window**: the
+    model's potential gives `v_c` = 76 km/s at 100 ly (94 at 30 ly, 93 at 200 ly), against the
+    brainstorm's 100 km/s, so the maximum from a corner of the cube is 7.5″, not 10–16″. The
+    test pins 7.5″ ± 10% and checks that the formula gives the brainstorm's 13″ at 100 km/s.
+    Ruling 143.1: the acceptance is "the formula at the model's `v_c`"; plan 02's nuclear
+    potential is raised in its next revision (its own bump), which moves the pin.
+  - _T2._ `observe::{ObservedSystem, observe_hit, summary_observed, bearing, Bearing,
+BearingFrame, AXIS_FRAME_RADIUS_LY}`. `bearing(from, to) -> Option<Bearing>` takes no galaxy
+    (the directions are geometry) and is `None` for coincident points; `Bearing::frame()` says
+    `GalacticX` within a light-year of the axis. `observe_hit` takes the present from the
+    system's own line, not from the hit (plan 03's drift rounds it differently), so that it and
+    `retarded` give the same bits; it resolves a feature member again for its velocity, which
+    costs an interior build: T3 should hand velocities or a member cache to the observed query.
+    After the death's light arrives the test checks for a neutron star or black hole whose age
+    since T is t − d ÷ c − T: the brief has no supernova state, which arrives as a transient with
+    the catalogue class and T5. Acceptance: `cargo test -p hyperion-sim observe::`, since the
+    bearing tests are in `observe::bearing`. The supergiant test re-ages a real layer-E record so that it dies 20,000 years before
+    the epoch (a search of 320 layer-E cells of the solar circle found no death in 40,000 years:
+    about one such cell in 3,000 has one); the "born a century ago" test re-ages a layer-B
+    record. The extrapolated jump lands under a metre from the star's line, and plan 03's
+    `position_at` lies within 5 m of it. **Deferred:** "several hundred dead supergiants seen
+    alive from 26,000 ly (slow; counted from the catalogue's supernova class)" waits for the
+    supernova class's grid (P09.T32–T35); no stand-in was built. A centre member's extrapolation
+    "uses the orbit" once P09.T28 exists: `Retardation` will need the orbit's elements then.
+  - _T4.a._ `galaxy::query::cells_along_segment` in `query/segment.rs` steps through the slabs
+    of cells across the segment's dominant axis and takes the rectangle the capsule reaches in
+    each, Amanatides and Woo's traversal widened to a tube, so a wide tube costs its
+    cross-section and not a cube per step; each cell is kept on the exact segment-to-box distance.
+    The result is collected and sorted (by the projection of the cell's centre, then by cell).
+    The brute-force test uses the walk's own distance test and so checks the candidate set; a
+    second test checks the distance test against dense sampling. Acceptance:
+    `cargo test -p hyperion-sim segment_walk lensing`, since the walk's tests are in
+    `galaxy::query::segment`.
+  - _T4.b._ `lensing::{LensSightline, LensQuery, LensQueryBuilder, BuildLensQueryError,
+LensEvent, LensResult, LensCensus, FindLensesError, lenses_along, magnification_at,
+point_lens_magnification, einstein_angle, lens_mass_at, DEFAULT_MAX_IMPACT,
+DEFAULT_LENS_CELL_BUDGET}`. The query is built (`LensQuery::builder`) and takes a
+    `mass_floor`; its window must lie in ±H. An event is a lens whose least impact within the
+    window is under the reach; `peak` is the closest approach clamped to the window, and the
+    event keeps the unclamped one, so `magnification_at(event, t)` needs no galaxy or sightline.
+    `LensQueryError` is `FindLensesError` (the rules' verb-object naming). A lens's mass is the
+    sum of its stars' `state_at(t).mass()` at the retarded time, or a free-floating object's
+    mark; plan 11's `SystemStars::system_mass_at` waits for P11.T4 and the call switches to it
+    then. Sources are asked on a chain of 64 spheres, twice a year apart, to read each hit's
+    velocity, since `SystemSource` has none, and a grid system a source `suppresses` at the
+    lens's retarded time is left out, as the range query leaves it out. The budget is checked
+    against the tube's volume in cells before any is listed. The observer is at rest, so its own
+    motion adds nothing to the relative proper motion. "Of order 10⁻⁶" is tested as τ within a
+    factor of three of it. Bench `lensing/lens_walk_26kly` (the Sun to Baade's window, a year): **48 s** in a galaxy whose
+    systems move (the cone below) and **0.55 s** in one whose systems keep their epoch positions
+    (the thin tube), 2026-09-29 at load average 12. A finding: retarded lensing to the bulge is a
+    background job, not an interactive one.
+  - _T4.b, provisional (finding)._ **Design note 13's tube misses the lenses.** Cells hold epoch
+    positions and a lens is taken at its retarded time, up to the source's light time before the
+    window, so a tube of the reach's Einstein radius plus `PAD_SPEED` × window holds lenses of
+    epoch positions that have since moved about 9 ly away, and misses those on the line then. As
+    built, for a galaxy whose systems move, the tube adds the layer's padding speed times the
+    time from the epoch to the lens's retarded time: a cone, 87 ly across at 26,000 ly for layers
+    A–D and 260 ly for layer E, about 4.6 × 10⁵ cells to the bulge, which the cell budget bounds.
+    The optical-depth test runs in a galaxy without kinematic tables, where nothing moves and the
+    thin tube is exact: **τ = 8.1 × 10⁻⁷** (81 lenses, ±11%) towards 3–5° south of the centre from
+    10⁴ sightlines (U = 100), inside the window and at the low end of Mróz et al. 2019's 0.6–1.4 ×
+    10⁻⁶ for that field. The test walks 6.9 × 10⁷ cells in 24 minutes on four threads at load 12. The
+    owner's ruling is needed on whether retarded lensing is worth the cone's cost.
+  - _Centre members (after the rebase onto `d5330c7`, which added P09.T24–T27)._
+    `Drift::of_record` returns `Result<Drift, TraceMotionError>` and refuses a member of the
+    galactic centre (`SystemOrigin::CentreMember`) with `TraceMotionError::CentreOrbitNotBuilt`:
+    inside the sphere of influence it follows its Kepler orbit, and `regime_of` and the orbit are
+    P09.T28's, so no line is given for any centre member until then (provisional).
+    `observe_hit` and `summary_observed` return that error; `lenses_along` returns
+    `FindLensesError::SourceMotionNotTraced` for a centre member as the source and leaves a
+    source's centre members out as lenses (`lens_mass_at` is `None` for one). Tests:
+    `observed_centre_member_is_refused_until_its_orbit_is_built`,
+    `lensing_refuses_a_centre_member_as_its_source`. P09.T28 replaces the refusal with the orbit
+    (`Motion::Followed`) and adds the centre members' row to the T0 sweep.
+  - _For P12.T13._ Its goldens should also pin one sightline's lens events (peak, impact, `t_E`,
+    closest approach), one segment walk's keys and a few bearings, whose angles pass through
+    `math::atan2` (determinism audit).

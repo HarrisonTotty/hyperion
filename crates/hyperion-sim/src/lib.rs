@@ -39,6 +39,12 @@
 //! - [`orbit`]: Keplerian elements and their propagation to any time, bound and open, the
 //!   inverse from a state, Roche lobes and gravitational-wave inspiral.
 //!
+//! What a sensor sees (plan 12):
+//!
+//! - [`observe`]: readings at the retarded time, the apparent position and the light's age, the
+//!   stated error from neglected curvature, and bearings.
+//! - [`lensing`]: microlensing along one monitored line of sight.
+//!
 //! Planetary systems (plan 14):
 //!
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
@@ -50,7 +56,9 @@ pub mod coords;
 pub mod events;
 pub mod galaxy;
 pub mod id;
+pub mod lensing;
 pub mod math;
+pub mod observe;
 pub mod orbit;
 pub mod planetary;
 pub mod rng;

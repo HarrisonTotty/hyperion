@@ -104,6 +104,9 @@ pub mod consts {
     /// Radians in one degree, π ÷ 180.
     pub const RADIANS_PER_DEGREE: f64 = core::f64::consts::PI / 180.0;
 
+    /// Radians in one second of arc, π ÷ 648,000.
+    pub const RADIANS_PER_ARCSECOND: f64 = core::f64::consts::PI / 648_000.0;
+
     /// The Earth radius that planetary radii are quoted in, m: the volumetric mean radius,
     /// 6,371.000 km (NASA Earth Fact Sheet; IUGG's R₁ is 6,371.0088 km).
     ///
@@ -408,7 +411,15 @@ unit!(
     /// An angle in degrees, an edge unit.
     Degrees
 );
-dimension!(Radians; Degrees = consts::RADIANS_PER_DEGREE);
+unit!(
+    /// An angle in seconds of arc, 1 ÷ 3,600 of a degree, an edge unit: the unit of the stated
+    /// error of a retarded observation (plan 12).
+    Arcseconds
+);
+dimension!(Radians;
+    Degrees = consts::RADIANS_PER_DEGREE,
+    Arcseconds = consts::RADIANS_PER_ARCSECOND,
+);
 
 unit!(
     /// A temperature in kelvin.
@@ -661,6 +672,7 @@ mod tests {
             round_trip!(Kilograms, EarthMasses, value);
             round_trip!(MetresPerSecond, KilometresPerSecond, value);
             round_trip!(Radians, Degrees, value);
+            round_trip!(Degrees, Arcseconds, value);
             round_trip!(Watts, SolarLuminosities, value);
             round_trip!(LightYears, Parsecs, value);
             round_trip!(Kiloparsecs, AstronomicalUnits, value);
@@ -682,6 +694,7 @@ mod tests {
             180.0,
             1e-15,
         );
+        assert_relative(Arcseconds::from(Degrees::new(1.0)).value(), 3_600.0, 1e-15);
         assert_relative(Years::from(Gigayears::new(13.8)).value(), 1.38e10, 1e-15);
         assert_same_bits(Days::from(Years::new(1.0)).value(), 365.25);
         assert_same_bits(Seconds::from(Days::new(1.0)).value(), 86_400.0);

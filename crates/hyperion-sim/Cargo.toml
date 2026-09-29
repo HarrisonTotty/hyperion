@@ -64,6 +64,10 @@ name = "feature_members"
 harness = false
 
 [[bench]]
+name = "observe"
+harness = false
+
+[[bench]]
 name = "substellar"
 harness = false
 

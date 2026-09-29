@@ -1083,3 +1083,9 @@ Reserved so that later plans move no star they need not:
   brute-force test counts. The answers are computed apart from the brute-force search, so that the
   golden turns red on its own. With `SEARCH_MARGIN` at 0.5 in place of 1.25 it does, at line 11
   (`ship[01]` at the epoch, `0x42002cb200000000` becomes `none`), and so does the brute-force test.
+- **`position_at` and feature members (found by P12.T0, 2026-09-29).** In a galaxy with its
+  kinematic tables, `query::position_at` (through `epoch_velocity` and `kinematics::draw`) panics
+  for a feature member's record, which has no density component; a member moves at the velocity
+  its `MemberRecord` carries. Nothing calls it for a member yet. Plan 12 moves every record through
+  `observe::Drift::of_record`, which resolves the member; whoever next wires members into the drift
+  hook (plan 08's P08.T12.d or plan 09's P09.T28.b) should make the hook dispatch on the origin.
