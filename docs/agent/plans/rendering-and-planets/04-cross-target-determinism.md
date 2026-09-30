@@ -1311,6 +1311,14 @@ It reserves, so that later plans need not:
   for word. The hand check ran `cargo clippy -p <crate> --lib -- -D warnings` (a subset of
   `just lint`) on `hyperion-sim`, `hyperion-fit` and `hyperion-server`, each failing with "use of a
   disallowed method `f64::algebraic_add`".
+- **T3.a and T3.b, as drafted (2026-09-30).** Plan 14's amendment is drafted at four places, each
+  marked "amended by R04.T3.a": P14.T23's text, the `hooks::BodyHooks` Provides sketch, the DTO
+  list and the note on `BodyHooksDto`. P14.T23 had already landed, built to this amendment (its
+  as-built note: the surface seed kept off the wire, `BodyHooksDto.surface_seed` left for T3.c),
+  so the draft records what the code does. The guide's two rows read `DETAIL SEED`, each marked
+  "(draft for the owner, R04.T3.b)". **Awaiting the owners:** plan 14's owner's acceptance of
+  T3.a and the guide owner's sign-off of T3.b, neither yet recorded. T3.c was built treating T3.a
+  as provisionally accepted (the orchestrator's instruction for this lane) and to T3.b's draft.
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so
