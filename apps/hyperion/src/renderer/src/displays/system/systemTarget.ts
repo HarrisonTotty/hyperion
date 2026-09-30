@@ -6,7 +6,7 @@ import {
 } from "@hyperion/protocol";
 
 import type { ChartSystem } from "../../lib/galaxy/model";
-import type { Vec3 } from "../../spatial/vec3";
+import type { Vec3 } from "../../geometry/vec3";
 import type { LayerBand } from "../galaxy/chartModel";
 
 /**

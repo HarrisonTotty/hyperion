@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { BANNED_SPATIAL_MEMBERS, type ContextCall, stubCanvas } from "../test/RecordingContext2D";
 import type { Camera, Viewport } from "./camera";
 import { buildDrawList, type DrawList, type DrawOp, type SymbolOp } from "./drawList";
-import { localFrameAt } from "./frame";
+import { localFrameAt } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { symbolOutline } from "./symbols";
-import { vec3 } from "./vec3";
+import { vec3 } from "../geometry/vec3";
 
 /** Tokens with values unlike the stylesheet's, so that each stroke can be traced to its token. */
 const TOKENS: ColourTokens = {

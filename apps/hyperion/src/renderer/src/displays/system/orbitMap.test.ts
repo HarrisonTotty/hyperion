@@ -5,9 +5,9 @@ import { composePosition, orbitPolyline, positionAt } from "../../lib/orbit";
 import { layoutHierarchy } from "../../lib/system/hierarchy";
 import type { SystemModel } from "../../lib/system/model";
 import { toSystemModel } from "../../lib/system/wire";
-import { localFrameAt } from "../../spatial/frame";
+import { localFrameAt } from "../../geometry/frame";
 import { gridSpacing } from "../../spatial/scale";
-import { dot, norm, scale, sub, vec3 } from "../../spatial/vec3";
+import { dot, norm, scale, sub, vec3 } from "../../geometry/vec3";
 import {
   aSingleStarSummary,
   aSunlikeStar,
