@@ -9,7 +9,7 @@
  * nothing at run time, so it is safe in either bundle.
  */
 
-import type { GraphicsLaunchMode } from "./api";
+import type { GpuProcessGoneReport, GraphicsLaunchMode } from "./api";
 
 /**
  * The switch that makes a launch the declared safe mode: no Vulkan, no WebGPU, the DOM and Canvas
@@ -44,4 +44,61 @@ export function launchModeOf(platform: NodeJS.Platform, safeSwitch: boolean): Gr
     return "default";
   }
   return safeSwitch ? "safe" : "vulkan";
+}
+
+/** The one IPC channel that carries GPU-process crashes from the main process to the preload. */
+export const GPU_PROCESS_GONE_CHANNEL = "hyperion:gpu-process-gone";
+
+/**
+ * The renderer arguments that carry the launch's graphics set-up, for
+ * `webPreferences.additionalArguments`.
+ */
+export function graphicsArguments(mode: GraphicsLaunchMode, gpuTiming: boolean): string[] {
+  const args: string[] = [];
+  if (mode === "safe") {
+    args.push(`--${SAFE_MODE_SWITCH}`);
+  }
+  if (gpuTiming) {
+    args.push(`--${GPU_TIMING_SWITCH}`);
+  }
+  return args;
+}
+
+/** The launch's graphics set-up, as the preload reads it back. */
+export interface GraphicsLaunch {
+  readonly launchMode: GraphicsLaunchMode;
+  readonly gpuTiming: boolean;
+}
+
+/**
+ * The graphics set-up carried by `argv`, the renderer's arguments.
+ *
+ * @param platform - `process.platform`: the mode is `default` off Linux whatever the arguments.
+ */
+export function graphicsLaunchFromArgv(
+  argv: readonly string[],
+  platform: NodeJS.Platform,
+): GraphicsLaunch {
+  return {
+    launchMode: launchModeOf(platform, argv.includes(`--${SAFE_MODE_SWITCH}`)),
+    gpuTiming: argv.includes(`--${GPU_TIMING_SWITCH}`),
+  };
+}
+
+/**
+ * A crash report received over {@link GPU_PROCESS_GONE_CHANNEL}, or `undefined` when the message
+ * is not one.
+ *
+ * @param message - The IPC message's payload, untrusted until narrowed.
+ */
+export function readGpuProcessGoneReport(message: unknown): GpuProcessGoneReport | undefined {
+  if (typeof message !== "object" || message === null) {
+    return undefined;
+  }
+  const reason: unknown = Reflect.get(message, "reason");
+  const count: unknown = Reflect.get(message, "count");
+  if (typeof reason !== "string" || typeof count !== "number" || !Number.isInteger(count)) {
+    return undefined;
+  }
+  return { reason, count };
 }
