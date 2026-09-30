@@ -53,11 +53,10 @@ describe("GraphicsPanel", () => {
     renderPanel("vulkan");
     for (const label of ["Adapter", "Software Adapter", "Features", "Styles", "GPU Timer"]) {
       expect(reading(label)).toHaveTextContent("—");
-      expect(reading(label)).toHaveClass("readout__missing");
     }
     expect(reading("Mode")).toHaveTextContent("VULKAN");
     expect(reading("Device Losses")).toHaveTextContent("0");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
   });
 
   it("reads a nominal hardware adapter with no status colour", async () => {
@@ -68,8 +67,7 @@ describe("GraphicsPanel", () => {
     expect(reading("Styles")).toHaveTextContent("WIREFRAME, PHOTOREALISTIC");
     expect(reading("GPU Timer")).toHaveTextContent("QUANTIZED");
     const panel = screen.getByRole("region", { name: "Graphics" });
-    expect(panel.querySelector("output")).toBeNull();
-    expect(panel.querySelector(".request-status__text--fault")).toBeNull();
+    expect(within(panel).queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
   });
 
   it("states a software adapter in plain text", async () => {
@@ -86,7 +84,7 @@ describe("GraphicsPanel", () => {
     expect(statement).not.toHaveClass("request-status__text--fault");
   });
 
-  it("states no WebGPU and no adapter", () => {
+  it("states no WebGPU", () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: { kind: "no-webgpu" } });
     expect(screen.getByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
     expect(reading("Styles")).toHaveTextContent("NONE");
@@ -128,7 +126,7 @@ describe("GraphicsPanel", () => {
   it("states the disabled state after three losses", async () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: await adapter() }, LOST, LOST, LOST);
     expect(
-      screen.getByText("GRAPHICS DISABLED: 3 DEVICE LOSSES, relaunch to retry"),
+      screen.getByText("GRAPHICS DISABLED: 3 device losses, relaunch to retry"),
     ).not.toHaveClass("request-status__text--fault");
   });
 

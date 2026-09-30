@@ -7,7 +7,9 @@ import { graphicsModeAnnunciation, useGraphicsStatus } from "../view/engine/stat
  * @remarks
  * The guide reserves the header strip's banner for a simulation, training or replay mode; extending
  * it to these two is drafted for the owner (R01 Design note 10, R01.T5.c). It is the console's
- * statement of its own condition, in plain text, and never counts as an alert.
+ * statement of its own condition, in plain text, and never counts as an alert. It names the mode
+ * alone, the words before the colon, so that the strip fits at 1280 × 720; the `GRAPHICS` panel
+ * carries the whole sentence.
  */
 export function GraphicsModeBanner() {
   const annunciation = graphicsModeAnnunciation(useGraphicsStatus());
@@ -16,7 +18,7 @@ export function GraphicsModeBanner() {
   }
   return (
     <output className="console__banner" aria-label="Graphics mode">
-      {annunciation.text}
+      {annunciation.text.split(":", 1)[0]}
     </output>
   );
 }

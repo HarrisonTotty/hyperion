@@ -1729,7 +1729,20 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     them (lower case, e.g. `intel · gen-9`).
   - The header banner is its own component, `GraphicsModeBanner`, in `ConsoleFrame`'s status area
     before the clock, an `output` labelled `Graphics mode` in `--text` inside a `--line` rule
-    (`.console__banner`); `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
+    (`.console__banner`). It names the mode alone, `GRAPHICS SAFE MODE` or `GRAPHICS DISABLED`
+    (the words before the colon), so that the strip fits at 1280 × 720; the panel carries the
+    sentence. `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
+  - The disabled statement's count is in mixed case (`GRAPHICS DISABLED: 3 device losses, …`),
+    since every other clause after a colon is a sentence (the guide's Typography); Design note 10
+    wrote `<n> DEVICE LOSSES`. The two counts are `output`s, live without an
+    annunciation once the mode is settled.
+  - Kept as drafted, for the owner (UX review of T5): `GRAPHICS NOT AVAILABLE: no WebGPU`,
+    `GRAPHICS NO ADAPTER: views unavailable` and `GRAPHICS PROCESS RESTARTED` name no operator
+    action (the guide's Voice asks for one where known; `relaunch to retry` is the candidate); the
+    `acquiring` condition shows only em dashes and no annunciation, which is momentary in practice
+    (a waiting `GRAPHICS ACQUIRING ADAPTER` would be a new word); whether the banner looks
+    "unmistakably different" enough in a `--line` rule; `GPU` and `WebGPU` on the list; one of
+    `UNAVAILABLE` and `NOT AVAILABLE`.
   - By eye, pending: the `GRAPHICS` panel in each condition and the header banner in safe mode on
     `just client`, with the store driven from the devtools console, beside the guide's banner rule.
 - **T5.c, the nomenclature draft for the owner (not applied to the guide).** R02.T2.f absorbs and
@@ -1752,7 +1765,7 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   +  place in the header's alert counts.
   @@ Nomenclature list @@
   +| `GRAPHICS` | System | The console's own graphics: adapter, features, mode, GPU timer and faults; the `LINK` display's `GRAPHICS` panel |
-  +| `GRAPHICS SOFTWARE ADAPTER`, `GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`, `GRAPHICS SAFE MODE`, `GRAPHICS DISABLED` | Status | The graphics' standing condition, with its cause or remedy after a colon: `GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE`, `GRAPHICS NOT AVAILABLE: no WebGPU`, `GRAPHICS NO ADAPTER: views unavailable`, `GRAPHICS SAFE MODE: views unavailable, relaunch to retry`, `GRAPHICS DISABLED: <n> DEVICE LOSSES, relaunch to retry` or `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` |
+  +| `GRAPHICS SOFTWARE ADAPTER`, `GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`, `GRAPHICS SAFE MODE`, `GRAPHICS DISABLED` | Status | The graphics' standing condition, with its cause or remedy after a colon: `GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE`, `GRAPHICS NOT AVAILABLE: no WebGPU`, `GRAPHICS NO ADAPTER: views unavailable`, `GRAPHICS SAFE MODE: views unavailable, relaunch to retry`, `GRAPHICS DISABLED: <n> device losses, relaunch to retry` or `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` |
   +| `GRAPHICS DEVICE LOST`, `GRAPHICS PROCESS RESTARTED` | Fault | The GPU device was lost and is being re-created (`GRAPHICS DEVICE LOST: re-creating`); the GPU process crashed and was restarted |
   +| `UNAVAILABLE` | Label | Not offered on this adapter or in this mode (the owner may prefer `NOT AVAILABLE`, which `GRAPHICS NOT AVAILABLE` already uses) |
   +| `DEFAULT`, `VULKAN`, `SAFE` | Mode | The launch's graphics mode: the platform's own path, the forced Vulkan path on Linux, the declared safe mode without WebGPU |

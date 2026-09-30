@@ -44,9 +44,9 @@ function renderFrame(
 
 const LOST: GraphicsEvent = { kind: "device-lost", reason: "unknown", message: "gpu gone" };
 
-/** The header strip's graphics banner, or `null` without one. */
-function banner(): HTMLElement | null {
-  return within(screen.getByRole("banner")).queryByRole("status", { name: "Graphics mode" });
+/** The header strip's graphics banner, which must be there. */
+function banner(): HTMLElement {
+  return within(screen.getByRole("banner")).getByRole("status", { name: "Graphics mode" });
 }
 
 function tabs(): HTMLElement[] {
@@ -99,17 +99,17 @@ describe("ConsoleFrame", () => {
 
   it("shows the safe mode in the header strip", () => {
     renderFrame("link", () => {}, graphicsStore("safe", []));
-    expect(banner()).toHaveTextContent("GRAPHICS SAFE MODE: views unavailable, relaunch to retry");
+    expect(banner()).toHaveTextContent(/^GRAPHICS SAFE MODE$/);
   });
 
   it("shows WebGPU disabled by device losses in the header strip", () => {
     renderFrame("link", () => {}, graphicsStore("vulkan", [LOST, LOST, LOST]));
-    expect(banner()).toHaveTextContent("GRAPHICS DISABLED: 3 DEVICE LOSSES, relaunch to retry");
+    expect(banner()).toHaveTextContent(/^GRAPHICS DISABLED$/);
   });
 
   it("shows WebGPU disabled by a withdrawn adapter in the header strip", () => {
     renderFrame("link", () => {}, graphicsStore("vulkan", [LOST, { kind: "adapter-withdrawn" }]));
-    expect(banner()).toHaveTextContent("GRAPHICS DISABLED: adapter withdrawn, relaunch to retry");
+    expect(banner()).toHaveTextContent(/^GRAPHICS DISABLED$/);
   });
 
   it("shows no graphics banner otherwise, a fault included", () => {
@@ -118,14 +118,16 @@ describe("ConsoleFrame", () => {
       () => {},
       graphicsStore("vulkan", [LOST, { kind: "gpu-process-gone", count: 1 }]),
     );
-    expect(banner()).toBeNull();
+    expect(
+      within(screen.getByRole("banner")).queryByRole("status", { name: "Graphics mode" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the same banner on every display", () => {
     const store = graphicsStore("safe", []);
     const texts = DISPLAYS.map(({ id }) => {
       const { unmount } = renderFrame(id, () => {}, store);
-      const text = banner()?.textContent;
+      const text = banner().textContent;
       unmount();
       return text;
     });

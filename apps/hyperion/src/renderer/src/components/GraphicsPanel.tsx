@@ -31,7 +31,13 @@ const TIMER_WORDS = {
   absent: "ABSENT",
 } as const satisfies Record<GpuTimer, string>;
 
-/** The capabilities the panel lists, by their WebGPU feature names, in `WANTED_FEATURES`' order. */
+/**
+ * The capabilities the panel lists, by their WebGPU feature names, in `WANTED_FEATURES`' order.
+ *
+ * @remarks
+ * The names are the API's identifiers, kept verbatim in lower case as the adapter's vendor and
+ * architecture are, since they are names and not the console's words.
+ */
 const FEATURE_NAMES: ReadonlyArray<
   readonly [
     keyof Omit<GpuCapabilities, "maxTextureDimension2D" | "subgroupMinSize">,
@@ -48,9 +54,21 @@ const FEATURE_NAMES: ReadonlyArray<
 ];
 
 function summaryOf(condition: GraphicsCondition): AdapterSummary | null {
-  return condition.kind === "nominal" || condition.kind === "software-adapter"
-    ? condition.summary
-    : null;
+  let summary: AdapterSummary | null;
+  switch (condition.kind) {
+    case "nominal":
+    case "software-adapter":
+      summary = condition.summary;
+      break;
+    case "acquiring":
+    case "no-webgpu":
+    case "no-adapter":
+    case "safe-mode":
+    case "disabled":
+      summary = null;
+      break;
+  }
+  return summary;
 }
 
 /** The styles the console may draw, or `null` while the adapter has not answered. */
@@ -115,9 +133,13 @@ export function GraphicsPanel() {
         <dt>GPU Timer</dt>
         <Reading value={status.capabilities === null ? null : TIMER_WORDS[status.timer]} />
         <dt>Device Losses</dt>
-        <Reading value={String(status.deviceLosses)} />
+        <dd>
+          <output>{status.deviceLosses}</output>
+        </dd>
         <dt>Process Restarts</dt>
-        <Reading value={String(status.gpuProcessCrashes)} />
+        <dd>
+          <output>{status.gpuProcessCrashes}</output>
+        </dd>
       </dl>
       {annunciation === null ? null : (
         <StatusLine text={annunciation.text} standing={annunciation.standing} />
