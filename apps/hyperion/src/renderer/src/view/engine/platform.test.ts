@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO, SWIFTSHADER_INFO } from "../../test/fakeGpu";
 import {
   type AdapterOutcome,
+  deviceCapabilities,
+  featuresNotEnabled,
   requestAdapterOutcome,
   requiredFeatures,
   styleAvailability,
@@ -160,6 +162,38 @@ describe("the required features", () => {
       withholdFloat32Blendable: true,
     });
     expect(required).toEqual(["subgroups", "timestamp-query", "float32-filterable"]);
+  });
+});
+
+describe("the device's capabilities", () => {
+  it("read as absent what the device was not asked for", async () => {
+    const intel = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: INTEL_FEATURES });
+    const device = await intel.requestDevice({
+      requiredFeatures: [
+        ...requiredFeatures(intel, { withholdSubgroups: true, withholdShaderF16: true }),
+      ],
+    });
+    expect(deviceCapabilities(device)).toEqual({
+      ...summariseAdapter(intel).capabilities,
+      subgroups: false,
+      shaderF16: false,
+      subgroupMinSize: null,
+    });
+  });
+
+  it("equal the adapter's when nothing is withheld", async () => {
+    const swiftShader = new FakeAdapter({ info: SWIFTSHADER_INFO, features: SWIFTSHADER_FEATURES });
+    const device = await swiftShader.requestDevice({
+      requiredFeatures: [...requiredFeatures(swiftShader, undefined)],
+    });
+    expect(deviceCapabilities(device)).toEqual(summariseAdapter(swiftShader).capabilities);
+  });
+
+  it("name each requested feature the device did not enable", () => {
+    expect(
+      featuresNotEnabled(["subgroups", "shader-f16", "timestamp-query"], new Set(["subgroups"])),
+    ).toEqual(["shader-f16", "timestamp-query"]);
+    expect(featuresNotEnabled(["subgroups"], new Set(["subgroups", "shader-f16"]))).toEqual([]);
   });
 });
 

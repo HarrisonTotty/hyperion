@@ -105,6 +105,11 @@ export type GraphicsEvent =
   | { readonly kind: "adapter-withdrawn" }
   /** The main process reported a GPU-process crash. */
   | { readonly kind: "gpu-process-gone"; readonly count: number }
+  /**
+   * The engine made its device and read its capabilities, in which a feature the harness withheld
+   * reads as absent (R01 Design note 7). Sent at each creation, a rebuild's included.
+   */
+  | { readonly kind: "device-capabilities"; readonly capabilities: GpuCapabilities }
   /** The adapter's rounding probe answered (R01.T8.j). */
   | {
       readonly kind: "target-rounding";
@@ -249,6 +254,15 @@ export function reduceGraphicsStatus(status: GraphicsStatus, event: GraphicsEven
       break;
     case "gpu-process-gone":
       next = afterProcessGone(status, event.count);
+      break;
+    case "device-capabilities":
+      next = settled(status.condition)
+        ? status
+        : {
+            ...status,
+            capabilities: event.capabilities,
+            timer: timerOf(event.capabilities, status.gpuTiming),
+          };
       break;
     case "target-rounding":
       next = { ...status, targetRounding: event.rounding };

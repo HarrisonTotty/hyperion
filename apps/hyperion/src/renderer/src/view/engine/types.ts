@@ -150,6 +150,20 @@ export interface StorageBufferSpec {
 /** An extra input of a post-process: the view's reversed-Z depth or its HDR colour. */
 export type PostProcessInput = "depth" | "hdr-colour";
 
+/**
+ * The texture each post-process input binds to, by the name its WGSL source declares.
+ *
+ * @remarks
+ * `hdr-colour` is the colour the pass reads, Babylon's own input to every post-process, declared
+ * `var textureSampler : texture_2d<f32>;` with its sampler `textureSamplerSampler`; `depth` is the
+ * view's or target's `depth32float`, declared `var depthTexture : texture_depth_2d;` and read with
+ * `textureLoad`.
+ */
+export const POST_PROCESS_INPUTS: Readonly<Record<PostProcessInput, string>> = {
+  "hdr-colour": "textureSampler",
+  depth: "depthTexture",
+};
+
 /** An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat). */
 export interface PointSplatSpec {
   readonly name: string;
@@ -190,13 +204,37 @@ export interface RenderView {
   dispose(): void;
 }
 
+/**
+ * The uniforms the engine sets on every material at every draw, by the names a WGSL source
+ * declares them under.
+ *
+ * @remarks
+ * A source declares those it reads, in Babylon's dialect: `uniform viewRotation : mat4x4f;`,
+ * `uniform clipProjection : mat4x4f;` and `uniform offsetFromCameraM : vec3f;`, read as
+ * `uniforms.viewRotation` and so on. The matrices are {@link FrameSubmission}'s, unchanged; the
+ * offset is the draw's {@link DrawItem.offsetFromCameraM}. None of them is a Babylon matrix, so
+ * Babylon neither converts nor overwrites them.
+ */
+export const FRAME_UNIFORMS = {
+  viewRotation: "viewRotation",
+  projection: "clipProjection",
+  offsetFromCamera: "offsetFromCameraM",
+} as const;
+
 /** One frame of one view or target. */
 export interface FrameSubmission {
   /** The pass's label in {@link PassTimes}, stable across frames (R12 keys its records on it). */
   readonly label: string;
-  /** 4 × 4, translation zero, right-handed (R02 fills it). */
+  /**
+   * 4 × 4, translation zero, right-handed (R02 fills it), column-major: sixteen `f32` in WGSL's
+   * `mat4x4f` order, as R02's `viewRotation4` gives them. Reaches the shaders unchanged as
+   * {@link FRAME_UNIFORMS}' `viewRotation`.
+   */
   readonly viewRotation: Float32Array;
-  /** 4 × 4, reversed-Z, WebGPU clip space; passed to the shaders unchanged. */
+  /**
+   * 4 × 4, reversed-Z, WebGPU clip space, column-major like {@link FrameSubmission.viewRotation};
+   * reaches the shaders unchanged as {@link FRAME_UNIFORMS}' `clipProjection`.
+   */
   readonly projection: Float32Array;
   readonly draws: ReadonlyArray<DrawItem>;
   readonly postProcesses: ReadonlyArray<PostProcessHandle>;
@@ -219,7 +257,20 @@ export interface DrawItem {
   readonly indirect?: IndirectArgs;
 }
 
-/** A WGSL material to create. */
+/**
+ * A WGSL material to create.
+ *
+ * @remarks
+ * The sources are WGSL in Babylon's dialect, which Babylon completes before compiling (R01 Design
+ * note 12). Each declares its inputs without groups or bindings: `attribute position : vec3f;`,
+ * `varying vColour : vec4f;`, `uniform tint : vec4f;` (read as `uniforms.tint`),
+ * `var name : texture_2d<f32>;`, `var name : sampler;` and `var<storage, read> name : T;`.
+ * The vertex stage is `@vertex fn main(input : VertexInputs) -> FragmentInputs`, reading
+ * `vertexInputs.position` and writing `vertexOutputs.position`; the fragment stage is
+ * `@fragment fn main(input : FragmentInputs) -> FragmentOutputs`, writing
+ * `fragmentOutputs.color`. `vertexInputs.instanceIndex` is `@builtin(instance_index)`. The frame's
+ * matrices and the draw's offset arrive as {@link FRAME_UNIFORMS}.
+ */
 export interface WgslMaterialSpec {
   readonly name: string;
   readonly vertexWgsl: string;
@@ -246,7 +297,13 @@ export interface WgslMaterialSpec {
   readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
 }
 
-/** A WGSL post-process to create. */
+/**
+ * A WGSL post-process to create.
+ *
+ * @remarks
+ * The fragment source is in Babylon's dialect, as {@link WgslMaterialSpec}'s are, and reads the
+ * full-screen quad's `varying vUV : vec2f;`. Its inputs bind under {@link POST_PROCESS_INPUTS}.
+ */
 export interface WgslPostProcessSpec {
   readonly name: string;
   readonly fragmentWgsl: string;

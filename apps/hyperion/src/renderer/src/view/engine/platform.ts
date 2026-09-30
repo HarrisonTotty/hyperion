@@ -112,6 +112,44 @@ export function summariseAdapter(adapter: GPUAdapter): {
 }
 
 /**
+ * The capabilities of a device, read from its own features and limits.
+ *
+ * @remarks
+ * A device has only the features it was asked for, so a feature the smoke harness withholds reads
+ * as absent here, and so everywhere downstream, although the adapter has it (R01 Design note 7).
+ */
+export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
+  const { features, limits, adapterInfo } = device;
+  const subgroups = features.has("subgroups");
+  return {
+    subgroups,
+    shaderF16: features.has("shader-f16"),
+    timestampQuery: features.has("timestamp-query"),
+    float32Filterable: features.has("float32-filterable"),
+    float32Blendable: features.has("float32-blendable"),
+    rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
+    depthClipControl: features.has("depth-clip-control"),
+    maxTextureDimension2D: limits.maxTextureDimension2D,
+    subgroupMinSize: subgroups ? adapterInfo.subgroupMinSize : null,
+  };
+}
+
+/**
+ * The features asked of a device that it does not have.
+ *
+ * @remarks
+ * Babylon drops a requested feature the adapter lacks without a word
+ * (`webgpuEngine.pure.js:430-438` in 9.28.0), so the engine compares what it asked with what the
+ * device enabled and reports the difference (R01 Design note 7).
+ */
+export function featuresNotEnabled(
+  requested: ReadonlyArray<GPUFeatureName>,
+  enabled: ReadonlySet<string>,
+): ReadonlyArray<GPUFeatureName> {
+  return requested.filter((feature) => !enabled.has(feature));
+}
+
+/**
  * The styles an adapter may draw.
  *
  * @returns The wireframe always; the photorealistic style only on a hardware adapter, since the
