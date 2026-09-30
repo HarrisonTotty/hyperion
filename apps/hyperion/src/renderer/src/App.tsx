@@ -2,6 +2,7 @@ import { Activity, type ReactElement, useCallback, useState } from "react";
 
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ConsoleFrame } from "./components/ConsoleFrame";
+import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
@@ -10,6 +11,8 @@ import { type ConnectionState, useServerConnection } from "./lib/connection";
 import { DISPLAYS, type DisplayId } from "./lib/displays";
 import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
+import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
+import { navigatorGpu } from "./view/engine/status";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
 interface DisplayInputs {
@@ -24,11 +27,14 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
   switch (id) {
     case "link":
       content = (
-        <ConnectionPanel
-          url={inputs.serverUrl}
-          clientVersion={__APP_VERSION__}
-          connection={inputs.connection}
-        />
+        <>
+          <ConnectionPanel
+            url={inputs.serverUrl}
+            clientVersion={__APP_VERSION__}
+            connection={inputs.connection}
+          />
+          <GraphicsPanel />
+        </>
       );
       break;
     case "galaxy":
@@ -47,7 +53,8 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  *
  * @remarks
  * The server it links to is the one the main process resolved from the command line, handed over by
- * the preload.
+ * the preload, as are the launch's graphics mode and the GPU process's crashes, which feed the one
+ * graphics status store beside the adapter's answer (R01.T4).
  *
  * Every display stays mounted under React's `Activity`: a hidden one keeps its state (a chart's
  * centre, its camera, its selection) while its effects are torn down and it leaves the
@@ -74,21 +81,23 @@ export function App() {
   }, []);
   const inputs: DisplayInputs = { connection, serverUrl, systemOpening, openSystem };
   return (
-    <ServerLinkContext value={link}>
-      <UniverseProvider>
-        <ConsoleFrame
-          displays={DISPLAYS}
-          activeDisplay={activeDisplay}
-          onSelectDisplay={setActiveDisplay}
-          linkStatus={connection.status}
-        >
-          {DISPLAYS.map(({ id }) => (
-            <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
-              {displayContent(id, inputs)}
-            </Activity>
-          ))}
-        </ConsoleFrame>
-      </UniverseProvider>
-    </ServerLinkContext>
+    <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
+      <ServerLinkContext value={link}>
+        <UniverseProvider>
+          <ConsoleFrame
+            displays={DISPLAYS}
+            activeDisplay={activeDisplay}
+            onSelectDisplay={setActiveDisplay}
+            linkStatus={connection.status}
+          >
+            {DISPLAYS.map(({ id }) => (
+              <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
+                {displayContent(id, inputs)}
+              </Activity>
+            ))}
+          </ConsoleFrame>
+        </UniverseProvider>
+      </ServerLinkContext>
+    </GraphicsStatusProvider>
   );
 }
