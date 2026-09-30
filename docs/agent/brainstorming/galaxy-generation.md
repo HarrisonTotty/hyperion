@@ -379,7 +379,7 @@ Milky Way figures:
 | Supernova remnant            | about 10⁴, a thousand or two of them bright                    | 5–900 ly                              | It is a system: the star that died                                      | Four in five core collapses are inside associations, which hold a quarter of the shells; Type Ia shells follow the old stars |
 | Stellar stream               | 150–1,500                                                      | 30,000–10⁶ ly long, 100–6,000 ly wide | 10³–10⁸ systems lost by a cluster or dwarf                              | The orbits of dissolving globulars and accreted dwarfs                                                                       |
 | Dwarf galaxy core            | 0–3                                                            | up to 20,000 ly                       | 10³–10⁸ systems, not coeval                                             | Accretion history                                                                                                            |
-| Galactic centre              | 1                                                              | about 100 ly                          | Central black hole, 4–5 × 10⁷ more                                      | Fixed at the origin                                                                                                          |
+| Galactic centre              | 1                                                              | about 100 ly                          | Central black hole, 4–6 × 10⁷ more                                      | Fixed at the origin                                                                                                          |
 
 Features follow the density of the populations that make them, statistically and never by reading
 individual stars. One bookkeeping rule keeps anything from being counted twice: a population's
@@ -563,7 +563,7 @@ position and on its own independent draws, and the parts are independent Poisson
   inside it expands into thin hot gas and is large, faint and gone within a few hundred thousand
   years, often by reaching the bubble's wall. The remaining core collapses, from runaways and
   dissolved associations, are catalogue systems in field gas. Globular clusters have no shells. The
-  galactic centre owns a handful from its young few per cent, as the real one owns Sgr A East and a
+  galactic centre owns a handful from its young stars, as the real one owns Sgr A East and a
   magnetar.
 - **The count is a result.** Across our ranges there are 3,000 to 30,000 distinct shells, about
   7,000 at the Milky Way's rates of about two core collapses and half a Type Ia per century (Li et
@@ -671,26 +671,34 @@ The kind field is a prefix:
 The galactic centre is the first entry of the global list. Its central black hole is member zero.
 
 Its nuclear cluster was the tight case, so it was worked through with the Milky Way's measured
-profile: 2.5 × 10⁷ M☉ (Schödel et al. 2014), which is 4–5 × 10⁷ systems, on a broken power law with
-an inner slope of 1.3 (Gallego-Cano et al. 2018), a break near 10 ly and an outer slope of 3.5. That
-puts about 7,800 systems per cubic light-year at 3 ly from the black hole (9,000 under Kroupa's
-function), matching the measured 1.5 × 10⁵ M☉ per cubic parsec. On a slope that shallow the count
-per cell rises with each level as far as the break, and the 16-cell grid above fails: its fullest
-cell in the M dwarf band expects about 11,000 candidates (14,000 under Kroupa's) against an index of
-8,192. Halving the cells fixes it. With 32 cells per axis the fullest cell expects about 1,400
-candidates, and the bound wastes only a few per cent of them.
+profile: 2.5 × 10⁷ M☉ (Schödel et al. 2014), which is 4–6 × 10⁷ systems, on a broken power law with
+an inner slope of 1.3 (Gallego-Cano et al. 2018), a break near 10 ly and an outer slope of 3.5. It
+is held to the measured masses: 1.2–1.8 × 10⁵ M☉ per cubic parsec at 1 pc across Schödel et al.'s
+(2018) normalisations, and about 10⁶, 7.8 × 10⁶ and 8.9 × 10⁶ M☉ inside 1, 3 and 3.9 pc (Schödel et
+al. 2018; Chatzopoulos et al. 2015). At the centre's own mean system mass, 0.42 M☉ while its members
+have no companions, that is some 9,000 systems per cubic light-year at 3 ly from the black hole.
+On a slope that shallow the count per cell rises with each level as far as the break, and the
+16-cell grid above fails: its fullest cell in the M dwarf band expects about 11,000 candidates
+(14,000 under Kroupa's) against an index of 8,192. Halving the cells fixes it. With 32 cells per axis the fullest cell expects about 2,200
+candidates at that mean mass (3,000 under Kroupa's function, whose mean there is 0.35 M☉), under
+the flattened bound below.
 
 An earlier draft softened the cusp into a core of 0.03 ly. That cannot stand. The cluster's
 velocities must come from somewhere, and the only consistent source is a distribution function f(E),
 found once per galaxy by Eddington inversion of the profile in the potential of the black hole and
 the cluster. For a softened core that inversion goes negative inside 0.035 ly: no isotropic cluster
-around a point mass can be shallower than r^−½. So the cusp continues inward to 10⁻³ ly, inside
-which fewer than three systems are expected, then falls as r^−½, and ends at the loss cone: a member
-whose pericentre would pass within about 2 au of the black hole is thinned out, which removes 4 ×
-10⁻⁵ of the cluster. The density is defined as the integral of f, so positions and velocities agree
-by construction. The grid becomes twelve levels, from cells of 1 ÷ 256 ly, a binary fraction so that
+around a point mass can be shallower than r^−½, as An and Evans's (2006) cusp-slope theorem
+requires of an isotropic cusp. So the cusp continues inward to 10⁻³ ly, inside which fewer than
+three systems are expected, then falls as r^−½, and ends at the loss cone. The r^−½ core is the
+distribution function's energy cut at Ψ(10⁻³ ly), not a turn in the profile, which would itself make
+the inversion negative; the same holds of a sharp break, so the break near 10 ly is a smooth (Nuker)
+one of sharpness α = 10 (Gallego-Cano et al. 2018; Schödel et al. 2018). A member whose pericentre
+would pass within about 2 au of the black hole is thinned out, which removes 4 × 10⁻⁵ of the
+cluster. The density is defined as the integral of f, so positions and velocities agree by
+construction. The grid becomes twelve levels, from cells of 1 ÷ 256 ly, a binary fraction so that
 cell edges are exact, up to 8 ly and a reach of 128 ly, where the cluster has fallen well below the
-nuclear disc around it. The innermost cell expects about eighty candidates.
+nuclear disc around it. The innermost cell expects some forty candidates across the bands, of
+which its density keeps some fifteen.
 
 Three more things are true of the real cluster and copied:
 
@@ -698,15 +706,25 @@ Three more things are true of the real cluster and copied:
   inclination i: accept with probability exp(−k sin² i), and turn a share of the retrograde orbits
   prograde. Inclination is an integral of the motion, so the cluster stays stationary. The density
   becomes the profile times a closed-form function of polar angle, k ≈ 0.84 gives the observed
-  flattening, and the cell bound is the nearest corner's profile times that function's maximum.
-- Its members are not coeval. They draw their ages from a distribution of the centre's own, mostly
-  old with a young few per cent on an inner disc, as the real one has.
+  flattening, and the cell bound is the nearest corner's profile times that function's maximum. The
+  observed 0.71 (Schödel et al. 2014) and 0.73 (Chatzopoulos et al. 2015) are isodensity or
+  isophote ratios, which is what k is set by; a sample's second moments inside a sphere read 0.91
+  for the same cluster, as they would for any flattened cusp. The share turned is 0.8, about
+  Chatzopoulos et al.'s fitted 0.85 ± 0.15, which gives the 30–50 km/s Feldmeier et al. (2014)
+  measure in a slit along the plane.
+- Its members are not coeval. They draw their ages from Schödel et al.'s (2020) history: about 80%
+  of the mass formed over 10 Gyr ago, 15% at 2–4 Gyr, 3% at 150–500 Myr and 1% since, and a burst
+  of about 2.5 × 10⁴ M☉ 3–8 Myr ago, the real centre's young cluster (Lu et al. 2013). A third of
+  the burst lies on the clockwise disc, n ∝ r⁻³ from a sharp inner edge at 0.1 ly to about 0.5 ly,
+  8° thick (k = 25) about the Milky Way's measured orientation (Yelda et al. 2014); the rest is
+  isotropic, n ∝ r^−2.1, reaching in to orbits like S2's.
 - Its dark remnants have profiles of their own, by the class device of
   [What is inside a cluster today](#what-is-inside-a-cluster-today). Black holes sink: a slope of
   1.75–2 with a break about half the stars' (Bahcall and Wolf 1976), which puts ten to forty
   thousand of them in the central parsec, as the X-ray sources there imply (Hailey et al. 2018).
   Retention is far from total: the escape speed is 1,100 km/s at 0.1 ly but only 210 at 10 ly, so
-  the cluster keeps about a fifth of its neutron stars and about nine tenths of its black holes. The
+  the cluster keeps about a third of its neutron stars under the adopted kick law and about nine
+  tenths of its black holes. The
   rest stay bound to the inner galaxy among the bulge's displaced remnants.
 
 Two consequences for play. At 3 ly from the black hole the mean distance between systems is about
@@ -2362,6 +2380,49 @@ stops at 15 M☉, while the galaxy's own function and fates leave about 0.46 at 
 globulars' initial masses are then about 1.5 times too low, and a revision is queued (ruling 145.5).
 The model also reads every depleted slope as dwarfs lost from the canonical −1.5, where Baumgardt et
 al. read the same slope in dynamically young globulars as a mass function born light at the bottom.
+
+**2026-09-29: the orchestrator's ruling 144.** Ruling 144 of the same file was made on research
+that read the sources' own text (`research/r-centre09a/NOTE.md`: Gallego-Cano et al. 2018, Schödel
+et al. 2014, 2018 and 2020, Chatzopoulos et al. 2015, Feldmeier et al. 2014, Paumard et al. 2006,
+Bartko et al. 2009, Lu et al. 2009 and 2013, Yelda et al. 2014, von Fellenberg et al. 2022), on the
+galactic centre as plan 09 built it. Only the centre's own output moves, which nothing else reads
+yet. The text has been brought into line:
+
+1. **The nuclear cluster's break is a smooth Nuker break of sharpness α = 10**, and its r^−½ core
+   is the distribution function's energy cut at Ψ(10⁻³ ly). Reason: a sharp break, or a sharp turn
+   to r^−½, has no isotropic distribution function that is nowhere negative; Gallego-Cano et al.
+   and Schödel et al. fix α = 10 in their fits, and the inversion stays positive there for black
+   holes over ±2σ of the M–σ scatter; An and Evans (2006) show an isotropic cusp about a point mass
+   can be no shallower than r^−½. The potential takes the same law at the next potential revision.
+   See [Dense features](#dense-features-clusters-and-the-galactic-centre).
+2. **The cluster is held to measured masses, not to a count per cubic light-year**: ρ(1 pc) of
+   1.2–1.8 × 10⁵ M☉ pc⁻³ and M(<1 pc), M(<3 pc) and M(<3.9 pc) of 0.8–1.2 × 10⁶, 6–10 × 10⁶ and
+   7–11 × 10⁶ M☉ (Schödel et al. 2018; Chatzopoulos et al. 2015). The law as built misses M(<3 pc)
+   by about a third, because a fifth of its mass lies beyond the grid's reach; the next potential
+   revision normalises the mass inside the reach.
+3. **The cluster holds 4–6 × 10⁷ systems**, not 4–5. Reason: without companions its members
+   average 0.42 M☉, so 2.5 × 10⁷ M☉ is some 5.8 × 10⁷ of them; companions, which plan 11 adds and
+   which the centre's density ionises inside about 2 pc when wider than about 10 au, bring the
+   count towards 4.2 × 10⁷.
+4. **The cell bound is the flattened one**, the nearest corner's profile times the angular
+   function's maximum, as this document already said. The fullest cell then expects about 2,200
+   candidates at the centre's own mean mass of 0.42 M☉ (3,000 under Kroupa's function), in place
+   of the "about 1,400" that was worked at the galaxy's mean mass and without the marks' thinning; the innermost cell expects about forty, of which its density keeps
+   fifteen, where "about eighty" had no derivation.
+5. **The young stars are a burst of about 2.5 × 10⁴ M☉ 3–8 Myr ago, a third on the clockwise disc
+   and the rest isotropic**, within Schödel et al.'s (2020) history of 80 / 15 / 3 / 1%. Reason:
+   Lu et al. (2013) measure 1.4–3.7 × 10⁴ M☉ of young stars at 2.5–5.8 Myr; the disc is n ∝ r⁻³
+   from a sharp inner edge at 0.1 ly to about 0.5 ly, 8° thick (Paumard et al. 2006; Yelda et al.
+   2014), and only a fifth to a half of the young stars lie on it (Yelda et al. 2014; Lu et al.
+   2009; Bartko et al. 2009).
+6. **The flattening is an isodensity ratio, and the rotation share is 0.8.** Reason: Schödel et
+   al.'s 0.71 is an isophote and Chatzopoulos et al.'s 0.73 an intrinsic homoeoid, and both are
+   isodensity ratios. A sample's second moments inside a sphere read 0.91, for the mark's
+   flattening and for a homoeoid of 0.71 alike, which is the sphere's doing. Chatzopoulos et al.
+   fit the same reversal of counter-rotating orbits with F = 0.85 ± 0.15.
+7. **The cluster keeps about a third of its neutron stars**, not a fifth. Reason: the kick law
+   adopted in plan 06 is Disberg and Mandel's (2025) log-normal, which keeps 0.36 at 210 km/s,
+   where the earlier figure came from a Maxwellian of 265 km/s (Hobbs et al. 2005).
 
 **2026-09-29: the orchestrator's ruling 147.** Ruling 147 of the same file was made on research
 into four slow-test failures after version 15 (`research/r-slowfail/NOTE.md`). Only tests and text

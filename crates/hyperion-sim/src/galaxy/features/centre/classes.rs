@@ -4,17 +4,25 @@
 //! # Ages
 //!
 //! The members are not coeval (the brainstorm, "Dense features"). Their initial mass follows
-//! Schödel et al.'s (2020, A&A 641, A102, abstract) star-formation history, as
-//! [`age_components`] holds it (the ages' spans are ours, provisional):
+//! Schödel et al.'s (2020, A&A 641, A102, §6.1) star-formation history, as [`age_components`]
+//! holds it (ruling 144.10; the old and intermediate spans are ours):
 //!
 //! - 80% of the mass formed 10–13 Gyr ago ("about 80% … 10 Gyr ago or longer");
-//! - 15% 2.5–3.5 Gyr ago (the episode "of about 3 Gyr in age");
-//! - 5% since 300 Myr ago ("a few percent … in the past few 100 Myr"), uniformly, of which the
-//!   part younger than 10 Myr, and the members born up to `H` after the epoch, lies on the young
-//!   inner disc: 0.17% of the mass formed, some 5 × 10⁴ M☉ at Milky Way values, against Lu et
-//!   al.'s (2013) 1.4–3.7 × 10⁴ M☉ of young stars in the central parsec (not re-checked). The
-//!   brainstorm's "a young few per cent on an inner disc" is read as the recent few per cent, of
-//!   which the disc is the youngest part (a finding, in the plan's Risks).
+//! - 15% 2.5–3.5 Gyr ago ("about 15% at 2–4 Gyr");
+//! - 3% 150–500 Myr ago ("a few percent … in the past 150–500 Myr"), on the stars' profile;
+//! - 1% at a constant rate from `H` after the epoch to 150 Myr ago ("≲ 1% of star formation
+//!   happened in the past 100 Myr"), on the stars' profile, which keeps the members born within
+//!   the clock's window;
+//! - and a burst of [`BURST_SHARE`] of the mass formed, 2.5 × 10⁴ M☉ at Milky Way values (Lu et
+//!   al. 2013, ApJ 764, 155: 1.4–3.7 × 10⁴ M☉ for the young cluster), uniformly 3–8 Myr ago
+//!   (Lu et al. 2013's 2.5–5.8 Myr; Paumard et al. 2006's 6 ± 2 Myr): a third on the clockwise
+//!   disc ([`CentreTracer::YoungDisc`]; Yelda et al. 2014 find about a fifth of the young stars
+//!   on it, Lu et al. 2009 and Bartko et al. 2009 about half) and two thirds isotropic
+//!   ([`CentreTracer::YoungIsotropic`]).
+//!
+//! The shares are relative, and divided by their sum (0.9906): what Schödel et al. leave out is
+//! the near-zero 5–10 Gyr and the minimum near 1 Gyr. The classes are then scaled to the
+//! cluster's present mass.
 //!
 //! # Classes and counts
 //!
@@ -28,29 +36,36 @@
 //! km/s at 0.1 ly, 210 at 10 ly), averaged over the stars' profile inside the reach, each
 //! progenitor's share read from the clusters' retention table (ruling 139.5), which ends at 500
 //! km/s and is held there above it: the 2% of the stars inside about 1 ly, where the escape speed
-//! is higher, keep a little too few (0.349 against the quadrature's 0.359 for the neutron stars
-//! at Milky Way values; the test holds the two to 0.02). The low mode is judged on its pair's systemic speed (ruling 126.3). The brainstorm has about a fifth of the neutron stars and nine tenths of the black
-//! holes stay; as built 0.35 and 0.85 do at Milky Way values, the neutron stars' share above the
-//! brainstorm's because the low mode's pairs are all kept at these speeds (a finding). The rest are the bulge's displaced remnants and are not
-//! generated here.
+//! is higher, keep a little too few (about 0.01 on the neutron stars' share; the test holds the
+//! table to plan 08's quadrature within 0.02). The low mode is judged on its pair's systemic
+//! speed (ruling 126.3). About a third of the neutron stars and nine tenths of the black holes
+//! stay (ruling 144.9): under Disberg and Mandel's (2025) log-normal ordinary kicks of plan 06,
+//! Φ((ln v − 5.60) ÷ 0.68) keeps 0.36 at 210 km/s, and the low mode's pairs are all kept, where
+//! the brainstorm's earlier "about a fifth" came from a Maxwellian of σ = 265 km/s. The rest are
+//! the bulge's displaced remnants and are not generated here.
 //!
 //! # Profiles
 //!
-//! Three distribution functions (Design note 14), in the one potential of the black hole and the
-//! stars:
+//! Four distribution functions (Design note 14 had three; ruling 144.6 splits the young), in the
+//! one potential of the black hole and the stars:
 //!
-//! - **Stars** ([`CentreTracer::Stars`]): the cluster's profile, which the old and intermediate
-//!   stars, the recent ones older than 10 Myr, the white dwarfs and the neutron stars follow. The
-//!   plan's "neutron stars on the stellar profile, widened" is built unwidened: Design note 14
-//!   has three inversions, and a retained neutron star is heavier than the mean star, which
-//!   segregation would narrow (a finding).
+//! - **Stars** ([`CentreTracer::Stars`]): the cluster's profile, which the old, intermediate,
+//!   recent and continuous stars, the white dwarfs and the neutron stars follow. The plan's
+//!   "neutron stars on the stellar profile, widened" is built unwidened: a retained neutron star
+//!   is heavier than the mean star, which segregation would narrow (a finding).
 //! - **Black holes** ([`CentreTracer::BlackHoles`]): Bahcall and Wolf's (1976) 7⁄4 inside a break
 //!   at half the stars' (5 ly), 3.5 outside ([`black_hole_shape`]).
-//! - **The young disc** ([`CentreTracer::YoungDisc`]): an r⁻² cusp to 1.5 ly and r⁻⁵ beyond,
-//!   with no inner hole (Design note 14), under the young disc's marks
-//!   ([`OrbitMarks::YOUNG_DISC`]). The shape is ours (provisional): the Milky Way's young stars lie
-//!   at 0.03–0.5 pc with a surface density falling as about `R^−2` (Paumard et al. 2006; not
-//!   re-checked).
+//! - **The young disc** ([`CentreTracer::YoungDisc`], [`young_disc_shape`]): n ∝ r⁻³, the disc
+//!   plane's Σ ∝ R⁻² for a thickness in proportion to radius (Paumard et al. 2006; Bartko et al.
+//!   2009's r^−1.95±0.25; Lu et al. 2009), with a sharp inner edge at 0.1 ly (0.8–1″, Paumard et
+//!   al. 2006 and Yelda et al. 2014) as the distribution function's energy cut, and a smooth
+//!   break at 0.5 ly to r⁻⁵ (Yelda et al. find no disc beyond 0.42 ly, Paumard et al. no OB stars
+//!   beyond 1.6 ly), under the disc's marks ([`OrbitMarks::young_disc`]: k = 25 about the Milky
+//!   Way's disc normal, all turned its way).
+//! - **The isotropic young** ([`CentreTracer::YoungIsotropic`], [`young_isotropic_shape`]): n ∝
+//!   r^−2.1 (Do et al. 2013's Σ ∝ R^−1.14 beyond 1″, as Yelda et al. 2014 quote it; not
+//!   re-checked) from the core radius, so that S2-like orbits exist, to a smooth break at 1.6 ly
+//!   to r⁻⁵, with no flattening or rotation.
 
 use crate::galaxy::features::cluster::MEAN_BLACK_HOLE_MASS;
 use crate::galaxy::features::interior::counts::{
@@ -70,10 +85,10 @@ use crate::stellar::sse::turn_off_mass;
 use crate::tables::cluster_retention;
 use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS};
 use crate::time::CLOCK_WINDOW_H;
-use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
+use crate::units::{Dex, HeliumExcess, LightYears, SolarMasses, Years};
 
 use super::marks::OrbitMarks;
-use super::profile::{BREAK_SHARPNESS, CentreProfile, SlopeBreak, TracerShape};
+use super::profile::{BREAK_SHARPNESS, CentreProfile, SlopeBreak, TracerProfile, TracerShape};
 
 /// The centre's metallicity for the turn-off and the kick law, dex (provisional, ours: the
 /// cluster is metal-rich, Schödel et al. 2020; plan 06's formulae clamp Z at 0.03).
@@ -90,20 +105,50 @@ pub enum CentreTracer {
     Stars,
     /// The black holes' steeper cusp.
     BlackHoles,
-    /// The young inner disc's.
+    /// The young clockwise disc's.
     YoungDisc,
+    /// The isotropic young stars' cusp.
+    YoungIsotropic,
 }
 
 impl CentreTracer {
     /// Every tracer, in the order of the centre's distribution functions.
-    pub const ALL: [Self; 3] = [Self::Stars, Self::BlackHoles, Self::YoungDisc];
+    pub const ALL: [Self; 4] = [
+        Self::Stars,
+        Self::BlackHoles,
+        Self::YoungDisc,
+        Self::YoungIsotropic,
+    ];
+
+    /// Its index in [`ALL`](Self::ALL).
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Stars => 0,
+            Self::BlackHoles => 1,
+            Self::YoungDisc => 2,
+            Self::YoungIsotropic => 3,
+        }
+    }
 
     /// The marks its members pass.
     #[must_use]
-    pub const fn marks(self) -> OrbitMarks {
+    pub fn marks(self) -> OrbitMarks {
         match self {
-            Self::Stars | Self::BlackHoles => OrbitMarks::OLD_STARS,
-            Self::YoungDisc => OrbitMarks::YOUNG_DISC,
+            Self::Stars | Self::BlackHoles => OrbitMarks::old_stars(),
+            Self::YoungDisc => OrbitMarks::young_disc(),
+            Self::YoungIsotropic => OrbitMarks::isotropic(),
+        }
+    }
+
+    /// Its profile: the stars' is `stars`, the others' their own shapes.
+    #[must_use]
+    pub fn profile(self, stars: &TracerProfile) -> TracerProfile {
+        match self {
+            Self::Stars => stars.clone(),
+            Self::BlackHoles => TracerProfile::new(black_hole_shape()),
+            Self::YoungDisc => TracerProfile::with_cut(young_disc_shape(), YOUNG_DISC_INNER_EDGE),
+            Self::YoungIsotropic => TracerProfile::new(young_isotropic_shape()),
         }
     }
 }
@@ -139,16 +184,27 @@ fn clock_window_years() -> f64 {
     CLOCK_WINDOW_H.as_julian_years_f64()
 }
 
-/// The components' shares of the recent 5%, split at 10 Myr: `(10 Myr + H) ÷ (300 Myr + H)` lies
-/// on the young disc.
-const RECENT_SHARE: f64 = 0.05;
+/// The burst's share of the mass formed, before the shares are divided by their sum: 2.5 × 10⁴ M☉
+/// at Milky Way values (module documentation; ruling 144.6).
+pub const BURST_SHARE: f64 = 6e-4;
 
-/// The centre's star-formation history (module documentation): old, intermediate, recent and the
-/// young disc.
+/// The share of the burst on the clockwise disc (ruling 144.6).
+pub const BURST_DISC_SHARE: f64 = 1.0 / 3.0;
+
+/// The young disc's inner edge, ly: the distribution function's energy cut (ruling 144.6).
+pub const YOUNG_DISC_INNER_EDGE: LightYears = LightYears::new(0.1);
+
+/// The centre's star-formation history (module documentation): old, intermediate, recent,
+/// continuous, and the burst on the disc and off it.
 #[must_use]
-pub fn age_components() -> [AgeComponent; 4] {
+pub fn age_components() -> [AgeComponent; 6] {
     let h = clock_window_years();
-    let disc = RECENT_SHARE * (1e7 + h) / (3e8 + h);
+    let burst = |share: f64, tracer: CentreTracer| AgeComponent {
+        share: BURST_SHARE * share,
+        youngest: Years::new(3e6),
+        oldest: Years::new(8e6),
+        tracer,
+    };
     [
         AgeComponent {
             share: 0.80,
@@ -163,17 +219,19 @@ pub fn age_components() -> [AgeComponent; 4] {
             tracer: CentreTracer::Stars,
         },
         AgeComponent {
-            share: RECENT_SHARE - disc,
-            youngest: Years::new(1e7),
-            oldest: Years::new(3e8),
+            share: 0.03,
+            youngest: Years::new(1.5e8),
+            oldest: Years::new(5e8),
             tracer: CentreTracer::Stars,
         },
         AgeComponent {
-            share: disc,
+            share: 0.01,
             youngest: Years::new(-h),
-            oldest: Years::new(1e7),
-            tracer: CentreTracer::YoungDisc,
+            oldest: Years::new(1.5e8),
+            tracer: CentreTracer::Stars,
         },
+        burst(BURST_DISC_SHARE, CentreTracer::YoungDisc),
+        burst(1.0 - BURST_DISC_SHARE, CentreTracer::YoungIsotropic),
     ]
 }
 
@@ -195,7 +253,10 @@ pub fn black_hole_shape() -> TracerShape {
     .expect("7/4 inside and 3.5 outside")
 }
 
-/// The young disc's shape: r⁻² inside 1.5 ly, r⁻⁵ outside (module documentation).
+/// The young disc's shape: r⁻³ from its inner edge, a smooth break at 0.5 ly to r⁻⁵ (module
+/// documentation). Inside the edge, which its distribution function's cut sets, the shape turns
+/// to r⁻² about 0.01 ly only so that its mass converges; that part sets nothing but the
+/// normalisation the cut replaces. The sharpness of both breaks is 4 (ours).
 ///
 /// # Panics
 ///
@@ -204,13 +265,39 @@ pub fn black_hole_shape() -> TracerShape {
 pub fn young_disc_shape() -> TracerShape {
     TracerShape::new(
         2.0,
+        [
+            SlopeBreak {
+                radius: 0.01,
+                sharpness: 4.0,
+                rise: 1.0,
+            },
+            SlopeBreak {
+                radius: 0.5,
+                sharpness: 4.0,
+                rise: 2.0,
+            },
+        ],
+    )
+    .expect("2, then 3, then 5")
+}
+
+/// The isotropic young stars' shape: r^−2.1 to a smooth break at 1.6 ly to r⁻⁵, of sharpness 4
+/// (module documentation; the break and its sharpness are ours).
+///
+/// # Panics
+///
+/// Never: the slopes are constants inside the ranges.
+#[must_use]
+pub fn young_isotropic_shape() -> TracerShape {
+    TracerShape::new(
+        2.1,
         [SlopeBreak {
-            radius: 1.5,
-            sharpness: BREAK_SHARPNESS,
-            rise: 3.0,
+            radius: 1.6,
+            sharpness: 4.0,
+            rise: 2.9,
         }],
     )
-    .expect("2 inside and 5 outside")
+    .expect("2.1 inside and 5 outside")
 }
 
 /// One class of the centre.
@@ -403,6 +490,7 @@ impl CentreClasses {
 
         // Per primary formed: (component, kind, band) → (count, mass, highest initial mass).
         let components = age_components();
+        let shares: f64 = components.iter().map(|c| c.share).sum();
         let mut raw: Vec<(CentreClass, f64)> = Vec::new();
         let mut add = |class: CentreClass, count: f64, mass: f64| {
             if count <= 0.0 {
@@ -440,7 +528,7 @@ impl CentreClasses {
             let half = 0.5 * (b - a);
             for (&x, &w) in GL4_NODES.iter().zip(&GL4_WEIGHTS) {
                 let age = (a + half + half * x).max(1e4);
-                let share = component.share * 0.5 * w;
+                let share = component.share / shares * 0.5 * w;
                 let m_to = turn_off_mass(Years::new(age), &composition).value();
                 for band in MassBand::ALL {
                     let (lo, hi) = (
@@ -658,7 +746,7 @@ mod tests {
     use crate::galaxy::features::centre::testing::milky_way_centre;
 
     /// P09.T26: 10⁴–4 × 10⁴ black holes inside the central parsec (Hailey et al. 2018); about a
-    /// fifth of the neutron stars (provisional, below) and nine tenths of the black holes
+    /// third of the neutron stars (ruling 144.9: 0.30–0.40) and nine tenths of the black holes
     /// retained, to a third (the brainstorm); the unretained are not generated.
     #[test]
     fn the_centre_keeps_a_third_of_its_neutron_stars_and_most_black_holes() {
@@ -695,9 +783,7 @@ mod tests {
             classes.primaries_formed(),
         );
         assert!((1e4..=4e4).contains(&in_parsec), "{in_parsec}");
-        // Provisional (the plan's Risks): "about a fifth", to a third, is 0.13–0.27, and plan
-        // 06's kick law as built keeps 0.35 at `GENERATOR_VERSION` 15 (0.29 at 14), much of it
-        // the low mode's pairs, every one kept at these speeds. Held at 0.30–0.40 until ruled.
+        // Ruling 144.9: about a third under the adopted kick law, 0.30–0.40.
         assert!(
             (0.30..=0.40).contains(&kept.neutron_stars),
             "{}",
@@ -738,6 +824,45 @@ mod tests {
         eprintln!("exact {exact:?}, table {table:?}");
         assert!((exact.neutron_stars - table.neutron_stars).abs() < 0.02);
         assert!((exact.black_holes - table.black_holes).abs() < 0.02);
+    }
+
+    /// Ruling 144.6 and 144.10: Schödel et al.'s (2020) history, 80 / 15 / 3 / 1% of the mass
+    /// formed, and the burst's 2.5 × 10⁴ M☉ formed 3–8 Myr ago at Milky Way values (1.4–3.7 ×
+    /// 10⁴), a third of its systems on the disc. Its mass above 1 M☉ is printed: Lu et al.'s
+    /// (2013) figure counts only that, of a top-heavy mass function.
+    #[test]
+    fn the_burst_is_the_measured_young_cluster() {
+        let model = milky_way_centre();
+        let classes = model.classes();
+        let components = age_components();
+        let shares: Vec<f64> = components.iter().map(|c| c.share).collect();
+        assert_eq!(&shares[..4], &[0.80, 0.15, 0.03, 0.01]);
+        let imf = crate::galaxy::imf::MassFunctionKind::default().to_mass_function();
+        let (_, per_primary) = moments(imf.as_ref(), MASS_BAND_EDGES[0], MASS_BAND_EDGES[5]);
+        let (_, above_one) = moments(imf.as_ref(), 1.0, MASS_BAND_EDGES[5]);
+        let burst = BURST_SHARE / shares.iter().sum::<f64>();
+        let formed = burst * classes.primaries_formed() * per_primary;
+        let heavy = burst * classes.primaries_formed() * above_one;
+        let systems = |tracer| classes.on_tracer(tracer);
+        let (disc, isotropic) = (
+            systems(CentreTracer::YoungDisc),
+            systems(CentreTracer::YoungIsotropic),
+        );
+        let present: f64 = classes
+            .classes()
+            .iter()
+            .filter(|c| c.component >= 4)
+            .map(|c| c.expected * c.mean_mass.value())
+            .sum();
+        eprintln!(
+            "burst: formed {formed:.4e} M☉ ({heavy:.4e} above 1 M☉), present {present:.4e} M☉; \
+             systems {disc:.4e} on the disc and {isotropic:.4e} isotropic"
+        );
+        assert!((1.4e4..=3.7e4).contains(&formed), "{formed}");
+        assert!((disc / (disc + isotropic) - BURST_DISC_SHARE).abs() < 1e-9);
+        for c in &components[4..] {
+            assert_eq!((c.youngest.value(), c.oldest.value()), (3e6, 8e6));
+        }
     }
 
     #[test]

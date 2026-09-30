@@ -19,22 +19,31 @@
 //!
 //! # The cut and the density
 //!
-//! f is zero above `E₀ = Ψ(10⁻³ ly)` (the profile module's documentation): no orbit is bound more
-//! tightly than a circular one at the core radius. Outside that radius the cut changes nothing,
-//! and inside it the density falls as `Ψ^½ ∝ r^−½`. **The density used everywhere from here on is
-//! the integral of f**, `n_f(r) = 4π ∫₀^{min(Ψ, E₀)} f(E) √(2(Ψ − E)) dE`, tabulated at the grid's
-//! radii and 64 more inside the core, so positions and velocities agree by construction. Between
-//! nodes `ln f` and `ln n_f` are monotone cubic Hermite interpolants (Fritsch and Butland's
-//! slopes) in `ln E` and `ln r`.
+//! f is zero above `E₀ = Ψ(r_c)` (the profile module's documentation), `r_c` the tracer's cut
+//! radius ([`TracerProfile::cut_radius`]): the core radius of 10⁻³ ly for most tracers, 0.1 ly for
+//! the young disc's inner edge, taken at the first grid radius at or outside it. No orbit is bound
+//! more tightly than a circular one there. Outside that radius the cut changes nothing, and inside
+//! it the density falls as `Ψ^½ ∝ r^−½`. f is found at the grid's energies from `E₀` down, and
+//! only those must be positive: the shape inside the cut radius does not enter them. **The
+//! density used everywhere from here on is the integral of f**, `n_f(r) = 4π ∫₀^{min(Ψ, E₀)} f(E)
+//! √(2(Ψ − E)) dE`, tabulated at the grid's radii and 64 more inside the core, so positions and
+//! velocities agree by construction. f is scaled so that `n_f` holds a total of one: what the cut
+//! keeps inside `r_c` in place of the profile's share there (a few parts in 10⁸ for the stars).
+//! Between nodes `ln f` is a cubic Hermite interpolant in `ln E` with five-point slopes, since f
+//! dips near a break of α = 10 and monotone slopes go flat there (they left 4.2 × 10⁻⁴ in the
+//! density's integral), and `ln n_f` one in `ln r` with the profile's exact slopes from the cut
+//! radius out and Fritsch and Butland's inside it.
 //!
 //! # The velocity sampler (P09.T24.c)
 //!
 //! At radius r the speed has the density `v² f(Ψ − v² ÷ 2)`. In `w = v² ÷ v_esc²` that is `w^½
 //! f(Ψ(1 − w))`, which about a point mass with a cusp of slope γ is exactly `Beta(3⁄2, γ − ½)`. The
-//! sampler proposes `1 − w` from `Beta(1, b)`, `b = γ₀ − ½`, by inverse transform restricted to the
-//! energies below `E₀`, and accepts on one mark against `√w f(E) ÷ (B E^{b−1})`, with `B` the
-//! greatest `f E^{1−b}` at the energies the radius reaches (tabulated, times the most the
-//! interpolant can exceed its nodes). That is the plan's Beta proposal with its `w^½` moved into
+//! sampler proposes `1 − w` from `Beta(1, b)`, `b = γ − ½` with γ the shape's slope at the cut
+//! radius (1 where that is ½ or less), by inverse transform restricted to the energies below
+//! `E₀`, and accepts on one mark against `√w f(E) ÷ (B E^{b−1})`, with `B` the interpolant's
+//! greatest `f E^{1−b}` at the energies the radius reaches (tabulated per node from each panel's
+//! cubic, whose extrema are the roots of a quadratic). That is the plan's Beta proposal with its
+//! `w^½` moved into
 //! the acceptance, which is exact by the same thinning theorem and needs no Beta variates. The
 //! direction is isotropic. Words: the direction's two, then two per attempt (the proposal's
 //! uniform and the mark), at most [`MAX_ATTEMPTS`] attempts.
@@ -93,6 +102,79 @@ impl Hermite {
             }
         }
         Self { x, y, d }
+    }
+
+    /// A cubic Hermite interpolant through increasing `x` whose slopes are the derivatives of the
+    /// Lagrange polynomial through the five nearest points (three at the ends, the parabolic
+    /// estimate): fourth-order where the data turn, where Fritsch and Butland's slopes go flat,
+    /// and not monotone.
+    fn five_point(x: Vec<f64>, y: Vec<f64>) -> Self {
+        let count = x.len();
+        let slopes = (0..count)
+            .map(|at| {
+                let (lo, hi) = if at >= 2 && at + 2 < count {
+                    (at - 2, at + 2)
+                } else {
+                    (at.saturating_sub(1), (at + 1).min(count - 1))
+                };
+                // The Lagrange basis's derivatives at x[at], for the points lo..=hi.
+                let mut slope = 0.0;
+                for point in lo..=hi {
+                    let weight = if point == at {
+                        (lo..=hi)
+                            .filter(|&other| other != at)
+                            .map(|other| 1.0 / (x[at] - x[other]))
+                            .sum::<f64>()
+                    } else {
+                        let mut weight = 1.0 / (x[point] - x[at]);
+                        for other in (lo..=hi).filter(|&other| other != point && other != at) {
+                            weight *= (x[at] - x[other]) / (x[point] - x[other]);
+                        }
+                        weight
+                    };
+                    slope += weight * y[point];
+                }
+                slope
+            })
+            .collect();
+        Self { x, y, d: slopes }
+    }
+
+    /// The greatest value of `eval(t) + c t` over the interval `[x[k], x[k + 1]]`: at its ends or
+    /// where the cubic's derivative, a quadratic in the interval's position, vanishes inside it.
+    fn interval_max(&self, k: usize, c: f64) -> f64 {
+        let (start, width) = (self.x[k], self.x[k + 1] - self.x[k]);
+        let (y0, y1) = (self.y[k], self.y[k + 1]);
+        let (d0, d1) = (width * self.d[k], width * self.d[k + 1]);
+        let at = |pos: f64| {
+            let (pos2, pos3) = (pos * pos, pos * pos * pos);
+            (2.0 * pos3 - 3.0 * pos2 + 1.0) * y0
+                + (pos3 - 2.0 * pos2 + pos) * d0
+                + (-2.0 * pos3 + 3.0 * pos2) * y1
+                + (pos3 - pos2) * d1
+                + c * (start + pos * width)
+        };
+        // The derivative in the position: quad pos² + lin pos + constant.
+        let quad = 6.0 * y0 + 3.0 * d0 - 6.0 * y1 + 3.0 * d1;
+        let lin = -6.0 * y0 - 4.0 * d0 + 6.0 * y1 - 2.0 * d1;
+        let constant = d0 + c * width;
+        let mut best = at(0.0).max(at(1.0));
+        let mut consider = |pos: f64| {
+            if pos > 0.0 && pos < 1.0 {
+                best = best.max(at(pos));
+            }
+        };
+        if quad.abs() > 1e-300 {
+            let disc = lin * lin - 4.0 * quad * constant;
+            if disc >= 0.0 {
+                let root = disc.sqrt();
+                consider((-lin + root) / (2.0 * quad));
+                consider((-lin - root) / (2.0 * quad));
+            }
+        } else if lin.abs() > 1e-300 {
+            consider(-constant / lin);
+        }
+        best
     }
 
     /// The interval `k` with `x[k] ≤ t ≤ x[k + 1]`, clamped to the ends, by bisection.
@@ -184,6 +266,22 @@ pub struct EnergyGrid {
 }
 
 impl EnergyGrid {
+    /// The first of the [`RADII`] radii at or outside `r` ly (within 10⁻⁹ of a step), and never
+    /// past the last but one.
+    fn first_at_or_outside(&self, r: f64) -> usize {
+        let ln_r0 = math::ln(self.radii[0]);
+        let at = ((math::ln(r) - ln_r0) / self.step - 1e-9)
+            .ceil()
+            .clamp(0.0, 254.0);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the value is clamped to [0, 254] and whole"
+        )]
+        let j = at as usize;
+        j.min(RADII - 2)
+    }
+
     /// The grid of `profile`'s potential.
     #[must_use]
     pub fn new(profile: &CentreProfile) -> Self {
@@ -272,15 +370,18 @@ pub struct DistributionFunction {
     panel_f: Vec<[f64; 16]>,
     /// `ln n_f` against `ln r`.
     log_density: Hermite,
+    /// `∫ f dE` over the energies with members.
+    energy_integral: f64,
+    /// The factor f was scaled by for a total of one.
+    scale: f64,
     /// The innermost tabulated radius and its density, for the `r^−½` below.
     inner: (f64, f64),
     /// The share of the realised density inside each tabulated radius.
     cumulative: Hermite,
     /// The sampler's exponent `b = γ₀ − ½` (1 for a tracer at or below ½).
     beta: f64,
-    /// The running greatest `f E^{1−b}` from the lowest energy up, and the interpolant's slack.
+    /// The running greatest `f E^{1−b}` of the interpolant from the lowest energy up to each node.
     bound: Vec<f64>,
-    slack: f64,
 }
 
 impl DistributionFunction {
@@ -313,6 +414,9 @@ impl DistributionFunction {
     ) -> Result<Self, BuildCentreError> {
         let (radii, psi, step) = (&grid.radii, &grid.psi, grid.step);
         let ln_r0 = math::ln(CORE_RADIUS.value());
+        // The cut's node: f is found from its energy down.
+        let first = grid.first_at_or_outside(tracer.cut_radius().value());
+        let nodes = RADII - first;
         let regular: Vec<[(f64, f64); 16]> = grid
             .regular
             .iter()
@@ -324,8 +428,8 @@ impl DistributionFunction {
             let d1 = n * tracer.shape().log_slope(outer_r) / outer_r;
             d1 / outer_p1
         };
-        let mut values = Vec::with_capacity(RADII);
-        for j in 0..RADII {
+        let mut values = Vec::with_capacity(nodes);
+        for j in first..RADII {
             let e = psi[j];
             let mut sum = 0.0;
             for node in &grid.singular[j] {
@@ -343,18 +447,20 @@ impl DistributionFunction {
             }
             values.push(f);
         }
-        let energies: Vec<f64> = psi[..RADII].to_vec();
-        let log_f = Hermite::new(
+        let energies: Vec<f64> = psi[first..RADII].to_vec();
+        // Five-point slopes: f dips near the break at α = 10, and Fritsch and Butland's flat
+        // slopes there left 4.2 × 10⁻⁴ in the density's integral, parabolic ones 1.9 × 10⁻⁴.
+        let log_f = Hermite::five_point(
             energies.iter().rev().map(|&e| math::ln(e)).collect(),
             values.iter().rev().map(|&f| math::ln(f)).collect(),
         );
         let f_at = |e: f64| math::exp(log_f.eval(math::ln(e)));
 
-        // Energy panels q = 0..254, between E_{q+1} and E_q, 16 nodes in ln E each.
-        let mut panel_energy = Vec::with_capacity(RADII - 1);
-        let mut panel_weight = Vec::with_capacity(RADII - 1);
-        let mut panel_f = Vec::with_capacity(RADII - 1);
-        for q in 0..RADII - 1 {
+        // Energy panels q = 0..nodes − 2, between E_{q+1} and E_q, 16 nodes in ln E each.
+        let mut panel_energy = Vec::with_capacity(nodes - 1);
+        let mut panel_weight = Vec::with_capacity(nodes - 1);
+        let mut panel_f = Vec::with_capacity(nodes - 1);
+        for q in 0..nodes - 1 {
             let (a, b) = (math::ln(energies[q + 1]), math::ln(energies[q]));
             let h = 0.5 * (b - a);
             let es: [f64; 16] = std::array::from_fn(|n| math::exp(a + h + h * GL16_NODES[n]));
@@ -363,8 +469,9 @@ impl DistributionFunction {
             panel_energy.push(es);
         }
 
-        let beta = if tracer.shape().inner_slope() > 0.5 {
-            tracer.shape().inner_slope() - 0.5
+        let slope_at_cut = -tracer.shape().log_slope(radii[first]);
+        let beta = if slope_at_cut > 0.5 {
+            slope_at_cut - 0.5
         } else {
             1.0
         };
@@ -376,11 +483,12 @@ impl DistributionFunction {
             panel_weight,
             panel_f,
             log_density: Hermite::new(vec![0.0, 1.0], vec![0.0, 0.0]),
+            energy_integral: 0.0,
+            scale: 1.0,
             inner: (1.0, 1.0),
             cumulative: Hermite::new(vec![0.0, 1.0], vec![0.0, 0.0]),
             beta,
             bound: Vec::new(),
-            slack: 1.0,
         };
 
         // The density table, from 64 radii inside the core to the grid's last radius but one (at
@@ -394,7 +502,7 @@ impl DistributionFunction {
             .enumerate()
             .map(|(i, &r)| {
                 let psi_r = if i >= INNER_RADII {
-                    df.energies[i - INNER_RADII]
+                    psi[i - INNER_RADII]
                 } else {
                     profile.psi(r)
                 };
@@ -406,6 +514,11 @@ impl DistributionFunction {
             table_r.iter().map(|&r| math::ln(r)).collect(),
             table_n.iter().map(|&n| math::ln(n)).collect(),
         );
+        // From the cut radius out the realised density is the profile, whose logarithmic slope
+        // is exact: Fritsch and Butland's estimates there left 5 × 10⁻⁴ at the break of α = 10.
+        for (i, &r) in table_r.iter().enumerate().skip(INNER_RADII + first) {
+            df.log_density.d[i] = tracer.shape().log_slope(r);
+        }
         // The realised share inside each radius: the r^−½ core below the table, then panels.
         let four_pi = 4.0 * core::f64::consts::PI;
         let mut within = Vec::with_capacity(table_r.len());
@@ -420,22 +533,93 @@ impl DistributionFunction {
             }
             within.push(within[i - 1] + piece);
         }
-        df.cumulative = Hermite::new(table_r.iter().map(|&r| math::ln(r)).collect(), within);
-
-        // The sampler's bound.
-        let exponent = 1.0 - beta;
-        let mut bound = vec![0.0; RADII];
-        let mut best = 0.0_f64;
-        for j in (0..RADII).rev() {
-            best = best.max(df.values[j] * math::powf(df.energies[j], exponent));
-            bound[j] = best;
+        // A total of one: outside the cut the realised density is the profile's, and inside it
+        // it is what the cut keeps.
+        let at_cut = INNER_RADII + first;
+        let scale = 1.0 / (1.0 - tracer.fraction_within(radii[first]) + within[at_cut]);
+        df.rescale(scale);
+        for w in &mut within {
+            *w *= scale;
         }
-        let widest = (0..RADII - 1)
-            .map(|q| math::ln(df.energies[q] / df.energies[q + 1]))
-            .fold(0.0_f64, f64::max);
+        df.cumulative = Hermite::new(table_r.iter().map(|&r| math::ln(r)).collect(), within);
+        df.energy_integral = df
+            .panel_weight
+            .iter()
+            .zip(&df.panel_f)
+            .map(|(w, f)| w.iter().zip(f).map(|(w, f)| w * f).sum::<f64>())
+            .sum();
+
+        // The sampler's bound: the running greatest of the interpolant's `ln f + (1 − b) ln E`
+        // over the panels below each node, `ln f`'s interval `nodes − 2 − q` being energy panel
+        // q, with a margin for rounding.
+        let exponent = 1.0 - beta;
+        let mut bound = vec![0.0; nodes];
+        let mut best = df.values[nodes - 1] * math::powf(df.energies[nodes - 1], exponent);
+        bound[nodes - 1] = best;
+        for q in (0..nodes - 1).rev() {
+            let top = math::exp(df.log_f.interval_max(nodes - 2 - q, exponent));
+            best = best.max(top);
+            bound[q] = best * (1.0 + 1e-9);
+        }
         df.bound = bound;
-        df.slack = math::exp(exponent.abs() * widest) * (1.0 + 1e-9);
         Ok(df)
+    }
+
+    /// Multiplies f and every table built on it by `scale`: the Hermite interpolants of `ln f` and
+    /// `ln n_f` shift by `ln scale`, which leaves their slopes as they were.
+    fn rescale(&mut self, scale: f64) {
+        let shift = math::ln(scale);
+        self.scale *= scale;
+        for f in &mut self.values {
+            *f *= scale;
+        }
+        for y in &mut self.log_f.y {
+            *y += shift;
+        }
+        for panel in &mut self.panel_f {
+            for f in panel {
+                *f *= scale;
+            }
+        }
+        for y in &mut self.log_density.y {
+            *y += shift;
+        }
+        self.inner.1 *= scale;
+    }
+
+    /// An envelope `coefficient × r^−slope` of the realised density at every radius up to
+    /// `radius` ly, as `(coefficient, slope)`: what the cells beside the black hole propose under
+    /// (P09.T27). Of two bounds it takes the one with the smaller integral over the ball of
+    /// `radius`:
+    ///
+    /// - the shape's cusp continued inward, `r^−γ₀` over the shape's integral, times f's scale,
+    ///   for a tracer cut at the core radius, whose f is positive at every energy, so that the cut
+    ///   only lowers the profile;
+    /// - `4π √2 √(R Ψ(R)) ∫ f dE × r^−½` for any tracer, because `n_f(r) ≤ 4π √(2Ψ(r)) ∫ f dE`
+    ///   and `r Ψ(r)` does not fall outward (its derivative is the potential's outer term).
+    #[must_use]
+    pub fn inner_envelope(
+        &self,
+        tracer: &TracerProfile,
+        profile: &CentreProfile,
+        radius: f64,
+    ) -> (f64, f64) {
+        let ball = |(c, g): (f64, f64)| c * math::powf(radius, 3.0 - g) / (3.0 - g);
+        let half = (
+            4.0 * core::f64::consts::PI
+                * 2.0_f64.sqrt()
+                * (radius * profile.psi(radius)).sqrt()
+                * self.energy_integral,
+            0.5,
+        );
+        if self.energies.len() < RADII {
+            return half;
+        }
+        let cusp = (
+            self.scale / tracer.shape_total(),
+            tracer.shape().inner_slope(),
+        );
+        if ball(cusp) <= ball(half) { cusp } else { half }
     }
 
     /// The energies of the grid, (km/s)², falling: `E_j = Ψ(r_j)`.
@@ -459,7 +643,8 @@ impl DistributionFunction {
     /// f at energy `e`, (km/s)²: zero above the cut and below the grid's least energy.
     #[must_use]
     pub fn value(&self, e: f64) -> f64 {
-        if e.is_nan() || e <= 0.0 || e > self.energies[0] || e < self.energies[RADII - 1] {
+        let last = self.energies.len() - 1;
+        if e.is_nan() || e <= 0.0 || e > self.energies[0] || e < self.energies[last] {
             return 0.0;
         }
         math::exp(self.log_f.eval(math::ln(e)))
@@ -472,12 +657,13 @@ impl DistributionFunction {
         reason = "energy, speed and the panel's symbols as in the module documentation"
     )]
     fn speed_integral(&self, psi_r: f64, g: impl Fn(f64) -> f64) -> f64 {
+        let last = self.energies.len() - 1;
         let top = psi_r.min(self.energies[0]);
-        if top.is_nan() || top <= self.energies[RADII - 1] {
+        if top.is_nan() || top <= self.energies[last] {
             return 0.0;
         }
         // The panel p with E_{p+1} < top ≤ E_p.
-        let (mut lo, mut hi) = (0, RADII - 1);
+        let (mut lo, mut hi) = (0, last);
         while hi - lo > 1 {
             let mid = lo + (hi - lo) / 2;
             if self.energies[mid] >= top {
@@ -496,7 +682,7 @@ impl DistributionFunction {
             let v = (2.0 * (psi_r - e)).max(0.0).sqrt();
             sum += GL16_WEIGHTS[n] * 0.5 * self.value(e) * v * g(v) * 2.0 * d * t;
         }
-        for q in p + 1..RADII - 1 {
+        for q in p + 1..last {
             for n in 0..16 {
                 let v = (2.0 * (psi_r - self.panel_energy[q][n])).sqrt();
                 sum += self.panel_weight[q][n] * self.panel_f[q][n] * v * g(v);
@@ -593,12 +779,13 @@ impl DistributionFunction {
         let r = (position[0] * position[0] + position[1] * position[1] + position[2] * position[2])
             .sqrt();
         let psi = profile.psi(r);
+        let last = self.energies.len() - 1;
         let top = psi.min(self.energies[0]);
-        if top.is_nan() || top <= self.energies[RADII - 1] {
+        if top.is_nan() || top <= self.energies[last] {
             return None;
         }
         // The bound at the energies up to `top`.
-        let (mut lo, mut hi) = (0, RADII - 1);
+        let (mut lo, mut hi) = (0, last);
         while hi - lo > 1 {
             let mid = lo + (hi - lo) / 2;
             if self.energies[mid] >= top {
@@ -607,7 +794,7 @@ impl DistributionFunction {
                 hi = mid;
             }
         }
-        let bound = self.bound[lo] * self.slack;
+        let bound = self.bound[lo];
         // 1 − w on (0, top ÷ Ψ]: u^{1/b} × (top ÷ Ψ).
         let span = top / psi;
         let exponent = self.beta - 1.0;
@@ -643,26 +830,33 @@ mod tests {
         (profile, df)
     }
 
-    /// P09.T24.b: the integral of f returns the profile to 10⁻⁴ from the core radius to the reach.
+    /// P09.T24.b: the integral of f returns the profile to 10⁻⁴ from the core radius to the reach,
+    /// integrated afresh and from its table.
     #[test]
     fn the_integral_of_f_returns_the_profile() {
         let (profile, df) = fixture();
-        let mut worst = (0.0_f64, 0.0);
+        let (mut direct_worst, mut table_worst) = ((0.0_f64, 0.0), (0.0_f64, 0.0));
         for i in 0..160 {
             let r = CORE_RADIUS.value() * math::exp(f64::from(i) * 0.074);
             if r > 128.0 {
                 break;
             }
             let want = profile.stars().density(r);
-            let direct = df.density_direct(&profile, r);
-            let table = df.density(r);
-            let err = (direct / want - 1.0).abs().max((table / want - 1.0).abs());
-            if err > worst.0 {
-                worst = (err, r);
+            let direct = (df.density_direct(&profile, r) / want - 1.0).abs();
+            let table = (df.density(r) / want - 1.0).abs();
+            if direct > direct_worst.0 {
+                direct_worst = (direct, r);
+            }
+            if table > table_worst.0 {
+                table_worst = (table, r);
             }
         }
-        eprintln!("worst relative error {:.3e} at {:.4} ly", worst.0, worst.1);
-        assert!(worst.0 < 1e-4, "{worst:?}");
+        eprintln!(
+            "worst relative error {:.3e} at {:.4} ly integrated, {:.3e} at {:.4} ly tabulated",
+            direct_worst.0, direct_worst.1, table_worst.0, table_worst.1
+        );
+        assert!(direct_worst.0 < 1e-4, "{direct_worst:?}");
+        assert!(table_worst.0 < 1e-4, "{table_worst:?}");
     }
 
     /// Inside the core the density falls as r^−½, and fewer than three of the Milky Way's systems

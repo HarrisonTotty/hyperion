@@ -345,7 +345,7 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
    field gives up a share for it. Its mass and break radius are plan 02's `NuclearClusterParams`,
    since the potential needs them. Reason: the brainstorm's seven shares sum to 100% of the drawn
    stellar mass and the nuclear cluster is not among them, while its mass model and its member count
-   (4–5 × 10⁷ systems "more") are given separately; carving it out of the nuclear disc instead would
+   (4–6 × 10⁷ systems "more", ruling 144.4) are given separately; carving it out of the nuclear disc instead would
    take 2–5% of that population, which the brainstorm nowhere asks for. The budget test treats it as
    an eighth budget, its mass ÷ the centre's own mean system mass. P09.T27 asserts that the fullest
    cell stays under the 8,192 index for every seed; if a heavy cluster breaks that, the parameter's
@@ -382,10 +382,17 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
     spherical profile, then draw a velocity, then pass the inclination and loss-cone marks. The
     profile's normalisation is divided by the marks' mean acceptance so that the cluster's mass
     comes out right. This wastes a third of the candidates and needs no Bessel function in the
-    bound.
+    bound. _Revised by ruling 144.5a (lane `centre09b`):_ the bound is the nearest corner's
+    profile times the angular factor's greatest value, `e^(−k/2) I₀(k/2) ÷ A` (×0.69 for the old
+    stars), I₀ once per class. Under it the inclination cannot be a rejection after the velocity,
+    so a candidate is thinned by its position's own angular factor (an I₀ per candidate and
+    flattened class) and the inclination mark draws the velocity's direction conditioned on it.
 14. **Dark remnants at the centre get distribution functions of their own**, one Eddington inversion
     per distinct profile (stars, black holes, the young inner disc), all in the same potential. The
-    young disc has no inner hole, because a hole has no isotropic equilibrium.
+    young disc has no inner hole, because a hole has no isotropic equilibrium. _Revised by ruling
+    144.6:_ four inversions, the young split into the clockwise disc and the isotropic young; the
+    disc's inner edge at 0.1 ly is its distribution function's energy cut, as the stars' r^−½ core
+    is, which leaves an r^−½ tail inside it and is an equilibrium.
 15. **`CentreModel` and `FeatureShares` are built with `Galaxy`.** Both are small and every query
     near the centre needs them. The build is benchmarked and must stay under 100 ms.
 16. **Feature-level lists are ordered by class.** Index 0 is member zero. From 1 upward come the
@@ -958,7 +965,9 @@ bench: that query cold, target under 20 ms.
 
 _Status (lane `centre09a`, 2026-09-29): T24.a–c, T25, T26 and T27 are built; see Risks, "Phase 6,
 T24–T27 as built", and the provisional findings after it. `resolve` now answers a centre ID;
-nothing else reads the centre until T28.b._
+nothing else reads the centre until T28.b. Lane `centre09b` (2026-09-29) applied ruling 144's
+points 1, 2, 4, 5a and 6–10 to the centre's own goldens; see Risks, "Ruling 144 as built". The
+windows below are ruling 144's._
 
 #### P09.T24 Profile and distribution function
 
@@ -966,9 +975,11 @@ nothing else reads the centre until T28.b._
   break near 10 ly and outer slope 3.5 (Schödel et al. 2014; Gallego-Cano et al. 2018), continued
   inward to 10⁻³ ly, then r^−½, truncated at the grid's reach of 128 ly; mass and break from
   `NuclearClusterParams`; enclosed mass in closed form by pieces; potential of the black hole plus
-  the cluster. Tests at Milky Way values: about 7,800 systems per cubic light-year at 3 ly under the
-  default mass function (9,000 under Kroupa's), 4–5 × 10⁷ systems, fewer than three inside 10⁻³ ly,
-  the stars outweigh the black hole near 10 ly.
+  the cluster. Tests at Milky Way values (ruling 144.2 and 144.4): ρ(1 pc) 1.2–1.8 × 10⁵ M☉ pc⁻³,
+  M(<1 pc) 0.8–1.2 × 10⁶ M☉, M(<3 pc) 6–10 × 10⁶ and M(<3.9 pc) 7–11 × 10⁶ (Schödel et al. 2018;
+  Chatzopoulos et al. 2015), 4–6 × 10⁷ systems at T27's own mean system mass, fewer than three
+  inside 10⁻³ ly, the stars outweigh the black hole near 10 ly; systems per cubic light-year at 3
+  ly printed.
 - **P09.T24.b Eddington inversion.** `DistributionFunction::invert(profile, potential)` on a
   logarithmic grid of 256 radii, with the substitution that removes the square-root singularity
   (Binney and Tremaine 2008, eq. 4.46). f must be non-negative everywhere: a returned error, not a
@@ -989,17 +1000,23 @@ Kepler pericentre about the black hole is inside about 2 au × (M_bh ÷ 4.3 × 1
 about 4 × 10⁻⁵. Inclination: accepted with probability exp(−k sin² i), k ≈ 0.84 for a flattening of
 0.7, then a share of the retrograde survivors have their velocity reversed, which keeps energy and
 sin² i. Both marks are integrals of the motion. The profile's normalisation is divided by the mean
-acceptance (design note 13), computed by a fixed quadrature. Tests: axis ratio 0.65–0.75 from a
-sample's second moments; net rotation of the sign of the galaxy's and of a magnitude within the
-range of Feldmeier et al. (2014); removed share within a factor of two of 4 × 10⁻⁵.
+acceptance (design note 13), computed by a fixed quadrature. Tests (ruling 144.7–8): isodensity
+axis ratio 0.65–0.75 inside 5 ly and projected isophote ratio 0.68–0.76 over 1–8 ly (the observed
+0.71 and 0.73 are both isodensity ratios; a sample's second moments inside a sphere read 0.91);
+net rotation of the sign of the galaxy's and 30–50 km/s in a slit along the plane (Feldmeier et
+al. 2014), at a reversal share of 0.8 (Chatzopoulos et al. 2015's F = 0.85 ± 0.15); removed share
+within a factor of two of 4 × 10⁻⁵.
 
 #### P09.T26 The centre's classes
 
 By the class device of P09.T8, with distribution functions per design note 14: old stars by band
-with ages from the centre's own distribution (mostly over 8 Gyr); a young few per cent on an inner
-disc (a class with large k and ages from −H to about 10 Myr); white dwarfs; neutron stars on the
+with ages from the centre's own distribution (Schödel et al. 2020: 80 / 15 / 3 / 1%, ruling
+144.10); a burst of 2.5 × 10⁴ M☉ 3–8 Myr ago, a third on the clockwise disc (n ∝ r⁻³ from an inner
+edge at 0.1 ly, k = 25 about the Milky Way's (i, Ω) = (130°, 96°)) and the rest isotropic, n ∝
+r^−2.1 (ruling 144.6); white dwarfs; neutron stars on the
 stellar profile, widened, with retention from the kick law against the local escape speed (1,100
-km/s at 0.1 ly, 210 at 10 ly) averaged over the profile, about a fifth; black holes on a slope of
+km/s at 0.1 ly, 210 at 10 ly) averaged over the profile, about a third (ruling 144.9: 0.30–0.40
+under Disberg and Mandel's log-normal kicks); black holes on a slope of
 1.75–2 with a break at half the stars', about nine tenths retained (Bahcall and Wolf 1976). Tests:
 10⁴–4 × 10⁴ black holes inside the central parsec (Hailey et al. 2018); retention figures to a
 third; the unretained are not generated here (they are in the bulge's displaced classes).
@@ -1010,9 +1027,11 @@ third; the unretained are not generated here (they are in the bulge's displaced 
 P09.T21 with the marks of P09.T25 after the class pick. `CentreMemberId`; the central black hole is
 member zero of the feature-level list, a `MemberRecord` with its mass from `GalaxyParams`.
 `CentreModel::as_global_entry()` gives plan 10 the first entry of its list. Plan 03's `resolve`
-dispatches `SystemIdKind::Centre` here. Tests: the fullest cell and band expects about 1,400
-candidates under the default mass function (1,700 under Kroupa's; under 8,192 for every seed); the
-innermost cell about eighty; every member's ID round-trips through `SystemId::from_raw` (levels
+dispatches `SystemIdKind::Centre` here. Tests: the fullest cell and band, under the flattened bound
+`e^(−k/2) I₀(k/2) ÷ A` (ruling 144.5a), expects the computed figure at the centre's own mean mass
+(Risks, "Ruling 144 as built"), and a typed headroom check says whether a seed's centre can pass
+8,192; the innermost cell against the model's own expectation of what it holds; every member's ID
+round-trips through `SystemId::from_raw` (levels
 0–11, no inner cell of 8–23); the black hole resolves from `0xF000_0007_0000_0000`; goldens of the
 hundred innermost members.
 
@@ -1319,7 +1338,8 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   function, with about 0.87 times Kroupa's systems per solar mass, so the centre's figures are
   scaled: about 7,800 systems per cubic light-year at 3 ly (T24.a), 1,400 candidates in the fullest
   cell and band and eighty in the innermost (T27), and 37,000 systems in r_full at a century (T29).
-  The cluster's 4–5 × 10⁷ members and every conclusion about the 8,192 index still hold.
+  The cluster's 4–5 × 10⁷ members and every conclusion about the 8,192 index still hold. _(T24.a's
+  and T27's figures are superseded by ruling 144; see "Ruling 144 as built".)_
 - **Where the shell window lives.** The brainstorm's order of attack puts "the shell test" with
   kicks and displaced objects, which is plan 08, while this plan's scope holds the supernova section
   in full. This plan owns `snr` and `claims`; if plan 08 has already built the window, P09.T15
@@ -2203,3 +2223,115 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Headroom (145.6)._ Re-run: unchanged, 734 clusters, two over the 2,000 target, the fullest
     cell 4,237 (a core, not a tail), the widest profile core 0.794 r_h. The remnants test at the
     0.50 helper: 5,397 pulsars (3 capped), 12,631 black holes, 0.218 core-collapsed.
+- **Ruling 144 as built (lane `centre09b`, 2026-09-29, on d5330c7 at `GENERATOR_VERSION` 15;
+  points 1, 2, 4, 5a and 6–10).** Only the centre's two unwired goldens move
+  (`galaxy/features/centre.golden`, `centre_members.golden`), re-blessed at 15, and `resolve` of a
+  centre ID; no tag is added and nothing wired moves (ruling 142.3's precedent). Files:
+  `features/centre/{mod,profile,df,marks,classes,members}.rs` and `benches/centre.rs`.
+  - _144.1, α = 10._ `BREAK_SHARPNESS` = 10 for the stars and the black holes' copy of the break;
+    `TracerShape::nuclear_cluster_with(params, α)` and
+    `CentreProfile::from_shape(shape, mass, black_hole)` keep α a parameter for the joint
+    revision. At α = 10 f dips near 8 ly, where Fritsch and Butland's monotone slopes for `ln f`
+    go flat and left 4.2 × 10⁻⁴ in the density's integral against T24.b's 10⁻⁴ (parabolic slopes
+    1.9 × 10⁻⁴): `ln f` now takes five-point slopes (the derivative of the Lagrange quartic through
+    the nearest nodes), and the sampler's bound is each energy panel's exact maximum of its cubic
+    (the extrema are a quadratic's roots) in place of the monotone interpolant's slack; `ln n_f`
+    takes the profile's exact slopes from the cut radius out. The integral now returns the
+    profile to 4.7 × 10⁻⁵ integrated and 4.5 × 10⁻⁵ tabulated.
+    `no_drawn_centre_fails_its_inversion` also inverts clusters of 10⁶, 2.5 × 10⁷ and 6 × 10⁷
+    M☉ (144.5b's cap) about black holes 0.76 and 1.5 dex either side of 4.3 × 10⁶ M☉ (±2σ and
+    ±4σ of the M–σ scatter): all positive.
+  - _144.2 and 144.4, T24.a's test._ `the_milky_way_s_cluster_has_the_observed_masses`: ρ(1 pc)
+    1.146 × 10⁵ M☉ pc⁻³, M(<1 pc) 8.47 × 10⁵, M(<3 pc) 5.37 × 10⁶, M(<3.9 pc) 7.60 × 10⁶, 78%
+    of the law inside 128 ly; 5.85 × 10⁷ systems at the classes' own mean of 0.423 M☉ (7.04 ×
+    10⁷ under Kroupa's at 0.351), 8,709 systems per cubic light-year at 3 ly (10,486 under
+    Kroupa's; printed, not tested), 2.13 inside 10⁻³ ly. **Two misses, pinned provisionally:**
+    M(<3 pc) is 31% under the ruled 6–10 × 10⁶ (held at 4.5–6 × 10⁶; the recorded miss, from the
+    22% of the mass beyond the reach), and ρ(1 pc) is 4.5% under the ruled 1.2 × 10⁵ floor (held
+    at 1.1–1.8 × 10⁵): α = 10 moves density from about 3 ly outward, as `prof.py` said, and
+    the research's 1.21 × 10⁵ was α = 4's. The joint revision's normalisation inside the reach
+    (×1.28) lifts both. The 5.85 × 10⁷ systems sit near the top of 4–6 × 10⁷.
+  - _144.4, plan 11._ The note on re-deriving the count with companions is in plan 11's Risks.
+  - _144.5a, the flattened bound._ `OrbitMarks` now holds an axis, k, the reversal share, the
+    inclination acceptance A (sixteen 32-node panels, which k = 25 needs) and the peak
+    `e^(−k/2) I₀(k/2)` (`galaxy::special::bessel_i0e`, once per class; ×(1 + 10⁻⁹)); the bound is
+    the nearest corner's density times the peak, ×0.686 for the old stars (1.163 ÷ A against
+    1.694) and ×0.114 for the disc (5.58 against 49). **A deviation the ruling did not foresee:**
+    under a bound below `1 ÷ A` the inclination cannot stay a rejection after the velocity,
+    because `exp(−k sin² i) ÷ g_max` exceeds one near the axis. So the placement's pick now
+    weighs each class by its position's own angular factor `g(θ) = e^(−k cos²θ) e^(−a) I₀(a)`
+    (an I₀ per candidate and flattened tracer), and the inclination mark draws the velocity's
+    direction conditioned on it: the speed is kept and the direction redrawn on `centre.marks`
+    (two words each) until the mark accepts, at most 4,096 times, then "no such system". The kept
+    direction of `L` about the position is the velocity's azimuth about the radius, independent
+    of the speed and of the angle on which the loss cone depends, so the three marks stay
+    independent (tested: the factor is the marks' mean over directions at four angles and both
+    k; the conditioned `cos² i` is the analytic one). `centre.marks` words: the mark, then
+    (direction, mark) per rejection, then the reversal's. The fullest cell and band now expects
+    2,199 candidates under the default mass function (3,008 under Kroupa's), band A at level 9
+    beside the x axis 16 ly out, at the classes' mean mass: pinned to 2% in
+    `the_fullest_cell_stays_under_the_index`.
+  - _144.5a, the overflow made visible._
+    `CentrePlacement::check_index_headroom() -> Result<(), ExceedCentreIndexError>`, plan 03's
+    rule for its own cells (the fullest cell's expectation
+    plus eight standard deviations under 8,192), and the clamp in `count_from_mean` now has a
+    debug assertion, as `candidate_count_from_bound` has. Why this form: the clamp keeps
+    resolving and generating in agreement and belongs to the generator version, so it stays; the
+    overflow is a property of the galaxy's drawn cluster, known before any member is generated,
+    so it is a typed error at that level rather than a `Result` on every cell's hot path; and a
+    debug assertion alone would be a reachable panic for the seeds that fail today. Whoever plays
+    a centre calls the check, as plan 04 calls plan 03's (T28.b decides where); nothing calls it
+    yet. `CentreModel::from_params` builds the centre without the galaxy, so the seed sweeps
+    build no potential. Over 16 seeds none fails (the heaviest, 6.3 × 10⁷ M☉, expects 5,512);
+    the slow `few_seeds_centres_overflow_their_index` finds **8 of 512 (1.6%) failing** (clusters
+    of 8.6 × 10⁷–1.5 × 10⁸ M☉), inside the research's 2%, and **4 of 512 (0.8%) whose fullest
+    cell expects 8,192 or more itself** (up to 13,298 for 1.5 × 10⁸ M☉), which clamp: a real
+    truncation for those galaxies until the joint revision's cap (144.5b). Pinned provisionally at
+    2% and 1%. Nothing wired moves meanwhile, since nothing plays a centre yet.
+  - _144.6, the young population._ Four tracers now (`CentreTracer::YoungIsotropic` added, and
+    `CentreTracer::index`, `marks`, `profile`). The burst is `BURST_SHARE` = 6 × 10⁻⁴ of the mass
+    formed, uniform over 3–8 Myr, a third on the disc: 2.75 × 10⁴ M☉ formed at Milky Way values
+    (1.73 × 10⁴ above 1 M☉), 2.52 × 10⁴ present, 1.19 × 10⁴ disc systems and 2.37 × 10⁴
+    isotropic. The disc: `young_disc_shape` r⁻³ (from r⁻² about 0.01 ly, only so its mass
+    converges) to a break at 0.5 ly to r⁻⁵, sharpness 4 (ours), cut at 0.1 ly by
+    `TracerProfile::with_cut`: the inversion takes the first grid node at or outside the cut,
+    0.1027 ly, finds f only from there down (only those energies must be positive), and scales f
+    so the realised density holds one. Its marks `OrbitMarks::young_disc()`: k = 25 about
+    `milky_way_disc_normal()`, Yelda's (130°, 96°) by Lu et al.'s eq. 8 (checked against
+    Paumard et al.'s own vector) through the galactic plane's position angle 31.40° at Sgr A* (the
+    IAU J2000 frame) and Wegg and Gerhard's bar angle of 27° for plan 01's +x: (−0.887, −0.325,
+    0.329), 70.8° from the galaxy's axis. **Findings:** the model has no Sun, so the bar angle
+    places the normal's azimuth, and every galaxy's disc takes the Milky Way's orientation, since
+    a per-galaxy draw with the fixture pinned needs a parameter in plan 02 (the joint revision's,
+    or later); and the transform puts the disc's `L` 71° from the galaxy's, partly co-rotating,
+    where the research note paraphrased Feldmeier et al. as "roughly opposite" (their §5 compares
+    line-of-sight patterns of old and young stars). The isotropic young: `young_isotropic_shape`
+    r^−2.1 to a break at 1.6 ly to r⁻⁵ (ours), no flattening. The cells beside the black hole
+    propose under `DistributionFunction::inner_envelope`: the cusp continued inward for a tracer
+    cut at the core radius, or `4π √2 √(R Ψ(R)) ∫ f dE r^−½` (as `n_f ≤ 4π √(2Ψ) ∫ f dE` and
+    `rΨ` does not fall outward), whichever holds fewer over the ball. The innermost cell proposes
+    42.5 candidates over all bands against the model's own expectation of 15.4
+    (`the_innermost_cell_holds_what_the_model_expects`, a quadrature over directions; held to
+    1–4 times), not the brainstorm's eighty. **Finding:** the isotropic young now dominate the
+    black hole's surroundings, since r^−2.1 is steeper than the old stars' 1.3: 73 of the hundred
+    innermost members (inside 2 ⁄ 256 ly) are theirs, 21 the old component's and 3 the disc's
+    (its r^−½ tail inside the edge). By an estimate from the shape (not a test), the isotropic
+    young put some 1,700 systems inside 0.13 ly (1″), a few per cent of them B stars, which is of
+    the order of the few dozen S-stars seen there; Do et al.'s slope, not re-checked, is the
+    input to confirm.
+  - _144.7, axis ratio._ The stated reason is corrected (the observations are isodensity and
+    isophote ratios; 0.91 is the sphere's sampling of a flattened cusp). Isodensity 0.700–0.7002
+    at 0.01–4.9 ly. **Projected: a miss beyond 6 ly, pinned provisionally:** 0.720, 0.721, 0.724,
+    0.729, 0.736, 0.746, 0.761 and 0.782 at 1–8 ly, against the ruled 0.68–0.76 over 1–8 ly; held
+    to 0.76 to 5 ly and 0.80 beyond, until the joint revision's optional k(E).
+  - _144.8, rotation._ 40.2 km/s in the slit, window 30–50.
+  - _144.9, neutron stars._ 0.354 retained (the quadrature's 0.364), window 0.30–0.40; black holes
+    0.851, 2.34 × 10⁴ inside 1 pc.
+  - _144.10, history._ `age_components()` is six: 80% at 10–13 Gyr, 15% at 2.5–3.5 Gyr, 3% at
+    150–500 Myr and 1% from −H to 150 Myr on the stars' profile, and the burst's two. Their shares
+    sum to 0.9906 and are divided by it, which the neutron-star count's check against the formed
+    remnants needed. Old stars are 78.5% of the present mass. The retention table's nodes above
+    500 km/s wait for its next regeneration, as ruled.
+  - _Cost._ Four inversions, not Design note 14's three; the bench is renamed
+    `profile_and_four_inversions` and was not run (the plan's 50 ms was for three, at 40–44 ms).
+    The centre's fast tests take 31–41 s at three threads on a shared machine (51 s before).

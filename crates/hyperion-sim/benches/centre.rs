@@ -1,8 +1,9 @@
 //! Benchmarks of plan 09's galactic centre (P09.T24). Targets are the plan's; a miss is a
 //! finding, not a CI failure: CI compiles these and never runs them.
 //!
-//! - The three Eddington inversions of Design note 14 together (stars, black holes, the young
-//!   disc), with the profile they share: under 50 ms.
+//! - The four Eddington inversions together (Design note 14's stars, black holes and young disc,
+//!   and ruling 144.6's isotropic young stars), with the profile they share: the plan's 50 ms was
+//!   set for three.
 //! - `CentreModel::new`, which adds the marks' acceptances and the classes: under 100 ms (Design
 //!   note 15's budget for building it with the galaxy).
 
@@ -18,7 +19,7 @@ fn centre(c: &mut Criterion) {
     let params = GalaxyParams::milky_way_like();
     let mut group = c.benchmark_group("centre");
     group.sample_size(20);
-    group.bench_function("profile_and_three_inversions", |b| {
+    group.bench_function("profile_and_four_inversions", |b| {
         b.iter(|| {
             let profile =
                 CentreProfile::from_params(black_box(&params)).expect("the fixture's profile");

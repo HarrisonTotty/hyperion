@@ -9,37 +9,44 @@
 //! # Placement (as P09.T21)
 //!
 //! Every cell is placed once per mass band. A band's density at local position `p` is the sum
-//! over its classes ([`CentreClasses`]) of `N_c n_t(|p|) ÷ A_t`: the class's count, its tracer's
-//! realised density (the integral of its distribution function, normalised to one) and the
-//! tracer's mean acceptance of the orbit marks (Design note 13), because members are placed under
-//! the spherical profile and thinned by the marks after their velocity. The realised densities
-//! fall with radius, so a cell's bound is the density at its corner nearest the black hole.
+//! over its classes ([`CentreClasses`]) of `N_c n_t(|p|) g_t(p) ÷ A_t`: the class's count, its
+//! tracer's realised density (the integral of its distribution function, normalised to one), its
+//! marks' angular factor at `p` and their mean acceptance (Design note 13; the marks module's
+//! documentation). The realised densities fall with radius, so a cell's bound is the density at
+//! its corner nearest the black hole times each class's greatest angular factor: the flattened
+//! bound of ruling 144.5a, `e^(−k/2) I₀(k/2) ÷ A` in place of `1 ÷ A`.
 //!
 //! The eight cells with a corner at the black hole cannot use that bound: the density rises as
 //! `r^−½` to the centre. There the candidates are proposed radially under `B r^−γ` over the
 //! octant's ball of radius `√3 e` and dropped outside the cell ([`CentreProposal::Cusp`]), γ the
-//! steepest inner slope of the band's tracers, which is exact because every tracer's realised
-//! density lies under its cusp continued inward, `n_t(r) ≤ r^−γ_t ÷ S_t` (`S_t` the shape's
-//! integral; the distribution function's cut only lowers it), and `r^−γ_t ≤ R^{γ−γ_t} r^−γ` inside
-//! the ball.
+//! steepest slope of the band's tracers' envelopes: each tracer's realised density lies under an
+//! envelope `c_t r^−γ_t` inside the ball ([`DistributionFunction::inner_envelope`]: its cusp
+//! continued inward, or for the young disc, cut at 0.1 ly, an `r^−½` one), and `r^−γ_t ≤
+//! R^{γ−γ_t} r^−γ` inside the ball.
 //!
 //! # A candidate
 //!
 //! Candidate `k` of a band in a cell, keyed by its member ID: its position (three uniforms of
 //! `member.position`, as a catalogue feature's), its class or its rejection (one mark of
 //! `member.accept` against the classes' cumulative odds over the bound), its velocity from its
-//! tracer's distribution function (`centre.velocity`), then its marks: the loss cone, the
-//! inclination and the reversal (`centre.marks`, P09.T25). A candidate the marks reject is "no
-//! such system". Then its star, as a feature member's (P09.T10): its age uniform in its component's
-//! span (`centre.age`), its primary's initial mass from the galaxy's mass function in the class's
-//! range below the turn-off at that age for a living star and above it for a white dwarf, and for
-//! a remnant class the redraws, attempt after attempt on `centre.mass` (six words each, as
-//! `member.mass`), until its remnant is of the class's kind with a kick below the local escape
-//! speed `√(2Ψ)`, a low-mode neutron star judged on its pair's systemic speed. Composition: the
-//! centre's [`CENTRE_FE_H`], no helium excess.
+//! tracer's distribution function (`centre.velocity`), then its marks (`centre.marks`, P09.T25):
+//! the inclination, which draws the velocity's direction conditioned on it, the reversal and the
+//! loss cone. A candidate the marks reject is "no such system". Then its star, as a feature
+//! member's (P09.T10): its age uniform in its component's span (`centre.age`), its primary's
+//! initial mass from the galaxy's mass function in the class's range below the turn-off at that
+//! age for a living star and above it for a white dwarf, and for a remnant class the redraws,
+//! attempt after attempt on `centre.mass` (six words each, as `member.mass`), until its remnant is
+//! of the class's kind with a kick below the local escape speed `√(2Ψ)`, a low-mode neutron star
+//! judged on its pair's systemic speed. Composition: the centre's [`CENTRE_FE_H`], no helium
+//! excess.
 //!
 //! The candidate count is a Poisson draw on `member.cell`, keyed by the member ID of the cell's
-//! candidate 0 in its band, clamped at the index's 8,192.
+//! candidate 0 in its band, clamped at the index's 8,192 with a debug assertion, as plan 03's
+//! cells are: the clamp keeps resolving and generating in agreement, and
+//! [`CentrePlacement::check_index_headroom`] says beforehand, as a typed error, whether a
+//! galaxy's centre can reach it (ruling 144.5a). Whoever plays a galaxy's centre calls the check,
+//! as plan 04 calls plan 03's; the joint revision's cap on the cluster's mass (ruling 144.5b)
+//! then makes it pass for every seed.
 //!
 //! # The black hole
 //!
@@ -66,7 +73,7 @@ use super::super::members::{ATTEMPT_WORDS, MAX_ATTEMPTS, remnant_fits, systemic_
 use super::super::nested::{NestedCell, NestedGrid};
 use super::classes::{CENTRE_FE_H, CentreClass, CentreClassKind, CentreTracer, age_components};
 use super::profile::REACH;
-use super::{CentreModel, TracerProfile};
+use super::{CentreModel, DistributionFunction};
 
 /// The width of the centre's finest cells: 1 ⁄ 256 ly (the brainstorm, "Dense features").
 pub const CENTRE_GRID_WIDTH: LightYears = LightYears::new(1.0 / 256.0);
@@ -78,8 +85,40 @@ pub const CENTRE_GRID_CELLS: u8 = 32;
 pub const CENTRE_GRID_LEVELS: u8 = 12;
 
 /// The relative margin of a cusp proposal over the classes' densities: the realised densities'
-/// tables lie within 10⁻⁴ of the profiles (P09.T24.b), which lie under their cusps.
+/// tables lie within 10⁻⁴ of the profiles (P09.T24.b), which lie under their envelopes.
 const CUSP_MARGIN: f64 = 1e-3;
+
+/// Standard deviations of a Poisson count the index must spare (plan 03, Design note 6).
+const HEADROOM_SIGMAS: f64 = 8.0;
+
+/// A galaxy's centre can draw more candidates in a cell than its index numbers (module
+/// documentation): its fullest cell's expected candidates plus eight standard deviations reach
+/// 8,192.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExceedCentreIndexError {
+    /// The fullest cell's expected candidates.
+    pub expected: f64,
+    /// Its band.
+    pub band: MassBand,
+    /// Its level.
+    pub level: u8,
+}
+
+impl core::fmt::Display for ExceedCentreIndexError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "the centre's fullest cell (band {:?}, level {}) expects {:.0} candidates, within \
+             eight standard deviations of its index's {}",
+            self.band,
+            self.level,
+            self.expected,
+            MemberSlot::INDEX_LIMIT
+        )
+    }
+}
+
+impl std::error::Error for ExceedCentreIndexError {}
 
 /// The centre's grid (module documentation).
 ///
@@ -223,6 +262,8 @@ struct BandClass {
     class: CentreClass,
     /// `N_c ÷ A_t`.
     weight: f64,
+    /// Its marks' greatest angular factor.
+    peak: f64,
 }
 
 /// The centre's grid and classes, ready to place members (module documentation).
@@ -263,6 +304,7 @@ impl<'a> CentrePlacement<'a> {
                 bands[c.band.index()].push(BandClass {
                     class: *c,
                     weight: c.expected / model.acceptance(c.tracer),
+                    peak: model.marks(c.tracer).peak_factor(),
                 });
             }
         }
@@ -286,21 +328,40 @@ impl<'a> CentrePlacement<'a> {
         self.model
     }
 
-    /// `band`'s density at `r` ly from the black hole, per cubic light-year, and each class's
+    /// `band`'s density at `at` (ly from the black hole), per cubic light-year, and each class's
     /// share of it in `weights` (cleared first): zero beyond the reach.
-    fn densities(&self, band: MassBand, r: f64, weights: &mut Vec<f64>) -> f64 {
+    fn densities(&self, band: MassBand, at: [f64; 3], weights: &mut Vec<f64>) -> f64 {
         weights.clear();
+        let radius = (at[0] * at[0] + at[1] * at[1] + at[2] * at[2]).sqrt();
+        let mut factors = [f64::NAN; 4];
         let mut total = 0.0;
-        for c in &self.bands[band.index()] {
-            let n = if r > REACH.value() {
+        for class in &self.bands[band.index()] {
+            let density = if radius > REACH.value() {
                 0.0
             } else {
-                c.weight * self.model.distribution(c.class.tracer).density(r)
+                let tracer = class.class.tracer;
+                let factor = &mut factors[tracer.index()];
+                if factor.is_nan() {
+                    *factor = self.model.marks(tracer).angular_factor(at);
+                }
+                class.weight * *factor * self.model.distribution(tracer).density(radius)
             };
-            weights.push(n);
-            total += n;
+            weights.push(density);
+            total += density;
         }
         total
+    }
+
+    /// `band`'s bound at `r` ly: every class's density there times its greatest angular factor;
+    /// zero beyond the reach.
+    fn bound_density(&self, band: MassBand, r: f64) -> f64 {
+        if r > REACH.value() {
+            return 0.0;
+        }
+        self.bands[band.index()]
+            .iter()
+            .map(|c| c.weight * c.peak * self.model.distribution(c.class.tracer).density(r))
+            .sum()
     }
 
     /// How `band`'s candidates are proposed in `cell` (module documentation).
@@ -308,23 +369,22 @@ impl<'a> CentrePlacement<'a> {
     pub fn proposal(&self, band: MassBand, cell: &LocalCell) -> CentreProposal {
         let near = cell.nearest_radius();
         if near > 0.0 {
-            let mut weights = Vec::new();
             return CentreProposal::Uniform {
-                bound: self.densities(band, near, &mut weights) * (1.0 + 1e-12),
+                bound: self.bound_density(band, near) * (1.0 + 1e-12),
             };
         }
         let classes = &self.bands[band.index()];
-        let slope = classes
-            .iter()
-            .map(|c| shape_of(self.model, c.class.tracer).shape().inner_slope())
-            .fold(0.0_f64, f64::max);
         let far = (3.0 * cell.edge * cell.edge).sqrt();
+        let envelopes: Vec<(f64, f64)> = classes
+            .iter()
+            .map(|c| envelope_of(self.model, c.class.tracer, far))
+            .collect();
+        let slope = envelopes.iter().map(|e| e.1).fold(0.0_f64, f64::max);
         let factor: f64 = classes
             .iter()
-            .map(|c| {
-                let tracer = shape_of(self.model, c.class.tracer);
-                let own = tracer.shape().inner_slope();
-                c.weight / tracer.shape_total() * math::powf(far, slope - own)
+            .zip(&envelopes)
+            .map(|(c, &(coefficient, own))| {
+                c.weight * c.peak * coefficient * math::powf(far, slope - own)
             })
             .sum();
         CentreProposal::Cusp {
@@ -362,6 +422,28 @@ impl<'a> CentrePlacement<'a> {
     pub fn candidate_count(&self, galaxy: &Galaxy, band: MassBand, cell: NestedCell) -> u16 {
         let mean = self.expected_candidates(band, cell);
         count_from_mean(galaxy, self.member_id(band, cell, 0), mean)
+    }
+
+    /// Checks that no cell of the centre can draw more candidates than its index numbers: the
+    /// fullest cell's expected candidates ([`peak_candidates`](Self::peak_candidates)) plus eight
+    /// standard deviations stay under 8,192, plan 03's rule for its own cells (module
+    /// documentation).
+    ///
+    /// # Errors
+    ///
+    /// [`ExceedCentreIndexError`] with the fullest cell's band, level and expected candidates if
+    /// they do not.
+    pub fn check_index_headroom(&self) -> Result<(), ExceedCentreIndexError> {
+        let (expected, band, cell) = self.peak_candidates();
+        if expected + HEADROOM_SIGMAS * expected.sqrt() < f64::from(MemberSlot::INDEX_LIMIT) {
+            Ok(())
+        } else {
+            Err(ExceedCentreIndexError {
+                expected,
+                band,
+                level: cell.level(),
+            })
+        }
     }
 
     /// Candidate `index` of `band` in `cell`, or `None` if the thinning, the marks or its draw
@@ -404,7 +486,7 @@ impl<'a> CentrePlacement<'a> {
         let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
         let mark = Stream::open(seed, tags::MEMBER_ACCEPT, key).mark();
         let mut weights = Vec::with_capacity(self.bands[band.index()].len());
-        self.densities(band, r, &mut weights);
+        self.densities(band, [p.x, p.y, p.z], &mut weights);
         let picked = pick(mark, &weights, bound)?;
         let class = self.bands[band.index()][picked].class;
         let df = self.model.distribution(class.tracer);
@@ -413,11 +495,12 @@ impl<'a> CentrePlacement<'a> {
         let mut velocity_stream = Stream::open(seed, tags::CENTRE_VELOCITY, key);
         let velocity = df.draw_velocity(profile, at, &mut velocity_stream)?;
         let mut marks = Stream::open(seed, tags::CENTRE_MARKS, key);
-        let velocity =
-            class
-                .tracer
-                .marks()
-                .apply(self.model.loss_cone(), at, velocity, &mut marks)?;
+        let velocity = self.model.marks(class.tracer).apply(
+            self.model.loss_cone(),
+            at,
+            velocity,
+            &mut marks,
+        )?;
         let (primary, attempt, age) =
             draw_star(galaxy, &class, system, profile.escape_speed(r).value())?;
         let record = SystemRecord::from_parts(
@@ -517,9 +600,11 @@ fn black_hole_of(mass: SolarMasses) -> CentreMemberRecord {
     }
 }
 
-/// The tracer profile of `tracer` in `model`.
-fn shape_of(model: &CentreModel, tracer: CentreTracer) -> &TracerProfile {
-    model.tracer_profile(tracer)
+/// The envelope of `tracer`'s realised density in `model` inside `radius` ly
+/// ([`DistributionFunction::inner_envelope`]).
+fn envelope_of(model: &CentreModel, tracer: CentreTracer, radius: f64) -> (f64, f64) {
+    let df: &DistributionFunction = model.distribution(tracer);
+    df.inner_envelope(model.tracer_profile(tracer), model.profile(), radius)
 }
 
 /// The class a mark picks by cumulative odds over `bound`, or `None` for rejection.
@@ -608,13 +693,21 @@ fn draw_star(
 }
 
 /// The count of a cell whose candidate 0 is `first` and whose mean is `mean`, clamped at the
-/// index.
+/// index (module documentation).
+///
+/// # Panics
+///
+/// In debug builds, if the draw passes the index, which
+/// [`CentrePlacement::check_index_headroom`] rules out for a galaxy that passes it.
 fn count_from_mean(galaxy: &Galaxy, first: CentreMemberId, mean: f64) -> u16 {
     let word = SystemId::from(first).raw();
     let drawn = Stream::open(galaxy.seed(), tags::MEMBER_CELL, ObjectKey::cell(word)).poisson(mean);
     let limit = MemberSlot::INDEX_LIMIT;
-    // No debug assertion, unlike a catalogue feature's cells: the heaviest drawn clusters come
-    // within eight standard deviations of the index (the plan's Risks), and the clamp is the rule.
+    debug_assert!(
+        drawn <= u64::from(limit),
+        "a centre cell drew {drawn} candidates on a mean of {mean}, past its index's {limit}: \
+         check_index_headroom refuses this galaxy's centre"
+    );
     u16::try_from(drawn.min(u64::from(limit))).expect("a count clamped at 8,192 fits in u16")
 }
 
@@ -700,56 +793,115 @@ mod tests {
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
 
+    /// The fullest cell's expected candidates at Milky Way values (ruling 144.5a), under the
+    /// default mass function and Kroupa's.
+    const FULLEST_CHABRIER: f64 = 2_199.0;
+    const FULLEST_KROUPA: f64 = 3_008.0;
+
     fn innermost(placement: &CentrePlacement<'_>) -> NestedCell {
         placement.grid().cell(0, [16, 16, 16]).unwrap()
     }
 
-    /// P09.T27: the fullest cell and band expects about 1,400 candidates under the default mass
-    /// function (1,700 under Kroupa's) and the innermost cell about eighty (the brainstorm,
-    /// "Dense features"). Under the spherical bound divided by the marks' acceptance (Design note
-    /// 13, 0.59) that is 1,400 ÷ 0.59 (1,700 ÷ 0.59), held provisionally to a factor of 1.5 (the
-    /// plan's Risks: the class device's mean system mass moves it); the innermost cell is printed
-    /// (its candidates are the young disc's, a finding); under 8,192 with eight standard
-    /// deviations always.
+    /// P09.T27 and ruling 144.5a: the fullest cell and band, under the flattened bound, at the
+    /// centre's own mean system mass (ruling 144.4), expects the brainstorm's figures as
+    /// re-derived for them (`FULLEST_CHABRIER` and `FULLEST_KROUPA`, to 2%), under 8,192 with
+    /// eight standard deviations to spare.
     #[test]
     fn the_fullest_cell_stays_under_the_index() {
-        for kind in [MassFunctionKind::Chabrier, MassFunctionKind::Kroupa] {
+        let mut misses = Vec::new();
+        for (kind, want) in [
+            (MassFunctionKind::Chabrier, FULLEST_CHABRIER),
+            (MassFunctionKind::Kroupa, FULLEST_KROUPA),
+        ] {
             let params = GalaxyParamsBuilder::new()
                 .mass_function(kind)
                 .build()
                 .unwrap();
-            let galaxy = Galaxy::from_params(crate::Seed::new(0x0927), params).unwrap();
-            let model = CentreModel::new(&galaxy).unwrap();
+            let model = CentreModel::from_params(&params).unwrap();
             let placement = CentrePlacement::new(&model);
             let (peak, band, cell) = placement.peak_candidates();
-            let inner = innermost(&placement);
-            let (inner_band, inner_expected) = MassBand::ALL
-                .iter()
-                .map(|&b| (b, placement.expected_candidates(b, inner)))
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-                .unwrap();
             let local = placement.grid().local_cell(cell);
-            let acceptance = model.acceptance(CentreTracer::Stars);
+            let marks = model.marks(CentreTracer::Stars);
             eprintln!(
                 "{kind:?}: fullest {peak:.1} in band {band:?}, level {} cell {:?} (nearest {:.3} \
-                 ly); innermost {inner_expected:.1} in band {inner_band:?}; stars' acceptance \
-                 {acceptance:.4}; class mean mass {:.4}",
+                 ly); stars' acceptance {:.4}, peak factor {:.4}; class mean mass {:.4}",
                 cell.level(),
                 cell.cell(),
                 local.nearest_radius(),
+                model.acceptance(CentreTracer::Stars),
+                marks.peak_factor(),
                 model.classes().mean_system_mass().value()
             );
-            let want = match kind {
-                MassFunctionKind::Chabrier => 1_400.0,
-                MassFunctionKind::Kroupa => 1_700.0,
-            } / acceptance;
-            assert!(peak + 8.0 * peak.sqrt() < 8_192.0, "{peak}");
-            assert!(
-                (want / 1.5..=want * 1.5).contains(&peak),
-                "{peak} against {want}"
-            );
-            assert!(inner_expected + 8.0 * inner_expected.sqrt() < 8_192.0);
+            assert_eq!(placement.check_index_headroom(), Ok(()));
+            misses.push((kind, peak, want));
         }
+        for (kind, peak, want) in misses {
+            assert!(
+                (peak / want - 1.0).abs() < 0.02,
+                "{kind:?}: {peak} against {want}"
+            );
+        }
+    }
+
+    /// Ruling 144.6: the innermost cell's candidates, band by band, against the model's own
+    /// expectation of what the cell holds, `Σ N_c ∫ n_t g_t dV ÷ A_t`, by a quadrature over
+    /// directions from the black hole (32 × 32 nodes a panel, 4 × 4 panels over the octant) of
+    /// each tracer's realised share within the ray's exit from the cell: no fewer, since the
+    /// proposal bounds the density, and at most four times as many.
+    #[test]
+    fn the_innermost_cell_holds_what_the_model_expects() {
+        use crate::galaxy::quad::gl32;
+        let model = milky_way_centre();
+        let placement = CentrePlacement::new(model);
+        let cell = innermost(&placement);
+        let edge = placement.grid().local_cell(cell).edge;
+        let half_pi = 0.5 * core::f64::consts::PI;
+        let (mut total_proposed, mut total_expected) = (0.0, 0.0);
+        for band in MassBand::ALL {
+            let proposed = placement.expected_candidates(band, cell);
+            let classes = &placement.bands[band.index()];
+            let at = |mu: f64, phi: f64| {
+                let sine = (1.0 - mu * mu).max(0.0).sqrt();
+                let (sin_p, cos_p) = math::sin_cos(phi);
+                let direction = [sine * cos_p, sine * sin_p, mu];
+                let exit = edge / direction[0].max(direction[1]).max(direction[2]);
+                classes
+                    .iter()
+                    .map(|class| {
+                        let tracer = class.class.tracer;
+                        class.weight
+                            * model.marks(tracer).angular_factor(direction)
+                            * model.distribution(tracer).fraction_within(exit)
+                    })
+                    .sum::<f64>()
+                    / (4.0 * core::f64::consts::PI)
+            };
+            let mut expected = 0.0;
+            for row in 0..4 {
+                for column in 0..4 {
+                    let (mu0, phi0) = (f64::from(row) / 4.0, half_pi * f64::from(column) / 4.0);
+                    expected += gl32(
+                        |mu| gl32(|phi| at(mu, phi), phi0, phi0 + half_pi / 4.0),
+                        mu0,
+                        mu0 + 0.25,
+                    );
+                }
+            }
+            eprintln!("innermost, band {band:?}: {proposed:.2} proposed, {expected:.2} expected");
+            if expected > 0.0 {
+                assert!(
+                    proposed >= expected * (1.0 - 1e-3),
+                    "{band:?}: {proposed} {expected}"
+                );
+                assert!(
+                    proposed <= 4.0 * expected,
+                    "{band:?}: {proposed} {expected}"
+                );
+            }
+            total_proposed += proposed;
+            total_expected += expected;
+        }
+        eprintln!("innermost: {total_proposed:.1} proposed, {total_expected:.1} expected");
     }
 
     /// The peak's search along the axes finds the largest count of a whole level.
@@ -771,31 +923,68 @@ mod tests {
         assert!((best - peak).abs() <= 1e-12 * peak, "{best} {peak}");
     }
 
-    /// P09.T27: under 8,192 for every seed of a sweep. Provisional (the plan's Risks): the plan
-    /// asks for eight standard deviations to spare, which one seed in sixteen misses at
-    /// `GENERATOR_VERSION` 15; the margin is printed.
+    /// The fullest cells of `seeds` drawn galaxies, and how many fail the index's headroom check
+    /// (plus eight standard deviations) and how many would clamp (the expectation itself at or
+    /// past 8,192).
+    fn sweep_fullest_cells(seeds: impl IntoIterator<Item = u64>) -> (u32, u32, u32) {
+        let (mut n, mut failing, mut clamping) = (0, 0, 0);
+        let mut worst = (0.0_f64, 0);
+        for s in seeds {
+            let params = GalaxyParams::from_seed(
+                crate::Seed::new(0x0927_0000 | s),
+                MassFunctionKind::default(),
+            );
+            let cluster = params.nuclear_cluster().mass().value();
+            let model = CentreModel::from_params(&params).unwrap();
+            let placement = CentrePlacement::new(&model);
+            let (peak, band, cell) = placement.peak_candidates();
+            let refused = placement.check_index_headroom().is_err();
+            eprintln!(
+                "seed {s}: cluster {cluster:.3e} M☉, fullest {peak:.0} (+8σ {:.0}) in {band:?} at \
+                 level {}{}",
+                peak + 8.0 * peak.sqrt(),
+                cell.level(),
+                if refused { ", refused" } else { "" }
+            );
+            n += 1;
+            failing += u32::from(refused);
+            clamping += u32::from(peak >= f64::from(MemberSlot::INDEX_LIMIT));
+            if peak > worst.0 {
+                worst = (peak, s);
+            }
+        }
+        eprintln!(
+            "{failing} of {n} seeds fail the headroom check, {clamping} expect 8,192 or more; \
+             worst {worst:?}"
+        );
+        (n, failing, clamping)
+    }
+
+    /// P09.T27 and ruling 144.5a: the headroom check over 16 drawn seeds. None of these fails at
+    /// `GENERATOR_VERSION` 15 under the flattened bound; the slow sweep counts the share.
     #[test]
     fn no_seed_s_centre_overflows_its_index() {
-        let mut worst = (0.0_f64, 0);
-        for n in 0..16_u64 {
-            let seed = crate::Seed::new(0x0927_0000 | n);
-            let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
-            let cluster = params.nuclear_cluster().mass().value();
-            let galaxy = Galaxy::from_params(seed, params).unwrap();
-            let model = CentreModel::new(&galaxy).unwrap();
-            let (peak, band, cell) = CentrePlacement::new(&model).peak_candidates();
-            eprintln!(
-                "seed {n}: cluster {cluster:.3e} M☉, fullest {peak:.0} (+8σ {:.0}) in {band:?} at \
-                 level {}",
-                peak + 8.0 * peak.sqrt(),
-                cell.level()
-            );
-            if peak > worst.0 {
-                worst = (peak, n);
-            }
-            assert!(peak < 8_192.0, "seed {n}: {peak}");
-        }
-        eprintln!("worst {worst:?}");
+        let (_, failing, clamping) = sweep_fullest_cells(0..16);
+        assert_eq!((failing, clamping), (0, 0));
+    }
+
+    /// Ruling 144.5a: the share of 512 drawn seeds whose centres fail the headroom check, which the
+    /// joint revision's cap on the cluster's mass (144.5b) takes to zero. Provisional: at most 2%,
+    /// the research's estimate before the flattened bound (8 of 512 at `GENERATOR_VERSION` 15),
+    /// and at most 1% whose fullest cell expects 8,192 or more itself (4 of 512, clusters of 1.0–1.5
+    /// × 10⁸ M☉, which clamp).
+    #[test]
+    #[ignore = "slow: 512 centres, three minutes in the slow-test profile"]
+    fn few_seeds_centres_overflow_their_index() {
+        let (n, failing, clamping) = sweep_fullest_cells(16..528);
+        assert!(
+            f64::from(failing) <= 0.02 * f64::from(n),
+            "{failing} of {n}"
+        );
+        assert!(
+            f64::from(clamping) <= 0.01 * f64::from(n),
+            "{clamping} of {n}"
+        );
     }
 
     /// P09.T27: every member's ID round-trips through plan 01's decode, at every level; a

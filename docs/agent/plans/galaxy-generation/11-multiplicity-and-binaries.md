@@ -883,7 +883,7 @@ tables must keep that under one in ten, which a test counts.
   brainstorm's "about 10", and the realised counts of ten seeds pass
   `hyperion_testkit::stats::assert_poisson_count` against it.
 - **P11.T8.e The centre's feature-level index.** Plan 09 flags it and the arithmetic bears it out:
-  the index under the spare band value is 13 bits, 8,192 members, and a nuclear cluster of 4–5 × 10⁷
+  the index under the spare band value is 13 bits, 8,192 members, and a nuclear cluster of 4–6 × 10⁷
   systems at the galaxy-wide share of 10⁻⁴ expects 2,400–6,000 accreting white dwarfs before any
   allowance for its density or for thinning. Add `check_feature_list_headroom(galaxy)`, called
   beside plan 03's `check_index_headroom`: the expected candidates of all classes on a feature's
@@ -2135,3 +2135,17 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     the cap (0077 and 0911 did). Over ruling 129.4's golden, 132.3's end of the main sequence
     alone moves 248 (every carried main sequence that ends is handed on at τ = 1 exactly), the
     limit on transfer 83 more, and on wind accretion 88.
+- **The centre's members gain companions here, and their count must be re-derived (ruling 144.4;
+  lane `centre09b`, 2026-09-29; nothing moves now).** Plan 09's centre counts its members by the
+  class device at their own present mass with no companions (P09.T26–T27): about 5.8 × 10⁷
+  systems at a mean of 0.42 M☉ for the Milky Way's 2.5 × 10⁷ M☉, against 4.2 × 10⁷ at the nuclear
+  disc's 0.585 M☉, which counts companions. That is right while members have none. When this plan
+  gives centre members companions, it must re-derive the count from the cluster's mass with the
+  companions included, or the cluster's mass grows by the companions' (×1.38 at the field's
+  multiplicity). The field's multiplicity is wrong there anyway: the hard–soft boundary is
+  `G m ÷ σ²` ≈ 0.1 au at σ ≈ 100 km/s, so nearly every binary is soft, and at 10⁵ M☉ pc⁻³ (about
+  1 pc) evaporation (Binney and Tremaine 2008, §7.5.7, eq. 7.173) takes about 3 Gyr at 1 au, 0.3
+  Gyr at 10 au and 30 Myr at 100 au, while at 10 pc a 10 au pair lasts a Hubble time. So inside
+  about 2 pc companions wider than about 10 au are ionised, and outside most survive; the eventual
+  count lies between 4.2 and 5.8 × 10⁷, nearer the lower by mass. The brainstorm's figure is now
+  "4–6 × 10⁷" to cover both.

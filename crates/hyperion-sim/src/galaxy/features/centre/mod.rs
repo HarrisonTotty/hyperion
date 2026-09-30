@@ -5,8 +5,9 @@
 //! The cluster is a budget of its own (Design note 5): its mass and break are plan 02's
 //! [`NuclearClusterParams`](crate::galaxy::params::NuclearClusterParams), and its black hole is
 //! the galaxy's. [`CentreProfile`] holds the stars' profile and the potential of the two
-//! ([`profile`]); one [`DistributionFunction`] per distinct profile (stars, black holes and the
-//! young inner disc, Design note 14) is found by Eddington inversion in that potential ([`df`]);
+//! ([`profile`]); one [`DistributionFunction`] per distinct profile (stars, black holes, the young
+//! clockwise disc and the isotropic young stars: Design note 14's three and ruling 144.6's split
+//! of the young) is found by Eddington inversion in that potential ([`df`]);
 //! [`OrbitMarks`] and [`LossCone`] thin the candidates after their velocity ([`marks`]); and
 //! [`CentreClasses`] says what the cluster holds and on which profile ([`classes`]).
 //!
@@ -25,13 +26,16 @@ pub mod testing;
 pub use classes::{CentreClass, CentreClassKind, CentreClasses, CentreTracer};
 pub use df::{DistributionFunction, EnergyGrid};
 pub use marks::{LossCone, OrbitMarks};
+pub use members::ExceedCentreIndexError;
 pub use profile::{BuildCentreError, CentreProfile, SlopeBreak, TracerProfile, TracerShape};
 
 use crate::galaxy::Galaxy;
+use crate::galaxy::imf::MassFunction;
+use crate::galaxy::params::GalaxyParams;
 use crate::units::{LightYears, SolarMasses};
 
-/// The galactic centre: its profile, its three distribution functions, its loss cone and its
-/// classes (module documentation).
+/// The galactic centre: its profile, its four distribution functions and their marks, its loss
+/// cone and its classes (module documentation).
 ///
 /// # Examples
 ///
@@ -50,10 +54,11 @@ use crate::units::{LightYears, SolarMasses};
 #[derive(Debug, Clone, PartialEq)]
 pub struct CentreModel {
     profile: CentreProfile,
-    tracers: [TracerProfile; 3],
-    distributions: [DistributionFunction; 3],
+    tracers: [TracerProfile; 4],
+    distributions: [DistributionFunction; 4],
+    marks: [OrbitMarks; 4],
     loss_cone: LossCone,
-    acceptance: [f64; 3],
+    acceptance: [f64; 4],
     classes: CentreClasses,
 }
 
@@ -66,62 +71,85 @@ impl CentreModel {
     /// has no isotropic distribution function in the potential (P09.T24.b), which no galaxy the
     /// builder allows does (`no_drawn_centre_fails_its_inversion`).
     pub fn new(galaxy: &Galaxy) -> Result<Self, BuildCentreError> {
-        let profile = CentreProfile::from_params(galaxy.params())?;
+        Self::from_parts(galaxy.params(), galaxy.mass_function())
+    }
+
+    /// The centre of a galaxy of `params`, without building the galaxy: what [`new`](Self::new)
+    /// builds for a galaxy of these parameters, bit for bit, since both read the parameters' mass
+    /// function.
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    pub fn from_params(params: &GalaxyParams) -> Result<Self, BuildCentreError> {
+        let imf = params.mass_function().to_mass_function();
+        Self::from_parts(params, imf.as_ref())
+    }
+
+    fn from_parts(
+        params: &GalaxyParams,
+        mass_function: &dyn MassFunction,
+    ) -> Result<Self, BuildCentreError> {
+        let profile = CentreProfile::from_params(params)?;
         let tracers = Self::tracers(&profile);
         let distributions = Self::invert_tracers(&profile, &tracers)?;
         let loss_cone = LossCone::new(profile.black_hole());
+        let orbit_marks = CentreTracer::ALL.map(CentreTracer::marks);
         let acceptance = std::array::from_fn(|i| {
-            marks::mean_acceptance(
-                &CentreTracer::ALL[i].marks(),
-                &loss_cone,
-                &distributions[i],
-                &profile,
-            )
+            marks::mean_acceptance(&orbit_marks[i], &loss_cone, &distributions[i], &profile)
         });
-        let classes = CentreClasses::new(&profile, galaxy.mass_function());
+        let classes = CentreClasses::new(&profile, mass_function);
         Ok(Self {
             profile,
             tracers,
             distributions,
+            marks: orbit_marks,
             loss_cone,
             acceptance,
             classes,
         })
     }
 
-    /// The three distribution functions of `profile`, in [`CentreTracer::ALL`]'s order: the
+    /// The four distribution functions of `profile`, in [`CentreTracer::ALL`]'s order: the
     /// inversions Design note 14 benchmarks together.
     ///
     /// # Errors
     ///
     /// [`BuildCentreError::NegativeDistribution`] if a profile has none.
-    pub fn invert(profile: &CentreProfile) -> Result<[DistributionFunction; 3], BuildCentreError> {
+    pub fn invert(profile: &CentreProfile) -> Result<[DistributionFunction; 4], BuildCentreError> {
         Self::invert_tracers(profile, &Self::tracers(profile))
     }
 
-    /// The three tracers' profiles, in [`CentreTracer::ALL`]'s order.
-    fn tracers(profile: &CentreProfile) -> [TracerProfile; 3] {
-        [
-            profile.stars().clone(),
-            TracerProfile::new(classes::black_hole_shape()),
-            TracerProfile::new(classes::young_disc_shape()),
-        ]
+    /// The four tracers' profiles, in [`CentreTracer::ALL`]'s order.
+    fn tracers(profile: &CentreProfile) -> [TracerProfile; 4] {
+        CentreTracer::ALL.map(|t| t.profile(profile.stars()))
     }
 
     /// The distribution functions of `tracers` on one grid of `profile`'s potential.
     fn invert_tracers(
         profile: &CentreProfile,
-        tracers: &[TracerProfile; 3],
-    ) -> Result<[DistributionFunction; 3], BuildCentreError> {
+        tracers: &[TracerProfile; 4],
+    ) -> Result<[DistributionFunction; 4], BuildCentreError> {
         let grid = EnergyGrid::new(profile);
         let on = |tracer: &TracerProfile| DistributionFunction::invert_on(&grid, tracer, profile);
-        Ok([on(&tracers[0])?, on(&tracers[1])?, on(&tracers[2])?])
+        Ok([
+            on(&tracers[0])?,
+            on(&tracers[1])?,
+            on(&tracers[2])?,
+            on(&tracers[3])?,
+        ])
     }
 
     /// The profile of `tracer`, normalised to one.
     #[must_use]
     pub fn tracer_profile(&self, tracer: CentreTracer) -> &TracerProfile {
-        &self.tracers[tracer_index(tracer)]
+        &self.tracers[tracer.index()]
+    }
+
+    /// The marks of `tracer`'s members.
+    #[must_use]
+    pub fn marks(&self, tracer: CentreTracer) -> &OrbitMarks {
+        &self.marks[tracer.index()]
     }
 
     /// The stars' profile and the potential.
@@ -133,14 +161,14 @@ impl CentreModel {
     /// The distribution function of `tracer`.
     #[must_use]
     pub fn distribution(&self, tracer: CentreTracer) -> &DistributionFunction {
-        &self.distributions[tracer_index(tracer)]
+        &self.distributions[tracer.index()]
     }
 
     /// The share of `tracer`'s candidates its marks accept, which divides its placement density
     /// (Design note 13).
     #[must_use]
     pub fn acceptance(&self, tracer: CentreTracer) -> f64 {
-        self.acceptance[tracer_index(tracer)]
+        self.acceptance[tracer.index()]
     }
 
     /// The loss cone.
@@ -174,21 +202,11 @@ impl CentreModel {
     }
 }
 
-/// `tracer`'s index in [`CentreTracer::ALL`].
-const fn tracer_index(tracer: CentreTracer) -> usize {
-    match tracer {
-        CentreTracer::Stars => 0,
-        CentreTracer::BlackHoles => 1,
-        CentreTracer::YoungDisc => 2,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::GENERATOR_VERSION;
     use crate::Seed;
-    use crate::galaxy::params::GalaxyParams;
     use crate::id::SystemId;
     use crate::rng::{ObjectKey, Stream, tags};
     use hyperion_testkit::golden;
@@ -212,13 +230,18 @@ mod tests {
         w.f64("loss cone", model.loss_cone_radius().value());
         for tracer in CentreTracer::ALL {
             let df = model.distribution(tracer);
-            for j in [0, 32, 64, 128, 192, 254] {
+            let last = df.values().len() - 1;
+            for j in [0, 32, 64, 128, 192, last] {
                 w.f64(&format!("{tracer:?} f[{j}]"), df.values()[j]);
             }
             for r in [1e-5, 0.01, 1.0, 30.0] {
                 w.f64(&format!("{tracer:?} density({r})"), df.density(r));
             }
             w.f64(&format!("{tracer:?} acceptance"), model.acceptance(tracer));
+            w.f64(
+                &format!("{tracer:?} peak factor"),
+                model.marks(tracer).peak_factor(),
+            );
             for n in 0..4_u64 {
                 let position = [0.3, -0.2 * f64::from(u32::try_from(n).unwrap()), 0.1];
                 // Feature-level members 1–4 of the centre stand in for P09.T27's members.
@@ -226,7 +249,9 @@ mod tests {
                 let mut s = Stream::open(Seed::new(9), tags::CENTRE_VELOCITY, key);
                 let v = df.draw_velocity(p, position, &mut s).unwrap();
                 let mut m = Stream::open(Seed::new(9), tags::CENTRE_MARKS, key);
-                let kept = tracer.marks().apply(model.loss_cone(), position, v, &mut m);
+                let kept = model
+                    .marks(tracer)
+                    .apply(model.loss_cone(), position, v, &mut m);
                 for (axis, c) in ["x", "y", "z"].iter().zip(v) {
                     w.f64(&format!("{tracer:?} v{n}.{axis}"), c);
                 }
@@ -242,8 +267,11 @@ mod tests {
         golden!("galaxy/features/centre", w.as_str());
     }
 
-    /// P09.T24.b: no drawn galaxy's centre fails its inversions (f positive at every node, for
-    /// every tracer), over 64 seeds.
+    /// P09.T24.b and ruling 144.1: no drawn galaxy's centre fails its inversions (f positive at
+    /// every node, for every tracer), over 64 seeds; nor does a centre at the extreme black hole
+    /// to cluster ratios the draws allow in practice: black holes 1.5 dex either side of the
+    /// Milky Way's (±4σ of the M–σ scatter's 0.38 dex), about clusters from 10⁶ M☉ to the 6 ×
+    /// 10⁷ M☉ of the cap the joint revision puts on plan 02's draw (ruling 144.5b).
     #[test]
     fn no_drawn_centre_fails_its_inversion() {
         for n in 0..64_u64 {
@@ -254,6 +282,22 @@ mod tests {
             let profile = CentreProfile::from_params(&params).unwrap();
             if let Err(e) = CentreModel::invert(&profile) {
                 panic!("seed {n}: {e}");
+            }
+        }
+        let params = GalaxyParams::milky_way_like();
+        let shape = TracerShape::nuclear_cluster(params.nuclear_cluster());
+        for cluster in [1e6, 2.5e7, 6e7] {
+            for dex in [-1.5, -0.76, 0.76, 1.5] {
+                let black_hole = 4.3e6 * crate::math::exp10(dex);
+                let profile = CentreProfile::from_shape(
+                    shape.clone(),
+                    SolarMasses::new(cluster),
+                    SolarMasses::new(black_hole),
+                )
+                .unwrap();
+                if let Err(e) = CentreModel::invert(&profile) {
+                    panic!("cluster {cluster:e}, black hole {black_hole:e}: {e}");
+                }
             }
         }
     }
