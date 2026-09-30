@@ -33,6 +33,10 @@ const ENGINE_IMPORT = new RegExp(
   String.raw`(?:from\s+|import\s*\(\s*|import\s+)["']${ENGINE_PACKAGE}`,
 );
 const TOLERANCE_READ = new RegExp(String.raw`\.read(?:Buffer|Texture)\([^)]*["']${TOLERANCE}["']`);
+const ENGINE_MODULE = ["babylon", "/", "engine"].join("");
+const STATIC_ENGINE_IMPORT = new RegExp(
+  String.raw`(?:from\s+|import\s+)["'][^"']*${ENGINE_MODULE}["']`,
+);
 const RAW_DEVICE_ALLOCATION = /\b\w*[dD]evice\.create(?:Buffer|Texture)\(/;
 
 /** Whether `path` lies in the one directory that may import the engine. */
@@ -56,6 +60,17 @@ function violations(file: SourceFile): string[] {
   }
   if (!inSmokePage(file.path) && TOLERANCE_READ.test(file.text)) {
     found.push(`${file.path} reads back with ${TOLERANCE} access outside the smoke page`);
+  }
+  if (!inEngineAdapter(file.path) && STATIC_ENGINE_IMPORT.test(file.text)) {
+    found.push(
+      `${file.path} imports the Babylon module eagerly, not through loadEngine's import()`,
+    );
+  } else if (
+    !inEngineAdapter(file.path) &&
+    file.path !== "view/engine/loadEngine.ts" &&
+    file.text.includes(ENGINE_MODULE)
+  ) {
+    found.push(`${file.path} names the Babylon module, which only loadEngine.ts may load`);
   }
   if (!inEngineAdapter(file.path) && RAW_DEVICE_ALLOCATION.test(file.text)) {
     found.push(`${file.path} allocates GPU memory outside the engine's one creation path`);
@@ -101,6 +116,17 @@ describe("the engine boundary", () => {
     const text = `await engine.readBuffer(sum, "${TOLERANCE}");`;
     expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
     expect(violations({ path: "smoke/kernels.ts", text })).toEqual([]);
+  });
+
+  it("refuses a static import of the Babylon module, even in the loader", () => {
+    const text = `import { createBabylonEngine } from "./${ENGINE_MODULE}";`;
+    expect(violations({ path: "view/engine/loadEngine.ts", text })).toHaveLength(1);
+  });
+
+  it("lets only the loader import the Babylon module dynamically", () => {
+    const text = `const engine = await import("./${ENGINE_MODULE}");`;
+    expect(violations({ path: "view/engine/loadEngine.ts", text })).toEqual([]);
+    expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
   });
 
   it("refuses a raw device allocation outside the adapter", () => {

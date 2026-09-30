@@ -21,7 +21,7 @@ import type { CreateBabylonEngine } from "../types";
 /**
  * Creates the engine on the vetted adapter.
  *
- * @throws Error always, until R01.T8.
+ * @returns A promise that rejects, naming the task, until R01.T8.
  */
 export const createBabylonEngine: CreateBabylonEngine = () =>
   Promise.reject(new Error(`${WebGPUEngine.name} is wrapped by R01.T8, which is not built yet`));
