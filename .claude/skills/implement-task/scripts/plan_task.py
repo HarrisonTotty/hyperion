@@ -13,7 +13,8 @@ Usage:
                                        starts with the ID.
     --feature <dir>                    Pick the plan set when an ID exists in several.
 
-IDs are case-insensitive: p02.t5.a is read as P02.T5.a.
+IDs are case-insensitive: p02.t5.a is read as P02.T5.a. The prefix picks the plan set: `P` for
+galaxy-generation, `R` for rendering-and-planets (`--feature` overrides it).
 
 Task markers the parser understands: `### P01.T1 Title` / `#### P01.T1.a Title` headings,
 `**P05.T1.a Title.** body` paragraphs and `- **P08.T2.a Title.** body` bullets. A subtask also
@@ -26,6 +27,9 @@ Design notes: `28. **Title.**` numbered items and `**D4. Title.**` or `**D8a. Ti
 paragraphs, cited as "Design note 7", "design notes 7 and 13", "notes 8–10", "D4" or "D8a". A
 citation with a plan named next to it ("plan 04's design note 15", "(plan 04, note 12)", "D8 of
 plan 02") or an "its D6" after a plan named in the same paragraph is looked up in that plan.
+Another plan is named as "plan 04" or "galaxy plan 04" (always a galaxy plan, including from the
+rendering plans, where R04 shares the number) or as "R10", "R10's" or "plan R10" (a rendering plan):
+"R10's Design note 7", "R11 (Design note 7)" and "R10 (its Design note 7)" resolve to R10's note.
 """
 
 from __future__ import annotations
@@ -40,10 +44,12 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-ID_RE = re.compile(r"P(\d{2})\.T(\d+)(?:\.([a-z]+))?")
-LOOSE_ID_RE = re.compile(r"[Pp](\d{2})\.[Tt](\d+)(?:\.([A-Za-z]+))?")
-HEADING_TASK_RE = re.compile(r"^(#{2,6})\s+(P\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*(.*)$")
-INLINE_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*(P\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*([^*]*?)\.?\*\*")
+# The task-ID prefix names the plan set: P for the galaxy plans, R for the rendering plans.
+PREFIX_SETS = {"P": "galaxy-generation", "R": "rendering-and-planets"}
+ID_RE = re.compile(r"([PR])(\d{2})\.T(\d+)(?:\.([a-z]+))?")
+LOOSE_ID_RE = re.compile(r"([PpRr])(\d{2})\.[Tt](\d+)(?:\.([A-Za-z]+))?")
+HEADING_TASK_RE = re.compile(r"^(#{2,6})\s+([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*(.*)$")
+INLINE_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*([^*]*?)\.?\*\*")
 HEADING_RE = re.compile(r"^(#{1,6})\s")
 BULLET_RE = re.compile(r"^\s*[-*]\s")
 NOTE_START_RES = (
@@ -60,11 +66,15 @@ NOTE_REF_RES = (
     re.compile(r"\b(?:[Dd]esign\s+)?[Nn]otes?\s+(D?" + NOTE_KEY + r"(?:\s*(?:,|and|or|–|-)\s*D?" + NOTE_KEY + r")*)"),
 )
 NOTE_ITEM_RE = re.compile(r"D?(\d{1,2}[a-z]?)(?:\s*[–-]\s*D?(\d{1,2}[a-z]?))?")
-# Another plan named right before or after a citation, or "its" referring back to one.
-PLAN_BEFORE_RE = re.compile(r"\b[Pp]lans?\s+(\d{1,2})(?:['’]s)?\s*,?\s*$")
-PLAN_AFTER_RE = re.compile(r"\s+(?:of|in|from)\s+[Pp]lan\s+(\d{1,2})\b")
+# Another plan named right before or after a citation, or "its" referring back to one. A plan is
+# named as "plan 04" or "galaxy plan 04" (group 1: a galaxy plan, P04, in either plan set, since
+# the rendering plans call galaxy plans "plan 14" and their own "R14"), or as "R10" or "plan R10"
+# (group 2: a rendering plan). "R10.T3" is a task, not a plan named before a note.
+PLAN_REF = r"(?:\b(?:[Gg]alaxy\s+)?[Pp]lans?\s+(\d{1,2})\b|\b(?:[Pp]lan\s+)?R(\d{2})\b(?!\.T))"
+PLAN_BEFORE_RE = re.compile(PLAN_REF + r"(?:['’]s)?\s*,?\s*(?:\(\s*)?(?:[Ii]ts\s+)?$")
+PLAN_AFTER_RE = re.compile(r"\s+(?:of|in|from)\s+" + PLAN_REF)
 ITS_BEFORE_RE = re.compile(r"\b[Ii]ts\s+$")
-PLAN_NAME_RE = re.compile(r"\b[Pp]lan\s+(\d{1,2})\b")
+PLAN_NAME_RE = re.compile(PLAN_REF)
 PARAGRAPH_BREAK_RE = re.compile(r"\n\s*\n|\n\s*[-*]\s")
 COMMAND_RE = re.compile(r"`((?:just|cargo|pnpm|grep|rg|git|python3?|uvx|wasmtime)\b[^`]*)`")
 ACCEPT_RE = re.compile(r"(?<![A-Za-z])Accept(?:ance)?\b")
@@ -100,11 +110,24 @@ def repo_root() -> Path:
 
 
 def normalise_id(task_id: str) -> str:
-    """P and T upper case, the subtask letter lower case: `p02.t5.A` -> `P02.T5.a`."""
+    """P or R and T upper case, the subtask letter lower case: `p02.t5.A` -> `P02.T5.a`."""
     m = LOOSE_ID_RE.fullmatch(task_id.strip())
     if m is None:
         return task_id
-    return f"P{m.group(1)}.T{m.group(2)}" + (f".{m.group(3).lower()}" if m.group(3) else "")
+    return f"{m.group(1).upper()}{m.group(2)}.T{m.group(3)}" + (f".{m.group(4).lower()}" if m.group(4) else "")
+
+
+def plan_code(m: re.Match[str]) -> str:
+    """The plan a PLAN_REF match names, as "P04" (a galaxy plan) or "R10" (a rendering plan)."""
+    return f"P{m.group(1).zfill(2)}" if m.group(1) else f"R{m.group(2)}"
+
+
+def prefix_feature(prefix: str, feature: str | None, root: Path) -> str | None:
+    """The plan set to search: the one given, else the prefix's own if it exists, else all (None)."""
+    if feature is not None:
+        return feature
+    name = PREFIX_SETS.get(prefix.upper())
+    return name if name and (root / "docs" / "agent" / "plans" / name).is_dir() else None
 
 
 def plan_sets(root: Path, feature: str | None) -> list[Path]:
@@ -120,10 +143,11 @@ def plan_sets(root: Path, feature: str | None) -> list[Path]:
     return sets
 
 
-def find_plan(root: Path, plan_no: str, feature: str | None) -> Path:
+def find_plan(root: Path, prefix: str, plan_no: str, feature: str | None) -> Path:
+    feature = prefix_feature(prefix, feature, root)
     matches = [f for s in plan_sets(root, feature) for f in sorted(s.glob(f"{plan_no}-*.md"))]
     if not matches:
-        sys.exit(f"no plan numbered {plan_no} under docs/agent/plans/*/")
+        sys.exit(f"no plan numbered {plan_no} under docs/agent/plans/{feature or '*'}/")
     if len(matches) > 1:
         listing = "\n  ".join(str(m.relative_to(root)) for m in matches)
         sys.exit(f"plan {plan_no} exists in several plan sets; pass --feature:\n  {listing}")
@@ -206,17 +230,18 @@ def note_keys(listed: str) -> list[str]:
 
 
 def note_owner(text: str, start: int, end: int, plan_no: str) -> str | None:
-    """The number of the plan whose note a citation names, or None for an "its" that refers to no
-    plan named earlier in its paragraph."""
+    """The plan whose note a citation names, as a code like "P04" or "R10" (`plan_no` is the
+    citing plan's own code), or None for an "its" that refers to no plan named earlier in its
+    paragraph."""
     before = text[max(0, start - 40) : start]
     if m := PLAN_BEFORE_RE.search(before):
-        return m.group(1).zfill(2)
+        return plan_code(m)
     if m := PLAN_AFTER_RE.match(text, end):
-        return m.group(1).zfill(2)
+        return plan_code(m)
     if ITS_BEFORE_RE.search(before):
         para_start = max((m.end() for m in PARAGRAPH_BREAK_RE.finditer(text, 0, start)), default=0)
-        named = PLAN_NAME_RE.findall(text, para_start, start)
-        return named[-1].zfill(2) if named else None
+        named = list(PLAN_NAME_RE.finditer(text, para_start, start))
+        return plan_code(named[-1]) if named else None
     return plan_no
 
 
@@ -274,8 +299,8 @@ def label_of(line: str) -> str | None:
 def load(root: Path, task_id: str, feature: str | None):
     m = ID_RE.fullmatch(task_id)
     if m is None:
-        sys.exit(f"{task_id!r} is not a task ID like P02.T5 or P05.T1.a")
-    plan = find_plan(root, m.group(1), feature)
+        sys.exit(f"{task_id!r} is not a task ID like P02.T5, P05.T1.a or R04.T3.c")
+    plan = find_plan(root, m.group(1), m.group(2), feature)
     lines = plan.read_text(encoding="utf-8").splitlines()
     all_markers = markers(lines)
     target = next((mk for mk in all_markers if mk.task_id == task_id), None)
@@ -283,7 +308,7 @@ def load(root: Path, task_id: str, feature: str | None):
         ids = [mk.task_id for mk in all_markers]
         known = ", ".join(ids[:60])
         if len(ids) > 60:
-            known += f", … and {len(ids) - 60} more (`--list P{m.group(1)}` prints them all)"
+            known += f", … and {len(ids) - 60} more (`--list {m.group(1)}{m.group(2)}` prints them all)"
         sys.exit(f"{task_id} not found in {plan.relative_to(root)}. Tasks there: {known}")
     return plan, lines, all_markers, target
 
@@ -455,12 +480,14 @@ def show_task(root: Path, task_id: str, feature: str | None, context: bool = Fal
     print("\n".join(block).rstrip())
     print()
 
-    plan_no = task_id[1:3]
+    plan_no = task_id[:3]
     notes = {plan_no: (plan, design_notes(lines))}
     cited = []
     for owner, key in cited_notes("\n".join(block), plan_no):
         if owner not in notes:
-            other = next(iter(sorted(plan.parent.glob(f"{owner}-*.md"))), None)
+            # A plan of the citing plan's own set when the prefix matches, else of the prefix's set.
+            home = plan.parent if owner[0] == plan_no[0] else plan.parent.parent / PREFIX_SETS.get(owner[0], "")
+            other = next(iter(sorted(home.glob(f"{owner[1:]}-*.md"))), None) if home.is_dir() else None
             if other is None:
                 continue
             notes[owner] = (other, design_notes(other.read_text(encoding="utf-8").splitlines()))
@@ -470,7 +497,8 @@ def show_task(root: Path, task_id: str, feature: str | None, context: bool = Fal
         print("## Design notes cited by the task (this plan's, unless labelled with another plan)\n")
         for owner, key in cited:
             if owner != plan_no:
-                print(f"[Plan {owner}'s design note {key}, {notes[owner][0].name}]")
+                name = f"Plan {owner[1:]}" if owner[0] == "P" else owner  # "Plan 14" (galaxy) or "R10"
+                print(f"[{name}'s design note {key}, {notes[owner][0].parent.name}/{notes[owner][0].name}]")
             print(notes[owner][1][key])
             print()
 
@@ -556,7 +584,7 @@ def risk_notes(rel: Path, lines: list[str], task_id: str) -> list[str]:
     names = [re.escape(short)]
     if short.count("."):
         names.append(re.escape(short.split(".")[0]) + r"(?!\.[a-z])")
-    name_re = re.compile(r"(?<![\w.`])(?:P" + task_id[1:3] + r"\.)?(?:" + "|".join(names) + r")(?![\w`])")
+    name_re = re.compile(r"(?<![\w.`])(?:" + task_id[:3] + r"\.)?(?:" + "|".join(names) + r")(?![\w`])")
     found = []
     for a, b in paragraph_spans(lines, span[0] + 1, span[1]):
         text = re.sub(r"^[-*]\s+", "", " ".join(" ".join(lines[a:b]).split()))
@@ -641,10 +669,12 @@ def show_list(root: Path, plan_filter: str | None, feature: str | None) -> None:
     log = commit_subjects(root)
     plan_no = None
     if plan_filter:
-        m = re.fullmatch(r"[Pp]?(\d{1,2})", plan_filter)
+        m = re.fullmatch(r"([PpRr]?)(\d{1,2})", plan_filter)
         if m is None:
-            sys.exit(f"{plan_filter!r} is not a plan number like P02 or 2")
-        plan_no = m.group(1).zfill(2)
+            sys.exit(f"{plan_filter!r} is not a plan number like P02, R04 or 2")
+        plan_no = m.group(2).zfill(2)
+        if m.group(1):
+            feature = prefix_feature(m.group(1), feature, root)
     found = False
     for plan_set in plan_sets(root, feature):
         files = sorted(plan_set.glob(f"{plan_no}-*.md" if plan_no else "[0-9][0-9]-*.md"))
@@ -664,7 +694,7 @@ def show_list(root: Path, plan_filter: str | None, feature: str | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("task_id", nargs="?", help="task ID such as P02.T5 or P05.T1.a")
+    parser.add_argument("task_id", nargs="?", help="task ID such as P02.T5, P05.T1.a or R04.T3.c")
     parser.add_argument("--acceptance", action="store_true", help="print only the acceptance criteria")
     parser.add_argument("--context", action="store_true", help="also print the Generator version and Risks sections")
     parser.add_argument("--list", nargs="?", const="", metavar="PLAN", help="list tasks, optionally of one plan")

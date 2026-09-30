@@ -26,7 +26,8 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-TASK_RE = re.compile(r"^P(\d{2})\.T(\d+)(?:\.([a-z]+))?$", re.IGNORECASE)
+# P for a galaxy plan task, R for a rendering plan task; plan_task.py picks the plan set by it.
+TASK_RE = re.compile(r"^([PR])(\d{2})\.T(\d+)(?:\.([a-z]+))?$", re.IGNORECASE)
 RUST_FILE = re.compile(r"(\.rs|Cargo\.(toml|lock)|clippy\.toml|rustfmt\.toml|rust-toolchain\.toml)$|^\.cargo/")
 TS_FILE = re.compile(
     r"(\.(ts|tsx|mts|cts|js|mjs|cjs|jsx)|package\.json|tsconfig[^/]*\.json|pnpm-lock\.yaml|"
@@ -86,7 +87,7 @@ def normal_task(word: str) -> str | None:
     m = TASK_RE.match(word.strip(",;:."))
     if not m:
         return None
-    return f"P{m[1]}.T{m[2]}" + (f".{m[3].lower()}" if m[3] else "")
+    return f"{m[1].upper()}{m[2]}.T{m[3]}" + (f".{m[4].lower()}" if m[4] else "")
 
 
 def parse_args(root: Path, argv: list[str]) -> tuple[str | None, str, str | None, list[str]]:
