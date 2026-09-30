@@ -1796,3 +1796,26 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   - `assertNoF16Subgroups` strips comments and reads every `enable` directive, comma lists and
     several on a line included; `highamBound` throws on a count that is not a positive integer or
     where (n − 1)u ≥ 1.
+- **Deviations in T7, as built.**
+  - `@babylonjs/core` is pinned at `9.28.0` exactly; the pin's reason is the module comment of
+    `view/engine/babylon/engine.ts`. The placeholder `createBabylonEngine` imports `WebGPUEngine`
+    from `Engines/webgpuEngine.pure` and rejects, naming T8, so that the chunk carries real Babylon
+    code until T8 replaces it.
+  - The renderer's `codeSplitting` has a second group, `preload-helper`, for Vite's
+    `vite/preload-helper` (priority 1): without it rolldown put the helper, shared by the entry and
+    every dynamic import, into the `babylon` chunk, and the entry imported that chunk eagerly for
+    the helper alone. `checkChunks.mjs` caught it.
+  - `scripts/checkChunks.mjs` reads the entry chunks from `out/renderer/index.html`, follows their
+    static imports, and fails (exit 1) if any holds Babylon code, recognised by the strings
+    `babylonjs` and `Babylon.js`, or if no `babylon-*.js` chunk holds it; exit 2 when there is no
+    build. It is not part of `just ci`.
+  - Nothing imports `loadEngine.ts` yet, so the build tree-shakes it and the `babylon` chunk is
+    absent: `checkChunks.mjs` fails on today's tree with "no `babylon` chunk" and passes once R02's
+    `VIEW` display or T9's smoke page imports `loadRenderEngine`. Checked by hand on 2026-09-30 with
+    a temporary dynamic import in `main.tsx`, not committed: the check passed (entry, the
+    preload helper and the rolldown runtime free of Babylon; `babylon-*.js` 1,255 kB minified, about
+    240 kB gzipped, the placeholder's `webgpuEngine.pure` closure alone); with a temporary static
+    import of `babylon/engine.ts` it failed, naming the entry. Timings and sizes are provisional
+    (a shared machine).
+  - `loadEngine.test.ts` fakes `importEngine` through `LoadEngineOptions` and follows the call by a
+    factory that rejects with a sentinel, so that no `RenderEngine` is built in the test.
