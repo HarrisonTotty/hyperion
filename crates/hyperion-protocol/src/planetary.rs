@@ -29,6 +29,11 @@ pub use requests::{
 };
 pub use zones::{ArchitectureClassDto, HabitableZoneDto, SystemPlaneDto, ZoneDto};
 
+#[cfg(test)]
+pub(crate) use record::tests as record_fixtures;
+#[cfg(test)]
+pub(crate) use requests::tests as requests_fixtures;
+
 use crate::orbit::OrbitDto;
 use crate::primitives::{BodyIdHex, UniverseTime};
 

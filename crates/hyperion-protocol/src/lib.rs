@@ -15,6 +15,7 @@ mod modelled;
 mod orbit;
 mod planetary;
 mod primitives;
+mod scene;
 mod stellar;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -43,6 +44,12 @@ pub use planetary::{
 pub use primitives::{
     BodyIdHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex, SurfaceSeedHex,
     SystemIdHex, UniverseIdHex, UniverseTime,
+};
+pub use scene::{
+    BodyGrantDto, CameraReportDto, FramePositionDto, KinematicsDto, SceneArrivalDto, SceneBodyDto,
+    SceneCamerasRequest, SceneClockDto, SceneClockStateDto, SceneCraftDto, SceneNotificationDto,
+    SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SceneSystemDto,
+    SeenPositionDto,
 };
 pub use stellar::{
     BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,

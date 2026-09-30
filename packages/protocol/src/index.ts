@@ -72,6 +72,24 @@ import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
 import type { RequestId } from "./generated/RequestId";
 import type { ResponseBody } from "./generated/ResponseBody";
+// The scene (rendering plan R03, R03.T4).
+import type { BodyGrantDto } from "./generated/BodyGrantDto";
+import type { CameraReportDto } from "./generated/CameraReportDto";
+import type { FramePositionDto } from "./generated/FramePositionDto";
+import type { KinematicsDto } from "./generated/KinematicsDto";
+import type { SceneArrivalDto } from "./generated/SceneArrivalDto";
+import type { SceneBodyDto } from "./generated/SceneBodyDto";
+import type { SceneCamerasRequest } from "./generated/SceneCamerasRequest";
+import type { SceneClockDto } from "./generated/SceneClockDto";
+import type { SceneClockStateDto } from "./generated/SceneClockStateDto";
+import type { SceneCraftDto } from "./generated/SceneCraftDto";
+import type { SceneNotificationDto } from "./generated/SceneNotificationDto";
+import type { SceneShipRequest } from "./generated/SceneShipRequest";
+import type { SceneShipSet } from "./generated/SceneShipSet";
+import type { SceneStateDto } from "./generated/SceneStateDto";
+import type { SceneSubscribeRequest } from "./generated/SceneSubscribeRequest";
+import type { SceneSystemDto } from "./generated/SceneSystemDto";
+import type { SeenPositionDto } from "./generated/SeenPositionDto";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -172,6 +190,23 @@ export type {
   RequestError,
   RequestId,
   ResponseBody,
+  BodyGrantDto,
+  CameraReportDto,
+  FramePositionDto,
+  KinematicsDto,
+  SceneArrivalDto,
+  SceneBodyDto,
+  SceneCamerasRequest,
+  SceneClockDto,
+  SceneClockStateDto,
+  SceneCraftDto,
+  SceneNotificationDto,
+  SceneShipRequest,
+  SceneShipSet,
+  SceneStateDto,
+  SceneSubscribeRequest,
+  SceneSystemDto,
+  SeenPositionDto,
   SectionDto,
   SeedHex,
   ServerMessage,
