@@ -41,10 +41,16 @@
 //! metres per second, seconds. Each step is a half kick by the acceleration held in the state, a
 //! drift, one force evaluation at the new position and the second half kick, so a step costs one
 //! force and `n` calls of [`Leapfrog::step`] are bit for bit one call of
-//! [`Leapfrog::integrate`] over `n` steps. The step is fixed per orbit, 1 ⁄ 256 of the radial
-//! period and at most 2 Myr, a whole number of steps over the span ([`FixedStep`], Design note 4).
-//! A negative step integrates backwards; the scheme is time-symmetric, so reversing the velocity
-//! and stepping again retraces the orbit to rounding.
+//! [`Leapfrog::integrate`] over `n` steps. The step is fixed per orbit, 1 ⁄ 64 of the pericentre
+//! crossing time `τ_p = r_p ÷ v_p` and at most 2 Myr, a whole number of steps over the span
+//! ([`FixedStep`]; ruling 146 of 2026-09-22, replacing Design note 4's 1 ⁄ 256 of the radial
+//! period). A leapfrog's energy error goes as `(h ÷ τ_p)²`: what it must resolve is the pericentre
+//! passage, where the field changes fastest, not the period, and a step set from the period left
+//! the passage of an eccentric orbit only 10–20 steps. Adaptive or time-transformed steps are
+//! rejected: every body of a stream shares the progenitor's time grid, for releases on step
+//! boundaries and for landing exactly on the present. A negative step integrates backwards; the
+//! scheme is time-symmetric, so reversing the velocity and stepping again retraces the orbit to
+//! rounding.
 //!
 //! # Determinism
 //!
@@ -60,10 +66,17 @@ use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::potential::{GRID_EDGE_LY, PotentialTables};
 use crate::math;
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR, SECONDS_PER_MEGAYEAR};
-use crate::units::{LightYears, Metres, PerYear, Seconds};
+use crate::units::{LightYears, Metres, MetresPerSecond, PerYear, Seconds};
 
-/// Steps per radial period (Design note 4), a parameter of the generator version.
-pub const STEPS_PER_RADIAL_PERIOD: u32 = 256;
+/// Steps per pericentre crossing time `τ_p = r_p ÷ v_p` (ruling 146 of 2026-09-22), a parameter of
+/// the generator version.
+///
+/// At 64 the energy of every pinned orbit on the Milky Way fixture, e 0.08–0.9, holds to 6 × 10⁻⁵
+/// over ten radial periods, against a bound of 2 × 10⁻⁴ (`tests/global_list_orbit.rs`); a toy Milky
+/// Way gives 4 × 10⁻⁵ to 2.6 × 10⁻⁴ over pericentres of 5–20 kpc and e 0.2–0.95 (research
+/// `r-int10`). That is 340 steps a radial period for the least eccentric pinned orbit and more for
+/// the rest, so Design note 4's 1 ⁄ 256 of the period would not bind and is dropped.
+pub const STEPS_PER_PERICENTRE_CROSSING: u32 = 64;
 
 /// The longest step, 2 Myr in seconds (Design note 4), a parameter of the generator version.
 pub const MAX_STEP: Seconds = Seconds::new(2.0 * SECONDS_PER_MEGAYEAR);
@@ -84,8 +97,8 @@ pub enum BuildLeapfrogError {
     /// The tables are in the plane only: an orbit needs the (R, |z|) grid of
     /// [`Galaxy::with_full_potential`](crate::galaxy::Galaxy::with_full_potential).
     NoVerticalGrid,
-    /// The step, or a radial period or span a step was asked for, is zero, negative where it must
-    /// be positive, not finite, or needs more than `u32::MAX` steps.
+    /// The step, or a pericentre crossing time or span a step was asked for, is zero, negative
+    /// where it must be positive, not finite, or needs more than `u32::MAX` steps.
     InvalidStep(Seconds),
 }
 
@@ -102,24 +115,31 @@ impl fmt::Display for BuildLeapfrogError {
 
 impl Error for BuildLeapfrogError {}
 
-/// A fixed step over a span: a whole number of steps, each at most 1 ⁄ 256 of the radial period
-/// and at most 2 Myr (Design note 4).
+/// A fixed step over a span: a whole number of steps, each at most 1 ⁄ 64 of the pericentre
+/// crossing time and at most 2 Myr (module documentation, "The step").
+///
+/// The crossing time `τ_p = r_p ÷ v_p` comes from the progenitor's spec, its pericentre and its
+/// speed there, so the step depends on the spec alone.
 ///
 /// # Examples
 ///
-/// A progenitor with a radial period of 300 Myr, stripped over the last 2 Gyr, is integrated
-/// backwards in 1,707 steps of 1.17 Myr:
+/// A progenitor like Pal 5's, with its pericentre at 7.5 kpc passed at 300 km/s, stripped over the
+/// last 3 Gyr, is integrated backwards in 7,855 steps of 0.38 Myr:
 ///
 /// ```
 /// use hyperion_sim::galaxy::global_list::orbit::FixedStep;
-/// use hyperion_sim::units::{Gigayears, Megayears, Seconds};
+/// use hyperion_sim::units::{
+///     Gigayears, KilometresPerSecond, Kiloparsecs, Megayears, Metres, MetresPerSecond, Seconds,
+/// };
 ///
-/// let period = Seconds::from(Megayears::new(300.0));
-/// let span = -Seconds::from(Gigayears::new(2.0));
-/// let fixed = FixedStep::new(period, span)?;
-/// assert_eq!(fixed.count(), 1_707);
+/// let pericentre = Metres::from(Kiloparsecs::new(7.5));
+/// let speed = MetresPerSecond::from(KilometresPerSecond::new(300.0));
+/// let span = -Seconds::from(Gigayears::new(3.0));
+/// let fixed = FixedStep::new(pericentre, speed, span)?;
+/// assert_eq!(fixed.count(), 7_855);
 /// assert!(fixed.step().value() < 0.0);
-/// assert!(Megayears::from(fixed.step().abs()).value() <= 300.0 / 256.0);
+/// let crossing = Megayears::from(Seconds::new(pericentre.value() / speed.value())).value();
+/// assert!(Megayears::from(fixed.step().abs()).value() <= crossing / 64.0);
 /// # Ok::<(), hyperion_sim::galaxy::global_list::orbit::BuildLeapfrogError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,25 +149,31 @@ pub struct FixedStep {
 }
 
 impl FixedStep {
-    /// The step over `span` (negative to integrate backwards) for an orbit of radial period
-    /// `radial_period`: the longest step, `min(P ÷ 256, 2 Myr)`, then shortened so that a whole
-    /// number of steps spans `span` exactly. A zero span takes no step, at the longest step.
+    /// The step over `span` (negative to integrate backwards) for an orbit whose pericentre
+    /// `pericentre` is passed at speed `pericentre_speed`: the longest step, `min(τ_p ÷ 64, 2
+    /// Myr)` with `τ_p = r_p ÷ v_p`, then shortened so that a whole number of steps spans `span`
+    /// exactly. A zero span takes no step, at the longest step.
     ///
     /// # Errors
     ///
-    /// [`BuildLeapfrogError::InvalidStep`] for a radial period that is not finite and positive, a
-    /// span that is not finite, or a span that needs more than `u32::MAX` steps.
-    pub fn new(radial_period: Seconds, span: Seconds) -> Result<Self, BuildLeapfrogError> {
-        let period = radial_period.value();
-        if !(period.is_finite() && period > 0.0) {
-            return Err(BuildLeapfrogError::InvalidStep(radial_period));
+    /// [`BuildLeapfrogError::InvalidStep`] for a crossing time that is not finite and positive
+    /// (carrying it), a span that is not finite, or a span that needs more than `u32::MAX`
+    /// steps.
+    pub fn new(
+        pericentre: Metres,
+        pericentre_speed: MetresPerSecond,
+        span: Seconds,
+    ) -> Result<Self, BuildLeapfrogError> {
+        let crossing = pericentre.value() / pericentre_speed.value();
+        if !(crossing.is_finite() && crossing > 0.0) {
+            return Err(BuildLeapfrogError::InvalidStep(Seconds::new(crossing)));
         }
         if !span.value().is_finite() {
             return Err(BuildLeapfrogError::InvalidStep(span));
         }
-        let longest = (period / f64::from(STEPS_PER_RADIAL_PERIOD)).min(MAX_STEP.value());
+        let longest = (crossing / f64::from(STEPS_PER_PERICENTRE_CROSSING)).min(MAX_STEP.value());
         let steps = (span.value().abs() / longest).ceil();
-        // Also refuses a NaN, from a subnormal period that makes `longest` zero.
+        // Also refuses a NaN, from a subnormal crossing time that makes `longest` zero.
         if steps.is_nan() || steps > f64::from(u32::MAX) {
             return Err(BuildLeapfrogError::InvalidStep(span));
         }
@@ -762,44 +788,101 @@ mod tests {
 
     #[test]
     fn the_fixed_step_is_a_whole_number_of_steps_over_the_span() {
-        let period = Seconds::from(Megayears::new(300.0));
+        // A pericentre of 24,000 ly passed at 300 km/s: τ_p = 23.98 Myr, at most 0.375 Myr a step.
+        let pericentre = Metres::from(LightYears::new(24_000.0));
+        let speed = MetresPerSecond::new(3e5);
+        let crossing = pericentre.value() / speed.value();
         let span = -Seconds::from(Gigayears::new(2.0));
-        let fixed = FixedStep::new(period, span).unwrap();
-        let longest = period.value() / 256.0;
-        assert_eq!(fixed.count(), 1_707);
+        let fixed = FixedStep::new(pericentre, speed, span).unwrap();
+        let longest = crossing / 64.0;
+        assert_eq!(fixed.count(), 5_338);
         assert!(fixed.step().value() < 0.0 && fixed.step().value().abs() <= longest);
+        assert!(fixed.step().value().abs() > 0.999 * longest);
         let covered = f64::from(fixed.count()) * fixed.step().value();
         assert!((covered / span.value() - 1.0).abs() < 1e-15);
-        // A long period is held to 2 Myr.
-        let slow = FixedStep::new(Seconds::from(Gigayears::new(3.0)), -span).unwrap();
+        // A slow crossing is held to 2 Myr: 200,000 ly at 100 km/s is 600 Myr.
+        let far = Metres::from(LightYears::new(200_000.0));
+        let slow = FixedStep::new(far, MetresPerSecond::new(1e5), -span).unwrap();
         assert_eq!(slow.count(), 1_000);
         assert!((slow.step().value() / MAX_STEP.value() - 1.0).abs() < 1e-15);
         // No span, no steps.
-        let none = FixedStep::new(period, Seconds::ZERO).unwrap();
+        let none = FixedStep::new(pericentre, speed, Seconds::ZERO).unwrap();
         assert_eq!(none.count(), 0);
-        assert!(none.step().value() > 0.0);
-        for bad in [0.0, -1.0, f64::INFINITY] {
+        assert!((none.step().value() / longest - 1.0).abs() < 1e-15);
+        // A crossing time that is zero, negative or not finite is refused, carrying it.
+        for (r, v, bad) in [
+            (0.0, 3e5, 0.0),
+            (-1.0, 1.0, -1.0),
+            (1.0, 0.0, f64::INFINITY),
+            (f64::INFINITY, 3e5, f64::INFINITY),
+        ] {
             assert_eq!(
-                FixedStep::new(Seconds::new(bad), span),
+                FixedStep::new(Metres::new(r), MetresPerSecond::new(v), span),
                 Err(BuildLeapfrogError::InvalidStep(Seconds::new(bad)))
             );
         }
+        for (r, v) in [(f64::NAN, 3e5), (0.0, 0.0), (1.0, f64::NAN)] {
+            assert!(matches!(
+                FixedStep::new(Metres::new(r), MetresPerSecond::new(v), span),
+                Err(BuildLeapfrogError::InvalidStep(_))
+            ));
+        }
         assert!(matches!(
-            FixedStep::new(Seconds::new(f64::NAN), span),
+            FixedStep::new(pericentre, speed, Seconds::new(f64::NAN)),
             Err(BuildLeapfrogError::InvalidStep(_))
         ));
+        // A subnormal crossing time rounds the longest step to zero: refused, not a zero step.
         assert!(matches!(
-            FixedStep::new(period, Seconds::new(f64::NAN)),
-            Err(BuildLeapfrogError::InvalidStep(_))
-        ));
-        // A subnormal period rounds the longest step to zero: refused, not a zero step.
-        assert!(matches!(
-            FixedStep::new(Seconds::new(1e-322), Seconds::ZERO),
+            FixedStep::new(
+                Metres::new(1e-322),
+                MetresPerSecond::new(1.0),
+                Seconds::ZERO
+            ),
             Err(BuildLeapfrogError::InvalidStep(_))
         ));
         assert_eq!(
-            FixedStep::new(Seconds::new(1.0), Seconds::new(1e300)),
+            FixedStep::new(
+                Metres::new(64.0),
+                MetresPerSecond::new(1.0),
+                Seconds::new(1e300)
+            ),
             Err(BuildLeapfrogError::InvalidStep(Seconds::new(1e300)))
+        );
+    }
+
+    /// The far field's fitted monopole, `−A ÷ G`, is the mass of the Gaussian components that
+    /// `GalaxyParams` gives, the stars of the discs, bar and bulge and the gas disc, to 1 %
+    /// (ruling 146.4 of 2026-09-22). The fit reads the tables' edge, not the parameters (module
+    /// documentation, "The far field"), so this restores Design note 3's point mass as a check,
+    /// and a bad table edge would fail it.
+    #[test]
+    #[ignore = "slow: builds the (R, z) grid"]
+    fn the_far_fields_monopole_is_the_gaussian_components_mass() {
+        use crate::galaxy::Population;
+        use crate::galaxy::consts::G;
+
+        let params = GalaxyParams::milky_way_like();
+        let model = MassModel::new(&params);
+        let tables = PotentialTables::full(&model);
+        let fitted = -FarField::new(&tables).monopole / G;
+        let stars = [
+            Population::YoungThinDisc,
+            Population::OldThinDisc,
+            Population::ThickDisc,
+            Population::Bulge,
+            Population::LongBar,
+            Population::NuclearDisc,
+        ]
+        .into_iter()
+        .fold(0.0, |sum, p| sum + params.population_mass(p).value());
+        let expected = stars + params.gas_disc().mass().value();
+        let expanded = model.extended_mass();
+        eprintln!(
+            "monopole {fitted:.5e} M☉, parameters {expected:.5e} M☉, Gaussians {expanded:.5e} M☉"
+        );
+        assert!(
+            (fitted / expected - 1.0).abs() < 0.01,
+            "{fitted:e} against {expected:e} M☉"
         );
     }
 

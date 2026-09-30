@@ -1,34 +1,40 @@
 # generator_version = 15
-inner.position.x = 0x4426ddcbfb7fcfda  # 2.1090525692531553e20
-inner.velocity.x = 0x40eb853c41b91c08  # 56361.8830228374
-inner.position.y = 0xc424b2f2ed515f4d  # -1.909147555455266e20
-inner.velocity.y = 0x410269c0dfda5422  # 150840.1093031476
-inner.position.z = 0xc4258c01d8b1b631  # -1.9873510422298234e20
-inner.velocity.z = 0xc0db4caddf2209a2  # -27954.716743955047
-inner.pericentre = 0x4427f05129fda8f6  # 2.2079589095348706e20
-inner.apocentre = 0x4433adfad3fc3269  # 3.6302470299335164e20
-inner.radial_period = 0x4337f9f125bf5471  # 6748738580075633.0
-inner.mean_angular_frequency = 0x3e574c2843dab1db  # 2.169747780635258e-8
-inner.turning_points 47
-retrograde.position.x = 0x442fe9105175f53c  # 2.9432153943126403e20
-retrograde.velocity.x = 0xc102c975bc8e2d4f  # -153902.71706805608
-retrograde.position.y = 0xc436f1afd09ec8d0  # -4.232437372860676e20
-retrograde.velocity.y = 0xc0f2f380ed8758db  # -77624.05799040517
-retrograde.position.z = 0x4430ee0bb7a70e5f  # 3.12300910713252e20
-retrograde.velocity.z = 0x40e7507566757c8e  # 47747.668757193824
-retrograde.pericentre = 0x443c1845841f8122  # 5.182577833650161e20
-retrograde.apocentre = 0x44407031f03a790c  # 6.064648242387784e20
-retrograde.radial_period = 0x4347939cf381a2aa  # 1.327245354777122e16
-retrograde.mean_angular_frequency = 0x3e474c7274a33513  # 1.0849266058807999e-8
-retrograde.turning_points 23
-outer.position.x = 0x446031b8497a17de  # 2.3898447957732905e21
-outer.velocity.x = 0x408165f511733b18  # 556.7446621897134
-outer.position.y = 0xc43978fc4fe47abd  # -4.698865326641516e20
-outer.velocity.y = 0x40a1b388b3bebf08  # 2265.7669963463013
-outer.position.z = 0xc43c847c4fc50531  # -5.260554270816003e20
-outer.velocity.z = 0x40e6e109d1c5ee5a  # 46856.3068570762
-outer.pericentre = 0x442ed7b1c96217a3  # 2.844723737117297e20
-outer.apocentre = 0x4460e98f4f53fc8a  # 2.4958213018719795e21
-outer.radial_period = 0x436004db5338132e  # 3.607151734322622e16
-outer.mean_angular_frequency = 0x3e2d7a031b5371e1  # 3.4315290284716888e-9
-outer.turning_points 9
+inner.step = 0x42a9317c47ac93a2  # 13850164581961.816
+inner.steps 9114
+inner.position.x = 0xc428acbe45b70e57  # -2.275846604208249e20
+inner.velocity.x = 0x40db854ef8f274de  # 28181.233944524887
+inner.position.y = 0xc3f108e075a79452  # -1.9639643110172336e19
+inner.velocity.y = 0xc10689ce4c128625  # -184633.78714470673
+inner.position.z = 0xc3f8e21f07ce7ace  # -2.8688475520580248e19
+inner.velocity.z = 0x4105bf5583d867ef  # 178154.68937760542
+inner.pericentre = 0x4427f05226c84025  # 2.2079602992701207e20
+inner.apocentre = 0x4433ae10de09615c  # 3.630309064945778e20
+inner.radial_period = 0x4337fa90223a182c  # 6749421420812332.0
+inner.mean_angular_frequency = 0x3e57453aa25b4a7e  # 2.1672272996020892e-8
+inner.turning_points 37
+retrograde.step = 0x42c1be8d117ba5c9  # 39020216383307.57
+retrograde.steps 3235
+retrograde.position.x = 0xc43afb945f6cdc0d  # -4.977435652376744e20
+retrograde.velocity.x = 0xc0f27716737a3915  # -75633.40319273279
+retrograde.position.y = 0xc416da6d2028d719  # -1.0539191031352985e20
+retrograde.velocity.y = 0x41039f85f64c81dc  # 160752.74526311352
+retrograde.position.z = 0x441d83dae4926c50  # 1.361141839547505e20
+retrograde.velocity.z = 0xc0f992d904adf5bd  # -104749.5636424636
+retrograde.pericentre = 0x443c1889ad5209d5  # 5.1827696896045095e20
+retrograde.apocentre = 0x444070357f3366cf  # 6.064668274882226e20
+retrograde.radial_period = 0x434791946c29d38a  # 1.3267982240425748e16
+retrograde.mean_angular_frequency = 0x3e4752cf5c0226d8  # 1.0860840116378035e-8
+retrograde.turning_points 19
+outer.step = 0x42a47c0e092cb20d  # 11261521991257.025
+outer.steps 11209
+outer.position.x = 0xc446a9e766b81056  # -8.361424733487484e20
+outer.velocity.x = 0xc0d4892c98313199  # -21028.69678907245
+outer.position.y = 0x442c55dcb15038fc  # 2.613479245050396e20
+outer.velocity.y = 0xc06b00f75e4c0b23  # -216.03019633152243
+outer.position.z = 0x445d1eee681855be  # 2.148737645827596e21
+outer.velocity.z = 0xc0f38db75474f832  # -80091.45811936332
+outer.pericentre = 0x442ed7a8ae7dd063  # 2.8447109229045937e20
+outer.apocentre = 0x4460e997f2dc0514  # 2.495840754707722e21
+outer.radial_period = 0x436004d43a850f78  # 3.607127350997702e16
+outer.mean_angular_frequency = 0x3e2c022b10aff1a3  # 3.260615004991313e-9
+outer.turning_points 7

@@ -52,7 +52,8 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   `Leapfrog::new(&PotentialTables, step) -> Result<Leapfrog, BuildLeapfrogError>` (an error when the
   tables lack the (R, z) grid of `Galaxy::with_full_potential`), `Leapfrog::step(&mut OrbitState)`,
   `integrate(state, steps) -> OrbitSummary` (pericentre, apocentre, radial period, mean angular
-  frequency, bounding radii).
+  frequency, bounding radii); `FixedStep::new(pericentre, pericentre_speed, span)`, design note 4's
+  step (as built, ruling 146).
 - `global_list::{GlobalList, GlobalEntry, GlobalEntryKind, BoundingShell}`,
   `global_list::{StreamSpec, StreamOrigin, DwarfCoreSpec}`:
   `GlobalList::build(&Galaxy) -> GlobalList`,
@@ -186,7 +187,13 @@ lifetime` (only `ProvisionalFates` implements it); no item is named the evolved 
    P10.T2.a's error test, not by this note.
 4. **The step is fixed per stream:** 1 ⁄ 256 of the progenitor's radial period, held to at most 2
    Myr, with a whole number of steps over the stripping time. Tracers are released on step
-   boundaries, so every body shares one time grid.
+   boundaries, so every body shares one time grid. _As built (ruling 146.1 of 2026-09-22, lane
+   `int10b`):_ the step is `h = min(2 Myr, τ_p ÷ 64)`, with the pericentre crossing time
+   `τ_p = r_p ÷ v_p` taken from the progenitor's spec, still one fixed step per stream and a whole number of
+   steps over T_s. The P ⁄ 256 term is dropped: the eccentric orbits that missed 10⁻⁴ ran at the 2
+   Myr cap, not at P ⁄ 256, and the energy error goes as `(h ÷ τ_p)²`. Adaptive and time-transformed
+   schemes are rejected, since per-body clocks break releases on step boundaries and the landing on
+   t = 0. The same rule serves dwarfs, the cores' single orbits and the shell orbits (P10.T4).
 5. **Stripping time.** T_s = min(π ÷ (η Ω̄), time since the last major merger), with Ω̄ the orbit's
    mean angular frequency and η the fractional spread in frequency across the debris, r_t ÷ r_peri
    times a constant of the generator version. For a dwarf, T_s also stops at its accretion time.
@@ -253,7 +260,8 @@ answers `KindNotGenerated` for a stream ID and a dwarf-core ID, and `resolve_wit
 ### P10.T2 The orbit integrator
 
 _T2.a–c built (lane `int10`, 2026-09-29, rebased onto `d5330c7` at `GENERATOR_VERSION` 15); see "T1 and T2 as built" in
-Risks. The eccentric orbits' energy figure of T2.b is pinned provisionally._
+Risks. The step rule, T2.b's energy tests and T2.c's acceptance follow ruling 146 (lane `int10b`,
+2026-09-29, on `2b2683f`), recorded there too._
 
 - **P10.T2.a Forces from the tables.** `Leapfrog::new` tabulates the gradient of Φ as design note 3
   describes, and returns `BuildLeapfrogError::NoVerticalGrid` for in-plane tables. Tests: against
@@ -265,7 +273,14 @@ Risks. The eccentric orbits' energy figure of T2.b is pinned provisionally._
   unit newtypes, using only `+ − × ÷`, `sqrt` and `math`. `integrate` returns an `OrbitSummary` from
   the recorded radial turning points. Tests: energy conserved to 10⁻⁴ over ten radial periods at the
   step of design note 4; L_z conserved to 10⁻¹²; time reversal returns the start to 10⁻⁹ relative; a
-  circular orbit stays circular.
+  circular orbit stays circular. _Restated by ruling 146.2:_ 10⁻⁴ means "the pericentre passage is
+  resolved"; the bound is 2 × 10⁻⁴ over ten radial periods at the step rule, with each pinned
+  orbit's measured drift pinned too, and the pinned starts include one of e ≈ 0.9 with its
+  apocentre near 10⁶ ly. Added: halving the step cuts the drift by 3.5–4.5 times (h²); over fifty
+  radial periods the worst drift in the last five is at most twice the worst in the first five;
+  optionally, two starts whose energies differ by 2 × 10⁻³ of |E| keep the difference to 1 % over
+  ten periods; and (ruling 146.4) the far field's fitted monopole is the Gaussian components' mass
+  from `GalaxyParams` to about 1 %. The heavy tests are slow tests.
 - **P10.T2.c Determinism across platforms.** A golden file of the exact bit patterns of an orbit
   after 10⁴ steps for three pinned starts. Plan 01's second-architecture job (P01.T12,
   `rust-aarch64`, or the `wasm32-wasip1` fallback it recorded) already runs
@@ -273,7 +288,12 @@ Risks. The eccentric orbits' energy figure of T2.b is pinned provisionally._
   workflow file; it only checks that the job is still there and runs this golden. A unit test reads
   the module's source with `include_str!` and fails on `mul_add` and on float methods of Clippy's
   disallowed list, so that a local `#[expect]` cannot hide one. Acceptance: both architectures green
-  on the same goldens.
+  on the same goldens. _Restated by ruling 146.5 (the workflow is gone, Risks):_ acceptance is (a)
+  `just ci` plus the slow orbit tests green on x86-64; (b) `just test-wasm` green on `hyperion-sim`,
+  `global_list_orbit`'s golden and determinism test included, run by hand at each bless or re-bless
+  of the orbit or tube goldens and at least at plan 10's close, recorded here with its wasmtime
+  version; (c) the `include_str!` source scan. AArch64 waits until a workflow returns (P01.T12's
+  owner item); a run under `qemu-aarch64` is optional.
 
 ### P10.T3 Which debris gets a tube
 
@@ -448,10 +468,13 @@ the plan's doc comment with the machine they ran on.
 ## Verification
 
 - `just ci` green after every task, on both of plan 01's CI architectures; `just test-slow` holds
-  P10.T3.c, T3.d and T12.
+  P10.T3.c, T3.d and T12. _Until a workflow returns (ruling 146.5):_ `just ci` on x86-64, and
+  `just test-wasm` on `hyperion-sim` at each orbit or tube re-bless and at the plan's close, its
+  wasmtime version recorded (P10.T2.c).
 - The brainstorm's Testing lines in scope: stream members stay in their tubes (P10.T12); budgets
   (P10.T3.d, T12); order independence and goldens (P10.T4, T6.c, T8.b); determinism of the leapfrog
-  and the tube table on x86-64 and AArch64 (P10.T2.c, T6.c).
+  and the tube table on x86-64 and AArch64 (P10.T2.c, T6.c; AArch64 waits for a workflow, and
+  `wasm32-wasip1` stands in, ruling 146.5).
 - Cost figures as benchmarks, targets not promises: list build about 1 s; tube table about 0.2 s and
   80 kB; about 160 members generated for a 50 ly query on a globular stream.
 - By eye in the `GALAXY` display: tracks crossing the halo in both map views, leading and trailing
@@ -538,8 +561,10 @@ OrbitState, steps: u32) -> OrbitSummary`, which leaves the state at the end. `Or
     step integrates backwards. `OrbitSummary`'s pericentre, apocentre and radial period are
     `Option`s (none before a turning point, or two), refined by the parabola through three samples;
     the radial period is `2 (t_last − t_first) ÷ (n − 1)` over all turning points; `bounding_radii`
-    and `turning_points` added. `orbit::FixedStep::new(radial_period, span)` is Design note 4, with
+    and `turning_points` added. `orbit::FixedStep::new(radial_period, span)` was Design note 4, with
     `STEPS_PER_RADIAL_PERIOD` (256) and `MAX_STEP` (2 Myr); `BuildLeapfrogError::InvalidStep` added.
+    _Superseded by "T2 after ruling 146" below_, which changes the step and the figures that
+    follow; they are kept as the evidence for the ruling.
     Measured on the Milky Way fixture over ten radial periods at that step: energy 8.8 × 10⁻⁵ for an
     inclined orbit with Pal 5's pericentre (23,300–38,400 ly; Pal 5's own reaches 16–19 kpc),
     9.0 × 10⁻⁶ for a GD-1-like one, **2.3 × 10⁻⁴ for one with radii near Sagittarius's
@@ -551,21 +576,75 @@ OrbitState, steps: u32) -> OrbitSummary`, which leaves the state at the end. `Or
     the blend and the grid's edge. The source check reads `orbit.rs` and the force path
     (`potential/{force,tables,nfw,spherical}.rs`) up to their test modules. **No second
     architecture ran it:** the CI workflow is gone (below), and `just test-wasm` was not run,
-    since wasmtime is not installed on the lane's machine.
-- **Provisional: Design note 4's step does not hold eccentric orbits' energy to 10⁻⁴ (P10.T2.b).**
-  At 1 ⁄ 256 of the radial period, capped at 2 Myr, a pericentre passage of an orbit of e ≳ 0.6
-  spans only 10–20 steps (`r_p ÷ v_p` over the step): the orbit with Sagittarius's radii drifts by 2.3 × 10⁻⁴ and the e 0.8 one by
-  2.1 × 10⁻³, where the orbits of low eccentricity hold 10⁻⁴. Scratch runs at P ⁄ 1,024 gave 7 ×
-  10⁻⁵ and 4 × 10⁻⁴, at P ⁄ 2,048 1.7 × 10⁻⁵ and 1.3 × 10⁻⁴. Plan 15's integrator sets its step
-  from the circular period at pericentre (1 ⁄ 200) for this reason. Not ruled here: the step is a
-  parameter of the generator version and the energy figure the plan's. The test pins the two at
-  4 × 10⁻⁴ and 3.5 × 10⁻³ (`ENERGY_DRIFT` in `tests/global_list_orbit.rs`) until a ruling, which
-  also decides whether a finer step's cost fits P10.T6.c's 0.2 s.
+    since wasmtime is not installed on the lane's machine (since run by lane `int10b`, below).
+- **T2 after ruling 146 (lane `int10b`, 2026-09-29, on `2b2683f` at `GENERATOR_VERSION` 15).**
+  Ruling 146's points 1, 2, 4 and 5 (research `r-int10`); point 3, the integrator's force grid,
+  goes with P10.T5. No output moved but the unwired orbit golden, re-blessed at 15.
+  - _The step (146.1)._ `FixedStep::new(pericentre, pericentre_speed, span)` (a `Metres`, a
+    `MetresPerSecond` and a `Seconds`) takes `τ_p = r_p ÷ v_p` from the spec and steps at `min(τ_p ÷ 64, 2 Myr)`, shortened to
+    a whole number of steps over the span; a crossing time that is not finite and positive is
+    `InvalidStep` carrying it. `STEPS_PER_RADIAL_PERIOD` is replaced by
+    `STEPS_PER_PERICENTRE_CROSSING` (64); `MAX_STEP` stays. Where v_p comes from (the epoch state's
+    energy, `√(2 [E − Φ(r_p)])`), or P10.T4's shell orbit) is the caller's, at P10.T4 and T5.
+  - _The tests (146.2, 146.4)._ The pinned starts carry their spec, pericentre and speed there
+    as a probe at 0.25 Myr measures them (the energy test checks the pins against the probe to
+    1 %), and gain a fifth, "wide": e 0.90, 53,200 ly to 10⁶ ly, started at apocentre 30° above the
+    plane. Over ten radial periods at the rule's step (slow tests, `tests/global_list_orbit.rs`,
+    v15, x86-64): energy 3.0 × 10⁻⁵ (inner, e 0.24, 0.44 Myr steps), 5.8 × 10⁻⁶ (retrograde, e
+    0.08, 1.24 Myr), 3.0 × 10⁻⁵ (Sagittarius-like, e 0.66, 0.56 Myr), 5.3 × 10⁻⁵ (outer, e 0.8,
+    0.36 Myr) and 2.3 × 10⁻⁵ (wide, 0.58 Myr); L_z to 2.1 × 10⁻¹³ at worst, each pinned at about 1.5 times that
+    (`Start::drift`) under the ruled bound of 2 × 10⁻⁴ (`ENERGY_DRIFT`), against 2.3 × 10⁻⁴ and 2.1
+    × 10⁻³ for the eccentric two at the old step. The fixture does better than the research's toy
+    (1.1–1.7 × 10⁻⁴ at e 0.8–0.9). **Convergence:** halving the step cuts the worst drift by 4.21,
+    4.62, 4.05, 3.20 and 3.92 times; the ruling's 3.5–4.5 holds for three orbits of five, since the
+    worst drift is read at the steps and scatters with where they fall about pericentre (at steps
+    0.3 % different, from the probe's spec rather than the pins, the same five read 4.21, 4.57,
+    3.30, 3.49 and 4.47). The test
+    holds the geometric mean of the five (3.97) to 3.5–4.5 and each ratio to 3–5, a reading of the
+    ruling recorded for the owner. **Secular drift:** over fifty radial periods the worst drift in
+    the last five periods is 0.71–1.16 times the first five's (bound 2). **Energy difference
+    (optional):** two starts 2 × 10⁻³ of |E| apart keep their difference to 0.04–0.27 % over ten
+    periods for four orbits, taken as the difference of energies averaged over each radial
+    period; **the outer orbit's grows steadily to 1.04 % by the tenth period** and is pinned at
+    1.5 %, the others at the ruled 1 %. The outer orbit's apocentre lies at the far field's blend
+    and the grid's edge, which may be why; not investigated. The figure is sensitive to the step:
+    at a step 0.3 % shorter it read 0.19 %. Read instantaneously the difference holds only 1.2–4.2
+    % for the four eccentric orbits (0.2 % for the retrograde one), because the two orbits dephase
+    and their step errors, each up to the drift above, stop cancelling (a step of τ_p ÷ 128 brings
+    it to 0.3–0.8 %). Both are recorded for the owner. The
+    near-circular retrograde orbit takes 340 steps a radial period, not the research's "over 430
+    for every orbit": for e near 0 `τ_p` is about the period ÷ 2π. **Monopole (146.4):** a slow
+    unit test holds the far field's fitted `−A ÷ G` to the Gaussian components' mass from
+    `GalaxyParams` (thin, thick and nuclear discs, bar, bulge and gas) to 1 %: 5.8921 × 10¹⁰ M☉ against 5.8919 × 10¹⁰ M☉, 2.7 × 10⁻⁵ apart (the Gaussians' own
+    total equals the parameters').
+    Costs in the slow profile: ten periods of all five starts take about 1.3 s after the grid.
+  - _The golden (T2.c)._ `orbit.golden` now pins each of the inner, retrograde and outer starts
+    over 4 Gyr at the rule's step from its spec (9,114, 3,235 and 11,209 steps, recorded with the
+    step), not 10⁴ steps of 0.5 Myr: the golden moves with the rule, which is a parameter of the
+    generator version.
+  - _Acceptance (146.5)._ Restated in P10.T2.c. **Run at this re-bless (2026-09-29, wasmtime
+    48.0.2, `e9f1ea232`, from the `calib` lane's scratch tools via `PATH`):** (a) `just ci` and the
+    seven slow tests above by name on x86-64, green; (b) `just test-wasm`'s first command,
+    `cargo test --target wasm32-wasip1 -p hyperion-sim -p hyperion-testkit`, with the golden, the
+    determinism check and the orbit unit tests green, and the seven slow orbit tests by name under
+    wasm in the slow-test profile, green, with the same figures to the printed digits. The recipe's
+    second command, every slow test of the two crates under wasm, was not run: the lane runs only
+    the slow tests it wrote or edited. **`just test-wasm` is not green at `2b2683f`, for reasons
+    outside plan 10:** `snr::caps::tests::cut_ends_a_window_at_its_cap` uses `catch_unwind`, which
+    aborts the whole lib binary under wasm's `panic = abort` (so the recipe stops there, before
+    any integration test; the run above skipped it with `--skip`), `planetary_properties`'s
+    `satellites::moons_inside_hill_spheres_and_rings_inside_roche_limits` spawns scoped threads,
+    which `wasm32-wasip1` lacks, and `planetary_rocky_properties`'s
+    `rocky_core_mass_fractions_follow_plotnykov_and_valencia` hits a multiply overflow under
+    wasm32 (not traced). For the owner. (c) The source scan passes.
 - **The second CI architecture is gone.** `.github/workflows/ci.yml`, with the `rust-aarch64` and
   `rust-wasm32` jobs of P01.T12, was deleted in `751bad8` ("checkpoint"), and no workflow exists at
   `941d80b`. P10.T2.c's "check that the job is still there" fails, and its acceptance, "both
   architectures green on the same goldens", cannot be met until a job returns or `just test-wasm`
-  is run by hand. For the owner (P01.T12 is gated on them).
+  is run by hand. For the owner (P01.T12 is gated on them). _Ruled (146.5):_ P10.T2.c's acceptance
+  is restated around `just test-wasm` by hand; AArch64 waits for a workflow. wasmtime has no
+  installed home on the dev machine: the owner's call where (v48.0.2 sits in the `calib` lane's
+  scratch tools today).
 - **`integrate` calls `math::atan2` once a step**, for Ω̄; `step` does not, so tracers that need
   no summary should be stepped with `step`.
 - **The force costs about 640 ns** (a release build on the loaded lane machine; the tables'
@@ -573,7 +652,11 @@ OrbitState, steps: u32) -> OrbitSummary`, which leaves the state at the end. `Or
   latter with `powf`). About 2,000 tracers over a few thousand steps each is some seconds, against
   P10.T6.c's 0.2 s for a tube: P10.T5 and T6 should measure first. A grid of the total potential
   of the integrator's own, bicubic like the tables', would drop the closed forms from the inner
-  loop.
+  loop. _Ruled (146.3), for P10.T5:_ at τ_p ÷ 64 a Pal 5-like stream takes about 9,000 steps, so
+  the grid is needed: one bicubic Hermite table of the total potential on the tables' (ln R, ln
+  |z|) nodes out to 2²⁰ ly, with its exact gradient, and the tracers run in parallel on plan 04's
+  pool, gathered by index; the 0.2 s is stated as parallel wall time. Fallback if the budget still
+  slips: τ_p ÷ 32 with a bound of 5 × 10⁻⁴.
 - **Updated for the 2026-09-21 density rulings.** The halo's smooth components now have inner slopes
   of 2.2–2.8, and the dominant merger breaks at 16–28 kpc, steepening by 1.5–2.5 beyond. At 15–18
   kpc that halo is three to four times denser than the r^−3.5 halo the brainstorm's 25–45 was worked
