@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@babylonjs/core": "9.28.0",
     "@hyperion/protocol": "workspace:*",
     "commander": "^15.0.0",
     "react": "^19.3.0",

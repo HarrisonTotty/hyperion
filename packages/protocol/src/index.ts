@@ -38,6 +38,7 @@ import type { DensityMap } from "./generated/DensityMap";
 import type { DensityMapRequest } from "./generated/DensityMapRequest";
 import type { DestructionCauseDto } from "./generated/DestructionCauseDto";
 import type { DetailLevelDto } from "./generated/DetailLevelDto";
+import type { DetailSeedHex } from "./generated/DetailSeedHex";
 import type { ErrorCode } from "./generated/ErrorCode";
 import type { GalacticPosition } from "./generated/GalacticPosition";
 import type { GalaxyParameters } from "./generated/GalaxyParameters";
@@ -97,7 +98,6 @@ import type { StarEventDto } from "./generated/StarEventDto";
 import type { StarEventKindDto } from "./generated/StarEventKindDto";
 import type { StarSummaryDto } from "./generated/StarSummaryDto";
 import type { StellarBriefDto } from "./generated/StellarBriefDto";
-import type { SurfaceSeedHex } from "./generated/SurfaceSeedHex";
 import type { SystemBodiesDto } from "./generated/SystemBodiesDto";
 import type { SystemBodiesRequest } from "./generated/SystemBodiesRequest";
 import type { SystemExistenceDto } from "./generated/SystemExistenceDto";
@@ -155,6 +155,7 @@ export type {
   DensityMapRequest,
   DestructionCauseDto,
   DetailLevelDto,
+  DetailSeedHex,
   ErrorCode,
   GalacticPosition,
   GalaxyParameters,
@@ -214,7 +215,6 @@ export type {
   StarEventKindDto,
   StarSummaryDto,
   StellarBriefDto,
-  SurfaceSeedHex,
   SystemBodiesDto,
   SystemBodiesRequest,
   SystemExistenceDto,

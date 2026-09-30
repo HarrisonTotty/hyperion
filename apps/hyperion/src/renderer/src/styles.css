@@ -186,6 +186,18 @@ body {
   letter-spacing: 0.15em;
 }
 
+/*
+ * A mode the whole console is in, persistent in the header strip until a relaunch: the graphics
+ * safe or disabled mode (R01.T5.b, a draft extension of the guide's banner rule). Plain text in a
+ * ruled box, so that it reads as a mode and not as an alert.
+ */
+.console__banner {
+  border: 1px solid var(--line);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
 /* Status annunciation. In-progress states stay neutral: see "Colour" in the UX guidelines. */
 .annunciator {
   font-size: 0.875rem;

@@ -10,8 +10,9 @@ paths:
 # Simulation determinism
 
 A universe is `(seed, generator_version)`. The same pair must give the same bits on x86-64,
-AArch64 and wasm32, in any call order, for as long as saves exist. CI checks all three
-architectures. The sim's `clippy.toml` already bans platform maths (go through
+AArch64 and wasm32, in any call order, for as long as saves exist. What checks it today: `just ci`
+runs the goldens natively on x86-64; `just test-wasm` runs them as `wasm32-wasip1` under wasmtime,
+by hand, outside every gate; and nothing checks AArch64. The sim's `clippy.toml` already bans platform maths (go through
 `hyperion_sim::math`), `f64::mul_add` and float `to_bits`, and `hyperion-fit`'s repeats the ban for
 fitted tables. The exact `libm` pin in the root `Cargo.toml` is part of the output too: changing it
 is a generator-version change. This skill covers what no lint can see.
@@ -111,8 +112,8 @@ moved.
    have, so go back to step 1 for it. An extension isn't automatically safe: if a
    new label pins a value the base already generated, and its computation changed, that is moved
    output too.
-5. Run `just test-wasm` if wasmtime is installed. If it isn't, say that it wasn't run; CI will run
-   it.
+5. Run `just test-wasm` if wasmtime is installed. If it isn't, report `just test-wasm` as not run:
+   no gate runs it for you.
 6. If the bump trips a statistical test, run that test under three other seeds. Two failures in
    three is a real defect. Otherwise change the seed in the same commit, with a note
    (galaxy-generation plan 01, design note 28). Never loosen α, shrink the sample, or widen a

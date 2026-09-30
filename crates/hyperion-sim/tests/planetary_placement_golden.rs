@@ -3,8 +3,8 @@
 //! zone is the barycentre's (ruling 52.4), with the host number it had as a pair.
 //!
 //! They pin the arithmetic and the words drawn: a reordered sum, a changed coefficient or a moved
-//! draw number changes a line here, which is a generator-version change. CI checks the same files
-//! on 64-bit Arm and on wasm32.
+//! draw number changes a line here, which is a generator-version change. The sim-determinism skill
+//! says which targets compare them.
 
 use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::id::{Layer, SystemId};

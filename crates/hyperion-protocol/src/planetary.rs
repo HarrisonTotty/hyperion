@@ -55,7 +55,7 @@ pub enum DetailLevelDto {
     Bulk,
     /// Its surface: atmosphere, surface conditions, rotation and global figures.
     Surface,
-    /// Everything, the hooks included: surface seed, composition, habitability and resources.
+    /// Everything, the hooks included: detail seed, composition, habitability and resources.
     Full,
 }
 

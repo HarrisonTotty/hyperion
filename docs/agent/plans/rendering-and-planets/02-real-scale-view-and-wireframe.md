@@ -1194,3 +1194,60 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   as `clampToTidalRadius(positionM, tidalRadiusM)`. Eligible candidates are taken in ID order, as
   the sim's `BTreeMap` iterates; the wire form's fixed-width hex sorts as `BodyId` does. The test
   also runs every golden case with the candidates reversed.
+- **Deviations in R02.T6.a, as built.** `FrameOrigins.bodyCentre` is `bodyCentreM` (the unit in
+  the name). `Rotation3` is a branded `{ rows: [Vec3, Vec3, Vec3] }` built only by
+  `rotation3FromRows`, which refuses non-finite entries, departures from orthonormality above
+  `ROTATION_ORTHONORMAL_TOLERANCE` (10⁻¹², the sim's) and reflections; `IDENTITY_ROTATION`,
+  `rotateToBody` (R · p) and `rotateToBodyFixed` (Rᵀ · p) go with it, in `view/coords/rotation.ts`.
+  The conversions between the four kinds are `expressIn(p, frame, origins)` over a `ViewFrame`
+  union, built on `differenceM(a, b, origins)`, which differences in the innermost frame the two
+  share (one body's frames, one system's, else through the galactic frame, barycentres differenced
+  cells first); `frameOf`, `systemOfFrame` and `galacticTranslated` (which refuses a result
+  outside the wire's `i32` cells) are exported too. A `null` rotation takes the body-fixed axes as
+  the body frame's (Design note 14). The galactic delta's test tolerates the frame's 2 m spacing
+  at a whole light-year's offset rather than asserting an exact cells-first sum.
+- **Deviations in R02.T6.b, as built.** `relativeToCamera` and `originMinusCamera` take
+  `CameraOrigins`, which extends `FrameOrigins` with `craftPosition(craft: CraftId)`, which the
+  `craft` frame needs; `CraftId` is a plain string. `CameraPose`, `CameraFrame` (whose `galactic`
+  variant carries its own `origin: GalacticPosition`) and the `Quaternion` interface are in
+  `view/camera/pose.ts`; the quaternion's operations and constructor are R02.T7.a's. A `craft`
+  pose's offset is along the galactic axes. The hull test's system-frame half asserts an error
+  above 0.1 m (f64 at 1 ly is spaced at 2 m, so the rounding is up to a metre, 0.37 m in the
+  test), where the plan says "by metres".
+- **Deviations in R02.T5, as built.** Plan 06 had not added the field, so R02.T5 built it:
+  `StellarBriefDto.absolute_v_mag` (`Option<f32>`, skipped when `None`), filled by `brief_dto`
+  through `brief_absolute_v`, which gates on the brief's `ObjectKind` being a living star (the
+  kinds `object_kind` gives only to remnant phases are refused, which is `phase().is_living()`)
+  and then computes `absolute_v_from(log L, T_eff)` with plan 06's `absolute_bolometric_magnitude`
+  and `bolometric_correction_v`. The Sun-like figure (4.83 ± 0.01) is tested on
+  `absolute_v_from(0 dex, 5,772 K)`, since the server cannot build a `StellarBrief` by hand; a real
+  1 M☉ brief is compared with its state's M_V and a white dwarf's brief has no key. "On every row
+  with a brief" is checked per row against plan 06's formula in `assert_briefs_are_the_sims`,
+  plus an `any`: most rows of the fixture are remnants (the briefs golden gained the field on 3
+  of its rows). Beyond the task's files, `hyperion-protocol/src/galaxy.rs`'s test
+  constructions, `hyperion-server/tests/systems_in_range.rs` and its
+  `systems_in_range_briefs.golden` changed with the field. `PROTOCOL_VERSION` stays 2.
+- **As built, R02.T2.a–e.** The nine items are drafted in one commit, each ending in a marker
+  `_Draft (plan R02, R02.T2.x, item n): the owner signs off._` so that the owner can accept or
+  revert each: items 1 and 5 as a "Views" entry and its scale substitute in "Graphs, schematics and
+  spatial displays"; items 2, 3 and 4 as three bullets in "Colour"; item 6 in "Data states" with
+  its `INHIBIT`/`ENABLE` pair in "Controls and commanding", and item 7 in "Data states"; item 8 in
+  "Motion and sound"; item 9 in "Layout". R02.T2.f, the nomenclature list, waits on R01.T5.c's
+  drafts and is not yet done.
+- **Deviations in R02.T7.a, as built.** `Quaternion` operations are in `view/camera/quaternion.ts`
+  (`quaternion`, `IDENTITY_QUATERNION`, `quaternionFromAxisAngle`, `multiply`, `conjugate`,
+  `rotate`, `rotationRows`). Matrices are `Float32Array`s in WGSL's column-major order:
+  `viewRotation` (3 × 3, Rᵀ) and `viewRotation4`, the 4 × 4 with a zero translation column that
+  R01's `FrameSubmission.viewRotation` takes (its layout is assumed column-major, to be confirmed
+  against R01's adapter in R02.T14). `project` and `pixelSolidAngle` take a
+  `ProjectionCamera { orientation, fovXRad }` and a `Viewport { widthPx, heightPx }`; `project`
+  returns `{ xPx, yPx, depth, inFront }` with y down; `toViewAxes` and `DEFAULT_FOV_DEG` = 60 are
+  exported. The corner pixel's ratio is cos³ 33.5° = 0.5794, which the plan rounds to 0.580; the
+  test holds it to 0.2%.
+- **Deviations in R02.T7.b, as built.** `view/depth/depth.ts` also exports `OCCLUDER_MARGIN`
+  (4 × 10⁻⁶), `DepthLayer` (`opaque`, `shell` with `radiusM`, `plane`, each with an `id`) and
+  `LayerCamera { bodyDistanceM(body) }`. `separable` is `|a − b| ≥ 10⁻⁶ d`. Ties: bodies at equal
+  distance go by the lower ID, a shell whose radius equals the camera's distance counts as above,
+  and equal places go by `id`. The occluder test measures the gap along each ray as a fraction of
+  the graticule point's own distance (at the sub-camera point it is 4 × 10⁻⁶ d exactly).
+  "Transparent layers write no depth" stays a documented rule for the pipelines (R02.T14).
