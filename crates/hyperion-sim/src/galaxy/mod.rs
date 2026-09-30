@@ -32,6 +32,7 @@ pub mod global_list;
 pub mod imf;
 pub mod kinematics;
 pub mod map;
+pub mod motion;
 pub mod params;
 pub mod placement;
 pub mod potential;

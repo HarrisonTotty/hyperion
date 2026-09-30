@@ -1394,7 +1394,10 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   `Galaxy::mean_system_mass` (the present-day mass) but the same quadrature without deaths.
 - **Kepler propagation against the true potential.** The orbit is about the mass inside the epoch
   radius and the precession from the enclosed stars is added on top. P09.T28.a's comparison with a
-  direct integration decides whether the second rate needs a correction beyond 0.3 ly.
+  direct integration decides whether the second rate needs a correction beyond 0.3 ly. _(As built,
+  T28.a compares with a two-body integration only; the comparison in the smooth potential of black
+  hole plus cluster is T28.d's test, and waits for lane `pot02`'s centre potential. See "P09.T28.a
+  as built".)_
 - **Grid systems inside the influence radius** are not drawn from the distribution function, so
   their density is not exactly stationary. They are about one in a hundred of the systems there and
   the effect is confined to the inner 1.5 ly over the clock window.
@@ -2335,3 +2338,48 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Cost._ Four inversions, not Design note 14's three; the bench is renamed
     `profile_and_four_inversions` and was not run (the plan's 50 ms was for three, at 40–44 ms).
     The centre's fast tests take 31–41 s at three threads on a shared machine (51 s before).
+- **P09.T28.a as built (lane `centre28a`, 2026-09-30, on d9a24a6 at `GENERATOR_VERSION` 15).** No
+  output moves: nothing reads the propagator until T28.b wires it into the drift hook, and it reads
+  no potential, so none of its figures waits on `pot02` (μ is the caller's). New golden
+  `galaxy/motion/kepler.golden` (twelve states from circular to e = 5.8, 0.001–9.5 ly, at six times
+  over ±1,000 yr), unwired. Files: `galaxy/motion.rs` (new), `galaxy/mod.rs`,
+  `tests/galaxy_motion.rs`.
+  - _Signatures._ `KeplerOrbit::from_state(PointLy, GalacticVelocity, GravitationalParameter) ->
+    Result<KeplerOrbit, BuildKeplerOrbitError>`: position relative to the black hole in ly (what
+    `CentreMemberRecord::local_position` gives), velocity and μ in SI; refuses non-finite values,
+    μ ≤ 0, a position at the black hole (`AtCentre`) and exactly zero angular momentum (`Radial`,
+    which includes a galaxy without kinematic tables: T28.b must keep such a system on its epoch
+    position). `propagate(Seconds) -> KeplerOrbit`, the state `dt` on as an orbit in its own
+    right. Getters `position`, `velocity`, `distance`, `gravitational_parameter`,
+    `specific_energy_j_per_kg`, `angular_momentum_m2_per_s`, `eccentricity`, `pericentre() ->
+    LightYears`, `semi_major_axis`, `period` (the last two `None` unless bound). `schwarzschild_rate`
+    and `mass_precession_rate` are T28.d's.
+  - _Method._ Universal variables with the Lagrange coefficients (Battin 1999, §4.5; Vallado 2013,
+    algorithm 8), solved by Laguerre–Conway (n = 5) for a fixed `UNIVERSAL_ITERATIONS` = 10
+    (at most seven needed to 10⁻¹⁴ over the stress set); a bound orbit's `dt` is first reduced to
+    within half a period. An unbound or parabolic orbit starts from the least of the parabolic
+    cubic's root, (for e > 1.01) the value its hyperbolic anomaly gives, and √μ τ ÷ q: the line
+    √μ τ ÷ r₀ alone started beyond the root of a nearly parabolic flyby, where each step gains
+    only 1 ÷ √−α, and diverged.
+  - _S2's elements._ The test takes S2's measured a = 0.0163 ly (125.058 mas at 8,246.7 pc) and
+    e = 0.8846 (GRAVITY Collaboration 2020, table E.1), which give 15.97 yr, 119.0 au and 7,771
+    km/s at the Milky Way fixture's 4.297 × 10⁶ M☉, held to 16 ± 0.1 yr, 120 ± 2 au and 7,800 km/s
+    ± 1%. The plan's a = 0.0158 ly (1,000 au) and e = 0.88 give 15.24 yr, 5% short of 16; the test
+    pins that too. The plan's text should read 0.0163 ly and 0.8846.
+  - _Tolerances._ The S2-like orbit is held to the plan's 10⁻¹² relative for energy, angular
+    momentum and the round trip at every time over ±1,000 yr. The stress set (e from 0 to 100,
+    pericentres 10⁻³–10 ly) holds the energy to 10⁻¹² of the larger of its kinetic and potential
+    terms (a nearly parabolic orbit's energy is near zero) and the angular momentum to 10⁻¹² of
+    |r| |v| (far out on a hyperbola r × v is a difference of products a million times |h|); worst
+    measured 1.3 × 10⁻¹⁴ and 4.6 × 10⁻¹⁴. Its round trips are bounded by the problem's
+    conditioning: 10⁻¹² × (1 + orbits completed) ÷ (1 − e) for bound orbits (worst some forty times
+    inside), and 10⁻¹² × (r ÷ q)² for unbound and nearly parabolic ones (worst 1.5 × 10⁻¹⁴).
+  - _Domain._ The stress set's hyperbolae stop at e = 10. At e = 100 and a pericentre of 10⁻³ ly
+    (v∞ of 16% of c, far outside anything the centre places) the solve back from 160 ly out does
+    not converge in ten steps, and the universal equation's root is defined only to about 10⁻⁷
+    there; not pursued (deferred).
+  - _Status._ T28.a done (its tests and golden pass; `just ci` in the lane's report). Not started:
+    T28.b (`Regime`, `regime_of`, `position_velocity_at`, the drift hook and loss-cone carve-out,
+    bump), T28.c (tidal radius at pericentre), T28.d (`schwarzschild_rate`,
+    `mass_precession_rate`, the direct integration in the true potential, bump), T29–T31. All wait
+    for `pot02`'s centre potential (v16).
