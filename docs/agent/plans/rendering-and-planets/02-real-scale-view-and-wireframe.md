@@ -1227,3 +1227,10 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   of its rows). Beyond the task's files, `hyperion-protocol/src/galaxy.rs`'s test
   constructions, `hyperion-server/tests/systems_in_range.rs` and its
   `systems_in_range_briefs.golden` changed with the field. `PROTOCOL_VERSION` stays 2.
+- **As built, R02.T2.a–e.** The nine items are drafted in one commit, each ending in a marker
+  `_Draft (plan R02, R02.T2.x, item n): the owner signs off._` so that the owner can accept or
+  revert each: items 1 and 5 as a "Views" entry and its scale substitute in "Graphs, schematics and
+  spatial displays"; items 2, 3 and 4 as three bullets in "Colour"; item 6 in "Data states" with
+  its `INHIBIT`/`ENABLE` pair in "Controls and commanding", and item 7 in "Data states"; item 8 in
+  "Motion and sound"; item 9 in "Layout". R02.T2.f, the nomenclature list, waits on R01.T5.c's
+  drafts and is not yet done.
