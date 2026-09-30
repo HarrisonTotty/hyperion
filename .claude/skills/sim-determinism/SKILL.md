@@ -90,7 +90,7 @@ moved.
 1. Decide whether the change is meant to move generated output. The task or the plan's
    **Generator version** section usually says. If it isn't, the failure is a bug: find the stream,
    order or arithmetic change that caused it, and don't bless.
-2. If it is meant to: bump `GENERATOR_VERSION` in `crates/hyperion-sim/src/version.rs`, once per
+2. If it is meant to: bump `GENERATOR_VERSION` in `crates/hyperion-base/src/version.rs`, once per
    task, in the commit that moves the output (plans say tasks bump "as they land"). Update the
    `assert_eq!(GENERATOR_VERSION.get(), N)` test in the same file. So that you don't bump twice,
    check whether the task already bumped, including in its earlier checkpoint commits:

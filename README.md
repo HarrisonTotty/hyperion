@@ -56,14 +56,15 @@ The full design is in
 
 ## Layout
 
-| Path                       | What                                                                 |
-| -------------------------- | -------------------------------------------------------------------- |
-| `crates/hyperion-server`   | Game server binary (axum, WebSocket at `/ws`)                        |
-| `crates/hyperion-sim`      | Deterministic simulation / procgen core — no I/O                     |
-| `crates/hyperion-protocol` | Wire protocol types; source of truth for the TypeScript bindings     |
-| `apps/hyperion`            | Bridge client (Electron + React, built with electron-vite)           |
-| `packages/protocol`        | `@hyperion/protocol` — TS bindings generated from the protocol crate |
-| `docs/`                    | Design docs, agent plans, UX guidelines                              |
+| Path                       | What                                                                  |
+| -------------------------- | --------------------------------------------------------------------- |
+| `crates/hyperion-server`   | Game server binary (axum, WebSocket at `/ws`)                         |
+| `crates/hyperion-sim`      | Deterministic simulation / procgen core — no I/O                      |
+| `crates/hyperion-base`     | Beneath the sim: maths on the pinned `libm`, units, generator version |
+| `crates/hyperion-protocol` | Wire protocol types; source of truth for the TypeScript bindings      |
+| `apps/hyperion`            | Bridge client (Electron + React, built with electron-vite)            |
+| `packages/protocol`        | `@hyperion/protocol` — TS bindings generated from the protocol crate  |
+| `docs/`                    | Design docs, agent plans, UX guidelines                               |
 
 ## Prerequisites
 

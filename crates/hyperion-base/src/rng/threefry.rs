@@ -74,7 +74,7 @@ fn mix(x: &mut [u64; 2], rotation: u32) {
 /// The first of Random123's known-answer vectors for this variant:
 ///
 /// ```
-/// use hyperion_sim::rng::threefry2x64_20;
+/// use hyperion_base::rng::threefry2x64_20;
 ///
 /// assert_eq!(
 ///     threefry2x64_20([0, 0], [0, 0]),
