@@ -39,7 +39,7 @@ import {
   triadLayout,
 } from "./furniture";
 import { chooseLabels, placeLabels } from "./labels";
-import type { LocalFrame } from "./frame";
+import type { LocalFrame } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { pick } from "./pick";

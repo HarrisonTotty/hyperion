@@ -1,6 +1,6 @@
 ---
 name: plan-conformance-reviewer
-description: Checks that changes implement a HYPERION action-plan task as specified (its files, Provides signatures, tests and acceptance criteria) without contradicting the brainstorm specification or the plan's design notes, and drafts the "as built" deviations to record in the plan. Normally launched by the review-changes skill; use directly to check a finished plan task (an ID like P03.T4.b) against its plan alone.
+description: Checks that changes implement a HYPERION action-plan task as specified (its files, Provides signatures, tests and acceptance criteria) without contradicting the brainstorm specification or the plan's design notes, and drafts the "as built" deviations to record in the plan. Normally launched by the review-changes skill; use directly to check a finished plan task (an ID like P03.T4.b or R04.T3.c) against its plan alone.
 tools: Read, Grep, Glob, Bash
 model: inherit
 color: purple

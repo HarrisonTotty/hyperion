@@ -11,7 +11,7 @@ import { layoutHierarchy } from "../../lib/system/hierarchy";
 import { toSystemModel } from "../../lib/system/wire";
 import { fitPxPerUnit, PRESETS, project, viewBasis } from "../../spatial/camera";
 import { buildDrawList } from "../../spatial/drawList";
-import type { Vec3 } from "../../spatial/vec3";
+import type { Vec3 } from "../../geometry/vec3";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
