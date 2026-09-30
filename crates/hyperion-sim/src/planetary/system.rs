@@ -68,6 +68,8 @@
 //!   [`star_positions_at`](crate::stellar::multiplicity::star_positions_at) (bit for bit for a
 //!   star, and a pair's barycentre on the same walk), plus the body's Kepler state about its host;
 //!   a moon's is its planet's plus its own offset, and a ring's its planet's.
+//! - [`PlanetarySystem::state_at`]: that position bit for bit with the body's velocity beside it
+//!   (added by rendering plan R03's R03.T3).
 //! - [`PlanetarySystem::habitable_zone_at`]: Kopparapu et al.'s zone of a host's stars at the
 //!   time, with the light of the system's other stars (P14.T12.b).
 //!
@@ -85,7 +87,7 @@
 use core::f64::consts::TAU;
 
 use crate::Seed;
-use crate::coords::SystemPosition;
+use crate::coords::{SystemPosition, SystemVelocity};
 use crate::id::{BodyId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
@@ -1662,6 +1664,58 @@ impl PlanetarySystem {
         })
     }
 
+    /// Where body `index` is at `t` and how fast it moves: [`position_at`](Self::position_at)'s
+    /// position bit for bit, with the body's velocity relative to the system's barycentre, m/s
+    /// along the galactic axes (asked of plan 14 by rendering plan R03, and added by R03.T3).
+    ///
+    /// The velocity follows the position's construction: the host's barycentric velocity on plan
+    /// 11's walk ([`star_states_at`](crate::stellar::multiplicity::star_states_at)), plus the
+    /// body's Kepler velocity about it, and for a moon its planet's plus its own relative velocity.
+    /// It is the time derivative of the Kepler state at the elements then; a slow change of the
+    /// elements themselves (a moon's tidal migration, a host's mass loss) is left out, which is
+    /// far below the orbital velocity. `None` where `position_at` is.
+    ///
+    /// # Errors
+    ///
+    /// As [`body_at`](Self::body_at).
+    ///
+    /// # Panics
+    ///
+    /// As [`snapshot_at`](Self::snapshot_at).
+    pub fn state_at(
+        &self,
+        ctx: &SystemContext,
+        index: BodyIndex,
+        t: UniverseTime,
+    ) -> Result<Option<(SystemPosition, SystemVelocity)>, ResolveBodyError> {
+        let Some(position) = self.position_at(ctx, index, t)? else {
+            return Ok(None);
+        };
+        let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
+        let epoch = Epoch::new(self, ctx, t);
+        let primary = match body.host {
+            OrbitHost::Body(parent) => self
+                .body(parent)
+                .expect("a satellite's parent is a body of its system"),
+            OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
+        };
+        let zone = self.zone_of(primary);
+        let host = fate_host(ctx, zone);
+        let fate = self.fate_of(primary, &host).at(t);
+        let orbit = fate
+            .orbit()
+            .expect("a body with a position has its primary's orbit then");
+        let centre = epoch.velocity(zone, orbit);
+        let velocity = match &body.part {
+            Part::Planet(_) | Part::Member(_) | Part::Ring(_) => centre,
+            Part::Moon(moon) => {
+                let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                centre + orbit.relative_state_at(t).1
+            }
+        };
+        Ok(Some((position, velocity)))
+    }
+
     /// The habitable zone of the orbit host `host` at `t` (P14.T12.b): Kopparapu et al.'s limits
     /// for the host's stars at `t`, pushed out by the light of the system's other stars, each
     /// seen along the orbit that separates it from the host ([`habitable_zone_of`]).
@@ -2662,6 +2716,49 @@ impl<'c> Epoch<'c> {
                 node = *outer;
             }
         }
+    }
+
+    /// The velocity at the time of the barycentre of the components `members`, relative to the
+    /// system's barycentre: [`centre`](Self::centre)'s walk with each pair's relative velocity
+    /// shared as its separation is, as plan 11's
+    /// [`star_states_at`](crate::stellar::multiplicity::star_states_at) does.
+    #[must_use]
+    fn centre_velocity(&self, members: u32) -> SystemVelocity {
+        let h = self.ctx.hierarchy();
+        let mut node = h.root();
+        let mut velocity = SystemVelocity::ZERO;
+        loop {
+            if self.under[usize::from(node.get())] == members {
+                return velocity;
+            }
+            let (inner, outer, orbit) = match h.node(node) {
+                HierarchyNode::Star(_) => return velocity,
+                HierarchyNode::Pair {
+                    inner,
+                    outer,
+                    orbit,
+                } => (inner, outer, orbit),
+            };
+            let (_, relative) = orbit.relative_state_at(self.t);
+            let inner_mass = h.node_mass(*inner).value();
+            let outer_mass = h.node_mass(*outer).value();
+            let mass = h.node_mass(node).value();
+            if self.under[usize::from(inner.get())] & members == members {
+                velocity = velocity + relative * -(outer_mass / mass);
+                node = *inner;
+            } else {
+                velocity = velocity + relative * (inner_mass / mass);
+                node = *outer;
+            }
+        }
+    }
+
+    /// The velocity at the time of a body of `zone` on `orbit`, relative to the system's
+    /// barycentre: [`position`](Self::position)'s derivative at the elements then.
+    #[must_use]
+    fn velocity(&self, zone: &OrbitZone, orbit: &KeplerElements) -> SystemVelocity {
+        let (_, relative) = orbit.relative_state_at(self.t);
+        self.centre_velocity(members_of(zone)) + relative
     }
 
     /// The position at the time of a body of `zone` on `orbit`, its elements then about the zone's

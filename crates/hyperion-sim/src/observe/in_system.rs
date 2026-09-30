@@ -47,6 +47,10 @@ use crate::units::consts::SPEED_OF_LIGHT;
 
 use super::retarded::{before, light_time};
 
+mod tracks;
+
+pub use tracks::{BodyTrack, StarTrack};
+
 /// The change in the light time at which the iteration stops, inclusive: one nanosecond.
 ///
 /// The light time is rounded to the nanosecond ([`light_time`]), so a strict test could cycle

@@ -1177,3 +1177,20 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   difference can change `corrections` and the emitted time; `Span` and `UniverseTime` stay as whole
   seconds and nanoseconds; and `aberrated`'s grouping, documented on it, is copied operation for
   operation.
+- **Deviations in T3, as built.** `BodyTrack::new(system, ctx, index)` returns
+  `Result<_, ResolveBodyError>` and `StarTrack::new(hierarchy, star)` an `Option`, so a track is
+  resolved once and its `SystemTrajectory` methods need no error path; a belt or the halo resolves
+  but has no position. `StarTrack` walks the whole hierarchy per call (a few stars; fine for now).
+  Both velocity tests (plan 14's and plan 11's) hold the central difference over ±1 s to 10⁻⁶ of
+  the speed plus 4 ε X, X the widest pair apocentre, the body's own apocentre or its distance: a
+  Kepler state is rounded at a few ε of its orbit, more near pericentre of an eccentric orbit,
+  which over a 2 s difference exceeds 10⁻⁶ v for wide eccentric pairs (measured: 0.008 m/s against
+  1,179 m/s on a 430 au pair). A third test pins `Epoch::centre_velocity` to `star_states_at` bit
+  for bit. The golden also records each source's velocity now, the observer's velocity,
+  `corrections` and `residual`; a primary's mass for the Hill radius is μ ÷ G − m from the orbit,
+  as a client has it, and Hill radii are written for bodies with a mass and a bound orbit. The
+  golden's farthest body is 92.9 au out (asserted beyond 60 au, bodies only); its most corrections
+  is 4, since its observers see planets, and Design note 7's five and seven are held by R03.T2's
+  unit tests instead. Plans 14 and 11 carry as-built notes of the two additions. The star tests
+  run under `cargo test -p hyperion-sim --lib stellar::multiplicity::positions`, beside the task's
+  acceptance commands.

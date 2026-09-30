@@ -2354,3 +2354,9 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     integration: the golden systems' predicates count only `SlotKind::Star` slots as stars, and a
     brown dwarf's orbit about the system is no stellar pair in their separations.
   - Open: the `system_full` bench is written but not run; `just ci` not run (single combined gate).
+- **Added by rendering plan R03's R03.T3, by agreement (R03 Design note 8).**
+  `stellar::multiplicity::star_states_at(h, t, out: &mut Vec<(BodyId, SystemPosition,
+SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s walk with each
+  star's velocity relative to the barycentre beside its position, the positions bit for bit
+  `star_positions_at`'s (tested), the velocities the time derivative of the positions (tested by
+  central differences). `star_positions_at` is untouched and no golden moved.
