@@ -278,7 +278,7 @@ export const GRAPHICS_WORDS = {
   processRestarted: "GRAPHICS PROCESS RESTARTED",
   safeMode: "GRAPHICS SAFE MODE: views unavailable, relaunch to retry",
   disabledByLosses: (losses: number): string =>
-    `GRAPHICS DISABLED: ${losses} DEVICE LOSSES, relaunch to retry`,
+    `GRAPHICS DISABLED: ${losses} device losses, relaunch to retry`,
   disabledWithdrawn: "GRAPHICS DISABLED: adapter withdrawn, relaunch to retry",
 } as const;
 

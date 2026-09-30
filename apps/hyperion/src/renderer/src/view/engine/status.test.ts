@@ -218,7 +218,7 @@ describe("the annunciation", () => {
     const outcome = await adapterOutcome();
     const nominal = reduce(launched(), { kind: "adapter-outcome", outcome });
     expect(graphicsAnnunciation(reduce(nominal, LOST, LOST, LOST))).toEqual({
-      text: "GRAPHICS DISABLED: 3 DEVICE LOSSES, relaunch to retry",
+      text: "GRAPHICS DISABLED: 3 device losses, relaunch to retry",
       standing: "refused",
     });
     expect(graphicsAnnunciation(reduce(nominal, LOST, { kind: "adapter-withdrawn" }))).toEqual({
