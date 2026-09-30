@@ -341,7 +341,7 @@ export interface RenderEngine {
   dispose(): void;
 }
 
-/** The Babylon module's one export, `view/engine/babylon/engine.ts`. */
+/** The Babylon module's one export, `createBabylonEngine`, which only `loadEngine.ts` imports. */
 export type CreateBabylonEngine = (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,

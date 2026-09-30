@@ -1819,3 +1819,10 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     (a shared machine).
   - `loadEngine.test.ts` fakes `importEngine` through `LoadEngineOptions` and follows the call by a
     factory that rejects with a sentinel, so that no `RenderEngine` is built in the test.
+  - `just check-chunks` builds and runs the check; it is in neither `just ci` nor T14's acceptance,
+    so T9 (whose smoke page first imports `loadRenderEngine`) or T14 should name it, and the
+    Verification section's "the chunk check" under automatic holds only once one does. Laziness is
+    also guarded in `just ci` by `engineBoundary.test.ts`: no file outside `view/engine/babylon/`
+    imports `babylon/engine` statically, and only `loadEngine.ts` names it at all. The marker
+    strings are a heuristic; the build manifest (`build.manifest`) would test module membership
+    directly if a user-visible string ever carries `Babylon.js`.

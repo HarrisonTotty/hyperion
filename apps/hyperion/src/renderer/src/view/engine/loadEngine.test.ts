@@ -27,7 +27,7 @@ async function vettedAdapter(): Promise<AdapterOutcome & { readonly kind: "adapt
 const CREATED = new Error("the fake engine was created");
 
 describe("loading the engine", () => {
-  it("imports nothing until asked", async () => {
+  it("imports the engine module once per load", async () => {
     const outcome = await vettedAdapter();
     const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
     const createBabylonEngine = vi.fn<CreateBabylonEngine>().mockRejectedValue(CREATED);
@@ -36,7 +36,6 @@ describe("loading the engine", () => {
       .mockResolvedValue({ createBabylonEngine });
     const options = { importEngine };
 
-    expect(importEngine).not.toHaveBeenCalled();
     await expect(loadRenderEngine(outcome, status, options)).rejects.toBe(CREATED);
     expect(importEngine).toHaveBeenCalledOnce();
   });
