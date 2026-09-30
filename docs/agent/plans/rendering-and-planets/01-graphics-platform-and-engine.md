@@ -1826,3 +1826,60 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     imports `babylon/engine` statically, and only `loadEngine.ts` names it at all. The marker
     strings are a heuristic; the build manifest (`build.manifest`) would test module membership
     directly if a user-visible string ever carries `Babylon.js`.
+- **Deviations in T8.a, as built.**
+  - Materials are WGSL in Babylon's dialect (`attribute`, `varying`, `uniform`, and `var` without
+    group or binding; `vertexInputs`, `vertexOutputs`, `fragmentOutputs`), documented on
+    `WgslMaterialSpec`; the attributes and textures a material binds are read from its
+    declarations. The engine sets three reserved uniforms in each material's `onBind` at every
+    draw, `FRAME_UNIFORMS` in `types.ts`: `viewRotation` and `clipProjection` (the submission's
+    matrices, column-major and unchanged, `Matrix.FromArrayToRef` then `setMatrix`, which matches
+    R02.T7.a's `viewRotation4`) and `offsetFromCameraM`. The names avoid those Babylon fills itself
+    (`view`, `projection`, `world`). `StorageBufferSpec.binding` is unused, since Babylon assigns
+    bindings. **Awaiting the owner:** shaders tied to Babylon's dialect make a change of engine a
+    rewrite of every material, against the brainstorm's "a re-implementation of one adapter";
+    the alternatives are standard WGSL with fixed `@group`/`@binding` that the adapter converts, or
+    a translator at the switch.
+  - Compute kernels are plain WGSL with explicit `@group`/`@binding` and entry point `main`,
+    compiled on the engine's device with `layout: "auto"` (`babylon/compute.ts`, bindings read by
+    name with `kernelBindings`), and will be dispatched on the adapter's own compute passes, not
+    through Babylon's `ComputeShader`: that cannot carry the adapter's `timestampWrites`, and its
+    `setStorageTexture` takes no mip level, which `ComputeBindings.storage` needs. Indirect
+    dispatch becomes `dispatchWorkgroupsIndirect` (Design note 19's _Indirect work_ and T8.g's
+    `ComputeShader.dispatchIndirect` read so).
+  - `createPostProcess` is a Babylon `PostProcess` whose fragment source is registered in the
+    shader store under a unique key; its inputs bind under `POST_PROCESS_INPUTS` (`types.ts`):
+    `hdr-colour` is Babylon's own `textureSampler`, `depth` is `depthTexture`
+    (`texture_depth_2d`); its samplers' filter and address are set in `onApply`. The textures are
+    bound when a view or target runs it (T8.c, T8.f).
+  - Instancing: `instanceAttributes` are instanced vertex buffers (divisor 1) on the mesh's shared
+    Babylon `Geometry`, and each draw sets `Mesh.forcedInstanceCount`, not `thinInstanceSetBuffer`:
+    thin-instance buffers belong to one Babylon mesh, and a `MeshHandle` is drawn through a pool of
+    Babylon meshes, one per (mesh, material, n-th use in the frame), sharing its geometry, each
+    with `alwaysSelectAsActiveMesh`. A draw of zero instances is left out. Every draw thus takes
+    Babylon's instanced path (`INSTANCES`/`THIN_INSTANCES` defines, harmless while no source
+    declares `world0`–`world3`).
+  - A `blend` other than `none` puts the material in Babylon's transparent queue whatever
+    `transparent` says, since `Mesh.render` sets the alpha mode only there
+    (`mesh.pure.js:2187`); within the queue `alphaIndex` is the draw's place in the submission.
+  - `premultiplied` throws "built by R01.T8.i" until T8.i overrides mode 7's factors.
+  - `createBabylonEngine` dispatches a new `GraphicsEvent`, `device-capabilities`, read from the
+    device (`deviceCapabilities` in `platform.ts`), so a withheld feature reads as absent in the
+    status; a settled condition ignores it. A rebuild's `device-restored` writes the adapter's
+    capabilities, so T8.e sends `device-capabilities` after it. A feature asked for and not
+    enabled (`featuresNotEnabled`) is logged with `console.warn`. A failed creation disposes the
+    Babylon engine.
+  - Registrations are explicit (`babylon/registrations.ts`): the `.pure` modules' register
+    functions and the clear-quad and post-process vertex shaders, since `.oxlintrc.json` forbids
+    side-effect imports.
+  - `internals.ts` holds, besides `_device`, `_disableEngineYFlip` and `_hardwareTexture`'s read,
+    two accesses built ahead for T8.c: `setAttachmentFormat`, which writes the hardware wrapper's
+    `format` so that Babylon renders a canvas texture through its `-srgb` view, and
+    `flushEngine`, over `flushFramebuffer`, declared `@internal` (`webgpuEngine.pure.d.ts:977`), a
+    fourth pinned internal: it submits what Babylon has recorded so that the adapter's own passes
+    run after it, and ends Babylon's current render pass.
+  - Checked by a scratch page (not committed) on SwiftShader: the engine is made on the handed
+    adapter, its capabilities read (no `shader-f16`, the rest present), and a material, a mesh, a
+    compute kernel and a post-process are created. The RTX 3080 (`ampere` architecture, NVIDIA's
+    Vulkan driver, Electron 44.4.3 under the client's switches with `DISPLAY=:0`) exposes
+    `subgroups`, `timestamp-query`, `float32-filterable`, `float32-blendable`,
+    `rg11b10ufloat-renderable` and `depth-clip-control`, and no `shader-f16`.

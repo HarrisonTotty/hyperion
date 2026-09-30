@@ -103,6 +103,28 @@ describe("the timer", () => {
   });
 });
 
+describe("the device's capabilities", () => {
+  it("replace the adapter's, so that a withheld feature reads as absent", async () => {
+    const outcome = await adapterOutcome();
+    const capabilities = { ...outcome.capabilities, subgroups: false, timestampQuery: false };
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "device-capabilities", capabilities },
+    );
+    expect(status.capabilities).toEqual(capabilities);
+    expect(status.timer).toBe("absent");
+  });
+
+  it("leave a settled condition as it is", async () => {
+    const outcome = await adapterOutcome();
+    const safe = launched("safe");
+    expect(reduce(safe, { kind: "device-capabilities", capabilities: outcome.capabilities })).toBe(
+      safe,
+    );
+  });
+});
+
 describe("device loss", () => {
   it("sets the fault and counts", async () => {
     const outcome = await adapterOutcome();
