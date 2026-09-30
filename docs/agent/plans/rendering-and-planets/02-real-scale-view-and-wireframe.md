@@ -1194,3 +1194,23 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   as `clampToTidalRadius(positionM, tidalRadiusM)`. Eligible candidates are taken in ID order, as
   the sim's `BTreeMap` iterates; the wire form's fixed-width hex sorts as `BodyId` does. The test
   also runs every golden case with the candidates reversed.
+- **Deviations in R02.T6.a, as built.** `FrameOrigins.bodyCentre` is `bodyCentreM` (the unit in
+  the name). `Rotation3` is a branded `{ rows: [Vec3, Vec3, Vec3] }` built only by
+  `rotation3FromRows`, which refuses non-finite entries, departures from orthonormality above
+  `ROTATION_ORTHONORMAL_TOLERANCE` (10⁻¹², the sim's) and reflections; `IDENTITY_ROTATION`,
+  `rotateToBody` (R · p) and `rotateToBodyFixed` (Rᵀ · p) go with it, in `view/coords/rotation.ts`.
+  The conversions between the four kinds are `expressIn(p, frame, origins)` over a `ViewFrame`
+  union, built on `differenceM(a, b, origins)`, which differences in the innermost frame the two
+  share (one body's frames, one system's, else through the galactic frame, barycentres differenced
+  cells first); `frameOf`, `systemOfFrame` and `galacticTranslated` (which refuses a result
+  outside the wire's `i32` cells) are exported too. A `null` rotation takes the body-fixed axes as
+  the body frame's (Design note 14). The galactic delta's test tolerates the frame's 2 m spacing
+  at a whole light-year's offset rather than asserting an exact cells-first sum.
+- **Deviations in R02.T6.b, as built.** `relativeToCamera` and `originMinusCamera` take
+  `CameraOrigins`, which extends `FrameOrigins` with `craftPosition(craft: CraftId)`, which the
+  `craft` frame needs; `CraftId` is a plain string. `CameraPose`, `CameraFrame` (whose `galactic`
+  variant carries its own `origin: GalacticPosition`) and the `Quaternion` interface are in
+  `view/camera/pose.ts`; the quaternion's operations and constructor are R02.T7.a's. A `craft`
+  pose's offset is along the galactic axes. The hull test's system-frame half asserts an error
+  above 0.1 m (f64 at 1 ly is spaced at 2 m, so the rounding is up to a metre, 0.37 m in the
+  test), where the plan says "by metres".
