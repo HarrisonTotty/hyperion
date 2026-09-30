@@ -5,6 +5,14 @@ import { app, BrowserWindow, shell } from "electron";
 
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { parseClientArgs, serverUrlOf, userArgs } from "./cli";
+import {
+  applyGraphicsSwitches,
+  GPU_TIMING_SWITCH,
+  graphicsSwitches,
+  launchModeOf,
+  SAFE_MODE_SWITCH,
+} from "./graphics/switches";
+import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 
 function reportLoadFailure(error: unknown): void {
@@ -80,10 +88,41 @@ function createWindow(serverUrl: string): void {
   }
 }
 
+/**
+ * Sets up the GPU before `ready`: relaunches a Wayland session through XWayland, or puts the
+ * launch's graphics switches on the command line.
+ *
+ * @returns Whether the launch goes on; `false` once a relaunch has been asked for and this process
+ * is exiting.
+ */
+function prepareGraphics(): boolean {
+  // `process.argv.slice(1)`: Electron supplies the executable itself (R01 Design note 3).
+  const relaunchArgs = x11RelaunchArgs(process.argv.slice(1), process.env, process.platform);
+  if (relaunchArgs !== undefined) {
+    app.relaunch({ args: [...relaunchArgs] });
+    app.exit(0);
+    return false;
+  }
+  // Without it Chromium blocked WebGPU for the page after the second GPU-process crash, so the
+  // client never got the chance to report and recover (R01 Design note 6).
+  app.disableDomainBlockingFor3DAPIs();
+  const mode = launchModeOf(process.platform, app.commandLine.hasSwitch(SAFE_MODE_SWITCH));
+  const gpuTiming = app.commandLine.hasSwitch(GPU_TIMING_SWITCH);
+  applyGraphicsSwitches(
+    app.commandLine,
+    graphicsSwitches({ platform: process.platform, mode, gpuTiming }),
+  );
+  return true;
+}
+
 async function main(): Promise<void> {
   // Before the app is ready, so that `--help` and a usage error answer without a window appearing.
   const serverUrl = resolveServerUrl();
   if (serverUrl === undefined) {
+    return;
+  }
+  // Also before `ready`: Chromium reads its switches when the GPU process starts.
+  if (!prepareGraphics()) {
     return;
   }
 
