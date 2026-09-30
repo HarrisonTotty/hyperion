@@ -1355,6 +1355,28 @@ It reserves, so that later plans need not:
   `assert_registries_disjoint` doctests use `tags::SELFTEST_STREAM` against an empty registry
   (passing) and against itself (`compile_fail,E0080`), so they carry over to base unchanged but
   for the crate path; two unit tests beside them. `tests/foundation_order.rs` needed no change.
+- **Deviations in T4.d, as built.** Moved by `git mv` from `crates/hyperion-sim/src/` to
+  `crates/hyperion-base/src/`: `rng/mod.rs`, `rng/stream.rs`, `rng/key.rs`, `rng/domain_tag.rs`,
+  `rng/decide.rs`, `rng/threefry.rs`, `rng/raw_event.rs`, `rng/sample/` (six files) and `hex.rs`;
+  and `rng/samplers.golden` and `rng/decisions.golden` from the sim's `tests/golden/` to base's
+  (100% renames), with `samplers_are_pinned` and `decisions_are_pinned`. New files: base's
+  `rng/tags.rs` (`selftest.stream` alone), base's `tests/panics.rs` and the sim's `rng/mod.rs`.
+  The sim's registry stays at `crates/hyperion-sim/src/rng/tags.rs`, less `selftest.stream`, which
+  it re-exports; the sim's old `rng/mod.rs` shows as the rename to base's, its Events section,
+  central-promise doctest and structured stream test going to the sim's new one, which is
+  `pub use hyperion_base::rng::*` plus `event` and `tags` (local items shadow the glob, so
+  `hyperion_sim::rng::tags` is the sim's registry). All 19 of base's `should_panic` tests, the two
+  of `math` (moved in T4.a) among them, are in `tests/panics.rs`, each with `expected`.
+  `HexFault`, now public, gained `Display`, `Error` and base's own unit tests. `DomainTag`'s docs
+  name the one exception to "only through the macro": tests that mint a tag outside every registry
+  to vary it (base's `panics.rs` and `domain_tag.rs`, the sim's `rng/mod.rs`); a source check that
+  no non-test code calls `DomainTag::registered` is not built (a determinism-review suggestion,
+  left open). The compile_fail doctests were checked by hand: with each error removed (the
+  duplicate, the upper-case and one-segment names, the doubled registry) all four compiled and
+  rustdoc failed them as "compiled successfully", so each fails for its own reason (on stable,
+  rustdoc does not check the `E0080` code). The disjointness `const` covers base's and the sim's
+  registries until T5. **Pending:** `just bench -- rng` and `-- samplers` before and after (never a
+  quiet machine), and `just test-wasm` (no wasmtime here; T7).
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so

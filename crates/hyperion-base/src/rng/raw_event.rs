@@ -52,7 +52,6 @@ impl RawEventKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rng::tags;
 
     const SEED: Seed = Seed::new(0x0e7e_0000_0000_0002);
 
@@ -77,11 +76,5 @@ mod tests {
             [stream.word_at(2), stream.word_at(3)],
             threefry2x64_20(key.words(), [u64::MAX, (3 << 48) | 1])
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "an event key needs a tag of scope Event")]
-    fn a_raw_event_key_refuses_a_tag_of_another_scope() {
-        let _ = RawEventKey::derive(SEED, tags::SELFTEST_STREAM, [0, 0]);
     }
 }

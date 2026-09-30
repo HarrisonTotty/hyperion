@@ -19,7 +19,7 @@ use std::str::FromStr;
 use super::body::BodyId;
 use super::event::{DecodeEventWordError, EventId, EventSubject, EventWord};
 use super::system::{DecodeSystemIdError, SystemId};
-use crate::hex::{HexFault, parse_lower_hex};
+use hyperion_base::hex::{HexFault, parse_lower_hex};
 
 /// A [`SystemId`] did not parse from its text form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

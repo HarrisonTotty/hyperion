@@ -51,15 +51,14 @@
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
 //!   the Roche, Hill and satellite-stability limits.
 //!
-//! [`math`], [`units`] and [`version`] live in `hyperion-base`, beneath this crate, and are
-//! re-exported here at their old paths. That crate is this one's only runtime dependency, and
-//! `libm`, beneath it, the only external one.
+//! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
+//! this crate, and are re-exported here at their old paths. That crate is this one's only runtime
+//! dependency, and `libm`, beneath it, the only external one.
 
 pub mod alerts;
 pub mod coords;
 pub mod events;
 pub mod galaxy;
-mod hex;
 pub mod id;
 pub mod lensing;
 pub mod observe;

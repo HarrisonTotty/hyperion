@@ -37,8 +37,8 @@ const SUB_SHIFT: u32 = 48;
 /// Random access and sequential draws agree:
 ///
 /// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::rng::{ObjectKey, Stream, tags};
+/// use hyperion_base::Seed;
+/// use hyperion_base::rng::{ObjectKey, Stream, tags};
 ///
 /// let mut stream = Stream::open(Seed::new(42), tags::SELFTEST_STREAM, ObjectKey::galaxy());
 /// let third = stream.word_at(2);
@@ -274,40 +274,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "past its end")]
-    fn drawing_past_the_last_block_panics() {
-        let mut stream = open(ObjectKey::galaxy());
-        stream.seek(Stream::WORDS - 1);
-        stream.next_u64();
-        stream.next_u64();
-    }
-
-    #[test]
-    #[should_panic(expected = "cannot seek")]
-    fn seeking_past_the_end_panics() {
-        open(ObjectKey::galaxy()).seek(Stream::WORDS + 1);
-    }
-
-    #[test]
     fn keys_hold_seed_and_tag_and_counters_hold_the_object() {
         let stream = open(ObjectKey::body(SYSTEM, 0x0102));
         assert_eq!(stream.key, [SEED.get(), tags::SELFTEST_STREAM.hash()]);
         assert_eq!(stream.counter(7), [SYSTEM, (0x0102 << 48) | 7]);
         assert_eq!(open(ObjectKey::system(SYSTEM)).counter(7), [SYSTEM, 7]);
-    }
-
-    #[test]
-    #[should_panic(expected = "scope")]
-    fn a_scope_mismatch_panics() {
-        const CELL_TAG: DomainTag = DomainTag::registered("selftest.cell", TagScope::Cell);
-        let _ = Stream::open(SEED, CELL_TAG, ObjectKey::galaxy());
-    }
-
-    #[test]
-    #[should_panic(expected = "scope")]
-    fn an_event_tag_is_never_opened_as_a_stream() {
-        const EVENT_TAG: DomainTag = DomainTag::registered("selftest.event_tag", TagScope::Event);
-        let _ = Stream::open(SEED, EVENT_TAG, ObjectKey::galaxy());
     }
 
     #[test]

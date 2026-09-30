@@ -1,16 +1,21 @@
 //! Golden files of the foundation that `hyperion-base` holds.
 //!
-//! Every value pinned here is part of the generator version: so far the pinned `libm`'s function
-//! values, which moved here from `hyperion-sim` with `math` (plan R04, T4.a) byte for byte. Each
+//! Every value pinned here is part of the generator version: the pinned `libm`'s function values,
+//! every sampler's output and word consumption, and the decision thresholds, which moved here from
+//! `hyperion-sim` with `math` and `rng` (plan R04, T4.a and T4.d) byte for byte, and `j0`. Each
 //! file's first line is `# generator_version = <n>` from [`GENERATOR_VERSION`], so a version bump
 //! fails every test here until `just bless` regenerates the files in the same commit, and
 //! [`every_golden_file_carries_the_current_version`] holds every golden file of the crate to the
 //! same header, whichever test writes it.
 
 use std::f64::consts::{FRAC_PI_4, LN_2, PI};
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
-use hyperion_base::{GENERATOR_VERSION, math};
+use hyperion_base::rng::{
+    ObjectKey, PiecewiseLinear, PiecewisePowerLaw, PowerLaw, Stream, Threshold, Thresholds, tags,
+};
+use hyperion_base::{GENERATOR_VERSION, Seed, math};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 
@@ -22,7 +27,12 @@ fn writer() -> GoldenWriter {
 }
 
 /// The golden files this suite writes, by name.
-const FOUNDATION_GOLDENS: [&str; 2] = ["math/functions", "math/bessel"];
+const FOUNDATION_GOLDENS: [&str; 4] = [
+    "math/functions",
+    "math/bessel",
+    "rng/samplers",
+    "rng/decisions",
+];
 
 /// The crate's golden directory.
 fn golden_root() -> PathBuf {
@@ -462,4 +472,160 @@ fn j0_values_are_pinned() {
         w.f64(&format!("j0({x:?})"), math::j0(x));
     }
     golden!("math/bessel", w.as_str());
+}
+
+/// Sixteen values of each sampler from `selftest.stream`, and the words each consumed.
+#[test]
+fn samplers_are_pinned() {
+    fn section(
+        w: &mut GoldenWriter,
+        item: u64,
+        name: &str,
+        mut draw: impl FnMut(&mut Stream) -> Drawn,
+    ) {
+        let mut stream = Stream::open(
+            Seed::new(0x5a3f_1e00_601d_e000),
+            tags::SELFTEST_STREAM,
+            ObjectKey::galaxy_item(item),
+        );
+        w.line("");
+        w.line(name);
+        for n in 0..16 {
+            match draw(&mut stream) {
+                Drawn::Real(x) => w.f64(&format!("[{n}]"), x),
+                Drawn::Pair(x, y) => {
+                    w.f64(&format!("[{n}].0"), x);
+                    w.f64(&format!("[{n}].1"), y);
+                }
+                Drawn::Count(k) => w.line(&format!("[{n}] = {k}")),
+            }
+        }
+        w.line(&format!("words = {}", stream.position()));
+    }
+
+    let six = NonZeroU64::new(6).unwrap();
+    let huge = NonZeroU64::new((1 << 63) + 1).unwrap();
+    let massive = PowerLaw::new(2.3, 8.0, 150.0).unwrap();
+    let flat_log = PowerLaw::new(1.0, 1.0, 1_000.0).unwrap();
+    let rising = PowerLaw::new(-0.5, 1.0, 4.0).unwrap();
+    let kroupa =
+        PiecewisePowerLaw::continuous(&[0.01, 0.08, 0.5, 150.0], &[0.3, 1.3, 2.3]).unwrap();
+    let band_c = kroupa.truncated(0.75, 2.5).unwrap();
+    let triangle = PiecewiseLinear::new(&[0.0, 1.0, 3.0], &[0.0, 2.0, 0.0]).unwrap();
+
+    let mut w = writer();
+    let real = Drawn::Real;
+    section(&mut w, 0, "uniform", |s| real(s.uniform()));
+    section(&mut w, 1, "uniform_open_low", |s| {
+        real(s.uniform_open_low())
+    });
+    section(&mut w, 2, "uniform_open", |s| real(s.uniform_open()));
+    section(&mut w, 3, "uniform_in(-3, 5)", |s| {
+        real(s.uniform_in(-3.0, 5.0))
+    });
+    section(&mut w, 4, "below(6)", |s| Drawn::Count(s.below(six)));
+    section(&mut w, 5, "below(2^63 + 1)", |s| {
+        Drawn::Count(s.below(huge))
+    });
+    section(&mut w, 6, "standard_normal", |s| real(s.standard_normal()));
+    section(&mut w, 7, "standard_normal_pair", |s| {
+        let (x, y) = s.standard_normal_pair();
+        Drawn::Pair(x, y)
+    });
+    section(&mut w, 8, "normal(1.5, 0.25)", |s| {
+        real(s.normal(1.5, 0.25))
+    });
+    section(&mut w, 9, "log_normal(0.3, 0.5)", |s| {
+        real(s.log_normal(0.3, 0.5))
+    });
+    section(&mut w, 10, "log_normal_dex(8, 0.11)", |s| {
+        real(s.log_normal_dex(8.0, 0.11))
+    });
+    for (item, mean) in (11..).zip([0.3, 1.2, 9.99, 10.0, 1_000.0, 3e5]) {
+        section(&mut w, item, &format!("poisson({mean})"), |s| {
+            Drawn::Count(s.poisson(mean))
+        });
+    }
+    section(&mut w, 17, "power_law(2.3, 8, 150)", |s| {
+        real(s.power_law(&massive))
+    });
+    section(&mut w, 18, "power_law(1, 1, 1000)", |s| {
+        real(s.power_law(&flat_log))
+    });
+    section(&mut w, 19, "power_law(-0.5, 1, 4)", |s| {
+        real(s.power_law(&rising))
+    });
+    section(&mut w, 20, "Kroupa on [0.01, 150]", |s| {
+        real(kroupa.sample(s))
+    });
+    section(&mut w, 21, "Kroupa on [0.75, 2.5]", |s| {
+        real(band_c.sample(s))
+    });
+    section(&mut w, 22, "triangle (0, 0) (1, 2) (3, 0)", |s| {
+        real(triangle.sample(s))
+    });
+    golden!("rng/samplers", w.as_str());
+}
+
+/// One draw of a sampler, as the golden prints it.
+enum Drawn {
+    Real(f64),
+    Pair(f64, f64),
+    Count(u64),
+}
+
+/// The integer-threshold convention: thresholds of fixed probabilities and weights, and sixteen
+/// marks from `selftest.stream` with the decisions and picks they give.
+#[test]
+fn decisions_are_pinned() {
+    let mut w = writer();
+    let third = Threshold::from_probability(1.0 / 3.0);
+    for (label, threshold) in [
+        ("0.1", Threshold::from_probability(0.1)),
+        ("1/3", third),
+        ("4e-5", Threshold::from_probability(4e-5)),
+        (
+            "1 - 2^-53",
+            Threshold::from_probability(1.0 - f64::EPSILON / 2.0),
+        ),
+        ("1", Threshold::from_probability(1.0)),
+        ("0", Threshold::from_probability(0.0)),
+    ] {
+        w.u64_hex(&format!("from_probability({label})"), threshold.get());
+    }
+    w.u64_hex("from_ratio(3, 7)", Threshold::from_ratio(3.0, 7.0).get());
+    w.u64_hex(
+        "from_ratio(0.8, 2.5)",
+        Threshold::from_ratio(0.8, 2.5).get(),
+    );
+
+    // Four classes with shares 0.1, 0.25, 0.05 and 0.3 of a bound of 2.5; the rest is rejection.
+    let weights = [0.25, 0.625, 0.125, 0.75];
+    let bound = 2.5;
+    let thresholds = Thresholds::from_weights(&weights, bound);
+    w.line("");
+    w.line(&format!("from_weights({weights:?}, {bound})"));
+    for (i, threshold) in thresholds.as_slice().iter().enumerate() {
+        w.u64_hex(&format!("[{i}]"), threshold.get());
+    }
+
+    let mut stream = Stream::open(
+        Seed::new(0x5a3f_1e00_601d_e000),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy_item(23),
+    );
+    w.line("");
+    w.line("marks of selftest.stream, item 23");
+    for n in 0..16 {
+        let mark = stream.mark();
+        let pick = mark.pick(&thresholds);
+        assert_eq!(pick, mark.pick_weighted(&weights, bound));
+        w.line(&format!(
+            "[{n}] mark = 0x{:014x} below(1/3) = {} pick = {pick:?}",
+            mark.get(),
+            mark.is_below(third)
+        ));
+    }
+    w.line(&format!("words = {}", stream.position()));
+    golden!("rng/decisions", w.as_str());
 }
