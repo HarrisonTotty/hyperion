@@ -134,6 +134,16 @@ pub struct StellarBriefDto {
     /// three stellar companions, direct or in subsystems (plan 11, P11.T13; rulings 74 and 81),
     /// and one bound brown dwarf, which the count includes (P11.T2.d).
     pub star_count: u8,
+    /// Its absolute visual magnitude M<sub>V</sub>, mag (Johnson V at 10 pc), from its luminosity
+    /// and temperature through plan 06's bolometric corrections (a named ask of plan 06, built by
+    /// plan R02, R02.T5).
+    ///
+    /// Absent where the primary is not a living star (a white dwarf, a neutron star, a black hole
+    /// or nothing), has no luminosity, or is below the last of plan 06's corrections (1,710 K), so
+    /// a brief without it keeps its earlier wire form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub absolute_v_mag: Option<f32>,
 }
 
 /// Asks for every star of one system as it is at one time (`system_summary`), answered with a
@@ -1096,6 +1106,7 @@ pub(crate) mod tests {
                 log_luminosity_lsun: Some(2.125),
                 teff_k: Some(4_286.0),
                 star_count: 2,
+                absolute_v_mag: Some(0.625),
             },
             json!({
                 "kind": "giant",
@@ -1103,6 +1114,7 @@ pub(crate) mod tests {
                 "log_luminosity_lsun": 2.125,
                 "teff_k": 4_286.0,
                 "star_count": 2,
+                "absolute_v_mag": 0.625,
             }),
         );
         assert_wire_form(
@@ -1112,6 +1124,7 @@ pub(crate) mod tests {
                 log_luminosity_lsun: None,
                 teff_k: None,
                 star_count: 1,
+                absolute_v_mag: None,
             },
             json!({
                 "kind": "black_hole",
