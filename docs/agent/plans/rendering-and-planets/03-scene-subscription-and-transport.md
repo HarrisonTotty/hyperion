@@ -1121,3 +1121,41 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 - **Body frames on the wire.** `FramePositionDto::Body` names a non-rotating body frame, plan 01's
   `Frame::Body`. R02's `BodyFixedPosition`, which rotates, is a position type and does not go on the
   wire here; if R02 needs it there, it adds a variant.
+- **Re-validated at `899db5e` (R03.T1, 2026-09-30).** No brainstorm change since the plan was
+  written. Found in the tree: P12.T9 has not landed (no `SubscribeRequest`, `Subscribed`,
+  `SubscriptionTopic` or `ServerMessage::Notification` anywhere), so R03.T5.a builds the whole
+  envelope; `PlanetarySystem::state_at`, `star_states_at` and `galaxy::frame::candidate_at` are
+  absent, so R03.T3 and R03.T7.a add them by agreement. The velocities they need exist and are
+  discarded today: `KeplerElements::relative_state_at` and `Orbit::relative_state_at` return
+  `(SystemVector, SystemVelocity)`, and `position_at` (through the private `Epoch::position`) and
+  `star_positions_at` keep only the first. Every other Consumes name matches, with these
+  particulars for later tasks: `star_positions_at(h, t, out: &mut Vec<(BodyId, SystemPosition)>)`
+  fills an out-parameter; `SystemPosition` has no `Sub` (use `displacement_to`, which gives other
+  − self, and `SystemVector::length`); `Span::as_seconds_f64` and `from_seconds_f64` are the names;
+  the window is `ClockWindow::contains` (±`CLOCK_WINDOW_H`, 1,000 Julian years); `hill_radius(a,
+e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a `&PointLy`;
+  `convert::planetary::system_bodies(wanted: BodiesRequest, hosts, ctx, planets, seed)`;
+  `requests::is_large` and `requests::system::bodies_of` are private, as the plan says;
+  `Handler::handle` returns `HandlerFuture`, a boxed `Result<ResponseBody, RequestError>`, which
+  R03.T10.a's `Answer` replaces; `Outbound::has_room_for(bytes)` exists; the three `axum::serve`
+  sites are `main.rs`, `src/testing.rs` (`Harness::start_with_limits`) and `tests/common/mod.rs`
+  (`TestServer::start_with`); socket2 0.6.5 is in `Cargo.lock` through tokio only; the lock holds
+  tungstenite 0.29.0 (axum's) and 0.30.0 (the tests' `tokio-tungstenite`). On the client,
+  `fractionOfPeriod` and `reduceToHalfTurn` are module-private in `lib/orbit.ts`, so R03.T13
+  exports them (or mirrors through `positionAt`) to share the exact reduction. The skills'
+  `plan_task.py` does not yet parse `R` IDs (R04.T7.c), so these tasks are read from the plan.
+  No task pending re-validation among T1–T10.a; T13 still waits on R02.T8.a.
+- **Deviations in T1, as built.** The plan 04 row and the P12.T9 note are drafted in the galaxy
+  plans and, per the RM1 lane rules, treated as provisionally accepted so that R03.T5.a proceeds;
+  the owner still signs them off (README, Awaiting the owner). The question 21 test is
+  `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` in
+  `crates/hyperion-server/tests/websocket.rs`: hello, `create_universe`, a 5 ly range query and two
+  pings, each answered by the very next text frame, which `TestClient` parses as `ServerMessage`
+  and would panic on as binary.
+- **Draft for the brainstorm's revision pass (R03.T1): open question 21 closed.** To replace the
+  entry's "**Open.**" text: "**Closed: no bump.** The first `notification` and the first binary
+  frames are additions like a new kind: the server sends a notification only on a subscription the
+  client opened and binary frames only in answer to a request whose kind asks for bulk, so a
+  version 2 client that sends neither receives neither, and a newer client asking an older server
+  gets `unsupported`. `PROTOCOL_VERSION` stays 2 while neither is ever sent unasked; a test pins it
+  (plan R03, Design note 12)." The owner signs off.

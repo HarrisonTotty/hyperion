@@ -5,7 +5,8 @@ mod common;
 
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, PROTOCOL_VERSION, RequestBody, RequestId, ResponseBody, ServerMessage,
+    ErrorCode, GalacticPosition, MassLayer, PROTOCOL_VERSION, RequestBody, RequestId, ResponseBody,
+    ServerMessage, SystemsInRangeRequest, UniverseTime,
 };
 use hyperion_server::limits::{MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES};
 
@@ -263,4 +264,67 @@ async fn the_server_stops_with_clients_connected_and_closes_them() {
     for closed in closing {
         assert_eq!(closed.await.unwrap(), Some(GOING_AWAY));
     }
+}
+
+/// Open question 21's ruling (plan R03, Design note 12): the first `notification` and the first
+/// binary frames are additions that leave `PROTOCOL_VERSION` at 2, because the server sends
+/// neither unasked. A client that subscribes to nothing and asks for no bulk receives only text
+/// frames of the messages a version 2 client already knows, each in answer to what it sent, and
+/// nothing between them.
+#[tokio::test]
+async fn a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames() {
+    let server = TestServer::start().await;
+    let mut client = server.connect().await;
+
+    // `next_text` panics on a binary frame, and each text must parse as today's `ServerMessage`.
+    let welcome = client.hello().await;
+    assert!(
+        matches!(
+            welcome,
+            ServerMessage::Welcome {
+                protocol_version: 2,
+                ..
+            }
+        ),
+        "{welcome:?}"
+    );
+    let universe = client.create_universe("Question 21", 0x4d2).await;
+
+    let range = client
+        .send_request(RequestBody::SystemsInRange(SystemsInRangeRequest {
+            universe: universe.id,
+            centre: GalacticPosition {
+                cell_ly: [0, 26_000, 0],
+                offset_m: [0.0; 3],
+            },
+            radius_ly: 5.0,
+            time: UniverseTime {
+                seconds: 0,
+                nanos: 0,
+            },
+            min_layer: MassLayer::A,
+            limit: 100,
+            include_stellar: false,
+        }))
+        .await;
+    // The range query's terminal response comes next: no notification or other message precedes it.
+    let answer = client.next_message().await;
+    assert!(
+        matches!(
+            &answer,
+            ServerMessage::Response {
+                id,
+                body: ResponseBody::SystemsInRange(_),
+            } if *id == range
+        ),
+        "{answer:?}"
+    );
+
+    // Two pings, each answered by the very next frame: nothing arrives between the answers.
+    for nonce in [21, 22] {
+        assert_eq!(client.ping(nonce).await, ServerMessage::Pong { nonce });
+    }
+
+    client.close().await;
+    server.stop().await;
 }
