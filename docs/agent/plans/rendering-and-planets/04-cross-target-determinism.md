@@ -1303,6 +1303,14 @@ It reserves, so that later plans need not:
   pre-push hook runs neither.
 - **AArch64 stays unchecked.** The claims are corrected, not made true; if a server is ever run on
   Arm, a run there is the check to add.
+- **Deviations in T1, as built.** `clippy_bans.rs` finds the crates' own files by listing
+  `crates/` rather than naming them, so base's and the surface crate's files (T4.a, T5) are held to
+  the list with no edit; it reads only the `disallowed-methods` array and ignores comments, and a
+  fourth test, `a_commented_out_ban_does_not_count`, pins that. The `reason` strings are the plan's
+  paraphrase; the header comments quote rustc 1.98.1's `primitive_docs.rs` (lines 1336–1337) word
+  for word. The hand check ran `cargo clippy -p <crate> --lib -- -D warnings` (a subset of
+  `just lint`) on `hyperion-sim`, `hyperion-fit` and `hyperion-server`, each failing with "use of a
+  disallowed method `f64::algebraic_add`".
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so
