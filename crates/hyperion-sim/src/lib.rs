@@ -59,6 +59,7 @@ pub mod alerts;
 pub mod coords;
 pub mod events;
 pub mod galaxy;
+mod hex;
 pub mod id;
 pub mod lensing;
 pub mod observe;

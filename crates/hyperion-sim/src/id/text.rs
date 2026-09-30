@@ -19,40 +19,7 @@ use std::str::FromStr;
 use super::body::BodyId;
 use super::event::{DecodeEventWordError, EventId, EventSubject, EventWord};
 use super::system::{DecodeSystemIdError, SystemId};
-
-/// Why a fixed-width hexadecimal field did not parse. Shared with `rng::Seed`'s text form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HexFault {
-    Whitespace,
-    HexPrefix,
-    WrongLength(usize),
-    UpperCase,
-    InvalidDigit,
-}
-
-/// Parses exactly `digits` lower-case hexadecimal digits.
-pub(crate) fn parse_lower_hex(text: &str, digits: usize) -> Result<u64, HexFault> {
-    if text.chars().any(char::is_whitespace) {
-        return Err(HexFault::Whitespace);
-    }
-    if text.starts_with("0x") || text.starts_with("0X") {
-        return Err(HexFault::HexPrefix);
-    }
-    if text.len() != digits {
-        return Err(HexFault::WrongLength(text.len()));
-    }
-    let mut value = 0_u64;
-    for b in text.bytes() {
-        let digit = match b {
-            b'0'..=b'9' => b - b'0',
-            b'a'..=b'f' => b - b'a' + 10,
-            b'A'..=b'F' => return Err(HexFault::UpperCase),
-            _ => return Err(HexFault::InvalidDigit),
-        };
-        value = (value << 4) | u64::from(digit);
-    }
-    Ok(value)
-}
+use crate::hex::{HexFault, parse_lower_hex};
 
 /// A [`SystemId`] did not parse from its text form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
