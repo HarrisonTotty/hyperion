@@ -186,6 +186,10 @@ export class RequestClient {
       case "request_error":
         this.#take(message.id)?.fail(message.error);
         break;
+      case "notification":
+        // Consumed and dropped until the subscription helper routes it (rendering plan R03,
+        // R03.T5.c): a client that subscribes to nothing is never sent one.
+        break;
       case "welcome":
       case "pong":
       case "error":

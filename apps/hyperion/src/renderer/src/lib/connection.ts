@@ -173,6 +173,7 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
             break;
           case "response":
           case "request_error":
+          case "notification":
             // The request client consumes every one of these above.
             break;
         }

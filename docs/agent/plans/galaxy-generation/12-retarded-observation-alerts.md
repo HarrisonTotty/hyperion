@@ -582,7 +582,9 @@ This task then adds only the `Alerts` topic, state and notification body, `alert
 note 1): the subscription helper lives on `RequestClient` itself
 (`packages/protocol/src/subscriptions.ts`), so `handleServerMessage` routes a `notification` to its
 subscription and consumes it (returns `true`), dropping one for an unknown subscription, rather than
-leaving it unconsumed for a helper outside.
+leaving it unconsumed for a helper outside. As built (R03.T5.a): the envelope's three enums,
+`SubscriptionTopic`, `SubscriptionState` and `NotificationBody`, are tagged by `topic` in snake
+case, and `ResponseBody::Subscribe` holds a `Box<Subscribed>`; the `Alerts` variants follow both.
 
 Tests: wire forms; an integration test subscribes near a pinned recurrent nova, advances the
 observer's time past an arrival and receives one contact at `bearing`, then moves the observer close

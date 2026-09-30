@@ -22,8 +22,9 @@ pub(crate) mod testing;
 mod universe;
 
 pub use envelope::{
-    ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    ServerMessage,
+    ClientMessage, ErrorCode, NotificationBody, REQUEST_KINDS, RequestBody, RequestError,
+    RequestId, ResponseBody, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
+    SubscriptionTopic, UnsubscribeRequest,
 };
 pub use galaxy::{
     Census, DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, LayerCensus,

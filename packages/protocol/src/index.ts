@@ -73,6 +73,13 @@ import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
 import type { RequestId } from "./generated/RequestId";
 import type { ResponseBody } from "./generated/ResponseBody";
+// The subscription envelope (plan 12's P12.T9, built by rendering plan R03's R03.T5.a).
+import type { NotificationBody } from "./generated/NotificationBody";
+import type { SubscribeRequest } from "./generated/SubscribeRequest";
+import type { Subscribed } from "./generated/Subscribed";
+import type { SubscriptionState } from "./generated/SubscriptionState";
+import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
+import type { UnsubscribeRequest } from "./generated/UnsubscribeRequest";
 // The scene (rendering plan R03, R03.T4).
 import type { BodyGrantDto } from "./generated/BodyGrantDto";
 import type { CameraReportDto } from "./generated/CameraReportDto";
@@ -191,6 +198,12 @@ export type {
   RequestError,
   RequestId,
   ResponseBody,
+  NotificationBody,
+  SubscribeRequest,
+  Subscribed,
+  SubscriptionState,
+  SubscriptionTopic,
+  UnsubscribeRequest,
   BodyGrantDto,
   CameraReportDto,
   FramePositionDto,
