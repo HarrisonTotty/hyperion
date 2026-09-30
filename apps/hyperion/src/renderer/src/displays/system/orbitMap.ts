@@ -17,10 +17,10 @@ import type { LayerIndex } from "../../lib/galaxy/model";
 import { composePosition, orbitPolyline } from "../../lib/orbit";
 import { type HierarchyLayout, orbitNormal } from "../../lib/system/hierarchy";
 import type { HostBody, SystemBodies, SystemPlane } from "../../lib/system/model";
-import { type LocalFrame, localFrameAt, planeFrame } from "../../spatial/frame";
+import { type LocalFrame, localFrameAt, planeFrame } from "../../geometry/frame";
 import type { PathMark, PlaneRing, PointMark, SpatialScene } from "../../spatial/marks";
 import { gridSpacing } from "../../spatial/scale";
-import { add, scale, type Vec3 } from "../../spatial/vec3";
+import { add, scale, type Vec3 } from "../../geometry/vec3";
 import type { LayerBand } from "../galaxy/chartModel";
 import {
   type BodiesLayout,

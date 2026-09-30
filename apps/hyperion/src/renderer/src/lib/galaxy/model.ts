@@ -14,7 +14,7 @@ import type {
   SystemIdHex,
 } from "@hyperion/protocol";
 
-import type { Vec3 } from "../../spatial/vec3";
+import type { Vec3 } from "../../geometry/vec3";
 
 /**
  * Half the edge of the root cube, the galaxy's whole extent: coordinates run from −65,536 ly to

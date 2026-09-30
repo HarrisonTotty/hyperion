@@ -31,7 +31,7 @@ import {
   PIN_SYSTEM,
 } from "../../test/systemFixtures";
 import { orbitNormal } from "../../lib/system/hierarchy";
-import { dot } from "../../spatial/vec3";
+import { dot } from "../../geometry/vec3";
 import { SystemView } from "./SystemView";
 
 const WIDTH_PX = 400;

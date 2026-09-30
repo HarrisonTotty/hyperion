@@ -12,11 +12,11 @@ import {
 } from "../../lib/format";
 import { StatusLine } from "../../components/StatusLine";
 import { useElementSize } from "../../lib/useElementSize";
-import { AXIS_TOLERANCE_LY, cylindrical } from "../../spatial/frame";
+import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import type { ScaleUnit } from "../../spatial/scale";
 import { SpatialView } from "../../spatial/SpatialView";
-import { vec3 } from "../../spatial/vec3";
+import { vec3 } from "../../geometry/vec3";
 import { CensusReadout } from "./CensusReadout";
 import { chartLayout, controlsGiveWay } from "./chartLayout";
 import { ChartControls } from "./ChartControls";

@@ -11,11 +11,11 @@ import { stubMatchMedia } from "../test/stubMatchMedia";
 import { type RecordingContext2D, stubCanvas } from "../test/RecordingContext2D";
 import { type CameraAngles, PRESETS, project, viewBasis } from "./camera";
 import { easeOut, TRANSITION_MS, tweenCamera } from "./transition";
-import { localFrameAt, planeFrame } from "./frame";
+import { localFrameAt, planeFrame } from "../geometry/frame";
 import type { PointMark, SpatialScene } from "./marks";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
-import { add, scale, vec3 } from "./vec3";
+import { add, scale, vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
