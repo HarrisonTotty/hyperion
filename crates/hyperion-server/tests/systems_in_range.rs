@@ -27,13 +27,15 @@ use hyperion_sim::galaxy::query::{
 };
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::math;
 use hyperion_sim::stellar::ObjectKind;
 use hyperion_sim::stellar::brief::BriefModel;
+use hyperion_sim::stellar::photometry::{absolute_bolometric_magnitude, bolometric_correction_v};
 use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
 use hyperion_sim::units::consts::{
     EARTH_MASS_KG, JUPITER_MASS_KG, METRES_PER_LIGHT_YEAR, SOLAR_MASS_KG,
 };
-use hyperion_sim::units::{LightYears, SolarMasses};
+use hyperion_sim::units::{LightYears, SolarLuminosities, SolarMasses};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
@@ -1158,10 +1160,34 @@ fn assert_briefs_are_the_sims(
                 log_luminosity_lsun: lit.map(|l| l.value() as f32),
                 teff_k: lit.map(|_| expected.effective_temperature().value() as f32),
                 star_count: expected.star_count(),
+                absolute_v_mag: brief.absolute_v_mag,
             },
             "{}",
             row.designation
         );
+        // A living primary's absolute V is plan 06's M_bol − BC_V from its log L and T_eff
+        // (R02.T5); a remnant, or a star below the corrections' last row, has none.
+        let living = !matches!(
+            expected.kind(),
+            ObjectKind::WhiteDwarf
+                | ObjectKind::NeutronStar
+                | ObjectKind::BlackHole
+                | ObjectKind::NoRemnant
+        );
+        let reference = expected.log_luminosity().and_then(|log_l| {
+            let m_bol =
+                absolute_bolometric_magnitude(SolarLuminosities::new(math::exp10(log_l.value())))?;
+            Some(m_bol - bolometric_correction_v(expected.effective_temperature())?)
+        });
+        match (brief.absolute_v_mag, reference.filter(|_| living)) {
+            (Some(sent), Some(state)) => assert!(
+                (f64::from(sent) - state.value()).abs() < 1e-4,
+                "{}: {sent} against {state:?}",
+                row.designation
+            ),
+            (None, None) => {}
+            (sent, state) => panic!("{}: {sent:?} against {state:?}", row.designation),
+        }
     }
 }
 
@@ -1182,6 +1208,15 @@ async fn a_range_request_with_include_stellar_returns_a_brief_on_every_row() {
         let answer = ask(&mut client, &universe.id, &query).await.unwrap();
         let (sim_query, _) = sim_answer(&galaxy, &query);
         assert_briefs_are_the_sims(&galaxy, &answer, &bare, sim_query.time());
+        // The living stars' rows carry their absolute V (R02.T5).
+        assert!(
+            answer
+                .systems
+                .iter()
+                .filter_map(|row| row.stellar.as_ref())
+                .any(|brief| brief.absolute_v_mag.is_some()),
+            "no row of {radius_ly} ly carries an absolute V"
+        );
         if radius_ly > 50.0 {
             assert!(
                 answer.systems.len() > hyperion_server::limits::BRIEF_CHUNK_ROWS,

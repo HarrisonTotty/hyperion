@@ -290,7 +290,8 @@
           "class": "B7Vp",
           "log_luminosity_lsun": 2.3900888,
           "teff_k": 14089.155,
-          "star_count": 2
+          "star_count": 2,
+          "absolute_v_mag": -0.17074993
         }
       },
       {
@@ -1026,7 +1027,8 @@
           "class": "B7.5Vp",
           "log_luminosity_lsun": 2.291636,
           "teff_k": 13415.391,
-          "star_count": 1
+          "star_count": 1,
+          "absolute_v_mag": -0.04452572
         }
       },
       {
@@ -1410,7 +1412,8 @@
           "class": "B7.5V",
           "log_luminosity_lsun": 2.3411436,
           "teff_k": 13195.722,
-          "star_count": 3
+          "star_count": 3,
+          "absolute_v_mag": -0.2091047
         }
       },
       {
