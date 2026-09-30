@@ -40,6 +40,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -369611768731875136, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40e1ec1648d0db71  # 36704.69638865337
+obliquity_rad = 0x3fd0a580ec8ece1e  # 0.2601015386710247
+pole_x = 0xbfc25abd09afe18f  # -0.14339411709785252
+pole_y = 0x3feb19938f6b3000  # 0.8468721200129039
+pole_z = 0xbfe0631e2a951b58  # -0.5120993453682372
+locking_time_s = 0x4283b24984ce5083  # 2707057318346.064
+w0_rad = 0x4005c3c733627498  # 2.7205947889729707
+w_rad = 0x4005c3c733627498  # 2.7205947889729707
+spin_rate_rad_s = 0x3ee182f33f0908e2  # 8.350145408124143e-6
+surface_seed: 1988bdd09cfd10fe
+bulk_composition:
+iron = 0x3fe1ae0ddface7be  # 0.5524968498859761
+rock = 0x3fdca3e440a63084  # 0.44750315011402386
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x446f7a394f57ca4c  # 4.6452497925581643e21
+carbon_dioxide_kg = 0x4469682cc1957a43  # 3.7494015149552325e21
+nitrogen_kg = 0x4415c389ed9d8f5b  # 1.0036791992951916e20
+argon_kg = 0x43778e4467daa662  # 1.0608558265036957e17
+fe_h = 0xbfe895d39c3897aa  # -0.7682893801872883
+alpha_fe = 0x3fd3333333333333  # 0.3
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff8a2933da0bd48  # 1.5396912009562858
 a_m = 0x42074c8f04c79796  # 12508586136.949017
@@ -68,6 +90,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -369597134245436288, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40d9aa60e48dbe95  # 26281.513949810138
+obliquity_rad = 0x3fc53331c61ceeeb  # 0.1656248299931272
+pole_x = 0x3fa5f41e3c5ba536  # 0.04287809836189142
+pole_y = 0x3fea6571bb8b14b8  # 0.8248833334879668
+pole_z = 0xbfe2099f21033203  # -0.5636745114111935
+locking_time_s = 0x42af8b491c6ac849  # 17341543757156.143
+w0_rad = 0x40112a475760db86  # 4.2912877705447325
+w_rad = 0x40112a475760db86  # 4.2912877705447325
+spin_rate_rad_s = 0x3ed5dae8add56b8a  # 5.210664963807292e-6
+surface_seed: c5a0784ac013f342
+bulk_composition:
+iron = 0x3fc0c380447e385d  # 0.1309662184179982
+rock = 0x3febcf1feee071e9  # 0.8690337815820018
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x447020abd557521b  # 4.760033839689607e21
+carbon_dioxide_kg = 0x446873956d40607a  # 3.608404327825478e21
+nitrogen_kg = 0x43d089c86f4e5692  # 4.766815827189713e18
+argon_kg = 0x437f8c7275b7ed7b  # 1.42082360114862e17
+fe_h = 0xbfe895d39c3897aa  # -0.7682893801872883
+alpha_fe = 0x3fd3333333333333  # 0.3
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ffa6229b0a  # 8.670040513112042e-11
 orbit: NotApplicable
@@ -86,6 +130,8 @@ fractional_luminosity = 0x3dfe424f59e631fb  # 4.4032674199473444e-10
 members: []
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 
 +H: 3 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100]
@@ -118,6 +164,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -369611768731875136, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40e1ec1648d0db71  # 36704.69638865337
+obliquity_rad = 0x3fd0a580ec8ece1e  # 0.2601015386710247
+pole_x = 0xbfc25abd09afe18f  # -0.14339411709785252
+pole_y = 0x3feb19938f6b3000  # 0.8468721200129039
+pole_z = 0xbfe0631e2a951b58  # -0.5120993453682372
+locking_time_s = 0x4283b24984ce5083  # 2707057318346.064
+w0_rad = 0x4005c3c733627498  # 2.7205947889729707
+w_rad = 0x400615f8c5d85cc6  # 2.7607284027722896
+spin_rate_rad_s = 0x3ee182f33f0908e2  # 8.350145408124143e-6
+surface_seed: 1988bdd09cfd10fe
+bulk_composition:
+iron = 0x3fe1ae0ddface7be  # 0.5524968498859761
+rock = 0x3fdca3e440a63084  # 0.44750315011402386
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x446f7a394f57ca4c  # 4.6452497925581643e21
+carbon_dioxide_kg = 0x4469682cc1957a43  # 3.7494015149552325e21
+nitrogen_kg = 0x4415c389ed9d8f5b  # 1.0036791992951916e20
+argon_kg = 0x43778e44682ed2d2  # 1.0608558273863197e17
+fe_h = 0xbfe895d39c3897aa  # -0.7682893801872883
+alpha_fe = 0x3fd3333333333333  # 0.3
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff8a2933da0bd48  # 1.5396912009562858
 a_m = 0x42074c8f04c79796  # 12508586136.949017
@@ -146,6 +214,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -369597134245436288, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40d9aa60e48dbe95  # 26281.513949810138
+obliquity_rad = 0x3fc53331c61ceeeb  # 0.1656248299931272
+pole_x = 0x3fa5f41e3c5ba536  # 0.04287809836189142
+pole_y = 0x3fea6571bb8b14b8  # 0.8248833334879668
+pole_z = 0xbfe2099f21033203  # -0.5636745114111935
+locking_time_s = 0x42af8b491c6ac849  # 17341543757156.143
+w0_rad = 0x40112a475760db86  # 4.2912877705447325
+w_rad = 0x400908c18cf7a54b  # 3.129275418574854
+spin_rate_rad_s = 0x3ed5dae8add56b8a  # 5.210664963807292e-6
+surface_seed: c5a0784ac013f342
+bulk_composition:
+iron = 0x3fc0c380447e385d  # 0.1309662184179982
+rock = 0x3febcf1feee071e9  # 0.8690337815820018
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x447020abd557521b  # 4.760033839689607e21
+carbon_dioxide_kg = 0x446873956d40607a  # 3.608404327825478e21
+nitrogen_kg = 0x43d089c86f4e5692  # 4.766815827189713e18
+argon_kg = 0x437f8c727628a9b2  # 1.4208236023307344e17
+fe_h = 0xbfe895d39c3897aa  # -0.7682893801872883
+alpha_fe = 0x3fd3333333333333  # 0.3
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ff8400ee60  # 8.670039773002226e-11
 orbit: NotApplicable
@@ -164,3 +254,5 @@ fractional_luminosity = 0x3dfe424f2d9dfdf2  # 4.403267035861838e-10
 members: []
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none

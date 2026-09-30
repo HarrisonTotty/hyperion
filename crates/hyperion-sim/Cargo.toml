@@ -75,5 +75,11 @@ harness = false
 name = "centre"
 harness = false
 
+[[bench]]
+name = "planetary"
+harness = false
+# `planetary::testing::sample_contexts` builds (ii)'s field systems.
+required-features = ["testing"]
+
 [lints]
 workspace = true

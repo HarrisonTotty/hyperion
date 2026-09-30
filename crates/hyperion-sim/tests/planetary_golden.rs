@@ -31,12 +31,14 @@ use hyperion_sim::planetary::architecture::{
     first_period_share,
 };
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
+use hyperion_sim::planetary::derive::rotation::BodyRotation;
 use hyperion_sim::planetary::derive::{
     OrbitSense, hill_radius, maximum_surviving_moon_mass, roche_limit_fluid, roche_limit_rigid,
     satellite_stability_limit,
 };
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
+use hyperion_sim::planetary::hooks::BodyHooks;
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
@@ -1098,7 +1100,72 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
     write_section_state(w, "hooks", record.hooks());
 }
 
-fn write_snapshot(w: &mut GoldenWriter, name: &str, snapshot: &SystemSnapshot) {
+/// A body's rotation (P14.T14), from [`PlanetarySystem::rotation_of`], with its regime and angle
+/// W at `t`: the spin as drawn, the lock and the frame.
+fn write_rotation(w: &mut GoldenWriter, rotation: Option<&BodyRotation>, t: UniverseTime) {
+    let Some(rotation) = rotation else {
+        w.line("rotation: none");
+        return;
+    };
+    let frame = rotation.frame();
+    let law = frame.rate();
+    w.line(&format!(
+        "rotation: {:?} obliquity, locks {:?} at {:?}, {:?} at the time",
+        rotation.obliquity_law(),
+        law.resonance(),
+        law.locks_at(),
+        law.state_at(t)
+    ));
+    w.f64("primordial_period_s", rotation.primordial_period().value());
+    w.f64("obliquity_rad", rotation.obliquity().value());
+    for (axis, x) in ["pole_x", "pole_y", "pole_z"].into_iter().zip(frame.pole()) {
+        w.f64(axis, x);
+    }
+    w.f64("locking_time_s", rotation.locking_time().value());
+    w.f64("w0_rad", frame.w0().value());
+    w.f64("w_rad", law.angle_at(t).value());
+    w.f64("spin_rate_rad_s", law.rate_at(t));
+}
+
+/// A body's hooks at a time (P14.T23), from [`PlanetarySystem::hooks_at`]: its surface seed as
+/// sixteen hexadecimal digits and its bulk composition. Goldens only: the record's `hooks`
+/// section stays `NotModelled` and the seed stays off the wire.
+fn write_hooks(w: &mut GoldenWriter, hooks: Option<&BodyHooks>) {
+    let Some(hooks) = hooks else {
+        w.line("surface_seed: none");
+        return;
+    };
+    w.line(&format!("surface_seed: {}", hooks.surface_seed()));
+    match hooks.bulk() {
+        Section::Ok(bulk) => {
+            w.line("bulk_composition:");
+            let f = bulk.fractions();
+            w.f64("iron", f.iron());
+            w.f64("rock", f.rock());
+            w.f64("water", f.water());
+            w.f64("envelope", f.envelope());
+            let inventory = bulk.inventory();
+            w.f64("water_kg", inventory.water().value());
+            w.f64("carbon_dioxide_kg", inventory.carbon_dioxide().value());
+            w.f64("nitrogen_kg", inventory.nitrogen().value());
+            w.f64("argon_kg", inventory.argon().value());
+            w.f64("fe_h", bulk.fe_h().value());
+            match bulk.alpha_fe() {
+                Some(alpha) => w.f64("alpha_fe", alpha.value()),
+                None => w.line("alpha_fe: none"),
+            }
+        }
+        other => write_section_state(w, "bulk_composition", other),
+    }
+}
+
+fn write_snapshot(
+    w: &mut GoldenWriter,
+    name: &str,
+    snapshot: &SystemSnapshot,
+    system: &PlanetarySystem,
+    context: &SystemContext,
+) {
     w.line("");
     w.line(&format!(
         "{name}: {} bodies at {:?}",
@@ -1115,11 +1182,21 @@ fn write_snapshot(w: &mut GoldenWriter, name: &str, snapshot: &SystemSnapshot) {
     }
     for record in snapshot.bodies() {
         write_record(w, record);
+        let index = record.index();
+        let rotation = system
+            .rotation_of(context, index)
+            .expect("a snapshot's body is a body of its system");
+        write_rotation(w, rotation.as_ref(), snapshot.time());
+        let hooks = system
+            .hooks_at(context, index, snapshot.time())
+            .expect("a snapshot's body is a body of its system");
+        write_hooks(w, hooks.as_ref());
     }
 }
 
 /// P14.T32.b: each golden system's whole `snapshot_at` at the epoch and at +H, with the stars it
-/// is about. The events of a century wait for P14.T31.
+/// is about, and each body's rotation (P14.T14) and hooks (P14.T23) at both times. The events of a
+/// century wait for P14.T31.
 #[test]
 fn golden_systems_are_pinned() {
     let galaxy = fixture();
@@ -1168,7 +1245,8 @@ fn golden_systems_are_pinned() {
             } else {
                 "+H"
             };
-            write_snapshot(&mut w, label, &system.snapshot_at(&context, t));
+            let snapshot = system.snapshot_at(&context, t);
+            write_snapshot(&mut w, label, &snapshot, &system, &context);
         }
         golden!(&format!("planetary/systems/{}", golden.name), w.as_str());
     }

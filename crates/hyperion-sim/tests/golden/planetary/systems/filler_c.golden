@@ -40,6 +40,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 125671015016331840, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40e6647dd29b1135  # 45859.931958707435
+obliquity_rad = 0x3fc7d09318d5cad3  # 0.18605269158032076
+pole_x = 0x3fe48fd3f9066ce2  # 0.6425571311732734
+pole_y = 0xbfe1d6a150e2b51c  # -0.5574499683185965
+pole_z = 0x3fe0d29b82041097  # 0.5257089175579662
+locking_time_s = 0x438070f598a70fa6  # 1.480895922481369e17
+w0_rad = 0x3fef9899b405cae5  # 0.9873779789034783
+w_rad = 0x3fef9899b405cae5  # 0.9873779789034783
+spin_rate_rad_s = 0x3f1e7d1d94e8cb46  # 0.00011630528499821405
+surface_seed: a6263dd197e63a37
+bulk_composition:
+iron = 0x3fd46896fbf3c666  # 0.3188836536856797
+rock = 0x3fe531891955c42f  # 0.6622968191933348
+water = 0x0000000000000000  # 0.0
+envelope = 0x3f93456d160b13e6  # 0.01881952712098558
+water_kg = 0x44845185c2fc294e  # 1.199389430884628e22
+carbon_dioxide_kg = 0x44435475b8d3152f  # 7.131482221773512e20
+nitrogen_kg = 0x43d68ae46544aeb4  # 6.49744695686246e18
+argon_kg = 0x435f2de32b28abc2  # 3.5104711931768584e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fe7f8f445469751  # 0.7491399148027346
 a_m = 0x424b1520c91bfafb  # 232637174327.9608
@@ -68,6 +90,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e87d0793904862  # 50152.23676313531
+obliquity_rad = 0x3fcba365a30e5bd8  # 0.2159239813015279
+pole_x = 0x3fe67f62f4f330e5  # 0.7030501159838677
+pole_y = 0xbfe549a52a19e51c  # -0.6652398893631104
+pole_z = 0x3fd0161afc5154a8  # 0.25134920730972476
+locking_time_s = 0x44008910659000a1  # 3.812805135391707e19
+w0_rad = 0x40039fc23d072bb6  # 2.453007199078878
+w_rad = 0x40039fc23d072bb6  # 2.453007199078878
+spin_rate_rad_s = 0x3f20694e770008af  # 0.00012520869086080552
+surface_seed: 411d24f6622e8b75
+bulk_composition:
+iron = 0x3fc625ab6c849436  # 0.17302458571171692
+rock = 0x3fea769524dedaf2  # 0.826975414288283
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44471c7623d79779  # 8.526519595689995e20
+carbon_dioxide_kg = 0x4457ce363e6faf34  # 1.7565369854611077e21
+nitrogen_kg = 0x43f9e84e90962dc6  # 2.986925485515056e19
+argon_kg = 0x435313e47d51caee  # 2.147958653394425e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0201 A c I: Moon(Captured) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3dc39d99df9961a8  # 3.568062160825185e-11
 a_m = 0x41c1db8ddfbc12a5  # 599202751.469319
@@ -96,6 +140,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at Some(UniverseTime { seconds: -21324606709165680, nanos: 0 }), Locked(ThreeToTwo) at the time
+primordial_period_s = 0x40ea23389b64fd47  # 53529.76896905392
+obliquity_rad = 0x3fcbdd976abddc4d  # 0.21769993507379795
+pole_x = 0xbfe4d01b97fb67e3  # -0.650403782691907
+pole_y = 0x3fe56b2773ba406c  # 0.6693303356460212
+pole_z = 0xbfd6fbed96a12ee5  # -0.35912646970676426
+locking_time_s = 0x430f17aee32c6078  # 1093970522639375.0
+w0_rad = 0x4017600d41a46372  # 5.843800569208598
+w_rad = 0x4017600d41a46372  # 5.843800569208598
+spin_rate_rad_s = 0x3ebda5fb6f7678b5  # 1.7671804338547025e-6
+surface_seed: 0c802e7662ec9d65
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe401055c23bb9a  # 0.6251246261216352
+water = 0x3fd7fdf547b888cd  # 0.37487537387836484
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x4226d28c830cf27f  # 49010852230.473625
+carbon_dioxide_kg = 0x4208362eaa315a4c  # 12998530374.16909
+nitrogen_kg = 0x41a082f5046ee06a  # 138508930.2165559
+argon_kg = 0x41292ab59a8f230a  # 824666.8018732977
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff2011931567054  # 1.1252681662799846
 a_m = 0x4261b7de956f657c  # 608794094459.1714
@@ -124,6 +190,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f3caa79b5a1429  # 81066.47542770267
+obliquity_rad = 0x3fd727b84300cf6b  # 0.3617993025138648
+pole_x = 0x3fe9329c85de1788  # 0.7874281515694159
+pole_y = 0xbfc34900db8969cb  # -0.15066538543290017
+pole_z = 0x3fe3207006ceaea3  # 0.5977096684414004
+locking_time_s = 0x4479aab175258934  # 7.575493483266247e21
+w0_rad = 0x40018753c59a5c90  # 2.191077750943414
+w_rad = 0x40018753c59a5c90  # 2.191077750943414
+spin_rate_rad_s = 0x3f14515cf9b84e60  # 7.750635125374763e-5
+surface_seed: 8649352bd8ad73c9
+bulk_composition:
+iron = 0x3fd2c8844c794a17  # 0.2934885737242054
+rock = 0x3fe38175b1e06a7b  # 0.609553191581042
+water = 0x3fb8d2413f1783d4  # 0.09695823469475268
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44e13f541ea5633e  # 6.515874923953745e23
+carbon_dioxide_kg = 0x44bf02b7646a74b6  # 1.4644346926136253e23
+nitrogen_kg = 0x443168a97f0da0f3  # 3.2113634800058257e20
+argon_kg = 0x43551f45999ba366  # 2.3781433204968856e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0400 A e: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fa4e357ec359f94  # 0.04079699285904251
 a_m = 0x4267ab6bca0ff18b  # 813281726591.5482
@@ -152,6 +240,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40eb8ecac1b8a7c0  # 56438.33614762081
+obliquity_rad = 0x3fcae209491311cb  # 0.21002307956781716
+pole_x = 0x3feaff5d84d61a18  # 0.8436725229701691
+pole_y = 0xbfd1d781aef92cf4  # -0.27877847754707763
+pole_z = 0x3fdd5d02e0a2f0d3  # 0.4588019555774398
+locking_time_s = 0x4495fca93603eddf  # 2.5957617146049673e22
+w0_rad = 0x3f9cd89a625af3ac  # 0.028170025113229677
+w_rad = 0x3f9cd89a625af3ac  # 0.028170025113229677
+spin_rate_rad_s = 0x3f1d2f1c5f0bd372  # 0.00011132822670474414
+surface_seed: 58e15707174b73f8
+bulk_composition:
+iron = 0x3fc584f3d21395dd  # 0.16811988599435682
+rock = 0x3fd658d5d04f6a66  # 0.3491720709113565
+water = 0x3fdee4b046a6caad  # 0.4827080430942868
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44b8e7a84b3e511b  # 1.1761012032483808e23
+carbon_dioxide_kg = 0x444c1ffb31ae0e7c  # 1.0376266486436693e21
+nitrogen_kg = 0x43e43dc4e4b0bd5d  # 1.1668306726677572e19
+argon_kg = 0x42fc132cab918a06  # 493898870364320.4
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0500 A f: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fde6fdf2931ccea  # 0.4755781080522882
 a_m = 0x426efd1d4dc3a2ce  # 1064764599837.0876
@@ -180,6 +290,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f5e52f0438b37d  # 89682.93853063691
+obliquity_rad = 0x3ffb783ce45f03e0  # 1.7168549462078246
+pole_x = 0xbfdbb26315beff66  # -0.4327628815044505
+pole_y = 0x3fd972e665091626  # 0.39763793818232995
+pole_z = 0x3fe9e3eeaa8590b9  # 0.8090737658026433
+locking_time_s = 0x44c434a4ee78cefb  # 1.908368898370457e23
+w0_rad = 0x3ff745bd4882a20d  # 1.4545262176926628
+w_rad = 0x3ff745bd4882a20d  # 1.4545262176926628
+spin_rate_rad_s = 0x3f125da53b5fe023  # 7.005997653652999e-5
+surface_seed: dd53dcd66fa7526f
+bulk_composition:
+iron = 0x3fd40fe1e3b7966f  # 0.3134693836021602
+rock = 0x3fe4d56a93dc2fea  # 0.6510517967121789
+water = 0x3fa22a47a4804df0  # 0.03547881968566091
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44b556a629e0a236  # 1.007680894786732e23
+carbon_dioxide_kg = 0x44adfd2c0a4315ac  # 7.080941383825801e22
+nitrogen_kg = 0x441ae12a4a53e458  # 1.2396005206204442e20
+argon_kg = 0x434311c6f793d116  # 1.0735141624717868e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0501 A f I: Moon(GiantImpact) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3f70e39340cfe03c  # 0.004123282630637045
 a_m = 0x41a67e54f2eafd44  # 188689017.4589635
@@ -208,6 +340,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22414827041527996, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40f160d73707671a  # 71181.45093479418
+obliquity_rad = 0x3fdf69ac89ca7ab0  # 0.4908248277296634
+pole_x = 0x3febcbb11b65d6a6  # 0.8686147246468934
+pole_y = 0xbfdfb0ded122e94a  # -0.49517031119798516
+pole_z = 0xbf922b499126e350  # -0.017743253216141952
+locking_time_s = 0x428b4946130e27ec  # 3750190277060.99
+w0_rad = 0x400a68b10157f641  # 3.3011188607186175
+w_rad = 0x400a68b10157f641  # 3.3011188607186175
+spin_rate_rad_s = 0x3ed660699e568d8d  # 5.3349999452919035e-6
+surface_seed: 621fc03a52de038c
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3ff0000000000000  # 1.0
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x4482504af851ab71  # 1.0810467296887523e22
+carbon_dioxide_kg = 0x442049393c0d4365  # 1.502121098227285e20
+nitrogen_kg = 0x43b6368c2cf9bfcf  # 1.6006208423733368e18
+argon_kg = 0x42c89e1e0443d7eb  # 54134774990767.836
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0502 A f II: Moon(Captured) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3db5f091320fbfc9  # 1.9954055013216192e-11
 a_m = 0x41e4977f6351cc9f  # 2763782938.556228
@@ -236,6 +390,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e2bbc0873ef63a  # 38366.016509514724
+obliquity_rad = 0x3fd95f6e109cce90  # 0.3964495813590725
+pole_x = 0x3fedf2550f2fac1f  # 0.9358315750699865
+pole_y = 0xbfd28d355ff56eb1  # -0.2898686825844648
+pole_z = 0xbfc9a996a6ab9500  # -0.2004879297084372
+locking_time_s = 0x43ffa19f1149f594  # 3.646844452848437e19
+w0_rad = 0x4018725761484913  # 6.111661453282312
+w_rad = 0x4018725761484913  # 6.111661453282312
+spin_rate_rad_s = 0x3f2573d1b00dfabf  # 0.00016366896309346309
+surface_seed: 594a79e288076338
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe401055c23bb9a  # 0.6251246261216352
+water = 0x3fd7fdf547b888cd  # 0.37487537387836484
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x42c6378319355863  # 48855356959408.77
+carbon_dioxide_kg = 0x4265280e43c9d44e  # 726930693710.6345
+nitrogen_kg = 0x41fcdb25151d5aa6  # 7745982801.834631
+argon_kg = 0x4110d14818334680  # 275538.0236331001
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fa1b03538f766b3  # 0.034547484592349596
 orbit: NotApplicable
@@ -252,6 +428,8 @@ fractional_luminosity = 0x3e790f29133d0ad0  # 9.335287104193984e-8
 members: [e101, e102, e103, e104, e105, e106, e107, e108]
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f940e11e6894e92  # 0.019584922500441033
 a_m = 0x4243ae1a1408d039  # 169050646545.62674
@@ -280,6 +458,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 1826082064223873536, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ffa1f605b1470f  # 129567.3763897682
+obliquity_rad = 0x3fddb2efc995d582  # 0.46404642759383574
+pole_x = 0x3fb46fb9b8c9aab5  # 0.07982979546947429
+pole_y = 0xbfe86bcc601d9702  # -0.7631589772470024
+pole_z = 0x3fe48535a3d75123  # 0.641260929109681
+locking_time_s = 0x43b9a7318a250c25  # 1.8485006414556787e18
+w0_rad = 0x3ff6df995e85780b  # 1.4295896236649266
+w_rad = 0x3ff6df995e85780b  # 1.4295896236649266
+spin_rate_rad_s = 0x3f091e0e9569cba4  # 4.790765767816806e-5
+surface_seed: 670523e3b0a07162
+bulk_composition:
+iron = 0x3fe073bb1e713b51  # 0.5141273111893075
+rock = 0x3fdf1889c31d895e  # 0.48587268881069245
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43f755678dd326b1  # 2.690182231557322e19
+carbon_dioxide_kg = 0x43d8c100c76e792f  # 7.134831135869418e18
+nitrogen_kg = 0x4370e1a0d8953397  # 7.602688915270693e16
+argon_kg = 0x42f2c108fda80765  # 329924621271158.3
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f794485d42d79ca  # 0.006168864029716345
 a_m = 0x424594465566276e  # 185363901132.30804
@@ -308,6 +508,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks Synchronous at Some(UniverseTime { seconds: 6282194977578687488, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40e6b6fb4643230a  # 46519.85232693523
+obliquity_rad = 0x3fe0eb1ccddf908c  # 0.5287002583468321
+pole_x = 0x3fe40f191a83a13c  # 0.626843025002962
+pole_y = 0xbfc5dc8b71585412  # -0.17079299005914145
+pole_z = 0x3fe8538608fa3257  # 0.7601957488382806
+locking_time_s = 0x43d5df9f27fd25e6  # 6.304613554810493e18
+w0_rad = 0x40109b7a83b8a98e  # 4.1518345433672845
+w_rad = 0x40109b7a83b8a98e  # 4.1518345433672845
+spin_rate_rad_s = 0x3f21a3eb667d0cae  # 0.00013458488978743604
+surface_seed: efe4e21a24cc688c
+bulk_composition:
+iron = 0x3fced395a2e17ae7  # 0.2408320470157925
+rock = 0x3fe84b1a9747a146  # 0.7591679529842075
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43dd6604a0d25f6f  # 8.473543053980581e18
+carbon_dioxide_kg = 0x43bf301f9f7b0111  # 2.247330983881806e18
+nitrogen_kg = 0x435544e914a11ac0  # 2.3946969500379904e16
+argon_kg = 0x42e275ac18d8fa7c  # 162372862265299.88
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f69b5e02caaa6ef  # 0.0031384828956405523
 a_m = 0x42418a1c4ce2ac0e  # 150663109061.34418
@@ -336,6 +558,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 1253500735238283264, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ec3c0161e450e3  # 57824.04319968985
+obliquity_rad = 0x3fc52296d3e9b987  # 0.16511807772935702
+pole_x = 0x3fe702caa36fac98  # 0.7190907661546531
+pole_y = 0xbfe5d6151d477acc  # -0.6823831149921147
+pole_z = 0x3fc0d130d7048339  # 0.13138399599940856
+locking_time_s = 0x43b1b4f9dac5d71b  # 1.2759193124700884e18
+w0_rad = 0x401731aafe658632  # 5.798503851839586
+w_rad = 0x401731aafe658632  # 5.798503851839586
+spin_rate_rad_s = 0x3f1bfc3532cfdcd1  # 0.00010675501535205584
+surface_seed: 4b65c4c081bf9801
+bulk_composition:
+iron = 0x3fc30511230e2799  # 0.14859213077243963
+rock = 0x3feb3ebbb73c761a  # 0.8514078692275604
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43cde9e6fcf7fb82  # 4.3110157416801905e18
+carbon_dioxide_kg = 0x43afbc0915456850  # 1.1433563488803983e18
+nitrogen_kg = 0x4345a45369fea6d3  # 1.2183305356922278e16
+argon_kg = 0x42d510b895f94240  # 92646241985801.0
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e104 BELT 1-4: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f5fd5d3f7b011af  # 0.001943070411244734
 a_m = 0x4245851ab0a23a7e  # 184854864196.45697
@@ -364,6 +608,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40d21c559143e1e8  # 18545.336991282093
+obliquity_rad = 0x3fae16b7087a9a1e  # 0.05876705149175997
+pole_x = 0x3fe97373f6d72a78  # 0.795343381986938
+pole_y = 0xbfd1009c0d13768f  # -0.26566220547633973
+pole_z = 0x3fe16f57e5dc20ad  # 0.5448417176676422
+locking_time_s = 0x43e87d3219b3e80f  # 1.4116973719784028e19
+w0_rad = 0x4014bf59babdb1ea  # 5.186865728214324
+w_rad = 0x4014bf59babdb1ea  # 5.186865728214324
+spin_rate_rad_s = 0x3f362b1efaf23ff7  # 0.00033826357225397126
+surface_seed: 19682aadea3bd6fb
+bulk_composition:
+iron = 0x3fd1fd74966174fd  # 0.2810946911393584
+rock = 0x3fe70145b4cf4582  # 0.7189053088606416
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43c285182407b789  # 2.668998815225156e18
+carbon_dioxide_kg = 0x43a3a5aec20ca38a  # 7.078649031684109e17
+nitrogen_kg = 0x433acc2845f157ed  # 7542822738679789.0
+argon_kg = 0x42c606341ea65f5d  # 48431800077502.73
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e105 BELT 1-5: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f55f2a5a7b4f251  # 0.0013395898557312556
 a_m = 0x424127560e4fb84f  # 147348790431.4399
@@ -392,6 +658,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 515372045709421312, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40f93f55826fbb6f  # 103413.34434483734
+obliquity_rad = 0x3fceed842c382b02  # 0.24162342223311134
+pole_x = 0x3fe0fd03df021cbd  # 0.5308856349592116
+pole_y = 0xbfd819063230fece  # -0.3765273561620973
+pole_z = 0x3fe84b61e0611de3  # 0.7592019445809765
+locking_time_s = 0x439dda76e38fca96  # 5.377906229412264e17
+w0_rad = 0x40161bd9f5886f1f  # 5.527198635532641
+w_rad = 0x40161bd9f5886f1f  # 5.527198635532641
+spin_rate_rad_s = 0x3f0e881b4798a104  # 5.823453188852533e-5
+surface_seed: b45764a5c5a7125d
+bulk_composition:
+iron = 0x3fb3931c1cb5a843  # 0.07646346760671556
+rock = 0x3fed8d9c7c694af8  # 0.9235365323932845
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43b98933b235b84a  # 1.8400587632560236e18
+carbon_dioxide_kg = 0x439b171e5b1c0cf7  # 4.880155850374671e17
+nitrogen_kg = 0x433279860361304b  # 5200166070071371.0
+argon_kg = 0x42c381841f1a3402  # 42893976679528.016
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e106 BELT 1-6: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f50325265623d8d  # 0.0009885601662381366
 a_m = 0x42432c62eeeab0eb  # 164698119637.38217
@@ -420,6 +708,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at Some(UniverseTime { seconds: 3301693724694273536, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40e03023a59be926  # 33153.113965945595
+obliquity_rad = 0x3fc2dce9e9eff5ed  # 0.14736675188753115
+pole_x = 0x3fe8f60d76012cb2  # 0.7800357155587305
+pole_y = 0xbfd84a09ae16159e  # -0.37951890946018263
+pole_z = 0x3fdfd718b2ab4c16  # 0.49750344703824234
+locking_time_s = 0x43c710cf436ae7ac  # 3.3241123019260785e18
+w0_rad = 0x400fcfb495cce1d9  # 3.9764186576032725
+w_rad = 0x400fcfb495cce1d9  # 3.9764186576032725
+spin_rate_rad_s = 0x3f28ac6b5b22daee  # 0.00018824396608404327
+surface_seed: 9b6b3417c22cf4e8
+bulk_composition:
+iron = 0x3fc2cacc1b31745d  # 0.1468138821391304
+rock = 0x3feb4d4cf933a2e9  # 0.8531861178608696
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43b2d82d1840dae9  # 1.357884869842758e18
+carbon_dioxide_kg = 0x4393fdd2580f6072  # 3.6013468287134016e17
+nitrogen_kg = 0x432b445f8660838c  # 3837500719120838.0
+argon_kg = 0x42ba9897f1695da9  # 29242686531933.66
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e107 BELT 1-7: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f490dcb5441d4c0  # 0.0007645838563933513
 a_m = 0x42428af1304ed940  # 159280947357.69727
@@ -448,6 +758,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 2732280608506149376, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ebe4be964f4462  # 57125.95584834438
+obliquity_rad = 0x3fd4f454a9ff49c0  # 0.3274127636078923
+pole_x = 0x3fe19618df231695  # 0.5495724065919655
+pole_y = 0xbfe45ce4d90439cf  # -0.6363395918468145
+pole_z = 0x3fe1529ae50d4434  # 0.5413336251896284
+locking_time_s = 0x43c31d54283e7bfa  # 2.7546991857379543e18
+w0_rad = 0x4009173034664ca8  # 3.1363224118918716
+w_rad = 0x4009173034664ca8  # 3.1363224118918716
+spin_rate_rad_s = 0x3f1c993a08b7c093  # 0.00010909477912668585
+surface_seed: bd877ad8024130fd
+bulk_composition:
+iron = 0x3fe7e06d6399b1d6  # 0.7461459107703898
+rock = 0x3fd03f2538cc9c54  # 0.25385408922961017
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43ad2657a5668f90  # 1.05023132205841e18
+carbon_dioxide_kg = 0x438eec92683bd467  # 2.7853961150244784e17
+nitrogen_kg = 0x432516d7aca5065d  # 2968045040599854.5
+argon_kg = 0x42987b4a458eab45  # 6729451529130.817
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e108 BELT 1-8: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f440e11e6894e90  # 0.0006120288281387821
 a_m = 0x42423309a70069f6  # 156331363840.82782
@@ -476,6 +808,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 6785367633210114048, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ca29c3f5fbd784  # 13395.53094432853
+obliquity_rad = 0x3fd67c85cfda5a68  # 0.3513502626241576
+pole_x = 0x3fe6ea3e170c595e  # 0.7160940599594985
+pole_y = 0xbfb061674bf2a4c0  # -0.06398625950045567
+pole_z = 0x3fe63df8813ae844  # 0.6950647853875656
+locking_time_s = 0x43d79e875f4f0c5f  # 6.807786210441919e18
+w0_rad = 0x40153401c1d69dc6  # 5.300787953113689
+w_rad = 0x40153401c1d69dc6  # 5.300787953113689
+spin_rate_rad_s = 0x3f3ea376e78cb86b  # 0.00046750691358255517
+surface_seed: 779749bce4bef5a6
+bulk_composition:
+iron = 0x3fd6c9c598e45398  # 0.35606517725801146
+rock = 0x3fe49b1d338dd634  # 0.6439348227419885
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43a755678dd326ae  # 8.406819473616627e17
+carbon_dioxide_kg = 0x4388c100c76e792c  # 2.2296347299591923e17
+nitrogen_kg = 0x4320e1a0d8953395  # 2375840286022090.5
+argon_kg = 0x42a8dae36eb13580  # 13664198809754.75
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e182 BELT 1-2 I: Moon(GiantImpact) about Some(Body(BodyIndex(57602))), Present
 mass_mearth = 0x3ee7217b957b9f80  # 1.1029621119942662e-5
 a_m = 0x4182c73110115ee5  # 39380514.00848178
@@ -504,6 +858,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22416961218553456, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40f163ca27b58b38  # 71228.63469461806
+obliquity_rad = 0x3f96b9c72b4fed23  # 0.02219306184632076
+pole_x = 0x3fe8c3ad29175a2d  # 0.7738862803042302
+pole_y = 0xbfdfcf662c08e568  # -0.49703363704937553
+pole_z = 0x3fd91ebf7928111e  # 0.39250170547190233
+locking_time_s = 0x4277841e5540eab6  # 1616013251598.6694
+w0_rad = 0x4006a9c5bb87c71b  # 2.8328966761408885
+w_rad = 0x4006a9c5bb87c71b  # 2.8328966761408885
+spin_rate_rad_s = 0x3edaa34238cb5265  # 6.35092954999871e-6
+surface_seed: 0d15432450ad2e8c
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3ff0000000000000  # 1.0
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x434ae98bd166375a  # 1.5150272234679988e16
+carbon_dioxide_kg = 0x432c8ce8eb80790d  # 4018115679632518.5
+nitrogen_kg = 0x42c3786fd729734a  # 42815986750182.58
+argon_kg = 0x4249696209c83048  # 218284430224.3772
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e200 BELT 2: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fb703c13260ea81  # 0.08990104179330595
 orbit: NotApplicable
@@ -520,6 +896,8 @@ fractional_luminosity = 0x3eb9d2527b77c293  # 1.5390855717634108e-6
 members: [e201, e202, e203, e204, e205, e206, e207, e208]
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 body e201 BELT 2-1: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3fa9e4da3c0857eb  # 0.05057413084811898
 a_m = 0x425ef35a82a9b65e  # 531727256230.8495
@@ -548,6 +926,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40e75b7741d07d33  # 47835.72678398564
+obliquity_rad = 0x3fd2e9a06f523bb6  # 0.29550944205487484
+pole_x = 0x3fe4670487dcb718  # 0.6375754025991425
+pole_y = 0xbfda7e34784d34a9  # -0.41395293949319495
+pole_z = 0x3fe4ca88d89f40b8  # 0.6497234564685845
+locking_time_s = 0x44694560f53b1316  # 3.729342936505537e21
+w0_rad = 0x3fe79fc489cb5837  # 0.7382528964324199
+w_rad = 0x3fe79fc489cb5837  # 0.7382528964324199
+spin_rate_rad_s = 0x3f2137526927b2ab  # 0.00013134842863795257
+surface_seed: 848341a6df356c9e
+bulk_composition:
+iron = 0x3fd1bd510425ccd4  # 0.2771799602989635
+rock = 0x3fe26bfb844ea37a  # 0.5756814560055397
+water = 0x3fc2d56fe679d873  # 0.1471385836954969
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44a2d2569386ab3e  # 4.444132571255575e22
+carbon_dioxide_kg = 0x4458f833d36a8721  # 1.8424269150749388e21
+nitrogen_kg = 0x43f10745c1b33ec8  # 1.9632417947519844e19
+argon_kg = 0x430cb0a6dafb9eea  # 1009441254110173.3
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f904fea56d0487f  # 0.015929853008920688
 a_m = 0x4252fae2bd41b545  # 326074299654.83234
@@ -576,6 +976,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40ebe31a7b8924fa  # 57112.827580044
+obliquity_rad = 0x3fd4c947b32d5f05  # 0.3247851609971664
+pole_x = 0x3fe88f82062d9ce8  # 0.7675180550258149
+pole_y = 0xbfe3e198f1a0a298  # -0.6212887496268023
+pole_z = 0x3fc43465dcc3d255  # 0.15784905700242527
+locking_time_s = 0x44201d9cc859d4b3  # 1.4864085289548287e20
+w0_rad = 0x4002bede566e1789  # 2.3431975128505127
+w_rad = 0x4002bede566e1789  # 2.3431975128505127
+spin_rate_rad_s = 0x3f1cd5c5b8911cb8  # 0.0001099969796466313
+surface_seed: 6ca96ea33082c14a
+bulk_composition:
+iron = 0x3fa261056c11cac6  # 0.03589646286208885
+rock = 0x3feed9efa93ee354  # 0.9641035371379112
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43f2fa9b93ed4639  # 2.188122394405867e19
+carbon_dioxide_kg = 0x43d422595c5fe418  # 5.803281132989473e18
+nitrogen_kg = 0x436b7631b2df1dee  # 6.183824158103538e16
+argon_kg = 0x42fe44a61dab566c  # 532483097146726.75
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f809917da2c1125  # 0.008104502053818916
 a_m = 0x4258a2166028f31b  # 423194362019.7985
@@ -604,6 +1026,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e58772e7ef6f82  # 44091.59081241397
+obliquity_rad = 0x3ff45c78da0a059d  # 1.272576190677092
+pole_x = 0xbfb549616837e498  # -0.08315094751732699
+pole_y = 0x3fc0d9a878b924fa  # 0.13164239782989978
+pole_z = 0x3fef9c168eb08e62  # 0.987803724947707
+locking_time_s = 0x444ebcad4ef03029  # 1.1339958637097901e21
+w0_rad = 0x40149aebe90d9cd0  # 5.151290551620335
+w_rad = 0x40149aebe90d9cd0  # 5.151290551620335
+spin_rate_rad_s = 0x3f22ad8385c51ace  # 0.00014250021457425658
+surface_seed: 28fe0c9af393d780
+bulk_composition:
+iron = 0x3fdb218c3ec456ee  # 0.42392259721360304
+rock = 0x3fe26f39e09dd489  # 0.576077402786397
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43e34fbfb504bba2  # 1.1132332752561312e19
+carbon_dioxide_kg = 0x43c47cac36050562  # 2.9524882517662607e18
+nitrogen_kg = 0x435bf163c006d92e  # 3.146094038767327e16
+argon_kg = 0x42e267288f6f8e29  # 161874171362417.28
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e204 BELT 2-4: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f748d52ddedf63f  # 0.0050175892819175885
 a_m = 0x425186eb805b085e  # 301112099180.13074
@@ -632,6 +1076,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f93c4b348ba559  # 103364.7003284892
+obliquity_rad = 0x3fc04cdad3d1c172  # 0.127345422198697
+pole_x = 0x3fea591e99260646  # 0.8233788481886186
+pole_y = 0xbfcdb3b9514cb4bb  # -0.23204723806103353
+pole_z = 0x3fe0927c6eec6974  # 0.5178816000437068
+locking_time_s = 0x441355c7027a0513  # 8.91672622842913e19
+w0_rad = 0x3fe7c240fd6273ef  # 0.7424626301686866
+w_rad = 0x3fe7c240fd6273ef  # 0.7424626301686866
+spin_rate_rad_s = 0x3f0fdc96166ea0ac  # 6.0771303473318216e-5
+surface_seed: 369a74a166bf8fdb
+bulk_composition:
+iron = 0x3fea6fb2efe6c5e4  # 0.8261351285529455
+rock = 0x3fc641344064e870  # 0.17386487144705454
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d7e9764f45803f  # 6.892153661145808e18
+carbon_dioxide_kg = 0x43b95e12a8b021a6  # 1.827919014477801e18
+nitrogen_kg = 0x43514cbeaa6fb8f1  # 1.9477825564107716e16
+argon_kg = 0x42bb82590d16be1e  # 30246653728446.117
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e205 BELT 2-5: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f6c56839c85e191  # 0.003459221890974536
 a_m = 0x425837efa14438ac  # 416070665488.8855
@@ -660,6 +1126,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e8a9dcad1191fb  # 50510.896126542204
+obliquity_rad = 0x3fc58bb7d124bad3  # 0.16832635604938292
+pole_x = 0x3fdf88fc4403d63a  # 0.49273592607582695
+pole_y = 0xbfe38e430c07539d  # -0.6111159548696495
+pole_z = 0x3fe3d2bc16152f0a  # 0.6194744521430675
+locking_time_s = 0x444348d08178ab26  # 7.114699466432711e20
+w0_rad = 0x40023c2acb7d4e9b  # 2.2793784997573545
+w_rad = 0x40023c2acb7d4e9b  # 2.2793784997573545
+spin_rate_rad_s = 0x3f204dcb42e515c9  # 0.00012438875405444545
+surface_seed: ce3693c17b001628
+bulk_composition:
+iron = 0x3fd14482348d10b2  # 0.26980643398224935
+rock = 0x3fe75dbee5b977a7  # 0.7301935660177507
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d07c40bff5f2b3  # 4.751582379712892e18
+carbon_dioxide_kg = 0x43b17d234cc222dc  # 1.260202283315158e18
+nitrogen_kg = 0x4347da85c280d0b4  # 1.3428384986145128e16
+argon_kg = 0x42d3e99d32cabeae  # 87576342637306.72
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e206 BELT 2-6: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f64e9859d4b43c2  # 0.002552758184130672
 a_m = 0x425c72cf25c98604  # 488741050150.094
@@ -688,6 +1176,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f9c570d2a0cd50  # 105559.05142288399
+obliquity_rad = 0x3fcf747c706213c4  # 0.24574237334686988
+pole_x = 0x3fe97368924adb30  # 0.7953379494927955
+pole_y = 0xbfcbd16298d476fe  # -0.2173274275054879
+pole_z = 0x3fe21b96bace9f26  # 0.5658677719665988
+locking_time_s = 0x4444115e18d8f2a1  # 7.403726930814185e20
+w0_rad = 0x40170485d36de9d6  # 5.754416755279143
+w_rad = 0x40170485d36de9d6  # 5.754416755279143
+spin_rate_rad_s = 0x3f0f34cad3e73041  # 5.952114087257087e-5
+surface_seed: 93e751943c0749f2
+bulk_composition:
+iron = 0x3fa777c44cd22bfb  # 0.045835623147546266
+rock = 0x3fee8883bb32dd40  # 0.9541643768524537
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43c854bbb6334fac  # 3.506465092346534e18
+carbon_dioxide_kg = 0x43a9cfdf9fe64b9e  # 9.299755244919068e17
+nitrogen_kg = 0x43419a5a64a72043  # 9909575260979334.0
+argon_kg = 0x42d333ad8106a494  # 84450700696210.31
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e207 BELT 2-7: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f602c95836ca155  # 0.0019743843253260764
 a_m = 0x42596a8b1ab63259  # 436646734552.7867
@@ -716,6 +1226,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f4279a82b80905  # 82553.65691379092
+obliquity_rad = 0x3fc50293cef22bed  # 0.1641411552885467
+pole_x = 0x3fe9e03345bb37c1  # 0.8086181985797724
+pole_y = 0xbfd75480d593d7cb  # -0.3645326696126829
+pole_z = 0x3fdd8e032b16ad21  # 0.46179274757260386
+locking_time_s = 0x4439c83053f1230a  # 4.755937237443466e20
+w0_rad = 0x3fd31caf1af8595b  # 0.2986257327442183
+w_rad = 0x3fd31caf1af8595b  # 0.2986257327442183
+spin_rate_rad_s = 0x3f13f36fc0e9a68c  # 7.610673513061046e-5
+surface_seed: 22e799621a567d25
+bulk_composition:
+iron = 0x3fb24d489219d862  # 0.07149175230901642
+rock = 0x3fedb656edbcc4f4  # 0.9285082476909836
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43c2d18013078478  # 2.712011564068172e18
+carbon_dioxide_kg = 0x43a3f6bd4bd7004a  # 7.192726322093847e17
+nitrogen_kg = 0x433b3ab6a58d537d  # 7664380507149181.0
+argon_kg = 0x42cce76cdac8e146  # 63560578601410.55
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e208 BELT 2-8: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f59e4da3c0857e8  # 0.0015804415890037175
 a_m = 0x42568510ed335e08  # 386887038157.46924
@@ -744,6 +1276,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e7ee578ae31de0  # 49010.73570400081
+obliquity_rad = 0x3fc24743cbf61be2  # 0.14279983004618574
+pole_x = 0x3fe57cbcad3ef731  # 0.671476686831488
+pole_y = 0xbfe079a2d112fead  # -0.5148481448631707
+pole_z = 0x3fe10e0a2ad3c341  # 0.5329638325184548
+locking_time_s = 0x443c162fb3cacd8c  # 5.181075281402205e20
+w0_rad = 0x400e8b00be20e1bc  # 3.817872510317299
+w_rad = 0x400e8b00be20e1bc  # 3.817872510317299
+spin_rate_rad_s = 0x3f20cd7f91bc6220  # 0.0001281946396083514
+surface_seed: 25e676b1e3ec1b9b
+bulk_composition:
+iron = 0x3fdc83f3748fb9cd  # 0.4455536497397617
+rock = 0x3fe1be0645b8231a  # 0.5544463502602384
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43be208f1b9f9671  # 2.1708923691969047e18
+carbon_dioxide_kg = 0x439ff604e5a7135b  # 5.757584109609182e17
+nitrogen_kg = 0x4335cbde6893838c  # 6135130608599948.0
+argon_kg = 0x42bba1baf6905413  # 30381440405588.074
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e283 BELT 2-3 I: Moon(GiantImpact) about Some(Body(BodyIndex(57859))), Present
 mass_mearth = 0x3ee513214541bbed  # 1.0049212655098181e-5
 a_m = 0x418289803a211600  # 38875143.26615524
@@ -772,6 +1326,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22416956383819768, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40e52da573498bb4  # 43373.17032315527
+obliquity_rad = 0x3fd0ada267a71d73  # 0.2605978023752506
+pole_x = 0x3fe63495904582c1  # 0.6939189737132311
+pole_y = 0xbfdb38eb20306362  # -0.42534902709444655
+pole_z = 0x3fe29781e00cd3b4  # 0.5809945465067501
+locking_time_s = 0x4277962118289bca  # 1620847985289.7368
+w0_rad = 0x3ff1fa018bb2120a  # 1.1235366303309342
+w_rad = 0x3ff1fa018bb2120a  # 1.1235366303309342
+spin_rate_rad_s = 0x3edf1ef765caf083  # 7.419815656713985e-6
+surface_seed: 84e30eaf623cfbf9
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3ff0000000000000  # 1.0
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43488524bc48edcb  # 1.3803584530537366e16
+carbon_dioxide_kg = 0x432a033b019fbbb5  # 3660950679838170.5
+nitrogen_kg = 0x42c1bd6079f91a73  # 39010130194996.9
+argon_kg = 0x42497a6c2f494214  # 218856185490.51624
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e300 BELT 3: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3fbd5e14963c82fc  # 0.11471680324440209
 orbit: NotApplicable
@@ -790,6 +1366,8 @@ fractional_luminosity = 0x3ee2c64a5e55db1c  # 8.952413689240035e-6
 members: [e301, e302, e303, e304, e305, e306, e307, e308]
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 body e301 BELT 3-1: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f83ae68bf916f6d  # 0.009610002847857147
 a_m = 0x42767e3532d1d09b  # 1545707138333.0378
@@ -818,6 +1396,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40f281114116ee6a  # 75793.07839100962
+obliquity_rad = 0x3fd18f275d5b561a  # 0.27436241261361405
+pole_x = 0x3fe7e4505c59a76c  # 0.7466203502383286
+pole_y = 0xbfd45d4ef15c2638  # -0.3181950909643976
+pole_z = 0x3fe2b1e8a0d4488e  # 0.5842173711009921
+locking_time_s = 0x44e4ac95cbc8db81  # 7.810477086387837e23
+w0_rad = 0x3fee5f47e61f0906  # 0.9491309637599279
+w_rad = 0x3fee5f47e61f0906  # 0.9491309637599279
+spin_rate_rad_s = 0x3f15bb454ff54ba4  # 8.289919423036404e-5
+surface_seed: 0649aca2f35c40d6
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe3d42b9f5fa67e  # 0.6196497071043294
+water = 0x3fd857a8c140b305  # 0.3803502928956706
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x443549640b4ee34d  # 3.926699898437892e20
+carbon_dioxide_kg = 0x4432fa89b8191198  # 3.5009455632587214e20
+nitrogen_kg = 0x43c9e2ba2942ed32  # 3.7305157641281464e18
+argon_kg = 0x42e964caa55d22fd  # 223365498071319.9
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f826e1a38f41f7d  # 0.008999066222272973
 a_m = 0x4278582201c9df82  # 1672925420701.9692
@@ -846,6 +1446,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40f4e0bd79dee1b1  # 85515.84225357209
+obliquity_rad = 0x3ff362d91032394a  # 1.2116327889121572
+pole_x = 0x3fadb4fba9102b1c  # 0.058021416080086236
+pole_y = 0xbfec0617c4a08133  # -0.8757437553759132
+pole_z = 0xbfdeac793555eadc  # -0.4792769451957335
+locking_time_s = 0x44ea2b87b186d997  # 9.886761303545231e23
+w0_rad = 0x401797734ec5d0d4  # 5.897900801490511
+w_rad = 0x401797734ec5d0d4  # 5.897900801490511
+spin_rate_rad_s = 0x3f1342c08992a5c1  # 7.347393183700699e-5
+surface_seed: 1d72a2b67e499b31
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0b45876c61721  # 0.5220148391533465
+water = 0x3fde974f1273d1be  # 0.47798516084665355
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x448f28e17f9a0036  # 1.8393434950901707e22
+carbon_dioxide_kg = 0x4431c5aa8a696da8  # 3.278379982099909e20
+nitrogen_kg = 0x43c83d72423d8aa8  # 3.4933557186310513e18
+argon_kg = 0x42df7f64b2b06ea0  # 138528042959290.5
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f809f1503e033d5  # 0.008115925007610084
 a_m = 0x42778c2820ea98e6  # 1618171006633.5562
@@ -874,6 +1496,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f07da037889f4d  # 67546.01355802752
+obliquity_rad = 0x3fc212a71971a3fd  # 0.14119423620584817
+pole_x = 0x3fe423a697454f0e  # 0.6293518976694672
+pole_y = 0xbfe571cfc085ad1a  # -0.6701430092047389
+pole_z = 0x3fd92ebc372617d9  # 0.3934774912416948
+locking_time_s = 0x44eb8e765ffcf4d1  # 1.0410549000823588e24
+w0_rad = 0x4008995ec6e3aac7  # 3.074887803862427
+w_rad = 0x4008995ec6e3aac7  # 3.074887803862427
+spin_rate_rad_s = 0x3f1862856b02b805  # 9.302081412229664e-5
+surface_seed: 034797bcf2073ea5
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe12202632ad51b  # 0.5354015290128332
+water = 0x3fddbbfb39aa55ca  # 0.4645984709871668
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44874549931e2445  # 1.3736569507676909e22
+carbon_dioxide_kg = 0x4430072cf8062747  # 2.9566496594190605e20
+nitrogen_kg = 0x43c5dc7668f368c6  # 3.1505283256104745e18
+argon_kg = 0x42def2909cccd431  # 136108628456272.77
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e304 BELT 3-4: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7b7d8199cbd3ce  # 0.006711488965028557
 a_m = 0x42784791351d9c9d  # 1668478620121.7883
@@ -902,6 +1546,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40f026099b409b0e  # 66144.60040340965
+obliquity_rad = 0x3fc3793e61573d6e  # 0.15213756325691058
+pole_x = 0x3fe62bf724c3af9e  # 0.6928668706946046
+pole_y = 0xbfe3f911fb87723b  # -0.6241540825536228
+pole_z = 0x3fd71babff4ba7ff  # 0.3610639565582687
+locking_time_s = 0x44f0afd6af6bd183  # 1.260824218249698e24
+w0_rad = 0x3fff712b58be1b23  # 1.9651292292125582
+w_rad = 0x3fff712b58be1b23  # 1.9651292292125582
+spin_rate_rad_s = 0x3f18e6c83dc173bb  # 9.499165702338181e-5
+surface_seed: 43adcb599bd3a328
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0c497334a3e63  # 0.5239978791959853
+water = 0x3fde76d1996b833a  # 0.4760021208040147
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44871e905742c7d2  # 1.3647279035437944e22
+carbon_dioxide_kg = 0x442a82446c6c4a63  # 2.445010463260778e20
+nitrogen_kg = 0x43c2140304467e46  # 2.605339018228698e18
+argon_kg = 0x42d78dbfff31e630  # 103590316001176.75
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e305 BELT 3-5: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7962486b9e40d9  # 0.0061972454949598904
 a_m = 0x428f4a8c46d0bf12  # 4300630186519.884
@@ -930,6 +1596,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e38d17b77b43af  # 40040.74114764423
+obliquity_rad = 0x3fced22b48f968e9  # 0.24078885138698716
+pole_x = 0x3fe2109e6ca8925b  # 0.5645286676631928
+pole_y = 0xbfe2bd010ce436d8  # -0.5855717899118771
+pole_z = 0x3fe29d8e20408942  # 0.581732810013172
+locking_time_s = 0x45826f11afdaba6f  # 7.131255583666111e26
+w0_rad = 0x400c99544fc0bf91  # 3.5748678427407374
+w_rad = 0x400c99544fc0bf91  # 3.5748678427407374
+spin_rate_rad_s = 0x3f24915add39004f  # 0.00015691980535059927
+surface_seed: d2fe6d499cf589a3
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe4c812264f2f7e  # 0.6494227169255138
+water = 0x3fd66fdbb361a103  # 0.35057728307448616
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43dd88a4bb6b0ba6  # 8.512527795177298e18
+carbon_dioxide_kg = 0x44287a4b5033d9a7  # 2.2576704152426745e20
+nitrogen_kg = 0x43c0b1683d690696  # 2.4057143768979323e18
+argon_kg = 0x42b2917ae8e43350  # 20416041641011.313
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e306 BELT 3-6: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f76625bac2fcb99  # 0.00546489534007124
 a_m = 0x42751e4a2db2d231  # 1451239856941.137
@@ -958,6 +1646,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f7bec400616717  # 97260.25009289045
+obliquity_rad = 0x3fc919dbecfa0f4c  # 0.19610165663845647
+pole_x = 0x3fe934ca747dda6a  # 0.7876941943384967
+pole_y = 0xbfd56f2fe3e3ccef  # -0.3349113202559257
+pole_z = 0x3fe08bec72253f3f  # 0.5170805196193909
+locking_time_s = 0x44d50f45c4854a3f  # 3.978056983640247e23
+w0_rad = 0x4014eed27ad05816  # 5.233224791494669
+w_rad = 0x4014eed27ad05816  # 5.233224791494669
+spin_rate_rad_s = 0x3f10ef5a1264a916  # 6.460177664694244e-5
+surface_seed: d664da90f9cea124
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe2a1d0ddd4ed62  # 0.5822529156352341
+water = 0x3fdabc5e4456253c  # 0.41774708436476593
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x446f70dd84821676  # 4.639854947850836e21
+carbon_dioxide_kg = 0x442595c8c8a8469f  # 1.9908736133997943e20
+nitrogen_kg = 0x43bd70ceb55b0684  # 2.1214227028030597e18
+argon_kg = 0x42d8f22abce0afaa  # 109713512694462.66
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e307 BELT 3-7: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7630ff6e2322fe  # 0.005417821668921572
 a_m = 0x427de7bb6c619a90  # 2055069943321.6602
@@ -986,6 +1696,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40ef3a25ec2045b1  # 63953.18507398235
+obliquity_rad = 0x3fd1647ac24c41bd  # 0.27175778364565045
+pole_x = 0x3fe6dad4cee764b2  # 0.714212802991048
+pole_y = 0xbfe25924dc3b43d6  # -0.5733818341633377
+pole_z = 0x3fd9b0c51a559a23  # 0.40141418048588856
+locking_time_s = 0x4510354c48ef5706  # 4.898626436372683e24
+w0_rad = 0x3fa783ae475338f5  # 0.045926519591022265
+w_rad = 0x3fa783ae475338f5  # 0.045926519591022265
+spin_rate_rad_s = 0x3f19c138598c2641  # 9.824663574078356e-5
+surface_seed: 0f27c9493e9cccc7
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe2bd8d7d9c4d4e  # 0.5856387570696968
+water = 0x3fda84e504c76565  # 0.41436124293030324
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x446d0a6ca2a55d42  # 4.2856538576524715e21
+carbon_dioxide_kg = 0x4425662fa7c120ff  # 1.9737245695579937e20
+nitrogen_kg = 0x43bd2fe2fdfc80f2  # 2.1031491314962232e18
+argon_kg = 0x42d902d57bc45262  # 109999849148745.53
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e308 BELT 3-8: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7385d02b05a006  # 0.004766286045516216
 a_m = 0x42825a5b0d609f1d  # 2522410494995.889
@@ -1014,6 +1746,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e7dbd1c66f807c  # 48862.55547309012
+obliquity_rad = 0x3fc07a1924b06614  # 0.12872614184816256
+pole_x = 0x3fe3689a8f65e8f6  # 0.6065190125221125
+pole_y = 0xbfe952ff4c1850a7  # -0.7913815008382884
+pole_z = 0x3fb3948b1b9dc714  # 0.0764853422567991
+locking_time_s = 0x45335f6a99a4158a  # 2.342018181441985e25
+w0_rad = 0x3fda2167d8e3d111  # 0.4082889192643658
+w_rad = 0x3fda2167d8e3d111  # 0.4082889192643658
+spin_rate_rad_s = 0x3f20dabac6651adb  # 0.00012858896224995125
+surface_seed: 8e8c3f63f26b3d4b
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe467349ebf3ed6  # 0.637598333409154
+water = 0x3fd73196c2818254  # 0.36240166659084605
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d6b6df3dd5438d  # 6.546963885038908e18
+carbon_dioxide_kg = 0x4422d364276be26b  # 1.7363686825537972e20
+nitrogen_kg = 0x43b9ad55674a1fd8  # 1.8502289240327352e18
+argon_kg = 0x42d26fa735c669ca  # 81083023956391.16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e382 BELT 3-2 I: Moon(GiantImpact) about Some(Body(BodyIndex(58114))), Present
 mass_mearth = 0x3ed489df78b03032  # 4.896775759110531e-6
 a_m = 0x4184fef5b8986848  # 44031671.07441765
@@ -1042,6 +1796,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22418066556463592, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40faf3fc641a86c1  # 110399.77443936003
+obliquity_rad = 0x3fc53ad72a0df6b3  # 0.16585816911167725
+pole_x = 0x3fe535f9c04dc8b1  # 0.662838817208714
+pole_y = 0xbfdf5cd99b499734  # -0.4900421158293853
+pole_z = 0x3fe21dbd200d5403  # 0.5661302209870204
+locking_time_s = 0x425db9a7d42598cf  # 510675341462.38763
+w0_rad = 0x4015e107d3eb3a2f  # 5.469756423217901
+w_rad = 0x4015e107d3eb3a2f  # 5.469756423217901
+spin_rate_rad_s = 0x3edb320fa7e4fe3b  # 6.483924720079475e-6
+surface_seed: 526429d817e897d5
+bulk_composition:
+iron = 0x3fcb5cdbe1caed2d  # 0.21377132916482236
+rock = 0x3fdc6a46ccf04512  # 0.4439866067269388
+water = 0x3fd5e74b422a4458  # 0.3422420641082389
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d7e4b6cce13bb0  # 6.886807794522964e18
+carbon_dioxide_kg = 0x4383ce2ab812fa66  # 1.7839063775047187e17
+nitrogen_kg = 0x431b036009557a77  # 1900883844882077.8
+argon_kg = 0x4234661e13c6ba4c  # 87612593094.72772
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 
 +H: 38 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100, e200, e300]
@@ -1074,6 +1850,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 125671015016331840, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40e6647dd29b1135  # 45859.931958707435
+obliquity_rad = 0x3fc7d09318d5cad3  # 0.18605269158032076
+pole_x = 0x3fe48fd3f9066ce2  # 0.6425571311732734
+pole_y = 0xbfe1d6a150e2b51c  # -0.5574499683185965
+pole_z = 0x3fe0d29b82041097  # 0.5257089175579662
+locking_time_s = 0x438070f598a70fa6  # 1.480895922481369e17
+w0_rad = 0x3fef9899b405cae5  # 0.9873779789034783
+w_rad = 0x40183bfddf97d020  # 6.058585637703828
+spin_rate_rad_s = 0x3f1e7d1d14bd4240  # 0.00011630525585571653
+surface_seed: a6263dd197e63a37
+bulk_composition:
+iron = 0x3fd46896fc207101  # 0.31888365384817524
+rock = 0x3fe5318919842695  # 0.6622968195308255
+water = 0x0000000000000000  # 0.0
+envelope = 0x3f93456d0d741d58  # 0.018819526620999255
+water_kg = 0x44845185c2cfb12e  # 1.1993894302734474e22
+carbon_dioxide_kg = 0x44435475b8a8c6ea  # 7.131482218139476e20
+nitrogen_kg = 0x43d68ae465135873  # 6.497446953551515e18
+argon_kg = 0x435f2de583c3e195  # 3.510475223777442e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fe7f8f445469751  # 0.7491399148027346
 a_m = 0x424b1520c91bfafa  # 232637174327.96075
@@ -1102,6 +1900,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e87d0793904862  # 50152.23676313531
+obliquity_rad = 0x3fcba365a30e5bd8  # 0.2159239813015279
+pole_x = 0x3fe67f62f4f330e5  # 0.7030501159838677
+pole_y = 0xbfe549a52a19e51c  # -0.6652398893631104
+pole_z = 0x3fd0161afc5154a8  # 0.25134920730972476
+locking_time_s = 0x44008910659000a1  # 3.812805135391707e19
+w0_rad = 0x40039fc23d072bb6  # 2.453007199078878
+w_rad = 0x3fd5ba91046acb80  # 0.3395121138702777
+spin_rate_rad_s = 0x3f20694e76c5bd2d  # 0.00012520869075725288
+surface_seed: 411d24f6622e8b75
+bulk_composition:
+iron = 0x3fc625ab6c849436  # 0.17302458571171692
+rock = 0x3fea769524dedaf2  # 0.826975414288283
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44471c7623d79779  # 8.526519595689995e20
+carbon_dioxide_kg = 0x4457ce363e6faf34  # 1.7565369854611077e21
+nitrogen_kg = 0x43f9e84e90962dc6  # 2.986925485515056e19
+argon_kg = 0x435313e5ecd048c2  # 2.147961119605633e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0201 A c I: Moon(Captured) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3dc39d99df9961a8  # 3.568062160825185e-11
 a_m = 0x41c1db8ddfbc12a5  # 599202751.469319
@@ -1130,6 +1950,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at Some(UniverseTime { seconds: -21324606709165680, nanos: 0 }), Locked(ThreeToTwo) at the time
+primordial_period_s = 0x40ea23389b64fd47  # 53529.76896905392
+obliquity_rad = 0x3fcbdd976abddc4d  # 0.21769993507379795
+pole_x = 0xbfe4d01b97fb67e3  # -0.650403782691907
+pole_y = 0x3fe56b2773ba406c  # 0.6693303356460212
+pole_z = 0xbfd6fbed96a12ee5  # -0.35912646970676426
+locking_time_s = 0x430f17aee32c6078  # 1093970522639375.0
+w0_rad = 0x4017600d41a46372  # 5.843800569208598
+w_rad = 0x40110e9db370faa3  # 4.264273456354803
+spin_rate_rad_s = 0x3ebda5fb6f7678b5  # 1.7671804338547025e-6
+surface_seed: 0c802e7662ec9d65
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe401055c23bb9a  # 0.6251246261216352
+water = 0x3fd7fdf547b888cd  # 0.37487537387836484
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x4226d28c830cf27f  # 49010852230.473625
+carbon_dioxide_kg = 0x4208362eaa315a4c  # 12998530374.16909
+nitrogen_kg = 0x41a082f5046ee06a  # 138508930.2165559
+argon_kg = 0x41292ab77f5923bf  # 824667.7487269564
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff2011931567054  # 1.1252681662799846
 a_m = 0x4261b7de956f657c  # 608794094459.1714
@@ -1158,6 +2000,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f3caa79b5a1429  # 81066.47542770267
+obliquity_rad = 0x3fd727b84300cf6b  # 0.3617993025138648
+pole_x = 0x3fe9329c85de1788  # 0.7874281515694159
+pole_y = 0xbfc34900db8969cb  # -0.15066538543290017
+pole_z = 0x3fe3207006ceaea3  # 0.5977096684414004
+locking_time_s = 0x4479aab175258934  # 7.575493483266247e21
+w0_rad = 0x40018753c59a5c90  # 2.191077750943414
+w_rad = 0x40121ce19ab97e18  # 4.528204362460677
+spin_rate_rad_s = 0x3f14515cf9b7f159  # 7.750635125342488e-5
+surface_seed: 8649352bd8ad73c9
+bulk_composition:
+iron = 0x3fd2c8844c794a17  # 0.2934885737242054
+rock = 0x3fe38175b1e06a7b  # 0.609553191581042
+water = 0x3fb8d2413f1783d4  # 0.09695823469475268
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44e13f541ea5633e  # 6.515874923953745e23
+carbon_dioxide_kg = 0x44bf02b7646a74b6  # 1.4644346926136253e23
+nitrogen_kg = 0x443168a97f0da0f3  # 3.2113634800058257e20
+argon_kg = 0x43551f47307bfe52  # 2.3781460509981e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0400 A e: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fa4e357ec359f94  # 0.04079699285904251
 a_m = 0x4267ab6bca0ff18b  # 813281726591.5482
@@ -1186,6 +2050,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40eb8ecac1b8a7c0  # 56438.33614762081
+obliquity_rad = 0x3fcae209491311cb  # 0.21002307956781716
+pole_x = 0x3feaff5d84d61a18  # 0.8436725229701691
+pole_y = 0xbfd1d781aef92cf4  # -0.27877847754707763
+pole_z = 0x3fdd5d02e0a2f0d3  # 0.4588019555774398
+locking_time_s = 0x4495fca93603eddf  # 2.5957617146049673e22
+w0_rad = 0x3f9cd89a625af3ac  # 0.028170025113229677
+w_rad = 0x40029ec8713df130  # 2.3275307509449235
+spin_rate_rad_s = 0x3f1d2f1c5f0bac71  # 0.00011132822670460882
+surface_seed: 58e15707174b73f8
+bulk_composition:
+iron = 0x3fc584f3d21395dd  # 0.16811988599435682
+rock = 0x3fd658d5d04f6a66  # 0.3491720709113565
+water = 0x3fdee4b046a6caad  # 0.4827080430942868
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44b8e7a84b3e511b  # 1.1761012032483808e23
+carbon_dioxide_kg = 0x444c1ffb31ae0e7c  # 1.0376266486436693e21
+nitrogen_kg = 0x43e43dc4e4b0bd5d  # 1.1668306726677572e19
+argon_kg = 0x42fc132ec8602f0e  # 493899437441776.9
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0500 A f: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fde6fdf2931ccea  # 0.4755781080522882
 a_m = 0x426efd1d4dc3a2ce  # 1064764599837.0876
@@ -1214,6 +2100,28 @@ rings: []
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f5e52f0438b37d  # 89682.93853063691
+obliquity_rad = 0x3ffb783ce45f03e0  # 1.7168549462078246
+pole_x = 0xbfdbb26315beff66  # -0.4327628815044505
+pole_y = 0x3fd972e665091626  # 0.39763793818232995
+pole_z = 0x3fe9e3eeaa8590b9  # 0.8090737658026433
+locking_time_s = 0x44c434a4ee78cefb  # 1.908368898370457e23
+w0_rad = 0x3ff745bd4882a20d  # 1.4545262176926628
+w_rad = 0x4014d458d9b56858  # 5.207370187470666
+spin_rate_rad_s = 0x3f125da53b5fdccd  # 7.005997653651841e-5
+surface_seed: dd53dcd66fa7526f
+bulk_composition:
+iron = 0x3fd40fe1e3b7966f  # 0.3134693836021602
+rock = 0x3fe4d56a93dc2fea  # 0.6510517967121789
+water = 0x3fa22a47a4804df0  # 0.03547881968566091
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44b556a629e0a236  # 1.007680894786732e23
+carbon_dioxide_kg = 0x44adfd2c0a4315ac  # 7.080941383825801e22
+nitrogen_kg = 0x441ae12a4a53e458  # 1.2396005206204442e20
+argon_kg = 0x434311c866e98f91  # 1.0735153950433058e16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0501 A f I: Moon(GiantImpact) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3f70e39340cfe03c  # 0.004123282630637045
 a_m = 0x41a67e5544a47a42  # 188689058.32124525
@@ -1242,6 +2150,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22414827041527996, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40f160d73707671a  # 71181.45093479418
+obliquity_rad = 0x3fdf69ac89ca7ab0  # 0.4908248277296634
+pole_x = 0x3febcbb11b65d6a6  # 0.8686147246468934
+pole_y = 0xbfdfb0ded122e94a  # -0.49517031119798516
+pole_z = 0xbf922b499126e350  # -0.017743253216141952
+locking_time_s = 0x428b4946130e27ec  # 3750190277060.99
+w0_rad = 0x400a68b10157f641  # 3.3011188607186175
+w_rad = 0x40149491900a9ef5  # 5.145086527488947
+spin_rate_rad_s = 0x3ed660699e568d8d  # 5.3349999452919035e-6
+surface_seed: 621fc03a52de038c
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3ff0000000000000  # 1.0
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x4482504af851ab71  # 1.0810467296887523e22
+carbon_dioxide_kg = 0x442049393c0d4365  # 1.502121098227285e20
+nitrogen_kg = 0x43b6368c2cf9bfcf  # 1.6006208423733368e18
+argon_kg = 0x42c89e1fde799e2c  # 54134837146428.34
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body 0502 A f II: Moon(Captured) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3db5f091320fbfc9  # 1.9954055013216192e-11
 a_m = 0x41e4977f6351cc9f  # 2763782938.556228
@@ -1270,6 +2200,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e2bbc0873ef63a  # 38366.016509514724
+obliquity_rad = 0x3fd95f6e109cce90  # 0.3964495813590725
+pole_x = 0x3fedf2550f2fac1f  # 0.9358315750699865
+pole_y = 0xbfd28d355ff56eb1  # -0.2898686825844648
+pole_z = 0xbfc9a996a6ab9500  # -0.2004879297084372
+locking_time_s = 0x43ffa19f1149f594  # 3.646844452848437e19
+w0_rad = 0x4018725761484913  # 6.111661453282312
+w_rad = 0x3ff4310a77c1c880  # 1.2619728734976263
+spin_rate_rad_s = 0x3f2573d1afbe44ff  # 0.00016366896295186975
+surface_seed: 594a79e288076338
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe401055c23bb9a  # 0.6251246261216352
+water = 0x3fd7fdf547b888cd  # 0.37487537387836484
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x42c6378319355863  # 48855356959408.77
+carbon_dioxide_kg = 0x4265280e43c9d44e  # 726930693710.6345
+nitrogen_kg = 0x41fcdb25151d5aa6  # 7745982801.834631
+argon_kg = 0x4110d1495c27fa00  # 275538.3399962485
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fa1b03538e08d29  # 0.03454748458195873
 orbit: NotApplicable
@@ -1286,6 +2238,8 @@ fractional_luminosity = 0x3e790f26a906a0ee  # 9.335273377117772e-8
 members: [e101, e102, e103, e104, e105, e106, e107, e108]
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f940e11e6894e92  # 0.019584922500441033
 a_m = 0x4243ae1a1408d039  # 169050646545.62674
@@ -1314,6 +2268,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 1826082064223873536, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ffa1f605b1470f  # 129567.3763897682
+obliquity_rad = 0x3fddb2efc995d582  # 0.46404642759383574
+pole_x = 0x3fb46fb9b8c9aab5  # 0.07982979546947429
+pole_y = 0xbfe86bcc601d9702  # -0.7631589772470024
+pole_z = 0x3fe48535a3d75123  # 0.641260929109681
+locking_time_s = 0x43b9a7318a250c25  # 1.8485006414556787e18
+w0_rad = 0x3ff6df995e85780b  # 1.4295896236649266
+w_rad = 0x40128773b867c010  # 4.632277375538266
+spin_rate_rad_s = 0x3f091e0e8e28949e  # 4.7907656853398944e-5
+surface_seed: 670523e3b0a07162
+bulk_composition:
+iron = 0x3fe073bb1e713b51  # 0.5141273111893075
+rock = 0x3fdf1889c31d895e  # 0.48587268881069245
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43f755678dd326b1  # 2.690182231557322e19
+carbon_dioxide_kg = 0x43d8c100c76e792f  # 7.134831135869418e18
+nitrogen_kg = 0x4370e1a0d8953397  # 7.602688915270693e16
+argon_kg = 0x42f2c10a66ea6fd4  # 329925000079101.25
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f794485d42d79ca  # 0.006168864029716345
 a_m = 0x424594465566276e  # 185363901132.30804
@@ -1342,6 +2318,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks Synchronous at Some(UniverseTime { seconds: 6282194977578687488, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40e6b6fb4643230a  # 46519.85232693523
+obliquity_rad = 0x3fe0eb1ccddf908c  # 0.5287002583468321
+pole_x = 0x3fe40f191a83a13c  # 0.626843025002962
+pole_y = 0xbfc5dc8b71585412  # -0.17079299005914145
+pole_z = 0x3fe8538608fa3257  # 0.7601957488382806
+locking_time_s = 0x43d5df9f27fd25e6  # 6.304613554810493e18
+w0_rad = 0x40109b7a83b8a98e  # 4.1518345433672845
+w_rad = 0x401268879c5789d8  # 4.602079813807414
+spin_rate_rad_s = 0x3f21a3eb6500e854  # 0.0001345848891121682
+surface_seed: efe4e21a24cc688c
+bulk_composition:
+iron = 0x3fced395a2e17ae7  # 0.2408320470157925
+rock = 0x3fe84b1a9747a146  # 0.7591679529842075
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43dd6604a0d25f6f  # 8.473543053980581e18
+carbon_dioxide_kg = 0x43bf301f9f7b0111  # 2.247330983881806e18
+nitrogen_kg = 0x435544e914a11ac0  # 2.3946969500379904e16
+argon_kg = 0x42e275ad7c6faba0  # 162373048696157.0
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f69b5e02caaa6ef  # 0.0031384828956405523
 a_m = 0x42418a1c4ce2ac0e  # 150663109061.34418
@@ -1370,6 +2368,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 1253500735238283264, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ec3c0161e450e3  # 57824.04319968985
+obliquity_rad = 0x3fc52296d3e9b987  # 0.16511807772935702
+pole_x = 0x3fe702caa36fac98  # 0.7190907661546531
+pole_y = 0xbfe5d6151d477acc  # -0.6823831149921147
+pole_z = 0x3fc0d130d7048339  # 0.13138399599940856
+locking_time_s = 0x43b1b4f9dac5d71b  # 1.2759193124700884e18
+w0_rad = 0x401731aafe658632  # 5.798503851839586
+w_rad = 0x3fe5cb8c2ce5cec0  # 0.6810971142681055
+spin_rate_rad_s = 0x3f1bfc3527040428  # 0.0001067550126698935
+surface_seed: 4b65c4c081bf9801
+bulk_composition:
+iron = 0x3fc30511230e2799  # 0.14859213077243963
+rock = 0x3feb3ebbb73c761a  # 0.8514078692275604
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43cde9e6fcf7fb82  # 4.3110157416801905e18
+carbon_dioxide_kg = 0x43afbc0915456850  # 1.1433563488803983e18
+nitrogen_kg = 0x4345a45369fea6d3  # 1.2183305356922278e16
+argon_kg = 0x42d510ba2bc1522c  # 92646348358984.69
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e104 BELT 1-4: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f5fd5d3f7b011af  # 0.001943070411244734
 a_m = 0x4245851ab0a23a7e  # 184854864196.45697
@@ -1398,6 +2418,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40d21c559143e1e8  # 18545.336991282093
+obliquity_rad = 0x3fae16b7087a9a1e  # 0.05876705149175997
+pole_x = 0x3fe97373f6d72a78  # 0.795343381986938
+pole_y = 0xbfd1009c0d13768f  # -0.26566220547633973
+pole_z = 0x3fe16f57e5dc20ad  # 0.5448417176676422
+locking_time_s = 0x43e87d3219b3e80f  # 1.4116973719784028e19
+w0_rad = 0x4014bf59babdb1ea  # 5.186865728214324
+w_rad = 0x4015af1482db26e8  # 5.420976681352592
+spin_rate_rad_s = 0x3f362b1efa1d2b78  # 0.0003382635714969588
+surface_seed: 19682aadea3bd6fb
+bulk_composition:
+iron = 0x3fd1fd74966174fd  # 0.2810946911393584
+rock = 0x3fe70145b4cf4582  # 0.7189053088606416
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43c285182407b789  # 2.668998815225156e18
+carbon_dioxide_kg = 0x43a3a5aec20ca38a  # 7.078649031684109e17
+nitrogen_kg = 0x433acc2845f157ed  # 7542822738679789.0
+argon_kg = 0x42c60635c6e72b2c  # 48431855685206.34
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e105 BELT 1-5: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f55f2a5a7b4f251  # 0.0013395898557312556
 a_m = 0x424127560e4fb84f  # 147348790431.4399
@@ -1426,6 +2468,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 515372045709421312, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40f93f55826fbb6f  # 103413.34434483734
+obliquity_rad = 0x3fceed842c382b02  # 0.24162342223311134
+pole_x = 0x3fe0fd03df021cbd  # 0.5308856349592116
+pole_y = 0xbfd819063230fece  # -0.3765273561620973
+pole_z = 0x3fe84b61e0611de3  # 0.7592019445809765
+locking_time_s = 0x439dda76e38fca96  # 5.377906229412264e17
+w0_rad = 0x40161bd9f5886f1f  # 5.527198635532641
+w_rad = 0x400e60178096aae0  # 3.796919827077872
+spin_rate_rad_s = 0x3f0e881b2859ef5f  # 5.8234528336391664e-5
+surface_seed: b45764a5c5a7125d
+bulk_composition:
+iron = 0x3fb3931c1cb5a843  # 0.07646346760671556
+rock = 0x3fed8d9c7c694af8  # 0.9235365323932845
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43b98933b235b84a  # 1.8400587632560236e18
+carbon_dioxide_kg = 0x439b171e5b1c0cf7  # 4.880155850374671e17
+nitrogen_kg = 0x433279860361304b  # 5200166070071371.0
+argon_kg = 0x42c3818596d85ffb  # 42894025928895.96
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e106 BELT 1-6: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f50325265623d8d  # 0.0009885601662381366
 a_m = 0x42432c62eeeab0eb  # 164698119637.38217
@@ -1454,6 +2518,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at Some(UniverseTime { seconds: 3301693724694273536, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40e03023a59be926  # 33153.113965945595
+obliquity_rad = 0x3fc2dce9e9eff5ed  # 0.14736675188753115
+pole_x = 0x3fe8f60d76012cb2  # 0.7800357155587305
+pole_y = 0xbfd84a09ae16159e  # -0.37951890946018263
+pole_z = 0x3fdfd718b2ab4c16  # 0.49750344703824234
+locking_time_s = 0x43c710cf436ae7ac  # 3.3241123019260785e18
+w0_rad = 0x400fcfb495cce1d9  # 3.9764186576032725
+w_rad = 0x4018e026e202eac0  # 6.218898326328315
+spin_rate_rad_s = 0x3f28ac6b572f816f  # 0.0001882439642875255
+surface_seed: 9b6b3417c22cf4e8
+bulk_composition:
+iron = 0x3fc2cacc1b31745d  # 0.1468138821391304
+rock = 0x3feb4d4cf933a2e9  # 0.8531861178608696
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43b2d82d1840dae9  # 1.357884869842758e18
+carbon_dioxide_kg = 0x4393fdd2580f6072  # 3.6013468287134016e17
+nitrogen_kg = 0x432b445f8660838c  # 3837500719120838.0
+argon_kg = 0x42ba9899f1bb6666  # 29242720107366.4
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e107 BELT 1-7: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f490dcb5441d4c0  # 0.0007645838563933513
 a_m = 0x42428af1304ed940  # 159280947357.69727
@@ -1482,6 +2568,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 2732280608506149376, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ebe4be964f4462  # 57125.95584834438
+obliquity_rad = 0x3fd4f454a9ff49c0  # 0.3274127636078923
+pole_x = 0x3fe19618df231695  # 0.5495724065919655
+pole_y = 0xbfe45ce4d90439cf  # -0.6363395918468145
+pole_z = 0x3fe1529ae50d4434  # 0.5413336251896284
+locking_time_s = 0x43c31d54283e7bfa  # 2.7546991857379543e18
+w0_rad = 0x4009173034664ca8  # 3.1363224118918716
+w_rad = 0x3ffa8ff014eb44c0  # 1.6601410691403515
+spin_rate_rad_s = 0x3f1c993a032fabf3  # 0.00010909477786895365
+surface_seed: bd877ad8024130fd
+bulk_composition:
+iron = 0x3fe7e06d6399b1d6  # 0.7461459107703898
+rock = 0x3fd03f2538cc9c54  # 0.25385408922961017
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43ad2657a5668f90  # 1.05023132205841e18
+carbon_dioxide_kg = 0x438eec92683bd467  # 2.7853961150244784e17
+nitrogen_kg = 0x432516d7aca5065d  # 2968045040599854.5
+argon_kg = 0x42987b4c1d259168  # 6729459255652.352
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e108 BELT 1-8: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f440e11e6894e90  # 0.0006120288281387821
 a_m = 0x42423309a70069f6  # 156331363840.82782
@@ -1510,6 +2618,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: 6785367633210114048, nanos: 0 }), Despinning at the time
+primordial_period_s = 0x40ca29c3f5fbd784  # 13395.53094432853
+obliquity_rad = 0x3fd67c85cfda5a68  # 0.3513502626241576
+pole_x = 0x3fe6ea3e170c595e  # 0.7160940599594985
+pole_y = 0xbfb061674bf2a4c0  # -0.06398625950045567
+pole_z = 0x3fe63df8813ae844  # 0.6950647853875656
+locking_time_s = 0x43d79e875f4f0c5f  # 6.807786210441919e18
+w0_rad = 0x40153401c1d69dc6  # 5.300787953113689
+w_rad = 0x401346e374e85fe0  # 4.819227053339972
+spin_rate_rad_s = 0x3f3ea376e528fa9d  # 0.00046750691140921304
+surface_seed: 779749bce4bef5a6
+bulk_composition:
+iron = 0x3fd6c9c598e45398  # 0.35606517725801146
+rock = 0x3fe49b1d338dd634  # 0.6439348227419885
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43a755678dd326ae  # 8.406819473616627e17
+carbon_dioxide_kg = 0x4388c100c76e792c  # 2.2296347299591923e17
+nitrogen_kg = 0x4320e1a0d8953395  # 2375840286022090.5
+argon_kg = 0x42a8dae54d799e79  # 13664214498511.236
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e182 BELT 1-2 I: Moon(GiantImpact) about Some(Body(BodyIndex(57602))), Present
 mass_mearth = 0x3ee7217b957b9f80  # 1.1029621119942662e-5
 a_m = 0x4182c731544afd2c  # 39380522.5366157
@@ -1538,6 +2668,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22416961218553456, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40f163ca27b58b38  # 71228.63469461806
+obliquity_rad = 0x3f96b9c72b4fed23  # 0.02219306184632076
+pole_x = 0x3fe8c3ad29175a2d  # 0.7738862803042302
+pole_y = 0xbfdfcf662c08e568  # -0.49703363704937553
+pole_z = 0x3fd91ebf7928111e  # 0.39250170547190233
+locking_time_s = 0x4277841e5540eab6  # 1616013251598.6694
+w0_rad = 0x4006a9c5bb87c71b  # 2.8328966761408885
+w_rad = 0x3ffe1e0b9ede3d5e  # 1.8823353009973611
+spin_rate_rad_s = 0x3edaa34238cb5265  # 6.35092954999871e-6
+surface_seed: 0d15432450ad2e8c
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3ff0000000000000  # 1.0
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x434ae98bd166375a  # 1.5150272234679988e16
+carbon_dioxide_kg = 0x432c8ce8eb80790d  # 4018115679632518.5
+nitrogen_kg = 0x42c3786fd729734a  # 42815986750182.58
+argon_kg = 0x42496963f3497929  # 218284680850.94656
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e200 BELT 2: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fb703c12e2080f7  # 0.08990104080340076
 orbit: NotApplicable
@@ -1554,6 +2706,8 @@ fractional_luminosity = 0x3eb9d25002aa0017  # 1.5390833235928762e-6
 members: [e201, e202, e203, e204, e205, e206, e207, e208]
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 body e201 BELT 2-1: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3fa9e4da3c0857eb  # 0.05057413084811898
 a_m = 0x425ef35a82a9b65e  # 531727256230.8495
@@ -1582,6 +2736,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40e75b7741d07d33  # 47835.72678398564
+obliquity_rad = 0x3fd2e9a06f523bb6  # 0.29550944205487484
+pole_x = 0x3fe4670487dcb718  # 0.6375754025991425
+pole_y = 0xbfda7e34784d34a9  # -0.41395293949319495
+pole_z = 0x3fe4ca88d89f40b8  # 0.6497234564685845
+locking_time_s = 0x44694560f53b1316  # 3.729342936505537e21
+w0_rad = 0x3fe79fc489cb5837  # 0.7382528964324199
+w_rad = 0x4016da3ba2eefdd8  # 5.713118120037926
+spin_rate_rad_s = 0x3f21375269271287  # 0.00013134842863684137
+surface_seed: 848341a6df356c9e
+bulk_composition:
+iron = 0x3fd1bd510425ccd4  # 0.2771799602989635
+rock = 0x3fe26bfb844ea37a  # 0.5756814560055397
+water = 0x3fc2d56fe679d873  # 0.1471385836954969
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44a2d2569386ab3e  # 4.444132571255575e22
+carbon_dioxide_kg = 0x4458f833d36a8721  # 1.8424269150749388e21
+nitrogen_kg = 0x43f10745c1b33ec8  # 1.9632417947519844e19
+argon_kg = 0x430cb0a903a3c0ab  # 1009442413115413.4
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f904fea56d0487f  # 0.015929853008920688
 a_m = 0x4252fae2bd41b545  # 326074299654.83234
@@ -1610,6 +2786,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40ebe31a7b8924fa  # 57112.827580044
+obliquity_rad = 0x3fd4c947b32d5f05  # 0.3247851609971664
+pole_x = 0x3fe88f82062d9ce8  # 0.7675180550258149
+pole_y = 0xbfe3e198f1a0a298  # -0.6212887496268023
+pole_z = 0x3fc43465dcc3d255  # 0.15784905700242527
+locking_time_s = 0x44201d9cc859d4b3  # 1.4864085289548287e20
+w0_rad = 0x4002bede566e1789  # 2.3431975128505127
+w_rad = 0x400874b9bab162d0  # 3.056994875467673
+spin_rate_rad_s = 0x3f1cd5c5b876d6d9  # 0.00010999697962329624
+surface_seed: 6ca96ea33082c14a
+bulk_composition:
+iron = 0x3fa261056c11cac6  # 0.03589646286208885
+rock = 0x3feed9efa93ee354  # 0.9641035371379112
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43f2fa9b93ed4639  # 2.188122394405867e19
+carbon_dioxide_kg = 0x43d422595c5fe418  # 5.803281132989473e18
+nitrogen_kg = 0x436b7631b2df1dee  # 6.183824158103538e16
+argon_kg = 0x42fe44a864b9abeb  # 532483708525246.7
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f809917da2c1125  # 0.008104502053818916
 a_m = 0x4258a2166028f31b  # 423194362019.7985
@@ -1638,6 +2836,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e58772e7ef6f82  # 44091.59081241397
+obliquity_rad = 0x3ff45c78da0a059d  # 1.272576190677092
+pole_x = 0xbfb549616837e498  # -0.08315094751732699
+pole_y = 0x3fc0d9a878b924fa  # 0.13164239782989978
+pole_z = 0x3fef9c168eb08e62  # 0.987803724947707
+locking_time_s = 0x444ebcad4ef03029  # 1.1339958637097901e21
+w0_rad = 0x40149aebe90d9cd0  # 5.151290551620335
+w_rad = 0x4018ef57ec50cbd0  # 6.233733837539106
+spin_rate_rad_s = 0x3f22ad8385c2df91  # 0.00014250021457029282
+surface_seed: 28fe0c9af393d780
+bulk_composition:
+iron = 0x3fdb218c3ec456ee  # 0.42392259721360304
+rock = 0x3fe26f39e09dd489  # 0.576077402786397
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43e34fbfb504bba2  # 1.1132332752561312e19
+carbon_dioxide_kg = 0x43c47cac36050562  # 2.9524882517662607e18
+nitrogen_kg = 0x435bf163c006d92e  # 3.146094038767327e16
+argon_kg = 0x42e26729f1eeaadd  # 161874357220694.9
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e204 BELT 2-4: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f748d52ddedf63f  # 0.0050175892819175885
 a_m = 0x425186eb805b085e  # 301112099180.13074
@@ -1666,6 +2886,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f93c4b348ba559  # 103364.7003284892
+obliquity_rad = 0x3fc04cdad3d1c172  # 0.127345422198697
+pole_x = 0x3fea591e99260646  # 0.8233788481886186
+pole_y = 0xbfcdb3b9514cb4bb  # -0.23204723806103353
+pole_z = 0x3fe0927c6eec6974  # 0.5178816000437068
+locking_time_s = 0x441355c7027a0513  # 8.91672622842913e19
+w0_rad = 0x3fe7c240fd6273ef  # 0.7424626301686866
+w_rad = 0x4016d715c5f33710  # 5.710043995828315
+spin_rate_rad_s = 0x3f0fdc96163e3ec7  # 6.0771303451832114e-5
+surface_seed: 369a74a166bf8fdb
+bulk_composition:
+iron = 0x3fea6fb2efe6c5e4  # 0.8261351285529455
+rock = 0x3fc641344064e870  # 0.17386487144705454
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d7e9764f45803f  # 6.892153661145808e18
+carbon_dioxide_kg = 0x43b95e12a8b021a6  # 1.827919014477801e18
+nitrogen_kg = 0x43514cbeaa6fb8f1  # 1.9477825564107716e16
+argon_kg = 0x42bb825b1eff96f9  # 30246688456598.973
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e205 BELT 2-5: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f6c56839c85e191  # 0.003459221890974536
 a_m = 0x425837efa14438ac  # 416070665488.8855
@@ -1694,6 +2936,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e8a9dcad1191fb  # 50510.896126542204
+obliquity_rad = 0x3fc58bb7d124bad3  # 0.16832635604938292
+pole_x = 0x3fdf88fc4403d63a  # 0.49273592607582695
+pole_y = 0xbfe38e430c07539d  # -0.6111159548696495
+pole_z = 0x3fe3d2bc16152f0a  # 0.6194744521430675
+locking_time_s = 0x444348d08178ab26  # 7.114699466432711e20
+w0_rad = 0x40023c2acb7d4e9b  # 2.2793784997573545
+w_rad = 0x40157ad43b6039e0  # 5.369950225589918
+spin_rate_rad_s = 0x3f204dcb42e1fb15  # 0.00012438875404893109
+surface_seed: ce3693c17b001628
+bulk_composition:
+iron = 0x3fd14482348d10b2  # 0.26980643398224935
+rock = 0x3fe75dbee5b977a7  # 0.7301935660177507
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d07c40bff5f2b3  # 4.751582379712892e18
+carbon_dioxide_kg = 0x43b17d234cc222dc  # 1.260202283315158e18
+nitrogen_kg = 0x4347da85c280d0b4  # 1.3428384986145128e16
+argon_kg = 0x42d3e99eb25e2833  # 87576443189408.8
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e206 BELT 2-6: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f64e9859d4b43c2  # 0.002552758184130672
 a_m = 0x425c72cf25c98604  # 488741050150.094
@@ -1722,6 +2986,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f9c570d2a0cd50  # 105559.05142288399
+obliquity_rad = 0x3fcf747c706213c4  # 0.24574237334686988
+pole_x = 0x3fe97368924adb30  # 0.7953379494927955
+pole_y = 0xbfcbd16298d476fe  # -0.2173274275054879
+pole_z = 0x3fe21b96bace9f26  # 0.5658677719665988
+locking_time_s = 0x4444115e18d8f2a1  # 7.403726930814185e20
+w0_rad = 0x40170485d36de9d6  # 5.754416755279143
+w_rad = 0x4011b6a5a59111a0  # 4.428366267184543
+spin_rate_rad_s = 0x3f0f34cad3e17aa0  # 5.952114087003535e-5
+surface_seed: 93e751943c0749f2
+bulk_composition:
+iron = 0x3fa777c44cd22bfb  # 0.045835623147546266
+rock = 0x3fee8883bb32dd40  # 0.9541643768524537
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43c854bbb6334fac  # 3.506465092346534e18
+carbon_dioxide_kg = 0x43a9cfdf9fe64b9e  # 9.299755244919068e17
+nitrogen_kg = 0x43419a5a64a72043  # 9909575260979334.0
+argon_kg = 0x42d333aef2e969d6  # 84450797659559.34
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e207 BELT 2-7: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f602c95836ca155  # 0.0019743843253260764
 a_m = 0x42596a8b1ab63259  # 436646734552.7867
@@ -1750,6 +3036,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f4279a82b80905  # 82553.65691379092
+obliquity_rad = 0x3fc50293cef22bed  # 0.1641411552885467
+pole_x = 0x3fe9e03345bb37c1  # 0.8086181985797724
+pole_y = 0xbfd75480d593d7cb  # -0.3645326696126829
+pole_z = 0x3fdd8e032b16ad21  # 0.46179274757260386
+locking_time_s = 0x4439c83053f1230a  # 4.755937237443466e20
+w0_rad = 0x3fd31caf1af8595b  # 0.2986257327442183
+w_rad = 0x40139c485a5fcf28  # 4.902619754884462
+spin_rate_rad_s = 0x3f13f36fc0e3f7c1  # 7.610673512556313e-5
+surface_seed: 22e799621a567d25
+bulk_composition:
+iron = 0x3fb24d489219d862  # 0.07149175230901642
+rock = 0x3fedb656edbcc4f4  # 0.9285082476909836
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43c2d18013078478  # 2.712011564068172e18
+carbon_dioxide_kg = 0x43a3f6bd4bd7004a  # 7.192726322093847e17
+nitrogen_kg = 0x433b3ab6a58d537d  # 7664380507149181.0
+argon_kg = 0x42cce76f07901d01  # 63560651579450.01
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e208 BELT 2-8: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f59e4da3c0857e8  # 0.0015804415890037175
 a_m = 0x42568510ed335e08  # 386887038157.46924
@@ -1778,6 +3086,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e7ee578ae31de0  # 49010.73570400081
+obliquity_rad = 0x3fc24743cbf61be2  # 0.14279983004618574
+pole_x = 0x3fe57cbcad3ef731  # 0.671476686831488
+pole_y = 0xbfe079a2d112fead  # -0.5148481448631707
+pole_z = 0x3fe10e0a2ad3c341  # 0.5329638325184548
+locking_time_s = 0x443c162fb3cacd8c  # 5.181075281402205e20
+w0_rad = 0x400e8b00be20e1bc  # 3.817872510317299
+w_rad = 0x4001375c8ed1fb80  # 2.1520320089179563
+spin_rate_rad_s = 0x3f20cd7f91b7fd7b  # 0.00012819463960054761
+surface_seed: 25e676b1e3ec1b9b
+bulk_composition:
+iron = 0x3fdc83f3748fb9cd  # 0.4455536497397617
+rock = 0x3fe1be0645b8231a  # 0.5544463502602384
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43be208f1b9f9671  # 2.1708923691969047e18
+carbon_dioxide_kg = 0x439ff604e5a7135b  # 5.757584109609182e17
+nitrogen_kg = 0x4335cbde6893838c  # 6135130608599948.0
+argon_kg = 0x42bba1bd0ad5b24a  # 30381475288498.29
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e283 BELT 2-3 I: Moon(GiantImpact) about Some(Body(BodyIndex(57859))), Present
 mass_mearth = 0x3ee513214541bbed  # 1.0049212655098181e-5
 a_m = 0x418289807d7ab462  # 38875151.684914365
@@ -1806,6 +3136,28 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22416956383819768, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40e52da573498bb4  # 43373.17032315527
+obliquity_rad = 0x3fd0ada267a71d73  # 0.2605978023752506
+pole_x = 0x3fe63495904582c1  # 0.6939189737132311
+pole_y = 0xbfdb38eb20306362  # -0.42534902709444655
+pole_z = 0x3fe29781e00cd3b4  # 0.5809945465067501
+locking_time_s = 0x4277962118289bca  # 1620847985289.7368
+w0_rad = 0x3ff1fa018bb2120a  # 1.1235366303309342
+w_rad = 0x400c1d96b3202316  # 3.51444759313416
+spin_rate_rad_s = 0x3edf1ef765caf083  # 7.419815656713985e-6
+surface_seed: 84e30eaf623cfbf9
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3ff0000000000000  # 1.0
+water = 0x0000000000000000  # 0.0
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43488524bc48edcb  # 1.3803584530537366e16
+carbon_dioxide_kg = 0x432a033b019fbbb5  # 3660950679838170.5
+nitrogen_kg = 0x42c1bd6079f91a73  # 39010130194996.9
+argon_kg = 0x42497a6e1a12c70c  # 218856436773.55505
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e300 BELT 3: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3fbd5e1331b5df15  # 0.11471672023423836
 orbit: NotApplicable
@@ -1824,6 +3176,8 @@ fractional_luminosity = 0x3ee2c648929a14be  # 8.952400622828208e-6
 members: [e301, e302, e303, e304, e305, e306, e307, e308]
 surface: NotApplicable
 hooks: NotApplicable
+rotation: none
+surface_seed: none
 body e301 BELT 3-1: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f83ae68bf916f6d  # 0.009610002847857147
 a_m = 0x42767e3532d1d09b  # 1545707138333.0378
@@ -1852,6 +3206,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40f281114116ee6a  # 75793.07839100962
+obliquity_rad = 0x3fd18f275d5b561a  # 0.27436241261361405
+pole_x = 0x3fe7e4505c59a76c  # 0.7466203502383286
+pole_y = 0xbfd45d4ef15c2638  # -0.3181950909643976
+pole_z = 0x3fe2b1e8a0d4488e  # 0.5842173711009921
+locking_time_s = 0x44e4ac95cbc8db81  # 7.810477086387837e23
+w0_rad = 0x3fee5f47e61f0906  # 0.9491309637599279
+w_rad = 0x4000e268ad6cb990  # 2.1105512188725655
+spin_rate_rad_s = 0x3f15bb454ff54aad  # 8.28991942303607e-5
+surface_seed: 0649aca2f35c40d6
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe3d42b9f5fa67e  # 0.6196497071043294
+water = 0x3fd857a8c140b305  # 0.3803502928956706
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x443549640b4ee34d  # 3.926699898437892e20
+carbon_dioxide_kg = 0x4432fa89b8191198  # 3.5009455632587214e20
+nitrogen_kg = 0x43c9e2ba2942ed32  # 3.7305157641281464e18
+argon_kg = 0x42e964cc8e85fa45  # 223365754531794.16
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f826e1a38f41f7d  # 0.008999066222272973
 a_m = 0x4278582201c9df82  # 1672925420701.9692
@@ -1880,6 +3256,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Isotropic obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40f4e0bd79dee1b1  # 85515.84225357209
+obliquity_rad = 0x3ff362d91032394a  # 1.2116327889121572
+pole_x = 0x3fadb4fba9102b1c  # 0.058021416080086236
+pole_y = 0xbfec0617c4a08133  # -0.8757437553759132
+pole_z = 0xbfdeac793555eadc  # -0.4792769451957335
+locking_time_s = 0x44ea2b87b186d997  # 9.886761303545231e23
+w0_rad = 0x401797734ec5d0d4  # 5.897900801490511
+w_rad = 0x3ffd32bd7b6352e0  # 1.824887735351858
+spin_rate_rad_s = 0x3f1342c08992a514  # 7.347393183700465e-5
+surface_seed: 1d72a2b67e499b31
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0b45876c61721  # 0.5220148391533465
+water = 0x3fde974f1273d1be  # 0.47798516084665355
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x448f28e17f9a0036  # 1.8393434950901707e22
+carbon_dioxide_kg = 0x4431c5aa8a696da8  # 3.278379982099909e20
+nitrogen_kg = 0x43c83d72423d8aa8  # 3.4933557186310513e18
+argon_kg = 0x42df7f67116db173  # 138528202012357.8
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f809f1503e033d5  # 0.008115925007610084
 a_m = 0x42778c2820ea98e6  # 1618171006633.5562
@@ -1908,6 +3306,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f07da037889f4d  # 67546.01355802752
+obliquity_rad = 0x3fc212a71971a3fd  # 0.14119423620584817
+pole_x = 0x3fe423a697454f0e  # 0.6293518976694672
+pole_y = 0xbfe571cfc085ad1a  # -0.6701430092047389
+pole_z = 0x3fd92ebc372617d9  # 0.3934774912416948
+locking_time_s = 0x44eb8e765ffcf4d1  # 1.0410549000823588e24
+w0_rad = 0x4008995ec6e3aac7  # 3.074887803862427
+w_rad = 0x40190a2c1f43bae8  # 6.259933937558095
+spin_rate_rad_s = 0x3f1862856b02b735  # 9.302081412229382e-5
+surface_seed: 034797bcf2073ea5
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe12202632ad51b  # 0.5354015290128332
+water = 0x3fddbbfb39aa55ca  # 0.4645984709871668
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44874549931e2445  # 1.3736569507676909e22
+carbon_dioxide_kg = 0x4430072cf8062747  # 2.9566496594190605e20
+nitrogen_kg = 0x43c5dc7668f368c6  # 3.1505283256104745e18
+argon_kg = 0x42def292f0f14f2c  # 136108784731452.69
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e304 BELT 3-4: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7b7d8199cbd3ce  # 0.006711488965028557
 a_m = 0x42784791351d9c9d  # 1668478620121.7883
@@ -1936,6 +3356,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40f026099b409b0e  # 66144.60040340965
+obliquity_rad = 0x3fc3793e61573d6e  # 0.15213756325691058
+pole_x = 0x3fe62bf724c3af9e  # 0.6928668706946046
+pole_y = 0xbfe3f911fb87723b  # -0.6241540825536228
+pole_z = 0x3fd71babff4ba7ff  # 0.3610639565582687
+locking_time_s = 0x44f0afd6af6bd183  # 1.260824218249698e24
+w0_rad = 0x3fff712b58be1b23  # 1.9651292292125582
+w_rad = 0x4007c41b231017c0  # 2.970754884651768
+spin_rate_rad_s = 0x3f18e6c83dc1730b  # 9.499165702337943e-5
+surface_seed: 43adcb599bd3a328
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0c497334a3e63  # 0.5239978791959853
+water = 0x3fde76d1996b833a  # 0.4760021208040147
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x44871e905742c7d2  # 1.3647279035437944e22
+carbon_dioxide_kg = 0x442a82446c6c4a63  # 2.445010463260778e20
+nitrogen_kg = 0x43c2140304467e46  # 2.605339018228698e18
+argon_kg = 0x42d78dc1c4e90f22  # 103590434939964.53
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e305 BELT 3-5: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7962486b9e40d9  # 0.0061972454949598904
 a_m = 0x428f4a8c46d0bf12  # 4300630186519.884
@@ -1964,6 +3406,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e38d17b77b43af  # 40040.74114764423
+obliquity_rad = 0x3fced22b48f968e9  # 0.24078885138698716
+pole_x = 0x3fe2109e6ca8925b  # 0.5645286676631928
+pole_y = 0xbfe2bd010ce436d8  # -0.5855717899118771
+pole_z = 0x3fe29d8e20408942  # 0.581732810013172
+locking_time_s = 0x45826f11afdaba6f  # 7.131255583666111e26
+w0_rad = 0x400c99544fc0bf91  # 3.5748678427407374
+w_rad = 0x4014d2b1858fab28  # 5.205755316633066
+spin_rate_rad_s = 0x3f24915add39004f  # 0.00015691980535059927
+surface_seed: d2fe6d499cf589a3
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe4c812264f2f7e  # 0.6494227169255138
+water = 0x3fd66fdbb361a103  # 0.35057728307448616
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43dd88a4bb6b0ba6  # 8.512527795177298e18
+carbon_dioxide_kg = 0x44287a4b5033d9a7  # 2.2576704152426745e20
+nitrogen_kg = 0x43c0b1683d690696  # 2.4057143768979323e18
+argon_kg = 0x42b2917c4e928e3f  # 20416065081998.246
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e306 BELT 3-6: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f76625bac2fcb99  # 0.00546489534007124
 a_m = 0x42751e4a2db2d231  # 1451239856941.137
@@ -1992,6 +3456,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at None, Despinning at the time
+primordial_period_s = 0x40f7bec400616717  # 97260.25009289045
+obliquity_rad = 0x3fc919dbecfa0f4c  # 0.19610165663845647
+pole_x = 0x3fe934ca747dda6a  # 0.7876941943384967
+pole_y = 0xbfd56f2fe3e3ccef  # -0.3349113202559257
+pole_z = 0x3fe08bec72253f3f  # 0.5170805196193909
+locking_time_s = 0x44d50f45c4854a3f  # 3.978056983640247e23
+w0_rad = 0x4014eed27ad05816  # 5.233224791494669
+w_rad = 0x40020c689fc446a0  # 2.2560589296125073
+spin_rate_rad_s = 0x3f10ef5a1264a79c  # 6.460177664693731e-5
+surface_seed: d664da90f9cea124
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe2a1d0ddd4ed62  # 0.5822529156352341
+water = 0x3fdabc5e4456253c  # 0.41774708436476593
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x446f70dd84821676  # 4.639854947850836e21
+carbon_dioxide_kg = 0x442595c8c8a8469f  # 1.9908736133997943e20
+nitrogen_kg = 0x43bd70ceb55b0684  # 2.1214227028030597e18
+argon_kg = 0x42d8f22c9d6982d3  # 109713638663691.3
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e307 BELT 3-7: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7630ff6e2322fe  # 0.005417821668921572
 a_m = 0x427de7bb6c619a90  # 2055069943321.6602
@@ -2020,6 +3506,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40ef3a25ec2045b1  # 63953.18507398235
+obliquity_rad = 0x3fd1647ac24c41bd  # 0.27175778364565045
+pole_x = 0x3fe6dad4cee764b2  # 0.714212802991048
+pole_y = 0xbfe25924dc3b43d6  # -0.5733818341633377
+pole_z = 0x3fd9b0c51a559a23  # 0.40141418048588856
+locking_time_s = 0x4510354c48ef5706  # 4.898626436372683e24
+w0_rad = 0x3fa783ae475338f5  # 0.045926519591022265
+w_rad = 0x4006d6100080c680  # 2.854522708825982
+spin_rate_rad_s = 0x3f19c138598c2613  # 9.824663574078294e-5
+surface_seed: 0f27c9493e9cccc7
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe2bd8d7d9c4d4e  # 0.5856387570696968
+water = 0x3fda84e504c76565  # 0.41436124293030324
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x446d0a6ca2a55d42  # 4.2856538576524715e21
+carbon_dioxide_kg = 0x4425662fa7c120ff  # 1.9737245695579937e20
+nitrogen_kg = 0x43bd2fe2fdfc80f2  # 2.1031491314962232e18
+argon_kg = 0x42d902d75d8e33ee  # 109999975446735.72
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e308 BELT 3-8: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f7385d02b05a006  # 0.004766286045516216
 a_m = 0x42825a5b0d609f1d  # 2522410494995.889
@@ -2048,6 +3556,28 @@ rings: NotModelled
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks ThreeToTwo at None, Despinning at the time
+primordial_period_s = 0x40e7dbd1c66f807c  # 48862.55547309012
+obliquity_rad = 0x3fc07a1924b06614  # 0.12872614184816256
+pole_x = 0x3fe3689a8f65e8f6  # 0.6065190125221125
+pole_y = 0xbfe952ff4c1850a7  # -0.7913815008382884
+pole_z = 0x3fb3948b1b9dc714  # 0.0764853422567991
+locking_time_s = 0x45335f6a99a4158a  # 2.342018181441985e25
+w0_rad = 0x3fda2167d8e3d111  # 0.4082889192643658
+w_rad = 0x3ffe96f84b50e080  # 1.9118578855541557
+spin_rate_rad_s = 0x3f20dabac6651ad4  # 0.00012858896224995106
+surface_seed: 8e8c3f63f26b3d4b
+bulk_composition:
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe467349ebf3ed6  # 0.637598333409154
+water = 0x3fd73196c2818254  # 0.36240166659084605
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d6b6df3dd5438d  # 6.546963885038908e18
+carbon_dioxide_kg = 0x4422d364276be26b  # 1.7363686825537972e20
+nitrogen_kg = 0x43b9ad55674a1fd8  # 1.8502289240327352e18
+argon_kg = 0x42d26fa898e928ce  # 81083117053091.22
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943
 body e382 BELT 3-2 I: Moon(GiantImpact) about Some(Body(BodyIndex(58114))), Present
 mass_mearth = 0x3ed489df78b03032  # 4.896775759110531e-6
 a_m = 0x4184fef604dfe67c  # 44031680.60932633
@@ -2076,3 +3606,25 @@ rings: NotApplicable
 population: NotApplicable
 surface: NotModelled
 hooks: NotModelled
+rotation: Rayleigh obliquity, locks Synchronous at Some(UniverseTime { seconds: -22418066556463592, nanos: 0 }), Locked(Synchronous) at the time
+primordial_period_s = 0x40faf3fc641a86c1  # 110399.77443936003
+obliquity_rad = 0x3fc53ad72a0df6b3  # 0.16585816911167725
+pole_x = 0x3fe535f9c04dc8b1  # 0.662838817208714
+pole_y = 0xbfdf5cd99b499734  # -0.4900421158293853
+pole_z = 0x3fe21dbd200d5403  # 0.5661302209870204
+locking_time_s = 0x425db9a7d42598cf  # 510675341462.38763
+w0_rad = 0x4015e107d3eb3a2f  # 5.469756423217901
+w_rad = 0x4011706c9402eaf4  # 4.359789192846382
+spin_rate_rad_s = 0x3edb320fa7e4fe3b  # 6.483924720079475e-6
+surface_seed: 526429d817e897d5
+bulk_composition:
+iron = 0x3fcb5cdbe1caed2d  # 0.21377132916482236
+rock = 0x3fdc6a46ccf04512  # 0.4439866067269388
+water = 0x3fd5e74b422a4458  # 0.3422420641082389
+envelope = 0x0000000000000000  # 0.0
+water_kg = 0x43d7e4b6cce13bb0  # 6.886807794522964e18
+carbon_dioxide_kg = 0x4383ce2ab812fa66  # 1.7839063775047187e17
+nitrogen_kg = 0x431b036009557a77  # 1900883844882077.8
+argon_kg = 0x4234661f9cb87389  # 87612693688.45131
+fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
+alpha_fe = 0xbf7750d8b53a7fe8  # -0.005692335620238943

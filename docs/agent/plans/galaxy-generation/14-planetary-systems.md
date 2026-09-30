@@ -2187,6 +2187,11 @@ before and after), and three ordinary fillers.
   asserted figures are those of T10.b restricted to main-sequence single FGK and M hosts; the rest
   is printed for review.
   - _Accept:_ `just bench` prints the four figures; `just test-slow` passes.
+  - _As built (`spin14b`, round 10):_ T33.a is `benches/planetary.rs` with (i), (ii) and (iv),
+    (iii) waiting for P14.T27.b; all three targets missed, provisional (1.75 ms, 1.21 ms per
+    system, 7.0 µs). T33.b is `planets_per_star_end_to_end` in `tests/planetary_end_to_end.rs`;
+    every asserted figure is inside T10.b's window but small planets at −0.8 against solar
+    (0.933, provisional). See "Risks and open points", the `spin14b` bullet.
 
 ### Phase H: queries and protocol
 
@@ -5323,3 +5328,51 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - _Not done._ T33.a (bench; (iii) rogue planets waits for T27 anyway); goldens for T14/T23;
     moons and rings are still referred to the planet's orbital plane, not T14's equator (moving
     them is an output change for T22.a's owner).
+- **Deviations in T32.b (T14 and T23 pinned), T33.a and T33.b, as built (`spin14b`, round 10).**
+  - _T32.b._ `golden_systems_are_pinned` now writes, after each body's record in both snapshots,
+    its rotation from `PlanetarySystem::rotation_of` (the obliquity law, the resonance it locks
+    into, `locks_at`, the `SpinState` at the snapshot's time, the primordial period, obliquity,
+    pole, locking time, W₀, W and the spin rate at that time, so W at the epoch and at +H) and its
+    hooks from `hooks_at` (the surface seed as sixteen hex digits, then `BulkComposition`'s
+    fractions, volatile inventory, \[Fe/H\] and \[α/Fe\]). Goldens only: the record's `surface` and
+    `hooks` sections stay `NotModelled`, and no record, DTO or protocol file changed. Re-blessed at
+    16: all fifteen system goldens gained 16,346 lines and no existing line moved (`golden_diff.py`:
+    "Extended only (15)"). `rotation: none` is written for belts, rings, the halo and bodies not
+    present at `parent_time`. The T32 search still reproduces every pinned ID.
+  - _T33.a._ `crates/hyperion-sim/benches/planetary.rs`, a `[[bench]]` with
+    `required-features = ["testing"]` (it takes (ii)'s systems from
+    `planetary::testing::sample_contexts`, which `just bench`'s `--workspace` build enables through
+    `hyperion-fit`). Measured at version 16, load 9–14, mean clock 2.2–2.8 GHz (i7-8665U): (i) the
+    Solar-like golden 1.75 ms, (ii) 1,000 field systems 1.21 s, 1.21 ms per system, (iv) a moon's
+    `position_at` 7.0 µs. **All three miss (under 1 ms; well under 1 µs); provisional; ruling
+    deferred.** `position_at` rebuilds the epoch and the primary's fate on every call. (iii)
+    waits for P14.T27.b.
+  - _T33.b._ `planets_per_star_end_to_end` (`#[ignore = "slow: …"]`, 134 s at load 13) generates
+    the 20,000 nearest 0.7–1.3 M☉ primaries, the 30,000 nearest 0.1–0.6 M☉ ones and the 20,000
+    nearest systems of any kind about the Sun-like point, whole (`generate` and `snapshot_at`
+    at the epoch), and counts the planets present then by their records' masses and orbits.
+    Asserted on single main-sequence hosts (one star, no companion of any kind): FGK small
+    planets inside 100 days 0.841 (0.5–1.2), hot Jupiters 0.0091 (0.004–0.012), Cumming giants
+    0.138 (0.07–0.14), Fischer and Valenti's slope 1.86 (1.7–2.3, six bins: the two below −0.3
+    hold no detection); M dwarfs of 0.35–0.6 M☉ 2.72 small inside 200 days (1.8–3.2); hosts of
+    0.1–0.5 M☉ 74.8% with two or more inside 200 days (≥ 40%) and 1.2% with a giant (< 5%). The
+    rest (planets per system, share with any planet, giants and small planets by 0.2 dex
+    \[Fe/H\] bin) is printed by host group and galactic population. The Cumming share sits 0.002
+    inside its upper edge.
+    - _−0.8 against solar._ Ruling 106.1's 0.35–0.75 is checked on the single FGK hosts of
+      \[Fe/H\] −1.0 to −0.6 against those of −0.1 to +0.1, all the volume holds: 0.933 (78 hosts
+      at 0.756 small planets inside 100 days each, 3,512 at 0.810), outside the window. **A
+      miss, pinned at 0.80–1.07; provisional; ruling deferred.** About 59 planets, so some 13%
+      of Poisson noise; T10.b's hosts at a fixed −0.8 pass. −2 is printed by bin only: the
+      sample holds almost no such host.
+    - _Not rerun._ T10.b's figures that need controlled hosts (a fixed \[Fe/H\], the zero-age
+      main sequence, the derivation's radii at a drawn rank) stay T10.b's: η⊕ (ruling 116), the
+      hot and warm splits at −0.8 (rulings 117 and 121), the late M dwarfs' anchors (ruling 94)
+      and the radius checks (ruling 102).
+    - _Feature._ The file is `#![cfg(feature = "testing")]`: a workspace build (`just ci`,
+      `just test-slow`) turns `testing` on through `hyperion-fit`; built for `hyperion-sim`
+      alone without `--features testing` it holds no test.
+- **T33.a's targets missed (`spin14b`):** a system in 1.21–1.75 ms (under 1 ms), a moon's
+  `position_at` in 7.0 µs (well under 1 µs), at load 9–14; provisional; ruling deferred.
+- **T33.b's small planets at −0.8 against solar (`spin14b`):** 0.933 on real metal-poor single
+  FGK hosts against ruling 106.1's 0.35–0.75, 78 hosts; provisional; ruling deferred.
