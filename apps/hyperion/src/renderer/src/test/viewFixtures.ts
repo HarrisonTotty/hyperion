@@ -13,7 +13,13 @@ import type { CameraPose, Quaternion } from "../view/camera/pose";
 import type { CameraScene, OwnShip } from "../view/camera/state";
 import type { ViewPosition } from "../view/coords/position";
 import { TEST_HULL } from "../view/scene/hull";
-import type { ViewBody, ViewCraft, ViewScene, ViewStar } from "../view/scene/model";
+import {
+  bodyKindSymbol,
+  type ViewBody,
+  type ViewCraft,
+  type ViewScene,
+  type ViewStar,
+} from "../view/scene/model";
 
 /** The fixtures' system. */
 export const FIXTURE_SYSTEM: SystemIdHex = "0200080020000000";
@@ -125,6 +131,8 @@ export function aBody(overrides: Partial<ViewBody> = {}): ViewBody {
     hillRadiusM: FIXTURE_PLANET_HILL_M,
     centreM: FIXTURE_PLANET_CENTRE_M,
     rotation: null,
+    symbol: bodyKindSymbol("planet"),
+    orbitNormal: null,
     ...overrides,
   };
 }
