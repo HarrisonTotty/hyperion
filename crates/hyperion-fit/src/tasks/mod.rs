@@ -3,12 +3,16 @@
 //! [`FitTask`](crate::task::FitTask), which [`registry`](crate::task::registry) lists.
 
 pub mod chabrier;
+pub mod cluster_bh;
 pub mod cluster_retention;
 pub mod displaced_forms;
+pub mod equipartition;
 pub mod giant_cooling;
 pub mod kick_rank;
 pub mod mge;
 pub mod period_correction;
+pub mod pulsars;
 pub mod stellar_fates;
 pub mod stripping;
+pub mod type_ia_delay;
 pub mod wd_cooling;

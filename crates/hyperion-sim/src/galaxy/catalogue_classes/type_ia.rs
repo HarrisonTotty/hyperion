@@ -17,10 +17,12 @@
 //! (1964) inspiral time, so that the secondary's lifetime and the inspiral add up to the delay.
 //! What it leaves follows the channel ([`IaLeftover`]).
 //!
-//! The channel shares, the masses' laws and the lifetimes are scratch forms until plan 15's
-//! `tables::type_ia_delay`: the channel does not depend on the delay, the primary follows
-//! Salpeter's slope over the masses whose lifetimes fit, and a lifetime is plan 06's track at solar
-//! composition and median draws, tabulated once per distribution.
+//! The channel and the two masses are drawn from plan 15's delay-first samplers,
+//! [`tables::type_ia_delay`](crate::tables::type_ia_delay) (P15.T9.a), by the bin of the delay:
+//! the channel by the bin's shares, the primary by its place on [`primary_range`] and the
+//! secondary by its place in [`secondary_window`], the windows read at the drawn delay itself so
+//! that both lifetimes fit it. A lifetime is plan 06's track at solar composition and median draws,
+//! tabulated once per distribution.
 
 use core::num::NonZeroU64;
 
@@ -38,6 +40,7 @@ use crate::rng::{Stream, Threshold};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::lifetime;
+use crate::tables::type_ia_delay;
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, Span, UniverseTime};
 use crate::units::consts::{GM_SUN, SECONDS_PER_JULIAN_YEAR, SPEED_OF_LIGHT};
 use crate::units::{KilometresPerSecond, LightYears, Metres, Seconds, SolarMasses, Years};
@@ -67,14 +70,13 @@ pub const PRIMARY_MIN: SolarMasses = SolarMasses::new(2.5);
 /// The greatest initial mass of a Type Ia primary, 8 M☉: layer D's top.
 pub const PRIMARY_MAX: SolarMasses = SolarMasses::new(8.0);
 
-/// Salpeter's (1955) slope of the primary's scratch mass function, `dN ∝ m^−2.35 dm`.
-const PRIMARY_SLOPE: f64 = -2.35;
+/// The least mass ratio of a progenitor's stars, secondary over primary: the pair's mass ratio is
+/// uniform on 0.1–1 (ours), which [`secondary_window`] intersects with each channel's own window.
+pub const MIN_MASS_RATIO: f64 = 0.1;
 
-/// The least mass ratio of a double white dwarf's stars, secondary over primary (scratch).
-const MIN_MASS_RATIO: f64 = 0.1;
-
-/// The heaviest living donor, M☉ (scratch): a donor is at most this and never outlives nothing.
-const DONOR_MAX: f64 = 3.0;
+/// The heaviest living donor, M☉ (ours): a donor is at most this, and no heavier than the star
+/// whose lifetime is the delay, since it is still alive.
+pub const DONOR_MAX: f64 = 3.0;
 
 /// Proposals of the delay's rejection draw before it gives up: the acceptance is at least a
 /// hundredth for every component the galaxy has, so 4,096 fail with probability under 10⁻¹⁷.
@@ -137,8 +139,9 @@ impl IaChannel {
 /// 0.04 fast, [`SURVIVOR_POPULATIONS`]), a hydrogen donor 0.04, and Iax 0.13 (Srivastav et al.
 /// 2022, MNRAS, doi 10.1093/mnras/stac177: 15 (+17/−9) Iax per 100 Type Ia in ATLAS's
 /// volume-limited sample, 0.13 of thermonuclear events; Foley et al. 2013's 31 (+17/−13) agrees
-/// within errors). The four sum to 1, and the delay-time yield counts all four. Scratch:
-/// independent of the delay until plan 15's `CHANNEL_SHARE`.
+/// within errors). The four sum to 1, and the delay-time yield counts all four. Plan 15's
+/// `tables::type_ia_delay::CHANNEL_SHARE` takes them into every delay bin (P15.T9.a), which the
+/// draw reads.
 pub const CHANNEL_SHARES: [f64; 4] = [0.53, 0.30, 0.04, 0.13];
 
 /// The speeds of a surviving hydrogen donor, km/s: 100–250, uniform (brainstorm).
@@ -421,13 +424,15 @@ impl IaProgenitor {
     /// whole seconds. The age at the epoch is the delay less the explosion's clock time, so every
     /// delay is at least [`MIN_DELAY`] and fits an 8 M☉ primary.
     ///
-    /// The primary's initial mass follows Salpeter's slope over the layer-D masses whose lifetimes
-    /// fit in the delay. For a double white dwarf the secondary is uniform between the larger of a
-    /// tenth of the primary and the mass whose lifetime is the delay, and the primary; the white
-    /// dwarfs' masses follow Kalirai et al. (2008), extrapolated above the 6.5 M☉ they calibrate to
-    /// (1.27 M☉ at 8 M☉, above a carbon–oxygen dwarf's usual 1.05–1.1; scratch), and the pair
-    /// spirals in by gravitational waves for the delay less the secondary's lifetime (Peters 1964). A living donor is uniform
-    /// on half to all of the lighter of 3 M☉ and the mass whose lifetime is the delay.
+    /// The channel follows the delay bin's `CHANNEL_SHARE`, and the two masses the bin's samplers
+    /// of plan 15 (`tables::type_ia_delay`, P15.T9.a): the primary's initial mass is placed in
+    /// `ln m` on [`primary_range`], the layer-D masses whose lifetimes fit in the delay, by
+    /// `PRIMARY_MASS_CDF`, and the secondary's linearly on [`secondary_window`] by
+    /// `SECONDARY_MASS_CDF` (uniform: the mass ratio's law is flat on 0.1–1). A double white
+    /// dwarf's secondary has died within the delay and a living donor has not. The white dwarfs'
+    /// masses follow Kalirai et al. (2008), extrapolated above the 6.5 M☉ they calibrate to (1.27
+    /// M☉ at 8 M☉, above a carbon–oxygen dwarf's usual 1.05–1.1; ours), and the pair spirals in by
+    /// gravitational waves for the delay less the secondary's lifetime (Peters 1964).
     ///
     /// # Panics
     ///
@@ -493,13 +498,13 @@ impl IaProgenitor {
         let (index, component) = candidates[pick];
         let delay_years = draw_delay(stream, &component.ages)?;
         stream.seek(base + 1 + 2 * DELAY_ATTEMPTS);
+        let bin = delay_bin(delay_years);
+        let shares = &type_ia_delay::CHANNEL_SHARE[bin];
         let channel_mark = stream.mark();
-        let channel = channel_mark
-            .pick_weighted(
-                &CHANNEL_SHARES,
-                CHANNEL_SHARES.iter().fold(0.0, |s, w| s + w),
-            )
-            .map_or(IaChannel::Iax, |i| IaChannel::ALL[i]);
+        let channel_index = channel_mark
+            .pick_weighted(shares, shares.iter().fold(0.0, |s, w| s + w))
+            .unwrap_or(IaChannel::ALL.len() - 1);
+        let channel = IaChannel::ALL[channel_index];
         let u_primary = stream.uniform();
         let u_secondary = stream.uniform();
         let window = until
@@ -515,19 +520,26 @@ impl IaProgenitor {
         ))?;
         let delay = Span::from_seconds_f64(delay_years * SECONDS_PER_JULIAN_YEAR)?;
         let fit = delays.mass_with_lifetime(Years::new(delay_years));
-        let lo = fit.value().clamp(PRIMARY_MIN.value(), PRIMARY_MAX.value());
-        let primary = salpeter(lo, PRIMARY_MAX.value(), u_primary);
+        let (lo, hi) = primary_range(fit);
+        let place = sampled(
+            &type_ia_delay::PRIMARY_MASS_CDF[bin][channel_index],
+            u_primary,
+        );
+        let primary = (lo * math::exp(place * math::ln(hi / lo))).clamp(lo, hi);
         let primary_lifetime = lifetime_span(delays, primary).min(delay);
-        let (secondary, secondary_lifetime, inspiral) = if channel.is_double_degenerate() {
-            let lo = (MIN_MASS_RATIO * primary).max(fit.value()).min(primary);
-            let secondary = lo + (primary - lo) * u_secondary;
+        let (a, b) = secondary_window(channel, primary, fit);
+        let place = sampled(
+            &type_ia_delay::SECONDARY_MASS_CDF[bin][channel_index],
+            u_secondary,
+        );
+        let secondary = (a + (b - a) * place).clamp(a, b);
+        let (secondary_lifetime, inspiral) = if channel.is_double_degenerate() {
             let life = lifetime_span(delays, secondary)
                 .max(primary_lifetime)
                 .min(delay);
-            (secondary, Some(life), delay.checked_sub(life))
+            (Some(life), delay.checked_sub(life))
         } else {
-            let top = DONOR_MAX.min(fit.value());
-            (top * (0.5 + 0.5 * u_secondary), None, None)
+            (None, None)
         };
         let primary_dwarf = white_dwarf_mass(primary);
         let secondary_dwarf = channel
@@ -665,6 +677,37 @@ impl IaProgenitor {
     }
 }
 
+/// The primary's initial masses, M☉, open to a Type Ia whose delay is the lifetime of a star of
+/// `fit` M☉: from the heavier of [`PRIMARY_MIN`] and `fit` (its white dwarf must exist by the
+/// explosion) to [`PRIMARY_MAX`]. Plan 15's `tables::type_ia_delay::PRIMARY_MASS_CDF` places the
+/// primary on this range in `ln m`.
+#[must_use]
+pub fn primary_range(fit: SolarMasses) -> (f64, f64) {
+    (
+        fit.value().clamp(PRIMARY_MIN.value(), PRIMARY_MAX.value()),
+        PRIMARY_MAX.value(),
+    )
+}
+
+/// The secondary's initial masses, M☉, open to a pair of `primary` M☉ under `channel`, for a delay
+/// that is the lifetime of a star of `fit` M☉: the mass ratio's range 0.1–1 ([`MIN_MASS_RATIO`])
+/// intersected with the channel's window. A white dwarf's progenitor must have died within the
+/// delay, so it is at least `fit`; a living donor must not have, so it is at most the lighter of
+/// `fit` and [`DONOR_MAX`], and at least half that (ours). Plan 15's
+/// `tables::type_ia_delay::SECONDARY_MASS_CDF` places the secondary on this range, linearly in
+/// mass. Never empty for a primary of [`primary_range`]: `fit` is at least 0.8 M☉, the lifetime
+/// table's lightest node.
+#[must_use]
+pub fn secondary_window(channel: IaChannel, primary: f64, fit: SolarMasses) -> (f64, f64) {
+    let floor = MIN_MASS_RATIO * primary;
+    if channel.is_double_degenerate() {
+        (floor.max(fit.value()).min(primary), primary)
+    } else {
+        let top = DONOR_MAX.min(fit.value()).min(primary);
+        ((0.5 * top).max(floor).min(top), top)
+    }
+}
+
 /// The delay, years, from the rejection draw on `stream`'s words after the component's: a proposal
 /// from `ages` above [`MIN_DELAY`], accepted with probability `ψ(delay) ÷ ψ(lowest)`.
 fn draw_delay(stream: &mut Stream, ages: &AgeDistribution) -> Option<f64> {
@@ -687,14 +730,28 @@ fn draw_delay(stream: &mut Stream, ages: &AgeDistribution) -> Option<f64> {
     None
 }
 
-/// The initial mass at rank `u` of `m^−2.35` on `[lo, hi]` M☉, by its closed-form inverse.
-fn salpeter(lo: f64, hi: f64, u: f64) -> f64 {
-    if hi <= lo {
-        return lo;
-    }
-    let s = PRIMARY_SLOPE + 1.0;
-    let (a, b) = (math::powf(lo, s), math::powf(hi, s));
-    math::powf(a + u * (b - a), 1.0 / s).clamp(lo, hi)
+/// The bin of `tables::type_ia_delay::DELAY_EDGES` holding a delay of `years`, the ends held.
+#[must_use]
+pub fn delay_bin(years: f64) -> usize {
+    let edges = &type_ia_delay::DELAY_EDGES;
+    edges
+        .partition_point(|&e| e <= years)
+        .clamp(1, edges.len() - 1)
+        - 1
+}
+
+/// The value at rank `u` of a law given by its quantiles at the 17 ranks `k ÷ 16`, linear between
+/// them.
+fn sampled(quantiles: &[f64; 17], u: f64) -> f64 {
+    let x = u.clamp(0.0, 1.0) * 16.0;
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "x is in [0, 16], so its floor is an index of 0–16"
+    )]
+    let k = (x.floor() as usize).min(15);
+    let t = x - f64::from(u32::try_from(k).expect("an index of 0–15"));
+    quantiles[k] + t * (quantiles[k + 1] - quantiles[k])
 }
 
 /// The scratch lifetime of a star of `mass` M☉ as a span of whole seconds.
@@ -977,6 +1034,16 @@ mod tests {
             assert!(p.explosion() > after && p.explosion() <= until);
             assert!(p.primary_mass() >= PRIMARY_MIN && p.primary_mass() <= PRIMARY_MAX);
             assert!(p.primary_lifetime() <= p.delay());
+            // P15.T9.a's samplers keep both stars in their windows at the drawn delay.
+            let fit = delays.mass_with_lifetime(Years::new(p.delay().as_julian_years_f64()));
+            let m1 = p.primary_mass().value();
+            assert!(
+                m1 >= primary_range(fit).0 * (1.0 - 1e-12),
+                "{m1} under {fit:?}"
+            );
+            let (a, b) = secondary_window(p.channel(), m1, fit);
+            let m2 = p.secondary_mass().value();
+            assert!(m2 >= a && m2 <= b, "{m2} outside {a}–{b}");
             short += u32::from(p.delay().as_julian_years_f64() < 1e8);
             if let (Some(life), Some(inspiral)) = (p.secondary_lifetime(), p.inspiral()) {
                 assert!(p.primary_lifetime() <= life);
@@ -1019,6 +1086,36 @@ mod tests {
             periods[periods.len() * 19 / 20],
         );
         assert!(low >= 70.0 && high <= 130.0, "{low}–{high}");
+    }
+
+    /// P15.T9.a: the table cuts this distribution: its edges run from [`MIN_DELAY`] to
+    /// [`HUBBLE_TIME`], each bin's yield is the closed form's, they sum to the yield, every bin
+    /// takes ruling 136.9's channel shares, and [`delay_bin`] finds each bin.
+    #[test]
+    fn the_delay_table_cuts_this_distribution() {
+        let edges = &type_ia_delay::DELAY_EDGES;
+        assert_same_bits(edges[0], MIN_DELAY.value());
+        assert_same_bits(edges[24], HUBBLE_TIME.value());
+        let mut sum = 0.0;
+        for (i, &y) in type_ia_delay::YIELD_PER_SOLAR_MASS.iter().enumerate() {
+            let want = DelayTimeDistribution::cumulative_per_solar_mass(Years::new(edges[i + 1]))
+                - DelayTimeDistribution::cumulative_per_solar_mass(Years::new(edges[i]));
+            assert!((y / want - 1.0).abs() < 1e-12, "{i}: {y} against {want}");
+            sum += y;
+            let mid = (edges[i] * edges[i + 1]).sqrt();
+            assert_eq!(delay_bin(mid), i);
+            assert_eq!(type_ia_delay::CHANNEL_SHARE[i], CHANNEL_SHARES);
+            assert!(type_ia_delay::LAYER_SHARE[i][0].abs() < 1e-15);
+        }
+        assert!((sum / YIELD_PER_SOLAR_MASS - 1.0).abs() < 1e-12, "{sum}");
+        assert!(
+            (type_ia_delay::ANCIENT_LOSS_PER_SOLAR_MASS / YIELD_PER_SOLAR_MASS - 1.0).abs() < 1e-12
+        );
+        assert_eq!(delay_bin(0.0), 0);
+        assert_eq!(delay_bin(HUBBLE_TIME.value()), 23);
+        assert_eq!(delay_bin(1e11), 23);
+        let q = [0.0, 0.5, 1.0].map(|u| sampled(&type_ia_delay::PRIMARY_MASS_CDF[3][0], u));
+        assert!(q[0].abs() < 1e-15 && (q[2] - 1.0).abs() < 1e-15 && q[1] > 0.0 && q[1] < 1.0);
     }
 
     /// The same stream gives the same progenitor.
@@ -1124,11 +1221,9 @@ mod tests {
             let mut fresh = stream(k);
             let a = IaProgenitor::draw(&delays, &mut fresh, Population::NuclearDisc, after, until)
                 .unwrap();
+            let shares = &type_ia_delay::CHANNEL_SHARE[delay_bin(a.delay().as_julian_years_f64())];
             let channel = Mark::from_word(stream(k).word_at(1 + 2 * DELAY_ATTEMPTS))
-                .pick_weighted(
-                    &CHANNEL_SHARES,
-                    CHANNEL_SHARES.iter().fold(0.0, |s, w| s + w),
-                )
+                .pick_weighted(shares, shares.iter().fold(0.0, |s, w| s + w))
                 .map_or(IaChannel::Iax, |i| IaChannel::ALL[i]);
             assert_eq!(a.channel(), channel);
             // A stream advanced first gives the same progenitor as the fresh one shifted.

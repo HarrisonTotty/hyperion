@@ -10,10 +10,11 @@ publish.workspace = true
 # for `hyperion_sim::math`, the quadratures and the generator's own code, so that a fit is
 # bit-identical on every platform. The ordinary crates below are allowed here and only here (plan
 # 15, Design note 3): none of them computes a table's numbers, and `rayon` is used only inside
-# `parallel::map_reduce_chunks`, whose reduction is in index order.
+# `parallel::map_reduce_chunks`, whose reduction is in index order. The sim's `testing` feature
+# gives the fits plan 09's copy of the Baumgardt–Hilker catalogue (plan 15's Consumes).
 [dependencies]
 clap.workspace = true
-hyperion-sim.workspace = true
+hyperion-sim = { workspace = true, features = ["testing"] }
 rayon.workspace = true
 serde.workspace = true
 sha2.workspace = true

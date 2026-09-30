@@ -3,6 +3,7 @@
 
 use std::fmt::Write as _;
 
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
 
@@ -340,28 +341,37 @@ fn a_cluster_s_classes_hold_its_present_mass() {
 fn the_milky_way_s_globulars_have_their_observed_remnants() {
     let galaxy = galaxy();
     let mut pulsars = 0.0;
+    let mut law_pulsars = 0.0;
     let mut black_holes = 0.0;
     let mut collapsed = 0_u32;
     let mut capped = 0_u32;
+    let mut largest_capped_law = 0.0_f64;
     let mut n = 0_u32;
     for g in milky_way_globulars() {
         let model = ClusterModel::new(&galaxy, &catalogue_parameters(g));
         // Ruling 126.3: no cluster's pulsars outnumber its neutron stars. The encounter-rate law
         // alone would in a few clusters with more encounters than neutron stars, so the table
-        // caps the pulsars at the class they are marks in (a deviation recorded in plan 09); the
-        // test holds that cap and the number of clusters it binds in.
+        // caps the pulsars at the class they are marks in (a deviation recorded in plan 09). The
+        // test checks the uncapped law against the neutron stars, counts the clusters where the
+        // cap binds, and holds the table to the smaller of the two.
         let table = table(&galaxy, &model);
         let neutron_stars = table.expected_of(ClassKind::NeutronStar);
+        let law = model.millisecond_pulsars();
         let held = table.millisecond_pulsars(&model);
-        assert!(
-            held <= neutron_stars,
-            "{}: {held} pulsars, {neutron_stars} neutron stars",
-            g.name
-        );
-        if model.millisecond_pulsars() > neutron_stars {
+        assert_same_bits(held, law.min(neutron_stars));
+        if law > neutron_stars {
+            eprintln!(
+                "{}: the law's {law:.3} pulsars exceed its {neutron_stars:.3} neutron stars (Γ \
+                 {:.3} of 47 Tucanae's, core-collapsed {})",
+                g.name,
+                model.encounter_rate(),
+                model.is_core_collapsed()
+            );
             capped += 1;
+            largest_capped_law = largest_capped_law.max(law);
         }
         pulsars += held;
+        law_pulsars += law;
         black_holes += model.black_hole_count();
         if model.is_core_collapsed() {
             collapsed += 1;
@@ -370,12 +380,25 @@ fn the_milky_way_s_globulars_have_their_observed_remnants() {
     }
     let collapsed_share = f64::from(collapsed) / f64::from(n);
     eprintln!(
-        "pulsars {pulsars:.0} ({capped} clusters capped at their neutron stars), black holes \
-         {black_holes:.0}, core-collapsed {collapsed_share:.3}"
+        "pulsars {pulsars:.0} held, {law_pulsars:.0} by the uncapped law ({capped} clusters \
+         where the law exceeds their neutron stars, the largest law there {largest_capped_law:.3}), \
+         black holes {black_holes:.0}, core-collapsed {collapsed_share:.3}"
     );
-    // Five clusters of 165 bind the cap, each with well under one pulsar expected.
+    // Three clusters of 165 bind the cap. Two expect well under one pulsar; the third, NGC 5694,
+    // whose catalogue core of 0.02 pc gives it 334 times 47 Tucanae's encounter rate, expects
+    // 2,336 by the law against its 1,037 neutron stars, and the cap removes 1,299 from the total
+    // (provisional, measured at P15.T8's start; ruling deferred to P15.T8.c's fit of the law).
     assert!(capped <= 8, "{capped} clusters capped");
-    // P09.T9.e: about 4,000 (2,000–8,000) pulsars over the system.
+    assert!(
+        law_pulsars - pulsars <= 1_400.0,
+        "the cap removes {} pulsars",
+        law_pulsars - pulsars
+    );
+    // P09.T9.e: about 4,000 (2,000–8,000) pulsars over the system, by the law and as held.
+    assert!(
+        (2_000.0..=8_000.0).contains(&law_pulsars),
+        "{law_pulsars} pulsars by the law"
+    );
     assert!((2_000.0..=8_000.0).contains(&pulsars), "{pulsars} pulsars");
     // P09.T9.d: about a fifth (0.12–0.28) over the core-collapse line (Trager et al. 1995).
     assert!(

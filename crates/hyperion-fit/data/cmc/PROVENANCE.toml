@@ -1,0 +1,15 @@
+# The CMC Cluster Catalog's models at the end of their runs (plan 15, P15.T8.a; Design note 12).
+# The catalogue's snapshots run to gigabytes and state no terms, so the dataset is the paper's own
+# table of the models' final states, reduced by `reduce.py` from the arXiv source (git-ignored,
+# `data/cache/cmc/1911.00018.tar.gz`) and committed as measured facts with their citation.
+dataset = "cmc"
+class = "committed"
+citation = "Kremer, Ye, Rui et al. (2020), ApJS 247, 48: Modeling Dense Star Clusters in the Milky Way and Beyond with the CMC Cluster Catalog, Table A1 (initial N, r_v, R_gc and Z; at 14 Gyr M_tot, r_c, r_h, N_NS and N_BH) of the 124 models that reach 14 Gyr of the 148"
+url = "https://arxiv.org/e-print/1911.00018"
+retrieved = "2026-09-30"
+release = "arXiv:1911.00018 source tarball (sha256 fdf11757d342bf16a39c468565071620aa3ad58ce8156bc521f9252d647cb3dc), main.tex Table A1, reduced by reduce.py; the models' snapshots are at cmc.ciera.northwestern.edu"
+licence = "the paper's arXiv licence (arXiv's perpetual non-exclusive licence to distribute; no redistribution terms stated for the data); only the table's numbers, measured facts of published simulations, are committed, with the citation"
+
+[[files]]
+name = "models.csv"
+sha256 = "71a8a24ac351e7dcba70c8f32a624801c4bef444887ee676df679ca8219a657b"

@@ -253,4 +253,25 @@ mod tests {
             Err(LoadDatasetError::Io { .. })
         ));
     }
+
+    /// Every dataset the repository records has a well-formed provenance naming its directory,
+    /// with its files in name order; the fetched helium grid of P15.T7.a lists its 88 files.
+    #[test]
+    fn every_recorded_provenance_parses() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let mut names: Vec<String> = fs::read_dir(&data)
+            .unwrap()
+            .map(|e| e.unwrap())
+            .filter(|e| e.path().join("PROVENANCE.toml").is_file())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        for name in &names {
+            let provenance = Provenance::load(&data, name).unwrap();
+            assert!(!provenance.files.is_empty(), "{name}");
+        }
+        let helium = Provenance::load(&data, "basti_helium").unwrap();
+        assert_eq!(helium.class, DatasetClass::Fetched);
+        assert_eq!(helium.files.len(), 88);
+    }
 }

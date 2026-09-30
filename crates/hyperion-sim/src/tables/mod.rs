@@ -28,6 +28,7 @@ pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
 pub mod streams;
 pub mod stripping;
+pub mod type_ia_delay;
 pub mod wd_cooling;
 
 /// What the fitting toolchain records of one fitted table.
@@ -54,6 +55,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: false,
     },
     TableInfo {
+        name: "cluster_bh",
+        revision: 0,
+        since_generator_version: 15,
+        provisional: true,
+    },
+    TableInfo {
         name: "cluster_retention",
         revision: 0,
         since_generator_version: 15,
@@ -61,6 +68,12 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "displaced_forms",
+        revision: 0,
+        since_generator_version: 15,
+        provisional: true,
+    },
+    TableInfo {
+        name: "equipartition",
         revision: 0,
         since_generator_version: 15,
         provisional: true,
@@ -90,6 +103,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: false,
     },
     TableInfo {
+        name: "pulsars",
+        revision: 0,
+        since_generator_version: 15,
+        provisional: true,
+    },
+    TableInfo {
         name: "stellar_fates_high",
         revision: 0,
         since_generator_version: 13,
@@ -111,6 +130,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "stripping",
         revision: 0,
         since_generator_version: 14,
+        provisional: false,
+    },
+    TableInfo {
+        name: "type_ia_delay",
+        revision: 0,
+        since_generator_version: 15,
         provisional: false,
     },
     TableInfo {

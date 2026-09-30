@@ -1255,3 +1255,45 @@ plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator 
   fits the 20 pc census's primary counts better: χ² 4.4 as published and 1.7 at s = 0.88, against
   5.6 for the fitted 2003 form. It is noted and not adopted, because it also moves plan 13's
   substellar branch; adopting it is a change to plan 02's mass function and a version bump.
+- **T7.a, T8.a–c, T9.a as built (lane `fit15a`, 2026-09-30, at `GENERATOR_VERSION` 15; no
+  bump, no wired output moved).**
+  - **T9.a done.** Task `type_ia_delay` (fast, 1.4 s release), `tables/type_ia_delay.rs`, test
+    `tests/type_ia_delay.rs`. `DELAY_EDGES` start at plan 06's 42.55 Myr (`type_ia::MIN_DELAY`,
+    ruling 136.7), not 40 Myr. Pair model: the galaxy's mass function × the share of mass ratios
+    on 0.1–1 left open by the channel's window (new `type_ia::{primary_range, secondary_window}`;
+    `MIN_MASS_RATIO`, `DONOR_MAX` made public; a living donor's window now also respects q ≥ 0.1).
+    `PRIMARY_MASS_CDF` holds quantiles at ranks k/16 of the primary's place in `ln m` on its range
+    at the drawn delay, not masses; `SECONDARY_MASS_CDF` quantiles of the place in the window
+    (the identity: flat q). `CHANNEL_SHARE` is ruling 136.9's in every bin (lifetimes and the IFMR
+    carry no channel information; left to T9.b). `LAYER_SHARE` C is 0 by construction (primary ≥
+    2.5 M☉). Acceptance passes: yield 1.000000, 0.187 under 0.1 Gyr, 0.617 under 1 Gyr, 0.462 a
+    century, ancient share 3.60–4.07%, quantiles within 0.0155. Swapped into
+    `IaProgenitor::draw` (new `type_ia::delay_bin`); `supernova.golden` (unwired) re-blessed:
+    masses move, channels do not.
+  - **T7.a done.** Source: old BaSTI α-enhanced with its helium-enhanced extension (Y 0.30, 0.35,
+    0.40; [Fe/H] −2.62 to −0.29; tracks and ZAHB), fetched: `data/basti_helium/PROVENANCE.toml`
+    (88 files, 38.4 MB) and `urls.txt`; raw in `data/cache/basti_helium/`. Research notes with the
+    survey and the columns T7.b reads: `target/lanes/srvbodies/target/fit15a/helium/NOTES.md` (not
+    committed). T7.b not started.
+  - **T8 file moved.** `tables/cluster_dynamics.rs` is now three blocks (`cluster_bh`,
+    `equipartition`, `pulsars`), each `@provisional` holding plan 09's scratch values bit for
+    bit; the fitted values and misses are in each block's acceptance. New `optimise.rs`
+    (golden section, Nelder–Mead). `hyperion-fit` enables the sim's `testing` feature for the
+    Baumgardt–Hilker copy. New committed datasets (reduced facts + `reduce.py`): `cmc` (Kremer et
+    al. 2020 Table A1 from the arXiv source), `bahramian_2013` (VizieR), `gc_pulsars` (Freire).
+  - **T8.a built, acceptance missed (provisional; ruling deferred).** β and c enter only as β ÷ c,
+    so c stays 0.138 and k 2.5; the best fit runs to ψ₁ → ∞ (a pure exponential, βψ₁ 0.101) at
+    0.476 dex (scratch 1.716 dex); 19 of 34 predicted empty are empty; on the catalogue ω Cen
+    12,100 and 0.6% core-collapsed. Scratch kept.
+  - **T8.b built, acceptance missed (provisional; ruling deferred).** Multimass King models (δ ½,
+    40 models, c 0.81–2.08): best η 0.17 with radii within 28%; η = 1 gives 92%. Light classes'
+    half-mass radii saturate in King models; the class profile's form cannot match to 10% at any
+    η. Task is `Slow` (31 s release); its smoke manifest `equipartition.smoke.toml` exists but
+    the smoke-run test is not written yet.
+  - **T8.c built, acceptance partly missed (provisional; ruling deferred).** γ 0.632 and A 38.0
+    pass; the implied total 1,539 misses 2,000–8,000. Scratch kept.
+  - **Pulsar-cap test fixed** (`interior/checks.rs`): asserts `held == min(law, NS)`, counts the
+    clusters where the law exceeds the neutron stars (3), and pins the cap's removal at ≤ 1,400
+    (measured 1,299, all NGC 5694, Γ 334 × 47 Tuc from its 0.02 pc catalogue core; provisional).
+  - **Not done:** T7.b; a reproduction/smoke test for the three T8 blocks beyond `just
+fit-check`; review-changes on this lane's diff.

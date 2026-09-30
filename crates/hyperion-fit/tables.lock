@@ -14,6 +14,18 @@ provisional = false
 acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
 
 [[table]]
+name = "cluster_bh"
+path = "cluster_dynamics.rs"
+task = "cluster_bh"
+revision = 0
+inputs_sha256 = "4efee92684d31ad81aac4f53fdfc763c4b5d402a75211fe60edac1bf384906d6"
+body_sha256 = "964586543142493ab4b88be0dd39b88e609d69f935c3e231310b7227bbdc8b20"
+fingerprint = [0.5859340259539524, 0.04856964674204547, 7.98070989792187]
+since_generator_version = 15
+provisional = true
+acceptance = "fitted β = 3.8937e-21, ψ₁ = 25949798996716978176.00 (β ψ₁ = 0.1010) at k = 2.5 and c = 0.138 (β and c enter only as β ÷ c) over 124 CMC models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any: rms 0.476 dex in log₁₀(1 + N) over those (under 0.3; FAILS; 1.716 at the scratch constants); 19 of 34 predicted empty are empty (FAILS); on the Baumgardt–Hilker catalogue at 12 Gyr, the most in a cluster past 14 t★ 25.86 (FAILS), the median over 3 × 10⁵ M☉ 693 (tens to a few hundred; FAILS), ω Centauri 12100 (thousands; FAILS), 0.006 past the core-collapse line with none (0.15–0.25; FAILS); the table keeps plan 09's scratch β 0.0028, ψ₁ 147 until a ruling"
+
+[[table]]
 name = "cluster_retention"
 path = "cluster_retention.rs"
 task = "cluster_retention"
@@ -36,6 +48,18 @@ fingerprint = [7000.0, 223.95985845020357, 2.574589608928813, 125.6529076974953,
 since_generator_version = 15
 provisional = true
 acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9670 (unregularised 0.9641, λ 0.01); 51 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 65 second-difference sign changes along the rows; worst misplaced share thick disc 0.984, halo 0.989, bulge 0.998, bar 0.996, nuclear disc 0.998; own-form shares at the fixture's corotation ratio 1.24, bar 0.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 1.00, 0.00, nuclear disc 1.00, 0.00, 1.00, 0.00; bar elongation over the control 0.67, -2.00, 0.67, 0.67, -, -, -, - and length within 0.76 of it; slowest thin class's mean rotation 0.889 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 254 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+
+[[table]]
+name = "equipartition"
+path = "cluster_dynamics.rs"
+task = "equipartition"
+revision = 0
+inputs_sha256 = "f46e73a140d825480a77e18cd79ab37ad3ce3531a665c870ff0184ffb20d0402"
+body_sha256 = "9a2e9fbef5a98ae3185bc365014401803712d89f5f1806decbbc7553138aea5e"
+fingerprint = [0.8330288595208089, 31.2727950943177, 0.38825650148602775, 0.37499999999999994, 0.612]
+since_generator_version = 15
+provisional = true
+acceptance = "η = 0.1675 at δ = 0.5 over 40 multimass King models (W₀ [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], slopes [-1.5, -1.0, -0.5, 0.0, 0.5]; concentrations 0.81–2.08; mass fractions within 8.7e-12): in 0.8–1.0 (ruling 139.2; FAILS); the living classes' half-mass radii below the turn-off within 0.282 (FAILS; 10%); at plan 09's η = 1 within 0.921; the table keeps plan 09's η until a ruling"
 
 [[table]]
 name = "giant_cooling"
@@ -86,6 +110,17 @@ provisional = false
 acceptance = "after 12 iterations over 20000 systems a row, the worst bin's relative miss of its share before the last update: 0.0012 at 3.5 M☉ (28.87% of tries rejected, 7 of 16683 direct companions dropped); 0.0007 at 7 M☉ (53.70% of tries rejected, 58 of 25887 direct companions dropped); 0.0008 at 12 M☉ (70.87% of tries rejected, 127 of 31813 direct companions dropped); 0.0010 at 28 M☉ (72.78% of tries rejected, 241 of 41918 direct companions dropped)"
 
 [[table]]
+name = "pulsars"
+path = "cluster_dynamics.rs"
+task = "pulsars"
+revision = 0
+inputs_sha256 = "a93eaf6f23b593829cdae6a4c0bc45d69ae4a52714681b68893ac086cd3e960a"
+body_sha256 = "f24767a95fc390d8f535c334f5ff904f5c2198140ed8d6a49f7dd9af71c40bfd"
+since_generator_version = 15
+provisional = true
+acceptance = "fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the implied total over the catalogue 1539 (2,000–8,000; FAILS); the table keeps plan 09's scratch A 40, γ 0.7 and cap 40 until a ruling"
+
+[[table]]
 name = "stellar_fates_high"
 path = "stellar_fates_high.rs"
 task = "stellar_fates_high"
@@ -132,6 +167,18 @@ fingerprint = [0.3460343735586854, 0.5343901251039018, 0.4818157115990379, 1.183
 since_generator_version = 14
 provisional = false
 acceptance = "at the centres of 330 cells, the share within 0.0729 of the exact (median 6.4e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (61 cells spread more)"
+
+[[table]]
+name = "type_ia_delay"
+path = "type_ia_delay.rs"
+task = "type_ia_delay"
+revision = 0
+inputs_sha256 = "c4bf45014ffd1f4f768c84287991bd5a8723f21488f9f3f4385da9d5dbc4fa50"
+body_sha256 = "c356be8135a256dd4e83491211e6eb5d2dd868929792e859437efa23d6d2bf86"
+fingerprint = [42550000.0, 13700000000.0, 0.00024271086255782685, 0.0008023004142646763, 12499416363.886879, 805033612.7064793, 122457088.15469107, 42548568.488513984, 0.0688898199785383, 2.5, 0.1, 3.0, 0.53, 0.3, 0.04, 0.13]
+since_generator_version = 15
+provisional = false
+acceptance = "the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.462 Type Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al. 2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF"
 
 [[table]]
 name = "wd_cooling"

@@ -21,6 +21,7 @@
 //! - [`check`]: the staleness check, `just fit-check`;
 //! - [`data`]: external datasets and their provenance;
 //! - [`parallel`]: the deterministic map-reduce;
+//! - [`optimise`]: hand-written optimisers (golden section, Nelder–Mead);
 //! - [`cli`]: the command line, which `main.rs` parses and hands to [`cli::run`].
 
 pub mod check;
@@ -28,6 +29,7 @@ pub mod cli;
 pub mod data;
 pub mod emit;
 pub mod manifest;
+pub mod optimise;
 pub mod parallel;
 pub mod pipeline;
 pub mod task;

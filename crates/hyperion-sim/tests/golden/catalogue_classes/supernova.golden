@@ -66,51 +66,51 @@ ancient share Bulge = 0x3fa46dc1703755a9  # 0.03989986891580639
 ancient share LongBar = 0x3fa3c7bc1757ea12  # 0.03863323006585885
 ancient share NuclearDisc = 0x3fa3bd30cb8aa1e1  # 0.03855278477323388
 ancient share Halo = 0x3fa4d6f64ad4fb76  # 0.04070253051258181
-progenitor 0: YoungThinDisc Iax explodes T-66797589785418.000000000 s delay 2704865986194598 s component 0 lifetimes 2663455038085678 None leftover PartlyBurntDwarf
-progenitor 0 primary = 0x40176318a9b1fcba  # 5.846773768890836
-progenitor 0 secondary = 0x3ffb93c160eaa3cd  # 1.7235730920603942
-progenitor 1: OldThinDisc DoubleDetonation explodes T-133790945517588.000000000 s delay 3260024594094476 s component 1 lifetimes 1726299145043031 Some(2671627988364252) leftover SurvivingDonor { speed: KilometresPerSecond(1221.7813950786153) }
-progenitor 1 primary = 0x401c7588e4663a97  # 7.11478001474338
-progenitor 1 secondary = 0x40175b2956fcdb07  # 5.839024886305885
-progenitor 1 separation = 0x41bf685a2f857795  # 526932527.5213559
-progenitor 2: ThickDisc Merger explodes T-76272915955926.000000000 s delay 338670045204764672 s component 6 lifetimes 20606939742892628 Some(26764885673534264) leftover Nothing
-progenitor 2 primary = 0x40058947e4d192b6  # 2.6920316578346855
-progenitor 2 secondary = 0x4003a15d563efd18  # 2.453791307255994
-progenitor 2 separation = 0x41da212023bebde5  # 1753514126.9803402
-progenitor 3: Bulge Iax explodes T-72983938233399.000000000 s delay 320899973877962048 s component 7 lifetimes 1775935548993064 None leftover PartlyBurntDwarf
-progenitor 3 primary = 0x401c149dcc110a44  # 7.020133198299451
-progenitor 3 secondary = 0x3fee3ac6311799f6  # 0.9446745833236594
-progenitor 4: LongBar Merger explodes T-45009071088941.000000000 s delay 269893234138773120 s component 8 lifetimes 3269849701132208 Some(13859608196188138) leftover Nothing
-progenitor 4 primary = 0x40156df3a5ff8e25  # 5.357374757502417
-progenitor 4 secondary = 0x4008c44c9699a598  # 3.095849205554895
-progenitor 4 separation = 0x41dd8da59e2bae5b  # 1983288952.6825168
-progenitor 5: NuclearDisc Merger explodes T-72371513811695.000000000 s delay 4801536152009899 s component 9 lifetimes 4349097975370106 Some(4678177409728929) leftover Nothing
-progenitor 5 primary = 0x4013121c78eccd32  # 4.767686738446445
-progenitor 5 secondary = 0x401286386a8f0d23  # 4.631074585896644
-progenitor 5 separation = 0x41b2656c838c52c8  # 308636803.54813814
-progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358440524624456384 s component 11 lifetimes 3081053548977730 Some(12840348295212050) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
-progenitor 6 primary = 0x4015f917b473f570  # 5.493254489495811
-progenitor 6 secondary = 0x4009721d3520b592  # 3.180719771443088
-progenitor 6 separation = 0x41e018059252caa7  # 2160077970.587238
-progenitor 7: YoungThinDisc DoubleDetonation explodes T-9860607974324.000000000 s delay 2610142086417050 s component 0 lifetimes 2598368617974501 Some(2605451423538379) leftover SurvivingDonor { speed: KilometresPerSecond(1280.7002871299778) }
-progenitor 7 primary = 0x4017a38e83d63f9d  # 5.909723339034739
-progenitor 7 secondary = 0x40179c6e2b2fed2f  # 5.9027640102388395
-progenitor 7 separation = 0x41a1fc5fbcad003f  # 150876126.3378925
-progenitor 8: OldThinDisc Iax explodes T-88798210384591.000000000 s delay 7968291677473653 s component 1 lifetimes 1689113242058485 None leftover PartlyBurntDwarf
-progenitor 8 primary = 0x401cc0df74204432  # 7.188352407903084
-progenitor 8 secondary = 0x4004de2a63c1b5fb  # 2.6084792893877853
-progenitor 9: ThickDisc DoubleDetonation explodes T-16567164538357.000000000 s delay 316716857115400832 s component 6 lifetimes 5452942520149978 Some(31745294241227240) leftover SurvivingDonor { speed: KilometresPerSecond(1301.7451879581693) }
-progenitor 9 primary = 0x40117247a71f738a  # 4.361601458830487
-progenitor 9 secondary = 0x40027856a384c644  # 2.308759000291305
-progenitor 9 separation = 0x41dbb89b4af27ac0  # 1860332843.788742
-progenitor 10: Bulge Merger explodes T-78791901634881.000000000 s delay 331805810710472512 s component 7 lifetimes 10423552499749600 Some(17891994419797378) leftover Nothing
-progenitor 10 primary = 0x400b69960d75e764  # 3.426555733833924
-progenitor 10 secondary = 0x4006a278d4bd449c  # 2.829332029367448
-progenitor 10 separation = 0x41dbe6e381029189  # 1872465412.0401328
-progenitor 11: LongBar Merger explodes T-31819319152072.000000000 s delay 313282686091587456 s component 8 lifetimes 4605313815317540 Some(77104486511543072) leftover Nothing
-progenitor 11 primary = 0x4012a397efcb333e  # 4.659759279992441
-progenitor 11 secondary = 0x3ff9f6c48a787c1d  # 1.6227460297593617
-progenitor 11 separation = 0x41d9b3bb1b830841  # 1724836974.0473788
+progenitor 0: YoungThinDisc Iax explodes T-66797589785418.000000000 s delay 2704865986194598 s component 0 lifetimes 2666725818637009 None leftover PartlyBurntDwarf
+progenitor 0 primary = 0x40175feaaa51c17b  # 5.843668614616372
+progenitor 0 secondary = 0x3ffb93c160eaa3ce  # 1.7235730920603944
+progenitor 1: OldThinDisc DoubleDetonation explodes T-133790945517588.000000000 s delay 3260024594094476 s component 1 lifetimes 1540679182928723 Some(2560602605642052) leftover SurvivingDonor { speed: KilometresPerSecond(1221.7813950786153) }
+progenitor 1 primary = 0x401e0e3647a872d0  # 7.513878936439781
+progenitor 1 secondary = 0x4017ca07bfe2db84  # 5.947295187207491
+progenitor 1 separation = 0x41c0b2bd40e4addb  # 560298625.7865556
+progenitor 2: ThickDisc Merger explodes T-76272915955926.000000000 s delay 338670045204764672 s component 6 lifetimes 19569943770412796 Some(25510030495606304) leftover Nothing
+progenitor 2 primary = 0x4005ee8921f71bd3  # 2.7414724973236644
+progenitor 2 secondary = 0x4003f7fd92fc790a  # 2.4960891230867945
+progenitor 2 separation = 0x41da4d022ac3363e  # 1765017771.0501857
+progenitor 3: Bulge Iax explodes T-72983938233399.000000000 s delay 320899973877962048 s component 7 lifetimes 2360689112346398 None leftover PartlyBurntDwarf
+progenitor 3 primary = 0x4018a87342a1c96e  # 6.164502183079419
+progenitor 3 secondary = 0x3feed484765a28d7  # 0.9634420692030073
+progenitor 4: LongBar Merger explodes T-45009071088941.000000000 s delay 269893234138773120 s component 8 lifetimes 2860155603684712 Some(12173292569107470) leftover Nothing
+progenitor 4 primary = 0x4016ad6e85984197  # 5.669366919916135
+progenitor 4 secondary = 0x4009eedd99246338  # 3.2416336025457007
+progenitor 4 separation = 0x41de3bc2d9721235  # 2028931941.7823613
+progenitor 5: NuclearDisc Merger explodes T-72371513811695.000000000 s delay 4801536152009899 s component 9 lifetimes 3439657898031930 Some(4380939667776088) leftover Nothing
+progenitor 5 primary = 0x4014fba5647d6a49  # 5.245748109965072
+progenitor 5 secondary = 0x401303de4c88b21a  # 4.753777690737957
+progenitor 5 separation = 0x41b9aad75fe7f519  # 430626655.90608364
+progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358440524624456384 s component 11 lifetimes 2729599721943659 Some(11369432597163072) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
+progenitor 6 primary = 0x401723dc24a5fe0e  # 5.78501946700227
+progenitor 6 secondary = 0x400a92480df42254  # 3.3214264955643475
+progenitor 6 separation = 0x41e06e83cfec08ac  # 2205425279.3760586
+progenitor 7: YoungThinDisc DoubleDetonation explodes T-9860607974324.000000000 s delay 2610142086417050 s component 0 lifetimes 2559915463380946 Some(2590002620215102) leftover SurvivingDonor { speed: KilometresPerSecond(1280.7002871299778) }
+progenitor 7 primary = 0x4017cabce1237ca6  # 5.947986142912816
+progenitor 7 secondary = 0x4017ac029421af23  # 5.917978586727062
+progenitor 7 separation = 0x41a9f1d27d5cc67b  # 217639230.6812018
+progenitor 8: OldThinDisc Iax explodes T-88798210384591.000000000 s delay 7968291677473653 s component 1 lifetimes 1842868365963724 None leftover PartlyBurntDwarf
+progenitor 8 primary = 0x401b9840d844d336  # 6.898684863281963
+progenitor 8 secondary = 0x4004de2a63c1b5fc  # 2.6084792893877857
+progenitor 9: ThickDisc DoubleDetonation explodes T-16567164538357.000000000 s delay 316716857115400832 s component 6 lifetimes 4618183725352162 Some(27842612814715716) leftover SurvivingDonor { speed: KilometresPerSecond(1301.7451879581693) }
+progenitor 9 primary = 0x40129e5bc1140213  # 4.654646889539907
+progenitor 9 secondary = 0x40035b06c67a382a  # 2.4194465166138075
+progenitor 9 separation = 0x41dc667e0080aff8  # 1905915906.0107403
+progenitor 10: Bulge Merger explodes T-78791901634881.000000000 s delay 331805810710472512 s component 7 lifetimes 8973887104773898 Some(15555329718479454) leftover Nothing
+progenitor 10 primary = 0x400cf06985429516  # 3.6173887644714666
+progenitor 10 secondary = 0x4007c71ffdcfc226  # 2.9722289876010732
+progenitor 10 separation = 0x41dc7829af6a6926  # 1910548157.6626678
+progenitor 11: LongBar Merger explodes T-31819319152072.000000000 s delay 313282686091587456 s component 8 lifetimes 3924311654194022 Some(70622397087015064) leftover Nothing
+progenitor 11 primary = 0x4013e08d703ac62b  # 4.969289544665609
+progenitor 11 secondary = 0x3ffabb312c6c2008  # 1.6707011924027046
+progenitor 11 separation = 0x41da58a8fa253cd2  # 1768072168.5818372
 CoreCollapse(IIP) at 0.01 d = 0x47c86bb4f8dd9188  # 6.492143642717258e37
 CoreCollapse(IIP) at 10 d = 0x4733aac2733b0684  # 1.021170558704438e35
 CoreCollapse(IIP) at 50 d = 0x4735ffd47f1b5661  # 1.1422708418626074e35
